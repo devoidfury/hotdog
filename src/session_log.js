@@ -1,0 +1,354 @@
+// Session log — append-only JSONL audit trail for observability.
+// Each session gets a file at ~/.cache/oa-agent/sessions/<uuid>.jsonl.
+// Messages are appended as JSON lines. The file is never truncated or modified.
+
+import { homedir } from "node:os";
+import { join } from "node:path";
+import { appendFileSync, readFileSync, existsSync, readdirSync } from "node:fs";
+
+// ── Log Source Types ────────────────────────────────────────────────────────
+
+export const LOG_SOURCE = {
+  SYSTEM_PROMPT: "system_prompt",
+  INPUT: "input",
+  LLM: "llm",
+  TOOL_RESULT: "tool_result",
+  RESET: "reset",
+  COMPACTION: "compaction",
+  PROMPT: "prompt",
+};
+
+// ── Session Log Entry ───────────────────────────────────────────────────────
+
+/**
+ * Create a system prompt entry.
+ */
+export function createSystemPromptEntry(sessionId, content) {
+  return {
+    ts: now(),
+    session_id: sessionId,
+    role: "system",
+    source: LOG_SOURCE.SYSTEM_PROMPT,
+    content,
+    reasoning_content: null,
+    tool_calls: null,
+    tool_call_id: null,
+    tool_name: null,
+  };
+}
+
+/**
+ * Create a user input entry.
+ */
+export function createInputEntry(sessionId, content) {
+  return {
+    ts: now(),
+    session_id: sessionId,
+    role: "user",
+    source: LOG_SOURCE.INPUT,
+    content,
+    reasoning_content: null,
+    tool_calls: null,
+    tool_call_id: null,
+    tool_name: null,
+  };
+}
+
+/**
+ * Create an LLM assistant response entry.
+ */
+export function createAssistantEntry(
+  sessionId,
+  content,
+  toolCalls = null,
+  reasoningContent = null,
+) {
+  return {
+    ts: now(),
+    session_id: sessionId,
+    role: "assistant",
+    source: LOG_SOURCE.LLM,
+    content,
+    reasoning_content: reasoningContent,
+    tool_calls: toolCalls,
+    tool_call_id: null,
+    tool_name: null,
+  };
+}
+
+/**
+ * Create a tool result entry.
+ */
+export function createToolResultEntry(
+  sessionId,
+  content,
+  toolCallId = null,
+  toolName = null,
+) {
+  return {
+    ts: now(),
+    session_id: sessionId,
+    role: "tool",
+    source: LOG_SOURCE.TOOL_RESULT,
+    content,
+    reasoning_content: null,
+    tool_calls: null,
+    tool_call_id: toolCallId,
+    tool_name: toolName,
+  };
+}
+
+/**
+ * Create a reset entry.
+ */
+export function createResetEntry(sessionId) {
+  return {
+    ts: now(),
+    session_id: sessionId,
+    role: "user",
+    source: LOG_SOURCE.RESET,
+    content: "",
+    reasoning_content: null,
+    tool_calls: null,
+    tool_call_id: null,
+    tool_name: null,
+  };
+}
+
+/**
+ * Create a compaction entry.
+ */
+export function createCompactionEntry(sessionId, messagesCompacted, summary) {
+  return {
+    ts: now(),
+    session_id: sessionId,
+    role: "system",
+    source: LOG_SOURCE.COMPACTION,
+    content: `[Compacted ${messagesCompacted} messages]\n\n${summary}`,
+    reasoning_content: null,
+    tool_calls: null,
+    tool_call_id: null,
+    tool_name: null,
+  };
+}
+
+/**
+ * Create a prompt expansion entry.
+ */
+export function createPromptEntry(sessionId, content) {
+  return {
+    ts: now(),
+    session_id: sessionId,
+    role: "user",
+    source: LOG_SOURCE.PROMPT,
+    content,
+    reasoning_content: null,
+    tool_calls: null,
+    tool_call_id: null,
+    tool_name: null,
+  };
+}
+
+// ── Session Log Writer ──────────────────────────────────────────────────────
+
+/**
+ * Get the sessions directory path.
+ */
+function sessionsDir() {
+  const home = homedir();
+  return join(home, ".cache", "oa-agent", "sessions");
+}
+
+/**
+ * Get the session file path for a given session ID.
+ */
+function sessionPath(sessionId) {
+  return join(sessionsDir(), `${sessionId}.jsonl`);
+}
+
+/**
+ * Session log writer. Append-only, never truncates.
+ */
+export class SessionLog {
+  constructor(sessionId) {
+    this.sessionId = sessionId;
+    this.path = sessionPath(sessionId);
+  }
+
+  /**
+   * Ensure the sessions directory exists.
+   */
+  _ensureDir() {
+    const dir = sessionsDir();
+    if (!existsSync(dir)) {
+      try {
+        const { mkdirSync } = require("node:fs");
+        mkdirSync(dir, { recursive: true });
+      } catch {
+        // Best effort — will fail on first write if dir can't be created
+      }
+    }
+  }
+
+  /**
+   * Append an entry to the log file.
+   */
+  append(entry) {
+    this._ensureDir();
+    const line = JSON.stringify(entry);
+    appendFileSync(this.path, line + "\n");
+  }
+
+  /**
+   * Write a system prompt entry.
+   */
+  writeSystemPrompt(content) {
+    this.append(createSystemPromptEntry(this.sessionId, content));
+  }
+
+  /**
+   * Write a user input entry.
+   */
+  writeInput(content) {
+    this.append(createInputEntry(this.sessionId, content));
+  }
+
+  /**
+   * Write an LLM assistant response entry.
+   */
+  writeAssistant(content, toolCalls = null, reasoningContent = null) {
+    this.append(
+      createAssistantEntry(
+        this.sessionId,
+        content,
+        toolCalls,
+        reasoningContent,
+      ),
+    );
+  }
+
+  /**
+   * Write a tool result entry.
+   */
+  writeToolResult(content, toolCallId = null, toolName = null) {
+    this.append(
+      createToolResultEntry(this.sessionId, content, toolCallId, toolName),
+    );
+  }
+
+  /**
+   * Write a reset entry.
+   */
+  writeReset() {
+    this.append(createResetEntry(this.sessionId));
+  }
+
+  /**
+   * Write a compaction entry.
+   */
+  writeCompaction(messagesCompacted, summary) {
+    this.append(
+      createCompactionEntry(this.sessionId, messagesCompacted, summary),
+    );
+  }
+
+  /**
+   * Write a prompt expansion entry.
+   */
+  writePrompt(content) {
+    this.append(createPromptEntry(this.sessionId, content));
+  }
+}
+
+/**
+ * Create a disabled session log (no-op).
+ */
+export function disabledSessionLog() {
+  return {
+    append() {},
+    writeSystemPrompt() {},
+    writeInput() {},
+    writeAssistant() {},
+    writeToolResult() {},
+    writeReset() {},
+    writeCompaction() {},
+    writePrompt() {},
+  };
+}
+
+/**
+ * Read all entries from a specific session file, replaying from the last reset.
+ */
+export function readSessionEntries(sessionId) {
+  const path = sessionPath(sessionId);
+  if (!existsSync(path)) return [];
+
+  const content = readFileSync(path, "utf-8");
+  const lines = content.split("\n");
+  const entries = [];
+  let lastResetIdx = null;
+
+  for (let i = 0; i < lines.length; i++) {
+    const trimmed = lines[i].trim();
+    if (!trimmed) continue;
+
+    try {
+      const entry = JSON.parse(trimmed);
+      if (entry.source === LOG_SOURCE.RESET) {
+        lastResetIdx = i;
+      }
+      entries.push(entry);
+    } catch {
+      // Skip malformed lines
+      // TODO: log warning
+    }
+  }
+
+  // Replay from the last reset event (or beginning if no reset)
+  return entries.slice(lastResetIdx ?? 0);
+}
+
+/**
+ * Read all entries from all session files.
+ */
+export function readAllSessions() {
+  const dir = sessionsDir();
+  if (!existsSync(dir)) return [];
+
+  const allEntries = [];
+  const files = readdirSync(dir).filter((f) => f.endsWith(".jsonl"));
+
+  for (const file of files) {
+    const path = join(dir, file);
+    const content = readFileSync(path, "utf-8");
+
+    for (const line of content.split("\n")) {
+      const trimmed = line.trim();
+      if (!trimmed) continue;
+
+      try {
+        allEntries.push(JSON.parse(trimmed));
+      } catch {
+        // Skip malformed lines
+        // TODO: log warning
+      }
+    }
+  }
+
+  return allEntries;
+}
+
+/**
+ * Check if a session file exists.
+ */
+export function sessionExists(sessionId) {
+  return existsSync(sessionPath(sessionId));
+}
+
+/**
+ * Get current timestamp string.
+ */
+function now() {
+  const d = new Date();
+  return d.toISOString();
+}

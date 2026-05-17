@@ -1,0 +1,82 @@
+samples
+AGENTS.local.md
+
+
+# dependencies
+node_modules
+
+# code coverage
+coverage
+*.lcov
+
+# logs
+logs
+_.log
+report.[0-9]_.[0-9]_.[0-9]_.[0-9]_.json
+
+# dotenv environment variable files
+.env
+.env.development.local
+.env.test.local
+.env.production.local
+.env.local
+
+# caches
+.eslintcache
+.cache
+*.tsbuildinfo
+
+# IntelliJ based IDEs
+.idea
+
+# Finder (MacOS) folder config
+.DS_Store
+
+# output
+out
+*.out
+dist
+*.tgz
+/target
+tmp/
+*.log
+
+# conf file backups created by automatic tools
+*.bak
+*.bak.*
+
+# Extensions
+*.a
+*.bat
+*.bin
+*.d
+*.dll
+*.dot
+*.etag
+*.exe
+*.gcda
+*.gcno
+*.gcov
+*.gguf
+*.gguf.json
+*.lastModified
+*.log
+*.metallib
+*.o
+*.out
+*.so
+*.swp
+*.tmp
+*.DS_Store
+
+# IDE / OS
+
+.cache/
+.ccls-cache/
+.direnv/
+.envrc
+.idea/
+.swiftpm
+.vs/
+.vscode/
+/nppBackup

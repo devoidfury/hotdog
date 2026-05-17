@@ -1,0 +1,171 @@
+// Prompts loader — loads .prompt.md files from config/prompts/.
+// Each prompt is a reusable template with YAML front matter + Tera body.
+
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { cwd } from 'node:process';
+import { parseFrontMatter } from '../config.js';
+
+/**
+ * Validate a prompt name per spec constraints.
+ * Returns warnings (non-critical) — prompts still load with warnings.
+ */
+function validatePromptName(name, fileStem) {
+  const warnings = [];
+
+  if (name && name !== fileStem) {
+    warnings.push(`Prompt name '${name}' does not match file name '${fileStem}'`);
+  }
+  if (!name || name.length === 0) {
+    warnings.push('Prompt name is empty');
+  } else if (name.length > 64) {
+    warnings.push(`Prompt name '${name}' exceeds 64 characters (got ${name.length})`);
+  }
+  if (name && (name.startsWith('-') || name.endsWith('-'))) {
+    warnings.push(`Prompt name '${name}' must not start or end with a hyphen`);
+  }
+  if (name && name.includes('--')) {
+    warnings.push(`Prompt name '${name}' must not contain consecutive hyphens`);
+  }
+  if (name) {
+    for (const c of name) {
+      if (!/^[a-z0-9-]$/.test(c)) {
+        warnings.push(`Prompt name '${name}' contains invalid character '${c}', only lowercase alphanumeric and hyphens allowed`);
+      }
+    }
+  }
+  return warnings;
+}
+
+/**
+ * Parse a .prompt.md file into a Prompt object.
+ */
+export function parsePromptFromMd(content, fileName, location) {
+  const parsed = parseFrontMatter(content);
+  if (!parsed) {
+    throw new Error('No YAML frontmatter found');
+  }
+
+  const fm = parsed.frontMatter;
+  const body = parsed.body;
+
+  // Validate description
+  if (!fm.description || !fm.description.trim()) {
+    throw new Error('Prompt description is missing or empty (required)');
+  }
+
+  const fileStem = fileName.replace(/\.prompt\.md$/, '');
+  const name = fm.name || fileStem;
+
+  // Warn on validation issues
+  const warnings = validatePromptName(name, fileStem);
+  for (const w of warnings) {
+    console.warn(`Warning: Prompt '${name}': ${w}`);
+  }
+
+  return {
+    name,
+    description: fm.description,
+    disableModelInvocation: fm['disable-model-invocation'] || fm.disable_model_invocation || false,
+    content: body,
+    location,
+  };
+}
+
+/**
+ * PromptsLoader — loads and manages prompt templates.
+ */
+export class PromptsLoader {
+  constructor(paths) {
+    // paths can be a string (colon-separated) or array
+    this.paths = Array.isArray(paths) ? paths : paths.split(':').map(p => p.trim()).filter(Boolean);
+    this.prompts = new Map();
+  }
+
+  /**
+   * Load all .prompt.md files from configured directories.
+   * Returns number of prompts loaded.
+   */
+  loadPrompts() {
+    let count = 0;
+    for (const dir of this.paths) {
+      count += this.loadFromDirectory(dir);
+    }
+    return count;
+  }
+
+  loadFromDirectory(dir) {
+    let count = 0;
+    const fs = require('node:fs');
+
+    let entries;
+    try {
+      entries = fs.readdirSync(dir, { withFileTypes: true });
+    } catch {
+      // Directory doesn't exist — silently skip
+      return 0;
+    }
+
+    for (const entry of entries) {
+      if (!entry.isFile()) continue;
+      if (!entry.name.endsWith('.prompt.md')) continue;
+
+      const filePath = join(dir, entry.name);
+      let content;
+      try {
+        content = fs.readFileSync(filePath, 'utf-8');
+      } catch {
+        console.warn(`Warning: Failed to read prompt '${entry.name}'`);
+        continue;
+      }
+
+      try {
+        const location = fs.realpathSync(filePath);
+        const prompt = parsePromptFromMd(content, entry.name, location);
+
+        // Collision detection
+        if (this.prompts.has(prompt.name)) {
+          const existing = this.prompts.get(prompt.name);
+          console.warn(
+            `Warning: Prompt '${prompt.name}' already loaded (from ${existing.location}), overwriting with ${location}`
+          );
+        }
+
+        this.prompts.set(prompt.name, prompt);
+        count++;
+      } catch (e) {
+        console.warn(`Warning: Failed to load prompt '${entry.name}': ${e.message}`);
+      }
+    }
+
+    return count;
+  }
+
+  /**
+   * Get a prompt by name.
+   */
+  getPrompt(name) {
+    return this.prompts.get(name) || null;
+  }
+
+  /**
+   * Get all prompts (excluding disabled ones).
+   */
+  allPrompts() {
+    return Array.from(this.prompts.values()).filter(p => !p.disableModelInvocation);
+  }
+
+  /**
+   * Get all prompts including disabled ones.
+   */
+  allPromptsIncludingHidden() {
+    return Array.from(this.prompts.values());
+  }
+
+  /**
+   * Get configured directories.
+   */
+  directories() {
+    return [...this.paths];
+  }
+}

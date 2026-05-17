@@ -1,0 +1,1095 @@
+// Agent — the core AI agent with tool calling support.
+// Manages conversation context, model selection, tool execution, and the run loop.
+
+import { MessageLog, outputEvent, OUTPUT_EVENT, Message } from "../context/index.js";
+import { LlmClient, LlmError } from "../llm_client/client.js";
+import { render } from "../context/render.js";
+import { ToolRegistry, ToolContext } from "../tools/registry.js";
+import {
+  createToolFactory,
+  CORE_TOOL_NAMES,
+  SUBAGENT_TOOL_NAMES,
+  toolResult,
+} from "../tools/index.js";
+import {
+  DEFAULT_MODEL,
+  DEFAULT_MAX_TOKENS,
+  DEFAULT_MAX_ITERATIONS,
+  DEFAULT_ROLE,
+  defaultCompactionSettings,
+  getProfile,
+} from "../config.js";
+import { NoopSink } from "../context/output.js";
+import {
+  buildSystemPrompt,
+  loadAspects,
+  loadAgentsMd,
+} from "../context/system_prompt.js";
+import { disabledSessionLog } from "../session_log.js";
+import { compactMessages as doCompact, findFirstKeptIndex } from "../compaction.js";
+
+/**
+ * Core tool names that are always allowed regardless of skill filtering.
+ */
+const ALWAYS_ALLOWED = new Set([
+  ...CORE_TOOL_NAMES,
+  ...SUBAGENT_TOOL_NAMES,
+]);
+
+export class Agent {
+  constructor(options = {}) {
+    this.client = options.client || new LlmClient();
+    this.context = new MessageLog();
+    this.model = options.model || DEFAULT_MODEL;
+    this.modelRegistry = options.modelRegistry || {};
+    this.sink = options.sink || new NoopSink();
+    this.hideTools = options.hideTools !== false;
+    this.hideThinking = false;
+    this.skills = options.skills || [];
+    this.allSkills = options.allSkills || [];
+    this.skillDirectories = options.skillDirectories || [];
+    this.activeSkills = new Set();
+    this.maxToolOutputLines = options.maxToolOutputLines || 800;
+    this.sessionId = options.sessionId || crypto.randomUUID();
+    this.cwdBoundary = options.cwdBoundary || null;
+    this.role = options.role || DEFAULT_ROLE;
+    this.profileBody = options.profileBody || "";
+    this.stream = options.stream !== false;
+    this.compaction = options.compaction || defaultCompactionSettings;
+    this.compactDebug = options.compactDebug || false;
+    this.showTokenUse = options.showTokenUse !== false;
+    this.profileName = options.profileName || "default";
+    this.usedTools = new Set();
+    this.iterationCount = 0;
+    this.cancelled = false;
+    this.outputCache = new Map();
+    this.promptsLoader = options.promptsLoader || null;
+    this.skillsLoader = options.skillsLoader || null;
+    // Session logging
+    this.sessionLog = options.sessionLog || disabledSessionLog();
+    // Token usage tracking per model
+    this.tokenStats = new Map();
+    // Task manager for async task delegation (meta profile)
+    this.taskManager = options.taskManager || null;
+    // Task completion wake-up messages
+    this._pendingTaskMessages = [];
+    // Tool definition cache
+    this._toolDefs = null;
+  }
+
+  // ── Tool Allowance ────────────────────────────────────────────────────────
+
+  /**
+   * Get the set of tool names allowed by active skills.
+   * Rust: allowed_tool_names()
+   */
+  allowedToolNames() {
+    if (this.activeSkills.size === 0) return new Set();
+
+    const allowed = new Set();
+    for (const skillName of this.activeSkills) {
+      const skill = this.skills.find((s) => s.name === skillName);
+      if (skill) {
+        for (const tool of skill.allowedTools || []) {
+          allowed.add(tool.toLowerCase());
+        }
+      }
+    }
+    return allowed;
+  }
+
+  /**
+   * Get combined tool patterns: include_tools + allowed_tools from active skills.
+   * Patterns are ADDITIVE — they don't bypass core tools.
+   * Rust: combined_tool_patterns()
+   */
+  combinedToolPatterns() {
+    if (this.activeSkills.size === 0) return new Set();
+
+    const patterns = new Set();
+    for (const skillName of this.activeSkills) {
+      const skill = this.skills.find((s) => s.name === skillName);
+      if (skill) {
+        for (const tool of skill.includeTools || []) {
+          patterns.add(tool.toLowerCase());
+        }
+        for (const tool of skill.allowedTools || []) {
+          patterns.add(tool.toLowerCase());
+        }
+      }
+    }
+    return patterns;
+  }
+
+  /**
+   * Check if a tool is allowed by active skills.
+   * Core tools are always allowed. Non-core tools must match a pattern.
+   * Rust: is_tool_allowed()
+   */
+  isToolAllowed(toolName) {
+    if (ALWAYS_ALLOWED.has(toolName)) return true;
+
+    const patterns = this.combinedToolPatterns();
+    if (patterns.size === 0) return true;
+
+    const nameLower = toolName.toLowerCase();
+    return Array.from(patterns).some((pattern) => {
+      // Use the same pattern matching as the skills loader
+      if (pattern === nameLower) return true;
+      if (!pattern.includes("*")) return false;
+
+      // Inline glob matching (same as patternMatches in skills/loader.js)
+      return _globMatch(pattern, nameLower);
+    });
+  }
+
+  /**
+   * Get tool definitions filtered by active skill patterns.
+   * Core tools are always included. Non-core tools must match a pattern.
+   * Rust: filtered_tool_defs()
+   */
+  filteredToolDefs(toolRegistry) {
+    const patterns = this.combinedToolPatterns();
+    if (patterns.size === 0) return toolRegistry.getToolDefs();
+
+    const defs = toolRegistry.getToolDefs();
+    const result = [];
+    const seen = new Set();
+
+    for (const t of defs) {
+      const name = t.function?.name || "";
+      const nameLower = name.toLowerCase();
+
+      const allowed = ALWAYS_ALLOWED.has(name) ||
+        Array.from(patterns).some((pattern) => _globMatch(pattern, nameLower));
+
+      if (allowed && seen.add(name)) {
+        result.push(t);
+      }
+    }
+
+    return result;
+  }
+
+  // ── Context Management ────────────────────────────────────────────────────
+
+  /**
+   * Add user input to the context.
+   * Rust: add_input() — adds user message + optional session log.
+   */
+  addInput(content, logToSession = true) {
+    this.ensureSystemPrompt();
+    if (content && content.trim().length > 0) {
+      this.context.addUserMessage(content);
+      if (logToSession) {
+        this.sessionLog.writeInput(content);
+      }
+    }
+  }
+
+  /**
+   * Add an assistant response to the context.
+   * Rust: add_response() — adds assistant message with reasoning + tool_calls + session log.
+   */
+  addResponse(content, reasoningContent = null, toolCalls = null) {
+    this.context.addAssistantMessage(content, reasoningContent, toolCalls);
+    this.sessionLog.writeAssistant(content, toolCalls, reasoningContent);
+  }
+
+  /**
+   * Build layered messages for the API request.
+   * Rust: build_layered_messages() — maps Message → ChatMessage format.
+   */
+  buildLayeredMessages() {
+    return this.context.getMessages();
+  }
+
+  /**
+   * Clear context and start a new session.
+   * Rust: clear_context() — new session ID, new session log, reset, iteration reset.
+   */
+  clearContext() {
+    const newSessionId = crypto.randomUUID();
+    this.sessionId = newSessionId;
+    this.context.clear();
+    this.iterationCount = 0;
+    this.sessionLog.writeReset();
+  }
+
+  // ── System Prompt ─────────────────────────────────────────────────────────
+
+  /**
+   * Ensure system prompt is inserted before any user messages.
+   * Rust: ensure_system_prompt() — only adds if no system message exists (preserves cache).
+   */
+  ensureSystemPrompt() {
+    if (this.context.systemMessages.length > 0) return;
+
+    const profile = getProfile(this._config || {}, this.profileName);
+    const aspects = loadAspects(profile.aspects || []);
+    const agentsMd = loadAgentsMd();
+
+    // Build skills preamble content
+    const skillsContent = this._buildSkillsPreamble();
+
+    const systemPrompt = buildSystemPrompt({
+      role: this.role,
+      body: this.profileBody || "",
+      model: this.model,
+      profileName: this.profileName,
+      aspects,
+      agentsMd,
+      skillsContent,
+    });
+
+    this.context.addSystemMessage(systemPrompt);
+    this.sessionLog.writeSystemPrompt(systemPrompt);
+  }
+
+  /**
+   * Regenerate the system prompt.
+   * Rust: regenerate_system_prompt() — replaces system message at index 0,
+   * prunes <skill_content> blocks from conversation (dynamically loaded skills
+   * are now embedded in the system message), keeps all other messages.
+   */
+  regenerateSystemPrompt() {
+    const profile = getProfile(this._config || {}, this.profileName);
+    const aspects = loadAspects(profile.aspects || []);
+    const agentsMd = loadAgentsMd();
+    const skillsContent = this._buildSkillsPreamble();
+
+    const rendered = buildSystemPrompt({
+      role: this.role,
+      body: this.profileBody || "",
+      model: this.model,
+      profileName: this.profileName,
+      aspects,
+      agentsMd,
+      skillsContent,
+    });
+
+    // Prune old <skill_content> blocks from conversation and replace system
+    const oldMessages = this.context.messages();
+    const newMessages = [];
+
+    for (let i = 0; i < oldMessages.length; i++) {
+      const msg = oldMessages[i];
+
+      if (i === 0 && msg.role === "system") {
+        // Replace system message with fresh content
+        newMessages.push(new Message({
+          role: "system",
+          content: rendered,
+          reasoningContent: null,
+          toolCalls: null,
+          toolCallId: null,
+        }));
+      } else if (msg.role === "user" && _hasSkillContent(msg.content)) {
+        // Prune: dynamically loaded skill messages are no longer necessary
+        // (preloaded skills are now embedded in the system message)
+        // → skip this message entirely
+      } else {
+        // Keep everything else: user input, assistant responses, tool calls, etc.
+        newMessages.push(msg);
+      }
+    }
+
+    this.context.replaceMessages(newMessages);
+    return rendered;
+  }
+
+  /**
+   * Build skills preamble content for the system prompt.
+   * Rust: collect_prompt_parts() + skill_refs_slice()
+   */
+  _buildSkillsPreamble() {
+    if (this.allSkills.length === 0) return "";
+
+    const skillDirs = this.skillDirectories.join("\n") || "/skills";
+    const visibleSkills = this.allSkills.filter(
+      (s) => s.visible && !s.disableModelInvocation,
+    );
+    if (visibleSkills.length === 0) return "";
+
+    const loadedSkills = visibleSkills.filter((s) => s.loaded);
+    const unloadedSkills = visibleSkills.filter((s) => !s.loaded);
+
+    let preamble = "# Available Skills\n\nSkill directories: " + skillDirs + "\n\n";
+
+    // Loaded skills with full content
+    if (loadedSkills.length > 0) {
+      preamble += "## Loaded Skills\n\n";
+      for (const skill of loadedSkills) {
+        preamble += `<skill_content name="${skill.name}">\n${skill.content}\n</skill_content>\n\n`;
+      }
+    }
+
+    // Unloaded skills with descriptions
+    if (unloadedSkills.length > 0) {
+      preamble += "## Available Skills\n\n";
+      for (const skill of unloadedSkills) {
+        preamble += `<name>${skill.name}</name>\n${skill.description}\n\n`;
+      }
+    }
+
+    return preamble;
+  }
+
+  // ── Tool Execution ────────────────────────────────────────────────────────
+
+  /**
+   * Handle tool calls from an LLM response.
+   * Rust: handle_tool_calls() — allowance check, duration tracking, first-use help,
+   * output caching, tool result logging.
+   */
+  async handleToolCalls(toolCalls, toolRegistry) {
+    for (const tc of toolCalls) {
+      const toolName = tc.function?.name || tc.toolName;
+      const toolCallId = tc.id || tc.toolCallId;
+      const input = tc.function?.arguments || tc.input || "{}";
+
+      // Emit tool call event before execution
+      this.sink.emit(
+        outputEvent(OUTPUT_EVENT.TOOL_CALL, {
+          toolName,
+          input,
+          toolCallId,
+        }),
+      );
+
+      // Check tool allowance
+      if (!this.isToolAllowed(toolName)) {
+        const allowed = this.allowedToolNames();
+        const errorMsg = `Tool '${toolName}' is not allowed by active skills. Allowed tools: ${Array.from(allowed).join(", ")}`;
+        this._emitToolResult(toolName, input, errorMsg, toolCallId);
+        this.context.addMessage("tool", errorMsg, null, null, toolCallId);
+        this.sessionLog.writeToolResult(errorMsg, toolCallId, toolName);
+        continue;
+      }
+
+      // Track duration
+      const start = Date.now();
+
+      // Show first-use help on first execution
+      const tool = toolRegistry.get(toolName);
+      let firstUseHelp = null;
+      if (tool && tool.firstUseHelp && !this.usedTools.has(toolName)) {
+        this.usedTools.add(toolName);
+        firstUseHelp = tool.firstUseHelp;
+      }
+
+      // Execute the tool
+      const ctx = this.createToolContext();
+      let result;
+      try {
+        result = await tool.execute(input, ctx);
+      } catch (e) {
+        result = `Error executing tool ${toolName}: ${e.message}`;
+      }
+
+      const durationMs = Date.now() - start;
+
+      // Add duration to result
+      if (typeof result === "string") {
+        result = `${result}\n[duration: ${durationMs}ms]`;
+      } else if (result && typeof result === "object") {
+        result.duration_ms = durationMs;
+      }
+
+      // Convert to string for API
+      result = toolResult(result);
+
+      this._emitToolResult(toolName, input, result, toolCallId);
+
+      // Prepend first-use help if present
+      const displayResult = firstUseHelp
+        ? `<system-notice>${firstUseHelp}</system-notice>\n${result}`
+        : result;
+
+      // Add tool result to context
+      this.context.addMessage("tool", displayResult, null, null, toolCallId);
+
+      // Cache output
+      this.outputCache.set(toolCallId, displayResult);
+
+      // Log tool result
+      this.sessionLog.writeToolResult(displayResult, toolCallId, toolName);
+    }
+
+    return "continue";
+  }
+
+  /**
+   * Emit tool result event through the output sink.
+   */
+  _emitToolResult(toolName, input, result, toolCallId) {
+    this.sink.emit(
+      outputEvent(OUTPUT_EVENT.TOOL_RESULT, {
+        toolName,
+        input,
+        result,
+      }),
+    );
+  }
+
+  // ── Compaction ────────────────────────────────────────────────────────────
+
+  /**
+   * Compact the message log using LLM-based summarization.
+   * Rust: compact() — uses find_first_kept_index, <previous-context-summary> wrapper,
+   * rebuilds context with system + summary + kept messages.
+   */
+  async compactMessages(overrideKeep) {
+    const messages = this.context.messages();
+    const keepRecent = overrideKeep ?? this.compaction.keepRecentMessages;
+
+    // Filter out system messages for compaction decision
+    const allMessages = messages.filter((m) => m.role !== "system");
+    if (allMessages.length <= keepRecent * 2) return null;
+
+    this.sink.emit(
+      outputEvent(OUTPUT_EVENT.COMPACTING, {
+        messageCount: allMessages.length,
+        keepRecent,
+      }),
+    );
+
+    // Use Rust-compatible message keeping: find_first_kept_index
+    const firstKept = findFirstKeptIndex(allMessages, keepRecent);
+    if (firstKept === 0) return null;
+
+    // Build a chat-compatible message array for the LLM
+    const chatMessages = allMessages.map((m) => ({
+      role: m.role,
+      content: m.content,
+    }));
+
+    const result = await doCompact(
+      chatMessages,
+      // LLM chat callback
+      async (msgs, model) => {
+        const modelConfig = this.modelRegistry[this.model] || {
+          name: this.model,
+          temperature: null,
+          maxTokens: DEFAULT_MAX_TOKENS,
+        };
+        const stream = this.client.chatStreamCancellable(
+          msgs,
+          modelConfig,
+          [],
+          { aborted: this.cancelled },
+        );
+        let fullText = "";
+        for await (const event of stream) {
+          if (event.type === "content") {
+            fullText += event.content;
+          }
+        }
+        return fullText;
+      },
+      this.model,
+      this.compaction,
+    );
+
+    if (!result) return null;
+
+    // Rebuild context: system prompt + <previous-context-summary> + kept messages
+    this.context.clear();
+
+    // Add system prompt back
+    this.ensureSystemPrompt();
+
+    // Add compaction summary as user message with Rust-compatible wrapper
+    const summaryContent = `<previous-context-summary>${result.summary}</previous-context-summary>`;
+    this.context.addUserMessage(summaryContent);
+
+    // Add kept messages (from firstKept index onward)
+    const keptMessages = allMessages.slice(firstKept);
+    for (const msg of keptMessages) {
+      this.context.addMessage(
+        msg.role,
+        msg.content,
+        msg.reasoning_content || null,
+        msg.tool_calls || null,
+        msg.tool_call_id || null,
+      );
+    }
+
+    // Log compaction
+    this.sessionLog.writeCompaction(result.messagesCompacted, result.summary);
+
+    // Debug: write serialized context to compaction.out.json
+    if (this.compactDebug) {
+      this.writeCompactionDebugFile();
+    }
+
+    return result.summary;
+  }
+
+  /**
+   * Write the serialized context after compaction to compaction.out.json.
+   */
+  writeCompactionDebugFile() {
+    const fs = require("node:fs");
+    const messages = this.context.getMessages();
+    const chatMessages = messages.map((m) => m.toJSON());
+    const json = JSON.stringify(chatMessages, null, 2);
+    try {
+      fs.writeFileSync("compaction.out.json", json);
+    } catch {
+      // Silently skip — file write is debug-only
+    }
+  }
+
+  // ── Prompt Execution ──────────────────────────────────────────────────────
+
+  /**
+   * Execute a saved prompt template.
+   * Rust: execute_prompt() — renders with ARGS, appends as user message
+   * (preserves context), logs with prompt source.
+   */
+  executePrompt(name, args) {
+    if (!this.promptsLoader) {
+      return { success: false, error: "Prompts loader not configured" };
+    }
+
+    const promptsLoader = this.promptsLoader;
+    const prompt = promptsLoader.getPrompt(name);
+    if (!prompt) {
+      const available = promptsLoader.allPrompts()
+        .filter((p) => !p.disableModelInvocation)
+        .map((p) => p.name);
+      return {
+        success: false,
+        error: `Unknown prompt '${name}'. Available prompts: ${available.length === 0 ? "(none)" : available.join(", ")}`,
+      };
+    }
+
+    // Render template with ARGS using the template engine
+    let rendered = prompt.content;
+    if (args) {
+      try {
+        rendered = render(prompt.content, { ARGS: args });
+      } catch {
+        // If template rendering fails, fall back to raw content
+        rendered = prompt.content;
+      }
+    }
+
+    // Append as user message (preserves context — Rust behavior)
+    this.context.addUserMessage(rendered);
+    this.sessionLog.writePrompt(rendered);
+
+    return { success: true, prompt: rendered };
+  }
+
+  // ── Skill Activation ──────────────────────────────────────────────────────
+
+  /**
+   * Activate a skill (mark as loaded, inject into context).
+   * Rust: activate_skill() — wraps in structured <skill_content> tags,
+   * logs to session, deduplicates via activeSkills Set.
+   */
+  activateSkill(name) {
+    if (!this.skillsLoader) {
+      return { success: false, error: "Skills loader not configured" };
+    }
+
+    // Deduplication: skip if already active
+    if (this.activeSkills.has(name)) return { success: true };
+
+    this.skillsLoader.activateSkill(name);
+    this.activeSkills.add(name);
+
+    // Wrap in structured tags
+    const skill = this.skills.find((s) => s.name === name);
+    if (!skill) return { success: true };
+
+    const additionalFiles = skill.additionalFiles || [];
+    const resourcesSection = additionalFiles.length > 0
+      ? `<skill_resources>\n${additionalFiles.map((f) => `  <file>${f}</file>`).join("\n")}\n</skill_resources>`
+      : "(none)";
+
+    const wrappedContent = `<skill_content name="${skill.name}">\n${skill.content}\n\nSkill directory: ${skill.location}\nRelative paths in this skill are relative to the skill directory.\n\n<skill_resources>\n${resourcesSection}\n</skill_resources>\n</skill_content>`;
+
+    this.context.addUserMessage(wrappedContent);
+    this.sessionLog.writeInput(wrappedContent);
+
+    // Rebuild system prompt to include the loaded skill
+    this.context.systemMessages = [];
+
+    return { success: true };
+  }
+
+  // ── Helpers ───────────────────────────────────────────────────────────────
+
+  /**
+   * Build the agent's tool registry.
+   */
+  async buildToolRegistry(
+    whitelist = null,
+    blacklist = null,
+    managerToolsEnabled = false,
+  ) {
+    const registry = new ToolRegistry();
+    const ctx = this.createToolContext();
+    const factory = createToolFactory(this.taskManager);
+
+    // Core tools
+    const coreToolNames = CORE_TOOL_NAMES.filter((name) => {
+      if (whitelist && !whitelist.includes(name)) return false;
+      if (blacklist && blacklist.includes(name)) return false;
+      return true;
+    });
+
+    for (const name of coreToolNames) {
+      const tool = await factory.createTool(
+        name,
+        ctx,
+        whitelist,
+        managerToolsEnabled,
+      );
+      if (tool) {
+        registry.register(name, tool);
+      }
+    }
+
+    // Subagent tools (manager-only)
+    if (managerToolsEnabled && this.taskManager) {
+      const subagentNames = SUBAGENT_TOOL_NAMES.filter((name) => {
+        if (whitelist && !whitelist.includes(name)) return false;
+        if (blacklist && blacklist.includes(name)) return false;
+        return true;
+      });
+
+      for (const name of subagentNames) {
+        const tool = await factory.createTool(
+          name,
+          ctx,
+          whitelist,
+          managerToolsEnabled,
+        );
+        if (tool) {
+          registry.register(name, tool);
+        }
+      }
+    }
+
+    return registry;
+  }
+
+  /**
+   * Create a ToolContext for tools.
+   */
+  createToolContext() {
+    return new ToolContext({
+      skills: this.skills,
+      allSkills: this.allSkills,
+      skillDirectories: this.skillDirectories,
+      modelRegistry: this.modelRegistry,
+      cwdBoundary: this.cwdBoundary,
+      onActivateSkill: (name) => {
+        this.activeSkills.add(name);
+      },
+      onSwitchModel: (modelName) => {
+        this.model = modelName;
+      },
+      onClearContext: () => {
+        this.clearContext();
+      },
+      onCacheToolOutput: (toolCallId, output) => {
+        this.outputCache.set(toolCallId, output);
+      },
+      onGetCachedToolOutput: (toolCallId) => {
+        return this.outputCache.get(toolCallId);
+      },
+      isCancelled: () => this.cancelled,
+    });
+  }
+
+  /**
+   * Get tool definitions for the API request.
+   */
+  getToolDefs(toolRegistry) {
+    return this.filteredToolDefs(toolRegistry);
+  }
+
+  /**
+   * Process a streaming LLM response.
+   */
+  async processStream(stream, generationDurationMs) {
+    let fullText = "";
+    let fullReasoning = null;
+    const toolCallsBuffer = new Map();
+    let usage = null;
+    let finalToolCalls = null;
+
+    for await (const event of stream) {
+      if (this.cancelled) {
+        throw LlmError.Cancelled("Agent cancelled");
+      }
+
+      switch (event.type) {
+        case "content":
+          fullText += event.content;
+          if (this.stream) {
+            this.sink.emit(
+              outputEvent(OUTPUT_EVENT.STREAMING_CHUNK, {
+                content: event.content,
+              }),
+            );
+          }
+          break;
+        case "reasoning":
+          if (!fullReasoning) fullReasoning = "";
+          fullReasoning += event.content;
+          if (this.stream) {
+            this.sink.emit(
+              outputEvent(OUTPUT_EVENT.STREAMING_REASONING_CHUNK, {
+                content: event.content,
+              }),
+            );
+          }
+          break;
+        case "toolName":
+          toolCallsBuffer.set(event.index, {
+            name: event.name,
+            args: "",
+            id: event.toolCallId || "",
+          });
+          break;
+        case "toolArgument":
+          const existing = toolCallsBuffer.get(event.index) || {
+            name: "",
+            args: "",
+            id: "",
+          };
+          existing.args += event.arguments;
+          toolCallsBuffer.set(event.index, existing);
+          break;
+        case "usage":
+          usage = event.data;
+          break;
+      }
+    }
+
+    // Build final tool calls from buffer
+    if (toolCallsBuffer.size > 0) {
+      finalToolCalls = Array.from(toolCallsBuffer.values()).map(
+        (tc, index) => ({
+          id: tc.id || `call_${index}_${Date.now()}`,
+          type: "function",
+          function: {
+            name: tc.name,
+            arguments: tc.args,
+          },
+        }),
+      );
+    }
+
+    return {
+      fullText,
+      fullReasoning,
+      finalToolCalls,
+      usage,
+      generationDurationMs,
+    };
+  }
+
+  /**
+   * Process an accumulated response.
+   */
+  async processResponse(response) {
+    const {
+      fullText,
+      fullReasoning,
+      finalToolCalls,
+      usage,
+      generationDurationMs,
+    } = response;
+
+    if (finalToolCalls) {
+      this.addResponse(fullText, fullReasoning, finalToolCalls);
+      const outcome = await this.handleToolCalls(
+        finalToolCalls,
+        this._currentTools,
+      );
+      return outcome === "continue" ? "continue" : "return";
+    } else {
+      this.addResponse(fullText, fullReasoning, null);
+      return fullText;
+    }
+  }
+
+  /**
+   * Drain pending task completion messages into the agent's context.
+   * Returns true if any messages were drained.
+   */
+  drainPendingTaskMessages() {
+    if (this._pendingTaskMessages.length === 0) return false;
+
+    const messages = this._pendingTaskMessages.splice(0);
+    for (const msg of messages) {
+      this.context.addSystemMessage(msg);
+      this.sessionLog.writeSystemPrompt(msg);
+      this.sink.emit(
+        outputEvent(OUTPUT_EVENT.TASK_PROGRESS, {
+          status: "task_result_received",
+        }),
+      );
+    }
+    return true;
+  }
+
+  /**
+   * Wait for all delegated tasks to complete and drain their results.
+   * Returns true if any task results were processed.
+   */
+  async waitForTasksAndDrain() {
+    if (!this.taskManager) return false;
+
+    const activeTasks = this.taskManager.activeTasks();
+    if (activeTasks.length === 0) return false;
+
+    // Wait for all active tasks to complete
+    let drained = false;
+    let iterations = 0;
+    const maxWaitIterations = 120; // ~60s max wait
+
+    while (activeTasks.length > 0 && iterations < maxWaitIterations) {
+      await new Promise((resolve) => setTimeout(resolve, 500));
+      const remaining = this.taskManager.activeTasks();
+
+      // Drain any completed task messages
+      if (this.drainPendingTaskMessages()) {
+        drained = true;
+      }
+
+      if (remaining.length === 0) break;
+      iterations++;
+    }
+
+    // Final drain
+    if (this.drainPendingTaskMessages()) {
+      drained = true;
+    }
+
+    return drained;
+  }
+
+  /**
+   * The agent's run loop.
+   */
+  async run(userInput) {
+    this.ensureSystemPrompt();
+    this.addInput(userInput);
+    this.iterationCount = 0;
+
+    while (this.iterationCount < DEFAULT_MAX_ITERATIONS) {
+      if (this.cancelled) {
+        throw LlmError.Cancelled("Agent cancelled");
+      }
+
+      this.iterationCount++;
+
+      // Drain any pending task completion messages into context
+      this.drainPendingTaskMessages();
+
+      // Build messages
+      const messages = this.buildLayeredMessages();
+
+      // Build tool registry for this iteration
+      const profile = getProfile(this._config || {}, this.profileName);
+      this._currentTools = await this.buildToolRegistry(
+        profile.whitelistTools,
+        profile.blacklistTools,
+        profile.manager,
+      );
+
+      const modelConfig = this.modelRegistry[this.model] || {
+        name: this.model,
+        temperature: null,
+        maxTokens: DEFAULT_MAX_TOKENS,
+      };
+
+      const toolDefs = this.getToolDefs(this._currentTools);
+
+      // Call the LLM
+      let stream;
+      try {
+        stream = this.client.chatStreamCancellable(
+          messages,
+          modelConfig,
+          toolDefs,
+          { aborted: this.cancelled },
+        );
+      } catch (e) {
+        throw e;
+      }
+
+      const start = Date.now();
+      const response = await this.processStream(stream, Date.now() - start);
+      const duration = Date.now() - start;
+
+      // Process the response
+      const outcome = await this.processResponse(response);
+
+      // Emit token usage
+      if (this.showTokenUse && response.usage) {
+        this.sink.emit(
+          outputEvent(OUTPUT_EVENT.TOKEN_USAGE, {
+            promptTokens: response.usage.prompt_tokens || 0,
+            cachedTokens:
+              response.usage.prompt_tokens_details?.cached_tokens || 0,
+            completionTokens: response.usage.completion_tokens || 0,
+            totalTokens: response.usage.total_tokens || 0,
+          }),
+        );
+        // Track stats per model
+        this.trackTokenStats(response.usage, this.model);
+      }
+
+      // Check if we should return
+      if (outcome !== "continue") {
+        return outcome;
+      }
+
+      // Compact if needed
+      if (
+        this.compaction.enabled &&
+        this.context.size() > modelConfig.maxTokens / 100
+      ) {
+        await this.compactMessages();
+      }
+    }
+
+    throw new Error(`Max iterations (${DEFAULT_MAX_ITERATIONS}) reached`);
+  }
+
+  /**
+   * Cancel the current run.
+   */
+  cancel() {
+    this.cancelled = true;
+  }
+
+  /**
+   * Get all available prompts.
+   */
+  availablePrompts() {
+    if (!this.promptsLoader) return [];
+    return this.promptsLoader.allPrompts();
+  }
+
+  /**
+   * Get all available skills (including hidden).
+   */
+  allSkills() {
+    if (!this.skillsLoader) return [];
+    return this.skillsLoader.allSkills();
+  }
+
+  /**
+   * Auto-activate skills based on available tools.
+   */
+  autoActivateSkills(toolNames) {
+    if (!this.skillsLoader) return;
+    this.skillsLoader.autoActivate(toolNames);
+  }
+
+  /**
+   * Track token usage stats per model.
+   */
+  trackTokenStats(usage, modelName) {
+    if (!this.tokenStats.has(modelName)) {
+      this.tokenStats.set(modelName, {
+        totalRequests: 0,
+        successfulRequests: 0,
+        failedRequests: 0,
+        latestPromptTokens: 0,
+        latestCachedTokens: 0,
+        latestCompletionTokens: 0,
+        latestTotalTokens: 0,
+      });
+    }
+    const stats = this.tokenStats.get(modelName);
+    stats.totalRequests++;
+    stats.successfulRequests++;
+    stats.latestPromptTokens = usage.prompt_tokens || 0;
+    stats.latestCachedTokens = usage.prompt_tokens_details?.cached_tokens || 0;
+    stats.latestCompletionTokens = usage.completion_tokens || 0;
+    stats.latestTotalTokens = usage.total_tokens || 0;
+  }
+
+  /**
+   * Get token usage stats as a formatted string.
+   */
+  tokenStatsDisplay() {
+    if (this.tokenStats.size === 0) {
+      return `Token Usage (model: ${this.model})`;
+    }
+    const lines = [`Token Usage (model: ${this.model})`];
+    for (const [model, stats] of this.tokenStats) {
+      const uncached = stats.latestPromptTokens - stats.latestCachedTokens;
+      lines.push(
+        `  ${model}: ${stats.successfulRequests} ok, ` +
+          `${uncached} prompt + ${stats.latestCachedTokens} cached + ` +
+          `${stats.latestCompletionTokens} completion = ` +
+          `${stats.latestTotalTokens} total tokens`,
+      );
+    }
+    return lines.join("\n");
+  }
+
+  /**
+   * Get all token stats.
+   */
+  getTokenStats() {
+    return new Map(this.tokenStats);
+  }
+}
+
+// ── Helpers ─────────────────────────────────────────────────────────────────
+
+/**
+ * Check if a string contains <skill_content name="..."> tags.
+ */
+function _hasSkillContent(content) {
+  return typeof content === "string" && content.includes("<skill_content name=");
+}
+
+/**
+ * Glob pattern matching for tool name filtering.
+ * Same algorithm as patternMatches in skills/loader.js.
+ */
+function _globMatch(pattern, text) {
+  if (pattern === text) return true;
+  if (!pattern.includes("*")) return false;
+
+  const pat = pattern.split("");
+  const name = text.split("");
+  const patLen = pat.length;
+  const nameLen = name.length;
+
+  const dp = Array.from({ length: patLen + 1 }, () =>
+    Array(nameLen + 1).fill(false),
+  );
+  dp[0][0] = true;
+
+  for (let i = 1; i <= patLen; i++) {
+    if (pat[i - 1] === "*") dp[i][0] = dp[i - 1][0];
+    else break;
+  }
+
+  for (let i = 1; i <= patLen; i++) {
+    for (let j = 1; j <= nameLen; j++) {
+      if (pat[i - 1] === "*") {
+        dp[i][j] = dp[i - 1][j] || dp[i][j - 1];
+      } else if (pat[i - 1] === name[j - 1]) {
+        dp[i][j] = dp[i - 1][j - 1];
+      }
+    }
+  }
+
+  return dp[patLen][nameLen];
+}

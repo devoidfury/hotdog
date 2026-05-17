@@ -1,0 +1,141 @@
+{
+  "ai_url": "http://ai365.home:9292",
+  "api_key": "8bc20044d7183419bc3140346dbcc936a997a",
+  "default_model": "ai365/qwen3.6-35b",
+  "thinker": " 🧠 *thinking out loud* {}",
+  "toolfmt": " 🔧 {} {}",
+  "hide_tools": true,
+  "show_token_use": true,
+  "skills_path": "/skills",
+  "profiles": {
+    "default": {
+      "blacklist_tools": ["patch"]
+    },
+    "explorer": {
+      "model": "ai365/qwen3.5-4b:coder",
+      "blacklist_tools": ["patch", "write", "model", "explore"]
+    },
+    "generate": {
+      "model": "ai365/qwen3.6-35b:general"
+    },
+    "oa-planner": {
+      "model": "ai365/qwen3.6-35b:general"
+    }
+  },
+  "mcp_servers": [
+    {
+      "enabled": false,
+      "name": "moo-tasks",
+      "type": "streamable-http",
+      "url": "http://host.docker.internal:3000/api/boards/oUlvAvi_50SQ/mcp",
+      "headers": {
+        "Authorization": "Bearer mab_YEYp2-uzRj70bA_R2YtRuMf5Bn8G05ly"
+      },
+      "blacklist-tools": ["dangerous-tool"]
+    },
+    {
+      "enabled": false,
+      "name": "lightpanda",
+      "command": "/usr/local/bin/lightpanda",
+      "args": ["mcp"],
+      "env": {
+        "LIGHTPANDA_DISABLE_TELEMETRY": "true"
+      },
+      "blacklist-tools": []
+    }
+  ],
+  "providers": [
+    {
+      "name": "ai365",
+      "url": "http://ai365.home:9292",
+      "api_key": "8bc20044d7183419bc3140346dbcc936a997a",
+      "models": [
+        {
+          "name": "qwen3.5-4b",
+          "context-limit": 262144,
+          "tags": ["general", "fast", "instruct"]
+        },
+        {
+          "name": "qwen3.5-4b:coder",
+          "context-limit": 262144,
+          "tags": ["coder", "general", "fast", "think"],
+          "parallel_tool_calling": true
+        },
+        {
+          "name": "qwen3.5-0.8b",
+          "context-limit": 262144,
+          "tags": ["small", "general", "fast", "speedy"]
+        },
+        {
+          "name": "qwen3.6-35b",
+          "context-limit": 262144,
+          "tags": ["coder", "general", "powerful", "think"],
+          "parallel_tool_calling": true
+        },
+        {
+          "name": "qwen3.6-35b:general",
+          "context-limit": 262144,
+          "tags": ["general", "powerful", "think"],
+          "parallel_tool_calling": true
+        },
+        {
+          "name": "qwen3.6-35b:instruct",
+          "context-limit": 262144,
+          "tags": ["general", "powerful", "instruct"],
+          "parallel_tool_calling": true
+        },
+        {
+          "name": "qwen3.6-27b",
+          "context-limit": 262144,
+          "tags": [
+            "coder",
+            "general",
+            "powerful",
+            "think",
+            "slow",
+            "best-coder"
+          ],
+          "parallel_tool_calling": true
+        },
+        {
+          "name": "gemma-4-E2B",
+          "context-limit": 128000,
+          "tags": ["fast", "general"]
+        },
+        {
+          "name": "gemma4-26b",
+          "context-limit": 256000,
+          "tags": ["coder", "general", "powerful"]
+        },
+        {
+          "name": "smollm3-3b",
+          "context-limit": 64000,
+          "tags": ["fast", "general"]
+        },
+        {
+          "name": "qwen3.5-9b-dsv4f-d",
+          "context-limit": 262144,
+          "tags": ["general", "powerful", "coding", "instruct"],
+          "parallel_tool_calling": true
+        },
+        {
+          "name": "qwen3.5-9b-dsv4f-d:general",
+          "context-limit": 262144,
+          "tags": ["general", "powerful", "instruct"],
+          "parallel_tool_calling": true
+        }
+      ]
+    },
+
+    {
+      "name": "home",
+      "url": "http://mini.home:9292",
+      "models": [
+        {
+          "name": "home-model",
+          "context-limit": 128000
+        }
+      ]
+    }
+  ]
+}

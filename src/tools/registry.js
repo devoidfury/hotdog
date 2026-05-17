@@ -246,16 +246,6 @@ export function generateDiff(oldText, newText, maxLines = 80) {
 }
 
 /**
- * Validate that a path is within the cwd boundary.
- */
-export function validateCwdBoundary(filePath, boundary) {
-  if (!boundary) return true;
-  const resolved = require('node:path').resolve(boundary);
-  const fileResolved = require('node:path').resolve(filePath);
-  return fileResolved.startsWith(resolved + require('node:path').sep) || fileResolved === resolved;
-}
-
-/**
  * Write a file, creating parent directories as needed.
  */
 export function writeFileWithParents(filePath, content) {
@@ -264,6 +254,20 @@ export function writeFileWithParents(filePath, content) {
     fs.mkdirSync(parentDir, { recursive: true });
   }
   fs.writeFileSync(filePath, content);
+}
+
+/**
+ * Validate that a path is within the cwd boundary.
+ * Returns an error string if outside the boundary, or null if valid.
+ */
+export function validateCwdBoundary(filePath, cwdBoundary) {
+  if (!cwdBoundary) return null;
+  const boundaryResolved = path.resolve(cwdBoundary);
+  const fileResolved = path.resolve(filePath);
+  if (!fileResolved.startsWith(boundaryResolved + path.sep) && fileResolved !== boundaryResolved) {
+    return `Error: path ${filePath} is outside cwd boundary ${cwdBoundary}`;
+  }
+  return null;
 }
 
 /**

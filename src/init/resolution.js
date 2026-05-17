@@ -4,8 +4,47 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { cwd } from "node:process";
-import { parseFrontMatter } from "../config.js";
+import { parseFrontMatter, DEFAULT_MODEL, DEFAULT_ROLE, DEFAULT_SKILLS_PATH, DEFAULT_PROFILES_PATH } from "../config.js";
 import { render } from "../context/render.js";
+
+// ── Unified Config Builder ───────────────────────────────────────────────────
+
+/**
+ * Build the complete resolved configuration from CLI args.
+ *
+ * This is the single entry point for configuration resolution.
+ * It loads the config file, resolves all values (CLI → config → env → default),
+ * and returns a single object with everything needed.
+ *
+ * Usage:
+ *   const config = await buildConfig(cliArgv);
+ *   // config.resolved — fully resolved agent configuration
+ *   // config.modelRegistry — model lookup map
+ *   // config.providers — raw provider list
+ *
+ * @param {object} cliArgv - Parsed CLI arguments (from cli.js parseArgs)
+ * @returns {Promise<{ resolved: object, modelRegistry: object, providers: object[] }>} Complete resolved configuration
+ */
+export async function buildConfig(cliArgv) {
+  const { loadConfig } = await import("../config.js");
+  const config = await loadConfig(cliArgv.config);
+
+  const resolved = buildAgentConfig({
+    cli: cliArgv,
+    config,
+    providers: config.providers || [],
+    defaultModel: DEFAULT_MODEL,
+    defaultRole: DEFAULT_ROLE,
+    profilesPath: cliArgv.skillsPath
+      ? join(cliArgv.skillsPath, "..", "profiles")
+      : config.profilesPath || DEFAULT_PROFILES_PATH,
+  });
+
+  const { buildModelRegistry } = await import("../config.js");
+  const modelRegistry = buildModelRegistry({ providers: config.providers || [] });
+
+  return { resolved, modelRegistry, providers: config.providers || [] };
+}
 
 // ── Profile File Loading ───────────────────────────────────────────────────
 
@@ -13,7 +52,7 @@ import { render } from "../context/render.js";
  * Load all .profile.md files from a directory.
  * Returns a map of profile name → { name, role, aspects, body, blacklistTools, whitelistTools, model, preloadSkills, manager }
  */
-export function loadProfileFiles(profilesPath) {
+function loadProfileFiles(profilesPath) {
   const fs = require("node:fs");
   const result = {};
 
@@ -583,6 +622,12 @@ export function buildAgentConfig(options) {
       : cli.hideTools !== false
         ? cli.hideTools
         : config.hideTools !== false,
+    hideThinking:
+      cli.hideThinking === true
+        ? true
+        : cli.hideThinking === false
+          ? false
+          : config.hideThinking !== false,
     compactDebug: cli.compactDebug || config.compactDebug || false,
     showTokenUse: cli.tokens || config.showTokenUse !== false,
     stream: !cli.noStream,
@@ -605,5 +650,9 @@ export function buildAgentConfig(options) {
     chatTimeout: cli.chatTimeout || config.chatTimeoutSecs || 600,
     embeddingsTimeout:
       cli.embeddingsTimeout || config.embeddingsTimeoutSecs || 120,
+    // Session / paths
+    sessionId: cli.sessionId || null,
+    skillsPath: cli.skillsPath || config.skillsPath || null,
+    promptsPath: cli.promptsPath || config.promptsPath || null,
   };
 }

@@ -2,7 +2,7 @@
 
 import fsSync from 'node:fs';
 import path from 'node:path';
-import { ToolContext, toolDef, param, toolResult } from './registry.js';
+import { ToolContext, toolDef, param, toolResult, validateCwdBoundary } from './registry.js';
 import { DEFAULT_READ_TOOL_LIMIT } from '../config.js';
 
 export class ReadTool {
@@ -50,12 +50,9 @@ export class ReadTool {
     const cwdBoundary = ctx?.cwdBoundary || null;
 
     // Validate cwd boundary
-    if (cwdBoundary) {
-      const resolved = path.resolve(cwdBoundary);
-      const fileResolved = path.resolve(filePath);
-      if (!fileResolved.startsWith(resolved + path.sep) && fileResolved !== resolved) {
-        return toolResult(`Error: path ${filePath} is outside cwd boundary ${cwdBoundary}`);
-      }
+    const boundaryError = validateCwdBoundary(filePath, cwdBoundary);
+    if (boundaryError) {
+      return toolResult(boundaryError);
     }
 
     const resolved = path.resolve(filePath);

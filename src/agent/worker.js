@@ -209,10 +209,10 @@ export class TaskWorker {
           try {
             const tool = registry.get(toolName);
             const toolResultStr = toolResult(await tool.execute(input, {}));
-            taskContext.addMessage('tool', toolResultStr, null, null, toolCallId);
+            taskContext.addMessage({ role: 'tool', content: toolResultStr, reasoningContent: null, toolCalls: null, toolCallId });
           } catch (e) {
             const errorMsg = toolResult(`Error executing tool ${toolName}: ${e.message}`);
-            taskContext.addMessage('tool', errorMsg, null, null, toolCallId);
+            taskContext.addMessage({ role: 'tool', content: errorMsg, reasoningContent: null, toolCalls: null, toolCallId });
           }
         }
 

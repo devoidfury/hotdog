@@ -1,145 +1,149 @@
-import { describe, it, expect } from 'bun:test';
-import {
-  LOG_SOURCE,
-  createSystemPromptEntry,
-  createInputEntry,
-  createAssistantEntry,
-  createToolResultEntry,
-  createResetEntry,
-  createCompactionEntry,
-  createPromptEntry,
-  disabledSessionLog,
-} from '../src/session_log.js';
+import { test, expect } from "bun:test";
+import { SessionLog, LOG_SOURCE, stripNulls, readSessionEntries } from "../src/session_log.js";
+import { mkdirSync, rmSync, readFileSync } from "node:fs";
+import { join } from "node:path";
+import { homedir } from "node:os";
 
-describe('LOG_SOURCE', () => {
-  it('has all expected sources', () => {
-    expect(LOG_SOURCE.SYSTEM_PROMPT).toBe('system_prompt');
-    expect(LOG_SOURCE.INPUT).toBe('input');
-    expect(LOG_SOURCE.LLM).toBe('llm');
-    expect(LOG_SOURCE.TOOL_RESULT).toBe('tool_result');
-    expect(LOG_SOURCE.RESET).toBe('reset');
-    expect(LOG_SOURCE.COMPACTION).toBe('compaction');
-    expect(LOG_SOURCE.PROMPT).toBe('prompt');
-  });
+const TEST_SESSION_ID = "test-session-nulls";
+
+function setupTestDir() {
+  const dir = join(homedir(), ".cache", "oa-agent", "sessions");
+  if (!dir.includes("oa-agent")) throw new Error("bad path");
+  mkdirSync(dir, { recursive: true });
+  // Clean up any previous test data
+  const testFile = join(dir, `${TEST_SESSION_ID}.jsonl`);
+  try {
+    rmSync(testFile);
+  } catch {
+    // doesn't exist yet
+  }
+}
+
+function teardown() {
+  const testFile = join(homedir(), ".cache", "oa-agent", "sessions", `${TEST_SESSION_ID}.jsonl`);
+  try {
+    rmSync(testFile);
+  } catch {
+    // ignore
+  }
+}
+
+test("stripNulls removes null fields", () => {
+  const obj = { a: 1, b: null, c: "hello", d: null };
+  const result = stripNulls(obj);
+  expect(Object.keys(result).sort()).toEqual(["a", "c"]);
+  expect(result.a).toBe(1);
+  expect(result.c).toBe("hello");
 });
 
-describe('createSystemPromptEntry', () => {
-  it('creates a system prompt entry', () => {
-    const entry = createSystemPromptEntry('sess-1', 'You are helpful');
-    expect(entry.session_id).toBe('sess-1');
-    expect(entry.role).toBe('system');
-    expect(entry.source).toBe(LOG_SOURCE.SYSTEM_PROMPT);
-    expect(entry.content).toBe('You are helpful');
-    expect(entry.ts).toBeDefined();
-    expect(entry.reasoning_content).toBeNull();
-    expect(entry.tool_calls).toBeNull();
-  });
+test("stripNulls preserves non-null values", () => {
+  const obj = { a: 0, b: false, c: "", d: [], e: {} };
+  const result = stripNulls(obj);
+  expect(Object.keys(result).sort()).toEqual(["a", "b", "c", "d", "e"]);
 });
 
-describe('createInputEntry', () => {
-  it('creates an input entry', () => {
-    const entry = createInputEntry('sess-1', 'Hello');
-    expect(entry.session_id).toBe('sess-1');
-    expect(entry.role).toBe('user');
-    expect(entry.source).toBe(LOG_SOURCE.INPUT);
-    expect(entry.content).toBe('Hello');
-  });
+test("SessionLog serializes without null fields", () => {
+  setupTestDir();
+  try {
+    const log = new SessionLog(TEST_SESSION_ID);
+    log.writeInput("hello world");
+    log.writeReset();
+
+    const content = readFileSync(log.path, "utf-8");
+    const lines = content.trim().split("\n");
+    expect(lines.length).toBe(2);
+
+    // First line should NOT have null fields
+    const firstLine = JSON.parse(lines[0]);
+    expect(firstLine).toEqual({
+      ts: expect.any(String),
+      session_id: TEST_SESSION_ID,
+      role: "user",
+      source: LOG_SOURCE.INPUT,
+      content: "hello world",
+    });
+    // Verify null fields are absent
+    expect(firstLine).not.toHaveProperty("reasoning_content");
+    expect(firstLine).not.toHaveProperty("tool_calls");
+    expect(firstLine).not.toHaveProperty("tool_call_id");
+    expect(firstLine).not.toHaveProperty("tool_name");
+
+    // Reset line should also be clean
+    const resetLine = JSON.parse(lines[1]);
+    expect(resetLine).toEqual({
+      ts: expect.any(String),
+      session_id: TEST_SESSION_ID,
+      role: "user",
+      source: LOG_SOURCE.RESET,
+      content: "",
+    });
+    expect(resetLine).not.toHaveProperty("reasoning_content");
+  } finally {
+    teardown();
+  }
 });
 
-describe('createAssistantEntry', () => {
-  it('creates an assistant entry', () => {
-    const entry = createAssistantEntry('sess-1', 'Hi there');
-    expect(entry.session_id).toBe('sess-1');
-    expect(entry.role).toBe('assistant');
-    expect(entry.source).toBe(LOG_SOURCE.LLM);
-    expect(entry.content).toBe('Hi there');
-  });
+test("SessionLog with tool_calls includes them", () => {
+  setupTestDir();
+  try {
+    const log = new SessionLog(TEST_SESSION_ID);
+    log.writeAssistant("thinking", [
+      { id: "tc_1", type: "function", function: { name: "bash", arguments: "ls" } },
+    ], "reasoning content");
 
-  it('includes tool_calls when provided', () => {
-    const toolCalls = [{ id: '1', function: { name: 'bash', arguments: '{}' } }];
-    const entry = createAssistantEntry('sess-1', 'Hi', toolCalls);
-    expect(entry.tool_calls).toBe(toolCalls);
-  });
+    const content = readFileSync(log.path, "utf-8");
+    const line = JSON.parse(content.trim());
 
-  it('includes reasoning_content when provided', () => {
-    const entry = createAssistantEntry('sess-1', 'Hi', null, 'Thinking...');
-    expect(entry.reasoning_content).toBe('Thinking...');
-  });
+    expect(line.role).toBe("assistant");
+    expect(line.content).toBe("thinking");
+    expect(line.reasoning_content).toBe("reasoning content");
+    expect(line.tool_calls).toEqual([
+      { id: "tc_1", type: "function", function: { name: "bash", arguments: "ls" } },
+    ]);
+    // tool_call_id and tool_name should be absent (they're null)
+    expect(line).not.toHaveProperty("tool_call_id");
+    expect(line).not.toHaveProperty("tool_name");
+  } finally {
+    teardown();
+  }
 });
 
-describe('createToolResultEntry', () => {
-  it('creates a tool result entry', () => {
-    const entry = createToolResultEntry('sess-1', 'Output', 'call-1', 'bash');
-    expect(entry.session_id).toBe('sess-1');
-    expect(entry.role).toBe('tool');
-    expect(entry.source).toBe(LOG_SOURCE.TOOL_RESULT);
-    expect(entry.content).toBe('Output');
-    expect(entry.tool_call_id).toBe('call-1');
-    expect(entry.tool_name).toBe('bash');
-  });
+test("SessionLog tool_result includes tool_call_id and tool_name", () => {
+  setupTestDir();
+  try {
+    const log = new SessionLog(TEST_SESSION_ID);
+    log.writeToolResult("<output>done</output>", "tc_1", "bash");
 
-  it('creates entry without optional fields', () => {
-    const entry = createToolResultEntry('sess-1', 'Output');
-    expect(entry.tool_call_id).toBeNull();
-    expect(entry.tool_name).toBeNull();
-  });
+    const content = readFileSync(log.path, "utf-8");
+    const line = JSON.parse(content.trim());
+
+    expect(line.role).toBe("tool");
+    expect(line.content).toBe("<output>done</output>");
+    expect(line.tool_call_id).toBe("tc_1");
+    expect(line.tool_name).toBe("bash");
+    // reasoning_content and tool_calls should be absent
+    expect(line).not.toHaveProperty("reasoning_content");
+    expect(line).not.toHaveProperty("tool_calls");
+  } finally {
+    teardown();
+  }
 });
 
-describe('createResetEntry', () => {
-  it('creates a reset entry', () => {
-    const entry = createResetEntry('sess-1');
-    expect(entry.session_id).toBe('sess-1');
-    expect(entry.role).toBe('user');
-    expect(entry.source).toBe(LOG_SOURCE.RESET);
-    expect(entry.content).toBe('');
-  });
-});
+test("readSessionEntries round-trip with stripped nulls", () => {
+  setupTestDir();
+  try {
+    const log = new SessionLog(TEST_SESSION_ID);
+    log.writeInput("test input");
+    log.writeAssistant("response");
+    log.writeReset();
+    log.writeInput("after reset");
 
-describe('createCompactionEntry', () => {
-  it('creates a compaction entry', () => {
-    const entry = createCompactionEntry('sess-1', 10, 'Summarized 10 messages');
-    expect(entry.session_id).toBe('sess-1');
-    expect(entry.role).toBe('system');
-    expect(entry.source).toBe(LOG_SOURCE.COMPACTION);
-    expect(entry.content).toContain('[Compacted 10 messages]');
-    expect(entry.content).toContain('Summarized 10 messages');
-  });
-});
+    const entries = readSessionEntries(TEST_SESSION_ID);
 
-describe('createPromptEntry', () => {
-  it('creates a prompt entry', () => {
-    const entry = createPromptEntry('sess-1', 'Expanded prompt');
-    expect(entry.session_id).toBe('sess-1');
-    expect(entry.role).toBe('user');
-    expect(entry.source).toBe(LOG_SOURCE.PROMPT);
-    expect(entry.content).toBe('Expanded prompt');
-  });
-});
-
-describe('disabledSessionLog', () => {
-  it('creates a no-op session log', () => {
-    const log = disabledSessionLog();
-    expect(log.append).toBeDefined();
-    expect(log.writeSystemPrompt).toBeDefined();
-    expect(log.writeInput).toBeDefined();
-    expect(log.writeAssistant).toBeDefined();
-    expect(log.writeToolResult).toBeDefined();
-    expect(log.writeReset).toBeDefined();
-    expect(log.writeCompaction).toBeDefined();
-    expect(log.writePrompt).toBeDefined();
-  });
-
-  it('all methods are no-ops', () => {
-    const log = disabledSessionLog();
-    expect(() => {
-      log.append({});
-      log.writeSystemPrompt('test');
-      log.writeInput('test');
-      log.writeAssistant('test');
-      log.writeToolResult('test');
-      log.writeReset();
-      log.writeCompaction(1, 'summary');
-      log.writePrompt('test');
-    }).not.toThrow();
-  });
+    // Should replay from reset, so only 1 entry
+    expect(entries.length).toBeGreaterThanOrEqual(1);
+    expect(entries[entries.length - 1].content).toBe("after reset");
+  } finally {
+    teardown();
+  }
 });

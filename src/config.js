@@ -129,6 +129,7 @@ function getDefaultConfig() {
     toolOutputFmt: DEFAULT_TOOL_OUTPUT_FMT,
     role: DEFAULT_ROLE,
     hideTools: true,
+    hideThinking: false,
     skillsPath: null,
     profilesPath: null,
     promptsPath: null,
@@ -149,17 +150,6 @@ function getDefaultConfig() {
 }
 
 /**
- * Resolve a string value with priority: CLI → config → env → default.
- */
-export function resolveString(cli, configValue, defaultValue, envName) {
-  if (cli !== undefined && cli !== null) return cli;
-  if (configValue !== undefined && configValue !== null && configValue !== '') return configValue;
-  const env = envName ? process.env[envName] : undefined;
-  if (env !== undefined && env !== '') return env;
-  return defaultValue;
-}
-
-/**
  * Resolve API key with priority: CLI → config → env → null.
  */
 export function resolveApiKey(cli, config) {
@@ -168,6 +158,10 @@ export function resolveApiKey(cli, config) {
   return process.env.AI_API_KEY || null;
 }
 
+// ── YAML Parsing ───────────────────────────────────────────────────────────
+
+import { YAML } from "bun";
+
 /**
  * Parse YAML front matter from a markdown string.
  * Returns { frontMatter: object, body: string } or null if no front matter.
@@ -175,37 +169,9 @@ export function resolveApiKey(cli, config) {
 export function parseFrontMatter(content) {
   const m = content.match(/^---\n([\s\S]*?)\n---\n?([\s\S]*)$/);
   if (!m) return null;
-  const body = m[2] || '';
-  const fm = parseYamlSimple(m[1]);
+  const body = m[2] || "";
+  const fm = YAML.parse(m[1]);
   return { frontMatter: fm, body };
-}
-
-/**
- * Simple YAML scalar/array parser for front matter.
- */
-function parseYamlSimple(str) {
-  const result = {};
-  const lines = str.split('\n');
-  for (const line of lines) {
-    if (/^\s*$/.test(line) || /^\s*#/.test(line)) continue;
-    const kv = line.match(/^([\w-]+)\s*:\s*(.*)$/);
-    if (!kv) continue;
-    const [, key, raw] = kv;
-    let val = raw.trim();
-    // Array: ["item1", "item2"]
-    if (val.startsWith('[') && val.endsWith(']')) {
-      const inner = val.slice(1, -1);
-      result[key] = inner.split(',').map(s => s.trim().replace(/^["']/, '').replace(/["']$/, '')).filter(Boolean);
-    }
-    // Boolean
-    else if (val === 'true') result[key] = true;
-    else if (val === 'false') result[key] = false;
-    // Number
-    else if (/^-?\d+$/.test(val)) result[key] = parseInt(val, 10);
-    // String
-    else result[key] = val.replace(/^["']/, '').replace(/["']$/, '');
-  }
-  return result;
 }
 
 /**
@@ -273,6 +239,16 @@ export function getProfile(config, profileName) {
   };
 }
 
+// Internal helpers — used by tests and internal logic
+export function resolveString(cli, configValue, defaultValue, envName) {
+  if (cli !== undefined && cli !== null) return cli;
+  if (configValue !== undefined && configValue !== null && configValue !== '') return configValue;
+  const env = envName ? process.env[envName] : undefined;
+  if (env !== undefined && env !== '') return env;
+  return defaultValue;
+}
+
+// Internal helpers — used by tests and internal logic
 export function isFalse(val) {
   return val === false;
 }
@@ -287,7 +263,8 @@ export function isNoneOr(val, check) {
 
 /**
  * Build a model registry from config providers.
- * Returns a map of model_name -> { name, temperature, maxTokens, contextLimit }
+ * Accepts a config object with a `providers` array.
+ * Returns a map of model_name -> { name, temperature, maxTokens }
  */
 export function buildModelRegistry(config) {
   const registry = {};

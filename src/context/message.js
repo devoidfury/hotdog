@@ -38,16 +38,16 @@ export class MessageLog {
     this.systemMessages = [];
   }
 
-  addMessage(role, content, reasoningContent = null, toolCalls = null, toolCallId = null) {
+  addMessage({ role, content, reasoningContent = null, toolCalls = null, toolCallId = null }) {
     this.messages.push(new Message({ role, content, reasoningContent, toolCalls, toolCallId }));
   }
 
   addUserMessage(content) {
-    this.addMessage('user', content);
+    this.addMessage({ role: 'user', content });
   }
 
   addAssistantMessage(content, reasoningContent = null, toolCalls = null) {
-    this.addMessage('assistant', content, reasoningContent, toolCalls);
+    this.addMessage({ role: 'assistant', content, reasoningContent, toolCalls });
   }
 
   addSystemMessage(content) {

@@ -3,6 +3,7 @@
 
 import { join } from "node:path";
 import { parseFrontMatter } from "../config.js";
+import { validateNameable } from "../lib.js";
 
 // ── Pattern Matching ───────────────────────────────────────────────────────
 
@@ -44,45 +45,6 @@ export function patternMatches(pattern, toolName) {
   return dp[patLen][nameLen];
 }
 
-// ── Name Validation ────────────────────────────────────────────────────────
-
-/**
- * Validate a skill name per spec constraints.
- * Returns warnings — skills still load with warnings.
- */
-function validateName(name, dirName) {
-  const warnings = [];
-
-  if (name && name !== dirName) {
-    warnings.push(
-      `Skill name '${name}' does not match directory name '${dirName}'`,
-    );
-  }
-  if (!name || name.length === 0) {
-    warnings.push("Skill name is empty");
-  } else if (name.length > 64) {
-    warnings.push(
-      `Skill name '${name}' exceeds 64 characters (got ${name.length})`,
-    );
-  }
-  if (name && (name.startsWith("-") || name.endsWith("-"))) {
-    warnings.push(`Skill name '${name}' must not start or end with a hyphen`);
-  }
-  if (name && name.includes("--")) {
-    warnings.push(`Skill name '${name}' must not contain consecutive hyphens`);
-  }
-  if (name) {
-    for (const c of name) {
-      if (!/^[a-z0-9-]$/.test(c)) {
-        warnings.push(
-          `Skill name '${name}' contains invalid character '${c}', only lowercase alphanumeric and hyphens allowed`,
-        );
-      }
-    }
-  }
-  return warnings;
-}
-
 // ── Skill Parsing ──────────────────────────────────────────────────────────
 
 /**
@@ -102,10 +64,18 @@ export function parseSkillFromMd(content, dirName, location) {
     throw new Error("Skill description is missing or empty (required)");
   }
 
+  // Warn on description length (matches Rust's 1024 char limit)
+  const descLen = typeof fm.description === "string" ? fm.description.length : 0;
+  if (descLen > 1024) {
+    console.warn(
+      `Warning: Skill '${fm.name || dirName}' description exceeds 1024 characters (${descLen} chars), truncating`,
+    );
+  }
+
   const name = fm.name || dirName;
 
   // Lenient name validation
-  const warnings = validateName(name, dirName);
+  const warnings = validateNameable(name, "Skill", dirName);
   for (const w of warnings) {
     console.warn(`Warning: Skill '${name}': ${w}`);
   }
@@ -162,8 +132,9 @@ function parseToolList(val) {
 
 /**
  * Recursively collect additional files from a skill directory.
+ * Stores paths relative to the skill root (matching Rust's strip_prefix).
  */
-function collectAdditionalFiles(dirPath, files = []) {
+function collectAdditionalFiles(dirPath, parentDir, files = []) {
   const fs = require("node:fs");
   try {
     const entries = fs.readdirSync(dirPath, { withFileTypes: true });
@@ -171,9 +142,10 @@ function collectAdditionalFiles(dirPath, files = []) {
       if (entry.name.startsWith(".") || entry.name === "SKILL.md") continue;
       const fullPath = join(dirPath, entry.name);
       if (entry.isFile()) {
-        files.push(entry.name);
+        const relPath = join(parentDir, entry.name);
+        files.push(relPath);
       } else if (entry.isDirectory()) {
-        collectAdditionalFiles(fullPath, files);
+        collectAdditionalFiles(fullPath, join(parentDir, entry.name), files);
       }
     }
   } catch {
@@ -235,8 +207,11 @@ export class SkillsLoader {
         const location = fs.realpathSync(skillFile);
         const skill = parseSkillFromMd(content, entry.name, location);
 
-        // Discover additional files
-        skill.additionalFiles = collectAdditionalFiles(join(dir, entry.name));
+        // Discover additional files (relative paths from skill root)
+        skill.additionalFiles = collectAdditionalFiles(
+          join(dir, entry.name),
+          entry.name,
+        );
 
         // Collision detection
         if (this.skills.has(skill.name)) {

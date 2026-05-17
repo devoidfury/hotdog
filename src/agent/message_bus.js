@@ -4,28 +4,34 @@
 // blocking; the bus drains sequentially: dequeue → agent.run() → emit events → repeat.
 
 import { MessageQueue } from "./message_queue.js";
+import { OUTPUT_EVENT } from "../context/output.js";
+import { formatError, isExpectedError } from "../context/error.js";
 
 /**
  * The message bus — a single dispatcher that owns the agent run loop.
  *
- * The CLI session enqueues text; the bus drains sequentially.
- * This decouples the UI layer from the agent implementation.
+ * Uses SessionManager for agent access, enabling profile switching and
+// multi-session support.
  */
 export class MessageBus {
   /**
    * @param {object} options
-   * @param {import("../agent/agent.js").Agent} options.agent - The agent instance
+   * @param {import("./session_manager.js").SessionManager} options.sessionManager - Session manager for agent access
    * @param {import("../context/output.js").OutputSink} options.sink - Output sink for events
    * @param {Function} [options.wakeUpCallback] - Optional callback for task wake-up
+   * @param {Function} [options.onMessageProcessed] - Optional callback called after each message is processed
+   * @param {import("../marker_mangler.js").MarkerMangler} [options.markerMangler] - Optional marker mangler for injection prevention
    */
-  constructor({ agent, sink, wakeUpCallback }) {
-    this._agent = agent;
+  constructor({ sessionManager, sink, wakeUpCallback, onMessageProcessed, markerMangler }) {
+    this._sessionManager = sessionManager;
     this._sink = sink;
     this._queue = new MessageQueue();
     this._isRunning = false;
     this._cancelled = false;
     this._wakeUpCallback = wakeUpCallback;
     this._drainAfterCancel = false;
+    this._onMessageProcessed = onMessageProcessed;
+    this._markerMangler = markerMangler;
   }
 
   /**
@@ -39,11 +45,14 @@ export class MessageBus {
   }
 
   /**
-   * Cancel the currently running agent dispatch.
+   * Cancel the currently running agent dispatch. Safe from any thread.
    */
   cancel() {
     this._cancelled = true;
-    this._agent.cancel();
+    const agent = this._sessionManager.getAgent();
+    if (agent) {
+      agent.cancel();
+    }
   }
 
   /**
@@ -70,17 +79,24 @@ export class MessageBus {
   }
 
   /**
-   * Get the agent for command execution.
+   * Get the session manager.
    */
-  get agent() {
-    return this._agent;
+  get sessionManager() {
+    return this._sessionManager;
   }
 
   /**
    * Get the session ID for this bus.
    */
   get sessionId() {
-    return this._agent.sessionId;
+    return this._sessionManager.sessionId();
+  }
+
+  /**
+   * Get the current agent.
+   */
+  get agent() {
+    return this._sessionManager.getAgent();
   }
 
   /**
@@ -89,10 +105,13 @@ export class MessageBus {
    * Returns the rendered text on success, or throws on failure.
    */
   async executePromptAndEnqueue(cmd) {
-    const result = this._agent.executePrompt(cmd);
+    const agent = this._sessionManager.getAgent();
+    if (!agent) throw new Error("No agent available");
+
+    const result = agent.executePrompt(cmd);
     if (result.success) {
-      this.enqueue(result.output || "");
-      return result.output || "";
+      this.enqueue(result.prompt || "");
+      return result.prompt || "";
     }
     throw new Error(result.error);
   }
@@ -154,22 +173,48 @@ export class MessageBus {
       // Mark as running
       this._isRunning = true;
 
+      // Reset cancellation for this turn and give the token to the agent
+      const agent = this._sessionManager.getAgent();
+      if (agent) {
+        agent.cancel(false);
+      }
+
       try {
         // Execute the agent run (this handles tool calls internally)
-        await this._agent.run(text);
+        await agent.run(text);
       } catch (e) {
         // Suppress error message for cancelled agents (user already saw the interrupt message)
-        if (!e.message?.includes("cancelled")) {
+        if (isExpectedError(e)) {
+          // Expected errors: emit message only, no stack
           this._sink.emit({
-            type: this._sink.OUTPUT_EVENT.COMMAND_RESULT,
-            content: `Error: ${e.message}`,
+            type: OUTPUT_EVENT.COMMAND_RESULT,
+            content: e.message,
+          });
+        } else {
+          // Unexpected errors: include full stack for debugging
+          this._sink.emit({
+            type: OUTPUT_EVENT.COMMAND_RESULT,
+            content: formatError(e),
           });
         }
       }
 
-      // Reset cancellation for this turn
+      // Reset cancellation for this turn so subsequent runs work
+      if (agent) {
+        agent.cancel(false);
+      }
       this._cancelled = false;
       this._isRunning = false;
+
+      // In drain mode, if the queue is now empty, we're done — exit the loop
+      if (drain && this._queue.isEmpty()) {
+        break;
+      }
+
+      // Notify listener that message processing is complete
+      if (this._onMessageProcessed) {
+        this._onMessageProcessed();
+      }
     }
   }
 
@@ -183,10 +228,10 @@ export class MessageBus {
     if (!this._wakeUpCallback) return;
 
     const bus = this;
-    this._agent.taskManager?.setWakeUpCallback((taskId, result) => {
-      // Escape special markers to prevent injection
-      const escaped = result.replace(/<m_/g, "&lt;m_");
-      const message = `<task-result subagent="${taskId}">${escaped}</task-result>`;
+    const agent = this._sessionManager.getAgent();
+    agent?.taskManager?.setWakeUpCallback((taskId, result) => {
+      const escaped = this._markerMangler?.escapeMarkers(result) ?? result;
+      const message = `<m_59gt7zdgkjzdeshe subagent="${taskId}">${escaped}</m_59gt7zdgkjzdeshe>`;
       bus.enqueue(message);
     });
   }

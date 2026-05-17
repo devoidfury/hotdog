@@ -17,6 +17,24 @@ export const OUTPUT_EVENT = {
 };
 
 /**
+ * Map output event types to handler method names.
+ */
+export const EVENT_HANDLERS = {
+  [OUTPUT_EVENT.USER_MESSAGE]: 'emitUserMessage',
+  [OUTPUT_EVENT.ASSISTANT_MESSAGE]: 'emitAssistantMessage',
+  [OUTPUT_EVENT.THINKING]: 'emitThinking',
+  [OUTPUT_EVENT.TOOL_CALL]: 'emitToolCall',
+  [OUTPUT_EVENT.TOOL_RESULT]: 'emitToolResult',
+  [OUTPUT_EVENT.COMPACTING]: 'emitCompacting',
+  [OUTPUT_EVENT.COMMAND_RESULT]: 'emitCommandResult',
+  [OUTPUT_EVENT.QUESTION]: 'emitQuestion',
+  [OUTPUT_EVENT.STREAMING_CHUNK]: 'emitStreamingChunk',
+  [OUTPUT_EVENT.STREAMING_REASONING_CHUNK]: 'emitStreamingReasoningChunk',
+  [OUTPUT_EVENT.TASK_PROGRESS]: 'emitTaskProgress',
+  [OUTPUT_EVENT.TOKEN_USAGE]: 'emitTokenUsage',
+};
+
+/**
  * Create an output event.
  */
 export function outputEvent(type, data = {}) {
@@ -33,100 +51,59 @@ export class OutputSink {
   }
 
   emit(event) {
-    switch (event.type) {
-      case OUTPUT_EVENT.USER_MESSAGE:
-        this.emitUserMessage(event.content);
-        break;
-      case OUTPUT_EVENT.ASSISTANT_MESSAGE:
-        this.emitAssistantMessage(event.content);
-        break;
-      case OUTPUT_EVENT.THINKING:
-        this.emitThinking(event.content);
-        break;
-      case OUTPUT_EVENT.TOOL_CALL:
-        this.emitToolCall(event.toolName, event.input, event.toolCallId);
-        break;
-      case OUTPUT_EVENT.TOOL_RESULT:
-        this.emitToolResult(event.toolName, event.input, event.result);
-        break;
-      case OUTPUT_EVENT.COMPACTING:
-        this.emitCompacting(event.messageCount, event.keepRecent);
-        break;
-      case OUTPUT_EVENT.COMMAND_RESULT:
-        this.emitCommandResult(event.content);
-        break;
-      case OUTPUT_EVENT.QUESTION:
-        this.emitQuestion(event.questions);
-        break;
-      case OUTPUT_EVENT.STREAMING_CHUNK:
-        this.emitStreamingChunk(event.content);
-        break;
-      case OUTPUT_EVENT.STREAMING_REASONING_CHUNK:
-        this.emitStreamingReasoningChunk(event.content);
-        break;
-      case OUTPUT_EVENT.TASK_PROGRESS:
-        this.emitTaskProgress(event.activeTasks, event.totalTasks);
-        break;
-      case OUTPUT_EVENT.TOKEN_USAGE:
-        this.emitTokenUsage(
-          event.promptTokens,
-          event.cachedTokens,
-          event.completionTokens,
-          event.totalTokens,
-        );
-        break;
-    }
+    const handler = EVENT_HANDLERS[event.type];
+    if (handler) this[handler](event);
   }
 
-  emitUserMessage(content) {
+  emitUserMessage(event) {
     // User messages are typically echoed back
   }
 
-  emitAssistantMessage(content) {
-    process.stdout.write(content);
+  emitAssistantMessage(event) {
+    process.stdout.write(event.content);
   }
 
-  emitThinking(content) {
-    process.stderr.write(content);
+  emitThinking(event) {
+    process.stderr.write(event.content);
   }
 
-  emitToolCall(toolName, input, toolCallId) {
+  emitToolCall(event) {
     // Tool calls are displayed by the agent loop
   }
 
-  emitToolResult(toolName, input, result) {
+  emitToolResult(event) {
     // Tool results are displayed by the agent loop
   }
 
-  emitCompacting(messageCount, keepRecent) {
+  emitCompacting(event) {
     // Compacting is displayed by the agent loop
   }
 
-  emitCommandResult(content) {
-    process.stdout.write(content + "\n");
+  emitCommandResult(event) {
+    process.stdout.write(event.content + "\n");
   }
 
-  emitQuestion(questions) {
+  emitQuestion(event) {
     // Questions are handled by the agent loop
   }
 
-  emitStreamingChunk(content) {
+  emitStreamingChunk(event) {
     if (this.stream) {
-      process.stdout.write(content);
+      process.stdout.write(event.content);
     }
   }
 
-  emitStreamingReasoningChunk(content) {
+  emitStreamingReasoningChunk(event) {
     if (this.stream) {
-      process.stderr.write(content);
+      process.stderr.write(event.content);
     }
   }
 
-  emitTaskProgress(activeTasks, totalTasks) {
+  emitTaskProgress(event) {
     // Task progress is displayed by the agent loop
   }
 
-  emitTokenUsage(promptTokens, cachedTokens, completionTokens, totalTokens) {
+  emitTokenUsage(event) {
     // Token usage is displayed by the agent loop
   }
 

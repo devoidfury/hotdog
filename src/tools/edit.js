@@ -59,21 +59,18 @@ export class EditTool {
     const { path: filePath, oldString, newString, replaceAll } = op;
     const cwdBoundary = ctx?.cwdBoundary || null;
 
+    // Validate cwd boundary
+    const boundaryError = validateCwdBoundary(filePath, cwdBoundary);
+    if (boundaryError) {
+      return toolResult(boundaryError);
+    }
+
     // Validate input size
     const inputSize = oldString.length + newString.length;
     if (inputSize > DEFAULT_MAX_EDIT_INPUT_SIZE) {
       return toolResult(
         `Edit input too large: ${inputSize} characters (max ${DEFAULT_MAX_EDIT_INPUT_SIZE}). Please split into smaller edits.`,
       );
-    }
-
-    // Validate cwd boundary
-    if (cwdBoundary) {
-      const resolved = path.resolve(cwdBoundary);
-      const fileResolved = path.resolve(filePath);
-      if (!fileResolved.startsWith(resolved + path.sep) && fileResolved !== resolved) {
-        return toolResult(`Error: path ${filePath} is outside cwd boundary ${cwdBoundary}`);
-      }
     }
 
     // Read file

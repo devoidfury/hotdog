@@ -114,19 +114,16 @@ export class WriteTool {
     const { mode, path: filePath, content, search, search_re, start_at, end_at } = args;
     const cwdBoundary = ctx?.cwdBoundary || null;
 
+    // Validate cwd boundary
+    const boundaryError = validateCwdBoundary(filePath, cwdBoundary);
+    if (boundaryError) {
+      return toolResult(boundaryError);
+    }
+
     // Validate mode
     const modeResult = validateMode(mode, { search, search_re, start_at, end_at });
     if (modeResult) {
       return toolResult(modeResult);
-    }
-
-    // Validate cwd boundary
-    if (cwdBoundary) {
-      const resolved = path.resolve(cwdBoundary);
-      const fileResolved = path.resolve(filePath);
-      if (!fileResolved.startsWith(resolved + path.sep) && fileResolved !== resolved) {
-        return toolResult(`Error: path ${filePath} is outside cwd boundary ${cwdBoundary}`);
-      }
     }
 
     // Read existing content

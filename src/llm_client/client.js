@@ -93,12 +93,12 @@ export class LlmClient {
   _escapeMessages(messages) {
     if (!this._mangler) return messages;
     return messages.map((msg) => {
-      const cloned = { ...msg };
-      if (cloned.content !== undefined && cloned.content !== null) {
-        cloned.content = this._mangler.escape(cloned.content);
+      const json = msg.toJSON();
+      if (json.content !== undefined && json.content !== null) {
+        json.content = this._mangler.escape(json.content);
       }
-      if (cloned.tool_calls) {
-        cloned.tool_calls = cloned.tool_calls.map((tc) => {
+      if (json.tool_calls) {
+        json.tool_calls = json.tool_calls.map((tc) => {
           const clonedTc = { ...tc };
           if (clonedTc.function) {
             const clonedFn = { ...clonedTc.function };
@@ -109,7 +109,7 @@ export class LlmClient {
           return clonedTc;
         });
       }
-      return cloned;
+      return json;
     });
   }
 
@@ -121,7 +121,7 @@ export class LlmClient {
     const escapedMessages = this._escapeMessages(messages);
     const request = {
       model: modelName,
-      messages: escapedMessages.map((m) => m.toJSON()),
+      messages: escapedMessages,
       max_tokens: modelConfig.maxTokens || DEFAULT_MAX_TOKENS,
       temperature: modelConfig.temperature,
       tools: tools || [],

@@ -5,37 +5,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { cwd } from 'node:process';
 import { parseFrontMatter } from '../config.js';
-
-/**
- * Validate a prompt name per spec constraints.
- * Returns warnings (non-critical) — prompts still load with warnings.
- */
-function validatePromptName(name, fileStem) {
-  const warnings = [];
-
-  if (name && name !== fileStem) {
-    warnings.push(`Prompt name '${name}' does not match file name '${fileStem}'`);
-  }
-  if (!name || name.length === 0) {
-    warnings.push('Prompt name is empty');
-  } else if (name.length > 64) {
-    warnings.push(`Prompt name '${name}' exceeds 64 characters (got ${name.length})`);
-  }
-  if (name && (name.startsWith('-') || name.endsWith('-'))) {
-    warnings.push(`Prompt name '${name}' must not start or end with a hyphen`);
-  }
-  if (name && name.includes('--')) {
-    warnings.push(`Prompt name '${name}' must not contain consecutive hyphens`);
-  }
-  if (name) {
-    for (const c of name) {
-      if (!/^[a-z0-9-]$/.test(c)) {
-        warnings.push(`Prompt name '${name}' contains invalid character '${c}', only lowercase alphanumeric and hyphens allowed`);
-      }
-    }
-  }
-  return warnings;
-}
+import { validateNameable } from '../lib.js';
 
 /**
  * Parse a .prompt.md file into a Prompt object.
@@ -58,7 +28,7 @@ export function parsePromptFromMd(content, fileName, location) {
   const name = fm.name || fileStem;
 
   // Warn on validation issues
-  const warnings = validatePromptName(name, fileStem);
+  const warnings = validateNameable(name, 'Prompt', fileStem);
   for (const w of warnings) {
     console.warn(`Warning: Prompt '${name}': ${w}`);
   }

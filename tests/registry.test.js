@@ -158,20 +158,22 @@ describe('generateDiff', () => {
 });
 
 describe('validateCwdBoundary', () => {
-  it('returns true when no boundary', () => {
-    expect(validateCwdBoundary('/any/path', null)).toBe(true);
+  it('returns null when no boundary', () => {
+    expect(validateCwdBoundary('/any/path', null)).toBeNull();
   });
 
-  it('returns true for path within boundary', () => {
-    expect(validateCwdBoundary('/home/user/project/file.txt', '/home/user/project')).toBe(true);
+  it('returns null for path within boundary', () => {
+    expect(validateCwdBoundary('/home/user/project/file.txt', '/home/user/project')).toBeNull();
   });
 
-  it('returns true for boundary itself', () => {
-    expect(validateCwdBoundary('/home/user/project', '/home/user/project')).toBe(true);
+  it('returns null for boundary itself', () => {
+    expect(validateCwdBoundary('/home/user/project', '/home/user/project')).toBeNull();
   });
 
-  it('returns false for path outside boundary', () => {
-    expect(validateCwdBoundary('/home/other/file.txt', '/home/user/project')).toBe(false);
+  it('returns error string for path outside boundary', () => {
+    const result = validateCwdBoundary('/home/other/file.txt', '/home/user/project');
+    expect(typeof result).toBe('string');
+    expect(result).toContain('outside cwd boundary');
   });
 });
 

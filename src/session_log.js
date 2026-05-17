@@ -6,6 +6,22 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import { appendFileSync, readFileSync, existsSync, readdirSync } from "node:fs";
 
+// ── Helpers ─────────────────────────────────────────────────────────────────
+
+/**
+ * Strip null fields from an object for serialization.
+ * Matches Rust's #[serde(skip_serializing_if = "Option::is_none")].
+ */
+export function stripNulls(obj) {
+  const result = {};
+  for (const [k, v] of Object.entries(obj)) {
+    if (v !== null) {
+      result[k] = v;
+    }
+  }
+  return result;
+}
+
 // ── Log Source Types ────────────────────────────────────────────────────────
 
 export const LOG_SOURCE = {
@@ -195,7 +211,7 @@ export class SessionLog {
    */
   append(entry) {
     this._ensureDir();
-    const line = JSON.stringify(entry);
+    const line = JSON.stringify(stripNulls(entry));
     appendFileSync(this.path, line + "\n");
   }
 

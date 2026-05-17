@@ -4,9 +4,9 @@ JS project `oa-js` — an AI agent harness with tool calling support. This is a 
 
 ## Quick Reference
 
-- **Run:** `bun src/main.js` / **One-shot:** `bun src/main.js "hello"` / **TUI:** interactive
+- **Run:** `timeout 30 bun src/main.js` / **One-shot:** `timeout 30 bun src/main.js -c "hello"` / **TUI:** interactive
 - **With profile:** `--profile minimal` / **With model:** `--model qwen3.5-0.8b`
-- **Test:** `bun test --only-failures`
+- **Test:** `timeout 30 bun test --only-failures`
 
 ## Rules & Guidelines
 
@@ -17,6 +17,14 @@ JS project `oa-js` — an AI agent harness with tool calling support. This is a 
 ### Centralized Defaults
 All hard-coded configurable strings (model names, host URLs, ports, format templates, timeouts, etc.) must live in `src/config.js` as named constants. Never duplicate.
 
+### Error Handling
+All error catches must use `formatError()` from `src/context/error.js`:
+- Expected errors (cancelled, http, api, timeout): message only
+- Unexpected errors (bugs, iteration errors, null derefs): message + full stack
+- Never use `console.error(e.message)` directly — always use `formatError(e)`
+- The `isExpectedError()` helper classifies errors; add new types to `EXPECTED_ERROR_TYPES`
+All hard-coded configurable strings (model names, host URLs, ports, format templates, timeouts, etc.) must live in `src/config.js` as named constants. Never duplicate.
+
 ### UI Layer Separation
 All UI/display logic lives under `src/ui/`. The `OutputSink` class in `src/context/output.js` is the core abstraction. Each UI module (CLI) implements output independently.
 
@@ -24,3 +32,40 @@ Similarly, the `Input` handling lives in `src/context/input.js` with `parseInput
 
 ### Spotting Separation-of-Concerns Issues
 When adding `OutputEvent` variants, check: does the variant carry a pre-formatted display string? If so, split into raw data + a `format_*()` function in `src/ui/cli.js`.
+
+### Module Layout (mirrors Rust `oa-agent/src/`)
+
+```
+src/
+├── main.js          — Entry point: parse args → dispatch subcommand → build agent → run
+├── cli.js           — CLI argument parsing + HELP_TEXT constant
+├── config.js        — All defaults, provider config loading
+├── agent/
+│   ├── agent.js       — Agent core (LLM loop, tool execution)
+│   ├── commands.js    — Slash command parsing + execution
+│   ├── message_bus.js — Message bus (run loop, enqueue/dequeue)
+│   ├── worker.js      — Task manager / subagent support
+│   ├── session_builder.js — Init pipeline encapsulation (CLI+config→shared resources)
+│   ├── session_manager.js — Session lifecycle (owns builder + current agent, agent swaps)
+│   └── session_store.js   — Multi-session storage (map of agents keyed by session ID)
+├── ui/
+│   ├── cli.js       — CliOutputSink (formatting + color emission)
+│   ├── colors.js    — Color palettes, ANSI helpers, theme resolution
+│   ├── session.js   — Interactive CLI session (readline loop, command dispatch)
+│   ├── info.js      — Info subcommand (print system diagnostics)
+│   ├── show_prompt.js — Show-prompt subcommand
+│   └── review.js    — Review subcommand
+├── context/
+│   ├── output.js    — OutputSink base class + OUTPUT_EVENT types
+│   ├── input.js     — parseInput() for question/answer collection
+│   └── message.js   — Message types
+├── init/resolution.js — buildAgentConfig() (resolves CLI+config→resolved)
+├── llm_client/client.js — LLM HTTP client
+├── mcp/             — MCP server connections (HTTP + stdio)
+├── skills/loader.js — Skills discovery and loading
+├── prompts/loader.js — Prompt template loading
+├── tools/           — Individual tool implementations
+└── session_log.js   — Session logging
+```
+
+When adding new subcommands, add them to `src/ui/` as a separate file and dispatch from `main.js`.

@@ -1,7 +1,12 @@
 // Agent — the core AI agent with tool calling support.
 // Manages conversation context, model selection, tool execution, and the run loop.
 
-import { MessageLog, outputEvent, OUTPUT_EVENT, Message } from "../context/index.js";
+import {
+  MessageLog,
+  outputEvent,
+  OUTPUT_EVENT,
+  Message,
+} from "../context/index.js";
 import { LlmClient, LlmError } from "../llm_client/client.js";
 import { render } from "../context/render.js";
 import { ToolRegistry, ToolContext } from "../tools/registry.js";
@@ -26,55 +31,67 @@ import {
   loadAgentsMd,
 } from "../context/system_prompt.js";
 import { disabledSessionLog } from "../session_log.js";
-import { compactMessages as doCompact, findFirstKeptIndex } from "../compaction.js";
+import {
+  compactMessages as doCompact,
+  findFirstKeptIndex,
+} from "../compaction.js";
+import { McpTool } from "../mcp/tools.js";
 
 /**
  * Core tool names that are always allowed regardless of skill filtering.
  */
-const ALWAYS_ALLOWED = new Set([
-  ...CORE_TOOL_NAMES,
-  ...SUBAGENT_TOOL_NAMES,
-]);
+const ALWAYS_ALLOWED = new Set([...CORE_TOOL_NAMES, ...SUBAGENT_TOOL_NAMES]);
 
 export class Agent {
-  constructor(options = {}) {
-    this.client = options.client || new LlmClient();
+  /**
+   * Create a new Agent from a config object.
+   * Used by SessionBuilder for agent construction and swapping.
+   */
+  constructor(config = {}) {
+    this.client = config.client || new LlmClient();
     this.context = new MessageLog();
-    this.model = options.model || DEFAULT_MODEL;
-    this.modelRegistry = options.modelRegistry || {};
-    this.sink = options.sink || new NoopSink();
-    this.hideTools = options.hideTools !== false;
-    this.hideThinking = false;
-    this.skills = options.skills || [];
-    this.allSkills = options.allSkills || [];
-    this.skillDirectories = options.skillDirectories || [];
+    this.model = config.model || DEFAULT_MODEL;
+    this.modelRegistry = config.modelRegistry || {};
+    this.sink = config.sink || new NoopSink();
+    this.hideTools = config.hideTools !== false;
+    this.hideThinking = config.hideThinking === true;
+    this.skills = config.skills || [];
+    this.allSkills = config.allSkills || [];
+    this.skillDirectories = config.skillDirectories || [];
     this.activeSkills = new Set();
-    this.maxToolOutputLines = options.maxToolOutputLines || 800;
-    this.sessionId = options.sessionId || crypto.randomUUID();
-    this.cwdBoundary = options.cwdBoundary || null;
-    this.role = options.role || DEFAULT_ROLE;
-    this.profileBody = options.profileBody || "";
-    this.stream = options.stream !== false;
-    this.compaction = options.compaction || defaultCompactionSettings;
-    this.compactDebug = options.compactDebug || false;
-    this.showTokenUse = options.showTokenUse !== false;
-    this.profileName = options.profileName || "default";
+    this.maxToolOutputLines = config.maxToolOutputLines || 800;
+    this.sessionId = config.sessionId || crypto.randomUUID();
+    this.cwdBoundary = config.cwdBoundary || null;
+    this.role = config.role || DEFAULT_ROLE;
+    this.profileBody = config.profileBody || "";
+    this.stream = config.stream !== false;
+    this.compaction = config.compaction || defaultCompactionSettings;
+    this.compactDebug = config.compactDebug || false;
+    this.showTokenUse = config.showTokenUse !== false;
+    this.profileName = config.profileName || "default";
     this.usedTools = new Set();
     this.iterationCount = 0;
     this.cancelled = false;
     this.outputCache = new Map();
-    this.promptsLoader = options.promptsLoader || null;
-    this.skillsLoader = options.skillsLoader || null;
+    this.promptsLoader = config.promptsLoader || null;
+    this.skillsLoader = config.skillsLoader || null;
     // Session logging
-    this.sessionLog = options.sessionLog || disabledSessionLog();
+    this.sessionLog = config.sessionLog || disabledSessionLog();
     // Token usage tracking per model
     this.tokenStats = new Map();
     // Task manager for async task delegation (meta profile)
-    this.taskManager = options.taskManager || null;
+    this.taskManager = config.taskManager || null;
     // Task completion wake-up messages
     this._pendingTaskMessages = [];
     // Tool definition cache
     this._toolDefs = null;
+    // MCP connections (from main.js)
+    this._mcpConnections = config.mcpConnections || [];
+    // Cached MCP tool definitions
+    this._mcpToolDefs = null;
+    this._mcpToolDefsDirty = true;
+    // Config reference for profile lookups
+    this._config = config.config || null;
   }
 
   // ── Tool Allowance ────────────────────────────────────────────────────────
@@ -160,7 +177,8 @@ export class Agent {
       const name = t.function?.name || "";
       const nameLower = name.toLowerCase();
 
-      const allowed = ALWAYS_ALLOWED.has(name) ||
+      const allowed =
+        ALWAYS_ALLOWED.has(name) ||
         Array.from(patterns).some((pattern) => _globMatch(pattern, nameLower));
 
       if (allowed && seen.add(name)) {
@@ -277,13 +295,15 @@ export class Agent {
 
       if (i === 0 && msg.role === "system") {
         // Replace system message with fresh content
-        newMessages.push(new Message({
-          role: "system",
-          content: rendered,
-          reasoningContent: null,
-          toolCalls: null,
-          toolCallId: null,
-        }));
+        newMessages.push(
+          new Message({
+            role: "system",
+            content: rendered,
+            reasoningContent: null,
+            toolCalls: null,
+            toolCallId: null,
+          }),
+        );
       } else if (msg.role === "user" && _hasSkillContent(msg.content)) {
         // Prune: dynamically loaded skill messages are no longer necessary
         // (preloaded skills are now embedded in the system message)
@@ -314,7 +334,8 @@ export class Agent {
     const loadedSkills = visibleSkills.filter((s) => s.loaded);
     const unloadedSkills = visibleSkills.filter((s) => !s.loaded);
 
-    let preamble = "# Available Skills\n\nSkill directories: " + skillDirs + "\n\n";
+    let preamble =
+      "# Available Skills\n\nSkill directories: " + skillDirs + "\n\n";
 
     // Loaded skills with full content
     if (loadedSkills.length > 0) {
@@ -362,7 +383,7 @@ export class Agent {
         const allowed = this.allowedToolNames();
         const errorMsg = `Tool '${toolName}' is not allowed by active skills. Allowed tools: ${Array.from(allowed).join(", ")}`;
         this._emitToolResult(toolName, input, errorMsg, toolCallId);
-        this.context.addMessage("tool", errorMsg, null, null, toolCallId);
+        this.context.addMessage({ role: "tool", content: errorMsg, reasoningContent: null, toolCalls: null, toolCallId });
         this.sessionLog.writeToolResult(errorMsg, toolCallId, toolName);
         continue;
       }
@@ -407,7 +428,7 @@ export class Agent {
         : result;
 
       // Add tool result to context
-      this.context.addMessage("tool", displayResult, null, null, toolCallId);
+      this.context.addMessage({ role: "tool", content: displayResult, reasoningContent: null, toolCalls: null, toolCallId });
 
       // Cache output
       this.outputCache.set(toolCallId, displayResult);
@@ -506,13 +527,13 @@ export class Agent {
     // Add kept messages (from firstKept index onward)
     const keptMessages = allMessages.slice(firstKept);
     for (const msg of keptMessages) {
-      this.context.addMessage(
-        msg.role,
-        msg.content,
-        msg.reasoning_content || null,
-        msg.tool_calls || null,
-        msg.tool_call_id || null,
-      );
+      this.context.addMessage({
+        role: msg.role,
+        content: msg.content,
+        reasoningContent: msg.reasoning_content || null,
+        toolCalls: msg.tool_calls || null,
+        toolCallId: msg.tool_call_id || null,
+      });
     }
 
     // Log compaction
@@ -536,8 +557,8 @@ export class Agent {
     const json = JSON.stringify(chatMessages, null, 2);
     try {
       fs.writeFileSync("compaction.out.json", json);
-    } catch {
-      // Silently skip — file write is debug-only
+    } catch (e) {
+      console.warn(e);
     }
   }
 
@@ -556,7 +577,8 @@ export class Agent {
     const promptsLoader = this.promptsLoader;
     const prompt = promptsLoader.getPrompt(name);
     if (!prompt) {
-      const available = promptsLoader.allPrompts()
+      const available = promptsLoader
+        .allPrompts()
         .filter((p) => !p.disableModelInvocation)
         .map((p) => p.name);
       return {
@@ -606,9 +628,10 @@ export class Agent {
     if (!skill) return { success: true };
 
     const additionalFiles = skill.additionalFiles || [];
-    const resourcesSection = additionalFiles.length > 0
-      ? `<skill_resources>\n${additionalFiles.map((f) => `  <file>${f}</file>`).join("\n")}\n</skill_resources>`
-      : "(none)";
+    const resourcesSection =
+      additionalFiles.length > 0
+        ? `<skill_resources>\n${additionalFiles.map((f) => `  <file>${f}</file>`).join("\n")}\n</skill_resources>`
+        : "(none)";
 
     const wrappedContent = `<skill_content name="${skill.name}">\n${skill.content}\n\nSkill directory: ${skill.location}\nRelative paths in this skill are relative to the skill directory.\n\n<skill_resources>\n${resourcesSection}\n</skill_resources>\n</skill_content>`;
 
@@ -619,6 +642,28 @@ export class Agent {
     this.context.systemMessages = [];
 
     return { success: true };
+  }
+
+  /**
+   * Get the current model name.
+   */
+  currentModel() {
+    return this.model;
+  }
+
+  /**
+   * Set the output sink for this agent.
+   * Rust: set_sink() — useful for swapping sinks after construction.
+   */
+  setSink(sink) {
+    this.sink = sink;
+  }
+
+  /**
+   * Cancel or reset the current run. Defaults to cancelling.
+   */
+  cancel(flag = true) {
+    this.cancelled = flag;
   }
 
   // ── Helpers ───────────────────────────────────────────────────────────────
@@ -675,7 +720,51 @@ export class Agent {
       }
     }
 
+    // MCP tools
+    await this._registerMcpTools(registry, whitelist, blacklist);
+
     return registry;
+  }
+
+  /**
+   * Register tools from MCP connections.
+   */
+  async _registerMcpTools(registry, profileWhitelist, profileBlacklist) {
+    for (const { connection, serverConfig } of this._mcpConnections) {
+      // Check if server is enabled
+      if (serverConfig.enabled === false) continue;
+
+      // Build server-level tool filter
+      const serverBlacklist = new Set(serverConfig.blacklistTools || []);
+      const serverWhitelist = serverConfig.whitelistTools
+        ? new Set(serverConfig.whitelistTools)
+        : null;
+
+      // Build profile-level tool filter
+      const profileBlacklistSet = new Set(profileBlacklist || []);
+      const profileWhitelistSet = profileWhitelist
+        ? new Set(profileWhitelist)
+        : null;
+
+      const prefix = `${connection.serverName}/`;
+
+      for (const toolDef of connection.tools) {
+        const fullName = `${prefix}${toolDef.name}`;
+
+        // Apply server-level filter
+        if (serverWhitelist && !serverWhitelist.has(toolDef.name)) continue;
+        if (serverBlacklist.has(toolDef.name)) continue;
+
+        // Apply profile-level filter
+        if (profileWhitelistSet && !profileWhitelistSet.has(fullName)) continue;
+        if (profileBlacklistSet.has(fullName)) continue;
+
+        // Create and register the MCP tool
+        const handle = connection.handle();
+        const mcpTool = new McpTool(connection.serverName, toolDef, handle);
+        registry.register(fullName, mcpTool);
+      }
+    }
   }
 
   /**
@@ -967,13 +1056,6 @@ export class Agent {
   }
 
   /**
-   * Cancel the current run.
-   */
-  cancel() {
-    this.cancelled = true;
-  }
-
-  /**
    * Get all available prompts.
    */
   availablePrompts() {
@@ -1055,7 +1137,9 @@ export class Agent {
  * Check if a string contains <skill_content name="..."> tags.
  */
 function _hasSkillContent(content) {
-  return typeof content === "string" && content.includes("<skill_content name=");
+  return (
+    typeof content === "string" && content.includes("<skill_content name=")
+  );
 }
 
 /**

@@ -5,23 +5,16 @@
 ### Tools
 - [ ] **explore tool** — Rust has `tools/explore/mod.rs` (~262 lines) for file/directory exploration with outline generation. Args: `path`, `outline`.
 
-### Security
-- [ ] **marker_mangler** — Rust has `marker_mangler.rs` (~377 lines) for injection prevention. Randomly aliases protected XML markers (`<tool-call>`, `<system-notice>`, `<skill>`, etc.) before sending to model, reverses on output. Prevents model from generating injection attacks via marker syntax.
-
-### Core Utilities
-- [ ] **formatter** — Rust has `formatter.rs` (~136 lines) for `{}` placeholder replacement. Pre-compiled templates with left-to-right argument substitution. (deprecated in js)
-- [ ] **resolver** — Rust has `resolver.rs` (~135 lines) for priority-chain resolution: CLI > file > env > default. Lazy env var evaluation (only called when higher-priority values absent). (deprecated in js)
-- [ ] **truncated_output** — Rust has `tools/truncated_output.rs` (~247 lines) with `OutputPage` and `TruncatedOutput` structs for page-based output truncation. (this is buggy in rust and we should rethink this)
-
 ### Session Management
-- [ ] **session_manager** — Rust has `agent/session_manager.rs` (~110 lines) for session lifecycle, agent swaps for profile switching. Decouples UI from Agent type.
-- [ ] **session_store** — Rust has `agent/session_store.rs` (~80 lines) for multi-session agent storage (ACP mode). Map of agents keyed by session ID.
-
-### External Integrations
-- [ ] **MCP client** — Rust has `mcp/` (~1k lines) for Model Context Protocol. stdio + HTTP transport, tool discovery, exposes MCP server tools as native agent tools.
+- [x] **session_manager** — `src/agent/session_manager.js` for session lifecycle, agent swaps for profile switching. Decouples UI from Agent type.
+- [x] **session_store** — `src/agent/session_store.js` for multi-session agent storage (ACP mode). Map of agents keyed by session ID.
+- [x] **session_builder** — `src/agent/session_builder.js` encapsulates the full init pipeline (CLI + config → resolved config → shared resources). Cloneable for agent swaps.
 
 ### UI
-- [ ] **TUI** — Rust has `ui/tui/` (~3.5k lines) with ratatui/crossterm. App state machine, key events, layout, widgets, theme, session display.
+- [ ] **FormattedSink** — Rust has `ui/cli/formatted_sink.rs` (~351 lines) with event switching (tracks `current_event`, `current_len`), running byte length tracking, `TypedRenderer` trait, separate format strings for thinking/tool/tool-output.
+- [ ] **UI common** — Rust has `ui/common.rs` (~483 lines) — `formatQuestion()`, `formatFinalResponse()`, `isEventVisible()`, `renderEvent()` with `TypedRenderer`, `Command` enum, `parseCommand()`, `dispatchCommand()`.
+- [ ] **CLI session** — Rust has `ui/cli/session.rs` (~325 lines) — rustyline editor (history, autocomplete), command history, persistent history file, prompt management, signal handling.
+- [ ] **colors** — Missing `loadPaletteFromFile(path)`, `pushColorOpening(colorName, useColors)`.
 
 ## 🟡 Partially Ported (functionality exists but missing features)
 
@@ -36,19 +29,10 @@
 - [x] `resolvePath(requested)` — Resolve path with safety checks (cwd boundary)
 - [x] **`ToolResult` struct** — Structured result with `output`, `error`, `metadata`, `success`, `output_tag`, `toDisplay()`, `toApiContent()`
 
-**Missing:**
-- [ ] `simpleUnifiedDiff(old, new)` — Simple unified diff (buggy, skip)
-- [ ] `scopedDiff(old, new, path, start, end, ctx)` — Line-scoped diff (buggy, skip)
+**Missing (skip — buggy in Rust):**
+- [ ] `simpleUnifiedDiff(old, new)` — Simple unified diff
+- [ ] `scopedDiff(old, new, path, start, end, ctx)` — Line-scoped diff
 - [ ] `killProcessTree(pid)` — Kill process and children
-
-### Tool Context (`tools/context.rs` → `tools/registry.js`)
-**JS has simpler `ToolContext`. Missing fields:**
-- [x] `workspace_root` — Project root path
-- [x] `current_file` — Currently editing file
-- [x] `model_names` — Available model names
-- [x] `active_provider` — Active provider name
-- [x] `cwd_boundary` — Directory boundary for file ops
-- [ ] `output_cache` — Tool output cache (for pager pagination)
 
 ### Agent Module (`agent/` → `agent/agent.js`)
 **JS has consolidated many Rust agent files into `agent/agent.js`. Missing:**
@@ -59,25 +43,11 @@
 - [x] **`agent/tools.rs`** (~174 lines) — Tool execution with truncation, output caching by `tool_call_id`, duration tracking. Added: tool allowance enforcement, duration tracking, first-use help display, output caching.
 - [x] **`agent/context.rs`** (~313 lines) — Session log helpers, message context management, compaction integration. Added: `clearContext()`, `replaceMessages()`, `insertAt()`, `messages()` getter. Fixed: compaction uses `find_first_kept_index()`, `<previous-context-summary>` wrapper, `regenerateSystemPrompt()` prunes old `<skill_content>` blocks.
 
-### Model Registry (`model.rs` → inline in `agent.js`)
-**JS has inline model config. Missing dedicated module:**
-- [ ] `ModelRegistry` — Model lookup by name
-- [ ] `ModelConfig` — Per-model settings (temperature, maxTokens, tags)
-- [ ] `ModelUsageStats` — Per-model usage statistics
-- [ ] `ModelUsageTracker` — Tracks requests, success/failure, token counts
-
 ### LLM Client (`llm_client/` → `llm_client/client.js`)
 **JS has consolidated HTTP, streaming, parsing into `client.js`. Missing:**
 - [ ] **`llm_client/types.rs`** (~750 lines) — Dedicated types module: `ChatMessage`, `ToolCall`, `StreamChunk`, `Usage`, `Timings`, `ToolCallInfo`, `AgentResponse`, `Error` enum.
 - [ ] **`llm_client/streaming.rs`** (~389 lines) — `StreamEvent` enum (Content, Reasoning, ToolName, ToolArgument, FinalContent, FinalReasoning, FinalToolCalls, Usage, Timings), `ParserState` accumulator, final events after `[DONE]`, `Timings` support.
 - [ ] **`llm_client/parsing.rs`** (~408 lines) — `StreamChunk` parsing with `StreamChoice`, `StreamDelta`, `StreamToolCall`, `StreamFunction`. `ToolCallInfo` assembly from accumulated deltas.
-
-### UI (`ui/` → `ui/cli.js`)
-**JS has `CliOutputSink` in `ui/cli.js` with formatting and colors. Missing:**
-- [ ] **`ui/common.rs`** (~483 lines) — `formatQuestion()`, `formatFinalResponse()`, `isEventVisible()`, `renderEvent()` with `TypedRenderer`, `Command` enum, `parseCommand()`, `dispatchCommand()`.
-- [ ] **`ui/cli/formatted_sink.rs`** (~351 lines) — `FormattedSink` with event switching (tracks `current_event`, `current_len`), running byte length tracking, `TypedRenderer` trait, separate format strings for thinking/tool/tool-output.
-- [ ] **`ui/cli/session.rs`** (~325 lines) — `CliSession` with rustyline editor (history, autocomplete), command history, persistent history file, prompt management, signal handling.
-- [ ] **`ui/colors.rs`** — Missing `loadPaletteFromFile(path)`, `pushColorOpening(colorName, useColors)`.
 
 ### Skills Loader (`context/skills/loader.rs` → `skills/loader.js`)
 **JS has most features. Verify parity:**
@@ -112,6 +82,12 @@
 ### Subagent tools
 - ✅ delegate_task, task_status, task_followup, task_interrupt, plan_status, complete_task
 
+### Security
+- ✅ **marker_mangler** — `src/marker_mangler.js` (139 lines). Randomly aliases protected XML markers before sending to model, reverses on output. Integrated into `llm_client/client.js`.
+
+### External Integrations
+- ✅ **MCP client** — `src/mcp/` — full stdio + HTTP transport, tool discovery, exposes MCP server tools as native agent tools. Files: `client.js`, `connection.js`, `tools.js`, `types.js`, `index.js`.
+
 ### Core
 - ✅ LLM client: HTTP transport, SSE streaming, retry logic, cancellation
 - ✅ Compaction: LLM-based message summarization
@@ -128,6 +104,22 @@
 - ✅ Message queue: FIFO buffer
 - ✅ Worker: TaskManager, TaskWorker, async task delegation
 - ✅ Tests: 10 test files (input, prompts, config, session_log, message, retry, output, template, registry, compaction)
+
+### Utilities
+- ✅ **ModelRegistry** — `src/config.js:buildModelRegistry()`, used throughout agent for model lookup and per-model config.
+- ✅ **output_cache** — `src/agent/agent.js` — `this.outputCache = new Map()` with set/get for pager pagination.
+
+## ⏭️ Deprecated / Skip
+
+| Item | Reason |
+|------|--------|
+| `formatter` | Rust `formatter.rs` — deprecated in JS |
+| `resolver` | Rust `resolver.rs` — deprecated in JS |
+| `TUI` | ratatui/crossterm — not applicable to JS |
+| `truncated_output` | Buggy in Rust, needs rethink |
+| `simpleUnifiedDiff` | Buggy in Rust, skip |
+| `scopedDiff` | Buggy in Rust, skip |
+| `killProcessTree` | Buggy in Rust, skip |
 
 ## Notes
 

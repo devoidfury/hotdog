@@ -11,7 +11,7 @@ import { SkillsLoader } from "../skills/loader.js";
 import { McpConnection } from "../mcp/index.js";
 import { TaskManager } from "./worker.js";
 import { Agent } from "./agent.js";
-import { SessionLog, disabledSessionLog } from "../session_log.js";
+import { SessionLog, disabledSessionLog, readSessionEntries, replayEntriesIntoContext } from "../session_log.js";
 import { DEFAULT_SKILLS_PATH, DEFAULT_PROMPTS_PATH, loadProfileFile, defaultCompactionSettings } from "../config.js";
 import { MarkerMangler } from "../marker_mangler.js";
 
@@ -61,7 +61,7 @@ export class SessionBuilder {
 
     const mcpConnections = await this._mcpConnections;
 
-    return new Agent({
+    const agent = new Agent({
       client,
       model: this._resolved.model,
       modelRegistry: this._modelRegistry,
@@ -88,6 +88,20 @@ export class SessionBuilder {
       taskManager: this._taskManager,
       mcpConnections,
     });
+
+    // Replay existing session if a session ID was provided and logging is enabled
+    if (this._resolved.sessionId && !this._resolved.noLog) {
+      const entries = readSessionEntries(this._resolved.sessionId);
+      if (entries.length > 0) {
+        const replayed = replayEntriesIntoContext(agent, entries);
+        if (replayed > 0) {
+          // Set the system prompt after replaying so it appears before replayed messages
+          agent.ensureSystemPrompt();
+        }
+      }
+    }
+
+    return agent;
   }
 
   /**

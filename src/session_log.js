@@ -361,6 +361,92 @@ export function sessionExists(sessionId) {
 }
 
 /**
+ * Replay log entries into an agent's context.
+ *
+ * Takes an array of log entries (from readSessionEntries) and converts them
+ * to Message objects, adding them to the agent's context. This allows the
+ * agent to "continue" a previous conversation.
+ *
+ * System prompt entries are skipped — the agent regenerates them dynamically
+ * via ensureSystemPrompt().
+ *
+ * Compaction entries (role: "system", source: LOG_SOURCE.COMPACTION) are
+ * added as user messages, since compaction summaries appear in context as
+ * user messages wrapped in <m_xytup662vkenbt4f> tags.
+ *
+ * @param {import("./agent/agent.js").Agent} agent - The agent whose context to populate
+ * @param {Array<object>} entries - Log entries from readSessionEntries()
+ * @returns {number} The number of entries actually replayed (excluding skipped ones)
+ */
+export function replayEntriesIntoContext(agent, entries) {
+  if (!entries || entries.length === 0) return 0;
+
+  let replayed = 0;
+
+  for (const entry of entries) {
+    const source = entry.source;
+
+    // Skip system prompt entries — they are regenerated dynamically
+    if (source === LOG_SOURCE.SYSTEM_PROMPT) {
+      continue;
+    }
+
+    // Skip reset entries — they mark the start of the replayed portion
+    if (source === LOG_SOURCE.RESET) {
+      continue;
+    }
+
+    switch (source) {
+      case LOG_SOURCE.INPUT:
+      case LOG_SOURCE.PROMPT: {
+        // Both INPUT and PROMPT are user messages in context
+        agent.context.addUserMessage(entry.content);
+        replayed++;
+        break;
+      }
+
+      case LOG_SOURCE.LLM: {
+        // Assistant response — preserve reasoning content and tool calls
+        agent.context.addAssistantMessage(
+          entry.content,
+          entry.reasoning_content || null,
+          entry.tool_calls || null,
+        );
+        replayed++;
+        break;
+      }
+
+      case LOG_SOURCE.TOOL_RESULT: {
+        // Tool result — use addMessage with tool_call_id
+        agent.context.addMessage({
+          role: "tool",
+          content: entry.content,
+          reasoningContent: null,
+          toolCalls: null,
+          toolCallId: entry.tool_call_id || null,
+        });
+        replayed++;
+        break;
+      }
+
+      case LOG_SOURCE.COMPACTION: {
+        // Compaction summary — added as user message in context
+        // (the agent sees it as a user message with <m_xytup662vkenbt4f> tags)
+        agent.context.addUserMessage(entry.content);
+        replayed++;
+        break;
+      }
+
+      default:
+        // Unknown source — skip silently
+        break;
+    }
+  }
+
+  return replayed;
+}
+
+/**
  * Get current timestamp string.
  */
 function now() {

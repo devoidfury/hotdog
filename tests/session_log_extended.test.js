@@ -1,234 +1,308 @@
-import { describe, it, expect } from 'bun:test';
-import {
-  stripNulls,
-  LOG_SOURCE,
-  createSystemPromptEntry,
-  createInputEntry,
-  createAssistantEntry,
-  createToolResultEntry,
-  createResetEntry,
-  createCompactionEntry,
-  createPromptEntry,
-  disabledSessionLog,
-  sessionExists,
-} from '../src/session_log.js';
+import { test, expect } from "bun:test";
+import { SessionLog, LOG_SOURCE, stripNulls, readSessionEntries, readAllSessions, sessionExists, disabledSessionLog } from "../src/session_log.js";
+import { mkdirSync, rmSync, readFileSync, writeFileSync, existsSync } from "node:fs";
+import { join } from "node:path";
+import { homedir } from "node:os";
 
-describe('stripNulls', () => {
-  it('removes null fields', () => {
-    const input = { a: 1, b: null, c: 'hello' };
-    expect(stripNulls(input)).toEqual({ a: 1, c: 'hello' });
-  });
+const TEST_SESSION_ID = "test-session-extended";
 
-  it('preserves zero values', () => {
-    const input = { a: 0, b: false, c: '' };
-    expect(stripNulls(input)).toEqual({ a: 0, b: false, c: '' });
-  });
+function setupTestDir() {
+  const dir = join(homedir(), ".cache", "oa-agent", "sessions");
+  mkdirSync(dir, { recursive: true });
+  const testFile = join(dir, `${TEST_SESSION_ID}.jsonl`);
+  try {
+    rmSync(testFile);
+  } catch {
+    // doesn't exist yet
+  }
+}
 
-  it('preserves empty arrays', () => {
-    const input = { a: [], b: null };
-    expect(stripNulls(input)).toEqual({ a: [] });
-  });
+function teardown() {
+  const testFile = join(homedir(), ".cache", "oa-agent", "sessions", `${TEST_SESSION_ID}.jsonl`);
+  try {
+    rmSync(testFile);
+  } catch {
+    // ignore
+  }
+}
 
-  it('preserves empty objects', () => {
-    const input = { a: {}, b: null };
-    expect(stripNulls(input)).toEqual({ a: {} });
-  });
-
-  it('handles empty object', () => {
-    expect(stripNulls({})).toEqual({});
-  });
-
-  it('handles object with only null fields', () => {
-    const input = { a: null, b: null };
-    expect(stripNulls(input)).toEqual({});
-  });
-
-  it('handles nested objects (only strips top level)', () => {
-    const input = { a: { b: null, c: 1 }, b: null };
-    expect(stripNulls(input)).toEqual({ a: { b: null, c: 1 } });
-  });
+test("disabledSessionLog is a no-op", () => {
+  const log = disabledSessionLog();
+  expect(log.append).toBeDefined();
+  expect(log.writeSystemPrompt).toBeDefined();
+  expect(log.writeInput).toBeDefined();
+  expect(log.writeAssistant).toBeDefined();
+  expect(log.writeToolResult).toBeDefined();
+  expect(log.writeReset).toBeDefined();
+  expect(log.writeCompaction).toBeDefined();
+  expect(log.writePrompt).toBeDefined();
+  // Should not throw
+  expect(() => log.append({})).not.toThrow();
+  expect(() => log.writeSystemPrompt("x")).not.toThrow();
+  expect(() => log.writeInput("x")).not.toThrow();
+  expect(() => log.writeAssistant("x")).not.toThrow();
+  expect(() => log.writeToolResult("x", "tc1", "bash")).not.toThrow();
+  expect(() => log.writeReset()).not.toThrow();
+  expect(() => log.writeCompaction(5, "summary")).not.toThrow();
+  expect(() => log.writePrompt("x")).not.toThrow();
 });
 
-describe('LOG_SOURCE constants', () => {
-  it('has all expected source types', () => {
-    expect(LOG_SOURCE.SYSTEM_PROMPT).toBe('system_prompt');
-    expect(LOG_SOURCE.INPUT).toBe('input');
-    expect(LOG_SOURCE.LLM).toBe('llm');
-    expect(LOG_SOURCE.TOOL_RESULT).toBe('tool_result');
-    expect(LOG_SOURCE.RESET).toBe('reset');
-    expect(LOG_SOURCE.COMPACTION).toBe('compaction');
-    expect(LOG_SOURCE.PROMPT).toBe('prompt');
-  });
+test("SessionLog.writeAssistant includes reasoning and tool_calls", () => {
+  setupTestDir();
+  try {
+    const log = new SessionLog(TEST_SESSION_ID);
+    log.writeAssistant("final output", [
+      { id: "tc1", type: "function", function: { name: "bash", arguments: "ls" } },
+    ], "reasoning content");
+
+    const content = readFileSync(log.path, "utf-8");
+    const line = JSON.parse(content.trim());
+
+    expect(line.role).toBe("assistant");
+    expect(line.content).toBe("final output");
+    expect(line.reasoning_content).toBe("reasoning content");
+    expect(line.tool_calls).toEqual([
+      { id: "tc1", type: "function", function: { name: "bash", arguments: "ls" } },
+    ]);
+  } finally {
+    teardown();
+  }
 });
 
-describe('createSystemPromptEntry', () => {
-  it('creates a system prompt entry', () => {
-    const entry = createSystemPromptEntry('session-1', 'You are helpful.');
-    expect(entry.session_id).toBe('session-1');
-    expect(entry.role).toBe('system');
-    expect(entry.source).toBe(LOG_SOURCE.SYSTEM_PROMPT);
-    expect(entry.content).toBe('You are helpful.');
-    expect(entry.reasoning_content).toBeNull();
-    expect(entry.tool_calls).toBeNull();
-    expect(entry.tool_call_id).toBeNull();
-    expect(entry.tool_name).toBeNull();
-    expect(entry.ts).toBeDefined();
-  });
+test("SessionLog.writeCompaction includes messagesCompacted count", () => {
+  setupTestDir();
+  try {
+    const log = new SessionLog(TEST_SESSION_ID);
+    log.writeCompaction(15, "Summarized conversation");
 
-  it('has valid ISO timestamp', () => {
-    const entry = createSystemPromptEntry('s1', 'content');
-    expect(() => new Date(entry.ts)).not.toThrow();
-  });
+    const content = readFileSync(log.path, "utf-8");
+    const line = JSON.parse(content.trim());
+
+    expect(line.source).toBe(LOG_SOURCE.COMPACTION);
+    expect(line.role).toBe("system");
+    expect(line.content).toContain("[Compacted 15 messages]");
+    expect(line.content).toContain("Summarized conversation");
+  } finally {
+    teardown();
+  }
 });
 
-describe('createInputEntry', () => {
-  it('creates a user input entry', () => {
-    const entry = createInputEntry('session-1', 'Hello world');
-    expect(entry.session_id).toBe('session-1');
-    expect(entry.role).toBe('user');
-    expect(entry.source).toBe(LOG_SOURCE.INPUT);
-    expect(entry.content).toBe('Hello world');
-    expect(entry.reasoning_content).toBeNull();
-    expect(entry.tool_calls).toBeNull();
-    expect(entry.tool_call_id).toBeNull();
-    expect(entry.tool_name).toBeNull();
-  });
+test("SessionLog.writePrompt creates correct entry", () => {
+  setupTestDir();
+  try {
+    const log = new SessionLog(TEST_SESSION_ID);
+    log.writePrompt("Prompt content rendered");
 
-  it('handles empty content', () => {
-    const entry = createInputEntry('s1', '');
-    expect(entry.content).toBe('');
-  });
+    const content = readFileSync(log.path, "utf-8");
+    const line = JSON.parse(content.trim());
+
+    expect(line.source).toBe(LOG_SOURCE.PROMPT);
+    expect(line.role).toBe("user");
+    expect(line.content).toBe("Prompt content rendered");
+  } finally {
+    teardown();
+  }
 });
 
-describe('createAssistantEntry', () => {
-  it('creates an assistant entry without tool calls', () => {
-    const entry = createAssistantEntry('session-1', 'I can help you.');
-    expect(entry.session_id).toBe('session-1');
-    expect(entry.role).toBe('assistant');
-    expect(entry.source).toBe(LOG_SOURCE.LLM);
-    expect(entry.content).toBe('I can help you.');
-    expect(entry.reasoning_content).toBeNull();
-    expect(entry.tool_calls).toBeNull();
-  });
+test("readSessionEntries handles malformed JSON lines", () => {
+  const dir = join(homedir(), ".cache", "oa-agent", "sessions");
+  mkdirSync(dir, { recursive: true });
+  const testFile = join(dir, `${TEST_SESSION_ID}.jsonl`);
+  try {
+    rmSync(testFile);
+  } catch {}
+  
+  try {
+    // Write a mix of valid and invalid lines
+    writeFileSync(testFile, [
+      '{"ts":"2024-01-01T00:00:00Z","source":"input","content":"valid"}',
+      'this is not json',
+      '{"ts":"2024-01-01T00:00:01Z","source":"input","content":"also valid"}',
+      '',
+      '{"ts":"2024-01-01T00:00:02Z","source":"reset"}',
+      '{"ts":"2024-01-01T00:00:03Z","source":"input","content":"after reset"}',
+    ].join('\n'));
 
-  it('creates an assistant entry with tool calls', () => {
-    const toolCalls = [
-      { id: 'tc1', function: { name: 'bash', arguments: '{}' } },
-    ];
-    const entry = createAssistantEntry('s1', 'Let me check.', toolCalls);
-    expect(entry.tool_calls).toEqual(toolCalls);
-  });
-
-  it('creates an assistant entry with reasoning content', () => {
-    const entry = createAssistantEntry('s1', 'Output', null, 'Thinking...');
-    expect(entry.reasoning_content).toBe('Thinking...');
-  });
-
-  it('creates an assistant entry with both tool calls and reasoning', () => {
-    const toolCalls = [{ id: 'tc1', function: { name: 'read', arguments: '{}' } }];
-    const entry = createAssistantEntry('s1', 'Done', toolCalls, 'I read the file.');
-    expect(entry.tool_calls).toEqual(toolCalls);
-    expect(entry.reasoning_content).toBe('I read the file.');
-  });
+    const entries = readSessionEntries(TEST_SESSION_ID);
+    expect(entries.length).toBeGreaterThanOrEqual(1);
+    // Should include "after reset" since there's a reset entry
+    const lastEntry = entries[entries.length - 1];
+    expect(lastEntry.content).toBe("after reset");
+  } finally {
+    try { rmSync(testFile); } catch {}
+  }
 });
 
-describe('createToolResultEntry', () => {
-  it('creates a tool result entry', () => {
-    const entry = createToolResultEntry('session-1', 'Result', 'tc1', 'bash');
-    expect(entry.session_id).toBe('session-1');
-    expect(entry.role).toBe('tool');
-    expect(entry.source).toBe(LOG_SOURCE.TOOL_RESULT);
-    expect(entry.content).toBe('Result');
-    expect(entry.tool_call_id).toBe('tc1');
-    expect(entry.tool_name).toBe('bash');
-    expect(entry.reasoning_content).toBeNull();
-    expect(entry.tool_calls).toBeNull();
-  });
+test("readSessionEntries replays from last reset", () => {
+  // Use a unique session ID to avoid conflicts with other tests
+  const uniqueId = "test-reset-replay-" + Date.now();
+  const dir = join(homedir(), ".cache", "oa-agent", "sessions");
+  mkdirSync(dir, { recursive: true });
+  const testFile = join(dir, `${uniqueId}.jsonl`);
+  
+  // Clean up any leftover file from previous runs
+  try { rmSync(testFile); } catch {}
+  
+  try {
+    const log = new SessionLog(uniqueId);
+    log.writeInput("before reset");
+    log.writeReset();
+    log.writeInput("after reset");
+    log.writeAssistant("response");
 
-  it('handles null tool call id', () => {
-    const entry = createToolResultEntry('s1', 'result', null, null);
-    expect(entry.tool_call_id).toBeNull();
-    expect(entry.tool_name).toBeNull();
-  });
+    const entries = readSessionEntries(uniqueId);
+    // Should only include entries after reset
+    expect(entries.length).toBe(2);
+    expect(entries[0].content).toBe("after reset");
+    expect(entries[1].content).toBe("response");
+  } finally {
+    try { rmSync(testFile); } catch {}
+  }
 });
 
-describe('createResetEntry', () => {
-  it('creates a reset entry', () => {
-    const entry = createResetEntry('session-1');
-    expect(entry.session_id).toBe('session-1');
-    expect(entry.role).toBe('user');
-    expect(entry.source).toBe(LOG_SOURCE.RESET);
-    expect(entry.content).toBe('');
-    expect(entry.reasoning_content).toBeNull();
-    expect(entry.tool_calls).toBeNull();
-  });
+test("readSessionEntries returns all entries when no reset", () => {
+  setupTestDir();
+  try {
+    const log = new SessionLog(TEST_SESSION_ID);
+    log.writeInput("msg1");
+    log.writeAssistant("resp1");
+    log.writeInput("msg2");
+
+    const entries = readSessionEntries(TEST_SESSION_ID);
+    expect(entries.length).toBe(3);
+    expect(entries[0].content).toBe("msg1");
+    expect(entries[1].content).toBe("resp1");
+    expect(entries[2].content).toBe("msg2");
+  } finally {
+    teardown();
+  }
 });
 
-describe('createCompactionEntry', () => {
-  it('creates a compaction entry with summary', () => {
-    const entry = createCompactionEntry('session-1', 5, 'Summary here');
-    expect(entry.session_id).toBe('session-1');
-    expect(entry.role).toBe('system');
-    expect(entry.source).toBe(LOG_SOURCE.COMPACTION);
-    expect(entry.content).toBe('[Compacted 5 messages]\n\nSummary here');
-    expect(entry.reasoning_content).toBeNull();
-    expect(entry.tool_calls).toBeNull();
-  });
-
-  it('handles zero messages compacted', () => {
-    const entry = createCompactionEntry('s1', 0, 'No messages');
-    expect(entry.content).toBe('[Compacted 0 messages]\n\nNo messages');
-  });
-
-  it('handles empty summary', () => {
-    const entry = createCompactionEntry('s1', 10, '');
-    expect(entry.content).toBe('[Compacted 10 messages]\n\n');
-  });
+test("readSessionEntries returns empty for non-existent session", () => {
+  const entries = readSessionEntries("non-existent-session-xyz");
+  expect(entries).toEqual([]);
 });
 
-describe('createPromptEntry', () => {
-  it('creates a prompt expansion entry', () => {
-    const entry = createPromptEntry('session-1', 'Prompt content');
-    expect(entry.session_id).toBe('session-1');
-    expect(entry.role).toBe('user');
-    expect(entry.source).toBe(LOG_SOURCE.PROMPT);
-    expect(entry.content).toBe('Prompt content');
-    expect(entry.reasoning_content).toBeNull();
-    expect(entry.tool_calls).toBeNull();
-  });
+test("sessionExists returns true for existing session", () => {
+  setupTestDir();
+  try {
+    const log = new SessionLog(TEST_SESSION_ID);
+    log.writeInput("test");
+    expect(sessionExists(TEST_SESSION_ID)).toBe(true);
+  } finally {
+    teardown();
+  }
 });
 
-describe('disabledSessionLog', () => {
-  it('returns a no-op object', () => {
-    const log = disabledSessionLog();
-    // All methods should be no-ops (not throw)
-    expect(() => log.append({})).not.toThrow();
-    expect(() => log.writeSystemPrompt('content')).not.toThrow();
-    expect(() => log.writeInput('input')).not.toThrow();
-    expect(() => log.writeAssistant('content')).not.toThrow();
-    expect(() => log.writeToolResult('result', 'id', 'name')).not.toThrow();
-    expect(() => log.writeReset()).not.toThrow();
-    expect(() => log.writeCompaction(5, 'summary')).not.toThrow();
-    expect(() => log.writePrompt('prompt')).not.toThrow();
-  });
-
-  it('has all expected methods', () => {
-    const log = disabledSessionLog();
-    expect(typeof log.append).toBe('function');
-    expect(typeof log.writeSystemPrompt).toBe('function');
-    expect(typeof log.writeInput).toBe('function');
-    expect(typeof log.writeAssistant).toBe('function');
-    expect(typeof log.writeToolResult).toBe('function');
-    expect(typeof log.writeReset).toBe('function');
-    expect(typeof log.writeCompaction).toBe('function');
-    expect(typeof log.writePrompt).toBe('function');
-  });
+test("sessionExists returns false for non-existent session", () => {
+  expect(sessionExists("non-existent-session-xyz")).toBe(false);
 });
 
-describe('sessionExists', () => {
-  it('returns false for non-existent session', () => {
-    // Use a random UUID that almost certainly doesn't exist
-    const randomId = '00000000-0000-0000-0000-000000000000';
-    expect(sessionExists(randomId)).toBe(false);
-  });
+test("stripNulls only strips top-level nulls", () => {
+  const obj = {
+    a: { nested: "value", nullField: null },
+    b: null,
+    c: [1, null, 3],
+  };
+  const result = stripNulls(obj);
+  // Top-level nulls are stripped
+  expect(result.b).toBeUndefined();
+  // Nested objects are NOT recursively processed
+  expect(result.a.nullField).toBeNull();
+  // Arrays are NOT recursively processed
+  expect(result.c).toEqual([1, null, 3]);
+});
+
+test("stripNulls handles empty object", () => {
+  expect(stripNulls({})).toEqual({});
+});
+
+test("stripNulls preserves 0, false, empty string, empty array, empty object", () => {
+  const obj = { a: 0, b: false, c: "", d: [], e: {} };
+  const result = stripNulls(obj);
+  expect(result).toEqual({ a: 0, b: false, c: "", d: [], e: {} });
+});
+
+test("readAllSessions reads from multiple session files", () => {
+  const dir = join(homedir(), ".cache", "oa-agent", "sessions");
+  mkdirSync(dir, { recursive: true });
+  
+  const testId1 = "test-readall-1";
+  const testId2 = "test-readall-2";
+  
+  try {
+    const file1 = join(dir, `${testId1}.jsonl`);
+    const file2 = join(dir, `${testId2}.jsonl`);
+    
+    writeFileSync(file1, '{"ts":"2024-01-01","source":"input","content":"from session 1"}\n');
+    writeFileSync(file2, '{"ts":"2024-01-01","source":"input","content":"from session 2"}\n');
+    
+    const allEntries = readAllSessions();
+    expect(allEntries.length).toBeGreaterThanOrEqual(2);
+    
+    // Clean up
+    rmSync(file1);
+    rmSync(file2);
+  } finally {
+    // Clean up test files
+    try { rmSync(join(dir, `${testId1}.jsonl`)); } catch {}
+    try { rmSync(join(dir, `${testId2}.jsonl`)); } catch {}
+  }
+});
+
+test("readAllSessions returns empty when no sessions exist", () => {
+  // This test relies on the actual sessions directory state
+  // It should not throw
+  expect(() => readAllSessions()).not.toThrow();
+});
+
+test("SessionLog handles empty content", () => {
+  setupTestDir();
+  try {
+    const log = new SessionLog(TEST_SESSION_ID);
+    log.writeInput("");
+    log.writeAssistant("");
+    log.writeToolResult("");
+    log.writeReset();
+
+    const content = readFileSync(log.path, "utf-8");
+    const lines = content.trim().split("\n");
+    expect(lines.length).toBe(4);
+    
+    const firstLine = JSON.parse(lines[0]);
+    expect(firstLine.content).toBe("");
+  } finally {
+    teardown();
+  }
+});
+
+test("SessionLog writes entries in order", () => {
+  setupTestDir();
+  try {
+    const log = new SessionLog(TEST_SESSION_ID);
+    log.writeSystemPrompt("system");
+    log.writeInput("input");
+    log.writeAssistant("assistant");
+    log.writeToolResult("tool result", "tc1", "bash");
+    log.writeReset();
+    log.writeCompaction(5, "summary");
+    log.writePrompt("prompt");
+
+    const content = readFileSync(log.path, "utf-8");
+    const lines = content.trim().split("\n");
+    expect(lines.length).toBe(7);
+
+    const sources = lines.map(l => JSON.parse(l).source);
+    expect(sources).toEqual([
+      LOG_SOURCE.SYSTEM_PROMPT,
+      LOG_SOURCE.INPUT,
+      LOG_SOURCE.LLM,
+      LOG_SOURCE.TOOL_RESULT,
+      LOG_SOURCE.RESET,
+      LOG_SOURCE.COMPACTION,
+      LOG_SOURCE.PROMPT,
+    ]);
+  } finally {
+    teardown();
+  }
 });

@@ -468,27 +468,32 @@ export class Agent {
       }),
     );
 
+    // Convert Message objects to plain objects (toJSON uses snake_case expected by serializeConversation)
+    const plainMessages = allMessages.map((m) => m.toJSON());
+
     // Use Rust-compatible message keeping: find_first_kept_index
-    const firstKept = findFirstKeptIndex(allMessages, keepRecent);
+    const firstKept = findFirstKeptIndex(plainMessages, keepRecent);
     if (firstKept === 0) return null;
 
     // Build a chat-compatible message array for the LLM
-    const chatMessages = allMessages.map((m) => ({
+    const chatMessages = plainMessages.map((m) => ({
       role: m.role,
       content: m.content,
     }));
 
     const result = await doCompact(
       chatMessages,
-      // LLM chat callback
+      // LLM chat callback — convert plain objects to Message instances
+      // because chatStreamCancellable calls msg.toJSON() on each message
       async (msgs, model) => {
         const modelConfig = this.modelRegistry[this.model] || {
           name: this.model,
           temperature: null,
           maxTokens: DEFAULT_MAX_TOKENS,
         };
+        const messageObjects = msgs.map((m) => new Message(m));
         const stream = this.client.chatStreamCancellable(
-          msgs,
+          messageObjects,
           modelConfig,
           [],
           { aborted: this.cancelled },

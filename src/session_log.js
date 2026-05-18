@@ -310,10 +310,11 @@ export function readSessionEntries(sessionId) {
 
     try {
       const entry = JSON.parse(trimmed);
-      if (entry.source === LOG_SOURCE.RESET) {
-        lastResetIdx = i;
-      }
       entries.push(entry);
+      if (entry.source === LOG_SOURCE.RESET) {
+        // Track the index AFTER the reset entry (skip the reset itself)
+        lastResetIdx = entries.length;
+      }
     } catch {
       // Skip malformed lines
       // TODO: log warning

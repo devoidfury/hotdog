@@ -102,13 +102,17 @@ export class MessageBus {
   /**
    * Execute a prompt command and enqueue the rendered result for processing.
    *
+   * Accepts either a string (prompt name) or a command object { name, args }.
+   *
    * Returns the rendered text on success, or throws on failure.
    */
   async executePromptAndEnqueue(cmd) {
     const agent = this._sessionManager.getAgent();
     if (!agent) throw new Error("No agent available");
 
-    const result = agent.executePrompt(cmd);
+    const name = typeof cmd === "string" ? cmd : cmd.name;
+    const args = typeof cmd === "string" ? undefined : cmd.args;
+    const result = agent.executePrompt(name, args);
     if (result.success) {
       this.enqueue(result.prompt || "");
       return result.prompt || "";

@@ -213,16 +213,18 @@ function dispatchAgentCommand(cmd, sessionManager, sink, bus, resolved, rl) {
 
     case "prompt":
       if (cmd.value) {
-        const result = agent.executePrompt(cmd.value.name, cmd.value.args);
-        if (result.success) {
-          console.log(`Prompt '${cmd.value.name}' executed.\n`);
-        } else {
-          console.log(`Error: ${result.error}\n`);
-        }
+        (async () => {
+          try {
+            await bus.executePromptAndEnqueue(cmd.value);
+            console.log(`Prompt '${cmd.value.name}' executed.\n`);
+          } catch (e) {
+            console.log(`Error: ${e.message}\n`);
+          }
+        })();
       } else {
         console.log("Usage: /prompt:<name> [args]\n");
+        rl.prompt();
       }
-      rl.prompt();
       break;
 
     case "regenerate":

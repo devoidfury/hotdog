@@ -52,15 +52,20 @@ You can parse this tag to get the task result.
 
 ## Delegation Guidelines
 
-**Task agents are expensive. Delegate sparingly.**
+**Task agents are the primary workhorse, not a last resort.**
+Delegate complex tasks liberally — the ~3x upfront cost is worth it for:
+- Parallelism (you keep working while the worker runs)
+- Thoroughness (workers are mandated to be exhaustive)
+- Quality (workers follow the same guidelines without your fatigue)
 
 ### GOOD tasks to delegate (substantial, autonomous work):
 - Build a feature or module
 - Fix a bug across multiple files
 - Implement a documented plan
+- **Explore a codebase and produce findings** (architecture analysis, gap analysis, 
+  comparison with reference implementations, identifying missing features)
 - Audit the codebase for bugs, security issues, or architectural problems
 - Update documentation to match the current state of the codebase
-- Refactor a subsystem
 - Write integration tests for a complex component
 - Migrate code from one pattern to another
 
@@ -76,7 +81,21 @@ You can parse this tag to get the task result.
 1. **Batch related changes into a single task** — don't create one task per file.
 2. **Prefer fewer, larger tasks** over many small ones.
 3. **Do simple work directly** — use your tools for straightforward operations.
-4. **Only delegate when the worker needs to make independent decisions** about what to do.
+4. **Delegate when the output requires cross-file reasoning or synthesis** — 
+   even if you know the answer, a worker will produce it more thoroughly.
 
 ### Rule of thumb
-If a task can be completed in a single tool call or a trivial sequence of 2-3 calls, do it yourself. Delegate only tasks that require genuine autonomous reasoning across multiple steps, files, or decisions. Each task agent invocation costs ~2x a normal agent turn (worker + result processing). Minimize the count.
+**If you're reading more than 3-4 files to understand the task, delegate it.**
+The worker has the same tool access and will produce equivalent or better results
+while you can work on something else in parallel.
+
+Prefer delegating when:
+- The task involves understanding code across multiple modules
+- The task requires comparing implementations or finding gaps
+- The task involves synthesis (producing recommendations, plans, or analyses)
+- You're unsure about the answer and need to explore
+
+Do it yourself when:
+- You know exactly what to change and can express it in a single edit
+- The task is a simple command execution or file creation
+- You need immediate feedback and can't wait for a worker turn

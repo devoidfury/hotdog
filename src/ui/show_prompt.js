@@ -10,7 +10,12 @@ import { SkillsLoader } from "../skills/loader.js";
 import { PromptsLoader } from "../prompts/loader.js";
 import { disabledSessionLog } from "../session_log.js";
 import { buildConfig } from "../init/resolution.js";
-import { loadConfig, DEFAULT_SKILLS_PATH, DEFAULT_PROMPTS_PATH } from "../config.js";
+import {
+  loadConfig,
+  DEFAULT_SKILLS_PATH,
+  DEFAULT_PROMPTS_PATH,
+  getProfile,
+} from "../config.js";
 
 /**
  * Run the show-prompt subcommand.
@@ -101,18 +106,26 @@ export async function runShowPrompt(cli) {
   const systemPrompt = agent.context.systemMessages[0]?.content || "";
   console.log(systemPrompt);
 
+  // Build tool registry so we can display tools
+  const profile = getProfile(agent._config || {}, agent.profileName);
+  agent._currentTools = await agent.buildToolRegistry(
+    profile.whitelistTools || null,
+    profile.blacklistTools || null,
+    profile.manager || false,
+  );
+
   // Print tools section
-  const toolDefs = agent._currentTools || {};
-  const toolNames = Object.keys(toolDefs);
-  if (toolNames.length > 0) {
-    console.log("\n--- Tools ---\n");
-    for (const name of toolNames) {
-      const tool = toolDefs[name];
-      const def = tool?.toToolDef?.();
-      if (def) {
-        console.log(`${def.function.name}`);
-        console.log(`\n${def.function.description}`);
-        console.log("---------\n");
+  if (agent._currentTools) {
+    const tools = agent._currentTools.getAll();
+    if (tools.length > 0) {
+      console.log("\n--- Tools ---\n");
+      for (const [name, tool] of tools) {
+        const def = tool?.toToolDef?.();
+        if (def) {
+          console.log(`${def.function.name}`);
+          console.log(`\n${def.function.description}`);
+          console.log("---------\n");
+        }
       }
     }
   }

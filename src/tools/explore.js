@@ -1,14 +1,10 @@
 // Explore tool — run the agent in explorer mode against a project directory.
 // Mirrors Rust: oa-agent/src/tools/explore/mod.rs
 
-import { execFile } from "node:child_process";
+import { spawn } from "node:child_process";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { ToolContext, toolDef, param, toolResult } from "./registry.js";
-
-const execFileAsync = import("node:util").then((util) =>
-  util.promisify(execFile),
-);
+import { toolDef, param, toolResult } from "./registry.js";
 
 // Resolve the path to the current binary (main.js)
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -75,8 +71,7 @@ export class ExploreTool {
     const command = `node ${BIN_PATH} -c "${args.outline}" --profile explorer`;
 
     // Build command: node main.js -c "<prompt>" --profile explorer
-    const childProcess = await import("node:child_process");
-    const cp = childProcess.spawn(
+    const cp = spawn(
       "node",
       [
         BIN_PATH,

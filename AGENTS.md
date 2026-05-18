@@ -24,7 +24,6 @@ All error catches must use `formatError()` from `src/context/error.js`:
 - Unexpected errors (bugs, iteration errors, null derefs): message + full stack
 - Never use `console.error(e.message)` directly — always use `formatError(e)`
 - The `isExpectedError()` helper classifies errors; add new types to `EXPECTED_ERROR_TYPES`
-All hard-coded configurable strings (model names, host URLs, ports, format templates, timeouts, etc.) must live in `src/config.js` as named constants. Never duplicate.
 
 ### UI Layer Separation
 All UI/display logic lives under `src/ui/`. The `OutputSink` class in `src/context/output.js` is the core abstraction. Each UI module (CLI) implements output independently.
@@ -70,3 +69,18 @@ src/
 ```
 
 When adding new subcommands, add them to `src/ui/` as a separate file and dispatch from `main.js`.
+
+## Documentation
+
+Conceptual documentation (no language-specific details):
+
+| Doc | Purpose |
+|-----|---------|
+| `CONTEXT.md` | Domain glossary — core concepts, entities, architecture terms |
+| `docs/agents/architecture.md` | Project structure, component breakdown, key types |
+| `docs/agents/tools_and_skills.md` | Tool system and skill system details |
+| `docs/agents/model_and_config.md` | Model registry, config system, profiles |
+| `docs/agents/debugging.md` | Debugging patterns, one-shot mode |
+| `docs/agents/show-prompt.md` | show-prompt subcommand reference |
+
+For the Rust reference, see `/workspace/oa-agent/docs/agents/`.

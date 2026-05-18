@@ -2,7 +2,7 @@
 
 import fs from 'node:fs/promises';
 import path from 'node:path';
-import { ToolContext, toolDef, param, toolResult } from './registry.js';
+import { toolDef, param, toolResult } from './registry.js';
 import { DEFAULT_SKILLS_PATH } from '../config.js';
 
 export class LoadSkillTool {

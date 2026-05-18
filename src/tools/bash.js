@@ -1,13 +1,7 @@
 // Bash tool — execute shell commands.
 
-import { spawn, execFile } from "node:child_process";
-import {
-  ToolContext,
-  toolDef,
-  param,
-  toolResult,
-  truncateOutput,
-} from "./registry.js";
+import { spawn } from "node:child_process";
+import { toolDef, param, toolResult, truncateOutput } from "./registry.js";
 import {
   DEFAULT_BASH_TIMEOUT_MS,
   DEFAULT_MAX_TOOL_OUTPUT_LINES,

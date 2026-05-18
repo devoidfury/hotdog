@@ -3,7 +3,7 @@
 import fs from 'node:fs/promises';
 import fsSync from 'node:fs';
 import path from 'node:path';
-import { ToolContext, toolDef, param, toolResult, validateCwdBoundary } from './registry.js';
+import { toolDef, param, toolResult, validateCwdBoundary } from './registry.js';
 import { DEFAULT_MAX_EDIT_INPUT_SIZE } from '../config.js';
 
 export class EditTool {

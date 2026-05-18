@@ -20,6 +20,9 @@
     },
     "oa-planner": {
       "model": "ai365/qwen3.6-35b:general"
+    },
+    "fixer": {
+      "model": "ai365/qwen3.6-35b:instruct"
     }
   },
   "mcp_servers": [

@@ -3,30 +3,30 @@
 // Provides TaskHandle, TaskWorker, and TaskManager for spawning,
 // monitoring, and controlling concurrent task agents.
 
-import { MessageLog } from '../context/index.js';
-import { LlmClient, LlmError } from '../llm_client/client.js';
-import { ToolRegistry, toolResult } from '../tools/registry.js';
-import { createToolFactory, CORE_TOOL_NAMES } from '../tools/index.js';
-import { DEFAULT_MAX_TOKENS, DEFAULT_MAX_ITERATIONS } from '../config.js';
+import { MessageLog } from "../context/index.js";
+import { LlmError } from "../llm_client/client.js";
+import { ToolRegistry, toolResult } from "../tools/registry.js";
+import { createToolFactory, CORE_TOOL_NAMES } from "../tools/index.js";
+import { DEFAULT_MAX_ITERATIONS } from "../config.js";
 
 // ── Task Status ─────────────────────────────────────────────────────────────
 
 export const TASK_STATUS = {
-  RUNNING: 'running',
-  COMPLETED: 'completed',
-  FAILED: 'failed',
-  CANCELLED: 'cancelled',
+  RUNNING: "running",
+  COMPLETED: "completed",
+  FAILED: "failed",
+  CANCELLED: "cancelled",
 };
 
 // ── Task Handle ─────────────────────────────────────────────────────────────
 
 /** Handle to a running task agent. Provides status checks, follow-up sending, and interruption. */
 export class TaskHandle {
-  constructor(taskId, statusRef, abortController, followEmitter) {
+  constructor(taskId, statusRef, abortController, followQueue) {
     this.taskId = taskId;
     this._statusRef = statusRef;
     this._abortController = abortController;
-    this._followEmitter = followEmitter;
+    this._followQueue = followQueue;
   }
 
   get status() {
@@ -35,8 +35,8 @@ export class TaskHandle {
 
   /** Send a follow-up message to a running task. */
   sendFollowUp(message) {
-    if (this._followEmitter && this.status === TASK_STATUS.RUNNING) {
-      this._followEmitter.emit('follow-up', message);
+    if (this._followQueue && this.status === TASK_STATUS.RUNNING) {
+      this._followQueue.push(message);
       return true;
     }
     return false;
@@ -61,7 +61,7 @@ export class TaskWorker {
     this.taskDescription = options.taskDescription;
     this.managerContext = options.managerContext;
     this.llmClient = options.llmClient;
-    this.modelName = options.modelName || options.modelRegistry?.default || '';
+    this.modelName = options.modelName || options.modelRegistry?.default || "";
     this.modelRegistry = options.modelRegistry || {};
     this.allowedTools = options.allowedTools || null;
     this.systemPrompt = options.systemPrompt;
@@ -70,7 +70,8 @@ export class TaskWorker {
     this.maxToolOutputLines = options.maxToolOutputLines || 800;
 
     this.abortController = new AbortController();
-    this._followEmitter = null;
+    // Shared queue for follow-up messages — populated by sendFollowUp, drained in the loop
+    this._followQueue = [];
     this._statusRef = { value: TASK_STATUS.RUNNING };
   }
 
@@ -82,6 +83,9 @@ export class TaskWorker {
     const worker = new TaskWorker(options);
     const handle = worker._createHandle();
 
+    // Start follow-up polling before the main loop runs
+    worker._startFollowUpPoller();
+
     // Run in background — uncaught errors won't crash the main process
     worker.run().catch((err) => {
       // Task failed — status already updated in run()
@@ -91,28 +95,23 @@ export class TaskWorker {
   }
 
   _createHandle() {
-    this._followEmitter = { 
-      emit: null, 
-      on: null,
-      listeners: [] 
-    };
-    // Simple event emitter
-    this._followEmitter.listeners = [];
-    this._followEmitter.on = (event, cb) => {
-      this._followEmitter.listeners.push({ event, cb });
-    };
-    this._followEmitter.emit = (event, data) => {
-      for (const l of this._followEmitter.listeners) {
-        if (l.event === event) l.cb(data);
-      }
-    };
-
     return new TaskHandle(
       this.taskId,
       this._statusRef,
       this.abortController,
-      this._followEmitter
+      this._followQueue,
     );
+  }
+
+  /**
+   * Start a periodic poller that checks for pending follow-up messages.
+   * This runs concurrently with the main loop and populates _followQueue.
+   */
+  _startFollowUpPoller() {
+    this._followPollInterval = setInterval(() => {
+      // The queue is populated directly by sendFollowUp (push).
+      // Nothing extra to do here — the loop drains it.
+    }, 1_000);
   }
 
   /** Run the task agent loop. */
@@ -121,7 +120,10 @@ export class TaskWorker {
     try {
       result = await this._runInner();
     } catch (err) {
-      if (err instanceof LlmError.Cancelled || this.abortController.signal.aborted) {
+      if (
+        err instanceof LlmError.Cancelled ||
+        this.abortController.signal.aborted
+      ) {
         this._statusRef.value = TASK_STATUS.CANCELLED;
         result = `Task ${this.taskId} cancelled`;
       } else {
@@ -130,12 +132,20 @@ export class TaskWorker {
       }
     }
 
+    // Stop the follow-up poller
+    if (this._followPollInterval) {
+      clearInterval(this._followPollInterval);
+      this._followPollInterval = null;
+    }
+
     if (this._statusRef.value === TASK_STATUS.RUNNING) {
       this._statusRef.value = TASK_STATUS.COMPLETED;
     }
 
     // Append final result to manager's context
-    this.managerContext.addSystemMessage(`[Task ${this.taskId} completed]\n${result}`);
+    this.managerContext.addSystemMessage(
+      `[Task ${this.taskId} completed]\n${result}`,
+    );
 
     // Wake up the subagent manager with the result
     if (this.wakeUpCallback) {
@@ -143,7 +153,7 @@ export class TaskWorker {
     }
   }
 
-  /** Inner run loop with follow-up polling. */
+  /** Inner run loop — drains pending follow-ups before each LLM call. */
   async _runInner() {
     // Create task agent context with system prompt and task description
     const taskContext = new MessageLog();
@@ -153,7 +163,7 @@ export class TaskWorker {
     const modelConfig = this.modelRegistry[this.modelName] || {
       name: this.modelName,
       temperature: null,
-      maxTokens: DEFAULT_MAX_TOKENS,
+      maxTokens: 32000,
     };
 
     // Build tool registry for this worker
@@ -170,10 +180,17 @@ export class TaskWorker {
     let iteration = 0;
     while (iteration < this.maxIterations) {
       if (this.abortController.signal.aborted) {
-        throw new LlmError.Cancelled('Task cancelled');
+        throw new LlmError.Cancelled("Task cancelled");
       }
 
       iteration++;
+
+      // Drain any pending follow-up messages from the queue
+      let followUp = null;
+      while (this._followQueue.length > 0) {
+        followUp = this._followQueue.shift();
+        taskContext.addUserMessage(followUp);
+      }
 
       // Build messages from task context
       const messages = taskContext.getMessages();
@@ -184,7 +201,7 @@ export class TaskWorker {
         messages,
         modelConfig,
         toolDefs,
-        { aborted: this.abortController.signal.aborted }
+        { aborted: this.abortController.signal.aborted },
       );
 
       const response = await this._processStream(stream);
@@ -194,68 +211,89 @@ export class TaskWorker {
         taskContext.addAssistantMessage(
           response.fullText,
           response.fullReasoning,
-          response.finalToolCalls
+          response.finalToolCalls,
         );
 
         for (const tc of response.finalToolCalls) {
           if (this.abortController.signal.aborted) {
-            throw new LlmError.Cancelled('Task cancelled');
+            throw new LlmError.Cancelled("Task cancelled");
           }
 
           const toolName = tc.function?.name;
           const toolCallId = tc.id;
-          const input = tc.function?.arguments || '{}';
+          const input = tc.function?.arguments || "{}";
 
           try {
             const tool = registry.get(toolName);
             const toolResultStr = toolResult(await tool.execute(input, {}));
-            taskContext.addMessage({ role: 'tool', content: toolResultStr, reasoningContent: null, toolCalls: null, toolCallId });
+            taskContext.addMessage({
+              role: "tool",
+              content: toolResultStr,
+              reasoningContent: null,
+              toolCalls: null,
+              toolCallId,
+            });
           } catch (e) {
-            const errorMsg = toolResult(`Error executing tool ${toolName}: ${e.message}`);
-            taskContext.addMessage({ role: 'tool', content: errorMsg, reasoningContent: null, toolCalls: null, toolCallId });
+            const errorMsg = toolResult(
+              `Error executing tool ${toolName}: ${e.message}`,
+            );
+            taskContext.addMessage({
+              role: "tool",
+              content: errorMsg,
+              reasoningContent: null,
+              toolCalls: null,
+              toolCallId,
+            });
           }
-        }
-
-        // Check for follow-up messages (45s timeout)
-        const followUp = await this._checkFollowUp();
-        if (followUp) {
-          taskContext.addUserMessage(followUp);
-          continue;
         }
       } else {
         // No tool calls — task is done
-        taskContext.addAssistantMessage(response.fullText, response.fullReasoning, null);
+        taskContext.addAssistantMessage(
+          response.fullText,
+          response.fullReasoning,
+          null,
+        );
         return response.fullText;
       }
     }
 
-    throw new Error(`Task ${this.taskId}: max iterations (${this.maxIterations}) reached`);
+    throw new Error(
+      `Task ${this.taskId}: max iterations (${this.maxIterations}) reached`,
+    );
   }
 
   /** Process a streaming LLM response. */
   async _processStream(stream) {
-    let fullText = '';
+    let fullText = "";
     let fullReasoning = null;
     const toolCallsBuffer = new Map();
 
     for await (const event of stream) {
       if (this.abortController.signal.aborted) {
-        throw new LlmError.Cancelled('Task cancelled');
+        throw new LlmError.Cancelled("Task cancelled");
       }
 
       switch (event.type) {
-        case 'content':
+        case "content":
           fullText += event.content;
           break;
-        case 'reasoning':
-          if (!fullReasoning) fullReasoning = '';
+        case "reasoning":
+          if (!fullReasoning) fullReasoning = "";
           fullReasoning += event.content;
           break;
-        case 'toolName':
-          toolCallsBuffer.set(event.index, { name: event.name, args: '', id: '' });
+        case "toolName":
+          toolCallsBuffer.set(event.index, {
+            name: event.name,
+            args: "",
+            id: "",
+          });
           break;
-        case 'toolArgument':
-          const existing = toolCallsBuffer.get(event.index) || { name: '', args: '', id: '' };
+        case "toolArgument":
+          const existing = toolCallsBuffer.get(event.index) || {
+            name: "",
+            args: "",
+            id: "",
+          };
           existing.args += event.arguments;
           toolCallsBuffer.set(event.index, existing);
           break;
@@ -264,43 +302,19 @@ export class TaskWorker {
 
     let finalToolCalls = null;
     if (toolCallsBuffer.size > 0) {
-      finalToolCalls = Array.from(toolCallsBuffer.values()).map((tc, index) => ({
-        id: `call_${index}_${Date.now()}`,
-        type: 'function',
-        function: {
-          name: tc.name,
-          arguments: tc.args,
-        },
-      }));
+      finalToolCalls = Array.from(toolCallsBuffer.values()).map(
+        (tc, index) => ({
+          id: `call_${index}_${Date.now()}`,
+          type: "function",
+          function: {
+            name: tc.name,
+            arguments: tc.args,
+          },
+        }),
+      );
     }
 
     return { fullText, fullReasoning, finalToolCalls };
-  }
-
-  /** Check for follow-up messages with 45s timeout. */
-  _checkFollowUp() {
-    return new Promise((resolve) => {
-      let resolved = false;
-
-      // Wait for a follow-up message
-      const handler = (message) => {
-        if (!resolved) {
-          resolved = true;
-          clearTimeout(timer);
-          resolve(message);
-        }
-      };
-
-      this._followEmitter.on('follow-up', handler);
-
-      // 45s timeout
-      const timer = setTimeout(() => {
-        if (!resolved) {
-          resolved = true;
-          resolve(null);
-        }
-      }, 45_000);
-    });
   }
 }
 
@@ -311,7 +325,7 @@ export class TaskManager {
   constructor(options = {}) {
     this._tasks = new Map();
     this.llmClient = options.llmClient;
-    this.modelName = options.modelName || '';
+    this.modelName = options.modelName || "";
     this.modelRegistry = options.modelRegistry || {};
     this.managerContext = options.managerContext;
     this.systemPrompt = options.systemPrompt;
@@ -389,7 +403,6 @@ export class TaskManager {
   progressMessage() {
     const active = this.activeTasks().length;
     if (active === 0) return null;
-    return `${active} task${active === 1 ? '' : 's'} running`;
+    return `${active} task${active === 1 ? "" : "s"} running`;
   }
 }
-

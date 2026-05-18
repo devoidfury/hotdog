@@ -77,4 +77,4 @@ If a task can be completed in a single tool call or a trivial sequence of 2-3 ca
 4. **Only delegate when the worker needs to make independent decisions** about what to do.
 
 
-**Recommended default task agent model: 9b-dsv4f**
+**Recommended default task agent model: ai365/qwen3.5-9b-dsv4f-d**

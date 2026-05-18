@@ -15,6 +15,7 @@ export * from "./load_skill.js";
 
 export * from "./project_info.js";
 export * from "./review.js";
+export * from "./explore.js";
 
 // Import classes for factory use
 import { BashTool } from "./bash.js";
@@ -30,6 +31,7 @@ import { ModelTool } from "./model.js";
 import { LoadSkillTool } from "./load_skill.js";
 import { ProjectInfoTool } from "./project_info.js";
 import { ReviewTool } from "./review.js";
+import { ExploreTool } from "./explore.js";
 
 // Tool descriptors — declarative table of all core tools.
 const TOOL_DESCRIPTORS = [
@@ -40,6 +42,7 @@ const TOOL_DESCRIPTORS = [
   { name: "read", disabled: false },
   { name: "question", disabled: false },
   { name: "pager", disabled: false },
+  { name: "explore", disabled: false },
   { name: "find", disabled: false },
   { name: "grep", disabled: false },
   { name: "fetch", disabled: false },
@@ -112,6 +115,8 @@ export function createToolFactory(taskManager = null) {
           return new QuestionTool();
         case "pager":
           return new PagerTool();
+        case "explore":
+          return new ExploreTool();
         case "model":
           return new ModelTool(ctx?.modelRegistry || {});
         case "load_skill":

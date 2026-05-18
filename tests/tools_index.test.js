@@ -11,7 +11,7 @@ describe('CORE_TOOL_NAMES', () => {
     // project_info is included but disabled by default
     const expected = [
       'bash', 'write', 'model', 'load_skill',
-      'read', 'question', 'pager', 'find',
+      'read', 'question', 'pager', 'explore', 'find',
       'grep', 'fetch', 'project_info',
       'review', 'edit',
     ];
@@ -97,6 +97,18 @@ describe('createToolFactory', () => {
     const tool = factory.createTool('pager', {});
     expect(tool).not.toBeNull();
     expect(typeof tool.execute).toBe('function');
+  });
+
+  it('creates explore tool', () => {
+    const factory = createToolFactory();
+    const tool = factory.createTool('explore', {});
+    expect(tool).not.toBeNull();
+    expect(typeof tool.execute).toBe('function');
+    expect(typeof tool.toToolDef).toBe('function');
+    expect(typeof tool.callDisplay).toBe('function');
+    const def = tool.toToolDef();
+    expect(def.function.name).toBe('explore');
+    expect(def.function.description.length).toBeGreaterThan(0);
   });
 
   it('creates model tool', () => {

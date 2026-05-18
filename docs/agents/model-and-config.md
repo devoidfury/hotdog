@@ -1,57 +1,58 @@
 # Model and Config
 
-## Model System (`src/model.js`)
+## Model System (`src/config.js`)
 
 ### Core Types
-- **`ModelConfig`** — `name`, `temperature`, `max_tokens`, `capabilities`, `tags`
-- **`ModelRegistry`** — stores models by name, `find_best(requested_tags)` for tag-based selection, `find_best_name()` returns name string, `names()` returns all registered model names, `primary()` returns primary model, `set_primary()` changes primary
-- **`ModelUsageStats`** — per-model: total_requests, successful_requests, failed_requests, total_duration
-- **`ModelUsageTracker`** — tracks current model, records success/failure, provides `get_stats()` / `all_stats()`
+- **`ModelConfig`** — plain object with `name`, `temperature`, `maxTokens`, `capabilities`, `tags`
+- **`ModelRegistry`** — stores models by name, `findBest(requestedTags)` for tag-based selection, `findBestName()` returns name string, `names()` returns all registered model names, `primary()` returns primary model, `setPrimary()` changes primary
+- **`ModelUsageStats`** — per-model: totalRequests, successfulRequests, failedRequests, totalDuration
+- **`ModelUsageTracker`** — tracks current model, records success/failure, provides `getStats()` / `allStats()`
 
 ### Model Name Format
 
 All model names use `provider/model` format (e.g., `ai365/qwen3.5-4b`) when a provider is active. Bare model names are only used in the legacy path when no providers are configured.
 
 ### Model Switching
-- **By name**: `agent.switch_model("provider/model-name")`
-- **By tags**: Not directly supported — use `agent.switch_model()` with the model name. Tag-based selection is used during initialization via `ModelRegistry::find_best()`.
+- **By name**: `agent.switchModel("provider/model-name")`
+- **By tags**: Not directly supported — use `agent.switchModel()` with the model name. Tag-based selection is used during initialization via `ModelRegistry.findBest()`.
 - **Via ModelTool**: The LLM can call the `model` tool mid-conversation: `{"name": "model", "arguments": {"name": "provider/model-name"}}`
 
 ## Config System (`src/config.js`)
 
 ### AgentConfig (Construction)
-The `AgentConfig` object bundles all configuration for constructing an `Agent`. It has 22 fields covering model registry, output sink, tool registry, skills, session metadata, streaming control, compaction, and profile switching. Format strings live in `AgentFormatting` (part of `BuildOutput`).
+The `AgentConfig` object bundles all configuration for constructing an `Agent`. It has 23 fields covering model registry, output sink, tool registry, skills, session metadata, streaming control, compaction, and profile switching.
 
 ```javascript
 const config = {
-    model_registry: ModelRegistry,
+    client: LlmClient,
+    context: MessageLog,
+    model: string,
+    modelRegistry: ModelRegistry,
     sink: OutputSink,
-    registry: ToolRegistry,
-    hide_tools: boolean,
+    hideTools: boolean,
+    hideThinking: boolean,
     skills: Skill[],
-    all_skills: Skill[],
-    skill_directories: string[],
+    allSkills: Skill[],
+    skillDirectories: string[],
+    activeSkills: Set,
+    maxToolOutputLines: number,
+    sessionId: string,
+    cwdBoundary: string | null,
     role: string,
-    profile_body: string,
-    aspect_body: string,
-    max_tool_output_lines: number,
-    session_id: string | null,
-    no_log: boolean,
-    cwd_boundary: string | null,
-    prompts_loader: PromptsLoader,
+    profileBody: string,
     stream: boolean,
-    profiles: Map<String, SwitchProfile>,
     compaction: CompactionSettings,
-    compact_debug: boolean,
-    task_manager: TaskManager | null,
-    profile_name: string,
+    compactDebug: boolean,
+    showTokenUse: boolean,
+    profileName: string,
+    taskManager: TaskManager | null,
+    mcpConnections: [],
 };
 ```
 
-Construction is done via `AgentConfig::from_build_output()` which extracts relevant fields from `BuildOutput`:
+Construction is done by passing the config object directly to the `Agent` constructor:
 ```javascript
-const config = AgentConfig.from_build_output(build_output, tool_registry, sink);
-const agent = await Agent.from_builder(builder, sink, loud);
+const agent = new Agent(config);
 ```
 
 ### Config File
@@ -103,8 +104,8 @@ The `resolve_str` helper generates config resolution methods (URL, model, skills
 
 ### Model Resolution
 
-Model names flow through `AgentBuilder::model_name()` (in `init/resolution.js`):
-1. CLI model → profile model → config `default_model` → provider's first model → `DEFAULT_MODEL`
+Model names flow through `buildAgentConfig()` (in `init/resolution.js`):
+1. CLI model → profile model → config `defaultModel` → provider's first model → `DEFAULT_MODEL`
 2. If the name contains `/`, it's used as-is (already qualified)
 3. If a provider is active and the name matches a provider model, it's prefixed with the provider name
 4. Otherwise, the bare name is passed through (will error at validation if not in registry)

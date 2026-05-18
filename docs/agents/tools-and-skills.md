@@ -4,12 +4,12 @@
 
 ### Tool System (`src/tools/`)
 
-- **Tool interface** — all tools implement: `try_new_from_context(ctx) → { instance, error }`, `execute(input, ctx, tool_call_id) → { result, error }`, `to_tool_def()`, `call_display(input)`
-- **ToolRegistry** — stores tools by name, provides lookup, serialization, and `tool_defs()` accessor
+- **Tool interface** — all tools implement: `create(ctx) → { instance, error }`, `execute(input, ctx, toolCallId) → { result, error }`, `toToolDef()`, `callDisplay(input)`
+- **ToolRegistry** — stores tools by name, provides lookup, serialization, and `toolDefs()` accessor
 - **Tool** / **ToolFunction** / **ToolParams** / **ToolParam** — shared types for LLM tool definitions
 - **ToolFactory interface + DefaultToolFactory** — creates tool instances from config, supports `ToolContext`
 - **TOOL_DESCRIPTORS** — static array of tool descriptors defining all core + manager tools with their factory functions and disabled flags
-- **CORE_TOOL_NAMES** — includes all 20 tool names: `bash`, `write`, `model`, `load_skill`, `read`, `question`, `pager`, `explore`, `find`, `grep`, `fetch`, `project_info`, `review`, `edit`, `plan_status`, `complete_task`, `delegate_task`, `task_status`, `task_followup`, `task_interrupt`. Filtered by profile whitelist/blacklist.
+- **CORE_TOOL_NAMES** — includes all 15 core tool names: `bash`, `write`, `model`, `load_skill`, `read`, `question`, `pager`, `explore`, `find`, `grep`, `fetch`, `project_info`, `review`, `edit`. Filtered by profile whitelist/blacklist.
 - **Disabled by default** — `ProjectInfoTool` and all orchestrator tools (`plan_status`, `complete_task`, `delegate_task`, `task_status`, `task_followup`, `task_interrupt`) have `disabled: true` in their descriptors; they require explicit inclusion via profile `whitelist_tools` or the `manager: true` profile flag
 
 ### Implementations
@@ -36,7 +36,7 @@
 
 ## Skills
 
-### Skill System (`src/context/skills/`)
+### Skill System (`src/skills/`)
 
 - **Skill** — skill data with `name`, `description`, `license`, `compatibility`, `metadata`, `allowed_tools` (array from space-separated YAML string), `include_tools`, `tool_dependencies`, `visible`, `disable_model_invocation`, `loaded`, `content` (markdown body), `location`, `additional_files`
 - **SkillConfig** — `path` (default: `/skills`, colon-separated multi-path support)
@@ -46,6 +46,6 @@
   - `load_skills()` — loads all skills from all configured paths
   - `load_from_directory(path)` — loads from a single directory
   - `parse_skill_from_md(content, dir_name)` — parses YAML frontmatter + markdown body
-  - `auto_activate(&core_tool_names)` — auto-activates skills whose tool-dependencies are met by core tools
+  - `autoActivate(coreToolNames)` — auto-activates skills whose tool-dependencies are met by core tools
   - `all_skills()`, `get_skill(name)`, `directories()`
   - Non-existent paths are silently skipped

@@ -13,7 +13,7 @@ bun src/main.js --prompt "hello"
 
 - **`--loud`** — verbose stderr logging for LLM requests/responses
 - **`--no-stream`** — batch mode: text appears after full generation (no streaming)
-- **`--compact-debug`** — show compaction details in output
+- **`--compact-debug`** — write compaction details to `compaction.out.json`
 - **`--no-log`** — disable JSONL session logging
 - **`--tokens`** — show token usage at the end of the session
 

@@ -7,111 +7,136 @@
 ## Key Components
 
 ### Context (`src/context/`)
-- `MessageLog` — stores message history (`Message { role, content, reasoning_content, tool_calls, tool_call_id }`). Methods: `append()`, `add_message()`, `add_system_message()`, `add_user_message()`, `add_assistant_message()`, `add_tool_message()`, `insert_at()`, `reset()`, `messages()`, `message_count()`, `replace_messages()`
-- `OUTPUT_EVENT` types: `UserMessage`, `AssistantMessage`, `Thinking`, `ToolCall`, `ToolResult`, `Compacting`, `CommandResult`, `Question`, `StreamingChunk`, `StreamingReasoningChunk`, `TaskProgress`, `TokenUsage`
-- `InputEvent` enum: `Text(String)`, `Command(String)` — parsed by `parse_input()` in `context/input.js`
-- `OutputSink` base class — `emit()` plus convenience methods (`emit_thinking`, `emit_tool_call`, `emit_tool_result`, `emit_assistant_message`, `emit_user_message`, `emit_compacting`, `emit_question`, `emit_streaming_chunk`, `emit_streaming_reasoning_chunk`, `emit_task_progress`)
-- `Input` handling — question/answer collection abstraction (CLI implements independently)
-- `QuestionDef` — question definition with key, prompt, options, required, default, allow_other
-- `NoopSink` — no-op implementation for testing and show-prompt
+- **`MessageLog`** — stores message history (`Message { role, content, reasoning_content, tool_calls, tool_call_id }`). Methods: `append()`, `addMessage()`, `addSystemMessage()`, `addUserMessage()`, `addAssistantMessage()`, `addToolMessage()`, `insertAt()`, `reset()`, `messages()`, `messageCount()`, `replaceMessages()`
+- **`OUTPUT_EVENT`** — event type constants: `USER_MESSAGE`, `ASSISTANT_MESSAGE`, `THINKING`, `TOOL_CALL`, `TOOL_RESULT`, `COMPACTING`, `COMMAND_RESULT`, `QUESTION`, `STREAMING_CHUNK`, `STREAMING_REASONING_CHUNK`, `TASK_PROGRESS`, `TOKEN_USAGE`
+- **`EVENT_HANDLERS`** — maps event types to handler method names on `OutputSink`
+- **`OutputSink`** — base class with `emit()` plus convenience methods (`emitThinking`, `emitToolCall`, `emitToolResult`, `emitAssistantMessage`, `emitUserMessage`, `emitCompacting`, `emitQuestion`, `emitStreamingChunk`, `emitTaskProgress`)
+- **`NoopSink`** — no-op implementation for testing and show-prompt
+- **`parseInput()`** — parses raw text into `{ type: 'text' | 'command', value }` events
+- **`NoopInput`** — no-op input implementation that returns defaults
 
 ### Agent (`src/agent/`)
-- `AgentConfig` — bundled configuration struct covering model registry, output sink, tool registry, skills, session metadata, streaming control, compaction, and profile switching
-- `Agent` — run loop, tool dispatch, model switching, context management. Fields: client, context, model, model_registry, usage_tracker, cancellation_token, executor, sink, hide_tools, skills, all_skills, skill_directories, active_skills, loop_state, output_cache, max_tool_output_lines, session_id, session_log, cwd_boundary, role, profile_body, aspect_body, prompts_loader, stream, profiles, compaction, compact_debug, task_manager, mangler, used_tools, profile_name
-- `Agent::from_builder(builder, sink, loud)` — async factory method constructing agent from `BuildOutput`
-- `Agent::run(user_input)` — main iteration loop
-- `Agent::switch_model(model_name)` — switch to a specific model by name
-- `Agent::cancel()` — cancel the running agent loop
-- `Agent::reset_cancel()` — reset cancellation token
-- `Agent::set_cancellation_token()` — set cancellation token
-- `Agent::current_model()` — returns the current model name
-- `Agent::model_names()` — returns all registered model names
-- `Agent::profile_names()` — returns all available profile names
-- `Agent::switch_profile(profile_name)` — switch to a named profile
-- `Agent::session_id()` — returns the session ID
-- `Agent::get_rendered_prompt()` — returns the rendered system prompt and skills preamble
-- `Agent::token_usage()` — returns current model and all usage stats
-- `Agent::record_token_usage(usage)` — record token usage from API response
-- `Agent::show_task_progress()` — emit task progress update if active
-- `Agent::set_sink()` — replace output sink (for ACP session routing)
-- `Agent::compact(override_keep, debug)` — compact context
-- `Agent::ensure_system_prompt()` — build and inject system prompt
-- `Agent::execute_command(cmd)` — execute slash commands
-- `AgentLoop` — manages iteration counting (default max: 1000) and cancellation via `CancellationToken`
-- `TaskManager` — async task delegation for meta profile
+- **`Agent`** — run loop, tool dispatch, model switching, context management. Constructor takes a config object with fields: `client`, `context`, `model`, `modelRegistry`, `sink`, `hideTools`, `hideThinking`, `skills`, `allSkills`, `skillDirectories`, `activeSkills`, `maxToolOutputLines`, `sessionId`, `cwdBoundary`, `role`, `profileBody`, `stream`, `compaction`, `compactDebug`, `showTokenUse`, `profileName`, `taskManager`, `promptsLoader`, `skillsLoader`, `sessionLog`, `mcpConnections`
+- **`Agent.run()`** — main iteration loop
+- **`Agent.switchModel(modelName)`** — switch to a specific model by name
+- **`Agent.cancel()`** — cancel the running agent loop
+- **`Agent.currentModel()`** — returns the current model name
+- **`Agent.modelNames()`** — returns all registered model names
+- **`Agent.profileNames()`** — returns all available profile names
+- **`Agent.switchProfile(profileName)`** — switch to a named profile
+- **`Agent.sessionId()`** — returns the session ID
+- **`Agent.tokenUsage()`** — returns current model and all usage stats
+- **`Agent.recordTokenUsage(usage)`** — record token usage from API response
+- **`Agent.compact(overrideKeep, debug)`** — compact context
+- **`Agent.executeCommand(cmd)`** — execute slash commands
+- **`AgentLoop`** — manages iteration counting (default max: 1000) and cancellation via `CancellationToken`
+- **`TaskManager`** — async task delegation for meta profile
+- **`AgentConfig`** — plain object bundling all configuration for agent construction
+
+### Commands (`src/agent/commands.js`)
+- **`Command`** — enum: `Help`, `Quit`, `Clear`, `ClearProfile`, `Tools`, `Thinking`, `Models`, `Model`, `Tokens`, `Compact`, `Prompt`, `Regenerate`, `Skill`, `Unknown`
+- **`parseCommand(cmd)`** — parses raw command string into typed command object
+- **`executeCommand(agent, command)`** — executes parsed command on agent
+- **`isUiCommand(type)`** — checks if command is handled by UI layer (not delegated to agent)
 
 ### LLM Client (`src/llm_client/`)
-- `LlmClient::new()` — reads `AI_URL` env var (default: `http://ai365.home:9292`), `AI_API_KEY` env var
-- `chat(messages, model)` — sends messages, returns content string
-- `chat_cancellable(messages, model, cancel)` — chat with cancellation support
-- `chat_with_model_config(messages, config, tools)` — sends messages with tool defs, returns `AgentResponse::Content` or `AgentResponse::ToolCalls(calls, usage, reasoning, content)`
-- `chat_stream(messages, config, tools)` — streaming chat variant
-- `chat_stream_cancellable(messages, config, tools, cancel)` — streaming with cancellation
-- Fluent setters: `with_loud()`, `with_base_url()`, `with_api_key()`, `with_chat_timeout()`, `with_session_id()`, `with_stream()`, `with_cancellation_token()`, `with_providers()`
-- Endpoint: `POST {base_url}/v1/chat/completions`
-- `ping()` — check connectivity to AI URL
-- `providers` field — stores configured providers for model name resolution
+- **`LlmClient`** — reads `AI_URL` env var (default: `http://ai365.home:9292`), `AI_API_KEY` env var
+- **`chat(messages, model)`** — sends messages, returns content string
+- **`chatCancellable(messages, model, cancel)`** — chat with cancellation support
+- **`chatWithModelConfig(messages, config, tools)`** — sends messages with tool defs, returns `{ content }` or `{ toolCalls, usage, reasoning, content }`
+- **`chatStream(messages, config, tools)`** — streaming chat variant
+- **`chatStreamCancellable(messages, config, tools, cancel)`** — streaming with cancellation
+- **Fluent setters**: `withLoud()`, `withBaseUrl()`, `withApiKey()`, `withChatTimeout()`, `withSessionId()`, `withStream()`, `withCancellationToken()`, `withProviders()`
+- **Endpoint**: `POST {baseUrl}/v1/chat/completions`
+- **`ping()`** — check connectivity to AI URL
+- **`providers`** field — stores configured providers for model name resolution
+- **`retry.js`** — retry logic with exponential backoff
 
 ### Config System (`src/config.js`)
-- `Config` object — configuration with defaults. Fields: `providers`, `default_provider`, `ai_url`, `default_model`, `temperature`, `thinker`, `toolfmt`, `tool_output_fmt`, `role`, `hide_tools`, `skills_path`, `profiles_path`, `prompts_path`, `system_prompt_template`, `chat_timeout_secs`, `embeddings_timeout_secs`, `profile`, `profiles`, `theme`, `colors`, `api_key`, `max_tool_output_lines`, `no_log`, `mcp_servers`, `compaction`
-- `Provider` object — `name`, `url`, `api_key`, `models`
-- `Profile` object — `whitelist_tools`, `blacklist_tools`, `skills`, `model`, `preload_skills`, `cwd_boundary`, `manager`, `aspects`
-- `ModelEntry` object — `name`, `tags`, `temperature`, `max_tokens`, `context_limit`
-- `McpServerConfig` object — `name`, `command`, `args`, `env`, `url`, `type_`, `headers`, `whitelist_tools`, `blacklist_tools`, `enabled`
-- `CompactionSettings` object — `enabled`, `reserve_tokens`, `keep_recent_messages`
-- Missing fields use defaults (from `DEFAULT_*` constants)
-- Resolution priority: CLI arg → config file → env var → default
-- `resolve_str` helper — generates config resolution methods with priority chain: CLI argument → config file → environment variable → constant default
-- Methods: `resolve_url()`, `resolve_model()`, `resolve_skills_path()`, `resolve_profiles_path()`, `resolve_prompts_path()`, `resolve_system_prompt_path()`, `resolve_profile()`, `resolve_role()`, `get_profile()`, `resolve_api_key()`, `resolve_model_config()`, `load_with_fallback()`, `load_file()`
+- **`DEFAULT_*`** constants — all defaults live here: `DEFAULT_MODEL`, `DEFAULT_AI_URL`, `DEFAULT_THINKER`, `DEFAULT_TOOL_FMT`, `DEFAULT_TOOL_OUTPUT_FMT`, `DEFAULT_SKILLS_PATH`, `DEFAULT_PROFILES_PATH`, `DEFAULT_PROMPTS_PATH`, `DEFAULT_CHAT_TIMEOUT_SECS`, `DEFAULT_MAX_TOKENS`, `DEFAULT_MAX_ITERATIONS`, `DEFAULT_ROLE`, `DEFAULT_MAX_TOOL_OUTPUT_LINES`, `DEFAULT_COMPACTION_ENABLED`, `DEFAULT_COMPACTION_RESERVE_TOKENS`, `DEFAULT_COMPACTION_KEEP_RECENT_MESSAGES`
+- **`loadConfig(configPath)`** — loads config from file, falls back to `./config/defaults.json` then `~/.config/oa-agent/default.json`, then defaults
+- **`buildModelRegistry({ providers })`** — builds model lookup map from provider configs
+- **`Provider`** — `name`, `url`, `apiKey`, `models`
+- **`Profile`** — `whitelistTools`, `blacklistTools`, `skills`, `model`, `preloadSkills`, `cwdBoundary`, `manager`, `aspects`
+- **`ModelEntry`** — `name`, `tags`, `temperature`, `maxTokens`, `contextLimit`
+- **`McpServerConfig`** — `name`, `command`, `args`, `env`, `url`, `type_`, `headers`, `whitelistTools`, `blacklistTools`, `enabled`
+- **`CompactionSettings`** — `enabled`, `reserveTokens`, `keepRecentMessages`
+- Resolution priority: CLI arg → config file → env var → default constant
 
 ### System Prompt (`src/context/system_prompt.js`)
-- `init_system_prompt_template(template_path)` — pre-compiles template from file path, called at startup
-- `build_system_prompt(model, role, body, available_tools, aspects, agents_md, profile_name)` — constructs system prompt from template with placeholders for `{model}`, `{cwd}`, `{platform}`, `{date}`, `{time}`, `{session_start}`, `{role}`, `{body}`, `{aspects}`, `{tool_guidelines}`, `{agents_md}`, `{profile_name}`
-- `build_system_prompt_with_skills()` — wraps `build_system_prompt` and appends skills preamble
-- `render_skills_preamble(skills, skill_directories)` — renders skills_preamble template, filters disabled/invisible skills, shows loaded content vs descriptions
+- **`initSystemPromptTemplate(templatePath)`** — pre-compiles template from file path (called from `init/resolution.js`)
+- **`buildSystemPrompt(model, role, body, availableTools, aspects, agentsMd, profileName)`** — constructs system prompt from template with placeholders for `{model}`, `{cwd}`, `{platform}`, `{date}`, `{time}`, `{session_start}`, `{role}`, `{body}`, `{aspects}`, `{tool_guidelines}`, `{agents_md}`, `{profile_name}`
+- **`buildSystemPromptWithSkills()`** — wraps `buildSystemPrompt` and appends skills preamble
+- **`renderSkillsPreamble(skills, skillDirectories)`** — renders skills_preamble template, filters disabled/invisible skills
+- **`loadAspects(aspectNames)`** — loads `.aspect.md` files from `config/aspects/`
+- **`loadAgentsMd()`** — loads `AGENTS.md` from CWD
 - Uses `config/templates/system_prompt.md` as the base template
 - Tool guidelines are auto-loaded from `src/tools/<name>/guidelines.md` for each available tool
 
-### Profiles (`src/context/profiles/`)
+### Template Engine (`src/context/render.js`)
+- **`render(template, context)`** — Tera-like template engine supporting `{{ vars }}`, `{% if %}`, `{% for %}`, filters (`|trim`, `|length`, `|exec`), and block tags
+- **`compile(template)`** — compiles template string into render function
+- **`renderTemplate`** — alias for `render`
 
-File-based profile definitions follow the same YAML frontmatter + markdown body pattern as skills.
-
-- `ProfileFile` object — parsed from `.profile.md` files: `name`, `description`, `role`, `blacklist_tools`, `body`, `whitelist_tools`, `preload_skills`
-- `parse(content, file_name)` — extracts YAML frontmatter and markdown body from a profile file
-- `load_profiles_from_dir(path)` — scans directory for `*.profile.md` files, returns map of profiles
+### Profiles
+File-based profile definitions in `config/profiles/*.profile.md` use YAML frontmatter + markdown body pattern.
+- **`ProfileFile`** — parsed from `.profile.md` files: `name`, `description`, `role`, `blacklistTools`, `body`, `whitelistTools`, `preloadSkills`
+- **`parseFrontMatter(content)`** — extracts YAML frontmatter and markdown body
+- **`loadProfileFiles(profilesPath)`** — scans directory for `*.profile.md` files, returns map of profiles
 - Profile file `role` fills the `{role}` template placeholder
 - Profile file `body` fills the `{body}` template placeholder
 - Config file settings take precedence over profile file settings for tool restrictions
-
-### Config Resolution (`src/resolver.js`)
-- `Resolver<T>` — generic priority-chain resolver for any type: CLI → file → env → default
-- `StringResolver` — string-specific resolver with lazy env var evaluation via `with_env_fn()`
-- Builder methods: `new()`, `with_cli()`, `with_file()`, `with_env_fn()`, `resolve()`
 
 ### Initialization (`src/init/resolution.js`)
 
 The entire agent initialization pipeline lives here — encapsulated to make it testable and reusable.
 
-- `Cli` object — CLI argument definitions (all data fields, no binary logic). Fields: `subcommand`, `config`, `ai_url`, `api_key`, `model`, `role`, `skills_path`, `prompts_path`, `chat_timeout`, `embeddings_timeout`, `profile`, `provider`, `colors`, `no_colors`, `theme`, `prompt`, `thinker`, `toolfmt`, `tool_output_fmt`, `loud`, `hide_tools`, `show_tools`, `preload_skills`, `tui_debug`, `session_id`, `no_log`, `tokens`, `no_stream`, `compact_debug`
-- `Subcommand` enum — `Info`, `Cli`, `Tui`, `Review { session_id, json, tool_index }`, `ShowPrompt` subcommands
-- `SwitchProfile` object — merged profile data for runtime switching: `role`, `body`, `model`, `aspect_body`
-- `AgentBuilder` — encapsulates the full initialization pipeline:
-  - `new(cli)` — merges CLI args with config file
-  - `model_registry()` — builds `ModelRegistry` from CLI `--models` and config `models`
-  - `llm_client(loud)` — builds `LlmClient` with resolved URL and timeouts
-  - `colors()` — resolves `ColorPalette` from CLI, config, and theme file
-  - `profile()` — resolves profile name and `Profile` object
-  - `tool_registry(models, profile)` — builds `ToolRegistry` from config and profile
-  - `build_components()` — returns `BuildOutput` with all resolved pieces
-- `BuildOutput` — grouped into focused sub-objects:
-  - `runtime: AgentRuntime` — registry, client, skills, all_skills, skill_directories, role, profile_body, aspect_body, prompts_loader
-  - `session: AgentSession` — profile, preload_skills, session_id, no_log
-  - `formatting: AgentFormatting` — thinker_format, tool_format, tool_output_fmt, hide_tools
-  - Plus flat fields: `config`, `stream`, `base_url`, `model`, `skills_path`, `profile_name`, `theme_file`, `chat_timeout`, `embeddings_timeout`, `active_provider`, `profiles`, `compact_debug`
-- `ConfigResolver` interface — config resolution interface (`base_url`, `api_key`, `thinker_format`, `tool_format`, `tool_output_fmt`, `hide_tools`)
-- `AgentBuilder` implements `ConfigResolver`
-- `AgentBuilder::formatted_sink()` — constructs a fully-configured output sink in one call
-- Model resolution flows through `model_name()`: CLI model → profile model → config default_model → provider model → DEFAULT_MODEL
-- Provider resolution: `--provider` CLI flag or `default_provider` config key selects the active provider; model names are prefixed with provider name when active
+- **`buildConfig(cliArgv)`** — single entry point for config resolution. Returns `{ resolved, modelRegistry, providers }`
+- **`buildAgentConfig({ cli, config, providers, defaultModel, defaultRole, profilesPath })`** — resolves all values through priority chain
+- **`SwitchProfile`** — merged profile data for runtime switching: `role`, `body`, `model`, `aspectBody`
+- Model resolution flows through `buildAgentConfig`: CLI model → profile model → config `defaultModel` → provider's first model → `DEFAULT_MODEL`
+- Provider resolution: `--provider` CLI flag or `defaultProvider` config key selects the active provider; model names are prefixed with provider name when active
 
-`main.js` is thin — only contains the entry point with subcommand dispatch and binary-specific UI setup. All initialization logic is in `src/init/`, which can be tested independently.
+### UI Layer (`src/ui/`)
+- **`cli.js`** — `CliOutputSink` class: formatting + color emission, implements `OutputSink`
+- **`colors.js`** — Color palettes, ANSI helpers, theme resolution
+- **`session.js`** — `runInteractiveSession()`: readline loop, slash command dispatch, SIGINT handling
+- **`info.js`** — `runInfo()`: prints system diagnostics
+- **`show_prompt.js`** — `runShowPrompt()`: renders system prompt without LLM connection
+- **`review.js`** — `runReview()`: session log inspection with JSON output and tool index
+
+### Session Management (`src/agent/`)
+- **`SessionBuilder`** — init pipeline encapsulation: CLI + config → resolved config → shared resources. Cloneable for agent swaps.
+- **`SessionManager`** — session lifecycle: owns builder + current agent, handles agent swaps for profile switching
+- **`SessionStore`** — multi-session storage: map of agents keyed by session ID
+
+### Message Bus (`src/agent/message_bus.js`)
+- Decoupled CLI/agent communication via channels
+- Single-threaded dispatch owning the run loop
+- Methods: `enqueue()`, `run()`, `runUntilCancelled()`, `cancel()`
+
+### Message Queue (`src/agent/message_queue.js`)
+- Thread-safe FIFO buffer for external event injection
+
+### Worker (`src/agent/worker.js`)
+- `TaskManager`, `TaskWorker`, async task delegation
+- Task lifecycle: spawn → LLM loop with tool support → text response → result appended to manager's MessageLog
+
+### Tools (`src/tools/`)
+- **`registry.js`** — `ToolRegistry`, `ToolContext`, `toolDef()`, `toolResult()`, `parseToolArgs()`, `truncateOutput()`, `generateDiff()`, `validateCwdBoundary()`
+- **`TOOL_DESCRIPTORS`** — static array of tool descriptors with `name` and `disabled` flags
+- **`CORE_TOOL_NAMES`** — 15 core tool names: `bash`, `write`, `model`, `load_skill`, `read`, `question`, `pager`, `explore`, `find`, `grep`, `fetch`, `project_info`, `review`, `edit`
+- **`SUBAGENT_TOOL_NAMES`** — 6 subagent tool names: `delegate_task`, `task_status`, `task_followup`, `task_interrupt`, `plan_status`, `complete_task`
+- Individual tools: `bash.js`, `write.js`, `read.js`, `edit.js`, `grep.js`, `find.js`, `fetch.js`, `question.js`, `pager.js`, `model.js`, `load_skill.js`, `project_info.js`, `review.js`, `explore.js`, `subagents.js`
+- **`createToolFactory(taskManager)`** — creates tool instances from config, supports `ToolContext`
+
+### External Integrations
+- **MCP** (`src/mcp/`) — stdio + HTTP transport, tool discovery, exposes MCP server tools as native agent tools. Files: `client.js`, `connection.js`, `tools.js`, `types.js`, `index.js`
+- **Skills** (`src/skills/loader.js`) — loads `SKILL.md` files from directories following Agent Skills spec
+- **Prompts** (`src/prompts/loader.js`) — named prompt template loading
+- **Compaction** (`src/compaction.js`) — LLM-based message summarization with `estimateMessageTokens()`, `shouldCompact()`, `compactMessages()`, `findFirstKeptIndex()`
+- **Session Log** (`src/session_log.js`) — JSONL format logging
+- **Marker Mangler** (`src/marker_mangler.js`) — escapes input that triggers special behavior, protects against prompt injection
+
+### `main.js` — Entry Point
+Thin entry point: parse args → dispatch subcommand → build config → create session builder → create output sink → create session manager → create message bus → run one-shot or interactive session. All initialization logic is in `src/init/resolution.js`.

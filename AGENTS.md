@@ -4,7 +4,7 @@ JS project `oa-js` — an AI agent harness with tool calling support. This is a 
 
 ## Quick Reference
 
-- **Run:** `bun src/main.js` / **One-shot:** `bun src/main.js -c "hello"` / **TUI:** interactive
+- **Run:** `bun src/main.js` / **One-shot:** `bun src/main.js -c "hello"` / **Interactive:** default mode (readline)
 - **With profile:** `--profile minimal` / **With model:** `--model qwen3.5-0.8b`
 - **Test:** `bun test --only-failures`
 - **Coverage:** `bun test --coverage`
@@ -49,12 +49,12 @@ src/
 │   ├── session_manager.js — Session lifecycle (owns builder + current agent, agent swaps)
 │   └── session_store.js   — Multi-session storage (map of agents keyed by session ID)
 ├── ui/
-│   ├── cli.js       — CliOutputSink (formatting + color emission)
-│   ├── colors.js    — Color palettes, ANSI helpers, theme resolution
-│   ├── session.js   — Interactive CLI session (readline loop, command dispatch)
-│   ├── info.js      — Info subcommand (print system diagnostics)
+│   ├── cli.js         — CliOutputSink (formatting + color emission)
+│   ├── colors.js      — Color palettes, ANSI helpers, theme resolution
+│   ├── session.js     — Interactive CLI session (readline loop, command dispatch)
+│   ├── info.js        — Info subcommand (print system diagnostics)
 │   ├── show_prompt.js — Show-prompt subcommand
-│   └── review.js    — Review subcommand
+│   └── review.js      — Review subcommand (session log inspection)
 ├── context/
 │   ├── output.js    — OutputSink base class + OUTPUT_EVENT types
 │   ├── input.js     — parseInput() for question/answer collection
@@ -78,9 +78,9 @@ Conceptual documentation (no language-specific details):
 |-----|---------|
 | `CONTEXT.md` | Domain glossary — core concepts, entities, architecture terms |
 | `docs/agents/architecture.md` | Project structure, component breakdown, key types |
-| `docs/agents/tools_and_skills.md` | Tool system and skill system details |
-| `docs/agents/model_and_config.md` | Model registry, config system, profiles |
-| `docs/agents/debugging.md` | Debugging patterns, one-shot mode |
-| `docs/agents/show-prompt.md` | show-prompt subcommand reference |
+| `docs/agents/tools-and-skills.md` | Tool system and skill system details |
+| `docs/agents/model-and-config.md` | Model registry, config system, profiles |
+| `docs/agents/debugging-oa-agent-tools-visibility-flags.md` | Debugging patterns, one-shot mode |
+| `docs/agents/show-prompt-audit-profile.md` | show-prompt subcommand reference |
 
 For the Rust reference, see `/workspace/oa-agent/docs/agents/`.

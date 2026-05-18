@@ -17,7 +17,7 @@ bun src/main.js show-prompt --profile fixer
 bun src/main.js show-prompt --model smollm
 
 # With preloaded skills
-bun src/main.js show-prompt --preload-skills tdd
+bun src/main.js show-prompt --preload-skills tdd,git
 ```
 
 ## Output Format
@@ -37,7 +37,7 @@ bun src/main.js show-prompt --preload-skills tdd
 ## Implementation Details
 
 - **No API calls**: The prompt is rendered entirely locally using templates and the available tool definitions. No LLM connection is needed.
-- **MCP connections**: `Agent::from_builder()` still connects to MCP servers. This is necessary to get the full tool list that appears in the prompt. If MCP servers are unavailable, warnings are printed but the agent still builds.
+- **MCP connections**: The agent still connects to MCP servers during construction. This is necessary to get the full tool list that appears in the prompt. If MCP servers are unavailable, warnings are printed but the agent still builds.
 - **Skills**: If `--preload-skills` is used, the skills preamble is injected and included in the output.
 - **NoopSink**: A minimal `Output` implementation that discards all events — we only need the agent to render the prompt, not display anything.
 - **Session ID**: Not printed (no session is actually started).

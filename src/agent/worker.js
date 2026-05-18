@@ -7,7 +7,7 @@ import { MessageLog } from "../context/index.js";
 import { LlmError } from "../llm_client/client.js";
 import { ToolRegistry, toolResult } from "../tools/registry.js";
 import { createToolFactory, CORE_TOOL_NAMES } from "../tools/index.js";
-import { DEFAULT_MAX_ITERATIONS } from "../config.js";
+import { DEFAULT_MAX_ITERATIONS, loadProfileFile } from "../config.js";
 
 // ── Task Status ─────────────────────────────────────────────────────────────
 
@@ -68,6 +68,7 @@ export class TaskWorker {
     this.wakeUpCallback = options.wakeUpCallback || null;
     this.maxIterations = options.maxIterations || DEFAULT_MAX_ITERATIONS;
     this.maxToolOutputLines = options.maxToolOutputLines || 800;
+    this.blacklistTools = options.blacklistTools || null;
 
     this.abortController = new AbortController();
     // Shared queue for follow-up messages — populated by sendFollowUp, drained in the loop
@@ -80,7 +81,10 @@ export class TaskWorker {
    * Returns the TaskHandle for controlling the task.
    */
   static spawn(options) {
-    const worker = new TaskWorker(options);
+    const worker = new TaskWorker({
+      ...options,
+      blacklistTools: options.blacklistTools || null,
+    });
     const handle = worker._createHandle();
 
     // Start follow-up polling before the main loop runs
@@ -166,8 +170,15 @@ export class TaskWorker {
       maxTokens: 32000,
     };
 
-    // Build tool registry for this worker
-    const toolNames = this.allowedTools || CORE_TOOL_NAMES;
+    // Build tool registry for this worker with profile-based filtering
+    let toolNames = this.allowedTools || CORE_TOOL_NAMES;
+
+    // Apply blacklist from profile
+    if (this.blacklistTools && this.blacklistTools.length > 0) {
+      const blacklistSet = new Set(this.blacklistTools);
+      toolNames = toolNames.filter((name) => !blacklistSet.has(name));
+    }
+
     const registry = new ToolRegistry();
     const factory = createToolFactory();
     for (const name of toolNames) {
@@ -330,8 +341,10 @@ export class TaskManager {
     this.managerContext = options.managerContext;
     this.systemPrompt = options.systemPrompt;
     this.allowedTools = options.allowedTools || null;
+    this._config = options.config || {};
     this.maxIterations = options.maxIterations || DEFAULT_MAX_ITERATIONS;
     this.maxToolOutputLines = options.maxToolOutputLines || 800;
+    this._blacklistTools = options.blacklistTools || null;
     this._wakeUpCallback = null;
   }
 
@@ -340,17 +353,54 @@ export class TaskManager {
     this._wakeUpCallback = callback;
   }
 
-  /** Spawn a new background task agent. Returns a TaskHandle. */
-  spawnTask(taskId, taskDescription, workerModel = null) {
+  /**
+   * Spawn a new background task agent.
+   * @param {string} taskId - Unique task identifier
+   * @param {string} taskDescription - Description of what the task should do
+   * @param {string|null} workerModel - Optional model override for the worker
+   * @param {string|null} profile - Optional profile name to customize worker behavior
+   * @returns {TaskHandle}
+   */
+  spawnTask(taskId, taskDescription, workerModel = null, profile = null) {
+    // Resolve profile: use provided name, fall back to default
+    const profileName = profile || 'task-default';
+    const taskProfile = loadProfileFile(this._config, profileName);
+
+    // Apply profile model override
+    const resolvedModel = workerModel
+      || (taskProfile && taskProfile.model)
+      || this.modelName;
+
+    // Build system prompt from profile
+    const resolvedSystemPrompt = taskProfile
+      ? `${taskProfile.role || 'A focused worker that executes tasks autonomously'}\n\n${taskProfile.body}`
+      : this.systemPrompt;
+
+    // Resolve allowed tools: profile whitelist takes precedence, then fall back to manager default
+    let resolvedAllowedTools = this.allowedTools;
+    if (taskProfile && taskProfile.whitelistTools) {
+      resolvedAllowedTools = taskProfile.whitelistTools;
+    }
+
+    // Merge blacklist: profile blacklist + manager-level blacklist
+    const blacklistSet = new Set(this._blacklistTools || []);
+    if (taskProfile && taskProfile.blacklistTools) {
+      for (const t of taskProfile.blacklistTools) {
+        blacklistSet.add(t);
+      }
+    }
+    const resolvedBlacklist = blacklistSet.size > 0 ? Array.from(blacklistSet) : null;
+
     const handle = TaskWorker.spawn({
       taskId,
       taskDescription,
       managerContext: this.managerContext,
       llmClient: this.llmClient,
-      modelName: workerModel || this.modelName,
+      modelName: resolvedModel,
       modelRegistry: this.modelRegistry,
-      allowedTools: this.allowedTools,
-      systemPrompt: this.systemPrompt,
+      allowedTools: resolvedAllowedTools,
+      blacklistTools: resolvedBlacklist,
+      systemPrompt: resolvedSystemPrompt,
       wakeUpCallback: this._wakeUpCallback,
       maxIterations: this.maxIterations,
       maxToolOutputLines: this.maxToolOutputLines,

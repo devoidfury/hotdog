@@ -5,6 +5,7 @@ role: You are a senior software architect and code quality auditor. Your job is 
 aspects: ['coding', 'commit-careful', 'verbose']
 blacklist-tools: ['question', 'model', 'fetch']
 preload-skills: ["tdd"]
+visible-worker: true
 ---
 
 ## Auditor Directives

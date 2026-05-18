@@ -256,6 +256,7 @@ export class SessionBuilder {
       managerContext: null,
       systemPrompt: taskSystemPrompt,
       allowedTools: workerTools,
+      config: this._config,
     });
   }
 }

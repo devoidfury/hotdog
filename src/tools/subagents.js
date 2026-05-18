@@ -4,6 +4,7 @@
 // They provide task delegation, status checking, follow-up, and interruption.
 
 import { toolDef, param, parseToolArgs, toolResult } from './registry.js';
+import { getVisibleWorkerProfiles } from '../config.js';
 
 // ── delegate_task ───────────────────────────────────────────────────────────
 
@@ -24,19 +25,32 @@ export class DelegateTaskTool {
       return toolResult('Error: Task manager not available');
     }
 
-    const handle = tm.spawnTask(args.task_id, args.description, args.worker_model || null);
+    const handle = tm.spawnTask(
+      args.task_id,
+      args.description,
+      args.worker_model || null,
+      args.profile || null,
+    );
     return toolResult(`Task ${args.task_id} delegated (handle: ${handle.taskId})`);
   }
 
   toToolDef() {
+    // Build dynamic list of visible worker profiles
+    const config = this._taskManager?._config;
+    const visibleProfiles = config ? getVisibleWorkerProfiles(config) : [];
+    const profileList = visibleProfiles.length > 0
+      ? `\n\nAvailable worker profiles (visible-worker: true): ${visibleProfiles.join(', ')}.`
+      : '';
+
     return toolDef(
       'delegate_task',
-      'Spawn a background task agent to perform work. The task runs concurrently and its result is appended to the manager\'s context when complete. IMPORTANT: Task agents are expensive — only delegate substantial autonomous work (build features, fix bugs, implement plans, audit code). Do NOT delegate trivial operations like creating a single file, running a command, or reading a file — do those directly with your tools. Batch related changes into a single task.',
+      `Spawn a background task agent to perform work. The task runs concurrently and its result is appended to the manager\'s context when complete. IMPORTANT: Task agents are expensive — only delegate substantial autonomous work (build features, fix bugs, implement plans, audit code). Do NOT delegate trivial operations like creating a single file, running a command, or reading a file — do those directly with your tools. Batch related changes into a single task.${profileList}`,
       {
         properties: {
           task_id: param('string', 'Unique identifier for this task'),
           description: param('string', 'Description of what the task agent should do'),
           worker_model: param('string', 'Optional model name for the worker agent (e.g. \'ai365/qwen3.5-4b\'). If omitted, uses the manager\'s model.'),
+          profile: param('string', `Optional profile name to customize the worker agent\'s behavior (role, tools, model). Defaults to \'task-default\'.${visibleProfiles.length > 0 ? ` Available profiles: ${visibleProfiles.join(', ')}.` : ''}`),
         },
         required: ['task_id', 'description'],
       }

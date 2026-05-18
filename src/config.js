@@ -23,6 +23,7 @@ export const DEFAULT_EXIT_COMMANDS = ['exit', 'quit'];
 export const DEFAULT_ROLE =
   'You are an AI coding assistant. Use the instructions below and the tools available to you to assist the user.';
 export const DEFAULT_MAX_TOOL_OUTPUT_LINES = 800;
+export const DEFAULT_TASK_PROFILE = 'task-default';
 export const DEFAULT_READ_TOOL_LIMIT = 800;
 export const DEFAULT_FIND_MAX_RESULTS = 400;
 export const DEFAULT_GREP_MAX_RESULTS = 100;
@@ -205,6 +206,7 @@ export function loadProfileFile(config, profileName) {
       aspects: fm.aspects || [],
       preloadSkills: fm['preload-skills'] || fm.preload_skills || [],
       manager: fm.manager || false,
+      visibleWorker: fm['visible-worker'] || fm.visible_worker || false,
     };
   } catch {
     return null;
@@ -237,6 +239,34 @@ export function getProfile(config, profileName) {
     cwdBoundary: null,
     aspects: [],
   };
+}
+
+/**
+ * Get all profile names that have visibleWorker: true.
+ * Scans all .profile.md files in the profiles directory.
+ * Returns an array of profile name strings.
+ */
+export function getVisibleWorkerProfiles(config) {
+  const profilesPath = config.profilesPath || DEFAULT_PROFILES_PATH;
+  let fs, path, dir;
+  try {
+    fs = require('node:fs');
+    path = require('node:path');
+    dir = fs.readdirSync(profilesPath);
+  } catch {
+    return []; // Profiles directory not found or not readable
+  }
+
+  const profiles = [];
+  for (const entry of dir) {
+    if (!entry.endsWith('.profile.md')) continue;
+    const profileName = entry.slice(0, -'.profile.md'.length);
+    const profile = loadProfileFile(config, profileName);
+    if (profile && profile.visibleWorker) {
+      profiles.push(profileName);
+    }
+  }
+  return profiles;
 }
 
 // Internal helpers — used by tests and internal logic

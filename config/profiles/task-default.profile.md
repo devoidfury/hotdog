@@ -3,6 +3,7 @@ name: task-default
 description: Default worker profile for delegated tasks
 role: A focused worker that executes tasks autonomously
 manager: false
+visible-worker: true
 ---
 
 ## Worker Directives

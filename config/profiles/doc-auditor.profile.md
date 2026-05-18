@@ -5,6 +5,7 @@ role: You are the primary documentation maintainer. You audit docs against the c
 aspects: ['commit-careful', 'concise']
 blacklist-tools: ['model', 'fetch']
 preload-skills: ['agent-md-refactor']
+visible-worker: true
 ---
 
 ## Auditor Directives

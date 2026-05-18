@@ -56,11 +56,15 @@ export class EditTool {
       return toolResult('Error parsing arguments');
     }
 
-    const { path: filePath, oldString, newString, replaceAll } = op;
+    const { path: filePath, oldString, newString, replace_all: replaceAll = false } = op;
     const cwdBoundary = ctx?.cwdBoundary || null;
+    const workspaceRoot = ctx?.workspaceRoot || null;
+
+    // Resolve path: cwdBoundary takes precedence, falls back to workspaceRoot
+    const resolvedPath = resolvePath(filePath, cwdBoundary, workspaceRoot);
 
     // Validate cwd boundary
-    const boundaryError = validateCwdBoundary(filePath, cwdBoundary);
+    const boundaryError = validateCwdBoundary(resolvedPath, cwdBoundary);
     if (boundaryError) {
       return toolResult(boundaryError);
     }
@@ -76,7 +80,7 @@ export class EditTool {
     // Read file
     let sourceContent;
     try {
-      sourceContent = fsSync.readFileSync(filePath, 'utf-8');
+      sourceContent = fsSync.readFileSync(resolvedPath, 'utf-8');
     } catch (e) {
       return toolResult(`File not found or unreadable '${filePath}': ${e.message}`);
     }
@@ -91,9 +95,9 @@ export class EditTool {
 
     // Write file
     try {
-      const dir = path.dirname(filePath);
+      const dir = path.dirname(resolvedPath);
       await fs.mkdir(dir, { recursive: true });
-      await fs.writeFile(filePath, newContent, 'utf-8');
+      await fs.writeFile(resolvedPath, newContent, 'utf-8');
     } catch (e) {
       return toolResult(`Error writing file: ${e.message}`);
     }
@@ -103,6 +107,24 @@ export class EditTool {
       `Successfully edited '${filePath}', found ${matchInfo.matchCount} match${matchInfo.matchCount > 1 ? 'es' : ''}, replaced with ${lineCount} line${lineCount > 1 ? 's' : ''}`,
     );
   }
+}
+
+/**
+ * Resolve a file path against cwdBoundary or workspaceRoot.
+ * cwdBoundary takes precedence if set; otherwise falls back to workspaceRoot.
+ * Absolute paths are returned as-is.
+ */
+function resolvePath(filePath, cwdBoundary, workspaceRoot) {
+  if (path.isAbsolute(filePath)) {
+    return filePath;
+  }
+  if (cwdBoundary) {
+    return path.resolve(cwdBoundary, filePath);
+  }
+  if (workspaceRoot) {
+    return path.resolve(workspaceRoot, filePath);
+  }
+  return path.resolve(filePath);
 }
 
 /**
@@ -127,10 +149,15 @@ function parseArgs(input) {
 
   // Support snake_case aliases
   const path = json.path;
-  const oldString = json.oldString || json.old_string;
-  const newString = json.newString || json.new_string;
+  const oldString = json.oldString ?? json.old_string;
+  const newString = json.newString ?? json.new_string;
 
-  if (!path || !oldString || !newString) {
+  if (!path || !newString) {
+    return null;
+  }
+  // oldString can be empty string (findAndReplace validates that)
+  // but must be present (not undefined/null)
+  if (oldString === undefined || oldString === null) {
     return null;
   }
 

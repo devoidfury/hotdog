@@ -4,9 +4,10 @@ JS project `oa-js` — an AI agent harness with tool calling support. This is a 
 
 ## Quick Reference
 
-- **Run:** `timeout 30 bun src/main.js` / **One-shot:** `timeout 30 bun src/main.js -c "hello"` / **TUI:** interactive
+- **Run:** `bun src/main.js` / **One-shot:** `bun src/main.js -c "hello"` / **TUI:** interactive
 - **With profile:** `--profile minimal` / **With model:** `--model qwen3.5-0.8b`
-- **Test:** `timeout 30 bun test --only-failures`
+- **Test:** `bun test --only-failures`
+- **Coverage:** `bun test --coverage`
 
 ## Rules & Guidelines
 

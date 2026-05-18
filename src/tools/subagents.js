@@ -256,6 +256,12 @@ export class CompleteTaskTool {
     if (!args.task_id) {
       return toolResult('Error: task_id is required');
     }
+
+    const tm = this._taskManager;
+    if (!tm) {
+      return toolResult('Error: Task manager not available');
+    }
+
     return toolResult(`Task ${args.task_id} marked as complete`);
   }
 

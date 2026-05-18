@@ -34,12 +34,12 @@ export class SystemMessage {
  */
 export class MessageLog {
   constructor() {
-    this.messages = [];
+    this._messages = [];
     this.systemMessages = [];
   }
 
   addMessage({ role, content, reasoningContent = null, toolCalls = null, toolCallId = null }) {
-    this.messages.push(new Message({ role, content, reasoningContent, toolCalls, toolCallId }));
+    this._messages.push(new Message({ role, content, reasoningContent, toolCalls, toolCallId }));
   }
 
   addUserMessage(content) {
@@ -59,7 +59,7 @@ export class MessageLog {
    * Rust: context.insert_at(index, message)
    */
   insertAt(index, message) {
-    this.messages.splice(index, 0, message);
+    this._messages.splice(index, 0, message);
   }
 
   /**
@@ -67,7 +67,7 @@ export class MessageLog {
    * Rust: context.replace_messages(new_messages)
    */
   replaceMessages(newMessages) {
-    this.messages = newMessages;
+    this._messages = newMessages;
   }
 
   /**
@@ -75,11 +75,11 @@ export class MessageLog {
    * Rust: context.messages()
    */
   messages() {
-    return [...this.messages];
+    return [...this._messages];
   }
 
   getMessages() {
-    return [...this.systemMessages, ...this.messages];
+    return [...this.systemMessages, ...this._messages];
   }
 
   getMessagesAsJSON() {
@@ -87,11 +87,11 @@ export class MessageLog {
   }
 
   size() {
-    return this.messages.length;
+    return this._messages.length;
   }
 
   clear() {
-    this.messages = [];
+    this._messages = [];
     this.systemMessages = [];
   }
 }

@@ -113,9 +113,13 @@ export class WriteTool {
 
     const { mode, path: filePath, content, search, search_re, start_at, end_at } = args;
     const cwdBoundary = ctx?.cwdBoundary || null;
+    const workspaceRoot = ctx?.workspaceRoot || null;
 
-    // Validate cwd boundary
-    const boundaryError = validateCwdBoundary(filePath, cwdBoundary);
+    // Resolve path: cwdBoundary takes precedence, falls back to workspaceRoot
+    const resolvedPath = resolvePath(filePath, cwdBoundary, workspaceRoot);
+
+    // Validate cwd boundary on resolved path
+    const boundaryError = validateCwdBoundary(resolvedPath, cwdBoundary);
     if (boundaryError) {
       return toolResult(boundaryError);
     }
@@ -127,15 +131,15 @@ export class WriteTool {
     }
 
     // Read existing content
-    const dir = path.dirname(filePath);
+    const dir = path.dirname(resolvedPath);
     try {
       await fs.mkdir(dir, { recursive: true });
     } catch (e) {
       return toolResult(`Error creating directory: ${e.message}`);
     }
 
-    const sourceContent = fsSync.existsSync(filePath)
-      ? fsSync.readFileSync(filePath, 'utf-8')
+    const sourceContent = fsSync.existsSync(resolvedPath)
+      ? fsSync.readFileSync(resolvedPath, 'utf-8')
       : '';
     const filesizeBefore = Buffer.byteLength(sourceContent, 'utf-8');
 
@@ -151,7 +155,7 @@ export class WriteTool {
 
     // Write the file
     try {
-      await fs.writeFile(filePath, newContent, 'utf-8');
+      await fs.writeFile(resolvedPath, newContent, 'utf-8');
     } catch (e) {
       return toolResult(`Error writing file: ${e.message}`);
     }
@@ -164,6 +168,28 @@ export class WriteTool {
       filesize_after: filesizeAfter,
     }));
   }
+}
+
+/**
+ * Resolve a file path against cwdBoundary or workspaceRoot.
+ * cwdBoundary takes precedence if set; otherwise falls back to workspaceRoot.
+ * Absolute paths are returned as-is.
+ */
+function resolvePath(filePath, cwdBoundary, workspaceRoot) {
+  // Absolute paths are used as-is
+  if (path.isAbsolute(filePath)) {
+    return filePath;
+  }
+  // cwdBoundary takes precedence
+  if (cwdBoundary) {
+    return path.resolve(cwdBoundary, filePath);
+  }
+  // Fall back to workspaceRoot
+  if (workspaceRoot) {
+    return path.resolve(workspaceRoot, filePath);
+  }
+  // Last resort: resolve relative to cwd
+  return path.resolve(filePath);
 }
 
 /**
@@ -232,7 +258,7 @@ function validateMode(mode, { search, search_re, start_at, end_at }) {
       if (!search_re || !start_at) return 'replace_range_regex requires path, search_re, start_at, and content';
       return null;
     default:
-      return `Unknown mode: '${mode}'`;
+      return `Edit failed: Unknown mode: '${mode}'`;
   }
 }
 
@@ -265,6 +291,10 @@ function applyEdit(source, mode, content, search, search_re, start_at, end_at) {
 }
 
 function applyInsert(source, startLine, content) {
+  // Empty source: just return content as-is
+  if (source === '') {
+    return content;
+  }
   const lines = source.split('\n');
   const insertIdx = startLine - 1;
 

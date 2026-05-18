@@ -67,7 +67,10 @@ export class LlmClient {
     const providerName = modelName.split("/")[0];
     const provider = this.providers.find((p) => p.name === providerName);
     if (provider) {
-      return { url: provider.url, apiKey: provider.apiKey };
+      return {
+        url: provider.url || this.baseUrl,
+        apiKey: provider.apiKey || this.apiKey,
+      };
     }
     return { url: this.baseUrl, apiKey: this.apiKey };
   }

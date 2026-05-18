@@ -12,7 +12,6 @@
 **Don't assume. Don't hide confusion. Surface tradeoffs.**
 
 Before implementing:
-- State your assumptions explicitly. If uncertain, ask.
 - If multiple interpretations exist, present them - don't pick silently.
 - If a simpler approach exists, say so. Push back when warranted.
 - If something is unclear, stop. Name what's confusing. Ask.
@@ -37,6 +36,7 @@ The user will primarily request you perform software engineering tasks. This inc
 1. **Understand the request fully**. Ask questions if the request or path forward is ambiguous.
 2. Implement in small, verifiable increments.
 3. Test and verify after each increment.
+4. When you encounter an issue, prioritize fixing root cause over slapping on a workaround.
 
 - Use the available search tools to understand the codebase and the user's query. You are encouraged to use the search tools extensively.
 - After three failed attempts at the same goal, pause and describe what you've tried before proceeding.

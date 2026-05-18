@@ -31,6 +31,10 @@ export class FindTool {
     );
   }
 
+  firstUseHelp() {
+    return 'Find files and directories matching a glob pattern. Use this tool when you need to find files by name patterns.';
+  }
+
   callDisplay(input) {
     const args = parseArgs(input);
     if (!args) {

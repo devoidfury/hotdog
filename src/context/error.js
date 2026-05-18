@@ -36,10 +36,16 @@ export function isExpectedError(err) {
  * Unexpected errors: message + stack for debugging.
  */
 export function formatError(err) {
-  if (isExpectedError(err)) {
-    return err.message || String(err);
+  if (err == null) {
+    return String(err);
   }
-  return `${err.message}\n${err.stack || "(no stack)"}`;
+  if (!(err instanceof Error)) {
+    return String(err);
+  }
+  if (!isExpectedError(err)) {
+    return `${err.message}\n${err.stack || "(no stack)"}`;
+  }
+  return err.message || String(err);
 }
 
 /**

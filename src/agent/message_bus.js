@@ -206,14 +206,14 @@ export class MessageBus {
       this._cancelled = false;
       this._isRunning = false;
 
-      // In drain mode, if the queue is now empty, we're done — exit the loop
-      if (drain && this._queue.isEmpty()) {
-        break;
-      }
-
       // Notify listener that message processing is complete
       if (this._onMessageProcessed) {
         this._onMessageProcessed();
+      }
+
+      // In drain mode, if the queue is now empty, we're done — exit the loop
+      if (drain && this._queue.isEmpty()) {
+        break;
       }
     }
   }

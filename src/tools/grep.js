@@ -276,6 +276,10 @@ export class GrepTool {
     );
   }
 
+  firstUseHelp() {
+    return 'Search file contents for a pattern. Supports regex, file type filtering, and context lines. Returns matching lines with file paths.';
+  }
+
   callDisplay(input) {
     const args = parseArgs(input);
     if (!args) {

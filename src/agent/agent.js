@@ -38,9 +38,17 @@ import {
 import { McpTool } from "../mcp/tools.js";
 
 /**
- * Core tool names that are always allowed regardless of skill filtering.
+ * Check if a tool name matches a skill pattern (exact or glob).
+ * Used by isToolAllowed and filteredToolDefs.
  */
-const ALWAYS_ALLOWED = new Set([...CORE_TOOL_NAMES, ...SUBAGENT_TOOL_NAMES]);
+function _toolMatchesPattern(toolName, patterns) {
+  const nameLower = toolName.toLowerCase();
+  return Array.from(patterns).some((pattern) => {
+    if (pattern === nameLower) return true;
+    if (!pattern.includes("*")) return false;
+    return _globMatch(pattern, nameLower);
+  });
+}
 
 export class Agent {
   /**
@@ -56,7 +64,7 @@ export class Agent {
     this.hideTools = config.hideTools !== false;
     this.hideThinking = config.hideThinking === true;
     this.skills = config.skills || [];
-    this.allSkills = config.allSkills || [];
+    this._allSkills = config.allSkills || [];
     this.skillDirectories = config.skillDirectories || [];
     this.activeSkills = new Set();
     this.maxToolOutputLines = config.maxToolOutputLines || 800;
@@ -140,29 +148,20 @@ export class Agent {
 
   /**
    * Check if a tool is allowed by active skills.
-   * Core tools are always allowed. Non-core tools must match a pattern.
+   * All tools (including core) are subject to skill filtering.
+   * If no skills are active, everything is allowed.
    * Rust: is_tool_allowed()
    */
   isToolAllowed(toolName) {
-    if (ALWAYS_ALLOWED.has(toolName)) return true;
-
     const patterns = this.combinedToolPatterns();
     if (patterns.size === 0) return true;
-
-    const nameLower = toolName.toLowerCase();
-    return Array.from(patterns).some((pattern) => {
-      // Use the same pattern matching as the skills loader
-      if (pattern === nameLower) return true;
-      if (!pattern.includes("*")) return false;
-
-      // Inline glob matching (same as patternMatches in skills/loader.js)
-      return _globMatch(pattern, nameLower);
-    });
+    return _toolMatchesPattern(toolName, patterns);
   }
 
   /**
    * Get tool definitions filtered by active skill patterns.
-   * Core tools are always included. Non-core tools must match a pattern.
+   * All tools (including core) are subject to skill filtering.
+   * If no skills are active, all tools are returned.
    * Rust: filtered_tool_defs()
    */
   filteredToolDefs(toolRegistry) {
@@ -175,13 +174,7 @@ export class Agent {
 
     for (const t of defs) {
       const name = t.function?.name || "";
-      const nameLower = name.toLowerCase();
-
-      const allowed =
-        ALWAYS_ALLOWED.has(name) ||
-        Array.from(patterns).some((pattern) => _globMatch(pattern, nameLower));
-
-      if (allowed && seen.add(name)) {
+      if (_toolMatchesPattern(name, patterns) && seen.add(name)) {
         result.push(t);
       }
     }
@@ -323,10 +316,10 @@ export class Agent {
    * Rust: collect_prompt_parts() + skill_refs_slice()
    */
   _buildSkillsPreamble() {
-    if (this.allSkills.length === 0) return "";
+    if (this._allSkills.length === 0) return "";
 
     const skillDirs = this.skillDirectories.join("\n") || "/skills";
-    const visibleSkills = this.allSkills.filter(
+    const visibleSkills = this._allSkills.filter(
       (s) => s.visible && !s.disableModelInvocation,
     );
     if (visibleSkills.length === 0) return "";
@@ -509,7 +502,8 @@ export class Agent {
         return fullText;
       },
       this.model,
-      this.compaction,
+      // Pass settings with 'keepRecent' property that doCompact expects
+      { enabled: this.compaction.enabled, keepRecent, reserveTokens: this.compaction.reserveTokens },
     );
 
     if (!result) return null;
@@ -773,7 +767,7 @@ export class Agent {
   createToolContext() {
     return new ToolContext({
       skills: this.skills,
-      allSkills: this.allSkills,
+      allSkills: this._allSkills,
       skillDirectories: this.skillDirectories,
       modelRegistry: this.modelRegistry,
       cwdBoundary: this.cwdBoundary,
@@ -935,13 +929,19 @@ export class Agent {
    * Returns true if any task results were processed.
    */
   async waitForTasksAndDrain() {
-    if (!this.taskManager) return false;
+    if (!this.taskManager) return this.drainPendingTaskMessages();
+
+    let drained = false;
+
+    // Drain any pending task messages first
+    if (this.drainPendingTaskMessages()) {
+      drained = true;
+    }
 
     const activeTasks = this.taskManager.activeTasks();
-    if (activeTasks.length === 0) return false;
+    if (activeTasks.length === 0) return drained;
 
     // Wait for all active tasks to complete
-    let drained = false;
     let iterations = 0;
     const maxWaitIterations = 120; // ~60s max wait
 

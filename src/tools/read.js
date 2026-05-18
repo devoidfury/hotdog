@@ -35,9 +35,16 @@ export class ReadTool {
       return typeof input === 'string' ? input : '(no path)';
     }
     const { path: filePath, limit, offset, type } = args;
+    if (!filePath) {
+      return '(no path)';
+    }
     const typeStr = type || 'lines';
     const end = offset + limit;
     return `${filePath} (${typeStr} ${offset}-${end})`;
+  }
+
+  firstUseHelp() {
+    return "Read a file's contents with optional pagination. Supports line-based or byte-based extraction with offset/limit. Returns an error for directories with a depth-1 listing instead.";
   }
 
   async execute(input, ctx) {
@@ -48,14 +55,18 @@ export class ReadTool {
 
     const { path: filePath, limit, offset, type } = args;
     const cwdBoundary = ctx?.cwdBoundary || null;
+    const workspaceRoot = ctx?.workspaceRoot || null;
+
+    // Resolve path: cwdBoundary takes precedence, falls back to workspaceRoot
+    const resolvedPath = resolvePath(filePath, cwdBoundary, workspaceRoot);
 
     // Validate cwd boundary
-    const boundaryError = validateCwdBoundary(filePath, cwdBoundary);
+    const boundaryError = validateCwdBoundary(resolvedPath, cwdBoundary);
     if (boundaryError) {
       return toolResult(boundaryError);
     }
 
-    const resolved = path.resolve(filePath);
+    const resolved = resolvedPath;
 
     // Check if it's a directory
     try {
@@ -81,6 +92,24 @@ export class ReadTool {
     }
     return readLines(resolved, offset, limit);
   }
+}
+
+/**
+ * Resolve a file path against cwdBoundary or workspaceRoot.
+ * cwdBoundary takes precedence if set; otherwise falls back to workspaceRoot.
+ * Absolute paths are returned as-is.
+ */
+function resolvePath(filePath, cwdBoundary, workspaceRoot) {
+  if (path.isAbsolute(filePath)) {
+    return filePath;
+  }
+  if (cwdBoundary) {
+    return path.resolve(cwdBoundary, filePath);
+  }
+  if (workspaceRoot) {
+    return path.resolve(workspaceRoot, filePath);
+  }
+  return path.resolve(filePath);
 }
 
 /**

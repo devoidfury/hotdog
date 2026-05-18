@@ -4,6 +4,7 @@
 // - **HTTP**: POST requests with SSE response support
 
 import { spawn } from "node:child_process";
+import { Readable } from "node:stream";
 import { parseMcpInitializeResponse, parseMcpToolsListResponse, parseMcpToolCallResponse, contentBlocksToString, jsonRpcRequest, jsonRpcNotification, mcpToolCallRequest } from "./types.js";
 
 /**
@@ -101,7 +102,6 @@ export class McpClient {
   _startReader() {
     if (!this._readStream) return;
 
-    const { Readable } = require("node:stream");
     const readStream = this._readStream;
     let buffer = "";
 

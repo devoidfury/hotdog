@@ -14,6 +14,8 @@ describe('FetchTool', () => {
     expect(def.function.parameters.properties).toHaveProperty('method');
     expect(def.function.parameters.properties).toHaveProperty('headers');
     expect(def.function.parameters.properties).toHaveProperty('body');
+    expect(def.function.parameters.properties).toHaveProperty('showOriginal');
+    expect(def.function.parameters.properties.showOriginal.type).toBe('boolean');
   });
 
   it('generates call display for GET request', () => {
@@ -91,5 +93,66 @@ describe('FetchTool parseArgs behavior', () => {
     const result = await tool.execute({ url: 'https://example.com' });
     // Should not return a parse error
     expect(result).not.toContain('Error parsing arguments');
+  });
+
+  it('accepts showOriginal: true without parse error', async () => {
+    const tool = new FetchTool();
+    const result = await tool.execute(JSON.stringify({ url: 'https://example.com', showOriginal: true }));
+    expect(result).not.toContain('Error parsing arguments');
+    expect(result).not.toContain('Invalid');
+  });
+
+  it('accepts showOriginal: false without parse error', async () => {
+    const tool = new FetchTool();
+    const result = await tool.execute(JSON.stringify({ url: 'https://example.com', showOriginal: false }));
+    expect(result).not.toContain('Error parsing arguments');
+    expect(result).not.toContain('Invalid');
+  });
+
+  it('accepts showOriginal: 0 without parse error (falsy but not true)', async () => {
+    const tool = new FetchTool();
+    const result = await tool.execute(JSON.stringify({ url: 'https://example.com', showOriginal: 0 }));
+    expect(result).not.toContain('Error parsing arguments');
+    expect(result).not.toContain('Invalid');
+  });
+
+  it('accepts showOriginal: "true" (string) without parse error', async () => {
+    const tool = new FetchTool();
+    const result = await tool.execute(JSON.stringify({ url: 'https://example.com', showOriginal: 'true' }));
+    expect(result).not.toContain('Error parsing arguments');
+    expect(result).not.toContain('Invalid');
+  });
+});
+
+// Integration tests for pandoc HTML-to-GFM conversion
+describe('FetchTool pandoc conversion', () => {
+  it('converts HTML to GFM when showOriginal is not true', async () => {
+    const tool = new FetchTool();
+    // Fetch a real HTML page - pandoc should convert it
+    const result = await tool.execute(JSON.stringify({ url: 'https://example.com' }));
+    const parsed = JSON.parse(result);
+    expect(parsed.content_type).toContain('text/html');
+    // The body should be the pandoc-converted GFM (or original HTML if pandoc fails)
+    expect(parsed.body).toBeDefined();
+    expect(typeof parsed.body).toBe('string');
+  });
+
+  it('returns original HTML when showOriginal is true', async () => {
+    const tool = new FetchTool();
+    const result = await tool.execute(JSON.stringify({ url: 'https://example.com', showOriginal: true }));
+    const parsed = JSON.parse(result);
+    expect(parsed.content_type).toContain('text/html');
+    expect(typeof parsed.body).toBe('string');
+    // Body should contain HTML tags (not converted to GFM)
+    expect(parsed.body.toLowerCase()).toContain('<!doctype html>');
+  });
+
+  it('returns non-HTML content unchanged when showOriginal is false', async () => {
+    const tool = new FetchTool();
+    const result = await tool.execute(JSON.stringify({ url: 'https://jsonplaceholder.typicode.com/posts/1' }));
+    const parsed = JSON.parse(result);
+    expect(parsed.content_type).toContain('application/json');
+    // JSON should be parsed as an object, not a string
+    expect(typeof parsed.body).toBe('object');
   });
 });

@@ -2,7 +2,7 @@
 
 import fsSync from 'node:fs';
 import path from 'node:path';
-import { ToolContext, toolDef, param, toolResult, validateCwdBoundary } from './registry.js';
+import { toolDef, param, toolResult, validateCwdBoundary, resolvePath } from './registry.js';
 import { DEFAULT_READ_TOOL_LIMIT } from '../config.js';
 
 export class ReadTool {
@@ -92,24 +92,6 @@ export class ReadTool {
     }
     return readLines(resolved, offset, limit);
   }
-}
-
-/**
- * Resolve a file path against cwdBoundary or workspaceRoot.
- * cwdBoundary takes precedence if set; otherwise falls back to workspaceRoot.
- * Absolute paths are returned as-is.
- */
-function resolvePath(filePath, cwdBoundary, workspaceRoot) {
-  if (path.isAbsolute(filePath)) {
-    return filePath;
-  }
-  if (cwdBoundary) {
-    return path.resolve(cwdBoundary, filePath);
-  }
-  if (workspaceRoot) {
-    return path.resolve(workspaceRoot, filePath);
-  }
-  return path.resolve(filePath);
 }
 
 /**

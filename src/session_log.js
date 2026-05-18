@@ -4,13 +4,12 @@
 
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { appendFileSync, readFileSync, existsSync, readdirSync } from "node:fs";
+import { appendFileSync, readFileSync, existsSync, readdirSync, mkdirSync } from "node:fs";
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
 
 /**
  * Strip null fields from an object for serialization.
- * Matches Rust's #[serde(skip_serializing_if = "Option::is_none")].
  */
 export function stripNulls(obj) {
   const result = {};
@@ -198,7 +197,6 @@ export class SessionLog {
     const dir = sessionsDir();
     if (!existsSync(dir)) {
       try {
-        const { mkdirSync } = require("node:fs");
         mkdirSync(dir, { recursive: true });
       } catch {
         // Best effort — will fail on first write if dir can't be created

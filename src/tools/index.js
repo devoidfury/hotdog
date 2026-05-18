@@ -73,6 +73,34 @@ export const SUBAGENT_TOOL_NAMES = [
   "complete_task",
 ];
 
+// Declarative tool constructor map — maps tool names to their constructor functions.
+const TOOL_CONSTRUCTORS = {
+  bash: () => new BashTool(),
+  write: () => new WriteTool(),
+  read: () => new ReadTool(),
+  edit: () => new EditTool(),
+  grep: () => new GrepTool(),
+  find: () => new FindTool(),
+  fetch: () => new FetchTool(),
+  question: () => new QuestionTool(),
+  pager: () => new PagerTool(),
+  explore: () => new ExploreTool(),
+  model: (ctx) => new ModelTool(ctx?.modelRegistry || {}),
+  load_skill: () => new LoadSkillTool(),
+  project_info: () => new ProjectInfoTool(),
+  review: () => new ReviewTool(),
+};
+
+// Subagent tool constructors (manager-only)
+const SUBAGENT_TOOL_CONSTRUCTORS = {
+  delegate_task: (tm) => new DelegateTaskTool(tm),
+  task_status: (tm) => new TaskStatusTool(tm),
+  task_followup: (tm) => new TaskFollowupTool(tm),
+  task_interrupt: (tm) => new TaskInterruptTool(tm),
+  plan_status: (tm) => new PlanStatusTool(tm),
+  complete_task: (tm) => new CompleteTaskTool(tm),
+};
+
 /**
  * Create a tool factory that can create and register tools.
  */
@@ -95,53 +123,17 @@ export function createToolFactory(taskManager = null) {
         }
       }
 
-      // Core tools
-      switch (toolName) {
-        case "bash":
-          return new BashTool();
-        case "write":
-          return new WriteTool();
-        case "read":
-          return new ReadTool();
-        case "edit":
-          return new EditTool();
-        case "grep":
-          return new GrepTool();
-        case "find":
-          return new FindTool();
-        case "fetch":
-          return new FetchTool();
-        case "question":
-          return new QuestionTool();
-        case "pager":
-          return new PagerTool();
-        case "explore":
-          return new ExploreTool();
-        case "model":
-          return new ModelTool(ctx?.modelRegistry || {});
-        case "load_skill":
-          return new LoadSkillTool();
-        case "project_info":
-          return new ProjectInfoTool();
-        case "review":
-          return new ReviewTool();
+      // Core tools — lookup from declarative map
+      const coreCtor = TOOL_CONSTRUCTORS[toolName];
+      if (coreCtor) {
+        return coreCtor(ctx);
       }
 
       // Subagent tools (manager-only)
       if (managerToolsEnabled && taskManager) {
-        switch (toolName) {
-          case "delegate_task":
-            return new DelegateTaskTool(taskManager);
-          case "task_status":
-            return new TaskStatusTool(taskManager);
-          case "task_followup":
-            return new TaskFollowupTool(taskManager);
-          case "task_interrupt":
-            return new TaskInterruptTool(taskManager);
-          case "plan_status":
-            return new PlanStatusTool(taskManager);
-          case "complete_task":
-            return new CompleteTaskTool(taskManager);
+        const subCtor = SUBAGENT_TOOL_CONSTRUCTORS[toolName];
+        if (subCtor) {
+          return subCtor(taskManager);
         }
       }
 

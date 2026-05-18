@@ -10,7 +10,7 @@ import {
   generateDiff,
   validateCwdBoundary,
   writeFileWithParents,
-  resolvePath,
+  resolvePathAndValidate,
   fileSize,
   checkWritable,
   checkReadable,
@@ -420,28 +420,28 @@ describe('writeFileWithParents', () => {
   });
 });
 
-describe('resolvePath', () => {
+describe('resolvePathAndValidate', () => {
   it('resolves existing path', () => {
-    const resolved = resolvePath('/workspace/oa-js/src/tools/registry.js');
+    const resolved = resolvePathAndValidate('/workspace/oa-js/src/tools/registry.js');
     expect(resolved).toBe('/workspace/oa-js/src/tools/registry.js');
   });
 
   it('throws for non-existent path', () => {
-    expect(() => resolvePath('/nonexistent/path/file.txt')).toThrow('Path not found');
+    expect(() => resolvePathAndValidate('/nonexistent/path/file.txt')).toThrow('Path not found');
   });
 
   it('throws when path escapes boundary', () => {
-    expect(() => resolvePath('/etc/passwd', '/workspace/oa-js')).toThrow('outside the allowed directory');
+    expect(() => resolvePathAndValidate('/etc/passwd', '/workspace/oa-js')).toThrow('outside the allowed directory');
   });
 
   it('allows path within boundary', () => {
-    const resolved = resolvePath('/workspace/oa-js/src/tools/registry.js', '/workspace/oa-js');
+    const resolved = resolvePathAndValidate('/workspace/oa-js/src/tools/registry.js', '/workspace/oa-js');
     expect(resolved).toBe('/workspace/oa-js/src/tools/registry.js');
   });
 
   it('allows path outside cwd when no boundary is set', () => {
     // When cwdBoundary is null, paths outside the current directory should be allowed
-    const resolved = resolvePath('/etc/hostname');
+    const resolved = resolvePathAndValidate('/etc/hostname');
     expect(resolved).toBe('/etc/hostname');
   });
 });

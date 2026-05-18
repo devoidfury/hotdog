@@ -1,6 +1,6 @@
 // Pager tool — paginate through large tool outputs.
 
-import { ToolContext, toolDef, param, toolResult } from './registry.js';
+import { toolDef, param, toolResult } from './registry.js';
 
 export class PagerTool {
   static TOOL_NAME = 'pager';

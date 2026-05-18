@@ -1,6 +1,6 @@
 #!/usr/bin/env bun
 // oa-agent — AI agent harness with tool calling support.
-// CLI entry point. Mirrors Rust's main.rs structure.
+// CLI entry point.
 
 import readline from "node:readline";
 import { MessageBus } from "./agent/message_bus.js";

@@ -31,7 +31,7 @@ export class BashTool {
       {
         properties: {
           command: param("string", "The shell command to execute."),
-          timeout_ms: param("integer", "Optional timeout in milliseconds."),
+          timeoutMs: param("integer", "Optional timeout in milliseconds."),
         },
         required: ["command"],
       },
@@ -50,7 +50,8 @@ export class BashTool {
   async execute(input, ctx) {
     const args = typeof input === "string" ? JSON.parse(input) : input;
     const command = args.command;
-    const timeout = args.timeout_ms || this.timeoutMs;
+    // Support both camelCase (timeoutMs) and snake_case (timeout_ms) for backward compatibility
+    const timeout = args.timeoutMs ?? args.timeout_ms ?? this.timeoutMs;
 
     if (!command) {
       return toolResult("Error: command is required");

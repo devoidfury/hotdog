@@ -20,16 +20,11 @@ describe('TaskHandle', () => {
 
   it('sends follow-up when running', () => {
     const statusRef = { value: TASK_STATUS.RUNNING };
-    let followUpReceived = null;
-    const followEmitter = {
-      emit: (event, data) => {
-        if (event === 'follow-up') followUpReceived = data;
-      },
-    };
-    const handle = new TaskHandle('task-1', statusRef, null, followEmitter);
+    const followQueue = [];
+    const handle = new TaskHandle('task-1', statusRef, null, followQueue);
     const sent = handle.sendFollowUp('continue working');
     expect(sent).toBe(true);
-    expect(followUpReceived).toBe('continue working');
+    expect(followQueue).toEqual(['continue working']);
   });
 
   it('does not send follow-up when not running', () => {
@@ -102,7 +97,7 @@ describe('TaskWorker', () => {
     expect(handle.status).toBe('running');
   });
 
-  it('creates follow emitter with event listeners', () => {
+  it('creates handle with follow queue', () => {
     const worker = new TaskWorker({
       taskId: 'task-1',
       taskDescription: 'Do something',
@@ -111,10 +106,11 @@ describe('TaskWorker', () => {
       systemPrompt: 'You are a worker',
     });
     const handle = worker._createHandle();
-    let received = null;
-    handle._followEmitter.on('follow-up', (data) => { received = data; });
-    handle._followEmitter.emit('follow-up', 'test message');
-    expect(received).toBe('test message');
+    // The handle's _followQueue is a reference to the worker's queue
+    expect(handle._followQueue).toBe(worker._followQueue);
+    // Messages pushed to the queue are accessible
+    worker._followQueue.push('test message');
+    expect(worker._followQueue).toEqual(['test message']);
   });
 });
 

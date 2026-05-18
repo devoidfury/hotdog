@@ -2,7 +2,7 @@
 
 import { execFile } from 'node:child_process';
 import util from 'node:util';
-import { ToolContext, toolDef, param, toolResult, truncateOutput } from './registry.js';
+import { toolDef, param, toolResult, truncateOutput } from './registry.js';
 import { DEFAULT_FIND_MAX_RESULTS, DEFAULT_MAX_TOOL_OUTPUT_LINES } from '../config.js';
 
 const execFileAsync = util.promisify(execFile);

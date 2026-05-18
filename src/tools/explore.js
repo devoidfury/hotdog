@@ -1,5 +1,4 @@
 // Explore tool — run the agent in explorer mode against a project directory.
-// Mirrors Rust: oa-agent/src/tools/explore/mod.rs
 
 import { spawn } from "node:child_process";
 import path from "node:path";

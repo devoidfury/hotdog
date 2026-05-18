@@ -3,7 +3,7 @@
 import fs from 'node:fs/promises';
 import fsSync from 'node:fs';
 import path from 'node:path';
-import { toolDef, param, toolResult, validateCwdBoundary } from './registry.js';
+import { toolDef, param, toolResult, validateCwdBoundary, resolvePath } from './registry.js';
 import { DEFAULT_MAX_EDIT_INPUT_SIZE } from '../config.js';
 
 export class EditTool {
@@ -107,24 +107,6 @@ export class EditTool {
       `Successfully edited '${filePath}', found ${matchInfo.matchCount} match${matchInfo.matchCount > 1 ? 'es' : ''}, replaced with ${lineCount} line${lineCount > 1 ? 's' : ''}`,
     );
   }
-}
-
-/**
- * Resolve a file path against cwdBoundary or workspaceRoot.
- * cwdBoundary takes precedence if set; otherwise falls back to workspaceRoot.
- * Absolute paths are returned as-is.
- */
-function resolvePath(filePath, cwdBoundary, workspaceRoot) {
-  if (path.isAbsolute(filePath)) {
-    return filePath;
-  }
-  if (cwdBoundary) {
-    return path.resolve(cwdBoundary, filePath);
-  }
-  if (workspaceRoot) {
-    return path.resolve(workspaceRoot, filePath);
-  }
-  return path.resolve(filePath);
 }
 
 /**

@@ -1,7 +1,7 @@
 // Question tool — ask the user questions and collect answers.
 
 import readline from 'node:readline';
-import { ToolContext, toolDef, param, toolResult } from './registry.js';
+import { toolDef, param, toolResult } from './registry.js';
 
 export class QuestionTool {
   static TOOL_NAME = 'question';

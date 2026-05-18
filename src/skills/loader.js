@@ -1,6 +1,7 @@
 // Skills loader — loads SKILL.md files from skill directories.
 // Supports tool-dependencies, auto-activation, and pattern matching.
 
+import fs from "node:fs";
 import { join } from "node:path";
 import { parseFrontMatter } from "../config.js";
 import { validateNameable } from "../lib.js";
@@ -135,7 +136,6 @@ function parseToolList(val) {
  * Stores paths relative to the skill root (matching Rust's strip_prefix).
  */
 function collectAdditionalFiles(dirPath, parentDir, files = []) {
-  const fs = require("node:fs");
   try {
     const entries = fs.readdirSync(dirPath, { withFileTypes: true });
     for (const entry of entries) {
@@ -182,7 +182,6 @@ export class SkillsLoader {
   }
 
   loadFromDirectory(dir) {
-    const fs = require("node:fs");
     let count = 0;
 
     let entries;

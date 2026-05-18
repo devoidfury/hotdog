@@ -99,17 +99,6 @@ describe('SessionManager', () => {
     expect(agent.getSink()).toBe(newSink);
   });
 
-  it('returns agent clone', () => {
-    const agent = manager.agentClone();
-    expect(agent).not.toBeNull();
-  });
-
-  it('returns the store', () => {
-    const store = manager.store();
-    expect(store).not.toBeNull();
-    expect(store.size()).toBe(1);
-  });
-
   it('returns the builder', () => {
     const b = manager.builder();
     expect(b).toBeInstanceOf(MockBuilder);
@@ -125,17 +114,13 @@ describe('SessionManager with multiple sessions', () => {
     manager = await SessionManager.create(builder, sink);
   });
 
-  it('tracks multiple sessions in store', async () => {
-    const store = manager.store();
-    expect(store.size()).toBe(1);
-
+  it('tracks multiple sessions', async () => {
     const id1 = await manager.newSession(new MockSink());
-    expect(store.size()).toBe(2);
-    expect(store.getAgent(id1)).not.toBeNull();
+    expect(id1).not.toBeNull();
 
     const id2 = await manager.newSession(new MockSink());
-    expect(store.size()).toBe(3);
-    expect(store.getAgent(id2)).not.toBeNull();
+    expect(id2).not.toBeNull();
+    expect(id1).not.toBe(id2);
   });
 
   it('switches between sessions correctly', async () => {

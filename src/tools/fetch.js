@@ -1,6 +1,7 @@
 // Fetch tool — make HTTP requests.
 
-import { ToolContext, toolDef, param, toolResult } from './registry.js';
+import { spawnSync } from 'node:child_process';
+import { toolDef, param, toolResult } from './registry.js';
 
 const VALID_METHODS = ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'HEAD'];
 const METHODS_WITH_BODY = ['POST', 'PUT', 'PATCH'];
@@ -16,7 +17,7 @@ export class FetchTool {
   toToolDef() {
     return toolDef(
       FetchTool.TOOL_NAME,
-      'Perform a web request to a URL. Supports GET, POST, PUT, DELETE, PATCH, HEAD methods with optional headers and body. Returns the response body, status code, and content type.',
+      'Perform a web request to a URL. Supports GET, POST, PUT, DELETE, PATCH, HEAD methods with optional headers and body. Returns the response body, status code, and content type. When showOriginal is true, returns the raw response body without pandoc conversion.',
       {
         schema: 'https://json-schema.org/draft/2020-12/schema',
         properties: {
@@ -24,6 +25,7 @@ export class FetchTool {
           method: param('string', 'HTTP method to use (GET, POST, PUT, DELETE, PATCH, HEAD). Defaults to GET.', { enum: VALID_METHODS }),
           headers: param('object', 'Optional HTTP headers as key-value pairs'),
           body: param('string', 'Optional request body (for POST, PUT, PATCH)'),
+          showOriginal: param('boolean', 'If true, return the original raw response body without pandoc conversion. Defaults to false, which converts HTML to GFM markdown.'),
         },
         required: ['url'],
       }
@@ -50,7 +52,7 @@ export class FetchTool {
       return toolResult(error);
     }
 
-    const { url, method, headers, body } = args;
+    const { url, method, headers, body, showOriginal } = args;
 
     try {
       const resp = await fetch(url, {
@@ -79,15 +81,57 @@ export class FetchTool {
       const reason = resp.statusText || 'Unknown';
       const truncated = bodyLength > 8000;
 
+      // If showOriginal is true, return raw body without conversion
+      if (showOriginal) {
+        return toolResult({
+          status: resp.status,
+          status_text: reason,
+          method,
+          url,
+          content_type: contentType,
+          body_length: bodyLength,
+          ...(truncated ? { truncated: 'true' } : {}),
+          body: respBody,
+          headers: respHeaders,
+        });
+      }
+
+      // When showOriginal is not true, convert HTML through pandoc to GFM
+      let bodyToReturn = respBody;
+      if (typeof respBody === 'string' && (contentType.includes('text/html') || contentType.includes('application/xhtml+xml'))) {
+        try {
+          const result = spawnSync('pandoc', ['-f', 'html', '-t', 'gfm'], {
+            input: respBody,
+            encoding: 'utf-8',
+            maxBuffer: 10 * 1024 * 1024,
+          });
+          if (result.error) {
+            // pandoc not available or failed to spawn; use original body
+            bodyToReturn = respBody;
+          } else if (result.status === 0) {
+            bodyToReturn = result.stdout;
+          } else {
+            // pandoc failed for some other reason; use original body
+            bodyToReturn = respBody;
+          }
+        } catch {
+          // pandoc not available; use original body
+          bodyToReturn = respBody;
+        }
+      }
+
+      const finalBodyLength = typeof bodyToReturn === 'string' ? bodyToReturn.length : JSON.stringify(bodyToReturn).length;
+      const finalTruncated = finalBodyLength > 8000;
+
       return toolResult({
         status: resp.status,
         status_text: reason,
         method,
         url,
         content_type: contentType,
-        body_length: bodyLength,
-        ...(truncated ? { truncated: 'true' } : {}),
-        body: respBody,
+        body_length: finalBodyLength,
+        ...(finalTruncated ? { truncated: 'true' } : {}),
+        body: bodyToReturn,
         headers: respHeaders,
       });
     } catch (e) {
@@ -139,6 +183,7 @@ function parseArgs(input) {
 
   const headers = json.headers && typeof json.headers === 'object' ? json.headers : {};
   const body = typeof json.body === 'string' ? json.body : null;
+  const showOriginal = json.showOriginal === true;
 
-  return { args: { url, method, headers, body }, error: null };
+  return { args: { url, method, headers, body, showOriginal }, error: null };
 }

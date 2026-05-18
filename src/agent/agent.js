@@ -1,6 +1,7 @@
 // Agent — the core AI agent with tool calling support.
 // Manages conversation context, model selection, tool execution, and the run loop.
 
+import fs from "node:fs";
 import {
   MessageLog,
   outputEvent,
@@ -106,7 +107,6 @@ export class Agent {
 
   /**
    * Get the set of tool names allowed by active skills.
-   * Rust: allowed_tool_names()
    */
   allowedToolNames() {
     if (this.activeSkills.size === 0) return new Set();
@@ -126,7 +126,6 @@ export class Agent {
   /**
    * Get combined tool patterns: include_tools + allowed_tools from active skills.
    * Patterns are ADDITIVE — they don't bypass core tools.
-   * Rust: combined_tool_patterns()
    */
   combinedToolPatterns() {
     if (this.activeSkills.size === 0) return new Set();
@@ -150,7 +149,6 @@ export class Agent {
    * Check if a tool is allowed by active skills.
    * All tools (including core) are subject to skill filtering.
    * If no skills are active, everything is allowed.
-   * Rust: is_tool_allowed()
    */
   isToolAllowed(toolName) {
     const patterns = this.combinedToolPatterns();
@@ -162,7 +160,6 @@ export class Agent {
    * Get tool definitions filtered by active skill patterns.
    * All tools (including core) are subject to skill filtering.
    * If no skills are active, all tools are returned.
-   * Rust: filtered_tool_defs()
    */
   filteredToolDefs(toolRegistry) {
     const patterns = this.combinedToolPatterns();
@@ -174,7 +171,8 @@ export class Agent {
 
     for (const t of defs) {
       const name = t.function?.name || "";
-      if (_toolMatchesPattern(name, patterns) && seen.add(name)) {
+      if (_toolMatchesPattern(name, patterns) && !seen.has(name)) {
+        seen.add(name);
         result.push(t);
       }
     }
@@ -186,7 +184,6 @@ export class Agent {
 
   /**
    * Add user input to the context.
-   * Rust: add_input() — adds user message + optional session log.
    */
   addInput(content, logToSession = true) {
     this.ensureSystemPrompt();
@@ -200,7 +197,6 @@ export class Agent {
 
   /**
    * Add an assistant response to the context.
-   * Rust: add_response() — adds assistant message with reasoning + tool_calls + session log.
    */
   addResponse(content, reasoningContent = null, toolCalls = null) {
     this.context.addAssistantMessage(content, reasoningContent, toolCalls);
@@ -209,7 +205,6 @@ export class Agent {
 
   /**
    * Build layered messages for the API request.
-   * Rust: build_layered_messages() — maps Message → ChatMessage format.
    */
   buildLayeredMessages() {
     return this.context.getMessages();
@@ -217,7 +212,6 @@ export class Agent {
 
   /**
    * Clear context and start a new session.
-   * Rust: clear_context() — new session ID, new session log, reset, iteration reset.
    */
   clearContext() {
     const newSessionId = crypto.randomUUID();
@@ -231,7 +225,6 @@ export class Agent {
 
   /**
    * Ensure system prompt is inserted before any user messages.
-   * Rust: ensure_system_prompt() — only adds if no system message exists (preserves cache).
    */
   ensureSystemPrompt() {
     if (this.context.systemMessages.length > 0) return;
@@ -259,9 +252,6 @@ export class Agent {
 
   /**
    * Regenerate the system prompt.
-   * Rust: regenerate_system_prompt() — replaces system message at index 0,
-   * prunes <skill_content> blocks from conversation (dynamically loaded skills
-   * are now embedded in the system message), keeps all other messages.
    */
   regenerateSystemPrompt() {
     const profile = getProfile(this._config || {}, this.profileName);
@@ -313,7 +303,6 @@ export class Agent {
 
   /**
    * Build skills preamble content for the system prompt.
-   * Rust: collect_prompt_parts() + skill_refs_slice()
    */
   _buildSkillsPreamble() {
     if (this._allSkills.length === 0) return "";
@@ -353,8 +342,6 @@ export class Agent {
 
   /**
    * Handle tool calls from an LLM response.
-   * Rust: handle_tool_calls() — allowance check, duration tracking, first-use help,
-   * output caching, tool result logging.
    */
   async handleToolCalls(toolCalls, toolRegistry) {
     for (const tc of toolCalls) {
@@ -450,8 +437,7 @@ export class Agent {
 
   /**
    * Compact the message log using LLM-based summarization.
-   * Rust: compact() — uses find_first_kept_index, <previous-context-summary> wrapper,
-   * rebuilds context with system + summary + kept messages.
+   * Compact the message log using LLM-based summarization.
    */
   async compactMessages(overrideKeep) {
     const messages = this.context.messages();
@@ -468,10 +454,10 @@ export class Agent {
       }),
     );
 
-    // Convert Message objects to plain objects (toJSON uses snake_case expected by serializeConversation)
+    // Convert Message objects to plain objects for API serialization
     const plainMessages = allMessages.map((m) => m.toJSON());
 
-    // Use Rust-compatible message keeping: find_first_kept_index
+    // Find the first message to keep
     const firstKept = findFirstKeptIndex(plainMessages, keepRecent);
     if (firstKept === 0) return null;
 
@@ -519,7 +505,7 @@ export class Agent {
     // Add system prompt back
     this.ensureSystemPrompt();
 
-    // Add compaction summary as user message with Rust-compatible wrapper
+    // Add compaction summary as user message
     const summaryContent = `<previous-context-summary>${result.summary}</previous-context-summary>`;
     this.context.addUserMessage(summaryContent);
 
@@ -550,7 +536,6 @@ export class Agent {
    * Write the serialized context after compaction to compaction.out.json.
    */
   writeCompactionDebugFile() {
-    const fs = require("node:fs");
     const messages = this.context.getMessages();
     const chatMessages = messages.map((m) => m.toJSON());
     const json = JSON.stringify(chatMessages, null, 2);
@@ -565,8 +550,6 @@ export class Agent {
 
   /**
    * Execute a saved prompt template.
-   * Rust: execute_prompt() — renders with ARGS, appends as user message
-   * (preserves context), logs with prompt source.
    */
   executePrompt(name, args) {
     if (!this.promptsLoader) {
@@ -597,7 +580,7 @@ export class Agent {
       }
     }
 
-    // Append as user message (preserves context — Rust behavior)
+    // Append as user message (preserves context)
     this.context.addUserMessage(rendered);
     this.sessionLog.writePrompt(rendered);
 
@@ -608,8 +591,6 @@ export class Agent {
 
   /**
    * Activate a skill (mark as loaded, inject into context).
-   * Rust: activate_skill() — wraps in structured <skill_content> tags,
-   * logs to session, deduplicates via activeSkills Set.
    */
   activateSkill(name) {
     if (!this.skillsLoader) {
@@ -652,7 +633,6 @@ export class Agent {
 
   /**
    * Set the output sink for this agent.
-   * Rust: set_sink() — useful for swapping sinks after construction.
    */
   setSink(sink) {
     this.sink = sink;

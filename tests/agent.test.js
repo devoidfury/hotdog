@@ -602,7 +602,12 @@ describe('Agent.regenerateSystemPrompt', () => {
     // System prompt should be replaced with new content
     expect(agent.context.getMessages()[0].role).toBe('system');
     expect(agent.context.getMessages()[0].content).toContain('Role & Mission');
-    expect(agent.context.getMessages()[0].content).toContain(rendered);
+    // Check that the regenerated prompt contains the key static parts
+    // (not the full string, since timestamps change between calls)
+    expect(agent.context.getMessages()[0].content).toContain('# Role & Mission');
+    expect(agent.context.getMessages()[0].content).toContain('# Environment');
+    expect(agent.context.getMessages()[0].content).toContain('# Guidelines');
+    expect(agent.context.getMessages()[0].content).toContain('# Project Context');
   });
 
   it('prunes old skill content messages from conversation', () => {
@@ -1320,5 +1325,339 @@ describe('Agent.createToolContext', () => {
     const ctx = agent.createToolContext();
     ctx.onClearContext();
     expect(agent.iterationCount).toBe(0);
+  });
+});
+
+describe('Agent._buildSkillsPreamble', () => {
+  it('returns empty string when no skills', () => {
+    const agent = new Agent();
+    expect(agent._buildSkillsPreamble()).toBe('');
+  });
+
+  it('returns empty string when no visible skills', () => {
+    const agent = new Agent({
+      allSkills: [
+        { name: 'skill-a', visible: false, loaded: true, content: 'content' },
+      ],
+    });
+    expect(agent._buildSkillsPreamble()).toBe('');
+  });
+
+  it('returns empty string when all visible skills are disabled', () => {
+    const agent = new Agent({
+      allSkills: [
+        { name: 'skill-a', visible: true, disableModelInvocation: true, loaded: true, content: 'content' },
+      ],
+    });
+    expect(agent._buildSkillsPreamble()).toBe('');
+  });
+
+  it('includes loaded skills with content', () => {
+    const agent = new Agent({
+      allSkills: [
+        { name: 'skill-a', visible: true, loaded: true, content: 'Skill A content' },
+      ],
+      skillDirectories: ['/skills'],
+    });
+    const preamble = agent._buildSkillsPreamble();
+    expect(preamble).toContain('# Available Skills');
+    expect(preamble).toContain('## Loaded Skills');
+    expect(preamble).toContain('<skill_content name="skill-a">');
+    expect(preamble).toContain('Skill A content');
+  });
+
+  it('includes unloaded skills with descriptions', () => {
+    const agent = new Agent({
+      allSkills: [
+        { name: 'skill-a', visible: true, loaded: false, description: 'A helpful skill' },
+      ],
+      skillDirectories: ['/skills'],
+    });
+    const preamble = agent._buildSkillsPreamble();
+    expect(preamble).toContain('# Available Skills');
+    expect(preamble).toContain('## Available Skills');
+    expect(preamble).toContain('<name>skill-a</name>');
+    expect(preamble).toContain('A helpful skill');
+  });
+
+  it('includes both loaded and unloaded skills', () => {
+    const agent = new Agent({
+      allSkills: [
+        { name: 'loaded-skill', visible: true, loaded: true, content: 'loaded content' },
+        { name: 'unloaded-skill', visible: true, loaded: false, description: 'unloaded desc' },
+      ],
+      skillDirectories: ['/skills'],
+    });
+    const preamble = agent._buildSkillsPreamble();
+    expect(preamble).toContain('<skill_content name="loaded-skill">');
+    expect(preamble).toContain('loaded content');
+    expect(preamble).toContain('<name>unloaded-skill</name>');
+    expect(preamble).toContain('unloaded desc');
+  });
+
+  it('uses default skill directory when none configured', () => {
+    const agent = new Agent({
+      allSkills: [
+        { name: 'skill-a', visible: true, loaded: true, content: 'content' },
+      ],
+      skillDirectories: [],
+    });
+    const preamble = agent._buildSkillsPreamble();
+    expect(preamble).toContain('/skills');
+  });
+});
+
+describe('Agent.executePrompt', () => {
+  it('returns error when no prompts loader', () => {
+    const agent = new Agent();
+    const result = agent.executePrompt('test');
+    expect(result.success).toBe(false);
+    expect(result.error).toBe('Prompts loader not configured');
+  });
+
+  it('returns error for unknown prompt', () => {
+    const mockLoader = {
+      allPrompts: () => [{ name: 'prompt-a', disableModelInvocation: false }],
+      getPrompt: () => null,
+    };
+    const agent = new Agent({ promptsLoader: mockLoader });
+    const result = agent.executePrompt('unknown');
+    expect(result.success).toBe(false);
+    expect(result.error).toContain('Unknown prompt');
+    expect(result.error).toContain('prompt-a');
+  });
+
+  it('executes prompt without args', () => {
+    const mockLoader = {
+      getPrompt: () => ({ content: 'Hello {{ARGS.name}}' }),
+      allPrompts: () => [],
+    };
+    const agent = new Agent({ promptsLoader: mockLoader });
+    const result = agent.executePrompt('test');
+    expect(result.success).toBe(true);
+    expect(result.prompt).toBe('Hello {{ARGS.name}}');
+  });
+
+  it('executes prompt with args', () => {
+    const mockLoader = {
+      getPrompt: () => ({ content: 'Hello {{ARGS.name}}' }),
+      allPrompts: () => [],
+    };
+    const agent = new Agent({ promptsLoader: mockLoader });
+    const result = agent.executePrompt('test', { name: 'World' });
+    expect(result.success).toBe(true);
+    expect(result.prompt).toBe('Hello World');
+  });
+
+  it('falls back to raw content on render error', () => {
+    const mockLoader = {
+      getPrompt: () => ({ content: '{{invalid syntax' }),
+      allPrompts: () => [],
+    };
+    const agent = new Agent({ promptsLoader: mockLoader });
+    const result = agent.executePrompt('test', { name: 'World' });
+    expect(result.success).toBe(true);
+    expect(result.prompt).toBe('{{invalid syntax');
+  });
+
+  it('adds rendered prompt as user message', () => {
+    const mockLoader = {
+      getPrompt: () => ({ content: 'Prompt content' }),
+      allPrompts: () => [],
+    };
+    const agent = new Agent({ promptsLoader: mockLoader });
+    agent.executePrompt('test');
+    const messages = agent.context.getMessages();
+    const userMsg = [...messages].reverse().find(m => m.role === 'user');
+    expect(userMsg.content).toBe('Prompt content');
+  });
+});
+
+describe('Agent.clearContext', () => {
+  it('generates new session ID', () => {
+    const agent = new Agent();
+    const oldId = agent.sessionId;
+    agent.clearContext();
+    expect(agent.sessionId).not.toBe(oldId);
+  });
+
+  it('resets iteration count', () => {
+    const agent = new Agent();
+    agent.iterationCount = 42;
+    agent.clearContext();
+    expect(agent.iterationCount).toBe(0);
+  });
+
+  it('clears context messages', () => {
+    const agent = new Agent();
+    agent.addInput('Hello');
+    agent.clearContext();
+    expect(agent.context.size()).toBe(0);
+  });
+
+  it('does not clear used tools', () => {
+    const agent = new Agent();
+    agent.usedTools.add('bash');
+    agent.clearContext();
+    expect(agent.usedTools.has('bash')).toBe(true);
+  });
+
+  it('does not clear active skills', () => {
+    const agent = new Agent();
+    agent.activeSkills.add('skill-a');
+    agent.clearContext();
+    expect(agent.activeSkills.has('skill-a')).toBe(true);
+  });
+});
+
+describe('Agent.filteredToolDefs', () => {
+  it('returns all defs when no active skills', () => {
+    const agent = new Agent();
+    const registry = new ToolRegistry();
+    registry.register('bash', { toToolDef: () => ({ function: { name: 'bash' } }) });
+    registry.register('write', { toToolDef: () => ({ function: { name: 'write' } }) });
+    const defs = agent.filteredToolDefs(registry);
+    expect(defs).toHaveLength(2);
+  });
+
+  it('filters tool defs by active skill patterns', () => {
+    const agent = new Agent({
+      skills: [{ name: 'skill-a', allowedTools: ['read'], includeTools: ['grep'] }],
+    });
+    agent.activeSkills.add('skill-a');
+    const registry = new ToolRegistry();
+    registry.register('bash', { toToolDef: () => ({ function: { name: 'bash' } }) });
+    registry.register('read', { toToolDef: () => ({ function: { name: 'read' } }) });
+    registry.register('grep', { toToolDef: () => ({ function: { name: 'grep' } }) });
+    const defs = agent.filteredToolDefs(registry);
+    expect(defs).toHaveLength(2);
+    expect(defs[0].function.name).toBe('read');
+    expect(defs[1].function.name).toBe('grep');
+  });
+
+  it('deduplicates tool defs', () => {
+    const agent = new Agent({
+      skills: [{ name: 'skill-a', allowedTools: ['read'] }],
+    });
+    agent.activeSkills.add('skill-a');
+    const registry = new ToolRegistry();
+    registry.register('read', { toToolDef: () => ({ function: { name: 'read' } }) });
+    // Register same tool name again - should be deduplicated
+    registry.register('read2', { toToolDef: () => ({ function: { name: 'read' } }) });
+    const defs = agent.filteredToolDefs(registry);
+    expect(defs).toHaveLength(1);
+  });
+});
+
+describe('Agent.isToolAllowed', () => {
+  it('returns true when no active skills', () => {
+    const agent = new Agent();
+    expect(agent.isToolAllowed('bash')).toBe(true);
+    expect(agent.isToolAllowed('write')).toBe(true);
+  });
+
+  it('returns true for tools allowed by active skills', () => {
+    const agent = new Agent({
+      skills: [{ name: 'skill-a', allowedTools: ['read', 'write'] }],
+    });
+    agent.activeSkills.add('skill-a');
+    expect(agent.isToolAllowed('read')).toBe(true);
+    expect(agent.isToolAllowed('write')).toBe(true);
+  });
+
+  it('returns false for tools not allowed by active skills', () => {
+    const agent = new Agent({
+      skills: [{ name: 'skill-a', allowedTools: ['read', 'write'] }],
+    });
+    agent.activeSkills.add('skill-a');
+    expect(agent.isToolAllowed('bash')).toBe(false);
+  });
+
+  it('returns false for tools not in any active skill', () => {
+    const agent = new Agent({
+      skills: [
+        { name: 'skill-a', allowedTools: ['read'] },
+        { name: 'skill-b', allowedTools: ['write'] },
+      ],
+    });
+    agent.activeSkills.add('skill-a');
+    expect(agent.isToolAllowed('read')).toBe(true);
+    expect(agent.isToolAllowed('write')).toBe(false);
+  });
+
+  it('supports includeTools patterns', () => {
+    const agent = new Agent({
+      skills: [{ name: 'skill-a', allowedTools: ['read'], includeTools: ['grep*'] }],
+    });
+    agent.activeSkills.add('skill-a');
+    expect(agent.isToolAllowed('grep')).toBe(true);
+    expect(agent.isToolAllowed('grep-file')).toBe(true);
+    expect(agent.isToolAllowed('bash')).toBe(false);
+  });
+});
+
+describe('Agent.allowedToolNames', () => {
+  it('returns empty set when no active skills', () => {
+    const agent = new Agent();
+    const allowed = agent.allowedToolNames();
+    expect(allowed.size).toBe(0);
+  });
+
+  it('returns allowed tools from active skills', () => {
+    const agent = new Agent({
+      skills: [{ name: 'skill-a', allowedTools: ['read', 'grep'] }],
+    });
+    agent.activeSkills.add('skill-a');
+    const allowed = agent.allowedToolNames();
+    expect(allowed.has('read')).toBe(true);
+    expect(allowed.has('grep')).toBe(true);
+    expect(allowed.has('bash')).toBe(false);
+  });
+
+  it('converts tool names to lowercase', () => {
+    const agent = new Agent({
+      skills: [{ name: 'skill-a', allowedTools: ['READ', 'Write'] }],
+    });
+    agent.activeSkills.add('skill-a');
+    const allowed = agent.allowedToolNames();
+    expect(allowed.has('read')).toBe(true);
+    expect(allowed.has('write')).toBe(true);
+  });
+});
+
+describe('Agent.currentModel', () => {
+  it('returns the current model', () => {
+    const agent = new Agent();
+    expect(agent.currentModel()).toBe('qwen3.5-0.8b');
+  });
+
+  it('returns custom model when set', () => {
+    const agent = new Agent({ model: 'custom-model' });
+    expect(agent.currentModel()).toBe('custom-model');
+  });
+});
+
+describe('Agent.cancel', () => {
+  it('cancels the agent', () => {
+    const agent = new Agent();
+    expect(agent.cancelled).toBe(false);
+    agent.cancel(true);
+    expect(agent.cancelled).toBe(true);
+  });
+
+  it('resets cancellation', () => {
+    const agent = new Agent();
+    agent.cancel(true);
+    agent.cancel(false);
+    expect(agent.cancelled).toBe(false);
+  });
+});
+
+describe('Agent.setSink', () => {
+  it('sets a new output sink', () => {
+    const agent = new Agent();
+    const newSink = { emit: () => {} };
+    agent.setSink(newSink);
+    expect(agent.sink).toBe(newSink);
   });
 });

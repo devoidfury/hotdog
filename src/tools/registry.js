@@ -1,7 +1,8 @@
 // Tool registry and common utilities.
 
-const fs = require('node:fs');
-const path = require('node:path');
+import fs from 'node:fs';
+import path from 'node:path';
+import { spawnSync } from 'node:child_process';
 
 /**
  * Metadata keys rendered as XML attributes on the root <tool> tag.
@@ -271,11 +272,29 @@ export function validateCwdBoundary(filePath, cwdBoundary) {
 }
 
 /**
+ * Resolve a path against cwdBoundary or workspaceRoot.
+ * cwdBoundary takes precedence if set; otherwise falls back to workspaceRoot.
+ * Absolute paths are returned as-is.
+ */
+export function resolvePath(filePath, cwdBoundary, workspaceRoot) {
+  if (path.isAbsolute(filePath)) {
+    return filePath;
+  }
+  if (cwdBoundary) {
+    return path.resolve(cwdBoundary, filePath);
+  }
+  if (workspaceRoot) {
+    return path.resolve(workspaceRoot, filePath);
+  }
+  return path.resolve(filePath);
+}
+
+/**
  * Resolve a path and verify it stays within the cwd boundary (if set).
  * Returns the resolved path string.
  * Throws if the path doesn't exist or escapes the boundary.
  */
-export function resolvePath(requested, cwdBoundary = null) {
+export function resolvePathAndValidate(requested, cwdBoundary = null) {
   const resolved = path.resolve(requested);
 
   if (!fs.existsSync(resolved)) {
@@ -368,7 +387,6 @@ export function getRequiredStr(value, key) {
  * Throws on non-zero exit or spawn failure.
  */
 export function runCommand(cmd, args = [], cwd = null) {
-  const { spawnSync } = require('node:child_process');
   const result = spawnSync(cmd, args, {
     cwd,
     encoding: 'utf-8',

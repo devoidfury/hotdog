@@ -1,4 +1,4 @@
-// System prompt builder — mirrors Rust `context/system_prompt.rs`.
+// System prompt builder.
 // Reads the template from disk and renders with variables.
 
 import { readFileSync } from "node:fs";
@@ -72,7 +72,7 @@ export function loadSystemPromptTemplate(templatePath) {
 
 /**
  * Build the full system prompt.
- * Mirrors Rust `build_system_prompt_with_skills`.
+ * Build system prompt with skills preamble.
  */
 export function buildSystemPrompt(options) {
   const template = loadSystemPromptTemplate(options.templatePath);
@@ -84,7 +84,7 @@ export function buildSystemPrompt(options) {
     profile_name: options.profileName || "default",
     cwd: cwd(),
     platform: process.platform,
-    session_start: new Date().toISOString(),
+    session_start: new Date().toISOString().slice(0, 10),
     aspects: options.aspects || [],
     agents_md: options.agentsMd || "",
   };

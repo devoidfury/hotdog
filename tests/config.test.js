@@ -2,7 +2,6 @@ import { describe, it, expect } from 'bun:test';
 import {
   parseFrontMatter,
   resolveString,
-  resolveApiKey,
   isFalse,
   isEmptyArray,
   isNoneOr,
@@ -149,31 +148,6 @@ describe('resolveString', () => {
     expect(resolveString(null, null, 'default', 'TEST_RESOLVE2')).toBe('default');
     if (orig !== undefined) process.env.TEST_RESOLVE2 = orig;
     else delete process.env.TEST_RESOLVE2;
-  });
-});
-
-describe('resolveApiKey', () => {
-  it('prefers cli key', () => {
-    expect(resolveApiKey('cli-key', {})).toBe('cli-key');
-  });
-
-  it('uses config key when no cli', () => {
-    expect(resolveApiKey(null, { apiKey: 'config-key' })).toBe('config-key');
-  });
-
-  it('uses env key when no cli or config', () => {
-    const orig = process.env.AI_API_KEY;
-    process.env.AI_API_KEY = 'env-key';
-    expect(resolveApiKey(null, {})).toBe('env-key');
-    if (orig !== undefined) process.env.AI_API_KEY = orig;
-    else delete process.env.AI_API_KEY;
-  });
-
-  it('returns null when nothing set', () => {
-    const orig = process.env.AI_API_KEY;
-    delete process.env.AI_API_KEY;
-    expect(resolveApiKey(null, {})).toBeNull();
-    if (orig !== undefined) process.env.AI_API_KEY = orig;
   });
 });
 

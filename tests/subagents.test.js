@@ -398,3 +398,115 @@ describe('TaskWorker', () => {
     expect(handle.taskId).toBe('t1');
   });
 });
+
+describe('DelegateTaskTool.toToolDef', () => {
+  it('includes visible profiles in description', () => {
+    const tm = new MockTaskManager();
+    tm._config = {
+      worker_profiles: {
+        'task-default': { visibleWorker: true },
+        'task-default2': { visibleWorker: false },
+      },
+    };
+    const tool = new DelegateTaskTool(tm);
+    const def = tool.toToolDef();
+    expect(def.function.description).toContain('task-default');
+    expect(def.function.description).not.toContain('task-default2');
+  });
+
+  it('handles null task manager', () => {
+    const tool = new DelegateTaskTool(null);
+    const def = tool.toToolDef();
+    expect(def.function.name).toBe('delegate_task');
+  });
+});
+
+describe('TaskFollowupTool.toToolDef', () => {
+  it('generates correct tool definition', () => {
+    const tm = new MockTaskManager();
+    const tool = new TaskFollowupTool(tm);
+    const def = tool.toToolDef();
+    expect(def.function.name).toBe('task_followup');
+    expect(def.function.parameters.required).toEqual(['task_id', 'message']);
+  });
+});
+
+describe('TaskFollowupTool.callDisplay', () => {
+  it('shows truncated message', () => {
+    const tm = new MockTaskManager();
+    const tool = new TaskFollowupTool(tm);
+    const display = tool.callDisplay(JSON.stringify({ task_id: 't1', message: 'A very long message that should be truncated' }));
+    expect(display).toContain('task_followup');
+    expect(display).toContain('t1');
+    // Message is truncated to 40 chars: task_followup(t1 -> ...) = 16 + 2 + 4 + 40 + 1 = 63 max
+    expect(display.length).toBeLessThanOrEqual(63);
+  });
+});
+
+describe('TaskInterruptTool.toToolDef', () => {
+  it('generates correct tool definition', () => {
+    const tm = new MockTaskManager();
+    const tool = new TaskInterruptTool(tm);
+    const def = tool.toToolDef();
+    expect(def.function.name).toBe('task_interrupt');
+    expect(def.function.parameters.required).toEqual(['task_id']);
+  });
+});
+
+describe('TaskInterruptTool.callDisplay', () => {
+  it('shows task ID', () => {
+    const tm = new MockTaskManager();
+    const tool = new TaskInterruptTool(tm);
+    const display = tool.callDisplay(JSON.stringify({ task_id: 't1' }));
+    expect(display).toContain('task_interrupt');
+    expect(display).toContain('t1');
+  });
+});
+
+describe('PlanStatusTool.toToolDef', () => {
+  it('generates correct tool definition', () => {
+    const tm = new MockTaskManager();
+    const tool = new PlanStatusTool(tm);
+    const def = tool.toToolDef();
+    expect(def.function.name).toBe('plan_status');
+    expect(def.function.parameters.required).toEqual([]);
+  });
+});
+
+describe('PlanStatusTool.callDisplay', () => {
+  it('shows task ID when specified', () => {
+    const tm = new MockTaskManager();
+    const tool = new PlanStatusTool(tm);
+    const display = tool.callDisplay(JSON.stringify({ task_id: 't1' }));
+    expect(display).toContain('plan_status');
+    expect(display).toContain('task=t1');
+  });
+
+  it('shows all when no task ID', () => {
+    const tm = new MockTaskManager();
+    const tool = new PlanStatusTool(tm);
+    const display = tool.callDisplay(JSON.stringify({}));
+    expect(display).toContain('plan_status');
+    expect(display).toContain('task=all');
+  });
+});
+
+describe('CompleteTaskTool.toToolDef', () => {
+  it('generates correct tool definition', () => {
+    const tm = new MockTaskManager();
+    const tool = new CompleteTaskTool(tm);
+    const def = tool.toToolDef();
+    expect(def.function.name).toBe('complete_task');
+    expect(def.function.parameters.required).toEqual(['task_id']);
+  });
+});
+
+describe('CompleteTaskTool.callDisplay', () => {
+  it('shows task ID', () => {
+    const tm = new MockTaskManager();
+    const tool = new CompleteTaskTool(tm);
+    const display = tool.callDisplay(JSON.stringify({ task_id: 't1' }));
+    expect(display).toContain('complete_task');
+    expect(display).toContain('t1');
+  });
+});

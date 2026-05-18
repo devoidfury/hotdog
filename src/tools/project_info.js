@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { execFile } from 'node:child_process';
 import util from 'node:util';
-import { ToolContext, toolDef, param, toolResult } from './registry.js';
+import { toolDef, param, toolResult } from './registry.js';
 import { DEFAULT_MAX_TOOL_OUTPUT_LINES, DEFAULT_READ_TOOL_LIMIT } from '../config.js';
 
 const execFileAsync = util.promisify(execFile);

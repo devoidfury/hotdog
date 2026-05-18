@@ -1,7 +1,7 @@
 // Init module — agent initialization and configuration resolution.
-// Mirrors Rust `init/` module: resolves model, URL, API key, profiles, etc.
+// Init module — agent initialization and configuration resolution.
 
-import { readFileSync } from "node:fs";
+import fs from "node:fs";
 import { join } from "node:path";
 import { cwd } from "node:process";
 import { parseFrontMatter, DEFAULT_MODEL, DEFAULT_ROLE, DEFAULT_SKILLS_PATH, DEFAULT_PROFILES_PATH } from "../config.js";
@@ -53,7 +53,6 @@ export async function buildConfig(cliArgv) {
  * Returns a map of profile name → { name, role, aspects, body, blacklistTools, whitelistTools, model, preloadSkills, manager }
  */
 function loadProfileFiles(profilesPath) {
-  const fs = require("node:fs");
   const result = {};
 
   let entries;
@@ -156,7 +155,7 @@ function isColorPalette(obj) {
 /**
  * Resolve the color palette from config. Returns a ColorPalette-like object
  * if config.colors contains one, otherwise null.
- * Mirrors Rust's `config.colors: Option<ColorPalette>`.
+ * Check if the config contains a color palette object.
  */
 export function resolveColorPalette(config) {
   if (isColorPalette(config.colors)) {
@@ -382,7 +381,6 @@ export function resolveSwitchProfile(
 function loadAspectsFromNames(aspectNames, profilesPath) {
   if (!aspectNames || aspectNames.length === 0) return [];
 
-  const fs = require("node:fs");
   const aspects = [];
 
   for (const name of aspectNames) {
@@ -440,7 +438,7 @@ let cachedSystemPromptTemplate = null;
 /**
  * Initialize (load) the system prompt template from disk.
  * Falls back to a minimal template if the file doesn't exist.
- * This is the JS equivalent of Rust's `init_system_prompt_template()`.
+ * Initialize (load) the system prompt template from disk.
  */
 export function initSystemPromptTemplate(templatePath) {
   if (cachedSystemPromptTemplate) return cachedSystemPromptTemplate;
@@ -448,7 +446,7 @@ export function initSystemPromptTemplate(templatePath) {
   const path =
     templatePath || join(cwd(), "config", "templates", "system_prompt.md");
   try {
-    cachedSystemPromptTemplate = readFileSync(path, "utf-8");
+    cachedSystemPromptTemplate = fs.readFileSync(path, "utf-8");
   } catch {
     // Fallback: minimal template
     cachedSystemPromptTemplate = `# Role & Mission
@@ -500,7 +498,7 @@ Use the instructions below and the tools available to you to assist the user.
 
 /**
  * Build a complete resolved configuration for the agent.
- * This is the JS equivalent of Rust's AgentBuilder::build_components().
+ * Build a complete resolved configuration for the agent.
  */
 export function buildAgentConfig(options) {
   const {

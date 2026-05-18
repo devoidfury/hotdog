@@ -1,11 +1,10 @@
-// Grep tool — search files for patterns.
-// Mirrors Rust `tools/grep/mod.rs`: tries ripgrep first, falls back to native.
+// Grep tool — search files for patterns. Tries ripgrep first, falls back to native.
 
+import fs from 'node:fs';
 import { execFile } from 'node:child_process';
 import util from 'node:util';
-import { readFileSync, existsSync } from 'node:fs';
 import { join, extname } from 'node:path';
-import { ToolContext, toolDef, param, ToolResult, toolResult, truncateOutput } from './registry.js';
+import { toolDef, param, ToolResult, toolResult, truncateOutput } from './registry.js';
 import { DEFAULT_GREP_MAX_RESULTS, DEFAULT_MAX_TOOL_OUTPUT_LINES } from '../config.js';
 
 const execFileAsync = util.promisify(execFile);
@@ -58,7 +57,7 @@ function matchesType(fileExt, typeFilter) {
  */
 function isBinary(filePath) {
   try {
-    const data = readFileSync(filePath);
+    const data = fs.readFileSync(filePath);
     const slice = data.length > 512 ? data.subarray(0, 512) : data;
     return slice.some(b => b === 0);
   } catch {
@@ -68,14 +67,13 @@ function isBinary(filePath) {
 
 /**
  * Recursively walk a directory and search files for a pattern.
- * Rust: walk_and_search()
  */
 function walkAndSearch(dir, re, maxResults, context, typeFilter, outputLines, totalMatches) {
-  if (!existsSync(dir) || !require('node:fs').statSync(dir).isDirectory()) {
+  if (!fs.existsSync(dir) || !fs.statSync(dir).isDirectory()) {
     return;
   }
 
-  const entries = require('node:fs').readdirSync(dir, { withFileTypes: true });
+  const entries = fs.readdirSync(dir, { withFileTypes: true });
 
   for (const entry of entries) {
     if (outputLines.length >= maxResults) return;
@@ -140,7 +138,6 @@ function walkAndSearch(dir, re, maxResults, context, typeFilter, outputLines, to
 
 /**
  * Native grep implementation — walks directory tree and searches file contents.
- * Rust: grep_native()
  */
 function grepNative(pattern, searchDir, maxResults, context, typeFilter) {
   // Validate regex first
@@ -157,7 +154,6 @@ function grepNative(pattern, searchDir, maxResults, context, typeFilter) {
 
 /**
  * Try running ripgrep with JSON output.
- * Rust: grep_with_rg()
  */
 async function grepWithRg(pattern, searchDir, maxResults, context, typeFilter) {
   const args = [

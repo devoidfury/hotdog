@@ -64,13 +64,6 @@ export class SessionManager {
   }
 
   /**
-   * Get the current agent as a clone of the agent reference.
-   */
-  agentClone() {
-    return this.getAgent();
-  }
-
-  /**
    * Replace the current agent's output sink.
    */
   setSink(sink) {
@@ -119,12 +112,5 @@ export class SessionManager {
    */
   sessionId() {
     return this._currentSessionId;
-  }
-
-  /**
-   * Get the session store.
-   */
-  store() {
-    return this._store;
   }
 }

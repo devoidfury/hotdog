@@ -3,7 +3,7 @@
 import fs from 'node:fs/promises';
 import fsSync from 'node:fs';
 import path from 'node:path';
-import { ToolContext, toolDef, param, toolResult, validateCwdBoundary } from './registry.js';
+import { toolDef, param, toolResult, validateCwdBoundary, resolvePath } from './registry.js';
 
 export class WriteTool {
   static TOOL_NAME = 'write';
@@ -168,28 +168,6 @@ export class WriteTool {
       filesize_after: filesizeAfter,
     }));
   }
-}
-
-/**
- * Resolve a file path against cwdBoundary or workspaceRoot.
- * cwdBoundary takes precedence if set; otherwise falls back to workspaceRoot.
- * Absolute paths are returned as-is.
- */
-function resolvePath(filePath, cwdBoundary, workspaceRoot) {
-  // Absolute paths are used as-is
-  if (path.isAbsolute(filePath)) {
-    return filePath;
-  }
-  // cwdBoundary takes precedence
-  if (cwdBoundary) {
-    return path.resolve(cwdBoundary, filePath);
-  }
-  // Fall back to workspaceRoot
-  if (workspaceRoot) {
-    return path.resolve(workspaceRoot, filePath);
-  }
-  // Last resort: resolve relative to cwd
-  return path.resolve(filePath);
 }
 
 /**

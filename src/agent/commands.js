@@ -18,6 +18,7 @@ export const Command = {
   Prompt: 'prompt',
   Regenerate: 'regenerate',
   Skill: 'skill',
+  Shell: 'shell',
   Unknown: 'unknown',
 };
 
@@ -84,6 +85,24 @@ export function parseCommand(cmd) {
     return { type: Command.Compact, value: { keep, debug } };
   }
 
+  // sh <command>
+  if (cmd.startsWith('sh ')) {
+    const command = cmd.slice(3).trim();
+    return {
+      type: command ? Command.Shell : Command.Shell,
+      value: command || null,
+    };
+  }
+
+  // !<command> or :!<command> (vim-like shell escape)
+  if (cmd.startsWith('!') || cmd.startsWith(':!')) {
+    const command = cmd.startsWith(':!') ? cmd.slice(2).trim() : cmd.slice(1).trim();
+    return {
+      type: Command.Shell,
+      value: command || null,
+    };
+  }
+
   // prompt:<name> [args]
   if (cmd.startsWith('prompt:')) {
     const rest = cmd.slice(7);
@@ -110,86 +129,6 @@ export function parseCommand(cmd) {
 }
 
 /**
- * Execute a parsed slash command on the agent.
- * Returns a result object: { success, message, error }.
- */
-export function executeCommand(agent, command) {
-  switch (command.type) {
-    case Command.Clear:
-      agent.context.clear();
-      agent.context.systemMessages = [];
-      return { success: true, message: 'Conversation cleared.' };
-
-    case Command.ClearProfile:
-      if (!command.value) {
-        return { success: true, message: 'Conversation cleared.' };
-      }
-      // Profile switching requires config; handled inline in main.js for now
-      return { success: false, error: `Profile switching requires config: ${command.value}` };
-
-    case Command.Models:
-      return {
-        success: true,
-        message: Object.keys(agent.modelRegistry || {}).join(', '),
-      };
-
-    case Command.Model:
-      if (!command.value) {
-        return { success: false, error: 'Usage: /model <model_name>' };
-      }
-      agent.model = command.value;
-      agent.context.clear();
-      agent.context.systemMessages = [];
-      return { success: true, message: `Switched to model: ${command.value}` };
-
-    case Command.Tokens:
-      return { success: true, message: agent.tokenStatsDisplay?.() || 'No token stats available.' };
-
-    case Command.Prompt:
-      if (!command.value || !command.value.name) {
-        return { success: false, error: 'Usage: /prompt:<name> [args]' };
-      }
-      const result = agent.executePrompt(command.value.name, command.value.args);
-      if (result.success) {
-        return { success: true, message: `Prompt '${command.value.name}' executed.` };
-      }
-      return { success: false, error: `Failed to execute prompt '${command.value.name}': ${result.error}` };
-
-    case Command.Regenerate:
-      const newPrompt = agent.regenerateSystemPrompt?.();
-      return { success: true, message: `System prompt regenerated.\n${newPrompt}` };
-
-    case Command.Skill:
-      if (!command.value) {
-        // List skills
-        const allSkills = agent.allSkills?.();
-        if (!allSkills || allSkills.length === 0) {
-          return { success: true, message: 'No skills loaded.' };
-        }
-        const lines = ['Available skills:'];
-        for (const s of allSkills) {
-          const status = s.loaded ? '[loaded]' : s.visible ? '[visible]' : '[hidden]';
-          lines.push(`  ${status} ${s.name}: ${s.description}`);
-        }
-        lines.push('');
-        lines.push('Use /skill:<name> to activate a skill.');
-        return { success: true, message: lines.join('\n') };
-      }
-      const skillResult = agent.activateSkill(command.value);
-      if (skillResult.success) {
-        return { success: true, message: `Skill '${command.value}' activated. System prompt updated.` };
-      }
-      return { success: false, error: skillResult.error || 'Failed to activate skill.' };
-
-    case Command.Unknown:
-      return { success: false, error: `Unknown command: ${command.value}` };
-
-    default:
-      return { success: false, error: `Command not handled by agent: ${command.type}` };
-  }
-}
-
-/**
  * Check if a command is handled by the UI layer (not delegated to agent).
  */
 export function isUiCommand(type) {
@@ -198,5 +137,6 @@ export function isUiCommand(type) {
     Command.Quit,
     Command.Tools,
     Command.Thinking,
+    Command.Shell,
   ].includes(type);
 }

@@ -56,7 +56,7 @@ export class MessageLog {
 
   /**
    * Insert a message at a specific index in the messages array.
-   * Rust: context.insert_at(index, message)
+   * Insert a message at a specific index.
    */
   insertAt(index, message) {
     this._messages.splice(index, 0, message);
@@ -64,7 +64,7 @@ export class MessageLog {
 
   /**
    * Replace the entire messages array.
-   * Rust: context.replace_messages(new_messages)
+   * Replace all messages with a new array.
    */
   replaceMessages(newMessages) {
     this._messages = newMessages;
@@ -72,7 +72,7 @@ export class MessageLog {
 
   /**
    * Get a copy of the messages array.
-   * Rust: context.messages()
+   * Get all messages.
    */
   messages() {
     return [...this._messages];

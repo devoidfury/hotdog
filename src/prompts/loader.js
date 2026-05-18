@@ -1,7 +1,7 @@
 // Prompts loader — loads .prompt.md files from config/prompts/.
 // Each prompt is a reusable template with YAML front matter + Tera body.
 
-import { readFileSync } from 'node:fs';
+import fs from 'node:fs';
 import { join } from 'node:path';
 import { cwd } from 'node:process';
 import { parseFrontMatter } from '../config.js';
@@ -66,7 +66,6 @@ export class PromptsLoader {
 
   loadFromDirectory(dir) {
     let count = 0;
-    const fs = require('node:fs');
 
     let entries;
     try {

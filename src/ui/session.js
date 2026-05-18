@@ -2,7 +2,8 @@
 // Extracted from main.js to mirror Rust's ui/cli/session.rs.
 
 import readline from "node:readline";
-import { parseCommand, isUiCommand } from "../agent/commands.js";
+import { spawn } from "node:child_process";
+import { parseCommand, isUiCommand, Command } from "../agent/commands.js";
 import { Agent } from "../agent/agent.js";
 
 const HELP_TEXT = `
@@ -22,6 +23,8 @@ Commands:
   /thinking     - Toggle thinking display
   /theme <name> - Set theme (dark, light, monochrome)
   /regenerate   - Regenerate system prompt
+  /sh <command> - Run a shell command and display output
+  :!<command>  - Vim-like alias for shell commands (e.g., :!ls)
 `;
 
 /**
@@ -88,29 +91,60 @@ function handleSlashCommand(cmd, sessionManager, bus, sink, resolved, rl) {
 function dispatchUiCommand(cmd, sessionManager, sink, rl) {
   const agent = sessionManager.getAgent();
   switch (cmd.type) {
-    case "help":
+    case Command.Help:
       console.log(HELP_TEXT);
       rl.prompt();
       break;
 
-    case "quit":
+    case Command.Quit:
       console.log("Goodbye!");
       rl.close();
       process.exit(0);
       break;
 
-    case "tools":
+    case Command.Tools:
       agent.hideTools = !agent.hideTools;
       sink.hideTools = agent.hideTools;
       console.log(`Tool display: ${agent.hideTools ? "hidden" : "shown"}\n`);
       rl.prompt();
       break;
 
-    case "thinking":
+    case Command.Thinking:
       agent.hideThinking = !agent.hideThinking;
       sink.hideThinking = agent.hideThinking;
       console.log(`Thinking display: ${agent.hideThinking ? "hidden" : "shown"}\n`);
       rl.prompt();
+      break;
+
+    case Command.Shell:
+      if (!cmd.value) {
+        console.log("Usage: /sh <command>\n");
+      } else {
+        console.log(`\n$ ${cmd.value}\n`);
+        const proc = spawn(cmd.value, [], {
+          shell: true,
+          stdio: ["pipe", "pipe", "pipe"],
+        });
+        let stdout = "";
+        let stderr = "";
+        proc.stdout.on("data", (chunk) => {
+          stdout += chunk.toString();
+        });
+        proc.stderr.on("data", (chunk) => {
+          stderr += chunk.toString();
+        });
+        proc.on("close", (code) => {
+          const output = [stdout, stderr].filter(Boolean).join("\n");
+          console.log(output);
+          if (output) console.log("\n");
+          console.log(`[exited with code ${code}]\n`);
+          rl.prompt();
+        });
+        proc.on("error", (err) => {
+          console.log(`Error: ${err.message}\n`);
+          rl.prompt();
+        });
+      }
       break;
 
     default:

@@ -1,5 +1,8 @@
 // Default configuration values used across the application.
 
+import fs from 'node:fs';
+import path from 'node:path';
+
 export const DEFAULT_MODEL = 'qwen3.5-0.8b';
 export const DEFAULT_AI_URL = 'http://ai365.home:9292';
 export const DEFAULT_THINKER = '[Thinking: {}]';
@@ -150,15 +153,6 @@ function getDefaultConfig() {
   };
 }
 
-/**
- * Resolve API key with priority: CLI → config → env → null.
- */
-export function resolveApiKey(cli, config) {
-  if (cli) return cli;
-  if (config.apiKey) return config.apiKey;
-  return process.env.AI_API_KEY || null;
-}
-
 // ── YAML Parsing ───────────────────────────────────────────────────────────
 
 import { YAML } from "bun";
@@ -181,16 +175,9 @@ export function parseFrontMatter(content) {
  */
 export function loadProfileFile(config, profileName) {
   const profilesPath = config.profilesPath || DEFAULT_PROFILES_PATH;
-  let fs, path;
+  let filePath;
   try {
-    fs = require('node:fs');
-    path = require('node:path');
-  } catch {
-    return null;
-  }
-
-  const filePath = path.join(profilesPath, `${profileName}.profile.md`);
-  try {
+    filePath = path.join(profilesPath, `${profileName}.profile.md`);
     const content = fs.readFileSync(filePath, 'utf-8');
     const parsed = parseFrontMatter(content);
     if (!parsed) return null;
@@ -248,10 +235,8 @@ export function getProfile(config, profileName) {
  */
 export function getVisibleWorkerProfiles(config) {
   const profilesPath = config.profilesPath || DEFAULT_PROFILES_PATH;
-  let fs, path, dir;
+  let dir;
   try {
-    fs = require('node:fs');
-    path = require('node:path');
     dir = fs.readdirSync(profilesPath);
   } catch {
     return []; // Profiles directory not found or not readable

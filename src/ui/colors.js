@@ -1,6 +1,8 @@
 // CLI color palettes and ANSI color helpers.
 // Mirrors the Rust implementation in src/ui/cli/colors.rs.
 
+import fs from "node:fs";
+
 // ── Color Palette ─────────────────────────────────────────────────────────────
 
 /**
@@ -164,7 +166,6 @@ export function resolvePalette(
     } else {
       // Try to load from file
       try {
-        const fs = require("node:fs");
         const content = fs.readFileSync(themeFile, "utf-8");
         const custom = JSON.parse(content);
         const base = new ColorPalette(dark_palette());

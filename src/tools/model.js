@@ -1,6 +1,6 @@
 // Model tool — switch the AI model at runtime.
 
-import { ToolContext, toolDef, param, toolResult } from './registry.js';
+import { toolDef, param, toolResult } from './registry.js';
 
 export class ModelTool {
   static TOOL_NAME = 'model';

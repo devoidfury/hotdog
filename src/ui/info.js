@@ -45,7 +45,6 @@ export async function runInfo(cli) {
 }
 
 function printInfoText(resolved, modelRegistry, providers, skillsLoader, skillCount, connectivity, config) {
-  const DEFAULT_SKILLS_PATH = "/skills";
   console.log("=== Agent Harness Info ===");
   console.log();
   console.log("Configuration:");
@@ -119,7 +118,6 @@ function printInfoText(resolved, modelRegistry, providers, skillsLoader, skillCo
 }
 
 function printInfoJson(resolved, modelRegistry, providers, skillsLoader, skillCount, connectivity, config) {
-  const DEFAULT_SKILLS_PATH = "/skills";
   const providersConfigured = providers.map((p) => ({
     name: p.name,
     url: p.url,

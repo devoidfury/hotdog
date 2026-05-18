@@ -87,9 +87,6 @@ export class TaskWorker {
     });
     const handle = worker._createHandle();
 
-    // Start follow-up polling before the main loop runs
-    worker._startFollowUpPoller();
-
     // Run in background — uncaught errors won't crash the main process
     worker.run().catch((err) => {
       // Task failed — status already updated in run()
@@ -105,17 +102,6 @@ export class TaskWorker {
       this.abortController,
       this._followQueue,
     );
-  }
-
-  /**
-   * Start a periodic poller that checks for pending follow-up messages.
-   * This runs concurrently with the main loop and populates _followQueue.
-   */
-  _startFollowUpPoller() {
-    this._followPollInterval = setInterval(() => {
-      // The queue is populated directly by sendFollowUp (push).
-      // Nothing extra to do here — the loop drains it.
-    }, 1_000);
   }
 
   /** Run the task agent loop. */
@@ -134,12 +120,6 @@ export class TaskWorker {
         this._statusRef.value = TASK_STATUS.FAILED;
         result = `Task ${this.taskId} failed: ${err.message}`;
       }
-    }
-
-    // Stop the follow-up poller
-    if (this._followPollInterval) {
-      clearInterval(this._followPollInterval);
-      this._followPollInterval = null;
     }
 
     if (this._statusRef.value === TASK_STATUS.RUNNING) {

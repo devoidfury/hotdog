@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'bun:test';
-import { parseCommand, executeCommand, Command, isUiCommand } from '../src/agent/commands.js';
+import { parseCommand, Command, isUiCommand } from '../src/agent/commands.js';
 
 describe('parseCommand', () => {
   it('parses help', () => {
@@ -97,6 +97,40 @@ describe('parseCommand', () => {
     expect(parseCommand('skill: ')).toEqual({ type: Command.Skill, value: null });
   });
 
+  it('parses sh with command', () => {
+    expect(parseCommand('sh ls -la')).toEqual({ type: Command.Shell, value: 'ls -la' });
+  });
+
+  it('parses sh with complex command', () => {
+    expect(parseCommand('sh echo "hello world" && cat file.txt')).toEqual({
+      type: Command.Shell,
+      value: 'echo "hello world" && cat file.txt',
+    });
+  });
+
+  it('parses sh with trailing space as empty value', () => {
+    expect(parseCommand('sh ')).toEqual({ type: Command.Shell, value: null });
+  });
+
+  it('parses :! vim-like shell escape', () => {
+    expect(parseCommand(':!ls -la')).toEqual({ type: Command.Shell, value: 'ls -la' });
+  });
+
+  it('parses ! vim-like shell escape', () => {
+    expect(parseCommand('!ls')).toEqual({ type: Command.Shell, value: 'ls' });
+  });
+
+  it('parses :! with complex command', () => {
+    expect(parseCommand(':!echo "hello" && cat file.txt')).toEqual({
+      type: Command.Shell,
+      value: 'echo "hello" && cat file.txt',
+    });
+  });
+
+  it('parses :! with trailing space as empty value', () => {
+    expect(parseCommand(':! ')).toEqual({ type: Command.Shell, value: null });
+  });
+
   it('parses unknown commands', () => {
     expect(parseCommand('foobar')).toEqual({ type: Command.Unknown, value: 'foobar' });
   });
@@ -112,109 +146,12 @@ describe('isUiCommand', () => {
     expect(isUiCommand(Command.Quit)).toBe(true);
     expect(isUiCommand(Command.Tools)).toBe(true);
     expect(isUiCommand(Command.Thinking)).toBe(true);
+    expect(isUiCommand(Command.Shell)).toBe(true);
   });
 
   it('returns false for agent commands', () => {
     expect(isUiCommand(Command.Clear)).toBe(false);
     expect(isUiCommand(Command.Model)).toBe(false);
     expect(isUiCommand(Command.Skill)).toBe(false);
-  });
-});
-
-describe('executeCommand', () => {
-  const makeAgent = (overrides = {}) => ({
-    context: {
-      clear: () => {},
-      systemMessages: [],
-    },
-    modelRegistry: { 'qwen3.5-0.8b': { name: 'qwen3.5-0.8b' } },
-    model: 'qwen3.5-0.8b',
-    tokenStatsDisplay: () => 'Token stats',
-    executePrompt: (name, args) => ({ success: true, prompt: `prompt:${name} ${args || ''}` }),
-    regenerateSystemPrompt: () => 'system prompt content',
-    allSkills: () => [
-      { name: 'rust-guidelines', description: 'Rust best practices', loaded: true, visible: true },
-      { name: 'stripe-integration', description: 'Stripe payments', loaded: false, visible: true },
-    ],
-    activateSkill: (name) => ({ success: name === 'rust-guidelines' }),
-    ...overrides,
-  });
-
-  it('clears context', () => {
-    const agent = makeAgent();
-    const result = executeCommand(agent, { type: Command.Clear, value: null });
-    expect(result.success).toBe(true);
-    expect(result.message).toBe('Conversation cleared.');
-  });
-
-  it('lists models', () => {
-    const agent = makeAgent();
-    const result = executeCommand(agent, { type: Command.Models, value: null });
-    expect(result.success).toBe(true);
-    expect(result.message).toBe('qwen3.5-0.8b');
-  });
-
-  it('switches model', () => {
-    const agent = makeAgent();
-    const result = executeCommand(agent, { type: Command.Model, value: 'qwen3.5-4b' });
-    expect(result.success).toBe(true);
-    expect(result.message).toBe('Switched to model: qwen3.5-4b');
-    expect(agent.model).toBe('qwen3.5-4b');
-  });
-
-  it('shows tokens', () => {
-    const agent = makeAgent();
-    const result = executeCommand(agent, { type: Command.Tokens, value: null });
-    expect(result.success).toBe(true);
-    expect(result.message).toBe('Token stats');
-  });
-
-  it('executes prompt', () => {
-    const agent = makeAgent();
-    const result = executeCommand(agent, { type: Command.Prompt, value: { name: 'test', args: 'hello' } });
-    expect(result.success).toBe(true);
-    expect(result.message).toBe("Prompt 'test' executed.");
-  });
-
-  it('fails on unknown prompt', () => {
-    const agent = makeAgent({ executePrompt: () => ({ success: false, error: 'not found' }) });
-    const result = executeCommand(agent, { type: Command.Prompt, value: { name: 'bad', args: undefined } });
-    expect(result.success).toBe(false);
-    expect(result.error).toContain('Failed to execute prompt');
-  });
-
-  it('regenerates system prompt', () => {
-    const agent = makeAgent();
-    const result = executeCommand(agent, { type: Command.Regenerate, value: null });
-    expect(result.success).toBe(true);
-    expect(result.message).toContain('System prompt regenerated.');
-  });
-
-  it('lists skills', () => {
-    const agent = makeAgent();
-    const result = executeCommand(agent, { type: Command.Skill, value: null });
-    expect(result.success).toBe(true);
-    expect(result.message).toContain('Available skills:');
-    expect(result.message).toContain('rust-guidelines');
-  });
-
-  it('activates skill', () => {
-    const agent = makeAgent();
-    const result = executeCommand(agent, { type: Command.Skill, value: 'rust-guidelines' });
-    expect(result.success).toBe(true);
-    expect(result.message).toContain("Skill 'rust-guidelines' activated.");
-  });
-
-  it('fails on unknown skill', () => {
-    const agent = makeAgent();
-    const result = executeCommand(agent, { type: Command.Skill, value: 'nonexistent' });
-    expect(result.success).toBe(false);
-  });
-
-  it('handles unknown command', () => {
-    const agent = makeAgent();
-    const result = executeCommand(agent, { type: Command.Unknown, value: 'foobar' });
-    expect(result.success).toBe(false);
-    expect(result.error).toBe('Unknown command: foobar');
   });
 });

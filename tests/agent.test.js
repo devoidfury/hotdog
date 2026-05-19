@@ -352,7 +352,7 @@ describe('Agent.createToolContext', () => {
     expect(ctx.allSkills).toEqual([]);
     expect(ctx.skillDirectories).toEqual([]);
     expect(ctx.cwdBoundary).toBeNull();
-    expect(ctx.workspaceRoot).toBeNull();
+    expect(ctx.workspaceRoot).toBe(process.cwd());
     expect(ctx.currentFile).toBeNull();
     expect(ctx.modelNames).toEqual([]);
     expect(ctx.activeProvider).toBeNull();

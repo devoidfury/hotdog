@@ -15,6 +15,7 @@ export const Command = {
   Model: 'model',
   Tokens: 'tokens',
   Compact: 'compact',
+  CompactStrategy: 'compactStrategy',
   Prompt: 'prompt',
   Regenerate: 'regenerate',
   Skill: 'skill',
@@ -68,6 +69,22 @@ export function parseCommand(cmd) {
 
   if (cmd === 'tokens') {
     return { type: Command.Tokens, value: null };
+  }
+
+  // compact:strategy [action] [name]
+  if (cmd.startsWith('compact:strategy')) {
+    const rest = cmd.slice(16).trim();
+    const parts = rest ? rest.split(/\s+/) : [];
+    const action = parts[0] || 'list';
+    const name = parts[1] || null;
+
+    if (action === 'help') {
+      return { type: Command.CompactStrategy, value: { action: 'help', name } };
+    } else if (action === 'list' || action === '') {
+      return { type: Command.CompactStrategy, value: { action: 'list' } };
+    } else {
+      return { type: Command.CompactStrategy, value: { action: 'set', name: action } };
+    }
   }
 
   // compact [n] [--compact-debug]

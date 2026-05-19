@@ -469,6 +469,7 @@ export class ToolContext {
     this.currentFile = options.currentFile || null;
     this.modelNames = options.modelNames || [];
     this.activeProvider = options.activeProvider || null;
+    this.lspConfig = options.lspConfig || null;
     this.onActivateSkill = options.onActivateSkill || null;
     this.onSwitchModel = options.onSwitchModel || null;
     this.onClearContext = options.onClearContext || null;

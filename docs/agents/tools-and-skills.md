@@ -34,6 +34,37 @@
 - **ReviewTool** — lists recent sessions, gets all entries for a specific session, or gets a lightweight tool call index. Returns JSON data. Params: `{"operation": "list"|"get"|"tool_index", "session_id": "...", "limit": N}`.
 - **Subagent tools** *(disabled by default, enabled in meta profile)*: `plan_status`, `complete_task`, `delegate_task`, `task_status`, `task_followup`, `task_interrupt` — async task delegation and management.
 
+### LSP Tools (`src/lsp/`)
+
+12 tools providing IDE-like features via external language servers. All tools require:
+- `lsp.enabled: true` in config or profile
+- A language server binary installed (e.g., `typescript-language-server`, `pyright-langserver`, `gopls`, `rust-analyzer`)
+- A file with a supported extension to determine the language server
+
+**Activation**: LSP tools are only registered when `lsp.enabled` is `true` in the resolved config. Tools are created per-file using the file's language ID to select the appropriate server.
+
+| Tool | Params | Description |
+|------|--------|-------------|
+| `lsp-hover` | `file`, `line`, `character` | Get type info, docs, function signatures at a position |
+| `lsp-definition` | `file`, `line`, `character` | Find where a symbol is defined |
+| `lsp-completion` | `file`, `line`, `character`, `limit` | Auto-completion suggestions (default limit: 50) |
+| `lsp-signature` | `file`, `line`, `character` | Function parameter hints with active signature tracking |
+| `lsp-document-symbol` | `file` | List all symbols in a document (functions, classes, variables) |
+| `lsp-references` | `file`, `line`, `character` | Find all usages/references of a symbol |
+| `lsp-code-action` | `file`, `line`, `character` | Quick fixes and refactoring options |
+| `lsp-formatting` | `file` | Format an entire document (tabSize=2, insertSpaces=true) |
+| `lsp-rename` | `file`, `line`, `character`, `newName` | Rename a symbol across all files |
+| `lsp-diagnostics` | `file` | Get errors/warnings/hints (**push-mode only** — server must publish diagnostics after document open) |
+| `lsp-workspace-symbol` | `query` | Search for symbols across the entire workspace |
+| `lsp-apply-edit` | `edit` (JSON) | Apply multi-file workspace edits atomically |
+
+**Position encoding**: All position parameters (`line`, `character`) use LSP's UTF-16 zero-based indexing.
+
+**Known limitations**:
+- `lsp-diagnostics` is a stub: it reports capability status but cannot retrieve actual diagnostics because the LSP client is never initialized (language server process never spawned). This is a critical implementation gap.
+- Each tool creates its own LSP client (no document sharing across tools for the same file).
+- No support for incremental document sync (uses full document replacement).
+
 ## Skills
 
 ### Skill System (`src/skills/`)

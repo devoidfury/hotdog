@@ -67,11 +67,11 @@ export class ExploreTool {
     }
 
     const prompt = `Explore project at '${args.path}'. ${args.outline}`;
-    const command = `node ${BIN_PATH} -c "${args.outline}" --profile explorer`;
+    const command = `bun ${BIN_PATH} -c "${args.outline}" --profile explorer`;
 
     // Build command: node main.js -c "<prompt>" --profile explorer
     const cp = spawn(
-      "node",
+      "bun",
       [
         BIN_PATH,
         "-c",

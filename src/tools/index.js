@@ -17,6 +17,11 @@ export * from "./project_info.js";
 export * from "./review.js";
 export * from "./explore.js";
 
+// Export LSP tools and utilities
+export { LSP_TOOL_NAMES } from "./lsp-tools.js";
+import { LSP_TOOL_NAMES } from "./lsp-tools.js";
+export * from "../lsp/tools/index.js";
+
 // Import classes for factory use
 import { BashTool } from "./bash.js";
 import { WriteTool } from "./write.js";
@@ -32,6 +37,21 @@ import { LoadSkillTool } from "./load_skill.js";
 import { ProjectInfoTool } from "./project_info.js";
 import { ReviewTool } from "./review.js";
 import { ExploreTool } from "./explore.js";
+import {
+  LspHoverTool,
+  LspDefinitionTool,
+  LspCompletionTool,
+  LspSignatureTool,
+  LspDocumentSymbolTool,
+  LspReferencesTool,
+  LspCodeActionTool,
+  LspFormattingTool,
+  LspRenameTool,
+  LspDiagnosticsTool,
+  LspWorkspaceSymbolTool,
+  LspApplyEditTool,
+} from "../lsp/tools/index.js";
+import { isLspEnabled } from "../lsp/config.js";
 
 // Tool descriptors — declarative table of all core tools.
 const TOOL_DESCRIPTORS = [
@@ -52,6 +72,9 @@ const TOOL_DESCRIPTORS = [
 ];
 
 export const CORE_TOOL_NAMES = TOOL_DESCRIPTORS.map((d) => d.name);
+
+// Combined tool list (core + LSP)
+export const ALL_TOOL_NAMES = [...CORE_TOOL_NAMES, ...LSP_TOOL_NAMES];
 
 // Import subagent tools
 import {
@@ -74,6 +97,28 @@ export const SUBAGENT_TOOL_NAMES = [
   "complete_task",
   "wait",
 ];
+
+// LSP tool class map
+const LSP_TOOL_MAP = {
+  'lsp-hover': LspHoverTool,
+  'lsp-definition': LspDefinitionTool,
+  'lsp-completion': LspCompletionTool,
+  'lsp-signature': LspSignatureTool,
+  'lsp-document-symbol': LspDocumentSymbolTool,
+  'lsp-references': LspReferencesTool,
+  'lsp-code-action': LspCodeActionTool,
+  'lsp-formatting': LspFormattingTool,
+  'lsp-rename': LspRenameTool,
+  'lsp-diagnostics': LspDiagnosticsTool,
+  'lsp-workspace-symbol': LspWorkspaceSymbolTool,
+  'lsp-apply-edit': LspApplyEditTool,
+};
+
+/**
+ * Resolve language ID from a file path.
+ * Re-exported from lsp/utils for internal use.
+ */
+import { getLanguageId as _getLanguageId } from '../lsp/utils.js';
 
 // Declarative tool constructor map — maps tool names to their constructor functions.
 const TOOL_CONSTRUCTORS = {
@@ -103,6 +148,25 @@ const SUBAGENT_TOOL_CONSTRUCTORS = {
   complete_task: (tm) => new CompleteTaskTool(tm),
   wait: (tm) => new WaitTool(tm),
 };
+
+/**
+ * Create an LSP tool instance with proper client setup.
+ */
+function createLspInstance(toolName, ctx, lspConfig) {
+  const ToolClass = LSP_TOOL_MAP[toolName];
+  if (!ToolClass) return null;
+
+  // Determine language ID from context
+  let languageId = null;
+  if (ctx?.currentFile) {
+    languageId = _getLanguageId(ctx.currentFile);
+  }
+
+  return new ToolClass({
+    languageId,
+    lspConfig,
+  });
+}
 
 /**
  * Create a tool factory that can create and register tools.
@@ -140,6 +204,17 @@ export function createToolFactory(taskManager = null) {
         }
       }
 
+      // LSP tools — only when enabled
+      if (LSP_TOOL_MAP[toolName]) {
+        // Get LSP config from ctx or profile
+        const lspConfig = ctx?.lspConfig || null;
+        if (isLspEnabled(lspConfig)) {
+          return createLspInstance(toolName, ctx, lspConfig);
+        }
+        // LSP tools are optional — don't create if not enabled
+        return null;
+      }
+
       return null;
     },
 
@@ -161,4 +236,34 @@ export function createToolFactory(taskManager = null) {
       }
     },
   };
+}
+
+/**
+ * Register all LSP tools with a registry when LSP is enabled.
+ *
+ * Factory method that creates and registers all 12 LSP tools.
+ * Returns the number of tools registered (0 if LSP is disabled or no server configured).
+ *
+ * @param {ToolRegistry} registry - The tool registry to register tools with
+ * @param {ToolContext} ctx - Tool context (provides lspConfig, currentFile, etc.)
+ * @returns {Promise<number>} Number of tools registered
+ */
+export async function registerLspTools(registry, ctx) {
+  const lspConfig = ctx?.lspConfig || null;
+  if (!isLspEnabled(lspConfig)) {
+    return 0;
+  }
+
+  const languageId = ctx?.currentFile ? _getLanguageId(ctx.currentFile) : null;
+  let registered = 0;
+
+  for (const toolName of LSP_TOOL_NAMES) {
+    const tool = createLspInstance(toolName, ctx, lspConfig);
+    if (tool) {
+      registry.register(toolName, tool);
+      registered++;
+    }
+  }
+
+  return registered;
 }

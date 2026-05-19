@@ -16,6 +16,7 @@ import { parseArgs, HELP_TEXT } from "./cli.js";
 import { buildConfig } from "./init/resolution.js";
 import { formatError } from "./context/error.js";
 import { OUTPUT_EVENT } from "./context/output.js";
+import { shutdownAll } from "./lsp/client-cache.js";
 
 async function main() {
   const cli = parseArgs();
@@ -109,8 +110,10 @@ async function main() {
       console.log("\n");
     } catch (e) {
       console.error(formatError(e));
+      await shutdownAll();
       process.exit(1);
     }
+    await shutdownAll();
     process.exit(0);
   }
 
@@ -143,7 +146,8 @@ async function main() {
   bus.run();
 }
 
-main().catch((e) => {
+main().catch(async (e) => {
   console.error(formatError(e));
+  await shutdownAll();
   process.exit(1);
 });

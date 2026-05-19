@@ -16,6 +16,7 @@ import {
   CORE_TOOL_NAMES,
   SUBAGENT_TOOL_NAMES,
   toolResult,
+  registerLspTools,
 } from "../tools/index.js";
 import {
   DEFAULT_MODEL,
@@ -33,9 +34,16 @@ import {
 } from "../context/system_prompt.js";
 import { disabledSessionLog } from "../session_log.js";
 import {
-  compactMessages as doCompact,
   findFirstKeptIndex,
 } from "../compaction.js";
+import {
+  CompactionStrategyRegistry,
+} from "../compaction/strategies.js";
+import { SummarizeStrategy } from "../compaction/strategies/summarize.js";
+import { DropStrategy } from "../compaction/strategies/drop.js";
+import { SummarizeShortStrategy } from "../compaction/strategies/summarize-short.js";
+import { TokenAwareStrategy } from "../compaction/strategies/token-aware.js";
+import { DEFAULT_COMPACTION_STRATEGY } from "../config.js";
 import { McpTool } from "../mcp/tools.js";
 
 /**
@@ -77,6 +85,10 @@ export class Agent {
     this.compaction = config.compaction || defaultCompactionSettings;
     this.compactDebug = config.compactDebug || false;
     this.showTokenUse = config.showTokenUse !== false;
+    // Compaction strategy
+    this.compactionStrategy = config.compaction?.strategy || DEFAULT_COMPACTION_STRATEGY;
+    this.compactionStrategyRegistry = new CompactionStrategyRegistry();
+    this._registerBuiltinCompactionStrategies();
     this.profileName = config.profileName || "default";
     this.usedTools = new Set();
     this.iterationCount = 0;
@@ -101,6 +113,18 @@ export class Agent {
     this._mcpToolDefsDirty = true;
     // Config reference for profile lookups
     this._config = config.config || null;
+  }
+
+  // ── Compaction Strategy Registration ──────────────────────────────────────
+
+  /**
+   * Register built-in compaction strategies.
+   */
+  _registerBuiltinCompactionStrategies() {
+    this.compactionStrategyRegistry.register(new SummarizeStrategy());
+    this.compactionStrategyRegistry.register(new DropStrategy());
+    this.compactionStrategyRegistry.register(new SummarizeShortStrategy());
+    this.compactionStrategyRegistry.register(new TokenAwareStrategy());
   }
 
   // ── Tool Allowance ────────────────────────────────────────────────────────
@@ -438,12 +462,10 @@ export class Agent {
       }),
     );
   }
-
   // ── Compaction ────────────────────────────────────────────────────────────
 
   /**
-   * Compact the message log using LLM-based summarization.
-   * Compact the message log using LLM-based summarization.
+   * Compact the message log using the configured compaction strategy.
    */
   async compactMessages(overrideKeep) {
     const messages = this.context.messages();
@@ -463,18 +485,31 @@ export class Agent {
     // Convert Message objects to plain objects for API serialization
     const plainMessages = allMessages.map((m) => m.toJSON());
 
-    // Find the first message to keep
-    const firstKept = findFirstKeptIndex(plainMessages, keepRecent);
-    if (firstKept === 0) return null;
+    // Get the configured strategy
+    const strategy = this.compactionStrategyRegistry.get(this.compactionStrategy);
+    if (!strategy) {
+      console.warn(`Compaction strategy '${this.compactionStrategy}' not found, falling back to 'summarize'`);
+      this.compactionStrategy = 'summarize';
+      const fallback = this.compactionStrategyRegistry.get('summarize');
+      if (!fallback) return null;
+      return this._executeCompaction(fallback, plainMessages, keepRecent, allMessages);
+    }
 
-    // Build a chat-compatible message array for the LLM
-    const chatMessages = plainMessages.map((m) => ({
-      role: m.role,
-      content: m.content,
-    }));
+    return this._executeCompaction(strategy, plainMessages, keepRecent, allMessages);
+  }
 
-    const result = await doCompact(
-      chatMessages,
+  /**
+   * Execute compaction using a specific strategy.
+   * Shared logic for both direct calls and fallback.
+   */
+  async _executeCompaction(strategy, plainMessages, keepRecent, allMessages) {
+    // Check if compaction is enabled (strategies don't check this)
+    if (!this.compaction.enabled) return null;
+
+    const result = await strategy.execute(
+      plainMessages,
+      // Pass settings with 'keepRecent' property that strategies expect
+      { enabled: this.compaction.enabled, keepRecent, reserveTokens: this.compaction.reserveTokens },
       // LLM chat callback — convert plain objects to Message instances
       // because chatStreamCancellable calls msg.toJSON() on each message
       async (msgs, model) => {
@@ -499,24 +534,28 @@ export class Agent {
         return fullText;
       },
       this.model,
-      // Pass settings with 'keepRecent' property that doCompact expects
-      { enabled: this.compaction.enabled, keepRecent, reserveTokens: this.compaction.reserveTokens },
     );
 
     if (!result) return null;
 
-    // Rebuild context: system prompt + <previous-context-summary> + kept messages
+    // Rebuild context: system prompt + <m_buzefmhm52i8k2m2> + kept messages
     this.context.clear();
 
     // Add system prompt back
     this.ensureSystemPrompt();
 
-    // Add compaction summary as user message
-    const summaryContent = `<previous-context-summary>${result.summary}</previous-context-summary>`;
-    this.context.addUserMessage(summaryContent);
+    // Add compaction summary as user message (or empty marker for drop strategy)
+    if (result.summary) {
+      const summaryContent = `<m_buzefmhm52i8k2m2>${result.summary}</m_buzefmhm52i8k2m2>`;
+      this.context.addUserMessage(summaryContent);
+    } else {
+      // Drop strategy: no summary, just a marker
+      const summaryContent = `<m_buzefmhm52i8k2m2>Context compacted: ${result.messagesCompacted} messages removed</m_buzefmhm52i8k2m2>`;
+      this.context.addUserMessage(summaryContent);
+    }
 
-    // Add kept messages (from firstKept index onward)
-    const keptMessages = allMessages.slice(firstKept);
+    // Add kept messages (from result.messagesCompacted index onward)
+    const keptMessages = allMessages.slice(result.messagesCompacted);
     for (const msg of keptMessages) {
       this.context.addMessage({
         role: msg.role,
@@ -529,6 +568,15 @@ export class Agent {
 
     // Log compaction
     this.sessionLog.writeCompaction(result.messagesCompacted, result.summary);
+
+    // Emit compaction result event
+    this.sink.emit(
+      outputEvent(OUTPUT_EVENT.COMPACTION_RESULT, {
+        summary: result.summary,
+        messagesCompacted: result.messagesCompacted,
+        strategy: this.compactionStrategy,
+      }),
+    );
 
     // Debug: write serialized context to compaction.out.json
     if (this.compactDebug) {
@@ -708,6 +756,9 @@ export class Agent {
     // MCP tools
     await this._registerMcpTools(registry, whitelist, blacklist);
 
+    // LSP tools (when LSP is enabled)
+    await registerLspTools(registry, ctx);
+
     return registry;
   }
 
@@ -756,12 +807,16 @@ export class Agent {
    * Create a ToolContext for tools.
    */
   createToolContext() {
+    const workspaceRoot = this.cwdBoundary || process.cwd();
+    const lspConfig = this._config?.lsp || null;
     return new ToolContext({
       skills: this.skills,
       allSkills: this._allSkills,
       skillDirectories: this.skillDirectories,
       modelRegistry: this.modelRegistry,
       cwdBoundary: this.cwdBoundary,
+      workspaceRoot,
+      lspConfig,
       onActivateSkill: (name) => {
         this.activeSkills.add(name);
       },

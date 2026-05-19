@@ -615,10 +615,9 @@ export function buildAgentConfig(options) {
     aspects,
     profileBody,
     preloadSkills,
-    hideTools: cli.showTools
-      ? false
-      : cli.hideTools !== false
-        ? cli.hideTools
+    hideTools:
+      cli.hideTools === false
+        ? false
         : config.hideTools !== false,
     hideThinking:
       cli.hideThinking === true

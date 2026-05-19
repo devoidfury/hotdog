@@ -34,12 +34,12 @@ describe('ReadTool.toToolDef', () => {
     expect(def.function.parameters.required).toEqual(['path']);
   });
 
-  it('has optional limit, offset, and type', () => {
+  it('has optional limit and offset', () => {
     const def = new ReadTool().toToolDef();
     const props = def.function.parameters.properties;
     expect(props.limit.type).toBe('integer');
     expect(props.offset.type).toBe('integer');
-    expect(props.type.enum).toEqual(['lines', 'bytes']);
+    expect(props.type).toBeUndefined();
   });
 });
 
@@ -49,11 +49,6 @@ describe('ReadTool.callDisplay', () => {
   it('shows path and pagination range', () => {
     const display = new ReadTool().callDisplay({ path: 'foo.txt', limit: 10, offset: 5 });
     expect(display).toBe('foo.txt (lines 5-15)');
-  });
-
-  it('shows bytes type', () => {
-    const display = new ReadTool().callDisplay({ path: 'foo.bin', type: 'bytes', limit: 100, offset: 0 });
-    expect(display).toBe('foo.bin (bytes 0-100)');
   });
 
   it('handles invalid input gracefully', () => {
@@ -154,41 +149,6 @@ describe('ReadTool.execute — read lines', () => {
     );
 
     expect(result).toBe('only line');
-    fs.rmSync(dir, { recursive: true, force: true });
-  });
-});
-
-// ── execute: read bytes ─────────────────────────────────────────────────────
-
-describe('ReadTool.execute — read bytes', () => {
-  it('reads bytes with offset and limit', async () => {
-    const dir = tmpDir();
-    const filePath = path.join(dir, 'file.txt');
-    fsSync.writeFileSync(filePath, 'hello world');
-
-    const tool = new ReadTool();
-    const result = await tool.execute(
-      { path: 'file.txt', type: 'bytes', offset: 6, limit: 5 },
-      toolCtx({ workspaceRoot: dir })
-    );
-
-    expect(result).toBe('world');
-    fs.rmSync(dir, { recursive: true, force: true });
-  });
-
-  it('handles offset beyond file length', async () => {
-    const dir = tmpDir();
-    const filePath = path.join(dir, 'file.txt');
-    fsSync.writeFileSync(filePath, 'hello');
-
-    const tool = new ReadTool();
-    const result = await tool.execute(
-      { path: 'file.txt', type: 'bytes', offset: 100 },
-      toolCtx({ workspaceRoot: dir })
-    );
-
-    expect(result).toContain('offset 100 is beyond end');
-    expect(result).toContain('[empty]');
     fs.rmSync(dir, { recursive: true, force: true });
   });
 });

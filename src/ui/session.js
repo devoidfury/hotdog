@@ -5,6 +5,7 @@ import readline from "node:readline";
 import { spawn } from "node:child_process";
 import { parseCommand, isUiCommand, Command } from "../agent/commands.js";
 import { Agent } from "../agent/agent.js";
+import { lspClientCache } from "../lsp/client-cache.js";
 
 const HELP_TEXT = `
 Commands:
@@ -16,6 +17,7 @@ Commands:
   /tokens       - Show token usage
   /tools        - Toggle tool call display
   /compact [n] [--compact-debug]  - Compact context
+  /compact:strategy [name]        - Manage compaction strategies
   /cancel       - Cancel current run
   /prompt:name [args] - Execute saved prompt
   /skill        - List skills
@@ -71,6 +73,13 @@ export function runInteractiveSession({ rl, sessionManager, bus, sink, resolved,
 
   rl.on("close", () => {
     console.log("\nGoodbye!");
+    // Quick cleanup: force-kill all LSP clients synchronously
+    for (const [, client] of lspClientCache) {
+      if (client.process && client.process.kill) {
+        try { client.process.kill("SIGKILL"); } catch {}
+      }
+    }
+    lspClientCache.clear();
     process.exit(0);
   });
 }
@@ -244,6 +253,65 @@ function dispatchAgentCommand(cmd, sessionManager, sink, bus, resolved, rl) {
         rl.prompt();
       }
       break;
+
+    case "compactStrategy": {
+      const registry = agent.compactionStrategyRegistry;
+      const { action, name } = cmd.value;
+
+      switch (action) {
+        case "list": {
+          const strategies = registry.getAll();
+          const current = agent.compactionStrategy || 'summarize';
+          console.log("\nCompaction Strategies:\n");
+          for (const s of strategies) {
+            const marker = s.name === current ? ' (current)' : '';
+            console.log(`  ${s.name}${marker} — ${s.description}`);
+          }
+          console.log(`\nCurrent strategy: ${current}\n`);
+          break;
+        }
+        case "set": {
+          if (!name) {
+            console.log('Usage: /compact:strategy <name>\n');
+            break;
+          }
+          if (!registry.has(name)) {
+            const available = registry.getAll().map(s => s.name).join(', ');
+            console.log(`Unknown strategy '${name}'. Available: ${available}\n`);
+            break;
+          }
+          agent.compactionStrategy = name;
+          console.log(`Compaction strategy set to: ${name}\n`);
+          break;
+        }
+        case "help": {
+          if (!name) {
+            // Show help for all strategies
+            const strategies = registry.getAll();
+            console.log('\nCompaction Strategies:\n');
+            for (const s of strategies) {
+              console.log(`  ${s.name} — ${s.description}`);
+            }
+            console.log('\nUsage:');
+            console.log('  /compact:strategy              — List strategies');
+            console.log('  /compact:strategy <name>       — Set strategy');
+            console.log('  /compact:strategy help         — Show help');
+            console.log('  /compact:strategy help <name>  — Show strategy details\n');
+          } else if (registry.has(name)) {
+            const strategy = registry.get(name);
+            console.log(`\nStrategy: ${strategy.name}\n`);
+            console.log(`Description: ${strategy.description}\n`);
+          } else {
+            console.log(`Unknown strategy '${name}'.\n`);
+          }
+          break;
+        }
+        default:
+          console.log(`Unknown action: ${action}\n`);
+      }
+      rl.prompt();
+      break;
+    }
 
     case "prompt":
       if (cmd.value) {

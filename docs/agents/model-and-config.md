@@ -200,3 +200,76 @@ Focus on architecture, dependencies, and entry points.
 **Resolution chain for role**: CLI `--role` > config `role` > profile file `role` > `DEFAULT_ROLE`
 
 **Config file settings take precedence** over profile file settings for tool restrictions. The profile file provides defaults that are overlaid with config values where they are non-empty.
+
+## LSP Configuration (`src/lsp/config.js`)
+
+LSP integration is controlled via the `lsp` config object. It is **disabled by default** (`DEFAULT_LSP_ENABLED = false`).
+
+### Config Fields
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `enabled` | boolean | `false` | Master switch for LSP tools |
+| `servers` | object | (empty) | Custom server overrides keyed by name |
+| `defaultServers` | object | (4 built-in) | TypeScript, Python, Go, Rust servers |
+| `maxHoverLines` | number | `200` | Max lines in hover results |
+| `maxCompletionItems` | number | `50` | Max completion items returned |
+| `maxSymbolResults` | number | `100` | Max symbol search results |
+| `maxDiagnostics` | number | `100` | Max diagnostics to display |
+| `requestTimeoutMs` | number | `30000` | Per-request timeout |
+| `serverStartupTimeoutMs` | number | `60000` | Server startup timeout |
+| `documentSyncKind` | string | `'full'` | Document sync mode |
+
+### Default Language Servers
+
+| Language | Command | Args | Filetypes |
+|----------|---------|------|--------|
+| TypeScript | `typescript-language-server` | `--stdio` | `.ts`, `.tsx`, `.js`, `.jsx` |
+| Python | `pyright-langserver` | `--stdio` | `.py` |
+| Go | `gopls` | `serve` | `.go` |
+| Rust | `rust-analyzer` | (none) | `.rs` |
+
+### Resolution Chain
+
+Profile-level `lsp.*` settings override global `lsp.*` settings, which override defaults.
+
+```bash
+# Enable LSP globally
+oa-agent --prompt "hover on line 5" --config '{"lsp": {"enabled": true}}'
+
+# Enable LSP per-profile (in config file or profile .profile.md)
+{
+  "profile": "coding",
+  "profiles": {
+    "coding": {
+      "lsp": { "enabled": true },
+      "whitelist_tools": ["lsp-hover", "lsp-definition", "lsp-completion"]
+    }
+  }
+}
+```
+
+### Custom Server Configuration
+
+Add custom servers in the config file under `lsp.servers`:
+
+```json
+{
+  "lsp": {
+    "enabled": true,
+    "servers": {
+      "java": {
+        "name": "java",
+        "command": "jdtls",
+        "args": [],
+        "filetypes": ["java"],
+        "timeoutMs": 45000
+      }
+    }
+  }
+}
+```
+
+### Supported File Extensions
+
+The LSP system maps extensions to language IDs: `ts`→typescript, `tsx`→typescriptreact, `js`→javascript, `jsx`→javascriptreact, `py`→python, `go`→go, `rs`→rust, `java`→java, `rb`→ruby, `php`→php, `c`→c, `cpp`→cpp, `cs`→csharp, `swift`→swift, `kt`→kotlin, plus markdown, json, yaml, html, css, scss, shellscript, toml, xml, sql. Unknown extensions map to `plaintext` (no server configured).

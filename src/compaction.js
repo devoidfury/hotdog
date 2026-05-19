@@ -83,12 +83,12 @@ export function findFirstKeptIndex(messages, keepRecent) {
   return 0;
 }
 
-// ── Summarization ───────────────────────────────────────────────────────────
+// ── Summarization Prompts ──────────────────────────────────────────────────
 
-const SUMMARIZATION_SYSTEM_PROMPT =
+export const SUMMARIZATION_SYSTEM_PROMPT =
   'You are a context summarization assistant. Your task is to read a conversation between a user and an AI coding assistant, then produce a structured summary following the exact format specified.\n\nDo NOT continue the conversation. Do NOT respond to any questions in the conversation. ONLY output the structured summary.';
 
-const SUMMARIZATION_USER_PROMPT_TEMPLATE = `
+export const SUMMARIZATION_USER_PROMPT_TEMPLATE = `
 The messages above are a conversation to summarize. Create a structured context checkpoint summary that another LLM will use to continue the work.
 
 Use this EXACT format:
@@ -128,7 +128,7 @@ const TOOL_RESULT_MAX_CHARS = 2000;
  * Serialize messages to text for summarization.
  * Wraps in role tags to prevent the model from treating it as a conversation.
  */
-function serializeConversation(messages) {
+export function serializeConversation(messages) {
   const parts = [];
 
   for (const msg of messages) {

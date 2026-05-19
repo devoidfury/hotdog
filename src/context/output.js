@@ -14,6 +14,7 @@ export const OUTPUT_EVENT = {
   STREAMING_REASONING_CHUNK: 10,
   TASK_PROGRESS: 11,
   TOKEN_USAGE: 12,
+  COMPACTION_RESULT: 13,
 };
 
 /**
@@ -32,6 +33,7 @@ export const EVENT_HANDLERS = {
   [OUTPUT_EVENT.STREAMING_REASONING_CHUNK]: 'emitStreamingReasoningChunk',
   [OUTPUT_EVENT.TASK_PROGRESS]: 'emitTaskProgress',
   [OUTPUT_EVENT.TOKEN_USAGE]: 'emitTokenUsage',
+  [OUTPUT_EVENT.COMPACTION_RESULT]: 'emitCompactionResult',
 };
 
 /**
@@ -77,6 +79,10 @@ export class OutputSink {
 
   emitCompacting(event) {
     // Compacting is displayed by the agent loop
+  }
+
+  emitCompactionResult(event) {
+    // Compaction result is displayed by the agent loop
   }
 
   emitCommandResult(event) {

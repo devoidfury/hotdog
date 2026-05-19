@@ -130,6 +130,35 @@ The entire agent initialization pipeline lives here — encapsulated to make it 
 - Individual tools: `bash.js`, `write.js`, `read.js`, `edit.js`, `grep.js`, `find.js`, `fetch.js`, `question.js`, `pager.js`, `model.js`, `load_skill.js`, `project_info.js`, `review.js`, `explore.js`, `subagents.js`
 - **`createToolFactory(taskManager)`** — creates tool instances from config, supports `ToolContext`
 
+### LSP Integration (`src/lsp/`)
+
+JSON-RPC 2.0 over stdio client for language server communication. Provides 12 tools backed by external language servers.
+
+- **`client.js`** — `LspClient` class: manages language server process lifecycle (spawn → initialize → shutdown), JSON-RPC 2.0 request/response with Content-Length header framing, notification handling, document sync (`didOpen`, `didChange`, `didClose`). Supports `requestTimeoutMs` (default 30s) and `serverStartupTimeoutMs` (default 60s).
+- **`document-store.js`** — `DocumentStore` class: in-memory document state per URI (`content`, `languageId`, `version`). Auto-incrementing version counter. Methods: `put()`, `get()`, `delete()`, `has()`, `updateContent()`, `updateLanguageId()`, `clear()`.
+- **`utils.js`** — URI/path conversion (`pathToUri`, `uriToPath`), file extension → language ID mapping (30+ extensions for ts/js/py/go/rs/etc.), UTF-16 ↔ UTF-8 offset conversion (LSP spec), token estimation, text truncation.
+- **`config.js`** — Server configuration resolution. Default servers: TypeScript (`typescript-language-server --stdio`), Python (`pyright-langserver --stdio`), Go (`gopls serve`), Rust (`rust-analyzer`). Resolution: explicit `servers` config → default servers → `null`. Profile-level overrides via `profile.lsp.*`.
+- **`tools/base.js`** — `LspBaseTool` base class with shared helpers: path resolution, client lifecycle (`_getClient()`), document open tracking (`_ensureDocumentOpen()`), result formatters (`_formatHover`, `_formatLocation`, `_formatCompletions`, `_formatSymbol`, `_formatDiagnostics`). Contains LSP constant enums: `CompletionKind`, `SymbolKind`, `DiagnosticSeverity`.
+- **`tools/index.js`** — Re-exports all 12 LSP tool classes.
+
+**12 LSP Tools** (registered via `src/tools/lsp-tools.js` and `src/tools/index.js`):
+| Tool | LSP Method | Purpose |
+|------|-----------|--------|
+| `lsp-hover` | `textDocument/hover` | Type info, docs at position |
+| `lsp-definition` | `textDocument/definition` | Find symbol definition location |
+| `lsp-completion` | `textDocument/completion` | Auto-completion suggestions |
+| `lsp-signature` | `textDocument/signatureHelp` | Function parameter hints |
+| `lsp-document-symbol` | `textDocument/documentSymbol` | All symbols in a document |
+| `lsp-references` | `textDocument/references` | All usages of a symbol |
+| `lsp-code-action` | `textDocument/codeAction` | Quick fixes, refactoring options |
+| `lsp-formatting` | `textDocument/formatting` | Format entire document |
+| `lsp-rename` | `textDocument/rename` | Rename symbol across project |
+| `lsp-diagnostics` | `publishDiagnostics` (push) | Errors, warnings, hints |
+| `lsp-workspace-symbol` | `workspace/symbol` | Search symbols across workspace |
+| `lsp-apply-edit` | `workspace/applyEdit` | Apply multi-file edits atomically |
+
+**Client lifecycle**: Tools call `_getClient()` (base.js) or `getOrCreateClient()` (lsp-tools.js) to get a cached client per language ID.
+
 ### External Integrations
 - **MCP** (`src/mcp/`) — stdio + HTTP transport, tool discovery, exposes MCP server tools as native agent tools. Files: `client.js`, `connection.js`, `tools.js`, `types.js`, `index.js`
 - **Skills** (`src/skills/loader.js`) — loads `SKILL.md` files from directories following Agent Skills spec

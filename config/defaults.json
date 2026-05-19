@@ -25,6 +25,9 @@
       "model": "ai365/qwen3.6-35b:instruct"
     }
   },
+  "lsp": {
+    "enabled": true
+  },
   "mcp_servers": [
     {
       "enabled": false,

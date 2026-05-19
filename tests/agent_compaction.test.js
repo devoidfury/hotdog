@@ -87,8 +87,8 @@ describe('Agent.compactMessages', () => {
 
     // Context should have been rebuilt with summary
     const messages = agent.context.getMessages();
-    // Summary is wrapped in a previous-context-summary tag (unescaped form)
-    const summaryMsg = messages.find(m => m.role === 'user' && m.content && m.content.includes('previous-context-summary'));
+    // Summary is wrapped in a context-summary tag
+    const summaryMsg = messages.find(m => m.role === 'user' && m.content && m.content.includes('<m_buzefmhm52i8k2m2>'));
     expect(summaryMsg).toBeDefined();
     expect(summaryMsg.content).toContain('Summarized conversation about user queries');
 
@@ -118,7 +118,7 @@ describe('Agent.compactMessages', () => {
     await agent.compactMessages(1);
 
     const messages = agent.context.getMessages();
-    const summaryMsg = messages.find(m => m.role === 'user' && m.content && m.content.includes('previous-context-summary'));
+    const summaryMsg = messages.find(m => m.role === 'user' && m.content && m.content.includes('<m_buzefmhm52i8k2m2>'));
     expect(summaryMsg).toBeDefined();
   });
 

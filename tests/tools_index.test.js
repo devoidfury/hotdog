@@ -28,7 +28,7 @@ describe('SUBAGENT_TOOL_NAMES', () => {
   it('contains all expected subagent tools', () => {
     const expected = [
       'delegate_task', 'task_status', 'task_followup',
-      'task_interrupt', 'plan_status', 'complete_task',
+      'task_interrupt', 'plan_status', 'complete_task', 'wait',
     ];
     expect(SUBAGENT_TOOL_NAMES).toEqual(expected);
   });
@@ -181,6 +181,7 @@ describe('createToolFactory', () => {
     expect(factory.createTool('task_interrupt', {}, null, true)).not.toBeNull();
     expect(factory.createTool('plan_status', {}, null, true)).not.toBeNull();
     expect(factory.createTool('complete_task', {}, null, true)).not.toBeNull();
+    expect(factory.createTool('wait', {}, null, true)).not.toBeNull();
   });
 
   it('does not create subagent tools without manager', () => {

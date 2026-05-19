@@ -415,6 +415,12 @@ export class Agent {
 
       // Log tool result
       this.sessionLog.writeToolResult(displayResult, toolCallId, toolName);
+
+      // If this is the wait tool, signal the loop to exit — the model has
+      // nothing more to do and is yielding control back to the user.
+      if (toolName === "wait") {
+        return "return";
+      }
     }
 
     return "continue";

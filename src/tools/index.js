@@ -61,6 +61,7 @@ import {
   TaskInterruptTool,
   PlanStatusTool,
   CompleteTaskTool,
+  WaitTool,
 } from "./subagents.js";
 
 // Subagent tool names (manager-only)
@@ -71,6 +72,7 @@ export const SUBAGENT_TOOL_NAMES = [
   "task_interrupt",
   "plan_status",
   "complete_task",
+  "wait",
 ];
 
 // Declarative tool constructor map — maps tool names to their constructor functions.
@@ -99,6 +101,7 @@ const SUBAGENT_TOOL_CONSTRUCTORS = {
   task_interrupt: (tm) => new TaskInterruptTool(tm),
   plan_status: (tm) => new PlanStatusTool(tm),
   complete_task: (tm) => new CompleteTaskTool(tm),
+  wait: (tm) => new WaitTool(tm),
 };
 
 /**

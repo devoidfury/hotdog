@@ -1,13 +1,18 @@
 // Write tool — write content to a file.
 
-import fs from 'node:fs/promises';
-import fsSync from 'node:fs';
-import path from 'node:path';
-import { toolDef, param, toolResult, validateCwdBoundary, resolvePath } from './registry.js';
+import fs from "node:fs/promises";
+import fsSync from "node:fs";
+import path from "node:path";
+import {
+  toolDef,
+  param,
+  toolResult,
+  validateCwdBoundary,
+  resolvePath,
+} from "./registry.js";
 
 export class WriteTool {
-  static TOOL_NAME = 'write';
-  static FIRST_USE_HELP = 'Write content to a file. Creates parent directories if they don\'t exist.';
+  static TOOL_NAME = "write";
 
   static tryNewFromContext(ctx) {
     return new WriteTool();
@@ -16,60 +21,82 @@ export class WriteTool {
   toToolDef() {
     return toolDef(
       WriteTool.TOOL_NAME,
-      'Writes a file to the local filesystem. Each call performs a single operation. Modes:\n\n1. **overwrite** — replaces entire file content. Requires: path, content.\n2. **insert_before** — inserts content at the given line, shifting existing lines down. Requires: path, start_at, content.\n3. **replace_all** — replaces all occurrences of literal string. Requires: path, search, content.\n4. **regex_replace** — replaces all matches of regex pattern. Requires: path, search_re, content.\n5. **replace_range** — replaces lines from start_at through end_at (inclusive) with new content. Requires: path, start_at, end_at, content.\n6. **replace_range_literal** — replaces literal string on each line from start_at to end_at (or EOF). Requires: path, search, start_at, content.\n7. **replace_range_regex** — applies regex replacement on each line from start_at to end_at (or EOF). Requires: path, search_re, start_at, content.\n\nAll line numbers are 1-indexed.',
+      "Writes a file to the local filesystem. Each call performs a single operation. Modes:\n\n1. **overwrite** — replaces entire file content. Requires: path, content.\n2. **insert_before** — inserts content at the given line, shifting existing lines down. Requires: path, start_at, content.\n3. **replace_all** — replaces all occurrences of literal string. Requires: path, search, content.\n4. **regex_replace** — replaces all matches of regex pattern. Requires: path, search_re, content.\n5. **replace_range** — replaces lines from start_at through end_at (inclusive) with new content. Requires: path, start_at, end_at, content.\n6. **replace_range_literal** — replaces literal string on each line from start_at to end_at (or EOF). Requires: path, search, start_at, content.\n7. **replace_range_regex** — applies regex replacement on each line from start_at to end_at (or EOF). Requires: path, search_re, start_at, content.\n\nAll line numbers are 1-indexed.",
       {
-        schema: 'https://json-schema.org/draft/2020-12/schema',
+        schema: "https://json-schema.org/draft/2020-12/schema",
         properties: {
-          mode: param('string', 'Operation mode. One of: overwrite, insert_before, replace_all, regex_replace, replace_range, replace_range_literal, replace_range_regex'),
-          path: param('string', 'File path relative to workspace root'),
-          content: param('string', 'Replacement content or full new file content'),
-          search: param('string', 'Literal string to find/replace (used by replace_all, replace_range_literal)'),
-          search_re: param('string', 'Regex pattern to find/replace (used by regex_replace, replace_range_regex)'),
-          start_at: param('integer', 'Start line (1-indexed, inclusive). Required for insert_before, replace_range, replace_range_literal, replace_range_regex.', { minimum: 1 }),
-          end_at: param('integer', 'End line (1-indexed, inclusive). Required for replace_range, replace_range_literal, replace_range_regex. Optional for replace_range_literal/replace_range_regex — defaults to EOF.'),
-          replace_all: param('boolean', 'Replace all occurrences (default: false).'),
+          mode: param(
+            "string",
+            "Operation mode. One of: overwrite, insert_before, replace_all, regex_replace, replace_range, replace_range_literal, replace_range_regex",
+          ),
+          path: param("string", "File path relative to workspace root"),
+          content: param(
+            "string",
+            "Replacement content or full new file content",
+          ),
+          search: param(
+            "string",
+            "Literal string to find/replace (used by replace_all, replace_range_literal)",
+          ),
+          search_re: param(
+            "string",
+            "Regex pattern to find/replace (used by regex_replace, replace_range_regex)",
+          ),
+          start_at: param(
+            "integer",
+            "Start line (1-indexed, inclusive). Required for insert_before, replace_range, replace_range_literal, replace_range_regex.",
+            { minimum: 1 },
+          ),
+          end_at: param(
+            "integer",
+            "End line (1-indexed, inclusive). Required for replace_range, replace_range_literal, replace_range_regex. Optional for replace_range_literal/replace_range_regex — defaults to EOF.",
+          ),
+          replace_all: param(
+            "boolean",
+            "Replace all occurrences (default: false).",
+          ),
         },
-        required: ['mode', 'path', 'content'],
-      }
+        required: ["mode", "path", "content"],
+      },
     );
   }
 
   callDisplay(input) {
     let args;
     try {
-      args = typeof input === 'string' ? JSON.parse(input) : input;
+      args = typeof input === "string" ? JSON.parse(input) : input;
     } catch {
-      return typeof input === 'string' ? input : '';
+      return typeof input === "string" ? input : "";
     }
     if (!args || !args.mode || !args.path || args.content === undefined) {
-      return typeof input === 'string' ? input : '';
+      return typeof input === "string" ? input : "";
     }
     const mode = args.mode;
     const filePath = args.path;
-    const content = args.content || '';
-    const search = args.search || '';
-    const search_re = args.search_re || '';
-    const start_at = typeof args.start_at === 'number' ? args.start_at : null;
-    const end_at = typeof args.end_at === 'number' ? args.end_at : null;
-    const contentLines = content.split('\n').length;
+    const content = args.content || "";
+    const search = args.search || "";
+    const search_re = args.search_re || "";
+    const start_at = typeof args.start_at === "number" ? args.start_at : null;
+    const end_at = typeof args.end_at === "number" ? args.end_at : null;
+    const contentLines = content.split("\n").length;
 
     switch (mode) {
-      case 'overwrite':
+      case "overwrite":
         return `${filePath} overwrite (${contentLines} lines)`;
-      case 'insert_before':
+      case "insert_before":
         return `${filePath} insert_before line ${start_at || 1} (${contentLines} lines)`;
-      case 'replace_all':
-        return `${filePath} replace_all /${search || ''}/ (${contentLines} lines)`;
-      case 'regex_replace':
-        return `${filePath} regex_replace /${search_re || ''}/ (${contentLines} lines)`;
-      case 'replace_range': {
+      case "replace_all":
+        return `${filePath} replace_all /${search || ""}/ (${contentLines} lines)`;
+      case "regex_replace":
+        return `${filePath} regex_replace /${search_re || ""}/ (${contentLines} lines)`;
+      case "replace_range": {
         const start = start_at || 1;
         const end = end_at || start;
         const replaced = end - start + 1;
         return `${filePath} replace_range lines ${start}–${end} (${replaced} → ${contentLines} lines)`;
       }
-      case 'replace_range_literal':
-      case 'replace_range_regex': {
+      case "replace_range_literal":
+      case "replace_range_regex": {
         const start = start_at || 1;
         const hasEnd = end_at !== null && end_at !== undefined;
         if (hasEnd) {
@@ -84,19 +111,15 @@ export class WriteTool {
     }
   }
 
-  firstUseHelp() {
-    return WriteTool.FIRST_USE_HELP;
-  }
-
   async execute(input, ctx) {
     let args;
     try {
-      args = typeof input === 'string' ? JSON.parse(input) : input;
+      args = typeof input === "string" ? JSON.parse(input) : input;
     } catch {
-      return toolResult('Error parsing arguments');
+      return toolResult("Error parsing arguments");
     }
     if (!args || !args.mode || !args.path || args.content === undefined) {
-      return toolResult('Error parsing arguments');
+      return toolResult("Error parsing arguments");
     }
 
     // Normalize args
@@ -106,12 +129,20 @@ export class WriteTool {
       content: args.content,
       search: args.search || null,
       search_re: args.search_re || null,
-      start_at: typeof args.start_at === 'number' ? args.start_at : null,
-      end_at: typeof args.end_at === 'number' ? args.end_at : null,
+      start_at: typeof args.start_at === "number" ? args.start_at : null,
+      end_at: typeof args.end_at === "number" ? args.end_at : null,
       replace_all: args.replace_all || false,
     };
 
-    const { mode, path: filePath, content, search, search_re, start_at, end_at } = args;
+    const {
+      mode,
+      path: filePath,
+      content,
+      search,
+      search_re,
+      start_at,
+      end_at,
+    } = args;
     const cwdBoundary = ctx?.cwdBoundary || null;
     const workspaceRoot = ctx?.workspaceRoot || null;
 
@@ -125,7 +156,12 @@ export class WriteTool {
     }
 
     // Validate mode
-    const modeResult = validateMode(mode, { search, search_re, start_at, end_at });
+    const modeResult = validateMode(mode, {
+      search,
+      search_re,
+      start_at,
+      end_at,
+    });
     if (modeResult) {
       return toolResult(modeResult);
     }
@@ -139,34 +175,44 @@ export class WriteTool {
     }
 
     const sourceContent = fsSync.existsSync(resolvedPath)
-      ? fsSync.readFileSync(resolvedPath, 'utf-8')
-      : '';
-    const filesizeBefore = Buffer.byteLength(sourceContent, 'utf-8');
+      ? fsSync.readFileSync(resolvedPath, "utf-8")
+      : "";
+    const filesizeBefore = Buffer.byteLength(sourceContent, "utf-8");
 
     // Apply edit in-memory
     let newContent;
     try {
-      newContent = applyEdit(sourceContent, mode, content, search, search_re, start_at, end_at);
+      newContent = applyEdit(
+        sourceContent,
+        mode,
+        content,
+        search,
+        search_re,
+        start_at,
+        end_at,
+      );
     } catch (e) {
       return toolResult(`Edit failed: ${e.message}`);
     }
 
-    const filesizeAfter = Buffer.byteLength(newContent, 'utf-8');
+    const filesizeAfter = Buffer.byteLength(newContent, "utf-8");
 
     // Write the file
     try {
-      await fs.writeFile(resolvedPath, newContent, 'utf-8');
+      await fs.writeFile(resolvedPath, newContent, "utf-8");
     } catch (e) {
       return toolResult(`Error writing file: ${e.message}`);
     }
 
     // Return structured result
-    return toolResult(JSON.stringify({
-      path: filePath,
-      mode,
-      filesize_before: filesizeBefore,
-      filesize_after: filesizeAfter,
-    }));
+    return toolResult(
+      JSON.stringify({
+        path: filePath,
+        mode,
+        filesize_before: filesizeBefore,
+        filesize_after: filesizeAfter,
+      }),
+    );
   }
 }
 
@@ -174,12 +220,12 @@ export class WriteTool {
  * Parse and validate write tool arguments.
  */
 function parseArgs(input) {
-  if (!input || (typeof input === 'string' && input.trim().length === 0)) {
+  if (!input || (typeof input === "string" && input.trim().length === 0)) {
     return null;
   }
 
   let json;
-  if (typeof input === 'string') {
+  if (typeof input === "string") {
     try {
       json = JSON.parse(input);
     } catch {
@@ -203,8 +249,8 @@ function parseArgs(input) {
     content,
     search: json.search || null,
     search_re: json.search_re || null,
-    start_at: typeof json.start_at === 'number' ? json.start_at : null,
-    end_at: typeof json.end_at === 'number' ? json.end_at : null,
+    start_at: typeof json.start_at === "number" ? json.start_at : null,
+    end_at: typeof json.end_at === "number" ? json.end_at : null,
     replace_all: json.replace_all || false,
   };
 }
@@ -214,26 +260,31 @@ function parseArgs(input) {
  */
 function validateMode(mode, { search, search_re, start_at, end_at }) {
   switch (mode) {
-    case 'overwrite':
+    case "overwrite":
       return null;
-    case 'insert_before':
-      if (!start_at || start_at < 1) return 'insert_before requires path, start_at, and content';
+    case "insert_before":
+      if (!start_at || start_at < 1)
+        return "insert_before requires path, start_at, and content";
       return null;
-    case 'replace_all':
-      if (!search) return 'replace_all requires path, search, and content';
+    case "replace_all":
+      if (!search) return "replace_all requires path, search, and content";
       return null;
-    case 'regex_replace':
-      if (!search_re) return 'regex_replace requires path, search_re, and content';
+    case "regex_replace":
+      if (!search_re)
+        return "regex_replace requires path, search_re, and content";
       return null;
-    case 'replace_range':
-      if (!start_at || !end_at) return 'replace_range requires path, start_at, end_at, and content';
-      if (start_at > end_at) return 'replace_range: start_at must be <= end_at';
+    case "replace_range":
+      if (!start_at || !end_at)
+        return "replace_range requires path, start_at, end_at, and content";
+      if (start_at > end_at) return "replace_range: start_at must be <= end_at";
       return null;
-    case 'replace_range_literal':
-      if (!search || !start_at) return 'replace_range_literal requires path, search, start_at, and content';
+    case "replace_range_literal":
+      if (!search || !start_at)
+        return "replace_range_literal requires path, search, start_at, and content";
       return null;
-    case 'replace_range_regex':
-      if (!search_re || !start_at) return 'replace_range_regex requires path, search_re, start_at, and content';
+    case "replace_range_regex":
+      if (!search_re || !start_at)
+        return "replace_range_regex requires path, search_re, start_at, and content";
       return null;
     default:
       return `Edit failed: Unknown mode: '${mode}'`;
@@ -245,23 +296,35 @@ function validateMode(mode, { search, search_re, start_at, end_at }) {
  */
 function applyEdit(source, mode, content, search, search_re, start_at, end_at) {
   switch (mode) {
-    case 'overwrite':
+    case "overwrite":
       return content;
-    case 'insert_before':
+    case "insert_before":
       return applyInsert(source, start_at, content);
-    case 'replace_all':
+    case "replace_all":
       return source.split(search).join(content);
-    case 'regex_replace':
+    case "regex_replace":
       return applyRegexReplace(source, search_re, content);
-    case 'replace_range':
+    case "replace_range":
       return applyRangeReplace(source, start_at, end_at, content);
-    case 'replace_range_literal': {
-      const effectiveEnd = end_at || source.split('\n').length;
-      return applyRangeLiteralReplace(source, start_at, effectiveEnd, search, content);
+    case "replace_range_literal": {
+      const effectiveEnd = end_at || source.split("\n").length;
+      return applyRangeLiteralReplace(
+        source,
+        start_at,
+        effectiveEnd,
+        search,
+        content,
+      );
     }
-    case 'replace_range_regex': {
-      const effectiveEnd = end_at || source.split('\n').length;
-      return applyRangeRegexReplace(source, start_at, effectiveEnd, search_re, content);
+    case "replace_range_regex": {
+      const effectiveEnd = end_at || source.split("\n").length;
+      return applyRangeRegexReplace(
+        source,
+        start_at,
+        effectiveEnd,
+        search_re,
+        content,
+      );
     }
     default:
       throw new Error(`Unknown mode: ${mode}`);
@@ -270,54 +333,74 @@ function applyEdit(source, mode, content, search, search_re, start_at, end_at) {
 
 function applyInsert(source, startLine, content) {
   // Empty source: just return content as-is
-  if (source === '') {
+  if (source === "") {
     return content;
   }
-  const lines = source.split('\n');
+  const lines = source.split("\n");
   const insertIdx = startLine - 1;
 
   if (insertIdx < 0) {
     // Insert at beginning
-    const contentLines = content.split('\n');
-    return [...contentLines, ...lines].join('\n');
+    const contentLines = content.split("\n");
+    return [...contentLines, ...lines].join("\n");
   }
 
   if (insertIdx >= lines.length) {
     // Insert at end
-    return source.endsWith('\n') ? `${source}${content}\n` : `${source}\n${content}`;
+    return source.endsWith("\n")
+      ? `${source}${content}\n`
+      : `${source}\n${content}`;
   }
 
   // Insert in middle
-  const contentLines = content.split('\n');
-  return [...lines.slice(0, insertIdx), ...contentLines, ...lines.slice(insertIdx)].join('\n');
+  const contentLines = content.split("\n");
+  return [
+    ...lines.slice(0, insertIdx),
+    ...contentLines,
+    ...lines.slice(insertIdx),
+  ].join("\n");
 }
 
 function applyRegexReplace(source, pattern, replacement) {
-  const re = new RegExp(pattern, 'g');
+  const re = new RegExp(pattern, "g");
   return source.replace(re, replacement);
 }
 
 function applyRangeReplace(source, startLine, endLine, content) {
-  const lines = source.split('\n');
+  const lines = source.split("\n");
   const totalLines = lines.length;
 
   if (endLine > totalLines) {
-    throw new Error(`end_line (${endLine}) exceeds file length (${totalLines} lines)`);
+    throw new Error(
+      `end_line (${endLine}) exceeds file length (${totalLines} lines)`,
+    );
   }
 
   const startIdx = startLine - 1;
   const endIdx = endLine;
-  const contentLines = content.split('\n');
+  const contentLines = content.split("\n");
 
-  return [...lines.slice(0, startIdx), ...contentLines, ...lines.slice(endIdx)].join('\n');
+  return [
+    ...lines.slice(0, startIdx),
+    ...contentLines,
+    ...lines.slice(endIdx),
+  ].join("\n");
 }
 
-function applyRangeLiteralReplace(source, startLine, endLine, search, replacement) {
-  const lines = source.split('\n');
+function applyRangeLiteralReplace(
+  source,
+  startLine,
+  endLine,
+  search,
+  replacement,
+) {
+  const lines = source.split("\n");
   const totalLines = lines.length;
 
   if (endLine > totalLines) {
-    throw new Error(`end_line (${endLine}) exceeds file length (${totalLines} lines)`);
+    throw new Error(
+      `end_line (${endLine}) exceeds file length (${totalLines} lines)`,
+    );
   }
 
   const startIdx = startLine - 1;
@@ -329,16 +412,24 @@ function applyRangeLiteralReplace(source, startLine, endLine, search, replacemen
     return line;
   });
 
-  return newLines.join('\n');
+  return newLines.join("\n");
 }
 
-function applyRangeRegexReplace(source, startLine, endLine, pattern, replacement) {
-  const re = new RegExp(pattern, 'g');
-  const lines = source.split('\n');
+function applyRangeRegexReplace(
+  source,
+  startLine,
+  endLine,
+  pattern,
+  replacement,
+) {
+  const re = new RegExp(pattern, "g");
+  const lines = source.split("\n");
   const totalLines = lines.length;
 
   if (endLine > totalLines) {
-    throw new Error(`end_line (${endLine}) exceeds file length (${totalLines} lines)`);
+    throw new Error(
+      `end_line (${endLine}) exceeds file length (${totalLines} lines)`,
+    );
   }
 
   const startIdx = startLine - 1;
@@ -350,5 +441,5 @@ function applyRangeRegexReplace(source, startLine, endLine, pattern, replacement
     return line;
   });
 
-  return newLines.join('\n');
+  return newLines.join("\n");
 }

@@ -4,7 +4,13 @@
 
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { appendFileSync, readFileSync, existsSync, readdirSync, mkdirSync } from "node:fs";
+import {
+  appendFileSync,
+  readFileSync,
+  existsSync,
+  readdirSync,
+  mkdirSync,
+} from "node:fs";
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -372,7 +378,7 @@ export function sessionExists(sessionId) {
  *
  * Compaction entries (role: "system", source: LOG_SOURCE.COMPACTION) are
  * added as user messages, since compaction summaries appear in context as
- * user messages wrapped in <m_xytup662vkenbt4f> tags.
+ * user messages wrapped in <previous-context-summary> tags.
  *
  * @param {import("./agent/agent.js").Agent} agent - The agent whose context to populate
  * @param {Array<object>} entries - Log entries from readSessionEntries()
@@ -431,7 +437,7 @@ export function replayEntriesIntoContext(agent, entries) {
 
       case LOG_SOURCE.COMPACTION: {
         // Compaction summary — added as user message in context
-        // (the agent sees it as a user message with <m_xytup662vkenbt4f> tags)
+        // (the agent sees it as a user message with <previous-context-summary> tags)
         agent.context.addUserMessage(entry.content);
         replayed++;
         break;

@@ -75,10 +75,10 @@ export const DEFAULT_PROMPT = "> ";
 export const DEFAULT_EXIT_COMMANDS = ["exit", "quit"];
 export const DEFAULT_ROLE =
   "You are an AI coding assistant. Use the instructions below and the tools available to you to assist the user.";
-export const DEFAULT_MAX_TOOL_OUTPUT_LINES = 800;
+export const DEFAULT_MAX_TOOL_OUTPUT_LINES = 600;
 export const DEFAULT_TASK_PROFILE = "task-default";
 export const DEFAULT_READ_TOOL_LIMIT = 500;
-export const DEFAULT_FIND_MAX_RESULTS = 400;
+export const DEFAULT_FIND_MAX_RESULTS = 200;
 export const DEFAULT_GREP_MAX_RESULTS = 100;
 
 // Max diff size in characters — diffs larger than this are truncated to prevent API crashes

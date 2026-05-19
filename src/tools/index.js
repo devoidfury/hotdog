@@ -138,12 +138,13 @@ const TOOL_CONSTRUCTORS = {
 };
 
 // Subagent tool constructors (manager-only)
+// Accepts either { sessionCore, taskManager } or just taskManager (legacy)
 const SUBAGENT_TOOL_CONSTRUCTORS = {
-  delegate_task: (tm) => new DelegateTaskTool(tm),
-  task_status: (tm) => new TaskStatusTool(tm),
-  task_followup: (tm) => new TaskFollowupTool(tm),
-  task_interrupt: (tm) => new TaskInterruptTool(tm),
-  plan_status: (tm) => new PlanStatusTool(tm),
+  delegate_task: (opts) => new DelegateTaskTool(opts),
+  task_status: (opts) => new TaskStatusTool(opts),
+  task_followup: (opts) => new TaskFollowupTool(opts),
+  task_interrupt: (opts) => new TaskInterruptTool(opts),
+  plan_status: (opts) => new PlanStatusTool(opts),
   complete_task: (tm) => new CompleteTaskTool(tm),
   wait: (tm) => new WaitTool(tm),
 };
@@ -170,7 +171,7 @@ function createLspInstance(toolName, ctx, lspConfig) {
 /**
  * Create a tool factory that can create and register tools.
  */
-export function createToolFactory(taskManager = null) {
+export function createToolFactory(taskManager = null, sessionCore = null) {
   return {
     createTool(toolName, ctx, whitelist = null, managerToolsEnabled = false) {
       const descriptor = TOOL_DESCRIPTORS.find((d) => d.name === toolName);
@@ -196,10 +197,14 @@ export function createToolFactory(taskManager = null) {
       }
 
       // Subagent tools (manager-only)
-      if (managerToolsEnabled && taskManager) {
+      if (managerToolsEnabled && (taskManager || sessionCore || ctx?.sessionCore)) {
         const subCtor = SUBAGENT_TOOL_CONSTRUCTORS[toolName];
         if (subCtor) {
-          return subCtor(taskManager);
+          // Pass options object with both sessionCore and taskManager
+          return subCtor({
+            sessionCore: sessionCore || ctx?.sessionCore || null,
+            taskManager,
+          });
         }
       }
 

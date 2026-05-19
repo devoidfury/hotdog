@@ -22,7 +22,13 @@ export class MessageBus {
    * @param {Function} [options.onMessageProcessed] - Optional callback called after each message is processed
    * @param {import("../marker_mangler.js").MarkerMangler} [options.markerMangler] - Optional marker mangler for injection prevention
    */
-  constructor({ sessionManager, sink, wakeUpCallback, onMessageProcessed, markerMangler }) {
+  constructor({
+    sessionManager,
+    sink,
+    wakeUpCallback,
+    onMessageProcessed,
+    markerMangler,
+  }) {
     this._sessionManager = sessionManager;
     this._sink = sink;
     this._queue = new MessageQueue();
@@ -235,7 +241,7 @@ export class MessageBus {
     const agent = this._sessionManager.getAgent();
     agent?.taskManager?.setWakeUpCallback((taskId, result) => {
       const escaped = this._markerMangler?.escapeMarkers(result) ?? result;
-      const message = `<m_59gt7zdgkjzdeshe subagent="${taskId}">${escaped}</m_59gt7zdgkjzdeshe>`;
+      const message = `<task-result subagent="${taskId}">${escaped}</task-result>`;
       bus.enqueue(message);
     });
   }

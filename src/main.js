@@ -77,7 +77,7 @@ async function main() {
           const agent = sessionManager.getAgent();
           if (agent) {
             agent._pendingTaskMessages.push(
-              `<m_59gt7zdgkjzdeshe subagent="${taskId}">${escaped}</m_59gt7zdgkjzdeshe>`,
+              `<task-result subagent="${taskId}">${escaped}</task-result>`,
             );
           }
           sink.emit({

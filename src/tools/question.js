@@ -1,11 +1,10 @@
 // Question tool — ask the user questions and collect answers.
 
-import readline from 'node:readline';
-import { toolDef, param, toolResult } from './registry.js';
+import readline from "node:readline";
+import { toolDef, param, toolResult } from "./registry.js";
 
 export class QuestionTool {
-  static TOOL_NAME = 'question';
-  static FIRST_USE_HELP = `Ask the user questions and collect answers. Returns a JSON object mapping question keys to answers.`;
+  static TOOL_NAME = "question";
 
   static tryNewFromContext(ctx) {
     return new QuestionTool();
@@ -14,27 +13,23 @@ export class QuestionTool {
   toToolDef() {
     return toolDef(
       QuestionTool.TOOL_NAME,
-      'Ask the user questions. Returns answers as JSON.',
+      "Ask the user questions. Returns answers as JSON.",
       {
         properties: {
-          questions: param('array', 'Array of question definitions.'),
+          questions: param("array", "Array of question definitions."),
         },
-        required: ['questions'],
-      }
+        required: ["questions"],
+      },
     );
   }
 
   callDisplay(input) {
-    const args = typeof input === 'string' ? JSON.parse(input) : input;
+    const args = typeof input === "string" ? JSON.parse(input) : input;
     return `question: ${args.questions?.length || 0} question(s)`;
   }
 
-  firstUseHelp() {
-    return QuestionTool.FIRST_USE_HELP;
-  }
-
   async execute(input, ctx) {
-    const args = typeof input === 'string' ? JSON.parse(input) : input;
+    const args = typeof input === "string" ? JSON.parse(input) : input;
     const questions = args.questions || [];
     const answers = {};
 
@@ -44,10 +39,10 @@ export class QuestionTool {
     });
 
     for (const q of questions) {
-      const prompt = `${q.prompt}${q.default ? ` [${q.default}]` : ''}: `;
+      const prompt = `${q.prompt}${q.default ? ` [${q.default}]` : ""}: `;
       const answer = await new Promise((resolve) => {
         rl.question(prompt, (answer) => {
-          resolve(answer.trim() || q.default || '');
+          resolve(answer.trim() || q.default || "");
         });
       });
       answers[q.key] = answer;

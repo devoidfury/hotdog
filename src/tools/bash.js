@@ -9,7 +9,6 @@ import {
 
 export class BashTool {
   static TOOL_NAME = "bash";
-  static FIRST_USE_HELP = `Use this tool to execute a shell command. The result is the stdout + stderr of the command.`;
 
   constructor(options = {}) {
     this.timeoutMs = options.timeoutMs || DEFAULT_BASH_TIMEOUT_MS;
@@ -31,7 +30,9 @@ export class BashTool {
       {
         properties: {
           command: param("string", "The shell command to execute."),
-          timeoutMs: param("integer", "Optional timeout in milliseconds."),
+          timeoutMs: param("integer", "Optional timeout in milliseconds.", {
+            default: DEFAULT_BASH_TIMEOUT_MS,
+          }),
         },
         required: ["command"],
       },
@@ -41,10 +42,6 @@ export class BashTool {
   callDisplay(input) {
     const args = typeof input === "string" ? JSON.parse(input) : input;
     return `bash: ${args.command}`;
-  }
-
-  firstUseHelp() {
-    return BashTool.FIRST_USE_HELP;
   }
 
   async execute(input, ctx) {

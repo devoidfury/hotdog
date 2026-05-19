@@ -734,10 +734,14 @@ describe('Agent.handleToolCalls', async () => {
 
     const messages = agent.context.getMessages();
     const toolMsg = messages.find(m => m.role === 'tool');
+    // Tool results are now XML-wrapped: <tool name="..." status="..." duration_ms="...">
+    expect(toolMsg.content).toContain('<tool name="bash"');
+    expect(toolMsg.content).toContain('status="success"');
+    expect(toolMsg.content).toContain('duration_ms=');
+    expect(toolMsg.content).toContain('<output>');
+    // JSON inside <output> is NOT escaped (raw content)
     expect(toolMsg.content).toContain('"status":"ok"');
     expect(toolMsg.content).toContain('"count":5');
-    // Object results get duration_ms added
-    expect(toolMsg.content).toContain('"duration_ms"');
   });
 
   it('handles tool execution error', async () => {

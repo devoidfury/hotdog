@@ -385,10 +385,11 @@ describe('ToolResult', () => {
     expect(content).toContain('<output>output</output>');
   });
 
-  it('toApiContent escapes XML special chars', () => {
+  it('toApiContent does NOT escape output content', () => {
     const r = ToolResult.ok('a < b & c > d');
     const content = r.toApiContent('bash');
-    expect(content).toContain('a &lt; b &amp; c &gt; d');
+    // Output content is raw (not XML-escaped), matching Rust behavior
+    expect(content).toContain('a < b & c > d');
   });
 
   it('toolResult passes through ToolResult via toDisplay()', () => {

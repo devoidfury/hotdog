@@ -9,7 +9,7 @@
   "skills_path": "/skills",
   "profiles": {
     "default": {
-      "blacklist_tools": ["patch"]
+      "blacklist_tools": ["patch", "explore"]
     },
     "explorer": {
       "model": "ai365/qwen3.5-4b:coder",
@@ -48,6 +48,11 @@
         "LIGHTPANDA_DISABLE_TELEMETRY": "true"
       },
       "blacklist-tools": []
+    },
+    {
+      "enabled": true,
+      "name": "bun-docs-mcp",
+      "url": "https://bun.com/docs/mcp"
     }
   ],
   "providers": [

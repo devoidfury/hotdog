@@ -29,15 +29,13 @@ export class ReadTool {
             "string",
             "Path to the file to read (relative to workspace root)",
           ),
-          limit: param(
-            "integer",
-            `Maximum number of lines to return (default ${DEFAULT_READ_TOOL_LIMIT})`,
-            {
-              minimum: 1,
-            },
-          ),
+          limit: param("integer", `Maximum number of lines to return`, {
+            minimum: 1,
+            default: DEFAULT_READ_TOOL_LIMIT,
+          }),
           offset: param("integer", "Number of lines to skip", {
             minimum: 0,
+            default: 0,
           }),
         },
         required: ["path"],
@@ -56,10 +54,6 @@ export class ReadTool {
     }
     const end = offset + limit;
     return `${filePath} (lines ${offset}-${end})`;
-  }
-
-  firstUseHelp() {
-    return "Read a file's contents with optional pagination. Supports line-based extraction with offset/limit. Returns an error for directories with a depth-1 listing instead.";
   }
 
   async execute(input, ctx) {

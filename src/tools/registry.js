@@ -132,7 +132,7 @@ export class ToolResult {
       longMeta.unshift(`  <error>${xmlEscape(this.error)}</error>`);
     }
 
-    const outputNode = `  <${tag}>${xmlEscape(this.output)}</${tag}>`;
+    const outputNode = `  <${tag}>${this.output}</${tag}>`;
 
     const parts = [`<tool ${attrs.join(' ')}>`];
     parts.push(...longMeta);
@@ -470,6 +470,7 @@ export class ToolContext {
     this.modelNames = options.modelNames || [];
     this.activeProvider = options.activeProvider || null;
     this.lspConfig = options.lspConfig || null;
+    this.sessionCore = options.sessionCore || null;
     this.onActivateSkill = options.onActivateSkill || null;
     this.onSwitchModel = options.onSwitchModel || null;
     this.onClearContext = options.onClearContext || null;

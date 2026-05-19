@@ -1,14 +1,13 @@
 // Fetch tool — make HTTP requests.
 
-import { spawnSync } from 'node:child_process';
-import { toolDef, param, toolResult } from './registry.js';
+import { spawnSync } from "node:child_process";
+import { toolDef, param, toolResult } from "./registry.js";
 
-const VALID_METHODS = ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'HEAD'];
-const METHODS_WITH_BODY = ['POST', 'PUT', 'PATCH'];
+const VALID_METHODS = ["GET", "POST", "PUT", "DELETE", "PATCH", "HEAD"];
+const METHODS_WITH_BODY = ["POST", "PUT", "PATCH"];
 
 export class FetchTool {
-  static TOOL_NAME = 'fetch';
-  static FIRST_USE_HELP = 'Make HTTP requests to URLs. Supports GET, POST, PUT, DELETE, PATCH, HEAD.';
+  static TOOL_NAME = "fetch";
 
   static tryNewFromContext(ctx) {
     return new FetchTool();
@@ -17,33 +16,39 @@ export class FetchTool {
   toToolDef() {
     return toolDef(
       FetchTool.TOOL_NAME,
-      'Perform a web request to a URL. Supports GET, POST, PUT, DELETE, PATCH, HEAD methods with optional headers and body. Returns the response body, status code, and content type. When showOriginal is true, returns the raw response body without pandoc conversion.',
+      `Perform a web request to a URL. Supports ${VALID_METHODS.join(", ")} methods with optional headers and body. Returns the response body, status code, and content type. When showOriginal is true, returns the raw response body without pandoc conversion.`,
       {
-        schema: 'https://json-schema.org/draft/2020-12/schema',
+        schema: "https://json-schema.org/draft/2020-12/schema",
         properties: {
-          url: param('string', 'The URL to fetch'),
-          method: param('string', 'HTTP method to use (GET, POST, PUT, DELETE, PATCH, HEAD). Defaults to GET.', { enum: VALID_METHODS }),
-          headers: param('object', 'Optional HTTP headers as key-value pairs'),
-          body: param('string', 'Optional request body (for POST, PUT, PATCH)'),
-          showOriginal: param('boolean', 'If true, return the original raw response body without pandoc conversion. Defaults to false, which converts HTML to GFM markdown.'),
+          url: param("string", "The URL to fetch"),
+          method: param("string", "HTTP method to use", {
+            enum: VALID_METHODS,
+            default: "GET",
+          }),
+          headers: param("object", "Optional HTTP headers as key-value pairs"),
+          body: param(
+            "string",
+            `Optional request body (for ${METHODS_WITH_BODY.join(", ")})`,
+          ),
+          showOriginal: param(
+            "boolean",
+            "If true, return the original raw response body without markdown conversion.",
+            { default: false },
+          ),
         },
-        required: ['url'],
-      }
+        required: ["url"],
+      },
     );
   }
 
   callDisplay(input) {
     const { args, error } = parseArgs(input);
     if (!args) {
-      return typeof input === 'string' ? input : '';
+      return typeof input === "string" ? input : "";
     }
     const url = args.url;
-    const urlDisplay = url.length > 40 ? url.slice(0, 40) + '...' : url;
+    const urlDisplay = url.length > 40 ? url.slice(0, 40) + "..." : url;
     return `[${args.method}] ${urlDisplay}`;
-  }
-
-  firstUseHelp() {
-    return FetchTool.FIRST_USE_HELP;
   }
 
   async execute(input, ctx) {
@@ -58,10 +63,12 @@ export class FetchTool {
       const resp = await fetch(url, {
         method,
         headers: {
-          'Content-Type': 'application/json',
+          "Content-Type": "application/json",
           ...headers,
         },
-        body: METHODS_WITH_BODY.includes(method) ? body || undefined : undefined,
+        body: METHODS_WITH_BODY.includes(method)
+          ? body || undefined
+          : undefined,
       });
 
       const respHeaders = {};
@@ -69,16 +76,19 @@ export class FetchTool {
         respHeaders[key] = value;
       });
 
-      const contentType = resp.headers.get('content-type') || '';
+      const contentType = resp.headers.get("content-type") || "";
       let respBody;
-      if (contentType.includes('application/json')) {
+      if (contentType.includes("application/json")) {
         respBody = await resp.json();
       } else {
         respBody = await resp.text();
       }
 
-      const bodyLength = typeof respBody === 'string' ? respBody.length : JSON.stringify(respBody).length;
-      const reason = resp.statusText || 'Unknown';
+      const bodyLength =
+        typeof respBody === "string"
+          ? respBody.length
+          : JSON.stringify(respBody).length;
+      const reason = resp.statusText || "Unknown";
       const truncated = bodyLength > 8000;
 
       // If showOriginal is true, return raw body without conversion
@@ -90,7 +100,7 @@ export class FetchTool {
           url,
           content_type: contentType,
           body_length: bodyLength,
-          ...(truncated ? { truncated: 'true' } : {}),
+          ...(truncated ? { truncated: "true" } : {}),
           body: respBody,
           headers: respHeaders,
         });
@@ -98,11 +108,15 @@ export class FetchTool {
 
       // When showOriginal is not true, convert HTML through pandoc to GFM
       let bodyToReturn = respBody;
-      if (typeof respBody === 'string' && (contentType.includes('text/html') || contentType.includes('application/xhtml+xml'))) {
+      if (
+        typeof respBody === "string" &&
+        (contentType.includes("text/html") ||
+          contentType.includes("application/xhtml+xml"))
+      ) {
         try {
-          const result = spawnSync('pandoc', ['-f', 'html', '-t', 'gfm'], {
+          const result = spawnSync("pandoc", ["-f", "html", "-t", "gfm"], {
             input: respBody,
-            encoding: 'utf-8',
+            encoding: "utf-8",
             maxBuffer: 10 * 1024 * 1024,
           });
           if (result.error) {
@@ -120,7 +134,10 @@ export class FetchTool {
         }
       }
 
-      const finalBodyLength = typeof bodyToReturn === 'string' ? bodyToReturn.length : JSON.stringify(bodyToReturn).length;
+      const finalBodyLength =
+        typeof bodyToReturn === "string"
+          ? bodyToReturn.length
+          : JSON.stringify(bodyToReturn).length;
       const finalTruncated = finalBodyLength > 8000;
 
       return toolResult({
@@ -130,16 +147,16 @@ export class FetchTool {
         url,
         content_type: contentType,
         body_length: finalBodyLength,
-        ...(finalTruncated ? { truncated: 'true' } : {}),
+        ...(finalTruncated ? { truncated: "true" } : {}),
         body: bodyToReturn,
         headers: respHeaders,
       });
     } catch (e) {
       const msg = e.message || String(e);
-      if (msg.includes('timeout') || msg.includes('timed out')) {
+      if (msg.includes("timeout") || msg.includes("timed out")) {
         return toolResult(`Request to ${url} timed out`);
       }
-      if (msg.includes('connect') || msg.includes('network')) {
+      if (msg.includes("connect") || msg.includes("network")) {
         return toolResult(`Connection failed for ${url}: ${msg}`);
       }
       return toolResult(`Error: ${msg}`);
@@ -152,28 +169,28 @@ export class FetchTool {
  * Returns { args, error } where error is a string if validation failed.
  */
 function parseArgs(input) {
-  if (!input || (typeof input === 'string' && input.trim().length === 0)) {
-    return { args: null, error: 'Missing required argument: url' };
+  if (!input || (typeof input === "string" && input.trim().length === 0)) {
+    return { args: null, error: "Missing required argument: url" };
   }
 
   let json;
-  if (typeof input === 'string') {
+  if (typeof input === "string") {
     try {
       json = JSON.parse(input);
     } catch {
-      return { args: null, error: 'Error parsing arguments' };
+      return { args: null, error: "Error parsing arguments" };
     }
   } else {
     json = input;
   }
 
   const url = json.url;
-  if (!url || typeof url !== 'string') {
-    return { args: null, error: 'Missing required argument: url' };
+  if (!url || typeof url !== "string") {
+    return { args: null, error: "Missing required argument: url" };
   }
 
   // Validate method
-  const method = (json.method || 'GET').toUpperCase();
+  const method = (json.method || "GET").toUpperCase();
   if (!VALID_METHODS.includes(method)) {
     return {
       args: null,
@@ -181,8 +198,9 @@ function parseArgs(input) {
     };
   }
 
-  const headers = json.headers && typeof json.headers === 'object' ? json.headers : {};
-  const body = typeof json.body === 'string' ? json.body : null;
+  const headers =
+    json.headers && typeof json.headers === "object" ? json.headers : {};
+  const body = typeof json.body === "string" ? json.body : null;
   const showOriginal = json.showOriginal === true;
 
   return { args: { url, method, headers, body, showOriginal }, error: null };

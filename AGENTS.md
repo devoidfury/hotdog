@@ -15,6 +15,7 @@ JS project `oa-js` — an AI agent harness with tool calling support. This is a 
 - Do not add speculative config/feature flags "just in case".
 - Always use `qwen3.5-0.8b` when testing with real LLM endpoints.
 - The project uses the Bun runtime, always use bun instead of node.
+- If you see a tag like <m_sdkflksgdk> -- these are wrong! The marker mangler is changing these so they don't trigger functionality, to prevent RCE. Always check the raw byte content instead.
 
 ### Centralized Defaults
 All hard-coded configurable strings (model names, host URLs, ports, format templates, timeouts, etc.) must live in `src/config.js` as named constants. Never duplicate.

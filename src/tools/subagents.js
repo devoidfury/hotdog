@@ -2,16 +2,54 @@
 //
 // These tools are only enabled when the profile has `manager: true`.
 // They provide task delegation, status checking, follow-up, and interruption.
+//
+// Phase 2: Tools accept an optional SessionCore reference. When set, they
+// delegate to SessionCore; otherwise they fall back to TaskManager.
 
 import { toolDef, param, parseToolArgs, toolResult } from "./registry.js";
 import { getVisibleWorkerProfiles } from "../config.js";
+
+// ── Helper: resolve task manager or session core ───────────────────────────
+
+/**
+ * Resolve the task management backend.
+ * Returns { type: 'sessionCore', value } or { type: 'taskManager', value }.
+ */
+function resolveTaskBackend(sessionCore, taskManager) {
+  if (sessionCore) {
+    return { type: 'sessionCore', value: sessionCore };
+  }
+  if (taskManager) {
+    return { type: 'taskManager', value: taskManager };
+  }
+  return { type: 'none', value: null };
+}
+
+/**
+ * Detect if an argument is a task manager (has spawnTask method) or an options object.
+ */
+function isTaskManager(obj) {
+  return obj && typeof obj === 'object' && typeof obj.spawnTask === 'function';
+}
 
 // ── delegate_task ───────────────────────────────────────────────────────────
 
 /** Spawn a background task agent to perform work. */
 export class DelegateTaskTool {
-  constructor(taskManager) {
-    this._taskManager = taskManager;
+  constructor(options) {
+    if (isTaskManager(options)) {
+      // Legacy: single taskManager argument
+      this._taskManager = options;
+      this._sessionCore = null;
+    } else if (typeof options === 'object' && options !== null) {
+      // New: options object with sessionCore and/or taskManager
+      this._sessionCore = options.sessionCore || null;
+      this._taskManager = options.taskManager || null;
+    } else {
+      // Null/undefined
+      this._taskManager = null;
+      this._sessionCore = null;
+    }
   }
 
   async execute(input) {
@@ -20,12 +58,27 @@ export class DelegateTaskTool {
       return toolResult("Error: task_id and description are required");
     }
 
-    const tm = this._taskManager;
-    if (!tm) {
+    const backend = resolveTaskBackend(this._sessionCore, this._taskManager);
+    if (backend.type === 'none') {
       return toolResult("Error: Task manager not available");
     }
 
-    const handle = tm.spawnTask(
+    if (backend.type === 'sessionCore') {
+      const handle = await backend.value.spawnTask(
+        args.task_id,
+        args.description,
+        {
+          workerModel: args.worker_model || null,
+          profile: args.profile || null,
+        },
+      );
+      return toolResult(
+        `Task ${args.task_id} delegated (handle: ${handle.taskId})`,
+      );
+    }
+
+    // Legacy: TaskManager
+    const handle = backend.value.spawnTask(
       args.task_id,
       args.description,
       args.worker_model || null,
@@ -80,8 +133,17 @@ export class DelegateTaskTool {
 
 /** Check the status of a specific running task agent. */
 export class TaskStatusTool {
-  constructor(taskManager) {
-    this._taskManager = taskManager;
+  constructor(options) {
+    if (isTaskManager(options)) {
+      this._taskManager = options;
+      this._sessionCore = null;
+    } else if (typeof options === 'object' && options !== null) {
+      this._sessionCore = options.sessionCore || null;
+      this._taskManager = options.taskManager || null;
+    } else {
+      this._taskManager = null;
+      this._sessionCore = null;
+    }
   }
 
   async execute(input) {
@@ -90,12 +152,18 @@ export class TaskStatusTool {
       return toolResult("Error: task_id is required");
     }
 
-    const tm = this._taskManager;
-    if (!tm) {
+    const backend = resolveTaskBackend(this._sessionCore, this._taskManager);
+    if (backend.type === 'none') {
       return toolResult("Error: Task manager not available");
     }
 
-    const status = tm.taskStatus(args.task_id);
+    let status;
+    if (backend.type === 'sessionCore') {
+      status = backend.value.taskOrchestrator.taskStatus(args.task_id);
+    } else {
+      status = backend.value.taskStatus(args.task_id);
+    }
+
     if (status === null) {
       return toolResult(`Task ${args.task_id} not found`);
     }
@@ -125,8 +193,17 @@ export class TaskStatusTool {
 
 /** Send a follow-up message to a running task agent. */
 export class TaskFollowupTool {
-  constructor(taskManager) {
-    this._taskManager = taskManager;
+  constructor(options) {
+    if (isTaskManager(options)) {
+      this._taskManager = options;
+      this._sessionCore = null;
+    } else if (typeof options === 'object' && options !== null) {
+      this._sessionCore = options.sessionCore || null;
+      this._taskManager = options.taskManager || null;
+    } else {
+      this._taskManager = null;
+      this._sessionCore = null;
+    }
   }
 
   async execute(input) {
@@ -135,12 +212,18 @@ export class TaskFollowupTool {
       return toolResult("Error: task_id and message are required");
     }
 
-    const tm = this._taskManager;
-    if (!tm) {
+    const backend = resolveTaskBackend(this._sessionCore, this._taskManager);
+    if (backend.type === 'none') {
       return toolResult("Error: Task manager not available");
     }
 
-    const ok = tm.sendFollowUp(args.task_id, args.message);
+    let ok;
+    if (backend.type === 'sessionCore') {
+      ok = backend.value.taskOrchestrator.followUp(args.task_id, args.message);
+    } else {
+      ok = backend.value.sendFollowUp(args.task_id, args.message);
+    }
+
     if (ok) {
       return toolResult(`Follow-up sent to task ${args.task_id}`);
     }
@@ -172,8 +255,17 @@ export class TaskFollowupTool {
 
 /** Interrupt (cancel) a running task agent. */
 export class TaskInterruptTool {
-  constructor(taskManager) {
-    this._taskManager = taskManager;
+  constructor(options) {
+    if (isTaskManager(options)) {
+      this._taskManager = options;
+      this._sessionCore = null;
+    } else if (typeof options === 'object' && options !== null) {
+      this._sessionCore = options.sessionCore || null;
+      this._taskManager = options.taskManager || null;
+    } else {
+      this._taskManager = null;
+      this._sessionCore = null;
+    }
   }
 
   async execute(input) {
@@ -182,12 +274,18 @@ export class TaskInterruptTool {
       return toolResult("Error: task_id is required");
     }
 
-    const tm = this._taskManager;
-    if (!tm) {
+    const backend = resolveTaskBackend(this._sessionCore, this._taskManager);
+    if (backend.type === 'none') {
       return toolResult("Error: Task manager not available");
     }
 
-    const ok = tm.interruptTask(args.task_id);
+    let ok;
+    if (backend.type === 'sessionCore') {
+      ok = backend.value.taskOrchestrator.interrupt(args.task_id);
+    } else {
+      ok = backend.value.interruptTask(args.task_id);
+    }
+
     if (ok) {
       return toolResult(`Task ${args.task_id} interrupted`);
     }
@@ -217,34 +315,59 @@ export class TaskInterruptTool {
 
 /** Check the status of task agents. Shows all active tasks or the status of a specific task. */
 export class PlanStatusTool {
-  constructor(taskManager) {
-    this._taskManager = taskManager;
+  constructor(options) {
+    if (isTaskManager(options)) {
+      this._taskManager = options;
+      this._sessionCore = null;
+    } else if (typeof options === 'object' && options !== null) {
+      this._sessionCore = options.sessionCore || null;
+      this._taskManager = options.taskManager || null;
+    } else {
+      this._taskManager = null;
+      this._sessionCore = null;
+    }
   }
 
   async execute(input) {
     const args = parseToolArgs(input);
 
-    const tm = this._taskManager;
-    if (!tm) {
+    const backend = resolveTaskBackend(this._sessionCore, this._taskManager);
+    if (backend.type === 'none') {
       return toolResult("Error: Task manager not available");
     }
 
     if (args.task_id) {
-      const status = tm.taskStatus(args.task_id);
+      let status;
+      if (backend.type === 'sessionCore') {
+        status = backend.value.taskOrchestrator.taskStatus(args.task_id);
+      } else {
+        status = backend.value.taskStatus(args.task_id);
+      }
       if (status === null) {
         return toolResult(`Task ${args.task_id} not found`);
       }
       return toolResult(`Task ${args.task_id}: ${status}`);
     }
 
-    const active = tm.activeTasks();
+    let active;
+    if (backend.type === 'sessionCore') {
+      active = backend.value.taskOrchestrator.activeTasks();
+    } else {
+      active = backend.value.activeTasks();
+    }
+
     if (active.length === 0) {
       return toolResult("No active tasks");
     }
 
     const lines = ["Active tasks:"];
     for (const taskId of active) {
-      const status = tm.taskStatus(taskId);
+      let status;
+      if (backend.type === 'sessionCore') {
+        status = backend.value.taskOrchestrator.taskStatus(taskId);
+      } else {
+        status = backend.value.taskStatus(taskId);
+      }
       lines.push(`  ${taskId} — ${status}`);
     }
     return toolResult(lines.join("\n"));

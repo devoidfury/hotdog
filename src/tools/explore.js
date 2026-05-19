@@ -29,13 +29,9 @@ export class ExploreTool {
             "An outline of what you are specifically interested in or any particular questions you have",
           ),
         },
-        required: [],
+        required: ["path", "outline"],
       },
     );
-  }
-
-  firstUseHelp() {
-    return "Run the agent in explorer mode against a project directory. Executes the agent with the explorer profile and a prompt describing what to explore.";
   }
 
   callDisplay(input) {

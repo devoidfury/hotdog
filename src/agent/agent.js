@@ -17,6 +17,7 @@ import {
   SUBAGENT_TOOL_NAMES,
   toolResult,
   registerLspTools,
+  ToolResult,
 } from "../tools/index.js";
 import {
   DEFAULT_MODEL,
@@ -33,12 +34,8 @@ import {
   loadAgentsMd,
 } from "../context/system_prompt.js";
 import { disabledSessionLog } from "../session_log.js";
-import {
-  findFirstKeptIndex,
-} from "../compaction.js";
-import {
-  CompactionStrategyRegistry,
-} from "../compaction/strategies.js";
+import { findFirstKeptIndex } from "../compaction.js";
+import { CompactionStrategyRegistry } from "../compaction/strategies.js";
 import { SummarizeStrategy } from "../compaction/strategies/summarize.js";
 import { DropStrategy } from "../compaction/strategies/drop.js";
 import { SummarizeShortStrategy } from "../compaction/strategies/summarize-short.js";
@@ -86,7 +83,8 @@ export class Agent {
     this.compactDebug = config.compactDebug || false;
     this.showTokenUse = config.showTokenUse !== false;
     // Compaction strategy
-    this.compactionStrategy = config.compaction?.strategy || DEFAULT_COMPACTION_STRATEGY;
+    this.compactionStrategy =
+      config.compaction?.strategy || DEFAULT_COMPACTION_STRATEGY;
     this.compactionStrategyRegistry = new CompactionStrategyRegistry();
     this._registerBuiltinCompactionStrategies();
     this.profileName = config.profileName || "default";
@@ -486,16 +484,30 @@ export class Agent {
     const plainMessages = allMessages.map((m) => m.toJSON());
 
     // Get the configured strategy
-    const strategy = this.compactionStrategyRegistry.get(this.compactionStrategy);
+    const strategy = this.compactionStrategyRegistry.get(
+      this.compactionStrategy,
+    );
     if (!strategy) {
-      console.warn(`Compaction strategy '${this.compactionStrategy}' not found, falling back to 'summarize'`);
-      this.compactionStrategy = 'summarize';
-      const fallback = this.compactionStrategyRegistry.get('summarize');
+      console.warn(
+        `Compaction strategy '${this.compactionStrategy}' not found, falling back to 'summarize'`,
+      );
+      this.compactionStrategy = "summarize";
+      const fallback = this.compactionStrategyRegistry.get("summarize");
       if (!fallback) return null;
-      return this._executeCompaction(fallback, plainMessages, keepRecent, allMessages);
+      return this._executeCompaction(
+        fallback,
+        plainMessages,
+        keepRecent,
+        allMessages,
+      );
     }
 
-    return this._executeCompaction(strategy, plainMessages, keepRecent, allMessages);
+    return this._executeCompaction(
+      strategy,
+      plainMessages,
+      keepRecent,
+      allMessages,
+    );
   }
 
   /**
@@ -509,7 +521,11 @@ export class Agent {
     const result = await strategy.execute(
       plainMessages,
       // Pass settings with 'keepRecent' property that strategies expect
-      { enabled: this.compaction.enabled, keepRecent, reserveTokens: this.compaction.reserveTokens },
+      {
+        enabled: this.compaction.enabled,
+        keepRecent,
+        reserveTokens: this.compaction.reserveTokens,
+      },
       // LLM chat callback — convert plain objects to Message instances
       // because chatStreamCancellable calls msg.toJSON() on each message
       async (msgs, model) => {
@@ -538,7 +554,7 @@ export class Agent {
 
     if (!result) return null;
 
-    // Rebuild context: system prompt + <m_buzefmhm52i8k2m2> + kept messages
+    // Rebuild context: system prompt + <previous-context-summary> + kept messages
     this.context.clear();
 
     // Add system prompt back
@@ -546,11 +562,11 @@ export class Agent {
 
     // Add compaction summary as user message (or empty marker for drop strategy)
     if (result.summary) {
-      const summaryContent = `<m_buzefmhm52i8k2m2>${result.summary}</m_buzefmhm52i8k2m2>`;
+      const summaryContent = `<previous-context-summary>${result.summary}</previous-context-summary>`;
       this.context.addUserMessage(summaryContent);
     } else {
       // Drop strategy: no summary, just a marker
-      const summaryContent = `<m_buzefmhm52i8k2m2>Context compacted: ${result.messagesCompacted} messages removed</m_buzefmhm52i8k2m2>`;
+      const summaryContent = `<previous-context-summary>Context compacted: ${result.messagesCompacted} messages removed</previous-context-summary>`;
       this.context.addUserMessage(summaryContent);
     }
 

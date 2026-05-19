@@ -14,6 +14,7 @@ JS project `oa-js` — an AI agent harness with tool calling support. This is a 
 - Do not add heavy dependencies for minor convenience.
 - Do not add speculative config/feature flags "just in case".
 - Always use `qwen3.5-0.8b` when testing with real LLM endpoints.
+- The project uses the Bun runtime, always use bun instead of node.
 
 ### Centralized Defaults
 All hard-coded configurable strings (model names, host URLs, ports, format templates, timeouts, etc.) must live in `src/config.js` as named constants. Never duplicate.

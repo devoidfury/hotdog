@@ -16,7 +16,7 @@ import { parseArgs, HELP_TEXT } from "./cli.js";
 import { buildConfig } from "./init/resolution.js";
 import { formatError } from "./context/error.js";
 import { OUTPUT_EVENT } from "./context/output.js";
-import { shutdownAll } from "./lsp/client-cache.js";
+import { shutdownAll } from "../ext/lsp/index.js";
 
 async function main() {
   const cli = parseArgs();

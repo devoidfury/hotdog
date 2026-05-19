@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from 'bun:test';
-import { LspDefinitionTool } from '../src/lsp/tools/lsp-definition.js';
+import { LspDefinitionTool } from '../ext/lsp/tools/lsp-definition.js';
 
 describe('LspDefinitionTool', () => {
   let tool;

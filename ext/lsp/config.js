@@ -9,12 +9,12 @@ import {
   DEFAULT_LSP_MAX_SYMBOL_RESULTS,
   DEFAULT_LSP_REQUEST_TIMEOUT_MS,
   DEFAULT_LSP_SERVER_TIMEOUT_MS,
-} from "../config.js";
+} from "../../src/config.js";
 
 /**
  * Default LSP server configurations
  */
-export { DEFAULT_LSP_SERVERS } from "../config.js";
+export { DEFAULT_LSP_SERVERS } from "../../src/config.js";
 
 /**
  * Default LSP settings.

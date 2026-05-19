@@ -1,5 +1,7 @@
 // LSP Client — JSON-RPC 2.0 over stdio with language server process management.
 
+import fs from 'node:fs';
+import path from 'node:path';
 import { spawn } from 'node:child_process';
 import { DocumentStore } from './document-store.js';
 import { pathToUri } from './utils.js';
@@ -114,11 +116,101 @@ export class LspClient {
         // Non-fatal — server may have already exited
       }
 
+      // Small delay to let the server settle before indexing
+      await new Promise(r => setTimeout(r, 1000));
+
+      // Index workspace — open all JS/TS files so the server has full project
+      // context for cross-file references, workspace symbols, etc.
+      try {
+        await this._indexWorkspace(rootPath);
+      } catch (e) {
+        // Non-fatal — server can still work without full indexing
+        console.error(`LSP workspace indexing failed: ${e.message}`);
+      }
+
+      // Small delay after indexing to let the server process files
+      await new Promise(r => setTimeout(r, 500));
+
+      // Force TypeScript server to reload projects (required for workspace/symbol)
+      try {
+        await this.request('workspace/executeCommand', {
+          command: 'typescript.reloadProjects',
+          arguments: [],
+        });
+      } catch {
+        // Non-fatal — server may not support this command
+      }
+
       this.isInitialized = true;
       return result;
     } catch (e) {
       await this._cleanupProcess();
       throw e;
+    }
+  }
+
+  /**
+   * Index the workspace — discover and open all JS/TS source files.
+   * This gives the language server full project context for cross-file
+   * references, workspace symbols, go-to-definition across modules, etc.
+   * @param {string} rootPath - Workspace root directory
+   * @returns {Promise<void>}
+   */
+  async _indexWorkspace(rootPath) {
+    const exts = new Set(['.js', '.ts', '.mjs', '.cjs', '.jsx', '.tsx']);
+    const skipDirs = new Set([
+      'node_modules', 'dist', 'build', '.git', '.next', 'out',
+      '__pycache__', '.bun', 'vendor',
+    ]);
+    const files = [];
+
+    const walk = (dir) => {
+      try {
+        const entries = fs.readdirSync(dir, { withFileTypes: true });
+        for (const entry of entries) {
+          if (skipDirs.has(entry.name)) continue;
+          const fullPath = path.join(dir, entry.name);
+          if (entry.isDirectory()) {
+            walk(fullPath);
+          } else if (entry.isFile() && exts.has(path.extname(entry.name))) {
+            files.push(fullPath);
+          }
+        }
+      } catch {
+        // Skip unreadable directories
+      }
+    };
+
+    walk(rootPath);
+
+    // Also open tsconfig.json if present — required for TS server project context
+    const tsconfigPath = path.join(rootPath, 'tsconfig.json');
+    if (fs.existsSync(tsconfigPath)) {
+      files.unshift(tsconfigPath);
+    }
+
+    // Open each file with the language server
+    const openPromises = files.map(async (filePath) => {
+      const ext = path.extname(filePath);
+      let langId = 'javascript';
+      if (['.ts', '.tsx'].includes(ext)) langId = 'typescript';
+      else if (['.jsx'].includes(ext)) langId = 'javascriptreact';
+      else if (['.tsx'].includes(ext)) langId = 'typescriptreact';
+      else if (ext === '.json') langId = 'json';
+
+      try {
+        const content = fs.readFileSync(filePath, 'utf-8');
+        const uri = pathToUri(filePath);
+        await this.didOpen(uri, content, langId);
+      } catch {
+        // Skip files that can't be read
+      }
+    });
+
+    // Open files in batches to avoid overwhelming the server
+    const batchSize = 50;
+    for (let i = 0; i < openPromises.length; i += batchSize) {
+      await Promise.allSettled(openPromises.slice(i, i + batchSize));
     }
   }
 
@@ -130,7 +222,11 @@ export class LspClient {
       processId: process.pid,
       rootUri: pathToUri(rootPath),
       capabilities: this._getClientCapabilities(),
-      initializationOptions: config.initializationOptions,
+      initializationOptions: {
+        ...config.initializationOptions,
+        // Explicitly set project root for TypeScript server
+        projectRoot: rootPath,
+      },
       workspaceFolders: rootPath ? [
         { uri: pathToUri(rootPath), name: 'workspace' }
       ] : null,

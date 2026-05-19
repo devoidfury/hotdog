@@ -17,10 +17,9 @@ export * from "./project_info.js";
 export * from "./review.js";
 export * from "./explore.js";
 
-// Export LSP tools and utilities
-export { LSP_TOOL_NAMES } from "./lsp-tools.js";
-import { LSP_TOOL_NAMES } from "./lsp-tools.js";
-export * from "../lsp/tools/index.js";
+// Export LSP tools and utilities through the extension hook
+export { LSP_TOOL_NAMES } from "../../ext/lsp/index.js";
+import { LSP_TOOL_NAMES } from "../../ext/lsp/index.js";
 
 // Import classes for factory use
 import { BashTool } from "./bash.js";
@@ -50,8 +49,8 @@ import {
   LspDiagnosticsTool,
   LspWorkspaceSymbolTool,
   LspApplyEditTool,
-} from "../lsp/tools/index.js";
-import { isLspEnabled } from "../lsp/config.js";
+} from "../../ext/lsp/index.js";
+import { isLspEnabled } from "../../ext/lsp/index.js";
 
 // Tool descriptors — declarative table of all core tools.
 const TOOL_DESCRIPTORS = [
@@ -116,9 +115,9 @@ const LSP_TOOL_MAP = {
 
 /**
  * Resolve language ID from a file path.
- * Re-exported from lsp/utils for internal use.
+ * Re-exported from ext/lsp/utils for internal use.
  */
-import { getLanguageId as _getLanguageId } from '../lsp/utils.js';
+import { getLanguageId as _getLanguageId } from '../../ext/lsp/utils.js';
 
 // Declarative tool constructor map — maps tool names to their constructor functions.
 const TOOL_CONSTRUCTORS = {

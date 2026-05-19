@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach } from 'bun:test';
-import { LspClient, LspError } from '../src/lsp/client.js';
-import { DocumentStore } from '../src/lsp/document-store.js';
+import { LspClient, LspError } from '../ext/lsp/client.js';
+import { DocumentStore } from '../ext/lsp/document-store.js';
 
 describe('LspError', () => {
   it('creates error with message', () => {

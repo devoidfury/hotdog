@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from 'bun:test';
-import { LspHoverTool } from '../src/lsp/tools/lsp-hover.js';
+import { LspHoverTool } from '../ext/lsp/tools/lsp-hover.js';
 import { ToolResult } from '../src/tools/registry.js';
 
 describe('LspHoverTool', () => {

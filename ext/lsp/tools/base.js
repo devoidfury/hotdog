@@ -10,8 +10,8 @@ import {
   getCachedClient,
   deleteCachedClient,
 } from "../client-cache.js";
-import { toolDef, param, ToolResult } from "../../tools/registry.js";
-import { formatError } from "../../context/error.js";
+import { toolDef, param, ToolResult } from "../../../src/tools/registry.js";
+import { formatError } from "../../../src/context/error.js";
 
 /**
  * Base class for all LSP tools.

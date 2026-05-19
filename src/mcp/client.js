@@ -5,7 +5,7 @@
 
 import { spawn } from "node:child_process";
 import { Readable } from "node:stream";
-import { parseMcpInitializeResponse, parseMcpToolsListResponse, parseMcpToolCallResponse, contentBlocksToString, jsonRpcRequest, jsonRpcNotification, mcpToolCallRequest } from "./types.js";
+import { parseMcpInitializeResponse, parseMcpToolsListResponse, parseMcpToolCallResponse, contentBlocksToString, jsonRpcRequest, jsonRpcNotification, mcpToolCallRequest, mcpInitializeRequest } from "./types.js";
 
 /**
  * MCP error types.
@@ -245,22 +245,86 @@ export class McpClient {
       throw new McpError(`MCP HTTP error (${response.status}): ${body}`);
     }
 
-    // For HTTP transport, we read the response body directly
-    // (no SSE streaming for now, as MCP over HTTP uses direct JSON responses)
+    // Read response body as text and parse SSE format
     const body = await response.text();
+
+    // Try direct JSON first (for servers that don't use SSE)
     let data;
     try {
       data = JSON.parse(body);
+      if (data.error) {
+        const errMsg = data.error.message || `MCP error code ${data.error.code}`;
+        throw new McpError(`${errMsg}\nRaw response: ${body}`, data.error.code || -1);
+      }
+      return data.result;
     } catch {
-      throw new McpError(`Invalid JSON response from MCP server: ${body.slice(0, 200)}`);
+      // Not direct JSON — try SSE parsing
     }
 
-    if (data.error) {
-      const errMsg = data.error.message || `MCP error code ${data.error.code}`;
-      throw new McpError(`${errMsg}\nRaw response: ${body}`, data.error.code || -1);
+    // Parse SSE stream: "event: message\ndata: {json}\n\n"
+    const messages = this._parseSse(body);
+    if (messages.length === 0) {
+      throw new McpError(`No SSE messages found in response: ${body.slice(0, 200)}`);
     }
 
-    return data.result;
+    // For MCP requests, we expect exactly one response message
+    // (though SSE can carry multiple events)
+    const lastMsg = messages[messages.length - 1];
+    if (lastMsg.error) {
+      const errMsg = lastMsg.error.message || `MCP error code ${lastMsg.error.code}`;
+      throw new McpError(`${errMsg}\nRaw SSE: ${body}`, lastMsg.error.code || -1);
+    }
+
+    return lastMsg.result;
+  }
+
+  /**
+   * Parse SSE (Server-Sent Events) formatted text into JSON-RPC messages.
+   * Handles the format: "event: message\ndata: {json}\n\n"
+   */
+  _parseSse(text) {
+    const messages = [];
+    const lines = text.split(/\r?\n/);
+    let currentEvent = "message";
+    let currentData = "";
+
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i];
+
+      // Empty line signals end of an event
+      if (line === "") {
+        if (currentData.trim()) {
+          try {
+            const parsed = JSON.parse(currentData.trim());
+            messages.push(parsed);
+          } catch {
+            // Skip unparseable SSE data
+          }
+        }
+        currentEvent = "message";
+        currentData = "";
+        continue;
+      }
+
+      if (line.startsWith("event:")) {
+        currentEvent = line.slice(6).trim();
+      } else if (line.startsWith("data:")) {
+        currentData = line.slice(5).trim();
+      }
+      // Other lines (like "id:", etc.) are ignored
+    }
+
+    // Handle trailing data without final empty line
+    if (currentData.trim()) {
+      try {
+        const parsed = JSON.parse(currentData.trim());
+        messages.push(parsed);
+      } catch {
+        // Skip unparseable SSE data
+      }
+    }
+
+    return messages;
   }
 
   // ── Public API ──────────────────────────────────────────────────────────

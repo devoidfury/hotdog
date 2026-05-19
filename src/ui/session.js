@@ -5,7 +5,7 @@ import readline from "node:readline";
 import { spawn } from "node:child_process";
 import { parseCommand, isUiCommand, Command } from "../agent/commands.js";
 import { Agent } from "../agent/agent.js";
-import { lspClientCache } from "../lsp/client-cache.js";
+import { lspClientCache } from "../../ext/lsp/client-cache.js";
 
 const HELP_TEXT = `
 Commands:
@@ -39,7 +39,14 @@ Commands:
  * @param {object} resolved - resolved agent config (from buildConfig().resolved)
  * @param {Function} [setPromptFn] - Optional callback to set the prompt function for onMessageProcessed
  */
-export function runInteractiveSession({ rl, sessionManager, bus, sink, resolved, setPromptFn }) {
+export function runInteractiveSession({
+  rl,
+  sessionManager,
+  bus,
+  sink,
+  resolved,
+  setPromptFn,
+}) {
   // Set the prompt function so the bus can call it after each message
   if (setPromptFn) {
     setPromptFn(() => rl.prompt());
@@ -76,7 +83,9 @@ export function runInteractiveSession({ rl, sessionManager, bus, sink, resolved,
     // Quick cleanup: force-kill all LSP clients synchronously
     for (const [, client] of lspClientCache) {
       if (client.process && client.process.kill) {
-        try { client.process.kill("SIGKILL"); } catch {}
+        try {
+          client.process.kill("SIGKILL");
+        } catch {}
       }
     }
     lspClientCache.clear();
@@ -121,7 +130,9 @@ function dispatchUiCommand(cmd, sessionManager, sink, rl) {
     case Command.Thinking:
       agent.hideThinking = !agent.hideThinking;
       sink.hideThinking = agent.hideThinking;
-      console.log(`Thinking display: ${agent.hideThinking ? "hidden" : "shown"}\n`);
+      console.log(
+        `Thinking display: ${agent.hideThinking ? "hidden" : "shown"}\n`,
+      );
       rl.prompt();
       break;
 
@@ -173,14 +184,18 @@ function dispatchAgentCommand(cmd, sessionManager, sink, bus, resolved, rl) {
           const profile = resolved.profiles[cmd.value];
           (async () => {
             try {
-              const newAgent = await sessionManager.swapAgent(async (builder) => {
-                const agent = await builder.buildAgent(sink);
-                agent.role = profile.role || agent.role;
-                agent.profileBody = profile.body || "";
-                agent.profileName = cmd.value;
-                return agent;
-              });
-              console.log(`Cleared context and switched to profile: ${cmd.value}\n`);
+              const newAgent = await sessionManager.swapAgent(
+                async (builder) => {
+                  const agent = await builder.buildAgent(sink);
+                  agent.role = profile.role || agent.role;
+                  agent.profileBody = profile.body || "";
+                  agent.profileName = cmd.value;
+                  return agent;
+                },
+              );
+              console.log(
+                `Cleared context and switched to profile: ${cmd.value}\n`,
+              );
             } catch (e) {
               console.log(`Profile switch failed: ${e.message}\n`);
             }
@@ -205,7 +220,9 @@ function dispatchAgentCommand(cmd, sessionManager, sink, bus, resolved, rl) {
         agent.context.systemMessages = [];
         console.log(`Switched to model: ${cmd.value}\n`);
       } else {
-        console.log(`Available models: ${Object.keys(agent.modelRegistry).join(", ")}\n`);
+        console.log(
+          `Available models: ${Object.keys(agent.modelRegistry).join(", ")}\n`,
+        );
       }
       rl.prompt();
       break;
@@ -213,7 +230,9 @@ function dispatchAgentCommand(cmd, sessionManager, sink, bus, resolved, rl) {
     case "models": {
       const models = Object.keys(agent.modelRegistry);
       if (models.length === 0) {
-        console.log("No models configured. Add providers to your config file.\n");
+        console.log(
+          "No models configured. Add providers to your config file.\n",
+        );
       } else {
         console.log("Available models:");
         for (const name of models) {
@@ -261,10 +280,10 @@ function dispatchAgentCommand(cmd, sessionManager, sink, bus, resolved, rl) {
       switch (action) {
         case "list": {
           const strategies = registry.getAll();
-          const current = agent.compactionStrategy || 'summarize';
+          const current = agent.compactionStrategy || "summarize";
           console.log("\nCompaction Strategies:\n");
           for (const s of strategies) {
-            const marker = s.name === current ? ' (current)' : '';
+            const marker = s.name === current ? " (current)" : "";
             console.log(`  ${s.name}${marker} — ${s.description}`);
           }
           console.log(`\nCurrent strategy: ${current}\n`);
@@ -272,12 +291,17 @@ function dispatchAgentCommand(cmd, sessionManager, sink, bus, resolved, rl) {
         }
         case "set": {
           if (!name) {
-            console.log('Usage: /compact:strategy <name>\n');
+            console.log("Usage: /compact:strategy <name>\n");
             break;
           }
           if (!registry.has(name)) {
-            const available = registry.getAll().map(s => s.name).join(', ');
-            console.log(`Unknown strategy '${name}'. Available: ${available}\n`);
+            const available = registry
+              .getAll()
+              .map((s) => s.name)
+              .join(", ");
+            console.log(
+              `Unknown strategy '${name}'. Available: ${available}\n`,
+            );
             break;
           }
           agent.compactionStrategy = name;
@@ -288,15 +312,17 @@ function dispatchAgentCommand(cmd, sessionManager, sink, bus, resolved, rl) {
           if (!name) {
             // Show help for all strategies
             const strategies = registry.getAll();
-            console.log('\nCompaction Strategies:\n');
+            console.log("\nCompaction Strategies:\n");
             for (const s of strategies) {
               console.log(`  ${s.name} — ${s.description}`);
             }
-            console.log('\nUsage:');
-            console.log('  /compact:strategy              — List strategies');
-            console.log('  /compact:strategy <name>       — Set strategy');
-            console.log('  /compact:strategy help         — Show help');
-            console.log('  /compact:strategy help <name>  — Show strategy details\n');
+            console.log("\nUsage:");
+            console.log("  /compact:strategy              — List strategies");
+            console.log("  /compact:strategy <name>       — Set strategy");
+            console.log("  /compact:strategy help         — Show help");
+            console.log(
+              "  /compact:strategy help <name>  — Show strategy details\n",
+            );
           } else if (registry.has(name)) {
             const strategy = registry.get(name);
             console.log(`\nStrategy: ${strategy.name}\n`);
@@ -356,7 +382,9 @@ function dispatchAgentCommand(cmd, sessionManager, sink, bus, resolved, rl) {
       } else {
         const result = agent.activateSkill(cmd.value);
         if (result.success) {
-          console.log(`Skill '${cmd.value}' activated. System prompt updated.\n`);
+          console.log(
+            `Skill '${cmd.value}' activated. System prompt updated.\n`,
+          );
         } else {
           console.log(`Error: ${result.error}\n`);
         }

@@ -1,8 +1,8 @@
 // LSP Workspace Symbol tool — workspace/symbol
 
 import { LspBaseTool, CompletionKind, SymbolKind, DiagnosticSeverity } from './base.js';
-import { toolDef, param, ToolResult } from '../../tools/registry.js';
-import { formatError } from '../../context/error.js';
+import { toolDef, param, ToolResult } from '../../../src/tools/registry.js';
+import { formatError } from '../../../src/context/error.js';
 
 export class LspWorkspaceSymbolTool extends LspBaseTool {
   static TOOL_NAME = 'lsp-workspace-symbol';

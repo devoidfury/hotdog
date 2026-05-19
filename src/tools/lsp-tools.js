@@ -1,10 +1,13 @@
 // LSP Tools factory — creates and registers LSP tools based on configuration.
 
-import { LspClient } from '../lsp/client.js';
-import { getServerByLanguageId, isLspEnabled } from '../lsp/config.js';
-import { getLanguageId } from '../lsp/utils.js';
-import { lspClientCache, getCachedClient, deleteCachedClient } from '../lsp/client-cache.js';
 import {
+  LspClient,
+  getServerByLanguageId,
+  isLspEnabled,
+  getLanguageId,
+  lspClientCache,
+  getCachedClient,
+  deleteCachedClient,
   LspHoverTool,
   LspDefinitionTool,
   LspCompletionTool,
@@ -17,7 +20,7 @@ import {
   LspDiagnosticsTool,
   LspWorkspaceSymbolTool,
   LspApplyEditTool,
-} from '../lsp/tools/index.js';
+} from '../../ext/lsp/index.js';
 
 /**
  * LSP tool definitions — maps tool names to their classes.

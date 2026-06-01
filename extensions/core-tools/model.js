@@ -56,9 +56,10 @@ export class ModelTool {
       );
     }
 
-    if (ctx?.onSwitchModel) {
+    const onSwitchModel = ctx?.get('onSwitchModel');
+    if (onSwitchModel) {
       try {
-        await ctx.onSwitchModel(name);
+        await onSwitchModel(name);
         return ToolResult.ok(`Switched to model: ${name}`).withEntry(
           "model", name,
         );

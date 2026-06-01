@@ -291,8 +291,9 @@ export class LspQueryTool extends LspBaseTool {
     }
 
     // Get language ID from context
-    const languageId = ctx?.currentFile
-      ? this._getLanguageId(ctx.currentFile)
+    const currentFile = ctx?.get('currentFile');
+    const languageId = currentFile
+      ? this._getLanguageId(currentFile)
       : "typescript";
 
     const client = await this._getClient(languageId, ctx, this.lspConfig);

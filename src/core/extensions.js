@@ -33,9 +33,10 @@ export class ExtensionLoader {
    *
    * @param {string} name - Unique extension name.
    * @param {string|Object} entryPoint - Path or module object.
+   * @param {Object} [createOptions] - Options to pass to the extension's `create()` function.
    * @returns {Promise<Object>} The loaded extension instance.
    */
-  async load(name, entryPoint) {
+  async load(name, entryPoint, createOptions = {}) {
     // Resolve the module — add cache-busting query string so hot-reloads
     // bypass the JS engine's native module cache
     let extModule;
@@ -47,7 +48,7 @@ export class ExtensionLoader {
 
     // Create the extension instance
     const instance = extModule.create
-      ? extModule.create(this._core)
+      ? extModule.create(this._core, createOptions)
       : extModule;
 
     if (!instance) {
@@ -94,11 +95,12 @@ export class ExtensionLoader {
    * Hot-reload an extension: unload and reload.
    * @param {string} name
    * @param {string|Object} entryPoint
+   * @param {Object} [createOptions] - Options to pass to the extension's `create()` function.
    * @returns {Promise<Object>}
    */
-  async reload(name, entryPoint) {
+  async reload(name, entryPoint, createOptions = {}) {
     await this.unload(name);
-    return await this.load(name, entryPoint);
+    return await this.load(name, entryPoint, createOptions);
   }
 
   /**

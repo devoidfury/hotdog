@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'bun:test';
 import { PagerTool } from '../../extensions/core-tools/pager.js';
-import { ToolResult } from '../../extensions/core-tools/registry.js';
+import { ToolResult, ToolContext } from '../../extensions/core-tools/registry.js';
 
 /**
  * Extract string output from a tool result (handles ToolResult or plain string).
@@ -30,21 +30,19 @@ describe('PagerTool', () => {
   it('returns cached output when available', async () => {
     const tool = new PagerTool();
     const mockCached = 'Previously cached output data';
-    const ctx = {
-      onGetCachedToolOutput: (toolCallId) => {
-        if (toolCallId === 'call_123') return mockCached;
-        return null;
-      },
-    };
+    const ctx = new ToolContext();
+    ctx.set('onGetCachedToolOutput', (toolCallId) => {
+      if (toolCallId === 'call_123') return mockCached;
+      return null;
+    });
     const result = await tool.execute(JSON.stringify({ tool_call_id: 'call_123' }), ctx);
     expect(resultStr(result)).toBe(mockCached);
   });
 
   it('returns not found when no cached output', async () => {
     const tool = new PagerTool();
-    const ctx = {
-      onGetCachedToolOutput: () => null,
-    };
+    const ctx = new ToolContext();
+    ctx.set('onGetCachedToolOutput', () => null);
     const result = await tool.execute(JSON.stringify({ tool_call_id: 'call_456' }), ctx);
     expect(resultStr(result)).toContain('No cached output found');
     expect(resultStr(result)).toContain('call_456');

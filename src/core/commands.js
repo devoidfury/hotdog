@@ -1,6 +1,8 @@
 // Slash command dispatch for the agent.
 // Handles parsing and execution of slash commands from the CLI.
 
+import { createSlashCommandRegistry } from "./slash-command-registry.js";
+
 /**
  * Parsed slash command (without the leading `/`).
  */
@@ -14,21 +16,33 @@ export const Command = {
   Models: 'models',
   Model: 'model',
   Tokens: 'tokens',
-  Compact: 'compact',
-  CompactStrategy: 'compactStrategy',
-  Prompt: 'prompt',
   Regenerate: 'regenerate',
-  Skill: 'skill',
-  Shell: 'shell',
-  Refresh: 'refresh',
   Unknown: 'unknown',
 };
 
 /**
  * Parse a raw command string (without leading `/`) into a typed command object.
+ *
+ * @param {string} cmd - Raw command string (without leading `/`)
+ * @param {Object} [registry] - Optional SlashCommandRegistry for custom commands
+ * @returns {Object} Parsed command object { type, value }
  */
-export function parseCommand(cmd) {
+export function parseCommand(cmd, registry) {
   if (!cmd) return { type: Command.Unknown, value: null };
+
+  // Check custom commands first (via registry)
+  if (registry) {
+    const customName = registry.match(cmd);
+    if (customName) {
+      const def = registry.get(customName);
+      return {
+        type: customName,
+        value: cmd,
+        _customCommand: customName,
+        _handler: def.handler || null,
+      };
+    }
+  }
 
   switch (cmd) {
     case 'help':
@@ -72,83 +86,8 @@ export function parseCommand(cmd) {
     return { type: Command.Tokens, value: null };
   }
 
-  // compact:strategy [action] [name]
-  if (cmd.startsWith('compact:strategy')) {
-    const rest = cmd.slice(16).trim();
-    const parts = rest ? rest.split(/\s+/) : [];
-    const action = parts[0] || 'list';
-    const name = parts[1] || null;
-
-    if (action === 'help') {
-      return { type: Command.CompactStrategy, value: { action: 'help', name } };
-    } else if (action === 'list' || action === '') {
-      return { type: Command.CompactStrategy, value: { action: 'list' } };
-    } else {
-      return { type: Command.CompactStrategy, value: { action: 'set', name: action } };
-    }
-  }
-
-  // compact [n] [--compact-debug]
-  if (cmd.startsWith('compact')) {
-    const parts = cmd.split(/\s+/);
-    let keep = null;
-    let debug = false;
-    for (const part of parts.slice(1)) {
-      if (part === '--compact-debug') {
-        debug = true;
-      } else if (!Number.isNaN(Number(part))) {
-        keep = parseInt(part, 10);
-      }
-    }
-    return { type: Command.Compact, value: { keep, debug } };
-  }
-
-  // sh <command>
-  if (cmd.startsWith('sh ')) {
-    const command = cmd.slice(3).trim();
-    return {
-      type: command ? Command.Shell : Command.Shell,
-      value: command || null,
-    };
-  }
-
-  // !<command> or :!<command> (vim-like shell escape)
-  if (cmd.startsWith('!') || cmd.startsWith(':!')) {
-    const command = cmd.startsWith(':!') ? cmd.slice(2).trim() : cmd.slice(1).trim();
-    return {
-      type: Command.Shell,
-      value: command || null,
-    };
-  }
-
-  // prompt:<name> [args]
-  if (cmd.startsWith('prompt:')) {
-    const rest = cmd.slice(7);
-    const spaceIdx = rest.indexOf(' ');
-    const name = spaceIdx >= 0 ? rest.slice(0, spaceIdx).trim() : rest.trim();
-    const args = spaceIdx >= 0 ? rest.slice(spaceIdx + 1).trim() : '';
-    return { type: Command.Prompt, value: { name, args: args || undefined } };
-  }
-
   if (cmd === 'regenerate') {
     return { type: Command.Regenerate, value: null };
-  }
-
-  // skill:<name> or skill:
-  if (cmd.startsWith('skill:')) {
-    const name = cmd.slice(6).trim();
-    if (!name) {
-      return { type: Command.Skill, value: null }; // List skills
-    }
-    return { type: Command.Skill, value: name };
-  }
-
-  // refresh [target] [--force]
-  if (cmd.startsWith('refresh')) {
-    const parts = cmd.split(/\s+/);
-    const target = parts.slice(1).filter(p => !p.startsWith('--')).join(' ') || 'list';
-    const force = parts.some(p => p === '--force');
-    return { type: Command.Refresh, value: target, force };
   }
 
   return { type: Command.Unknown, value: cmd };
@@ -163,6 +102,5 @@ export function isUiCommand(type) {
     Command.Quit,
     Command.Tools,
     Command.Thinking,
-    Command.Shell,
   ].includes(type);
 }

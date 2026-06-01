@@ -29,8 +29,9 @@ export class PagerTool {
     }
     const toolCallId = args.tool_call_id;
 
-    if (ctx?.onGetCachedToolOutput) {
-      const cached = ctx.onGetCachedToolOutput(toolCallId);
+    const onGetCachedToolOutput = ctx?.get('onGetCachedToolOutput');
+    if (onGetCachedToolOutput) {
+      const cached = onGetCachedToolOutput(toolCallId);
       if (cached) {
         return ToolResult.ok(cached).withEntry('tool_call_id', toolCallId);
       }

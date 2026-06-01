@@ -7,7 +7,7 @@
  *
  * Hooks:
  *   - tools:register  → registers the refresh tool
- *   - command:dispatch → handles /refresh slash command
+ *   - slashCommands:register → handles /refresh slash command
  *
  * Features:
  *   - Selective reload of specific extensions by name
@@ -48,7 +48,7 @@ export function create(core) {
       },
 
       /**
-       * Handle /refresh slash command.
+       * Register /refresh slash command.
        *
        * Usage:
        *   /refresh list          — Show loaded modules and extensions
@@ -56,23 +56,28 @@ export function create(core) {
        *   /refresh <name>        — Reload a specific extension
        *   /refresh cache-clear   — Clear the module cache
        */
-      [HOOKS.COMMAND_DISPATCH]: async ({ command, agent }) => {
-        if (command.type !== 'refresh') return;
+      [HOOKS.SLASH_COMMANDS_REGISTER]: async ({ registry }) => {
+        registry.register('refresh', {
+          description: 'Hot-reload extensions and modules',
+          matches: (cmd) => cmd.startsWith('refresh'),
+          handler: async (agent, cmdValue) => {
+            const parts = cmdValue.split(/\s+/);
+            const target = parts.slice(1).filter(p => !p.startsWith('--')).join(' ') || 'list';
+            const force = parts.some(p => p === '--force');
 
-        const target = command.value || 'list';
-        const force = command.force || false;
+            // Simulate tool input for reuse
+            const input = {
+              action: target === 'list' ? 'list'
+                    : target === 'cache-clear' ? 'cache-clear'
+                    : 'reload',
+              target,
+              force,
+            };
 
-        // Simulate tool input for reuse
-        const input = {
-          action: target === 'list' ? 'list'
-                : target === 'cache-clear' ? 'cache-clear'
-                : 'reload',
-          target,
-          force,
-        };
-
-        const result = await refreshTool.execute(input, { agent });
-        return { content: result.toDisplay() };
+            const result = await refreshTool.execute(input, { agent });
+            return { content: result.toDisplay() };
+          },
+        });
       },
     },
 

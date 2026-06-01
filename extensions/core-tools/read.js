@@ -64,8 +64,8 @@ export class ReadTool {
       return ToolResult.err("path is required");
     }
 
-    const cwdBoundary = ctx?.cwdBoundary || null;
-    const workspaceRoot = ctx?.workspaceRoot || null;
+    const cwdBoundary = ctx?.get('cwdBoundary') || null;
+    const workspaceRoot = ctx?.get('workspaceRoot') || null;
 
     // Resolve path: cwdBoundary takes precedence, falls back to workspaceRoot
     const resolvedPath = resolvePath(filePath, cwdBoundary, workspaceRoot);

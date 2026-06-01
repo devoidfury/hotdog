@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'bun:test';
 import { parseCommand, Command, isUiCommand } from '../../src/core/commands.js';
+import { createSlashCommandRegistry } from '../../src/core/slash-command-registry.js';
 
 describe('parseCommand', () => {
   it('parses help', () => {
@@ -51,84 +52,33 @@ describe('parseCommand', () => {
     expect(parseCommand('tokens')).toEqual({ type: Command.Tokens, value: null });
   });
 
-  it('parses compact without args', () => {
-    expect(parseCommand('compact')).toEqual({ type: Command.Compact, value: { keep: null, debug: false } });
+  it('parses compact as unknown (handled by extension)', () => {
+    // compact is now handled by the compaction extension via slash command registry
+    expect(parseCommand('compact')).toEqual({ type: Command.Unknown, value: 'compact' });
   });
 
-  it('parses compact with keep count', () => {
-    expect(parseCommand('compact 10')).toEqual({ type: Command.Compact, value: { keep: 10, debug: false } });
-  });
-
-  it('parses compact with debug flag', () => {
-    expect(parseCommand('compact 5 --compact-debug')).toEqual({ type: Command.Compact, value: { keep: 5, debug: true } });
-  });
-
-  it('parses prompt with args', () => {
-    expect(parseCommand('prompt:my-prompt some args')).toEqual({
-      type: Command.Prompt,
-      value: { name: 'my-prompt', args: 'some args' },
-    });
-  });
-
-  it('parses prompt without args', () => {
-    expect(parseCommand('prompt:my-prompt')).toEqual({
-      type: Command.Prompt,
-      value: { name: 'my-prompt', args: undefined },
-    });
+  it('parses compact:strategy as unknown (handled by extension)', () => {
+    // compact:strategy is now handled by the compaction extension via slash command registry
+    expect(parseCommand('compact:strategy list')).toEqual({ type: Command.Unknown, value: 'compact:strategy list' });
   });
 
   it('parses regenerate', () => {
     expect(parseCommand('regenerate')).toEqual({ type: Command.Regenerate, value: null });
   });
 
-  it('parses skill:name', () => {
-    expect(parseCommand('skill:rust-guidelines')).toEqual({ type: Command.Skill, value: 'rust-guidelines' });
+ it('parses sh as unknown (handled by extension)', () => {
+    // sh is now handled by the run-shell-command extension
+    expect(parseCommand('sh ls -la')).toEqual({ type: Command.Unknown, value: 'sh ls -la' });
   });
 
-  it('parses skill: with spaces', () => {
-    expect(parseCommand('skill:  stripe-integration  ')).toEqual({ type: Command.Skill, value: 'stripe-integration' });
+  it('parses ! as unknown (handled by extension)', () => {
+    // ! is now handled by the run-shell-command extension
+    expect(parseCommand('!ls')).toEqual({ type: Command.Unknown, value: '!ls' });
   });
 
-  it('parses skill: (empty) as list', () => {
-    expect(parseCommand('skill:')).toEqual({ type: Command.Skill, value: null });
-  });
-
-  it('parses skill: (space) as list', () => {
-    expect(parseCommand('skill: ')).toEqual({ type: Command.Skill, value: null });
-  });
-
-  it('parses sh with command', () => {
-    expect(parseCommand('sh ls -la')).toEqual({ type: Command.Shell, value: 'ls -la' });
-  });
-
-  it('parses sh with complex command', () => {
-    expect(parseCommand('sh echo "hello world" && cat file.txt')).toEqual({
-      type: Command.Shell,
-      value: 'echo "hello world" && cat file.txt',
-    });
-  });
-
-  it('parses sh with trailing space as empty value', () => {
-    expect(parseCommand('sh ')).toEqual({ type: Command.Shell, value: null });
-  });
-
-  it('parses :! vim-like shell escape', () => {
-    expect(parseCommand(':!ls -la')).toEqual({ type: Command.Shell, value: 'ls -la' });
-  });
-
-  it('parses ! vim-like shell escape', () => {
-    expect(parseCommand('!ls')).toEqual({ type: Command.Shell, value: 'ls' });
-  });
-
-  it('parses :! with complex command', () => {
-    expect(parseCommand(':!echo "hello" && cat file.txt')).toEqual({
-      type: Command.Shell,
-      value: 'echo "hello" && cat file.txt',
-    });
-  });
-
-  it('parses :! with trailing space as empty value', () => {
-    expect(parseCommand(':! ')).toEqual({ type: Command.Shell, value: null });
+  it('parses :! as unknown (handled by extension)', () => {
+    // :! is now handled by the run-shell-command extension
+    expect(parseCommand(':!ls -la')).toEqual({ type: Command.Unknown, value: ':!ls -la' });
   });
 
   it('parses unknown commands', () => {
@@ -140,18 +90,73 @@ describe('parseCommand', () => {
   });
 });
 
+describe('parseCommand with registry', () => {
+  it('returns custom command for skill: via registry', () => {
+    const registry = createSlashCommandRegistry();
+    registry.register('skill', {
+      matches: (cmd) => cmd.startsWith('skill:'),
+    });
+    const result = parseCommand('skill:rust-guidelines', registry);
+    expect(result.type).toBe('skill');
+    expect(result.value).toBe('skill:rust-guidelines');
+    expect(result._customCommand).toBe('skill');
+  });
+
+  it('returns custom command for prompt: via registry', () => {
+    const registry = createSlashCommandRegistry();
+    registry.register('prompt', {
+      matches: (cmd) => cmd.startsWith('prompt:'),
+    });
+    const result = parseCommand('prompt:my-prompt some args', registry);
+    expect(result.type).toBe('prompt');
+    expect(result.value).toBe('prompt:my-prompt some args');
+    expect(result._customCommand).toBe('prompt');
+  });
+
+  it('returns custom command for refresh via registry', () => {
+    const registry = createSlashCommandRegistry();
+    registry.register('refresh', {
+      matches: (cmd) => cmd.startsWith('refresh'),
+    });
+    const result = parseCommand('refresh all', registry);
+    expect(result.type).toBe('refresh');
+    expect(result.value).toBe('refresh all');
+    expect(result._customCommand).toBe('refresh');
+  });
+
+  it('returns custom command for compact via registry', () => {
+    const registry = createSlashCommandRegistry();
+    registry.register('compact', {
+      matches: (cmd) => cmd.startsWith('compact') && !cmd.startsWith('compact:'),
+    });
+    const result = parseCommand('compact 10', registry);
+    expect(result.type).toBe('compact');
+    expect(result.value).toBe('compact 10');
+    expect(result._customCommand).toBe('compact');
+  });
+
+  it('returns custom command for compact:strategy via registry', () => {
+    const registry = createSlashCommandRegistry();
+    registry.register('compact:strategy', {
+      matches: (cmd) => cmd.startsWith('compact:strategy'),
+    });
+    const result = parseCommand('compact:strategy list', registry);
+    expect(result.type).toBe('compact:strategy');
+    expect(result.value).toBe('compact:strategy list');
+    expect(result._customCommand).toBe('compact:strategy');
+  });
+});
+
 describe('isUiCommand', () => {
   it('returns true for UI commands', () => {
     expect(isUiCommand(Command.Help)).toBe(true);
     expect(isUiCommand(Command.Quit)).toBe(true);
     expect(isUiCommand(Command.Tools)).toBe(true);
     expect(isUiCommand(Command.Thinking)).toBe(true);
-    expect(isUiCommand(Command.Shell)).toBe(true);
   });
 
   it('returns false for agent commands', () => {
     expect(isUiCommand(Command.Clear)).toBe(false);
     expect(isUiCommand(Command.Model)).toBe(false);
-    expect(isUiCommand(Command.Skill)).toBe(false);
   });
 });

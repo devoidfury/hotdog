@@ -92,8 +92,9 @@ function createLspTool(toolName, ctx, lspConfig) {
   if (!ToolClass) return null;
 
   let languageId = null;
-  if (ctx?.currentFile) {
-    languageId = getLanguageId(ctx.currentFile);
+  const currentFile = ctx?.get('currentFile');
+  if (currentFile) {
+    languageId = getLanguageId(currentFile);
   }
 
   return new ToolClass({
@@ -113,6 +114,13 @@ export function create(core) {
 
   return {
     hooks: {
+      /**
+       * Mount LSP config on the shared context container.
+       */
+      [HOOKS.AGENT_TOOL_CONTEXT]: async ({ toolCtx }) => {
+        toolCtx.set('lspConfig', lspConfig);
+      },
+
       /**
        * Register LSP tools when requested.
        */

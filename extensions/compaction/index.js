@@ -105,6 +105,59 @@ export function create(core) {
         }
         settings.strategy = strategyName;
       },
+
+      /**
+       * Register slash commands for compaction.
+       */
+      [HOOKS.SLASH_COMMANDS_REGISTER]: async ({ registry }) => {
+        // /compact [n] [--compact-debug]
+        registry.register('compact', {
+          description: 'Compact context (compact [n] [--compact-debug])',
+          matches: (cmd) => cmd.startsWith('compact') && !cmd.startsWith('compact:'),
+          handler: async (agent, cmdValue) => {
+            const parts = cmdValue.split(/\s+/);
+            let keep = null;
+            let debug = false;
+            for (const part of parts.slice(1)) {
+              if (part === '--compact-debug') {
+                debug = true;
+              } else if (!Number.isNaN(Number(part))) {
+                keep = parseInt(part, 10);
+              }
+            }
+            return await _handleCompactCommand(agent, { keep, debug });
+          },
+        });
+
+        // /compact:strategy [action] [name]
+        registry.register('compact:strategy', {
+          description: 'Manage compaction strategy (compact:strategy [list|set <name>|help])',
+          matches: (cmd) => cmd.startsWith('compact:strategy'),
+          handler: async (agent, cmdValue) => {
+            const rest = cmdValue.slice(16).trim();
+            const parts = rest ? rest.split(/\s+/) : [];
+            const action = parts[0] || 'list';
+            const name = parts[1] || null;
+
+            if (action === 'help') {
+              return { content: `Usage: /compact:strategy [list|set <name>|help]\n  list   - Show available strategies\n  set    - Set the current strategy\n  help   - Show this help` };
+            } else if (action === 'list' || action === '') {
+              const result = core.hooks.emit(HOOKS.COMPACT_STRATEGY_LIST, { agent });
+              const strategies = result?.strategies || [];
+              const lines = ['Available compaction strategies:'];
+              for (const s of strategies) {
+                const marker = s.name === result?.current ? ' (current)' : '';
+                lines.push(`  ${s.name}${marker} - ${s.description}`);
+              }
+              return { content: lines.join('\n') };
+            } else {
+              // Set strategy
+              core.hooks.emit(HOOKS.COMPACT_STRATEGY_SET, { agent, strategyName: action });
+              return { content: `Compaction strategy set to: ${action}` };
+            }
+          },
+        });
+      },
     },
 
     // Expose for external use
@@ -121,6 +174,55 @@ export function create(core) {
       }));
     },
   };
+}
+
+/**
+ * Handle the /compact command.
+ */
+async function _handleCompactCommand(agent, { keep, debug }) {
+  const messages = agent.context;
+  const nonSystemMessages = messages.filter(m => m.role !== 'system');
+
+  if (nonSystemMessages.length <= 2) {
+    return { content: 'Not enough messages to compact.' };
+  }
+
+  // If keep is specified, just trim to that many messages
+  if (keep !== null) {
+    const systemMessages = messages.filter(m => m.role === 'system');
+    const keptMessages = nonSystemMessages.slice(-keep);
+    agent._context = [...systemMessages, ...keptMessages];
+    return { content: `Context compacted to ${keptMessages.length} messages.` };
+  }
+
+  // Auto-compact based on token budget
+  const estimatedTokens = estimateContextTokens(nonSystemMessages);
+  const reserveTokens = settings.reserveTokens || DEFAULT_COMPACTION.reserveTokens;
+  const modelConfig = core.modelRegistry?.[agent.model];
+  const contextLimit = modelConfig?.maxTokens || 128000;
+
+  if (estimatedTokens <= contextLimit - reserveTokens) {
+    return { content: 'Context is within token budget. No compaction needed.' };
+  }
+
+  // Get the strategy
+  const strategy = registry.get(settings.strategy) || registry.getDefault();
+  if (!strategy) {
+    return { error: 'No compaction strategy available.' };
+  }
+
+  if (!strategy.canCompact(nonSystemMessages, settings)) {
+    return { content: 'Compaction not applicable with current settings.' };
+  }
+
+  // Perform compaction
+  await _performCompaction(core, agent, strategy, settings);
+
+  const resultContent = `Context compacted using '${settings.strategy}' strategy.`;
+  if (debug) {
+    return { content: resultContent + '\n(Debug mode: debug file written.)' };
+  }
+  return { content: resultContent };
 }
 
 /**

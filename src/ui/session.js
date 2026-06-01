@@ -5,9 +5,9 @@
 // (command execution, state changes) lives in the core.
 
 import readline from "node:readline";
-import { spawn } from "node:child_process";
 import { parseCommand, Command } from "../core/commands.js";
 import { HOOKS } from "../hooks.js";
+import { create } from "../../extensions/run-shell-command/index.js";
 
 const HELP_TEXT = `
 Commands:
@@ -28,8 +28,11 @@ Commands:
   /theme <name> - Set theme (dark, light, monochrome)
   /regenerate   - Regenerate system prompt
   /sh <command> - Run a shell command and display output
-  :!<command>  - Vim-like alias for shell commands (e.g., :!ls)
+  :!<command>   - Vim-like alias for shell commands (e.g., :!ls)
 `;
+
+// Create shell command extension instance
+const shellCommandExt = create({});
 
 /**
  * Create and run an interactive CLI session.
@@ -79,7 +82,7 @@ export function runInteractiveSession({
     }
   }
 
-  rl.on("line", (line) => {
+  rl.on("line", async (line) => {
     const trimmed = line.trim();
 
     if (!trimmed) {
@@ -94,7 +97,7 @@ export function runInteractiveSession({
       trimmed.startsWith(":!") ||
       trimmed.startsWith("!")
     ) {
-      handleShellCommand(trimmed, rl);
+      await handleShellCommand(trimmed, rl);
       return;
     }
 
@@ -135,7 +138,7 @@ export function runInteractiveSession({
 /**
  * Handle shell commands directly (UI-specific, terminal-bound).
  */
-function handleShellCommand(line, rl) {
+async function handleShellCommand(line, rl) {
   let cmd;
   if (line.startsWith("/sh ") || line.startsWith("sh ")) {
     cmd = line.replace(/^\/?sh\s+/, "");
@@ -150,29 +153,14 @@ function handleShellCommand(line, rl) {
   }
 
   console.log(`\n$ ${cmd}\n`);
-  const proc = spawn(cmd, [], {
-    shell: true,
-    stdio: ["pipe", "pipe", "pipe"],
-  });
-  let stdout = "";
-  let stderr = "";
-  proc.stdout.on("data", (chunk) => {
-    stdout += chunk.toString();
-  });
-  proc.stderr.on("data", (chunk) => {
-    stderr += chunk.toString();
-  });
-  proc.on("close", (code) => {
-    const output = [stdout, stderr].filter(Boolean).join("\n");
-    console.log(output);
-    if (output) console.log("\n");
-    console.log(`[exited with code ${code}]\n`);
-    rl.prompt();
-  });
-  proc.on("error", (err) => {
-    console.log(`Error: ${err.message}\n`);
-    rl.prompt();
-  });
+  const result = await shellCommandExt.execute(cmd);
+  if (result.content) {
+    console.log(result.content);
+  } else if (result.error) {
+    console.log(`${result.error}\n`);
+  }
+  console.log("");
+  rl.prompt();
 }
 
 /**

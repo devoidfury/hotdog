@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'bun:test';
 import { ModelTool } from '../../extensions/core-tools/model.js';
-import { ToolResult } from '../../extensions/core-tools/registry.js';
+import { ToolResult, ToolContext } from '../../extensions/core-tools/registry.js';
 
 /**
  * Extract string output from a tool result (handles ToolResult or plain string).
@@ -81,9 +81,8 @@ describe('ModelTool', () => {
   it('calls onSwitchModel callback on valid switch', async () => {
     const registry = { 'model-1': { name: 'Model 1' } };
     let switched = false;
-    const ctx = {
-      onSwitchModel: async (name) => { switched = true; },
-    };
+    const ctx = new ToolContext();
+    ctx.set('onSwitchModel', async (name) => { switched = true; });
     const tool = new ModelTool(registry);
     const result = await tool.execute(JSON.stringify({ name: 'model-1' }), ctx);
     expect(switched).toBe(true);
@@ -92,9 +91,8 @@ describe('ModelTool', () => {
 
   it('returns error when onSwitchModel fails', async () => {
     const registry = { 'model-1': { name: 'Model 1' } };
-    const ctx = {
-      onSwitchModel: async () => { throw new Error('switch failed'); },
-    };
+    const ctx = new ToolContext();
+    ctx.set('onSwitchModel', async () => { throw new Error('switch failed'); });
     const tool = new ModelTool(registry);
     const result = await tool.execute(JSON.stringify({ name: 'model-1' }), ctx);
     expect(resultStr(result)).toContain('Error switching model');

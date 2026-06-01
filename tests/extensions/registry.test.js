@@ -237,11 +237,11 @@ describe('ToolRegistry', () => {
 describe('ToolContext', () => {
   it('creates context with defaults', () => {
     const ctx = new ToolContext();
-    expect(ctx.skills).toEqual([]);
-    expect(ctx.allSkills).toEqual([]);
-    expect(ctx.skillDirectories).toEqual([]);
-    expect(ctx.modelRegistry).toEqual({});
-    expect(ctx.cwdBoundary).toBeNull();
+    expect(ctx.get('skills')).toBeUndefined();
+    expect(ctx.get('allSkills')).toBeUndefined();
+    expect(ctx.get('skillDirectories')).toBeUndefined();
+    expect(ctx.get('modelRegistry')).toBeUndefined();
+    expect(ctx.get('cwdBoundary')).toBeUndefined();
   });
 
   it('accepts custom options', () => {
@@ -249,39 +249,39 @@ describe('ToolContext', () => {
       skills: ['skill1'],
       cwdBoundary: '/project',
     });
-    expect(ctx.skills).toEqual(['skill1']);
-    expect(ctx.cwdBoundary).toBe('/project');
+    expect(ctx.get('skills')).toEqual(['skill1']);
+    expect(ctx.get('cwdBoundary')).toBe('/project');
   });
 
   it('handles cancelled callback', () => {
     let cancelled = false;
-    const ctx = new ToolContext({
-      isCancelled: () => cancelled,
-    });
-    expect(ctx.isCancelled()).toBe(false);
+    const ctx = new ToolContext();
+    ctx.set('isCancelled', () => cancelled);
+    expect(ctx.get('isCancelled')()).toBe(false);
     cancelled = true;
-    expect(ctx.isCancelled()).toBe(true);
+    expect(ctx.get('isCancelled')()).toBe(true);
   });
 
-  it('has new fields: workspaceRoot, currentFile, modelNames, activeProvider', () => {
-    const ctx = new ToolContext({
+  it('mounts and retrieves properties via get()', () => {
+    const ctx = new ToolContext();
+    ctx.mount({
       workspaceRoot: '/project',
       currentFile: '/project/src/main.js',
       modelNames: ['qwen3.5-0.8b', 'qwen3.5-4b'],
       activeProvider: 'openai',
     });
-    expect(ctx.workspaceRoot).toBe('/project');
-    expect(ctx.currentFile).toBe('/project/src/main.js');
-    expect(ctx.modelNames).toEqual(['qwen3.5-0.8b', 'qwen3.5-4b']);
-    expect(ctx.activeProvider).toBe('openai');
+    expect(ctx.get('workspaceRoot')).toBe('/project');
+    expect(ctx.get('currentFile')).toBe('/project/src/main.js');
+    expect(ctx.get('modelNames')).toEqual(['qwen3.5-0.8b', 'qwen3.5-4b']);
+    expect(ctx.get('activeProvider')).toBe('openai');
   });
 
-  it('defaults new fields to null/empty', () => {
+  it('returns undefined for unmounted properties', () => {
     const ctx = new ToolContext();
-    expect(ctx.workspaceRoot).toBeNull();
-    expect(ctx.currentFile).toBeNull();
-    expect(ctx.modelNames).toEqual([]);
-    expect(ctx.activeProvider).toBeNull();
+    expect(ctx.get('workspaceRoot')).toBeUndefined();
+    expect(ctx.get('currentFile')).toBeUndefined();
+    expect(ctx.get('modelNames')).toBeUndefined();
+    expect(ctx.get('activeProvider')).toBeUndefined();
   });
 });
 

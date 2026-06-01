@@ -6,6 +6,7 @@ const ROOT = path.resolve(__dirname, '..');
 // tests/core/ -> tests/ -> project root
 const PROJECT_ROOT = path.resolve(__dirname, '../..');
 import { LspDefinitionTool } from '../../extensions/lsp/tools/lsp-definition.js';
+import { ToolContext } from '../../extensions/core-tools/registry.js';
 
 describe('LspDefinitionTool', () => {
   let tool;
@@ -80,7 +81,7 @@ describe('LspDefinitionTool', () => {
     it('returns error when no LSP server configured', async () => {
       const result = await tool.execute(
         { file: path.join(PROJECT_ROOT, 'extensions/core-tools/read.js'), line: 1, character: 0 },
-        { cwdBoundary: PROJECT_ROOT, workspaceRoot: PROJECT_ROOT }
+        new ToolContext({ cwdBoundary: PROJECT_ROOT, workspaceRoot: PROJECT_ROOT })
       );
       expect(result.isErr()).toBe(true);
       expect(result.error).toContain('No language server configured');

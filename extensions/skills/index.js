@@ -1,8 +1,12 @@
 // Skills Extension
 // Manages skills loading, activation, and system prompt integration.
-// Hooks: systemPrompt:build, agent:toolContext, tools:register, command:dispatch
+// Hooks: systemPrompt:build, agent:toolContext, tools:register, slashCommands:register
 
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+import { cwd } from "node:process";
 import { HOOKS } from "../../src/hooks.js";
+import { render } from "../../src/context/render.js";
 import { patternMatches, SkillsLoader } from "./loader.js";
 export { LoadSkillTool } from "./load_skill.js";
 
@@ -27,11 +31,11 @@ export function create(core) {
       },
 
       /**
-       * Enrich tool context with skills loader — extensions can access
-       * toolCtx.skillsLoader instead of agent._skillsLoader.
+       * Mount the skills loader on the shared context container.
+       * Tools access it via toolCtx.get('skillsLoader').
        */
       [HOOKS.AGENT_TOOL_CONTEXT]: async ({ toolCtx }) => {
-        toolCtx.skillsLoader = loader;
+        toolCtx.set("skillsLoader", loader);
       },
 
       /**
@@ -44,24 +48,30 @@ export function create(core) {
       },
 
       /**
-       * Handle skill activation commands.
+       * Register slash commands for skills.
        */
-      [HOOKS.COMMAND_DISPATCH]: async ({ command, agent }) => {
-        if (command.type !== "skill") return;
-
-        if (command.value) {
-          loader.activateSkill(command.value);
-          return { content: `Skill '${command.value}' activated.` };
-        } else {
-          const skills = loader.allSkills();
-          const active = loader.activeSkills();
-          const lines = skills
-            .map(
-              (s) => `${s.loaded ? "[x]" : "[ ]"} ${s.name}: ${s.description}`,
-            )
-            .join("\n");
-          return { content: `## Available Skills\n\n${lines}` };
-        }
+      [HOOKS.SLASH_COMMANDS_REGISTER]: async ({ registry }) => {
+        registry.register("skill", {
+          description: "List skills or activate a skill (skill:<name>)",
+          matches: (cmd) => cmd.startsWith("skill:"),
+          handler: async (agent, cmdValue) => {
+            const name = cmdValue.slice(6).trim();
+            if (!name) {
+              // List all skills
+              const skills = loader.allSkills();
+              const active = loader.activeSkills();
+              const lines = skills
+                .map(
+                  (s) => `${s.loaded ? "[x]" : "[ ]"} ${s.name}: ${s.description}`,
+                )
+                .join("\n");
+              return { content: `## Available Skills\n\n${lines}` };
+            }
+            // Activate skill
+            loader.activateSkill(name);
+            return { content: `Skill '${name}' activated.` };
+          },
+        });
       },
     },
 
@@ -116,35 +126,29 @@ export function create(core) {
  * Build skills preamble content for the system prompt.
  */
 export function buildSkillsPreamble(loader) {
-  const allSkills = loader.allSkills();
-  if (allSkills.length === 0) return "";
-
-  const skillDirs = loader.directories().join("\n") || "/skills";
-  const visibleSkills = allSkills.filter(
-    (s) => s.visible && !s.disableModelInvocation,
-  );
+  const visibleSkills = loader.agentViewableSkills();
   if (visibleSkills.length === 0) return "";
 
-  const loadedSkills = visibleSkills.filter((s) => s.loaded);
-  const unloadedSkills = visibleSkills.filter((s) => !s.loaded);
-
-  let preamble = `# Available Skills\n\nSkill directories: ${skillDirs}\n\n`;
-
-  // Loaded skills with full content
-  if (loadedSkills.length > 0) {
-    preamble += "## Loaded Skills\n\n";
-    for (const skill of loadedSkills) {
-      preamble += `<skill_content name="${skill.name}">\n${skill.content}\n</skill_content>\n\n`;
-    }
+  // Load the skills preamble template
+  const templatePath = join(cwd(), "config", "templates", "skills_preamble.md");
+  let template;
+  try {
+    template = readFileSync(templatePath, "utf-8");
+  } catch {
+    console.warn(`skills preamble ${templatePath} not found`);
+    return "";
   }
 
-  // Unloaded skills with descriptions
-  if (unloadedSkills.length > 0) {
-    preamble += "## Available Skills\n\n";
-    for (const skill of unloadedSkills) {
-      preamble += `<name>${skill.name}</name>\n${skill.description}\n\n`;
-    }
-  }
+  // Transform skills to match template expectations
+  const renderedSkills = visibleSkills.map((s) => ({
+    ...s,
+    additional_files: s.additionalFiles || [],
+  }));
 
-  return preamble;
+  const context = {
+    skills: renderedSkills,
+    skill_directories: loader.directories(),
+  };
+
+  return render(template, context);
 }

@@ -3,7 +3,9 @@
 
 import fs from "node:fs";
 import { join } from "node:path";
+import { cwd } from "node:process";
 import { parseFrontMatter } from "../../src/utils.js";
+import { render } from "../../src/context/render.js";
 import { validateNameable } from "../../src/lib.js";
 
 // ── Pattern Matching ───────────────────────────────────────────────────────
@@ -311,32 +313,30 @@ export class SkillsLoader {
    * Build skills preamble content for the system prompt.
    */
   buildSkillsPreamble() {
-    const skillDirs = this.directories().join("\n") || "/skills";
     const visibleSkills = this.agentViewableSkills();
 
     if (visibleSkills.length === 0) return "";
 
-    const loadedSkills = visibleSkills.filter((s) => s.loaded);
-    const unloadedSkills = visibleSkills.filter((s) => !s.loaded);
-
-    let preamble = `# Available Skills\n\nSkill directories: ${skillDirs}\n\n`;
-
-    // Loaded skills with full content
-    if (loadedSkills.length > 0) {
-      preamble += "## Loaded Skills\n\n";
-      for (const skill of loadedSkills) {
-        preamble += `<skill_content name="${skill.name}">\n${skill.content}\n</skill_content>\n\n`;
-      }
+    // Load the skills preamble template
+    const templatePath = join(cwd(), "config", "templates", "skills_preamble.md");
+    let template;
+    try {
+      template = fs.readFileSync(templatePath, "utf-8");
+    } catch {
+      return "";
     }
 
-    // Unloaded skills with descriptions
-    if (unloadedSkills.length > 0) {
-      preamble += "## Available Skills\n\n";
-      for (const skill of unloadedSkills) {
-        preamble += `<name>${skill.name}</name>\n${skill.description}\n\n`;
-      }
-    }
+    // Transform skills to match template expectations
+    const renderedSkills = visibleSkills.map((s) => ({
+      ...s,
+      additional_files: s.additionalFiles || [],
+    }));
 
-    return preamble;
+    const context = {
+      skills: renderedSkills,
+      skill_directories: this.directories(),
+    };
+
+    return render(template, context);
   }
 }

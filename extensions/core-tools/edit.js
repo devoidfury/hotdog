@@ -60,8 +60,8 @@ export class EditTool {
       newString,
       replace_all: replaceAll = false,
     } = op;
-    const cwdBoundary = ctx?.cwdBoundary || null;
-    const workspaceRoot = ctx?.workspaceRoot || null;
+    const cwdBoundary = ctx?.get('cwdBoundary') || null;
+    const workspaceRoot = ctx?.get('workspaceRoot') || null;
 
     // Resolve path: cwdBoundary takes precedence, falls back to workspaceRoot
     const resolvedPath = resolvePath(filePath, cwdBoundary, workspaceRoot);

@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import { LoadSkillTool } from '../../extensions/skills/load_skill.js';
+import { ToolContext } from '../../extensions/core-tools/registry.js';
 import { SkillsLoader } from '../../extensions/skills/loader.js';
 
 function getResultStr(result) {
@@ -62,9 +63,8 @@ describe('LoadSkillTool', () => {
 
     loader.loadSkills();
     let activated = false;
-    const ctx = {
-      onActivateSkill: (name) => { activated = true; expect(name).toBe('activated-skill'); },
-    };
+    const ctx = new ToolContext();
+    ctx.set('onActivateSkill', (name) => { activated = true; expect(name).toBe('activated-skill'); });
 
     const tool = new LoadSkillTool({ loader });
     await tool.execute(JSON.stringify({ name: 'activated-skill' }), ctx);

@@ -139,8 +139,9 @@ function createLspInstance(toolName, ctx, lspConfig) {
 
   // Determine language ID from context
   let languageId = null;
-  if (ctx?.currentFile) {
-    languageId = _getLanguageId(ctx.currentFile);
+  const currentFile = ctx?.get('currentFile');
+  if (currentFile) {
+    languageId = _getLanguageId(currentFile);
   }
 
   return new ToolClass({
@@ -245,12 +246,13 @@ export function createToolFactory(taskManager = null, sessionCore = null) {
  * @returns {Promise<number>} Number of tools registered
  */
 export async function registerLspTools(registry, ctx) {
-  const lspConfig = ctx?.lspConfig || null;
+  const lspConfig = ctx?.get('lspConfig') || null;
   if (!isLspEnabled(lspConfig)) {
     return 0;
   }
 
-  const languageId = ctx?.currentFile ? _getLanguageId(ctx.currentFile) : null;
+  const currentFile = ctx?.get('currentFile');
+  const languageId = currentFile ? _getLanguageId(currentFile) : null;
   let registered = 0;
 
   for (const toolName of LSP_TOOL_NAMES) {
@@ -268,14 +270,20 @@ export async function registerLspTools(registry, ctx) {
 
 /**
  * Create the core-tools extension.
+ *
+ * @param {Object} core - The core object.
+ * @param {Object} [options] - Optional extension options.
+ * @param {Object} [options.taskManager] - TaskManager instance for subagent tools.
+ * @returns {Object} The extension instance.
  */
-export function create(core) {
+export function create(core, { taskManager } = {}) {
   return {
     hooks: {
       /**
-       * Register all core tools when requested.
+       * Register all core tools and subagent tools when requested.
        */
       [HOOKS.TOOLS_REGISTER]: async (registry) => {
+        // Register core tools (no taskManager needed)
         const factory = createToolFactory();
 
         for (const descriptor of TOOL_DESCRIPTORS) {
@@ -288,6 +296,17 @@ export function create(core) {
             console.error(
               `[core-tools] Failed to create tool '${descriptor.name}': ${e.message}`,
             );
+          }
+        }
+
+        // Register subagent tools (taskManager is required)
+        if (taskManager) {
+          const subagentFactory = createToolFactory(taskManager);
+          for (const toolName of SUBAGENT_TOOL_NAMES) {
+            const tool = subagentFactory.createTool(toolName, core, null, true);
+            if (tool) {
+              registry.register(toolName, tool);
+            }
           }
         }
       },

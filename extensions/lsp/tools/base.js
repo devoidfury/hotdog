@@ -123,11 +123,13 @@ export class LspBaseTool {
     if (path.isAbsolute(filePath)) {
       return filePath;
     }
-    if (ctx?.cwdBoundary) {
-      return path.resolve(ctx.cwdBoundary, filePath);
+    const cwdBoundary = ctx?.get('cwdBoundary');
+    if (cwdBoundary) {
+      return path.resolve(cwdBoundary, filePath);
     }
-    if (ctx?.workspaceRoot) {
-      return path.resolve(ctx.workspaceRoot, filePath);
+    const workspaceRoot = ctx?.get('workspaceRoot');
+    if (workspaceRoot) {
+      return path.resolve(workspaceRoot, filePath);
     }
     return path.resolve(filePath);
   }
@@ -156,8 +158,11 @@ export class LspBaseTool {
     if (this.lspConfig) {
       serverConfig = getServerByLanguageId(languageId, this.lspConfig);
     }
-    if (!serverConfig && ctx?.lspConfig) {
-      serverConfig = getServerByLanguageId(languageId, ctx.lspConfig);
+    if (!serverConfig) {
+      const lspConfig = ctx?.get('lspConfig');
+      if (lspConfig) {
+        serverConfig = getServerByLanguageId(languageId, lspConfig);
+      }
     }
     if (!serverConfig) {
       return null;

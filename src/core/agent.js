@@ -6,6 +6,8 @@ import { Message } from "../context/message.js";
 import { LlmError } from "../llm_client/client.js";
 import { OUTPUT_EVENT } from "../context/output.js";
 import { HOOKS } from "../hooks.js";
+import { ToolContext } from "./tool-registry.js";
+import { createSlashCommandRegistry } from "./slash-command-registry.js";
 
 /**
  * Minimal Agent that runs the LLM loop and delegates behavior to hooks.
@@ -65,6 +67,8 @@ export class Agent {
     this._abortSignal = options.abortSignal || null;
     this._toolWhitelist = options.toolWhitelist || null;
     this._followQueue = [];
+    // Slash command registry — extensions register commands here
+    this._slashCommandRegistry = options.slashCommandRegistry || createSlashCommandRegistry();
   }
 
   // ── Properties ────────────────────────────────────────────────────────────
@@ -395,10 +399,14 @@ export class Agent {
       });
 
       // Build and enrich tool context via hook
-      const toolCtx = {
-        agent: this,
-        isSessionRestoring: this._isRestoring,
-      };
+      const toolCtx = new ToolContext();
+      toolCtx.set('agent', this);
+      toolCtx.set('isSessionRestoring', this._isRestoring);
+      // Mount infrastructure properties from config
+      if (this._config) {
+        toolCtx.set('cwdBoundary', this._config.cwdBoundary || null);
+        toolCtx.set('workspaceRoot', this._config.workspaceRoot || null);
+      }
       await this._hooks.emitAsync(HOOKS.AGENT_TOOL_CONTEXT, {
         toolCtx,
         toolName,
@@ -554,6 +562,13 @@ export class Agent {
    * @returns {Promise<Object>}
    */
   async executeCommand(cmd) {
+    // Check if this is a custom command with a handler
+    if (cmd._customCommand && cmd._handler) {
+      const result = await cmd._handler(this, cmd.value, cmd);
+      if (result) return result;
+    }
+
+    // Fire COMMAND_DISPATCH hook — extensions can handle specific commands
     const result = this._hooks.emit(HOOKS.COMMAND_DISPATCH, {
       command: cmd,
       agent: this,
@@ -586,15 +601,19 @@ export class Agent {
         return this._handleToolsCommand();
       case "thinking":
         return this._handleThinkingCommand();
-      case "compact":
-        return await this._handleCompactCommand(cmd.value);
-      case "compact:strategy":
-        return this._handleCompactStrategyCommand(cmd.value);
       case "regenerate":
         return this._handleRegenerateCommand();
       default:
         return { error: `Unknown command: ${cmd.type}` };
     }
+  }
+
+  /**
+   * Get the slash command registry.
+   * @returns {Object} SlashCommandRegistry instance
+   */
+  getSlashCommandRegistry() {
+    return this._slashCommandRegistry;
   }
 
   // ── Command Handlers ──────────────────────────────────────────────────────
@@ -651,66 +670,6 @@ export class Agent {
     return {
       content: `Thinking display: ${this._hideThinking ? "hidden" : "shown"}`,
     };
-  }
-
-  async _handleCompactCommand(value) {
-    if (!value) {
-      return { content: "Usage: /compact [n] [--compact-debug]" };
-    }
-    // Trigger compaction via hook — the compaction extension handles it
-    await this._hooks.emitAsync(HOOKS.CONTEXT_FULL, {
-      agent: this,
-      contextSize: this._context.length,
-    });
-    return { content: "Compaction triggered." };
-  }
-
-  _handleCompactStrategyCommand(value) {
-    const { action, name } = value || { action: "list" };
-
-    // Get compaction strategy info via hook — decoupled from extension internals
-    const hookResult = this._hooks.emit(HOOKS.COMPACT_STRATEGY_LIST, { agent: this });
-    if (!hookResult || !hookResult.strategies) {
-      return { content: "Compaction extension not loaded." };
-    }
-
-    const { strategies, current } = hookResult;
-
-    if (action === "list" || action === "") {
-      const lines = ["\nCompaction Strategies:\n"];
-      for (const s of strategies) {
-        const marker = s.name === current ? " (current)" : "";
-        lines.push(`  ${s.name}${marker} — ${s.description}`);
-      }
-      lines.push(`\nCurrent strategy: ${current}\n`);
-      return { content: lines.join("") };
-    }
-
-    if (action === "set") {
-      if (!name) {
-        return { content: "Usage: /compact:strategy <name>" };
-      }
-      // Set strategy via hook — the extension updates its own settings
-      this._hooks.emit(HOOKS.COMPACT_STRATEGY_SET, { agent: this, strategyName: name });
-      return { content: `Compaction strategy set to: ${name}` };
-    }
-
-    if (action === "help") {
-      const lines = ["\nCompaction Strategies:\n"];
-      for (const s of strategies) {
-        lines.push(`  ${s.name} — ${s.description}`);
-      }
-      lines.push(
-        "\nUsage:\n" +
-          "  /compact:strategy              — List strategies\n" +
-          "  /compact:strategy <name>       — Set strategy\n" +
-          "  /compact:strategy help         — Show help\n" +
-          "  /compact:strategy help <name>  — Show strategy details\n",
-      );
-      return { content: lines.join("") };
-    }
-
-    return { error: `Unknown action: ${action}` };
   }
 
   _handleRegenerateCommand() {

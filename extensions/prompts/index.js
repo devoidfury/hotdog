@@ -1,6 +1,6 @@
 // Prompts Extension
 // Manages prompt templates loading and execution.
-// Hooks: command:dispatch
+// Hooks: tools:register, slashCommands:register
 
 import { HOOKS } from '../../src/hooks.js';
 import { PromptsLoader } from './loader.js';
@@ -16,29 +16,38 @@ export function create(core) {
   return {
     hooks: {
       /**
-       * Handle prompt execution commands.
+       * Register slash commands for prompts.
        */
-      [HOOKS.COMMAND_DISPATCH]: async ({ command, agent }) => {
-        if (command.type !== 'prompt') return;
+      [HOOKS.SLASH_COMMANDS_REGISTER]: async ({ registry }) => {
+        registry.register('prompt', {
+          description: 'Execute a prompt template (prompt:<name> [args])',
+          matches: (cmd) => cmd.startsWith('prompt:'),
+          handler: async (agent, cmdValue) => {
+            const rest = cmdValue.slice(7);
+            const spaceIdx = rest.indexOf(' ');
+            const name = spaceIdx >= 0 ? rest.slice(0, spaceIdx).trim() : rest.trim();
+            const args = spaceIdx >= 0 ? rest.slice(spaceIdx + 1).trim() : '';
 
-        const prompt = loader.getPrompt(command.value.name);
-        if (!prompt) {
-          return { error: `Unknown prompt: ${command.value.name}` };
-        }
+            const prompt = loader.getPrompt(name);
+            if (!prompt) {
+              return { error: `Unknown prompt: ${name}` };
+            }
 
-        // Render the prompt template with args
-        let content = prompt.content;
-        if (command.value.args) {
-          // Simple template rendering: replace {ARGS} with the args string
-          content = content.replace(/\{ARGS\}/g, command.value.args);
-        }
+            // Render the prompt template with args
+            let content = prompt.content;
+            if (args) {
+              // Simple template rendering: replace {ARGS} with the args string
+              content = content.replace(/\{ARGS\}/g, args);
+            }
 
-        // Add the rendered prompt as a user message
-        const { Message } = await import('../../src/context/message.js');
-        agent._context.push(new Message({ role: 'user', content }));
-        await core.hooks.emitAsync(HOOKS.CONTEXT_MESSAGE, { message: agent._context[agent._context.length - 1] });
+            // Add the rendered prompt as a user message
+            const { Message } = await import('../../src/context/message.js');
+            agent._context.push(new Message({ role: 'user', content }));
+            await core.hooks.emitAsync(HOOKS.CONTEXT_MESSAGE, { message: agent._context[agent._context.length - 1] });
 
-        return { content: `Prompt '${prompt.name}' executed.` };
+            return { content: `Prompt '${prompt.name}' executed.` };
+          },
+        });
       },
     },
 

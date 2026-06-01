@@ -181,7 +181,8 @@ export const HOOKS = {
   SYSTEM_PROMPT_BUILD:'systemPrompt:build',
 
   // Commands
-  COMMAND_DISPATCH:   'command:dispatch',
+  COMMAND_DISPATCH:        'command:dispatch',
+  SLASH_COMMANDS_REGISTER: 'slashCommands:register',
 
   // Output
   OUTPUT_EVENT:       'output:event',

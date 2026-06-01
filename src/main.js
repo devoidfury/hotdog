@@ -9,13 +9,14 @@ import {
   SessionManager,
   Agent,
 } from "./core/index.js";
+import { HOOKS } from "./hooks.js";
 import { CliOutputSink } from "./ui/cli.js";
 import { parseArgs, HELP_TEXT } from "./cli.js";
 import { loadConfig } from "./config.js";
 import { buildConfig } from "./config.js";
 import { formatError, isExpectedError } from "./context/error.js";
 import { OUTPUT_EVENT } from "./context/output.js";
-import { createSubcommandRegistry } from "./cli/subcommand-registry.js";
+import { createSubcommandRegistry } from "./core/subcommand-registry.js";
 import { TaskManager } from "./session/task_manager.js";
 import { Message } from "./context/message.js";
 import {
@@ -33,7 +34,7 @@ import {
  * Note: Extension paths are resolved relative to src/core/extensions.js
  * (the file that does the import()), not relative to src/main.js.
  */
-async function loadExtensions(core) {
+async function loadExtensions(core, { taskManager } = {}) {
   const loaded = [];
 
   // 0. Refresh extension — hot-reload capabilities (loaded first to track others)
@@ -54,6 +55,7 @@ async function loadExtensions(core) {
   const coreToolsExt = await core.extensions.load(
     "core-tools",
     "../../extensions/core-tools/index.js",
+    { taskManager },
   );
   if (coreToolsExt) loaded.push(coreToolsExt);
 
@@ -267,8 +269,8 @@ class MessageBus {
    */
   async executeCommand(cmdText) {
     const { parseCommand } = await import("./core/commands.js");
-    const cmd = parseCommand(cmdText);
     const agent = this._sessionManager.getAgent();
+    const cmd = parseCommand(cmdText, agent?.getSlashCommandRegistry());
 
     if (!agent) {
       this._sink.emit({
@@ -352,11 +354,6 @@ async function main() {
   // ── Create core infrastructure ──────────────────────────────────────────
   const core = createCore(config);
 
-  // ── Load extensions ─────────────────────────────────────────────────────
-  // Tool registration happens inside ExtensionLoader.load() via the
-  // tools:register hook emission (see extensions.js). No separate emission needed.
-  await loadExtensions(core);
-
   // ── Output sink ─────────────────────────────────────────────────────────
   const palette = CliOutputSink.resolve(
     cli.colors !== false,
@@ -414,6 +411,12 @@ async function main() {
 
     await agent.ensureSystemPrompt();
 
+    // Emit hook for extensions to register slash commands
+    core.hooks.emit(HOOKS.SLASH_COMMANDS_REGISTER, {
+      registry: agent.getSlashCommandRegistry(),
+      agent,
+    });
+
     // Restore session from disk if a session ID was explicitly provided
     // and a session log file exists for it
     const explicitSessionId = cli.sessionId;
@@ -446,6 +449,11 @@ async function main() {
     maxIterations: config.maxIterations || 1000,
   });
 
+  // ── Load extensions ─────────────────────────────────────────────────────
+  // Tool registration happens inside ExtensionLoader.load() via the
+  // tools:register hook emission (see extensions.js). No separate emission needed.
+  await loadExtensions(core, { taskManager });
+
   // ── Create SessionManager with buildAgent function ──────────────────────
   const sessionManager = await SessionManager.create({
     hooks: core.hooks,
@@ -456,18 +464,6 @@ async function main() {
 
   // Wire taskManager to sessionManager
   taskManager.setSessionManager(sessionManager);
-
-  // Create and register subagent tools (manager-only tools)
-  // TaskManager is passed directly to createToolFactory — no global state needed.
-  const { createToolFactory, SUBAGENT_TOOL_NAMES } =
-    await import("../extensions/core-tools/index.js");
-  const subagentFactory = createToolFactory(taskManager);
-  for (const toolName of SUBAGENT_TOOL_NAMES) {
-    const tool = subagentFactory.createTool(toolName, core, null, true);
-    if (tool) {
-      core.toolRegistry.register(toolName, tool);
-    }
-  }
 
   // ── One-shot mode ───────────────────────────────────────────────────────
   if (cli.prompt) {

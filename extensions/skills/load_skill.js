@@ -42,8 +42,9 @@ export class LoadSkillTool {
     }
 
     // Notify context about skill activation
-    if (ctx?.onActivateSkill) {
-      ctx.onActivateSkill(skillName);
+    const onActivateSkill = ctx?.get('onActivateSkill');
+    if (onActivateSkill) {
+      onActivateSkill(skillName);
     }
 
     const contentLength = skill.content?.length || 0;

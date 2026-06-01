@@ -30,6 +30,132 @@ Commands:
 `;
 
 /**
+ * AsyncInteractiveCliInput — collects answers using the CLI's readline interface.
+ * Implements the Input interface for question/answer collection.
+ *
+ * This does NOT create a separate readline instance. Instead, it takes over
+ * the existing readline by temporarily removing the main 'line' handler,
+ * collecting answers via rl.question(), then restoring the handler.
+ */
+export class AsyncInteractiveCliInput {
+  /**
+   * @param {readline.Interface} rl - The readline interface to use for input
+   * @param {Function} onLine - The main 'line' handler to temporarily remove
+   * @param {Function} addLineHandler - Function to re-add the line handler
+   */
+  constructor(rl, onLine, addLineHandler) {
+    this._rl = rl;
+    this._onLine = onLine;
+    this._addLineHandler = addLineHandler;
+  }
+
+  isInteractive() {
+    return true;
+  }
+
+  /**
+   * Collect answers to questions using the readline interface.
+   * Temporarily takes over readline input, collects answers, then restores.
+   *
+   * @param {Array} questions - Array of question definitions
+   * @returns {Object} Answers keyed by question key
+   */
+  async collectAnswers(questions) {
+    const rl = this._rl;
+
+    // Temporarily take over readline by removing the main line handler
+    rl.removeListener("line", this._onLine);
+
+    const answers = {};
+    try {
+      for (const q of questions) {
+        const key = q.key;
+        const promptText = q.prompt || "";
+        const options = q.options || [];
+        const defaultValue = q.default ?? "";
+        const required = q.required !== false;
+        // Handle both snake_case (from JSON) and camelCase
+        const allowOther = (q.allowOther ?? q.allow_other) !== false;
+
+        // Display the question
+        process.stdout.write(`\n  ? ${promptText}\n`);
+
+        if (options.length > 0) {
+          for (let i = 0; i < options.length; i++) {
+            process.stdout.write(`    [${i + 1}] ${options[i]}\n`);
+          }
+        }
+
+        if (defaultValue !== "") {
+          process.stdout.write(`    (default: ${defaultValue})\n`);
+        }
+
+        let answer = "";
+        let valid = false;
+
+        while (!valid) {
+          const prompt = defaultValue !== "" ? ` [${defaultValue}] ` : " ";
+          const line = await new Promise((resolve) => {
+            rl.question(prompt, (response) => {
+              resolve(response ?? "");
+            });
+          });
+
+          const trimmed = line.trim();
+
+          if (trimmed === "") {
+            // User pressed enter, use default
+            answer = defaultValue;
+          } else if (options.length > 0) {
+            // Try to parse as a number index
+            const idx = parseInt(trimmed, 10);
+            if (
+              !isNaN(idx) &&
+              idx >= 1 &&
+              idx <= options.length
+            ) {
+              answer = options[idx - 1];
+            } else if (options.includes(trimmed)) {
+              // Exact match on option text
+              answer = trimmed;
+            } else if (allowOther) {
+              // Free text accepted alongside options
+              answer = trimmed;
+            } else {
+              // Strict mode: reject unknown values
+              process.stderr.write(
+                `  Invalid option. Please enter a number 1-${options.length} or one of: ${JSON.stringify(options)}\n`,
+              );
+              continue;
+            }
+          } else {
+            // Free text question
+            answer = trimmed;
+          }
+
+          // Check required
+          if (required && answer === "") {
+            process.stderr.write(
+              "  This question is required. Please enter a value.\n",
+            );
+            continue;
+          }
+
+          valid = true;
+        }
+
+        answers[key] = answer;
+      }
+    } finally {
+      // Always restore the main line handler
+      this._addLineHandler(this._onLine);
+    }
+
+    return answers;
+  }
+}
+
+/**
  * Create the interactive-cli extension.
  * Registers a "cli" subcommand for interactive mode.
  * main.js dispatches to "cli" when no subcommand is provided.
@@ -40,6 +166,9 @@ Commands:
 export function create(core) {
   // Lazily load shell command extension when needed
   let shellCommandExt = null;
+
+  // Store reference for tool context
+  let currentInput = null;
 
   // Register the "cli" subcommand
   if (core.cliSubcommandRegistry) {
@@ -65,8 +194,19 @@ export function create(core) {
               },
             });
           },
+
+          // Provide input interface to tool context
+          [HOOKS.AGENT_TOOL_CONTEXT]: ({ toolCtx }) => {
+            if (currentInput) {
+              toolCtx.set("input", currentInput);
+            }
+          },
         }
       : undefined,
+
+    cleanup: async () => {
+      currentInput = null;
+    },
   };
 
   /**
@@ -209,6 +349,21 @@ export function create(core) {
       prompt: `(${resolved.model})> `,
     });
 
+    // Define the line handler so we can reference it for the input interface
+    /** @type {Function} */
+    let lineHandler;
+
+    // Helper to add line handler (used by AsyncInteractiveCliInput to restore)
+    const addLineHandler = (handler) => {
+      rl.on("line", handler);
+    };
+
+    // Create the input interface for question tool
+    // We need to set it up after defining lineHandler
+    const setupInput = () => {
+      currentInput = new AsyncInteractiveCliInput(rl, lineHandler, addLineHandler);
+    };
+
     // Listen for model changes and update the readline prompt
     core.hooks.on(HOOKS.MODEL_CHANGE, (data) => {
       rl.setPrompt(`(${data.newModel})> `);
@@ -219,7 +374,8 @@ export function create(core) {
       setImmediate(() => rl.prompt());
     });
 
-    rl.on("line", async (line) => {
+    // Define and register the line handler
+    lineHandler = async (line) => {
       const trimmed = line.trim();
 
       if (!trimmed) {
@@ -247,7 +403,12 @@ export function create(core) {
 
       // Regular text input — enqueue for agent processing
       bus.enqueue(trimmed);
-    });
+    };
+
+    rl.on("line", lineHandler);
+
+    // Now set up the input interface with the line handler
+    setupInput();
 
     rl.on("close", async () => {
       console.log("\nGoodbye!");
@@ -255,6 +416,7 @@ export function create(core) {
       if (interactiveSessionId) {
         console.log(`Session: ${interactiveSessionId}`);
       }
+      currentInput = null;
       await core.extensions.cleanup();
       process.exit(0);
     });

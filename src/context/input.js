@@ -1,4 +1,6 @@
-// Input events, parsing, and the Input trait for collecting user responses.
+// Input events, parsing, and the Input interface for collecting user responses.
+// The Input interface decouples question/answer collection from the tool itself.
+// The UI (CLI, TUI, etc.) provides its own implementation.
 
 // Input event types
 export const INPUT_EVENT = {
@@ -26,6 +28,7 @@ export function parseInput(input) {
 
 /**
  * No-op input implementation that silently returns defaults.
+ * Used in non-interactive modes (CI, pipes, one-shot).
  */
 export class NoopInput {
   isInteractive() {

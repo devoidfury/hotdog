@@ -1,13 +1,10 @@
 /**
- * Lightweight JSON Schema parameter validation.
+ * Lightweight JSON Schema (draft 2020-12) validation.
  *
- * Validates tool arguments against the tool's JSON Schema before execution.
- * Catches common LLM mistakes: wrong types, missing required fields,
- * invalid enums, out-of-range numbers, strings too long/short, etc.
- *
- * Inspired by OpenViking's Tool.validate_params().
- * Handles: type, enum, minimum/maximum, minLength/maxLength, required,
- * properties, items (arrays), additionalProperties.
+ * Standalone, reusable validator supporting: type, enum, const,
+ * minLength/maxLength, minimum/maximum, exclusiveMinimum/maximum,
+ * required, properties, additionalProperties, items (arrays),
+ * minItems/maxItems, pattern (regex), and default (skip validation).
  */
 
 // ── Type checking helpers ────────────────────────────────────────────────────
@@ -18,7 +15,8 @@
 const TYPE_CHECKS = {
   string: (v) => typeof v === "string",
   number: (v) => typeof v === "number" && !Number.isNaN(v),
-  integer: (v) => typeof v === "number" && Number.isInteger(v) && !Number.isNaN(v),
+  integer: (v) =>
+    typeof v === "number" && Number.isInteger(v) && !Number.isNaN(v),
   boolean: (v) => typeof v === "boolean",
   array: (v) => Array.isArray(v),
   object: (v) => typeof v === "object" && v !== null && !Array.isArray(v),
@@ -28,10 +26,24 @@ const TYPE_CHECKS = {
 /**
  * Get a human-readable type name for a JavaScript value.
  */
-function typeName(value) {
+export function typeName(value) {
   if (value === null) return "null";
   if (Array.isArray(value)) return "array";
   return typeof value;
+}
+
+// ── Default matching ─────────────────────────────────────────────────────────
+
+/**
+ * Check if a value matches a schema's default (deep equality).
+ * Used to skip validation when value equals default.
+ */
+function matchesDefault(value, defaultValue) {
+  try {
+    return JSON.stringify(value) === JSON.stringify(defaultValue);
+  } catch {
+    return false;
+  }
 }
 
 // ── Recursive validation ─────────────────────────────────────────────────────
@@ -39,11 +51,41 @@ function typeName(value) {
 /**
  * Validate a single value against a schema node.
  * Returns an array of error strings (empty if valid).
+ *
+ * @param {any} value - Value to validate.
+ * @param {object} schema - JSON Schema fragment.
+ * @param {string} path - Current JSON path (for error messages).
+ * @returns {string[]} Array of error strings.
  */
-function validateValue(value, schema, path) {
+export function validate(value, schema, path = "") {
   const errors = [];
 
   if (!schema || typeof schema !== "object") return errors;
+
+  // ── Default: skip validation if value matches ──
+  if (schema.default !== undefined && matchesDefault(value, schema.default)) {
+    return errors;
+  }
+
+  // ── Const check ──
+  if (schema.const !== undefined) {
+    if (!matchesDefault(value, schema.const)) {
+      errors.push(`${path || "root"}: must be ${JSON.stringify(schema.const)}`);
+    }
+    return errors;
+  }
+
+  // ── Enum check ──
+  if (schema.enum !== undefined && Array.isArray(schema.enum)) {
+    const matches = schema.enum.some(
+      (e) => JSON.stringify(e) === JSON.stringify(value),
+    );
+    if (!matches) {
+      errors.push(
+        `${path || "root"}: value ${JSON.stringify(value)} not in enum [${schema.enum.map((e) => JSON.stringify(e)).join(", ")}]`,
+      );
+    }
+  }
 
   // ── Type check ──
   if (schema.type !== undefined) {
@@ -53,15 +95,6 @@ function validateValue(value, schema, path) {
         `${path || "root"}: expected ${schema.type}, got ${typeName(value)}`,
       );
       return errors; // No point checking further constraints on wrong type
-    }
-  }
-
-  // ── Enum check ──
-  if (schema.enum !== undefined) {
-    if (!schema.enum.includes(value)) {
-      errors.push(
-        `${path || "root"}: value ${JSON.stringify(value)} not in enum [${schema.enum.map((e) => JSON.stringify(e)).join(", ")}]`,
-      );
     }
   }
 
@@ -77,6 +110,14 @@ function validateValue(value, schema, path) {
         `${path || "root"}: string length ${value.length} exceeds maximum ${schema.maxLength}`,
       );
     }
+    if (schema.pattern !== undefined) {
+      const regex = new RegExp(schema.pattern);
+      if (!regex.test(value)) {
+        errors.push(
+          `${path || "root"}: must match pattern "${schema.pattern}"`,
+        );
+      }
+    }
   }
 
   // ── Number constraints ──
@@ -91,12 +132,18 @@ function validateValue(value, schema, path) {
         `${path || "root"}: value ${value} exceeds maximum ${schema.maximum}`,
       );
     }
-    if (schema.exclusiveMinimum !== undefined && value <= schema.exclusiveMinimum) {
+    if (
+      schema.exclusiveMinimum !== undefined &&
+      value <= schema.exclusiveMinimum
+    ) {
       errors.push(
         `${path || "root"}: value ${value} must be greater than ${schema.exclusiveMinimum}`,
       );
     }
-    if (schema.exclusiveMaximum !== undefined && value >= schema.exclusiveMaximum) {
+    if (
+      schema.exclusiveMaximum !== undefined &&
+      value >= schema.exclusiveMaximum
+    ) {
       errors.push(
         `${path || "root"}: value ${value} must be less than ${schema.exclusiveMaximum}`,
       );
@@ -109,7 +156,9 @@ function validateValue(value, schema, path) {
     if (schema.required && Array.isArray(schema.required)) {
       for (const field of schema.required) {
         if (!(field in value)) {
-          errors.push(`${path ? `${path}.` : ""}${field}: missing required field`);
+          errors.push(
+            `${path ? `${path}.` : ""}${field}: missing required field`,
+          );
         }
       }
     }
@@ -118,7 +167,11 @@ function validateValue(value, schema, path) {
     if (schema.properties && typeof schema.properties === "object") {
       for (const [key, propSchema] of Object.entries(schema.properties)) {
         if (key in value) {
-          const childErrors = validateValue(value[key], propSchema, path ? `${path}.${key}` : key);
+          const childErrors = validate(
+            value[key],
+            propSchema,
+            path ? `${path}.${key}` : key,
+          );
           errors.push(...childErrors);
         }
       }
@@ -128,11 +181,13 @@ function validateValue(value, schema, path) {
     if (schema.additionalProperties === false) {
       const allowedKeys = new Set([
         ...Object.keys(schema.properties || {}),
-        ...schema.required || [],
+        ...(schema.required || []),
       ]);
       for (const key of Object.keys(value)) {
         if (!allowedKeys.has(key)) {
-          errors.push(`${path ? `${path}.` : ""}${key}: additional property not allowed`);
+          errors.push(
+            `${path ? `${path}.` : ""}${key}: additional property not allowed`,
+          );
         }
       }
     }
@@ -142,7 +197,11 @@ function validateValue(value, schema, path) {
   if (Array.isArray(value)) {
     if (schema.items) {
       for (let i = 0; i < value.length; i++) {
-        const itemErrors = validateValue(value[i], schema.items, `${path ? `${path}[` : "["}${i}]`);
+        const itemErrors = validate(
+          value[i],
+          schema.items,
+          `${path ? `${path}[` : "["}${i}]`,
+        );
         errors.push(...itemErrors);
       }
     }
@@ -161,13 +220,11 @@ function validateValue(value, schema, path) {
   return errors;
 }
 
-// ── Public API ───────────────────────────────────────────────────────────────
-
 /**
- * Validate tool arguments against a JSON Schema.
+ * Validate arguments against a JSON Schema.
  *
  * @param {object} args - Parsed arguments to validate
- * @param {object} schema - JSON Schema object (the "parameters" portion of a tool definition)
+ * @param {object} schema - JSON Schema object
  * @returns {object} { valid: boolean, errors: string[] }
  */
 export function validateParams(args, schema) {
@@ -178,7 +235,7 @@ export function validateParams(args, schema) {
     return { valid: true, errors: [] };
   }
 
-  const errors = validateValue(args, schema, "");
+  const errors = validate(args, schema, "");
   return { valid: errors.length === 0, errors };
 }
 

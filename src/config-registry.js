@@ -33,6 +33,8 @@
 //     return { /* ... */ };
 //   }
 
+import { validate } from "./json-schema.js";
+
 /**
  * Registry for extension-registered CLI flags and config parameters.
  */
@@ -61,14 +63,14 @@ export class ConfigRegistry {
    */
   registerCliFlags(flags) {
     if (!Array.isArray(flags)) {
-      throw new TypeError('flags must be an array');
+      throw new TypeError("flags must be an array");
     }
     for (const flag of flags) {
       if (!flag.long && !flag.short) {
-        throw new Error('Each CLI flag must have a short or long form');
+        throw new Error("Each CLI flag must have a short or long form");
       }
       if (!flag.type) {
-        flag.type = 'string';
+        flag.type = "string";
       }
       this._cliFlags.push(flag);
     }
@@ -85,14 +87,16 @@ export class ConfigRegistry {
    */
   registerConfigParams(params) {
     if (!Array.isArray(params)) {
-      throw new TypeError('params must be an array');
+      throw new TypeError("params must be an array");
     }
     for (const param of params) {
       if (!param.key) {
-        throw new Error('Each config param must have a key');
+        throw new Error("Each config param must have a key");
       }
-      if (!param.defaults || typeof param.defaults !== 'object') {
-        throw new Error(`Config param '${param.key}' must have a defaults object`);
+      if (!param.defaults || typeof param.defaults !== "object") {
+        throw new Error(
+          `Config param '${param.key}' must have a defaults object`,
+        );
       }
       this._configParams.push(param);
     }
@@ -130,15 +134,15 @@ export class ConfigRegistry {
         parts.push(flag.long);
       }
 
-      if (flag.type !== 'boolean') {
-        parts.push(`<${flag.type === 'array' ? 'value,...' : 'value'}>`);
+      if (flag.type !== "boolean") {
+        parts.push(`<${flag.type === "array" ? "value,..." : "value"}>`);
       }
 
-      const help = parts.join(' ');
-      const desc = flag.description || '';
+      const help = parts.join(" ");
+      const desc = flag.description || "";
       lines.push(`  ${help.padEnd(35)} ${desc}`);
     }
-    return lines.join('\n');
+    return lines.join("\n");
   }
 
   /**
@@ -157,19 +161,14 @@ export class ConfigRegistry {
 
   /**
    * Validate a config object against a JSON Schema (draft 2020-12).
-   * This is a lightweight inline validator — it does not use any external
-   * schema validation library. It supports the most common JSON Schema
-   * keywords: type, properties, required, items, additionalProperties,
-   * default, enum, const, minLength, maxLength, minimum, maximum,
-   * pattern, and nested objects/arrays.
+   * Uses the shared json-schema.js validator.
    *
    * @param {any} config - The config object to validate.
    * @param {Object} schema - JSON Schema (draft 2020-12) to validate against.
    * @returns {{valid: boolean, errors: string[]}} Validation result.
    */
   validateConfig(config, schema) {
-    const errors = [];
-    this._validate(config, schema, errors, '');
+    const errors = validate(config, schema, "");
     return { valid: errors.length === 0, errors };
   }
 
@@ -180,11 +179,11 @@ export class ConfigRegistry {
    * @param {Object} schema - JSON Schema (draft 2020-12) for this config.
    */
   registerConfigSchema(key, schema) {
-    if (!key || typeof key !== 'string') {
-      throw new TypeError('key must be a non-empty string');
+    if (!key || typeof key !== "string") {
+      throw new TypeError("key must be a non-empty string");
     }
-    if (!schema || typeof schema !== 'object') {
-      throw new TypeError('schema must be a non-null object');
+    if (!schema || typeof schema !== "object") {
+      throw new TypeError("schema must be a non-null object");
     }
     if (!this._configSchemas) {
       this._configSchemas = new Map();
@@ -226,123 +225,6 @@ export class ConfigRegistry {
 
     // No schema found — consider valid by default
     return { valid: true, errors: [] };
-  }
-
-  /**
-   * Lightweight JSON Schema validator (draft 2020-12 subset).
-   * Supports: type, properties, required, items, additionalProperties,
-   * default, enum, const, minLength, maxLength, minimum, maximum, pattern.
-   *
-   * @param {any} value - Value to validate.
-   * @param {Object} schema - JSON Schema fragment.
-   * @param {string[]} errors - Error accumulator.
-   * @param {string} path - Current JSON path (for error messages).
-   * @private
-   */
-  _validate(value, schema, errors, path) {
-    if (!schema || typeof schema !== 'object') return;
-
-    // Check const
-    if (schema.const !== undefined) {
-      if (JSON.stringify(value) !== JSON.stringify(schema.const)) {
-        errors.push(`${path || 'root'}: must be ${JSON.stringify(schema.const)}`);
-      }
-      return;
-    }
-
-    // Check enum
-    if (schema.enum && Array.isArray(schema.enum)) {
-      if (!schema.enum.some(v => JSON.stringify(v) === JSON.stringify(value))) {
-        errors.push(`${path || 'root'}: must be one of ${JSON.stringify(schema.enum)}`);
-      }
-      return;
-    }
-
-    // Check type
-    if (schema.type) {
-      const actualType = Array.isArray(value) ? 'array' : typeof value;
-      if (schema.type === 'integer') {
-        if (!Number.isInteger(value)) {
-          errors.push(`${path || 'root'}: must be integer, got ${actualType}`);
-          return;
-        }
-      } else if (schema.type !== actualType) {
-        errors.push(`${path || 'root'}: must be ${schema.type}, got ${actualType}`);
-        return;
-      }
-    }
-
-    // Validate number constraints
-    if (typeof value === 'number') {
-      if (schema.minimum !== undefined && value < schema.minimum) {
-        errors.push(`${path || 'root'}: must be >= ${schema.minimum}`);
-      }
-      if (schema.maximum !== undefined && value > schema.maximum) {
-        errors.push(`${path || 'root'}: must be <= ${schema.maximum}`);
-      }
-    }
-
-    // Validate string constraints
-    if (typeof value === 'string') {
-      if (schema.minLength !== undefined && value.length < schema.minLength) {
-        errors.push(`${path || 'root'}: must be at least ${schema.minLength} characters`);
-      }
-      if (schema.maxLength !== undefined && value.length > schema.maxLength) {
-        errors.push(`${path || 'root'}: must be at most ${schema.maxLength} characters`);
-      }
-      if (schema.pattern) {
-        const regex = new RegExp(schema.pattern);
-        if (!regex.test(value)) {
-          errors.push(`${path || 'root'}: must match pattern "${schema.pattern}"`);
-        }
-      }
-    }
-
-    // Validate object properties
-    if (typeof value === 'object' && value !== null && !Array.isArray(value)) {
-      // Check required properties
-      if (schema.required && Array.isArray(schema.required)) {
-        for (const req of schema.required) {
-          if (!(req in value)) {
-            errors.push(`${path ? path + '.' : ''}${req}: required property missing`);
-          }
-        }
-      }
-
-      // Validate each declared property
-      if (schema.properties && typeof schema.properties === 'object') {
-        for (const [propName, propSchema] of Object.entries(schema.properties)) {
-          if (propName in value) {
-            this._validate(value[propName], propSchema, errors, path ? `${path}.${propName}` : propName);
-          }
-        }
-      }
-
-      // Check additionalProperties
-      if (schema.additionalProperties === false) {
-        const allowed = new Set([...Object.keys(schema.properties || {}), ...(schema.required || [])]);
-        for (const key of Object.keys(value)) {
-          if (!allowed.has(key)) {
-            errors.push(`${path ? path + '.' : ''}${key}: additional property not allowed`);
-          }
-        }
-      }
-    }
-
-    // Validate array items
-    if (Array.isArray(value)) {
-      if (schema.items) {
-        for (let i = 0; i < value.length; i++) {
-          this._validate(value[i], schema.items, errors, `${path ? path + '.' : ''}[${i}]`);
-        }
-      }
-      if (schema.minItems !== undefined && value.length < schema.minItems) {
-        errors.push(`${path || 'root'}: must have at least ${schema.minItems} items`);
-      }
-      if (schema.maxItems !== undefined && value.length > schema.maxItems) {
-        errors.push(`${path || 'root'}: must have at most ${schema.maxItems} items`);
-      }
-    }
   }
 }
 

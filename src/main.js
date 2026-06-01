@@ -264,6 +264,11 @@ async function main() {
   // Force autoload: true to ensure all extensions are loaded (not just explicitly listed ones).
   await loadExtensions(core, { taskManager: null, config });
 
+  // Emit CLI subcommand registration hook so extensions can register their handlers.
+  // Subcommand metadata (description, options) was already registered from extension.json;
+  // this hook allows extensions to attach the actual handler functions.
+  core.hooks.emit(HOOKS.CLI_SUBCOMMANDS_REGISTER, core.cliSubcommandRegistry);
+
   // Emit CLI args parsed hook after extensions are loaded (so handlers are registered)
   core.hooks.emit(HOOKS.CLI_ARGS_PARSED, { cli });
 

@@ -439,8 +439,11 @@ export async function getExtensionsToLoad(extensionPaths, extensionAutoload, ext
 
   if (extensionAutoload) {
     // Filter out extensions with autoload: false — they must be
-    // explicitly listed to be loaded.
-    return discovered.filter((ext) => ext.autoload !== false);
+    // explicitly listed to be loaded. Then resolve their transitive
+    // dependencies so that an autoload extension's deps are included
+    // even if the deps themselves have autoload: false.
+    const autoloaded = discovered.filter((ext) => ext.autoload !== false);
+    return resolveExtensionDependencies(autoloaded, discovered);
   }
 
   // Filter to only explicitly listed extensions

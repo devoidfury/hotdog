@@ -326,6 +326,28 @@ async function main() {
         const config = await loadConfig(cli.config, extParams);
         earlyCore.config = config;
       }
+
+      // Load all non-CLI extensions so that hooks are fully populated.
+      // CLI extensions are already loaded via loadCliExtensions().
+      // This ensures subcommands like show-prompt get the real
+      // system prompt built via the full extension hook chain.
+      const allExtensions = await getExtensionsToLoad(
+        earlyCore.config?.extensionPaths || ["builtins"],
+        earlyCore.config?.extensionAutoload ?? false,
+        earlyCore.config?.extensions || [],
+      );
+      for (const ext of allExtensions) {
+        // Skip CLI extensions — already loaded via loadCliExtensions()
+        if (ext.provides?.includes(EXTENSION_PROVIDES.CLI_SUBCOMMANDS)) {
+          continue;
+        }
+        try {
+          await earlyCore.extensions.load(ext.name, ext.path);
+        } catch (e) {
+          console.warn(`[subcommand] Failed to load extension ${ext.name}: ${e.message}`);
+        }
+      }
+
       // Execute the subcommand handler
       await subcommandDef.handler(cli, earlyCore);
       return;

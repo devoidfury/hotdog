@@ -8,7 +8,6 @@ import {
   toolDef,
   param,
   ToolResult,
-  toolResult,
   truncateOutput,
   parseToolInput,
   defaultCallDisplay,
@@ -328,11 +327,15 @@ export class GrepTool {
   }
 
   callDisplay(input) {
-    return defaultCallDisplay(input, (args) => {
-      if (!args.pattern) return "";
-      const path = args.path || ".";
-      return `'${args.pattern}' in ${path}`;
-    }, typeof input === "string" ? input : "");
+    return defaultCallDisplay(
+      input,
+      (args) => {
+        if (!args.pattern) return "";
+        const path = args.path || ".";
+        return `'${args.pattern}' in ${path}`;
+      },
+      typeof input === "string" ? input : "",
+    );
   }
 
   async execute(input, ctx) {

@@ -604,7 +604,7 @@ export function create(core) {
 **Current:** `src/mcp/` (~5 files)
 
 ```javascript
-// extensions/mcp/index.js
+// extensions/mcp-client/index.js
 export function create(core) {
   const servers = core.config.mcpServers || [];
   return {

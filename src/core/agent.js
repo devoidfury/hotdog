@@ -126,6 +126,10 @@ export class Agent {
     this._hideThinking = v;
   }
 
+  get systemPrompt() {
+    return this._systemPrompt;
+  }
+
   // ── Run Loop ──────────────────────────────────────────────────────────────
 
   /**
@@ -267,28 +271,40 @@ export class Agent {
 
   /**
    * Ensure system prompt is built and cached.
-   * Extensions hook into systemPrompt:build to contribute.
+   * Uses the real buildSystemPrompt() function and then allows
+   * extensions to contribute via the SYSTEM_PROMPT_BUILD hook.
    */
   async ensureSystemPrompt() {
     if (this._systemPrompt) return;
 
-    // Build prompt via hook — extensions can contribute
+    // Import here to avoid circular dependency
+    const { buildSystemPrompt, loadAspects, loadAgentsMd } = await import(
+      "../context/system_prompt.js"
+    );
+
+    // Load aspects and AGENTS.md
+    const resolvedConfig = this._config?.resolved || {};
+    const aspects = loadAspects(resolvedConfig.aspects || []);
+    const agentsMd = loadAgentsMd();
+
+    // Build skills preamble via hook (extensions contribute)
     const promptParts = [];
-
-    // Core: role + profile body
-    if (this._role) promptParts.push(this._role);
-    if (this._profileBody) promptParts.push(this._profileBody);
-
-    // Hook: let extensions add to the system prompt
-    const hookResult = this._hooks.emit(HOOKS.SYSTEM_PROMPT_BUILD, {
+    await this._hooks.emitAsync(HOOKS.SYSTEM_PROMPT_BUILD, {
       agent: this,
       promptParts,
     });
-    if (hookResult && hookResult.promptParts) {
-      promptParts.push(...hookResult.promptParts);
-    }
+    const skillsContent = promptParts.filter(Boolean).join("\n\n");
 
-    this._systemPrompt = promptParts.filter(Boolean).join("\n\n");
+    // Build the real system prompt using the proper function
+    this._systemPrompt = buildSystemPrompt({
+      role: this._role || "",
+      body: this._profileBody || "",
+      model: this.__model || "",
+      profileName: this._profileName || "default",
+      aspects,
+      agentsMd,
+      skillsContent: skillsContent || "",
+    });
   }
 
   // ── Stream Processing ─────────────────────────────────────────────────────

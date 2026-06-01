@@ -1,7 +1,13 @@
 // Fetch tool — make HTTP requests.
 
 import { spawnSync } from "node:child_process";
-import { toolDef, param, ToolResult, toolResult, parseToolInput, defaultCallDisplay } from "./registry.js";
+import {
+  toolDef,
+  param,
+  ToolResult,
+  parseToolInput,
+  defaultCallDisplay,
+} from "./registry.js";
 
 const VALID_METHODS = ["GET", "POST", "PUT", "DELETE", "PATCH", "HEAD"];
 const METHODS_WITH_BODY = ["POST", "PUT", "PATCH"];

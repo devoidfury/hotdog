@@ -3,14 +3,10 @@
 // Registers subcommands via the cli:subcommandsRegister hook.
 // Capability declared in extension.json metadata file.
 
-import { HOOKS } from "../../src/hooks.js";
 import { LlmClient } from "../../src/llm_client/client.js";
 import { SkillsLoader } from "../skills/loader.js";
 import { DEFAULT_SKILLS_PATH } from "../../src/config.js";
-import { CliOutputSink } from "../../src/ui/cli.js";
-import { readdirSync, existsSync, statSync } from "node:fs";
-import { homedir } from "node:os";
-import { join } from "node:path";
+import { Agent } from "../../src/core/agent.js";
 
 /**
  * Run the info subcommand.
@@ -197,73 +193,31 @@ function printInfoJson(
 
 /**
  * Run the show-prompt subcommand.
+ * Creates a real agent, ensures the system prompt is built via hooks,
+ * and outputs the actual system prompt.
  */
-async function runShowPrompt(cli, config, buildConfig) {
-  const { resolved, modelRegistry } = await buildConfig(cli);
+async function runShowPrompt(cli, core, config, buildConfig) {
+  const { resolved } = await buildConfig(cli);
 
-  // Load skills
-  const skillsLoader = new SkillsLoader(cli.skillsPath || config.skillsPath);
-  skillsLoader.loadSkills();
-  skillsLoader.setAvailableTools([
-    "bash",
-    "read",
-    "write",
-    "edit",
-    "grep",
-    "find",
-    "fetch",
-    "question",
-    "pager",
-    "model",
-    "load_skill",
-  ]);
-  // Preload skills from CLI args or config (skills extension now handles this)
-  const preloadSkills = cli.preloadSkills || config.skills?.preloadSkills || [];
-  if (preloadSkills.length > 0) {
-    skillsLoader.preloadSkills(preloadSkills);
-  }
-
-  // Create client
-  const client = new LlmClient({
-    baseUrl: resolved.baseUrl,
-    apiKey: resolved.apiKey,
-    stream: false,
-    chatTimeoutSecs: resolved.chatTimeout,
-    providers: config.providers || [],
+  // Create an agent with the same config that a real agent would get.
+  // Use the hooks from earlyCore (which already has CLI extensions loaded
+  // including skills, which contributes to the system prompt via hooks).
+  const agent = new Agent({
+    hooks: core.hooks,
+    toolRegistry: core.toolRegistry,
+    llmClient: null, // Not needed — we only want the system prompt
+    model: resolved.model || "",
+    profileName: resolved.profileName || "default",
+    role: resolved.role || "",
+    profileBody: resolved.profileBody || "",
+    config,
   });
 
-  // Build system prompt (simplified version)
-  const systemPrompt = buildSystemPrompt(resolved, skillsLoader, config);
-  console.log(systemPrompt);
-}
+  // Build the system prompt via the real hook mechanism
+  await agent.ensureSystemPrompt();
 
-function buildSystemPrompt(resolved, skillsLoader, config) {
-  const profile = resolved.profile || {};
-  const skills = skillsLoader.allSkills();
-
-  let prompt = "";
-
-  // Role
-  if (resolved.role) {
-    prompt += resolved.role + "\n\n";
-  }
-
-  // Profile body
-  if (resolved.profileBody) {
-    prompt += resolved.profileBody + "\n\n";
-  }
-
-  prompt += skillsLoader.buildSkillsPreamble();
-
-  // Environment marker
-  prompt += `<m_fy6az93w38i7eahj>\n`;
-  prompt += `  Agent: oa-agent (Model: ${resolved.model}) (Profile: ${resolved.profileName})\n`;
-  prompt += `  CWD: ${process.cwd()}\n`;
-  prompt += `  Platform: ${process.platform}\n`;
-  prompt += `  Session: ${new Date().toISOString().slice(0, 10)}\n`;
-  prompt += `</m_fy6az93w38i7eahj>\n`;
-
-  return prompt;
+  // Output the actual system prompt
+  console.log(agent.systemPrompt);
 }
 
 // ── Extension Entry Point ───────────────────────────────────────────────────
@@ -289,35 +243,12 @@ export function create(core) {
       requiresConfig: true,
       handler: async (cli, core) => {
         const { config, buildConfig } = core;
-        await runShowPrompt(cli, config, buildConfig);
+        await runShowPrompt(cli, core, config, buildConfig);
       },
     });
   }
 
   return {
-    hooks: core.hooks
-      ? {
-          // Register via hook as well for backward compatibility
-          [HOOKS.CLI_SUBCOMMANDS_REGISTER]: async (registry) => {
-            registry.register("info", {
-              description: "Show system info and diagnostics",
-              requiresConfig: true,
-              handler: async (cli, core) => {
-                const { config, buildConfig } = core;
-                await runInfo(cli, config, buildConfig);
-              },
-            });
-
-            registry.register("show-prompt", {
-              description: "Show rendered system prompt with tool definitions",
-              requiresConfig: true,
-              handler: async (cli, core) => {
-                const { config, buildConfig } = core;
-                await runShowPrompt(cli, config, buildConfig);
-              },
-            });
-          },
-        }
-      : undefined,
+    hooks: core.hooks ? {} : undefined,
   };
 }

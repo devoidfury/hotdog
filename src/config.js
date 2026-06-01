@@ -169,7 +169,10 @@ function getDefaultConfig(extParams) {
     thinker: DEFAULT_THINKER,
     toolfmt: DEFAULT_TOOL_FMT,
     toolOutputFmt: DEFAULT_TOOL_OUTPUT_FMT,
-    role: DEFAULT_ROLE,
+    // Note: role is intentionally NOT set here. It's resolved from:
+    // CLI --role > config file role > profile file role > DEFAULT_ROLE fallback
+    // Setting a default here would override profile file roles.
+    role: null,
     hideTools: true,
     hideThinking: false,
     skillsPath: DEFAULT_SKILLS_PATH,

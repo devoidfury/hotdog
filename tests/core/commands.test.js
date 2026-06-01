@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'bun:test';
 import { parseCommand, Command } from '../../src/core/commands.js';
-import { createSlashCommandRegistry } from '../../src/core/slash-command-registry.js';
+import { createSlashCommandRegistry } from '../../src/core/extensions/registries.js';
 
 describe('parseCommand', () => {
   it('parses help', () => {

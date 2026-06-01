@@ -3,7 +3,8 @@ import fsSync from "node:fs";
 import path from "node:path";
 import os from "node:os";
 import { GrepTool } from "../../src/extensions/core-tools/grep.js";
-import { ToolContext, ToolResult } from "../../src/core/tool-registry.js";
+import { ToolContext } from "../../src/core/extensions/tool-context.js";
+import { ToolResult } from "../../src/core/extensions/tool-utils.js";
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
 

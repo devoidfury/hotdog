@@ -4,7 +4,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { pathToUri, uriToPath, getLanguageId } from "../utils.js";
 import { getOrCreateLspClient } from "../client-utils.js";
-import { toolDef, param, ToolResult, defaultCallDisplay } from "../../../core/tool-registry.js";
+import { toolDef, param, ToolResult, defaultCallDisplay } from "../../../core/extensions/tool-utils.js";
 
 /**
  * Base class for all LSP tools.

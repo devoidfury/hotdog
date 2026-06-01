@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'bun:test';
 import { PagerTool } from '../../src/extensions/core-tools/pager.js';
-import { ToolResult, ToolContext } from '../../src/core/tool-registry.js';
+import { ToolContext } from '../../src/core/extensions/tool-context.js';
+import { ToolResult } from '../../src/core/extensions/tool-utils.js';
 
 /**
  * Extract string output from a tool result (handles ToolResult or plain string).

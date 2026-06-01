@@ -3,7 +3,7 @@
 // Sync hooks run synchronously; async hooks run via `emitAsync()` and errors
 // don't stop the chain (each handler is wrapped in try/catch).
 
-import { formatError } from "./context/error.js";
+import { formatError } from "./error.js";
 
 let _handlerCounter = 0;
 
@@ -272,17 +272,17 @@ export const HOOKS = {
   //   { toolDefs } — replace the tool definitions
   // Runs via emitAsyncSeq so each handler sees prior transformations.
   // Enables: request logging, last-minute message injection, request modification.
-  BEFORE_PROVIDER_REQUEST: "before_provider_request",
+  PROVIDER_REQUEST: "provider:request",
 
   // Provider response — emitted AFTER the LLM response is fully received.
   // Handlers receive { response, modelConfig, agent } as notification.
   // Enables: response logging, metrics, cost tracking, telemetry.
-  AFTER_PROVIDER_RESPONSE: "after_provider_response",
+  PROVIDER_RESPONSE: "provider:response",
 
   // Turn start — emitted at the beginning of each agent loop iteration.
   // Handlers receive { turnIndex, timestamp, agent } as notification.
   // Enables: per-turn metrics, timing, analytics.
-  TURN_START: "turn_start",
+  TURN_START: "turn:start",
 
   // Turn end — emitted at the end of each agent loop iteration.
   // Handlers receive { turnIndex, message, toolResults, stopped, agent } as notification.
@@ -291,7 +291,7 @@ export const HOOKS = {
   // - stopped: boolean indicating if the agent has finished processing (true) or
   //   will continue to the next iteration (false)
   // Enables: per-turn analysis, cost tracking, audit logging, UI prompt control.
-  TURN_END: "turn_end",
+  TURN_END: "turn:end",
 };
 
 /**

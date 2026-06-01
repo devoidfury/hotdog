@@ -7,7 +7,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { cwd } from "node:process";
 import { HOOKS } from "../../core/hooks.js";
-import { render } from "../../core/context/render.js";
+import { render } from "../../utils/render.js";
 import { patternMatches, SkillsLoader } from "./loader.js";
 import { LoadSkillTool } from "./load_skill.js";
 export { LoadSkillTool };

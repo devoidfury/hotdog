@@ -5,7 +5,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 // tests/core/ -> tests/ -> project root
 const PROJECT_ROOT = path.resolve(__dirname, "../..");
 import { LspDefinitionTool } from "../../src/extensions/lsp/tools/lsp-definition.js";
-import { ToolContext } from "../../src/core/tool-registry.js";
+import { ToolContext } from "../../src/core/extensions/tool-context.js";
 
 describe("LspDefinitionTool", () => {
   let tool;

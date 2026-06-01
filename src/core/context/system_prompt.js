@@ -5,8 +5,8 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { cwd } from "node:process";
 import { initSystemPromptTemplate as _initTemplate } from "../config.js";
-import { render, render as renderTemplate } from "./render.js";
-import { loadAspects as _loadAspects } from "../utils.js";
+import { render, render as renderTemplate } from "../../utils/render.js";
+import { loadAspects as _loadAspects } from "../../utils/utils.js";
 
 export { renderTemplate };
 

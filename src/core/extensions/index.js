@@ -1,27 +1,33 @@
-// Core module — the minimal foundation for the extension architecture.
+// Extension system — re-exports all extension-related modules.
 
-export * from "./hooks.js";
-
-// Extension system
 export {
   ExtensionLoader,
   createExtensionLoader,
   extractSchemaDefaults,
   getExtensionConfigDefaults,
   emitConfigRegistration,
+  resolveExtensionPath,
+  isExtensionDirectory,
+  discoverExtensionsInDir,
+  LOAD_ORDER,
+  resolveLoadOrder,
+  discoverExtensions,
+  getExtensionConfigSchemas,
+  getExtensionsToLoad,
+  resolveExtensionDependencies,
   registerExtensionMetadata,
   HOOKS,
   EXTENSION_PROVIDES,
-} from "./extensions/extensions.js";
+} from "./extensions.js";
 
 export {
   ToolRegistry,
   createToolRegistry,
-} from "./extensions/tool-registry.js";
+} from "./tool-registry.js";
 
 export {
   ToolContext,
-} from "./extensions/tool-context.js";
+} from "./tool-context.js";
 
 export {
   ToolResult,
@@ -43,23 +49,15 @@ export {
   checkReadable,
   getRequiredStr,
   runCommand,
-} from "./extensions/tool-utils.js";
+} from "./tool-utils.js";
 
 export {
   CommandRegistry,
   createSlashCommandRegistry,
   createSubcommandRegistry,
-} from "./extensions/registries.js";
+} from "./registries.js";
 
 export {
   ConfigRegistry,
   createConfigRegistry,
-} from "./extensions/config-registry.js";
-
-export * from "./agent.js";
-export * from "./session/index.js";
-
-// Session components
-export * from "./session/agent_sink.js";
-export * from "./session/task_manager.js";
-export * from "./session/message-bus.js";
+} from "./config-registry.js";

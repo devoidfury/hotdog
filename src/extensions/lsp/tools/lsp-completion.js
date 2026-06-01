@@ -1,7 +1,7 @@
 // LSP Completion tool — textDocument/completion
 // Created via factory to reduce boilerplate.
 
-import { ToolResult } from '../../../core/tool-registry.js';
+import { ToolResult } from '../../../core/extensions/tool-utils.js';
 import { definePositionTool } from './lsp-position-tool.js';
 
 export const LspCompletionTool = definePositionTool({

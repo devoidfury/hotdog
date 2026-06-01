@@ -574,7 +574,7 @@ describe("Integration — validation blocks invalid tool execution", () => {
 
 // ── ToolRegistry.validateToolArgs integration ────────────────────────────────
 
-import { ToolRegistry } from "../../src/core/tool-registry.js";
+import { ToolRegistry } from "../../src/core/extensions/tool-registry.js";
 
 describe("ToolRegistry.validateToolArgs", () => {
   it("returns null for unknown tool", () => {

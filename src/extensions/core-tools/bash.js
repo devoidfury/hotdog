@@ -9,7 +9,7 @@ import {
   truncateOutput,
   parseToolInput,
   defaultCallDisplay,
-} from "../../core/tool-registry.js";
+} from "../../core/extensions/tool-utils.js";
 import {
   DEFAULT_BASH_TIMEOUT_MS,
   DEFAULT_MAX_TOOL_OUTPUT_LINES,

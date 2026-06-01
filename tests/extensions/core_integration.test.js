@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach } from 'bun:test';
 import { HookSystem, HOOKS } from '../../src/core/hooks.js';
-import { ExtensionLoader } from '../../src/core/extensions.js';
-import { ToolRegistry } from '../../src/core/tool-registry.js';
+import { ExtensionLoader } from '../../src/core/extensions/extensions.js';
+import { ToolRegistry } from '../../src/core/extensions/tool-registry.js';
 import { create as createCompactionExtension } from '../../src/extensions/compaction/index.js';
 import { create as createCoreToolsExtension } from '../../src/extensions/core-tools/index.js';
 import { create as createSkillsExtension } from '../../src/extensions/skills/index.js';

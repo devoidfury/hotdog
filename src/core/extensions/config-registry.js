@@ -33,7 +33,7 @@
 //     return { /* ... */ };
 //   }
 
-import { validate } from "./json-schema.js";
+import { validate } from "../../utils/json-schema.js";
 
 /**
  * Registry for extension-registered CLI flags and config parameters.

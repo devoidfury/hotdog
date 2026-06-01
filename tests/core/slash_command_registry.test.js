@@ -1,8 +1,8 @@
 import { describe, it, expect } from "bun:test";
 import {
-  SlashCommandRegistry,
+  CommandRegistry,
   createSlashCommandRegistry,
-} from "../../src/core/slash-command-registry.js";
+} from "../../src/core/extensions/registries.js";
 
 describe("SlashCommandRegistry", () => {
   it("creates an empty registry", () => {

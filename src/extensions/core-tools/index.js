@@ -5,7 +5,9 @@
 
 import { HOOKS } from "../../core/hooks.js";
 
-export * from "../../core/tool-registry.js";
+export * from "../../core/extensions/tool-utils.js";
+export * from "../../core/extensions/tool-registry.js";
+export * from "../../core/extensions/tool-context.js";
 export * from "./bash.js";
 export * from "./write.js";
 export * from "./read.js";

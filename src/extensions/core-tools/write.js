@@ -11,7 +11,7 @@ import {
   validateCwdBoundary,
   resolvePath,
   parseToolInput,
-} from "../../core/tool-registry.js";
+} from "../../core/extensions/tool-utils.js";
 
 export class WriteTool {
   static TOOL_NAME = "write";

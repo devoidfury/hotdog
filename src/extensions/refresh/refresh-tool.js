@@ -18,7 +18,7 @@ import {
   ToolResult,
   parseToolInput,
   defaultCallDisplay,
-} from "../../core/tool-registry.js";
+} from "../../core/extensions/tool-utils.js";
 
 export class RefreshTool {
   static TOOL_NAME = "refresh";

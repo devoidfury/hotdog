@@ -5,10 +5,11 @@
 import { Message } from "./context/message.js";
 import { LlmError } from "./llm_client/client.js";
 import { OUTPUT_EVENT } from "./context/output.js";
-import { formatError } from "./context/error.js";
+import { formatError } from "./error.js";
 import { HOOKS } from "./hooks.js";
-import { ToolContext, xmlEscape } from "./tool-registry.js";
-import { createSlashCommandRegistry } from "./slash-command-registry.js";
+import { ToolContext } from "./extensions/tool-context.js";
+import { xmlEscape } from "./extensions/tool-utils.js";
+import { createSlashCommandRegistry } from "./extensions/registries.js";
 import { DEFAULT_MAX_TOKENS } from "./config.js";
 
 /**
@@ -203,10 +204,12 @@ export class Agent {
 
       // Before provider request — sequential, modifiable. Extensions can
       // log the request, modify messages, change model config, or alter tools.
-      const reqResult = await this._hooks.emitAsyncSeq(
-        HOOKS.BEFORE_PROVIDER_REQUEST,
-        { messages, modelConfig, toolDefs, agent: this },
-      );
+      const reqResult = await this._hooks.emitAsyncSeq(HOOKS.PROVIDER_REQUEST, {
+        messages,
+        modelConfig,
+        toolDefs,
+        agent: this,
+      });
       if (reqResult?.messages) messages = reqResult.messages;
       if (reqResult?.modelConfig) modelConfig = reqResult.modelConfig;
       if (reqResult?.toolDefs) toolDefs = reqResult.toolDefs;
@@ -222,7 +225,7 @@ export class Agent {
 
       // After provider response — notification with full response data.
       // Enables: response logging, metrics, cost tracking, telemetry.
-      await this._hooks.emitAsync(HOOKS.AFTER_PROVIDER_RESPONSE, {
+      await this._hooks.emitAsync(HOOKS.PROVIDER_RESPONSE, {
         response,
         modelConfig,
         agent: this,

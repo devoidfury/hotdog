@@ -2,7 +2,7 @@
 
 import { Agent, HOOKS } from '../../src/core/index.js';
 import { HookSystem, createHooks } from '../../src/core/hooks.js';
-import { ToolRegistry, createToolRegistry } from '../../src/core/tool-registry.js';
+import { ToolRegistry, createToolRegistry } from '../../src/core/extensions/tool-registry.js';
 import { Message } from '../../src/core/context/message.js';
 import { describe, it, expect, beforeEach, spyOn } from 'bun:test';
 

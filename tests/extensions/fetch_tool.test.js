@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'bun:test';
 import { FetchTool } from '../../src/extensions/core-tools/fetch.js';
-import { ToolResult } from '../../src/core/tool-registry.js';
+import { ToolResult } from '../../src/core/extensions/tool-utils.js';
 
 /**
  * Extract string output from a tool result (handles ToolResult or plain string).

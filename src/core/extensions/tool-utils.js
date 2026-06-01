@@ -1,9 +1,9 @@
-// Tool registry and common utilities — core implementation.
+// Tool utilities — shared helpers for tool definitions and execution.
+// Extracted from tool-registry.js for better separation of concerns.
 
 import fs from "node:fs";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
-import { validateParams, formatValidationErrors } from "./json-schema.js";
 
 /**
  * Metadata keys rendered as XML attributes on the root <tool> tag.
@@ -24,7 +24,6 @@ const SHORT_META_KEYS = new Set([
 
 /**
  * Minimal XML escaping for attribute/text content.
- * Exported for use by agent.js to avoid duplication.
  */
 export function xmlEscape(s) {
   return s
@@ -54,16 +53,10 @@ export class ToolResult {
     this.outputTag = outputTag;
   }
 
-  /**
-   * Create a successful result with the given output.
-   */
   static ok(output) {
     return new ToolResult({ output, success: true });
   }
 
-  /**
-   * Create an error result with the given message.
-   */
   static err(message) {
     return new ToolResult({
       output: "",
@@ -72,18 +65,12 @@ export class ToolResult {
     });
   }
 
-  /**
-   * Add a single metadata entry.
-   */
   withEntry(key, value) {
     this.metadata = this.metadata || new Map();
     this.metadata.set(key, String(value));
     return this;
   }
 
-  /**
-   * Add multiple metadata entries at once.
-   */
   withEntries(entries) {
     this.metadata = this.metadata || new Map();
     for (const [key, value] of Object.entries(entries)) {
@@ -92,31 +79,19 @@ export class ToolResult {
     return this;
   }
 
-  /**
-   * Set a custom XML tag name for the output.
-   */
   withOutputTag(tag) {
     this.outputTag = tag;
     return this;
   }
 
-  /**
-   * Check if result is successful.
-   */
   isOk() {
     return this.success;
   }
 
-  /**
-   * Check if result is an error.
-   */
   isErr() {
     return !this.success;
   }
 
-  /**
-   * Format result for display (plain text).
-   */
   toDisplay() {
     const parts = this.output ? [this.output] : [];
     if (this.error) {
@@ -125,9 +100,6 @@ export class ToolResult {
     return parts.join("\n");
   }
 
-  /**
-   * Format result as XML for API content.
-   */
   toApiContent(toolName) {
     const status = this.success ? "success" : "failure";
     const tag = this.outputTag || "output";
@@ -162,7 +134,6 @@ export class ToolResult {
 
 /**
  * Tool definition (OpenAI function-calling schema).
- * Supports JSON Schema draft/2020-12 format with additional fields like enum, min/max, etc.
  */
 export function toolDef(name, description, parameters) {
   return {
@@ -182,7 +153,6 @@ export function toolDef(name, description, parameters) {
 
 /**
  * Create a parameter definition.
- * Supports additional JSON Schema fields: enum, minimum, maximum, etc.
  */
 export function param(typeName, description, extra = {}) {
   return { type: typeName, description: description || "", ...extra };
@@ -204,16 +174,9 @@ export function parseToolArgs(input) {
 
 /**
  * Resolve a tool result string.
- * Handles plain strings, objects, and ToolResult instances.
- *
- * When a `toolName` is provided, the result is formatted as XML
- * for the API. This is used for tool results sent back to the LLM.
- *
- * When no tool name is provided, falls back to plain text display.
  */
 export function toolResult(result, toolName) {
   if (result instanceof ToolResult) {
-    // XML-formatted for API when tool name is available, plain text otherwise
     if (toolName) {
       return result.toApiContent(toolName);
     }
@@ -240,13 +203,10 @@ export function toolResult(result, toolName) {
 
 /**
  * Wrap content in XML tool tags for API output.
- * Matches the format of ToolResult.toApiContent().
- * Extracts short metadata keys (like duration_ms) as XML attributes.
  */
 function xmlWrap(toolName, status, content) {
   const attrs = [`name="${xmlEscape(toolName)}"`, `status="${status}"`];
 
-  // If content is an object, check for short metadata keys
   let outputContent = content;
   if (typeof content === "object" && content !== null) {
     const shortMeta = [];
@@ -262,7 +222,6 @@ function xmlWrap(toolName, status, content) {
     if (shortMeta.length > 0) {
       attrs.push(...shortMeta);
     }
-    // Re-serialize remaining object as JSON content
     outputContent = JSON.stringify(remaining);
   }
 
@@ -283,18 +242,6 @@ export function truncateOutput(text, maxLines) {
 
 /**
  * Parse and validate tool input from the LLM.
- * Handles the common pattern of JSON string → object conversion
- * with graceful error handling. Returns null on parse failure.
- *
- * Usage in tools:
- *   const args = parseToolInput(input);
- *   if (!args) return ToolResult.err("Error parsing arguments");
- *   // Then do field-specific validation:
- *   const path = args.path;
- *   if (!path) return ToolResult.err("path is required");
- *
- * @param {string|object} input - Raw tool input (JSON string or parsed object)
- * @returns {object|null} Parsed object, or null on failure
  */
 export function parseToolInput(input) {
   if (!input || (typeof input === "string" && input.trim().length === 0)) {
@@ -316,26 +263,9 @@ export function parseToolInput(input) {
 }
 
 /**
- * Default callDisplay implementation — parses JSON input and delegates
- * to a template function for formatted output.
- *
- * Usage in tools:
- *   callDisplay(input) {
- *     return defaultCallDisplay(input, (args) => {
- *       return `${args.path} (lines ${args.offset}-${args.offset + args.limit})`;
- *     });
- *   }
- *
- * @param {string|object} input - Raw tool input (JSON string or parsed object)
- * @param {Function} templateFn - Function(args) => string — formats parsed args
- * @param {string|Function|object} [options] - Options object or fallback value.
- *   If string: used as fallback for empty/null input.
- *   If function: called with input as fallback for empty/null input.
- *   If object: { fallback: string|Function, returnRawOnParseError: boolean }
- * @returns {string} Human-readable display string
+ * Default callDisplay implementation.
  */
 export function defaultCallDisplay(input, templateFn, options) {
-  // Normalize options
   let fallback,
     returnRawOnParseError = false;
   if (typeof options === "string") {
@@ -355,7 +285,6 @@ export function defaultCallDisplay(input, templateFn, options) {
 
   const args = parseToolInput(input);
   if (!args) {
-    // When parsing fails, return raw input if configured, otherwise return fallback
     if (returnRawOnParseError) {
       return typeof input === "string" ? input : "";
     }
@@ -381,7 +310,6 @@ export function generateDiff(oldText, newText, maxLines = 80) {
       oldIdx++;
       newIdx++;
     } else {
-      // Simple diff: just show the changed lines
       diff.push(`- ${oldLines[oldIdx]}`);
       diff.push(`+ ${newLines[newIdx]}`);
       oldIdx++;
@@ -415,7 +343,6 @@ export function writeFileWithParents(filePath, content) {
 
 /**
  * Validate that a path is within the cwd boundary.
- * Returns an error string if outside the boundary, or null if valid.
  */
 export function validateCwdBoundary(filePath, cwdBoundary) {
   if (!cwdBoundary) return null;
@@ -432,8 +359,6 @@ export function validateCwdBoundary(filePath, cwdBoundary) {
 
 /**
  * Resolve a path against cwdBoundary or workspaceRoot.
- * cwdBoundary takes precedence if set; otherwise falls back to workspaceRoot.
- * Absolute paths are returned as-is.
  */
 export function resolvePath(filePath, cwdBoundary, workspaceRoot) {
   if (path.isAbsolute(filePath)) {
@@ -449,9 +374,7 @@ export function resolvePath(filePath, cwdBoundary, workspaceRoot) {
 }
 
 /**
- * Resolve a path and verify it stays within the cwd boundary (if set).
- * Returns the resolved path string.
- * Throws if the path doesn't exist or escapes the boundary.
+ * Resolve a path and verify it stays within the cwd boundary.
  */
 export function resolvePathAndValidate(requested, cwdBoundary = null) {
   const resolved = path.resolve(requested);
@@ -478,7 +401,6 @@ export function resolvePathAndValidate(requested, cwdBoundary = null) {
 
 /**
  * Get file size in bytes.
- * Returns the file size as a number.
  */
 export function fileSize(filePath) {
   const stats = fs.statSync(filePath);
@@ -487,13 +409,10 @@ export function fileSize(filePath) {
 
 /**
  * Check if a path is writable.
- * Tests by creating a temp file in the parent dir (if new) or checking write access (if existing).
- * Returns true if writable, throws if not.
  */
 export function checkWritable(filePath) {
   const parentDir = path.dirname(filePath);
 
-  // Test parent directory writability by creating a temp file
   if (parentDir && parentDir !== ".") {
     const tempPath = path.join(parentDir, ".oa-agent-permission-test");
     try {
@@ -504,7 +423,6 @@ export function checkWritable(filePath) {
     }
   }
 
-  // If file exists, check write permission via access (no file descriptor leak)
   if (fs.existsSync(filePath)) {
     try {
       fs.accessSync(filePath, fs.constants.W_OK);
@@ -518,7 +436,6 @@ export function checkWritable(filePath) {
 
 /**
  * Check if a path is readable.
- * Returns true if readable, throws if not.
  */
 export function checkReadable(filePath) {
   if (!fs.existsSync(filePath)) {
@@ -534,7 +451,6 @@ export function checkReadable(filePath) {
 
 /**
  * Extract a required string from a JSON value.
- * Returns the string value, or throws if missing/not a string.
  */
 export function getRequiredStr(value, key) {
   const v = value?.[key];
@@ -546,13 +462,12 @@ export function getRequiredStr(value, key) {
 
 /**
  * Run a shell command and capture stdout.
- * Throws on non-zero exit or spawn failure.
  */
 export function runCommand(cmd, args = [], cwd = null) {
   const result = spawnSync(cmd, args, {
     cwd,
     encoding: "utf-8",
-    maxBuffer: 10 * 1024 * 1024, // 10MB
+    maxBuffer: 10 * 1024 * 1024,
   });
 
   if (result.error) {
@@ -569,175 +484,4 @@ export function runCommand(cmd, args = [], cwd = null) {
   }
 
   return stdout;
-}
-
-/**
- * Tool registry — holds all available tools.
- */
-export class ToolRegistry {
-  constructor() {
-    this.tools = new Map();
-  }
-
-  register(name, tool) {
-    this.tools.set(name, tool);
-  }
-
-  get(name) {
-    return this.tools.get(name);
-  }
-
-  has(name) {
-    return this.tools.has(name);
-  }
-
-  getAll() {
-    return Array.from(this.tools.entries());
-  }
-
-  getToolDefs() {
-    return Array.from(this.tools.values())
-      .filter((t) => t.toToolDef)
-      .map((t) => t.toToolDef());
-  }
-
-  /**
-   * Clear all tools from the registry.
-   */
-  clear() {
-    this.tools.clear();
-  }
-
-  /**
-   * Filter tools by whitelist/blacklist.
-   */
-  filter(whitelist, blacklist, managerToolsEnabled = false) {
-    const result = new ToolRegistry();
-    for (const [name, tool] of this.tools) {
-      // Check blacklist
-      if (blacklist && blacklist.includes(name)) continue;
-      // Check whitelist
-      if (whitelist && !whitelist.includes(name)) continue;
-      result.register(name, tool);
-    }
-    return result;
-  }
-
-  /**
-   * Validate tool arguments against the tool's JSON Schema.
-   * Returns an error string if validation fails, or null if valid.
-   *
-   * @param {string} toolName - Name of the tool
-   * @param {string|object} input - Raw tool input (JSON string or parsed object)
-   * @returns {string|null} Error message if invalid, null if valid
-   */
-  validateToolArgs(toolName, input) {
-    const tool = this.get(toolName);
-    if (!tool || !tool.toToolDef) return null;
-
-    const def = tool.toToolDef();
-    const params = def?.function?.parameters || null;
-    if (!params) return null;
-
-    // Parse input if it's a string
-    let args;
-    if (typeof input === "string") {
-      try {
-        args = JSON.parse(input);
-      } catch {
-        // Can't parse — validation will catch it
-        args = input;
-      }
-    } else {
-      args = input;
-    }
-
-    const result = validateParams(args, params);
-    if (!result.valid) {
-      return formatValidationErrors(result.errors);
-    }
-    return null;
-  }
-}
-
-/**
- * Shared context container — a flat object that extensions mount
- * their own properties onto. Core knows nothing about property names;
- * each extension owns its own keys.
- *
- * Accepts optional initial data in the constructor for backward
- * compatibility (tests and direct instantiation).
- */
-export class ToolContext {
-  constructor(initialData = {}) {
-    // Flat key-value store — extensions add their own properties
-    // via the AGENT_TOOL_CONTEXT hook or direct assignment.
-    Object.defineProperty(this, "_data", {
-      value: { ...initialData },
-      writable: false,
-      enumerable: false,
-    });
-  }
-
-  /**
-   * Mount (set) a property on the shared context.
-   * Extensions use this to register their own data.
-   */
-  set(key, value) {
-    this._data[key] = value;
-    return this;
-  }
-
-  /**
-   * Get a property from the shared context.
-   */
-  get(key) {
-    return this._data[key];
-  }
-
-  /**
-   * Check if a property exists on the shared context.
-   */
-  has(key) {
-    return key in this._data;
-  }
-
-  /**
-   * Delete a property from the shared context.
-   */
-  delete(key) {
-    delete this._data[key];
-  }
-
-  /**
-   * Get all mounted keys.
-   */
-  keys() {
-    return Object.keys(this._data);
-  }
-
-  /**
-   * Get a snapshot of all mounted data.
-   */
-  toJSON() {
-    return { ...this._data };
-  }
-
-  /**
-   * Mount multiple properties at once.
-   */
-  mount(data) {
-    for (const [key, value] of Object.entries(data)) {
-      this._data[key] = value;
-    }
-    return this;
-  }
-}
-
-/**
- * Create a new ToolRegistry instance.
- * @returns {ToolRegistry}
- */
-export function createToolRegistry() {
-  return new ToolRegistry();
 }

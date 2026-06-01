@@ -4,8 +4,8 @@
 
 import fs from "node:fs";
 import { LspBaseTool } from "./base.js";
-import { toolDef, param, ToolResult, parseToolInput, defaultCallDisplay } from "../../../core/tool-registry.js";
-import { formatError } from "../../../core/context/error.js";
+import { toolDef, param, ToolResult, parseToolInput, defaultCallDisplay } from "../../../core/extensions/tool-utils.js";
+import { formatError } from "../../../core/error.js";
 
 /**
  * Base class for LSP tools that operate on a position in a file.

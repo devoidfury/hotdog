@@ -2,27 +2,21 @@
 // oa-agent — AI agent harness with tool calling support.
 // CLI entry point — wired to the extension architecture.
 
+import { createHooks, SessionManager, Agent, MessageBus } from "./index.js";
 import {
-  createHooks,
   createToolRegistry,
   createExtensionLoader,
-  SessionManager,
-  Agent,
-  MessageBus,
-} from "./index.js";
-import {
   getExtensionsToLoad,
-  emitConfigRegistration,
-  discoverExtensions,
   getExtensionConfigDefaults,
-} from "./extensions.js";
+  registerExtensionMetadata,
+} from "./extensions/index.js";
 import { HOOKS } from "./hooks.js";
 import { CliOutputSink } from "./ui/cli.js";
 import { parseArgs, generateHelpText } from "./cli.js";
 import { loadConfig, buildConfig } from "./config.js";
-import { createConfigRegistry } from "./config-registry.js";
-import { formatError } from "./context/error.js";
-import { createSubcommandRegistry } from "./subcommand-registry.js";
+import { createConfigRegistry } from "./extensions/config-registry.js";
+import { formatError } from "./error.js";
+import { createSubcommandRegistry } from "./extensions/registries.js";
 import { Message } from "./context/message.js";
 import {
   sessionExists,
@@ -130,63 +124,6 @@ function createCore(
   };
 }
 
-/**
- * Discover extensions and register their CLI flags and subcommands from metadata.
- * This reads extension.json files without loading any extension code.
- *
- * @param {Object} config - Configuration with extension paths and autoload settings.
- * @param {Object} configRegistry - Config registry to register CLI flags.
- * @param {Object} cliSubcommandRegistry - Subcommand registry to register subcommands.
- * @returns {Promise<Array>} Array of discovered extension metadata.
- */
-async function registerExtensionMetadata(
-  config,
-  configRegistry,
-  cliSubcommandRegistry,
-) {
-  const extensionPaths = config?.extensionPaths || ["builtins"];
-  const extensionAutoload = config?.extensionAutoload ?? false;
-  const extensionsList = config?.extensions || [];
-
-  const extensionsToLoad = await getExtensionsToLoad(
-    extensionPaths,
-    extensionAutoload,
-    extensionsList,
-  );
-
-  // Register CLI flags from extension metadata
-  for (const ext of extensionsToLoad) {
-    if (ext.cliFlags && ext.cliFlags.length > 0) {
-      const flags = ext.cliFlags.map((flag) => ({
-        short: flag.short,
-        long: flag.long,
-        description: flag.description,
-        type: flag.type,
-        default: flag.default,
-      }));
-      configRegistry.registerCliFlags(flags);
-    }
-  }
-
-  // Register subcommands from extension metadata (for help/discovery without loading)
-  for (const ext of extensionsToLoad) {
-    if (ext.cliSubcommands && ext.cliSubcommands.length > 0) {
-      for (const sc of ext.cliSubcommands) {
-        cliSubcommandRegistry.register(sc.name, {
-          description: sc.description || "",
-          requiresConfig: sc.requiresConfig,
-          requiresCore: sc.requiresCore,
-          options: sc.options || [],
-          // The handler will be set when the extension is loaded at runtime
-          handler: null,
-        });
-      }
-    }
-  }
-
-  return extensionsToLoad;
-}
-
 // ── Main ─────────────────────────────────────────────────────────────────────
 
 async function main() {
@@ -199,10 +136,10 @@ async function main() {
   // Include extension schema defaults so extension-specific config keys
   // get their defaults merged into the base config.
   const extSchemaDefaults = await getExtensionConfigDefaults();
-  const minimalConfig = await loadConfig(
-    null,
-    [...configRegistry.getConfigParams(), ...extSchemaDefaults],
-  );
+  const minimalConfig = await loadConfig(null, [
+    ...configRegistry.getConfigParams(),
+    ...extSchemaDefaults,
+  ]);
 
   // ── Discover extensions from metadata (no code loading) ─────────────────
   // Reads extension.json files to extract CLI flags and subcommand declarations.

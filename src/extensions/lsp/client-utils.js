@@ -7,7 +7,7 @@ import {
   deleteCachedClient,
   setCachedClient,
 } from './client-cache.js';
-import { formatError } from '../../core/context/error.js';
+import { formatError } from '../../core/error.js';
 
 /**
  * Get or create an LSP client for the given language.

@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import { ProjectInfoTool } from '../../src/extensions/core-tools/project_info.js';
-import { ToolResult } from '../../src/core/tool-registry.js';
+import { ToolResult } from '../../src/core/extensions/tool-utils.js';
 
 /**
  * Extract string output from a tool result (handles ToolResult or plain string).

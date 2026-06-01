@@ -3,7 +3,7 @@
 
 import fs from "node:fs";
 import { join } from "node:path";
-import { parseFrontMatter } from "../../core/utils.js";
+import { parseFrontMatter } from "../../utils/utils.js";
 import { validateNameable } from "./lib.js";
 
 /**

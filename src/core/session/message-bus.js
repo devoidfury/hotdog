@@ -2,7 +2,7 @@
 // Uses SessionManager for agent access.
 // Extracted from main.js to allow extensions to import it independently.
 
-import { formatError, isExpectedError } from "../context/error.js";
+import { formatError, isExpectedError } from "../error.js";
 import { OUTPUT_EVENT } from "../context/output.js";
 import { HOOKS } from "../hooks.js";
 import { parseCommand } from "../commands.js";
@@ -14,7 +14,7 @@ import { parseCommand } from "../commands.js";
 export class MessageBus {
   /**
    * @param {Object} options
-   * @param {import("../core/session.js").SessionManager} options.sessionManager
+   * @param {import("./index.js").SessionManager} options.sessionManager
    * @param {import("../context/output.js").OutputSink} options.sink
    */
   constructor({ sessionManager, sink }) {

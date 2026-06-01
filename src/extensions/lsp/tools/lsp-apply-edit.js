@@ -1,8 +1,8 @@
 // LSP Apply Edit tool — workspace/applyEdit
 
 import { LspBaseTool } from './base.js';
-import { ToolResult, defaultCallDisplay } from '../../../core/tool-registry.js';
-import { formatError } from '../../../core/context/error.js';
+import { ToolResult, defaultCallDisplay } from '../../../core/extensions/tool-utils.js';
+import { formatError } from '../../../core/error.js';
 
 export class LspApplyEditTool extends LspBaseTool {
   static TOOL_NAME = 'lsp-apply-edit';

@@ -4,7 +4,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { execFile } from "node:child_process";
 import util from "node:util";
-import { toolDef, param, ToolResult, toolResult, defaultCallDisplay } from "../../core/tool-registry.js";
+import { toolDef, param, ToolResult, toolResult, defaultCallDisplay } from "../../core/extensions/tool-utils.js";
 import {
   DEFAULT_MAX_TOOL_OUTPUT_LINES,
   DEFAULT_READ_TOOL_LIMIT,

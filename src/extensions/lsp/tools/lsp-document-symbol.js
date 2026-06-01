@@ -1,7 +1,7 @@
 // LSP Document Symbol tool — textDocument/documentSymbol
 // Created via factory to reduce boilerplate.
 
-import { ToolResult } from '../../../core/tool-registry.js';
+import { ToolResult } from '../../../core/extensions/tool-utils.js';
 import { defineFileTool } from './lsp-position-tool.js';
 
 export const LspDocumentSymbolTool = defineFileTool({

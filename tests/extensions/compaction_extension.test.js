@@ -1,6 +1,6 @@
 import { describe, it, expect } from "bun:test";
 import { HookSystem, HOOKS } from "../../src/core/hooks.js";
-import { ToolRegistry } from "../../src/core/tool-registry.js";
+import { ToolRegistry } from "../../src/core/extensions/tool-registry.js";
 import { create as createCompactionExtension } from "../../src/extensions/compaction/index.js";
 
 import {

@@ -1,20 +1,18 @@
 // Slash command dispatch for the agent.
 // Handles parsing and execution of slash commands from the CLI.
 
-import { createSlashCommandRegistry } from "./slash-command-registry.js";
-
 /**
  * Parsed slash command (without the leading `/`).
  */
 export const Command = {
-  Help: 'help',
-  Quit: 'quit',
-  Clear: 'clear',
-  Tools: 'tools',
-  Thinking: 'thinking',
-  Tokens: 'tokens',
-  Regenerate: 'regenerate',
-  Unknown: 'unknown',
+  Help: "help",
+  Quit: "quit",
+  Clear: "clear",
+  Tools: "tools",
+  Thinking: "thinking",
+  Tokens: "tokens",
+  Regenerate: "regenerate",
+  Unknown: "unknown",
 };
 
 /**
@@ -42,17 +40,17 @@ export function parseCommand(cmd, registry) {
   }
 
   switch (cmd) {
-    case 'help':
+    case "help":
       return { type: Command.Help, value: null };
-    case 'quit':
-    case 'exit':
+    case "quit":
+    case "exit":
       return { type: Command.Quit, value: null };
-    case 'clear':
+    case "clear":
       return { type: Command.Clear, value: null };
   }
 
   // clear <profile> — profile name stored in value, handler decides what to do
-  if (cmd.startsWith('clear ')) {
+  if (cmd.startsWith("clear ")) {
     const profileName = cmd.slice(6).trim();
     return {
       type: Command.Clear,
@@ -61,17 +59,17 @@ export function parseCommand(cmd, registry) {
   }
 
   switch (cmd) {
-    case 'tools':
+    case "tools":
       return { type: Command.Tools, value: null };
-    case 'thinking':
+    case "thinking":
       return { type: Command.Thinking, value: null };
   }
 
-  if (cmd === 'tokens') {
+  if (cmd === "tokens") {
     return { type: Command.Tokens, value: null };
   }
 
-  if (cmd === 'regenerate') {
+  if (cmd === "regenerate") {
     return { type: Command.Regenerate, value: null };
   }
 

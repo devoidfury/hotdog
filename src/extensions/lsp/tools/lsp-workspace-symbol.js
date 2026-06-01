@@ -1,7 +1,7 @@
 // LSP Workspace Symbol tool — workspace/symbol
 // Created via factory to reduce boilerplate.
 
-import { ToolResult } from '../../../core/tool-registry.js';
+import { ToolResult } from '../../../core/extensions/tool-utils.js';
 import { SymbolKind } from './base.js';
 import { defineQueryTool } from './lsp-position-tool.js';
 

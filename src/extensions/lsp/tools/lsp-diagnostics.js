@@ -2,7 +2,7 @@
 
 import fs from 'node:fs';
 import { LspFileTool } from './lsp-position-tool.js';
-import { ToolResult } from '../../../core/tool-registry.js';
+import { ToolResult } from '../../../core/extensions/tool-utils.js';
 
 export class LspDiagnosticsTool extends LspFileTool {
   static TOOL_NAME = 'lsp-diagnostics';

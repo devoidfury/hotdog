@@ -4,13 +4,13 @@
 // Registers CLI flag (-c/--prompt), subcommand, and CLI args hook handler.
 
 import { MessageBus } from "../../core/index.js";
-import { formatError } from "../../core/context/error.js";
+import { formatError } from "../../core/error.js";
 import { HOOKS } from "../../core/hooks.js";
 import { CliOutputSink } from "../../core/ui/cli.js";
 import { LlmClient } from "../../core/llm_client/client.js";
 import { MarkerMangler } from "../../core/marker_mangler.js";
 import { TaskManager } from "../../core/session/task_manager.js";
-import { SessionManager } from "../../core/session.js";
+import { SessionManager } from "../../core/session/index.js";
 import { Agent } from "../../core/agent.js";
 
 /**

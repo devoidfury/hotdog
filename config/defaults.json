@@ -25,6 +25,9 @@
     },
     "fixer": {
       "model": "ai365/qwen3.6-27b"
+    },
+    "test": {
+      "model": "ai365/qwen3.5-4b:coder"
     }
   },
   "lsp": {

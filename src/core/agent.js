@@ -5,6 +5,7 @@
 import { Message } from "../context/message.js";
 import { LlmError } from "../llm_client/client.js";
 import { OUTPUT_EVENT } from "../context/output.js";
+import { formatError } from "../context/error.js";
 import { HOOKS } from "../hooks.js";
 import { ToolContext, xmlEscape } from "./tool-registry.js";
 import { createSlashCommandRegistry } from "./slash-command-registry.js";
@@ -171,11 +172,22 @@ export class Agent {
       }
 
       // Build messages (extensions can modify via hook)
-      const messages = this._buildMessages();
+      let messages = this._buildMessages();
       await this._hooks.emitAsync(HOOKS.MESSAGES_BUILD, {
         messages,
         agent: this,
       });
+
+      // Context hook — sequential, modifiable. Each handler sees prior
+      // transformations and can return { messages } to replace the array.
+      // This differs from MESSAGES_BUILD which is notification-only.
+      const contextResult = await this._hooks.emitAsyncSeq(HOOKS.CONTEXT, {
+        messages,
+        agent: this,
+      });
+      if (contextResult?.messages) {
+        messages = contextResult.messages;
+      }
 
       // Check context size — trigger compaction extension if needed
       if (this._context.length > this._maxTokens / 100) {
@@ -385,7 +397,7 @@ export class Agent {
     for (const tc of toolCalls) {
       const toolName = tc.function?.name || tc.toolName;
       const toolCallId = tc.id || tc.toolCallId;
-      const input = tc.function?.arguments || tc.input || "{}";
+      let input = tc.function?.arguments || tc.input || "{}";
 
       // Check tool whitelist (for task agents)
       if (this._toolWhitelist && !this._toolWhitelist.includes(toolName)) {
@@ -411,6 +423,37 @@ export class Agent {
         input,
         agent: this,
       });
+
+      // Tool call gate — sequential, modifiable. Handlers can block, modify
+      // input args, or allow execution to proceed.
+      // Actions: { action: "continue" } | { action: "modify", input } | { action: "block", result }
+      const callResult = await this._hooks.emitAsyncSeq(HOOKS.TOOL_CALL, {
+        toolCallId,
+        toolName,
+        input,
+        agent: this,
+      });
+      if (callResult?.action === "block") {
+        // Extension blocked this tool call — use provided result
+        const blockedResult = this._formatToolResult(callResult.result, toolName);
+        this._emitOutput("tool_result", {
+          toolName,
+          input,
+          result: blockedResult,
+        });
+        this._context.push(
+          new Message({ role: "tool", content: blockedResult, toolCallId }),
+        );
+        await this._hooks.emitAsync(HOOKS.CONTEXT_MESSAGE, {
+          message: this._context[this._context.length - 1],
+          agent: this,
+        });
+        continue;
+      }
+      if (callResult?.action === "modify" && callResult.input !== undefined) {
+        // Extension modified the input args
+        input = callResult.input;
+      }
 
       // Build and enrich tool context via hook
       const toolCtx = new ToolContext();
@@ -482,6 +525,20 @@ export class Agent {
         input,
         agent: this,
       });
+
+      // Tool result — sequential, modifiable. Handlers can transform the
+      // result before it reaches the LLM context.
+      // Returns { result } to replace the result (any value: string, ToolResult, object)
+      const resultHook = await this._hooks.emitAsyncSeq(HOOKS.TOOL_RESULT, {
+        toolCallId,
+        toolName,
+        result,
+        input,
+        agent: this,
+      });
+      if (resultHook?.result !== undefined) {
+        result = resultHook.result;
+      }
 
       // Convert result to string for API
       const resultStr = this._formatToolResult(result, toolName);

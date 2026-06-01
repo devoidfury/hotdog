@@ -95,22 +95,61 @@ export class HookSystem {
   /**
    * Emit an async hook sequentially — handlers run one at a time.
    * Errors in individual handlers are caught and logged, never propagated.
+   * Returns the last handler return value, or undefined.
    * @param {string} hookName
    * @param {*} data
-   * @returns {Promise<void>}
+   * @returns {Promise<*>} Last handler return value, or undefined.
    */
   async emitAsyncSeq(hookName, data) {
     const handlers = this._hooks.get(hookName) || [];
+    let lastResult;
     for (const entry of handlers) {
       try {
         const result = entry.handler(data);
         if (result && typeof result.then === 'function') {
-          await result;
+          lastResult = await result;
+        } else {
+          lastResult = result;
         }
       } catch (e) {
         console.error(`[hook:${hookName}] ${formatError(e)}`);
       }
     }
+    return lastResult;
+  }
+
+  /**
+   * Emit an async hook sequentially with early termination.
+   * Runs handlers one at a time; stops when shouldStop(handlerResult) returns true.
+   * The data object is mutable — handlers can modify it in place, and each
+   * subsequent handler sees the accumulated changes.
+   *
+   * @param {string} hookName
+   * @param {*} data — Mutable data object passed to each handler.
+   * @param {Function} shouldStop — Called with each handler's return value.
+   *   Return true to stop processing further handlers.
+   * @returns {Promise<Object>} { data, stopped, lastResult }
+   */
+  async emitAsyncSeqUntil(hookName, data, shouldStop) {
+    const handlers = this._hooks.get(hookName) || [];
+    let lastResult;
+    let stopped = false;
+    for (const entry of handlers) {
+      try {
+        const result = entry.handler(data);
+        const resolved = result && typeof result.then === 'function'
+          ? await result
+          : result;
+        lastResult = resolved;
+        if (resolved && shouldStop(resolved)) {
+          stopped = true;
+          break;
+        }
+      } catch (e) {
+        console.error(`[hook:${hookName}] ${formatError(e)}`);
+      }
+    }
+    return { data, stopped, lastResult };
   }
 
   /**
@@ -206,6 +245,30 @@ export const HOOKS = {
 
   // CLI — emitted after CLI args are parsed, before subcommand dispatch
   CLI_ARGS_PARSED: 'cli:argsParsed',
+
+  // Input preprocessing — emitted before user input reaches the agent.
+  // Handlers can transform the text, attach images, or short-circuit entirely.
+  // Result: { action: "continue" } | { action: "transform", text, images? } | { action: "handled" }
+  INPUT: 'input',
+
+  // Context modification — emitted sequentially before each LLM call.
+  // Handlers receive { messages, agent } and can return { messages } to replace.
+  // Runs via emitAsyncSeq so each handler sees prior transformations.
+  CONTEXT: 'context',
+
+  // Tool call gate — BLOCK or MUTATE tool input arguments before execution.
+  // Emitted sequentially via emitAsyncSeq. Handlers receive
+  // { toolCallId, toolName, input, agent } and can return:
+  //   { action: "continue" }       — proceed with original input
+  //   { action: "modify", input }  — proceed with modified input
+  //   { action: "block", result }  — skip execution, use provided result
+  TOOL_CALL: 'tool:call',
+
+  // Tool result — MODIFY tool output before it reaches the LLM context.
+  // Emitted sequentially via emitAsyncSeq. Handlers receive
+  // { toolCallId, toolName, result, input, agent } and can return:
+  //   { result } — replace the result (any value: string, ToolResult, object)
+  TOOL_RESULT: 'tool:result',
 };
 
 /**

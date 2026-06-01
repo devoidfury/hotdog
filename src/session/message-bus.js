@@ -4,6 +4,7 @@
 
 import { formatError, isExpectedError } from "../context/error.js";
 import { OUTPUT_EVENT } from "../context/output.js";
+import { HOOKS } from "../hooks.js";
 
 /**
  * A simple message bus that owns the agent run loop.
@@ -63,7 +64,7 @@ export class MessageBus {
     if (drain && this._cancelled && this._queue.length === 0) return;
 
     while (true) {
-      const text = this._queue.shift();
+      let text = this._queue.shift();
       if (text === undefined) {
         if (this._cancelled) {
           if (!drain) break;
@@ -81,6 +82,28 @@ export class MessageBus {
       this._isRunning = true;
       const agent = this._sessionManager.getAgent();
       if (agent) agent.cancel(false);
+
+      // Input hook — sequential, handlers can transform or short-circuit.
+      // Actions: { action: "continue" } | { action: "transform", text } | { action: "handled" }
+      const inputData = { text, source: "interactive", agent };
+      let inputHandled = false;
+      if (agent?._hooks) {
+        const { stopped, data: finalData } = await agent._hooks.emitAsyncSeqUntil(
+          HOOKS.INPUT,
+          inputData,
+          (result) => result?.action === "handled",
+        );
+        if (stopped) inputHandled = true;
+        text = finalData.text;
+      }
+
+      // If input was handled by a hook, skip agent processing
+      if (inputHandled) {
+        if (agent) agent.cancel(false);
+        this._cancelled = false;
+        this._isRunning = false;
+        continue;
+      }
 
       try {
         await agent.run(text);

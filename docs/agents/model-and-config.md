@@ -1,6 +1,6 @@
 # Model and Config
 
-## Model System (`src/config.js`)
+## Model System (`src/core/config.js`)
 
 ### Core Types
 - **ModelRegistry** — stores models by name from provider configs. Built by `buildModelRegistry(config)`.
@@ -11,10 +11,10 @@
 - **By name**: `agent.model = "provider/model-name"` (setter emits `MODEL_CHANGE` hook)
 - **Via ModelTool**: The LLM can call the `model` tool mid-conversation: `{"name": "model", "arguments": {"name": "provider/model-name"}}`
 
-## Config System (`src/config.js`)
+## Config System (`src/core/config.js`)
 
 ### Core Defaults
-All defaults live in `src/config.js` as named constants:
+All defaults live in `src/core/config.js` as named constants:
 - `DEFAULT_MODEL`, `DEFAULT_AI_URL`, `DEFAULT_THINKER`, `DEFAULT_TOOL_FMT`, `DEFAULT_TOOL_OUTPUT_FMT`, `DEFAULT_TOOL_RESULT_FMT`
 - `DEFAULT_SKILLS_PATH`, `DEFAULT_PROFILES_PATH`, `DEFAULT_PROMPTS_PATH`, `DEFAULT_CONFIG_PATH`, `DEFAULT_SYSTEM_PROMPT_PATH`
 - `DEFAULT_CHAT_TIMEOUT_SECS`, `DEFAULT_EMBEDDINGS_TIMEOUT_SECS`, `DEFAULT_BASH_TIMEOUT_MS`, `DEFAULT_MAX_TOKENS`, `DEFAULT_MAX_ITERATIONS`, `DEFAULT_MAX_RETRIES`
@@ -106,7 +106,7 @@ Profiles can also be defined as `.profile.md` files in a `profiles/` directory (
 
 **Config file settings take precedence** over profile file settings for tool restrictions.
 
-### Config Registry (`src/config-registry.js`)
+### Config Registry (`src/core/extensions/config-registry.js`)
 
 Allows extensions to register their own CLI flags and config parameters dynamically.
 
@@ -137,7 +137,7 @@ export function create(core) {
 
 **Key methods**: `registerCliFlags(flags)`, `registerConfigParams(params)`, `getCliFlags()`, `getConfigParams()`, `getCliHelpText()`, `buildDefaults()`.
 
-## LSP Configuration (`src/extensions/lsp/config.js`)
+## LSP Configuration (`src/extensions/lsp/`)
 
 LSP integration is controlled via the `lsp` config object. It is **disabled by default** (`DEFAULT_LSP_ENABLED = false`).
 

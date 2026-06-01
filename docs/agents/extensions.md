@@ -50,7 +50,6 @@ Every extension directory must contain an `extension.json` metadata file. This i
 | `cli:flags` | array | No | CLI flag declarations for static discovery |
 | `configSchema` | object | No | JSON Schema for extension config options |
 | `autoload` | boolean | No | Whether to auto-discover. Default: true |
-| `enabled` | boolean | No | Whether the extension is enabled |
 
 **Load Order Constants** (from `LOAD_ORDER` in `extensions.js`):
 - `0` — REFRESH (must load first, tracks other extensions)

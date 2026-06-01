@@ -1,14 +1,14 @@
 {
   "name": "oa-agent",
   "version": "0.1.0",
-  "main": "src/lib.js",
+  "main": "src/core/index.js",
   "devDependencies": {},
   "bin": {
     "oa-agent": "bin/oa-agent"
   },
   "description": "AI agent harness with tool calling support",
   "scripts": {
-    "start": "bun src/main.js"
+    "start": "bun src/core/main.js"
   },
   "type": "module"
 }

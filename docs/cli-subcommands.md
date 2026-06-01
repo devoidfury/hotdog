@@ -122,7 +122,7 @@ The `cli:subcommands` array is used for **discovery** (help text, `--help`, unkn
 For more complex setups, extensions can register via the hook:
 
 ```javascript
-import { HOOKS } from '../../src/hooks.js';
+import { HOOKS } from '../../core/hooks.js';
 
 export function create(core) {
   return {
@@ -148,6 +148,7 @@ export function create(core) {
 | `info` | `info-show-prompt` | Show system info and diagnostics |
 | `show-prompt` | `info-show-prompt` | Show rendered system prompt |
 | `review` | `session-review` | Review session logs |
+| `prompt` | `one-shot` | One-shot prompt mode — run a single prompt and exit |
 
 ## Benefits
 

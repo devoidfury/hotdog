@@ -11,9 +11,9 @@ Core tools are provided by the `core-tools` extension. Tools are registered via 
 - `ctx` — `ToolContext` with agent, isSessionRestoring, cwdBoundary, workspaceRoot
 - Result can be: string, ToolResult instance, or object
 
-**ToolRegistry** — stores tools by name, provides lookup, serialization, and `getToolDefs()` accessor. Located in `src/core/tool-registry.js`.
+**ToolRegistry** — stores tools by name, provides lookup, serialization, and `getToolDefs()` accessor. Located in `src/core/extensions/tool-registry.js`.
 
-**Tool definition helpers**:
+**Tool definition helpers** (from `src/core/extensions/tool-utils.js`):
 - `toolDef(name, description, parameters)` — creates OpenAI function-calling schema
 - `param(typeName, description, extra)` — creates parameter definition with JSON Schema fields (enum, min/max, etc.)
 - `ToolResult` — structured result with `output`, `error`, `metadata`, `success`, `outputTag`, `toDisplay()`, `toApiContent()`
@@ -23,11 +23,9 @@ Core tools are provided by the `core-tools` extension. Tools are registered via 
 **Tool descriptors** — declarative table in `src/extensions/core-tools/index.js`:
 - `TOOL_DESCRIPTORS` — array of `{ name, disabled }` for all core tools
 - `CORE_TOOL_NAMES` — all core tool names
-- `SUBAGENT_TOOL_NAMES` — subagent tool names (manager-only)
 - `TOOL_CONSTRUCTORS` — declarative map of tool names to constructor functions
-- `SUBAGENT_TOOL_CONSTRUCTORS` — subagent tool constructors
 
-**Disabled by default** — `ExploreTool` and `ProjectInfoTool` have `disabled: true` in their descriptors; they require explicit inclusion via profile `whitelist_tools` or the `manager: true` profile flag. Subagent tools require `managerToolsEnabled: true` and a `taskManager`.
+**Disabled by default** — `ExploreTool` and `ProjectInfoTool` have `disabled: true` in their descriptors; they require explicit inclusion via profile `whitelist_tools`. Subagent tools require `manager: true` profile flag and a `taskManager`.
 
 ### Core Tool Implementations
 
@@ -35,19 +33,26 @@ Core tools are provided by the `core-tools` extension. Tools are registered via 
 |------|-------------|------------|
 | `bash` | Executes shell commands via `bash -c` | `command` |
 | `write` | Writes files with multi-mode support | `path`, `content` / `regex` + `content` / `files` + `atomic` |
-| `read` | Reads file contents with pagination | `path`, `limit`, `offset`, `type` |
+| `read` | Reads file contents with pagination | `path`, `limit`, `offset` |
 | `edit` | Edits files using replace modes | `path`, `oldString`, `newString` / `search`, `replace` / `files` + `atomic` |
 | `grep` | Searches file contents for regex patterns | `pattern`, `path`, `type`, `context` |
 | `find` | Glob-based file search using `fd` with `find` fallback | `pattern`, `path`, `file_type`, `max_results` |
 | `fetch` | Fetches URLs via HTTP | `url`, `method`, `headers`, `body` |
 | `question` | Asks interactive questions to the user | `questions` array with `key`, `prompt`, `options`, `required`, `default` |
 | `pager` | Virtual pagination of truncated tool output | `tool_call_id`, `page` |
-| `model` | Switches to a different model mid-conversation | `name` |
 | `project_info` *(disabled)* | Gathers project information | `path` |
-| `review` | Lists recent sessions, gets session entries, or gets tool call index | `operation`, `session_id`, `limit` |
 | `explore` *(disabled)* | Explores codebase with configurable thoroughness | `path`, `thoroughness` |
 
+### Additional Tools (from other extensions)
+
+| Tool | Extension | Description |
+|------|-----------|-------------|
+| `model` | `model-switch` | Switches to a different model mid-conversation |
+| `review` | `session-review` | Lists recent sessions, gets session entries, or gets tool call index |
+
 ### Subagent Tools *(disabled by default, enabled in manager profile)*
+
+Provided by the `subagents` extension. Only registered when `profile.manager: true` and a `taskManager` is available.
 
 | Tool | Description |
 |------|-------------|

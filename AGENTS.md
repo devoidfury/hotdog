@@ -4,13 +4,15 @@ JS project `oa-js` — an AI agent harness with tool calling support.
 
 ## Quick Command Reference
 
-- **Run one-shot:** `bun bin/oa-agent -c "hello"`
+- **Run one-shot:** `bun bin/oa-agent -c "hello"` or `bun bin/oa-agent prompt "hello"`
+- **Interactive:** `bun bin/oa-agent` (starts readline session)
 - **With profile:** `--profile fixer`
 - **With model:** `--model qwen3.5-0.8b`
 - **Subcommands:**
-  - `bun bin/oa-agent info`
-  - `bun bin/oa-agent show-prompt`
-  - `bun bin/oa-agent review`
+  - `bun bin/oa-agent info` — system info and diagnostics
+  - `bun bin/oa-agent show-prompt` — render system prompt to stdout
+  - `bun bin/oa-agent review` — review session logs
+  - `bun bin/oa-agent prompt "text"` — one-shot mode
 - **Run Tests:** `bun test --only-failures`
 - **Run Tests with Coverage report:** `bun test --coverage --only-failures`
 
@@ -23,10 +25,10 @@ JS project `oa-js` — an AI agent harness with tool calling support.
 - If you see a tag like <m_sdkflksgdk> -- these are wrong! The marker mangler is changing these so they don't trigger functionality, to prevent RCE. Always check the raw byte content instead.
 
 ### Centralized Defaults
-All hard-coded configurable strings (model names, host URLs, ports, format templates, timeouts, etc.) must live in `src/config.js` as named constants. Never duplicate.
+All hard-coded configurable strings (model names, host URLs, ports, format templates, timeouts, etc.) must live in `src/core/config.js` as named constants. Never duplicate.
 
 ### Error Handling
-All error catches must use `formatError()` from `src/context/error.js`:
+All error catches must use `formatError()` from `src/core/error.js`:
 - Expected errors (cancelled, http, api, timeout): message only
 - Unexpected errors (bugs, iteration errors, null derefs): message + full stack
 - Never use `console.error(e.message)` directly — always use `formatError(e)`

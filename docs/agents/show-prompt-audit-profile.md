@@ -8,13 +8,13 @@
 
 ```bash
 # Basic usage — renders with current config/model
-bun src/main.js show-prompt
+bun bin/oa-agent show-prompt
 
 # With profile
-bun src/main.js show-prompt --profile fixer
+bun bin/oa-agent show-prompt --profile fixer
 
 # With specific model
-bun src/main.js show-prompt --model qwen3.5-0.8b
+bun bin/oa-agent show-prompt --model qwen3.5-0.8b
 ```
 
 ## Output Format

@@ -1,12 +1,14 @@
 # Debugging
 
-## One-Shot Mode (`-c`)
+## One-Shot Mode (`-c` / `--prompt`)
 
 Run the agent with a single prompt and exit:
 ```bash
-bun src/main.js -c "hello"
+bun bin/oa-agent -c "hello"
 # or
-bun src/main.js --prompt "hello"
+bun bin/oa-agent --prompt "hello"
+# or
+bun bin/oa-agent prompt "hello"
 ```
 
 ## Debug Flags
@@ -17,9 +19,9 @@ bun src/main.js --prompt "hello"
 - **`--no-log`** — disable JSONL session logging
 - **`--tokens`** — show token usage at the end of the session
 - **`--show-tools`** — show tool calls (overrides `hideTools`)
-- **`--hide-tools`** — hide tool calls (default)
-- **`--show-thinking`** — show thinking output (overrides `hideThinking`)
-- **`--hide-thinking`** — hide thinking output (default)
+- **`--hide-tools`** — hide tool calls (default: hidden)
+- **`--show-thinking`** — show thinking output (default: shown)
+- **`--hide-thinking`** — hide thinking output
 - **`--thinker <fmt>`** — custom thinking format string
 - **`--toolfmt <fmt>`** — custom tool call format string
 - **`--tool-output-fmt <fmt>`** — custom tool result format string
@@ -32,7 +34,7 @@ bun src/main.js --prompt "hello"
 
 ### List Recent Sessions
 ```bash
-bun src/main.js review
+bun bin/oa-agent review
 ```
 - Shows last 10 sessions with timestamps and entry counts
 - `--json` for raw JSONL output
@@ -41,15 +43,15 @@ bun src/main.js review
 
 ### Show System Info
 ```bash
-bun src/main.js info
+bun bin/oa-agent info
 # or
-bun src/main.js info --json
+bun bin/oa-agent info --json
 ```
 - Shows configuration, models, providers, skills, MCP servers, connectivity
 
 ### Examine Specific Tool Call Results
 ```bash
 # Extract a range of lines around the suspect tool calls
-bun src/main.js review --session-id <ID> | \
+bun bin/oa-agent review --session-id <ID> | \
   sed -n '700,720p'  # Adjust line numbers based on grep results
 ```

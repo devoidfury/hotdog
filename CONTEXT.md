@@ -12,7 +12,7 @@ Domain concepts for the oa-agent AI agent harness. Implementation details are do
 ## Context Layer
 
 - **Context** — Everything the LLM sees. The high-level concept. Managed via MessageLog (implementation).
-- **MessageLog** — Append-only message buffer, the internal implementation of context tracking. Immutability is a caching optimization, not a fundamental constraint. Operations: `append()`, `insert_at()`, `reset()`, `replace_messages()`. No individual message deletion.
+- **MessageLog** — The agent's context is a plain JS array (`this._context`). Messages are `Message` objects with `role`, `content`, `reasoningContent`, `toolCalls`, `toolCallId`. Messages are added via `push()`. No dedicated MessageLog class — the array is the log.
 - **Cache Invalidation** — Triggers: compaction, reset, model switch. These are the known break points. Critical performance concern (can mean difference between 20s and 5m response).
 - **Selective Pruning** (experimental) — Tail-popping messages to reuse older cache layers. Not yet validated.
 
@@ -61,8 +61,8 @@ Domain concepts for the oa-agent AI agent harness. Implementation details are do
 ## Output and Events
 
 - **Output** — Decoupling agent from UI layer. Agent emits raw data; UI layer formats display. Deliberate domain boundary.
-- **Sink** — UI implementation of Output. One sink per agent (not currently multiple simultaneous sinks).
-- **OutputEvent** — Domain concept: events representing changes in the agent's state. Emitted to the sink for display. Variants: UserMessage, AssistantMessage, Thinking, ToolCall, ToolResult, Compacting, CommandResult, Question, StreamingChunk, TaskProgress, TokenUsage.
+- **Sink** — UI implementation of OutputSink. `CliOutputSink` extends `OutputSink` with formatting and color support. One sink per agent. Task agents use `AgentSink` which filters output.
+- **OutputEvent** — Domain concept: events representing changes in the agent's state. Emitted to the sink for display. 14 types: `USER_MESSAGE`, `ASSISTANT_MESSAGE`, `THINKING`, `TOOL_CALL`, `TOOL_RESULT`, `COMPACTING`, `COMMAND_RESULT`, `QUESTION`, `STREAMING_CHUNK`, `STREAMING_REASONING_CHUNK`, `TASK_PROGRESS`, `TOKEN_USAGE`, `COMPACTION_RESULT`, `SESSION_STATE`.
 - **Pager / TruncatedOutput** — Context manipulation (pagination of tool output into context), not UI formatting.
 
 ## Persistence
@@ -93,25 +93,27 @@ Domain concepts for the oa-agent AI agent harness. Implementation details are do
 ## Commands
 
 - **Commands** — User-triggered slash commands. Never LLM-triggered.
-- **Domain commands** — clear, profile switch, model switch, compact, regenerate, skill load, prompt execute.
-- **UI commands** — help, quit, tools listing, thinking toggle, models listing, tokens.
+- **Core commands** (`Command` enum): `help`, `quit`, `clear`, `tools`, `thinking`, `tokens`, `regenerate`, `unknown`.
+- **Custom commands** — Extensions register additional slash commands via `SlashCommandRegistry` (e.g., `compact`, `model`, `skill`, `prompt:name`).
+- **UI commands** — `help`, `quit` handled directly by UI layer; all others dispatched through agent.
 
 ## Configuration
 
-- defaults.json — User-editable global defaults for the entire application.
-- profiles/*.profile.md — Named profile overlays (role, body, tools).
-- templates/ — Prompt templates (system_prompt.md, skills_preamble.md).
-- prompts/ — Named prompt templates.
-- Resolution priority — CLI argument → config file → environment variable → default constant.
+- `config/defaults.json` — User-editable global defaults (CWD-relative). Fallback: `~/.config/oa-agent/default.json`.
+- `config/profiles/*.profile.md` — Named profile overlays (role, body, tools, aspects).
+- `config/templates/system_prompt.md` — System prompt template.
+- `config/prompts/*.prompt.md` — Named prompt templates.
+- `config/aspects/*.aspect.md` — Aspect snippets loaded by profiles.
+- Resolution priority — CLI argument → config file → extension defaults → built-in defaults.
 
 ## Architecture
 
-- **Backend** — The agent runtime: owns MessageBus, Agent, LlmClient, TaskManager. Runs on a dedicated thread. Receives `Inbound` messages, emits `Outbound` events. No UI dependencies.
-- **Frontend (UI Thread)** — The user-facing thread. Handles input (readline, TUI) and output (rendering). Communicates with Backend via channels. No agent dependencies.
-- **Message Bus Protocol** — Channel-based communication between UI and Backend. Replaces shared-state synchronization. Two unidirectional channels: `Inbound` (UI→Backend) and `Outbound` (Backend→UI).
-- **Inbound** — Messages from UI to Backend: `Message(String)`, `Cancel`, `QuestionAnswer(answer[])`, `SwitchProfile(String)`, `Command(Command)`, `Quit`.
-- **Outbound** — Events from Backend to UI: `Event(OutputEvent)`, `Idle`, `Done`, `FatalError(String)`, `SessionStarted { session_id }`, `TokenUsage { ... }`.
-- **ChannelSink** — Backend-side `Output` implementation. Wraps the outbound channel sender. Agent calls `sink.emit()` → sink sends `OutputEvent` over channel to UI.
+- **Single-threaded event loop** — The JS runtime runs on a single thread with async/await. No separate backend/frontend threads.
+- **Core** (`src/core/`) — Minimal foundation: Agent, hooks, session management, tool registry, config, CLI parsing. No extension dependencies.
+- **Extensions** (`src/extensions/`) — All features (tools, compaction, LSP, MCP, skills, subcommands) live as extensions that plug into the core via hooks.
+- **Hook System** — The primary extension mechanism. `HookSystem` with `on()`, `emit()`, `emitAsync()`, `emitAsyncSeq()`. Extensions register handlers; core emits events.
+- **MessageBus** — Owns the agent run loop. Drains queued messages sequentially through `agent.run()`. Provides input preprocessing via `INPUT` hook.
+- **OutputSink** — Decouples agent from UI. Agent emits events via `sink.emit()`; `CliOutputSink` formats and displays with color support.
 
 ## Analytics
 

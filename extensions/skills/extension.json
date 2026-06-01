@@ -3,5 +3,24 @@
   "provides": ["tools"],
   "loadOrder": 10,
   "dependsOn": ["core-tools"],
-  "description": "Skills loading, activation, and system prompt integration"
+  "description": "Skills loading, activation, and system prompt integration",
+  "configSchema": {
+    "type": "object",
+    "properties": {
+      "preloadSkills": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        },
+        "default": [],
+        "description": "List of skill names to preload"
+      },
+      "skillsPath": {
+        "type": "string",
+        "default": "/skills",
+        "description": "Directory path where skills are stored"
+      }
+    },
+    "additionalProperties": false
+  }
 }

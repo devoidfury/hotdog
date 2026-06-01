@@ -3,5 +3,32 @@
   "provides": [],
   "loadOrder": 10,
   "dependsOn": ["core-tools"],
-  "description": "Context compaction strategies (summarize, drop, token-aware)"
+  "description": "Context compaction strategies (summarize, drop, token-aware)",
+  "configSchema": {
+    "type": "object",
+    "properties": {
+      "enabled": {
+        "type": "boolean",
+        "default": true,
+        "description": "Whether compaction is enabled"
+      },
+      "reserveTokens": {
+        "type": "number",
+        "default": 16384,
+        "description": "Token budget to reserve for the conversation"
+      },
+      "keepRecentMessages": {
+        "type": "number",
+        "default": 3,
+        "description": "Number of recent messages to keep after compaction"
+      },
+      "strategy": {
+        "type": "string",
+        "default": "summarize",
+        "enum": ["summarize", "drop", "summarize-short", "token-aware"],
+        "description": "Compaction strategy to use"
+      }
+    },
+    "additionalProperties": false
+  }
 }

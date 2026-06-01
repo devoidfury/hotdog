@@ -1,0 +1,54 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://oa-agent.dev/schemas/extension.json",
+  "title": "Extension Metadata",
+  "description": "Schema for extension.json metadata files in the oa-agent extension system",
+  "type": "object",
+  "required": ["name", "provides"],
+  "additionalProperties": false,
+  "properties": {
+    "name": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Unique extension identifier"
+    },
+    "provides": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "minItems": 1,
+      "description": "Capabilities this extension provides (e.g., 'tools', 'cli:subcommands')"
+    },
+    "loadOrder": {
+      "type": "number",
+      "minimum": 0,
+      "description": "Load order priority — lower values loaded first"
+    },
+    "dependsOn": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "Extension names this extension depends on"
+    },
+    "description": {
+      "type": "string",
+      "description": "Human-readable description of the extension"
+    },
+    "autoload": {
+      "type": "boolean",
+      "default": true,
+      "description": "Whether to auto-discover and load this extension"
+    },
+    "enabled": {
+      "type": "boolean",
+      "description": "Whether the extension is enabled"
+    },
+    "configSchema": {
+      "description": "JSON Schema (draft 2020-12) defining the extension's configuration options",
+      "type": "object",
+      "unevaluatedProperties": false
+    }
+  }
+}

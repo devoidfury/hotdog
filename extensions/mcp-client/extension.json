@@ -2,5 +2,71 @@
   "name": "mcp-client",
   "provides": ["tools"],
   "loadOrder": 10,
-  "description": "Model Context Protocol client — connects to MCP servers and exposes their tools"
+  "description": "Model Context Protocol client — connects to MCP servers and exposes their tools",
+  "configSchema": {
+    "type": "array",
+    "items": {
+      "type": "object",
+      "required": ["name"],
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Unique name for this MCP server"
+        },
+        "command": {
+          "type": "string",
+          "description": "Stdio command to launch the MCP server"
+        },
+        "url": {
+          "type": "string",
+          "format": "uri",
+          "description": "HTTP URL for the MCP server (used instead of command for HTTP transport)"
+        },
+        "args": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Arguments for the stdio command"
+        },
+        "env": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          },
+          "description": "Environment variables for the stdio command"
+        },
+        "headers": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          },
+          "description": "HTTP headers for the MCP server (used with url transport)"
+        },
+        "enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Whether this server is enabled"
+        }
+      },
+      "additionalProperties": false,
+      "if": {
+        "properties": {
+          "command": { "type": "string" }
+        },
+        "required": ["command"]
+      },
+      "then": {
+        "properties": {
+          "url": { "not": {} }
+        }
+      },
+      "else": {
+        "properties": {
+          "command": { "not": {} }
+        }
+      }
+    }
+  }
 }

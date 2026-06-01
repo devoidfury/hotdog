@@ -2,5 +2,92 @@
   "name": "lsp",
   "provides": ["tools"],
   "loadOrder": 10,
-  "description": "Language Server Protocol tools (hover, definition, completion, diagnostics, etc.)"
+  "description": "Language Server Protocol tools (hover, definition, completion, diagnostics, etc.)",
+  "configSchema": {
+    "type": "object",
+    "properties": {
+      "enabled": {
+        "type": "boolean",
+        "default": false,
+        "description": "Whether LSP tools are enabled"
+      },
+      "servers": {
+        "type": "object",
+        "additionalProperties": {
+          "type": "object",
+          "required": ["command"],
+          "properties": {
+            "name": {
+              "type": "string",
+              "description": "Human-readable name for this server"
+            },
+            "command": {
+              "type": "string",
+              "description": "Command to launch the language server"
+            },
+            "args": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "default": [],
+              "description": "Arguments for the language server command"
+            },
+            "filetypes": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "description": "File type/language IDs this server handles"
+            },
+            "timeoutMs": {
+              "type": "number",
+              "default": 30000,
+              "description": "Per-request timeout in milliseconds"
+            },
+            "env": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "string"
+              },
+              "description": "Environment variables for the language server"
+            },
+            "initializationOptions": {
+              "type": "object",
+              "description": "Initialization options passed to the language server"
+            }
+          },
+          "additionalProperties": false
+        },
+        "default": {},
+        "description": "Language server configurations keyed by name"
+      },
+      "maxHoverLines": {
+        "type": "number",
+        "default": 800,
+        "description": "Maximum number of lines for hover responses"
+      },
+      "maxCompletionItems": {
+        "type": "number",
+        "default": 50,
+        "description": "Maximum number of completion items to return"
+      },
+      "maxSymbolResults": {
+        "type": "number",
+        "default": 50,
+        "description": "Maximum number of symbol results to return"
+      },
+      "requestTimeoutMs": {
+        "type": "number",
+        "default": 30000,
+        "description": "Default request timeout in milliseconds"
+      },
+      "serverStartupTimeoutMs": {
+        "type": "number",
+        "default": 60000,
+        "description": "Timeout for language server startup in milliseconds"
+      }
+    },
+    "additionalProperties": false
+  }
 }

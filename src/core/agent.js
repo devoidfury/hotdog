@@ -32,8 +32,6 @@ export class Agent {
    * @param {string} [options.role] — Role description
    * @param {string} [options.profileBody] — Profile body content
    * @param {boolean} [options.stream=true] — Enable streaming
-   * @param {Object} [options.compaction] — Compaction config
-   * @param {boolean} [options.compactDebug] — Write debug file
    * @param {AbortSignal} [options.abortSignal] — Abort signal for cancellation
    * @param {string[]} [options.toolWhitelist] — Allowed tool names (restricts available tools)
    */
@@ -56,8 +54,6 @@ export class Agent {
     this._role = options.role;
     this._profileBody = options.profileBody;
     this._stream = options.stream !== false;
-    this._compaction = options.compaction;
-    this._compactDebug = options.compactDebug;
     this._cancelled = false;
     this._iterationCount = 0;
     this._systemPrompt = null;

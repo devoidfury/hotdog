@@ -3,7 +3,7 @@
 import fs from "node:fs";
 import { execFile } from "node:child_process";
 import util from "node:util";
-import { join, extname } from "node:path";
+import { join, extname, resolve } from "node:path";
 import {
   toolDef,
   param,
@@ -141,7 +141,7 @@ function walkAndSearch(
       // Read file and search
       let content;
       try {
-        content = readFileSync(fullPath, "utf-8");
+        content = fs.readFileSync(fullPath, "utf-8");
       } catch {
         continue;
       }
@@ -215,6 +215,8 @@ function grepNative(pattern, searchDir, maxResults, context, typeFilter) {
  * Try running ripgrep with JSON output.
  */
 async function grepWithRg(pattern, searchDir, maxResults, context, typeFilter) {
+  // Resolve to absolute path to avoid cwd-relative path issues
+  const absSearchDir = resolve(searchDir);
   const args = ["--json", "--no-heading", "--color", "never"];
 
   if (context > 0) {
@@ -228,12 +230,12 @@ async function grepWithRg(pattern, searchDir, maxResults, context, typeFilter) {
     }
   }
 
-  args.push(pattern, searchDir);
+  args.push(pattern, absSearchDir);
 
   try {
     const { stdout } = await execFileAsync("rg", args, {
       maxBuffer: 10 * 1024 * 1024,
-      cwd: searchDir,
+      cwd: absSearchDir,
     });
 
     // Parse NDJSON output from ripgrep

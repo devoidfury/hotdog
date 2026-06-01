@@ -77,6 +77,6 @@
   - `load_skills()` — loads all skills from all configured paths
   - `load_from_directory(path)` — loads from a single directory
   - `parse_skill_from_md(content, dir_name)` — parses YAML frontmatter + markdown body
-  - `autoActivate(coreToolNames)` — auto-activates skills whose tool-dependencies are met by core tools
+  - `setAvailableTools(coreToolNames)` — loads skills whose tool-dependencies are met by tools
   - `all_skills()`, `get_skill(name)`, `directories()`
   - Non-existent paths are silently skipped

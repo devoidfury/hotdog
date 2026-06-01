@@ -70,16 +70,17 @@ For each finding:
 
 ### Step 1: Explore the Scope
 - Read the file(s) or area mentioned in the issue. If no specific files are given, start with the most recently changed or most complex areas.
-- For Rust projects, pay special attention to:
-  - Modules that have grown beyond ~400 lines
-  - Trait implementations — are they consistent and complete?
-  - Configuration or resolution patterns — are there duplicates?
-  - Test modules — do tests actually test logic, or just compilation?
-  - Layer separation — does any non-UI code reference display logic?
+- Pay special attention to:
+  - Modules that have grown beyond ~1000 lines
+  - Trait implementations, sublasses -- are they consistent and complete?
+  - Configuration or resolution patterns -- are there duplicates?
+  - Test modules -- do tests actually test logic, or just compilation?
+  - Layer separation -- does any non-UI code reference display logic?
+  - If applicable -- would a hook be better suited to decoupled cross module communication instead of direct coupling?
 
 ### Step 2: Cross-Reference
 - Don't judge in isolation. If a function seems unused, verify across the entire crate (imports, trait impls, public API surface).
-- Check if "dead" functions are actually part of a public `pub` API or used via dynamic dispatch.
+- Check if "dead" functions are actually part of a public API or used via dynamic dispatch.
 - Verify tests aren't just checking compilation — do they assert behavior?
 
 ### Step 3: Prioritize and Report
@@ -88,11 +89,6 @@ For each finding:
 - Flag findings that block other work (e.g., a poor abstraction that makes implementing a new feature impossible without major refactoring).
 
 ## Decision Frameworks
-
-### Is this dead code?
-- The function is `pub` but never imported or called anywhere in the crate: DEAD (unless it's part of a public library API for external consumers)
-- The function has `#[cfg(test)]` and is only used inside the test module: OK
-- A large branch in an `if let` that can never be reached given current logic: DEAD (but note the code path may become reachable if dependencies change)
 
 ### Is this a useless test?
 - Test asserts on a constant literal with no branching logic: USELESS — remove or rewrite to test actual behavior
@@ -120,19 +116,9 @@ For each finding:
 
 ## Edge Cases to Consider
 
-- **Public API surface**: Don't flag functions used as part of a public crate interface, even if internal callers are few.
 - **Feature-gated code**: Code under `#[cfg(...)]` might be dead in default builds but essential for feature builds — flag only if the feature is inactive or the code is unreachable in any supported configuration.
 - **Build output tests**: Tests that compile with/without features are valuable regression tests — don't flag them as useless unless they add no assertion beyond compilation.
 - **Intentional patterns**: Some patterns (e.g., generic resolution traits, builder patterns) are deliberate. Flag actual duplicates (same logic implemented separately), not just uses of the same pattern.
-
-## Example Finding
-
-```markdown
-1. **Duplicate config resolution** — Both `config_loader.rs` and `app.rs` contain ad-hoc resolution chains for the base URL instead of routing through a shared method.
-   - **Location**: `src/config_loader.rs:45-52`, `src/app.rs:110-117`
-   - **Fix**: Remove the ad-hoc chains in `app.rs`; call `config.resolve_url(cli.url)` instead.
-   - **Impact**: 4 — creates drift risk if the resolution priority chain changes, and duplicates logic that should live in one place.
-```
 
 ## Your Mindset
 

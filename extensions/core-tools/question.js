@@ -1,7 +1,7 @@
 // Question tool — ask the user questions and collect answers.
 
 import readline from "node:readline";
-import { toolDef, param, ToolResult, toolResult } from "./registry.js";
+import { toolDef, param, ToolResult, toolResult, parseToolInput } from "./registry.js";
 
 export class QuestionTool {
   static TOOL_NAME = "question";
@@ -25,7 +25,10 @@ export class QuestionTool {
   }
 
   async execute(input, ctx) {
-    const args = typeof input === "string" ? JSON.parse(input) : input;
+    const args = parseToolInput(input);
+    if (!args) {
+      return ToolResult.err("Error parsing arguments");
+    }
     const questions = args.questions || [];
     const answers = {};
 

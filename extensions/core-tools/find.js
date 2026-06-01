@@ -2,7 +2,7 @@
 
 import { execFile } from "node:child_process";
 import util from "node:util";
-import { toolDef, param, ToolResult, toolResult, truncateOutput } from "./registry.js";
+import { toolDef, param, ToolResult, toolResult, truncateOutput, parseToolInput } from "./registry.js";
 import {
   DEFAULT_FIND_MAX_RESULTS,
   DEFAULT_MAX_TOOL_OUTPUT_LINES,
@@ -127,16 +127,8 @@ function parseArgs(input) {
     };
   }
 
-  let json;
-  if (typeof input === "string") {
-    try {
-      json = JSON.parse(input);
-    } catch {
-      return null;
-    }
-  } else {
-    json = input;
-  }
+  const json = parseToolInput(input);
+  if (!json) return null;
 
   // pattern is required
   const pattern = json.pattern;

@@ -1,7 +1,7 @@
 // Fetch tool — make HTTP requests.
 
 import { spawnSync } from "node:child_process";
-import { toolDef, param, ToolResult, toolResult } from "./registry.js";
+import { toolDef, param, ToolResult, toolResult, parseToolInput } from "./registry.js";
 
 const VALID_METHODS = ["GET", "POST", "PUT", "DELETE", "PATCH", "HEAD"];
 const METHODS_WITH_BODY = ["POST", "PUT", "PATCH"];
@@ -185,15 +185,9 @@ function parseArgs(input) {
     return { args: null, error: "Missing required argument: url" };
   }
 
-  let json;
-  if (typeof input === "string") {
-    try {
-      json = JSON.parse(input);
-    } catch {
-      return { args: null, error: "Error parsing arguments" };
-    }
-  } else {
-    json = input;
+  const json = parseToolInput(input);
+  if (!json) {
+    return { args: null, error: "Error parsing arguments" };
   }
 
   const url = json.url;

@@ -51,6 +51,71 @@ describe('HookSystem', () => {
     });
   });
 
+  describe('on() returns removal function', () => {
+    it('should return a function that removes the handler', () => {
+      const hooks = createHooks();
+      const calls = [];
+      const remove = hooks.on('test:hook', (data) => calls.push(data));
+      hooks.emit('test:hook', { value: 1 });
+      expect(calls).toEqual([{ value: 1 }]);
+
+      remove();
+      hooks.emit('test:hook', { value: 2 });
+      expect(calls).toEqual([{ value: 1 }]); // handler no longer called
+    });
+
+    it('should handle removal of a handler that was already removed', () => {
+      const hooks = createHooks();
+      const remove = hooks.on('test:hook', () => {});
+      remove();
+      expect(() => remove()).not.toThrow();
+      expect(hooks.handlerCount('test:hook')).toBe(0);
+    });
+
+    it('should allow re-registering the same function after removal', () => {
+      const hooks = createHooks();
+      const handler = () => 'result';
+      const remove1 = hooks.on('test:hook', handler);
+      expect(hooks.handlerCount('test:hook')).toBe(1);
+
+      remove1();
+      expect(hooks.handlerCount('test:hook')).toBe(0);
+
+      const remove2 = hooks.on('test:hook', handler);
+      expect(hooks.handlerCount('test:hook')).toBe(1);
+      remove2();
+    });
+  });
+
+  describe('off()', () => {
+    it('should remove a specific handler by reference', () => {
+      const hooks = createHooks();
+      const handler1 = () => 'first';
+      const handler2 = () => 'second';
+      hooks.on('test:hook', handler1);
+      hooks.on('test:hook', handler2);
+      expect(hooks.handlerCount('test:hook')).toBe(2);
+
+      const removed = hooks.off('test:hook', handler1);
+      expect(removed).toBe(true);
+      expect(hooks.handlerCount('test:hook')).toBe(1);
+      expect(hooks.emit('test:hook', {})).toBe('second');
+    });
+
+    it('should return false when handler not found', () => {
+      const hooks = createHooks();
+      const handler = () => {};
+      const removed = hooks.off('test:hook', handler);
+      expect(removed).toBe(false);
+    });
+
+    it('should handle off on non-existent hook', () => {
+      const hooks = createHooks();
+      const removed = hooks.off('nonexistent:hook', () => {});
+      expect(removed).toBe(false);
+    });
+  });
+
   describe('emitAsync()', () => {
     it('should call async handlers', async () => {
       const hooks = createHooks();
@@ -195,6 +260,10 @@ describe('HookSystem', () => {
       expect(HOOKS.TOOLS_REGISTER).toBe('tools:register');
       expect(HOOKS.CONTEXT_FULL).toBe('context:full');
       expect(HOOKS.OUTPUT_EVENT).toBe('output:event');
+    });
+
+    it('should include COMPACT_STRATEGY_LIST hook', () => {
+      expect(HOOKS.COMPACT_STRATEGY_LIST).toBe('compact:strategyList');
     });
   });
 });

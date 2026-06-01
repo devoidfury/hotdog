@@ -10,6 +10,7 @@ import {
   toolResult,
   validateCwdBoundary,
   resolvePath,
+  parseToolInput,
 } from "./registry.js";
 
 export class WriteTool {
@@ -109,26 +110,21 @@ export class WriteTool {
   }
 
   async execute(input, ctx) {
-    let args;
-    try {
-      args = typeof input === "string" ? JSON.parse(input) : input;
-    } catch {
-      return ToolResult.err("Error parsing arguments");
-    }
-    if (!args || !args.mode || !args.path || args.content === undefined) {
+    const rawArgs = parseToolInput(input);
+    if (!rawArgs || !rawArgs.mode || !rawArgs.path || rawArgs.content === undefined) {
       return ToolResult.err("Error parsing arguments");
     }
 
     // Normalize args
-    args = {
-      mode: args.mode,
-      path: args.path,
-      content: args.content,
-      search: args.search || null,
-      search_re: args.search_re || null,
-      start_at: typeof args.start_at === "number" ? args.start_at : null,
-      end_at: typeof args.end_at === "number" ? args.end_at : null,
-      replace_all: args.replace_all || false,
+    const args = {
+      mode: rawArgs.mode,
+      path: rawArgs.path,
+      content: rawArgs.content,
+      search: rawArgs.search || null,
+      search_re: rawArgs.search_re || null,
+      start_at: typeof rawArgs.start_at === "number" ? rawArgs.start_at : null,
+      end_at: typeof rawArgs.end_at === "number" ? rawArgs.end_at : null,
+      replace_all: rawArgs.replace_all || false,
     };
 
     const {

@@ -643,15 +643,15 @@ export class Agent {
   _handleCompactStrategyCommand(value) {
     const { action, name } = value || { action: "list" };
 
-    // Check if compaction extension is loaded
-    const compactionExt = this._hooks._extensions?.get?.("compaction");
-    if (!compactionExt) {
+    // Get compaction strategy info via hook — decoupled from extension internals
+    const hookResult = this._hooks.emit(HOOKS.COMPACT_STRATEGY_LIST, { agent: this });
+    if (!hookResult || !hookResult.strategies) {
       return { content: "Compaction extension not loaded." };
     }
 
+    const { strategies, current } = hookResult;
+
     if (action === "list" || action === "") {
-      const strategies = compactionExt.getStrategyList();
-      const current = compactionExt.settings?.strategy || "summarize";
       const lines = ["\nCompaction Strategies:\n"];
       for (const s of strategies) {
         const marker = s.name === current ? " (current)" : "";
@@ -665,12 +665,12 @@ export class Agent {
       if (!name) {
         return { content: "Usage: /compact:strategy <name>" };
       }
-      compactionExt.settings.strategy = name;
+      // Set strategy via hook — the extension updates its own settings
+      this._hooks.emit(HOOKS.COMPACT_STRATEGY_SET, { agent: this, strategyName: name });
       return { content: `Compaction strategy set to: ${name}` };
     }
 
     if (action === "help") {
-      const strategies = compactionExt.getStrategyList();
       const lines = ["\nCompaction Strategies:\n"];
       for (const s of strategies) {
         lines.push(`  ${s.name} — ${s.description}`);

@@ -129,6 +129,77 @@ describe('ExtensionLoader', () => {
       await loader.unload('test');
       expect(loader.has('test')).toBe(false);
     });
+
+    it('should only remove this extension\'s handlers, not others on the same hook', async () => {
+      const extACalls = [];
+      const extBCalls = [];
+
+      // Load extension A with a handler on 'shared:hook'
+      const extAModule = {
+        create: () => ({
+          name: 'extA',
+          hooks: {
+            'shared:hook': (data) => extACalls.push(data),
+          },
+        }),
+      };
+
+      // Load extension B with a handler on the same 'shared:hook'
+      const extBModule = {
+        create: () => ({
+          name: 'extB',
+          hooks: {
+            'shared:hook': (data) => extBCalls.push(data),
+          },
+        }),
+      };
+
+      await loader.load('extA', extAModule);
+      await loader.load('extB', extBModule);
+
+      // Both handlers should fire
+      core.hooks.emit('shared:hook', { from: 'emit' });
+      expect(extACalls).toEqual([{ from: 'emit' }]);
+      expect(extBCalls).toEqual([{ from: 'emit' }]);
+
+      // Unload extension A
+      await loader.unload('extA');
+      expect(loader.has('extA')).toBe(false);
+      expect(loader.has('extB')).toBe(true);
+
+      // Only extension B's handler should fire now
+      extACalls.length = 0;
+      extBCalls.length = 0;
+      core.hooks.emit('shared:hook', { from: 'emit2' });
+      expect(extACalls).toEqual([]); // A's handler removed
+      expect(extBCalls).toEqual([{ from: 'emit2' }]); // B's handler still works
+    });
+
+    it('should allow reloading an extension without leaking handlers', async () => {
+      let callCount = 0;
+      const makeModule = (count) => ({
+        create: () => ({
+          name: 'test',
+          hooks: {
+            'reload:hook': () => { callCount += count; },
+          },
+        }),
+      });
+
+      await loader.load('test', makeModule(1));
+      core.hooks.emit('reload:hook');
+      expect(callCount).toBe(1);
+
+      // Reload
+      await loader.reload('test', makeModule(2));
+      core.hooks.emit('reload:hook');
+      expect(callCount).toBe(3); // 1 + 2 (no double registration)
+
+      // Unload
+      await loader.unload('test');
+      core.hooks.emit('reload:hook');
+      expect(callCount).toBe(3); // no change
+    });
   });
 
   describe('reload()', () => {

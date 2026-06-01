@@ -34,11 +34,11 @@ Here is some information about the environment you are running in:
 {% endfor %}
 {%- endif %}
 
-{% if agents_md %}
 # Project Context
 
-AGENTS.md contains project-specific context loaded into every session.
+AGENTS.md contains important project-specific context just for you -- so if you see one, you're encouraged to read it.
 
+{% if agents_md %}
 After any agentic session:
 - If you discover a non-obvious pattern that would help future sessions, add it to **AGENTS.md**.
 
@@ -46,6 +46,8 @@ High bar for new additions:
 1. **Non-obvious** — someone familiar with the codebase would get it wrong without the info.
 2. **Repeatedly encountered** — it came up more than once (multiple hits in one session counts).
 3. **Specific enough to act on** — a concrete instruction, not a vague principle.
+
+Existing AGENTS.md found:
 
 <file-include>
 <path>./AGENTS.md</path>

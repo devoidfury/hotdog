@@ -4,7 +4,7 @@
 
 import fs from "node:fs";
 import { LspBaseTool } from "./base.js";
-import { toolDef, param, ToolResult } from "../../core-tools/registry.js";
+import { toolDef, param, ToolResult, parseToolInput } from "../../core-tools/registry.js";
 import { formatError } from "../../../src/context/error.js";
 
 /**
@@ -77,17 +77,8 @@ export class LspPositionTool extends LspBaseTool {
    * @returns {object|null}
    */
   _parseArgs(input) {
-    if (!input) return null;
-    let json;
-    if (typeof input === "string") {
-      try {
-        json = JSON.parse(input);
-      } catch {
-        return null;
-      }
-    } else {
-      json = input;
-    }
+    const json = parseToolInput(input);
+    if (!json) return null;
 
     const args = {};
     if (this.constructor.HAS_FILE) args.file = json.file;
@@ -289,15 +280,9 @@ export class LspQueryTool extends LspBaseTool {
   }
 
   async execute(input, ctx) {
-    let json;
-    if (typeof input === "string") {
-      try {
-        json = JSON.parse(input);
-      } catch {
-        return ToolResult.err("Error parsing arguments");
-      }
-    } else {
-      json = input;
+    const json = parseToolInput(input);
+    if (!json) {
+      return ToolResult.err("Error parsing arguments");
     }
 
     const query = json?.query;

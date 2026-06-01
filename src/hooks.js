@@ -3,6 +3,8 @@
 // Sync hooks run synchronously; async hooks run via `emitAsync()` and errors
 // don't stop the chain (each handler is wrapped in try/catch).
 
+let _handlerCounter = 0;
+
 export class HookSystem {
   constructor() {
     this._hooks = new Map();
@@ -12,10 +14,38 @@ export class HookSystem {
    * Register a handler for a hook.
    * @param {string} hookName - The hook name (e.g., "context:message").
    * @param {Function} handler - Function(data) or async Function(data).
+   * @returns {Function} A removal function that unregisters this handler.
    */
   on(hookName, handler) {
     if (!this._hooks.has(hookName)) this._hooks.set(hookName, []);
-    this._hooks.get(hookName).push(handler);
+    const handlers = this._hooks.get(hookName);
+    const id = ++_handlerCounter;
+    handlers.push({ id, handler });
+
+    // Return a removal function
+    return () => {
+      const idx = handlers.findIndex((h) => h.id === id);
+      if (idx !== -1) {
+        handlers.splice(idx, 1);
+      }
+    };
+  }
+
+  /**
+   * Remove a specific handler from a hook by its function reference.
+   * @param {string} hookName
+   * @param {Function} handler - The exact handler function to remove.
+   * @returns {boolean} true if handler was found and removed.
+   */
+  off(hookName, handler) {
+    const handlers = this._hooks.get(hookName);
+    if (!handlers) return false;
+    const idx = handlers.findIndex((h) => h.handler === handler);
+    if (idx !== -1) {
+      handlers.splice(idx, 1);
+      return true;
+    }
+    return false;
   }
 
   /**
@@ -28,8 +58,8 @@ export class HookSystem {
   emit(hookName, data) {
     const handlers = this._hooks.get(hookName) || [];
     let lastResult;
-    for (const handler of handlers) {
-      const result = handler(data);
+    for (const entry of handlers) {
+      const result = entry.handler(data);
       if (result !== undefined) lastResult = result;
     }
     return lastResult;
@@ -45,9 +75,9 @@ export class HookSystem {
   async emitAsync(hookName, data) {
     const handlers = this._hooks.get(hookName) || [];
     const results = [];
-    for (const handler of handlers) {
+    for (const entry of handlers) {
       try {
-        const result = handler(data);
+        const result = entry.handler(data);
         if (result && typeof result.then === 'function') {
           results.push(result.catch((e) => {
             console.error(`[hook:${hookName}] ${e.message}`);
@@ -69,9 +99,9 @@ export class HookSystem {
    */
   async emitAsyncSeq(hookName, data) {
     const handlers = this._hooks.get(hookName) || [];
-    for (const handler of handlers) {
+    for (const entry of handlers) {
       try {
-        const result = handler(data);
+        const result = entry.handler(data);
         if (result && typeof result.then === 'function') {
           await result;
         }
@@ -157,6 +187,10 @@ export const HOOKS = {
 
   // CLI subcommand registration — extensions register subcommand handlers here
   CLI_SUBCOMMANDS_REGISTER: 'cli:subcommandsRegister',
+
+  // Compaction — extension exposes strategy list and current setting
+  COMPACT_STRATEGY_LIST: 'compact:strategyList',
+  COMPACT_STRATEGY_SET: 'compact:strategySet',
 };
 
 /**

@@ -12,7 +12,7 @@
  * - Auto-re-registers tools after reload
  */
 
-import { toolDef, param, ToolResult, toolResult } from '../core-tools/registry.js';
+import { toolDef, param, ToolResult, toolResult, parseToolInput } from '../core-tools/registry.js';
 import { importModule, getLoadedModules, clearModuleCache } from './module-loader.js';
 
 export class RefreshTool {
@@ -226,20 +226,8 @@ export class RefreshTool {
  * Parse refresh tool arguments.
  */
 function parseArgs(input) {
-  if (!input || (typeof input === 'string' && input.trim().length === 0)) {
-    return null;
-  }
-
-  let json;
-  if (typeof input === 'string') {
-    try {
-      json = JSON.parse(input);
-    } catch {
-      return null;
-    }
-  } else {
-    json = input;
-  }
+  const json = parseToolInput(input);
+  if (!json) return null;
 
   const action = json.action;
   const target = json.target;

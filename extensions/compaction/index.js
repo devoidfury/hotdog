@@ -79,6 +79,32 @@ export function create(core) {
         // Execute compaction via the strategy
         await _performCompaction(core, agent, strategy, settings);
       },
+
+      /**
+       * Handle compact:strategyList hook — return available strategies and current setting.
+       * The agent calls this via emit() (sync) to get strategy info for the /compact:strategy command.
+       */
+      [HOOKS.COMPACT_STRATEGY_LIST]: ({ agent }) => {
+        const strategies = registry.getAll().map(s => ({
+          name: s.name,
+          description: s.description,
+        }));
+        return {
+          strategies,
+          current: settings.strategy,
+        };
+      },
+
+      /**
+       * Handle compact:strategySet hook — update the current compaction strategy.
+       */
+      [HOOKS.COMPACT_STRATEGY_SET]: ({ agent, strategyName }) => {
+        // Validate that the strategy exists
+        if (!registry.get(strategyName) && strategyName !== 'summarize' && strategyName !== 'drop' && strategyName !== 'summarize-short' && strategyName !== 'token-aware') {
+          // Allow any name — the strategy registry handles validation at execution time
+        }
+        settings.strategy = strategyName;
+      },
     },
 
     // Expose for external use

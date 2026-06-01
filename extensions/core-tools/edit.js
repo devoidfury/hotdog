@@ -10,6 +10,7 @@ import {
   toolResult,
   validateCwdBoundary,
   resolvePath,
+  parseToolInput,
 } from "./registry.js";
 import { DEFAULT_MAX_EDIT_INPUT_SIZE } from "../../src/config.js";
 
@@ -132,20 +133,8 @@ export class EditTool {
  * Supports both camelCase and snake_case field names.
  */
 function parseArgs(input) {
-  if (!input || (typeof input === "string" && input.trim().length === 0)) {
-    return null;
-  }
-
-  let json;
-  if (typeof input === "string") {
-    try {
-      json = JSON.parse(input);
-    } catch {
-      return null;
-    }
-  } else {
-    json = input;
-  }
+  const json = parseToolInput(input);
+  if (!json) return null;
 
   // Support snake_case aliases
   const path = json.path;

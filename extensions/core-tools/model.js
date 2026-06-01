@@ -1,6 +1,6 @@
 // Model tool — switch the AI model at runtime.
 
-import { toolDef, param, ToolResult, toolResult } from "./registry.js";
+import { toolDef, param, ToolResult, toolResult, parseToolInput } from "./registry.js";
 
 export class ModelTool {
   static TOOL_NAME = "model";
@@ -38,7 +38,7 @@ export class ModelTool {
   async execute(input, ctx) {
     const args = parseArgs(input);
     if (!args) {
-      return ToolResult.err("Invalid JSON input");
+      return ToolResult.err("Error parsing arguments");
     }
 
     const name = args.name;
@@ -81,20 +81,8 @@ export class ModelTool {
  * Parse model tool arguments.
  */
 function parseArgs(input) {
-  if (!input || (typeof input === "string" && input.trim().length === 0)) {
-    return null;
-  }
-
-  let json;
-  if (typeof input === "string") {
-    try {
-      json = JSON.parse(input);
-    } catch {
-      return null;
-    }
-  } else {
-    json = input;
-  }
+  const json = parseToolInput(input);
+  if (!json) return null;
 
   const name = json.name;
   if (!name || typeof name !== "string") {

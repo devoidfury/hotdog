@@ -7,6 +7,7 @@ import {
   ToolResult,
   toolResult,
   truncateOutput,
+  parseToolInput,
 } from "./registry.js";
 import {
   DEFAULT_BASH_TIMEOUT_MS,
@@ -44,7 +45,10 @@ export class BashTool {
   }
 
   async execute(input, ctx) {
-    const args = typeof input === "string" ? JSON.parse(input) : input;
+    const args = parseToolInput(input);
+    if (!args) {
+      return ToolResult.err("Error parsing arguments");
+    }
     const command = args.command;
     // Support both camelCase (timeoutMs) and snake_case (timeout_ms) for backward compatibility
     const timeout = args.timeoutMs ?? args.timeout_ms ?? this.timeoutMs;

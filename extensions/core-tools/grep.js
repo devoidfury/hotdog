@@ -10,6 +10,7 @@ import {
   ToolResult,
   toolResult,
   truncateOutput,
+  parseToolInput,
 } from "./registry.js";
 import {
   DEFAULT_GREP_MAX_RESULTS,
@@ -269,20 +270,8 @@ async function grepWithRg(pattern, searchDir, maxResults, context, typeFilter) {
  * Parse and validate grep tool arguments.
  */
 function parseArgs(input) {
-  if (!input || (typeof input === "string" && input.trim().length === 0)) {
-    return null;
-  }
-
-  let json;
-  if (typeof input === "string") {
-    try {
-      json = JSON.parse(input);
-    } catch {
-      return null;
-    }
-  } else {
-    json = input;
-  }
+  const json = parseToolInput(input);
+  if (!json) return null;
 
   const pattern = json.pattern;
   if (!pattern || typeof pattern !== "string") {

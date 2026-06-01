@@ -63,19 +63,19 @@ describe('ModelTool', () => {
   it('returns error for empty input', async () => {
     const tool = new ModelTool({});
     const result = await tool.execute('');
-    expect(resultStr(result)).toBe('Invalid JSON input');
+    expect(resultStr(result)).toBe('Error parsing arguments');
   });
 
   it('returns error for null input', async () => {
     const tool = new ModelTool({});
     const result = await tool.execute(null);
-    expect(resultStr(result)).toBe('Invalid JSON input');
+    expect(resultStr(result)).toBe('Error parsing arguments');
   });
 
   it('returns error for invalid JSON', async () => {
     const tool = new ModelTool({});
     const result = await tool.execute('not json');
-    expect(resultStr(result)).toBe('Invalid JSON input');
+    expect(resultStr(result)).toBe('Error parsing arguments');
   });
 
   it('calls onSwitchModel callback on valid switch', async () => {

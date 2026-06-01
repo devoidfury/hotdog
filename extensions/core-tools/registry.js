@@ -267,6 +267,40 @@ export function truncateOutput(text, maxLines) {
 }
 
 /**
+ * Parse and validate tool input from the LLM.
+ * Handles the common pattern of JSON string → object conversion
+ * with graceful error handling. Returns null on parse failure.
+ *
+ * Usage in tools:
+ *   const args = parseToolInput(input);
+ *   if (!args) return ToolResult.err("Error parsing arguments");
+ *   // Then do field-specific validation:
+ *   const path = args.path;
+ *   if (!path) return ToolResult.err("path is required");
+ *
+ * @param {string|object} input - Raw tool input (JSON string or parsed object)
+ * @returns {object|null} Parsed object, or null on failure
+ */
+export function parseToolInput(input) {
+  if (!input || (typeof input === 'string' && input.trim().length === 0)) {
+    return null;
+  }
+
+  let json;
+  if (typeof input === 'string') {
+    try {
+      json = JSON.parse(input);
+    } catch {
+      return null;
+    }
+  } else {
+    json = input;
+  }
+
+  return json;
+}
+
+/**
  * Generate a simple unified diff between old and new text.
  */
 export function generateDiff(oldText, newText, maxLines = 80) {

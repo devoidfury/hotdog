@@ -15,6 +15,9 @@ export class ExtensionLoader {
   constructor(core) {
     this._core = core;
     this._extensions = new Map();
+    // Track removal functions per extension so we can cleanly deregister
+    // only this extension's handlers on unload.
+    this._handlerRemovers = new Map();
   }
 
   /**
@@ -49,10 +52,15 @@ export class ExtensionLoader {
 
     this._extensions.set(name, instance);
 
+    // Track removal functions for this extension's hooks
+    const removers = [];
+    this._handlerRemovers.set(name, removers);
+
     // Auto-register hooks if the extension has them
     if (instance.hooks) {
       for (const [hookName, handler] of Object.entries(instance.hooks)) {
-        this._core.hooks.on(hookName, handler);
+        const remove = this._core.hooks.on(hookName, handler);
+        removers.push(remove);
       }
     }
 
@@ -77,6 +85,8 @@ export class ExtensionLoader {
 
   /**
    * Unload an extension: call shutdown hook, remove from registry.
+   * Only removes this extension's own handlers — other extensions'
+   * handlers on the same hooks remain intact.
    * @param {string} name
    * @returns {Promise<void>}
    */
@@ -92,11 +102,13 @@ export class ExtensionLoader {
         }
       }
 
-      // Unregister hooks
-      if (ext.hooks) {
-        for (const hookName of Object.keys(ext.hooks)) {
-          this._core.hooks.clear(hookName);
+      // Remove only this extension's handlers
+      const removers = this._handlerRemovers.get(name);
+      if (removers) {
+        for (const remove of removers) {
+          remove();
         }
+        this._handlerRemovers.delete(name);
       }
 
       this._extensions.delete(name);

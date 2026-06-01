@@ -1,6 +1,6 @@
 // Pager tool — paginate through large tool outputs.
 
-import { toolDef, param, ToolResult, toolResult } from './registry.js';
+import { toolDef, param, ToolResult, toolResult, parseToolInput } from './registry.js';
 
 export class PagerTool {
   static TOOL_NAME = 'pager';
@@ -24,7 +24,10 @@ export class PagerTool {
   }
 
   async execute(input, ctx) {
-    const args = typeof input === 'string' ? JSON.parse(input) : input;
+    const args = parseToolInput(input);
+    if (!args) {
+      return ToolResult.err("Error parsing arguments");
+    }
     const toolCallId = args.tool_call_id;
 
     if (ctx?.onGetCachedToolOutput) {

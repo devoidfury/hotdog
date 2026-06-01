@@ -9,6 +9,7 @@ import {
   toolResult,
   validateCwdBoundary,
   resolvePath,
+  parseToolInput,
 } from "./registry.js";
 import { DEFAULT_READ_TOOL_LIMIT } from "../../src/config.js";
 
@@ -47,7 +48,8 @@ export class ReadTool {
     }
     const { path: filePath, limit, offset } = args;
     if (!filePath) {
-      return "(no path)";
+      // Invalid JSON or missing path — return raw input if string for debugging
+      return typeof input === "string" ? input : "(no path)";
     }
     const end = offset + limit;
     return `${filePath} (lines ${offset}-${end})`;
@@ -60,6 +62,10 @@ export class ReadTool {
     }
 
     const { path: filePath, limit, offset } = args;
+    if (!filePath) {
+      return ToolResult.err("path is required");
+    }
+
     const cwdBoundary = ctx?.cwdBoundary || null;
     const workspaceRoot = ctx?.workspaceRoot || null;
 
@@ -103,6 +109,7 @@ export class ReadTool {
  * Parse and validate read tool arguments.
  */
 function parseArgs(input) {
+  // Empty input → defaults
   if (!input || (typeof input === "string" && input.trim().length === 0)) {
     return {
       path: null,
@@ -111,15 +118,9 @@ function parseArgs(input) {
     };
   }
 
-  let json;
-  if (typeof input === "string") {
-    try {
-      json = JSON.parse(input);
-    } catch {
-      return null;
-    }
-  } else {
-    json = input;
+  const json = parseToolInput(input);
+  if (!json) {
+    return null; // Invalid JSON — error
   }
 
   const filePath = json.path;

@@ -11,7 +11,12 @@ import { SkillsLoader } from "../skills/loader.js";
 import { McpConnection } from "../mcp/index.js";
 import { TaskManager } from "./worker.js";
 import { Agent } from "./agent.js";
-import { SessionLog, disabledSessionLog, readSessionEntries, replayEntriesIntoContext } from "../session_log.js";
+import {
+  SessionLog,
+  disabledSessionLog,
+  readSessionEntries,
+  replayEntriesIntoContext,
+} from "../session_log.js";
 import { loadProfileFile } from "../config.js";
 import { MarkerMangler } from "../marker_mangler.js";
 
@@ -181,6 +186,8 @@ export class SessionBuilder {
     return this._cli;
   }
 
+  withPreloadedSkills() {}
+
   // ── Private helpers ─────────────────────────────────────────────────────
 
   _buildSkillsLoader() {
@@ -188,19 +195,20 @@ export class SessionBuilder {
       this._resolved.skillsPath || this._config.skillsPath,
     );
     loader.loadSkills();
-    loader.autoActivate([
-      "bash", "read", "write", "edit", "grep", "find",
-      "fetch", "question", "pager", "model", "load_skill",
+    loader.setAvailableTools([
+      "bash",
+      "read",
+      "write",
+      "edit",
+      "grep",
+      "find",
+      "fetch",
+      "question",
+      "pager",
+      "model",
+      "load_skill",
     ]);
-
-    // Preload skills
-    const preloadSkills = this._resolved.preloadSkills || [];
-    if (preloadSkills.length > 0) {
-      for (const name of preloadSkills) {
-        const skill = loader.allSkills().find((s) => s.name === name);
-        if (skill) skill.loaded = true;
-      }
-    }
+    loader.preloadSkills(this._resolved.preloadSkills);
 
     return loader;
   }
@@ -229,19 +237,28 @@ export class SessionBuilder {
         let connection;
         if (serverConfig.url) {
           connection = await McpConnection.connectHttp(
-            serverConfig.name, serverConfig.url, serverConfig.headers || {},
+            serverConfig.name,
+            serverConfig.url,
+            serverConfig.headers || {},
           );
         } else if (serverConfig.command) {
           connection = await McpConnection.connectStdio(
-            serverConfig.name, serverConfig.command, serverConfig.args || [], serverConfig.env || {},
+            serverConfig.name,
+            serverConfig.command,
+            serverConfig.args || [],
+            serverConfig.env || {},
           );
         } else {
-          console.warn(`Warning: MCP server '${serverConfig.name}' has no transport configured`);
+          console.warn(
+            `Warning: MCP server '${serverConfig.name}' has no transport configured`,
+          );
           continue;
         }
         connections.push({ connection, serverConfig });
       } catch (e) {
-        console.warn(`Warning: failed to connect to MCP server '${serverConfig.name}': ${e.message}`);
+        console.warn(
+          `Warning: failed to connect to MCP server '${serverConfig.name}': ${e.message}`,
+        );
       }
     }
     return connections;

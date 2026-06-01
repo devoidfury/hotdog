@@ -81,7 +81,7 @@ export class CliOutputSink extends OutputSink {
     super(options);
     this.thinkerFormat = options.thinkerFormat || "[Thinking: {}]";
     this.toolFormat = options.toolFormat || DEFAULT_TOOL_FMT;
-    this.toolOutputFormat = options.toolOutputFormat || DEFAULT_TOOL_OUTPUT_FMT;
+    this.toolOutputFmt = options.toolOutputFmt || DEFAULT_TOOL_OUTPUT_FMT;
     this.palette = options.palette || ColorPalette.default();
     this.hideTools = options.hideTools;
     this.hideThinking = options.hideThinking;
@@ -123,7 +123,11 @@ export class CliOutputSink extends OutputSink {
   }
 
   emitToolCall(event) {
-    const display = formatToolCall(event.toolName, event.input, this.toolFormat);
+    const display = formatToolCall(
+      event.toolName,
+      event.input,
+      this.toolFormat,
+    );
     const colored = applyToolCall(display, this.palette);
     process.stdout.write(`\n${colored}\n`);
   }
@@ -131,7 +135,7 @@ export class CliOutputSink extends OutputSink {
   emitToolResult(event) {
     if (this.hideTools) return;
     const colored = applyToolResult(
-      formatToolResult(event.result, this.toolOutputFormat),
+      formatToolResult(event.result, this.toolOutputFmt),
       this.palette,
     );
     process.stdout.write(`${colored}\n\n`);
@@ -144,7 +148,9 @@ export class CliOutputSink extends OutputSink {
   }
 
   emitCommandResult(event) {
-    process.stdout.write(applyFinalResponse(event.content, this.palette) + "\n");
+    process.stdout.write(
+      applyFinalResponse(event.content, this.palette) + "\n",
+    );
   }
 
   emitQuestion(event) {
@@ -199,6 +205,18 @@ export class CliOutputSink extends OutputSink {
     );
     const colored = applyProgress(display, this.palette);
     process.stdout.write(`\n${colored}\n`);
+  }
+
+  emitSessionState(event) {
+    // React to agent state changes emitted by the agent
+    switch (event.key) {
+      case "hideTools":
+        this.hideTools = event.value;
+        break;
+      case "hideThinking":
+        this.hideThinking = event.value;
+        break;
+    }
   }
 
   reset() {

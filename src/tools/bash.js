@@ -80,7 +80,7 @@ export class BashTool {
         resolve(ToolResult.err(`Command timed out after ${timeout}ms`));
       }, timeout + 2000); // give it a two second grace period before hard killing
 
-      const cmdFirstLine = command.split("\n")[0];
+      const cmdFirstLine = command.trim().split("\n")[0];
       proc.on("close", (code) => {
         clearTimeout(termTimer);
         clearTimeout(killTimer);

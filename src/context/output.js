@@ -15,6 +15,7 @@ export const OUTPUT_EVENT = {
   TASK_PROGRESS: 11,
   TOKEN_USAGE: 12,
   COMPACTION_RESULT: 13,
+  SESSION_STATE: 14,
 };
 
 /**
@@ -34,6 +35,7 @@ export const EVENT_HANDLERS = {
   [OUTPUT_EVENT.TASK_PROGRESS]: 'emitTaskProgress',
   [OUTPUT_EVENT.TOKEN_USAGE]: 'emitTokenUsage',
   [OUTPUT_EVENT.COMPACTION_RESULT]: 'emitCompactionResult',
+  [OUTPUT_EVENT.SESSION_STATE]: 'emitSessionState',
 };
 
 /**
@@ -83,6 +85,11 @@ export class OutputSink {
 
   emitCompactionResult(event) {
     // Compaction result is displayed by the agent loop
+  }
+
+  emitSessionState(event) {
+    // Session state changes (e.g., hideTools toggle) — no-op in base class
+    // Subclasses can override to react to state changes
   }
 
   emitCommandResult(event) {

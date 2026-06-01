@@ -66,7 +66,8 @@ export function parseSkillFromMd(content, dirName, location) {
   }
 
   // Warn on description length (matches Rust's 1024 char limit)
-  const descLen = typeof fm.description === "string" ? fm.description.length : 0;
+  const descLen =
+    typeof fm.description === "string" ? fm.description.length : 0;
   if (descLen > 1024) {
     console.warn(
       `Warning: Skill '${fm.name || dirName}' description exceeds 1024 characters (${descLen} chars), truncating`,
@@ -247,6 +248,17 @@ export class SkillsLoader {
   }
 
   /**
+   * Get active/loaded skills.
+   */
+  activeSkills() {
+    return this.allSkills().filter((skill) => skill.loaded);
+  }
+
+  agentViewableSkills() {
+    return this.activeSkills().filter((s) => !s.disableModelInvocation);
+  }
+
+  /**
    * Activate a skill (mark as loaded).
    */
   activateSkill(name) {
@@ -255,12 +267,23 @@ export class SkillsLoader {
   }
 
   /**
+   * Preload skills
+   */
+  preloadSkills(preloadSkills) {
+    if (preloadSkills.length > 0) {
+      for (const name of preloadSkills) {
+        this.activateSkill(name);
+      }
+    }
+  }
+
+  /**
    * Auto-activate skills whose tool-dependencies match available tools.
    * A skill becomes visible when at least one dependency pattern matches.
    * Skills without dependencies remain visible (default).
    * Does NOT set loaded — only visible.
    */
-  autoActivate(availableTools) {
+  setAvailableTools(availableTools) {
     const availableLower = availableTools.map((t) => t.toLowerCase());
     for (const skill of this.skills.values()) {
       if (skill.toolDependencies.length === 0) {

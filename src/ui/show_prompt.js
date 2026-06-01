@@ -10,10 +10,7 @@ import { SkillsLoader } from "../skills/loader.js";
 import { PromptsLoader } from "../prompts/loader.js";
 import { disabledSessionLog } from "../session_log.js";
 import { buildConfig } from "../init/resolution.js";
-import {
-  loadConfig,
-  getProfile,
-} from "../config.js";
+import { loadConfig, getProfile } from "../config.js";
 
 /**
  * Run the show-prompt subcommand.
@@ -23,34 +20,22 @@ export async function runShowPrompt(cli) {
   const config = await loadConfig(cli.config);
 
   // Load skills
-  const skillsLoader = new SkillsLoader(
-    cli.skillsPath || config.skillsPath,
-  );
+  const skillsLoader = new SkillsLoader(cli.skillsPath || config.skillsPath);
   skillsLoader.loadSkills();
-  skillsLoader.autoActivate([
-    "bash", "read", "write", "edit", "grep", "find",
-    "fetch", "question", "pager", "model", "load_skill",
+  skillsLoader.setAvailableTools([
+    "bash",
+    "read",
+    "write",
+    "edit",
+    "grep",
+    "find",
+    "fetch",
+    "question",
+    "pager",
+    "model",
+    "load_skill",
   ]);
-
-  // Preload skills
-  const preloadSkills =
-    cli.preloadSkills.length > 0
-      ? cli.preloadSkills
-      : resolved.profile?.preloadSkills || [];
-  const skills =
-    preloadSkills.length > 0
-      ? preloadSkills
-          .map((name) => {
-            const skill = skillsLoader.allSkills().find((s) => s.name === name);
-            if (skill) { skill.loaded = true; return skill; }
-            return null;
-          })
-          .filter(Boolean)
-      : [];
-  const allSkills = skillsLoader
-    .allSkills()
-    .filter((s) => !s.disableModelInvocation);
-  const skillDirectories = skillsLoader.directories();
+  skillsLoader.preloadSkills(resolved.preloadSkills);
 
   // Load prompts
   const promptsLoader = new PromptsLoader(
@@ -68,12 +53,8 @@ export async function runShowPrompt(cli) {
   });
 
   const sink = new CliOutputSink({
+    ...resolved,
     stream: false,
-    thinkerFormat: resolved.thinkerFormat,
-    toolFormat: resolved.toolFormat,
-    toolOutputFormat: resolved.toolOutputFmt,
-    hideTools: resolved.hideTools,
-    hideThinking: resolved.hideThinking,
   });
 
   // Create agent
@@ -93,9 +74,9 @@ export async function runShowPrompt(cli) {
     _config: config,
     skillsLoader,
     promptsLoader,
-    skills,
-    allSkills,
-    skillDirectories,
+    skills: skillsLoader.activeSkills(),
+    allSkills: skillsLoader.agentViewableSkills(),
+    skillDirectories: skillsLoader.directories(),
     sessionLog: disabledSessionLog(),
   });
 

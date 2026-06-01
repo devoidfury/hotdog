@@ -54,13 +54,8 @@ async function main() {
   // ── Output sink ───────────────────────────────────────────────────────────
   const palette = builder.palette();
   const sink = new CliOutputSink({
-    stream: resolved.stream,
-    thinkerFormat: resolved.thinkerFormat,
-    toolFormat: resolved.toolFormat,
-    toolOutputFormat: resolved.toolOutputFmt,
-    palette,
-    hideTools: resolved.hideTools,
-    hideThinking: resolved.hideThinking,
+    ...resolved,
+    palette: builder.palette(),
   });
 
   // ── Session manager — owns builder + current agent ────────────────────────

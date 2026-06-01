@@ -20,10 +20,11 @@ describe('OUTPUT_EVENT', () => {
 
 describe('EVENT_HANDLERS', () => {
   it('maps all event types to handler methods', () => {
-    expect(Object.keys(EVENT_HANDLERS).length).toBe(13);
+    expect(Object.keys(EVENT_HANDLERS).length).toBe(14);
     expect(EVENT_HANDLERS[OUTPUT_EVENT.USER_MESSAGE]).toBe('emitUserMessage');
     expect(EVENT_HANDLERS[OUTPUT_EVENT.ASSISTANT_MESSAGE]).toBe('emitAssistantMessage');
     expect(EVENT_HANDLERS[OUTPUT_EVENT.TOOL_CALL]).toBe('emitToolCall');
+    expect(EVENT_HANDLERS[OUTPUT_EVENT.SESSION_STATE]).toBe('emitSessionState');
   });
 });
 

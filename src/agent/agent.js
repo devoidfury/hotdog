@@ -39,6 +39,7 @@ import { SummarizeShortStrategy } from "../compaction/strategies/summarize-short
 import { TokenAwareStrategy } from "../compaction/strategies/token-aware.js";
 import { DEFAULT_COMPACTION_STRATEGY } from "../config.js";
 import { McpTool } from "../mcp/tools.js";
+import { Command } from "./commands.js";
 
 /**
  * Check if a tool name matches a skill pattern (exact or glob).
@@ -418,7 +419,7 @@ export class Agent {
       // Add duration to result metadata
       if (result && typeof result === "object") {
         if (result instanceof ToolResult) {
-          result.withEntry('duration_ms', durationMs);
+          result.withEntry("duration_ms", durationMs);
         } else {
           result.duration_ms = durationMs;
         }
@@ -1149,7 +1150,7 @@ export class Agent {
    */
   autoActivateSkills(toolNames) {
     if (!this.skillsLoader) return;
-    this.skillsLoader.autoActivate(toolNames);
+    this.skillsLoader.setAvailableTools(toolNames);
   }
 
   /**
@@ -1201,6 +1202,257 @@ export class Agent {
    */
   getTokenStats() {
     return new Map(this.tokenStats);
+  }
+
+  // ── Command Execution ─────────────────────────────────────────────────────
+
+  /**
+   * Execute a slash command. Returns { content: string } on success or
+   * { error: string } on failure.
+   *
+   * This is the canonical command execution entry point — the UI layer
+   * should never manipulate agent state directly. All commands flow
+   * through this method.
+   *
+   * UI-only commands (Help, Quit, Tools, Thinking, Shell) return an
+   * error indicating they should be handled by the UI layer.
+   */
+  async executeCommand(cmd) {
+    switch (cmd.type) {
+      case Command.Clear:
+        this.context.clear();
+        this.context.systemMessages = [];
+        this.sessionLog.writeReset();
+        return { content: "Context cleared." };
+
+      case Command.ClearProfile:
+        return this._switchProfile(cmd.value);
+
+      case Command.Model:
+        if (!cmd.value) {
+          return {
+            content: `Available models: ${Object.keys(this.modelRegistry).join(", ")}`,
+          };
+        }
+        this.model = cmd.value;
+        this.context.clear();
+        this.context.systemMessages = [];
+        return { content: `Switched to model: ${cmd.value}` };
+
+      case Command.Models:
+        const models = Object.keys(this.modelRegistry);
+        if (models.length === 0) {
+          return {
+            content: "No models configured. Add providers to your config file.",
+          };
+        }
+        const modelLines = ["Available models:"];
+        for (const name of models) {
+          const m = this.modelRegistry[name];
+          const tags = m.tags ? ` [${m.tags.join(", ")}]` : "";
+          modelLines.push(`  ${name}${tags}`);
+        }
+        modelLines.push(`\nCurrently using: ${this.model}`);
+        return { content: modelLines.join("\n") };
+
+      case Command.Tokens:
+        return { content: this.tokenStatsDisplay() };
+
+      case Command.Compact:
+        return await this._compactCommand(cmd.value);
+
+      case Command.CompactStrategy:
+        return this._compactStrategyCommand(cmd.value);
+
+      case Command.Prompt:
+        return await this._promptCommand(cmd.value);
+
+      case Command.Regenerate:
+        this.regenerateSystemPrompt();
+        return { content: "System prompt regenerated." };
+
+      case Command.Skill:
+        return this._skillCommand(cmd.value);
+
+      // UI-only commands — these should be handled by the UI layer
+      case Command.Help:
+        return { error: "UI command: help" };
+      case Command.Quit:
+        return { error: "UI command: quit" };
+      case Command.Shell:
+        return { error: "UI command: shell" };
+
+      // Tools/thinking toggles — agent owns the state, emits event for UI
+      case Command.Tools:
+        this.hideTools = !this.hideTools;
+        this.sink.emit(
+          outputEvent(OUTPUT_EVENT.SESSION_STATE, {
+            key: "hideTools",
+            value: this.hideTools,
+          }),
+        );
+        return {
+          content: `Tool display: ${this.hideTools ? "hidden" : "shown"}`,
+        };
+
+      case Command.Thinking:
+        this.hideThinking = !this.hideThinking;
+        this.sink.emit(
+          outputEvent(OUTPUT_EVENT.SESSION_STATE, {
+            key: "hideThinking",
+            value: this.hideThinking,
+          }),
+        );
+        return {
+          content: `Thinking display: ${this.hideThinking ? "hidden" : "shown"}`,
+        };
+      case Command.Unknown:
+        return { error: `Unknown command: ${cmd.value || ""}` };
+
+      default:
+        return { error: `Unknown command type: ${cmd.type}` };
+    }
+  }
+
+  /**
+   * Switch to a named profile via session manager.
+   * Returns { error } since profile switching requires the session manager.
+   */
+  _switchProfile(profileName) {
+    return {
+      error:
+        `Profile switching requires SessionManager. ` +
+        `Use /clear ${profileName} from the UI.`,
+    };
+  }
+
+  /**
+   * Handle compact command.
+   */
+  async _compactCommand(value) {
+    if (!value) {
+      return { content: "Usage: /compact [n] [--compact-debug]" };
+    }
+    try {
+      const summary = await this.compactMessages(value.keep);
+      if (summary) {
+        return { content: `Compacted. Summary: ${summary.slice(0, 200)}...` };
+      }
+      return { content: "Not enough messages to compact." };
+    } catch (e) {
+      return { error: `Compaction failed: ${e.message}` };
+    }
+  }
+
+  /**
+   * Handle compact:strategy command.
+   */
+  _compactStrategyCommand(value) {
+    const registry = this.compactionStrategyRegistry;
+    const { action, name } = value || { action: "list" };
+
+    switch (action) {
+      case "list": {
+        const strategies = registry.getAll();
+        const current = this.compactionStrategy || "summarize";
+        const lines = ["\nCompaction Strategies:\n"];
+        for (const s of strategies) {
+          const marker = s.name === current ? " (current)" : "";
+          lines.push(`  ${s.name}${marker} — ${s.description}`);
+        }
+        lines.push(`\nCurrent strategy: ${current}\n`);
+        return { content: lines.join("") };
+      }
+      case "set": {
+        if (!name) {
+          return { content: "Usage: /compact:strategy <name>" };
+        }
+        if (!registry.has(name)) {
+          const available = registry
+            .getAll()
+            .map((s) => s.name)
+            .join(", ");
+          return {
+            error: `Unknown strategy '${name}'. Available: ${available}`,
+          };
+        }
+        this.compactionStrategy = name;
+        return { content: `Compaction strategy set to: ${name}` };
+      }
+      case "help": {
+        if (!name) {
+          const strategies = registry.getAll();
+          const lines = ["\nCompaction Strategies:\n"];
+          for (const s of strategies) {
+            lines.push(`  ${s.name} — ${s.description}`);
+          }
+          lines.push(
+            "\nUsage:\n" +
+              "  /compact:strategy              — List strategies\n" +
+              "  /compact:strategy <name>       — Set strategy\n" +
+              "  /compact:strategy help         — Show help\n" +
+              "  /compact:strategy help <name>  — Show strategy details\n",
+          );
+          return { content: lines.join("") };
+        }
+        if (registry.has(name)) {
+          const strategy = registry.get(name);
+          return {
+            content: `\nStrategy: ${strategy.name}\nDescription: ${strategy.description}\n`,
+          };
+        }
+        return { error: `Unknown strategy '${name}'.` };
+      }
+      default:
+        return { error: `Unknown action: ${action}` };
+    }
+  }
+
+  /**
+   * Handle prompt command.
+   */
+  async _promptCommand(value) {
+    if (!value || !value.name) {
+      return { content: "Usage: /prompt:name [args]" };
+    }
+    try {
+      const result = this.executePrompt(value.name, value.args);
+      if (result.success) {
+        return { content: `Prompt '${value.name}' executed.` };
+      }
+      return { error: result.error };
+    } catch (e) {
+      return { error: `Error: ${e.message}` };
+    }
+  }
+
+  /**
+   * Handle skill command.
+   */
+  _skillCommand(value) {
+    if (!value) {
+      // List skills
+      const allSkills = this.allSkills();
+      if (allSkills.length === 0) {
+        return { content: "No skills loaded." };
+      }
+      const lines = ["Available skills:"];
+      for (const s of allSkills) {
+        const status = s.loaded
+          ? "[loaded]"
+          : s.visible
+            ? "[visible]"
+            : "[hidden]";
+        lines.push(`  ${status} ${s.name}: ${s.description}`);
+      }
+      lines.push("\nUse /skill:<name> to activate a skill.\n");
+      return { content: lines.join("\n") };
+    }
+    const result = this.activateSkill(value);
+    if (result.success) {
+      return { content: `Skill '${value}' activated. System prompt updated.` };
+    }
+    return { error: result.error };
   }
 }
 

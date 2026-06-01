@@ -247,6 +247,46 @@ export class MessageBus {
   }
 
   /**
+   * Execute a slash command through the agent.
+   *
+   * This is the canonical entry point for command execution from the UI layer.
+   * The UI should never manipulate agent state directly — all commands flow
+   * through this method, which delegates to agent.executeCommand() and emits
+   * a COMMAND_RESULT event.
+   *
+   * @param {string} cmdText - The command text (without leading /)
+   * @returns {Promise<void>}
+   */
+  async executeCommand(cmdText) {
+    const { parseCommand } = await import("./commands.js");
+    const cmd = parseCommand(cmdText);
+    const agent = this._sessionManager.getAgent();
+
+    if (!agent) {
+      this._sink.emit({
+        type: OUTPUT_EVENT.COMMAND_RESULT,
+        content: "No agent available.",
+      });
+      return;
+    }
+
+    const result = await agent.executeCommand(cmd);
+
+    if (result.error) {
+      // UI-only commands or errors — emit as command result
+      this._sink.emit({
+        type: OUTPUT_EVENT.COMMAND_RESULT,
+        content: result.error,
+      });
+    } else if (result.content) {
+      this._sink.emit({
+        type: OUTPUT_EVENT.COMMAND_RESULT,
+        content: result.content,
+      });
+    }
+  }
+
+  /**
    * Sleep for the given number of milliseconds.
    */
   _sleep(ms) {

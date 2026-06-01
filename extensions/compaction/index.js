@@ -288,7 +288,7 @@ async function _performCompaction(core, agent, strategy, settings) {
   }
 }
 
-// ── Re-exports for backward compatibility ────────────────────────────────────
+// ── Re-exports for convenience ───────────────────────────────────────────────
 
 export { estimateContextTokens, findFirstKeptIndex, serializeConversation, estimateMessageTokens, shouldCompact, compactMessages } from './utils.js';
 export { CompactionStrategy, CompactionStrategyRegistry } from './strategies.js';

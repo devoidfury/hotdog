@@ -50,7 +50,7 @@ export class BashTool {
       return ToolResult.err("Error parsing arguments");
     }
     const command = args.command;
-    // Support both camelCase (timeoutMs) and snake_case (timeout_ms) for backward compatibility
+    // Support both camelCase (timeoutMs) and snake_case (timeout_ms)
     const timeout = args.timeoutMs ?? args.timeout_ms ?? this.timeoutMs;
 
     if (!command) {

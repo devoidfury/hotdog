@@ -1,6 +1,10 @@
 // Load skill tool — load a skill's full instructions into context.
-
-import { toolDef, param, ToolResult, defaultCallDisplay } from "../../src/core/tool-registry.js";
+import {
+  toolDef,
+  param,
+  ToolResult,
+  defaultCallDisplay,
+} from "../../src/core/tool-registry.js";
 
 export class LoadSkillTool {
   static TOOL_NAME = "load_skill";
@@ -42,7 +46,7 @@ export class LoadSkillTool {
     }
 
     // Notify context about skill activation
-    const onActivateSkill = ctx?.get('onActivateSkill');
+    const onActivateSkill = ctx?.get("onActivateSkill");
     if (onActivateSkill) {
       onActivateSkill(skillName);
     }

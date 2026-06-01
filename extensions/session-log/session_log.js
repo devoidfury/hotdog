@@ -20,7 +20,7 @@ import {
   replayEntriesIntoContext,
 } from "../../src/session/session-log.js";
 
-// Re-export for backward compatibility
+// Re-export core functions for convenience
 export {
   stripNulls,
   LOG_SOURCE,

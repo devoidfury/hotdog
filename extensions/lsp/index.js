@@ -2,16 +2,15 @@
 // Registers LSP tools (hover, definition, completion, etc.) via the tools:register hook.
 // Only activates when LSP is enabled in config.
 
-import { HOOKS } from '../../src/hooks.js';
-import { isLspEnabled, getServerByLanguageId } from './config.js';
-import { getLanguageId } from './utils.js';
-import { LspClient, LspError } from './client.js';
+import { HOOKS } from "../../src/hooks.js";
+import { isLspEnabled, getServerByLanguageId } from "./config.js";
+import { LspClient } from "./client.js";
 import {
   lspClientCache,
   getCachedClient,
   deleteCachedClient,
   shutdownAll,
-} from './client-cache.js';
+} from "./client-cache.js";
 import {
   LspHoverTool,
   LspDefinitionTool,
@@ -25,22 +24,22 @@ import {
   LspDiagnosticsTool,
   LspWorkspaceSymbolTool,
   LspApplyEditTool,
-} from './tools/index.js';
+} from "./tools/index.js";
 
 // LSP tool class map — maps tool names to their classes
 const LSP_TOOL_MAP = {
-  'lsp-hover': LspHoverTool,
-  'lsp-definition': LspDefinitionTool,
-  'lsp-completion': LspCompletionTool,
-  'lsp-signature': LspSignatureTool,
-  'lsp-document-symbol': LspDocumentSymbolTool,
-  'lsp-references': LspReferencesTool,
-  'lsp-code-action': LspCodeActionTool,
-  'lsp-formatting': LspFormattingTool,
-  'lsp-rename': LspRenameTool,
-  'lsp-diagnostics': LspDiagnosticsTool,
-  'lsp-workspace-symbol': LspWorkspaceSymbolTool,
-  'lsp-apply-edit': LspApplyEditTool,
+  "lsp-hover": LspHoverTool,
+  "lsp-definition": LspDefinitionTool,
+  "lsp-completion": LspCompletionTool,
+  "lsp-signature": LspSignatureTool,
+  "lsp-document-symbol": LspDocumentSymbolTool,
+  "lsp-references": LspReferencesTool,
+  "lsp-code-action": LspCodeActionTool,
+  "lsp-formatting": LspFormattingTool,
+  "lsp-rename": LspRenameTool,
+  "lsp-diagnostics": LspDiagnosticsTool,
+  "lsp-workspace-symbol": LspWorkspaceSymbolTool,
+  "lsp-apply-edit": LspApplyEditTool,
 };
 
 export const LSP_TOOL_NAMES = Object.keys(LSP_TOOL_MAP);
@@ -76,7 +75,9 @@ async function getOrCreateClient(languageId, lspConfig) {
       timeoutMs: serverConfig.timeoutMs,
     });
   } catch (e) {
-    console.error(`[lsp] Failed to initialize client for ${languageId}: ${e.message}`);
+    console.error(
+      `[lsp] Failed to initialize client for ${languageId}: ${e.message}`,
+    );
     return null;
   }
 
@@ -112,7 +113,7 @@ export function create(core) {
        * Mount LSP config on the shared context container.
        */
       [HOOKS.AGENT_TOOL_CONTEXT]: async ({ toolCtx }) => {
-        toolCtx.set('lspConfig', lspConfig);
+        toolCtx.set("lspConfig", lspConfig);
       },
 
       /**
@@ -128,7 +129,9 @@ export function create(core) {
               registry.register(toolName, tool);
             }
           } catch (e) {
-            console.error(`[lsp] Failed to create tool '${toolName}': ${e.message}`);
+            console.error(
+              `[lsp] Failed to create tool '${toolName}': ${e.message}`,
+            );
           }
         }
       },
@@ -158,31 +161,3 @@ export function create(core) {
     },
   };
 }
-
-// Re-export for backward compatibility
-export { LspClient, LspError, lspClientCache, getCachedClient, deleteCachedClient, shutdownAll };
-export { getServerByLanguageId, getServerForFile, isLspEnabled } from './config.js';
-export { getLanguageId, estimateLspTokenCount, truncateLines, safeStringify } from './utils.js';
-
-// Re-export LSP tool classes
-export {
-  LspHoverTool, LspDefinitionTool, LspCompletionTool, LspSignatureTool,
-  LspDocumentSymbolTool, LspReferencesTool, LspCodeActionTool,
-  LspFormattingTool, LspRenameTool, LspDiagnosticsTool,
-  LspWorkspaceSymbolTool, LspApplyEditTool,
-};
-
-// Re-export base classes for extension authors
-export {
-  LspPositionTool,
-  LspFileTool,
-  LspQueryTool,
-  LspBaseTool,
-  // Factory functions for creating new LSP tools
-  definePositionTool,
-  createLspPositionTool,
-  defineFileTool,
-  createLspFileTool,
-  defineQueryTool,
-  createLspQueryTool,
-} from './tools/index.js';

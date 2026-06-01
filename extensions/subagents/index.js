@@ -4,13 +4,6 @@
 
 import { HOOKS } from "../../src/hooks.js";
 import {
-  DelegateTaskTool,
-  TaskStatusTool,
-  TaskFollowupTool,
-  TaskInterruptTool,
-  PlanStatusTool,
-  CompleteTaskTool,
-  WaitTool,
   SUBAGENT_TOOL_NAMES,
   SUBAGENT_TOOL_CONSTRUCTORS,
 } from "./subagents.js";
@@ -71,18 +64,3 @@ export function create(core, { taskManager, sessionCore } = {}) {
     SUBAGENT_TOOL_CONSTRUCTORS,
   };
 }
-
-// Re-export for backward compatibility
-export {
-  SubagentTool,
-  DelegateTaskTool,
-  TaskStatusTool,
-  TaskFollowupTool,
-  TaskInterruptTool,
-  PlanStatusTool,
-  CompleteTaskTool,
-  WaitTool,
-} from "./subagents.js";
-
-// Re-export names and constructors
-export { SUBAGENT_TOOL_NAMES, SUBAGENT_TOOL_CONSTRUCTORS } from "./subagents.js";

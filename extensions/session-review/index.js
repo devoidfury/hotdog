@@ -32,7 +32,7 @@ export function create(core) {
   return {
     hooks: core.hooks
       ? {
-          // Register CLI subcommand via hook for backward compatibility
+          // Register CLI subcommand via hook
           [HOOKS.CLI_SUBCOMMANDS_REGISTER]: async (registry) => {
             registry.register("review", {
               description: "Review session logs",
@@ -221,6 +221,3 @@ function printToolIndex(entries, json) {
     }
   }
 }
-
-// Re-export for backward compatibility
-export { ReviewTool } from "./review.js";

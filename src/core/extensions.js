@@ -16,10 +16,12 @@ export { HookSystem, HOOKS, EXTENSION_PROVIDES };
  *
  * @param {Object} extension - The extension instance.
  * @param {Object} configRegistry - The config registry to register with.
- * @returns {Promise<void>}
+ * @returns {Promise<string[]>} Array of error messages (empty if no errors).
  */
 export async function emitConfigRegistration(extension, configRegistry) {
-  if (!extension || !configRegistry) return;
+  if (!extension || !configRegistry) return [];
+
+  const errors = [];
 
   // Emit CLI flags registration hook
   const cliFlagsResult = extension.hooks?.[HOOKS.CONFIG_CLI_FLAGS_REGISTER];
@@ -33,7 +35,7 @@ export async function emitConfigRegistration(extension, configRegistry) {
         configRegistry.registerCliFlags(result);
       }
     } catch (e) {
-      console.error(`[extension] Error in CONFIG_CLI_FLAGS_REGISTER: ${e.message}`);
+      errors.push(`CONFIG_CLI_FLAGS_REGISTER failed: ${e.message}`);
     }
   }
 
@@ -49,9 +51,11 @@ export async function emitConfigRegistration(extension, configRegistry) {
         configRegistry.registerConfigParams(result);
       }
     } catch (e) {
-      console.error(`[extension] Error in CONFIG_PARAMS_REGISTER: ${e.message}`);
+      errors.push(`CONFIG_PARAMS_REGISTER failed: ${e.message}`);
     }
   }
+
+  return errors;
 }
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -101,12 +105,12 @@ export function isExtensionDirectory(dirPath) {
  * Read extension metadata from extension.json file.
  *
  * @param {string} dirPath - Extension directory path.
- * @returns {{name: string, provides: string[], loadOrder: number, description: string}} Extension metadata.
+ * @returns {{name: string, provides: string[], loadOrder: number, description: string, dependsOn: string[]}} Extension metadata.
  */
 function readExtensionMetadata(dirPath) {
   const metaPath = path.join(dirPath, "extension.json");
   if (!fs.existsSync(metaPath)) {
-    return { name: "", provides: [], loadOrder: LOAD_ORDER.DEFAULT, description: "" };
+    return { name: "", provides: [], loadOrder: LOAD_ORDER.DEFAULT, description: "", dependsOn: [] };
   }
   try {
     const content = fs.readFileSync(metaPath, "utf-8");
@@ -114,6 +118,7 @@ function readExtensionMetadata(dirPath) {
 
     const provides = Array.isArray(meta.provides) ? meta.provides : [];
     const description = typeof meta.description === "string" ? meta.description : "";
+    const dependsOn = Array.isArray(meta.dependsOn) ? meta.dependsOn : [];
 
     // Determine load order: explicit in JSON, or infer from capabilities
     let loadOrder = LOAD_ORDER.DEFAULT;
@@ -123,9 +128,9 @@ function readExtensionMetadata(dirPath) {
       loadOrder = LOAD_ORDER.CLI;
     }
 
-    return { name: meta.name || "", provides, loadOrder, description };
+    return { name: meta.name || "", provides, loadOrder, description, dependsOn };
   } catch {
-    return { name: "", provides: [], loadOrder: LOAD_ORDER.DEFAULT, description: "" };
+    return { name: "", provides: [], loadOrder: LOAD_ORDER.DEFAULT, description: "", dependsOn: [] };
   }
 }
 
@@ -136,7 +141,7 @@ function readExtensionMetadata(dirPath) {
  * is any directory containing extension.json + index.js.
  *
  * @param {string} dirPath - Directory to search.
- * @returns {Array<{name: string, path: string, provides: string[], loadOrder: number}>} Array of discovered extensions.
+ * @returns {Array<{name: string, path: string, provides: string[], loadOrder: number, dependsOn: string[]}>} Array of discovered extensions.
  */
 export function discoverExtensionsInDir(dirPath) {
   const extensions = [];
@@ -152,14 +157,15 @@ export function discoverExtensionsInDir(dirPath) {
 
     const dirFull = path.join(dirPath, entry.name);
     if (isExtensionDirectory(dirFull)) {
-      // Read extension metadata (includes name, provides, loadOrder)
-      const { name, provides, loadOrder } = readExtensionMetadata(dirFull);
+      // Read extension metadata (includes name, provides, loadOrder, dependsOn)
+      const { name, provides, loadOrder, dependsOn } = readExtensionMetadata(dirFull);
 
       extensions.push({
         name: name || entry.name,
         path: `../extensions/${entry.name}/index.js`,
         provides,
         loadOrder,
+        dependsOn,
       });
     }
   }
@@ -179,12 +185,84 @@ export const LOAD_ORDER = {
 };
 
 /**
+ * Resolve load order based on extension dependencies using topological sort.
+ *
+ * Extensions that declare `dependsOn` will be loaded after their dependencies,
+ * regardless of their explicit `loadOrder` value. For extensions without
+ * dependencies, the explicit `loadOrder` is used as a tiebreaker.
+ *
+ * @param {Array<{name: string, path: string, loadOrder: number, provides: string[], dependsOn: string[]}>} extensions - Discovered extensions.
+ * @returns {Array<{name: string, path: string, loadOrder: number, provides: string[], dependsOn: string[]}>} Extensions sorted by dependency order.
+ * @throws {Error} If a circular dependency is detected.
+ */
+export function resolveLoadOrder(extensions) {
+  // Build dependency graph
+  const nameSet = new Set(extensions.map(e => e.name));
+  const deps = new Map();  // name -> [dependency names]
+
+  for (const ext of extensions) {
+    // Filter to only known dependencies (ignore unknown ones — they'll be caught later)
+    const validDeps = ext.dependsOn.filter(d => nameSet.has(d));
+    deps.set(ext.name, validDeps);
+  }
+
+  // Topological sort using Kahn's algorithm with loadOrder tiebreaker
+  const inDegree = new Map();
+  const adjList = new Map();  // dependency -> [dependents]
+
+  for (const ext of extensions) {
+    if (!inDegree.has(ext.name)) inDegree.set(ext.name, 0);
+    if (!adjList.has(ext.name)) adjList.set(ext.name, []);
+  }
+
+  for (const [name, depList] of deps) {
+    for (const dep of depList) {
+      if (!adjList.has(dep)) adjList.set(dep, []);
+      adjList.get(dep).push(name);
+      inDegree.set(name, (inDegree.get(name) || 0) + 1);
+    }
+  }
+
+  // Start with nodes that have no dependencies
+  const queue = extensions
+    .filter(e => (inDegree.get(e.name) || 0) === 0)
+    .sort((a, b) => a.loadOrder - b.loadOrder || a.name.localeCompare(b.name));
+
+  const result = [];
+
+  while (queue.length > 0) {
+    // Pick the node with the lowest loadOrder among available nodes
+    queue.sort((a, b) => a.loadOrder - b.loadOrder || a.name.localeCompare(b.name));
+    const current = queue.shift();
+    result.push(current);
+
+    // Reduce in-degree for dependents
+    for (const dependent of (adjList.get(current.name) || [])) {
+      inDegree.set(dependent, inDegree.get(dependent) - 1);
+      if (inDegree.get(dependent) === 0) {
+        const depExt = extensions.find(e => e.name === dependent);
+        if (depExt) queue.push(depExt);
+      }
+    }
+  }
+
+  // Check for cycles: if result doesn't include all extensions, there's a cycle
+  if (result.length !== extensions.length) {
+    const remaining = extensions.filter(e => !result.find(r => r.name === e.name));
+    const cycleNames = remaining.map(e => e.name).join(", ");
+    throw new Error(`Circular dependency detected among extensions: ${cycleNames}`);
+  }
+
+  return result;
+}
+
+/**
  * Discover all extensions from configured extension paths.
- * Reads extension capabilities (provides array) to determine load order.
- * CLI extensions (provides: ['cli:subcommands']) get higher priority.
+ * Reads extension capabilities (provides array) and dependencies (dependsOn)
+ * to determine load order via topological sort.
  *
  * @param {Array<string>} extensionPaths - Array of path specs (e.g., ["builtins", "/custom/extensions"]).
- * @returns {Promise<Array<{name: string, path: string, loadOrder: number, provides: string[]}>>} Array of discovered extensions.
+ * @returns {Promise<Array<{name: string, path: string, loadOrder: number, provides: string[], dependsOn: string[]}>>} Array of discovered extensions.
  */
 export async function discoverExtensions(extensionPaths) {
   const allExtensions = [];
@@ -209,17 +287,13 @@ export async function discoverExtensions(extensionPaths) {
         path: basePath,
         loadOrder: ext.loadOrder,
         provides: ext.provides,
+        dependsOn: ext.dependsOn,
       });
     }
   }
 
-  // Sort by load order (lower values first), then alphabetically for same order
-  allExtensions.sort((a, b) => {
-    if (a.loadOrder !== b.loadOrder) return a.loadOrder - b.loadOrder;
-    return a.name.localeCompare(b.name);
-  });
-
-  return allExtensions;
+  // Resolve load order using topological sort (respects dependsOn)
+  return resolveLoadOrder(allExtensions);
 }
 
 /**
@@ -227,12 +301,13 @@ export async function discoverExtensions(extensionPaths) {
  *
  * If extensionAutoload is true, returns all discovered extensions.
  * If extensionAutoload is false, returns only extensions whose names
- * match entries in the extensions config array.
+ * match entries in the extensions config array, plus their transitive
+ * dependencies (resolved via `dependsOn` in extension.json).
  *
  * @param {Array<string>} extensionPaths - Configured extension paths.
  * @param {boolean} extensionAutoload - Whether to auto-discover all extensions.
  * @param {Array<string>} extensions - Explicit list of extension names to load.
- * @returns {Promise<Array<{name: string, path: string, loadOrder: number, provides: string[]}>>} Extensions to load.
+ * @returns {Promise<Array<{name: string, path: string, loadOrder: number, provides: string[], dependsOn: string[]}>>} Extensions to load.
  */
 export async function getExtensionsToLoad(extensionPaths, extensionAutoload, extensions) {
   const discovered = await discoverExtensions(extensionPaths);
@@ -243,11 +318,50 @@ export async function getExtensionsToLoad(extensionPaths, extensionAutoload, ext
 
   // Filter to only explicitly listed extensions
   if (extensions && extensions.length > 0) {
-    return discovered.filter((ext) => extensions.includes(ext.name));
+    const selected = discovered.filter((ext) => extensions.includes(ext.name));
+    // Resolve transitive dependencies — if extension A depends on B,
+    // and A is explicitly listed but B is not, include B.
+    return resolveExtensionDependencies(selected, discovered);
   }
 
   // If autoload is false but no extensions list, return empty
   return [];
+}
+
+/**
+ * Resolve extension dependencies: for each extension, also include its
+ * transitive dependencies in the load list.
+ *
+ * This is used when an extension explicitly lists its dependencies but
+ * the dependencies themselves aren't in the explicit extensions list.
+ *
+ * @param {Array<{name: string, path: string, loadOrder: number, provides: string[], dependsOn: string[]}>} extensions - Extensions to load.
+ * @param {Array<{name: string, path: string, loadOrder: number, provides: string[], dependsOn: string[]}>} allDiscovered - All discovered extensions (for resolving dependency names).
+ * @returns {Array<{name: string, path: string, loadOrder: number, provides: string[], dependsOn: string[]}>} Extensions with dependencies included.
+ */
+export function resolveExtensionDependencies(extensions, allDiscovered) {
+  if (extensions.length === 0) return extensions;
+
+  const extMap = new Map(allDiscovered.map(e => [e.name, e]));
+  const result = new Map();
+
+  function addWithDeps(extName) {
+    if (result.has(extName)) return;
+    const ext = extMap.get(extName);
+    if (!ext) return;
+
+    // First add dependencies
+    for (const dep of ext.dependsOn) {
+      addWithDeps(dep);
+    }
+    result.set(extName, ext);
+  }
+
+  for (const ext of extensions) {
+    addWithDeps(ext.name);
+  }
+
+  return Array.from(result.values());
 }
 
 // ── Extension Loader ─────────────────────────────────────────────────────────
@@ -270,6 +384,8 @@ export class ExtensionLoader {
     // Track the entry point (module path) used to load each extension.
     // Used by the refresh tool to know which paths to re-import.
     this._entryPoints = new Map();
+    // Track extension metadata (provides, dependsOn) for capability queries.
+    this._metadata = new Map();
     // Config registry for extension CLI flags and config params
     this._configRegistry = core.configRegistry || null;
     // CLI subcommand registry for CLI extensions
@@ -315,6 +431,14 @@ export class ExtensionLoader {
       this._entryPoints.set(name, entryPoint);
     }
 
+    // Store extension metadata for capability queries
+    if (createOptions.provides) {
+      this._metadata.set(name, {
+        provides: createOptions.provides,
+        dependsOn: createOptions.dependsOn || [],
+      });
+    }
+
     // Track removal functions for this extension's hooks
     const removers = [];
     this._handlerRemovers.set(name, removers);
@@ -342,8 +466,13 @@ export class ExtensionLoader {
     }
 
     // Emit config registration hooks for CLI flags and config params
+    // Errors here are fatal — config registration is part of extension setup
     if (this._configRegistry) {
-      await emitConfigRegistration(instance, this._configRegistry);
+      const configErrors = await emitConfigRegistration(instance, this._configRegistry);
+      if (configErrors.length > 0) {
+        const msg = configErrors.join('; ');
+        throw new Error(`Extension '${name}' config registration failed: ${msg}`);
+      }
     }
 
     return instance;
@@ -367,16 +496,17 @@ export class ExtensionLoader {
    * handlers on the same hooks remain intact.
    * @param {string} name
    * @returns {Promise<void>}
+   * @throws {Error} If shutdown fails.
    */
   async unload(name) {
     const ext = this._extensions.get(name);
     if (ext) {
-      // Call shutdown if available
+      // Call shutdown if available — rethrow on failure
       if (ext.shutdown) {
         try {
           await ext.shutdown();
         } catch (e) {
-          console.error(`[extension:${name}] shutdown error: ${e.message}`);
+          throw new Error(`Extension '${name}' shutdown failed: ${e.message}`);
         }
       }
 
@@ -391,6 +521,7 @@ export class ExtensionLoader {
 
       this._extensions.delete(name);
       this._entryPoints.delete(name);
+      this._metadata.delete(name);
     }
   }
 
@@ -435,6 +566,56 @@ export class ExtensionLoader {
    */
   size() {
     return this._extensions.size;
+  }
+
+  /**
+   * Get the `provides` array for a loaded extension.
+   * @param {string} name - Extension name.
+   * @returns {string[]|undefined} Provides array, or undefined if not loaded.
+   */
+  getProvides(name) {
+    const meta = this._metadata.get(name);
+    return meta?.provides;
+  }
+
+  /**
+   * Get the `dependsOn` array for a loaded extension.
+   * @param {string} name - Extension name.
+   * @returns {string[]|undefined} DependsOn array, or undefined if not loaded.
+   */
+  getDependsOn(name) {
+    const meta = this._metadata.get(name);
+    return meta?.dependsOn;
+  }
+
+  /**
+   * Check if any loaded extension provides a given capability.
+   * Capabilities are declared in extension.json `provides` array.
+   * @param {string} capability - Capability name (e.g., "tools", "cli:subcommands").
+   * @returns {boolean} True if at least one extension provides this capability.
+   */
+  hasCapability(capability) {
+    for (const [, meta] of this._metadata) {
+      if (meta.provides?.includes(capability)) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  /**
+   * Get all extensions that provide a given capability.
+   * @param {string} capability - Capability name.
+   * @returns {string[]} Extension names that provide this capability.
+   */
+  getProviders(capability) {
+    const providers = [];
+    for (const [name, meta] of this._metadata) {
+      if (meta.provides?.includes(capability)) {
+        providers.push(name);
+      }
+    }
+    return providers;
   }
 
   /**

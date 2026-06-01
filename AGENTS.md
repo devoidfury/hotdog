@@ -124,6 +124,7 @@ Every extension directory must contain an `extension.json` metadata file. This i
 | `name` | string | Yes | Unique extension identifier (used for loading/filtering) |
 | `provides` | string[] | No | Capabilities: `"tools"`, `"cli:subcommands"` |
 | `loadOrder` | number | No | Load priority (lower = earlier). Defaults to 10. |
+| `dependsOn` | string[] | No | Names of extensions that must load before this one |
 | `description` | string | No | Human-readable description |
 
 **Load Order Constants** (from `LOAD_ORDER` in `extensions.js`):
@@ -133,6 +134,29 @@ Every extension directory must contain an `extension.json` metadata file. This i
 - `10` — DEFAULT (most extensions)
 
 **Discovery flow**: `extension.json` exists → `index.js` exists → valid extension.
+
+### Dependencies
+
+Use `dependsOn` to declare that an extension must load after specific other extensions. The loader uses topological sort to resolve dependencies — a dependency's `loadOrder` is ignored if it would violate the dependency order. Circular dependencies are detected and reported as errors.
+
+Example:
+```json
+{
+  "name": "skills",
+  "dependsOn": ["core-tools"],
+  "provides": ["tools"]
+}
+```
+
+### Capability Queries
+
+The `ExtensionLoader` exposes methods to query extension capabilities:
+- `loader.getProvides(name)` — get `provides` array for an extension
+- `loader.hasCapability(capability)` — check if any extension provides a capability
+- `loader.getProviders(capability)` — get all extensions providing a capability
+- `loader.getDependsOn(name)` — get `dependsOn` array for an extension
+
+When `extensionAutoload: false`, the loader auto-resolves transitive dependencies — if extension A depends on B, and A is explicitly listed but B is not, B is automatically included.
 
 ## Documentation
 

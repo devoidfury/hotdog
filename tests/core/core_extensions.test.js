@@ -108,7 +108,7 @@ describe('ExtensionLoader', () => {
       expect(loader.has('test')).toBe(false);
     });
 
-    it('should handle shutdown errors gracefully', async () => {
+    it('should propagate shutdown errors', async () => {
       const extModule = {
         create: () => ({
           shutdown: async () => { throw new Error('shutdown fail'); },
@@ -116,8 +116,10 @@ describe('ExtensionLoader', () => {
       };
 
       await loader.load('test', extModule);
-      // Should not throw
-      await loader.unload('test');
+      // Should throw
+      await expect(loader.unload('test')).rejects.toThrow(
+        "Extension 'test' shutdown failed: shutdown fail",
+      );
     });
 
     it('should handle extensions without shutdown', async () => {

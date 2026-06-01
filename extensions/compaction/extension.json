@@ -1,6 +1,7 @@
 {
   "name": "compaction",
-  "provides": ["tools"],
+  "provides": [],
   "loadOrder": 10,
+  "dependsOn": ["core-tools"],
   "description": "Context compaction strategies (summarize, drop, token-aware)"
 }

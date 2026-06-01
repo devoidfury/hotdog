@@ -2,5 +2,6 @@
   "name": "skills",
   "provides": ["tools"],
   "loadOrder": 10,
+  "dependsOn": ["core-tools"],
   "description": "Skills loading, activation, and system prompt integration"
 }

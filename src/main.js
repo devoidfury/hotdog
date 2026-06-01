@@ -10,7 +10,7 @@ import {
   Agent,
 } from "./core/index.js";
 import { getExtensionsToLoad, emitConfigRegistration } from "./core/extensions.js";
-import { HOOKS, EXTENSION_PROVIDES } from "./hooks.js";
+import { HOOKS } from "./hooks.js";
 import { CliOutputSink } from "./ui/cli.js";
 import { parseArgs, generateHelpText } from "./cli.js";
 import { loadConfig, buildConfig } from "./config.js";
@@ -29,16 +29,9 @@ import {
 // ── Extension Loading ────────────────────────────────────────────────────────
 
 /**
- * Load all extensions into the core.
- * Returns the loaded extensions for reference.
- *
- * Note: Extension paths are resolved relative to src/core/extensions.js
- * (the file that does the import()), not relative to src/main.js.
- */
-/**
  * Load all extensions into the core based on config settings.
  * Extensions are auto-discovered from configured paths and loaded in
- * the proper order (refresh first, core-tools second, then others).
+ * dependency order (refresh first, core-tools second, then others).
  *
  * @param {Object} core - The core object with hooks, extensions, etc.
  * @param {Object} options - Loading options.
@@ -49,7 +42,7 @@ import {
 async function loadExtensions(core, { taskManager, config } = {}) {
   const loaded = [];
 
-  // Discover extensions from config (returns sorted by load order)
+  // Discover extensions from config (returns sorted by dependency order)
   const extensionPaths = config?.extensionPaths || ["builtins"];
   const extensionAutoload = config?.extensionAutoload ?? false;
   const extensionsList = config?.extensions || [];
@@ -60,52 +53,16 @@ async function loadExtensions(core, { taskManager, config } = {}) {
     extensionsList,
   );
 
-  // Load all extensions in proper order via the extension loader.
+  // Load all extensions in dependency order via the extension loader.
   // The loader handles import + create() call. taskManager is passed
   // to all extensions (extensions that don't need it simply ignore it).
+  // Also passes provides/dependsOn for capability tracking.
   for (const ext of extensionsToLoad) {
     const extInstance = await core.extensions.load(ext.name, ext.path, {
       taskManager,
+      provides: ext.provides,
+      dependsOn: ext.dependsOn,
     });
-    if (extInstance) loaded.push(extInstance);
-  }
-
-  return loaded;
-}
-
-/**
- * Load CLI subcommand extensions — extensions that provide CLI subcommands.
- * These are loaded early (before core config) and register subcommands via hooks.
- * CLI extensions are automatically discovered by their 'provides' capability.
- *
- * @param {Object} earlyCore - Minimal core with hooks for subcommand registration.
- * @param {Object} earlyCore.config - Configuration object.
- * @returns {Promise<Array>} Loaded extension instances.
- */
-async function loadCliExtensions(earlyCore) {
-  const loaded = [];
-
-  // Discover all extensions and filter for CLI providers
-  const extensionPaths = earlyCore.config?.extensionPaths || ["builtins"];
-  const extensionAutoload = earlyCore.config?.extensionAutoload ?? false;
-  const extensionsList = earlyCore.config?.extensions || [];
-
-  const allExtensions = await getExtensionsToLoad(
-    extensionPaths,
-    extensionAutoload,
-    extensionsList,
-  );
-
-  // Filter to only extensions that provide CLI subcommands
-  const cliExtensions = allExtensions.filter((ext) =>
-    ext.provides?.includes(EXTENSION_PROVIDES.CLI_SUBCOMMANDS),
-  );
-
-  // Load CLI extensions via the extension loader (handles import + create() call)
-  // Note: Path is ../../extensions/... because the import happens from
-  // extensions.js context (where ExtensionLoader.load() does the import)
-  for (const ext of cliExtensions) {
-    const extInstance = await earlyCore.extensions.load(ext.name, ext.path);
     if (extInstance) loaded.push(extInstance);
   }
 
@@ -119,19 +76,21 @@ async function loadCliExtensions(earlyCore) {
  *
  * @param {Object} config - Configuration object.
  * @param {Object} [configRegistry] - Optional config registry for extension CLI flags & config params.
+ * @param {Object} [cliSubcommandRegistry] - Optional CLI subcommand registry.
  * @returns {Object} Core object with hooks, toolRegistry, extensions, config.
  */
-function createCore(config, configRegistry) {
+function createCore(config, configRegistry, cliSubcommandRegistry) {
   const hooks = createHooks();
   const toolRegistry = createToolRegistry();
   const extensions = createExtensionLoader({
     hooks,
     toolRegistry,
     config,
+    cliSubcommandRegistry,
     configRegistry,
   });
 
-  return { hooks, toolRegistry, extensions, config };
+  return { hooks, toolRegistry, extensions, config, cliSubcommandRegistry };
 }
 
 // ── Message Bus ──────────────────────────────────────────────────────────────
@@ -284,77 +243,35 @@ async function main() {
   // ── Parse CLI args with extension flags ─────────────────────────────────
   const cli = parseArgs(configRegistry);
 
-  // ── Early core for CLI extension loading ────────────────────────────────
-  // Create minimal core with hooks for CLI subcommand registration
-  const earlyHooks = createHooks();
+  // ── Build complete config early (needed for extension discovery) ────────
+  // We need config to know which extensions to load (autoload vs explicit list)
+  // and to pass config to extensions during create().
+  const { resolved, modelRegistry, providers } = await buildConfig(cli);
+  const extParams = configRegistry.getConfigParams();
+  const config = await loadConfig(cli.config, extParams);
+
+  // ── Create CLI subcommand registry ──────────────────────────────────────
   const cliSubcommandRegistry = createSubcommandRegistry();
-  const earlyToolRegistry = createToolRegistry();
-  const earlyExtensions = createExtensionLoader({
-    hooks: earlyHooks,
-    toolRegistry: earlyToolRegistry,
-    config: null,
-    cliSubcommandRegistry,
-    configRegistry,
-  });
-  // Minimal extension config for discovery (loaded before full config)
-  // Use autoload mode to discover all extensions for CLI subcommand registration
-  const extConfig = {
-    extensionPaths: ["builtins"],
-    extensionAutoload: true,
-    extensions: [],
-  };
 
-  const earlyCore = {
-    hooks: earlyHooks,
-    config: extConfig,
-    buildConfig,
-    cliSubcommandRegistry,
-    configRegistry,
-    extensions: earlyExtensions,
-  };
+  // ── Create core infrastructure ──────────────────────────────────────────
+  const core = createCore(config, configRegistry, cliSubcommandRegistry);
 
-  // ── Load CLI extensions (auto-discovered via provides capability) ────────
-  const cliExtensions = await loadCliExtensions(earlyCore);
-
-  // ── Subcommand dispatch ─────────────────────────────────────────────────
+  // ── Subcommand dispatch (before loading extensions, to check if needed) ─
   if (cli.subcommand) {
-    const subcommandDef = cliSubcommandRegistry.get(cli.subcommand);
+    const subcommandDef = core.cliSubcommandRegistry.get(cli.subcommand);
     if (subcommandDef) {
-      // Load config if needed (with extension params)
-      if (subcommandDef.requiresConfig) {
-        const extParams = configRegistry.getConfigParams();
-        const config = await loadConfig(cli.config, extParams);
-        earlyCore.config = config;
-      }
-
-      // Load all non-CLI extensions so that hooks are fully populated.
-      // CLI extensions are already loaded via loadCliExtensions().
+      // Load all extensions so hooks are fully populated.
       // This ensures subcommands like show-prompt get the real
       // system prompt built via the full extension hook chain.
-      const allExtensions = await getExtensionsToLoad(
-        earlyCore.config?.extensionPaths || ["builtins"],
-        earlyCore.config?.extensionAutoload ?? false,
-        earlyCore.config?.extensions || [],
-      );
-      for (const ext of allExtensions) {
-        // Skip CLI extensions — already loaded via loadCliExtensions()
-        if (ext.provides?.includes(EXTENSION_PROVIDES.CLI_SUBCOMMANDS)) {
-          continue;
-        }
-        try {
-          await earlyCore.extensions.load(ext.name, ext.path);
-        } catch (e) {
-          console.warn(`[subcommand] Failed to load extension ${ext.name}: ${e.message}`);
-        }
-      }
+      await loadExtensions(core, { taskManager: null, config });
 
       // Execute the subcommand handler
-      await subcommandDef.handler(cli, earlyCore);
+      await subcommandDef.handler(cli, core);
       return;
     }
     console.error(`Unknown subcommand: ${cli.subcommand}`);
     console.log(
-      `Available subcommands: ${cliSubcommandRegistry.names().join(", ")}`,
+      `Available subcommands: ${core.cliSubcommandRegistry.names().join(", ")}`,
     );
     process.exit(1);
   }
@@ -364,21 +281,11 @@ async function main() {
     process.exit(0);
   }
   if (cli.help) {
-    const subcommandHelp = cliSubcommandRegistry.generateHelpText();
+    const subcommandHelp = core.cliSubcommandRegistry.generateHelpText();
     const fullHelp = generateHelpText(configRegistry);
     console.log(fullHelp.replace("<subcommands>", subcommandHelp));
     process.exit(0);
   }
-
-  // ── Build complete config ───────────────────────────────────────────────
-  const { resolved, modelRegistry, providers } = await buildConfig(cli);
-
-  // Get extension config params for merging into config
-  const extParams = configRegistry.getConfigParams();
-  const config = await loadConfig(cli.config, extParams);
-
-  // ── Create core infrastructure ──────────────────────────────────────────
-  const core = createCore(config, configRegistry);
 
   // ── Output sink ─────────────────────────────────────────────────────────
   const palette = CliOutputSink.resolve(

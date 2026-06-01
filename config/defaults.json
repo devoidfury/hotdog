@@ -112,6 +112,11 @@
           "tags": ["coder", "general", "powerful"]
         },
         {
+          "name": "glm4.7-flash",
+          "context-limit": 131072,
+          "tags": ["coder", "general"]
+        },
+        {
           "name": "smollm3-3b",
           "context-limit": 64000,
           "tags": ["fast", "general"]
@@ -119,20 +124,17 @@
         {
           "name": "qwen3.5-9b-dsv4f-d",
           "context-limit": 262144,
-          "tags": ["general", "powerful", "coding", "instruct"],
-          "parallel_tool_calling": true
+          "tags": ["general", "powerful", "coding", "instruct"]
         },
         {
           "name": "qwen3.5-9b-dsv4f-d:general",
           "context-limit": 262144,
-          "tags": ["general", "powerful", "instruct"],
-          "parallel_tool_calling": true
+          "tags": ["general", "powerful", "instruct"]
         },
         {
           "name": "qwen3.5-122b-a10b",
           "context-limit": 262144,
-          "tags": ["general", "powerful", "instruct", "slow"],
-          "parallel_tool_calling": true
+          "tags": ["general", "powerful", "instruct", "slow"]
         }
       ]
     },

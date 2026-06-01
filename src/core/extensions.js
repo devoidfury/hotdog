@@ -110,7 +110,7 @@ export function isExtensionDirectory(dirPath) {
 function readExtensionMetadata(dirPath) {
   const metaPath = path.join(dirPath, "extension.json");
   if (!fs.existsSync(metaPath)) {
-    return { name: "", provides: [], loadOrder: LOAD_ORDER.DEFAULT, description: "", dependsOn: [] };
+    return { name: "", provides: [], loadOrder: LOAD_ORDER.DEFAULT, description: "", dependsOn: [], autoload: true };
   }
   try {
     const content = fs.readFileSync(metaPath, "utf-8");
@@ -119,6 +119,7 @@ function readExtensionMetadata(dirPath) {
     const provides = Array.isArray(meta.provides) ? meta.provides : [];
     const description = typeof meta.description === "string" ? meta.description : "";
     const dependsOn = Array.isArray(meta.dependsOn) ? meta.dependsOn : [];
+    const autoload = meta.autoload !== false; // default true — false means "don't auto-discover"
 
     // Determine load order: explicit in JSON, or infer from capabilities
     let loadOrder = LOAD_ORDER.DEFAULT;
@@ -128,9 +129,9 @@ function readExtensionMetadata(dirPath) {
       loadOrder = LOAD_ORDER.CLI;
     }
 
-    return { name: meta.name || "", provides, loadOrder, description, dependsOn };
+    return { name: meta.name || "", provides, loadOrder, description, dependsOn, autoload };
   } catch {
-    return { name: "", provides: [], loadOrder: LOAD_ORDER.DEFAULT, description: "", dependsOn: [] };
+    return { name: "", provides: [], loadOrder: LOAD_ORDER.DEFAULT, description: "", dependsOn: [], autoload: true };
   }
 }
 
@@ -141,7 +142,7 @@ function readExtensionMetadata(dirPath) {
  * is any directory containing extension.json + index.js.
  *
  * @param {string} dirPath - Directory to search.
- * @returns {Array<{name: string, path: string, provides: string[], loadOrder: number, dependsOn: string[]}>} Array of discovered extensions.
+ * @returns {Array<{name: string, path: string, provides: string[], loadOrder: number, dependsOn: string[], autoload: boolean}>} Array of discovered extensions.
  */
 export function discoverExtensionsInDir(dirPath) {
   const extensions = [];
@@ -158,7 +159,7 @@ export function discoverExtensionsInDir(dirPath) {
     const dirFull = path.join(dirPath, entry.name);
     if (isExtensionDirectory(dirFull)) {
       // Read extension metadata (includes name, provides, loadOrder, dependsOn)
-      const { name, provides, loadOrder, dependsOn } = readExtensionMetadata(dirFull);
+      const { name, provides, loadOrder, dependsOn, autoload } = readExtensionMetadata(dirFull);
 
       extensions.push({
         name: name || entry.name,
@@ -166,6 +167,7 @@ export function discoverExtensionsInDir(dirPath) {
         provides,
         loadOrder,
         dependsOn,
+        autoload,
       });
     }
   }
@@ -258,11 +260,11 @@ export function resolveLoadOrder(extensions) {
 
 /**
  * Discover all extensions from configured extension paths.
- * Reads extension capabilities (provides array) and dependencies (dependsOn)
- * to determine load order via topological sort.
+ * Reads extension capabilities (provides array), dependencies (dependsOn),
+ * and autoload settings to determine load order via topological sort.
  *
  * @param {Array<string>} extensionPaths - Array of path specs (e.g., ["builtins", "/custom/extensions"]).
- * @returns {Promise<Array<{name: string, path: string, loadOrder: number, provides: string[], dependsOn: string[]}>>} Array of discovered extensions.
+ * @returns {Promise<Array<{name: string, path: string, loadOrder: number, provides: string[], dependsOn: string[], autoload: boolean}>>} Array of discovered extensions.
  */
 export async function discoverExtensions(extensionPaths) {
   const allExtensions = [];
@@ -288,6 +290,7 @@ export async function discoverExtensions(extensionPaths) {
         loadOrder: ext.loadOrder,
         provides: ext.provides,
         dependsOn: ext.dependsOn,
+        autoload: ext.autoload,
       });
     }
   }
@@ -299,21 +302,28 @@ export async function discoverExtensions(extensionPaths) {
 /**
  * Get the list of extensions to load based on config settings.
  *
- * If extensionAutoload is true, returns all discovered extensions.
- * If extensionAutoload is false, returns only extensions whose names
- * match entries in the extensions config array, plus their transitive
- * dependencies (resolved via `dependsOn` in extension.json).
+ * When extensionAutoload is true:
+ *   Returns all discovered extensions EXCEPT those with `autoload: false`
+ *   in their extension.json. Extensions with autoload: false must be
+ *   explicitly listed in the `extensions` config to be loaded.
+ *
+ * When extensionAutoload is false:
+ *   Returns only extensions whose names match entries in the `extensions`
+ *   config array, plus their transitive dependencies (resolved via
+ *   `dependsOn` in extension.json).
  *
  * @param {Array<string>} extensionPaths - Configured extension paths.
  * @param {boolean} extensionAutoload - Whether to auto-discover all extensions.
  * @param {Array<string>} extensions - Explicit list of extension names to load.
- * @returns {Promise<Array<{name: string, path: string, loadOrder: number, provides: string[], dependsOn: string[]}>>} Extensions to load.
+ * @returns {Promise<Array<{name: string, path: string, loadOrder: number, provides: string[], dependsOn: string[], autoload: boolean}>>} Extensions to load.
  */
 export async function getExtensionsToLoad(extensionPaths, extensionAutoload, extensions) {
   const discovered = await discoverExtensions(extensionPaths);
 
   if (extensionAutoload) {
-    return discovered;
+    // Filter out extensions with autoload: false — they must be
+    // explicitly listed to be loaded.
+    return discovered.filter((ext) => ext.autoload !== false);
   }
 
   // Filter to only explicitly listed extensions
@@ -335,9 +345,9 @@ export async function getExtensionsToLoad(extensionPaths, extensionAutoload, ext
  * This is used when an extension explicitly lists its dependencies but
  * the dependencies themselves aren't in the explicit extensions list.
  *
- * @param {Array<{name: string, path: string, loadOrder: number, provides: string[], dependsOn: string[]}>} extensions - Extensions to load.
- * @param {Array<{name: string, path: string, loadOrder: number, provides: string[], dependsOn: string[]}>} allDiscovered - All discovered extensions (for resolving dependency names).
- * @returns {Array<{name: string, path: string, loadOrder: number, provides: string[], dependsOn: string[]}>} Extensions with dependencies included.
+ * @param {Array<{name: string, path: string, loadOrder: number, provides: string[], dependsOn: string[], autoload: boolean}>} extensions - Extensions to load.
+ * @param {Array<{name: string, path: string, loadOrder: number, provides: string[], dependsOn: string[], autoload: boolean}>} allDiscovered - All discovered extensions (for resolving dependency names).
+ * @returns {Array<{name: string, path: string, loadOrder: number, provides: string[], dependsOn: string[], autoload: boolean}>} Extensions with dependencies included.
  */
 export function resolveExtensionDependencies(extensions, allDiscovered) {
   if (extensions.length === 0) return extensions;

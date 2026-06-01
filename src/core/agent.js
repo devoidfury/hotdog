@@ -68,7 +68,8 @@ export class Agent {
     this._toolWhitelist = options.toolWhitelist || null;
     this._followQueue = [];
     // Slash command registry — extensions register commands here
-    this._slashCommandRegistry = options.slashCommandRegistry || createSlashCommandRegistry();
+    this._slashCommandRegistry =
+      options.slashCommandRegistry || createSlashCommandRegistry();
   }
 
   // ── Properties ────────────────────────────────────────────────────────────
@@ -278,9 +279,8 @@ export class Agent {
     if (this._systemPrompt) return;
 
     // Import here to avoid circular dependency
-    const { buildSystemPrompt, loadAspects, loadAgentsMd } = await import(
-      "../context/system_prompt.js"
-    );
+    const { buildSystemPrompt, loadAspects, loadAgentsMd } =
+      await import("../context/system_prompt.js");
 
     // Load aspects and AGENTS.md
     const resolvedConfig = this._config?.resolved || {};
@@ -409,6 +409,7 @@ export class Agent {
 
       // Emit before-execute hook (skill filtering handled by skills extension)
       await this._hooks.emitAsync(HOOKS.TOOL_BEFORE_EXECUTE, {
+        toolCallId,
         toolName,
         input,
         agent: this,
@@ -416,12 +417,12 @@ export class Agent {
 
       // Build and enrich tool context via hook
       const toolCtx = new ToolContext();
-      toolCtx.set('agent', this);
-      toolCtx.set('isSessionRestoring', this._isRestoring);
+      toolCtx.set("agent", this);
+      toolCtx.set("isSessionRestoring", this._isRestoring);
       // Mount infrastructure properties from config
       if (this._config) {
-        toolCtx.set('cwdBoundary', this._config.cwdBoundary || null);
-        toolCtx.set('workspaceRoot', this._config.workspaceRoot || null);
+        toolCtx.set("cwdBoundary", this._config.cwdBoundary || null);
+        toolCtx.set("workspaceRoot", this._config.workspaceRoot || null);
       }
       await this._hooks.emitAsync(HOOKS.AGENT_TOOL_CONTEXT, {
         toolCtx,
@@ -447,6 +448,28 @@ export class Agent {
         continue;
       }
 
+      // Validate arguments against tool's JSON Schema before execution
+      const validationError = this._toolRegistry.validateToolArgs(
+        toolName,
+        input,
+      );
+      if (validationError) {
+        const errorMsg = `Parameter validation error:\n${validationError}`;
+        this._emitOutput("tool_result", { toolName, input, result: errorMsg });
+        this._context.push(
+          new Message({
+            role: "tool",
+            content: errorMsg,
+            toolCallId,
+          }),
+        );
+        await this._hooks.emitAsync(HOOKS.CONTEXT_MESSAGE, {
+          message: this._context[this._context.length - 1],
+          agent: this,
+        });
+        continue;
+      }
+
       let result;
       try {
         result = await tool.execute(input, toolCtx);
@@ -456,8 +479,10 @@ export class Agent {
 
       // Emit after-execute hook
       await this._hooks.emitAsync(HOOKS.TOOL_AFTER_EXECUTE, {
+        toolCallId,
         toolName,
         result,
+        input,
         agent: this,
       });
 

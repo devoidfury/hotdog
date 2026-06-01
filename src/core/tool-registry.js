@@ -3,6 +3,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
+import { validateParams, formatValidationErrors } from "./param-validation.js";
 
 /**
  * Metadata keys rendered as XML attributes on the root <tool> tag.
@@ -613,6 +614,42 @@ export class ToolRegistry {
       result.register(name, tool);
     }
     return result;
+  }
+
+  /**
+   * Validate tool arguments against the tool's JSON Schema.
+   * Returns an error string if validation fails, or null if valid.
+   *
+   * @param {string} toolName - Name of the tool
+   * @param {string|object} input - Raw tool input (JSON string or parsed object)
+   * @returns {string|null} Error message if invalid, null if valid
+   */
+  validateToolArgs(toolName, input) {
+    const tool = this.get(toolName);
+    if (!tool || !tool.toToolDef) return null;
+
+    const def = tool.toToolDef();
+    const params = def?.function?.parameters || null;
+    if (!params) return null;
+
+    // Parse input if it's a string
+    let args;
+    if (typeof input === "string") {
+      try {
+        args = JSON.parse(input);
+      } catch {
+        // Can't parse — validation will catch it
+        args = input;
+      }
+    } else {
+      args = input;
+    }
+
+    const result = validateParams(args, params);
+    if (!result.valid) {
+      return formatValidationErrors(result.errors);
+    }
+    return null;
   }
 }
 

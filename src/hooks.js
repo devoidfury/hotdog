@@ -174,6 +174,7 @@ export const HOOKS = {
   TOOLS_REGISTER:     'tools:register',
   TOOL_BEFORE_EXECUTE:'tool:beforeExecute',
   TOOL_AFTER_EXECUTE: 'tool:afterExecute',
+  LOOP_DETECTED:      'loop:detected',
 
   // Context management
   CONTEXT_FULL:       'context:full',

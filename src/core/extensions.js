@@ -8,6 +8,67 @@ import { HookSystem, HOOKS, EXTENSION_PROVIDES } from '../hooks.js';
 
 export { HookSystem, HOOKS, EXTENSION_PROVIDES };
 
+// ── Schema Defaults Extraction ─────────────────────────────────────────────
+
+/**
+ * Extract default values from a JSON Schema's properties.
+ * Walks the schema and collects all `default` values from properties,
+ * nesting them under their parent key.
+ *
+ * @param {Object} schema - JSON Schema object with a "properties" field.
+ * @returns {Array<{key: string, defaults: Object}>} Array of {key, defaults} objects.
+ */
+export function extractSchemaDefaults(schema) {
+  if (!schema || !schema.properties) return [];
+
+  const result = [];
+
+  for (const [key, prop] of Object.entries(schema.properties)) {
+    if (prop.type === "object" && prop.properties) {
+      // Nested object: collect defaults from nested properties
+      const nestedDefaults = {};
+      for (const [nestedKey, nestedProp] of Object.entries(prop.properties)) {
+        if (nestedProp.default !== undefined) {
+          nestedDefaults[nestedKey] = nestedProp.default;
+        }
+      }
+      if (Object.keys(nestedDefaults).length > 0) {
+        result.push({ key, defaults: nestedDefaults });
+      }
+    } else if (prop.default !== undefined) {
+      // Top-level property with default
+      result.push({ key, defaults: { [key]: prop.default } });
+    }
+  }
+
+  return result;
+}
+
+/**
+ * Get extension config defaults from extension.json schemas.
+ * Reads extension.json files and extracts default values from configSchema.
+ *
+ * @param {Array<string>} extensionPaths - Extension path specs.
+ * @returns {Promise<Array<{key: string, defaults: Object}>>} Config params with defaults.
+ */
+export async function getExtensionConfigDefaults(extensionPaths) {
+  const params = [];
+
+  for (const spec of extensionPaths || ["builtins"]) {
+    const resolved = resolveExtensionPath(spec);
+    const discovered = discoverExtensionsInDir(resolved);
+
+    for (const ext of discovered) {
+      if (ext.configSchema) {
+        const defaults = extractSchemaDefaults(ext.configSchema);
+        params.push(...defaults);
+      }
+    }
+  }
+
+  return params;
+}
+
 // ── Config Registration ────────────────────────────────────────────────────
 
 /**

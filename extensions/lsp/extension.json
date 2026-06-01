@@ -64,7 +64,7 @@
       },
       "maxHoverLines": {
         "type": "number",
-        "default": 800,
+        "default": 200,
         "description": "Maximum number of lines for hover responses"
       },
       "maxCompletionItems": {
@@ -74,7 +74,7 @@
       },
       "maxSymbolResults": {
         "type": "number",
-        "default": 50,
+        "default": 100,
         "description": "Maximum number of symbol results to return"
       },
       "requestTimeoutMs": {

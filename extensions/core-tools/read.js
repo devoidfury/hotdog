@@ -12,7 +12,7 @@ import {
   parseToolInput,
   defaultCallDisplay,
 } from "../../src/core/tool-registry.js";
-import { DEFAULT_READ_TOOL_LIMIT } from "../../src/config.js";
+import { DEFAULT_READ_TOOL_LIMIT } from "./defaults.js";
 
 export class ReadTool {
   static TOOL_NAME = "read";

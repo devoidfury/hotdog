@@ -2,5 +2,46 @@
   "name": "core-tools",
   "provides": ["tools"],
   "loadOrder": 1,
-  "description": "Core agent tools (bash, write, read, edit, grep, find, fetch, question, pager, model, explore)"
+  "description": "Core agent tools (bash, write, read, edit, grep, find, fetch, question, pager, model, explore)",
+  "configSchema": {
+    "type": "object",
+    "properties": {
+      "maxToolOutputLines": {
+        "type": "number",
+        "default": 600,
+        "description": "Maximum number of output lines for tool results"
+      },
+      "bashTimeoutMs": {
+        "type": "number",
+        "default": 60000,
+        "description": "Default timeout for bash commands in milliseconds"
+      },
+      "readToolLimit": {
+        "type": "number",
+        "default": 500,
+        "description": "Default maximum lines for the read tool"
+      },
+      "findMaxResults": {
+        "type": "number",
+        "default": 200,
+        "description": "Maximum number of results for the find tool"
+      },
+      "grepMaxResults": {
+        "type": "number",
+        "default": 100,
+        "description": "Maximum number of results for the grep tool"
+      },
+      "maxDiffSize": {
+        "type": "number",
+        "default": 8000,
+        "description": "Maximum diff size in characters"
+      },
+      "maxEditInputSize": {
+        "type": "number",
+        "default": 16000,
+        "description": "Maximum edit input size in characters (oldString + newString combined)"
+      }
+    },
+    "additionalProperties": false
+  }
 }

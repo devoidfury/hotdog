@@ -26,6 +26,55 @@ import {
   LspApplyEditTool,
 } from "./tools/index.js";
 
+// LSP defaults — canonical values, also declared in extension.json configSchema
+const DEFAULT_LSP_ENABLED = false;
+const DEFAULT_LSP_MAX_HOVER_LINES = 200;
+const DEFAULT_LSP_MAX_COMPLETION_ITEMS = 50;
+const DEFAULT_LSP_MAX_SYMBOL_RESULTS = 100;
+const DEFAULT_LSP_REQUEST_TIMEOUT_MS = 30000;
+const DEFAULT_LSP_SERVER_TIMEOUT_MS = 60000;
+
+// Default LSP server configurations for common languages
+const DEFAULT_LSP_SERVERS = {
+  typescript: {
+    name: "typescript",
+    command: "typescript-language-server",
+    args: ["--stdio"],
+    filetypes: [
+      "typescript",
+      "javascript",
+      "typescriptreact",
+      "javascriptreact",
+    ],
+    timeoutMs: DEFAULT_LSP_REQUEST_TIMEOUT_MS,
+    maxOutputLines: 500,
+  },
+  python: {
+    name: "python",
+    command: "pyright-langserver",
+    args: ["--stdio"],
+    filetypes: ["python"],
+    timeoutMs: DEFAULT_LSP_REQUEST_TIMEOUT_MS,
+    maxOutputLines: 500,
+  },
+  go: {
+    name: "go",
+    command: "gopls",
+    args: ["serve"],
+    filetypes: ["go"],
+    timeoutMs: DEFAULT_LSP_REQUEST_TIMEOUT_MS,
+    maxOutputLines: 500,
+  },
+  rust: {
+    name: "rust",
+    command: "rust-analyzer",
+    args: [],
+    filetypes: ["rust"],
+    timeoutMs: DEFAULT_LSP_REQUEST_TIMEOUT_MS,
+    maxOutputLines: 500,
+  },
+};
+
 // LSP tool class map — maps tool names to their classes
 const LSP_TOOL_MAP = {
   "lsp-hover": LspHoverTool,
@@ -102,7 +151,22 @@ function createLspTool(toolName, lspConfig) {
  * Create the LSP extension.
  */
 export function create(core) {
-  const lspConfig = core.config?.lsp;
+  // Get LSP config with fallback to extension defaults
+  // Note: extension config params are registered AFTER buildConfig runs,
+  // so lspConfig may be undefined. The extension applies its own defaults.
+  const rawLspConfig = core.config?.lsp || {};
+  const lspConfig = {
+    enabled: rawLspConfig.enabled ?? DEFAULT_LSP_ENABLED,
+    servers: (rawLspConfig.servers && Object.keys(rawLspConfig.servers).length > 0)
+      ? rawLspConfig.servers
+      : DEFAULT_LSP_SERVERS,
+    maxHoverLines: rawLspConfig.maxHoverLines ?? DEFAULT_LSP_MAX_HOVER_LINES,
+    maxCompletionItems: rawLspConfig.maxCompletionItems ?? DEFAULT_LSP_MAX_COMPLETION_ITEMS,
+    maxSymbolResults: rawLspConfig.maxSymbolResults ?? DEFAULT_LSP_MAX_SYMBOL_RESULTS,
+    requestTimeoutMs: rawLspConfig.requestTimeoutMs ?? DEFAULT_LSP_REQUEST_TIMEOUT_MS,
+    serverStartupTimeoutMs: rawLspConfig.serverStartupTimeoutMs ?? DEFAULT_LSP_SERVER_TIMEOUT_MS,
+  };
+
   if (!isLspEnabled(lspConfig)) {
     return null; // Don't load if LSP is disabled
   }
@@ -142,6 +206,26 @@ export function create(core) {
       [HOOKS.SHUTDOWN_CLEANUP]: async () => {
         await shutdownAll();
       },
+
+      /**
+       * Register config params for LSP defaults.
+       * These get merged into the base config so tools can access them.
+       */
+      [HOOKS.CONFIG_PARAMS_REGISTER]: () => [
+        {
+          key: "lsp",
+          description: "LSP (Language Server Protocol) configuration",
+          defaults: {
+            enabled: DEFAULT_LSP_ENABLED,
+            servers: DEFAULT_LSP_SERVERS,
+            maxHoverLines: DEFAULT_LSP_MAX_HOVER_LINES,
+            maxCompletionItems: DEFAULT_LSP_MAX_COMPLETION_ITEMS,
+            maxSymbolResults: DEFAULT_LSP_MAX_SYMBOL_RESULTS,
+            requestTimeoutMs: DEFAULT_LSP_REQUEST_TIMEOUT_MS,
+            serverStartupTimeoutMs: DEFAULT_LSP_SERVER_TIMEOUT_MS,
+          },
+        },
+      ],
     },
 
     // Expose for external use

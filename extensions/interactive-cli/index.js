@@ -108,7 +108,7 @@ export function create(core) {
     // Create TaskManager
     const { TaskManager } = await import("../../src/session/task_manager.js");
     const { SessionManager } = await import("../../src/core/session.js");
-    const { MessageBus } = await import("../../src/main.js");
+    const { MessageBus } = await import("../../src/core/index.js");
     const { Agent } = await import("../../src/core/agent.js");
     const { readSessionEntries, sessionExists, replayEntriesIntoContext } = await import("../../src/session/session-log.js");
     const { Message } = await import("../../src/context/message.js");

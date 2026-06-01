@@ -13,7 +13,7 @@ import {
 import {
   DEFAULT_BASH_TIMEOUT_MS,
   DEFAULT_MAX_TOOL_OUTPUT_LINES,
-} from "../../src/config.js";
+} from "./defaults.js";
 
 export class BashTool {
   static TOOL_NAME = "bash";

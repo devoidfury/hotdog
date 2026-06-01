@@ -1,9 +1,6 @@
-// CLI color palettes and ANSI color helpers.
-// Mirrors the Rust implementation in src/ui/cli/colors.rs.
-
 import fs from "node:fs";
 
-// ── Color Palette ─────────────────────────────────────────────────────────────
+// CLI color palettes and ANSI color helpers.
 
 /**
  * Color mapping for each OutputEvent variant.

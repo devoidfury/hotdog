@@ -3,7 +3,7 @@
 // Runs a single prompt and exits — no interactive session.
 // Registers CLI flag (-c/--prompt), subcommand, and CLI args hook handler.
 
-import { MessageBus } from "../../src/main.js";
+import { MessageBus } from "../../src/core/index.js";
 import { formatError } from "../../src/context/error.js";
 import { HOOKS } from "../../src/hooks.js";
 

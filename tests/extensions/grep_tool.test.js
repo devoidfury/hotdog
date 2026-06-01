@@ -4,7 +4,7 @@ import path from 'node:path';
 import os from 'node:os';
 import { GrepTool } from '../../extensions/core-tools/grep.js';
 import { ToolContext, ToolResult } from '../../src/core/tool-registry.js';
-import { DEFAULT_GREP_MAX_RESULTS } from '../../src/config.js';
+import { DEFAULT_GREP_MAX_RESULTS } from '../../extensions/core-tools/defaults.js';
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
 

@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from 'bun:test';
-import { MessageBus } from '../../src/main.js';
+import { MessageBus } from '../../src/core/index.js';
 
 // Mock session manager
 class MockSessionManager {

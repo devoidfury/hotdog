@@ -9,7 +9,7 @@ import {
   DEFAULT_MAX_TOOL_OUTPUT_LINES,
   DEFAULT_READ_TOOL_LIMIT,
   DEFAULT_GREP_MAX_RESULTS,
-} from "../../src/config.js";
+} from "./defaults.js";
 
 const execFileAsync = util.promisify(execFile);
 

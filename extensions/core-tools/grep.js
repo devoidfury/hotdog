@@ -15,7 +15,7 @@ import {
 import {
   DEFAULT_GREP_MAX_RESULTS,
   DEFAULT_MAX_TOOL_OUTPUT_LINES,
-} from "../../src/config.js";
+} from "./defaults.js";
 
 const execFileAsync = util.promisify(execFile);
 

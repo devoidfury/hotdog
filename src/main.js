@@ -8,21 +8,21 @@ import {
   createExtensionLoader,
   SessionManager,
   Agent,
+  MessageBus,
 } from "./core/index.js";
 import {
   getExtensionsToLoad,
   emitConfigRegistration,
   discoverExtensions,
+  getExtensionConfigDefaults,
 } from "./core/extensions.js";
 import { HOOKS } from "./hooks.js";
 import { CliOutputSink } from "./ui/cli.js";
 import { parseArgs, generateHelpText } from "./cli.js";
 import { loadConfig, buildConfig } from "./config.js";
 import { createConfigRegistry } from "./config-registry.js";
-import { formatError, isExpectedError } from "./context/error.js";
-import { OUTPUT_EVENT } from "./context/output.js";
+import { formatError } from "./context/error.js";
 import { createSubcommandRegistry } from "./core/subcommand-registry.js";
-import { TaskManager } from "./session/task_manager.js";
 import { Message } from "./context/message.js";
 import {
   sessionExists,
@@ -130,147 +130,6 @@ function createCore(
   };
 }
 
-// ── Message Bus ──────────────────────────────────────────────────────────────
-
-/**
- * A simple message bus that owns the agent run loop.
- * Uses SessionManager for agent access.
- */
-class MessageBus {
-  /**
-   * @param {Object} options
-   * @param {SessionManager} options.sessionManager
-   * @param {Object} options.sink
-   */
-  constructor({ sessionManager, sink }) {
-    this._sessionManager = sessionManager;
-    this._sink = sink;
-    this._queue = [];
-    this._isRunning = false;
-    this._cancelled = false;
-  }
-
-  enqueue(text) {
-    this._queue.push(text);
-  }
-
-  cancel() {
-    this._cancelled = true;
-    const agent = this._sessionManager.getAgent();
-    if (agent) agent.cancel();
-  }
-
-  isIdle() {
-    return !this._isRunning && this._queue.length === 0;
-  }
-
-  get sessionManager() {
-    return this._sessionManager;
-  }
-
-  get agent() {
-    return this._sessionManager.getAgent();
-  }
-
-  /**
-   * Run the dispatch loop. Drains messages sequentially.
-   */
-  async run() {
-    await this._dispatchLoop(false);
-  }
-
-  /**
-   * Run the dispatch loop, draining remaining messages after cancellation.
-   */
-  async runUntilCancelled() {
-    await this._dispatchLoop(true);
-  }
-
-  async _dispatchLoop(drain) {
-    if (drain && this._cancelled && this._queue.length === 0) return;
-
-    while (true) {
-      const text = this._queue.shift();
-      if (text === undefined) {
-        if (this._cancelled) {
-          if (!drain) break;
-          await this._sleep(50);
-          continue;
-        }
-        await this._sleep(50);
-        continue;
-      }
-
-      if (this._cancelled) {
-        if (!drain) break;
-      }
-
-      this._isRunning = true;
-      const agent = this._sessionManager.getAgent();
-      if (agent) agent.cancel(false);
-
-      try {
-        await agent.run(text);
-      } catch (e) {
-        if (isExpectedError(e)) {
-          this._sink.emit({
-            type: OUTPUT_EVENT.COMMAND_RESULT,
-            content: e.message,
-          });
-        } else {
-          this._sink.emit({
-            type: OUTPUT_EVENT.COMMAND_RESULT,
-            content: formatError(e),
-          });
-        }
-      }
-
-      if (agent) agent.cancel(false);
-      this._cancelled = false;
-      this._isRunning = false;
-
-      if (drain && this._queue.length === 0) break;
-    }
-  }
-
-  _sleep(ms) {
-    return new Promise((resolve) => setTimeout(resolve, ms));
-  }
-
-  /**
-   * Execute a slash command through the agent.
-   */
-  async executeCommand(cmdText) {
-    const { parseCommand } = await import("./core/commands.js");
-    const agent = this._sessionManager.getAgent();
-    const cmd = parseCommand(cmdText, agent?.getSlashCommandRegistry());
-
-    if (!agent) {
-      this._sink.emit({
-        type: OUTPUT_EVENT.COMMAND_RESULT,
-        content: "No agent available.",
-      });
-      return;
-    }
-
-    const result = await agent.executeCommand(cmd);
-
-    if (result && result.error) {
-      this._sink.emit({
-        type: OUTPUT_EVENT.COMMAND_RESULT,
-        content: result.error,
-      });
-    } else if (result && result.content) {
-      this._sink.emit({
-        type: OUTPUT_EVENT.COMMAND_RESULT,
-        content: result.content,
-      });
-    }
-  }
-}
-
-export { MessageBus };
-
 /**
  * Discover extensions and register their CLI flags and subcommands from metadata.
  * This reads extension.json files without loading any extension code.
@@ -337,9 +196,12 @@ async function main() {
   // ── Build minimal config (defaults only, for extension discovery) ───────
   // We need this early to discover extensions and read their CLI flags /
   // subcommand declarations from extension.json without loading code.
+  // Include extension schema defaults so extension-specific config keys
+  // get their defaults merged into the base config.
+  const extSchemaDefaults = await getExtensionConfigDefaults();
   const minimalConfig = await loadConfig(
     null,
-    configRegistry.getConfigParams(),
+    [...configRegistry.getConfigParams(), ...extSchemaDefaults],
   );
 
   // ── Discover extensions from metadata (no code loading) ─────────────────

@@ -12,7 +12,7 @@ import {
   parseToolInput,
   defaultCallDisplay,
 } from "../../src/core/tool-registry.js";
-import { DEFAULT_MAX_EDIT_INPUT_SIZE } from "../../src/config.js";
+import { DEFAULT_MAX_EDIT_INPUT_SIZE } from "./defaults.js";
 
 export class EditTool {
   static TOOL_NAME = "edit";

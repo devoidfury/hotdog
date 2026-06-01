@@ -36,56 +36,6 @@ export function mergeExtensionConfigDefaults(defaultConfig, extParams) {
   return merged;
 }
 
-// ── LSP Configuration Defaults ──────────────────────────────────────────
-
-export const DEFAULT_LSP_ENABLED = false;
-export const DEFAULT_LSP_MAX_HOVER_LINES = 200;
-export const DEFAULT_LSP_MAX_COMPLETION_ITEMS = 50;
-export const DEFAULT_LSP_MAX_SYMBOL_RESULTS = 100;
-export const DEFAULT_LSP_REQUEST_TIMEOUT_MS = 30000;
-export const DEFAULT_LSP_SERVER_TIMEOUT_MS = 60000;
-
-// Default LSP server configurations for common languages
-export const DEFAULT_LSP_SERVERS = {
-  typescript: {
-    name: "typescript",
-    command: "typescript-language-server",
-    args: ["--stdio"],
-    filetypes: [
-      "typescript",
-      "javascript",
-      "typescriptreact",
-      "javascriptreact",
-    ],
-    timeoutMs: DEFAULT_LSP_REQUEST_TIMEOUT_MS,
-    maxOutputLines: 500,
-  },
-  python: {
-    name: "python",
-    command: "pyright-langserver",
-    args: ["--stdio"],
-    filetypes: ["python"],
-    timeoutMs: DEFAULT_LSP_REQUEST_TIMEOUT_MS,
-    maxOutputLines: 500,
-  },
-  go: {
-    name: "go",
-    command: "gopls",
-    args: ["serve"],
-    filetypes: ["go"],
-    timeoutMs: DEFAULT_LSP_REQUEST_TIMEOUT_MS,
-    maxOutputLines: 500,
-  },
-  rust: {
-    name: "rust",
-    command: "rust-analyzer",
-    args: [],
-    filetypes: ["rust"],
-    timeoutMs: DEFAULT_LSP_REQUEST_TIMEOUT_MS,
-    maxOutputLines: 500,
-  },
-};
-
 // ── Core Defaults ───────────────────────────────────────────────────────
 
 export const DEFAULT_MODEL = "qwen3.5-0.8b";
@@ -100,7 +50,6 @@ export const DEFAULT_PROMPTS_PATH = "./config/prompts";
 export const DEFAULT_CONFIG_PATH = "./config/defaults.json";
 export const DEFAULT_CHAT_TIMEOUT_SECS = 600;
 export const DEFAULT_EMBEDDINGS_TIMEOUT_SECS = 120;
-export const DEFAULT_BASH_TIMEOUT_MS = 60000;
 export const DEFAULT_SYSTEM_PROMPT_PATH = "config/templates/system_prompt.md";
 export const DEFAULT_MAX_TOKENS = 32000;
 export const DEFAULT_MAX_ITERATIONS = 1000;
@@ -109,30 +58,7 @@ export const DEFAULT_PROMPT = "> ";
 export const DEFAULT_EXIT_COMMANDS = ["exit", "quit"];
 export const DEFAULT_ROLE =
   "You are an AI coding assistant. Use the instructions below and the tools available to you to assist the user.";
-export const DEFAULT_MAX_TOOL_OUTPUT_LINES = 600;
 export const DEFAULT_TASK_PROFILE = "task-default";
-export const DEFAULT_READ_TOOL_LIMIT = 500;
-export const DEFAULT_FIND_MAX_RESULTS = 200;
-export const DEFAULT_GREP_MAX_RESULTS = 100;
-
-// Max diff size in characters — diffs larger than this are truncated to prevent API crashes
-export const DEFAULT_MAX_DIFF_SIZE = 8000;
-
-// Max input size for edit tool (oldString + newString combined) in characters
-export const DEFAULT_MAX_EDIT_INPUT_SIZE = 16000;
-
-// Compaction settings
-export const DEFAULT_COMPACTION_ENABLED = true;
-export const DEFAULT_COMPACTION_RESERVE_TOKENS = 16384;
-export const DEFAULT_COMPACTION_KEEP_RECENT_MESSAGES = 3;
-export const DEFAULT_COMPACTION_STRATEGY = "summarize";
-
-export const defaultCompactionSettings = {
-  enabled: DEFAULT_COMPACTION_ENABLED,
-  reserveTokens: DEFAULT_COMPACTION_RESERVE_TOKENS,
-  keepRecentMessages: DEFAULT_COMPACTION_KEEP_RECENT_MESSAGES,
-  strategy: DEFAULT_COMPACTION_STRATEGY,
-};
 
 // ── Config Loading ─────────────────────────────────────────────────────
 
@@ -190,22 +116,10 @@ function getDefaultConfig(extParams) {
     theme: null,
     colors: null, // ColorPalette object — see colors.js ColorPalette
     apiKey: null,
-    maxToolOutputLines: DEFAULT_MAX_TOOL_OUTPUT_LINES,
     noLog: false,
     compactDebug: false,
     mcpServers: [],
-    compaction: defaultCompactionSettings,
     showTokenUse: true,
-    // LSP configuration
-    lsp: {
-      enabled: DEFAULT_LSP_ENABLED,
-      servers: DEFAULT_LSP_SERVERS,
-      maxHoverLines: DEFAULT_LSP_MAX_HOVER_LINES,
-      maxCompletionItems: DEFAULT_LSP_MAX_COMPLETION_ITEMS,
-      maxSymbolResults: DEFAULT_LSP_MAX_SYMBOL_RESULTS,
-      requestTimeoutMs: DEFAULT_LSP_REQUEST_TIMEOUT_MS,
-      serverStartupTimeoutMs: DEFAULT_LSP_SERVER_TIMEOUT_MS,
-    },
   };
 
   return mergeExtensionConfigDefaults(baseConfig, extParams);

@@ -24,8 +24,9 @@ const SHORT_META_KEYS = new Set([
 
 /**
  * Minimal XML escaping for attribute/text content.
+ * Exported for use by agent.js to avoid duplication.
  */
-function xmlEscape(s) {
+export function xmlEscape(s) {
   return s
     .replace(/&/g, "&amp;")
     .replace(/</g, "&lt;")

@@ -6,7 +6,7 @@ import { Message } from "../context/message.js";
 import { LlmError } from "../llm_client/client.js";
 import { OUTPUT_EVENT } from "../context/output.js";
 import { HOOKS } from "../hooks.js";
-import { ToolContext } from "./tool-registry.js";
+import { ToolContext, xmlEscape } from "./tool-registry.js";
 import { createSlashCommandRegistry } from "./slash-command-registry.js";
 
 /**
@@ -521,16 +521,16 @@ export class Agent {
     }
     // String: wrap in XML
     if (typeof result === "string") {
-      return `<tool name="${toolName}" status="success">\n  <output>${this._xmlEscape(result)}</output>\n</tool>`;
+      return `<tool name="${toolName}" status="success">\n  <output>${xmlEscape(result)}</output>\n</tool>`;
     }
     // Object: serialize and wrap
     if (typeof result === "object" && result !== null) {
       const json = JSON.stringify(result);
-      return `<tool name="${toolName}" status="success">\n  <output>${this._xmlEscape(json)}</output>\n</tool>`;
+      return `<tool name="${toolName}" status="success">\n  <output>${xmlEscape(json)}</output>\n</tool>`;
     }
     // Primitive
     const str = String(result);
-    return `<tool name="${toolName}" status="success">\n  <output>${this._xmlEscape(str)}</output>\n</tool>`;
+    return `<tool name="${toolName}" status="success">\n  <output>${xmlEscape(str)}</output>\n</tool>`;
   }
 
   // ── Helpers ───────────────────────────────────────────────────────────────
@@ -550,14 +550,6 @@ export class Agent {
       this._sink.emit({ type: OUTPUT_EVENT[type.toUpperCase()], ...data });
     }
     this._hooks.emit(HOOKS.OUTPUT_EVENT, { type, data, agent: this });
-  }
-
-  _xmlEscape(s) {
-    return String(s)
-      .replace(/&/g, "&amp;")
-      .replace(/</g, "&lt;")
-      .replace(/>/g, "&gt;")
-      .replace(/"/g, "&quot;");
   }
 
   // ── Session Management ────────────────────────────────────────────────────

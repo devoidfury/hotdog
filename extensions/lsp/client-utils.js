@@ -60,7 +60,7 @@ export async function getOrCreateLspClient(
       timeoutMs: serverConfig.timeoutMs,
     });
   } catch (e) {
-    formatError(e); // Log the error
+    console.error(`[lsp] Failed to initialize client for '${languageId}': ${formatError(e)}`);
     return null;
   }
 

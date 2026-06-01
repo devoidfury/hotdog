@@ -167,6 +167,20 @@ function createLspInstance(toolName, ctx, lspConfig) {
 }
 
 /**
+ * Shared taskManager reference — set by main.js when TaskManager is created.
+ * This allows subagent tools to be created after TaskManager exists.
+ */
+let _sharedTaskManager = null;
+
+/**
+ * Set the shared taskManager reference for subagent tools.
+ * @param {Object} taskManager — TaskManager instance
+ */
+export function setSharedTaskManager(taskManager) {
+  _sharedTaskManager = taskManager;
+}
+
+/**
  * Create a tool factory that can create and register tools.
  */
 export function createToolFactory(taskManager = null, sessionCore = null) {
@@ -195,16 +209,18 @@ export function createToolFactory(taskManager = null, sessionCore = null) {
       }
 
       // Subagent tools (manager-only)
+      // Use shared taskManager if not passed directly
+      const effectiveTaskManager = taskManager || _sharedTaskManager;
       if (
         managerToolsEnabled &&
-        (taskManager || sessionCore || ctx?.sessionCore)
+        (effectiveTaskManager || sessionCore || ctx?.sessionCore)
       ) {
         const subCtor = SUBAGENT_TOOL_CONSTRUCTORS[toolName];
         if (subCtor) {
           // Pass options object with both sessionCore and taskManager
           return subCtor({
             sessionCore: sessionCore || ctx?.sessionCore || null,
-            taskManager,
+            taskManager: effectiveTaskManager,
           });
         }
       }

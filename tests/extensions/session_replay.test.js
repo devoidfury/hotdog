@@ -2,6 +2,7 @@ import { test, expect, beforeEach, afterEach } from "bun:test";
 import {
   replayEntriesIntoContext,
   readSessionEntries,
+  sessionExists,
   LOG_SOURCE,
   SessionLog,
   disabledSessionLog,
@@ -426,4 +427,132 @@ test("replayEntriesIntoContext preserves system prompt count at 0 before ensureS
   // System messages should be empty (ensureSystemPrompt was not called)
   expect(agent.context.systemMessages.length).toBe(0);
   expect(agent.context.size()).toBe(2);
+});
+
+// ── Session Restoration Tests ────────────────────────────────────────────────
+
+/**
+ * Test that session restoration works end-to-end:
+ * 1. Create a session log file
+ * 2. Verify sessionExists returns true
+ * 3. Read entries and replay into context
+ */
+test("sessionExists + readSessionEntries + replayEntriesIntoContext integration", () => {
+  const uniqueId = "test-restoration-" + Date.now();
+  const dir = join(homedir(), ".cache", "oa-agent", "sessions");
+  mkdirSync(dir, { recursive: true });
+  const testFile = join(dir, `${uniqueId}.jsonl`);
+
+  try {
+    // 1. Create session log
+    const log = new SessionLog(uniqueId);
+    log.writeInput("Hello");
+    log.writeAssistant("Hi there!");
+    log.writeToolResult("<output>done</output>", "tc_1", "bash");
+    log.writeInput("Goodbye");
+    log.writeAssistant("See you later!");
+
+    // 2. Verify sessionExists
+    expect(sessionExists(uniqueId)).toBe(true);
+
+    // 3. Read entries
+    const entries = readSessionEntries(uniqueId);
+    expect(entries.length).toBe(5);
+
+    // 4. Replay into context
+    const agent = createMockAgent();
+    const replayed = replayEntriesIntoContext(agent, entries);
+    expect(replayed).toBe(5);
+    expect(agent.context.size()).toBe(5);
+
+    // 5. Verify message order
+    const messages = agent.context.messages();
+    expect(messages[0].content).toBe("Hello");
+    expect(messages[1].content).toBe("Hi there!");
+    expect(messages[2].role).toBe("tool");
+    expect(messages[3].content).toBe("Goodbye");
+    expect(messages[4].content).toBe("See you later!");
+  } finally {
+    try {
+      rmSync(testFile);
+    } catch {}
+  }
+});
+
+test("sessionExists returns false for non-existent session", () => {
+  expect(sessionExists("this-session-does-not-exist-xyz-12345")).toBe(false);
+});
+
+test("replayEntriesIntoContext with empty entries list", () => {
+  const agent = createMockAgent();
+  const replayed = replayEntriesIntoContext(agent, []);
+  expect(replayed).toBe(0);
+  expect(agent.context.size()).toBe(0);
+});
+
+test("readSessionEntries returns empty array for non-existent session", () => {
+  const entries = readSessionEntries("non-existent-session-abc-12345");
+  expect(entries).toEqual([]);
+});
+
+test("session restoration with reset — only replays after last reset", () => {
+  const uniqueId = "test-restoration-reset-" + Date.now();
+  const dir = join(homedir(), ".cache", "oa-agent", "sessions");
+  mkdirSync(dir, { recursive: true });
+  const testFile = join(dir, `${uniqueId}.jsonl`);
+
+  try {
+    const log = new SessionLog(uniqueId);
+    log.writeInput("before reset 1");
+    log.writeAssistant("response 1");
+    log.writeReset();
+    log.writeInput("after reset");
+    log.writeAssistant("response after");
+
+    const entries = readSessionEntries(uniqueId);
+    expect(entries.length).toBe(2);
+    expect(entries[0].content).toBe("after reset");
+    expect(entries[1].content).toBe("response after");
+
+    const agent = createMockAgent();
+    const replayed = replayEntriesIntoContext(agent, entries);
+    expect(replayed).toBe(2);
+    expect(agent.context.messages()[0].content).toBe("after reset");
+  } finally {
+    try {
+      rmSync(testFile);
+    } catch {}
+  }
+});
+
+test("session restoration with compaction entries", () => {
+  const uniqueId = "test-restoration-compaction-" + Date.now();
+  const dir = join(homedir(), ".cache", "oa-agent", "sessions");
+  mkdirSync(dir, { recursive: true });
+  const testFile = join(dir, `${uniqueId}.jsonl`);
+
+  try {
+    const log = new SessionLog(uniqueId);
+    log.writeInput("first question");
+    log.writeAssistant("first answer");
+    log.writeCompaction(10, "Summarized conversation about JS");
+    log.writeInput("second question");
+    log.writeAssistant("second answer");
+
+    const entries = readSessionEntries(uniqueId);
+    expect(entries.length).toBe(5);
+
+    const agent = createMockAgent();
+    const replayed = replayEntriesIntoContext(agent, entries);
+    expect(replayed).toBe(5);
+
+    const messages = agent.context.messages();
+    // Compaction entry should be replayed as user message
+    expect(messages[2].role).toBe("user");
+    expect(messages[2].content).toContain("[Compacted 10 messages]");
+  } finally {
+    try {
+      rmSync(testFile);
+    } catch {}
+  }
 });

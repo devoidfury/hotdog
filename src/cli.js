@@ -123,6 +123,7 @@ export function parseArgs() {
       case "--compact-debug":
         options.compactDebug = true;
         break;
+      case "-s":
       case "--session-id":
         options.sessionId = args[++i];
         break;
@@ -212,7 +213,7 @@ Options:
   --no-log                  Disable session logging
   -l, --loud                Print full JSON API responses
       --compact-debug       Write compaction output to compaction.out.json
-      --session-id <id>     Resumable session ID
+  -s, --session-id <id>   Resumable session ID
       --tokens              Display token usage stats
   --theme <name>            Theme (dark, light, monochrome, or file path)
   --colors                  Enable colors

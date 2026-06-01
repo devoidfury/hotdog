@@ -2,7 +2,6 @@
 // oa-agent — AI agent harness with tool calling support.
 // CLI entry point — wired to the extension architecture.
 
-import readline from "node:readline";
 import {
   createHooks,
   createToolRegistry,
@@ -17,6 +16,14 @@ import { buildConfig } from "./config.js";
 import { formatError, isExpectedError } from "./context/error.js";
 import { OUTPUT_EVENT } from "./context/output.js";
 import { createSubcommandRegistry } from "./cli/subcommand-registry.js";
+import { TaskManager } from "./session/task_manager.js";
+import { Message } from "./context/message.js";
+import { setSharedTaskManager } from "../extensions/core-tools/index.js";
+import {
+  sessionExists,
+  readSessionEntries,
+  replayEntriesIntoContext,
+} from "../extensions/session-log/session_log.js";
 
 // ── Extension Loading ────────────────────────────────────────────────────────
 
@@ -29,6 +36,13 @@ import { createSubcommandRegistry } from "./cli/subcommand-registry.js";
  */
 async function loadExtensions(core) {
   const loaded = [];
+
+  // 0. Refresh extension — hot-reload capabilities (loaded first to track others)
+  const refreshExt = await core.extensions.load(
+    "refresh",
+    "../../extensions/refresh/index.js",
+  );
+  if (refreshExt) loaded.push(refreshExt);
 
   // 1. Compaction extension — handles context compaction
   const compactionExt = await core.extensions.load(
@@ -78,6 +92,24 @@ async function loadExtensions(core) {
     "../../extensions/mcp/index.js",
   );
   if (mcpExt) loaded.push(mcpExt);
+
+  // 8. Info-Show-Prompt extension — provides info, show-prompt subcommands
+  const { create: createInfoShowPrompt } =
+    await import("../extensions/info-show-prompt/index.js");
+  const infoExt = createInfoShowPrompt(core);
+  if (infoExt) {
+    await core.extensions.load("info-show-prompt", infoExt);
+    loaded.push(infoExt);
+  }
+
+  // 9. Session-Review extension — provides review subcommand
+  const { create: createSessionReview } =
+    await import("../extensions/session-review/index.js");
+  const reviewExt = createSessionReview(core);
+  if (reviewExt) {
+    await core.extensions.load("session-review", reviewExt);
+    loaded.push(reviewExt);
+  }
 
   return loaded;
 }
@@ -298,7 +330,9 @@ async function main() {
       return;
     }
     console.error(`Unknown subcommand: ${cli.subcommand}`);
-    console.log(`Available subcommands: ${cliSubcommandRegistry.names().join(", ")}`);
+    console.log(
+      `Available subcommands: ${cliSubcommandRegistry.names().join(", ")}`,
+    );
     process.exit(1);
   }
 
@@ -354,42 +388,97 @@ async function main() {
     markerMangler: new MarkerMangler(),
   });
 
+  // ── Create TaskManager ──────────────────────────────────────────────────
+  // buildAgent function defined here so TaskManager can use it
+  const buildAgent = async (agentConfig) => {
+    const sessionId = agentConfig.sessionId || crypto.randomUUID();
+    const agent = new Agent({
+      hooks: core.hooks,
+      toolRegistry: core.toolRegistry,
+      llmClient,
+      model: agentConfig.model || resolved.model,
+      maxIterations: agentConfig.maxIterations || config.maxIterations || 1000,
+      maxTokens: config.maxTokens || 32000,
+      hideTools: agentConfig.hideTools ?? resolved.hideTools,
+      hideThinking: agentConfig.hideThinking ?? resolved.hideThinking,
+      showTokenUse: agentConfig.showTokenUse ?? resolved.showTokenUse,
+      sink: agentConfig.sink || sink,
+      modelRegistry: modelRegistry,
+      profileName: agentConfig.profileName || resolved.profileName,
+      role: agentConfig.role || resolved.role,
+      profileBody: agentConfig.profileBody || resolved.profileBody,
+      stream: agentConfig.stream ?? resolved.stream,
+      config,
+      sessionId,
+      abortSignal: agentConfig.abortSignal || null,
+      toolWhitelist: agentConfig.toolWhitelist || null,
+    });
+
+    await agent.ensureSystemPrompt();
+
+    // Restore session from disk if a session ID was explicitly provided
+    // and a session log file exists for it
+    const explicitSessionId = cli.sessionId;
+    if (explicitSessionId && sessionId === explicitSessionId) {
+      if (sessionExists(explicitSessionId)) {
+        const entries = readSessionEntries(explicitSessionId);
+        if (entries.length > 0) {
+          // Set restoring flag to prevent duplicate log writes during replay
+          agent._isRestoring = true;
+          const replayed = replayEntriesIntoContext(agent, entries);
+          agent._isRestoring = false;
+          if (replayed > 0) {
+            console.log(
+              `Session restored: ${replayed} messages replayed from ${explicitSessionId}`,
+            );
+          }
+        }
+      }
+    }
+
+    return agent;
+  };
+
+  const taskManager = new TaskManager({
+    buildAgent,
+    llmClient,
+    modelRegistry,
+    config,
+    hooks: core.hooks,
+    maxIterations: config.maxIterations || 1000,
+  });
+
   // ── Create SessionManager with buildAgent function ──────────────────────
   const sessionManager = await SessionManager.create({
     hooks: core.hooks,
     extensions: core.extensions,
-    buildAgent: async (agentConfig) => {
-      // Build agent using core Agent with hooks and tool registry
-      const agent = new Agent({
-        hooks: core.hooks,
-        toolRegistry: core.toolRegistry,
-        llmClient,
-        model: agentConfig.model || resolved.model,
-        maxIterations: config.maxIterations || 1000,
-        maxTokens: config.maxTokens || 32000,
-        hideTools: resolved.hideTools,
-        hideThinking: resolved.hideThinking,
-        showTokenUse: resolved.showTokenUse,
-        sink,
-        modelRegistry: modelRegistry,
-        profileName: resolved.profileName,
-        role: resolved.role,
-        profileBody: resolved.profileBody,
-        stream: resolved.stream,
-        config,
-        sessionId: resolved.sessionId || crypto.randomUUID(),
-      });
-
-      // Ensure system prompt is built
-      await agent.ensureSystemPrompt();
-
-      return agent;
-    },
+    buildAgent,
+    initialConfig: { sessionId: cli.sessionId || null },
   });
+
+  // Wire taskManager to sessionManager
+  taskManager.setSessionManager(sessionManager);
+
+  // Register taskManager so subagent tools can use it
+  setSharedTaskManager(taskManager);
+
+  // Create and register subagent tools (manager-only tools)
+  const { createToolFactory, SUBAGENT_TOOL_NAMES } =
+    await import("../extensions/core-tools/index.js");
+  const subagentFactory = createToolFactory(taskManager);
+  for (const toolName of SUBAGENT_TOOL_NAMES) {
+    const tool = subagentFactory.createTool(toolName, core, null, true);
+    if (tool) {
+      core.toolRegistry.register(toolName, tool);
+    }
+  }
 
   // ── One-shot mode ───────────────────────────────────────────────────────
   if (cli.prompt) {
     const bus = new MessageBus({ sessionManager, sink });
+    // Wire up task completion (appends result to context + wakes manager)
+    taskManager.setBus(bus);
+
     bus.enqueue(cli.prompt);
     let exitCode = 0;
     try {
@@ -398,6 +487,10 @@ async function main() {
     } catch (e) {
       console.error(formatError(e));
       exitCode = 1;
+    }
+    const oneShotSessionId = sessionManager.sessionId();
+    if (oneShotSessionId) {
+      console.log(`Session: ${oneShotSessionId}`);
     }
     await core.extensions.cleanup();
     process.exit(exitCode);
@@ -412,29 +505,31 @@ async function main() {
   console.log(`Session: ${agent?.sessionId || "unknown"}`);
   console.log("Type /quit or /exit to exit.\n");
 
-  const rl = readline.createInterface({
-    input: process.stdin,
-    output: process.stdout,
-    prompt: `(${resolved.model})> `,
-  });
-
   const bus = new MessageBus({ sessionManager, sink });
+
+  // Wire up task completion (appends result to context + wakes manager)
+  taskManager.setBus(bus);
 
   // Interactive session loop
   const { runInteractiveSession } = await import("./ui/session.js");
   runInteractiveSession({
-    rl,
     sessionManager,
     bus,
     sink,
     resolved,
-    onClose: () => core.extensions.cleanup(),
+    hooks: core.hooks,
+    onClose: () => {
+      const interactiveSessionId = sessionManager.sessionId();
+      if (interactiveSessionId) {
+        console.log(`Session: ${interactiveSessionId}`);
+      }
+      return core.extensions.cleanup();
+    },
   });
   bus.run();
 }
 
 main().catch(async (e) => {
   console.error(formatError(e));
-  await core?.extensions?.cleanup();
   process.exit(1);
 });

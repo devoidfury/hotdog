@@ -20,6 +20,7 @@ export const Command = {
   Regenerate: 'regenerate',
   Skill: 'skill',
   Shell: 'shell',
+  Refresh: 'refresh',
   Unknown: 'unknown',
 };
 
@@ -140,6 +141,14 @@ export function parseCommand(cmd) {
       return { type: Command.Skill, value: null }; // List skills
     }
     return { type: Command.Skill, value: name };
+  }
+
+  // refresh [target] [--force]
+  if (cmd.startsWith('refresh')) {
+    const parts = cmd.split(/\s+/);
+    const target = parts.slice(1).filter(p => !p.startsWith('--')).join(' ') || 'list';
+    const force = parts.some(p => p === '--force');
+    return { type: Command.Refresh, value: target, force };
   }
 
   return { type: Command.Unknown, value: cmd };

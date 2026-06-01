@@ -30,7 +30,10 @@
 - **`Agent.compact(overrideKeep, debug)`** — compact context
 - **`Agent.executeCommand(cmd)`** — execute slash commands
 - **`AgentLoop`** — manages iteration counting (default max: 1000) and cancellation via `CancellationToken`
-- **`TaskManager`** — async task delegation for meta profile
+- **`_abortSignal`** — AbortSignal for task agent cancellation
+- **`_toolWhitelist`** — Array of allowed tool names for task agents
+- **`_followQueue`** — Queue for follow-up messages to running tasks
+- **`_notifyCompletion()`** — Called when task agent completes
 - **`AgentConfig`** — plain object bundling all configuration for agent construction
 
 ### Commands (`src/agent/commands.js`)
@@ -118,9 +121,12 @@ The entire agent initialization pipeline lives here — encapsulated to make it 
 ### Message Queue (`src/agent/message_queue.js`)
 - Thread-safe FIFO buffer for external event injection
 
-### Worker (`src/agent/worker.js`)
-- `TaskManager`, `TaskWorker`, async task delegation
-- Task lifecycle: spawn → LLM loop with tool support → text response → result appended to manager's MessageLog
+### Session (`src/session/`)
+- **`task_manager.js`** — `TaskManager`, `TaskHandle` — async task delegation using Agent instances
+  - Task lifecycle: spawn → Agent.run() with restricted tools → text response → result appended to manager's context
+  - Task agents are silent to UI (filtered output via AgentSink)
+  - Supports follow-up messages and cancellation via AbortController
+- **`agent_sink.js`** — `AgentSink` — output routing with task/normal mode filtering
 
 ### Tools (`src/tools/`)
 - **`registry.js`** — `ToolRegistry`, `ToolContext`, `toolDef()`, `toolResult()`, `parseToolArgs()`, `truncateOutput()`, `generateDiff()`, `validateCwdBoundary()`
@@ -129,6 +135,7 @@ The entire agent initialization pipeline lives here — encapsulated to make it 
 - **`SUBAGENT_TOOL_NAMES`** — 6 subagent tool names: `delegate_task`, `task_status`, `task_followup`, `task_interrupt`, `plan_status`, `complete_task`
 - Individual tools: `bash.js`, `write.js`, `read.js`, `edit.js`, `grep.js`, `find.js`, `fetch.js`, `question.js`, `pager.js`, `model.js`, `load_skill.js`, `project_info.js`, `review.js`, `explore.js`, `subagents.js`
 - **`createToolFactory(taskManager)`** — creates tool instances from config, supports `ToolContext`
+- **`setSharedTaskManager(taskManager)`** — sets shared reference for subagent tools (called after TaskManager is created)
 
 ### LSP Integration (`src/lsp/`)
 

@@ -1,6 +1,7 @@
 // Session Log Extension
 // Append-only JSONL audit trail for observability.
-// Hooks: context:message, tool:afterExecute, output:event
+// Hooks: context:message, output:event
+// Context messages are logged with the correct source type based on message role.
 
 import { homedir } from 'node:os';
 import { join } from 'node:path';
@@ -62,11 +63,10 @@ function messageToLogEntry(message, source) {
 
 /**
  * Create the session log extension.
+ * Uses the current agent's session ID (from the hook context) for the log file.
  */
 export function create(core) {
-  const sessionId = crypto.randomUUID();
   const cacheDir = getCacheDir();
-  const logPath = join(cacheDir, `${sessionId}.jsonl`);
 
   // Track session state
   let systemPromptWritten = false;
@@ -75,31 +75,46 @@ export function create(core) {
     hooks: {
       /**
        * Log messages as they enter the context.
+       * Uses the agent's sessionId from the hook context to determine the log file.
+       * Maps message roles to the correct log source types for proper replay.
        */
-      [HOOKS.CONTEXT_MESSAGE]: ({ message }) => {
-        const entry = messageToLogEntry(message, LOG_SOURCE.INPUT);
-        appendFileSync(logPath, JSON.stringify(entry) + '\n');
-      },
+      [HOOKS.CONTEXT_MESSAGE]: ({ message, agent }) => {
+        // Skip logging during session restoration to avoid duplicate entries
+        if (agent?._isRestoring) return;
 
-      /**
-       * Log tool results.
-       */
-      [HOOKS.TOOL_AFTER_EXECUTE]: ({ toolName, result }) => {
-        const entry = stripNulls({
-          ts: new Date().toISOString(),
-          session_id: sessionId,
-          source: LOG_SOURCE.TOOL_RESULT,
-          tool_name: toolName,
-          result: typeof result === 'string' ? result : JSON.stringify(result),
-        });
+        const sessionId = agent?.sessionId || message.sessionId || 'unknown';
+        const logPath = join(cacheDir, `${sessionId}.jsonl`);
+
+        // Map message role to the correct log source type
+        let source;
+        switch (message.role) {
+          case 'user':
+            source = LOG_SOURCE.INPUT;
+            break;
+          case 'assistant':
+            source = LOG_SOURCE.LLM;
+            break;
+          case 'tool':
+            source = LOG_SOURCE.TOOL_RESULT;
+            break;
+          case 'system':
+            source = LOG_SOURCE.SYSTEM_PROMPT;
+            break;
+          default:
+            source = LOG_SOURCE.INPUT;
+        }
+
+        const entry = messageToLogEntry(message, source);
         appendFileSync(logPath, JSON.stringify(entry) + '\n');
       },
 
       /**
        * Log compaction results.
        */
-      [HOOKS.OUTPUT_EVENT]: ({ type, data }) => {
+      [HOOKS.OUTPUT_EVENT]: ({ type, data, agent }) => {
         if (type === 'compaction_result' && data?.summary) {
+          const sessionId = agent?.sessionId || 'unknown';
+          const logPath = join(cacheDir, `${sessionId}.jsonl`);
           const entry = stripNulls({
             ts: new Date().toISOString(),
             session_id: sessionId,
@@ -112,9 +127,9 @@ export function create(core) {
       },
     },
 
-    // Expose for external use
-    sessionId,
-    logPath,
+    // Expose for external use (sessionId is dynamic, determined per-request)
+    sessionId: null,
+    logPath: null,
 
     /**
      * Read all entries from the session log.

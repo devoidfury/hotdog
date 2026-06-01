@@ -7,6 +7,7 @@
 import readline from "node:readline";
 import { spawn } from "node:child_process";
 import { parseCommand, Command } from "../core/commands.js";
+import { HOOKS } from "../hooks.js";
 
 const HELP_TEXT = `
 Commands:
@@ -42,28 +43,41 @@ Commands:
  * @param {import("../context/output.js").OutputSink} sink - The CliOutputSink instance
  * @param {object} resolved - resolved agent config (from buildConfig().resolved)
  * @param {Function} [setPromptFn] - Optional callback to set the prompt function for onMessageProcessed
+ * @param {Object} [hooks] - Optional HookSystem instance for listening to model changes
  */
 export function runInteractiveSession({
-  rl,
   bus,
   sink,
   resolved,
   setPromptFn,
   onClose,
+  hooks,
 }) {
+  const rl = readline.createInterface({
+    input: process.stdin,
+    output: process.stdout,
+    prompt: `(${resolved.model})> `,
+  });
+
   // Set the prompt function so the bus can call it after each message
   if (setPromptFn) {
     setPromptFn(() => rl.prompt());
   }
 
-  rl.prompt();
+  // Listen for model changes and update the readline prompt
+  if (hooks) {
+    const agent = bus?.sessionManager?.getAgent();
+    if (agent) {
+      hooks.on(HOOKS.MODEL_CHANGE, (data) => {
+        rl.prompt(`(${data.newModel})> `);
+      });
 
-  process.on("SIGINT", () => {
-    console.log("\nInterrupted. Cancelling...");
-    bus.cancel();
-    console.log("Cancelled.");
-    rl.prompt();
-  });
+      // Re-display prompt after agent finishes running
+      hooks.on(HOOKS.AGENT_AFTER_RUN, () => {
+        setImmediate(() => rl.prompt());
+      });
+    }
+  }
 
   rl.on("line", (line) => {
     const trimmed = line.trim();
@@ -74,8 +88,12 @@ export function runInteractiveSession({
     }
 
     // Handle shell commands directly (UI-specific, doesn't go through agent)
-    if (trimmed.startsWith("/sh ") || trimmed.startsWith("sh ") ||
-        trimmed.startsWith(":!") || trimmed.startsWith("!")) {
+    if (
+      trimmed.startsWith("/sh ") ||
+      trimmed.startsWith("/shell ") ||
+      trimmed.startsWith(":!") ||
+      trimmed.startsWith("!")
+    ) {
       handleShellCommand(trimmed, rl);
       return;
     }
@@ -102,6 +120,16 @@ export function runInteractiveSession({
     }
     process.exit(0);
   });
+
+  rl.on("SIGINT", () => {
+    // Override readline's default SIGINT behavior (which calls rl.close()).
+    // Just return to the prompt and cancel any running agent operation.
+    bus.cancel();
+    console.log("Interrupted (/quit, /exit, or ctrl-d to exit)");
+    rl.prompt();
+  });
+
+  rl.prompt();
 }
 
 /**

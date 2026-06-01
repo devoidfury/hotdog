@@ -32,13 +32,15 @@ export class Agent {
    * @param {boolean} [options.stream=true] — Enable streaming
    * @param {Object} [options.compaction] — Compaction config
    * @param {boolean} [options.compactDebug] — Write debug file
+   * @param {AbortSignal} [options.abortSignal] — Abort signal for cancellation
+   * @param {string[]} [options.toolWhitelist] — Allowed tool names (restricts available tools)
    */
   constructor(options = {}) {
     this._hooks = options.hooks;
     this._toolRegistry = options.toolRegistry;
     this._llmClient = options.llmClient;
     this._context = [];
-    this._model = options.model;
+    this.__model = options.model;
     this._maxIterations = options.maxIterations || 1000;
     this._maxTokens = options.maxTokens || 4096;
     this._hideTools = options.hideTools !== false;
@@ -57,16 +59,27 @@ export class Agent {
     this._cancelled = false;
     this._iterationCount = 0;
     this._systemPrompt = null;
+    this._isRestoring = false;
     this._toolDefs = null;
+    // Task agent support
+    this._abortSignal = options.abortSignal || null;
+    this._toolWhitelist = options.toolWhitelist || null;
+    this._followQueue = [];
   }
 
   // ── Properties ────────────────────────────────────────────────────────────
 
   get model() {
-    return this._model;
+    return this.__model;
   }
   set model(v) {
-    this._model = v;
+    const oldModel = this.__model;
+    this.__model = v;
+    this._hooks.emit(HOOKS.MODEL_CHANGE, {
+      agent: this,
+      oldModel,
+      newModel: v,
+    });
   }
 
   get context() {
@@ -108,15 +121,33 @@ export class Agent {
     // Add user input to context
     const userMsg = new Message({ role: "user", content: userInput });
     this._context.push(userMsg);
-    await this._hooks.emitAsync(HOOKS.CONTEXT_MESSAGE, { message: userMsg });
+    await this._hooks.emitAsync(HOOKS.CONTEXT_MESSAGE, {
+      message: userMsg,
+      agent: this,
+    });
 
     let iteration = 0;
     while (iteration < this._maxIterations) {
       iteration++;
       this._iterationCount = iteration;
 
+      // Check cancellation flags
       if (this._cancelled) {
         throw LlmError.Cancelled("Agent cancelled");
+      }
+      if (this._abortSignal?.aborted) {
+        throw LlmError.Cancelled("Agent aborted");
+      }
+
+      // Drain follow-up queue (for task agents)
+      while (this._followQueue.length > 0) {
+        const followUp = this._followQueue.shift();
+        const followUpMsg = new Message({ role: "user", content: followUp });
+        this._context.push(followUpMsg);
+        await this._hooks.emitAsync(HOOKS.CONTEXT_MESSAGE, {
+          message: followUpMsg,
+          agent: this,
+        });
       }
 
       // Build messages (extensions can modify via hook)
@@ -176,12 +207,27 @@ export class Agent {
       } else {
         await this._hooks.emitAsync(HOOKS.CONTEXT_MESSAGE, {
           message: assistantMsg,
+          agent: this,
+        });
+        await this._hooks.emitAsync(HOOKS.AGENT_AFTER_RUN, {
+          result: response.fullText,
+          agent: this,
         });
         return response.fullText;
       }
     }
 
     throw new Error(`Max iterations (${this._maxIterations}) reached`);
+  }
+
+  /**
+   * Called when the agent completes (for task agents).
+   * @param {string} result - The final result text
+   */
+  _notifyCompletion(result) {
+    if (this._sink && typeof this._sink.onTaskComplete === "function") {
+      this._sink.onTaskComplete(result);
+    }
   }
 
   // ── Message Building ──────────────────────────────────────────────────────
@@ -310,6 +356,20 @@ export class Agent {
       const toolCallId = tc.id || tc.toolCallId;
       const input = tc.function?.arguments || tc.input || "{}";
 
+      // Check tool whitelist (for task agents)
+      if (this._toolWhitelist && !this._toolWhitelist.includes(toolName)) {
+        const errorMsg = `Tool '${toolName}' is not available for this agent`;
+        this._emitOutput("tool_result", { toolName, input, result: errorMsg });
+        this._context.push(
+          new Message({ role: "tool", content: errorMsg, toolCallId }),
+        );
+        await this._hooks.emitAsync(HOOKS.CONTEXT_MESSAGE, {
+          message: this._context[this._context.length - 1],
+          agent: this,
+        });
+        continue;
+      }
+
       // Emit tool call event
       this._emitOutput("tool_call", { toolName, input, toolCallId });
 
@@ -333,6 +393,7 @@ export class Agent {
         );
         await this._hooks.emitAsync(HOOKS.CONTEXT_MESSAGE, {
           message: this._context[this._context.length - 1],
+          agent: this,
         });
         continue;
       }
@@ -364,7 +425,10 @@ export class Agent {
         toolCallId,
       });
       this._context.push(toolMsg);
-      await this._hooks.emitAsync(HOOKS.CONTEXT_MESSAGE, { message: toolMsg });
+      await this._hooks.emitAsync(HOOKS.CONTEXT_MESSAGE, {
+        message: toolMsg,
+        agent: this,
+      });
 
       // Check for wait tool — model is yielding control
       if (toolName === "wait") return "return";
@@ -403,8 +467,8 @@ export class Agent {
 
   _resolveModelConfig() {
     return (
-      this._modelRegistry[this._model] || {
-        name: this._model,
+      this._modelRegistry[this.__model] || {
+        name: this.__model,
         temperature: null,
         maxTokens: 4096,
       }
@@ -415,7 +479,7 @@ export class Agent {
     if (this._sink) {
       this._sink.emit({ type: OUTPUT_EVENT[type.toUpperCase()], ...data });
     }
-    this._hooks.emit(HOOKS.OUTPUT_EVENT, { type, data });
+    this._hooks.emit(HOOKS.OUTPUT_EVENT, { type, data, agent: this });
   }
 
   _xmlEscape(s) {
@@ -516,7 +580,7 @@ export class Agent {
         content: `Available models: ${Object.keys(this._modelRegistry).join(", ")}`,
       };
     }
-    this._model = cmd.value;
+    this.model = cmd.value;
     this.clearContext();
     return { content: `Switched to model: ${cmd.value}` };
   }
@@ -534,7 +598,7 @@ export class Agent {
       const tags = m.tags ? ` [${m.tags.join(", ")}]` : "";
       lines.push(`  ${name}${tags}`);
     }
-    lines.push(`\nCurrently using: ${this._model}`);
+    lines.push(`\nCurrently using: ${this.model}`);
     return { content: lines.join("\n") };
   }
 
@@ -637,7 +701,7 @@ export class Agent {
     return {
       sessionId: this._sessionId,
       context: this._context.map((m) => m.toJSON()),
-      model: this._model,
+      model: this.model,
       iterationCount: this._iterationCount,
     };
   }
@@ -649,7 +713,7 @@ export class Agent {
   deserialize(data) {
     this._sessionId = data.sessionId;
     this._context = data.context.map((m) => new Message(m));
-    this._model = data.model;
+    this.model = data.model;
     this._iterationCount = data.iterationCount || 0;
   }
 }

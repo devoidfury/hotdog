@@ -163,7 +163,8 @@ describe('Session Log Extension', () => {
     const core = createMockCore();
     const ext = createSessionLogExtension(core);
     expect(ext.hooks[HOOKS.CONTEXT_MESSAGE]).toBeDefined();
-    expect(ext.hooks[HOOKS.TOOL_AFTER_EXECUTE]).toBeDefined();
+    // Tool results are now logged via CONTEXT_MESSAGE (for tool role messages),
+    // not via TOOL_AFTER_EXECUTE hook
   });
 });
 
@@ -185,7 +186,7 @@ describe('Full Extension Chain', () => {
     const hookNames = core.hooks.hookNames();
     expect(hookNames).toContain(HOOKS.CONTEXT_FULL);        // compaction
     expect(hookNames).toContain(HOOKS.CONTEXT_MESSAGE);     // session-log
-    expect(hookNames).toContain(HOOKS.TOOL_AFTER_EXECUTE);  // session-log
+    expect(hookNames).toContain(HOOKS.OUTPUT_EVENT);        // session-log (compaction)
     expect(hookNames).toContain(HOOKS.TOOLS_REGISTER);      // core-tools
     expect(hookNames).toContain(HOOKS.SYSTEM_PROMPT_BUILD); // skills
     expect(hookNames).toContain(HOOKS.COMMAND_DISPATCH);    // skills, prompts

@@ -248,7 +248,7 @@ function buildSystemPrompt(resolved, skillsLoader, config) {
     prompt += resolved.profileBody + "\n\n";
   }
 
-  prompt += loader.buildSkillsPreamble();
+  prompt += skillsLoader.buildSkillsPreamble();
 
   // Environment marker
   prompt += `<m_fy6az93w38i7eahj>\n`;

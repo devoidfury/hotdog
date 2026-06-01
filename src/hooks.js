@@ -127,6 +127,9 @@ export const HOOKS = {
   AGENT_AFTER_RUN:    'agent:afterRun',
   AGENT_CANCELLED:    'agent:cancelled',
 
+  // Model changes
+  MODEL_CHANGE:       'model:change',
+
   // Message flow
   MESSAGES_BUILD:     'messages:build',
   MESSAGES_AFTER_LLM: 'messages:afterLLM',

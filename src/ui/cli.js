@@ -49,7 +49,7 @@ export function formatTokenUsage(
   completionTokens,
   totalTokens,
 ) {
-  return `(tokens cached:${cachedTokens} prompt:${promptTokens} completion:${completionTokens} total:${totalTokens})`;
+  return `(tokens cached:${cachedTokens} prompt:${promptTokens - cachedTokens} completion:${completionTokens} total:${totalTokens})`;
 }
 
 /**

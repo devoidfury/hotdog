@@ -1,0 +1,8 @@
+telemetry = false
+
+[test]
+coveragePathIgnorePatterns = [
+    "config/**",
+    "**/*.test.js",
+    "tests/**",
+]

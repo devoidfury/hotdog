@@ -6,64 +6,98 @@
 // Phase 2: Tools accept an optional SessionCore reference. When set, they
 // delegate to SessionCore; otherwise they fall back to TaskManager.
 
-import { toolDef, param, parseToolArgs, toolResult } from "./registry.js";
+import { toolDef, param, parseToolArgs, toolResult, ToolResult } from "./registry.js";
 import { getVisibleWorkerProfiles } from "../config.js";
 
-// ── Helper: resolve task manager or session core ───────────────────────────
+// ── Base class for subagent tools ──────────────────────────────────────────
 
 /**
- * Resolve the task management backend.
- * Returns { type: 'sessionCore', value } or { type: 'taskManager', value }.
+ * Base class for all subagent tools.
+ * Handles constructor normalization, backend resolution, and common patterns.
  */
-function resolveTaskBackend(sessionCore, taskManager) {
-  if (sessionCore) {
-    return { type: 'sessionCore', value: sessionCore };
-  }
-  if (taskManager) {
-    return { type: 'taskManager', value: taskManager };
-  }
-  return { type: 'none', value: null };
-}
-
-/**
- * Detect if an argument is a task manager (has spawnTask method) or an options object.
- */
-function isTaskManager(obj) {
-  return obj && typeof obj === 'object' && typeof obj.spawnTask === 'function';
-}
-
-// ── delegate_task ───────────────────────────────────────────────────────────
-
-/** Spawn a background task agent to perform work. */
-export class DelegateTaskTool {
+export class SubagentTool {
+  /**
+   * Construct a subagent tool. Accepts either:
+   * - Legacy: single taskManager argument (has spawnTask method)
+   * - New: options object with sessionCore and/or taskManager
+   * - Null/undefined: no backend
+   */
   constructor(options) {
     if (isTaskManager(options)) {
       // Legacy: single taskManager argument
       this._taskManager = options;
       this._sessionCore = null;
-    } else if (typeof options === 'object' && options !== null) {
+    } else if (typeof options === "object" && options !== null) {
       // New: options object with sessionCore and/or taskManager
       this._sessionCore = options.sessionCore || null;
       this._taskManager = options.taskManager || null;
     } else {
-      // Null/undefined
       this._taskManager = null;
       this._sessionCore = null;
     }
   }
 
+  /**
+   * Resolve the task management backend.
+   * Returns { type: 'sessionCore', value } or { type: 'taskManager', value }.
+   */
+  _resolveBackend() {
+    if (this._sessionCore) {
+      return { type: "sessionCore", value: this._sessionCore };
+    }
+    if (this._taskManager) {
+      return { type: "taskManager", value: this._taskManager };
+    }
+    return { type: "none", value: null };
+  }
+
+  /**
+   * Check if a backend is available. Subclasses can call this to guard execute().
+   * Returns a ToolResult error string when no backend, or the backend object otherwise.
+   */
+  _ensureBackend() {
+    const backend = this._resolveBackend();
+    if (backend.type === "none") {
+      return "Error: Task manager not available";
+    }
+    return backend;
+  }
+
+  /**
+   * Default callDisplay: parse args and show tool name with task_id.
+   * Override in subclasses for custom display.
+   */
+  callDisplay(input) {
+    const args = parseToolArgs(input);
+    return `${this.constructor.name}(${args?.task_id || "?"})`;
+  }
+}
+
+// ── Helper ──────────────────────────────────────────────────────────────────
+
+/**
+ * Detect if an argument is a task manager (has spawnTask method) or an options object.
+ */
+function isTaskManager(obj) {
+  return obj && typeof obj === "object" && typeof obj.spawnTask === "function";
+}
+
+// ── delegate_task ───────────────────────────────────────────────────────────
+
+/** Spawn a background task agent to perform work. */
+export class DelegateTaskTool extends SubagentTool {
+  static TOOL_NAME = "delegate_task";
+
   async execute(input) {
     const args = parseToolArgs(input);
     if (!args.task_id || !args.description) {
-      return toolResult("Error: task_id and description are required");
+      return ToolResult.err("Error: task_id and description are required");
     }
 
-    const backend = resolveTaskBackend(this._sessionCore, this._taskManager);
-    if (backend.type === 'none') {
-      return toolResult("Error: Task manager not available");
-    }
+    const backend = this._ensureBackend();
+    if (typeof backend === "string") return ToolResult.err(backend);
 
-    if (backend.type === 'sessionCore') {
+    if (backend.type === "sessionCore") {
       const handle = await backend.value.spawnTask(
         args.task_id,
         args.description,
@@ -72,9 +106,12 @@ export class DelegateTaskTool {
           profile: args.profile || null,
         },
       );
-      return toolResult(
+      return ToolResult.ok(
         `Task ${args.task_id} delegated (handle: ${handle.taskId})`,
-      );
+      ).withEntries({
+        task_id: args.task_id,
+        handle: handle.taskId,
+      });
     }
 
     // Legacy: TaskManager
@@ -84,13 +121,15 @@ export class DelegateTaskTool {
       args.worker_model || null,
       args.profile || null,
     );
-    return toolResult(
+    return ToolResult.ok(
       `Task ${args.task_id} delegated (handle: ${handle.taskId})`,
-    );
+    ).withEntries({
+      task_id: args.task_id,
+      handle: handle.taskId,
+    });
   }
 
   toToolDef() {
-    // Build dynamic list of visible worker profiles
     const config = this._taskManager?._config;
     const visibleProfiles = config ? getVisibleWorkerProfiles(config) : [];
     const profileList =
@@ -114,7 +153,7 @@ export class DelegateTaskTool {
           ),
           profile: param(
             "string",
-            `Optional profile name to customize the worker agent\'s behavior (role, tools, model). Defaults to \'task-default\'.${visibleProfiles.length > 0 ? ` Available profiles: ${visibleProfiles.join(", ")}.` : ""}`,
+            `Optional profile name to customize the worker agent\'s behavior (role, tools, model). Defaults to 'task-default'.${visibleProfiles.length > 0 ? ` Available profiles: ${visibleProfiles.join(", ")}.` : ""}`,
           ),
         },
         required: ["task_id", "description"],
@@ -132,42 +171,32 @@ export class DelegateTaskTool {
 // ── task_status ─────────────────────────────────────────────────────────────
 
 /** Check the status of a specific running task agent. */
-export class TaskStatusTool {
-  constructor(options) {
-    if (isTaskManager(options)) {
-      this._taskManager = options;
-      this._sessionCore = null;
-    } else if (typeof options === 'object' && options !== null) {
-      this._sessionCore = options.sessionCore || null;
-      this._taskManager = options.taskManager || null;
-    } else {
-      this._taskManager = null;
-      this._sessionCore = null;
-    }
-  }
+export class TaskStatusTool extends SubagentTool {
+  static TOOL_NAME = "task_status";
 
   async execute(input) {
     const args = parseToolArgs(input);
     if (!args.task_id) {
-      return toolResult("Error: task_id is required");
+      return ToolResult.err("Error: task_id is required");
     }
 
-    const backend = resolveTaskBackend(this._sessionCore, this._taskManager);
-    if (backend.type === 'none') {
-      return toolResult("Error: Task manager not available");
-    }
+    const backend = this._ensureBackend();
+    if (typeof backend === "string") return ToolResult.err(backend);
 
     let status;
-    if (backend.type === 'sessionCore') {
+    if (backend.type === "sessionCore") {
       status = backend.value.taskOrchestrator.taskStatus(args.task_id);
     } else {
       status = backend.value.taskStatus(args.task_id);
     }
 
     if (status === null) {
-      return toolResult(`Task ${args.task_id} not found`);
+      return ToolResult.err(`Task ${args.task_id} not found`);
     }
-    return toolResult(`Task ${args.task_id}: ${status}`);
+    return ToolResult.ok(`Task ${args.task_id}: ${status}`).withEntries({
+      task_id: args.task_id,
+      status,
+    });
   }
 
   toToolDef() {
@@ -192,42 +221,31 @@ export class TaskStatusTool {
 // ── task_followup ───────────────────────────────────────────────────────────
 
 /** Send a follow-up message to a running task agent. */
-export class TaskFollowupTool {
-  constructor(options) {
-    if (isTaskManager(options)) {
-      this._taskManager = options;
-      this._sessionCore = null;
-    } else if (typeof options === 'object' && options !== null) {
-      this._sessionCore = options.sessionCore || null;
-      this._taskManager = options.taskManager || null;
-    } else {
-      this._taskManager = null;
-      this._sessionCore = null;
-    }
-  }
+export class TaskFollowupTool extends SubagentTool {
+  static TOOL_NAME = "task_followup";
 
   async execute(input) {
     const args = parseToolArgs(input);
     if (!args.task_id || !args.message) {
-      return toolResult("Error: task_id and message are required");
+      return ToolResult.err("Error: task_id and message are required");
     }
 
-    const backend = resolveTaskBackend(this._sessionCore, this._taskManager);
-    if (backend.type === 'none') {
-      return toolResult("Error: Task manager not available");
-    }
+    const backend = this._ensureBackend();
+    if (typeof backend === "string") return ToolResult.err(backend);
 
     let ok;
-    if (backend.type === 'sessionCore') {
+    if (backend.type === "sessionCore") {
       ok = backend.value.taskOrchestrator.followUp(args.task_id, args.message);
     } else {
       ok = backend.value.sendFollowUp(args.task_id, args.message);
     }
 
     if (ok) {
-      return toolResult(`Follow-up sent to task ${args.task_id}`);
+      return ToolResult.ok(`Follow-up sent to task ${args.task_id}`).withEntry(
+        "task_id", args.task_id,
+      );
     }
-    return toolResult(`Failed to send follow-up to task ${args.task_id}`);
+    return ToolResult.err(`Failed to send follow-up to task ${args.task_id}`);
   }
 
   toToolDef() {
@@ -254,42 +272,31 @@ export class TaskFollowupTool {
 // ── task_interrupt ──────────────────────────────────────────────────────────
 
 /** Interrupt (cancel) a running task agent. */
-export class TaskInterruptTool {
-  constructor(options) {
-    if (isTaskManager(options)) {
-      this._taskManager = options;
-      this._sessionCore = null;
-    } else if (typeof options === 'object' && options !== null) {
-      this._sessionCore = options.sessionCore || null;
-      this._taskManager = options.taskManager || null;
-    } else {
-      this._taskManager = null;
-      this._sessionCore = null;
-    }
-  }
+export class TaskInterruptTool extends SubagentTool {
+  static TOOL_NAME = "task_interrupt";
 
   async execute(input) {
     const args = parseToolArgs(input);
     if (!args.task_id) {
-      return toolResult("Error: task_id is required");
+      return ToolResult.err("Error: task_id is required");
     }
 
-    const backend = resolveTaskBackend(this._sessionCore, this._taskManager);
-    if (backend.type === 'none') {
-      return toolResult("Error: Task manager not available");
-    }
+    const backend = this._ensureBackend();
+    if (typeof backend === "string") return ToolResult.err(backend);
 
     let ok;
-    if (backend.type === 'sessionCore') {
+    if (backend.type === "sessionCore") {
       ok = backend.value.taskOrchestrator.interrupt(args.task_id);
     } else {
       ok = backend.value.interruptTask(args.task_id);
     }
 
     if (ok) {
-      return toolResult(`Task ${args.task_id} interrupted`);
+      return ToolResult.ok(`Task ${args.task_id} interrupted`).withEntry(
+        "task_id", args.task_id,
+      );
     }
-    return toolResult(`Failed to interrupt task ${args.task_id}`);
+    return ToolResult.err(`Failed to interrupt task ${args.task_id}`);
   }
 
   toToolDef() {
@@ -314,63 +321,57 @@ export class TaskInterruptTool {
 // ── plan_status ─────────────────────────────────────────────────────────────
 
 /** Check the status of task agents. Shows all active tasks or the status of a specific task. */
-export class PlanStatusTool {
-  constructor(options) {
-    if (isTaskManager(options)) {
-      this._taskManager = options;
-      this._sessionCore = null;
-    } else if (typeof options === 'object' && options !== null) {
-      this._sessionCore = options.sessionCore || null;
-      this._taskManager = options.taskManager || null;
-    } else {
-      this._taskManager = null;
-      this._sessionCore = null;
-    }
-  }
+export class PlanStatusTool extends SubagentTool {
+  static TOOL_NAME = "plan_status";
 
   async execute(input) {
     const args = parseToolArgs(input);
 
-    const backend = resolveTaskBackend(this._sessionCore, this._taskManager);
-    if (backend.type === 'none') {
-      return toolResult("Error: Task manager not available");
-    }
+    const backend = this._ensureBackend();
+    if (typeof backend === "string") return ToolResult.err(backend);
 
     if (args.task_id) {
       let status;
-      if (backend.type === 'sessionCore') {
+      if (backend.type === "sessionCore") {
         status = backend.value.taskOrchestrator.taskStatus(args.task_id);
       } else {
         status = backend.value.taskStatus(args.task_id);
       }
       if (status === null) {
-        return toolResult(`Task ${args.task_id} not found`);
+        return ToolResult.err(`Task ${args.task_id} not found`);
       }
-      return toolResult(`Task ${args.task_id}: ${status}`);
+      return ToolResult.ok(`Task ${args.task_id}: ${status}`).withEntries({
+        task_id: args.task_id,
+        status,
+      });
     }
 
     let active;
-    if (backend.type === 'sessionCore') {
+    if (backend.type === "sessionCore") {
       active = backend.value.taskOrchestrator.activeTasks();
     } else {
       active = backend.value.activeTasks();
     }
 
     if (active.length === 0) {
-      return toolResult("No active tasks");
+      return ToolResult.ok("No active tasks").withEntry(
+        "active_task_count", "0",
+      );
     }
 
     const lines = ["Active tasks:"];
     for (const taskId of active) {
       let status;
-      if (backend.type === 'sessionCore') {
+      if (backend.type === "sessionCore") {
         status = backend.value.taskOrchestrator.taskStatus(taskId);
       } else {
         status = backend.value.taskStatus(taskId);
       }
       lines.push(`  ${taskId} — ${status}`);
     }
-    return toolResult(lines.join("\n"));
+    return ToolResult.ok(lines.join("\n")).withEntry(
+      "active_task_count", String(active.length),
+    );
   }
 
   toToolDef() {
@@ -398,23 +399,27 @@ export class PlanStatusTool {
 // ── complete_task ───────────────────────────────────────────────────────────
 
 /** Mark a task as complete. The task agent\'s result is already appended to the manager\'s context. */
-export class CompleteTaskTool {
+export class CompleteTaskTool extends SubagentTool {
+  static TOOL_NAME = "complete_task";
+
   constructor(taskManager) {
-    this._taskManager = taskManager;
+    super(taskManager);
   }
 
   async execute(input) {
     const args = parseToolArgs(input);
     if (!args.task_id) {
-      return toolResult("Error: task_id is required");
+      return ToolResult.err("Error: task_id is required");
     }
 
     const tm = this._taskManager;
     if (!tm) {
-      return toolResult("Error: Task manager not available");
+      return ToolResult.err("Error: Task manager not available");
     }
 
-    return toolResult(`Task ${args.task_id} marked as complete`);
+    return ToolResult.ok(`Task ${args.task_id} marked as complete`).withEntry(
+      "task_id", args.task_id,
+    );
   }
 
   toToolDef() {
@@ -439,20 +444,22 @@ export class CompleteTaskTool {
 // ── wait ────────────────────────────────────────────────────────────────────
 
 /** Wait for user input — signal that the manager has nothing more to do. */
-export class WaitTool {
+export class WaitTool extends SubagentTool {
   static TOOL_NAME = "wait";
 
   constructor(taskManager) {
-    this._taskManager = taskManager;
+    super(taskManager);
   }
 
   async execute(input) {
     const args = parseToolArgs(input);
     const message = args.message || null;
     const note = message ? ` Note: ${message}` : "";
-    return toolResult(
+    return ToolResult.ok(
       `Manager has nothing more to do. Waiting for user input.${note}`,
-    );
+    ).withEntries({
+      ...(message ? { message } : {}),
+    });
   }
 
   toToolDef() {

@@ -18,7 +18,7 @@ export class ReadTool {
   toToolDef() {
     return toolDef(
       ReadTool.TOOL_NAME,
-      `Read a file's contents with optional pagination. Supports line-based extraction with offset/limit. Returns an error for directories with a depth-1 listing instead. **The offset is based on lines NOT pages** -- so if you see lines 1-${DEFAULT_READ_TOOL_LIMIT}, and then want to see lines ${DEFAULT_READ_TOOL_LIMIT + 1}-${DEFAULT_READ_TOOL_LIMIT * 2}, use an offset of ${DEFAULT_READ_TOOL_LIMIT}.`,
+      `Read a file's contents with optional pagination. Supports line-based extraction with offset/limit. Returns an error for directories with a depth-1 listing instead.`,
       {
         schema: "https://json-schema.org/draft/2020-12/schema",
         properties: {

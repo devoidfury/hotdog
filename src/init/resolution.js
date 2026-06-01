@@ -41,7 +41,9 @@ export async function buildConfig(cliArgv) {
   });
 
   const { buildModelRegistry } = await import("../config.js");
-  const modelRegistry = buildModelRegistry({ providers: config.providers || [] });
+  const modelRegistry = buildModelRegistry({
+    providers: config.providers || [],
+  });
 
   return { resolved, modelRegistry, providers: config.providers || [] };
 }
@@ -99,17 +101,6 @@ function loadProfileFiles(profilesPath) {
 // ── Resolution Helpers ─────────────────────────────────────────────────────
 
 /**
- * Resolve format string: CLI → config → default.
- */
-export function resolveFormatString(cliValue, configValue, defaultValue) {
-  if (cliValue !== undefined && cliValue !== null && cliValue !== "")
-    return cliValue;
-  if (configValue !== undefined && configValue !== null && configValue !== "")
-    return configValue;
-  return defaultValue;
-}
-
-/**
  * Resolve no-log: CLI → env (OA_AGENT_LOG, OA_AGENT_NO_LOG) → config → false.
  */
 export function resolveNoLog(cli, config) {
@@ -130,15 +121,6 @@ export function resolveTheme(cliTheme, configTheme) {
   if (configTheme !== undefined && configTheme !== null && configTheme !== "")
     return configTheme;
   return "dark";
-}
-
-/**
- * Resolve color usage: CLI colors flag → config colors → true (default).
- */
-export function resolveColors(cliColors, configColors) {
-  if (cliColors !== undefined) return cliColors;
-  if (configColors !== undefined) return configColors;
-  return true;
 }
 
 /**
@@ -566,32 +548,19 @@ export function buildAgentConfig(options) {
       : profile.preloadSkills || [];
 
   // Format strings: CLI → config → default
-  const thinkerFormat = resolveFormatString(
-    cli.thinker,
-    config.thinker,
-    "[Thinking: {}]",
-  );
-  const toolFormat = resolveFormatString(
-    cli.toolfmt,
-    config.toolfmt,
-    "  → {} {}",
-  );
-  const toolOutputFmt = resolveFormatString(
-    cli.toolOutputFmt,
-    config.toolOutputFmt,
-    "----\n{}\n----",
-  );
+  const thinkerFormat = cli.thinker ?? config.thinker ?? "[Thinking: {}]";
+  const toolFormat = cli.toolfmt ?? config.toolfmt ?? "  → {} {}";
+  const toolOutputFmt =
+    cli.toolOutputFmt ?? config.toolOutputFmt ?? "----\n{}\n----";
 
   // No-log resolution
   const noLog = resolveNoLog(cli.noLog, config);
 
   // Theme resolution
   const theme = resolveTheme(cli.theme, config.theme);
-  const useColors = cli.noColors
-    ? false
-    : resolveColorPalette(config) !== null
-      ? true
-      : resolveColors(cli.colors, config.colors);
+  const useColors =
+    !cli.noColors &&
+    (resolveColorPalette(config) || (cli.colors ?? config.colors ?? true));
 
   // System prompt template init
   const systemPromptTemplate = initSystemPromptTemplate(
@@ -615,10 +584,7 @@ export function buildAgentConfig(options) {
     aspects,
     profileBody,
     preloadSkills,
-    hideTools:
-      cli.hideTools === false
-        ? false
-        : config.hideTools !== false,
+    hideTools: cli.hideTools === false ? false : config.hideTools !== false,
     hideThinking:
       cli.hideThinking === true
         ? true
@@ -645,8 +611,7 @@ export function buildAgentConfig(options) {
     profiles,
     // Chat/embedding timeouts
     chatTimeout: cli.chatTimeout || config.chatTimeoutSecs,
-    embeddingsTimeout:
-      cli.embeddingsTimeout || config.embeddingsTimeoutSecs,
+    embeddingsTimeout: cli.embeddingsTimeout || config.embeddingsTimeoutSecs,
     // Session / paths
     sessionId: cli.sessionId || null,
     skillsPath: cli.skillsPath || config.skillsPath,

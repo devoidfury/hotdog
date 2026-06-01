@@ -415,15 +415,17 @@ export class Agent {
 
       const durationMs = Date.now() - start;
 
-      // Add duration to result
-      if (typeof result === "string") {
-        result = `${result}\n[duration: ${durationMs}ms]`;
-      } else if (result && typeof result === "object") {
-        result.duration_ms = durationMs;
+      // Add duration to result metadata
+      if (result && typeof result === "object") {
+        if (result instanceof ToolResult) {
+          result.withEntry('duration_ms', durationMs);
+        } else {
+          result.duration_ms = durationMs;
+        }
       }
 
-      // Convert to string for API
-      result = toolResult(result);
+      // Convert to string for API — XML-formatted when tool name is available
+      result = toolResult(result, toolName);
 
       this._emitToolResult(toolName, input, result, toolCallId);
 

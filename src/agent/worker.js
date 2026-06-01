@@ -216,7 +216,7 @@ export class TaskWorker {
 
           try {
             const tool = registry.get(toolName);
-            const toolResultStr = toolResult(await tool.execute(input, {}));
+            const toolResultStr = toolResult(await tool.execute(input, {}), toolName);
             taskContext.addMessage({
               role: "tool",
               content: toolResultStr,
@@ -227,6 +227,7 @@ export class TaskWorker {
           } catch (e) {
             const errorMsg = toolResult(
               `Error executing tool ${toolName}: ${e.message}`,
+              toolName,
             );
             taskContext.addMessage({
               role: "tool",

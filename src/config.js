@@ -4,8 +4,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { cwd } from "node:process";
 
-import { parseFrontMatter } from "./utils.js";
-import { deepMerge } from "./utils.js";
+import { parseFrontMatter, deepMerge, loadAspects } from "./utils.js";
 import { render } from "./context/render.js";
 
 // ── Extension Config Helpers ──────────────────────────────────────────────
@@ -444,31 +443,6 @@ function resolveModel(
 // ── Switch Profile ─────────────────────────────────────────────────────
 
 /**
- * Load aspects from names and a profiles path.
- */
-function loadAspectsFromNames(aspectNames, profilesPath) {
-  if (!aspectNames || aspectNames.length === 0) return [];
-
-  const aspects = [];
-
-  for (const name of aspectNames) {
-    const fileName = `${name}.aspect.md`;
-    const filePath = path.join(profilesPath, "aspects", fileName);
-    try {
-      const content = fs.readFileSync(filePath, "utf-8");
-      const trimmed = content.trim();
-      if (trimmed.length > 0) {
-        aspects.push({ name, content: trimmed });
-      }
-    } catch {
-      // Silent skip
-    }
-  }
-
-  return aspects;
-}
-
-/**
  * Resolve a single profile's SwitchProfile data.
  */
 export function resolveSwitchProfile(
@@ -488,8 +462,8 @@ export function resolveSwitchProfile(
   const body = fileProfile?.body || "";
   const model = configProfile?.model || null;
 
-  // Load aspects
-  const aspects = loadAspectsFromNames(aspectNames, profilesPath);
+  // Load aspects from the profiles aspects subdirectory
+  const aspects = loadAspects(aspectNames, path.join(profilesPath, "aspects"));
 
   return { role, body, model, aspects };
 }

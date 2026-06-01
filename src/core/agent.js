@@ -8,6 +8,7 @@ import { OUTPUT_EVENT } from "../context/output.js";
 import { HOOKS } from "../hooks.js";
 import { ToolContext, xmlEscape } from "./tool-registry.js";
 import { createSlashCommandRegistry } from "./slash-command-registry.js";
+import { DEFAULT_MAX_TOKENS } from "../config.js";
 
 /**
  * Minimal Agent that runs the LLM loop and delegates behavior to hooks.
@@ -20,7 +21,7 @@ export class Agent {
    * @param {Object} options.llmClient — LlmClient instance
    * @param {string} options.model — Model name
    * @param {number} [options.maxIterations=1000] — Max loop iterations
-   * @param {number} [options.maxTokens=4096] — Token threshold for context:full
+   * @param {number} [options.maxTokens] — Token threshold for context:full (default: DEFAULT_MAX_TOKENS)
    * @param {boolean} [options.hideTools=true] — Hide tool display
    * @param {boolean} [options.hideThinking=false] — Hide thinking display
    * @param {boolean} [options.showTokenUse=true] — Show token usage
@@ -42,7 +43,7 @@ export class Agent {
     this._context = [];
     this.__model = options.model;
     this._maxIterations = options.maxIterations || 1000;
-    this._maxTokens = options.maxTokens || 4096;
+    this._maxTokens = options.maxTokens || DEFAULT_MAX_TOKENS;
     this._hideTools = options.hideTools !== false;
     this._hideThinking = options.hideThinking === true;
     this._showTokenUse = options.showTokenUse !== false;
@@ -540,7 +541,7 @@ export class Agent {
       this._modelRegistry[this.__model] || {
         name: this.__model,
         temperature: null,
-        maxTokens: 4096,
+        maxTokens: DEFAULT_MAX_TOKENS,
       }
     );
   }

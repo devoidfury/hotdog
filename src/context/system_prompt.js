@@ -6,36 +6,22 @@ import { join } from "node:path";
 import { cwd } from "node:process";
 import { initSystemPromptTemplate as _initTemplate } from "../config.js";
 import { render, render as renderTemplate } from "./render.js";
+import { loadAspects as _loadAspects } from "../utils.js";
 
 export { renderTemplate };
 
 // ── Aspect Loading ─────────────────────────────────────────────────────────
 
 /**
- * Load aspect files from config/aspects/.
- * Files are named <name>.aspect.md.
+ * Load aspect files from the default aspects directory (CWD/config/aspects).
+ * Files are named `<name>.aspect.md`.
+ *
+ * @param {string[]} aspectNames - Names of aspects to load.
+ * @returns {{name: string, content: string}[]} Array of loaded aspects.
  */
 export function loadAspects(aspectNames) {
-  if (!aspectNames || aspectNames.length === 0) return [];
-
   const aspectsDir = join(cwd(), "config", "aspects");
-  const aspects = [];
-
-  for (const name of aspectNames) {
-    const fileName = `${name}.aspect.md`;
-    const path = join(aspectsDir, fileName);
-    try {
-      const content = readFileSync(path, "utf-8");
-      const trimmed = content.trim();
-      if (trimmed.length > 0) {
-        aspects.push({ name, content: trimmed });
-      }
-    } catch (e) {
-      console.error(e);
-    }
-  }
-
-  return aspects;
+  return _loadAspects(aspectNames, aspectsDir);
 }
 
 // ── AGENTS.md Loading ──────────────────────────────────────────────────────

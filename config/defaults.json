@@ -134,9 +134,9 @@
           "tags": ["general", "powerful", "instruct"]
         },
         {
-          "name": "qwen3.5-122b-a10b",
+          "name": "qwopus3.6-27b",
           "context-limit": 262144,
-          "tags": ["general", "powerful", "instruct", "slow"]
+          "tags": ["general", "powerful", "slow"]
         }
       ]
     },

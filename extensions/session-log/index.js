@@ -7,6 +7,7 @@ import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { appendFileSync, readFileSync, existsSync, readdirSync, mkdirSync } from 'node:fs';
 import { HOOKS } from '../../src/hooks.js';
+import { stripNulls } from '../../src/session/session-log.js';
 
 // ── Log Source Types ────────────────────────────────────────────────────────
 
@@ -29,19 +30,6 @@ function getCacheDir() {
     mkdirSync(cacheDir, { recursive: true });
   }
   return cacheDir;
-}
-
-/**
- * Strip null fields from an object for serialization.
- */
-function stripNulls(obj) {
-  const result = {};
-  for (const [k, v] of Object.entries(obj)) {
-    if (v !== null) {
-      result[k] = v;
-    }
-  }
-  return result;
 }
 
 /**
@@ -71,6 +59,8 @@ export function create(core) {
   // Track session state
   let systemPromptWritten = false;
   let isRestoring = false;
+  // Track the most recent session ID so readEntries/getLogPath work correctly.
+  let lastSessionId = null;
 
   return {
     hooks: {
@@ -91,6 +81,7 @@ export function create(core) {
         if (isRestoring) return;
 
         const sessionId = agent?.sessionId || message.sessionId || 'unknown';
+        lastSessionId = sessionId;
         const logPath = join(cacheDir, `${sessionId}.jsonl`);
 
         // Map message role to the correct log source type
@@ -122,6 +113,7 @@ export function create(core) {
       [HOOKS.OUTPUT_EVENT]: ({ type, data, agent }) => {
         if (type === 'compaction_result' && data?.summary) {
           const sessionId = agent?.sessionId || 'unknown';
+          lastSessionId = sessionId;
           const logPath = join(cacheDir, `${sessionId}.jsonl`);
           const entry = stripNulls({
             ts: new Date().toISOString(),
@@ -141,8 +133,11 @@ export function create(core) {
 
     /**
      * Read all entries from the session log.
+     * Uses the most recently observed session ID.
      */
     readEntries() {
+      if (!lastSessionId) return [];
+      const logPath = join(cacheDir, `${lastSessionId}.jsonl`);
       if (!existsSync(logPath)) return [];
       const content = readFileSync(logPath, 'utf-8');
       return content.split('\n').filter(Boolean).map(line => JSON.parse(line));
@@ -150,9 +145,11 @@ export function create(core) {
 
     /**
      * Get the session log path.
+     * Returns the path for the most recently observed session ID.
      */
     getLogPath() {
-      return logPath;
+      if (!lastSessionId) return null;
+      return join(cacheDir, `${lastSessionId}.jsonl`);
     },
   };
 }

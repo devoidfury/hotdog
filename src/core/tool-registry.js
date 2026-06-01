@@ -488,7 +488,7 @@ export function fileSize(filePath) {
 
 /**
  * Check if a path is writable.
- * Tests by creating a temp file in the parent dir (if new) or opening for write (if existing).
+ * Tests by creating a temp file in the parent dir (if new) or checking write access (if existing).
  * Returns true if writable, throws if not.
  */
 export function checkWritable(filePath) {
@@ -505,10 +505,10 @@ export function checkWritable(filePath) {
     }
   }
 
-  // If file exists, check if it can be opened for writing
+  // If file exists, check write permission via access (no file descriptor leak)
   if (fs.existsSync(filePath)) {
     try {
-      fs.openSync(filePath, "w");
+      fs.accessSync(filePath, fs.constants.W_OK);
     } catch (e) {
       throw new Error(`File '${filePath}' is not writable: ${e.message}`);
     }

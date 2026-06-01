@@ -1,4 +1,6 @@
 import { YAML } from "bun";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 
 /**
  * Parse YAML front matter from a markdown string.
@@ -10,6 +12,36 @@ export function parseFrontMatter(content) {
   const body = m[2] || "";
   const fm = YAML.parse(m[1]);
   return { frontMatter: fm, body };
+}
+
+/**
+ * Load aspect files from a directory.
+ * Files are named `<name>.aspect.md`.
+ *
+ * @param {string[]} aspectNames - Names of aspects to load.
+ * @param {string} aspectsDir - Directory containing `.aspect.md` files.
+ * @returns {{name: string, content: string}[]} Array of loaded aspects.
+ */
+export function loadAspects(aspectNames, aspectsDir) {
+  if (!aspectNames || aspectNames.length === 0) return [];
+
+  const aspects = [];
+
+  for (const name of aspectNames) {
+    const fileName = `${name}.aspect.md`;
+    const filePath = join(aspectsDir, fileName);
+    try {
+      const content = readFileSync(filePath, "utf-8");
+      const trimmed = content.trim();
+      if (trimmed.length > 0) {
+        aspects.push({ name, content: trimmed });
+      }
+    } catch {
+      // Silent skip — aspect file not found or unreadable
+    }
+  }
+
+  return aspects;
 }
 
 /**

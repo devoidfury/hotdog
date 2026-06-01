@@ -4,7 +4,7 @@ import fs from "node:fs";
 import { join } from "node:path";
 import { cwd } from "node:process";
 import { DEFAULT_MODEL, DEFAULT_ROLE } from "../config.js";
-import { parseFrontMatter } from "../render_md.js";
+import { parseFrontMatter } from "../utils.js";
 import { render } from "../context/render.js";
 
 // ── Unified Config Builder ───────────────────────────────────────────────────

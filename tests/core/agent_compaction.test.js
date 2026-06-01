@@ -1,247 +1,256 @@
-import { describe, it, expect } from 'bun:test';
-import { Agent } from '../src/agent/agent.js';
-import { Message, MessageLog } from '../src/context/index.js';
-import { NoopSink } from '../src/context/output.js';
-import { OUTPUT_EVENT } from '../src/context/output.js';
+import { describe, it, expect, beforeEach } from "bun:test";
+import { Agent } from "../../src/core/agent.js";
+import { NoopSink } from "../../src/context/output.js";
+import { Message } from "../../src/context/message.js";
+import { createHooks } from "../../src/core/hooks.js";
 
-describe('Agent.compactMessages', () => {
-  it('returns null when messages are below threshold', async () => {
+describe("Agent.compaction behavior", () => {
+  let hooks;
+
+  beforeEach(() => {
+    hooks = createHooks();
+  });
+
+  it("creates with compaction config", () => {
     const agent = new Agent({
+      hooks,
       compaction: { enabled: true, keepRecentMessages: 10 },
       sink: new NoopSink(),
     });
-    agent.ensureSystemPrompt();
-    agent.addInput('Hello');
-    agent.addResponse('Hi there!');
-    const result = await agent.compactMessages();
-    expect(result).toBeNull();
+    expect(agent._compaction.enabled).toBe(true);
+    expect(agent._compaction.keepRecentMessages).toBe(10);
   });
 
-  it('returns null when compaction is disabled', async () => {
+  it("creates with compaction disabled", () => {
     const agent = new Agent({
+      hooks,
       compaction: { enabled: false, keepRecentMessages: 1 },
       sink: new NoopSink(),
     });
-    agent.ensureSystemPrompt();
-    for (let i = 0; i < 50; i++) {
-      agent.addInput(`User message ${i}`);
-      agent.addResponse(`Response ${i}`);
-    }
-    const result = await agent.compactMessages();
-    expect(result).toBeNull();
+    expect(agent._compaction.enabled).toBe(false);
   });
 
-  it('emits COMPACTING event when compaction triggers', async () => {
-    const events = [];
-    const mockSink = {
-      emit: (event) => { events.push(event); },
-    };
+  it("has hideTools default true", () => {
     const agent = new Agent({
-      compaction: { enabled: true, keepRecentMessages: 1 },
-      sink: mockSink,
-    });
-    agent.ensureSystemPrompt();
-    for (let i = 0; i < 50; i++) {
-      agent.addInput(`User message ${i}`);
-      agent.addResponse(`Response ${i}`);
-    }
-
-    const mockClient = {
-      chatStreamCancellable: async function* () {
-        yield { type: 'content', content: 'Summarized context' };
-      },
-    };
-    agent.client = mockClient;
-
-    await agent.compactMessages();
-
-    const compactingEvent = events.find(e => e.type === OUTPUT_EVENT.COMPACTING);
-    expect(compactingEvent).toBeDefined();
-    expect(compactingEvent.messageCount).toBeGreaterThan(0);
-  });
-
-  it('rebuilds context with summary after compaction', async () => {
-    const agent = new Agent({
-      compaction: { enabled: true, keepRecentMessages: 1 },
+      hooks,
       sink: new NoopSink(),
     });
-    agent.ensureSystemPrompt();
-    agent.addInput('First user message');
-    agent.addResponse('First response');
-    agent.addInput('Second user message');
-    agent.addResponse('Second response');
-
-    const mockClient = {
-      chatStreamCancellable: async function* () {
-        yield { type: 'content', content: 'Summarized conversation about user queries' };
-      },
-    };
-    agent.client = mockClient;
-
-    for (let i = 0; i < 50; i++) {
-      agent.addInput(`User message ${i}`);
-      agent.addResponse(`Response ${i}`);
-    }
-
-    await agent.compactMessages();
-
-    // Context should have been rebuilt with summary
-    const messages = agent.context.getMessages();
-    // Summary is wrapped in a previous-context-summary tag
-    const summaryMsg = messages.find(m => m.role === 'user' && m.content && m.content.includes('<previous-context-summary>'));
-    expect(summaryMsg).toBeDefined();
-    expect(summaryMsg.content).toContain('Summarized conversation about user queries');
-
-    // Should have kept recent messages
-    const assistantMsg = messages.find(m => m.role === 'assistant' && m.content && m.content.includes('Response 49'));
-    expect(assistantMsg).toBeDefined();
+    expect(agent.hideTools).toBe(true);
   });
 
-  it('respects overrideKeep parameter', async () => {
+  it("has hideThinking default false", () => {
     const agent = new Agent({
-      compaction: { enabled: true, keepRecentMessages: 10 },
+      hooks,
       sink: new NoopSink(),
     });
-    agent.ensureSystemPrompt();
-    for (let i = 0; i < 50; i++) {
-      agent.addInput(`User message ${i}`);
-      agent.addResponse(`Response ${i}`);
-    }
-
-    const mockClient = {
-      chatStreamCancellable: async function* () {
-        yield { type: 'content', content: 'Summary' };
-      },
-    };
-    agent.client = mockClient;
-
-    await agent.compactMessages(1);
-
-    const messages = agent.context.getMessages();
-    const summaryMsg = messages.find(m => m.role === 'user' && m.content && m.content.includes('<previous-context-summary>'));
-    expect(summaryMsg).toBeDefined();
+    expect(agent.hideThinking).toBe(false);
   });
 
-  it('writes compaction debug file when enabled', async () => {
-    const fs = require('node:fs');
+  it("toggles hideTools via property setter", () => {
     const agent = new Agent({
-      compaction: { enabled: true, keepRecentMessages: 1 },
+      hooks,
       sink: new NoopSink(),
-      compactDebug: true,
     });
-    agent.ensureSystemPrompt();
-    for (let i = 0; i < 50; i++) {
-      agent.addInput(`User message ${i}`);
-      agent.addResponse(`Response ${i}`);
-    }
-
-    const mockClient = {
-      chatStreamCancellable: async function* () {
-        yield { type: 'content', content: 'Summary' };
-      },
-    };
-    agent.client = mockClient;
-
-    try {
-      fs.unlinkSync('compaction.out.json');
-    } catch {}
-
-    await agent.compactMessages();
-
-    expect(fs.existsSync('compaction.out.json')).toBe(true);
-    const content = JSON.parse(fs.readFileSync('compaction.out.json', 'utf-8'));
-    expect(Array.isArray(content)).toBe(true);
-
-    fs.unlinkSync('compaction.out.json');
+    expect(agent.hideTools).toBe(true);
+    agent.hideTools = false;
+    expect(agent.hideTools).toBe(false);
+    agent.hideTools = true;
+    expect(agent.hideTools).toBe(true);
   });
 
-  it('logs compaction to session log', async () => {
-    const logWrites = [];
-    const mockSessionLog = {
-      writeCompaction: (count, summary) => {
-        logWrites.push({ count, summary });
-      },
-      writeSystemPrompt: () => {},
-      writeInput: () => {},
-      writeToolResult: () => {},
-      writeAssistant: () => {},
-      writeReset: () => {},
-      writePrompt: () => {},
-    };
+  it("toggles hideThinking via property setter", () => {
     const agent = new Agent({
-      compaction: { enabled: true, keepRecentMessages: 1 },
+      hooks,
       sink: new NoopSink(),
-      sessionLog: mockSessionLog,
     });
-    agent.ensureSystemPrompt();
-    for (let i = 0; i < 50; i++) {
-      agent.addInput(`User message ${i}`);
-      agent.addResponse(`Response ${i}`);
-    }
-
-    const mockClient = {
-      chatStreamCancellable: async function* () {
-        yield { type: 'content', content: 'Conversation summary' };
-      },
-    };
-    agent.client = mockClient;
-
-    await agent.compactMessages();
-
-    expect(logWrites).toHaveLength(1);
-    expect(logWrites[0].count).toBeGreaterThan(0);
-    expect(logWrites[0].summary).toBe('Conversation summary');
+    expect(agent.hideThinking).toBe(false);
+    agent.hideThinking = true;
+    expect(agent.hideThinking).toBe(true);
+    agent.hideThinking = false;
+    expect(agent.hideThinking).toBe(false);
   });
 
-  it('returns summary string after successful compaction', async () => {
+  it("clearContext clears context and resets iteration", () => {
     const agent = new Agent({
-      compaction: { enabled: true, keepRecentMessages: 1 },
+      hooks,
       sink: new NoopSink(),
     });
-    agent.ensureSystemPrompt();
-    for (let i = 0; i < 50; i++) {
-      agent.addInput(`User message ${i}`);
-      agent.addResponse(`Response ${i}`);
-    }
-
-    const mockClient = {
-      chatStreamCancellable: async function* () {
-        yield { type: 'content', content: 'Summarized conversation' };
-      },
-    };
-    agent.client = mockClient;
-
-    const result = await agent.compactMessages();
-    expect(typeof result).toBe('string');
-    expect(result).toBe('Summarized conversation');
+    agent._context.push({ role: "user", content: "hello" });
+    agent._iterationCount = 5;
+    agent.clearContext();
+    expect(agent._context.length).toBe(0);
+    expect(agent._iterationCount).toBe(0);
+    expect(agent._systemPrompt).toBeNull();
   });
 
-  it('preserves kept messages after compaction', async () => {
+  it("cancel sets cancelled flag", () => {
     const agent = new Agent({
-      compaction: { enabled: true, keepRecentMessages: 2 },
+      hooks,
       sink: new NoopSink(),
     });
-    agent.ensureSystemPrompt();
-    for (let i = 0; i < 50; i++) {
-      agent.addInput(`User message ${i}`);
-      agent.addResponse(`Response ${i}`);
-    }
+    expect(agent.cancelled).toBe(false);
+    agent.cancel(true);
+    expect(agent.cancelled).toBe(true);
+    agent.cancel(false);
+    expect(agent.cancelled).toBe(false);
+  });
 
-    const mockClient = {
-      chatStreamCancellable: async function* () {
-        yield { type: 'content', content: 'Summary' };
+  it("model getter/setter works", () => {
+    const agent = new Agent({
+      hooks,
+      model: "test-model",
+      sink: new NoopSink(),
+    });
+    expect(agent.model).toBe("test-model");
+    agent.model = "new-model";
+    expect(agent.model).toBe("new-model");
+  });
+
+  it("sessionId is set on construction", () => {
+    const agent = new Agent({
+      hooks,
+      sink: new NoopSink(),
+    });
+    expect(agent.sessionId).toBeDefined();
+    expect(typeof agent.sessionId).toBe("string");
+  });
+
+  it("sessionId can be passed explicitly", () => {
+    const agent = new Agent({
+      hooks,
+      sessionId: "my-session-123",
+      sink: new NoopSink(),
+    });
+    expect(agent.sessionId).toBe("my-session-123");
+  });
+
+  it("context is an array", () => {
+    const agent = new Agent({
+      hooks,
+      sink: new NoopSink(),
+    });
+    expect(Array.isArray(agent.context)).toBe(true);
+  });
+
+  it("iterationCount starts at 0", () => {
+    const agent = new Agent({
+      hooks,
+      sink: new NoopSink(),
+    });
+    expect(agent.iterationCount).toBe(0);
+  });
+});
+
+describe("Agent executeCommand (core commands)", () => {
+  let agent;
+
+  beforeEach(() => {
+    const hooks = createHooks();
+    agent = new Agent({
+      hooks,
+      model: "test-model",
+      modelRegistry: {
+        "test-model": { name: "test-model" },
+        "gpt-4": { name: "gpt-4", tags: ["fast"] },
       },
+      sink: new NoopSink(),
+    });
+  });
+
+  it("clear command clears context", async () => {
+    agent._context.push({ role: "user", content: "hello" });
+    const result = await agent.executeCommand({ type: "clear", value: null });
+    expect(result).toEqual({ content: "Context cleared." });
+    expect(agent._context.length).toBe(0);
+  });
+
+  it("quit command returns UI error", async () => {
+    const result = await agent.executeCommand({ type: "quit", value: null });
+    expect(result).toEqual({ error: "UI command: quit" });
+  });
+
+  it("help command returns UI error", async () => {
+    const result = await agent.executeCommand({ type: "help", value: null });
+    expect(result).toEqual({ error: "UI command: help" });
+  });
+
+  it("model command lists models when no value", async () => {
+    const result = await agent.executeCommand({ type: "model", value: null });
+    expect(result.content).toContain("test-model");
+    expect(result.content).toContain("gpt-4");
+  });
+
+  it("model command switches model", async () => {
+    const result = await agent.executeCommand({
+      type: "model",
+      value: "gpt-4",
+    });
+    expect(result.content).toBe("Switched to model: gpt-4");
+    expect(agent.model).toBe("gpt-4");
+  });
+
+  it("unknown command returns error", async () => {
+    const result = await agent.executeCommand({ type: "foobar", value: null });
+    expect(result).toEqual({ error: "Unknown command: foobar" });
+  });
+
+  it("tools command toggles hideTools", async () => {
+    expect(agent.hideTools).toBe(true);
+    const result = await agent.executeCommand({ type: "tools", value: null });
+    expect(result.content).toContain("shown");
+    expect(agent.hideTools).toBe(false);
+  });
+
+  it("thinking command toggles hideThinking", async () => {
+    expect(agent.hideThinking).toBe(false);
+    const result = await agent.executeCommand({
+      type: "thinking",
+      value: null,
+    });
+    expect(result.content).toContain("hidden");
+    expect(agent.hideThinking).toBe(true);
+  });
+});
+
+describe("Agent serialize/deserialize", () => {
+  it("serializes agent state", () => {
+    const hooks = createHooks();
+    const agent = new Agent({
+      hooks,
+      model: "test-model",
+      sessionId: "test-session",
+      sink: new NoopSink(),
+    });
+    agent._context.push(new Message({ role: "user", content: "hello" }));
+    agent._iterationCount = 5;
+
+    const serialized = agent.serialize();
+    expect(serialized.sessionId).toBe("test-session");
+    expect(serialized.model).toBe("test-model");
+    expect(serialized.iterationCount).toBe(5);
+    expect(serialized.context).toHaveLength(1);
+  });
+
+  it("deserializes agent state", () => {
+    const hooks = createHooks();
+    const agent = new Agent({
+      hooks,
+      model: "old-model",
+      sessionId: "old-session",
+      sink: new NoopSink(),
+    });
+    agent._iterationCount = 10;
+
+    const data = {
+      sessionId: "new-session",
+      model: "new-model",
+      context: [{ role: "user", content: "hi" }],
+      iterationCount: 3,
     };
-    agent.client = mockClient;
-
-    await agent.compactMessages();
-
-    const messages = agent.context.getMessages();
-    // With keepRecentMessages: 2, we keep 2 recent pairs = 4 messages
-    // But findFirstKeptIndex uses keepRecent * 2 = 4, so we keep 2 messages
-    const assistantMsgs = messages.filter(m => m.role === 'assistant');
-    expect(assistantMsgs.length).toBeGreaterThan(0);
-    // The last kept message should be Response 49
-    expect(assistantMsgs[assistantMsgs.length - 1].content).toBe('Response 49');
+    agent.deserialize(data);
+    expect(agent.sessionId).toBe("new-session");
+    expect(agent.model).toBe("new-model");
+    expect(agent._iterationCount).toBe(3);
+    expect(agent._context).toHaveLength(1);
   });
 });

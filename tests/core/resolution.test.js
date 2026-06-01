@@ -15,7 +15,7 @@ import {
   resolveSwitchProfile,
   allProfilesForSwitch,
   initSystemPromptTemplate,
-} from "../src/init/resolution.js";
+} from "../../src/init/resolution.js";
 
 describe("resolveNoLog", () => {
   it("returns true when cli is true", () => {

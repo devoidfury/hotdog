@@ -380,7 +380,7 @@ export function sessionExists(sessionId) {
  * added as user messages, since compaction summaries appear in context as
  * user messages wrapped in <previous-context-summary> tags.
  *
- * @param {import("./agent/agent.js").Agent} agent - The agent whose context to populate
+ * @param {import("../../src/core/agent.js").Agent} agent - The agent whose context to populate
  * @param {Array<object>} entries - Log entries from readSessionEntries()
  * @returns {number} The number of entries actually replayed (excluding skipped ones)
  */

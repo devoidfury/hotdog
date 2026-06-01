@@ -1,16 +1,16 @@
 import { describe, it, expect, beforeEach } from 'bun:test';
-import { HookSystem, HOOKS } from '../src/core/hooks.js';
-import { ExtensionLoader } from '../src/core/extensions.js';
-import { ToolRegistry } from '../src/core/tool-registry.js';
-import { create as createCompactionExtension } from '../extensions/compaction/index.js';
+import { HookSystem, HOOKS } from '../../src/core/hooks.js';
+import { ExtensionLoader } from '../../src/core/extensions.js';
+import { ToolRegistry } from '../../src/core/tool-registry.js';
+import { create as createCompactionExtension } from '../../extensions/compaction/index.js';
 import {
   CompactionStrategyRegistry,
   SummarizeStrategy,
   DropStrategy,
   SummarizeShortStrategy,
   TokenAwareStrategy,
-} from '../extensions/compaction/index.js';
-import { estimateContextTokens, findFirstKeptIndex } from '../extensions/compaction/index.js';
+} from '../../extensions/compaction/index.js';
+import { estimateContextTokens, findFirstKeptIndex } from '../../extensions/compaction/index.js';
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 

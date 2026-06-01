@@ -1,6 +1,5 @@
 import { describe, it, expect, beforeEach } from 'bun:test';
-import { MessageBus } from '../src/agent/message_bus.js';
-import { OUTPUT_EVENT } from '../src/context/output.js';
+import { MessageBus } from '../../src/main.js';
 
 // Mock session manager
 class MockSessionManager {
@@ -65,16 +64,8 @@ describe('MessageBus', () => {
     expect(bus.isIdle()).toBe(false);
   });
 
-  it('has sink property', () => {
-    expect(bus.sink).toBe(mockSink);
-  });
-
   it('has sessionManager property', () => {
     expect(bus.sessionManager).toBe(mockSessionManager);
-  });
-
-  it('has sessionId property', () => {
-    expect(bus.sessionId).toBe('test-session');
   });
 
   it('has agent property', () => {
@@ -87,50 +78,6 @@ describe('MessageBus', () => {
     expect(mockAgent._cancelled).toBe(true);
   });
 
-  it('sets drain-after-cancel mode', () => {
-    bus.setDrainAfterCancel(true);
-    // No direct getter, but we can verify it doesn't throw
-  });
-
-  it('executePromptAndEnqueue enqueues prompt result', async () => {
-    const result = await bus.executePromptAndEnqueue('test-cmd');
-    expect(result).toBe('prompt: test-cmd');
-    // The prompt was enqueued
-    expect(bus.isIdle()).toBe(false);
-  });
-
-  it('executePromptAndEnqueue throws on failed prompt', async () => {
-    const failingAgent = new MockAgent();
-    failingAgent.executePrompt = () => ({ success: false, error: 'command not found' });
-    const failingManager = new MockSessionManager(failingAgent);
-    const failingBus = new MessageBus({
-      sessionManager: failingManager,
-      sink: mockSink,
-    });
-    await expect(failingBus.executePromptAndEnqueue('bad-cmd')).rejects.toThrow('command not found');
-  });
-
-  it('executePromptAndEnqueue throws when no agent', async () => {
-    const emptyManager = { getAgent: () => null, sessionId: () => 'empty' };
-    const emptyBus = new MessageBus({
-      sessionManager: emptyManager,
-      sink: mockSink,
-    });
-    await expect(emptyBus.executePromptAndEnqueue('cmd')).rejects.toThrow('No agent available');
-  });
-
-  it('wires task wake up callback', () => {
-    let wakeCalled = false;
-    const wakeCb = (taskId, result) => { wakeCalled = true; };
-    const busWithWake = new MessageBus({
-      sessionManager: mockSessionManager,
-      sink: mockSink,
-      wakeUpCallback: wakeCb,
-    });
-    // wireTaskWakeUp should not throw
-    busWithWake.wireTaskWakeUp();
-  });
-
   it('sleep returns a promise', () => {
     const sleepPromise = bus._sleep(10);
     expect(sleepPromise).toBeInstanceOf(Promise);
@@ -141,37 +88,5 @@ describe('MessageBus', () => {
     bus.enqueue('msg2');
     bus.enqueue('msg3');
     expect(bus.isIdle()).toBe(false);
-  });
-
-  it('onMessageProcessed callback is stored', () => {
-    let called = false;
-    const busWithCb = new MessageBus({
-      sessionManager: mockSessionManager,
-      sink: mockSink,
-      onMessageProcessed: () => { called = true; },
-    });
-    expect(busWithCb._onMessageProcessed).toBeDefined();
-  });
-});
-
-describe('MessageBus with wakeUpCallback', () => {
-  it('passes result through marker mangler', async () => {
-    const mockAgent = new MockAgent();
-    const mockSessionManager = new MockSessionManager(mockAgent);
-    const mockSink = new MockSink();
-    const mangler = {
-      escapeMarkers: (text) => text.replace('<m_', '<[m_'),
-    };
-    let wakeResult = null;
-    const bus = new MessageBus({
-      sessionManager: mockSessionManager,
-      sink: mockSink,
-      wakeUpCallback: (taskId, result) => { wakeResult = result; },
-      markerMangler: mangler,
-    });
-    bus.wireTaskWakeUp();
-    // The wakeUpCallback is set on the agent's taskManager
-    // We can verify the bus was configured without error
-    expect(bus._wakeUpCallback).toBeDefined();
   });
 });

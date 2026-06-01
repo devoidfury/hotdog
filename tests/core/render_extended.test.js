@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'bun:test';
-import { render } from '../src/context/render.js';
+import { render } from '../../src/context/render.js';
 
 describe('render - for loops', () => {
   it('renders simple for loop', () => {

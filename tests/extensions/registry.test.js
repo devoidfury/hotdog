@@ -1,6 +1,9 @@
 import { describe, it, expect } from 'bun:test';
 import fs from 'node:fs';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const ROOT = path.resolve(__dirname, '../..');
 import {
   toolDef,
   param,
@@ -19,7 +22,7 @@ import {
   ToolRegistry,
   ToolContext,
   ToolResult,
-} from '../extensions/core-tools/registry.js';
+} from '../../extensions/core-tools/registry.js';
 
 describe('toolDef', () => {
   it('creates a tool definition', () => {
@@ -423,8 +426,8 @@ describe('writeFileWithParents', () => {
 
 describe('resolvePathAndValidate', () => {
   it('resolves existing path', () => {
-    const resolved = resolvePathAndValidate('/workspace/oa-js/extensions/core-tools/registry.js');
-    expect(resolved).toBe('/workspace/oa-js/extensions/core-tools/registry.js');
+    const resolved = resolvePathAndValidate(path.join(ROOT, 'extensions/core-tools/registry.js'));
+    expect(resolved).toBe(path.join(ROOT, 'extensions/core-tools/registry.js'));
   });
 
   it('throws for non-existent path', () => {
@@ -432,12 +435,12 @@ describe('resolvePathAndValidate', () => {
   });
 
   it('throws when path escapes boundary', () => {
-    expect(() => resolvePathAndValidate('/etc/passwd', '/workspace/oa-js')).toThrow('outside the allowed directory');
+    expect(() => resolvePathAndValidate('/etc/passwd', ROOT)).toThrow('outside the allowed directory');
   });
 
   it('allows path within boundary', () => {
-    const resolved = resolvePathAndValidate('/workspace/oa-js/extensions/core-tools/registry.js', '/workspace/oa-js');
-    expect(resolved).toBe('/workspace/oa-js/extensions/core-tools/registry.js');
+    const resolved = resolvePathAndValidate(path.join(ROOT, 'extensions/core-tools/registry.js'), ROOT);
+    expect(resolved).toBe(path.join(ROOT, 'extensions/core-tools/registry.js'));
   });
 
   it('allows path outside cwd when no boundary is set', () => {
@@ -449,7 +452,7 @@ describe('resolvePathAndValidate', () => {
 
 describe('fileSize', () => {
   it('returns file size in bytes', () => {
-    const size = fileSize('/workspace/oa-js/extensions/core-tools/registry.js');
+    const size = fileSize(path.join(ROOT, 'extensions/core-tools/registry.js'));
     expect(typeof size).toBe('number');
     expect(size).toBeGreaterThan(0);
   });

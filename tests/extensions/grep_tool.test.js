@@ -2,9 +2,9 @@ import { describe, it, expect } from 'bun:test';
 import fsSync from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
-import { GrepTool } from '../extensions/core-tools/grep.js';
-import { ToolContext, ToolResult } from '../extensions/core-tools/registry.js';
-import { DEFAULT_GREP_MAX_RESULTS } from '../src/config.js';
+import { GrepTool } from '../../extensions/core-tools/grep.js';
+import { ToolContext, ToolResult } from '../../extensions/core-tools/registry.js';
+import { DEFAULT_GREP_MAX_RESULTS } from '../../src/config.js';
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
 

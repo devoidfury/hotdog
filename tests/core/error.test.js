@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'bun:test';
-import { isExpectedError, formatError, withContext } from '../src/context/error.js';
+import { isExpectedError, formatError, withContext } from '../../src/context/error.js';
 
 describe('isExpectedError', () => {
   it('returns false for non-Error values', () => {

@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'bun:test';
-import { LlmClient, LlmError } from '../src/llm_client/client.js';
-import { Message } from '../src/context/message.js';
+import { LlmClient, LlmError } from '../../src/llm_client/client.js';
+import { Message } from '../../src/context/message.js';
 
 describe('LlmClient.resolveProviderSettings', () => {
   it('falls back to defaults when provider not found', () => {

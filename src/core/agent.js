@@ -2,10 +2,10 @@
 // Thin orchestrator that delegates behavior to hooks.
 // Behaviors (compaction, tools, system prompt, commands) live in extensions.
 
-import { Message } from '../context/message.js';
-import { LlmError } from '../llm_client/client.js';
-import { OUTPUT_EVENT } from '../context/output.js';
-import { HOOKS } from './hooks.js';
+import { Message } from "../context/message.js";
+import { LlmError } from "../llm_client/client.js";
+import { OUTPUT_EVENT } from "../context/output.js";
+import { HOOKS } from "./hooks.js";
 
 /**
  * Minimal Agent that runs the LLM loop and delegates behavior to hooks.
@@ -62,18 +62,38 @@ export class Agent {
 
   // ── Properties ────────────────────────────────────────────────────────────
 
-  get model() { return this._model; }
-  set model(v) { this._model = v; }
+  get model() {
+    return this._model;
+  }
+  set model(v) {
+    this._model = v;
+  }
 
-  get context() { return this._context; }
-  get iterationCount() { return this._iterationCount; }
-  get sessionId() { return this._sessionId; }
-  get cancelled() { return this._cancelled; }
-  get hideTools() { return this._hideTools; }
-  set hideTools(v) { this._hideTools = v; }
+  get context() {
+    return this._context;
+  }
+  get iterationCount() {
+    return this._iterationCount;
+  }
+  get sessionId() {
+    return this._sessionId;
+  }
+  get cancelled() {
+    return this._cancelled;
+  }
+  get hideTools() {
+    return this._hideTools;
+  }
+  set hideTools(v) {
+    this._hideTools = v;
+  }
 
-  get hideThinking() { return this._hideThinking; }
-  set hideThinking(v) { this._hideThinking = v; }
+  get hideThinking() {
+    return this._hideThinking;
+  }
+  set hideThinking(v) {
+    this._hideThinking = v;
+  }
 
   // ── Run Loop ──────────────────────────────────────────────────────────────
 
@@ -86,7 +106,7 @@ export class Agent {
     await this._hooks.emitAsync(HOOKS.AGENT_BEFORE_RUN, { userInput });
 
     // Add user input to context
-    const userMsg = new Message({ role: 'user', content: userInput });
+    const userMsg = new Message({ role: "user", content: userInput });
     this._context.push(userMsg);
     await this._hooks.emitAsync(HOOKS.CONTEXT_MESSAGE, { message: userMsg });
 
@@ -96,12 +116,15 @@ export class Agent {
       this._iterationCount = iteration;
 
       if (this._cancelled) {
-        throw LlmError.Cancelled('Agent cancelled');
+        throw LlmError.Cancelled("Agent cancelled");
       }
 
       // Build messages (extensions can modify via hook)
       const messages = this._buildMessages();
-      await this._hooks.emitAsync(HOOKS.MESSAGES_BUILD, { messages, agent: this });
+      await this._hooks.emitAsync(HOOKS.MESSAGES_BUILD, {
+        messages,
+        agent: this,
+      });
 
       // Check context size — trigger compaction extension if needed
       if (this._context.length > this._maxTokens / 100) {
@@ -115,35 +138,45 @@ export class Agent {
       const toolDefs = this._toolRegistry.getToolDefs();
       const modelConfig = this._resolveModelConfig();
       const stream = this._llmClient.chatStreamCancellable(
-        messages, modelConfig, toolDefs, { aborted: this._cancelled },
+        messages,
+        modelConfig,
+        toolDefs,
+        { aborted: this._cancelled },
       );
 
       const response = await this._processStream(stream);
       await this._hooks.emitAsync(HOOKS.MESSAGES_AFTER_LLM, {
-        response, messages: this._context,
+        response,
+        messages: this._context,
       });
 
       // Emit token usage
       if (this._showTokenUse && response.usage) {
-        this._emitOutput('token_usage', {
+        this._emitOutput("token_usage", {
           promptTokens: response.usage.prompt_tokens || 0,
-          cachedTokens: response.usage.prompt_tokens_details?.cached_tokens || 0,
+          cachedTokens:
+            response.usage.prompt_tokens_details?.cached_tokens || 0,
           completionTokens: response.usage.completion_tokens || 0,
           totalTokens: response.usage.total_tokens || 0,
         });
       }
 
+      const assistantMsg = new Message({
+        role: "assistant",
+        content: response.fullText,
+        reasoningContent: response.fullReasoning,
+        toolCalls: response.finalToolCalls,
+      });
+      this._context.push(assistantMsg);
+
       // Tool execution
       if (response.finalToolCalls) {
         const outcome = await this._executeTools(response.finalToolCalls);
-        if (outcome !== 'continue') return outcome;
+        if (outcome !== "continue") return outcome;
       } else {
-        const assistantMsg = new Message({
-          role: 'assistant', content: response.fullText,
-          reasoningContent: response.fullReasoning,
+        await this._hooks.emitAsync(HOOKS.CONTEXT_MESSAGE, {
+          message: assistantMsg,
         });
-        this._context.push(assistantMsg);
-        await this._hooks.emitAsync(HOOKS.CONTEXT_MESSAGE, { message: assistantMsg });
         return response.fullText;
       }
     }
@@ -161,7 +194,7 @@ export class Agent {
   _buildMessages() {
     if (this._systemPrompt) {
       return [
-        new Message({ role: 'system', content: this._systemPrompt }),
+        new Message({ role: "system", content: this._systemPrompt }),
         ...this._context,
       ];
     }
@@ -191,7 +224,7 @@ export class Agent {
       promptParts.push(...hookResult.promptParts);
     }
 
-    this._systemPrompt = promptParts.filter(Boolean).join('\n\n');
+    this._systemPrompt = promptParts.filter(Boolean).join("\n\n");
   }
 
   // ── Stream Processing ─────────────────────────────────────────────────────
@@ -202,42 +235,48 @@ export class Agent {
    * @returns {Promise<Object>} { fullText, fullReasoning, finalToolCalls, usage }
    */
   async _processStream(stream) {
-    let fullText = '';
+    let fullText = "";
     let fullReasoning = null;
     const toolCallsBuffer = new Map();
     let usage = null;
 
     for await (const event of stream) {
-      if (this._cancelled) throw LlmError.Cancelled('Agent cancelled');
+      if (this._cancelled) throw LlmError.Cancelled("Agent cancelled");
 
       switch (event.type) {
-        case 'content':
+        case "content":
           fullText += event.content;
           if (this._stream) {
-            this._emitOutput('streaming_chunk', { content: event.content });
+            this._emitOutput("streaming_chunk", { content: event.content });
           }
           break;
-        case 'reasoning':
-          if (!fullReasoning) fullReasoning = '';
+        case "reasoning":
+          if (!fullReasoning) fullReasoning = "";
           fullReasoning += event.content;
           if (this._stream) {
-            this._emitOutput('streaming_reasoning_chunk', { content: event.content });
+            this._emitOutput("streaming_reasoning_chunk", {
+              content: event.content,
+            });
           }
           break;
-        case 'toolName':
+        case "toolName":
           toolCallsBuffer.set(event.index, {
-            name: event.name, args: '', id: event.toolCallId || '',
+            name: event.name,
+            args: "",
+            id: event.toolCallId || "",
           });
           break;
-        case 'toolArgument': {
+        case "toolArgument": {
           const existing = toolCallsBuffer.get(event.index) || {
-            name: '', args: '', id: '',
+            name: "",
+            args: "",
+            id: "",
           };
           existing.args += event.arguments;
           toolCallsBuffer.set(event.index, existing);
           break;
         }
-        case 'usage':
+        case "usage":
           usage = event.data;
           break;
       }
@@ -246,11 +285,13 @@ export class Agent {
     // Build final tool calls from buffer
     let finalToolCalls = null;
     if (toolCallsBuffer.size > 0) {
-      finalToolCalls = Array.from(toolCallsBuffer.values()).map((tc, index) => ({
-        id: tc.id || `call_${index}_${Date.now()}`,
-        type: 'function',
-        function: { name: tc.name, arguments: tc.args },
-      }));
+      finalToolCalls = Array.from(toolCallsBuffer.values()).map(
+        (tc, index) => ({
+          id: tc.id || `call_${index}_${Date.now()}`,
+          type: "function",
+          function: { name: tc.name, arguments: tc.args },
+        }),
+      );
     }
 
     return { fullText, fullReasoning, finalToolCalls, usage };
@@ -267,29 +308,37 @@ export class Agent {
     for (const tc of toolCalls) {
       const toolName = tc.function?.name || tc.toolName;
       const toolCallId = tc.id || tc.toolCallId;
-      const input = tc.function?.arguments || tc.input || '{}';
+      const input = tc.function?.arguments || tc.input || "{}";
 
       // Emit tool call event
-      this._emitOutput('tool_call', { toolName, input, toolCallId });
+      this._emitOutput("tool_call", { toolName, input, toolCallId });
 
       // Emit before-execute hook
       await this._hooks.emitAsync(HOOKS.TOOL_BEFORE_EXECUTE, {
-        toolName, input, agent: this,
+        toolName,
+        input,
+        agent: this,
       });
 
       // Check tool allowance
-      const isAllowed = await this._hooks.emitAsync(HOOKS.TOOL_BEFORE_EXECUTE, {
-        toolName, agent: this,
-      }) || true;
+      const isAllowed =
+        (await this._hooks.emitAsync(HOOKS.TOOL_BEFORE_EXECUTE, {
+          toolName,
+          agent: this,
+        })) || true;
       // (Skill filtering is handled by the skills extension via the hook)
 
       // Execute the tool
       const tool = this._toolRegistry.get(toolName);
       if (!tool) {
         const errorMsg = `Unknown tool: ${toolName}`;
-        this._context.push(new Message({
-          role: 'tool', content: errorMsg, toolCallId,
-        }));
+        this._context.push(
+          new Message({
+            role: "tool",
+            content: errorMsg,
+            toolCallId,
+          }),
+        );
         await this._hooks.emitAsync(HOOKS.CONTEXT_MESSAGE, {
           message: this._context[this._context.length - 1],
         });
@@ -305,27 +354,31 @@ export class Agent {
 
       // Emit after-execute hook
       await this._hooks.emitAsync(HOOKS.TOOL_AFTER_EXECUTE, {
-        toolName, result, agent: this,
+        toolName,
+        result,
+        agent: this,
       });
 
       // Convert result to string for API
       const resultStr = this._formatToolResult(result, toolName);
 
       // Emit tool result event
-      this._emitOutput('tool_result', { toolName, input, result: resultStr });
+      this._emitOutput("tool_result", { toolName, input, result: resultStr });
 
       // Add tool result to context
       const toolMsg = new Message({
-        role: 'tool', content: resultStr, toolCallId,
+        role: "tool",
+        content: resultStr,
+        toolCallId,
       });
       this._context.push(toolMsg);
       await this._hooks.emitAsync(HOOKS.CONTEXT_MESSAGE, { message: toolMsg });
 
       // Check for wait tool — model is yielding control
-      if (toolName === 'wait') return 'return';
+      if (toolName === "wait") return "return";
     }
 
-    return 'continue';
+    return "continue";
   }
 
   /**
@@ -337,15 +390,15 @@ export class Agent {
    */
   _formatToolResult(result, toolName) {
     // If the result has a toApiContent method, use it (ToolResult)
-    if (result && typeof result.toApiContent === 'function') {
+    if (result && typeof result.toApiContent === "function") {
       return result.toApiContent(toolName);
     }
     // String: wrap in XML
-    if (typeof result === 'string') {
+    if (typeof result === "string") {
       return `<tool name="${toolName}" status="success">\n  <output>${this._xmlEscape(result)}</output>\n</tool>`;
     }
     // Object: serialize and wrap
-    if (typeof result === 'object' && result !== null) {
+    if (typeof result === "object" && result !== null) {
       const json = JSON.stringify(result);
       return `<tool name="${toolName}" status="success">\n  <output>${this._xmlEscape(json)}</output>\n</tool>`;
     }
@@ -357,11 +410,13 @@ export class Agent {
   // ── Helpers ───────────────────────────────────────────────────────────────
 
   _resolveModelConfig() {
-    return this._modelRegistry[this._model] || {
-      name: this._model,
-      temperature: null,
-      maxTokens: 4096,
-    };
+    return (
+      this._modelRegistry[this._model] || {
+        name: this._model,
+        temperature: null,
+        maxTokens: 4096,
+      }
+    );
   }
 
   _emitOutput(type, data) {
@@ -373,10 +428,10 @@ export class Agent {
 
   _xmlEscape(s) {
     return String(s)
-      .replace(/&/g, '&amp;')
-      .replace(/</g, '&lt;')
-      .replace(/>/g, '&gt;')
-      .replace(/"/g, '&quot;');
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;");
   }
 
   // ── Session Management ────────────────────────────────────────────────────
@@ -419,11 +474,12 @@ export class Agent {
    */
   async executeCommand(cmd) {
     const result = this._hooks.emit(HOOKS.COMMAND_DISPATCH, {
-      command: cmd, agent: this,
+      command: cmd,
+      agent: this,
     });
 
     // Handle async hook results (Promises)
-    if (result && typeof result.then === 'function') {
+    if (result && typeof result.then === "function") {
       const awaited = await result;
       if (awaited) return awaited;
     } else if (result) {
@@ -432,28 +488,28 @@ export class Agent {
 
     // Default command handling (core commands)
     switch (cmd.type) {
-      case 'clear':
+      case "clear":
         this.clearContext();
-        return { content: 'Context cleared.' };
-      case 'quit':
-        return { error: 'UI command: quit' };
-      case 'help':
-        return { error: 'UI command: help' };
-      case 'model':
+        return { content: "Context cleared." };
+      case "quit":
+        return { error: "UI command: quit" };
+      case "help":
+        return { error: "UI command: help" };
+      case "model":
         return this._handleModelCommand(cmd);
-      case 'models':
+      case "models":
         return this._handleModelsCommand();
-      case 'tokens':
+      case "tokens":
         return this._handleTokensCommand();
-      case 'tools':
+      case "tools":
         return this._handleToolsCommand();
-      case 'thinking':
+      case "thinking":
         return this._handleThinkingCommand();
-      case 'compact':
+      case "compact":
         return await this._handleCompactCommand(cmd.value);
-      case 'compact:strategy':
+      case "compact:strategy":
         return this._handleCompactStrategyCommand(cmd.value);
-      case 'regenerate':
+      case "regenerate":
         return this._handleRegenerateCommand();
       default:
         return { error: `Unknown command: ${cmd.type}` };
@@ -465,7 +521,7 @@ export class Agent {
   _handleModelCommand(cmd) {
     if (!cmd?.value) {
       return {
-        content: `Available models: ${Object.keys(this._modelRegistry).join(', ')}`,
+        content: `Available models: ${Object.keys(this._modelRegistry).join(", ")}`,
       };
     }
     this._model = cmd.value;
@@ -477,94 +533,100 @@ export class Agent {
     const models = Object.keys(this._modelRegistry);
     if (models.length === 0) {
       return {
-        content: 'No models configured. Add providers to your config file.',
+        content: "No models configured. Add providers to your config file.",
       };
     }
-    const lines = ['Available models:'];
+    const lines = ["Available models:"];
     for (const name of models) {
       const m = this._modelRegistry[name];
-      const tags = m.tags ? ` [${m.tags.join(', ')}]` : '';
+      const tags = m.tags ? ` [${m.tags.join(", ")}]` : "";
       lines.push(`  ${name}${tags}`);
     }
     lines.push(`\nCurrently using: ${this._model}`);
-    return { content: lines.join('\n') };
+    return { content: lines.join("\n") };
   }
 
   _handleTokensCommand() {
-    return { content: 'Token stats not yet tracked.' };
+    return { content: "Token stats not yet tracked." };
   }
 
   _handleToolsCommand() {
     this._hideTools = !this._hideTools;
-    this._emitOutput('session_state', { key: 'hideTools', value: this._hideTools });
+    this._emitOutput("session_state", {
+      key: "hideTools",
+      value: this._hideTools,
+    });
     return {
-      content: `Tool display: ${this._hideTools ? 'hidden' : 'shown'}`,
+      content: `Tool display: ${this._hideTools ? "hidden" : "shown"}`,
     };
   }
 
   _handleThinkingCommand() {
     this._hideThinking = !this._hideThinking;
-    this._emitOutput('session_state', { key: 'hideThinking', value: this._hideThinking });
+    this._emitOutput("session_state", {
+      key: "hideThinking",
+      value: this._hideThinking,
+    });
     return {
-      content: `Thinking display: ${this._hideThinking ? 'hidden' : 'shown'}`,
+      content: `Thinking display: ${this._hideThinking ? "hidden" : "shown"}`,
     };
   }
 
   async _handleCompactCommand(value) {
     if (!value) {
-      return { content: 'Usage: /compact [n] [--compact-debug]' };
+      return { content: "Usage: /compact [n] [--compact-debug]" };
     }
     // Trigger compaction via hook — the compaction extension handles it
     await this._hooks.emitAsync(HOOKS.CONTEXT_FULL, {
       agent: this,
       contextSize: this._context.length,
     });
-    return { content: 'Compaction triggered.' };
+    return { content: "Compaction triggered." };
   }
 
   _handleCompactStrategyCommand(value) {
-    const { action, name } = value || { action: 'list' };
+    const { action, name } = value || { action: "list" };
 
     // Check if compaction extension is loaded
-    const compactionExt = this._hooks._extensions?.get?.('compaction');
+    const compactionExt = this._hooks._extensions?.get?.("compaction");
     if (!compactionExt) {
-      return { content: 'Compaction extension not loaded.' };
+      return { content: "Compaction extension not loaded." };
     }
 
-    if (action === 'list' || action === '') {
+    if (action === "list" || action === "") {
       const strategies = compactionExt.getStrategyList();
-      const current = compactionExt.settings?.strategy || 'summarize';
-      const lines = ['\nCompaction Strategies:\n'];
+      const current = compactionExt.settings?.strategy || "summarize";
+      const lines = ["\nCompaction Strategies:\n"];
       for (const s of strategies) {
-        const marker = s.name === current ? ' (current)' : '';
+        const marker = s.name === current ? " (current)" : "";
         lines.push(`  ${s.name}${marker} — ${s.description}`);
       }
       lines.push(`\nCurrent strategy: ${current}\n`);
-      return { content: lines.join('') };
+      return { content: lines.join("") };
     }
 
-    if (action === 'set') {
+    if (action === "set") {
       if (!name) {
-        return { content: 'Usage: /compact:strategy <name>' };
+        return { content: "Usage: /compact:strategy <name>" };
       }
       compactionExt.settings.strategy = name;
       return { content: `Compaction strategy set to: ${name}` };
     }
 
-    if (action === 'help') {
+    if (action === "help") {
       const strategies = compactionExt.getStrategyList();
-      const lines = ['\nCompaction Strategies:\n'];
+      const lines = ["\nCompaction Strategies:\n"];
       for (const s of strategies) {
         lines.push(`  ${s.name} — ${s.description}`);
       }
       lines.push(
-        '\nUsage:\n' +
-          '  /compact:strategy              — List strategies\n' +
-          '  /compact:strategy <name>       — Set strategy\n' +
-          '  /compact:strategy help         — Show help\n' +
-          '  /compact:strategy help <name>  — Show strategy details\n',
+        "\nUsage:\n" +
+          "  /compact:strategy              — List strategies\n" +
+          "  /compact:strategy <name>       — Set strategy\n" +
+          "  /compact:strategy help         — Show help\n" +
+          "  /compact:strategy help <name>  — Show strategy details\n",
       );
-      return { content: lines.join('') };
+      return { content: lines.join("") };
     }
 
     return { error: `Unknown action: ${action}` };
@@ -572,7 +634,7 @@ export class Agent {
 
   _handleRegenerateCommand() {
     this._systemPrompt = null;
-    return { content: 'System prompt regenerated.' };
+    return { content: "System prompt regenerated." };
   }
 
   /**
@@ -582,7 +644,7 @@ export class Agent {
   serialize() {
     return {
       sessionId: this._sessionId,
-      context: this._context.map(m => m.toJSON()),
+      context: this._context.map((m) => m.toJSON()),
       model: this._model,
       iterationCount: this._iterationCount,
     };
@@ -594,7 +656,7 @@ export class Agent {
    */
   deserialize(data) {
     this._sessionId = data.sessionId;
-    this._context = data.context.map(m => new Message(m));
+    this._context = data.context.map((m) => new Message(m));
     this._model = data.model;
     this._iterationCount = data.iterationCount || 0;
   }

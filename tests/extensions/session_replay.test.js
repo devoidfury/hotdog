@@ -5,9 +5,9 @@ import {
   LOG_SOURCE,
   SessionLog,
   disabledSessionLog,
-} from "../extensions/session-log/session_log.js";
-import { MessageLog, Message } from "../src/context/message.js";
-import { mkdirSync, rmSync, readFileSync, writeFileSync } from "node:fs";
+} from "../../extensions/session-log/session_log.js";
+import { MessageLog } from "../../src/context/message.js";
+import { mkdirSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { homedir } from "node:os";
 
@@ -25,7 +25,13 @@ function setupTestDir() {
 }
 
 function teardown() {
-  const testFile = join(homedir(), ".cache", "oa-agent", "sessions", `${TEST_SESSION_ID}.jsonl`);
+  const testFile = join(
+    homedir(),
+    ".cache",
+    "oa-agent",
+    "sessions",
+    `${TEST_SESSION_ID}.jsonl`,
+  );
   try {
     rmSync(testFile);
   } catch {
@@ -73,9 +79,17 @@ test("replayEntriesIntoContext replays user and assistant messages", () => {
 test("replayEntriesIntoContext skips system prompt entries", () => {
   const agent = createMockAgent();
   const entries = [
-    { role: "system", source: LOG_SOURCE.SYSTEM_PROMPT, content: "You are a helpful assistant" },
+    {
+      role: "system",
+      source: LOG_SOURCE.SYSTEM_PROMPT,
+      content: "You are a helpful assistant",
+    },
     { role: "user", source: LOG_SOURCE.INPUT, content: "Hello" },
-    { role: "system", source: LOG_SOURCE.SYSTEM_PROMPT, content: "More system prompt" },
+    {
+      role: "system",
+      source: LOG_SOURCE.SYSTEM_PROMPT,
+      content: "More system prompt",
+    },
     { role: "assistant", source: LOG_SOURCE.LLM, content: "Hi" },
   ];
 
@@ -106,10 +120,20 @@ test("replayEntriesIntoContext skips reset entries", () => {
 test("replayEntriesIntoContext handles tool calls in assistant messages", () => {
   const agent = createMockAgent();
   const toolCalls = [
-    { id: "tc_1", type: "function", function: { name: "bash", arguments: "ls" } },
+    {
+      id: "tc_1",
+      type: "function",
+      function: { name: "bash", arguments: "ls" },
+    },
   ];
   const entries = [
-    { role: "assistant", source: LOG_SOURCE.LLM, content: "Let me check", tool_calls: toolCalls, reasoning_content: "I should list files" },
+    {
+      role: "assistant",
+      source: LOG_SOURCE.LLM,
+      content: "Let me check",
+      tool_calls: toolCalls,
+      reasoning_content: "I should list files",
+    },
   ];
 
   const replayed = replayEntriesIntoContext(agent, entries);
@@ -125,7 +149,13 @@ test("replayEntriesIntoContext handles tool calls in assistant messages", () => 
 test("replayEntriesIntoContext handles tool result entries", () => {
   const agent = createMockAgent();
   const entries = [
-    { role: "tool", source: LOG_SOURCE.TOOL_RESULT, content: "<output>done</output>", tool_call_id: "tc_1", tool_name: "bash" },
+    {
+      role: "tool",
+      source: LOG_SOURCE.TOOL_RESULT,
+      content: "<output>done</output>",
+      tool_call_id: "tc_1",
+      tool_name: "bash",
+    },
   ];
 
   const replayed = replayEntriesIntoContext(agent, entries);
@@ -140,7 +170,12 @@ test("replayEntriesIntoContext handles tool result entries", () => {
 test("replayEntriesIntoContext handles compaction entries as user messages", () => {
   const agent = createMockAgent();
   const entries = [
-    { role: "system", source: LOG_SOURCE.COMPACTION, content: "[Compacted 5 messages]\n\nUser asked about JS, assistant explained closures." },
+    {
+      role: "system",
+      source: LOG_SOURCE.COMPACTION,
+      content:
+        "[Compacted 5 messages]\n\nUser asked about JS, assistant explained closures.",
+    },
   ];
 
   const replayed = replayEntriesIntoContext(agent, entries);
@@ -148,13 +183,19 @@ test("replayEntriesIntoContext handles compaction entries as user messages", () 
   expect(replayed).toBe(1);
   const messages = agent.context.messages();
   expect(messages[0].role).toBe("user");
-  expect(messages[0].content).toBe("[Compacted 5 messages]\n\nUser asked about JS, assistant explained closures.");
+  expect(messages[0].content).toBe(
+    "[Compacted 5 messages]\n\nUser asked about JS, assistant explained closures.",
+  );
 });
 
 test("replayEntriesIntoContext handles PROMPT source as user messages", () => {
   const agent = createMockAgent();
   const entries = [
-    { role: "user", source: LOG_SOURCE.PROMPT, content: "Prompt template rendered content" },
+    {
+      role: "user",
+      source: LOG_SOURCE.PROMPT,
+      content: "Prompt template rendered content",
+    },
   ];
 
   const replayed = replayEntriesIntoContext(agent, entries);
@@ -170,9 +211,25 @@ test("replayEntriesIntoContext handles mixed entry types", () => {
   const entries = [
     { role: "user", source: LOG_SOURCE.INPUT, content: "Hello" },
     { role: "assistant", source: LOG_SOURCE.LLM, content: "Hi there" },
-    { role: "tool", source: LOG_SOURCE.TOOL_RESULT, content: "result", tool_call_id: "tc_1" },
+    {
+      role: "tool",
+      source: LOG_SOURCE.TOOL_RESULT,
+      content: "result",
+      tool_call_id: "tc_1",
+    },
     { role: "user", source: LOG_SOURCE.INPUT, content: "Next" },
-    { role: "assistant", source: LOG_SOURCE.LLM, content: "Done", tool_calls: [{ id: "tc_2", type: "function", function: { name: "read", arguments: "file.txt" } }] },
+    {
+      role: "assistant",
+      source: LOG_SOURCE.LLM,
+      content: "Done",
+      tool_calls: [
+        {
+          id: "tc_2",
+          type: "function",
+          function: { name: "read", arguments: "file.txt" },
+        },
+      ],
+    },
   ];
 
   const replayed = replayEntriesIntoContext(agent, entries);
@@ -186,7 +243,13 @@ test("replayEntriesIntoContext handles mixed entry types", () => {
   expect(messages[2].role).toBe("tool");
   expect(messages[3].role).toBe("user");
   expect(messages[4].role).toBe("assistant");
-  expect(messages[4].toolCalls).toEqual([{ id: "tc_2", type: "function", function: { name: "read", arguments: "file.txt" } }]);
+  expect(messages[4].toolCalls).toEqual([
+    {
+      id: "tc_2",
+      type: "function",
+      function: { name: "read", arguments: "file.txt" },
+    },
+  ]);
 });
 
 test("replayEntriesIntoContext returns 0 for empty entries", () => {
@@ -258,7 +321,17 @@ test("replayEntriesIntoContext round-trip with readSessionEntries", () => {
     log.writeAssistant("Hi there");
     log.writeToolResult("<output>done</output>", "tc_1", "bash");
     log.writeInput("Next question");
-    log.writeAssistant("Answer", [{ id: "tc_2", type: "function", function: { name: "read", arguments: "file.txt" } }], "Reasoning");
+    log.writeAssistant(
+      "Answer",
+      [
+        {
+          id: "tc_2",
+          type: "function",
+          function: { name: "read", arguments: "file.txt" },
+        },
+      ],
+      "Reasoning",
+    );
 
     const entries = readSessionEntries(TEST_SESSION_ID);
     expect(entries.length).toBe(5);
@@ -274,7 +347,13 @@ test("replayEntriesIntoContext round-trip with readSessionEntries", () => {
     expect(messages[1].content).toBe("Hi there");
     expect(messages[2].role).toBe("tool");
     expect(messages[3].content).toBe("Next question");
-    expect(messages[4].toolCalls).toEqual([{ id: "tc_2", type: "function", function: { name: "read", arguments: "file.txt" } }]);
+    expect(messages[4].toolCalls).toEqual([
+      {
+        id: "tc_2",
+        type: "function",
+        function: { name: "read", arguments: "file.txt" },
+      },
+    ]);
   } finally {
     teardown();
   }
@@ -303,7 +382,9 @@ test("replayEntriesIntoContext round-trip with reset", () => {
     expect(agent.context.messages()[0].content).toBe("after reset");
     expect(agent.context.messages()[1].content).toBe("response");
   } finally {
-    try { rmSync(testFile); } catch {}
+    try {
+      rmSync(testFile);
+    } catch {}
   }
 });
 
@@ -327,7 +408,9 @@ test("replayEntriesIntoContext with only reset entries returns 0", () => {
     expect(replayed).toBe(0);
     expect(agent.context.size()).toBe(0);
   } finally {
-    try { rmSync(testFile); } catch {}
+    try {
+      rmSync(testFile);
+    } catch {}
   }
 });
 

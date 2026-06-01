@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'bun:test';
-import { validateNameable, deepMerge } from '../src/lib.js';
+import { validateNameable, deepMerge } from '../../src/lib.js';
 
 // Helper to check if any warning contains a substring
 const hasWarning = (warnings, substring) => warnings.some(w => w.includes(substring));

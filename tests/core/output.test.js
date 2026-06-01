@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'bun:test';
-import { OUTPUT_EVENT, outputEvent, OutputSink, NoopSink, EVENT_HANDLERS } from '../src/context/output.js';
+import { OUTPUT_EVENT, outputEvent, OutputSink, NoopSink, EVENT_HANDLERS } from '../../src/context/output.js';
 
 describe('OUTPUT_EVENT', () => {
   it('has all expected event types', () => {

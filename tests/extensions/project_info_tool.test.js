@@ -2,8 +2,8 @@ import { describe, it, expect, beforeEach, afterEach } from 'bun:test';
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
-import { ProjectInfoTool } from '../extensions/core-tools/project_info.js';
-import { ToolResult } from '../extensions/core-tools/registry.js';
+import { ProjectInfoTool } from '../../extensions/core-tools/project_info.js';
+import { ToolResult } from '../../extensions/core-tools/registry.js';
 
 /**
  * Extract string output from a tool result (handles ToolResult or plain string).

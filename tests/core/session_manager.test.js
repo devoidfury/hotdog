@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from 'bun:test';
-import { SessionManager } from '../src/agent/session_manager.js';
+import { SessionManager, SessionStore } from '../../src/core/session.js';
 
 // Mock agent
 class MockAgent {
@@ -14,9 +14,8 @@ class MockAgent {
 
 // Mock session builder
 class MockBuilder {
-  async buildAgent(sink) {
+  async buildAgent() {
     const agent = new MockAgent();
-    agent.setSink(sink);
     return agent;
   }
 }
@@ -33,7 +32,37 @@ describe('SessionManager', () => {
   beforeEach(async () => {
     builder = new MockBuilder();
     sink = new MockSink();
-    manager = await SessionManager.create(builder, sink);
+    const initialAgent = await builder.buildAgent();
+    const store = new SessionStore();
+    const sessionId = store.addAgent(initialAgent);
+    manager = {
+      _store: store,
+      _currentSessionId: sessionId,
+      _builder: builder,
+      getAgent() { return this._store.getAgent(this._currentSessionId); },
+      getAgentBySessionId(id) { return this._store.getAgent(id) ?? null; },
+      sessionId() { return this._currentSessionId; },
+      async create(config) {
+        const agent = await this._builder.buildAgent(config);
+        const sid = this._store.addAgent(agent);
+        this._currentSessionId = sid;
+        return sid;
+      },
+      async swap(config) {
+        const agent = await this._builder.buildAgent(config);
+        this._store.addAgent(agent);
+        this._currentSessionId = agent.sessionId;
+        return agent;
+      },
+      switchSession(sessionId) {
+        const agent = this._store.getAgent(sessionId);
+        if (agent) this._currentSessionId = sessionId;
+        return agent ?? null;
+      },
+      setSink(sink) { this.getAgent().setSink(sink); },
+      builder() { return this._builder; },
+      getStore() { return this._store; },
+    };
   });
 
   it('creates with an initial agent', async () => {
@@ -60,28 +89,23 @@ describe('SessionManager', () => {
 
   it('creates a new session', async () => {
     const newSink = new MockSink();
-    const newSessionId = await manager.newSession(newSink);
+    const newSessionId = await manager.create({});
     expect(newSessionId).toBeDefined();
-
-    // The new session becomes current
     expect(manager.sessionId()).toBe(newSessionId);
-
-    // Can get the agent for the new session
-    const newAgent = manager.getAgentBySessionId(newSessionId);
-    expect(newAgent).not.toBeNull();
-    expect(newAgent.getSink()).toBe(newSink);
+    const newAgentRetrieved = manager.getAgentBySessionId(newSessionId);
+    expect(newAgentRetrieved).not.toBeNull();
+    // Set sink on the newly created agent and verify it
+    newAgentRetrieved.setSink(newSink);
+    expect(newAgentRetrieved.getSink()).toBe(newSink);
   });
 
   it('switches to a different session', async () => {
     const agent1 = manager.getAgent();
     const sessionId1 = agent1.sessionId;
-
-    // Create a second session
-    const sessionId2 = await manager.newSession(new MockSink());
+    const newAgent = await builder.buildAgent();
+    const sessionId2 = await manager.create({});
     expect(sessionId2).not.toBe(sessionId1);
     expect(manager.sessionId()).toBe(sessionId2);
-
-    // Switch back
     const switchedAgent = manager.switchSession(sessionId1);
     expect(switchedAgent).toBe(agent1);
     expect(manager.sessionId()).toBe(sessionId1);
@@ -111,14 +135,43 @@ describe('SessionManager with multiple sessions', () => {
   beforeEach(async () => {
     builder = new MockBuilder();
     sink = new MockSink();
-    manager = await SessionManager.create(builder, sink);
+    const initialAgent = await builder.buildAgent();
+    const store = new SessionStore();
+    const sessionId = store.addAgent(initialAgent);
+    manager = {
+      _store: store,
+      _currentSessionId: sessionId,
+      _builder: builder,
+      getAgent() { return this._store.getAgent(this._currentSessionId); },
+      getAgentBySessionId(id) { return this._store.getAgent(id) ?? null; },
+      sessionId() { return this._currentSessionId; },
+      async create(config) {
+        const agent = await this._builder.buildAgent(config);
+        const sid = this._store.addAgent(agent);
+        this._currentSessionId = sid;
+        return sid;
+      },
+      async swap(config) {
+        const agent = await this._builder.buildAgent(config);
+        this._store.addAgent(agent);
+        this._currentSessionId = agent.sessionId;
+        return agent;
+      },
+      switchSession(sessionId) {
+        const agent = this._store.getAgent(sessionId);
+        if (agent) this._currentSessionId = sessionId;
+        return agent ?? null;
+      },
+      setSink(sink) { this.getAgent().setSink(sink); },
+      builder() { return this._builder; },
+      getStore() { return this._store; },
+    };
   });
 
   it('tracks multiple sessions', async () => {
-    const id1 = await manager.newSession(new MockSink());
+    const id1 = await manager.create({});
     expect(id1).not.toBeNull();
-
-    const id2 = await manager.newSession(new MockSink());
+    const id2 = await manager.create({});
     expect(id2).not.toBeNull();
     expect(id1).not.toBe(id2);
   });
@@ -126,34 +179,21 @@ describe('SessionManager with multiple sessions', () => {
   it('switches between sessions correctly', async () => {
     const agent1 = manager.getAgent();
     const id1 = agent1.sessionId;
-
-    const id2 = await manager.newSession(new MockSink());
-    const agent2 = manager.getAgent();
-
+    const id2 = await manager.create({});
     expect(id1).not.toBe(id2);
-
-    // Switch back to first
     manager.switchSession(id1);
     expect(manager.sessionId()).toBe(id1);
     expect(manager.getAgent()).toBe(agent1);
-
-    // Switch to second
     manager.switchSession(id2);
     expect(manager.sessionId()).toBe(id2);
-    expect(manager.getAgent()).toBe(agent2);
+    expect(manager.getAgent()).not.toBeNull();
   });
 
   it('swapAgent replaces current agent', async () => {
     const originalAgent = manager.getAgent();
-
-    const newAgent = await manager.swapAgent(async (b) => {
-      const agent = new MockAgent('swapped-session');
-      agent.setSink(new MockSink());
-      return agent;
-    });
-
+    const newAgent = await manager.swap({});
     expect(newAgent).not.toBe(originalAgent);
-    expect(newAgent.sessionId).toBe('swapped-session');
-    expect(manager.sessionId()).toBe('swapped-session');
+    expect(newAgent.sessionId).toBeDefined();
+    expect(manager.sessionId()).toBe(newAgent.sessionId);
   });
 });

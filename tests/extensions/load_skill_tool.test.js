@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'bun:test';
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
-import { LoadSkillTool } from '../extensions/core-tools/load_skill.js';
+import { LoadSkillTool } from '../../extensions/core-tools/load_skill.js';
 
 function getResultStr(result) {
   if (result?.toDisplay) {

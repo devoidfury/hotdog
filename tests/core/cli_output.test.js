@@ -6,7 +6,7 @@ import {
   formatTokenUsage,
   formatThinking,
   formatTaskProgress,
-} from '../src/ui/cli.js';
+} from '../../src/ui/cli.js';
 
 describe('formatCompacting', () => {
   it('formats compacting message', () => {

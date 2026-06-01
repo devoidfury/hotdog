@@ -3,7 +3,7 @@
 
 import fs from "node:fs";
 import { join } from "node:path";
-import { parseFrontMatter } from "../../src/render_md.js";
+import { parseFrontMatter } from "../../src/utils.js";
 import { validateNameable } from "../../src/lib.js";
 
 // ── Pattern Matching ───────────────────────────────────────────────────────

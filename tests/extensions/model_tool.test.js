@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'bun:test';
-import { ModelTool } from '../extensions/core-tools/model.js';
-import { ToolResult } from '../extensions/core-tools/registry.js';
+import { ModelTool } from '../../extensions/core-tools/model.js';
+import { ToolResult } from '../../extensions/core-tools/registry.js';
 
 /**
  * Extract string output from a tool result (handles ToolResult or plain string).

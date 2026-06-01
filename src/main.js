@@ -263,6 +263,8 @@ class MessageBus {
   }
 }
 
+export { MessageBus };
+
 // ── Main ─────────────────────────────────────────────────────────────────────
 
 async function main() {

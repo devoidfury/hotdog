@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'bun:test';
-import { parseInput, INPUT_EVENT, NoopInput } from '../src/context/input.js';
+import { parseInput, INPUT_EVENT, NoopInput } from '../../src/context/input.js';
 
 describe('parseInput', () => {
   it('parses plain text', () => {

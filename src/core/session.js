@@ -33,6 +33,16 @@ export class SessionStore {
   size() {
     return this._agents.size;
   }
+
+  removeAgent(sessionId) {
+    if (!this._agents.has(sessionId)) return false;
+    this._agents.delete(sessionId);
+    return true;
+  }
+
+  agents() {
+    return Array.from(this._agents.values());
+  }
 }
 
 /**

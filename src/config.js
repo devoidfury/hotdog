@@ -3,7 +3,7 @@
 import fs from "node:fs";
 import path from "node:path";
 
-import { parseFrontMatter } from "./render_md.js";
+import { parseFrontMatter } from "./utils.js";
 import { deepMerge } from "./utils.js";
 
 // ── LSP Configuration Defaults ──────────────────────────────────────────

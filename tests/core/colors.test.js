@@ -15,7 +15,7 @@ import {
   applyFinalResponse,
   applyCompacting,
   applyProgress,
-} from '../src/ui/colors.js';
+} from '../../src/ui/colors.js';
 
 describe('ColorPalette', () => {
   it('creates with defaults', () => {

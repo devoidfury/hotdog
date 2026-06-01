@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'bun:test';
-import { OutputSink, NoopSink, OUTPUT_EVENT, outputEvent } from '../src/context/output.js';
+import { OutputSink, NoopSink, OUTPUT_EVENT, outputEvent } from '../../src/context/output.js';
 
 describe('outputEvent', () => {
   it('creates event with type and data', () => {
@@ -226,7 +226,7 @@ describe('OUTPUT_EVENT constants', () => {
 
 describe('EVENT_HANDLERS mapping', () => {
   it('maps all event types to handler methods', async () => {
-    const { EVENT_HANDLERS } = await import('../src/context/output.js');
+    const { EVENT_HANDLERS } = await import('../../src/context/output.js');
     expect(EVENT_HANDLERS[OUTPUT_EVENT.USER_MESSAGE]).toBe('emitUserMessage');
     expect(EVENT_HANDLERS[OUTPUT_EVENT.ASSISTANT_MESSAGE]).toBe('emitAssistantMessage');
     expect(EVENT_HANDLERS[OUTPUT_EVENT.THINKING]).toBe('emitThinking');

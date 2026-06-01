@@ -1,12 +1,12 @@
 import { describe, it, expect, beforeEach } from 'bun:test';
-import { HookSystem, HOOKS } from '../src/core/hooks.js';
-import { ExtensionLoader } from '../src/core/extensions.js';
-import { ToolRegistry } from '../src/core/tool-registry.js';
-import { create as createCompactionExtension } from '../extensions/compaction/index.js';
-import { create as createCoreToolsExtension } from '../extensions/core-tools/index.js';
-import { create as createSkillsExtension } from '../extensions/skills/index.js';
-import { create as createPromptsExtension } from '../extensions/prompts/index.js';
-import { create as createSessionLogExtension } from '../extensions/session-log/index.js';
+import { HookSystem, HOOKS } from '../../src/core/hooks.js';
+import { ExtensionLoader } from '../../src/core/extensions.js';
+import { ToolRegistry } from '../../src/core/tool-registry.js';
+import { create as createCompactionExtension } from '../../extensions/compaction/index.js';
+import { create as createCoreToolsExtension } from '../../extensions/core-tools/index.js';
+import { create as createSkillsExtension } from '../../extensions/skills/index.js';
+import { create as createPromptsExtension } from '../../extensions/prompts/index.js';
+import { create as createSessionLogExtension } from '../../extensions/session-log/index.js';
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -76,7 +76,8 @@ describe('Hook + Extension Integration', () => {
     expect(toolNames).toContain('fetch');
     expect(toolNames).toContain('question');
     expect(toolNames).toContain('pager');
-    expect(toolNames).toContain('explore');
+    // explore is disabled by default
+    expect(toolNames).not.toContain('explore');
     expect(toolNames).toContain('model');
     expect(toolNames).toContain('load_skill');
     expect(toolNames).toContain('review');

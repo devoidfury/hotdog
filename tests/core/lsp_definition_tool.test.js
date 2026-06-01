@@ -1,5 +1,11 @@
 import { describe, it, expect, beforeEach } from 'bun:test';
-import { LspDefinitionTool } from '../ext/lsp/tools/lsp-definition.js';
+import { fileURLToPath } from 'node:url';
+import path from 'node:path';
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const ROOT = path.resolve(__dirname, '..');
+// tests/core/ -> tests/ -> project root
+const PROJECT_ROOT = path.resolve(__dirname, '../..');
+import { LspDefinitionTool } from '../../ext/lsp/tools/lsp-definition.js';
 
 describe('LspDefinitionTool', () => {
   let tool;
@@ -73,8 +79,8 @@ describe('LspDefinitionTool', () => {
 
     it('returns error when no LSP server configured', async () => {
       const result = await tool.execute(
-        { file: '/workspace/oa-js/extensions/core-tools/read.js', line: 1, character: 0 },
-        { cwdBoundary: '/workspace/oa-js', workspaceRoot: '/workspace/oa-js' }
+        { file: path.join(PROJECT_ROOT, 'extensions/core-tools/read.js'), line: 1, character: 0 },
+        { cwdBoundary: PROJECT_ROOT, workspaceRoot: PROJECT_ROOT }
       );
       expect(result.isErr()).toBe(true);
       expect(result.error).toContain('No language server configured');

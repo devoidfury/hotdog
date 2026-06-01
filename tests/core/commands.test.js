@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'bun:test';
-import { parseCommand, Command, isUiCommand } from '../src/agent/commands.js';
+import { parseCommand, Command, isUiCommand } from '../../src/core/commands.js';
 
 describe('parseCommand', () => {
   it('parses help', () => {

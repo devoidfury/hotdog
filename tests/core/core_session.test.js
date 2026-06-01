@@ -1,11 +1,11 @@
 // Tests for the core SessionManager class.
 
-import { SessionManager, SessionStore } from '../src/core/session.js';
-import { Agent } from '../src/core/agent.js';
-import { HookSystem, createHooks } from '../src/core/hooks.js';
-import { ExtensionLoader, createExtensionLoader } from '../src/core/extensions.js';
-import { ToolRegistry, createToolRegistry } from '../src/core/tool-registry.js';
-import { Message } from '../src/context/message.js';
+import { SessionManager, SessionStore } from '../../src/core/session.js';
+import { Agent } from '../../src/core/agent.js';
+import { HookSystem, createHooks } from '../../src/core/hooks.js';
+import { ExtensionLoader, createExtensionLoader } from '../../src/core/extensions.js';
+import { ToolRegistry, createToolRegistry } from '../../src/core/tool-registry.js';
+import { Message } from '../../src/context/message.js';
 import { describe, it, expect, beforeEach } from 'bun:test';
 
 // Mock LLM client

@@ -26,13 +26,13 @@ export class RefreshTool {
   /**
    * @param {Object} options
    * @param {Object} options.core - The core object (hooks, extensions, etc.)
-   * @param {Object} options.extensionLoader - The ExtensionLoader instance
-   * @param {Function} options.reRegisterTools - Callback to re-register all tools
+   * @param {Object} [options.extensionLoader] - The ExtensionLoader instance
+   * @param {Function} [options.reRegisterTools] - Callback to re-register all tools
    */
   constructor({ core, extensionLoader, reRegisterTools }) {
     this.core = core;
-    this.extensionLoader = extensionLoader;
-    this.reRegisterTools = reRegisterTools;
+    this.extensionLoader = extensionLoader ?? null;
+    this.reRegisterTools = reRegisterTools ?? null;
   }
 
   toToolDef() {
@@ -80,9 +80,11 @@ export class RefreshTool {
         return this._handleList();
       case "reload":
         return this._handleReload(target);
+      case "cache-clear":
+        return this._handleCacheClear();
       default:
         return ToolResult.err(
-          `Unknown action: ${action}. Use "reload" or "list".`,
+          `Unknown action: ${action}. Use "reload", "list", or "cache-clear".`,
         );
     }
   }
@@ -91,6 +93,12 @@ export class RefreshTool {
    * Handle the "list" action — show loaded modules and extensions.
    */
   async _handleList() {
+    if (!this.extensionLoader) {
+      return ToolResult.ok(
+        "Extension loader not available. Refresh tool is not fully initialized.",
+      ).withEntries({ extension_count: "0" });
+    }
+
     const lines = [];
 
     // ── Loaded Extensions ────────────────────────────────────────────────
@@ -115,6 +123,21 @@ export class RefreshTool {
   }
 
   /**
+   * Handle the "cache-clear" action — clear the module cache.
+   */
+  async _handleCacheClear() {
+    const cacheSize = Object.keys(globalThis.__bun_package_require__.cache || {})
+      .length;
+    // Clear the module cache
+    if (globalThis.__bun_package_require__.cache) {
+      globalThis.__bun_package_require__.cache.clear();
+    }
+    return ToolResult.ok(`Module cache cleared (${cacheSize} modules removed).`).withEntries({
+      modules_cleared: String(cacheSize),
+    });
+  }
+
+  /**
    * Handle the "reload" action — reload specific or all extensions.
    * @param {string} target - Extension name or "all"
    */
@@ -122,6 +145,12 @@ export class RefreshTool {
     if (!target || target.trim() === "") {
       return ToolResult.err(
         'Target is required. Provide an extension name or "all".',
+      );
+    }
+
+    if (!this.extensionLoader) {
+      return ToolResult.err(
+        "Extension loader not available. Cannot reload extensions.",
       );
     }
 
@@ -163,11 +192,15 @@ export class RefreshTool {
 
     // Re-register tools after reload
     if (results.length > 0) {
-      try {
-        await this.reRegisterTools();
-        results.push("✓ Tools re-registered");
-      } catch (e) {
-        errors.push(`✗ Failed to re-register tools: ${e.message}`);
+      if (this.reRegisterTools) {
+        try {
+          await this.reRegisterTools();
+          results.push("✓ Tools re-registered");
+        } catch (e) {
+          errors.push(`✗ Failed to re-register tools: ${e.message}`);
+        }
+      } else {
+        results.push("✓ Extensions reloaded (tool re-registration not available)");
       }
     }
 

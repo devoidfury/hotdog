@@ -1,6 +1,7 @@
 // LSP Formatting tool — textDocument/formatting
 // Created via factory to reduce boilerplate.
 
+import fs from 'node:fs';
 import { ToolResult } from '../../../src/core/tool-registry.js';
 import { defineFileTool } from './lsp-position-tool.js';
 
@@ -17,7 +18,7 @@ export const LspFormattingTool = defineFileTool({
     }
 
     // Read current content
-    const currentContent = require('node:fs').readFileSync(resolvedPath, 'utf-8');
+    const currentContent = fs.readFileSync(resolvedPath, 'utf-8');
 
     // Apply edits to get formatted content
     let newContent = currentContent;

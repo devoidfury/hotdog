@@ -2,16 +2,9 @@
 
 import fs from "node:fs";
 import path from "node:path";
-import { LspClient } from "../client.js";
 import { pathToUri, uriToPath, getLanguageId } from "../utils.js";
-import { getServerByLanguageId } from "../config.js";
-import {
-  lspClientCache,
-  getCachedClient,
-  deleteCachedClient,
-} from "../client-cache.js";
+import { getOrCreateLspClient } from "../client-utils.js";
 import { toolDef, param, ToolResult, defaultCallDisplay } from "../../../src/core/tool-registry.js";
-import { formatError } from "../../../src/context/error.js";
 
 /**
  * Base class for all LSP tools.
@@ -136,61 +129,22 @@ export class LspBaseTool {
 
   /**
    * Get or create an LSP client for the given language.
-   * Initializes the client with server config before returning.
+   * Delegates to shared client-utils utility.
    * @param {string} languageId - Language identifier
    * @param {object} ctx - Tool context
    * @param {object} [lspConfig] - LSP configuration
    * @returns {Promise<LspClient|null>}
    */
   async _getClient(languageId, ctx, lspConfig) {
-    // Use cached client if available
-    const cached = getCachedClient(languageId);
-    if (cached && cached.isReady()) {
-      return cached;
-    }
-    // Client is dead or not found — clear
-    if (cached) {
-      deleteCachedClient(languageId);
-    }
-
-    // Look up server config
-    let serverConfig;
-    if (this.lspConfig) {
-      serverConfig = getServerByLanguageId(languageId, this.lspConfig);
-    }
-    if (!serverConfig) {
-      const lspConfig = ctx?.get('lspConfig');
-      if (lspConfig) {
-        serverConfig = getServerByLanguageId(languageId, lspConfig);
+    // Resolve config: instance lspConfig > ctx lspConfig > passed lspConfig
+    let effectiveConfig = this.lspConfig || lspConfig;
+    if (!effectiveConfig) {
+      const ctxConfig = ctx?.get('lspConfig');
+      if (ctxConfig) {
+        effectiveConfig = ctxConfig;
       }
     }
-    if (!serverConfig) {
-      return null;
-    }
-
-    // Create new client
-    const client = new LspClient({
-      requestTimeoutMs: serverConfig.timeoutMs || 30000,
-      serverStartupTimeoutMs: 60000,
-    });
-
-    // Initialize the client with server config
-    try {
-      await client.initialize({
-        command: serverConfig.command,
-        args: serverConfig.args || [],
-        initializationOptions: serverConfig.initializationOptions,
-        rootPath: ctx?.workspaceRoot || process.cwd(),
-        env: serverConfig.env,
-        timeoutMs: serverConfig.timeoutMs,
-      });
-    } catch (e) {
-      formatError(e); // Log the error
-      return null;
-    }
-
-    lspClientCache.set(languageId, client);
-    return client;
+    return getOrCreateLspClient(languageId, effectiveConfig, ctx);
   }
 
   /**

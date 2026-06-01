@@ -415,7 +415,14 @@ export function createLspPositionTool(spec) {
 /**
  * Factory for creating LSP file-based tool classes (no position required).
  *
- * @param {Object} spec — Tool specification (same as definePositionTool)
+ * @param {Object} spec — Tool specification
+ * @param {string} spec.name — Tool name
+ * @param {string} spec.description — Tool description
+ * @param {string} spec.lspMethod — LSP method (e.g., 'textDocument/formatting')
+ * @param {string} spec.requiredCapability — Server capability name
+ * @param {string} [spec.successResponse] — Message when no result
+ * @param {Function} spec.formatResult — Function(self, result, args, resolvedPath, languageId, lspLine) → ToolResult
+ *   `self` is the tool instance, providing access to inherited helpers like _formatLocation, _uriToPath, etc.
  * @returns {typeof LspFileTool} — A subclass of LspFileTool
  */
 export function defineFileTool(spec) {
@@ -436,7 +443,7 @@ export function defineFileTool(spec) {
     static SUCCESS_RESPONSE = successResponse || null;
 
     _formatResult(result, args, resolvedPath, languageId, lspLine) {
-      return formatResult(result, args, resolvedPath, languageId, lspLine);
+      return formatResult(this, result, args, resolvedPath, languageId, lspLine);
     }
   };
 }

@@ -602,6 +602,13 @@ export class ToolRegistry {
   }
 
   /**
+   * Clear all tools from the registry.
+   */
+  clear() {
+    this.tools.clear();
+  }
+
+  /**
    * Filter tools by whitelist/blacklist.
    */
   filter(whitelist, blacklist, managerToolsEnabled = false) {

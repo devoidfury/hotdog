@@ -3,14 +3,13 @@
 // Only activates when LSP is enabled in config.
 
 import { HOOKS } from "../../src/hooks.js";
-import { isLspEnabled, getServerByLanguageId } from "./config.js";
-import { LspClient } from "./client.js";
+import { isLspEnabled } from "./config.js";
 import {
-  lspClientCache,
   getCachedClient,
   deleteCachedClient,
   shutdownAll,
 } from "./client-cache.js";
+import { getOrCreateLspClient } from "./client-utils.js";
 import {
   LspHoverTool,
   LspDefinitionTool,
@@ -96,42 +95,10 @@ export { LSP_TOOL_MAP };
 
 /**
  * Get or create an LSP client for a given language.
+ * Delegates to shared client-utils utility.
  */
 async function getOrCreateClient(languageId, lspConfig) {
-  const cached = getCachedClient(languageId);
-  if (cached && cached.isReady()) {
-    return cached;
-  }
-  if (cached) {
-    deleteCachedClient(languageId);
-  }
-
-  const serverConfig = getServerByLanguageId(languageId, lspConfig);
-  if (!serverConfig) return null;
-
-  const client = new LspClient({
-    requestTimeoutMs: serverConfig.timeoutMs || 30000,
-    serverStartupTimeoutMs: 60000,
-  });
-
-  try {
-    await client.initialize({
-      command: serverConfig.command,
-      args: serverConfig.args || [],
-      initializationOptions: serverConfig.initializationOptions,
-      rootPath: process.cwd(),
-      env: serverConfig.env,
-      timeoutMs: serverConfig.timeoutMs,
-    });
-  } catch (e) {
-    console.error(
-      `[lsp] Failed to initialize client for ${languageId}: ${e.message}`,
-    );
-    return null;
-  }
-
-  lspClientCache.set(languageId, client);
-  return client;
+  return getOrCreateLspClient(languageId, lspConfig);
 }
 
 /**

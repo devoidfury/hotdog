@@ -11,7 +11,7 @@ import {
   resolvePath,
   parseToolInput,
   defaultCallDisplay,
-} from "./registry.js";
+} from "../../src/core/tool-registry.js";
 import { DEFAULT_MAX_EDIT_INPUT_SIZE } from "../../src/config.js";
 
 export class EditTool {

@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import { ReadTool } from '../../extensions/core-tools/read.js';
-import { ToolContext, ToolResult } from '../../extensions/core-tools/registry.js';
+import { ToolContext, ToolResult } from '../../src/core/tool-registry.js';
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
 

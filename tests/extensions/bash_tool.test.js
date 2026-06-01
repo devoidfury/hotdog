@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'bun:test';
 import { BashTool } from '../../extensions/core-tools/bash.js';
-import { ToolResult } from '../../extensions/core-tools/registry.js';
+import { ToolResult } from '../../src/core/tool-registry.js';
 
 /**
  * Extract string output from a tool result (handles ToolResult or plain string).

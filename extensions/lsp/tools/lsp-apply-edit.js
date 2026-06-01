@@ -1,7 +1,7 @@
 // LSP Apply Edit tool — workspace/applyEdit
 
 import { LspBaseTool } from './base.js';
-import { ToolResult, defaultCallDisplay } from '../../core-tools/registry.js';
+import { ToolResult, defaultCallDisplay } from '../../../src/core/tool-registry.js';
 import { formatError } from '../../../src/context/error.js';
 
 export class LspApplyEditTool extends LspBaseTool {

@@ -6,7 +6,7 @@ const ROOT = path.resolve(__dirname, '..');
 // tests/core/ -> tests/ -> project root
 const PROJECT_ROOT = path.resolve(__dirname, '../..');
 import { LspHoverTool } from '../../extensions/lsp/tools/lsp-hover.js';
-import { ToolResult, ToolContext } from '../../extensions/core-tools/registry.js';
+import { ToolResult, ToolContext } from '../../src/core/tool-registry.js';
 
 describe('LspHoverTool', () => {
   let tool;

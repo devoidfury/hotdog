@@ -5,7 +5,7 @@
 
 import { HOOKS } from "../../src/hooks.js";
 
-export * from "./registry.js";
+export * from "../../src/core/tool-registry.js";
 export * from "./bash.js";
 export * from "./write.js";
 export * from "./read.js";

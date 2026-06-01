@@ -11,7 +11,7 @@ import { readSessionEntries } from '../../src/session/session-log.js';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { readdirSync, existsSync, statSync } from 'node:fs';
-import { ToolResult, defaultCallDisplay } from '../core-tools/registry.js';
+import { ToolResult, defaultCallDisplay } from '../../src/core/tool-registry.js';
 
 /**
  * Truncate content to max_len bytes, appending '…' if truncated.

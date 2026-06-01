@@ -1,6 +1,6 @@
 // Load skill tool — load a skill's full instructions into context.
 
-import { toolDef, param, ToolResult, defaultCallDisplay } from "../core-tools/registry.js";
+import { toolDef, param, ToolResult, defaultCallDisplay } from "../../src/core/tool-registry.js";
 
 export class LoadSkillTool {
   static TOOL_NAME = "load_skill";

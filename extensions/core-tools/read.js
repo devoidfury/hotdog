@@ -11,7 +11,7 @@ import {
   resolvePath,
   parseToolInput,
   defaultCallDisplay,
-} from "./registry.js";
+} from "../../src/core/tool-registry.js";
 import { DEFAULT_READ_TOOL_LIMIT } from "../../src/config.js";
 
 export class ReadTool {

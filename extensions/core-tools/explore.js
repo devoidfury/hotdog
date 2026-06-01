@@ -3,7 +3,7 @@
 import { spawn } from "node:child_process";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { toolDef, param, ToolResult, toolResult, defaultCallDisplay } from "./registry.js";
+import { toolDef, param, ToolResult, toolResult, defaultCallDisplay } from "../../src/core/tool-registry.js";
 
 // Resolve the path to the current binary (main.js)
 const __dirname = path.dirname(fileURLToPath(import.meta.url));

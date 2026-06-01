@@ -1,7 +1,7 @@
 import { test, expect, describe, beforeEach } from "bun:test";
 import { HookSystem, createHooks, HOOKS } from "../../src/hooks.js";
 import { Agent } from "../../src/core/agent.js";
-import { ToolRegistry } from "../../extensions/core-tools/registry.js";
+import { ToolRegistry } from "../../src/core/tool-registry.js";
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 

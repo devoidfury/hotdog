@@ -11,7 +11,7 @@ import {
   truncateOutput,
   parseToolInput,
   defaultCallDisplay,
-} from "./registry.js";
+} from "../../src/core/tool-registry.js";
 import {
   DEFAULT_GREP_MAX_RESULTS,
   DEFAULT_MAX_TOOL_OUTPUT_LINES,

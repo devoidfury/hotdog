@@ -7,7 +7,7 @@ import {
   ToolResult,
   parseToolInput,
   defaultCallDisplay,
-} from "./registry.js";
+} from "../../src/core/tool-registry.js";
 
 const VALID_METHODS = ["GET", "POST", "PUT", "DELETE", "PATCH", "HEAD"];
 const METHODS_WITH_BODY = ["POST", "PUT", "PATCH"];

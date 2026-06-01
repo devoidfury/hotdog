@@ -1,7 +1,7 @@
 // LSP Formatting tool — textDocument/formatting
 // Created via factory to reduce boilerplate.
 
-import { ToolResult } from '../../core-tools/registry.js';
+import { ToolResult } from '../../../src/core/tool-registry.js';
 import { defineFileTool } from './lsp-position-tool.js';
 
 export const LspFormattingTool = defineFileTool({

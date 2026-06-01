@@ -1,7 +1,7 @@
 // LSP Diagnostics tool — textDocument/publishDiagnostics
 
 import { LspFileTool } from './lsp-position-tool.js';
-import { ToolResult } from '../../core-tools/registry.js';
+import { ToolResult } from '../../../src/core/tool-registry.js';
 import { DiagnosticSeverity } from './base.js';
 
 export class LspDiagnosticsTool extends LspFileTool {

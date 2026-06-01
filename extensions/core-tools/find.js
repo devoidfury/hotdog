@@ -2,7 +2,7 @@
 
 import { execFile } from "node:child_process";
 import util from "node:util";
-import { toolDef, param, ToolResult, toolResult, truncateOutput, parseToolInput, defaultCallDisplay } from "./registry.js";
+import { toolDef, param, ToolResult, toolResult, truncateOutput, parseToolInput, defaultCallDisplay } from "../../src/core/tool-registry.js";
 import {
   DEFAULT_FIND_MAX_RESULTS,
   DEFAULT_MAX_TOOL_OUTPUT_LINES,

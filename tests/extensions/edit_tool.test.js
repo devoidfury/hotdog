@@ -4,7 +4,7 @@ import fsSync from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import { EditTool } from '../../extensions/core-tools/edit.js';
-import { ToolContext, ToolResult } from '../../extensions/core-tools/registry.js';
+import { ToolContext, ToolResult } from '../../src/core/tool-registry.js';
 import { DEFAULT_MAX_EDIT_INPUT_SIZE } from '../../src/config.js';
 
 // ── Helpers ─────────────────────────────────────────────────────────────────

@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import { LoadSkillTool } from '../../extensions/skills/load_skill.js';
-import { ToolContext } from '../../extensions/core-tools/registry.js';
+import { ToolContext } from '../../src/core/tool-registry.js';
 import { SkillsLoader } from '../../extensions/skills/loader.js';
 
 function getResultStr(result) {

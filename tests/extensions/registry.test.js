@@ -22,7 +22,7 @@ import {
   ToolRegistry,
   ToolContext,
   ToolResult,
-} from '../../extensions/core-tools/registry.js';
+} from '../../src/core/tool-registry.js';
 
 describe('toolDef', () => {
   it('creates a tool definition', () => {
@@ -426,8 +426,8 @@ describe('writeFileWithParents', () => {
 
 describe('resolvePathAndValidate', () => {
   it('resolves existing path', () => {
-    const resolved = resolvePathAndValidate(path.join(ROOT, 'extensions/core-tools/registry.js'));
-    expect(resolved).toBe(path.join(ROOT, 'extensions/core-tools/registry.js'));
+    const resolved = resolvePathAndValidate(path.join(ROOT, 'src/core/tool-registry.js'));
+    expect(resolved).toBe(path.join(ROOT, 'src/core/tool-registry.js'));
   });
 
   it('throws for non-existent path', () => {
@@ -439,8 +439,8 @@ describe('resolvePathAndValidate', () => {
   });
 
   it('allows path within boundary', () => {
-    const resolved = resolvePathAndValidate(path.join(ROOT, 'extensions/core-tools/registry.js'), ROOT);
-    expect(resolved).toBe(path.join(ROOT, 'extensions/core-tools/registry.js'));
+    const resolved = resolvePathAndValidate(path.join(ROOT, 'src/core/tool-registry.js'), ROOT);
+    expect(resolved).toBe(path.join(ROOT, 'src/core/tool-registry.js'));
   });
 
   it('allows path outside cwd when no boundary is set', () => {
@@ -452,7 +452,7 @@ describe('resolvePathAndValidate', () => {
 
 describe('fileSize', () => {
   it('returns file size in bytes', () => {
-    const size = fileSize(path.join(ROOT, 'extensions/core-tools/registry.js'));
+    const size = fileSize(path.join(ROOT, 'src/core/tool-registry.js'));
     expect(typeof size).toBe('number');
     expect(size).toBeGreaterThan(0);
   });

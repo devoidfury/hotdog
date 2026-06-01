@@ -3,7 +3,7 @@ import fsSync from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import { FindTool } from '../../extensions/core-tools/find.js';
-import { ToolContext, ToolResult } from '../../extensions/core-tools/registry.js';
+import { ToolContext, ToolResult } from '../../src/core/tool-registry.js';
 import { DEFAULT_FIND_MAX_RESULTS } from '../../src/config.js';
 
 // ── Helpers ─────────────────────────────────────────────────────────────────

@@ -1,7 +1,7 @@
 // LSP Code Action tool — textDocument/codeAction
 // Created via factory to reduce boilerplate.
 
-import { ToolResult } from '../../core-tools/registry.js';
+import { ToolResult } from '../../../src/core/tool-registry.js';
 import { definePositionTool } from './lsp-position-tool.js';
 
 export const LspCodeActionTool = definePositionTool({

@@ -10,7 +10,7 @@ import {
 } from "../context/index.js";
 import { LlmClient, LlmError } from "../llm_client/client.js";
 import { render } from "../context/render.js";
-import { ToolRegistry, ToolContext } from "../tools/registry.js";
+import { ToolRegistry, ToolContext } from "../../extensions/core-tools/registry.js";
 import {
   createToolFactory,
   CORE_TOOL_NAMES,
@@ -18,7 +18,7 @@ import {
   toolResult,
   registerLspTools,
   ToolResult,
-} from "../tools/index.js";
+} from "../../extensions/core-tools/index.js";
 import {
   DEFAULT_MAX_TOKENS,
   DEFAULT_MAX_ITERATIONS,
@@ -30,15 +30,15 @@ import {
   loadAspects,
   loadAgentsMd,
 } from "../context/system_prompt.js";
-import { disabledSessionLog } from "../session_log.js";
-import { findFirstKeptIndex } from "../compaction.js";
-import { CompactionStrategyRegistry } from "../compaction/strategies.js";
-import { SummarizeStrategy } from "../compaction/strategies/summarize.js";
-import { DropStrategy } from "../compaction/strategies/drop.js";
-import { SummarizeShortStrategy } from "../compaction/strategies/summarize-short.js";
-import { TokenAwareStrategy } from "../compaction/strategies/token-aware.js";
+import { disabledSessionLog } from "../../extensions/session-log/session_log.js";
+import { findFirstKeptIndex } from "../../extensions/compaction/index.js";
+import { CompactionStrategyRegistry } from "../../extensions/compaction/strategies.js";
+import { SummarizeStrategy } from "../../extensions/compaction/strategies/summarize.js";
+import { DropStrategy } from "../../extensions/compaction/strategies/drop.js";
+import { SummarizeShortStrategy } from "../../extensions/compaction/strategies/summarize-short.js";
+import { TokenAwareStrategy } from "../../extensions/compaction/strategies/token-aware.js";
 import { DEFAULT_COMPACTION_STRATEGY } from "../config.js";
-import { McpTool } from "../mcp/tools.js";
+import { McpTool } from "../../extensions/mcp/tools.js";
 import { Command } from "./commands.js";
 
 /**

@@ -1,10 +1,10 @@
 // Init module — agent initialization and configuration resolution.
-// Init module — agent initialization and configuration resolution.
 
 import fs from "node:fs";
 import { join } from "node:path";
 import { cwd } from "node:process";
-import { parseFrontMatter, DEFAULT_MODEL, DEFAULT_ROLE } from "../config.js";
+import { DEFAULT_MODEL, DEFAULT_ROLE } from "../config.js";
+import { parseFrontMatter } from "../render_md.js";
 import { render } from "../context/render.js";
 
 // ── Unified Config Builder ───────────────────────────────────────────────────
@@ -455,8 +455,6 @@ Use the instructions below and the tools available to you to assist the user.
 # Guidelines
 
 {% for aspect in aspects -%}
-## Aspect: {{ aspect.name }}
-
 {{ aspect.content }}
 {% endfor %}
 {%- endif %}

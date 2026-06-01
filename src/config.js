@@ -3,6 +3,9 @@
 import fs from "node:fs";
 import path from "node:path";
 
+import { parseFrontMatter } from "./render_md.js";
+import { deepMerge } from "./utils.js";
+
 // ── LSP Configuration Defaults ──────────────────────────────────────────
 
 export const DEFAULT_LSP_ENABLED = false;
@@ -215,23 +218,6 @@ function getDefaultConfig() {
   };
 }
 
-// ── YAML Parsing ───────────────────────────────────────────────────────────
-
-import { YAML } from "bun";
-import { deepMerge } from "./lib";
-
-/**
- * Parse YAML front matter from a markdown string.
- * Returns { frontMatter: object, body: string } or null if no front matter.
- */
-export function parseFrontMatter(content) {
-  const m = content.match(/^---\n([\s\S]*?)\n---\n?([\s\S]*)$/);
-  if (!m) return null;
-  const body = m[2] || "";
-  const fm = YAML.parse(m[1]);
-  return { frontMatter: fm, body };
-}
-
 /**
  * Load a profile from a .profile.md file.
  * Profile files use YAML front matter with fields: name, role, aspects, blacklist-tools, model, preload-skills, manager.
@@ -315,29 +301,6 @@ export function getVisibleWorkerProfiles(config) {
     }
   }
   return profiles;
-}
-
-// Internal helpers — used by tests and internal logic
-export function resolveString(cli, configValue, defaultValue, envName) {
-  if (cli !== undefined && cli !== null) return cli;
-  if (configValue !== undefined && configValue !== null && configValue !== "")
-    return configValue;
-  const env = envName ? process.env[envName] : undefined;
-  if (env !== undefined && env !== "") return env;
-  return defaultValue;
-}
-
-// Internal helpers — used by tests and internal logic
-export function isFalse(val) {
-  return val === false;
-}
-
-export function isEmptyArray(val) {
-  return Array.isArray(val) && val.length === 0;
-}
-
-export function isNoneOr(val, check) {
-  return val === null || val === undefined || check(val);
 }
 
 /**

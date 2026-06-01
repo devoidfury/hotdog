@@ -4,6 +4,7 @@
 
 import { Message } from '../context/message.js';
 import { LlmError } from '../llm_client/client.js';
+import { OUTPUT_EVENT } from '../context/output.js';
 import { HOOKS } from './hooks.js';
 
 /**
@@ -124,7 +125,12 @@ export class Agent {
 
       // Emit token usage
       if (this._showTokenUse && response.usage) {
-        this._emitOutput('token_usage', response.usage);
+        this._emitOutput('token_usage', {
+          promptTokens: response.usage.prompt_tokens || 0,
+          cachedTokens: response.usage.prompt_tokens_details?.cached_tokens || 0,
+          completionTokens: response.usage.completion_tokens || 0,
+          totalTokens: response.usage.total_tokens || 0,
+        });
       }
 
       // Tool execution
@@ -360,7 +366,7 @@ export class Agent {
 
   _emitOutput(type, data) {
     if (this._sink) {
-      this._sink.emit({ type, ...data });
+      this._sink.emit({ type: OUTPUT_EVENT[type.toUpperCase()], ...data });
     }
     this._hooks.emit(HOOKS.OUTPUT_EVENT, { type, data });
   }
@@ -415,7 +421,14 @@ export class Agent {
     const result = this._hooks.emit(HOOKS.COMMAND_DISPATCH, {
       command: cmd, agent: this,
     });
-    if (result) return result;
+
+    // Handle async hook results (Promises)
+    if (result && typeof result.then === 'function') {
+      const awaited = await result;
+      if (awaited) return awaited;
+    } else if (result) {
+      return result;
+    }
 
     // Default command handling (core commands)
     switch (cmd.type) {
@@ -426,9 +439,140 @@ export class Agent {
         return { error: 'UI command: quit' };
       case 'help':
         return { error: 'UI command: help' };
+      case 'model':
+        return this._handleModelCommand(cmd);
+      case 'models':
+        return this._handleModelsCommand();
+      case 'tokens':
+        return this._handleTokensCommand();
+      case 'tools':
+        return this._handleToolsCommand();
+      case 'thinking':
+        return this._handleThinkingCommand();
+      case 'compact':
+        return await this._handleCompactCommand(cmd.value);
+      case 'compact:strategy':
+        return this._handleCompactStrategyCommand(cmd.value);
+      case 'regenerate':
+        return this._handleRegenerateCommand();
       default:
         return { error: `Unknown command: ${cmd.type}` };
     }
+  }
+
+  // ── Command Handlers ──────────────────────────────────────────────────────
+
+  _handleModelCommand(cmd) {
+    if (!cmd?.value) {
+      return {
+        content: `Available models: ${Object.keys(this._modelRegistry).join(', ')}`,
+      };
+    }
+    this._model = cmd.value;
+    this.clearContext();
+    return { content: `Switched to model: ${cmd.value}` };
+  }
+
+  _handleModelsCommand() {
+    const models = Object.keys(this._modelRegistry);
+    if (models.length === 0) {
+      return {
+        content: 'No models configured. Add providers to your config file.',
+      };
+    }
+    const lines = ['Available models:'];
+    for (const name of models) {
+      const m = this._modelRegistry[name];
+      const tags = m.tags ? ` [${m.tags.join(', ')}]` : '';
+      lines.push(`  ${name}${tags}`);
+    }
+    lines.push(`\nCurrently using: ${this._model}`);
+    return { content: lines.join('\n') };
+  }
+
+  _handleTokensCommand() {
+    return { content: 'Token stats not yet tracked.' };
+  }
+
+  _handleToolsCommand() {
+    this._hideTools = !this._hideTools;
+    this._emitOutput('session_state', { key: 'hideTools', value: this._hideTools });
+    return {
+      content: `Tool display: ${this._hideTools ? 'hidden' : 'shown'}`,
+    };
+  }
+
+  _handleThinkingCommand() {
+    this._hideThinking = !this._hideThinking;
+    this._emitOutput('session_state', { key: 'hideThinking', value: this._hideThinking });
+    return {
+      content: `Thinking display: ${this._hideThinking ? 'hidden' : 'shown'}`,
+    };
+  }
+
+  async _handleCompactCommand(value) {
+    if (!value) {
+      return { content: 'Usage: /compact [n] [--compact-debug]' };
+    }
+    // Trigger compaction via hook — the compaction extension handles it
+    await this._hooks.emitAsync(HOOKS.CONTEXT_FULL, {
+      agent: this,
+      contextSize: this._context.length,
+    });
+    return { content: 'Compaction triggered.' };
+  }
+
+  _handleCompactStrategyCommand(value) {
+    const { action, name } = value || { action: 'list' };
+
+    // Check if compaction extension is loaded
+    const compactionExt = this._hooks._extensions?.get?.('compaction');
+    if (!compactionExt) {
+      return { content: 'Compaction extension not loaded.' };
+    }
+
+    if (action === 'list' || action === '') {
+      const strategies = compactionExt.getStrategyList();
+      const current = compactionExt.settings?.strategy || 'summarize';
+      const lines = ['\nCompaction Strategies:\n'];
+      for (const s of strategies) {
+        const marker = s.name === current ? ' (current)' : '';
+        lines.push(`  ${s.name}${marker} — ${s.description}`);
+      }
+      lines.push(`\nCurrent strategy: ${current}\n`);
+      return { content: lines.join('') };
+    }
+
+    if (action === 'set') {
+      if (!name) {
+        return { content: 'Usage: /compact:strategy <name>' };
+      }
+      compactionExt.settings.strategy = name;
+      return { content: `Compaction strategy set to: ${name}` };
+    }
+
+    if (action === 'help') {
+      const strategies = compactionExt.getStrategyList();
+      const lines = ['\nCompaction Strategies:\n'];
+      for (const s of strategies) {
+        lines.push(`  ${s.name} — ${s.description}`);
+      }
+      lines.push(
+        '\nUsage:\n' +
+          '  /compact:strategy              — List strategies\n' +
+          '  /compact:strategy <name>       — Set strategy\n' +
+          '  /compact:strategy help         — Show help\n' +
+          '  /compact:strategy help <name>  — Show strategy details\n',
+      );
+      return { content: lines.join('') };
+    }
+
+    return { error: `Unknown action: ${action}` };
+  }
+
+  _handleRegenerateCommand() {
+    this._systemPrompt = null;
+    return { content: 'System prompt regenerated.' };
   }
 
   /**

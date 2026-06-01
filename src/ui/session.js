@@ -6,7 +6,7 @@
 
 import readline from "node:readline";
 import { spawn } from "node:child_process";
-import { parseCommand, Command } from "../agent/commands.js";
+import { parseCommand, Command } from "../core/commands.js";
 import { lspClientCache } from "../../ext/lsp/client-cache.js";
 
 const HELP_TEXT = `

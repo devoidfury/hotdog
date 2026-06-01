@@ -46,10 +46,20 @@ export class SessionManager {
    * @param {Object} options.extensions — ExtensionLoader
    * @param {Function} options.buildAgent — Function(config) → Agent
    * @param {Object} [options.serializer] — Optional session serializer
+   * @param {Object} [options.initialConfig] — Config for initial agent
    * @returns {Promise<SessionManager>}
    */
   static async create(options) {
     const instance = new SessionManager(options);
+
+    // Build initial agent if a buildAgent function is provided
+    if (options.buildAgent) {
+      const initialConfig = options.initialConfig || {};
+      const agent = await options.buildAgent(initialConfig);
+      const sessionId = instance._store.addAgent(agent);
+      instance._currentSessionId = sessionId;
+    }
+
     return instance;
   }
 

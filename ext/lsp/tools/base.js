@@ -10,7 +10,7 @@ import {
   getCachedClient,
   deleteCachedClient,
 } from "../client-cache.js";
-import { toolDef, param, ToolResult } from "../../../src/tools/registry.js";
+import { toolDef, param, ToolResult } from "../../../extensions/core-tools/registry.js";
 import { formatError } from "../../../src/context/error.js";
 
 /**

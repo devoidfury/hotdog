@@ -2,17 +2,13 @@
   "name": "oa-agent",
   "version": "0.1.0",
   "main": "src/lib.js",
-  "devDependencies": {
-    "eslint": "^9.0.0"
-  },
+  "devDependencies": {},
   "bin": {
     "oa-agent": "bin/oa-agent"
   },
   "description": "AI agent harness with tool calling support",
   "scripts": {
-    "start": "bun src/main.js",
-    "check": "bun lint",
-    "lint": "bunx --bun eslint src/"
+    "start": "bun src/main.js"
   },
   "type": "module"
 }

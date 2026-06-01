@@ -78,7 +78,8 @@ describe('Hook + Extension Integration', () => {
     expect(toolNames).toContain('pager');
     // explore is disabled by default
     expect(toolNames).not.toContain('explore');
-    expect(toolNames).toContain('model');
+    // model is registered by model-switch extension, not core-tools
+    expect(toolNames).not.toContain('model');
     // load_skill is registered by skills extension, not core-tools
     expect(toolNames).not.toContain('load_skill');
     // review is registered by session-review extension, not core-tools

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'bun:test';
-import { ModelTool } from '../../extensions/core-tools/model.js';
+import { ModelTool } from '../../extensions/model-switch/model.js';
 import { ToolResult, ToolContext } from '../../src/core/tool-registry.js';
 
 /**

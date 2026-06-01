@@ -15,8 +15,6 @@ export * from "./find.js";
 export * from "./fetch.js";
 export * from "./question.js";
 export * from "./pager.js";
-export * from "./model.js";
-
 export * from "./project_info.js";
 export * from "./explore.js";
 
@@ -30,7 +28,6 @@ import { FindTool } from "./find.js";
 import { FetchTool } from "./fetch.js";
 import { QuestionTool } from "./question.js";
 import { PagerTool } from "./pager.js";
-import { ModelTool } from "./model.js";
 import { ProjectInfoTool } from "./project_info.js";
 import { ExploreTool } from "./explore.js";
 
@@ -38,7 +35,6 @@ import { ExploreTool } from "./explore.js";
 const TOOL_DESCRIPTORS = [
   { name: "bash", disabled: false },
   { name: "write", disabled: false },
-  { name: "model", disabled: false },
   { name: "read", disabled: false },
   { name: "question", disabled: false },
   { name: "pager", disabled: false },
@@ -64,7 +60,6 @@ const TOOL_CONSTRUCTORS = {
   question: () => new QuestionTool(),
   pager: () => new PagerTool(),
   explore: () => new ExploreTool(),
-  model: (ctx) => new ModelTool(ctx?.modelRegistry || {}),
   project_info: () => new ProjectInfoTool(),
 };
 

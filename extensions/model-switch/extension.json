@@ -1,0 +1,22 @@
+{
+  "name": "model-switch",
+  "provides": ["tools"],
+  "loadOrder": 1,
+  "description": "Switch the AI model at runtime (tool + slash commands)",
+  "configSchema": {
+    "type": "object",
+    "properties": {
+      "toolEnabled": {
+        "type": "boolean",
+        "default": true,
+        "description": "Whether to register the model tool"
+      },
+      "commandEnabled": {
+        "type": "boolean",
+        "default": true,
+        "description": "Whether to register the /model and /models slash commands"
+      }
+    },
+    "additionalProperties": false
+  }
+}

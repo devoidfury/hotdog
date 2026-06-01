@@ -621,10 +621,6 @@ export class Agent {
         return { error: "UI command: quit" };
       case "help":
         return { error: "UI command: help" };
-      case "model":
-        return this._handleModelCommand(cmd);
-      case "models":
-        return this._handleModelsCommand();
       case "tokens":
         return this._handleTokensCommand();
       case "tools":
@@ -647,34 +643,6 @@ export class Agent {
   }
 
   // ── Command Handlers ──────────────────────────────────────────────────────
-
-  _handleModelCommand(cmd) {
-    if (!cmd?.value) {
-      return {
-        content: `Available models: ${Object.keys(this._modelRegistry).join(", ")}`,
-      };
-    }
-    this.model = cmd.value;
-    this.clearContext();
-    return { content: `Switched to model: ${cmd.value}` };
-  }
-
-  _handleModelsCommand() {
-    const models = Object.keys(this._modelRegistry);
-    if (models.length === 0) {
-      return {
-        content: "No models configured. Add providers to your config file.",
-      };
-    }
-    const lines = ["Available models:"];
-    for (const name of models) {
-      const m = this._modelRegistry[name];
-      const tags = m.tags ? ` [${m.tags.join(", ")}]` : "";
-      lines.push(`  ${name}${tags}`);
-    }
-    lines.push(`\nCurrently using: ${this.model}`);
-    return { content: lines.join("\n") };
-  }
 
   _handleTokensCommand() {
     return { content: "Token stats not yet tracked." };

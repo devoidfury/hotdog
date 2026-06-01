@@ -12,8 +12,6 @@ export const Command = {
   Clear: 'clear',
   Tools: 'tools',
   Thinking: 'thinking',
-  Models: 'models',
-  Model: 'model',
   Tokens: 'tokens',
   Regenerate: 'regenerate',
   Unknown: 'unknown',
@@ -67,18 +65,6 @@ export function parseCommand(cmd, registry) {
       return { type: Command.Tools, value: null };
     case 'thinking':
       return { type: Command.Thinking, value: null };
-    case 'models':
-    case 'model':
-      return { type: Command.Models, value: null };
-  }
-
-  // model <name>
-  if (cmd.startsWith('model ')) {
-    const modelName = cmd.slice(6).trim();
-    return {
-      type: modelName ? Command.Model : Command.Models,
-      value: modelName || null,
-    };
   }
 
   if (cmd === 'tokens') {

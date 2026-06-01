@@ -36,16 +36,16 @@ describe('parseCommand', () => {
     expect(parseCommand('thinking')).toEqual({ type: Command.Thinking, value: null });
   });
 
-  it('parses models', () => {
-    expect(parseCommand('models')).toEqual({ type: Command.Models, value: null });
+  it('parses models as unknown (handled by model-switch extension)', () => {
+    expect(parseCommand('models')).toEqual({ type: Command.Unknown, value: 'models' });
   });
 
-  it('parses model (no name) as models', () => {
-    expect(parseCommand('model')).toEqual({ type: Command.Models, value: null });
+  it('parses model as unknown (handled by model-switch extension)', () => {
+    expect(parseCommand('model')).toEqual({ type: Command.Unknown, value: 'model' });
   });
 
-  it('parses model with name', () => {
-    expect(parseCommand('model qwen3.5-0.8b')).toEqual({ type: Command.Model, value: 'qwen3.5-0.8b' });
+  it('parses model with name as unknown (handled by model-switch extension)', () => {
+    expect(parseCommand('model qwen3.5-0.8b')).toEqual({ type: Command.Unknown, value: 'model qwen3.5-0.8b' });
   });
 
   it('parses tokens', () => {

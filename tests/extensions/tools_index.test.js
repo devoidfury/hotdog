@@ -14,7 +14,6 @@ describe("CORE_TOOL_NAMES", () => {
     const expected = [
       "bash",
       "write",
-      "model",
       "read",
       "question",
       "pager",
@@ -114,18 +113,11 @@ describe("createToolFactory", () => {
     expect(typeof tool.execute).toBe("function");
   });
 
-  it("creates model tool", () => {
+  // model is registered by the model-switch extension, not core-tools
+  it("returns null for model (registered by model-switch extension)", () => {
     const factory = createToolFactory();
     const tool = factory.createTool("model", {});
-    expect(tool).not.toBeNull();
-    expect(typeof tool.execute).toBe("function");
-  });
-
-  it("creates model tool with custom registry", () => {
-    const factory = createToolFactory();
-    const ctx = { modelRegistry: { "gpt-4": { name: "gpt-4" } } };
-    const tool = factory.createTool("model", ctx);
-    expect(tool).not.toBeNull();
+    expect(tool).toBeNull();
   });
 
   // load_skill is registered by the skills extension, not the core-tools factory

@@ -2,7 +2,7 @@
   "name": "core-tools",
   "provides": ["tools"],
   "loadOrder": 1,
-  "description": "Core agent tools (bash, write, read, edit, grep, find, fetch, question, pager, model, explore)",
+  "description": "Core agent tools (bash, write, read, edit, grep, find, fetch, question, pager, explore)",
   "configSchema": {
     "type": "object",
     "properties": {

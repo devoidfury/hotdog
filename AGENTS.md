@@ -1,6 +1,6 @@
 # Agent Harness
 
-JS project `oa-js` — an AI agent harness with tool calling support. This is a port from the rust version /workspace/oa-agent/
+JS project `oa-js` — an AI agent harness with tool calling support.
 
 ## Quick Command Reference
 

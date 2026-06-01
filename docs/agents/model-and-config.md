@@ -29,7 +29,7 @@ All defaults live in `src/config.js` as named constants:
 - **`loadConfig(configPath, extParams)`** — loads config from file, falls back to `./config/defaults.json` then `~/.config/oa-agent/default.json`, then defaults. Merges extension defaults.
 - **`buildConfig(cli)`** — single entry point for config resolution. Returns `{ resolved, modelRegistry, providers }`. Handles CLI args → config file → env var → default priority chain.
 - **`mergeExtensionConfigDefaults(defaultConfig, extParams)`** — merges extension-registered config defaults into base config
-- **`normalizeConfigKeys(obj)`** — converts snake_case (Rust format) to camelCase (JS format)
+- **`normalizeConfigKeys(obj)`** — converts snake_case to camelCase
 
 ### Providers
 Models are declared inside providers. Each provider has `name`, `url`, optional `api_key`, and a list of `models`. The active provider is selected via `--provider` CLI flag or `default_provider` config key.

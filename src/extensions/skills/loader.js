@@ -67,7 +67,7 @@ export function parseSkillFromMd(content, dirName, location) {
     throw new Error("Skill description is missing or empty (required)");
   }
 
-  // Warn on description length (matches Rust's 1024 char limit)
+  // Warn on description length
   const descLen =
     typeof fm.description === "string" ? fm.description.length : 0;
   if (descLen > 1024) {
@@ -136,7 +136,7 @@ function parseToolList(val) {
 
 /**
  * Recursively collect additional files from a skill directory.
- * Stores paths relative to the skill root (matching Rust's strip_prefix).
+ * Stores paths relative to the skill root
  */
 function collectAdditionalFiles(dirPath, parentDir, files = []) {
   try {
@@ -318,7 +318,12 @@ export class SkillsLoader {
     if (visibleSkills.length === 0) return "";
 
     // Load the skills preamble template
-    const templatePath = join(cwd(), "config", "templates", "skills_preamble.md");
+    const templatePath = join(
+      cwd(),
+      "config",
+      "templates",
+      "skills_preamble.md",
+    );
     let template;
     try {
       template = fs.readFileSync(templatePath, "utf-8");

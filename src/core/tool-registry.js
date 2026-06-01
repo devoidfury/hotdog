@@ -207,8 +207,7 @@ export function parseToolArgs(input) {
  * Handles plain strings, objects, and ToolResult instances.
  *
  * When a `toolName` is provided, the result is formatted as XML
- * for the API (matching the Rust reference's `to_api_content()`
- * behavior). This is used for tool results sent back to the LLM.
+ * for the API. This is used for tool results sent back to the LLM.
  *
  * When no tool name is provided, falls back to plain text display.
  */

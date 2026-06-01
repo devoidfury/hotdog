@@ -28,7 +28,10 @@ export function mergeExtensionConfigDefaults(defaultConfig, extParams) {
   for (const param of extParams) {
     if (merged[param.key] === undefined) {
       merged[param.key] = { ...param.defaults };
-    } else if (typeof merged[param.key] === 'object' && merged[param.key] !== null) {
+    } else if (
+      typeof merged[param.key] === "object" &&
+      merged[param.key] !== null
+    ) {
       // Deep merge with extension defaults
       merged[param.key] = deepMerge(merged[param.key], param.defaults);
     }
@@ -64,7 +67,7 @@ export const DEFAULT_TASK_PROFILE = "task-default";
 // ── Config Loading ─────────────────────────────────────────────────────
 
 /**
- * Normalize config keys from snake_case (Rust format) to camelCase (JS format).
+ * Normalize config keys from snake_case to camelCase.
  * Handles nested objects like profiles and mcp_servers.
  */
 function normalizeConfigKeys(obj) {
@@ -173,7 +176,7 @@ export async function loadConfig(configPath, extParams) {
   try {
     const content = await fsPromises.readFile(configPathToUse, "utf-8");
     const raw = JSON.parse(content);
-    // Normalize snake_case keys from Rust config to camelCase
+    // Normalize snake_case keys from config to camelCase
     return deepMerge(getDefaultConfig(extParams), normalizeConfigKeys(raw));
   } catch (e) {
     console.error(`Error loading config from ${configPathToUse}: ${e.message}`);

@@ -1,4 +1,4 @@
-// Minimal Agent — the core AI agent with tool calling support.
+// Agent - the core AI agent with tool calling support.
 // Thin orchestrator that delegates behavior to hooks.
 // Behaviors (compaction, tools, system prompt, commands) live in extensions.
 
@@ -254,8 +254,9 @@ export class Agent {
 
       // Tool execution
       if (response.finalToolCalls) {
-        const { outcome, toolResults } =
-          await this._executeTools(response.finalToolCalls);
+        const { outcome, toolResults } = await this._executeTools(
+          response.finalToolCalls,
+        );
         if (outcome !== "continue") {
           // Turn end — agent has stopped (e.g., wait tool yielded control).
           await this._hooks.emitAsync(HOOKS.TURN_END, {
@@ -514,11 +515,19 @@ export class Agent {
     // 5. Resolve tool from registry
     const tool = this._toolRegistry.get(toolName);
     if (!tool) {
-      return this._writeToolResult(toolName, input, `Unknown tool: ${toolName}`, toolCallId);
+      return this._writeToolResult(
+        toolName,
+        input,
+        `Unknown tool: ${toolName}`,
+        toolCallId,
+      );
     }
 
     // 6. Validate arguments against tool's JSON Schema
-    const validationError = this._toolRegistry.validateToolArgs(toolName, input);
+    const validationError = this._toolRegistry.validateToolArgs(
+      toolName,
+      input,
+    );
     if (validationError) {
       return this._writeToolResult(
         toolName,
@@ -597,7 +606,10 @@ export class Agent {
     this._emitOutput("tool_result", { toolName, input, result });
     const msg = new Message({ role: "tool", content: result, toolCallId });
     this._context.push(msg);
-    await this._hooks.emitAsync(HOOKS.CONTEXT_MESSAGE, { message: msg, agent: this });
+    await this._hooks.emitAsync(HOOKS.CONTEXT_MESSAGE, {
+      message: msg,
+      agent: this,
+    });
     return { toolName, input, result };
   }
 

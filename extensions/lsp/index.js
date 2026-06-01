@@ -87,18 +87,12 @@ async function getOrCreateClient(languageId, lspConfig) {
 /**
  * Create an LSP tool instance.
  */
-function createLspTool(toolName, ctx, lspConfig) {
+function createLspTool(toolName, lspConfig) {
   const ToolClass = LSP_TOOL_MAP[toolName];
   if (!ToolClass) return null;
 
-  let languageId = null;
-  const currentFile = ctx?.get('currentFile');
-  if (currentFile) {
-    languageId = getLanguageId(currentFile);
-  }
-
   return new ToolClass({
-    languageId,
+    languageId: null,
     lspConfig,
   });
 }
@@ -129,7 +123,7 @@ export function create(core) {
 
         for (const toolName of LSP_TOOL_NAMES) {
           try {
-            const tool = createLspTool(toolName, { lspConfig }, lspConfig);
+            const tool = createLspTool(toolName, lspConfig);
             if (tool) {
               registry.register(toolName, tool);
             }

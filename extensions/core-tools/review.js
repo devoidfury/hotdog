@@ -7,7 +7,7 @@
 //
 // Disabled by default; enable via profile whitelist.
 
-import { readSessionEntries } from '../session-log/session_log.js';
+import { readSessionEntries } from '../../src/session/session-log.js';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { readdirSync, existsSync, statSync } from 'node:fs';

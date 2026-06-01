@@ -24,7 +24,7 @@ import {
   sessionExists,
   readSessionEntries,
   replayEntriesIntoContext,
-} from "../extensions/session-log/session_log.js";
+} from "./session/session-log.js";
 
 // ── Extension Loading ────────────────────────────────────────────────────────
 

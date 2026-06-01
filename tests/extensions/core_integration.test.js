@@ -81,7 +81,8 @@ describe('Hook + Extension Integration', () => {
     expect(toolNames).toContain('model');
     // load_skill is registered by skills extension, not core-tools
     expect(toolNames).not.toContain('load_skill');
-    expect(toolNames).toContain('review');
+    // review is registered by session-review extension, not core-tools
+    expect(toolNames).not.toContain('review');
     // project_info should NOT be registered (disabled)
     expect(toolNames).not.toContain('project_info');
   });

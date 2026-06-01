@@ -1,6 +1,7 @@
 // Session Review Extension
 // Provides the `review` CLI subcommand for inspecting session logs.
 // Registers subcommands via the cli:subcommandsRegister hook.
+// Also registers the `review` tool via tools:register hook.
 // Capability declared in extension.json metadata file.
 
 import { HOOKS } from "../../src/hooks.js";
@@ -9,10 +10,11 @@ import { readSessionEntries } from "../session-log/index.js";
 import { readdirSync, existsSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
+import { ReviewTool } from "./review.js";
 
 /**
  * Create the session-review extension.
- * Registers subcommands via the cli:subcommandsRegister hook.
+ * Registers CLI subcommands and the review tool.
  */
 export function create(core) {
   // Register subcommands if the registry is available
@@ -30,7 +32,7 @@ export function create(core) {
   return {
     hooks: core.hooks
       ? {
-          // Register via hook as well for backward compatibility
+          // Register CLI subcommand via hook for backward compatibility
           [HOOKS.CLI_SUBCOMMANDS_REGISTER]: async (registry) => {
             registry.register("review", {
               description: "Review session logs",
@@ -40,6 +42,12 @@ export function create(core) {
                 await runReview(cli, config);
               },
             });
+          },
+
+          // Register the review tool
+          [HOOKS.TOOLS_REGISTER]: async (registry) => {
+            const tool = new ReviewTool();
+            registry.register("review", tool);
           },
         }
       : undefined,
@@ -213,3 +221,6 @@ function printToolIndex(entries, json) {
     }
   }
 }
+
+// Re-export for backward compatibility
+export { ReviewTool } from "./review.js";

@@ -2,5 +2,5 @@
   "name": "core-tools",
   "provides": ["tools"],
   "loadOrder": 1,
-  "description": "Core agent tools (bash, write, read, edit, grep, find, fetch, question, pager, model, review, explore)"
+  "description": "Core agent tools (bash, write, read, edit, grep, find, fetch, question, pager, model, explore)"
 }

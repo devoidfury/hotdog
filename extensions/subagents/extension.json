@@ -1,0 +1,6 @@
+{
+  "name": "subagents",
+  "provides": ["tools"],
+  "loadOrder": 2,
+  "description": "Subagent tools for task delegation and management (manager-only)"
+}

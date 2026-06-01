@@ -2,38 +2,30 @@
 //
 // These tools are only enabled when the profile has `manager: true`.
 // They provide task delegation, status checking, follow-up, and interruption.
-//
-// Phase 2: Tools accept an optional SessionCore reference. When set, they
-// delegate to SessionCore; otherwise they fall back to TaskManager.
 
-import { toolDef, param, parseToolArgs, toolResult, ToolResult, defaultCallDisplay } from "./registry.js";
+import {
+  toolDef,
+  param,
+  parseToolArgs,
+  ToolResult,
+  defaultCallDisplay,
+} from "../../src/core/tool-registry.js";
 import { getVisibleWorkerProfiles } from "../../src/config.js";
 
 // ── Base class for subagent tools ──────────────────────────────────────────
 
 /**
  * Base class for all subagent tools.
- * Handles constructor normalization, backend resolution, and common patterns.
+ * Accepts an options object with sessionCore and/or taskManager.
  */
 export class SubagentTool {
-  /**
-   * Construct a subagent tool. Accepts either:
-   * - Legacy: single taskManager argument (has spawnTask method)
-   * - New: options object with sessionCore and/or taskManager
-   * - Null/undefined: no backend
-   */
   constructor(options) {
-    if (isTaskManager(options)) {
-      // Legacy: single taskManager argument
-      this._taskManager = options;
-      this._sessionCore = null;
-    } else if (typeof options === "object" && options !== null) {
-      // New: options object with sessionCore and/or taskManager
+    if (typeof options === "object" && options !== null) {
       this._sessionCore = options.sessionCore || null;
       this._taskManager = options.taskManager || null;
     } else {
-      this._taskManager = null;
       this._sessionCore = null;
+      this._taskManager = null;
     }
   }
 
@@ -68,17 +60,11 @@ export class SubagentTool {
    * Override in subclasses for custom display.
    */
   callDisplay(input) {
-    return defaultCallDisplay(input, (args) => `${this.constructor.name}(${args?.task_id || "?"})`);
+    return defaultCallDisplay(
+      input,
+      (args) => `${this.constructor.name}(${args?.task_id || "?"})`,
+    );
   }
-}
-
-// ── Helper ──────────────────────────────────────────────────────────────────
-
-/**
- * Detect if an argument is a task manager (has spawnTask method) or an options object.
- */
-function isTaskManager(obj) {
-  return obj && typeof obj === "object" && typeof obj.spawnTask === "function";
 }
 
 // ── delegate_task ───────────────────────────────────────────────────────────
@@ -96,29 +82,13 @@ export class DelegateTaskTool extends SubagentTool {
     const backend = this._ensureBackend();
     if (typeof backend === "string") return ToolResult.err(backend);
 
-    if (backend.type === "sessionCore") {
-      const handle = await backend.value.spawnTask(
-        args.task_id,
-        args.description,
-        {
-          workerModel: args.worker_model || null,
-          profile: args.profile || null,
-        },
-      );
-      return ToolResult.ok(
-        `Task ${args.task_id} delegated (handle: ${handle.taskId})`,
-      ).withEntries({
-        task_id: args.task_id,
-        handle: handle.taskId,
-      });
-    }
-
-    // Legacy: TaskManager
-    const handle = backend.value.spawnTask(
+    const handle = await backend.value.spawnTask(
       args.task_id,
       args.description,
-      args.worker_model || null,
-      args.profile || null,
+      {
+        workerModel: args.worker_model || null,
+        profile: args.profile || null,
+      },
     );
     return ToolResult.ok(
       `Task ${args.task_id} delegated (handle: ${handle.taskId})`,
@@ -182,12 +152,7 @@ export class TaskStatusTool extends SubagentTool {
     const backend = this._ensureBackend();
     if (typeof backend === "string") return ToolResult.err(backend);
 
-    let status;
-    if (backend.type === "sessionCore") {
-      status = backend.value.taskOrchestrator.taskStatus(args.task_id);
-    } else {
-      status = backend.value.taskStatus(args.task_id);
-    }
+    const status = backend.value.taskOrchestrator.taskStatus(args.task_id);
 
     if (status === null) {
       return ToolResult.err(`Task ${args.task_id} not found`);
@@ -232,16 +197,15 @@ export class TaskFollowupTool extends SubagentTool {
     const backend = this._ensureBackend();
     if (typeof backend === "string") return ToolResult.err(backend);
 
-    let ok;
-    if (backend.type === "sessionCore") {
-      ok = backend.value.taskOrchestrator.followUp(args.task_id, args.message);
-    } else {
-      ok = backend.value.sendFollowUp(args.task_id, args.message);
-    }
+    const ok = backend.value.taskOrchestrator.followUp(
+      args.task_id,
+      args.message,
+    );
 
     if (ok) {
       return ToolResult.ok(`Follow-up sent to task ${args.task_id}`).withEntry(
-        "task_id", args.task_id,
+        "task_id",
+        args.task_id,
       );
     }
     return ToolResult.err(`Failed to send follow-up to task ${args.task_id}`);
@@ -283,16 +247,12 @@ export class TaskInterruptTool extends SubagentTool {
     const backend = this._ensureBackend();
     if (typeof backend === "string") return ToolResult.err(backend);
 
-    let ok;
-    if (backend.type === "sessionCore") {
-      ok = backend.value.taskOrchestrator.interrupt(args.task_id);
-    } else {
-      ok = backend.value.interruptTask(args.task_id);
-    }
+    const ok = backend.value.taskOrchestrator.interrupt(args.task_id);
 
     if (ok) {
       return ToolResult.ok(`Task ${args.task_id} interrupted`).withEntry(
-        "task_id", args.task_id,
+        "task_id",
+        args.task_id,
       );
     }
     return ToolResult.err(`Failed to interrupt task ${args.task_id}`);
@@ -330,12 +290,7 @@ export class PlanStatusTool extends SubagentTool {
     if (typeof backend === "string") return ToolResult.err(backend);
 
     if (args.task_id) {
-      let status;
-      if (backend.type === "sessionCore") {
-        status = backend.value.taskOrchestrator.taskStatus(args.task_id);
-      } else {
-        status = backend.value.taskStatus(args.task_id);
-      }
+      const status = backend.value.taskOrchestrator.taskStatus(args.task_id);
       if (status === null) {
         return ToolResult.err(`Task ${args.task_id} not found`);
       }
@@ -345,31 +300,23 @@ export class PlanStatusTool extends SubagentTool {
       });
     }
 
-    let active;
-    if (backend.type === "sessionCore") {
-      active = backend.value.taskOrchestrator.activeTasks();
-    } else {
-      active = backend.value.activeTasks();
-    }
+    const active = backend.value.taskOrchestrator.activeTasks();
 
     if (active.length === 0) {
       return ToolResult.ok("No active tasks").withEntry(
-        "active_task_count", "0",
+        "active_task_count",
+        "0",
       );
     }
 
     const lines = ["Active tasks:"];
     for (const taskId of active) {
-      let status;
-      if (backend.type === "sessionCore") {
-        status = backend.value.taskOrchestrator.taskStatus(taskId);
-      } else {
-        status = backend.value.taskStatus(taskId);
-      }
+      const status = backend.value.taskOrchestrator.taskStatus(taskId);
       lines.push(`  ${taskId} — ${status}`);
     }
     return ToolResult.ok(lines.join("\n")).withEntry(
-      "active_task_count", String(active.length),
+      "active_task_count",
+      String(active.length),
     );
   }
 
@@ -401,23 +348,15 @@ export class PlanStatusTool extends SubagentTool {
 export class CompleteTaskTool extends SubagentTool {
   static TOOL_NAME = "complete_task";
 
-  constructor(taskManager) {
-    super(taskManager);
-  }
-
   async execute(input) {
     const args = parseToolArgs(input);
     if (!args.task_id) {
       return ToolResult.err("Error: task_id is required");
     }
 
-    const tm = this._taskManager;
-    if (!tm) {
-      return ToolResult.err("Error: Task manager not available");
-    }
-
     return ToolResult.ok(`Task ${args.task_id} marked as complete`).withEntry(
-      "task_id", args.task_id,
+      "task_id",
+      args.task_id,
     );
   }
 
@@ -445,10 +384,6 @@ export class CompleteTaskTool extends SubagentTool {
 /** Wait for user input — signal that the manager has nothing more to do. */
 export class WaitTool extends SubagentTool {
   static TOOL_NAME = "wait";
-
-  constructor(taskManager) {
-    super(taskManager);
-  }
 
   async execute(input) {
     const args = parseToolArgs(input);
@@ -483,3 +418,27 @@ export class WaitTool extends SubagentTool {
     return `wait(${message || "no-op"})`;
   }
 }
+
+// ── Subagent tool names and constructors ────────────────────────────────────
+
+/** Subagent tool names (manager-only) */
+export const SUBAGENT_TOOL_NAMES = [
+  "delegate_task",
+  "task_status",
+  "task_followup",
+  "task_interrupt",
+  "plan_status",
+  "complete_task",
+  "wait",
+];
+
+// Subagent tool constructors (manager-only)
+export const SUBAGENT_TOOL_CONSTRUCTORS = {
+  delegate_task: (opts) => new DelegateTaskTool(opts),
+  task_status: (opts) => new TaskStatusTool(opts),
+  task_followup: (opts) => new TaskFollowupTool(opts),
+  task_interrupt: (opts) => new TaskInterruptTool(opts),
+  plan_status: (opts) => new PlanStatusTool(opts),
+  complete_task: (opts) => new CompleteTaskTool(opts),
+  wait: (opts) => new WaitTool(opts),
+};

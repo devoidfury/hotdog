@@ -1,15 +1,16 @@
 import { describe, it, expect } from "bun:test";
 import {
   CORE_TOOL_NAMES,
-  SUBAGENT_TOOL_NAMES,
   createToolFactory,
 } from "../../extensions/core-tools/index.js";
+import { SUBAGENT_TOOL_NAMES } from "../../extensions/subagents/index.js";
 import { ToolRegistry } from "../../extensions/core-tools/registry.js";
 
 describe("CORE_TOOL_NAMES", () => {
   it("contains all expected core tools", () => {
     // project_info is included but disabled by default
     // load_skill is registered by the skills extension, not core-tools
+    // review is registered by the session-review extension, not core-tools
     const expected = [
       "bash",
       "write",
@@ -22,7 +23,6 @@ describe("CORE_TOOL_NAMES", () => {
       "grep",
       "fetch",
       "project_info",
-      "review",
       "edit",
     ];
     expect(CORE_TOOL_NAMES).toEqual(expected);
@@ -135,11 +135,11 @@ describe("createToolFactory", () => {
     expect(tool).toBeNull();
   });
 
-  it("creates review tool", () => {
+  // review is registered by the session-review extension, not core-tools
+  it("returns null for review (registered by session-review extension)", () => {
     const factory = createToolFactory();
     const tool = factory.createTool("review", {});
-    expect(tool).not.toBeNull();
-    expect(typeof tool.execute).toBe("function");
+    expect(tool).toBeNull();
   });
 
   it("returns null for unknown tool", () => {
@@ -169,33 +169,10 @@ describe("createToolFactory", () => {
     expect(tool).not.toBeNull();
   });
 
-  it("enables disabled tools when managerToolsEnabled", () => {
+  it("enables disabled tools when in whitelist", () => {
     const factory = createToolFactory();
-    const tool = factory.createTool("project_info", {}, null, true);
+    const tool = factory.createTool("project_info", {}, ["project_info"]);
     expect(tool).not.toBeNull();
-  });
-
-  it("creates subagent tools when managerToolsEnabled", () => {
-    const mockManager = { id: "test-manager" };
-    const factory = createToolFactory(mockManager);
-    expect(factory.createTool("delegate_task", {}, null, true)).not.toBeNull();
-    expect(factory.createTool("task_status", {}, null, true)).not.toBeNull();
-    expect(factory.createTool("task_followup", {}, null, true)).not.toBeNull();
-    expect(factory.createTool("task_interrupt", {}, null, true)).not.toBeNull();
-    expect(factory.createTool("plan_status", {}, null, true)).not.toBeNull();
-    expect(factory.createTool("complete_task", {}, null, true)).not.toBeNull();
-    expect(factory.createTool("wait", {}, null, true)).not.toBeNull();
-  });
-
-  it("does not create subagent tools without manager", () => {
-    const factory = createToolFactory();
-    expect(factory.createTool("delegate_task", {}, null, true)).toBeNull();
-  });
-
-  it("does not create subagent tools when not manager", () => {
-    const mockManager = { id: "test-manager" };
-    const factory = createToolFactory(mockManager);
-    expect(factory.createTool("delegate_task", {})).toBeNull();
   });
 });
 

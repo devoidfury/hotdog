@@ -77,9 +77,12 @@ async function loadExtensions(core, { taskManager, config } = {}) {
  * @param {Object} config - Configuration object.
  * @param {Object} [configRegistry] - Optional config registry for extension CLI flags & config params.
  * @param {Object} [cliSubcommandRegistry] - Optional CLI subcommand registry.
+ * @param {Object} [options] - Optional additional options.
+ * @param {string} [options.profileName] - Current profile name.
+ * @param {Object} [options.profile] - Resolved profile object (includes manager flag, whitelistTools, etc.).
  * @returns {Object} Core object with hooks, toolRegistry, extensions, config.
  */
-function createCore(config, configRegistry, cliSubcommandRegistry) {
+function createCore(config, configRegistry, cliSubcommandRegistry, options = {}) {
   const hooks = createHooks();
   const toolRegistry = createToolRegistry();
   const extensions = createExtensionLoader({
@@ -90,7 +93,14 @@ function createCore(config, configRegistry, cliSubcommandRegistry) {
     configRegistry,
   });
 
-  return { hooks, toolRegistry, extensions, config, cliSubcommandRegistry };
+  // Merge profile info into config so extensions can access it
+  const coreConfig = {
+    ...config,
+    profileName: options.profileName || config.profileName || "default",
+    profile: options.profile || config.profile || {},
+  };
+
+  return { hooks, toolRegistry, extensions, config: coreConfig, cliSubcommandRegistry };
 }
 
 // ── Message Bus ──────────────────────────────────────────────────────────────
@@ -254,7 +264,10 @@ async function main() {
   const cliSubcommandRegistry = createSubcommandRegistry();
 
   // ── Create core infrastructure ──────────────────────────────────────────
-  const core = createCore(config, configRegistry, cliSubcommandRegistry);
+  const core = createCore(config, configRegistry, cliSubcommandRegistry, {
+    profileName: resolved.profileName,
+    profile: resolved.profile,
+  });
 
   // ── Subcommand dispatch (before loading extensions, to check if needed) ─
   if (cli.subcommand) {

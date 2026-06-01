@@ -1,6 +1,7 @@
-// Tools module — exports all tools and the tool registry.
-// Core tools are independent of other extensions. LSP tools are registered
-// by the LSP extension via its own HOOKS.TOOLS_REGISTER handler.
+// Tools module — exports all core tools and the tool registry.
+// Core tools are independent of other extensions. Subagent tools are
+// registered by the subagents extension via its own HOOKS.TOOLS_REGISTER handler.
+// The review tool is registered by the session-review extension.
 
 import { HOOKS } from "../../src/hooks.js";
 
@@ -17,7 +18,6 @@ export * from "./pager.js";
 export * from "./model.js";
 
 export * from "./project_info.js";
-export * from "./review.js";
 export * from "./explore.js";
 
 // Import classes for factory use
@@ -32,7 +32,6 @@ import { QuestionTool } from "./question.js";
 import { PagerTool } from "./pager.js";
 import { ModelTool } from "./model.js";
 import { ProjectInfoTool } from "./project_info.js";
-import { ReviewTool } from "./review.js";
 import { ExploreTool } from "./explore.js";
 
 // Tool descriptors — declarative table of all core tools.
@@ -48,33 +47,10 @@ const TOOL_DESCRIPTORS = [
   { name: "grep", disabled: false },
   { name: "fetch", disabled: false },
   { name: "project_info", disabled: true },
-  { name: "review", disabled: false },
   { name: "edit", disabled: false },
 ];
 
 export const CORE_TOOL_NAMES = TOOL_DESCRIPTORS.map((d) => d.name);
-
-// Import subagent tools
-import {
-  DelegateTaskTool,
-  TaskStatusTool,
-  TaskFollowupTool,
-  TaskInterruptTool,
-  PlanStatusTool,
-  CompleteTaskTool,
-  WaitTool,
-} from "./subagents.js";
-
-// Subagent tool names (manager-only)
-export const SUBAGENT_TOOL_NAMES = [
-  "delegate_task",
-  "task_status",
-  "task_followup",
-  "task_interrupt",
-  "plan_status",
-  "complete_task",
-  "wait",
-];
 
 // Declarative tool constructor map — maps tool names to their constructor functions.
 const TOOL_CONSTRUCTORS = {
@@ -90,47 +66,20 @@ const TOOL_CONSTRUCTORS = {
   explore: () => new ExploreTool(),
   model: (ctx) => new ModelTool(ctx?.modelRegistry || {}),
   project_info: () => new ProjectInfoTool(),
-  review: () => new ReviewTool(),
-};
-
-// Subagent tool constructors (manager-only)
-// Accepts either { sessionCore, taskManager } or just taskManager (legacy)
-const SUBAGENT_TOOL_CONSTRUCTORS = {
-  delegate_task: (opts) => new DelegateTaskTool(opts),
-  task_status: (opts) => new TaskStatusTool(opts),
-  task_followup: (opts) => new TaskFollowupTool(opts),
-  task_interrupt: (opts) => new TaskInterruptTool(opts),
-  plan_status: (opts) => new PlanStatusTool(opts),
-  complete_task: (tm) => new CompleteTaskTool(tm),
-  wait: (tm) => new WaitTool(tm),
 };
 
 /**
- * Create a tool factory that can create and register tools.
+ * Create a tool factory that can create and register core tools.
  *
- * @param {Object} [taskManager] — TaskManager instance for subagent tools (required for subagent tools).
- * @param {Object} [sessionCore] — Session core for subagent tools.
+ * @param {Object} [ctx] — Core context object.
  * @returns {{ createTool: Function, createAndRegister: Function }}
  */
-export function createToolFactory(taskManager = null, sessionCore = null) {
-  // When taskManager is not provided, we can only create core tools.
-  // Subagent tools are rejected (they require taskManager).
-  const hasTaskManager = !!taskManager;
-
-  const createToolInternal = (
-    toolName,
-    ctx,
-    whitelist = null,
-    managerToolsEnabled = false,
-  ) => {
+export function createToolFactory(ctx = {}) {
+  const createToolInternal = (toolName, whitelist = null) => {
     const descriptor = TOOL_DESCRIPTORS.find((d) => d.name === toolName);
     if (descriptor) {
       // Check disabled status
-      if (
-        descriptor.disabled &&
-        !whitelist?.includes(toolName) &&
-        !managerToolsEnabled
-      ) {
+      if (descriptor.disabled && !whitelist?.includes(toolName)) {
         return null;
       }
       // Check whitelist
@@ -145,38 +94,16 @@ export function createToolFactory(taskManager = null, sessionCore = null) {
       return coreCtor(ctx);
     }
 
-    // Subagent tools (manager-only) — taskManager is required
-    if (managerToolsEnabled && hasTaskManager) {
-      const subCtor = SUBAGENT_TOOL_CONSTRUCTORS[toolName];
-      if (subCtor) {
-        return subCtor({
-          sessionCore: sessionCore || ctx?.sessionCore || null,
-          taskManager,
-        });
-      }
-    }
-
     return null;
   };
 
   return {
-    createTool(toolName, ctx, whitelist = null, managerToolsEnabled = false) {
-      return createToolInternal(toolName, ctx, whitelist, managerToolsEnabled);
+    createTool(toolName, ctx, whitelist = null) {
+      return createToolInternal(toolName, whitelist);
     },
 
-    async createAndRegister(
-      toolName,
-      registry,
-      ctx,
-      whitelist = null,
-      managerToolsEnabled = false,
-    ) {
-      const tool = this.createTool(
-        toolName,
-        ctx,
-        whitelist,
-        managerToolsEnabled,
-      );
+    async createAndRegister(toolName, registry, whitelist = null) {
+      const tool = this.createTool(toolName, whitelist);
       if (tool) {
         registry.register(toolName, tool);
       }
@@ -190,23 +117,22 @@ export function createToolFactory(taskManager = null, sessionCore = null) {
  * Create the core-tools extension.
  *
  * @param {Object} core - The core object.
- * @param {Object} [options] - Optional extension options.
- * @param {Object} [options.taskManager] - TaskManager instance for subagent tools.
  * @returns {Object} The extension instance.
  */
-export function create(core, { taskManager } = {}) {
+export function create(core) {
   return {
     hooks: {
       /**
-       * Register all core tools and subagent tools when requested.
+       * Register all core tools when requested.
+       * Subagent tools are registered by the subagents extension.
+       * The review tool is registered by the session-review extension.
        */
       [HOOKS.TOOLS_REGISTER]: async (registry) => {
-        // Register core tools (no taskManager needed)
-        const factory = createToolFactory();
+        const factory = createToolFactory(core);
 
         for (const descriptor of TOOL_DESCRIPTORS) {
           try {
-            const tool = factory.createTool(descriptor.name, core);
+            const tool = factory.createTool(descriptor.name);
             if (tool) {
               registry.register(descriptor.name, tool);
             }
@@ -214,17 +140,6 @@ export function create(core, { taskManager } = {}) {
             console.error(
               `[core-tools] Failed to create tool '${descriptor.name}': ${e.message}`,
             );
-          }
-        }
-
-        // Register subagent tools (taskManager is required)
-        if (taskManager) {
-          const subagentFactory = createToolFactory(taskManager);
-          for (const toolName of SUBAGENT_TOOL_NAMES) {
-            const tool = subagentFactory.createTool(toolName, core, null, true);
-            if (tool) {
-              registry.register(toolName, tool);
-            }
           }
         }
       },

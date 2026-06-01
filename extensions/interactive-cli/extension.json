@@ -1,0 +1,14 @@
+{
+  "name": "interactive-cli",
+  "provides": ["interactive-session"],
+  "loadOrder": 10,
+  "description": "Interactive CLI session with readline loop, slash commands, and shell execution",
+  "cli:subcommands": [
+    {
+      "name": "cli",
+      "description": "Interactive CLI session",
+      "requiresConfig": true,
+      "requiresCore": false
+    }
+  ]
+}

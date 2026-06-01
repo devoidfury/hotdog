@@ -353,7 +353,32 @@ async function main() {
   );
 
   // ── Parse CLI args with extension flags ─────────────────────────────────
-  const cli = parseArgs(configRegistry, cliSubcommandRegistry.names());
+  let cli;
+  try {
+    cli = parseArgs(configRegistry, cliSubcommandRegistry.names());
+  } catch (e) {
+    if (e.message.startsWith("Unknown subcommand:")) {
+      const knownSubcommands = cliSubcommandRegistry.names();
+      const posLower = e.message.replace("Unknown subcommand: ", "").toLowerCase();
+      const similar = knownSubcommands.filter(
+        (sc) => sc.toLowerCase() !== posLower && sc.startsWith(posLower.slice(0, 2)),
+      );
+      if (similar.length === 1) {
+        console.error(
+          `Unknown subcommand: ${posLower}\n` +
+            `Did you mean: ${similar[0]}?`,
+        );
+      } else {
+        console.error(
+          `Unknown subcommand: ${posLower}\n` +
+            `Available subcommands: ${knownSubcommands.join(", ")}\n` +
+            `To send a prompt, use -c or --prompt: oa-agent -c "your prompt"`,
+        );
+      }
+      process.exit(1);
+    }
+    throw e;
+  }
 
   // ── Build complete config ───────────────────────────────────────────────
   const { resolved, modelRegistry, providers } = await buildConfig(cli);
@@ -366,6 +391,9 @@ async function main() {
     profile: resolved.profile,
     buildConfig,
   });
+
+  // Attach resolved config to core so extensions can access it
+  core.resolved = resolved;
 
   // ── Subcommand dispatch ─────────────────────────────────────────────────
   if (cli.subcommand) {
@@ -519,31 +547,6 @@ async function main() {
   // Wire taskManager to sessionManager
   taskManager.setSessionManager(sessionManager);
 
-  // ── Reject unrecognized positional args as subcommands ──────────────────
-  // When subcommands are registered, a bare positional arg is NOT a prompt —
-  // it's an unrecognized subcommand.  Only `-c`/`--prompt` flags produce prompts.
-  if (cli.positionalPrompt) {
-    const knownSubcommands = core.cliSubcommandRegistry.names();
-    const posLower = cli.positionalPrompt.toLowerCase();
-    const similar = knownSubcommands.filter(
-      (sc) => sc.toLowerCase() !== posLower && sc.startsWith(posLower.slice(0, 2)),
-    );
-    if (similar.length === 1) {
-      console.error(
-        `Unknown subcommand: ${cli.positionalPrompt}\n` +
-          `Did you mean: ${similar[0]}?`,
-      );
-      await core.extensions.cleanup();
-      process.exit(1);
-    }
-    console.error(
-      `Unknown subcommand: ${cli.positionalPrompt}\n` +
-        `Available subcommands: ${knownSubcommands.join(", ")}\n` +
-        `To send a prompt, use -c or --prompt: oa-agent -c "${cli.positionalPrompt}"`,
-    );
-    await core.extensions.cleanup();
-    process.exit(1);
-  }
 
   // ── One-shot mode (only from -c / --prompt flag) ────────────────────────
   if (cli.prompt) {
@@ -568,37 +571,19 @@ async function main() {
     process.exit(exitCode);
   }
 
-  // ── Interactive mode ────────────────────────────────────────────────────
-  const agent = sessionManager.getAgent();
+  // ── Default subcommand dispatch ─────────────────────────────────────────
+  // When no subcommand is provided, dispatch to the "cli" subcommand
+  // (interactive mode) if it's registered by an extension.
+  const defaultSubcommand = core.cliSubcommandRegistry.get("cli");
+  if (defaultSubcommand && defaultSubcommand.handler) {
+    await defaultSubcommand.handler(cli, core);
+    return;
+  }
 
-  console.log("oa-agent 0.1.0 (interactive mode)");
-  console.log(`Model: ${resolved.model}`);
-  console.log(`Profile: ${resolved.profileName}`);
-  console.log(`Session: ${agent?.sessionId || "unknown"}`);
-  console.log("Type /quit or /exit to exit.\n");
-
-  const bus = new MessageBus({ sessionManager, sink });
-
-  // Wire up task completion (appends result to context + wakes manager)
-  taskManager.setBus(bus);
-
-  // Interactive session loop
-  const { runInteractiveSession } = await import("./ui/session.js");
-  runInteractiveSession({
-    sessionManager,
-    bus,
-    sink,
-    resolved,
-    hooks: core.hooks,
-    onClose: () => {
-      const interactiveSessionId = sessionManager.sessionId();
-      if (interactiveSessionId) {
-        console.log(`Session: ${interactiveSessionId}`);
-      }
-      return core.extensions.cleanup();
-    },
-  });
-  bus.run();
+  // No default subcommand registered — show usage hint
+  console.error("No prompt provided. Use -c or --prompt for one-shot mode.");
+  console.log(`Available subcommands: ${core.cliSubcommandRegistry.names().join(", ") || "(none)"}`);
+  process.exit(1);
 }
 
 // Only run main() when this module is the entry point (not when imported by tests).

@@ -33,7 +33,6 @@ export function parseArgs(configRegistry = null, knownSubcommands = null) {
     theme: null,
     colors: null,
     subcommand: null,
-    positionalPrompt: null,
     reviewToolIndex: false,
     systemPromptTemplate: null,
     wantsJson: false,
@@ -227,16 +226,16 @@ export function parseArgs(configRegistry = null, knownSubcommands = null) {
       continue;
     }
 
-    // Positional argument — treat as subcommand or prompt
+    // Positional argument — treat as subcommand or throw
     const isKnownSubcommand = knownSubcommands
       ? knownSubcommands.includes(arg)
       : (arg === 'info' || arg === 'show-prompt' || arg === 'review');
 
     if (isKnownSubcommand) {
       options.subcommand = arg;
-    } else if (options.positionalPrompt === null) {
-      // First positional argument is the prompt
-      options.positionalPrompt = arg;
+    } else {
+      // Unknown positional argument — throw to let main.js handle it
+      throw new Error(`Unknown subcommand: ${arg}`);
     }
 
     i++;

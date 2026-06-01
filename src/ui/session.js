@@ -1,8 +1,9 @@
-// Interactive CLI session — thin readline loop.
+// Interactive CLI session — backward compatibility wrapper.
 //
-// The UI layer is now a dumb terminal: it only knows how to
-// read input and render output events. All business logic
-// (command execution, state changes) lives in the core.
+// This module exists for backward compatibility only.
+// The interactive-cli extension now handles the interactive session.
+// If this module is imported directly, it provides the same functionality
+// as the extension (for anyone who imports it directly).
 
 import readline from "node:readline";
 import { parseCommand, Command } from "../core/commands.js";
@@ -37,17 +38,18 @@ const shellCommandExt = create({});
 /**
  * Create and run an interactive CLI session.
  *
- * The UI is thin: it only reads input, dispatches to the bus,
- * and renders events from the sink. No agent state manipulation.
+ * @deprecated Use the interactive-cli extension instead.
+ * This module is kept for backward compatibility only.
  *
  * @param {object} options
- * @param {readline.Interface} rl - readline interface
  * @param {import("../agent/message_bus.js").MessageBus} bus - The MessageBus instance
  * @param {import("../context/output.js").OutputSink} sink - The CliOutputSink instance
  * @param {object} resolved - resolved agent config (from buildConfig().resolved)
  * @param {Object} [hooks] - Optional HookSystem instance for listening to model changes
+ * @param {Function} [onClose] - Optional cleanup callback
+ * @param {Object} [sessionManager] - Optional SessionManager for model change hooks
  */
-export function runInteractiveSession({ bus, sink, resolved, onClose, hooks }) {
+export function runInteractiveSession({ bus, sink, resolved, onClose, hooks, sessionManager }) {
   const rl = readline.createInterface({
     input: process.stdin,
     output: process.stdout,
@@ -56,7 +58,7 @@ export function runInteractiveSession({ bus, sink, resolved, onClose, hooks }) {
 
   // Listen for model changes and update the readline prompt
   if (hooks) {
-    const agent = bus?.sessionManager?.getAgent();
+    const agent = sessionManager?.getAgent();
     if (agent) {
       hooks.on(HOOKS.MODEL_CHANGE, (data) => {
         rl.setPrompt(`(${data.newModel})> `);

@@ -648,6 +648,7 @@ export async function buildConfig(cliArgv) {
   const modelRegistry = buildModelRegistry({
     providers: config.providers || [],
   });
+  resolved.modelRegistry = modelRegistry;
 
   return { resolved, modelRegistry, providers: config.providers || [] };
 }
@@ -837,5 +838,7 @@ export function buildAgentConfig(options) {
     sessionId: cli.sessionId || null,
     skillsPath: cli.skillsPath || config.skillsPath,
     promptsPath: cli.promptsPath || config.promptsPath,
+    // Model registry (populated by buildConfig after calling this function)
+    modelRegistry: {},
   };
 }

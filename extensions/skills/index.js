@@ -93,7 +93,7 @@ export function create(core) {
       [HOOKS.SLASH_COMMANDS_REGISTER]: async ({ registry }) => {
         registry.register("skill", {
           description: "List skills or activate a skill (skill:<name>)",
-          matches: (cmd) => cmd.startsWith("skill:"),
+          matches: (cmd) => cmd.startsWith("skill"),
           handler: async (agent, cmdValue) => {
             const name = cmdValue.slice(6).trim();
             if (!name) {

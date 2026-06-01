@@ -269,6 +269,32 @@ export const HOOKS = {
   // { toolCallId, toolName, result, input, agent } and can return:
   //   { result } — replace the result (any value: string, ToolResult, object)
   TOOL_RESULT: 'tool:result',
+
+  // Provider request — emitted sequentially BEFORE the HTTP request to the LLM.
+  // Handlers receive { messages, modelConfig, toolDefs, agent } and can return:
+  //   { messages } — replace the messages array
+  //   { modelConfig } — replace the model config
+  //   { toolDefs } — replace the tool definitions
+  // Runs via emitAsyncSeq so each handler sees prior transformations.
+  // Enables: request logging, last-minute message injection, request modification.
+  BEFORE_PROVIDER_REQUEST: 'before_provider_request',
+
+  // Provider response — emitted AFTER the LLM response is fully received.
+  // Handlers receive { response, modelConfig, agent } as notification.
+  // Enables: response logging, metrics, cost tracking, telemetry.
+  AFTER_PROVIDER_RESPONSE: 'after_provider_response',
+
+  // Turn start — emitted at the beginning of each agent loop iteration.
+  // Handlers receive { turnIndex, timestamp, agent } as notification.
+  // Enables: per-turn metrics, timing, analytics.
+  TURN_START: 'turn_start',
+
+  // Turn end — emitted at the end of each agent loop iteration.
+  // Handlers receive { turnIndex, message, toolResults, agent } as notification.
+  // - message: the assistant's text response (may be empty if only tool calls)
+  // - toolResults: array of { toolName, input, result } for tools executed this turn
+  // Enables: per-turn analysis, cost tracking, audit logging.
+  TURN_END: 'turn_end',
 };
 
 /**

@@ -152,6 +152,13 @@ export class Agent {
       iteration++;
       this._iterationCount = iteration;
 
+      // Turn start — emitted at the beginning of each agent loop iteration.
+      await this._hooks.emitAsync(HOOKS.TURN_START, {
+        turnIndex: iteration,
+        timestamp: Date.now(),
+        agent: this,
+      });
+
       // Check cancellation flags
       if (this._cancelled) {
         throw LlmError.Cancelled("Agent cancelled");
@@ -198,8 +205,19 @@ export class Agent {
       }
 
       // LLM call
-      const toolDefs = this._toolRegistry.getToolDefs();
-      const modelConfig = this._resolveModelConfig();
+      let toolDefs = this._toolRegistry.getToolDefs();
+      let modelConfig = this._resolveModelConfig();
+
+      // Before provider request — sequential, modifiable. Extensions can
+      // log the request, modify messages, change model config, or alter tools.
+      const reqResult = await this._hooks.emitAsyncSeq(
+        HOOKS.BEFORE_PROVIDER_REQUEST,
+        { messages, modelConfig, toolDefs, agent: this },
+      );
+      if (reqResult?.messages) messages = reqResult.messages;
+      if (reqResult?.modelConfig) modelConfig = reqResult.modelConfig;
+      if (reqResult?.toolDefs) toolDefs = reqResult.toolDefs;
+
       const stream = this._llmClient.chatStreamCancellable(
         messages,
         modelConfig,
@@ -208,6 +226,15 @@ export class Agent {
       );
 
       const response = await this._processStream(stream);
+
+      // After provider response — notification with full response data.
+      // Enables: response logging, metrics, cost tracking, telemetry.
+      await this._hooks.emitAsync(HOOKS.AFTER_PROVIDER_RESPONSE, {
+        response,
+        modelConfig,
+        agent: this,
+      });
+
       await this._hooks.emitAsync(HOOKS.MESSAGES_AFTER_LLM, {
         response,
         messages: this._context,
@@ -234,8 +261,25 @@ export class Agent {
 
       // Tool execution
       if (response.finalToolCalls) {
-        const outcome = await this._executeTools(response.finalToolCalls);
-        if (outcome !== "continue") return outcome;
+        const { outcome, toolResults } =
+          await this._executeTools(response.finalToolCalls);
+        if (outcome !== "continue") {
+          // Turn end — emitted at the end of each agent loop iteration.
+          await this._hooks.emitAsync(HOOKS.TURN_END, {
+            turnIndex: iteration,
+            message: response.fullText,
+            toolResults,
+            agent: this,
+          });
+          return outcome;
+        }
+        // Turn end (tool execution continues to next iteration).
+        await this._hooks.emitAsync(HOOKS.TURN_END, {
+          turnIndex: iteration,
+          message: response.fullText,
+          toolResults,
+          agent: this,
+        });
       } else {
         await this._hooks.emitAsync(HOOKS.CONTEXT_MESSAGE, {
           message: assistantMsg,
@@ -243,6 +287,13 @@ export class Agent {
         });
         await this._hooks.emitAsync(HOOKS.AGENT_AFTER_RUN, {
           result: response.fullText,
+          agent: this,
+        });
+        // Turn end (final response, no tools).
+        await this._hooks.emitAsync(HOOKS.TURN_END, {
+          turnIndex: iteration,
+          message: response.fullText,
+          toolResults: [],
           agent: this,
         });
         return response.fullText;
@@ -391,9 +442,13 @@ export class Agent {
   /**
    * Execute tool calls from an LLM response.
    * @param {Array} toolCalls
-   * @returns {Promise<string>} 'continue' or 'return'
+   * @returns {Promise<{outcome: string, toolResults: Array}>}
+   *   outcome: 'continue' or 'return'
+   *   toolResults: array of { toolName, input, result } for each tool executed
    */
   async _executeTools(toolCalls) {
+    const toolResults = [];
+
     for (const tc of toolCalls) {
       const toolName = tc.function?.name || tc.toolName;
       const toolCallId = tc.id || tc.toolCallId;
@@ -410,6 +465,7 @@ export class Agent {
           message: this._context[this._context.length - 1],
           agent: this,
         });
+        toolResults.push({ toolName, input, result: errorMsg });
         continue;
       }
 
@@ -448,6 +504,7 @@ export class Agent {
           message: this._context[this._context.length - 1],
           agent: this,
         });
+        toolResults.push({ toolName, input, result: blockedResult });
         continue;
       }
       if (callResult?.action === "modify" && callResult.input !== undefined) {
@@ -485,6 +542,7 @@ export class Agent {
           message: this._context[this._context.length - 1],
           agent: this,
         });
+        toolResults.push({ toolName, input, result: errorMsg });
         continue;
       }
 
@@ -507,6 +565,7 @@ export class Agent {
           message: this._context[this._context.length - 1],
           agent: this,
         });
+        toolResults.push({ toolName, input, result: errorMsg });
         continue;
       }
 
@@ -558,11 +617,14 @@ export class Agent {
         agent: this,
       });
 
+      // Collect tool result for turn_end hook
+      toolResults.push({ toolName, input, result: resultStr });
+
       // Check for wait tool — model is yielding control
-      if (toolName === "wait") return "return";
+      if (toolName === "wait") return { outcome: "return", toolResults };
     }
 
-    return "continue";
+    return { outcome: "continue", toolResults };
   }
 
   /**

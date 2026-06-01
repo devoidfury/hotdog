@@ -45,34 +45,21 @@ const shellCommandExt = create({});
  * @param {import("../agent/message_bus.js").MessageBus} bus - The MessageBus instance
  * @param {import("../context/output.js").OutputSink} sink - The CliOutputSink instance
  * @param {object} resolved - resolved agent config (from buildConfig().resolved)
- * @param {Function} [setPromptFn] - Optional callback to set the prompt function for onMessageProcessed
  * @param {Object} [hooks] - Optional HookSystem instance for listening to model changes
  */
-export function runInteractiveSession({
-  bus,
-  sink,
-  resolved,
-  setPromptFn,
-  onClose,
-  hooks,
-}) {
+export function runInteractiveSession({ bus, sink, resolved, onClose, hooks }) {
   const rl = readline.createInterface({
     input: process.stdin,
     output: process.stdout,
     prompt: `(${resolved.model})> `,
   });
 
-  // Set the prompt function so the bus can call it after each message
-  if (setPromptFn) {
-    setPromptFn(() => rl.prompt());
-  }
-
   // Listen for model changes and update the readline prompt
   if (hooks) {
     const agent = bus?.sessionManager?.getAgent();
     if (agent) {
       hooks.on(HOOKS.MODEL_CHANGE, (data) => {
-        rl.prompt(`(${data.newModel})> `);
+        rl.setPrompt(`(${data.newModel})> `);
       });
 
       // Re-display prompt after agent finishes running

@@ -369,9 +369,11 @@ export function create(core) {
       rl.setPrompt(`(${data.newModel})> `);
     });
 
-    // Re-display prompt after agent finishes running
-    core.hooks.on(HOOKS.AGENT_AFTER_RUN, () => {
-      setImmediate(() => rl.prompt());
+    // Re-display prompt after agent finishes processing
+    core.hooks.on(HOOKS.TURN_END, (data) => {
+      if (data.stopped) {
+        setImmediate(() => rl.prompt());
+      }
     });
 
     // Define and register the line handler

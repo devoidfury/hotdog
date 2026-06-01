@@ -80,10 +80,12 @@ export class HookSystem {
     for (const entry of handlers) {
       try {
         const result = entry.handler(data);
-        if (result && typeof result.then === 'function') {
-          results.push(result.catch((e) => {
-            console.error(`[hook:${hookName}] ${formatError(e)}`);
-          }));
+        if (result && typeof result.then === "function") {
+          results.push(
+            result.catch((e) => {
+              console.error(`[hook:${hookName}] ${formatError(e)}`);
+            }),
+          );
         }
       } catch (e) {
         console.error(`[hook:${hookName}] ${formatError(e)}`);
@@ -106,7 +108,7 @@ export class HookSystem {
     for (const entry of handlers) {
       try {
         const result = entry.handler(data);
-        if (result && typeof result.then === 'function') {
+        if (result && typeof result.then === "function") {
           lastResult = await result;
         } else {
           lastResult = result;
@@ -137,9 +139,8 @@ export class HookSystem {
     for (const entry of handlers) {
       try {
         const result = entry.handler(data);
-        const resolved = result && typeof result.then === 'function'
-          ? await result
-          : result;
+        const resolved =
+          result && typeof result.then === "function" ? await result : result;
         lastResult = resolved;
         if (resolved && shouldStop(resolved)) {
           stopped = true;
@@ -188,73 +189,67 @@ export class HookSystem {
  */
 export const HOOKS = {
   // Session lifecycle
-  SESSION_CREATE:     'session:create',
-  SESSION_SWAP:       'session:swap',
-  SESSION_SERIALIZE:  'session:serialize',
-  SESSION_DESERIALIZE:'session:deserialize',
-  SESSION_RESTORE_ACTIVE: 'session:restoreActive',
-
-  // Agent run loop
-  AGENT_BEFORE_RUN:   'agent:beforeRun',
-  AGENT_AFTER_RUN:    'agent:afterRun',
-  AGENT_CANCELLED:    'agent:cancelled',
+  SESSION_CREATE: "session:create",
+  SESSION_SWAP: "session:swap",
+  SESSION_SERIALIZE: "session:serialize",
+  SESSION_DESERIALIZE: "session:deserialize",
+  SESSION_RESTORE_ACTIVE: "session:restoreActive",
 
   // Tool context enrichment — extensions add fields to tool context
-  AGENT_TOOL_CONTEXT: 'agent:toolContext',
+  AGENT_TOOL_CONTEXT: "agent:toolContext",
 
   // Model changes
-  MODEL_CHANGE:       'model:change',
+  MODEL_CHANGE: "model:change",
 
   // Message flow
-  MESSAGES_BUILD:     'messages:build',
-  MESSAGES_AFTER_LLM: 'messages:afterLLM',
+  MESSAGES_AFTER_LLM: "messages:afterLLM",
 
   // Tool execution
-  TOOLS_REGISTER:     'tools:register',
-  TOOL_BEFORE_EXECUTE:'tool:beforeExecute',
-  TOOL_AFTER_EXECUTE: 'tool:afterExecute',
-  LOOP_DETECTED:      'loop:detected',
+  TOOLS_REGISTER: "tools:register",
+  TOOL_BEFORE_EXECUTE: "tool:beforeExecute",
+  TOOL_AFTER_EXECUTE: "tool:afterExecute",
+  LOOP_DETECTED: "loop:detected",
 
   // Context management
-  CONTEXT_FULL:       'context:full',
-  CONTEXT_MESSAGE:    'context:message',
+  CONTEXT_FULL: "context:full",
+  CONTEXT_MESSAGE: "context:message",
 
   // System prompt
-  SYSTEM_PROMPT_BUILD:'systemPrompt:build',
+  SYSTEM_PROMPT_BUILD: "systemPrompt:build",
 
   // Commands
-  COMMAND_DISPATCH:        'command:dispatch',
-  SLASH_COMMANDS_REGISTER: 'slashCommands:register',
+  COMMAND_DISPATCH: "command:dispatch",
+  SLASH_COMMANDS_REGISTER: "slashCommands:register",
 
   // Output
-  OUTPUT_EVENT:       'output:event',
+  OUTPUT_EVENT: "output:event",
 
   // Shutdown — extensions register cleanup handlers here
-  SHUTDOWN_CLEANUP:   'shutdown:cleanup',
+  SHUTDOWN_CLEANUP: "shutdown:cleanup",
 
   // CLI subcommand registration — extensions register subcommand handlers here
-  CLI_SUBCOMMANDS_REGISTER: 'cli:subcommandsRegister',
+  CLI_SUBCOMMANDS_REGISTER: "cli:subcommandsRegister",
 
   // Compaction — extension exposes strategy list and current setting
-  COMPACT_STRATEGY_LIST: 'compact:strategyList',
-  COMPACT_STRATEGY_SET: 'compact:strategySet',
+  COMPACT_STRATEGY_LIST: "compact:strategyList",
+  COMPACT_STRATEGY_SET: "compact:strategySet",
 
   // Config — extensions register their CLI flags and config params
-  CONFIG_CLI_FLAGS_REGISTER: 'config:cliFlagsRegister',
-  CONFIG_PARAMS_REGISTER: 'config:paramsRegister',
+  CONFIG_CLI_FLAGS_REGISTER: "config:cliFlagsRegister",
+  CONFIG_PARAMS_REGISTER: "config:paramsRegister",
 
   // CLI — emitted after CLI args are parsed, before subcommand dispatch
-  CLI_ARGS_PARSED: 'cli:argsParsed',
+  CLI_ARGS_PARSED: "cli:argsParsed",
 
   // Input preprocessing — emitted before user input reaches the agent.
   // Handlers can transform the text, attach images, or short-circuit entirely.
   // Result: { action: "continue" } | { action: "transform", text, images? } | { action: "handled" }
-  INPUT: 'input',
+  INPUT: "input",
 
   // Context modification — emitted sequentially before each LLM call.
   // Handlers receive { messages, agent } and can return { messages } to replace.
   // Runs via emitAsyncSeq so each handler sees prior transformations.
-  CONTEXT: 'context',
+  CONTEXT: "context",
 
   // Tool call gate — BLOCK or MUTATE tool input arguments before execution.
   // Emitted sequentially via emitAsyncSeq. Handlers receive
@@ -262,13 +257,13 @@ export const HOOKS = {
   //   { action: "continue" }       — proceed with original input
   //   { action: "modify", input }  — proceed with modified input
   //   { action: "block", result }  — skip execution, use provided result
-  TOOL_CALL: 'tool:call',
+  TOOL_CALL: "tool:call",
 
   // Tool result — MODIFY tool output before it reaches the LLM context.
   // Emitted sequentially via emitAsyncSeq. Handlers receive
   // { toolCallId, toolName, result, input, agent } and can return:
   //   { result } — replace the result (any value: string, ToolResult, object)
-  TOOL_RESULT: 'tool:result',
+  TOOL_RESULT: "tool:result",
 
   // Provider request — emitted sequentially BEFORE the HTTP request to the LLM.
   // Handlers receive { messages, modelConfig, toolDefs, agent } and can return:
@@ -277,24 +272,26 @@ export const HOOKS = {
   //   { toolDefs } — replace the tool definitions
   // Runs via emitAsyncSeq so each handler sees prior transformations.
   // Enables: request logging, last-minute message injection, request modification.
-  BEFORE_PROVIDER_REQUEST: 'before_provider_request',
+  BEFORE_PROVIDER_REQUEST: "before_provider_request",
 
   // Provider response — emitted AFTER the LLM response is fully received.
   // Handlers receive { response, modelConfig, agent } as notification.
   // Enables: response logging, metrics, cost tracking, telemetry.
-  AFTER_PROVIDER_RESPONSE: 'after_provider_response',
+  AFTER_PROVIDER_RESPONSE: "after_provider_response",
 
   // Turn start — emitted at the beginning of each agent loop iteration.
   // Handlers receive { turnIndex, timestamp, agent } as notification.
   // Enables: per-turn metrics, timing, analytics.
-  TURN_START: 'turn_start',
+  TURN_START: "turn_start",
 
   // Turn end — emitted at the end of each agent loop iteration.
-  // Handlers receive { turnIndex, message, toolResults, agent } as notification.
+  // Handlers receive { turnIndex, message, toolResults, stopped, agent } as notification.
   // - message: the assistant's text response (may be empty if only tool calls)
   // - toolResults: array of { toolName, input, result } for tools executed this turn
-  // Enables: per-turn analysis, cost tracking, audit logging.
-  TURN_END: 'turn_end',
+  // - stopped: boolean indicating if the agent has finished processing (true) or
+  //   will continue to the next iteration (false)
+  // Enables: per-turn analysis, cost tracking, audit logging, UI prompt control.
+  TURN_END: "turn_end",
 };
 
 /**
@@ -302,8 +299,8 @@ export const HOOKS = {
  * Extensions can export a `provides` array declaring what they offer.
  */
 export const EXTENSION_PROVIDES = {
-  CLI_SUBCOMMANDS: 'cli:subcommands',  // Extension provides CLI subcommands
-  TOOLS: 'tools',                      // Extension provides tools
+  CLI_SUBCOMMANDS: "cli:subcommands", // Extension provides CLI subcommands
+  TOOLS: "tools", // Extension provides tools
 };
 
 /**

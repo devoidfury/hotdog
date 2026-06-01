@@ -40,9 +40,8 @@ Allows extensions to register their own CLI flags and config parameters dynamica
 ### Hook System (`src/hooks.js`)
 The foundation for the extension architecture. `HookSystem` class with `on()`, `emit()`, `emitAsync()`, `emitAsyncSeq()`, `off()`, `clear()` methods. Standard hook names defined in `HOOKS` constant:
 - Session: `SESSION_CREATE`, `SESSION_SWAP`, `SESSION_SERIALIZE`, `SESSION_DESERIALIZE`, `SESSION_RESTORE_ACTIVE`
-- Agent: `AGENT_BEFORE_RUN`, `AGENT_AFTER_RUN`, `AGENT_CANCELLED`
 - Tools: `TOOLS_REGISTER`, `TOOL_BEFORE_EXECUTE`, `TOOL_AFTER_EXECUTE`, `AGENT_TOOL_CONTEXT`
-- Messages: `MESSAGES_BUILD`, `MESSAGES_AFTER_LLM`, `CONTEXT_MESSAGE`, `CONTEXT_FULL`
+- Messages: `CONTEXT`, `MESSAGES_AFTER_LLM`, `CONTEXT_MESSAGE`, `CONTEXT_FULL`
 - System prompt: `SYSTEM_PROMPT_BUILD`
 - Commands: `COMMAND_DISPATCH`, `SLASH_COMMANDS_REGISTER`
 - Output: `OUTPUT_EVENT`
@@ -215,7 +214,7 @@ Extensions are loaded in order: REFRESH (0) → CORE_TOOLS (1) → CLI (2) → D
 ### Normal Agent Run
 ```
 User input → MessageBus.enqueue() → Agent.run()
-  → build messages (hooks: MESSAGES_BUILD)
+  → build messages (hooks: CONTEXT)
   → LLM call (streaming)
   → process stream (content, reasoning, tool calls, usage)
   → emit events to sink

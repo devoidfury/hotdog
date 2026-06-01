@@ -137,8 +137,6 @@ export class Agent {
    * @returns {Promise<string|undefined>} Final text response, or undefined if tool calls
    */
   async run(userInput) {
-    await this._hooks.emitAsync(HOOKS.AGENT_BEFORE_RUN, { userInput });
-
     // Add user input to context
     const userMsg = new Message({ role: "user", content: userInput });
     this._context.push(userMsg);
@@ -180,14 +178,9 @@ export class Agent {
 
       // Build messages (extensions can modify via hook)
       let messages = this._buildMessages();
-      await this._hooks.emitAsync(HOOKS.MESSAGES_BUILD, {
-        messages,
-        agent: this,
-      });
 
       // Context hook — sequential, modifiable. Each handler sees prior
       // transformations and can return { messages } to replace the array.
-      // This differs from MESSAGES_BUILD which is notification-only.
       const contextResult = await this._hooks.emitAsyncSeq(HOOKS.CONTEXT, {
         messages,
         agent: this,
@@ -264,11 +257,12 @@ export class Agent {
         const { outcome, toolResults } =
           await this._executeTools(response.finalToolCalls);
         if (outcome !== "continue") {
-          // Turn end — emitted at the end of each agent loop iteration.
+          // Turn end — agent has stopped (e.g., wait tool yielded control).
           await this._hooks.emitAsync(HOOKS.TURN_END, {
             turnIndex: iteration,
             message: response.fullText,
             toolResults,
+            stopped: true,
             agent: this,
           });
           return outcome;
@@ -278,6 +272,7 @@ export class Agent {
           turnIndex: iteration,
           message: response.fullText,
           toolResults,
+          stopped: false,
           agent: this,
         });
       } else {
@@ -285,15 +280,12 @@ export class Agent {
           message: assistantMsg,
           agent: this,
         });
-        await this._hooks.emitAsync(HOOKS.AGENT_AFTER_RUN, {
-          result: response.fullText,
-          agent: this,
-        });
         // Turn end (final response, no tools).
         await this._hooks.emitAsync(HOOKS.TURN_END, {
           turnIndex: iteration,
           message: response.fullText,
           toolResults: [],
+          stopped: true,
           agent: this,
         });
         return response.fullText;

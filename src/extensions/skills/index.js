@@ -9,7 +9,7 @@ import { cwd } from "node:process";
 import { HOOKS } from "../../core/hooks.js";
 import { render } from "../../utils/render.js";
 import { patternMatches, SkillsLoader } from "./loader.js";
-import { LoadSkillTool } from "./load_skill.js";
+import { LoadSkillTool } from "./load-skill.js";
 export { LoadSkillTool };
 
 // ── Extension Config Registration ──────────────────────────────────────────

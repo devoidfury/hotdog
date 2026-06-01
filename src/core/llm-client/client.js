@@ -7,7 +7,7 @@ import {
   DEFAULT_MAX_TOKENS,
 } from "../config.js";
 import { retryWithBackoff } from "./retry.js";
-import { createMarkerMangler } from "../marker_mangler.js";
+import { createMarkerMangler } from "../marker-mangler.js";
 
 export class LlmError extends Error {
   constructor(message, type = "unknown") {

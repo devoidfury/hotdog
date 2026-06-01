@@ -4,7 +4,7 @@ import {
   loadAgentsMd,
   buildSystemPrompt,
   loadSystemPromptTemplate,
-} from "../../src/core/context/system_prompt.js";
+} from "../../src/core/context/system-prompt.js";
 
 describe("loadAspects", () => {
   it("returns empty array for null input", () => {

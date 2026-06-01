@@ -6,7 +6,8 @@ import path from "node:path";
 import os from "node:os";
 import { cwd } from "node:process";
 
-import { parseFrontMatter, deepMerge, loadAspects } from "../utils/utils.js";
+import { parseFrontMatter } from "../utils/file-utils.js";
+import { deepMerge, loadAspects } from "../utils/utils.js";
 import { render } from "../utils/render.js";
 
 // ── Extension Config Helpers ──────────────────────────────────────────────

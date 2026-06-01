@@ -4,9 +4,9 @@
 // full Agent instances with restricted tool sets and filtered output.
 
 import { Message } from "../context/message.js";
-import { LlmError } from "../llm_client/client.js";
+import { LlmError } from "../llm-client/client.js";
 import { OUTPUT_EVENT } from "../context/output.js";
-import { AgentSink } from "./agent_sink.js";
+import { AgentSink } from "./agent-sink.js";
 import { loadProfileFile } from "../config.js";
 
 // ── Task Status ─────────────────────────────────────────────────────────────

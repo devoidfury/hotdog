@@ -60,6 +60,6 @@ export * from "./agent.js";
 export * from "./session/index.js";
 
 // Session components
-export * from "./session/agent_sink.js";
-export * from "./session/task_manager.js";
+export * from "./session/agent-sink.js";
+export * from "./session/task-manager.js";
 export * from "./session/message-bus.js";

@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'bun:test';
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
-import { ProjectInfoTool } from '../../src/extensions/core-tools/project_info.js';
+import { ProjectInfoTool } from '../../src/extensions/core-tools/project-info.js';
 import { ToolResult } from '../../src/core/extensions/tool-utils.js';
 
 /**

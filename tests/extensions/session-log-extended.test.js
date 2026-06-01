@@ -7,7 +7,7 @@ import {
   readAllSessions,
   sessionExists,
   disabledSessionLog,
-} from "../../src/extensions/session-log/session_log.js";
+} from "../../src/extensions/session-log/session-log.js";
 import { mkdirSync, rmSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { homedir } from "node:os";

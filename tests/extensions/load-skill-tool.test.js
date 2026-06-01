@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'bun:test';
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
-import { LoadSkillTool } from '../../src/extensions/skills/load_skill.js';
+import { LoadSkillTool } from '../../src/extensions/skills/load-skill.js';
 import { ToolContext } from '../../src/core/extensions/tool-context.js';
 import { SkillsLoader } from '../../src/extensions/skills/loader.js';
 

@@ -7,9 +7,9 @@ import { MessageBus } from "../../core/index.js";
 import { formatError } from "../../core/error.js";
 import { HOOKS } from "../../core/hooks.js";
 import { CliOutputSink } from "../../core/ui/cli.js";
-import { LlmClient } from "../../core/llm_client/client.js";
-import { MarkerMangler } from "../../core/marker_mangler.js";
-import { TaskManager } from "../../core/session/task_manager.js";
+import { LlmClient } from "../../core/llm-client/client.js";
+import { MarkerMangler } from "../../core/marker-mangler.js";
+import { TaskManager } from "../../core/session/task-manager.js";
 import { SessionManager } from "../../core/session/index.js";
 import { Agent } from "../../core/agent.js";
 

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'bun:test';
-import { LlmClient, LlmError } from '../../src/core/llm_client/client.js';
+import { LlmClient, LlmError } from '../../src/core/llm-client/client.js';
 import { Message } from '../../src/core/context/message.js';
 
 describe('LlmClient.resolveProviderSettings', () => {

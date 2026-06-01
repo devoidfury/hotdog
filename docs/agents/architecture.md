@@ -113,7 +113,7 @@ Tera-like template engine supporting `{{ vars }}`, `{% if %}`, `{% for %}`, filt
 - `renderTemplate` — alias for render
 - `compile(template)` — compiles template into render function
 
-### System Prompt (`src/context/system_prompt.js`)
+### System Prompt (`src/core/context/system-prompt.js`)
 System prompt building. Key exports:
 - `loadAspects(aspectNames)` — loads `.aspect.md` files from `config/aspects/`
 - `loadAgentsMd()` — loads `AGENTS.md` from CWD
@@ -146,16 +146,16 @@ Input parsing. Key exports:
 - `parseInput(input)` — parses raw text into typed input event
 - `NoopInput` — no-op input implementation
 
-### LLM Client (`src/llm_client/`)
+### LLM Client (`src/core/llm-client/`)
 - `client.js` — LLM HTTP client with streaming, cancellation, retry support
 - `retry.js` — `retryWithBackoff(fn, maxRetries, options)` with cancellation support
 
 ### Session (`src/session/`)
 - `session-log.js` — Session log reading/replaying (JSONL format). Key exports: `readSessionEntries()`, `readAllSessions()`, `sessionExists()`, `replayEntriesIntoContext()`, `LOG_SOURCE` constants
-- `task_manager.js` — `TaskManager` manages background task agents. Key exports: `TASK_STATUS` (RUNNING, COMPLETED, FAILED, CANCELLED), `TaskHandle` (status, interrupt), `TaskManager` (spawnTask, taskStatus, sendFollowUp, interruptTask, activeTasks, taskCounts, progressMessage)
-- `agent_sink.js` — `AgentSink` bridges Agent output to Session Core. Two modes: normal (all events forwarded) and task (filtered, only TASK_PROGRESS passes through). Key exports: `AgentSink` (emit, setTaskAgentId, onTaskComplete, isTaskAgent)
+- `task-manager.js` — `TaskManager` manages background task agents. Key exports: `TASK_STATUS` (RUNNING, COMPLETED, FAILED, CANCELLED), `TaskHandle` (status, interrupt), `TaskManager` (spawnTask, taskStatus, sendFollowUp, interruptTask, activeTasks, taskCounts, progressMessage)
+- `agent-sink.js` — `AgentSink` bridges Agent output to Session Core. Two modes: normal (all events forwarded) and task (filtered, only TASK_PROGRESS passes through). Key exports: `AgentSink` (emit, setTaskAgentId, onTaskComplete, isTaskAgent)
 
-### Marker Mangler (`src/marker_mangler.js`)
+### Marker Mangler (`src/core/marker-mangler.js`)
 Escapes input that triggers special behavior (tool call actions, internal markers). Protects against prompt injection via crafted input. Key exports: `MarkerMangler` class with `escape()`, `unescape()`, `escapeInput()`, `escapeToolOutput()`, `unescapeOutput()`, `unescapeToolInput()`, `createMarkerMangler()`.
 
 ### Utilities (`src/utils.js`)
@@ -170,7 +170,7 @@ Escapes input that triggers special behavior (tool call actions, internal marker
 - `index.js` — Re-exports all UI modules
 
 ### Library Entry (`src/lib.js`)
-Re-exports core modules for programmatic use: config, context, llm_client, core/agent, ui/cli, utils.
+Re-exports core modules for programmatic use: config, context, llm-client, core/agent, ui/cli, utils.
 
 ## Extensions (`src/extensions/`)
 

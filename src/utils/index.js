@@ -5,4 +5,5 @@ export { validate, validateParams, formatValidationErrors, typeName } from "./js
 export { compile, render } from "./render.js";
 
 // ── General utilities ────────────────────────────────────────────────────────
-export { parseFrontMatter, loadAspects, deepMerge, validateNameable } from "./utils.js";
+export { parseFrontMatter } from "./file-utils.js";
+export { loadAspects, deepMerge, validateNameable } from "./utils.js";

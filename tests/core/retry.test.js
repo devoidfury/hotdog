@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'bun:test';
-import { retryWithBackoff } from '../../src/core/llm_client/retry.js';
-import { LlmError } from '../../src/core/llm_client/client.js';
+import { retryWithBackoff } from '../../src/core/llm-client/retry.js';
+import { LlmError } from '../../src/core/llm-client/client.js';
 
 describe('retryWithBackoff', () => {
   it('succeeds on first try', async () => {

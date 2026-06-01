@@ -17,7 +17,7 @@ export * from "./find.js";
 export * from "./fetch.js";
 export * from "./question.js";
 export * from "./pager.js";
-export * from "./project_info.js";
+export * from "./project-info.js";
 export * from "./explore.js";
 
 // Import classes for factory use
@@ -30,7 +30,7 @@ import { FindTool } from "./find.js";
 import { FetchTool } from "./fetch.js";
 import { QuestionTool } from "./question.js";
 import { PagerTool } from "./pager.js";
-import { ProjectInfoTool } from "./project_info.js";
+import { ProjectInfoTool } from "./project-info.js";
 import { ExploreTool } from "./explore.js";
 
 // Tool descriptors — declarative table of all core tools.

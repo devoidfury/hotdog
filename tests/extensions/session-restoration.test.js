@@ -6,7 +6,7 @@ import {
   LOG_SOURCE,
   SessionLog,
   disabledSessionLog,
-} from "../../src/extensions/session-log/session_log.js";
+} from "../../src/extensions/session-log/session-log.js";
 import { Message } from "../../src/core/context/message.js";
 import { mkdirSync, rmSync, readFileSync } from "node:fs";
 import { join } from "node:path";

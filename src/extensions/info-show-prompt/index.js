@@ -3,7 +3,7 @@
 // Registers subcommands via the cli:subcommandsRegister hook.
 // Capability declared in extension.json metadata file.
 
-import { LlmClient } from "../../core/llm_client/client.js";
+import { LlmClient } from "../../core/llm-client/client.js";
 import { SkillsLoader } from "../skills/loader.js";
 import { DEFAULT_SKILLS_PATH, loadConfig } from "../../core/config.js";
 import { Agent } from "../../core/agent.js";

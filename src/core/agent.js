@@ -313,20 +313,12 @@ export class Agent {
       // Emit tool call event
       this._emitOutput("tool_call", { toolName, input, toolCallId });
 
-      // Emit before-execute hook
+      // Emit before-execute hook (skill filtering handled by skills extension)
       await this._hooks.emitAsync(HOOKS.TOOL_BEFORE_EXECUTE, {
         toolName,
         input,
         agent: this,
       });
-
-      // Check tool allowance
-      const isAllowed =
-        (await this._hooks.emitAsync(HOOKS.TOOL_BEFORE_EXECUTE, {
-          toolName,
-          agent: this,
-        })) || true;
-      // (Skill filtering is handled by the skills extension via the hook)
 
       // Execute the tool
       const tool = this._toolRegistry.get(toolName);

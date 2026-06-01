@@ -37,7 +37,7 @@ describe('LspHoverTool', () => {
         line: 5,
         character: 10,
       }));
-      expect(display).toBe('hover(/test.js:5:10)');
+      expect(display).toBe('lsp-hover(/test.js:5:10)');
     });
 
     it('displays hover with object input', () => {
@@ -46,7 +46,7 @@ describe('LspHoverTool', () => {
         line: 1,
         character: 0,
       });
-      expect(display).toBe('hover(/test.ts:1:0)');
+      expect(display).toBe('lsp-hover(/test.ts:1:0)');
     });
   });
 

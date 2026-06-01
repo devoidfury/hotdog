@@ -1,28 +1,20 @@
 // LSP Apply Edit tool — workspace/applyEdit
 
-import fs from 'node:fs';
-import { LspBaseTool, CompletionKind, SymbolKind, DiagnosticSeverity } from './base.js';
-import { toolDef, param, ToolResult } from '../../core-tools/registry.js';
+import { LspBaseTool } from './base.js';
+import { ToolResult } from '../../core-tools/registry.js';
 import { formatError } from '../../../src/context/error.js';
 
 export class LspApplyEditTool extends LspBaseTool {
   static TOOL_NAME = 'lsp-apply-edit';
   static DESCRIPTION = 'Apply a workspace edit (multiple file changes) atomically. Accepts a WorkspaceEdit object with document changes and/or file operations.';
+  static PARAMS = {
+    edit: { type: 'string', description: 'A JSON string representing a WorkspaceEdit object. Must contain either "documentChanges" (preferred) or "changes". Document changes is an array of TextDocumentEdit objects.' },
+  };
+  static REQUIRED = ['edit'];
 
-  toToolDef() {
-    return toolDef(
-      LspApplyEditTool.TOOL_NAME,
-      LspApplyEditTool.DESCRIPTION,
-      {
-        schema: 'https://json-schema.org/draft/2020-12/schema',
-        properties: {
-          edit: param('string', 'A JSON string representing a WorkspaceEdit object. Must contain either "documentChanges" (preferred) or "changes". Document changes is an array of TextDocumentEdit objects.'),
-        },
-        required: ['edit'],
-      }
-    );
-  }
-
+  /**
+   * Custom display that shows the number of changes in the edit.
+   */
   callDisplay(input) {
     const args = typeof input === 'string' ? JSON.parse(input) : input;
     const edit = typeof args.edit === 'string' ? JSON.parse(args.edit) : args.edit;

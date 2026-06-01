@@ -36,7 +36,7 @@ describe('LspDefinitionTool', () => {
         line: 5,
         character: 10,
       }));
-      expect(display).toBe('definition(/test.js:5:10)');
+      expect(display).toBe('lsp-definition(/test.js:5:10)');
     });
 
     it('displays definition with object input', () => {
@@ -45,7 +45,7 @@ describe('LspDefinitionTool', () => {
         line: 1,
         character: 0,
       });
-      expect(display).toBe('definition(/test.ts:1:0)');
+      expect(display).toBe('lsp-definition(/test.ts:1:0)');
     });
   });
 

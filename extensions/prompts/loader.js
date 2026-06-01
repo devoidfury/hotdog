@@ -134,13 +134,6 @@ export class PromptsLoader {
   }
 
   /**
-   * Get all prompts including disabled ones.
-   */
-  allPromptsIncludingHidden() {
-    return Array.from(this.prompts.values());
-  }
-
-  /**
    * Get configured directories.
    */
   directories() {

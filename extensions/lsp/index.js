@@ -27,7 +27,7 @@ import {
   LspApplyEditTool,
 } from './tools/index.js';
 
-// LSP tool class map
+// LSP tool class map — maps tool names to their classes
 const LSP_TOOL_MAP = {
   'lsp-hover': LspHoverTool,
   'lsp-definition': LspDefinitionTool,
@@ -168,3 +168,7 @@ export {
   LspFormattingTool, LspRenameTool, LspDiagnosticsTool,
   LspWorkspaceSymbolTool, LspApplyEditTool,
 };
+
+// Re-export base classes for extension authors
+export { LspPositionTool, LspFileTool, LspQueryTool } from './tools/lsp-position-tool.js';
+export { LspBaseTool } from './tools/base.js';

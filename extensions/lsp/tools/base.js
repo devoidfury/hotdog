@@ -27,7 +27,10 @@ export class LspBaseTool {
   static REQUIRED_CAPABILITIES = [];
 
   /** @type {object} */
-  static DEFAULT_PARAMS = {};
+  static PARAMS = {};
+
+  /** @type {string[]} */
+  static REQUIRED = [];
 
   constructor(options = {}) {
     this.lspClient = options.lspClient || null;
@@ -39,7 +42,8 @@ export class LspBaseTool {
 
   /**
    * Get the tool definition for OpenAI function-calling.
-   * Override in subclasses.
+   * Auto-generates from PARAMS/REQUIRED static properties.
+   * Subclasses can override to customize.
    */
   toToolDef() {
     return toolDef(
@@ -47,10 +51,22 @@ export class LspBaseTool {
       this.constructor.DESCRIPTION || "LSP tool",
       {
         schema: "https://json-schema.org/draft/2020-12/schema",
-        properties: {},
-        required: [],
+        properties: this.constructor.PARAMS,
+        required: this.constructor.REQUIRED,
       },
     );
+  }
+
+  /**
+   * Generate a display string for tool calls from arguments.
+   * Default implementation shows the first few args.
+   */
+  callDisplay(input) {
+    const args = typeof input === "string" ? JSON.parse(input) : input;
+    const parts = Object.entries(args)
+      .slice(0, 3)
+      .map(([k, v]) => `${k}=${typeof v === "string" ? `"${v}"` : v}`);
+    return `${this.constructor.TOOL_NAME}(${parts.join(", ")})`;
   }
 
   /**

@@ -1,64 +1,22 @@
 // LSP Diagnostics tool — textDocument/publishDiagnostics
 
-import fs from 'node:fs';
-import { LspBaseTool, DiagnosticSeverity } from './base.js';
-import { toolDef, param, ToolResult } from '../../core-tools/registry.js';
-import { formatError } from '../../../src/context/error.js';
+import { LspFileTool } from './lsp-position-tool.js';
+import { ToolResult } from '../../core-tools/registry.js';
+import { DiagnosticSeverity } from './base.js';
 
-export class LspDiagnosticsTool extends LspBaseTool {
+export class LspDiagnosticsTool extends LspFileTool {
   static TOOL_NAME = 'lsp-diagnostics';
   static DESCRIPTION = 'Get diagnostics (errors, warnings, hints) for a document. Returns all reported issues with their severity, message, and location.';
+  static LSP_METHOD = null; // Diagnostics come from publishDiagnostics notification, not a request
+  static REQUIRED_CAPABILITY = 'publishDiagnostics';
+  static SUCCESS_RESPONSE = null;
 
-  toToolDef() {
-    return toolDef(
-      LspDiagnosticsTool.TOOL_NAME,
-      LspDiagnosticsTool.DESCRIPTION,
-      {
-        schema: 'https://json-schema.org/draft/2020-12/schema',
-        properties: {
-          file: param('string', 'Path to the file.'),
-        },
-        required: ['file'],
-      }
-    );
-  }
-
-  callDisplay(input) {
-    const args = typeof input === 'string' ? JSON.parse(input) : input;
-    return `diagnostics(${args.file})`;
-  }
-
+  // Override execute to handle diagnostics specially (they come from notifications, not requests)
   async execute(input, ctx) {
-    const args = typeof input === 'string' ? JSON.parse(input) : input;
-    const filePath = args.file;
-
-    if (filePath === undefined || filePath === null) {
-      return ToolResult.err('file is required');
-    }
-
-    // Resolve path
-    const resolvedPath = this._resolvePath(filePath, ctx);
-
-    // Check file exists
-    if (!fs.existsSync(resolvedPath)) {
-      return ToolResult.err(`File not found: ${resolvedPath}`);
-    }
-
-    // Get language ID and client
-    const languageId = this._getLanguageId(resolvedPath);
-    const client = await this._getClient(languageId, ctx, this.lspConfig);
-
-    if (!client) {
-      return ToolResult.err(
-        `No language server configured for '${languageId}'. ` +
-        'Configure an LSP server in your profile or defaults.json.'
-      );
-    }
+    const { resolvedPath, languageId, client, args, uri, error } = await this._prepareAndValidate(input, ctx);
+    if (error) return error;
 
     try {
-      // Ensure document is open
-      const uri = await this._ensureDocumentOpen(client, resolvedPath, languageId);
-
       // Check server supports diagnostics
       const caps = client.getCapabilities();
       const hasDiagnostics = !!(caps?.publishDiagnostics || caps?.diagnosticProvider);
@@ -72,9 +30,10 @@ export class LspDiagnosticsTool extends LspBaseTool {
 
       // Send didChange to trigger re-analysis
       try {
+        const fs = require('node:fs');
         const content = fs.readFileSync(resolvedPath, 'utf-8');
         await client.didChange(uri, content);
-      } catch (e) {
+      } catch {
         // Non-fatal — document may not have changed
       }
 
@@ -104,16 +63,10 @@ export class LspDiagnosticsTool extends LspBaseTool {
 
       return ToolResult.ok(formatted).withEntries(metadata);
     } catch (e) {
-      return ToolResult.err(`Diagnostics failed: ${formatError(e)}`);
+      return ToolResult.err(`Diagnostics failed: ${e.message || String(e)}`);
     }
   }
 
-  /**
-   * Format diagnostics for display.
-   * @param {object[]} diagnostics - LSP diagnostics
-   * @param {number} [maxItems] - Maximum items to display
-   * @returns {string}
-   */
   _formatDiagnostics(diagnostics, maxItems) {
     if (!diagnostics || diagnostics.length === 0) return 'No diagnostics.';
 

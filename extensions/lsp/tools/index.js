@@ -12,4 +12,10 @@ export { LspRenameTool } from './lsp-rename.js';
 export { LspDiagnosticsTool } from './lsp-diagnostics.js';
 export { LspWorkspaceSymbolTool } from './lsp-workspace-symbol.js';
 export { LspApplyEditTool } from './lsp-apply-edit.js';
-export { LspBaseTool, CompletionKind, SymbolKind, DiagnosticSeverity } from './base.js';
+
+// Base classes for creating new LSP tools
+export { LspPositionTool, LspFileTool, LspQueryTool } from './lsp-position-tool.js';
+export { LspBaseTool } from './base.js';
+
+// Constants (re-exported for convenience)
+export { CompletionKind, SymbolKind, DiagnosticSeverity } from './base.js';

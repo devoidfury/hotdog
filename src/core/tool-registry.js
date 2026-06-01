@@ -1,57 +1,9 @@
-// Minimal tool registry for the core.
-// Extensions register tools via `register(name, tool)`.
-// The full registry (with filtering, etc.) lives in the tools extension.
+// Tool registry — re-exported from extensions/core-tools.
+// This consolidates the two ToolRegistry classes into one source of truth.
 
-export class ToolRegistry {
-  constructor() {
-    this._tools = new Map();
-  }
+import { ToolRegistry } from "../../extensions/core-tools/registry.js";
 
-  /**
-   * Register a tool.
-   * @param {string} name
-   * @param {Object} tool - Tool instance with `execute(input, ctx)` and optionally `toToolDef()`.
-   */
-  register(name, tool) {
-    this._tools.set(name, tool);
-  }
-
-  /**
-   * Get a tool by name.
-   * @param {string} name
-   * @returns {Object|undefined}
-   */
-  get(name) {
-    return this._tools.get(name);
-  }
-
-  /**
-   * Check if a tool is registered.
-   * @param {string} name
-   * @returns {boolean}
-   */
-  has(name) {
-    return this._tools.has(name);
-  }
-
-  /**
-   * Get all registered tools as [name, tool] pairs.
-   * @returns {Array<[string, Object]>}
-   */
-  getAll() {
-    return Array.from(this._tools.entries());
-  }
-
-  /**
-   * Get tool definitions for the LLM API.
-   * @returns {Array<Object>}
-   */
-  getToolDefs() {
-    return Array.from(this._tools.values())
-      .filter(t => t.toToolDef)
-      .map(t => t.toToolDef());
-  }
-}
+export { ToolRegistry, toolResult, toolDef, param } from "../../extensions/core-tools/registry.js";
 
 /**
  * Create a new ToolRegistry instance.

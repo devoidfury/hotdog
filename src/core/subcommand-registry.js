@@ -24,9 +24,23 @@ export class CliSubcommandRegistry {
    */
   register(name, definition) {
     if (this._subcommands.has(name)) {
-      console.warn(
-        `[subcommand-registry] Subcommand "${name}" already registered, overwriting.`,
-      );
+      const existing = this._subcommands.get(name);
+      // Only warn if we're overwriting an existing handler (not just populating from metadata)
+      if (existing.handler) {
+        console.warn(
+          `[subcommand-registry] Subcommand "${name}" already registered, overwriting.`,
+        );
+      }
+      // If the existing entry has no handler (metadata placeholder), keep its metadata
+      // but replace the handler
+      if (!existing.handler && definition.handler) {
+        definition = {
+          ...existing,
+          ...definition,
+          requiresConfig: definition.requiresConfig !== false,
+          requiresCore: definition.requiresCore === true,
+        };
+      }
     }
     this._subcommands.set(name, {
       ...definition,

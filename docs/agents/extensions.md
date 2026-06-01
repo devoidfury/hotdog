@@ -5,7 +5,7 @@ When adding new functionality:
 1. Check if an existing extension can be extended
 2. If creating a new extension, place it in `extensions/<name>/` with `index.js` and a `extension.json` metadata file
 3. Register tools via `HOOKS.TOOLS_REGISTER`
-4. Register CLI subcommands via `HOOKS.CLI_SUBCOMMANDS_REGISTER`
+4. Register CLI subcommands via `HOOKS.CLI_SUBCOMMANDS_REGISTER` (or directly via `core.cliSubcommandRegistry`)
 5. Register config params/CLI flags via `HOOKS.CONFIG_PARAMS_REGISTER` / `HOOKS.CONFIG_CLI_FLAGS_REGISTER`
 6. Contribute to system prompt via `HOOKS.SYSTEM_PROMPT_BUILD`
 
@@ -20,7 +20,22 @@ Every extension directory must contain an `extension.json` metadata file. This i
   "name": "extension-name",
   "provides": ["tools", "cli:subcommands"],
   "loadOrder": 10,
-  "description": "Brief description of what this extension does"
+  "description": "Brief description of what this extension does",
+  "cli:subcommands": [
+    {
+      "name": "my-cmd",
+      "description": "Do something useful",
+      "requiresConfig": true
+    }
+  ],
+  "cli:flags": [
+    {
+      "short": "-x",
+      "long": "--my-flag",
+      "description": "My extension flag",
+      "type": "string"
+    }
+  ]
 }
 ```
 
@@ -31,6 +46,11 @@ Every extension directory must contain an `extension.json` metadata file. This i
 | `loadOrder` | number | No | Load priority (lower = earlier). Defaults to 10. |
 | `dependsOn` | string[] | No | Names of extensions that must load before this one |
 | `description` | string | No | Human-readable description |
+| `cli:subcommands` | array | No | Subcommand declarations for static discovery (help text, `--help`) |
+| `cli:flags` | array | No | CLI flag declarations for static discovery |
+| `configSchema` | object | No | JSON Schema for extension config options |
+| `autoload` | boolean | No | Whether to auto-discover. Default: true |
+| `enabled` | boolean | No | Whether the extension is enabled |
 
 **Load Order Constants** (from `LOAD_ORDER` in `extensions.js`):
 - `0` — REFRESH (must load first, tracks other extensions)
@@ -39,6 +59,8 @@ Every extension directory must contain an `extension.json` metadata file. This i
 - `10` — DEFAULT (most extensions)
 
 **Discovery flow**: `extension.json` exists → `index.js` exists → valid extension.
+
+**Static discovery**: CLI flags and subcommand declarations in `extension.json` are read at startup without loading extension code. This enables `--help` and subcommand discovery to work immediately.
 
 ### Dependencies
 

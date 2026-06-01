@@ -2,5 +2,30 @@
   "name": "session-review",
   "provides": ["cli:subcommands", "tools"],
   "loadOrder": 10,
-  "description": "Provides the review CLI subcommand and review tool for session log inspection"
+  "description": "Provides the review CLI subcommand and review tool for session log inspection",
+  "cli:subcommands": [
+    {
+      "name": "review",
+      "description": "Review session logs",
+      "requiresConfig": true,
+      "requiresCore": false,
+      "options": [
+        {
+          "name": "--session-id",
+          "type": "string",
+          "description": "Session ID to review"
+        },
+        {
+          "name": "--json",
+          "type": "boolean",
+          "description": "Output in JSON format"
+        },
+        {
+          "name": "--tool-index",
+          "type": "boolean",
+          "description": "Show tool usage index"
+        }
+      ]
+    }
+  ]
 }

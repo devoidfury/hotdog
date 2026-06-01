@@ -9,7 +9,11 @@ import {
   SessionManager,
   Agent,
 } from "./core/index.js";
-import { getExtensionsToLoad, emitConfigRegistration } from "./core/extensions.js";
+import {
+  getExtensionsToLoad,
+  emitConfigRegistration,
+  discoverExtensions,
+} from "./core/extensions.js";
 import { HOOKS } from "./hooks.js";
 import { CliOutputSink } from "./ui/cli.js";
 import { parseArgs, generateHelpText } from "./cli.js";
@@ -57,7 +61,13 @@ async function loadExtensions(core, { taskManager, config } = {}) {
   // The loader handles import + create() call. taskManager is passed
   // to all extensions (extensions that don't need it simply ignore it).
   // Also passes provides/dependsOn for capability tracking.
+  // Guard: skip extensions already loaded (prevents double-loading when
+  // loadExtensions is called multiple times, e.g., early for subcommands
+  // then again with real taskManager for interactive mode).
   for (const ext of extensionsToLoad) {
+    if (core.extensions.has(ext.name)) {
+      continue; // already loaded, skip
+    }
     const extInstance = await core.extensions.load(ext.name, ext.path, {
       taskManager,
       provides: ext.provides,
@@ -80,9 +90,15 @@ async function loadExtensions(core, { taskManager, config } = {}) {
  * @param {Object} [options] - Optional additional options.
  * @param {string} [options.profileName] - Current profile name.
  * @param {Object} [options.profile] - Resolved profile object (includes manager flag, whitelistTools, etc.).
+ * @param {Function} [options.buildConfig] - Optional buildConfig function for subcommand handlers.
  * @returns {Object} Core object with hooks, toolRegistry, extensions, config.
  */
-function createCore(config, configRegistry, cliSubcommandRegistry, options = {}) {
+function createCore(
+  config,
+  configRegistry,
+  cliSubcommandRegistry,
+  options = {},
+) {
   const hooks = createHooks();
   const toolRegistry = createToolRegistry();
 
@@ -104,7 +120,14 @@ function createCore(config, configRegistry, cliSubcommandRegistry, options = {})
     configRegistry,
   });
 
-  return { hooks, toolRegistry, extensions, config: coreConfig, cliSubcommandRegistry };
+  return {
+    hooks,
+    toolRegistry,
+    extensions,
+    config: coreConfig,
+    cliSubcommandRegistry,
+    buildConfig: options.buildConfig,
+  };
 }
 
 // ── Message Bus ──────────────────────────────────────────────────────────────
@@ -248,43 +271,124 @@ class MessageBus {
 
 export { MessageBus };
 
+/**
+ * Discover extensions and register their CLI flags and subcommands from metadata.
+ * This reads extension.json files without loading any extension code.
+ *
+ * @param {Object} config - Configuration with extension paths and autoload settings.
+ * @param {Object} configRegistry - Config registry to register CLI flags.
+ * @param {Object} cliSubcommandRegistry - Subcommand registry to register subcommands.
+ * @returns {Promise<Array>} Array of discovered extension metadata.
+ */
+async function registerExtensionMetadata(
+  config,
+  configRegistry,
+  cliSubcommandRegistry,
+) {
+  const extensionPaths = config?.extensionPaths || ["builtins"];
+  const extensionAutoload = config?.extensionAutoload ?? false;
+  const extensionsList = config?.extensions || [];
+
+  const extensionsToLoad = await getExtensionsToLoad(
+    extensionPaths,
+    extensionAutoload,
+    extensionsList,
+  );
+
+  // Register CLI flags from extension metadata
+  for (const ext of extensionsToLoad) {
+    if (ext.cliFlags && ext.cliFlags.length > 0) {
+      const flags = ext.cliFlags.map((flag) => ({
+        short: flag.short,
+        long: flag.long,
+        description: flag.description,
+        type: flag.type,
+        default: flag.default,
+      }));
+      configRegistry.registerCliFlags(flags);
+    }
+  }
+
+  // Register subcommands from extension metadata (for help/discovery without loading)
+  for (const ext of extensionsToLoad) {
+    if (ext.cliSubcommands && ext.cliSubcommands.length > 0) {
+      for (const sc of ext.cliSubcommands) {
+        cliSubcommandRegistry.register(sc.name, {
+          description: sc.description || "",
+          requiresConfig: sc.requiresConfig,
+          requiresCore: sc.requiresCore,
+          options: sc.options || [],
+          // The handler will be set when the extension is loaded at runtime
+          handler: null,
+        });
+      }
+    }
+  }
+
+  return extensionsToLoad;
+}
+
 // ── Main ─────────────────────────────────────────────────────────────────────
 
 async function main() {
   // ── Create config registry for extension CLI flags & config params ──────
   const configRegistry = createConfigRegistry();
 
-  // ── Parse CLI args with extension flags ─────────────────────────────────
-  const cli = parseArgs(configRegistry);
+  // ── Build minimal config (defaults only, for extension discovery) ───────
+  // We need this early to discover extensions and read their CLI flags /
+  // subcommand declarations from extension.json without loading code.
+  const minimalConfig = await loadConfig(
+    null,
+    configRegistry.getConfigParams(),
+  );
 
-  // ── Build complete config early (needed for extension discovery) ────────
-  // We need config to know which extensions to load (autoload vs explicit list)
-  // and to pass config to extensions during create().
+  // ── Discover extensions from metadata (no code loading) ─────────────────
+  // Reads extension.json files to extract CLI flags and subcommand declarations.
+  // This enables `--help` and subcommand discovery without loading any extension code.
+  const cliSubcommandRegistry = createSubcommandRegistry();
+  await registerExtensionMetadata(
+    minimalConfig,
+    configRegistry,
+    cliSubcommandRegistry,
+  );
+
+  // ── Parse CLI args with extension flags ─────────────────────────────────
+  const cli = parseArgs(configRegistry, cliSubcommandRegistry.names());
+
+  // ── Build complete config ───────────────────────────────────────────────
   const { resolved, modelRegistry, providers } = await buildConfig(cli);
   const extParams = configRegistry.getConfigParams();
   const config = await loadConfig(cli.config, extParams);
-
-  // ── Create CLI subcommand registry ──────────────────────────────────────
-  const cliSubcommandRegistry = createSubcommandRegistry();
 
   // ── Create core infrastructure ──────────────────────────────────────────
   const core = createCore(config, configRegistry, cliSubcommandRegistry, {
     profileName: resolved.profileName,
     profile: resolved.profile,
+    buildConfig,
   });
 
-  // ── Subcommand dispatch (before loading extensions, to check if needed) ─
+  // ── Subcommand dispatch ─────────────────────────────────────────────────
   if (cli.subcommand) {
-    const subcommandDef = core.cliSubcommandRegistry.get(cli.subcommand);
+    // Re-get after loading to pick up handlers registered by extensions
+    const getSubcommand = () => core.cliSubcommandRegistry.get(cli.subcommand);
+
+    const subcommandDef = getSubcommand();
     if (subcommandDef) {
-      // Load all extensions so hooks are fully populated.
-      // This ensures subcommands like show-prompt get the real
-      // system prompt built via the full extension hook chain.
+      // Load all extensions to get the actual handlers.
+      // Extensions register their handlers in create() via cliSubcommandRegistry.register().
+      // Force autoload: true to ensure all extensions are loaded (not just explicitly listed ones).
       await loadExtensions(core, { taskManager: null, config });
 
-      // Execute the subcommand handler
-      await subcommandDef.handler(cli, core);
-      return;
+      // Re-get after loading to pick up the updated handler
+      const updatedDef = getSubcommand();
+      if (updatedDef && updatedDef.handler) {
+        await updatedDef.handler(cli, core);
+        return;
+      }
+      console.error(
+        `Subcommand "${cli.subcommand}" handler not available after loading extensions.`,
+      );
+      process.exit(1);
     }
     console.error(`Unknown subcommand: ${cli.subcommand}`);
     console.log(
@@ -415,7 +519,33 @@ async function main() {
   // Wire taskManager to sessionManager
   taskManager.setSessionManager(sessionManager);
 
-  // ── One-shot mode ───────────────────────────────────────────────────────
+  // ── Reject unrecognized positional args as subcommands ──────────────────
+  // When subcommands are registered, a bare positional arg is NOT a prompt —
+  // it's an unrecognized subcommand.  Only `-c`/`--prompt` flags produce prompts.
+  if (cli.positionalPrompt) {
+    const knownSubcommands = core.cliSubcommandRegistry.names();
+    const posLower = cli.positionalPrompt.toLowerCase();
+    const similar = knownSubcommands.filter(
+      (sc) => sc.toLowerCase() !== posLower && sc.startsWith(posLower.slice(0, 2)),
+    );
+    if (similar.length === 1) {
+      console.error(
+        `Unknown subcommand: ${cli.positionalPrompt}\n` +
+          `Did you mean: ${similar[0]}?`,
+      );
+      await core.extensions.cleanup();
+      process.exit(1);
+    }
+    console.error(
+      `Unknown subcommand: ${cli.positionalPrompt}\n` +
+        `Available subcommands: ${knownSubcommands.join(", ")}\n` +
+        `To send a prompt, use -c or --prompt: oa-agent -c "${cli.positionalPrompt}"`,
+    );
+    await core.extensions.cleanup();
+    process.exit(1);
+  }
+
+  // ── One-shot mode (only from -c / --prompt flag) ────────────────────────
   if (cli.prompt) {
     const bus = new MessageBus({ sessionManager, sink });
     // Wire up task completion (appends result to context + wakes manager)
@@ -471,7 +601,10 @@ async function main() {
   bus.run();
 }
 
-main().catch(async (e) => {
-  console.error(formatError(e));
-  process.exit(1);
-});
+// Only run main() when this module is the entry point (not when imported by tests).
+if (process.argv[1]?.match(/(main\.js|oa-agent)$/)) {
+  main().catch(async (e) => {
+    console.error(formatError(e));
+    process.exit(1);
+  });
+}

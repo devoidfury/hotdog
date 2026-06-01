@@ -2,7 +2,7 @@
 // Extracted from main.js.
 // Supports dynamic CLI flags registered via ConfigRegistry.
 
-export function parseArgs(configRegistry = null) {
+export function parseArgs(configRegistry = null, knownSubcommands = null) {
   const args = process.argv.slice(2);
   const options = {
     config: null,
@@ -33,6 +33,7 @@ export function parseArgs(configRegistry = null) {
     theme: null,
     colors: null,
     subcommand: null,
+    positionalPrompt: null,
     reviewToolIndex: false,
     systemPromptTemplate: null,
     wantsJson: false,
@@ -227,15 +228,15 @@ export function parseArgs(configRegistry = null) {
     }
 
     // Positional argument — treat as subcommand or prompt
-    if (arg === 'info') {
-      options.subcommand = 'info';
-    } else if (arg === 'show-prompt') {
-      options.subcommand = 'show-prompt';
-    } else if (arg === 'review') {
-      options.subcommand = 'review';
-    } else if (options.prompt === null) {
+    const isKnownSubcommand = knownSubcommands
+      ? knownSubcommands.includes(arg)
+      : (arg === 'info' || arg === 'show-prompt' || arg === 'review');
+
+    if (isKnownSubcommand) {
+      options.subcommand = arg;
+    } else if (options.positionalPrompt === null) {
       // First positional argument is the prompt
-      options.prompt = arg;
+      options.positionalPrompt = arg;
     }
 
     i++;

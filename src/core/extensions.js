@@ -105,12 +105,12 @@ export function isExtensionDirectory(dirPath) {
  * Read extension metadata from extension.json file.
  *
  * @param {string} dirPath - Extension directory path.
- * @returns {{name: string, provides: string[], loadOrder: number, description: string, dependsOn: string[], autoload: boolean, configSchema: object|null}} Extension metadata.
+ * @returns {{name: string, provides: string[], loadOrder: number, description: string, dependsOn: string[], autoload: boolean, configSchema: object|null, cliSubcommands: Array, cliFlags: Array}} Extension metadata.
  */
 function readExtensionMetadata(dirPath) {
   const metaPath = path.join(dirPath, "extension.json");
   if (!fs.existsSync(metaPath)) {
-    return { name: "", provides: [], loadOrder: LOAD_ORDER.DEFAULT, description: "", dependsOn: [], autoload: true, configSchema: null };
+    return { name: "", provides: [], loadOrder: LOAD_ORDER.DEFAULT, description: "", dependsOn: [], autoload: true, configSchema: null, cliSubcommands: [], cliFlags: [] };
   }
   try {
     const content = fs.readFileSync(metaPath, "utf-8");
@@ -124,6 +124,28 @@ function readExtensionMetadata(dirPath) {
       ? meta.configSchema
       : null;
 
+    // Parse CLI subcommand declarations from extension.json
+    const cliSubcommands = Array.isArray(meta["cli:subcommands"])
+      ? meta["cli:subcommands"].map((sc) => ({
+          name: sc.name || "",
+          description: sc.description || "",
+          requiresConfig: sc.requiresConfig !== false, // default true
+          requiresCore: sc.requiresCore === true,
+          options: Array.isArray(sc.options) ? sc.options : [],
+        }))
+      : [];
+
+    // Parse CLI flag declarations from extension.json
+    const cliFlags = Array.isArray(meta["cli:flags"])
+      ? meta["cli:flags"].map((flag) => ({
+          short: flag.short || null,
+          long: flag.long || "",
+          description: flag.description || "",
+          type: flag.type || "string",
+          default: flag.default !== undefined ? flag.default : null,
+        }))
+      : [];
+
     // Determine load order: explicit in JSON, or infer from capabilities
     let loadOrder = LOAD_ORDER.DEFAULT;
     if (meta.loadOrder !== undefined) {
@@ -132,9 +154,9 @@ function readExtensionMetadata(dirPath) {
       loadOrder = LOAD_ORDER.CLI;
     }
 
-    return { name: meta.name || "", provides, loadOrder, description, dependsOn, autoload, configSchema };
+    return { name: meta.name || "", provides, loadOrder, description, dependsOn, autoload, configSchema, cliSubcommands, cliFlags };
   } catch {
-    return { name: "", provides: [], loadOrder: LOAD_ORDER.DEFAULT, description: "", dependsOn: [], autoload: true, configSchema: null };
+    return { name: "", provides: [], loadOrder: LOAD_ORDER.DEFAULT, description: "", dependsOn: [], autoload: true, configSchema: null, cliSubcommands: [], cliFlags: [] };
   }
 }
 
@@ -145,7 +167,7 @@ function readExtensionMetadata(dirPath) {
  * is any directory containing extension.json + index.js.
  *
  * @param {string} dirPath - Directory to search.
- * @returns {Array<{name: string, path: string, provides: string[], loadOrder: number, dependsOn: string[], autoload: boolean, configSchema: object|null}>} Array of discovered extensions.
+ * @returns {Array<{name: string, path: string, provides: string[], loadOrder: number, dependsOn: string[], autoload: boolean, configSchema: object|null, cliSubcommands: Array, cliFlags: Array}>} Array of discovered extensions.
  */
 export function discoverExtensionsInDir(dirPath) {
   const extensions = [];
@@ -161,8 +183,8 @@ export function discoverExtensionsInDir(dirPath) {
 
     const dirFull = path.join(dirPath, entry.name);
     if (isExtensionDirectory(dirFull)) {
-      // Read extension metadata (includes name, provides, loadOrder, dependsOn, configSchema)
-      const { name, provides, loadOrder, dependsOn, autoload, configSchema } = readExtensionMetadata(dirFull);
+      // Read extension metadata (includes name, provides, loadOrder, dependsOn, configSchema, cliSubcommands, cliFlags)
+      const { name, provides, loadOrder, dependsOn, autoload, configSchema, cliSubcommands, cliFlags } = readExtensionMetadata(dirFull);
 
       extensions.push({
         name: name || entry.name,
@@ -172,6 +194,8 @@ export function discoverExtensionsInDir(dirPath) {
         dependsOn,
         autoload,
         configSchema,
+        cliSubcommands,
+        cliFlags,
       });
     }
   }
@@ -296,6 +320,8 @@ export async function discoverExtensions(extensionPaths) {
         dependsOn: ext.dependsOn,
         autoload: ext.autoload,
         configSchema: ext.configSchema,
+        cliSubcommands: ext.cliSubcommands || [],
+        cliFlags: ext.cliFlags || [],
       });
     }
   }

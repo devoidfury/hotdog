@@ -2,5 +2,19 @@
   "name": "info-show-prompt",
   "provides": ["cli:subcommands"],
   "loadOrder": 10,
-  "description": "Provides info and show-prompt CLI subcommands"
+  "description": "Provides info and show-prompt CLI subcommands",
+  "cli:subcommands": [
+    {
+      "name": "info",
+      "description": "Show system info and diagnostics",
+      "requiresConfig": true,
+      "requiresCore": false
+    },
+    {
+      "name": "show-prompt",
+      "description": "Show rendered system prompt with tool definitions",
+      "requiresConfig": true,
+      "requiresCore": false
+    }
+  ]
 }

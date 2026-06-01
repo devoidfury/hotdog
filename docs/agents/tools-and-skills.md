@@ -2,81 +2,125 @@
 
 ## Tools
 
-### Tool System (`src/tools/`)
+### Tool System (`extensions/core-tools/`)
 
-- **Tool interface** — all tools implement: `create(ctx) → { instance, error }`, `execute(input, ctx, toolCallId) → { result, error }`, `toToolDef()`, `callDisplay(input)`
-- **ToolRegistry** — stores tools by name, provides lookup, serialization, and `toolDefs()` accessor
-- **Tool** / **ToolFunction** / **ToolParams** / **ToolParam** — shared types for LLM tool definitions
-- **ToolFactory interface + DefaultToolFactory** — creates tool instances from config, supports `ToolContext`
-- **TOOL_DESCRIPTORS** — static array of tool descriptors defining all core + manager tools with their factory functions and disabled flags
-- **CORE_TOOL_NAMES** — includes all 15 core tool names: `bash`, `write`, `model`, `load_skill`, `read`, `question`, `pager`, `explore`, `find`, `grep`, `fetch`, `project_info`, `review`, `edit`. Filtered by profile whitelist/blacklist.
-- **Disabled by default** — `ProjectInfoTool` and all orchestrator tools (`plan_status`, `complete_task`, `delegate_task`, `task_status`, `task_followup`, `task_interrupt`) have `disabled: true` in their descriptors; they require explicit inclusion via profile `whitelist_tools` or the `manager: true` profile flag
+Core tools are provided by the `core-tools` extension. Tools are registered via the `HOOKS.TOOLS_REGISTER` hook.
 
-### Implementations
+**Tool interface** — all tools implement: `execute(input, ctx) → result`
+- `input` — JSON string or parsed object from LLM
+- `ctx` — `ToolContext` with agent, isSessionRestoring, cwdBoundary, workspaceRoot
+- Result can be: string, ToolResult instance, or object
 
-- **BashTool** — executes shell commands via `bash -c`. Params: `{"command": "..."}`
-- **WriteTool** — writes files with three modes:
-  1. **Full replacement**: `{"path": "file.txt", "content": "new content"}` — replaces entire file
-  2. **Regex replace**: `{"path": "file.txt", "regex": "old_pattern", "content": "replacement"}` — replaces all regex matches
-  3. **Atomic multi-file**: `{"files": [{"path": "a.txt", "regex": "old", "content": "new"}], "atomic": true}` — writes multiple files atomically (all-or-nothing)
-  Auto-creates parent directories.
-- **ModelTool** — switches to a different model mid-conversation. Params: `{"name": "model-name"}`. Tool description dynamically shows the current model and lists all available models in the schema. Each agent instance has its own `ModelTool`.
-- **LoadSkillTool** — activates a skill mid-conversation by loading its full content. Params: `{"name": "skill-name"}`
-- **ReadTool** — reads file contents with pagination. Params: `{"path": "...", "limit": N, "offset": N, "type": "lines"|"bytes"}`. Returns error for directories with a depth-1 listing.
-- **QuestionTool** — asks interactive questions to the user with optional choices and defaults. Params: `{"questions": [{"key": "...", "prompt": "...", "options": [...], "required": true, "default": "..."}]}` (interactive mode is auto-detected based on stdin terminal)
-- **PagerTool** — virtual pagination of truncated tool output. Params: `{"tool_call_id": "...", "page": N}`. Use after a tool returns truncated output to see subsequent pages.
-- **ExploreTool** — explores codebase with configurable thoroughness (quick, medium, very thorough). Params: `{"path": "...", "thoroughness": "..."}`
-- **FindTool** — glob-based file search using `fd` with fallback to `find`. Params: `{"pattern": "...", "path": "...", "file_type": "file"|"directory"|"empty", "max_results": N}`.
-- **FetchTool** — fetches URLs via HTTP. Params: `{"url": "...", "method": "GET"|"POST", "headers": {...}}`
-- **GrepTool** — searches file contents for a pattern using regex. Params: `{"pattern": "...", "path": "...", "type": "all"|"rust"|"ts"|"py"|"js", "context": N}`.
-- **ProjectInfoTool** *(disabled by default)* — gathers project information (structure, dependencies, entry points). Params: `{"path": "..."}`
-- **EditTool** — edits files using three modes: full replacement, regex replace, and atomic multi-file edits. Supports the same pattern format as WriteTool for structured edits.
-- **ReviewTool** — lists recent sessions, gets all entries for a specific session, or gets a lightweight tool call index. Returns JSON data. Params: `{"operation": "list"|"get"|"tool_index", "session_id": "...", "limit": N}`.
-- **Subagent tools** *(disabled by default, enabled in meta profile)*: `plan_status`, `complete_task`, `delegate_task`, `task_status`, `task_followup`, `task_interrupt` — async task delegation and management.
+**ToolRegistry** — stores tools by name, provides lookup, serialization, and `getToolDefs()` accessor. Located in `src/core/tool-registry.js`.
 
-### LSP Tools (`src/lsp/`)
+**Tool definition helpers**:
+- `toolDef(name, description, parameters)` — creates OpenAI function-calling schema
+- `param(typeName, description, extra)` — creates parameter definition with JSON Schema fields (enum, min/max, etc.)
+- `ToolResult` — structured result with `output`, `error`, `metadata`, `success`, `outputTag`, `toDisplay()`, `toApiContent()`
+- `parseToolInput(input)` — safe argument parsing returning null on failure
+- `defaultCallDisplay(input, templateFn, options)` — default display formatter for tools
+
+**Tool descriptors** — declarative table in `extensions/core-tools/index.js`:
+- `TOOL_DESCRIPTORS` — array of `{ name, disabled }` for all core tools
+- `CORE_TOOL_NAMES` — all core tool names
+- `SUBAGENT_TOOL_NAMES` — subagent tool names (manager-only)
+- `TOOL_CONSTRUCTORS` — declarative map of tool names to constructor functions
+- `SUBAGENT_TOOL_CONSTRUCTORS` — subagent tool constructors
+
+**Disabled by default** — `ExploreTool` and `ProjectInfoTool` have `disabled: true` in their descriptors; they require explicit inclusion via profile `whitelist_tools` or the `manager: true` profile flag. Subagent tools require `managerToolsEnabled: true` and a `taskManager`.
+
+### Core Tool Implementations
+
+| Tool | Description | Key Params |
+|------|-------------|------------|
+| `bash` | Executes shell commands via `bash -c` | `command` |
+| `write` | Writes files with multi-mode support | `path`, `content` / `regex` + `content` / `files` + `atomic` |
+| `read` | Reads file contents with pagination | `path`, `limit`, `offset`, `type` |
+| `edit` | Edits files using replace modes | `path`, `oldString`, `newString` / `search`, `replace` / `files` + `atomic` |
+| `grep` | Searches file contents for regex patterns | `pattern`, `path`, `type`, `context` |
+| `find` | Glob-based file search using `fd` with `find` fallback | `pattern`, `path`, `file_type`, `max_results` |
+| `fetch` | Fetches URLs via HTTP | `url`, `method`, `headers`, `body` |
+| `question` | Asks interactive questions to the user | `questions` array with `key`, `prompt`, `options`, `required`, `default` |
+| `pager` | Virtual pagination of truncated tool output | `tool_call_id`, `page` |
+| `model` | Switches to a different model mid-conversation | `name` |
+| `project_info` *(disabled)* | Gathers project information | `path` |
+| `review` | Lists recent sessions, gets session entries, or gets tool call index | `operation`, `session_id`, `limit` |
+| `explore` *(disabled)* | Explores codebase with configurable thoroughness | `path`, `thoroughness` |
+
+### Subagent Tools *(disabled by default, enabled in manager profile)*
+
+| Tool | Description |
+|------|-------------|
+| `delegate_task` | Spawn a background task agent |
+| `task_status` | Check status of a running task |
+| `task_followup` | Send follow-up to a running task |
+| `task_interrupt` | Interrupt (cancel) a running task |
+| `plan_status` | List recent sessions or check task status |
+| `complete_task` | Mark a task as complete |
+| `wait` | Model yields control back to user |
+
+### LSP Tools (`extensions/lsp/`)
 
 12 tools providing IDE-like features via external language servers. All tools require:
 - `lsp.enabled: true` in config or profile
 - A language server binary installed (e.g., `typescript-language-server`, `pyright-langserver`, `gopls`, `rust-analyzer`)
 - A file with a supported extension to determine the language server
 
-**Activation**: LSP tools are only registered when `lsp.enabled` is `true` in the resolved config. Tools are created per-file using the file's language ID to select the appropriate server.
+**Activation**: LSP tools are registered by the LSP extension via `HOOKS.TOOLS_REGISTER` when `lsp.enabled` is `true`.
 
-| Tool | Params | Description |
-|------|--------|-------------|
-| `lsp-hover` | `file`, `line`, `character` | Get type info, docs, function signatures at a position |
-| `lsp-definition` | `file`, `line`, `character` | Find where a symbol is defined |
-| `lsp-completion` | `file`, `line`, `character`, `limit` | Auto-completion suggestions (default limit: 50) |
-| `lsp-signature` | `file`, `line`, `character` | Function parameter hints with active signature tracking |
-| `lsp-document-symbol` | `file` | List all symbols in a document (functions, classes, variables) |
-| `lsp-references` | `file`, `line`, `character` | Find all usages/references of a symbol |
-| `lsp-code-action` | `file`, `line`, `character` | Quick fixes and refactoring options |
-| `lsp-formatting` | `file` | Format an entire document (tabSize=2, insertSpaces=true) |
-| `lsp-rename` | `file`, `line`, `character`, `newName` | Rename a symbol across all files |
-| `lsp-diagnostics` | `file` | Get errors/warnings/hints (**push-mode only** — server must publish diagnostics after document open) |
-| `lsp-workspace-symbol` | `query` | Search for symbols across the entire workspace |
-| `lsp-apply-edit` | `edit` (JSON) | Apply multi-file workspace edits atomically |
+| Tool | LSP Method | Purpose |
+|------|-----------|--------|
+| `lsp-hover` | `textDocument/hover` | Type info, docs at position |
+| `lsp-definition` | `textDocument/definition` | Find symbol definition location |
+| `lsp-completion` | `textDocument/completion` | Auto-completion suggestions |
+| `lsp-signature` | `textDocument/signatureHelp` | Function parameter hints |
+| `lsp-document-symbol` | `textDocument/documentSymbol` | All symbols in a document |
+| `lsp-references` | `textDocument/references` | All usages of a symbol |
+| `lsp-code-action` | `textDocument/codeAction` | Quick fixes, refactoring options |
+| `lsp-formatting` | `textDocument/formatting` | Format entire document |
+| `lsp-rename` | `textDocument/rename` | Rename symbol across project |
+| `lsp-diagnostics` | `publishDiagnostics` (push) | Errors, warnings, hints |
+| `lsp-workspace-symbol` | `workspace/symbol` | Search symbols across workspace |
+| `lsp-apply-edit` | `workspace/applyEdit` | Apply multi-file edits atomically |
 
 **Position encoding**: All position parameters (`line`, `character`) use LSP's UTF-16 zero-based indexing.
 
-**Known limitations**:
-- `lsp-diagnostics` is a stub: it reports capability status but cannot retrieve actual diagnostics because the LSP client is never initialized (language server process never spawned). This is a critical implementation gap.
-- Each tool creates its own LSP client (no document sharing across tools for the same file).
-- No support for incremental document sync (uses full document replacement).
+**LSP Client Management**: Tools use `client-cache.js` for LSP client caching per language ID. The LSP extension manages server lifecycle (spawn → initialize → shutdown) with configurable timeouts.
 
 ## Skills
 
-### Skill System (`src/skills/`)
+### Skill System (`extensions/skills/`)
 
-- **Skill** — skill data with `name`, `description`, `license`, `compatibility`, `metadata`, `allowed_tools` (array from space-separated YAML string), `include_tools`, `tool_dependencies`, `visible`, `disable_model_invocation`, `loaded`, `content` (markdown body), `location`, `additional_files`
-- **SkillConfig** — `path` (default: `/skills`, colon-separated multi-path support)
-- **SkillsLoader** — loads SKILL.md files from directories following Agent Skills spec
-  - Recursive directory scanning, finds `SKILL.md` in each subdirectory
-  - Validates `name` matches directory name, lowercase alphanumeric + hyphens only (1-64 chars, no leading/trailing hyphens, no consecutive hyphens)
-  - `load_skills()` — loads all skills from all configured paths
-  - `load_from_directory(path)` — loads from a single directory
-  - `parse_skill_from_md(content, dir_name)` — parses YAML frontmatter + markdown body
-  - `setAvailableTools(coreToolNames)` — loads skills whose tool-dependencies are met by tools
-  - `all_skills()`, `get_skill(name)`, `directories()`
-  - Non-existent paths are silently skipped
+Skills are load-on-demand guides/workflows. They are discovered by name + description and can reference external files and scripts.
+
+**Skill states**:
+- **Unknown** (invisible to agent)
+- **Available** (known, can be loaded)
+- **Loaded** (body text inlined into context + additional files listed)
+
+**Skill data** — parsed from `SKILL.md` files:
+- `name` — skill identifier (matches directory name)
+- `description` — human-readable description
+- `license` — skill license
+- `compatibility` — compatibility info
+- `metadata` — additional metadata
+- `allowed_tools` — array of tool names (from space-separated YAML string)
+- `include_tools` — tools to include
+- `tool_dependencies` — tools the skill depends on
+- `visible` — whether the skill is visible to the agent
+- `disable_model_invocation` — whether model invocation is disabled
+- `loaded` — whether the skill is currently loaded
+- `content` — markdown body
+- `location` — file path
+- `additional_files` — additional files referenced by the skill
+
+**SkillsLoader** — loads SKILL.md files from directories:
+- `load_skills()` — loads all skills from all configured paths
+- `load_from_directory(path)` — loads from a single directory
+- `parse_skill_from_md(content, dir_name)` — parses YAML frontmatter + markdown body
+- `setAvailableTools(coreToolNames)` — loads skills whose tool-dependencies are met
+- `all_skills()`, `get_skill(name)`, `directories()`, `activeSkills()`
+- Non-existent paths are silently skipped
+- Name validation: lowercase alphanumeric + hyphens only (1-64 chars, no leading/trailing hyphens, no consecutive hyphens)
+
+**Skill loading**: Skills are loaded by the `skills` extension via `HOOKS.SYSTEM_PROMPT_BUILD` hook, contributing a skills preamble to the system prompt. Skills can also be loaded mid-conversation via the `load_skill` tool.

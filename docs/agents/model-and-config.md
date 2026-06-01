@@ -3,64 +3,36 @@
 ## Model System (`src/config.js`)
 
 ### Core Types
-- **`ModelConfig`** — plain object with `name`, `temperature`, `maxTokens`, `capabilities`, `tags`
-- **`ModelRegistry`** — stores models by name, `findBest(requestedTags)` for tag-based selection, `findBestName()` returns name string, `names()` returns all registered model names, `primary()` returns primary model, `setPrimary()` changes primary
-- **`ModelUsageStats`** — per-model: totalRequests, successfulRequests, failedRequests, totalDuration
-- **`ModelUsageTracker`** — tracks current model, records success/failure, provides `getStats()` / `allStats()`
-
-### Model Name Format
-
-All model names use `provider/model` format (e.g., `ai365/qwen3.5-4b`) when a provider is active. Bare model names are only used in the legacy path when no providers are configured.
+- **ModelRegistry** — stores models by name from provider configs. Built by `buildModelRegistry(config)`.
+- **ModelEntry** — `{ name, temperature, maxTokens }` per model in registry
+- Model names use `provider/model` format (e.g., `ai365/qwen3.5-4b`) when a provider is active
 
 ### Model Switching
-- **By name**: `agent.switchModel("provider/model-name")`
-- **By tags**: Not directly supported — use `agent.switchModel()` with the model name. Tag-based selection is used during initialization via `ModelRegistry.findBest()`.
+- **By name**: `agent.model = "provider/model-name"` (setter emits `MODEL_CHANGE` hook)
 - **Via ModelTool**: The LLM can call the `model` tool mid-conversation: `{"name": "model", "arguments": {"name": "provider/model-name"}}`
 
 ## Config System (`src/config.js`)
 
-### AgentConfig (Construction)
-The `AgentConfig` object bundles all configuration for constructing an `Agent`. It has 23 fields covering model registry, output sink, tool registry, skills, session metadata, streaming control, compaction, and profile switching.
+### Core Defaults
+All defaults live in `src/config.js` as named constants:
+- `DEFAULT_MODEL`, `DEFAULT_AI_URL`, `DEFAULT_THINKER`, `DEFAULT_TOOL_FMT`, `DEFAULT_TOOL_OUTPUT_FMT`, `DEFAULT_TOOL_RESULT_FMT`
+- `DEFAULT_SKILLS_PATH`, `DEFAULT_PROFILES_PATH`, `DEFAULT_PROMPTS_PATH`, `DEFAULT_CONFIG_PATH`, `DEFAULT_SYSTEM_PROMPT_PATH`
+- `DEFAULT_CHAT_TIMEOUT_SECS`, `DEFAULT_EMBEDDINGS_TIMEOUT_SECS`, `DEFAULT_BASH_TIMEOUT_MS`, `DEFAULT_MAX_TOKENS`, `DEFAULT_MAX_ITERATIONS`, `DEFAULT_MAX_RETRIES`
+- `DEFAULT_PROMPT`, `DEFAULT_EXIT_COMMANDS`, `DEFAULT_ROLE`, `DEFAULT_MAX_TOOL_OUTPUT_LINES`, `DEFAULT_TASK_PROFILE`
+- `DEFAULT_READ_TOOL_LIMIT`, `DEFAULT_FIND_MAX_RESULTS`, `DEFAULT_GREP_MAX_RESULTS`
+- `DEFAULT_MAX_DIFF_SIZE`, `DEFAULT_MAX_EDIT_INPUT_SIZE`
+- `DEFAULT_COMPACTION_ENABLED`, `DEFAULT_COMPACTION_RESERVE_TOKENS`, `DEFAULT_COMPACTION_KEEP_RECENT_MESSAGES`, `DEFAULT_COMPACTION_STRATEGY`
+- `defaultCompactionSettings` — `{ enabled, reserveTokens, keepRecentMessages, strategy }`
+- LSP defaults: `DEFAULT_LSP_ENABLED`, `DEFAULT_LSP_MAX_HOVER_LINES`, `DEFAULT_LSP_MAX_COMPLETION_ITEMS`, `DEFAULT_LSP_MAX_SYMBOL_RESULTS`, `DEFAULT_LSP_REQUEST_TIMEOUT_MS`, `DEFAULT_LSP_SERVER_TIMEOUT_MS`, `DEFAULT_LSP_SERVERS`
 
-```javascript
-const config = {
-    client: LlmClient,
-    context: MessageLog,
-    model: string,
-    modelRegistry: ModelRegistry,
-    sink: OutputSink,
-    hideTools: boolean,
-    hideThinking: boolean,
-    skills: Skill[],
-    allSkills: Skill[],
-    skillDirectories: string[],
-    activeSkills: Set,
-    maxToolOutputLines: number,
-    sessionId: string,
-    cwdBoundary: string | null,
-    role: string,
-    profileBody: string,
-    stream: boolean,
-    compaction: CompactionSettings,
-    compactDebug: boolean,
-    showTokenUse: boolean,
-    profileName: string,
-    taskManager: TaskManager | null,
-    mcpConnections: [],
-};
-```
-
-Construction is done by passing the config object directly to the `Agent` constructor:
-```javascript
-const agent = new Agent(config);
-```
-
-### Config File
-A JSON config file can be loaded with `--config path/to/config.json` to set defaults. CLI args and env vars override config file values. Skills are loaded from `/skills` directory by default (configurable via `skills_path` in config or `--skills-path` CLI flag).
+### Config Resolution
+- **`loadConfig(configPath, extParams)`** — loads config from file, falls back to `./config/defaults.json` then `~/.config/oa-agent/default.json`, then defaults. Merges extension defaults.
+- **`buildConfig(cli)`** — single entry point for config resolution. Returns `{ resolved, modelRegistry, providers }`. Handles CLI args → config file → env var → default priority chain.
+- **`mergeExtensionConfigDefaults(defaultConfig, extParams)`** — merges extension-registered config defaults into base config
+- **`normalizeConfigKeys(obj)`** — converts snake_case (Rust format) to camelCase (JS format)
 
 ### Providers
-
-Models are declared inside providers. The top-level `models` field is no longer used. Each provider has a `name`, `url`, optional `api_key`, and a list of `models`. The active provider is selected via `--provider` CLI flag or `default_provider` config key.
+Models are declared inside providers. Each provider has `name`, `url`, optional `api_key`, and a list of `models`. The active provider is selected via `--provider` CLI flag or `default_provider` config key.
 
 ### Example Config
 ```json
@@ -94,17 +66,8 @@ Models are declared inside providers. The top-level `models` field is no longer 
 }
 ```
 
-### Defaults and Serialization
-
-Missing fields in the config use defaults from `DEFAULT_*` constants. The config loader creates a default instance and merges the file values on top.
-
-### Resolution Priority
-
-The `resolve_str` helper generates config resolution methods (URL, model, skills path, profile) that follow a consistent priority chain: CLI argument → config file → environment variable → constant default.
-
 ### Model Resolution
-
-Model names flow through `buildAgentConfig()` (in `init/resolution.js`):
+Model names flow through `buildConfig()`:
 1. CLI model → profile model → config `defaultModel` → provider's first model → `DEFAULT_MODEL`
 2. If the name contains `/`, it's used as-is (already qualified)
 3. If a provider is active and the name matches a provider model, it's prefixed with the provider name
@@ -113,95 +76,68 @@ Model names flow through `buildAgentConfig()` (in `init/resolution.js`):
 ### Profiles
 Tool profiles control which tools are available to the agent. Profiles are defined in the config file under `profiles` and selected via `--profile` CLI flag or the `profile` config key.
 
-- **`whitelist_tools`**: If specified, only these tools are available. All other tools are excluded.
-- **`blacklist_tools`**: These tools are excluded from the available set. All other tools remain available.
-- **`skills`**: List of skill names to make available to this profile.
-- **`model`**: Override the default model for this profile (resolved through provider if bare name).
-- **`preload_skills`**: Skills to preload into the initial context.
-- **`cwd_boundary`**: Directory boundary for file operations (write, read, find).
-- **`manager`**: When true, enables manager-specific tools (orchestrator tools) before whitelist/blacklist filtering applies.
+- **`whitelist_tools`**: If specified, only these tools are available.
+- **`blacklist_tools`**: These tools are excluded. All other tools remain available.
+- **`model`**: Override the default model for this profile.
+- **`cwd_boundary`**: Directory boundary for file operations.
+- **`manager`**: When true, enables manager-specific tools before whitelist/blacklist filtering.
 - **`aspects`**: List of aspect names to include (loaded from `config/aspects/<name>.aspect.md`).
-
-Both whitelist and blacklist fields are optional. If neither is specified, all tools are available (default behavior).
 
 **Profile Selection Priority**: `--profile` CLI flag > config `profile` > `"default"`
 
-**Example Config with Profiles**:
-```json
-{
-  "providers": [
-    {
-      "name": "ai365",
-      "url": "http://ai365.home:9292",
-      "models": [
-        {"name": "qwen3.5-4b", "tags": ["fast"]},
-        {"name": "qwen3.6-35b", "tags": ["powerful"]}
-      ]
-    }
-  ],
-  "default_provider": "ai365",
-  "profile": "minimal",
-  "profiles": {
-    "minimal": {
-      "blacklist_tools": ["write", "model"]
-    },
-    "coding": {
-      "whitelist_tools": ["bash", "write"],
-      "blacklist_tools": ["model"]
-    },
-    "default": {
-      "blacklist_tools": ["model"]
-    }
-  }
-}
-```
-
-**Usage**:
-```bash
-oa-agent --profile minimal --prompt "run ls"
-oa-agent --profile coding --prompt "write a file"
-oa-agent --provider ai365 --model qwen3.6-35b --prompt "hello"
-```
-
-**The `info` subcommand shows the active profile and providers**:
-```bash
-oa-agent info
-# Shows: Profile: minimal, Blacklist Tools: write, model
-# Shows: Providers: ai365 → http://ai365.home:9292  [qwen3.5-4b, qwen3.6-35b]
-# Shows: Active Provider: ai365
-```
-
 #### File-Based Profiles
 
-Profiles can also be defined as `.profile.md` files in a `profiles/` directory (configurable via `profiles_path` in config). Each file uses YAML frontmatter followed by markdown body, following the same pattern as skills.
+Profiles can also be defined as `.profile.md` files in a `profiles/` directory (configurable via `profiles_path` in config). Each file uses YAML frontmatter followed by markdown body.
 
 **Frontmatter fields**:
-- **`name`**: Profile identifier (falls back to filename without `.profile` extension)
+- **`name`**: Profile identifier (falls back to filename)
 - **`description`**: Human-readable description
 - **`role`**: Role string that fills the `{role}` placeholder in the system prompt template
-- **`blacklist-tools`**: Tools to exclude (same as config `blacklist_tools`)
+- **`blacklist-tools`**: Tools to exclude
+- **`whitelist-tools`**: Tools to include
+- **`model`**: Override model
+- **`aspects`**: List of aspect names
+- **`manager`**: Enable manager tools
+- **`visible-worker`**: Mark as visible worker profile
 
-**Markdown body**: Content that fills the `{body}` placeholder in the system prompt template, appended as an extension to the base system prompt.
-
-**Example profile file** (`profiles/explorer.profile.md`):
-```yaml
----
-name: explorer
-description: A codebase scout for gathering context
-role: You are a codebase scout. You create concise project summaries.
-blacklist-tools: ["patch", "write", "model"]
----
-
-# Assignment
-Summarize the project structure and key files.
-Focus on architecture, dependencies, and entry points.
-```
+**Markdown body**: Content that fills the `{body}` placeholder in the system prompt template.
 
 **Resolution chain for role**: CLI `--role` > config `role` > profile file `role` > `DEFAULT_ROLE`
 
-**Config file settings take precedence** over profile file settings for tool restrictions. The profile file provides defaults that are overlaid with config values where they are non-empty.
+**Config file settings take precedence** over profile file settings for tool restrictions.
 
-## LSP Configuration (`src/lsp/config.js`)
+### Config Registry (`src/config-registry.js`)
+
+Allows extensions to register their own CLI flags and config parameters dynamically.
+
+**Usage in an extension**:
+```javascript
+export function create(core) {
+  core.configRegistry.registerCliFlags([
+    {
+      short: '-x',
+      long: '--my-flag',
+      description: 'My extension flag',
+      type: 'string',
+      default: null,
+    },
+  ]);
+
+  core.configRegistry.registerConfigParams([
+    {
+      key: 'myExtension',
+      description: 'My extension config section',
+      defaults: { enabled: true, timeout: 30 },
+    },
+  ]);
+
+  return { /* ... */ };
+}
+```
+
+**Key methods**: `registerCliFlags(flags)`, `registerConfigParams(params)`, `getCliFlags()`, `getConfigParams()`, `getCliHelpText()`, `buildDefaults()`.
+
+## LSP Configuration (`extensions/lsp/config.js`)
 
 LSP integration is controlled via the `lsp` config object. It is **disabled by default** (`DEFAULT_LSP_ENABLED = false`).
 
@@ -211,14 +147,11 @@ LSP integration is controlled via the `lsp` config object. It is **disabled by d
 |-------|------|---------|-------------|
 | `enabled` | boolean | `false` | Master switch for LSP tools |
 | `servers` | object | (empty) | Custom server overrides keyed by name |
-| `defaultServers` | object | (4 built-in) | TypeScript, Python, Go, Rust servers |
 | `maxHoverLines` | number | `200` | Max lines in hover results |
 | `maxCompletionItems` | number | `50` | Max completion items returned |
 | `maxSymbolResults` | number | `100` | Max symbol search results |
-| `maxDiagnostics` | number | `100` | Max diagnostics to display |
 | `requestTimeoutMs` | number | `30000` | Per-request timeout |
 | `serverStartupTimeoutMs` | number | `60000` | Server startup timeout |
-| `documentSyncKind` | string | `'full'` | Document sync mode |
 
 ### Default Language Servers
 
@@ -232,22 +165,6 @@ LSP integration is controlled via the `lsp` config object. It is **disabled by d
 ### Resolution Chain
 
 Profile-level `lsp.*` settings override global `lsp.*` settings, which override defaults.
-
-```bash
-# Enable LSP globally
-oa-agent --prompt "hover on line 5" --config '{"lsp": {"enabled": true}}'
-
-# Enable LSP per-profile (in config file or profile .profile.md)
-{
-  "profile": "coding",
-  "profiles": {
-    "coding": {
-      "lsp": { "enabled": true },
-      "whitelist_tools": ["lsp-hover", "lsp-definition", "lsp-completion"]
-    }
-  }
-}
-```
 
 ### Custom Server Configuration
 

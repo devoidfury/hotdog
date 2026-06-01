@@ -1,3 +1,21 @@
+> **⚠️ OBSOLETE — Extension system implemented.**
+>
+> The extension architecture described in this design has been implemented. See:
+> - `docs/agents/architecture.md` — Current architecture overview
+> - `src/hooks.js` — Hook system implementation
+> - `src/core/extensions.js` — Extension loader implementation
+> - `AGENTS.md` — Module layout and extension guidelines
+> - `docs/cli-subcommands.md` — CLI subcommand registration
+>
+> Key differences from this design:
+> - Extensions use `create(core, options)` instead of `register(context)`
+> - Hook-based registration (`HOOKS.TOOLS_REGISTER`, etc.) instead of context methods
+> - `ExtensionLoader` class with `load()`, `unload()`, `reload()` lifecycle
+> - `ConfigRegistry` for extension CLI flags and config params
+> - `CliSubcommandRegistry` for CLI subcommand registration
+> - Extension metadata via `extension.json` with `provides` array
+> - Auto-discovery from configured extension paths
+
 # OA-JS Extension System Design
 
 ## 1. Current State Analysis
@@ -498,144 +516,3 @@ Write clean, well-tested code.
     additionalFiles: [],
     allowedTools: [],
     includeTools: [],
-    toolDependencies: [],
-  });
-
-  // Register a prompt
-  context.addPrompt({
-    name: "code-review",
-    description: "Review code for quality and correctness",
-    content: `Review the following code:\n\n{{ ARGS }}\n\nCheck for:\n1. Correctness\n2. Edge cases\n3. Performance\n4. Style consistency\n`,
-    location: "extension:developer_skills",
-    disableModelInvocation: false,
-  });
-}
-```
-
----
-
-## 6. Configuration
-
-### 6.1 Config File (`config/defaults.json`)
-
-```json
-{
-  "extensions": [],
-  "extensionsDir": "./extensions"
-}
-```
-
-### 6.2 Usage Examples
-
-**Explicit paths:**
-```json
-{
-  "extensions": [
-    "/opt/my-agent/extensions/analytics.js",
-    "/opt/my-agent/extensions/custom_tools.js"
-  ]
-}
-```
-
-**Convention directory (default):**
-```json
-{
-  "extensionsDir": "./extensions"
-}
-```
-Any `.js` file in `./extensions/` that exports a `register()` function is loaded.
-
-**Disable extensions:**
-```json
-{
-  "extensions": [],
-  "extensionsDir": null
-}
-```
-
----
-
-## 7. Migration Path
-
-### Phase 1: Add Extension System (non-breaking)
-
-1. Create `src/extension_manager.js` — the extension manager and context
-2. Add `extensions` and `extensionsDir` to config defaults
-3. Integrate into `SessionBuilder` and `Agent`
-4. **No existing behavior changes** — all hardcoded tools, MCP, skills, prompts continue to work
-
-### Phase 2: Document and Showcase
-
-1. Add `docs/agents/extensions.md` — extension system documentation
-2. Create example extensions in `examples/extensions/`
-3. Update `AGENTS.md` with extension guidelines
-
-### Phase 3: Optional — Move Core Tools to Extensions
-
-Once the system is proven, core tools could be moved to the extension system:
-
-```javascript
-// extensions/core_tools.js
-// Instead of hardcoded TOOL_DESCRIPTORS, core tools are registered here
-// This makes the core tool list configurable
-```
-
-This is a **future** refactor, not part of the initial design.
-
----
-
-## 8. What This Does NOT Do (Deliberately)
-
-1. **No plugin manifest files** — Extensions are just JS files. No `package.json`, no `manifest.json`, no schema validation.
-2. **No versioning** — Extensions are loaded directly. If an extension breaks, it's the user's responsibility.
-3. **No sandboxing** — Extensions run with full Node.js access. This is a trust boundary: extensions are loaded from trusted paths.
-4. **No hot-reloading** — Extensions are loaded once at startup. No runtime reload.
-5. **No dependency management** — Extensions must use `import()` for their dependencies. No package resolution.
-6. **No event system** — Extensions can't register for events. If they need to react to agent behavior, they do so through the context methods.
-7. **No output sink integration** — Extensions cannot register custom output handlers. If they need to emit output, they should use tool results.
-
----
-
-## 9. File Changes Summary
-
-| File | Change |
-|------|--------|
-| `src/extension_manager.js` | **NEW** — Extension manager, context, loader |
-| `src/config.js` | Add `extensions` and `extensionsDir` to defaults |
-| `src/agent/session_builder.js` | Add `_buildExtensionManager()` and call `load()` |
-| `src/agent/agent.js` | Apply deferred extension tools in `buildToolRegistry()` |
-| `docs/agents/extensions.md` | **NEW** — Documentation |
-| `config/defaults.json` | Add extension config fields |
-
-**Total new code: ~150 lines** (extension_manager.js) + ~20 lines (integration) + ~10 lines (config).
-
----
-
-## 10. Mental Model Summary
-
-```
-Extension = A JS file that exports:
-
-  export function register(context) {
-    context.registerTool("name", toolInstance);
-    context.addSkill(skillObject);
-    context.addPrompt(promptObject);
-    context.registerMcpTool("server", toolDef, handler);
-  }
-
-Discovery:
-  1. Config paths: config.extensions array
-  2. Convention dir: config.extensionsDir (default: ./extensions/)
-
-Loading:
-  SessionBuilder._buildExtensionManager()
-    → ExtensionManager.load(context)
-      → For each extension path: import(path).register(context)
-      → For each .js file in convention dir: import(path).register(context)
-
-Registration:
-  Extensions buffer their registrations
-  Agent.applyExtensionTools() applies them to ToolRegistry
-```
-
-This is it. One function, one context object, two discovery methods. That's the entire extension system.

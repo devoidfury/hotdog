@@ -5,11 +5,12 @@ Extensions can register CLI subcommands that are automatically discovered and di
 ## How It Works
 
 1. When the CLI starts, it creates an early core with a `CliSubcommandRegistry`
-2. CLI extensions are loaded and can register subcommands via:
+2. CLI extensions are loaded (auto-discovered via `provides: ["cli:subcommands"]` in `extension.json`)
+3. CLI extensions register subcommands via:
    - Direct registration: `core.cliSubcommandRegistry.register(name, definition)`
    - Hook-based registration: Register a handler for `HOOKS.CLI_SUBCOMMANDS_REGISTER`
-3. When a subcommand is invoked, main.js looks it up in the registry and dispatches to the handler
-4. Help text is dynamically generated from registered subcommands
+4. When a subcommand is invoked, main.js looks it up in the registry and dispatches to the handler
+5. Help text is dynamically generated from registered subcommands
 
 ## Creating a CLI Extension
 
@@ -21,11 +22,12 @@ Extensions can register CLI subcommands that are automatically discovered and di
 import { HOOKS } from '../../src/hooks.js';
 
 export function create(core) {
-  // Option 1: Direct registration (recommended for simple cases)
+  // Direct registration (recommended)
   if (core.cliSubcommandRegistry) {
     core.cliSubcommandRegistry.register("my-cmd", {
       description: "Do something useful",
-      requiresConfig: true,  // Load config before running
+      requiresConfig: true,  // Load config before running (default: true)
+      requiresCore: false,   // Whether this needs the full core (default: false)
       handler: async (cli, core) => {
         const { config } = core;
         console.log("Hello from my-cmd!");
@@ -33,22 +35,7 @@ export function create(core) {
     });
   }
 
-  // Option 2: Hook-based registration (for more complex setups)
-  return {
-    hooks: core.hooks
-      ? {
-          [HOOKS.CLI_SUBCOMMANDS_REGISTER]: async (registry) => {
-            registry.register("my-cmd", {
-              description: "Do something useful",
-              requiresConfig: true,
-              handler: async (cli, core) => {
-                // ...
-              },
-            });
-          },
-        }
-      : undefined,
-  };
+  return {};
 }
 ```
 
@@ -66,74 +53,47 @@ export function create(core) {
 }
 ```
 
-### Loading Your Extension
+### Extension Metadata
 
-Add your extension to `loadCliExtensions()` in `src/main.js`:
+Each CLI extension needs an `extension.json` file declaring its capability:
 
-```javascript
-async function loadCliExtensions(earlyCore) {
-  const loaded = [];
-
-  // ... existing extensions ...
-
-  // Your extension
-  const { create: createMyExt } = await import("../extensions/my-subcommand/index.js");
-  const myExt = createMyExt(earlyCore);
-  if (myExt) loaded.push(myExt);
-
-  return loaded;
+```json
+{
+  "provides": ["cli:subcommands"]
 }
 ```
 
-## Examples
+This is how the extension loader auto-discovers CLI extensions before config is loaded.
 
-### Simple Info Command
+## Hook Registration (Alternative)
 
-```javascript
-// extensions/my-info/index.js
-
-export function create(core) {
-  if (core.cliSubcommandRegistry) {
-    core.cliSubcommandRegistry.register("my-info", {
-      description: "Show custom information",
-      handler: async (cli, core) => {
-        console.log("Custom info here");
-      },
-    });
-  }
-  return {};
-}
-```
-
-### Command with Config Access
+For more complex setups, extensions can register via the hook:
 
 ```javascript
 export function create(core) {
-  if (core.cliSubcommandRegistry) {
-    core.cliSubcommandRegistry.register("my-command", {
-      description: "Command that needs config",
-      requiresConfig: true,
-      handler: async (cli, core) => {
-        const { config, buildConfig } = core;
-        const { resolved } = await buildConfig(cli);
-        console.log(`Model: ${resolved.model}`);
+  return {
+    hooks: core.hooks ? {
+      [HOOKS.CLI_SUBCOMMANDS_REGISTER]: async (registry) => {
+        registry.register("my-cmd", {
+          description: "Do something useful",
+          requiresConfig: true,
+          handler: async (cli, core) => {
+            // ...
+          },
+        });
       },
-    });
-  }
-  return {};
+    } : undefined,
+  };
 }
 ```
 
-## Hook Constants
+## Built-in Subcommands
 
-The following hook is used for CLI subcommand registration:
-
-```javascript
-import { HOOKS } from '../../src/hooks.js';
-
-// Hook name: 'cli:subcommandsRegister'
-HOOKS.CLI_SUBCOMMANDS_REGISTER
-```
+| Subcommand | Extension | Description |
+|-----------|-----------|-------------|
+| `info` | `info-show-prompt` | Show system info and diagnostics |
+| `show-prompt` | `info-show-prompt` | Show rendered system prompt |
+| `review` | `session-review` | Review session logs |
 
 ## Benefits
 

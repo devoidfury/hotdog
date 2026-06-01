@@ -2,177 +2,265 @@
 
 ## Overview
 
-`oa-agent` is an AI agent harness with tool calling support. It connects to an LLM API, sends conversation messages, handles tool calls from the LLM, and executes tools (bash, file writing, model switching, skill loading).
+`oa-agent` is an AI agent harness with tool calling support. It connects to an LLM API, sends conversation messages, handles tool calls from the LLM, and executes tools. The architecture is built around a **minimal core** with **extension-based features** — all features (tools, compaction, MCP, skills, prompts, LSP, subcommands) live as extensions that plug into the core via hooks.
 
-## Key Components
+## Architecture Philosophy
 
-### Context (`src/context/`)
-- **`MessageLog`** — stores message history (`Message { role, content, reasoning_content, tool_calls, tool_call_id }`). Methods: `append()`, `addMessage()`, `addSystemMessage()`, `addUserMessage()`, `addAssistantMessage()`, `addToolMessage()`, `insertAt()`, `reset()`, `messages()`, `messageCount()`, `replaceMessages()`
-- **`OUTPUT_EVENT`** — event type constants: `USER_MESSAGE`, `ASSISTANT_MESSAGE`, `THINKING`, `TOOL_CALL`, `TOOL_RESULT`, `COMPACTING`, `COMMAND_RESULT`, `QUESTION`, `STREAMING_CHUNK`, `STREAMING_REASONING_CHUNK`, `TASK_PROGRESS`, `TOKEN_USAGE`
-- **`EVENT_HANDLERS`** — maps event types to handler method names on `OutputSink`
-- **`OutputSink`** — base class with `emit()` plus convenience methods (`emitThinking`, `emitToolCall`, `emitToolResult`, `emitAssistantMessage`, `emitUserMessage`, `emitCompacting`, `emitQuestion`, `emitStreamingChunk`, `emitTaskProgress`)
-- **`NoopSink`** — no-op implementation for testing and show-prompt
-- **`parseInput()`** — parses raw text into `{ type: 'text' | 'command', value }` events
-- **`NoopInput`** — no-op input implementation that returns defaults
+The core provides:
+1. **Session lifecycle** — create, swap, serialize, switch sessions
+2. **Agent run loop** — dequeue → LLM call → tool exec → repeat
+3. **Hook/event system** — where extensions plug in
+4. **Extension loader** — discovery, loading, hot-reload
+5. **Config resolution** — core defaults + extension config keys
 
-### Agent (`src/agent/`)
-- **`Agent`** — run loop, tool dispatch, model switching, context management. Constructor takes a config object with fields: `client`, `context`, `model`, `modelRegistry`, `sink`, `hideTools`, `hideThinking`, `skills`, `allSkills`, `skillDirectories`, `activeSkills`, `maxToolOutputLines`, `sessionId`, `cwdBoundary`, `role`, `profileBody`, `stream`, `compaction`, `compactDebug`, `showTokenUse`, `profileName`, `taskManager`, `promptsLoader`, `skillsLoader`, `sessionLog`, `mcpConnections`
-- **`Agent.run()`** — main iteration loop
-- **`Agent.switchModel(modelName)`** — switch to a specific model by name
-- **`Agent.cancel()`** — cancel the running agent loop
-- **`Agent.currentModel()`** — returns the current model name
-- **`Agent.modelNames()`** — returns all registered model names
-- **`Agent.profileNames()`** — returns all available profile names
-- **`Agent.switchProfile(profileName)`** — switch to a named profile
-- **`Agent.sessionId()`** — returns the session ID
-- **`Agent.tokenUsage()`** — returns current model and all usage stats
-- **`Agent.recordTokenUsage(usage)`** — record token usage from API response
-- **`Agent.compact(overrideKeep, debug)`** — compact context
-- **`Agent.executeCommand(cmd)`** — execute slash commands
-- **`AgentLoop`** — manages iteration counting (default max: 1000) and cancellation via `CancellationToken`
-- **`_abortSignal`** — AbortSignal for task agent cancellation
-- **`_toolWhitelist`** — Array of allowed tool names for task agents
-- **`_followQueue`** — Queue for follow-up messages to running tasks
-- **`_notifyCompletion()`** — Called when task agent completes
-- **`AgentConfig`** — plain object bundling all configuration for agent construction
+Everything else is an extension. This keeps the core minimal, testable, and fully decoupled from feature implementations.
 
-### Commands (`src/agent/commands.js`)
-- **`Command`** — enum: `Help`, `Quit`, `Clear`, `ClearProfile`, `Tools`, `Thinking`, `Models`, `Model`, `Tokens`, `Compact`, `Prompt`, `Regenerate`, `Skill`, `Unknown`
-- **`parseCommand(cmd)`** — parses raw command string into typed command object
-- **`executeCommand(agent, command)`** — executes parsed command on agent
-- **`isUiCommand(type)`** — checks if command is handled by UI layer (not delegated to agent)
+## Core Modules (`src/`)
 
-### LLM Client (`src/llm_client/`)
-- **`LlmClient`** — reads `AI_URL` env var (default: `http://ai365.home:9292`), `AI_API_KEY` env var
-- **`chat(messages, model)`** — sends messages, returns content string
-- **`chatCancellable(messages, model, cancel)`** — chat with cancellation support
-- **`chatWithModelConfig(messages, config, tools)`** — sends messages with tool defs, returns `{ content }` or `{ toolCalls, usage, reasoning, content }`
-- **`chatStream(messages, config, tools)`** — streaming chat variant
-- **`chatStreamCancellable(messages, config, tools, cancel)`** — streaming with cancellation
-- **Fluent setters**: `withLoud()`, `withBaseUrl()`, `withApiKey()`, `withChatTimeout()`, `withSessionId()`, `withStream()`, `withCancellationToken()`, `withProviders()`
-- **Endpoint**: `POST {baseUrl}/v1/chat/completions`
-- **`ping()`** — check connectivity to AI URL
-- **`providers`** field — stores configured providers for model name resolution
-- **`retry.js`** — retry logic with exponential backoff
+### Entry Point (`src/main.js`)
+Thin orchestrator: parse args → dispatch subcommand → build config → create core infrastructure → load extensions → create session manager → run one-shot or interactive session. All initialization logic is in config.js and core modules.
 
-### Config System (`src/config.js`)
-- **`DEFAULT_*`** constants — all defaults live here: `DEFAULT_MODEL`, `DEFAULT_AI_URL`, `DEFAULT_THINKER`, `DEFAULT_TOOL_FMT`, `DEFAULT_TOOL_OUTPUT_FMT`, `DEFAULT_SKILLS_PATH`, `DEFAULT_PROFILES_PATH`, `DEFAULT_PROMPTS_PATH`, `DEFAULT_CHAT_TIMEOUT_SECS`, `DEFAULT_MAX_TOKENS`, `DEFAULT_MAX_ITERATIONS`, `DEFAULT_ROLE`, `DEFAULT_MAX_TOOL_OUTPUT_LINES`, `DEFAULT_COMPACTION_ENABLED`, `DEFAULT_COMPACTION_RESERVE_TOKENS`, `DEFAULT_COMPACTION_KEEP_RECENT_MESSAGES`
-- **`loadConfig(configPath)`** — loads config from file, falls back to `./config/defaults.json` then `~/.config/oa-agent/default.json`, then defaults
-- **`buildModelRegistry({ providers })`** — builds model lookup map from provider configs
-- **`Provider`** — `name`, `url`, `apiKey`, `models`
-- **`Profile`** — `whitelistTools`, `blacklistTools`, `skills`, `model`, `preloadSkills`, `cwdBoundary`, `manager`, `aspects`
-- **`ModelEntry`** — `name`, `tags`, `temperature`, `maxTokens`, `contextLimit`
-- **`McpServerConfig`** — `name`, `command`, `args`, `env`, `url`, `type_`, `headers`, `whitelistTools`, `blacklistTools`, `enabled`
-- **`CompactionSettings`** — `enabled`, `reserveTokens`, `keepRecentMessages`
-- Resolution priority: CLI arg → config file → env var → default constant
+### CLI (`src/cli.js`)
+Argument parsing with support for dynamic CLI flags registered by extensions via `ConfigRegistry`. Exports `parseArgs()` and `HELP_TEXT`. Supports core flags plus extension-provided flags.
 
-### System Prompt (`src/context/system_prompt.js`)
-- **`initSystemPromptTemplate(templatePath)`** — pre-compiles template from file path (called from `init/resolution.js`)
-- **`buildSystemPrompt(model, role, body, availableTools, aspects, agentsMd, profileName)`** — constructs system prompt from template with placeholders for `{model}`, `{cwd}`, `{platform}`, `{date}`, `{time}`, `{session_start}`, `{role}`, `{body}`, `{aspects}`, `{tool_guidelines}`, `{agents_md}`, `{profile_name}`
-- **`buildSystemPromptWithSkills()`** — wraps `buildSystemPrompt` and appends skills preamble
-- **`renderSkillsPreamble(skills, skillDirectories)`** — renders skills_preamble template, filters disabled/invisible skills
-- **`loadAspects(aspectNames)`** — loads `.aspect.md` files from `config/aspects/`
-- **`loadAgentsMd()`** — loads `AGENTS.md` from CWD
-- Uses `config/templates/system_prompt.md` as the base template
-- Tool guidelines are auto-loaded from `src/tools/<name>/guidelines.md` for each available tool
+### Config (`src/config.js`)
+All defaults, provider config loading, profiles, and model registry. Key exports:
+- `DEFAULT_*` constants — all defaults live here
+- `loadConfig(configPath, extParams)` — loads config from file with extension param merging
+- `buildConfig(cli)` — single entry point for config resolution, returns `{ resolved, modelRegistry, providers }`
+- `loadProfileFile(config, profileName)` — loads `.profile.md` files
+- `getProfile(config, profileName)` — resolves profile from config and profile files
+- `buildModelRegistry(config)` — builds model lookup map from provider configs
+- `initSystemPromptTemplate(templatePath)` — loads/reuses system prompt template
+- `mergeExtensionConfigDefaults(defaultConfig, extParams)` — merges extension defaults into base config
+
+### Config Registry (`src/config-registry.js`)
+Allows extensions to register their own CLI flags and config parameters dynamically. Used during CLI parsing and config resolution. Extensions register via `CONFIG_CLI_FLAGS_REGISTER` and `CONFIG_PARAMS_REGISTER` hooks.
+
+### Hook System (`src/hooks.js`)
+The foundation for the extension architecture. `HookSystem` class with `on()`, `emit()`, `emitAsync()`, `emitAsyncSeq()`, `off()`, `clear()` methods. Standard hook names defined in `HOOKS` constant:
+- Session: `SESSION_CREATE`, `SESSION_SWAP`, `SESSION_SERIALIZE`, `SESSION_DESERIALIZE`, `SESSION_RESTORE_ACTIVE`
+- Agent: `AGENT_BEFORE_RUN`, `AGENT_AFTER_RUN`, `AGENT_CANCELLED`
+- Tools: `TOOLS_REGISTER`, `TOOL_BEFORE_EXECUTE`, `TOOL_AFTER_EXECUTE`, `AGENT_TOOL_CONTEXT`
+- Messages: `MESSAGES_BUILD`, `MESSAGES_AFTER_LLM`, `CONTEXT_MESSAGE`, `CONTEXT_FULL`
+- System prompt: `SYSTEM_PROMPT_BUILD`
+- Commands: `COMMAND_DISPATCH`, `SLASH_COMMANDS_REGISTER`
+- Output: `OUTPUT_EVENT`
+- Shutdown: `SHUTDOWN_CLEANUP`
+- CLI: `CLI_SUBCOMMANDS_REGISTER`
+- Config: `CONFIG_CLI_FLAGS_REGISTER`, `CONFIG_PARAMS_REGISTER`
+- Compaction: `COMPACT_STRATEGY_LIST`, `COMPACT_STRATEGY_SET`
+- Model: `MODEL_CHANGE`
+
+### Extension Loader (`src/core/extensions.js`)
+Discovers, loads, and manages extensions. Key exports:
+- `HookSystem`, `HOOKS`, `EXTENSION_PROVIDES` — re-exported from hooks.js
+- `ExtensionLoader` class — manages extension lifecycle (load, unload, reload, get, all, has, size)
+- `createExtensionLoader(core)` — factory function
+- `discoverExtensions(extensionPaths)` — discovers extensions from configured paths
+- `getExtensionsToLoad(extensionPaths, extensionAutoload, extensions)` — filters extensions based on config
+- `resolveExtensionPath(spec)` — resolves "builtins" or path specs to absolute directories
+- `LOAD_ORDER` — constants for extension load ordering (REFRESH: 0, CORE_TOOLS: 1, CLI: 2, DEFAULT: 10)
+- `emitConfigRegistration(extension, configRegistry)` — emits config registration hooks
+
+### Agent (`src/core/agent.js`)
+Minimal Agent class that runs the LLM loop and delegates behavior to hooks. Key features:
+- Constructor takes: `hooks`, `toolRegistry`, `llmClient`, `model`, `maxIterations`, `maxTokens`, `hideTools`, `hideThinking`, `showTokenUse`, `sink`, `modelRegistry`, `profileName`, `role`, `profileBody`, `stream`, `config`, `sessionId`, `abortSignal`, `toolWhitelist`
+- `run(userInput)` — main iteration loop: add user message → build messages → LLM call → process stream → execute tools → repeat
+- `ensureSystemPrompt()` — builds system prompt via hooks (extensions contribute)
+- `_processStream(stream)` — processes streaming LLM response (content, reasoning, tool calls, usage)
+- `_executeTools(toolCalls)` — executes tool calls with hook-based enrichment
+- `executeCommand(cmd)` — executes slash commands
+- `cancel()` — cancels the running agent loop
+- Properties: `model`, `context`, `iterationCount`, `sessionId`, `cancelled`, `hideTools`, `hideThinking`, `systemPrompt`
+- Task agent support: `_abortSignal`, `_toolWhitelist`, `_followQueue`, `_notifyCompletion()`
+
+### Commands (`src/core/commands.js`)
+Slash command parsing and dispatch. Key exports:
+- `Command` enum: `Help`, `Quit`, `Clear`, `ClearProfile`, `Tools`, `Thinking`, `Models`, `Model`, `Tokens`, `Regenerate`, `Unknown`
+- `parseCommand(cmd, registry)` — parses raw command string into typed command object
+- `isUiCommand(type)` — checks if command is handled by UI layer
+
+### Session Management (`src/core/session.js`)
+- `SessionStore` — holds agents keyed by session ID (addAgent, getAgent, removeAgent, agents, size)
+- `SessionManager` — manages session lifecycle (create, swap, getAgent, switchSession, serialize, deserialize)
+- `SessionManager.create(options)` — static factory that builds initial agent
+
+### Slash Command Registry (`src/core/slash-command-registry.js`)
+Allows extensions to register slash commands without being explicitly wired up. `SlashCommandRegistry` class with `register()`, `has()`, `names()`, `get()`, `all()`, `match()`, `generateHelpText()`.
+
+### Subcommand Registry (`src/core/subcommand-registry.js`)
+Allows extensions to register CLI subcommands. `CliSubcommandRegistry` class with `register()`, `has()`, `names()`, `get()`, `all()`, `generateHelpText()`. Subcommand definitions include: `handler`, `description`, `requiresConfig`, `requiresCore`.
+
+### Tool Registry (`src/core/tool-registry.js`)
+Tool registry and common utilities. Key exports:
+- `ToolResult` — structured result with `output`, `error`, `metadata`, `success`, `outputTag`, `toDisplay()`, `toApiContent()`
+- `toolDef(name, description, parameters)` — creates OpenAI function-calling schema
+- `param(typeName, description, extra)` — creates parameter definition with JSON Schema fields
+- `parseToolArgs(input)` — parses JSON tool arguments
+- `toolResult(result, toolName)` — resolves tool result to string (XML for API, plain text for display)
+- `truncateOutput(text, maxLines)` — truncates output
+- `generateDiff(oldText, newText, maxLines)` — simple unified diff
+- `writeFileWithParents(filePath, content)` — writes file with parent dirs
+- `validateCwdBoundary(filePath, cwdBoundary)` — path safety check
+- `resolvePath(filePath, cwdBoundary, workspaceRoot)` — path resolution with safety
+- `parseToolInput(input)` — safer argument parsing returning null on failure
+- `defaultCallDisplay(input, templateFn, options)` — default display formatter for tools
+- `ToolContext` — context object for tool execution (set/get for agent, isSessionRestoring, cwdBoundary, workspaceRoot)
 
 ### Template Engine (`src/context/render.js`)
-- **`render(template, context)`** — Tera-like template engine supporting `{{ vars }}`, `{% if %}`, `{% for %}`, filters (`|trim`, `|length`, `|exec`), and block tags
-- **`compile(template)`** — compiles template string into render function
-- **`renderTemplate`** — alias for `render`
+Tera-like template engine supporting `{{ vars }}`, `{% if %}`, `{% for %}`, filters (`|trim`, `|length`, `|exec`, `|default`), and block tags. Key exports:
+- `render(template, context, cache)` — renders template string with context
+- `renderTemplate` — alias for render
+- `compile(template)` — compiles template into render function
 
-### Profiles
-File-based profile definitions in `config/profiles/*.profile.md` use YAML frontmatter + markdown body pattern.
-- **`ProfileFile`** — parsed from `.profile.md` files: `name`, `description`, `role`, `blacklistTools`, `body`, `whitelistTools`, `preloadSkills`
-- **`parseFrontMatter(content)`** — extracts YAML frontmatter and markdown body
-- **`loadProfileFiles(profilesPath)`** — scans directory for `*.profile.md` files, returns map of profiles
-- Profile file `role` fills the `{role}` template placeholder
-- Profile file `body` fills the `{body}` template placeholder
-- Config file settings take precedence over profile file settings for tool restrictions
+### System Prompt (`src/context/system_prompt.js`)
+System prompt building. Key exports:
+- `loadAspects(aspectNames)` — loads `.aspect.md` files from `config/aspects/`
+- `loadAgentsMd()` — loads `AGENTS.md` from CWD
+- `loadSystemPromptTemplate(templatePath)` — loads/reuses system prompt template
+- `buildSystemPrompt(options)` — builds full system prompt with role, body, model, aspects, agentsMd, skillsContent
 
-### Initialization (`src/init/resolution.js`)
+### Error Handling (`src/context/error.js`)
+Centralized error formatting. Key exports:
+- `EXPECTED_ERROR_TYPES` — Set of expected error types (cancelled, http, api, timeout, invalid_response)
+- `isExpectedError(err)` — checks if error is expected vs unexpected
+- `formatError(err)` — formats error (expected: message only; unexpected: message + stack)
+- `withContext(label, fn)` — wraps operation with context and centralized error handling
 
-The entire agent initialization pipeline lives here — encapsulated to make it testable and reusable.
+### Output Events (`src/context/output.js`)
+Output event types and OutputSink base class. Key exports:
+- `OUTPUT_EVENT` — enum with 14 event types (USER_MESSAGE, ASSISTANT_MESSAGE, THINKING, TOOL_CALL, TOOL_RESULT, COMPACTING, COMMAND_RESULT, QUESTION, STREAMING_CHUNK, STREAMING_REASONING_CHUNK, TASK_PROGRESS, TOKEN_USAGE, COMPACTION_RESULT, SESSION_STATE)
+- `EVENT_HANDLERS` — maps event types to handler method names on OutputSink
+- `OutputSink` — base class with `emit()` plus convenience methods
+- `NoopSink` — no-op implementation for testing and show-prompt
 
-- **`buildConfig(cliArgv)`** — single entry point for config resolution. Returns `{ resolved, modelRegistry, providers }`
-- **`buildAgentConfig({ cli, config, providers, defaultModel, defaultRole, profilesPath })`** — resolves all values through priority chain
-- **`SwitchProfile`** — merged profile data for runtime switching: `role`, `body`, `model`, `aspectBody`
-- Model resolution flows through `buildAgentConfig`: CLI model → profile model → config `defaultModel` → provider's first model → `DEFAULT_MODEL`
-- Provider resolution: `--provider` CLI flag or `defaultProvider` config key selects the active provider; model names are prefixed with provider name when active
+### Messages (`src/context/message.js`)
+Message types and message log. Key exports:
+- `Message` — conversation message with `role`, `content`, `reasoningContent`, `toolCalls`, `toolCallId`
+- `SystemMessage` — special message with role="system"
+- `MessageLog` — message buffer with `addMessage()`, `addUserMessage()`, `addAssistantMessage()`, `addSystemMessage()`, `insertAt()`, `replaceMessages()`, `messages()`, `getMessages()`, `getMessagesAsJSON()`, `size()`, `clear()`
 
-### UI Layer (`src/ui/`)
-- **`cli.js`** — `CliOutputSink` class: formatting + color emission, implements `OutputSink`
-- **`colors.js`** — Color palettes, ANSI helpers, theme resolution
-- **`session.js`** — `runInteractiveSession()`: readline loop, slash command dispatch, SIGINT handling
-- **`info.js`** — `runInfo()`: prints system diagnostics
-- **`show_prompt.js`** — `runShowPrompt()`: renders system prompt without LLM connection
-- **`review.js`** — `runReview()`: session log inspection with JSON output and tool index
+### Input (`src/context/input.js`)
+Input parsing. Key exports:
+- `INPUT_EVENT` — enum with `TEXT` and `COMMAND` types
+- `parseInput(input)` — parses raw text into typed input event
+- `NoopInput` — no-op input implementation
 
-### Session Management (`src/agent/`)
-- **`SessionBuilder`** — init pipeline encapsulation: CLI + config → resolved config → shared resources. Cloneable for agent swaps.
-- **`SessionManager`** — session lifecycle: owns builder + current agent, handles agent swaps for profile switching
-- **`SessionStore`** — multi-session storage: map of agents keyed by session ID
-
-### Message Bus (`src/agent/message_bus.js`)
-- Decoupled CLI/agent communication via channels
-- Single-threaded dispatch owning the run loop
-- Methods: `enqueue()`, `run()`, `runUntilCancelled()`, `cancel()`
-
-### Message Queue (`src/agent/message_queue.js`)
-- Thread-safe FIFO buffer for external event injection
+### LLM Client (`src/llm_client/`)
+- `client.js` — LLM HTTP client with streaming, cancellation, retry support
+- `retry.js` — `retryWithBackoff(fn, maxRetries, options)` with cancellation support
 
 ### Session (`src/session/`)
-- **`task_manager.js`** — `TaskManager`, `TaskHandle` — async task delegation using Agent instances
-  - Task lifecycle: spawn → Agent.run() with restricted tools → text response → result appended to manager's context
-  - Task agents are silent to UI (filtered output via AgentSink)
-  - Supports follow-up messages and cancellation via AbortController
-- **`agent_sink.js`** — `AgentSink` — output routing with task/normal mode filtering
+- `session-log.js` — Session log reading/replaying (JSONL format). Key exports: `readSessionEntries()`, `readAllSessions()`, `sessionExists()`, `replayEntriesIntoContext()`, `LOG_SOURCE` constants
+- `task_manager.js` — `TaskManager` manages background task agents. Key exports: `TASK_STATUS` (RUNNING, COMPLETED, FAILED, CANCELLED), `TaskHandle` (status, interrupt), `TaskManager` (spawnTask, taskStatus, sendFollowUp, interruptTask, activeTasks, taskCounts, progressMessage)
+- `agent_sink.js` — `AgentSink` bridges Agent output to Session Core. Two modes: normal (all events forwarded) and task (filtered, only TASK_PROGRESS passes through). Key exports: `AgentSink` (emit, setTaskAgentId, onTaskComplete, isTaskAgent)
 
-### Tools (`src/tools/`)
-- **`registry.js`** — `ToolRegistry`, `ToolContext`, `toolDef()`, `toolResult()`, `parseToolArgs()`, `truncateOutput()`, `generateDiff()`, `validateCwdBoundary()`
-- **`TOOL_DESCRIPTORS`** — static array of tool descriptors with `name` and `disabled` flags
-- **`CORE_TOOL_NAMES`** — 15 core tool names: `bash`, `write`, `model`, `load_skill`, `read`, `question`, `pager`, `explore`, `find`, `grep`, `fetch`, `project_info`, `review`, `edit`
-- **`SUBAGENT_TOOL_NAMES`** — 6 subagent tool names: `delegate_task`, `task_status`, `task_followup`, `task_interrupt`, `plan_status`, `complete_task`
-- Individual tools: `bash.js`, `write.js`, `read.js`, `edit.js`, `grep.js`, `find.js`, `fetch.js`, `question.js`, `pager.js`, `model.js`, `load_skill.js`, `project_info.js`, `review.js`, `explore.js`, `subagents.js`
-- **`createToolFactory(taskManager)`** — creates tool instances from config, supports `ToolContext`
-- **`setSharedTaskManager(taskManager)`** — sets shared reference for subagent tools (called after TaskManager is created)
+### Marker Mangler (`src/marker_mangler.js`)
+Escapes input that triggers special behavior (tool call actions, internal markers). Protects against prompt injection via crafted input. Key exports: `MarkerMangler` class with `escape()`, `unescape()`, `escapeInput()`, `escapeToolOutput()`, `unescapeOutput()`, `unescapeToolInput()`, `createMarkerMangler()`.
 
-### LSP Integration (`src/lsp/`)
+### Utilities (`src/utils.js`)
+- `parseFrontMatter(content)` — parses YAML front matter from markdown
+- `deepMerge(...sources)` — recursive object merge
+- `validateNameable(name, label, dirName)` — validates name constraints
 
-JSON-RPC 2.0 over stdio client for language server communication. Provides 12 tools backed by external language servers.
+### UI Layer (`src/ui/`)
+- `cli.js` — `CliOutputSink` class: formatting + color emission, implements `OutputSink`. Key exports: `formatCompacting()`, `formatToolCall()`, `formatToolResult()`, `formatTokenUsage()`, `formatThinking()`, `formatTaskProgress()`, `CliOutputSink`
+- `colors.js` — Color palettes, ANSI helpers, theme resolution. Key exports: `ColorPalette`, `resolvePalette()`, `applyThinking()`, `applyToolCall()`, `applyToolResult()`, `applyFinalResponse()`, `applyCompacting()`, `applyProgress()`
+- `session.js` — `runInteractiveSession()`: thin readline loop, slash command dispatch, SIGINT handling, shell commands
+- `index.js` — Re-exports all UI modules
 
-- **`client.js`** — `LspClient` class: manages language server process lifecycle (spawn → initialize → shutdown), JSON-RPC 2.0 request/response with Content-Length header framing, notification handling, document sync (`didOpen`, `didChange`, `didClose`). Supports `requestTimeoutMs` (default 30s) and `serverStartupTimeoutMs` (default 60s).
-- **`document-store.js`** — `DocumentStore` class: in-memory document state per URI (`content`, `languageId`, `version`). Auto-incrementing version counter. Methods: `put()`, `get()`, `delete()`, `has()`, `updateContent()`, `updateLanguageId()`, `clear()`.
-- **`utils.js`** — URI/path conversion (`pathToUri`, `uriToPath`), file extension → language ID mapping (30+ extensions for ts/js/py/go/rs/etc.), UTF-16 ↔ UTF-8 offset conversion (LSP spec), token estimation, text truncation.
-- **`config.js`** — Server configuration resolution. Default servers: TypeScript (`typescript-language-server --stdio`), Python (`pyright-langserver --stdio`), Go (`gopls serve`), Rust (`rust-analyzer`). Resolution: explicit `servers` config → default servers → `null`. Profile-level overrides via `profile.lsp.*`.
-- **`tools/base.js`** — `LspBaseTool` base class with shared helpers: path resolution, client lifecycle (`_getClient()`), document open tracking (`_ensureDocumentOpen()`), result formatters (`_formatHover`, `_formatLocation`, `_formatCompletions`, `_formatSymbol`, `_formatDiagnostics`). Contains LSP constant enums: `CompletionKind`, `SymbolKind`, `DiagnosticSeverity`.
-- **`tools/index.js`** — Re-exports all 12 LSP tool classes.
+### Library Entry (`src/lib.js`)
+Re-exports core modules for programmatic use: config, context, llm_client, core/agent, ui/cli, utils.
 
-**12 LSP Tools** (registered via `src/tools/lsp-tools.js` and `src/tools/index.js`):
-| Tool | LSP Method | Purpose |
-|------|-----------|--------|
-| `lsp-hover` | `textDocument/hover` | Type info, docs at position |
-| `lsp-definition` | `textDocument/definition` | Find symbol definition location |
-| `lsp-completion` | `textDocument/completion` | Auto-completion suggestions |
-| `lsp-signature` | `textDocument/signatureHelp` | Function parameter hints |
-| `lsp-document-symbol` | `textDocument/documentSymbol` | All symbols in a document |
-| `lsp-references` | `textDocument/references` | All usages of a symbol |
-| `lsp-code-action` | `textDocument/codeAction` | Quick fixes, refactoring options |
-| `lsp-formatting` | `textDocument/formatting` | Format entire document |
-| `lsp-rename` | `textDocument/rename` | Rename symbol across project |
-| `lsp-diagnostics` | `publishDiagnostics` (push) | Errors, warnings, hints |
-| `lsp-workspace-symbol` | `workspace/symbol` | Search symbols across workspace |
-| `lsp-apply-edit` | `workspace/applyEdit` | Apply multi-file edits atomically |
+## Extensions (`extensions/`)
 
-**Client lifecycle**: Tools call `_getClient()` (base.js) or `getOrCreateClient()` (lsp-tools.js) to get a cached client per language ID.
+All features live as extensions that plug into the core via hooks. Extensions are auto-discovered from configured paths.
 
-### External Integrations
-- **MCP** (`src/mcp/`) — stdio + HTTP transport, tool discovery, exposes MCP server tools as native agent tools. Files: `client.js`, `connection.js`, `tools.js`, `types.js`, `index.js`
-- **Skills** (`src/skills/loader.js`) — loads `SKILL.md` files from directories following Agent Skills spec
-- **Prompts** (`src/prompts/loader.js`) — named prompt template loading
-- **Compaction** (`src/compaction.js`) — LLM-based message summarization with `estimateMessageTokens()`, `shouldCompact()`, `compactMessages()`, `findFirstKeptIndex()`
-- **Session Log** (`src/session_log.js`) — JSONL format logging
-- **Marker Mangler** (`src/marker_mangler.js`) — escapes input that triggers special behavior, protects against prompt injection
+### Extension Anatomy
+Each extension has:
+- `index.js` — entry point with `create(core, options)` function
+- `extension.json` — metadata file with `provides` array (e.g., `["cli:subcommands"]`)
 
-### `main.js` — Entry Point
-Thin entry point: parse args → dispatch subcommand → build config → create session builder → create output sink → create session manager → create message bus → run one-shot or interactive session. All initialization logic is in `src/init/resolution.js`.
+### Extension Loading
+1. Extensions are discovered via `discoverExtensions()` which walks configured paths
+2. CLI extensions (provides: `["cli:subcommands"]`) are loaded early for subcommand registration
+3. All other extensions are loaded after config resolution
+4. Extensions register tools via `HOOKS.TOOLS_REGISTER`
+5. Extensions register CLI subcommands via `HOOKS.CLI_SUBCOMMANDS_REGISTER`
+6. Extensions register config params/flags via `HOOKS.CONFIG_PARAMS_REGISTER` / `HOOKS.CONFIG_CLI_FLAGS_REGISTER`
+7. Extensions contribute to system prompt via `HOOKS.SYSTEM_PROMPT_BUILD`
+
+### Built-in Extensions
+
+| Extension | Purpose |
+|-----------|---------|
+| `core-tools` | Core tools: bash, write, read, edit, grep, find, fetch, question, pager, model, project_info, review, explore |
+| `compaction` | Compaction strategies: summarize, summarize-short, drop, token-aware |
+| `lsp` | LSP tools: hover, definition, completion, signature, document-symbol, references, code-action, formatting, rename, diagnostics, workspace-symbol, apply-edit |
+| `mcp-client` | MCP server connections (HTTP + stdio) |
+| `skills` | Skills discovery and loading |
+| `prompts` | Prompt template loading |
+| `session-log` | JSONL session logging |
+| `session-review` | Review CLI subcommand |
+| `info-show-prompt` | Info + show-prompt CLI subcommands |
+| `refresh` | Hot-reload extension + refresh tool |
+| `run-shell-command` | Shell command tool |
+
+### Extension Load Order
+Extensions are loaded in order: REFRESH (0) → CORE_TOOLS (1) → CLI (2) → DEFAULT (10). This ensures CLI extensions register subcommands before config is loaded, and core tools are available before other extensions that depend on them.
+
+## Data Flow
+
+### Normal Agent Run
+```
+User input → MessageBus.enqueue() → Agent.run()
+  → build messages (hooks: MESSAGES_BUILD)
+  → LLM call (streaming)
+  → process stream (content, reasoning, tool calls, usage)
+  → emit events to sink
+  → execute tool calls (hooks: TOOL_BEFORE_EXECUTE, TOOL_AFTER_EXECUTE)
+  → repeat or return result
+```
+
+### Task Delegation
+```
+Parent agent calls delegate_task()
+  → TaskManager.spawnTask(taskId, description, options)
+  → Load task profile
+  → Create Agent instance with:
+    - sink = AgentSink (isTaskAgent: true, filters streaming/tool events)
+    - toolWhitelist from profile
+    - hideTools/hideThinking: true
+  → Run agent.run(description) in background
+  → On completion: append result to manager's context + wake up via bus
+```
+
+### Subcommand Dispatch
+```
+User runs: bun src/main.js info
+  → parseArgs() detects subcommand
+  → CliSubcommandRegistry.get("info") → handler
+  → Load config (if requiresConfig: true)
+  → Load all non-CLI extensions (for full hook chain)
+  → Execute handler(cli, core)
+```
+
+## Key Differences from Rust Reference
+
+| Rust | JS | Notes |
+|------|-----|-------|
+| `agent/` directory | `core/` directory | Same concepts, different name |
+| `agent/message_bus.rs` | Inline in `main.js` | MessageBus is now a class in main.js |
+| `agent/worker.rs` | `session/task_manager.js` | Refactored to use Agent instances |
+| `agent/session_builder.rs` | Removed | SessionManager handles construction directly |
+| `tools/` directory | `extensions/core-tools/` | Tools are now extensions |
+| `mcp/` directory | `extensions/mcp-client/` | MCP is now an extension |
+| `skills/` directory | `extensions/skills/` | Skills are now an extension |
+| `prompts/` directory | `extensions/prompts/` | Prompts are now an extension |
+| `init/resolution.rs` | `config.js` | Resolution logic moved to config |
+| `ui/cli/formatted_sink.rs` | `ui/cli.js` | Combined into single file |
+| `ui/session.rs` | `ui/session.js` | Same concept |
+| `ui/info.rs` | `extensions/info-show-prompt/` | Moved to extension |
+| `ui/show_prompt.rs` | `extensions/info-show-prompt/` | Moved to extension |
+| `ui/review.rs` | `extensions/session-review/` | Moved to extension |

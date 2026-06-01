@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'bun:test';
-import { PagerTool } from '../../extensions/core-tools/pager.js';
+import { PagerTool } from '../../src/extensions/core-tools/pager.js';
 import { ToolResult, ToolContext } from '../../src/core/tool-registry.js';
 
 /**

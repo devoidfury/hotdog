@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach } from 'bun:test';
-import { CliOutputSink } from '../../src/ui/cli.js';
-import { OUTPUT_EVENT } from '../../src/context/output.js';
-import { ColorPalette } from '../../src/ui/colors.js';
+import { CliOutputSink } from '../../src/core/ui/cli.js';
+import { OUTPUT_EVENT } from '../../src/core/context/output.js';
+import { ColorPalette } from '../../src/core/ui/colors.js';
 
 describe('CliOutputSink.emitSessionState', () => {
   let sink;

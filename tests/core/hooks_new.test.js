@@ -1,8 +1,8 @@
 // Tests for the new input and context hooks
 
 import { describe, test, expect } from "bun:test";
-import { createHooks, HOOKS } from "../../src/hooks.js";
-import { Message } from "../../src/context/message.js";
+import { createHooks, HOOKS } from "../../src/core/hooks.js";
+import { Message } from "../../src/core/context/message.js";
 
 describe("input hook", () => {
   test("handlers receive text, source, and agent", async () => {

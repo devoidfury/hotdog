@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'bun:test';
-import { create as createModelSwitchExtension } from '../../extensions/model-switch/index.js';
-import { HookSystem, HOOKS } from '../../src/hooks.js';
+import { create as createModelSwitchExtension } from '../../src/extensions/model-switch/index.js';
+import { HookSystem, HOOKS } from '../../src/core/hooks.js';
 import { ToolRegistry } from '../../src/core/tool-registry.js';
 import { createSlashCommandRegistry } from '../../src/core/slash-command-registry.js';
 

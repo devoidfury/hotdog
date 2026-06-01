@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'bun:test';
-import { ReviewTool } from '../../extensions/session-review/review.js';
+import { ReviewTool } from '../../src/extensions/session-review/review.js';
 import { ToolResult } from '../../src/core/tool-registry.js';
 
 /**

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'bun:test';
-import { Message } from '../../src/context/message.js';
+import { Message } from '../../src/core/context/message.js';
 
 describe('Message', () => {
   it('creates a message with all fields', () => {

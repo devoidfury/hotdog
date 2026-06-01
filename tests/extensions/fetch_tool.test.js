@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'bun:test';
-import { FetchTool } from '../../extensions/core-tools/fetch.js';
+import { FetchTool } from '../../src/extensions/core-tools/fetch.js';
 import { ToolResult } from '../../src/core/tool-registry.js';
 
 /**

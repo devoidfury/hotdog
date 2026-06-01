@@ -1,12 +1,12 @@
 import { describe, it, expect, beforeEach } from 'bun:test';
-import { HookSystem, HOOKS } from '../../src/hooks.js';
+import { HookSystem, HOOKS } from '../../src/core/hooks.js';
 import { ExtensionLoader } from '../../src/core/extensions.js';
 import { ToolRegistry } from '../../src/core/tool-registry.js';
-import { create as createCompactionExtension } from '../../extensions/compaction/index.js';
-import { create as createCoreToolsExtension } from '../../extensions/core-tools/index.js';
-import { create as createSkillsExtension } from '../../extensions/skills/index.js';
-import { create as createPromptsExtension } from '../../extensions/prompts/index.js';
-import { create as createSessionLogExtension } from '../../extensions/session-log/index.js';
+import { create as createCompactionExtension } from '../../src/extensions/compaction/index.js';
+import { create as createCoreToolsExtension } from '../../src/extensions/core-tools/index.js';
+import { create as createSkillsExtension } from '../../src/extensions/skills/index.js';
+import { create as createPromptsExtension } from '../../src/extensions/prompts/index.js';
+import { create as createSessionLogExtension } from '../../src/extensions/session-log/index.js';
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 

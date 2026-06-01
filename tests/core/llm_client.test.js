@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'bun:test';
-import { LlmClient, LlmError } from '../../src/llm_client/client.js';
-import { Message } from '../../src/context/message.js';
+import { LlmClient, LlmError } from '../../src/core/llm_client/client.js';
+import { Message } from '../../src/core/context/message.js';
 
 describe('LlmError', () => {
   it('creates error with type', () => {

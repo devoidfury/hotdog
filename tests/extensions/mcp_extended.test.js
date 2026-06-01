@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'bun:test';
 import {
   McpTool,
-} from '../../extensions/mcp-client/tools.js';
+} from '../../src/extensions/mcp-client/tools.js';
 import {
   jsonRpcRequest,
   jsonRpcNotification,
@@ -13,7 +13,7 @@ import {
   parseMcpToolCallResponse,
   parseMcpContentBlock,
   contentBlocksToString,
-} from '../../extensions/mcp-client/types.js';
+} from '../../src/extensions/mcp-client/types.js';
 
 describe('McpTool', () => {
   const mockHandle = {

@@ -2,14 +2,14 @@
 // Thin orchestrator that delegates behavior to hooks.
 // Behaviors (compaction, tools, system prompt, commands) live in extensions.
 
-import { Message } from "../context/message.js";
-import { LlmError } from "../llm_client/client.js";
-import { OUTPUT_EVENT } from "../context/output.js";
-import { formatError } from "../context/error.js";
-import { HOOKS } from "../hooks.js";
+import { Message } from "./context/message.js";
+import { LlmError } from "./llm_client/client.js";
+import { OUTPUT_EVENT } from "./context/output.js";
+import { formatError } from "./context/error.js";
+import { HOOKS } from "./hooks.js";
 import { ToolContext, xmlEscape } from "./tool-registry.js";
 import { createSlashCommandRegistry } from "./slash-command-registry.js";
-import { DEFAULT_MAX_TOKENS } from "../config.js";
+import { DEFAULT_MAX_TOKENS } from "./config.js";
 
 /**
  * Minimal Agent that runs the LLM loop and delegates behavior to hooks.
@@ -340,7 +340,7 @@ export class Agent {
 
     // Import here to avoid circular dependency
     const { buildSystemPrompt, loadAspects, loadAgentsMd } =
-      await import("../context/system_prompt.js");
+      await import("./context/system_prompt.js");
 
     // Load aspects and AGENTS.md
     const resolvedConfig = this._config?.resolved || {};

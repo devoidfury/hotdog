@@ -2,8 +2,8 @@ import { describe, it, expect } from "bun:test";
 import {
   CORE_TOOL_NAMES,
   createToolFactory,
-} from "../../extensions/core-tools/index.js";
-import { SUBAGENT_TOOL_NAMES } from "../../extensions/subagents/index.js";
+} from "../../src/extensions/core-tools/index.js";
+import { SUBAGENT_TOOL_NAMES } from "../../src/extensions/subagents/index.js";
 import { ToolRegistry } from "../../src/core/tool-registry.js";
 
 describe("CORE_TOOL_NAMES", () => {

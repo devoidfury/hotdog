@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'bun:test';
-import { parsePromptFromMd } from '../../extensions/prompts/loader.js';
+import { parsePromptFromMd } from '../../src/extensions/prompts/loader.js';
 
 describe('parsePromptFromMd', () => {
   it('parses a valid prompt file', () => {

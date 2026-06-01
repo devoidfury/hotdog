@@ -1,7 +1,7 @@
 // Tests for tool:call and tool:result hooks, and CONTEXT hook via emitAsyncSeq.
 
 import { describe, test, expect } from "bun:test";
-import { HookSystem, HOOKS } from "../../src/hooks.js";
+import { HookSystem, HOOKS } from "../../src/core/hooks.js";
 
 describe("HookSystem.emitAsyncSeq", () => {
   test("runs handlers sequentially and returns last result", async () => {

@@ -5,7 +5,7 @@ import {
   shouldCompact,
   findFirstKeptIndex,
   compactMessages,
-} from '../../extensions/compaction/index.js';
+} from '../../src/extensions/compaction/index.js';
 
 describe('estimateMessageTokens', () => {
   it('estimates tokens for user message', () => {

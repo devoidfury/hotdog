@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import fsSync from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
-import { WriteTool } from '../../extensions/core-tools/write.js';
+import { WriteTool } from '../../src/extensions/core-tools/write.js';
 import { ToolContext, ToolResult } from '../../src/core/tool-registry.js';
 
 // ── Helpers ─────────────────────────────────────────────────────────────────

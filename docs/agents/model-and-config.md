@@ -137,7 +137,7 @@ export function create(core) {
 
 **Key methods**: `registerCliFlags(flags)`, `registerConfigParams(params)`, `getCliFlags()`, `getConfigParams()`, `getCliHelpText()`, `buildDefaults()`.
 
-## LSP Configuration (`extensions/lsp/config.js`)
+## LSP Configuration (`src/extensions/lsp/config.js`)
 
 LSP integration is controlled via the `lsp` config object. It is **disabled by default** (`DEFAULT_LSP_ENABLED = false`).
 

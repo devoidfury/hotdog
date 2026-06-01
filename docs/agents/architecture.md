@@ -173,7 +173,7 @@ Escapes input that triggers special behavior (tool call actions, internal marker
 ### Library Entry (`src/lib.js`)
 Re-exports core modules for programmatic use: config, context, llm_client, core/agent, ui/cli, utils.
 
-## Extensions (`extensions/`)
+## Extensions (`src/extensions/`)
 
 All features live as extensions that plug into the core via hooks. Extensions are auto-discovered from configured paths.
 

@@ -10,8 +10,8 @@ import {
   PlanStatusTool,
   CompleteTaskTool,
   WaitTool,
-} from "../../extensions/subagents/index.js";
-import { HOOKS } from "../../src/hooks.js";
+} from "../../src/extensions/subagents/index.js";
+import { HOOKS } from "../../src/core/hooks.js";
 
 describe("SUBAGENT_TOOL_NAMES", () => {
   it("contains all expected subagent tools", () => {

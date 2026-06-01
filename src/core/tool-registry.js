@@ -3,7 +3,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
-import { validateParams, formatValidationErrors } from "../json-schema.js";
+import { validateParams, formatValidationErrors } from "./json-schema.js";
 
 /**
  * Metadata keys rendered as XML attributes on the root <tool> tag.

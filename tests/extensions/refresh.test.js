@@ -3,7 +3,7 @@
  */
 
 import { describe, it, expect, beforeEach } from "bun:test";
-import { RefreshTool } from "../../extensions/refresh/refresh-tool.js";
+import { RefreshTool } from "../../src/extensions/refresh/refresh-tool.js";
 
 describe("RefreshTool", () => {
   let tool;

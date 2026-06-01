@@ -1,5 +1,5 @@
-import { describe, it, expect, beforeEach } from 'bun:test';
-import { SessionManager, SessionStore } from '../../src/core/session.js';
+import { describe, it, expect, beforeEach } from "bun:test";
+import { SessionStore } from "../../src/core/session.js";
 
 // Mock agent
 class MockAgent {
@@ -8,8 +8,12 @@ class MockAgent {
     this.sessionId = sessionId || `session-${++MockAgent._counter}`;
     this._sink = null;
   }
-  setSink(sink) { this._sink = sink; }
-  getSink() { return this._sink; }
+  setSink(sink) {
+    this._sink = sink;
+  }
+  getSink() {
+    return this._sink;
+  }
 }
 
 // Mock session builder
@@ -22,11 +26,15 @@ class MockBuilder {
 
 // Mock output sink
 class MockSink {
-  constructor() { this.events = []; }
-  emit(event) { this.events.push(event); }
+  constructor() {
+    this.events = [];
+  }
+  emit(event) {
+    this.events.push(event);
+  }
 }
 
-describe('SessionManager', () => {
+describe("SessionManager", () => {
   let builder, sink, manager;
 
   beforeEach(async () => {
@@ -39,9 +47,15 @@ describe('SessionManager', () => {
       _store: store,
       _currentSessionId: sessionId,
       _builder: builder,
-      getAgent() { return this._store.getAgent(this._currentSessionId); },
-      getAgentBySessionId(id) { return this._store.getAgent(id) ?? null; },
-      sessionId() { return this._currentSessionId; },
+      getAgent() {
+        return this._store.getAgent(this._currentSessionId);
+      },
+      getAgentBySessionId(id) {
+        return this._store.getAgent(id) ?? null;
+      },
+      sessionId() {
+        return this._currentSessionId;
+      },
       async create(config) {
         const agent = await this._builder.buildAgent(config);
         const sid = this._store.addAgent(agent);
@@ -59,35 +73,41 @@ describe('SessionManager', () => {
         if (agent) this._currentSessionId = sessionId;
         return agent ?? null;
       },
-      setSink(sink) { this.getAgent().setSink(sink); },
-      builder() { return this._builder; },
-      getStore() { return this._store; },
+      setSink(sink) {
+        this.getAgent().setSink(sink);
+      },
+      builder() {
+        return this._builder;
+      },
+      getStore() {
+        return this._store;
+      },
     };
   });
 
-  it('creates with an initial agent', async () => {
+  it("creates with an initial agent", async () => {
     const agent = manager.getAgent();
     expect(agent).not.toBeNull();
     expect(agent).toBeInstanceOf(MockAgent);
   });
 
-  it('has a session ID', () => {
+  it("has a session ID", () => {
     const sessionId = manager.sessionId();
     expect(sessionId).toBeDefined();
-    expect(typeof sessionId).toBe('string');
+    expect(typeof sessionId).toBe("string");
   });
 
-  it('gets agent by session ID', () => {
+  it("gets agent by session ID", () => {
     const agent = manager.getAgent();
     const byId = manager.getAgentBySessionId(agent.sessionId);
     expect(byId).toBe(agent);
   });
 
-  it('returns null for unknown session ID', () => {
-    expect(manager.getAgentBySessionId('unknown-session')).toBeNull();
+  it("returns null for unknown session ID", () => {
+    expect(manager.getAgentBySessionId("unknown-session")).toBeNull();
   });
 
-  it('creates a new session', async () => {
+  it("creates a new session", async () => {
     const newSink = new MockSink();
     const newSessionId = await manager.create({});
     expect(newSessionId).toBeDefined();
@@ -99,7 +119,7 @@ describe('SessionManager', () => {
     expect(newAgentRetrieved.getSink()).toBe(newSink);
   });
 
-  it('switches to a different session', async () => {
+  it("switches to a different session", async () => {
     const agent1 = manager.getAgent();
     const sessionId1 = agent1.sessionId;
     const newAgent = await builder.buildAgent();
@@ -111,25 +131,25 @@ describe('SessionManager', () => {
     expect(manager.sessionId()).toBe(sessionId1);
   });
 
-  it('returns null when switching to unknown session', () => {
-    const result = manager.switchSession('unknown-session');
+  it("returns null when switching to unknown session", () => {
+    const result = manager.switchSession("unknown-session");
     expect(result).toBeNull();
   });
 
-  it('sets sink on current agent', () => {
+  it("sets sink on current agent", () => {
     const newSink = new MockSink();
     manager.setSink(newSink);
     const agent = manager.getAgent();
     expect(agent.getSink()).toBe(newSink);
   });
 
-  it('returns the builder', () => {
+  it("returns the builder", () => {
     const b = manager.builder();
     expect(b).toBeInstanceOf(MockBuilder);
   });
 });
 
-describe('SessionManager with multiple sessions', () => {
+describe("SessionManager with multiple sessions", () => {
   let builder, sink, manager;
 
   beforeEach(async () => {
@@ -142,9 +162,15 @@ describe('SessionManager with multiple sessions', () => {
       _store: store,
       _currentSessionId: sessionId,
       _builder: builder,
-      getAgent() { return this._store.getAgent(this._currentSessionId); },
-      getAgentBySessionId(id) { return this._store.getAgent(id) ?? null; },
-      sessionId() { return this._currentSessionId; },
+      getAgent() {
+        return this._store.getAgent(this._currentSessionId);
+      },
+      getAgentBySessionId(id) {
+        return this._store.getAgent(id) ?? null;
+      },
+      sessionId() {
+        return this._currentSessionId;
+      },
       async create(config) {
         const agent = await this._builder.buildAgent(config);
         const sid = this._store.addAgent(agent);
@@ -162,13 +188,19 @@ describe('SessionManager with multiple sessions', () => {
         if (agent) this._currentSessionId = sessionId;
         return agent ?? null;
       },
-      setSink(sink) { this.getAgent().setSink(sink); },
-      builder() { return this._builder; },
-      getStore() { return this._store; },
+      setSink(sink) {
+        this.getAgent().setSink(sink);
+      },
+      builder() {
+        return this._builder;
+      },
+      getStore() {
+        return this._store;
+      },
     };
   });
 
-  it('tracks multiple sessions', async () => {
+  it("tracks multiple sessions", async () => {
     const id1 = await manager.create({});
     expect(id1).not.toBeNull();
     const id2 = await manager.create({});
@@ -176,7 +208,7 @@ describe('SessionManager with multiple sessions', () => {
     expect(id1).not.toBe(id2);
   });
 
-  it('switches between sessions correctly', async () => {
+  it("switches between sessions correctly", async () => {
     const agent1 = manager.getAgent();
     const id1 = agent1.sessionId;
     const id2 = await manager.create({});
@@ -189,7 +221,7 @@ describe('SessionManager with multiple sessions', () => {
     expect(manager.getAgent()).not.toBeNull();
   });
 
-  it('swapAgent replaces current agent', async () => {
+  it("swapAgent replaces current agent", async () => {
     const originalAgent = manager.getAgent();
     const newAgent = await manager.swap({});
     expect(newAgent).not.toBe(originalAgent);

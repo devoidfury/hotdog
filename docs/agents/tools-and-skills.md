@@ -2,7 +2,7 @@
 
 ## Tools
 
-### Tool System (`extensions/core-tools/`)
+### Tool System (`src/extensions/core-tools/`)
 
 Core tools are provided by the `core-tools` extension. Tools are registered via the `HOOKS.TOOLS_REGISTER` hook.
 
@@ -20,7 +20,7 @@ Core tools are provided by the `core-tools` extension. Tools are registered via 
 - `parseToolInput(input)` — safe argument parsing returning null on failure
 - `defaultCallDisplay(input, templateFn, options)` — default display formatter for tools
 
-**Tool descriptors** — declarative table in `extensions/core-tools/index.js`:
+**Tool descriptors** — declarative table in `src/extensions/core-tools/index.js`:
 - `TOOL_DESCRIPTORS` — array of `{ name, disabled }` for all core tools
 - `CORE_TOOL_NAMES` — all core tool names
 - `SUBAGENT_TOOL_NAMES` — subagent tool names (manager-only)
@@ -59,7 +59,7 @@ Core tools are provided by the `core-tools` extension. Tools are registered via 
 | `complete_task` | Mark a task as complete |
 | `wait` | Model yields control back to user |
 
-### LSP Tools (`extensions/lsp/`)
+### LSP Tools (`src/extensions/lsp/`)
 
 12 tools providing IDE-like features via external language servers. All tools require:
 - `lsp.enabled: true` in config or profile
@@ -89,7 +89,7 @@ Core tools are provided by the `core-tools` extension. Tools are registered via 
 
 ## Skills
 
-### Skill System (`extensions/skills/`)
+### Skill System (`src/extensions/skills/`)
 
 Skills are load-on-demand guides/workflows. They are discovered by name + description and can reference external files and scripts.
 

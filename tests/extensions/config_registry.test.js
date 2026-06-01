@@ -39,10 +39,10 @@
  */
 
 import { describe, it, expect } from 'bun:test';
-import { createConfigRegistry } from '../../src/config-registry.js';
-import { parseArgs } from '../../src/cli.js';
-import { loadConfig } from '../../src/config.js';
-import { HOOKS } from '../../src/hooks.js';
+import { createConfigRegistry } from '../../src/core/config-registry.js';
+import { parseArgs } from '../../src/core/cli.js';
+import { loadConfig } from '../../src/core/config.js';
+import { HOOKS } from '../../src/core/hooks.js';
 import { emitConfigRegistration } from '../../src/core/extensions.js';
 
 describe('ConfigRegistry', () => {

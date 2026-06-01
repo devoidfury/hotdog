@@ -1,7 +1,7 @@
 // Tests for the question tool — non-interactive mode only.
 
 import { describe, it, expect, beforeEach } from "bun:test";
-import { QuestionTool } from "../../extensions/core-tools/question.js";
+import { QuestionTool } from "../../src/extensions/core-tools/question.js";
 
 describe("QuestionTool", () => {
   let tool;

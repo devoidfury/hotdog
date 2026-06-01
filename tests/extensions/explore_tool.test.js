@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'bun:test';
-import { ExploreTool } from '../../extensions/core-tools/explore.js';
+import { ExploreTool } from '../../src/extensions/core-tools/explore.js';
 import { ToolResult } from '../../src/core/tool-registry.js';
 
 /**

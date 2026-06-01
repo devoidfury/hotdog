@@ -4,7 +4,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { HookSystem, HOOKS, EXTENSION_PROVIDES } from '../hooks.js';
+import { HookSystem, HOOKS, EXTENSION_PROVIDES } from './hooks.js';
 
 export { HookSystem, HOOKS, EXTENSION_PROVIDES };
 
@@ -128,7 +128,7 @@ const ROOT_DIR = path.resolve(__dirname, "../../");
  * Resolve an extension path spec to an absolute directory path.
  *
  * Special values:
- * - "builtins" → resolves to the repo's extensions/ directory
+ * - "builtins" → resolves to the repo's src/extensions/ directory
  * - Relative paths → resolved relative to CWD
  * - Absolute paths → used as-is
  *
@@ -249,7 +249,7 @@ export function discoverExtensionsInDir(dirPath) {
 
       extensions.push({
         name: name || entry.name,
-        path: `../extensions/${entry.name}/index.js`,
+        path: `./extensions/${entry.name}/index.js`,
         provides,
         loadOrder,
         dependsOn,
@@ -366,7 +366,7 @@ export async function discoverExtensions(extensionPaths) {
     for (const ext of discovered) {
       let basePath;
       if (spec === "builtins") {
-        basePath = `../../extensions/${ext.name}/index.js`;
+        basePath = `./extensions/${ext.name}/index.js`;
       } else {
         const relPath = path.relative(ROOT_DIR, path.join(resolved, ext.name, "index.js"));
         basePath = relPath.startsWith("..") ? relPath : `./${relPath}`;

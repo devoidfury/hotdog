@@ -7,8 +7,8 @@ import {
   mcpToolCallRequest,
   jsonRpcRequest,
   jsonRpcNotification,
-} from "../../extensions/mcp-client/types.js";
-import { McpTool } from "../../extensions/mcp-client/tools.js";
+} from "../../src/extensions/mcp-client/types.js";
+import { McpTool } from "../../src/extensions/mcp-client/tools.js";
 
 describe("MCP types", () => {
   it("parses tool definition", () => {

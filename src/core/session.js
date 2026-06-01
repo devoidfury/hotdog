@@ -2,7 +2,7 @@
 // Owns agents, enables swaps, serialization.
 // Delegates agent construction to extensions via hooks.
 
-import { HOOKS } from '../hooks.js';
+import { HOOKS } from './hooks.js';
 
 /**
  * Session store — holds agents keyed by session ID.

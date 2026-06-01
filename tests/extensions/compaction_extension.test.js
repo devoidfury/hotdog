@@ -1,25 +1,21 @@
-import { describe, it, expect, beforeEach } from 'bun:test';
-import { HookSystem, HOOKS } from '../../src/hooks.js';
-import { ExtensionLoader } from '../../src/core/extensions.js';
-import { ToolRegistry } from '../../src/core/tool-registry.js';
-import { create as createCompactionExtension } from '../../extensions/compaction/index.js';
+import { describe, it, expect } from "bun:test";
+import { HookSystem, HOOKS } from "../../src/core/hooks.js";
+import { ToolRegistry } from "../../src/core/tool-registry.js";
+import { create as createCompactionExtension } from "../../src/extensions/compaction/index.js";
+
 import {
-  CompactionStrategyRegistry,
-  SummarizeStrategy,
-  DropStrategy,
-  SummarizeShortStrategy,
-  TokenAwareStrategy,
-} from '../../extensions/compaction/index.js';
-import { estimateContextTokens, findFirstKeptIndex } from '../../extensions/compaction/index.js';
+  estimateContextTokens,
+  findFirstKeptIndex,
+} from "../../src/extensions/compaction/index.js";
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
-function makeMessages(count, content = 'x'.repeat(100)) {
+function makeMessages(count, content = "x".repeat(100)) {
   const messages = [];
   for (let i = 0; i < count; i++) {
     const isUser = i % 2 === 0;
     messages.push({
-      role: isUser ? 'user' : 'assistant',
+      role: isUser ? "user" : "assistant",
       content,
     });
   }
@@ -33,21 +29,22 @@ function createMockCore(config = {}) {
     hooks,
     config: { compaction: config },
     modelRegistry: {
-      'test-model': { name: 'test-model', temperature: null, maxTokens: 32000 },
+      "test-model": { name: "test-model", temperature: null, maxTokens: 32000 },
     },
     toolRegistry,
   };
 }
 
-function createMockAgent(context, model = 'test-model') {
+function createMockAgent(context, model = "test-model") {
   return {
     context,
     model,
-    sessionId: 'test-session',
+    sessionId: "test-session",
     _llmClient: {
-      chatStreamCancellable: () => (async function* () {
-        yield { type: 'content', content: 'test response' };
-      })(),
+      chatStreamCancellable: () =>
+        (async function* () {
+          yield { type: "content", content: "test response" };
+        })(),
     },
     _context: context,
   };
@@ -55,58 +52,63 @@ function createMockAgent(context, model = 'test-model') {
 
 // ── Extension Creation ───────────────────────────────────────────────────────
 
-describe('Compaction Extension Creation', () => {
-  it('should create extension with default config', () => {
+describe("Compaction Extension Creation", () => {
+  it("should create extension with default config", () => {
     const core = createMockCore();
     const ext = createCompactionExtension(core);
     expect(ext).not.toBeNull();
     expect(ext.settings.enabled).toBe(true);
     expect(ext.settings.keepRecentMessages).toBe(3);
-    expect(ext.settings.strategy).toBe('summarize');
+    expect(ext.settings.strategy).toBe("summarize");
   });
 
-  it('should return null when compaction is disabled', () => {
+  it("should return null when compaction is disabled", () => {
     const core = createMockCore({ enabled: false });
     const ext = createCompactionExtension(core);
     expect(ext).toBeNull();
   });
 
-  it('should apply custom config values', () => {
+  it("should apply custom config values", () => {
     const core = createMockCore({
       enabled: true,
       keepRecentMessages: 5,
-      strategy: 'drop',
+      strategy: "drop",
       reserveTokens: 8192,
     });
     const ext = createCompactionExtension(core);
     expect(ext.settings.enabled).toBe(true);
     expect(ext.settings.keepRecentMessages).toBe(5);
-    expect(ext.settings.strategy).toBe('drop');
+    expect(ext.settings.strategy).toBe("drop");
     expect(ext.settings.reserveTokens).toBe(8192);
   });
 
-  it('should register all built-in strategies', () => {
+  it("should register all built-in strategies", () => {
     const core = createMockCore();
     const ext = createCompactionExtension(core);
-    expect(ext.registry.has('summarize')).toBe(true);
-    expect(ext.registry.has('drop')).toBe(true);
-    expect(ext.registry.has('summarize-short')).toBe(true);
-    expect(ext.registry.has('token-aware')).toBe(true);
+    expect(ext.registry.has("summarize")).toBe(true);
+    expect(ext.registry.has("drop")).toBe(true);
+    expect(ext.registry.has("summarize-short")).toBe(true);
+    expect(ext.registry.has("token-aware")).toBe(true);
   });
 
-  it('should provide getStrategyList', () => {
+  it("should provide getStrategyList", () => {
     const core = createMockCore();
     const ext = createCompactionExtension(core);
     const list = ext.getStrategyList();
     expect(list.length).toBe(4);
-    expect(list.map(s => s.name)).toEqual(['summarize', 'drop', 'summarize-short', 'token-aware']);
+    expect(list.map((s) => s.name)).toEqual([
+      "summarize",
+      "drop",
+      "summarize-short",
+      "token-aware",
+    ]);
   });
 });
 
 // ── Hook Integration ─────────────────────────────────────────────────────────
 
-describe('Hook Integration', () => {
-  it('should register hooks with the hook system', () => {
+describe("Hook Integration", () => {
+  it("should register hooks with the hook system", () => {
     const core = createMockCore();
     const ext = createCompactionExtension(core);
 
@@ -115,7 +117,7 @@ describe('Hook Integration', () => {
     expect(ext.hooks[HOOKS.CONTEXT_FULL]).toBeDefined();
   });
 
-  it('should not trigger compaction when context is small', async () => {
+  it("should not trigger compaction when context is small", async () => {
     const core = createMockCore();
     const ext = createCompactionExtension(core);
 
@@ -129,7 +131,7 @@ describe('Hook Integration', () => {
     expect(agent._context.length).toBe(4);
   });
 
-  it('should not trigger compaction when token budget is not exceeded', async () => {
+  it("should not trigger compaction when token budget is not exceeded", async () => {
     const core = createMockCore({
       enabled: true,
       keepRecentMessages: 2,
@@ -138,7 +140,7 @@ describe('Hook Integration', () => {
     const ext = createCompactionExtension(core);
 
     // Create messages that are under the token budget
-    const context = makeMessages(20, 'x'.repeat(50)); // ~250 tokens total
+    const context = makeMessages(20, "x".repeat(50)); // ~250 tokens total
     const agent = createMockAgent(context);
 
     // Call the hook handler directly
@@ -148,7 +150,7 @@ describe('Hook Integration', () => {
     expect(agent._context.length).toBe(20);
   });
 
-  it('should trigger compaction when context exceeds token budget', async () => {
+  it("should trigger compaction when context exceeds token budget", async () => {
     const core = createMockCore({
       enabled: true,
       keepRecentMessages: 2,
@@ -165,56 +167,62 @@ describe('Hook Integration', () => {
     // Actually the model maxTokens is 32000, so threshold is 31900.
     // Need ~255 messages of 500 chars each for 25000+ tokens.
     // Simpler: override modelRegistry with small maxTokens
-    const largeContext = makeMessages(100, 'x'.repeat(500)); // ~12500 tokens
+    const largeContext = makeMessages(100, "x".repeat(500)); // ~12500 tokens
     const agent = createMockAgent(largeContext);
 
     // Override model config for this test
     const originalCore = core;
     core.modelRegistry = {
-      'test-model': { name: 'test-model', temperature: null, maxTokens: 8000 },
+      "test-model": { name: "test-model", temperature: null, maxTokens: 8000 },
     };
     const threshold = 8000 - 100; // 7900
     // 12500 > 7900 → should compact
 
-    await ext.hooks[HOOKS.CONTEXT_FULL]({ agent, contextSize: largeContext.length });
+    await ext.hooks[HOOKS.CONTEXT_FULL]({
+      agent,
+      contextSize: largeContext.length,
+    });
 
     // Context should be compacted
     expect(agent._context.length).toBeLessThan(largeContext.length);
     const summaryMsg = agent._context[0];
-    expect(summaryMsg.role).toBe('user');
-    expect(summaryMsg.content).toContain('<m_ckga3qxdoia7896k>');
+    expect(summaryMsg.role).toBe("user");
+    expect(summaryMsg.content).toContain("<m_ckga3qxdoia7896k>");
   });
 
-  it('should use drop strategy when configured', async () => {
+  it("should use drop strategy when configured", async () => {
     const core = createMockCore({
       enabled: true,
       keepRecentMessages: 2,
-      strategy: 'drop',
+      strategy: "drop",
       reserveTokens: 100,
     });
     const ext = createCompactionExtension(core);
 
-    const largeContext = makeMessages(100, 'x'.repeat(500)); // ~12500 tokens
+    const largeContext = makeMessages(100, "x".repeat(500)); // ~12500 tokens
     const agent = createMockAgent(largeContext);
 
     // Override model config for this test
     core.modelRegistry = {
-      'test-model': { name: 'test-model', temperature: null, maxTokens: 8000 },
+      "test-model": { name: "test-model", temperature: null, maxTokens: 8000 },
     };
 
-    await ext.hooks[HOOKS.CONTEXT_FULL]({ agent, contextSize: largeContext.length });
+    await ext.hooks[HOOKS.CONTEXT_FULL]({
+      agent,
+      contextSize: largeContext.length,
+    });
 
     // Drop strategy: no summary message, just shortened context
     expect(agent._context.length).toBeLessThan(largeContext.length);
     const firstMsg = agent._context[0];
-    expect(firstMsg.content).not.toContain('<m_ckga3qxdoia7896k>');
+    expect(firstMsg.content).not.toContain("<m_ckga3qxdoia7896k>");
   });
 });
 
 // ── Utility Functions ────────────────────────────────────────────────────────
 
-describe('Compaction Utilities', () => {
-  it('findFirstKeptIndex returns correct index', () => {
+describe("Compaction Utilities", () => {
+  it("findFirstKeptIndex returns correct index", () => {
     const messages = makeMessages(10);
     const index = findFirstKeptIndex(messages, 2);
     // With 10 messages and keepRecent=2, keeps last 3 (indices 7,8,9), compacts first 7
@@ -222,16 +230,16 @@ describe('Compaction Utilities', () => {
     expect(index).toBeLessThan(messages.length);
   });
 
-  it('findFirstKeptIndex returns 0 for keepRecent=0', () => {
+  it("findFirstKeptIndex returns 0 for keepRecent=0", () => {
     const messages = makeMessages(10);
     expect(findFirstKeptIndex(messages, 0)).toBe(0);
   });
 
-  it('findFirstKeptIndex skips system messages', () => {
+  it("findFirstKeptIndex skips system messages", () => {
     // 1 system + 8 user/assistant = 9 messages total
     // Non-system: 8 messages. keepRecent=2 → keep 4, compact 4
     const messages = [
-      { role: 'system', content: 'You are helpful' },
+      { role: "system", content: "You are helpful" },
       ...makeMessages(8),
     ];
     const index = findFirstKeptIndex(messages, 2);
@@ -239,8 +247,8 @@ describe('Compaction Utilities', () => {
     expect(index).toBe(6);
   });
 
-  it('estimateContextTokens estimates correctly', () => {
-    const messages = makeMessages(4, 'x'.repeat(100));
+  it("estimateContextTokens estimates correctly", () => {
+    const messages = makeMessages(4, "x".repeat(100));
     const tokens = estimateContextTokens(messages);
     // Each message ~100 chars / 4 = 25 tokens
     expect(tokens).toBeGreaterThan(0);
@@ -250,8 +258,8 @@ describe('Compaction Utilities', () => {
 
 // ── Strategy List ────────────────────────────────────────────────────────────
 
-describe('Strategy List', () => {
-  it('should return all strategies with descriptions', () => {
+describe("Strategy List", () => {
+  it("should return all strategies with descriptions", () => {
     const core = createMockCore();
     const ext = createCompactionExtension(core);
     const list = ext.getStrategyList();

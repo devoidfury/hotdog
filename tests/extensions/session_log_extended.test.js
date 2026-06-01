@@ -1,6 +1,14 @@
 import { test, expect } from "bun:test";
-import { SessionLog, LOG_SOURCE, stripNulls, readSessionEntries, readAllSessions, sessionExists, disabledSessionLog } from "../../extensions/session-log/session_log.js";
-import { mkdirSync, rmSync, readFileSync, writeFileSync, existsSync } from "node:fs";
+import {
+  SessionLog,
+  LOG_SOURCE,
+  stripNulls,
+  readSessionEntries,
+  readAllSessions,
+  sessionExists,
+  disabledSessionLog,
+} from "../../src/extensions/session-log/session_log.js";
+import { mkdirSync, rmSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { homedir } from "node:os";
 
@@ -18,7 +26,13 @@ function setupTestDir() {
 }
 
 function teardown() {
-  const testFile = join(homedir(), ".cache", "oa-agent", "sessions", `${TEST_SESSION_ID}.jsonl`);
+  const testFile = join(
+    homedir(),
+    ".cache",
+    "oa-agent",
+    "sessions",
+    `${TEST_SESSION_ID}.jsonl`,
+  );
   try {
     rmSync(testFile);
   } catch {
@@ -51,9 +65,17 @@ test("SessionLog.writeAssistant includes reasoning and tool_calls", () => {
   setupTestDir();
   try {
     const log = new SessionLog(TEST_SESSION_ID);
-    log.writeAssistant("final output", [
-      { id: "tc1", type: "function", function: { name: "bash", arguments: "ls" } },
-    ], "reasoning content");
+    log.writeAssistant(
+      "final output",
+      [
+        {
+          id: "tc1",
+          type: "function",
+          function: { name: "bash", arguments: "ls" },
+        },
+      ],
+      "reasoning content",
+    );
 
     const content = readFileSync(log.path, "utf-8");
     const line = JSON.parse(content.trim());
@@ -62,7 +84,11 @@ test("SessionLog.writeAssistant includes reasoning and tool_calls", () => {
     expect(line.content).toBe("final output");
     expect(line.reasoning_content).toBe("reasoning content");
     expect(line.tool_calls).toEqual([
-      { id: "tc1", type: "function", function: { name: "bash", arguments: "ls" } },
+      {
+        id: "tc1",
+        type: "function",
+        function: { name: "bash", arguments: "ls" },
+      },
     ]);
   } finally {
     teardown();
@@ -111,17 +137,20 @@ test("readSessionEntries handles malformed JSON lines", () => {
   try {
     rmSync(testFile);
   } catch {}
-  
+
   try {
     // Write a mix of valid and invalid lines
-    writeFileSync(testFile, [
-      '{"ts":"2024-01-01T00:00:00Z","source":"input","content":"valid"}',
-      'this is not json',
-      '{"ts":"2024-01-01T00:00:01Z","source":"input","content":"also valid"}',
-      '',
-      '{"ts":"2024-01-01T00:00:02Z","source":"reset"}',
-      '{"ts":"2024-01-01T00:00:03Z","source":"input","content":"after reset"}',
-    ].join('\n'));
+    writeFileSync(
+      testFile,
+      [
+        '{"ts":"2024-01-01T00:00:00Z","source":"input","content":"valid"}',
+        "this is not json",
+        '{"ts":"2024-01-01T00:00:01Z","source":"input","content":"also valid"}',
+        "",
+        '{"ts":"2024-01-01T00:00:02Z","source":"reset"}',
+        '{"ts":"2024-01-01T00:00:03Z","source":"input","content":"after reset"}',
+      ].join("\n"),
+    );
 
     const entries = readSessionEntries(TEST_SESSION_ID);
     expect(entries.length).toBeGreaterThanOrEqual(1);
@@ -129,7 +158,9 @@ test("readSessionEntries handles malformed JSON lines", () => {
     const lastEntry = entries[entries.length - 1];
     expect(lastEntry.content).toBe("after reset");
   } finally {
-    try { rmSync(testFile); } catch {}
+    try {
+      rmSync(testFile);
+    } catch {}
   }
 });
 
@@ -139,10 +170,12 @@ test("readSessionEntries replays from last reset", () => {
   const dir = join(homedir(), ".cache", "oa-agent", "sessions");
   mkdirSync(dir, { recursive: true });
   const testFile = join(dir, `${uniqueId}.jsonl`);
-  
+
   // Clean up any leftover file from previous runs
-  try { rmSync(testFile); } catch {}
-  
+  try {
+    rmSync(testFile);
+  } catch {}
+
   try {
     const log = new SessionLog(uniqueId);
     log.writeInput("before reset");
@@ -156,7 +189,9 @@ test("readSessionEntries replays from last reset", () => {
     expect(entries[0].content).toBe("after reset");
     expect(entries[1].content).toBe("response");
   } finally {
-    try { rmSync(testFile); } catch {}
+    try {
+      rmSync(testFile);
+    } catch {}
   }
 });
 
@@ -226,27 +261,37 @@ test("stripNulls preserves 0, false, empty string, empty array, empty object", (
 test("readAllSessions reads from multiple session files", () => {
   const dir = join(homedir(), ".cache", "oa-agent", "sessions");
   mkdirSync(dir, { recursive: true });
-  
+
   const testId1 = "test-readall-1";
   const testId2 = "test-readall-2";
-  
+
   try {
     const file1 = join(dir, `${testId1}.jsonl`);
     const file2 = join(dir, `${testId2}.jsonl`);
-    
-    writeFileSync(file1, '{"ts":"2024-01-01","source":"input","content":"from session 1"}\n');
-    writeFileSync(file2, '{"ts":"2024-01-01","source":"input","content":"from session 2"}\n');
-    
+
+    writeFileSync(
+      file1,
+      '{"ts":"2024-01-01","source":"input","content":"from session 1"}\n',
+    );
+    writeFileSync(
+      file2,
+      '{"ts":"2024-01-01","source":"input","content":"from session 2"}\n',
+    );
+
     const allEntries = readAllSessions();
     expect(allEntries.length).toBeGreaterThanOrEqual(2);
-    
+
     // Clean up
     rmSync(file1);
     rmSync(file2);
   } finally {
     // Clean up test files
-    try { rmSync(join(dir, `${testId1}.jsonl`)); } catch {}
-    try { rmSync(join(dir, `${testId2}.jsonl`)); } catch {}
+    try {
+      rmSync(join(dir, `${testId1}.jsonl`));
+    } catch {}
+    try {
+      rmSync(join(dir, `${testId2}.jsonl`));
+    } catch {}
   }
 });
 
@@ -268,7 +313,7 @@ test("SessionLog handles empty content", () => {
     const content = readFileSync(log.path, "utf-8");
     const lines = content.trim().split("\n");
     expect(lines.length).toBe(4);
-    
+
     const firstLine = JSON.parse(lines[0]);
     expect(firstLine.content).toBe("");
   } finally {
@@ -292,7 +337,7 @@ test("SessionLog writes entries in order", () => {
     const lines = content.trim().split("\n");
     expect(lines.length).toBe(7);
 
-    const sources = lines.map(l => JSON.parse(l).source);
+    const sources = lines.map((l) => JSON.parse(l).source);
     expect(sources).toEqual([
       LOG_SOURCE.SYSTEM_PROMPT,
       LOG_SOURCE.INPUT,

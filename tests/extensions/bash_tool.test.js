@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'bun:test';
-import { BashTool } from '../../extensions/core-tools/bash.js';
+import { BashTool } from '../../src/extensions/core-tools/bash.js';
 import { ToolResult } from '../../src/core/tool-registry.js';
 
 /**

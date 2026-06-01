@@ -226,13 +226,3 @@ describe('GrepTool.execute', () => {
     fsSync.rmSync(dir, { recursive: true, force: true });
   });
 });
-
-// ── firstUseHelp ─────────────────────────────────────────────────────────────
-
-describe('GrepTool.firstUseHelp', () => {
-  it('returns help text', () => {
-    const help = new GrepTool().firstUseHelp();
-    expect(help).toContain('Search file contents');
-    expect(help).toContain('pattern');
-  });
-});

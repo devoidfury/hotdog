@@ -20,11 +20,8 @@ import {
   ToolResult,
 } from "../tools/index.js";
 import {
-  DEFAULT_MODEL,
   DEFAULT_MAX_TOKENS,
   DEFAULT_MAX_ITERATIONS,
-  DEFAULT_ROLE,
-  defaultCompactionSettings,
   getProfile,
 } from "../config.js";
 import { NoopSink } from "../context/output.js";
@@ -64,7 +61,7 @@ export class Agent {
   constructor(config = {}) {
     this.client = config.client || new LlmClient();
     this.context = new MessageLog();
-    this.model = config.model || DEFAULT_MODEL;
+    this.model = config.model || config.defaultModel;
     this.modelRegistry = config.modelRegistry || {};
     this.sink = config.sink || new NoopSink();
     this.hideTools = config.hideTools !== false;
@@ -73,21 +70,21 @@ export class Agent {
     this._allSkills = config.allSkills || [];
     this.skillDirectories = config.skillDirectories || [];
     this.activeSkills = new Set();
-    this.maxToolOutputLines = config.maxToolOutputLines || 800;
+    this.maxToolOutputLines = config.maxToolOutputLines;
     this.sessionId = config.sessionId || crypto.randomUUID();
     this.cwdBoundary = config.cwdBoundary || null;
-    this.role = config.role || DEFAULT_ROLE;
-    this.profileBody = config.profileBody || "";
+    this.role = config.role;
+    this.profileBody = config.profileBody;
     this.stream = config.stream !== false;
-    this.compaction = config.compaction || defaultCompactionSettings;
-    this.compactDebug = config.compactDebug || false;
+    this.compaction = config.compaction;
+    this.compactDebug = config.compactDebug;
     this.showTokenUse = config.showTokenUse !== false;
     // Compaction strategy
     this.compactionStrategy =
       config.compaction?.strategy || DEFAULT_COMPACTION_STRATEGY;
     this.compactionStrategyRegistry = new CompactionStrategyRegistry();
     this._registerBuiltinCompactionStrategies();
-    this.profileName = config.profileName || "default";
+    this.profileName = config.profileName;
     this.usedTools = new Set();
     this.iterationCount = 0;
     this.cancelled = false;
@@ -385,7 +382,13 @@ export class Agent {
         const allowed = this.allowedToolNames();
         const errorMsg = `Tool '${toolName}' is not allowed by active skills. Allowed tools: ${Array.from(allowed).join(", ")}`;
         this._emitToolResult(toolName, input, errorMsg, toolCallId);
-        this.context.addMessage({ role: "tool", content: errorMsg, reasoningContent: null, toolCalls: null, toolCallId });
+        this.context.addMessage({
+          role: "tool",
+          content: errorMsg,
+          reasoningContent: null,
+          toolCalls: null,
+          toolCallId,
+        });
         this.sessionLog.writeToolResult(errorMsg, toolCallId, toolName);
         continue;
       }
@@ -430,7 +433,13 @@ export class Agent {
         : result;
 
       // Add tool result to context
-      this.context.addMessage({ role: "tool", content: displayResult, reasoningContent: null, toolCalls: null, toolCallId });
+      this.context.addMessage({
+        role: "tool",
+        content: displayResult,
+        reasoningContent: null,
+        toolCalls: null,
+        toolCallId,
+      });
 
       // Cache output
       this.outputCache.set(toolCallId, displayResult);

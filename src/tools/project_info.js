@@ -18,10 +18,6 @@ const DEFAULT_DU_DEPTH = 1;
 export class ProjectInfoTool {
   static TOOL_NAME = "project_info";
 
-  static tryNewFromContext(ctx) {
-    return new ProjectInfoTool();
-  }
-
   toToolDef() {
     return toolDef(
       ProjectInfoTool.TOOL_NAME,

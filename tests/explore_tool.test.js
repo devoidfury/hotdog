@@ -6,11 +6,6 @@ describe('ExploreTool', () => {
     expect(ExploreTool.TOOL_NAME).toBe('explore');
   });
 
-  it('creates instance from context', () => {
-    const tool = ExploreTool.tryNewFromContext({});
-    expect(tool).toBeInstanceOf(ExploreTool);
-  });
-
   it('has valid tool definition', () => {
     const tool = new ExploreTool();
     const def = tool.toToolDef();
@@ -18,14 +13,7 @@ describe('ExploreTool', () => {
     expect(def.function.description.length).toBeGreaterThan(0);
     expect(def.function.parameters.properties).toHaveProperty('path');
     expect(def.function.parameters.properties).toHaveProperty('outline');
-    expect(def.function.parameters.required).toEqual([]);
-  });
-
-  it('has first use help', () => {
-    const tool = new ExploreTool();
-    const help = tool.firstUseHelp();
-    expect(typeof help).toBe('string');
-    expect(help.length).toBeGreaterThan(0);
+    expect(def.function.parameters.required).toEqual(['path', 'outline']);
   });
 });
 

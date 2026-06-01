@@ -4,7 +4,7 @@
 import fs from "node:fs";
 import { join } from "node:path";
 import { cwd } from "node:process";
-import { parseFrontMatter, DEFAULT_MODEL, DEFAULT_ROLE, DEFAULT_SKILLS_PATH, DEFAULT_PROFILES_PATH } from "../config.js";
+import { parseFrontMatter, DEFAULT_MODEL, DEFAULT_ROLE } from "../config.js";
 import { render } from "../context/render.js";
 
 // ── Unified Config Builder ───────────────────────────────────────────────────
@@ -37,7 +37,7 @@ export async function buildConfig(cliArgv) {
     defaultRole: DEFAULT_ROLE,
     profilesPath: cliArgv.skillsPath
       ? join(cliArgv.skillsPath, "..", "profiles")
-      : config.profilesPath || DEFAULT_PROFILES_PATH,
+      : config.profilesPath,
   });
 
   const { buildModelRegistry } = await import("../config.js");
@@ -625,7 +625,7 @@ export function buildAgentConfig(options) {
         : cli.hideThinking === false
           ? false
           : config.hideThinking !== false,
-    compactDebug: cli.compactDebug || config.compactDebug || false,
+    compactDebug: cli.compactDebug || config.compactDebug,
     showTokenUse: cli.tokens || config.showTokenUse !== false,
     stream: !cli.noStream,
     provider,
@@ -644,12 +644,12 @@ export function buildAgentConfig(options) {
     // All profiles
     profiles,
     // Chat/embedding timeouts
-    chatTimeout: cli.chatTimeout || config.chatTimeoutSecs || 600,
+    chatTimeout: cli.chatTimeout || config.chatTimeoutSecs,
     embeddingsTimeout:
-      cli.embeddingsTimeout || config.embeddingsTimeoutSecs || 120,
+      cli.embeddingsTimeout || config.embeddingsTimeoutSecs,
     // Session / paths
     sessionId: cli.sessionId || null,
-    skillsPath: cli.skillsPath || config.skillsPath || null,
-    promptsPath: cli.promptsPath || config.promptsPath || null,
+    skillsPath: cli.skillsPath || config.skillsPath,
+    promptsPath: cli.promptsPath || config.promptsPath,
   };
 }

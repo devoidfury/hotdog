@@ -304,10 +304,6 @@ function parseArgs(input) {
 export class GrepTool {
   static TOOL_NAME = "grep";
 
-  static tryNewFromContext(ctx) {
-    return new GrepTool();
-  }
-
   toToolDef() {
     return toolDef(
       GrepTool.TOOL_NAME,

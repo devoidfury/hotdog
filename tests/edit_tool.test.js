@@ -326,14 +326,3 @@ describe('EditTool.execute — snake_case aliases', () => {
     fs.rmSync(dir, { recursive: true, force: true });
   });
 });
-
-// ── firstUseHelp ─────────────────────────────────────────────────────────────
-
-describe('EditTool.firstUseHelp', () => {
-  it('returns help text', () => {
-    const help = new EditTool().firstUseHelp();
-    expect(help).toContain('Edit a file');
-    expect(help).toContain('oldString');
-    expect(help).toContain('newString');
-  });
-});

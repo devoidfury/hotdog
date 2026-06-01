@@ -12,8 +12,6 @@ import { disabledSessionLog } from "../session_log.js";
 import { buildConfig } from "../init/resolution.js";
 import {
   loadConfig,
-  DEFAULT_SKILLS_PATH,
-  DEFAULT_PROMPTS_PATH,
   getProfile,
 } from "../config.js";
 
@@ -26,7 +24,7 @@ export async function runShowPrompt(cli) {
 
   // Load skills
   const skillsLoader = new SkillsLoader(
-    cli.skillsPath || config.skillsPath || DEFAULT_SKILLS_PATH,
+    cli.skillsPath || config.skillsPath,
   );
   skillsLoader.loadSkills();
   skillsLoader.autoActivate([
@@ -56,7 +54,7 @@ export async function runShowPrompt(cli) {
 
   // Load prompts
   const promptsLoader = new PromptsLoader(
-    cli.promptsPath || config.promptsPath || DEFAULT_PROMPTS_PATH,
+    cli.promptsPath || config.promptsPath,
   );
   promptsLoader.loadPrompts();
 

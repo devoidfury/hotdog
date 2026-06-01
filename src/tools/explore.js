@@ -12,10 +12,6 @@ const BIN_PATH = path.resolve(__dirname, "..", "main.js");
 export class ExploreTool {
   static TOOL_NAME = "explore";
 
-  static tryNewFromContext(ctx) {
-    return new ExploreTool();
-  }
-
   toToolDef() {
     return toolDef(
       ExploreTool.TOOL_NAME,

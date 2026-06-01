@@ -12,12 +12,6 @@ export class LoadSkillTool {
     this.skillsPath = options.skillsPath || DEFAULT_SKILLS_PATH;
   }
 
-  static tryNewFromContext(ctx) {
-    return new LoadSkillTool({
-      skillsPath: DEFAULT_SKILLS_PATH,
-    });
-  }
-
   toToolDef() {
     return toolDef(
       LoadSkillTool.TOOL_NAME,

@@ -9,10 +9,6 @@ export class ModelTool {
     this.modelRegistry = modelRegistry || {};
   }
 
-  static tryNewFromContext(ctx) {
-    return new ModelTool(ctx?.modelRegistry || {});
-  }
-
   toToolDef() {
     const models = Object.keys(this.modelRegistry).sort();
     const description =

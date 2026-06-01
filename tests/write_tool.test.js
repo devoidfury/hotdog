@@ -588,13 +588,3 @@ describe('WriteTool.execute — error cases', () => {
     fs.rmSync(dir, { recursive: true, force: true });
   });
 });
-
-// ── firstUseHelp ─────────────────────────────────────────────────────────────
-
-describe('WriteTool.firstUseHelp', () => {
-  it('returns help text', () => {
-    const help = new WriteTool().firstUseHelp();
-    expect(help).toContain('Write content to a file');
-    expect(help).toContain('parent directories');
-  });
-});

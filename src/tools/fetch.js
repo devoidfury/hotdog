@@ -9,10 +9,6 @@ const METHODS_WITH_BODY = ["POST", "PUT", "PATCH"];
 export class FetchTool {
   static TOOL_NAME = "fetch";
 
-  static tryNewFromContext(ctx) {
-    return new FetchTool();
-  }
-
   toToolDef() {
     return toolDef(
       FetchTool.TOOL_NAME,

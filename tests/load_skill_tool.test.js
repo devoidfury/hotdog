@@ -85,11 +85,6 @@ describe('LoadSkillTool', () => {
     expect(display).toBe('load_skill: my-skill');
   });
 
-  it('returns firstUseHelp', () => {
-    const tool = new LoadSkillTool({ skillsPath: tmpDir });
-    expect(tool.firstUseHelp()).toContain('Load a skill');
-  });
-
   it('handles object input', async () => {
     const skillDir = path.join(tmpDir, 'object-input');
     fs.mkdirSync(skillDir, { recursive: true });

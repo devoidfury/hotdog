@@ -38,10 +38,6 @@ describe('FetchTool', () => {
     expect(display).toContain('...');
   });
 
-  it('returns firstUseHelp', () => {
-    const tool = new FetchTool();
-    expect(tool.firstUseHelp()).toContain('HTTP requests');
-  });
 });
 
 // Test parseArgs via the tool's execute method

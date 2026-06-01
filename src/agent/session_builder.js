@@ -12,7 +12,7 @@ import { McpConnection } from "../mcp/index.js";
 import { TaskManager } from "./worker.js";
 import { Agent } from "./agent.js";
 import { SessionLog, disabledSessionLog, readSessionEntries, replayEntriesIntoContext } from "../session_log.js";
-import { DEFAULT_SKILLS_PATH, DEFAULT_PROMPTS_PATH, loadProfileFile, defaultCompactionSettings } from "../config.js";
+import { loadProfileFile } from "../config.js";
 import { MarkerMangler } from "../marker_mangler.js";
 
 /**
@@ -74,7 +74,7 @@ export class SessionBuilder {
       profileBody: this._resolved.profileBody,
       stream: this._resolved.stream,
       profileName: this._resolved.profileName,
-      compaction: this._config.compaction || defaultCompactionSettings,
+      compaction: this._config.compaction,
       config: this._config,
       skillsLoader: this._skillsLoader,
       promptsLoader: this._promptsLoader,
@@ -185,7 +185,7 @@ export class SessionBuilder {
 
   _buildSkillsLoader() {
     const loader = new SkillsLoader(
-      this._resolved.skillsPath || this._config.skillsPath || DEFAULT_SKILLS_PATH,
+      this._resolved.skillsPath || this._config.skillsPath,
     );
     loader.loadSkills();
     loader.autoActivate([
@@ -207,7 +207,7 @@ export class SessionBuilder {
 
   _buildPromptsLoader() {
     const loader = new PromptsLoader(
-      this._resolved.promptsPath || this._config.promptsPath || DEFAULT_PROMPTS_PATH,
+      this._resolved.promptsPath || this._config.promptsPath,
     );
     loader.loadPrompts();
     return loader;

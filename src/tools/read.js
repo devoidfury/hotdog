@@ -14,10 +14,6 @@ import { DEFAULT_READ_TOOL_LIMIT } from "../config.js";
 export class ReadTool {
   static TOOL_NAME = "read";
 
-  static tryNewFromContext(ctx) {
-    return new ReadTool();
-  }
-
   toToolDef() {
     return toolDef(
       ReadTool.TOOL_NAME,

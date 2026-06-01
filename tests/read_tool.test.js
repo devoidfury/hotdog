@@ -233,13 +233,3 @@ describe('ReadTool.execute — error cases', () => {
     fs.rmSync(dir, { recursive: true, force: true });
   });
 });
-
-// ── firstUseHelp ─────────────────────────────────────────────────────────────
-
-describe('ReadTool.firstUseHelp', () => {
-  it('returns help text', () => {
-    const help = new ReadTool().firstUseHelp();
-    expect(help).toContain("Read a file's contents");
-    expect(help).toContain('pagination');
-  });
-});

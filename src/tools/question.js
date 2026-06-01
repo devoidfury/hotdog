@@ -6,10 +6,6 @@ import { toolDef, param, toolResult } from "./registry.js";
 export class QuestionTool {
   static TOOL_NAME = "question";
 
-  static tryNewFromContext(ctx) {
-    return new QuestionTool();
-  }
-
   toToolDef() {
     return toolDef(
       QuestionTool.TOOL_NAME,

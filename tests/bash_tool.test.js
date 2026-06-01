@@ -63,11 +63,6 @@ describe('BashTool', () => {
     expect(display).toBe('bash: ls -la');
   });
 
-  it('returns firstUseHelp', () => {
-    const tool = new BashTool();
-    expect(BashTool.FIRST_USE_HELP).toContain('shell command');
-  });
-
   it('limits output lines', async () => {
     const tool = new BashTool({ maxOutputLines: 2 });
     const result = await tool.execute(JSON.stringify({ command: 'printf "line1\\nline2\\nline3\\nline4\\nline5"' }));

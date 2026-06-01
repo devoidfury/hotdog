@@ -78,7 +78,7 @@ describe('ProjectInfoTool', () => {
     expect(result).toContain('=== Project Info ===');
   });
 
-  it('returns firstUseHelp', () => {
+  it('has correct TOOL_NAME', () => {
     expect(ProjectInfoTool.TOOL_NAME).toBe('project_info');
   });
 });

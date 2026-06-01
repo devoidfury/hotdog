@@ -15,10 +15,6 @@ import { DEFAULT_MAX_EDIT_INPUT_SIZE } from "../config.js";
 export class EditTool {
   static TOOL_NAME = "edit";
 
-  static tryNewFromContext(ctx) {
-    return new EditTool();
-  }
-
   toToolDef() {
     return toolDef(
       EditTool.TOOL_NAME,

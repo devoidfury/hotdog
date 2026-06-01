@@ -14,10 +14,6 @@ import {
 export class WriteTool {
   static TOOL_NAME = "write";
 
-  static tryNewFromContext(ctx) {
-    return new WriteTool();
-  }
-
   toToolDef() {
     return toolDef(
       WriteTool.TOOL_NAME,

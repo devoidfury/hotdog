@@ -40,7 +40,7 @@ describe('FindTool.toToolDef', () => {
 describe('FindTool.callDisplay', () => {
   it('shows pattern and path with default max', () => {
     const display = new FindTool().callDisplay({ pattern: '*.js', path: 'src' });
-    expect(display).toBe('*.js in src (max 400)');
+    expect(display).toBe(`*.js in src (max ${DEFAULT_FIND_MAX_RESULTS})`);
   });
 
   it('shows file type filter', () => {
@@ -49,9 +49,9 @@ describe('FindTool.callDisplay', () => {
   });
 
   it('handles invalid input gracefully', () => {
-    expect(new FindTool().callDisplay('not json')).toBe('* in . (max 400)');
-    expect(new FindTool().callDisplay({})).toBe('* in . (max 400)');
-    expect(new FindTool().callDisplay(null)).toBe('* in . (max 400)');
+    expect(new FindTool().callDisplay('not json')).toBe(`* in . (max ${DEFAULT_FIND_MAX_RESULTS})`);
+    expect(new FindTool().callDisplay({})).toBe(`* in . (max ${DEFAULT_FIND_MAX_RESULTS})`);
+    expect(new FindTool().callDisplay(null)).toBe(`* in . (max ${DEFAULT_FIND_MAX_RESULTS})`);
   });
 });
 
@@ -206,15 +206,5 @@ describe('FindTool.execute — error cases', () => {
     );
     // Should not crash, may return "No files found" or error
     expect(result).toBeDefined();
-  });
-});
-
-// ── firstUseHelp ─────────────────────────────────────────────────────────────
-
-describe('FindTool.firstUseHelp', () => {
-  it('returns help text', () => {
-    const help = new FindTool().firstUseHelp();
-    expect(help).toContain('Find files');
-    expect(help).toContain('glob pattern');
   });
 });

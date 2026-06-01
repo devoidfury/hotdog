@@ -5,10 +5,6 @@ import { toolDef, param, toolResult } from './registry.js';
 export class PagerTool {
   static TOOL_NAME = 'pager';
 
-  static tryNewFromContext(ctx) {
-    return new PagerTool();
-  }
-
   toToolDef() {
     return toolDef(
       PagerTool.TOOL_NAME,

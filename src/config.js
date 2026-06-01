@@ -165,15 +165,10 @@ export async function loadConfig(configPath) {
     const content = await fs.readFile(configPathToUse, "utf-8");
     const raw = JSON.parse(content);
     // Normalize snake_case keys from Rust config to camelCase
-    return normalizeConfigKeys(raw);
+    return deepMerge(getDefaultConfig(), normalizeConfigKeys(raw));
   } catch (e) {
-    if (configPath) {
-      console.error(
-        `Error loading config from ${configPathToUse}: ${e.message}`,
-      );
-      process.exit(1);
-    }
-    return getDefaultConfig();
+    console.error(`Error loading config from ${configPathToUse}: ${e.message}`);
+    process.exit(1);
   }
 }
 
@@ -182,7 +177,7 @@ function getDefaultConfig() {
     providers: [],
     defaultProvider: null,
     aiUrl: null,
-    defaultModel: null,
+    defaultModel: DEFAULT_MODEL,
     temperature: null,
     thinker: DEFAULT_THINKER,
     toolfmt: DEFAULT_TOOL_FMT,
@@ -190,9 +185,9 @@ function getDefaultConfig() {
     role: DEFAULT_ROLE,
     hideTools: true,
     hideThinking: false,
-    skillsPath: null,
-    profilesPath: null,
-    promptsPath: null,
+    skillsPath: DEFAULT_SKILLS_PATH,
+    profilesPath: DEFAULT_PROFILES_PATH,
+    promptsPath: DEFAULT_PROMPTS_PATH,
     systemPromptTemplate: null,
     chatTimeoutSecs: DEFAULT_CHAT_TIMEOUT_SECS,
     embeddingsTimeoutSecs: DEFAULT_EMBEDDINGS_TIMEOUT_SECS,
@@ -203,9 +198,10 @@ function getDefaultConfig() {
     apiKey: null,
     maxToolOutputLines: DEFAULT_MAX_TOOL_OUTPUT_LINES,
     noLog: false,
+    compactDebug: false,
     mcpServers: [],
     compaction: defaultCompactionSettings,
-    showTokenUse: null,
+    showTokenUse: true,
     // LSP configuration
     lsp: {
       enabled: DEFAULT_LSP_ENABLED,
@@ -222,6 +218,7 @@ function getDefaultConfig() {
 // ── YAML Parsing ───────────────────────────────────────────────────────────
 
 import { YAML } from "bun";
+import { deepMerge } from "./lib";
 
 /**
  * Parse YAML front matter from a markdown string.
@@ -240,7 +237,7 @@ export function parseFrontMatter(content) {
  * Profile files use YAML front matter with fields: name, role, aspects, blacklist-tools, model, preload-skills, manager.
  */
 export function loadProfileFile(config, profileName) {
-  const profilesPath = config.profilesPath || DEFAULT_PROFILES_PATH;
+  const profilesPath = config.profilesPath;
   let filePath;
   try {
     filePath = path.join(profilesPath, `${profileName}.profile.md`);
@@ -300,7 +297,7 @@ export function getProfile(config, profileName) {
  * Returns an array of profile name strings.
  */
 export function getVisibleWorkerProfiles(config) {
-  const profilesPath = config.profilesPath || DEFAULT_PROFILES_PATH;
+  const profilesPath = config.profilesPath;
   let dir;
   try {
     dir = fs.readdirSync(profilesPath);

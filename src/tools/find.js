@@ -13,10 +13,6 @@ const execFileAsync = util.promisify(execFile);
 export class FindTool {
   static TOOL_NAME = "find";
 
-  static tryNewFromContext(ctx) {
-    return new FindTool();
-  }
-
   toToolDef() {
     return toolDef(
       FindTool.TOOL_NAME,

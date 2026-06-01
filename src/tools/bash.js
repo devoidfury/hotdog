@@ -16,13 +16,6 @@ export class BashTool {
       options.maxOutputLines || DEFAULT_MAX_TOOL_OUTPUT_LINES;
   }
 
-  static tryNewFromContext(ctx) {
-    return new BashTool({
-      timeoutMs: DEFAULT_BASH_TIMEOUT_MS,
-      maxOutputLines: DEFAULT_MAX_TOOL_OUTPUT_LINES,
-    });
-  }
-
   toToolDef() {
     return toolDef(
       BashTool.TOOL_NAME,

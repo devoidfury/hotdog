@@ -105,11 +105,6 @@ describe('ModelTool', () => {
     expect(display).toBe('-> model-1');
   });
 
-  it('returns firstUseHelp', () => {
-    const tool = new ModelTool({});
-    expect(tool.firstUseHelp()).toContain('Switch the AI model');
-  });
-
   it('sorts models alphabetically in definition', () => {
     const registry = {
       'zebra-model': { name: 'Zebra' },

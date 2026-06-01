@@ -1,6 +1,7 @@
 // Skills Extension
 // Manages skills loading, activation, and system prompt integration.
 // Hooks: systemPrompt:build, agent:toolContext, tools:register, slashCommands:register
+// Also registers CLI flags and config params for skill preloading.
 
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -10,13 +11,52 @@ import { render } from "../../src/context/render.js";
 import { patternMatches, SkillsLoader } from "./loader.js";
 export { LoadSkillTool } from "./load_skill.js";
 
+// ── Extension Config Registration ──────────────────────────────────────────
+
+/**
+ * Register CLI flags and config params for the skills extension.
+ */
+function registerSkillsConfig(core) {
+  // Register CLI flag for preloading skills
+  if (core.configRegistry) {
+    core.configRegistry.registerCliFlags([
+      {
+        short: null,
+        long: '--preload-skills',
+        description: 'Preload skills by name (comma-separated)',
+        type: 'array',
+        default: [],
+      },
+    ]);
+
+    core.configRegistry.registerConfigParams([
+      {
+        key: 'skills',
+        description: 'Skills extension configuration',
+        defaults: {
+          preloadSkills: [],
+        },
+      },
+    ]);
+  }
+}
+
 /**
  * Create the skills extension.
  */
 export function create(core) {
+  // Register CLI flags and config params
+  registerSkillsConfig(core);
+
   const skillsPath = core.config?.skillsPath || "/skills";
   const loader = new SkillsLoader(skillsPath);
   loader.loadSkills();
+
+  // Preload skills from config (CLI → config file priority)
+  const preloadSkills = _resolvePreloadSkills(core);
+  if (preloadSkills.length > 0) {
+    loader.preloadSkills(preloadSkills);
+  }
 
   return {
     hooks: {
@@ -151,4 +191,27 @@ export function buildSkillsPreamble(loader) {
   };
 
   return render(template, context);
+}
+
+/**
+ * Resolve preload skills from CLI args or config.
+ * Priority: CLI args → config file → empty.
+ *
+ * @param {Object} core - The core object.
+ * @returns {string[]} Array of skill names to preload.
+ */
+function _resolvePreloadSkills(core) {
+  // Check CLI args first
+  const cliSkills = core.cli?.preloadSkills;
+  if (cliSkills && cliSkills.length > 0) {
+    return cliSkills;
+  }
+
+  // Check config file
+  const configSkills = core.config?.skills?.preloadSkills;
+  if (configSkills && configSkills.length > 0) {
+    return configSkills;
+  }
+
+  return [];
 }

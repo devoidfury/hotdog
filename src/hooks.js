@@ -196,6 +196,19 @@ export const HOOKS = {
   // Compaction — extension exposes strategy list and current setting
   COMPACT_STRATEGY_LIST: 'compact:strategyList',
   COMPACT_STRATEGY_SET: 'compact:strategySet',
+
+  // Config — extensions register their CLI flags and config params
+  CONFIG_CLI_FLAGS_REGISTER: 'config:cliFlagsRegister',
+  CONFIG_PARAMS_REGISTER: 'config:paramsRegister',
+};
+
+/**
+ * Extension capability constants.
+ * Extensions can export a `provides` array declaring what they offer.
+ */
+export const EXTENSION_PROVIDES = {
+  CLI_SUBCOMMANDS: 'cli:subcommands',  // Extension provides CLI subcommands
+  TOOLS: 'tools',                      // Extension provides tools
 };
 
 /**

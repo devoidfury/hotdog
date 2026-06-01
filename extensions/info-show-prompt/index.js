@@ -1,6 +1,7 @@
 // Info-Show-Prompt Extension
 // Provides CLI subcommands (info, show-prompt) that run outside the agent loop.
 // Registers subcommands via the cli:subcommandsRegister hook.
+// Capability declared in extension.json metadata file.
 
 import { HOOKS } from "../../src/hooks.js";
 import { LlmClient } from "../../src/llm_client/client.js";
@@ -216,7 +217,11 @@ async function runShowPrompt(cli, config, buildConfig) {
     "model",
     "load_skill",
   ]);
-  skillsLoader.preloadSkills(resolved.preloadSkills);
+  // Preload skills from CLI args or config (skills extension now handles this)
+  const preloadSkills = cli.preloadSkills || config.skills?.preloadSkills || [];
+  if (preloadSkills.length > 0) {
+    skillsLoader.preloadSkills(preloadSkills);
+  }
 
   // Create client
   const client = new LlmClient({

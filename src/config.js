@@ -8,6 +8,34 @@ import { parseFrontMatter } from "./utils.js";
 import { deepMerge } from "./utils.js";
 import { render } from "./context/render.js";
 
+// ── Extension Config Helpers ──────────────────────────────────────────────
+
+/**
+ * Merge extension-registered config defaults into the base config.
+ *
+ * @param {Object} defaultConfig - The default config object.
+ * @param {Array<{key: string, defaults: Object}>} extParams - Extension config params.
+ * @returns {Object} Merged config.
+ */
+export function mergeExtensionConfigDefaults(defaultConfig, extParams) {
+  if (!extParams || extParams.length === 0) {
+    return defaultConfig;
+  }
+
+  const merged = { ...defaultConfig };
+
+  for (const param of extParams) {
+    if (merged[param.key] === undefined) {
+      merged[param.key] = { ...param.defaults };
+    } else if (typeof merged[param.key] === 'object' && merged[param.key] !== null) {
+      // Deep merge with extension defaults
+      merged[param.key] = deepMerge(merged[param.key], param.defaults);
+    }
+  }
+
+  return merged;
+}
+
 // ── LSP Configuration Defaults ──────────────────────────────────────────
 
 export const DEFAULT_LSP_ENABLED = false;
@@ -125,8 +153,14 @@ function normalizeConfigKeys(obj) {
   return normalized;
 }
 
-function getDefaultConfig() {
-  return {
+/**
+ * Get the default configuration.
+ *
+ * @param {Array<{key: string, defaults: Object}>} [extParams] - Extension config params to merge.
+ * @returns {Object} Default config object.
+ */
+function getDefaultConfig(extParams) {
+  const baseConfig = {
     providers: [],
     defaultProvider: null,
     aiUrl: null,
@@ -144,6 +178,10 @@ function getDefaultConfig() {
     systemPromptTemplate: null,
     chatTimeoutSecs: DEFAULT_CHAT_TIMEOUT_SECS,
     embeddingsTimeoutSecs: DEFAULT_EMBEDDINGS_TIMEOUT_SECS,
+    // Extension settings
+    extensionPaths: ["builtins"],
+    extensionAutoload: false,
+    extensions: [],
     profile: null,
     profiles: {},
     theme: null,
@@ -166,6 +204,8 @@ function getDefaultConfig() {
       serverStartupTimeoutMs: DEFAULT_LSP_SERVER_TIMEOUT_MS,
     },
   };
+
+  return mergeExtensionConfigDefaults(baseConfig, extParams);
 }
 
 /**
@@ -178,8 +218,12 @@ function getDefaultConfig() {
  *    b. ~/.config/oa-agent/default.json (home directory)
  *    Silently fall through to defaults if none exist.
  * 3. Return defaults as the final fallback.
+ *
+ * @param {string} [configPath] - Path to config file.
+ * @param {Array<{key: string, defaults: Object}>} [extParams] - Extension config params to merge.
+ * @returns {Promise<Object>} Resolved config object.
  */
-export async function loadConfig(configPath) {
+export async function loadConfig(configPath, extParams) {
   const fs = await import("node:fs/promises");
   const path = await import("node:path");
   const os = await import("node:os");
@@ -209,14 +253,14 @@ export async function loadConfig(configPath) {
   }
 
   if (!configPathToUse) {
-    return getDefaultConfig();
+    return getDefaultConfig(extParams);
   }
 
   try {
     const content = await fs.readFile(configPathToUse, "utf-8");
     const raw = JSON.parse(content);
     // Normalize snake_case keys from Rust config to camelCase
-    return deepMerge(getDefaultConfig(), normalizeConfigKeys(raw));
+    return deepMerge(getDefaultConfig(extParams), normalizeConfigKeys(raw));
   } catch (e) {
     console.error(`Error loading config from ${configPathToUse}: ${e.message}`);
     process.exit(1);
@@ -247,7 +291,6 @@ export function loadProfileFile(config, profileName) {
       blacklistTools: fm["blacklist-tools"] || fm.blacklist_tools || [],
       whitelistTools: fm["whitelist-tools"] || fm.whitelist_tools || null,
       aspects: fm.aspects || [],
-      preloadSkills: fm["preload-skills"] || fm.preload_skills || [],
       manager: fm.manager || false,
       visibleWorker: fm["visible-worker"] || fm.visible_worker || false,
     };
@@ -277,7 +320,6 @@ export function getProfile(config, profileName) {
     skills: [],
     role: null,
     model: null,
-    preloadSkills: [],
     manager: false,
     cwdBoundary: null,
     aspects: [],
@@ -350,7 +392,6 @@ function loadProfileFiles(profilesPath) {
       blacklistTools: fm["blacklist-tools"] || fm.blacklist_tools || [],
       whitelistTools: fm["whitelist-tools"] || fm.whitelist_tools || null,
       model: fm.model || null,
-      preloadSkills: fm["preload-skills"] || fm.preload_skills || [],
       manager: fm.manager || false,
     };
   }
@@ -410,9 +451,7 @@ export function initSystemPromptTemplate(templatePath) {
     cachedSystemPromptTemplate = fs.readFileSync(templateFile, "utf-8");
   } catch {
     // Fallback: minimal template
-    cachedSystemPromptTemplate = `# Role & Mission
-
-{{ role }}
+    cachedSystemPromptTemplate = `{{ role }}
 
 Use the instructions below and the tools available to you to assist the user.
 
@@ -423,12 +462,12 @@ Use the instructions below and the tools available to you to assist the user.
 
 # Environment
 
-<m_uydrbi3z8epdsyc2>
+<system-notice>
   Agent: oa-agent (Model: {{ model }}) (Profile: {{ profile_name }})
   CWD: {{ cwd }}
   Platform: {{ platform }}
   Session: {{ session_start }}
-</m_uydrbi3z8epdsyc2>
+</system-notice>
 
 {% if aspects|length > 0 -%}
 # Guidelines
@@ -441,12 +480,12 @@ Use the instructions below and the tools available to you to assist the user.
 {% if agents_md %}
 # Project Context
 
-<m_jiof4mhnkmxkk6gd>
+<file-include>
 <path>./AGENTS.md</path>
 <contents>
 {{ agents_md }}
 </contents>
-</m_jiof4mhnkmxkk6gd>
+</file-include>
 {%- endif %}`;
   }
 
@@ -470,10 +509,17 @@ function resolveModelWithProvider(name, provider) {
 /**
  * Resolve model name with priority: profile → CLI → provider default → config → default.
  */
-function resolveModel(cliModel, profileModel, configModel, provider, defaultModel) {
+function resolveModel(
+  cliModel,
+  profileModel,
+  configModel,
+  provider,
+  defaultModel,
+) {
   if (profileModel) return resolveModelWithProvider(profileModel, provider);
   if (cliModel) return resolveModelWithProvider(cliModel, provider);
-  if (provider?.models?.length) return resolveModelWithProvider(provider.models[0].name, provider);
+  if (provider?.models?.length)
+    return resolveModelWithProvider(provider.models[0].name, provider);
   if (configModel) return resolveModelWithProvider(configModel, provider);
   return defaultModel || "qwen3.5-0.8b";
 }
@@ -550,9 +596,9 @@ export function allProfilesForSwitch(options) {
     const configProfile = configProfiles?.[name] || null;
     // Aspects: file profile → config profile
     const aspectNames =
-      (fileProfile?.aspects?.length ? fileProfile.aspects : null)
-      ?? (configProfile?.aspects?.length ? configProfile.aspects : null)
-      ?? [];
+      (fileProfile?.aspects?.length ? fileProfile.aspects : null) ??
+      (configProfile?.aspects?.length ? configProfile.aspects : null) ??
+      [];
     const sp = resolveSwitchProfile(
       name,
       fileProfile,
@@ -621,8 +667,7 @@ export function buildAgentConfig(options) {
   const profileName = cli.profile || config.profile || "default";
 
   // Get config profile
-  const configProfile =
-    config.profiles?.[profileName] ?? null;
+  const configProfile = config.profiles?.[profileName] ?? null;
 
   // Get file profile
   const fileProfile = profileFiles[profileName] ?? null;
@@ -632,14 +677,20 @@ export function buildAgentConfig(options) {
   // Provider
   const providerName = cli.provider || config.defaultProvider;
   const provider = providerName
-    ? providers.find((p) => p.name === providerName) ?? null
+    ? (providers.find((p) => p.name === providerName) ?? null)
     : null;
 
   // Base URL: provider → CLI → config → default
-  const baseUrl = provider?.url ?? cli.url ?? config.aiUrl ?? "http://ai365.home:9292";
+  const baseUrl =
+    provider?.url ?? cli.url ?? config.aiUrl ?? "http://ai365.home:9292";
 
   // API key: provider → CLI → config → env
-  const apiKey = provider?.apiKey ?? cli.apiKey ?? config.apiKey ?? process.env.AI_API_KEY ?? null;
+  const apiKey =
+    provider?.apiKey ??
+    cli.apiKey ??
+    config.apiKey ??
+    process.env.AI_API_KEY ??
+    null;
 
   // Model
   const model = resolveModel(
@@ -652,19 +703,20 @@ export function buildAgentConfig(options) {
 
   // Role: CLI → config → file profile → default
   const role =
-    cli.role
-    ?? (config.role?.trim() ? config.role : null)
-    ?? (fileProfile?.role?.trim() ? fileProfile.role : null)
-    ?? defaultRole;
+    cli.role ??
+    (config.role?.trim() ? config.role : null) ??
+    (fileProfile?.role?.trim() ? fileProfile.role : null) ??
+    defaultRole;
 
   // Profile merge
   let profile;
   if (configProfile || fileProfile) {
     profile = { ...configProfile };
     if (fileProfile) {
-      if (fileProfile.whitelistTools != null) profile.whitelistTools = fileProfile.whitelistTools;
-      if (fileProfile.blacklistTools?.length) profile.blacklistTools = fileProfile.blacklistTools;
-      if (fileProfile.preloadSkills?.length) profile.preloadSkills = fileProfile.preloadSkills;
+      if (fileProfile.whitelistTools != null)
+        profile.whitelistTools = fileProfile.whitelistTools;
+      if (fileProfile.blacklistTools?.length)
+        profile.blacklistTools = fileProfile.blacklistTools;
       if (fileProfile.manager) profile.manager = true;
     }
   } else {
@@ -674,7 +726,6 @@ export function buildAgentConfig(options) {
       skills: [],
       role: null,
       model: null,
-      preloadSkills: [],
       manager: false,
       cwdBoundary: null,
       aspects: [],
@@ -683,22 +734,22 @@ export function buildAgentConfig(options) {
 
   // Aspects: file profile → config profile
   const aspects =
-    (fileProfile?.aspects?.length ? fileProfile.aspects : null)
-    ?? (profile.aspects?.length ? profile.aspects : null)
-    ?? [];
+    (fileProfile?.aspects?.length ? fileProfile.aspects : null) ??
+    (profile.aspects?.length ? profile.aspects : null) ??
+    [];
 
   // Profile body with template rendering
   const profileBody = fileProfile?.body?.trim()
-    ? (cli.prompt
-        ? (() => { try { return render(fileProfile.body, { ARGS: cli.prompt }); } catch { return fileProfile.body; } })()
-        : fileProfile.body)
+    ? cli.prompt
+      ? (() => {
+          try {
+            return render(fileProfile.body, { ARGS: cli.prompt });
+          } catch {
+            return fileProfile.body;
+          }
+        })()
+      : fileProfile.body
     : "";
-
-  // Preload skills
-  const preloadSkills =
-    cli.preloadSkills?.length > 0
-      ? cli.preloadSkills
-      : profile.preloadSkills || [];
 
   // Format strings: CLI → config → default
   const thinkerFormat = cli.thinker ?? config.thinker ?? "[Thinking: {}]";
@@ -708,20 +759,24 @@ export function buildAgentConfig(options) {
 
   // No-log: CLI → env → config → false
   const noLog =
-    cli.noLog !== undefined && cli.noLog !== false
-    || process.env.OA_AGENT_LOG === "false"
-    || process.env.OA_AGENT_NO_LOG === "1"
-    || config.noLog
-    || false;
+    (cli.noLog !== undefined && cli.noLog !== false) ||
+    process.env.OA_AGENT_LOG === "false" ||
+    process.env.OA_AGENT_NO_LOG === "1" ||
+    config.noLog ||
+    false;
 
   // Theme: CLI → config → 'dark'
   const theme =
-    (cli.theme?.trim() || config.theme?.trim() || "dark")
-    .replace(/^\s+|\s+$/g, "") || "dark";
+    (cli.theme?.trim() || config.theme?.trim() || "dark").replace(
+      /^\s+|\s+$/g,
+      "",
+    ) || "dark";
 
   // Colors
   const isColorPalette = (obj) =>
-    obj != null && typeof obj === "object" && ("thinking" in obj || "tool_call" in obj || "tool_result" in obj);
+    obj != null &&
+    typeof obj === "object" &&
+    ("thinking" in obj || "tool_call" in obj || "tool_result" in obj);
   const useColors =
     !cli.noColors &&
     (isColorPalette(config.colors) || (cli.colors ?? config.colors ?? true));
@@ -747,7 +802,6 @@ export function buildAgentConfig(options) {
     profile,
     aspects,
     profileBody,
-    preloadSkills,
     hideTools: cli.hideTools === false ? false : config.hideTools !== false,
     hideThinking:
       cli.hideThinking === true

@@ -1,7 +1,8 @@
 // CLI argument parsing.
 // Extracted from main.js.
+// Supports dynamic CLI flags registered via ConfigRegistry.
 
-export function parseArgs() {
+export function parseArgs(configRegistry = null) {
   const args = process.argv.slice(2);
   const options = {
     config: null,
@@ -31,149 +32,212 @@ export function parseArgs() {
     tokens: false,
     theme: null,
     colors: null,
-    preloadSkills: [],
     subcommand: null,
     reviewToolIndex: false,
     systemPromptTemplate: null,
     wantsJson: false,
   };
 
+  // Initialize extension-provided options from defaults
+  if (configRegistry) {
+    const extDefaults = configRegistry.buildDefaults();
+    for (const [key, value] of Object.entries(extDefaults)) {
+      options[key] = null; // Will be set from CLI or config file
+    }
+  }
+
+  // Build a lookup map of all known flags (core + extension)
+  const flagMap = new Map();
+
+  // Core flags
+  const coreFlags = [
+    { short: '-f', long: '--config', type: 'string', hasValue: true },
+    { short: '-c', long: '--prompt', type: 'string', hasValue: true },
+    { short: '-m', long: '--model', type: 'string', hasValue: true },
+    { short: null, long: '--ai-url', type: 'string', hasValue: true },
+    { short: null, long: '--url', type: 'string', hasValue: true, deprecated: true },
+    { short: '-k', long: '--api-key', type: 'string', hasValue: true },
+    { short: '-p', long: '--profile', type: 'string', hasValue: true },
+    { short: null, long: '--provider', type: 'string', hasValue: true },
+    { short: null, long: '--role', type: 'string', hasValue: true },
+    { short: null, long: '--skills-path', type: 'string', hasValue: true },
+    { short: null, long: '--prompts-path', type: 'string', hasValue: true },
+    { short: null, long: '--chat-timeout', type: 'number', hasValue: true },
+    { short: null, long: '--embeddings-timeout', type: 'number', hasValue: true },
+    { short: null, long: '--no-stream', type: 'boolean', hasValue: false },
+    { short: null, long: '--show-tools', type: 'boolean', hasValue: false },
+    { short: null, long: '--hide-tools', type: 'boolean', hasValue: false },
+    { short: null, long: '--show-thinking', type: 'boolean', hasValue: false },
+    { short: null, long: '--hide-thinking', type: 'boolean', hasValue: false },
+    { short: '-t', long: '--thinker', type: 'string', hasValue: true },
+    { short: null, long: '--toolfmt', type: 'string', hasValue: true },
+    { short: null, long: '--tool-output-fmt', type: 'string', hasValue: true },
+    { short: null, long: '--no-log', type: 'boolean', hasValue: false },
+    { short: '-l', long: '--loud', type: 'boolean', hasValue: false },
+    { short: null, long: '--compact-debug', type: 'boolean', hasValue: false },
+    { short: '-s', long: '--session-id', type: 'string', hasValue: true },
+    { short: null, long: '--tokens', type: 'boolean', hasValue: false },
+    { short: null, long: '--theme', type: 'string', hasValue: true },
+    { short: null, long: '--colors', type: 'boolean', hasValue: false },
+    { short: null, long: '--no-colors', type: 'boolean', hasValue: false },
+    { short: null, long: '--system-prompt-template', type: 'string', hasValue: true },
+    { short: null, long: '--json', type: 'boolean', hasValue: false },
+    { short: '-v', long: '--version', type: 'boolean', hasValue: false },
+    { short: '-h', long: '--help', type: 'boolean', hasValue: false },
+  ];
+
+  for (const flag of coreFlags) {
+    if (flag.short) {
+      flagMap.set(flag.short, flag);
+    }
+    flagMap.set(flag.long, flag);
+  }
+
+  // Add extension flags
+  if (configRegistry) {
+    const extFlags = configRegistry.getCliFlags();
+    for (const flag of extFlags) {
+      const entry = {
+        type: flag.type || 'string',
+        hasValue: flag.type !== 'boolean',
+        description: flag.description,
+        extension: true,
+        // Store the original long flag name for key extraction
+        longName: flag.long,
+      };
+      if (flag.parse) {
+        entry.parse = flag.parse;
+      }
+      if (flag.short) {
+        flagMap.set(flag.short, entry);
+      }
+      if (flag.long) {
+        flagMap.set(flag.long, entry);
+      }
+    }
+  }
+
+  // Helper: extract option key from flag name
+  function extractKey(flagName) {
+    return flagName.replace(/^-+/, '').replace(/-/g, '_').toLowerCase();
+  }
+
   let i = 0;
   while (i < args.length) {
     const arg = args[i];
-    switch (arg) {
-      case "-f":
-      case "--config":
-        options.config = args[++i];
-        break;
-      case "-c":
-      case "--prompt":
-      case "prompt":
-        options.prompt = args[++i];
-        break;
-      case "-m":
-      case "--model":
-        options.model = args[++i];
-        break;
-      case "--ai-url":
-        options.aiUrl = args[++i];
-        break;
-      case "--url":
-        console.warn("Warning: --url is deprecated, use --ai-url");
-        options.aiUrl = args[++i];
-        break;
-      case "-k":
-      case "--api-key":
-        options.apiKey = args[++i];
-        break;
-      case "-p":
-      case "--profile":
-        options.profile = args[++i];
-        break;
-      case "--provider":
-        options.provider = args[++i];
-        break;
-      case "--role":
-        options.role = args[++i];
-        break;
-      case "--skills-path":
-        options.skillsPath = args[++i];
-        break;
-      case "--prompts-path":
-        options.promptsPath = args[++i];
-        break;
-      case "--chat-timeout":
-        options.chatTimeout = parseInt(args[++i], 10);
-        break;
-      case "--embeddings-timeout":
-        options.embeddingsTimeout = parseInt(args[++i], 10);
-        break;
-      case "--no-stream":
-        options.stream = false;
-        break;
-      case "--show-tools":
-        options.hideTools = false;
-        break;
-      case "--hide-tools":
-        options.hideTools = true;
-        break;
-      case "--show-thinking":
-        options.hideThinking = false;
-        break;
-      case "--hide-thinking":
-        options.hideThinking = true;
-        break;
-      case "-t":
-      case "--thinker":
-        options.thinker = args[++i];
-        break;
-      case "--toolfmt":
-        options.toolfmt = args[++i];
-        break;
-      case "--tool-output-fmt":
-        options.toolOutputFmt = args[++i];
-        break;
-      case "--no-log":
-        options.noLog = true;
-        break;
-      case "-l":
-      case "--loud":
-        options.loud = true;
-        break;
-      case "--compact-debug":
-        options.compactDebug = true;
-        break;
-      case "-s":
-      case "--session-id":
-        options.sessionId = args[++i];
-        break;
-      case "--tokens":
-        options.tokens = true;
-        break;
-      case "--theme":
-        options.theme = args[++i];
-        break;
-      case "--colors":
-        options.colors = true;
-        break;
-      case "--no-colors":
-        options.colors = false;
-        break;
-      case "--preload-skills":
-        options.preloadSkills.push(...args[++i].split(","));
-        break;
-      case "--system-prompt-template":
-        options.systemPromptTemplate = args[++i];
-        break;
-      case "info":
-        options.subcommand = "info";
-        break;
-      case "--json":
-        options.wantsJson = true;
-        break;
-      case "show-prompt":
-        options.subcommand = "show-prompt";
-        break;
-      case "review":
-        options.subcommand = "review";
-        break;
-      case "--tool-index":
-        if (options.subcommand === "review") {
-          options.reviewToolIndex = true;
+
+    // Check if this is a known flag
+    const flagDef = flagMap.get(arg);
+
+    if (flagDef) {
+      // Handle subcommand aliases (like "prompt" as a subcommand)
+      if (flagDef.isSubcommand) {
+        options.subcommand = 'prompt';
+        if (flagDef.hasValue && i + 1 < args.length) {
+          options.prompt = args[++i];
         }
-        break;
-      case "-v":
-      case "--version":
-        options.version = true;
-        break;
-      case "-h":
-      case "--help":
-        options.help = true;
-        break;
-      default:
-        // TODO: warn arg unrecognized
-        break;
+        i++;
+        continue;
+      }
+
+      // Handle deprecated flags
+      if (flagDef.deprecated) {
+        console.warn(`Warning: ${arg} is deprecated, use ${flagDef.long}`);
+      }
+
+      // Handle boolean flags
+      if (!flagDef.hasValue) {
+        // Core boolean flags (explicit handling)
+        if (arg === '--no-stream') {
+          options.stream = false;
+        } else if (arg === '--show-tools') {
+          options.hideTools = false;
+        } else if (arg === '--hide-tools') {
+          options.hideTools = true;
+        } else if (arg === '--show-thinking') {
+          options.hideThinking = false;
+        } else if (arg === '--hide-thinking') {
+          options.hideThinking = true;
+        } else if (arg === '--no-log') {
+          options.noLog = true;
+        } else if (arg === '--tokens') {
+          options.tokens = true;
+        } else if (arg === '--colors') {
+          options.colors = true;
+        } else if (arg === '--no-colors') {
+          options.colors = false;
+        } else if (arg === '--json') {
+          options.wantsJson = true;
+        } else if (arg === '--version') {
+          options.version = true;
+        } else if (arg === '--help') {
+          options.help = true;
+        } else if (arg === '--loud') {
+          options.loud = true;
+        } else if (arg === '--compact-debug') {
+          options.compactDebug = true;
+        }
+        // Extension boolean flags (generic handling)
+        else if (flagDef.extension) {
+          // Use the arg itself to extract the key (handles both short and long)
+          const key = extractKey(arg);
+          options[key] = true;
+        }
+        i++;
+        continue;
+      }
+
+      // Handle flags with values
+      if (i + 1 >= args.length) {
+        console.error(`Error: ${arg} requires a value`);
+        process.exit(1);
+      }
+
+      const value = args[++i];
+
+      // Parse the value based on type
+      let parsedValue = value;
+      if (flagDef.type === 'number' || flagDef.type === 'int') {
+        parsedValue = parseInt(value, 10);
+        if (isNaN(parsedValue)) {
+          console.error(`Error: ${arg} requires a numeric value`);
+          process.exit(1);
+        }
+      } else if (flagDef.type === 'array') {
+        parsedValue = value.split(',');
+      } else if (typeof flagDef.parse === 'function') {
+        parsedValue = flagDef.parse(value);
+      }
+
+      // Store in options using the long flag name as key
+      // For extension flags, use longName; for core flags, use long
+      const flagLong = flagDef.extension ? flagDef.longName : flagDef.long;
+      const key = extractKey(flagLong);
+      options[key] = parsedValue;
+      i++;
+      continue;
     }
+
+    // Check if this looks like an unknown flag
+    if (arg.startsWith('-')) {
+      // Could be an unknown flag — warn and skip
+      console.warn(`Warning: unknown flag '${arg}'`);
+      i++;
+      continue;
+    }
+
+    // Positional argument — treat as subcommand or prompt
+    if (arg === 'info') {
+      options.subcommand = 'info';
+    } else if (arg === 'show-prompt') {
+      options.subcommand = 'show-prompt';
+    } else if (arg === 'review') {
+      options.subcommand = 'review';
+    } else if (options.prompt === null) {
+      // First positional argument is the prompt
+      options.prompt = arg;
+    }
+
     i++;
   }
 
@@ -218,7 +282,28 @@ Options:
   --theme <name>            Theme (dark, light, monochrome, or file path)
   --colors                  Enable colors
   --no-colors               Disable colors
-  --preload-skills <name>   Preload a skill by name
   --system-prompt-template <path> Custom system prompt template
   -v, --version             Show version
   -h, --help                Show help`;
+
+/**
+ * Generate combined help text including extension flags.
+ *
+ * @param {import('./config-registry.js').ConfigRegistry} [configRegistry]
+ * @returns {string}
+ */
+export function generateHelpText(configRegistry) {
+  let help = HELP_TEXT;
+
+  if (configRegistry) {
+    const extHelp = configRegistry.getCliHelpText();
+    if (extHelp) {
+      help = help.replace(
+        /(-h, --help\s+Show help`)/,
+        `$1\n${extHelp}`
+      );
+    }
+  }
+
+  return help;
+}

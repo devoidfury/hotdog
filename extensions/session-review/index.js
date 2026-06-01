@@ -1,6 +1,7 @@
 // Session Review Extension
 // Provides the `review` CLI subcommand for inspecting session logs.
 // Registers subcommands via the cli:subcommandsRegister hook.
+// Capability declared in extension.json metadata file.
 
 import { HOOKS } from "../../src/hooks.js";
 import { CliOutputSink } from "../../src/ui/cli.js";

@@ -1,0 +1,5 @@
+{
+  "name": "session-review",
+  "provides": ["cli:subcommands"],
+  "description": "Provides the review CLI subcommand for session log inspection"
+}

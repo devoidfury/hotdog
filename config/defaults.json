@@ -7,6 +7,8 @@
   "hide_tools": true,
   "show_token_use": true,
   "skills_path": "/skills",
+  "extension_paths": ["builtins"],
+  "extension_autoload": true,
   "profiles": {
     "default": {
       "blacklist_tools": ["patch", "explore"]

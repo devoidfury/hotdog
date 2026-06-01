@@ -1,6 +1,8 @@
 // Info-Show-Prompt Extension
 // Provides CLI subcommands (info, show-prompt) that run outside the agent loop.
+// Registers subcommands via the cli:subcommandsRegister hook.
 
+import { HOOKS } from "../../src/hooks.js";
 import { LlmClient } from "../../src/llm_client/client.js";
 import { SkillsLoader } from "../skills/loader.js";
 import { DEFAULT_SKILLS_PATH } from "../../src/config.js";
@@ -263,23 +265,54 @@ function buildSystemPrompt(resolved, skillsLoader, config) {
 
 /**
  * Create the info-show-prompt extension.
+ * Registers subcommands via the cli:subcommandsRegister hook.
  */
 export function create(core) {
-  const cli = {
-    // core will be set by main.js before use
-    _core: {},
-    info: function (cmdLineArgs) {
-      const { config, buildConfig } = this._core;
-      return runInfo(cmdLineArgs, config, buildConfig);
-    },
-    "show-prompt": function (cmdLineArgs) {
-      const { config, buildConfig } = this._core;
-      return runShowPrompt(cmdLineArgs, config, buildConfig);
-    },
-  };
+  // Register subcommands if the registry is available
+  if (core.cliSubcommandRegistry) {
+    core.cliSubcommandRegistry.register("info", {
+      description: "Show system info and diagnostics",
+      requiresConfig: true,
+      handler: async (cli, core) => {
+        const { config, buildConfig } = core;
+        await runInfo(cli, config, buildConfig);
+      },
+    });
+
+    core.cliSubcommandRegistry.register("show-prompt", {
+      description: "Show rendered system prompt with tool definitions",
+      requiresConfig: true,
+      handler: async (cli, core) => {
+        const { config, buildConfig } = core;
+        await runShowPrompt(cli, config, buildConfig);
+      },
+    });
+  }
 
   return {
-    // CLI handlers — these are called directly from main.js
-    cli,
+    hooks: core.hooks
+      ? {
+          // Register via hook as well for backward compatibility
+          [HOOKS.CLI_SUBCOMMANDS_REGISTER]: async (registry) => {
+            registry.register("info", {
+              description: "Show system info and diagnostics",
+              requiresConfig: true,
+              handler: async (cli, core) => {
+                const { config, buildConfig } = core;
+                await runInfo(cli, config, buildConfig);
+              },
+            });
+
+            registry.register("show-prompt", {
+              description: "Show rendered system prompt with tool definitions",
+              requiresConfig: true,
+              handler: async (cli, core) => {
+                const { config, buildConfig } = core;
+                await runShowPrompt(cli, config, buildConfig);
+              },
+            });
+          },
+        }
+      : undefined,
   };
 }

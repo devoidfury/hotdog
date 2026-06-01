@@ -4,7 +4,7 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { cwd } from "node:process";
-import { initSystemPromptTemplate as _initTemplate } from "../init/resolution.js";
+import { initSystemPromptTemplate as _initTemplate } from "../config.js";
 import { render, render as renderTemplate } from "./render.js";
 
 export { renderTemplate };
@@ -58,7 +58,7 @@ let cachedTemplate = null;
 
 /**
  * Load the system prompt template.
- * Uses the pre-initialized template from init/resolution.js if available,
+ * Uses the pre-initialized template from config.js if available,
  * otherwise loads from disk or falls back to minimal template.
  */
 export function loadSystemPromptTemplate(templatePath) {

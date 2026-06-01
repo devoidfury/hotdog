@@ -5,7 +5,7 @@
 import { Message } from "../context/message.js";
 import { LlmError } from "../llm_client/client.js";
 import { OUTPUT_EVENT } from "../context/output.js";
-import { HOOKS } from "./hooks.js";
+import { HOOKS } from "../hooks.js";
 
 /**
  * Minimal Agent that runs the LLM loop and delegates behavior to hooks.

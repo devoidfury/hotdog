@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from 'bun:test';
-import { HookSystem, HOOKS } from '../../src/core/hooks.js';
+import { HookSystem, HOOKS } from '../../src/hooks.js';
 import { ExtensionLoader } from '../../src/core/extensions.js';
 import { ToolRegistry } from '../../src/core/tool-registry.js';
 import { create as createCompactionExtension } from '../../extensions/compaction/index.js';
@@ -79,7 +79,8 @@ describe('Hook + Extension Integration', () => {
     // explore is disabled by default
     expect(toolNames).not.toContain('explore');
     expect(toolNames).toContain('model');
-    expect(toolNames).toContain('load_skill');
+    // load_skill is registered by skills extension, not core-tools
+    expect(toolNames).not.toContain('load_skill');
     expect(toolNames).toContain('review');
     // project_info should NOT be registered (disabled)
     expect(toolNames).not.toContain('project_info');

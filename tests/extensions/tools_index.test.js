@@ -9,11 +9,11 @@ import { ToolRegistry } from "../../extensions/core-tools/registry.js";
 describe("CORE_TOOL_NAMES", () => {
   it("contains all expected core tools", () => {
     // project_info is included but disabled by default
+    // load_skill is registered by the skills extension, not core-tools
     const expected = [
       "bash",
       "write",
       "model",
-      "load_skill",
       "read",
       "question",
       "pager",
@@ -128,11 +128,11 @@ describe("createToolFactory", () => {
     expect(tool).not.toBeNull();
   });
 
-  it("creates load_skill tool", () => {
+  // load_skill is registered by the skills extension, not the core-tools factory
+  it("returns null for load_skill (registered by skills extension)", () => {
     const factory = createToolFactory();
     const tool = factory.createTool("load_skill", {});
-    expect(tool).not.toBeNull();
-    expect(typeof tool.execute).toBe("function");
+    expect(tool).toBeNull();
   });
 
   it("creates review tool", () => {

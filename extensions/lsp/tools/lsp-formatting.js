@@ -2,7 +2,7 @@
 
 import fs from 'node:fs';
 import { LspBaseTool, CompletionKind, SymbolKind, DiagnosticSeverity } from './base.js';
-import { toolDef, param, ToolResult } from '../../../extensions/core-tools/registry.js';
+import { toolDef, param, ToolResult } from '../../core-tools/registry.js';
 import { formatError } from '../../../src/context/error.js';
 
 export class LspFormattingTool extends LspBaseTool {

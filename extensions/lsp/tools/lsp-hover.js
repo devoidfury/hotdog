@@ -1,18 +1,19 @@
-// LSP Definition tool — textDocument/definition
+// LSP Hover tool — textDocument/hover
 
+import path from 'node:path';
 import fs from 'node:fs';
 import { LspBaseTool, CompletionKind, SymbolKind, DiagnosticSeverity } from './base.js';
-import { toolDef, param, ToolResult } from '../../../extensions/core-tools/registry.js';
+import { toolDef, param, ToolResult } from '../../core-tools/registry.js';
 import { formatError } from '../../../src/context/error.js';
 
-export class LspDefinitionTool extends LspBaseTool {
-  static TOOL_NAME = 'lsp-definition';
-  static DESCRIPTION = 'Find the definition location of a symbol at a given position. Returns file path, line, and character of the definition.';
+export class LspHoverTool extends LspBaseTool {
+  static TOOL_NAME = 'lsp-hover';
+  static DESCRIPTION = 'Get hover information (type, documentation) for a symbol at a given position in a file. Returns function signatures, type information, and documentation comments.';
 
   toToolDef() {
     return toolDef(
-      LspDefinitionTool.TOOL_NAME,
-      LspDefinitionTool.DESCRIPTION,
+      LspHoverTool.TOOL_NAME,
+      LspHoverTool.DESCRIPTION,
       {
         schema: 'https://json-schema.org/draft/2020-12/schema',
         properties: {
@@ -27,7 +28,7 @@ export class LspDefinitionTool extends LspBaseTool {
 
   callDisplay(input) {
     const args = typeof input === 'string' ? JSON.parse(input) : input;
-    return `definition(${args.file}:${args.line}:${args.character})`;
+    return `hover(${args.file}:${args.line}:${args.character})`;
   }
 
   async execute(input, ctx) {
@@ -76,44 +77,29 @@ export class LspDefinitionTool extends LspBaseTool {
       // Ensure document is open
       const uri = await this._ensureDocumentOpen(client, resolvedPath, languageId);
 
-      // Check server supports definition
+      // Check server supports hover
       const caps = client.getCapabilities();
-      if (!caps?.definitionProvider) {
-        return ToolResult.err(`Server does not support definition (definitionProvider not in capabilities)`);
+      if (!caps?.hoverProvider) {
+        return ToolResult.err(`Server does not support hover (hoverProvider not in capabilities)`);
       }
 
-      // Send definition request
-      const result = await client.request('textDocument/definition', {
+      // Send hover request
+      const result = await client.request('textDocument/hover', {
         textDocument: { uri },
         position: { line: lspLine, character },
       });
 
-      if (!result) {
-        return ToolResult.ok('No definition found at this position.');
-      }
-
-      // Handle Location | Location[] | LocationLink[]
-      const locations = Array.isArray(result) ? result : [result];
-      const lines = locations.map(loc => {
-        const file = this._uriToPath(loc.uri);
-        let pos;
-        if ('targetSelectionRange' in loc) {
-          // LocationLink
-          pos = loc.targetSelectionRange?.start;
-        } else {
-          pos = loc.range?.start;
-        }
-        return `  ${file}:${(pos?.line ?? 0) + 1}:${(pos?.character ?? 0) + 1}`;
-      }).join('\n');
+      // Format result
+      const maxLines = this.maxOutputLines || 800;
+      const formatted = this._formatHover(result, maxLines);
 
       const metadata = new Map();
       metadata.set('file', resolvedPath);
       metadata.set('position', `${line}:${character}`);
-      metadata.set('locations', String(locations.length));
       metadata.set('language', languageId);
       metadata.set('lsp_line', String(lspLine));
 
-      return ToolResult.ok(`Definition found:\n${lines}`).withEntries(metadata);
+      return ToolResult.ok(formatted).withEntries(metadata);
     } catch (e) {
       const msg = e.message || String(e);
       if (msg.includes('computePositionOfLineAndCharacter') || msg.includes('Debug Failure')) {
@@ -122,7 +108,7 @@ export class LspDefinitionTool extends LspBaseTool {
           `Try placing the cursor directly on the symbol name.`
         );
       }
-      return ToolResult.err(`Definition failed: ${formatError(e)}`);
+      return ToolResult.err(`Hover failed: ${formatError(e)}`);
     }
   }
 }

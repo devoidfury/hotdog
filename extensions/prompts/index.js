@@ -2,7 +2,7 @@
 // Manages prompt templates loading and execution.
 // Hooks: command:dispatch
 
-import { HOOKS } from '../../src/core/hooks.js';
+import { HOOKS } from '../../src/hooks.js';
 import { PromptsLoader } from './loader.js';
 
 /**

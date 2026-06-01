@@ -1,7 +1,8 @@
 // Session Review Extension
 // Provides the `review` CLI subcommand for inspecting session logs.
-// Runs outside the agent loop, dispatched from main.js.
+// Registers subcommands via the cli:subcommandsRegister hook.
 
+import { HOOKS } from "../../src/hooks.js";
 import { CliOutputSink } from "../../src/ui/cli.js";
 import { readSessionEntries } from "../session-log/index.js";
 import { readdirSync, existsSync, statSync } from "node:fs";
@@ -10,18 +11,37 @@ import { join } from "node:path";
 
 /**
  * Create the session-review extension.
+ * Registers subcommands via the cli:subcommandsRegister hook.
  */
 export function create(core) {
-  const cli = {
-    _core: {},
-    review: function (cmdLineArgs) {
-      const { config } = this._core;
-      return runReview(cmdLineArgs, config);
-    },
-  };
+  // Register subcommands if the registry is available
+  if (core.cliSubcommandRegistry) {
+    core.cliSubcommandRegistry.register("review", {
+      description: "Review session logs",
+      requiresConfig: true,
+      handler: async (cli, core) => {
+        const { config } = core;
+        await runReview(cli, config);
+      },
+    });
+  }
 
   return {
-    cli,
+    hooks: core.hooks
+      ? {
+          // Register via hook as well for backward compatibility
+          [HOOKS.CLI_SUBCOMMANDS_REGISTER]: async (registry) => {
+            registry.register("review", {
+              description: "Review session logs",
+              requiresConfig: true,
+              handler: async (cli, core) => {
+                const { config } = core;
+                await runReview(cli, config);
+              },
+            });
+          },
+        }
+      : undefined,
   };
 }
 

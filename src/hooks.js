@@ -148,6 +148,12 @@ export const HOOKS = {
 
   // Output
   OUTPUT_EVENT:       'output:event',
+
+  // Shutdown — extensions register cleanup handlers here
+  SHUTDOWN_CLEANUP:   'shutdown:cleanup',
+
+  // CLI subcommand registration — extensions register subcommand handlers here
+  CLI_SUBCOMMANDS_REGISTER: 'cli:subcommandsRegister',
 };
 
 /**

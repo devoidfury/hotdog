@@ -1,19 +1,18 @@
-// LSP Hover tool — textDocument/hover
+// LSP References tool — textDocument/references
 
-import path from 'node:path';
 import fs from 'node:fs';
 import { LspBaseTool, CompletionKind, SymbolKind, DiagnosticSeverity } from './base.js';
-import { toolDef, param, ToolResult } from '../../../extensions/core-tools/registry.js';
+import { toolDef, param, ToolResult } from '../../core-tools/registry.js';
 import { formatError } from '../../../src/context/error.js';
 
-export class LspHoverTool extends LspBaseTool {
-  static TOOL_NAME = 'lsp-hover';
-  static DESCRIPTION = 'Get hover information (type, documentation) for a symbol at a given position in a file. Returns function signatures, type information, and documentation comments.';
+export class LspReferencesTool extends LspBaseTool {
+  static TOOL_NAME = 'lsp-references';
+  static DESCRIPTION = 'Find all usages/references of a symbol at a given position. Returns file paths, line numbers, and context for each reference.';
 
   toToolDef() {
     return toolDef(
-      LspHoverTool.TOOL_NAME,
-      LspHoverTool.DESCRIPTION,
+      LspReferencesTool.TOOL_NAME,
+      LspReferencesTool.DESCRIPTION,
       {
         schema: 'https://json-schema.org/draft/2020-12/schema',
         properties: {
@@ -28,7 +27,7 @@ export class LspHoverTool extends LspBaseTool {
 
   callDisplay(input) {
     const args = typeof input === 'string' ? JSON.parse(input) : input;
-    return `hover(${args.file}:${args.line}:${args.character})`;
+    return `references(${args.file}:${args.line}:${args.character})`;
   }
 
   async execute(input, ctx) {
@@ -77,38 +76,52 @@ export class LspHoverTool extends LspBaseTool {
       // Ensure document is open
       const uri = await this._ensureDocumentOpen(client, resolvedPath, languageId);
 
-      // Check server supports hover
+      // Check server supports references
       const caps = client.getCapabilities();
-      if (!caps?.hoverProvider) {
-        return ToolResult.err(`Server does not support hover (hoverProvider not in capabilities)`);
+      if (!caps?.referencesProvider) {
+        return ToolResult.err(`Server does not support references (referencesProvider not in capabilities)`);
       }
 
-      // Send hover request
-      const result = await client.request('textDocument/hover', {
+      // Send references request
+      const result = await client.request('textDocument/references', {
         textDocument: { uri },
         position: { line: lspLine, character },
+        context: { includeDeclaration: false },
       });
 
-      // Format result
-      const maxLines = this.maxOutputLines || 800;
-      const formatted = this._formatHover(result, maxLines);
+      if (!result || result.length === 0) {
+        return ToolResult.ok(
+          `No references found at ${resolvedPath}:${line}:${character}. ` +
+          'Make sure the position is on a valid identifier.'
+        );
+      }
+
+      // Format references
+      const lines = result.map((ref, index) => {
+        const file = this._uriToPath(ref.uri);
+        const start = ref.range?.start;
+        return `  ${index + 1}. ${file}:${start?.line + 1 ?? 0}:${start?.character + 1 ?? 0}`;
+      }).join('\n');
 
       const metadata = new Map();
       metadata.set('file', resolvedPath);
       metadata.set('position', `${line}:${character}`);
+      metadata.set('total_references', String(result.length));
       metadata.set('language', languageId);
       metadata.set('lsp_line', String(lspLine));
 
-      return ToolResult.ok(formatted).withEntries(metadata);
+      return ToolResult.ok(`Found ${result.length} reference(s):\n${lines}`).withEntries(metadata);
     } catch (e) {
+      // Check for TypeScript server internal errors
       const msg = e.message || String(e);
       if (msg.includes('computePositionOfLineAndCharacter') || msg.includes('Debug Failure')) {
         return ToolResult.err(
           `Language server crashed at this position. ` +
+          `This usually means the position is not on a valid identifier. ` +
           `Try placing the cursor directly on the symbol name.`
         );
       }
-      return ToolResult.err(`Hover failed: ${formatError(e)}`);
+      return ToolResult.err(`References failed: ${formatError(e)}`);
     }
   }
 }

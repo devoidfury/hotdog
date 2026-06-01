@@ -2,7 +2,7 @@
 
 import { SessionManager, SessionStore } from '../../src/core/session.js';
 import { Agent } from '../../src/core/agent.js';
-import { HookSystem, createHooks } from '../../src/core/hooks.js';
+import { HookSystem, createHooks } from '../../src/hooks.js';
 import { ExtensionLoader, createExtensionLoader } from '../../src/core/extensions.js';
 import { ToolRegistry, createToolRegistry } from '../../src/core/tool-registry.js';
 import { Message } from '../../src/context/message.js';

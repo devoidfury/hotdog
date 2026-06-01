@@ -11,7 +11,7 @@ import { DropStrategy } from './strategies/drop.js';
 import { SummarizeShortStrategy } from './strategies/summarize-short.js';
 import { TokenAwareStrategy } from './strategies/token-aware.js';
 import { estimateContextTokens } from './utils.js';
-import { HOOKS } from '../../src/core/hooks.js';
+import { HOOKS } from '../../src/hooks.js';
 
 /**
  * Default compaction settings.

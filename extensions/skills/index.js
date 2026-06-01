@@ -2,8 +2,9 @@
 // Manages skills loading, activation, and system prompt integration.
 // Hooks: systemPrompt:build, tools:register, command:dispatch
 
-import { HOOKS } from "../../src/core/hooks.js";
+import { HOOKS } from "../../src/hooks.js";
 import { patternMatches, SkillsLoader } from "./loader.js";
+export { LoadSkillTool } from "./load_skill.js";
 
 /**
  * Create the skills extension.
@@ -31,9 +32,8 @@ export function create(core) {
        * Register the load_skill tool.
        */
       [HOOKS.TOOLS_REGISTER]: async (registry) => {
-        const { LoadSkillTool } =
-          await import("../../extensions/core-tools/load_skill.js");
-        const tool = new LoadSkillTool(loader);
+        const { LoadSkillTool } = await import("./load_skill.js");
+        const tool = new LoadSkillTool({ loader });
         registry.register("load_skill", tool);
       },
 

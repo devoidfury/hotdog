@@ -13,10 +13,10 @@ import {
 import { CliOutputSink } from "./ui/cli.js";
 import { parseArgs, HELP_TEXT } from "./cli.js";
 import { loadConfig } from "./config.js";
-import { buildConfig } from "./init/resolution.js";
+import { buildConfig } from "./config.js";
 import { formatError, isExpectedError } from "./context/error.js";
 import { OUTPUT_EVENT } from "./context/output.js";
-import { shutdownAll } from "../ext/lsp/index.js";
+import { createSubcommandRegistry } from "./cli/subcommand-registry.js";
 
 // ── Extension Loading ────────────────────────────────────────────────────────
 
@@ -83,32 +83,32 @@ async function loadExtensions(core) {
 }
 
 /**
- * Load the info-show-prompt extension (info, show-prompt).
- * Returns the extension instance with CLI handlers.
+ * Load CLI subcommand extensions — extensions that provide CLI subcommands.
+ * These are loaded early (before core config) and register subcommands via hooks.
+ *
+ * @param {Object} earlyCore - Minimal core with hooks for subcommand registration.
+ * @returns {Promise<Array>} Loaded extension instances.
  */
-async function loadInfoShowPromptExtension() {
+async function loadCliExtensions(earlyCore) {
+  const loaded = [];
+
+  // Info-Show-Prompt extension — provides info, show-prompt subcommands
   const { create: createInfoShowPrompt } =
     await import("../extensions/info-show-prompt/index.js");
-  const core = {
-    config: null, // Will be set after config loading
-    buildConfig,
-  };
-  const ext = createInfoShowPrompt(core);
-  return ext;
-}
+  const infoExt = createInfoShowPrompt(earlyCore);
+  if (infoExt) {
+    loaded.push(infoExt);
+  }
 
-/**
- * Load the session-review extension (review subcommand).
- * Returns the extension instance with CLI handlers.
- */
-async function loadSessionReviewExtension() {
+  // Session-Review extension — provides review subcommand
   const { create: createSessionReview } =
     await import("../extensions/session-review/index.js");
-  const core = {
-    config: null,
-  };
-  const ext = createSessionReview(core);
-  return ext;
+  const reviewExt = createSessionReview(earlyCore);
+  if (reviewExt) {
+    loaded.push(reviewExt);
+  }
+
+  return loaded;
 }
 
 // ── Core Infrastructure ─────────────────────────────────────────────────────
@@ -270,31 +270,36 @@ export { MessageBus };
 async function main() {
   const cli = parseArgs();
 
+  // ── Early core for CLI extension loading ────────────────────────────────
+  // Create minimal core with hooks for CLI subcommand registration
+  const earlyHooks = createHooks();
+  const cliSubcommandRegistry = createSubcommandRegistry();
+  const earlyCore = {
+    hooks: earlyHooks,
+    config: null,
+    buildConfig,
+    cliSubcommandRegistry,
+  };
+
+  // ── Load CLI extensions (info, show-prompt, review, etc.) ───────────────
+  const cliExtensions = await loadCliExtensions(earlyCore);
+
   // ── Subcommand dispatch ─────────────────────────────────────────────────
-  // Load info-show-prompt extension first (needs config)
-  const infoShowPromptExt = await loadInfoShowPromptExtension();
-
-  if (cli.subcommand === "info") {
-    const config = await loadConfig(cli.config);
-    infoShowPromptExt.cli._core = { config, buildConfig };
-    await infoShowPromptExt.cli.info(cli);
-    return;
-  }
-  if (cli.subcommand === "show-prompt") {
-    const config = await loadConfig(cli.config);
-    infoShowPromptExt.cli._core = { config, buildConfig };
-    await infoShowPromptExt.cli["show-prompt"].call(infoShowPromptExt.cli, cli);
-    return;
-  }
-
-  // Load session-review extension for review subcommand
-  const sessionReviewExt = await loadSessionReviewExtension();
-
-  if (cli.subcommand === "review") {
-    const config = await loadConfig(cli.config);
-    sessionReviewExt.cli._core = { config };
-    await sessionReviewExt.cli.review.call(sessionReviewExt.cli, cli);
-    return;
+  if (cli.subcommand) {
+    const subcommandDef = cliSubcommandRegistry.get(cli.subcommand);
+    if (subcommandDef) {
+      // Load config if needed
+      if (subcommandDef.requiresConfig) {
+        const config = await loadConfig(cli.config);
+        earlyCore.config = config;
+      }
+      // Execute the subcommand handler
+      await subcommandDef.handler(cli, earlyCore);
+      return;
+    }
+    console.error(`Unknown subcommand: ${cli.subcommand}`);
+    console.log(`Available subcommands: ${cliSubcommandRegistry.names().join(", ")}`);
+    process.exit(1);
   }
 
   if (cli.version) {
@@ -302,7 +307,8 @@ async function main() {
     process.exit(0);
   }
   if (cli.help) {
-    console.log(HELP_TEXT);
+    const subcommandHelp = cliSubcommandRegistry.generateHelpText();
+    console.log(HELP_TEXT.replace("<subcommands>", subcommandHelp));
     process.exit(0);
   }
 
@@ -385,16 +391,16 @@ async function main() {
   if (cli.prompt) {
     const bus = new MessageBus({ sessionManager, sink });
     bus.enqueue(cli.prompt);
+    let exitCode = 0;
     try {
       await bus.runUntilCancelled();
       console.log("\n");
     } catch (e) {
       console.error(formatError(e));
-      await shutdownAll();
-      process.exit(1);
+      exitCode = 1;
     }
-    await shutdownAll();
-    process.exit(0);
+    await core.extensions.cleanup();
+    process.exit(exitCode);
   }
 
   // ── Interactive mode ────────────────────────────────────────────────────
@@ -422,12 +428,13 @@ async function main() {
     bus,
     sink,
     resolved,
+    onClose: () => core.extensions.cleanup(),
   });
   bus.run();
 }
 
 main().catch(async (e) => {
   console.error(formatError(e));
-  await shutdownAll();
+  await core?.extensions?.cleanup();
   process.exit(1);
 });

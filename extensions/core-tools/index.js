@@ -1,6 +1,6 @@
 // Tools module — exports all tools and the tool registry.
 
-import { HOOKS } from "../../src/core/hooks.js";
+import { HOOKS } from "../../src/hooks.js";
 
 export * from "./registry.js";
 export * from "./bash.js";
@@ -13,7 +13,6 @@ export * from "./fetch.js";
 export * from "./question.js";
 export * from "./pager.js";
 export * from "./model.js";
-export * from "./load_skill.js";
 
 export * from "./project_info.js";
 export * from "./review.js";
@@ -34,7 +33,6 @@ import { FetchTool } from "./fetch.js";
 import { QuestionTool } from "./question.js";
 import { PagerTool } from "./pager.js";
 import { ModelTool } from "./model.js";
-import { LoadSkillTool } from "./load_skill.js";
 import { ProjectInfoTool } from "./project_info.js";
 import { ReviewTool } from "./review.js";
 import { ExploreTool } from "./explore.js";
@@ -59,7 +57,6 @@ const TOOL_DESCRIPTORS = [
   { name: "bash", disabled: false },
   { name: "write", disabled: false },
   { name: "model", disabled: false },
-  { name: "load_skill", disabled: false },
   { name: "read", disabled: false },
   { name: "question", disabled: false },
   { name: "pager", disabled: false },
@@ -117,7 +114,7 @@ const LSP_TOOL_MAP = {
 
 /**
  * Resolve language ID from a file path.
- * Re-exported from ext/lsp/utils for internal use.
+ * Re-exported from extensions/lsp/utils for internal use.
  */
 import { getLanguageId as _getLanguageId } from "../lsp/index.js";
 
@@ -134,7 +131,6 @@ const TOOL_CONSTRUCTORS = {
   pager: () => new PagerTool(),
   explore: () => new ExploreTool(),
   model: (ctx) => new ModelTool(ctx?.modelRegistry || {}),
-  load_skill: () => new LoadSkillTool(),
   project_info: () => new ProjectInfoTool(),
   review: () => new ReviewTool(),
 };

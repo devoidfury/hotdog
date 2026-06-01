@@ -132,18 +132,6 @@ export class MarkerMangler {
   unescapeToolInput(text) {
     return this.unescape(text);
   }
-
-  /**
-   * Escape all m_ markers in text to prevent injection.
-   * This is used for content that comes FROM the model (e.g. task results)
-   * before it's inserted into the agent's context. Converts <m_...> markers
-   * to HTML entities so they are treated as plain text rather than parsed
-   * as XML by the LLM or agent.
-   */
-  escapeMarkers(text) {
-    if (!text) return text;
-    return text.replace(/<m_/g, '&lt;m_');
-  }
 }
 
 export function createMarkerMangler() {

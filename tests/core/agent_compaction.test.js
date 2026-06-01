@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach } from "bun:test";
 import { Agent } from "../../src/core/agent.js";
 import { NoopSink } from "../../src/context/output.js";
 import { Message } from "../../src/context/message.js";
-import { createHooks } from "../../src/core/hooks.js";
+import { createHooks } from "../../src/hooks.js";
 
 describe("Agent.compaction behavior", () => {
   let hooks;

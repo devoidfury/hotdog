@@ -1,7 +1,7 @@
 // Extension loader — discovers, loads, and manages extensions.
 // Extensions plug into the core via hooks and tool registration.
 
-import { HookSystem, HOOKS } from './hooks.js';
+import { HookSystem, HOOKS } from '../hooks.js';
 
 export { HookSystem, HOOKS };
 
@@ -135,6 +135,15 @@ export class ExtensionLoader {
    */
   size() {
     return this._extensions.size;
+  }
+
+  /**
+   * Emit shutdown:cleanup hook — all extensions get a chance to clean up.
+   * This is called before the process exits to ensure graceful shutdown.
+   * @returns {Promise<void>}
+   */
+  async cleanup() {
+    await this._core.hooks.emitAsync(HOOKS.SHUTDOWN_CLEANUP, null);
   }
 }
 

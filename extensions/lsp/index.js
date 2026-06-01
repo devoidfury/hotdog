@@ -2,16 +2,17 @@
 // Registers LSP tools (hover, definition, completion, etc.) via the tools:register hook.
 // Only activates when LSP is enabled in config.
 
-import { HOOKS } from '../../src/core/hooks.js';
-import { isLspEnabled, getServerByLanguageId } from '../../ext/lsp/config.js';
-import { getLanguageId } from '../../ext/lsp/utils.js';
+import { HOOKS } from '../../src/hooks.js';
+import { isLspEnabled, getServerByLanguageId } from './config.js';
+import { getLanguageId } from './utils.js';
+import { LspClient, LspError } from './client.js';
 import {
-  LspClient,
-  LspError,
   lspClientCache,
   getCachedClient,
   deleteCachedClient,
   shutdownAll,
+} from './client-cache.js';
+import {
   LspHoverTool,
   LspDefinitionTool,
   LspCompletionTool,
@@ -24,7 +25,7 @@ import {
   LspDiagnosticsTool,
   LspWorkspaceSymbolTool,
   LspApplyEditTool,
-} from '../../ext/lsp/index.js';
+} from './tools/index.js';
 
 // LSP tool class map
 const LSP_TOOL_MAP = {
@@ -128,6 +129,13 @@ export function create(core) {
           }
         }
       },
+
+      /**
+       * Clean up LSP clients on shutdown.
+       */
+      [HOOKS.SHUTDOWN_CLEANUP]: async () => {
+        await shutdownAll();
+      },
     },
 
     // Expose for external use
@@ -150,8 +158,8 @@ export function create(core) {
 
 // Re-export for backward compatibility
 export { LspClient, LspError, lspClientCache, getCachedClient, deleteCachedClient, shutdownAll };
-export { getServerByLanguageId, getServerForFile, isLspEnabled } from '../../ext/lsp/config.js';
-export { getLanguageId, estimateLspTokenCount, truncateLines, safeStringify } from '../../ext/lsp/utils.js';
+export { getServerByLanguageId, getServerForFile, isLspEnabled } from './config.js';
+export { getLanguageId, estimateLspTokenCount, truncateLines, safeStringify } from './utils.js';
 
 // Re-export LSP tool classes
 export {

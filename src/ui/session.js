@@ -7,7 +7,6 @@
 import readline from "node:readline";
 import { spawn } from "node:child_process";
 import { parseCommand, Command } from "../core/commands.js";
-import { lspClientCache } from "../../ext/lsp/client-cache.js";
 
 const HELP_TEXT = `
 Commands:
@@ -50,6 +49,7 @@ export function runInteractiveSession({
   sink,
   resolved,
   setPromptFn,
+  onClose,
 }) {
   // Set the prompt function so the bus can call it after each message
   if (setPromptFn) {
@@ -91,17 +91,15 @@ export function runInteractiveSession({
     bus.enqueue(trimmed);
   });
 
-  rl.on("close", () => {
+  rl.on("close", async () => {
     console.log("\nGoodbye!");
-    // Quick cleanup: force-kill all LSP clients synchronously
-    for (const [, client] of lspClientCache) {
-      if (client.process && client.process.kill) {
-        try {
-          client.process.kill("SIGKILL");
-        } catch {}
+    if (onClose) {
+      try {
+        await onClose();
+      } catch (e) {
+        console.error(`[session] cleanup error: ${e.message}`);
       }
     }
-    lspClientCache.clear();
     process.exit(0);
   });
 }

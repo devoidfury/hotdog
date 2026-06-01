@@ -1,18 +1,18 @@
-// LSP References tool — textDocument/references
+// LSP Definition tool — textDocument/definition
 
 import fs from 'node:fs';
 import { LspBaseTool, CompletionKind, SymbolKind, DiagnosticSeverity } from './base.js';
-import { toolDef, param, ToolResult } from '../../../extensions/core-tools/registry.js';
+import { toolDef, param, ToolResult } from '../../core-tools/registry.js';
 import { formatError } from '../../../src/context/error.js';
 
-export class LspReferencesTool extends LspBaseTool {
-  static TOOL_NAME = 'lsp-references';
-  static DESCRIPTION = 'Find all usages/references of a symbol at a given position. Returns file paths, line numbers, and context for each reference.';
+export class LspDefinitionTool extends LspBaseTool {
+  static TOOL_NAME = 'lsp-definition';
+  static DESCRIPTION = 'Find the definition location of a symbol at a given position. Returns file path, line, and character of the definition.';
 
   toToolDef() {
     return toolDef(
-      LspReferencesTool.TOOL_NAME,
-      LspReferencesTool.DESCRIPTION,
+      LspDefinitionTool.TOOL_NAME,
+      LspDefinitionTool.DESCRIPTION,
       {
         schema: 'https://json-schema.org/draft/2020-12/schema',
         properties: {
@@ -27,7 +27,7 @@ export class LspReferencesTool extends LspBaseTool {
 
   callDisplay(input) {
     const args = typeof input === 'string' ? JSON.parse(input) : input;
-    return `references(${args.file}:${args.line}:${args.character})`;
+    return `definition(${args.file}:${args.line}:${args.character})`;
   }
 
   async execute(input, ctx) {
@@ -76,52 +76,53 @@ export class LspReferencesTool extends LspBaseTool {
       // Ensure document is open
       const uri = await this._ensureDocumentOpen(client, resolvedPath, languageId);
 
-      // Check server supports references
+      // Check server supports definition
       const caps = client.getCapabilities();
-      if (!caps?.referencesProvider) {
-        return ToolResult.err(`Server does not support references (referencesProvider not in capabilities)`);
+      if (!caps?.definitionProvider) {
+        return ToolResult.err(`Server does not support definition (definitionProvider not in capabilities)`);
       }
 
-      // Send references request
-      const result = await client.request('textDocument/references', {
+      // Send definition request
+      const result = await client.request('textDocument/definition', {
         textDocument: { uri },
         position: { line: lspLine, character },
-        context: { includeDeclaration: false },
       });
 
-      if (!result || result.length === 0) {
-        return ToolResult.ok(
-          `No references found at ${resolvedPath}:${line}:${character}. ` +
-          'Make sure the position is on a valid identifier.'
-        );
+      if (!result) {
+        return ToolResult.ok('No definition found at this position.');
       }
 
-      // Format references
-      const lines = result.map((ref, index) => {
-        const file = this._uriToPath(ref.uri);
-        const start = ref.range?.start;
-        return `  ${index + 1}. ${file}:${start?.line + 1 ?? 0}:${start?.character + 1 ?? 0}`;
+      // Handle Location | Location[] | LocationLink[]
+      const locations = Array.isArray(result) ? result : [result];
+      const lines = locations.map(loc => {
+        const file = this._uriToPath(loc.uri);
+        let pos;
+        if ('targetSelectionRange' in loc) {
+          // LocationLink
+          pos = loc.targetSelectionRange?.start;
+        } else {
+          pos = loc.range?.start;
+        }
+        return `  ${file}:${(pos?.line ?? 0) + 1}:${(pos?.character ?? 0) + 1}`;
       }).join('\n');
 
       const metadata = new Map();
       metadata.set('file', resolvedPath);
       metadata.set('position', `${line}:${character}`);
-      metadata.set('total_references', String(result.length));
+      metadata.set('locations', String(locations.length));
       metadata.set('language', languageId);
       metadata.set('lsp_line', String(lspLine));
 
-      return ToolResult.ok(`Found ${result.length} reference(s):\n${lines}`).withEntries(metadata);
+      return ToolResult.ok(`Definition found:\n${lines}`).withEntries(metadata);
     } catch (e) {
-      // Check for TypeScript server internal errors
       const msg = e.message || String(e);
       if (msg.includes('computePositionOfLineAndCharacter') || msg.includes('Debug Failure')) {
         return ToolResult.err(
           `Language server crashed at this position. ` +
-          `This usually means the position is not on a valid identifier. ` +
           `Try placing the cursor directly on the symbol name.`
         );
       }
-      return ToolResult.err(`References failed: ${formatError(e)}`);
+      return ToolResult.err(`Definition failed: ${formatError(e)}`);
     }
   }
 }

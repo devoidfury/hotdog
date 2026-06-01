@@ -6,7 +6,7 @@ import {
   estimateLspTokenCount,
   truncateLines,
   safeStringify,
-} from '../../ext/lsp/utils.js';
+} from '../../extensions/lsp/utils.js';
 
 describe('pathToUri', () => {
   it('converts a Unix path to a file URI', () => {

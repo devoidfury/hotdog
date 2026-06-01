@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from 'bun:test';
-import { DocumentStore } from '../../ext/lsp/document-store.js';
+import { DocumentStore } from '../../extensions/lsp/document-store.js';
 
 describe('DocumentStore', () => {
   let store;

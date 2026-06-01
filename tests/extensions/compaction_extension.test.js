@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from 'bun:test';
-import { HookSystem, HOOKS } from '../../src/core/hooks.js';
+import { HookSystem, HOOKS } from '../../src/hooks.js';
 import { ExtensionLoader } from '../../src/core/extensions.js';
 import { ToolRegistry } from '../../src/core/tool-registry.js';
 import { create as createCompactionExtension } from '../../extensions/compaction/index.js';

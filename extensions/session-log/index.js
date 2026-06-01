@@ -5,7 +5,7 @@
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { appendFileSync, readFileSync, existsSync, readdirSync, mkdirSync } from 'node:fs';
-import { HOOKS } from '../../src/core/hooks.js';
+import { HOOKS } from '../../src/hooks.js';
 
 // ── Log Source Types ────────────────────────────────────────────────────────
 

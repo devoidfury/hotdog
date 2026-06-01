@@ -188,9 +188,7 @@ Usage: oa-agent [options] [prompt]
        oa-agent prompt "One-shot prompt"
 
 Subcommands:
-  info                  Show system info and diagnostics
-  show-prompt           Show rendered system prompt with tool definitions
-  review                Review session logs
+  <subcommands>
 
 Options:
   -f, --config <path>       Config file path

@@ -2,7 +2,8 @@ import { describe, it, expect, beforeEach, afterEach } from 'bun:test';
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
-import { LoadSkillTool } from '../../extensions/core-tools/load_skill.js';
+import { LoadSkillTool } from '../../extensions/skills/load_skill.js';
+import { SkillsLoader } from '../../extensions/skills/loader.js';
 
 function getResultStr(result) {
   if (result?.toDisplay) {
@@ -13,9 +14,12 @@ function getResultStr(result) {
 
 describe('LoadSkillTool', () => {
   let tmpDir;
+  let loader;
 
   beforeEach(() => {
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'oa-test-skill-'));
+    loader = new SkillsLoader(tmpDir);
+    loader.loadSkills();
   });
 
   afterEach(() => {
@@ -27,7 +31,7 @@ describe('LoadSkillTool', () => {
   });
 
   it('generates tool definition', () => {
-    const tool = new LoadSkillTool({ skillsPath: tmpDir });
+    const tool = new LoadSkillTool({ loader });
     const def = tool.toToolDef();
     expect(def.function.name).toBe('load_skill');
     expect(def.function.parameters.required).toEqual(['name']);
@@ -36,24 +40,17 @@ describe('LoadSkillTool', () => {
   it('loads skill from SKILL.md in subdirectory', async () => {
     const skillDir = path.join(tmpDir, 'my-skill');
     fs.mkdirSync(skillDir, { recursive: true });
-    fs.writeFileSync(path.join(skillDir, 'SKILL.md'), '# Skill Instructions\n\nDo stuff.');
+    fs.writeFileSync(path.join(skillDir, 'SKILL.md'), '---\ndescription: Test skill\n---\n# Skill Instructions\n\nDo stuff.');
 
-    const tool = new LoadSkillTool({ skillsPath: tmpDir });
+    loader.loadSkills();
+    const tool = new LoadSkillTool({ loader });
     const result = await tool.execute(JSON.stringify({ name: 'my-skill' }));
     expect(getResultStr(result)).toContain('Skill Instructions');
     expect(getResultStr(result)).toContain('Do stuff.');
   });
 
-  it('loads skill from direct .md file', async () => {
-    fs.writeFileSync(path.join(tmpDir, 'direct-skill.md'), '# Direct Skill');
-
-    const tool = new LoadSkillTool({ skillsPath: tmpDir });
-    const result = await tool.execute(JSON.stringify({ name: 'direct-skill' }));
-    expect(getResultStr(result)).toContain('Direct Skill');
-  });
-
   it('returns error for non-existent skill', async () => {
-    const tool = new LoadSkillTool({ skillsPath: tmpDir });
+    const tool = new LoadSkillTool({ loader });
     const result = await tool.execute(JSON.stringify({ name: 'non-existent' }));
     expect(getResultStr(result)).toContain('Skill not found');
   });
@@ -61,33 +58,21 @@ describe('LoadSkillTool', () => {
   it('notifies context on skill activation', async () => {
     const skillDir = path.join(tmpDir, 'activated-skill');
     fs.mkdirSync(skillDir, { recursive: true });
-    fs.writeFileSync(path.join(skillDir, 'SKILL.md'), '# Content');
+    fs.writeFileSync(path.join(skillDir, 'SKILL.md'), '---\ndescription: Activated\n---\n# Content');
 
+    loader.loadSkills();
     let activated = false;
     const ctx = {
       onActivateSkill: (name) => { activated = true; expect(name).toBe('activated-skill'); },
     };
 
-    const tool = new LoadSkillTool({ skillsPath: tmpDir });
+    const tool = new LoadSkillTool({ loader });
     await tool.execute(JSON.stringify({ name: 'activated-skill' }), ctx);
     expect(activated).toBe(true);
   });
 
-  it('notifies context when loading direct .md file', async () => {
-    fs.writeFileSync(path.join(tmpDir, 'direct-activated.md'), '# Content');
-
-    let activated = false;
-    const ctx = {
-      onActivateSkill: (name) => { activated = true; expect(name).toBe('direct-activated'); },
-    };
-
-    const tool = new LoadSkillTool({ skillsPath: tmpDir });
-    await tool.execute(JSON.stringify({ name: 'direct-activated' }), ctx);
-    expect(activated).toBe(true);
-  });
-
   it('generates call display', () => {
-    const tool = new LoadSkillTool({ skillsPath: tmpDir });
+    const tool = new LoadSkillTool({ loader });
     const display = tool.callDisplay(JSON.stringify({ name: 'my-skill' }));
     expect(display).toBe('load_skill: my-skill');
   });
@@ -95,10 +80,17 @@ describe('LoadSkillTool', () => {
   it('handles object input', async () => {
     const skillDir = path.join(tmpDir, 'object-input');
     fs.mkdirSync(skillDir, { recursive: true });
-    fs.writeFileSync(path.join(skillDir, 'SKILL.md'), '# Object Input Skill');
+    fs.writeFileSync(path.join(skillDir, 'SKILL.md'), '---\ndescription: Object\n---\n# Object Input Skill');
 
-    const tool = new LoadSkillTool({ skillsPath: tmpDir });
+    loader.loadSkills();
+    const tool = new LoadSkillTool({ loader });
     const result = await tool.execute({ name: 'object-input' });
     expect(getResultStr(result)).toContain('Object Input Skill');
+  });
+
+  it('returns error when loader not available', async () => {
+    const tool = new LoadSkillTool();
+    const result = await tool.execute(JSON.stringify({ name: 'any' }));
+    expect(getResultStr(result)).toContain('Skills loader not available');
   });
 });

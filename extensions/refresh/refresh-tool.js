@@ -37,7 +37,7 @@ export class RefreshTool {
 
   toToolDef() {
     const desc =
-      "Hot-reload extensions and modules without restarting. Use \"list\" to see loaded modules, \"all\" to reload everything, or provide specific extension names to reload only those. Preserves agent state (context, messages, model, etc).";
+      'Hot-reload extensions and modules without restarting. Use "list" to see loaded modules, "all" to reload everything, or provide specific extension names to reload only those. Preserves agent state (context, messages, model, etc).';
 
     return toolDef(RefreshTool.TOOL_NAME, desc, {
       schema: "https://json-schema.org/draft/2020-12/schema",
@@ -49,10 +49,6 @@ export class RefreshTool {
           "string",
           'Extension name to reload, or "all" for everything, or "list" to see loaded modules, or "cache-clear" to clear the module cache.',
         ),
-        force: param(
-          "boolean",
-          "Force reload even if module is cached (default: false)",
-        ),
       },
       required: ["action", "target"],
     });
@@ -61,8 +57,7 @@ export class RefreshTool {
   callDisplay(input) {
     return defaultCallDisplay(
       input,
-      (args) =>
-        `-> refresh: ${args.action} ${args.target || ""}${args.force ? " (force)" : ""}`,
+      (args) => `-> refresh: ${args.action} ${args.target || ""}`,
     );
   }
 
@@ -78,18 +73,16 @@ export class RefreshTool {
       return ToolResult.err("Invalid JSON input");
     }
 
-    const { action, target, force = false } = args;
+    const { action, target } = args;
 
     switch (action) {
       case "list":
         return this._handleList();
-      case "cache-clear":
-        return this._handleCacheClear();
       case "reload":
-        return this._handleReload(target, force);
+        return this._handleReload(target);
       default:
         return ToolResult.err(
-          `Unknown action: ${action}. Use "reload", "list", or "cache-clear".`,
+          `Unknown action: ${action}. Use "reload" or "list".`,
         );
     }
   }
@@ -122,24 +115,10 @@ export class RefreshTool {
   }
 
   /**
-   * Handle the "cache-clear" action — no-op since cache-busting
-   * is handled automatically via query-string on each reload.
-   */
-  async _handleCacheClear() {
-    const lines = [
-      "Module cache is managed automatically via query-string cache-busting.",
-      "Each reload automatically bypasses the JS engine's module cache.",
-    ];
-
-    return ToolResult.ok(lines.join("\n"));
-  }
-
-  /**
    * Handle the "reload" action — reload specific or all extensions.
    * @param {string} target - Extension name or "all"
-   * @param {boolean} force - Force reload
    */
-  async _handleReload(target, force) {
+  async _handleReload(target) {
     if (!target || target.trim() === "") {
       return ToolResult.err(
         'Target is required. Provide an extension name or "all".',
@@ -212,7 +191,6 @@ function parseArgs(input) {
 
   const action = json.action;
   const target = json.target;
-  const force = json.force;
 
   if (!action || typeof action !== "string") {
     return null;
@@ -222,5 +200,5 @@ function parseArgs(input) {
     return null;
   }
 
-  return { action, target, force: force === true };
+  return { action, target };
 }

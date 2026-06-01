@@ -1,8 +1,8 @@
 // LSP Diagnostics tool — textDocument/publishDiagnostics
 
+import fs from 'node:fs';
 import { LspFileTool } from './lsp-position-tool.js';
 import { ToolResult } from '../../../src/core/tool-registry.js';
-import { DiagnosticSeverity } from './base.js';
 
 export class LspDiagnosticsTool extends LspFileTool {
   static TOOL_NAME = 'lsp-diagnostics';
@@ -30,7 +30,6 @@ export class LspDiagnosticsTool extends LspFileTool {
 
       // Send didChange to trigger re-analysis
       try {
-        const fs = require('node:fs');
         const content = fs.readFileSync(resolvedPath, 'utf-8');
         await client.didChange(uri, content);
       } catch {
@@ -65,25 +64,5 @@ export class LspDiagnosticsTool extends LspFileTool {
     } catch (e) {
       return ToolResult.err(`Diagnostics failed: ${e.message || String(e)}`);
     }
-  }
-
-  _formatDiagnostics(diagnostics, maxItems) {
-    if (!diagnostics || diagnostics.length === 0) return 'No diagnostics.';
-
-    const limit = maxItems || diagnostics.length;
-    const display = diagnostics.slice(0, limit).map((diag, index) => {
-      const severity = DiagnosticSeverity[diag.severity] || 'Unknown';
-      const source = diag.source ? `[${diag.source}] ` : '';
-      const location = this._formatLocation({
-        uri: diag.uri,
-        range: diag.range,
-      });
-      return `  ${index + 1}. ${severity}: ${source}${diag.message} (${location})`;
-    }).join('\n');
-
-    const remaining = diagnostics.length - limit;
-    return remaining > 0
-      ? `${display}\n--- [${remaining} more diagnostics not shown] ---`
-      : display;
   }
 }

@@ -6,7 +6,29 @@ import { HOOKS } from "../../src/hooks.js";
 import {
   SUBAGENT_TOOL_NAMES,
   SUBAGENT_TOOL_CONSTRUCTORS,
+  SubagentTool,
+  DelegateTaskTool,
+  TaskStatusTool,
+  TaskFollowupTool,
+  TaskInterruptTool,
+  PlanStatusTool,
+  CompleteTaskTool,
+  WaitTool,
 } from "./subagents.js";
+
+// Re-export for tests and external use
+export {
+  SUBAGENT_TOOL_NAMES,
+  SUBAGENT_TOOL_CONSTRUCTORS,
+  SubagentTool,
+  DelegateTaskTool,
+  TaskStatusTool,
+  TaskFollowupTool,
+  TaskInterruptTool,
+  PlanStatusTool,
+  CompleteTaskTool,
+  WaitTool,
+};
 
 /**
  * Create the subagents extension.

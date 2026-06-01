@@ -10,7 +10,6 @@ export const Command = {
   Help: 'help',
   Quit: 'quit',
   Clear: 'clear',
-  ClearProfile: 'clearProfile',
   Tools: 'tools',
   Thinking: 'thinking',
   Models: 'models',
@@ -54,11 +53,11 @@ export function parseCommand(cmd, registry) {
       return { type: Command.Clear, value: null };
   }
 
-  // clear <profile>
+  // clear <profile> — profile name stored in value, handler decides what to do
   if (cmd.startsWith('clear ')) {
     const profileName = cmd.slice(6).trim();
     return {
-      type: profileName ? Command.ClearProfile : Command.Clear,
+      type: Command.Clear,
       value: profileName || null,
     };
   }
@@ -91,16 +90,4 @@ export function parseCommand(cmd, registry) {
   }
 
   return { type: Command.Unknown, value: cmd };
-}
-
-/**
- * Check if a command is handled by the UI layer (not delegated to agent).
- */
-export function isUiCommand(type) {
-  return [
-    Command.Help,
-    Command.Quit,
-    Command.Tools,
-    Command.Thinking,
-  ].includes(type);
 }

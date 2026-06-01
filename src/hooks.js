@@ -3,6 +3,8 @@
 // Sync hooks run synchronously; async hooks run via `emitAsync()` and errors
 // don't stop the chain (each handler is wrapped in try/catch).
 
+import { formatError } from "./context/error.js";
+
 let _handlerCounter = 0;
 
 export class HookSystem {
@@ -80,11 +82,11 @@ export class HookSystem {
         const result = entry.handler(data);
         if (result && typeof result.then === 'function') {
           results.push(result.catch((e) => {
-            console.error(`[hook:${hookName}] ${e.message}`);
+            console.error(`[hook:${hookName}] ${formatError(e)}`);
           }));
         }
       } catch (e) {
-        console.error(`[hook:${hookName}] ${e.message}`);
+        console.error(`[hook:${hookName}] ${formatError(e)}`);
       }
     }
     await Promise.all(results);
@@ -106,7 +108,7 @@ export class HookSystem {
           await result;
         }
       } catch (e) {
-        console.error(`[hook:${hookName}] ${e.message}`);
+        console.error(`[hook:${hookName}] ${formatError(e)}`);
       }
     }
   }

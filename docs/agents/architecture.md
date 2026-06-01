@@ -245,22 +245,3 @@ User runs: bun src/main.js info
   → Load all non-CLI extensions (for full hook chain)
   → Execute handler(cli, core)
 ```
-
-## Key Differences from Rust Reference
-
-| Rust | JS | Notes |
-|------|-----|-------|
-| `agent/` directory | `core/` directory | Same concepts, different name |
-| `agent/message_bus.rs` | Inline in `main.js` | MessageBus is now a class in main.js |
-| `agent/worker.rs` | `session/task_manager.js` | Refactored to use Agent instances |
-| `agent/session_builder.rs` | Removed | SessionManager handles construction directly |
-| `tools/` directory | `extensions/core-tools/` | Tools are now extensions |
-| `mcp/` directory | `extensions/mcp-client/` | MCP is now an extension |
-| `skills/` directory | `extensions/skills/` | Skills are now an extension |
-| `prompts/` directory | `extensions/prompts/` | Prompts are now an extension |
-| `init/resolution.rs` | `config.js` | Resolution logic moved to config |
-| `ui/cli/formatted_sink.rs` | `ui/cli.js` | Combined into single file |
-| `ui/session.rs` | `ui/session.js` | Same concept |
-| `ui/info.rs` | `extensions/info-show-prompt/` | Moved to extension |
-| `ui/show_prompt.rs` | `extensions/info-show-prompt/` | Moved to extension |
-| `ui/review.rs` | `extensions/session-review/` | Moved to extension |

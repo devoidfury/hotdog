@@ -15,9 +15,6 @@ export function render(template, context, cache = false) {
   return artifact(context);
 }
 
-// Convenience alias used by system_prompt.js
-export const renderTemplate = render;
-
 // ── Tokenizer ──────────────────────────────────────────────────────
 
 function tokenize(template) {

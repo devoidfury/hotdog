@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'bun:test';
-import { parseCommand, Command, isUiCommand } from '../../src/core/commands.js';
+import { parseCommand, Command } from '../../src/core/commands.js';
 import { createSlashCommandRegistry } from '../../src/core/slash-command-registry.js';
 
 describe('parseCommand', () => {
@@ -16,8 +16,8 @@ describe('parseCommand', () => {
     expect(parseCommand('clear')).toEqual({ type: Command.Clear, value: null });
   });
 
-  it('parses clear with profile', () => {
-    expect(parseCommand('clear explorer')).toEqual({ type: Command.ClearProfile, value: 'explorer' });
+  it('parses clear with profile — stores profile in value', () => {
+    expect(parseCommand('clear explorer')).toEqual({ type: Command.Clear, value: 'explorer' });
   });
 
   it('parses clear with trailing space as plain clear', () => {
@@ -25,7 +25,7 @@ describe('parseCommand', () => {
   });
 
   it('parses clear with extra spaces', () => {
-    expect(parseCommand('clear  coding  ')).toEqual({ type: Command.ClearProfile, value: 'coding' });
+    expect(parseCommand('clear  coding  ')).toEqual({ type: Command.Clear, value: 'coding' });
   });
 
   it('parses tools', () => {
@@ -144,19 +144,5 @@ describe('parseCommand with registry', () => {
     expect(result.type).toBe('compact:strategy');
     expect(result.value).toBe('compact:strategy list');
     expect(result._customCommand).toBe('compact:strategy');
-  });
-});
-
-describe('isUiCommand', () => {
-  it('returns true for UI commands', () => {
-    expect(isUiCommand(Command.Help)).toBe(true);
-    expect(isUiCommand(Command.Quit)).toBe(true);
-    expect(isUiCommand(Command.Tools)).toBe(true);
-    expect(isUiCommand(Command.Thinking)).toBe(true);
-  });
-
-  it('returns false for agent commands', () => {
-    expect(isUiCommand(Command.Clear)).toBe(false);
-    expect(isUiCommand(Command.Model)).toBe(false);
   });
 });

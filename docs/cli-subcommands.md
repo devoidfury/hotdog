@@ -59,11 +59,12 @@ Each CLI extension needs an `extension.json` file declaring its capability:
 
 ```json
 {
+  "name": "example-ext",
   "provides": ["cli:subcommands"]
 }
 ```
 
-This is how the extension loader auto-discovers CLI extensions before config is loaded.
+This is how the extension loader auto-discovers extensions.
 
 ## Hook Registration (Alternative)
 

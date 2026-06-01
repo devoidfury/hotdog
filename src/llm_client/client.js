@@ -104,10 +104,9 @@ export class LlmClient {
         json.tool_calls = json.tool_calls.map((tc) => {
           const clonedTc = { ...tc };
           if (clonedTc.function) {
-            const clonedFn = { ...clonedTc.function };
-            if (clonedFn.name) clonedFn.name = this._mangler.escape(clonedFn.name);
-            if (clonedFn.arguments) clonedFn.arguments = this._mangler.escape(clonedFn.arguments);
-            clonedTc.function = clonedFn;
+            clonedTc.function = { ...clonedTc.function };
+            if (clonedTc.function.name) clonedTc.function.name = this._mangler.escape(clonedTc.function.name);
+            if (clonedTc.function.arguments) clonedTc.function.arguments = this._mangler.escape(clonedTc.function.arguments);
           }
           return clonedTc;
         });

@@ -19,7 +19,6 @@ export function parseArgs(configRegistry = null, knownSubcommands = null) {
     stream: true,
     hideTools: true,
     hideThinking: false,
-    prompt: null,
     version: false,
     help: false,
     thinker: null,
@@ -52,7 +51,6 @@ export function parseArgs(configRegistry = null, knownSubcommands = null) {
   // Core flags
   const coreFlags = [
     { short: '-f', long: '--config', type: 'string', hasValue: true },
-    { short: '-c', long: '--prompt', type: 'string', hasValue: true },
     { short: '-m', long: '--model', type: 'string', hasValue: true },
     { short: null, long: '--ai-url', type: 'string', hasValue: true },
     { short: null, long: '--url', type: 'string', hasValue: true, deprecated: true },
@@ -257,7 +255,6 @@ Subcommands:
 
 Options:
   -f, --config <path>       Config file path
-  -c, --prompt              One-shot prompt alias
   -m, --model <name>        Model name
       --ai-url <url>        AI URL (deprecated: --url)
   -k, --api-key <key>       API key
@@ -299,7 +296,7 @@ export function generateHelpText(configRegistry) {
     const extHelp = configRegistry.getCliHelpText();
     if (extHelp) {
       help = help.replace(
-        /(-h, --help\s+Show help`)/,
+        /(-h, --help\s+Show help)/,
         `$1\n${extHelp}`
       );
     }

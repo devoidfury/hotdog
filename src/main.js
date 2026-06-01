@@ -359,14 +359,16 @@ async function main() {
   } catch (e) {
     if (e.message.startsWith("Unknown subcommand:")) {
       const knownSubcommands = cliSubcommandRegistry.names();
-      const posLower = e.message.replace("Unknown subcommand: ", "").toLowerCase();
+      const posLower = e.message
+        .replace("Unknown subcommand: ", "")
+        .toLowerCase();
       const similar = knownSubcommands.filter(
-        (sc) => sc.toLowerCase() !== posLower && sc.startsWith(posLower.slice(0, 2)),
+        (sc) =>
+          sc.toLowerCase() !== posLower && sc.startsWith(posLower.slice(0, 2)),
       );
       if (similar.length === 1) {
         console.error(
-          `Unknown subcommand: ${posLower}\n` +
-            `Did you mean: ${similar[0]}?`,
+          `Unknown subcommand: ${posLower}\n` + `Did you mean: ${similar[0]}?`,
         );
       } else {
         console.error(
@@ -395,32 +397,25 @@ async function main() {
   // Attach resolved config to core so extensions can access it
   core.resolved = resolved;
 
+  // ── Load extensions ──────────────────────────────────────────────────────
+  // Extensions register their handlers in create() via cliSubcommandRegistry.register().
+  // Force autoload: true to ensure all extensions are loaded (not just explicitly listed ones).
+  await loadExtensions(core, { taskManager: null, config });
+
+  // Emit CLI args parsed hook after extensions are loaded (so handlers are registered)
+  core.hooks.emit(HOOKS.CLI_ARGS_PARSED, { cli });
+
   // ── Subcommand dispatch ─────────────────────────────────────────────────
   if (cli.subcommand) {
-    // Re-get after loading to pick up handlers registered by extensions
+    // Re-get after loading to pick up updated handler (in case hook modified subcommand)
     const getSubcommand = () => core.cliSubcommandRegistry.get(cli.subcommand);
-
     const subcommandDef = getSubcommand();
-    if (subcommandDef) {
-      // Load all extensions to get the actual handlers.
-      // Extensions register their handlers in create() via cliSubcommandRegistry.register().
-      // Force autoload: true to ensure all extensions are loaded (not just explicitly listed ones).
-      await loadExtensions(core, { taskManager: null, config });
-
-      // Re-get after loading to pick up the updated handler
-      const updatedDef = getSubcommand();
-      if (updatedDef && updatedDef.handler) {
-        await updatedDef.handler(cli, core);
-        return;
-      }
-      console.error(
-        `Subcommand "${cli.subcommand}" handler not available after loading extensions.`,
-      );
-      process.exit(1);
+    if (subcommandDef && subcommandDef.handler) {
+      await subcommandDef.handler(cli, core);
+      return;
     }
-    console.error(`Unknown subcommand: ${cli.subcommand}`);
-    console.log(
-      `Available subcommands: ${core.cliSubcommandRegistry.names().join(", ")}`,
+    console.error(
+      `Subcommand "${cli.subcommand}" handler not available after loading extensions.`,
     );
     process.exit(1);
   }
@@ -436,153 +431,10 @@ async function main() {
     process.exit(0);
   }
 
-  // ── Output sink ─────────────────────────────────────────────────────────
-  const palette = CliOutputSink.resolve(
-    cli.colors !== false,
-    cli.theme || config.theme || "dark",
-    config.colors || null,
+  console.error("No subcommand provided.");
+  console.log(
+    `Available subcommands: ${core.cliSubcommandRegistry.names().join(", ") || "(none)"}`,
   );
-
-  const sink = new CliOutputSink({
-    ...resolved,
-    palette,
-    thinkerFormat: cli.thinker ?? config.thinker ?? "[Thinking: {}]",
-    toolFormat: cli.toolfmt ?? config.toolfmt ?? "  → {} {}",
-    toolOutputFmt:
-      cli.toolOutputFmt ?? config.toolOutputFmt ?? "----\n{}\n----",
-  });
-
-  // ── Build LLM client ────────────────────────────────────────────────────
-  const { LlmClient } = await import("./llm_client/client.js");
-  const { MarkerMangler } = await import("./marker_mangler.js");
-
-  const llmClient = new LlmClient({
-    baseUrl: resolved.baseUrl,
-    apiKey: resolved.apiKey,
-    stream: resolved.stream,
-    chatTimeoutSecs: resolved.chatTimeout,
-    providers: config.providers || [],
-    markerMangler: new MarkerMangler(),
-  });
-
-  // ── Create TaskManager ──────────────────────────────────────────────────
-  // buildAgent function defined here so TaskManager can use it
-  const buildAgent = async (agentConfig) => {
-    const sessionId = agentConfig.sessionId || crypto.randomUUID();
-    const agent = new Agent({
-      hooks: core.hooks,
-      toolRegistry: core.toolRegistry,
-      llmClient,
-      model: agentConfig.model || resolved.model,
-      maxIterations: agentConfig.maxIterations || config.maxIterations || 1000,
-      maxTokens: config.maxTokens || 32000,
-      hideTools: agentConfig.hideTools ?? resolved.hideTools,
-      hideThinking: agentConfig.hideThinking ?? resolved.hideThinking,
-      showTokenUse: agentConfig.showTokenUse ?? resolved.showTokenUse,
-      sink: agentConfig.sink || sink,
-      modelRegistry: modelRegistry,
-      profileName: agentConfig.profileName || resolved.profileName,
-      role: agentConfig.role || resolved.role,
-      profileBody: agentConfig.profileBody || resolved.profileBody,
-      stream: agentConfig.stream ?? resolved.stream,
-      config,
-      sessionId,
-      abortSignal: agentConfig.abortSignal || null,
-      toolWhitelist: agentConfig.toolWhitelist || null,
-    });
-
-    await agent.ensureSystemPrompt();
-
-    // Emit hook for extensions to register slash commands
-    core.hooks.emit(HOOKS.SLASH_COMMANDS_REGISTER, {
-      registry: agent.getSlashCommandRegistry(),
-      agent,
-    });
-
-    // Restore session from disk if a session ID was explicitly provided
-    // and a session log file exists for it
-    const explicitSessionId = cli.sessionId;
-    if (explicitSessionId && sessionId === explicitSessionId) {
-      if (sessionExists(explicitSessionId)) {
-        const entries = readSessionEntries(explicitSessionId);
-        if (entries.length > 0) {
-          // Set restoring flag to prevent duplicate log writes during replay
-          agent.isRestoring = true;
-          const replayed = replayEntriesIntoContext(agent, entries);
-          agent.isRestoring = false;
-          if (replayed > 0) {
-            console.log(
-              `Session restored: ${replayed} messages replayed from ${explicitSessionId}`,
-            );
-          }
-        }
-      }
-    }
-
-    return agent;
-  };
-
-  const taskManager = new TaskManager({
-    buildAgent,
-    llmClient,
-    modelRegistry,
-    config,
-    hooks: core.hooks,
-    maxIterations: config.maxIterations || 1000,
-  });
-
-  // ── Load extensions ─────────────────────────────────────────────────────
-  // Tool registration happens inside ExtensionLoader.load() via the
-  // tools:register hook emission (see extensions.js). No separate emission needed.
-  await loadExtensions(core, { taskManager, config });
-
-  // ── Create SessionManager with buildAgent function ──────────────────────
-  const sessionManager = await SessionManager.create({
-    hooks: core.hooks,
-    extensions: core.extensions,
-    buildAgent,
-    initialConfig: { sessionId: cli.sessionId || null },
-  });
-
-  // Wire taskManager to sessionManager
-  taskManager.setSessionManager(sessionManager);
-
-
-  // ── One-shot mode (only from -c / --prompt flag) ────────────────────────
-  if (cli.prompt) {
-    const bus = new MessageBus({ sessionManager, sink });
-    // Wire up task completion (appends result to context + wakes manager)
-    taskManager.setBus(bus);
-
-    bus.enqueue(cli.prompt);
-    let exitCode = 0;
-    try {
-      await bus.runUntilCancelled();
-      console.log("\n");
-    } catch (e) {
-      console.error(formatError(e));
-      exitCode = 1;
-    }
-    const oneShotSessionId = sessionManager.sessionId();
-    if (oneShotSessionId) {
-      console.log(`Session: ${oneShotSessionId}`);
-    }
-    await core.extensions.cleanup();
-    process.exit(exitCode);
-  }
-
-  // ── Default subcommand dispatch ─────────────────────────────────────────
-  // When no subcommand is provided, dispatch to the "cli" subcommand
-  // (interactive mode) if it's registered by an extension.
-  const defaultSubcommand = core.cliSubcommandRegistry.get("cli");
-  if (defaultSubcommand && defaultSubcommand.handler) {
-    await defaultSubcommand.handler(cli, core);
-    return;
-  }
-
-  // No default subcommand registered — show usage hint
-  console.error("No prompt provided. Use -c or --prompt for one-shot mode.");
-  console.log(`Available subcommands: ${core.cliSubcommandRegistry.names().join(", ") || "(none)"}`);
   process.exit(1);
 }
 

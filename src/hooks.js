@@ -203,6 +203,9 @@ export const HOOKS = {
   // Config — extensions register their CLI flags and config params
   CONFIG_CLI_FLAGS_REGISTER: 'config:cliFlagsRegister',
   CONFIG_PARAMS_REGISTER: 'config:paramsRegister',
+
+  // CLI — emitted after CLI args are parsed, before subcommand dispatch
+  CLI_ARGS_PARSED: 'cli:argsParsed',
 };
 
 /**

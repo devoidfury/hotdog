@@ -1,0 +1,22 @@
+{
+  "name": "one-shot",
+  "provides": ["cli:subcommands"],
+  "loadOrder": 10,
+  "description": "One-shot prompt mode — run a single prompt and exit",
+  "cli:flags": [
+    {
+      "short": "-c",
+      "long": "--prompt",
+      "description": "One-shot prompt — run a single prompt and exit",
+      "type": "string"
+    }
+  ],
+  "cli:subcommands": [
+    {
+      "name": "prompt",
+      "description": "One-shot prompt mode — run a single prompt and exit",
+      "requiresConfig": true,
+      "requiresCore": false
+    }
+  ]
+}

@@ -2,7 +2,7 @@
 
 import fs from "node:fs/promises";
 import path from "node:path";
-import { toolDef, param, toolResult } from "./registry.js";
+import { toolDef, param, ToolResult, toolResult } from "./registry.js";
 import { DEFAULT_SKILLS_PATH } from "../config.js";
 
 export class LoadSkillTool {
@@ -45,7 +45,12 @@ export class LoadSkillTool {
         ctx.onActivateSkill(skillName);
       }
 
-      return toolResult(content);
+      const contentLength = content.length;
+      return ToolResult.ok(content).withEntries({
+        skill: skillName,
+        content_length: String(contentLength),
+        source: "directory",
+      });
     } catch (e) {
       // Try loading directly by name
       try {
@@ -54,9 +59,14 @@ export class LoadSkillTool {
         if (ctx?.onActivateSkill) {
           ctx.onActivateSkill(skillName);
         }
-        return toolResult(content);
+        const contentLength = content.length;
+        return ToolResult.ok(content).withEntries({
+          skill: skillName,
+          content_length: String(contentLength),
+          source: "file",
+        });
       } catch {
-        return toolResult(`Skill not found: ${skillName}`);
+        return ToolResult.err(`Skill not found: ${skillName}`);
       }
     }
   }

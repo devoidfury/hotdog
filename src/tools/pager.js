@@ -1,6 +1,6 @@
 // Pager tool — paginate through large tool outputs.
 
-import { toolDef, param, toolResult } from './registry.js';
+import { toolDef, param, ToolResult, toolResult } from './registry.js';
 
 export class PagerTool {
   static TOOL_NAME = 'pager';
@@ -29,9 +29,11 @@ export class PagerTool {
 
     if (ctx?.onGetCachedToolOutput) {
       const cached = ctx.onGetCachedToolOutput(toolCallId);
-      if (cached) return toolResult(cached);
+      if (cached) {
+        return ToolResult.ok(cached).withEntry('tool_call_id', toolCallId);
+      }
     }
 
-    return toolResult(`No cached output found for tool call ID: ${toolCallId}`);
+    return ToolResult.err(`No cached output found for tool call ID: ${toolCallId}`);
   }
 }

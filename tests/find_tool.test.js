@@ -20,6 +20,13 @@ function toolCtx(opts = {}) {
   });
 }
 
+function getResultStr(result) {
+  if (result?.toDisplay) {
+    return result.toDisplay();
+  }
+  return String(result);
+}
+
 // ── Tool Definition ─────────────────────────────────────────────────────────
 
 describe('FindTool.toToolDef', () => {
@@ -70,9 +77,9 @@ describe('FindTool.execute — basic find', () => {
       toolCtx()
     );
 
-    expect(result).toContain('hello.txt');
-    expect(result).toContain('world.txt');
-    expect(result).not.toContain('data.json');
+    expect(getResultStr(result)).toContain('hello.txt');
+    expect(getResultStr(result)).toContain('world.txt');
+    expect(getResultStr(result)).not.toContain('data.json');
     fsSync.rmSync(dir, { recursive: true, force: true });
   });
 
@@ -88,8 +95,8 @@ describe('FindTool.execute — basic find', () => {
       toolCtx()
     );
 
-    expect(result).toContain('root.txt');
-    expect(result).toContain('nested.txt');
+    expect(getResultStr(result)).toContain('root.txt');
+    expect(getResultStr(result)).toContain('nested.txt');
     fsSync.rmSync(dir, { recursive: true, force: true });
   });
 
@@ -103,7 +110,7 @@ describe('FindTool.execute — basic find', () => {
       toolCtx()
     );
 
-    expect(result).toContain('No files found');
+    expect(getResultStr(result)).toContain('No files found');
     fsSync.rmSync(dir, { recursive: true, force: true });
   });
 });
@@ -122,8 +129,8 @@ describe('FindTool.execute — file type filter', () => {
       toolCtx()
     );
 
-    expect(result).toContain('file.txt');
-    expect(result).not.toContain('subdir');
+    expect(getResultStr(result)).toContain('file.txt');
+    expect(getResultStr(result)).not.toContain('subdir');
     fsSync.rmSync(dir, { recursive: true, force: true });
   });
 
@@ -138,8 +145,8 @@ describe('FindTool.execute — file type filter', () => {
       toolCtx()
     );
 
-    expect(result).toContain('subdir');
-    expect(result).not.toContain('file.txt');
+    expect(getResultStr(result)).toContain('subdir');
+    expect(getResultStr(result)).not.toContain('file.txt');
     fsSync.rmSync(dir, { recursive: true, force: true });
   });
 });
@@ -160,7 +167,7 @@ describe('FindTool.execute — max_results', () => {
     );
 
     // Should have at most 3 results
-    const lines = result.split('\n').filter(l => l.includes('file'));
+    const lines = getResultStr(result).split('\n').filter(l => l.includes('file'));
     expect(lines.length).toBeLessThanOrEqual(3);
     fsSync.rmSync(dir, { recursive: true, force: true });
   });
@@ -177,7 +184,7 @@ describe('FindTool.execute — max_results', () => {
       toolCtx()
     );
 
-    const lines = result.split('\n').filter(l => l.includes('file'));
+    const lines = getResultStr(result).split('\n').filter(l => l.includes('file'));
     expect(lines.length).toBe(5);
     fsSync.rmSync(dir, { recursive: true, force: true });
   });
@@ -189,13 +196,13 @@ describe('FindTool.execute — error cases', () => {
   it('returns error on invalid JSON input', async () => {
     const tool = new FindTool();
     const result = await tool.execute('not json', toolCtx());
-    expect(result).toContain('Error parsing arguments');
+    expect(getResultStr(result)).toContain('Error parsing arguments');
   });
 
   it('returns error on missing pattern', async () => {
     const tool = new FindTool();
     const result = await tool.execute({ path: '.' }, toolCtx());
-    expect(result).toContain('Error parsing arguments');
+    expect(getResultStr(result)).toContain('Error parsing arguments');
   });
 
   it('handles non-existent search path gracefully', async () => {
@@ -205,6 +212,6 @@ describe('FindTool.execute — error cases', () => {
       toolCtx()
     );
     // Should not crash, may return "No files found" or error
-    expect(result).toBeDefined();
+    expect(getResultStr(result)).toBeDefined();
   });
 });

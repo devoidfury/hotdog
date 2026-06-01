@@ -6,6 +6,7 @@ import path from "node:path";
 import {
   toolDef,
   param,
+  ToolResult,
   toolResult,
   validateCwdBoundary,
   resolvePath,
@@ -112,10 +113,10 @@ export class WriteTool {
     try {
       args = typeof input === "string" ? JSON.parse(input) : input;
     } catch {
-      return toolResult("Error parsing arguments");
+      return ToolResult.err("Error parsing arguments");
     }
     if (!args || !args.mode || !args.path || args.content === undefined) {
-      return toolResult("Error parsing arguments");
+      return ToolResult.err("Error parsing arguments");
     }
 
     // Normalize args
@@ -148,7 +149,7 @@ export class WriteTool {
     // Validate cwd boundary on resolved path
     const boundaryError = validateCwdBoundary(resolvedPath, cwdBoundary);
     if (boundaryError) {
-      return toolResult(boundaryError);
+      return ToolResult.err(boundaryError);
     }
 
     // Validate mode
@@ -159,7 +160,7 @@ export class WriteTool {
       end_at,
     });
     if (modeResult) {
-      return toolResult(modeResult);
+      return ToolResult.err(modeResult);
     }
 
     // Read existing content
@@ -167,7 +168,7 @@ export class WriteTool {
     try {
       await fs.mkdir(dir, { recursive: true });
     } catch (e) {
-      return toolResult(`Error creating directory: ${e.message}`);
+      return ToolResult.err(`Error creating directory: ${e.message}`);
     }
 
     const sourceContent = fsSync.existsSync(resolvedPath)
@@ -188,7 +189,7 @@ export class WriteTool {
         end_at,
       );
     } catch (e) {
-      return toolResult(`Edit failed: ${e.message}`);
+      return ToolResult.err(`Edit failed: ${e.message}`);
     }
 
     const filesizeAfter = Buffer.byteLength(newContent, "utf-8");
@@ -197,18 +198,24 @@ export class WriteTool {
     try {
       await fs.writeFile(resolvedPath, newContent, "utf-8");
     } catch (e) {
-      return toolResult(`Error writing file: ${e.message}`);
+      return ToolResult.err(`Error writing file: ${e.message}`);
     }
 
-    // Return structured result
-    return toolResult(
+    // Return structured result with metadata
+    return ToolResult.ok(
       JSON.stringify({
         path: filePath,
         mode,
         filesize_before: filesizeBefore,
         filesize_after: filesizeAfter,
       }),
-    );
+    ).withEntries({
+      path: filePath,
+      mode,
+      filesize_before: String(filesizeBefore),
+      filesize_after: String(filesizeAfter),
+      bytes_changed: String(filesizeAfter - filesizeBefore),
+    });
   }
 }
 

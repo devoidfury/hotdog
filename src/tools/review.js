@@ -11,6 +11,7 @@ import { readSessionEntries } from '../session_log.js';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { readdirSync, existsSync, statSync } from 'node:fs';
+import { ToolResult } from './registry.js';
 
 /**
  * Truncate content to max_len bytes, appending '…' if truncated.
@@ -179,24 +180,35 @@ export class ReviewTool {
       case 'list': {
         const limit = Math.min(100, Math.max(1, args.limit));
         const sessions = listSessions(limit);
-        return JSON.stringify(sessions);
+        return ToolResult.ok(JSON.stringify(sessions)).withEntries({
+          operation: 'list',
+          session_count: String(sessions.length),
+        });
       }
       case 'get': {
         if (!args.session_id) {
-          return 'Error: session_id is required for \'get\' operation';
+          return ToolResult.err('Error: session_id is required for \'get\' operation');
         }
         const entries = getSession(args.session_id);
-        return JSON.stringify(entries);
+        return ToolResult.ok(JSON.stringify(entries)).withEntries({
+          operation: 'get',
+          session_id: args.session_id,
+          entry_count: String(entries.length),
+        });
       }
       case 'tool_index': {
         if (!args.session_id) {
-          return 'Error: session_id is required for \'tool_index\' operation';
+          return ToolResult.err('Error: session_id is required for \'tool_index\' operation');
         }
         const index = getToolIndex(args.session_id);
-        return JSON.stringify(index);
+        return ToolResult.ok(JSON.stringify(index)).withEntries({
+          operation: 'tool_index',
+          session_id: args.session_id,
+          tool_call_count: String(index.length),
+        });
       }
       default:
-        return `Error: Unknown operation: '${args.operation}'. Use 'list', 'get', or 'tool_index'.`;
+        return ToolResult.err(`Error: Unknown operation: '${args.operation}'. Use 'list', 'get', or 'tool_index'.`);
     }
   }
 }

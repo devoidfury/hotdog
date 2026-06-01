@@ -1,7 +1,7 @@
 // Fetch tool — make HTTP requests.
 
 import { spawnSync } from "node:child_process";
-import { toolDef, param, toolResult } from "./registry.js";
+import { toolDef, param, ToolResult, toolResult } from "./registry.js";
 
 const VALID_METHODS = ["GET", "POST", "PUT", "DELETE", "PATCH", "HEAD"];
 const METHODS_WITH_BODY = ["POST", "PUT", "PATCH"];
@@ -50,7 +50,7 @@ export class FetchTool {
   async execute(input, ctx) {
     const { args, error } = parseArgs(input);
     if (!args) {
-      return toolResult(error);
+      return ToolResult.err(error);
     }
 
     const { url, method, headers, body, showOriginal } = args;
@@ -89,7 +89,7 @@ export class FetchTool {
 
       // If showOriginal is true, return raw body without conversion
       if (showOriginal) {
-        return toolResult({
+        return ToolResult.ok({
           status: resp.status,
           status_text: reason,
           method,
@@ -99,6 +99,14 @@ export class FetchTool {
           ...(truncated ? { truncated: "true" } : {}),
           body: respBody,
           headers: respHeaders,
+        }).withEntries({
+          url,
+          method,
+          status: String(resp.status),
+          status_text: reason,
+          content_type: contentType,
+          body_length: String(bodyLength),
+          ...(truncated ? { truncated: "true" } : {}),
         });
       }
 
@@ -136,7 +144,7 @@ export class FetchTool {
           : JSON.stringify(bodyToReturn).length;
       const finalTruncated = finalBodyLength > 8000;
 
-      return toolResult({
+      return ToolResult.ok({
         status: resp.status,
         status_text: reason,
         method,
@@ -146,16 +154,24 @@ export class FetchTool {
         ...(finalTruncated ? { truncated: "true" } : {}),
         body: bodyToReturn,
         headers: respHeaders,
+      }).withEntries({
+        url,
+        method,
+        status: String(resp.status),
+        status_text: reason,
+        content_type: contentType,
+        body_length: String(finalBodyLength),
+        ...(finalTruncated ? { truncated: "true" } : {}),
       });
     } catch (e) {
       const msg = e.message || String(e);
       if (msg.includes("timeout") || msg.includes("timed out")) {
-        return toolResult(`Request to ${url} timed out`);
+        return ToolResult.err(`Request to ${url} timed out`);
       }
       if (msg.includes("connect") || msg.includes("network")) {
-        return toolResult(`Connection failed for ${url}: ${msg}`);
+        return ToolResult.err(`Connection failed for ${url}: ${msg}`);
       }
-      return toolResult(`Error: ${msg}`);
+      return ToolResult.err(`Error: ${msg}`);
     }
   }
 }

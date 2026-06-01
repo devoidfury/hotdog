@@ -1,6 +1,6 @@
 // Model tool — switch the AI model at runtime.
 
-import { toolDef, param, toolResult } from "./registry.js";
+import { toolDef, param, ToolResult, toolResult } from "./registry.js";
 
 export class ModelTool {
   static TOOL_NAME = "model";
@@ -38,22 +38,24 @@ export class ModelTool {
   async execute(input, ctx) {
     const args = parseArgs(input);
     if (!args) {
-      return toolResult("Invalid JSON input");
+      return ToolResult.err("Invalid JSON input");
     }
 
     const name = args.name;
 
     if (name === "list") {
       const models = Object.keys(this.modelRegistry);
-      return toolResult(
+      return ToolResult.ok(
         models.length > 0 ? models.join("\n") : "No models registered.",
-      );
+      ).withEntries({
+        model_count: String(models.length),
+      });
     }
 
     // Validate model exists
     if (!this.modelRegistry[name]) {
       const available = Object.keys(this.modelRegistry);
-      return toolResult(
+      return ToolResult.err(
         `Unknown model '${name}'. Available models: ${available.join(", ")}`,
       );
     }
@@ -61,15 +63,17 @@ export class ModelTool {
     if (ctx?.onSwitchModel) {
       try {
         await ctx.onSwitchModel(name);
-        return toolResult(`Switched to model: ${name}`);
+        return ToolResult.ok(`Switched to model: ${name}`).withEntry(
+          "model", name,
+        );
       } catch (e) {
-        return toolResult(`Error switching model: ${e.message}`);
+        return ToolResult.err(`Error switching model: ${e.message}`);
       }
     }
 
-    return toolResult(
+    return ToolResult.ok(
       `Model tool requires a model switch callback. Model: ${name}`,
-    );
+    ).withEntry("model", name);
   }
 }
 

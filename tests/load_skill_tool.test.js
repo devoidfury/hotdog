@@ -4,6 +4,13 @@ import path from 'node:path';
 import os from 'node:os';
 import { LoadSkillTool } from '../src/tools/load_skill.js';
 
+function getResultStr(result) {
+  if (result?.toDisplay) {
+    return result.toDisplay();
+  }
+  return String(result);
+}
+
 describe('LoadSkillTool', () => {
   let tmpDir;
 
@@ -33,8 +40,8 @@ describe('LoadSkillTool', () => {
 
     const tool = new LoadSkillTool({ skillsPath: tmpDir });
     const result = await tool.execute(JSON.stringify({ name: 'my-skill' }));
-    expect(result).toContain('Skill Instructions');
-    expect(result).toContain('Do stuff.');
+    expect(getResultStr(result)).toContain('Skill Instructions');
+    expect(getResultStr(result)).toContain('Do stuff.');
   });
 
   it('loads skill from direct .md file', async () => {
@@ -42,13 +49,13 @@ describe('LoadSkillTool', () => {
 
     const tool = new LoadSkillTool({ skillsPath: tmpDir });
     const result = await tool.execute(JSON.stringify({ name: 'direct-skill' }));
-    expect(result).toContain('Direct Skill');
+    expect(getResultStr(result)).toContain('Direct Skill');
   });
 
   it('returns error for non-existent skill', async () => {
     const tool = new LoadSkillTool({ skillsPath: tmpDir });
     const result = await tool.execute(JSON.stringify({ name: 'non-existent' }));
-    expect(result).toContain('Skill not found');
+    expect(getResultStr(result)).toContain('Skill not found');
   });
 
   it('notifies context on skill activation', async () => {
@@ -92,6 +99,6 @@ describe('LoadSkillTool', () => {
 
     const tool = new LoadSkillTool({ skillsPath: tmpDir });
     const result = await tool.execute({ name: 'object-input' });
-    expect(result).toContain('Object Input Skill');
+    expect(getResultStr(result)).toContain('Object Input Skill');
   });
 });

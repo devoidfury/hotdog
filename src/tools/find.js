@@ -2,7 +2,7 @@
 
 import { execFile } from "node:child_process";
 import util from "node:util";
-import { toolDef, param, toolResult, truncateOutput } from "./registry.js";
+import { toolDef, param, ToolResult, toolResult, truncateOutput } from "./registry.js";
 import {
   DEFAULT_FIND_MAX_RESULTS,
   DEFAULT_MAX_TOOL_OUTPUT_LINES,
@@ -61,7 +61,7 @@ export class FindTool {
   async execute(input, ctx) {
     const args = parseArgs(input);
     if (!args) {
-      return toolResult("Error parsing arguments");
+      return ToolResult.err("Error parsing arguments");
     }
 
     const { pattern, file_type, max_results, path: searchPath } = args;
@@ -102,7 +102,14 @@ export class FindTool {
 
     const content = files.length === 0 ? "No files found" : files.join("\n");
 
-    return toolResult(truncateOutput(content, DEFAULT_MAX_TOOL_OUTPUT_LINES));
+    return ToolResult.ok(truncateOutput(content, DEFAULT_MAX_TOOL_OUTPUT_LINES)).withEntries({
+      pattern,
+      path: cwd,
+      total_count: String(total_count),
+      showing,
+      ...(truncated ? { truncated: "true" } : {}),
+      ...(file_type ? { file_type } : {}),
+    });
   }
 }
 

@@ -188,16 +188,71 @@ export function parseToolArgs(input) {
 /**
  * Resolve a tool result string.
  * Handles plain strings, objects, and ToolResult instances.
+ *
+ * When a `toolName` is provided, the result is formatted as XML
+ * for the API (matching the Rust reference's `to_api_content()`
+ * behavior). This is used for tool results sent back to the LLM.
+ *
+ * When no tool name is provided, falls back to plain text display.
  */
-export function toolResult(result) {
+export function toolResult(result, toolName) {
   if (result instanceof ToolResult) {
+    // XML-formatted for API when tool name is available, plain text otherwise
+    if (toolName) {
+      return result.toApiContent(toolName);
+    }
     return result.toDisplay();
   }
-  if (typeof result === 'string') return result;
+  if (typeof result === 'string') {
+    if (toolName) {
+      return xmlWrap(toolName, 'success', result);
+    }
+    return result;
+  }
   if (typeof result === 'object' && result !== null) {
+    if (toolName) {
+      return xmlWrap(toolName, 'success', result);
+    }
     return JSON.stringify(result);
   }
-  return String(result);
+  const str = String(result);
+  if (toolName) {
+    return xmlWrap(toolName, 'success', str);
+  }
+  return str;
+}
+
+/**
+ * Wrap content in XML tool tags for API output.
+ * Matches the format of ToolResult.toApiContent().
+ * Extracts short metadata keys (like duration_ms) as XML attributes.
+ */
+function xmlWrap(toolName, status, content) {
+  const attrs = [
+    `name="${xmlEscape(toolName)}"`,
+    `status="${status}"`,
+  ];
+
+  // If content is an object, check for short metadata keys
+  let outputContent = content;
+  if (typeof content === 'object' && content !== null) {
+    const shortMeta = [];
+    const remaining = { ...content };
+    for (const key of SHORT_META_KEYS) {
+      if (key in remaining) {
+        shortMeta.push(`${xmlEscape(key)}="${xmlEscape(String(remaining[key]))}"`);
+        delete remaining[key];
+      }
+    }
+    if (shortMeta.length > 0) {
+      attrs.push(...shortMeta);
+    }
+    // Re-serialize remaining object as JSON content
+    outputContent = JSON.stringify(remaining);
+  }
+
+  const attrsStr = attrs.join(' ');
+  return `<tool ${attrsStr}>\n  <output>${outputContent}</output>\n</tool>`;
 }
 
 /**

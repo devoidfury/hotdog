@@ -5,6 +5,7 @@ import path from "node:path";
 import {
   toolDef,
   param,
+  ToolResult,
   toolResult,
   validateCwdBoundary,
   resolvePath,
@@ -55,7 +56,7 @@ export class ReadTool {
   async execute(input, ctx) {
     const args = parseArgs(input);
     if (!args) {
-      return toolResult("Error parsing arguments");
+      return ToolResult.err("Error parsing arguments");
     }
 
     const { path: filePath, limit, offset } = args;
@@ -68,7 +69,7 @@ export class ReadTool {
     // Validate cwd boundary
     const boundaryError = validateCwdBoundary(resolvedPath, cwdBoundary);
     if (boundaryError) {
-      return toolResult(boundaryError);
+      return ToolResult.err(boundaryError);
     }
 
     const resolved = resolvedPath;
@@ -78,9 +79,12 @@ export class ReadTool {
       const stat = fsSync.statSync(resolved);
       if (stat.isDirectory()) {
         const listing = listDirectoryDepth1(resolved);
-        return toolResult(
+        return ToolResult.ok(
           `'${filePath}' is a directory. Here's a depth-1 listing:\n${listing}`,
-        );
+        ).withEntries({
+          path: resolved,
+          type: "directory",
+        });
       }
     } catch (e) {
       // stat failed — continue to file-not-found handling below
@@ -88,7 +92,7 @@ export class ReadTool {
 
     // Check if file exists
     if (!fsSync.existsSync(resolved)) {
-      return toolResult(`File not found: ${filePath}`);
+      return ToolResult.err(`File not found: ${filePath}`);
     }
 
     return readLines(resolved, offset, limit);
@@ -143,18 +147,29 @@ function readLines(filePath, offset, limit) {
     const totalLines = lines.length;
 
     if (offset >= totalLines) {
-      return toolResult(
+      return ToolResult.ok(
         `File has ${totalLines} lines, offset ${offset} is beyond end.\n[empty]`,
-      );
+      ).withEntries({
+        path: filePath,
+        total_lines: String(totalLines),
+        offset: String(offset),
+        limit: String(limit),
+      });
     }
 
     const end = Math.min(offset + limit, totalLines);
     const selected = lines.slice(offset, end);
     const result = selected.length === 0 ? "[empty]" : selected.join("\n");
 
-    return toolResult(result);
+    return ToolResult.ok(result).withEntries({
+      path: filePath,
+      total_lines: String(totalLines),
+      offset: String(offset),
+      limit: String(limit),
+      showing: `${offset + 1}-${end} (of ${totalLines} total)`,
+    });
   } catch (e) {
-    return toolResult(`Failed to read file: ${e.message}`);
+    return ToolResult.err(`Failed to read file: ${e.message}`);
   }
 }
 

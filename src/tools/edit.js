@@ -6,6 +6,7 @@ import path from "node:path";
 import {
   toolDef,
   param,
+  ToolResult,
   toolResult,
   validateCwdBoundary,
   resolvePath,
@@ -52,7 +53,7 @@ export class EditTool {
   async execute(input, ctx) {
     const op = parseArgs(input);
     if (!op) {
-      return toolResult("Error parsing arguments");
+      return ToolResult.err("Error parsing arguments");
     }
 
     const {
@@ -70,13 +71,13 @@ export class EditTool {
     // Validate cwd boundary
     const boundaryError = validateCwdBoundary(resolvedPath, cwdBoundary);
     if (boundaryError) {
-      return toolResult(boundaryError);
+      return ToolResult.err(boundaryError);
     }
 
     // Validate input size
     const inputSize = oldString.length + newString.length;
     if (inputSize > DEFAULT_MAX_EDIT_INPUT_SIZE) {
-      return toolResult(
+      return ToolResult.err(
         `Edit input too large: ${inputSize} characters (max ${DEFAULT_MAX_EDIT_INPUT_SIZE}). Please split into smaller edits.`,
       );
     }
@@ -86,7 +87,7 @@ export class EditTool {
     try {
       sourceContent = fsSync.readFileSync(resolvedPath, "utf-8");
     } catch (e) {
-      return toolResult(
+      return ToolResult.err(
         `File not found or unreadable '${filePath}': ${e.message}`,
       );
     }
@@ -99,7 +100,7 @@ export class EditTool {
       replaceAll || false,
     );
     if (result.error) {
-      return toolResult(`Edit failed: ${result.error}`);
+      return ToolResult.err(`Edit failed: ${result.error}`);
     }
 
     const { newContent, matchInfo } = result;
@@ -110,13 +111,19 @@ export class EditTool {
       await fs.mkdir(dir, { recursive: true });
       await fs.writeFile(resolvedPath, newContent, "utf-8");
     } catch (e) {
-      return toolResult(`Error writing file: ${e.message}`);
+      return ToolResult.err(`Error writing file: ${e.message}`);
     }
 
     const lineCount = oldString.split("\n").length;
-    return toolResult(
+    return ToolResult.ok(
       `Successfully edited '${filePath}', found ${matchInfo.matchCount} match${matchInfo.matchCount > 1 ? "es" : ""}, replaced with ${lineCount} line${lineCount > 1 ? "s" : ""}`,
-    );
+    ).withEntries({
+      path: filePath,
+      match_count: String(matchInfo.matchCount),
+      lines_replaced: String(lineCount),
+      start_line: String(matchInfo.startLine),
+      end_line: String(matchInfo.endLine),
+    });
   }
 }
 

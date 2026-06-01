@@ -3,7 +3,7 @@
 import { spawn } from "node:child_process";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { toolDef, param, toolResult } from "./registry.js";
+import { toolDef, param, ToolResult, toolResult } from "./registry.js";
 
 // Resolve the path to the current binary (main.js)
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -51,8 +51,11 @@ export class ExploreTool {
     if (!args.outline || args.outline.trim().length === 0) {
       const error =
         "The 'outline' argument is required. Provide an outline of what you're specifically interested in or any particular questions you have.";
-      return toolResult({
+      return ToolResult.ok({
         error,
+        path: args.path,
+        outline: args.outline,
+      }).withEntries({
         path: args.path,
         outline: args.outline,
       });
@@ -95,19 +98,25 @@ export class ExploreTool {
     });
 
     if (exitCode !== 0) {
-      return toolResult({
-        error: stderr.trim() || `Explorer exited with code ${exitCode}`,
+      return ToolResult.err(stderr.trim() || `Explorer exited with code ${exitCode}`).withEntries({
         path: args.path,
         outline: args.outline,
         command,
+        exit_code: String(exitCode),
       });
     }
 
-    return toolResult({
+    return ToolResult.ok({
       content: stdout.trim(),
       path: args.path,
       outline: args.outline,
       command,
+    }).withEntries({
+      path: args.path,
+      outline: args.outline,
+      command,
+      exit_code: String(exitCode),
+      content_length: String(stdout.length),
     });
   }
 

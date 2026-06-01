@@ -1,7 +1,13 @@
 // Bash tool — execute shell commands.
 
 import { spawn } from "node:child_process";
-import { toolDef, param, toolResult, truncateOutput } from "./registry.js";
+import {
+  toolDef,
+  param,
+  ToolResult,
+  toolResult,
+  truncateOutput,
+} from "./registry.js";
 import {
   DEFAULT_BASH_TIMEOUT_MS,
   DEFAULT_MAX_TOOL_OUTPUT_LINES,
@@ -44,7 +50,7 @@ export class BashTool {
     const timeout = args.timeoutMs ?? args.timeout_ms ?? this.timeoutMs;
 
     if (!command) {
-      return toolResult("Error: command is required");
+      return ToolResult.err("Error: command is required");
     }
 
     return new Promise((resolve) => {
@@ -66,25 +72,35 @@ export class BashTool {
 
       const termTimer = setTimeout(() => {
         proc.kill("SIGTERM");
-        resolve(toolResult(`Command timed out after ${timeout}ms`));
+        resolve(ToolResult.err(`Command timed out after ${timeout}ms`));
       }, timeout);
 
       const killTimer = setTimeout(() => {
         proc.kill("SIGKILL");
-        resolve(toolResult(`Command timed out after ${timeout}ms`));
+        resolve(ToolResult.err(`Command timed out after ${timeout}ms`));
       }, timeout + 2000); // give it a two second grace period before hard killing
 
+      const cmdFirstLine = command.split("\n")[0];
       proc.on("close", (code) => {
         clearTimeout(termTimer);
         clearTimeout(killTimer);
         const output = [stdout, stderr].filter(Boolean).join("\n");
-        resolve(toolResult(truncateOutput(output, this.maxOutputLines)));
+        const truncated = truncateOutput(output, this.maxOutputLines);
+        resolve(
+          ToolResult.ok(truncated).withEntries({
+            command:
+              cmdFirstLine.length > 60
+                ? cmdFirstLine.slice(0, 60) + "…"
+                : cmdFirstLine,
+            exit_code: String(code),
+          }),
+        );
       });
 
       proc.on("error", (err) => {
         clearTimeout(termTimer);
         clearTimeout(killTimer);
-        resolve(toolResult(`Error: ${err.message}`));
+        resolve(ToolResult.err(`Error: ${err.message}`));
       });
     });
   }

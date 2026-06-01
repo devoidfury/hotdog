@@ -4,7 +4,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { execFile } from "node:child_process";
 import util from "node:util";
-import { toolDef, param, toolResult } from "./registry.js";
+import { toolDef, param, ToolResult, toolResult } from "./registry.js";
 import {
   DEFAULT_MAX_TOOL_OUTPUT_LINES,
   DEFAULT_READ_TOOL_LIMIT,
@@ -62,7 +62,7 @@ export class ProjectInfoTool {
     try {
       workdir = path.resolve(cwd);
     } catch {
-      return toolResult(`Error: invalid path ${cwd}`);
+      return ToolResult.err(`Error: invalid path ${cwd}`);
     }
 
     // Check if directory exists
@@ -74,7 +74,7 @@ export class ProjectInfoTool {
     }
 
     if (!dirExists) {
-      return toolResult(`=== Project Info ===\nDirectory not found: ${cwd}`);
+      return ToolResult.err(`=== Project Info ===\nDirectory not found: ${cwd}`);
     }
 
     // Try git ls-files
@@ -102,7 +102,10 @@ export class ProjectInfoTool {
     }
 
     if (gitFiles.length === 0) {
-      return toolResult("=== Project Info ===\nNo files found.");
+      return ToolResult.ok("=== Project Info ===\nNo files found.").withEntries({
+        path: workdir,
+        file_count: "0",
+      });
     }
 
     // Gather metadata
@@ -166,7 +169,12 @@ export class ProjectInfoTool {
       lines.push("");
     }
 
-    return toolResult(lines.join("\n"));
+    return ToolResult.ok(lines.join("\n")).withEntries({
+      path: workdir,
+      file_count: String(gitFiles.length),
+      ...(branch ? { branch } : {}),
+      ...(lastCommit ? { last_commit: lastCommit } : {}),
+    });
   }
 
   async _partialInfo(workdir, cwd, maxDepth, maxFiles) {
@@ -215,7 +223,11 @@ export class ProjectInfoTool {
       }
     }
 
-    return toolResult(lines.join("\n"));
+    return ToolResult.ok(lines.join("\n")).withEntries({
+      path: workdir,
+      file_count: String(files.length),
+      git_repo: "false",
+    });
   }
 
   _listFilesRecursively(base, maxDepth, maxFiles) {

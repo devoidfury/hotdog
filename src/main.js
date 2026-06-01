@@ -85,20 +85,24 @@ async function loadExtensions(core, { taskManager, config } = {}) {
 function createCore(config, configRegistry, cliSubcommandRegistry, options = {}) {
   const hooks = createHooks();
   const toolRegistry = createToolRegistry();
-  const extensions = createExtensionLoader({
-    hooks,
-    toolRegistry,
-    config,
-    cliSubcommandRegistry,
-    configRegistry,
-  });
 
   // Merge profile info into config so extensions can access it
+  // This must be done BEFORE creating the extension loader, because
+  // extensions access core.config.profile during create() (e.g., subagents
+  // checks core.config.profile.manager to decide whether to register tools).
   const coreConfig = {
     ...config,
     profileName: options.profileName || config.profileName || "default",
     profile: options.profile || config.profile || {},
   };
+
+  const extensions = createExtensionLoader({
+    hooks,
+    toolRegistry,
+    config: coreConfig,
+    cliSubcommandRegistry,
+    configRegistry,
+  });
 
   return { hooks, toolRegistry, extensions, config: coreConfig, cliSubcommandRegistry };
 }

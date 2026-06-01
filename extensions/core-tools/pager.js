@@ -1,6 +1,6 @@
 // Pager tool — paginate through large tool outputs.
 
-import { toolDef, param, ToolResult, toolResult, parseToolInput } from './registry.js';
+import { toolDef, param, ToolResult, toolResult, parseToolInput, defaultCallDisplay } from './registry.js';
 
 export class PagerTool {
   static TOOL_NAME = 'pager';
@@ -19,8 +19,7 @@ export class PagerTool {
   }
 
   callDisplay(input) {
-    const args = typeof input === 'string' ? JSON.parse(input) : input;
-    return `pager: ${args.tool_call_id}`;
+    return defaultCallDisplay(input, (args) => `pager: ${args.tool_call_id}`);
   }
 
   async execute(input, ctx) {

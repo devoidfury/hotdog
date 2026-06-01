@@ -18,7 +18,6 @@ import { OUTPUT_EVENT } from "./context/output.js";
 import { createSubcommandRegistry } from "./cli/subcommand-registry.js";
 import { TaskManager } from "./session/task_manager.js";
 import { Message } from "./context/message.js";
-import { setSharedTaskManager } from "../extensions/core-tools/index.js";
 import {
   sessionExists,
   readSessionEntries,
@@ -354,10 +353,9 @@ async function main() {
   const core = createCore(config);
 
   // ── Load extensions ─────────────────────────────────────────────────────
+  // Tool registration happens inside ExtensionLoader.load() via the
+  // tools:register hook emission (see extensions.js). No separate emission needed.
   await loadExtensions(core);
-
-  // ── Emit tools:register hook to trigger tool registration ───────────────
-  await core.hooks.emitAsync("tools:register", core.toolRegistry);
 
   // ── Output sink ─────────────────────────────────────────────────────────
   const palette = CliOutputSink.resolve(
@@ -424,9 +422,9 @@ async function main() {
         const entries = readSessionEntries(explicitSessionId);
         if (entries.length > 0) {
           // Set restoring flag to prevent duplicate log writes during replay
-          agent._isRestoring = true;
+          agent.isRestoring = true;
           const replayed = replayEntriesIntoContext(agent, entries);
-          agent._isRestoring = false;
+          agent.isRestoring = false;
           if (replayed > 0) {
             console.log(
               `Session restored: ${replayed} messages replayed from ${explicitSessionId}`,
@@ -459,10 +457,8 @@ async function main() {
   // Wire taskManager to sessionManager
   taskManager.setSessionManager(sessionManager);
 
-  // Register taskManager so subagent tools can use it
-  setSharedTaskManager(taskManager);
-
   // Create and register subagent tools (manager-only tools)
+  // TaskManager is passed directly to createToolFactory — no global state needed.
   const { createToolFactory, SUBAGENT_TOOL_NAMES } =
     await import("../extensions/core-tools/index.js");
   const subagentFactory = createToolFactory(taskManager);

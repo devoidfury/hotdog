@@ -151,11 +151,15 @@ export const HOOKS = {
   SESSION_SWAP:       'session:swap',
   SESSION_SERIALIZE:  'session:serialize',
   SESSION_DESERIALIZE:'session:deserialize',
+  SESSION_RESTORE_ACTIVE: 'session:restoreActive',
 
   // Agent run loop
   AGENT_BEFORE_RUN:   'agent:beforeRun',
   AGENT_AFTER_RUN:    'agent:afterRun',
   AGENT_CANCELLED:    'agent:cancelled',
+
+  // Tool context enrichment — extensions add fields to tool context
+  AGENT_TOOL_CONTEXT: 'agent:toolContext',
 
   // Model changes
   MODEL_CHANGE:       'model:change',

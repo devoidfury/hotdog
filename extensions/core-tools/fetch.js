@@ -1,7 +1,7 @@
 // Fetch tool — make HTTP requests.
 
 import { spawnSync } from "node:child_process";
-import { toolDef, param, ToolResult, toolResult, parseToolInput } from "./registry.js";
+import { toolDef, param, ToolResult, toolResult, parseToolInput, defaultCallDisplay } from "./registry.js";
 
 const VALID_METHODS = ["GET", "POST", "PUT", "DELETE", "PATCH", "HEAD"];
 const METHODS_WITH_BODY = ["POST", "PUT", "PATCH"];
@@ -38,13 +38,11 @@ export class FetchTool {
   }
 
   callDisplay(input) {
-    const { args, error } = parseArgs(input);
-    if (!args) {
-      return typeof input === "string" ? input : "";
-    }
-    const url = args.url;
-    const urlDisplay = url.length > 40 ? url.slice(0, 40) + "..." : url;
-    return `[${args.method}] ${urlDisplay}`;
+    return defaultCallDisplay(input, (args) => {
+      const url = args.url;
+      const urlDisplay = url.length > 40 ? url.slice(0, 40) + "..." : url;
+      return `[${args.method}] ${urlDisplay}`;
+    });
   }
 
   async execute(input, ctx) {

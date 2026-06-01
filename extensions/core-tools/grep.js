@@ -11,6 +11,7 @@ import {
   toolResult,
   truncateOutput,
   parseToolInput,
+  defaultCallDisplay,
 } from "./registry.js";
 import {
   DEFAULT_GREP_MAX_RESULTS,
@@ -327,12 +328,11 @@ export class GrepTool {
   }
 
   callDisplay(input) {
-    const args = parseArgs(input);
-    if (!args) {
-      return typeof input === "string" ? input : "";
-    }
-    const path = args.path || ".";
-    return `'${args.pattern}' in ${path}`;
+    return defaultCallDisplay(input, (args) => {
+      if (!args.pattern) return "";
+      const path = args.path || ".";
+      return `'${args.pattern}' in ${path}`;
+    }, typeof input === "string" ? input : "");
   }
 
   async execute(input, ctx) {

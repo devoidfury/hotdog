@@ -6,7 +6,7 @@
 // Phase 2: Tools accept an optional SessionCore reference. When set, they
 // delegate to SessionCore; otherwise they fall back to TaskManager.
 
-import { toolDef, param, parseToolArgs, toolResult, ToolResult } from "./registry.js";
+import { toolDef, param, parseToolArgs, toolResult, ToolResult, defaultCallDisplay } from "./registry.js";
 import { getVisibleWorkerProfiles } from "../../src/config.js";
 
 // ── Base class for subagent tools ──────────────────────────────────────────
@@ -68,8 +68,7 @@ export class SubagentTool {
    * Override in subclasses for custom display.
    */
   callDisplay(input) {
-    const args = parseToolArgs(input);
-    return `${this.constructor.name}(${args?.task_id || "?"})`;
+    return defaultCallDisplay(input, (args) => `${this.constructor.name}(${args?.task_id || "?"})`);
   }
 }
 

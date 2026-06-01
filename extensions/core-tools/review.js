@@ -11,7 +11,7 @@ import { readSessionEntries } from '../session-log/session_log.js';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { readdirSync, existsSync, statSync } from 'node:fs';
-import { ToolResult } from './registry.js';
+import { ToolResult, defaultCallDisplay } from './registry.js';
 
 /**
  * Truncate content to max_len bytes, appending '…' if truncated.
@@ -160,17 +160,18 @@ export class ReviewTool {
   }
 
   callDisplay(input) {
-    const args = parseArgs(input);
-    switch (args.operation) {
-      case 'list':
-        return `(list, limit=${args.limit})`;
-      case 'get':
-        return `(get, session_id=${args.session_id || '?'})`;
-      case 'tool_index':
-        return `(tool_index, session_id=${args.session_id || '?'})`;
-      default:
-        return `(unknown op=${args.operation})`;
-    }
+    return defaultCallDisplay(input, (args) => {
+      switch (args.operation) {
+        case 'list':
+          return `(list, limit=${args.limit})`;
+        case 'get':
+          return `(get, session_id=${args.session_id || '?'})`;
+        case 'tool_index':
+          return `(tool_index, session_id=${args.session_id || '?'})`;
+        default:
+          return `(unknown op=${args.operation})`;
+      }
+    });
   }
 
   async execute(input) {

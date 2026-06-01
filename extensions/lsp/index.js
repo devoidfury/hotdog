@@ -44,6 +44,7 @@ const LSP_TOOL_MAP = {
 };
 
 export const LSP_TOOL_NAMES = Object.keys(LSP_TOOL_MAP);
+export { LSP_TOOL_MAP };
 
 /**
  * Get or create an LSP client for a given language.
@@ -170,5 +171,16 @@ export {
 };
 
 // Re-export base classes for extension authors
-export { LspPositionTool, LspFileTool, LspQueryTool } from './tools/lsp-position-tool.js';
-export { LspBaseTool } from './tools/base.js';
+export {
+  LspPositionTool,
+  LspFileTool,
+  LspQueryTool,
+  LspBaseTool,
+  // Factory functions for creating new LSP tools
+  definePositionTool,
+  createLspPositionTool,
+  defineFileTool,
+  createLspFileTool,
+  defineQueryTool,
+  createLspQueryTool,
+} from './tools/index.js';

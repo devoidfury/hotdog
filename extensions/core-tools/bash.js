@@ -8,6 +8,7 @@ import {
   toolResult,
   truncateOutput,
   parseToolInput,
+  defaultCallDisplay,
 } from "./registry.js";
 import {
   DEFAULT_BASH_TIMEOUT_MS,
@@ -40,8 +41,7 @@ export class BashTool {
   }
 
   callDisplay(input) {
-    const args = typeof input === "string" ? JSON.parse(input) : input;
-    return `bash: ${args.command}`;
+    return defaultCallDisplay(input, (args) => `bash: ${args.command}`);
   }
 
   async execute(input, ctx) {

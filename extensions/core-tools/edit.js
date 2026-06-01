@@ -11,6 +11,7 @@ import {
   validateCwdBoundary,
   resolvePath,
   parseToolInput,
+  defaultCallDisplay,
 } from "./registry.js";
 import { DEFAULT_MAX_EDIT_INPUT_SIZE } from "../../src/config.js";
 
@@ -37,18 +38,14 @@ export class EditTool {
   }
 
   callDisplay(input) {
-    let op;
-    try {
-      op = typeof input === "string" ? JSON.parse(input) : input;
-    } catch {
-      return typeof input === "string" ? input : "";
-    }
-    if (!op || !op.path) {
-      return typeof input === "string" ? input : "";
-    }
-    const oldPreview = truncateString(op.oldString || "", 40);
-    const newPreview = truncateString(op.newString || "", 40);
-    return `${op.path}: '${oldPreview}' → '${newPreview}'`;
+    return defaultCallDisplay(input, (op) => {
+      if (!op || !op.path) {
+        return typeof input === "string" ? input : "";
+      }
+      const oldPreview = truncateString(op.oldString || "", 40);
+      const newPreview = truncateString(op.newString || "", 40);
+      return `${op.path}: '${oldPreview}' → '${newPreview}'`;
+    });
   }
 
   async execute(input, ctx) {

@@ -18,9 +18,8 @@ export * from "./project_info.js";
 export * from "./review.js";
 export * from "./explore.js";
 
-// Export LSP tools and utilities through the extension hook
-export { LSP_TOOL_NAMES } from "../lsp/index.js";
-import { LSP_TOOL_NAMES } from "../lsp/index.js";
+// Import LSP tool definitions from the LSP extension (single source of truth)
+import { LSP_TOOL_NAMES, LSP_TOOL_MAP } from "../lsp/index.js";
 
 // Import classes for factory use
 import { BashTool } from "./bash.js";
@@ -96,22 +95,6 @@ export const SUBAGENT_TOOL_NAMES = [
   "wait",
 ];
 
-// LSP tool class map
-const LSP_TOOL_MAP = {
-  "lsp-hover": LspHoverTool,
-  "lsp-definition": LspDefinitionTool,
-  "lsp-completion": LspCompletionTool,
-  "lsp-signature": LspSignatureTool,
-  "lsp-document-symbol": LspDocumentSymbolTool,
-  "lsp-references": LspReferencesTool,
-  "lsp-code-action": LspCodeActionTool,
-  "lsp-formatting": LspFormattingTool,
-  "lsp-rename": LspRenameTool,
-  "lsp-diagnostics": LspDiagnosticsTool,
-  "lsp-workspace-symbol": LspWorkspaceSymbolTool,
-  "lsp-apply-edit": LspApplyEditTool,
-};
-
 /**
  * Resolve language ID from a file path.
  * Re-exported from extensions/lsp/utils for internal use.
@@ -167,76 +150,68 @@ function createLspInstance(toolName, ctx, lspConfig) {
 }
 
 /**
- * Shared taskManager reference — set by main.js when TaskManager is created.
- * This allows subagent tools to be created after TaskManager exists.
- */
-let _sharedTaskManager = null;
-
-/**
- * Set the shared taskManager reference for subagent tools.
- * @param {Object} taskManager — TaskManager instance
- */
-export function setSharedTaskManager(taskManager) {
-  _sharedTaskManager = taskManager;
-}
-
-/**
  * Create a tool factory that can create and register tools.
+ *
+ * @param {Object} [taskManager] — TaskManager instance for subagent tools (required for subagent tools).
+ * @param {Object} [sessionCore] — Session core for subagent tools.
+ * @returns {{ createTool: Function, createAndRegister: Function }}
  */
 export function createToolFactory(taskManager = null, sessionCore = null) {
-  return {
-    createTool(toolName, ctx, whitelist = null, managerToolsEnabled = false) {
-      const descriptor = TOOL_DESCRIPTORS.find((d) => d.name === toolName);
-      if (descriptor) {
-        // Check disabled status
-        if (
-          descriptor.disabled &&
-          !whitelist?.includes(toolName) &&
-          !managerToolsEnabled
-        ) {
-          return null;
-        }
-        // Check whitelist
-        if (whitelist && !whitelist.includes(toolName)) {
-          return null;
-        }
-      }
+  // When taskManager is not provided, we can only create core tools.
+  // Subagent tools are rejected (they require taskManager).
+  const hasTaskManager = !!taskManager;
 
-      // Core tools — lookup from declarative map
-      const coreCtor = TOOL_CONSTRUCTORS[toolName];
-      if (coreCtor) {
-        return coreCtor(ctx);
-      }
-
-      // Subagent tools (manager-only)
-      // Use shared taskManager if not passed directly
-      const effectiveTaskManager = taskManager || _sharedTaskManager;
+  const createToolInternal = (toolName, ctx, whitelist = null, managerToolsEnabled = false) => {
+    const descriptor = TOOL_DESCRIPTORS.find((d) => d.name === toolName);
+    if (descriptor) {
+      // Check disabled status
       if (
-        managerToolsEnabled &&
-        (effectiveTaskManager || sessionCore || ctx?.sessionCore)
+        descriptor.disabled &&
+        !whitelist?.includes(toolName) &&
+        !managerToolsEnabled
       ) {
-        const subCtor = SUBAGENT_TOOL_CONSTRUCTORS[toolName];
-        if (subCtor) {
-          // Pass options object with both sessionCore and taskManager
-          return subCtor({
-            sessionCore: sessionCore || ctx?.sessionCore || null,
-            taskManager: effectiveTaskManager,
-          });
-        }
-      }
-
-      // LSP tools — only when enabled
-      if (LSP_TOOL_MAP[toolName]) {
-        // Get LSP config from ctx or profile
-        const lspConfig = ctx?.lspConfig || null;
-        if (isLspEnabled(lspConfig)) {
-          return createLspInstance(toolName, ctx, lspConfig);
-        }
-        // LSP tools are optional — don't create if not enabled
         return null;
       }
+      // Check whitelist
+      if (whitelist && !whitelist.includes(toolName)) {
+        return null;
+      }
+    }
 
+    // Core tools — lookup from declarative map
+    const coreCtor = TOOL_CONSTRUCTORS[toolName];
+    if (coreCtor) {
+      return coreCtor(ctx);
+    }
+
+    // Subagent tools (manager-only) — taskManager is required
+    if (managerToolsEnabled && hasTaskManager) {
+      const subCtor = SUBAGENT_TOOL_CONSTRUCTORS[toolName];
+      if (subCtor) {
+        return subCtor({
+          sessionCore: sessionCore || ctx?.sessionCore || null,
+          taskManager,
+        });
+      }
+    }
+
+    // LSP tools — only when enabled
+    if (LSP_TOOL_MAP[toolName]) {
+      // Get LSP config from ctx or profile
+      const lspConfig = ctx?.lspConfig || null;
+      if (isLspEnabled(lspConfig)) {
+        return createLspInstance(toolName, ctx, lspConfig);
+      }
+      // LSP tools are optional — don't create if not enabled
       return null;
+    }
+
+    return null;
+  };
+
+  return {
+    createTool(toolName, ctx, whitelist = null, managerToolsEnabled = false) {
+      return createToolInternal(toolName, ctx, whitelist, managerToolsEnabled);
     },
 
     async createAndRegister(

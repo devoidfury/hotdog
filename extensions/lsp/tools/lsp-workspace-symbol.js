@@ -1,16 +1,17 @@
 // LSP Workspace Symbol tool — workspace/symbol
+// Created via factory to reduce boilerplate.
 
-import { LspQueryTool } from './lsp-position-tool.js';
 import { ToolResult } from '../../core-tools/registry.js';
 import { SymbolKind } from './base.js';
+import { defineQueryTool } from './lsp-position-tool.js';
 
-export class LspWorkspaceSymbolTool extends LspQueryTool {
-  static TOOL_NAME = 'lsp-workspace-symbol';
-  static DESCRIPTION = 'Search for symbols across the entire workspace. Returns matching symbols with their locations and kinds.';
-  static LSP_METHOD = 'workspace/symbol';
-  static REQUIRED_CAPABILITY = 'workspaceSymbolProvider';
-
-  _formatResult(result, args, languageId) {
+export const LspWorkspaceSymbolTool = defineQueryTool({
+  name: 'lsp-workspace-symbol',
+  description:
+    'Search for symbols across the entire workspace. Returns matching symbols with their locations and kinds.',
+  lspMethod: 'workspace/symbol',
+  requiredCapability: 'workspaceSymbolProvider',
+  formatResult: (self, result, args, languageId) => {
     if (!result || result.length === 0) {
       return ToolResult.ok(`No symbols found matching '${args.query}'.`);
     }
@@ -18,7 +19,7 @@ export class LspWorkspaceSymbolTool extends LspQueryTool {
     // Format results
     const lines = result.map((symbol, index) => {
       const kind = SymbolKind[symbol.kind] || 'Unknown';
-      const location = this._formatLocation(symbol.location || symbol.range);
+      const location = self._formatLocation(symbol.location || symbol.range);
       const container = symbol.containerName ? ` (${symbol.containerName})` : '';
       return `  ${index + 1}. ${kind}: ${symbol.name}${container} (${location})`;
     }).join('\n');
@@ -29,5 +30,5 @@ export class LspWorkspaceSymbolTool extends LspQueryTool {
     metadata.set('language', languageId);
 
     return ToolResult.ok(`Found ${result.length} workspace symbol(s) matching '${args.query}':\n${lines}`).withEntries(metadata);
-  }
-}
+  },
+});

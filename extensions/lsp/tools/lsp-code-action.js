@@ -1,30 +1,17 @@
 // LSP Code Action tool — textDocument/codeAction
+// Created via factory to reduce boilerplate.
 
-import { LspPositionTool } from './lsp-position-tool.js';
 import { ToolResult } from '../../core-tools/registry.js';
+import { definePositionTool } from './lsp-position-tool.js';
 
-export class LspCodeActionTool extends LspPositionTool {
-  static TOOL_NAME = 'lsp-code-action';
-  static DESCRIPTION = 'Get available code actions (quick fixes, refactoring options) at a given position. Returns actions with titles, descriptions, and edit operations.';
-  static LSP_METHOD = 'textDocument/codeAction';
-  static REQUIRED_CAPABILITY = 'codeActionProvider';
-  static SUCCESS_RESPONSE = 'No code actions available at this position.';
-
-  _buildRequestParams(args, uri, lspLine) {
-    return {
-      textDocument: { uri },
-      range: {
-        start: { line: lspLine, character: args.character },
-        end: { line: lspLine, character: args.character },
-      },
-      context: {
-        diagnostics: [],
-        only: ['quickfix', 'refactor'],
-      },
-    };
-  }
-
-  _formatResult(result, args, resolvedPath, languageId) {
+export const LspCodeActionTool = definePositionTool({
+  name: 'lsp-code-action',
+  description:
+    'Get available code actions (quick fixes, refactoring options) at a given position. Returns actions with titles, descriptions, and edit operations.',
+  lspMethod: 'textDocument/codeAction',
+  requiredCapability: 'codeActionProvider',
+  successResponse: 'No code actions available at this position.',
+  formatResult: (self, result, args, resolvedPath, languageId) => {
     if (!result || result.length === 0) {
       return ToolResult.ok('No code actions available at this position.');
     }
@@ -47,5 +34,5 @@ export class LspCodeActionTool extends LspPositionTool {
     metadata.set('language', languageId);
 
     return ToolResult.ok(`Found ${result.length} code action(s):\n${lines}`).withEntries(metadata);
-  }
-}
+  },
+});

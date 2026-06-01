@@ -4,7 +4,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { execFile } from "node:child_process";
 import util from "node:util";
-import { toolDef, param, ToolResult, toolResult } from "./registry.js";
+import { toolDef, param, ToolResult, toolResult, defaultCallDisplay } from "./registry.js";
 import {
   DEFAULT_MAX_TOOL_OUTPUT_LINES,
   DEFAULT_READ_TOOL_LIMIT,
@@ -41,14 +41,15 @@ export class ProjectInfoTool {
   }
 
   callDisplay(input) {
-    const args = typeof input === "string" ? JSON.parse(input) : input;
-    const p = args.path || ".";
-    const d = args.max_depth;
-    const f = args.max_files;
-    if (d && f) return `(path=${p}, depth=${d}, files=${f})`;
-    if (d) return `(path=${p}, depth=${d})`;
-    if (f) return `(path=${p}, files=${f})`;
-    return `(path=${p})`;
+    return defaultCallDisplay(input, (args) => {
+      const p = args.path || ".";
+      const d = args.max_depth;
+      const f = args.max_files;
+      if (d && f) return `(path=${p}, depth=${d}, files=${f})`;
+      if (d) return `(path=${p}, depth=${d})`;
+      if (f) return `(path=${p}, files=${f})`;
+      return `(path=${p})`;
+    });
   }
 
   async execute(input, ctx) {

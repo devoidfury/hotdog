@@ -53,6 +53,10 @@ function createMockAgent(sessionId) {
     // Stub ensureSystemPrompt so it doesn't fail
     ensureSystemPrompt: () => {},
   };
+  Object.defineProperty(agent, 'isRestoring', {
+    get() { return agent._isRestoring; },
+    set(v) { agent._isRestoring = v; },
+  });
   return agent;
 }
 
@@ -180,11 +184,11 @@ test("Session restoration: _isRestoring flag prevents duplicate log writes", () 
     const entries = readSessionEntries(sessionId);
     expect(entries.length).toBe(2);
 
-    // Replay with _isRestoring = true (simulating the fix)
+    // Replay with isRestoring = true (simulating the fix)
     const agent = createMockAgent(sessionId);
-    agent._isRestoring = true; // This should prevent duplicate writes
+    agent.isRestoring = true; // This should prevent duplicate writes
     const replayed = replayEntriesIntoContext(agent, entries);
-    agent._isRestoring = false;
+    agent.isRestoring = false;
 
     expect(replayed).toBe(2);
     expect(agent.context.length).toBe(2);

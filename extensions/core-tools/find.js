@@ -2,7 +2,7 @@
 
 import { execFile } from "node:child_process";
 import util from "node:util";
-import { toolDef, param, ToolResult, toolResult, truncateOutput, parseToolInput } from "./registry.js";
+import { toolDef, param, ToolResult, toolResult, truncateOutput, parseToolInput, defaultCallDisplay } from "./registry.js";
 import {
   DEFAULT_FIND_MAX_RESULTS,
   DEFAULT_MAX_TOOL_OUTPUT_LINES,
@@ -45,17 +45,16 @@ export class FindTool {
   }
 
   callDisplay(input) {
-    const args = parseArgs(input);
-    if (!args) {
-      return `* in . (max ${DEFAULT_FIND_MAX_RESULTS})`;
-    }
-    const { pattern, file_type, path, max_results } = args;
-    const pathStr = path || ".";
-
-    if (!file_type) {
-      return `${pattern} in ${pathStr} (max ${max_results})`;
-    }
-    return `${pattern} in ${pathStr} (${file_type}, max ${max_results})`;
+    return defaultCallDisplay(input, (args) => {
+      if (!args.pattern) return `* in . (max ${DEFAULT_FIND_MAX_RESULTS})`;
+      const { file_type, path, max_results } = args;
+      const pathStr = path || ".";
+      const max = max_results ?? DEFAULT_FIND_MAX_RESULTS;
+      if (!file_type) {
+        return `${args.pattern} in ${pathStr} (max ${max})`;
+      }
+      return `${args.pattern} in ${pathStr} (${file_type}, max ${max})`;
+    }, (raw) => `* in . (max ${DEFAULT_FIND_MAX_RESULTS})`);
   }
 
   async execute(input, ctx) {

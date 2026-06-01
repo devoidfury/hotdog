@@ -10,7 +10,7 @@ import {
   getCachedClient,
   deleteCachedClient,
 } from "../client-cache.js";
-import { toolDef, param, ToolResult } from "../../core-tools/registry.js";
+import { toolDef, param, ToolResult, defaultCallDisplay } from "../../core-tools/registry.js";
 import { formatError } from "../../../src/context/error.js";
 
 /**
@@ -62,11 +62,12 @@ export class LspBaseTool {
    * Default implementation shows the first few args.
    */
   callDisplay(input) {
-    const args = typeof input === "string" ? JSON.parse(input) : input;
-    const parts = Object.entries(args)
-      .slice(0, 3)
-      .map(([k, v]) => `${k}=${typeof v === "string" ? `"${v}"` : v}`);
-    return `${this.constructor.TOOL_NAME}(${parts.join(", ")})`;
+    return defaultCallDisplay(input, (args) => {
+      const parts = Object.entries(args)
+        .slice(0, 3)
+        .map(([k, v]) => `${k}=${typeof v === "string" ? `"${v}"` : v}`);
+      return `${this.constructor.TOOL_NAME}(${parts.join(", ")})`;
+    });
   }
 
   /**
@@ -75,15 +76,6 @@ export class LspBaseTool {
    */
   async execute(input, ctx) {
     return ToolResult.err("Not implemented");
-  }
-
-  /**
-   * Display name for the tool call.
-   * Override in subclasses.
-   */
-  callDisplay(input) {
-    const args = typeof input === "string" ? JSON.parse(input) : input;
-    return `${this.constructor.TOOL_NAME}(${JSON.stringify(args)})`;
   }
 
   // ── Shared Helpers ──────────────────────────────────────────────────

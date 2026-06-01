@@ -1,6 +1,6 @@
 // Session Log Extension
 // Append-only JSONL audit trail for observability.
-// Hooks: context:message, output:event
+// Hooks: context:message, output:event, session:restoreActive
 // Context messages are logged with the correct source type based on message role.
 
 import { homedir } from 'node:os';
@@ -70,9 +70,17 @@ export function create(core) {
 
   // Track session state
   let systemPromptWritten = false;
+  let isRestoring = false;
 
   return {
     hooks: {
+      /**
+       * Track session restoration state via hook — avoids reading private fields.
+       */
+      [HOOKS.SESSION_RESTORE_ACTIVE]: ({ isRestoring: restoring }) => {
+        isRestoring = restoring;
+      },
+
       /**
        * Log messages as they enter the context.
        * Uses the agent's sessionId from the hook context to determine the log file.
@@ -80,7 +88,7 @@ export function create(core) {
        */
       [HOOKS.CONTEXT_MESSAGE]: ({ message, agent }) => {
         // Skip logging during session restoration to avoid duplicate entries
-        if (agent?._isRestoring) return;
+        if (isRestoring) return;
 
         const sessionId = agent?.sessionId || message.sessionId || 'unknown';
         const logPath = join(cacheDir, `${sessionId}.jsonl`);

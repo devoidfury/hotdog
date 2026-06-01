@@ -4,11 +4,6 @@
 
 import { describe, it, expect, beforeEach } from 'bun:test';
 import { RefreshTool } from '../../extensions/refresh/refresh-tool.js';
-import {
-  importModule,
-  getLoadedModules,
-  clearModuleCache,
-} from '../../extensions/refresh/module-loader.js';
 
 describe('RefreshTool', () => {
   let tool;
@@ -16,17 +11,30 @@ describe('RefreshTool', () => {
   let mockExtensionLoader;
   let unloadCalls = [];
   let loadCalls = [];
+  let reloadCalls = [];
   let reRegisterCalls = 0;
 
   beforeEach(() => {
     unloadCalls = [];
     loadCalls = [];
+    reloadCalls = [];
     reRegisterCalls = 0;
+
+    // Shared mock state that can be overridden by individual tests
+    const mockState = {
+      extensions: [['test-ext', { name: 'test-ext' }]],
+      entryPoints: new Map([['test-ext', './path/to/test.js']]),
+    };
 
     mockExtensionLoader = {
       unload: (name) => { unloadCalls.push(name); },
       load: (name, mod) => { loadCalls.push({ name, mod }); },
+      reload: (name, entryPoint) => { reloadCalls.push({ name, entryPoint }); },
+      all: () => mockState.extensions,
+      has: (name) => mockState.extensions.some(([n]) => n === name),
+      entryPoints: () => mockState.entryPoints,
     };
+
     mockCore = {};
 
     tool = new RefreshTool({
@@ -34,12 +42,14 @@ describe('RefreshTool', () => {
       extensionLoader: mockExtensionLoader,
       reRegisterTools: () => { reRegisterCalls++; },
     });
+
+    // Allow tests to override mock state
+    tool._mockState = mockState;
   });
 
   describe('constructor', () => {
-    it('should register extension paths', () => {
-      tool.registerExtensionPath('test-ext', './path/to/test.js');
-      expect(tool._extensionPaths.get('test-ext')).toBe('./path/to/test.js');
+    it('should create tool with extension loader reference', () => {
+      expect(tool.extensionLoader).toBe(mockExtensionLoader);
     });
   });
 
@@ -79,27 +89,26 @@ describe('RefreshTool', () => {
   });
 
   describe('execute - list', () => {
-    it('should return module list', async () => {
+    it('should return loaded extensions', async () => {
       const result = await tool.execute(
         JSON.stringify({ action: 'list', target: 'list' }),
         {}
       );
       expect(result.success).toBe(true);
-      expect(result.output).toContain('## Loaded Modules');
+      expect(result.output).toContain('## Loaded Extensions');
+      expect(result.output).toContain('test-ext');
+      expect(result.output).toContain('./path/to/test.js');
     });
   });
 
   describe('execute - cache-clear', () => {
-    it('should clear module cache', async () => {
-      // First, load a module to have something in cache
-      await importModule('/workspace/oa-js/tests/extensions/refresh.test.js');
-
+    it('should report automatic cache management', async () => {
       const result = await tool.execute(
         JSON.stringify({ action: 'cache-clear', target: 'cache-clear' }),
         {}
       );
       expect(result.success).toBe(true);
-      expect(result.output).toContain('Module cache cleared');
+      expect(result.output).toContain('cache-busting');
     });
   });
 
@@ -113,74 +122,46 @@ describe('RefreshTool', () => {
       expect(result.error).toContain('Target is required');
     });
 
-    it('should return error for unknown extension', async () => {
+    it('should return error for unloaded extension', async () => {
       const result = await tool.execute(
         JSON.stringify({ action: 'reload', target: 'nonexistent' }),
         {}
       );
       expect(result.success).toBe(true); // Returns ok with error info
-      expect(result.output).toContain('not registered for reload');
-    });
-  });
-});
-
-describe('Module Loader', () => {
-  beforeEach(() => {
-    clearModuleCache();
-  });
-
-  describe('importModule', () => {
-    it('should import a module', async () => {
-      const mod = await importModule('/workspace/oa-js/tests/extensions/refresh.test.js');
-      expect(mod).toBeDefined();
+      expect(result.output).toContain('not loaded');
     });
 
-    it('should cache modules', async () => {
-      const mod1 = await importModule('/workspace/oa-js/tests/extensions/refresh.test.js');
-      const mod2 = await importModule('/workspace/oa-js/tests/extensions/refresh.test.js');
-      expect(mod1).toBe(mod2); // Same cached instance
+    it('should reload known extension via ExtensionLoader.reload', async () => {
+      const result = await tool.execute(
+        JSON.stringify({ action: 'reload', target: 'test-ext' }),
+        {}
+      );
+      expect(result.success).toBe(true);
+      expect(result.output).toContain('Reloaded: test-ext');
+      expect(reloadCalls.length).toBe(1);
+      expect(reloadCalls[0].name).toBe('test-ext');
+      expect(reloadCalls[0].entryPoint).toBe('./path/to/test.js');
+      expect(reRegisterCalls).toBe(1);
     });
 
-    it('should force reload when requested', async () => {
-      // First import
-      const mod1 = await importModule('/workspace/oa-js/tests/extensions/refresh.test.js');
-      expect(mod1).toBeDefined();
+    it('should reload all extensions', async () => {
+      tool._mockState.extensions = [
+        ['ext-a', { name: 'ext-a' }],
+        ['ext-b', { name: 'ext-b' }],
+      ];
+      tool._mockState.entryPoints = new Map([
+        ['ext-a', './path/a.js'],
+        ['ext-b', './path/b.js'],
+      ]);
 
-      // Force reload - this should clear our cache and attempt a new import
-      // Note: The underlying JS module system may still cache at a higher level,
-      // but our loader's cache should be bypassed
-      const mod2 = await importModule('/workspace/oa-js/tests/extensions/refresh.test.js', true);
-      expect(mod2).toBeDefined();
-
-      // Verify the cache was cleared by checking that a subsequent non-force
-      // import gets the new module
-      const mod3 = await importModule('/workspace/oa-js/tests/extensions/refresh.test.js');
-      expect(mod3).toBe(mod2); // mod3 should be the same as mod2 (force-reloaded version)
-    });
-  });
-
-  describe('getLoadedModules', () => {
-    it('should return empty array initially', () => {
-      const modules = getLoadedModules();
-      expect(modules).toEqual([]);
-    });
-
-    it('should return loaded modules', async () => {
-      await importModule('/workspace/oa-js/tests/extensions/refresh.test.js');
-      const modules = getLoadedModules();
-      expect(modules.length).toBeGreaterThan(0);
-      expect(modules[0]).toHaveProperty('path');
-      expect(modules[0]).toHaveProperty('timestamp');
-    });
-  });
-
-  describe('clearModuleCache', () => {
-    it('should clear all cached modules', async () => {
-      await importModule('/workspace/oa-js/tests/extensions/refresh.test.js');
-      expect(getLoadedModules().length).toBeGreaterThan(0);
-
-      clearModuleCache();
-      expect(getLoadedModules().length).toBe(0);
+      const result = await tool.execute(
+        JSON.stringify({ action: 'reload', target: 'all' }),
+        {}
+      );
+      expect(result.success).toBe(true);
+      expect(result.output).toContain('Reloaded: ext-a');
+      expect(result.output).toContain('Reloaded: ext-b');
+      expect(result.output).toContain('Tools re-registered');
     });
   });
 });

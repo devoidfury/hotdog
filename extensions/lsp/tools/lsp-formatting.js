@@ -1,16 +1,17 @@
 // LSP Formatting tool — textDocument/formatting
+// Created via factory to reduce boilerplate.
 
-import { LspFileTool } from './lsp-position-tool.js';
 import { ToolResult } from '../../core-tools/registry.js';
+import { defineFileTool } from './lsp-position-tool.js';
 
-export class LspFormattingTool extends LspFileTool {
-  static TOOL_NAME = 'lsp-formatting';
-  static DESCRIPTION = 'Format an entire document using the language server. Returns the formatted document content or diff.';
-  static LSP_METHOD = 'textDocument/formatting';
-  static REQUIRED_CAPABILITY = 'documentFormattingProvider';
-  static SUCCESS_RESPONSE = 'Document is already properly formatted.';
-
-  _formatResult(result, args, resolvedPath, languageId) {
+export const LspFormattingTool = defineFileTool({
+  name: 'lsp-formatting',
+  description:
+    'Format an entire document using the language server. Returns the formatted document content or diff.',
+  lspMethod: 'textDocument/formatting',
+  requiredCapability: 'documentFormattingProvider',
+  successResponse: 'Document is already properly formatted.',
+  formatResult: (self, result, args, resolvedPath, languageId) => {
     if (!result || result.length === 0) {
       return ToolResult.ok('Document is already properly formatted.');
     }
@@ -30,10 +31,10 @@ export class LspFormattingTool extends LspFileTool {
     });
 
     for (const edit of sortedEdits) {
-      const startOffset = this._offsetAt('', edit.range.start, newContent);
-      const endOffset = this._offsetAt('', edit.range.end, newContent);
+      const startOffset = self._offsetAt('', edit.range.start, newContent);
+      const endOffset = self._offsetAt('', edit.range.end, newContent);
       changes.push({
-        file: this._uriToPath(args.uri || `file://${resolvedPath}`),
+        file: self._uriToPath(args.uri || `file://${resolvedPath}`),
         oldText: newContent.slice(startOffset, endOffset),
         newText: edit.newText || '',
         line: edit.range.start.line + 1,
@@ -60,5 +61,5 @@ export class LspFormattingTool extends LspFileTool {
     metadata.set('language', languageId);
 
     return ToolResult.ok(lines.join('\n')).withEntries(metadata);
-  }
-}
+  },
+});

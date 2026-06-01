@@ -10,6 +10,7 @@ import {
   validateCwdBoundary,
   resolvePath,
   parseToolInput,
+  defaultCallDisplay,
 } from "./registry.js";
 import { DEFAULT_READ_TOOL_LIMIT } from "../../src/config.js";
 
@@ -42,17 +43,14 @@ export class ReadTool {
   }
 
   callDisplay(input) {
-    const args = parseArgs(input);
-    if (!args) {
-      return typeof input === "string" ? input : "(no path)";
-    }
-    const { path: filePath, limit, offset } = args;
-    if (!filePath) {
-      // Invalid JSON or missing path — return raw input if string for debugging
-      return typeof input === "string" ? input : "(no path)";
-    }
-    const end = offset + limit;
-    return `${filePath} (lines ${offset}-${end})`;
+    return defaultCallDisplay(input, (args) => {
+      const { path: filePath, limit, offset } = args;
+      if (!filePath) {
+        return typeof input === "string" ? input : "(no path)";
+      }
+      const end = offset + limit;
+      return `${filePath} (lines ${offset}-${end})`;
+    }, typeof input === "string" ? input : "(no path)");
   }
 
   async execute(input, ctx) {

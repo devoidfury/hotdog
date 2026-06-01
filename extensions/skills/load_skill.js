@@ -1,6 +1,6 @@
 // Load skill tool — load a skill's full instructions into context.
 
-import { toolDef, param, ToolResult } from "../core-tools/registry.js";
+import { toolDef, param, ToolResult, defaultCallDisplay } from "../core-tools/registry.js";
 
 export class LoadSkillTool {
   static TOOL_NAME = "load_skill";
@@ -23,8 +23,7 @@ export class LoadSkillTool {
   }
 
   callDisplay(input) {
-    const args = typeof input === "string" ? JSON.parse(input) : input;
-    return `load_skill: ${args.name}`;
+    return defaultCallDisplay(input, (args) => `load_skill: ${args.name}`);
   }
 
   async execute(input, ctx) {

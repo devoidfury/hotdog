@@ -1,6 +1,6 @@
 // Skills Extension
 // Manages skills loading, activation, and system prompt integration.
-// Hooks: systemPrompt:build, tools:register, command:dispatch
+// Hooks: systemPrompt:build, agent:toolContext, tools:register, command:dispatch
 
 import { HOOKS } from "../../src/hooks.js";
 import { patternMatches, SkillsLoader } from "./loader.js";
@@ -24,8 +24,14 @@ export function create(core) {
         if (preamble) {
           promptParts.push(preamble);
         }
-        // Store loader on agent for tool filtering
-        agent._skillsLoader = loader;
+      },
+
+      /**
+       * Enrich tool context with skills loader — extensions can access
+       * toolCtx.skillsLoader instead of agent._skillsLoader.
+       */
+      [HOOKS.AGENT_TOOL_CONTEXT]: async ({ toolCtx }) => {
+        toolCtx.skillsLoader = loader;
       },
 
       /**

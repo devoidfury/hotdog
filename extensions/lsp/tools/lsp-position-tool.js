@@ -4,7 +4,7 @@
 
 import fs from "node:fs";
 import { LspBaseTool } from "./base.js";
-import { toolDef, param, ToolResult, parseToolInput } from "../../core-tools/registry.js";
+import { toolDef, param, ToolResult, parseToolInput, defaultCallDisplay } from "../../core-tools/registry.js";
 import { formatError } from "../../../src/context/error.js";
 
 /**
@@ -56,19 +56,20 @@ export class LspPositionTool extends LspBaseTool {
    * Generate a display string for tool calls from arguments.
    */
   callDisplay(input) {
-    const args = typeof input === "string" ? JSON.parse(input) : input;
-    const parts = [];
-    if (this.constructor.HAS_FILE) parts.push(args.file ?? "");
-    if (this.constructor.HAS_POSITION) {
-      parts.push(args.line ?? "", args.character ?? "");
-    }
-    // Include any extra params
-    for (const key of Object.keys(args)) {
-      if (!["file", "line", "character"].includes(key) && args[key] !== undefined) {
-        parts.push(`${key}=${args[key]}`);
+    return defaultCallDisplay(input, (args) => {
+      const parts = [];
+      if (this.constructor.HAS_FILE) parts.push(args.file ?? "");
+      if (this.constructor.HAS_POSITION) {
+        parts.push(args.line ?? "", args.character ?? "");
       }
-    }
-    return `${this.constructor.TOOL_NAME}(${parts.join(":")})`;
+      // Include any extra params
+      for (const key of Object.keys(args)) {
+        if (!["file", "line", "character"].includes(key) && args[key] !== undefined) {
+          parts.push(`${key}=${args[key]}`);
+        }
+      }
+      return `${this.constructor.TOOL_NAME}(${parts.join(":")})`;
+    });
   }
 
   /**
@@ -275,8 +276,7 @@ export class LspQueryTool extends LspBaseTool {
    * Generate a display string for tool calls from arguments.
    */
   callDisplay(input) {
-    const args = typeof input === "string" ? JSON.parse(input) : input;
-    return `${this.constructor.TOOL_NAME}('${args.query ?? ""}')`;
+    return defaultCallDisplay(input, (args) => `${this.constructor.TOOL_NAME}('${args.query ?? ""}')`);
   }
 
   async execute(input, ctx) {
@@ -330,4 +330,162 @@ export class LspQueryTool extends LspBaseTool {
   _formatResult(result, args, languageId) {
     return ToolResult.ok("Not implemented — override in subclass");
   }
+}
+
+// ── LSP Tool Factory ────────────────────────────────────────────────────
+
+/**
+ * Factory for creating LSP position-based tool classes.
+ *
+ * Reduces boilerplate: instead of defining a full class with static properties
+ * and _formatResult, callers provide just the metadata and formatting function.
+ *
+ * Usage:
+ *   const LspHoverTool = definePositionTool({
+ *     name: 'lsp-hover',
+ *     description: 'Get hover information...',
+ *     lspMethod: 'textDocument/hover',
+ *     requiredCapability: 'hoverProvider',
+ *     successResponse: 'No hover information available.',
+ *     formatResult: (self, result, args, resolvedPath, languageId, lspLine) => {
+ *       const formatted = self._formatHover(result, 800);
+ *       return ToolResult.ok(formatted).withEntries(metadata);
+ *     },
+ *   });
+ *
+ *   // Or create an instance directly:
+ *   const tool = createLspPositionTool({
+ *     name: 'lsp-hover',
+ *     description: '...',
+ *     lspMethod: 'textDocument/hover',
+ *     requiredCapability: 'hoverProvider',
+ *     successResponse: 'No hover.',
+ *     formatResult: (self, result, args, resolvedPath, languageId, lspLine) => { ... },
+ *     options: { languageId: 'typescript', lspConfig: {...} },
+ *   });
+ *
+ * @param {Object} spec — Tool specification
+ * @param {string} spec.name — Tool name (e.g., 'lsp-hover')
+ * @param {string} spec.description — Tool description
+ * @param {string} spec.lspMethod — LSP method (e.g., 'textDocument/hover')
+ * @param {string} spec.requiredCapability — Server capability name
+ * @param {string} [spec.successResponse] — Message when no result
+ * @param {Function} spec.formatResult — Function(self, result, args, resolvedPath, languageId, lspLine) → ToolResult
+ *   `self` is the tool instance, providing access to inherited helpers like _formatHover, _uriToPath, etc.
+ * @returns {typeof LspPositionTool} — A subclass of LspPositionTool
+ */
+export function definePositionTool(spec) {
+  const {
+    name,
+    description,
+    lspMethod,
+    requiredCapability,
+    successResponse,
+    formatResult,
+  } = spec;
+
+  return class LspTool extends LspPositionTool {
+    static TOOL_NAME = name;
+    static DESCRIPTION = description;
+    static LSP_METHOD = lspMethod;
+    static REQUIRED_CAPABILITY = requiredCapability;
+    static SUCCESS_RESPONSE = successResponse || null;
+
+    _formatResult(result, args, resolvedPath, languageId, lspLine) {
+      return formatResult(this, result, args, resolvedPath, languageId, lspLine);
+    }
+  };
+}
+
+/**
+ * Create a fully instantiated LSP position tool.
+ * Convenience wrapper around definePositionTool + constructor.
+ *
+ * @param {Object} spec — Same spec as definePositionTool, plus `options` for constructor
+ * @param {Object} spec.options — Options passed to LspPositionTool constructor
+ * @returns {LspPositionTool} — An instance of the tool
+ */
+export function createLspPositionTool(spec) {
+  const { options, ...toolSpec } = spec;
+  const ToolClass = definePositionTool(toolSpec);
+  return new ToolClass(options || {});
+}
+
+/**
+ * Factory for creating LSP file-based tool classes (no position required).
+ *
+ * @param {Object} spec — Tool specification (same as definePositionTool)
+ * @returns {typeof LspFileTool} — A subclass of LspFileTool
+ */
+export function defineFileTool(spec) {
+  const {
+    name,
+    description,
+    lspMethod,
+    requiredCapability,
+    successResponse,
+    formatResult,
+  } = spec;
+
+  return class LspTool extends LspFileTool {
+    static TOOL_NAME = name;
+    static DESCRIPTION = description;
+    static LSP_METHOD = lspMethod;
+    static REQUIRED_CAPABILITY = requiredCapability;
+    static SUCCESS_RESPONSE = successResponse || null;
+
+    _formatResult(result, args, resolvedPath, languageId, lspLine) {
+      return formatResult(result, args, resolvedPath, languageId, lspLine);
+    }
+  };
+}
+
+/**
+ * Create a fully instantiated LSP file tool.
+ *
+ * @param {Object} spec — Same spec as defineFileTool, plus `options` for constructor
+ * @returns {LspFileTool} — An instance of the tool
+ */
+export function createLspFileTool(spec) {
+  const { options, ...toolSpec } = spec;
+  const ToolClass = defineFileTool(toolSpec);
+  return new ToolClass(options || {});
+}
+
+/**
+ * Factory for creating LSP query-based tool classes (workspace/symbol style).
+ *
+ * @param {Object} spec — Tool specification
+ * @param {string} spec.name — Tool name
+ * @param {string} spec.description — Tool description
+ * @param {string} spec.lspMethod — LSP method (e.g., 'workspace/symbol')
+ * @param {string} spec.requiredCapability — Server capability name
+ * @param {Function} spec.formatResult — Function(result, args, languageId) → ToolResult
+ * @returns {typeof LspQueryTool} — A subclass of LspQueryTool
+ */
+export function defineQueryTool(spec) {
+  const { name, description, lspMethod, requiredCapability, formatResult } = spec;
+
+  return class LspTool extends LspQueryTool {
+    static TOOL_NAME = name;
+    static DESCRIPTION = description;
+    static LSP_METHOD = lspMethod;
+    static REQUIRED_CAPABILITY = requiredCapability;
+
+    _formatResult(result, args, languageId) {
+      return formatResult(result, args, languageId);
+    }
+  };
+}
+
+/**
+ * Create a fully instantiated LSP query tool.
+ *
+ * @param {Object} spec — Same spec as defineQueryTool, plus `options` for constructor
+ * @returns {LspQueryTool} — An instance of the tool
+ */
+export function createLspQueryTool(spec) {
+  const { options, ...toolSpec } = spec;
+  const ToolClass = defineQueryTool(toolSpec);
+  return new ToolClass(options || {});
 }

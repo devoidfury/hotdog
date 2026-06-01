@@ -3,7 +3,7 @@
 import { spawn } from "node:child_process";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { toolDef, param, ToolResult, toolResult } from "./registry.js";
+import { toolDef, param, ToolResult, toolResult, defaultCallDisplay } from "./registry.js";
 
 // Resolve the path to the current binary (main.js)
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -31,17 +31,11 @@ export class ExploreTool {
   }
 
   callDisplay(input) {
-    if (!input || (typeof input === "string" && input.trim().length === 0)) {
-      return "path=.";
-    }
-    try {
-      const args = typeof input === "string" ? JSON.parse(input) : input;
+    return defaultCallDisplay(input, (args) => {
       const p = args.path || ".";
       const o = args.outline || "";
       return `path=${p} -> ${o}`;
-    } catch {
-      return input.toString();
-    }
+    }, { fallback: "path=.", returnRawOnParseError: true });
   }
 
   async execute(input, ctx) {

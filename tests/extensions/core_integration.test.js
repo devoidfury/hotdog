@@ -183,11 +183,13 @@ describe('Full Extension Chain', () => {
     expect(loader.size()).toBe(4);
 
     // Check that all expected hooks are registered
+    // Note: TOOLS_REGISTER is NOT registered via hooks.on() — it's called
+    // directly in ExtensionLoader.load() to avoid double emission.
     const hookNames = core.hooks.hookNames();
     expect(hookNames).toContain(HOOKS.CONTEXT_FULL);        // compaction
     expect(hookNames).toContain(HOOKS.CONTEXT_MESSAGE);     // session-log
     expect(hookNames).toContain(HOOKS.OUTPUT_EVENT);        // session-log (compaction)
-    expect(hookNames).toContain(HOOKS.TOOLS_REGISTER);      // core-tools
+    expect(hookNames).not.toContain(HOOKS.TOOLS_REGISTER);  // called directly in load()
     expect(hookNames).toContain(HOOKS.SYSTEM_PROMPT_BUILD); // skills
     expect(hookNames).toContain(HOOKS.COMMAND_DISPATCH);    // skills, prompts
   });

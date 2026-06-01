@@ -7,16 +7,21 @@
  * Features:
  * - Selective reload of specific extensions by name
  * - Full reload of all extensions
- * - Module cache inspection
+ * - Module cache inspection and clearing
  * - Preserves agent state (context, messages, model, etc.)
  * - Auto-re-registers tools after reload
  */
 
-import { toolDef, param, ToolResult, toolResult, parseToolInput } from '../core-tools/registry.js';
-import { importModule, getLoadedModules, clearModuleCache } from './module-loader.js';
+import {
+  toolDef,
+  param,
+  ToolResult,
+  parseToolInput,
+  defaultCallDisplay,
+} from "../core-tools/registry.js";
 
 export class RefreshTool {
-  static TOOL_NAME = 'refresh';
+  static TOOL_NAME = "refresh";
 
   /**
    * @param {Object} options
@@ -28,44 +33,37 @@ export class RefreshTool {
     this.core = core;
     this.extensionLoader = extensionLoader;
     this.reRegisterTools = reRegisterTools;
-    this._extensionPaths = new Map(); // name → path for tracking
-  }
-
-  /**
-   * Register extension paths for tracking.
-   * Call this during initialization so we know which paths to reload.
-   * @param {string} name - Extension name
-   * @param {string} path - Module path
-   */
-  registerExtensionPath(name, path) {
-    this._extensionPaths.set(name, path);
   }
 
   toToolDef() {
-    const extensions = Array.from(this._extensionPaths.keys()).sort();
-    const desc = extensions.length > 0
-      ? `Hot-reload extensions and modules without restarting. Use "list" to see loaded modules, "all" to reload everything, or provide specific extension names to reload only those. Preserves agent state (context, messages, model, etc.).`
-      : 'Hot-reload extensions and modules without restarting. Use "list" to see loaded modules, "all" to reload everything, or provide specific extension names to reload only those.';
+    const desc =
+      "Hot-reload extensions and modules without restarting. Use \"list\" to see loaded modules, \"all\" to reload everything, or provide specific extension names to reload only those. Preserves agent state (context, messages, model, etc).";
 
     return toolDef(RefreshTool.TOOL_NAME, desc, {
-      schema: 'https://json-schema.org/draft/2020-12/schema',
+      schema: "https://json-schema.org/draft/2020-12/schema",
       properties: {
-        action: param('string', 'The action to perform', {
-          enum: ['reload', 'list', 'cache-clear'],
+        action: param("string", "The action to perform", {
+          enum: ["reload", "list", "cache-clear"],
         }),
-        target: param('string', 'Extension name to reload, or "all" for everything, or "list" to see loaded modules, or "cache-clear" to clear the module cache.'),
-        force: param('boolean', 'Force reload even if module is cached (default: false)'),
+        target: param(
+          "string",
+          'Extension name to reload, or "all" for everything, or "list" to see loaded modules, or "cache-clear" to clear the module cache.',
+        ),
+        force: param(
+          "boolean",
+          "Force reload even if module is cached (default: false)",
+        ),
       },
-      required: ['action', 'target'],
+      required: ["action", "target"],
     });
   }
 
   callDisplay(input) {
-    const args = parseArgs(input);
-    if (!args) {
-      return typeof input === 'string' ? input : '';
-    }
-    return `-> refresh: ${args.action} ${args.target || ''}${args.force ? ' (force)' : ''}`;
+    return defaultCallDisplay(
+      input,
+      (args) =>
+        `-> refresh: ${args.action} ${args.target || ""}${args.force ? " (force)" : ""}`,
+    );
   }
 
   /**
@@ -77,70 +75,63 @@ export class RefreshTool {
   async execute(input, ctx) {
     const args = parseArgs(input);
     if (!args) {
-      return ToolResult.err('Invalid JSON input');
+      return ToolResult.err("Invalid JSON input");
     }
 
     const { action, target, force = false } = args;
 
     switch (action) {
-      case 'list':
+      case "list":
         return this._handleList();
-      case 'cache-clear':
+      case "cache-clear":
         return this._handleCacheClear();
-      case 'reload':
+      case "reload":
         return this._handleReload(target, force);
       default:
         return ToolResult.err(
-          `Unknown action: ${action}. Use "reload", "list", or "cache-clear".`
+          `Unknown action: ${action}. Use "reload", "list", or "cache-clear".`,
         );
     }
   }
 
   /**
-   * Handle the "list" action — show loaded modules.
+   * Handle the "list" action — show loaded modules and extensions.
    */
   async _handleList() {
-    const modules = getLoadedModules();
-    const extensions = Array.from(this._extensionPaths.entries());
-
     const lines = [];
 
-    // Extension paths
-    if (extensions.length > 0) {
-      lines.push('## Registered Extensions');
-      for (const [name, path] of extensions) {
-        lines.push(`  ${name}: ${path}`);
-      }
-      lines.push('');
-    }
+    // ── Loaded Extensions ────────────────────────────────────────────────
+    const extensions = this.extensionLoader.all();
+    const entryPoints = this.extensionLoader.entryPoints();
 
-    // Loaded modules
-    if (modules.length > 0) {
-      lines.push('## Loaded Modules');
-      for (const { path, timestamp } of modules) {
-        const age = Math.round((Date.now() - timestamp) / 1000);
-        lines.push(`  ${path} (loaded ${age}s ago)`);
-      }
+    lines.push("## Loaded Extensions");
+    if (extensions.length === 0) {
+      lines.push("  (none)");
     } else {
-      lines.push('## Loaded Modules');
-      lines.push('  (none)');
+      for (const [name, instance] of extensions) {
+        const path = entryPoints.get(name);
+        const pathStr = path ? ` (${path})` : "";
+        lines.push(`  ${name}${pathStr}`);
+      }
     }
+    lines.push("");
 
-    return ToolResult.ok(lines.join('\n')).withEntries({
-      module_count: String(modules.length),
+    return ToolResult.ok(lines.join("\n")).withEntries({
       extension_count: String(extensions.length),
     });
   }
 
   /**
-   * Handle the "cache-clear" action — clear the module cache.
+   * Handle the "cache-clear" action — no-op since cache-busting
+   * is handled automatically via query-string on each reload.
    */
   async _handleCacheClear() {
-    const count = getLoadedModules().length;
-    clearModuleCache();
-    return ToolResult.ok(`Module cache cleared (${count} entries removed).`).withEntry(
-      'entries_cleared', String(count)
-    );
+    const lines = [
+      "Module cache is managed automatically via query-string cache-busting.",
+      "Each reload automatically bypasses the JS engine's module cache.",
+    ];
+
+    return ToolResult.ok(lines.join("\n"));
   }
 
   /**
@@ -149,27 +140,42 @@ export class RefreshTool {
    * @param {boolean} force - Force reload
    */
   async _handleReload(target, force) {
-    if (!target || target.trim() === '') {
-      return ToolResult.err('Target is required. Provide an extension name or "all".');
+    if (!target || target.trim() === "") {
+      return ToolResult.err(
+        'Target is required. Provide an extension name or "all".',
+      );
     }
 
-    const targets = target.trim().toLowerCase() === 'all'
-      ? Array.from(this._extensionPaths.keys())
-      : [target.trim().toLowerCase()];
+    // Get all loaded extension names from the ExtensionLoader
+    const allNames = this.extensionLoader.all().map(([name]) => name);
+
+    const targets =
+      target.trim().toLowerCase() === "all"
+        ? allNames
+        : [target.trim().toLowerCase()];
 
     const results = [];
     const errors = [];
 
     for (const name of targets) {
-      const path = this._extensionPaths.get(name);
+      // Check if extension is loaded
+      if (!this.extensionLoader.has(name)) {
+        errors.push(`Extension "${name}" is not loaded`);
+        continue;
+      }
 
-      if (!path) {
-        errors.push(`Extension "${name}" not registered for reload`);
+      // Get the entry point path
+      const entryPoint = this.extensionLoader.entryPoints().get(name);
+      if (!entryPoint) {
+        errors.push(
+          `Extension "${name}" was not loaded from a file path (cannot hot-reload)`,
+        );
         continue;
       }
 
       try {
-        await this._reloadExtension(name, path, force);
+        // Use ExtensionLoader's built-in reload which handles unload + load
+        await this.extensionLoader.reload(name, entryPoint);
         results.push(`✓ Reloaded: ${name}`);
       } catch (e) {
         errors.push(`✗ Failed to reload "${name}": ${e.message}`);
@@ -180,45 +186,20 @@ export class RefreshTool {
     if (results.length > 0) {
       try {
         await this.reRegisterTools();
-        results.push('✓ Tools re-registered');
+        results.push("✓ Tools re-registered");
       } catch (e) {
         errors.push(`✗ Failed to re-register tools: ${e.message}`);
       }
     }
 
-    const output = results.join('\n');
-    const errorOutput = errors.length > 0 ? `\nErrors:\n${errors.join('\n')}` : '';
+    const output = results.join("\n");
+    const errorOutput =
+      errors.length > 0 ? `\nErrors:\n${errors.join("\n")}` : "";
 
     return ToolResult.ok(output + errorOutput).withEntries({
       reloaded: String(results.length),
       errors: String(errors.length),
     });
-  }
-
-  /**
-   * Reload a single extension by name and path.
-   * @param {string} name - Extension name
-   * @param {string} path - Module path
-   * @param {boolean} force - Force reload
-   */
-  async _reloadExtension(name, path, force) {
-    // 1. Unload the extension (cleanup hooks, etc.)
-    await this.extensionLoader.unload(name);
-
-    // 2. Force reload the module (bust cache)
-    const mod = await importModule(path, true);
-
-    // 3. Recreate the extension instance
-    if (mod.create) {
-      const instance = mod.create(this.core);
-      if (instance) {
-        // Re-load into the extension loader (which re-registers hooks)
-        await this.extensionLoader.load(name, mod);
-
-        // Also update the path tracking in case the path changed
-        this._extensionPaths.set(name, path);
-      }
-    }
   }
 }
 
@@ -233,11 +214,11 @@ function parseArgs(input) {
   const target = json.target;
   const force = json.force;
 
-  if (!action || typeof action !== 'string') {
+  if (!action || typeof action !== "string") {
     return null;
   }
 
-  if (!target || typeof target !== 'string') {
+  if (!target || typeof target !== "string") {
     return null;
   }
 

@@ -18,6 +18,9 @@ export class ExtensionLoader {
     // Track removal functions per extension so we can cleanly deregister
     // only this extension's handlers on unload.
     this._handlerRemovers = new Map();
+    // Track the entry point (module path) used to load each extension.
+    // Used by the refresh tool to know which paths to re-import.
+    this._entryPoints = new Map();
   }
 
   /**
@@ -33,10 +36,11 @@ export class ExtensionLoader {
    * @returns {Promise<Object>} The loaded extension instance.
    */
   async load(name, entryPoint) {
-    // Resolve the module
+    // Resolve the module — add cache-busting query string so hot-reloads
+    // bypass the JS engine's native module cache
     let extModule;
     if (typeof entryPoint === 'string') {
-      extModule = await import(entryPoint);
+      extModule = await import(`${entryPoint}?t=${Date.now()}`);
     } else {
       extModule = entryPoint;
     }
@@ -52,20 +56,34 @@ export class ExtensionLoader {
 
     this._extensions.set(name, instance);
 
+    // Store the entry point path for hot-reload support
+    if (typeof entryPoint === 'string') {
+      this._entryPoints.set(name, entryPoint);
+    }
+
     // Track removal functions for this extension's hooks
     const removers = [];
     this._handlerRemovers.set(name, removers);
 
     // Auto-register hooks if the extension has them
+    // Skip TOOLS_REGISTER — tool registration is handled separately below
+    // to avoid double emission (the hook was previously emitted in main.js
+    // AND here, causing tools to be registered twice).
     if (instance.hooks) {
       for (const [hookName, handler] of Object.entries(instance.hooks)) {
+        if (hookName === HOOKS.TOOLS_REGISTER) continue;
         const remove = this._core.hooks.on(hookName, handler);
         removers.push(remove);
       }
     }
 
-    // Auto-register tools via the tools:register hook
-    if (instance.registerTools) {
+    // Tool registration: call tools:register handlers directly during load().
+    // Extensions can register via hooks: { [HOOKS.TOOLS_REGISTER]: ... }
+    // OR via registerTools() — both paths are handled here so tool
+    // registration happens exactly once per extension, during load().
+    if (instance.hooks?.[HOOKS.TOOLS_REGISTER]) {
+      await instance.hooks[HOOKS.TOOLS_REGISTER](this._core.toolRegistry);
+    } else if (instance.registerTools) {
       await instance.registerTools(this._core.toolRegistry);
     }
 
@@ -112,6 +130,7 @@ export class ExtensionLoader {
       }
 
       this._extensions.delete(name);
+      this._entryPoints.delete(name);
     }
   }
 
@@ -130,6 +149,15 @@ export class ExtensionLoader {
    */
   all() {
     return Array.from(this._extensions.entries());
+  }
+
+  /**
+   * Get all entry point paths as [name, path] pairs.
+   * Returns only extensions that were loaded via a string path (not inline modules).
+   * @returns {Map<string, string>}
+   */
+  entryPoints() {
+    return this._entryPoints;
   }
 
   /**

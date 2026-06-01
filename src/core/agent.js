@@ -82,6 +82,20 @@ export class Agent {
     });
   }
 
+  get isRestoring() {
+    return this._isRestoring;
+  }
+  set isRestoring(v) {
+    const oldVal = this._isRestoring;
+    this._isRestoring = v;
+    if (oldVal !== v) {
+      this._hooks.emit(HOOKS.SESSION_RESTORE_ACTIVE, {
+        agent: this,
+        isRestoring: v,
+      });
+    }
+  }
+
   get context() {
     return this._context;
   }
@@ -380,6 +394,17 @@ export class Agent {
         agent: this,
       });
 
+      // Build and enrich tool context via hook
+      const toolCtx = {
+        agent: this,
+        isSessionRestoring: this._isRestoring,
+      };
+      await this._hooks.emitAsync(HOOKS.AGENT_TOOL_CONTEXT, {
+        toolCtx,
+        toolName,
+        agent: this,
+      });
+
       // Execute the tool
       const tool = this._toolRegistry.get(toolName);
       if (!tool) {
@@ -400,7 +425,7 @@ export class Agent {
 
       let result;
       try {
-        result = await tool.execute(input, { agent: this });
+        result = await tool.execute(input, toolCtx);
       } catch (e) {
         result = `Error executing tool ${toolName}: ${e.message}`;
       }

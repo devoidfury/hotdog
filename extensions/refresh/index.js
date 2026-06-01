@@ -20,42 +20,6 @@
 import { HOOKS } from '../../src/hooks.js';
 import { RefreshTool } from './refresh-tool.js';
 
-// ── Extension Registry ────────────────────────────────────────────────────────
-
-/**
- * Extension names and their module paths.
- * This registry tells the refresh tool which extensions it can reload.
- */
-const REFRESHABLE_EXTENSIONS = [
-  'compaction',
-  'core-tools',
-  'skills',
-  'prompts',
-  'session-log',
-  'lsp',
-  'mcp',
-  'refresh',       // Can reload itself!
-  'info-show-prompt',
-  'session-review',
-];
-
-/**
- * Map of extension name → relative module path (relative to src/main.js).
- * These paths are used for dynamic imports during reload.
- */
-const EXTENSION_PATHS = {
-  'compaction': '../../extensions/compaction/index.js',
-  'core-tools': '../../extensions/core-tools/index.js',
-  'skills': '../../extensions/skills/index.js',
-  'prompts': '../../extensions/prompts/index.js',
-  'session-log': '../../extensions/session-log/index.js',
-  'lsp': '../../extensions/lsp/index.js',
-  'mcp': '../../extensions/mcp/index.js',
-  'refresh': '../../extensions/refresh/index.js',
-  'info-show-prompt': '../../extensions/info-show-prompt/index.js',
-  'session-review': '../../extensions/session-review/index.js',
-};
-
 // ── Extension Creator ─────────────────────────────────────────────────────────
 
 /**
@@ -73,14 +37,6 @@ export function create(core) {
     extensionLoader: extensions,
     reRegisterTools: () => _reRegisterAllTools(core),
   });
-
-  // Register all extension paths so the tool knows what can be reloaded
-  for (const name of REFRESHABLE_EXTENSIONS) {
-    const path = EXTENSION_PATHS[name];
-    if (path) {
-      refreshTool.registerExtensionPath(name, path);
-    }
-  }
 
   return {
     hooks: {
@@ -122,21 +78,20 @@ export function create(core) {
 
     // Expose for external use
     refreshTool,
-    REFRESHABLE_EXTENSIONS,
-    EXTENSION_PATHS,
 
     /**
-     * Get the list of reloadable extensions.
+     * Get the list of reloadable extensions (those loaded from file paths).
      */
     getReloadableExtensions() {
-      return Array.from(refreshTool._extensionPaths.keys());
+      const entryPoints = extensions.entryPoints();
+      return Array.from(entryPoints.keys());
     },
 
     /**
      * Get the module paths for reloadable extensions.
      */
     getExtensionPaths() {
-      return new Map(refreshTool._extensionPaths);
+      return extensions.entryPoints();
     },
   };
 }
@@ -151,7 +106,7 @@ export function create(core) {
  * @returns {Promise<void>}
  */
 async function _reRegisterAllTools(core) {
-  const { hooks, toolRegistry, config } = core;
+  const { hooks, toolRegistry } = core;
 
   // Clear existing tools (but keep the refresh tool)
   const allTools = toolRegistry.getAll();
@@ -171,4 +126,3 @@ async function _reRegisterAllTools(core) {
 // ── Re-exports ────────────────────────────────────────────────────────────────
 
 export { RefreshTool } from './refresh-tool.js';
-export { importModule, getLoadedModules, clearModuleCache } from './module-loader.js';

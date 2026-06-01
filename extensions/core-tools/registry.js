@@ -301,6 +301,52 @@ export function parseToolInput(input) {
 }
 
 /**
+ * Default callDisplay implementation — parses JSON input and delegates
+ * to a template function for formatted output.
+ *
+ * Usage in tools:
+ *   callDisplay(input) {
+ *     return defaultCallDisplay(input, (args) => {
+ *       return `${args.path} (lines ${args.offset}-${args.offset + args.limit})`;
+ *     });
+ *   }
+ *
+ * @param {string|object} input - Raw tool input (JSON string or parsed object)
+ * @param {Function} templateFn - Function(args) => string — formats parsed args
+ * @param {string|Function|object} [options] - Options object or fallback value.
+ *   If string: used as fallback for empty/null input.
+ *   If function: called with input as fallback for empty/null input.
+ *   If object: { fallback: string|Function, returnRawOnParseError: boolean }
+ * @returns {string} Human-readable display string
+ */
+export function defaultCallDisplay(input, templateFn, options) {
+  // Normalize options
+  let fallback, returnRawOnParseError = false;
+  if (typeof options === 'string') {
+    fallback = options;
+  } else if (typeof options === 'function') {
+    fallback = options;
+  } else if (typeof options === 'object' && options !== null) {
+    fallback = options.fallback;
+    returnRawOnParseError = options.returnRawOnParseError === true;
+  }
+
+  if (!input || (typeof input === 'string' && input.trim().length === 0)) {
+    return typeof fallback === 'function' ? fallback(input) : (fallback ?? (typeof input === 'string' ? input : ''));
+  }
+
+  const args = parseToolInput(input);
+  if (!args) {
+    // When parsing fails, return raw input if configured, otherwise return fallback
+    if (returnRawOnParseError) {
+      return typeof input === 'string' ? input : '';
+    }
+    return typeof fallback === 'function' ? fallback(input) : (fallback ?? (typeof input === 'string' ? input : ''));
+  }
+  return templateFn(args);
+}
+
+/**
  * Generate a simple unified diff between old and new text.
  */
 export function generateDiff(oldText, newText, maxLines = 80) {
@@ -566,5 +612,8 @@ export class ToolContext {
     this.onCacheToolOutput = options.onCacheToolOutput || null;
     this.onGetCachedToolOutput = options.onGetCachedToolOutput || null;
     this.isCancelled = options.isCancelled || (() => false);
+    // Enriched via agent:toolContext hook
+    this.skillsLoader = options.skillsLoader || null;
+    this.isSessionRestoring = options.isSessionRestoring || false;
   }
 }

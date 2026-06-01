@@ -1,7 +1,7 @@
 // LSP Apply Edit tool — workspace/applyEdit
 
 import { LspBaseTool } from './base.js';
-import { ToolResult } from '../../core-tools/registry.js';
+import { ToolResult, defaultCallDisplay } from '../../core-tools/registry.js';
 import { formatError } from '../../../src/context/error.js';
 
 export class LspApplyEditTool extends LspBaseTool {
@@ -16,13 +16,14 @@ export class LspApplyEditTool extends LspBaseTool {
    * Custom display that shows the number of changes in the edit.
    */
   callDisplay(input) {
-    const args = typeof input === 'string' ? JSON.parse(input) : input;
-    const edit = typeof args.edit === 'string' ? JSON.parse(args.edit) : args.edit;
-    const docChanges = edit?.documentChanges || edit?.changes || {};
-    const totalChanges = Array.isArray(docChanges)
-      ? docChanges.reduce((sum, dc) => sum + (dc.edits?.length || 0), 0)
-      : Object.values(docChanges).reduce((sum, arr) => sum + arr.length, 0);
-    return `applyEdit(${totalChanges} changes)`;
+    return defaultCallDisplay(input, (args) => {
+      const edit = typeof args.edit === 'string' ? JSON.parse(args.edit) : args.edit;
+      const docChanges = edit?.documentChanges || edit?.changes || {};
+      const totalChanges = Array.isArray(docChanges)
+        ? docChanges.reduce((sum, dc) => sum + (dc.edits?.length || 0), 0)
+        : Object.values(docChanges).reduce((sum, arr) => sum + arr.length, 0);
+      return `applyEdit(${totalChanges} changes)`;
+    });
   }
 
   async execute(input, ctx) {

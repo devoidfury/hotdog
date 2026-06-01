@@ -1,6 +1,6 @@
 // Model tool — switch the AI model at runtime.
 
-import { toolDef, param, ToolResult, toolResult, parseToolInput } from "./registry.js";
+import { toolDef, param, ToolResult, toolResult, parseToolInput, defaultCallDisplay } from "./registry.js";
 
 export class ModelTool {
   static TOOL_NAME = "model";
@@ -28,11 +28,7 @@ export class ModelTool {
   }
 
   callDisplay(input) {
-    const args = parseArgs(input);
-    if (!args) {
-      return typeof input === "string" ? input : "";
-    }
-    return `-> ${args.name}`;
+    return defaultCallDisplay(input, (args) => `-> ${args.name}`);
   }
 
   async execute(input, ctx) {

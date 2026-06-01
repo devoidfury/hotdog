@@ -5,7 +5,7 @@
 
 import { LlmClient } from "../../core/llm_client/client.js";
 import { SkillsLoader } from "../skills/loader.js";
-import { DEFAULT_SKILLS_PATH } from "../../core/config.js";
+import { DEFAULT_SKILLS_PATH, loadConfig } from "../../core/config.js";
 import { Agent } from "../../core/agent.js";
 
 /**
@@ -13,9 +13,7 @@ import { Agent } from "../../core/agent.js";
  */
 async function runInfo(cli, config, buildConfig) {
   const { resolved, modelRegistry, providers } = await buildConfig(cli);
-  const rawConfig = await (
-    await import("../../src/core/config.js")
-  ).loadConfig(cli.config);
+  const rawConfig = await loadConfig(cli.config);
 
   // Check connectivity
   const client = new LlmClient({

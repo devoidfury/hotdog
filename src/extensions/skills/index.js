@@ -9,7 +9,8 @@ import { cwd } from "node:process";
 import { HOOKS } from "../../core/hooks.js";
 import { render } from "../../core/context/render.js";
 import { patternMatches, SkillsLoader } from "./loader.js";
-export { LoadSkillTool } from "./load_skill.js";
+import { LoadSkillTool } from "./load_skill.js";
+export { LoadSkillTool };
 
 // ── Extension Config Registration ──────────────────────────────────────────
 
@@ -82,7 +83,6 @@ export function create(core) {
        * Register the load_skill tool.
        */
       [HOOKS.TOOLS_REGISTER]: async (registry) => {
-        const { LoadSkillTool } = await import("./load_skill.js");
         const tool = new LoadSkillTool({ loader });
         registry.register("load_skill", tool);
       },

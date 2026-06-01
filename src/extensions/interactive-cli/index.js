@@ -4,8 +4,18 @@
 // when no subcommand is provided.
 
 import readline from "node:readline";
+import { spawn } from "node:child_process";
 import { parseCommand, Command } from "../../core/commands.js";
 import { HOOKS } from "../../core/hooks.js";
+import { CliOutputSink } from "../../core/ui/cli.js";
+import { LlmClient } from "../../core/llm_client/client.js";
+import { MarkerMangler } from "../../core/marker_mangler.js";
+import { TaskManager } from "../../core/session/task_manager.js";
+import { SessionManager } from "../../core/session.js";
+import { MessageBus } from "../../core/index.js";
+import { Agent } from "../../core/agent.js";
+import { readSessionEntries, sessionExists, replayEntriesIntoContext } from "../../core/session/session-log.js";
+import { Message } from "../../core/context/message.js";
 
 const HELP_TEXT = `
 Commands:
@@ -216,7 +226,6 @@ export function create(core) {
     const { resolved, config } = core;
 
     // Create output sink
-    const { CliOutputSink } = await import("../../src/core/ui/cli.js");
     const palette = CliOutputSink.resolve(
       cli.colors !== false,
       resolved.theme || "dark",
@@ -233,9 +242,6 @@ export function create(core) {
     });
 
     // Build LLM client
-    const { LlmClient } = await import("../../src/core/llm_client/client.js");
-    const { MarkerMangler } = await import("../../src/core/marker_mangler.js");
-
     const llmClient = new LlmClient({
       baseUrl: resolved.baseUrl,
       apiKey: resolved.apiKey,
@@ -244,14 +250,6 @@ export function create(core) {
       providers: config.providers || [],
       markerMangler: new MarkerMangler(),
     });
-
-    // Create TaskManager
-    const { TaskManager } = await import("../../src/core/session/task_manager.js");
-    const { SessionManager } = await import("../../src/core/session.js");
-    const { MessageBus } = await import("../../src/core/index.js");
-    const { Agent } = await import("../../src/core/agent.js");
-    const { readSessionEntries, sessionExists, replayEntriesIntoContext } = await import("../../src/core/session/session-log.js");
-    const { Message } = await import("../../src/core/context/message.js");
 
     // Build agent function
     const buildAgent = async (agentConfig) => {
@@ -503,7 +501,7 @@ export function create(core) {
         shellCommandExt = core.extensions.get("run-shell-command");
       } else {
         // Fallback: create inline shell command handler
-        shellCommandExt = await createInlineShellCommand();
+        shellCommandExt = createInlineShellCommand();
       }
     }
     return shellCommandExt;
@@ -512,11 +510,9 @@ export function create(core) {
 
 /**
  * Create an inline shell command handler as fallback.
- * @returns {Promise<Object>}
+ * @returns {Object}
  */
-async function createInlineShellCommand() {
-  const { spawn } = await import("node:child_process");
-
+function createInlineShellCommand() {
   return {
     execute(command) {
       return new Promise((resolve) => {

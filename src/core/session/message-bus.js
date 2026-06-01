@@ -5,6 +5,7 @@
 import { formatError, isExpectedError } from "../context/error.js";
 import { OUTPUT_EVENT } from "../context/output.js";
 import { HOOKS } from "../hooks.js";
+import { parseCommand } from "../commands.js";
 
 /**
  * A simple message bus that owns the agent run loop.
@@ -137,7 +138,6 @@ export class MessageBus {
    * Execute a slash command through the agent.
    */
   async executeCommand(cmdText) {
-    const { parseCommand } = await import("../core/commands.js");
     const agent = this._sessionManager.getAgent();
     const cmd = parseCommand(cmdText, agent?.getSlashCommandRegistry());
 

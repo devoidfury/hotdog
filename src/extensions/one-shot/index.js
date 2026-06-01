@@ -6,6 +6,12 @@
 import { MessageBus } from "../../core/index.js";
 import { formatError } from "../../core/context/error.js";
 import { HOOKS } from "../../core/hooks.js";
+import { CliOutputSink } from "../../core/ui/cli.js";
+import { LlmClient } from "../../core/llm_client/client.js";
+import { MarkerMangler } from "../../core/marker_mangler.js";
+import { TaskManager } from "../../core/session/task_manager.js";
+import { SessionManager } from "../../core/session.js";
+import { Agent } from "../../core/agent.js";
 
 /**
  * Register CLI flags for the one-shot extension.
@@ -28,11 +34,6 @@ function registerOneShotConfig(core) {
  * Run one-shot mode: execute a single prompt and exit.
  */
 async function runOneShot(cli, core, resolved, config, modelRegistry, sink, buildAgent) {
-  // Create TaskManager
-  const { TaskManager } = await import("../../src/core/session/task_manager.js");
-  const { LlmClient } = await import("../../src/core/llm_client/client.js");
-  const { MarkerMangler } = await import("../../src/core/marker_mangler.js");
-
   const llmClient = new LlmClient({
     baseUrl: resolved.baseUrl,
     apiKey: resolved.apiKey,
@@ -52,7 +53,6 @@ async function runOneShot(cli, core, resolved, config, modelRegistry, sink, buil
   });
 
   // Create SessionManager
-  const { SessionManager } = await import("../../src/core/session.js");
   const sessionManager = await SessionManager.create({
     hooks: core.hooks,
     extensions: core.extensions,
@@ -118,7 +118,6 @@ export function create(core) {
         const { config, buildConfig, resolved, modelRegistry } = core;
 
         // Build output sink
-        const { CliOutputSink } = await import("../../src/core/ui/cli.js");
         const palette = CliOutputSink.resolve(
           cli.colors !== false,
           cli.theme || config.theme || "dark",
@@ -135,10 +134,6 @@ export function create(core) {
         });
 
         // Build agent function (same as in main.js)
-        const { LlmClient } = await import("../../src/core/llm_client/client.js");
-        const { MarkerMangler } = await import("../../src/core/marker_mangler.js");
-        const { Agent } = await import("../../src/core/agent.js");
-
         const llmClient = new LlmClient({
           baseUrl: resolved.baseUrl,
           apiKey: resolved.apiKey,

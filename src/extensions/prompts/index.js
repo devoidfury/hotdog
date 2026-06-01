@@ -3,6 +3,7 @@
 // Hooks: tools:register, slashCommands:register
 
 import { HOOKS } from '../../core/hooks.js';
+import { Message } from '../../core/context/message.js';
 import { PromptsLoader } from './loader.js';
 
 /**
@@ -41,7 +42,6 @@ export function create(core) {
             }
 
             // Add the rendered prompt as a user message
-            const { Message } = await import('../../src/core/context/message.js');
             agent._context.push(new Message({ role: 'user', content }));
             await core.hooks.emitAsync(HOOKS.CONTEXT_MESSAGE, { message: agent._context[agent._context.length - 1] });
 

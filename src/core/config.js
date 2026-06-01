@@ -1,7 +1,9 @@
 // Default configuration values and resolution logic used across the application.
 
 import fs from "node:fs";
+import fsPromises from "node:fs/promises";
 import path from "node:path";
+import os from "node:os";
 import { cwd } from "node:process";
 
 import { parseFrontMatter, deepMerge, loadAspects } from "./utils.js";
@@ -140,10 +142,6 @@ function getDefaultConfig(extParams) {
  * @returns {Promise<Object>} Resolved config object.
  */
 export async function loadConfig(configPath, extParams) {
-  const fs = await import("node:fs/promises");
-  const path = await import("node:path");
-  const os = await import("node:os");
-
   const homeConfig = path.join(
     os.homedir(),
     ".config",
@@ -159,7 +157,7 @@ export async function loadConfig(configPath, extParams) {
     const candidates = [DEFAULT_CONFIG_PATH, homeConfig];
     for (const candidate of candidates) {
       try {
-        await fs.access(candidate);
+        await fsPromises.access(candidate);
         configPathToUse = candidate;
         break;
       } catch {
@@ -173,7 +171,7 @@ export async function loadConfig(configPath, extParams) {
   }
 
   try {
-    const content = await fs.readFile(configPathToUse, "utf-8");
+    const content = await fsPromises.readFile(configPathToUse, "utf-8");
     const raw = JSON.parse(content);
     // Normalize snake_case keys from Rust config to camelCase
     return deepMerge(getDefaultConfig(extParams), normalizeConfigKeys(raw));

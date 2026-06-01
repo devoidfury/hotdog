@@ -1,0 +1,6 @@
+{
+  "name": "session-log",
+  "provides": [],
+  "loadOrder": 10,
+  "description": "Append-only JSONL session logging for observability"
+}

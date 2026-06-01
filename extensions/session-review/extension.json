@@ -1,5 +1,6 @@
 {
   "name": "session-review",
   "provides": ["cli:subcommands"],
+  "loadOrder": 10,
   "description": "Provides the review CLI subcommand for session log inspection"
 }

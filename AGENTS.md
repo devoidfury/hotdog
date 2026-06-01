@@ -93,7 +93,7 @@ extensions/
 ├── core-tools/     — Core tools (bash, write, read, edit, grep, find, fetch, etc.)
 ├── compaction/     — Compaction strategies (summarize, drop, token-aware)
 ├── lsp/            — LSP tools (hover, definition, completion, etc.)
-├── mcp-client/     — MCP server connections (HTTP + stdio)
+├── mcp-client/     — MCP server connections (HTTP + stdio), registers tools from configured servers
 ├── skills/         — Skills discovery and loading
 ├── prompts/        — Prompt template loading
 ├── session-log/    — JSONL session logging
@@ -105,6 +105,34 @@ extensions/
 ```
 
 When adding new subcommands, create a new extension in `extensions/` and register via `CliSubcommandRegistry`.
+
+### Extension.json Schema
+
+Every extension directory must contain an `extension.json` metadata file. This is the **primary discovery signal** — the extension loader uses `extension.json` presence (plus `index.js`) to identify valid extensions.
+
+```json
+{
+  "name": "extension-name",
+  "provides": ["tools", "cli:subcommands"],
+  "loadOrder": 10,
+  "description": "Brief description of what this extension does"
+}
+```
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `name` | string | Yes | Unique extension identifier (used for loading/filtering) |
+| `provides` | string[] | No | Capabilities: `"tools"`, `"cli:subcommands"` |
+| `loadOrder` | number | No | Load priority (lower = earlier). Defaults to 10. |
+| `description` | string | No | Human-readable description |
+
+**Load Order Constants** (from `LOAD_ORDER` in `extensions.js`):
+- `0` — REFRESH (must load first, tracks other extensions)
+- `1` — CORE_TOOLS (needed by other extensions)
+- `2` — CLI (loaded early for CLI subcommand registration)
+- `10` — DEFAULT (most extensions)
+
+**Discovery flow**: `extension.json` exists → `index.js` exists → valid extension.
 
 ## Documentation
 

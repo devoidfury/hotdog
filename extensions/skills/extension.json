@@ -1,0 +1,6 @@
+{
+  "name": "skills",
+  "provides": ["tools"],
+  "loadOrder": 10,
+  "description": "Skills loading, activation, and system prompt integration"
+}

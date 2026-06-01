@@ -1,0 +1,6 @@
+{
+  "name": "mcp-client",
+  "provides": ["tools"],
+  "loadOrder": 10,
+  "description": "Model Context Protocol client — connects to MCP servers and exposes their tools"
+}

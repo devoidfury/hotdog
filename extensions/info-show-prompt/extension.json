@@ -1,5 +1,6 @@
 {
   "name": "info-show-prompt",
   "provides": ["cli:subcommands"],
+  "loadOrder": 10,
   "description": "Provides info and show-prompt CLI subcommands"
 }

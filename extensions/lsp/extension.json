@@ -1,0 +1,6 @@
+{
+  "name": "lsp",
+  "provides": ["tools"],
+  "loadOrder": 10,
+  "description": "Language Server Protocol tools (hover, definition, completion, diagnostics, etc.)"
+}

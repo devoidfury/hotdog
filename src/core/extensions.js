@@ -81,57 +81,59 @@ export function resolveExtensionPath(spec) {
 }
 
 /**
- * Check if a directory looks like an extension (has index.js with a create function).
+ * Check if a directory is a valid extension.
+ * An extension must have an extension.json metadata file and an index.js entry point.
  *
  * @param {string} dirPath - Directory path to check.
- * @returns {boolean} True if the directory appears to be an extension.
+ * @returns {boolean} True if the directory is a valid extension.
  */
 export function isExtensionDirectory(dirPath) {
+  const metaPath = path.join(dirPath, "extension.json");
+  if (!fs.existsSync(metaPath)) {
+    return false;
+  }
+  // Must also have an index.js entry point
   const indexPath = path.join(dirPath, "index.js");
-  if (!fs.existsSync(indexPath)) {
-    return false;
-  }
-  // Quick check: file should contain "export function create" or "export {"
-  try {
-    const content = fs.readFileSync(indexPath, "utf-8");
-    return /export\s+(function\s+create|{)/.test(content);
-  } catch {
-    return false;
-  }
+  return fs.existsSync(indexPath);
 }
 
 /**
  * Read extension metadata from extension.json file.
  *
  * @param {string} dirPath - Extension directory path.
- * @returns {{provides: string[], loadOrder: number}} Extension capabilities.
+ * @returns {{name: string, provides: string[], loadOrder: number, description: string}} Extension metadata.
  */
 function readExtensionMetadata(dirPath) {
   const metaPath = path.join(dirPath, "extension.json");
   if (!fs.existsSync(metaPath)) {
-    return { provides: [], loadOrder: LOAD_ORDER.DEFAULT };
+    return { name: "", provides: [], loadOrder: LOAD_ORDER.DEFAULT, description: "" };
   }
   try {
     const content = fs.readFileSync(metaPath, "utf-8");
     const meta = JSON.parse(content);
-    const provides = Array.isArray(meta.provides) ? meta.provides : [];
 
-    // Determine load order based on capabilities
+    const provides = Array.isArray(meta.provides) ? meta.provides : [];
+    const description = typeof meta.description === "string" ? meta.description : "";
+
+    // Determine load order: explicit in JSON, or infer from capabilities
     let loadOrder = LOAD_ORDER.DEFAULT;
-    if (provides.includes(EXTENSION_PROVIDES.CLI_SUBCOMMANDS)) {
+    if (meta.loadOrder !== undefined) {
+      loadOrder = meta.loadOrder;
+    } else if (provides.includes(EXTENSION_PROVIDES.CLI_SUBCOMMANDS)) {
       loadOrder = LOAD_ORDER.CLI;
     }
 
-    return { provides, loadOrder };
+    return { name: meta.name || "", provides, loadOrder, description };
   } catch {
-    return { provides: [], loadOrder: LOAD_ORDER.DEFAULT };
+    return { name: "", provides: [], loadOrder: LOAD_ORDER.DEFAULT, description: "" };
   }
 }
 
 /**
  * Discover extensions in a directory.
- * Walks subdirectories and returns those that look like extensions.
- * Reads extension.json metadata for capabilities.
+ * Walks subdirectories and returns those with extension.json metadata.
+ * Uses extension.json as the primary discovery signal — an extension
+ * is any directory containing extension.json + index.js.
  *
  * @param {string} dirPath - Directory to search.
  * @returns {Array<{name: string, path: string, provides: string[], loadOrder: number}>} Array of discovered extensions.
@@ -150,11 +152,11 @@ export function discoverExtensionsInDir(dirPath) {
 
     const dirFull = path.join(dirPath, entry.name);
     if (isExtensionDirectory(dirFull)) {
-      // Read extension metadata
-      const { provides, loadOrder } = readExtensionMetadata(dirFull);
+      // Read extension metadata (includes name, provides, loadOrder)
+      const { name, provides, loadOrder } = readExtensionMetadata(dirFull);
 
       extensions.push({
-        name: entry.name,
+        name: name || entry.name,
         path: `../extensions/${entry.name}/index.js`,
         provides,
         loadOrder,

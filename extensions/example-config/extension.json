@@ -1,0 +1,6 @@
+{
+  "name": "example-config",
+  "provides": [],
+  "loadOrder": 10,
+  "description": "Example extension demonstrating CLI flags and config param registration"
+}

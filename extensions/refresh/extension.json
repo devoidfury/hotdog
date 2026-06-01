@@ -1,0 +1,6 @@
+{
+  "name": "refresh",
+  "provides": ["tools"],
+  "loadOrder": 0,
+  "description": "Hot-reload extensions and modules at runtime"
+}

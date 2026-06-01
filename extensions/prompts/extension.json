@@ -1,0 +1,6 @@
+{
+  "name": "prompts",
+  "provides": [],
+  "loadOrder": 10,
+  "description": "Prompt template loading and execution"
+}

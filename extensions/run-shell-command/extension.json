@@ -1,0 +1,6 @@
+{
+  "name": "run-shell-command",
+  "provides": [],
+  "loadOrder": 10,
+  "description": "Shell command execution via /sh, !, and :! syntax"
+}

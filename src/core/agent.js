@@ -433,6 +433,8 @@ export class Agent {
 
   /**
    * Execute tool calls from an LLM response.
+   * Thin loop that delegates per-call logic to _executeSingleToolCall.
+   *
    * @param {Array} toolCalls
    * @returns {Promise<{outcome: string, toolResults: Array}>}
    *   outcome: 'continue' or 'return'
@@ -442,181 +444,161 @@ export class Agent {
     const toolResults = [];
 
     for (const tc of toolCalls) {
-      const toolName = tc.function?.name || tc.toolName;
-      const toolCallId = tc.id || tc.toolCallId;
-      let input = tc.function?.arguments || tc.input || "{}";
-
-      // Check tool whitelist (for task agents)
-      if (this._toolWhitelist && !this._toolWhitelist.includes(toolName)) {
-        const errorMsg = `Tool '${toolName}' is not available for this agent`;
-        this._emitOutput("tool_result", { toolName, input, result: errorMsg });
-        this._context.push(
-          new Message({ role: "tool", content: errorMsg, toolCallId }),
-        );
-        await this._hooks.emitAsync(HOOKS.CONTEXT_MESSAGE, {
-          message: this._context[this._context.length - 1],
-          agent: this,
-        });
-        toolResults.push({ toolName, input, result: errorMsg });
-        continue;
-      }
-
-      // Emit tool call event
-      this._emitOutput("tool_call", { toolName, input, toolCallId });
-
-      // Emit before-execute hook (skill filtering handled by skills extension)
-      await this._hooks.emitAsync(HOOKS.TOOL_BEFORE_EXECUTE, {
-        toolCallId,
-        toolName,
-        input,
-        agent: this,
-      });
-
-      // Tool call gate — sequential, modifiable. Handlers can block, modify
-      // input args, or allow execution to proceed.
-      // Actions: { action: "continue" } | { action: "modify", input } | { action: "block", result }
-      const callResult = await this._hooks.emitAsyncSeq(HOOKS.TOOL_CALL, {
-        toolCallId,
-        toolName,
-        input,
-        agent: this,
-      });
-      if (callResult?.action === "block") {
-        // Extension blocked this tool call — use provided result
-        const blockedResult = this._formatToolResult(callResult.result, toolName);
-        this._emitOutput("tool_result", {
-          toolName,
-          input,
-          result: blockedResult,
-        });
-        this._context.push(
-          new Message({ role: "tool", content: blockedResult, toolCallId }),
-        );
-        await this._hooks.emitAsync(HOOKS.CONTEXT_MESSAGE, {
-          message: this._context[this._context.length - 1],
-          agent: this,
-        });
-        toolResults.push({ toolName, input, result: blockedResult });
-        continue;
-      }
-      if (callResult?.action === "modify" && callResult.input !== undefined) {
-        // Extension modified the input args
-        input = callResult.input;
-      }
-
-      // Build and enrich tool context via hook
-      const toolCtx = new ToolContext();
-      toolCtx.set("agent", this);
-      toolCtx.set("isSessionRestoring", this._isRestoring);
-      // Mount infrastructure properties from config
-      if (this._config) {
-        toolCtx.set("cwdBoundary", this._config.cwdBoundary || null);
-        toolCtx.set("workspaceRoot", this._config.workspaceRoot || null);
-      }
-      await this._hooks.emitAsync(HOOKS.AGENT_TOOL_CONTEXT, {
-        toolCtx,
-        toolName,
-        agent: this,
-      });
-
-      // Execute the tool
-      const tool = this._toolRegistry.get(toolName);
-      if (!tool) {
-        const errorMsg = `Unknown tool: ${toolName}`;
-        this._context.push(
-          new Message({
-            role: "tool",
-            content: errorMsg,
-            toolCallId,
-          }),
-        );
-        await this._hooks.emitAsync(HOOKS.CONTEXT_MESSAGE, {
-          message: this._context[this._context.length - 1],
-          agent: this,
-        });
-        toolResults.push({ toolName, input, result: errorMsg });
-        continue;
-      }
-
-      // Validate arguments against tool's JSON Schema before execution
-      const validationError = this._toolRegistry.validateToolArgs(
-        toolName,
-        input,
-      );
-      if (validationError) {
-        const errorMsg = `Parameter validation error:\n${validationError}`;
-        this._emitOutput("tool_result", { toolName, input, result: errorMsg });
-        this._context.push(
-          new Message({
-            role: "tool",
-            content: errorMsg,
-            toolCallId,
-          }),
-        );
-        await this._hooks.emitAsync(HOOKS.CONTEXT_MESSAGE, {
-          message: this._context[this._context.length - 1],
-          agent: this,
-        });
-        toolResults.push({ toolName, input, result: errorMsg });
-        continue;
-      }
-
-      let result;
-      try {
-        result = await tool.execute(input, toolCtx);
-      } catch (e) {
-        result = `Error executing tool ${toolName}: ${e.message}`;
-      }
-
-      // Emit after-execute hook
-      await this._hooks.emitAsync(HOOKS.TOOL_AFTER_EXECUTE, {
-        toolCallId,
-        toolName,
-        result,
-        input,
-        agent: this,
-      });
-
-      // Tool result — sequential, modifiable. Handlers can transform the
-      // result before it reaches the LLM context.
-      // Returns { result } to replace the result (any value: string, ToolResult, object)
-      const resultHook = await this._hooks.emitAsyncSeq(HOOKS.TOOL_RESULT, {
-        toolCallId,
-        toolName,
-        result,
-        input,
-        agent: this,
-      });
-      if (resultHook?.result !== undefined) {
-        result = resultHook.result;
-      }
-
-      // Convert result to string for API
-      const resultStr = this._formatToolResult(result, toolName);
-
-      // Emit tool result event
-      this._emitOutput("tool_result", { toolName, input, result: resultStr });
-
-      // Add tool result to context
-      const toolMsg = new Message({
-        role: "tool",
-        content: resultStr,
-        toolCallId,
-      });
-      this._context.push(toolMsg);
-      await this._hooks.emitAsync(HOOKS.CONTEXT_MESSAGE, {
-        message: toolMsg,
-        agent: this,
-      });
-
-      // Collect tool result for turn_end hook
-      toolResults.push({ toolName, input, result: resultStr });
+      const result = await this._executeSingleToolCall(tc);
+      toolResults.push(result);
 
       // Check for wait tool — model is yielding control
-      if (toolName === "wait") return { outcome: "return", toolResults };
+      if (result.toolName === "wait") {
+        return { outcome: "return", toolResults };
+      }
     }
 
     return { outcome: "continue", toolResults };
+  }
+
+  /**
+   * Execute a single tool call through the full pipeline:
+   *   whitelist → gate hook → context build → resolve → validate → execute
+   *   → after-execute hook → result hook → format → write to context.
+   *
+   * @param {Object} tc — Tool call from the LLM response.
+   * @returns {Promise<{toolName: string, input: string, result: string}>}
+   */
+  async _executeSingleToolCall(tc) {
+    const toolName = tc.function?.name || tc.toolName;
+    const toolCallId = tc.id || tc.toolCallId;
+    let input = tc.function?.arguments || tc.input || "{}";
+
+    // 1. Whitelist check (for task agents)
+    if (this._toolWhitelist && !this._toolWhitelist.includes(toolName)) {
+      const msg = `Tool '${toolName}' is not available for this agent`;
+      return this._writeToolResult(toolName, input, msg, toolCallId);
+    }
+
+    // 2. Emit tool call event + before-execute hook
+    this._emitOutput("tool_call", { toolName, input, toolCallId });
+    await this._hooks.emitAsync(HOOKS.TOOL_BEFORE_EXECUTE, {
+      toolCallId,
+      toolName,
+      input,
+      agent: this,
+    });
+
+    // 3. Tool call gate — sequential, modifiable. Handlers can block, modify
+    //    input args, or allow execution to proceed.
+    //    Actions: { action: "continue" } | { action: "modify", input } | { action: "block", result }
+    const callResult = await this._hooks.emitAsyncSeq(HOOKS.TOOL_CALL, {
+      toolCallId,
+      toolName,
+      input,
+      agent: this,
+    });
+    if (callResult?.action === "block") {
+      // Extension blocked this tool call — use provided result
+      const blockedResult = this._formatToolResult(callResult.result, toolName);
+      return this._writeToolResult(toolName, input, blockedResult, toolCallId);
+    }
+    if (callResult?.action === "modify" && callResult.input !== undefined) {
+      // Extension modified the input args
+      input = callResult.input;
+    }
+
+    // 4. Build and enrich tool context via hook
+    const toolCtx = this._buildToolContext(toolName);
+    await this._hooks.emitAsync(HOOKS.AGENT_TOOL_CONTEXT, {
+      toolCtx,
+      toolName,
+      agent: this,
+    });
+
+    // 5. Resolve tool from registry
+    const tool = this._toolRegistry.get(toolName);
+    if (!tool) {
+      return this._writeToolResult(toolName, input, `Unknown tool: ${toolName}`, toolCallId);
+    }
+
+    // 6. Validate arguments against tool's JSON Schema
+    const validationError = this._toolRegistry.validateToolArgs(toolName, input);
+    if (validationError) {
+      return this._writeToolResult(
+        toolName,
+        input,
+        `Parameter validation error:\n${validationError}`,
+        toolCallId,
+      );
+    }
+
+    // 7. Execute the tool
+    let result;
+    try {
+      result = await tool.execute(input, toolCtx);
+    } catch (e) {
+      result = `Error executing tool ${toolName}: ${e.message}`;
+    }
+
+    // 8. After-execute hook + result modification hook
+    await this._hooks.emitAsync(HOOKS.TOOL_AFTER_EXECUTE, {
+      toolCallId,
+      toolName,
+      result,
+      input,
+      agent: this,
+    });
+
+    // Tool result — sequential, modifiable. Handlers can transform the
+    // result before it reaches the LLM context.
+    // Returns { result } to replace the result (any value: string, ToolResult, object)
+    const resultHook = await this._hooks.emitAsyncSeq(HOOKS.TOOL_RESULT, {
+      toolCallId,
+      toolName,
+      result,
+      input,
+      agent: this,
+    });
+    if (resultHook?.result !== undefined) {
+      result = resultHook.result;
+    }
+
+    // 9. Format and write result to context
+    const resultStr = this._formatToolResult(result, toolName);
+    return this._writeToolResult(toolName, input, resultStr, toolCallId);
+  }
+
+  /**
+   * Build a ToolContext with standard infrastructure fields.
+   * Extensions can further enrich it via the AGENT_TOOL_CONTEXT hook.
+   *
+   * @param {string} toolName
+   * @returns {ToolContext}
+   */
+  _buildToolContext(toolName) {
+    const toolCtx = new ToolContext();
+    toolCtx.set("agent", this);
+    toolCtx.set("isSessionRestoring", this._isRestoring);
+    // Mount infrastructure properties from config
+    if (this._config) {
+      toolCtx.set("cwdBoundary", this._config.cwdBoundary || null);
+      toolCtx.set("workspaceRoot", this._config.workspaceRoot || null);
+    }
+    return toolCtx;
+  }
+
+  /**
+   * Write a tool result to output, context, and emit the context message hook.
+   * Shared helper used by both error paths and the happy path in _executeSingleToolCall.
+   *
+   * @param {string} toolName
+   * @param {string} input
+   * @param {string} result
+   * @param {string} toolCallId
+   * @returns {{toolName: string, input: string, result: string}}
+   */
+  async _writeToolResult(toolName, input, result, toolCallId) {
+    this._emitOutput("tool_result", { toolName, input, result });
+    const msg = new Message({ role: "tool", content: result, toolCallId });
+    this._context.push(msg);
+    await this._hooks.emitAsync(HOOKS.CONTEXT_MESSAGE, { message: msg, agent: this });
+    return { toolName, input, result };
   }
 
   /**

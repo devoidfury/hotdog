@@ -17,18 +17,6 @@ import { ReviewTool } from "./review.js";
  * Registers CLI subcommands and the review tool.
  */
 export function create(core) {
-  // Register subcommands if the registry is available
-  if (core.cliSubcommandRegistry) {
-    core.cliSubcommandRegistry.register("review", {
-      description: "Review session logs",
-      requiresConfig: true,
-      handler: async (cli, core) => {
-        const { config } = core;
-        await runReview(cli, config);
-      },
-    });
-  }
-
   return {
     hooks: core.hooks
       ? {

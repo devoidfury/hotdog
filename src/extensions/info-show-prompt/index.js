@@ -3,6 +3,7 @@
 // Registers subcommands via the cli:subcommandsRegister hook.
 // Capability declared in extension.json metadata file.
 
+import { HOOKS } from "../../core/hooks.js";
 import { LlmClient } from "../../core/llm-client/client.js";
 import { SkillsLoader } from "../skills/loader.js";
 import { DEFAULT_SKILLS_PATH, loadConfig } from "../../core/config.js";
@@ -225,28 +226,29 @@ async function runShowPrompt(cli, core, config, buildConfig) {
  * Registers subcommands via the cli:subcommandsRegister hook.
  */
 export function create(core) {
-  // Register subcommands if the registry is available
-  if (core.cliSubcommandRegistry) {
-    core.cliSubcommandRegistry.register("info", {
-      description: "Show system info and diagnostics",
-      requiresConfig: true,
-      handler: async (cli, core) => {
-        const { config, buildConfig } = core;
-        await runInfo(cli, config, buildConfig);
-      },
-    });
-
-    core.cliSubcommandRegistry.register("show-prompt", {
-      description: "Show rendered system prompt with tool definitions",
-      requiresConfig: true,
-      handler: async (cli, core) => {
-        const { config, buildConfig } = core;
-        await runShowPrompt(cli, core, config, buildConfig);
-      },
-    });
-  }
-
   return {
-    hooks: core.hooks ? {} : undefined,
+    hooks: core.hooks
+      ? {
+          [HOOKS.CLI_SUBCOMMANDS_REGISTER]: async (registry) => {
+            registry.register("info", {
+              description: "Show system info and diagnostics",
+              requiresConfig: true,
+              handler: async (cli, core) => {
+                const { config, buildConfig } = core;
+                await runInfo(cli, config, buildConfig);
+              },
+            });
+
+            registry.register("show-prompt", {
+              description: "Show rendered system prompt with tool definitions",
+              requiresConfig: true,
+              handler: async (cli, core) => {
+                const { config, buildConfig } = core;
+                await runShowPrompt(cli, core, config, buildConfig);
+              },
+            });
+          },
+        }
+      : undefined,
   };
 }

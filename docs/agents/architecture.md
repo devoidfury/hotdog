@@ -37,7 +37,7 @@ All defaults, provider config loading, profiles, and model registry. Key exports
 - `mergeExtensionConfigDefaults(defaultConfig, extParams)` — merges extension defaults into base config
 
 ### Config Registry (`src/core/extensions/config-registry.js`)
-Allows extensions to register their own CLI flags and config parameters dynamically. Used during CLI parsing and config resolution. Extensions register via `CONFIG_CLI_FLAGS_REGISTER` and `CONFIG_PARAMS_REGISTER` hooks.
+Manages extension-registered CLI flags and config parameters. Config params are primarily defined in `extension.json` configSchema (single source of truth), with defaults automatically extracted and registered. Extensions can still use `CONFIG_CLI_FLAGS_REGISTER` and `CONFIG_PARAMS_REGISTER` hooks for programmatic control when needed.
 
 ### Hook System (`src/core/hooks.js`)
 The foundation for the extension architecture. `HookSystem` class with `on()`, `emit()`, `emitAsync()`, `emitAsyncSeq()`, `emitAsyncSeqUntil()`, `off()`, `clear()` methods. Standard hook names defined in `HOOKS` constant:
@@ -81,8 +81,10 @@ Discovers, loads, and manages extensions. Key exports:
 - `getExtensionsToLoad(extensionPaths, extensionAutoload, extensions)` — filters extensions based on config
 - `resolveExtensionPath(spec)` — resolves "builtins" or path specs to absolute directories
 - `LOAD_ORDER` — constants for extension load ordering (REFRESH: 0, CORE_TOOLS: 1, CLI: 2, DEFAULT: 10)
-- `registerExtensionMetadata(config, configRegistry, cliSubcommandRegistry)` — reads extension.json metadata without loading code
-- `emitConfigRegistration(extension, configRegistry)` — emits config registration hooks
+- `registerExtensionMetadata(config, configRegistry, cliSubcommandRegistry)` — reads extension.json metadata, auto-registers configSchema defaults
+- `extractSchemaDefaults(schema, configKey)` — extracts defaults from JSON Schema as config params
+- `extensionNameToConfigKey(name)` — converts kebab-case extension name to camelCase config key
+- `emitConfigRegistration(extension, configRegistry)` — emits config registration hooks (for programmatic control)
 
 ### Agent (`src/core/agent.js`)
 Minimal Agent class that runs the LLM loop and delegates behavior to hooks. Key features:

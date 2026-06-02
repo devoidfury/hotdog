@@ -1,36 +1,41 @@
-// Config Registry — allows extensions to register their own CLI flags
-// and config parameters dynamically.
+// Config Registry — manages extension-registered CLI flags and config params.
 //
-// Extensions register during the CONFIG_CLI_FLAGS_REGISTER and
-// CONFIG_PARAMS_REGISTER hooks. The core collects these and uses
-// them during CLI parsing and config resolution.
+// Config params are primarily defined in extension.json configSchema (single
+// source of truth). The loader automatically extracts defaults from the schema
+// and registers them as config params. Extensions can still use the
+// CONFIG_CLI_FLAGS_REGISTER and CONFIG_PARAMS_REGISTER hooks for programmatic
+// control when needed.
 //
-// Usage in an extension:
+// Usage in an extension (programmatic registration):
 //
 //   export function create(core) {
-//     core.configRegistry.registerCliFlags([
-//       {
-//         short: '-x',
-//         long: '--my-flag',
-//         description: 'My extension flag',
-//         type: 'string',       // 'string', 'boolean', 'number', 'array'
-//         default: null,
-//         parse: (value) => value,  // optional custom parser
-//       },
-//     ]);
-//
-//     core.configRegistry.registerConfigParams([
-//       {
-//         key: 'myExtension',
-//         description: 'My extension config section',
-//         defaults: {
-//           enabled: true,
-//           timeout: 30,
+//     return {
+//       hooks: {
+//         [HOOKS.CONFIG_CLI_FLAGS_REGISTER]: (configRegistry) => {
+//           configRegistry.registerCliFlags([
+//             {
+//               short: '-x',
+//               long: '--my-flag',
+//               description: 'My extension flag',
+//               type: 'string',       // 'string', 'boolean', 'number', 'array'
+//               default: null,
+//               parse: (value) => value,  // optional custom parser
+//             },
+//           ]);
 //         },
+//         // Optional: for programmatic config param registration
+//         [HOOKS.CONFIG_PARAMS_REGISTER]: () => [
+//           {
+//             key: 'myExtension',
+//             description: 'My extension config section',
+//             defaults: {
+//               enabled: true,
+//               timeout: 30,
+//             },
+//           },
+//         ],
 //       },
-//     ]);
-//
-//     return { /* ... */ };
+//     };
 //   }
 
 import { validate } from "../../utils/json-schema.js";

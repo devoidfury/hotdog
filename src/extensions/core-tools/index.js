@@ -150,26 +150,6 @@ export function create(core) {
           }
         }
       },
-
-      /**
-       * Register config params for core tools defaults.
-       * These get merged into the base config so tools can access them.
-       */
-      [HOOKS.CONFIG_PARAMS_REGISTER]: () => [
-        {
-          key: "coreTools",
-          description: "Core tools configuration",
-          defaults: {
-            maxToolOutputLines: DEFAULT_MAX_TOOL_OUTPUT_LINES,
-            bashTimeoutMs: DEFAULT_BASH_TIMEOUT_MS,
-            readToolLimit: DEFAULT_READ_TOOL_LIMIT,
-            findMaxResults: DEFAULT_FIND_MAX_RESULTS,
-            grepMaxResults: DEFAULT_GREP_MAX_RESULTS,
-            maxDiffSize: DEFAULT_MAX_DIFF_SIZE,
-            maxEditInputSize: DEFAULT_MAX_EDIT_INPUT_SIZE,
-          },
-        },
-      ],
     },
 
     // Expose for external use

@@ -30,8 +30,10 @@ function createMockAgent(modelRegistry = {}) {
 }
 
 describe("Model-switch extension", () => {
-  it("registers model tool by default", async () => {
-    const core = createMockCore();
+  it("registers model tool when toolEnabled is true", async () => {
+    const core = createMockCore({
+      coreConfig: { modelSwitch: { toolEnabled: true } },
+    });
     const ext = createModelSwitchExtension(core);
     expect(ext).not.toBeNull();
 
@@ -49,8 +51,20 @@ describe("Model-switch extension", () => {
     expect(core.toolRegistry.has("model")).toBe(false);
   });
 
-  it("registers slash commands by default", async () => {
-    const core = createMockCore();
+  it("does not register model tool when toolEnabled is undefined (defaults to false)", async () => {
+    const core = createMockCore({
+      coreConfig: { modelSwitch: {} },
+    });
+    const ext = createModelSwitchExtension(core);
+
+    await ext.hooks[HOOKS.TOOLS_REGISTER](core.toolRegistry);
+    expect(core.toolRegistry.has("model")).toBe(false);
+  });
+
+  it("registers slash commands when commandEnabled is true", async () => {
+    const core = createMockCore({
+      coreConfig: { modelSwitch: { commandEnabled: true } },
+    });
     const ext = createModelSwitchExtension(core);
 
     const registry = createSlashCommandRegistry();
@@ -108,7 +122,9 @@ describe("Model-switch extension", () => {
   });
 
   it("/models command lists available models", async () => {
-    const core = createMockCore();
+    const core = createMockCore({
+      coreConfig: { modelSwitch: { commandEnabled: true } },
+    });
     const ext = createModelSwitchExtension(core);
 
     const registry = createSlashCommandRegistry();
@@ -125,7 +141,10 @@ describe("Model-switch extension", () => {
   });
 
   it("/models command shows message when no models configured", async () => {
-    const core = createMockCore({ modelRegistry: {} });
+    const core = createMockCore({
+      modelRegistry: {},
+      coreConfig: { modelSwitch: { commandEnabled: true } },
+    });
     const ext = createModelSwitchExtension(core);
 
     const registry = createSlashCommandRegistry();
@@ -139,7 +158,9 @@ describe("Model-switch extension", () => {
   });
 
   it("/model command switches model", async () => {
-    const core = createMockCore();
+    const core = createMockCore({
+      coreConfig: { modelSwitch: { commandEnabled: true } },
+    });
     const ext = createModelSwitchExtension(core);
 
     const registry = createSlashCommandRegistry();
@@ -154,7 +175,9 @@ describe("Model-switch extension", () => {
   });
 
   it("/model command without name shows available models", async () => {
-    const core = createMockCore();
+    const core = createMockCore({
+      coreConfig: { modelSwitch: { commandEnabled: true } },
+    });
     const ext = createModelSwitchExtension(core);
 
     const registry = createSlashCommandRegistry();
@@ -169,12 +192,11 @@ describe("Model-switch extension", () => {
     expect(result.content).toContain("model-b");
   });
 
-  it("registers config params", () => {
+  it("does not have CONFIG_PARAMS_REGISTER hook (config comes from extension.json)", () => {
     const core = createMockCore();
     const ext = createModelSwitchExtension(core);
 
-    const params = ext.hooks[HOOKS.CONFIG_PARAMS_REGISTER]();
-    expect(params).toHaveLength(1);
-    expect(params[0].key).toBe("modelSwitch");
+    // Config params now come from extension.json configSchema, not from the hook
+    expect(ext.hooks[HOOKS.CONFIG_PARAMS_REGISTER]).toBeUndefined();
   });
 });

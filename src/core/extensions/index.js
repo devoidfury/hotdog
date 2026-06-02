@@ -4,6 +4,7 @@ export {
   ExtensionLoader,
   createExtensionLoader,
   extractSchemaDefaults,
+  extensionNameToConfigKey,
   getExtensionConfigDefaults,
   emitConfigRegistration,
   resolveExtensionPath,

@@ -11,34 +11,74 @@ export { HOOKS, EXTENSION_PROVIDES };
 // ── Schema Defaults Extraction ─────────────────────────────────────────────
 
 /**
- * Extract default values from a JSON Schema's properties.
+ * Convert extension name (kebab-case) to config key (camelCase).
+ * e.g., "core-tools" → "coreTools", "model-switch" → "modelSwitch"
  */
-export function extractSchemaDefaults(schema) {
-  if (!schema || !schema.properties) return [];
+export function extensionNameToConfigKey(name) {
+  return name
+    .split("-")
+    .map((part, i) =>
+      i === 0 ? part : part.charAt(0).toUpperCase() + part.slice(1),
+    )
+    .join("");
+}
 
-  const result = [];
+/**
+ * Extract default values from a JSON Schema's properties.
+ * Returns a single config param entry with all defaults merged into one object.
+ * This format is compatible with ConfigRegistry.registerConfigParams().
+ *
+ * @param {Object} schema - JSON Schema with properties containing defaults.
+ * @param {string} [configKey] - Optional config key override. If not provided,
+ *   defaults are returned with individual property keys.
+ * @returns {Array<{key: string, description?: string, defaults: Object}>}
+ */
+export function extractSchemaDefaults(schema, configKey) {
+  if (!schema) return [];
 
-  for (const [key, prop] of Object.entries(schema.properties)) {
-    if (prop.type === "object" && prop.properties) {
-      const nestedDefaults = {};
-      for (const [nestedKey, nestedProp] of Object.entries(prop.properties)) {
-        if (nestedProp.default !== undefined) {
-          nestedDefaults[nestedKey] = nestedProp.default;
+  // For object-type schemas: collect all defaults into a single entry
+  if (schema.type === "object" && schema.properties) {
+    const defaults = {};
+    for (const [propName, prop] of Object.entries(schema.properties)) {
+      if (prop.default !== undefined) {
+        defaults[propName] = prop.default;
+      } else if (prop.type === "object" && prop.properties) {
+        // Collect nested defaults
+        for (const [nestedKey, nestedProp] of Object.entries(prop.properties)) {
+          if (nestedProp.default !== undefined) {
+            defaults[nestedKey] = nestedProp.default;
+          }
         }
       }
-      if (Object.keys(nestedDefaults).length > 0) {
-        result.push({ key, defaults: nestedDefaults });
-      }
-    } else if (prop.default !== undefined) {
-      result.push({ key, defaults: { [key]: prop.default } });
+    }
+    if (Object.keys(defaults).length > 0) {
+      return [
+        {
+          key: configKey || schema.$id || "config",
+          description: schema.description || "",
+          defaults,
+        },
+      ];
     }
   }
 
-  return result;
+  // For array-type schemas: check for top-level default
+  if (schema.type === "array" && schema.default !== undefined) {
+    return [
+      {
+        key: configKey || schema.$id || "config",
+        description: schema.description || "",
+        defaults: { items: schema.default },
+      },
+    ];
+  }
+
+  return [];
 }
 
 /**
  * Get extension config defaults from extension.json schemas.
+ * Returns config params in the format expected by ConfigRegistry.registerConfigParams().
  */
 export async function getExtensionConfigDefaults(extensionPaths) {
   const params = [];
@@ -49,7 +89,8 @@ export async function getExtensionConfigDefaults(extensionPaths) {
 
     for (const ext of discovered) {
       if (ext.configSchema) {
-        const defaults = extractSchemaDefaults(ext.configSchema);
+        const configKey = extensionNameToConfigKey(ext.name);
+        const defaults = extractSchemaDefaults(ext.configSchema, configKey);
         params.push(...defaults);
       }
     }
@@ -449,11 +490,16 @@ export function resolveExtensionDependencies(extensions, allDiscovered) {
 // ── Metadata Registration (consolidated from main.js) ────────────────────────
 
 /**
- * Discover extensions and register their CLI flags and subcommands from metadata.
- * This reads extension.json files without loading any extension code.
+ * Discover extensions and register their CLI flags, subcommands, and config params
+ * from metadata. This reads extension.json files without loading any extension code.
+ *
+ * Config params are extracted from configSchema and registered automatically,
+ * making extension.json the single source of truth for extension configuration.
+ * Extensions can still use CONFIG_PARAMS_REGISTER for programmatic control,
+ * but the common case is schema-only.
  *
  * @param {Object} config - Configuration with extension paths and autoload settings.
- * @param {Object} configRegistry - Config registry to register CLI flags.
+ * @param {Object} configRegistry - Config registry to register CLI flags and config params.
  * @param {Object} cliSubcommandRegistry - Subcommand registry to register subcommands.
  * @returns {Promise<Array>} Array of discovered extension metadata.
  */
@@ -483,6 +529,19 @@ export async function registerExtensionMetadata(
         default: flag.default,
       }));
       configRegistry.registerCliFlags(flags);
+    }
+  }
+
+  // Register config params from configSchema (single source of truth)
+  // This makes extension.json the canonical config definition.
+  // Extensions can still use CONFIG_PARAMS_REGISTER for additional/programmatic params.
+  for (const ext of extensionsToLoad) {
+    if (ext.configSchema) {
+      const configKey = extensionNameToConfigKey(ext.name);
+      const params = extractSchemaDefaults(ext.configSchema, configKey);
+      if (params.length > 0) {
+        configRegistry.registerConfigParams(params);
+      }
     }
   }
 

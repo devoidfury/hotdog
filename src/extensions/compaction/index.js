@@ -99,10 +99,7 @@ export function create(core) {
        * Handle compact:strategySet hook — update the current compaction strategy.
        */
       [HOOKS.COMPACT_STRATEGY_SET]: ({ agent, strategyName }) => {
-        // Validate that the strategy exists
-        if (!registry.get(strategyName) && strategyName !== 'summarize' && strategyName !== 'drop' && strategyName !== 'summarize-short' && strategyName !== 'token-aware') {
-          // Allow any name — the strategy registry handles validation at execution time
-        }
+        // The strategy registry validates at execution time, so allow any name here.
         settings.strategy = strategyName;
       },
 

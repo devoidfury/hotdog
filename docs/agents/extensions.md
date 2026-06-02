@@ -6,8 +6,9 @@ When adding new functionality:
 2. If creating a new extension, place it in `src/extensions/<name>/` with `index.js` and a `extension.json` metadata file
 3. Register tools via `HOOKS.TOOLS_REGISTER`
 4. Register CLI subcommands via `HOOKS.CLI_SUBCOMMANDS_REGISTER` (or directly via `core.cliSubcommandRegistry`)
-5. Register config params/CLI flags via `HOOKS.CONFIG_PARAMS_REGISTER` / `HOOKS.CONFIG_CLI_FLAGS_REGISTER`
-6. Contribute to system prompt via `HOOKS.SYSTEM_PROMPT_BUILD`
+5. **Define config options in `configSchema` in `extension.json`** (single source of truth)
+6. Optionally use `HOOKS.CONFIG_CLI_FLAGS_REGISTER` for CLI flags that need programmatic control
+7. Contribute to system prompt via `HOOKS.SYSTEM_PROMPT_BUILD`
 
 When adding new subcommands, create a new extension in `src/extensions/` and register via `CliSubcommandRegistry`.
 
@@ -35,7 +36,22 @@ Every extension directory must contain an `extension.json` metadata file. This i
       "description": "My extension flag",
       "type": "string"
     }
-  ]
+  ],
+  "configSchema": {
+    "type": "object",
+    "properties": {
+      "enabled": {
+        "type": "boolean",
+        "default": true,
+        "description": "Whether this extension is enabled"
+      },
+      "timeout": {
+        "type": "number",
+        "default": 30,
+        "description": "Request timeout in seconds"
+      }
+    }
+  }
 }
 ```
 
@@ -48,7 +64,7 @@ Every extension directory must contain an `extension.json` metadata file. This i
 | `description` | string | No | Human-readable description |
 | `cli:subcommands` | array | No | Subcommand declarations for static discovery (help text, `--help`) |
 | `cli:flags` | array | No | CLI flag declarations for static discovery |
-| `configSchema` | object | No | JSON Schema for extension config options |
+| `configSchema` | object | No | JSON Schema for extension config options (**single source of truth**) |
 | `autoload` | boolean | No | Whether to auto-discover. Default: true |
 
 **Load Order Constants** (from `LOAD_ORDER` in `extensions.js`):
@@ -59,7 +75,30 @@ Every extension directory must contain an `extension.json` metadata file. This i
 
 **Discovery flow**: `extension.json` exists → `index.js` exists → valid extension.
 
-**Static discovery**: CLI flags and subcommand declarations in `extension.json` are read at startup without loading extension code. This enables `--help` and subcommand discovery to work immediately.
+**Static discovery**: CLI flags, subcommand declarations, and config params from `configSchema` are read at startup without loading extension code. This enables `--help`, subcommand discovery, and config defaults to work immediately.
+
+### Configuration
+
+**`configSchema` is the single source of truth** for extension configuration. Defaults defined in `configSchema` are automatically extracted and registered as config params. Extensions do NOT need to also register via `HOOKS.CONFIG_PARAMS_REGISTER` — the loader handles this automatically.
+
+The extension name (kebab-case) is converted to camelCase for the config key:
+- `core-tools` → `coreTools`
+- `model-switch` → `modelSwitch`
+- `mcp-client` → `mcpClient`
+
+Config values are accessed via `core.config.<configKey>`:
+```javascript
+export function create(core) {
+  const config = core.config?.modelSwitch || {};
+  if (config.toolEnabled) {
+    // ...
+  }
+}
+```
+
+**When to use `HOOKS.CONFIG_PARAMS_REGISTER`**: Only use this hook when you need programmatic control over config registration (e.g., dynamic defaults based on runtime conditions). For the common case, define defaults in `configSchema` only.
+
+**When to use `HOOKS.CONFIG_CLI_FLAGS_REGISTER`**: Use this hook to register CLI flags that need programmatic control or custom parsers. Simple flags can be declared in `extension.json` via `cli:flags`.
 
 ### Dependencies
 

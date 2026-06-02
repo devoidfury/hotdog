@@ -5,6 +5,10 @@
  * and config parameters dynamically, instead of having these hardcoded
  * in src/cli.js and src/config.js.
  * 
+ * Config params are now primarily defined in extension.json configSchema,
+ * which is the single source of truth. Extensions can still use the
+ * CONFIG_PARAMS_REGISTER hook for programmatic control.
+ * 
  * Usage in an extension:
  * 
  *   export function create(core) {
@@ -21,6 +25,7 @@
  *             },
  *           ]);
  *         },
+ *         // Optional: CONFIG_PARAMS_REGISTER for programmatic control
  *         [HOOKS.CONFIG_PARAMS_REGISTER]: function(configRegistry) {
  *           configRegistry.registerConfigParams([
  *             {
@@ -43,7 +48,11 @@ import { createConfigRegistry } from '../../src/core/extensions/config-registry.
 import { parseArgs } from '../../src/core/cli.js';
 import { loadConfig } from '../../src/core/config.js';
 import { HOOKS } from '../../src/core/hooks.js';
-import { emitConfigRegistration } from '../../src/core/extensions/extensions.js';
+import {
+  emitConfigRegistration,
+  extractSchemaDefaults,
+  extensionNameToConfigKey,
+} from '../../src/core/extensions/extensions.js';
 
 describe('ConfigRegistry', () => {
   describe('registerCliFlags', () => {
@@ -301,6 +310,90 @@ describe('ConfigRegistry', () => {
       
       const defaults = registry.buildDefaults();
       expect(defaults.skills.preloadSkills).toEqual([]);
+    });
+  });
+
+  describe('extensionNameToConfigKey', () => {
+    it('should convert kebab-case to camelCase', () => {
+      expect(extensionNameToConfigKey('core-tools')).toBe('coreTools');
+      expect(extensionNameToConfigKey('model-switch')).toBe('modelSwitch');
+      expect(extensionNameToConfigKey('mcp-client')).toBe('mcpClient');
+      expect(extensionNameToConfigKey('session-log')).toBe('sessionLog');
+    });
+
+    it('should handle single-word names', () => {
+      expect(extensionNameToConfigKey('skills')).toBe('skills');
+      expect(extensionNameToConfigKey('lsp')).toBe('lsp');
+    });
+  });
+
+  describe('extractSchemaDefaults', () => {
+    it('should extract defaults from object schema', () => {
+      const schema = {
+        type: 'object',
+        properties: {
+          enabled: { type: 'boolean', default: true },
+          timeout: { type: 'number', default: 30 },
+          name: { type: 'string' }, // no default
+        },
+      };
+      
+      const params = extractSchemaDefaults(schema, 'myExtension');
+      expect(params).toHaveLength(1);
+      expect(params[0].key).toBe('myExtension');
+      expect(params[0].defaults).toEqual({ enabled: true, timeout: 30 });
+    });
+
+    it('should handle nested object properties', () => {
+      const schema = {
+        type: 'object',
+        properties: {
+          servers: {
+            type: 'object',
+            properties: {
+              defaultServer: { type: 'string', default: 'localhost' },
+            },
+          },
+          enabled: { type: 'boolean', default: false },
+        },
+      };
+      
+      const params = extractSchemaDefaults(schema, 'myExtension');
+      expect(params).toHaveLength(1);
+      expect(params[0].defaults).toEqual({
+        defaultServer: 'localhost',
+        enabled: false,
+      });
+    });
+
+    it('should handle array schema with default', () => {
+      const schema = {
+        type: 'array',
+        default: [],
+        items: { type: 'object' },
+      };
+      
+      const params = extractSchemaDefaults(schema, 'myArray');
+      expect(params).toHaveLength(1);
+      expect(params[0].key).toBe('myArray');
+      expect(params[0].defaults).toEqual({ items: [] });
+    });
+
+    it('should return empty array for schema without defaults', () => {
+      const schema = {
+        type: 'object',
+        properties: {
+          name: { type: 'string' },
+        },
+      };
+      
+      const params = extractSchemaDefaults(schema, 'noDefaults');
+      expect(params).toHaveLength(0);
+    });
+
+    it('should return empty array for null schema', () => {
+      const params = extractSchemaDefaults(null, 'test');
+      expect(params).toHaveLength(0);
     });
   });
 });

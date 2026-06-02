@@ -1,6 +1,8 @@
 // LSP Extension
 // Registers LSP tools (hover, definition, completion, etc.) via the tools:register hook.
 // Only activates when LSP is enabled in config.
+//
+// Config defaults are defined in extension.json configSchema.
 
 import { HOOKS } from "../../core/hooks.js";
 import { isLspEnabled } from "./config.js";
@@ -25,15 +27,9 @@ import {
   LspApplyEditTool,
 } from "./tools/index.js";
 
-// LSP defaults — canonical values, also declared in extension.json configSchema
-const DEFAULT_LSP_ENABLED = false;
-const DEFAULT_LSP_MAX_HOVER_LINES = 200;
-const DEFAULT_LSP_MAX_COMPLETION_ITEMS = 50;
-const DEFAULT_LSP_MAX_SYMBOL_RESULTS = 100;
-const DEFAULT_LSP_REQUEST_TIMEOUT_MS = 30000;
-const DEFAULT_LSP_SERVER_TIMEOUT_MS = 60000;
-
 // Default LSP server configurations for common languages
+// Note: These are not in extension.json because they are runtime defaults,
+// not user-configurable settings. Users can override via lsp.servers config.
 const DEFAULT_LSP_SERVERS = {
   typescript: {
     name: "typescript",
@@ -45,7 +41,7 @@ const DEFAULT_LSP_SERVERS = {
       "typescriptreact",
       "javascriptreact",
     ],
-    timeoutMs: DEFAULT_LSP_REQUEST_TIMEOUT_MS,
+    timeoutMs: 30000,
     maxOutputLines: 500,
   },
   python: {
@@ -53,7 +49,7 @@ const DEFAULT_LSP_SERVERS = {
     command: "pyright-langserver",
     args: ["--stdio"],
     filetypes: ["python"],
-    timeoutMs: DEFAULT_LSP_REQUEST_TIMEOUT_MS,
+    timeoutMs: 30000,
     maxOutputLines: 500,
   },
   go: {
@@ -61,7 +57,7 @@ const DEFAULT_LSP_SERVERS = {
     command: "gopls",
     args: ["serve"],
     filetypes: ["go"],
-    timeoutMs: DEFAULT_LSP_REQUEST_TIMEOUT_MS,
+    timeoutMs: 30000,
     maxOutputLines: 500,
   },
   rust: {
@@ -69,7 +65,7 @@ const DEFAULT_LSP_SERVERS = {
     command: "rust-analyzer",
     args: [],
     filetypes: ["rust"],
-    timeoutMs: DEFAULT_LSP_REQUEST_TIMEOUT_MS,
+    timeoutMs: 30000,
     maxOutputLines: 500,
   },
 };
@@ -118,20 +114,19 @@ function createLspTool(toolName, lspConfig) {
  * Create the LSP extension.
  */
 export function create(core) {
-  // Get LSP config with fallback to extension defaults
-  // Note: extension config params are registered AFTER buildConfig runs,
-  // so lspConfig may be undefined. The extension applies its own defaults.
+  // Get LSP config with fallback to extension defaults from configSchema
   const rawLspConfig = core.config?.lsp || {};
   const lspConfig = {
-    enabled: rawLspConfig.enabled ?? DEFAULT_LSP_ENABLED,
-    servers: (rawLspConfig.servers && Object.keys(rawLspConfig.servers).length > 0)
-      ? rawLspConfig.servers
-      : DEFAULT_LSP_SERVERS,
-    maxHoverLines: rawLspConfig.maxHoverLines ?? DEFAULT_LSP_MAX_HOVER_LINES,
-    maxCompletionItems: rawLspConfig.maxCompletionItems ?? DEFAULT_LSP_MAX_COMPLETION_ITEMS,
-    maxSymbolResults: rawLspConfig.maxSymbolResults ?? DEFAULT_LSP_MAX_SYMBOL_RESULTS,
-    requestTimeoutMs: rawLspConfig.requestTimeoutMs ?? DEFAULT_LSP_REQUEST_TIMEOUT_MS,
-    serverStartupTimeoutMs: rawLspConfig.serverStartupTimeoutMs ?? DEFAULT_LSP_SERVER_TIMEOUT_MS,
+    enabled: rawLspConfig.enabled ?? false,
+    servers:
+      rawLspConfig.servers && Object.keys(rawLspConfig.servers).length > 0
+        ? rawLspConfig.servers
+        : DEFAULT_LSP_SERVERS,
+    maxHoverLines: rawLspConfig.maxHoverLines ?? 200,
+    maxCompletionItems: rawLspConfig.maxCompletionItems ?? 50,
+    maxSymbolResults: rawLspConfig.maxSymbolResults ?? 100,
+    requestTimeoutMs: rawLspConfig.requestTimeoutMs ?? 30000,
+    serverStartupTimeoutMs: rawLspConfig.serverStartupTimeoutMs ?? 60000,
   };
 
   if (!isLspEnabled(lspConfig)) {
@@ -173,26 +168,6 @@ export function create(core) {
       [HOOKS.SHUTDOWN_CLEANUP]: async () => {
         await shutdownAll();
       },
-
-      /**
-       * Register config params for LSP defaults.
-       * These get merged into the base config so tools can access them.
-       */
-      [HOOKS.CONFIG_PARAMS_REGISTER]: () => [
-        {
-          key: "lsp",
-          description: "LSP (Language Server Protocol) configuration",
-          defaults: {
-            enabled: DEFAULT_LSP_ENABLED,
-            servers: DEFAULT_LSP_SERVERS,
-            maxHoverLines: DEFAULT_LSP_MAX_HOVER_LINES,
-            maxCompletionItems: DEFAULT_LSP_MAX_COMPLETION_ITEMS,
-            maxSymbolResults: DEFAULT_LSP_MAX_SYMBOL_RESULTS,
-            requestTimeoutMs: DEFAULT_LSP_REQUEST_TIMEOUT_MS,
-            serverStartupTimeoutMs: DEFAULT_LSP_SERVER_TIMEOUT_MS,
-          },
-        },
-      ],
     },
 
     // Expose for external use

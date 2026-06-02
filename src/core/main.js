@@ -7,7 +7,6 @@ import {
   createToolRegistry,
   createExtensionLoader,
   getExtensionsToLoad,
-  getExtensionConfigDefaults,
   registerExtensionMetadata,
 } from "./extensions/index.js";
 import { HOOKS } from "./hooks.js";
@@ -133,16 +132,13 @@ async function main() {
   // ── Build minimal config (defaults only, for extension discovery) ───────
   // We need this early to discover extensions and read their CLI flags /
   // subcommand declarations from extension.json without loading code.
-  // Include extension schema defaults so extension-specific config keys
-  // get their defaults merged into the base config.
-  const extSchemaDefaults = await getExtensionConfigDefaults();
-  const minimalConfig = await loadConfig(null, [
-    ...configRegistry.getConfigParams(),
-    ...extSchemaDefaults,
-  ]);
+  const minimalConfig = await loadConfig(null);
 
   // ── Discover extensions from metadata (no code loading) ─────────────────
-  // Reads extension.json files to extract CLI flags and subcommand declarations.
+  // Reads extension.json files to extract CLI flags, subcommand declarations,
+  // and config params from configSchema.
+  // Config params from schema are registered automatically, making extension.json
+  // the single source of truth for extension configuration.
   // This enables `--help` and subcommand discovery without loading any extension code.
   const cliSubcommandRegistry = createSubcommandRegistry();
   await registerExtensionMetadata(

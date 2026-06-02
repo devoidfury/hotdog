@@ -180,17 +180,6 @@ export function create(core) {
   // Store reference for tool context
   let currentInput = null;
 
-  // Register the "cli" subcommand
-  if (core.cliSubcommandRegistry) {
-    core.cliSubcommandRegistry.register("cli", {
-      description: "Interactive CLI session",
-      requiresConfig: true,
-      handler: async (cli, core) => {
-        await runInteractiveSession(cli, core);
-      },
-    });
-  }
-
   return {
     hooks: core.hooks
       ? {

@@ -140,6 +140,11 @@
           "name": "qwopus3.6-27b",
           "context-limit": 262144,
           "tags": ["general", "powerful", "slow"]
+        },
+        {
+          "name": "step-3.7-flash",
+          "context-limit": 256000,
+          "tags": ["general", "powerful", "slow"]
         }
       ]
     },

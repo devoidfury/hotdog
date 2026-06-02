@@ -1,7 +1,8 @@
 // Skills Extension
 // Manages skills loading, activation, and system prompt integration.
 // Hooks: systemPrompt:build, agent:toolContext, tools:register, slashCommands:register
-// Also registers CLI flags and config params for skill preloading.
+// Config defaults are defined in extension.json configSchema.
+// CLI flags are registered via the hook since they need programmatic control.
 
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -12,44 +13,11 @@ import { patternMatches, SkillsLoader } from "./loader.js";
 import { LoadSkillTool } from "./load-skill.js";
 export { LoadSkillTool };
 
-// ── Extension Config Registration ──────────────────────────────────────────
-
-/**
- * Register CLI flags and config params for the skills extension.
- */
-function registerSkillsConfig(core) {
-  // Register CLI flag for preloading skills
-  if (core.configRegistry) {
-    core.configRegistry.registerCliFlags([
-      {
-        short: null,
-        long: '--preload-skills',
-        description: 'Preload skills by name (comma-separated)',
-        type: 'array',
-        default: [],
-      },
-    ]);
-
-    core.configRegistry.registerConfigParams([
-      {
-        key: 'skills',
-        description: 'Skills extension configuration',
-        defaults: {
-          preloadSkills: [],
-        },
-      },
-    ]);
-  }
-}
-
 /**
  * Create the skills extension.
  */
 export function create(core) {
-  // Register CLI flags and config params
-  registerSkillsConfig(core);
-
-  const skillsPath = core.config?.skillsPath || "/skills";
+  const skillsPath = core.config?.skills?.skillsPath || core.config?.skillsPath || "/skills";
   const loader = new SkillsLoader(skillsPath);
   loader.loadSkills();
 
@@ -61,6 +29,22 @@ export function create(core) {
 
   return {
     hooks: {
+      /**
+       * Register CLI flag for preloading skills.
+       * Kept here because CLI flags need programmatic registration.
+       */
+      [HOOKS.CONFIG_CLI_FLAGS_REGISTER]: (configRegistry) => {
+        configRegistry.registerCliFlags([
+          {
+            short: null,
+            long: '--preload-skills',
+            description: 'Preload skills by name (comma-separated)',
+            type: 'array',
+            default: [],
+          },
+        ]);
+      },
+
       /**
        * Build skills preamble for system prompt.
        */

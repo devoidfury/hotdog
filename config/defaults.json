@@ -1,8 +1,6 @@
 {
-  "ai_url": "http://ai365.home:9292",
-  "api_key": "8bc20044d7183419bc3140346dbcc936a997a",
   "default_model": "ai365/qwen3.6-27b",
-  "thinker": " 🧠 *thinking out loud* {}",
+  "thinker": " 🧠 ... {}",
   "toolfmt": " 🔧 {} {}",
   "hide_tools": true,
   "show_token_use": true,

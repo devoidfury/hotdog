@@ -143,6 +143,11 @@
           "name": "step-3.7-flash",
           "context-limit": 256000,
           "tags": ["general", "powerful", "slow"]
+        },
+        {
+          "name": "minimax-m2.7",
+          "context-limit": 196608,
+          "tags": ["general", "powerful", "slow"]
         }
       ]
     },

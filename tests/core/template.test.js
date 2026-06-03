@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'bun:test';
-import { compile } from '../../src/core/context/render.js';
+import { compile } from '../../src/utils/render.js';
 
 describe('compile - plain text', () => {
   it('returns a render function', () => {

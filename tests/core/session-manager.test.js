@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from "bun:test";
-import { SessionStore } from "../../src/core/session.js";
+import { SessionStore } from "../../src/core/session/index.js";
 
 // Mock agent
 class MockAgent {

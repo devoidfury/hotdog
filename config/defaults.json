@@ -110,7 +110,7 @@
           "tags": ["fast", "general"]
         },
         {
-          "name": "gemma4-26b",
+          "name": "gemma-4-31b",
           "context-limit": 256000,
           "tags": ["coder", "general", "powerful"]
         },

@@ -1,6 +1,6 @@
 // Tests for the core SessionManager class.
 
-import { SessionManager, SessionStore } from '../../src/core/session.js';
+import { SessionManager, SessionStore } from '../../src/core/session/index.js';
 import { Agent } from '../../src/core/agent.js';
 import { HookSystem, createHooks } from '../../src/core/hooks.js';
 import { ExtensionLoader, createExtensionLoader } from '../../src/core/extensions/extensions.js';

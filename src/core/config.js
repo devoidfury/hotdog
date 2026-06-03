@@ -9,6 +9,7 @@ import { cwd } from "node:process";
 import { parseFrontMatter } from "../utils/file-utils.js";
 import { deepMerge, loadAspects } from "../utils/utils.js";
 import { render } from "../utils/render.js";
+import { resolveAll, CONFIG_KEYS } from "./config-resolution.js";
 
 // ── Extension Config Helpers ──────────────────────────────────────────────
 
@@ -566,52 +567,24 @@ export function buildAgentConfig(options) {
   // Get file profile
   const fileProfile = profileFiles[profileName] ?? null;
 
-  // ── Resolve simple values inline ──────────────────────────────────────
-
   // Provider
   const providerName = cli.provider || config.defaultProvider;
   const provider = providerName
     ? (providers.find((p) => p.name === providerName) ?? null)
     : null;
 
-  // Base URL: provider → CLI → config → default
-  const baseUrl =
-    provider?.url ?? cli.url ?? config.aiUrl ?? "http://ai365.home:9292";
-
-  // API key: provider → CLI → config → env
-  const apiKey =
-    provider?.apiKey ??
-    cli.apiKey ??
-    config.apiKey ??
-    process.env.AI_API_KEY ??
-    null;
-
-  // Model
-  const model = resolveModel(
-    cli.model,
-    configProfile?.model,
-    config.defaultModel,
-    provider,
-    defaultModel,
-  );
-
-  // Role: CLI → config → file profile → default
-  const role =
-    cli.role ??
-    (config.role?.trim() ? config.role : null) ??
-    (fileProfile?.role?.trim() ? fileProfile.role : null) ??
-    defaultRole;
-
-  // Profile merge
+  // Profile merge — file profile wins for role, whitelist, blacklist, manager
   let profile;
   if (configProfile || fileProfile) {
     profile = { ...configProfile };
     if (fileProfile) {
+      if (fileProfile.role) profile.role = fileProfile.role;
       if (fileProfile.whitelistTools != null)
         profile.whitelistTools = fileProfile.whitelistTools;
       if (fileProfile.blacklistTools?.length)
         profile.blacklistTools = fileProfile.blacklistTools;
       if (fileProfile.manager) profile.manager = true;
+      if (fileProfile.aspects?.length) profile.aspects = fileProfile.aspects;
     }
   } else {
     profile = {
@@ -626,13 +599,31 @@ export function buildAgentConfig(options) {
     };
   }
 
-  // Aspects: file profile → config profile
-  const aspects =
-    (fileProfile?.aspects?.length ? fileProfile.aspects : null) ??
-    (profile.aspects?.length ? profile.aspects : null) ??
-    [];
+  // ── Declarative resolution ────────────────────────────────────────────
 
-  // Profile body with template rendering
+  const context = {
+    cli,
+    config,
+    provider,
+    profile,
+    profileName,
+    profilesPath,
+  };
+
+  const resolved = resolveAll(CONFIG_KEYS, context);
+
+  // ── Non-declarative values ────────────────────────────────────────────
+
+  // Model — needs resolveModelWithProvider transform
+  const model = resolveModel(
+    cli.model,
+    configProfile?.model,
+    config.defaultModel,
+    provider,
+    defaultModel,
+  );
+
+  // Profile body with template rendering (stays imperative — file I/O + template)
   const profileBody = fileProfile?.body?.trim()
     ? cli.prompt
       ? (() => {
@@ -644,36 +635,6 @@ export function buildAgentConfig(options) {
         })()
       : fileProfile.body
     : "";
-
-  // Format strings: CLI → config → default
-  const thinkerFormat = cli.thinker ?? config.thinker ?? "[Thinking: {}]";
-  const toolFormat = cli.toolfmt ?? config.toolfmt ?? "  → {} {}";
-  const toolOutputFmt =
-    cli.toolOutputFmt ?? config.toolOutputFmt ?? "----\n{}\n----";
-
-  // No-log: CLI → env → config → false
-  const noLog =
-    (cli.noLog !== undefined && cli.noLog !== false) ||
-    process.env.OA_AGENT_LOG === "false" ||
-    process.env.OA_AGENT_NO_LOG === "1" ||
-    config.noLog ||
-    false;
-
-  // Theme: CLI → config → 'dark'
-  const theme =
-    (cli.theme?.trim() || config.theme?.trim() || "dark").replace(
-      /^\s+|\s+$/g,
-      "",
-    ) || "dark";
-
-  // Colors
-  const isColorPalette = (obj) =>
-    obj != null &&
-    typeof obj === "object" &&
-    ("thinking" in obj || "tool_call" in obj || "tool_result" in obj);
-  const useColors =
-    !cli.noColors &&
-    (isColorPalette(config.colors) || (cli.colors ?? config.colors ?? true));
 
   // System prompt template
   const systemPromptTemplate = initSystemPromptTemplate(
@@ -688,46 +649,17 @@ export function buildAgentConfig(options) {
   });
 
   return {
-    baseUrl,
-    apiKey,
+    // Declaratively resolved values
+    ...resolved,
+    // Non-declarative values
     model,
-    role,
     profileName,
     profile,
-    aspects,
     profileBody,
-    hideTools: cli.hideTools === false ? false : config.hideTools !== false,
-    hideThinking:
-      cli.hideThinking === true
-        ? true
-        : cli.hideThinking === false
-          ? false
-          : config.hideThinking !== false,
-    compactDebug: cli.compactDebug || config.compactDebug,
-    showTokenUse: cli.tokens || config.showTokenUse !== false,
-    stream: !cli.noStream,
     provider,
     activeProvider: provider?.name || null,
-    // Format strings
-    thinkerFormat,
-    toolFormat,
-    toolOutputFmt,
-    // No-log
-    noLog,
-    // Theme / colors
-    theme,
-    useColors,
-    // System prompt template
     systemPromptTemplate,
-    // All profiles
     profiles,
-    // Chat/embedding timeouts
-    chatTimeout: cli.chatTimeout || config.chatTimeoutSecs,
-    embeddingsTimeout: cli.embeddingsTimeout || config.embeddingsTimeoutSecs,
-    // Session / paths
-    sessionId: cli.sessionId || null,
-    skillsPath: cli.skillsPath || config.skillsPath,
-    promptsPath: cli.promptsPath || config.promptsPath,
     // Model registry (populated by buildConfig after calling this function)
     modelRegistry: {},
   };

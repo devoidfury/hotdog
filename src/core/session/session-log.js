@@ -167,60 +167,38 @@ export function replayEntriesIntoContext(agent, entries) {
       case LOG_SOURCE.INPUT:
       case LOG_SOURCE.PROMPT: {
         // Both INPUT and PROMPT are user messages in context
-        if (typeof agent.context.addUserMessage === "function") {
-          agent.context.addUserMessage(entry.content);
-        } else {
-          agent.context.push(
-            new Message({ role: "user", content: entry.content }),
-          );
-        }
+        agent.context.push(
+          new Message({ role: "user", content: entry.content }),
+        );
         replayed++;
         break;
       }
 
       case LOG_SOURCE.LLM: {
         // Assistant response — preserve reasoning content and tool calls
-        if (typeof agent.context.addAssistantMessage === "function") {
-          agent.context.addAssistantMessage(
-            entry.content,
-            entry.reasoning_content || null,
-            entry.tool_calls || null,
-          );
-        } else {
-          agent.context.push(
-            new Message({
-              role: "assistant",
-              content: entry.content,
-              reasoningContent: entry.reasoning_content || null,
-              toolCalls: entry.tool_calls || null,
-            }),
-          );
-        }
+        agent.context.push(
+          new Message({
+            role: "assistant",
+            content: entry.content,
+            reasoningContent: entry.reasoning_content || null,
+            toolCalls: entry.tool_calls || null,
+          }),
+        );
         replayed++;
         break;
       }
 
       case LOG_SOURCE.TOOL_RESULT: {
-        // Tool result — use addMessage or push directly
-        if (typeof agent.context.addMessage === "function") {
-          agent.context.addMessage({
+        // Tool result
+        agent.context.push(
+          new Message({
             role: "tool",
             content: entry.content,
             reasoningContent: null,
             toolCalls: null,
             toolCallId: entry.tool_call_id || null,
-          });
-        } else {
-          agent.context.push(
-            new Message({
-              role: "tool",
-              content: entry.content,
-              reasoningContent: null,
-              toolCalls: null,
-              toolCallId: entry.tool_call_id || null,
-            }),
-          );
-        }
+          }),
+        );
         replayed++;
         break;
       }
@@ -228,13 +206,9 @@ export function replayEntriesIntoContext(agent, entries) {
       case LOG_SOURCE.COMPACTION: {
         // Compaction summary — added as user message in context
         // (the agent sees it as a user message with <m_r3hthso4y9htef72> tags)
-        if (typeof agent.context.addUserMessage === "function") {
-          agent.context.addUserMessage(entry.content);
-        } else {
-          agent.context.push(
-            new Message({ role: "user", content: entry.content }),
-          );
-        }
+        agent.context.push(
+          new Message({ role: "user", content: entry.content }),
+        );
         replayed++;
         break;
       }

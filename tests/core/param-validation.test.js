@@ -2,7 +2,7 @@ import { describe, it, expect } from "bun:test";
 import {
   validateParams,
   formatValidationErrors,
-} from "../../src/core/json-schema.js";
+} from "../../src/utils/json-schema.js";
 
 // ── Helper: build a minimal schema ───────────────────────────────────────────
 

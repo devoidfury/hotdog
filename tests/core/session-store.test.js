@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'bun:test';
-import { SessionStore } from '../../src/core/session.js';
+import { SessionStore } from '../../src/core/session/index.js';
 
 // Mock agent factory for testing
 class MockAgent {

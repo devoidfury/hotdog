@@ -1,5 +1,9 @@
 // LLM client for communicating with AI providers.
 // Provides HTTP transport, streaming (SSE), and retry logic.
+//
+// Naming: Stream events use camelCase for internal fields (toolCallId).
+// The toolCallId field contains the OpenAI `id` value from tool_calls.
+// Final tool calls are normalized to OpenAI format: { id, type, function }.
 
 import {
   DEFAULT_AI_URL,
@@ -305,6 +309,13 @@ export class LlmClient {
 
   /**
    * Parse a single SSE data event into StreamEvents.
+   *
+   * Stream event shapes:
+   *   { type: "content", content }
+   *   { type: "reasoning", content }
+   *   { type: "toolName", index, name, toolCallId }  — toolCallId is the OpenAI `id` field
+   *   { type: "toolArgument", index, arguments }
+   *   { type: "usage", data }
    */
   _parseStreamData(data) {
     const events = [];

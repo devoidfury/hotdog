@@ -27,7 +27,7 @@ export function create(core) {
               requiresConfig: true,
               handler: async (cli, core) => {
                 const { config } = core;
-                await runReview(cli, config);
+                return await runReview(cli, config);
               },
             });
           },
@@ -58,14 +58,20 @@ async function runReview(cli, config) {
 
   const sessionId = cli.sessionId;
   if (sessionId) {
-    reviewSession(sessionId, cli.wantsJson, cli.reviewToolIndex, palette);
-  } else if (cli.reviewToolIndex) {
+    return reviewSession(
+      sessionId,
+      cli.wantsJson,
+      cli.reviewToolIndex,
+      palette,
+    );
+  }
+  if (cli.reviewToolIndex) {
     const files = readdirSync(sessionsDirPath).filter((f) =>
       f.endsWith(".jsonl"),
     );
     if (files.length === 0) {
       console.log("No sessions found.");
-      return;
+      return 1;
     }
     const mostRecent = files
       .map((f) => ({
@@ -77,10 +83,9 @@ async function runReview(cli, config) {
           statSync(b.path).mtime.getTime() - statSync(a.path).mtime.getTime(),
       )[0];
     const entries = readSessionEntries(mostRecent.name);
-    printToolIndex(entries, cli.wantsJson);
-  } else {
-    listSessions(cli.wantsJson, sessionsDirPath, palette);
+    return printToolIndex(entries, cli.wantsJson);
   }
+  return listSessions(cli.wantsJson, sessionsDirPath, palette);
 }
 
 function listSessions(json, sessionsDirPath, palette) {
@@ -88,14 +93,14 @@ function listSessions(json, sessionsDirPath, palette) {
   if (!existsSync(dir)) {
     if (json) console.log("[]");
     else console.log("No log entries found.");
-    return;
+    return 1;
   }
 
   const files = readdirSync(dir).filter((f) => f.endsWith(".jsonl"));
   if (files.length === 0) {
     if (json) console.log("[]");
     else console.log("No log entries found.");
-    return;
+    return 1;
   }
 
   const sessions = [];
@@ -119,19 +124,21 @@ function listSessions(json, sessionsDirPath, palette) {
   if (sessions.length === 0) {
     if (json) console.log("[]");
     else console.log("No log entries found.");
-    return;
+    return 1;
   }
 
   sessions.sort((a, b) => b.mtime - a.mtime);
 
   if (json) {
     console.log(JSON.stringify(sessions, null, 2));
-  } else {
-    console.log("=== Sessions ===");
-    for (const s of sessions) {
-      console.log(`  ${s.id}  (${s.entry_count} entries, ${s.last_modified})`);
-    }
+    return 0;
   }
+
+  console.log("=== Sessions ===");
+  for (const s of sessions) {
+    console.log(`  ${s.id}  (${s.entry_count} entries, ${s.last_modified})`);
+  }
+  return 0;
 }
 
 function reviewSession(sessionId, json, toolIndex, palette) {
@@ -139,44 +146,44 @@ function reviewSession(sessionId, json, toolIndex, palette) {
   if (entries.length === 0) {
     if (json) console.log("{}");
     else console.log(`Session '${sessionId}' not found or empty.`);
-    return;
+    return 1;
   }
 
   if (toolIndex) {
-    printToolIndex(entries, json);
-    return;
+    return printToolIndex(entries, json);
   }
 
   if (json) {
     console.log(JSON.stringify(entries, null, 2));
-  } else {
-    console.log(`=== Session: ${sessionId} ===`);
-    console.log(`Entries: ${entries.length}`);
-    console.log();
-
-    for (const entry of entries) {
-      const ts = new Date(entry.ts).toLocaleTimeString();
-      const role = entry.role || entry.source;
-      const content = entry.content || entry.result || "";
-
-      let max = 200;
-      if (entry.source === "system_prompt") {
-        console.log(`[${ts}] [SYSTEM]`);
-        max = 500;
-      } else if (entry.source === "input") {
-        console.log(`[${ts}] [USER]`);
-      } else if (entry.source === "tool_result") {
-        console.log(`[${ts}] [TOOL: ${entry.tool_name}]`);
-      } else if (entry.source === "llm") {
-        console.log(`[${ts}] [ASSISTANT]`);
-      } else {
-        console.log(`[${ts}] [${role}]`);
-      }
-      console.log(
-        content.substring(0, max) + (content.length > max ? "..." : ""),
-      );
-    }
+    return 0;
   }
+
+  console.log(`=== Session: ${sessionId} ===`);
+  console.log(`Entries: ${entries.length}\n`);
+
+  for (const entry of entries) {
+    const ts = new Date(entry.ts).toLocaleTimeString();
+    const role = entry.role || entry.source;
+    const content = entry.content || entry.result || "";
+
+    let max = 200;
+    if (entry.source === "system_prompt") {
+      console.log(`[${ts}] [SYSTEM]`);
+      max = 500;
+    } else if (entry.source === "input") {
+      console.log(`[${ts}] [USER]`);
+    } else if (entry.source === "tool_result") {
+      console.log(`[${ts}] [TOOL: ${entry.tool_name}]`);
+    } else if (entry.source === "llm") {
+      console.log(`[${ts}] [ASSISTANT]`);
+    } else {
+      console.log(`[${ts}] [${role}]`);
+    }
+    console.log(
+      content.substring(0, max) + (content.length > max ? "..." : ""),
+    );
+  }
+  return 0;
 }
 
 function printToolIndex(entries, json) {
@@ -195,17 +202,17 @@ function printToolIndex(entries, json) {
       result[name] = count;
     }
     console.log(JSON.stringify(result, null, 2));
+    return 0;
+  }
+
+  console.log("=== Tool Usage ===");
+  if (toolUsage.size === 0) {
+    console.log("  No tools used.");
   } else {
-    console.log("=== Tool Usage ===");
-    if (toolUsage.size === 0) {
-      console.log("  No tools used.");
-    } else {
-      const sorted = Array.from(toolUsage.entries()).sort(
-        (a, b) => b[1] - a[1],
-      );
-      for (const [name, count] of sorted) {
-        console.log(`  ${name}: ${count}x`);
-      }
+    const sorted = Array.from(toolUsage.entries()).sort((a, b) => b[1] - a[1]);
+    for (const [name, count] of sorted) {
+      console.log(`  ${name}: ${count}x`);
     }
   }
+  return 0;
 }

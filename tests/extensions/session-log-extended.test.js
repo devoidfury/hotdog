@@ -2,12 +2,12 @@ import { test, expect } from "bun:test";
 import {
   SessionLog,
   LOG_SOURCE,
-  stripNulls,
   readSessionEntries,
   readAllSessions,
   sessionExists,
   disabledSessionLog,
 } from "../../src/extensions/session-log/session-log.js";
+import { stripNulls } from "../../src/utils/objects.js";
 import { mkdirSync, rmSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { homedir } from "node:os";

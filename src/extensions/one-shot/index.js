@@ -16,7 +16,15 @@ import { Agent } from "../../core/agent.js";
 /**
  * Run one-shot mode: execute a single prompt and exit.
  */
-async function runOneShot(cli, core, resolved, config, modelRegistry, sink, buildAgent) {
+async function runOneShot(
+  cli,
+  core,
+  resolved,
+  config,
+  modelRegistry,
+  sink,
+  buildAgent,
+) {
   const llmClient = new LlmClient({
     baseUrl: resolved.baseUrl,
     apiKey: resolved.apiKey,
@@ -61,16 +69,16 @@ async function runOneShot(cli, core, resolved, config, modelRegistry, sink, buil
     console.log("\n");
   } catch (e) {
     console.error(formatError(e));
-    exitCode = 1;
+    exitCode = e.exitCode ?? 1;
+  } finally {
+    const oneShotSessionId = sessionManager.sessionId();
+    if (oneShotSessionId) {
+      console.log(`Session: ${oneShotSessionId}`);
+    }
+    await core.extensions.cleanup();
   }
 
-  const oneShotSessionId = sessionManager.sessionId();
-  if (oneShotSessionId) {
-    console.log(`Session: ${oneShotSessionId}`);
-  }
-
-  await core.extensions.cleanup();
-  process.exit(exitCode);
+  return exitCode;
 }
 
 // ── Extension Entry Point ───────────────────────────────────────────────────
@@ -141,7 +149,15 @@ async function handlePromptSubcommand(cli, core) {
     return agent;
   };
 
-  await runOneShot(cli, core, resolved, config, modelRegistry, sink, buildAgent);
+  return await runOneShot(
+    cli,
+    core,
+    resolved,
+    config,
+    modelRegistry,
+    sink,
+    buildAgent,
+  );
 }
 
 /**
@@ -164,7 +180,8 @@ export function create(core) {
           // Register the "prompt" subcommand
           [HOOKS.CLI_SUBCOMMANDS_REGISTER]: async (registry) => {
             registry.register("prompt", {
-              description: "One-shot prompt mode — run a single prompt and exit",
+              description:
+                "One-shot prompt mode — run a single prompt and exit",
               requiresConfig: true,
               handler: handlePromptSubcommand,
             });

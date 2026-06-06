@@ -7,7 +7,7 @@ import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { appendFileSync, readFileSync, existsSync, readdirSync, mkdirSync } from 'node:fs';
 import { HOOKS } from '../../core/hooks.js';
-import { stripNulls } from '../../core/session/session-log.js';
+import { stripNulls } from '../../utils/objects.js';
 
 // ── Log Source Types ────────────────────────────────────────────────────────
 

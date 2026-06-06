@@ -4,27 +4,8 @@
 
 import { homedir } from "node:os";
 import { join } from "node:path";
-import {
-  readFileSync,
-  existsSync,
-  readdirSync,
-} from "node:fs";
+import { readFileSync, existsSync, readdirSync } from "node:fs";
 import { Message } from "../context/message.js";
-
-// ── Helpers ─────────────────────────────────────────────────────────────────
-
-/**
- * Strip null fields from an object for serialization.
- */
-export function stripNulls(obj) {
-  const result = {};
-  for (const [k, v] of Object.entries(obj)) {
-    if (v !== null) {
-      result[k] = v;
-    }
-  }
-  return result;
-}
 
 // ── Log Source Types ────────────────────────────────────────────────────────
 

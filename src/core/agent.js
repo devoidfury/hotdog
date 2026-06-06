@@ -1,6 +1,13 @@
 // Agent - the core AI agent with tool calling support.
 // Thin orchestrator that delegates behavior to hooks.
 // Behaviors (compaction, tools, system prompt, commands) live in extensions.
+//
+// Naming conventions:
+//   - Internal JS: camelCase (toolCallId, reasoningContent, toolCalls)
+//   - JSON/persistence: snake_case (tool_call_id, reasoning_content, tool_calls)
+//   - OpenAI API tool calls: { id, type, function: { name, arguments } }
+//   - Stream events: { type: "toolName", toolCallId } (toolCallId = OpenAI id field)
+//   - Message class: accepts both camelCase and snake_case, normalizes to camelCase
 
 import crypto from "node:crypto";
 import { Message } from "./context/message.js";
@@ -368,6 +375,8 @@ export class Agent {
 
   /**
    * Process a streaming LLM response.
+   * Normalizes tool calls to OpenAI format: { id, type, function: { name, arguments } }.
+   *
    * @param {AsyncIterable} stream
    * @returns {Promise<Object>} { fullText, fullReasoning, finalToolCalls, usage }
    */
@@ -466,13 +475,18 @@ export class Agent {
    *   whitelist → gate hook → context build → resolve → validate → execute
    *   → after-execute hook → result hook → format → write to context.
    *
-   * @param {Object} tc — Tool call from the LLM response.
+   * Tool call shape (normalized by _processStream to match OpenAI format):
+   *   { id, type: "function", function: { name, arguments } }
+   *
+   * @param {Object} tc — Tool call from the LLM response (normalized format).
    * @returns {Promise<{toolName: string, input: string, result: string}>}
    */
   async _executeSingleToolCall(tc) {
-    const toolName = tc.function?.name || tc.toolName;
-    const toolCallId = tc.id || tc.toolCallId;
-    let input = tc.function?.arguments || tc.input || "{}";
+    // Tool calls are normalized by _processStream to OpenAI format:
+    //   { id, type: "function", function: { name, arguments } }
+    const toolName = tc.function?.name;
+    const toolCallId = tc.id;
+    let input = tc.function?.arguments || "{}";
 
     // 1. Whitelist check (for task agents)
     if (this._toolWhitelist && !this._toolWhitelist.includes(toolName)) {

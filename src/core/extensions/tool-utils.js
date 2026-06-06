@@ -1,5 +1,9 @@
 // Tool utilities — shared helpers for tool definitions and execution.
 // Extracted from tool-registry.js for better separation of concerns.
+//
+// Naming: Tool metadata keys use snake_case (total_pages, duration_ms, exit_code)
+// for consistency with JSON/persistence format. Short metadata keys become XML
+// attributes on the <tool> tag; long keys become child nodes.
 
 import fs from "node:fs";
 import path from "node:path";

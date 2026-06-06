@@ -2,6 +2,10 @@
 // Extensions register handlers via `on()`, core emits events via `emit()`.
 // Sync hooks run synchronously; async hooks run via `emitAsync()` and errors
 // don't stop the chain (each handler is wrapped in try/catch).
+//
+// Naming: Hook data shapes use camelCase (toolCallId, toolName, reasoningContent).
+// This is consistent with internal JS conventions. When data flows to JSON/persistence,
+// it is serialized to snake_case by the Message.toJSON() method or explicit converters.
 
 import { formatError } from "./error.js";
 

@@ -7,7 +7,8 @@ import os from "node:os";
 import { cwd } from "node:process";
 
 import { parseFrontMatter } from "../utils/file-utils.js";
-import { deepMerge, loadAspects } from "../utils/utils.js";
+import { loadAspects } from "../utils/utils.js";
+import { deepMerge } from "../utils/objects.js";
 import { render } from "../utils/render.js";
 import { resolveAll, CONFIG_KEYS } from "./config-resolution.js";
 

@@ -172,7 +172,7 @@ async function main() {
             `To send a prompt, use -c or --prompt: oa-agent -c "your prompt"`,
         );
       }
-      process.exit(1);
+      return 1;
     }
     throw e;
   }
@@ -211,37 +211,38 @@ async function main() {
     const getSubcommand = () => core.cliSubcommandRegistry.get(cli.subcommand);
     const subcommandDef = getSubcommand();
     if (subcommandDef && subcommandDef.handler) {
-      await subcommandDef.handler(cli, core);
-      return;
+      return await subcommandDef.handler(cli, core);
     }
     console.error(
       `Subcommand "${cli.subcommand}" handler not available after loading extensions.`,
     );
-    process.exit(1);
+    return 1;
   }
 
   if (cli.version) {
     console.log("oa-agent 0.1.0");
-    process.exit(0);
+    return 0;
   }
   if (cli.help) {
     const subcommandHelp = core.cliSubcommandRegistry.generateHelpText();
     const fullHelp = generateHelpText(configRegistry);
     console.log(fullHelp.replace("<subcommands>", subcommandHelp));
-    process.exit(0);
+    return 0;
   }
 
   console.error("No subcommand provided.");
   console.log(
     `Available subcommands: ${core.cliSubcommandRegistry.names().join(", ") || "(none)"}`,
   );
-  process.exit(1);
+  return 1;
 }
 
 // Only run main() when this module is the entry point (not when imported by tests).
 if (process.argv[1]?.match(/(main\.js|oa-agent)$/)) {
-  main().catch(async (e) => {
-    console.error(formatError(e));
-    process.exit(1);
-  });
+  main()
+    .catch(async (e) => {
+      console.error(formatError(e));
+      return 1;
+    })
+    .then((code) => process.exit(code));
 }

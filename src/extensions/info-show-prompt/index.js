@@ -39,16 +39,7 @@ async function runInfo(cli, config, buildConfig) {
   skillsLoader.loadSkills();
 
   if (cli.wantsJson) {
-    printInfoJson(
-      resolved,
-      modelRegistry,
-      providers,
-      skillsLoader,
-      connectivity,
-      rawConfig,
-    );
-  } else {
-    printInfoText(
+    return printInfoJson(
       resolved,
       modelRegistry,
       providers,
@@ -57,6 +48,15 @@ async function runInfo(cli, config, buildConfig) {
       rawConfig,
     );
   }
+
+  return printInfoText(
+    resolved,
+    modelRegistry,
+    providers,
+    skillsLoader,
+    connectivity,
+    rawConfig,
+  );
 }
 
 function printInfoText(
@@ -136,6 +136,7 @@ function printInfoText(
   } else {
     console.log(`  ${resolved.baseUrl} - unreachable: ${connectivity.error}`);
   }
+  return 0;
 }
 
 function printInfoJson(
@@ -146,17 +147,6 @@ function printInfoJson(
   connectivity,
   config,
 ) {
-  const providersConfigured = providers.map((p) => ({
-    name: p.name,
-    url: p.url,
-    models: (p.models || []).map((m) => m.name),
-  }));
-
-  const models = Object.keys(modelRegistry).map((name) => {
-    const m = modelRegistry[name];
-    return { name, tags: m.tags || [] };
-  });
-
   const json = {
     config: {
       ai_url: resolved.baseUrl,
@@ -168,10 +158,17 @@ function printInfoJson(
       profile_blacklist: resolved.profile?.blacklistTools || [],
     },
     providers: {
-      configured: providersConfigured,
+      configured: providers.map((p) => ({
+        name: p.name,
+        url: p.url,
+        models: (p.models || []).map((m) => m.name),
+      })),
       active: resolved.activeProvider || null,
     },
-    models,
+    models: Object.keys(modelRegistry).map((name) => {
+      const m = modelRegistry[name];
+      return { name, tags: m.tags || [] };
+    }),
     skills_loaded: skillsLoader.activeSkills(),
     mcp_servers: (config?.mcpServers || []).map((s) => ({
       name: s.name,
@@ -186,21 +183,15 @@ function printInfoJson(
     },
   };
   console.log(JSON.stringify(json, null, 2));
+  return 0;
 }
-
-// ── Show-Prompt Subcommand ───────────────────────────────────────────────────
 
 /**
  * Run the show-prompt subcommand.
- * Creates a real agent, ensures the system prompt is built via hooks,
- * and outputs the actual system prompt.
+ * Creates an agent, outputs the generated system prompt.
  */
 async function runShowPrompt(cli, core, config, buildConfig) {
   const { resolved } = await buildConfig(cli);
-
-  // Create an agent with the same config that a real agent would get.
-  // Use the hooks from earlyCore (which already has CLI extensions loaded
-  // including skills, which contributes to the system prompt via hooks).
   const agent = new Agent({
     hooks: core.hooks,
     toolRegistry: core.toolRegistry,
@@ -211,12 +202,11 @@ async function runShowPrompt(cli, core, config, buildConfig) {
     profileBody: resolved.profileBody || "",
     config,
   });
-
   // Build the system prompt via the real hook mechanism
   await agent.ensureSystemPrompt();
-
   // Output the actual system prompt
   console.log(agent.systemPrompt);
+  return 0;
 }
 
 // ── Extension Entry Point ───────────────────────────────────────────────────
@@ -235,7 +225,7 @@ export function create(core) {
               requiresConfig: true,
               handler: async (cli, core) => {
                 const { config, buildConfig } = core;
-                await runInfo(cli, config, buildConfig);
+                return await runInfo(cli, config, buildConfig);
               },
             });
 
@@ -244,7 +234,7 @@ export function create(core) {
               requiresConfig: true,
               handler: async (cli, core) => {
                 const { config, buildConfig } = core;
-                await runShowPrompt(cli, core, config, buildConfig);
+                return await runShowPrompt(cli, core, config, buildConfig);
               },
             });
           },

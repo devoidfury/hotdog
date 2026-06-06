@@ -12,17 +12,16 @@ import {
 
 // Re-export core session log functions from src/ (session resume is a core feature)
 import {
-  stripNulls,
   LOG_SOURCE,
   readSessionEntries,
   readAllSessions,
   sessionExists,
   replayEntriesIntoContext,
 } from "../../core/session/session-log.js";
+import { stripNulls } from "../../utils/objects.js";
 
 // Re-export core functions for convenience
 export {
-  stripNulls,
   LOG_SOURCE,
   readSessionEntries,
   readAllSessions,

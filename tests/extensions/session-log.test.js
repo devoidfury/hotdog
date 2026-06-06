@@ -1,5 +1,6 @@
 import { test, expect } from "bun:test";
-import { SessionLog, LOG_SOURCE, stripNulls, readSessionEntries } from "../../src/extensions/session-log/session-log.js";
+import { SessionLog, LOG_SOURCE, readSessionEntries } from "../../src/extensions/session-log/session-log.js";
+import { stripNulls } from "../../src/utils/objects.js";
 import { mkdirSync, rmSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { homedir } from "node:os";

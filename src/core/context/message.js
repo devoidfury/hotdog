@@ -1,4 +1,9 @@
 // Message types and message log for conversation management.
+//
+// Naming: Message normalizes between camelCase (internal JS) and snake_case (JSON/persistence).
+//   - Constructor accepts both: toolCallId/tool_call_id, reasoningContent/reasoning_content
+//   - Internal fields are always camelCase: this.toolCallId, this.reasoningContent
+//   - toJSON() serializes to snake_case for JSON/persistence
 
 export class Message {
   /**

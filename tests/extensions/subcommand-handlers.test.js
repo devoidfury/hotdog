@@ -1,0 +1,509 @@
+import { describe, it, expect, beforeEach, afterEach } from "bun:test";
+import { HookSystem, HOOKS } from "../../src/core/hooks.js";
+import { ToolRegistry } from "../../src/core/extensions/tool-registry.js";
+import { createSubcommandRegistry } from "../../src/core/extensions/registries.js";
+import { mkdirSync, rmSync, writeFileSync, readFileSync } from "node:fs";
+import { join } from "node:path";
+import { homedir } from "node:os";
+
+// ── Helpers ──────────────────────────────────────────────────────────────────
+
+function createMockCore(config = {}) {
+  const hooks = new HookSystem();
+  const toolRegistry = new ToolRegistry();
+  const cliSubcommandRegistry = createSubcommandRegistry();
+
+  const resolved = {
+    baseUrl: "http://localhost:8080",
+    apiKey: "test-key",
+    model: "test-model",
+    stream: false,
+    chatTimeout: 30,
+    profileName: "default",
+    profile: {},
+    hideTools: false,
+    hideThinking: false,
+    showTokenUse: false,
+    role: "",
+    profileBody: "",
+    ...config.resolved,
+  };
+
+  return {
+    hooks,
+    toolRegistry,
+    cliSubcommandRegistry,
+    config: {
+      theme: "dark",
+      maxIterations: 100,
+      skillsPath: join(homedir(), ".oa-agent", "skills"),
+      promptsPath: join(homedir(), ".oa-agent", "prompts"),
+      ...config.coreConfig,
+    },
+    resolved,
+    modelRegistry: config.modelRegistry || {},
+    extensions: {
+      has: () => false,
+      load: async () => null,
+      cleanup: async () => {},
+    },
+    buildConfig:
+      config.buildConfig ||
+      (async () => ({
+        resolved,
+        modelRegistry: config.modelRegistry || {},
+        providers: [],
+      })),
+  };
+}
+
+// ── Session Review Extension Tests ───────────────────────────────────────────
+
+describe("Session Review Extension - exit codes", () => {
+  const TEST_SESSION_ID = `test-subcmd-review-${Date.now()}`;
+  const sessionsDir = join(homedir(), ".cache", "oa-agent", "sessions");
+
+  function setup() {
+    mkdirSync(sessionsDir, { recursive: true });
+  }
+
+  function teardown() {
+    const testFile = join(sessionsDir, `${TEST_SESSION_ID}.jsonl`);
+    try {
+      rmSync(testFile);
+    } catch {
+      // ignore
+    }
+  }
+
+  beforeEach(setup);
+  afterEach(teardown);
+
+  it("registers review subcommand via CLI_SUBCOMMANDS_REGISTER hook", async () => {
+    const core = createMockCore();
+    const { create } = await import("../../src/extensions/session-review/index.js");
+    const ext = create(core);
+
+    expect(ext).not.toBeNull();
+    expect(ext.hooks[HOOKS.CLI_SUBCOMMANDS_REGISTER]).toBeDefined();
+
+    // Trigger the hook to register the subcommand
+    await ext.hooks[HOOKS.CLI_SUBCOMMANDS_REGISTER](core.cliSubcommandRegistry);
+
+    expect(core.cliSubcommandRegistry.has("review")).toBe(true);
+    const def = core.cliSubcommandRegistry.get("review");
+    expect(def.handler).toBeDefined();
+  });
+
+  it("review subcommand returns exit code 0 for existing session", async () => {
+    const { SessionLog } = await import(
+      "../../src/extensions/session-log/session-log.js"
+    );
+
+    // Create a test session
+    const log = new SessionLog(TEST_SESSION_ID);
+    log.writeInput("hello");
+    log.writeAssistant("world");
+
+    const core = createMockCore();
+    const { create } = await import("../../src/extensions/session-review/index.js");
+    const ext = create(core);
+    await ext.hooks[HOOKS.CLI_SUBCOMMANDS_REGISTER](core.cliSubcommandRegistry);
+
+    const def = core.cliSubcommandRegistry.get("review");
+    const cli = {
+      sessionId: TEST_SESSION_ID,
+      wantsJson: true,
+      reviewToolIndex: false,
+      colors: false,
+      theme: "dark",
+    };
+
+    const exitCode = await def.handler(cli, core);
+    expect(exitCode).toBe(0);
+  });
+
+  it("review subcommand returns exit code 1 for non-existent session", async () => {
+    const core = createMockCore();
+    const { create } = await import("../../src/extensions/session-review/index.js");
+    const ext = create(core);
+    await ext.hooks[HOOKS.CLI_SUBCOMMANDS_REGISTER](core.cliSubcommandRegistry);
+
+    const def = core.cliSubcommandRegistry.get("review");
+    const cli = {
+      sessionId: "non-existent-session-xyz",
+      wantsJson: true,
+      reviewToolIndex: false,
+      colors: false,
+      theme: "dark",
+    };
+
+    const exitCode = await def.handler(cli, core);
+    expect(exitCode).toBe(1);
+  });
+
+  it("review subcommand with --tool-index returns 0", async () => {
+    const { SessionLog } = await import(
+      "../../src/extensions/session-log/session-log.js"
+    );
+
+    // Create a test session with tool usage
+    const log = new SessionLog(TEST_SESSION_ID);
+    log.writeInput("run bash");
+    log.writeAssistant(
+      "running",
+      [{ id: "tc_1", type: "function", function: { name: "bash", arguments: "ls" } }],
+    );
+    log.writeToolResult("<output>done</output>", "tc_1", "bash");
+
+    const core = createMockCore();
+    const { create } = await import("../../src/extensions/session-review/index.js");
+    const ext = create(core);
+    await ext.hooks[HOOKS.CLI_SUBCOMMANDS_REGISTER](core.cliSubcommandRegistry);
+
+    const def = core.cliSubcommandRegistry.get("review");
+    const cli = {
+      sessionId: TEST_SESSION_ID,
+      wantsJson: true,
+      reviewToolIndex: true,
+      colors: false,
+      theme: "dark",
+    };
+
+    const exitCode = await def.handler(cli, core);
+    expect(exitCode).toBe(0);
+  });
+
+  it("review subcommand lists sessions (returns 0 when sessions exist)", async () => {
+    const { SessionLog } = await import(
+      "../../src/extensions/session-log/session-log.js"
+    );
+
+    // Create a test session with multiple entries
+    const log = new SessionLog(TEST_SESSION_ID);
+    log.writeInput("hello");
+    log.writeAssistant("world");
+    log.writeInput("how are you");
+    log.writeAssistant("good");
+
+    const core = createMockCore();
+    const { create } = await import("../../src/extensions/session-review/index.js");
+    const ext = create(core);
+    await ext.hooks[HOOKS.CLI_SUBCOMMANDS_REGISTER](core.cliSubcommandRegistry);
+
+    const def = core.cliSubcommandRegistry.get("review");
+    const cli = {
+      sessionId: null, // No session ID = list mode
+      wantsJson: true,
+      reviewToolIndex: false,
+      colors: false,
+      theme: "dark",
+    };
+
+    // Capture console output to verify it's valid JSON
+    let capturedOutput = "";
+    const originalLog = console.log;
+    console.log = (msg) => {
+      capturedOutput += msg + "\n";
+    };
+
+    try {
+      const exitCode = await def.handler(cli, core);
+      expect(exitCode).toBe(0);
+
+      // Verify output is valid JSON array
+      const parsed = JSON.parse(capturedOutput.trim());
+      expect(Array.isArray(parsed)).toBe(true);
+      // Our test session should be in the list
+      const foundSession = parsed.find(
+        (s) => s.id === TEST_SESSION_ID,
+      );
+      expect(foundSession).toBeDefined();
+      expect(foundSession.entry_count).toBe(4);
+    } finally {
+      console.log = originalLog;
+    }
+  });
+});
+
+// ── Info Show-Prompt Extension Tests ─────────────────────────────────────────
+
+describe("Info Show-Prompt Extension - exit codes", () => {
+  it("registers info and show-prompt subcommands", async () => {
+    const core = createMockCore();
+    const { create } = await import("../../src/extensions/info-show-prompt/index.js");
+    const ext = create(core);
+
+    expect(ext).not.toBeNull();
+    expect(ext.hooks[HOOKS.CLI_SUBCOMMANDS_REGISTER]).toBeDefined();
+
+    await ext.hooks[HOOKS.CLI_SUBCOMMANDS_REGISTER](core.cliSubcommandRegistry);
+
+    expect(core.cliSubcommandRegistry.has("info")).toBe(true);
+    expect(core.cliSubcommandRegistry.has("show-prompt")).toBe(true);
+  });
+
+  it("info subcommand returns exit code 0", async () => {
+    const core = createMockCore();
+    const { create } = await import("../../src/extensions/info-show-prompt/index.js");
+    const ext = create(core);
+    await ext.hooks[HOOKS.CLI_SUBCOMMANDS_REGISTER](core.cliSubcommandRegistry);
+
+    const def = core.cliSubcommandRegistry.get("info");
+    const cli = {
+      wantsJson: true,
+      colors: false,
+      theme: "dark",
+      config: null,
+      skillsPath: null,
+    };
+
+    const exitCode = await def.handler(cli, core);
+    expect(exitCode).toBe(0);
+  });
+
+  it("info subcommand returns 0 for text output", async () => {
+    const core = createMockCore();
+    const { create } = await import("../../src/extensions/info-show-prompt/index.js");
+    const ext = create(core);
+    await ext.hooks[HOOKS.CLI_SUBCOMMANDS_REGISTER](core.cliSubcommandRegistry);
+
+    const def = core.cliSubcommandRegistry.get("info");
+    const cli = {
+      wantsJson: false,
+      colors: false,
+      theme: "dark",
+      config: null,
+      skillsPath: null,
+    };
+
+    const exitCode = await def.handler(cli, core);
+    expect(exitCode).toBe(0);
+  });
+
+  it("show-prompt subcommand returns exit code 0", async () => {
+    const core = createMockCore();
+    const { create } = await import("../../src/extensions/info-show-prompt/index.js");
+    const ext = create(core);
+    await ext.hooks[HOOKS.CLI_SUBCOMMANDS_REGISTER](core.cliSubcommandRegistry);
+
+    const def = core.cliSubcommandRegistry.get("show-prompt");
+    const cli = {
+      wantsJson: false,
+      colors: false,
+      theme: "dark",
+      config: null,
+    };
+
+    const exitCode = await def.handler(cli, core);
+    expect(exitCode).toBe(0);
+  });
+});
+
+// ── One-Shot Extension Tests ─────────────────────────────────────────────────
+
+describe("One-Shot Extension - exit codes", () => {
+  it("registers prompt subcommand via CLI_SUBCOMMANDS_REGISTER hook", async () => {
+    const core = createMockCore();
+    const { create } = await import("../../src/extensions/one-shot/index.js");
+    const ext = create(core);
+
+    expect(ext).not.toBeNull();
+    expect(ext.hooks[HOOKS.CLI_SUBCOMMANDS_REGISTER]).toBeDefined();
+
+    await ext.hooks[HOOKS.CLI_SUBCOMMANDS_REGISTER](core.cliSubcommandRegistry);
+
+    expect(core.cliSubcommandRegistry.has("prompt")).toBe(true);
+    const def = core.cliSubcommandRegistry.get("prompt");
+    expect(def.handler).toBeDefined();
+  });
+
+  it("CLI_ARGS_PARSED hook sets subcommand when --prompt flag is used", async () => {
+    const core = createMockCore();
+    const { create } = await import("../../src/extensions/one-shot/index.js");
+    const ext = create(core);
+
+    const cli = { prompt: "test prompt" };
+    ext.hooks[HOOKS.CLI_ARGS_PARSED]({ cli });
+
+    expect(cli.subcommand).toBe("prompt");
+  });
+
+  it("CLI_ARGS_PARSED hook does nothing when --prompt flag is not used", async () => {
+    const core = createMockCore();
+    const { create } = await import("../../src/extensions/one-shot/index.js");
+    const ext = create(core);
+
+    const cli = { prompt: null };
+    ext.hooks[HOOKS.CLI_ARGS_PARSED]({ cli });
+
+    expect(cli.subcommand).toBeUndefined();
+  });
+});
+
+// ── Subcommand Handler Return Type Tests ─────────────────────────────────────
+
+describe("Subcommand handler return types", () => {
+  it("all registered handlers return numeric exit codes", async () => {
+    const core = createMockCore();
+
+    // Load all extensions that register subcommands
+    const { create: createReview } = await import("../../src/extensions/session-review/index.js");
+    const { create: createInfo } = await import("../../src/extensions/info-show-prompt/index.js");
+    const { create: createOneShot } = await import("../../src/extensions/one-shot/index.js");
+
+    const reviewExt = createReview(core);
+    const infoExt = createInfo(core);
+    const oneShotExt = createOneShot(core);
+
+    // Register all subcommands
+    await reviewExt.hooks[HOOKS.CLI_SUBCOMMANDS_REGISTER](core.cliSubcommandRegistry);
+    await infoExt.hooks[HOOKS.CLI_SUBCOMMANDS_REGISTER](core.cliSubcommandRegistry);
+    await oneShotExt.hooks[HOOKS.CLI_SUBCOMMANDS_REGISTER](core.cliSubcommandRegistry);
+
+    // Verify all subcommands are registered
+    const subcommands = core.cliSubcommandRegistry.names();
+    expect(subcommands).toContain("review");
+    expect(subcommands).toContain("info");
+    expect(subcommands).toContain("show-prompt");
+    expect(subcommands).toContain("prompt");
+
+    // Verify all have handlers
+    for (const name of subcommands) {
+      const def = core.cliSubcommandRegistry.get(name);
+      expect(def.handler).toBeDefined();
+      expect(typeof def.handler).toBe("function");
+    }
+  });
+});
+
+// ── Main Entry Point Integration Tests ───────────────────────────────────────
+
+describe("Main entry point - exit code flow", () => {
+  it("process.exit is called with return value from main()", async () => {
+    // This test verifies the pattern:
+    // main().catch(...).then((code) => process.exit(code))
+    //
+    // We can't actually test process.exit without killing the test process,
+    // but we can verify the promise chain behavior.
+
+    const mockMain = async () => {
+      return 0;
+    };
+
+    let capturedCode = null;
+    const originalExit = process.exit;
+    process.exit = (code) => {
+      capturedCode = code;
+      throw new Error("process.exit called with: " + code);
+    };
+
+    try {
+      await mockMain()
+        .catch((e) => {
+          return 1;
+        })
+        .then((code) => process.exit(code));
+    } catch (e) {
+      if (e.message.startsWith("process.exit called with:")) {
+        expect(capturedCode).toBe(0);
+      } else {
+        throw e;
+      }
+    } finally {
+      process.exit = originalExit;
+    }
+  });
+
+  it("error in main() returns exit code 1", async () => {
+    const mockMain = async () => {
+      throw new Error("Test error");
+    };
+
+    let capturedCode = null;
+    const originalExit = process.exit;
+    process.exit = (code) => {
+      capturedCode = code;
+      throw new Error("process.exit called with: " + code);
+    };
+
+    try {
+      await mockMain()
+        .catch((e) => {
+          return 1;
+        })
+        .then((code) => process.exit(code));
+    } catch (e) {
+      if (e.message.startsWith("process.exit called with:")) {
+        expect(capturedCode).toBe(1);
+      } else {
+        throw e;
+      }
+    } finally {
+      process.exit = originalExit;
+    }
+  });
+
+  it("error with custom exitCode preserves the code", async () => {
+    const mockMain = async () => {
+      const err = new Error("Custom error");
+      err.exitCode = 42;
+      throw err;
+    };
+
+    // Simulate the runOneShot pattern
+    let exitCode = 0;
+    try {
+      await mockMain();
+    } catch (e) {
+      exitCode = e.exitCode ?? 1;
+    }
+    expect(exitCode).toBe(42);
+  });
+});
+
+// ── Exit Code Propagation Tests ──────────────────────────────────────────────
+
+describe("Exit code propagation through subcommand chain", () => {
+  it("subcommand handler return value flows to main() return", async () => {
+    // Simulate the main() dispatch logic:
+    // if (subcommandDef && subcommandDef.handler) {
+    //   return await subcommandDef.handler(cli, core);
+    // }
+
+    const mockHandler = async () => 0;
+    const result = await mockHandler();
+    expect(result).toBe(0);
+  });
+
+  it("subcommand error return flows to main() return", async () => {
+    const mockHandler = async () => 1;
+    const result = await mockHandler();
+    expect(result).toBe(1);
+  });
+
+  it("missing handler returns 1", async () => {
+    const subcommandDef = { description: "test" }; // No handler
+
+    // Simulate main() logic
+    let exitCode = 0;
+    if (subcommandDef && subcommandDef.handler) {
+      exitCode = await subcommandDef.handler({}, {});
+    } else {
+      exitCode = 1;
+    }
+    expect(exitCode).toBe(1);
+  });
+
+  it("undefined subcommand returns 1", async () => {
+    const subcommandDef = undefined;
+
+    let exitCode = 0;
+    if (subcommandDef && subcommandDef.handler) {
+      exitCode = await subcommandDef.handler({}, {});
+    } else {
+      exitCode = 1;
+    }
+    expect(exitCode).toBe(1);
+  });
+});

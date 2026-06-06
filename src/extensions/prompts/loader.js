@@ -3,8 +3,7 @@
 
 import fs from "node:fs";
 import { join } from "node:path";
-import { parseFrontMatter } from "../../utils/file-utils.js";
-import { validateNameable } from "./lib.js";
+import { parseFrontMatter, validateNameable } from "../../utils/file-utils.js";
 
 /**
  * Parse a .prompt.md file into a Prompt object.

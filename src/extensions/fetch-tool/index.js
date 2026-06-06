@@ -235,7 +235,7 @@ function parseArgs(input) {
   if (!VALID_METHODS.includes(method)) {
     return {
       args: null,
-      error: `Invalid HTTP method: '${method}'. Supported: GET, POST, PUT, DELETE, PATCH, HEAD`,
+      error: `Invalid HTTP method: '${method}'. Supported: ${VALID_METHODS.join(", ")}`,
     };
   }
 

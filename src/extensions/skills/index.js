@@ -40,9 +40,9 @@ export function create(core) {
         configRegistry.registerCliFlags([
           {
             short: null,
-            long: '--preload-skills',
-            description: 'Preload skills by name (comma-separated)',
-            type: 'array',
+            long: "--preload-skills",
+            description: "Preload skills by name (comma-separated)",
+            type: "array",
             default: [],
           },
         ]);
@@ -89,7 +89,8 @@ export function create(core) {
               const active = loader.activeSkills();
               const lines = skills
                 .map(
-                  (s) => `${s.loaded ? "[x]" : "[ ]"} ${s.name}: ${s.description}`,
+                  (s) =>
+                    `${s.loaded ? "[x]" : "[ ]"} ${s.name}: ${s.description}`,
                 )
                 .join("\n");
               return { content: `## Available Skills\n\n${lines}` };
@@ -194,7 +195,6 @@ function _resolvePreloadSkills(core) {
     return cliSkills;
   }
 
-  // Check config file (config defaults come from extension.json configSchema)
   const config = core.config?.skills || {};
   const configSkills = config.preloadSkills;
   if (configSkills && configSkills.length > 0) {

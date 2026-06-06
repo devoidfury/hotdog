@@ -1,6 +1,7 @@
 // Minimal MCP protocol types.
 // Implements only the JSON-RPC 2.0 and MCP message types needed for
-// connecting to MCP servers, listing tools, and calling tools.\n
+// connecting to MCP servers, listing tools, and calling tools.
+
 // ── JSON-RPC 2.0 ──────────────────────────────────────────────────────────
 
 /**
@@ -101,7 +102,9 @@ export function parseMcpToolDefinition(tool) {
 export function mcpToolCallRequest(name, arguments_) {
   return {
     name,
-    ...(arguments_ !== undefined && arguments_ !== null ? { arguments: arguments_ } : {}),
+    ...(arguments_ !== undefined && arguments_ !== null
+      ? { arguments: arguments_ }
+      : {}),
   };
 }
 
@@ -154,7 +157,9 @@ export function contentBlocksToString(blocks) {
         if (block.text) parts.push(block.text);
         break;
       case "image":
-        parts.push(`[Image: ${block.mimeType || "image"} (${(block.data || "").length} bytes)]`);
+        parts.push(
+          `[Image: ${block.mimeType || "image"} (${(block.data || "").length} bytes)]`,
+        );
         break;
       case "resource":
         if (block.text) {
@@ -167,4 +172,3 @@ export function contentBlocksToString(blocks) {
   }
   return parts.join("\n");
 }
-

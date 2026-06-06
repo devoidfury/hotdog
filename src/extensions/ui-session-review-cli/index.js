@@ -2,7 +2,6 @@
 // Provides the `review` CLI subcommand for inspecting session logs.
 // Registers subcommands via the cli:subcommandsRegister hook.
 // Also registers the `review` tool via tools:register hook.
-// Capability declared in extension.json metadata file.
 
 import { HOOKS } from "../../core/hooks.js";
 import { CliOutputSink } from "../../core/ui/cli.js";

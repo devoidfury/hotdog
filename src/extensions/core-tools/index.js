@@ -1,5 +1,3 @@
-// Core tools are independent of other extensions.
-
 import { HOOKS } from "../../core/hooks.js";
 
 export * from "./write.js";
@@ -23,7 +21,6 @@ import { ExploreTool } from "./explore.js";
 import { DEFAULT_MAX_IMAGE_SIZE } from "./defaults.js";
 
 // Tool descriptors — declarative table of all core tools.
-// Note: bash is registered by the bash-tool extension, not here.
 const TOOL_DESCRIPTORS = [
   { name: "write", disabled: false },
   { name: "read", disabled: false },
@@ -40,21 +37,25 @@ export const CORE_TOOL_NAMES = TOOL_DESCRIPTORS.map((d) => d.name);
 // Tool constructor map with config — maps tool names to factory functions that accept config.
 const TOOL_FACTORIES = {
   write: () => new WriteTool(),
-  read: (config) => new ReadTool({
-    readLimit: config.readToolLimit,
-    maxImageSize: DEFAULT_MAX_IMAGE_SIZE,
-  }),
-  edit: (config) => new EditTool({
-    maxEditInputSize: config.maxEditInputSize,
-  }),
-  grep: (config) => new GrepTool({
-    maxResults: config.grepMaxResults,
-    maxOutputLines: config.maxToolOutputLines,
-  }),
-  find: (config) => new FindTool({
-    maxResults: config.findMaxResults,
-    maxOutputLines: config.maxToolOutputLines,
-  }),
+  read: (config) =>
+    new ReadTool({
+      readLimit: config.readToolLimit,
+      maxImageSize: DEFAULT_MAX_IMAGE_SIZE,
+    }),
+  edit: (config) =>
+    new EditTool({
+      maxEditInputSize: config.maxEditInputSize,
+    }),
+  grep: (config) =>
+    new GrepTool({
+      maxResults: config.grepMaxResults,
+      maxOutputLines: config.maxToolOutputLines,
+    }),
+  find: (config) =>
+    new FindTool({
+      maxResults: config.findMaxResults,
+      maxOutputLines: config.maxToolOutputLines,
+    }),
   pager: () => new PagerTool(),
   explore: () => new ExploreTool(),
   project_info: () => new ProjectInfoTool(),
@@ -68,7 +69,7 @@ const TOOL_FACTORIES = {
  */
 export function createToolFactory(ctx = {}) {
   const config = ctx?.config || {};
-  
+
   const createToolInternal = (toolName, whitelist = null) => {
     const descriptor = TOOL_DESCRIPTORS.find((d) => d.name === toolName);
     if (descriptor) {
@@ -77,7 +78,11 @@ export function createToolFactory(ctx = {}) {
         return null;
       }
       // Check whitelist
-      if (whitelist && Array.isArray(whitelist) && !whitelist.includes(toolName)) {
+      if (
+        whitelist &&
+        Array.isArray(whitelist) &&
+        !whitelist.includes(toolName)
+      ) {
         return null;
       }
     }
@@ -101,7 +106,12 @@ export function createToolFactory(ctx = {}) {
       return createToolInternal(toolName, whitelist);
     },
 
-    async createAndRegister(toolName, registry, ctxOrWhitelist = {}, whitelist = null) {
+    async createAndRegister(
+      toolName,
+      registry,
+      ctxOrWhitelist = {},
+      whitelist = null,
+    ) {
       // Support both old API (toolName, registry, ctx, whitelist) and new API (toolName, registry, whitelist)
       // If ctxOrWhitelist is an array, treat it as whitelist
       let effectiveWhitelist = whitelist;
@@ -132,9 +142,6 @@ export function create(core) {
     hooks: {
       /**
        * Register all core tools when requested.
-       * Subagent tools are registered by the subagents extension.
-       * The review tool is registered by the session-review extension.
-       * The bash tool is registered by the bash-tool extension.
        */
       [HOOKS.TOOLS_REGISTER]: async (registry) => {
         const factory = createToolFactory({ config });

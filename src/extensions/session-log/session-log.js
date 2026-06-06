@@ -45,13 +45,17 @@ export function createSystemPromptEntry(sessionId, content) {
     tool_calls: null,
     tool_call_id: null,
     tool_name: null,
+    images: null,
   };
 }
 
 /**
  * Create a user input entry.
+ * @param {string} sessionId
+ * @param {string|Array} content — Plain text or array of content parts
+ * @param {Array<{type: string, mimeType: string, data: string}>} [images] — Optional images
  */
-export function createInputEntry(sessionId, content) {
+export function createInputEntry(sessionId, content, images = null) {
   return {
     ts: now(),
     session_id: sessionId,
@@ -62,6 +66,7 @@ export function createInputEntry(sessionId, content) {
     tool_calls: null,
     tool_call_id: null,
     tool_name: null,
+    images,
   };
 }
 
@@ -84,6 +89,7 @@ export function createAssistantEntry(
     tool_calls: toolCalls,
     tool_call_id: null,
     tool_name: null,
+    images: null,
   };
 }
 
@@ -106,6 +112,7 @@ export function createToolResultEntry(
     tool_calls: null,
     tool_call_id: toolCallId,
     tool_name: toolName,
+    images: null,
   };
 }
 
@@ -123,6 +130,7 @@ export function createResetEntry(sessionId) {
     tool_calls: null,
     tool_call_id: null,
     tool_name: null,
+    images: null,
   };
 }
 
@@ -140,13 +148,17 @@ export function createCompactionEntry(sessionId, messagesCompacted, summary) {
     tool_calls: null,
     tool_call_id: null,
     tool_name: null,
+    images: null,
   };
 }
 
 /**
  * Create a prompt expansion entry.
+ * @param {string} sessionId
+ * @param {string|Array} content
+ * @param {Array<{type: string, mimeType: string, data: string}>} [images]
  */
-export function createPromptEntry(sessionId, content) {
+export function createPromptEntry(sessionId, content, images = null) {
   return {
     ts: now(),
     session_id: sessionId,
@@ -157,6 +169,7 @@ export function createPromptEntry(sessionId, content) {
     tool_calls: null,
     tool_call_id: null,
     tool_name: null,
+    images,
   };
 }
 
@@ -218,9 +231,11 @@ export class SessionLog {
 
   /**
    * Write a user input entry.
+   * @param {string|Array} content
+   * @param {Array<{type: string, mimeType: string, data: string}>} [images]
    */
-  writeInput(content) {
-    this.append(createInputEntry(this.sessionId, content));
+  writeInput(content, images = null) {
+    this.append(createInputEntry(this.sessionId, content, images));
   }
 
   /**
@@ -264,9 +279,11 @@ export class SessionLog {
 
   /**
    * Write a prompt expansion entry.
+   * @param {string|Array} content
+   * @param {Array<{type: string, mimeType: string, data: string}>} [images]
    */
-  writePrompt(content) {
-    this.append(createPromptEntry(this.sessionId, content));
+  writePrompt(content, images = null) {
+    this.append(createPromptEntry(this.sessionId, content, images));
   }
 }
 

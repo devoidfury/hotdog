@@ -148,8 +148,13 @@ export function replayEntriesIntoContext(agent, entries) {
       case LOG_SOURCE.INPUT:
       case LOG_SOURCE.PROMPT: {
         // Both INPUT and PROMPT are user messages in context
+        // Preserve images if present
         agent.context.push(
-          new Message({ role: "user", content: entry.content }),
+          new Message({
+            role: "user",
+            content: entry.content,
+            images: entry.images || null,
+          }),
         );
         replayed++;
         break;

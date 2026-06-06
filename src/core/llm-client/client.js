@@ -96,13 +96,24 @@ export class LlmClient {
   /**
    * Escape protected markers in messages before sending to the model.
    * Returns a new array of cloned messages with escaped content.
+   * Handles both string content and array content (with image_url parts).
    */
   _escapeMessages(messages) {
     if (!this._mangler) return messages;
     return messages.map((msg) => {
       const json = msg.toJSON();
       if (json.content !== undefined && json.content !== null) {
-        json.content = this._mangler.escape(json.content);
+        if (Array.isArray(json.content)) {
+          // Content is an array of parts (text + image_url)
+          json.content = json.content.map((part) => {
+            if (part.type === "text" && typeof part.text === "string") {
+              return { ...part, text: this._mangler.escape(part.text) };
+            }
+            return part; // image_url parts pass through unchanged
+          });
+        } else if (typeof json.content === "string") {
+          json.content = this._mangler.escape(json.content);
+        }
       }
       if (json.tool_calls) {
         json.tool_calls = json.tool_calls.map((tc) => {

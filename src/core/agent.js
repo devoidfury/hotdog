@@ -142,12 +142,14 @@ export class Agent {
 
   /**
    * Run the agent loop with the given user input.
-   * @param {string} userInput
+   * @param {string} userInput — Text content of the user message
+   * @param {Array<{type: string, mimeType: string, data: string}>} [images] — Optional images
+   *   Each image: { type: "image_url", mimeType: "image/png", data: "<base64>" }
    * @returns {Promise<string|undefined>} Final text response, or undefined if tool calls
    */
-  async run(userInput) {
+  async run(userInput, images = null) {
     // Add user input to context
-    const userMsg = new Message({ role: "user", content: userInput });
+    const userMsg = new Message({ role: "user", content: userInput, images });
     this._context.push(userMsg);
     await this._hooks.emitAsync(HOOKS.CONTEXT_MESSAGE, {
       message: userMsg,
@@ -807,6 +809,10 @@ export class Agent {
 
   /**
    * Serialize the agent state for persistence.
+   * Messages are serialized via Message.toJSON() which handles:
+   * - Plain text content as string
+   * - Content with images as array of { type: "text", text } and { type: "image_url", image_url } parts
+   * - Images stored separately as { type: "image_url", mimeType, data } for session log
    * @returns {Object}
    */
   serialize() {
@@ -820,6 +826,7 @@ export class Agent {
 
   /**
    * Deserialize agent state from persisted data.
+   * Handles both plain text content and array content (with image_url parts).
    * @param {Object} data
    */
   deserialize(data) {

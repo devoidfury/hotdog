@@ -5,6 +5,7 @@
 import { HOOKS } from '../../core/hooks.js';
 import { Message } from '../../core/context/message.js';
 import { PromptsLoader } from './loader.js';
+import { render } from '../../utils/render.js';
 
 /**
  * Create the prompts extension.
@@ -36,12 +37,8 @@ export function create(core) {
               return { error: `Unknown prompt: ${name}` };
             }
 
-            // Render the prompt template with args
-            let content = prompt.content;
-            if (args) {
-              // Simple template rendering: replace {ARGS} with the args string
-              content = content.replace(/\{ARGS\}/g, args);
-            }
+            // Render the prompt template with args using the render engine
+            const content = render(prompt.content, { ARGS: args || '' });
 
             // Add the rendered prompt as a user message
             agent._context.push(new Message({ role: 'user', content }));

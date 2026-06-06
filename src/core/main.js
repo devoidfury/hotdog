@@ -230,6 +230,14 @@ async function main() {
     return 0;
   }
 
+  // No explicit subcommand — default to interactive "cli" when stdin is a TTY
+  if (process.stdin.isTTY) {
+    const defaultSubcommand = core.cliSubcommandRegistry.get("cli");
+    if (defaultSubcommand && defaultSubcommand.handler) {
+      return await defaultSubcommand.handler(cli, core);
+    }
+  }
+
   console.error("No subcommand provided.");
   console.log(
     `Available subcommands: ${core.cliSubcommandRegistry.names().join(", ") || "(none)"}`,

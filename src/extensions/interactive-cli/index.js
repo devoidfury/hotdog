@@ -422,8 +422,8 @@ export function create(core) {
 
     rl.prompt();
 
-    // Run the message bus (non-awaited, fire-and-forget)
-    bus.run();
+    // Run the message bus — awaited so the process stays alive until the user quits.
+    await bus.run();
   }
 
   /**

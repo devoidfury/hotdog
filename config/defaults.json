@@ -148,6 +148,11 @@
           "name": "minimax-m2.7",
           "context-limit": 196608,
           "tags": ["general", "powerful", "slow"]
+        },
+        {
+          "name": "qwen3.6-35b-unc",
+          "context-limit": 262144,
+          "tags": ["general", "powerful", "slow"]
         }
       ]
     },

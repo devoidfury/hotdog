@@ -11,18 +11,12 @@ import {
   defaultCallDisplay,
 } from "../../core/extensions/tool-utils.js";
 
-// ── Defaults ────────────────────────────────────────────────────────────────
-
-export const DEFAULT_BASH_TIMEOUT_MS = 60000;
-export const DEFAULT_MAX_TOOL_OUTPUT_LINES = 600;
-
 export class BashTool {
   static TOOL_NAME = "bash";
 
   constructor(options = {}) {
-    this.timeoutMs = options.timeoutMs ?? DEFAULT_BASH_TIMEOUT_MS;
-    this.maxOutputLines =
-      options.maxOutputLines ?? DEFAULT_MAX_TOOL_OUTPUT_LINES;
+    this.timeoutMs = options.timeoutMs ?? 60000;
+    this.maxOutputLines = options.maxOutputLines ?? 600;
   }
 
   toToolDef() {
@@ -33,7 +27,7 @@ export class BashTool {
         properties: {
           command: param("string", "The shell command to execute."),
           timeoutMs: param("integer", "Optional timeout in milliseconds.", {
-            default: DEFAULT_BASH_TIMEOUT_MS,
+            default: this.timeoutMs,
           }),
         },
         required: ["command"],
@@ -122,22 +116,23 @@ import { HOOKS } from "../../core/hooks.js";
  * @returns {Object} The extension instance.
  */
 export function create(core) {
+  // Config defaults come from extension.json configSchema
+  const config = core.config?.bashTool || {};
+  const timeoutMs = config.bashTimeoutMs;
+  const maxOutputLines = config.maxToolOutputLines;
+
   return {
     hooks: {
       /**
        * Register the bash tool.
        */
       [HOOKS.TOOLS_REGISTER]: async (registry) => {
-        const tool = new BashTool(core);
+        const tool = new BashTool({ timeoutMs, maxOutputLines });
         registry.register(BashTool.TOOL_NAME, tool);
       },
     },
 
     // Expose for external use
     BashTool,
-    defaults: {
-      DEFAULT_BASH_TIMEOUT_MS,
-      DEFAULT_MAX_TOOL_OUTPUT_LINES,
-    },
   };
 }

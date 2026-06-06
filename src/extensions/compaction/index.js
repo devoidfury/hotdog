@@ -14,30 +14,28 @@ import { estimateContextTokens } from './utils.js';
 import { HOOKS } from '../../core/hooks.js';
 
 /**
- * Default compaction settings.
- */
-const DEFAULT_COMPACTION = {
-  enabled: true,
-  reserveTokens: 16384,
-  keepRecentMessages: 3,
-  strategy: 'summarize',
-};
-
-/**
  * Create the compaction extension.
  *
  * @param {Object} core - The core object with hooks, config, etc.
  * @returns {Object|null} Extension instance, or null if compaction is disabled.
  */
 export function create(core) {
-  const config = core.config?.compaction;
-  if (config?.enabled === false) return null;
+  // Config defaults come from extension.json configSchema
+  const config = core.config?.compaction || {};
+  
+  const settings = {
+    enabled: config.enabled ?? true,
+    reserveTokens: config.reserveTokens ?? 8000,
+    keepRecentMessages: config.keepRecentMessages ?? 3,
+    strategy: config.strategy ?? 'summarize',
+  };
 
-  const settings = { ...DEFAULT_COMPACTION, ...config };
   // Normalize: config uses keepRecentMessages, strategies use keepRecent
   if (settings.keepRecentMessages !== undefined) {
     settings.keepRecent = settings.keepRecentMessages;
   }
+
+  if (!settings.enabled) return null;
 
   // Register built-in strategies
   const registry = new CompactionStrategyRegistry();
@@ -63,7 +61,7 @@ export function create(core) {
 
         // Check token budget
         const estimatedTokens = estimateContextTokens(nonSystemMessages);
-        const reserveTokens = settings.reserveTokens || DEFAULT_COMPACTION.reserveTokens;
+        const reserveTokens = settings.reserveTokens;
         const modelConfig = core.modelRegistry?.[agent.model];
         const contextLimit = modelConfig?.maxTokens || 128000;
 
@@ -195,7 +193,7 @@ export function create(core) {
 
     // Auto-compact based on token budget
     const estimatedTokens = estimateContextTokens(nonSystemMessages);
-    const reserveTokens = settings.reserveTokens || DEFAULT_COMPACTION.reserveTokens;
+    const reserveTokens = settings.reserveTokens;
     const modelConfig = core.modelRegistry?.[agent.model];
     const contextLimit = modelConfig?.maxTokens || 128000;
 

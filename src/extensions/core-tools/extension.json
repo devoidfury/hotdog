@@ -30,6 +30,11 @@
         "type": "number",
         "default": 16000,
         "description": "Maximum edit input size in characters (oldString + newString combined)"
+      },
+      "maxToolOutputLines": {
+        "type": "number",
+        "default": 600,
+        "description": "Maximum number of output lines for tool results"
       }
     },
     "additionalProperties": false

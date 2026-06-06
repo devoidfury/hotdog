@@ -13,7 +13,7 @@ import {
   parseToolInput,
   defaultCallDisplay,
 } from "../../core/extensions/tool-utils.js";
-import { DEFAULT_READ_TOOL_LIMIT, DEFAULT_MAX_IMAGE_SIZE } from "./defaults.js";
+import { DEFAULT_MAX_IMAGE_SIZE } from "./defaults.js";
 
 /**
  * Supported image extensions mapped to MIME types.
@@ -29,6 +29,11 @@ const IMAGE_EXTENSIONS = {
 export class ReadTool {
   static TOOL_NAME = "read";
 
+  constructor(options = {}) {
+    this.readLimit = options.readLimit ?? 500;
+    this.maxImageSize = options.maxImageSize ?? DEFAULT_MAX_IMAGE_SIZE;
+  }
+
   toToolDef() {
     return toolDef(
       ReadTool.TOOL_NAME,
@@ -42,7 +47,7 @@ export class ReadTool {
           ),
           limit: param("integer", `Maximum number of lines to return`, {
             minimum: 1,
-            default: DEFAULT_READ_TOOL_LIMIT,
+            default: this.readLimit,
           }),
           offset: param("integer", "Number of lines to skip", {
             minimum: 0,
@@ -66,7 +71,7 @@ export class ReadTool {
   }
 
   async execute(input, ctx) {
-    const args = parseArgs(input);
+    const args = parseArgs(input, this.readLimit);
     if (!args) {
       return ToolResult.err("Error parsing arguments");
     }
@@ -114,7 +119,7 @@ export class ReadTool {
     // Check if it's an image file
     const mimeType = getImageMimeType(resolved);
     if (mimeType) {
-      return readImage(resolved, mimeType, filePath);
+      return readImage(resolved, mimeType, filePath, this.maxImageSize);
     }
 
     return readLines(resolved, offset, limit);
@@ -124,12 +129,12 @@ export class ReadTool {
 /**
  * Parse and validate read tool arguments.
  */
-function parseArgs(input) {
+function parseArgs(input, defaultLimit) {
   // Empty input → defaults
   if (!input || (typeof input === "string" && input.trim().length === 0)) {
     return {
       path: null,
-      limit: DEFAULT_READ_TOOL_LIMIT,
+      limit: defaultLimit,
       offset: 0,
     };
   }
@@ -147,7 +152,7 @@ function parseArgs(input) {
   const limit =
     typeof json.limit === "number" && json.limit >= 1
       ? json.limit
-      : DEFAULT_READ_TOOL_LIMIT;
+      : defaultLimit;
   const offset =
     typeof json.offset === "number" && json.offset >= 0 ? json.offset : 0;
 
@@ -220,13 +225,13 @@ function getImageMimeType(filePath) {
 /**
  * Read an image file and return it as a ToolResult with images.
  */
-function readImage(filePath, mimeType, originalPath) {
+function readImage(filePath, mimeType, originalPath, maxImageSize) {
   try {
     // Check file size
     const stats = fsSync.statSync(filePath);
-    if (stats.size > DEFAULT_MAX_IMAGE_SIZE) {
+    if (stats.size > maxImageSize) {
       return ToolResult.err(
-        `Image file too large: ${(stats.size / 1024 / 1024).toFixed(1)}MB (max ${DEFAULT_MAX_IMAGE_SIZE / 1024 / 1024}MB)`,
+        `Image file too large: ${(stats.size / 1024 / 1024).toFixed(1)}MB (max ${maxImageSize / 1024 / 1024}MB)`,
       );
     }
 

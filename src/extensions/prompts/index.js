@@ -10,7 +10,9 @@ import { PromptsLoader } from './loader.js';
  * Create the prompts extension.
  */
 export function create(core) {
-  const promptsPath = core.config?.promptsPath || './config/prompts';
+  // Config defaults come from extension.json configSchema
+  const config = core.config?.prompts || {};
+  const promptsPath = config.promptsPath ?? "./config/prompts";
   const loader = new PromptsLoader(promptsPath);
   loader.loadPrompts();
 

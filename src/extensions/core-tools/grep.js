@@ -12,10 +12,6 @@ import {
   parseToolInput,
   defaultCallDisplay,
 } from "../../core/extensions/tool-utils.js";
-import {
-  DEFAULT_GREP_MAX_RESULTS,
-  DEFAULT_MAX_TOOL_OUTPUT_LINES,
-} from "./defaults.js";
 
 const execFileAsync = util.promisify(execFile);
 
@@ -271,7 +267,7 @@ async function grepWithRg(pattern, searchDir, maxResults, context, typeFilter) {
 /**
  * Parse and validate grep tool arguments.
  */
-function parseArgs(input) {
+function parseArgs(input, defaultMaxResults) {
   const json = parseToolInput(input);
   if (!json) return null;
 
@@ -284,7 +280,7 @@ function parseArgs(input) {
   const maxResults =
     typeof json.max_results === "number" && json.max_results >= 1
       ? json.max_results
-      : DEFAULT_GREP_MAX_RESULTS;
+      : defaultMaxResults;
   const context =
     typeof json.context === "number" && json.context >= 0 ? json.context : 0;
   const type = typeof json.type === "string" ? json.type : null;
@@ -294,6 +290,11 @@ function parseArgs(input) {
 
 export class GrepTool {
   static TOOL_NAME = "grep";
+
+  constructor(options = {}) {
+    this.maxResults = options.maxResults ?? 100;
+    this.maxOutputLines = options.maxOutputLines ?? 600;
+  }
 
   toToolDef() {
     return toolDef(
@@ -313,7 +314,7 @@ export class GrepTool {
           ),
           max_results: param("integer", `Maximum results to return`, {
             minimum: 1,
-            default: DEFAULT_GREP_MAX_RESULTS,
+            default: this.maxResults,
           }),
           context: param(
             "integer",
@@ -341,7 +342,7 @@ export class GrepTool {
   }
 
   async execute(input, ctx) {
-    const args = parseArgs(input);
+    const args = parseArgs(input, this.maxResults);
     if (!args) {
       return ToolResult.err("Error parsing arguments");
     }
@@ -372,7 +373,7 @@ export class GrepTool {
       return ToolResult.ok("No matches found.");
     }
 
-    const content = truncateOutput(display, DEFAULT_MAX_TOOL_OUTPUT_LINES);
+    const content = truncateOutput(display, this.maxOutputLines);
 
     const metadata = new Map();
     metadata.set("path", searchDir);

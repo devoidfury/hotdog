@@ -3,15 +3,16 @@
 import { execFile } from "node:child_process";
 import util from "node:util";
 import { toolDef, param, ToolResult, toolResult, truncateOutput, parseToolInput, defaultCallDisplay } from "../../core/extensions/tool-utils.js";
-import {
-  DEFAULT_FIND_MAX_RESULTS,
-  DEFAULT_MAX_TOOL_OUTPUT_LINES,
-} from "./defaults.js";
 
 const execFileAsync = util.promisify(execFile);
 
 export class FindTool {
   static TOOL_NAME = "find";
+
+  constructor(options = {}) {
+    this.maxResults = options.maxResults ?? 200;
+    this.maxOutputLines = options.maxOutputLines ?? 600;
+  }
 
   toToolDef() {
     return toolDef(
@@ -32,7 +33,7 @@ export class FindTool {
           max_results: param("integer", `Maximum number of results to return`, {
             minimum: 1,
             maximum: 10000,
-            default: DEFAULT_FIND_MAX_RESULTS,
+            default: this.maxResults,
           }),
           path: param(
             "string",
@@ -46,19 +47,19 @@ export class FindTool {
 
   callDisplay(input) {
     return defaultCallDisplay(input, (args) => {
-      if (!args.pattern) return `* in . (max ${DEFAULT_FIND_MAX_RESULTS})`;
+      if (!args.pattern) return `* in . (max ${this.maxResults})`;
       const { file_type, path, max_results } = args;
       const pathStr = path || ".";
-      const max = max_results ?? DEFAULT_FIND_MAX_RESULTS;
+      const max = max_results ?? this.maxResults;
       if (!file_type) {
         return `${args.pattern} in ${pathStr} (max ${max})`;
       }
       return `${args.pattern} in ${pathStr} (${file_type}, max ${max})`;
-    }, (raw) => `* in . (max ${DEFAULT_FIND_MAX_RESULTS})`);
+    }, (raw) => `* in . (max ${this.maxResults})`);
   }
 
   async execute(input, ctx) {
-    const args = parseArgs(input);
+    const args = parseArgs(input, this.maxResults);
     if (!args) {
       return ToolResult.err("Error parsing arguments");
     }
@@ -101,7 +102,7 @@ export class FindTool {
 
     const content = files.length === 0 ? "No files found" : files.join("\n");
 
-    return ToolResult.ok(truncateOutput(content, DEFAULT_MAX_TOOL_OUTPUT_LINES)).withEntries({
+    return ToolResult.ok(truncateOutput(content, this.maxOutputLines)).withEntries({
       pattern,
       path: cwd,
       total_count: String(total_count),
@@ -115,13 +116,13 @@ export class FindTool {
 /**
  * Parse and validate find tool arguments. Returns normalized args object or null on error.
  */
-function parseArgs(input) {
+function parseArgs(input, defaultMaxResults) {
   // Empty input → defaults
   if (!input || (typeof input === "string" && input.trim().length === 0)) {
     return {
       pattern: "*",
       file_type: null,
-      max_results: DEFAULT_FIND_MAX_RESULTS,
+      max_results: defaultMaxResults,
       path: null,
     };
   }
@@ -142,7 +143,7 @@ function parseArgs(input) {
   const max_results =
     typeof json.max_results === "number" && json.max_results >= 0
       ? json.max_results
-      : DEFAULT_FIND_MAX_RESULTS;
+      : defaultMaxResults;
 
   // path: optional
   const path = typeof json.path === "string" ? json.path : null;

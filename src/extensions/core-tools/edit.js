@@ -12,10 +12,13 @@ import {
   parseToolInput,
   defaultCallDisplay,
 } from "../../core/extensions/tool-utils.js";
-import { DEFAULT_MAX_EDIT_INPUT_SIZE } from "./defaults.js";
 
 export class EditTool {
   static TOOL_NAME = "edit";
+
+  constructor(options = {}) {
+    this.maxEditInputSize = options.maxEditInputSize ?? 16000;
+  }
 
   toToolDef() {
     return toolDef(
@@ -73,9 +76,9 @@ export class EditTool {
 
     // Validate input size
     const inputSize = oldString.length + newString.length;
-    if (inputSize > DEFAULT_MAX_EDIT_INPUT_SIZE) {
+    if (inputSize > this.maxEditInputSize) {
       return ToolResult.err(
-        `Edit input too large: ${inputSize} characters (max ${DEFAULT_MAX_EDIT_INPUT_SIZE}). Please split into smaller edits.`,
+        `Edit input too large: ${inputSize} characters (max ${this.maxEditInputSize}). Please split into smaller edits.`,
       );
     }
 

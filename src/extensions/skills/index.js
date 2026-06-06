@@ -15,9 +15,12 @@ export { LoadSkillTool };
 
 /**
  * Create the skills extension.
+ * Config defaults come from extension.json configSchema.
  */
 export function create(core) {
-  const skillsPath = core.config?.skills?.skillsPath || core.config?.skillsPath || "/skills";
+  // Config defaults come from extension.json configSchema
+  const config = core.config?.skills || {};
+  const skillsPath = config.skillsPath ?? "/skills";
   const loader = new SkillsLoader(skillsPath);
   loader.loadSkills();
 
@@ -191,8 +194,9 @@ function _resolvePreloadSkills(core) {
     return cliSkills;
   }
 
-  // Check config file
-  const configSkills = core.config?.skills?.preloadSkills;
+  // Check config file (config defaults come from extension.json configSchema)
+  const config = core.config?.skills || {};
+  const configSkills = config.preloadSkills;
   if (configSkills && configSkills.length > 0) {
     return configSkills;
   }

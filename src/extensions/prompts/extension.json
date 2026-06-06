@@ -2,5 +2,16 @@
   "name": "prompts",
   "provides": [],
   "loadOrder": 10,
-  "description": "Prompt template loading and execution"
+  "description": "Prompt template loading and execution",
+  "configSchema": {
+    "type": "object",
+    "properties": {
+      "promptsPath": {
+        "type": "string",
+        "default": "./config/prompts",
+        "description": "Directory path where prompt templates are stored"
+      }
+    },
+    "additionalProperties": false
+  }
 }

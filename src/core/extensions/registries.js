@@ -1,7 +1,7 @@
 // Unified command registries for extensions.
 // Supports both agent-level commands and CLI subcommands.
-// "Commands" are the abstract concept — slash commands (/cmd) are one
-// UI implementation for invoking them in the interactive CLI.
+// "Commands" are the abstract concept —
+// slash commands(/cmd) are one UI implementation for invoking them in the interactive CLI.
 
 /**
  * Registry for agent-level commands and CLI subcommands.
@@ -32,13 +32,13 @@ export class CommandRegistry {
    * @param {Function} definition.handler - Async function(cliArgs, config) => void
    * @param {string} [definition.description] - Short description for help text.
    * @param {Object} [definition.options] - Subcommand-specific options (for help text).
-    */
+   */
   register(name, definition) {
     if (this._commands.has(name)) {
       const existing = this._commands.get(name);
       // For CLI subcommands: if existing has no handler (metadata placeholder),
       // merge the new handler with existing metadata
-      if (this._type === 'cli' && !existing.handler && definition.handler) {
+      if (this._type === "cli" && !existing.handler && definition.handler) {
         definition = {
           ...existing,
           ...definition,
@@ -52,7 +52,7 @@ export class CommandRegistry {
 
     const normalized = { ...definition };
 
-    if (this._type === 'command') {
+    if (this._type === "command") {
       normalized.isUiCommand = definition.isUiCommand === true;
     }
 
@@ -94,7 +94,7 @@ export class CommandRegistry {
    * @returns {string|null} - The registered command name if matched, null otherwise
    */
   match(cmd) {
-    if (this._type !== 'command') return null;
+    if (this._type !== "command") return null;
     if (!cmd) return null;
     for (const [name, def] of this._commands) {
       if (def.matches && def.matches(cmd)) {
@@ -110,7 +110,7 @@ export class CommandRegistry {
    */
   generateHelpText() {
     const lines = [];
-    const prefix = this._type === 'command' ? '/' : '';
+    const prefix = this._type === "command" ? "/" : "";
     for (const [name, def] of this._commands) {
       const desc = def.description || "";
       lines.push(`  ${prefix}${name.padEnd(20)} ${desc}`);
@@ -126,7 +126,7 @@ export class CommandRegistry {
  * @returns {CommandRegistry}
  */
 export function createCommandRegistry() {
-  return new CommandRegistry('command');
+  return new CommandRegistry("command");
 }
 
 /**
@@ -142,5 +142,5 @@ export function createSlashCommandRegistry() {
  * @returns {CommandRegistry}
  */
 export function createSubcommandRegistry() {
-  return new CommandRegistry('cli');
+  return new CommandRegistry("cli");
 }

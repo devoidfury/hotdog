@@ -127,6 +127,7 @@ function getDefaultConfig(extParams) {
     compactDebug: false,
     mcpServers: [],
     showTokenUse: true,
+    defaultSubcommand: "cli",
   };
 
   return mergeExtensionConfigDefaults(baseConfig, extParams);

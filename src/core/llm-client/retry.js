@@ -1,7 +1,6 @@
 // Retry with backoff utility.
-// Extracted from LLM client for reuse across the codebase.
 
-import { LlmError } from './client.js';
+import { LlmError } from "./client.js";
 
 /**
  * Retry an async operation with linear backoff and cancellation support.
@@ -16,7 +15,7 @@ export async function retryWithBackoff(fn, maxRetries = 12, options = {}) {
   const { signal } = options;
 
   if (signal?.aborted) {
-    throw LlmError.Cancelled('request was cancelled');
+    throw LlmError.Cancelled("request was cancelled");
   }
 
   let delaySecs = 1;
@@ -24,7 +23,7 @@ export async function retryWithBackoff(fn, maxRetries = 12, options = {}) {
   for (let attempt = 1; attempt <= maxRetries; attempt++) {
     // Check cancellation before each attempt
     if (signal?.aborted) {
-      throw LlmError.Cancelled('request was cancelled');
+      throw LlmError.Cancelled("request was cancelled");
     }
 
     try {
@@ -39,23 +38,27 @@ export async function retryWithBackoff(fn, maxRetries = 12, options = {}) {
       // Only retry on transient errors
       const shouldRetry =
         e instanceof LlmError &&
-        (e.type === 'http' ||
-          e.type === 'timeout' ||
-          (e.type === 'api' && e.message.startsWith('HTTP ')));
+        (e.type === "http" ||
+          e.type === "timeout" ||
+          (e.type === "api" && e.message.startsWith("HTTP ")));
 
       if (shouldRetry && attempt < maxRetries) {
         // Check cancellation during delay
         if (signal?.aborted) {
-          throw LlmError.Cancelled('request was cancelled');
+          throw LlmError.Cancelled("request was cancelled");
         }
 
         await new Promise((resolve) => {
           const timeout = setTimeout(resolve, delaySecs * 1000);
           if (signal) {
-            signal.addEventListener('abort', () => {
-              clearTimeout(timeout);
-              resolve();
-            }, { once: true });
+            signal.addEventListener(
+              "abort",
+              () => {
+                clearTimeout(timeout);
+                resolve();
+              },
+              { once: true },
+            );
           }
         });
 

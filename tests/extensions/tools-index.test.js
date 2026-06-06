@@ -13,10 +13,10 @@ describe("CORE_TOOL_NAMES", () => {
     // review is registered by the session-review extension, not core-tools
     // bash is registered by the bash-tool extension, not core-tools
     // fetch is registered by the fetch-tool extension, not core-tools
+    // question is registered by the question-tool extension, not core-tools
     const expected = [
       "write",
       "read",
-      "question",
       "pager",
       "explore",
       "find",
@@ -84,11 +84,11 @@ describe("createToolFactory", () => {
     expect(typeof tool.execute).toBe("function");
   });
 
-  it("creates question tool", () => {
+  // question is registered by the question-tool extension, not core-tools
+  it("returns null for question (registered by question-tool extension)", () => {
     const factory = createToolFactory();
     const tool = factory.createTool("question", {});
-    expect(tool).not.toBeNull();
-    expect(typeof tool.execute).toBe("function");
+    expect(tool).toBeNull();
   });
 
   it("creates pager tool", () => {

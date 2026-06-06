@@ -1,13 +1,5 @@
 // Agent - the core AI agent with tool calling support.
 // Thin orchestrator that delegates behavior to hooks.
-// Behaviors (compaction, tools, system prompt, commands) live in extensions.
-//
-// Naming conventions:
-//   - Internal JS: camelCase (toolCallId, reasoningContent, toolCalls)
-//   - JSON/persistence: snake_case (tool_call_id, reasoning_content, tool_calls)
-//   - OpenAI API tool calls: { id, type, function: { name, arguments } }
-//   - Stream events: { type: "toolName", toolCallId } (toolCallId = OpenAI id field)
-//   - Message class: accepts both camelCase and snake_case, normalizes to camelCase
 
 import crypto from "node:crypto";
 import { Message } from "./context/message.js";
@@ -75,8 +67,7 @@ export class Agent {
     this._toolWhitelist = options.toolWhitelist || null;
     this._followQueue = [];
     // Command registry — extensions register commands here
-    this._commandRegistry =
-      options.commandRegistry || createCommandRegistry();
+    this._commandRegistry = options.commandRegistry || createCommandRegistry();
   }
 
   // ── Properties ────────────────────────────────────────────────────────────
@@ -516,7 +507,11 @@ export class Agent {
     });
     if (callResult?.action === "block") {
       // Extension blocked this tool call — use provided result
-      const blockedResult = this._formatToolResult(callResult.result, toolName);
+      const blockedResult = this._formatToolResult(
+        callResult.result,
+        toolName,
+        false,
+      );
       return this._writeToolResult(toolName, input, blockedResult, toolCallId);
     }
     if (callResult?.action === "modify" && callResult.input !== undefined) {
@@ -559,10 +554,13 @@ export class Agent {
 
     // 7. Execute the tool
     let result;
+    let success;
     try {
       result = await tool.execute(input, toolCtx);
+      success = true;
     } catch (e) {
       result = `Error executing tool ${toolName}: ${e.message}`;
+      success = false;
     }
 
     // 8. After-execute hook + result modification hook
@@ -572,6 +570,7 @@ export class Agent {
       result,
       input,
       agent: this,
+      success,
     });
 
     // Tool result — sequential, modifiable. Handlers can transform the
@@ -581,6 +580,7 @@ export class Agent {
       toolCallId,
       toolName,
       result,
+      success,
       input,
       agent: this,
     });
@@ -592,8 +592,14 @@ export class Agent {
     const images = result && result.images ? result.images : null;
 
     // 10. Format and write result to context
-    const resultStr = this._formatToolResult(result, toolName);
-    return this._writeToolResult(toolName, input, resultStr, toolCallId, images);
+    const resultStr = this._formatToolResult(result, toolName, success);
+    return this._writeToolResult(
+      toolName,
+      input,
+      resultStr,
+      toolCallId,
+      images,
+    );
   }
 
   /**
@@ -628,7 +634,12 @@ export class Agent {
    */
   async _writeToolResult(toolName, input, result, toolCallId, images) {
     this._emitOutput("tool_result", { toolName, input, result });
-    const msg = new Message({ role: "tool", content: result, toolCallId, images });
+    const msg = new Message({
+      role: "tool",
+      content: result,
+      toolCallId,
+      images,
+    });
     this._context.push(msg);
     await this._hooks.emitAsync(HOOKS.CONTEXT_MESSAGE, {
       message: msg,
@@ -644,23 +655,24 @@ export class Agent {
    * @param {string} toolName
    * @returns {string}
    */
-  _formatToolResult(result, toolName) {
+  _formatToolResult(result, toolName, success) {
     // If the result has a toApiContent method, use it (ToolResult)
     if (result && typeof result.toApiContent === "function") {
       return result.toApiContent(toolName);
     }
+    const successStr = success ? "success" : "error";
     // String: wrap in XML
     if (typeof result === "string") {
-      return `<tool name="${toolName}" status="success">\n  <output>${xmlEscape(result)}</output>\n</tool>`;
+      return `<tool name="${toolName}" status="${successStr}">\n  <output>${xmlEscape(result)}</output>\n</tool>`;
     }
     // Object: serialize and wrap
     if (typeof result === "object" && result !== null) {
       const json = JSON.stringify(result);
-      return `<tool name="${toolName}" status="success">\n  <output>${xmlEscape(json)}</output>\n</tool>`;
+      return `<tool name="${toolName}" status="${successStr}">\n  <output>${xmlEscape(json)}</output>\n</tool>`;
     }
     // Primitive
     const str = String(result);
-    return `<tool name="${toolName}" status="success">\n  <output>${xmlEscape(str)}</output>\n</tool>`;
+    return `<tool name="${toolName}" status="${successStr}">\n  <output>${xmlEscape(str)}</output>\n</tool>`;
   }
 
   // ── Helpers ───────────────────────────────────────────────────────────────

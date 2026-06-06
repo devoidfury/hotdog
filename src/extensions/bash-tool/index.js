@@ -16,9 +16,6 @@ import {
 export const DEFAULT_BASH_TIMEOUT_MS = 60000;
 export const DEFAULT_MAX_TOOL_OUTPUT_LINES = 600;
 
-/**
- * BashTool — executes shell commands.
- */
 export class BashTool {
   static TOOL_NAME = "bash";
 

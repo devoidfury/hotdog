@@ -22,6 +22,9 @@ import {
   readSessionEntries,
   replayEntriesIntoContext,
 } from "./session/session-log.js";
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+import { dirname, join } from "node:path";
 
 // ── Extension Loading ────────────────────────────────────────────────────────
 
@@ -202,7 +205,7 @@ async function main() {
   // this hook allows extensions to attach the actual handler functions.
   core.hooks.emit(HOOKS.CLI_SUBCOMMANDS_REGISTER, core.cliSubcommandRegistry);
 
-  // Emit CLI args parsed hook after extensions are loaded (so handlers are registered)
+  // Emit CLI_ARGS_PARSED hook after extensions are loaded, before performing any actions.
   core.hooks.emit(HOOKS.CLI_ARGS_PARSED, { cli });
 
   // ── Subcommand dispatch ─────────────────────────────────────────────────
@@ -220,9 +223,15 @@ async function main() {
   }
 
   if (cli.version) {
-    console.log("oa-agent 0.1.0");
+    const __dirname = dirname(fileURLToPath(import.meta.url));
+    const pkg = JSON.parse(
+      readFileSync(join(__dirname, "../../package.json"), "utf-8"),
+    );
+    const VERSION = pkg.version;
+    console.log(`oa-agent ${VERSION}`);
     return 0;
   }
+
   if (cli.help) {
     const subcommandHelp = core.cliSubcommandRegistry.generateHelpText();
     const fullHelp = generateHelpText(configRegistry);
@@ -230,9 +239,10 @@ async function main() {
     return 0;
   }
 
-  // No explicit subcommand — default to interactive "cli" when stdin is a TTY
+  // No explicit subcommand — use default_subcommand from config when stdin is a TTY
   if (process.stdin.isTTY) {
-    const defaultSubcommand = core.cliSubcommandRegistry.get("cli");
+    const defaultSubcommandName = config.defaultSubcommand || "cli";
+    const defaultSubcommand = core.cliSubcommandRegistry.get(defaultSubcommandName);
     if (defaultSubcommand && defaultSubcommand.handler) {
       return await defaultSubcommand.handler(cli, core);
     }

@@ -7,6 +7,7 @@
   "skills_path": "/skills",
   "extension_paths": ["builtins"],
   "extension_autoload": true,
+  "default_subcommand": "cli",
   "profiles": {
     "default": {
       "blacklist_tools": ["patch", "explore"]

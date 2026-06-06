@@ -1,9 +1,5 @@
 // LLM client for communicating with AI providers.
 // Provides HTTP transport, streaming (SSE), and retry logic.
-//
-// Naming: Stream events use camelCase for internal fields (toolCallId).
-// The toolCallId field contains the OpenAI `id` value from tool_calls.
-// Final tool calls are normalized to OpenAI format: { id, type, function }.
 
 import {
   DEFAULT_AI_URL,
@@ -12,7 +8,6 @@ import {
 } from "../config.js";
 import { retryWithBackoff } from "./retry.js";
 import { createMarkerMangler } from "../marker-mangler.js";
-
 export class LlmError extends Error {
   constructor(message, type = "unknown") {
     super(message);
@@ -120,8 +115,14 @@ export class LlmClient {
           const clonedTc = { ...tc };
           if (clonedTc.function) {
             clonedTc.function = { ...clonedTc.function };
-            if (clonedTc.function.name) clonedTc.function.name = this._mangler.escape(clonedTc.function.name);
-            if (clonedTc.function.arguments) clonedTc.function.arguments = this._mangler.escape(clonedTc.function.arguments);
+            if (clonedTc.function.name)
+              clonedTc.function.name = this._mangler.escape(
+                clonedTc.function.name,
+              );
+            if (clonedTc.function.arguments)
+              clonedTc.function.arguments = this._mangler.escape(
+                clonedTc.function.arguments,
+              );
           }
           return clonedTc;
         });
@@ -208,7 +209,10 @@ export class LlmClient {
       const onAbort = () => abortController.abort();
 
       // Prefer standard AbortSignal event listener
-      if (cancelToken.signal && typeof cancelToken.signal.addEventListener === "function") {
+      if (
+        cancelToken.signal &&
+        typeof cancelToken.signal.addEventListener === "function"
+      ) {
         cancelToken.signal.addEventListener("abort", onAbort, { once: true });
         removeCancelListener = () =>
           cancelToken.signal.removeEventListener("abort", onAbort);
@@ -234,18 +238,21 @@ export class LlmClient {
           this.chatTimeoutSecs * 1000,
         );
         try {
-          return await this._doRequest(url, apiKey, request, abortController.signal);
+          return await this._doRequest(
+            url,
+            apiKey,
+            request,
+            abortController.signal,
+          );
         } finally {
           clearTimeout(timeoutId);
         }
       };
 
       // Use retryWithBackoff for transient errors
-      const response = await retryWithBackoff(
-        doRequestWithTimeout,
-        12,
-        { signal: abortController.signal },
-      );
+      const response = await retryWithBackoff(doRequestWithTimeout, 12, {
+        signal: abortController.signal,
+      });
 
       yield* this._processSSE(response);
     } finally {

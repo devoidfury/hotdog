@@ -1,7 +1,4 @@
 // TaskManager — manages background task agents using the Agent class.
-//
-// Replaces the old TaskWorker-based implementation. Task agents are now
-// full Agent instances with restricted tool sets and filtered output.
 
 import { Message } from "../context/message.js";
 import { LlmError } from "../llm-client/client.js";
@@ -142,7 +139,8 @@ export class TaskManager {
       "";
 
     // 3. Build system prompt from profile
-    const resolvedRole = taskProfile?.role || "A focused worker that executes tasks autonomously";
+    const resolvedRole =
+      taskProfile?.role || "A focused worker that executes tasks autonomously";
     const resolvedProfileBody = taskProfile?.body || "";
 
     // 4. Resolve allowed tools: profile whitelist takes precedence
@@ -176,7 +174,12 @@ export class TaskManager {
     const statusRef = { value: TASK_STATUS.RUNNING };
 
     // 9. Run the agent in background
-    const runPromise = this._runTask(agent, taskDescription, abortController, statusRef);
+    const runPromise = this._runTask(
+      agent,
+      taskDescription,
+      abortController,
+      statusRef,
+    );
 
     // 10. Store task info
     this._tasks.set(taskId, {

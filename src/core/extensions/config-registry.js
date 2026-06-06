@@ -1,10 +1,9 @@
 // Config Registry — manages extension-registered CLI flags and config params.
 //
-// Config params are primarily defined in extension.json configSchema (single
-// source of truth). The loader automatically extracts defaults from the schema
-// and registers them as config params. Extensions can still use the
-// CONFIG_CLI_FLAGS_REGISTER and CONFIG_PARAMS_REGISTER hooks for programmatic
-// control when needed.
+// Config params are primarily defined in extension.json configSchema.
+// The loader automatically extracts defaults from the schema and registers
+// them as config params. Extensions can still use the CONFIG_CLI_FLAGS_REGISTER
+// and CONFIG_PARAMS_REGISTER hooks for programmatic control when needed.
 //
 // Usage in an extension (programmatic registration):
 //

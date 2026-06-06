@@ -1,5 +1,4 @@
 // CLI argument parsing.
-// Extracted from main.js.
 // Supports dynamic CLI flags registered via ConfigRegistry.
 
 export function parseArgs(configRegistry = null, knownSubcommands = null) {
@@ -50,38 +49,54 @@ export function parseArgs(configRegistry = null, knownSubcommands = null) {
 
   // Core flags
   const coreFlags = [
-    { short: '-f', long: '--config', type: 'string', hasValue: true },
-    { short: '-m', long: '--model', type: 'string', hasValue: true },
-    { short: null, long: '--ai-url', type: 'string', hasValue: true },
-    { short: null, long: '--url', type: 'string', hasValue: true, deprecated: true },
-    { short: '-k', long: '--api-key', type: 'string', hasValue: true },
-    { short: '-p', long: '--profile', type: 'string', hasValue: true },
-    { short: null, long: '--provider', type: 'string', hasValue: true },
-    { short: null, long: '--role', type: 'string', hasValue: true },
-    { short: null, long: '--skills-path', type: 'string', hasValue: true },
-    { short: null, long: '--prompts-path', type: 'string', hasValue: true },
-    { short: null, long: '--chat-timeout', type: 'number', hasValue: true },
-    { short: null, long: '--embeddings-timeout', type: 'number', hasValue: true },
-    { short: null, long: '--no-stream', type: 'boolean', hasValue: false },
-    { short: null, long: '--show-tools', type: 'boolean', hasValue: false },
-    { short: null, long: '--hide-tools', type: 'boolean', hasValue: false },
-    { short: null, long: '--show-thinking', type: 'boolean', hasValue: false },
-    { short: null, long: '--hide-thinking', type: 'boolean', hasValue: false },
-    { short: '-t', long: '--thinker', type: 'string', hasValue: true },
-    { short: null, long: '--toolfmt', type: 'string', hasValue: true },
-    { short: null, long: '--tool-output-fmt', type: 'string', hasValue: true },
-    { short: null, long: '--no-log', type: 'boolean', hasValue: false },
-    { short: '-l', long: '--loud', type: 'boolean', hasValue: false },
-    { short: null, long: '--compact-debug', type: 'boolean', hasValue: false },
-    { short: '-s', long: '--session-id', type: 'string', hasValue: true },
-    { short: null, long: '--tokens', type: 'boolean', hasValue: false },
-    { short: null, long: '--theme', type: 'string', hasValue: true },
-    { short: null, long: '--colors', type: 'boolean', hasValue: false },
-    { short: null, long: '--no-colors', type: 'boolean', hasValue: false },
-    { short: null, long: '--system-prompt-template', type: 'string', hasValue: true },
-    { short: null, long: '--json', type: 'boolean', hasValue: false },
-    { short: '-v', long: '--version', type: 'boolean', hasValue: false },
-    { short: '-h', long: '--help', type: 'boolean', hasValue: false },
+    { short: "-f", long: "--config", type: "string", hasValue: true },
+    { short: "-m", long: "--model", type: "string", hasValue: true },
+    { short: null, long: "--ai-url", type: "string", hasValue: true },
+    {
+      short: null,
+      long: "--url",
+      type: "string",
+      hasValue: true,
+      deprecated: true,
+    },
+    { short: "-k", long: "--api-key", type: "string", hasValue: true },
+    { short: "-p", long: "--profile", type: "string", hasValue: true },
+    { short: null, long: "--provider", type: "string", hasValue: true },
+    { short: null, long: "--role", type: "string", hasValue: true },
+    { short: null, long: "--skills-path", type: "string", hasValue: true },
+    { short: null, long: "--prompts-path", type: "string", hasValue: true },
+    { short: null, long: "--chat-timeout", type: "number", hasValue: true },
+    {
+      short: null,
+      long: "--embeddings-timeout",
+      type: "number",
+      hasValue: true,
+    },
+    { short: null, long: "--no-stream", type: "boolean", hasValue: false },
+    { short: null, long: "--show-tools", type: "boolean", hasValue: false },
+    { short: null, long: "--hide-tools", type: "boolean", hasValue: false },
+    { short: null, long: "--show-thinking", type: "boolean", hasValue: false },
+    { short: null, long: "--hide-thinking", type: "boolean", hasValue: false },
+    { short: "-t", long: "--thinker", type: "string", hasValue: true },
+    { short: null, long: "--toolfmt", type: "string", hasValue: true },
+    { short: null, long: "--tool-output-fmt", type: "string", hasValue: true },
+    { short: null, long: "--no-log", type: "boolean", hasValue: false },
+    { short: "-l", long: "--loud", type: "boolean", hasValue: false },
+    { short: null, long: "--compact-debug", type: "boolean", hasValue: false },
+    { short: "-s", long: "--session-id", type: "string", hasValue: true },
+    { short: null, long: "--tokens", type: "boolean", hasValue: false },
+    { short: null, long: "--theme", type: "string", hasValue: true },
+    { short: null, long: "--colors", type: "boolean", hasValue: false },
+    { short: null, long: "--no-colors", type: "boolean", hasValue: false },
+    {
+      short: null,
+      long: "--system-prompt-template",
+      type: "string",
+      hasValue: true,
+    },
+    { short: null, long: "--json", type: "boolean", hasValue: false },
+    { short: "-v", long: "--version", type: "boolean", hasValue: false },
+    { short: "-h", long: "--help", type: "boolean", hasValue: false },
   ];
 
   for (const flag of coreFlags) {
@@ -96,8 +111,8 @@ export function parseArgs(configRegistry = null, knownSubcommands = null) {
     const extFlags = configRegistry.getCliFlags();
     for (const flag of extFlags) {
       const entry = {
-        type: flag.type || 'string',
-        hasValue: flag.type !== 'boolean',
+        type: flag.type || "string",
+        hasValue: flag.type !== "boolean",
         description: flag.description,
         extension: true,
         // Store the original long flag name for key extraction
@@ -117,7 +132,7 @@ export function parseArgs(configRegistry = null, knownSubcommands = null) {
 
   // Helper: extract option key from flag name
   function extractKey(flagName) {
-    return flagName.replace(/^-+/, '').replace(/-/g, '_').toLowerCase();
+    return flagName.replace(/^-+/, "").replace(/-/g, "_").toLowerCase();
   }
 
   let i = 0;
@@ -130,7 +145,7 @@ export function parseArgs(configRegistry = null, knownSubcommands = null) {
     if (flagDef) {
       // Handle subcommand aliases (like "prompt" as a subcommand)
       if (flagDef.isSubcommand) {
-        options.subcommand = 'prompt';
+        options.subcommand = "prompt";
         if (flagDef.hasValue && i + 1 < args.length) {
           options.prompt = args[++i];
         }
@@ -146,33 +161,33 @@ export function parseArgs(configRegistry = null, knownSubcommands = null) {
       // Handle boolean flags
       if (!flagDef.hasValue) {
         // Core boolean flags (explicit handling)
-        if (arg === '--no-stream') {
+        if (arg === "--no-stream") {
           options.stream = false;
-        } else if (arg === '--show-tools') {
+        } else if (arg === "--show-tools") {
           options.hideTools = false;
-        } else if (arg === '--hide-tools') {
+        } else if (arg === "--hide-tools") {
           options.hideTools = true;
-        } else if (arg === '--show-thinking') {
+        } else if (arg === "--show-thinking") {
           options.hideThinking = false;
-        } else if (arg === '--hide-thinking') {
+        } else if (arg === "--hide-thinking") {
           options.hideThinking = true;
-        } else if (arg === '--no-log') {
+        } else if (arg === "--no-log") {
           options.noLog = true;
-        } else if (arg === '--tokens') {
+        } else if (arg === "--tokens") {
           options.tokens = true;
-        } else if (arg === '--colors') {
+        } else if (arg === "--colors") {
           options.colors = true;
-        } else if (arg === '--no-colors') {
+        } else if (arg === "--no-colors") {
           options.colors = false;
-        } else if (arg === '--json') {
+        } else if (arg === "--json") {
           options.wantsJson = true;
-        } else if (arg === '--version') {
+        } else if (arg === "--version") {
           options.version = true;
-        } else if (arg === '--help') {
+        } else if (arg === "--help") {
           options.help = true;
-        } else if (arg === '--loud') {
+        } else if (arg === "--loud") {
           options.loud = true;
-        } else if (arg === '--compact-debug') {
+        } else if (arg === "--compact-debug") {
           options.compactDebug = true;
         }
         // Extension boolean flags (generic handling)
@@ -195,15 +210,15 @@ export function parseArgs(configRegistry = null, knownSubcommands = null) {
 
       // Parse the value based on type
       let parsedValue = value;
-      if (flagDef.type === 'number' || flagDef.type === 'int') {
+      if (flagDef.type === "number" || flagDef.type === "int") {
         parsedValue = parseInt(value, 10);
         if (isNaN(parsedValue)) {
           console.error(`Error: ${arg} requires a numeric value`);
           process.exit(1);
         }
-      } else if (flagDef.type === 'array') {
-        parsedValue = value.split(',');
-      } else if (typeof flagDef.parse === 'function') {
+      } else if (flagDef.type === "array") {
+        parsedValue = value.split(",");
+      } else if (typeof flagDef.parse === "function") {
         parsedValue = flagDef.parse(value);
       }
 
@@ -217,7 +232,7 @@ export function parseArgs(configRegistry = null, knownSubcommands = null) {
     }
 
     // Check if this looks like an unknown flag
-    if (arg.startsWith('-')) {
+    if (arg.startsWith("-")) {
       // Could be an unknown flag — warn and skip
       console.warn(`Warning: unknown flag '${arg}'`);
       i++;
@@ -227,7 +242,7 @@ export function parseArgs(configRegistry = null, knownSubcommands = null) {
     // Positional argument — treat as subcommand or throw
     const isKnownSubcommand = knownSubcommands
       ? knownSubcommands.includes(arg)
-      : (arg === 'info' || arg === 'show-prompt' || arg === 'review');
+      : arg === "info" || arg === "show-prompt" || arg === "review";
 
     if (isKnownSubcommand) {
       options.subcommand = arg;
@@ -295,10 +310,7 @@ export function generateHelpText(configRegistry) {
   if (configRegistry) {
     const extHelp = configRegistry.getCliHelpText();
     if (extHelp) {
-      help = help.replace(
-        /(-h, --help\s+Show help)/,
-        `$1\n${extHelp}`
-      );
+      help = help.replace(/(-h, --help\s+Show help)/, `$1\n${extHelp}`);
     }
   }
 

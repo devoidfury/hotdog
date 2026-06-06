@@ -72,10 +72,11 @@ describe('Hook + Extension Integration', () => {
     expect(toolNames).toContain('edit');
     expect(toolNames).toContain('grep');
     expect(toolNames).toContain('find');
-    expect(toolNames).toContain('question');
     expect(toolNames).toContain('pager');
     // bash is now registered by bash-tool extension, not core-tools
     expect(toolNames).not.toContain('bash');
+    // question is now registered by question-tool extension, not core-tools
+    expect(toolNames).not.toContain('question');
     // explore is disabled by default
     expect(toolNames).not.toContain('explore');
     // model is registered by model-switch extension, not core-tools

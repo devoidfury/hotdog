@@ -1,5 +1,4 @@
 // Compaction utilities — token estimation, message serialization, helpers.
-// Moved from src/compaction.js into the compaction extension.
 
 // ── Token Estimation ────────────────────────────────────────────────────────
 
@@ -16,20 +15,22 @@ export function estimateMessageTokens(msg) {
  */
 function _messageCharCount(msg) {
   switch (msg.role) {
-    case 'user':
-    case 'system':
+    case "user":
+    case "system":
       return msg.content.length;
-    case 'assistant': {
+    case "assistant": {
       let chars = msg.content.length;
       if (msg.reasoning_content) chars += msg.reasoning_content.length;
       if (msg.tool_calls) {
         for (const tc of msg.tool_calls) {
-          chars += (tc.function?.name || '').length + (tc.function?.arguments || '').length;
+          chars +=
+            (tc.function?.name || "").length +
+            (tc.function?.arguments || "").length;
         }
       }
       return chars;
     }
-    case 'tool':
+    case "tool":
       return msg.content.length;
     default:
       return msg.content.length;
@@ -58,7 +59,7 @@ export function findFirstKeptIndex(messages, keepRecent) {
   const target = keepRecent * 2;
 
   for (let i = messages.length - 1; i >= 0; i--) {
-    if (messages[i].role === 'system') continue;
+    if (messages[i].role === "system") continue;
     count++;
     if (count >= target) return i + 1;
   }
@@ -89,10 +90,10 @@ export function serializeConversation(messages) {
 
   for (const msg of messages) {
     switch (msg.role) {
-      case 'user':
+      case "user":
         parts.push(`[User]: ${msg.content}`);
         break;
-      case 'assistant': {
+      case "assistant": {
         if (msg.reasoning_content) {
           parts.push(`[Assistant thinking]: ${msg.reasoning_content}`);
         }
@@ -101,20 +102,23 @@ export function serializeConversation(messages) {
         }
         if (msg.tool_calls) {
           const calls = msg.tool_calls
-            .map(tc => `${tc.function?.name}(${tc.function?.arguments || ''})`)
-            .join('; ');
+            .map(
+              (tc) => `${tc.function?.name}(${tc.function?.arguments || ""})`,
+            )
+            .join("; ");
           parts.push(`[Assistant tool calls]: ${calls}`);
         }
         break;
       }
-      case 'tool': {
-        const truncated = msg.content.length > TOOL_RESULT_MAX_CHARS
-          ? `${msg.content.slice(0, TOOL_RESULT_MAX_CHARS)}\n\n[... ${msg.content.length - TOOL_RESULT_MAX_CHARS} more characters truncated]`
-          : msg.content;
+      case "tool": {
+        const truncated =
+          msg.content.length > TOOL_RESULT_MAX_CHARS
+            ? `${msg.content.slice(0, TOOL_RESULT_MAX_CHARS)}\n\n[... ${msg.content.length - TOOL_RESULT_MAX_CHARS} more characters truncated]`
+            : msg.content;
         parts.push(`[Tool result]: ${truncated}`);
         break;
       }
-      case 'system':
+      case "system":
         // Skip system messages in summary (they're re-injected)
         break;
       default:
@@ -122,12 +126,15 @@ export function serializeConversation(messages) {
     }
   }
 
-  return parts.join('\n\n');
+  return parts.join("\n\n");
 }
 
 // ── Public API ──────────────────────────────────────────────────────────────
 
-import { SUMMARIZATION_SYSTEM_PROMPT, SUMMARIZATION_USER_PROMPT_TEMPLATE } from './prompts.js';
+import {
+  SUMMARIZATION_SYSTEM_PROMPT,
+  SUMMARIZATION_USER_PROMPT_TEMPLATE,
+} from "./prompts.js";
 
 /**
  * Compact the context by summarizing older messages.
@@ -149,11 +156,14 @@ export async function compactMessages(messages, llmChat, model, settings) {
 
   const messagesToCompact = messages.slice(0, firstKept);
   const conversation = serializeConversation(messagesToCompact);
-  const userPrompt = SUMMARIZATION_USER_PROMPT_TEMPLATE.replace('{conversation}', conversation);
+  const userPrompt = SUMMARIZATION_USER_PROMPT_TEMPLATE.replace(
+    "{conversation}",
+    conversation,
+  );
 
   const summaryMessages = [
-    { role: 'system', content: SUMMARIZATION_SYSTEM_PROMPT },
-    { role: 'user', content: userPrompt },
+    { role: "system", content: SUMMARIZATION_SYSTEM_PROMPT },
+    { role: "user", content: userPrompt },
   ];
 
   let summary;

@@ -1,5 +1,5 @@
 {
-  "name": "session-review",
+  "name": "ui-session-review-cli",
   "provides": ["cli:subcommands", "tools"],
   "loadOrder": 10,
   "description": "Provides the review CLI subcommand and review tool for session log inspection",

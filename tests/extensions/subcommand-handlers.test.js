@@ -81,7 +81,7 @@ describe("Session Review Extension - exit codes", () => {
 
   it("registers review subcommand via CLI_SUBCOMMANDS_REGISTER hook", async () => {
     const core = createMockCore();
-    const { create } = await import("../../src/extensions/session-review/index.js");
+    const { create } = await import("../../src/extensions/ui-session-review-cli/index.js");
     const ext = create(core);
 
     expect(ext).not.toBeNull();
@@ -106,7 +106,7 @@ describe("Session Review Extension - exit codes", () => {
     log.writeAssistant("world");
 
     const core = createMockCore();
-    const { create } = await import("../../src/extensions/session-review/index.js");
+    const { create } = await import("../../src/extensions/ui-session-review-cli/index.js");
     const ext = create(core);
     await ext.hooks[HOOKS.CLI_SUBCOMMANDS_REGISTER](core.cliSubcommandRegistry);
 
@@ -125,7 +125,7 @@ describe("Session Review Extension - exit codes", () => {
 
   it("review subcommand returns exit code 1 for non-existent session", async () => {
     const core = createMockCore();
-    const { create } = await import("../../src/extensions/session-review/index.js");
+    const { create } = await import("../../src/extensions/ui-session-review-cli/index.js");
     const ext = create(core);
     await ext.hooks[HOOKS.CLI_SUBCOMMANDS_REGISTER](core.cliSubcommandRegistry);
 
@@ -157,7 +157,7 @@ describe("Session Review Extension - exit codes", () => {
     log.writeToolResult("<output>done</output>", "tc_1", "bash");
 
     const core = createMockCore();
-    const { create } = await import("../../src/extensions/session-review/index.js");
+    const { create } = await import("../../src/extensions/ui-session-review-cli/index.js");
     const ext = create(core);
     await ext.hooks[HOOKS.CLI_SUBCOMMANDS_REGISTER](core.cliSubcommandRegistry);
 
@@ -187,7 +187,7 @@ describe("Session Review Extension - exit codes", () => {
     log.writeAssistant("good");
 
     const core = createMockCore();
-    const { create } = await import("../../src/extensions/session-review/index.js");
+    const { create } = await import("../../src/extensions/ui-session-review-cli/index.js");
     const ext = create(core);
     await ext.hooks[HOOKS.CLI_SUBCOMMANDS_REGISTER](core.cliSubcommandRegistry);
 
@@ -231,7 +231,7 @@ describe("Session Review Extension - exit codes", () => {
 describe("Info Show-Prompt Extension - exit codes", () => {
   it("registers info and show-prompt subcommands", async () => {
     const core = createMockCore();
-    const { create } = await import("../../src/extensions/info-show-prompt/index.js");
+    const { create } = await import("../../src/extensions/ui-info-cli/index.js");
     const ext = create(core);
 
     expect(ext).not.toBeNull();
@@ -245,7 +245,7 @@ describe("Info Show-Prompt Extension - exit codes", () => {
 
   it("info subcommand returns exit code 0", async () => {
     const core = createMockCore();
-    const { create } = await import("../../src/extensions/info-show-prompt/index.js");
+    const { create } = await import("../../src/extensions/ui-info-cli/index.js");
     const ext = create(core);
     await ext.hooks[HOOKS.CLI_SUBCOMMANDS_REGISTER](core.cliSubcommandRegistry);
 
@@ -264,7 +264,7 @@ describe("Info Show-Prompt Extension - exit codes", () => {
 
   it("info subcommand returns 0 for text output", async () => {
     const core = createMockCore();
-    const { create } = await import("../../src/extensions/info-show-prompt/index.js");
+    const { create } = await import("../../src/extensions/ui-info-cli/index.js");
     const ext = create(core);
     await ext.hooks[HOOKS.CLI_SUBCOMMANDS_REGISTER](core.cliSubcommandRegistry);
 
@@ -283,7 +283,7 @@ describe("Info Show-Prompt Extension - exit codes", () => {
 
   it("show-prompt subcommand returns exit code 0", async () => {
     const core = createMockCore();
-    const { create } = await import("../../src/extensions/info-show-prompt/index.js");
+    const { create } = await import("../../src/extensions/ui-info-cli/index.js");
     const ext = create(core);
     await ext.hooks[HOOKS.CLI_SUBCOMMANDS_REGISTER](core.cliSubcommandRegistry);
 
@@ -305,7 +305,7 @@ describe("Info Show-Prompt Extension - exit codes", () => {
 describe("One-Shot Extension - exit codes", () => {
   it("registers prompt subcommand via CLI_SUBCOMMANDS_REGISTER hook", async () => {
     const core = createMockCore();
-    const { create } = await import("../../src/extensions/one-shot/index.js");
+    const { create } = await import("../../src/extensions/ui-one-shot/index.js");
     const ext = create(core);
 
     expect(ext).not.toBeNull();
@@ -320,7 +320,7 @@ describe("One-Shot Extension - exit codes", () => {
 
   it("CLI_ARGS_PARSED hook sets subcommand when --prompt flag is used", async () => {
     const core = createMockCore();
-    const { create } = await import("../../src/extensions/one-shot/index.js");
+    const { create } = await import("../../src/extensions/ui-one-shot/index.js");
     const ext = create(core);
 
     const cli = { prompt: "test prompt" };
@@ -331,7 +331,7 @@ describe("One-Shot Extension - exit codes", () => {
 
   it("CLI_ARGS_PARSED hook does nothing when --prompt flag is not used", async () => {
     const core = createMockCore();
-    const { create } = await import("../../src/extensions/one-shot/index.js");
+    const { create } = await import("../../src/extensions/ui-one-shot/index.js");
     const ext = create(core);
 
     const cli = { prompt: null };
@@ -348,9 +348,9 @@ describe("Subcommand handler return types", () => {
     const core = createMockCore();
 
     // Load all extensions that register subcommands
-    const { create: createReview } = await import("../../src/extensions/session-review/index.js");
-    const { create: createInfo } = await import("../../src/extensions/info-show-prompt/index.js");
-    const { create: createOneShot } = await import("../../src/extensions/one-shot/index.js");
+    const { create: createReview } = await import("../../src/extensions/ui-session-review-cli/index.js");
+    const { create: createInfo } = await import("../../src/extensions/ui-info-cli/index.js");
+    const { create: createOneShot } = await import("../../src/extensions/ui-one-shot/index.js");
 
     const reviewExt = createReview(core);
     const infoExt = createInfo(core);

@@ -1,5 +1,5 @@
 {
-  "name": "one-shot",
+  "name": "ui-one-shot",
   "provides": ["cli:subcommands"],
   "loadOrder": 10,
   "description": "One-shot prompt mode — run a single prompt and exit",

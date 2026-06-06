@@ -1,7 +1,7 @@
 // Tests for AsyncInteractiveCliInput — the Input interface for interactive CLI.
 
 import { describe, it, expect, beforeEach, afterEach } from "bun:test";
-import { AsyncInteractiveCliInput } from "../../src/extensions/interactive-cli/index.js";
+import { AsyncInteractiveCliInput } from "../../src/extensions/ui-interactive-cli/index.js";
 import { NoopInput } from "../../src/core/context/input.js";
 
 describe("NoopInput", () => {

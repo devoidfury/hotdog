@@ -1,6 +1,6 @@
 {
-  "name": "interactive-cli",
-  "provides": ["interactive-session"],
+  "name": "ui-interactive-cli",
+  "provides": ["interactive-session", "cli:subcommands"],
   "loadOrder": 10,
   "description": "Interactive CLI session with readline loop, slash commands, and shell execution",
   "cli:subcommands": [

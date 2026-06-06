@@ -260,7 +260,7 @@ function readExtensionMetadata(dirPath) {
 }
 
 /**
- * Discover extensions in a directory.
+ * Discover extensions in a directory recursively.
  */
 export function discoverExtensionsInDir(dirPath) {
   const extensions = [];
@@ -269,38 +269,49 @@ export function discoverExtensionsInDir(dirPath) {
     return extensions;
   }
 
-  const entries = fs.readdirSync(dirPath, { withFileTypes: true });
+  function scanDirectory(currentDir, relativeBase = "") {
+    const entries = fs.readdirSync(currentDir, { withFileTypes: true });
 
-  for (const entry of entries) {
-    if (!entry.isDirectory()) continue;
+    for (const entry of entries) {
+      if (!entry.isDirectory()) continue;
 
-    const dirFull = path.join(dirPath, entry.name);
-    if (isExtensionDirectory(dirFull)) {
-      const {
-        name,
-        provides,
-        loadOrder,
-        dependsOn,
-        autoload,
-        configSchema,
-        cliSubcommands,
-        cliFlags,
-      } = readExtensionMetadata(dirFull);
+      const dirFull = path.join(currentDir, entry.name);
+      const relativePath = relativeBase
+        ? `${relativeBase}/${entry.name}`
+        : entry.name;
 
-      extensions.push({
-        name: name || entry.name,
-        path: `./extensions/${entry.name}/index.js`,
-        dirPath,
-        provides,
-        loadOrder,
-        dependsOn,
-        autoload,
-        configSchema,
-        cliSubcommands,
-        cliFlags,
-      });
+      if (isExtensionDirectory(dirFull)) {
+        const {
+          name,
+          provides,
+          loadOrder,
+          dependsOn,
+          autoload,
+          configSchema,
+          cliSubcommands,
+          cliFlags,
+        } = readExtensionMetadata(dirFull);
+
+        extensions.push({
+          name: name || entry.name,
+          path: `./extensions/${relativePath}/index.js`,
+          dirPath: dirFull,
+          provides,
+          loadOrder,
+          dependsOn,
+          autoload,
+          configSchema,
+          cliSubcommands,
+          cliFlags,
+        });
+      }
+
+      // Recurse into subdirectories regardless of whether this one is an extension
+      scanDirectory(dirFull, relativePath);
     }
   }
+
+  scanDirectory(dirPath);
 
   return extensions;
 }

@@ -78,9 +78,30 @@ describe('MessageBus', () => {
     expect(mockAgent._cancelled).toBe(true);
   });
 
-  it('sleep returns a promise', () => {
-    const sleepPromise = bus._sleep(10);
-    expect(sleepPromise).toBeInstanceOf(Promise);
+  it('_waitForMessage returns a promise', async () => {
+    // _waitForMessage should return a promise that resolves when a message is enqueued
+    const waitPromise = bus._waitForMessage();
+    expect(waitPromise).toBeInstanceOf(Promise);
+    // Resolve it by enqueuing a message
+    bus.enqueue('wake');
+    await waitPromise;
+  });
+
+  it('cancel resolves the deferred wait', async () => {
+    // _waitForMessage should also resolve when cancel() is called
+    const waitPromise = bus._waitForMessage();
+    expect(waitPromise).toBeInstanceOf(Promise);
+    // Resolve it by cancelling
+    bus.cancel();
+    await waitPromise;
+  });
+
+  it('_waitForMessage returns immediately when queue is non-empty', async () => {
+    bus.enqueue('already here');
+    // Should return immediately since queue is non-empty
+    await bus._waitForMessage();
+    // The message should still be in the queue
+    expect(bus.isIdle()).toBe(false);
   });
 
   it('handles multiple enqueues', () => {

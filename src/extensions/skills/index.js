@@ -1,6 +1,6 @@
 // Skills Extension
 // Manages skills loading, activation, and system prompt integration.
-// Hooks: systemPrompt:build, agent:toolContext, tools:register, slashCommands:register
+// Hooks: systemPrompt:build, agent:toolContext, tools:register, commands:register
 // Config defaults are defined in extension.json configSchema.
 // CLI flags are registered via the hook since they need programmatic control.
 
@@ -72,9 +72,9 @@ export function create(core) {
       },
 
       /**
-       * Register slash commands for skills.
+       * Register commands for skills.
        */
-      [HOOKS.SLASH_COMMANDS_REGISTER]: async ({ registry }) => {
+      [HOOKS.COMMANDS_REGISTER]: async ({ registry }) => {
         registry.register("skill", {
           description: "List skills or activate a skill (skill:<name>)",
           matches: (cmd) => cmd.startsWith("skill"),

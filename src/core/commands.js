@@ -1,8 +1,11 @@
-// Slash command dispatch for the agent.
-// Handles parsing and execution of slash commands from the CLI.
+// Command parsing for the agent.
+// Commands are the abstract concept — how they are invoked (slash commands,
+// menu items, API calls) is a UI implementation detail.
+// This module handles parsing raw command text into typed command objects.
 
 /**
- * Parsed slash command (without the leading `/`).
+ * Built-in command type constants.
+ * These are core commands that the agent always understands.
  */
 export const Command = {
   Help: "help",
@@ -16,10 +19,10 @@ export const Command = {
 };
 
 /**
- * Parse a raw command string (without leading `/`) into a typed command object.
+ * Parse a raw command string into a typed command object.
  *
- * @param {string} cmd - Raw command string (without leading `/`)
- * @param {Object} [registry] - Optional SlashCommandRegistry for custom commands
+ * @param {string} cmd - Raw command string
+ * @param {Object} [registry] - Optional CommandRegistry for custom commands
  * @returns {Object} Parsed command object { type, value }
  */
 export function parseCommand(cmd, registry) {

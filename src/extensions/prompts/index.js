@@ -1,6 +1,6 @@
 // Prompts Extension
 // Manages prompt templates loading and execution.
-// Hooks: tools:register, slashCommands:register
+// Hooks: tools:register, commands:register
 
 import { HOOKS } from '../../core/hooks.js';
 import { Message } from '../../core/context/message.js';
@@ -17,9 +17,9 @@ export function create(core) {
   return {
     hooks: {
       /**
-       * Register slash commands for prompts.
+       * Register commands for prompts.
        */
-      [HOOKS.SLASH_COMMANDS_REGISTER]: async ({ registry }) => {
+      [HOOKS.COMMANDS_REGISTER]: async ({ registry }) => {
         registry.register('prompt', {
           description: 'Execute a prompt template (prompt:<name> [args])',
           matches: (cmd) => cmd.startsWith('prompt:'),

@@ -2,6 +2,10 @@
 // Provides the interactive CLI session with readline loop.
 // Registers a default subcommand (empty name) that main.js dispatches to
 // when no subcommand is provided.
+//
+// This extension implements "slash commands" as the UI syntax for invoking
+// agent commands. The `/` prefix is a UI convention — commands themselves
+// are defined in the core and registered by extensions via COMMANDS_REGISTER.
 
 import readline from "node:readline";
 import { spawn } from "node:child_process";
@@ -267,9 +271,9 @@ export function create(core) {
 
       await agent.ensureSystemPrompt();
 
-      // Emit hook for extensions to register slash commands
-      core.hooks.emit(HOOKS.SLASH_COMMANDS_REGISTER, {
-        registry: agent.getSlashCommandRegistry(),
+      // Emit hook for extensions to register commands
+      core.hooks.emit(HOOKS.COMMANDS_REGISTER, {
+        registry: agent.getCommandRegistry(),
         agent,
       });
 

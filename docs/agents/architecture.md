@@ -93,13 +93,13 @@ Minimal Agent class that runs the LLM loop and delegates behavior to hooks. Key 
 - `ensureSystemPrompt()` — builds system prompt via hooks (extensions contribute)
 - `_processStream(stream)` — processes streaming LLM response (content, reasoning, tool calls, usage)
 - `_executeTools(toolCalls)` — executes tool calls with hook-based enrichment
-- `executeCommand(cmd)` — executes slash commands
+- `executeCommand(cmd)` — executes commands
 - `cancel()` — cancels the running agent loop
 - Properties: `model`, `context`, `iterationCount`, `sessionId`, `cancelled`, `hideTools`, `hideThinking`, `systemPrompt`
 - Task agent support: `_abortSignal`, `_toolWhitelist`, `_followQueue`, `_notifyCompletion()`
 
 ### Commands (`src/core/commands.js`)
-Slash command parsing and dispatch. Key exports:
+Command parsing — commands are the abstract concept, slash commands (/cmd) are one UI implementation. Key exports:
 - `Command` enum: `Help`, `Quit`, `Clear`, `Tools`, `Thinking`, `Tokens`, `Regenerate`, `Unknown`
 - `parseCommand(cmd, registry)` — parses raw command string into typed command object
 
@@ -110,8 +110,8 @@ Slash command parsing and dispatch. Key exports:
 
 ### Registries (`src/core/extensions/registries.js`)
 Unified command registries for extensions. Key exports:
-- `CommandRegistry` class — supports both slash commands (agent-level) and CLI subcommands
-- `createSlashCommandRegistry()` — creates slash command registry
+- `CommandRegistry` class — supports both agent-level commands and CLI subcommands
+- `createCommandRegistry()` — creates command registry for agent-level commands
 - `createSubcommandRegistry()` — creates CLI subcommand registry
 - Methods: `register()`, `has()`, `names()`, `get()`, `all()`, `match()`, `generateHelpText()`
 

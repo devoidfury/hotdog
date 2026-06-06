@@ -182,47 +182,61 @@ export class LlmClient {
     const request = this.buildChatRequest(messages, modelConfig, tools, true);
     const { url, apiKey } = this.resolveProviderSettings(modelConfig.name);
 
-    // Build an AbortSignal for cancellation
-    let abortController;
-    let signal;
+    // Build an AbortController for cancellation + timeout.
+    // Uses event-based cancellation (no polling) when the cancelToken
+    // is an AbortSignal or has a .signal property. Falls back to
+    // directly checking .aborted for custom cancel tokens.
+    const abortController = new AbortController();
+    let removeCancelListener = null;
+
     if (cancelToken) {
-      abortController = new AbortController();
-      signal = abortController.signal;
-      // Listen for cancellation
-      const checkCancel = () => {
-        if (cancelToken.aborted) {
-          abortController.abort();
-        } else {
-          setTimeout(checkCancel, 50);
-        }
-      };
-      checkCancel();
-    } else {
-      abortController = new AbortController();
-      signal = abortController.signal;
+      const onAbort = () => abortController.abort();
+
+      // Prefer standard AbortSignal event listener
+      if (cancelToken.signal && typeof cancelToken.signal.addEventListener === "function") {
+        cancelToken.signal.addEventListener("abort", onAbort, { once: true });
+        removeCancelListener = () =>
+          cancelToken.signal.removeEventListener("abort", onAbort);
+      } else if (typeof cancelToken.addEventListener === "function") {
+        // cancelToken itself is an AbortSignal
+        cancelToken.addEventListener("abort", onAbort, { once: true });
+        removeCancelListener = () =>
+          cancelToken.removeEventListener("abort", onAbort);
+      } else if (cancelToken.aborted) {
+        // Already aborted — abort immediately
+        abortController.abort();
+      }
+      // If cancelToken has neither addEventListener nor is already aborted,
+      // we can't listen for it. The caller can still abort via the agent's
+      // cancel() flag which is checked in the stream processing loop.
     }
 
-    // Wrap the request in a timeout
-    const doRequestWithTimeout = async () => {
-      const timeoutId = setTimeout(
-        () => abortController.abort(),
-        this.chatTimeoutSecs * 1000,
+    try {
+      // Wrap the request in a timeout
+      const doRequestWithTimeout = async () => {
+        const timeoutId = setTimeout(
+          () => abortController.abort(),
+          this.chatTimeoutSecs * 1000,
+        );
+        try {
+          return await this._doRequest(url, apiKey, request, abortController.signal);
+        } finally {
+          clearTimeout(timeoutId);
+        }
+      };
+
+      // Use retryWithBackoff for transient errors
+      const response = await retryWithBackoff(
+        doRequestWithTimeout,
+        12,
+        { signal: abortController.signal },
       );
-      try {
-        return await this._doRequest(url, apiKey, request, signal);
-      } finally {
-        clearTimeout(timeoutId);
-      }
-    };
 
-    // Use retryWithBackoff for transient errors
-    const response = await retryWithBackoff(
-      doRequestWithTimeout,
-      12,
-      { signal },
-    );
-
-    yield* this._processSSE(response);
+      yield* this._processSSE(response);
+    } finally {
+      // Clean up the cancel listener so it doesn't fire after the request completes
+      removeCancelListener?.();
+    }
   }
 
   /**

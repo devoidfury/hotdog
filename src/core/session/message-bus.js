@@ -1,6 +1,6 @@
 // Message Bus — owns the agent run loop.
 // Uses SessionManager for agent access.
-// Extracted from main.js to allow extensions to import it independently.
+// Event-driven: enqueue() resolves a deferred Promise instead of polling.
 
 import { formatError, isExpectedError } from "../error.js";
 import { OUTPUT_EVENT } from "../context/output.js";
@@ -8,8 +8,9 @@ import { HOOKS } from "../hooks.js";
 import { parseCommand } from "../commands.js";
 
 /**
- * A simple message bus that owns the agent run loop.
+ * An event-driven message bus that owns the agent run loop.
  * Uses SessionManager for agent access.
+ * No polling — enqueue() resolves a deferred Promise.
  */
 export class MessageBus {
   /**
@@ -23,16 +24,37 @@ export class MessageBus {
     this._queue = [];
     this._isRunning = false;
     this._cancelled = false;
+    // Deferred: resolves when a message is enqueued or cancelled.
+    this._deferred = null;
+    this._deferredResolve = null;
   }
 
+  /**
+   * Enqueue a message for processing.
+   * If the dispatch loop is waiting, this wakes it immediately.
+   */
   enqueue(text) {
     this._queue.push(text);
+    // Wake the dispatch loop if it's waiting on a deferred
+    if (this._deferredResolve) {
+      const resolve = this._deferredResolve;
+      this._deferred = null;
+      this._deferredResolve = null;
+      resolve();
+    }
   }
 
   cancel() {
     this._cancelled = true;
     const agent = this._sessionManager.getAgent();
     if (agent) agent.cancel();
+    // Also wake the loop so it can observe the cancellation immediately
+    if (this._deferredResolve) {
+      const resolve = this._deferredResolve;
+      this._deferred = null;
+      this._deferredResolve = null;
+      resolve();
+    }
   }
 
   isIdle() {
@@ -49,6 +71,7 @@ export class MessageBus {
 
   /**
    * Run the dispatch loop. Drains messages sequentially.
+   * Blocks indefinitely until cancelled.
    */
   async run() {
     await this._dispatchLoop(false);
@@ -56,9 +79,27 @@ export class MessageBus {
 
   /**
    * Run the dispatch loop, draining remaining messages after cancellation.
+   * Exits once cancelled and the queue is empty.
    */
   async runUntilCancelled() {
     await this._dispatchLoop(true);
+  }
+
+  /**
+   * Wait for a message to arrive or cancellation.
+   * Returns when either happens — the caller checks _queue and _cancelled.
+   */
+  async _waitForMessage() {
+    // If there's already something to process or we're cancelled, return immediately
+    if (this._queue.length > 0 || this._cancelled) return;
+
+    // Create a deferred and wait for enqueue() or cancel() to resolve it
+    this._deferred = new Promise((resolve) => {
+      this._deferredResolve = resolve;
+    });
+    await this._deferred;
+    this._deferred = null;
+    this._deferredResolve = null;
   }
 
   async _dispatchLoop(drain) {
@@ -66,18 +107,27 @@ export class MessageBus {
 
     while (true) {
       let text = this._queue.shift();
+
       if (text === undefined) {
+        // Queue is empty — check for exit conditions
         if (this._cancelled) {
           if (!drain) break;
-          await this._sleep(50);
+          // drain mode: wait for more messages that might have been enqueued
+          // during processing, then exit when truly empty
+          await this._waitForMessage();
+          if (this._queue.length === 0) break;
           continue;
         }
-        await this._sleep(50);
+
+        // Event-driven wait — no polling
+        await this._waitForMessage();
         continue;
       }
 
+      // Message was cancelled before we got to it
       if (this._cancelled) {
         if (!drain) break;
+        // drain mode: keep processing remaining queued messages
       }
 
       this._isRunning = true;
@@ -130,16 +180,12 @@ export class MessageBus {
     }
   }
 
-  _sleep(ms) {
-    return new Promise((resolve) => setTimeout(resolve, ms));
-  }
-
   /**
-   * Execute a slash command through the agent.
+   * Execute a command through the agent.
    */
   async executeCommand(cmdText) {
     const agent = this._sessionManager.getAgent();
-    const cmd = parseCommand(cmdText, agent?.getSlashCommandRegistry());
+    const cmd = parseCommand(cmdText, agent?.getCommandRegistry());
 
     if (!agent) {
       this._sink.emit({

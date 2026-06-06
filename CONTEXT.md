@@ -92,9 +92,10 @@ Domain concepts for the oa-agent AI agent harness. Implementation details are do
 
 ## Commands
 
-- **Commands** — User-triggered slash commands. Never LLM-triggered.
+- **Commands** — User-triggered operations. Never LLM-triggered. Commands are the abstract concept; how they are invoked is a UI implementation detail.
+- **Slash Commands** — The interactive CLI implements commands using `/` prefix syntax (e.g., `/quit`, `/compact`). This is one UI implementation for invoking commands.
 - **Core commands** (`Command` enum): `help`, `quit`, `clear`, `tools`, `thinking`, `tokens`, `regenerate`, `unknown`.
-- **Custom commands** — Extensions register additional slash commands via `SlashCommandRegistry` (e.g., `compact`, `model`, `skill`, `prompt:name`).
+- **Custom commands** — Extensions register commands via `CommandRegistry` using the `COMMANDS_REGISTER` hook (e.g., `compact`, `model`, `skill`, `prompt:name`).
 - **UI commands** — `help`, `quit` handled directly by UI layer; all others dispatched through agent.
 
 ## Configuration

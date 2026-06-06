@@ -2,7 +2,7 @@ import { describe, it, expect } from "bun:test";
 import { create as createModelSwitchExtension } from "../../src/extensions/model-switch/index.js";
 import { HookSystem, HOOKS } from "../../src/core/hooks.js";
 import { ToolRegistry } from "../../src/core/extensions/tool-registry.js";
-import { createSlashCommandRegistry } from "../../src/core/extensions/registries.js";
+import { createCommandRegistry } from "../../src/core/extensions/registries.js";
 
 function createMockCore(config = {}) {
   return {
@@ -61,27 +61,27 @@ describe("Model-switch extension", () => {
     expect(core.toolRegistry.has("model")).toBe(false);
   });
 
-  it("registers slash commands when commandEnabled is true", async () => {
+  it("registers commands when commandEnabled is true", async () => {
     const core = createMockCore({
       coreConfig: { modelSwitch: { commandEnabled: true } },
     });
     const ext = createModelSwitchExtension(core);
 
-    const registry = createSlashCommandRegistry();
-    await ext.hooks[HOOKS.SLASH_COMMANDS_REGISTER]({ registry });
+    const registry = createCommandRegistry();
+    await ext.hooks[HOOKS.COMMANDS_REGISTER]({ registry });
 
     expect(registry.has("model")).toBe(true);
     expect(registry.has("models")).toBe(true);
   });
 
-  it("does not register slash commands when commandEnabled is false", async () => {
+  it("does not register commands when commandEnabled is false", async () => {
     const core = createMockCore({
       coreConfig: { modelSwitch: { commandEnabled: false } },
     });
     const ext = createModelSwitchExtension(core);
 
-    const registry = createSlashCommandRegistry();
-    await ext.hooks[HOOKS.SLASH_COMMANDS_REGISTER]({ registry });
+    const registry = createCommandRegistry();
+    await ext.hooks[HOOKS.COMMANDS_REGISTER]({ registry });
 
     expect(registry.has("model")).toBe(false);
     expect(registry.has("models")).toBe(false);
@@ -98,8 +98,8 @@ describe("Model-switch extension", () => {
     expect(core.toolRegistry.has("model")).toBe(true);
 
     // Commands should not be registered
-    const registry = createSlashCommandRegistry();
-    await ext.hooks[HOOKS.SLASH_COMMANDS_REGISTER]({ registry });
+    const registry = createCommandRegistry();
+    await ext.hooks[HOOKS.COMMANDS_REGISTER]({ registry });
     expect(registry.has("model")).toBe(false);
     expect(registry.has("models")).toBe(false);
   });
@@ -115,8 +115,8 @@ describe("Model-switch extension", () => {
     expect(core.toolRegistry.has("model")).toBe(false);
 
     // Commands should be registered
-    const registry = createSlashCommandRegistry();
-    await ext.hooks[HOOKS.SLASH_COMMANDS_REGISTER]({ registry });
+    const registry = createCommandRegistry();
+    await ext.hooks[HOOKS.COMMANDS_REGISTER]({ registry });
     expect(registry.has("model")).toBe(true);
     expect(registry.has("models")).toBe(true);
   });
@@ -127,8 +127,8 @@ describe("Model-switch extension", () => {
     });
     const ext = createModelSwitchExtension(core);
 
-    const registry = createSlashCommandRegistry();
-    await ext.hooks[HOOKS.SLASH_COMMANDS_REGISTER]({ registry });
+    const registry = createCommandRegistry();
+    await ext.hooks[HOOKS.COMMANDS_REGISTER]({ registry });
 
     const def = registry.get("models");
     const agent = createMockAgent(core.resolved.modelRegistry);
@@ -147,8 +147,8 @@ describe("Model-switch extension", () => {
     });
     const ext = createModelSwitchExtension(core);
 
-    const registry = createSlashCommandRegistry();
-    await ext.hooks[HOOKS.SLASH_COMMANDS_REGISTER]({ registry });
+    const registry = createCommandRegistry();
+    await ext.hooks[HOOKS.COMMANDS_REGISTER]({ registry });
 
     const def = registry.get("models");
     const agent = createMockAgent({});
@@ -163,8 +163,8 @@ describe("Model-switch extension", () => {
     });
     const ext = createModelSwitchExtension(core);
 
-    const registry = createSlashCommandRegistry();
-    await ext.hooks[HOOKS.SLASH_COMMANDS_REGISTER]({ registry });
+    const registry = createCommandRegistry();
+    await ext.hooks[HOOKS.COMMANDS_REGISTER]({ registry });
 
     const def = registry.get("model");
     const agent = createMockAgent(core.resolved.modelRegistry);
@@ -180,8 +180,8 @@ describe("Model-switch extension", () => {
     });
     const ext = createModelSwitchExtension(core);
 
-    const registry = createSlashCommandRegistry();
-    await ext.hooks[HOOKS.SLASH_COMMANDS_REGISTER]({ registry });
+    const registry = createCommandRegistry();
+    await ext.hooks[HOOKS.COMMANDS_REGISTER]({ registry });
 
     const def = registry.get("model");
     const agent = createMockAgent(core.resolved.modelRegistry);

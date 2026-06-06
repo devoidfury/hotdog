@@ -77,7 +77,7 @@ export function create(core) {
         if (!strategy.canCompact(nonSystemMessages, settings)) return;
 
         // Execute compaction via the strategy
-        await _performCompaction(core, agent, strategy, settings);
+        await _performCompaction(agent, strategy);
       },
 
       /**
@@ -104,9 +104,9 @@ export function create(core) {
       },
 
       /**
-       * Register slash commands for compaction.
+       * Register commands for compaction.
        */
-      [HOOKS.SLASH_COMMANDS_REGISTER]: async ({ registry }) => {
+      [HOOKS.COMMANDS_REGISTER]: async ({ registry }) => {
         // /compact [n] [--compact-debug]
         registry.register('compact', {
           description: 'Compact context (compact [n] [--compact-debug])',
@@ -171,117 +171,119 @@ export function create(core) {
       }));
     },
   };
-}
 
-/**
- * Handle the /compact command.
- */
-async function _handleCompactCommand(agent, { keep, debug }) {
-  const messages = agent.context;
-  const nonSystemMessages = messages.filter(m => m.role !== 'system');
+  // ── Helper functions (inside create() to close over core, settings, registry) ──
 
-  if (nonSystemMessages.length <= 2) {
-    return { content: 'Not enough messages to compact.' };
+  /**
+   * Handle the /compact command.
+   */
+  async function _handleCompactCommand(agent, { keep, debug }) {
+    const messages = agent.context;
+    const nonSystemMessages = messages.filter(m => m.role !== 'system');
+
+    if (nonSystemMessages.length <= 2) {
+      return { content: 'Not enough messages to compact.' };
+    }
+
+    // If keep is specified, just trim to that many messages
+    if (keep !== null) {
+      const systemMessages = messages.filter(m => m.role === 'system');
+      const keptMessages = nonSystemMessages.slice(-keep);
+      agent._context = [...systemMessages, ...keptMessages];
+      return { content: `Context compacted to ${keptMessages.length} messages.` };
+    }
+
+    // Auto-compact based on token budget
+    const estimatedTokens = estimateContextTokens(nonSystemMessages);
+    const reserveTokens = settings.reserveTokens || DEFAULT_COMPACTION.reserveTokens;
+    const modelConfig = core.modelRegistry?.[agent.model];
+    const contextLimit = modelConfig?.maxTokens || 128000;
+
+    if (estimatedTokens <= contextLimit - reserveTokens) {
+      return { content: 'Context is within token budget. No compaction needed.' };
+    }
+
+    // Get the strategy
+    const strategy = registry.get(settings.strategy) || registry.getDefault();
+    if (!strategy) {
+      return { error: 'No compaction strategy available.' };
+    }
+
+    if (!strategy.canCompact(nonSystemMessages, settings)) {
+      return { content: 'Compaction not applicable with current settings.' };
+    }
+
+    // Perform compaction
+    await _performCompaction(agent, strategy);
+
+    const resultContent = `Context compacted using '${settings.strategy}' strategy.`;
+    if (debug) {
+      return { content: resultContent + '\n(Debug mode: debug file written.)' };
+    }
+    return { content: resultContent };
   }
 
-  // If keep is specified, just trim to that many messages
-  if (keep !== null) {
-    const systemMessages = messages.filter(m => m.role === 'system');
-    const keptMessages = nonSystemMessages.slice(-keep);
-    agent._context = [...systemMessages, ...keptMessages];
-    return { content: `Context compacted to ${keptMessages.length} messages.` };
-  }
+  /**
+   * Perform the actual compaction.
+   */
+  async function _performCompaction(agent, strategy) {
+    const messages = agent.context;
+    const model = agent.model;
+    const modelConfig = core.modelRegistry?.[model];
 
-  // Auto-compact based on token budget
-  const estimatedTokens = estimateContextTokens(nonSystemMessages);
-  const reserveTokens = settings.reserveTokens || DEFAULT_COMPACTION.reserveTokens;
-  const modelConfig = core.modelRegistry?.[agent.model];
-  const contextLimit = modelConfig?.maxTokens || 128000;
+    // Build the LLM chat function from the agent's LLM client
+    const llmChat = async (chatMessages, chatModel) => {
+      const stream = agent._llmClient.chatStreamCancellable(
+        chatMessages,
+        modelConfig || { name: chatModel, temperature: null, maxTokens: 4096 },
+        [],
+        { aborted: false },
+      );
 
-  if (estimatedTokens <= contextLimit - reserveTokens) {
-    return { content: 'Context is within token budget. No compaction needed.' };
-  }
-
-  // Get the strategy
-  const strategy = registry.get(settings.strategy) || registry.getDefault();
-  if (!strategy) {
-    return { error: 'No compaction strategy available.' };
-  }
-
-  if (!strategy.canCompact(nonSystemMessages, settings)) {
-    return { content: 'Compaction not applicable with current settings.' };
-  }
-
-  // Perform compaction
-  await _performCompaction(core, agent, strategy, settings);
-
-  const resultContent = `Context compacted using '${settings.strategy}' strategy.`;
-  if (debug) {
-    return { content: resultContent + '\n(Debug mode: debug file written.)' };
-  }
-  return { content: resultContent };
-}
-
-/**
- * Perform the actual compaction.
- */
-async function _performCompaction(core, agent, strategy, settings) {
-  const messages = agent.context;
-  const model = agent.model;
-  const modelConfig = core.modelRegistry?.[model];
-
-  // Build the LLM chat function from the agent's LLM client
-  const llmChat = async (chatMessages, chatModel) => {
-    const stream = agent._llmClient.chatStreamCancellable(
-      chatMessages,
-      modelConfig || { name: chatModel, temperature: null, maxTokens: 4096 },
-      [],
-      { aborted: false },
-    );
-
-    let fullText = '';
-    for await (const event of stream) {
-      if (event.type === 'content') {
-        fullText += event.content;
+      let fullText = '';
+      for await (const event of stream) {
+        if (event.type === 'content') {
+          fullText += event.content;
+        }
       }
+      return fullText;
+    };
+
+    try {
+      const result = await strategy.execute(messages, settings, llmChat, model);
+      if (!result) return;
+
+      // Apply the compaction result
+      const compactedCount = result.messagesCompacted;
+
+      // Replace compacted messages with summary
+      if (result.summary) {
+        // Create a summary message with marker wrapper
+        const summaryMsg = {
+          role: 'user',
+          content: `<m_ckga3qxdoia7896k>${result.summary}</m_ckga3qxdoia7896k>`,
+        };
+
+        // Replace the compacted portion
+        agent._context = [
+          summaryMsg,
+          ...messages.slice(compactedCount),
+        ];
+      } else {
+        // Drop strategy — just remove the old messages
+        agent._context = messages.slice(compactedCount);
+      }
+
+      // Emit compaction result event
+      core.hooks?.emit(HOOKS.OUTPUT_EVENT, {
+        type: 'compaction_result',
+        data: result,
+      });
+
+    } catch (e) {
+      // Compaction failure is non-fatal — log and continue
+      console.error(`[compaction] error: ${e.message}`);
     }
-    return fullText;
-  };
-
-  try {
-    const result = await strategy.execute(messages, settings, llmChat, model);
-    if (!result) return;
-
-    // Apply the compaction result
-    const compactedCount = result.messagesCompacted;
-
-    // Replace compacted messages with summary
-    if (result.summary) {
-      // Create a summary message with marker wrapper
-      const summaryMsg = {
-        role: 'user',
-        content: `<m_ckga3qxdoia7896k>${result.summary}</m_ckga3qxdoia7896k>`,
-      };
-
-      // Replace the compacted portion
-      agent._context = [
-        summaryMsg,
-        ...messages.slice(compactedCount),
-      ];
-    } else {
-      // Drop strategy — just remove the old messages
-      agent._context = messages.slice(compactedCount);
-    }
-
-    // Emit compaction result event
-    core.hooks?.emit(HOOKS.OUTPUT_EVENT, {
-      type: 'compaction_result',
-      data: result,
-    });
-
-  } catch (e) {
-    // Compaction failure is non-fatal — log and continue
-    console.error(`[compaction] error: ${e.message}`);
   }
 }
 

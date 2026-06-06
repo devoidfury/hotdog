@@ -217,9 +217,9 @@ export const HOOKS = {
   // System prompt
   SYSTEM_PROMPT_BUILD: "systemPrompt:build",
 
-  // Commands
+  // Commands — generic command system (not UI-specific)
   COMMAND_DISPATCH: "command:dispatch",
-  SLASH_COMMANDS_REGISTER: "slashCommands:register",
+  COMMANDS_REGISTER: "commands:register",
 
   // Output
   OUTPUT_EVENT: "output:event",

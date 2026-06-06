@@ -1,10 +1,12 @@
 // Unified command registries for extensions.
-// Supports both slash commands (agent-level) and CLI subcommands.
+// Supports both agent-level commands and CLI subcommands.
+// "Commands" are the abstract concept — slash commands (/cmd) are one
+// UI implementation for invoking them in the interactive CLI.
 
 /**
- * Registry for slash commands (agent-level) and CLI subcommands.
+ * Registry for agent-level commands and CLI subcommands.
  *
- * @param {'slash' | 'cli'} type - Registry type that determines behavior.
+ * @param {'command' | 'cli'} type - Registry type that determines behavior.
  */
 export class CommandRegistry {
   constructor(type) {
@@ -16,8 +18,8 @@ export class CommandRegistry {
   /**
    * Register a command.
    *
-   * For slash commands:
-   * @param {string} name - The command name (without leading `/`).
+   * For agent-level commands:
+   * @param {string} name - The command name.
    * @param {Object} definition - Command definition.
    * @param {string} [definition.description] - Short description for help text.
    * @param {Function} [definition.handler] - Async function(agent, value, cmd) => { content?, error? }
@@ -54,7 +56,7 @@ export class CommandRegistry {
 
     const normalized = { ...definition };
 
-    if (this._type === 'slash') {
+    if (this._type === 'command') {
       normalized.isUiCommand = definition.isUiCommand === true;
     } else {
       // CLI subcommand defaults
@@ -95,12 +97,12 @@ export class CommandRegistry {
 
   /**
    * Check if a raw command string matches any registered custom command.
-   * Only applicable for slash command type.
-   * @param {string} cmd - Raw command string (without leading `/`)
+   * Only applicable for command registry type.
+   * @param {string} cmd - Raw command string
    * @returns {string|null} - The registered command name if matched, null otherwise
    */
   match(cmd) {
-    if (this._type !== 'slash') return null;
+    if (this._type !== 'command') return null;
     if (!cmd) return null;
     for (const [name, def] of this._commands) {
       if (def.matches && def.matches(cmd)) {
@@ -112,11 +114,11 @@ export class CommandRegistry {
 
   /**
    * Generate help text for all registered commands.
-   * Slash commands are prefixed with `/`, CLI subcommands are not.
+   * Agent commands are prefixed with `/` (for slash command UI), CLI subcommands are not.
    */
   generateHelpText() {
     const lines = [];
-    const prefix = this._type === 'slash' ? '/' : '';
+    const prefix = this._type === 'command' ? '/' : '';
     for (const [name, def] of this._commands) {
       const desc = def.description || "";
       lines.push(`  ${prefix}${name.padEnd(20)} ${desc}`);
@@ -126,11 +128,21 @@ export class CommandRegistry {
 }
 
 /**
- * Create a new slash command registry.
+ * Create a new command registry for agent-level commands.
+ * Commands are the abstract concept — slash commands (/cmd) are one
+ * UI implementation for invoking them in the interactive CLI.
  * @returns {CommandRegistry}
  */
+export function createCommandRegistry() {
+  return new CommandRegistry('command');
+}
+
+/**
+ * @deprecated Use createCommandRegistry() instead.
+ * Kept for backward compatibility.
+ */
 export function createSlashCommandRegistry() {
-  return new CommandRegistry('slash');
+  return createCommandRegistry();
 }
 
 /**

@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'bun:test';
 import { parseCommand, Command } from '../../src/core/commands.js';
-import { createSlashCommandRegistry } from '../../src/core/extensions/registries.js';
+import { createCommandRegistry } from '../../src/core/extensions/registries.js';
 
 describe('parseCommand', () => {
   it('parses help', () => {
@@ -92,7 +92,7 @@ describe('parseCommand', () => {
 
 describe('parseCommand with registry', () => {
   it('returns custom command for skill: via registry', () => {
-    const registry = createSlashCommandRegistry();
+    const registry = createCommandRegistry();
     registry.register('skill', {
       matches: (cmd) => cmd.startsWith('skill:'),
     });
@@ -103,7 +103,7 @@ describe('parseCommand with registry', () => {
   });
 
   it('returns custom command for prompt: via registry', () => {
-    const registry = createSlashCommandRegistry();
+    const registry = createCommandRegistry();
     registry.register('prompt', {
       matches: (cmd) => cmd.startsWith('prompt:'),
     });
@@ -114,7 +114,7 @@ describe('parseCommand with registry', () => {
   });
 
   it('returns custom command for refresh via registry', () => {
-    const registry = createSlashCommandRegistry();
+    const registry = createCommandRegistry();
     registry.register('refresh', {
       matches: (cmd) => cmd.startsWith('refresh'),
     });
@@ -125,7 +125,7 @@ describe('parseCommand with registry', () => {
   });
 
   it('returns custom command for compact via registry', () => {
-    const registry = createSlashCommandRegistry();
+    const registry = createCommandRegistry();
     registry.register('compact', {
       matches: (cmd) => cmd.startsWith('compact') && !cmd.startsWith('compact:'),
     });
@@ -136,7 +136,7 @@ describe('parseCommand with registry', () => {
   });
 
   it('returns custom command for compact:strategy via registry', () => {
-    const registry = createSlashCommandRegistry();
+    const registry = createCommandRegistry();
     registry.register('compact:strategy', {
       matches: (cmd) => cmd.startsWith('compact:strategy'),
     });

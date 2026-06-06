@@ -1,6 +1,6 @@
 // Run Shell Command Extension
 // Provides shell command execution via /sh, !, and :! syntax.
-// Hooks: slashCommands:register
+// Hooks: commands:register
 
 import { spawn } from 'node:child_process';
 import { HOOKS } from '../../core/hooks.js';
@@ -15,9 +15,9 @@ export function create(core) {
   return {
     hooks: {
       /**
-       * Register slash commands for shell execution.
+       * Register commands for shell execution.
        */
-      [HOOKS.SLASH_COMMANDS_REGISTER]: async ({ registry }) => {
+      [HOOKS.COMMANDS_REGISTER]: async ({ registry }) => {
         // /sh <command> — Run a shell command
         registry.register('sh', {
           description: 'Run a shell command (/sh <command>)',

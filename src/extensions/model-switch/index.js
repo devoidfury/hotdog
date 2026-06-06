@@ -1,9 +1,9 @@
-// Model-switch extension — provides the model tool and /model slash commands
+// Model-switch extension — provides the model tool and /model commands
 // for switching AI models at runtime.
 //
 // Config (modelSwitch) — defined in extension.json configSchema:
 //   - toolEnabled:    bool  (default: true)  — register the model tool
-//   - commandEnabled: bool  (default: true)  — register /model and /models slash commands
+//   - commandEnabled: bool  (default: true)  — register /model and /models commands
 
 import { HOOKS } from "../../core/hooks.js";
 import { ModelTool } from "./model.js";
@@ -33,9 +33,9 @@ export function create(core) {
       },
 
       /**
-       * Register /model and /models slash commands (if enabled).
+       * Register /model and /models commands (if enabled).
        */
-      [HOOKS.SLASH_COMMANDS_REGISTER]: async ({ registry }) => {
+      [HOOKS.COMMANDS_REGISTER]: async ({ registry }) => {
         if (!config.commandEnabled) return;
 
         // /models — list available models

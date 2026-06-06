@@ -193,6 +193,6 @@ describe('Full Extension Chain', () => {
     expect(hookNames).toContain(HOOKS.OUTPUT_EVENT);        // session-log (compaction)
     expect(hookNames).not.toContain(HOOKS.TOOLS_REGISTER);  // called directly in load()
     expect(hookNames).toContain(HOOKS.SYSTEM_PROMPT_BUILD);  // skills
-    expect(hookNames).toContain(HOOKS.SLASH_COMMANDS_REGISTER); // skills
+    expect(hookNames).toContain(HOOKS.COMMANDS_REGISTER); // commands
   });
 });

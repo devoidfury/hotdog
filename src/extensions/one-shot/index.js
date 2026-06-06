@@ -133,8 +133,8 @@ async function handlePromptSubcommand(cli, core) {
 
     await agent.ensureSystemPrompt();
 
-    core.hooks.emit(HOOKS.SLASH_COMMANDS_REGISTER, {
-      registry: agent.getSlashCommandRegistry(),
+    core.hooks.emit(HOOKS.COMMANDS_REGISTER, {
+      registry: agent.getCommandRegistry(),
       agent,
     });
 

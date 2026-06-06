@@ -54,6 +54,7 @@ export {
 
 export {
   CommandRegistry,
+  createCommandRegistry,
   createSlashCommandRegistry,
   createSubcommandRegistry,
 } from "./registries.js";

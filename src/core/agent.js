@@ -10,7 +10,7 @@ import { formatError } from "./error.js";
 import { HOOKS } from "./hooks.js";
 import { ToolContext } from "./extensions/tool-context.js";
 import { xmlEscape } from "./extensions/tool-utils.js";
-import { createSlashCommandRegistry } from "./extensions/registries.js";
+import { createCommandRegistry } from "./extensions/registries.js";
 import { DEFAULT_MAX_TOKENS } from "./config.js";
 
 /**
@@ -67,9 +67,9 @@ export class Agent {
     this._abortSignal = options.abortSignal || null;
     this._toolWhitelist = options.toolWhitelist || null;
     this._followQueue = [];
-    // Slash command registry — extensions register commands here
-    this._slashCommandRegistry =
-      options.slashCommandRegistry || createSlashCommandRegistry();
+    // Command registry — extensions register commands here
+    this._commandRegistry =
+      options.commandRegistry || createCommandRegistry();
   }
 
   // ── Properties ────────────────────────────────────────────────────────────
@@ -695,7 +695,7 @@ export class Agent {
   }
 
   /**
-   * Execute a slash command. Returns { content } or { error }.
+   * Execute a command. Returns { content } or { error }.
    * Delegates to hooks — extensions handle specific commands.
    * @param {Object} cmd - Command object { type, value }
    * @returns {Promise<Object>}
@@ -744,11 +744,18 @@ export class Agent {
   }
 
   /**
-   * Get the slash command registry.
-   * @returns {Object} SlashCommandRegistry instance
+   * Get the command registry.
+   * @returns {Object} CommandRegistry instance
+   */
+  getCommandRegistry() {
+    return this._commandRegistry;
+  }
+
+  /**
+   * @deprecated Use getCommandRegistry() instead.
    */
   getSlashCommandRegistry() {
-    return this._slashCommandRegistry;
+    return this.getCommandRegistry();
   }
 
   // ── Command Handlers ──────────────────────────────────────────────────────

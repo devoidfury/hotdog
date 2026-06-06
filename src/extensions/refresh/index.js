@@ -7,7 +7,7 @@
  *
  * Hooks:
  *   - tools:register  → registers the refresh tool
- *   - slashCommands:register → handles /refresh slash command
+ *   - commands:register → handles /refresh command
  *
  * Features:
  *   - Selective reload of specific extensions by name
@@ -48,7 +48,7 @@ export function create(core) {
       },
 
       /**
-       * Register /refresh slash command.
+       * Register /refresh command.
        *
        * Usage:
        *   /refresh list          — Show loaded modules and extensions
@@ -56,7 +56,7 @@ export function create(core) {
        *   /refresh <name>        — Reload a specific extension
        *   /refresh cache-clear   — Clear the module cache
        */
-      [HOOKS.SLASH_COMMANDS_REGISTER]: async ({ registry }) => {
+      [HOOKS.COMMANDS_REGISTER]: async ({ registry }) => {
         registry.register('refresh', {
           description: 'Hot-reload extensions and modules',
           matches: (cmd) => cmd.startsWith('refresh'),

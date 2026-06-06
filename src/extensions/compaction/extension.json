@@ -14,7 +14,7 @@
       },
       "reserveTokens": {
         "type": "number",
-        "default": 16384,
+        "default": 8000,
         "description": "Token budget to reserve for the conversation"
       },
       "keepRecentMessages": {

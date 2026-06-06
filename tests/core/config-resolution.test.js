@@ -472,10 +472,10 @@ describe("Phase 2: Complex values", () => {
   });
 
   describe("hideThinking", () => {
-    it("defaults to true", () => {
+    it("defaults to false", () => {
       expect(
         resolveKey("hideThinking", CONFIG_KEYS.hideThinking, baseContext),
-      ).toBe(true);
+      ).toBe(false);
     });
 
     it("resolves true when cli.hideThinking === true", () => {
@@ -499,7 +499,7 @@ describe("Phase 2: Complex values", () => {
       ).toBe(false);
     });
 
-    it("falls through config.hideThinking=true to default true", () => {
+    it("falls through config.hideThinking=true to default false", () => {
       const context = { ...baseContext, config: { hideThinking: true } };
       expect(
         resolveKey("hideThinking", CONFIG_KEYS.hideThinking, context),
@@ -665,7 +665,7 @@ describe("integration: resolveAll with CONFIG_KEYS", () => {
     expect(result.theme).toBe("dark");
     expect(result.role).toBe("You are an AI coding assistant.");
     expect(result.noLog).toBe(false);
-    expect(result.hideThinking).toBe(true);
+    expect(result.hideThinking).toBe(false);
     expect(result.useColors).toBe(true);
     expect(result.aspects).toEqual([]);
   });

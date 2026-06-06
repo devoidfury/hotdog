@@ -2,6 +2,7 @@
 // Thin orchestrator that delegates behavior to hooks.
 // Behaviors (compaction, tools, system prompt, commands) live in extensions.
 
+import crypto from "node:crypto";
 import { Message } from "./context/message.js";
 import { LlmError } from "./llm-client/client.js";
 import { OUTPUT_EVENT } from "./context/output.js";
@@ -423,7 +424,7 @@ export class Agent {
     if (toolCallsBuffer.size > 0) {
       finalToolCalls = Array.from(toolCallsBuffer.values()).map(
         (tc, index) => ({
-          id: tc.id || `call_${index}_${Date.now()}`,
+          id: tc.id || crypto.randomUUID(),
           type: "function",
           function: { name: tc.name, arguments: tc.args },
         }),

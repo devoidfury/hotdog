@@ -385,10 +385,16 @@ const CONFIG_KEYS = {
       {
         source: "config",
         key: "hideThinking",
+        predicate: (v) => v === true,
+        transform: () => true,
+      },
+      {
+        source: "config",
+        key: "hideThinking",
         predicate: (v) => v === false,
         transform: () => false,
       },
-      { default: true },
+      { default: false },
     ],
   },
 

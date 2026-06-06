@@ -65,17 +65,17 @@ describe('Hook + Extension Integration', () => {
     // Trigger the tools:register hook
     await core.hooks.emitAsync(HOOKS.TOOLS_REGISTER, core.toolRegistry);
 
-    // Core tools should be registered
+    // Core tools should be registered (bash is now in bash-tool extension, fetch is in fetch-tool extension)
     const toolNames = core.toolRegistry.getAll().map(([name]) => name);
-    expect(toolNames).toContain('bash');
     expect(toolNames).toContain('write');
     expect(toolNames).toContain('read');
     expect(toolNames).toContain('edit');
     expect(toolNames).toContain('grep');
     expect(toolNames).toContain('find');
-    expect(toolNames).toContain('fetch');
     expect(toolNames).toContain('question');
     expect(toolNames).toContain('pager');
+    // bash is now registered by bash-tool extension, not core-tools
+    expect(toolNames).not.toContain('bash');
     // explore is disabled by default
     expect(toolNames).not.toContain('explore');
     // model is registered by model-switch extension, not core-tools

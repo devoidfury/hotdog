@@ -2,20 +2,10 @@
   "name": "core-tools",
   "provides": ["tools"],
   "loadOrder": 1,
-  "description": "Core agent tools (bash, write, read, edit, grep, find, fetch, question, pager, explore)",
+  "description": "Core agent tools (write, read, edit, grep, find, pager, explore)",
   "configSchema": {
     "type": "object",
     "properties": {
-      "maxToolOutputLines": {
-        "type": "number",
-        "default": 600,
-        "description": "Maximum number of output lines for tool results"
-      },
-      "bashTimeoutMs": {
-        "type": "number",
-        "default": 60000,
-        "description": "Default timeout for bash commands in milliseconds"
-      },
       "readToolLimit": {
         "type": "number",
         "default": 500,

@@ -1,0 +1,6 @@
+{
+  "name": "question-tool",
+  "provides": ["tools"],
+  "loadOrder": 1,
+  "description": "Ask the user questions and collect answers"
+}

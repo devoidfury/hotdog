@@ -1,0 +1,17 @@
+{
+  "name": "fetch-tool",
+  "provides": ["tools"],
+  "loadOrder": 1,
+  "description": "Make HTTP requests via the fetch tool",
+  "configSchema": {
+    "type": "object",
+    "properties": {
+      "toolEnabled": {
+        "type": "boolean",
+        "default": true,
+        "description": "Whether to register the fetch tool"
+      }
+    },
+    "additionalProperties": false
+  }
+}

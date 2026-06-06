@@ -11,8 +11,9 @@ describe("CORE_TOOL_NAMES", () => {
     // project_info is included but disabled by default
     // load_skill is registered by the skills extension, not core-tools
     // review is registered by the session-review extension, not core-tools
+    // bash is registered by the bash-tool extension, not core-tools
+    // fetch is registered by the fetch-tool extension, not core-tools
     const expected = [
-      "bash",
       "write",
       "read",
       "question",
@@ -20,7 +21,6 @@ describe("CORE_TOOL_NAMES", () => {
       "explore",
       "find",
       "grep",
-      "fetch",
       "project_info",
       "edit",
     ];
@@ -49,14 +49,6 @@ describe("SUBAGENT_TOOL_NAMES", () => {
 });
 
 describe("createToolFactory", () => {
-  it("creates bash tool", () => {
-    const factory = createToolFactory();
-    const tool = factory.createTool("bash", {});
-    expect(tool).not.toBeNull();
-    expect(typeof tool.execute).toBe("function");
-    expect(typeof tool.toToolDef).toBe("function");
-  });
-
   it("creates write tool", () => {
     const factory = createToolFactory();
     const tool = factory.createTool("write", {});
@@ -88,13 +80,6 @@ describe("createToolFactory", () => {
   it("creates find tool", () => {
     const factory = createToolFactory();
     const tool = factory.createTool("find", {});
-    expect(tool).not.toBeNull();
-    expect(typeof tool.execute).toBe("function");
-  });
-
-  it("creates fetch tool", () => {
-    const factory = createToolFactory();
-    const tool = factory.createTool("fetch", {});
     expect(tool).not.toBeNull();
     expect(typeof tool.execute).toBe("function");
   });
@@ -142,9 +127,9 @@ describe("createToolFactory", () => {
 
   it("respects whitelist", () => {
     const factory = createToolFactory();
-    const tool = factory.createTool("bash", {}, ["bash", "write"]);
+    const tool = factory.createTool("write", {}, ["write", "read"]);
     expect(tool).not.toBeNull();
-    const otherTool = factory.createTool("read", {}, ["bash", "write"]);
+    const otherTool = factory.createTool("edit", {}, ["write", "read"]);
     expect(otherTool).toBeNull();
   });
 
@@ -172,8 +157,8 @@ describe("createToolFactory - createAndRegister", async () => {
   it("registers tool in registry", async () => {
     const factory = createToolFactory();
     const registry = new ToolRegistry();
-    await factory.createAndRegister("bash", registry, {});
-    expect(registry.has("bash")).toBe(true);
+    await factory.createAndRegister("write", registry, {});
+    expect(registry.has("write")).toBe(true);
   });
 
   it("skips tool when creation fails", async () => {
@@ -186,9 +171,9 @@ describe("createToolFactory - createAndRegister", async () => {
   it("respects whitelist in createAndRegister", async () => {
     const factory = createToolFactory();
     const registry = new ToolRegistry();
-    await factory.createAndRegister("bash", registry, {}, ["bash"]);
-    expect(registry.has("bash")).toBe(true);
-    expect(registry.has("write")).toBe(false);
+    await factory.createAndRegister("write", registry, {}, ["write"]);
+    expect(registry.has("write")).toBe(true);
+    expect(registry.has("read")).toBe(false);
   });
 
   it("skips disabled tools when not in whitelist or manager", async () => {

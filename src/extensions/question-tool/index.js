@@ -15,6 +15,8 @@ import {
 } from "../../core/extensions/tool-utils.js";
 import { NoopInput } from "../../core/context/input.js";
 
+import { HOOKS } from "../../core/hooks.js";
+
 /**
  * Generate a key from the prompt if one is not provided.
  * Returns null if key is explicitly empty (caller should reject).
@@ -160,4 +162,30 @@ export class QuestionTool {
       questions_answered: String(Object.keys(answers).length),
     });
   }
+}
+
+// ── Extension Entry Point ───────────────────────────────────────────────────
+
+/**
+ * Create the question-tool extension.
+ *
+ * @param {Object} core - The core object.
+ * @returns {Object} The extension instance.
+ */
+export function create(core) {
+  const questionTool = new QuestionTool();
+
+  return {
+    hooks: {
+      /**
+       * Register the question tool.
+       */
+      [HOOKS.TOOLS_REGISTER]: async (registry) => {
+        registry.register("question", questionTool);
+      },
+    },
+
+    // Expose for external use
+    QuestionTool,
+  };
 }

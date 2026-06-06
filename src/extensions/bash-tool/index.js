@@ -10,18 +10,22 @@ import {
   parseToolInput,
   defaultCallDisplay,
 } from "../../core/extensions/tool-utils.js";
-import {
-  DEFAULT_BASH_TIMEOUT_MS,
-  DEFAULT_MAX_TOOL_OUTPUT_LINES,
-} from "./defaults.js";
 
+// ── Defaults ────────────────────────────────────────────────────────────────
+
+export const DEFAULT_BASH_TIMEOUT_MS = 60000;
+export const DEFAULT_MAX_TOOL_OUTPUT_LINES = 600;
+
+/**
+ * BashTool — executes shell commands.
+ */
 export class BashTool {
   static TOOL_NAME = "bash";
 
   constructor(options = {}) {
-    this.timeoutMs = options.timeoutMs || DEFAULT_BASH_TIMEOUT_MS;
+    this.timeoutMs = options.timeoutMs ?? DEFAULT_BASH_TIMEOUT_MS;
     this.maxOutputLines =
-      options.maxOutputLines || DEFAULT_MAX_TOOL_OUTPUT_LINES;
+      options.maxOutputLines ?? DEFAULT_MAX_TOOL_OUTPUT_LINES;
   }
 
   toToolDef() {
@@ -108,4 +112,35 @@ export class BashTool {
       });
     });
   }
+}
+
+// ── Extension Entry Point ───────────────────────────────────────────────────
+
+import { HOOKS } from "../../core/hooks.js";
+
+/**
+ * Create the bash-tool extension.
+ *
+ * @param {Object} core - The core object.
+ * @returns {Object} The extension instance.
+ */
+export function create(core) {
+  return {
+    hooks: {
+      /**
+       * Register the bash tool.
+       */
+      [HOOKS.TOOLS_REGISTER]: async (registry) => {
+        const tool = new BashTool(core);
+        registry.register(BashTool.TOOL_NAME, tool);
+      },
+    },
+
+    // Expose for external use
+    BashTool,
+    defaults: {
+      DEFAULT_BASH_TIMEOUT_MS,
+      DEFAULT_MAX_TOOL_OUTPUT_LINES,
+    },
+  };
 }

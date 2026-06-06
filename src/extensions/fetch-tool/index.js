@@ -1,4 +1,4 @@
-// Fetch tool — make HTTP requests.
+// Fetch-tool extension — provides the fetch tool for making HTTP requests.
 
 import { spawnSync } from "node:child_process";
 import {
@@ -8,6 +8,37 @@ import {
   parseToolInput,
   defaultCallDisplay,
 } from "../../core/extensions/tool-utils.js";
+
+import { HOOKS } from "../../core/hooks.js";
+
+/**
+ * Create the fetch-tool extension.
+ *
+ * @param {Object} core - The core object with hooks, resolved config, etc.
+ * @returns {Object} The extension instance.
+ */
+export function create(core) {
+  // Config defaults come from extension.json configSchema
+  const config = core.config?.fetchTool || {};
+
+  const fetchTool = new FetchTool();
+
+  return {
+    hooks: {
+      /**
+       * Register the fetch tool (if enabled).
+       */
+      [HOOKS.TOOLS_REGISTER]: async (registry) => {
+        if (config.toolEnabled) {
+          registry.register("fetch", fetchTool);
+        }
+      },
+    },
+
+    // Expose for external use
+    fetchTool,
+  };
+}
 
 const VALID_METHODS = ["GET", "POST", "PUT", "DELETE", "PATCH", "HEAD"];
 const METHODS_WITH_BODY = ["POST", "PUT", "PATCH"];

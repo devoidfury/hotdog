@@ -248,3 +248,227 @@ describe('ReadTool.execute — error cases', () => {
     fs.rmSync(dir, { recursive: true, force: true });
   });
 });
+
+// ── execute: image files ────────────────────────────────────────────────────
+
+describe('ReadTool.execute — image files', () => {
+  /**
+   * Minimal valid PNG file (1x1 transparent pixel).
+   */
+  const MINIMAL_PNG = Buffer.from(
+    '89504e470d0a1a0a0000000d49484452000000010000000108060000001f15c4890000000a49444154789c6260000000020001978304000000000049454e44ae426082',
+    'hex',
+  );
+
+  /**
+   * Minimal valid JPEG file (1x1 white pixel).
+   */
+  const MINIMAL_JPEG = Buffer.from(
+    'ffd8ffe000104a46494600010100000100010000ffdb004300080606070605080707070909080a0c140d0c0b0b0c1912130f141d1a1f1e1d1a1c1c28222e232837292c30313434341f27393d3c32363c3e3f3f3f3f3f3f3f3f3f3f3f3f3f3f3ffc0000b080001000101011100ffc4001f0000010501010101010100000000000000000102030405060708090a0bffc4001f100002010303020403050504040000017d0102030405060708090a0bffc4001f000003010101010101010101010101000000000102030405060708090a0bffc4001f1000030101010101010101010100000000000102030405060708090a0bffd9',
+    'hex',
+  );
+
+  it('reads PNG file and returns image', async () => {
+    const dir = tmpDir();
+    const filePath = path.join(dir, 'test.png');
+    fsSync.writeFileSync(filePath, MINIMAL_PNG);
+
+    const tool = new ReadTool();
+    const result = await tool.execute(
+      { path: 'test.png' },
+      toolCtx({ workspaceRoot: dir })
+    );
+
+    expect(result.success).toBe(true);
+    expect(result.output).toContain('test.png');
+    expect(result.output).toContain('image/png');
+    expect(result.images).toEqual([
+      {
+        type: 'image_url',
+        mimeType: 'image/png',
+        data: MINIMAL_PNG.toString('base64'),
+      },
+    ]);
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
+
+  it('reads JPEG file (.jpg) and returns image', async () => {
+    const dir = tmpDir();
+    const filePath = path.join(dir, 'test.jpg');
+    fsSync.writeFileSync(filePath, MINIMAL_JPEG);
+
+    const tool = new ReadTool();
+    const result = await tool.execute(
+      { path: 'test.jpg' },
+      toolCtx({ workspaceRoot: dir })
+    );
+
+    expect(result.success).toBe(true);
+    expect(result.output).toContain('test.jpg');
+    expect(result.output).toContain('image/jpeg');
+    expect(result.images).toEqual([
+      {
+        type: 'image_url',
+        mimeType: 'image/jpeg',
+        data: MINIMAL_JPEG.toString('base64'),
+      },
+    ]);
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
+
+  it('reads JPEG file (.jpeg) and returns image', async () => {
+    const dir = tmpDir();
+    const filePath = path.join(dir, 'test.jpeg');
+    fsSync.writeFileSync(filePath, MINIMAL_JPEG);
+
+    const tool = new ReadTool();
+    const result = await tool.execute(
+      { path: 'test.jpeg' },
+      toolCtx({ workspaceRoot: dir })
+    );
+
+    expect(result.images).toEqual([
+      {
+        type: 'image_url',
+        mimeType: 'image/jpeg',
+        data: MINIMAL_JPEG.toString('base64'),
+      },
+    ]);
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
+
+  it('reads WebP file and returns image', async () => {
+    const dir = tmpDir();
+    // Minimal WebP (RIFF container with VP8 bitstream)
+    const webp = Buffer.from(
+      '524946461a000000574542505650380a00000001000100000100407200000000405249464600000000',
+      'hex',
+    );
+    const filePath = path.join(dir, 'test.webp');
+    fsSync.writeFileSync(filePath, webp);
+
+    const tool = new ReadTool();
+    const result = await tool.execute(
+      { path: 'test.webp' },
+      toolCtx({ workspaceRoot: dir })
+    );
+
+    expect(result.success).toBe(true);
+    expect(result.output).toContain('test.webp');
+    expect(result.output).toContain('image/webp');
+    expect(result.images).toEqual([
+      {
+        type: 'image_url',
+        mimeType: 'image/webp',
+        data: webp.toString('base64'),
+      },
+    ]);
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
+
+  it('reads .base64 file and returns image with text content', async () => {
+    const dir = tmpDir();
+    const base64Content = 'SGVsbG8gV29ybGQh'; // "Hello World!" in base64
+    const filePath = path.join(dir, 'data.base64');
+    fsSync.writeFileSync(filePath, base64Content);
+
+    const tool = new ReadTool();
+    const result = await tool.execute(
+      { path: 'data.base64' },
+      toolCtx({ workspaceRoot: dir })
+    );
+
+    expect(result.success).toBe(true);
+    expect(result.images).toEqual([
+      {
+        type: 'image_url',
+        mimeType: 'application/octet-stream',
+        data: base64Content,
+      },
+    ]);
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
+
+  it('handles uppercase extensions', async () => {
+    const dir = tmpDir();
+    const filePath = path.join(dir, 'test.PNG');
+    fsSync.writeFileSync(filePath, MINIMAL_PNG);
+
+    const tool = new ReadTool();
+    const result = await tool.execute(
+      { path: 'test.PNG' },
+      toolCtx({ workspaceRoot: dir })
+    );
+
+    expect(result.success).toBe(true);
+    expect(result.images).toBeDefined();
+    expect(result.images[0].mimeType).toBe('image/png');
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
+
+  it('includes file size in metadata', async () => {
+    const dir = tmpDir();
+    const filePath = path.join(dir, 'test.png');
+    fsSync.writeFileSync(filePath, MINIMAL_PNG);
+
+    const tool = new ReadTool();
+    const result = await tool.execute(
+      { path: 'test.png' },
+      toolCtx({ workspaceRoot: dir })
+    );
+
+    expect(result.metadata.get('size')).toBe(String(MINIMAL_PNG.length));
+    expect(result.metadata.get('mime_type')).toBe('image/png');
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
+
+  it('reads image with absolute path', async () => {
+    const dir = tmpDir();
+    const filePath = path.join(dir, 'test.png');
+    fsSync.writeFileSync(filePath, MINIMAL_PNG);
+
+    const tool = new ReadTool();
+    const result = await tool.execute(
+      { path: filePath },
+      toolCtx({ workspaceRoot: dir })
+    );
+
+    expect(result.success).toBe(true);
+    expect(result.images).toBeDefined();
+    expect(result.images[0].mimeType).toBe('image/png');
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
+
+  it('rejects path outside cwd boundary for images', async () => {
+    const dir = tmpDir();
+    const filePath = path.join(dir, 'test.png');
+    fsSync.writeFileSync(filePath, MINIMAL_PNG);
+
+    const tool = new ReadTool();
+    const result = await tool.execute(
+      { path: filePath },
+      toolCtx({ cwdBoundary: '/tmp/restricted' })
+    );
+
+    expect(result.success).toBe(false);
+    expect(result.error).toContain('outside cwd boundary');
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
+
+  it('text files are not treated as images', async () => {
+    const dir = tmpDir();
+    const filePath = path.join(dir, 'file.txt');
+    fsSync.writeFileSync(filePath, 'hello world');
+
+    const tool = new ReadTool();
+    const result = await tool.execute(
+      { path: 'file.txt' },
+      toolCtx({ workspaceRoot: dir })
+    );
+
+    expect(result.success).toBe(true);
+    expect(result.output).toBe('hello world');
+    expect(result.images).toBeNull();
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
+});

@@ -49,12 +49,14 @@ export class ToolResult {
     metadata = null,
     success = true,
     outputTag = null,
+    images = null,
   } = {}) {
     this.output = output;
     this.error = error;
     this.metadata = metadata;
     this.success = success;
     this.outputTag = outputTag;
+    this.images = images;
   }
 
   static ok(output) {
@@ -85,6 +87,11 @@ export class ToolResult {
 
   withOutputTag(tag) {
     this.outputTag = tag;
+    return this;
+  }
+
+  withImages(images) {
+    this.images = images;
     return this;
   }
 

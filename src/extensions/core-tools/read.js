@@ -1,4 +1,5 @@
 // Read tool — read content from a file.
+// Supports text files (line-based) and image files (jpeg, png, webp, base64).
 
 import fsSync from "node:fs";
 import path from "node:path";
@@ -12,7 +13,18 @@ import {
   parseToolInput,
   defaultCallDisplay,
 } from "../../core/extensions/tool-utils.js";
-import { DEFAULT_READ_TOOL_LIMIT } from "./defaults.js";
+import { DEFAULT_READ_TOOL_LIMIT, DEFAULT_MAX_IMAGE_SIZE } from "./defaults.js";
+
+/**
+ * Supported image extensions mapped to MIME types.
+ */
+const IMAGE_EXTENSIONS = {
+  ".jpg": "image/jpeg",
+  ".jpeg": "image/jpeg",
+  ".png": "image/png",
+  ".webp": "image/webp",
+  ".base64": "application/octet-stream",
+};
 
 export class ReadTool {
   static TOOL_NAME = "read";
@@ -20,7 +32,7 @@ export class ReadTool {
   toToolDef() {
     return toolDef(
       ReadTool.TOOL_NAME,
-      `Read a file's contents with optional pagination. Supports line-based extraction with offset/limit. Returns an error for directories with a depth-1 listing instead.`,
+      `Read a file's contents with optional pagination. Supports text files (line-based extraction with offset/limit) and image files (jpeg, png, webp, base64). Returns an error for directories with a depth-1 listing instead.`,
       {
         schema: "https://json-schema.org/draft/2020-12/schema",
         properties: {
@@ -97,6 +109,12 @@ export class ReadTool {
     // Check if file exists
     if (!fsSync.existsSync(resolved)) {
       return ToolResult.err(`File not found: ${filePath}`);
+    }
+
+    // Check if it's an image file
+    const mimeType = getImageMimeType(resolved);
+    if (mimeType) {
+      return readImage(resolved, mimeType, filePath);
     }
 
     return readLines(resolved, offset, limit);
@@ -187,5 +205,57 @@ function listDirectoryDepth1(dirPath) {
     return sorted.join("\n");
   } catch {
     return "  (unable to read directory)";
+  }
+}
+
+/**
+ * Get MIME type for image files based on extension.
+ * Returns null if not a recognized image extension.
+ */
+function getImageMimeType(filePath) {
+  const ext = path.extname(filePath).toLowerCase();
+  return IMAGE_EXTENSIONS[ext] ?? null;
+}
+
+/**
+ * Read an image file and return it as a ToolResult with images.
+ */
+function readImage(filePath, mimeType, originalPath) {
+  try {
+    // Check file size
+    const stats = fsSync.statSync(filePath);
+    if (stats.size > DEFAULT_MAX_IMAGE_SIZE) {
+      return ToolResult.err(
+        `Image file too large: ${(stats.size / 1024 / 1024).toFixed(1)}MB (max ${DEFAULT_MAX_IMAGE_SIZE / 1024 / 1024}MB)`,
+      );
+    }
+
+    // Read file as binary and convert to base64
+    const buffer = fsSync.readFileSync(filePath);
+    const base64 = buffer.toString("base64");
+
+    // For .base64 files, the content is already base64 text — read as text
+    let data;
+    if (mimeType === "application/octet-stream") {
+      const text = fsSync.readFileSync(filePath, "utf-8").trim();
+      data = text;
+    } else {
+      data = base64;
+    }
+
+    const size = stats.size;
+    const image = { type: "image_url", mimeType, data };
+
+    return ToolResult.ok(
+      `Image: ${originalPath} (${mimeType}, ${(size / 1024).toFixed(1)}KB)`,
+    )
+      .withImages([image])
+      .withEntries({
+        path: filePath,
+        mime_type: mimeType,
+        size: String(size),
+      });
+  } catch (e) {
+    return ToolResult.err(`Failed to read image: ${e.message}`);
   }
 }

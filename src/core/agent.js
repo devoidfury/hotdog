@@ -588,9 +588,12 @@ export class Agent {
       result = resultHook.result;
     }
 
-    // 9. Format and write result to context
+    // 9. Extract images from ToolResult before formatting
+    const images = result && result.images ? result.images : null;
+
+    // 10. Format and write result to context
     const resultStr = this._formatToolResult(result, toolName);
-    return this._writeToolResult(toolName, input, resultStr, toolCallId);
+    return this._writeToolResult(toolName, input, resultStr, toolCallId, images);
   }
 
   /**
@@ -620,11 +623,12 @@ export class Agent {
    * @param {string} input
    * @param {string} result
    * @param {string} toolCallId
+   * @param {Array<{type: string, mimeType: string, data: string}>} [images] — Optional images
    * @returns {{toolName: string, input: string, result: string}}
    */
-  async _writeToolResult(toolName, input, result, toolCallId) {
+  async _writeToolResult(toolName, input, result, toolCallId, images) {
     this._emitOutput("tool_result", { toolName, input, result });
-    const msg = new Message({ role: "tool", content: result, toolCallId });
+    const msg = new Message({ role: "tool", content: result, toolCallId, images });
     this._context.push(msg);
     await this._hooks.emitAsync(HOOKS.CONTEXT_MESSAGE, {
       message: msg,

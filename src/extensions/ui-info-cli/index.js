@@ -474,7 +474,6 @@ export function create(core) {
           [HOOKS.CLI_SUBCOMMANDS_REGISTER]: async (registry) => {
             registry.register("info", {
               description: "Show system info and diagnostics",
-              requiresConfig: true,
               handler: async (cli, core) => {
                 const { config, buildConfig } = core;
                 return await runInfo(cli, config, buildConfig);
@@ -483,7 +482,6 @@ export function create(core) {
 
             registry.register("show-prompt", {
               description: "Show rendered system prompt with tool definitions",
-              requiresConfig: true,
               handler: async (cli, core) => {
                 const { config, buildConfig } = core;
                 return await runShowPrompt(cli, core, config, buildConfig);

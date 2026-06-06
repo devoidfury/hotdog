@@ -191,7 +191,6 @@ export function create(core) {
           [HOOKS.CLI_SUBCOMMANDS_REGISTER]: async (registry) => {
             registry.register("cli", {
               description: "Interactive CLI session",
-              requiresConfig: true,
               handler: async (cli, core) => {
                 await runInteractiveSession(cli, core);
               },

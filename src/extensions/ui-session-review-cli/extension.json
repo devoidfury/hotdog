@@ -7,8 +7,6 @@
     {
       "name": "review",
       "description": "Review session logs",
-      "requiresConfig": true,
-      "requiresCore": false,
       "options": [
         {
           "name": "--session-id",

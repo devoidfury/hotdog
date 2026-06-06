@@ -24,7 +24,6 @@ export function create(core) {
           [HOOKS.CLI_SUBCOMMANDS_REGISTER]: async (registry) => {
             registry.register("review", {
               description: "Review session logs",
-              requiresConfig: true,
               handler: async (cli, core) => {
                 const { config } = core;
                 return await runReview(cli, config);

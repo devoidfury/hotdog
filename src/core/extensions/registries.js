@@ -32,9 +32,7 @@ export class CommandRegistry {
    * @param {Function} definition.handler - Async function(cliArgs, config) => void
    * @param {string} [definition.description] - Short description for help text.
    * @param {Object} [definition.options] - Subcommand-specific options (for help text).
-   * @param {boolean} [definition.requiresConfig=true] - Whether this subcommand needs config loaded.
-   * @param {boolean} [definition.requiresCore=false] - Whether this subcommand needs the full core.
-   */
+    */
   register(name, definition) {
     if (this._commands.has(name)) {
       const existing = this._commands.get(name);
@@ -44,8 +42,6 @@ export class CommandRegistry {
         definition = {
           ...existing,
           ...definition,
-          requiresConfig: definition.requiresConfig !== false,
-          requiresCore: definition.requiresCore === true,
         };
       } else {
         console.warn(
@@ -58,10 +54,6 @@ export class CommandRegistry {
 
     if (this._type === 'command') {
       normalized.isUiCommand = definition.isUiCommand === true;
-    } else {
-      // CLI subcommand defaults
-      normalized.requiresConfig = definition.requiresConfig !== false;
-      normalized.requiresCore = definition.requiresCore === true;
     }
 
     this._commands.set(name, normalized);

@@ -273,7 +273,7 @@ Parent agent calls delegate_task()
 User runs: bun bin/oa-agent info
   → parseArgs() detects subcommand
   → CliSubcommandRegistry.get("info") → handler
-  → Load config (if requiresConfig: true)
+  → Load config
   → Load all non-CLI extensions (for full hook chain)
   → Execute handler(cli, core)
 ```

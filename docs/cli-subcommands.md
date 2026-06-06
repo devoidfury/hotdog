@@ -22,8 +22,6 @@ Subcommands and CLI flags are declared in `extension.json`:
     {
       "name": "my-cmd",
       "description": "Do something useful",
-      "requiresConfig": true,
-      "requiresCore": false,
       "options": [
         {
           "name": "--verbose",
@@ -51,8 +49,6 @@ Subcommands and CLI flags are declared in `extension.json`:
 |-------|------|---------|-------------|
 | `name` | string | (required) | Subcommand name (e.g., "info", "show-prompt") |
 | `description` | string | "" | Short description shown in help text |
-| `requiresConfig` | boolean | true | Whether config should be loaded before handler runs |
-| `requiresCore` | boolean | false | Whether the full core object is needed by the handler |
 | `options` | array | [] | Subcommand-specific options for help text |
 
 ### Option Fields
@@ -85,8 +81,6 @@ export function create(core) {
   if (core.cliSubcommandRegistry) {
     core.cliSubcommandRegistry.register("my-cmd", {
       description: "Do something useful",
-      requiresConfig: true,
-      requiresCore: false,
       handler: async (cli, core) => {
         const { config, buildConfig } = core;
         console.log("Hello from my-cmd!");
@@ -130,7 +124,6 @@ export function create(core) {
       [HOOKS.CLI_SUBCOMMANDS_REGISTER]: async (registry) => {
         registry.register("my-cmd", {
           description: "Do something useful",
-          requiresConfig: true,
           handler: async (cli, core) => {
             // ...
           },

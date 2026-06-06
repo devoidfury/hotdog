@@ -210,8 +210,6 @@ function readExtensionMetadata(dirPath) {
       ? meta["cli:subcommands"].map((sc) => ({
           name: sc.name || "",
           description: sc.description || "",
-          requiresConfig: sc.requiresConfig !== false,
-          requiresCore: sc.requiresCore === true,
           options: Array.isArray(sc.options) ? sc.options : [],
         }))
       : [];
@@ -562,8 +560,6 @@ export async function registerExtensionMetadata(
       for (const sc of ext.cliSubcommands) {
         cliSubcommandRegistry.register(sc.name, {
           description: sc.description || "",
-          requiresConfig: sc.requiresConfig,
-          requiresCore: sc.requiresCore,
           options: sc.options || [],
           handler: null,
         });

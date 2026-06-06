@@ -7,8 +7,6 @@
     {
       "name": "cli",
       "description": "Interactive CLI session",
-      "requiresConfig": true,
-      "requiresCore": false
-    }
+      }
   ]
 }

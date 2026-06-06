@@ -182,7 +182,6 @@ export function create(core) {
             registry.register("prompt", {
               description:
                 "One-shot prompt mode — run a single prompt and exit",
-              requiresConfig: true,
               handler: handlePromptSubcommand,
             });
           },

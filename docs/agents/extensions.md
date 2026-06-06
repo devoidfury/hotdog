@@ -25,8 +25,7 @@ Every extension directory must contain an `extension.json` metadata file. This i
   "cli:subcommands": [
     {
       "name": "my-cmd",
-      "description": "Do something useful",
-      "requiresConfig": true
+      "description": "Do something useful"
     }
   ],
   "cli:flags": [

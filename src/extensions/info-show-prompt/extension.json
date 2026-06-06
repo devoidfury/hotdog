@@ -3,12 +3,26 @@
   "provides": ["cli:subcommands"],
   "loadOrder": 10,
   "description": "Provides info and show-prompt CLI subcommands",
+  "cli:flags": [
+    {
+      "long": "--config-debug",
+      "type": "boolean",
+      "description": "Show config resolution details (sources and layers)"
+    }
+  ],
   "cli:subcommands": [
     {
       "name": "info",
       "description": "Show system info and diagnostics",
       "requiresConfig": true,
-      "requiresCore": false
+      "requiresCore": false,
+      "options": [
+        {
+          "name": "--config-debug",
+          "type": "boolean",
+          "description": "Show config resolution details (sources and layers)"
+        }
+      ]
     },
     {
       "name": "show-prompt",

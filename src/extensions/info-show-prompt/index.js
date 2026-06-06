@@ -6,8 +6,12 @@
 import { HOOKS } from "../../core/hooks.js";
 import { LlmClient } from "../../core/llm-client/client.js";
 import { SkillsLoader } from "../skills/loader.js";
-import { DEFAULT_SKILLS_PATH, loadConfig } from "../../core/config.js";
+import { DEFAULT_SKILLS_PATH, loadConfig, loadProfileFiles } from "../../core/config.js";
 import { Agent } from "../../core/agent.js";
+import { CONFIG_KEYS } from "../../core/config-resolution.js";
+import path from "node:path";
+import fs from "node:fs";
+import os from "node:os";
 
 /**
  * Run the info subcommand.
@@ -15,6 +19,11 @@ import { Agent } from "../../core/agent.js";
 async function runInfo(cli, config, buildConfig) {
   const { resolved, modelRegistry, providers } = await buildConfig(cli);
   const rawConfig = await loadConfig(cli.config);
+
+  // If --config-debug is set, show config resolution details and exit
+  if (cli.config_debug) {
+    return await printConfigDebug(cli, rawConfig, providers, resolved);
+  }
 
   // Check connectivity
   const client = new LlmClient({
@@ -184,6 +193,249 @@ function printInfoJson(
   };
   console.log(JSON.stringify(json, null, 2));
   return 0;
+}
+
+/**
+ * Trace config resolution for a single key, showing which layer provided the value.
+ */
+function traceConfigResolution(keyName, schema, context) {
+  const { layers, transform } = schema;
+  const result = {
+    key: keyName,
+    type: schema.type || "unknown",
+    layers: [],
+    resolvedValue: undefined,
+    resolvedFrom: null,
+  };
+
+  for (const layer of layers) {
+    const layerInfo = { ...layer, matched: false, value: undefined };
+
+    if ("default" in layer) {
+      const defaultValue = typeof layer.default === "function"
+        ? layer.default(context)
+        : layer.default;
+      layerInfo.matched = true;
+      layerInfo.value = defaultValue;
+      result.resolvedValue = defaultValue;
+      result.resolvedFrom = "default";
+      result.layers.push(layerInfo);
+      break;
+    }
+
+    let value;
+    switch (layer.source) {
+      case "cli":
+        value = context.cli[layer.key];
+        break;
+      case "config":
+        value = context.config[layer.key];
+        break;
+      case "env":
+        value = process.env[layer.key];
+        break;
+      case "provider":
+        value = getNested(context.provider, layer.path);
+        break;
+      case "providerDefault":
+        if (context.provider?.models?.length && context.provider.models[0].name) {
+          value = context.provider.models[0].name;
+        }
+        break;
+      case "profile":
+        value = getNested(context.profile, layer.key || layer.path);
+        break;
+      default:
+        continue;
+    }
+
+    layerInfo.value = value;
+
+    if (value !== undefined && value !== null && value !== "") {
+      if (layer.predicate && !layer.predicate(value, context)) {
+        layerInfo.predicateFailed = true;
+        result.layers.push(layerInfo);
+        continue;
+      }
+
+      // Apply transforms
+      let finalValue = value;
+      if (layer.transform) {
+        finalValue = layer.transform(value, context);
+      }
+      if (transform) {
+        finalValue = transform(finalValue, context);
+      }
+
+      layerInfo.matched = true;
+      result.resolvedValue = finalValue;
+      result.resolvedFrom = `${layer.source}${layer.key ? ` (${layer.key})` : layer.path ? ` (${layer.path})` : ""}`;
+      result.layers.push(layerInfo);
+      break;
+    }
+
+    result.layers.push(layerInfo);
+  }
+
+  return result;
+}
+
+/**
+ * Helper to safely access nested properties.
+ */
+function getNested(obj, path) {
+  if (!obj || !path) return undefined;
+  const parts = path.includes(".") ? path.split(".") : [path];
+  let current = obj;
+  for (const part of parts) {
+    if (current == null || typeof current !== "object") return undefined;
+    current = current[part];
+  }
+  return current;
+}
+
+/**
+ * Print config resolution debug output.
+ * Shows each config key, its resolved value, and which source (layer) provided it.
+ */
+async function printConfigDebug(cli, config, providers, resolved) {
+  const profileName = cli.profile || config.profile || "default";
+  const profileFiles = loadProfileFiles(config.profilesPath || "./config/profiles");
+  const configProfile = config.profiles?.[profileName] ?? null;
+  const fileProfile = profileFiles[profileName] ?? null;
+
+  // Provider resolution
+  const providerName = cli.provider || config.defaultProvider;
+  const provider = providerName
+    ? (providers.find((p) => p.name === providerName) ?? null)
+    : null;
+
+  // Profile merge
+  let profile;
+  if (configProfile || fileProfile) {
+    profile = { ...configProfile };
+    if (fileProfile) {
+      if (fileProfile.role) profile.role = fileProfile.role;
+      if (fileProfile.whitelistTools != null) profile.whitelistTools = fileProfile.whitelistTools;
+      if (fileProfile.blacklistTools?.length) profile.blacklistTools = fileProfile.blacklistTools;
+      if (fileProfile.manager) profile.manager = true;
+      if (fileProfile.aspects?.length) profile.aspects = fileProfile.aspects;
+    }
+  } else {
+    profile = { whitelistTools: null, blacklistTools: [], skills: [], role: null, model: null, manager: false, cwdBoundary: null, aspects: [] };
+  }
+
+  const context = {
+    cli,
+    config,
+    provider,
+    profile,
+    profileName,
+    profilesPath: config.profilesPath || "./config/profiles",
+  };
+
+  console.log("=== Config Resolution Debug ===");
+  console.log();
+  console.log(`Profile: ${profileName}`);
+  console.log(`Provider: ${provider?.name || "(none)"}`);
+  console.log(`CLI config path: ${cli.config || "(none)"}`);
+  console.log(`Config file: ${cli.config || (config.profilesPath ? path.join(config.profilesPath, "..", "defaults.json") : "(defaults only)")}`);
+  console.log();
+
+  // Print each config key with resolution details
+  for (const [keyName, keySchema] of Object.entries(CONFIG_KEYS)) {
+    const trace = traceConfigResolution(keyName, keySchema, context);
+    const valueStr = trace.resolvedValue === undefined ? "(undefined)" :
+      typeof trace.resolvedValue === "object" ? JSON.stringify(trace.resolvedValue) :
+      String(trace.resolvedValue);
+
+    console.log(`  ${keyName.padEnd(25)} → ${valueStr}`);
+    console.log(`    Source: ${trace.resolvedFrom || "(none)"}`);
+    console.log(`    Type: ${trace.type}`);
+
+    // Show layer details
+    for (const layer of trace.layers) {
+      const status = layer.matched ? "✓" : layer.predicateFailed ? "✗ (predicate)" : "·";
+      const layerDesc = layer.source === "default"
+        ? `default: ${JSON.stringify(layer.default)}`
+        : `${layer.source}${layer.key ? ` [${layer.key}]` : layer.path ? ` [${layer.path}]` : ""}`;
+      console.log(`      ${status} ${layerDesc}${layer.value !== undefined ? ` → ${JSON.stringify(layer.value)}` : ""}`);
+    }
+    console.log();
+  }
+
+  // Non-declarative values (model, profile, etc.)
+  console.log("=== Non-Declarative Values ===");
+  console.log();
+  console.log(`  ${"model".padEnd(25)} → ${resolved.model}`);
+  console.log(`  ${"profileName".padEnd(25)} → ${resolved.profileName}`);
+  console.log(`  ${"activeProvider".padEnd(25)} → ${resolved.activeProvider || "(none)"}`);
+  console.log(`  ${"profile.whitelistTools".padEnd(25)} → ${resolved.profile?.whitelistTools ? JSON.stringify(resolved.profile.whitelistTools) : "(none)"}`);
+  console.log(`  ${"profile.blacklistTools".padEnd(25)} → ${JSON.stringify(resolved.profile?.blacklistTools || [])}`);
+  console.log(`  ${"profile.manager".padEnd(25)} → ${resolved.profile?.manager || false}`);
+  console.log(`  ${"profile.aspects".padEnd(25)} → ${JSON.stringify(resolved.profile?.aspects || [])}`);
+  console.log(`  ${"profile.role".padEnd(25)} → ${resolved.profile?.role || "(from DEFAULT_ROLE)"}`);
+  console.log(`  ${"profile.body".padEnd(25)} → ${resolved.profileBody ? `(${resolved.profileBody.length} chars)` : "(none)"}`);
+  console.log();
+
+  // Config file sources
+  console.log("=== Config File Sources ===");
+  console.log();
+  const homeConfig = path.join(os.homedir(), ".config", "oa-agent", "default.json");
+  const cwdConfig = "./config/defaults.json";
+
+  const cwdExists = checkFileExists(cwdConfig);
+  const homeExists = checkFileExists(homeConfig);
+
+  console.log(`  CWD config (${cwdConfig}): ${cwdExists ? "EXISTS" : "not found"}`);
+  console.log(`  Home config (${homeConfig}): ${homeExists ? "EXISTS" : "not found"}`);
+  if (cwdExists) {
+    try {
+      const content = fs.readFileSync(cwdConfig, "utf-8");
+      console.log(`    Content: ${content.trim().slice(0, 200)}${content.trim().length > 200 ? "..." : ""}`);
+    } catch { /* ignore */ }
+  }
+  if (homeExists) {
+    try {
+      const content = fs.readFileSync(homeConfig, "utf-8");
+      console.log(`    Content: ${content.trim().slice(0, 200)}${content.trim().length > 200 ? "..." : ""}`);
+    } catch { /* ignore */ }
+  }
+  console.log();
+
+  // Extension config
+  console.log("=== Extension Config ===");
+  console.log();
+  const extConfigs = Object.entries(config).filter(([k]) =>
+    !["providers", "defaultProvider", "aiUrl", "defaultModel", "temperature",
+      "thinker", "toolfmt", "toolOutputFmt", "role", "hideTools", "hideThinking",
+      "skillsPath", "profilesPath", "promptsPath", "systemPromptTemplate",
+      "chatTimeoutSecs", "embeddingsTimeoutSecs", "extensionPaths", "extensionAutoload",
+      "extensions", "profile", "profiles", "theme", "colors", "apiKey", "noLog",
+      "compactDebug", "mcpServers", "showTokenUse"].includes(k)
+  );
+  if (extConfigs.length > 0) {
+    for (const [extKey, extVal] of extConfigs) {
+      console.log(`  ${extKey.padEnd(25)} → ${typeof extVal === "object" ? JSON.stringify(extVal) : String(extVal)}`);
+    }
+  } else {
+    console.log("  (no extension-specific config)");
+  }
+  console.log();
+
+  return 0;
+}
+
+/**
+ * Check if a file exists.
+ */
+function checkFileExists(filePath) {
+  try {
+    require("fs").accessSync(filePath);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 /**

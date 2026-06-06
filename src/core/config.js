@@ -276,7 +276,7 @@ export function getVisibleWorkerProfiles(config) {
  * Load all .profile.md files from a directory.
  * Returns a map of profile name → { name, role, aspects, body, blacklistTools, whitelistTools, model, preloadSkills, manager }
  */
-function loadProfileFiles(profilesPath) {
+export function loadProfileFiles(profilesPath) {
   const result = {};
 
   let entries;

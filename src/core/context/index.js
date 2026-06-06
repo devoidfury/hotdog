@@ -3,3 +3,4 @@
 export * from './message.js';
 export * from './output.js';
 export * from './input.js';
+export * from './system-prompt.js';

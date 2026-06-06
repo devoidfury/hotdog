@@ -6,22 +6,41 @@ import { join } from "node:path";
 import { cwd } from "node:process";
 import { initSystemPromptTemplate as _initTemplate } from "../config.js";
 import { render, render as renderTemplate } from "../../utils/render.js";
-import { loadAspects as _loadAspects } from "../../utils/utils.js";
 
 export { renderTemplate };
 
 // ── Aspect Loading ─────────────────────────────────────────────────────────
 
 /**
- * Load aspect files from the default aspects directory (CWD/config/aspects).
+ * Load aspect files from a directory.
  * Files are named `<name>.aspect.md`.
  *
  * @param {string[]} aspectNames - Names of aspects to load.
+ * @param {string} [aspectsDir] - Directory containing `.aspect.md` files. Defaults to CWD/config/aspects.
  * @returns {{name: string, content: string}[]} Array of loaded aspects.
  */
-export function loadAspects(aspectNames) {
-  const aspectsDir = join(cwd(), "config", "aspects");
-  return _loadAspects(aspectNames, aspectsDir);
+export function loadAspects(aspectNames, aspectsDir) {
+  if (!aspectNames || aspectNames.length === 0) return [];
+
+  const dir = aspectsDir || join(cwd(), "config", "aspects");
+
+  const aspects = [];
+
+  for (const name of aspectNames) {
+    const fileName = `${name}.aspect.md`;
+    const filePath = join(dir, fileName);
+    try {
+      const content = readFileSync(filePath, "utf-8");
+      const trimmed = content.trim();
+      if (trimmed.length > 0) {
+        aspects.push({ name, content: trimmed });
+      }
+    } catch {
+      // Silent skip — aspect file not found or unreadable
+    }
+  }
+
+  return aspects;
 }
 
 // ── AGENTS.md Loading ──────────────────────────────────────────────────────

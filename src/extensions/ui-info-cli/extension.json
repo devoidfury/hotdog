@@ -24,7 +24,7 @@
     },
     {
       "name": "show-prompt",
-      "description": "Show rendered system prompt with tool definitions",
-      }
+      "description": "Show rendered system prompt with tool definitions"
+    }
   ]
 }

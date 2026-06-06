@@ -190,7 +190,9 @@ Escapes input that triggers special behavior (tool call actions, internal marker
 
 ### Utilities (`src/utils/`)
 - `file-utils.js` — `parseFrontMatter(content)` — parses YAML front matter from markdown
-- `utils.js` — `deepMerge(...sources)`, `loadAspects(aspectNames, aspectsDir)`, `validateNameable(name, label, dirName)`
+- `utils.js` — `deepMerge(...sources)`
+- `file-utils.js` — `parseFrontMatter(content)`, `validateNameable(name, label, dirName)`
+- `context/system-prompt.js` — `loadAspects(aspectNames, aspectsDir)`, `buildSystemPrompt(...)`
 - `render.js` — Template engine
 - `json-schema.js` — `validateParams()`, `formatValidationErrors()`
 

@@ -14,7 +14,7 @@
   "cli:subcommands": [
     {
       "name": "prompt",
-      "description": "One-shot prompt mode — run a single prompt and exit",
-      }
+      "description": "One-shot prompt mode — run a single prompt and exit"
+    }
   ]
 }

@@ -5,7 +5,7 @@ import fs from "node:fs";
 import { join } from "node:path";
 import { cwd } from "node:process";
 import { parseFrontMatter } from "../../utils/file-utils.js";
-import { validateNameable } from "../../utils/utils.js";
+import { validateNameable } from "../../utils/file-utils.js";
 import { render } from "../../utils/render.js";
 
 // ── Pattern Matching ───────────────────────────────────────────────────────

@@ -6,7 +6,7 @@
   "cli:subcommands": [
     {
       "name": "cli",
-      "description": "Interactive CLI session",
-      }
+      "description": "Interactive CLI session"
+    }
   ]
 }

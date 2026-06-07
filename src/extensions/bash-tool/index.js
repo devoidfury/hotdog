@@ -11,12 +11,18 @@ import {
   defaultCallDisplay,
 } from "../../core/extensions/tool-utils.js";
 
+import extensionData from "./extension.json";
+
 export class BashTool {
   static TOOL_NAME = "bash";
 
   constructor(options = {}) {
-    this.timeoutMs = options.timeoutMs ?? 60000;
-    this.maxOutputLines = options.maxOutputLines ?? 600;
+    this.timeoutMs =
+      options.timeoutMs ??
+      extensionData.configSchema.properties.bashTimeoutMs.default;
+    this.maxOutputLines =
+      options.maxOutputLines ??
+      extensionData.configSchema.properties.maxToolOutputLines.default;
   }
 
   toToolDef() {

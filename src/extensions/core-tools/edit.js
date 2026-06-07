@@ -3,6 +3,7 @@
 import fs from "node:fs/promises";
 import fsSync from "node:fs";
 import path from "node:path";
+import extensionData from "./extension.json";
 import {
   toolDef,
   param,
@@ -17,7 +18,9 @@ export class EditTool {
   static TOOL_NAME = "edit";
 
   constructor(options = {}) {
-    this.maxEditInputSize = options.maxEditInputSize ?? 16000;
+    this.maxEditInputSize =
+      options.maxEditInputSize ??
+      extensionData.configSchema.properties.maxEditInputSize.default;
   }
 
   toToolDef() {

@@ -3,6 +3,7 @@
 
 import fsSync from "node:fs";
 import path from "node:path";
+import extensionData from "./extension.json";
 import {
   toolDef,
   param,
@@ -30,7 +31,9 @@ export class ReadTool {
   static TOOL_NAME = "read";
 
   constructor(options = {}) {
-    this.readLimit = options.readLimit ?? 500;
+    this.readLimit =
+      options.readLimit ??
+      extensionData.configSchema.properties.readToolLimit.default;
     this.maxImageSize = options.maxImageSize ?? DEFAULT_MAX_IMAGE_SIZE;
   }
 

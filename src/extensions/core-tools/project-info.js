@@ -5,11 +5,7 @@ import path from "node:path";
 import { execFile } from "node:child_process";
 import util from "node:util";
 import { toolDef, param, ToolResult, toolResult, defaultCallDisplay } from "../../core/extensions/tool-utils.js";
-import {
-  DEFAULT_MAX_TOOL_OUTPUT_LINES,
-  DEFAULT_READ_TOOL_LIMIT,
-  DEFAULT_GREP_MAX_RESULTS,
-} from "./defaults.js";
+import { DEFAULT_GREP_MAX_RESULTS } from "./defaults.js";
 
 const execFileAsync = util.promisify(execFile);
 

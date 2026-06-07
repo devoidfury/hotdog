@@ -2,6 +2,7 @@
 
 import { execFile } from "node:child_process";
 import util from "node:util";
+import extensionData from "./extension.json";
 import { toolDef, param, ToolResult, toolResult, truncateOutput, parseToolInput, defaultCallDisplay } from "../../core/extensions/tool-utils.js";
 
 const execFileAsync = util.promisify(execFile);
@@ -10,8 +11,11 @@ export class FindTool {
   static TOOL_NAME = "find";
 
   constructor(options = {}) {
-    this.maxResults = options.maxResults ?? 200;
-    this.maxOutputLines = options.maxOutputLines ?? 600;
+    this.maxResults =
+      options.maxResults ?? extensionData.configSchema.properties.findMaxResults.default;
+    this.maxOutputLines =
+      options.maxOutputLines ??
+      extensionData.configSchema.properties.maxToolOutputLines.default;
   }
 
   toToolDef() {

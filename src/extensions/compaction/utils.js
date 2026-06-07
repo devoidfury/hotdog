@@ -1,5 +1,7 @@
 // Compaction utilities — token estimation, message serialization, helpers.
 
+const TOOL_RESULT_MAX_CHARS = 2000;
+
 // ── Token Estimation ────────────────────────────────────────────────────────
 
 /**
@@ -78,8 +80,6 @@ export function shouldCompact(messages, contextLimit, reserveTokens) {
 }
 
 // ── Serialization ───────────────────────────────────────────────────────────
-
-const TOOL_RESULT_MAX_CHARS = 2000;
 
 /**
  * Serialize messages to text for summarization.

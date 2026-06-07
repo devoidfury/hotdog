@@ -4,6 +4,7 @@ import fs from "node:fs";
 import { execFile } from "node:child_process";
 import util from "node:util";
 import { join, extname, resolve } from "node:path";
+import extensionData from "./extension.json";
 import {
   toolDef,
   param,
@@ -292,8 +293,12 @@ export class GrepTool {
   static TOOL_NAME = "grep";
 
   constructor(options = {}) {
-    this.maxResults = options.maxResults ?? 100;
-    this.maxOutputLines = options.maxOutputLines ?? 600;
+    this.maxResults =
+      options.maxResults ??
+      extensionData.configSchema.properties.grepMaxResults.default;
+    this.maxOutputLines =
+      options.maxOutputLines ??
+      extensionData.configSchema.properties.maxToolOutputLines.default;
   }
 
   toToolDef() {

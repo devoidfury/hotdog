@@ -4,6 +4,7 @@
 // Config defaults are defined in extension.json configSchema.
 // CLI flags are registered via the hook since they need programmatic control.
 
+import extensionData from "./extension.json";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { cwd } from "node:process";
@@ -20,7 +21,7 @@ export { LoadSkillTool };
 export function create(core) {
   // Config defaults come from extension.json configSchema
   const config = core.config?.skills || {};
-  const skillsPath = config.skillsPath ?? "/skills";
+  const skillsPath = config.skillsPath ?? extensionData.configSchema.properties.skillsPath.default;
   const loader = new SkillsLoader(skillsPath);
   loader.loadSkills();
 

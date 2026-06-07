@@ -6,8 +6,6 @@ import os from 'node:os';
 import { EditTool } from '../../src/extensions/core-tools/edit.js';
 import { ToolContext } from '../../src/core/extensions/tool-context.js';
 import { ToolResult } from '../../src/core/extensions/tool-utils.js';
-import { DEFAULT_MAX_EDIT_INPUT_SIZE } from '../../src/extensions/core-tools/defaults.js';
-
 // ── Helpers ─────────────────────────────────────────────────────────────────
 
 function tmpDir() {
@@ -297,7 +295,7 @@ describe('EditTool.execute — error cases', () => {
     fsSync.writeFileSync(filePath, 'hello');
 
     const tool = new EditTool();
-    const bigString = 'x'.repeat(DEFAULT_MAX_EDIT_INPUT_SIZE + 1);
+    const bigString = 'x'.repeat(16001); // DEFAULT_MAX_EDIT_INPUT_SIZE (16000) + 1
     const result = await tool.execute(
       { path: 'file.txt', oldString: bigString, newString: 'y' },
       toolCtx({ workspaceRoot: dir })

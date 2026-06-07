@@ -2,6 +2,7 @@
 // Handles context compaction when the conversation grows too long.
 // Hooks into `context:full` to trigger compaction.
 
+import extensionData from './extension.json';
 import {
   CompactionStrategy,
   CompactionStrategyRegistry,
@@ -22,12 +23,13 @@ import { HOOKS } from '../../core/hooks.js';
 export function create(core) {
   // Config defaults come from extension.json configSchema
   const config = core.config?.compaction || {};
-  
+  const cs = extensionData.configSchema.properties;
+
   const settings = {
-    enabled: config.enabled ?? true,
-    reserveTokens: config.reserveTokens ?? 8000,
-    keepRecentMessages: config.keepRecentMessages ?? 3,
-    strategy: config.strategy ?? 'summarize',
+    enabled: config.enabled ?? cs.enabled.default,
+    reserveTokens: config.reserveTokens ?? cs.reserveTokens.default,
+    keepRecentMessages: config.keepRecentMessages ?? cs.keepRecentMessages.default,
+    strategy: config.strategy ?? cs.strategy.default,
   };
 
   // Normalize: config uses keepRecentMessages, strategies use keepRecent

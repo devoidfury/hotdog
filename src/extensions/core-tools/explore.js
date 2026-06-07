@@ -3,11 +3,17 @@
 import { spawn } from "node:child_process";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { toolDef, param, ToolResult, toolResult, defaultCallDisplay } from "../../core/extensions/tool-utils.js";
+import {
+  toolDef,
+  param,
+  ToolResult,
+  toolResult,
+  defaultCallDisplay,
+} from "../../core/extensions/tool-utils.js";
 
 // Resolve the path to the current binary (main.js)
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const BIN_PATH = path.resolve(__dirname, "..", "..", "src", "main.js");
+const BIN_PATH = path.resolve(__dirname, "..", "..", "..", "bin", "oa-agent");
 
 export class ExploreTool {
   static TOOL_NAME = "explore";
@@ -31,11 +37,15 @@ export class ExploreTool {
   }
 
   callDisplay(input) {
-    return defaultCallDisplay(input, (args) => {
-      const p = args.path || ".";
-      const o = args.outline || "";
-      return `path=${p} -> ${o}`;
-    }, { fallback: "path=.", returnRawOnParseError: true });
+    return defaultCallDisplay(
+      input,
+      (args) => {
+        const p = args.path || ".";
+        const o = args.outline || "";
+        return `path=${p} -> ${o}`;
+      },
+      { fallback: "path=.", returnRawOnParseError: true },
+    );
   }
 
   async execute(input, ctx) {
@@ -57,6 +67,7 @@ export class ExploreTool {
 
     const prompt = `Explore project at '${args.path}'. ${args.outline}`;
 
+    console.log(BIN_PATH);
     // Build command: bun main.js -c "<prompt>" --profile explorer
     const command = [
       BIN_PATH,
@@ -76,11 +87,11 @@ export class ExploreTool {
     let stderr = "";
 
     cp.stdout.on("data", (chunk) => {
-      stdout += chunk;
+      stdout += chunk.toString();
     });
 
     cp.stderr.on("data", (chunk) => {
-      stderr += chunk;
+      stderr += chunk.toString();
     });
 
     const exitCode = await new Promise((resolve) => {
@@ -98,12 +109,7 @@ export class ExploreTool {
       });
     }
 
-    return ToolResult.ok({
-      content: stdout.trim(),
-      path: args.path,
-      outline: args.outline,
-      command: command.join(" "),
-    }).withEntries({
+    return ToolResult.ok(stdout.trim()).withEntries({
       path: args.path,
       outline: args.outline,
       command: command.join(" "),

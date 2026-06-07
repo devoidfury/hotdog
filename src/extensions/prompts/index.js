@@ -2,6 +2,7 @@
 // Manages prompt templates loading and execution.
 // Hooks: tools:register, commands:register
 
+import extensionData from './extension.json';
 import { HOOKS } from '../../core/hooks.js';
 import { Message } from '../../core/context/message.js';
 import { PromptsLoader } from './loader.js';
@@ -13,7 +14,7 @@ import { render } from '../../utils/render.js';
 export function create(core) {
   // Config defaults come from extension.json configSchema
   const config = core.config?.prompts || {};
-  const promptsPath = config.promptsPath ?? "./config/prompts";
+  const promptsPath = config.promptsPath ?? extensionData.configSchema.properties.promptsPath.default;
   const loader = new PromptsLoader(promptsPath);
   loader.loadPrompts();
 

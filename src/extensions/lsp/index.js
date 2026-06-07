@@ -4,6 +4,7 @@
 //
 // Config defaults are defined in extension.json configSchema.
 
+import extensionData from "./extension.json";
 import { HOOKS } from "../../core/hooks.js";
 import { isLspEnabled } from "./config.js";
 import {
@@ -116,17 +117,18 @@ function createLspTool(toolName, lspConfig) {
 export function create(core) {
   // Get LSP config with fallback to extension defaults from configSchema
   const rawLspConfig = core.config?.lsp || {};
+  const cs = extensionData.configSchema.properties;
   const lspConfig = {
-    enabled: rawLspConfig.enabled ?? false,
+    enabled: rawLspConfig.enabled ?? cs.enabled.default,
     servers:
       rawLspConfig.servers && Object.keys(rawLspConfig.servers).length > 0
         ? rawLspConfig.servers
         : DEFAULT_LSP_SERVERS,
-    maxHoverLines: rawLspConfig.maxHoverLines ?? 200,
-    maxCompletionItems: rawLspConfig.maxCompletionItems ?? 50,
-    maxSymbolResults: rawLspConfig.maxSymbolResults ?? 100,
-    requestTimeoutMs: rawLspConfig.requestTimeoutMs ?? 30000,
-    serverStartupTimeoutMs: rawLspConfig.serverStartupTimeoutMs ?? 60000,
+    maxHoverLines: rawLspConfig.maxHoverLines ?? cs.maxHoverLines.default,
+    maxCompletionItems: rawLspConfig.maxCompletionItems ?? cs.maxCompletionItems.default,
+    maxSymbolResults: rawLspConfig.maxSymbolResults ?? cs.maxSymbolResults.default,
+    requestTimeoutMs: rawLspConfig.requestTimeoutMs ?? cs.requestTimeoutMs.default,
+    serverStartupTimeoutMs: rawLspConfig.serverStartupTimeoutMs ?? cs.serverStartupTimeoutMs.default,
   };
 
   if (!isLspEnabled(lspConfig)) {

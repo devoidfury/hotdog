@@ -1,3 +1,4 @@
+import extensionData from "./extension.json";
 import { HOOKS } from "../../core/hooks.js";
 
 export * from "./write.js";
@@ -25,36 +26,40 @@ const TOOL_DESCRIPTORS = [
   { name: "write", disabled: false },
   { name: "read", disabled: false },
   { name: "pager", disabled: false },
-  { name: "explore", disabled: true },
+  { name: "explore", disabled: false },
   { name: "find", disabled: false },
   { name: "grep", disabled: false },
-  { name: "project_info", disabled: true },
+  { name: "project_info", disabled: false },
   { name: "edit", disabled: false },
 ];
 
 export const CORE_TOOL_NAMES = TOOL_DESCRIPTORS.map((d) => d.name);
 
 // Tool constructor map with config — maps tool names to factory functions that accept config.
+// Config values are pre-resolved with defaults from extension.json configSchema.
+const cs = extensionData.configSchema.properties;
 const TOOL_FACTORIES = {
   write: () => new WriteTool(),
   read: (config) =>
     new ReadTool({
-      readLimit: config.readToolLimit,
+      readLimit: config.readToolLimit ?? cs.readToolLimit.default,
       maxImageSize: DEFAULT_MAX_IMAGE_SIZE,
     }),
   edit: (config) =>
     new EditTool({
-      maxEditInputSize: config.maxEditInputSize,
+      maxEditInputSize: config.maxEditInputSize ?? cs.maxEditInputSize.default,
     }),
   grep: (config) =>
     new GrepTool({
-      maxResults: config.grepMaxResults,
-      maxOutputLines: config.maxToolOutputLines,
+      maxResults: config.grepMaxResults ?? cs.grepMaxResults.default,
+      maxOutputLines:
+        config.maxToolOutputLines ?? cs.maxToolOutputLines.default,
     }),
   find: (config) =>
     new FindTool({
-      maxResults: config.findMaxResults,
-      maxOutputLines: config.maxToolOutputLines,
+      maxResults: config.findMaxResults ?? cs.findMaxResults.default,
+      maxOutputLines:
+        config.maxToolOutputLines ?? cs.maxToolOutputLines.default,
     }),
   pager: () => new PagerTool(),
   explore: () => new ExploreTool(),

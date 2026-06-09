@@ -4,7 +4,7 @@
 
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { readFileSync, existsSync, readdirSync } from "node:fs";
+import { readFile, access, readdir } from "node:fs/promises";
 import { Message } from "../context/message.js";
 
 // ── Log Source Types ────────────────────────────────────────────────────────
@@ -41,11 +41,15 @@ function sessionPath(sessionId) {
 /**
  * Read all entries from a specific session file, replaying from the last reset.
  */
-export function readSessionEntries(sessionId) {
+export async function readSessionEntries(sessionId) {
   const path = sessionPath(sessionId);
-  if (!existsSync(path)) return [];
+  try {
+    await access(path);
+  } catch {
+    return [];
+  }
 
-  const content = readFileSync(path, "utf-8");
+  const content = await readFile(path, "utf-8");
   const lines = content.split("\n");
   const entries = [];
   let lastResetIdx = null;
@@ -74,16 +78,20 @@ export function readSessionEntries(sessionId) {
 /**
  * Read all entries from all session files.
  */
-export function readAllSessions() {
+export async function readAllSessions() {
   const dir = sessionsDir();
-  if (!existsSync(dir)) return [];
+  try {
+    await access(dir);
+  } catch {
+    return [];
+  }
 
   const allEntries = [];
-  const files = readdirSync(dir).filter((f) => f.endsWith(".jsonl"));
+  const files = (await readdir(dir)).filter((f) => f.endsWith(".jsonl"));
 
   for (const file of files) {
     const path = join(dir, file);
-    const content = readFileSync(path, "utf-8");
+    const content = await readFile(path, "utf-8");
 
     for (const line of content.split("\n")) {
       const trimmed = line.trim();
@@ -104,8 +112,13 @@ export function readAllSessions() {
 /**
  * Check if a session file exists.
  */
-export function sessionExists(sessionId) {
-  return existsSync(sessionPath(sessionId));
+export async function sessionExists(sessionId) {
+  try {
+    await access(sessionPath(sessionId));
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 /**

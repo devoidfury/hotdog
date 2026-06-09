@@ -145,12 +145,6 @@ describe("createToolFactory", () => {
     const tool = factory.createTool("project_info", {}, ["project_info"]);
     expect(tool).not.toBeNull();
   });
-
-  it("enables disabled tools when in whitelist", () => {
-    const factory = createToolFactory();
-    const tool = factory.createTool("project_info", {}, ["project_info"]);
-    expect(tool).not.toBeNull();
-  });
 });
 
 describe("createToolFactory - createAndRegister", async () => {

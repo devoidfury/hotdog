@@ -10,7 +10,7 @@
 import { readSessionEntries } from '../../core/session/session-log.js';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
-import { readdirSync, existsSync, statSync } from 'node:fs';
+import { readdir, access, stat } from 'node:fs/promises';
 import { ToolResult, defaultCallDisplay } from '../../core/extensions/tool-utils.js';
 
 /**
@@ -32,20 +32,24 @@ function sessionsDir() {
 /**
  * List sessions, returning JSON array of summaries.
  */
-function listSessions(limit) {
+async function listSessions(limit) {
   const dir = sessionsDir();
 
-  if (!existsSync(dir)) return [];
+  try {
+    await access(dir);
+  } catch {
+    return [];
+  }
 
-  const files = readdirSync(dir).filter(f => f.endsWith('.jsonl'));
+  const files = (await readdir(dir)).filter(f => f.endsWith('.jsonl'));
   if (files.length === 0) return [];
 
   const sessions = [];
   for (const file of files) {
     const sessionId = file.replace(/\.jsonl$/, '');
-    const path = join(dir, file);
-    const metadata = statSync(path);
-    const entries = readSessionEntries(sessionId);
+    const filePath = join(dir, file);
+    const metadata = await stat(filePath);
+    const entries = await readSessionEntries(sessionId);
 
     // Filter out sessions with only 1 entry
     if (entries.length <= 1) continue;
@@ -73,16 +77,16 @@ function listSessions(limit) {
 /**
  * Get a specific session's entries as a JSON array.
  */
-function getSession(sessionId) {
-  const entries = readSessionEntries(sessionId);
+async function getSession(sessionId) {
+  const entries = await readSessionEntries(sessionId);
   return entries;
 }
 
 /**
  * Get a lightweight index of tool calls in a session.
  */
-function getToolIndex(sessionId) {
-  const entries = readSessionEntries(sessionId);
+async function getToolIndex(sessionId) {
+  const entries = await readSessionEntries(sessionId);
   const indexEntries = [];
 
   for (let i = 0; i < entries.length; i++) {
@@ -180,7 +184,7 @@ export class ReviewTool {
     switch (args.operation) {
       case 'list': {
         const limit = Math.min(100, Math.max(1, args.limit));
-        const sessions = listSessions(limit);
+        const sessions = await listSessions(limit);
         return ToolResult.ok(JSON.stringify(sessions)).withEntries({
           operation: 'list',
           session_count: String(sessions.length),
@@ -190,7 +194,7 @@ export class ReviewTool {
         if (!args.session_id) {
           return ToolResult.err('Error: session_id is required for \'get\' operation');
         }
-        const entries = getSession(args.session_id);
+        const entries = await getSession(args.session_id);
         return ToolResult.ok(JSON.stringify(entries)).withEntries({
           operation: 'get',
           session_id: args.session_id,
@@ -201,7 +205,7 @@ export class ReviewTool {
         if (!args.session_id) {
           return ToolResult.err('Error: session_id is required for \'tool_index\' operation');
         }
-        const index = getToolIndex(args.session_id);
+        const index = await getToolIndex(args.session_id);
         return ToolResult.ok(JSON.stringify(index)).withEntries({
           operation: 'tool_index',
           session_id: args.session_id,

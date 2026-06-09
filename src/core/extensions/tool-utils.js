@@ -4,7 +4,7 @@
 // for consistency with JSON/persistence format. Short metadata keys become XML
 // attributes on the <tool> tag; long keys become child nodes.
 
-import fs from "node:fs";
+import fsPromises from "node:fs/promises";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
 
@@ -343,12 +343,12 @@ export function generateDiff(oldText, newText, maxLines = 80) {
 /**
  * Write a file, creating parent directories as needed.
  */
-export function writeFileWithParents(filePath, content) {
+export async function writeFileWithParents(filePath, content) {
   const parentDir = path.dirname(filePath);
   if (parentDir && parentDir !== ".") {
-    fs.mkdirSync(parentDir, { recursive: true });
+    await fsPromises.mkdir(parentDir, { recursive: true });
   }
-  fs.writeFileSync(filePath, content);
+  await fsPromises.writeFile(filePath, content);
 }
 
 /**
@@ -386,10 +386,12 @@ export function resolvePath(filePath, cwdBoundary, workspaceRoot) {
 /**
  * Resolve a path and verify it stays within the cwd boundary.
  */
-export function resolvePathAndValidate(requested, cwdBoundary = null) {
+export async function resolvePathAndValidate(requested, cwdBoundary = null) {
   const resolved = path.resolve(requested);
 
-  if (!fs.existsSync(resolved)) {
+  try {
+    await fsPromises.access(resolved);
+  } catch {
     throw new Error(`Path not found: ${requested}`);
   }
 
@@ -412,33 +414,31 @@ export function resolvePathAndValidate(requested, cwdBoundary = null) {
 /**
  * Get file size in bytes.
  */
-export function fileSize(filePath) {
-  const stats = fs.statSync(filePath);
+export async function fileSize(filePath) {
+  const stats = await fsPromises.stat(filePath);
   return stats.size;
 }
 
 /**
  * Check if a path is writable.
  */
-export function checkWritable(filePath) {
+export async function checkWritable(filePath) {
   const parentDir = path.dirname(filePath);
 
   if (parentDir && parentDir !== ".") {
     const tempPath = path.join(parentDir, ".oa-agent-permission-test");
     try {
-      fs.writeFileSync(tempPath, "");
-      fs.unlinkSync(tempPath);
+      await fsPromises.writeFile(tempPath, "");
+      await fsPromises.unlink(tempPath);
     } catch (e) {
       throw new Error(`Directory '${parentDir}' is not writable: ${e.message}`);
     }
   }
 
-  if (fs.existsSync(filePath)) {
-    try {
-      fs.accessSync(filePath, fs.constants.W_OK);
-    } catch (e) {
-      throw new Error(`File '${filePath}' is not writable: ${e.message}`);
-    }
+  try {
+    await fsPromises.access(filePath, fsPromises.constants.W_OK);
+  } catch {
+    // File doesn't exist — that's OK, we can create it
   }
 
   return true;
@@ -447,14 +447,11 @@ export function checkWritable(filePath) {
 /**
  * Check if a path is readable.
  */
-export function checkReadable(filePath) {
-  if (!fs.existsSync(filePath)) {
-    throw new Error(`Path '${filePath}' does not exist`);
-  }
+export async function checkReadable(filePath) {
   try {
-    fs.accessSync(filePath, fs.constants.R_OK);
-  } catch (e) {
-    throw new Error(`File '${filePath}' is not readable: ${e.message}`);
+    await fsPromises.access(filePath, fsPromises.constants.R_OK);
+  } catch {
+    throw new Error(`Path '${filePath}' does not exist or is not readable`);
   }
   return true;
 }

@@ -1,7 +1,7 @@
 // System prompt builder.
 // Reads the template from disk and renders with variables.
 
-import { readFileSync } from "node:fs";
+import fsPromises from "node:fs/promises";
 import { join } from "node:path";
 import { cwd } from "node:process";
 import { initSystemPromptTemplate as _initTemplate } from "../config.js";
@@ -19,28 +19,28 @@ export { renderTemplate };
  * @param {string} [aspectsDir] - Directory containing `.aspect.md` files. Defaults to CWD/config/aspects.
  * @returns {{name: string, content: string}[]} Array of loaded aspects.
  */
-export function loadAspects(aspectNames, aspectsDir) {
+export async function loadAspects(aspectNames, aspectsDir) {
   if (!aspectNames || aspectNames.length === 0) return [];
 
   const dir = aspectsDir || join(cwd(), "config", "aspects");
 
-  const aspects = [];
-
-  for (const name of aspectNames) {
+  const promises = aspectNames.map(async (name) => {
     const fileName = `${name}.aspect.md`;
     const filePath = join(dir, fileName);
     try {
-      const content = readFileSync(filePath, "utf-8");
+      const content = await fsPromises.readFile(filePath, "utf-8");
       const trimmed = content.trim();
       if (trimmed.length > 0) {
-        aspects.push({ name, content: trimmed });
+        return { name, content: trimmed };
       }
     } catch {
       // Silent skip — aspect file not found or unreadable
     }
-  }
+    return null;
+  });
 
-  return aspects;
+  const results = await Promise.all(promises);
+  return results.filter(Boolean);
 }
 
 // ── AGENTS.md Loading ──────────────────────────────────────────────────────
@@ -48,10 +48,10 @@ export function loadAspects(aspectNames, aspectsDir) {
 /**
  * Load AGENTS.md from CWD if it exists.
  */
-export function loadAgentsMd() {
+export async function loadAgentsMd() {
   try {
     const path = join(cwd(), "AGENTS.md");
-    return readFileSync(path, "utf-8");
+    return await fsPromises.readFile(path, "utf-8");
   } catch {
     return "";
   }
@@ -66,10 +66,10 @@ let cachedTemplate = null;
  * Uses the pre-initialized template from config.js if available,
  * otherwise loads from disk or falls back to minimal template.
  */
-export function loadSystemPromptTemplate(templatePath) {
+export async function loadSystemPromptTemplate(templatePath) {
   if (cachedTemplate) return cachedTemplate;
 
-  cachedTemplate = _initTemplate(templatePath);
+  cachedTemplate = await _initTemplate(templatePath);
   return cachedTemplate;
 }
 
@@ -79,8 +79,8 @@ export function loadSystemPromptTemplate(templatePath) {
  * Build the full system prompt.
  * Build system prompt with skills preamble.
  */
-export function buildSystemPrompt(options) {
-  const template = loadSystemPromptTemplate(options.templatePath);
+export async function buildSystemPrompt(options) {
+  const template = await loadSystemPromptTemplate(options.templatePath);
 
   const context = {
     role: options.role || "",

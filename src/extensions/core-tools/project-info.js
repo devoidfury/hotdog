@@ -1,6 +1,6 @@
 // Project Info tool — compact project structure overview.
 
-import fs from "node:fs";
+import fs from "node:fs/promises";
 import path from "node:path";
 import { execFile } from "node:child_process";
 import util from "node:util";
@@ -65,7 +65,8 @@ export class ProjectInfoTool {
     // Check if directory exists
     let dirExists;
     try {
-      dirExists = fs.statSync(cwd).isDirectory();
+      const stats = await fs.stat(cwd);
+      dirExists = stats.isDirectory();
     } catch {
       dirExists = false;
     }
@@ -181,7 +182,7 @@ export class ProjectInfoTool {
     lines.push("");
 
     // List files manually
-    const files = this._listFilesRecursively(cwd, maxDepth, maxFiles);
+    const files = await this._listFilesRecursively(cwd, maxDepth, maxFiles);
     if (files.length > 0) {
       lines.push("── Files ──────────────────────────────");
       for (const f of files) {
@@ -227,16 +228,16 @@ export class ProjectInfoTool {
     });
   }
 
-  _listFilesRecursively(base, maxDepth, maxFiles) {
+  async _listFilesRecursively(base, maxDepth, maxFiles) {
     const results = [];
-    this._walkDir(base, 0, maxDepth, results, maxFiles);
+    await this._walkDir(base, 0, maxDepth, results, maxFiles);
     return results;
   }
 
-  _walkDir(dir, depth, maxDepth, results, maxFiles) {
+  async _walkDir(dir, depth, maxDepth, results, maxFiles) {
     if (depth > maxDepth || results.length >= maxFiles) return;
     try {
-      const entries = fs.readdirSync(dir, { withFileTypes: true });
+      const entries = await fs.readdir(dir, { withFileTypes: true });
       for (const entry of entries) {
         if (results.length >= maxFiles) break;
         if (entry.name.startsWith(".")) continue;
@@ -245,7 +246,7 @@ export class ProjectInfoTool {
           const relPath = path.relative(".", fullPath);
           results.push(relPath);
         } else if (entry.isDirectory()) {
-          this._walkDir(fullPath, depth + 1, maxDepth, results, maxFiles);
+          await this._walkDir(fullPath, depth + 1, maxDepth, results, maxFiles);
         }
       }
     } catch {

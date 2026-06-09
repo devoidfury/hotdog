@@ -1,7 +1,7 @@
 // Extension loader — discovers, loads, and manages extensions.
 // Extensions plug into the core via hooks and tool registration.
 
-import fs from "node:fs";
+import fsPromises from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { HOOKS, EXTENSION_PROVIDES } from "../hooks.js";
@@ -85,7 +85,7 @@ export async function getExtensionConfigDefaults(extensionPaths) {
 
   for (const spec of extensionPaths || ["builtins"]) {
     const resolved = resolveExtensionPath(spec);
-    const discovered = discoverExtensionsInDir(resolved);
+    const discovered = await discoverExtensionsInDir(resolved);
 
     for (const ext of discovered) {
       if (ext.configSchema) {
@@ -163,21 +163,30 @@ export function resolveExtensionPath(spec) {
 /**
  * Check if a directory is a valid extension.
  */
-export function isExtensionDirectory(dirPath) {
+export async function isExtensionDirectory(dirPath) {
   const metaPath = path.join(dirPath, "extension.json");
-  if (!fs.existsSync(metaPath)) {
+  try {
+    await fsPromises.access(metaPath);
+  } catch {
     return false;
   }
   const indexPath = path.join(dirPath, "index.js");
-  return fs.existsSync(indexPath);
+  try {
+    await fsPromises.access(indexPath);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 /**
  * Read extension metadata from extension.json file.
  */
-function readExtensionMetadata(dirPath) {
+async function readExtensionMetadata(dirPath) {
   const metaPath = path.join(dirPath, "extension.json");
-  if (!fs.existsSync(metaPath)) {
+  try {
+    await fsPromises.access(metaPath);
+  } catch {
     return {
       name: "",
       provides: [],
@@ -191,7 +200,7 @@ function readExtensionMetadata(dirPath) {
     };
   }
   try {
-    const content = fs.readFileSync(metaPath, "utf-8");
+    const content = await fsPromises.readFile(metaPath, "utf-8");
     const meta = JSON.parse(content);
 
     const provides = Array.isArray(meta.provides) ? meta.provides : [];
@@ -260,15 +269,20 @@ function readExtensionMetadata(dirPath) {
 /**
  * Discover extensions in a directory recursively.
  */
-export function discoverExtensionsInDir(dirPath) {
+export async function discoverExtensionsInDir(dirPath) {
   const extensions = [];
 
-  if (!fs.existsSync(dirPath) || !fs.statSync(dirPath).isDirectory()) {
+  try {
+    const stats = await fsPromises.stat(dirPath);
+    if (!stats.isDirectory()) {
+      return extensions;
+    }
+  } catch {
     return extensions;
   }
 
-  function scanDirectory(currentDir, relativeBase = "") {
-    const entries = fs.readdirSync(currentDir, { withFileTypes: true });
+  async function scanDirectory(currentDir, relativeBase = "") {
+    const entries = await fsPromises.readdir(currentDir, { withFileTypes: true });
 
     for (const entry of entries) {
       if (!entry.isDirectory()) continue;
@@ -278,7 +292,7 @@ export function discoverExtensionsInDir(dirPath) {
         ? `${relativeBase}/${entry.name}`
         : entry.name;
 
-      if (isExtensionDirectory(dirFull)) {
+      if (await isExtensionDirectory(dirFull)) {
         const {
           name,
           provides,
@@ -288,7 +302,7 @@ export function discoverExtensionsInDir(dirPath) {
           configSchema,
           cliSubcommands,
           cliFlags,
-        } = readExtensionMetadata(dirFull);
+        } = await readExtensionMetadata(dirFull);
 
         extensions.push({
           name: name || entry.name,
@@ -305,11 +319,11 @@ export function discoverExtensionsInDir(dirPath) {
       }
 
       // Recurse into subdirectories regardless of whether this one is an extension
-      scanDirectory(dirFull, relativePath);
+      await scanDirectory(dirFull, relativePath);
     }
   }
 
-  scanDirectory(dirPath);
+  await scanDirectory(dirPath);
 
   return extensions;
 }
@@ -395,7 +409,7 @@ export async function discoverExtensions(extensionPaths) {
 
   for (const spec of extensionPaths) {
     const resolved = resolveExtensionPath(spec);
-    const discovered = discoverExtensionsInDir(resolved);
+    const discovered = await discoverExtensionsInDir(resolved);
 
     for (const ext of discovered) {
       let basePath;
@@ -434,7 +448,7 @@ export async function getExtensionConfigSchemas(extensionPaths) {
 
   for (const spec of extensionPaths) {
     const resolved = resolveExtensionPath(spec);
-    const discovered = discoverExtensionsInDir(resolved);
+    const discovered = await discoverExtensionsInDir(resolved);
 
     for (const ext of discovered) {
       if (ext.configSchema !== null) {

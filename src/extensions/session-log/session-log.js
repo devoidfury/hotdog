@@ -5,10 +5,10 @@
 import { homedir } from "node:os";
 import { join } from "node:path";
 import {
-  appendFileSync,
-  existsSync,
-  mkdirSync,
-} from "node:fs";
+  appendFile,
+  access,
+  mkdir,
+} from "node:fs/promises";
 
 // Re-export core session log functions from src/ (session resume is a core feature)
 import {
@@ -202,11 +202,13 @@ export class SessionLog {
   /**
    * Ensure the sessions directory exists.
    */
-  _ensureDir() {
+  async _ensureDir() {
     const dir = sessionsDir();
-    if (!existsSync(dir)) {
+    try {
+      await access(dir);
+    } catch {
       try {
-        mkdirSync(dir, { recursive: true });
+        await mkdir(dir, { recursive: true });
       } catch {
         // Best effort — will fail on first write if dir can't be created
       }
@@ -216,17 +218,17 @@ export class SessionLog {
   /**
    * Append an entry to the log file.
    */
-  append(entry) {
-    this._ensureDir();
+  async append(entry) {
+    await this._ensureDir();
     const line = JSON.stringify(stripNulls(entry));
-    appendFileSync(this.path, line + "\n");
+    await appendFile(this.path, line + "\n");
   }
 
   /**
    * Write a system prompt entry.
    */
-  writeSystemPrompt(content) {
-    this.append(createSystemPromptEntry(this.sessionId, content));
+  async writeSystemPrompt(content) {
+    await this.append(createSystemPromptEntry(this.sessionId, content));
   }
 
   /**
@@ -234,15 +236,15 @@ export class SessionLog {
    * @param {string|Array} content
    * @param {Array<{type: string, mimeType: string, data: string}>} [images]
    */
-  writeInput(content, images = null) {
-    this.append(createInputEntry(this.sessionId, content, images));
+  async writeInput(content, images = null) {
+    await this.append(createInputEntry(this.sessionId, content, images));
   }
 
   /**
    * Write an LLM assistant response entry.
    */
-  writeAssistant(content, toolCalls = null, reasoningContent = null) {
-    this.append(
+  async writeAssistant(content, toolCalls = null, reasoningContent = null) {
+    await this.append(
       createAssistantEntry(
         this.sessionId,
         content,
@@ -255,8 +257,8 @@ export class SessionLog {
   /**
    * Write a tool result entry.
    */
-  writeToolResult(content, toolCallId = null, toolName = null) {
-    this.append(
+  async writeToolResult(content, toolCallId = null, toolName = null) {
+    await this.append(
       createToolResultEntry(this.sessionId, content, toolCallId, toolName),
     );
   }
@@ -264,15 +266,15 @@ export class SessionLog {
   /**
    * Write a reset entry.
    */
-  writeReset() {
-    this.append(createResetEntry(this.sessionId));
+  async writeReset() {
+    await this.append(createResetEntry(this.sessionId));
   }
 
   /**
    * Write a compaction entry.
    */
-  writeCompaction(messagesCompacted, summary) {
-    this.append(
+  async writeCompaction(messagesCompacted, summary) {
+    await this.append(
       createCompactionEntry(this.sessionId, messagesCompacted, summary),
     );
   }
@@ -282,8 +284,8 @@ export class SessionLog {
    * @param {string|Array} content
    * @param {Array<{type: string, mimeType: string, data: string}>} [images]
    */
-  writePrompt(content, images = null) {
-    this.append(createPromptEntry(this.sessionId, content, images));
+  async writePrompt(content, images = null) {
+    await this.append(createPromptEntry(this.sessionId, content, images));
   }
 }
 

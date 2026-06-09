@@ -1,6 +1,6 @@
 // Grep tool — search files for patterns. Tries ripgrep first, falls back to native.
 
-import fs from "node:fs";
+import fs from "node:fs/promises";
 import { execFile } from "node:child_process";
 import util from "node:util";
 import { join, extname, resolve } from "node:path";
@@ -82,9 +82,9 @@ function matchesType(fileExt, typeFilter) {
 /**
  * Check if a file is binary by reading its first bytes.
  */
-function isBinary(filePath) {
+async function isBinary(filePath) {
   try {
-    const data = fs.readFileSync(filePath);
+    const data = await fs.readFile(filePath);
     const slice = data.length > 512 ? data.subarray(0, 512) : data;
     return slice.some((b) => b === 0);
   } catch {
@@ -95,7 +95,7 @@ function isBinary(filePath) {
 /**
  * Recursively walk a directory and search files for a pattern.
  */
-function walkAndSearch(
+async function walkAndSearch(
   dir,
   re,
   maxResults,
@@ -104,11 +104,16 @@ function walkAndSearch(
   outputLines,
   totalMatches,
 ) {
-  if (!fs.existsSync(dir) || !fs.statSync(dir).isDirectory()) {
+  try {
+    const stats = await fs.stat(dir);
+    if (!stats.isDirectory()) {
+      return;
+    }
+  } catch {
     return;
   }
 
-  const entries = fs.readdirSync(dir, { withFileTypes: true });
+  const entries = await fs.readdir(dir, { withFileTypes: true });
 
   for (const entry of entries) {
     if (outputLines.length >= maxResults) return;
@@ -118,7 +123,7 @@ function walkAndSearch(
     if (entry.isDirectory()) {
       // Skip common non-source directories
       if (SKIP_DIRS.has(entry.name)) continue;
-      walkAndSearch(
+      await walkAndSearch(
         fullPath,
         re,
         maxResults,
@@ -133,12 +138,12 @@ function walkAndSearch(
       if (!matchesType(ext, typeFilter)) continue;
 
       // Skip binary files
-      if (isBinary(fullPath)) continue;
+      if (await isBinary(fullPath)) continue;
 
       // Read file and search
       let content;
       try {
-        content = fs.readFileSync(fullPath, "utf-8");
+        content = await fs.readFile(fullPath, "utf-8");
       } catch {
         continue;
       }
@@ -187,14 +192,14 @@ function walkAndSearch(
 /**
  * Native grep implementation — walks directory tree and searches file contents.
  */
-function grepNative(pattern, searchDir, maxResults, context, typeFilter) {
+async function grepNative(pattern, searchDir, maxResults, context, typeFilter) {
   // Validate regex first
   const re = new RegExp(pattern);
 
   const outputLines = [];
   const totalMatches = { count: 0 };
 
-  walkAndSearch(
+  await walkAndSearch(
     searchDir,
     re,
     maxResults,
@@ -368,7 +373,7 @@ export class GrepTool {
       result = await grepWithRg(pattern, searchDir, maxResults, context, type);
     } catch {
       // ripgrep not available — use native implementation
-      result = grepNative(pattern, searchDir, maxResults, context, type);
+      result = await grepNative(pattern, searchDir, maxResults, context, type);
     }
 
     const { display, totalMatches } = result;

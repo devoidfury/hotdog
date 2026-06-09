@@ -1,7 +1,7 @@
 // Read tool — read content from a file.
 // Supports text files (line-based) and image files (jpeg, png, webp, base64).
 
-import fsSync from "node:fs";
+import fs from "node:fs/promises";
 import path from "node:path";
 import extensionData from "./extension.json";
 import {
@@ -100,9 +100,9 @@ export class ReadTool {
 
     // Check if it's a directory
     try {
-      const stat = fsSync.statSync(resolved);
+      const stat = await fs.stat(resolved);
       if (stat.isDirectory()) {
-        const listing = listDirectoryDepth1(resolved);
+        const listing = await listDirectoryDepth1(resolved);
         return ToolResult.ok(
           `'${filePath}' is a directory. Here's a depth-1 listing:\n${listing}`,
         ).withEntries({
@@ -115,17 +115,19 @@ export class ReadTool {
     }
 
     // Check if file exists
-    if (!fsSync.existsSync(resolved)) {
+    try {
+      await fs.access(resolved);
+    } catch {
       return ToolResult.err(`File not found: ${filePath}`);
     }
 
     // Check if it's an image file
     const mimeType = getImageMimeType(resolved);
     if (mimeType) {
-      return readImage(resolved, mimeType, filePath, this.maxImageSize);
+      return await readImage(resolved, mimeType, filePath, this.maxImageSize);
     }
 
-    return readLines(resolved, offset, limit);
+    return await readLines(resolved, offset, limit);
   }
 }
 
@@ -165,9 +167,9 @@ function parseArgs(input, defaultLimit) {
 /**
  * Read file by lines with offset/limit pagination.
  */
-function readLines(filePath, offset, limit) {
+async function readLines(filePath, offset, limit) {
   try {
-    const content = fsSync.readFileSync(filePath, "utf-8");
+    const content = await fs.readFile(filePath, "utf-8");
     const lines = content.split("\n");
     const totalLines = lines.length;
 
@@ -201,9 +203,9 @@ function readLines(filePath, offset, limit) {
 /**
  * List directory contents at depth 1, sorted.
  */
-function listDirectoryDepth1(dirPath) {
+async function listDirectoryDepth1(dirPath) {
   try {
-    const entries = fsSync.readdirSync(dirPath, { withFileTypes: true });
+    const entries = await fs.readdir(dirPath, { withFileTypes: true });
     const sorted = entries
       .map((entry) => {
         const suffix = entry.isDirectory() ? "/" : "";
@@ -228,10 +230,10 @@ function getImageMimeType(filePath) {
 /**
  * Read an image file and return it as a ToolResult with images.
  */
-function readImage(filePath, mimeType, originalPath, maxImageSize) {
+async function readImage(filePath, mimeType, originalPath, maxImageSize) {
   try {
     // Check file size
-    const stats = fsSync.statSync(filePath);
+    const stats = await fs.stat(filePath);
     if (stats.size > maxImageSize) {
       return ToolResult.err(
         `Image file too large: ${(stats.size / 1024 / 1024).toFixed(1)}MB (max ${maxImageSize / 1024 / 1024}MB)`,
@@ -239,13 +241,13 @@ function readImage(filePath, mimeType, originalPath, maxImageSize) {
     }
 
     // Read file as binary and convert to base64
-    const buffer = fsSync.readFileSync(filePath);
+    const buffer = await fs.readFile(filePath);
     const base64 = buffer.toString("base64");
 
     // For .base64 files, the content is already base64 text — read as text
     let data;
     if (mimeType === "application/octet-stream") {
-      const text = fsSync.readFileSync(filePath, "utf-8").trim();
+      const text = (await fs.readFile(filePath, "utf-8")).trim();
       data = text;
     } else {
       data = base64;

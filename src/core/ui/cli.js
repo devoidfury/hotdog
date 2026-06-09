@@ -97,7 +97,7 @@ export class CliOutputSink extends OutputSink {
   /**
    * Resolve a palette from CLI args, config, and theme.
    */
-  static resolve(useColors, theme, configPalette) {
+  static async resolve(useColors, theme, configPalette) {
     return resolvePalette(theme, configPalette, null, useColors);
   }
 

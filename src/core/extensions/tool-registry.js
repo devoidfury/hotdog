@@ -26,10 +26,15 @@ export class ToolRegistry {
     return Array.from(this.tools.entries());
   }
 
-  getToolDefs() {
-    return Array.from(this.tools.values())
-      .filter((t) => t.toToolDef)
-      .map((t) => t.toToolDef());
+  async getToolDefs() {
+    const defs = [];
+    for (const t of this.tools.values()) {
+      if (t.toToolDef) {
+        const def = t.toToolDef();
+        if (def) defs.push(def);
+      }
+    }
+    return defs;
   }
 
   /**
@@ -56,11 +61,11 @@ export class ToolRegistry {
    * Validate tool arguments against the tool's JSON Schema.
    * Returns an error string if validation fails, or null if valid.
    */
-  validateToolArgs(toolName, input) {
+  async validateToolArgs(toolName, input) {
     const tool = this.get(toolName);
     if (!tool || !tool.toToolDef) return null;
 
-    const def = tool.toToolDef();
+    const def = await tool.toToolDef();
     const params = def?.function?.parameters || null;
     if (!params) return null;
 

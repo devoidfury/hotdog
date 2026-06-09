@@ -5,7 +5,7 @@
 
 import { homedir } from 'node:os';
 import { join } from 'node:path';
-import { appendFileSync, readFileSync, existsSync, readdirSync, mkdirSync } from 'node:fs';
+import { appendFile, readFile, access, mkdir } from 'node:fs/promises';
 import { HOOKS } from '../../core/hooks.js';
 import { stripNulls } from '../../utils/objects.js';
 
@@ -24,10 +24,12 @@ export const LOG_SOURCE = {
 /**
  * Get the cache directory for session logs.
  */
-function getCacheDir() {
+async function getCacheDir() {
   const cacheDir = join(homedir(), '.cache', 'oa-agent', 'sessions');
-  if (!existsSync(cacheDir)) {
-    mkdirSync(cacheDir, { recursive: true });
+  try {
+    await access(cacheDir);
+  } catch {
+    await mkdir(cacheDir, { recursive: true });
   }
   return cacheDir;
 }
@@ -53,8 +55,8 @@ function messageToLogEntry(message, source) {
  * Create the session log extension.
  * Uses the current agent's session ID (from the hook context) for the log file.
  */
-export function create(core) {
-  const cacheDir = getCacheDir();
+export async function create(core) {
+  const cacheDir = await getCacheDir();
 
   // Track session state
   let systemPromptWritten = false;
@@ -76,7 +78,7 @@ export function create(core) {
        * Uses the agent's sessionId from the hook context to determine the log file.
        * Maps message roles to the correct log source types for proper replay.
        */
-      [HOOKS.CONTEXT_MESSAGE]: ({ message, agent }) => {
+      [HOOKS.CONTEXT_MESSAGE]: async ({ message, agent }) => {
         // Skip logging during session restoration to avoid duplicate entries
         if (isRestoring) return;
 
@@ -104,13 +106,13 @@ export function create(core) {
         }
 
         const entry = messageToLogEntry(message, source);
-        appendFileSync(logPath, JSON.stringify(entry) + '\n');
+        await appendFile(logPath, JSON.stringify(entry) + '\n');
       },
 
       /**
        * Log compaction results.
        */
-      [HOOKS.OUTPUT_EVENT]: ({ type, data, agent }) => {
+      [HOOKS.OUTPUT_EVENT]: async ({ type, data, agent }) => {
         if (type === 'compaction_result' && data?.summary) {
           const sessionId = agent?.sessionId || 'unknown';
           lastSessionId = sessionId;
@@ -122,7 +124,7 @@ export function create(core) {
             summary: data.summary,
             messages_compacted: data.messagesCompacted,
           });
-          appendFileSync(logPath, JSON.stringify(entry) + '\n');
+          await appendFile(logPath, JSON.stringify(entry) + '\n');
         }
       },
     },
@@ -135,11 +137,15 @@ export function create(core) {
      * Read all entries from the session log.
      * Uses the most recently observed session ID.
      */
-    readEntries() {
+    async readEntries() {
       if (!lastSessionId) return [];
       const logPath = join(cacheDir, `${lastSessionId}.jsonl`);
-      if (!existsSync(logPath)) return [];
-      const content = readFileSync(logPath, 'utf-8');
+      try {
+        await access(logPath);
+      } catch {
+        return [];
+      }
+      const content = await readFile(logPath, 'utf-8');
       return content.split('\n').filter(Boolean).map(line => JSON.parse(line));
     },
 
@@ -158,12 +164,16 @@ export function create(core) {
  * Read session entries from a specific session by ID.
  * Used by subcommands to review sessions.
  */
-export function readSessionEntries(sessionId) {
+export async function readSessionEntries(sessionId) {
   const cacheDir = join(homedir(), '.cache', 'oa-agent', 'sessions');
   const path = join(cacheDir, `${sessionId}.jsonl`);
-  if (!existsSync(path)) return [];
+  try {
+    await access(path);
+  } catch {
+    return [];
+  }
 
-  const content = readFileSync(path, 'utf-8');
+  const content = await readFile(path, 'utf-8');
   return content.split('\n').filter(Boolean).map(line => JSON.parse(line));
 }
 

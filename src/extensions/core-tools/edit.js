@@ -1,7 +1,6 @@
 // Edit tool — replace text in a file.
 
 import fs from "node:fs/promises";
-import fsSync from "node:fs";
 import path from "node:path";
 import extensionData from "./extension.json";
 import {
@@ -88,7 +87,7 @@ export class EditTool {
     // Read file
     let sourceContent;
     try {
-      sourceContent = fsSync.readFileSync(resolvedPath, "utf-8");
+      sourceContent = await fs.readFile(resolvedPath, "utf-8");
     } catch (e) {
       return ToolResult.err(
         `File not found or unreadable '${filePath}': ${e.message}`,

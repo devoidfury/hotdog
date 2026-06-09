@@ -13,7 +13,7 @@ import {
 import { Agent } from "../../core/agent.js";
 import { CONFIG_KEYS } from "../../core/config-resolution.js";
 import path from "node:path";
-import fs from "node:fs";
+import fs from "node:fs/promises";
 import os from "node:os";
 
 /**
@@ -48,7 +48,7 @@ async function runInfo(cli, config, buildConfig) {
   const skillsLoader = new SkillsLoader(
     cli.skillsPath || rawConfig.skillsPath || DEFAULT_SKILLS_PATH,
   );
-  skillsLoader.loadSkills();
+  await skillsLoader.loadSkills();
 
   if (cli.wantsJson) {
     return printInfoJson(
@@ -307,7 +307,7 @@ function getNested(obj, path) {
  */
 async function printConfigDebug(cli, config, providers, resolved) {
   const profileName = cli.profile || config.profile || "default";
-  const profileFiles = loadProfileFiles(
+  const profileFiles = await loadProfileFiles(
     config.profilesPath || "./config/profiles",
   );
   const configProfile = config.profiles?.[profileName] ?? null;
@@ -435,8 +435,8 @@ async function printConfigDebug(cli, config, providers, resolved) {
   );
   const cwdConfig = "./config/defaults.json";
 
-  const cwdExists = checkFileExists(cwdConfig);
-  const homeExists = checkFileExists(homeConfig);
+  const cwdExists = await checkFileExists(cwdConfig);
+  const homeExists = await checkFileExists(homeConfig);
 
   console.log(
     `  CWD config (${cwdConfig}): ${cwdExists ? "EXISTS" : "not found"}`,
@@ -446,7 +446,7 @@ async function printConfigDebug(cli, config, providers, resolved) {
   );
   if (cwdExists) {
     try {
-      const content = fs.readFileSync(cwdConfig, "utf-8");
+      const content = await fs.readFile(cwdConfig, "utf-8");
       console.log(
         `    Content: ${content.trim().slice(0, 200)}${content.trim().length > 200 ? "..." : ""}`,
       );
@@ -456,7 +456,7 @@ async function printConfigDebug(cli, config, providers, resolved) {
   }
   if (homeExists) {
     try {
-      const content = fs.readFileSync(homeConfig, "utf-8");
+      const content = await fs.readFile(homeConfig, "utf-8");
       console.log(
         `    Content: ${content.trim().slice(0, 200)}${content.trim().length > 200 ? "..." : ""}`,
       );
@@ -520,9 +520,9 @@ async function printConfigDebug(cli, config, providers, resolved) {
 /**
  * Check if a file exists.
  */
-function checkFileExists(filePath) {
+async function checkFileExists(filePath) {
   try {
-    require("fs").accessSync(filePath);
+    await fs.access(filePath);
     return true;
   } catch {
     return false;

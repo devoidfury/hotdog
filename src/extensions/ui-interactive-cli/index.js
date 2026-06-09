@@ -218,7 +218,7 @@ export function create(core) {
     const { resolved, config } = core;
 
     // Create output sink
-    const palette = CliOutputSink.resolve(
+    const palette = await CliOutputSink.resolve(
       cli.colors !== false,
       resolved.theme || "dark",
       config.colors || null,
@@ -279,8 +279,8 @@ export function create(core) {
       // Restore session from disk if a session ID was explicitly provided
       const explicitSessionId = cli.sessionId;
       if (explicitSessionId && sessionId === explicitSessionId) {
-        if (sessionExists(explicitSessionId)) {
-          const entries = readSessionEntries(explicitSessionId);
+        if (await sessionExists(explicitSessionId)) {
+          const entries = await readSessionEntries(explicitSessionId);
           if (entries.length > 0) {
             agent.isRestoring = true;
             const replayed = replayEntriesIntoContext(agent, entries);

@@ -1,8 +1,20 @@
 // Write tool — write content to a file.
 
 import fs from "node:fs/promises";
-import fsSync from "node:fs";
 import path from "node:path";
+
+/**
+ * Check if a file exists.
+ */
+async function fileExists(filePath) {
+  try {
+    await fs.access(filePath);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 import {
   toolDef,
   param,
@@ -167,8 +179,8 @@ export class WriteTool {
       return ToolResult.err(`Error creating directory: ${e.message}`);
     }
 
-    const sourceContent = fsSync.existsSync(resolvedPath)
-      ? fsSync.readFileSync(resolvedPath, "utf-8")
+    const sourceContent = await fileExists(resolvedPath)
+      ? await fs.readFile(resolvedPath, "utf-8")
       : "";
     const filesizeBefore = Buffer.byteLength(sourceContent, "utf-8");
 

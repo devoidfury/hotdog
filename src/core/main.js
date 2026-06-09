@@ -22,7 +22,7 @@ import {
   readSessionEntries,
   replayEntriesIntoContext,
 } from "./session/session-log.js";
-import { readFileSync } from "node:fs";
+import { readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 
@@ -225,7 +225,7 @@ async function main() {
   if (cli.version) {
     const __dirname = dirname(fileURLToPath(import.meta.url));
     const pkg = JSON.parse(
-      readFileSync(join(__dirname, "../../package.json"), "utf-8"),
+      await readFile(join(__dirname, "../../package.json"), "utf-8"),
     );
     const VERSION = pkg.version;
     console.log(`oa-agent ${VERSION}`);

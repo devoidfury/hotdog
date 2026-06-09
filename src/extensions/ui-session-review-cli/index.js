@@ -6,7 +6,7 @@
 import { HOOKS } from "../../core/hooks.js";
 import { CliOutputSink } from "../../core/ui/cli.js";
 import { readSessionEntries } from "../session-log/index.js";
-import { readdirSync, existsSync, statSync } from "node:fs";
+import { readdir, access, stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { ReviewTool } from "./review.js";
@@ -48,7 +48,7 @@ export function create(core) {
 async function runReview(cli, config) {
   const sessionsDirPath = join(homedir(), ".cache", "oa-agent", "sessions");
 
-  const palette = CliOutputSink.resolve(
+  const palette = await CliOutputSink.resolve(
     cli.theme,
     config.colors || null,
     cli.colors,
@@ -56,7 +56,7 @@ async function runReview(cli, config) {
 
   const sessionId = cli.sessionId;
   if (sessionId) {
-    return reviewSession(
+    return await reviewSession(
       sessionId,
       cli.wantsJson,
       cli.reviewToolIndex,
@@ -64,37 +64,39 @@ async function runReview(cli, config) {
     );
   }
   if (cli.reviewToolIndex) {
-    const files = readdirSync(sessionsDirPath).filter((f) =>
+    const files = (await readdir(sessionsDirPath)).filter((f) =>
       f.endsWith(".jsonl"),
     );
     if (files.length === 0) {
       console.log("No sessions found.");
       return 1;
     }
-    const mostRecent = files
-      .map((f) => ({
+    const fileInfos = await Promise.all(
+      files.map(async (f) => ({
         name: f.replace(/\.jsonl$/, ""),
         path: join(sessionsDirPath, f),
-      }))
-      .sort(
-        (a, b) =>
-          statSync(b.path).mtime.getTime() - statSync(a.path).mtime.getTime(),
-      )[0];
-    const entries = readSessionEntries(mostRecent.name);
+        mtime: (await stat(join(sessionsDirPath, f))).mtime.getTime(),
+      })),
+    );
+    fileInfos.sort((a, b) => b.mtime - a.mtime);
+    const mostRecent = fileInfos[0];
+    const entries = await readSessionEntries(mostRecent.name);
     return printToolIndex(entries, cli.wantsJson);
   }
   return listSessions(cli.wantsJson, sessionsDirPath, palette);
 }
 
-function listSessions(json, sessionsDirPath, palette) {
+async function listSessions(json, sessionsDirPath, palette) {
   const dir = sessionsDirPath;
-  if (!existsSync(dir)) {
+  try {
+    await access(dir);
+  } catch {
     if (json) console.log("[]");
     else console.log("No log entries found.");
     return 1;
   }
 
-  const files = readdirSync(dir).filter((f) => f.endsWith(".jsonl"));
+  const files = (await readdir(dir)).filter((f) => f.endsWith(".jsonl"));
   if (files.length === 0) {
     if (json) console.log("[]");
     else console.log("No log entries found.");
@@ -104,9 +106,9 @@ function listSessions(json, sessionsDirPath, palette) {
   const sessions = [];
   for (const file of files) {
     const sessionId = file.replace(/\.jsonl$/, "");
-    const path = join(dir, file);
-    const metadata = statSync(path);
-    const entries = readSessionEntries(sessionId);
+    const filePath = join(dir, file);
+    const metadata = await stat(filePath);
+    const entries = await readSessionEntries(sessionId);
 
     if (entries.length <= 1) continue;
 
@@ -139,8 +141,8 @@ function listSessions(json, sessionsDirPath, palette) {
   return 0;
 }
 
-function reviewSession(sessionId, json, toolIndex, palette) {
-  const entries = readSessionEntries(sessionId);
+async function reviewSession(sessionId, json, toolIndex, palette) {
+  const entries = await readSessionEntries(sessionId);
   if (entries.length === 0) {
     if (json) console.log("{}");
     else console.log(`Session '${sessionId}' not found or empty.`);

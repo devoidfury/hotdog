@@ -1,7 +1,7 @@
 // Prompts loader — loads .prompt.md files from config/prompts/.
 // Each prompt is a reusable template with YAML front matter + Tera body.
 
-import fs from "node:fs";
+import fs from "node:fs/promises";
 import { join } from "node:path";
 import { parseFrontMatter, validateNameable } from "../../utils/file-utils.js";
 
@@ -60,20 +60,20 @@ export class PromptsLoader {
    * Load all .prompt.md files from configured directories.
    * Returns number of prompts loaded.
    */
-  loadPrompts() {
+  async loadPrompts() {
     let count = 0;
     for (const dir of this.paths) {
-      count += this.loadFromDirectory(dir);
+      count += await this.loadFromDirectory(dir);
     }
     return count;
   }
 
-  loadFromDirectory(dir) {
+  async loadFromDirectory(dir) {
     let count = 0;
 
     let entries;
     try {
-      entries = fs.readdirSync(dir, { withFileTypes: true });
+      entries = await fs.readdir(dir, { withFileTypes: true });
     } catch {
       // Directory doesn't exist — silently skip
       return 0;
@@ -86,14 +86,14 @@ export class PromptsLoader {
       const filePath = join(dir, entry.name);
       let content;
       try {
-        content = fs.readFileSync(filePath, "utf-8");
+        content = await fs.readFile(filePath, "utf-8");
       } catch {
         console.warn(`Warning: Failed to read prompt '${entry.name}'`);
         continue;
       }
 
       try {
-        const location = fs.realpathSync(filePath);
+        const location = await fs.realpath(filePath);
         const prompt = parsePromptFromMd(content, entry.name, location);
 
         // Collision detection

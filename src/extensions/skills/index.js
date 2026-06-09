@@ -5,7 +5,7 @@
 // CLI flags are registered via the hook since they need programmatic control.
 
 import extensionData from "./extension.json";
-import { readFileSync } from "node:fs";
+import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { cwd } from "node:process";
 import { HOOKS } from "../../core/hooks.js";
@@ -18,12 +18,12 @@ export { LoadSkillTool };
  * Create the skills extension.
  * Config defaults come from extension.json configSchema.
  */
-export function create(core) {
+export async function create(core) {
   // Config defaults come from extension.json configSchema
   const config = core.config?.skills || {};
   const skillsPath = config.skillsPath ?? extensionData.configSchema.properties.skillsPath.default;
   const loader = new SkillsLoader(skillsPath);
-  loader.loadSkills();
+  await loader.loadSkills();
 
   // Preload skills from config (CLI → config file priority)
   const preloadSkills = _resolvePreloadSkills(core);
@@ -53,7 +53,7 @@ export function create(core) {
        * Build skills preamble for system prompt.
        */
       [HOOKS.SYSTEM_PROMPT_BUILD]: async ({ agent, promptParts }) => {
-        const preamble = buildSkillsPreamble(loader);
+        const preamble = await buildSkillsPreamble(loader);
         if (preamble) {
           promptParts.push(preamble);
         }
@@ -154,7 +154,7 @@ export function create(core) {
 /**
  * Build skills preamble content for the system prompt.
  */
-export function buildSkillsPreamble(loader) {
+export async function buildSkillsPreamble(loader) {
   const visibleSkills = loader.agentViewableSkills();
   if (visibleSkills.length === 0) return "";
 
@@ -162,7 +162,7 @@ export function buildSkillsPreamble(loader) {
   const templatePath = join(cwd(), "config", "templates", "skills_preamble.md");
   let template;
   try {
-    template = readFileSync(templatePath, "utf-8");
+    template = await readFile(templatePath, "utf-8");
   } catch {
     console.warn(`skills preamble ${templatePath} not found`);
     return "";

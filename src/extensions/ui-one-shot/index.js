@@ -90,7 +90,7 @@ async function handlePromptSubcommand(cli, core) {
   const { config, buildConfig, resolved, modelRegistry } = core;
 
   // Build output sink
-  const palette = CliOutputSink.resolve(
+  const palette = await CliOutputSink.resolve(
     cli.colors !== false,
     cli.theme || config.theme || "dark",
     config.colors || null,

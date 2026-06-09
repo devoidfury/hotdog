@@ -11,12 +11,12 @@ import { render } from '../../utils/render.js';
 /**
  * Create the prompts extension.
  */
-export function create(core) {
+export async function create(core) {
   // Config defaults come from extension.json configSchema
   const config = core.config?.prompts || {};
   const promptsPath = config.promptsPath ?? extensionData.configSchema.properties.promptsPath.default;
   const loader = new PromptsLoader(promptsPath);
-  loader.loadPrompts();
+  await loader.loadPrompts();
 
   return {
     hooks: {

@@ -26,7 +26,7 @@ const TOOL_DESCRIPTORS = [
   { name: "write", disabled: false },
   { name: "read", disabled: false },
   { name: "pager", disabled: false },
-  { name: "explore", disabled: false },
+  { name: "explore", disabled: true },
   { name: "find", disabled: false },
   { name: "grep", disabled: false },
   { name: "project_info", disabled: false },

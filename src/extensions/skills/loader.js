@@ -1,7 +1,7 @@
 // Skills loader — loads SKILL.md files from skill directories.
 // Supports tool-dependencies, auto-activation, and pattern matching.
 
-import fs from "node:fs";
+import fs from "node:fs/promises";
 import { join } from "node:path";
 import { cwd } from "node:process";
 import { parseFrontMatter, validateNameable } from "../../utils/file-utils.js";
@@ -137,9 +137,9 @@ function parseToolList(val) {
  * Recursively collect additional files from a skill directory.
  * Stores paths relative to the skill root
  */
-function collectAdditionalFiles(dirPath, parentDir, files = []) {
+async function collectAdditionalFiles(dirPath, parentDir, files = []) {
   try {
-    const entries = fs.readdirSync(dirPath, { withFileTypes: true });
+    const entries = await fs.readdir(dirPath, { withFileTypes: true });
     for (const entry of entries) {
       if (entry.name.startsWith(".") || entry.name === "SKILL.md") continue;
       const fullPath = join(dirPath, entry.name);
@@ -147,7 +147,7 @@ function collectAdditionalFiles(dirPath, parentDir, files = []) {
         const relPath = join(parentDir, entry.name);
         files.push(relPath);
       } else if (entry.isDirectory()) {
-        collectAdditionalFiles(fullPath, join(parentDir, entry.name), files);
+        await collectAdditionalFiles(fullPath, join(parentDir, entry.name), files);
       }
     }
   } catch {
@@ -175,20 +175,20 @@ export class SkillsLoader {
    * Load all skills from configured directories.
    * Returns number of skills loaded.
    */
-  loadSkills() {
+  async loadSkills() {
     let count = 0;
     for (const dir of this.paths) {
-      count += this.loadFromDirectory(dir);
+      count += await this.loadFromDirectory(dir);
     }
     return count;
   }
 
-  loadFromDirectory(dir) {
+  async loadFromDirectory(dir) {
     let count = 0;
 
     let entries;
     try {
-      entries = fs.readdirSync(dir, { withFileTypes: true });
+      entries = await fs.readdir(dir, { withFileTypes: true });
     } catch {
       return 0;
     }
@@ -199,17 +199,17 @@ export class SkillsLoader {
       const skillFile = join(dir, entry.name, "SKILL.md");
       let content;
       try {
-        content = fs.readFileSync(skillFile, "utf-8");
+        content = await fs.readFile(skillFile, "utf-8");
       } catch {
         continue; // No SKILL.md in this directory
       }
 
       try {
-        const location = fs.realpathSync(skillFile);
+        const location = await fs.realpath(skillFile);
         const skill = parseSkillFromMd(content, entry.name, location);
 
         // Discover additional files (relative paths from skill root)
-        skill.additionalFiles = collectAdditionalFiles(
+        skill.additionalFiles = await collectAdditionalFiles(
           join(dir, entry.name),
           entry.name,
         );
@@ -311,7 +311,7 @@ export class SkillsLoader {
   /**
    * Build skills preamble content for the system prompt.
    */
-  buildSkillsPreamble() {
+  async buildSkillsPreamble() {
     const visibleSkills = this.agentViewableSkills();
 
     if (visibleSkills.length === 0) return "";
@@ -325,7 +325,7 @@ export class SkillsLoader {
     );
     let template;
     try {
-      template = fs.readFileSync(templatePath, "utf-8");
+      template = await fs.readFile(templatePath, "utf-8");
     } catch {
       return "";
     }

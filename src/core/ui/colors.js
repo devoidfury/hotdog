@@ -1,4 +1,4 @@
-import fs from "node:fs";
+import fsPromises from "node:fs/promises";
 
 // CLI color palettes and ANSI color helpers.
 
@@ -144,7 +144,7 @@ export function mergePalette(base, custom) {
 /**
  * Resolve the effective color palette from CLI args, config, and theme file.
  */
-export function resolvePalette(
+export async function resolvePalette(
   themeFile,
   configPalette,
   namedTheme,
@@ -163,7 +163,7 @@ export function resolvePalette(
     } else {
       // Try to load from file
       try {
-        const content = fs.readFileSync(themeFile, "utf-8");
+        const content = await fsPromises.readFile(themeFile, "utf-8");
         const custom = JSON.parse(content);
         const base = new ColorPalette(dark_palette());
         palette = mergePalette(base, custom);

@@ -203,7 +203,7 @@ export class Agent {
       }
 
       // LLM call
-      let toolDefs = this._toolRegistry.getToolDefs();
+      let toolDefs = await this._toolRegistry.getToolDefs();
       let modelConfig = this._resolveModelConfig();
 
       // Before provider request — sequential, modifiable. Extensions can
@@ -367,8 +367,8 @@ export class Agent {
 
     // Load aspects and AGENTS.md
     const resolvedConfig = this._config?.resolved || {};
-    const aspects = loadAspects(resolvedConfig.aspects || []);
-    const agentsMd = loadAgentsMd();
+    const aspects = await loadAspects(resolvedConfig.aspects || []);
+    const agentsMd = await loadAgentsMd();
 
     // Build skills preamble via hook (extensions contribute)
     const promptParts = [];
@@ -379,7 +379,7 @@ export class Agent {
     const skillsContent = promptParts.filter(Boolean).join("\n\n");
 
     // Build the real system prompt using the proper function
-    this._systemPrompt = buildSystemPrompt({
+    this._systemPrompt = await buildSystemPrompt({
       role: this._role || "",
       body: this._profileBody || "",
       model: this.__model || "",
@@ -565,7 +565,7 @@ export class Agent {
     }
 
     // 6. Validate arguments against tool's JSON Schema
-    const validationError = this._toolRegistry.validateToolArgs(
+    const validationError = await this._toolRegistry.validateToolArgs(
       toolName,
       input,
     );
@@ -747,8 +747,8 @@ export class Agent {
   /**
    * Get tool definitions for the API.
    */
-  getToolDefs() {
-    return this._toolRegistry.getToolDefs();
+  async getToolDefs() {
+    return await this._toolRegistry.getToolDefs();
   }
 
   /**

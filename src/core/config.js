@@ -1,6 +1,5 @@
 // Default configuration values and resolution logic used across the application.
 
-import fs from "node:fs";
 import fsPromises from "node:fs/promises";
 import path from "node:path";
 import os from "node:os";
@@ -194,12 +193,12 @@ export async function loadConfig(configPath, extParams) {
  * Load a profile from a .profile.md file.
  * Profile files use YAML front matter with fields: name, role, aspects, blacklist-tools, model, preload-skills, manager.
  */
-export function loadProfileFile(config, profileName) {
+export async function loadProfileFile(config, profileName) {
   const profilesPath = config.profilesPath;
   let filePath;
   try {
     filePath = path.join(profilesPath, `${profileName}.profile.md`);
-    const content = fs.readFileSync(filePath, "utf-8");
+    const content = await fsPromises.readFile(filePath, "utf-8");
     const parsed = parseFrontMatter(content);
     if (!parsed) return null;
     const fm = parsed.frontMatter;
@@ -224,13 +223,13 @@ export function loadProfileFile(config, profileName) {
  * Get resolved profile from config and profile files.
  * Priority: JSON config profile → .profile.md file → default.
  */
-export function getProfile(config, profileName) {
+export async function getProfile(config, profileName) {
   // 1. Check JSON config profiles
   if (config.profiles && config.profiles[profileName]) {
     return config.profiles[profileName];
   }
   // 2. Check profile markdown files
-  const fileProfile = loadProfileFile(config, profileName);
+  const fileProfile = await loadProfileFile(config, profileName);
   if (fileProfile) {
     return fileProfile;
   }
@@ -252,11 +251,11 @@ export function getProfile(config, profileName) {
  * Scans all .profile.md files in the profiles directory.
  * Returns an array of profile name strings.
  */
-export function getVisibleWorkerProfiles(config) {
+export async function getVisibleWorkerProfiles(config) {
   const profilesPath = config.profilesPath;
   let dir;
   try {
-    dir = fs.readdirSync(profilesPath);
+    dir = await fsPromises.readdir(profilesPath);
   } catch {
     return []; // Profiles directory not found or not readable
   }
@@ -265,7 +264,7 @@ export function getVisibleWorkerProfiles(config) {
   for (const entry of dir) {
     if (!entry.endsWith(".profile.md")) continue;
     const profileName = entry.slice(0, -".profile.md".length);
-    const profile = loadProfileFile(config, profileName);
+    const profile = await loadProfileFile(config, profileName);
     if (profile && profile.visibleWorker) {
       profiles.push(profileName);
     }
@@ -277,12 +276,12 @@ export function getVisibleWorkerProfiles(config) {
  * Load all .profile.md files from a directory.
  * Returns a map of profile name → { name, role, aspects, body, blacklistTools, whitelistTools, model, preloadSkills, manager }
  */
-export function loadProfileFiles(profilesPath) {
+export async function loadProfileFiles(profilesPath) {
   const result = {};
 
   let entries;
   try {
-    entries = fs.readdirSync(profilesPath, { withFileTypes: true });
+    entries = await fsPromises.readdir(profilesPath, { withFileTypes: true });
   } catch {
     return result;
   }
@@ -293,7 +292,7 @@ export function loadProfileFiles(profilesPath) {
     const filePath = path.join(profilesPath, entry.name);
     let content;
     try {
-      content = fs.readFileSync(filePath, "utf-8");
+      content = await fsPromises.readFile(filePath, "utf-8");
     } catch {
       continue;
     }
@@ -363,13 +362,13 @@ let cachedSystemPromptTemplate = null;
  * Initialize (load) the system prompt template from disk.
  * Falls back to a minimal template if the file doesn't exist.
  */
-export function initSystemPromptTemplate(templatePath) {
+export async function initSystemPromptTemplate(templatePath) {
   if (cachedSystemPromptTemplate) return cachedSystemPromptTemplate;
 
   const templateFile =
     templatePath || path.join(cwd(), "config", "templates", "system_prompt.md");
   try {
-    cachedSystemPromptTemplate = fs.readFileSync(templateFile, "utf-8");
+    cachedSystemPromptTemplate = await fsPromises.readFile(templateFile, "utf-8");
   } catch {
     // Fallback: minimal template
     cachedSystemPromptTemplate = `{{ role }}
@@ -527,7 +526,7 @@ export function allProfilesForSwitch(options) {
 export async function buildConfig(cliArgv) {
   const config = await loadConfig(cliArgv.config);
 
-  const resolved = buildAgentConfig({
+  const resolved = await buildAgentConfig({
     cli: cliArgv,
     config,
     providers: config.providers || [],
@@ -549,7 +548,7 @@ export async function buildConfig(cliArgv) {
 /**
  * Build a complete resolved configuration for the agent.
  */
-export function buildAgentConfig(options) {
+export async function buildAgentConfig(options) {
   const {
     cli,
     config,
@@ -560,7 +559,7 @@ export function buildAgentConfig(options) {
   } = options;
 
   // Load profile files
-  const profileFiles = loadProfileFiles(profilesPath);
+  const profileFiles = await loadProfileFiles(profilesPath);
   const profileName = cli.profile || config.profile || "default";
 
   // Get config profile
@@ -639,7 +638,7 @@ export function buildAgentConfig(options) {
     : "";
 
   // System prompt template
-  const systemPromptTemplate = initSystemPromptTemplate(
+  const systemPromptTemplate = await initSystemPromptTemplate(
     cli.systemPromptTemplate || config.systemPromptTemplate,
   );
 

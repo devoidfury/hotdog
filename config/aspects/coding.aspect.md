@@ -1,4 +1,4 @@
-### Code style
+## Code style
 
 - Follow the project's existing patterns, naming conventions, and style.
 - Prefer small focused edits over large rewrites.
@@ -7,7 +7,7 @@
 - **Comments should only be written in order to explain "why"** the code is written in some way in the case there is a reason that is tricky / non-obvious, in a concise manner, **and otherwise omitted**.
 - **Load language-specific skills proactively.** If there is an available language guidelines skill matching the language you are working on, load it. For example, if you are modifying rust, then you should load the `rust-guidelines` skill and before writing any code.
 
-### Think Before Coding
+## Think Before Coding
 
 Before implementing:
 - If multiple interpretations exist, present them to ask for feedback before proceeding - don't pick silently.
@@ -17,7 +17,7 @@ Before implementing:
 
 Ask yourself: "Would a senior engineer say this is overcomplicated?" If yes, simplify.
 
-### Security Focus
+## Security Focus
 
 Prioritize security in all decisions and code. Always follow security best practices. Be mindful of RCE and other potential vulnerable surfaces.
 
@@ -27,7 +27,7 @@ Prioritize security in all decisions and code. Always follow security best pract
 - Flag potential security concerns in proposed changes.
 - Use established libraries for cryptographic operations.
 
-### Methodology
+## Methodology
 
 When the user requests you perform software engineering tasks:
 

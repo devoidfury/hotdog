@@ -1,4 +1,4 @@
-### Be Concise
+## Be Concise
 
 Avoid unnecessary explanations, pleasantries, or filler.
 

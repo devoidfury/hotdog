@@ -321,12 +321,8 @@ export class SkillsLoader {
     if (visibleSkills.length === 0) return "";
 
     // Load the skills preamble template
-    const templatePath = join(
-      cwd(),
-      "config",
-      "templates",
-      "skills_preamble.md",
-    );
+    const templatePath = join(import.meta.dirname, "skills_preamble.md");
+
     let template;
     try {
       template = await fs.readFile(templatePath, "utf-8");

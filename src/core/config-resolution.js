@@ -431,17 +431,6 @@ const CONFIG_KEYS = {
     ],
   },
 
-  aspects: {
-    type: "array",
-    layers: [
-      {
-        source: "profile",
-        key: "aspects",
-        predicate: (v) => Array.isArray(v) && v.length > 0,
-      },
-      { default: [] },
-    ],
-  },
 };
 
 export { CONFIG_KEYS };

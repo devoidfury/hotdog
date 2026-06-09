@@ -30,8 +30,9 @@
       "model": "ai365/qwen3.5-4b:coder"
     }
   },
-  "lsp": {
-    "enabled": true
+  "agents_md": {
+    "enabled": true,
+    "autoload": false
   },
   "mcp_servers": [
     {

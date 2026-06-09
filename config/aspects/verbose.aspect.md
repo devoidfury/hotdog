@@ -1,4 +1,4 @@
-### Aim for completeness
+## Aim for completeness
 
 Explain your reasoning and decisions thoroughly. Provide context and alternatives when relevant.
 

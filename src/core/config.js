@@ -5,7 +5,7 @@ import path from "node:path";
 import os from "node:os";
 import { cwd } from "node:process";
 
-import { parseFrontMatter, loadAspects } from "../utils/file-utils.js";
+import { parseFrontMatter } from "../utils/file-utils.js";
 import { deepMerge } from "../utils/objects.js";
 import { render } from "../utils/render.js";
 import { resolveAll, CONFIG_KEYS } from "./config-resolution.js";
@@ -55,7 +55,7 @@ export const DEFAULT_PROMPTS_PATH = "./config/prompts";
 export const DEFAULT_CONFIG_PATH = "./config/defaults.json";
 export const DEFAULT_CHAT_TIMEOUT_SECS = 600;
 export const DEFAULT_EMBEDDINGS_TIMEOUT_SECS = 120;
-export const DEFAULT_SYSTEM_PROMPT_PATH = "config/templates/system_prompt.md";
+export const DEFAULT_SYSTEM_PROMPT_PATH = "config/system_prompt.md";
 export const DEFAULT_MAX_TOKENS = 32000;
 export const DEFAULT_MAX_ITERATIONS = 1000;
 export const DEFAULT_MAX_RETRIES = 12;
@@ -190,7 +190,7 @@ export async function loadConfig(configPath, extParams) {
 
 /**
  * Load a profile from a .profile.md file.
- * Profile files use YAML front matter with fields: name, role, aspects, blacklist-tools, model, preload-skills, manager.
+ * Profile files use YAML front matter with fields: name, role, blacklist-tools, model, preload-skills, manager.
  */
 export async function loadProfileFile(config, profileName) {
   const profilesPath = config.profilesPath;
@@ -209,7 +209,6 @@ export async function loadProfileFile(config, profileName) {
       model: fm.model || null,
       blacklistTools: fm["blacklist-tools"] || fm.blacklist_tools || [],
       whitelistTools: fm["whitelist-tools"] || fm.whitelist_tools || null,
-      aspects: fm.aspects || [],
       manager: fm.manager || false,
       visibleWorker: fm["visible-worker"] || fm.visible_worker || false,
     };
@@ -241,7 +240,6 @@ export async function getProfile(config, profileName) {
     model: null,
     manager: false,
     cwdBoundary: null,
-    aspects: [],
   };
 }
 
@@ -273,7 +271,7 @@ export async function getVisibleWorkerProfiles(config) {
 
 /**
  * Load all .profile.md files from a directory.
- * Returns a map of profile name → { name, role, aspects, body, blacklistTools, whitelistTools, model, preloadSkills, manager }
+ * Returns a map of profile name → { name, role, body, blacklistTools, whitelistTools, model, preloadSkills, manager }
  */
 export async function loadProfileFiles(profilesPath) {
   const result = {};
@@ -306,7 +304,6 @@ export async function loadProfileFiles(profilesPath) {
       name: fm.name || fileStem,
       description: fm.description || "",
       role: fm.role || "",
-      aspects: fm.aspects || [],
       body: parsed.body || "",
       blacklistTools: fm["blacklist-tools"] || fm.blacklist_tools || [],
       whitelistTools: fm["whitelist-tools"] || fm.whitelist_tools || null,
@@ -365,47 +362,15 @@ export async function initSystemPromptTemplate(templatePath) {
   if (cachedSystemPromptTemplate) return cachedSystemPromptTemplate;
 
   const templateFile =
-    templatePath || path.join(cwd(), "config", "templates", "system_prompt.md");
+    templatePath || path.join(cwd(), "config", "system_prompt.md");
   try {
-    cachedSystemPromptTemplate = await fsPromises.readFile(templateFile, "utf-8");
+    cachedSystemPromptTemplate = await fsPromises.readFile(
+      templateFile,
+      "utf-8",
+    );
   } catch {
     // Fallback: minimal template
-    cachedSystemPromptTemplate = `{{ role }}
-
-Use the instructions below and the tools available to you to assist the user.
-
-{%- if body %}
-
-{{ body }}
-{%- endif %}
-
-# Environment
-
-<system-notice>
-  Agent: oa-agent (Model: {{ model }}) (Profile: {{ profile_name }})
-  CWD: {{ cwd }}
-  Platform: {{ platform }}
-  Session: {{ session_start }}
-</system-notice>
-
-{% if aspects|length > 0 -%}
-# Guidelines
-
-{% for aspect in aspects -%}
-{{ aspect.content }}
-{% endfor %}
-{%- endif %}
-
-{% if agents_md %}
-# Project Context
-
-<file-include>
-<path>./AGENTS.md</path>
-<contents>
-{{ agents_md }}
-</contents>
-</file-include>
-{%- endif %}`;
+    cachedSystemPromptTemplate = `{{ role }}\n\n{{ body }}\n{% for chunk in chunks %}{{ chunk.content }}{% endfor %}`;
   }
 
   return cachedSystemPromptTemplate;
@@ -448,13 +413,7 @@ function resolveModel(
 /**
  * Resolve a single profile's SwitchProfile data.
  */
-export function resolveSwitchProfile(
-  profileName,
-  fileProfile,
-  configProfile,
-  aspectNames,
-  profilesPath,
-) {
+export function resolveSwitchProfile(profileName, fileProfile, configProfile) {
   const role =
     fileProfile && fileProfile.role && fileProfile.role.trim()
       ? fileProfile.role
@@ -465,10 +424,7 @@ export function resolveSwitchProfile(
   const body = fileProfile?.body || "";
   const model = configProfile?.model || null;
 
-  // Load aspects from the profiles aspects subdirectory
-  const aspects = loadAspects(aspectNames, path.join(profilesPath, "aspects"));
-
-  return { role, body, model, aspects };
+  return { role, body, model };
 }
 
 /**
@@ -476,7 +432,7 @@ export function resolveSwitchProfile(
  * Merges config profiles with file profiles.
  */
 export function allProfilesForSwitch(options) {
-  const { profileFiles, configProfiles, profilesPath } = options;
+  const { profileFiles, configProfiles } = options;
   const result = {};
 
   // Collect all profile names from both sources
@@ -488,18 +444,7 @@ export function allProfilesForSwitch(options) {
   for (const name of allNames) {
     const fileProfile = profileFiles?.[name] || null;
     const configProfile = configProfiles?.[name] || null;
-    // Aspects: file profile → config profile
-    const aspectNames =
-      (fileProfile?.aspects?.length ? fileProfile.aspects : null) ??
-      (configProfile?.aspects?.length ? configProfile.aspects : null) ??
-      [];
-    const sp = resolveSwitchProfile(
-      name,
-      fileProfile,
-      configProfile,
-      aspectNames,
-      profilesPath,
-    );
+    const sp = resolveSwitchProfile(name, fileProfile, configProfile);
     result[name] = sp;
   }
 
@@ -584,7 +529,6 @@ export async function buildAgentConfig(options) {
       if (fileProfile.blacklistTools?.length)
         profile.blacklistTools = fileProfile.blacklistTools;
       if (fileProfile.manager) profile.manager = true;
-      if (fileProfile.aspects?.length) profile.aspects = fileProfile.aspects;
     }
   } else {
     profile = {
@@ -595,7 +539,6 @@ export async function buildAgentConfig(options) {
       model: null,
       manager: false,
       cwdBoundary: null,
-      aspects: [],
     };
   }
 
@@ -654,6 +597,7 @@ export async function buildAgentConfig(options) {
     // Non-declarative values
     model,
     profileName,
+    profilesPath,
     profile,
     profileBody,
     provider,

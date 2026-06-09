@@ -330,7 +330,6 @@ async function printConfigDebug(cli, config, providers, resolved) {
       if (fileProfile.blacklistTools?.length)
         profile.blacklistTools = fileProfile.blacklistTools;
       if (fileProfile.manager) profile.manager = true;
-      if (fileProfile.aspects?.length) profile.aspects = fileProfile.aspects;
     }
   } else {
     profile = {
@@ -341,7 +340,6 @@ async function printConfigDebug(cli, config, providers, resolved) {
       model: null,
       manager: false,
       cwdBoundary: null,
-      aspects: [],
     };
   }
 
@@ -412,9 +410,6 @@ async function printConfigDebug(cli, config, providers, resolved) {
   );
   console.log(
     `  ${"profile.manager".padEnd(25)} → ${resolved.profile?.manager || false}`,
-  );
-  console.log(
-    `  ${"profile.aspects".padEnd(25)} → ${JSON.stringify(resolved.profile?.aspects || [])}`,
   );
   console.log(
     `  ${"profile.role".padEnd(25)} → ${resolved.profile?.role || "(from DEFAULT_ROLE)"}`,

@@ -143,7 +143,12 @@
         },
         {
           "name": "step-3.7-flash",
-          "context-limit": 110000,
+          "context-limit": 100000,
+          "tags": ["general", "powerful", "slow"]
+        },
+        {
+          "name": "mistral-medium-3.5",
+          "context-limit": 80000,
           "tags": ["general", "powerful", "slow"]
         },
         {

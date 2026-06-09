@@ -1,0 +1,17 @@
+{
+  "name": "agents-md",
+  "provides": [],
+  "loadOrder": 10,
+  "description": "Loads AGENTS.md and contributes Project Context section to the system prompt",
+  "configSchema": {
+    "type": "object",
+    "properties": {
+      "autoload": {
+        "type": "boolean",
+        "default": true,
+        "description": "Whether to automatically load AGENTS.md from CWD. When false, the extension loads but skips reading the file."
+      }
+    },
+    "additionalProperties": false
+  }
+}

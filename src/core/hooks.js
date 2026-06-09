@@ -20,13 +20,15 @@ export class HookSystem {
    * Register a handler for a hook.
    * @param {string} hookName - The hook name (e.g., "context:message").
    * @param {Function} handler - Function(data) or async Function(data).
+   * @param {string} [source] - Optional source identifier (e.g., extension name).
+   *   Used for tracking which extension registered a handler.
    * @returns {Function} A removal function that unregisters this handler.
    */
-  on(hookName, handler) {
+  on(hookName, handler, source) {
     if (!this._hooks.has(hookName)) this._hooks.set(hookName, []);
     const handlers = this._hooks.get(hookName);
     const id = ++_handlerCounter;
-    handlers.push({ id, handler });
+    handlers.push({ id, handler, source });
 
     // Return a removal function
     return () => {

@@ -5,8 +5,7 @@ import path from "node:path";
 import os from "node:os";
 import { cwd } from "node:process";
 
-import { parseFrontMatter } from "../utils/file-utils.js";
-import { loadAspects } from "./context/system-prompt.js";
+import { parseFrontMatter, loadAspects } from "../utils/file-utils.js";
 import { deepMerge } from "../utils/objects.js";
 import { render } from "../utils/render.js";
 import { resolveAll, CONFIG_KEYS } from "./config-resolution.js";

@@ -147,7 +147,11 @@ async function collectAdditionalFiles(dirPath, parentDir, files = []) {
         const relPath = join(parentDir, entry.name);
         files.push(relPath);
       } else if (entry.isDirectory()) {
-        await collectAdditionalFiles(fullPath, join(parentDir, entry.name), files);
+        await collectAdditionalFiles(
+          fullPath,
+          join(parentDir, entry.name),
+          files,
+        );
       }
     }
   } catch {
@@ -327,6 +331,7 @@ export class SkillsLoader {
     try {
       template = await fs.readFile(templatePath, "utf-8");
     } catch {
+      console.warn(`skills preamble ${templatePath} template error`);
       return "";
     }
 

@@ -355,38 +355,40 @@ export class Agent {
 
   /**
    * Ensure system prompt is built and cached.
-   * Uses the real buildSystemPrompt() function and then allows
-   * extensions to contribute via the SYSTEM_PROMPT_BUILD hook.
+   * Extensions contribute chunks via the SYSTEM_PROMPT_BUILD hook.
+   * Chunks are sorted by priority and rendered via the template.
    */
   async ensureSystemPrompt() {
     if (this._systemPrompt) return;
 
     // Import here to avoid circular dependency
-    const { buildSystemPrompt, loadAspects, loadAgentsMd } =
+    const { buildSystemPrompt } =
       await import("./context/system-prompt.js");
 
-    // Load aspects and AGENTS.md
-    const resolvedConfig = this._config?.resolved || {};
-    const aspects = await loadAspects(resolvedConfig.aspects || []);
-    const agentsMd = await loadAgentsMd();
+    // Collect chunks from extensions via contribute callback.
+    // Each handler receives a contribute(name, priority, content) callback
+    // that auto-prefixes the chunk name with the extension source.
+    const chunks = [];
+    const handlers =
+      this._hooks._hooks.get(HOOKS.SYSTEM_PROMPT_BUILD) || [];
+    for (const { handler, source } of handlers) {
+      const contribute = (name, priority, content) => {
+        const fullName = source ? `${source}:${name}` : name;
+        chunks.push({ name: fullName, priority, content });
+      };
+      await handler({ agent: this, contribute });
+    }
 
-    // Build skills preamble via hook (extensions contribute)
-    const promptParts = [];
-    await this._hooks.emitAsync(HOOKS.SYSTEM_PROMPT_BUILD, {
-      agent: this,
-      promptParts,
-    });
-    const skillsContent = promptParts.filter(Boolean).join("\n\n");
+    // Sort by priority (lower = earlier in the prompt)
+    chunks.sort((a, b) => a.priority - b.priority);
 
-    // Build the real system prompt using the proper function
+    // Build the system prompt
     this._systemPrompt = await buildSystemPrompt({
       role: this._role || "",
       body: this._profileBody || "",
       model: this.__model || "",
       profileName: this._profileName || "default",
-      aspects,
-      agentsMd,
-      skillsContent: skillsContent || "",
+      chunks,
     });
   }
 

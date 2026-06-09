@@ -1,0 +1,11 @@
+{
+  "name": "environment",
+  "provides": [],
+  "loadOrder": 10,
+  "description": "Contributes Environment section to the system prompt",
+  "configSchema": {
+    "type": "object",
+    "properties": {},
+    "additionalProperties": false
+  }
+}

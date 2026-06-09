@@ -641,7 +641,8 @@ export class ExtensionLoader {
     if (instance.hooks) {
       for (const [hookName, handler] of Object.entries(instance.hooks)) {
         if (hookName === HOOKS.TOOLS_REGISTER) continue;
-        const remove = this._core.hooks.on(hookName, handler);
+        // Pass extension name as source for name prefixing (e.g., chunk names)
+        const remove = this._core.hooks.on(hookName, handler, name);
         removers.push(remove);
       }
     }

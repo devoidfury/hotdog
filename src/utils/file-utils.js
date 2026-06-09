@@ -1,3 +1,6 @@
+import fsPromises from "node:fs/promises";
+import { join } from "node:path";
+import { cwd } from "node:process";
 import { YAML } from "bun";
 
 /**
@@ -10,6 +13,38 @@ export function parseFrontMatter(content) {
   const body = m[2] || "";
   const fm = YAML.parse(m[1]);
   return { frontMatter: fm, body };
+}
+
+/**
+ * Load aspect files from a directory.
+ * Files are named `<name>.aspect.md`.
+ *
+ * @param {string[]} aspectNames - Names of aspects to load.
+ * @param {string} [aspectsDir] - Directory containing `.aspect.md` files. Defaults to CWD/config/aspects.
+ * @returns {{name: string, content: string}[]} Array of loaded aspects.
+ */
+export async function loadAspects(aspectNames, aspectsDir) {
+  if (!aspectNames || aspectNames.length === 0) return [];
+
+  const dir = aspectsDir || join(cwd(), "config", "aspects");
+
+  const promises = aspectNames.map(async (name) => {
+    const fileName = `${name}.aspect.md`;
+    const filePath = join(dir, fileName);
+    try {
+      const content = await fsPromises.readFile(filePath, "utf-8");
+      const trimmed = content.trim();
+      if (trimmed.length > 0) {
+        return { name, content: trimmed };
+      }
+    } catch {
+      // Silent skip — aspect file not found or unreadable
+    }
+    return null;
+  });
+
+  const results = await Promise.all(promises);
+  return results.filter(Boolean);
 }
 
 /**

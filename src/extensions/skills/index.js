@@ -21,7 +21,9 @@ export { LoadSkillTool };
 export async function create(core) {
   // Config defaults come from extension.json configSchema
   const config = core.config?.skills || {};
-  const skillsPath = config.skillsPath ?? extensionData.configSchema.properties.skillsPath.default;
+  const skillsPath =
+    config.skillsPath ??
+    extensionData.configSchema.properties.skillsPath.default;
   const loader = new SkillsLoader(skillsPath);
   await loader.loadSkills();
 
@@ -52,10 +54,10 @@ export async function create(core) {
       /**
        * Build skills preamble for system prompt.
        */
-      [HOOKS.SYSTEM_PROMPT_BUILD]: async ({ agent, promptParts }) => {
-        const preamble = await buildSkillsPreamble(loader);
+      [HOOKS.SYSTEM_PROMPT_BUILD]: async ({ agent, contribute }) => {
+        const preamble = await loader.buildSkillsPreamble();
         if (preamble) {
-          promptParts.push(preamble);
+          contribute("preamble", 400, preamble);
         }
       },
 
@@ -149,37 +151,6 @@ export async function create(core) {
       );
     },
   };
-}
-
-/**
- * Build skills preamble content for the system prompt.
- */
-export async function buildSkillsPreamble(loader) {
-  const visibleSkills = loader.agentViewableSkills();
-  if (visibleSkills.length === 0) return "";
-
-  // Load the skills preamble template
-  const templatePath = join(cwd(), "config", "templates", "skills_preamble.md");
-  let template;
-  try {
-    template = await readFile(templatePath, "utf-8");
-  } catch {
-    console.warn(`skills preamble ${templatePath} not found`);
-    return "";
-  }
-
-  // Transform skills to match template expectations
-  const renderedSkills = visibleSkills.map((s) => ({
-    ...s,
-    additional_files: s.additionalFiles || [],
-  }));
-
-  const context = {
-    skills: renderedSkills,
-    skill_directories: loader.directories(),
-  };
-
-  return render(template, context);
 }
 
 /**

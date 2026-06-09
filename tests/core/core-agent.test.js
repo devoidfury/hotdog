@@ -175,15 +175,17 @@ describe('Agent', () => {
   });
 
   describe('hooks integration', () => {
-    it('should emit SYSTEM_PROMPT_BUILD on ensureSystemPrompt', async () => {
-      const emitted = [];
-      hooks.on(HOOKS.SYSTEM_PROMPT_BUILD, ({ agent: a, promptParts }) => {
-        emitted.push({ role: 'system', promptParts });
+    it('should call SYSTEM_PROMPT_BUILD handlers with contribute callback', async () => {
+      const contributed = [];
+      hooks.on(HOOKS.SYSTEM_PROMPT_BUILD, ({ agent: a, contribute }) => {
+        contribute('test-chunk', 500, '\n# Test Chunk');
+        contributed.push('called');
       });
 
       await agent.ensureSystemPrompt();
-      expect(emitted.length).toBe(1);
+      expect(contributed.length).toBe(1);
       expect(agent._systemPrompt).toBeDefined();
+      expect(agent._systemPrompt).toContain('Test Chunk');
     });
 
     it('should emit CONTEXT_MESSAGE on context changes', async () => {

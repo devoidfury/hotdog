@@ -1,5 +1,6 @@
 // Default configuration values and resolution logic used across the application.
 
+import fs from "node:fs";
 import fsPromises from "node:fs/promises";
 import path from "node:path";
 import os from "node:os";
@@ -9,6 +10,59 @@ import { parseFrontMatter } from "../utils/file-utils.js";
 import { deepMerge } from "../utils/objects.js";
 import { render } from "../utils/render.js";
 import { resolveAll, CONFIG_KEYS } from "./config-resolution.js";
+
+// ── Config Directory Resolution ────────────────────────────────────────
+
+/**
+ * Resolve the config directory with the following priority:
+ * 1. CLI argument (--config-dir)
+ * 2. ./config (CWD-relative)
+ * 3. OA_AGENT_CONFIG_DIR environment variable
+ * 4. /etc/oa-agent
+ * 5. ~/.config/oa-agent (XDG)
+ *
+ * @param {string} [cliConfigDir] - Config directory from CLI --config-dir flag.
+ * @returns {string} Resolved absolute config directory path.
+ */
+export function resolveConfigDir(cliConfigDir) {
+  if (cliConfigDir) {
+    return path.resolve(cliConfigDir);
+  }
+
+  const cwdConfig = path.resolve(cwd(), "config");
+  try {
+    fs.accessSync(cwdConfig);
+    return cwdConfig;
+  } catch {
+    // Not a directory or doesn't exist
+  }
+
+  const envConfigDir = process.env.OA_AGENT_CONFIG_DIR;
+  if (envConfigDir) {
+    return path.resolve(envConfigDir);
+  }
+
+  const etcConfig = "/etc/oa-agent";
+  try {
+    fs.accessSync(etcConfig);
+    return etcConfig;
+  } catch {
+    // Not found
+  }
+
+  return path.join(os.homedir(), ".config", "oa-agent");
+}
+
+/**
+ * Get a sub-path within the config directory.
+ *
+ * @param {string} configDir - Resolved config directory.
+ * @param {string} subPath - Sub-path (e.g. "profiles", "prompts", "defaults.json").
+ * @returns {string} Full path to the sub-resource.
+ */
+export function configSubPath(configDir, subPath) {
+  return path.join(configDir, subPath);
+}
 
 // ── Extension Config Helpers ──────────────────────────────────────────────
 
@@ -50,6 +104,13 @@ export const DEFAULT_TOOL_FMT = "  → {} {}";
 export const DEFAULT_TOOL_OUTPUT_FMT = "----\n{}\n----";
 export const DEFAULT_TOOL_RESULT_FMT = "  → {}";
 export const DEFAULT_SKILLS_PATH = "/skills";
+// Sub-path names relative to the resolved config directory
+export const DEFAULT_PROFILES_SUBPATH = "profiles";
+export const DEFAULT_PROMPTS_SUBPATH = "prompts";
+export const DEFAULT_CONFIG_FILENAME = "defaults.json";
+export const DEFAULT_SYSTEM_PROMPT_FILENAME = "system_prompt.md";
+
+// Full default paths (CWD-relative, for backward compatibility and display)
 export const DEFAULT_PROFILES_PATH = "./config/profiles";
 export const DEFAULT_PROMPTS_PATH = "./config/prompts";
 export const DEFAULT_CONFIG_PATH = "./config/defaults.json";
@@ -136,38 +197,29 @@ function getDefaultConfig(extParams) {
  *
  * Resolution order:
  * 1. If `configPath` is explicitly provided via CLI, load that file (exit on error).
- * 2. Otherwise, try loading config from (in priority):
- *    a. ./config/defaults.json (relative to CWD)
- *    b. ~/.config/oa-agent/default.json (home directory)
+ * 2. Otherwise, resolve the config directory and look for defaults.json there.
+ *    Config dir resolution: CLI --config-dir > ./config > env > /etc/oa-agent > XDG
  *    Silently fall through to defaults if none exist.
  * 3. Return defaults as the final fallback.
  *
  * @param {string} [configPath] - Path to config file.
+ * @param {string} [cliConfigDir] - Config directory from CLI --config-dir flag.
  * @param {Array<{key: string, defaults: Object}>} [extParams] - Extension config params to merge.
  * @returns {Promise<Object>} Resolved config object.
  */
-export async function loadConfig(configPath, extParams) {
-  const homeConfig = path.join(
-    os.homedir(),
-    ".config",
-    "oa-agent",
-    "default.json",
-  );
-
+export async function loadConfig(configPath, cliConfigDir, extParams) {
   // Resolve config path: if relative, keep as-is (CWD-relative);
   // if absolute, use directly.
   let configPathToUse = configPath;
   if (!configPathToUse) {
-    // Try CWD-relative config first, then home directory
-    const candidates = [DEFAULT_CONFIG_PATH, homeConfig];
-    for (const candidate of candidates) {
-      try {
-        await fsPromises.access(candidate);
-        configPathToUse = candidate;
-        break;
-      } catch {
-        // Not found, try next
-      }
+    // Resolve the config directory and look for defaults.json
+    const configDir = resolveConfigDir(cliConfigDir);
+    const configFilePath = configSubPath(configDir, DEFAULT_CONFIG_FILENAME);
+    try {
+      await fsPromises.access(configFilePath);
+      configPathToUse = configFilePath;
+    } catch {
+      // Not found, fall through to defaults
     }
   }
 
@@ -358,11 +410,12 @@ let cachedSystemPromptTemplate = null;
  * Initialize (load) the system prompt template from disk.
  * Falls back to a minimal template if the file doesn't exist.
  */
-export async function initSystemPromptTemplate(templatePath) {
+export async function initSystemPromptTemplate(templatePath, cliConfigDir) {
   if (cachedSystemPromptTemplate) return cachedSystemPromptTemplate;
 
   const templateFile =
-    templatePath || path.join(cwd(), "config", "system_prompt.md");
+    templatePath ||
+    configSubPath(resolveConfigDir(cliConfigDir), DEFAULT_SYSTEM_PROMPT_FILENAME);
   try {
     cachedSystemPromptTemplate = await fsPromises.readFile(
       templateFile,
@@ -468,17 +521,20 @@ export function allProfilesForSwitch(options) {
  * @returns {Promise<object>} Complete resolved configuration
  */
 export async function buildConfig(cliArgv) {
-  const config = await loadConfig(cliArgv.config);
+  const configDir = resolveConfigDir(cliArgv.configDir);
+
+  const config = await loadConfig(cliArgv.config, cliArgv.configDir);
 
   const resolved = await buildAgentConfig({
     cli: cliArgv,
     config,
+    configDir,
     providers: config.providers || [],
     defaultModel: DEFAULT_MODEL,
     defaultRole: DEFAULT_ROLE,
     profilesPath: cliArgv.skillsPath
       ? path.join(cliArgv.skillsPath, "..", "profiles")
-      : config.profilesPath,
+      : configSubPath(configDir, DEFAULT_PROFILES_SUBPATH),
   });
 
   const modelRegistry = buildModelRegistry({
@@ -496,11 +552,18 @@ export async function buildAgentConfig(options) {
   const {
     cli,
     config,
+    configDir,
     providers = [],
     defaultModel = "qwen3.5-0.8b",
     defaultRole = "You are an AI coding assistant.",
-    profilesPath = "./config/profiles",
+    profilesPath: givenProfilesPath,
   } = options;
+
+  const profilesPath =
+    givenProfilesPath ||
+    (configDir
+      ? configSubPath(configDir, DEFAULT_PROFILES_SUBPATH)
+      : DEFAULT_PROFILES_PATH);
 
   // Load profile files
   const profileFiles = await loadProfileFiles(profilesPath);
@@ -547,6 +610,7 @@ export async function buildAgentConfig(options) {
   const context = {
     cli,
     config,
+    configDir,
     provider,
     profile,
     profileName,
@@ -582,6 +646,7 @@ export async function buildAgentConfig(options) {
   // System prompt template
   const systemPromptTemplate = await initSystemPromptTemplate(
     cli.systemPromptTemplate || config.systemPromptTemplate,
+    cli.configDir,
   );
 
   // All profiles for switch
@@ -597,6 +662,7 @@ export async function buildAgentConfig(options) {
     // Non-declarative values
     model,
     profileName,
+    configDir,
     profilesPath,
     profile,
     profileBody,

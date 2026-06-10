@@ -8,8 +8,8 @@
     "properties": {
       "promptsPath": {
         "type": "string",
-        "default": "./config/prompts",
-        "description": "Directory path where prompt templates are stored"
+        "default": "config/prompts",
+        "description": "Directory path where prompt templates are stored (relative to config dir, or absolute)"
       }
     },
     "additionalProperties": false

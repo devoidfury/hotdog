@@ -183,7 +183,7 @@ async function main() {
   // ── Build complete config ───────────────────────────────────────────────
   const { resolved, modelRegistry, providers } = await buildConfig(cli);
   const extParams = configRegistry.getConfigParams();
-  const config = await loadConfig(cli.config, extParams);
+  const config = await loadConfig(cli.config, cli.configDir, extParams);
 
   // ── Create core infrastructure ──────────────────────────────────────────
   const core = createCore(config, configRegistry, cliSubcommandRegistry, {

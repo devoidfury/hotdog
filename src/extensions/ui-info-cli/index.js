@@ -9,6 +9,10 @@ import {
   DEFAULT_SKILLS_PATH,
   loadConfig,
   loadProfileFiles,
+  resolveConfigDir,
+  configSubPath,
+  DEFAULT_PROFILES_SUBPATH,
+  DEFAULT_CONFIG_FILENAME,
 } from "../../core/config.js";
 import { Agent } from "../../core/agent.js";
 import { CONFIG_KEYS } from "../../core/config-resolution.js";
@@ -21,7 +25,8 @@ import os from "node:os";
  */
 async function runInfo(cli, config, buildConfig) {
   const { resolved, modelRegistry, providers } = await buildConfig(cli);
-  const rawConfig = await loadConfig(cli.config);
+  const configDir = resolved.configDir || resolveConfigDir(cli.configDir);
+  const rawConfig = await loadConfig(cli.config, cli.configDir);
 
   // If --config-debug is set, show config resolution details and exit
   if (cli.config_debug) {
@@ -307,9 +312,11 @@ function getNested(obj, path) {
  */
 async function printConfigDebug(cli, config, providers, resolved) {
   const profileName = cli.profile || config.profile || "default";
-  const profileFiles = await loadProfileFiles(
-    config.profilesPath || "./config/profiles",
-  );
+  const configDir = resolved.configDir || resolveConfigDir(cli.configDir);
+  const profilesPath =
+    config.profilesPath ||
+    configSubPath(configDir, DEFAULT_PROFILES_SUBPATH);
+  const profileFiles = await loadProfileFiles(profilesPath);
   const configProfile = config.profiles?.[profileName] ?? null;
   const fileProfile = profileFiles[profileName] ?? null;
 
@@ -349,7 +356,7 @@ async function printConfigDebug(cli, config, providers, resolved) {
     provider,
     profile,
     profileName,
-    profilesPath: config.profilesPath || "./config/profiles",
+    profilesPath,
   };
 
   console.log("=== Config Resolution Debug ===");
@@ -422,36 +429,20 @@ async function printConfigDebug(cli, config, providers, resolved) {
   // Config file sources
   console.log("=== Config File Sources ===");
   console.log();
-  const homeConfig = path.join(
-    os.homedir(),
-    ".config",
-    "oa-agent",
-    "default.json",
-  );
-  const cwdConfig = "./config/defaults.json";
+  const resolvedConfigDir = resolved.configDir || resolveConfigDir(cli.configDir);
+  const resolvedConfig = configSubPath(resolvedConfigDir, DEFAULT_CONFIG_FILENAME);
 
-  const cwdExists = await checkFileExists(cwdConfig);
-  const homeExists = await checkFileExists(homeConfig);
+  const resolvedExists = await checkFileExists(resolvedConfig);
 
   console.log(
-    `  CWD config (${cwdConfig}): ${cwdExists ? "EXISTS" : "not found"}`,
+    `  Config dir: ${resolvedConfigDir}`,
   );
   console.log(
-    `  Home config (${homeConfig}): ${homeExists ? "EXISTS" : "not found"}`,
+    `  Config file (${resolvedConfig}): ${resolvedExists ? "EXISTS" : "not found"}`,
   );
-  if (cwdExists) {
+  if (resolvedExists) {
     try {
-      const content = await fs.readFile(cwdConfig, "utf-8");
-      console.log(
-        `    Content: ${content.trim().slice(0, 200)}${content.trim().length > 200 ? "..." : ""}`,
-      );
-    } catch {
-      /* ignore */
-    }
-  }
-  if (homeExists) {
-    try {
-      const content = await fs.readFile(homeConfig, "utf-8");
+      const content = await fs.readFile(resolvedConfig, "utf-8");
       console.log(
         `    Content: ${content.trim().slice(0, 200)}${content.trim().length > 200 ? "..." : ""}`,
       );

@@ -5,6 +5,8 @@
  * A generic resolver walks the layers and returns the first valid value.
  */
 
+import { join } from "node:path";
+
 // ── Helpers ────────────────────────────────────────────────────────────────
 
 /**
@@ -246,7 +248,14 @@ const CONFIG_KEYS = {
     layers: [
       { source: "cli", key: "promptsPath" },
       { source: "config", key: "promptsPath" },
-      { default: "./config/prompts" },
+      {
+        default: (ctx) => {
+          if (ctx.configDir) {
+            return join(ctx.configDir, "prompts");
+          }
+          return "./config/prompts";
+        },
+      },
     ],
   },
 

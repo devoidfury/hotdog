@@ -7,6 +7,7 @@ import { join } from "node:path";
 import { HOOKS } from "../../core/hooks.js";
 import { render } from "../../utils/render.js";
 import { parseFrontMatter, loadAspects } from "../../utils/file-utils.js";
+import { resolveConfigDir, configSubPath, DEFAULT_PROFILES_SUBPATH } from "../../core/config.js";
 
 const TEMPLATE_PATH = join(import.meta.dirname, "aspects_chunk.md");
 
@@ -20,10 +21,13 @@ const TEMPLATE_PATH = join(import.meta.dirname, "aspects_chunk.md");
 async function resolveAspectNames(core) {
   const resolved = core.resolved || {};
   const rawConfig = core.config || {};
+  const configDir = resolved.configDir || resolveConfigDir();
 
   const profileName = resolved.profileName || "default";
   const profilesPath =
-    resolved.profilesPath || rawConfig.profilesPath || "./config/profiles";
+    resolved.profilesPath ||
+    rawConfig.profilesPath ||
+    configSubPath(configDir, DEFAULT_PROFILES_SUBPATH);
 
   // Try to read aspect names from profile file front matter
   const profileFilePath = join(profilesPath, `${profileName}.profile.md`);
@@ -87,10 +91,11 @@ export function create(core) {
         const aspectNames = await resolveAspectNames(core);
         const resolved = core.resolved || {};
         const rawConfig = core.config || {};
+        const configDir = resolved.configDir || resolveConfigDir();
         const profilesPath =
           resolved.profilesPath ||
           rawConfig.profilesPath ||
-          "./config/profiles";
+          configSubPath(configDir, DEFAULT_PROFILES_SUBPATH);
         const content = await buildAspectsChunk(aspectNames, profilesPath);
         contribute("guidelines", 200, content);
       },

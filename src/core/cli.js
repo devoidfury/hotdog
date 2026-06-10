@@ -5,6 +5,7 @@ export function parseArgs(configRegistry = null, knownSubcommands = null) {
   const args = process.argv.slice(2);
   const options = {
     config: null,
+    configDir: null,
     model: null,
     aiUrl: null,
     apiKey: null,
@@ -50,6 +51,7 @@ export function parseArgs(configRegistry = null, knownSubcommands = null) {
   // Core flags
   const coreFlags = [
     { short: "-f", long: "--config", type: "string", hasValue: true },
+    { short: "-d", long: "--config-dir", type: "string", hasValue: true },
     { short: "-m", long: "--model", type: "string", hasValue: true },
     { short: null, long: "--ai-url", type: "string", hasValue: true },
     {
@@ -270,6 +272,7 @@ Subcommands:
 
 Options:
   -f, --config <path>       Config file path
+  -d, --config-dir <path>   Config directory (overrides default ./config)
   -m, --model <name>        Model name
       --ai-url <url>        AI URL (deprecated: --url)
   -k, --api-key <key>       API key

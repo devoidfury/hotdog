@@ -8,11 +8,7 @@ import { readFile } from "node:fs/promises";
 import { HOOKS } from "../../core/hooks.js";
 import { render } from "../../utils/render.js";
 
-const TEMPLATE_PATH = join(
-  import.meta.dirname,
-  "templates",
-  "environment_chunk.md",
-);
+const TEMPLATE_PATH = join(import.meta.dirname, "environment_chunk.md");
 
 /**
  * Build the environment chunk content.

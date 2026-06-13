@@ -223,9 +223,11 @@ export async function main() {
   }
 
   if (cli.version) {
-    const __dirname = dirname(fileURLToPath(import.meta.url));
     const pkg = JSON.parse(
-      await readFile(join(__dirname, "../../package.json"), "utf-8"),
+      await readFile(
+        join(dirname(fileURLToPath(import.meta.url)), "../../package.json"),
+        "utf-8",
+      ),
     );
     const VERSION = pkg.version;
     console.log(`oa-agent ${VERSION}`);

@@ -35,6 +35,7 @@ export function parseArgs(configRegistry = null, knownSubcommands = null) {
     reviewToolIndex: false,
     systemPromptTemplate: null,
     wantsJson: false,
+    args: [],
   };
 
   // Initialize extension-provided options from defaults
@@ -241,16 +242,22 @@ export function parseArgs(configRegistry = null, knownSubcommands = null) {
       continue;
     }
 
-    // Positional argument — treat as subcommand or throw
-    const isKnownSubcommand = knownSubcommands
-      ? knownSubcommands.includes(arg)
-      : arg === "info" || arg === "show-prompt" || arg === "review";
+    // Positional arguments, first needs to be a subcommand
 
-    if (isKnownSubcommand) {
-      options.subcommand = arg;
+    if (!options.subcommand) {
+      const isKnownSubcommand = knownSubcommands
+        ? knownSubcommands.includes(arg)
+        : arg === "info" || arg === "show-prompt" || arg === "review";
+
+      if (isKnownSubcommand) {
+        options.subcommand = arg;
+      } else {
+        // Unknown positional argument — throw to let main.js handle it
+        throw new Error(`Unknown subcommand: ${arg}`);
+      }
     } else {
-      // Unknown positional argument — throw to let main.js handle it
-      throw new Error(`Unknown subcommand: ${arg}`);
+      // subcommand already set, forward the positional args
+      options.args.push(arg);
     }
 
     i++;

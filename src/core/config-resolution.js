@@ -205,10 +205,7 @@ const CONFIG_KEYS = {
 
   sessionId: {
     type: "string",
-    layers: [
-      { source: "cli", key: "sessionId" },
-      { default: null },
-    ],
+    layers: [{ source: "cli", key: "sessionId" }, { default: null }],
   },
 
   skillsPath: {
@@ -216,7 +213,14 @@ const CONFIG_KEYS = {
     layers: [
       { source: "cli", key: "skillsPath" },
       { source: "config", key: "skillsPath" },
-      { default: "/skills" },
+      {
+        default: (ctx) => {
+          if (ctx.configDir) {
+            return join(ctx.configDir, "skills");
+          }
+          return "./config/skills";
+        },
+      },
     ],
   },
 
@@ -286,18 +290,8 @@ const CONFIG_KEYS = {
   theme: {
     type: "string",
     layers: [
-      {
-        source: "cli",
-        key: "theme",
-        predicate: (v) => typeof v === "string" && v.trim().length > 0,
-        transform: (v) => v.trim(),
-      },
-      {
-        source: "config",
-        key: "theme",
-        predicate: (v) => typeof v === "string" && v.trim().length > 0,
-        transform: (v) => v.trim(),
-      },
+      { source: "cli", key: "theme" },
+      { source: "config", key: "theme" },
       { default: "dark" },
     ],
   },
@@ -308,20 +302,14 @@ const CONFIG_KEYS = {
       {
         source: "cli",
         key: "role",
-        predicate: (v) => typeof v === "string" && v.trim().length > 0,
-        transform: (v) => v.trim(),
       },
       {
         source: "config",
         key: "role",
-        predicate: (v) => typeof v === "string" && v.trim().length > 0,
-        transform: (v) => v.trim(),
       },
       {
         source: "profile",
         key: "role",
-        predicate: (v) => typeof v === "string" && v.trim().length > 0,
-        transform: (v) => v.trim(),
       },
       { default: "You are an AI coding assistant." },
     ],
@@ -416,7 +404,6 @@ const CONFIG_KEYS = {
       { default: true },
     ],
   },
-
 };
 
 export { CONFIG_KEYS };

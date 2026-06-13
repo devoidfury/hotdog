@@ -61,7 +61,7 @@ async function runOneShot(
   taskManager.setBus(bus);
 
   // Enqueue the prompt
-  bus.enqueue(cli.prompt);
+  bus.enqueue(cli.prompt || cli.args.join(" "));
 
   let exitCode = 0;
   try {

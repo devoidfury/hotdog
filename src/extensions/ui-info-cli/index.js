@@ -14,6 +14,7 @@ import {
   DEFAULT_PROFILES_SUBPATH,
   DEFAULT_CONFIG_FILENAME,
 } from "../../core/config.js";
+import { getNested } from "../../utils/objects.js";
 import { Agent } from "../../core/agent.js";
 import { CONFIG_KEYS } from "../../core/config-resolution.js";
 import path from "node:path";
@@ -290,20 +291,6 @@ function traceConfigResolution(keyName, schema, context) {
   }
 
   return result;
-}
-
-/**
- * Helper to safely access nested properties.
- */
-function getNested(obj, path) {
-  if (!obj || !path) return undefined;
-  const parts = path.includes(".") ? path.split(".") : [path];
-  let current = obj;
-  for (const part of parts) {
-    if (current == null || typeof current !== "object") return undefined;
-    current = current[part];
-  }
-  return current;
 }
 
 /**

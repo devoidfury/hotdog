@@ -128,7 +128,7 @@ function createCore(
 
 // ── Main ─────────────────────────────────────────────────────────────────────
 
-async function main() {
+export async function main() {
   // ── Create config registry for extension CLI flags & config params ──────
   const configRegistry = createConfigRegistry();
 
@@ -242,7 +242,9 @@ async function main() {
   // No explicit subcommand — use default_subcommand from config when stdin is a TTY
   if (process.stdin.isTTY) {
     const defaultSubcommandName = config.defaultSubcommand || "cli";
-    const defaultSubcommand = core.cliSubcommandRegistry.get(defaultSubcommandName);
+    const defaultSubcommand = core.cliSubcommandRegistry.get(
+      defaultSubcommandName,
+    );
     if (defaultSubcommand && defaultSubcommand.handler) {
       return await defaultSubcommand.handler(cli, core);
     }
@@ -256,7 +258,7 @@ async function main() {
 }
 
 // Only run main() when this module is the entry point (not when imported by tests).
-if (process.argv[1]?.match(/(main\.js|oa-agent)$/)) {
+if (import.meta.main) {
   main()
     .catch(async (e) => {
       console.error(formatError(e));

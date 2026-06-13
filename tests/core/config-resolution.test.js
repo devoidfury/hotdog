@@ -1,10 +1,10 @@
 import { describe, it, expect } from "bun:test";
 import {
-  getNested,
   resolveKey,
   resolveAll,
   CONFIG_KEYS,
 } from "../../src/core/config-resolution.js";
+import { getNested } from "../../src/utils/objects.js";
 
 describe("getNested", () => {
   it("returns top-level property", () => {

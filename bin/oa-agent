@@ -1,2 +1,10 @@
 #!/usr/bin/env bun
-import '../src/core/main.js';
+import { formatError } from "../src/core/error.js";
+import { main } from "../src/core/main.js";
+
+main()
+  .catch(async (e) => {
+    console.error(formatError(e));
+    return 1;
+  })
+  .then((code) => process.exit(code));

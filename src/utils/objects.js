@@ -1,4 +1,26 @@
 /**
+ * Safely access a nested property path on an object.
+ * Returns undefined if any part of the path is missing.
+ *
+ * @param {object} obj - The object to traverse.
+ * @param {string} path - Dot-separated path, e.g. "url" or "nested.value".
+ * @returns {*} The value at the path, or undefined.
+ */
+export function getNested(obj, path) {
+  if (!obj || !path) return undefined;
+
+  const parts = path.includes(".") ? path.split(".") : [path];
+  let current = obj;
+
+  for (const part of parts) {
+    if (current == null || typeof current !== "object") return undefined;
+    current = current[part];
+  }
+
+  return current;
+}
+
+/**
  * Strip null fields from an object for serialization.
  */
 export function stripNulls(obj) {

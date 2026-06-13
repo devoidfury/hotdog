@@ -12,7 +12,7 @@ import {
 import { HOOKS } from "./hooks.js";
 import { CliOutputSink } from "./ui/cli.js";
 import { parseArgs, generateHelpText } from "./cli.js";
-import { loadConfig, buildConfig } from "./config.js";
+import { loadConfig, buildConfig } from "./config/index.js";
 import { createConfigRegistry } from "./extensions/config-registry.js";
 import { formatError } from "./error.js";
 import { createSubcommandRegistry } from "./extensions/registries.js";

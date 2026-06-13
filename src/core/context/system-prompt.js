@@ -3,7 +3,7 @@
 // Extensions contribute chunks via the SYSTEM_PROMPT_BUILD hook;
 // this module renders the template with those chunks.
 
-import { initSystemPromptTemplate as _initTemplate } from "../config.js";
+import { initSystemPromptTemplate as _initTemplate } from "../config/providers.js";
 import { render, render as renderTemplate } from "../../utils/render.js";
 
 export { renderTemplate };

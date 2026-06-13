@@ -2,8 +2,8 @@ import { describe, it, expect } from "bun:test";
 import {
   resolveKey,
   resolveAll,
-  CONFIG_KEYS,
-} from "../../src/core/config-resolution.js";
+} from "../../src/core/config/resolver.js";
+import { CONFIG_SCHEMA as CONFIG_KEYS } from "../../src/core/config/schema.js";
 import { getNested } from "../../src/utils/objects.js";
 
 describe("getNested", () => {

@@ -4,7 +4,7 @@ import { Message } from "../context/message.js";
 import { LlmError } from "../llm-client/client.js";
 import { OUTPUT_EVENT } from "../context/output.js";
 import { AgentSink } from "./agent-sink.js";
-import { loadProfileFile } from "../config.js";
+import { loadProfileFile } from "../config/profiles.js";
 
 // ── Task Status ─────────────────────────────────────────────────────────────
 

@@ -46,7 +46,7 @@
 import { describe, it, expect } from 'bun:test';
 import { createConfigRegistry } from '../../src/core/extensions/config-registry.js';
 import { parseArgs } from '../../src/core/cli.js';
-import { loadConfig } from '../../src/core/config.js';
+import { loadConfig } from '../../src/core/config/index.js';
 import { HOOKS } from '../../src/core/hooks.js';
 import {
   emitConfigRegistration,
@@ -220,7 +220,7 @@ describe('ConfigRegistry', () => {
         },
       ]);
       
-      const config = await loadConfig(null, registry.getConfigParams());
+      const config = await loadConfig(null, null, registry.getConfigParams());
       
       expect(config.myExtension).toEqual({ enabled: true, timeout: 30 });
     });

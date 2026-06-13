@@ -5,7 +5,7 @@ import {
   DEFAULT_AI_URL,
   DEFAULT_CHAT_TIMEOUT_SECS,
   DEFAULT_MAX_TOKENS,
-} from "../config.js";
+} from "../config/defaults.js";
 import { retryWithBackoff } from "./retry.js";
 import { createMarkerMangler } from "../marker-mangler.js";
 export class LlmError extends Error {

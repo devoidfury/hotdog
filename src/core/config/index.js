@@ -1,4 +1,7 @@
-// Default configuration values and resolution logic used across the application.
+// Unified config module — single entry point for all configuration.
+//
+// Re-exports everything from sub-modules and provides the main
+// config loading and resolution functions.
 
 import fs from "node:fs";
 import fsPromises from "node:fs/promises";
@@ -6,10 +9,41 @@ import path from "node:path";
 import os from "node:os";
 import { cwd } from "node:process";
 
-import { parseFrontMatter } from "../utils/file-utils.js";
-import { deepMerge } from "../utils/objects.js";
-import { render } from "../utils/render.js";
-import { resolveAll, CONFIG_KEYS } from "./config-resolution.js";
+import { parseFrontMatter } from "../../utils/file-utils.js";
+import { deepMerge } from "../../utils/objects.js";
+import { render } from "../../utils/render.js";
+
+// ── Re-exports from sub-modules ──────────────────────────────────────────
+
+export * from "./defaults.js";
+export * from "./schema.js";
+export * from "./resolver.js";
+export * from "./profiles.js";
+export * from "./providers.js";
+
+// Import specific items we need locally
+import {
+  DEFAULT_MODEL,
+  DEFAULT_ROLE,
+  DEFAULT_PROFILES_SUBPATH,
+  DEFAULT_PROFILES_PATH,
+  DEFAULT_CONFIG_FILENAME,
+  DEFAULT_THINKER,
+  DEFAULT_TOOL_FMT,
+  DEFAULT_TOOL_OUTPUT_FMT,
+  DEFAULT_SKILLS_PATH,
+  DEFAULT_PROFILES_PATH as DEFAULT_PROFILES_PATH_CONST,
+  DEFAULT_PROMPTS_PATH,
+  DEFAULT_CHAT_TIMEOUT_SECS,
+  DEFAULT_EMBEDDINGS_TIMEOUT_SECS,
+} from "./defaults.js";
+import { CONFIG_SCHEMA } from "./schema.js";
+import { resolveAll, resolveModel, resolveModelWithProvider } from "./resolver.js";
+import {
+  loadProfileFiles,
+  allProfilesForSwitch,
+} from "./profiles.js";
+import { buildModelRegistry, initSystemPromptTemplate } from "./providers.js";
 
 // ── Config Directory Resolution ────────────────────────────────────────
 
@@ -95,37 +129,6 @@ export function mergeExtensionConfigDefaults(defaultConfig, extParams) {
   return merged;
 }
 
-// ── Core Defaults ───────────────────────────────────────────────────────
-
-export const DEFAULT_MODEL = "qwen3.5-0.8b";
-export const DEFAULT_AI_URL = "http://ai365.home:9292";
-export const DEFAULT_THINKER = "[Thinking: {}]";
-export const DEFAULT_TOOL_FMT = "  → {} {}";
-export const DEFAULT_TOOL_OUTPUT_FMT = "----\n{}\n----";
-export const DEFAULT_TOOL_RESULT_FMT = "  → {}";
-export const DEFAULT_SKILLS_PATH = "/skills";
-// Sub-path names relative to the resolved config directory
-export const DEFAULT_PROFILES_SUBPATH = "profiles";
-export const DEFAULT_PROMPTS_SUBPATH = "prompts";
-export const DEFAULT_CONFIG_FILENAME = "defaults.json";
-export const DEFAULT_SYSTEM_PROMPT_FILENAME = "system_prompt.md";
-
-// Full default paths (CWD-relative, for backward compatibility and display)
-export const DEFAULT_PROFILES_PATH = "./config/profiles";
-export const DEFAULT_PROMPTS_PATH = "./config/prompts";
-export const DEFAULT_CONFIG_PATH = "./config/defaults.json";
-export const DEFAULT_CHAT_TIMEOUT_SECS = 600;
-export const DEFAULT_EMBEDDINGS_TIMEOUT_SECS = 120;
-export const DEFAULT_SYSTEM_PROMPT_PATH = "config/system_prompt.md";
-export const DEFAULT_MAX_TOKENS = 32000;
-export const DEFAULT_MAX_ITERATIONS = 1000;
-export const DEFAULT_MAX_RETRIES = 12;
-export const DEFAULT_PROMPT = "> ";
-export const DEFAULT_EXIT_COMMANDS = ["exit", "quit"];
-export const DEFAULT_ROLE =
-  "You are an AI coding assistant. Use the instructions below and the tools available to you to assist the user.";
-export const DEFAULT_TASK_PROFILE = "task-default";
-
 // ── Config Loading ─────────────────────────────────────────────────────
 
 /**
@@ -151,7 +154,7 @@ function normalizeConfigKeys(obj) {
  * @param {Array<{key: string, defaults: Object}>} [extParams] - Extension config params to merge.
  * @returns {Object} Default config object.
  */
-function getDefaultConfig(extParams) {
+export function getDefaultConfig(extParams) {
   const baseConfig = {
     providers: [],
     defaultProvider: null,
@@ -168,7 +171,7 @@ function getDefaultConfig(extParams) {
     hideTools: true,
     hideThinking: false,
     skillsPath: DEFAULT_SKILLS_PATH,
-    profilesPath: DEFAULT_PROFILES_PATH,
+    profilesPath: DEFAULT_PROFILES_PATH_CONST,
     promptsPath: DEFAULT_PROMPTS_PATH,
     systemPromptTemplate: null,
     chatTimeoutSecs: DEFAULT_CHAT_TIMEOUT_SECS,
@@ -236,272 +239,6 @@ export async function loadConfig(configPath, cliConfigDir, extParams) {
     console.error(`Error loading config from ${configPathToUse}: ${e.message}`);
     process.exit(1);
   }
-}
-
-// ── Profile Loading ────────────────────────────────────────────────────
-
-/**
- * Load a profile from a .profile.md file.
- * Profile files use YAML front matter with fields: name, role, blacklist-tools, model, preload-skills, manager.
- */
-export async function loadProfileFile(config, profileName) {
-  const profilesPath = config.profilesPath;
-  let filePath;
-  try {
-    filePath = path.join(profilesPath, `${profileName}.profile.md`);
-    const content = await fsPromises.readFile(filePath, "utf-8");
-    const parsed = parseFrontMatter(content);
-    if (!parsed) return null;
-    const fm = parsed.frontMatter;
-    const body = parsed.body;
-    return {
-      name: fm.name || profileName,
-      role: fm.role || null,
-      body: body || "",
-      model: fm.model || null,
-      blacklistTools: fm["blacklist-tools"] || fm.blacklist_tools || [],
-      whitelistTools: fm["whitelist-tools"] || fm.whitelist_tools || null,
-      manager: fm.manager || false,
-      visibleWorker: fm["visible-worker"] || fm.visible_worker || false,
-    };
-  } catch {
-    return null;
-  }
-}
-
-/**
- * Get resolved profile from config and profile files.
- * Priority: JSON config profile → .profile.md file → default.
- */
-export async function getProfile(config, profileName) {
-  // 1. Check JSON config profiles
-  if (config.profiles && config.profiles[profileName]) {
-    return config.profiles[profileName];
-  }
-  // 2. Check profile markdown files
-  const fileProfile = await loadProfileFile(config, profileName);
-  if (fileProfile) {
-    return fileProfile;
-  }
-  // Default profile: no restrictions
-  return {
-    whitelistTools: null,
-    blacklistTools: [],
-    skills: [],
-    role: null,
-    model: null,
-    manager: false,
-    cwdBoundary: null,
-  };
-}
-
-/**
- * Get all profile names that have visibleWorker: true.
- * Scans all .profile.md files in the profiles directory.
- * Returns an array of profile name strings.
- */
-export async function getVisibleWorkerProfiles(config) {
-  const profilesPath = config.profilesPath;
-  let dir;
-  try {
-    dir = await fsPromises.readdir(profilesPath);
-  } catch {
-    return []; // Profiles directory not found or not readable
-  }
-
-  const profiles = [];
-  for (const entry of dir) {
-    if (!entry.endsWith(".profile.md")) continue;
-    const profileName = entry.slice(0, -".profile.md".length);
-    const profile = await loadProfileFile(config, profileName);
-    if (profile && profile.visibleWorker) {
-      profiles.push(profileName);
-    }
-  }
-  return profiles;
-}
-
-/**
- * Load all .profile.md files from a directory.
- * Returns a map of profile name → { name, role, body, blacklistTools, whitelistTools, model, preloadSkills, manager }
- */
-export async function loadProfileFiles(profilesPath) {
-  const result = {};
-
-  let entries;
-  try {
-    entries = await fsPromises.readdir(profilesPath, { withFileTypes: true });
-  } catch {
-    return result;
-  }
-
-  for (const entry of entries) {
-    if (!entry.isFile() || !entry.name.endsWith(".profile.md")) continue;
-
-    const filePath = path.join(profilesPath, entry.name);
-    let content;
-    try {
-      content = await fsPromises.readFile(filePath, "utf-8");
-    } catch {
-      continue;
-    }
-
-    const parsed = parseFrontMatter(content);
-    if (!parsed) continue;
-
-    const fm = parsed.frontMatter;
-    const fileStem = entry.name.replace(/\.profile\.md$/, "");
-
-    result[fileStem] = {
-      name: fm.name || fileStem,
-      description: fm.description || "",
-      role: fm.role || "",
-      body: parsed.body || "",
-      blacklistTools: fm["blacklist-tools"] || fm.blacklist_tools || [],
-      whitelistTools: fm["whitelist-tools"] || fm.whitelist_tools || null,
-      model: fm.model || null,
-      manager: fm.manager || false,
-    };
-  }
-
-  return result;
-}
-
-// ── Model Registry ─────────────────────────────────────────────────────
-
-/**
- * Build a model registry from config providers.
- * Accepts a config object with a `providers` array.
- * Returns a map of model_name -> { name, temperature, maxTokens }
- */
-export function buildModelRegistry(config) {
-  const registry = {};
-  const providers = config.providers || [];
-
-  for (const provider of providers) {
-    const models = provider.models || [];
-    for (const modelEntry of models) {
-      const modelName = `${provider.name}/${modelEntry.name}`;
-      registry[modelName] = {
-        name: modelName,
-        temperature: modelEntry.temperature,
-        maxTokens: modelEntry.maxTokens || DEFAULT_MAX_TOKENS,
-      };
-    }
-    // Also add provider-level models (models defined at provider level)
-    // If provider has no models array, use default model settings
-    if (models.length === 0 && provider.defaultModel) {
-      registry[`${provider.name}/${provider.defaultModel}`] = {
-        name: `${provider.name}/${provider.defaultModel}`,
-        temperature: provider.temperature,
-        maxTokens: provider.maxTokens || DEFAULT_MAX_TOKENS,
-      };
-    }
-  }
-
-  return registry;
-}
-
-// ── System Prompt Template ─────────────────────────────────────────────
-
-let cachedSystemPromptTemplate = null;
-
-/**
- * Initialize (load) the system prompt template from disk.
- * Falls back to a minimal template if the file doesn't exist.
- */
-export async function initSystemPromptTemplate(templatePath, cliConfigDir) {
-  if (cachedSystemPromptTemplate) return cachedSystemPromptTemplate;
-
-  const templateFile =
-    templatePath ||
-    configSubPath(resolveConfigDir(cliConfigDir), DEFAULT_SYSTEM_PROMPT_FILENAME);
-  try {
-    cachedSystemPromptTemplate = await fsPromises.readFile(
-      templateFile,
-      "utf-8",
-    );
-  } catch {
-    // Fallback: minimal template
-    cachedSystemPromptTemplate = `{{ role }}\n\n{{ body }}\n{% for chunk in chunks %}{{ chunk.content }}{% endfor %}`;
-  }
-
-  return cachedSystemPromptTemplate;
-}
-
-// ── Model Resolution ───────────────────────────────────────────────────
-
-/**
- * Resolve a model name to provider/model format.
- */
-function resolveModelWithProvider(name, provider) {
-  if (name.includes("/")) return name;
-  if (provider?.models) {
-    const match = provider.models.find((m) => m.name === name);
-    if (match) return `${provider.name}/${name}`;
-  }
-  return name;
-}
-
-/**
- * Resolve model name with priority: profile → CLI → provider default → config → default.
- */
-function resolveModel(
-  cliModel,
-  profileModel,
-  configModel,
-  provider,
-  defaultModel,
-) {
-  if (profileModel) return resolveModelWithProvider(profileModel, provider);
-  if (cliModel) return resolveModelWithProvider(cliModel, provider);
-  if (provider?.models?.length)
-    return resolveModelWithProvider(provider.models[0].name, provider);
-  if (configModel) return resolveModelWithProvider(configModel, provider);
-  return defaultModel || "qwen3.5-0.8b";
-}
-
-// ── Switch Profile ─────────────────────────────────────────────────────
-
-/**
- * Resolve a single profile's SwitchProfile data.
- */
-export function resolveSwitchProfile(profileName, fileProfile, configProfile) {
-  const role =
-    fileProfile && fileProfile.role && fileProfile.role.trim()
-      ? fileProfile.role
-      : configProfile && configProfile.role
-        ? configProfile.role
-        : "";
-
-  const body = fileProfile?.body || "";
-  const model = configProfile?.model || null;
-
-  return { role, body, model };
-}
-
-/**
- * Get all profiles available for switching.
- * Merges config profiles with file profiles.
- */
-export function allProfilesForSwitch(options) {
-  const { profileFiles, configProfiles } = options;
-  const result = {};
-
-  // Collect all profile names from both sources
-  const allNames = new Set([
-    ...Object.keys(configProfiles || {}),
-    ...Object.keys(profileFiles || {}),
-  ]);
-
-  for (const name of allNames) {
-    const fileProfile = profileFiles?.[name] || null;
-    const configProfile = configProfiles?.[name] || null;
-    const sp = resolveSwitchProfile(name, fileProfile, configProfile);
-    result[name] = sp;
-  }
-
-  return result;
 }
 
 // ── Unified Config Builder ─────────────────────────────────────────────
@@ -617,7 +354,7 @@ export async function buildAgentConfig(options) {
     profilesPath,
   };
 
-  const resolved = resolveAll(CONFIG_KEYS, context);
+  const resolved = resolveAll(CONFIG_SCHEMA, context);
 
   // ── Non-declarative values ────────────────────────────────────────────
 
@@ -647,6 +384,7 @@ export async function buildAgentConfig(options) {
   const systemPromptTemplate = await initSystemPromptTemplate(
     cli.systemPromptTemplate || config.systemPromptTemplate,
     cli.configDir,
+    resolveConfigDir,
   );
 
   // All profiles for switch

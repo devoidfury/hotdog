@@ -7,16 +7,18 @@ import { LlmClient } from "../../core/llm-client/client.js";
 import { SkillsLoader } from "../skills/loader.js";
 import {
   DEFAULT_SKILLS_PATH,
-  loadConfig,
-  loadProfileFiles,
-  resolveConfigDir,
-  configSubPath,
   DEFAULT_PROFILES_SUBPATH,
   DEFAULT_CONFIG_FILENAME,
-} from "../../core/config.js";
+} from "../../core/config/defaults.js";
+import {
+  loadConfig,
+  resolveConfigDir,
+  configSubPath,
+} from "../../core/config/index.js";
+import { loadProfileFiles } from "../../core/config/profiles.js";
+import { CONFIG_SCHEMA as CONFIG_KEYS } from "../../core/config/schema.js";
 import { getNested } from "../../utils/objects.js";
 import { Agent } from "../../core/agent.js";
-import { CONFIG_KEYS } from "../../core/config-resolution.js";
 import path from "node:path";
 import fs from "node:fs/promises";
 import os from "node:os";

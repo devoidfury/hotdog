@@ -10,7 +10,7 @@ import { HOOKS } from "./hooks.js";
 import { ToolContext } from "./extensions/tool-context.js";
 import { xmlEscape } from "./extensions/tool-utils.js";
 import { createCommandRegistry } from "./extensions/registries.js";
-import { DEFAULT_MAX_TOKENS } from "./config.js";
+import { DEFAULT_MAX_TOKENS } from "./config/defaults.js";
 
 /**
  * Minimal Agent that runs the LLM loop and delegates behavior to hooks.

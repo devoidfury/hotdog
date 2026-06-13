@@ -10,7 +10,7 @@ import {
   ToolResult,
   defaultCallDisplay,
 } from "../../core/extensions/tool-utils.js";
-import { getVisibleWorkerProfiles } from "../../core/config.js";
+import { getVisibleWorkerProfiles } from "../../core/config/profiles.js";
 
 // ── Base class for subagent tools ──────────────────────────────────────────
 

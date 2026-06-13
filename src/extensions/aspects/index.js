@@ -7,7 +7,8 @@ import { join } from "node:path";
 import { HOOKS } from "../../core/hooks.js";
 import { render } from "../../utils/render.js";
 import { parseFrontMatter, loadAspects } from "../../utils/file-utils.js";
-import { resolveConfigDir, configSubPath, DEFAULT_PROFILES_SUBPATH } from "../../core/config.js";
+import { resolveConfigDir, configSubPath } from "../../core/config/index.js";
+import { DEFAULT_PROFILES_SUBPATH } from "../../core/config/defaults.js";
 
 const TEMPLATE_PATH = join(import.meta.dirname, "aspects_chunk.md");
 

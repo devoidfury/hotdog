@@ -1,7 +1,7 @@
 // CLI output sink — formats and displays agent output with color support.
 
 import { OutputSink, OUTPUT_EVENT, EVENT_HANDLERS } from "../context/output.js";
-import { DEFAULT_TOOL_FMT, DEFAULT_TOOL_OUTPUT_FMT } from "../config.js";
+import { DEFAULT_TOOL_FMT, DEFAULT_TOOL_OUTPUT_FMT } from "../config/defaults.js";
 import {
   ColorPalette,
   applyThinking,

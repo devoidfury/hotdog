@@ -130,14 +130,6 @@ export function createCommandRegistry() {
 }
 
 /**
- * @deprecated Use createCommandRegistry() instead.
- * Kept for backward compatibility.
- */
-export function createSlashCommandRegistry() {
-  return createCommandRegistry();
-}
-
-/**
  * Create a new CLI subcommand registry.
  * @returns {CommandRegistry}
  */

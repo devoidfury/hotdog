@@ -2,5 +2,16 @@
   "name": "subagents",
   "provides": ["tools"],
   "loadOrder": 2,
-  "description": "Subagent tools for task delegation and management (manager-only)"
+  "description": "Subagent tools for task delegation and management (manager-only)",
+  "configSchema": {
+    "type": "object",
+    "properties": {
+      "enabled": {
+        "type": "boolean",
+        "default": true,
+        "description": "Whether this extension is enabled. Set to false to disable the extension entirely."
+      }
+    },
+    "additionalProperties": false
+  }
 }

@@ -9,6 +9,7 @@ export {
   emitConfigRegistration,
   resolveExtensionPath,
   isExtensionDirectory,
+  isExtensionEnabled,
   discoverExtensionsInDir,
   LOAD_ORDER,
   resolveLoadOrder,
@@ -55,7 +56,6 @@ export {
 export {
   CommandRegistry,
   createCommandRegistry,
-  createSlashCommandRegistry,
   createSubcommandRegistry,
 } from "./registries.js";
 

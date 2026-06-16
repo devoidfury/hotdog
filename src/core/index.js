@@ -11,8 +11,6 @@ export {
   getExtensionConfigDefaults,
   emitConfigRegistration,
   registerExtensionMetadata,
-  HOOKS,
-  EXTENSION_PROVIDES,
 } from "./extensions/extensions.js";
 
 export {
@@ -49,7 +47,6 @@ export {
 export {
   CommandRegistry,
   createCommandRegistry,
-  createSlashCommandRegistry,
   createSubcommandRegistry,
 } from "./extensions/registries.js";
 

@@ -12,7 +12,7 @@ import {
 import { HOOKS } from "./hooks.js";
 import { CliOutputSink } from "./ui/cli.js";
 import { parseArgs, generateHelpText } from "./cli.js";
-import { loadConfig, buildConfig } from "./config/index.js";
+import { loadConfig, buildConfig, validateConfig, failOnInvalidConfig } from "./config/index.js";
 import { createConfigRegistry } from "./extensions/config-registry.js";
 import { formatError } from "./error.js";
 import { createSubcommandRegistry } from "./extensions/registries.js";
@@ -51,6 +51,7 @@ async function loadExtensions(core, { taskManager, config } = {}) {
     extensionPaths,
     extensionAutoload,
     extensionsList,
+    config,
   );
 
   // Load all extensions in dependency order via the extension loader.
@@ -184,6 +185,13 @@ export async function main() {
   const { resolved, modelRegistry, providers } = await buildConfig(cli);
   const extParams = configRegistry.getConfigParams();
   const config = await loadConfig(cli.config, cli.configDir, extParams);
+
+  // ── Validate config against core schema and extension schemas ────────────
+  const extensionSchemas = extParams
+    .filter((p) => p.schema)
+    .map((p) => ({ key: p.key, schema: p.schema }));
+  const validationResult = validateConfig(config, extensionSchemas);
+  failOnInvalidConfig(validationResult);
 
   // ── Create core infrastructure ──────────────────────────────────────────
   const core = createCore(config, configRegistry, cliSubcommandRegistry, {

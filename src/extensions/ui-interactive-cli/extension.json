@@ -3,6 +3,17 @@
   "provides": ["interactive-session", "cli:subcommands"],
   "loadOrder": 10,
   "description": "Interactive CLI session with readline loop, slash commands, and shell execution",
+  "configSchema": {
+    "type": "object",
+    "properties": {
+      "enabled": {
+        "type": "boolean",
+        "default": true,
+        "description": "Whether this extension is enabled. Set to false to disable the extension entirely."
+      }
+    },
+    "additionalProperties": false
+  },
   "cli:subcommands": [
     {
       "name": "cli",

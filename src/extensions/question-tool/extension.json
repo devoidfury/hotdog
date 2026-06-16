@@ -2,5 +2,16 @@
   "name": "question-tool",
   "provides": ["tools"],
   "loadOrder": 1,
-  "description": "Ask the user questions and collect answers"
+  "description": "Ask the user questions and collect answers",
+  "configSchema": {
+    "type": "object",
+    "properties": {
+      "enabled": {
+        "type": "boolean",
+        "default": true,
+        "description": "Whether this extension is enabled. Set to false to disable the extension entirely."
+      }
+    },
+    "additionalProperties": false
+  }
 }

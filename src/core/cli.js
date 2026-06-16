@@ -18,7 +18,7 @@ export function parseArgs(configRegistry = null, knownSubcommands = null) {
     embeddingsTimeout: null,
     stream: true,
     hideTools: true,
-    hideThinking: false,
+    hideThinking: null,
     version: false,
     help: false,
     thinker: null,
@@ -55,13 +55,6 @@ export function parseArgs(configRegistry = null, knownSubcommands = null) {
     { short: "-d", long: "--config-dir", type: "string", hasValue: true },
     { short: "-m", long: "--model", type: "string", hasValue: true },
     { short: null, long: "--ai-url", type: "string", hasValue: true },
-    {
-      short: null,
-      long: "--url",
-      type: "string",
-      hasValue: true,
-      deprecated: true,
-    },
     { short: "-k", long: "--api-key", type: "string", hasValue: true },
     { short: "-p", long: "--profile", type: "string", hasValue: true },
     { short: null, long: "--provider", type: "string", hasValue: true },
@@ -154,11 +147,6 @@ export function parseArgs(configRegistry = null, knownSubcommands = null) {
         }
         i++;
         continue;
-      }
-
-      // Handle deprecated flags
-      if (flagDef.deprecated) {
-        console.warn(`Warning: ${arg} is deprecated, use ${flagDef.long}`);
       }
 
       // Handle boolean flags

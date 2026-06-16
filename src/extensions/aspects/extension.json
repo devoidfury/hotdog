@@ -2,10 +2,5 @@
   "name": "aspects",
   "provides": [],
   "loadOrder": 10,
-  "description": "Loads aspect files and contributes Guidelines section to the system prompt",
-  "configSchema": {
-    "type": "object",
-    "properties": {},
-    "additionalProperties": false
-  }
+  "description": "Loads aspect files and contributes Guidelines section to the system prompt"
 }

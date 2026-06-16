@@ -1,29 +1,60 @@
-// Default configuration constants only — no resolution logic.
+/**
+ * Default configuration constants — sourced from core.config.json.
+ *
+ * Instead of hardcoded values, each constant reads from the schema's
+ * default layer. This keeps the JSON file as the single source of truth.
+ */
 
-export const DEFAULT_MODEL = "qwen3.5-0.8b";
-export const DEFAULT_AI_URL = "http://ai365.home:9292";
-export const DEFAULT_THINKER = "[Thinking: {}]";
-export const DEFAULT_TOOL_FMT = "  → {} {}";
-export const DEFAULT_TOOL_OUTPUT_FMT = "----\n{}\n----";
+import { CONFIG_SCHEMA, getLayerDefault } from "./schema-loader.js";
+
+// ── Core config defaults (from schema) ────────────────────────────────────
+
+/**
+ * Get the default value for a schema key.
+ * Handles both static values and function defaults.
+ *
+ * @param {string} keyName - The config key name.
+ * @returns {*} The default value (static, not function-evaluated).
+ */
+function defaultFor(keyName) {
+  const schemaKey = CONFIG_SCHEMA[keyName];
+  if (!schemaKey) return undefined;
+  return getLayerDefault(schemaKey);
+}
+
+// Connection settings
+export const DEFAULT_AI_URL = defaultFor("baseUrl");
+
+// Format strings
+export const DEFAULT_THINKER = defaultFor("thinkerFormat");
+export const DEFAULT_TOOL_FMT = defaultFor("toolFormat");
+export const DEFAULT_TOOL_OUTPUT_FMT = defaultFor("toolOutputFmt");
 export const DEFAULT_TOOL_RESULT_FMT = "  → {}";
+
+// Timeouts
+export const DEFAULT_CHAT_TIMEOUT_SECS = defaultFor("chatTimeout");
+export const DEFAULT_EMBEDDINGS_TIMEOUT_SECS = defaultFor("embeddingsTimeout");
+
+// Model (not in schema layers — still a constant)
+export const DEFAULT_MODEL = "qwen3.5-0.8b";
+
+// Path constants (not computed — static defaults for display/fallback)
 export const DEFAULT_SKILLS_PATH = "/skills";
-// Sub-path names relative to the resolved config directory
 export const DEFAULT_PROFILES_SUBPATH = "profiles";
 export const DEFAULT_PROMPTS_SUBPATH = "prompts";
 export const DEFAULT_CONFIG_FILENAME = "defaults.json";
 export const DEFAULT_SYSTEM_PROMPT_FILENAME = "system_prompt.md";
-// Full default paths (CWD-relative, for backward compatibility and display)
+// Full default paths (CWD-relative, for display and fallback)
 export const DEFAULT_PROFILES_PATH = "./config/profiles";
 export const DEFAULT_PROMPTS_PATH = "./config/prompts";
 export const DEFAULT_CONFIG_PATH = "./config/defaults.json";
-export const DEFAULT_CHAT_TIMEOUT_SECS = 600;
-export const DEFAULT_EMBEDDINGS_TIMEOUT_SECS = 120;
 export const DEFAULT_SYSTEM_PROMPT_PATH = "config/system_prompt.md";
-export const DEFAULT_MAX_TOKENS = 32000;
-export const DEFAULT_MAX_ITERATIONS = 1000;
-export const DEFAULT_MAX_RETRIES = 12;
-export const DEFAULT_PROMPT = "> ";
-export const DEFAULT_EXIT_COMMANDS = ["exit", "quit"];
-export const DEFAULT_ROLE =
-  "You are an AI coding assistant. Use the instructions below and the tools available to you to assist the user.";
-export const DEFAULT_TASK_PROFILE = "task-default";
+
+// Other constants (from schema)
+export const DEFAULT_MAX_TOKENS = defaultFor("maxTokens");
+export const DEFAULT_MAX_ITERATIONS = defaultFor("maxIterations");
+export const DEFAULT_MAX_RETRIES = defaultFor("maxRetries");
+export const DEFAULT_PROMPT = defaultFor("prompt");
+export const DEFAULT_EXIT_COMMANDS = defaultFor("exitCommands");
+export const DEFAULT_ROLE = defaultFor("role");
+export const DEFAULT_TASK_PROFILE = defaultFor("taskProfile");

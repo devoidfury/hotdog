@@ -6,15 +6,28 @@
   "configSchema": {
     "type": "object",
     "properties": {
+      "enabled": {
+        "type": "boolean",
+        "default": true,
+        "description": "Whether this extension is enabled. Set to false to disable the extension entirely."
+      },
       "toolEnabled": {
         "type": "boolean",
         "default": true,
-        "description": "Whether to register the model tool"
+        "description": "Whether to register the model tool",
+        "layers": [
+          { "source": "config", "key": "modelToolEnabled" },
+          { "default": true }
+        ]
       },
       "commandEnabled": {
         "type": "boolean",
         "default": true,
-        "description": "Whether to register the /model and /models slash commands"
+        "description": "Whether to register the /model and /models slash commands",
+        "layers": [
+          { "source": "config", "key": "modelCommandEnabled" },
+          { "default": true }
+        ]
       }
     },
     "additionalProperties": false

@@ -274,7 +274,40 @@ describe("CONFIG_KEYS schema", () => {
       true,
     );
 
+    // Config false should be respected (not skipped by notFalse predicate)
     context = { ...baseContext, config: { showTokenUse: false } };
+    expect(resolveKey("showTokenUse", CONFIG_KEYS.showTokenUse, context)).toBe(
+      false,
+    );
+
+    // Config true should be respected
+    context = { ...baseContext, config: { showTokenUse: true } };
+    expect(resolveKey("showTokenUse", CONFIG_KEYS.showTokenUse, context)).toBe(
+      true,
+    );
+
+    // Default is true when no cli or config
+    context = { ...baseContext };
+    expect(resolveKey("showTokenUse", CONFIG_KEYS.showTokenUse, context)).toBe(
+      true,
+    );
+
+    // CLI --tokens (true) overrides config false
+    context = {
+      ...baseContext,
+      cli: { tokens: true },
+      config: { showTokenUse: false },
+    };
+    expect(resolveKey("showTokenUse", CONFIG_KEYS.showTokenUse, context)).toBe(
+      true,
+    );
+
+    // CLI tokens not set (false) falls through to config
+    context = {
+      ...baseContext,
+      cli: { tokens: false },
+      config: { showTokenUse: true },
+    };
     expect(resolveKey("showTokenUse", CONFIG_KEYS.showTokenUse, context)).toBe(
       true,
     );
@@ -398,7 +431,7 @@ describe("Phase 2: Complex values", () => {
   describe("role", () => {
     it("defaults to fallback string", () => {
       expect(resolveKey("role", CONFIG_KEYS.role, baseContext)).toBe(
-        "You are an AI coding assistant.",
+        "You are an AI coding assistant. Use the instructions below and the tools available to you to assist the user.",
       );
     });
 
@@ -663,7 +696,9 @@ describe("integration: resolveAll with CONFIG_KEYS", () => {
     const result = resolveAll(CONFIG_KEYS, context);
 
     expect(result.theme).toBe("dark");
-    expect(result.role).toBe("You are an AI coding assistant.");
+    expect(result.role).toBe(
+      "You are an AI coding assistant. Use the instructions below and the tools available to you to assist the user.",
+    );
     expect(result.noLog).toBe(false);
     expect(result.hideThinking).toBe(false);
     expect(result.useColors).toBe(true);

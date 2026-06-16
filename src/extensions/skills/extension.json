@@ -7,18 +7,31 @@
   "configSchema": {
     "type": "object",
     "properties": {
+      "enabled": {
+        "type": "boolean",
+        "default": true,
+        "description": "Whether this extension is enabled. Set to false to disable the extension entirely."
+      },
       "preloadSkills": {
         "type": "array",
         "items": {
           "type": "string"
         },
         "default": [],
-        "description": "List of skill names to preload"
+        "description": "List of skill names to preload",
+        "layers": [
+          { "source": "config", "key": "preloadSkills", "predicate": "nonemptyArray" },
+          { "default": [] }
+        ]
       },
       "skillsPath": {
         "type": "string",
         "default": "/skills",
-        "description": "Directory path where skills are stored"
+        "description": "Directory path where skills are stored",
+        "layers": [
+          { "source": "config", "key": "skillsPath", "predicate": "nonempty" },
+          { "default": "/skills" }
+        ]
       }
     },
     "additionalProperties": false

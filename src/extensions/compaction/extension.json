@@ -10,23 +10,39 @@
       "enabled": {
         "type": "boolean",
         "default": true,
-        "description": "Whether compaction is enabled"
+        "description": "Whether compaction is enabled",
+        "layers": [
+          { "source": "config", "key": "compactionEnabled" },
+          { "default": true }
+        ]
       },
       "reserveTokens": {
         "type": "number",
         "default": 8000,
-        "description": "Token budget to reserve for the conversation"
+        "description": "Token budget to reserve for the conversation",
+        "layers": [
+          { "source": "config", "key": "compactionReserveTokens" },
+          { "default": 8000 }
+        ]
       },
       "keepRecentMessages": {
         "type": "number",
         "default": 3,
-        "description": "Number of recent messages to keep after compaction"
+        "description": "Number of recent messages to keep after compaction",
+        "layers": [
+          { "source": "config", "key": "compactionKeepRecentMessages" },
+          { "default": 3 }
+        ]
       },
       "strategy": {
         "type": "string",
         "default": "summarize",
         "enum": ["summarize", "drop", "summarize-short", "token-aware"],
-        "description": "Compaction strategy to use"
+        "description": "Compaction strategy to use",
+        "layers": [
+          { "source": "config", "key": "compactionStrategy" },
+          { "default": "summarize" }
+        ]
       }
     },
     "additionalProperties": false

@@ -817,13 +817,6 @@ export class Agent {
     return this._commandRegistry;
   }
 
-  /**
-   * @deprecated Use getCommandRegistry() instead.
-   */
-  getSlashCommandRegistry() {
-    return this.getCommandRegistry();
-  }
-
   // ── Command Handlers ──────────────────────────────────────────────────────
 
   _handleTokensCommand() {

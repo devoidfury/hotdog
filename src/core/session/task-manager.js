@@ -129,7 +129,7 @@ export class TaskManager {
   async spawnTask(taskId, taskDescription, options = {}) {
     // 1. Load task profile
     const profileName = options.profile || "task-default";
-    const taskProfile = loadProfileFile(this._config, profileName);
+    const taskProfile = loadProfileFile(this._config.profilesPath, profileName);
 
     // 2. Resolve model
     const resolvedModel =

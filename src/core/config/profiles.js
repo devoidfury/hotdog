@@ -2,8 +2,8 @@
  * Profile loading and resolution — consolidated from config.js.
  *
  * Provides a single `resolveProfile()` function that replaces the overlapping
- * `loadProfileFile()`, `getProfile()`, `loadProfileFiles()`, `allProfilesForSwitch()`,
- * `resolveSwitchProfile()`, and `resolveProfileFile()` functions.
+ * `loadProfileFile()`, `loadProfileFiles()`, `allProfilesForSwitch()`,
+ * and `resolveSwitchProfile()` functions.
  */
 
 import fsPromises from "node:fs/promises";
@@ -149,7 +149,7 @@ export async function getVisibleWorkerProfiles(profilesPath) {
  * @param {object} [configProfile] - Profile from config file.
  * @returns {object} SwitchProfile data with role, body, model.
  */
-export function resolveSwitchProfile(profileName, fileProfile, configProfile) {
+function resolveSwitchProfile(profileName, fileProfile, configProfile) {
   const role =
     fileProfile && fileProfile.role && fileProfile.role.trim()
       ? fileProfile.role
@@ -215,36 +215,6 @@ export function mergeProfile(configProfile, fileProfile) {
     return profile;
   }
 
-  // Default profile: no restrictions
-  return {
-    whitelistTools: null,
-    blacklistTools: [],
-    skills: [],
-    role: null,
-    model: null,
-    manager: false,
-    cwdBoundary: null,
-  };
-}
-
-/**
- * Get resolved profile from config and profile files.
- * Priority: JSON config profile → .profile.md file → default.
- *
- * @param {object} config - Config object with profiles and profilesPath.
- * @param {string} profileName - Name of the profile to resolve.
- * @returns {Promise<object>} Resolved profile object.
- */
-export async function getProfile(config, profileName) {
-  // 1. Check JSON config profiles
-  if (config.profiles && config.profiles[profileName]) {
-    return config.profiles[profileName];
-  }
-  // 2. Check profile markdown files
-  const fileProfile = await loadProfileFile(config.profilesPath, profileName);
-  if (fileProfile) {
-    return fileProfile;
-  }
   // Default profile: no restrictions
   return {
     whitelistTools: null,

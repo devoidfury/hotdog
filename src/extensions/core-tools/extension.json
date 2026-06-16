@@ -6,35 +6,64 @@
   "configSchema": {
     "type": "object",
     "properties": {
+      "enabled": {
+        "type": "boolean",
+        "default": true,
+        "description": "Whether this extension is enabled. Set to false to disable the extension entirely."
+      },
       "readToolLimit": {
         "type": "number",
         "default": 500,
-        "description": "Default maximum lines for the read tool"
+        "description": "Default maximum lines for the read tool",
+        "layers": [
+          { "source": "config", "key": "readToolLimit" },
+          { "default": 500 }
+        ]
       },
       "findMaxResults": {
         "type": "number",
         "default": 200,
-        "description": "Maximum number of results for the find tool"
+        "description": "Maximum number of results for the find tool",
+        "layers": [
+          { "source": "config", "key": "findMaxResults" },
+          { "default": 200 }
+        ]
       },
       "grepMaxResults": {
         "type": "number",
         "default": 100,
-        "description": "Maximum number of results for the grep tool"
+        "description": "Maximum number of results for the grep tool",
+        "layers": [
+          { "source": "config", "key": "grepMaxResults" },
+          { "default": 100 }
+        ]
       },
       "maxDiffSize": {
         "type": "number",
         "default": 8000,
-        "description": "Maximum diff size in characters"
+        "description": "Maximum diff size in characters",
+        "layers": [
+          { "source": "config", "key": "maxDiffSize" },
+          { "default": 8000 }
+        ]
       },
       "maxEditInputSize": {
         "type": "number",
         "default": 16000,
-        "description": "Maximum edit input size in characters (oldString + newString combined)"
+        "description": "Maximum edit input size in characters (oldString + newString combined)",
+        "layers": [
+          { "source": "config", "key": "maxEditInputSize" },
+          { "default": 16000 }
+        ]
       },
       "maxToolOutputLines": {
         "type": "number",
         "default": 600,
-        "description": "Maximum number of output lines for tool results"
+        "description": "Maximum number of output lines for tool results",
+        "layers": [
+          { "source": "config", "key": "maxToolOutputLines" },
+          { "default": 600 }
+        ]
       }
     },
     "additionalProperties": false

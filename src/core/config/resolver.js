@@ -2,10 +2,53 @@
  * Generic config resolver.
  *
  * Walks declared layers for each config key and returns the first valid value.
+ * Supports compiled schemas (from schema-loader.js) with function predicates/transforms.
  */
 
 import { getNested } from "../../utils/objects.js";
-import { CONFIG_SCHEMA } from "./schema.js";
+
+// ── Layer Value Lookup ─────────────────────────────────────────────────────
+
+/**
+ * Resolve the raw value for a single layer from the context.
+ * Shared between resolveKey() and traceConfigResolution().
+ *
+ * @param {object} layer - The layer definition.
+ * @param {object} context - The resolution context.
+ * @returns {*} The raw value from this layer, or undefined.
+ */
+export function resolveLayerValue(layer, context) {
+  if ("default" in layer) {
+    return typeof layer.default === "function"
+      ? layer.default(context)
+      : layer.default;
+  }
+
+  switch (layer.source) {
+    case "cli":
+      return context.cli[layer.key];
+    case "config":
+      return context.config[layer.key];
+    case "env":
+      return process.env[layer.key];
+    case "provider":
+      return getNested(context.provider, layer.path);
+    case "providerDefault":
+      if (
+        context.provider?.models?.length &&
+        context.provider.models[0].name
+      ) {
+        return context.provider.models[0].name;
+      }
+      return undefined;
+    case "profile":
+      return getNested(context.profile, layer.key || layer.path);
+    case "extension":
+      return getNested(context.extensions, layer.key);
+    default:
+      return undefined;
+  }
+}
 
 // ── Resolver ───────────────────────────────────────────────────────────────
 
@@ -21,46 +64,12 @@ export function resolveKey(keyName, schema, context) {
   const { layers, transform } = schema;
 
   for (const layer of layers) {
-    let value;
-
+    // Default layer always wins — return immediately, even if null
     if ("default" in layer) {
-      return typeof layer.default === "function"
-        ? layer.default(context)
-        : layer.default;
+      return resolveLayerValue(layer, context);
     }
 
-    switch (layer.source) {
-      case "cli":
-        value = context.cli[layer.key];
-        break;
-      case "config":
-        value = context.config[layer.key];
-        break;
-      case "env":
-        value = process.env[layer.key];
-        break;
-      case "provider":
-        value = getNested(context.provider, layer.path);
-        break;
-      case "providerDefault":
-        // Returns the first model name from provider's models array
-        if (
-          context.provider?.models?.length &&
-          context.provider.models[0].name
-        ) {
-          value = context.provider.models[0].name;
-        }
-        break;
-      case "profile":
-        value = getNested(context.profile, layer.key || layer.path);
-        break;
-      case "extension":
-        value = getNested(context.extensions, layer.key);
-        break;
-      default:
-        // Unknown source, skip
-        continue;
-    }
+    const value = resolveLayerValue(layer, context);
 
     // Layer may specify a predicate — only use this value if predicate passes
     if (value !== undefined && value !== null && value !== "") {

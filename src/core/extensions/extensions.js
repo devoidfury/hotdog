@@ -31,7 +31,7 @@ export function extensionNameToConfigKey(name) {
  * @param {Object} schema - JSON Schema with properties containing defaults.
  * @param {string} [configKey] - Optional config key override. If not provided,
  *   defaults are returned with individual property keys.
- * @returns {Array<{key: string, description?: string, defaults: Object}>}
+ * @returns {Array<{key: string, description?: string, defaults: Object, schema?: Object, layers?: Object}>}
  */
 export function extractSchemaDefaults(schema, configKey) {
   if (!schema) return [];
@@ -39,6 +39,8 @@ export function extractSchemaDefaults(schema, configKey) {
   // For object-type schemas: collect all defaults into a single entry
   if (schema.type === "object" && schema.properties) {
     const defaults = {};
+    const layers = {};
+
     for (const [propName, prop] of Object.entries(schema.properties)) {
       if (prop.default !== undefined) {
         defaults[propName] = prop.default;
@@ -50,16 +52,30 @@ export function extractSchemaDefaults(schema, configKey) {
           }
         }
       }
+
+      // Extract layers if defined (extension layer support)
+      if (prop.layers) {
+        layers[propName] = prop.layers;
+      }
     }
-    if (Object.keys(defaults).length > 0) {
-      return [
-        {
-          key: configKey || schema.$id || "config",
-          description: schema.description || "",
-          defaults,
-        },
-      ];
+
+    const result = [
+      {
+        key: configKey || schema.$id || "config",
+        description: schema.description || "",
+        defaults,
+        schema,
+      },
+    ];
+
+    // Attach layers if any were found
+    if (Object.keys(layers).length > 0) {
+      result[0].layers = layers;
     }
+
+    return Object.keys(defaults).length > 0 || Object.keys(layers).length > 0
+      ? result
+      : [];
   }
 
   // For array-type schemas: check for top-level default
@@ -461,23 +477,56 @@ export async function getExtensionConfigSchemas(extensionPaths) {
 }
 
 /**
+ * Check if an extension is enabled based on its config.
+ * An extension is disabled when its config section has `enabled: false`.
+ * If the config section doesn't exist or `enabled` is not set, the extension
+ * is considered enabled (defaults to true).
+ *
+ * @param {string} extName - Extension name (kebab-case, e.g., "bash-tool").
+ * @param {Object} config - The resolved config object.
+ * @returns {boolean} true if the extension should be loaded.
+ */
+export function isExtensionEnabled(extName, config) {
+  if (!config) return true;
+  const configKey = extensionNameToConfigKey(extName);
+  const extConfig = config[configKey];
+  if (extConfig && typeof extConfig === "object") {
+    return extConfig.enabled !== false;
+  }
+  return true;
+}
+
+/**
  * Get the list of extensions to load based on config settings.
+ * Filters out extensions whose config has `enabled: false`.
+ *
+ * @param {string[]} extensionPaths - Paths to search for extensions.
+ * @param {boolean} extensionAutoload - Whether to autoload extensions.
+ * @param {string[]} extensions - Explicit list of extensions to load (when autoload is false).
+ * @param {Object} [config] - Resolved config object for checking `enabled` settings.
+ * @returns {Promise<Array>} Extensions to load, sorted by dependency order.
  */
 export async function getExtensionsToLoad(
   extensionPaths,
   extensionAutoload,
   extensions,
+  config,
 ) {
   const discovered = await discoverExtensions(extensionPaths);
 
+  // Filter out extensions disabled via config (enabled: false)
+  const enabledExtensions = config
+    ? discovered.filter((ext) => isExtensionEnabled(ext.name, config))
+    : discovered;
+
   if (extensionAutoload) {
-    const autoloaded = discovered.filter((ext) => ext.autoload !== false);
-    return resolveExtensionDependencies(autoloaded, discovered);
+    const autoloaded = enabledExtensions.filter((ext) => ext.autoload !== false);
+    return resolveExtensionDependencies(autoloaded, enabledExtensions);
   }
 
   if (extensions && extensions.length > 0) {
-    const selected = discovered.filter((ext) => extensions.includes(ext.name));
-    return resolveExtensionDependencies(selected, discovered);
+    const selected = enabledExtensions.filter((ext) => extensions.includes(ext.name));
+    return resolveExtensionDependencies(selected, enabledExtensions);
   }
 
   return [];

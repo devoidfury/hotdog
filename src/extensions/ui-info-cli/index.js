@@ -17,7 +17,7 @@ import {
 } from "../../core/config/index.js";
 import { loadProfileFiles } from "../../core/config/profiles.js";
 import { CONFIG_SCHEMA as CONFIG_KEYS } from "../../core/config/schema.js";
-import { getNested } from "../../utils/objects.js";
+import { resolveLayerValue } from "../../core/config/resolver.js";
 import { Agent } from "../../core/agent.js";
 import path from "node:path";
 import fs from "node:fs/promises";
@@ -222,11 +222,9 @@ function traceConfigResolution(keyName, schema, context) {
   for (const layer of layers) {
     const layerInfo = { ...layer, matched: false, value: undefined };
 
+    // Default layer always wins — return immediately, even if null
     if ("default" in layer) {
-      const defaultValue =
-        typeof layer.default === "function"
-          ? layer.default(context)
-          : layer.default;
+      const defaultValue = resolveLayerValue(layer, context);
       layerInfo.matched = true;
       layerInfo.value = defaultValue;
       result.resolvedValue = defaultValue;
@@ -235,34 +233,7 @@ function traceConfigResolution(keyName, schema, context) {
       break;
     }
 
-    let value;
-    switch (layer.source) {
-      case "cli":
-        value = context.cli[layer.key];
-        break;
-      case "config":
-        value = context.config[layer.key];
-        break;
-      case "env":
-        value = process.env[layer.key];
-        break;
-      case "provider":
-        value = getNested(context.provider, layer.path);
-        break;
-      case "providerDefault":
-        if (
-          context.provider?.models?.length &&
-          context.provider.models[0].name
-        ) {
-          value = context.provider.models[0].name;
-        }
-        break;
-      case "profile":
-        value = getNested(context.profile, layer.key || layer.path);
-        break;
-      default:
-        continue;
-    }
+    const value = resolveLayerValue(layer, context);
 
     layerInfo.value = value;
 

@@ -12,6 +12,7 @@ import { cwd } from "node:process";
 import { parseFrontMatter } from "../../utils/file-utils.js";
 import { deepMerge } from "../../utils/objects.js";
 import { render } from "../../utils/render.js";
+import { validate as validateSchema } from "../../utils/json-schema.js";
 
 // ── Re-exports from sub-modules ──────────────────────────────────────────
 
@@ -20,6 +21,9 @@ export * from "./schema.js";
 export * from "./resolver.js";
 export * from "./profiles.js";
 export * from "./providers.js";
+
+// Validation re-export
+export { validate, validateParams, formatValidationErrors } from "../../utils/json-schema.js";
 
 // Import specific items we need locally
 import {
@@ -32,7 +36,6 @@ import {
   DEFAULT_TOOL_FMT,
   DEFAULT_TOOL_OUTPUT_FMT,
   DEFAULT_SKILLS_PATH,
-  DEFAULT_PROFILES_PATH as DEFAULT_PROFILES_PATH_CONST,
   DEFAULT_PROMPTS_PATH,
   DEFAULT_CHAT_TIMEOUT_SECS,
   DEFAULT_EMBEDDINGS_TIMEOUT_SECS,
@@ -134,8 +137,11 @@ export function mergeExtensionConfigDefaults(defaultConfig, extParams) {
 /**
  * Normalize config keys from snake_case to camelCase.
  * Handles nested objects like profiles and mcp_servers.
+ *
+ * @param {any} obj - The object to normalize.
+ * @returns {any} The normalized object with camelCase keys.
  */
-function normalizeConfigKeys(obj) {
+export function normalizeConfigKeys(obj) {
   if (typeof obj !== "object" || obj === null) return obj;
   if (Array.isArray(obj)) return obj.map(normalizeConfigKeys);
 
@@ -171,7 +177,7 @@ export function getDefaultConfig(extParams) {
     hideTools: true,
     hideThinking: false,
     skillsPath: DEFAULT_SKILLS_PATH,
-    profilesPath: DEFAULT_PROFILES_PATH_CONST,
+    profilesPath: DEFAULT_PROFILES_PATH,
     promptsPath: DEFAULT_PROMPTS_PATH,
     systemPromptTemplate: null,
     chatTimeoutSecs: DEFAULT_CHAT_TIMEOUT_SECS,
@@ -237,6 +243,66 @@ export async function loadConfig(configPath, cliConfigDir, extParams) {
     return deepMerge(getDefaultConfig(extParams), normalizeConfigKeys(raw));
   } catch (e) {
     console.error(`Error loading config from ${configPathToUse}: ${e.message}`);
+    process.exit(1);
+  }
+}
+
+// ── Config Validation ───────────────────────────────────────────────────
+
+/**
+ * Validate a loaded config object against extension schemas.
+ * Uses the json-schema.js validator for type/enum/required checks.
+ *
+ * @param {object} config - The loaded config object.
+ * @param {Array<object>} [extensionSchemas] - Array of {key, schema} from extensions.
+ * @returns {{valid: boolean, errors: string[]}} Validation result.
+ */
+export function validateConfig(config, extensionSchemas) {
+  const errors = [];
+
+  // Validate core config types from schema
+  for (const [keyName, schemaKey] of Object.entries(CONFIG_SCHEMA)) {
+    const value = config[keyName];
+    if (value === undefined || value === null) continue;
+
+    // Basic type checking
+    const expectedType = schemaKey.type;
+    if (expectedType === "string" && typeof value !== "string") {
+      errors.push(`${keyName}: expected string, got ${typeof value}`);
+    } else if (expectedType === "number" && typeof value !== "number") {
+      errors.push(`${keyName}: expected number, got ${typeof value}`);
+    } else if (expectedType === "boolean" && typeof value !== "boolean") {
+      errors.push(`${keyName}: expected boolean, got ${typeof value}`);
+    } else if (expectedType === "array" && !Array.isArray(value)) {
+      errors.push(`${keyName}: expected array, got ${typeof value}`);
+    }
+  }
+
+  // Validate extension configs against their schemas
+  if (extensionSchemas) {
+    for (const { key, schema } of extensionSchemas) {
+      const value = config[key];
+      if (value && schema) {
+        const schemaErrors = validateSchema(value, schema, key);
+        errors.push(...schemaErrors);
+      }
+    }
+  }
+
+  return { valid: errors.length === 0, errors };
+}
+
+/**
+ * Print validation errors and exit if config is invalid.
+ *
+ * @param {{valid: boolean, errors: string[]}} result - Validation result.
+ */
+export function failOnInvalidConfig(result) {
+  if (!result.valid) {
+    console.error("Configuration validation failed:");
+    for (const error of result.errors) {
+      console.error(`  - ${error}`);
+    }
     process.exit(1);
   }
 }
@@ -342,6 +408,26 @@ export async function buildAgentConfig(options) {
     };
   }
 
+  // ── Build extension config context ────────────────────────────────────
+  // Collect extension config objects from the loaded config for extension layers
+  const extensions = {};
+  for (const [key, value] of Object.entries(config)) {
+    // Extension config keys are camelCase versions of extension names
+    // e.g., coreTools, compaction, mcpClient, agentsMd, etc.
+    if (
+      typeof value === "object" &&
+      value !== null &&
+      !Array.isArray(value) &&
+      !["profiles", "provider"].includes(key)
+    ) {
+      // Check if this looks like an extension config key
+      // (starts lowercase, has uppercase letter = camelCase)
+      if (/^[a-z][a-zA-Z]+$/.test(key) && key !== "defaultModel") {
+        extensions[key] = value;
+      }
+    }
+  }
+
   // ── Declarative resolution ────────────────────────────────────────────
 
   const context = {
@@ -352,6 +438,7 @@ export async function buildAgentConfig(options) {
     profile,
     profileName,
     profilesPath,
+    extensions,
   };
 
   const resolved = resolveAll(CONFIG_SCHEMA, context);

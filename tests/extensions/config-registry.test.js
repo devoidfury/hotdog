@@ -52,6 +52,8 @@ import {
   emitConfigRegistration,
   extractSchemaDefaults,
   extensionNameToConfigKey,
+  isExtensionEnabled,
+  getExtensionsToLoad,
 } from '../../src/core/extensions/extensions.js';
 
 describe('ConfigRegistry', () => {
@@ -394,6 +396,49 @@ describe('ConfigRegistry', () => {
     it('should return empty array for null schema', () => {
       const params = extractSchemaDefaults(null, 'test');
       expect(params).toHaveLength(0);
+    });
+  });
+
+  describe('isExtensionEnabled', () => {
+    it('should return true when config is null/undefined', () => {
+      expect(isExtensionEnabled('bash-tool', null)).toBe(true);
+      expect(isExtensionEnabled('bash-tool', undefined)).toBe(true);
+    });
+
+    it('should return true when extension config section does not exist', () => {
+      const config = { someOtherConfig: {} };
+      expect(isExtensionEnabled('bash-tool', config)).toBe(true);
+    });
+
+    it('should return true when enabled is not set (defaults to enabled)', () => {
+      const config = { bashTool: { timeout: 5000 } };
+      expect(isExtensionEnabled('bash-tool', config)).toBe(true);
+    });
+
+    it('should return true when enabled is explicitly true', () => {
+      const config = { bashTool: { enabled: true } };
+      expect(isExtensionEnabled('bash-tool', config)).toBe(true);
+    });
+
+    it('should return false when enabled is explicitly false', () => {
+      const config = { bashTool: { enabled: false } };
+      expect(isExtensionEnabled('bash-tool', config)).toBe(false);
+    });
+
+    it('should handle kebab-case extension names correctly', () => {
+      const config = {
+        coreTools: { enabled: true },
+        modelSwitch: { enabled: false },
+        sessionLog: { enabled: true },
+      };
+      expect(isExtensionEnabled('core-tools', config)).toBe(true);
+      expect(isExtensionEnabled('model-switch', config)).toBe(false);
+      expect(isExtensionEnabled('session-log', config)).toBe(true);
+    });
+
+    it('should handle single-word extension names', () => {
+      const config = { skills: { enabled: false } };
+      expect(isExtensionEnabled('skills', config)).toBe(false);
     });
   });
 });

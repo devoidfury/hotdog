@@ -3,6 +3,17 @@
   "provides": ["cli:subcommands", "tools"],
   "loadOrder": 10,
   "description": "Provides the review CLI subcommand and review tool for session log inspection",
+  "configSchema": {
+    "type": "object",
+    "properties": {
+      "enabled": {
+        "type": "boolean",
+        "default": true,
+        "description": "Whether this extension is enabled. Set to false to disable the extension entirely."
+      }
+    },
+    "additionalProperties": false
+  },
   "cli:subcommands": [
     {
       "name": "review",

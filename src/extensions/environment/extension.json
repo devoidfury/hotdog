@@ -5,7 +5,13 @@
   "description": "Contributes Environment section to the system prompt",
   "configSchema": {
     "type": "object",
-    "properties": {},
+    "properties": {
+      "enabled": {
+        "type": "boolean",
+        "default": true,
+        "description": "Whether this extension is enabled. Set to false to disable the extension entirely."
+      }
+    },
     "additionalProperties": false
   }
 }

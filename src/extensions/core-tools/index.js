@@ -69,13 +69,11 @@ const TOOL_FACTORIES = {
 /**
  * Create a tool factory that can create and register core tools.
  *
- * @param {Object} [ctx] — Core context object with config.
+ * @param {Object} [config] — Extension config with tool-specific overrides.
  * @returns {{ createTool: Function, createAndRegister: Function }}
  */
-export function createToolFactory(ctx = {}) {
-  const config = ctx?.config || {};
-
-  const createToolInternal = (toolName, whitelist = null) => {
+export function createToolFactory(config = {}) {
+  const createTool = (toolName, whitelist = null) => {
     const descriptor = TOOL_DESCRIPTORS.find((d) => d.name === toolName);
     if (descriptor) {
       // Check disabled status
@@ -83,11 +81,7 @@ export function createToolFactory(ctx = {}) {
         return null;
       }
       // Check whitelist
-      if (
-        whitelist &&
-        Array.isArray(whitelist) &&
-        !whitelist.includes(toolName)
-      ) {
+      if (whitelist && Array.isArray(whitelist) && !whitelist.includes(toolName)) {
         return null;
       }
     }
@@ -101,34 +95,14 @@ export function createToolFactory(ctx = {}) {
     return null;
   };
 
-  return {
-    createTool(toolName, ctxOrWhitelist = {}, whitelist = null) {
-      // Support both old API (toolName, ctx, whitelist) and new API (toolName, whitelist)
-      // If ctxOrWhitelist is an array, treat it as whitelist
-      if (Array.isArray(ctxOrWhitelist)) {
-        return createToolInternal(toolName, ctxOrWhitelist);
-      }
-      return createToolInternal(toolName, whitelist);
-    },
-
-    async createAndRegister(
-      toolName,
-      registry,
-      ctxOrWhitelist = {},
-      whitelist = null,
-    ) {
-      // Support both old API (toolName, registry, ctx, whitelist) and new API (toolName, registry, whitelist)
-      // If ctxOrWhitelist is an array, treat it as whitelist
-      let effectiveWhitelist = whitelist;
-      if (Array.isArray(ctxOrWhitelist)) {
-        effectiveWhitelist = ctxOrWhitelist;
-      }
-      const tool = this.createTool(toolName, null, effectiveWhitelist);
-      if (tool) {
-        registry.register(toolName, tool);
-      }
-    },
+  const createAndRegister = (toolName, registry, whitelist = null) => {
+    const tool = createTool(toolName, whitelist);
+    if (tool) {
+      registry.register(toolName, tool);
+    }
   };
+
+  return { createTool, createAndRegister };
 }
 
 // ── Extension Entry Point ───────────────────────────────────────────────────
@@ -148,19 +122,13 @@ export function create(core) {
       /**
        * Register all core tools when requested.
        */
-      [HOOKS.TOOLS_REGISTER]: async (registry) => {
-        const factory = createToolFactory({ config });
+      [HOOKS.TOOLS_REGISTER]: (registry) => {
+        const factory = createToolFactory(config);
 
         for (const descriptor of TOOL_DESCRIPTORS) {
-          try {
-            const tool = factory.createTool(descriptor.name);
-            if (tool) {
-              registry.register(descriptor.name, tool);
-            }
-          } catch (e) {
-            console.error(
-              `[core-tools] Failed to create tool '${descriptor.name}': ${e.message}`,
-            );
+          const tool = factory.createTool(descriptor.name);
+          if (tool) {
+            registry.register(descriptor.name, tool);
           }
         }
       },

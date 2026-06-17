@@ -61,27 +61,27 @@ function createMockAgent(sessionId) {
 
 // ── Tests ────────────────────────────────────────────────────────────────────
 
-test("Session restoration: full round-trip with INPUT, LLM, and TOOL_RESULT entries", () => {
+test("Session restoration: full round-trip with INPUT, LLM, and TOOL_RESULT entries", async () => {
   const sessionId = uniqueSessionId("restore-full");
   setupSessionDir();
 
   try {
     // Step 1: Simulate a session with user message, assistant response, and tool result
     const log = new SessionLog(sessionId);
-    log.writeInput("What is 2+2?");
-    log.writeAssistant(
+    await log.writeInput("What is 2+2?");
+    await log.writeAssistant(
       "Let me calculate that.",
       [{ id: "tc_1", type: "function", function: { name: "bash", arguments: "echo 4" } }],
       "I should use bash to calculate",
     );
-    log.writeToolResult("<output>4</output>", "tc_1", "bash");
-    log.writeAssistant("The answer is 4.");
+    await log.writeToolResult("<output>4</output>", "tc_1", "bash");
+    await log.writeAssistant("The answer is 4.");
 
     // Verify file exists
-    expect(sessionExists(sessionId)).toBe(true);
+    expect(await sessionExists(sessionId)).toBe(true);
 
     // Step 2: Read entries
-    const entries = readSessionEntries(sessionId);
+    const entries = await readSessionEntries(sessionId);
     expect(entries.length).toBe(4);
 
     // Verify entry types
@@ -120,23 +120,23 @@ test("Session restoration: full round-trip with INPUT, LLM, and TOOL_RESULT entr
   }
 });
 
-test("Session restoration: successive one-shot prompts resume correctly", () => {
+test("Session restoration: successive one-shot prompts resume correctly", async () => {
   const sessionId = uniqueSessionId("restore-successive");
   setupSessionDir();
 
   try {
     // Simulate first one-shot prompt
     const log1 = new SessionLog(sessionId);
-    log1.writeInput("Hello, world!");
-    log1.writeAssistant("Hello! How can I help you today?");
+    await log1.writeInput("Hello, world!");
+    await log1.writeAssistant("Hello! How can I help you today?");
 
     // Simulate second one-shot prompt (same session, continuing conversation)
     const log2 = new SessionLog(sessionId);
-    log2.writeInput("What's the weather?");
-    log2.writeAssistant("I don't have access to weather data.");
+    await log2.writeInput("What's the weather?");
+    await log2.writeAssistant("I don't have access to weather data.");
 
     // Verify file has all 4 entries
-    const entries = readSessionEntries(sessionId);
+    const entries = await readSessionEntries(sessionId);
     expect(entries.length).toBe(4);
 
     // Step 2: Create a fresh agent and replay
@@ -170,17 +170,17 @@ test("Session restoration: successive one-shot prompts resume correctly", () => 
   }
 });
 
-test("Session restoration: _isRestoring flag prevents duplicate log writes", () => {
+test("Session restoration: _isRestoring flag prevents duplicate log writes", async () => {
   const sessionId = uniqueSessionId("restore-flag");
   setupSessionDir();
 
   try {
     // Create initial session log
     const log = new SessionLog(sessionId);
-    log.writeInput("First message");
-    log.writeAssistant("First response");
+    await log.writeInput("First message");
+    await log.writeAssistant("First response");
 
-    const entries = readSessionEntries(sessionId);
+    const entries = await readSessionEntries(sessionId);
     expect(entries.length).toBe(2);
 
     // Replay with isRestoring = true (simulating the fix)
@@ -202,18 +202,18 @@ test("Session restoration: _isRestoring flag prevents duplicate log writes", () 
   }
 });
 
-test("Session restoration: handles session with reset marker", () => {
+test("Session restoration: handles session with reset marker", async () => {
   const sessionId = uniqueSessionId("restore-reset");
   setupSessionDir();
 
   try {
     const log = new SessionLog(sessionId);
-    log.writeInput("Before reset");
-    log.writeReset();
-    log.writeInput("After reset");
-    log.writeAssistant("Response after reset");
+    await log.writeInput("Before reset");
+    await log.writeReset();
+    await log.writeInput("After reset");
+    await log.writeAssistant("Response after reset");
 
-    const entries = readSessionEntries(sessionId);
+    const entries = await readSessionEntries(sessionId);
     // Should only get entries after the reset
     expect(entries.length).toBe(2);
     expect(entries[0].source).toBe(LOG_SOURCE.INPUT);
@@ -231,19 +231,19 @@ test("Session restoration: handles session with reset marker", () => {
   }
 });
 
-test("Session restoration: handles session with compaction entries", () => {
+test("Session restoration: handles session with compaction entries", async () => {
   const sessionId = uniqueSessionId("restore-compaction");
   setupSessionDir();
 
   try {
     const log = new SessionLog(sessionId);
-    log.writeInput("Question 1");
-    log.writeAssistant("Answer 1");
-    log.writeCompaction(5, "Summary of conversation about JavaScript");
-    log.writeInput("Question 2");
-    log.writeAssistant("Answer 2");
+    await log.writeInput("Question 1");
+    await log.writeAssistant("Answer 1");
+    await log.writeCompaction(5, "Summary of conversation about JavaScript");
+    await log.writeInput("Question 2");
+    await log.writeAssistant("Answer 2");
 
-    const entries = readSessionEntries(sessionId);
+    const entries = await readSessionEntries(sessionId);
     expect(entries.length).toBe(5); // 2 before compaction + compaction + 2 after
 
     const agent = createMockAgent(sessionId);
@@ -263,15 +263,15 @@ test("Session restoration: handles session with compaction entries", () => {
   }
 });
 
-test("Session restoration: handles empty/non-existent session gracefully", () => {
+test("Session restoration: handles empty/non-existent session gracefully", async () => {
   const sessionId = uniqueSessionId("restore-empty");
   setupSessionDir();
 
   try {
     // No entries written
-    expect(sessionExists(sessionId)).toBe(false);
+    expect(await sessionExists(sessionId)).toBe(false);
 
-    const entries = readSessionEntries(sessionId);
+    const entries = await readSessionEntries(sessionId);
     expect(entries.length).toBe(0);
 
     const agent = createMockAgent(sessionId);
@@ -285,19 +285,19 @@ test("Session restoration: handles empty/non-existent session gracefully", () =>
   }
 });
 
-test("Session restoration: preserves reasoning content in assistant messages", () => {
+test("Session restoration: preserves reasoning content in assistant messages", async () => {
   const sessionId = uniqueSessionId("restore-reasoning");
   setupSessionDir();
 
   try {
     const log = new SessionLog(sessionId);
-    log.writeAssistant(
+    await log.writeAssistant(
       "I think the answer is 42.",
       null,
       "First I need to understand the question. Then I'll reason through it step by step. The answer should be 42.",
     );
 
-    const entries = readSessionEntries(sessionId);
+    const entries = await readSessionEntries(sessionId);
     expect(entries.length).toBe(1);
 
     const agent = createMockAgent(sessionId);
@@ -315,7 +315,7 @@ test("Session restoration: preserves reasoning content in assistant messages", (
   }
 });
 
-test("Session restoration: preserves tool calls in assistant messages", () => {
+test("Session restoration: preserves tool calls in assistant messages", async () => {
   const sessionId = uniqueSessionId("restore-tool-calls");
   setupSessionDir();
 
@@ -326,9 +326,9 @@ test("Session restoration: preserves tool calls in assistant messages", () => {
     ];
 
     const log = new SessionLog(sessionId);
-    log.writeAssistant("Let me check the files.", toolCalls);
+    await log.writeAssistant("Let me check the files.", toolCalls);
 
-    const entries = readSessionEntries(sessionId);
+    const entries = await readSessionEntries(sessionId);
     expect(entries.length).toBe(1);
     expect(entries[0].tool_calls).toEqual(toolCalls);
 
@@ -343,15 +343,15 @@ test("Session restoration: preserves tool calls in assistant messages", () => {
   }
 });
 
-test("Session restoration: tool result entries preserve tool_call_id", () => {
+test("Session restoration: tool result entries preserve tool_call_id", async () => {
   const sessionId = uniqueSessionId("restore-tool-result");
   setupSessionDir();
 
   try {
     const log = new SessionLog(sessionId);
-    log.writeToolResult("<output>file contents</output>", "tc_1", "read");
+    await log.writeToolResult("<output>file contents</output>", "tc_1", "read");
 
-    const entries = readSessionEntries(sessionId);
+    const entries = await readSessionEntries(sessionId);
     expect(entries.length).toBe(1);
     expect(entries[0].tool_call_id).toBe("tc_1");
     expect(entries[0].tool_name).toBe("read");
@@ -368,23 +368,23 @@ test("Session restoration: tool result entries preserve tool_call_id", () => {
   }
 });
 
-test("Session restoration: handles mixed entry types in correct order", () => {
+test("Session restoration: handles mixed entry types in correct order", async () => {
   const sessionId = uniqueSessionId("restore-mixed");
   setupSessionDir();
 
   try {
     const log = new SessionLog(sessionId);
-    log.writeInput("Hello");
-    log.writeAssistant("Hi there!");
-    log.writeInput("Can you read file.txt?");
-    log.writeAssistant(
+    await log.writeInput("Hello");
+    await log.writeAssistant("Hi there!");
+    await log.writeInput("Can you read file.txt?");
+    await log.writeAssistant(
       "Sure, let me read it.",
       [{ id: "tc_1", type: "function", function: { name: "read", arguments: "file.txt" } }],
     );
-    log.writeToolResult("<output>File contents here</output>", "tc_1", "read");
-    log.writeAssistant("Here's what I found in file.txt: File contents here");
+    await log.writeToolResult("<output>File contents here</output>", "tc_1", "read");
+    await log.writeAssistant("Here's what I found in file.txt: File contents here");
 
-    const entries = readSessionEntries(sessionId);
+    const entries = await readSessionEntries(sessionId);
     expect(entries.length).toBe(6);
 
     const agent = createMockAgent(sessionId);
@@ -406,14 +406,14 @@ test("Session restoration: handles mixed entry types in correct order", () => {
   }
 });
 
-test("Session restoration: skip system prompt entries, regenerate dynamically", () => {
+test("Session restoration: skip system prompt entries, regenerate dynamically", async () => {
   const sessionId = uniqueSessionId("restore-system-skip");
   setupSessionDir();
 
   try {
     const log = new SessionLog(sessionId);
-    log.writeInput("Hello");
-    log.writeAssistant("Hi!");
+    await log.writeInput("Hello");
+    await log.writeAssistant("Hi!");
 
     // Manually add a system prompt entry (simulating what the session log extension might write)
     const systemEntry = {
@@ -424,7 +424,7 @@ test("Session restoration: skip system prompt entries, regenerate dynamically", 
       content: "You are a helpful assistant.",
     };
 
-    const entries = readSessionEntries(sessionId);
+    const entries = await readSessionEntries(sessionId);
     // readSessionEntries only reads INPUT and LLM entries (system prompts are skipped)
     expect(entries.length).toBe(2);
 
@@ -440,28 +440,28 @@ test("Session restoration: skip system prompt entries, regenerate dynamically", 
   }
 });
 
-test("Session restoration: multiple successive runs maintain consistent context", () => {
+test("Session restoration: multiple successive runs maintain consistent context", async () => {
   const sessionId = uniqueSessionId("restore-multiple");
   setupSessionDir();
 
   try {
     // Run 1: Initial conversation
     const log1 = new SessionLog(sessionId);
-    log1.writeInput("Run 1: Hello");
-    log1.writeAssistant("Run 1: Hi there!");
+    await log1.writeInput("Run 1: Hello");
+    await log1.writeAssistant("Run 1: Hi there!");
 
     // Run 2: Continue conversation
     const log2 = new SessionLog(sessionId);
-    log2.writeInput("Run 2: How are you?");
-    log2.writeAssistant("Run 2: I'm doing well!");
+    await log2.writeInput("Run 2: How are you?");
+    await log2.writeAssistant("Run 2: I'm doing well!");
 
     // Run 3: More conversation
     const log3 = new SessionLog(sessionId);
-    log3.writeInput("Run 3: Goodbye");
-    log3.writeAssistant("Run 3: See you later!");
+    await log3.writeInput("Run 3: Goodbye");
+    await log3.writeAssistant("Run 3: See you later!");
 
     // Verify all 6 entries exist
-    const entries = readSessionEntries(sessionId);
+    const entries = await readSessionEntries(sessionId);
     expect(entries.length).toBe(6);
 
     // Replay into fresh agent

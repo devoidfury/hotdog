@@ -80,15 +80,15 @@ test("createPromptEntry includes images when provided", () => {
 
 // ── SessionLog writeInput with images ────────────────────────────────────────
 
-test("SessionLog.writeInput stores images in log file", () => {
+test("SessionLog.writeInput stores images in log file", async () => {
   setupTestDir();
   try {
     const log = new SessionLog(TEST_SESSION_ID);
-    log.writeInput("What is in this image?", [
+    await log.writeInput("What is in this image?", [
       { type: "image_url", mimeType: "image/png", data: "base64data" },
     ]);
 
-    const entries = readSessionEntries(TEST_SESSION_ID);
+    const entries = await readSessionEntries(TEST_SESSION_ID);
     expect(entries.length).toBe(1);
     expect(entries[0].content).toBe("What is in this image?");
     expect(entries[0].images).toEqual([
@@ -99,13 +99,13 @@ test("SessionLog.writeInput stores images in log file", () => {
   }
 });
 
-test("SessionLog.writeInput without images stores null", () => {
+test("SessionLog.writeInput without images stores null", async () => {
   setupTestDir();
   try {
     const log = new SessionLog(TEST_SESSION_ID);
-    log.writeInput("Hello");
+    await log.writeInput("Hello");
 
-    const entries = readSessionEntries(TEST_SESSION_ID);
+    const entries = await readSessionEntries(TEST_SESSION_ID);
     expect(entries.length).toBe(1);
     // stripNulls removes null images from the log
     expect(entries[0].images).toBeUndefined();
@@ -206,20 +206,20 @@ test("replayEntriesIntoContext handles mixed entries with and without images", (
 
 // ── Round-trip test ──────────────────────────────────────────────────────────
 
-test("SessionLog round-trip with images preserves image data", () => {
+test("SessionLog round-trip with images preserves image data", async () => {
   setupTestDir();
   try {
     const log = new SessionLog(TEST_SESSION_ID);
-    log.writeInput("Analyze this image", [
+    await log.writeInput("Analyze this image", [
       { type: "image_url", mimeType: "image/png", data: "testbase64data" },
     ]);
-    log.writeAssistant("I see a cat");
-    log.writeInput("What color is it?", [
+    await log.writeAssistant("I see a cat");
+    await log.writeInput("What color is it?", [
       { type: "image_url", mimeType: "image/jpeg", data: "anotherimage" },
     ]);
-    log.writeAssistant("It is orange");
+    await log.writeAssistant("It is orange");
 
-    const entries = readSessionEntries(TEST_SESSION_ID);
+    const entries = await readSessionEntries(TEST_SESSION_ID);
     expect(entries.length).toBe(4);
 
     // Verify images are preserved in entries

@@ -139,13 +139,13 @@ describe("Session Review - exit codes", () => {
 
       // Create a session with multiple entries (listSessions filters sessions with <= 1 entry)
       const log = new SessionLog(TEST_SESSION_ID);
-      log.writeInput("test input");
-      log.writeAssistant("test response");
+      await log.writeInput("test input");
+      await log.writeAssistant("test response");
 
       const { readSessionEntries } = await import(
         "../../src/extensions/session-log/session-log.js"
       );
-      const entries = readSessionEntries(TEST_SESSION_ID);
+      const entries = await readSessionEntries(TEST_SESSION_ID);
       expect(entries.length).toBeGreaterThanOrEqual(2);
     });
   });
@@ -156,7 +156,7 @@ describe("Session Review - exit codes", () => {
         "../../src/extensions/session-log/session-log.js"
       );
 
-      const entries = readSessionEntries("non-existent-session-xyz");
+      const entries = await readSessionEntries("non-existent-session-xyz");
       expect(entries.length).toBe(0);
     });
 
@@ -166,10 +166,10 @@ describe("Session Review - exit codes", () => {
       );
 
       const log = new SessionLog(TEST_SESSION_ID);
-      log.writeInput("hello");
-      log.writeAssistant("world");
+      await log.writeInput("hello");
+      await log.writeAssistant("world");
 
-      const entries = readSessionEntries(TEST_SESSION_ID);
+      const entries = await readSessionEntries(TEST_SESSION_ID);
       expect(entries.length).toBe(2);
       expect(entries[0].content).toBe("hello");
     });
@@ -182,10 +182,10 @@ describe("Session Review - exit codes", () => {
       );
 
       const log = new SessionLog(TEST_SESSION_ID);
-      log.writeInput("hello");
-      log.writeAssistant("world");
+      await log.writeInput("hello");
+      await log.writeAssistant("world");
 
-      const entries = readSessionEntries(TEST_SESSION_ID);
+      const entries = await readSessionEntries(TEST_SESSION_ID);
       // No tool results in these entries
       const toolEntries = entries.filter((e) => e.source === "tool_result");
       expect(toolEntries.length).toBe(0);
@@ -197,14 +197,14 @@ describe("Session Review - exit codes", () => {
       );
 
       const log = new SessionLog(TEST_SESSION_ID);
-      log.writeInput("run bash");
-      log.writeAssistant(
+      await log.writeInput("run bash");
+      await log.writeAssistant(
         "running",
         [{ id: "tc_1", type: "function", function: { name: "bash", arguments: "ls" } }],
       );
-      log.writeToolResult("<output>done</output>", "tc_1", "bash");
+      await log.writeToolResult("<output>done</output>", "tc_1", "bash");
 
-      const entries = readSessionEntries(TEST_SESSION_ID);
+      const entries = await readSessionEntries(TEST_SESSION_ID);
       const toolEntries = entries.filter((e) => e.source === "tool_result");
       expect(toolEntries.length).toBe(1);
       expect(toolEntries[0].tool_name).toBe("bash");

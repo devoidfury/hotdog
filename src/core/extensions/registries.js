@@ -136,3 +136,11 @@ export function createCommandRegistry() {
 export function createSubcommandRegistry() {
   return new CommandRegistry("cli");
 }
+
+/**
+ * @deprecated Use createCommandRegistry instead.
+ * This is kept for backward compatibility.
+ */
+export function createSlashCommandRegistry() {
+  return createCommandRegistry();
+}

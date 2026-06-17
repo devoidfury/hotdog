@@ -107,7 +107,8 @@ describe("buildSystemPrompt", () => {
     });
     // Should contain role but not have empty body artifacts
     expect(result).toContain("test");
-    expect(result).toContain("Role & Mission");
+    // Body section is conditionally rendered, so empty body means no extra content
+    expect(result).not.toContain("{{ body }}");
   });
 });
 

@@ -43,12 +43,12 @@ test("stripNulls preserves non-null values", () => {
   expect(Object.keys(result).sort()).toEqual(["a", "b", "c", "d", "e"]);
 });
 
-test("SessionLog serializes without null fields", () => {
+test("SessionLog serializes without null fields", async () => {
   setupTestDir();
   try {
     const log = new SessionLog(TEST_SESSION_ID);
-    log.writeInput("hello world");
-    log.writeReset();
+    await log.writeInput("hello world");
+    await log.writeReset();
 
     const content = readFileSync(log.path, "utf-8");
     const lines = content.trim().split("\n");
@@ -84,11 +84,11 @@ test("SessionLog serializes without null fields", () => {
   }
 });
 
-test("SessionLog with tool_calls includes them", () => {
+test("SessionLog with tool_calls includes them", async () => {
   setupTestDir();
   try {
     const log = new SessionLog(TEST_SESSION_ID);
-    log.writeAssistant("thinking", [
+    await log.writeAssistant("thinking", [
       { id: "tc_1", type: "function", function: { name: "bash", arguments: "ls" } },
     ], "reasoning content");
 
@@ -109,11 +109,11 @@ test("SessionLog with tool_calls includes them", () => {
   }
 });
 
-test("SessionLog tool_result includes tool_call_id and tool_name", () => {
+test("SessionLog tool_result includes tool_call_id and tool_name", async () => {
   setupTestDir();
   try {
     const log = new SessionLog(TEST_SESSION_ID);
-    log.writeToolResult("<output>done</output>", "tc_1", "bash");
+    await log.writeToolResult("<output>done</output>", "tc_1", "bash");
 
     const content = readFileSync(log.path, "utf-8");
     const line = JSON.parse(content.trim());
@@ -130,16 +130,16 @@ test("SessionLog tool_result includes tool_call_id and tool_name", () => {
   }
 });
 
-test("readSessionEntries round-trip with stripped nulls", () => {
+test("readSessionEntries round-trip with stripped nulls", async () => {
   setupTestDir();
   try {
     const log = new SessionLog(TEST_SESSION_ID);
-    log.writeInput("test input");
-    log.writeAssistant("response");
-    log.writeReset();
-    log.writeInput("after reset");
+    await log.writeInput("test input");
+    await log.writeAssistant("response");
+    await log.writeReset();
+    await log.writeInput("after reset");
 
-    const entries = readSessionEntries(TEST_SESSION_ID);
+    const entries = await readSessionEntries(TEST_SESSION_ID);
 
     // Should replay from reset, so only 1 entry
     expect(entries.length).toBeGreaterThanOrEqual(1);

@@ -17,10 +17,10 @@ describe('LoadSkillTool', () => {
   let tmpDir;
   let loader;
 
-  beforeEach(() => {
+  beforeEach(async () => {
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'oa-test-skill-'));
     loader = new SkillsLoader(tmpDir);
-    loader.loadSkills();
+    await loader.loadSkills();
   });
 
   afterEach(() => {
@@ -43,7 +43,7 @@ describe('LoadSkillTool', () => {
     fs.mkdirSync(skillDir, { recursive: true });
     fs.writeFileSync(path.join(skillDir, 'SKILL.md'), '---\ndescription: Test skill\n---\n# Skill Instructions\n\nDo stuff.');
 
-    loader.loadSkills();
+    await loader.loadSkills();
     const tool = new LoadSkillTool({ loader });
     const result = await tool.execute(JSON.stringify({ name: 'my-skill' }));
     expect(getResultStr(result)).toContain('Skill Instructions');
@@ -61,7 +61,7 @@ describe('LoadSkillTool', () => {
     fs.mkdirSync(skillDir, { recursive: true });
     fs.writeFileSync(path.join(skillDir, 'SKILL.md'), '---\ndescription: Activated\n---\n# Content');
 
-    loader.loadSkills();
+    await loader.loadSkills();
     let activated = false;
     const ctx = new ToolContext();
     ctx.set('onActivateSkill', (name) => { activated = true; expect(name).toBe('activated-skill'); });
@@ -82,7 +82,7 @@ describe('LoadSkillTool', () => {
     fs.mkdirSync(skillDir, { recursive: true });
     fs.writeFileSync(path.join(skillDir, 'SKILL.md'), '---\ndescription: Object\n---\n# Object Input Skill');
 
-    loader.loadSkills();
+    await loader.loadSkills();
     const tool = new LoadSkillTool({ loader });
     const result = await tool.execute({ name: 'object-input' });
     expect(getResultStr(result)).toContain('Object Input Skill');

@@ -102,8 +102,8 @@ describe("Session Review Extension - exit codes", () => {
 
     // Create a test session
     const log = new SessionLog(TEST_SESSION_ID);
-    log.writeInput("hello");
-    log.writeAssistant("world");
+    await log.writeInput("hello");
+    await log.writeAssistant("world");
 
     const core = createMockCore();
     const { create } = await import("../../src/extensions/ui-session-review-cli/index.js");
@@ -149,12 +149,12 @@ describe("Session Review Extension - exit codes", () => {
 
     // Create a test session with tool usage
     const log = new SessionLog(TEST_SESSION_ID);
-    log.writeInput("run bash");
-    log.writeAssistant(
+    await log.writeInput("run bash");
+    await log.writeAssistant(
       "running",
       [{ id: "tc_1", type: "function", function: { name: "bash", arguments: "ls" } }],
     );
-    log.writeToolResult("<output>done</output>", "tc_1", "bash");
+    await log.writeToolResult("<output>done</output>", "tc_1", "bash");
 
     const core = createMockCore();
     const { create } = await import("../../src/extensions/ui-session-review-cli/index.js");
@@ -179,12 +179,20 @@ describe("Session Review Extension - exit codes", () => {
       "../../src/extensions/session-log/session-log.js"
     );
 
+    // Clean up any leftover session file from previous test runs
+    try {
+      const { rmSync } = await import("node:fs");
+      const { join } = await import("node:path");
+      const { homedir } = await import("node:os");
+      rmSync(join(homedir(), ".cache", "oa-agent", "sessions", `${TEST_SESSION_ID}.jsonl`));
+    } catch {}
+
     // Create a test session with multiple entries
     const log = new SessionLog(TEST_SESSION_ID);
-    log.writeInput("hello");
-    log.writeAssistant("world");
-    log.writeInput("how are you");
-    log.writeAssistant("good");
+    await log.writeInput("hello");
+    await log.writeAssistant("world");
+    await log.writeInput("how are you");
+    await log.writeAssistant("good");
 
     const core = createMockCore();
     const { create } = await import("../../src/extensions/ui-session-review-cli/index.js");

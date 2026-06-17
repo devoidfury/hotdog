@@ -577,15 +577,15 @@ describe("Integration — validation blocks invalid tool execution", () => {
 import { ToolRegistry } from "../../src/core/extensions/tool-registry.js";
 
 describe("ToolRegistry.validateToolArgs", () => {
-  it("returns null for unknown tool", () => {
+  it("returns null for unknown tool", async () => {
     const registry = new ToolRegistry();
-    expect(registry.validateToolArgs("nonexistent", "{}")).toBeNull();
+    expect(await registry.validateToolArgs("nonexistent", "{}")).toBeNull();
   });
 
-  it("returns null for tool without toToolDef", () => {
+  it("returns null for tool without toToolDef", async () => {
     const registry = new ToolRegistry();
     registry.register("mytool", { execute: async () => "ok" });
-    expect(registry.validateToolArgs("mytool", "{}")).toBeNull();
+    expect(await registry.validateToolArgs("mytool", "{}")).toBeNull();
   });
 
   it("returns null when tool has no parameters", async () => {
@@ -599,7 +599,7 @@ describe("ToolRegistry.validateToolArgs", () => {
       },
       execute: async () => "ok",
     });
-    expect(registry.validateToolArgs("mytool", '{"a": 1}')).toBeNull();
+    expect(await registry.validateToolArgs("mytool", '{"a": 1}')).toBeNull();
   });
 
   it("detects missing required field via registry", async () => {
@@ -621,7 +621,7 @@ describe("ToolRegistry.validateToolArgs", () => {
       },
       execute: async () => "ok",
     });
-    const error = registry.validateToolArgs("testtool", "{}");
+    const error = await registry.validateToolArgs("testtool", "{}");
     expect(error).not.toBeNull();
     expect(error).toContain("name");
     expect(error).toContain("missing required");
@@ -646,7 +646,7 @@ describe("ToolRegistry.validateToolArgs", () => {
       },
       execute: async () => "ok",
     });
-    const error = registry.validateToolArgs("testtool", '{"count": "five"}');
+    const error = await registry.validateToolArgs("testtool", '{"count": "five"}');
     expect(error).not.toBeNull();
     expect(error).toContain("expected integer");
   });
@@ -673,7 +673,7 @@ describe("ToolRegistry.validateToolArgs", () => {
       },
       execute: async () => "ok",
     });
-    const error = registry.validateToolArgs(
+    const error = await registry.validateToolArgs(
       "testtool",
       '{"name": "test", "count": 5}',
     );
@@ -701,11 +701,11 @@ describe("ToolRegistry.validateToolArgs", () => {
     });
     // Valid JSON string
     expect(
-      registry.validateToolArgs("testtool", '{"name": "test"}'),
+      await registry.validateToolArgs("testtool", '{"name": "test"}'),
     ).toBeNull();
     // Invalid JSON string
     expect(
-      registry.validateToolArgs("testtool", '{"name": 123}'),
+      await registry.validateToolArgs("testtool", '{"name": 123}'),
     ).not.toBeNull();
   });
 
@@ -730,7 +730,7 @@ describe("ToolRegistry.validateToolArgs", () => {
       },
       execute: async () => "ok",
     });
-    const error = registry.validateToolArgs("testtool", '{"mode": "delete"}');
+    const error = await registry.validateToolArgs("testtool", '{"mode": "delete"}');
     expect(error).not.toBeNull();
     expect(error).toContain("not in enum");
   });

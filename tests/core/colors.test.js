@@ -190,42 +190,42 @@ describe('mergePalette', () => {
 });
 
 describe('resolvePalette', () => {
-  it('returns disabled palette when useColors is false', () => {
-    const p = resolvePalette(null, null, null, false);
+  it('returns disabled palette when useColors is false', async () => {
+    const p = await resolvePalette(null, null, null, false);
     expect(p.use_colors).toBe(false);
   });
 
-  it('resolves dark named theme', () => {
-    const p = resolvePalette(null, null, 'dark', true);
+  it('resolves dark named theme', async () => {
+    const p = await resolvePalette(null, null, 'dark', true);
     expect(p.thinking).toBe('cyan');
     expect(p.use_colors).toBe(true);
   });
 
-  it('resolves light named theme', () => {
-    const p = resolvePalette(null, null, 'light', true);
+  it('resolves light named theme', async () => {
+    const p = await resolvePalette(null, null, 'light', true);
     expect(p.thinking).toBe('blue');
     expect(p.use_colors).toBe(true);
   });
 
-  it('resolves monochrome named theme', () => {
-    const p = resolvePalette(null, null, 'monochrome', true);
+  it('resolves monochrome named theme', async () => {
+    const p = await resolvePalette(null, null, 'monochrome', true);
     expect(p.thinking).toBe('dim');
     expect(p.use_colors).toBe(true);
   });
 
-  it('defaults to dark theme when no theme specified', () => {
-    const p = resolvePalette(null, null, null, true);
+  it('defaults to dark theme when no theme specified', async () => {
+    const p = await resolvePalette(null, null, null, true);
     expect(p.thinking).toBe('cyan');
     expect(p.use_colors).toBe(true);
   });
 
-  it('applies config palette overrides', () => {
-    const p = resolvePalette(null, { thinking: 'red' }, null, true);
+  it('applies config palette overrides', async () => {
+    const p = await resolvePalette(null, { thinking: 'red' }, null, true);
     expect(p.thinking).toBe('red');
   });
 
-  it('handles case-insensitive theme names', () => {
-    const p = resolvePalette(null, null, 'DARK', true);
+  it('handles case-insensitive theme names', async () => {
+    const p = await resolvePalette(null, null, 'DARK', true);
     expect(p.thinking).toBe('cyan');
   });
 });

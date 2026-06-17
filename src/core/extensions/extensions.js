@@ -664,7 +664,7 @@ export class ExtensionLoader {
     }
 
     const instance = extModule.create
-      ? extModule.create(this._core, createOptions)
+      ? await extModule.create(this._core, createOptions)
       : extModule;
 
     if (!instance) {

@@ -306,15 +306,15 @@ test("replayEntriesIntoContext skips unknown source types", () => {
 });
 
 // Integration test: round-trip with readSessionEntries
-test("replayEntriesIntoContext round-trip with readSessionEntries", () => {
+test("replayEntriesIntoContext round-trip with readSessionEntries", async () => {
   setupTestDir();
   try {
     const log = new SessionLog(TEST_SESSION_ID);
-    log.writeInput("Hello");
-    log.writeAssistant("Hi there");
-    log.writeToolResult("<output>done</output>", "tc_1", "bash");
-    log.writeInput("Next question");
-    log.writeAssistant(
+    await log.writeInput("Hello");
+    await log.writeAssistant("Hi there");
+    await log.writeToolResult("<output>done</output>", "tc_1", "bash");
+    await log.writeInput("Next question");
+    await log.writeAssistant(
       "Answer",
       [
         {
@@ -326,7 +326,7 @@ test("replayEntriesIntoContext round-trip with readSessionEntries", () => {
       "Reasoning",
     );
 
-    const entries = readSessionEntries(TEST_SESSION_ID);
+    const entries = await readSessionEntries(TEST_SESSION_ID);
     expect(entries.length).toBe(5);
 
     const agent = createMockAgent();
@@ -351,7 +351,7 @@ test("replayEntriesIntoContext round-trip with readSessionEntries", () => {
   }
 });
 
-test("replayEntriesIntoContext round-trip with reset", () => {
+test("replayEntriesIntoContext round-trip with reset", async () => {
   const uniqueId = "test-replay-reset-" + Date.now();
   const dir = join(homedir(), ".cache", "oa-agent", "sessions");
   mkdirSync(dir, { recursive: true });
@@ -359,12 +359,12 @@ test("replayEntriesIntoContext round-trip with reset", () => {
 
   try {
     const log = new SessionLog(uniqueId);
-    log.writeInput("before reset");
-    log.writeReset();
-    log.writeInput("after reset");
-    log.writeAssistant("response");
+    await log.writeInput("before reset");
+    await log.writeReset();
+    await log.writeInput("after reset");
+    await log.writeAssistant("response");
 
-    const entries = readSessionEntries(uniqueId);
+    const entries = await readSessionEntries(uniqueId);
     expect(entries.length).toBe(2);
 
     const agent = createMockAgent();
@@ -380,7 +380,7 @@ test("replayEntriesIntoContext round-trip with reset", () => {
   }
 });
 
-test("replayEntriesIntoContext with only reset entries returns 0", () => {
+test("replayEntriesIntoContext with only reset entries returns 0", async () => {
   const uniqueId = "test-replay-only-reset-" + Date.now();
   const dir = join(homedir(), ".cache", "oa-agent", "sessions");
   mkdirSync(dir, { recursive: true });
@@ -388,10 +388,10 @@ test("replayEntriesIntoContext with only reset entries returns 0", () => {
 
   try {
     const log = new SessionLog(uniqueId);
-    log.writeInput("before");
-    log.writeReset();
+    await log.writeInput("before");
+    await log.writeReset();
 
-    const entries = readSessionEntries(uniqueId);
+    const entries = await readSessionEntries(uniqueId);
     expect(entries.length).toBe(0);
 
     const agent = createMockAgent();
@@ -421,7 +421,7 @@ test("replayEntriesIntoContext preserves system prompt count at 0 before ensureS
 
 // ── Session Restoration Tests ────────────────────────────────────────────────
 
-test("sessionExists + readSessionEntries + replayEntriesIntoContext integration", () => {
+test("sessionExists + readSessionEntries + replayEntriesIntoContext integration", async () => {
   const uniqueId = "test-restoration-" + Date.now();
   const dir = join(homedir(), ".cache", "oa-agent", "sessions");
   mkdirSync(dir, { recursive: true });
@@ -429,15 +429,15 @@ test("sessionExists + readSessionEntries + replayEntriesIntoContext integration"
 
   try {
     const log = new SessionLog(uniqueId);
-    log.writeInput("Hello");
-    log.writeAssistant("Hi there!");
-    log.writeToolResult("<output>done</output>", "tc_1", "bash");
-    log.writeInput("Goodbye");
-    log.writeAssistant("See you later!");
+    await log.writeInput("Hello");
+    await log.writeAssistant("Hi there!");
+    await log.writeToolResult("<output>done</output>", "tc_1", "bash");
+    await log.writeInput("Goodbye");
+    await log.writeAssistant("See you later!");
 
-    expect(sessionExists(uniqueId)).toBe(true);
+    expect(await sessionExists(uniqueId)).toBe(true);
 
-    const entries = readSessionEntries(uniqueId);
+    const entries = await readSessionEntries(uniqueId);
     expect(entries.length).toBe(5);
 
     const agent = createMockAgent();
@@ -457,8 +457,8 @@ test("sessionExists + readSessionEntries + replayEntriesIntoContext integration"
   }
 });
 
-test("sessionExists returns false for non-existent session", () => {
-  expect(sessionExists("this-session-does-not-exist-xyz-12345")).toBe(false);
+test("sessionExists returns false for non-existent session", async () => {
+  expect(await sessionExists("this-session-does-not-exist-xyz-12345")).toBe(false);
 });
 
 test("replayEntriesIntoContext with empty entries list", () => {
@@ -468,12 +468,12 @@ test("replayEntriesIntoContext with empty entries list", () => {
   expect(agent.context.length).toBe(0);
 });
 
-test("readSessionEntries returns empty array for non-existent session", () => {
-  const entries = readSessionEntries("non-existent-session-abc-12345");
+test("readSessionEntries returns empty array for non-existent session", async () => {
+  const entries = await readSessionEntries("non-existent-session-abc-12345");
   expect(entries).toEqual([]);
 });
 
-test("session restoration with reset — only replays after last reset", () => {
+test("session restoration with reset — only replays after last reset", async () => {
   const uniqueId = "test-restoration-reset-" + Date.now();
   const dir = join(homedir(), ".cache", "oa-agent", "sessions");
   mkdirSync(dir, { recursive: true });
@@ -481,13 +481,13 @@ test("session restoration with reset — only replays after last reset", () => {
 
   try {
     const log = new SessionLog(uniqueId);
-    log.writeInput("before reset 1");
-    log.writeAssistant("response 1");
-    log.writeReset();
-    log.writeInput("after reset");
-    log.writeAssistant("response after");
+    await log.writeInput("before reset 1");
+    await log.writeAssistant("response 1");
+    await log.writeReset();
+    await log.writeInput("after reset");
+    await log.writeAssistant("response after");
 
-    const entries = readSessionEntries(uniqueId);
+    const entries = await readSessionEntries(uniqueId);
     expect(entries.length).toBe(2);
     expect(entries[0].content).toBe("after reset");
     expect(entries[1].content).toBe("response after");
@@ -503,7 +503,7 @@ test("session restoration with reset — only replays after last reset", () => {
   }
 });
 
-test("session restoration with compaction entries", () => {
+test("session restoration with compaction entries", async () => {
   const uniqueId = "test-restoration-compaction-" + Date.now();
   const dir = join(homedir(), ".cache", "oa-agent", "sessions");
   mkdirSync(dir, { recursive: true });
@@ -511,13 +511,13 @@ test("session restoration with compaction entries", () => {
 
   try {
     const log = new SessionLog(uniqueId);
-    log.writeInput("first question");
-    log.writeAssistant("first answer");
-    log.writeCompaction(10, "Summarized conversation about JS");
-    log.writeInput("second question");
-    log.writeAssistant("second answer");
+    await log.writeInput("first question");
+    await log.writeAssistant("first answer");
+    await log.writeCompaction(10, "Summarized conversation about JS");
+    await log.writeInput("second question");
+    await log.writeAssistant("second answer");
 
-    const entries = readSessionEntries(uniqueId);
+    const entries = await readSessionEntries(uniqueId);
     expect(entries.length).toBe(5);
 
     const agent = createMockAgent();

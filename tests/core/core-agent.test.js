@@ -95,19 +95,19 @@ describe('Agent', () => {
   });
 
   describe('tool registry access', () => {
-    it('should return empty tool defs when no tools registered', () => {
-      expect(agent.getToolDefs()).toEqual([]);
+    it('should return empty tool defs when no tools registered', async () => {
+      expect(await agent.getToolDefs()).toEqual([]);
       expect(agent.getToolNames()).toEqual([]);
     });
 
-    it('should return registered tools', () => {
+    it('should return registered tools', async () => {
       const tool = {
         toToolDef: () => ({ type: 'function', function: { name: 'test-tool' } }),
         execute: async () => 'result',
       };
       toolRegistry.register('test-tool', tool);
 
-      const defs = agent.getToolDefs();
+      const defs = await agent.getToolDefs();
       expect(defs).toEqual([
         { type: 'function', function: { name: 'test-tool' } },
       ]);

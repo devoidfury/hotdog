@@ -61,11 +61,11 @@ test("disabledSessionLog is a no-op", () => {
   expect(() => log.writePrompt("x")).not.toThrow();
 });
 
-test("SessionLog.writeAssistant includes reasoning and tool_calls", () => {
+test("SessionLog.writeAssistant includes reasoning and tool_calls", async () => {
   setupTestDir();
   try {
     const log = new SessionLog(TEST_SESSION_ID);
-    log.writeAssistant(
+    await log.writeAssistant(
       "final output",
       [
         {
@@ -95,11 +95,11 @@ test("SessionLog.writeAssistant includes reasoning and tool_calls", () => {
   }
 });
 
-test("SessionLog.writeCompaction includes messagesCompacted count", () => {
+test("SessionLog.writeCompaction includes messagesCompacted count", async () => {
   setupTestDir();
   try {
     const log = new SessionLog(TEST_SESSION_ID);
-    log.writeCompaction(15, "Summarized conversation");
+    await log.writeCompaction(15, "Summarized conversation");
 
     const content = readFileSync(log.path, "utf-8");
     const line = JSON.parse(content.trim());
@@ -113,11 +113,11 @@ test("SessionLog.writeCompaction includes messagesCompacted count", () => {
   }
 });
 
-test("SessionLog.writePrompt creates correct entry", () => {
+test("SessionLog.writePrompt creates correct entry", async () => {
   setupTestDir();
   try {
     const log = new SessionLog(TEST_SESSION_ID);
-    log.writePrompt("Prompt content rendered");
+    await log.writePrompt("Prompt content rendered");
 
     const content = readFileSync(log.path, "utf-8");
     const line = JSON.parse(content.trim());
@@ -130,7 +130,7 @@ test("SessionLog.writePrompt creates correct entry", () => {
   }
 });
 
-test("readSessionEntries handles malformed JSON lines", () => {
+test("readSessionEntries handles malformed JSON lines", async () => {
   const dir = join(homedir(), ".cache", "oa-agent", "sessions");
   mkdirSync(dir, { recursive: true });
   const testFile = join(dir, `${TEST_SESSION_ID}.jsonl`);
@@ -152,7 +152,7 @@ test("readSessionEntries handles malformed JSON lines", () => {
       ].join("\n"),
     );
 
-    const entries = readSessionEntries(TEST_SESSION_ID);
+    const entries = await readSessionEntries(TEST_SESSION_ID);
     expect(entries.length).toBeGreaterThanOrEqual(1);
     // Should include "after reset" since there's a reset entry
     const lastEntry = entries[entries.length - 1];
@@ -164,7 +164,7 @@ test("readSessionEntries handles malformed JSON lines", () => {
   }
 });
 
-test("readSessionEntries replays from last reset", () => {
+test("readSessionEntries replays from last reset", async () => {
   // Use a unique session ID to avoid conflicts with other tests
   const uniqueId = "test-reset-replay-" + Date.now();
   const dir = join(homedir(), ".cache", "oa-agent", "sessions");
@@ -178,12 +178,12 @@ test("readSessionEntries replays from last reset", () => {
 
   try {
     const log = new SessionLog(uniqueId);
-    log.writeInput("before reset");
-    log.writeReset();
-    log.writeInput("after reset");
-    log.writeAssistant("response");
+    await log.writeInput("before reset");
+    await log.writeReset();
+    await log.writeInput("after reset");
+    await log.writeAssistant("response");
 
-    const entries = readSessionEntries(uniqueId);
+    const entries = await readSessionEntries(uniqueId);
     // Should only include entries after reset
     expect(entries.length).toBe(2);
     expect(entries[0].content).toBe("after reset");
@@ -195,15 +195,15 @@ test("readSessionEntries replays from last reset", () => {
   }
 });
 
-test("readSessionEntries returns all entries when no reset", () => {
+test("readSessionEntries returns all entries when no reset", async () => {
   setupTestDir();
   try {
     const log = new SessionLog(TEST_SESSION_ID);
-    log.writeInput("msg1");
-    log.writeAssistant("resp1");
-    log.writeInput("msg2");
+    await log.writeInput("msg1");
+    await log.writeAssistant("resp1");
+    await log.writeInput("msg2");
 
-    const entries = readSessionEntries(TEST_SESSION_ID);
+    const entries = await readSessionEntries(TEST_SESSION_ID);
     expect(entries.length).toBe(3);
     expect(entries[0].content).toBe("msg1");
     expect(entries[1].content).toBe("resp1");
@@ -213,24 +213,24 @@ test("readSessionEntries returns all entries when no reset", () => {
   }
 });
 
-test("readSessionEntries returns empty for non-existent session", () => {
-  const entries = readSessionEntries("non-existent-session-xyz");
+test("readSessionEntries returns empty for non-existent session", async () => {
+  const entries = await readSessionEntries("non-existent-session-xyz");
   expect(entries).toEqual([]);
 });
 
-test("sessionExists returns true for existing session", () => {
+test("sessionExists returns true for existing session", async () => {
   setupTestDir();
   try {
     const log = new SessionLog(TEST_SESSION_ID);
-    log.writeInput("test");
-    expect(sessionExists(TEST_SESSION_ID)).toBe(true);
+    await log.writeInput("test");
+    expect(await sessionExists(TEST_SESSION_ID)).toBe(true);
   } finally {
     teardown();
   }
 });
 
-test("sessionExists returns false for non-existent session", () => {
-  expect(sessionExists("non-existent-session-xyz")).toBe(false);
+test("sessionExists returns false for non-existent session", async () => {
+  expect(await sessionExists("non-existent-session-xyz")).toBe(false);
 });
 
 test("stripNulls only strips top-level nulls", () => {
@@ -258,7 +258,7 @@ test("stripNulls preserves 0, false, empty string, empty array, empty object", (
   expect(result).toEqual({ a: 0, b: false, c: "", d: [], e: {} });
 });
 
-test("readAllSessions reads from multiple session files", () => {
+test("readAllSessions reads from multiple session files", async () => {
   const dir = join(homedir(), ".cache", "oa-agent", "sessions");
   mkdirSync(dir, { recursive: true });
 
@@ -278,7 +278,7 @@ test("readAllSessions reads from multiple session files", () => {
       '{"ts":"2024-01-01","source":"input","content":"from session 2"}\n',
     );
 
-    const allEntries = readAllSessions();
+    const allEntries = await readAllSessions();
     expect(allEntries.length).toBeGreaterThanOrEqual(2);
 
     // Clean up
@@ -301,14 +301,14 @@ test("readAllSessions returns empty when no sessions exist", () => {
   expect(() => readAllSessions()).not.toThrow();
 });
 
-test("SessionLog handles empty content", () => {
+test("SessionLog handles empty content", async () => {
   setupTestDir();
   try {
     const log = new SessionLog(TEST_SESSION_ID);
-    log.writeInput("");
-    log.writeAssistant("");
-    log.writeToolResult("");
-    log.writeReset();
+    await log.writeInput("");
+    await log.writeAssistant("");
+    await log.writeToolResult("");
+    await log.writeReset();
 
     const content = readFileSync(log.path, "utf-8");
     const lines = content.trim().split("\n");
@@ -321,17 +321,17 @@ test("SessionLog handles empty content", () => {
   }
 });
 
-test("SessionLog writes entries in order", () => {
+test("SessionLog writes entries in order", async () => {
   setupTestDir();
   try {
     const log = new SessionLog(TEST_SESSION_ID);
-    log.writeSystemPrompt("system");
-    log.writeInput("input");
-    log.writeAssistant("assistant");
-    log.writeToolResult("tool result", "tc1", "bash");
-    log.writeReset();
-    log.writeCompaction(5, "summary");
-    log.writePrompt("prompt");
+    await log.writeSystemPrompt("system");
+    await log.writeInput("input");
+    await log.writeAssistant("assistant");
+    await log.writeToolResult("tool result", "tc1", "bash");
+    await log.writeReset();
+    await log.writeCompaction(5, "summary");
+    await log.writePrompt("prompt");
 
     const content = readFileSync(log.path, "utf-8");
     const lines = content.trim().split("\n");

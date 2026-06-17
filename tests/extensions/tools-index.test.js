@@ -133,16 +133,23 @@ describe("createToolFactory", () => {
     expect(otherTool).toBeNull();
   });
 
-  it("handles project_info as disabled descriptor", () => {
+  it("handles project_info as enabled by default", () => {
     const factory = createToolFactory();
-    // project_info is disabled by default (descriptor.disabled = true)
+    // project_info is enabled by default (descriptor.disabled = false)
     const tool = factory.createTool("project_info", {});
+    expect(tool).not.toBeNull();
+  });
+
+  it("handles explore as disabled by default", () => {
+    const factory = createToolFactory();
+    // explore is disabled by default (descriptor.disabled = true)
+    const tool = factory.createTool("explore", {});
     expect(tool).toBeNull();
   });
 
   it("enables disabled tools when in whitelist", () => {
     const factory = createToolFactory();
-    const tool = factory.createTool("project_info", {}, ["project_info"]);
+    const tool = factory.createTool("explore", {}, ["explore"]);
     expect(tool).not.toBeNull();
   });
 });
@@ -173,7 +180,8 @@ describe("createToolFactory - createAndRegister", async () => {
   it("skips disabled tools when not in whitelist or manager", async () => {
     const factory = createToolFactory();
     const registry = new ToolRegistry();
-    await factory.createAndRegister("project_info", registry, {});
-    expect(registry.has("project_info")).toBe(false);
+    // explore is disabled by default
+    await factory.createAndRegister("explore", registry, {});
+    expect(registry.has("explore")).toBe(false);
   });
 });

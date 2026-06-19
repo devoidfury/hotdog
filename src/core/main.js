@@ -13,6 +13,7 @@ import { HOOKS } from "./hooks.js";
 import { CliOutputSink } from "./ui/cli.js";
 import { parseArgs, generateHelpText } from "./cli.js";
 import { loadConfig, buildConfig, validateConfig, failOnInvalidConfig } from "./config/index.js";
+import { cliFlagsFromSchema, CONFIG_SCHEMA } from "./config/schema-loader.js";
 import { createConfigRegistry } from "./extensions/config-registry.js";
 import { formatError } from "./error.js";
 import { createSubcommandRegistry } from "./extensions/registries.js";
@@ -139,6 +140,17 @@ export async function main() {
 
   // ── Create config registry for extension CLI flags & config params ──────
   const configRegistry = createConfigRegistry();
+
+  // Register core CLI flags from schema (single source of truth)
+  const coreFlags = cliFlagsFromSchema(CONFIG_SCHEMA);
+  configRegistry.registerCliFlags(coreFlags);
+
+  // Register inverse flags not in schema (schema has one cliFlag per key)
+  configRegistry.registerCliFlags([
+    { long: "--hide-tools", type: "boolean", description: "Hide tool calls" },
+    { long: "--show-thinking", type: "boolean", description: "Show thinking output" },
+    { long: "--no-colors", type: "boolean", description: "Disable colors" },
+  ]);
 
   // ── Build minimal config (defaults only, for extension discovery) ───────
   // We need this early to discover extensions and read their CLI flags /

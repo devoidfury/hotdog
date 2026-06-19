@@ -1,11 +1,37 @@
 // CLI argument parsing.
-// Supports dynamic CLI flags registered via ConfigRegistry.
+// Core config flags come from core.config.json via ConfigRegistry.
+// Only structural/meta flags are hardcoded here (--config, --model, --help, etc.).
 
 import { logger } from "./logger.js";
+
+// Structural flags that are NOT config values (config file paths, model selection, etc.)
+// These are parsed directly and passed to the config resolver as CLI context.
+const STRUCTURAL_FLAGS = [
+  { short: "-f", long: "--config", type: "string" },
+  { short: "-d", long: "--config-dir", type: "string" },
+  { short: "-m", long: "--model", type: "string" },
+  { short: null, long: "--ai-url", type: "string" },
+  { short: "-k", long: "--api-key", type: "string" },
+  { short: "-p", long: "--profile", type: "string" },
+  { short: null, long: "--provider", type: "string" },
+  {
+    short: null,
+    long: "--system-prompt-template",
+    type: "string",
+  },
+  // Meta/structural booleans
+  { short: "-l", long: "--loud", type: "boolean" },
+  { short: null, long: "--json", type: "boolean" },
+  { short: "-v", long: "--version", type: "boolean" },
+  { short: "-h", long: "--help", type: "boolean" },
+  // Review subcommand flag
+  { short: null, long: "--review-tool-index", type: "boolean" },
+];
 
 export function parseArgs(configRegistry = null, knownSubcommands = null) {
   const args = process.argv.slice(2);
   const options = {
+    // Structural flags (parsed directly)
     config: null,
     configDir: null,
     model: null,
@@ -13,120 +39,48 @@ export function parseArgs(configRegistry = null, knownSubcommands = null) {
     apiKey: null,
     profile: null,
     provider: null,
-    role: null,
-    skillsPath: null,
-    promptsPath: null,
-    chatTimeout: null,
-    embeddingsTimeout: null,
-    stream: true,
-    hideTools: true,
-    hideThinking: null,
+    systemPromptTemplate: null,
+    loud: false,
+    wantsJson: false,
     version: false,
     help: false,
-    thinker: null,
-    toolfmt: null,
-    toolOutputFmt: null,
-    noLog: false,
-    loud: false,
-    compactDebug: false,
-    hookTrace: false,
-    sessionId: null,
-    tokens: false,
-    theme: null,
-    colors: null,
-    subcommand: null,
     reviewToolIndex: false,
-    systemPromptTemplate: null,
-    wantsJson: false,
+    // Meta
+    subcommand: null,
     args: [],
   };
 
-  // Initialize extension-provided options from defaults
+  // Initialize extension-registered options from defaults
   if (configRegistry) {
     const extDefaults = configRegistry.buildDefaults();
-    for (const [key, value] of Object.entries(extDefaults)) {
-      options[key] = null; // Will be set from CLI or config file
+    for (const [key] of Object.entries(extDefaults)) {
+      options[key] = null;
     }
   }
 
-  // Build a lookup map of all known flags (core + extension)
+  // Build a lookup map of all known flags (structural + registered)
   const flagMap = new Map();
 
-  // Core flags
-  const coreFlags = [
-    { short: "-f", long: "--config", type: "string", hasValue: true },
-    { short: "-d", long: "--config-dir", type: "string", hasValue: true },
-    { short: "-m", long: "--model", type: "string", hasValue: true },
-    { short: null, long: "--ai-url", type: "string", hasValue: true },
-    { short: "-k", long: "--api-key", type: "string", hasValue: true },
-    { short: "-p", long: "--profile", type: "string", hasValue: true },
-    { short: null, long: "--provider", type: "string", hasValue: true },
-    { short: null, long: "--role", type: "string", hasValue: true },
-    { short: null, long: "--skills-path", type: "string", hasValue: true },
-    { short: null, long: "--prompts-path", type: "string", hasValue: true },
-    { short: null, long: "--chat-timeout", type: "number", hasValue: true },
-    {
-      short: null,
-      long: "--embeddings-timeout",
-      type: "number",
-      hasValue: true,
-    },
-    { short: null, long: "--no-stream", type: "boolean", hasValue: false },
-    { short: null, long: "--show-tools", type: "boolean", hasValue: false },
-    { short: null, long: "--hide-tools", type: "boolean", hasValue: false },
-    { short: null, long: "--show-thinking", type: "boolean", hasValue: false },
-    { short: null, long: "--hide-thinking", type: "boolean", hasValue: false },
-    { short: "-t", long: "--thinker", type: "string", hasValue: true },
-    { short: null, long: "--toolfmt", type: "string", hasValue: true },
-    { short: null, long: "--tool-output-fmt", type: "string", hasValue: true },
-    { short: null, long: "--no-log", type: "boolean", hasValue: false },
-    { short: "-l", long: "--loud", type: "boolean", hasValue: false },
-    { short: null, long: "--compact-debug", type: "boolean", hasValue: false },
-    { short: null, long: "--hook-trace", type: "boolean", hasValue: false },
-    { short: "-s", long: "--session-id", type: "string", hasValue: true },
-    { short: null, long: "--tokens", type: "boolean", hasValue: false },
-    { short: null, long: "--theme", type: "string", hasValue: true },
-    { short: null, long: "--colors", type: "boolean", hasValue: false },
-    { short: null, long: "--no-colors", type: "boolean", hasValue: false },
-    {
-      short: null,
-      long: "--system-prompt-template",
-      type: "string",
-      hasValue: true,
-    },
-    { short: null, long: "--json", type: "boolean", hasValue: false },
-    { short: "-v", long: "--version", type: "boolean", hasValue: false },
-    { short: "-h", long: "--help", type: "boolean", hasValue: false },
-  ];
-
-  for (const flag of coreFlags) {
-    if (flag.short) {
-      flagMap.set(flag.short, flag);
-    }
-    flagMap.set(flag.long, flag);
+  // Structural flags (always available, no config needed)
+  for (const flag of STRUCTURAL_FLAGS) {
+    const entry = { ...flag, hasValue: flag.type !== "boolean", structural: true };
+    if (flag.short) flagMap.set(flag.short, entry);
+    flagMap.set(flag.long, entry);
   }
 
-  // Add extension flags
+  // Registered flags (from core schema + extensions via ConfigRegistry)
   if (configRegistry) {
-    const extFlags = configRegistry.getCliFlags();
-    for (const flag of extFlags) {
+    const registeredFlags = configRegistry.getCliFlags();
+    for (const flag of registeredFlags) {
       const entry = {
         type: flag.type || "string",
         hasValue: flag.type !== "boolean",
         description: flag.description,
-        extension: true,
-        // Store the original long flag name for key extraction
         longName: flag.long,
       };
-      if (flag.parse) {
-        entry.parse = flag.parse;
-      }
-      if (flag.short) {
-        flagMap.set(flag.short, entry);
-      }
-      if (flag.long) {
-        flagMap.set(flag.long, entry);
-      }
+      if (flag.parse) entry.parse = flag.parse;
+      if (flag.short) flagMap.set(flag.short, entry);
+      if (flag.long) flagMap.set(flag.long, entry);
     }
   }
 
@@ -138,12 +92,10 @@ export function parseArgs(configRegistry = null, knownSubcommands = null) {
   let i = 0;
   while (i < args.length) {
     const arg = args[i];
-
-    // Check if this is a known flag
     const flagDef = flagMap.get(arg);
 
     if (flagDef) {
-      // Handle subcommand aliases (like "prompt" as a subcommand)
+      // Handle subcommand aliases
       if (flagDef.isSubcommand) {
         options.subcommand = "prompt";
         if (flagDef.hasValue && i + 1 < args.length) {
@@ -153,46 +105,16 @@ export function parseArgs(configRegistry = null, knownSubcommands = null) {
         continue;
       }
 
-      // Handle boolean flags
+      // Handle boolean flags — all handled generically now
       if (!flagDef.hasValue) {
-        // Core boolean flags (explicit handling)
-        if (arg === "--no-stream") {
-          options.stream = false;
-        } else if (arg === "--show-tools") {
-          options.hideTools = false;
-        } else if (arg === "--hide-tools") {
-          options.hideTools = true;
-        } else if (arg === "--show-thinking") {
-          options.hideThinking = false;
-        } else if (arg === "--hide-thinking") {
-          options.hideThinking = true;
-        } else if (arg === "--no-log") {
-          options.noLog = true;
-        } else if (arg === "--tokens") {
-          options.tokens = true;
-        } else if (arg === "--colors") {
-          options.colors = true;
-        } else if (arg === "--no-colors") {
-          options.colors = false;
-        } else if (arg === "--json") {
-          options.wantsJson = true;
-        } else if (arg === "--version") {
-          options.version = true;
-        } else if (arg === "--help") {
-          options.help = true;
-        } else if (arg === "--loud") {
-          options.loud = true;
-        } else if (arg === "--compact-debug") {
-          options.compactDebug = true;
-        } else if (arg === "--hook-trace") {
-          options.hookTrace = true;
-        }
-        // Extension boolean flags (generic handling)
-        else if (flagDef.extension) {
-          // Use the arg itself to extract the key (handles both short and long)
-          const key = extractKey(arg);
-          options[key] = true;
-        }
+        const key = extractKey(flagDef.long || arg);
+        // Map structural flag keys to their option names
+        const keyMap = {
+          json: "wantsJson",
+          "system-prompt-template": "systemPromptTemplate",
+          "review-tool-index": "reviewToolIndex",
+        };
+        options[keyMap[key] || key] = true;
         i++;
         continue;
       }
@@ -219,25 +141,22 @@ export function parseArgs(configRegistry = null, knownSubcommands = null) {
         parsedValue = flagDef.parse(value);
       }
 
-      // Store in options using the long flag name as key
-      // For extension flags, use longName; for core flags, use long
-      const flagLong = flagDef.extension ? flagDef.longName : flagDef.long;
+      // Store in options using the extracted key
+      const flagLong = flagDef.longName || flagDef.long;
       const key = extractKey(flagLong);
       options[key] = parsedValue;
       i++;
       continue;
     }
 
-    // Check if this looks like an unknown flag
+    // Unknown flag
     if (arg.startsWith("-")) {
-      // Could be an unknown flag — warn and skip
       logger.warn(`Warning: unknown flag '${arg}'`);
       i++;
       continue;
     }
 
-    // Positional arguments, first needs to be a subcommand
-
+    // Positional arguments
     if (!options.subcommand) {
       const isKnownSubcommand = knownSubcommands
         ? knownSubcommands.includes(arg)
@@ -246,14 +165,11 @@ export function parseArgs(configRegistry = null, knownSubcommands = null) {
       if (isKnownSubcommand) {
         options.subcommand = arg;
       } else {
-        // Unknown positional argument — throw to let main.js handle it
         throw new Error(`Unknown subcommand: ${arg}`);
       }
     } else {
-      // subcommand already set, forward the positional args
       options.args.push(arg);
     }
-
     i++;
   }
 
@@ -275,36 +191,21 @@ Options:
   -f, --config <path>       Config file path
   -d, --config-dir <path>   Config directory (overrides default ./config)
   -m, --model <name>        Model name
-      --ai-url <url>        AI URL (deprecated: --url)
+      --ai-url <url>        AI URL
   -k, --api-key <key>       API key
   -p, --profile <name>      Profile name
       --provider <name>     AI provider to use
-      --role <text>         System prompt role
-      --skills-path <path>  Skills directory path
-      --prompts-path <path> Prompts directory path
-      --chat-timeout <s>    Chat request timeout in seconds
-      --embeddings-timeout <s> Embeddings request timeout in seconds
-  --no-stream               Disable streaming
-  --show-tools              Show tool calls
-  --show-thinking           Show thinking output
-  -t, --thinker <fmt>       Thinking format string
-  --toolfmt <fmt>           Tool call format string
-  --tool-output-fmt <fmt>   Tool result format string
-  --no-log                  Disable session logging
+      --system-prompt-template <path> Custom system prompt template
   -l, --loud                Print full JSON API responses
-      --compact-debug       Write compaction output to compaction.out.json
-      --hook-trace          Trace hook execution (requires OA_LOG_LEVEL=debug)
-  -s, --session-id <id>   Resumable session ID
-      --tokens              Display token usage stats
-  --theme <name>            Theme (dark, light, monochrome, or file path)
-  --colors                  Enable colors
-  --no-colors               Disable colors
-  --system-prompt-template <path> Custom system prompt template
+  --json                    Output as JSON
   -v, --version             Show version
-  -h, --help                Show help`;
+  -h, --help                Show help
+
+Config flags (from schema):
+  <config_flags>`;
 
 /**
- * Generate combined help text including extension flags.
+ * Generate combined help text including config flags from schema.
  *
  * @param {import('./config-registry.js').ConfigRegistry} [configRegistry]
  * @returns {string}
@@ -313,9 +214,11 @@ export function generateHelpText(configRegistry) {
   let help = HELP_TEXT;
 
   if (configRegistry) {
-    const extHelp = configRegistry.getCliHelpText();
-    if (extHelp) {
-      help = help.replace(/(-h, --help\s+Show help)/, `$1\n${extHelp}`);
+    const configFlagsHelp = configRegistry.getCliHelpText();
+    if (configFlagsHelp) {
+      help = help.replace("<config_flags>", configFlagsHelp);
+    } else {
+      help = help.replace("\n  <config_flags>", "");
     }
   }
 

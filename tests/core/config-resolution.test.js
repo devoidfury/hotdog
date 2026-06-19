@@ -219,9 +219,7 @@ describe("CONFIG_KEYS schema", () => {
     );
 
     // Default when nothing
-    expect(resolveKey("baseUrl", CONFIG_KEYS.baseUrl, baseContext)).toBe(
-      "http://ai365.home:9292",
-    );
+    expect(resolveKey("baseUrl", CONFIG_KEYS.baseUrl, baseContext)).toBe(null);
   });
 
   it("apiKey resolves with correct priority including env", () => {
@@ -257,13 +255,24 @@ describe("CONFIG_KEYS schema", () => {
     expect(resolveKey("stream", CONFIG_KEYS.stream, context)).toBe(true);
   });
 
-  it("hideTools only uses cli when explicitly false", () => {
-    let context = { ...baseContext, cli: { hideTools: false } };
+  it("hideTools respects cli flag (showTools negates, hideTools direct)", () => {
+    // --show-tools sets showTools=true → negate → hideTools=false
+    let context = { ...baseContext, cli: { showTools: true } };
     expect(resolveKey("hideTools", CONFIG_KEYS.hideTools, context)).toBe(false);
 
+    // --hide-tools sets hideTools=true → direct
+    context = { ...baseContext, cli: { hideTools: true } };
+    expect(resolveKey("hideTools", CONFIG_KEYS.hideTools, context)).toBe(true);
+
+    // CLI hideTools=false (explicit)
+    context = { ...baseContext, cli: { hideTools: false } };
+    expect(resolveKey("hideTools", CONFIG_KEYS.hideTools, context)).toBe(false);
+
+    // CLI wins over config
     context = { ...baseContext, cli: { hideTools: true }, config: { hideTools: false } };
-    expect(resolveKey("hideTools", CONFIG_KEYS.hideTools, context)).toBe(false);
+    expect(resolveKey("hideTools", CONFIG_KEYS.hideTools, context)).toBe(true);
 
+    // Default when nothing
     context = { ...baseContext };
     expect(resolveKey("hideTools", CONFIG_KEYS.hideTools, context)).toBe(true);
   });

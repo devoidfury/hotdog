@@ -8,6 +8,7 @@
 // it is serialized to snake_case by the Message.toJSON() method or explicit converters.
 
 import { formatError } from "./error.js";
+import { logger } from "./logger.js";
 
 let _handlerCounter = 0;
 
@@ -89,12 +90,12 @@ export class HookSystem {
         if (result && typeof result.then === "function") {
           results.push(
             result.catch((e) => {
-              console.error(`[hook:${hookName}] ${formatError(e)}`);
+              logger.error(`[hook:${hookName}] ${formatError(e)}`);
             }),
           );
         }
       } catch (e) {
-        console.error(`[hook:${hookName}] ${formatError(e)}`);
+        logger.error(`[hook:${hookName}] ${formatError(e)}`);
       }
     }
     await Promise.all(results);
@@ -120,7 +121,7 @@ export class HookSystem {
           lastResult = result;
         }
       } catch (e) {
-        console.error(`[hook:${hookName}] ${formatError(e)}`);
+        logger.error(`[hook:${hookName}] ${formatError(e)}`);
       }
     }
     return lastResult;
@@ -153,7 +154,7 @@ export class HookSystem {
           break;
         }
       } catch (e) {
-        console.error(`[hook:${hookName}] ${formatError(e)}`);
+        logger.error(`[hook:${hookName}] ${formatError(e)}`);
       }
     }
     return { data, stopped, lastResult };

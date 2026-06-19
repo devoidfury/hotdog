@@ -1,7 +1,7 @@
 // Logger — centralized, swappable logging via the hook system.
 //
 // Singleton pattern: import `logger` and use it directly.
-// Calls made before `initializeLogger()` are silently dropped.
+// Calls made before `initializeLogger()` are buffered and emitted once initialized.
 // Once initialized, emits to the "log" hook. A default handler writes to stderr.
 // Alternate implementations register their own "log" hook handler.
 //
@@ -58,9 +58,12 @@ let _minLevelNum = LOG_LEVELS.warn;
 /** @type {boolean} */
 let _initialized = false;
 
+/** queue for messages emitted before initialization */
+let _preloadQueue = [];
+
 /**
  * Initialize the singleton logger.
- * Must be called once during bootstrap before any logging occurs.
+ * Must be called once during bootstrap.
  *
  * @param {Object} options
  * @param {HookSystem} options.hooks — Hook system to emit log events
@@ -86,13 +89,23 @@ export function initializeLogger({ hooks, minLevel = "warn", target = "stderr" }
       stream.write(line + "\n");
     });
   }
+
+  for (const msg of _preloadQueue) {
+    _emit(...msg);
+  }
+  _preloadQueue = [];
 }
 
 /**
  * Internal emit — checks initialization and level before emitting to hooks.
  */
 function _emit(level, message, metadata) {
-  if (!_initialized) return; // Silently drop if not yet initialized
+  if (!_initialized) {
+    if (_preloadQueue.length < 2000) {  // prevent unbounded growth
+      _preloadQueue.push([level, message, metadata]);
+    }
+    return;
+  }
   if (LOG_LEVELS[level] < _minLevelNum) return;
   if (_hooks) {
     _hooks.emit("log", { level, message, metadata });
@@ -101,7 +114,7 @@ function _emit(level, message, metadata) {
 
 /**
  * Singleton logger instance.
- * Safe to import and use from any module. Calls before initialization are no-ops.
+ * Safe to import and use from any module. Calls before initialization are buffered and emitted once initialized.
  */
 export const logger = {
   debug: (message, metadata) => _emit("debug", message, metadata),

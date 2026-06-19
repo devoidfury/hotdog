@@ -3,6 +3,8 @@
 // "Commands" are the abstract concept —
 // slash commands(/cmd) are one UI implementation for invoking them in the interactive CLI.
 
+import { logger } from "../logger.js";
+
 /**
  * Registry for agent-level commands and CLI subcommands.
  *
@@ -44,7 +46,7 @@ export class CommandRegistry {
           ...definition,
         };
       } else {
-        console.warn(
+        logger.warn(
           `[${this._type}-registry] Command "${name}" already registered, overwriting.`,
         );
       }

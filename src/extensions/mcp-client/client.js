@@ -6,6 +6,7 @@
 import { spawn } from "node:child_process";
 import { Readable } from "node:stream";
 import { parseMcpInitializeResponse, parseMcpToolsListResponse, parseMcpToolCallResponse, contentBlocksToString, jsonRpcRequest, jsonRpcNotification, mcpToolCallRequest, mcpInitializeRequest } from "./types.js";
+import { logger } from "../../core/logger.js";
 
 /**
  * MCP error types.
@@ -121,7 +122,7 @@ export class McpClient {
         }
       } catch (e) {
         if (!this._cancelled) {
-          console.error(`MCP reader error: ${e.message}`);
+          logger.error(`MCP reader error: ${e.message}`);
         }
       }
     })();
@@ -402,7 +403,7 @@ export class McpClient {
 
     // Print stderr if any
     if (this._stderrOutput && this._stderrOutput.trim()) {
-      console.error(`MCP server stderr: ${this._stderrOutput.trim()}`);
+      logger.error(`MCP server stderr: ${this._stderrOutput.trim()}`);
     }
   }
 }

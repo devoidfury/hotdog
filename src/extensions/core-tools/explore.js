@@ -10,6 +10,7 @@ import {
   toolResult,
   defaultCallDisplay,
 } from "../../core/extensions/tool-utils.js";
+import { logger } from "../../core/logger.js";
 
 // Resolve the path to the current binary (main.js)
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -67,7 +68,7 @@ export class ExploreTool {
 
     const prompt = `Explore project at '${args.path}'. ${args.outline}`;
 
-    console.log(BIN_PATH);
+    logger.debug(`Explore: ${BIN_PATH}`);
     // Build command: bun main.js -c "<prompt>" --profile explorer
     const command = [
       BIN_PATH,

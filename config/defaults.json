@@ -120,6 +120,11 @@
           "tags": ["coder", "general", "powerful"]
         },
         {
+          "name": "gemma-4-12b",
+          "context-limit": 256000,
+          "tags": ["coder", "general", "powerful"]
+        },
+        {
           "name": "glm4.7-flash",
           "context-limit": 131072,
           "tags": ["coder", "general"]

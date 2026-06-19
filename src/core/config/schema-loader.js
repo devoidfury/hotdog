@@ -11,7 +11,7 @@
  */
 
 import { join } from "node:path";
-import coreConfig from "../core.config.json" with { type: "json" };
+import configSchema from "../core.config.json" with { type: "json" };
 
 // ── Built-in predicate functions ──────────────────────────────────────────
 
@@ -67,11 +67,7 @@ const TRANSFORM_BUILTINS = {
   /** Convert to boolean, but treat palette objects as true */
   toBooleanOrPalette: (v) => {
     if (typeof v === "object" && v !== null) {
-      if (
-        "thinking" in v ||
-        "tool_call" in v ||
-        "tool_result" in v
-      ) {
+      if ("thinking" in v || "tool_call" in v || "tool_result" in v) {
         return true;
       }
     }
@@ -225,7 +221,7 @@ export function resolveCompute(compute) {
  * @returns {object} The keys object from core.config.json.
  */
 export function loadCoreSchema() {
-  return coreConfig.keys;
+  return configSchema;
 }
 
 /**
@@ -328,9 +324,7 @@ export function loadExtensionSchemas(extensions) {
     const configKey = ext.name
       .split("-")
       .map((part, i) =>
-        i === 0
-          ? part
-          : part.charAt(0).toUpperCase() + part.slice(1),
+        i === 0 ? part : part.charAt(0).toUpperCase() + part.slice(1),
       )
       .join("");
 

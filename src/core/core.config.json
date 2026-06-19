@@ -1,238 +1,278 @@
 {
-  "$schema": "oa-agent-config-v1",
-  "keys": {
-    "baseUrl": {
-      "type": "string",
-      "layers": [
-        { "source": "provider", "path": "url" },
-        { "source": "cli", "key": "url" },
-        { "source": "config", "key": "aiUrl" },
-        { "default": "http://ai365.home:9292" }
-      ]
-    },
-    "apiKey": {
-      "type": "string",
-      "layers": [
-        { "source": "provider", "path": "apiKey" },
-        { "source": "cli", "key": "apiKey" },
-        { "source": "config", "key": "apiKey" },
-        { "source": "env", "key": "AI_API_KEY" },
-        { "default": null }
-      ]
-    },
-    "thinkerFormat": {
-      "type": "string",
-      "cliFlag": { "short": "-t", "long": "--thinker", "type": "string" },
-      "layers": [
-        { "source": "cli", "key": "thinker" },
-        { "source": "config", "key": "thinker" },
-        { "default": "[Thinking: {}]" }
-      ]
-    },
-    "toolFormat": {
-      "type": "string",
-      "cliFlag": { "long": "--toolfmt", "type": "string" },
-      "layers": [
-        { "source": "cli", "key": "toolfmt" },
-        { "source": "config", "key": "toolfmt" },
-        { "default": "  \u2192 {} {}" }
-      ]
-    },
-    "toolOutputFmt": {
-      "type": "string",
-      "cliFlag": { "long": "--tool-output-fmt", "type": "string" },
-      "layers": [
-        { "source": "cli", "key": "toolOutputFmt" },
-        { "source": "config", "key": "toolOutputFmt" },
-        { "default": "----\n{}\n----" }
-      ]
-    },
-    "chatTimeout": {
-      "type": "number",
-      "cliFlag": { "long": "--chat-timeout", "type": "number" },
-      "layers": [
-        { "source": "cli", "key": "chatTimeout" },
-        { "source": "config", "key": "chatTimeoutSecs" },
-        { "default": 600 }
-      ]
-    },
-    "embeddingsTimeout": {
-      "type": "number",
-      "cliFlag": { "long": "--embeddings-timeout", "type": "number" },
-      "layers": [
-        { "source": "cli", "key": "embeddingsTimeout" },
-        { "source": "config", "key": "embeddingsTimeoutSecs" },
-        { "default": 120 }
-      ]
-    },
-    "sessionId": {
-      "type": "string",
-      "cliFlag": { "short": "-s", "long": "--session-id", "type": "string" },
-      "layers": [
-        { "source": "cli", "key": "sessionId" },
-        { "default": null }
-      ]
-    },
-    "skillsPath": {
-      "type": "string",
-      "cliFlag": { "long": "--skills-path", "type": "string" },
-      "layers": [
-        { "source": "cli", "key": "skillsPath" },
-        { "source": "config", "key": "skillsPath" },
-        { "compute": "joinConfigDir:skills" }
-      ]
-    },
-    "promptsPath": {
-      "type": "string",
-      "cliFlag": { "long": "--prompts-path", "type": "string" },
-      "layers": [
-        { "source": "cli", "key": "promptsPath" },
-        { "source": "config", "key": "promptsPath" },
-        { "compute": "joinConfigDir:prompts" }
-      ]
-    },
-    "compactDebug": {
-      "type": "boolean",
-      "cliFlag": { "long": "--compact-debug", "type": "boolean" },
-      "layers": [
-        { "source": "cli", "key": "compactDebug", "predicate": "truthy" },
-        { "source": "config", "key": "compactDebug" },
-        { "default": false }
-      ]
-    },
-    "noLog": {
-      "type": "boolean",
-      "cliFlag": { "long": "--no-log", "type": "boolean" },
-      "layers": [
-        { "source": "cli", "key": "noLog", "predicate": "truthy" },
-        { "source": "env", "key": "OA_AGENT_LOG", "predicate": "equalsStr:false" },
-        { "source": "env", "key": "OA_AGENT_NO_LOG", "predicate": "equalsStr:1" },
-        { "source": "config", "key": "noLog" },
-        { "default": false }
-      ]
-    },
-    "showTokenUse": {
-      "type": "boolean",
-      "cliFlag": { "long": "--tokens", "type": "boolean" },
-      "layers": [
-        { "source": "cli", "key": "tokens", "predicate": "truthy" },
-        { "source": "config", "key": "showTokenUse", "predicate": "notUndefined" },
-        { "default": true }
-      ]
-    },
-    "stream": {
-      "type": "boolean",
-      "cliFlag": { "long": "--no-stream", "type": "boolean" },
-      "layers": [
-        { "source": "cli", "key": "noStream", "transform": "negate" },
-        { "default": true }
-      ]
-    },
-    "hideTools": {
-      "type": "boolean",
-      "cliFlag": { "long": "--show-tools", "type": "boolean" },
-      "layers": [
-        { "source": "cli", "key": "hideTools", "predicate": "equals:false" },
-        { "source": "config", "key": "hideTools" },
-        { "default": true }
-      ]
-    },
-    "hideThinking": {
-      "type": "boolean",
-      "cliFlag": { "long": "--hide-thinking", "type": "boolean" },
-      "layers": [
-        { "source": "cli", "key": "hideThinking", "predicate": "notUndefined" },
-        { "source": "config", "key": "hideThinking", "predicate": "notUndefined" },
-        { "default": false }
-      ]
-    },
-    "useColors": {
-      "type": "boolean",
-      "cliFlag": { "long": "--colors", "type": "boolean" },
-      "layers": [
-        { "source": "cli", "key": "noColors", "predicate": "equals(true)", "transform": "negate" },
-        { "source": "cli", "key": "colors", "predicate": "notUndefined", "transform": "toBoolean" },
-        { "source": "config", "key": "colors", "predicate": "notNull", "transform": "toBooleanOrPalette" },
-        { "default": true }
-      ]
-    },
-    "theme": {
-      "type": "string",
-      "cliFlag": { "long": "--theme", "type": "string" },
-      "layers": [
-        { "source": "cli", "key": "theme", "predicate": "nonempty", "transform": "trim" },
-        { "source": "config", "key": "theme", "predicate": "nonempty", "transform": "trim" },
-        { "default": "dark" }
-      ]
-    },
-    "role": {
-      "type": "string",
-      "cliFlag": { "long": "--role", "type": "string" },
-      "layers": [
-        { "source": "cli", "key": "role", "predicate": "nonempty", "transform": "trim" },
-        { "source": "config", "key": "role", "predicate": "nonempty", "transform": "trim" },
-        { "source": "profile", "key": "role", "predicate": "nonempty", "transform": "trim" },
-        { "default": "You are an AI coding assistant. Use the instructions below and the tools available to you to assist the user." }
-      ]
-    },
-    "aspects": {
-      "type": "array",
-      "layers": [
-        { "source": "profile", "key": "aspects", "predicate": "nonemptyArray" },
-        { "default": [] }
-      ]
-    },
-    "maxTokens": {
-      "type": "number",
-      "layers": [
-        { "default": 32000 }
-      ]
-    },
-    "maxIterations": {
-      "type": "number",
-      "layers": [
-        { "default": 1000 }
-      ]
-    },
-    "maxRetries": {
-      "type": "number",
-      "layers": [
-        { "default": 12 }
-      ]
-    },
-    "prompt": {
-      "type": "string",
-      "layers": [
-        { "default": "> " }
-      ]
-    },
-    "exitCommands": {
-      "type": "array",
-      "layers": [
-        { "default": ["exit", "quit"] }
-      ]
-    },
-    "taskProfile": {
-      "type": "string",
-      "layers": [
-        { "default": "task-default" }
-      ]
-    },
-    "coreTools": {
-      "type": "object",
-      "layers": [
-        { "source": "extension", "key": "coreTools" },
-        { "source": "config", "key": "coreTools" },
-        { "default": {} }
-      ]
-    },
-    "compaction": {
-      "type": "object",
-      "layers": [
-        { "source": "extension", "key": "compaction" },
-        { "source": "config", "key": "compaction" },
-        { "default": {} }
-      ]
-    }
+  "baseUrl": {
+    "type": "string",
+    "layers": [
+      { "source": "provider", "path": "url" },
+      { "source": "cli", "key": "url" },
+      { "source": "config", "key": "aiUrl" },
+      { "default": null }
+    ]
+  },
+  "apiKey": {
+    "type": "string",
+    "layers": [
+      { "source": "provider", "path": "apiKey" },
+      { "source": "cli", "key": "apiKey" },
+      { "source": "config", "key": "apiKey" },
+      { "source": "env", "key": "AI_API_KEY" },
+      { "default": null }
+    ]
+  },
+  "thinkerFormat": {
+    "type": "string",
+    "cliFlag": { "short": "-t", "long": "--thinker", "type": "string" },
+    "layers": [
+      { "source": "cli", "key": "thinker" },
+      { "source": "config", "key": "thinker" },
+      { "default": "[Thinking: {}]" }
+    ]
+  },
+  "toolFormat": {
+    "type": "string",
+    "cliFlag": { "long": "--toolfmt", "type": "string" },
+    "layers": [
+      { "source": "cli", "key": "toolfmt" },
+      { "source": "config", "key": "toolfmt" },
+      { "default": "  \u2192 {} {}" }
+    ]
+  },
+  "toolOutputFmt": {
+    "type": "string",
+    "cliFlag": { "long": "--tool-output-fmt", "type": "string" },
+    "layers": [
+      { "source": "cli", "key": "toolOutputFmt" },
+      { "source": "config", "key": "toolOutputFmt" },
+      { "default": "----\n{}\n----" }
+    ]
+  },
+  "chatTimeout": {
+    "type": "number",
+    "cliFlag": { "long": "--chat-timeout", "type": "number" },
+    "layers": [
+      { "source": "cli", "key": "chatTimeout" },
+      { "source": "config", "key": "chatTimeoutSecs" },
+      { "default": 600 }
+    ]
+  },
+  "embeddingsTimeout": {
+    "type": "number",
+    "cliFlag": { "long": "--embeddings-timeout", "type": "number" },
+    "layers": [
+      { "source": "cli", "key": "embeddingsTimeout" },
+      { "source": "config", "key": "embeddingsTimeoutSecs" },
+      { "default": 120 }
+    ]
+  },
+  "sessionId": {
+    "type": "string",
+    "cliFlag": { "short": "-s", "long": "--session-id", "type": "string" },
+    "layers": [{ "source": "cli", "key": "sessionId" }, { "default": null }]
+  },
+  "skillsPath": {
+    "type": "string",
+    "cliFlag": { "long": "--skills-path", "type": "string" },
+    "layers": [
+      { "source": "cli", "key": "skillsPath" },
+      { "source": "config", "key": "skillsPath" },
+      { "compute": "joinConfigDir:skills" }
+    ]
+  },
+  "promptsPath": {
+    "type": "string",
+    "cliFlag": { "long": "--prompts-path", "type": "string" },
+    "layers": [
+      { "source": "cli", "key": "promptsPath" },
+      { "source": "config", "key": "promptsPath" },
+      { "compute": "joinConfigDir:prompts" }
+    ]
+  },
+  "compactDebug": {
+    "type": "boolean",
+    "cliFlag": { "long": "--compact-debug", "type": "boolean" },
+    "layers": [
+      { "source": "cli", "key": "compactDebug", "predicate": "truthy" },
+      { "source": "config", "key": "compactDebug" },
+      { "default": false }
+    ]
+  },
+  "noLog": {
+    "type": "boolean",
+    "cliFlag": { "long": "--no-log", "type": "boolean" },
+    "layers": [
+      { "source": "cli", "key": "noLog", "predicate": "truthy" },
+      {
+        "source": "env",
+        "key": "OA_AGENT_LOG",
+        "predicate": "equalsStr:false"
+      },
+      {
+        "source": "env",
+        "key": "OA_AGENT_NO_LOG",
+        "predicate": "equalsStr:1"
+      },
+      { "source": "config", "key": "noLog" },
+      { "default": false }
+    ]
+  },
+  "showTokenUse": {
+    "type": "boolean",
+    "cliFlag": { "long": "--tokens", "type": "boolean" },
+    "layers": [
+      { "source": "cli", "key": "tokens", "predicate": "truthy" },
+      {
+        "source": "config",
+        "key": "showTokenUse",
+        "predicate": "notUndefined"
+      },
+      { "default": true }
+    ]
+  },
+  "stream": {
+    "type": "boolean",
+    "cliFlag": { "long": "--no-stream", "type": "boolean" },
+    "layers": [
+      { "source": "cli", "key": "noStream", "transform": "negate" },
+      { "default": true }
+    ]
+  },
+  "hideTools": {
+    "type": "boolean",
+    "cliFlag": { "long": "--show-tools", "type": "boolean" },
+    "layers": [
+      { "source": "cli", "key": "hideTools", "predicate": "equals:false" },
+      { "source": "config", "key": "hideTools" },
+      { "default": true }
+    ]
+  },
+  "hideThinking": {
+    "type": "boolean",
+    "cliFlag": { "long": "--hide-thinking", "type": "boolean" },
+    "layers": [
+      { "source": "cli", "key": "hideThinking", "predicate": "notUndefined" },
+      {
+        "source": "config",
+        "key": "hideThinking",
+        "predicate": "notUndefined"
+      },
+      { "default": false }
+    ]
+  },
+  "useColors": {
+    "type": "boolean",
+    "cliFlag": { "long": "--colors", "type": "boolean" },
+    "layers": [
+      {
+        "source": "cli",
+        "key": "noColors",
+        "predicate": "equals(true)",
+        "transform": "negate"
+      },
+      {
+        "source": "cli",
+        "key": "colors",
+        "predicate": "notUndefined",
+        "transform": "toBoolean"
+      },
+      {
+        "source": "config",
+        "key": "colors",
+        "predicate": "notNull",
+        "transform": "toBooleanOrPalette"
+      },
+      { "default": true }
+    ]
+  },
+  "theme": {
+    "type": "string",
+    "cliFlag": { "long": "--theme", "type": "string" },
+    "layers": [
+      {
+        "source": "cli",
+        "key": "theme",
+        "predicate": "nonempty",
+        "transform": "trim"
+      },
+      {
+        "source": "config",
+        "key": "theme",
+        "predicate": "nonempty",
+        "transform": "trim"
+      },
+      { "default": "dark" }
+    ]
+  },
+  "role": {
+    "type": "string",
+    "cliFlag": { "long": "--role", "type": "string" },
+    "layers": [
+      {
+        "source": "cli",
+        "key": "role",
+        "predicate": "nonempty",
+        "transform": "trim"
+      },
+      {
+        "source": "config",
+        "key": "role",
+        "predicate": "nonempty",
+        "transform": "trim"
+      },
+      {
+        "source": "profile",
+        "key": "role",
+        "predicate": "nonempty",
+        "transform": "trim"
+      },
+      {
+        "default": "You are an AI coding assistant. Use the instructions below and the tools available to you to assist the user."
+      }
+    ]
+  },
+  "aspects": {
+    "type": "array",
+    "layers": [
+      { "source": "profile", "key": "aspects", "predicate": "nonemptyArray" },
+      { "default": [] }
+    ]
+  },
+  "maxTokens": {
+    "type": "number",
+    "layers": [{ "default": 32000 }]
+  },
+  "maxIterations": {
+    "type": "number",
+    "layers": [{ "default": 1000 }]
+  },
+  "maxRetries": {
+    "type": "number",
+    "layers": [{ "default": 12 }]
+  },
+  "prompt": {
+    "type": "string",
+    "layers": [{ "default": "> " }]
+  },
+  "exitCommands": {
+    "type": "array",
+    "layers": [{ "default": ["exit", "quit"] }]
+  },
+  "taskProfile": {
+    "type": "string",
+    "layers": [{ "default": "task-default" }]
+  },
+  "coreTools": {
+    "type": "object",
+    "layers": [
+      { "source": "extension", "key": "coreTools" },
+      { "source": "config", "key": "coreTools" },
+      { "default": {} }
+    ]
+  },
+  "compaction": {
+    "type": "object",
+    "layers": [
+      { "source": "extension", "key": "compaction" },
+      { "source": "config", "key": "compaction" },
+      { "default": {} }
+    ]
   }
 }

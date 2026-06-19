@@ -10,11 +10,36 @@
 import { formatError } from "./error.js";
 import { logger } from "./logger.js";
 
+// ── Trace Helpers ────────────────────────────────────────────────────────────
+
+/**
+ * Summarize a hook handler return value for trace output.
+ * Keeps output short and readable while showing the action taken.
+ */
+function _summarizeResult(value) {
+  if (value == null) return "null";
+  if (typeof value !== "object") return JSON.stringify(value);
+  if (Array.isArray(value)) return `Array(${value.length})`;
+  const keys = Object.keys(value);
+  if (keys.length === 0) return "{}";
+  // Show action field first if present (common for gate hooks)
+  if ("action" in value) {
+    const action = JSON.stringify(value.action);
+    const extra = keys.filter((k) => k !== "action");
+    if (extra.length === 0) return `{ action: ${action} }`;
+    return `{ action: ${action}, ${extra.join(", ")} }`;
+  }
+  // Generic object summary
+  if (keys.length <= 3) return `{ ${keys.join(", ")} }`;
+  return `{ ${keys.slice(0, 3).join(", ")}, +${keys.length - 3} }`;
+}
+
 let _handlerCounter = 0;
 
 export class HookSystem {
   constructor() {
     this._hooks = new Map();
+    this._trace = false;
   }
 
   /**
@@ -67,8 +92,17 @@ export class HookSystem {
   emit(hookName, data) {
     const handlers = this._hooks.get(hookName) || [];
     let lastResult;
-    for (const entry of handlers) {
+    const doTrace = this._trace && hookName !== "log";
+    for (let i = 0; i < handlers.length; i++) {
+      const entry = handlers[i];
+      const t0 = doTrace ? Date.now() : 0;
       const result = entry.handler(data);
+      if (doTrace) {
+        const ms = Date.now() - t0;
+        const label = entry.source ? ` (${entry.source})` : "";
+        const action = result !== undefined ? ` returned ${_summarizeResult(result)}` : " no return";
+        logger.debug(`[hook:trace] ${hookName} — ${i + 1}/${handlers.length}${label} — ${ms}ms${action}`);
+      }
       if (result !== undefined) lastResult = result;
     }
     return lastResult;
@@ -84,17 +118,47 @@ export class HookSystem {
   async emitAsync(hookName, data) {
     const handlers = this._hooks.get(hookName) || [];
     const results = [];
-    for (const entry of handlers) {
+    const doTrace = this._trace && hookName !== "log";
+    if (doTrace && handlers.length > 0) {
+      logger.debug(`[hook:trace] ${hookName} — ${handlers.length} handler(s) fired concurrently`);
+    }
+    for (let i = 0; i < handlers.length; i++) {
+      const entry = handlers[i];
+      const t0 = doTrace ? Date.now() : 0;
       try {
         const result = entry.handler(data);
         if (result && typeof result.then === "function") {
           results.push(
-            result.catch((e) => {
-              logger.error(`[hook:${hookName}] ${formatError(e)}`);
-            }),
+            result.then(
+              (v) => {
+                if (doTrace) {
+                  const ms = Date.now() - t0;
+                  const label = entry.source ? ` (${entry.source})` : "";
+                  logger.debug(`[hook:trace] ${hookName} — handler${label} — ${ms}ms`);
+                }
+                return v;
+              },
+              (e) => {
+                if (doTrace) {
+                  const ms = Date.now() - t0;
+                  const label = entry.source ? ` (${entry.source})` : "";
+                  logger.debug(`[hook:trace] ${hookName} — handler${label} — ${ms}ms — error`);
+                }
+                logger.error(`[hook:${hookName}] ${formatError(e)}`);
+              },
+            ),
           );
+        } else if (doTrace) {
+          const ms = Date.now() - t0;
+          const label = entry.source ? ` (${entry.source})` : "";
+          logger.debug(`[hook:trace] ${hookName} — handler${label} — ${ms}ms (sync)`);
         }
       } catch (e) {
+        if (doTrace) {
+          const ms = Date.now() - t0;
+          const label = entry.source ? ` (${entry.source})` : "";
+          logger.debug(`[hook:trace] ${hookName} — handler${label} — ${ms}ms — error`);
+        }
         logger.error(`[hook:${hookName}] ${formatError(e)}`);
       }
     }
@@ -112,7 +176,10 @@ export class HookSystem {
   async emitAsyncSeq(hookName, data) {
     const handlers = this._hooks.get(hookName) || [];
     let lastResult;
-    for (const entry of handlers) {
+    const doTrace = this._trace && hookName !== "log";
+    for (let i = 0; i < handlers.length; i++) {
+      const entry = handlers[i];
+      const t0 = doTrace ? Date.now() : 0;
       try {
         const result = entry.handler(data);
         if (result && typeof result.then === "function") {
@@ -120,7 +187,18 @@ export class HookSystem {
         } else {
           lastResult = result;
         }
+        if (doTrace) {
+          const ms = Date.now() - t0;
+          const label = entry.source ? ` (${entry.source})` : "";
+          const action = lastResult !== undefined ? ` returned ${_summarizeResult(lastResult)}` : " no return";
+          logger.debug(`[hook:trace] ${hookName} — ${i + 1}/${handlers.length}${label} — ${ms}ms${action}`);
+        }
       } catch (e) {
+        if (doTrace) {
+          const ms = Date.now() - t0;
+          const label = entry.source ? ` (${entry.source})` : "";
+          logger.debug(`[hook:trace] ${hookName} — ${i + 1}/${handlers.length}${label} — ${ms}ms — error`);
+        }
         logger.error(`[hook:${hookName}] ${formatError(e)}`);
       }
     }
@@ -143,17 +221,34 @@ export class HookSystem {
     const handlers = this._hooks.get(hookName) || [];
     let lastResult;
     let stopped = false;
-    for (const entry of handlers) {
+    const doTrace = this._trace && hookName !== "log";
+    for (let i = 0; i < handlers.length; i++) {
+      const entry = handlers[i];
+      const t0 = doTrace ? Date.now() : 0;
       try {
         const result = entry.handler(data);
         const resolved =
           result && typeof result.then === "function" ? await result : result;
         lastResult = resolved;
+        if (doTrace) {
+          const ms = Date.now() - t0;
+          const label = entry.source ? ` (${entry.source})` : "";
+          const action = resolved !== undefined ? ` returned ${_summarizeResult(resolved)}` : " no return";
+          logger.debug(`[hook:trace] ${hookName} — ${i + 1}/${handlers.length}${label} — ${ms}ms${action}`);
+        }
         if (resolved && shouldStop(resolved)) {
           stopped = true;
+          if (doTrace) {
+            logger.debug(`[hook:trace] ${hookName} — stopped at handler ${i + 1}/${handlers.length}`);
+          }
           break;
         }
       } catch (e) {
+        if (doTrace) {
+          const ms = Date.now() - t0;
+          const label = entry.source ? ` (${entry.source})` : "";
+          logger.debug(`[hook:trace] ${hookName} — ${i + 1}/${handlers.length}${label} — ${ms}ms — error`);
+        }
         logger.error(`[hook:${hookName}] ${formatError(e)}`);
       }
     }

@@ -274,5 +274,15 @@
       { "source": "config", "key": "compaction" },
       { "default": {} }
     ]
+  },
+  "hookTrace": {
+    "type": "boolean",
+    "cliFlag": { "long": "--hook-trace", "type": "boolean" },
+    "layers": [
+      { "source": "cli", "key": "hookTrace", "predicate": "truthy" },
+      { "source": "env", "key": "OA_HOOK_TRACE", "predicate": "equalsStr:1" },
+      { "source": "config", "key": "hookTrace" },
+      { "default": false }
+    ]
   }
 }

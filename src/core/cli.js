@@ -29,6 +29,7 @@ export function parseArgs(configRegistry = null, knownSubcommands = null) {
     noLog: false,
     loud: false,
     compactDebug: false,
+    hookTrace: false,
     sessionId: null,
     tokens: false,
     theme: null,
@@ -81,6 +82,7 @@ export function parseArgs(configRegistry = null, knownSubcommands = null) {
     { short: null, long: "--no-log", type: "boolean", hasValue: false },
     { short: "-l", long: "--loud", type: "boolean", hasValue: false },
     { short: null, long: "--compact-debug", type: "boolean", hasValue: false },
+    { short: null, long: "--hook-trace", type: "boolean", hasValue: false },
     { short: "-s", long: "--session-id", type: "string", hasValue: true },
     { short: null, long: "--tokens", type: "boolean", hasValue: false },
     { short: null, long: "--theme", type: "string", hasValue: true },
@@ -182,6 +184,8 @@ export function parseArgs(configRegistry = null, knownSubcommands = null) {
           options.loud = true;
         } else if (arg === "--compact-debug") {
           options.compactDebug = true;
+        } else if (arg === "--hook-trace") {
+          options.hookTrace = true;
         }
         // Extension boolean flags (generic handling)
         else if (flagDef.extension) {
@@ -289,6 +293,7 @@ Options:
   --no-log                  Disable session logging
   -l, --loud                Print full JSON API responses
       --compact-debug       Write compaction output to compaction.out.json
+      --hook-trace          Trace hook execution (requires OA_LOG_LEVEL=debug)
   -s, --session-id <id>   Resumable session ID
       --tokens              Display token usage stats
   --theme <name>            Theme (dark, light, monochrome, or file path)

@@ -84,9 +84,15 @@ export function parseArgs(configRegistry = null, knownSubcommands = null) {
     }
   }
 
-  // Helper: extract option key from flag name
+  // Helper: extract option key from flag name (kebab-case → camelCase)
   function extractKey(flagName) {
-    return flagName.replace(/^-+/, "").replace(/-/g, "_").toLowerCase();
+    return flagName
+      .replace(/^-+/, "")
+      .split("-")
+      .map((part, i) =>
+        i === 0 ? part : part.charAt(0).toUpperCase() + part.slice(1),
+      )
+      .join("");
   }
 
   let i = 0;
@@ -108,12 +114,8 @@ export function parseArgs(configRegistry = null, knownSubcommands = null) {
       // Handle boolean flags — all handled generically now
       if (!flagDef.hasValue) {
         const key = extractKey(flagDef.long || arg);
-        // Map structural flag keys to their option names
-        const keyMap = {
-          json: "wantsJson",
-          "system-prompt-template": "systemPromptTemplate",
-          "review-tool-index": "reviewToolIndex",
-        };
+        // Semantic renames only — camelCase conversion is handled by extractKey()
+        const keyMap = { json: "wantsJson" };
         options[keyMap[key] || key] = true;
         i++;
         continue;

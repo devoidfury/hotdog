@@ -20,5 +20,4 @@ unzip -jo "bun-*.zip" "bun-*/bun" -d $INSTALL_DIR/
 rm bun-*.zip
 
 { set +x; } &> /dev/null
-
 echo -e "\nbun installed to $INSTALL_DIR/bun\nbun on path: $(which bun || echo "not found")\n"

@@ -143,7 +143,7 @@ describe('ConfigRegistry', () => {
       process.argv = ['node', 'test', '--my-flag', 'hello'];
       const options = parseArgs(registry);
       
-      expect(options.my_flag).toBe('hello');
+      expect(options.myFlag).toBe('hello');
     });
 
     it('should parse extension boolean flags', () => {
@@ -155,7 +155,7 @@ describe('ConfigRegistry', () => {
       process.argv = ['node', 'test', '--my-bool'];
       const options = parseArgs(registry);
       
-      expect(options.my_bool).toBe(true);
+      expect(options.myBool).toBe(true);
     });
 
     it('should parse extension number flags', () => {
@@ -167,7 +167,7 @@ describe('ConfigRegistry', () => {
       process.argv = ['node', 'test', '--my-number', '42'];
       const options = parseArgs(registry);
       
-      expect(options.my_number).toBe(42);
+      expect(options.myNumber).toBe(42);
     });
 
     it('should parse extension array flags', () => {
@@ -179,7 +179,7 @@ describe('ConfigRegistry', () => {
       process.argv = ['node', 'test', '--my-tags', 'a,b,c'];
       const options = parseArgs(registry);
       
-      expect(options.my_tags).toEqual(['a', 'b', 'c']);
+      expect(options.myTags).toEqual(['a', 'b', 'c']);
     });
 
     it('should parse short flags', () => {
@@ -191,7 +191,7 @@ describe('ConfigRegistry', () => {
       process.argv = ['node', 'test', '-x', 'world'];
       const options = parseArgs(registry);
       
-      expect(options.my_flag).toBe('world');
+      expect(options.myFlag).toBe('world');
     });
 
     it('should use custom parser', () => {
@@ -208,7 +208,7 @@ describe('ConfigRegistry', () => {
       process.argv = ['node', 'test', '--my-flag', 'hello'];
       const options = parseArgs(registry);
       
-      expect(options.my_flag).toBe('HELLO');
+      expect(options.myFlag).toBe('HELLO');
     });
   });
 

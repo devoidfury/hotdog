@@ -6,6 +6,7 @@
 // their discovered tools via the tools:register hook.
 
 import { HOOKS } from '../../core/hooks.js';
+import { logger } from '../../core/logger.js';
 import { McpConnection } from './connection.js';
 import { McpTool } from './tools.js';
 
@@ -69,7 +70,7 @@ export function create(core) {
               registry.register(tool.registeredName, tool);
             }
           } catch (e) {
-            console.error(`[mcp] Failed to connect to server '${server.name}': ${e.message}`);
+            logger.error(`[mcp] Failed to connect to server '${server.name}': ${e.message}`);
           }
         }
       },
@@ -121,7 +122,7 @@ async function _connectServer(server) {
     }
     return null;
   } catch (e) {
-    console.error(`[mcp] Failed to connect to '${server.name}': ${e.message}`);
+    logger.error(`[mcp] Failed to connect to '${server.name}': ${e.message}`);
     return null;
   }
 }
@@ -137,7 +138,7 @@ async function _shutdownAll(connections) {
     try {
       await conn.shutdown();
     } catch (e) {
-      console.error(`[mcp] Error shutting down connection: ${e.message}`);
+      logger.error(`[mcp] Error shutting down connection: ${e.message}`);
     }
   }
 }

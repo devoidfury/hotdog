@@ -5,6 +5,7 @@
 import fsPromises from "node:fs/promises";
 import { join } from "node:path";
 import { HOOKS } from "../../core/hooks.js";
+import { logger } from "../../core/logger.js";
 import { render } from "../../utils/render.js";
 import { parseFrontMatter, loadAspects } from "../../utils/file-utils.js";
 import { resolveConfigDir, configSubPath } from "../../core/config/index.js";
@@ -75,7 +76,7 @@ async function buildAspectsChunk(aspectNames, profilesPath) {
   try {
     template = await fsPromises.readFile(TEMPLATE_PATH, "utf-8");
   } catch {
-    console.warn(`aspects template ${TEMPLATE_PATH} not found`);
+    logger.warn(`aspects template ${TEMPLATE_PATH} not found`);
     return "";
   }
 

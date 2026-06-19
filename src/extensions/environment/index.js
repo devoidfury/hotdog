@@ -6,6 +6,7 @@ import { join } from "node:path";
 import { cwd, platform } from "node:process";
 import { readFile } from "node:fs/promises";
 import { HOOKS } from "../../core/hooks.js";
+import { logger } from "../../core/logger.js";
 import { render } from "../../utils/render.js";
 
 const TEMPLATE_PATH = join(import.meta.dirname, "environment_chunk.md");
@@ -20,7 +21,7 @@ async function buildEnvironmentChunk(agent) {
   try {
     template = await readFile(TEMPLATE_PATH, "utf-8");
   } catch {
-    console.warn(`environment template ${TEMPLATE_PATH} not found`);
+    logger.warn(`environment template ${TEMPLATE_PATH} not found`);
     return "";
   }
 

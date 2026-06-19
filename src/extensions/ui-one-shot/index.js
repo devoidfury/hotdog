@@ -6,6 +6,7 @@
 import { MessageBus } from "../../core/index.js";
 import { formatError } from "../../core/error.js";
 import { HOOKS } from "../../core/hooks.js";
+import { logger } from "../../core/logger.js";
 import { CliOutputSink } from "../../core/ui/cli.js";
 import { LlmClient } from "../../core/llm-client/client.js";
 import { MarkerMangler } from "../../core/marker-mangler.js";
@@ -68,7 +69,7 @@ async function runOneShot(
     await bus.runUntilCancelled();
     console.log("\n");
   } catch (e) {
-    console.error(formatError(e));
+    logger.error(formatError(e));
     exitCode = e.exitCode ?? 1;
   } finally {
     const oneShotSessionId = sessionManager.sessionId();

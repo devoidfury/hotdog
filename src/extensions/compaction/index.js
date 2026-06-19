@@ -13,6 +13,7 @@ import { SummarizeShortStrategy } from './strategies/summarize-short.js';
 import { TokenAwareStrategy } from './strategies/token-aware.js';
 import { estimateContextTokens } from './utils.js';
 import { HOOKS } from '../../core/hooks.js';
+import { logger } from '../../core/logger.js';
 
 /**
  * Create the compaction extension.
@@ -282,7 +283,7 @@ export function create(core) {
 
     } catch (e) {
       // Compaction failure is non-fatal — log and continue
-      console.error(`[compaction] error: ${e.message}`);
+      logger.error(`[compaction] error: ${e.message}`);
     }
   }
 }

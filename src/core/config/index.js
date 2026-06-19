@@ -9,6 +9,7 @@ import path from "node:path";
 import os from "node:os";
 import { cwd } from "node:process";
 
+import { logger } from "../logger.js";
 import { parseFrontMatter } from "../../utils/file-utils.js";
 import { deepMerge } from "../../utils/objects.js";
 import { render } from "../../utils/render.js";
@@ -242,7 +243,7 @@ export async function loadConfig(configPath, cliConfigDir, extParams) {
     // Normalize snake_case keys from config to camelCase
     return deepMerge(getDefaultConfig(extParams), normalizeConfigKeys(raw));
   } catch (e) {
-    console.error(`Error loading config from ${configPathToUse}: ${e.message}`);
+    logger.error(`Error loading config from ${configPathToUse}: ${e.message}`);
     process.exit(1);
   }
 }
@@ -299,9 +300,9 @@ export function validateConfig(config, extensionSchemas) {
  */
 export function failOnInvalidConfig(result) {
   if (!result.valid) {
-    console.error("Configuration validation failed:");
+    logger.error("Configuration validation failed:");
     for (const error of result.errors) {
-      console.error(`  - ${error}`);
+      logger.error(`  - ${error}`);
     }
     process.exit(1);
   }

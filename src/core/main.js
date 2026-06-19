@@ -2,7 +2,7 @@
 // oa-agent — AI agent harness with tool calling support.
 // CLI entry point — wired to the extension architecture.
 
-import { createHooks, SessionManager, Agent, MessageBus } from "./index.js";
+import { createHooks, SessionManager, Agent, MessageBus, initializeLogger, logger, resolveLogLevel, resolveLogTarget } from "./index.js";
 import {
   createToolRegistry,
   createExtensionLoader,
@@ -85,6 +85,7 @@ async function loadExtensions(core, { taskManager, config } = {}) {
  * @param {Object} [configRegistry] - Optional config registry for extension CLI flags & config params.
  * @param {Object} [cliSubcommandRegistry] - Optional CLI subcommand registry.
  * @param {Object} [options] - Optional additional options.
+ * @param {HookSystem} [options.hooks] - Pre-created hook system.
  * @param {string} [options.profileName] - Current profile name.
  * @param {Object} [options.profile] - Resolved profile object (includes manager flag, whitelistTools, etc.).
  * @param {Function} [options.buildConfig] - Optional buildConfig function for subcommand handlers.
@@ -96,7 +97,7 @@ function createCore(
   cliSubcommandRegistry,
   options = {},
 ) {
-  const hooks = createHooks();
+  const hooks = options.hooks || createHooks();
   const toolRegistry = createToolRegistry();
 
   // Merge profile info into config so extensions can access it
@@ -130,6 +131,12 @@ function createCore(
 // ── Main ─────────────────────────────────────────────────────────────────────
 
 export async function main() {
+  // ── Create hooks + logger early (needed before any error output) ────────
+  const hooks = createHooks();
+  const minLevel = resolveLogLevel();
+  const logTarget = resolveLogTarget();
+  initializeLogger({ hooks, minLevel, target: logTarget });
+
   // ── Create config registry for extension CLI flags & config params ──────
   const configRegistry = createConfigRegistry();
 
@@ -166,11 +173,11 @@ export async function main() {
           sc.toLowerCase() !== posLower && sc.startsWith(posLower.slice(0, 2)),
       );
       if (similar.length === 1) {
-        console.error(
+        logger.error(
           `Unknown subcommand: ${posLower}\n` + `Did you mean: ${similar[0]}?`,
         );
       } else {
-        console.error(
+        logger.error(
           `Unknown subcommand: ${posLower}\n` +
             `Available subcommands: ${knownSubcommands.join(", ")}\n` +
             `To send a prompt, use -c or --prompt: oa-agent -c "your prompt"`,
@@ -195,6 +202,7 @@ export async function main() {
 
   // ── Create core infrastructure ──────────────────────────────────────────
   const core = createCore(config, configRegistry, cliSubcommandRegistry, {
+    hooks,
     profileName: resolved.profileName,
     profile: resolved.profile,
     buildConfig,
@@ -224,7 +232,7 @@ export async function main() {
     if (subcommandDef && subcommandDef.handler) {
       return await subcommandDef.handler(cli, core);
     }
-    console.error(
+    logger.error(
       `Subcommand "${cli.subcommand}" handler not available after loading extensions.`,
     );
     return 1;
@@ -260,7 +268,7 @@ export async function main() {
     }
   }
 
-  console.error("No subcommand provided.");
+  logger.error("No subcommand provided.");
   console.log(
     `Available subcommands: ${core.cliSubcommandRegistry.names().join(", ") || "(none)"}`,
   );
@@ -269,9 +277,13 @@ export async function main() {
 
 // Only run main() when this module is the entry point (not when imported by tests).
 if (import.meta.main) {
+  // Initialize logger early for the top-level catch block
+  const bootHooks = createHooks();
+  initializeLogger({ hooks: bootHooks, minLevel: "error", target: "stderr" });
+
   main()
     .catch(async (e) => {
-      console.error(formatError(e));
+      logger.error(formatError(e));
       return 1;
     })
     .then((code) => process.exit(code));

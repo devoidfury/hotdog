@@ -1,6 +1,7 @@
 // Core module — the minimal foundation for the extension architecture.
 
 export * from "./hooks.js";
+export { logger, initializeLogger, LOG_LEVELS, resolveLogLevel, resolveLogTarget } from "./logger.js";
 
 // Extension system
 export {

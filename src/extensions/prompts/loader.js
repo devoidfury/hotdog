@@ -4,6 +4,7 @@
 import fs from "node:fs/promises";
 import { join } from "node:path";
 import { parseFrontMatter, validateNameable } from "../../utils/file-utils.js";
+import { logger } from "../../core/logger.js";
 
 /**
  * Parse a .prompt.md file into a Prompt object.
@@ -28,7 +29,7 @@ export function parsePromptFromMd(content, fileName, location) {
   // Warn on validation issues
   const warnings = validateNameable(name, "Prompt", fileStem);
   for (const w of warnings) {
-    console.warn(`Warning: Prompt '${name}': ${w}`);
+    logger.warn(`Prompt '${name}': ${w}`);
   }
 
   return {
@@ -88,7 +89,7 @@ export class PromptsLoader {
       try {
         content = await fs.readFile(filePath, "utf-8");
       } catch {
-        console.warn(`Warning: Failed to read prompt '${entry.name}'`);
+        logger.warn(`Failed to read prompt '${entry.name}'`);
         continue;
       }
 
@@ -99,16 +100,18 @@ export class PromptsLoader {
         // Collision detection
         if (this.prompts.has(prompt.name)) {
           const existing = this.prompts.get(prompt.name);
-          console.warn(
-            `Warning: Prompt '${prompt.name}' already loaded (from ${existing.location}), overwriting with ${location}`,
+          logger.warn(
+            `Prompt '${prompt.name}' already loaded (from ${existing.location}), overwriting with ${location}`,
+            { existingLocation: existing.location, newLocation: location },
           );
         }
 
         this.prompts.set(prompt.name, prompt);
         count++;
       } catch (e) {
-        console.warn(
-          `Warning: Failed to load prompt '${entry.name}': ${e.message}`,
+        logger.warn(
+          `Failed to load prompt '${entry.name}': ${e.message}`,
+          { error: e.message },
         );
       }
     }

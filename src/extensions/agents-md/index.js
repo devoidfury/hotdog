@@ -5,6 +5,7 @@ import fsPromises from "node:fs/promises";
 import { join } from "node:path";
 import { cwd } from "node:process";
 import { HOOKS } from "../../core/hooks.js";
+import { logger } from "../../core/logger.js";
 import { render } from "../../utils/render.js";
 import extensionData from "./extension.json";
 
@@ -36,7 +37,7 @@ async function buildAgentsMdChunk(autoload) {
   try {
     template = await fsPromises.readFile(TEMPLATE_PATH, "utf-8");
   } catch {
-    console.warn(`agents-md template ${TEMPLATE_PATH} not found`);
+    logger.warn(`agents-md template ${TEMPLATE_PATH} not found`);
     return "";
   }
 

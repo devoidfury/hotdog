@@ -3,6 +3,7 @@
 // Only activates when taskManager is provided (manager mode).
 
 import { HOOKS } from "../../core/hooks.js";
+import { logger } from "../../core/logger.js";
 import {
   SUBAGENT_TOOL_NAMES,
   SUBAGENT_TOOL_CONSTRUCTORS,
@@ -73,7 +74,7 @@ export function create(core, { taskManager, sessionCore } = {}) {
               registry.register(toolName, tool);
             }
           } catch (e) {
-            console.error(
+            logger.error(
               `[subagents] Failed to create tool '${toolName}': ${e.message}`,
             );
           }

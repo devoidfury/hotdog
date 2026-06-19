@@ -1,6 +1,8 @@
 // CLI argument parsing.
 // Supports dynamic CLI flags registered via ConfigRegistry.
 
+import { logger } from "./logger.js";
+
 export function parseArgs(configRegistry = null, knownSubcommands = null) {
   const args = process.argv.slice(2);
   const options = {
@@ -193,7 +195,7 @@ export function parseArgs(configRegistry = null, knownSubcommands = null) {
 
       // Handle flags with values
       if (i + 1 >= args.length) {
-        console.error(`Error: ${arg} requires a value`);
+        logger.error(`Error: ${arg} requires a value`);
         process.exit(1);
       }
 
@@ -204,7 +206,7 @@ export function parseArgs(configRegistry = null, knownSubcommands = null) {
       if (flagDef.type === "number" || flagDef.type === "int") {
         parsedValue = parseInt(value, 10);
         if (isNaN(parsedValue)) {
-          console.error(`Error: ${arg} requires a numeric value`);
+          logger.error(`Error: ${arg} requires a numeric value`);
           process.exit(1);
         }
       } else if (flagDef.type === "array") {
@@ -225,7 +227,7 @@ export function parseArgs(configRegistry = null, knownSubcommands = null) {
     // Check if this looks like an unknown flag
     if (arg.startsWith("-")) {
       // Could be an unknown flag — warn and skip
-      console.warn(`Warning: unknown flag '${arg}'`);
+      logger.warn(`Warning: unknown flag '${arg}'`);
       i++;
       continue;
     }

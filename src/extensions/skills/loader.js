@@ -6,6 +6,7 @@ import { join } from "node:path";
 import { cwd } from "node:process";
 import { parseFrontMatter, validateNameable } from "../../utils/file-utils.js";
 import { render } from "../../utils/render.js";
+import { logger } from "../../core/logger.js";
 
 // ── Pattern Matching ───────────────────────────────────────────────────────
 
@@ -70,8 +71,8 @@ export function parseSkillFromMd(content, dirName, location) {
   const descLen =
     typeof fm.description === "string" ? fm.description.length : 0;
   if (descLen > 1024) {
-    console.warn(
-      `Warning: Skill '${fm.name || dirName}' description exceeds 1024 characters (${descLen} chars), truncating`,
+    logger.warn(
+      `Skill '${fm.name || dirName}' description exceeds 1024 characters (${descLen} chars), truncating`,
     );
   }
 
@@ -80,7 +81,7 @@ export function parseSkillFromMd(content, dirName, location) {
   // Lenient name validation
   const warnings = validateNameable(name, "Skill", dirName);
   for (const w of warnings) {
-    console.warn(`Warning: Skill '${name}': ${w}`);
+    logger.warn(`Skill '${name}': ${w}`);
   }
 
   // Parse tool-related fields
@@ -221,16 +222,18 @@ export class SkillsLoader {
         // Collision detection
         if (this.skills.has(skill.name)) {
           const existing = this.skills.get(skill.name);
-          console.warn(
-            `Warning: Skill '${skill.name}' already loaded (from ${existing.location}), overwriting with ${location}`,
+          logger.warn(
+            `Skill '${skill.name}' already loaded (from ${existing.location}), overwriting with ${location}`,
+            { existingLocation: existing.location, newLocation: location },
           );
         }
 
         this.skills.set(skill.name, skill);
         count++;
       } catch (e) {
-        console.warn(
-          `Warning: Failed to load skill '${entry.name}': ${e.message}`,
+        logger.warn(
+          `Failed to load skill '${entry.name}': ${e.message}`,
+          { error: e.message },
         );
       }
     }
@@ -327,7 +330,7 @@ export class SkillsLoader {
     try {
       template = await fs.readFile(templatePath, "utf-8");
     } catch {
-      console.warn(`skills preamble ${templatePath} template error`);
+      logger.warn(`skills preamble ${templatePath} template error`);
       return "";
     }
 

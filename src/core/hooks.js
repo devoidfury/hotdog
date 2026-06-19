@@ -298,6 +298,10 @@ export const HOOKS = {
   //   will continue to the next iteration (false)
   // Enables: per-turn analysis, cost tracking, audit logging, UI prompt control.
   TURN_END: "turn:end",
+
+  // Logging — emitted by the logger module, intercepted by handlers.
+  // Payload: { level: "debug"|"info"|"warn"|"error", message: string, metadata?: object }
+  LOG: "log",
 };
 
 /**

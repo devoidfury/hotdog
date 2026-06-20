@@ -6,73 +6,80 @@
  * - Resolution layers (cli > config > env > provider > profile > extension > default)
  * - Default values
  *
- * String predicates and transforms in the JSON are resolved to functions
- * by the resolver at runtime.
+ * String casts in the JSON are resolved to functions by the resolver at runtime.
  */
 
 import { join } from "node:path";
 import configSchema from "../core.config.json" with { type: "json" };
 
-// ── Built-in predicate functions ──────────────────────────────────────────
+// ── Built-in cast functions ────────────────────────────────────────────────
 
 /**
- * Map of named predicate strings to their function implementations.
+ * Map of named cast strings to their function implementations.
  * These are referenced in core.config.json layer definitions.
+ *
+ * A cast function receives a raw value and either:
+ * - Returns a converted value (accepts this layer)
+ * - Returns `undefined` (skip to next layer)
  */
-const PREDICATE_BUILTINS = {
-  /** Value is truthy (not undefined, null, false, 0, or empty string) */
-  truthy: (v) => !!v,
-
-  /** Value is falsy */
-  falsy: (v) => !v,
-
-  /** Value is not undefined */
-  notUndefined: (v) => v !== undefined,
-
-  /** Value is not null */
-  notNull: (v) => v !== null,
-
-  /** Value is not false */
-  notFalse: (v) => v !== false,
-
-  /** Value is a non-empty string (after trim) */
-  nonempty: (v) => typeof v === "string" && v.trim().length > 0,
-
-  /** Value is a non-empty array */
-  nonemptyArray: (v) => Array.isArray(v) && v.length > 0,
-
-  /** Value equals a specific value (JSON-parsed: equals:true → boolean true) */
-  equals: (expected) => (v) => v === expected,
-
-  /** Value equals a specific string (always compares as string) */
-  equalsStr: (expected) => (v) => String(v) === expected,
-};
-
-// ── Built-in transform functions ──────────────────────────────────────────
-
-/**
- * Map of named transform strings to their function implementations.
- * These are referenced in core.config.json layer definitions.
- */
-const TRANSFORM_BUILTINS = {
-  /** Negate a boolean value */
-  negate: (v) => !v,
-
-  /** Trim whitespace from a string */
-  trim: (v) => (typeof v === "string" ? v.trim() : v),
-
-  /** Convert to boolean (truthy/falsy) */
-  toBoolean: (v) => !!v,
-
-  /** Convert to boolean, but treat palette objects as true */
-  toBooleanOrPalette: (v) => {
-    if (typeof v === "object" && v !== null) {
-      if ("thinking" in v || "tool_call" in v || "tool_result" in v) {
-        return true;
-      }
-    }
-    return !!v;
+const CAST_BUILTINS = {
+  /**
+   * Cast to boolean. Accepts: boolean, "true"/"on"/"1", "false"/"off"/"0".
+   * Returns the boolean value. Returns undefined for unrecognizable input.
+   */
+  truthy: (v) => {
+    if (typeof v === "boolean") return v;
+    if (typeof v === "number") return v !== 0;
+    if (typeof v !== "string") return undefined;
+    const s = v.trim().toLowerCase();
+    if (s === "true" || s === "on" || s === "1") return true;
+    if (s === "false" || s === "off" || s === "0") return false;
+    return undefined;
   },
+
+  /**
+   * Like truthy, but negates the result.
+   * "true"/"on"/"1" -> false, "false"/"off"/"0" -> true.
+   */
+  falsy: (v) => {
+    const result = CAST_BUILTINS.truthy(v);
+    if (result === undefined) return undefined;
+    return !result;
+  },
+
+  /**
+   * Cast to number. Accepts numeric strings and numbers.
+   * Returns undefined for non-numeric strings.
+   */
+  number: (v) => {
+    if (typeof v === "number") return v;
+    if (typeof v === "string" && v.trim().length > 0) {
+      const n = Number(v.trim());
+      if (!isNaN(n)) return n;
+    }
+    return undefined;
+  },
+
+  /**
+   * Cast to non-empty string (trimmed). Returns undefined for empty/whitespace.
+   */
+  string: (v) => {
+    if (typeof v === "string") {
+      const trimmed = v.trim();
+      return trimmed.length > 0 ? trimmed : undefined;
+    }
+    return undefined;
+  },
+
+  /**
+   * Accept any value as-is (never skips).
+   */
+  any: (v) => v,
+
+  /**
+   * Accept non-empty arrays only.
+   */
+  nonemptyArray: (v) => (Array.isArray(v) && v.length > 0 ? v : undefined),
 };
 
 // ── Built-in compute functions ────────────────────────────────────────────
@@ -104,71 +111,19 @@ const COMPUTE_BUILTINS = {
   },
 };
 
-// ── Predicate/Transform Resolution ──────────────────────────────────────────
+// ── Cast Resolution ────────────────────────────────────────────────────────
 
 /**
- * Parse a predicate string and return a function.
- * Supports named builtins and parameterized forms like equals:false or equals('false').
+ * Parse a cast string and return a function.
  *
- * @param {string|Function} predicate - Predicate string or function.
- * @returns {Function|null} Predicate function or null.
+ * @param {string} cast - Cast name (e.g. "truthy", "falsy", "number", "string", "any").
+ * @returns {Function|null} Cast function or null.
  */
-export function resolvePredicate(predicate) {
-  if (typeof predicate === "function") return predicate;
-  if (typeof predicate !== "string") return null;
+export function resolveCast(cast) {
+  if (typeof cast === "function") return cast;
+  if (typeof cast !== "string") return null;
 
-  // Check for parameterized form: name('arg') or name:arg
-  let name, arg;
-
-  // Try name('arg') form first
-  const parenMatch = predicate.match(/^(\w+)\('(.*)'\)$/);
-  if (parenMatch) {
-    [, name, arg] = parenMatch;
-  } else {
-    // Try name:arg form
-    const colonMatch = predicate.match(/^(\w+):(.+)$/);
-    if (colonMatch) {
-      [, name, arg] = colonMatch;
-    }
-  }
-
-  if (name && arg !== undefined) {
-    const factory = PREDICATE_BUILTINS[name];
-    if (factory) {
-      // For equalsStr, always use raw string (no JSON parsing)
-      if (name === "equalsStr") {
-        return factory(arg);
-      }
-      // Try to parse as JSON first (handles true/false/null/numbers)
-      try {
-        return factory(JSON.parse(arg));
-      } catch {
-        // Use as string
-        return factory(arg);
-      }
-    }
-  }
-
-  // Check for named builtin
-  const builtin = PREDICATE_BUILTINS[predicate];
-  if (builtin) return builtin;
-
-  // Unknown predicate — return null (no filtering)
-  return null;
-}
-
-/**
- * Parse a transform string and return a function.
- * Supports named builtins.
- *
- * @param {string|Function} transform - Transform string or function.
- * @returns {Function|null} Transform function or null.
- */
-export function resolveTransform(transform) {
-  if (typeof transform === "function") return transform;
-  if (typeof transform !== "string") return null;
-
-  const builtin = TRANSFORM_BUILTINS[transform];
+  const builtin = CAST_BUILTINS[cast];
   return builtin || null;
 }
 
@@ -226,11 +181,11 @@ export function loadCoreSchema() {
 
 /**
  * Convert a raw JSON schema entry to a runtime-ready schema entry.
- * Resolves string predicates and transforms to functions.
+ * Resolves string casts to functions.
  * Preserves function defaults.
  *
  * @param {object} rawKey - A key entry from core.config.json.
- * @returns {object} Runtime-ready schema entry with resolved predicates/transforms.
+ * @returns {object} Runtime-ready schema entry with resolved casts.
  */
 export function compileSchemaKey(rawKey) {
   const { layers, ...rest } = rawKey;
@@ -238,14 +193,9 @@ export function compileSchemaKey(rawKey) {
   const compiledLayers = layers.map((layer) => {
     const compiled = { ...layer };
 
-    // Resolve predicate string to function
-    if (typeof compiled.predicate === "string") {
-      compiled.predicate = resolvePredicate(compiled.predicate);
-    }
-
-    // Resolve transform string to function
-    if (typeof compiled.transform === "string") {
-      compiled.transform = resolveTransform(compiled.transform);
+    // Resolve cast string to function
+    if (typeof compiled.cast === "string") {
+      compiled.cast = resolveCast(compiled.cast);
     }
 
     // Resolve compute layer to function
@@ -258,13 +208,7 @@ export function compileSchemaKey(rawKey) {
       }
     }
 
-    // Handle noLog special transforms
-    if (layer.source === "env" && layer.key === "OA_AGENT_LOG") {
-      compiled.transform = () => false;
-    }
-    if (layer.source === "env" && layer.key === "OA_AGENT_NO_LOG") {
-      compiled.transform = () => true;
-    }
+    // noLog env vars use standard cast from JSON (falsy for OA_AGENT_LOG, truthy for OA_AGENT_NO_LOG)
 
     return compiled;
   });

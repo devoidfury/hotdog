@@ -210,7 +210,7 @@ function printInfoJson(
  * Trace config resolution for a single key, showing which layer provided the value.
  */
 function traceConfigResolution(keyName, schema, context) {
-  const { layers, transform } = schema;
+  const { layers } = schema;
   const result = {
     key: keyName,
     type: schema.type || "unknown",
@@ -238,23 +238,26 @@ function traceConfigResolution(keyName, schema, context) {
     layerInfo.value = value;
 
     if (value !== undefined && value !== null && value !== "") {
-      if (layer.predicate && !layer.predicate(value, context)) {
-        layerInfo.predicateFailed = true;
+      // Apply cast — converts value or returns undefined to skip
+      if (layer.cast && typeof layer.cast === "function") {
+        const casted = layer.cast(value, context);
+        if (casted === undefined) {
+          layerInfo.castSkipped = true;
+          result.layers.push(layerInfo);
+          continue;
+        }
+
+        layerInfo.matched = true;
+        layerInfo.castedValue = casted;
+        result.resolvedValue = casted;
+        result.resolvedFrom = `${layer.source}${layer.key ? ` (${layer.key})` : layer.path ? ` (${layer.path})` : ""}`;
         result.layers.push(layerInfo);
-        continue;
+        break;
       }
 
-      // Apply transforms
-      let finalValue = value;
-      if (layer.transform) {
-        finalValue = layer.transform(value, context);
-      }
-      if (transform) {
-        finalValue = transform(finalValue, context);
-      }
-
+      // No cast — return raw value
       layerInfo.matched = true;
-      result.resolvedValue = finalValue;
+      result.resolvedValue = value;
       result.resolvedFrom = `${layer.source}${layer.key ? ` (${layer.key})` : layer.path ? ` (${layer.path})` : ""}`;
       result.layers.push(layerInfo);
       break;
@@ -347,8 +350,8 @@ async function printConfigDebug(cli, config, providers, resolved) {
     for (const layer of trace.layers) {
       const status = layer.matched
         ? "✓"
-        : layer.predicateFailed
-          ? "✗ (predicate)"
+        : layer.castSkipped
+          ? "✗ (cast)"
           : "·";
       const layerDesc =
         layer.source === "default"

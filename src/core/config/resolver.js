@@ -2,7 +2,7 @@
  * Generic config resolver.
  *
  * Walks declared layers for each config key and returns the first valid value.
- * Supports compiled schemas (from schema-loader.js) with function predicates/transforms.
+ * Supports compiled schemas (from schema-loader.js) with cast functions.
  */
 
 import { getNested } from "../../utils/objects.js";
@@ -61,7 +61,7 @@ export function resolveLayerValue(layer, context) {
  * @returns {*} The resolved value.
  */
 export function resolveKey(keyName, schema, context) {
-  const { layers, transform } = schema;
+  const { layers } = schema;
 
   for (const layer of layers) {
     // Default layer always wins — return immediately, even if null
@@ -71,21 +71,18 @@ export function resolveKey(keyName, schema, context) {
 
     const value = resolveLayerValue(layer, context);
 
-    // Layer may specify a predicate — only use this value if predicate passes
-    if (value !== undefined && value !== null && value !== "") {
-      if (layer.predicate && !layer.predicate(value, context)) continue;
+    // Skip undefined, null, empty string before cast
+    if (value === undefined || value === null || value === "") continue;
 
-      // Apply layer-level transform first, then schema-level transform
-      let result =
-        layer.transform && typeof layer.transform === "function"
-          ? layer.transform(value, context)
-          : value;
-      result =
-        transform && typeof transform === "function"
-          ? transform(result, context)
-          : result;
-      return result;
+    // Apply cast — converts value or returns undefined to skip
+    if (layer.cast && typeof layer.cast === "function") {
+      const casted = layer.cast(value, context);
+      if (casted === undefined) continue;
+      return casted;
     }
+
+    // No cast — return raw value
+    return value;
   }
 
   // No layer matched — return undefined (should not happen if schema has a default)

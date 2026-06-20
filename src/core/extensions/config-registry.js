@@ -129,8 +129,7 @@ export class ConfigRegistry {
    * @param {string} layers[].source - Source type: 'cli', 'config', 'env', 'default'.
    * @param {string} [layers[].key] - Key to look up in the source.
    * @param {*} [layers[].default] - Default fallback value.
-   * @param {string|Function} [layers[].predicate] - Condition for value acceptance.
-   * @param {string|Function} [layers[].transform] - Post-process function.
+   * @param {string|Function} [layers[].cast] - Cast function: converts value or returns undefined to skip.
    */
   registerConfigSchemaWithLayers(key, schema, layers) {
     if (!key || typeof key !== "string") {

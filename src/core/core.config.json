@@ -90,7 +90,7 @@
     "type": "boolean",
     "cliFlag": { "long": "--compact-debug", "type": "boolean", "description": "Write compaction output to compaction.out.json" },
     "layers": [
-      { "source": "cli", "key": "compactDebug", "predicate": "truthy" },
+      { "source": "cli", "key": "compactDebug", "cast": "truthy" },
       { "source": "config", "key": "compactDebug" },
       { "default": false }
     ]
@@ -99,16 +99,16 @@
     "type": "boolean",
     "cliFlag": { "long": "--no-log", "type": "boolean", "description": "Disable session logging" },
     "layers": [
-      { "source": "cli", "key": "noLog", "predicate": "truthy" },
+      { "source": "cli", "key": "noLog", "cast": "truthy" },
       {
         "source": "env",
         "key": "OA_AGENT_LOG",
-        "predicate": "equalsStr:false"
+        "cast": "falsy"
       },
       {
         "source": "env",
         "key": "OA_AGENT_NO_LOG",
-        "predicate": "equalsStr:1"
+        "cast": "truthy"
       },
       { "source": "config", "key": "noLog" },
       { "default": false }
@@ -118,11 +118,11 @@
     "type": "boolean",
     "cliFlag": { "long": "--tokens", "type": "boolean", "description": "Display token usage stats" },
     "layers": [
-      { "source": "cli", "key": "tokens", "predicate": "truthy" },
+      { "source": "cli", "key": "tokens", "cast": "truthy" },
       {
         "source": "config",
         "key": "showTokenUse",
-        "predicate": "notUndefined"
+        "cast": "any"
       },
       { "default": true }
     ]
@@ -131,7 +131,7 @@
     "type": "boolean",
     "cliFlag": { "long": "--no-stream", "type": "boolean", "description": "Disable streaming" },
     "layers": [
-      { "source": "cli", "key": "noStream", "transform": "negate" },
+      { "source": "cli", "key": "noStream", "cast": "falsy" },
       { "default": true }
     ]
   },
@@ -139,8 +139,8 @@
     "type": "boolean",
     "cliFlag": { "long": "--show-tools", "type": "boolean", "description": "Show tool calls" },
     "layers": [
-      { "source": "cli", "key": "showTools", "predicate": "truthy", "transform": "negate" },
-      { "source": "cli", "key": "hideTools", "predicate": "notUndefined" },
+      { "source": "cli", "key": "showTools", "cast": "falsy" },
+      { "source": "cli", "key": "hideTools", "cast": "any" },
       { "source": "config", "key": "hideTools" },
       { "default": true }
     ]
@@ -149,12 +149,12 @@
     "type": "boolean",
     "cliFlag": { "long": "--hide-thinking", "type": "boolean", "description": "Hide thinking output" },
     "layers": [
-      { "source": "cli", "key": "showThinking", "predicate": "truthy", "transform": "negate" },
-      { "source": "cli", "key": "hideThinking", "predicate": "notUndefined" },
+      { "source": "cli", "key": "showThinking", "cast": "falsy" },
+      { "source": "cli", "key": "hideThinking", "cast": "any" },
       {
         "source": "config",
         "key": "hideThinking",
-        "predicate": "notUndefined"
+        "cast": "any"
       },
       { "default": false }
     ]
@@ -166,20 +166,17 @@
       {
         "source": "cli",
         "key": "noColors",
-        "predicate": "equals(true)",
-        "transform": "negate"
+        "cast": "falsy"
       },
       {
         "source": "cli",
         "key": "colors",
-        "predicate": "notUndefined",
-        "transform": "toBoolean"
+        "cast": "truthy"
       },
       {
         "source": "config",
         "key": "colors",
-        "predicate": "notNull",
-        "transform": "toBooleanOrPalette"
+        "cast": "any"
       },
       { "default": true }
     ]
@@ -191,14 +188,12 @@
       {
         "source": "cli",
         "key": "theme",
-        "predicate": "nonempty",
-        "transform": "trim"
+        "cast": "string"
       },
       {
         "source": "config",
         "key": "theme",
-        "predicate": "nonempty",
-        "transform": "trim"
+        "cast": "string"
       },
       { "default": "dark" }
     ]
@@ -210,20 +205,17 @@
       {
         "source": "cli",
         "key": "role",
-        "predicate": "nonempty",
-        "transform": "trim"
+        "cast": "string"
       },
       {
         "source": "config",
         "key": "role",
-        "predicate": "nonempty",
-        "transform": "trim"
+        "cast": "string"
       },
       {
         "source": "profile",
         "key": "role",
-        "predicate": "nonempty",
-        "transform": "trim"
+        "cast": "string"
       },
       {
         "default": "You are an AI coding assistant. Use the instructions below and the tools available to you to assist the user."
@@ -233,7 +225,7 @@
   "aspects": {
     "type": "array",
     "layers": [
-      { "source": "profile", "key": "aspects", "predicate": "nonemptyArray" },
+      { "source": "profile", "key": "aspects", "cast": "nonemptyArray" },
       { "default": [] }
     ]
   },
@@ -281,8 +273,8 @@
     "type": "boolean",
     "cliFlag": { "long": "--hook-trace", "type": "boolean", "description": "Trace hook execution (requires OA_LOG_LEVEL=debug)" },
     "layers": [
-      { "source": "cli", "key": "hookTrace", "predicate": "truthy" },
-      { "source": "env", "key": "OA_HOOK_TRACE", "predicate": "equalsStr:1" },
+      { "source": "cli", "key": "hookTrace", "cast": "truthy" },
+      { "source": "env", "key": "OA_HOOK_TRACE", "cast": "truthy" },
       { "source": "config", "key": "hookTrace" },
       { "default": false }
     ]

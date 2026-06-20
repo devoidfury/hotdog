@@ -18,7 +18,6 @@ export {
   loadExtensionSchemas,
   compileSchemaKey,
   getLayerDefault,
-  resolvePredicate,
-  resolveTransform,
+  resolveCast,
   resolveCompute,
 } from "./schema-loader.js";

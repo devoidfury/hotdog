@@ -4,6 +4,7 @@ import {
   resolveAll,
 } from "../../src/core/config/resolver.js";
 import { CONFIG_SCHEMA as CONFIG_KEYS } from "../../src/core/config/schema.js";
+import { resolveCast } from "../../src/core/config/schema-loader.js";
 import { getNested } from "../../src/utils/objects.js";
 
 describe("getNested", () => {
@@ -24,13 +25,189 @@ describe("getNested", () => {
   });
 
   it("returns undefined for null object", () => {
-    expect(getNested(null, "a")).toBeUndefined();
+    expect(getNested(null, "a.b")).toBeUndefined();
   });
 
   it("returns undefined for empty path", () => {
     expect(getNested({ a: 1 }, "")).toBeUndefined();
   });
 });
+
+// ── Cast Builtins ────────────────────────────────────────────────────────
+
+describe("resolveCast", () => {
+  describe("truthy", () => {
+    const cast = resolveCast("truthy");
+
+    it("passes boolean true through", () => {
+      expect(cast(true)).toBe(true);
+    });
+
+    it("passes boolean false through", () => {
+      expect(cast(false)).toBe(false);
+    });
+
+    it("casts number 0 to false", () => {
+      expect(cast(0)).toBe(false);
+    });
+
+    it("casts non-zero number to true", () => {
+      expect(cast(1)).toBe(true);
+      expect(cast(-1)).toBe(true);
+    });
+
+    it("casts 'true' string to true", () => {
+      expect(cast("true")).toBe(true);
+      expect(cast("True")).toBe(true);
+      expect(cast("TRUE")).toBe(true);
+    });
+
+    it("casts 'false' string to false", () => {
+      expect(cast("false")).toBe(false);
+      expect(cast("False")).toBe(false);
+    });
+
+    it("casts 'on' to true", () => {
+      expect(cast("on")).toBe(true);
+      expect(cast("ON")).toBe(true);
+    });
+
+    it("casts 'off' to false", () => {
+      expect(cast("off")).toBe(false);
+      expect(cast("OFF")).toBe(false);
+    });
+
+    it("casts '1' to true", () => {
+      expect(cast("1")).toBe(true);
+    });
+
+    it("casts '0' to false", () => {
+      expect(cast("0")).toBe(false);
+    });
+
+    it("returns undefined for unrecognizable strings", () => {
+      expect(cast("maybe")).toBeUndefined();
+      expect(cast("yes")).toBeUndefined();
+      expect(cast("no")).toBeUndefined();
+    });
+
+    it("returns undefined for non-string non-boolean non-number", () => {
+      expect(cast(null)).toBeUndefined();
+      expect(cast({})).toBeUndefined();
+      expect(cast([])).toBeUndefined();
+    });
+  });
+
+  describe("falsy", () => {
+    const cast = resolveCast("falsy");
+
+    it("negates boolean true", () => {
+      expect(cast(true)).toBe(false);
+    });
+
+    it("negates boolean false", () => {
+      expect(cast(false)).toBe(true);
+    });
+
+    it("negates 'true' string", () => {
+      expect(cast("true")).toBe(false);
+    });
+
+    it("negates 'false' string", () => {
+      expect(cast("false")).toBe(true);
+    });
+
+    it("negates '1'", () => {
+      expect(cast("1")).toBe(false);
+    });
+
+    it("negates '0'", () => {
+      expect(cast("0")).toBe(true);
+    });
+
+    it("negates 'on'/'off'", () => {
+      expect(cast("on")).toBe(false);
+      expect(cast("off")).toBe(true);
+    });
+
+    it("returns undefined for unrecognizable strings", () => {
+      expect(cast("maybe")).toBeUndefined();
+    });
+  });
+
+  describe("number", () => {
+    const cast = resolveCast("number");
+
+    it("passes number through", () => {
+      expect(cast(42)).toBe(42);
+      expect(cast(0)).toBe(0);
+      expect(cast(-3.14)).toBe(-3.14);
+    });
+
+    it("casts numeric strings", () => {
+      expect(cast("42")).toBe(42);
+      expect(cast("  3.14  ")).toBe(3.14);
+      expect(cast("-10")).toBe(-10);
+    });
+
+    it("returns undefined for non-numeric strings", () => {
+      expect(cast("hello")).toBeUndefined();
+      expect(cast("")).toBeUndefined();
+    });
+  });
+
+  describe("string", () => {
+    const cast = resolveCast("string");
+
+    it("trims and returns non-empty strings", () => {
+      expect(cast("  hello  ")).toBe("hello");
+      expect(cast("world")).toBe("world");
+    });
+
+    it("returns undefined for empty/whitespace strings", () => {
+      expect(cast("")).toBeUndefined();
+      expect(cast("   ")).toBeUndefined();
+    });
+
+    it("returns undefined for non-strings", () => {
+      expect(cast(42)).toBeUndefined();
+      expect(cast(true)).toBeUndefined();
+    });
+  });
+
+  describe("any", () => {
+    const cast = resolveCast("any");
+
+    it("passes any value through", () => {
+      expect(cast(true)).toBe(true);
+      expect(cast(false)).toBe(false);
+      expect(cast(0)).toBe(0);
+      expect(cast("hello")).toBe("hello");
+      expect(cast(null)).toBe(null);
+      expect(cast({})).toEqual({});
+    });
+  });
+
+  describe("nonemptyArray", () => {
+    const cast = resolveCast("nonemptyArray");
+
+    it("passes non-empty arrays through", () => {
+      expect(cast(["a"])).toEqual(["a"]);
+      expect(cast([1, 2, 3])).toEqual([1, 2, 3]);
+    });
+
+    it("returns undefined for empty arrays", () => {
+      expect(cast([])).toBeUndefined();
+    });
+
+    it("returns undefined for non-arrays", () => {
+      expect(cast("hello")).toBeUndefined();
+      expect(cast({})).toBeUndefined();
+    });
+  });
+});
+
+// ── resolveKey ───────────────────────────────────────────────────────────
 
 describe("resolveKey", () => {
   it("resolves from cli layer first", () => {
@@ -86,13 +263,13 @@ describe("resolveKey", () => {
     expect(resolveKey("url", schema, context)).toBe("dynamic-test");
   });
 
-  it("skips layer when predicate fails", () => {
+  it("skips layer when cast returns undefined", () => {
     const schema = {
       layers: [
         {
           source: "cli",
           key: "role",
-          predicate: (v) => v?.trim().length > 0,
+          cast: (v) => (typeof v === "string" && v.trim().length > 0 ? v.trim() : undefined),
         },
         { default: "default role" },
       ],
@@ -101,19 +278,20 @@ describe("resolveKey", () => {
     expect(resolveKey("role", schema, context)).toBe("default role");
   });
 
-  it("applies transform to resolved value", () => {
+  it("applies cast to resolved value", () => {
     const schema = {
-      layers: [{ source: "cli", key: "name" }],
-      transform: (v) => v.toUpperCase(),
+      layers: [
+        { source: "cli", key: "name", cast: (v) => v.toUpperCase() },
+      ],
     };
     const context = { cli: { name: "hello" } };
     expect(resolveKey("name", schema, context)).toBe("HELLO");
   });
 
-  it("applies layer-level transform", () => {
+  it("applies cast that negates (falsy-like)", () => {
     const schema = {
       layers: [
-        { source: "cli", key: "noStream", transform: (v) => !v },
+        { source: "cli", key: "noStream", cast: (v) => !v },
         { default: true },
       ],
     };
@@ -183,6 +361,8 @@ describe("resolveAll", () => {
     expect(result.key2).toBe("default2");
   });
 });
+
+// ── CONFIG_KEYS schema ───────────────────────────────────────────────────
 
 describe("CONFIG_KEYS schema", () => {
   const baseContext = {
@@ -255,12 +435,12 @@ describe("CONFIG_KEYS schema", () => {
     expect(resolveKey("stream", CONFIG_KEYS.stream, context)).toBe(true);
   });
 
-  it("hideTools respects cli flag (showTools negates, hideTools direct)", () => {
-    // --show-tools sets showTools=true → negate → hideTools=false
+  it("hideTools respects cli flag (showTools falsy, hideTools any)", () => {
+    // --show-tools sets showTools=true -> cast falsy -> hideTools=false
     let context = { ...baseContext, cli: { showTools: true } };
     expect(resolveKey("hideTools", CONFIG_KEYS.hideTools, context)).toBe(false);
 
-    // --hide-tools sets hideTools=true → direct
+    // --hide-tools sets hideTools=true -> direct
     context = { ...baseContext, cli: { hideTools: true } };
     expect(resolveKey("hideTools", CONFIG_KEYS.hideTools, context)).toBe(true);
 
@@ -283,7 +463,7 @@ describe("CONFIG_KEYS schema", () => {
       true,
     );
 
-    // Config false should be respected (not skipped by notFalse predicate)
+    // Config false should be respected
     context = { ...baseContext, config: { showTokenUse: false } };
     expect(resolveKey("showTokenUse", CONFIG_KEYS.showTokenUse, context)).toBe(
       false,
@@ -311,14 +491,14 @@ describe("CONFIG_KEYS schema", () => {
       true,
     );
 
-    // CLI tokens not set (false) falls through to config
+    // CLI tokens=false is a valid boolean — cast: truthy passes it through as false
     context = {
       ...baseContext,
       cli: { tokens: false },
       config: { showTokenUse: true },
     };
     expect(resolveKey("showTokenUse", CONFIG_KEYS.showTokenUse, context)).toBe(
-      true,
+      false,
     );
   });
 
@@ -485,18 +665,50 @@ describe("Phase 2: Complex values", () => {
       expect(resolveKey("noLog", CONFIG_KEYS.noLog, context)).toBe(true);
     });
 
-    it("skips cli noLog=false", () => {
+    it("cli noLog=false is accepted as valid boolean (not skipped)", () => {
       const context = {
         ...baseContext,
         cli: { noLog: false },
         config: { noLog: true },
       };
-      expect(resolveKey("noLog", CONFIG_KEYS.noLog, context)).toBe(true);
+      // cast: truthy passes boolean false through — doesn't skip
+      expect(resolveKey("noLog", CONFIG_KEYS.noLog, context)).toBe(false);
     });
 
-    it("resolves from OA_AGENT_LOG=false env", () => {
+    it("resolves from OA_AGENT_LOG=false env (falsy cast)", () => {
       process.env.OA_AGENT_LOG = "false";
       try {
+        // OA_AGENT_LOG=false -> cast falsy -> true
+        expect(resolveKey("noLog", CONFIG_KEYS.noLog, baseContext)).toBe(true);
+      } finally {
+        delete process.env.OA_AGENT_LOG;
+      }
+    });
+
+    it("resolves from OA_AGENT_LOG=true env (falsy cast)", () => {
+      process.env.OA_AGENT_LOG = "true";
+      try {
+        // OA_AGENT_LOG=true -> cast falsy -> false
+        expect(resolveKey("noLog", CONFIG_KEYS.noLog, baseContext)).toBe(false);
+      } finally {
+        delete process.env.OA_AGENT_LOG;
+      }
+    });
+
+    it("resolves from OA_AGENT_LOG=1 env (falsy cast)", () => {
+      process.env.OA_AGENT_LOG = "1";
+      try {
+        // OA_AGENT_LOG=1 -> cast falsy -> false
+        expect(resolveKey("noLog", CONFIG_KEYS.noLog, baseContext)).toBe(false);
+      } finally {
+        delete process.env.OA_AGENT_LOG;
+      }
+    });
+
+    it("resolves from OA_AGENT_LOG=on env (falsy cast)", () => {
+      process.env.OA_AGENT_LOG = "on";
+      try {
+        // OA_AGENT_LOG=on -> cast falsy -> false
         expect(resolveKey("noLog", CONFIG_KEYS.noLog, baseContext)).toBe(false);
       } finally {
         delete process.env.OA_AGENT_LOG;
@@ -570,14 +782,14 @@ describe("Phase 2: Complex values", () => {
       ).toBe(false);
     });
 
-    it("recognizes color palette object from config", () => {
+    it("passes color palette object through from config (cast: any)", () => {
       const context = {
         ...baseContext,
         config: { colors: { thinking: "cyan", tool_call: "green" } },
       };
       expect(
         resolveKey("useColors", CONFIG_KEYS.useColors, context),
-      ).toBe(true);
+      ).toEqual({ thinking: "cyan", tool_call: "green" });
     });
 
     it("resolves boolean from config.colors", () => {

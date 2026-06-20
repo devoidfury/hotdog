@@ -4,9 +4,7 @@
 // this module renders the template with those chunks.
 
 import { initSystemPromptTemplate as _initTemplate } from "../config/providers.js";
-import { render, render as renderTemplate } from "../../utils/render.js";
-
-export { renderTemplate };
+import { render } from "../../utils/render.js";
 
 // ── System Prompt Template ─────────────────────────────────────────────────
 

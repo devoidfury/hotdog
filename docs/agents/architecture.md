@@ -142,7 +142,6 @@ Tool definition helpers and utilities. Key exports:
 ### Template Engine (`src/utils/render.js`)
 Tera-like template engine supporting `{{ vars }}`, `{% if %}`, `{% for %}`, filters (`|trim`, `|length`, `|exec`, `|default`), and block tags. Key exports:
 - `render(template, context, cache)` — renders template string with context
-- `renderTemplate` — alias for render
 - `compile(template)` — compiles template into render function
 
 ### System Prompt (`src/core/context/system-prompt.js`)

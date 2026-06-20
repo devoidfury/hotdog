@@ -130,6 +130,11 @@
           "tags": ["coder", "general"]
         },
         {
+          "name": "granite-4.1-30b",
+          "context-limit": 131072,
+          "tags": ["coder", "general"]
+        },
+        {
           "name": "smollm3-3b",
           "context-limit": 64000,
           "tags": ["fast", "general"]

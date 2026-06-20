@@ -2,7 +2,7 @@
 
 ## Overview
 
-`oa-agent` is an AI agent harness with tool calling support. It connects to an LLM API, sends conversation messages, handles tool calls from the LLM, and executes tools. The architecture is built around a **minimal core** with **extension-based features** — all features (tools, compaction, MCP, skills, prompts, LSP, subcommands) live as extensions that plug into the core via hooks.
+`oa-agent` is an AI agent harness with tool calling support. It connects to an LLM API, sends conversation messages, handles tool calls from the LLM, and executes tools. The architecture is built around a **minimal core** with **extension-based features** -- all features (tools, compaction, MCP, skills, prompts, subcommands) live as extensions that plug into the core via hooks.
 
 ## Architecture Philosophy
 
@@ -20,21 +20,20 @@ Everything else is an extension. This keeps the core minimal, testable, and full
 ## Core Modules (`src/core/`)
 
 ### Entry Point (`src/core/main.js`)
-Thin orchestrator: create config registry → discover extension metadata → parse CLI args → build config → create core infrastructure → load extensions → dispatch subcommand. All initialization logic is in config.js and core modules.
+Thin orchestrator: create config registry -> discover extension metadata -> parse CLI args -> build config -> create core infrastructure -> load extensions -> dispatch subcommand. All initialization logic is in config modules and core modules.
 
 ### CLI (`src/core/cli.js`)
 Argument parsing with support for dynamic CLI flags registered by extensions via `ConfigRegistry`. Exports `parseArgs()` and `HELP_TEXT`. Supports core flags plus extension-provided flags.
 
-### Config (`src/core/config.js`)
-All defaults, provider config loading, profiles, and model registry. Key exports:
-- `DEFAULT_*` constants — all defaults live here (model, URL, timeouts, role, compaction settings)
-- `loadConfig(configPath, extParams)` — loads config from file with extension param merging
-- `buildConfig(cli)` — single entry point for config resolution, returns `{ resolved, modelRegistry, providers }`
-- `loadProfileFile(config, profileName)` — loads `.profile.md` files
-- `getProfile(config, profileName)` — resolves profile from config and profile files
-- `buildModelRegistry(config)` — builds model lookup map from provider configs
-- `initSystemPromptTemplate(templatePath)` — loads/reuses system prompt template
-- `mergeExtensionConfigDefaults(defaultConfig, extParams)` — merges extension defaults into base config
+### Config (`src/core/config/`)
+Split into sub-modules. The single source of truth is `src/core/core.config.json`. Key exports:
+- `src/core/config/index.js` — `loadConfig(configPath, cliConfigDir, extParams)`, `buildConfig(cli)`, `validateConfig()`, `getDefaultConfig()`, `normalizeConfigKeys()`
+- `src/core/config/defaults.js` — `DEFAULT_*` constants (model, URL, timeouts, role, paths, etc.)
+- `src/core/config/schema.js` — `CONFIG_SCHEMA` re-exported from schema-loader
+- `src/core/config/schema-loader.js` — Reads `core.config.json`, builds resolution layers, cast functions
+- `src/core/config/profiles.js` — `loadProfileFile()`, `loadProfileFiles()`, `resolveProfile()`, `mergeProfile()`
+- `src/core/config/providers.js` — `buildModelRegistry()`, `initSystemPromptTemplate()`
+- `src/core/config/resolver.js` — `resolveAll()`, `resolveModel()`, `resolveModelWithProvider()`
 
 ### Config Registry (`src/core/extensions/config-registry.js`)
 Manages extension-registered CLI flags and config parameters. Config params are primarily defined in `extension.json` configSchema (single source of truth), with defaults automatically extracted and registered. Extensions can still use `CONFIG_CLI_FLAGS_REGISTER` and `CONFIG_PARAMS_REGISTER` hooks for programmatic control when needed.
@@ -52,7 +51,7 @@ The foundation for the extension architecture. `HookSystem` class with `on()`, `
 
 **System prompt:** `SYSTEM_PROMPT_BUILD`
 
-**Commands:** `COMMAND_DISPATCH`, `SLASH_COMMANDS_REGISTER`
+**Commands:** `COMMAND_DISPATCH`, `COMMANDS_REGISTER`
 
 **Output:** `OUTPUT_EVENT`
 
@@ -90,7 +89,7 @@ Discovers, loads, and manages extensions. Key exports:
 
 ### Agent (`src/core/agent.js`)
 Minimal Agent class that runs the LLM loop and delegates behavior to hooks. Key features:
-- Constructor takes `options` object: `hooks`, `toolRegistry`, `llmClient`, `model`, `maxIterations`, `maxTokens`, `hideTools`, `hideThinking`, `showTokenUse`, `sink`, `modelRegistry`, `profileName`, `role`, `profileBody`, `stream`, `config`, `sessionId`, `abortSignal`, `toolWhitelist`
+- Constructor takes `options` object: `hooks`, `toolRegistry`, `llmClient`, `model`, `maxIterations`, `maxTokens`, `hideTools`, `hideThinking`, `showTokenUse`, `sink`, `modelRegistry`, `profileName`, `role`, `profileBody`, `stream`, `config`, `sessionId`, `abortSignal`, `toolWhitelist`, `commandRegistry`
 - `run(userInput)` — main iteration loop: add user message → build messages → LLM call → process stream → execute tools → repeat
 - `ensureSystemPrompt()` — builds system prompt via hooks (extensions contribute)
 - `_processStream(stream)` — processes streaming LLM response (content, reasoning, tool calls, usage)
@@ -102,7 +101,7 @@ Minimal Agent class that runs the LLM loop and delegates behavior to hooks. Key 
 
 ### Commands (`src/core/commands.js`)
 Command parsing — commands are the abstract concept, slash commands (/cmd) are one UI implementation. Key exports:
-- `Command` enum: `Help`, `Quit`, `Clear`, `Tools`, `Thinking`, `Tokens`, `Regenerate`, `Unknown`
+- `Command` enum: `Command.Help`, `Command.Quit`, `Command.Clear`, `Command.Tools`, `Command.Thinking`, `Command.Tokens`, `Command.Regenerate`, `Command.Unknown`
 - `parseCommand(cmd, registry)` — parses raw command string into typed command object
 
 ### Session Management (`src/core/session/index.js`)
@@ -137,7 +136,7 @@ Tool definition helpers and utilities. Key exports:
 - `resolvePath(filePath, cwdBoundary, workspaceRoot)` — path resolution with safety
 - `parseToolInput(input)` — safer argument parsing returning null on failure
 - `defaultCallDisplay(input, templateFn, options)` — default display formatter for tools
-- `ToolContext` — context object for tool execution
+- `ToolContext` — context object for tool execution (defined in `src/core/extensions/tool-context.js`)
 
 ### Template Engine (`src/utils/render.js`)
 Tera-like template engine supporting `{{ vars }}`, `{% if %}`, `{% for %}`, filters (`|trim`, `|length`, `|exec`, `|default`), and block tags. Key exports:
@@ -146,10 +145,9 @@ Tera-like template engine supporting `{{ vars }}`, `{% if %}`, `{% for %}`, filt
 
 ### System Prompt (`src/core/context/system-prompt.js`)
 System prompt building. Key exports:
-- `loadAspects(aspectNames)` — loads `.aspect.md` files from `config/aspects/`
+- `loadAspects(aspectNames, aspectsDir)` — loads `.aspect.md` files from configured aspects directory
 - `loadAgentsMd()` — loads `AGENTS.md` from CWD
-- `loadSystemPromptTemplate(templatePath)` — loads/reuses system prompt template
-- `buildSystemPrompt(options)` — builds full system prompt with role, body, model, aspects, agentsMd, skillsContent
+- `buildSystemPrompt(options)` — builds full system prompt from chunks contributed by extensions via `SYSTEM_PROMPT_BUILD` hook
 
 ### Error Handling (`src/core/error.js`)
 Centralized error formatting. Key exports:
@@ -190,12 +188,10 @@ Input parsing. Key exports:
 Escapes input that triggers special behavior (tool call actions, internal markers). Protects against prompt injection via crafted input. Key exports: `MarkerMangler` class with `escape()`, `unescape()`, `escapeInput()`, `escapeToolOutput()`, `unescapeOutput()`, `unescapeToolInput()`, `createMarkerMangler()`.
 
 ### Utilities (`src/utils/`)
-- `file-utils.js` — `parseFrontMatter(content)` — parses YAML front matter from markdown
-- `utils.js` — `deepMerge(...sources)`
 - `file-utils.js` — `parseFrontMatter(content)`, `validateNameable(name, label, dirName)`
-- `context/system-prompt.js` — `loadAspects(aspectNames, aspectsDir)`, `buildSystemPrompt(...)`
-- `render.js` — Template engine
-- `json-schema.js` — `validateParams()`, `formatValidationErrors()`
+- `objects.js` — `deepMerge(...sources)`
+- `render.js` — Template engine with `{{ vars }}`, `{% if %}`, `{% for %}`, filters
+- `json-schema.js` — `validate()`, `validateParams()`, `formatValidationErrors()`
 
 ### UI Layer (`src/core/ui/`)
 - `cli.js` — `CliOutputSink` class: formatting + color emission, extends `OutputSink`. Key exports: `formatCompacting()`, `formatToolCall()`, `formatToolResult()`, `formatTokenUsage()`, `formatThinking()`, `formatTaskProgress()`, `CliOutputSink`
@@ -226,21 +222,25 @@ Each extension has:
 
 | Extension | Purpose |
 |-----------|---------|
-| `core-tools` | Core tools: bash, write, read, edit, grep, find, fetch, question, pager, explore, project_info |
+| `core-tools` | Core tools: write, read, edit, grep, find, pager, explore (disabled), project_info |
+| `bash-tool` | Bash tool -- execute shell commands |
+| `fetch-tool` | Fetch tool -- make HTTP requests |
+| `question-tool` | Question tool -- ask interactive questions |
+| `model-switch` | Model switching tool + `/model` slash commands |
 | `compaction` | Compaction strategies: summarize, summarize-short, drop, token-aware |
-| `lsp` | LSP tools: hover, definition, completion, signature, document-symbol, references, code-action, formatting, rename, diagnostics, workspace-symbol, apply-edit |
 | `mcp-client` | MCP server connections (HTTP + stdio) |
 | `skills` | Skills discovery and loading |
 | `prompts` | Prompt template loading |
 | `session-log` | JSONL session logging |
-| `session-review` | Review CLI subcommand + review tool |
-| `info-show-prompt` | Info + show-prompt CLI subcommands |
-| `refresh` | Hot-reload extension + refresh tool |
-| `run-shell-command` | Shell command tool |
-| `one-shot` | One-shot prompt mode (`-c`/`--prompt` flag, `prompt` subcommand) |
-| `interactive-cli` | Interactive CLI session with readline loop |
+| `ui-session-review-cli` | Review CLI subcommand + review tool |
+| `ui-info-cli` | Info + show-prompt CLI subcommands |
+| `ui-one-shot` | One-shot prompt mode (`-c`/`--prompt` flag, `prompt` subcommand) |
+| `ui-interactive-cli` | Interactive CLI session with readline loop |
+| `run-shell-command` | Shell command execution via `/sh`, `!`, and `:!` syntax |
 | `subagents` | Subagent tools for task delegation (manager-only) |
-| `model-switch` | Model switching tool |
+| `agents-md` | Loads AGENTS.md and contributes Project Context section |
+| `aspects` | Loads aspect files and contributes Guidelines section |
+| `environment` | Contributes Environment section to system prompt |
 
 ### Extension Load Order
 Extensions are loaded in order: REFRESH (0) → CORE_TOOLS (1) → CLI (2) → DEFAULT (10). This ensures CLI extensions register subcommands before config is loaded, and core tools are available before other extensions that depend on them.

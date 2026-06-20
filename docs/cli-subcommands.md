@@ -138,10 +138,11 @@ export function create(core) {
 
 | Subcommand | Extension | Description |
 |-----------|-----------|-------------|
-| `info` | `info-show-prompt` | Show system info and diagnostics |
-| `show-prompt` | `info-show-prompt` | Show rendered system prompt |
-| `review` | `session-review` | Review session logs |
-| `prompt` | `one-shot` | One-shot prompt mode — run a single prompt and exit |
+| `info` | `ui-info-cli` | Show system info and diagnostics |
+| `show-prompt` | `ui-info-cli` | Show rendered system prompt |
+| `review` | `ui-session-review-cli` | Review session logs |
+| `prompt` | `ui-one-shot` | One-shot prompt mode — run a single prompt and exit |
+| `cli` | `ui-interactive-cli` | Interactive CLI session (default when stdin is TTY) |
 
 ## Benefits
 

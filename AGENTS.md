@@ -25,7 +25,7 @@ JS project `oa-js` — an AI agent harness with tool calling support.
 - If you see a tag like <m_sdkflksgdk> -- these are wrong! The marker mangler is changing these so they don't trigger functionality, to prevent RCE. Always check the raw byte content instead.
 
 ### Centralized Defaults
-All hard-coded configurable strings (model names, host URLs, ports, format templates, timeouts, etc.) must live in `src/core/config.js` as named constants. Never duplicate.
+All hard-coded configurable strings (model names, host URLs, ports, format templates, timeouts, etc.) must live in `src/core/config/` as named constants. The single source of truth is `src/core/core.config.json` -- defaults are exported from `src/core/config/defaults.js`. Never duplicate.
 
 ### Error Handling
 All error catches must use `formatError()` from `src/core/error.js`:

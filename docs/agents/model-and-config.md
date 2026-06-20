@@ -1,6 +1,6 @@
 # Model and Config
 
-## Model System (`src/core/config.js`)
+## Model System (`src/core/config/`)
 
 ### Core Types
 - **ModelRegistry** — stores models by name from provider configs. Built by `buildModelRegistry(config)`.
@@ -11,25 +11,23 @@
 - **By name**: `agent.model = "provider/model-name"` (setter emits `MODEL_CHANGE` hook)
 - **Via ModelTool**: The LLM can call the `model` tool mid-conversation: `{"name": "model", "arguments": {"name": "provider/model-name"}}`
 
-## Config System (`src/core/config.js`)
+## Config System (`src/core/config/`)
 
 ### Core Defaults
-All defaults live in `src/core/config.js` as named constants:
+All defaults live in `src/core/config/defaults.js` (sourced from `src/core/core.config.json`):
 - `DEFAULT_MODEL`, `DEFAULT_AI_URL`, `DEFAULT_THINKER`, `DEFAULT_TOOL_FMT`, `DEFAULT_TOOL_OUTPUT_FMT`, `DEFAULT_TOOL_RESULT_FMT`
 - `DEFAULT_SKILLS_PATH`, `DEFAULT_PROFILES_PATH`, `DEFAULT_PROMPTS_PATH`, `DEFAULT_CONFIG_PATH`, `DEFAULT_SYSTEM_PROMPT_PATH`
-- `DEFAULT_CHAT_TIMEOUT_SECS`, `DEFAULT_EMBEDDINGS_TIMEOUT_SECS`, `DEFAULT_BASH_TIMEOUT_MS`, `DEFAULT_MAX_TOKENS`, `DEFAULT_MAX_ITERATIONS`, `DEFAULT_MAX_RETRIES`
-- `DEFAULT_PROMPT`, `DEFAULT_EXIT_COMMANDS`, `DEFAULT_ROLE`, `DEFAULT_MAX_TOOL_OUTPUT_LINES`, `DEFAULT_TASK_PROFILE`
-- `DEFAULT_READ_TOOL_LIMIT`, `DEFAULT_FIND_MAX_RESULTS`, `DEFAULT_GREP_MAX_RESULTS`
-- `DEFAULT_MAX_EDIT_INPUT_SIZE`
-- `DEFAULT_COMPACTION_ENABLED`, `DEFAULT_COMPACTION_RESERVE_TOKENS`, `DEFAULT_COMPACTION_KEEP_RECENT_MESSAGES`, `DEFAULT_COMPACTION_STRATEGY`
-- `defaultCompactionSettings` — `{ enabled, reserveTokens, keepRecentMessages, strategy }`
-- LSP defaults: `DEFAULT_LSP_ENABLED`, `DEFAULT_LSP_MAX_HOVER_LINES`, `DEFAULT_LSP_MAX_COMPLETION_ITEMS`, `DEFAULT_LSP_MAX_SYMBOL_RESULTS`, `DEFAULT_LSP_REQUEST_TIMEOUT_MS`, `DEFAULT_LSP_SERVER_TIMEOUT_MS`, `DEFAULT_LSP_SERVERS`
+- `DEFAULT_CHAT_TIMEOUT_SECS`, `DEFAULT_EMBEDDINGS_TIMEOUT_SECS`, `DEFAULT_MAX_TOKENS`, `DEFAULT_MAX_ITERATIONS`, `DEFAULT_MAX_RETRIES`
+- `DEFAULT_PROMPT`, `DEFAULT_EXIT_COMMANDS`, `DEFAULT_ROLE`, `DEFAULT_TASK_PROFILE`
+
+Extension-specific defaults (e.g., `DEFAULT_READ_TOOL_LIMIT`, `DEFAULT_FIND_MAX_RESULTS`, compaction settings) are defined in each extension's `extension.json` configSchema.
 
 ### Config Resolution
-- **`loadConfig(configPath, extParams)`** — loads config from file, falls back to `./config/defaults.json` then `~/.config/oa-agent/default.json`, then defaults. Merges extension defaults.
-- **`buildConfig(cli)`** — single entry point for config resolution. Returns `{ resolved, modelRegistry, providers }`. Handles CLI args → config file → env var → default priority chain.
+- **`loadConfig(configPath, cliConfigDir, extParams)`** — loads config from file, falls back to resolved config dir (CLI `--config-dir` > `./config` > env > `/etc/oa-agent` > XDG). Merges extension defaults.
+- **`buildConfig(cli)`** — single entry point for config resolution. Returns `{ resolved, modelRegistry, providers }`. Handles CLI args -> config file -> env var -> default priority chain.
 - **`mergeExtensionConfigDefaults(defaultConfig, extParams)`** — merges extension-registered config defaults into base config
 - **`normalizeConfigKeys(obj)`** — converts snake_case to camelCase
+- **`validateConfig(config, extensionSchemas)`** — validates config against core schema and extension schemas
 
 ### Providers
 Models are declared inside providers. Each provider has `name`, `url`, optional `api_key`, and a list of `models`. The active provider is selected via `--provider` CLI flag or `default_provider` config key.
@@ -110,83 +108,32 @@ Profiles can also be defined as `.profile.md` files in a `profiles/` directory (
 
 Allows extensions to register their own CLI flags and config parameters dynamically.
 
-**Usage in an extension**:
+**Usage in an extension** (via hooks):
 ```javascript
 export function create(core) {
-  core.configRegistry.registerCliFlags([
-    {
-      short: '-x',
-      long: '--my-flag',
-      description: 'My extension flag',
-      type: 'string',
-      default: null,
+  return {
+    hooks: {
+      [HOOKS.CONFIG_CLI_FLAGS_REGISTER]: (configRegistry) => {
+        configRegistry.registerCliFlags([
+          {
+            short: '-x',
+            long: '--my-flag',
+            description: 'My extension flag',
+            type: 'string',
+            default: null,
+          },
+        ]);
+      },
+      [HOOKS.CONFIG_PARAMS_REGISTER]: () => [
+        {
+          key: 'myExtension',
+          description: 'My extension config section',
+          defaults: { enabled: true, timeout: 30 },
+        },
+      ],
     },
-  ]);
-
-  core.configRegistry.registerConfigParams([
-    {
-      key: 'myExtension',
-      description: 'My extension config section',
-      defaults: { enabled: true, timeout: 30 },
-    },
-  ]);
-
-  return { /* ... */ };
+  };
 }
 ```
 
-**Key methods**: `registerCliFlags(flags)`, `registerConfigParams(params)`, `getCliFlags()`, `getConfigParams()`, `getCliHelpText()`, `buildDefaults()`.
-
-## LSP Configuration (`src/extensions/lsp/`)
-
-LSP integration is controlled via the `lsp` config object. It is **disabled by default** (`DEFAULT_LSP_ENABLED = false`).
-
-### Config Fields
-
-| Field | Type | Default | Description |
-|-------|------|---------|-------------|
-| `enabled` | boolean | `false` | Master switch for LSP tools |
-| `servers` | object | (empty) | Custom server overrides keyed by name |
-| `maxHoverLines` | number | `200` | Max lines in hover results |
-| `maxCompletionItems` | number | `50` | Max completion items returned |
-| `maxSymbolResults` | number | `100` | Max symbol search results |
-| `requestTimeoutMs` | number | `30000` | Per-request timeout |
-| `serverStartupTimeoutMs` | number | `60000` | Server startup timeout |
-
-### Default Language Servers
-
-| Language | Command | Args | Filetypes |
-|----------|---------|------|--------|
-| TypeScript | `typescript-language-server` | `--stdio` | `.ts`, `.tsx`, `.js`, `.jsx` |
-| Python | `pyright-langserver` | `--stdio` | `.py` |
-| Go | `gopls` | `serve` | `.go` |
-| Rust | `rust-analyzer` | (none) | `.rs` |
-
-### Resolution Chain
-
-Profile-level `lsp.*` settings override global `lsp.*` settings, which override defaults.
-
-### Custom Server Configuration
-
-Add custom servers in the config file under `lsp.servers`:
-
-```json
-{
-  "lsp": {
-    "enabled": true,
-    "servers": {
-      "java": {
-        "name": "java",
-        "command": "jdtls",
-        "args": [],
-        "filetypes": ["java"],
-        "timeoutMs": 45000
-      }
-    }
-  }
-}
-```
-
-### Supported File Extensions
-
-The LSP system maps extensions to language IDs: `ts`→typescript, `tsx`→typescriptreact, `js`→javascript, `jsx`→javascriptreact, `py`→python, `go`→go, `rs`→rust, `java`→java, `rb`→ruby, `php`→php, `c`→c, `cpp`→cpp, `cs`→csharp, `swift`→swift, `kt`→kotlin, plus markdown, json, yaml, html, css, scss, shellscript, toml, xml, sql. Unknown extensions map to `plaintext` (no server configured).
+**Key methods**: `registerCliFlags(flags)`, `registerConfigParams(params)`, `getCliFlags()`, `getConfigParams()`, `getCliHelpText()`, `buildDefaults()`, `registerConfigSchema(key, schema)`, `validateConfig(config, schema)`.

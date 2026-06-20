@@ -1,11 +1,11 @@
 > **⚠️ OBSOLETE — Extension system implemented.**
 >
 > The extension architecture described in this design has been implemented. See:
-> - `docs/agents/architecture.md` — Current architecture overview
-> - `src/hooks.js` — Hook system implementation
-> - `src/core/extensions.js` — Extension loader implementation
-> - `AGENTS.md` — Module layout and extension guidelines
-> - `docs/cli-subcommands.md` — CLI subcommand registration
+> - `docs/agents/architecture.md` -- Current architecture overview
+> - `src/core/hooks.js` -- Hook system implementation
+> - `src/core/extensions/extensions.js` -- Extension loader implementation
+> - `AGENTS.md` -- Module layout and extension guidelines
+> - `docs/cli-subcommands.md` -- CLI subcommand registration
 >
 > Key differences from this design:
 > - Extensions use `create(core, options)` instead of `register(context)`

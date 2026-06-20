@@ -95,14 +95,14 @@ Domain concepts for the oa-agent AI agent harness. Implementation details are do
 - **Commands** — User-triggered operations. Never LLM-triggered. Commands are the abstract concept; how they are invoked is a UI implementation detail.
 - **Slash Commands** — The interactive CLI implements commands using `/` prefix syntax (e.g., `/quit`, `/compact`). This is one UI implementation for invoking commands.
 - **Core commands** (`Command` enum): `help`, `quit`, `clear`, `tools`, `thinking`, `tokens`, `regenerate`, `unknown`.
-- **Custom commands** — Extensions register commands via `CommandRegistry` using the `COMMANDS_REGISTER` hook (e.g., `compact`, `model`, `skill`, `prompt:name`).
+- **Custom commands** — Extensions register commands via `CommandRegistry` using the `COMMANDS_REGISTER` hook (e.g., `compact`, `model`, `skill`).
 - **UI commands** — `help`, `quit` handled directly by UI layer; all others dispatched through agent.
 
 ## Configuration
 
 - `config/defaults.json` — User-editable global defaults (CWD-relative). Fallback: `~/.config/oa-agent/default.json`.
 - `config/profiles/*.profile.md` — Named profile overlays (role, body, tools, aspects).
-- `config/templates/system_prompt.md` — System prompt template.
+- `config/system_prompt.md` — System prompt template.
 - `config/prompts/*.prompt.md` — Named prompt templates.
 - `config/aspects/*.aspect.md` — Aspect snippets loaded by profiles.
 - Resolution priority — CLI argument → config file → extension defaults → built-in defaults.
@@ -111,7 +111,7 @@ Domain concepts for the oa-agent AI agent harness. Implementation details are do
 
 - **Single-threaded event loop** — The JS runtime runs on a single thread with async/await. No separate backend/frontend threads.
 - **Core** (`src/core/`) — Minimal foundation: Agent, hooks, session management, tool registry, config, CLI parsing. No extension dependencies.
-- **Extensions** (`src/extensions/`) — All features (tools, compaction, LSP, MCP, skills, subcommands) live as extensions that plug into the core via hooks.
+- **Extensions** (`src/extensions/`) — All features (tools, compaction, MCP, skills, prompts, subcommands) live as extensions that plug into the core via hooks.
 - **Hook System** — The primary extension mechanism. `HookSystem` with `on()`, `emit()`, `emitAsync()`, `emitAsyncSeq()`. Extensions register handlers; core emits events.
 - **MessageBus** — Owns the agent run loop. Drains queued messages sequentially through `agent.run()`. Provides input preprocessing via `INPUT` hook.
 - **OutputSink** — Decouples agent from UI. Agent emits events via `sink.emit()`; `CliOutputSink` formats and displays with color support.

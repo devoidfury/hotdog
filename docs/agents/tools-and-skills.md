@@ -23,32 +23,27 @@ Core tools are provided by the `core-tools` extension. Tools are registered via 
 **Tool descriptors** — declarative table in `src/extensions/core-tools/index.js`:
 - `TOOL_DESCRIPTORS` — array of `{ name, disabled }` for all core tools
 - `CORE_TOOL_NAMES` — all core tool names
-- `TOOL_CONSTRUCTORS` — declarative map of tool names to constructor functions
+- `TOOL_FACTORIES` — declarative map of tool names to factory functions
 
-**Disabled by default** — `ExploreTool` and `ProjectInfoTool` have `disabled: true` in their descriptors; they require explicit inclusion via profile `whitelist_tools`. Subagent tools require `manager: true` profile flag and a `taskManager`.
+**Disabled by default** — `ExploreTool` has `disabled: true` in its descriptor; it requires explicit inclusion via profile `whitelist_tools`. Subagent tools require `manager: true` profile flag and a `taskManager`.
 
 ### Core Tool Implementations
 
-| Tool | Description | Key Params |
-|------|-------------|------------|
-| `bash` | Executes shell commands via `bash -c` | `command` |
-| `write` | Writes files with multi-mode support | `path`, `content` / `regex` + `content` / `files` + `atomic` |
-| `read` | Reads file contents with pagination | `path`, `limit`, `offset` |
-| `edit` | Edits files using replace modes | `path`, `oldString`, `newString` / `search`, `replace` / `files` + `atomic` |
-| `grep` | Searches file contents for regex patterns | `pattern`, `path`, `type`, `context` |
-| `find` | Glob-based file search using `fd` with `find` fallback | `pattern`, `path`, `file_type`, `max_results` |
-| `fetch` | Fetches URLs via HTTP | `url`, `method`, `headers`, `body` |
-| `question` | Asks interactive questions to the user | `questions` array with `key`, `prompt`, `options`, `required`, `default` |
-| `pager` | Virtual pagination of truncated tool output | `tool_call_id`, `page` |
-| `project_info` *(disabled)* | Gathers project information | `path` |
-| `explore` *(disabled)* | Explores codebase with configurable thoroughness | `path`, `thoroughness` |
-
-### Additional Tools (from other extensions)
-
-| Tool | Extension | Description |
-|------|-----------|-------------|
-| `model` | `model-switch` | Switches to a different model mid-conversation |
-| `review` | `session-review` | Lists recent sessions, gets session entries, or gets tool call index |
+| Tool | Extension | Description | Key Params |
+|------|-----------|-------------|------------|
+| `write` | `core-tools` | Writes files with multi-mode support | `path`, `content` / `regex` + `content` / `files` + `atomic` |
+| `read` | `core-tools` | Reads file contents with pagination | `path`, `limit`, `offset` |
+| `edit` | `core-tools` | Edits files using replace modes | `path`, `oldString`, `newString` / `search`, `replace` / `files` + `atomic` |
+| `grep` | `core-tools` | Searches file contents for regex patterns | `pattern`, `path`, `type`, `context` |
+| `find` | `core-tools` | Glob-based file search | `pattern`, `path`, `file_type`, `max_results` |
+| `pager` | `core-tools` | Virtual pagination of truncated tool output | `tool_call_id`, `page` |
+| `project_info` | `core-tools` | Gathers project information | `path` |
+| `explore` *(disabled)* | `core-tools` | Explores codebase with configurable thoroughness | `path`, `thoroughness` |
+| `bash` | `bash-tool` | Executes shell commands via `bash -c` | `command` |
+| `fetch` | `fetch-tool` | Fetches URLs via HTTP | `url`, `method`, `headers`, `body` |
+| `question` | `question-tool` | Asks interactive questions to the user | `questions` array with `key`, `prompt`, `options`, `required`, `default` |
+| `model` | `model-switch` | Switches to a different model mid-conversation | `name` |
+| `review` | `ui-session-review-cli` | Lists recent sessions, gets session entries, or gets tool call index | `operation`, `session_id`, `limit` |
 
 ### Subagent Tools *(disabled by default, enabled in manager profile)*
 
@@ -63,34 +58,6 @@ Provided by the `subagents` extension. Only registered when `profile.manager: tr
 | `plan_status` | List recent sessions or check task status |
 | `complete_task` | Mark a task as complete |
 | `wait` | Model yields control back to user |
-
-### LSP Tools (`src/extensions/lsp/`)
-
-12 tools providing IDE-like features via external language servers. All tools require:
-- `lsp.enabled: true` in config or profile
-- A language server binary installed (e.g., `typescript-language-server`, `pyright-langserver`, `gopls`, `rust-analyzer`)
-- A file with a supported extension to determine the language server
-
-**Activation**: LSP tools are registered by the LSP extension via `HOOKS.TOOLS_REGISTER` when `lsp.enabled` is `true`.
-
-| Tool | LSP Method | Purpose |
-|------|-----------|--------|
-| `lsp-hover` | `textDocument/hover` | Type info, docs at position |
-| `lsp-definition` | `textDocument/definition` | Find symbol definition location |
-| `lsp-completion` | `textDocument/completion` | Auto-completion suggestions |
-| `lsp-signature` | `textDocument/signatureHelp` | Function parameter hints |
-| `lsp-document-symbol` | `textDocument/documentSymbol` | All symbols in a document |
-| `lsp-references` | `textDocument/references` | All usages of a symbol |
-| `lsp-code-action` | `textDocument/codeAction` | Quick fixes, refactoring options |
-| `lsp-formatting` | `textDocument/formatting` | Format entire document |
-| `lsp-rename` | `textDocument/rename` | Rename symbol across project |
-| `lsp-diagnostics` | `publishDiagnostics` (push) | Errors, warnings, hints |
-| `lsp-workspace-symbol` | `workspace/symbol` | Search symbols across workspace |
-| `lsp-apply-edit` | `workspace/applyEdit` | Apply multi-file edits atomically |
-
-**Position encoding**: All position parameters (`line`, `character`) use LSP's UTF-16 zero-based indexing.
-
-**LSP Client Management**: Tools use `client-cache.js` for LSP client caching per language ID. The LSP extension manages server lifecycle (spawn → initialize → shutdown) with configurable timeouts.
 
 ## Skills
 

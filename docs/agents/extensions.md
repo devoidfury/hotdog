@@ -1,11 +1,11 @@
 ### Extension Architecture
-The core is minimal — all features (tools, compaction, MCP, skills, prompts, subcommands, LSP) live as extensions in `src/extensions/`. Extensions plug into the core via hooks defined in `src/core/hooks.js`.
+The core is minimal -- all features (tools, compaction, MCP, skills, prompts, subcommands) live as extensions in `src/extensions/`. Extensions plug into the core via hooks defined in `src/core/hooks.js`.
 
 When adding new functionality:
 1. Check if an existing extension can be extended
 2. If creating a new extension, place it in `src/extensions/<name>/` with `index.js` and a `extension.json` metadata file
 3. Register tools via `HOOKS.TOOLS_REGISTER`
-4. Register CLI subcommands via `HOOKS.CLI_SUBCOMMANDS_REGISTER` (or directly via `core.cliSubcommandRegistry`)
+4. Register CLI subcommands via `HOOKS.CLI_SUBCOMMANDS_REGISTER` (or via `core.cliSubcommandRegistry`)
 5. **Define config options in `configSchema` in `extension.json`** (single source of truth)
 6. Optionally use `HOOKS.CONFIG_CLI_FLAGS_REGISTER` for CLI flags that need programmatic control
 7. Contribute to system prompt via `HOOKS.SYSTEM_PROMPT_BUILD`

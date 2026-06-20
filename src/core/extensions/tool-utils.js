@@ -70,6 +70,27 @@ export class ToolResult {
     });
   }
 
+  /**
+   * Build a ToolResult from an options object.
+   * Convenience factory for tools that construct results from scratch.
+   *
+   * @param {Object} opts
+   * @param {string} [opts.output=""] — Output text.
+   * @param {string|null} [opts.error=null] — Error message (sets success to false).
+   * @param {Map|Object|null} [opts.metadata=null] — Metadata entries.
+   * @param {boolean} [opts.success=true] — Override success flag.
+   * @param {string|null} [opts.outputTag=null] — Custom XML tag for output.
+   * @param {Array|null} [opts.images=null] — Image attachments.
+   * @returns {ToolResult}
+   */
+  static from({ output = "", error = null, metadata = null, success = true, outputTag = null, images = null } = {}) {
+    // If an error is provided and success wasn't explicitly set, mark as failure
+    if (error !== null && success !== false) {
+      success = false;
+    }
+    return new ToolResult({ output, error, metadata, success, outputTag, images });
+  }
+
   withEntry(key, value) {
     this.metadata = this.metadata || new Map();
     this.metadata.set(key, String(value));

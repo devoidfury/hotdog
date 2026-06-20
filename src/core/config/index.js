@@ -243,8 +243,9 @@ export async function loadConfig(configPath, cliConfigDir, extParams) {
     // Normalize snake_case keys from config to camelCase
     return deepMerge(getDefaultConfig(extParams), normalizeConfigKeys(raw));
   } catch (e) {
-    logger.error(`Error loading config from ${configPathToUse}: ${e.message}`);
-    process.exit(1);
+    const err = new Error(`Error loading config from ${configPathToUse}: ${e.message}`);
+    err.cause = e;
+    throw err;
   }
 }
 

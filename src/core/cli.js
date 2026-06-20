@@ -123,8 +123,7 @@ export function parseArgs(configRegistry = null, knownSubcommands = null) {
 
       // Handle flags with values
       if (i + 1 >= args.length) {
-        logger.error(`Error: ${arg} requires a value`);
-        process.exit(1);
+        throw new Error(`${arg} requires a value`);
       }
 
       const value = args[++i];
@@ -134,8 +133,7 @@ export function parseArgs(configRegistry = null, knownSubcommands = null) {
       if (flagDef.type === "number" || flagDef.type === "int") {
         parsedValue = parseInt(value, 10);
         if (isNaN(parsedValue)) {
-          logger.error(`Error: ${arg} requires a numeric value`);
-          process.exit(1);
+          throw new Error(`${arg} requires a numeric value`);
         }
       } else if (flagDef.type === "array") {
         parsedValue = value.split(",");

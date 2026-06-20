@@ -658,7 +658,7 @@ export class ExtensionLoader {
   async load(name, entryPoint, createOptions = {}) {
     let extModule;
     if (typeof entryPoint === "string") {
-      extModule = await import(`${entryPoint}?t=${Date.now()}`);
+      extModule = await import(entryPoint);
     } else {
       extModule = entryPoint;
     }

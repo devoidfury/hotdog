@@ -39,6 +39,7 @@ Commands:
   /thinking     - Toggle thinking display
   /theme <name> - Set theme (dark, light, monochrome)
   /regenerate   - Regenerate system prompt
+  /reasoning none|minimal|low|high|xhigh|max|unset - Set reasoning effort level
   /sh <command> - Run a shell command and display output
   :!<command>   - Vim-like alias for shell commands (e.g., :!ls)
 `;

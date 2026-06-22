@@ -105,6 +105,37 @@ describe('Agent', () => {
       expect(agent.context).toEqual([]);
     });
 
+    it('should handle reasoning command to set effort', async () => {
+      const result = await agent.executeCommand({ type: 'reasoning', value: 'high' });
+      expect(result).toEqual({ content: 'Reasoning effort set to: high' });
+      expect(agent._reasoningEffort).toBe('high');
+    });
+
+    it('should handle reasoning command with unset', async () => {
+      agent._reasoningEffort = 'high';
+      const result = await agent.executeCommand({ type: 'reasoning', value: 'unset' });
+      expect(result).toEqual({ content: 'Reasoning effort unset (omitted from requests).' });
+      expect(agent._reasoningEffort).toBeUndefined();
+    });
+
+    it('should show current setting when no value given', async () => {
+      agent._reasoningEffort = 'high';
+      const result = await agent.executeCommand({ type: 'reasoning', value: null });
+      expect(result).toEqual({ content: 'Current reasoning effort: high' });
+      expect(agent._reasoningEffort).toBe('high');
+    });
+
+    it('should show (not set) when no value given and no override', async () => {
+      const result = await agent.executeCommand({ type: 'reasoning', value: null });
+      expect(result).toEqual({ content: 'Current reasoning effort: (not set, omitted from requests)' });
+      expect(agent._reasoningEffort).toBeUndefined();
+    });
+
+    it('should reject invalid reasoning effort', async () => {
+      const result = await agent.executeCommand({ type: 'reasoning', value: 'invalid' });
+      expect(result.error).toContain('Invalid reasoning effort');
+    });
+
     it('should delegate to hooks for custom commands', async () => {
       hooks.on(HOOKS.COMMAND_DISPATCH, () => ({ content: 'custom handled' }));
       const result = await agent.executeCommand({ type: 'custom' });
@@ -133,6 +164,55 @@ describe('Agent', () => {
       await agent.ensureSystemPrompt();
       expect(contributed.length).toBe(1);
       expect(agent._systemPrompt).toContain('Test Chunk');
+    });
+  });
+
+  describe('_resolveModelConfig', () => {
+    it('should include reasoning_effort from model registry', () => {
+      agent._modelRegistry = {
+        'test-model': { name: 'test-model', temperature: 0.5, maxTokens: 100, reasoningEffort: 'high' },
+      };
+      const config = agent._resolveModelConfig();
+      expect(config.reasoningEffort).toBe('high');
+    });
+
+    it('should override reasoning_effort from runtime setting', () => {
+      agent._modelRegistry = {
+        'test-model': { name: 'test-model', temperature: 0.5, maxTokens: 100, reasoningEffort: 'low' },
+      };
+      agent._reasoningEffort = 'max';
+      const config = agent._resolveModelConfig();
+      expect(config.reasoningEffort).toBe('max');
+    });
+
+    it('should omit reasoning_effort when not set anywhere', () => {
+      agent._modelRegistry = {
+        'test-model': { name: 'test-model', temperature: 0.5, maxTokens: 100 },
+      };
+      const config = agent._resolveModelConfig();
+      expect(config.reasoningEffort).toBeUndefined();
+    });
+  });
+
+  describe('serialize/deserialize reasoning_effort', () => {
+    it('should serialize and deserialize reasoning_effort', () => {
+      agent._reasoningEffort = 'max';
+      const serialized = agent.serialize();
+      expect(serialized.reasoningEffort).toBe('max');
+
+      const newAgent = new Agent({ hooks, toolRegistry, llmClient, model: 'test' });
+      newAgent.deserialize(serialized);
+      expect(newAgent._reasoningEffort).toBe('max');
+    });
+
+    it('should handle undefined reasoning_effort in deserialize', () => {
+      const serialized = agent.serialize();
+      expect(serialized.reasoningEffort).toBeUndefined();
+
+      const newAgent = new Agent({ hooks, toolRegistry, llmClient, model: 'test' });
+      newAgent._reasoningEffort = 'high';
+      newAgent.deserialize(serialized);
+      expect(newAgent._reasoningEffort).toBeUndefined();
     });
   });
 });

@@ -186,3 +186,48 @@ describe('LlmClient.chatStream', () => {
     expect(gen[Symbol.asyncIterator]).toBeDefined();
   });
 });
+
+describe('LlmClient.buildChatRequest reasoning_effort', () => {
+  it('includes reasoning_effort when present in modelConfig', () => {
+    const client = new LlmClient();
+    const request = client.buildChatRequest(
+      [],
+      { name: 'gpt-4', temperature: null, maxTokens: 100, reasoningEffort: 'high' },
+      null,
+    );
+    expect(request.reasoning_effort).toBe('high');
+  });
+
+  it('omits reasoning_effort when undefined in modelConfig', () => {
+    const client = new LlmClient();
+    const request = client.buildChatRequest(
+      [],
+      { name: 'gpt-4', temperature: null, maxTokens: 100 },
+      null,
+    );
+    expect(request.reasoning_effort).toBeUndefined();
+  });
+
+  it('omits reasoning_effort when null in modelConfig', () => {
+    const client = new LlmClient();
+    const request = client.buildChatRequest(
+      [],
+      { name: 'gpt-4', temperature: null, maxTokens: 100, reasoningEffort: null },
+      null,
+    );
+    expect(request.reasoning_effort).toBeUndefined();
+  });
+
+  it('supports all reasoning effort values', () => {
+    const client = new LlmClient();
+    const values = ['none', 'minimal', 'low', 'high', 'xhigh', 'max'];
+    for (const v of values) {
+      const request = client.buildChatRequest(
+        [],
+        { name: 'gpt-4', temperature: null, maxTokens: 100, reasoningEffort: v },
+        null,
+      );
+      expect(request.reasoning_effort).toBe(v);
+    }
+  });
+});

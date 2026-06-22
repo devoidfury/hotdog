@@ -60,6 +60,7 @@ export class Agent {
     this._cancelled = false;
     this._iterationCount = 0;
     this._systemPrompt = null;
+    this._reasoningEffort = undefined;
     this._isRestoring = false;
     this._toolDefs = null;
     // Task agent support
@@ -706,13 +707,20 @@ export class Agent {
   // ── Helpers ───────────────────────────────────────────────────────────────
 
   _resolveModelConfig() {
-    return (
-      this._modelRegistry[this.__model] || {
-        name: this.__model,
-        temperature: null,
-        maxTokens: DEFAULT_MAX_TOKENS,
-      }
-    );
+    const fromRegistry = this._modelRegistry[this.__model] || {
+      name: this.__model,
+      temperature: null,
+      maxTokens: DEFAULT_MAX_TOKENS,
+      reasoningEffort: undefined,
+    };
+    // Runtime override via /reasoning command takes priority
+    if (this._reasoningEffort !== undefined) {
+      return {
+        ...fromRegistry,
+        reasoningEffort: this._reasoningEffort,
+      };
+    }
+    return fromRegistry;
   }
 
   _emitOutput(type, data) {
@@ -804,6 +812,8 @@ export class Agent {
         return this._handleThinkingCommand();
       case "regenerate":
         return this._handleRegenerateCommand();
+      case "reasoning":
+        return this._handleReasoningCommand(cmd.value);
       default:
         return { error: `Unknown command: ${cmd.type}` };
     }
@@ -850,6 +860,28 @@ export class Agent {
     return { content: "System prompt regenerated." };
   }
 
+  _handleReasoningCommand(value) {
+    const valid = ["none", "minimal", "low", "high", "xhigh", "max", "unset"];
+    // No argument — show current setting
+    if (!value) {
+      const current = this._reasoningEffort !== undefined
+        ? this._reasoningEffort
+        : "(not set, omitted from requests)";
+      return { content: `Current reasoning effort: ${current}` };
+    }
+    if (value === "unset") {
+      this._reasoningEffort = undefined;
+      return { content: "Reasoning effort unset (omitted from requests)." };
+    }
+    if (valid.includes(value)) {
+      this._reasoningEffort = value;
+      return { content: `Reasoning effort set to: ${value}` };
+    }
+    return {
+      error: `Invalid reasoning effort '${value}'. Valid: none, minimal, low, high, xhigh, max, unset`,
+    };
+  }
+
   /**
    * Serialize the agent state for persistence.
    * Messages are serialized via Message.toJSON() which handles:
@@ -864,6 +896,7 @@ export class Agent {
       context: this._context.map((m) => m.toJSON()),
       model: this.model,
       iterationCount: this._iterationCount,
+      reasoningEffort: this._reasoningEffort,
     };
   }
 
@@ -877,5 +910,6 @@ export class Agent {
     this._context = data.context.map((m) => new Message(m));
     this.model = data.model;
     this._iterationCount = data.iterationCount || 0;
+    this._reasoningEffort = data.reasoningEffort !== undefined ? data.reasoningEffort : undefined;
   }
 }

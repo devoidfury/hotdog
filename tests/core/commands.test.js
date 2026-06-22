@@ -23,6 +23,17 @@ describe('parseCommand', () => {
     expect(parseCommand('regenerate')).toEqual({ type: Command.Regenerate, value: null });
   });
 
+  it('parses reasoning command', () => {
+    expect(parseCommand('reasoning')).toEqual({ type: Command.Reasoning, value: null });
+    expect(parseCommand('reasoning high')).toEqual({ type: Command.Reasoning, value: 'high' });
+    expect(parseCommand('reasoning none')).toEqual({ type: Command.Reasoning, value: 'none' });
+    expect(parseCommand('reasoning minimal')).toEqual({ type: Command.Reasoning, value: 'minimal' });
+    expect(parseCommand('reasoning low')).toEqual({ type: Command.Reasoning, value: 'low' });
+    expect(parseCommand('reasoning xhigh')).toEqual({ type: Command.Reasoning, value: 'xhigh' });
+    expect(parseCommand('reasoning max')).toEqual({ type: Command.Reasoning, value: 'max' });
+    expect(parseCommand('reasoning unset')).toEqual({ type: Command.Reasoning, value: 'unset' });
+  });
+
   it('parses extension-handled commands as unknown', () => {
     // These are handled by extensions, not core
     expect(parseCommand('models')).toEqual({ type: Command.Unknown, value: 'models' });

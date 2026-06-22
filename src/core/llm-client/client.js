@@ -147,6 +147,9 @@ export class LlmClient {
       function_choice: "auto",
       stream: stream,
     };
+    if (modelConfig.reasoningEffort !== undefined && modelConfig.reasoningEffort !== null) {
+      request.reasoning_effort = modelConfig.reasoningEffort;
+    }
     if (stream) {
       request.stream_options = { include_usage: true };
     }

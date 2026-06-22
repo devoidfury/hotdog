@@ -29,6 +29,7 @@ export function buildModelRegistry(config) {
         name: modelName,
         temperature: modelEntry.temperature,
         maxTokens: modelEntry.maxTokens || DEFAULT_MAX_TOKENS,
+        reasoningEffort: modelEntry.reasoning_effort || modelEntry.reasoningEffort || undefined,
       };
     }
     // Also add provider-level models (models defined at provider level)

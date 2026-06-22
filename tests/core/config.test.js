@@ -74,6 +74,25 @@ describe("buildModelRegistry", () => {
     expect(registry["a/m1"]).toBeDefined();
     expect(registry["b/m2"]).toBeDefined();
   });
+
+  it("extracts reasoning_effort from model entries", () => {
+    const config = {
+      providers: [
+        {
+          name: "ai365",
+          models: [
+            { name: "dsv4", reasoning_effort: "max" },
+            { name: "qwen", reasoning_effort: "high" },
+            { name: "basic" },
+          ],
+        },
+      ],
+    };
+    const registry = buildModelRegistry(config);
+    expect(registry["ai365/dsv4"].reasoningEffort).toBe("max");
+    expect(registry["ai365/qwen"].reasoningEffort).toBe("high");
+    expect(registry["ai365/basic"].reasoningEffort).toBeUndefined();
+  });
 });
 
 describe("normalizeConfigKeys", () => {

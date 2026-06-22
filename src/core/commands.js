@@ -15,6 +15,7 @@ export const Command = {
   Thinking: "thinking",
   Tokens: "tokens",
   Regenerate: "regenerate",
+  Reasoning: "reasoning",
   Unknown: "unknown",
 };
 
@@ -74,6 +75,13 @@ export function parseCommand(cmd, registry) {
 
   if (cmd === "regenerate") {
     return { type: Command.Regenerate, value: null };
+  }
+
+  // reasoning — set reasoning effort level
+  if (cmd === "reasoning" || cmd.startsWith("reasoning ")) {
+    const parts = cmd.split(/\s+/);
+    const effort = parts.slice(1).join(" ").trim();
+    return { type: Command.Reasoning, value: effort || null };
   }
 
   return { type: Command.Unknown, value: cmd };

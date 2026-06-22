@@ -2,6 +2,7 @@
 // Owns agents, enables swaps, serialization.
 // Delegates agent construction to extensions via hooks.
 
+import crypto from "node:crypto";
 import { HOOKS } from '../hooks.js';
 
 /**

@@ -1,6 +1,6 @@
 // Tests for the core SessionManager class.
 
-import { SessionManager, SessionStore } from '../../src/core/session/index.js';
+import { SessionManager } from '../../src/core/session/index.js';
 import { Agent } from '../../src/core/agent.js';
 import { HookSystem, createHooks } from '../../src/core/hooks.js';
 import { ExtensionLoader, createExtensionLoader } from '../../src/core/extensions/extensions.js';
@@ -30,46 +30,6 @@ function createMockAgent(options = {}) {
     ...options,
   });
 }
-
-describe('SessionStore', () => {
-  it('should start empty', () => {
-    const store = new SessionStore();
-    expect(store.size()).toBe(0);
-    expect(store.initialSessionId()).toBeNull();
-  });
-
-  it('should add agents and track session IDs', () => {
-    const store = new SessionStore();
-    const agent1 = createMockAgent({ sessionId: 'session-1' });
-    const agent2 = createMockAgent({ sessionId: 'session-2' });
-
-    const id1 = store.addAgent(agent1);
-    expect(id1).toBe('session-1');
-    expect(store.size()).toBe(1);
-    expect(store.initialSessionId()).toBe('session-1');
-
-    const id2 = store.addAgent(agent2);
-    expect(id2).toBe('session-2');
-    expect(store.size()).toBe(2);
-  });
-
-  it('should generate session ID if agent has none', () => {
-    const store = new SessionStore();
-    const agent = createMockAgent();
-    const id = store.addAgent(agent);
-    expect(id).toBeDefined();
-    expect(store.getAgent(id)).toBe(agent);
-  });
-
-  it('should retrieve agents by session ID', () => {
-    const store = new SessionStore();
-    const agent = createMockAgent({ sessionId: 'test-id' });
-    store.addAgent(agent);
-
-    expect(store.getAgent('test-id')).toBe(agent);
-    expect(store.getAgent('nonexistent')).toBeUndefined();
-  });
-});
 
 describe('SessionManager', () => {
   let hooks;

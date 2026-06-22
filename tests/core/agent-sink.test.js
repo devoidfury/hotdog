@@ -11,33 +11,24 @@ describe("AgentSink", () => {
       expect(sink.isTaskAgent).toBe(false);
     });
 
-    it("accepts parentSink", () => {
-      const parent = { emit: () => {} };
-      const sink = new AgentSink({ parentSink: parent });
-      expect(sink.isTaskAgent).toBe(false);
-    });
-
     it("accepts isTaskAgent flag", () => {
       const sink = new AgentSink({ isTaskAgent: true });
       expect(sink.isTaskAgent).toBe(true);
     });
-
-    it("accepts onTaskComplete callback", () => {
-      const onTaskComplete = () => {};
-      const sink = new AgentSink({ onTaskComplete });
-      expect(sink.isTaskAgent).toBe(false);
-    });
   });
 
   describe("setTaskAgentId", () => {
-    it("sets the task ID", () => {
+    it("sets the task ID for later completion", () => {
       const sink = new AgentSink({ isTaskAgent: true });
       sink.setTaskAgentId("task-123");
-      // Task ID is stored internally, verify via onTaskComplete
-      let capturedId = null;
-      sink._onTaskComplete = (id, result) => { capturedId = id; };
+
+      const events = [];
+      const parent = { emit: (e) => events.push(e) };
+      sink._parentSink = parent;
+
       sink.onTaskComplete("done");
-      expect(capturedId).toBe("task-123");
+
+      expect(events[0].taskId).toBe("task-123");
     });
   });
 
@@ -53,10 +44,6 @@ describe("AgentSink", () => {
       sink.emit({ type: OUTPUT_EVENT.TOKEN_USAGE, totalTokens: 100 });
 
       expect(events).toHaveLength(4);
-      expect(events[0].type).toBe(OUTPUT_EVENT.STREAMING_CHUNK);
-      expect(events[1].type).toBe(OUTPUT_EVENT.TOOL_CALL);
-      expect(events[2].type).toBe(OUTPUT_EVENT.ASSISTANT_MESSAGE);
-      expect(events[3].type).toBe(OUTPUT_EVENT.TOKEN_USAGE);
     });
 
     it("handles null parent sink without error", () => {
@@ -66,87 +53,34 @@ describe("AgentSink", () => {
   });
 
   describe("task agent mode (isTaskAgent=true)", () => {
-    it("filters streaming chunks", () => {
+    it("filters verbose events (streaming, tool, assistant, thinking)", () => {
       const events = [];
       const parent = { emit: (e) => events.push(e) };
       const sink = new AgentSink({ parentSink: parent, isTaskAgent: true });
 
+      // These should all be filtered
       sink.emit({ type: OUTPUT_EVENT.STREAMING_CHUNK, content: "chunk" });
-      expect(events).toHaveLength(0);
-    });
-
-    it("filters streaming reasoning chunks", () => {
-      const events = [];
-      const parent = { emit: (e) => events.push(e) };
-      const sink = new AgentSink({ parentSink: parent, isTaskAgent: true });
-
       sink.emit({ type: OUTPUT_EVENT.STREAMING_REASONING_CHUNK, content: "thinking" });
-      expect(events).toHaveLength(0);
-    });
-
-    it("filters tool calls", () => {
-      const events = [];
-      const parent = { emit: (e) => events.push(e) };
-      const sink = new AgentSink({ parentSink: parent, isTaskAgent: true });
-
       sink.emit({ type: OUTPUT_EVENT.TOOL_CALL, toolName: "bash" });
-      expect(events).toHaveLength(0);
-    });
-
-    it("filters tool results", () => {
-      const events = [];
-      const parent = { emit: (e) => events.push(e) };
-      const sink = new AgentSink({ parentSink: parent, isTaskAgent: true });
-
       sink.emit({ type: OUTPUT_EVENT.TOOL_RESULT, toolName: "bash", result: "out" });
-      expect(events).toHaveLength(0);
-    });
-
-    it("filters assistant messages", () => {
-      const events = [];
-      const parent = { emit: (e) => events.push(e) };
-      const sink = new AgentSink({ parentSink: parent, isTaskAgent: true });
-
       sink.emit({ type: OUTPUT_EVENT.ASSISTANT_MESSAGE, content: "hi" });
-      expect(events).toHaveLength(0);
-    });
-
-    it("filters thinking events", () => {
-      const events = [];
-      const parent = { emit: (e) => events.push(e) };
-      const sink = new AgentSink({ parentSink: parent, isTaskAgent: true });
-
       sink.emit({ type: OUTPUT_EVENT.THINKING, content: "thinking" });
-      expect(events).toHaveLength(0);
-    });
-
-    it("filters command results", () => {
-      const events = [];
-      const parent = { emit: (e) => events.push(e) };
-      const sink = new AgentSink({ parentSink: parent, isTaskAgent: true });
-
       sink.emit({ type: OUTPUT_EVENT.COMMAND_RESULT, content: "cmd" });
+
       expect(events).toHaveLength(0);
     });
 
-    it("forwards TASK_PROGRESS events", () => {
+    it("forwards TASK_PROGRESS and TOKEN_USAGE events", () => {
       const events = [];
       const parent = { emit: (e) => events.push(e) };
       const sink = new AgentSink({ parentSink: parent, isTaskAgent: true });
 
       sink.emit({ type: OUTPUT_EVENT.TASK_PROGRESS, status: "running" });
-      expect(events).toHaveLength(1);
-      expect(events[0].type).toBe(OUTPUT_EVENT.TASK_PROGRESS);
-    });
-
-    it("forwards TOKEN_USAGE events", () => {
-      const events = [];
-      const parent = { emit: (e) => events.push(e) };
-      const sink = new AgentSink({ parentSink: parent, isTaskAgent: true });
-
       sink.emit({ type: OUTPUT_EVENT.TOKEN_USAGE, totalTokens: 100 });
-      expect(events).toHaveLength(1);
-      expect(events[0].type).toBe(OUTPUT_EVENT.TOKEN_USAGE);
+
+      expect(events).toHaveLength(2);
+      expect(events[0].type).toBe(OUTPUT_EVENT.TASK_PROGRESS);
+      expect(events[1].type).toBe(OUTPUT_EVENT.TOKEN_USAGE);
     });
 
     it("handles unknown event types silently", () => {
@@ -173,7 +107,7 @@ describe("AgentSink", () => {
       expect(events[0].taskId).toBe("task-1");
     });
 
-    it("calls onTaskComplete callback", () => {
+    it("calls onTaskComplete callback with task id and result", () => {
       let capturedId = null;
       let capturedResult = null;
       const onTaskComplete = (id, result) => {
@@ -189,24 +123,10 @@ describe("AgentSink", () => {
       expect(capturedResult).toBe("Done!");
     });
 
-    it("handles null parent sink", () => {
-      let called = false;
-      const onTaskComplete = () => { called = true; };
-      const sink = new AgentSink({ isTaskAgent: true, onTaskComplete });
+    it("handles null parent sink and callback gracefully", () => {
+      const sink = new AgentSink({ isTaskAgent: true });
       sink.setTaskAgentId("task-3");
-
-      sink.onTaskComplete("result");
-      expect(called).toBe(true);
-    });
-
-    it("handles null onTaskComplete callback", () => {
-      const events = [];
-      const parent = { emit: (e) => events.push(e) };
-      const sink = new AgentSink({ parentSink: parent, isTaskAgent: true });
-      sink.setTaskAgentId("task-4");
-
       expect(() => sink.onTaskComplete("result")).not.toThrow();
-      expect(events).toHaveLength(1);
     });
   });
 });

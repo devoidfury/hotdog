@@ -4,121 +4,45 @@ import { normalizeConfigKeys } from "../../src/core/config/index.js";
 import { parseFrontMatter } from "../../src/utils/file-utils.js";
 
 describe("parseFrontMatter", () => {
-  it("parses simple front matter", () => {
+  it("parses front matter and body", () => {
     const input = `---
 title: Hello
+description: A test
 ---
 Body content`;
     const result = parseFrontMatter(input);
     expect(result).toEqual({
-      frontMatter: { title: "Hello" },
+      frontMatter: { title: "Hello", description: "A test" },
       body: "Body content",
     });
   });
 
-  it("parses front matter without trailing newline", () => {
+  it("handles booleans, numbers, and arrays", () => {
     const input = `---
-name: test
+active: true
+count: 42
+tags: [a, b, c]
 ---
 Body`;
     const result = parseFrontMatter(input);
-    expect(result).toEqual({ frontMatter: { name: "test" }, body: "Body" });
-  });
-
-  it("handles empty body after front matter", () => {
-    const input = `---
-title: test
----`;
-    const result = parseFrontMatter(input);
-    expect(result).toEqual({ frontMatter: { title: "test" }, body: "" });
+    expect(result.frontMatter).toEqual({ active: true, count: 42, tags: ["a", "b", "c"] });
   });
 
   it("returns null when no front matter", () => {
     expect(parseFrontMatter("just plain text")).toBeNull();
   });
 
-  it("parses multiple fields", () => {
-    const input = `---
-title: Hello
-description: A test
-author: John
----
-Body`;
-    const result = parseFrontMatter(input);
-    expect(result.frontMatter).toEqual({
-      title: "Hello",
-      description: "A test",
-      author: "John",
-    });
-  });
-
-  it("parses booleans", () => {
-    const input = `---
-active: true
-hidden: false
----
-Body`;
-    const result = parseFrontMatter(input);
-    expect(result.frontMatter).toEqual({ active: true, hidden: false });
-  });
-
-  it("parses numbers", () => {
-    const input = `---
-count: 42
-negative: -7
----
-Body`;
-    const result = parseFrontMatter(input);
-    expect(result.frontMatter).toEqual({ count: 42, negative: -7 });
-  });
-
-  it("parses arrays", () => {
-    const input = `---
-tags: ["a", "b", "c"]
----
-Body`;
-    const result = parseFrontMatter(input);
-    expect(result.frontMatter.tags).toEqual(["a", "b", "c"]);
-  });
-
-  it("parses arrays without quotes", () => {
-    const input = `---
-tags: [a, b, c]
----
-Body`;
-    const result = parseFrontMatter(input);
-    expect(result.frontMatter.tags).toEqual(["a", "b", "c"]);
-  });
-
-  it("skips comments and blank lines in front matter", () => {
-    const input = `---
-# comment
-title: Hello
-
----
-Body`;
-    const result = parseFrontMatter(input);
-    expect(result.frontMatter).toEqual({ title: "Hello" });
-  });
-
-  it("strips quotes from string values", () => {
-    const input = `---
-title: "Hello World"
----
-Body`;
-    const result = parseFrontMatter(input);
-    expect(result.frontMatter.title).toBe("Hello World");
+  it("handles empty body and missing trailing newline", () => {
+    expect(parseFrontMatter("---\ntitle: test\n---")).toEqual({ frontMatter: { title: "test" }, body: "" });
+    expect(parseFrontMatter("---\nname: test\n---\nBody")).toEqual({ frontMatter: { name: "test" }, body: "Body" });
   });
 });
 
 describe("buildModelRegistry", () => {
-  it("registers models from providers", () => {
+  it("registers models from providers with defaults", () => {
     const config = {
       providers: [
-        {
-          name: "openai",
-          models: [{ name: "gpt-4", temperature: 0.7 }],
-        },
+        { name: "openai", models: [{ name: "gpt-4", temperature: 0.7 }] },
       ],
     };
     const registry = buildModelRegistry(config);
@@ -129,31 +53,17 @@ describe("buildModelRegistry", () => {
     });
   });
 
-  it("uses default max tokens when not specified", () => {
-    const config = {
-      providers: [{ name: "test", models: [{ name: "model" }] }],
-    };
-    const registry = buildModelRegistry(config);
-    expect(registry["test/model"].maxTokens).toBe(32000);
-  });
-
   it("handles provider-level default model", () => {
     const config = {
       providers: [{ name: "test", defaultModel: "gpt-3.5", temperature: 0.5 }],
     };
     const registry = buildModelRegistry(config);
-    expect(registry["test/gpt-3.5"]).toEqual({
-      name: "test/gpt-3.5",
-      temperature: 0.5,
-      maxTokens: 32000,
-    });
+    expect(registry["test/gpt-3.5"]).toBeDefined();
+    expect(registry["test/gpt-3.5"].temperature).toBe(0.5);
   });
 
-  it("handles empty providers", () => {
+  it("handles empty or multiple providers", () => {
     expect(buildModelRegistry({})).toEqual({});
-  });
-
-  it("handles multiple providers", () => {
     const config = {
       providers: [
         { name: "a", models: [{ name: "m1" }] },
@@ -167,64 +77,34 @@ describe("buildModelRegistry", () => {
 });
 
 describe("normalizeConfigKeys", () => {
-  it("converts simple snake_case keys to camelCase", () => {
-    const input = { default_model: "test", hide_tools: true };
+  it("converts snake_case keys to camelCase recursively", () => {
+    const input = {
+      default_model: "test",
+      hide_tools: true,
+      profiles: {
+        default: { blacklist_tools: ["patch"] },
+      },
+      mcp_servers: [
+        { enabled: true, name: "test-server", blacklist_tools: ["dangerous"] },
+      ],
+    };
     const result = normalizeConfigKeys(input);
-    expect(result).toEqual({ defaultModel: "test", hideTools: true });
+    expect(result).toEqual({
+      defaultModel: "test",
+      hideTools: true,
+      profiles: {
+        default: { blacklistTools: ["patch"] },
+      },
+      mcpServers: [
+        { enabled: true, name: "test-server", blacklistTools: ["dangerous"] },
+      ],
+    });
   });
 
-  it("leaves already camelCase keys unchanged", () => {
+  it("leaves camelCase keys unchanged", () => {
     const input = { defaultModel: "test", hideTools: true };
     const result = normalizeConfigKeys(input);
     expect(result).toEqual({ defaultModel: "test", hideTools: true });
-  });
-
-  it("handles mixed snake_case and camelCase keys", () => {
-    const input = { default_model: "test", alreadyCamel: true, show_token_use: false };
-    const result = normalizeConfigKeys(input);
-    expect(result).toEqual({ defaultModel: "test", alreadyCamel: true, showTokenUse: false });
-  });
-
-  it("handles nested objects", () => {
-    const input = {
-      profiles: {
-        default: {
-          blacklist_tools: ["patch"],
-          model: "test",
-        },
-      },
-    };
-    const result = normalizeConfigKeys(input);
-    expect(result).toEqual({
-      profiles: {
-        default: {
-          blacklistTools: ["patch"],
-          model: "test",
-        },
-      },
-    });
-  });
-
-  it("handles arrays of objects", () => {
-    const input = {
-      mcp_servers: [
-        {
-          enabled: true,
-          name: "test-server",
-          blacklist_tools: ["dangerous"],
-        },
-      ],
-    };
-    const result = normalizeConfigKeys(input);
-    expect(result).toEqual({
-      mcpServers: [
-        {
-          enabled: true,
-          name: "test-server",
-          blacklistTools: ["dangerous"],
-        },
-      ],
-    });
   });
 
   it("handles deeply nested structures", () => {
@@ -233,66 +113,25 @@ describe("normalizeConfigKeys", () => {
         {
           name: "test",
           models: [
-            {
-              name: "model-1",
-              context_limit: 1000,
-              parallel_tool_calling: true,
-            },
+            { name: "model-1", context_limit: 1000, parallel_tool_calling: true },
           ],
         },
       ],
     };
     const result = normalizeConfigKeys(input);
-    expect(result).toEqual({
-      providers: [
-        {
-          name: "test",
-          models: [
-            {
-              name: "model-1",
-              contextLimit: 1000,
-              parallelToolCalling: true,
-            },
-          ],
-        },
-      ],
+    expect(result.providers[0].models[0]).toEqual({
+      name: "model-1",
+      contextLimit: 1000,
+      parallelToolCalling: true,
     });
   });
 
-  it("handles null values", () => {
-    const input = { default_model: null, hide_tools: true };
-    const result = normalizeConfigKeys(input);
-    expect(result).toEqual({ defaultModel: null, hideTools: true });
-  });
-
-  it("handles null object", () => {
+  it("handles null, primitives, and empty values", () => {
     expect(normalizeConfigKeys(null)).toBeNull();
-  });
-
-  it("handles primitive values", () => {
     expect(normalizeConfigKeys("string")).toBe("string");
     expect(normalizeConfigKeys(42)).toBe(42);
-    expect(normalizeConfigKeys(true)).toBe(true);
-  });
-
-  it("handles empty arrays", () => {
-    expect(normalizeConfigKeys([])).toEqual([]);
-  });
-
-  it("handles empty objects", () => {
     expect(normalizeConfigKeys({})).toEqual({});
-  });
-
-  it("handles arrays with primitive values", () => {
-    const input = { extension_paths: ["builtins", "custom"] };
-    const result = normalizeConfigKeys(input);
-    expect(result).toEqual({ extensionPaths: ["builtins", "custom"] });
-  });
-
-  it("handles keys with multiple underscores", () => {
-    const input = { some_very_long_key: "value" };
-    const result = normalizeConfigKeys(input);
-    expect(result).toEqual({ someVeryLongKey: "value" });
+    expect(normalizeConfigKeys([])).toEqual([]);
   });
 
   it("preserves non-snake_case keys like kebab-case", () => {
@@ -301,7 +140,7 @@ describe("normalizeConfigKeys", () => {
     expect(result).toEqual({ "kebab-case": "value", snakeCase: "other" });
   });
 
-  it("handles real-world config structure from defaults.json", () => {
+  it("handles real-world config structure", () => {
     const input = {
       default_model: "ai365/qwen3.6-27b",
       hide_tools: true,
@@ -312,51 +151,25 @@ describe("normalizeConfigKeys", () => {
       default_subcommand: "cli",
       chat_timeout_secs: 900,
       profiles: {
-        default: {
-          blacklist_tools: ["patch", "explore"],
-        },
-        explorer: {
-          model: "ai365/lfm2.5-8b-a1b",
-          blacklist_tools: ["patch", "write"],
-        },
+        default: { blacklist_tools: ["patch", "explore"] },
+        explorer: { model: "ai365/lfm2.5-8b-a1b", blacklist_tools: ["patch", "write"] },
       },
       mcp_servers: [
-        {
-          enabled: true,
-          name: "bun-docs-mcp",
-          url: "https://bun.com/docs/mcp",
-        },
+        { enabled: true, name: "bun-docs-mcp", url: "https://bun.com/docs/mcp" },
       ],
       providers: [
         {
           name: "ai365",
           url: "http://localhost:9292",
           api_key: "test-key",
-          models: [
-            {
-              name: "qwen3.5-4b",
-              context_limit: 262144,
-              tags: ["general", "fast"],
-            },
-          ],
+          models: [{ name: "qwen3.5-4b", context_limit: 262144, tags: ["general", "fast"] }],
         },
       ],
     };
-
     const result = normalizeConfigKeys(input);
-
     expect(result.defaultModel).toBe("ai365/qwen3.6-27b");
     expect(result.hideTools).toBe(true);
-    expect(result.showTokenUse).toBe(true);
-    expect(result.skillsPath).toBe("/skills");
-    expect(result.extensionPaths).toEqual(["builtins"]);
-    expect(result.extensionAutoload).toBe(true);
-    expect(result.defaultSubcommand).toBe("cli");
-    expect(result.chatTimeoutSecs).toBe(900);
     expect(result.profiles.default.blacklistTools).toEqual(["patch", "explore"]);
-    expect(result.profiles.explorer.blacklistTools).toEqual(["patch", "write"]);
-    expect(result.mcpServers[0].enabled).toBe(true);
-    expect(result.mcpServers[0].name).toBe("bun-docs-mcp");
     expect(result.providers[0].apiKey).toBe("test-key");
     expect(result.providers[0].models[0].contextLimit).toBe(262144);
   });

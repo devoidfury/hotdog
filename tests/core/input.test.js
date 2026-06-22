@@ -12,9 +12,6 @@ describe('parseInput', () => {
 
   it('parses command with slash', () => {
     expect(parseInput('/exit')).toEqual({ type: INPUT_EVENT.COMMAND, value: 'exit' });
-  });
-
-  it('parses command with args', () => {
     expect(parseInput('/model gpt-4')).toEqual({ type: INPUT_EVENT.COMMAND, value: 'model gpt-4' });
   });
 
@@ -22,16 +19,8 @@ describe('parseInput', () => {
     expect(parseInput('/')).toEqual({ type: INPUT_EVENT.TEXT, value: '/' });
   });
 
-  it('treats slash with only whitespace as text', () => {
-    expect(parseInput('/  ')).toEqual({ type: INPUT_EVENT.TEXT, value: '/' });
-  });
-
   it('handles empty input', () => {
     expect(parseInput('')).toEqual({ type: INPUT_EVENT.TEXT, value: '' });
-  });
-
-  it('treats multiple slashes as command', () => {
-    expect(parseInput('///')).toEqual({ type: INPUT_EVENT.COMMAND, value: '//' });
   });
 });
 

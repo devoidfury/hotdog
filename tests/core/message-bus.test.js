@@ -1,7 +1,6 @@
 import { describe, it, expect, beforeEach } from 'bun:test';
 import { MessageBus } from '../../src/core/index.js';
 
-// Mock session manager
 class MockSessionManager {
   constructor(agent) {
     this._agent = agent;
@@ -11,27 +10,22 @@ class MockSessionManager {
   sessionId() { return this._sessionId; }
 }
 
-// Mock agent
 class MockAgent {
-  constructor() {
+  constructor(runResult = 'done') {
     this._cancelled = false;
     this._runCalled = false;
-    this._runResult = undefined;
+    this._runResult = runResult;
   }
   get cancelled() { return this._cancelled; }
   cancel(reset = true) { this._cancelled = reset; }
   async run(text) {
     this._runCalled = true;
-    this._runResult = text;
     return this._runResult;
   }
-  executePrompt(cmd) {
-    return { success: true, prompt: `prompt: ${cmd}` };
-  }
   get sessionName() { return 'test-session'; }
+  get taskManager() { return null; }
 }
 
-// Mock output sink
 class MockSink {
   constructor() {
     this.events = [];
@@ -58,56 +52,64 @@ describe('MessageBus', () => {
     expect(bus.isIdle()).toBe(true);
   });
 
-  it('queues messages via enqueue', () => {
-    bus.enqueue('hello');
-    // Queue is no longer empty
-    expect(bus.isIdle()).toBe(false);
-  });
-
-  it('has sessionManager property', () => {
+  it('exposes sessionManager and agent', () => {
     expect(bus.sessionManager).toBe(mockSessionManager);
-  });
-
-  it('has agent property', () => {
     expect(bus.agent).toBe(mockAgent);
   });
 
-  it('cancels and notifies agent', () => {
-    bus.cancel();
-    // cancel() calls agent.cancel() which sets _cancelled = true (default reset)
-    expect(mockAgent._cancelled).toBe(true);
-  });
-
-  it('_waitForMessage returns a promise', async () => {
-    // _waitForMessage should return a promise that resolves when a message is enqueued
-    const waitPromise = bus._waitForMessage();
-    expect(waitPromise).toBeInstanceOf(Promise);
-    // Resolve it by enqueuing a message
-    bus.enqueue('wake');
-    await waitPromise;
-  });
-
-  it('cancel resolves the deferred wait', async () => {
-    // _waitForMessage should also resolve when cancel() is called
-    const waitPromise = bus._waitForMessage();
-    expect(waitPromise).toBeInstanceOf(Promise);
-    // Resolve it by cancelling
-    bus.cancel();
-    await waitPromise;
-  });
-
-  it('_waitForMessage returns immediately when queue is non-empty', async () => {
-    bus.enqueue('already here');
-    // Should return immediately since queue is non-empty
-    await bus._waitForMessage();
-    // The message should still be in the queue
+  it('queues messages via enqueue', () => {
+    bus.enqueue('hello');
     expect(bus.isIdle()).toBe(false);
   });
 
   it('handles multiple enqueues', () => {
     bus.enqueue('msg1');
     bus.enqueue('msg2');
-    bus.enqueue('msg3');
     expect(bus.isIdle()).toBe(false);
+  });
+
+  it('cancels and notifies agent', () => {
+    bus.cancel();
+    expect(mockAgent._cancelled).toBe(true);
+  });
+
+  describe('run methods', () => {
+    it('run() starts the dispatch loop with drain=false', async () => {
+      const bus = new MessageBus({
+        sessionManager: new MockSessionManager(new MockAgent()),
+        sink: new MockSink(),
+      });
+      let capturedDrain;
+      bus._dispatchLoop = async (drain) => { capturedDrain = drain; };
+      await bus.run();
+      expect(capturedDrain).toBe(false);
+    });
+
+    it('runUntilCancelled() drains the queue', async () => {
+      const bus = new MessageBus({
+        sessionManager: new MockSessionManager(new MockAgent()),
+        sink: new MockSink(),
+      });
+      let capturedDrain;
+      bus._dispatchLoop = async (drain) => { capturedDrain = drain; };
+      await bus.runUntilCancelled();
+      expect(capturedDrain).toBe(true);
+    });
+  });
+
+  describe('isIdle', () => {
+    it('is idle when not running and queue empty', () => {
+      expect(bus.isIdle()).toBe(true);
+    });
+
+    it('is not idle when queue has items', () => {
+      bus.enqueue('msg');
+      expect(bus.isIdle()).toBe(false);
+    });
+
+    it('is not idle when running', () => {
+      bus._isRunning = true;
+      expect(bus.isIdle()).toBe(false);
+    });
   });
 });

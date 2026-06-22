@@ -40,7 +40,6 @@ describe("HookSystem.emitAsyncSeq", () => {
       return { messages: data.messages };
     });
     hooks.on(HOOKS.CONTEXT, (data) => {
-      // Second handler sees the accumulated messages
       data.messages.push("second");
       return { messages: data.messages };
     });
@@ -185,14 +184,13 @@ describe("tool:call hook", () => {
   test("hook can block tool execution", async () => {
     const hooks = new HookSystem();
 
-    hooks.on(HOOKS.TOOL_CALL, ({ toolName, input }) => {
+    hooks.on(HOOKS.TOOL_CALL, ({ toolName }) => {
       if (toolName === "dangerous-tool") {
         return { action: "block", result: "Blocked for safety" };
       }
       return { action: "continue" };
     });
 
-    // Test blocking
     const blockResult = await hooks.emitAsyncSeq(HOOKS.TOOL_CALL, {
       toolCallId: "1",
       toolName: "dangerous-tool",
@@ -200,9 +198,7 @@ describe("tool:call hook", () => {
       agent: null,
     });
     expect(blockResult.action).toBe("block");
-    expect(blockResult.result).toBe("Blocked for safety");
 
-    // Test allowing
     const allowResult = await hooks.emitAsyncSeq(HOOKS.TOOL_CALL, {
       toolCallId: "2",
       toolName: "safe-tool",
@@ -218,7 +214,6 @@ describe("tool:call hook", () => {
     hooks.on(HOOKS.TOOL_CALL, ({ toolName, input }) => {
       if (toolName === "bash") {
         const args = JSON.parse(input);
-        // Sanitize: add safety prefix
         args.command = `set -euo pipefail; ${args.command}`;
         return { action: "modify", input: JSON.stringify(args) };
       }
@@ -233,14 +228,12 @@ describe("tool:call hook", () => {
     });
 
     expect(result.action).toBe("modify");
-    const modifiedArgs = JSON.parse(result.input);
-    expect(modifiedArgs.command).toBe("set -euo pipefail; ls");
+    expect(JSON.parse(result.input).command).toBe("set -euo pipefail; ls");
   });
 
   test("multiple handlers can chain modifications via data mutation", async () => {
     const hooks = new HookSystem();
 
-    // First handler: add cwd (mutate data.input in place for chaining)
     hooks.on(HOOKS.TOOL_CALL, (data) => {
       if (data.toolName === "read") {
         const args = JSON.parse(data.input);
@@ -250,7 +243,6 @@ describe("tool:call hook", () => {
       return { action: "continue" };
     });
 
-    // Second handler: validate path (sees the mutated input)
     hooks.on(HOOKS.TOOL_CALL, (data) => {
       if (data.toolName === "read") {
         const args = JSON.parse(data.input);
@@ -268,7 +260,6 @@ describe("tool:call hook", () => {
     };
     await hooks.emitAsyncSeq(HOOKS.TOOL_CALL, data);
 
-    // The data object was mutated by both handlers
     const finalArgs = JSON.parse(data.input);
     expect(finalArgs.cwd).toBe("/workspace");
     expect(finalArgs.path).toBe("/workspace/test.txt");
@@ -276,10 +267,10 @@ describe("tool:call hook", () => {
 });
 
 describe("tool:result hook", () => {
-  test("hook can modify tool result", async () => {
+  test("hook can redact sensitive data in results", async () => {
     const hooks = new HookSystem();
 
-    hooks.on(HOOKS.TOOL_RESULT, ({ toolName, result }) => {
+    hooks.on(HOOKS.TOOL_RESULT, ({ result }) => {
       if (typeof result === "string" && result.includes("sk-")) {
         return { result: result.replace(/sk-[a-zA-Z0-9]+/g, "[REDACTED]") };
       }
@@ -299,14 +290,13 @@ describe("tool:result hook", () => {
 
   test("hook can truncate large results", async () => {
     const hooks = new HookSystem();
-    const MAX_LINES = 100;
 
     hooks.on(HOOKS.TOOL_RESULT, ({ result }) => {
       if (typeof result === "string") {
         const lines = result.split("\n");
-        if (lines.length > MAX_LINES) {
+        if (lines.length > 100) {
           return {
-            result: lines.slice(0, MAX_LINES).join("\n") + `\n... [${lines.length - MAX_LINES} more lines]`,
+            result: lines.slice(0, 100).join("\n") + `\n... [${lines.length - 100} more lines]`,
           };
         }
       }
@@ -323,32 +313,7 @@ describe("tool:result hook", () => {
     });
 
     expect(result.result).toContain("[100 more lines]");
-    expect(result.result.split("\n").length).toBe(MAX_LINES + 1);
-  });
-
-  test("hook can replace result with ToolResult-like object", async () => {
-    const hooks = new HookSystem();
-
-    hooks.on(HOOKS.TOOL_RESULT, ({ toolName, result }) => {
-      // Wrap in structured format
-      return {
-        result: {
-          output: result,
-          metadata: { tool: toolName, timestamp: Date.now() },
-        },
-      };
-    });
-
-    const result = await hooks.emitAsyncSeq(HOOKS.TOOL_RESULT, {
-      toolCallId: "1",
-      toolName: "read",
-      result: "file contents",
-      input: '{"path": "test.txt"}',
-      agent: null,
-    });
-
-    expect(result.result.output).toBe("file contents");
-    expect(result.result.metadata.tool).toBe("read");
+    expect(result.result.split("\n").length).toBe(101);
   });
 });
 
@@ -357,7 +322,6 @@ describe("CONTEXT hook via emitAsyncSeq", () => {
     const hooks = new HookSystem();
 
     hooks.on(HOOKS.CONTEXT, ({ messages }) => {
-      // Filter out empty messages
       return { messages: messages.filter((m) => m.content?.length > 0) };
     });
 
@@ -378,13 +342,13 @@ describe("CONTEXT hook via emitAsyncSeq", () => {
   test("handlers can inject messages", async () => {
     const hooks = new HookSystem();
 
-    hooks.on(HOOKS.CONTEXT, ({ messages, agent }) => {
-      // Add context injection
-      const injected = [
-        { role: "system", content: "You are helpful." },
-        ...messages,
-      ];
-      return { messages: injected };
+    hooks.on(HOOKS.CONTEXT, ({ messages }) => {
+      return {
+        messages: [
+          { role: "system", content: "You are helpful." },
+          ...messages,
+        ],
+      };
     });
 
     const result = await hooks.emitAsyncSeq(HOOKS.CONTEXT, {

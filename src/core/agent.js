@@ -366,18 +366,27 @@ export class Agent {
     const { buildSystemPrompt } =
       await import("./context/system-prompt.js");
 
-    // Collect chunks from extensions via contribute callback.
-    // Each handler receives a contribute(name, priority, content) callback
-    // that auto-prefixes the chunk name with the extension source.
+    // Collect chunks from extensions via hook return values.
+    // Each handler returns a chunk object { name, priority, content } or
+    // an array of such objects. Source prefixing is applied by the agent
+    // based on the handler's registration source.
     const chunks = [];
-    const handlers =
-      this._hooks._hooks.get(HOOKS.SYSTEM_PROMPT_BUILD) || [];
-    for (const { handler, source } of handlers) {
-      const contribute = (name, priority, content) => {
-        const fullName = source ? `${source}:${name}` : name;
-        chunks.push({ name: fullName, priority, content });
-      };
-      await handler({ agent: this, contribute });
+    const results = await this._hooks.emitAsyncCollect(
+      HOOKS.SYSTEM_PROMPT_BUILD,
+      { agent: this },
+    );
+    for (const { result, source } of results) {
+      const items = Array.isArray(result) ? result : [result];
+      for (const item of items) {
+        if (item && item.name && item.content) {
+          const fullName = source ? `${source}:${item.name}` : item.name;
+          chunks.push({
+            name: fullName,
+            priority: item.priority,
+            content: item.content,
+          });
+        }
+      }
     }
 
     // Sort by priority (lower = earlier in the prompt)

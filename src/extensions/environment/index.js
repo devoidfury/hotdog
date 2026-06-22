@@ -42,9 +42,9 @@ async function buildEnvironmentChunk(agent) {
 export function create() {
   return {
     hooks: {
-      [HOOKS.SYSTEM_PROMPT_BUILD]: async ({ agent, contribute }) => {
+      [HOOKS.SYSTEM_PROMPT_BUILD]: async ({ agent }) => {
         const content = await buildEnvironmentChunk(agent);
-        contribute("info", 100, content);
+        return { name: "info", priority: 100, content };
       },
     },
   };

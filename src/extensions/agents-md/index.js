@@ -54,9 +54,9 @@ export function create(core) {
 
   return {
     hooks: {
-      [HOOKS.SYSTEM_PROMPT_BUILD]: async ({ agent, contribute }) => {
+      [HOOKS.SYSTEM_PROMPT_BUILD]: async ({ agent }) => {
         const content = await buildAgentsMdChunk(autoload);
-        contribute("project-context", 300, content);
+        return { name: "project-context", priority: 300, content };
       },
     },
   };

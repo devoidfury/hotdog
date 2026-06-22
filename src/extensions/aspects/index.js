@@ -89,7 +89,7 @@ async function buildAspectsChunk(aspectNames, profilesPath) {
 export function create(core) {
   return {
     hooks: {
-      [HOOKS.SYSTEM_PROMPT_BUILD]: async ({ agent, contribute }) => {
+      [HOOKS.SYSTEM_PROMPT_BUILD]: async ({ agent }) => {
         const aspectNames = await resolveAspectNames(core);
         const resolved = core.resolved || {};
         const rawConfig = core.config || {};
@@ -99,7 +99,7 @@ export function create(core) {
           rawConfig.profilesPath ||
           configSubPath(configDir, DEFAULT_PROFILES_SUBPATH);
         const content = await buildAspectsChunk(aspectNames, profilesPath);
-        contribute("guidelines", 200, content);
+        return { name: "guidelines", priority: 200, content };
       },
     },
   };

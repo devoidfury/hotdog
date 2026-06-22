@@ -54,10 +54,10 @@ export async function create(core) {
       /**
        * Build skills preamble for system prompt.
        */
-      [HOOKS.SYSTEM_PROMPT_BUILD]: async ({ agent, contribute }) => {
+      [HOOKS.SYSTEM_PROMPT_BUILD]: async ({ agent }) => {
         const preamble = await loader.buildSkillsPreamble();
         if (preamble) {
-          contribute("preamble", 400, preamble);
+          return { name: "preamble", priority: 400, content: preamble };
         }
       },
 

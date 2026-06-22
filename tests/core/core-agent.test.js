@@ -154,15 +154,12 @@ describe('Agent', () => {
   });
 
   describe('hooks integration', () => {
-    it('should call SYSTEM_PROMPT_BUILD handlers with contribute callback', async () => {
-      const contributed = [];
-      hooks.on(HOOKS.SYSTEM_PROMPT_BUILD, ({ agent: a, contribute }) => {
-        contribute('test-chunk', 500, '\n# Test Chunk');
-        contributed.push('called');
+    it('should call SYSTEM_PROMPT_BUILD handlers and collect returned chunks', async () => {
+      hooks.on(HOOKS.SYSTEM_PROMPT_BUILD, async ({ agent: a }) => {
+        return { name: 'test-chunk', priority: 500, content: '\n# Test Chunk' };
       });
 
       await agent.ensureSystemPrompt();
-      expect(contributed.length).toBe(1);
       expect(agent._systemPrompt).toContain('Test Chunk');
     });
   });

@@ -256,6 +256,47 @@ export class HookSystem {
   }
 
   /**
+   * Emit an async hook and collect all handler return values.
+   * Handlers run sequentially. Each handler receives the same data object.
+   * Returns an array of { result, source } for each handler that returned a value.
+   *
+   * @param {string} hookName
+   * @param {*} data — Data passed to each handler.
+   * @returns {Promise<Array<{result: *, source: string|null}>>}
+   */
+  async emitAsyncCollect(hookName, data) {
+    const handlers = this._hooks.get(hookName) || [];
+    const results = [];
+    const doTrace = this._trace && hookName !== "log";
+    for (let i = 0; i < handlers.length; i++) {
+      const entry = handlers[i];
+      const t0 = doTrace ? Date.now() : 0;
+      try {
+        const result = entry.handler(data);
+        const resolved =
+          result && typeof result.then === "function" ? await result : result;
+        if (resolved !== undefined) {
+          results.push({ result: resolved, source: entry.source || null });
+        }
+        if (doTrace) {
+          const ms = Date.now() - t0;
+          const label = entry.source ? ` (${entry.source})` : "";
+          const action = resolved !== undefined ? ` returned ${_summarizeResult(resolved)}` : " no return";
+          logger.debug(`[hook:trace] ${hookName} — ${i + 1}/${handlers.length}${label} — ${ms}ms${action}`);
+        }
+      } catch (e) {
+        if (doTrace) {
+          const ms = Date.now() - t0;
+          const label = entry.source ? ` (${entry.source})` : "";
+          logger.debug(`[hook:trace] ${hookName} — ${i + 1}/${handlers.length}${label} — ${ms}ms — error`);
+        }
+        logger.error(`[hook:${hookName}] ${formatError(e)}`);
+      }
+    }
+    return results;
+  }
+
+  /**
    * Remove all handlers for a hook (or all hooks if no name given).
    * @param {string} [hookName] - Optional hook name to clear.
    */
@@ -316,7 +357,9 @@ export const HOOKS = {
   CONTEXT_FULL: "context:full",
   CONTEXT_MESSAGE: "context:message",
 
-  // System prompt
+  // System prompt — handlers return a chunk object { name, priority, content }
+  // or an array of chunk objects. The agent collects all chunks, sorts by priority,
+  // and renders them into the system prompt template.
   SYSTEM_PROMPT_BUILD: "systemPrompt:build",
 
   // Commands — generic command system (not UI-specific)

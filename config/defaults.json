@@ -71,7 +71,7 @@
       "models": [
         {
           "name": "dsv4",
-          "context-limit": 200000,
+          "context-limit": 350000,
           "tags": ["general", "huge", "coder"],
           "reasoning_effort": "max"
         },

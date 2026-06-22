@@ -70,6 +70,12 @@
       "api_key": "8bc20044d7183419bc3140346dbcc936a997a",
       "models": [
         {
+          "name": "dsv4",
+          "context-limit": 200000,
+          "tags": ["general", "huge", "coder"],
+          "reasoning_effort": "max"
+        },
+        {
           "name": "qwen3.5-4b",
           "context-limit": 262144,
           "tags": ["general", "fast", "instruct"]
@@ -87,25 +93,25 @@
         },
         {
           "name": "qwen3.6-35b",
-          "context-limit": 262144,
+          "context-limit": 160000,
           "tags": ["coder", "general", "powerful", "think"],
           "parallel_tool_calling": true
         },
         {
           "name": "qwen3.6-35b:general",
-          "context-limit": 262144,
+          "context-limit": 160000,
           "tags": ["general", "powerful", "think"],
           "parallel_tool_calling": true
         },
         {
           "name": "qwen3.6-35b:instruct",
-          "context-limit": 262144,
+          "context-limit": 160000,
           "tags": ["general", "powerful", "instruct"],
           "parallel_tool_calling": true
         },
         {
           "name": "qwen3.6-27b",
-          "context-limit": 131072,
+          "context-limit": 160000,
           "tags": ["coder", "general", "powerful", "think"],
           "parallel_tool_calling": true
         },
@@ -168,6 +174,11 @@
           "name": "minimax-m2.7",
           "context-limit": 196608,
           "tags": ["general", "powerful", "slow"]
+        },
+        {
+          "name": "north-mini-code-1.0-30b",
+          "context-limit": 262144,
+          "tags": ["general", "powerful"]
         },
         {
           "name": "qwen3.6-35b-unc",

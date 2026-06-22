@@ -133,6 +133,14 @@ export class Agent {
     return this._systemPrompt;
   }
 
+  /**
+   * The LLM client used for API calls.
+   * @type {import('./llm-client/client.js').LlmClient}
+   */
+  get llmClient() {
+    return this._llmClient;
+  }
+
   // ── Run Loop ──────────────────────────────────────────────────────────────
 
   /**

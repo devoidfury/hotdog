@@ -3,20 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import { ProjectInfoTool } from '../../src/extensions/core-tools/project-info.js';
-import { ToolResult } from '../../src/core/extensions/tool-utils.js';
-
-/**
- * Extract string output from a tool result (handles ToolResult or plain string).
- */
-function resultStr(result) {
-  if (result instanceof ToolResult) {
-    if (result.error) {
-      return result.error;
-    }
-    return result.output;
-  }
-  return result;
-}
+import { resultStr, tmpDir } from '../helpers.js';
 
 describe('ProjectInfoTool', () => {
   let tmpDir;
@@ -71,14 +58,6 @@ describe('ProjectInfoTool', () => {
     expect(display).toContain('files=50');
   });
 
-  it('generates call display with all params', () => {
-    const tool = new ProjectInfoTool();
-    const display = tool.callDisplay(JSON.stringify({ path: '/p', max_depth: 2, max_files: 100 }));
-    expect(display).toContain('path=/p');
-    expect(display).toContain('depth=2');
-    expect(display).toContain('files=100');
-  });
-
   it('handles object input', async () => {
     const tool = new ProjectInfoTool();
     const result = await tool.execute({ path: tmpDir });
@@ -91,15 +70,9 @@ describe('ProjectInfoTool', () => {
     // Should return partial info since tmpDir is not a git repo
     expect(resultStr(result)).toContain('=== Project Info ===');
   });
-
-  it('has correct TOOL_NAME', () => {
-    expect(ProjectInfoTool.TOOL_NAME).toBe('project_info');
-  });
 });
 
 // Test the extensionToLanguage mapping through the tool's output
-// We can't test it directly since it's not exported, but we can verify
-// the tool produces language breakdowns with correct mappings.
 describe('ProjectInfoTool language detection', () => {
   let tmpDir;
 

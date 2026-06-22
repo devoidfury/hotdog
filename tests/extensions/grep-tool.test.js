@@ -4,41 +4,7 @@ import path from "node:path";
 import os from "node:os";
 import { GrepTool } from "../../src/extensions/core-tools/grep.js";
 import { ToolContext } from "../../src/core/extensions/tool-context.js";
-import { ToolResult } from "../../src/core/extensions/tool-utils.js";
-
-// ── Helpers ─────────────────────────────────────────────────────────────────
-
-function tmpDir() {
-  return fsSync.mkdtempSync(path.join(os.tmpdir(), "oa-grep-test-"));
-}
-
-function toolCtx(opts = {}) {
-  return new ToolContext({
-    cwdBoundary: opts.cwdBoundary || null,
-    workspaceRoot: opts.workspaceRoot || null,
-    ...opts,
-  });
-}
-
-/**
- * Extract string output from a tool result (handles ToolResult or plain string).
- */
-function resultStr(result) {
-  if (result instanceof ToolResult) {
-    if (result.error) {
-      return result.error;
-    }
-    return result.output;
-  }
-  return result;
-}
-
-// GrepTool returns ToolResult objects (with metadata), so we use toDisplay()
-function getResult(result) {
-  return typeof result === "object" && result?.toDisplay
-    ? result.toDisplay()
-    : String(result);
-}
+import { resultStr, getDisplay, tmpDir, toolCtx } from "../helpers.js";
 
 // ── Tool Definition ─────────────────────────────────────────────────────────
 
@@ -90,7 +56,7 @@ describe("GrepTool.execute", () => {
     fsSync.writeFileSync(path.join(dir, "other.js"), 'console.log("goodbye")');
 
     const tool = new GrepTool();
-    const result = getResult(
+    const result = getDisplay(
       await tool.execute({ pattern: "hello", path: dir }, toolCtx()),
     );
 
@@ -107,7 +73,7 @@ describe("GrepTool.execute", () => {
     );
 
     const tool = new GrepTool();
-    const result = getResult(
+    const result = getDisplay(
       await tool.execute({ pattern: "item\\d+", path: dir }, toolCtx()),
     );
 
@@ -124,7 +90,7 @@ describe("GrepTool.execute", () => {
     fsSync.writeFileSync(path.join(dir, "test.txt"), "hello world");
 
     const tool = new GrepTool();
-    const result = getResult(
+    const result = getDisplay(
       await tool.execute(
         { pattern: "hello", path: dir, type: "py" },
         toolCtx(),
@@ -147,7 +113,7 @@ describe("GrepTool.execute", () => {
     }
 
     const tool = new GrepTool();
-    const result = getResult(
+    const result = getDisplay(
       await tool.execute(
         { pattern: "hello", path: dir, max_results: 3 },
         toolCtx(),
@@ -165,7 +131,7 @@ describe("GrepTool.execute", () => {
     fsSync.writeFileSync(path.join(dir, "file.txt"), "hello world");
 
     const tool = new GrepTool();
-    const result = getResult(
+    const result = getDisplay(
       await tool.execute({ pattern: "zzzznotfound", path: dir }, toolCtx()),
     );
 
@@ -176,7 +142,7 @@ describe("GrepTool.execute", () => {
   it("rejects invalid regex", async () => {
     const dir = tmpDir();
     const tool = new GrepTool();
-    const result = getResult(
+    const result = getDisplay(
       await tool.execute({ pattern: "[invalid", path: dir }, toolCtx()),
     );
 
@@ -186,13 +152,13 @@ describe("GrepTool.execute", () => {
 
   it("returns error on invalid JSON input", async () => {
     const tool = new GrepTool();
-    const result = getResult(await tool.execute("not json", toolCtx()));
+    const result = getDisplay(await tool.execute("not json", toolCtx()));
     expect(resultStr(result)).toContain("Error parsing arguments");
   });
 
   it("returns error on missing pattern", async () => {
     const tool = new GrepTool();
-    const result = getResult(await tool.execute({ path: "." }, toolCtx()));
+    const result = getDisplay(await tool.execute({ path: "." }, toolCtx()));
     expect(resultStr(result)).toContain("Error parsing arguments");
   });
 
@@ -201,7 +167,7 @@ describe("GrepTool.execute", () => {
     fsSync.writeFileSync(path.join(dir, "file.js"), "hello world");
 
     const tool = new GrepTool();
-    const result = getResult(
+    const result = getDisplay(
       await tool.execute(
         JSON.stringify({ pattern: "hello", path: dir }),
         toolCtx(),
@@ -220,7 +186,7 @@ describe("GrepTool.execute", () => {
     fsSync.writeFileSync(path.join(dir, "sub", "nested.js"), "hello");
 
     const tool = new GrepTool();
-    const result = getResult(
+    const result = getDisplay(
       await tool.execute({ pattern: "hello", path: dir }, toolCtx()),
     );
 
@@ -241,7 +207,7 @@ describe("GrepTool.execute", () => {
     fsSync.writeFileSync(path.join(dir, "node_modules", "bad.js"), "hello");
 
     const tool = new GrepTool();
-    const result = getResult(
+    const result = getDisplay(
       await tool.execute({ pattern: "hello", path: dir }, toolCtx()),
     );
 

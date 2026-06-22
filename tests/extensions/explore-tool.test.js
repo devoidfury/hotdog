@@ -1,19 +1,6 @@
 import { describe, it, expect } from 'bun:test';
 import { ExploreTool } from '../../src/extensions/core-tools/explore.js';
-import { ToolResult } from '../../src/core/extensions/tool-utils.js';
-
-/**
- * Extract string output from a tool result (handles ToolResult or plain string).
- */
-function resultStr(result) {
-  if (result instanceof ToolResult) {
-    if (result.error) {
-      return result.error;
-    }
-    return result.output;
-  }
-  return result;
-}
+import { resultStr } from '../helpers.js';
 
 describe('ExploreTool', () => {
   it('has correct TOOL_NAME', () => {

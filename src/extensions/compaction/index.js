@@ -217,7 +217,7 @@ export function create(core) {
 
     // Build the LLM chat function from the agent's LLM client
     const llmChat = async (chatMessages, chatModel) => {
-      const stream = agent._llmClient.chatStreamCancellable(
+      const stream = agent.llmClient.chatStreamCancellable(
         chatMessages,
         modelConfig || { name: chatModel, temperature: null, maxTokens: 4096 },
         [],

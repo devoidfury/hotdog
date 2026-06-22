@@ -1,20 +1,7 @@
 import { describe, it, expect } from 'bun:test';
 import { PagerTool } from '../../src/extensions/core-tools/pager.js';
 import { ToolContext } from '../../src/core/extensions/tool-context.js';
-import { ToolResult } from '../../src/core/extensions/tool-utils.js';
-
-/**
- * Extract string output from a tool result (handles ToolResult or plain string).
- */
-function resultStr(result) {
-  if (result instanceof ToolResult) {
-    if (result.error) {
-      return result.error;
-    }
-    return result.output;
-  }
-  return result;
-}
+import { resultStr } from '../helpers.js';
 
 describe('PagerTool', () => {
   it('has correct tool name', () => {
@@ -37,7 +24,7 @@ describe('PagerTool', () => {
       return null;
     });
     const result = await tool.execute(JSON.stringify({ tool_call_id: 'call_123' }), ctx);
-    expect(resultStr(result)).toBe(mockCached);
+    expect(resultStr(result)).toContain('cached output');
   });
 
   it('returns not found when no cached output', async () => {

@@ -1,6 +1,7 @@
-import { describe, it, expect } from "bun:test";
+import { describe, it, expect, beforeEach, afterEach } from "bun:test";
 import fs from "node:fs";
 import path from "node:path";
+import os from "node:os";
 import { fileURLToPath } from "node:url";
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, "../..");
@@ -427,14 +428,21 @@ describe("ToolResult", () => {
 });
 
 describe("writeFileWithParents", () => {
-  const tmpDir = "/tmp/oa-test-writefile";
+  let tmpDir;
+
+  beforeEach(() => {
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "oa-test-writefile-"));
+  });
+
+  afterEach(() => {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  });
 
   it("writes file and creates parent dirs", async () => {
     const filePath = path.join(tmpDir, "a", "b", "c", "test.txt");
     await writeFileWithParents(filePath, "content");
     expect(fs.existsSync(filePath)).toBe(true);
     expect(fs.readFileSync(filePath, "utf-8")).toBe("content");
-    fs.rmSync(tmpDir, { recursive: true, force: true });
   });
 
   it("overwrites existing file", async () => {
@@ -442,42 +450,52 @@ describe("writeFileWithParents", () => {
     await writeFileWithParents(filePath, "v1");
     await writeFileWithParents(filePath, "v2");
     expect(fs.readFileSync(filePath, "utf-8")).toBe("v2");
-    fs.rmSync(tmpDir, { recursive: true, force: true });
   });
 });
 
 describe("resolvePathAndValidate", () => {
+  let tmpDir;
+
+  beforeEach(() => {
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "oa-test-resolve-"));
+  });
+
+  afterEach(() => {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  });
+
   it("resolves existing path", async () => {
-    const resolved = await resolvePathAndValidate(
-      path.join(ROOT, "src/core/extensions/tool-registry.js"),
-    );
-    expect(resolved).toBe(path.join(ROOT, "src/core/extensions/tool-registry.js"));
+    const existingFile = path.join(tmpDir, "exists.txt");
+    fs.writeFileSync(existingFile, "content");
+    const resolved = await resolvePathAndValidate(existingFile);
+    expect(resolved).toBe(existingFile);
   });
 
   it("throws for non-existent path", async () => {
-    await expect(resolvePathAndValidate("/nonexistent/path/file.txt")).rejects.toThrow(
+    await expect(resolvePathAndValidate(path.join(tmpDir, "nonexistent.txt"))).rejects.toThrow(
       "Path not found",
     );
   });
 
   it("throws when path escapes boundary", async () => {
-    await expect(resolvePathAndValidate("/etc/passwd", ROOT)).rejects.toThrow(
+    await expect(resolvePathAndValidate("/etc/passwd", tmpDir)).rejects.toThrow(
       "outside the allowed directory",
     );
   });
 
   it("allows path within boundary", async () => {
-    const resolved = await resolvePathAndValidate(
-      path.join(ROOT, "src/core/extensions/tool-registry.js"),
-      ROOT,
-    );
-    expect(resolved).toBe(path.join(ROOT, "src/core/extensions/tool-registry.js"));
+    const existingFile = path.join(tmpDir, "inside.txt");
+    fs.writeFileSync(existingFile, "content");
+    const resolved = await resolvePathAndValidate(existingFile, tmpDir);
+    expect(resolved).toBe(existingFile);
   });
 
   it("allows path outside cwd when no boundary is set", async () => {
     // When cwdBoundary is null, paths outside the current directory should be allowed
-    const resolved = await resolvePathAndValidate("/etc/hostname");
-    expect(resolved).toBe("/etc/hostname");
+    const existingFile = path.join(tmpDir, "outside.txt");
+    fs.writeFileSync(existingFile, "content");
+    const resolved = await resolvePathAndValidate(existingFile);
+    expect(resolved).toBe(existingFile);
   });
 });
 
@@ -490,24 +508,28 @@ describe("fileSize", () => {
 });
 
 describe("checkWritable", () => {
-  const tmpDir = "/tmp/oa-test-writable";
+  let tmpDir;
+
+  beforeEach(() => {
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "oa-test-writable-"));
+  });
+
+  afterEach(() => {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  });
 
   it("returns true for writable file", async () => {
-    fs.mkdirSync(tmpDir, { recursive: true });
     const filePath = path.join(tmpDir, "test.txt");
     fs.writeFileSync(filePath, "data");
     expect(await checkWritable(filePath)).toBe(true);
-    fs.unlinkSync(filePath);
   });
 
   it("returns true for new file in writable dir", async () => {
-    fs.mkdirSync(tmpDir, { recursive: true });
     const filePath = path.join(tmpDir, "new-file.txt");
     expect(await checkWritable(filePath)).toBe(true);
   });
 
   it("throws for unwritable directory", async () => {
-    fs.mkdirSync(tmpDir, { recursive: true });
     // Create a read-only directory
     const roDir = path.join(tmpDir, "readonly");
     fs.mkdirSync(roDir, { recursive: true });
@@ -515,32 +537,31 @@ describe("checkWritable", () => {
     const filePath = path.join(roDir, "test.txt");
     await expect(checkWritable(filePath)).rejects.toThrow("not writable");
     fs.chmodSync(roDir, 0o755);
-    fs.rmSync(roDir, { recursive: true, force: true });
   });
 
   it("returns true for existing read-only file (parent dir is writable)", async () => {
-    fs.mkdirSync(tmpDir, { recursive: true });
     const filePath = path.join(tmpDir, "readonly-file.txt");
-    // Clean up any leftover file from previous runs
-    try {
-      fs.chmodSync(filePath, 0o644);
-      fs.unlinkSync(filePath);
-    } catch {}
     fs.writeFileSync(filePath, "data");
     fs.chmodSync(filePath, 0o444);
     // checkWritable returns true for existing files in writable directories
     // (it only throws for unwritable parent directories)
     expect(await checkWritable(filePath)).toBe(true);
     fs.chmodSync(filePath, 0o644);
-    fs.unlinkSync(filePath);
   });
 });
 
 describe("checkReadable", () => {
-  const tmpDir = "/tmp/oa-test-readable";
+  let tmpDir;
+
+  beforeEach(() => {
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "oa-test-readable-"));
+  });
+
+  afterEach(() => {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  });
 
   it("returns true for readable file", async () => {
-    fs.mkdirSync(tmpDir, { recursive: true });
     const filePath = path.join(tmpDir, "test.txt");
     fs.writeFileSync(filePath, "data");
     expect(await checkReadable(filePath)).toBe(true);
@@ -553,13 +574,11 @@ describe("checkReadable", () => {
   });
 
   it("throws for unreadable file", async () => {
-    fs.mkdirSync(tmpDir, { recursive: true });
     const filePath = path.join(tmpDir, "no-read.txt");
     fs.writeFileSync(filePath, "data");
     fs.chmodSync(filePath, 0o000);
     await expect(checkReadable(filePath)).rejects.toThrow("not readable");
     fs.chmodSync(filePath, 0o644);
-    fs.unlinkSync(filePath);
   });
 });
 

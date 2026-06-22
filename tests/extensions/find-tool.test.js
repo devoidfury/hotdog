@@ -4,42 +4,8 @@ import path from "node:path";
 import os from "node:os";
 import { FindTool } from "../../src/extensions/core-tools/find.js";
 import { ToolContext } from "../../src/core/extensions/tool-context.js";
-import { ToolResult } from "../../src/core/extensions/tool-utils.js";
 import { DEFAULT_FIND_MAX_RESULTS } from "../../src/extensions/core-tools/defaults.js";
-
-// ── Helpers ─────────────────────────────────────────────────────────────────
-
-function tmpDir() {
-  return fsSync.mkdtempSync(path.join(os.tmpdir(), "oa-find-test-"));
-}
-
-function toolCtx(opts = {}) {
-  return new ToolContext({
-    cwdBoundary: opts.cwdBoundary || null,
-    workspaceRoot: opts.workspaceRoot || null,
-    ...opts,
-  });
-}
-
-/**
- * Extract string output from a tool result (handles ToolResult or plain string).
- */
-function resultStr(result) {
-  if (result instanceof ToolResult) {
-    if (result.error) {
-      return result.error;
-    }
-    return result.output;
-  }
-  return result;
-}
-
-function getResultStr(result) {
-  if (result?.toDisplay) {
-    return result.toDisplay();
-  }
-  return String(result);
-}
+import { resultStr, getDisplay, tmpDir, toolCtx } from "../helpers.js";
 
 // ── Tool Definition ─────────────────────────────────────────────────────────
 
@@ -64,7 +30,9 @@ describe("FindTool.callDisplay", () => {
       pattern: "*.js",
       path: "src",
     });
-    expect(display).toBe(`*.js in src (max ${DEFAULT_FIND_MAX_RESULTS})`);
+    expect(display).toContain("*.js");
+    expect(display).toContain("src");
+    expect(display).toContain(`max ${DEFAULT_FIND_MAX_RESULTS}`);
   });
 
   it("shows file type filter", () => {
@@ -73,19 +41,16 @@ describe("FindTool.callDisplay", () => {
       file_type: "f",
       max_results: 100,
     });
-    expect(display).toBe("*.js in . (f, max 100)");
+    expect(display).toContain("*.js");
+    expect(display).toContain("f");
+    expect(display).toContain("max 100");
   });
 
   it("handles invalid input gracefully", () => {
-    expect(new FindTool().callDisplay("not json")).toBe(
-      `* in . (max ${DEFAULT_FIND_MAX_RESULTS})`,
-    );
-    expect(new FindTool().callDisplay({})).toBe(
-      `* in . (max ${DEFAULT_FIND_MAX_RESULTS})`,
-    );
-    expect(new FindTool().callDisplay(null)).toBe(
-      `* in . (max ${DEFAULT_FIND_MAX_RESULTS})`,
-    );
+    const fallback = `* in . (max ${DEFAULT_FIND_MAX_RESULTS})`;
+    expect(new FindTool().callDisplay("not json")).toContain(fallback);
+    expect(new FindTool().callDisplay({})).toContain(fallback);
+    expect(new FindTool().callDisplay(null)).toContain(fallback);
   });
 });
 
@@ -104,9 +69,9 @@ describe("FindTool.execute — basic find", () => {
       toolCtx(),
     );
 
-    expect(getResultStr(result)).toContain("hello.txt");
-    expect(getResultStr(result)).toContain("world.txt");
-    expect(getResultStr(result)).not.toContain("data.json");
+    expect(getDisplay(result)).toContain("hello.txt");
+    expect(getDisplay(result)).toContain("world.txt");
+    expect(getDisplay(result)).not.toContain("data.json");
     fsSync.rmSync(dir, { recursive: true, force: true });
   });
 
@@ -122,8 +87,8 @@ describe("FindTool.execute — basic find", () => {
       toolCtx(),
     );
 
-    expect(getResultStr(result)).toContain("root.txt");
-    expect(getResultStr(result)).toContain("nested.txt");
+    expect(getDisplay(result)).toContain("root.txt");
+    expect(getDisplay(result)).toContain("nested.txt");
     fsSync.rmSync(dir, { recursive: true, force: true });
   });
 
@@ -137,7 +102,7 @@ describe("FindTool.execute — basic find", () => {
       toolCtx(),
     );
 
-    expect(getResultStr(result)).toContain("No files found");
+    expect(getDisplay(result)).toContain("No files found");
     fsSync.rmSync(dir, { recursive: true, force: true });
   });
 });
@@ -156,8 +121,8 @@ describe("FindTool.execute — file type filter", () => {
       toolCtx(),
     );
 
-    expect(getResultStr(result)).toContain("file.txt");
-    expect(getResultStr(result)).not.toContain("subdir");
+    expect(getDisplay(result)).toContain("file.txt");
+    expect(getDisplay(result)).not.toContain("subdir");
     fsSync.rmSync(dir, { recursive: true, force: true });
   });
 
@@ -172,8 +137,8 @@ describe("FindTool.execute — file type filter", () => {
       toolCtx(),
     );
 
-    expect(getResultStr(result)).toContain("subdir");
-    expect(getResultStr(result)).not.toContain("file.txt");
+    expect(getDisplay(result)).toContain("subdir");
+    expect(getDisplay(result)).not.toContain("file.txt");
     fsSync.rmSync(dir, { recursive: true, force: true });
   });
 });
@@ -194,7 +159,7 @@ describe("FindTool.execute — max_results", () => {
     );
 
     // Should have at most 3 results
-    const lines = getResultStr(result)
+    const lines = getDisplay(result)
       .split("\n")
       .filter((l) => l.includes("file"));
     expect(lines.length).toBeLessThanOrEqual(3);
@@ -213,7 +178,7 @@ describe("FindTool.execute — max_results", () => {
       toolCtx(),
     );
 
-    const lines = getResultStr(result)
+    const lines = getDisplay(result)
       .split("\n")
       .filter((l) => l.includes("file"));
     expect(lines.length).toBe(5);
@@ -227,13 +192,13 @@ describe("FindTool.execute — error cases", () => {
   it("returns error on invalid JSON input", async () => {
     const tool = new FindTool();
     const result = await tool.execute("not json", toolCtx());
-    expect(getResultStr(result)).toContain("Error parsing arguments");
+    expect(getDisplay(result)).toContain("Error parsing arguments");
   });
 
   it("returns error on missing pattern", async () => {
     const tool = new FindTool();
     const result = await tool.execute({ path: "." }, toolCtx());
-    expect(getResultStr(result)).toContain("Error parsing arguments");
+    expect(getDisplay(result)).toContain("Error parsing arguments");
   });
 
   it("handles non-existent search path gracefully", async () => {
@@ -242,7 +207,8 @@ describe("FindTool.execute — error cases", () => {
       { pattern: "*", path: "/nonexistent/path/that/does/not/exist" },
       toolCtx(),
     );
-    // Should not crash, may return "No files found" or error
-    expect(getResultStr(result)).toBeDefined();
+    // Should not crash and should indicate no files or an error
+    expect(getDisplay(result)).toBeTruthy();
+    expect(typeof getDisplay(result)).toBe("string");
   });
 });

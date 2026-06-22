@@ -5,13 +5,7 @@ import os from 'node:os';
 import { LoadSkillTool } from '../../src/extensions/skills/load-skill.js';
 import { ToolContext } from '../../src/core/extensions/tool-context.js';
 import { SkillsLoader } from '../../src/extensions/skills/loader.js';
-
-function getResultStr(result) {
-  if (result?.toDisplay) {
-    return result.toDisplay();
-  }
-  return String(result);
-}
+import { getDisplay } from '../helpers.js';
 
 describe('LoadSkillTool', () => {
   let tmpDir;
@@ -46,14 +40,14 @@ describe('LoadSkillTool', () => {
     await loader.loadSkills();
     const tool = new LoadSkillTool({ loader });
     const result = await tool.execute(JSON.stringify({ name: 'my-skill' }));
-    expect(getResultStr(result)).toContain('Skill Instructions');
-    expect(getResultStr(result)).toContain('Do stuff.');
+    expect(getDisplay(result)).toContain('Skill Instructions');
+    expect(getDisplay(result)).toContain('Do stuff.');
   });
 
   it('returns error for non-existent skill', async () => {
     const tool = new LoadSkillTool({ loader });
     const result = await tool.execute(JSON.stringify({ name: 'non-existent' }));
-    expect(getResultStr(result)).toContain('Skill not found');
+    expect(getDisplay(result)).toContain('Skill not found');
   });
 
   it('notifies context on skill activation', async () => {
@@ -85,12 +79,12 @@ describe('LoadSkillTool', () => {
     await loader.loadSkills();
     const tool = new LoadSkillTool({ loader });
     const result = await tool.execute({ name: 'object-input' });
-    expect(getResultStr(result)).toContain('Object Input Skill');
+    expect(getDisplay(result)).toContain('Object Input Skill');
   });
 
   it('returns error when loader not available', async () => {
     const tool = new LoadSkillTool();
     const result = await tool.execute(JSON.stringify({ name: 'any' }));
-    expect(getResultStr(result)).toContain('Skills loader not available');
+    expect(getDisplay(result)).toContain('Skills loader not available');
   });
 });

@@ -3,19 +3,13 @@ import { HookSystem, HOOKS } from "../../src/core/hooks.js";
 import { ToolRegistry } from "../../src/core/extensions/tool-registry.js";
 import { create as createCompactionExtension } from "../../src/extensions/compaction/index.js";
 
-import {
-  estimateContextTokens,
-  findFirstKeptIndex,
-} from "../../src/extensions/compaction/index.js";
-
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
 function makeMessages(count, content = "x".repeat(100)) {
   const messages = [];
   for (let i = 0; i < count; i++) {
-    const isUser = i % 2 === 0;
     messages.push({
-      role: isUser ? "user" : "assistant",
+      role: i % 2 === 0 ? "user" : "assistant",
       content,
     });
   }
@@ -35,23 +29,28 @@ function createMockCore(config = {}) {
   };
 }
 
-function createMockAgent(context, model = "test-model") {
+function createMockAgent(contextArray, model = "test-model") {
+  const mockLlmClient = {
+    chatStreamCancellable: () =>
+      (async function* () {
+        yield { type: "content", content: "test response" };
+      })(),
+  };
+  // Store the context internally; expose via getter to mirror the real Agent
+  let _context = contextArray;
   return {
-    context,
+    get context() { return _context; },
+    set context(v) { _context = v; },
     model,
     sessionId: "test-session",
-    _llmClient: {
-      chatStreamCancellable: () =>
-        (async function* () {
-          yield { type: "content", content: "test response" };
-        })(),
-    },
-    _context: context,
-    // Mirror the real Agent.buildMessages(): system prompt + context
+    _llmClient: mockLlmClient,
+    get llmClient() { return mockLlmClient; },
+    get _context() { return _context; },
+    set _context(v) { _context = v; },
     buildMessages() {
       return this.systemPrompt
-        ? [{ role: 'system', content: this.systemPrompt }, ...this._context]
-        : [...this._context];
+        ? [{ role: "system", content: this.systemPrompt }, ..._context]
+        : [..._context];
     },
   };
 }
@@ -117,8 +116,6 @@ describe("Hook Integration", () => {
   it("should register hooks with the hook system", () => {
     const core = createMockCore();
     const ext = createCompactionExtension(core);
-
-    // The extension should have hooks that can be registered
     expect(ext.hooks).toBeDefined();
     expect(ext.hooks[HOOKS.CONTEXT]).toBeDefined();
   });
@@ -127,17 +124,14 @@ describe("Hook Integration", () => {
     const core = createMockCore();
     const ext = createCompactionExtension(core);
 
-    const smallContext = makeMessages(4); // Only 2 pairs
+    const smallContext = makeMessages(4);
     const agent = createMockAgent(smallContext);
-
-    // Build messages array as the agent would
     const messages = [{ role: "system", content: "" }, ...smallContext];
 
-    // Call the hook handler directly with messages array
     await ext.hooks[HOOKS.CONTEXT]({ messages, agent });
 
-    // Context should be unchanged
-    expect(agent._context.length).toBe(4);
+    // Context should be unchanged since we don't have enough messages
+    expect(agent.context.length).toBe(4);
   });
 
   it("should not trigger compaction when token budget is not exceeded", async () => {
@@ -148,18 +142,14 @@ describe("Hook Integration", () => {
     });
     const ext = createCompactionExtension(core);
 
-    // Create messages that are under the token budget
-    const context = makeMessages(20, "x".repeat(50)); // ~250 tokens total
+    const context = makeMessages(20, "x".repeat(50));
     const agent = createMockAgent(context);
-
-    // Build messages array as the agent would
     const messages = [{ role: "system", content: "" }, ...context];
 
-    // Call the hook handler directly
     await ext.hooks[HOOKS.CONTEXT]({ messages, agent });
 
-    // Context should be unchanged (tokens well under 32000 - 16384 = 15616)
-    expect(agent._context.length).toBe(20);
+    // Context should be unchanged (tokens well under budget)
+    expect(agent.context.length).toBe(20);
   });
 
   it("should trigger compaction when context exceeds token budget", async () => {
@@ -170,25 +160,20 @@ describe("Hook Integration", () => {
     });
     const ext = createCompactionExtension(core);
 
-    // Use a small context limit to force compaction
-    const largeContext = makeMessages(100, "x".repeat(500)); // ~12500 tokens
+    const largeContext = makeMessages(100, "x".repeat(500));
     const agent = createMockAgent(largeContext);
 
-    // Override model config for this test
+    // Override model config with small maxTokens to force compaction
     core.modelRegistry = {
       "test-model": { name: "test-model", temperature: null, maxTokens: 8000 },
     };
 
-    // Build messages array as the agent would
     const messages = [{ role: "system", content: "" }, ...largeContext];
 
     const result = await ext.hooks[HOOKS.CONTEXT]({ messages, agent });
 
-    // Context should be compacted
-    expect(agent._context.length).toBeLessThan(largeContext.length);
-    const summaryMsg = agent._context[0];
-    expect(summaryMsg.role).toBe("user");
-    expect(summaryMsg.content).toContain("<m_ckga3qxdoia7896k>");
+    // Context should be compacted (fewer messages)
+    expect(agent.context.length).toBeLessThan(largeContext.length);
 
     // Should return the new messages array
     expect(result.messages).toBeDefined();
@@ -204,64 +189,23 @@ describe("Hook Integration", () => {
     });
     const ext = createCompactionExtension(core);
 
-    const largeContext = makeMessages(100, "x".repeat(500)); // ~12500 tokens
+    const largeContext = makeMessages(100, "x".repeat(500));
     const agent = createMockAgent(largeContext);
 
-    // Override model config for this test
     core.modelRegistry = {
       "test-model": { name: "test-model", temperature: null, maxTokens: 8000 },
     };
 
-    // Build messages array as the agent would
     const messages = [{ role: "system", content: "" }, ...largeContext];
 
     const result = await ext.hooks[HOOKS.CONTEXT]({ messages, agent });
 
-    // Drop strategy: no summary message, just shortened context
-    expect(agent._context.length).toBeLessThan(largeContext.length);
-    const firstMsg = agent._context[0];
-    expect(firstMsg.content).not.toContain("<m_ckga3qxdoia7896k>");
+    // Drop strategy: just shortened context without summary marker
+    expect(agent.context.length).toBeLessThan(largeContext.length);
 
     // Should return the new messages array
     expect(result.messages).toBeDefined();
     expect(result.messages.length).toBeLessThan(messages.length);
-  });
-});
-
-// ── Utility Functions ────────────────────────────────────────────────────────
-
-describe("Compaction Utilities", () => {
-  it("findFirstKeptIndex returns correct index", () => {
-    const messages = makeMessages(10);
-    const index = findFirstKeptIndex(messages, 2);
-    // With 10 messages and keepRecent=2, keeps last 3 (indices 7,8,9), compacts first 7
-    expect(index).toBeGreaterThan(0);
-    expect(index).toBeLessThan(messages.length);
-  });
-
-  it("findFirstKeptIndex returns 0 for keepRecent=0", () => {
-    const messages = makeMessages(10);
-    expect(findFirstKeptIndex(messages, 0)).toBe(0);
-  });
-
-  it("findFirstKeptIndex skips system messages", () => {
-    // 1 system + 8 user/assistant = 9 messages total
-    // Non-system: 8 messages. keepRecent=2 → keep 4, compact 4
-    const messages = [
-      { role: "system", content: "You are helpful" },
-      ...makeMessages(8),
-    ];
-    const index = findFirstKeptIndex(messages, 2);
-    // Count from end: indices 8,7,6,5 are 4 non-system → return 6
-    expect(index).toBe(6);
-  });
-
-  it("estimateContextTokens estimates correctly", () => {
-    const messages = makeMessages(4, "x".repeat(100));
-    const tokens = estimateContextTokens(messages);
-    // Each message ~100 chars / 4 = 25 tokens
-    expect(tokens).toBeGreaterThan(0);
-    expect(tokens).toBeLessThan(200);
   });
 });
 

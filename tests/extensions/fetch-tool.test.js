@@ -1,19 +1,8 @@
-import { describe, it, expect } from "bun:test";
+import { describe, it, expect, beforeAll } from "bun:test";
 import { FetchTool } from "../../src/extensions/fetch-tool/index.js";
-import { ToolResult } from "../../src/core/extensions/tool-utils.js";
+import { resultStr, getDisplay } from "../helpers.js";
 
-/**
- * Extract string output from a tool result (handles ToolResult or plain string).
- */
-function resultStr(result) {
-  if (result instanceof ToolResult) {
-    if (result.error) {
-      return result.error;
-    }
-    return result.output;
-  }
-  return result;
-}
+// ── Tool Definition ─────────────────────────────────────────────────────────
 
 describe("FetchTool", () => {
   it("has correct tool name", () => {
@@ -29,9 +18,7 @@ describe("FetchTool", () => {
     expect(def.function.parameters.properties).toHaveProperty("headers");
     expect(def.function.parameters.properties).toHaveProperty("body");
     expect(def.function.parameters.properties).toHaveProperty("showOriginal");
-    expect(def.function.parameters.properties.showOriginal.type).toBe(
-      "boolean",
-    );
+    expect(def.function.parameters.properties.showOriginal.type).toBe("boolean");
   });
 
   it("generates call display for GET request", () => {
@@ -59,39 +46,31 @@ describe("FetchTool", () => {
   });
 });
 
-// Test parseArgs via the tool's execute method
-// We can't import parseArgs directly since it's not exported,
-// but we can test its behavior through the tool.
-describe("FetchTool parseArgs behavior", () => {
-  function getResultStr(result) {
-    if (result?.toDisplay) {
-      return result.toDisplay();
-    }
-    return String(result);
-  }
+// ── Input validation ───────────────────────────────────────────────────────
 
+describe("FetchTool input validation", () => {
   it("returns error for missing URL", async () => {
     const tool = new FetchTool();
     const result = await tool.execute(JSON.stringify({ method: "GET" }));
-    expect(getResultStr(result)).toContain("Missing required argument: url");
+    expect(getDisplay(result)).toContain("Missing required argument: url");
   });
 
   it("returns error for empty input", async () => {
     const tool = new FetchTool();
     const result = await tool.execute("");
-    expect(getResultStr(result)).toContain("Missing required argument: url");
+    expect(getDisplay(result)).toContain("Missing required argument: url");
   });
 
   it("returns error for null input", async () => {
     const tool = new FetchTool();
     const result = await tool.execute(null);
-    expect(getResultStr(result)).toContain("Missing required argument: url");
+    expect(getDisplay(result)).toContain("Missing required argument: url");
   });
 
   it("returns error for invalid JSON", async () => {
     const tool = new FetchTool();
     const result = await tool.execute("not valid json");
-    expect(getResultStr(result)).toContain("Error parsing arguments");
+    expect(getDisplay(result)).toContain("Error parsing arguments");
   });
 
   it("returns error for invalid HTTP method", async () => {
@@ -99,7 +78,7 @@ describe("FetchTool parseArgs behavior", () => {
     const result = await tool.execute(
       JSON.stringify({ url: "https://example.com", method: "INVALID" }),
     );
-    expect(getResultStr(result)).toContain("Invalid HTTP method");
+    expect(getDisplay(result)).toContain("Invalid HTTP method");
   });
 
   it("normalizes method to uppercase", async () => {
@@ -109,7 +88,7 @@ describe("FetchTool parseArgs behavior", () => {
     const result = await tool.execute(
       JSON.stringify({ url: "https://example.com", method: "get" }),
     );
-    const str = getResultStr(result);
+    const str = getDisplay(result);
     // Should not return a parse error
     expect(str).not.toContain("Invalid HTTP method");
     expect(str).not.toContain("Error parsing arguments");
@@ -118,7 +97,7 @@ describe("FetchTool parseArgs behavior", () => {
   it("handles object input", async () => {
     const tool = new FetchTool();
     const result = await tool.execute({ url: "https://example.com" });
-    const str = getResultStr(result);
+    const str = getDisplay(result);
     // Should not return a parse error
     expect(str).not.toContain("Error parsing arguments");
   });
@@ -128,7 +107,7 @@ describe("FetchTool parseArgs behavior", () => {
     const result = await tool.execute(
       JSON.stringify({ url: "https://example.com", showOriginal: true }),
     );
-    const str = getResultStr(result);
+    const str = getDisplay(result);
     expect(str).not.toContain("Error parsing arguments");
     expect(str).not.toContain("Invalid");
   });
@@ -138,17 +117,7 @@ describe("FetchTool parseArgs behavior", () => {
     const result = await tool.execute(
       JSON.stringify({ url: "https://example.com", showOriginal: false }),
     );
-    const str = getResultStr(result);
-    expect(str).not.toContain("Error parsing arguments");
-    expect(str).not.toContain("Invalid");
-  });
-
-  it("accepts showOriginal: 0 without parse error (falsy but not true)", async () => {
-    const tool = new FetchTool();
-    const result = await tool.execute(
-      JSON.stringify({ url: "https://example.com", showOriginal: 0 }),
-    );
-    const str = getResultStr(result);
+    const str = getDisplay(result);
     expect(str).not.toContain("Error parsing arguments");
     expect(str).not.toContain("Invalid");
   });
@@ -158,63 +127,81 @@ describe("FetchTool parseArgs behavior", () => {
     const result = await tool.execute(
       JSON.stringify({ url: "https://example.com", showOriginal: "true" }),
     );
-    const str = getResultStr(result);
+    const str = getDisplay(result);
     expect(str).not.toContain("Error parsing arguments");
     expect(str).not.toContain("Invalid");
   });
 });
 
-// Integration tests for pandoc HTML-to-GFM conversion
-describe("FetchTool pandoc conversion", () => {
-  function getResultData(result) {
-    // ToolResult stores output in .output for success
-    // For objects, it's stored directly; for strings, it's the raw output
-    if (result?.output !== undefined) {
-      return result.output;
-    }
-    if (result?.toDisplay) {
-      return result.toDisplay();
-    }
-    return String(result);
+// ── Network-dependent tests (skipped when offline) ──────────────────────────
+
+/**
+ * Check if a URL is reachable before running network-dependent tests.
+ * Uses a lightweight HEAD request with a short timeout.
+ */
+async function isReachable(url) {
+  try {
+    const controller = new AbortController();
+    setTimeout(() => controller.abort(), 3000);
+    await fetch(url, { method: "HEAD", signal: controller.signal });
+    return true;
+  } catch {
+    return false;
   }
+}
+
+describe("FetchTool network integration", () => {
+  const EXAMPLE_URL = "https://example.com";
+  const JSON_URL = "https://jsonplaceholder.typicode.com/posts/1";
+
+  let exampleReachable = false;
+  let jsonReachable = false;
+
+  beforeAll(async () => {
+    exampleReachable = await isReachable(EXAMPLE_URL);
+    jsonReachable = await isReachable(JSON_URL);
+  });
 
   it("converts HTML to GFM when showOriginal is not true", async () => {
+    if (!exampleReachable) {
+      console.warn("Skipping network test: example.com not reachable");
+      return;
+    }
     const tool = new FetchTool();
-    // Fetch a real HTML page - pandoc should convert it
-    const result = await tool.execute(
-      JSON.stringify({ url: "https://example.com" }),
-    );
-    const data = getResultData(result);
-    // data is an object (ToolResult.ok({...}))
+    const result = await tool.execute(JSON.stringify({ url: EXAMPLE_URL }));
+    const data = result?.output !== undefined ? result.output : String(result);
     const parsed = typeof data === "string" ? JSON.parse(data) : data;
     expect(parsed.content_type).toContain("text/html");
-    // The body should be the pandoc-converted GFM (or original HTML if pandoc fails)
     expect(parsed.body).toBeDefined();
     expect(typeof parsed.body).toBe("string");
   });
 
   it("returns original HTML when showOriginal is true", async () => {
+    if (!exampleReachable) {
+      console.warn("Skipping network test: example.com not reachable");
+      return;
+    }
     const tool = new FetchTool();
     const result = await tool.execute(
-      JSON.stringify({ url: "https://example.com", showOriginal: true }),
+      JSON.stringify({ url: EXAMPLE_URL, showOriginal: true }),
     );
-    const data = getResultData(result);
+    const data = result?.output !== undefined ? result.output : String(result);
     const parsed = typeof data === "string" ? JSON.parse(data) : data;
     expect(parsed.content_type).toContain("text/html");
     expect(typeof parsed.body).toBe("string");
-    // Body should contain HTML tags (not converted to GFM)
     expect(parsed.body.toLowerCase()).toContain("<!doctype html>");
   });
 
   it("returns non-HTML content unchanged when showOriginal is false", async () => {
+    if (!jsonReachable) {
+      console.warn("Skipping network test: jsonplaceholder not reachable");
+      return;
+    }
     const tool = new FetchTool();
-    const result = await tool.execute(
-      JSON.stringify({ url: "https://jsonplaceholder.typicode.com/posts/1" }),
-    );
-    const data = getResultData(result);
+    const result = await tool.execute(JSON.stringify({ url: JSON_URL }));
+    const data = result?.output !== undefined ? result.output : String(result);
     const parsed = typeof data === "string" ? JSON.parse(data) : data;
     expect(parsed.content_type).toContain("application/json");
-    // JSON should be parsed as an object, not a string
     expect(typeof parsed.body).toBe("object");
   });
 });

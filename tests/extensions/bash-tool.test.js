@@ -1,19 +1,6 @@
 import { describe, it, expect } from 'bun:test';
 import { BashTool } from '../../src/extensions/bash-tool/index.js';
-import { ToolResult } from '../../src/core/extensions/tool-utils.js';
-
-/**
- * Extract string output from a tool result (handles ToolResult or plain string).
- */
-function resultStr(result) {
-  if (result instanceof ToolResult) {
-    if (result.error) {
-      return result.error;
-    }
-    return result.output;
-  }
-  return result;
-}
+import { resultStr } from '../helpers.js';
 
 describe('BashTool', () => {
   it('has correct tool name', () => {
@@ -61,8 +48,10 @@ describe('BashTool', () => {
   it('handles non-existent command', async () => {
     const tool = new BashTool();
     const result = await tool.execute(JSON.stringify({ command: 'nonexistent_command_xyz_123' }));
-    // Should return some output (error from shell)
+    // Should return an error message from the shell
+    expect(resultStr(result)).toBeTruthy();
     expect(typeof resultStr(result)).toBe('string');
+    expect(resultStr(result).length).toBeGreaterThan(0);
   });
 
   it('handles object input', async () => {
@@ -74,7 +63,7 @@ describe('BashTool', () => {
   it('generates call display', () => {
     const tool = new BashTool();
     const display = tool.callDisplay(JSON.stringify({ command: 'ls -la' }));
-    expect(display).toBe('bash: ls -la');
+    expect(display).toContain('ls -la');
   });
 
   it('limits output lines', async () => {

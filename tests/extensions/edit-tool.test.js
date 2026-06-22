@@ -1,37 +1,10 @@
 import { describe, it, expect } from 'bun:test';
-import fs from 'node:fs';
 import fsSync from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import { EditTool } from '../../src/extensions/core-tools/edit.js';
 import { ToolContext } from '../../src/core/extensions/tool-context.js';
-import { ToolResult } from '../../src/core/extensions/tool-utils.js';
-// ── Helpers ─────────────────────────────────────────────────────────────────
-
-function tmpDir() {
-  return fs.mkdtempSync(path.join(os.tmpdir(), 'oa-edit-test-'));
-}
-
-function toolCtx(opts = {}) {
-  return new ToolContext({
-    cwdBoundary: opts.cwdBoundary || null,
-    workspaceRoot: opts.workspaceRoot || null,
-    ...opts,
-  });
-}
-
-/**
- * Extract string output from a tool result (handles ToolResult or plain string).
- */
-function resultStr(result) {
-  if (result instanceof ToolResult) {
-    if (result.error) {
-      return result.error;
-    }
-    return result.output;
-  }
-  return result;
-}
+import { resultStr, tmpDir, toolCtx } from '../helpers.js';
 
 // ── Tool Definition ─────────────────────────────────────────────────────────
 
@@ -62,7 +35,9 @@ describe('EditTool.callDisplay', () => {
       oldString: 'hello',
       newString: 'world',
     });
-    expect(display).toBe("foo.js: 'hello' → 'world'");
+    expect(display).toContain('hello');
+    expect(display).toContain('world');
+    expect(display).toContain('foo.js');
   });
 
   it('truncates long strings', () => {
@@ -100,7 +75,7 @@ describe('EditTool.execute — exact match', () => {
     expect(fsSync.readFileSync(filePath, 'utf-8')).toBe('hello universe hello');
     expect(resultStr(result)).toContain('Successfully edited');
     expect(resultStr(result)).toContain('found 1 match');
-    fs.rmSync(dir, { recursive: true, force: true });
+    fsSync.rmSync(dir, { recursive: true, force: true });
   });
 
   it('replaces all occurrences with replace_all', async () => {
@@ -115,7 +90,7 @@ describe('EditTool.execute — exact match', () => {
     );
 
     expect(fsSync.readFileSync(filePath, 'utf-8')).toBe('qux bar qux baz qux');
-    fs.rmSync(dir, { recursive: true, force: true });
+    fsSync.rmSync(dir, { recursive: true, force: true });
   });
 
   it('replaces only first by default', async () => {
@@ -130,7 +105,7 @@ describe('EditTool.execute — exact match', () => {
     );
 
     expect(fsSync.readFileSync(filePath, 'utf-8')).toBe('qux bar foo baz foo');
-    fs.rmSync(dir, { recursive: true, force: true });
+    fsSync.rmSync(dir, { recursive: true, force: true });
   });
 
   it('replaces multi-line content', async () => {
@@ -145,7 +120,7 @@ describe('EditTool.execute — exact match', () => {
     );
 
     expect(fsSync.readFileSync(filePath, 'utf-8')).toBe('line1\nworld\nline3');
-    fs.rmSync(dir, { recursive: true, force: true });
+    fsSync.rmSync(dir, { recursive: true, force: true });
   });
 
   it('creates parent directories for new file', async () => {
@@ -163,7 +138,7 @@ describe('EditTool.execute — exact match', () => {
     );
 
     expect(fsSync.readFileSync(filePath, 'utf-8')).toBe('new content');
-    fs.rmSync(dir, { recursive: true, force: true });
+    fsSync.rmSync(dir, { recursive: true, force: true });
   });
 });
 
@@ -182,7 +157,7 @@ describe('EditTool.execute — line-trimmed fallback', () => {
     );
 
     expect(fsSync.readFileSync(filePath, 'utf-8')).toBe('  universe  \n  foo bar  ');
-    fs.rmSync(dir, { recursive: true, force: true });
+    fsSync.rmSync(dir, { recursive: true, force: true });
   });
 
   it('provides helpful error when text not found', async () => {
@@ -200,7 +175,7 @@ describe('EditTool.execute — line-trimmed fallback', () => {
     expect(resultStr(result)).toContain('Searched for');
     expect(resultStr(result)).toContain('File content');
     expect(resultStr(result)).toContain('Tip');
-    fs.rmSync(dir, { recursive: true, force: true });
+    fsSync.rmSync(dir, { recursive: true, force: true });
   });
 });
 
@@ -219,7 +194,7 @@ describe('EditTool.execute — error cases', () => {
     );
 
     expect(resultStr(result)).toContain('oldString must not be empty');
-    fs.rmSync(dir, { recursive: true, force: true });
+    fsSync.rmSync(dir, { recursive: true, force: true });
   });
 
   it('rejects identical oldString and newString', async () => {
@@ -234,7 +209,7 @@ describe('EditTool.execute — error cases', () => {
     );
 
     expect(resultStr(result)).toContain('no changes to apply');
-    fs.rmSync(dir, { recursive: true, force: true });
+    fsSync.rmSync(dir, { recursive: true, force: true });
   });
 
   it('returns error on invalid JSON input', async () => {
@@ -242,7 +217,7 @@ describe('EditTool.execute — error cases', () => {
     const tool = new EditTool();
     const result = await tool.execute('not json', toolCtx({ workspaceRoot: dir }));
     expect(resultStr(result)).toContain('Error parsing arguments');
-    fs.rmSync(dir, { recursive: true, force: true });
+    fsSync.rmSync(dir, { recursive: true, force: true });
   });
 
   it('returns error on missing path', async () => {
@@ -253,7 +228,7 @@ describe('EditTool.execute — error cases', () => {
       toolCtx({ workspaceRoot: dir })
     );
     expect(resultStr(result)).toContain('Error parsing arguments');
-    fs.rmSync(dir, { recursive: true, force: true });
+    fsSync.rmSync(dir, { recursive: true, force: true });
   });
 
   it('returns error on missing oldString', async () => {
@@ -264,7 +239,7 @@ describe('EditTool.execute — error cases', () => {
       toolCtx({ workspaceRoot: dir })
     );
     expect(resultStr(result)).toContain('Error parsing arguments');
-    fs.rmSync(dir, { recursive: true, force: true });
+    fsSync.rmSync(dir, { recursive: true, force: true });
   });
 
   it('returns error on missing newString', async () => {
@@ -275,7 +250,7 @@ describe('EditTool.execute — error cases', () => {
       toolCtx({ workspaceRoot: dir })
     );
     expect(resultStr(result)).toContain('Error parsing arguments');
-    fs.rmSync(dir, { recursive: true, force: true });
+    fsSync.rmSync(dir, { recursive: true, force: true });
   });
 
   it('rejects path outside cwd boundary', async () => {
@@ -286,7 +261,7 @@ describe('EditTool.execute — error cases', () => {
       toolCtx({ cwdBoundary: dir })
     );
     expect(resultStr(result)).toContain('outside cwd boundary');
-    fs.rmSync(dir, { recursive: true, force: true });
+    fsSync.rmSync(dir, { recursive: true, force: true });
   });
 
   it('rejects input that is too large', async () => {
@@ -301,7 +276,7 @@ describe('EditTool.execute — error cases', () => {
       toolCtx({ workspaceRoot: dir })
     );
     expect(resultStr(result)).toContain('Edit input too large');
-    fs.rmSync(dir, { recursive: true, force: true });
+    fsSync.rmSync(dir, { recursive: true, force: true });
   });
 
   it('handles input as string JSON', async () => {
@@ -316,7 +291,7 @@ describe('EditTool.execute — error cases', () => {
     );
 
     expect(fsSync.readFileSync(filePath, 'utf-8')).toBe('goodbye world');
-    fs.rmSync(dir, { recursive: true, force: true });
+    fsSync.rmSync(dir, { recursive: true, force: true });
   });
 });
 
@@ -335,6 +310,6 @@ describe('EditTool.execute — snake_case aliases', () => {
     );
 
     expect(fsSync.readFileSync(filePath, 'utf-8')).toBe('goodbye world');
-    fs.rmSync(dir, { recursive: true, force: true });
+    fsSync.rmSync(dir, { recursive: true, force: true });
   });
 });

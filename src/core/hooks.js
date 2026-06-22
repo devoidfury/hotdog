@@ -354,7 +354,6 @@ export const HOOKS = {
   LOOP_DETECTED: "loop:detected",
 
   // Context management
-  CONTEXT_FULL: "context:full",
   CONTEXT_MESSAGE: "context:message",
 
   // System prompt — handlers return a chunk object { name, priority, content }
@@ -374,10 +373,6 @@ export const HOOKS = {
 
   // CLI subcommand registration — extensions register subcommand handlers here
   CLI_SUBCOMMANDS_REGISTER: "cli:subcommandsRegister",
-
-  // Compaction — extension exposes strategy list and current setting
-  COMPACT_STRATEGY_LIST: "compact:strategyList",
-  COMPACT_STRATEGY_SET: "compact:strategySet",
 
   // Config — extensions register their CLI flags and config params
   CONFIG_CLI_FLAGS_REGISTER: "config:cliFlagsRegister",

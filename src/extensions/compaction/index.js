@@ -50,13 +50,13 @@ export function create(core) {
   return {
     hooks: {
       /**
-       * Handle context:full hook — trigger compaction if needed.
-       * The agent passes itself and context size; the extension does the work.
+       * Handle context hook — check if compaction is needed before each LLM call.
+       * Inspects the messages array and compacts the agent's context if token
+       * budget is exceeded. Returns modified messages to the agent.
        */
-      [HOOKS.CONTEXT_FULL]: async ({ agent, contextSize }) => {
+      [HOOKS.CONTEXT]: async ({ messages, agent }) => {
         if (!settings.enabled) return;
 
-        const messages = agent.context;
         const nonSystemMessages = messages.filter(m => m.role !== 'system');
 
         // Quick check: do we have enough messages?
@@ -77,31 +77,12 @@ export function create(core) {
         // Check if compaction is applicable
         if (!strategy.canCompact(nonSystemMessages, settings)) return;
 
-        // Execute compaction via the strategy
+        // Execute compaction — modifies agent._context in place
         await _performCompaction(agent, strategy);
-      },
 
-      /**
-       * Handle compact:strategyList hook — return available strategies and current setting.
-       * The agent calls this via emit() (sync) to get strategy info for the /compact:strategy command.
-       */
-      [HOOKS.COMPACT_STRATEGY_LIST]: ({ agent }) => {
-        const strategies = registry.getAll().map(s => ({
-          name: s.name,
-          description: s.description,
-        }));
-        return {
-          strategies,
-          current: settings.strategy,
-        };
-      },
-
-      /**
-       * Handle compact:strategySet hook — update the current compaction strategy.
-       */
-      [HOOKS.COMPACT_STRATEGY_SET]: ({ agent, strategyName }) => {
-        // The strategy registry validates at execution time, so allow any name here.
-        settings.strategy = strategyName;
+        // Rebuild messages from the updated context and return them.
+        const newMessages = agent.buildMessages();
+        return { messages: newMessages };
       },
 
       /**
@@ -140,17 +121,19 @@ export function create(core) {
             if (action === 'help') {
               return { content: `Usage: /compact:strategy [list|set <name>|help]\n  list   - Show available strategies\n  set    - Set the current strategy\n  help   - Show this help` };
             } else if (action === 'list' || action === '') {
-              const result = core.hooks.emit(HOOKS.COMPACT_STRATEGY_LIST, { agent });
-              const strategies = result?.strategies || [];
+              const strategies = registry.getAll().map(s => ({
+                name: s.name,
+                description: s.description,
+              }));
               const lines = ['Available compaction strategies:'];
               for (const s of strategies) {
-                const marker = s.name === result?.current ? ' (current)' : '';
+                const marker = s.name === settings.strategy ? ' (current)' : '';
                 lines.push(`  ${s.name}${marker} - ${s.description}`);
               }
               return { content: lines.join('\n') };
             } else {
               // Set strategy
-              core.hooks.emit(HOOKS.COMPACT_STRATEGY_SET, { agent, strategyName: action });
+              settings.strategy = action;
               return { content: `Compaction strategy set to: ${action}` };
             }
           },

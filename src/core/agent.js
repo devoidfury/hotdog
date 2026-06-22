@@ -183,7 +183,7 @@ export class Agent {
       }
 
       // Build messages (extensions can modify via hook)
-      let messages = this._buildMessages();
+      let messages = this.buildMessages();
 
       // Context hook — sequential, modifiable. Each handler sees prior
       // transformations and can return { messages } to replace the array.
@@ -193,14 +193,6 @@ export class Agent {
       });
       if (contextResult?.messages) {
         messages = contextResult.messages;
-      }
-
-      // Check context size — trigger compaction extension if needed
-      if (this._context.length > this._maxTokens / 100) {
-        await this._hooks.emitAsync(HOOKS.CONTEXT_FULL, {
-          agent: this,
-          contextSize: this._context.length,
-        });
       }
 
       // LLM call
@@ -342,9 +334,11 @@ export class Agent {
   /**
    * Build messages array: system prompt + context.
    * System prompt is built via hooks (extensions add to it).
+   * Public so extensions can rebuild messages after modifying context
+   * (e.g., compaction).
    * @returns {Message[]}
    */
-  _buildMessages() {
+  buildMessages() {
     if (this._systemPrompt) {
       return [
         new Message({ role: "system", content: this._systemPrompt }),

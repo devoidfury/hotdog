@@ -47,6 +47,12 @@ function createMockAgent(context, model = "test-model") {
         })(),
     },
     _context: context,
+    // Mirror the real Agent.buildMessages(): system prompt + context
+    buildMessages() {
+      return this.systemPrompt
+        ? [{ role: 'system', content: this.systemPrompt }, ...this._context]
+        : [...this._context];
+    },
   };
 }
 
@@ -114,7 +120,7 @@ describe("Hook Integration", () => {
 
     // The extension should have hooks that can be registered
     expect(ext.hooks).toBeDefined();
-    expect(ext.hooks[HOOKS.CONTEXT_FULL]).toBeDefined();
+    expect(ext.hooks[HOOKS.CONTEXT]).toBeDefined();
   });
 
   it("should not trigger compaction when context is small", async () => {
@@ -124,8 +130,11 @@ describe("Hook Integration", () => {
     const smallContext = makeMessages(4); // Only 2 pairs
     const agent = createMockAgent(smallContext);
 
-    // Call the hook handler directly
-    await ext.hooks[HOOKS.CONTEXT_FULL]({ agent, contextSize: 4 });
+    // Build messages array as the agent would
+    const messages = [{ role: "system", content: "" }, ...smallContext];
+
+    // Call the hook handler directly with messages array
+    await ext.hooks[HOOKS.CONTEXT]({ messages, agent });
 
     // Context should be unchanged
     expect(agent._context.length).toBe(4);
@@ -143,8 +152,11 @@ describe("Hook Integration", () => {
     const context = makeMessages(20, "x".repeat(50)); // ~250 tokens total
     const agent = createMockAgent(context);
 
+    // Build messages array as the agent would
+    const messages = [{ role: "system", content: "" }, ...context];
+
     // Call the hook handler directly
-    await ext.hooks[HOOKS.CONTEXT_FULL]({ agent, contextSize: context.length });
+    await ext.hooks[HOOKS.CONTEXT]({ messages, agent });
 
     // Context should be unchanged (tokens well under 32000 - 16384 = 15616)
     expect(agent._context.length).toBe(20);
@@ -159,35 +171,28 @@ describe("Hook Integration", () => {
     const ext = createCompactionExtension(core);
 
     // Use a small context limit to force compaction
-    // With 50 messages * 500 chars = 25000 chars ≈ 6250 tokens
-    // contextLimit(8000) - reserve(100) = 7900 threshold
-    // 6250 < 7900... still under. Need more messages.
-    // 15 messages * 500 chars = 7500 chars ≈ 1875 tokens — under
-    // 40 messages * 500 chars = 20000 chars ≈ 5000 tokens — under
-    // Actually the model maxTokens is 32000, so threshold is 31900.
-    // Need ~255 messages of 500 chars each for 25000+ tokens.
-    // Simpler: override modelRegistry with small maxTokens
     const largeContext = makeMessages(100, "x".repeat(500)); // ~12500 tokens
     const agent = createMockAgent(largeContext);
 
     // Override model config for this test
-    const originalCore = core;
     core.modelRegistry = {
       "test-model": { name: "test-model", temperature: null, maxTokens: 8000 },
     };
-    const threshold = 8000 - 100; // 7900
-    // 12500 > 7900 → should compact
 
-    await ext.hooks[HOOKS.CONTEXT_FULL]({
-      agent,
-      contextSize: largeContext.length,
-    });
+    // Build messages array as the agent would
+    const messages = [{ role: "system", content: "" }, ...largeContext];
+
+    const result = await ext.hooks[HOOKS.CONTEXT]({ messages, agent });
 
     // Context should be compacted
     expect(agent._context.length).toBeLessThan(largeContext.length);
     const summaryMsg = agent._context[0];
     expect(summaryMsg.role).toBe("user");
     expect(summaryMsg.content).toContain("<m_ckga3qxdoia7896k>");
+
+    // Should return the new messages array
+    expect(result.messages).toBeDefined();
+    expect(result.messages.length).toBeLessThan(messages.length);
   });
 
   it("should use drop strategy when configured", async () => {
@@ -207,15 +212,19 @@ describe("Hook Integration", () => {
       "test-model": { name: "test-model", temperature: null, maxTokens: 8000 },
     };
 
-    await ext.hooks[HOOKS.CONTEXT_FULL]({
-      agent,
-      contextSize: largeContext.length,
-    });
+    // Build messages array as the agent would
+    const messages = [{ role: "system", content: "" }, ...largeContext];
+
+    const result = await ext.hooks[HOOKS.CONTEXT]({ messages, agent });
 
     // Drop strategy: no summary message, just shortened context
     expect(agent._context.length).toBeLessThan(largeContext.length);
     const firstMsg = agent._context[0];
     expect(firstMsg.content).not.toContain("<m_ckga3qxdoia7896k>");
+
+    // Should return the new messages array
+    expect(result.messages).toBeDefined();
+    expect(result.messages.length).toBeLessThan(messages.length);
   });
 });
 

@@ -110,9 +110,7 @@ describe("HookSystem", () => {
     it("should define standard hook names", () => {
       expect(HOOKS.SESSION_CREATE).toBe("session:create");
       expect(HOOKS.TOOLS_REGISTER).toBe("tools:register");
-      expect(HOOKS.CONTEXT_FULL).toBe("context:full");
       expect(HOOKS.OUTPUT_EVENT).toBe("output:event");
-      expect(HOOKS.COMPACT_STRATEGY_LIST).toBe("compact:strategyList");
     });
   });
 });

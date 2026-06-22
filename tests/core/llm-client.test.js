@@ -27,15 +27,21 @@ describe('LlmError', () => {
 describe('LlmClient constructor', () => {
   it('creates with defaults', () => {
     const origKey = process.env.AI_API_KEY;
+    const origUrl = process.env.AI_URL;
     delete process.env.AI_API_KEY;
+    delete process.env.AI_URL;
     try {
       const client = new LlmClient();
-      expect(client.baseUrl).toContain('ai365.home');
+      // Default baseUrl is null (configured at runtime via config resolution)
+      expect(client.baseUrl).toBeNull();
       expect(client.apiKey).toBeNull();
       expect(client.stream).toBe(true);
       expect(client.chatTimeoutSecs).toBe(600);
     } finally {
       if (origKey !== undefined) process.env.AI_API_KEY = origKey;
+      else delete process.env.AI_API_KEY;
+      if (origUrl !== undefined) process.env.AI_URL = origUrl;
+      else delete process.env.AI_URL;
     }
   });
 

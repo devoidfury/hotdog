@@ -10,5 +10,8 @@
   "scripts": {
     "start": "bun src/core/main.js"
   },
-  "type": "module"
+  "type": "module",
+  "engines": {
+    "bun": ">=1.0"
+  }
 }

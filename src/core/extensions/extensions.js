@@ -804,7 +804,7 @@ export class ExtensionLoader {
   }
 
   async cleanup() {
-    await this._core.hooks.emitAsync(HOOKS.SHUTDOWN_CLEANUP, null);
+    await this._core.hooks.notifyHooksAsync(HOOKS.SHUTDOWN_CLEANUP, null);
   }
 }
 

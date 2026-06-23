@@ -235,10 +235,10 @@ export async function main() {
   // Emit CLI subcommand registration hook so extensions can register their handlers.
   // Subcommand metadata (description, options) was already registered from extension.json;
   // this hook allows extensions to attach the actual handler functions.
-  core.hooks.emit(HOOKS.CLI_SUBCOMMANDS_REGISTER, core.cliSubcommandRegistry);
+  core.hooks.notifyHooks(HOOKS.CLI_SUBCOMMANDS_REGISTER, core.cliSubcommandRegistry);
 
   // Emit CLI_ARGS_PARSED hook after extensions are loaded, before performing any actions.
-  core.hooks.emit(HOOKS.CLI_ARGS_PARSED, { cli });
+  core.hooks.notifyHooks(HOOKS.CLI_ARGS_PARSED, { cli });
 
   // ── Subcommand dispatch ─────────────────────────────────────────────────
   if (cli.subcommand) {

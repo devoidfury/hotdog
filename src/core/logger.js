@@ -108,7 +108,7 @@ function _emit(level, message, metadata) {
   }
   if (LOG_LEVELS[level] < _minLevelNum) return;
   if (_hooks) {
-    _hooks.emit("log", { level, message, metadata });
+    _hooks.notifyHooks("log", { level, message, metadata });
   }
 }
 

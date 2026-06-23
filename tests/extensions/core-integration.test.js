@@ -71,7 +71,7 @@ describe("Hook + Extension Integration", () => {
     await loader.load("core-tools", wrapFactory(createCoreToolsExtension));
 
     // Trigger the tools:register hook
-    await core.hooks.emitAsync(HOOKS.TOOLS_REGISTER, core.toolRegistry);
+    await core.hooks.notifyHooksAsync(HOOKS.TOOLS_REGISTER, core.toolRegistry);
 
     // Core tools should be registered (bash is now in bash-tool extension, fetch is in fetch-tool extension)
     const toolNames = core.toolRegistry.getAll().map(([name]) => name);

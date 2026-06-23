@@ -32,7 +32,7 @@ export function createLogger({ hooks, minLevel = "warn", target = "stderr" }) {
 
   const emit = (level, message, metadata) => {
     if (LOG_LEVELS[level] < minLevelNum) return;
-    hooks.emit("log", { level, message, metadata });
+    hooks.notifyHooks("log", { level, message, metadata });
   };
 
   return {

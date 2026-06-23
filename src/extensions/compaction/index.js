@@ -259,7 +259,7 @@ export function create(core) {
       }
 
       // Emit compaction result event
-      core.hooks?.emit(HOOKS.OUTPUT_EVENT, {
+      core.hooks?.notifyHooks(HOOKS.OUTPUT_EVENT, {
         type: 'compaction_result',
         data: result,
       });

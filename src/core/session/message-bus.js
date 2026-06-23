@@ -139,13 +139,13 @@ export class MessageBus {
       const inputData = { text, source: "interactive", agent };
       let inputHandled = false;
       if (agent?._hooks) {
-        const { stopped, data: finalData } = await agent._hooks.emitAsyncSeqUntil(
+        const inputResult = await agent._hooks.runHookPipeline(
           HOOKS.INPUT,
           inputData,
-          (result) => result?.action === "handled",
+          { shouldStop: (result) => result?.action === "handled" },
         );
-        if (stopped) inputHandled = true;
-        text = finalData.text;
+        if (inputResult.stopped) inputHandled = true;
+        text = inputResult.data.text;
       }
 
       // If input was handled by a hook, skip agent processing

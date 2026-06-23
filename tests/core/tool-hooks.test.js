@@ -3,7 +3,7 @@
 import { describe, test, expect } from "bun:test";
 import { HookSystem, HOOKS } from "../../src/core/hooks.js";
 
-describe("HookSystem.emitAsyncSeq", () => {
+describe("HookSystem.runHookPipeline", () => {
   test("runs handlers sequentially and returns last result", async () => {
     const hooks = new HookSystem();
     const order = [];
@@ -17,19 +17,19 @@ describe("HookSystem.emitAsyncSeq", () => {
       return { messages: ["a", "b"] };
     });
 
-    const result = await hooks.emitAsyncSeq(HOOKS.CONTEXT, {
+    const { lastResult } = await hooks.runHookPipeline(HOOKS.CONTEXT, {
       messages: [],
       agent: null,
     });
 
     expect(order).toEqual([1, 2]);
-    expect(result).toEqual({ messages: ["a", "b"] });
+    expect(lastResult).toEqual({ messages: ["a", "b"] });
   });
 
-  test("returns undefined when no handlers", async () => {
+  test("lastResult is undefined when no handlers", async () => {
     const hooks = new HookSystem();
-    const result = await hooks.emitAsyncSeq(HOOKS.CONTEXT, { messages: [] });
-    expect(result).toBeUndefined();
+    const { lastResult } = await hooks.runHookPipeline(HOOKS.CONTEXT, { messages: [] });
+    expect(lastResult).toBeUndefined();
   });
 
   test("handler can see prior transformations via data object", async () => {
@@ -44,12 +44,12 @@ describe("HookSystem.emitAsyncSeq", () => {
       return { messages: data.messages };
     });
 
-    const result = await hooks.emitAsyncSeq(HOOKS.CONTEXT, {
+    const { lastResult } = await hooks.runHookPipeline(HOOKS.CONTEXT, {
       messages: [],
       agent: null,
     });
 
-    expect(result.messages).toEqual(["first", "second"]);
+    expect(lastResult.messages).toEqual(["first", "second"]);
   });
 
   test("async handlers are awaited in order", async () => {
@@ -67,13 +67,13 @@ describe("HookSystem.emitAsyncSeq", () => {
       return { messages: ["a", "b"] };
     });
 
-    const result = await hooks.emitAsyncSeq(HOOKS.CONTEXT, {
+    const { lastResult } = await hooks.runHookPipeline(HOOKS.CONTEXT, {
       messages: [],
       agent: null,
     });
 
     expect(order).toEqual([1, 2]);
-    expect(result.messages).toEqual(["a", "b"]);
+    expect(lastResult.messages).toEqual(["a", "b"]);
   });
 
   test("errors in handlers are caught and logged", async () => {
@@ -92,17 +92,17 @@ describe("HookSystem.emitAsyncSeq", () => {
       return { messages: ["a", "b"] };
     });
 
-    const result = await hooks.emitAsyncSeq(HOOKS.CONTEXT, {
+    const { lastResult } = await hooks.runHookPipeline(HOOKS.CONTEXT, {
       messages: [],
       agent: null,
     });
 
     expect(order).toEqual([1, 3]);
-    expect(result.messages).toEqual(["a", "b"]);
+    expect(lastResult.messages).toEqual(["a", "b"]);
   });
 });
 
-describe("HookSystem.emitAsyncSeqUntil", () => {
+describe("HookSystem.runHookPipeline with shouldStop", () => {
   test("stops early when shouldStop returns true", async () => {
     const hooks = new HookSystem();
     const order = [];
@@ -121,15 +121,15 @@ describe("HookSystem.emitAsyncSeqUntil", () => {
       return { action: "continue" };
     });
 
-    const result = await hooks.emitAsyncSeqUntil(
+    const { stopped, data } = await hooks.runHookPipeline(
       HOOKS.INPUT,
       { text: "original" },
-      (r) => r?.action === "handled",
+      { shouldStop: (r) => r?.action === "handled" },
     );
 
     expect(order).toEqual([1, 2]);
-    expect(result.stopped).toBe(true);
-    expect(result.data.text).toBe("transformed");
+    expect(stopped).toBe(true);
+    expect(data.text).toBe("transformed");
   });
 
   test("runs all handlers when shouldStop never returns true", async () => {
@@ -147,15 +147,15 @@ describe("HookSystem.emitAsyncSeqUntil", () => {
       return { action: "transform", text: data.text };
     });
 
-    const result = await hooks.emitAsyncSeqUntil(
+    const { stopped, data } = await hooks.runHookPipeline(
       HOOKS.INPUT,
       { text: "original" },
-      (r) => r?.action === "handled",
+      { shouldStop: (r) => r?.action === "handled" },
     );
 
     expect(order).toEqual([1, 2]);
-    expect(result.stopped).toBe(false);
-    expect(result.data.text).toBe("step2");
+    expect(stopped).toBe(false);
+    expect(data.text).toBe("step2");
   });
 
   test("mutable data is shared between handlers", async () => {
@@ -170,13 +170,13 @@ describe("HookSystem.emitAsyncSeqUntil", () => {
       return { action: "continue" };
     });
 
-    const result = await hooks.emitAsyncSeqUntil(
+    const { data } = await hooks.runHookPipeline(
       HOOKS.INPUT,
       { text: "test", counter: 0 },
-      () => false,
+      { shouldStop: () => false },
     );
 
-    expect(result.data.counter).toBe(2);
+    expect(data.counter).toBe(2);
   });
 });
 
@@ -191,7 +191,7 @@ describe("tool:call hook", () => {
       return { action: "continue" };
     });
 
-    const blockResult = await hooks.emitAsyncSeq(HOOKS.TOOL_CALL, {
+    const { lastResult: blockResult } = await hooks.runHookPipeline(HOOKS.TOOL_CALL, {
       toolCallId: "1",
       toolName: "dangerous-tool",
       input: '{"cmd": "rm -rf /"}',
@@ -199,7 +199,7 @@ describe("tool:call hook", () => {
     });
     expect(blockResult.action).toBe("block");
 
-    const allowResult = await hooks.emitAsyncSeq(HOOKS.TOOL_CALL, {
+    const { lastResult: allowResult } = await hooks.runHookPipeline(HOOKS.TOOL_CALL, {
       toolCallId: "2",
       toolName: "safe-tool",
       input: '{"path": "/tmp/test"}',
@@ -220,15 +220,15 @@ describe("tool:call hook", () => {
       return { action: "continue" };
     });
 
-    const result = await hooks.emitAsyncSeq(HOOKS.TOOL_CALL, {
+    const { lastResult } = await hooks.runHookPipeline(HOOKS.TOOL_CALL, {
       toolCallId: "1",
       toolName: "bash",
       input: '{"command": "ls"}',
       agent: null,
     });
 
-    expect(result.action).toBe("modify");
-    expect(JSON.parse(result.input).command).toBe("set -euo pipefail; ls");
+    expect(lastResult.action).toBe("modify");
+    expect(JSON.parse(lastResult.input).command).toBe("set -euo pipefail; ls");
   });
 
   test("multiple handlers can chain modifications via data mutation", async () => {
@@ -258,7 +258,7 @@ describe("tool:call hook", () => {
       input: '{"path": "test.txt"}',
       agent: null,
     };
-    await hooks.emitAsyncSeq(HOOKS.TOOL_CALL, data);
+    await hooks.runHookPipeline(HOOKS.TOOL_CALL, data);
 
     const finalArgs = JSON.parse(data.input);
     expect(finalArgs.cwd).toBe("/workspace");
@@ -277,7 +277,7 @@ describe("tool:result hook", () => {
       return { result };
     });
 
-    const result = await hooks.emitAsyncSeq(HOOKS.TOOL_RESULT, {
+    const { lastResult } = await hooks.runHookPipeline(HOOKS.TOOL_RESULT, {
       toolCallId: "1",
       toolName: "bash",
       result: "API key is sk-abc123def456",
@@ -285,7 +285,7 @@ describe("tool:result hook", () => {
       agent: null,
     });
 
-    expect(result.result).toBe("API key is [REDACTED]");
+    expect(lastResult.result).toBe("API key is [REDACTED]");
   });
 
   test("hook can truncate large results", async () => {
@@ -304,7 +304,7 @@ describe("tool:result hook", () => {
     });
 
     const bigResult = Array(200).fill("line").join("\n");
-    const result = await hooks.emitAsyncSeq(HOOKS.TOOL_RESULT, {
+    const { lastResult } = await hooks.runHookPipeline(HOOKS.TOOL_RESULT, {
       toolCallId: "1",
       toolName: "bash",
       result: bigResult,
@@ -312,12 +312,12 @@ describe("tool:result hook", () => {
       agent: null,
     });
 
-    expect(result.result).toContain("[100 more lines]");
-    expect(result.result.split("\n").length).toBe(101);
+    expect(lastResult.result).toContain("[100 more lines]");
+    expect(lastResult.result.split("\n").length).toBe(101);
   });
 });
 
-describe("CONTEXT hook via emitAsyncSeq", () => {
+describe("CONTEXT hook via runHookPipeline", () => {
   test("handlers can filter messages", async () => {
     const hooks = new HookSystem();
 
@@ -325,7 +325,7 @@ describe("CONTEXT hook via emitAsyncSeq", () => {
       return { messages: messages.filter((m) => m.content?.length > 0) };
     });
 
-    const result = await hooks.emitAsyncSeq(HOOKS.CONTEXT, {
+    const { lastResult } = await hooks.runHookPipeline(HOOKS.CONTEXT, {
       messages: [
         { role: "user", content: "hello" },
         { role: "assistant", content: "" },
@@ -334,9 +334,9 @@ describe("CONTEXT hook via emitAsyncSeq", () => {
       agent: null,
     });
 
-    expect(result.messages).toHaveLength(2);
-    expect(result.messages[0].content).toBe("hello");
-    expect(result.messages[1].content).toBe("world");
+    expect(lastResult.messages).toHaveLength(2);
+    expect(lastResult.messages[0].content).toBe("hello");
+    expect(lastResult.messages[1].content).toBe("world");
   });
 
   test("handlers can inject messages", async () => {
@@ -351,13 +351,13 @@ describe("CONTEXT hook via emitAsyncSeq", () => {
       };
     });
 
-    const result = await hooks.emitAsyncSeq(HOOKS.CONTEXT, {
+    const { lastResult } = await hooks.runHookPipeline(HOOKS.CONTEXT, {
       messages: [{ role: "user", content: "hi" }],
       agent: null,
     });
 
-    expect(result.messages).toHaveLength(2);
-    expect(result.messages[0].role).toBe("system");
-    expect(result.messages[1].content).toBe("hi");
+    expect(lastResult.messages).toHaveLength(2);
+    expect(lastResult.messages[0].role).toBe("system");
+    expect(lastResult.messages[1].content).toBe("hi");
   });
 });

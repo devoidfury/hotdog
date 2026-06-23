@@ -82,7 +82,15 @@ export class Agent {
   set model(v) {
     const oldModel = this.__model;
     this.__model = v;
-    this._hooks.emit(HOOKS.MODEL_CHANGE, {
+    // Pull in the new model's config from the registry
+    const entry = this._modelRegistry[v];
+    if (entry) {
+      this._maxTokens = entry.maxTokens || DEFAULT_MAX_TOKENS;
+      // Reset reasoning effort to the new model's default —
+      // the user can re-override via /reasoning if needed.
+      this._reasoningEffort = entry.reasoningEffort;
+    }
+    this._hooks.notifyHooks(HOOKS.MODEL_CHANGE, {
       agent: this,
       oldModel,
       newModel: v,
@@ -96,7 +104,7 @@ export class Agent {
     const oldVal = this._isRestoring;
     this._isRestoring = v;
     if (oldVal !== v) {
-      this._hooks.emit(HOOKS.SESSION_RESTORE_ACTIVE, {
+      this._hooks.notifyHooks(HOOKS.SESSION_RESTORE_ACTIVE, {
         agent: this,
         isRestoring: v,
       });
@@ -154,7 +162,7 @@ export class Agent {
     // Add user input to context
     const userMsg = new Message({ role: "user", content: userInput, images });
     this._context.push(userMsg);
-    await this._hooks.emitAsync(HOOKS.CONTEXT_MESSAGE, {
+    await this._hooks.notifyHooksAsync(HOOKS.CONTEXT_MESSAGE, {
       message: userMsg,
       agent: this,
     });
@@ -165,7 +173,7 @@ export class Agent {
       this._iterationCount = iteration;
 
       // Turn start — emitted at the beginning of each agent loop iteration.
-      await this._hooks.emitAsync(HOOKS.TURN_START, {
+      await this._hooks.notifyHooksAsync(HOOKS.TURN_START, {
         turnIndex: iteration,
         timestamp: Date.now(),
         agent: this,
@@ -184,7 +192,7 @@ export class Agent {
         const followUp = this._followQueue.shift();
         const followUpMsg = new Message({ role: "user", content: followUp });
         this._context.push(followUpMsg);
-        await this._hooks.emitAsync(HOOKS.CONTEXT_MESSAGE, {
+        await this._hooks.notifyHooksAsync(HOOKS.CONTEXT_MESSAGE, {
           message: followUpMsg,
           agent: this,
         });
@@ -195,12 +203,12 @@ export class Agent {
 
       // Context hook — sequential, modifiable. Each handler sees prior
       // transformations and can return { messages } to replace the array.
-      const contextResult = await this._hooks.emitAsyncSeq(HOOKS.CONTEXT, {
+      const contextResult = await this._hooks.runHookPipeline(HOOKS.CONTEXT, {
         messages,
         agent: this,
       });
-      if (contextResult?.messages) {
-        messages = contextResult.messages;
+      if (contextResult.lastResult?.messages) {
+        messages = contextResult.lastResult.messages;
       }
 
       // LLM call
@@ -209,15 +217,15 @@ export class Agent {
 
       // Before provider request — sequential, modifiable. Extensions can
       // log the request, modify messages, change model config, or alter tools.
-      const reqResult = await this._hooks.emitAsyncSeq(HOOKS.PROVIDER_REQUEST, {
+      const reqResult = await this._hooks.runHookPipeline(HOOKS.PROVIDER_REQUEST, {
         messages,
         modelConfig,
         toolDefs,
         agent: this,
       });
-      if (reqResult?.messages) messages = reqResult.messages;
-      if (reqResult?.modelConfig) modelConfig = reqResult.modelConfig;
-      if (reqResult?.toolDefs) toolDefs = reqResult.toolDefs;
+      if (reqResult.lastResult?.messages) messages = reqResult.lastResult.messages;
+      if (reqResult.lastResult?.modelConfig) modelConfig = reqResult.lastResult.modelConfig;
+      if (reqResult.lastResult?.toolDefs) toolDefs = reqResult.lastResult.toolDefs;
 
       // Create an AbortController for this LLM request.
       // Pass its signal so the HTTP client can properly abort fetch()
@@ -248,13 +256,13 @@ export class Agent {
 
         // After provider response — notification with full response data.
         // Enables: response logging, metrics, cost tracking, telemetry.
-        await this._hooks.emitAsync(HOOKS.PROVIDER_RESPONSE, {
+        await this._hooks.notifyHooksAsync(HOOKS.PROVIDER_RESPONSE, {
           response,
           modelConfig,
           agent: this,
         });
 
-        await this._hooks.emitAsync(HOOKS.MESSAGES_AFTER_LLM, {
+        await this._hooks.notifyHooksAsync(HOOKS.MESSAGES_AFTER_LLM, {
           response,
           messages: this._context,
         });
@@ -285,7 +293,7 @@ export class Agent {
           );
           if (outcome !== "continue") {
             // Turn end — agent has stopped (e.g., wait tool yielded control).
-            await this._hooks.emitAsync(HOOKS.TURN_END, {
+            await this._hooks.notifyHooksAsync(HOOKS.TURN_END, {
               turnIndex: iteration,
               message: response.fullText,
               toolResults,
@@ -295,7 +303,7 @@ export class Agent {
             return outcome;
           }
           // Turn end (tool execution continues to next iteration).
-          await this._hooks.emitAsync(HOOKS.TURN_END, {
+          await this._hooks.notifyHooksAsync(HOOKS.TURN_END, {
             turnIndex: iteration,
             message: response.fullText,
             toolResults,
@@ -303,12 +311,12 @@ export class Agent {
             agent: this,
           });
         } else {
-          await this._hooks.emitAsync(HOOKS.CONTEXT_MESSAGE, {
+          await this._hooks.notifyHooksAsync(HOOKS.CONTEXT_MESSAGE, {
             message: assistantMsg,
             agent: this,
           });
           // Turn end (final response, no tools).
-          await this._hooks.emitAsync(HOOKS.TURN_END, {
+          await this._hooks.notifyHooksAsync(HOOKS.TURN_END, {
             turnIndex: iteration,
             message: response.fullText,
             toolResults: [],
@@ -373,7 +381,7 @@ export class Agent {
     // an array of such objects. Source prefixing is applied by the agent
     // based on the handler's registration source.
     const chunks = [];
-    const results = await this._hooks.emitAsyncCollect(
+    const { results } = await this._hooks.runHookPipeline(
       HOOKS.SYSTEM_PROMPT_BUILD,
       { agent: this },
     );
@@ -529,7 +537,7 @@ export class Agent {
 
     // 2. Emit tool call event + before-execute hook
     this._emitOutput("tool_call", { toolName, input, toolCallId });
-    await this._hooks.emitAsync(HOOKS.TOOL_BEFORE_EXECUTE, {
+    await this._hooks.notifyHooksAsync(HOOKS.TOOL_BEFORE_EXECUTE, {
       toolCallId,
       toolName,
       input,
@@ -539,29 +547,29 @@ export class Agent {
     // 3. Tool call gate — sequential, modifiable. Handlers can block, modify
     //    input args, or allow execution to proceed.
     //    Actions: { action: "continue" } | { action: "modify", input } | { action: "block", result }
-    const callResult = await this._hooks.emitAsyncSeq(HOOKS.TOOL_CALL, {
+    const callResult = await this._hooks.runHookPipeline(HOOKS.TOOL_CALL, {
       toolCallId,
       toolName,
       input,
       agent: this,
     });
-    if (callResult?.action === "block") {
+    if (callResult.lastResult?.action === "block") {
       // Extension blocked this tool call — use provided result
       const blockedResult = this._formatToolResult(
-        callResult.result,
+        callResult.lastResult.result,
         toolName,
         false,
       );
       return this._writeToolResult(toolName, input, blockedResult, toolCallId);
     }
-    if (callResult?.action === "modify" && callResult.input !== undefined) {
+    if (callResult.lastResult?.action === "modify" && callResult.lastResult.input !== undefined) {
       // Extension modified the input args
-      input = callResult.input;
+      input = callResult.lastResult.input;
     }
 
     // 4. Build and enrich tool context via hook
     const toolCtx = this._buildToolContext(toolName);
-    await this._hooks.emitAsync(HOOKS.AGENT_TOOL_CONTEXT, {
+    await this._hooks.notifyHooksAsync(HOOKS.AGENT_TOOL_CONTEXT, {
       toolCtx,
       toolName,
       agent: this,
@@ -604,7 +612,7 @@ export class Agent {
     }
 
     // 8. After-execute hook + result modification hook
-    await this._hooks.emitAsync(HOOKS.TOOL_AFTER_EXECUTE, {
+    await this._hooks.notifyHooksAsync(HOOKS.TOOL_AFTER_EXECUTE, {
       toolCallId,
       toolName,
       result,
@@ -616,7 +624,7 @@ export class Agent {
     // Tool result — sequential, modifiable. Handlers can transform the
     // result before it reaches the LLM context.
     // Returns { result } to replace the result (any value: string, ToolResult, object)
-    const resultHook = await this._hooks.emitAsyncSeq(HOOKS.TOOL_RESULT, {
+    const resultHook = await this._hooks.runHookPipeline(HOOKS.TOOL_RESULT, {
       toolCallId,
       toolName,
       result,
@@ -624,8 +632,8 @@ export class Agent {
       input,
       agent: this,
     });
-    if (resultHook?.result !== undefined) {
-      result = resultHook.result;
+    if (resultHook.lastResult?.result !== undefined) {
+      result = resultHook.lastResult.result;
     }
 
     // 9. Extract images from ToolResult before formatting
@@ -681,7 +689,7 @@ export class Agent {
       images,
     });
     this._context.push(msg);
-    await this._hooks.emitAsync(HOOKS.CONTEXT_MESSAGE, {
+    await this._hooks.notifyHooksAsync(HOOKS.CONTEXT_MESSAGE, {
       message: msg,
       agent: this,
     });
@@ -738,7 +746,7 @@ export class Agent {
     if (this._sink) {
       this._sink.emit({ type: OUTPUT_EVENT[type.toUpperCase()], ...data });
     }
-    this._hooks.emit(HOOKS.OUTPUT_EVENT, { type, data, agent: this });
+    this._hooks.notifyHooks(HOOKS.OUTPUT_EVENT, { type, data, agent: this });
   }
 
   // ── Session Management ────────────────────────────────────────────────────
@@ -792,18 +800,19 @@ export class Agent {
       if (result) return result;
     }
 
-    // Fire COMMAND_DISPATCH hook — extensions can handle specific commands
-    const result = this._hooks.emit(HOOKS.COMMAND_DISPATCH, {
+    // Run COMMAND_DISPATCH hook pipeline — extensions can handle specific commands.
+    // The pipeline returns the last handler's result; if it's truthy we use it.
+    const pipelineResult = await this._hooks.runHookPipeline(HOOKS.COMMAND_DISPATCH, {
       command: cmd,
       agent: this,
     });
 
-    // Handle async hook results (Promises)
-    if (result && typeof result.then === "function") {
-      const awaited = await result;
+    const lastResult = pipelineResult.lastResult;
+    if (lastResult && typeof lastResult.then === "function") {
+      const awaited = await lastResult;
       if (awaited) return awaited;
-    } else if (result) {
-      return result;
+    } else if (lastResult) {
+      return lastResult;
     }
 
     // Default command handling (core commands)

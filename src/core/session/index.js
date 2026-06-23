@@ -94,7 +94,7 @@ export class SessionManager {
     const agent = await this._buildAgent(config);
     const sessionId = this._store.addAgent(agent);
     this._currentSessionId = sessionId;
-    await this._hooks.emitAsync(HOOKS.SESSION_CREATE, {
+    await this._hooks.notifyHooksAsync(HOOKS.SESSION_CREATE, {
       session: this, config,
     });
     return sessionId;
@@ -110,7 +110,7 @@ export class SessionManager {
     const newAgent = await this._buildAgent(config);
     this._store.addAgent(newAgent);
     this._currentSessionId = newAgent.sessionId;
-    await this._hooks.emitAsync(HOOKS.SESSION_SWAP, {
+    await this._hooks.notifyHooksAsync(HOOKS.SESSION_SWAP, {
       oldAgent, newAgent,
     });
     return newAgent;
@@ -142,7 +142,7 @@ export class SessionManager {
     const agent = this._store.getAgent(sessionId);
     if (agent) {
       this._currentSessionId = sessionId;
-      this._hooks.emit(HOOKS.SESSION_SWAP, {
+      this._hooks.notifyHooks(HOOKS.SESSION_SWAP, {
         oldAgent: agent, newAgent: agent,
       });
     }
@@ -178,7 +178,7 @@ export class SessionManager {
    * @returns {Promise<Object>} The deserialized agent
    */
   async deserialize(data) {
-    await this._hooks.emitAsync(HOOKS.SESSION_DESERIALIZE, { data });
+    await this._hooks.notifyHooksAsync(HOOKS.SESSION_DESERIALIZE, { data });
 
     const agent = await this._buildAgent({ model: data.model });
     agent.deserialize(data);

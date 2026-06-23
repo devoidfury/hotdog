@@ -272,7 +272,7 @@ export function create(core) {
       await agent.ensureSystemPrompt();
 
       // Emit hook for extensions to register commands
-      core.hooks.emit(HOOKS.COMMANDS_REGISTER, {
+      core.hooks.notifyHooks(HOOKS.COMMANDS_REGISTER, {
         registry: agent.getCommandRegistry(),
         agent,
       });
@@ -444,7 +444,8 @@ export function create(core) {
     }
 
     console.log(`\n$ ${cmd}\n`);
-    const result = await getShellCommandExt().execute(cmd);
+    const ext = await getShellCommandExt();
+    const result = await ext.execute(cmd);
     if (result.content) {
       console.log(result.content);
     } else if (result.error) {

@@ -1,7 +1,10 @@
 // Hook system — the foundation for the extension architecture.
-// Extensions register handlers via `on()`, core emits events via `emit()`.
-// Sync hooks run synchronously; async hooks run via `emitAsync()` and errors
-// don't stop the chain (each handler is wrapped in try/catch).
+// Extensions register handlers via `on()`. The core notifies hooks via:
+//   notifyHooks(hookName, data)         — sync,  fire-and-forget
+//   notifyHooksAsync(hookName, data)    — async, fire-and-forget (concurrent)
+//   runHookPipeline(hookName, data, opts?) — async, sequential, returns results
+//
+// Old emit* methods are kept as aliases for backward compatibility.
 //
 // Naming: Hook data shapes use camelCase (toolCallId, toolName, reasoningContent).
 // This is consistent with internal JS conventions. When data flows to JSON/persistence,
@@ -82,42 +85,39 @@ export class HookSystem {
     return false;
   }
 
+  // ── New API ─────────────────────────────────────────────────────────────
+
   /**
-   * Emit a sync hook — all handlers run synchronously.
-   * If any handler returns a value, that value is returned (for short-circuit patterns).
+   * Notify hooks synchronously (fire-and-forget).
+   * All handlers run synchronously in order. Return values are ignored.
    * @param {string} hookName
    * @param {*} data
-   * @returns {*} Last handler return value, or undefined.
    */
-  emit(hookName, data) {
+  notifyHooks(hookName, data) {
     const handlers = this._hooks.get(hookName) || [];
-    let lastResult;
     const doTrace = this._trace && hookName !== "log";
     for (let i = 0; i < handlers.length; i++) {
       const entry = handlers[i];
       const t0 = doTrace ? Date.now() : 0;
-      const result = entry.handler(data);
+      entry.handler(data);
       if (doTrace) {
         const ms = Date.now() - t0;
         const label = entry.source ? ` (${entry.source})` : "";
-        const action = result !== undefined ? ` returned ${_summarizeResult(result)}` : " no return";
-        logger.debug(`[hook:trace] ${hookName} — ${i + 1}/${handlers.length}${label} — ${ms}ms${action}`);
+        logger.debug(`[hook:trace] ${hookName} — ${i + 1}/${handlers.length}${label} — ${ms}ms`);
       }
-      if (result !== undefined) lastResult = result;
     }
-    return lastResult;
   }
 
   /**
-   * Emit an async hook — all handlers run concurrently.
-   * Errors in individual handlers are caught and logged, never propagated.
+   * Notify hooks asynchronously (fire-and-forget, concurrent).
+   * All handlers launch concurrently. Errors are caught and logged.
    * @param {string} hookName
    * @param {*} data
    * @returns {Promise<void>}
    */
-  async emitAsync(hookName, data) {
+  async notifyHooksAsync(hookName, data) {
     const handlers = this._hooks.get(hookName) || [];
-    const results = [];
+    const promises = [];
     const doTrace = this._trace && hookName !== "log";
     if (doTrace && handlers.length > 0) {
       logger.debug(`[hook:trace] ${hookName} — ${handlers.length} handler(s) fired concurrently`);
@@ -128,7 +128,7 @@ export class HookSystem {
       try {
         const result = entry.handler(data);
         if (result && typeof result.then === "function") {
-          results.push(
+          promises.push(
             result.then(
               (v) => {
                 if (doTrace) {
@@ -136,7 +136,6 @@ export class HookSystem {
                   const label = entry.source ? ` (${entry.source})` : "";
                   logger.debug(`[hook:trace] ${hookName} — handler${label} — ${ms}ms`);
                 }
-                return v;
               },
               (e) => {
                 if (doTrace) {
@@ -162,63 +161,27 @@ export class HookSystem {
         logger.error(`[hook:${hookName}] ${formatError(e)}`);
       }
     }
-    await Promise.all(results);
+    await Promise.all(promises);
   }
 
   /**
-   * Emit an async hook sequentially — handlers run one at a time.
-   * Errors in individual handlers are caught and logged, never propagated.
-   * Returns the last handler return value, or undefined.
-   * @param {string} hookName
-   * @param {*} data
-   * @returns {Promise<*>} Last handler return value, or undefined.
-   */
-  async emitAsyncSeq(hookName, data) {
-    const handlers = this._hooks.get(hookName) || [];
-    let lastResult;
-    const doTrace = this._trace && hookName !== "log";
-    for (let i = 0; i < handlers.length; i++) {
-      const entry = handlers[i];
-      const t0 = doTrace ? Date.now() : 0;
-      try {
-        const result = entry.handler(data);
-        if (result && typeof result.then === "function") {
-          lastResult = await result;
-        } else {
-          lastResult = result;
-        }
-        if (doTrace) {
-          const ms = Date.now() - t0;
-          const label = entry.source ? ` (${entry.source})` : "";
-          const action = lastResult !== undefined ? ` returned ${_summarizeResult(lastResult)}` : " no return";
-          logger.debug(`[hook:trace] ${hookName} — ${i + 1}/${handlers.length}${label} — ${ms}ms${action}`);
-        }
-      } catch (e) {
-        if (doTrace) {
-          const ms = Date.now() - t0;
-          const label = entry.source ? ` (${entry.source})` : "";
-          logger.debug(`[hook:trace] ${hookName} — ${i + 1}/${handlers.length}${label} — ${ms}ms — error`);
-        }
-        logger.error(`[hook:${hookName}] ${formatError(e)}`);
-      }
-    }
-    return lastResult;
-  }
-
-  /**
-   * Emit an async hook sequentially with early termination.
-   * Runs handlers one at a time; stops when shouldStop(handlerResult) returns true.
-   * The data object is mutable — handlers can modify it in place, and each
-   * subsequent handler sees the accumulated changes.
+   * Run a hook pipeline sequentially.
+   * Handlers run one at a time, each seeing the accumulated state.
    *
    * @param {string} hookName
    * @param {*} data — Mutable data object passed to each handler.
-   * @param {Function} shouldStop — Called with each handler's return value.
+   * @param {Object} [opts]
+   * @param {Function} [opts.shouldStop] — Called with each handler's return value.
    *   Return true to stop processing further handlers.
-   * @returns {Promise<Object>} { data, stopped, lastResult }
+   * @returns {Promise<{ results: Array<{result: *, source: string|null}>, lastResult: *, stopped: boolean, data: * }>}
+   *   results — all non-undefined return values from handlers
+   *   lastResult — the last handler's return value (or undefined)
+   *   stopped — true if shouldStop caused early termination
+   *   data — the (possibly mutated) data object
    */
-  async emitAsyncSeqUntil(hookName, data, shouldStop) {
+  async runHookPipeline(hookName, data, opts = {}) {
     const handlers = this._hooks.get(hookName) || [];
+    const results = [];
     let lastResult;
     let stopped = false;
     const doTrace = this._trace && hookName !== "log";
@@ -229,14 +192,17 @@ export class HookSystem {
         const result = entry.handler(data);
         const resolved =
           result && typeof result.then === "function" ? await result : result;
-        lastResult = resolved;
+        if (resolved !== undefined) {
+          results.push({ result: resolved, source: entry.source || null });
+          lastResult = resolved;
+        }
         if (doTrace) {
           const ms = Date.now() - t0;
           const label = entry.source ? ` (${entry.source})` : "";
           const action = resolved !== undefined ? ` returned ${_summarizeResult(resolved)}` : " no return";
           logger.debug(`[hook:trace] ${hookName} — ${i + 1}/${handlers.length}${label} — ${ms}ms${action}`);
         }
-        if (resolved && shouldStop(resolved)) {
+        if (opts.shouldStop && resolved && opts.shouldStop(resolved)) {
           stopped = true;
           if (doTrace) {
             logger.debug(`[hook:trace] ${hookName} — stopped at handler ${i + 1}/${handlers.length}`);
@@ -252,21 +218,108 @@ export class HookSystem {
         logger.error(`[hook:${hookName}] ${formatError(e)}`);
       }
     }
-    return { data, stopped, lastResult };
+    return { results, lastResult, stopped, data };
+  }
+
+  // ── New API ─────────────────────────────────────────────────────────────
+
+  /**
+   * Notify hooks synchronously (fire-and-forget).
+   * All handlers run synchronously in order. Return values are ignored.
+   * @param {string} hookName
+   * @param {*} data
+   */
+  notifyHooks(hookName, data) {
+    const handlers = this._hooks.get(hookName) || [];
+    const doTrace = this._trace && hookName !== "log";
+    for (let i = 0; i < handlers.length; i++) {
+      const entry = handlers[i];
+      const t0 = doTrace ? Date.now() : 0;
+      entry.handler(data);
+      if (doTrace) {
+        const ms = Date.now() - t0;
+        const label = entry.source ? ` (${entry.source})` : "";
+        logger.debug(`[hook:trace] ${hookName} — ${i + 1}/${handlers.length}${label} — ${ms}ms`);
+      }
+    }
   }
 
   /**
-   * Emit an async hook and collect all handler return values.
-   * Handlers run sequentially. Each handler receives the same data object.
-   * Returns an array of { result, source } for each handler that returned a value.
+   * Notify hooks asynchronously (fire-and-forget, concurrent).
+   * All handlers launch concurrently. Errors are caught and logged.
+   * @param {string} hookName
+   * @param {*} data
+   * @returns {Promise<void>}
+   */
+  async notifyHooksAsync(hookName, data) {
+    const handlers = this._hooks.get(hookName) || [];
+    const promises = [];
+    const doTrace = this._trace && hookName !== "log";
+    if (doTrace && handlers.length > 0) {
+      logger.debug(`[hook:trace] ${hookName} — ${handlers.length} handler(s) fired concurrently`);
+    }
+    for (let i = 0; i < handlers.length; i++) {
+      const entry = handlers[i];
+      const t0 = doTrace ? Date.now() : 0;
+      try {
+        const result = entry.handler(data);
+        if (result && typeof result.then === "function") {
+          promises.push(
+            result.then(
+              (v) => {
+                if (doTrace) {
+                  const ms = Date.now() - t0;
+                  const label = entry.source ? ` (${entry.source})` : "";
+                  logger.debug(`[hook:trace] ${hookName} — handler${label} — ${ms}ms`);
+                }
+              },
+              (e) => {
+                if (doTrace) {
+                  const ms = Date.now() - t0;
+                  const label = entry.source ? ` (${entry.source})` : "";
+                  logger.debug(`[hook:trace] ${hookName} — handler${label} — ${ms}ms — error`);
+                }
+                logger.error(`[hook:${hookName}] ${formatError(e)}`);
+              },
+            ),
+          );
+        } else if (doTrace) {
+          const ms = Date.now() - t0;
+          const label = entry.source ? ` (${entry.source})` : "";
+          logger.debug(`[hook:trace] ${hookName} — handler${label} — ${ms}ms (sync)`);
+        }
+      } catch (e) {
+        if (doTrace) {
+          const ms = Date.now() - t0;
+          const label = entry.source ? ` (${entry.source})` : "";
+          logger.debug(`[hook:trace] ${hookName} — handler${label} — ${ms}ms — error`);
+        }
+        logger.error(`[hook:${hookName}] ${formatError(e)}`);
+      }
+    }
+    await Promise.all(promises);
+  }
+
+  /**
+   * Run a hook pipeline sequentially.
+   * Handlers run one at a time, each seeing the accumulated state.
    *
    * @param {string} hookName
-   * @param {*} data — Data passed to each handler.
-   * @returns {Promise<Array<{result: *, source: string|null}>>}
+   * @param {*} data — Mutable data object passed to each handler.
+   * @param {Object} [opts]
+   * @param {Function} [opts.shouldStop] — Called with each handler's return value.
+   *   Return true to stop processing further handlers.
+   * @returns {Promise<{ results: Array<{result: *, source: string|null}>, lastResult: *, stopped: boolean, data: * }>}
+   *   results — all non-undefined return values from handlers
+   *   lastResult — the last handler's return value (or undefined)
+   *   stopped — true if shouldStop caused early termination
+   *   data — the (possibly mutated) data object
    */
-  async emitAsyncCollect(hookName, data) {
+  async runHookPipeline(hookName, data, opts = {}) {
     const handlers = this._hooks.get(hookName) || [];
     const results = [];
+    let lastResult;
+    let stopped = false;
     const doTrace = this._trace && hookName !== "log";
     for (let i = 0; i < handlers.length; i++) {
       const entry = handlers[i];
@@ -277,12 +330,20 @@ export class HookSystem {
           result && typeof result.then === "function" ? await result : result;
         if (resolved !== undefined) {
           results.push({ result: resolved, source: entry.source || null });
+          lastResult = resolved;
         }
         if (doTrace) {
           const ms = Date.now() - t0;
           const label = entry.source ? ` (${entry.source})` : "";
           const action = resolved !== undefined ? ` returned ${_summarizeResult(resolved)}` : " no return";
           logger.debug(`[hook:trace] ${hookName} — ${i + 1}/${handlers.length}${label} — ${ms}ms${action}`);
+        }
+        if (opts.shouldStop && resolved && opts.shouldStop(resolved)) {
+          stopped = true;
+          if (doTrace) {
+            logger.debug(`[hook:trace] ${hookName} — stopped at handler ${i + 1}/${handlers.length}`);
+          }
+          break;
         }
       } catch (e) {
         if (doTrace) {
@@ -293,6 +354,45 @@ export class HookSystem {
         logger.error(`[hook:${hookName}] ${formatError(e)}`);
       }
     }
+    return { results, lastResult, stopped, data };
+  }
+
+  // ── Old API (kept as aliases for backward compatibility) ─────────────────
+
+  /**
+   * @deprecated Use notifyHooks instead.
+   */
+  emit(hookName, data) {
+    return this.notifyHooks(hookName, data);
+  }
+
+  /**
+   * @deprecated Use notifyHooksAsync instead.
+   */
+  async emitAsync(hookName, data) {
+    return this.notifyHooksAsync(hookName, data);
+  }
+
+  /**
+   * @deprecated Use runHookPipeline instead (returns { results, lastResult, stopped, data }).
+   */
+  async emitAsyncSeq(hookName, data) {
+    const { lastResult } = await this.runHookPipeline(hookName, data);
+    return lastResult;
+  }
+
+  /**
+   * @deprecated Use runHookPipeline with opts.shouldStop instead.
+   */
+  async emitAsyncSeqUntil(hookName, data, shouldStop) {
+    return this.runHookPipeline(hookName, data, { shouldStop });
+  }
+
+  /**
+   * @deprecated Use runHookPipeline instead (returns { results }).
+   */
+  async emitAsyncCollect(hookName, data) {
+    const { results } = await this.runHookPipeline(hookName, data);
     return results;
   }
 
@@ -381,18 +481,19 @@ export const HOOKS = {
   // CLI — emitted after CLI args are parsed, before subcommand dispatch
   CLI_ARGS_PARSED: "cli:argsParsed",
 
-  // Input preprocessing — emitted before user input reaches the agent.
+  // Input preprocessing — run before user input reaches the agent.
   // Handlers can transform the text, attach images, or short-circuit entirely.
   // Result: { action: "continue" } | { action: "transform", text, images? } | { action: "handled" }
+  // Uses runHookPipeline with shouldStop to stop on "handled".
   INPUT: "input",
 
-  // Context modification — emitted sequentially before each LLM call.
+  // Context modification — run sequentially before each LLM call.
   // Handlers receive { messages, agent } and can return { messages } to replace.
-  // Runs via emitAsyncSeq so each handler sees prior transformations.
+  // Runs via runHookPipeline so each handler sees prior transformations.
   CONTEXT: "context",
 
   // Tool call gate — BLOCK or MUTATE tool input arguments before execution.
-  // Emitted sequentially via emitAsyncSeq. Handlers receive
+  // Run sequentially via runHookPipeline. Handlers receive
   // { toolCallId, toolName, input, agent } and can return:
   //   { action: "continue" }       — proceed with original input
   //   { action: "modify", input }  — proceed with modified input
@@ -400,17 +501,17 @@ export const HOOKS = {
   TOOL_CALL: "tool:call",
 
   // Tool result — MODIFY tool output before it reaches the LLM context.
-  // Emitted sequentially via emitAsyncSeq. Handlers receive
+  // Run sequentially via runHookPipeline. Handlers receive
   // { toolCallId, toolName, result, input, agent } and can return:
   //   { result } — replace the result (any value: string, ToolResult, object)
   TOOL_RESULT: "tool:result",
 
-  // Provider request — emitted sequentially BEFORE the HTTP request to the LLM.
+  // Provider request — run sequentially BEFORE the HTTP request to the LLM.
   // Handlers receive { messages, modelConfig, toolDefs, agent } and can return:
   //   { messages } — replace the messages array
   //   { modelConfig } — replace the model config
   //   { toolDefs } — replace the tool definitions
-  // Runs via emitAsyncSeq so each handler sees prior transformations.
+  // Runs via runHookPipeline so each handler sees prior transformations.
   // Enables: request logging, last-minute message injection, request modification.
   PROVIDER_REQUEST: "provider:request",
 

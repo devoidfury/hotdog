@@ -44,7 +44,7 @@ describe('ExtensionLoader', () => {
       };
 
       await loader.load('test', extModule);
-      core.hooks.emit('test:hook', { value: 1 });
+      core.hooks.notifyHooks('test:hook', { value: 1 });
       expect(hookCalled).toEqual([{ value: 1 }]);
     });
 
@@ -160,7 +160,7 @@ describe('ExtensionLoader', () => {
       await loader.load('extB', extBModule);
 
       // Both handlers should fire
-      core.hooks.emit('shared:hook', { from: 'emit' });
+      core.hooks.notifyHooks('shared:hook', { from: 'emit' });
       expect(extACalls).toEqual([{ from: 'emit' }]);
       expect(extBCalls).toEqual([{ from: 'emit' }]);
 
@@ -172,7 +172,7 @@ describe('ExtensionLoader', () => {
       // Only extension B's handler should fire now
       extACalls.length = 0;
       extBCalls.length = 0;
-      core.hooks.emit('shared:hook', { from: 'emit2' });
+      core.hooks.notifyHooks('shared:hook', { from: 'emit2' });
       expect(extACalls).toEqual([]); // A's handler removed
       expect(extBCalls).toEqual([{ from: 'emit2' }]); // B's handler still works
     });
@@ -189,17 +189,17 @@ describe('ExtensionLoader', () => {
       });
 
       await loader.load('test', makeModule(1));
-      core.hooks.emit('reload:hook');
+      core.hooks.notifyHooks('reload:hook');
       expect(callCount).toBe(1);
 
       // Reload
       await loader.reload('test', makeModule(2));
-      core.hooks.emit('reload:hook');
+      core.hooks.notifyHooks('reload:hook');
       expect(callCount).toBe(3); // 1 + 2 (no double registration)
 
       // Unload
       await loader.unload('test');
-      core.hooks.emit('reload:hook');
+      core.hooks.notifyHooks('reload:hook');
       expect(callCount).toBe(3); // no change
     });
   });

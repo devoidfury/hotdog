@@ -1,6 +1,7 @@
 // Message Bus — owns the agent run loop.
-// Uses SessionManager for agent access.
-// Event-driven: enqueue() resolves a deferred Promise instead of polling.
+// Uses an async generator to yield messages, eliminating the manual
+// deferred lifecycle management. Event-driven: enqueue() wakes the
+// generator instead of polling.
 
 import { formatError, isExpectedError } from "../error.js";
 import { OUTPUT_EVENT } from "../context/output.js";
@@ -10,7 +11,7 @@ import { parseCommand } from "../commands.js";
 /**
  * An event-driven message bus that owns the agent run loop.
  * Uses SessionManager for agent access.
- * No polling — enqueue() resolves a deferred Promise.
+ * No polling — enqueue() resolves a per-iteration deferred.
  */
 export class MessageBus {
   /**
@@ -24,37 +25,25 @@ export class MessageBus {
     this._queue = [];
     this._isRunning = false;
     this._cancelled = false;
-    // Deferred: resolves when a message is enqueued or cancelled.
-    this._deferred = null;
-    this._deferredResolve = null;
+    // Single waiter slot: { resolve } or null. Created per generator
+    // iteration, cleared synchronously after await.
+    this._waiter = null;
   }
 
   /**
    * Enqueue a message for processing.
-   * If the dispatch loop is waiting, this wakes it immediately.
+   * If the generator is waiting, this wakes it immediately.
    */
   enqueue(text) {
     this._queue.push(text);
-    // Wake the dispatch loop if it's waiting on a deferred
-    if (this._deferredResolve) {
-      const resolve = this._deferredResolve;
-      this._deferred = null;
-      this._deferredResolve = null;
-      resolve();
-    }
+    this._wakeWaiter();
   }
 
   cancel() {
     this._cancelled = true;
     const agent = this._sessionManager.getAgent();
     if (agent) agent.cancel();
-    // Also wake the loop so it can observe the cancellation immediately
-    if (this._deferredResolve) {
-      const resolve = this._deferredResolve;
-      this._deferred = null;
-      this._deferredResolve = null;
-      resolve();
-    }
+    this._wakeWaiter();
   }
 
   isIdle() {
@@ -74,7 +63,9 @@ export class MessageBus {
    * Blocks indefinitely until cancelled.
    */
   async run() {
-    await this._dispatchLoop(false);
+    for await (const text of this._messages(false)) {
+      await this._processMessage(text);
+    }
   }
 
   /**
@@ -82,102 +73,110 @@ export class MessageBus {
    * Exits once cancelled and the queue is empty.
    */
   async runUntilCancelled() {
-    await this._dispatchLoop(true);
+    for await (const text of this._messages(true)) {
+      await this._processMessage(text);
+    }
   }
 
   /**
-   * Wait for a message to arrive or cancellation.
-   * Returns when either happens — the caller checks _queue and _cancelled.
+   * Wake a pending waiter, if any. Idempotent — safe to call
+   * even if no waiter is waiting.
    */
-  async _waitForMessage() {
-    // If there's already something to process or we're cancelled, return immediately
-    if (this._queue.length > 0 || this._cancelled) return;
-
-    // Create a deferred and wait for enqueue() or cancel() to resolve it
-    this._deferred = new Promise((resolve) => {
-      this._deferredResolve = resolve;
-    });
-    await this._deferred;
-    this._deferred = null;
-    this._deferredResolve = null;
+  _wakeWaiter() {
+    if (this._waiter) {
+      const resolve = this._waiter.resolve;
+      this._waiter = null;
+      resolve();
+    }
   }
 
-  async _dispatchLoop(drain) {
-    if (drain && this._cancelled && this._queue.length === 0) return;
-
+  /**
+   * Async generator that yields messages until cancellation.
+   *
+   * Each iteration:
+   *   1. Drains all currently queued messages synchronously
+   *   2. If cancelled (and not drain mode), exits
+   *   3. Otherwise, waits for the next enqueue or cancel event
+   *
+   * In drain mode (runUntilCancelled), cancellation is also checked
+   * after draining so any messages queued after cancellation are
+   * still processed before exit.
+   *
+   * The waiter promise is created fresh each iteration so there's
+   * no risk of stale resolves.
+   *
+   * @param {boolean} drain — If true, process remaining queued
+   *   messages after cancellation before exiting.
+   */
+  async * _messages(drain = false) {
     while (true) {
-      let text = this._queue.shift();
-
-      if (text === undefined) {
-        // Queue is empty — check for exit conditions
-        if (this._cancelled) {
-          if (!drain) break;
-          // drain mode: wait for more messages that might have been enqueued
-          // during processing, then exit when truly empty
-          await this._waitForMessage();
-          if (this._queue.length === 0) break;
-          continue;
-        }
-
-        // Event-driven wait — no polling
-        await this._waitForMessage();
-        continue;
+      // Drain all currently queued messages synchronously
+      while (this._queue.length > 0) {
+        if (this._cancelled && !drain) break;
+        yield this._queue.shift();
       }
 
-      // Message was cancelled before we got to it
+      // Check exit conditions after draining
       if (this._cancelled) {
         if (!drain) break;
-        // drain mode: keep processing remaining queued messages
-      }
-
-      this._isRunning = true;
-      const agent = this._sessionManager.getAgent();
-      if (agent) agent.cancel(false);
-
-      // Input hook — sequential, handlers can transform or short-circuit.
-      // Actions: { action: "continue" } | { action: "transform", text } | { action: "handled" }
-      const inputData = { text, source: "interactive", agent };
-      let inputHandled = false;
-      if (agent?._hooks) {
-        const inputResult = await agent._hooks.runHookPipeline(
-          HOOKS.INPUT,
-          inputData,
-          { shouldStop: (result) => result?.action === "handled" },
-        );
-        if (inputResult.stopped) inputHandled = true;
-        text = inputResult.data.text;
-      }
-
-      // If input was handled by a hook, skip agent processing
-      if (inputHandled) {
-        if (agent) agent.cancel(false);
-        this._cancelled = false;
-        this._isRunning = false;
+        // Drain mode: if queue is empty after cancellation, exit.
+        // Otherwise loop back to drain remaining items.
+        if (this._queue.length === 0) break;
         continue;
       }
 
-      try {
-        await agent.run(text);
-      } catch (e) {
-        if (isExpectedError(e)) {
-          this._sink.emit({
-            type: OUTPUT_EVENT.COMMAND_RESULT,
-            content: e.message,
-          });
-        } else {
-          this._sink.emit({
-            type: OUTPUT_EVENT.COMMAND_RESULT,
-            content: formatError(e),
-          });
-        }
-      }
-
-      if (agent) agent.cancel(false);
-      this._cancelled = false;
-      this._isRunning = false;
-
-      if (drain && this._queue.length === 0) break;
+      // Wait for the next message or cancellation.
+      // The promise is scoped to this iteration — _wakeWaiter nulls
+      // _waiter synchronously after await, so there's no lifecycle leak.
+      const promise = new Promise((resolve) => {
+        this._waiter = { resolve };
+      });
+      await promise;
+      this._waiter = null;
     }
+  }
+
+  /**
+   * Process a single message: run the input hook pipeline,
+   * then hand off to the agent.
+   */
+  async _processMessage(text) {
+    this._isRunning = true;
+    const agent = this._sessionManager.getAgent();
+    if (agent) agent.cancel(false);
+
+    // Input hook — sequential, handlers can transform or short-circuit.
+    // Actions: { action: "continue" } | { action: "transform", text } | { action: "handled" }
+    const inputData = { text, source: "interactive", agent };
+    let inputHandled = false;
+    if (agent?._hooks) {
+      const inputResult = await agent._hooks.runHookPipeline(
+        HOOKS.INPUT,
+        inputData,
+        { shouldStop: (result) => result?.action === "handled" },
+      );
+      if (inputResult.stopped) inputHandled = true;
+      text = inputResult.data.text;
+    }
+
+    // If input was handled by a hook, skip agent processing
+    if (inputHandled) {
+      if (agent) agent.cancel(false);
+      this._isRunning = false;
+      return;
+    }
+
+    try {
+      await agent.run(text);
+    } catch (e) {
+      this._sink.emit({
+        type: OUTPUT_EVENT.COMMAND_RESULT,
+        content: isExpectedError(e) ? e.message : formatError(e),
+      });
+    }
+
+    if (agent) agent.cancel(false);
+    this._isRunning = false;
   }
 
   /**

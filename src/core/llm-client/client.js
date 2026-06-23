@@ -141,12 +141,21 @@ export class LlmClient {
       model: modelName,
       messages: escapedMessages,
       max_tokens: modelConfig.maxTokens || DEFAULT_MAX_TOKENS,
-      temperature: modelConfig.temperature,
-      tools: tools || [],
-      parallel_tool_calls: true,
-      function_choice: "auto",
       stream: stream,
     };
+
+    // Only include temperature if it's a valid number (omit null/undefined)
+    if (modelConfig.temperature !== undefined && modelConfig.temperature !== null) {
+      request.temperature = modelConfig.temperature;
+    }
+
+    // Only include tool-related fields if tools are provided
+    if (tools && tools.length > 0) {
+      request.tools = tools;
+      request.tool_choice = "auto";
+      request.parallel_tool_calls = true;
+    }
+
     if (modelConfig.reasoningEffort !== undefined && modelConfig.reasoningEffort !== null) {
       request.reasoning_effort = modelConfig.reasoningEffort;
     }

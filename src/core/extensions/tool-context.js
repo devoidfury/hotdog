@@ -1,24 +1,20 @@
 // ToolContext — shared context container for tool execution.
 
 /**
- * Shared context container.
+ * Shared context container backed by a Map.
  * Accepts optional initial data in the constructor for backward
  * compatibility (tests and direct instantiation).
  */
 export class ToolContext {
   constructor(initialData = {}) {
-    Object.defineProperty(this, "_data", {
-      value: { ...initialData },
-      writable: false,
-      enumerable: false,
-    });
+    this._data = new Map(Object.entries(initialData));
   }
 
   /**
    * Mount (set) a property on the shared context.
    */
   set(key, value) {
-    this._data[key] = value;
+    this._data.set(key, value);
     return this;
   }
 
@@ -26,42 +22,44 @@ export class ToolContext {
    * Get a property from the shared context.
    */
   get(key) {
-    return this._data[key];
+    return this._data.get(key);
   }
 
   /**
    * Check if a property exists on the shared context.
    */
   has(key) {
-    return key in this._data;
+    return this._data.has(key);
   }
 
   /**
    * Delete a property from the shared context.
    */
   delete(key) {
-    delete this._data[key];
+    this._data.delete(key);
   }
 
   /**
    * Get all mounted keys.
    */
   keys() {
-    return Object.keys(this._data);
+    return Array.from(this._data.keys());
   }
 
   /**
-   * Get a snapshot of all mounted data.
+   * Get a snapshot of all mounted data as a plain object.
    */
   toJSON() {
-    return { ...this._data };
+    return Object.fromEntries(this._data);
   }
 
   /**
    * Mount multiple properties at once.
    */
   mount(data) {
-    Object.assign(this._data, data);
+    for (const [key, value] of Object.entries(data)) {
+      this._data.set(key, value);
+    }
     return this;
   }
 }

@@ -56,6 +56,7 @@ export {
 } from "./extensions/config-registry.js";
 
 export * from "./agent.js";
+export * from "./command-handlers.js";
 export * from "./session/index.js";
 
 // Session components

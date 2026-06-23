@@ -10,6 +10,7 @@ import { HOOKS } from "./hooks.js";
 import { ToolContext } from "./extensions/tool-context.js";
 import { xmlEscape } from "./extensions/tool-utils.js";
 import { createCommandRegistry } from "./extensions/registries.js";
+import { CORE_COMMAND_HANDLERS } from "./command-handlers.js";
 import { DEFAULT_MAX_TOKENS } from "./config/defaults.js";
 
 /**
@@ -72,6 +73,10 @@ export class Agent {
     this._runAbortController = null;
     // Command registry — extensions register commands here
     this._commandRegistry = options.commandRegistry || createCommandRegistry();
+    // Register core built-in commands with their handlers
+    for (const [type, def] of Object.entries(CORE_COMMAND_HANDLERS)) {
+      this._commandRegistry.register(type, def);
+    }
   }
 
   // ── Properties ────────────────────────────────────────────────────────────
@@ -815,24 +820,22 @@ export class Agent {
 
   /**
    * Execute a command. Returns { content } or { error }.
-   * Delegates to hooks — extensions handle specific commands.
+   * Dispatches via: custom handler → extension hooks → command registry.
    * @param {Object} cmd - Command object { type, value }
    * @returns {Promise<Object>}
    */
   async executeCommand(cmd) {
-    // Check if this is a custom command with a handler
+    // 1. Custom command with inline handler (from parseCommand registry match)
     if (cmd._customCommand && cmd._handler) {
       const result = await cmd._handler(this, cmd.value, cmd);
       if (result) return result;
     }
 
-    // Run COMMAND_DISPATCH hook pipeline — extensions can handle specific commands.
-    // The pipeline returns the last handler's result; if it's truthy we use it.
+    // 2. COMMAND_DISPATCH hook — extensions can handle specific commands.
     const pipelineResult = await this._hooks.runHookPipeline(HOOKS.COMMAND_DISPATCH, {
       command: cmd,
       agent: this,
     });
-
     const lastResult = pipelineResult.lastResult;
     if (lastResult && typeof lastResult.then === "function") {
       const awaited = await lastResult;
@@ -841,28 +844,16 @@ export class Agent {
       return lastResult;
     }
 
-    // Default command handling (core commands)
-    switch (cmd.type) {
-      case "clear":
-        await this.clearContext();
-        return { content: "Context cleared." };
-      case "quit":
-        return { error: "UI command: quit" };
-      case "help":
-        return { error: "UI command: help" };
-      case "tokens":
-        return this._handleTokensCommand();
-      case "tools":
-        return this._handleToolsCommand();
-      case "thinking":
-        return this._handleThinkingCommand();
-      case "regenerate":
-        return this._handleRegenerateCommand();
-      case "reasoning":
-        return this._handleReasoningCommand(cmd.value);
-      default:
-        return { error: `Unknown command: ${cmd.type}` };
+    // 3. Look up handler from command registry by command type.
+    //    Built-in commands are registered during construction;
+    //    extensions also register commands via COMMANDS_REGISTER hook.
+    const registered = this._commandRegistry.get(cmd.type);
+    if (registered && registered.handler) {
+      return await registered.handler(this, cmd.value, cmd);
     }
+
+    // 4. Unknown command
+    return { error: `Unknown command: ${cmd.type}` };
   }
 
   /**
@@ -873,61 +864,7 @@ export class Agent {
     return this._commandRegistry;
   }
 
-  // ── Command Handlers ──────────────────────────────────────────────────────
-
-  _handleTokensCommand() {
-    return { content: "Token stats not yet tracked." };
-  }
-
-  _handleToolsCommand() {
-    this._hideTools = !this._hideTools;
-    this._emitOutput("session_state", {
-      key: "hideTools",
-      value: this._hideTools,
-    });
-    return {
-      content: `Tool display: ${this._hideTools ? "hidden" : "shown"}`,
-    };
-  }
-
-  _handleThinkingCommand() {
-    this._hideThinking = !this._hideThinking;
-    this._emitOutput("session_state", {
-      key: "hideThinking",
-      value: this._hideThinking,
-    });
-    return {
-      content: `Thinking display: ${this._hideThinking ? "hidden" : "shown"}`,
-    };
-  }
-
-  async _handleRegenerateCommand() {
-    this._systemPrompt = null;
-    await this.ensureSystemPrompt();
-    return { content: "System prompt regenerated." };
-  }
-
-  _handleReasoningCommand(value) {
-    const valid = ["none", "minimal", "low", "high", "xhigh", "max", "unset"];
-    // No argument — show current setting
-    if (!value) {
-      const current = this._reasoningEffort !== undefined
-        ? this._reasoningEffort
-        : "(not set, omitted from requests)";
-      return { content: `Current reasoning effort: ${current}` };
-    }
-    if (value === "unset") {
-      this._reasoningEffort = undefined;
-      return { content: "Reasoning effort unset (omitted from requests)." };
-    }
-    if (valid.includes(value)) {
-      this._reasoningEffort = value;
-      return { content: `Reasoning effort set to: ${value}` };
-    }
-    return {
-      error: `Invalid reasoning effort '${value}'. Valid: none, minimal, low, high, xhigh, max, unset`,
-    };
-  }
+  // ── Command Handlers (moved to command-handlers.js) ────────────────────────
 
   /**
    * Serialize the agent state for persistence.

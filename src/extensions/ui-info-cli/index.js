@@ -277,8 +277,7 @@ async function printConfigDebug(cli, config, providers, resolved) {
   const profileName = cli.profile || config.profile || "default";
   const configDir = resolved.configDir || resolveConfigDir(cli.configDir);
   const profilesPath =
-    config.profilesPath ||
-    configSubPath(configDir, DEFAULT_PROFILES_SUBPATH);
+    config.profilesPath || configSubPath(configDir, DEFAULT_PROFILES_SUBPATH);
   const profileFiles = await loadProfileFiles(profilesPath);
   const configProfile = config.profiles?.[profileName] ?? null;
   const fileProfile = profileFiles[profileName] ?? null;
@@ -348,11 +347,7 @@ async function printConfigDebug(cli, config, providers, resolved) {
 
     // Show layer details
     for (const layer of trace.layers) {
-      const status = layer.matched
-        ? "✓"
-        : layer.castSkipped
-          ? "✗ (cast)"
-          : "·";
+      const status = layer.matched ? "✓" : layer.castSkipped ? "✗ (cast)" : "·";
       const layerDesc =
         layer.source === "default"
           ? `default: ${JSON.stringify(layer.default)}`
@@ -381,9 +376,7 @@ async function printConfigDebug(cli, config, providers, resolved) {
   console.log(
     `  ${"profile.manager".padEnd(25)} → ${resolved.profile?.manager || false}`,
   );
-  console.log(
-    `  ${"profile.role".padEnd(25)} → ${resolved.profile?.role || "(from DEFAULT_ROLE)"}`,
-  );
+  console.log(`  ${"profile.role".padEnd(25)} → ${resolved.profile?.role}`);
   console.log(
     `  ${"profile.body".padEnd(25)} → ${resolved.profileBody ? `(${resolved.profileBody.length} chars)` : "(none)"}`,
   );
@@ -392,14 +385,16 @@ async function printConfigDebug(cli, config, providers, resolved) {
   // Config file sources
   console.log("=== Config File Sources ===");
   console.log();
-  const resolvedConfigDir = resolved.configDir || resolveConfigDir(cli.configDir);
-  const resolvedConfig = configSubPath(resolvedConfigDir, DEFAULT_CONFIG_FILENAME);
+  const resolvedConfigDir =
+    resolved.configDir || resolveConfigDir(cli.configDir);
+  const resolvedConfig = configSubPath(
+    resolvedConfigDir,
+    DEFAULT_CONFIG_FILENAME,
+  );
 
   const resolvedExists = await checkFileExists(resolvedConfig);
 
-  console.log(
-    `  Config dir: ${resolvedConfigDir}`,
-  );
+  console.log(`  Config dir: ${resolvedConfigDir}`);
   console.log(
     `  Config file (${resolvedConfig}): ${resolvedExists ? "EXISTS" : "not found"}`,
   );

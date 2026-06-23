@@ -19,7 +19,6 @@ import {
   checkWritable,
   checkReadable,
   getRequiredStr,
-  runCommand,
   ToolResult,
 } from "../../src/core/extensions/tool-utils.js";
 import { ToolRegistry } from "../../src/core/extensions/tool-registry.js";
@@ -606,28 +605,3 @@ describe("getRequiredStr", () => {
   });
 });
 
-describe("runCommand", () => {
-  it("returns stdout for successful command", () => {
-    const output = runCommand("echo", ["hello world"]);
-    expect(output).toBe("hello world");
-  });
-
-  it("throws on non-zero exit", () => {
-    expect(() => runCommand("sh", ["-c", "exit 1"])).toThrow("exit code 1");
-  });
-
-  it("includes stderr in error message", () => {
-    try {
-      runCommand("sh", ["-c", "echo error >&2; exit 2"]);
-      expect.fail("should have thrown");
-    } catch (e) {
-      expect(e.message).toContain("exit code 2");
-      expect(e.message).toContain("error");
-    }
-  });
-
-  it("supports cwd option", () => {
-    const output = runCommand("pwd", [], "/tmp");
-    expect(output).toBe("/tmp");
-  });
-});

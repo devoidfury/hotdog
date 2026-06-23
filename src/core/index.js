@@ -42,7 +42,6 @@ export {
   checkWritable,
   checkReadable,
   getRequiredStr,
-  runCommand,
 } from "./extensions/tool-utils.js";
 
 export {

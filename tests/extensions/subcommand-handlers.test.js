@@ -119,8 +119,15 @@ describe("Session Review Extension - exit codes", () => {
       theme: "dark",
     };
 
-    const exitCode = await def.handler(cli, core);
-    expect(exitCode).toBe(0);
+    // Suppress console output during handler execution
+    const originalLog = console.log;
+    console.log = () => {};
+    try {
+      const exitCode = await def.handler(cli, core);
+      expect(exitCode).toBe(0);
+    } finally {
+      console.log = originalLog;
+    }
   });
 
   it("review subcommand returns exit code 1 for non-existent session", async () => {
@@ -138,8 +145,15 @@ describe("Session Review Extension - exit codes", () => {
       theme: "dark",
     };
 
-    const exitCode = await def.handler(cli, core);
-    expect(exitCode).toBe(1);
+    // Suppress console output during handler execution
+    const originalLog = console.log;
+    console.log = () => {};
+    try {
+      const exitCode = await def.handler(cli, core);
+      expect(exitCode).toBe(1);
+    } finally {
+      console.log = originalLog;
+    }
   });
 
   it("review subcommand with --tool-index returns 0", async () => {
@@ -170,8 +184,15 @@ describe("Session Review Extension - exit codes", () => {
       theme: "dark",
     };
 
-    const exitCode = await def.handler(cli, core);
-    expect(exitCode).toBe(0);
+    // Suppress console output during handler execution
+    const originalLog = console.log;
+    console.log = () => {};
+    try {
+      const exitCode = await def.handler(cli, core);
+      expect(exitCode).toBe(0);
+    } finally {
+      console.log = originalLog;
+    }
   });
 
   it("review subcommand lists sessions (returns 0 when sessions exist)", async () => {
@@ -266,8 +287,15 @@ describe("Info Show-Prompt Extension - exit codes", () => {
       skillsPath: null,
     };
 
-    const exitCode = await def.handler(cli, core);
-    expect(exitCode).toBe(0);
+    // Suppress console output during handler execution
+    const originalLog = console.log;
+    console.log = () => {};
+    try {
+      const exitCode = await def.handler(cli, core);
+      expect(exitCode).toBe(0);
+    } finally {
+      console.log = originalLog;
+    }
   });
 
   it("info subcommand returns 0 for text output", async () => {
@@ -285,8 +313,15 @@ describe("Info Show-Prompt Extension - exit codes", () => {
       skillsPath: null,
     };
 
-    const exitCode = await def.handler(cli, core);
-    expect(exitCode).toBe(0);
+    // Suppress console output during handler execution
+    const originalLog = console.log;
+    console.log = () => {};
+    try {
+      const exitCode = await def.handler(cli, core);
+      expect(exitCode).toBe(0);
+    } finally {
+      console.log = originalLog;
+    }
   });
 
   it("show-prompt subcommand returns exit code 0", async () => {
@@ -303,8 +338,15 @@ describe("Info Show-Prompt Extension - exit codes", () => {
       config: null,
     };
 
-    const exitCode = await def.handler(cli, core);
-    expect(exitCode).toBe(0);
+    // Suppress console output during handler execution
+    const originalLog = console.log;
+    console.log = () => {};
+    try {
+      const exitCode = await def.handler(cli, core);
+      expect(exitCode).toBe(0);
+    } finally {
+      console.log = originalLog;
+    }
   });
 });
 

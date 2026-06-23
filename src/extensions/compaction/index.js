@@ -173,7 +173,7 @@ export function create(core) {
     if (keep !== null) {
       const systemMessages = messages.filter(m => m.role === 'system');
       const keptMessages = nonSystemMessages.slice(-keep);
-      agent._context = [...systemMessages, ...keptMessages];
+      agent.replaceContext([...systemMessages, ...keptMessages]);
       return { content: `Context compacted to ${keptMessages.length} messages.` };
     }
 
@@ -249,13 +249,13 @@ export function create(core) {
         };
 
         // Replace the compacted portion
-        agent._context = [
+        agent.replaceContext([
           summaryMsg,
           ...messages.slice(compactedCount),
-        ];
+        ]);
       } else {
         // Drop strategy — just remove the old messages
-        agent._context = messages.slice(compactedCount);
+        agent.replaceContext(messages.slice(compactedCount));
       }
 
       // Emit compaction result event

@@ -24,12 +24,15 @@ export * from "./profiles.js";
 export * from "./providers.js";
 
 // Validation re-export
-export { validate, validateParams, formatValidationErrors } from "../../utils/json-schema.js";
+export {
+  validate,
+  validateParams,
+  formatValidationErrors,
+} from "../../utils/json-schema.js";
 
 // Import specific items we need locally
 import {
   DEFAULT_MODEL,
-  DEFAULT_ROLE,
   DEFAULT_PROFILES_SUBPATH,
   DEFAULT_PROFILES_PATH,
   DEFAULT_CONFIG_FILENAME,
@@ -42,11 +45,12 @@ import {
   DEFAULT_EMBEDDINGS_TIMEOUT_SECS,
 } from "./defaults.js";
 import { CONFIG_SCHEMA } from "./schema.js";
-import { resolveAll, resolveModel, resolveModelWithProvider } from "./resolver.js";
 import {
-  loadProfileFiles,
-  allProfilesForSwitch,
-} from "./profiles.js";
+  resolveAll,
+  resolveModel,
+  resolveModelWithProvider,
+} from "./resolver.js";
+import { loadProfileFiles, allProfilesForSwitch } from "./profiles.js";
 import { buildModelRegistry, initSystemPromptTemplate } from "./providers.js";
 
 // ── Config Directory Resolution ────────────────────────────────────────
@@ -172,7 +176,7 @@ export function getDefaultConfig(extParams) {
     toolfmt: DEFAULT_TOOL_FMT,
     toolOutputFmt: DEFAULT_TOOL_OUTPUT_FMT,
     // Note: role is intentionally NOT set here. It's resolved from:
-    // CLI --role > config file role > profile file role > DEFAULT_ROLE fallback
+    // CLI --role > config file role > profile file role fallback
     // Setting a default here would override profile file roles.
     role: null,
     hideTools: true,
@@ -243,7 +247,9 @@ export async function loadConfig(configPath, cliConfigDir, extParams) {
     // Normalize snake_case keys from config to camelCase
     return deepMerge(getDefaultConfig(extParams), normalizeConfigKeys(raw));
   } catch (e) {
-    const err = new Error(`Error loading config from ${configPathToUse}: ${e.message}`);
+    const err = new Error(
+      `Error loading config from ${configPathToUse}: ${e.message}`,
+    );
     err.cause = e;
     throw err;
   }
@@ -336,7 +342,7 @@ export async function buildConfig(cliArgv) {
     configDir,
     providers: config.providers || [],
     defaultModel: DEFAULT_MODEL,
-    defaultRole: DEFAULT_ROLE,
+    defaultRole: "",
     profilesPath: cliArgv.skillsPath
       ? path.join(cliArgv.skillsPath, "..", "profiles")
       : configSubPath(configDir, DEFAULT_PROFILES_SUBPATH),

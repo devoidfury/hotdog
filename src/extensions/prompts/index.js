@@ -42,8 +42,7 @@ export async function create(core) {
             const content = render(prompt.content, { ARGS: args || '' });
 
             // Add the rendered prompt as a user message
-            agent._context.push(new Message({ role: 'user', content }));
-            await core.hooks.notifyHooksAsync(HOOKS.CONTEXT_MESSAGE, { message: agent._context[agent._context.length - 1] });
+            agent.addMessage(new Message({ role: 'user', content }));
 
             return { content: `Prompt '${prompt.name}' executed.` };
           },

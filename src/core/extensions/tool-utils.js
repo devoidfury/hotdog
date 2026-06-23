@@ -6,7 +6,6 @@
 
 import fsPromises from "node:fs/promises";
 import path from "node:path";
-import { spawnSync } from "node:child_process";
 
 /**
  * Metadata keys rendered as XML attributes on the root <tool> tag.
@@ -488,28 +487,3 @@ export function getRequiredStr(value, key) {
   return v;
 }
 
-/**
- * Run a shell command and capture stdout.
- */
-export function runCommand(cmd, args = [], cwd = null) {
-  const result = spawnSync(cmd, args, {
-    cwd,
-    encoding: "utf-8",
-    maxBuffer: 10 * 1024 * 1024,
-  });
-
-  if (result.error) {
-    throw new Error(`Failed to execute '${cmd}': ${result.error.message}`);
-  }
-
-  const stdout = result.stdout?.trim() ?? "";
-  const stderr = result.stderr?.trim() ?? "";
-
-  if (result.status !== 0) {
-    throw new Error(
-      `Command '${cmd}' failed with exit code ${result.status}: ${stdout}\n${stderr}`,
-    );
-  }
-
-  return stdout;
-}

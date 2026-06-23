@@ -52,6 +52,14 @@ function createMockAgent(contextArray, model = "test-model") {
         ? [{ role: "system", content: this.systemPrompt }, ..._context]
         : [..._context];
     },
+    // New public context API (mirrors Agent.addMessage)
+    addMessage(msg) {
+      _context.push(msg);
+    },
+    // New public context API (mirrors Agent.replaceContext)
+    replaceContext(newContext) {
+      _context = newContext;
+    },
   };
 }
 

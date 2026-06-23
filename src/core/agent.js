@@ -161,11 +161,7 @@ export class Agent {
   async run(userInput, images = null) {
     // Add user input to context
     const userMsg = new Message({ role: "user", content: userInput, images });
-    this._context.push(userMsg);
-    await this._hooks.notifyHooksAsync(HOOKS.CONTEXT_MESSAGE, {
-      message: userMsg,
-      agent: this,
-    });
+    this.addMessage(userMsg);
 
     let iteration = 0;
     while (iteration < this._maxIterations) {
@@ -191,11 +187,7 @@ export class Agent {
       while (this._followQueue.length > 0) {
         const followUp = this._followQueue.shift();
         const followUpMsg = new Message({ role: "user", content: followUp });
-        this._context.push(followUpMsg);
-        await this._hooks.notifyHooksAsync(HOOKS.CONTEXT_MESSAGE, {
-          message: followUpMsg,
-          agent: this,
-        });
+        this.addMessage(followUpMsg);
       }
 
       // Build messages (extensions can modify via hook)
@@ -688,11 +680,7 @@ export class Agent {
       toolCallId,
       images,
     });
-    this._context.push(msg);
-    await this._hooks.notifyHooksAsync(HOOKS.CONTEXT_MESSAGE, {
-      message: msg,
-      agent: this,
-    });
+    this.addMessage(msg);
     return { toolName, input, result };
   }
 
@@ -721,6 +709,40 @@ export class Agent {
     // Primitive
     const str = String(result);
     return `<tool name="${toolName}" status="${successStr}">\n  <output>${xmlEscape(str)}</output>\n</tool>`;
+  }
+
+  // ── Public Context API ────────────────────────────────────────────────────
+
+  /**
+   * Add a single message to the agent's context.
+   * Fires the CONTEXT_MESSAGE hook so extensions (session-log, etc.) are notified.
+   * Use this instead of directly pushing to _context.
+   *
+   * @param {Message} msg - The message to add.
+   */
+  addMessage(msg) {
+    this._context.push(msg);
+    this._hooks.notifyHooksAsync(HOOKS.CONTEXT_MESSAGE, {
+      message: msg,
+      agent: this,
+    });
+  }
+
+  /**
+   * Replace the entire context array.
+   * Fires the CONTEXT_REPLACED hook so extensions can react to the replacement.
+   * Used by compaction and other context-modifying operations.
+   *
+   * @param {Array} newContext - The new context array (array of Message objects or plain objects).
+   */
+  replaceContext(newContext) {
+    const oldContext = this._context;
+    this._context = newContext;
+    this._hooks.notifyHooksAsync(HOOKS.CONTEXT_REPLACED, {
+      agent: this,
+      oldContext,
+      newContext,
+    });
   }
 
   // ── Helpers ───────────────────────────────────────────────────────────────
@@ -755,7 +777,7 @@ export class Agent {
    * Clear the context and start fresh.
    */
   clearContext() {
-    this._context = [];
+    this.replaceContext([]);
     this._systemPrompt = null;
     this._iterationCount = 0;
   }
@@ -927,7 +949,7 @@ export class Agent {
    */
   deserialize(data) {
     this._sessionId = data.sessionId;
-    this._context = data.context.map((m) => new Message(m));
+    this.replaceContext(data.context.map((m) => new Message(m)));
     this.model = data.model;
     this._iterationCount = data.iterationCount || 0;
     this._reasoningEffort = data.reasoningEffort !== undefined ? data.reasoningEffort : undefined;

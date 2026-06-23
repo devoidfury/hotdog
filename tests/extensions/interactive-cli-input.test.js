@@ -48,9 +48,21 @@ function createMockRl(responses = []) {
 
 describe("AsyncInteractiveCliInput", () => {
   let lineHandler;
+  let origStdout;
+  let origStderr;
 
   beforeEach(() => {
     lineHandler = function () {};
+    // Suppress stdout/stderr output during tests
+    origStdout = process.stdout.write;
+    origStderr = process.stderr.write;
+    process.stdout.write = () => true;
+    process.stderr.write = () => true;
+  });
+
+  afterEach(() => {
+    process.stdout.write = origStdout;
+    process.stderr.write = origStderr;
   });
 
   it("is interactive", () => {

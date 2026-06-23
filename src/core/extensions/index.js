@@ -50,7 +50,6 @@ export {
   checkWritable,
   checkReadable,
   getRequiredStr,
-  runCommand,
 } from "./tool-utils.js";
 
 export {

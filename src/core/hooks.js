@@ -293,6 +293,7 @@ export const HOOKS = {
 
   // Context management
   CONTEXT_MESSAGE: "context:message",
+  CONTEXT_REPLACED: "context:replaced",
 
   // System prompt — handlers return a chunk object { name, priority, content }
   // or an array of chunk objects. The agent collects all chunks, sorts by priority,

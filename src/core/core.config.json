@@ -229,6 +229,15 @@
       { "default": [] }
     ]
   },
+  "defaultModel": {
+    "type": "string",
+    "layers": [
+      { "source": "cli", "key": "model", "cast": "string" },
+      { "source": "profile", "key": "model", "cast": "string" },
+      { "source": "config", "key": "defaultModel", "cast": "string" },
+      { "default": "qwen3.5-0.8b" }
+    ]
+  },
   "maxTokens": {
     "type": "number",
     "layers": [{ "default": 32000 }]

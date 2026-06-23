@@ -3,12 +3,6 @@
 //   notifyHooks(hookName, data)         — sync,  fire-and-forget
 //   notifyHooksAsync(hookName, data)    — async, fire-and-forget (concurrent)
 //   runHookPipeline(hookName, data, opts?) — async, sequential, returns results
-//
-// Old emit* methods are kept as aliases for backward compatibility.
-//
-// Naming: Hook data shapes use camelCase (toolCallId, toolName, reasoningContent).
-// This is consistent with internal JS conventions. When data flows to JSON/persistence,
-// it is serialized to snake_case by the Message.toJSON() method or explicit converters.
 
 import { formatError } from "./error.js";
 import { logger } from "./logger.js";
@@ -85,8 +79,6 @@ export class HookSystem {
     return false;
   }
 
-  // ── New API ─────────────────────────────────────────────────────────────
-
   /**
    * Notify hooks synchronously (fire-and-forget).
    * All handlers run synchronously in order. Return values are ignored.
@@ -103,7 +95,9 @@ export class HookSystem {
       if (doTrace) {
         const ms = Date.now() - t0;
         const label = entry.source ? ` (${entry.source})` : "";
-        logger.debug(`[hook:trace] ${hookName} — ${i + 1}/${handlers.length}${label} — ${ms}ms`);
+        logger.debug(
+          `[hook:trace] ${hookName} — ${i + 1}/${handlers.length}${label} — ${ms}ms`,
+        );
       }
     }
   }
@@ -120,7 +114,9 @@ export class HookSystem {
     const promises = [];
     const doTrace = this._trace && hookName !== "log";
     if (doTrace && handlers.length > 0) {
-      logger.debug(`[hook:trace] ${hookName} — ${handlers.length} handler(s) fired concurrently`);
+      logger.debug(
+        `[hook:trace] ${hookName} — ${handlers.length} handler(s) fired concurrently`,
+      );
     }
     for (let i = 0; i < handlers.length; i++) {
       const entry = handlers[i];
@@ -134,14 +130,18 @@ export class HookSystem {
                 if (doTrace) {
                   const ms = Date.now() - t0;
                   const label = entry.source ? ` (${entry.source})` : "";
-                  logger.debug(`[hook:trace] ${hookName} — handler${label} — ${ms}ms`);
+                  logger.debug(
+                    `[hook:trace] ${hookName} — handler${label} — ${ms}ms`,
+                  );
                 }
               },
               (e) => {
                 if (doTrace) {
                   const ms = Date.now() - t0;
                   const label = entry.source ? ` (${entry.source})` : "";
-                  logger.debug(`[hook:trace] ${hookName} — handler${label} — ${ms}ms — error`);
+                  logger.debug(
+                    `[hook:trace] ${hookName} — handler${label} — ${ms}ms — error`,
+                  );
                 }
                 logger.error(`[hook:${hookName}] ${formatError(e)}`);
               },
@@ -150,13 +150,17 @@ export class HookSystem {
         } else if (doTrace) {
           const ms = Date.now() - t0;
           const label = entry.source ? ` (${entry.source})` : "";
-          logger.debug(`[hook:trace] ${hookName} — handler${label} — ${ms}ms (sync)`);
+          logger.debug(
+            `[hook:trace] ${hookName} — handler${label} — ${ms}ms (sync)`,
+          );
         }
       } catch (e) {
         if (doTrace) {
           const ms = Date.now() - t0;
           const label = entry.source ? ` (${entry.source})` : "";
-          logger.debug(`[hook:trace] ${hookName} — handler${label} — ${ms}ms — error`);
+          logger.debug(
+            `[hook:trace] ${hookName} — handler${label} — ${ms}ms — error`,
+          );
         }
         logger.error(`[hook:${hookName}] ${formatError(e)}`);
       }
@@ -199,149 +203,20 @@ export class HookSystem {
         if (doTrace) {
           const ms = Date.now() - t0;
           const label = entry.source ? ` (${entry.source})` : "";
-          const action = resolved !== undefined ? ` returned ${_summarizeResult(resolved)}` : " no return";
-          logger.debug(`[hook:trace] ${hookName} — ${i + 1}/${handlers.length}${label} — ${ms}ms${action}`);
-        }
-        if (opts.shouldStop && resolved && opts.shouldStop(resolved)) {
-          stopped = true;
-          if (doTrace) {
-            logger.debug(`[hook:trace] ${hookName} — stopped at handler ${i + 1}/${handlers.length}`);
-          }
-          break;
-        }
-      } catch (e) {
-        if (doTrace) {
-          const ms = Date.now() - t0;
-          const label = entry.source ? ` (${entry.source})` : "";
-          logger.debug(`[hook:trace] ${hookName} — ${i + 1}/${handlers.length}${label} — ${ms}ms — error`);
-        }
-        logger.error(`[hook:${hookName}] ${formatError(e)}`);
-      }
-    }
-    return { results, lastResult, stopped, data };
-  }
-
-  // ── New API ─────────────────────────────────────────────────────────────
-
-  /**
-   * Notify hooks synchronously (fire-and-forget).
-   * All handlers run synchronously in order. Return values are ignored.
-   * @param {string} hookName
-   * @param {*} data
-   */
-  notifyHooks(hookName, data) {
-    const handlers = this._hooks.get(hookName) || [];
-    const doTrace = this._trace && hookName !== "log";
-    for (let i = 0; i < handlers.length; i++) {
-      const entry = handlers[i];
-      const t0 = doTrace ? Date.now() : 0;
-      entry.handler(data);
-      if (doTrace) {
-        const ms = Date.now() - t0;
-        const label = entry.source ? ` (${entry.source})` : "";
-        logger.debug(`[hook:trace] ${hookName} — ${i + 1}/${handlers.length}${label} — ${ms}ms`);
-      }
-    }
-  }
-
-  /**
-   * Notify hooks asynchronously (fire-and-forget, concurrent).
-   * All handlers launch concurrently. Errors are caught and logged.
-   * @param {string} hookName
-   * @param {*} data
-   * @returns {Promise<void>}
-   */
-  async notifyHooksAsync(hookName, data) {
-    const handlers = this._hooks.get(hookName) || [];
-    const promises = [];
-    const doTrace = this._trace && hookName !== "log";
-    if (doTrace && handlers.length > 0) {
-      logger.debug(`[hook:trace] ${hookName} — ${handlers.length} handler(s) fired concurrently`);
-    }
-    for (let i = 0; i < handlers.length; i++) {
-      const entry = handlers[i];
-      const t0 = doTrace ? Date.now() : 0;
-      try {
-        const result = entry.handler(data);
-        if (result && typeof result.then === "function") {
-          promises.push(
-            result.then(
-              (v) => {
-                if (doTrace) {
-                  const ms = Date.now() - t0;
-                  const label = entry.source ? ` (${entry.source})` : "";
-                  logger.debug(`[hook:trace] ${hookName} — handler${label} — ${ms}ms`);
-                }
-              },
-              (e) => {
-                if (doTrace) {
-                  const ms = Date.now() - t0;
-                  const label = entry.source ? ` (${entry.source})` : "";
-                  logger.debug(`[hook:trace] ${hookName} — handler${label} — ${ms}ms — error`);
-                }
-                logger.error(`[hook:${hookName}] ${formatError(e)}`);
-              },
-            ),
+          const action =
+            resolved !== undefined
+              ? ` returned ${_summarizeResult(resolved)}`
+              : " no return";
+          logger.debug(
+            `[hook:trace] ${hookName} — ${i + 1}/${handlers.length}${label} — ${ms}ms${action}`,
           );
-        } else if (doTrace) {
-          const ms = Date.now() - t0;
-          const label = entry.source ? ` (${entry.source})` : "";
-          logger.debug(`[hook:trace] ${hookName} — handler${label} — ${ms}ms (sync)`);
-        }
-      } catch (e) {
-        if (doTrace) {
-          const ms = Date.now() - t0;
-          const label = entry.source ? ` (${entry.source})` : "";
-          logger.debug(`[hook:trace] ${hookName} — handler${label} — ${ms}ms — error`);
-        }
-        logger.error(`[hook:${hookName}] ${formatError(e)}`);
-      }
-    }
-    await Promise.all(promises);
-  }
-
-  /**
-   * Run a hook pipeline sequentially.
-   * Handlers run one at a time, each seeing the accumulated state.
-   *
-   * @param {string} hookName
-   * @param {*} data — Mutable data object passed to each handler.
-   * @param {Object} [opts]
-   * @param {Function} [opts.shouldStop] — Called with each handler's return value.
-   *   Return true to stop processing further handlers.
-   * @returns {Promise<{ results: Array<{result: *, source: string|null}>, lastResult: *, stopped: boolean, data: * }>}
-   *   results — all non-undefined return values from handlers
-   *   lastResult — the last handler's return value (or undefined)
-   *   stopped — true if shouldStop caused early termination
-   *   data — the (possibly mutated) data object
-   */
-  async runHookPipeline(hookName, data, opts = {}) {
-    const handlers = this._hooks.get(hookName) || [];
-    const results = [];
-    let lastResult;
-    let stopped = false;
-    const doTrace = this._trace && hookName !== "log";
-    for (let i = 0; i < handlers.length; i++) {
-      const entry = handlers[i];
-      const t0 = doTrace ? Date.now() : 0;
-      try {
-        const result = entry.handler(data);
-        const resolved =
-          result && typeof result.then === "function" ? await result : result;
-        if (resolved !== undefined) {
-          results.push({ result: resolved, source: entry.source || null });
-          lastResult = resolved;
-        }
-        if (doTrace) {
-          const ms = Date.now() - t0;
-          const label = entry.source ? ` (${entry.source})` : "";
-          const action = resolved !== undefined ? ` returned ${_summarizeResult(resolved)}` : " no return";
-          logger.debug(`[hook:trace] ${hookName} — ${i + 1}/${handlers.length}${label} — ${ms}ms${action}`);
         }
         if (opts.shouldStop && resolved && opts.shouldStop(resolved)) {
           stopped = true;
           if (doTrace) {
-            logger.debug(`[hook:trace] ${hookName} — stopped at handler ${i + 1}/${handlers.length}`);
+            logger.debug(
+              `[hook:trace] ${hookName} — stopped at handler ${i + 1}/${handlers.length}`,
+            );
           }
           break;
         }
@@ -349,51 +224,14 @@ export class HookSystem {
         if (doTrace) {
           const ms = Date.now() - t0;
           const label = entry.source ? ` (${entry.source})` : "";
-          logger.debug(`[hook:trace] ${hookName} — ${i + 1}/${handlers.length}${label} — ${ms}ms — error`);
+          logger.debug(
+            `[hook:trace] ${hookName} — ${i + 1}/${handlers.length}${label} — ${ms}ms — error`,
+          );
         }
         logger.error(`[hook:${hookName}] ${formatError(e)}`);
       }
     }
     return { results, lastResult, stopped, data };
-  }
-
-  // ── Old API (kept as aliases for backward compatibility) ─────────────────
-
-  /**
-   * @deprecated Use notifyHooks instead.
-   */
-  emit(hookName, data) {
-    return this.notifyHooks(hookName, data);
-  }
-
-  /**
-   * @deprecated Use notifyHooksAsync instead.
-   */
-  async emitAsync(hookName, data) {
-    return this.notifyHooksAsync(hookName, data);
-  }
-
-  /**
-   * @deprecated Use runHookPipeline instead (returns { results, lastResult, stopped, data }).
-   */
-  async emitAsyncSeq(hookName, data) {
-    const { lastResult } = await this.runHookPipeline(hookName, data);
-    return lastResult;
-  }
-
-  /**
-   * @deprecated Use runHookPipeline with opts.shouldStop instead.
-   */
-  async emitAsyncSeqUntil(hookName, data, shouldStop) {
-    return this.runHookPipeline(hookName, data, { shouldStop });
-  }
-
-  /**
-   * @deprecated Use runHookPipeline instead (returns { results }).
-   */
-  async emitAsyncCollect(hookName, data) {
-    const { results } = await this.runHookPipeline(hookName, data);
-    return results;
   }
 
   /**

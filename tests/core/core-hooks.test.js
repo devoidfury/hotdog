@@ -99,7 +99,10 @@ describe("HookSystem", () => {
         order.push("b");
         return { result: "b" };
       });
-      const { results, lastResult } = await hooks.runHookPipeline("test:hook", {});
+      const { results, lastResult } = await hooks.runHookPipeline(
+        "test:hook",
+        {},
+      );
       expect(order).toEqual(["a", "b"]);
       expect(results).toEqual([
         { result: { result: "a" }, source: null },
@@ -119,12 +122,18 @@ describe("HookSystem", () => {
         order.push("b");
         return { action: "continue" };
       });
-      const { stopped, results } = await hooks.runHookPipeline("test:hook", {}, {
-        shouldStop: (r) => r?.action === "handled",
-      });
+      const { stopped, results } = await hooks.runHookPipeline(
+        "test:hook",
+        {},
+        {
+          shouldStop: (r) => r?.action === "handled",
+        },
+      );
       expect(stopped).toBe(true);
       expect(order).toEqual(["a"]); // second handler skipped
-      expect(results).toEqual([{ result: { action: "handled" }, source: null }]);
+      expect(results).toEqual([
+        { result: { action: "handled" }, source: null },
+      ]);
     });
 
     it("should pass mutable data through handlers", async () => {
@@ -164,55 +173,6 @@ describe("HookSystem", () => {
       expect(HOOKS.SESSION_CREATE).toBe("session:create");
       expect(HOOKS.TOOLS_REGISTER).toBe("tools:register");
       expect(HOOKS.OUTPUT_EVENT).toBe("output:event");
-    });
-  });
-
-  describe("backward compatibility (old emit* aliases)", () => {
-    it("emit() should call notifyHooks and return undefined", () => {
-      const hooks = createHooks();
-      const calls = [];
-      hooks.on("test:hook", (data) => calls.push(data));
-      const result = hooks.emit("test:hook", { value: 42 });
-      expect(calls).toEqual([{ value: 42 }]);
-      expect(result).toBeUndefined(); // notifyHooks doesn't return values
-    });
-
-    it("emitAsync() should call notifyHooksAsync", async () => {
-      const hooks = createHooks();
-      const results = [];
-      hooks.on("test:hook", async (data) => {
-        await new Promise((r) => setTimeout(r, 10));
-        results.push(data.value);
-      });
-      await hooks.emitAsync("test:hook", { value: 1 });
-      expect(results).toEqual([1]);
-    });
-
-    it("emitAsyncSeq() should return lastResult from runHookPipeline", async () => {
-      const hooks = createHooks();
-      hooks.on("test:hook", () => "first");
-      hooks.on("test:hook", () => "second");
-      const result = await hooks.emitAsyncSeq("test:hook", {});
-      expect(result).toBe("second");
-    });
-
-    it("emitAsyncSeqUntil() should return { data, stopped, lastResult }", async () => {
-      const hooks = createHooks();
-      hooks.on("test:hook", () => ({ action: "handled" }));
-      const result = await hooks.emitAsyncSeqUntil("test:hook", {}, (r) => r?.action === "handled");
-      expect(result.stopped).toBe(true);
-      expect(result.lastResult).toEqual({ action: "handled" });
-    });
-
-    it("emitAsyncCollect() should return results array from runHookPipeline", async () => {
-      const hooks = createHooks();
-      hooks.on("test:hook", () => "val1");
-      hooks.on("test:hook", () => "val2");
-      const results = await hooks.emitAsyncCollect("test:hook", {});
-      expect(results).toEqual([
-        { result: "val1", source: null },
-        { result: "val2", source: null },
-      ]);
     });
   });
 });

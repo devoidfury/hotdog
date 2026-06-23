@@ -24,8 +24,6 @@ const STRUCTURAL_FLAGS = [
   { short: null, long: "--json", type: "boolean" },
   { short: "-v", long: "--version", type: "boolean" },
   { short: "-h", long: "--help", type: "boolean" },
-  // Review subcommand flag
-  { short: null, long: "--review-tool-index", type: "boolean" },
 ];
 
 export function parseArgs(configRegistry = null, knownSubcommands = null) {
@@ -44,7 +42,6 @@ export function parseArgs(configRegistry = null, knownSubcommands = null) {
     wantsJson: false,
     version: false,
     help: false,
-    reviewToolIndex: false,
     // Meta
     subcommand: null,
     args: [],

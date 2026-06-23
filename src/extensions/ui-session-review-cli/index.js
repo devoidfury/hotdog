@@ -59,11 +59,11 @@ async function runReview(cli, config) {
     return await reviewSession(
       sessionId,
       cli.wantsJson,
-      cli.reviewToolIndex,
+      cli.toolIndex,
       palette,
     );
   }
-  if (cli.reviewToolIndex) {
+  if (cli.toolIndex) {
     const files = (await readdir(sessionsDirPath)).filter((f) =>
       f.endsWith(".jsonl"),
     );

@@ -114,7 +114,7 @@ describe("Session Review Extension - exit codes", () => {
     const cli = {
       sessionId: TEST_SESSION_ID,
       wantsJson: true,
-      reviewToolIndex: false,
+      toolIndex: false,
       colors: false,
       theme: "dark",
     };
@@ -140,7 +140,7 @@ describe("Session Review Extension - exit codes", () => {
     const cli = {
       sessionId: "non-existent-session-xyz",
       wantsJson: true,
-      reviewToolIndex: false,
+      toolIndex: false,
       colors: false,
       theme: "dark",
     };
@@ -179,7 +179,7 @@ describe("Session Review Extension - exit codes", () => {
     const cli = {
       sessionId: TEST_SESSION_ID,
       wantsJson: true,
-      reviewToolIndex: true,
+      toolIndex: true,
       colors: false,
       theme: "dark",
     };
@@ -224,7 +224,7 @@ describe("Session Review Extension - exit codes", () => {
     const cli = {
       sessionId: null, // No session ID = list mode
       wantsJson: true,
-      reviewToolIndex: false,
+      toolIndex: false,
       colors: false,
       theme: "dark",
     };

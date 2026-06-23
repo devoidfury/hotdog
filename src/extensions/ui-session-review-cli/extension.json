@@ -14,6 +14,13 @@
     },
     "additionalProperties": false
   },
+  "cli:flags": [
+    {
+      "long": "--tool-index",
+      "type": "boolean",
+      "description": "Show tool usage index"
+    }
+  ],
   "cli:subcommands": [
     {
       "name": "review",

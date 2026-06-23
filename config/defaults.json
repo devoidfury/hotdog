@@ -1,7 +1,7 @@
 {
   "log_level": "warn",
   "log_target": "stderr",
-  "default_model": "ai365/qwen3.6-27b",
+  "default_model": "ai365/dsv4",
   "thinker": " 🧠 ... {}",
   "toolfmt": " 🔧 {} {}",
   "hide_tools": true,

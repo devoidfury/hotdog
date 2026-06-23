@@ -1,6 +1,4 @@
 // ToolContext — shared context container for tool execution.
-// A flat object that extensions mount their own properties onto.
-// Core knows nothing about property names; each extension owns its own keys.
 
 /**
  * Shared context container.
@@ -63,9 +61,7 @@ export class ToolContext {
    * Mount multiple properties at once.
    */
   mount(data) {
-    for (const [key, value] of Object.entries(data)) {
-      this._data[key] = value;
-    }
+    Object.assign(this._data, data);
     return this;
   }
 }

@@ -42,8 +42,10 @@ export function resolveLogLevel(configLevel) {
  */
 export function resolveLogTarget(configTarget) {
   const envTarget = process.env.OA_LOG_TARGET?.toLowerCase();
-  if (envTarget && ["stderr", "stdout", "none"].includes(envTarget)) return envTarget;
-  if (configTarget && ["stderr", "stdout", "none"].includes(configTarget)) return configTarget;
+  if (envTarget && ["stderr", "stdout", "none"].includes(envTarget))
+    return envTarget;
+  if (configTarget && ["stderr", "stdout", "none"].includes(configTarget))
+    return configTarget;
   return "stderr";
 }
 
@@ -70,7 +72,11 @@ let _preloadQueue = [];
  * @param {string} [options.minLevel="warn"] — Minimum log level to emit
  * @param {string} [options.target="stderr"] — Output target: stderr, stdout, none
  */
-export function initializeLogger({ hooks, minLevel = "warn", target = "stderr" }) {
+export function initializeLogger({
+  hooks,
+  minLevel = "warn",
+  target = "stderr",
+}) {
   if (_initialized) return; // Already initialized
   _hooks = hooks;
   _minLevelNum = LOG_LEVELS[minLevel] ?? LOG_LEVELS.warn;
@@ -101,7 +107,8 @@ export function initializeLogger({ hooks, minLevel = "warn", target = "stderr" }
  */
 function _emit(level, message, metadata) {
   if (!_initialized) {
-    if (_preloadQueue.length < 2000) {  // prevent unbounded growth
+    // prevent unbounded growth
+    if (_preloadQueue.length < 2000) {
       _preloadQueue.push([level, message, metadata]);
     }
     return;
@@ -122,6 +129,3 @@ export const logger = {
   warn: (message, metadata) => _emit("warn", message, metadata),
   error: (message, metadata) => _emit("error", message, metadata),
 };
-
-// Keep createLogger for backward compatibility / testing
-export { createLogger } from "./logger-factory.js";

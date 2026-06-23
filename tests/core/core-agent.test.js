@@ -995,10 +995,10 @@ describe('Agent — end-to-end loop', () => {
       expect(agent.context).toEqual([]);
     });
 
-    it('should allow clearing context', () => {
+    it('should allow clearing context', async () => {
       const { agent } = createFixture({});
       agent.context.push(new Message({ role: 'user', content: 'hello' }));
-      agent.clearContext();
+      await agent.clearContext();
       expect(agent.context).toEqual([]);
       expect(agent.iterationCount).toBe(0);
     });

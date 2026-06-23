@@ -159,6 +159,9 @@ export class Agent {
    * @returns {Promise<string|undefined>} Final text response, or undefined if tool calls
    */
   async run(userInput, images = null) {
+    // Ensure system prompt is built (e.g. after /clear or /regenerate)
+    await this.ensureSystemPrompt();
+
     // Add user input to context
     const userMsg = new Message({ role: "user", content: userInput, images });
     this.addMessage(userMsg);
@@ -776,10 +779,11 @@ export class Agent {
   /**
    * Clear the context and start fresh.
    */
-  clearContext() {
+  async clearContext() {
     this.replaceContext([]);
     this._systemPrompt = null;
     this._iterationCount = 0;
+    await this.ensureSystemPrompt();
   }
 
   /**
@@ -840,7 +844,7 @@ export class Agent {
     // Default command handling (core commands)
     switch (cmd.type) {
       case "clear":
-        this.clearContext();
+        await this.clearContext();
         return { content: "Context cleared." };
       case "quit":
         return { error: "UI command: quit" };
@@ -897,8 +901,9 @@ export class Agent {
     };
   }
 
-  _handleRegenerateCommand() {
+  async _handleRegenerateCommand() {
     this._systemPrompt = null;
+    await this.ensureSystemPrompt();
     return { content: "System prompt regenerated." };
   }
 

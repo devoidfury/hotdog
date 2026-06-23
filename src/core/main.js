@@ -1,8 +1,16 @@
 #!/usr/bin/env bun
-// oa-agent — AI agent harness with tool calling support.
 // CLI entry point — wired to the extension architecture.
 
-import { createHooks, SessionManager, Agent, MessageBus, initializeLogger, logger, resolveLogLevel, resolveLogTarget } from "./index.js";
+import {
+  createHooks,
+  SessionManager,
+  Agent,
+  MessageBus,
+  initializeLogger,
+  logger,
+  resolveLogLevel,
+  resolveLogTarget,
+} from "./index.js";
 import {
   createToolRegistry,
   createExtensionLoader,
@@ -12,7 +20,12 @@ import {
 import { HOOKS } from "./hooks.js";
 import { CliOutputSink } from "./ui/cli.js";
 import { parseArgs, generateHelpText } from "./cli.js";
-import { loadConfig, buildConfig, validateConfig, failOnInvalidConfig } from "./config/index.js";
+import {
+  loadConfig,
+  buildConfig,
+  validateConfig,
+  failOnInvalidConfig,
+} from "./config/index.js";
 import { cliFlagsFromSchema, CONFIG_SCHEMA } from "./config/schema-loader.js";
 import { createConfigRegistry } from "./extensions/config-registry.js";
 import { formatError } from "./error.js";
@@ -32,7 +45,7 @@ import { dirname, join } from "node:path";
 /**
  * Load all extensions into the core based on config settings.
  * Extensions are auto-discovered from configured paths and loaded in
- * dependency order (refresh first, core-tools second, then others).
+ * dependency order.
  *
  * @param {Object} core - The core object with hooks, extensions, etc.
  * @param {Object} options - Loading options.
@@ -55,13 +68,6 @@ async function loadExtensions(core, { taskManager, config } = {}) {
     config,
   );
 
-  // Load all extensions in dependency order via the extension loader.
-  // The loader handles import + create() call. taskManager is passed
-  // to all extensions (extensions that don't need it simply ignore it).
-  // Also passes provides/dependsOn for capability tracking.
-  // Guard: skip extensions already loaded (prevents double-loading when
-  // loadExtensions is called multiple times, e.g., early for subcommands
-  // then again with real taskManager for interactive mode).
   for (const ext of extensionsToLoad) {
     if (core.extensions.has(ext.name)) {
       continue; // already loaded, skip
@@ -148,7 +154,11 @@ export async function main() {
   // Register inverse flags not in schema (schema has one cliFlag per key)
   configRegistry.registerCliFlags([
     { long: "--hide-tools", type: "boolean", description: "Hide tool calls" },
-    { long: "--show-thinking", type: "boolean", description: "Show thinking output" },
+    {
+      long: "--show-thinking",
+      type: "boolean",
+      description: "Show thinking output",
+    },
     { long: "--no-colors", type: "boolean", description: "Disable colors" },
   ]);
 
@@ -158,10 +168,8 @@ export async function main() {
   const minimalConfig = await loadConfig(null);
 
   // ── Discover extensions from metadata (no code loading) ─────────────────
-  // Reads extension.json files to extract CLI flags, subcommand declarations,
-  // and config params from configSchema.
-  // Config params from schema are registered automatically, making extension.json
-  // the single source of truth for extension configuration.
+  // Reads extension.json files to extract CLI flags, subcommand declarations, and config params.
+  // Config params from schema are registered automatically, making extension.json the source of truth for extension configuration.
   // This enables `--help` and subcommand discovery without loading any extension code.
   const cliSubcommandRegistry = createSubcommandRegistry();
   await registerExtensionMetadata(
@@ -235,7 +243,10 @@ export async function main() {
   // Emit CLI subcommand registration hook so extensions can register their handlers.
   // Subcommand metadata (description, options) was already registered from extension.json;
   // this hook allows extensions to attach the actual handler functions.
-  core.hooks.notifyHooks(HOOKS.CLI_SUBCOMMANDS_REGISTER, core.cliSubcommandRegistry);
+  core.hooks.notifyHooks(
+    HOOKS.CLI_SUBCOMMANDS_REGISTER,
+    core.cliSubcommandRegistry,
+  );
 
   // Emit CLI_ARGS_PARSED hook after extensions are loaded, before performing any actions.
   core.hooks.notifyHooks(HOOKS.CLI_ARGS_PARSED, { cli });

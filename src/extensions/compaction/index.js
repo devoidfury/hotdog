@@ -14,6 +14,7 @@ import { TokenAwareStrategy } from './strategies/token-aware.js';
 import { estimateContextTokens } from './utils.js';
 import { HOOKS } from '../../core/hooks.js';
 import { logger } from '../../core/logger.js';
+import { Message } from '../../core/context/message.js';
 
 /**
  * Create the compaction extension.
@@ -177,16 +178,6 @@ export function create(core) {
       return { content: `Context compacted to ${keptMessages.length} messages.` };
     }
 
-    // Auto-compact based on token budget
-    const estimatedTokens = estimateContextTokens(nonSystemMessages);
-    const reserveTokens = settings.reserveTokens;
-    const modelConfig = core.modelRegistry?.[agent.model];
-    const contextLimit = modelConfig?.maxTokens || 128000;
-
-    if (estimatedTokens <= contextLimit - reserveTokens) {
-      return { content: 'Context is within token budget. No compaction needed.' };
-    }
-
     // Get the strategy
     const strategy = registry.get(settings.strategy) || registry.getDefault();
     if (!strategy) {
@@ -217,8 +208,12 @@ export function create(core) {
 
     // Build the LLM chat function from the agent's LLM client
     const llmChat = async (chatMessages, chatModel) => {
+      // Wrap plain objects as Message instances so _escapeMessages() can call .toJSON()
+      const wrapped = chatMessages.map(
+        (m) => new Message({ role: m.role, content: m.content }),
+      );
       const stream = agent.llmClient.chatStreamCancellable(
-        chatMessages,
+        wrapped,
         modelConfig || { name: chatModel, temperature: null, maxTokens: 4096 },
         [],
         { aborted: false },

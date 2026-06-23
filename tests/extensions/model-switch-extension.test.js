@@ -23,7 +23,7 @@ function createMockAgent(modelRegistry = {}) {
     _modelRegistry: modelRegistry,
     model: "model-a",
     context: [],
-    clearContext: function () {
+    clearContext: async function () {
       this.context = [];
     },
   };

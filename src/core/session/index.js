@@ -1,9 +1,7 @@
 // SessionManager — manages the session lifecycle.
-// Owns agents, enables swaps, serialization.
-// Delegates agent construction to extensions via hooks.
 
 import crypto from "node:crypto";
-import { HOOKS } from '../hooks.js';
+import { HOOKS } from "../hooks.js";
 
 /**
  * Session store — holds agents keyed by session ID.
@@ -95,7 +93,8 @@ export class SessionManager {
     const sessionId = this._store.addAgent(agent);
     this._currentSessionId = sessionId;
     await this._hooks.notifyHooksAsync(HOOKS.SESSION_CREATE, {
-      session: this, config,
+      session: this,
+      config,
     });
     return sessionId;
   }
@@ -111,7 +110,8 @@ export class SessionManager {
     this._store.addAgent(newAgent);
     this._currentSessionId = newAgent.sessionId;
     await this._hooks.notifyHooksAsync(HOOKS.SESSION_SWAP, {
-      oldAgent, newAgent,
+      oldAgent,
+      newAgent,
     });
     return newAgent;
   }
@@ -143,7 +143,8 @@ export class SessionManager {
     if (agent) {
       this._currentSessionId = sessionId;
       this._hooks.notifyHooks(HOOKS.SESSION_SWAP, {
-        oldAgent: agent, newAgent: agent,
+        oldAgent: agent,
+        newAgent: agent,
       });
     }
     return agent;

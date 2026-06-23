@@ -1,9 +1,5 @@
 import { describe, it, expect } from "bun:test";
-import {
-  CommandRegistry,
-  createCommandRegistry,
-  createSlashCommandRegistry,
-} from "../../src/core/extensions/registries.js";
+import { createCommandRegistry } from "../../src/core/extensions/registries.js";
 
 describe("CommandRegistry", () => {
   it("creates an empty registry", () => {
@@ -80,14 +76,5 @@ describe("CommandRegistry with custom matches", () => {
     expect(registry.match("")).toBeNull();
     expect(registry.match(null)).toBeNull();
     expect(registry.match(undefined)).toBeNull();
-  });
-});
-
-describe("createSlashCommandRegistry (deprecated)", () => {
-  it("delegates to createCommandRegistry for backward compatibility", () => {
-    const registry = createSlashCommandRegistry();
-    expect(registry).toBeDefined();
-    expect(typeof registry.register).toBe("function");
-    expect(typeof registry.match).toBe("function");
   });
 });

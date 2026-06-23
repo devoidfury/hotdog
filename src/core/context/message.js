@@ -1,14 +1,4 @@
 // Message types and message log for conversation management.
-//
-// Naming: Message normalizes between camelCase (internal JS) and snake_case (JSON/persistence).
-//   - Constructor accepts both: toolCallId/tool_call_id, reasoningContent/reasoning_content
-//   - Internal fields are always camelCase: this.toolCallId, this.reasoningContent
-//   - toJSON() serializes to snake_case for JSON/persistence
-//
-// Content format:
-//   - Plain text: content is a string
-//   - With images: content is an array of parts following OpenAI format:
-//     [{ type: "text", text }, { type: "image_url", image_url: { url: "data:image/png;base64,..." } }]
 
 export class Message {
   /**
@@ -72,7 +62,9 @@ export class Message {
     for (const img of this.images) {
       const mimeType = img.mimeType || "image/png";
       const data = img.data || "";
-      const url = data.startsWith("data:") ? data : `data:${mimeType};base64,${data}`;
+      const url = data.startsWith("data:")
+        ? data
+        : `data:${mimeType};base64,${data}`;
       parts.push({
         type: "image_url",
         image_url: { url },

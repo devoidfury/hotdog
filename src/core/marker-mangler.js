@@ -1,11 +1,7 @@
 // Marker mangler — injection prevention for protected XML markers.
 //
 // Randomly aliases protected marker names before sending to the model,
-// and reverses the transformation on output. Prevents the model from
-// generating injection attacks via marker syntax.
-//
-// Only marker *names* are transformed — content between markers is untouched.
-// Partial markers (unclosed tags, stray opening/closing markers) are also caught.
+// and reverses the transformation on output.
 
 const PROTECTED_PREFIXES = [
   "tool-call",

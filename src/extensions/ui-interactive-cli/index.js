@@ -415,7 +415,7 @@ export function create(core) {
     });
 
     rl.on("SIGINT", () => {
-      bus.cancel();
+      bus.interrupt();
       console.log("Interrupted (/quit, /exit, or ctrl-d to exit)");
       rl.prompt();
     });

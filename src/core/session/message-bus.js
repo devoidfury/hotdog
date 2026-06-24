@@ -3,7 +3,7 @@
 // deferred lifecycle management. Event-driven: enqueue() wakes the
 // generator instead of polling.
 
-import { formatError, isExpectedError } from "../error.js";
+import { formatError, isExpectedError, LlmError } from "../error.js";
 import { OUTPUT_EVENT } from "../context/output.js";
 import { HOOKS } from "../hooks.js";
 import { parseCommand } from "../commands.js";
@@ -43,6 +43,19 @@ export class MessageBus {
     this._cancelled = true;
     const agent = this._sessionManager.getAgent();
     if (agent) agent.cancel();
+    this._wakeWaiter();
+  }
+
+  /**
+   * Interrupt the current agent processing and clear the queue.
+   * Unlike cancel(), this does NOT end the run loop — the bus
+   * continues waiting for new input after the interruption.
+   * Used by Ctrl-C in interactive mode.
+   */
+  interrupt() {
+    const agent = this._sessionManager.getAgent();
+    if (agent) agent.cancel();
+    this._queue = [];
     this._wakeWaiter();
   }
 
@@ -169,10 +182,19 @@ export class MessageBus {
     try {
       await agent.run(text);
     } catch (e) {
-      this._sink.emit({
-        type: OUTPUT_EVENT.COMMAND_RESULT,
-        content: isExpectedError(e) ? e.message : formatError(e),
-      });
+      // Suppress cancellation errors on interrupt — the UI already
+      // prints an "Interrupted" message, so the full error is noise.
+      const isCancellation =
+        e instanceof LlmError && e.type === "cancelled" ||
+        e.name === "AbortError" ||
+        LlmError.isCancelled(e);
+
+      if (!isCancellation) {
+        this._sink.emit({
+          type: OUTPUT_EVENT.COMMAND_RESULT,
+          content: isExpectedError(e) ? e.message : formatError(e),
+        });
+      }
     }
 
     if (agent) agent.cancel(false);

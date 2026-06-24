@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach } from 'bun:test';
 import { MessageBus } from '../../src/core/index.js';
+import { LlmError } from '../../src/core/error.js';
 
 class MockSessionManager {
   constructor(agent) {
@@ -15,11 +16,13 @@ class MockAgent {
     this._cancelled = false;
     this._runCalled = false;
     this._runResult = runResult;
+    this._runError = null; // if set, run() throws this error
   }
   get cancelled() { return this._cancelled; }
   cancel(reset = true) { this._cancelled = reset; }
   async run(text) {
     this._runCalled = true;
+    if (this._runError) throw this._runError;
     return this._runResult;
   }
   get sessionName() { return 'test-session'; }
@@ -71,6 +74,118 @@ describe('MessageBus', () => {
   it('cancels and notifies agent', () => {
     bus.cancel();
     expect(mockAgent._cancelled).toBe(true);
+  });
+
+  describe('interrupt()', () => {
+    it('cancels agent and clears queue', () => {
+      bus.enqueue('msg1');
+      bus.enqueue('msg2');
+      bus.interrupt();
+      expect(mockAgent._cancelled).toBe(true);
+      expect(bus.isIdle()).toBe(true);
+    });
+
+    it('does not end the run loop — bus continues after interrupt', async () => {
+      const agent = new MockAgent();
+      const bus = new MessageBus({
+        sessionManager: new MockSessionManager(agent),
+        sink: new MockSink(),
+      });
+
+      bus.enqueue('msg1');
+      bus.interrupt();  // clears queue, cancels agent
+
+      // After interrupt, bus should still accept new messages
+      expect(bus.isIdle()).toBe(true);
+      bus.enqueue('msg2');
+      expect(bus.isIdle()).toBe(false);
+
+      // Run the loop — it should process the post-interrupt message
+      await Promise.resolve();
+      bus.cancel();
+      await bus.runUntilCancelled();
+      expect(agent._runCalled).toBe(true);
+    });
+
+    it('agent cancelled flag is reset before next run', async () => {
+      const agent = new MockAgent();
+      const bus = new MessageBus({
+        sessionManager: new MockSessionManager(agent),
+        sink: new MockSink(),
+      });
+
+      bus.interrupt();  // sets agent._cancelled = true
+      expect(agent._cancelled).toBe(true);
+
+      // Enqueue and process — _processMessage resets the flag
+      bus.enqueue('msg');
+      await Promise.resolve();
+      bus.cancel();
+      await bus.runUntilCancelled();
+      // After _processMessage, agent.cancel(false) was called
+      expect(agent._cancelled).toBe(false);
+    });
+  });
+
+  describe('cancellation error suppression', () => {
+    it('suppresses LlmError.Cancelled from agent.run()', async () => {
+      const sink = new MockSink();
+      const agent = new MockAgent();
+      agent._runError = LlmError.Cancelled('Agent cancelled');
+      const bus = new MessageBus({
+        sessionManager: new MockSessionManager(agent),
+        sink,
+      });
+
+      bus.enqueue('msg');
+      await Promise.resolve();
+      bus.cancel();
+      await bus.runUntilCancelled();
+
+      // No COMMAND_RESULT events should be emitted for cancellation
+      const cmdResults = sink.events.filter(e => e.type === 7);
+      expect(cmdResults.length).toBe(0);
+    });
+
+    it('suppresses AbortError from agent.run()', async () => {
+      const sink = new MockSink();
+      const agent = new MockAgent();
+      // Simulate a DOMException AbortError
+      const abortError = new Error('The operation was aborted');
+      abortError.name = 'AbortError';
+      agent._runError = abortError;
+      const bus = new MessageBus({
+        sessionManager: new MockSessionManager(agent),
+        sink,
+      });
+
+      bus.enqueue('msg');
+      await Promise.resolve();
+      bus.cancel();
+      await bus.runUntilCancelled();
+
+      const cmdResults = sink.events.filter(e => e.type === 7);
+      expect(cmdResults.length).toBe(0);
+    });
+
+    it('still emits non-cancellation errors', async () => {
+      const sink = new MockSink();
+      const agent = new MockAgent();
+      agent._runError = new Error('Real error');
+      const bus = new MessageBus({
+        sessionManager: new MockSessionManager(agent),
+        sink,
+      });
+
+      bus.enqueue('msg');
+      await Promise.resolve();
+      bus.cancel();
+      await bus.runUntilCancelled();
+
+      const cmdResults = sink.events.filter(e => e.type === 7);
+      expect(cmdResults.length).toBe(1);
+      expect(cmdResults[0].content).toContain('Real error');
+    });
   });
 
   describe('run methods', () => {

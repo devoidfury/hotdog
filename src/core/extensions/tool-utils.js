@@ -23,6 +23,8 @@ const SHORT_META_KEYS = new Set([
   "exit_code",
   "path",
   "pattern",
+  "offset",
+  "limit",
 ]);
 
 /**
@@ -83,12 +85,26 @@ export class ToolResult {
    * @param {Array|null} [opts.images=null] — Image attachments.
    * @returns {ToolResult}
    */
-  static from({ output = "", error = null, metadata = null, success = true, outputTag = null, images = null } = {}) {
+  static from({
+    output = "",
+    error = null,
+    metadata = null,
+    success = true,
+    outputTag = null,
+    images = null,
+  } = {}) {
     // If an error is provided and success wasn't explicitly set, mark as failure
     if (error !== null && success !== false) {
       success = false;
     }
-    return new ToolResult({ output, error, metadata, success, outputTag, images });
+    return new ToolResult({
+      output,
+      error,
+      metadata,
+      success,
+      outputTag,
+      images,
+    });
   }
 
   withEntry(key, value) {
@@ -484,4 +500,3 @@ export function getRequiredStr(value, key) {
   }
   return v;
 }
-

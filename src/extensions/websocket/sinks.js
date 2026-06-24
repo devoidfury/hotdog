@@ -120,7 +120,8 @@ export class WebSocketOutputSink {
         break;
       case OUTPUT_EVENT.TOOL_RESULT:
         msg.name = event.toolName;
-        if (event.output !== undefined) msg.output = event.output;
+        // Agent emits `result`, not `output` — map it to `output` for the client
+        if (event.result !== undefined) msg.output = event.result;
         if (event.error !== undefined) msg.error = event.error;
         break;
       case OUTPUT_EVENT.COMPACTING:

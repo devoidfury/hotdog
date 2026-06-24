@@ -6,7 +6,7 @@ import { OUTPUT_EVENT } from "../../core/context/output.js";
 import { HOOKS } from "../../core/hooks.js";
 import { MessageBus } from "../../core/session/message-bus.js";
 import { FanoutSink, WebSocketOutputSink, BackgroundSink } from "./sinks.js";
-import { C2S } from "./protocol.js";
+import { C2S, S2C } from "./protocol.js";
 
 // ── SessionRegistry ─────────────────────────────────────────────────────────
 
@@ -231,6 +231,78 @@ export class SessionRegistry {
   }
 }
 
+// ── Session History Replay ──────────────────────────────────────────────────
+
+/**
+ * Replay a session's message history to a WebSocket client.
+ * Iterates through the agent's context and emits the appropriate
+ * OUTPUT_EVENT-derived messages so the frontend can reconstruct the chat.
+ *
+ * @param {Object} session - Session from the registry
+ * @param {WebSocket} ws - Bun WebSocket instance to send to
+ */
+function replaySessionHistory(session, ws) {
+  const agent = session.agent;
+  if (!agent || !agent.context) return;
+
+  // Collect tool calls from the most recent assistant message to match
+  // tool results by toolCallId.
+  let pendingToolCalls = [];
+
+  for (const msg of agent.context) {
+    switch (msg.role) {
+      case "user": {
+        ws.send(JSON.stringify({
+          type: S2C.USER_MESSAGE,
+          sessionId: session.id,
+          content: msg.getTextContent(),
+        }));
+        break;
+      }
+
+      case "assistant": {
+        // Emit tool calls first (if any) so the UI renders them before the text
+        if (msg.toolCalls && msg.toolCalls.length > 0) {
+          pendingToolCalls = msg.toolCalls;
+          for (const tc of msg.toolCalls) {
+            ws.send(JSON.stringify({
+              type: S2C.TOOL_CALL,
+              sessionId: session.id,
+              name: tc.function?.name || "unknown",
+              args: tc.function?.arguments || "{}",
+            }));
+          }
+        }
+        // Then emit the assistant message text
+        ws.send(JSON.stringify({
+          type: S2C.ASSISTANT_MESSAGE,
+          sessionId: session.id,
+          content: msg.getTextContent(),
+        }));
+        break;
+      }
+
+      case "tool": {
+        // Match this tool result to the pending tool calls by toolCallId
+        const matchedCall = pendingToolCalls.find(
+          tc => tc.id === msg.toolCallId,
+        );
+        ws.send(JSON.stringify({
+          type: S2C.TOOL_RESULT,
+          sessionId: session.id,
+          name: matchedCall?.function?.name || "unknown",
+          output: msg.content || "",
+        }));
+        break;
+      }
+
+      // system messages are skipped — they are not user-visible
+      default:
+        break;
+    }
+  }
+}
+
 // ── WS Message Routing ──────────────────────────────────────────────────────
 
 /**
@@ -309,6 +381,8 @@ function routeMessage(ws, msg, registry, authMiddleware) {
           const wsSink = registry.attachSink(msg.sessionId, ws);
           ws.activeSessionId = msg.sessionId;
           ws.activeSink = wsSink;
+          // Replay session history so the client sees the full conversation
+          replaySessionHistory(session, ws);
         }
       }
       break;
@@ -488,6 +562,8 @@ export function createWsServer(core, options = {}) {
         type: "sessionCreated",
         sessionId,
         profile: agent.profileName || "default",
+        currentModel: agent.model,
+        models: Object.keys(agent._modelRegistry || {}),
       }));
     }).catch(err => {
       ws.send(JSON.stringify({ type: "error", message: err.message }));

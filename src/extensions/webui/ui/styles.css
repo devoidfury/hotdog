@@ -220,6 +220,36 @@ body {
     font-size: 0.8rem;
 }
 
+/* ── Model Selector ────────────────────────────────────────────────────────── */
+
+#model-selector {
+    color: var(--text-secondary);
+    font-size: 0.85rem;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+#model-select {
+    background: var(--bg-tertiary);
+    color: var(--text-primary);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 2px 8px;
+    font-size: 0.85rem;
+    cursor: pointer;
+    outline: none;
+    max-width: 200px;
+}
+
+#model-select:hover {
+    border-color: var(--accent);
+}
+
+#model-select:focus {
+    border-color: var(--accent);
+}
+
 .status-disconnected {
     color: var(--error);
     font-size: 0.8rem;
@@ -283,7 +313,6 @@ body {
     border: 1px solid var(--border);
     border-radius: var(--radius);
     margin-top: 8px;
-    overflow: hidden;
 }
 
 .tool-call-header {

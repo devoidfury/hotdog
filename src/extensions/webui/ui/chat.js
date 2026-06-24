@@ -38,11 +38,30 @@ export function createChat({
     onConnectionChange?.(connected);
   }
 
-  /** Show/hide the "Model is working..." spinner indicator. */
+  /** Show/hide the "Model is working..." spinner indicator and cancel button. */
   function setWorking(working) {
     const el = document.getElementById("working-indicator");
     if (!el) return;
     el.classList.toggle("hidden", !working);
+    // Show cancel button while working, hide when idle
+    const cancelBtn = document.getElementById("cancel-btn");
+    if (cancelBtn) {
+      cancelBtn.classList.toggle("hidden", !working);
+    }
+  }
+
+  /** Populate the model dropdown with available models. */
+  function populateModelDropdown(models, currentModel) {
+    const select = document.getElementById("model-select");
+    if (!select) return;
+    select.innerHTML = "";
+    for (const name of models) {
+      const opt = document.createElement("option");
+      opt.value = name;
+      opt.textContent = name;
+      if (name === currentModel) opt.selected = true;
+      select.appendChild(opt);
+    }
   }
 
   // ── WS Message Routing ───────────────────────────────────────────────────
@@ -54,6 +73,10 @@ export function createChat({
         currentSessionId = data.sessionId;
         document.getElementById("current-session-id").textContent =
           data.sessionId.slice(0, 8);
+        // Populate model dropdown with the model list from the server
+        if (data.models && data.models.length > 0) {
+          populateModelDropdown(data.models, data.currentModel);
+        }
         onSessionCreated?.({ sessionId: data.sessionId });
         return; // messageList will be created by onSessionCreated → setSession
       case "sessionDeleted":
@@ -77,44 +100,35 @@ export function createChat({
     // ── OUTPUT_EVENT mappings — require messageList ──
     if (!messageList) return;
 
-    // Hide working indicator when any response event arrives
     switch (data.type) {
       case "userMessage":
         messageList.handleUserMessage(data);
         break;
       case "assistantMessage":
-        setWorking(false);
         messageList.handleAssistantMessage(data);
         break;
       case "thinking":
-        setWorking(false);
         messageList.handleThinking(data);
         break;
       case "toolCall":
-        setWorking(false);
         messageList.handleToolCall(data);
         break;
       case "toolResult":
         messageList.handleToolResult(data);
         break;
       case "compacting":
-        setWorking(false);
         messageList.handleCompacting(data);
         break;
       case "commandResult":
-        setWorking(false);
         messageList.handleCommandResult(data);
         break;
       case "question":
-        setWorking(false);
         messageList.handleQuestion(data);
         break;
       case "streamingChunk":
-        setWorking(false);
         messageList.handleStreamingChunk(data);
         break;
       case "streamingReasoningChunk":
-        setWorking(false);
         messageList.handleStreamingReasoningChunk(data);
         break;
       case "taskProgress":
@@ -127,6 +141,10 @@ export function createChat({
         messageList.handleCompactionResult(data);
         break;
       case "sessionState":
+        // Handle working state signals from the server
+        if (data.key === "working") {
+          setWorking(data.value);
+        }
         messageList.handleSessionState(data);
         break;
       case "error":
@@ -263,6 +281,12 @@ export function createChat({
     send({ type: "send", sessionId: currentSessionId, content });
   }
 
+  /** Send a slash command to the agent. */
+  function sendSlashCommand(command) {
+    if (!currentSessionId) return;
+    send({ type: "command", sessionId: currentSessionId, command });
+  }
+
   /** Cancel the current run. */
   function cancel() {
     if (!currentSessionId) return;
@@ -322,14 +346,20 @@ export function createChat({
 
   // ── Init ───────────────────────────────────────────────────────────────────
 
-  // Wire up chat input form
+  // Wire up chat input form — detect slash commands and route accordingly
   document.getElementById("chat-form").addEventListener("submit", (e) => {
     e.preventDefault();
     const input = document.getElementById("chat-input");
     const text = input.value.trim();
     if (!text) return;
     input.value = "";
-    sendMessage(text);
+
+    if (text.startsWith("/")) {
+      // Slash command — send as command, not user message
+      sendSlashCommand(text);
+    } else {
+      sendMessage(text);
+    }
   });
 
   document.getElementById("cancel-btn").addEventListener("click", () => {
@@ -341,6 +371,13 @@ export function createChat({
     createSession({});
   });
 
+  // Model dropdown change — send /model command to switch
+  document.getElementById("model-select").addEventListener("change", (e) => {
+    const modelName = e.target.value;
+    if (!modelName || !currentSessionId) return;
+    sendSlashCommand(`/model ${modelName}`);
+  });
+
   // Connect
   connect();
 
@@ -348,6 +385,7 @@ export function createChat({
     connect,
     disconnect,
     sendMessage,
+    sendSlashCommand,
     cancel,
     createSession,
     switchSession,

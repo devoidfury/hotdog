@@ -176,6 +176,7 @@ export class MessageBus {
     if (inputHandled) {
       if (agent) agent.cancel(false);
       this._isRunning = false;
+      this._sink.emit({ type: OUTPUT_EVENT.SESSION_STATE, key: "working", value: false });
       return;
     }
 
@@ -199,6 +200,9 @@ export class MessageBus {
 
     if (agent) agent.cancel(false);
     this._isRunning = false;
+
+    // Signal that the agent is done working so the UI can hide the spinner
+    this._sink.emit({ type: OUTPUT_EVENT.SESSION_STATE, key: "working", value: false });
   }
 
   /**

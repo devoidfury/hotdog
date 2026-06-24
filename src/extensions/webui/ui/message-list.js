@@ -15,6 +15,7 @@ export function createMessageList(sessionId, { hideThinking = false } = {}) {
   let currentAssistantEl = null;
   let currentThinkingEl = null;
   let currentToolCalls = [];
+  let hasToolCallsSinceLastAssistant = false;
 
   function ensureAssistantEl() {
     if (!currentAssistantEl) {
@@ -67,6 +68,12 @@ export function createMessageList(sessionId, { hideThinking = false } = {}) {
   }
 
   function handleStreamingChunk({ content }) {
+    // If we've had tool calls since the last assistant message, start a new
+    // assistant element so tool calls appear sequentially before the final text.
+    if (hasToolCallsSinceLastAssistant) {
+      finalizeAssistant();
+      hasToolCallsSinceLastAssistant = false;
+    }
     const el = ensureAssistantEl();
     const contentDiv = el.querySelector(".content");
     contentDiv.textContent += content;
@@ -86,7 +93,9 @@ export function createMessageList(sessionId, { hideThinking = false } = {}) {
   }
 
   function handleToolCall({ name, args }) {
-    const parent = ensureAssistantEl();
+    // Finalize the current assistant message so tool calls appear as
+    // separate blocks after the user message, not nested inside the assistant.
+    finalizeAssistant();
 
     const block = document.createElement("div");
     block.className = "tool-call-block";
@@ -100,14 +109,20 @@ export function createMessageList(sessionId, { hideThinking = false } = {}) {
     body.textContent = args;
 
     header.addEventListener("click", () => {
+      // When expanding, show the full tool output (not truncated preview)
+      const isHidden = body.classList.contains("hidden");
+      if (isHidden && body.dataset.fullOutput) {
+        body.textContent = body.dataset.fullOutput;
+      }
       body.classList.toggle("hidden");
     });
 
     block.appendChild(header);
     block.appendChild(body);
-    parent.appendChild(block);
+    container.appendChild(block);
 
     currentToolCalls.push(block);
+    hasToolCallsSinceLastAssistant = true;
     scrollBottom();
   }
 
@@ -126,9 +141,15 @@ export function createMessageList(sessionId, { hideThinking = false } = {}) {
 
     const body = target.querySelector(".tool-call-body");
     if (body) {
-      if (output) body.textContent = output.slice(0, 2000);
+      // Store the full output on the body element for toggling
+      const fullOutput = output || error || "";
+      body.dataset.fullOutput = fullOutput;
+      body.dataset.truncated = "true";
+
+      // Show truncated preview in the body, but keep it hidden until clicked
+      if (output) body.textContent = output.slice(0, 2000) + "\n\n<click to show full response>";
       else if (error) body.textContent = `Error: ${error}`;
-      body.classList.remove("hidden");
+      // Don't auto-show the body — let the user click to expand
     }
     scrollBottom();
   }
@@ -221,10 +242,18 @@ export function createMessageList(sessionId, { hideThinking = false } = {}) {
     }
     currentThinkingEl = null;
     currentToolCalls = [];
+    hasToolCallsSinceLastAssistant = false;
   }
 
   function scrollBottom() {
-    container.scrollTop = container.scrollHeight;
+    // Only auto-scroll if the user is within 150px of the bottom,
+    // so they can scroll up to view history without being yanked down.
+    const threshold = 150;
+    const distFromBottom =
+      container.scrollHeight - container.scrollTop - container.clientHeight;
+    if (distFromBottom <= threshold) {
+      container.scrollTop = container.scrollHeight;
+    }
   }
 
   function clear() {
@@ -232,6 +261,7 @@ export function createMessageList(sessionId, { hideThinking = false } = {}) {
     currentAssistantEl = null;
     currentThinkingEl = null;
     currentToolCalls = [];
+    hasToolCallsSinceLastAssistant = false;
   }
 
   return {

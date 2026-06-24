@@ -1,0 +1,137 @@
+// Main application — wires login, chat, and session management together.
+
+import { initLogin } from "./login.js";
+import { createChat } from "./chat.js";
+import { initSessions } from "./sessions.js";
+
+// ── State ───────────────────────────────────────────────────────────────────
+
+let token = null;
+let chat = null;
+let updateSessions = null;
+
+// ── Screen Navigation ───────────────────────────────────────────────────────
+
+function showLogin() {
+  document.getElementById("login-screen").classList.remove("hidden");
+  document.getElementById("main-ui").classList.add("hidden");
+}
+
+function showMain() {
+  document.getElementById("login-screen").classList.add("hidden");
+  document.getElementById("main-ui").classList.remove("hidden");
+}
+
+// ── Auth Failure Handler ────────────────────────────────────────────────────
+
+/**
+ * Called when the session token is invalid or expired.
+ * Clears localStorage and shows the login screen so the user can re-authenticate.
+ */
+function handleAuthFailure() {
+  localStorage.removeItem("oa-webui-token");
+  token = null;
+  if (chat) {
+    chat.disconnect();
+    chat = null;
+  }
+  showLogin();
+}
+
+// ── Token Verification (startup) ────────────────────────────────────────────
+
+/**
+ * Verify the saved token before starting the chat connection.
+ * If the token is invalid, clear it and show login immediately.
+ */
+function verifyToken(tokenToCheck) {
+  return fetch(`/verify?token=${encodeURIComponent(tokenToCheck)}`)
+    .then((res) => {
+      if (res.status === 401) {
+        handleAuthFailure();
+        return false;
+      }
+      return true;
+    })
+    .catch(() => {
+      // Network error — server might be down; proceed and let chat.js retry
+      return true;
+    });
+}
+
+// ── Initialization ───────────────────────────────────────────────────────────
+
+async function init() {
+  // Check for existing token in localStorage
+  const savedToken = localStorage.getItem("oa-webui-token");
+  if (savedToken) {
+    token = savedToken;
+    // Verify the token before starting the chat connection
+    const valid = await verifyToken(token);
+    if (valid) {
+      startChat();
+      showMain();
+    }
+    // If invalid, verifyToken calls handleAuthFailure() which shows login
+  } else {
+    showLogin();
+  }
+
+  // Login screen
+  initLogin({
+    onLogin: (newToken) => {
+      token = newToken;
+      localStorage.setItem("oa-webui-token", token);
+      startChat();
+      showMain();
+    },
+  });
+
+  // Session sidebar
+  updateSessions = initSessions({
+    onCreate: () => {
+      chat.createSession({});
+    },
+    onSwitch: (sessionId) => {
+      chat.switchSession(sessionId);
+    },
+    onDelete: (sessionId) => {
+      chat.deleteSession(sessionId);
+    },
+  });
+
+  // Logout button (via sidebar context menu or simple clear)
+  // For now: clear token from localStorage and reload
+  document.addEventListener("keydown", (e) => {
+    // Ctrl+Shift+L → logout
+    if (e.ctrlKey && e.shiftKey && (e.key === "L" || e.key === "l")) {
+      handleAuthFailure();
+    }
+  });
+}
+
+function startChat() {
+  chat = createChat({
+    token,
+    host: window.location.host,
+    onSessionCreated: ({ sessionId }) => {
+      chat.setSession(sessionId);
+      chat.listSessions(); // Refresh sidebar
+    },
+    onSessionsUpdate: (sessions, activeSessionId) => {
+      if (updateSessions) {
+        updateSessions(sessions, activeSessionId);
+      }
+    },
+    onConnectionChange: (connected) => {
+      if (!connected && token) {
+        // Attempt to reconnect — chat.js handles this with reconnect timer
+      }
+    },
+    onAuthFailure: handleAuthFailure,
+  });
+}
+
+// ── Start ───────────────────────────────────────────────────────────────────
+
+init();

@@ -1,0 +1,70 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>oa-agent WebUI</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <div id="app">
+    <!-- Login screen -->
+    <div id="login-screen" class="screen hidden">
+      <div class="login-container">
+        <h1>oa-agent</h1>
+        <p class="subtitle">AI agent harness</p>
+        <form id="login-form">
+          <input type="password" id="api-key-input" placeholder="Enter API key" autocomplete="off" />
+          <button type="submit">Login</button>
+        </form>
+        <p id="login-error" class="error-message hidden"></p>
+      </div>
+    </div>
+
+    <!-- Main chat UI -->
+    <div id="main-ui" class="screen hidden">
+      <!-- Sidebar -->
+      <aside id="sidebar">
+        <div class="sidebar-header">
+          <h2>Sessions</h2>
+          <button id="new-session-btn" title="New session">+</button>
+        </div>
+        <div id="session-list">
+          <!-- Populated by sessions.js -->
+        </div>
+      </aside>
+
+      <!-- Chat area -->
+      <main id="chat-area">
+        <!-- Session info bar -->
+        <div id="session-info">
+          <span id="session-label">Session: <span id="current-session-id"></span></span>
+          <span id="connection-status" class="status-disconnected">Disconnected</span>
+        </div>
+
+        <!-- Messages -->
+        <div id="message-list">
+          <!-- Populated by message-list.js -->
+        </div>
+
+        <!-- Model working indicator -->
+        <div id="working-indicator" class="hidden">
+          <span class="spinner"></span>
+          <span>Model is working...</span>
+        </div>
+
+        <!-- Input area -->
+        <div id="input-area">
+          <form id="chat-form">
+            <input type="text" id="chat-input" placeholder="Type a message..." autocomplete="off" />
+            <button type="submit" id="send-btn">Send</button>
+          </form>
+          <button id="cancel-btn" class="hidden">Cancel</button>
+        </div>
+      </main>
+    </div>
+  </div>
+
+  <script type="module" src="app.js"></script>
+</body>
+</html>

@@ -36,6 +36,19 @@
     "enabled": true,
     "autoload": false
   },
+  "websocket": {
+    "port": 3000,
+    "host": "0.0.0.0",
+    "sessionTimeoutMin": 30,
+    "questionTimeoutSecs": 300,
+    "questionStrategy": "wait"
+  },
+  "webui": {
+    "port": 3000,
+    "host": "0.0.0.0",
+    "apiKey": "3419bc3140346d8bc20044d718bcc936a997a",
+    "sessionTokenTtlMin": 1440
+  },
   "mcp_servers": [
     {
       "enabled": false,

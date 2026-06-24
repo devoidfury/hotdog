@@ -1,0 +1,44 @@
+{
+  "name": "websocket",
+  "provides": [],
+  "loadOrder": 10,
+  "description": "WebSocket server for agent session management — provides core backend utility for UI extensions",
+  "autoload": true,
+  "configSchema": {
+    "type": "object",
+    "properties": {
+      "enabled": {
+        "type": "boolean",
+        "default": true,
+        "description": "Whether this extension is enabled. Set to false to disable the extension entirely."
+      },
+      "port": {
+        "type": "number",
+        "default": 3000,
+        "description": "WebSocket server port"
+      },
+      "host": {
+        "type": "string",
+        "default": "0.0.0.0",
+        "description": "WebSocket server host"
+      },
+      "sessionTimeoutMin": {
+        "type": "number",
+        "default": 30,
+        "description": "Idle session cleanup timeout (minutes)"
+      },
+      "questionTimeoutSecs": {
+        "type": "number",
+        "default": 300,
+        "description": "Default question timeout (seconds)"
+      },
+      "questionStrategy": {
+        "type": "string",
+        "default": "wait",
+        "enum": ["wait", "default", "cancel"],
+        "description": "Default question strategy"
+      }
+    },
+    "additionalProperties": false
+  }
+}

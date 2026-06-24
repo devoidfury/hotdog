@@ -171,6 +171,9 @@ export class Agent {
     const userMsg = new Message({ role: "user", content: userInput, images });
     this.addMessage(userMsg);
 
+    // Emit user message to output sinks so connected clients see it
+    this._emitOutput("user_message", { content: userInput });
+
     let iteration = 0;
     while (iteration < this._maxIterations) {
       iteration++;

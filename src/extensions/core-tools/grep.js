@@ -4,6 +4,7 @@ import fs from "node:fs/promises";
 import { execFile } from "node:child_process";
 import util from "node:util";
 import { join, extname, resolve } from "node:path";
+import { ToolError } from "../../core/error.js";
 import extensionData from "./extension.json";
 import {
   toolDef,
@@ -266,7 +267,7 @@ async function grepWithRg(pattern, searchDir, maxResults, context, typeFilter) {
     return { display: outputLines.join("\n"), totalMatches };
   } catch (e) {
     // ripgrep not found or failed — fall back to native
-    throw new Error("ripgrep not available");
+    throw ToolError.NotAvailable("ripgrep");
   }
 }
 

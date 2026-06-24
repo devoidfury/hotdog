@@ -1,3 +1,5 @@
+import { ParseError } from "../core/error.js";
+
 export function compile(template) {
   const tokens = tokenize(template);
   return function render(context) {
@@ -77,7 +79,7 @@ function pushText(tokens, template, start, end, stripLeft) {
 
 function findClose(str, from, delim) {
   const idx = str.indexOf(delim, from + 2);
-  if (idx === -1) throw new Error(`Unclosed ${delim}`);
+  if (idx === -1) throw new ParseError(`Unclosed ${delim}`);
   return idx;
 }
 

@@ -1,5 +1,7 @@
 // Compaction utilities — token estimation, message serialization, helpers.
 
+import { AgentError } from "../../core/error.js";
+
 const TOOL_RESULT_MAX_CHARS = 2000;
 
 // ── Token Estimation ────────────────────────────────────────────────────────
@@ -170,7 +172,7 @@ export async function compactMessages(messages, llmChat, model, settings) {
   try {
     summary = await llmChat(summaryMessages, model);
   } catch (e) {
-    throw new Error(`Summarization failed: ${e.message}`);
+    throw AgentError.SummarizationFailed(e.message);
   }
 
   return { summary, messagesCompacted: firstKept };

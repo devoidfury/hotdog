@@ -5,7 +5,7 @@ import crypto from "node:crypto";
 import { Message } from "./context/message.js";
 import { LlmError } from "./llm-client/client.js";
 import { OUTPUT_EVENT } from "./context/output.js";
-import { formatError } from "./error.js";
+import { formatError, AgentError } from "./error.js";
 import { HOOKS } from "./hooks.js";
 import { ToolContext } from "./extensions/tool-context.js";
 import { xmlEscape } from "./extensions/tool-utils.js";
@@ -332,7 +332,7 @@ export class Agent {
       }
     }
 
-    throw new Error(`Max iterations (${this._maxIterations}) reached`);
+    throw AgentError.MaxIterations(this._maxIterations);
   }
 
   /**

@@ -3,6 +3,7 @@
 // Only structural/meta flags are hardcoded here (--config, --model, --help, etc.).
 
 import { logger } from "./logger.js";
+import { CliError } from "./error.js";
 
 // Structural flags that are NOT config values (config file paths, model selection, etc.)
 // These are parsed directly and passed to the config resolver as CLI context.
@@ -120,7 +121,7 @@ export function parseArgs(configRegistry = null, knownSubcommands = null) {
 
       // Handle flags with values
       if (i + 1 >= args.length) {
-        throw new Error(`${arg} requires a value`);
+        throw CliError.MissingValue(arg);
       }
 
       const value = args[++i];
@@ -130,7 +131,7 @@ export function parseArgs(configRegistry = null, knownSubcommands = null) {
       if (flagDef.type === "number" || flagDef.type === "int") {
         parsedValue = parseInt(value, 10);
         if (isNaN(parsedValue)) {
-          throw new Error(`${arg} requires a numeric value`);
+          throw CliError.InvalidValue(arg);
         }
       } else if (flagDef.type === "array") {
         parsedValue = value.split(",");
@@ -162,7 +163,7 @@ export function parseArgs(configRegistry = null, knownSubcommands = null) {
       if (isKnownSubcommand) {
         options.subcommand = arg;
       } else {
-        throw new Error(`Unknown subcommand: ${arg}`);
+        throw CliError.UnknownSubcommand(arg);
       }
     } else {
       options.args.push(arg);

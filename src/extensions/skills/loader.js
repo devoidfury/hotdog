@@ -7,6 +7,7 @@ import { cwd } from "node:process";
 import { parseFrontMatter, validateNameable } from "../../utils/file-utils.js";
 import { render } from "../../utils/render.js";
 import { logger } from "../../core/logger.js";
+import { ParseError } from "../../core/error.js";
 
 // ── Pattern Matching ───────────────────────────────────────────────────────
 
@@ -56,7 +57,7 @@ export function patternMatches(pattern, toolName) {
 export function parseSkillFromMd(content, dirName, location) {
   const parsed = parseFrontMatter(content);
   if (!parsed) {
-    throw new Error("No YAML frontmatter found");
+    throw ParseError.FrontmatterNotFound();
   }
 
   const fm = parsed.frontMatter;
@@ -64,7 +65,7 @@ export function parseSkillFromMd(content, dirName, location) {
 
   // Validate description
   if (!fm.description || !fm.description.trim()) {
-    throw new Error("Skill description is missing or empty (required)");
+    throw ParseError.MissingDescription("Skill");
   }
 
   // Warn on description length

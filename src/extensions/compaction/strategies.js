@@ -1,6 +1,8 @@
 // Compaction Strategy Registry and Base Class
 // Provides the strategy interface and registry for managing compaction strategies.
 
+import { AgentError } from "../../core/error.js";
+
 /**
  * Base class for all compaction strategies.
  * All strategies must extend this and implement `execute()`.
@@ -26,7 +28,7 @@ export class CompactionStrategy {
    * @returns {Promise<CompactResult>} Result of compaction.
    */
   async execute(messages, settings, llmChat, model) {
-    throw new Error('execute() not implemented');
+    throw AgentError.NotImplemented();
   }
 
   /**
@@ -57,7 +59,7 @@ export class CompactionStrategyRegistry {
    */
   register(strategy) {
     if (!strategy.name) {
-      throw new Error('Strategy must have a name property');
+      throw new AgentError("Strategy must have a name property");
     }
     this._strategies.set(strategy.name, strategy);
   }

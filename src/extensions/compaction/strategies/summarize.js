@@ -6,6 +6,7 @@ import {
 } from '../prompts.js';
 import { serializeConversation, findFirstKeptIndex, estimateContextTokens } from '../utils.js';
 import { CompactionStrategy } from '../strategies.js';
+import { AgentError } from '../../../core/error.js';
 
 /**
  * Default compaction strategy: LLM-based summarization of older messages.
@@ -32,7 +33,7 @@ export class SummarizeStrategy extends CompactionStrategy {
     try {
       summary = await llmChat(summaryMessages, model);
     } catch (e) {
-      throw new Error(`Summarization failed: ${e.message}`);
+      throw AgentError.SummarizationFailed(e.message);
     }
 
     return {

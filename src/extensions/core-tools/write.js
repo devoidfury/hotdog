@@ -2,6 +2,7 @@
 
 import fs from "node:fs/promises";
 import path from "node:path";
+import { ToolError } from "../../core/error.js";
 
 /**
  * Check if a file exists.
@@ -338,7 +339,7 @@ function applyEdit(source, mode, content, search, search_re, start_at, end_at) {
       );
     }
     default:
-      throw new Error(`Unknown mode: ${mode}`);
+      throw ToolError.UnknownMode(mode);
   }
 }
 
@@ -382,9 +383,7 @@ function applyRangeReplace(source, startLine, endLine, content) {
   const totalLines = lines.length;
 
   if (endLine > totalLines) {
-    throw new Error(
-      `end_line (${endLine}) exceeds file length (${totalLines} lines)`,
-    );
+    throw ToolError.EndExceedsLines(endLine, totalLines);
   }
 
   const startIdx = startLine - 1;
@@ -409,9 +408,7 @@ function applyRangeLiteralReplace(
   const totalLines = lines.length;
 
   if (endLine > totalLines) {
-    throw new Error(
-      `end_line (${endLine}) exceeds file length (${totalLines} lines)`,
-    );
+    throw ToolError.EndExceedsLines(endLine, totalLines);
   }
 
   const startIdx = startLine - 1;
@@ -438,9 +435,7 @@ function applyRangeRegexReplace(
   const totalLines = lines.length;
 
   if (endLine > totalLines) {
-    throw new Error(
-      `end_line (${endLine}) exceeds file length (${totalLines} lines)`,
-    );
+    throw ToolError.EndExceedsLines(endLine, totalLines);
   }
 
   const startIdx = startLine - 1;

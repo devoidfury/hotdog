@@ -6,6 +6,7 @@
 
 import fsPromises from "node:fs/promises";
 import path from "node:path";
+import { ToolError } from "../error.js";
 
 /**
  * Metadata keys rendered as XML attributes on the root <tool> tag.
@@ -412,7 +413,7 @@ export async function resolvePathAndValidate(requested, cwdBoundary = null) {
   try {
     await fsPromises.access(resolved);
   } catch {
-    throw new Error(`Path not found: ${requested}`);
+    throw ToolError.PathNotFound(requested);
   }
 
   if (cwdBoundary) {
@@ -421,10 +422,7 @@ export async function resolvePathAndValidate(requested, cwdBoundary = null) {
       !resolved.startsWith(boundaryResolved + path.sep) &&
       resolved !== boundaryResolved
     ) {
-      throw new Error(
-        `Path '${requested}' is outside the allowed directory '${cwdBoundary}'. ` +
-          "File operations are restricted to the boundary directory.",
-      );
+      throw ToolError.PathOutside(requested, cwdBoundary);
     }
   }
 
@@ -451,7 +449,7 @@ export async function checkWritable(filePath) {
       await fsPromises.writeFile(tempPath, "");
       await fsPromises.unlink(tempPath);
     } catch (e) {
-      throw new Error(`Directory '${parentDir}' is not writable: ${e.message}`);
+      throw ToolError.NotWritable(parentDir, e.message);
     }
   }
 
@@ -471,7 +469,7 @@ export async function checkReadable(filePath) {
   try {
     await fsPromises.access(filePath, fsPromises.constants.R_OK);
   } catch {
-    throw new Error(`Path '${filePath}' does not exist or is not readable`);
+    throw ToolError.NotReadable(filePath);
   }
   return true;
 }
@@ -482,7 +480,7 @@ export async function checkReadable(filePath) {
 export function getRequiredStr(value, key) {
   const v = value?.[key];
   if (typeof v !== "string") {
-    throw new Error(`Missing required argument: ${key}`);
+    throw ToolError.MissingArg(key);
   }
   return v;
 }

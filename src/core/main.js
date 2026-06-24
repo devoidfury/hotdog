@@ -28,7 +28,7 @@ import {
 } from "./config/index.js";
 import { cliFlagsFromSchema, CONFIG_SCHEMA } from "./config/schema-loader.js";
 import { createConfigRegistry } from "./extensions/config-registry.js";
-import { formatError } from "./error.js";
+import { formatError, CliError } from "./error.js";
 import { createSubcommandRegistry } from "./extensions/registries.js";
 import { Message } from "./context/message.js";
 import {
@@ -183,7 +183,7 @@ export async function main() {
   try {
     cli = parseArgs(configRegistry, cliSubcommandRegistry.names());
   } catch (e) {
-    if (e.message.startsWith("Unknown subcommand:")) {
+    if (e instanceof CliError && e.message.startsWith("Unknown subcommand:")) {
       const knownSubcommands = cliSubcommandRegistry.names();
       const posLower = e.message
         .replace("Unknown subcommand: ", "")

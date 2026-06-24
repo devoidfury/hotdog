@@ -5,6 +5,7 @@ import fs from "node:fs/promises";
 import { join } from "node:path";
 import { parseFrontMatter, validateNameable } from "../../utils/file-utils.js";
 import { logger } from "../../core/logger.js";
+import { ParseError } from "../../core/error.js";
 
 /**
  * Parse a .prompt.md file into a Prompt object.
@@ -12,7 +13,7 @@ import { logger } from "../../core/logger.js";
 export function parsePromptFromMd(content, fileName, location) {
   const parsed = parseFrontMatter(content);
   if (!parsed) {
-    throw new Error("No YAML frontmatter found");
+    throw ParseError.FrontmatterNotFound();
   }
 
   const fm = parsed.frontMatter;
@@ -20,7 +21,7 @@ export function parsePromptFromMd(content, fileName, location) {
 
   // Validate description
   if (!fm.description || !fm.description.trim()) {
-    throw new Error("Prompt description is missing or empty (required)");
+    throw ParseError.MissingDescription("Prompt");
   }
 
   const fileStem = fileName.replace(/\.prompt\.md$/, "");

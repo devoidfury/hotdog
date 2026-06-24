@@ -5,6 +5,7 @@ import fsPromises from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { HOOKS, EXTENSION_PROVIDES } from "../hooks.js";
+import { ExtensionError } from "../error.js";
 
 export { HOOKS, EXTENSION_PROVIDES };
 
@@ -409,9 +410,7 @@ export function resolveLoadOrder(extensions) {
       (e) => !result.find((r) => r.name === e.name),
     );
     const cycleNames = remaining.map((e) => e.name).join(", ");
-    throw new Error(
-      `Circular dependency detected among extensions: ${cycleNames}`,
-    );
+    throw ExtensionError.CircularDependency(cycleNames);
   }
 
   return result;
@@ -709,9 +708,7 @@ export class ExtensionLoader {
       );
       if (configErrors.length > 0) {
         const msg = configErrors.join("; ");
-        throw new Error(
-          `Extension '${name}' config registration failed: ${msg}`,
-        );
+        throw ExtensionError.ConfigFailed(name, msg);
       }
     }
 
@@ -736,7 +733,7 @@ export class ExtensionLoader {
         try {
           await ext.shutdown();
         } catch (e) {
-          throw new Error(`Extension '${name}' shutdown failed: ${e.message}`);
+          throw ExtensionError.ShutdownFailed(name, e.message);
         }
       }
 

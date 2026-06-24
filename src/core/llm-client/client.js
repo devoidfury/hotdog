@@ -8,36 +8,7 @@ import {
 } from "../config/defaults.js";
 import { retryWithBackoff } from "./retry.js";
 import { createMarkerMangler } from "../marker-mangler.js";
-export class LlmError extends Error {
-  constructor(message, type = "unknown") {
-    super(message);
-    this.type = type;
-  }
-
-  static Http(msg) {
-    return new LlmError(msg, "http");
-  }
-
-  static Api(msg) {
-    return new LlmError(msg, "api");
-  }
-
-  static Timeout(msg) {
-    return new LlmError(msg, "timeout");
-  }
-
-  static Cancelled(msg) {
-    return new LlmError(msg, "cancelled");
-  }
-
-  static InvalidResponse(msg) {
-    return new LlmError(msg, "invalid_response");
-  }
-
-  static isCancelled(err) {
-    return err instanceof LlmError && err.type === "cancelled";
-  }
-}
+import { LlmError } from "../error.js";
 
 /**
  * LLM client builder.
@@ -406,3 +377,6 @@ export class LlmClient {
     return events;
   }
 }
+
+// Re-export for backward compatibility (tests import LlmError from this module)
+export { LlmError };

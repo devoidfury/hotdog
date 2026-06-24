@@ -1,4 +1,6 @@
 // Config Registry — manages extension-registered CLI flags and config params.
+
+import { ConfigError } from "../error.js";
 //
 // Config params are primarily defined in extension.json configSchema.
 // The loader automatically extracts defaults from the schema and registers
@@ -74,7 +76,7 @@ export class ConfigRegistry {
     }
     for (const flag of flags) {
       if (!flag.long && !flag.short) {
-        throw new Error("Each CLI flag must have a short or long form");
+        throw new ConfigError("Each CLI flag must have a short or long form");
       }
       if (!flag.type) {
         flag.type = "string";
@@ -99,10 +101,10 @@ export class ConfigRegistry {
     }
     for (const param of params) {
       if (!param.key) {
-        throw new Error("Each config param must have a key");
+        throw new ConfigError("Each config param must have a key");
       }
       if (!param.defaults || typeof param.defaults !== "object") {
-        throw new Error(
+        throw new ConfigError(
           `Config param '${param.key}' must have a defaults object`,
         );
       }

@@ -8,6 +8,7 @@ import fsPromises from "node:fs/promises";
 import path from "node:path";
 import os from "node:os";
 import { cwd } from "node:process";
+import { ConfigError } from "../error.js";
 
 import { logger } from "../logger.js";
 import { parseFrontMatter } from "../../utils/file-utils.js";
@@ -247,9 +248,7 @@ export async function loadConfig(configPath, cliConfigDir, extParams) {
     // Normalize snake_case keys from config to camelCase
     return deepMerge(getDefaultConfig(extParams), normalizeConfigKeys(raw));
   } catch (e) {
-    const err = new Error(
-      `Error loading config from ${configPathToUse}: ${e.message}`,
-    );
+    const err = ConfigError.LoadFailed(configPathToUse, e.message);
     err.cause = e;
     throw err;
   }

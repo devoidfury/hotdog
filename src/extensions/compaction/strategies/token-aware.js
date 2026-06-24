@@ -6,6 +6,7 @@ import {
 } from '../prompts.js';
 import { serializeConversation, estimateContextTokens, estimateMessageTokens } from '../utils.js';
 import { CompactionStrategy } from '../strategies.js';
+import { AgentError } from '../../../core/error.js';
 
 /**
  * Compact to a target token count.
@@ -49,7 +50,7 @@ export class TokenAwareStrategy extends CompactionStrategy {
     try {
       summary = await llmChat(summaryMessages, model);
     } catch (e) {
-      throw new Error(`Summarization failed: ${e.message}`);
+      throw AgentError.SummarizationFailed(e.message);
     }
 
     const tokensBefore = estimateContextTokens(messages);

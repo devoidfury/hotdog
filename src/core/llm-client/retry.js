@@ -1,6 +1,6 @@
 // Retry with backoff utility.
 
-import { LlmError } from "./client.js";
+import { LlmError } from "../error.js";
 
 /**
  * Extract the HTTP status code from an LlmError message.

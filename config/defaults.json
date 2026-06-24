@@ -214,9 +214,10 @@
     {
       "name": "home",
       "url": "http://mini.home:9292",
+      "api_key": "bcc936a997a8bc20044d7183419bc3140346d",
       "models": [
         {
-          "name": "home-model",
+          "name": "qwen3.6-27b",
           "context-limit": 128000
         }
       ]

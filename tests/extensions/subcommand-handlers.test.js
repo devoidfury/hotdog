@@ -29,6 +29,31 @@ function createMockCore(config = {}) {
     ...config.resolved,
   };
 
+  // Mock service registry with a default in-memory session service
+  const serviceRegistry = {
+    _services: new Map(),
+    register(name, impl) {
+      this._services.set(name, impl);
+    },
+    get(name) {
+      const impl = this._services.get(name);
+      if (impl === undefined) throw new Error(`Service "${name}" is not registered.`);
+      return impl;
+    },
+    has(name) {
+      return this._services.has(name);
+    },
+    names() {
+      return Array.from(this._services.keys());
+    },
+    checkContract(name, expectedMethods) {
+      const impl = this._services.get(name);
+      if (!impl) return { valid: false, missing: expectedMethods };
+      const missing = expectedMethods.filter((m) => typeof impl[m] !== "function");
+      return { valid: missing.length === 0, missing };
+    },
+  };
+
   return {
     hooks,
     toolRegistry,

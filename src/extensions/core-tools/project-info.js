@@ -312,6 +312,7 @@ export class ProjectInfoTool {
       return stdout
         .split("\n")
         .filter((l) => l.trim())
+        .filter((l) => !l.includes(".git"))
         .map((l) => {
           const parts = l.split("\t");
           return [parts[0] || "", parts[1] || ""];

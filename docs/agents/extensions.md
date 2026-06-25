@@ -65,6 +65,8 @@ Every extension directory must contain an `extension.json` metadata file. This i
 | `cli:flags` | array | No | CLI flag declarations for static discovery |
 | `configSchema` | object | No | JSON Schema for extension config options (**single source of truth**) |
 | `autoload` | boolean | No | Whether to auto-discover. Default: true |
+| `services` | object | No | Abstract services this extension provides. Keys are service names, values are method arrays. |
+| `requires` | object | No | Abstract services this extension requires. Keys are service names, values are expected method arrays. |
 
 **Load Order Constants** (from `LOAD_ORDER` in `extensions.js`):
 - `0` — REFRESH (must load first, tracks other extensions)
@@ -111,6 +113,67 @@ Example:
   "provides": ["tools"]
 }
 ```
+
+### Abstract Service Dependencies
+
+Extensions can declare abstract service dependencies via `requires` and `services` fields. This enables **swappable dependencies** — swap the implementation of a service (e.g., "session") without changing any extension that depends on it.
+
+```json
+{
+  "name": "my-extension",
+  "services": {
+    "session": ["list", "get", "create", "swap"],
+    "resourceLoader": ["read", "write", "exists"]
+  },
+  "requires": {
+    "config": ["get", "set"]
+  }
+}
+```
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `services` | `object` | Abstract services this extension *provides*. Keys are service names, values are method arrays. |
+| `requires` | `object` | Abstract services this extension *requires*. Keys are service names, values are expected method arrays. |
+
+**How it works:**
+1. During static metadata discovery, the system scans all `services` declarations to build a service→provider map
+2. For each `requires` entry, a dependency edge is added from the consumer to the provider extension
+3. Topological sort ensures providers load before consumers
+4. Extensions register their implementation via `core.services.register(name, impl)` in `create()`
+5. Consumers access the implementation via `core.service(name)` in `create()` or hooks
+
+**Service Registry API (available on `core`):**
+
+```js
+// Register a service implementation (in the provider's create())
+core.services.register("session", {
+  list:   ()        => core.sessionManager.sessionIds(),
+  get:    (id)      => core.sessionManager.getAgentBySessionId(id),
+  create: (config)  => core.sessionManager.create(config),
+  swap:   (config)  => core.sessionManager.swap(config),
+});
+
+// Consume a service (in a dependent extension)
+const session = core.service("session");
+const sessions = session.list();
+```
+
+**Config-based service override:**
+
+To swap which extension provides a service, set `services.<name>` in config:
+
+```json
+{
+  "services": {
+    "session": "my-custom-session-extension"
+  }
+}
+```
+
+If multiple extensions provide the same service and no override is set, the first-loaded wins (with a warning).
+
+**Validation:** After all extensions load, the system validates that every `requires` declaration has a matching registered service satisfying the method contract. Missing or incomplete services are reported as warnings.
 
 ### Capability Queries
 

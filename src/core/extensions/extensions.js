@@ -6,6 +6,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { HOOKS, EXTENSION_PROVIDES } from "../hooks.js";
 import { ExtensionError } from "../error.js";
+import { logger } from "../logger.js";
 
 export { HOOKS, EXTENSION_PROVIDES };
 
@@ -214,6 +215,8 @@ async function readExtensionMetadata(dirPath) {
       configSchema: null,
       cliSubcommands: [],
       cliFlags: [],
+      services: {},
+      requires: {},
     };
   }
   try {
@@ -250,6 +253,20 @@ async function readExtensionMetadata(dirPath) {
         }))
       : [];
 
+    // Parse abstract service declarations
+    // services: { "session": ["list", "get"], "resourceLoader": ["read", "write"] }
+    const services =
+      meta.services && typeof meta.services === "object" && !Array.isArray(meta.services)
+        ? meta.services
+        : {};
+
+    // Parse abstract service requirements
+    // requires: { "session": ["list", "get", "create", "swap"] }
+    const requires =
+      meta.requires && typeof meta.requires === "object" && !Array.isArray(meta.requires)
+        ? meta.requires
+        : {};
+
     let loadOrder = LOAD_ORDER.DEFAULT;
     if (meta.loadOrder !== undefined) {
       loadOrder = meta.loadOrder;
@@ -267,6 +284,8 @@ async function readExtensionMetadata(dirPath) {
       configSchema,
       cliSubcommands,
       cliFlags,
+      services,
+      requires,
     };
   } catch {
     return {
@@ -279,6 +298,8 @@ async function readExtensionMetadata(dirPath) {
       configSchema: null,
       cliSubcommands: [],
       cliFlags: [],
+      services: {},
+      requires: {},
     };
   }
 }
@@ -319,6 +340,8 @@ export async function discoverExtensionsInDir(dirPath) {
           configSchema,
           cliSubcommands,
           cliFlags,
+          services,
+          requires,
         } = await readExtensionMetadata(dirFull);
 
         extensions.push({
@@ -332,6 +355,8 @@ export async function discoverExtensionsInDir(dirPath) {
           configSchema,
           cliSubcommands,
           cliFlags,
+          services,
+          requires,
         });
       }
 
@@ -357,16 +382,40 @@ export const LOAD_ORDER = {
 
 /**
  * Resolve load order based on extension dependencies using topological sort.
+ * Supports both concrete extension dependencies (dependsOn) and abstract service
+ * dependencies (requires → services).
  */
-export function resolveLoadOrder(extensions) {
+export function resolveLoadOrder(extensions, serviceOverrides = {}) {
   const nameSet = new Set(extensions.map((e) => e.name));
+
+  // Build a map: abstract service name → provider extension name
+  // If multiple extensions provide the same service, use serviceOverrides or first-wins.
+  const serviceMap = buildServiceProviderMap(extensions, serviceOverrides);
+
+  // Collect all dependency edges (concrete + service-based)
   const deps = new Map();
 
   for (const ext of extensions) {
+    // Concrete dependencies from dependsOn
     const validDeps = ext.dependsOn.filter((d) => nameSet.has(d));
-    deps.set(ext.name, validDeps);
+    const allDeps = [...validDeps];
+
+    // Abstract service dependencies from requires
+    if (ext.requires && typeof ext.requires === "object") {
+      for (const [serviceName, methods] of Object.entries(ext.requires)) {
+        const provider = serviceMap.get(serviceName);
+        if (provider && nameSet.has(provider) && provider !== ext.name) {
+          if (!allDeps.includes(provider)) {
+            allDeps.push(provider);
+          }
+        }
+      }
+    }
+
+    deps.set(ext.name, allDeps);
   }
 
+  // Standard topological sort (Kahn's algorithm)
   const inDegree = new Map();
   const adjList = new Map();
 
@@ -417,9 +466,80 @@ export function resolveLoadOrder(extensions) {
 }
 
 /**
- * Discover all extensions from configured extension paths.
+ * Build a map of abstract service name → provider extension name from a list of extensions.
+ * If multiple extensions provide the same service, serviceOverrides picks which one to use.
+ * If no override, the first provider in the list wins (with a warning).
+ *
+ * @param {Array} extensions - Extension objects with `services` and `name` fields.
+ * @param {Object} serviceOverrides - Config-driven overrides: { "session": "my-session-ext" }
+ * @returns {Map<string, string>}
  */
-export async function discoverExtensions(extensionPaths) {
+function buildServiceProviderMap(extensions, serviceOverrides) {
+  const serviceMap = new Map();
+
+  // Build a set of extension names that exist (for override validation)
+  const extNames = new Set(extensions.map((e) => e.name));
+
+  for (const ext of extensions) {
+    if (!ext.services || typeof ext.services !== "object") continue;
+
+    for (const [serviceName, methods] of Object.entries(ext.services)) {
+      const override = serviceOverrides[serviceName];
+      if (override) {
+        // Config explicitly assigns this service to a specific extension
+        if (override === ext.name && !serviceMap.has(serviceName)) {
+          serviceMap.set(serviceName, ext.name);
+        }
+        // If the override matches this extension, it takes precedence
+        // (already handled above). If another extension matches the override,
+        // it will be set when we encounter it.
+        continue;
+      }
+
+      if (!serviceMap.has(serviceName)) {
+        serviceMap.set(serviceName, ext.name);
+      } else {
+        logger.warn(
+          `[services] Multiple extensions provide "${serviceName}": ` +
+          `"${serviceMap.get(serviceName)}" and "${ext.name}". ` +
+          `Using "${serviceMap.get(serviceName)}". ` +
+          `Set services.${serviceName} in config to override.`,
+        );
+      }
+    }
+  }
+
+  // Validate overrides: warn if an override target doesn't provide the service
+  for (const [serviceName, targetExtName] of Object.entries(serviceOverrides)) {
+    if (!targetExtName) continue;
+    if (!extNames.has(targetExtName)) {
+      logger.warn(
+        `[services] Config override sets "${serviceName}" to "${targetExtName}" ` +
+        `but no extension with that name was discovered.`,
+      );
+      continue;
+    }
+    if (!serviceMap.has(serviceName)) {
+      // The target didn't actually declare/provide this service
+      logger.warn(
+        `[services] Config override sets "${serviceName}" to "${targetExtName}" ` +
+        `but extension "${targetExtName}" does not declare "${serviceName}" in its services.`,
+      );
+    }
+  }
+
+  return serviceMap;
+}
+
+/**
+ * Discover all extensions from configured extension paths.
+ *
+ * @param {string[]} extensionPaths - Paths to search for extensions.
+ * @param {Object} [serviceOverrides] - Optional config-driven service overrides.
+ *   e.g. { "session": "my-session-extension" }
+ * @returns {Promise<Array>} Extensions sorted by dependency order.
+ */
+export async function discoverExtensions(extensionPaths, serviceOverrides = {}) {
   const allExtensions = [];
 
   for (const spec of extensionPaths) {
@@ -448,11 +568,13 @@ export async function discoverExtensions(extensionPaths) {
         configSchema: ext.configSchema,
         cliSubcommands: ext.cliSubcommands || [],
         cliFlags: ext.cliFlags || [],
+        services: ext.services || {},
+        requires: ext.requires || {},
       });
     }
   }
 
-  return resolveLoadOrder(allExtensions);
+  return resolveLoadOrder(allExtensions, serviceOverrides);
 }
 
 /**
@@ -511,7 +633,10 @@ export async function getExtensionsToLoad(
   extensions,
   config,
 ) {
-  const discovered = await discoverExtensions(extensionPaths);
+  // Extract service overrides from config (e.g., services.session: "my-session-ext")
+  const serviceOverrides = config?.services || {};
+
+  const discovered = await discoverExtensions(extensionPaths, serviceOverrides);
 
   // Filter out extensions disabled via config (enabled: false)
   const enabledExtensions = config
@@ -520,24 +645,34 @@ export async function getExtensionsToLoad(
 
   if (extensionAutoload) {
     const autoloaded = enabledExtensions.filter((ext) => ext.autoload !== false);
-    return resolveExtensionDependencies(autoloaded, enabledExtensions);
+    return resolveExtensionDependencies(autoloaded, enabledExtensions, serviceOverrides);
   }
 
   if (extensions && extensions.length > 0) {
     const selected = enabledExtensions.filter((ext) => extensions.includes(ext.name));
-    return resolveExtensionDependencies(selected, enabledExtensions);
+    return resolveExtensionDependencies(selected, enabledExtensions, serviceOverrides);
   }
 
   return [];
 }
 
 /**
- * Resolve extension dependencies.
+ * Resolve extension dependencies — includes both concrete dependsOn and
+ * abstract service dependencies (requires → services).
+ *
+ * @param {Array} extensions - Selected extensions to load.
+ * @param {Array} allDiscovered - All discovered extensions (the full pool).
+ * @param {Object} [serviceOverrides] - Config-driven service overrides.
+ * @returns {Array} Extensions with dependencies included, in dependency order.
  */
-export function resolveExtensionDependencies(extensions, allDiscovered) {
+export function resolveExtensionDependencies(extensions, allDiscovered, serviceOverrides = {}) {
   if (extensions.length === 0) return extensions;
 
   const extMap = new Map(allDiscovered.map((e) => [e.name, e]));
+
+  // Build service → provider map from all discovered extensions
+  const serviceMap = buildServiceProviderMap(allDiscovered, serviceOverrides);
+
   const result = new Map();
 
   function addWithDeps(extName) {
@@ -545,9 +680,21 @@ export function resolveExtensionDependencies(extensions, allDiscovered) {
     const ext = extMap.get(extName);
     if (!ext) return;
 
+    // Concrete extension dependencies
     for (const dep of ext.dependsOn) {
       addWithDeps(dep);
     }
+
+    // Abstract service dependencies — include the provider extension
+    if (ext.requires && typeof ext.requires === "object") {
+      for (const [serviceName] of Object.entries(ext.requires)) {
+        const provider = serviceMap.get(serviceName);
+        if (provider && provider !== ext.name) {
+          addWithDeps(provider);
+        }
+      }
+    }
+
     result.set(extName, ext);
   }
 
@@ -810,4 +957,50 @@ export class ExtensionLoader {
  */
 export function createExtensionLoader(core) {
   return new ExtensionLoader(core);
+}
+
+// ── Service Contract Validation ─────────────────────────────────────────────
+
+/**
+ * Validate that all required service contracts are satisfied by registered services.
+ * Called after all extensions have been loaded.
+ *
+ * @param {Array} loadedExtensions - The extension metadata for all loaded extensions
+ *   (from getExtensionsToLoad), each with `name`, `requires`, etc.
+ * @param {import("./service-registry.js").ServiceRegistry} serviceRegistry - The service registry.
+ * @returns {Array<{extension: string, service: string, missing: string[]}>} Validation errors.
+ */
+export function validateServiceContracts(loadedExtensions, serviceRegistry) {
+  const errors = [];
+
+  for (const ext of loadedExtensions) {
+    if (!ext.requires || typeof ext.requires !== "object") continue;
+
+    for (const [serviceName, expectedMethods] of Object.entries(ext.requires)) {
+      if (!Array.isArray(expectedMethods)) continue;
+
+      if (!serviceRegistry.has(serviceName)) {
+        errors.push({
+          extension: ext.name,
+          service: serviceName,
+          missing: expectedMethods,
+          message: `Extension "${ext.name}" requires service "${serviceName}" but no provider registered it.`,
+        });
+        continue;
+      }
+
+      const { valid, missing } = serviceRegistry.checkContract(serviceName, expectedMethods);
+      if (!valid) {
+        errors.push({
+          extension: ext.name,
+          service: serviceName,
+          missing,
+          message: `Extension "${ext.name}" requires service "${serviceName}" with methods [${expectedMethods.join(", ")}], ` +
+            `but registered implementation is missing: [${missing.join(", ")}].`,
+        });
+      }
+    }
+  }
+
+  return errors;
 }

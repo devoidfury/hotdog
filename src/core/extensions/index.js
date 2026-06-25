@@ -62,3 +62,12 @@ export {
   ConfigRegistry,
   createConfigRegistry,
 } from "./config-registry.js";
+
+export {
+  ServiceRegistry,
+  createServiceRegistry,
+} from "./service-registry.js";
+
+export {
+  validateServiceContracts,
+} from "./extensions.js";

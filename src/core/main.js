@@ -14,8 +14,10 @@ import {
 import {
   createToolRegistry,
   createExtensionLoader,
+  createServiceRegistry,
   getExtensionsToLoad,
   registerExtensionMetadata,
+  validateServiceContracts,
 } from "./extensions/index.js";
 import { HOOKS } from "./hooks.js";
 import { CliOutputSink } from "./ui/cli.js";
@@ -80,6 +82,14 @@ async function loadExtensions(core, { taskManager, config } = {}) {
     if (extInstance) loaded.push(extInstance);
   }
 
+  // Validate service contracts after all extensions are loaded.
+  // Only validate extensions that were actually loaded (create() returned non-null).
+  const loadedExtensions = extensionsToLoad.filter((ext) => core.extensions.has(ext.name));
+  const serviceErrors = validateServiceContracts(loadedExtensions, core.services);
+  for (const err of serviceErrors) {
+    logger.warn(`[services] ${err.message}`);
+  }
+
   return loaded;
 }
 
@@ -106,6 +116,7 @@ function createCore(
 ) {
   const hooks = options.hooks || createHooks();
   const toolRegistry = createToolRegistry();
+  const services = createServiceRegistry();
 
   // Merge profile info into config so extensions can access it
   // This must be done BEFORE creating the extension loader, because
@@ -129,8 +140,10 @@ function createCore(
     hooks,
     toolRegistry,
     extensions,
+    services,
     config: coreConfig,
     cliSubcommandRegistry,
+    service: (name) => services.get(name),
     buildConfig: options.buildConfig,
   };
 }

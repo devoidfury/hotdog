@@ -13,6 +13,29 @@ import { create as createSessionLogExtension } from "../../src/extensions/sessio
 function createMockCore(config = {}) {
   const hooks = new HookSystem();
   const toolRegistry = new ToolRegistry();
+  const serviceRegistry = {
+    _services: new Map(),
+    register(name, impl) {
+      this._services.set(name, impl);
+    },
+    get(name) {
+      const impl = this._services.get(name);
+      if (impl === undefined) throw new Error(`Service "${name}" is not registered.`);
+      return impl;
+    },
+    has(name) {
+      return this._services.has(name);
+    },
+    names() {
+      return Array.from(this._services.keys());
+    },
+    checkContract(name, expectedMethods) {
+      const impl = this._services.get(name);
+      if (!impl) return { valid: false, missing: expectedMethods };
+      const missing = expectedMethods.filter((m) => typeof impl[m] !== "function");
+      return { valid: missing.length === 0, missing };
+    },
+  };
   return {
     hooks,
     config: {
@@ -27,6 +50,7 @@ function createMockCore(config = {}) {
     },
     modelRegistry: {},
     toolRegistry,
+    services: serviceRegistry,
   };
 }
 

@@ -261,7 +261,17 @@ function replaySessionHistory(session, ws) {
       }
 
       case "assistant": {
-        // Emit tool calls first (if any) so the UI renders them before the text
+        // Emit reasoning/thinking content first (if any) so the UI
+        // renders it before the text or tool calls
+        if (msg.reasoningContent) {
+          ws.send(JSON.stringify({
+            type: S2C.THINKING,
+            sessionId: session.id,
+            content: msg.reasoningContent,
+          }));
+        }
+
+        // Emit tool calls next (if any) so the UI renders them before the text
         if (msg.toolCalls && msg.toolCalls.length > 0) {
           pendingToolCalls = msg.toolCalls;
           for (const tc of msg.toolCalls) {
@@ -348,6 +358,8 @@ function routeMessage(ws, msg, registry, authMiddleware) {
           type: "sessionCreated",
           sessionId,
           profile: agent.profileName || "default",
+          currentModel: agent.model,
+          models: Object.keys(agent._modelRegistry || {}),
         }));
       }).catch(err => {
         ws.send(JSON.stringify({ type: "error", message: err.message }));
@@ -426,7 +438,12 @@ function routeMessage(ws, msg, registry, authMiddleware) {
         registry.touch(msg.sessionId);
         const session = registry.get(msg.sessionId);
         if (session) {
-          session.bus.executeCommand(msg.command);
+          // Strip leading `/` and lowercase, matching the CLI behavior
+          let cmdText = msg.command;
+          if (cmdText.startsWith("/")) {
+            cmdText = cmdText.slice(1).trim().toLowerCase();
+          }
+          session.bus.executeCommand(cmdText);
         }
       }
       break;

@@ -121,7 +121,7 @@ export class SessionRegistry {
       result.push({
         id,
         profile: s.metadata.profile,
-        model: s.metadata.model,
+        model: s.agent?.model || s.metadata.model,
         createdAt: s.metadata.createdAt,
         lastActivityAt: s.metadata.lastActivityAt,
         connectedClients: s.metadata.connectedClients,
@@ -327,9 +327,13 @@ function routeMessage(ws, msg, registry, authMiddleware) {
         if (valid) {
           ws.authToken = msg.token;
           ws.send(JSON.stringify({ type: "authOk" }));
-          // If no session exists yet, create one now
+          // If no session exists yet, attach to existing or create new
           if (!ws.activeSessionId) {
-            createAndAttachSession(ws);
+            if (registry.size > 0) {
+              attachToMostRecentSession(ws);
+            } else {
+              createAndAttachSession(ws);
+            }
           }
         } else {
           ws.send(JSON.stringify({ type: "authError", message: "Invalid token" }));
@@ -393,6 +397,23 @@ function routeMessage(ws, msg, registry, authMiddleware) {
           const wsSink = registry.attachSink(msg.sessionId, ws);
           ws.activeSessionId = msg.sessionId;
           ws.activeSink = wsSink;
+          // Send session metadata so the frontend can update reactively
+          const agent = session.agent;
+          ws.send(JSON.stringify({
+            type: S2C.SESSION_STATE,
+            key: "model",
+            value: agent.model || session.metadata.model || "?",
+          }));
+          ws.send(JSON.stringify({
+            type: S2C.SESSION_STATE,
+            key: "models",
+            value: Object.keys(agent._modelRegistry || {}),
+          }));
+          ws.send(JSON.stringify({
+            type: S2C.SESSION_STATE,
+            key: "profile",
+            value: agent.profileName || session.metadata.profile || "default",
+          }));
           // Replay session history so the client sees the full conversation
           replaySessionHistory(session, ws);
         }
@@ -562,8 +583,63 @@ export function createWsServer(core, options = {}) {
       return;
     }
 
-    // Auth check passed (or auth disabled) — create a session
-    createAndAttachSession(ws);
+    // Auth check passed (or auth disabled) — check for existing sessions
+    // If there are existing sessions, attach to the most recently active one
+    // instead of creating a new one.
+    const existingCount = registry.size;
+    if (existingCount > 0) {
+      attachToMostRecentSession(ws);
+    } else {
+      createAndAttachSession(ws);
+    }
+  }
+
+  /**
+   * Attach the WebSocket to the most recently active existing session.
+   * Sends sessionCreated so the client sets up its UI, then replays history.
+   */
+  function attachToMostRecentSession(ws) {
+    // Find the session with the most recent lastActivityAt
+    const sessions = registry.list();
+    let mostRecent = null;
+    let mostRecentTime = 0;
+    for (const s of sessions) {
+      if (s.lastActivityAt > mostRecentTime) {
+        mostRecent = s;
+        mostRecentTime = s.lastActivityAt;
+      }
+    }
+
+    if (!mostRecent) {
+      // Fallback — create a new session
+      createAndAttachSession(ws);
+      return;
+    }
+
+    const sessionId = mostRecent.id;
+    const session = registry.get(sessionId);
+    if (!session || !session.agent) {
+      createAndAttachSession(ws);
+      return;
+    }
+
+    // Attach the WebSocket sink to the existing session
+    const wsSink = registry.attachSink(sessionId, ws);
+    ws.activeSessionId = sessionId;
+    ws.activeSink = wsSink;
+
+    // Send sessionCreated so the client sets up its UI for this session
+    const agent = session.agent;
+    ws.send(JSON.stringify({
+      type: "sessionCreated",
+      sessionId,
+      profile: agent.profileName || mostRecent.profile || "default",
+      currentModel: agent.model || mostRecent.model || "?",
+      models: Object.keys(agent._modelRegistry || {}),
+    }));
+
+    // Replay session history so the client sees the full conversation
+    replaySessionHistory(session, ws);
   }
 
   /**

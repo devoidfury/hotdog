@@ -100,6 +100,14 @@ export class Agent {
       oldModel,
       newModel: v,
     });
+    // Emit through the output sink so connected WS clients get notified
+    if (this._sink) {
+      this._sink.emit({
+        type: OUTPUT_EVENT.SESSION_STATE,
+        key: "model",
+        value: v,
+      });
+    }
   }
 
   get isRestoring() {

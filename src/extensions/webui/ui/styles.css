@@ -383,8 +383,7 @@ body {
     border-color: var(--accent);
 }
 
-#send-btn,
-#cancel-btn {
+#send-btn {
     padding: 10px 16px;
     border: none;
     border-radius: var(--radius);
@@ -395,16 +394,24 @@ body {
     transition: background 0.2s;
 }
 
-#send-btn:hover,
-#cancel-btn:hover {
+#send-btn:hover {
     background: var(--accent-hover);
 }
 
-#cancel-btn {
+/* Cancel button lives inside the working indicator */
+.cancel-inline {
+    padding: 4px 10px;
+    border: none;
+    border-radius: var(--radius);
     background: var(--error);
+    color: #fff;
+    font-size: 0.8rem;
+    cursor: pointer;
+    transition: background 0.2s;
+    margin-left: auto;
 }
 
-#cancel-btn:hover {
+.cancel-inline:hover {
     background: #ff3333;
 }
 

@@ -1,4 +1,5 @@
 // Main application — wires login, chat, and session management together.
+// Uses reactiveState atoms for cross-component coordination.
 
 import { initLogin } from "./login.js";
 import { createChat } from "./chat.js";
@@ -87,7 +88,7 @@ async function init() {
     },
   });
 
-  // Session sidebar
+  // Session sidebar — initSessions returns the update function
   updateSessions = initSessions({
     onCreate: () => {
       chat.createSession({});
@@ -100,8 +101,7 @@ async function init() {
     },
   });
 
-  // Logout button (via sidebar context menu or simple clear)
-  // For now: clear token from localStorage and reload
+  // Logout button (via keyboard shortcut)
   document.addEventListener("keydown", (e) => {
     // Ctrl+Shift+L → logout
     if (e.ctrlKey && e.shiftKey && (e.key === "L" || e.key === "l")) {
@@ -124,11 +124,17 @@ function startChat() {
       }
     },
     onConnectionChange: (connected) => {
-      if (!connected && token) {
-        // Attempt to reconnect — chat.js handles this with reconnect timer
-      }
+      // Connection recovery is handled by chat.js internally
     },
     onAuthFailure: handleAuthFailure,
+  });
+
+  // After chat is created, wire up reactive model changes to the sidebar.
+  // The sidebar displays per-session model info; when the current model
+  // changes (e.g. via /model command), refresh the session list so the
+  // sidebar shows the updated model.
+  chat.currentModelAtom.effect(() => {
+    chat.listSessions();
   });
 }
 

@@ -1,6 +1,8 @@
 // Chat view component — WS client, message routing, input handling.
 // Connects to the WebSocket server and routes messages to the message list.
+// Uses reactiveState atoms so DOM updates happen automatically via effects.
 
+import { reativeState, effect } from "./utils.js";
 import { createMessageList } from "./message-list.js";
 
 /**
@@ -25,44 +27,65 @@ export function createChat({
 }) {
   const wsUrl = `ws://${host}/ws?token=${token}`;
   let ws = null;
-  let currentSessionId = null;
   let messageList = null;
   let reconnectTimer = null;
   let authFailed = false;
 
-  /** Update connection status indicator. */
-  function setConnected(connected) {
-    const el = document.getElementById("connection-status");
-    el.className = connected ? "status-connected" : "status-disconnected";
-    el.textContent = connected ? "Connected" : "Disconnected";
-    onConnectionChange?.(connected);
-  }
+  // ── Reactive state atoms ───────────────────────────────────────────────────
+  // Every UI element that needs to update when data changes is driven by one
+  // of these atoms.  Effects (registered below) handle the actual DOM writes.
 
-  /** Show/hide the "Model is working..." spinner indicator and cancel button. */
-  function setWorking(working) {
-    const el = document.getElementById("working-indicator");
-    if (!el) return;
-    el.classList.toggle("hidden", !working);
-    // Show cancel button while working, hide when idle
-    const cancelBtn = document.getElementById("cancel-btn");
-    if (cancelBtn) {
-      cancelBtn.classList.toggle("hidden", !working);
-    }
-  }
+  const sessionIdAtom = reativeState(null);
+  const currentModelAtom = reativeState("");
+  const modelsAtom = reativeState([]);
+  const connectedAtom = reativeState(false);
+  const workingAtom = reativeState(false);
 
-  /** Populate the model dropdown with available models. */
-  function populateModelDropdown(models, currentModel) {
+  // ── Effects — auto-wire DOM to atoms ─────────────────────────────────────
+
+  // Model dropdown: rebuild whenever the list of available models *or* the
+  // currently selected model changes.
+  effect(() => {
     const select = document.getElementById("model-select");
     if (!select) return;
+    const models = modelsAtom();
+    const current = currentModelAtom();
     select.innerHTML = "";
     for (const name of models) {
       const opt = document.createElement("option");
       opt.value = name;
       opt.textContent = name;
-      if (name === currentModel) opt.selected = true;
+      if (name === current) opt.selected = true;
       select.appendChild(opt);
     }
-  }
+  }, [modelsAtom, currentModelAtom]);
+
+  // Connection-status badge.
+  effect(() => {
+    const el = document.getElementById("connection-status");
+    if (!el) return;
+    const connected = connectedAtom();
+    el.className = connected ? "status-connected" : "status-disconnected";
+    el.textContent = connected ? "Connected" : "Disconnected";
+    onConnectionChange?.(connected);
+  }, [connectedAtom]);
+
+  // Working indicator (spinner + cancel button).  Cancel button is now
+  // inside the indicator, so hiding the indicator hides it automatically.
+  effect(() => {
+    const el = document.getElementById("working-indicator");
+    if (!el) return;
+    const working = workingAtom();
+    el.classList.toggle("hidden", !working);
+  }, [workingAtom]);
+
+  // Session-id label in the info bar.
+  effect(() => {
+    const el = document.getElementById("current-session-id");
+    if (!el) return;
+    const sid = sessionIdAtom();
+    el.textContent = sid ? sid.slice(0, 8) : "";
+  }, [sessionIdAtom]);
 
   // ── WS Message Routing ───────────────────────────────────────────────────
 
@@ -70,24 +93,22 @@ export function createChat({
     // ── Session management messages — handled even before messageList is ready ──
     switch (data.type) {
       case "sessionCreated":
-        currentSessionId = data.sessionId;
-        document.getElementById("current-session-id").textContent =
-          data.sessionId.slice(0, 8);
-        // Populate model dropdown with the model list from the server
+        sessionIdAtom(data.sessionId);
+        currentModelAtom(data.currentModel || "");
         if (data.models && data.models.length > 0) {
-          populateModelDropdown(data.models, data.currentModel);
+          modelsAtom(data.models);
         }
         onSessionCreated?.({ sessionId: data.sessionId });
-        return; // messageList will be created by onSessionCreated → setSession
+        return;
       case "sessionDeleted":
-        if (data.sessionId === currentSessionId) {
+        if (data.sessionId === sessionIdAtom()) {
           if (messageList) messageList.clear();
-          currentSessionId = null;
-          document.getElementById("current-session-id").textContent = "";
+          sessionIdAtom(null);
+          currentModelAtom("");
         }
         return;
       case "sessions":
-        onSessionsUpdate?.(data.sessions, currentSessionId);
+        onSessionsUpdate?.(data.sessions, sessionIdAtom());
         return;
       case "authRequired":
         console.warn("[chat] Auth required but not provided");
@@ -143,12 +164,19 @@ export function createChat({
       case "sessionState":
         // Handle working state signals from the server
         if (data.key === "working") {
-          setWorking(data.value);
+          workingAtom(data.value);
+        }
+        // Handle model changes (e.g. after /model command or session switch)
+        if (data.key === "model") {
+          currentModelAtom(data.value);
+        }
+        if (data.key === "models") {
+          modelsAtom(data.value);
         }
         messageList.handleSessionState(data);
         break;
       case "error":
-        setWorking(false);
+        workingAtom(false);
         messageList.handleError(data);
         break;
 
@@ -170,13 +198,13 @@ export function createChat({
       ws = new WebSocket(wsUrl);
     } catch (e) {
       console.error("[chat] WS connection failed:", e);
-      setConnected(false);
+      connectedAtom(false);
       verifyTokenAndReconnect();
       return;
     }
 
     ws.onopen = () => {
-      setConnected(true);
+      connectedAtom(true);
     };
 
     ws.onmessage = (event) => {
@@ -191,15 +219,15 @@ export function createChat({
     };
 
     ws.onclose = () => {
-      setConnected(false);
-      setWorking(false);
+      connectedAtom(false);
+      workingAtom(false);
       ws = null;
       verifyTokenAndReconnect();
     };
 
     ws.onerror = () => {
-      setConnected(false);
-      setWorking(false);
+      connectedAtom(false);
+      workingAtom(false);
     };
   }
 
@@ -252,8 +280,8 @@ export function createChat({
       ws.close();
       ws = null;
     }
-    setConnected(false);
-    setWorking(false);
+    connectedAtom(false);
+    workingAtom(false);
   }
 
   // ── Send helpers ──────────────────────────────────────────────────────────
@@ -268,29 +296,29 @@ export function createChat({
 
   /** Send user message to the current session. */
   function sendMessage(content) {
-    if (!currentSessionId) {
+    if (!sessionIdAtom()) {
       console.warn("[chat] No active session");
       return;
     }
     // Optimistically render the user's message immediately
     if (messageList) {
-      messageList.handleUserMessage({ content });
+      // messageList.ShandleUserMessage({ content });
     }
     // Show working indicator while waiting for a response
-    setWorking(true);
-    send({ type: "send", sessionId: currentSessionId, content });
+    workingAtom(true);
+    send({ type: "send", sessionId: sessionIdAtom(), content });
   }
 
   /** Send a slash command to the agent. */
   function sendSlashCommand(command) {
-    if (!currentSessionId) return;
-    send({ type: "command", sessionId: currentSessionId, command });
+    if (!sessionIdAtom()) return;
+    send({ type: "command", sessionId: sessionIdAtom(), command });
   }
 
   /** Cancel the current run. */
   function cancel() {
-    if (!currentSessionId) return;
-    send({ type: "cancel", sessionId: currentSessionId });
+    if (!sessionIdAtom()) return;
+    send({ type: "cancel", sessionId: sessionIdAtom() });
   }
 
   /** Create a new session. */
@@ -301,18 +329,16 @@ export function createChat({
   /** Switch to a different session. */
   function switchSession(sessionId) {
     send({ type: "switchSession", sessionId });
-    currentSessionId = sessionId;
-    document.getElementById("current-session-id").textContent = sessionId.slice(
-      0,
-      8,
-    );
+    sessionIdAtom(sessionId);
     messageList.clear();
-    setWorking(false);
+    workingAtom(false);
+    listSessions(); // Refresh sidebar so the active session is highlighted correctly
   }
 
   /** Delete a session. */
   function deleteSession(sessionId) {
     send({ type: "deleteSession", sessionId });
+    listSessions(); // Refresh sidebar so the deleted session is removed
   }
 
   /** List sessions. */
@@ -322,25 +348,21 @@ export function createChat({
 
   /** Send a command to the agent. */
   function sendCommand(command) {
-    if (!currentSessionId) return;
-    send({ type: "command", sessionId: currentSessionId, command });
+    if (!sessionIdAtom()) return;
+    send({ type: "command", sessionId: sessionIdAtom(), command });
   }
 
   /** Send a question answer. */
   function sendQuestionAnswer(answers) {
-    if (!currentSessionId) return;
-    send({ type: "questionAnswer", sessionId: currentSessionId, answers });
+    if (!sessionIdAtom()) return;
+    send({ type: "questionAnswer", sessionId: sessionIdAtom(), answers });
   }
 
   // ── Session management ────────────────────────────────────────────────────
 
   function setSession(sessionId) {
     messageList = createMessageList(sessionId, { hideThinking: false });
-    currentSessionId = sessionId;
-    document.getElementById("current-session-id").textContent = sessionId.slice(
-      0,
-      8,
-    );
+    sessionIdAtom(sessionId);
     messageList.clear();
   }
 
@@ -374,7 +396,7 @@ export function createChat({
   // Model dropdown change — send /model command to switch
   document.getElementById("model-select").addEventListener("change", (e) => {
     const modelName = e.target.value;
-    if (!modelName || !currentSessionId) return;
+    if (!modelName || !sessionIdAtom()) return;
     sendSlashCommand(`/model ${modelName}`);
   });
 
@@ -395,5 +417,11 @@ export function createChat({
     sendQuestionAnswer,
     setSession,
     ws,
+    // Expose atoms for external reactive coordination
+    sessionIdAtom,
+    currentModelAtom,
+    modelsAtom,
+    connectedAtom,
+    workingAtom,
   };
 }

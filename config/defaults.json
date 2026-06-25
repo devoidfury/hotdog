@@ -218,7 +218,7 @@
       "models": [
         {
           "name": "qwen3.6-27b",
-          "context-limit": 128000
+          "context-limit": 100000
         }
       ]
     }

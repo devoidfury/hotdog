@@ -5,7 +5,7 @@ export { validate, validateParams, formatValidationErrors, typeName } from "./js
 export { compile, render } from "./render.js";
 
 // ── Reactive state (signal/atom) ──────────────────────────────────────────────
-export { reativeState, effect } from "./reative-state.js";
+export { reactiveState, effect } from "./reactive-state.js";
 
 // ── General utilities ────────────────────────────────────────────────────────
 export { parseFrontMatter, validateNameable, loadAspects } from "./file-utils.js";

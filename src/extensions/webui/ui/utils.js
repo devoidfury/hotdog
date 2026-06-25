@@ -1,5 +1,5 @@
 // Shared utilities for the WebUI frontend.
-// Also includes the reactive state atom (reativeState) and multi-dep effect.
+// Also includes the reactive state atom (reactiveState) and multi-dep effect.
 
 // ── Reactive state helpers ─────────────────────────────────────────────────
 
@@ -14,7 +14,7 @@ function isObjectLike(v) {
  * @param {*} initialValue
  * @returns {Function} state(val?) — getter/setter, plus .effect(fn)
  */
-export function reativeState(initialValue) {
+export function reactiveState(initialValue) {
   let currentValue = initialValue;
   const effects = new Set();
 
@@ -47,7 +47,7 @@ export function reativeState(initialValue) {
  * Runs `fn` immediately, then re-runs whenever any dependency changes.
  *
  * @param {Function} fn
- * @param {Array<Function>} dependencies - array of reativeState atoms
+ * @param {Array<Function>} dependencies - array of reactiveState atoms
  * @returns {Function} cleanup
  */
 export function effect(fn, dependencies) {

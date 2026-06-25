@@ -1,9 +1,9 @@
 /**
- * reativeState — a tiny reactive atom.
+ * reactiveState — a tiny reactive atom.
  *
  * Usage:
  *
- *   const count = reativeState(0);
+ *   const count = reactiveState(0);
  *   console.log(count());           // get → 0
  *   count(42);                      // set → triggers effects
  *
@@ -31,7 +31,7 @@ function isObjectLike(v) {
 
 // ── Atom factory ────────────────────────────────────────────────────────────
 
-export function reativeState(initialValue) {
+export function reactiveState(initialValue) {
   let currentValue = initialValue;
   const effects = new Set();
 
@@ -73,7 +73,7 @@ export function reativeState(initialValue) {
  * Runs `fn` immediately, then re-runs whenever any dependency changes.
  *
  * @param {Function} fn - the effect callback
- * @param {Array<Function>} dependencies - array of reativeState atoms
+ * @param {Array<Function>} dependencies - array of reactiveState atoms
  * @returns {Function} cleanup — call to stop the effect
  *
  * Usage:

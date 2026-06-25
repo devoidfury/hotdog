@@ -2,7 +2,7 @@
 // Connects to the WebSocket server and routes messages to the message list.
 // Uses reactiveState atoms so DOM updates happen automatically via effects.
 
-import { reativeState, effect } from "./utils.js";
+import { reactiveState, effect } from "./utils.js";
 import { createMessageList } from "./message-list.js";
 
 /**
@@ -35,11 +35,11 @@ export function createChat({
   // Every UI element that needs to update when data changes is driven by one
   // of these atoms.  Effects (registered below) handle the actual DOM writes.
 
-  const sessionIdAtom = reativeState(null);
-  const currentModelAtom = reativeState("");
-  const modelsAtom = reativeState([]);
-  const connectedAtom = reativeState(false);
-  const workingAtom = reativeState(false);
+  const sessionIdAtom = reactiveState(null);
+  const currentModelAtom = reactiveState("");
+  const modelsAtom = reactiveState([]);
+  const connectedAtom = reactiveState(false);
+  const workingAtom = reactiveState(false);
 
   // ── Effects — auto-wire DOM to atoms ─────────────────────────────────────
 

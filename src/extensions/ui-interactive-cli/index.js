@@ -416,6 +416,9 @@ export function create(core) {
 
     rl.on("SIGINT", () => {
       bus.interrupt();
+      // Clear the input buffer so any typed-but-unsubmitted text is discarded
+      rl.line = "";
+      rl.cursor = 0;
       console.log("Interrupted (/quit, /exit, or ctrl-d to exit)");
       rl.prompt();
     });

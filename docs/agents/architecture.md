@@ -39,7 +39,7 @@ Split into sub-modules. The single source of truth is `src/core/core.config.json
 Manages extension-registered CLI flags and config parameters. Config params are primarily defined in `extension.json` configSchema (single source of truth), with defaults automatically extracted and registered. Extensions can still use `CONFIG_CLI_FLAGS_REGISTER` and `CONFIG_PARAMS_REGISTER` hooks for programmatic control when needed.
 
 ### Hook System (`src/core/hooks.js`)
-The foundation for the extension architecture. `HookSystem` class with `on()`, `emit()`, `emitAsync()`, `emitAsyncSeq()`, `emitAsyncSeqUntil()`, `off()`, `clear()` methods. Standard hook names defined in `HOOKS` constant.
+The foundation for the extension architecture. `HookSystem` class with `on()`, `off()`, `notifyHooks()`, `notifyHooksAsync()`, `runHookPipeline()`, `clear()` methods. Standard hook names defined in `HOOKS` constant.
 
 **Hook trace:** Set `_trace = true` on the HookSystem instance (via `--hook-trace` CLI flag, `OA_HOOK_TRACE=1` env, or `hook_trace: true` config) to log each handler invocation with execution order, source extension, timing, and return value. Output uses `logger.debug()` so it requires `OA_LOG_LEVEL=debug`. See `docs/agents/debugging-oa-agent-tools-visibility-flags.md` for details.
 
@@ -47,7 +47,7 @@ The foundation for the extension architecture. `HookSystem` class with `on()`, `
 
 **Tools:** `TOOLS_REGISTER`, `TOOL_BEFORE_EXECUTE`, `TOOL_AFTER_EXECUTE`, `AGENT_TOOL_CONTEXT`, `TOOL_CALL`, `TOOL_RESULT`
 
-**Messages:** `CONTEXT`, `MESSAGES_AFTER_LLM`, `CONTEXT_MESSAGE`, `CONTEXT_FULL`
+**Messages:** `CONTEXT`, `CONTEXT_MESSAGE`, `CONTEXT_REPLACED`, `MESSAGES_AFTER_LLM`
 
 **System prompt:** `SYSTEM_PROMPT_BUILD`
 
@@ -72,6 +72,8 @@ The foundation for the extension architecture. `HookSystem` class with `on()`, `
 **Turn:** `TURN_START`, `TURN_END`
 
 **Loop:** `LOOP_DETECTED`
+
+**Logging:** `LOG`
 
 ### Extension Loader (`src/core/extensions/extensions.js`)
 Discovers, loads, and manages extensions. Key exports:
@@ -122,6 +124,15 @@ Tool registry and common utilities. Key exports:
 - `createToolRegistry()` — factory function
 - Methods: `register()`, `get()`, `has()`, `getAll()`, `getToolDefs()`, `clear()`, `filter()`, `validateToolArgs()`
 
+### Tool Context (`src/core/extensions/tool-context.js`)
+Shared context container for tool execution. Backed by a Map. Extensions mount objects via `AGENT_TOOL_CONTEXT` hook so tools can access them during execution. Key exports:
+- `ToolContext` class — `set(key, value)`, `get(key)`, `has(key)`, `delete(key)`, `keys()`, `mount(data)`, `toJSON()`
+
+### Service Registry (`src/core/extensions/service-registry.js`)
+Maps abstract interface names to implementations. Extensions declare services via `extension.json` `services`/`requires` fields. Key exports:
+- `ServiceRegistry` class — `register(name, implementation)`, `get(name)`, `has(name)`, `names()`, `checkContract(name, expectedMethods)`
+- `createServiceRegistry()` — factory function
+
 ### Tool Utilities (`src/core/extensions/tool-utils.js`)
 Tool definition helpers and utilities. Key exports:
 - `ToolResult` — structured result with `output`, `error`, `metadata`, `success`, `outputTag`, `toDisplay()`, `toApiContent()`
@@ -138,6 +149,14 @@ Tool definition helpers and utilities. Key exports:
 - `defaultCallDisplay(input, templateFn, options)` — default display formatter for tools
 - `ToolContext` — context object for tool execution (defined in `src/core/extensions/tool-context.js`)
 
+### Logger (`src/core/logger.js`)
+Centralized, swappable logging via the hook system. Singleton pattern with pre-init buffering. Key exports:
+- `logger` — singleton with `debug()`, `info()`, `warn()`, `error()` methods
+- `initializeLogger({ hooks, minLevel, target })` — bootstrap initialization
+- `resolveLogLevel(configLevel)` — resolves level from `OA_LOG_LEVEL` env or config
+- `resolveLogTarget(configTarget)` — resolves target from `OA_LOG_TARGET` env or config (`stderr`, `stdout`, `none`)
+- `LOG_LEVELS` — `{ debug: 0, info: 1, warn: 2, error: 3 }`
+
 ### Template Engine (`src/utils/render.js`)
 Tera-like template engine supporting `{{ vars }}`, `{% if %}`, `{% for %}`, filters (`|trim`, `|length`, `|exec`, `|default`), and block tags. Key exports:
 - `render(template, context, cache)` — renders template string with context
@@ -145,13 +164,19 @@ Tera-like template engine supporting `{{ vars }}`, `{% if %}`, `{% for %}`, filt
 
 ### System Prompt (`src/core/context/system-prompt.js`)
 System prompt building. Key exports:
-- `loadAspects(aspectNames, aspectsDir)` — loads `.aspect.md` files from configured aspects directory
-- `loadAgentsMd()` — loads `AGENTS.md` from CWD
-- `buildSystemPrompt(options)` — builds full system prompt from chunks contributed by extensions via `SYSTEM_PROMPT_BUILD` hook
+- `buildSystemPrompt(options)` — builds full system prompt from chunks contributed by extensions via `SYSTEM_PROMPT_BUILD` hook. Options: `role`, `body`, `model`, `profileName`, `chunks`, `templatePath`.
+- `loadSystemPromptTemplate(templatePath)` — loads the system prompt template from disk
+
+**Note**: `loadAspects()` lives in `src/utils/file-utils.js` and `loadAgentsMd()` lives in `src/extensions/agents-md/index.js` — neither is in this file.
+
+### Command Handlers (`src/core/command-handlers.js`)
+Built-in command handler implementations for core commands. Extracted from `agent.js` so the agent only does generic dispatch. Key exports:
+- `CORE_COMMAND_HANDLERS` — Map of Command enum values to handler functions: `handleClear`, `handleQuit`, `handleHelp`, `handleTokens`, `handleTools`, `handleThinking`, `handleRegenerate`, `handleReasoning`
+- Each handler is `(agent, value, cmd) => { content?, error? }`
 
 ### Error Handling (`src/core/error.js`)
 Centralized error formatting. Key exports:
-- `EXPECTED_ERROR_TYPES` — Set of expected error types (cancelled, http, api, timeout, invalid_response)
+- `EXPECTED_ERROR_TYPES` — Set of expected error types (cancelled, http, api, timeout, invalid_response, cli, tool, config)
 - `isExpectedError(err)` — checks if error is expected vs unexpected
 - `formatError(err)` — formats error (expected: message only; unexpected: message + stack)
 - `withContext(label, fn)` — wraps operation with context and centralized error handling
@@ -165,7 +190,7 @@ Output event types and OutputSink base class. Key exports:
 
 ### Messages (`src/core/context/message.js`)
 Message types and message log. Key exports:
-- `Message` — conversation message with `role`, `content`, `reasoningContent`, `toolCalls`, `toolCallId`
+- `Message` — conversation message with `role`, `content`, `reasoningContent`, `toolCalls`, `toolCallId`, `images` (optional array of `{ type, mimeType, data }`)
 - Accepts both camelCase (API/JS) and snake_case (JSON/log files) field names
 
 ### Input (`src/core/context/input.js`)
@@ -175,8 +200,9 @@ Input parsing. Key exports:
 - `NoopInput` — no-op input implementation
 
 ### LLM Client (`src/core/llm-client/`)
-- `client.js` — `LlmClient` with streaming, cancellation, retry support. `LlmError` class with `Http`, `Api`, `Timeout`, `Cancelled`, `InvalidResponse` static constructors
+- `client.js` — `LlmClient` with streaming, cancellation, retry support
 - `retry.js` — `retryWithBackoff(fn, maxRetries, options)` with cancellation support
+- `LlmError` class (with `Http`, `Api`, `Timeout`, `Cancelled`, `InvalidResponse` static constructors) is defined in `src/core/error.js`
 
 ### Session (`src/core/session/`)
 - `session-log.js` — Session log reading/replaying (JSONL format). Key exports: `readSessionEntries()`, `readAllSessions()`, `sessionExists()`, `replayEntriesIntoContext()`, `LOG_SOURCE` constants
@@ -241,6 +267,9 @@ Each extension has:
 | `agents-md` | Loads AGENTS.md and contributes Project Context section |
 | `aspects` | Loads aspect files and contributes Guidelines section |
 | `environment` | Contributes Environment section to system prompt |
+| `web-search` | Web search tool — search the web for information |
+| `websocket` | WebSocket server for agent session management — core backend utility for UI extensions |
+| `webui` | Web UI for agent interaction — login, chat, session management |
 
 ### Extension Load Order
 Extensions are loaded in order: REFRESH (0) → CORE_TOOLS (1) → CLI (2) → DEFAULT (10). This ensures CLI extensions register subcommands before config is loaded, and core tools are available before other extensions that depend on them.

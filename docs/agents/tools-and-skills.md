@@ -36,9 +36,9 @@ Core tools are provided by the `core-tools` extension. Tools are registered via 
 | `edit` | `core-tools` | Edits files using replace modes | `path`, `oldString`, `newString` / `search`, `replace` / `files` + `atomic` |
 | `grep` | `core-tools` | Searches file contents for regex patterns | `pattern`, `path`, `type`, `context` |
 | `find` | `core-tools` | Glob-based file search | `pattern`, `path`, `file_type`, `max_results` |
-| `pager` | `core-tools` | Virtual pagination of truncated tool output | `tool_call_id`, `page` |
+| `pager` | `core-tools` | Show a previously cached tool output for pagination | `tool_call_id` |
 | `project_info` | `core-tools` | Gathers project information | `path` |
-| `explore` *(disabled)* | `core-tools` | Explores codebase with configurable thoroughness | `path`, `thoroughness` |
+| `explore` *(disabled)* | `core-tools` | Runs the agent in explorer mode against a project directory | `path`, `outline` |
 | `bash` | `bash-tool` | Executes shell commands via `bash -c` | `command` |
 | `fetch` | `fetch-tool` | Fetches URLs via HTTP | `url`, `method`, `headers`, `body` |
 | `question` | `question-tool` | Asks interactive questions to the user | `questions` array with `key`, `prompt`, `options`, `required`, `default` |
@@ -87,11 +87,11 @@ Skills are load-on-demand guides/workflows. They are discovered by name + descri
 - `additional_files` — additional files referenced by the skill
 
 **SkillsLoader** — loads SKILL.md files from directories:
-- `load_skills()` — loads all skills from all configured paths
-- `load_from_directory(path)` — loads from a single directory
-- `parse_skill_from_md(content, dir_name)` — parses YAML frontmatter + markdown body
+- `loadSkills()` — loads all skills from all configured paths
+- `loadFromDirectory(path)` — loads from a single directory
+- `parseSkillFromMd(content, dirName)` — parses YAML frontmatter + markdown body
 - `setAvailableTools(coreToolNames)` — loads skills whose tool-dependencies are met
-- `all_skills()`, `get_skill(name)`, `directories()`, `activeSkills()`
+- `allSkills()`, `getSkill(name)`, `directories()`, `activeSkills()`
 - Non-existent paths are silently skipped
 - Name validation: lowercase alphanumeric + hyphens only (1-64 chars, no leading/trailing hyphens, no consecutive hyphens)
 

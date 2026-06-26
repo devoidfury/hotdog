@@ -143,6 +143,7 @@ export function create(core) {
 | `review` | `ui-session-review-cli` | Review session logs |
 | `prompt` | `ui-one-shot` | One-shot prompt mode — run a single prompt and exit |
 | `cli` | `ui-interactive-cli` | Interactive CLI session (default when stdin is TTY) |
+| `webui` | `webui` | Start the WebUI server (HTTP + WebSocket + frontend) |
 
 ## Benefits
 

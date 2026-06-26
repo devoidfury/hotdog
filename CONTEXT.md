@@ -34,7 +34,7 @@ Domain concepts for the oa-agent AI agent harness. Implementation details are do
 
 ## Messages
 
-- **Message** — A single turn with role, content, and optional metadata (reasoning_content, tool_calls, tool_call_id).
+- **Message** — A single turn with role, content, and optional metadata (reasoning_content, tool_calls, tool_call_id, images).
 - **Role** — `system`, `user`, `assistant`, `tool`. One combined system message (all pieces composited).
 - **Reasoning Content** — LLM's chain-of-thought/thinking output. Separate from main response. Model and config dependent.
 - **Tool Call** — Standard OpenAI tool-calling pattern: LLM returns tool_calls → agent executes → result comes back with tool_call_id.
@@ -73,10 +73,10 @@ Domain concepts for the oa-agent AI agent harness. Implementation details are do
 ## Task System
 
 - **Task Lifecycle** — Spawned as background task → LLM loop with tool support → text response → result appended to manager's MessageLog → wake-up callback fires.
-- **Task Communication** — Result appended as system message. Wake-up callback notifies MessageBus. Follow-up via channel (45s timeout).
+- **Task Communication** — Result appended as system message. Wake-up callback notifies MessageBus. Follow-up via queue (`_followQueue`) drained on each iteration.
 - **Task Cancellation** — CancellationToken on TaskHandle. Parent calls interrupt_task().
 - **Task Concurrency** — Multiple simultaneous task agents via TaskManager HashMap.
-- **TaskStatus** — Running, Completed, Failed(String), Cancelled.
+- **TaskStatus** — Running, Completed, Failed, Cancelled.
 
 ## External Events
 
@@ -94,7 +94,7 @@ Domain concepts for the oa-agent AI agent harness. Implementation details are do
 
 - **Commands** — User-triggered operations. Never LLM-triggered. Commands are the abstract concept; how they are invoked is a UI implementation detail.
 - **Slash Commands** — The interactive CLI implements commands using `/` prefix syntax (e.g., `/quit`, `/compact`). This is one UI implementation for invoking commands.
-- **Core commands** (`Command` enum): `help`, `quit`, `clear`, `tools`, `thinking`, `tokens`, `regenerate`, `unknown`.
+- **Core commands** (`Command` enum): `help`, `quit`, `clear`, `tools`, `thinking`, `tokens`, `regenerate`, `reasoning`, `unknown`.
 - **Custom commands** — Extensions register commands via `CommandRegistry` using the `COMMANDS_REGISTER` hook (e.g., `compact`, `model`, `skill`).
 - **UI commands** — `help`, `quit` handled directly by UI layer; all others dispatched through agent.
 
@@ -112,7 +112,7 @@ Domain concepts for the oa-agent AI agent harness. Implementation details are do
 - **Single-threaded event loop** — The JS runtime runs on a single thread with async/await. No separate backend/frontend threads.
 - **Core** (`src/core/`) — Minimal foundation: Agent, hooks, session management, tool registry, config, CLI parsing. No extension dependencies.
 - **Extensions** (`src/extensions/`) — All features (tools, compaction, MCP, skills, prompts, subcommands) live as extensions that plug into the core via hooks.
-- **Hook System** — The primary extension mechanism. `HookSystem` with `on()`, `emit()`, `emitAsync()`, `emitAsyncSeq()`. Extensions register handlers; core emits events.
+- **Hook System** — The primary extension mechanism. `HookSystem` with `on()`, `off()`, `notifyHooks()`, `notifyHooksAsync()`, `runHookPipeline()`, `clear()`. Extensions register handlers; core emits events.
 - **MessageBus** — Owns the agent run loop. Drains queued messages sequentially through `agent.run()`. Provides input preprocessing via `INPUT` hook.
 - **OutputSink** — Decouples agent from UI. Agent emits events via `sink.emit()`; `CliOutputSink` formats and displays with color support.
 

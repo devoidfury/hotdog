@@ -29,7 +29,7 @@ All hard-coded configurable strings (model names, host URLs, ports, format templ
 
 ### Error Handling
 All error catches must use `formatError()` from `src/core/error.js`:
-- Expected errors (cancelled, http, api, timeout): message only
+- Expected errors (cancelled, http, api, timeout, invalid_response, cli, tool, config): message only
 - Unexpected errors (bugs, iteration errors, null derefs): message + full stack
 - Never use `console.error(e.message)` directly — always use `formatError(e)`
 - The `isExpectedError()` helper classifies errors; add new types to `EXPECTED_ERROR_TYPES`
@@ -46,3 +46,4 @@ All error catches must use `formatError()` from `src/core/error.js`:
 | `docs/agents/debugging-oa-agent-tools-visibility-flags.md` | Debugging patterns, one-shot mode |
 | `docs/agents/show-prompt-audit-profile.md` | show-prompt subcommand reference |
 | `docs/cli-subcommands.md` | CLI subcommand extension registration |
+| `docs/hook-lifecycle.md` | Hook system lifecycle and extension registration patterns |

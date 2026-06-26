@@ -15,10 +15,9 @@
 
 ### Core Defaults
 All defaults live in `src/core/config/defaults.js` (sourced from `src/core/core.config.json`):
-- `DEFAULT_MODEL`, `DEFAULT_AI_URL`, `DEFAULT_THINKER`, `DEFAULT_TOOL_FMT`, `DEFAULT_TOOL_OUTPUT_FMT`, `DEFAULT_TOOL_RESULT_FMT`
-- `DEFAULT_SKILLS_PATH`, `DEFAULT_PROFILES_PATH`, `DEFAULT_PROMPTS_PATH`, `DEFAULT_CONFIG_PATH`, `DEFAULT_SYSTEM_PROMPT_PATH`
-- `DEFAULT_CHAT_TIMEOUT_SECS`, `DEFAULT_EMBEDDINGS_TIMEOUT_SECS`, `DEFAULT_MAX_TOKENS`, `DEFAULT_MAX_ITERATIONS`, `DEFAULT_MAX_RETRIES`
-- `DEFAULT_PROMPT`, `DEFAULT_EXIT_COMMANDS`, `DEFAULT_ROLE`, `DEFAULT_TASK_PROFILE`
+- `DEFAULT_MODEL`, `DEFAULT_AI_URL`, `DEFAULT_THINKER`, `DEFAULT_TOOL_FMT`, `DEFAULT_TOOL_OUTPUT_FMT`
+- `DEFAULT_SKILLS_PATH`, `DEFAULT_PROFILES_SUBPATH`, `DEFAULT_CONFIG_FILENAME`, `DEFAULT_SYSTEM_PROMPT_FILENAME`, `DEFAULT_PROFILES_PATH`, `DEFAULT_PROMPTS_PATH`
+- `DEFAULT_CHAT_TIMEOUT_SECS`, `DEFAULT_EMBEDDINGS_TIMEOUT_SECS`, `DEFAULT_MAX_TOKENS`
 
 Extension-specific defaults (e.g., `DEFAULT_READ_TOOL_LIMIT`, `DEFAULT_FIND_MAX_RESULTS`, compaction settings) are defined in each extension's `extension.json` configSchema.
 
@@ -66,7 +65,7 @@ Models are declared inside providers. Each provider has `name`, `url`, optional 
 
 ### Model Resolution
 Model names flow through `buildConfig()`:
-1. CLI model → profile model → config `defaultModel` → provider's first model → `DEFAULT_MODEL`
+1. Profile model → CLI model → provider's first model → config `defaultModel` → `DEFAULT_MODEL`
 2. If the name contains `/`, it's used as-is (already qualified)
 3. If a provider is active and the name matches a provider model, it's prefixed with the provider name
 4. Otherwise, the bare name is passed through (will error at validation if not in registry)
@@ -100,7 +99,7 @@ Profiles can also be defined as `.profile.md` files in a `profiles/` directory (
 
 **Markdown body**: Content that fills the `{body}` placeholder in the system prompt template.
 
-**Resolution chain for role**: CLI `--role` > config `role` > profile file `role` > `DEFAULT_ROLE`
+**Resolution chain for role**: CLI `--role` > config `role` > profile file `role` > core config schema default (no `DEFAULT_ROLE` constant exists)
 
 **Config file settings take precedence** over profile file settings for tool restrictions.
 

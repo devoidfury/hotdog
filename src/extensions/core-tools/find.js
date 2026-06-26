@@ -94,12 +94,12 @@ function buildFdArgs(args) {
 async function runFindFallback(pattern, fileType, cwd) {
   // glob change ** -> * for find compatibility
   let namePattern = pattern;
-  if (namePattern.includes("**/")) {
+  if (namePattern.includes("**")) {
     namePattern = namePattern.replace("**", "*");
   }
 
-  // If pattern still contains `/`, use -path instead of -name (matches
-  // against the full relative path, though ** globs won't expand).
+  // If pattern contains `/`, use -path instead of -name (matches
+  // against the full relative path).
   const usePath = namePattern.includes("/") && namePattern !== pattern;
 
   let findArgs = [cwd, "-maxdepth", "5"];

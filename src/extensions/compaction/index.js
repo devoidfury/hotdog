@@ -238,10 +238,10 @@ export function create(core) {
       // Replace compacted messages with summary
       if (result.summary) {
         // Create a summary message with marker wrapper
-        const summaryMsg = {
+        const summaryMsg = new Message({
           role: 'user',
           content: `<m_ckga3qxdoia7896k>${result.summary}</m_ckga3qxdoia7896k>`,
-        };
+        });
 
         // Replace the compacted portion
         agent.replaceContext([

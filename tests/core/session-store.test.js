@@ -1,17 +1,12 @@
 import { describe, it, expect } from 'bun:test';
 import { SessionStore } from '../../src/core/session/index.js';
-
-class MockAgent {
-  constructor(sessionId) {
-    this.sessionId = sessionId;
-  }
-}
+import { MockAgent } from '../helpers.js';
 
 describe('SessionStore', () => {
   it('stores, retrieves, and removes agents by session ID', () => {
     const store = new SessionStore();
-    const agent1 = new MockAgent('session-1');
-    const agent2 = new MockAgent('session-2');
+    const agent1 = new MockAgent('done', 'session-1');
+    const agent2 = new MockAgent('done', 'session-2');
 
     expect(store.addAgent(agent1)).toBe('session-1');
     expect(store.addAgent(agent2)).toBe('session-2');
@@ -28,8 +23,8 @@ describe('SessionStore', () => {
 
   it('returns all agents', () => {
     const store = new SessionStore();
-    const agent1 = new MockAgent('session-1');
-    const agent2 = new MockAgent('session-2');
+    const agent1 = new MockAgent('done', 'session-1');
+    const agent2 = new MockAgent('done', 'session-2');
     store.addAgent(agent1);
     store.addAgent(agent2);
     const agents = store.agents();
@@ -40,8 +35,8 @@ describe('SessionStore', () => {
 
   it('replaces existing agent when addAgent is called with same session ID', () => {
     const store = new SessionStore();
-    const agent1 = new MockAgent('session-1');
-    const agent2 = new MockAgent('session-1');
+    const agent1 = new MockAgent('done', 'session-1');
+    const agent2 = new MockAgent('done', 'session-1');
     store.addAgent(agent1);
     store.addAgent(agent2);
     expect(store.size()).toBe(1);

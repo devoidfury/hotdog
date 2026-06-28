@@ -1,6 +1,8 @@
 import { describe, it, expect } from "bun:test";
 import { HookSystem, HOOKS } from "../../src/core/hooks.js";
 import { ToolRegistry } from "../../src/core/extensions/tool-registry.js";
+import { MessageLog } from "../../src/core/context/message-log.js";
+import { Message } from "../../src/core/context/message.js";
 import { create as createCompactionExtension } from "../../src/extensions/compaction/index.js";
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
@@ -8,10 +10,10 @@ import { create as createCompactionExtension } from "../../src/extensions/compac
 function makeMessages(count, content = "x".repeat(100)) {
   const messages = [];
   for (let i = 0; i < count; i++) {
-    messages.push({
+    messages.push(new Message({
       role: i % 2 === 0 ? "user" : "assistant",
       content,
-    });
+    }));
   }
   return messages;
 }
@@ -36,29 +38,26 @@ function createMockAgent(contextArray, model = "test-model") {
         yield { type: "content", content: "test response" };
       })(),
   };
-  // Store the context internally; expose via getter to mirror the real Agent
-  let _context = contextArray;
+  // Use a real MessageLog so the extension can call agent.log.getAll()
+  const log = new MessageLog(contextArray);
   return {
-    get context() { return _context; },
-    set context(v) { _context = v; },
+    get log() { return log; },
     model,
     sessionId: "test-session",
     _llmClient: mockLlmClient,
     get llmClient() { return mockLlmClient; },
-    get _context() { return _context; },
-    set _context(v) { _context = v; },
     buildMessages() {
       return this.systemPrompt
-        ? [{ role: "system", content: this.systemPrompt }, ..._context]
-        : [..._context];
+        ? [{ role: "system", content: this.systemPrompt }, ...log.getAll()]
+        : [...log.getAll()];
     },
     // New public context API (mirrors Agent.addMessage)
     addMessage(msg) {
-      _context.push(msg);
+      log.push(msg);
     },
     // New public context API (mirrors Agent.replaceContext)
     replaceContext(newContext) {
-      _context = newContext;
+      log.replace(newContext);
     },
   };
 }
@@ -139,7 +138,7 @@ describe("Hook Integration", () => {
     await ext.hooks[HOOKS.CONTEXT]({ messages, agent });
 
     // Context should be unchanged since we don't have enough messages
-    expect(agent.context.length).toBe(4);
+    expect(agent.log.length).toBe(4);
   });
 
   it("should not trigger compaction when token budget is not exceeded", async () => {
@@ -157,7 +156,7 @@ describe("Hook Integration", () => {
     await ext.hooks[HOOKS.CONTEXT]({ messages, agent });
 
     // Context should be unchanged (tokens well under budget)
-    expect(agent.context.length).toBe(20);
+    expect(agent.log.length).toBe(20);
   });
 
   it("should trigger compaction when context exceeds token budget", async () => {
@@ -181,7 +180,7 @@ describe("Hook Integration", () => {
     const result = await ext.hooks[HOOKS.CONTEXT]({ messages, agent });
 
     // Context should be compacted (fewer messages)
-    expect(agent.context.length).toBeLessThan(largeContext.length);
+    expect(agent.log.length).toBeLessThan(largeContext.length);
 
     // Should return the new messages array
     expect(result.messages).toBeDefined();
@@ -209,7 +208,7 @@ describe("Hook Integration", () => {
     const result = await ext.hooks[HOOKS.CONTEXT]({ messages, agent });
 
     // Drop strategy: just shortened context without summary marker
-    expect(agent.context.length).toBeLessThan(largeContext.length);
+    expect(agent.log.length).toBeLessThan(largeContext.length);
 
     // Should return the new messages array
     expect(result.messages).toBeDefined();

@@ -2,12 +2,9 @@ import { test, expect, describe, beforeEach } from "bun:test";
 import { createHooks, HOOKS } from "../../src/core/hooks.js";
 import { Agent } from "../../src/core/agent.js";
 import { ToolRegistry } from "../../src/core/extensions/tool-registry.js";
+import { MockLLMClient } from "../helpers.js";
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
-
-function createMockHooks() {
-  return createHooks();
-}
 
 function createMockRegistry() {
   const registry = new ToolRegistry({
@@ -17,26 +14,17 @@ function createMockRegistry() {
   return registry;
 }
 
-function createMockLlmClient() {
-  return {
-    chatStreamCancellable: async function* () {
-      yield { type: "content", content: "Done" };
-      return { fullText: "Done", finalToolCalls: null, usage: null };
-    },
-  };
-}
-
 /**
  * Create a minimal agent for testing.
  */
 function createTestAgent(options = {}) {
-  const hooks = options.hooks || createMockHooks();
+  const hooks = options.hooks || createHooks();
   const registry = options.registry || createMockRegistry();
 
   return new Agent({
     hooks,
     toolRegistry: registry,
-    llmClient: createMockLlmClient(),
+    llmClient: new MockLLMClient(),
     model: "test-model",
     ...options,
   });
@@ -46,7 +34,7 @@ function createTestAgent(options = {}) {
 
 describe("HOOKS.AGENT_TOOL_CONTEXT", () => {
   test("hook is emitted with toolCtx containing agent and isSessionRestoring", async () => {
-    const hooks = createMockHooks();
+    const hooks = createHooks();
     let capturedCtx = null;
 
     hooks.on(HOOKS.AGENT_TOOL_CONTEXT, ({ toolCtx, toolName }) => {
@@ -73,7 +61,7 @@ describe("HOOKS.AGENT_TOOL_CONTEXT", () => {
   });
 
   test("hook is emitted with isSessionRestoring=true during restoration", async () => {
-    const hooks = createMockHooks();
+    const hooks = createHooks();
     let capturedRestoring = null;
 
     hooks.on(HOOKS.AGENT_TOOL_CONTEXT, ({ toolCtx }) => {
@@ -98,7 +86,7 @@ describe("HOOKS.AGENT_TOOL_CONTEXT", () => {
 
 describe("HOOKS.SESSION_RESTORE_ACTIVE", () => {
   test("hook is emitted when isRestoring changes", async () => {
-    const hooks = createMockHooks();
+    const hooks = createHooks();
     const events = [];
 
     hooks.on(HOOKS.SESSION_RESTORE_ACTIVE, ({ isRestoring }) => {
@@ -124,7 +112,7 @@ describe("HOOKS.SESSION_RESTORE_ACTIVE", () => {
   });
 
   test("hook is not emitted on initial construction", async () => {
-    const hooks = createMockHooks();
+    const hooks = createHooks();
     const events = [];
 
     hooks.on(HOOKS.SESSION_RESTORE_ACTIVE, ({ isRestoring }) => {
@@ -139,7 +127,7 @@ describe("HOOKS.SESSION_RESTORE_ACTIVE", () => {
 
 describe("Integration: toolContext enrichment flow", () => {
   test("extensions can enrich toolCtx via agent:toolContext hook", async () => {
-    const hooks = createMockHooks();
+    const hooks = createHooks();
     const enrichmentData = [];
 
     // Simulate skills extension enriching context

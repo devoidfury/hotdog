@@ -1,279 +1,20 @@
 // Tests for the core Agent class — full end-to-end agent loop.
 
 import { Agent, HOOKS } from '../../src/core/index.js';
-import { HookSystem, createHooks } from '../../src/core/hooks.js';
-import { ToolRegistry, createToolRegistry } from '../../src/core/extensions/tool-registry.js';
+import { createHooks } from '../../src/core/hooks.js';
+import { createToolRegistry } from '../../src/core/extensions/tool-registry.js';
 import { Message } from '../../src/core/context/message.js';
 import { describe, it, expect, beforeEach, afterEach } from 'bun:test';
-
-// ── Mock LLM Client ─────────────────────────────────────────────────────────
-//
-// Produces programmable streams of events. Each call to chatStreamCancellable
-// returns an async generator that yields a preset sequence of events, then
-// optionally waits for a "resume" signal before yielding the next batch.
-// This lets us simulate multi-turn tool-calling conversations.
-
-/**
- * Build a tool-call event sequence for a single tool call.
- * Returns [toolName, toolArgument] events.
- */
-function buildToolCallEvents({ index, name, arguments: args, id }) {
-  return [
-    { type: 'toolName', index, name, toolCallId: id || `call_${index}` },
-    { type: 'toolArgument', index, arguments: args },
-  ];
-}
-
-/**
- * Build a complete streaming response sequence.
- */
-function buildStreamResponse({
-  content = '',
-  reasoning = null,
-  toolCalls = null,
-  usage = { prompt_tokens: 10, completion_tokens: 20, total_tokens: 30 },
-}) {
-  const events = [];
-
-  // Reasoning before content (typical LLM order)
-  if (reasoning) {
-    events.push({ type: 'reasoning', content: reasoning });
-  }
-
-  // Text content
-  if (content) {
-    events.push({ type: 'content', content });
-  }
-
-  // Tool calls
-  if (toolCalls) {
-    for (const tc of toolCalls) {
-      events.push(...buildToolCallEvents(tc));
-    }
-  }
-
-  // Usage at the end
-  events.push({ type: 'usage', data: usage });
-
-  return events;
-}
-
-/**
- * MockLLMClient — simulates streaming LLM responses for testing.
- *
- * Each call to chatStreamCancellable yields events from a preset list.
- * Supports cancellation via AbortSignal: when aborted, the generator
- * stops yielding after the current event.
- */
-class MockLLMClient {
-  /**
-   * @param {Array<Array<Object>>} responseSequences — One array per call.
-   *   Each array is a list of stream events.
-   * @param {boolean} [cancelable=false] — If true, respects abort signal.
-   */
-  constructor({ responseSequences = [], cancelable = false } = {}) {
-    this._responseSequences = responseSequences;
-    this._callIndex = 0;
-    this.cancelable = cancelable;
-    this.callCount = 0;
-    this.lastMessages = null;
-    this.lastModelConfig = null;
-    this.lastToolDefs = null;
-    this.lastCancelSignal = null;
-  }
-
-  /**
-   * Reset call tracking for a fresh test.
-   */
-  reset(sequences) {
-    this._responseSequences = sequences || this._responseSequences;
-    this._callIndex = 0;
-    this.callCount = 0;
-    this.lastMessages = null;
-    this.lastModelConfig = null;
-    this.lastToolDefs = null;
-    this.lastCancelSignal = null;
-  }
-
-  chatStreamCancellable(messages, modelConfig, toolDefs, cancelSignal) {
-    this.callCount++;
-    this.lastMessages = messages;
-    this.lastModelConfig = modelConfig;
-    this.lastToolDefs = toolDefs;
-    this.lastCancelSignal = cancelSignal;
-
-    const sequence = this._responseSequences[this._callIndex++];
-    if (!sequence) {
-      // No sequence defined — return empty stream
-      return (async function* () {})();
-    }
-
-    return this._makeStream(sequence, cancelSignal);
-  }
-
-  async *_makeStream(events, cancelSignal) {
-    for (const event of events) {
-      // Check cancellation
-      if (cancelSignal?.aborted) {
-        return;
-      }
-      // Yield a tiny microtask tick so abort listeners can fire
-      await Promise.resolve();
-      yield event;
-    }
-  }
-}
-
-// ── Mock Tool ───────────────────────────────────────────────────────────────
-
-class MockTool {
-  constructor({ name, execute, toToolDef, callDisplay } = {}) {
-    this.name = name || 'mock-tool';
-    this._executeFn = execute || (async () => 'mock result');
-    this._toToolDefFn = toToolDef || (() => ({
-      type: 'function',
-      function: {
-        name: this.name,
-        description: 'Mock tool for testing',
-        parameters: { type: 'object', properties: {}, required: [] },
-      },
-    }));
-    this._callDisplayFn = callDisplay || null;
-    this.executeCount = 0;
-    this.lastInput = null;
-    this.lastContext = null;
-  }
-
-  toToolDef() {
-    return this._toToolDefFn();
-  }
-
-  async execute(input, ctx) {
-    this.executeCount++;
-    this.lastInput = input;
-    this.lastContext = ctx;
-    return this._executeFn(input, ctx);
-  }
-
-  callDisplay(input) {
-    if (this._callDisplayFn) return this._callDisplayFn(input);
-    return `mock-tool(${JSON.stringify(input)})`;
-  }
-}
-
-// ── Helpers ─────────────────────────────────────────────────────────────────
-
-/**
- * Create a simple mock tool that returns a fixed result.
- */
-function simpleTool(name, result = 'done') {
-  return new MockTool({
-    name,
-    execute: async () => result,
-    toToolDef: () => ({
-      type: 'function',
-      function: {
-        name,
-        description: `${name} tool`,
-        parameters: { type: 'object', properties: {}, required: [] },
-      },
-    }),
-  });
-}
-
-/**
- * Create a mock tool that validates its input against a schema.
- */
-function validatedTool(name, schema, execute) {
-  return new MockTool({
-    name,
-    execute,
-    toToolDef: () => ({
-      type: 'function',
-      function: {
-        name,
-        description: `${name} tool`,
-        parameters: {
-          type: 'object',
-          properties: schema.properties || {},
-          required: schema.required || [],
-        },
-      },
-    }),
-  });
-}
-
-/**
- * Create a mock tool that fails on execute.
- */
-function failingTool(name, errorMsg = 'intentional failure') {
-  return new MockTool({
-    name,
-    execute: async () => { throw new Error(errorMsg); },
-    toToolDef: () => ({
-      type: 'function',
-      function: {
-        name,
-        description: `${name} tool`,
-        parameters: { type: 'object', properties: {}, required: [] },
-      },
-    }),
-  });
-}
-
-/**
- * Create a mock tool that returns a ToolResult with metadata.
- */
-function metadataTool(name, metadata) {
-  return new MockTool({
-    name,
-    execute: async () => {
-      const { ToolResult } = await import('../../src/core/extensions/tool-utils.js');
-      return ToolResult.ok('output').withEntries(metadata);
-    },
-    toToolDef: () => ({
-      type: 'function',
-      function: {
-        name,
-        description: `${name} tool`,
-        parameters: { type: 'object', properties: {}, required: [] },
-      },
-    }),
-  });
-}
-
-// ── Agent Test Fixture ──────────────────────────────────────────────────────
-
-function createFixture(options = {}) {
-  const hooks = options.hooks || createHooks();
-  const toolRegistry = options.toolRegistry || createToolRegistry();
-
-  const mockLLM = options.mockLLM || new MockLLMClient({ cancelable: false });
-
-  const agent = new Agent({
-    hooks,
-    toolRegistry,
-    llmClient: mockLLM,
-    model: options.model || 'test-model',
-    maxIterations: options.maxIterations || 10,
-    maxTokens: options.maxTokens || 4096,
-    hideTools: options.hideTools ?? true,
-    hideThinking: options.hideThinking ?? false,
-    showTokenUse: options.showTokenUse ?? false,
-    stream: options.stream ?? false,
-    sink: options.sink || null,
-    modelRegistry: options.modelRegistry || {},
-    profileName: options.profileName || 'test',
-    role: options.role || 'Test agent',
-    profileBody: options.profileBody || '',
-    config: options.config || null,
-    sessionId: options.sessionId || 'test-session',
-    abortSignal: options.abortSignal || null,
-    toolWhitelist: options.toolWhitelist || null,
-  });
-
-  return { hooks, toolRegistry, mockLLM, agent };
-}
+import {
+  MockLLMClient,
+  MockTool,
+  buildStreamResponse,
+  simpleTool,
+  validatedTool,
+  failingTool,
+  metadataTool,
+  createFixture,
+} from '../helpers.js';
 
 // ── Tests ───────────────────────────────────────────────────────────────────
 
@@ -303,13 +44,13 @@ describe('Agent — end-to-end loop', () => {
     const result = await agent.run('Hi');
 
     expect(result).toBe('Hello! I am an AI assistant.');
-    // Note: agent.context only contains user/assistant/tool messages,
+    // Note: agent.log only contains user/assistant/tool messages,
     // NOT the system prompt. The system prompt is prepended at build time.
-    expect(agent.context.length).toBe(2); // user + assistant
-    expect(agent.context[0].role).toBe('user');
-    expect(agent.context[0].content).toBe('Hi');
-    expect(agent.context[1].role).toBe('assistant');
-    expect(agent.context[1].content).toBe('Hello! I am an AI assistant.');
+    expect(agent.log.length).toBe(2); // user + assistant
+    expect(agent.log.at(0).role).toBe('user');
+    expect(agent.log.at(0).content).toBe('Hi');
+    expect(agent.log.at(1).role).toBe('assistant');
+    expect(agent.log.at(1).content).toBe('Hello! I am an AI assistant.');
     expect(mockLLM.callCount).toBe(1);
   });
 
@@ -327,7 +68,7 @@ describe('Agent — end-to-end loop', () => {
     const result = await agent.run('Think step by step');
 
     expect(result).toBe('Here is my answer.');
-    expect(agent.context[1].reasoningContent).toBe('I need to think about this carefully.');
+    expect(agent.log.at(1).reasoningContent).toBe('I need to think about this carefully.');
   });
 
   // ── Single tool call ───────────────────────────────────────────────────────
@@ -363,7 +104,7 @@ describe('Agent — end-to-end loop', () => {
 
     // Context after full run:
     //   [0] user → [1] assistant (tool call) → [2] tool result → [3] assistant (final)
-    const ctx = agent.context;
+    const ctx = agent.log.getAll();
     expect(ctx.length).toBe(4);
     expect(ctx[0].role).toBe('user');
     expect(ctx[1].role).toBe('assistant');
@@ -410,7 +151,7 @@ describe('Agent — end-to-end loop', () => {
 
     // Context after full run:
     //   [0] user → [1] assistant (2 tool calls) → [2] tool result → [3] tool result → [4] assistant (final)
-    const ctx = agent.context;
+    const ctx = agent.log.getAll();
     expect(ctx.length).toBe(5);
     expect(ctx[0].role).toBe('user');
     expect(ctx[1].role).toBe('assistant');
@@ -454,7 +195,7 @@ describe('Agent — end-to-end loop', () => {
 
     // Context after full run:
     //   [0] user → [1] assistant (tool call) → [2] tool result (validation error) → [3] assistant (final)
-    const ctx = agent.context;
+    const ctx = agent.log.getAll();
     expect(ctx[2].role).toBe('tool');
     expect(ctx[2].content).toContain('validation');
   });
@@ -485,7 +226,7 @@ describe('Agent — end-to-end loop', () => {
 
     // Context after full run:
     //   [0] user → [1] assistant (tool call) → [2] tool result (unknown tool) → [3] assistant (final)
-    const ctx = agent.context;
+    const ctx = agent.log.getAll();
     expect(ctx[2].role).toBe('tool');
     expect(ctx[2].content).toContain('Unknown tool');
   });
@@ -519,7 +260,7 @@ describe('Agent — end-to-end loop', () => {
 
     // Context after full run:
     //   [0] user → [1] assistant (tool call) → [2] tool result (error) → [3] assistant (final)
-    const ctx = agent.context;
+    const ctx = agent.log.getAll();
     expect(ctx[2].role).toBe('tool');
     expect(ctx[2].content).toContain('Error executing');
   });
@@ -588,7 +329,7 @@ describe('Agent — end-to-end loop', () => {
 
     // Context after full run:
     //   [0] user → [1] assistant (2 tool calls) → [2] tool result (allowed) → [3] tool result (blocked) → [4] assistant (final)
-    const ctx = agent.context;
+    const ctx = agent.log.getAll();
     expect(ctx.length).toBe(5);
     expect(ctx[2].role).toBe('tool');
     expect(ctx[2].content).toContain('allowed result');
@@ -796,7 +537,7 @@ describe('Agent — end-to-end loop', () => {
 
     // Context after full run:
     //   [0] user → [1] assistant (tool call) → [2] tool result (blocked) → [3] assistant (final)
-    const ctx = agent.context;
+    const ctx = agent.log.getAll();
     expect(ctx[2].role).toBe('tool');
     expect(ctx[2].content).toContain('Blocked');
   });
@@ -833,7 +574,7 @@ describe('Agent — end-to-end loop', () => {
 
     // Context after full run:
     //   [0] user → [1] assistant (tool call) → [2] tool result (modified) → [3] assistant (final)
-    const ctx = agent.context;
+    const ctx = agent.log.getAll();
     expect(ctx[2].role).toBe('tool');
     expect(ctx[2].content).toContain('MODIFIED');
   });
@@ -912,7 +653,7 @@ describe('Agent — end-to-end loop', () => {
     expect(mockLLM.callCount).toBe(2);
 
     // Context should contain the follow-up user message
-    const ctx = agent.context;
+    const ctx = agent.log.getAll();
     const followUpMsg = ctx.find(m => m.role === 'user' && m.content === 'Follow-up message');
     expect(followUpMsg).toBeTruthy();
   });
@@ -922,8 +663,8 @@ describe('Agent — end-to-end loop', () => {
   it('should serialize and deserialize full agent state', async () => {
     const { agent } = createFixture({});
 
-    agent.context.push(new Message({ role: 'user', content: 'test message' }));
-    agent.context.push(new Message({
+    agent.addMessage(new Message({ role: 'user', content: 'test message' }));
+    agent.addMessage(new Message({
       role: 'assistant',
       content: 'response',
       reasoningContent: 'thinking...',
@@ -948,12 +689,12 @@ describe('Agent — end-to-end loop', () => {
     freshAgent.deserialize(serialized);
 
     expect(freshAgent.sessionId).toBe('test-session');
-    expect(freshAgent.context.length).toBe(2);
-    expect(freshAgent.context[0].role).toBe('user');
-    expect(freshAgent.context[0].content).toBe('test message');
-    expect(freshAgent.context[1].role).toBe('assistant');
-    expect(freshAgent.context[1].reasoningContent).toBe('thinking...');
-    expect(freshAgent.context[1].toolCalls.length).toBe(1);
+    expect(freshAgent.log.length).toBe(2);
+    expect(freshAgent.log.at(0).role).toBe('user');
+    expect(freshAgent.log.at(0).content).toBe('test message');
+    expect(freshAgent.log.at(1).role).toBe('assistant');
+    expect(freshAgent.log.at(1).reasoningContent).toBe('thinking...');
+    expect(freshAgent.log.at(1).toolCalls.length).toBe(1);
     expect(freshAgent._reasoningEffort).toBe('high');
     expect(freshAgent.model).toBe('test-model');
   });
@@ -992,14 +733,14 @@ describe('Agent — end-to-end loop', () => {
   describe('context (existing)', () => {
     it('should start with empty context', () => {
       const { agent } = createFixture({});
-      expect(agent.context).toEqual([]);
+      expect(agent.log.getAll()).toEqual([]);
     });
 
     it('should allow clearing context', async () => {
       const { agent } = createFixture({});
-      agent.context.push(new Message({ role: 'user', content: 'hello' }));
+      agent.addMessage(new Message({ role: 'user', content: 'hello' }));
       await agent.clearContext();
-      expect(agent.context).toEqual([]);
+      expect(agent.log.getAll()).toEqual([]);
       expect(agent.iterationCount).toBe(0);
     });
   });
@@ -1041,10 +782,10 @@ describe('Agent — end-to-end loop', () => {
   describe('executeCommand (existing)', () => {
     it('should handle clear command', async () => {
       const { agent } = createFixture({});
-      agent.context.push(new Message({ role: 'user', content: 'hello' }));
+      agent.addMessage(new Message({ role: 'user', content: 'hello' }));
       const result = await agent.executeCommand({ type: 'clear' });
       expect(result).toEqual({ content: 'Context cleared.' });
-      expect(agent.context).toEqual([]);
+      expect(agent.log.getAll()).toEqual([]);
     });
 
     it('should handle reasoning command to set effort', async () => {

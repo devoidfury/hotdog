@@ -102,7 +102,10 @@ describe("TaskManager", () => {
       const managerContext = [];
       const manager = createManager();
       manager.setSessionManager({
-        getAgent: () => ({ context: managerContext }),
+        getAgent: () => ({
+          context: managerContext,
+          addMessage(msg) { managerContext.push(msg); },
+        }),
       });
 
       manager._onTaskComplete("task-1", "Result text");

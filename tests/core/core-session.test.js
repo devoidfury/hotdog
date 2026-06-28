@@ -2,24 +2,18 @@
 
 import { SessionManager } from '../../src/core/session/index.js';
 import { Agent } from '../../src/core/agent.js';
-import { HookSystem, createHooks } from '../../src/core/hooks.js';
+import { createHooks } from '../../src/core/hooks.js';
 import { ExtensionLoader, createExtensionLoader } from '../../src/core/extensions/extensions.js';
-import { ToolRegistry, createToolRegistry } from '../../src/core/extensions/tool-registry.js';
+import { createToolRegistry } from '../../src/core/extensions/tool-registry.js';
 import { Message } from '../../src/core/context/message.js';
 import { describe, it, expect, beforeEach } from 'bun:test';
-
-// Mock LLM client
-function createMockLlmClient() {
-  return {
-    chatStreamCancellable: () => (async function* () {})(),
-  };
-}
+import { MockLLMClient } from '../helpers.js';
 
 // Helper to create a minimal agent
 function createMockAgent(options = {}) {
   const hooks = options.hooks || createHooks();
   const toolRegistry = options.toolRegistry || createToolRegistry();
-  const llmClient = options.llmClient || createMockLlmClient();
+  const llmClient = options.llmClient || new MockLLMClient();
 
   return new Agent({
     hooks,
@@ -135,7 +129,7 @@ describe('SessionManager', () => {
     it('should serialize agent state', async () => {
       await sessionManager.create({ model: 'test-model' });
       const agent = sessionManager.getAgent();
-      agent.context.push(new Message({ role: 'user', content: 'hello' }));
+      agent.addMessage(new Message({ role: 'user', content: 'hello' }));
 
       const data = sessionManager.serialize();
       expect(data.sessionId).toBeDefined();
@@ -156,8 +150,8 @@ describe('SessionManager', () => {
       const agent = await sessionManager.deserialize(data);
       expect(agent.sessionId).toBe('restored-session');
       expect(agent.model).toBe('restored-model');
-      expect(agent.context.length).toBe(1);
-      expect(agent.context[0].content).toBe('hello');
+      expect(agent.log.length).toBe(1);
+      expect(agent.log.at(0).content).toBe('hello');
     });
   });
 

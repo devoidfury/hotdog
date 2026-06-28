@@ -15,6 +15,7 @@ import {
   replayEntriesIntoContext,
 } from "../../src/extensions/session-log/session-log.js";
 import { Message } from "../../src/core/context/message.js";
+import { MessageLog } from "../../src/core/context/message-log.js";
 import { stripNulls } from "../../src/utils/objects.js";
 import { mkdirSync, rmSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -44,10 +45,12 @@ function teardown() {
 }
 
 function createMockAgent() {
+  const log = new MessageLog();
   return {
-    context: [],
+    get log() { return log; },
     sessionLog: disabledSessionLog(),
     ensureSystemPrompt: () => {},
+    addMessage(msg) { log.push(msg); },
   };
 }
 
@@ -364,14 +367,14 @@ test("SessionLog round-trip with images preserves image data", async () => {
     const replayed = replayEntriesIntoContext(agent, entries);
     expect(replayed).toBe(4);
 
-    expect(agent.context[0].images).toEqual([
+    expect(agent.log.at(0).images).toEqual([
       { type: "image_url", mimeType: "image/png", data: "testbase64data" },
     ]);
-    expect(agent.context[2].images).toEqual([
+    expect(agent.log.at(2).images).toEqual([
       { type: "image_url", mimeType: "image/jpeg", data: "anotherimage" },
     ]);
 
-    const json0 = agent.context[0].toJSON();
+    const json0 = agent.log.at(0).toJSON();
     expect(Array.isArray(json0.content)).toBe(true);
     expect(json0.content[0]).toEqual({ type: "text", text: "Analyze this image" });
     expect(json0.content[1]).toEqual({
@@ -512,7 +515,7 @@ test("replayEntriesIntoContext preserves images in user messages", () => {
 
   const replayed = replayEntriesIntoContext(agent, entries);
   expect(replayed).toBe(1);
-  expect(agent.context[0].images).toEqual([
+  expect(agent.log.at(0).images).toEqual([
     { type: "image_url", mimeType: "image/png", data: "abc" },
   ]);
 });
@@ -533,9 +536,9 @@ test("replayEntriesIntoContext handles multiple images", () => {
 
   const replayed = replayEntriesIntoContext(agent, entries);
   expect(replayed).toBe(1);
-  expect(agent.context[0].images.length).toBe(2);
-  expect(agent.context[0].images[0].mimeType).toBe("image/png");
-  expect(agent.context[0].images[1].mimeType).toBe("image/jpeg");
+  expect(agent.log.at(0).images.length).toBe(2);
+  expect(agent.log.at(0).images[0].mimeType).toBe("image/png");
+  expect(agent.log.at(0).images[1].mimeType).toBe("image/jpeg");
 });
 
 test("replayEntriesIntoContext handles PROMPT source with images", () => {
@@ -546,8 +549,8 @@ test("replayEntriesIntoContext handles PROMPT source with images", () => {
 
   const replayed = replayEntriesIntoContext(agent, entries);
   expect(replayed).toBe(1);
-  expect(agent.context[0].role).toBe("user");
-  expect(agent.context[0].images).toEqual([
+  expect(agent.log.at(0).role).toBe("user");
+  expect(agent.log.at(0).images).toEqual([
     { type: "image_url", mimeType: "image/webp", data: "webpimg" },
   ]);
 });
@@ -559,5 +562,5 @@ test("replayed message getTextContent returns text without images", () => {
   ];
 
   replayEntriesIntoContext(agent, entries);
-  expect(agent.context[0].getTextContent()).toBe("What is this?");
+  expect(agent.log.at(0).getTextContent()).toBe("What is this?");
 });

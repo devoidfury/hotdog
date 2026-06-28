@@ -76,7 +76,7 @@ export class SessionRegistry {
     });
 
     // Wire agent's sink to the fanout so agent emits events to fanout
-    agent._sink = fanout;
+    agent.setSink(fanout);
 
     // Start the bus run loop (non-blocking — it awaits messages as they arrive)
     const runLoop = bus.run().catch(err => {
@@ -243,13 +243,13 @@ export class SessionRegistry {
  */
 function replaySessionHistory(session, ws) {
   const agent = session.agent;
-  if (!agent || !agent.context) return;
+  if (!agent || !agent.log) return;
 
   // Collect tool calls from the most recent assistant message to match
   // tool results by toolCallId.
   let pendingToolCalls = [];
 
-  for (const msg of agent.context) {
+  for (const msg of agent.log) {
     switch (msg.role) {
       case "user": {
         ws.send(JSON.stringify({

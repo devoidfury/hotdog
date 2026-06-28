@@ -78,7 +78,7 @@ export function create(core) {
         // Check if compaction is applicable
         if (!strategy.canCompact(nonSystemMessages, settings)) return;
 
-        // Execute compaction — modifies agent._context in place
+        // Execute compaction — modifies agent context in place
         await _performCompaction(agent, strategy);
 
         // Rebuild messages from the updated context and return them.
@@ -163,8 +163,7 @@ export function create(core) {
    * Handle the /compact command.
    */
   async function _handleCompactCommand(agent, { keep, debug }) {
-    const messages = agent.context;
-    const nonSystemMessages = messages.filter(m => m.role !== 'system');
+    const nonSystemMessages = agent.log.getNonSystem();
 
     if (nonSystemMessages.length <= 2) {
       return { content: 'Not enough messages to compact.' };
@@ -172,7 +171,7 @@ export function create(core) {
 
     // If keep is specified, just trim to that many messages
     if (keep !== null) {
-      const systemMessages = messages.filter(m => m.role === 'system');
+      const systemMessages = agent.log.getSystem();
       const keptMessages = nonSystemMessages.slice(-keep);
       agent.replaceContext([...systemMessages, ...keptMessages]);
       return { content: `Context compacted to ${keptMessages.length} messages.` };
@@ -202,7 +201,7 @@ export function create(core) {
    * Perform the actual compaction.
    */
   async function _performCompaction(agent, strategy) {
-    const messages = agent.context;
+    const messages = agent.log.getAll(); // defensive copy — strategies expect Message[]
     const model = agent.model;
     const modelConfig = core.modelRegistry?.[model];
 

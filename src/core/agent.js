@@ -3,6 +3,7 @@
 
 import crypto from "node:crypto";
 import { Message } from "./context/message.js";
+import { MessageLog } from "./context/message-log.js";
 import { LlmError } from "./llm-client/client.js";
 import { OUTPUT_EVENT } from "./context/output.js";
 import { formatError, AgentError } from "./error.js";
@@ -43,7 +44,7 @@ export class Agent {
     this._hooks = options.hooks;
     this._toolRegistry = options.toolRegistry;
     this._llmClient = options.llmClient;
-    this._context = [];
+    this._log = new MessageLog();
     this.__model = options.model;
     this._maxIterations = options.maxIterations || 1000;
     this._maxTokens = options.maxTokens || DEFAULT_MAX_TOKENS;
@@ -124,8 +125,12 @@ export class Agent {
     }
   }
 
-  get context() {
-    return this._context;
+  /**
+   * The MessageLog instance — the canonical way to read or mutate messages.
+   * @type {MessageLog}
+   */
+  get log() {
+    return this._log;
   }
   get iterationCount() {
     return this._iterationCount;
@@ -160,6 +165,17 @@ export class Agent {
    */
   get llmClient() {
     return this._llmClient;
+  }
+
+  /**
+   * Replace the output sink at runtime.
+   * Allows the agent's event emissions to be re-routed (e.g., from a CLI sink
+   * to a fanout sink for WebSocket sessions) without reaching into private state.
+   *
+   * @param {Object|null} sink — The new output sink, or null to detach.
+   */
+  setSink(sink) {
+    this._sink = sink;
   }
 
   // ── Run Loop ──────────────────────────────────────────────────────────────
@@ -275,7 +291,7 @@ export class Agent {
 
         await this._hooks.notifyHooksAsync(HOOKS.MESSAGES_AFTER_LLM, {
           response,
-          messages: this._context,
+          messages: this._log.getAll(),
         });
 
         // Emit token usage
@@ -295,7 +311,7 @@ export class Agent {
           reasoningContent: response.fullReasoning,
           toolCalls: response.finalToolCalls,
         });
-        this._context.push(assistantMsg);
+        this.addMessage(assistantMsg);
 
         // Tool execution
         if (response.finalToolCalls) {
@@ -366,13 +382,7 @@ export class Agent {
    * @returns {Message[]}
    */
   buildMessages() {
-    if (this._systemPrompt) {
-      return [
-        new Message({ role: "system", content: this._systemPrompt }),
-        ...this._context,
-      ];
-    }
-    return [...this._context];
+    return this._log.buildMessages(this._systemPrompt);
   }
 
   /**
@@ -735,12 +745,12 @@ export class Agent {
   /**
    * Add a single message to the agent's context.
    * Fires the CONTEXT_MESSAGE hook so extensions (session-log, etc.) are notified.
-   * Use this instead of directly pushing to _context.
+   * Use this instead of directly pushing to _log.
    *
    * @param {Message} msg - The message to add.
    */
   addMessage(msg) {
-    this._context.push(msg);
+    this._log.push(msg);
     this._hooks.notifyHooksAsync(HOOKS.CONTEXT_MESSAGE, {
       message: msg,
       agent: this,
@@ -755,8 +765,8 @@ export class Agent {
    * @param {Array} newContext - The new context array (array of Message objects or plain objects).
    */
   replaceContext(newContext) {
-    const oldContext = this._context;
-    this._context = newContext;
+    const oldContext = this._log.getAll();
+    this._log.replace(newContext);
     this._hooks.notifyHooksAsync(HOOKS.CONTEXT_REPLACED, {
       agent: this,
       oldContext,
@@ -796,7 +806,7 @@ export class Agent {
    * Clear the context and start fresh.
    */
   async clearContext() {
-    this.replaceContext([]);
+    this._log.clear();
     this._systemPrompt = null;
     this._iterationCount = 0;
     await this.ensureSystemPrompt();
@@ -888,7 +898,7 @@ export class Agent {
   serialize() {
     return {
       sessionId: this._sessionId,
-      context: this._context.map((m) => m.toJSON()),
+      context: this._log.toJSON(),
       model: this.model,
       iterationCount: this._iterationCount,
       reasoningEffort: this._reasoningEffort,
@@ -902,7 +912,7 @@ export class Agent {
    */
   deserialize(data) {
     this._sessionId = data.sessionId;
-    this.replaceContext(data.context.map((m) => new Message(m)));
+    this._log.replace(data.context.map((m) => new Message(m)));
     this.model = data.model;
     this._iterationCount = data.iterationCount || 0;
     this._reasoningEffort = data.reasoningEffort !== undefined ? data.reasoningEffort : undefined;

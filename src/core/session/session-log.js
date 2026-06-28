@@ -6,6 +6,7 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import { readFile, access, readdir } from "node:fs/promises";
 import { Message } from "../context/message.js";
+import { logger } from "../logger.js";
 
 // ── Log Source Types ────────────────────────────────────────────────────────
 
@@ -66,8 +67,10 @@ export async function readSessionEntries(sessionId) {
         lastResetIdx = entries.length;
       }
     } catch {
-      // Skip malformed lines
-      // TODO: log warning
+      logger.warn(
+        `[session-log] malformed JSON line in session ${sessionId}: ` +
+        `line ${i + 1} — "${trimmed.slice(0, 80)}${trimmed.length > 80 ? "..." : ""}"`,
+      );
     }
   }
 
@@ -100,8 +103,10 @@ export async function readAllSessions() {
       try {
         allEntries.push(JSON.parse(trimmed));
       } catch {
-        // Skip malformed lines
-        // TODO: log warning
+        logger.warn(
+          `[session-log] malformed JSON in ${file}: ` +
+          `"${trimmed.slice(0, 80)}${trimmed.length > 80 ? "..." : ""}"`,
+        );
       }
     }
   }
@@ -162,7 +167,7 @@ export function replayEntriesIntoContext(agent, entries) {
       case LOG_SOURCE.PROMPT: {
         // Both INPUT and PROMPT are user messages in context
         // Preserve images if present
-        agent.context.push(
+        agent.addMessage(
           new Message({
             role: "user",
             content: entry.content,
@@ -175,7 +180,7 @@ export function replayEntriesIntoContext(agent, entries) {
 
       case LOG_SOURCE.LLM: {
         // Assistant response — preserve reasoning content and tool calls
-        agent.context.push(
+        agent.addMessage(
           new Message({
             role: "assistant",
             content: entry.content,
@@ -189,7 +194,7 @@ export function replayEntriesIntoContext(agent, entries) {
 
       case LOG_SOURCE.TOOL_RESULT: {
         // Tool result
-        agent.context.push(
+        agent.addMessage(
           new Message({
             role: "tool",
             content: entry.content,
@@ -205,7 +210,7 @@ export function replayEntriesIntoContext(agent, entries) {
       case LOG_SOURCE.COMPACTION: {
         // Compaction summary — added as user message in context
         // (the agent sees it as a user message with <m_r3hthso4y9htef72> tags)
-        agent.context.push(
+        agent.addMessage(
           new Message({ role: "user", content: entry.content }),
         );
         replayed++;

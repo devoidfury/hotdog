@@ -102,7 +102,7 @@ export class TaskManager {
     if (this._sessionManager) {
       const agent = this._sessionManager.getAgent();
       if (agent) {
-        agent.context.push(
+        agent.addMessage(
           new Message({
             role: "system",
             content: `[Task ${taskId} completed]\n${result}`,
@@ -262,7 +262,7 @@ export class TaskManager {
     }
 
     // If no follow-up queue, add directly to context
-    task.agent.context.push(new Message({ role: "user", content: message }));
+    task.agent.addMessage(new Message({ role: "user", content: message }));
     return true;
   }
 

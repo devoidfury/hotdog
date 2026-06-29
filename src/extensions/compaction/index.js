@@ -239,7 +239,7 @@ export function create(core) {
         // Create a summary message with marker wrapper
         const summaryMsg = new Message({
           role: 'user',
-          content: `<m_ckga3qxdoia7896k>${result.summary}</m_ckga3qxdoia7896k>`,
+          content: `<previous-context-summary>${result.summary}</previous-context-summary>`,
         });
 
         // Replace the compacted portion

@@ -295,7 +295,7 @@ export function validateConfig(config, extensionSchemas) {
  */
 export function failOnInvalidConfig(result) {
   if (!result.valid) {
-    ConfigError.ValidationError(result.errors);
+    throw ConfigError.ValidationError(result.errors);
   }
 }
 

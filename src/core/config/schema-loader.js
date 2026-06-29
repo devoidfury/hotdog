@@ -12,6 +12,7 @@
 import { join } from "node:path";
 import { getNested } from "../../utils/objects.js";
 import configSchema from "../core.config.json" with { type: "json" };
+import { camelCase } from "../../utils/strings.js";
 
 // ── Built-in cast functions ────────────────────────────────────────────────
 
@@ -78,9 +79,9 @@ const CAST_BUILTINS = {
   any: (v) => v,
 
   /**
-   * Accept non-empty arrays only.
+   * Accept arrays.
    */
-  nonemptyArray: (v) => (Array.isArray(v) && v.length > 0 ? v : undefined),
+  array: (v) => (Array.isArray(v) ? v : undefined),
 };
 
 // ── Built-in compute functions ────────────────────────────────────────────
@@ -266,12 +267,7 @@ export function loadExtensionSchemas(extensions) {
   for (const ext of extensions) {
     if (!ext.configSchema) continue;
 
-    const configKey = ext.name
-      .split("-")
-      .map((part, i) =>
-        i === 0 ? part : part.charAt(0).toUpperCase() + part.slice(1),
-      )
-      .join("");
+    const configKey = camelCase(ext.name);
 
     // If extension has layers in its configSchema properties, extract them
     if (ext.configSchema.properties) {
@@ -355,10 +351,7 @@ export function resolveLayerValue(layer, context) {
     case "provider":
       return getNested(context.provider, layer.path);
     case "providerDefault":
-      if (
-        context.provider?.models?.length &&
-        context.provider.models[0].name
-      ) {
+      if (context.provider?.models?.length && context.provider.models[0].name) {
         return context.provider.models[0].name;
       }
       return undefined;

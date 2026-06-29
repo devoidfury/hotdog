@@ -20,7 +20,7 @@
         "default": [],
         "description": "List of skill names to preload",
         "layers": [
-          { "source": "config", "key": "preloadSkills", "predicate": "nonemptyArray" },
+          { "source": "config", "key": "preloadSkills", "predicate": "array" },
           { "default": [] }
         ]
       },

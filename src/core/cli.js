@@ -4,6 +4,7 @@
 
 import { logger } from "./logger.js";
 import { CliError } from "./error.js";
+import { parseCliFlagKey } from "../utils/strings.js";
 
 // Structural flags that are NOT config values (config file paths, model selection, etc.)
 // These are parsed directly and passed to the config resolver as CLI context.
@@ -61,7 +62,11 @@ export function parseArgs(configRegistry = null, knownSubcommands = null) {
 
   // Structural flags (always available, no config needed)
   for (const flag of STRUCTURAL_FLAGS) {
-    const entry = { ...flag, hasValue: flag.type !== "boolean", structural: true };
+    const entry = {
+      ...flag,
+      hasValue: flag.type !== "boolean",
+      structural: true,
+    };
     if (flag.short) flagMap.set(flag.short, entry);
     flagMap.set(flag.long, entry);
   }
@@ -82,17 +87,6 @@ export function parseArgs(configRegistry = null, knownSubcommands = null) {
     }
   }
 
-  // Helper: extract option key from flag name (kebab-case → camelCase)
-  function extractKey(flagName) {
-    return flagName
-      .replace(/^-+/, "")
-      .split("-")
-      .map((part, i) =>
-        i === 0 ? part : part.charAt(0).toUpperCase() + part.slice(1),
-      )
-      .join("");
-  }
-
   let i = 0;
   while (i < args.length) {
     const arg = args[i];
@@ -111,8 +105,8 @@ export function parseArgs(configRegistry = null, knownSubcommands = null) {
 
       // Handle boolean flags — all handled generically now
       if (!flagDef.hasValue) {
-        const key = extractKey(flagDef.long || arg);
-        // Semantic renames only — camelCase conversion is handled by extractKey()
+        const key = parseCliFlagKey(flagDef.long || arg);
+        // Semantic renames only — camelCase conversion is handled by parseCliFlagKey()
         const keyMap = { json: "wantsJson" };
         options[keyMap[key] || key] = true;
         i++;
@@ -141,7 +135,7 @@ export function parseArgs(configRegistry = null, knownSubcommands = null) {
 
       // Store in options using the extracted key
       const flagLong = flagDef.longName || flagDef.long;
-      const key = extractKey(flagLong);
+      const key = parseCliFlagKey(flagLong);
       options[key] = parsedValue;
       i++;
       continue;

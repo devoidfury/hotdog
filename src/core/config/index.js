@@ -53,6 +53,7 @@ import {
 } from "./schema-loader.js";
 import { loadProfileFiles, allProfilesForSwitch } from "./profiles.js";
 import { buildModelRegistry, initSystemPromptTemplate } from "./providers.js";
+import { camelCase } from "../../utils/strings.js";
 
 // ── Config Directory Resolution ────────────────────────────────────────
 
@@ -142,9 +143,7 @@ export function normalizeConfigKeys(obj) {
 
   const normalized = {};
   for (const [key, value] of Object.entries(obj)) {
-    // Convert snake_case to camelCase
-    const camelKey = key.replace(/_([a-z])/g, (_, c) => c.toUpperCase());
-    normalized[camelKey] = normalizeConfigKeys(value);
+    normalized[camelCase(camelKey)] = normalizeConfigKeys(value);
   }
   return normalized;
 }
@@ -359,10 +358,6 @@ export async function buildAgentConfig(options) {
     cli,
     config,
     configDir,
-    provider: null,
-    profile: null,
-    profileName: null,
-    profilesPath: null,
     extensions: {},
   };
 
@@ -405,8 +400,6 @@ export async function buildAgentConfig(options) {
       whitelistTools: null,
       blacklistTools: [],
       skills: [],
-      role: null,
-      model: null,
       manager: false,
       cwdBoundary: null,
     };
@@ -429,9 +422,7 @@ export async function buildAgentConfig(options) {
 
   // ── Full declarative resolution ────────────────────────────────────────
   context = {
-    cli,
-    config,
-    configDir,
+    ...context,
     provider,
     profile,
     profileName,

@@ -3,15 +3,15 @@
 // Reads aspect names from profile file front matter or config file.
 
 import fsPromises from "node:fs/promises";
-import { join } from "node:path";
+import path from "node:path";
 import { HOOKS } from "../../core/hooks.js";
 import { logger } from "../../core/logger.js";
 import { render } from "../../utils/render.js";
 import { parseFrontMatter, loadAspects } from "../../utils/file-utils.js";
-import { resolveConfigDir, configSubPath } from "../../core/config/index.js";
+import { resolveConfigDir } from "../../core/config/index.js";
 import { DEFAULT_PROFILES_SUBPATH } from "../../core/config/defaults.js";
 
-const TEMPLATE_PATH = join(import.meta.dirname, "aspects_chunk.md");
+const TEMPLATE_PATH = path.join(import.meta.dirname, "aspects_chunk.md");
 
 /**
  * Resolve aspect names from profile file and/or config.
@@ -29,10 +29,10 @@ async function resolveAspectNames(core) {
   const profilesPath =
     resolved.profilesPath ||
     rawConfig.profilesPath ||
-    configSubPath(configDir, DEFAULT_PROFILES_SUBPATH);
+    path.join(configDir, DEFAULT_PROFILES_SUBPATH);
 
   // Try to read aspect names from profile file front matter
-  const profileFilePath = join(profilesPath, `${profileName}.profile.md`);
+  const profileFilePath = path.join(profilesPath, `${profileName}.profile.md`);
   try {
     const content = await fsPromises.readFile(profileFilePath, "utf-8");
     const parsed = parseFrontMatter(content);
@@ -65,7 +65,7 @@ async function buildAspectsChunk(aspectNames, profilesPath) {
 
   // Aspects are in a sibling directory to profiles: config/aspects/
   // (not config/profiles/aspects/)
-  const aspectsDir = join(profilesPath, "..", "aspects");
+  const aspectsDir = path.join(profilesPath, "..", "aspects");
   const aspects = await loadAspects(aspectNames, aspectsDir);
 
   if (aspects.length === 0) {
@@ -97,7 +97,7 @@ export function create(core) {
         const profilesPath =
           resolved.profilesPath ||
           rawConfig.profilesPath ||
-          configSubPath(configDir, DEFAULT_PROFILES_SUBPATH);
+          path.join(configDir, DEFAULT_PROFILES_SUBPATH);
         const content = await buildAspectsChunk(aspectNames, profilesPath);
         return { name: "guidelines", priority: 200, content };
       },

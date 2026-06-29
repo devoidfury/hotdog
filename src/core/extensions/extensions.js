@@ -432,16 +432,15 @@ export function resolveLoadOrder(extensions, serviceOverrides = {}) {
     }
   }
 
+  const cmp = (a, b) => a.loadOrder - b.loadOrder || a.name.localeCompare(b.name);
+
   const queue = extensions
     .filter((e) => (inDegree.get(e.name) || 0) === 0)
-    .sort((a, b) => a.loadOrder - b.loadOrder || a.name.localeCompare(b.name));
+    .sort(cmp);
 
   const result = [];
 
   while (queue.length > 0) {
-    queue.sort(
-      (a, b) => a.loadOrder - b.loadOrder || a.name.localeCompare(b.name),
-    );
     const current = queue.shift();
     result.push(current);
 
@@ -449,7 +448,12 @@ export function resolveLoadOrder(extensions, serviceOverrides = {}) {
       inDegree.set(dependent, inDegree.get(dependent) - 1);
       if (inDegree.get(dependent) === 0) {
         const depExt = extensions.find((e) => e.name === dependent);
-        if (depExt) queue.push(depExt);
+        if (depExt) {
+          // Insert in sorted position instead of appending and re-sorting the
+          // entire queue each iteration (O(n) vs O(n log n) per iteration).
+          const insertIdx = queue.findIndex((e) => cmp(depExt, e) < 0);
+          queue.splice(insertIdx === -1 ? queue.length : insertIdx, 0, depExt);
+        }
       }
     }
   }

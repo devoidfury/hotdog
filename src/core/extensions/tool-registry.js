@@ -38,6 +38,15 @@ export class ToolRegistry {
   }
 
   /**
+   * Remove a single tool from the registry by name.
+   * @param {string} name - Tool name to remove.
+   * @returns {boolean} true if the tool existed and was removed.
+   */
+  remove(name) {
+    return this.tools.delete(name);
+  }
+
+  /**
    * Clear all tools from the registry.
    */
   clear() {

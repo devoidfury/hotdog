@@ -762,7 +762,7 @@ export class Agent {
    * Fires the CONTEXT_REPLACED hook so extensions can react to the replacement.
    * Used by compaction and other context-modifying operations.
    *
-   * @param {Array} newContext - The new context array (array of Message objects or plain objects).
+   * @param {Message[]} newContext - The new context array (array of Message instances).
    */
   replaceContext(newContext) {
     const oldContext = this._log.getAll();

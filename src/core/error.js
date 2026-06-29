@@ -147,6 +147,12 @@ export class ConfigError extends AppError {
   static LoadFailed(path, msg) {
     return new ConfigError(`Error loading config from ${path}: ${msg}`);
   }
+
+  static ValidationError(errors) {
+    return new ConfigError(
+      `Configuration validation failed: ${errors.join("; ")}`,
+    );
+  }
 }
 
 /**

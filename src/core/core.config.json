@@ -287,5 +287,97 @@
       { "source": "config", "key": "hookTrace" },
       { "default": false }
     ]
+  },
+  "profileName": {
+    "type": "string",
+    "cliFlag": { "short": "-p", "long": "--profile", "type": "string", "description": "Profile name" },
+    "layers": [
+      { "source": "cli", "key": "profile" },
+      { "source": "config", "key": "profile" },
+      { "default": "default" }
+    ]
+  },
+  "profilesPath": {
+    "type": "string",
+    "cliFlag": { "long": "--profiles-path", "type": "string", "description": "Profiles directory path" },
+    "layers": [
+      { "source": "cli", "key": "profilesPath" },
+      { "source": "config", "key": "profilesPath" },
+      { "compute": "joinConfigDir:profiles" }
+    ]
+  },
+  "provider": {
+    "type": "string",
+    "cliFlag": { "long": "--provider", "type": "string", "description": "Provider name" },
+    "layers": [
+      { "source": "cli", "key": "provider" },
+      { "source": "config", "key": "defaultProvider" },
+      { "default": null }
+    ]
+  },
+  "systemPromptTemplate": {
+    "type": "string",
+    "cliFlag": { "long": "--system-prompt-template", "type": "string", "description": "System prompt template file path" },
+    "layers": [
+      { "source": "cli", "key": "systemPromptTemplate" },
+      { "source": "config", "key": "systemPromptTemplate" },
+      { "default": null }
+    ]
+  },
+  "profiles": {
+    "type": "object",
+    "layers": [
+      { "source": "config", "key": "profiles" },
+      { "default": {} }
+    ]
+  },
+  "extensionPaths": {
+    "type": "array",
+    "layers": [
+      { "source": "config", "key": "extensionPaths" },
+      { "default": ["builtins"] }
+    ]
+  },
+  "extensionAutoload": {
+    "type": "boolean",
+    "layers": [
+      { "source": "config", "key": "extensionAutoload" },
+      { "default": false }
+    ]
+  },
+  "extensions": {
+    "type": "array",
+    "layers": [
+      { "source": "config", "key": "extensions" },
+      { "default": [] }
+    ]
+  },
+  "mcpServers": {
+    "type": "array",
+    "layers": [
+      { "source": "config", "key": "mcpServers" },
+      { "default": [] }
+    ]
+  },
+  "defaultSubcommand": {
+    "type": "string",
+    "layers": [
+      { "source": "config", "key": "defaultSubcommand" },
+      { "default": "cli" }
+    ]
+  },
+  "temperature": {
+    "type": "number",
+    "layers": [
+      { "source": "config", "key": "temperature" },
+      { "default": null }
+    ]
+  },
+  "defaultProvider": {
+    "type": "string",
+    "layers": [
+      { "source": "config", "key": "defaultProvider" },
+      { "default": null }
+    ]
   }
 }

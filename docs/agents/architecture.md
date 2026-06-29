@@ -29,11 +29,9 @@ Argument parsing with support for dynamic CLI flags registered by extensions via
 Split into sub-modules. The single source of truth is `src/core/core.config.json`. Key exports:
 - `src/core/config/index.js` — `loadConfig(configPath, cliConfigDir, extParams)`, `buildConfig(cli)`, `validateConfig()`, `getDefaultConfig()`, `normalizeConfigKeys()`
 - `src/core/config/defaults.js` — `DEFAULT_*` constants (model, URL, timeouts, role, paths, etc.)
-- `src/core/config/schema.js` — `CONFIG_SCHEMA` re-exported from schema-loader
-- `src/core/config/schema-loader.js` — Reads `core.config.json`, builds resolution layers, cast functions
+- `src/core/config/schema-loader.js` — reads `core.config.json`, builds `CONFIG_SCHEMA`, cast functions, CLI flags, and resolver (`resolveKey()`, `resolveAll()`, `resolveModel()`)
 - `src/core/config/profiles.js` — `loadProfileFile()`, `loadProfileFiles()`, `resolveProfile()`, `mergeProfile()`
 - `src/core/config/providers.js` — `buildModelRegistry()`, `initSystemPromptTemplate()`
-- `src/core/config/resolver.js` — `resolveAll()`, `resolveModel()`, `resolveModelWithProvider()`
 
 ### Config Registry (`src/core/extensions/config-registry.js`)
 Manages extension-registered CLI flags and config parameters. Config params are primarily defined in `extension.json` configSchema (single source of truth), with defaults automatically extracted and registered. Extensions can still use `CONFIG_CLI_FLAGS_REGISTER` and `CONFIG_PARAMS_REGISTER` hooks for programmatic control when needed.

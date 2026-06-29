@@ -10,14 +10,13 @@ import {
   DEFAULT_PROFILES_SUBPATH,
   DEFAULT_CONFIG_FILENAME,
 } from "../../core/config/defaults.js";
-import {
-  loadConfig,
-  resolveConfigDir,
-  configSubPath,
-} from "../../core/config/index.js";
+import { loadConfig, resolveConfigDir } from "../../core/config/index.js";
 import { loadProfileFiles } from "../../core/config/profiles.js";
-import { CONFIG_SCHEMA as CONFIG_KEYS } from "../../core/config/schema.js";
-import { resolveLayerValue } from "../../core/config/resolver.js";
+import {
+  CONFIG_SCHEMA as CONFIG_KEYS,
+  resolveKey,
+  resolveLayerValue,
+} from "../../core/config/schema-loader.js";
 import { Agent } from "../../core/agent.js";
 import path from "node:path";
 import fs from "node:fs/promises";
@@ -208,6 +207,8 @@ function printInfoJson(
 
 /**
  * Trace config resolution for a single key, showing which layer provided the value.
+ * Uses resolveKey() from the schema-loader for the core resolution logic, then
+ * walks layers separately to build the trace display.
  */
 function traceConfigResolution(keyName, schema, context) {
   const { layers } = schema;
@@ -219,26 +220,26 @@ function traceConfigResolution(keyName, schema, context) {
     resolvedFrom: null,
   };
 
+  // Use the real resolver to get the final value
+  result.resolvedValue = resolveKey(keyName, schema, context);
+
+  // Walk layers to build trace display info (separate from resolution logic)
   for (const layer of layers) {
     const layerInfo = { ...layer, matched: false, value: undefined };
 
-    // Default layer always wins — return immediately, even if null
     if ("default" in layer) {
       const defaultValue = resolveLayerValue(layer, context);
       layerInfo.matched = true;
       layerInfo.value = defaultValue;
-      result.resolvedValue = defaultValue;
       result.resolvedFrom = "default";
       result.layers.push(layerInfo);
       break;
     }
 
     const value = resolveLayerValue(layer, context);
-
     layerInfo.value = value;
 
     if (value !== undefined && value !== null && value !== "") {
-      // Apply cast — converts value or returns undefined to skip
       if (layer.cast && typeof layer.cast === "function") {
         const casted = layer.cast(value, context);
         if (casted === undefined) {
@@ -246,18 +247,13 @@ function traceConfigResolution(keyName, schema, context) {
           result.layers.push(layerInfo);
           continue;
         }
-
         layerInfo.matched = true;
         layerInfo.castedValue = casted;
-        result.resolvedValue = casted;
         result.resolvedFrom = `${layer.source}${layer.key ? ` (${layer.key})` : layer.path ? ` (${layer.path})` : ""}`;
         result.layers.push(layerInfo);
         break;
       }
-
-      // No cast — return raw value
       layerInfo.matched = true;
-      result.resolvedValue = value;
       result.resolvedFrom = `${layer.source}${layer.key ? ` (${layer.key})` : layer.path ? ` (${layer.path})` : ""}`;
       result.layers.push(layerInfo);
       break;
@@ -277,7 +273,7 @@ async function printConfigDebug(cli, config, providers, resolved) {
   const profileName = cli.profile || config.profile || "default";
   const configDir = resolved.configDir || resolveConfigDir(cli.configDir);
   const profilesPath =
-    config.profilesPath || configSubPath(configDir, DEFAULT_PROFILES_SUBPATH);
+    config.profilesPath || path.join(configDir, DEFAULT_PROFILES_SUBPATH);
   const profileFiles = await loadProfileFiles(profilesPath);
   const configProfile = config.profiles?.[profileName] ?? null;
   const fileProfile = profileFiles[profileName] ?? null;
@@ -387,10 +383,7 @@ async function printConfigDebug(cli, config, providers, resolved) {
   console.log();
   const resolvedConfigDir =
     resolved.configDir || resolveConfigDir(cli.configDir);
-  const resolvedConfig = configSubPath(
-    resolvedConfigDir,
-    DEFAULT_CONFIG_FILENAME,
-  );
+  const resolvedConfig = path.join(resolvedConfigDir, DEFAULT_CONFIG_FILENAME);
 
   const resolvedExists = await checkFileExists(resolvedConfig);
 

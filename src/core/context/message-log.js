@@ -15,7 +15,7 @@ export class MessageLog {
    */
   constructor(messages = []) {
     /** @type {Message[]} */
-    this._messages = messages;
+    this._messages = [...messages];
   }
 
   // ── Mutators ────────────────────────────────────────────────────────────
@@ -55,7 +55,7 @@ export class MessageLog {
         );
       }
     }
-    this._messages = messages;
+    this._messages = [...messages];
   }
 
   /**
@@ -153,9 +153,11 @@ export class MessageLog {
 
   /**
    * Allow `for (const msg of log)` iteration.
+   * Iterates over a defensive copy so concurrent mutations don't
+   * corrupt the iterator.
    * @returns {Iterator<Message>}
    */
   [Symbol.iterator]() {
-    return this._messages[Symbol.iterator]();
+    return this.getAll()[Symbol.iterator]();
   }
 }

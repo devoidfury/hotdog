@@ -19,8 +19,7 @@ import { validate as validateSchema } from "../../utils/json-schema.js";
 // ── Re-exports from sub-modules ──────────────────────────────────────────
 
 export * from "./defaults.js";
-export * from "./schema.js";
-export * from "./resolver.js";
+export * from "./schema-loader.js";
 export * from "./profiles.js";
 export * from "./providers.js";
 
@@ -45,12 +44,13 @@ import {
   DEFAULT_CHAT_TIMEOUT_SECS,
   DEFAULT_EMBEDDINGS_TIMEOUT_SECS,
 } from "./defaults.js";
-import { CONFIG_SCHEMA } from "./schema.js";
+import { CONFIG_SCHEMA } from "./schema-loader.js";
 import {
   resolveAll,
+  resolveKey,
   resolveModel,
   resolveModelWithProvider,
-} from "./resolver.js";
+} from "./schema-loader.js";
 import { loadProfileFiles, allProfilesForSwitch } from "./profiles.js";
 import { buildModelRegistry, initSystemPromptTemplate } from "./providers.js";
 
@@ -59,9 +59,9 @@ import { buildModelRegistry, initSystemPromptTemplate } from "./providers.js";
 /**
  * Resolve the config directory with the following priority:
  * 1. CLI argument (--config-dir)
- * 2. ./config (CWD-relative)
- * 3. OA_AGENT_CONFIG_DIR environment variable
- * 4. /etc/oa-agent
+ * 2. OA_AGENT_CONFIG_DIR environment variable
+ * 3. /etc/oa-agent
+ * 4. ./config (CWD-relative)
  * 5. ~/.config/oa-agent (XDG)
  *
  * @param {string} [cliConfigDir] - Config directory from CLI --config-dir flag.
@@ -70,14 +70,6 @@ import { buildModelRegistry, initSystemPromptTemplate } from "./providers.js";
 export function resolveConfigDir(cliConfigDir) {
   if (cliConfigDir) {
     return path.resolve(cliConfigDir);
-  }
-
-  const cwdConfig = path.resolve(cwd(), "config");
-  try {
-    fs.accessSync(cwdConfig);
-    return cwdConfig;
-  } catch {
-    // Not a directory or doesn't exist
   }
 
   const envConfigDir = process.env.OA_AGENT_CONFIG_DIR;
@@ -93,18 +85,15 @@ export function resolveConfigDir(cliConfigDir) {
     // Not found
   }
 
-  return path.join(os.homedir(), ".config", "oa-agent");
-}
+  const cwdConfig = path.resolve(cwd(), "config");
+  try {
+    fs.accessSync(cwdConfig);
+    return cwdConfig;
+  } catch {
+    // Not a directory or doesn't exist
+  }
 
-/**
- * Get a sub-path within the config directory.
- *
- * @param {string} configDir - Resolved config directory.
- * @param {string} subPath - Sub-path (e.g. "profiles", "prompts", "defaults.json").
- * @returns {string} Full path to the sub-resource.
- */
-export function configSubPath(configDir, subPath) {
-  return path.join(configDir, subPath);
+  return path.join(os.homedir(), ".config", "oa-agent");
 }
 
 // ── Extension Config Helpers ──────────────────────────────────────────────
@@ -229,7 +218,7 @@ export async function loadConfig(configPath, cliConfigDir, extParams) {
   if (!configPathToUse) {
     // Resolve the config directory and look for defaults.json
     const configDir = resolveConfigDir(cliConfigDir);
-    const configFilePath = configSubPath(configDir, DEFAULT_CONFIG_FILENAME);
+    const configFilePath = path.join(configDir, DEFAULT_CONFIG_FILENAME);
     try {
       await fsPromises.access(configFilePath);
       configPathToUse = configFilePath;
@@ -306,11 +295,7 @@ export function validateConfig(config, extensionSchemas) {
  */
 export function failOnInvalidConfig(result) {
   if (!result.valid) {
-    logger.error("Configuration validation failed:");
-    for (const error of result.errors) {
-      logger.error(`  - ${error}`);
-    }
-    process.exit(1);
+    ConfigError.ValidationError(result.errors);
   }
 }
 
@@ -344,7 +329,7 @@ export async function buildConfig(cliArgv) {
     defaultRole: "",
     profilesPath: cliArgv.skillsPath
       ? path.join(cliArgv.skillsPath, "..", "profiles")
-      : configSubPath(configDir, DEFAULT_PROFILES_SUBPATH),
+      : path.join(configDir, DEFAULT_PROFILES_SUBPATH),
   });
 
   const modelRegistry = buildModelRegistry({
@@ -369,29 +354,41 @@ export async function buildAgentConfig(options) {
     profilesPath: givenProfilesPath,
   } = options;
 
+  // ── Early context (provider/profile not yet resolved) ────────────────────
+  let context = {
+    cli,
+    config,
+    configDir,
+    provider: null,
+    profile: null,
+    profileName: null,
+    profilesPath: null,
+    extensions: {},
+  };
+
+  // Resolve values that don't depend on profile/provider via schema layers
+  const profileName = resolveKey(
+    "profileName",
+    CONFIG_SCHEMA.profileName,
+    context,
+  );
   const profilesPath =
     givenProfilesPath ||
-    (configDir
-      ? configSubPath(configDir, DEFAULT_PROFILES_SUBPATH)
-      : DEFAULT_PROFILES_PATH);
+    resolveKey("profilesPath", CONFIG_SCHEMA.profilesPath, context);
 
-  // Load profile files
+  // Load profile files (imperative — file I/O)
   const profileFiles = await loadProfileFiles(profilesPath);
-  const profileName = cli.profile || config.profile || "default";
-
-  // Get config profile
   const configProfile = config.profiles?.[profileName] ?? null;
-
-  // Get file profile
   const fileProfile = profileFiles[profileName] ?? null;
 
-  // Provider
-  const providerName = cli.provider || config.defaultProvider;
+  // Resolve provider name via schema, then look up the provider object
+  const providerName = resolveKey("provider", CONFIG_SCHEMA.provider, context);
   const provider = providerName
     ? (providers.find((p) => p.name === providerName) ?? null)
     : null;
 
   // Profile merge — file profile wins for role, whitelist, blacklist, manager
+  // (stays imperative — complex merge logic)
   let profile;
   if (configProfile || fileProfile) {
     profile = { ...configProfile };
@@ -416,28 +413,22 @@ export async function buildAgentConfig(options) {
   }
 
   // ── Build extension config context ────────────────────────────────────
-  // Collect extension config objects from the loaded config for extension layers
   const extensions = {};
   for (const [key, value] of Object.entries(config)) {
-    // Extension config keys are camelCase versions of extension names
-    // e.g., coreTools, compaction, mcpClient, agentsMd, etc.
     if (
       typeof value === "object" &&
       value !== null &&
       !Array.isArray(value) &&
       !["profiles", "provider"].includes(key)
     ) {
-      // Check if this looks like an extension config key
-      // (starts lowercase, has uppercase letter = camelCase)
       if (/^[a-z][a-zA-Z]+$/.test(key) && key !== "defaultModel") {
         extensions[key] = value;
       }
     }
   }
 
-  // ── Declarative resolution ────────────────────────────────────────────
-
-  const context = {
+  // ── Full declarative resolution ────────────────────────────────────────
+  context = {
     cli,
     config,
     configDir,
@@ -447,12 +438,11 @@ export async function buildAgentConfig(options) {
     profilesPath,
     extensions,
   };
-
   const resolved = resolveAll(CONFIG_SCHEMA, context);
 
-  // ── Non-declarative values ────────────────────────────────────────────
+  // ── Truly imperative values ────────────────────────────────────────────
 
-  // Model — needs resolveModelWithProvider transform
+  // Model — needs resolveModelWithProvider transform (not a simple layer walk)
   const model = resolveModel(
     cli.model,
     configProfile?.model,
@@ -461,7 +451,7 @@ export async function buildAgentConfig(options) {
     defaultModel,
   );
 
-  // Profile body with template rendering (stays imperative — file I/O + template)
+  // Profile body with template rendering (file I/O + template)
   const profileBody = fileProfile?.body?.trim()
     ? cli.prompt
       ? (() => {
@@ -474,14 +464,14 @@ export async function buildAgentConfig(options) {
       : fileProfile.body
     : "";
 
-  // System prompt template
+  // System prompt template (file I/O)
   const systemPromptTemplate = await initSystemPromptTemplate(
     cli.systemPromptTemplate || config.systemPromptTemplate,
     cli.configDir,
     resolveConfigDir,
   );
 
-  // All profiles for switch
+  // All profiles for switch (merge + format)
   const profiles = allProfilesForSwitch({
     profileFiles,
     configProfiles: config.profiles || {},
@@ -489,16 +479,12 @@ export async function buildAgentConfig(options) {
   });
 
   return {
-    // Declaratively resolved values
     ...resolved,
-    // Non-declarative values
+    // Values not in schema (imperative-only)
     model,
-    profileName,
     configDir,
-    profilesPath,
     profile,
     profileBody,
-    provider,
     activeProvider: provider?.name || null,
     systemPromptTemplate,
     profiles,

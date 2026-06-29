@@ -21,13 +21,11 @@ async function handleWebuiSubcommand(cli, core) {
     port: config.port ?? DEFAULTS.port,
     host: config.host ?? DEFAULTS.host,
     apiKey: config.apiKey ?? DEFAULTS.apiKey,
-    sessionTokenTtlMin: config.sessionTokenTtlMin ?? DEFAULTS.sessionTokenTtlMin,
+    sessionTokenTtlMin:
+      config.sessionTokenTtlMin ?? DEFAULTS.sessionTokenTtlMin,
   };
 
   const { server } = await createWebuiServer(core, resolvedConfig, UI_DIR);
-
-  // Block indefinitely — the server runs until killed
-  await new Promise(() => {});
 }
 
 /**
@@ -44,7 +42,8 @@ export function create(core) {
           // Register the "webui" subcommand
           [HOOKS.CLI_SUBCOMMANDS_REGISTER]: async (registry) => {
             registry.register("webui", {
-              description: "Start the WebUI server (HTTP + WebSocket + frontend)",
+              description:
+                "Start the WebUI server (HTTP + WebSocket + frontend)",
               handler: handleWebuiSubcommand,
             });
           },

@@ -6,3 +6,5 @@ coveragePathIgnorePatterns = [
     "**/*.test.js",
     "tests/**",
 ]
+coverageThreshold = 0.80
+coverageSkipTestFiles = true

@@ -7,6 +7,7 @@
 // without changing any extension that depends on it.
 
 import { logger } from "../logger.js";
+import { ExtensionError } from "../error.js";
 
 /**
  * Registry for abstract service implementations.
@@ -44,7 +45,7 @@ export class ServiceRegistry {
   get(name) {
     const impl = this.#services.get(name);
     if (impl === undefined) {
-      throw new Error(
+      throw new ExtensionError(
         `Service "${name}" is not registered. ` +
         `Ensure a provider extension is loaded and its create() has registered this service.`,
       );

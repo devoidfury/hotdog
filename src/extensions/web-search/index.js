@@ -1,5 +1,6 @@
 // Web search tool — search the internet via DuckDuckGo, Brave, Tavily, or SearXNG.
 
+import { ToolError } from "../../core/error.js";
 import {
   toolDef,
   param,
@@ -30,7 +31,7 @@ async function searchDuckDuckGo(query, maxResults, timeout) {
   });
 
   if (!response.ok) {
-    throw new Error(`DuckDuckGo search failed with status ${response.status}`);
+    throw new ToolError(`DuckDuckGo search failed with status ${response.status}`);
   }
 
   const html = await response.text();
@@ -90,7 +91,7 @@ function stripHtml(content) {
  */
 async function searchBrave(query, maxResults, timeout, apiKey) {
   if (!apiKey) {
-    throw new Error(
+    throw new ToolError(
       "Brave API key not configured. Set webSearch.braveApiKey in config or BRAVE_API_KEY env var."
     );
   }
@@ -107,7 +108,7 @@ async function searchBrave(query, maxResults, timeout, apiKey) {
   });
 
   if (!response.ok) {
-    throw new Error(`Brave search failed with status ${response.status}`);
+    throw new ToolError(`Brave search failed with status ${response.status}`);
   }
 
   const json = await response.json();
@@ -132,7 +133,7 @@ async function searchBrave(query, maxResults, timeout, apiKey) {
  */
 async function searchTavily(query, maxResults, timeout, apiKey) {
   if (!apiKey) {
-    throw new Error(
+    throw new ToolError(
       "Tavily API key not configured. Set webSearch.tavilyApiKey in config or TAVILY_API_KEY env var."
     );
   }
@@ -156,7 +157,7 @@ async function searchTavily(query, maxResults, timeout, apiKey) {
   });
 
   if (!response.ok) {
-    throw new Error(`Tavily search failed with status ${response.status}`);
+    throw new ToolError(`Tavily search failed with status ${response.status}`);
   }
 
   const json = await response.json();
@@ -181,7 +182,7 @@ async function searchTavily(query, maxResults, timeout, apiKey) {
  */
 async function searchSearXNG(query, maxResults, timeout, instanceUrl) {
   if (!instanceUrl) {
-    throw new Error(
+    throw new ToolError(
       "SearXNG instance URL not configured. Set webSearch.searxngInstanceUrl in config."
     );
   }
@@ -198,7 +199,7 @@ async function searchSearXNG(query, maxResults, timeout, instanceUrl) {
   });
 
   if (!response.ok) {
-    throw new Error(`SearXNG search failed with status ${response.status}`);
+    throw new ToolError(`SearXNG search failed with status ${response.status}`);
   }
 
   const json = await response.json();

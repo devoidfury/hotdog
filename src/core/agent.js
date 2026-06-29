@@ -45,7 +45,7 @@ export class Agent {
     this._toolRegistry = options.toolRegistry;
     this._llmClient = options.llmClient;
     this._log = new MessageLog();
-    this.__model = options.model;
+    this._model = options.model;
     this._maxIterations = options.maxIterations || 1000;
     this._maxTokens = options.maxTokens || DEFAULT_MAX_TOKENS;
     this._hideTools = options.hideTools !== false;
@@ -83,11 +83,11 @@ export class Agent {
   // ── Properties ────────────────────────────────────────────────────────────
 
   get model() {
-    return this.__model;
+    return this._model;
   }
   set model(v) {
-    const oldModel = this.__model;
-    this.__model = v;
+    const oldModel = this._model;
+    this._model = v;
     // Pull in the new model's config from the registry
     const entry = this._modelRegistry[v];
     if (entry) {
@@ -427,7 +427,7 @@ export class Agent {
     this._systemPrompt = await buildSystemPrompt({
       role: this._role || "",
       body: this._profileBody || "",
-      model: this.__model || "",
+      model: this._model || "",
       profileName: this._profileName || "default",
       chunks,
     });
@@ -777,8 +777,8 @@ export class Agent {
   // ── Helpers ───────────────────────────────────────────────────────────────
 
   _resolveModelConfig() {
-    const fromRegistry = this._modelRegistry[this.__model] || {
-      name: this.__model,
+    const fromRegistry = this._modelRegistry[this._model] || {
+      name: this._model,
       temperature: null,
       maxTokens: DEFAULT_MAX_TOKENS,
       reasoningEffort: undefined,

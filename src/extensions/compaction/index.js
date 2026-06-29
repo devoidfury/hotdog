@@ -14,6 +14,7 @@ import { TokenAwareStrategy } from './strategies/token-aware.js';
 import { estimateContextTokens } from './utils.js';
 import { HOOKS } from '../../core/hooks.js';
 import { logger } from '../../core/logger.js';
+import { LlmError } from '../../core/error.js';
 import { Message } from '../../core/context/message.js';
 
 /**
@@ -205,8 +206,26 @@ export function create(core) {
     const model = agent.model;
     const modelConfig = core.modelRegistry?.[model];
 
-    // Build the LLM chat function from the agent's LLM client
+    // Build the LLM chat function from the agent's LLM client.
+    // Wires a real AbortController to the agent's cancellation signals
+    // so compaction can be interrupted (task agents via _abortSignal,
+    // main agent via _cancelled flag checked in the event loop).
     const llmChat = async (chatMessages, chatModel) => {
+      const abortController = new AbortController();
+
+      // Wire to task-agent abort signal if present
+      if (agent._abortSignal) {
+        if (agent._abortSignal.aborted) {
+          abortController.abort();
+        } else {
+          agent._abortSignal.addEventListener(
+            'abort',
+            () => abortController.abort(),
+            { once: true },
+          );
+        }
+      }
+
       // Wrap plain objects as Message instances so _escapeMessages() can call .toJSON()
       const wrapped = chatMessages.map(
         (m) => new Message({ role: m.role, content: m.content }),
@@ -215,11 +234,16 @@ export function create(core) {
         wrapped,
         modelConfig || { name: chatModel, temperature: null, maxTokens: 4096 },
         [],
-        { aborted: false },
+        abortController.signal,
       );
 
       let fullText = '';
       for await (const event of stream) {
+        // Check main-agent cancellation flag each iteration (Ctrl+C, etc.)
+        if (agent._cancelled) {
+          abortController.abort();
+          throw LlmError.Cancelled('Compaction cancelled');
+        }
         if (event.type === 'content') {
           fullText += event.content;
         }

@@ -104,8 +104,8 @@ export class TaskManager {
       if (agent) {
         agent.addMessage(
           new Message({
-            role: "system",
-            content: `[Task ${taskId} completed]\n${result}`,
+            role: "user",
+            content: `<system-notice>[Task ${taskId} completed]\n${result}</system-notice>`,
           }),
         );
       }

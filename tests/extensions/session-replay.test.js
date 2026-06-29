@@ -139,9 +139,9 @@ test("replayEntriesIntoContext handles tool result entries", () => {
 test("replayEntriesIntoContext handles compaction entries as user messages", () => {
   const agent = createMockAgent();
   const entries = [{
-    role: "system",
+    role: "user",
     source: LOG_SOURCE.COMPACTION,
-    content: "[Compacted 5 messages]\n\nUser asked about JS, assistant explained closures.",
+    content: "<system-notice>[Compacted 5 messages]\n\nUser asked about JS, assistant explained closures.</system-notice>",
   }];
 
   const replayed = replayEntriesIntoContext(agent, entries);

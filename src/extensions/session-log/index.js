@@ -99,7 +99,12 @@ export async function create(core) {
             source = LOG_SOURCE.TOOL_RESULT;
             break;
           case 'system':
-            source = LOG_SOURCE.SYSTEM_PROMPT;
+            // Non-initial system messages (e.g. task completion) should be
+            // logged as user messages with wrapper — but at this point they're
+            // already wrapped as user messages by the caller. If a bare system
+            // message somehow makes it here, log it as a user input to avoid
+            // mislabeling it as the initial system prompt.
+            source = LOG_SOURCE.INPUT;
             break;
           default:
             source = LOG_SOURCE.INPUT;

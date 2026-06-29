@@ -45,19 +45,20 @@ function handleAuthFailure() {
  * Verify the saved token before starting the chat connection.
  * If the token is invalid, clear it and show login immediately.
  */
-function verifyToken(tokenToCheck) {
-  return fetch(`/verify?token=${encodeURIComponent(tokenToCheck)}`)
-    .then((res) => {
-      if (res.status === 401) {
-        handleAuthFailure();
-        return false;
-      }
-      return true;
-    })
-    .catch(() => {
-      // Network error — server might be down; proceed and let chat.js retry
-      return true;
-    });
+async function verifyToken(tokenToCheck) {
+  try {
+    const res = await fetch(
+      `/verify?token=${encodeURIComponent(tokenToCheck)}`,
+    );
+    if (res.status === 401) {
+      handleAuthFailure();
+      return false;
+    }
+    return true;
+  } catch (e) {
+    // Network error — server might be down; proceed and let chat.js retry
+    return true;
+  }
 }
 
 // ── Initialization ───────────────────────────────────────────────────────────

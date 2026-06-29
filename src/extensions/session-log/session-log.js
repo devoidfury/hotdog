@@ -141,9 +141,9 @@ export function createCompactionEntry(sessionId, messagesCompacted, summary) {
   return {
     ts: now(),
     session_id: sessionId,
-    role: "system",
+    role: "user",
     source: LOG_SOURCE.COMPACTION,
-    content: `[Compacted ${messagesCompacted} messages]\n\n${summary}`,
+    content: `<system-notice>[Compacted ${messagesCompacted} messages]\n\n${summary}</system-notice>`,
     reasoning_content: null,
     tool_calls: null,
     tool_call_id: null,

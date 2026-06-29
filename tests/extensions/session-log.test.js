@@ -202,7 +202,8 @@ test("SessionLog.writeCompaction includes messagesCompacted count", async () => 
     const line = JSON.parse(content.trim());
 
     expect(line.source).toBe(LOG_SOURCE.COMPACTION);
-    expect(line.role).toBe("system");
+    expect(line.role).toBe("user");
+    expect(line.content).toContain("<system-notice>");
     expect(line.content).toContain("[Compacted 15 messages]");
     expect(line.content).toContain("Summarized conversation");
   } finally {

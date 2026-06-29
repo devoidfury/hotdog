@@ -111,7 +111,8 @@ describe("TaskManager", () => {
       manager._onTaskComplete("task-1", "Result text");
 
       expect(managerContext).toHaveLength(1);
-      expect(managerContext[0].role).toBe("system");
+      expect(managerContext[0].role).toBe("user");
+      expect(managerContext[0].content).toContain("<system-notice>");
       expect(managerContext[0].content).toContain("Task task-1 completed");
     });
 

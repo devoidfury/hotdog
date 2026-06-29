@@ -1,6 +1,7 @@
 // WebUI server — Bun.serve() with HTTP routing and WebSocket upgrade.
 // Owned by the webui extension. Uses createWsServer() from the websocket extension.
 
+import path from "node:path";
 import { createWsServer } from "../websocket/server.js";
 import { createAuthMiddleware } from "../websocket/auth.js";
 
@@ -23,22 +24,25 @@ const MIME_TYPES = {
 /**
  * Serve a static file from the UI directory.
  */
-async function serveStaticFile(urlPath, uiDir) {
-  // Normalize path — resolve to uiDir, prevent directory traversal
+async function serveStaticFile(urlPath, documentRoot) {
+  // Normalize path — resolve to documentRoot, prevent directory traversal
   const relPath = urlPath === "/" ? "/index.html" : urlPath;
   const safePath = relPath.split("?").shift().split("#").shift();
   const decoded = decodeURIComponent(safePath);
 
-  // Simple guard — only allow paths within uiDir
-  if (decoded.includes("..") || decoded.includes("~")) {
+  // Simple guard — only allow paths within documentRoot
+  const resolved = path.resolve(documentRoot, decoded);
+  if (!resolved.startsWith(path.resolve(documentRoot))) {
     return new Response("Forbidden", { status: 403 });
   }
 
   const ext = decoded.match(/\.([a-z0-9]+)$/i);
-  const contentType = ext ? MIME_TYPES[ext[0]] || "application/octet-stream" : "text/html";
+  const contentType = ext
+    ? MIME_TYPES[ext[0]] || "application/octet-stream"
+    : "text/html";
 
   try {
-    const file = Bun.file(uiDir + decoded);
+    const file = Bun.file(documentRoot + decoded);
     const exists = await file.exists();
     if (!exists) {
       return new Response("Not found", { status: 404 });
@@ -120,15 +124,15 @@ export async function createWebuiServer(core, config, uiDir) {
         const token = url.searchParams.get("token");
         const valid = token ? authMiddleware.validateToken(token) : false;
         if (valid) {
-          return new Response(
-            JSON.stringify({ valid: true }),
-            { status: 200, headers: { "Content-Type": "application/json" } },
-          );
+          return new Response(JSON.stringify({ valid: true }), {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          });
         }
-        return new Response(
-          JSON.stringify({ valid: false }),
-          { status: 401, headers: { "Content-Type": "application/json" } },
-        );
+        return new Response(JSON.stringify({ valid: false }), {
+          status: 401,
+          headers: { "Content-Type": "application/json" },
+        });
       }
 
       // ── Route: WS upgrade ───────────────────────────────────────────
@@ -137,14 +141,16 @@ export async function createWebuiServer(core, config, uiDir) {
         const token = url.searchParams.get("token");
         if (authMiddleware && token) {
           if (!authMiddleware.validateToken(token)) {
-            return new Response(
-              JSON.stringify({ error: "Invalid token" }),
-              { status: 401, headers: { "Content-Type": "application/json" } },
-            );
+            return new Response(JSON.stringify({ error: "Invalid token" }), {
+              status: 401,
+              headers: { "Content-Type": "application/json" },
+            });
           }
         } else if (authMiddleware && !token) {
           return new Response(
-            JSON.stringify({ error: "Token required. Use ?token= in WebSocket URL" }),
+            JSON.stringify({
+              error: "Token required. Use ?token= in WebSocket URL",
+            }),
             { status: 401, headers: { "Content-Type": "application/json" } },
           );
         }

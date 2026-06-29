@@ -7,7 +7,6 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { HOOKS } from "../../core/hooks.js";
 import { createWebuiServer } from "./server.js";
-import { DEFAULTS } from "./config.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const UI_DIR = path.join(__dirname, "ui");
@@ -17,15 +16,7 @@ const UI_DIR = path.join(__dirname, "ui");
  */
 async function handleWebuiSubcommand(cli, core) {
   const config = core.config?.webui || {};
-  const resolvedConfig = {
-    port: config.port ?? DEFAULTS.port,
-    host: config.host ?? DEFAULTS.host,
-    apiKey: config.apiKey ?? DEFAULTS.apiKey,
-    sessionTokenTtlMin:
-      config.sessionTokenTtlMin ?? DEFAULTS.sessionTokenTtlMin,
-  };
-
-  const { server } = await createWebuiServer(core, resolvedConfig, UI_DIR);
+  const { server } = await createWebuiServer(core, config, UI_DIR);
 }
 
 /**

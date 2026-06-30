@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach } from 'bun:test';
 import { MessageBus } from '../../src/core/index.js';
 import { LlmError } from '../../src/core/error.js';
+import { HookSystem } from '../../src/core/hooks.js';
 
 class MockSessionManager {
   constructor(agent) {
@@ -192,37 +193,6 @@ describe('MessageBus', () => {
     });
   });
 
-  describe('run methods', () => {
-    it('runUntilCancelled() processes enqueued messages', async () => {
-      const agent = new MockAgent();
-      const bus = new MessageBus({
-        sessionManager: new MockSessionManager(agent),
-        sink: new MockSink(),
-      });
-      bus.enqueue('hello');
-      // Cancel after a microtask so the loop sees the queue
-      await Promise.resolve();
-      bus.cancel();
-      await bus.runUntilCancelled();
-      expect(agent._runCalled).toBe(true);
-    });
-
-    it('runUntilCancelled() processes remaining messages after cancellation', async () => {
-      const agent = new MockAgent();
-      const bus = new MessageBus({
-        sessionManager: new MockSessionManager(agent),
-        sink: new MockSink(),
-      });
-      bus.enqueue('msg1');
-      bus.enqueue('msg2');
-      // Cancel after a microtask so the loop sees the queue
-      await Promise.resolve();
-      bus.cancel();
-      await bus.runUntilCancelled();
-      expect(agent._runCalled).toBe(true);
-    });
-  });
-
   describe('isIdle', () => {
     it('is idle when not running and queue empty', () => {
       expect(bus.isIdle()).toBe(true);
@@ -234,10 +204,6 @@ describe('MessageBus', () => {
     });
 
     it('is not idle when running', async () => {
-      // Start the dispatch loop without any messages — it blocks on _waitForMessage
-      // while _isRunning is false. This is a transient state that is hard to observe
-      // without accessing internals; the behavioral test is that enqueue + cancel
-      // causes the loop to process and exit.
       const agent = new MockAgent();
       const bus = new MessageBus({
         sessionManager: new MockSessionManager(agent),
@@ -248,6 +214,104 @@ describe('MessageBus', () => {
       bus.cancel();
       await bus.runUntilCancelled();
       expect(agent._runCalled).toBe(true);
+    });
+  });
+
+  describe('isCancelled', () => {
+    it('is false before cancel', () => {
+      expect(bus.isCancelled).toBe(false);
+    });
+
+    it('is true after cancel', () => {
+      bus.cancel();
+      expect(bus.isCancelled).toBe(true);
+    });
+
+    it('is false after reset', () => {
+      bus.cancel();
+      expect(bus.isCancelled).toBe(true);
+      bus.reset();
+      expect(bus.isCancelled).toBe(false);
+    });
+
+    it('bus is not idle when cancelled', () => {
+      bus.cancel();
+      expect(bus.isIdle()).toBe(false);
+    });
+  });
+
+  describe('reset()', () => {
+    it('creates a new AbortController after cancel', () => {
+      bus.cancel();
+      expect(bus.isCancelled).toBe(true);
+      bus.reset();
+      expect(bus.isCancelled).toBe(false);
+    });
+
+    it('allows reuse after cancel + reset', async () => {
+      bus.cancel();
+      bus.reset();
+      bus.enqueue('msg');
+      await Promise.resolve();
+      bus.cancel();
+      await bus.runUntilCancelled();
+      expect(mockAgent._runCalled).toBe(true);
+    });
+  });
+
+  describe('executeCommand()', () => {
+    it('emits error when no agent', async () => {
+      const noAgentManager = { getAgent: () => null };
+      const sink = new MockSink();
+      const bus = new MessageBus({ sessionManager: noAgentManager, sink });
+      await bus.executeCommand('/help');
+      const results = sink.events.filter(e => e.type === 7);
+      expect(results.length).toBe(1);
+      expect(results[0].content).toBe('No agent available.');
+    });
+  });
+
+  describe('input hook handling', () => {
+    it('processes messages when input hook returns continue', async () => {
+      const hooks = new HookSystem();
+      const agent = new MockAgent();
+      agent._hooks = hooks;
+      hooks.on('input', (data) => { return { action: 'continue' }; });
+      const sink = new MockSink();
+      const bus = new MessageBus({
+        sessionManager: new MockSessionManager(agent),
+        sink,
+      });
+
+      bus.enqueue('hello');
+      await Promise.resolve();
+      bus.cancel();
+      await bus.runUntilCancelled();
+      expect(agent._runCalled).toBe(true);
+    });
+
+    it('skips agent run when input hook returns handled', async () => {
+      const hooks = new HookSystem();
+      const agent = new MockAgent();
+      agent._hooks = hooks;
+      hooks.on('input', (data) => { return { action: 'handled' }; });
+      const sink = new MockSink();
+      const bus = new MessageBus({
+        sessionManager: new MockSessionManager(agent),
+        sink,
+      });
+
+      bus.enqueue('hello');
+      await Promise.resolve();
+      bus.cancel();
+      await bus.runUntilCancelled();
+      // Agent should NOT have been run
+      expect(agent._runCalled).toBe(false);
+      // But should emit working=false session state
+      const states = sink.events.filter(e => e.type === 14);
+      expect(states.length).toBe(1);
+      expect(states[0].key).toBe('working');
+      expect(states[0].value).toBe(false);
     });
   });
 });

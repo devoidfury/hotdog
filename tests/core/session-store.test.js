@@ -42,4 +42,18 @@ describe('SessionStore', () => {
     expect(store.size()).toBe(1);
     expect(store.getAgent('session-1')).toBe(agent2);
   });
+
+  it('tracks the initial session ID', () => {
+    const store = new SessionStore();
+    expect(store.initialSessionId()).toBeNull();
+
+    const agent1 = new MockAgent('done', 'session-1');
+    store.addAgent(agent1);
+    expect(store.initialSessionId()).toBe('session-1');
+
+    const agent2 = new MockAgent('done', 'session-2');
+    store.addAgent(agent2);
+    // initialSessionId should remain the first one added
+    expect(store.initialSessionId()).toBe('session-1');
+  });
 });

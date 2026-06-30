@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'bun:test';
-import { BashTool } from '../../src/extensions/bash-tool/index.js';
+import { BashTool, create } from '../../src/extensions/bash-tool/index.js';
 import { resultStr } from '../helpers.js';
+import { HOOKS } from '../../src/core/hooks.js';
 
 describe('BashTool', () => {
   it('has correct tool name', () => {
@@ -85,5 +86,51 @@ describe('BashTool', () => {
     const tool = new BashTool();
     const result = await tool.execute(JSON.stringify({ command: 'echo error >&2; echo success' }));
     expect(resultStr(result)).toContain('success');
+  });
+
+  it('truncates long command in metadata (>60 chars)', async () => {
+    const tool = new BashTool();
+    const longCmd = 'echo ' + 'a'.repeat(70);
+    const result = await tool.execute(JSON.stringify({ command: longCmd }));
+    const metadata = result.metadata;
+    expect(metadata).toBeDefined();
+    const cmd = metadata.get('command');
+    expect(cmd.length).toBe(61); // 60 chars + "…"
+    expect(cmd).toContain('…');
+  });
+
+  it('stores short command in metadata', async () => {
+    const tool = new BashTool();
+    const result = await tool.execute(JSON.stringify({ command: 'echo hello' }));
+    const metadata = result.metadata;
+    expect(metadata).toBeDefined();
+    expect(metadata.get('command')).toBe('echo hello');
+    expect(metadata.get('exit_code')).toBe('0');
+  });
+
+  it('create() registers tool via HOOKS.TOOLS_REGISTER', async () => {
+    let registeredName = null;
+    let registeredTool = null;
+    const registry = { register: (name, tool) => { registeredName = name; registeredTool = tool; } };
+    const mockCore = { config: { bashTool: { bashTimeoutMs: 5000, maxToolOutputLines: 100 } } };
+    const ext = create(mockCore);
+    expect(ext).toBeDefined();
+    expect(ext.hooks[HOOKS.TOOLS_REGISTER]).toBeDefined();
+    expect(ext.BashTool).toBe(BashTool);
+    await ext.hooks[HOOKS.TOOLS_REGISTER](registry);
+    expect(registeredName).toBe('bash');
+    expect(registeredTool).toBeInstanceOf(BashTool);
+  });
+
+  it('create() registers with default config when none provided', async () => {
+    let registeredName = null;
+    let registeredTool = null;
+    const registry = { register: (name, tool) => { registeredName = name; registeredTool = tool; } };
+    const mockCore = { config: {} };
+    const ext = create(mockCore);
+    expect(ext.hooks[HOOKS.TOOLS_REGISTER]).toBeDefined();
+    await ext.hooks[HOOKS.TOOLS_REGISTER](registry);
+    expect(registeredName).toBe('bash');
+    expect(registeredTool).toBeInstanceOf(BashTool);
   });
 });

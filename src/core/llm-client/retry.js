@@ -9,7 +9,7 @@ import { LlmError } from "../error.js";
  * @param {string} message - The error message.
  * @returns {number|null} The status code, or null if not parseable.
  */
-function extractHttpStatus(message) {
+export function extractHttpStatus(message) {
   const match = message.match(/^HTTP (\d+)/);
   return match ? parseInt(match[1], 10) : null;
 }
@@ -22,7 +22,7 @@ function extractHttpStatus(message) {
  * @param {number} status - HTTP status code.
  * @returns {boolean}
  */
-function isRetryableHttpStatus(status) {
+export function isRetryableHttpStatus(status) {
   // 5xx are server errors — retry
   if (status >= 500 && status < 600) return true;
   // 429 is rate limiting — retry (client error but transient)

@@ -8,6 +8,7 @@ import {
   getVisibleWorkerProfiles,
   mergeProfile,
   allProfilesForSwitch,
+  resolveProfile,
 } from "../../src/core/config/profiles.js";
 import fs from "node:fs";
 import path from "node:path";
@@ -366,5 +367,175 @@ describe("allProfilesForSwitch", () => {
     });
 
     expect(result["withModel"].model).toBe("gpt-4");
+  });
+});
+
+describe("resolveProfile", () => {
+  let tmpDir;
+
+  beforeEach(() => {
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "profiles-resolve-"));
+  });
+
+  it("resolves profile from CLI args and config", async () => {
+    fs.writeFileSync(
+      path.join(tmpDir, "test.profile.md"),
+      `---
+name: test
+role: Test Role
+---
+Body`,
+    );
+
+    const result = await resolveProfile(
+      { profile: "test" },
+      { profilesPath: tmpDir },
+      null,
+    );
+
+    expect(result.profileName).toBe("test");
+    expect(result.profile.role).toBe("Test Role");
+  });
+
+  it("falls back to default profile", async () => {
+    const result = await resolveProfile(
+      {},
+      {},
+      "/nonexistent-dir-12345",
+    );
+
+    expect(result.profileName).toBe("default");
+    expect(result.profile.role).toBeNull();
+  });
+
+  it("uses profile from fileConfig when CLI doesn't specify", async () => {
+    fs.writeFileSync(
+      path.join(tmpDir, "fileprofile.profile.md"),
+      `---
+name: fileprofile
+role: File Profile Role
+---
+Body`,
+    );
+
+    const result = await resolveProfile(
+      {},
+      { profile: "fileprofile", profilesPath: tmpDir },
+      null,
+    );
+
+    expect(result.profileName).toBe("fileprofile");
+    expect(result.profile.role).toBe("File Profile Role");
+  });
+
+  it("CLI profile takes priority over fileConfig profile", async () => {
+    fs.writeFileSync(
+      path.join(tmpDir, "cli.profile.md"),
+      `---
+name: cli
+role: CLI Role
+---
+Body`,
+    );
+    fs.writeFileSync(
+      path.join(tmpDir, "config.profile.md"),
+      `---
+name: config
+role: Config Role
+---
+Body`,
+    );
+
+    const result = await resolveProfile(
+      { profile: "cli" },
+      { profile: "config", profilesPath: tmpDir },
+      null,
+    );
+
+    expect(result.profileName).toBe("cli");
+    expect(result.profile.role).toBe("CLI Role");
+  });
+
+  it("includes profiles for switch", async () => {
+    fs.writeFileSync(
+      path.join(tmpDir, "a.profile.md"),
+      `---
+name: a
+role: Role A
+---
+Body A`,
+    );
+    fs.writeFileSync(
+      path.join(tmpDir, "b.profile.md"),
+      `---
+name: b
+role: Role B
+---
+Body B`,
+    );
+
+    const result = await resolveProfile(
+      { profile: "a" },
+      { profilesPath: tmpDir },
+      null,
+    );
+
+    expect(result.profiles).toBeDefined();
+    expect(Object.keys(result.profiles)).toContain("a");
+    expect(Object.keys(result.profiles)).toContain("b");
+  });
+
+  it("merges config profile with file profile", async () => {
+    fs.writeFileSync(
+      path.join(tmpDir, "merged.profile.md"),
+      `---
+name: merged
+role: File Role
+whitelist-tools:
+  - read
+---
+Body`,
+    );
+
+    const result = await resolveProfile(
+      { profile: "merged" },
+      {
+        profile: "merged",
+        profilesPath: tmpDir,
+        profiles: {
+          merged: {
+            role: "Config Role",
+            model: "test-model",
+          },
+        },
+      },
+      null,
+    );
+
+    // File profile wins for role
+    expect(result.profile.role).toBe("File Role");
+    // Config profile provides model
+    expect(result.profile.model).toBe("test-model");
+  });
+
+  it("returns profileFiles from disk", async () => {
+    fs.writeFileSync(
+      path.join(tmpDir, "x.profile.md"),
+      `---
+name: x
+role: X Role
+---
+Body`,
+    );
+
+    const result = await resolveProfile(
+      { profile: "x" },
+      { profilesPath: tmpDir },
+      null,
+    );
+
+    expect(result.profileFiles).toBeDefined();
+    expect(result.profileFiles["x"]).toBeDefined();
+    expect(result.profileFiles["x"].role).toBe("X Role");
   });
 });

@@ -25,6 +25,49 @@ function createMockAgent(options = {}) {
   });
 }
 
+describe('SessionManager.create (static)', () => {
+  it('should create a SessionManager with an initial agent', async () => {
+    const hooks = createHooks();
+    const toolRegistry = createToolRegistry();
+    const extensions = new ExtensionLoader({ hooks, toolRegistry });
+
+    const buildAgent = async (config) => {
+      return createMockAgent({
+        model: config.model || 'test-model',
+        hooks,
+        toolRegistry,
+      });
+    };
+
+    const sessionManager = await SessionManager.create({
+      hooks,
+      extensions,
+      buildAgent,
+      initialConfig: { model: 'initial-model' },
+    });
+
+    expect(sessionManager).toBeDefined();
+    expect(sessionManager.sessionId()).toBeDefined();
+    const agent = sessionManager.getAgent();
+    expect(agent).toBeDefined();
+    expect(agent.model).toBe('initial-model');
+  });
+
+  it('should create without initial agent when buildAgent is not provided', async () => {
+    const hooks = createHooks();
+    const toolRegistry = createToolRegistry();
+    const extensions = new ExtensionLoader({ hooks, toolRegistry });
+
+    const sessionManager = await SessionManager.create({
+      hooks,
+      extensions,
+    });
+
+    expect(sessionManager).toBeDefined();
+    expect(sessionManager.getAgent()).toBeUndefined();
+  });
+});
+
 describe('SessionManager', () => {
   let hooks;
   let extensions;
@@ -123,6 +166,22 @@ describe('SessionManager', () => {
       sessionManager.switchSession('nonexistent');
       expect(sessionManager.getAgent()).toBeUndefined();
     });
+
+    it('should emit session:swap hook when switching', async () => {
+      await sessionManager.create({ model: 'model-1' });
+      const session1Id = sessionManager.sessionId();
+      await sessionManager.create({ model: 'model-2' });
+      const session2Id = sessionManager.sessionId();
+
+      const emitted = [];
+      hooks.on('session:swap', (data) => {
+        emitted.push(data);
+      });
+
+      sessionManager.switchSession(session1Id);
+      expect(emitted.length).toBe(1);
+      expect(emitted[0].newAgent.model).toBe('model-1');
+    });
   });
 
   describe('serialize / deserialize', () => {
@@ -152,6 +211,43 @@ describe('SessionManager', () => {
       expect(agent.model).toBe('restored-model');
       expect(agent.log.length).toBe(1);
       expect(agent.log.at(0).content).toBe('hello');
+    });
+
+    it('should use custom serializer when provided', async () => {
+      const hooks = createHooks();
+      const toolRegistry = createToolRegistry();
+      const extensions = new ExtensionLoader({ hooks, toolRegistry });
+
+      const customSerializer = {
+        serialize: (agent) => ({ custom: true, model: agent.model }),
+      };
+
+      const sessionManager = new SessionManager({
+        hooks,
+        extensions,
+        buildAgent,
+        serializer: customSerializer,
+      });
+
+      await sessionManager.create({ model: 'test-model' });
+      const data = sessionManager.serialize();
+      expect(data.custom).toBe(true);
+      expect(data.model).toBe('test-model');
+    });
+
+    it('should return null when no agent to serialize', async () => {
+      const hooks = createHooks();
+      const toolRegistry = createToolRegistry();
+      const extensions = new ExtensionLoader({ hooks, toolRegistry });
+
+      const sessionManager = new SessionManager({
+        hooks,
+        extensions,
+        buildAgent,
+      });
+
+      const data = sessionManager.serialize();
+      expect(data).toBeNull();
     });
   });
 

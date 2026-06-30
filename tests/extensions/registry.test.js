@@ -12,15 +12,10 @@ import {
   toolResult,
   truncateOutput,
   generateDiff,
-  validateCwdBoundary,
-  writeFileWithParents,
-  resolvePathAndValidate,
-  fileSize,
-  checkWritable,
-  checkReadable,
   getRequiredStr,
   ToolResult,
 } from "../../src/core/extensions/tool-utils.js";
+import { validateCwdBoundary, writeFileWithParents, fileSize, resolvePathAndValidate, checkWritable, checkReadable, IOError } from "../../src/utils/file-utils.js";
 import { ToolRegistry } from "../../src/core/extensions/tool-registry.js";
 import { ToolContext } from "../../src/core/extensions/tool-context.js";
 

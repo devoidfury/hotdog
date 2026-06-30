@@ -9,11 +9,10 @@ import {
   param,
   ToolResult,
   toolResult,
-  validateCwdBoundary,
-  resolvePath,
   parseToolInput,
   defaultCallDisplay,
 } from "../../core/extensions/tool-utils.js";
+import { validateCwdBoundary, resolvePath } from "../../utils/file-utils.js";
 import { DEFAULT_MAX_IMAGE_SIZE } from "./defaults.js";
 
 /**

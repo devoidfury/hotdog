@@ -21,10 +21,9 @@ import {
   param,
   ToolResult,
   toolResult,
-  validateCwdBoundary,
-  resolvePath,
   parseToolInput,
 } from "../../core/extensions/tool-utils.js";
+import { validateCwdBoundary, resolvePath } from "../../utils/file-utils.js";
 
 export class WriteTool {
   static TOOL_NAME = "write";

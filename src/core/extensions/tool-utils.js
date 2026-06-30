@@ -4,8 +4,6 @@
 // for consistency with JSON/persistence format. Short metadata keys become XML
 // attributes on the <tool> tag; long keys become child nodes.
 
-import fsPromises from "node:fs/promises";
-import path from "node:path";
 import { ToolError } from "../error.js";
 
 /**
@@ -375,119 +373,6 @@ export function generateDiff(oldText, newText, maxLines = 80) {
   }
 
   return diff.join("\n");
-}
-
-/**
- * Write a file, creating parent directories as needed.
- */
-export async function writeFileWithParents(filePath, content) {
-  const parentDir = path.dirname(filePath);
-  if (parentDir && parentDir !== ".") {
-    await fsPromises.mkdir(parentDir, { recursive: true });
-  }
-  await fsPromises.writeFile(filePath, content);
-}
-
-/**
- * Validate that a path is within the cwd boundary.
- */
-export function validateCwdBoundary(filePath, cwdBoundary) {
-  if (!cwdBoundary) return null;
-  const boundaryResolved = path.resolve(cwdBoundary);
-  const fileResolved = path.resolve(filePath);
-  if (
-    !fileResolved.startsWith(boundaryResolved + path.sep) &&
-    fileResolved !== boundaryResolved
-  ) {
-    return `Error: path ${filePath} is outside cwd boundary ${cwdBoundary}`;
-  }
-  return null;
-}
-
-/**
- * Resolve a path against cwdBoundary or workspaceRoot.
- */
-export function resolvePath(filePath, cwdBoundary, workspaceRoot) {
-  if (path.isAbsolute(filePath)) {
-    return filePath;
-  }
-  if (cwdBoundary) {
-    return path.resolve(cwdBoundary, filePath);
-  }
-  if (workspaceRoot) {
-    return path.resolve(workspaceRoot, filePath);
-  }
-  return path.resolve(filePath);
-}
-
-/**
- * Resolve a path and verify it stays within the cwd boundary.
- */
-export async function resolvePathAndValidate(requested, cwdBoundary = null) {
-  const resolved = path.resolve(requested);
-
-  try {
-    await fsPromises.access(resolved);
-  } catch {
-    throw ToolError.PathNotFound(requested);
-  }
-
-  if (cwdBoundary) {
-    const boundaryResolved = path.resolve(cwdBoundary);
-    if (
-      !resolved.startsWith(boundaryResolved + path.sep) &&
-      resolved !== boundaryResolved
-    ) {
-      throw ToolError.PathOutside(requested, cwdBoundary);
-    }
-  }
-
-  return resolved;
-}
-
-/**
- * Get file size in bytes.
- */
-export async function fileSize(filePath) {
-  const stats = await fsPromises.stat(filePath);
-  return stats.size;
-}
-
-/**
- * Check if a path is writable.
- */
-export async function checkWritable(filePath) {
-  const parentDir = path.dirname(filePath);
-
-  if (parentDir && parentDir !== ".") {
-    const tempPath = path.join(parentDir, ".oa-agent-permission-test");
-    try {
-      await fsPromises.writeFile(tempPath, "");
-      await fsPromises.unlink(tempPath);
-    } catch (e) {
-      throw ToolError.NotWritable(parentDir, e.message);
-    }
-  }
-
-  try {
-    await fsPromises.access(filePath, fsPromises.constants.W_OK);
-  } catch {
-    // File doesn't exist — that's OK, we can create it
-  }
-
-  return true;
-}
-
-/**
- * Check if a path is readable.
- */
-export async function checkReadable(filePath) {
-  try {
-    await fsPromises.access(filePath, fsPromises.constants.R_OK);
-  } catch {
-    throw ToolError.NotReadable(filePath);
-  }
-  return true;
 }
 
 /**

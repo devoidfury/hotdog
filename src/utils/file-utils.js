@@ -1,7 +1,32 @@
 import fsPromises from "node:fs/promises";
-import { join } from "node:path";
+import { join, dirname, isAbsolute, resolve as resolveAbs, sep } from "node:path";
 import { cwd } from "node:process";
 import { YAML } from "bun";
+
+/**
+ * IO error class for file system operations.
+ * Standalone -- does not depend on core error classes.
+ */
+export class IOError extends Error {
+  static PathNotFound(requested) {
+    return new IOError(`Path not found: ${requested}`);
+  }
+
+  static PathOutside(requested, boundary) {
+    return new IOError(
+      `Path '${requested}' is outside the allowed directory '${boundary}'. ` +
+        "File operations are restricted to the boundary directory.",
+    );
+  }
+
+  static NotWritable(dir, msg) {
+    return new IOError(`Directory '${dir}' is not writable: ${msg}`);
+  }
+
+  static NotReadable(filePath) {
+    return new IOError(`Path '${filePath}' does not exist or is not readable`);
+  }
+}
 
 /**
  * Parse YAML front matter from a markdown string.
@@ -86,4 +111,117 @@ export function validateNameable(name, label, dirName) {
     }
   }
   return warnings;
+}
+
+/**
+ * Write a file, creating parent directories as needed.
+ */
+export async function writeFileWithParents(filePath, content) {
+  const parentDir = dirname(filePath);
+  if (parentDir && parentDir !== ".") {
+    await fsPromises.mkdir(parentDir, { recursive: true });
+  }
+  await fsPromises.writeFile(filePath, content);
+}
+
+/**
+ * Validate that a path is within the cwd boundary.
+ */
+export function validateCwdBoundary(filePath, cwdBoundary) {
+  if (!cwdBoundary) return null;
+  const boundaryResolved = resolveAbs(cwdBoundary);
+  const fileResolved = resolveAbs(filePath);
+  if (
+    !fileResolved.startsWith(boundaryResolved + sep) &&
+    fileResolved !== boundaryResolved
+  ) {
+    return `Error: path ${filePath} is outside cwd boundary ${cwdBoundary}`;
+  }
+  return null;
+}
+
+/**
+ * Resolve a path against cwdBoundary or workspaceRoot.
+ */
+export function resolvePath(filePath, cwdBoundary, workspaceRoot) {
+  if (isAbsolute(filePath)) {
+    return filePath;
+  }
+  if (cwdBoundary) {
+    return resolveAbs(cwdBoundary, filePath);
+  }
+  if (workspaceRoot) {
+    return resolveAbs(workspaceRoot, filePath);
+  }
+  return resolveAbs(filePath);
+}
+
+/**
+ * Get file size in bytes.
+ */
+export async function fileSize(filePath) {
+  const stats = await fsPromises.stat(filePath);
+  return stats.size;
+}
+
+/**
+ * Resolve a path and verify it stays within the cwd boundary.
+ */
+export async function resolvePathAndValidate(requested, cwdBoundary = null) {
+  const resolved = resolveAbs(requested);
+
+  try {
+    await fsPromises.access(resolved);
+  } catch {
+    throw IOError.PathNotFound(requested);
+  }
+
+  if (cwdBoundary) {
+    const boundaryResolved = resolveAbs(cwdBoundary);
+    if (
+      !resolved.startsWith(boundaryResolved + sep) &&
+      resolved !== boundaryResolved
+    ) {
+      throw IOError.PathOutside(requested, cwdBoundary);
+    }
+  }
+
+  return resolved;
+}
+
+/**
+ * Check if a path is writable.
+ */
+export async function checkWritable(filePath) {
+  const parentDir = dirname(filePath);
+
+  if (parentDir && parentDir !== ".") {
+    const tempPath = join(parentDir, ".oa-agent-permission-test");
+    try {
+      await fsPromises.writeFile(tempPath, "");
+      await fsPromises.unlink(tempPath);
+    } catch (e) {
+      throw IOError.NotWritable(parentDir, e.message);
+    }
+  }
+
+  try {
+    await fsPromises.access(filePath, fsPromises.constants.W_OK);
+  } catch {
+    // File doesn't exist — that's OK, we can create it
+  }
+
+  return true;
+}
+
+/**
+ * Check if a path is readable.
+ */
+export async function checkReadable(filePath) {
+  try {
+    await fsPromises.access(filePath, fsPromises.constants.R_OK);
+  } catch {
+    throw IOError.NotReadable(filePath);
+  }
+  return true;
 }

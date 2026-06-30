@@ -7,11 +7,10 @@ import {
   toolDef,
   param,
   ToolResult,
-  validateCwdBoundary,
-  resolvePath,
   parseToolInput,
   defaultCallDisplay,
 } from "../../core/extensions/tool-utils.js";
+import { validateCwdBoundary, resolvePath } from "../../utils/file-utils.js";
 
 export class EditTool {
   static TOOL_NAME = "edit";

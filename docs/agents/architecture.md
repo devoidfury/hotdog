@@ -95,12 +95,12 @@ Minimal Agent class that runs the LLM loop and delegates behavior to hooks. Key 
 - `_executeTools(toolCalls)` — executes tool calls with hook-based enrichment
 - `executeCommand(cmd)` — executes commands
 - `cancel()` — cancels the running agent loop
-- Properties: `model`, `context`, `iterationCount`, `sessionId`, `cancelled`, `hideTools`, `hideThinking`, `systemPrompt`
+- Properties: `model`, `log`, `isRestoring`, `iterationCount`, `sessionId`, `cancelled`, `hideTools`, `hideThinking`, `systemPrompt`
 - Task agent support: `_abortSignal`, `_toolWhitelist`, `_followQueue`, `_notifyCompletion()`
 
 ### Commands (`src/core/commands.js`)
 Command parsing — commands are the abstract concept, slash commands (/cmd) are one UI implementation. Key exports:
-- `Command` enum: `Command.Help`, `Command.Quit`, `Command.Clear`, `Command.Tools`, `Command.Thinking`, `Command.Tokens`, `Command.Regenerate`, `Command.Unknown`
+- `Command` enum: `Command.Help`, `Command.Quit`, `Command.Clear`, `Command.Tools`, `Command.Thinking`, `Command.Tokens`, `Command.Regenerate`, `Command.Reasoning`, `Command.Unknown`
 - `parseCommand(cmd, registry)` — parses raw command string into typed command object
 
 ### Session Management (`src/core/session/index.js`)

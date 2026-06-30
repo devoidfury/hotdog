@@ -65,7 +65,7 @@ Models are declared inside providers. Each provider has `name`, `url`, optional 
 
 ### Model Resolution
 Model names flow through `buildConfig()`:
-1. Profile model → CLI model → provider's first model → config `defaultModel` → `DEFAULT_MODEL`
+1. CLI model → Profile model → provider's first model → config `defaultModel` → `DEFAULT_MODEL`
 2. If the name contains `/`, it's used as-is (already qualified)
 3. If a provider is active and the name matches a provider model, it's prefixed with the provider name
 4. Otherwise, the bare name is passed through (will error at validation if not in registry)

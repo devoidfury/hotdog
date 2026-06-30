@@ -1,7 +1,4 @@
 // Unified config module — single entry point for all configuration.
-//
-// Re-exports everything from sub-modules and provides the main
-// config loading and resolution functions.
 
 import fs from "node:fs";
 import fsPromises from "node:fs/promises";
@@ -15,8 +12,6 @@ import { parseFrontMatter } from "../../utils/file-utils.js";
 import { deepMerge } from "../../utils/objects.js";
 import { render } from "../../utils/render.js";
 import { validate as validateSchema } from "../../utils/json-schema.js";
-
-// ── Re-exports from sub-modules ──────────────────────────────────────────
 
 export * from "./defaults.js";
 export * from "./schema-loader.js";
@@ -61,8 +56,8 @@ import { camelCase } from "../../utils/strings.js";
  * Resolve the config directory with the following priority:
  * 1. CLI argument (--config-dir)
  * 2. OA_AGENT_CONFIG_DIR environment variable
- * 3. /etc/oa-agent
- * 4. ./config (CWD-relative)
+ * 3. ./config (CWD-relative)
+ * 4. /etc/oa-agent
  * 5. ~/.config/oa-agent (XDG)
  *
  * @param {string} [cliConfigDir] - Config directory from CLI --config-dir flag.

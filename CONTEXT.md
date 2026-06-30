@@ -12,7 +12,7 @@ Domain concepts for the oa-agent AI agent harness. Implementation details are do
 ## Context Layer
 
 - **Context** — Everything the LLM sees. The high-level concept. Managed via MessageLog (implementation).
-- **MessageLog** — The agent's context is a plain JS array (`this._context`). Messages are `Message` objects with `role`, `content`, `reasoningContent`, `toolCalls`, `toolCallId`. Messages are added via `push()`. No dedicated MessageLog class — the array is the log.
+- **MessageLog** — Class in `src/core/context/message-log.js` that wraps the agent's message array. Provides `push()`, `replace()`, `getAll()`, `clear()`, `toJSON()`, and `buildMessages()`. The agent's `log` property returns this instance. Messages are `Message` objects with `role`, `content`, `reasoningContent`, `toolCalls`, `toolCallId`.
 - **Cache Invalidation** — Triggers: compaction, reset, model switch. These are the known break points. Critical performance concern (can mean difference between 20s and 5m response).
 - **Selective Pruning** (experimental) — Tail-popping messages to reuse older cache layers. Not yet validated.
 
@@ -100,7 +100,7 @@ Domain concepts for the oa-agent AI agent harness. Implementation details are do
 
 ## Configuration
 
-- `config/defaults.json` — User-editable global defaults (CWD-relative). Fallback: `~/.config/oa-agent/default.json`.
+- `config/defaults.json` — User-editable global defaults. Config dir resolution: CLI `--config-dir` > `OA_AGENT_CONFIG_DIR` env > `./config` (CWD) > `/etc/oa-agent` > `~/.config/oa-agent` (XDG).
 - `config/profiles/*.profile.md` — Named profile overlays (role, body, tools, aspects).
 - `config/system_prompt.md` — System prompt template.
 - `config/prompts/*.prompt.md` — Named prompt templates.

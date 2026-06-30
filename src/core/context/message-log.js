@@ -1,11 +1,4 @@
 // MessageLog — a controlled wrapper around the agent's message array.
-//
-// Provides safe access patterns (push, replace, filter helpers) so that
-// consumers don't mutate the internal array directly. The agent stores one
-// instance and exposes it via .log.
-//
-// All mutation methods validate inputs. getAll() returns a defensive copy
-// so consumers cannot accidentally mutate the internal state.
 
 import { Message } from "./message.js";
 
@@ -17,8 +10,6 @@ export class MessageLog {
     /** @type {Message[]} */
     this._messages = [...messages];
   }
-
-  // ── Mutators ────────────────────────────────────────────────────────────
 
   /**
    * Push a message onto the log.
@@ -51,7 +42,7 @@ export class MessageLog {
       if (!(m instanceof Message)) {
         throw new TypeError(
           `MessageLog.replace() requires all elements to be Message instances, ` +
-          `element ${i} is ${typeof m}`,
+            `element ${i} is ${typeof m}`,
         );
       }
     }
@@ -64,8 +55,6 @@ export class MessageLog {
   clear() {
     this._messages = [];
   }
-
-  // ── Accessors ───────────────────────────────────────────────────────────
 
   /** Number of messages. */
   get length() {
@@ -125,8 +114,6 @@ export class MessageLog {
     return this._messages.slice(start, end);
   }
 
-  // ── Building ────────────────────────────────────────────────────────────
-
   /**
    * Build the full message array for an LLM call, prepending the system prompt.
    * @param {string|null} [systemPrompt] - The system prompt string, or null.
@@ -134,12 +121,13 @@ export class MessageLog {
    */
   buildMessages(systemPrompt) {
     if (systemPrompt) {
-      return [new Message({ role: "system", content: systemPrompt }), ...this._messages];
+      return [
+        new Message({ role: "system", content: systemPrompt }),
+        ...this._messages,
+      ];
     }
     return [...this._messages];
   }
-
-  // ── Serialization ───────────────────────────────────────────────────────
 
   /**
    * Serialize all messages to JSON-compatible objects.
@@ -149,12 +137,8 @@ export class MessageLog {
     return this._messages.map((m) => m.toJSON());
   }
 
-  // ── Iteration ───────────────────────────────────────────────────────────
-
   /**
    * Allow `for (const msg of log)` iteration.
-   * Iterates over a defensive copy so concurrent mutations don't
-   * corrupt the iterator.
    * @returns {Iterator<Message>}
    */
   [Symbol.iterator]() {

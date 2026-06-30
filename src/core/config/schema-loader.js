@@ -5,16 +5,12 @@
  * - Config key definitions (type, cliFlag metadata)
  * - Resolution layers (cli > config > env > provider > profile > extension > default)
  * - Default values
- *
- * String casts in the JSON are resolved to functions by the resolver at runtime.
  */
 
 import { join } from "node:path";
 import { getNested } from "../../utils/objects.js";
 import configSchema from "../core.config.json" with { type: "json" };
 import { camelCase } from "../../utils/strings.js";
-
-// ── Built-in cast functions ────────────────────────────────────────────────
 
 /**
  * Map of named cast strings to their function implementations.
@@ -84,8 +80,6 @@ const CAST_BUILTINS = {
   array: (v) => (Array.isArray(v) ? v : undefined),
 };
 
-// ── Built-in compute functions ────────────────────────────────────────────
-
 /**
  * Map of compute function names to their implementations.
  * These are used for computed defaults like joinConfigDir('skills').
@@ -112,8 +106,6 @@ const COMPUTE_BUILTINS = {
     return fallbacks[subPath] || join("./config", subPath);
   },
 };
-
-// ── Cast Resolution ────────────────────────────────────────────────────────
 
 /**
  * Parse a cast string and return a function.
@@ -169,8 +161,6 @@ export function resolveCompute(compute) {
   return null;
 }
 
-// ── Schema Loading ─────────────────────────────────────────────────────────
-
 /**
  * Load the core config schema from core.config.json.
  * Returns the raw keys object from the JSON file.
@@ -209,8 +199,6 @@ export function compileSchemaKey(rawKey) {
         delete compiled.compute;
       }
     }
-
-    // noLog env vars use standard cast from JSON (falsy for OA_AGENT_LOG, truthy for OA_AGENT_NO_LOG)
 
     return compiled;
   });
@@ -323,8 +311,6 @@ export function cliFlagsFromSchema(schema) {
   }
   return flags;
 }
-
-// ── Resolver ─────────────────────────────────────────────────────────────────
 
 /**
  * Resolve the raw value for a single layer from the context.
@@ -452,10 +438,8 @@ export function resolveModel(
   if (provider?.models?.length)
     return resolveModelWithProvider(provider.models[0].name, provider);
   if (configModel) return resolveModelWithProvider(configModel, provider);
-  return defaultModel || "qwen3.5-0.8b";
+  return defaultModel;
 }
-
-// ── Default exports ─────────────────────────────────────────────────────────
 
 /**
  * The CONFIG_SCHEMA object — derived from core.config.json.

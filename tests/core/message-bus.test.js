@@ -19,7 +19,8 @@ class MockAgent {
     this._runError = null; // if set, run() throws this error
   }
   get cancelled() { return this._cancelled; }
-  cancel(reset = true) { this._cancelled = reset; }
+  cancel() { this._cancelled = true; }
+  resetCancel() { this._cancelled = false; }
   async run(text) {
     this._runCalled = true;
     if (this._runError) throw this._runError;
@@ -72,9 +73,10 @@ describe('MessageBus', () => {
   });
 
   it('cancels and notifies agent', () => {
-    bus.cancel();
-    expect(mockAgent._cancelled).toBe(true);
-  });
+      bus.cancel();
+      expect(mockAgent._cancelled).toBe(true);
+      expect(bus.isCancelled).toBe(true);
+    });
 
   describe('interrupt()', () => {
     it('cancels agent and clears queue', () => {
@@ -83,6 +85,8 @@ describe('MessageBus', () => {
       bus.interrupt();
       expect(mockAgent._cancelled).toBe(true);
       expect(bus.isIdle()).toBe(true);
+      // interrupt does NOT cancel the bus — bus continues running
+      expect(bus.isCancelled).toBe(false);
     });
 
     it('does not end the run loop — bus continues after interrupt', async () => {
@@ -117,12 +121,12 @@ describe('MessageBus', () => {
       bus.interrupt();  // sets agent._cancelled = true
       expect(agent._cancelled).toBe(true);
 
-      // Enqueue and process — _processMessage resets the flag
+      // Enqueue and process — _processMessage calls agent.resetCancel() at start
       bus.enqueue('msg');
       await Promise.resolve();
       bus.cancel();
       await bus.runUntilCancelled();
-      // After _processMessage, agent.cancel(false) was called
+      // After processing, agent._cancelled is false (reset at start of processing)
       expect(agent._cancelled).toBe(false);
     });
   });

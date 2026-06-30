@@ -143,7 +143,7 @@ export function normalizeConfigKeys(obj) {
 
   const normalized = {};
   for (const [key, value] of Object.entries(obj)) {
-    normalized[camelCase(camelKey)] = normalizeConfigKeys(value);
+    normalized[camelCase(key)] = normalizeConfigKeys(value);
   }
   return normalized;
 }

@@ -39,7 +39,8 @@ describe('MessageBus interrupt integration', () => {
   it('interrupt() cancels agent and clears queue without ending the loop', async () => {
     const agent = {
       _cancelled: false,
-      cancel(reset = true) { this._cancelled = reset; },
+      cancel() { this._cancelled = true; },
+      resetCancel() { this._cancelled = false; },
       run: async () => 'done',
       get cancelled() { return this._cancelled; },
       get sessionName() { return 'test'; },
@@ -69,7 +70,8 @@ describe('MessageBus interrupt integration', () => {
     let runCount = 0;
     const agent = {
       _cancelled: false,
-      cancel(reset = true) { this._cancelled = reset; },
+      cancel() { this._cancelled = true; },
+      resetCancel() { this._cancelled = false; },
       run: async (text) => {
         runCount++;
         return `processed: ${text}`;
@@ -101,12 +103,13 @@ describe('MessageBus interrupt integration', () => {
     let resolveRun;
     const agent = {
       _cancelled: false,
-      cancel(reset = true) {
-        this._cancelled = reset;
-        if (reset === true && resolveRun) {
+      cancel() {
+        this._cancelled = true;
+        if (resolveRun) {
           resolveRun();
         }
       },
+      resetCancel() { this._cancelled = false; },
       async run(text) {
         await new Promise((r) => { resolveRun = r; });
         if (this._cancelled) throw LlmError.Cancelled('Agent cancelled');
@@ -149,8 +152,9 @@ describe('MessageBus interrupt integration', () => {
     // No COMMAND_RESULT should be emitted for cancellation
     expect(sink.commandResults().length).toBe(0);
 
-    // Agent cancelled flag should be reset by _processMessage
-    expect(agent._cancelled).toBe(false);
+    // Agent cancelled flag is NOT reset here — it's reset at the start
+    // of the next message processing, not after catching cancellation.
+    expect(agent._cancelled).toBe(true);
 
     // End the loop
     bus.cancel();
@@ -160,7 +164,8 @@ describe('MessageBus interrupt integration', () => {
   it('still emits non-cancellation errors', async () => {
     const agent = {
       _cancelled: false,
-      cancel(reset = true) { this._cancelled = reset; },
+      cancel() { this._cancelled = true; },
+      resetCancel() { this._cancelled = false; },
       async run(text) { throw new Error('Real error'); },
       get cancelled() { return this._cancelled; },
       get sessionName() { return 'test'; },

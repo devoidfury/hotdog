@@ -26,7 +26,7 @@ describe('Agent — end-to-end loop', () => {
   });
 
   afterEach(() => {
-    fixture?.agent.cancel(false);
+    fixture?.agent.resetCancel();
   });
 
   // ── Text-only response ─────────────────────────────────────────────────────
@@ -357,7 +357,7 @@ describe('Agent — end-to-end loop', () => {
     // Run and cancel concurrently
     const runPromise = agent.run('Cancel me');
     await Promise.resolve(); // let the run start
-    agent.cancel(true);
+    agent.cancel();
 
     await expect(runPromise).rejects.toThrow('cancelled');
   });
@@ -745,13 +745,13 @@ describe('Agent — end-to-end loop', () => {
     });
   });
 
-  describe('cancel (existing)', () => {
+  describe('cancel / resetCancel', () => {
     it('should set cancelled flag', () => {
       const { agent } = createFixture({});
       expect(agent.cancelled).toBe(false);
-      agent.cancel(true);
+      agent.cancel();
       expect(agent.cancelled).toBe(true);
-      agent.cancel(false);
+      agent.resetCancel();
       expect(agent.cancelled).toBe(false);
     });
   });

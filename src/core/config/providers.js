@@ -1,13 +1,15 @@
 /**
- * Provider and model registry — consolidated from config.js.
+ * Provider and model registry.
  */
 
 import fsPromises from "node:fs/promises";
 import path from "node:path";
 
-import { DEFAULT_MAX_TOKENS, DEFAULT_MODEL, DEFAULT_SYSTEM_PROMPT_FILENAME } from "./defaults.js";
-
-// ── Model Registry ─────────────────────────────────────────────────────
+import {
+  DEFAULT_MAX_TOKENS,
+  DEFAULT_MODEL,
+  DEFAULT_SYSTEM_PROMPT_FILENAME,
+} from "./defaults.js";
 
 /**
  * Build a model registry from config providers.
@@ -29,7 +31,10 @@ export function buildModelRegistry(config) {
         name: modelName,
         temperature: modelEntry.temperature,
         maxTokens: modelEntry.maxTokens || DEFAULT_MAX_TOKENS,
-        reasoningEffort: modelEntry.reasoning_effort || modelEntry.reasoningEffort || undefined,
+        reasoningEffort:
+          modelEntry.reasoning_effort ||
+          modelEntry.reasoningEffort ||
+          undefined,
       };
     }
     // Also add provider-level models (models defined at provider level)
@@ -45,8 +50,6 @@ export function buildModelRegistry(config) {
 
   return registry;
 }
-
-// ── Provider Resolution ─────────────────────────────────────────────────
 
 /**
  * Resolve the active provider from CLI args and config.
@@ -83,7 +86,11 @@ export function resetSystemPromptCache() {
  * @param {Function} [resolveConfigDirFn] - Config dir resolver (to avoid circular import).
  * @returns {Promise<string>} System prompt template string.
  */
-export async function initSystemPromptTemplate(templatePath, cliConfigDir, resolveConfigDirFn) {
+export async function initSystemPromptTemplate(
+  templatePath,
+  cliConfigDir,
+  resolveConfigDirFn,
+) {
   if (cachedSystemPromptTemplate) return cachedSystemPromptTemplate;
 
   let templateFile = templatePath;

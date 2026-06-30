@@ -817,12 +817,23 @@ export class Agent {
    * Sets the cancelled flag and aborts the active HTTP request
    * via the per-iteration AbortController.
    */
-  cancel(flag = true) {
-    this._cancelled = flag;
+  cancel() {
+    this._cancelled = true;
     // Abort the active LLM request so the HTTP client terminates fetch().
     if (this._runAbortController && !this._runAbortController.signal.aborted) {
       this._runAbortController.abort();
     }
+  }
+
+  /**
+   * Reset the cancelled flag so the agent can process new input.
+   * Called by the MessageBus at the start of each new message,
+   * after a previous interrupt or cancellation has been handled.
+   * This replaces the old pattern of `agent.cancel(false)` which
+   * overloaded the cancel method with reset semantics.
+   */
+  resetCancel() {
+    this._cancelled = false;
   }
 
   /**

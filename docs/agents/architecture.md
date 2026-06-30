@@ -84,7 +84,6 @@ Discovers, loads, and manages extensions. Key exports:
 - `LOAD_ORDER` — constants for extension load ordering (REFRESH: 0, CORE_TOOLS: 1, CLI: 2, DEFAULT: 10)
 - `registerExtensionMetadata(config, configRegistry, cliSubcommandRegistry)` — reads extension.json metadata, auto-registers configSchema defaults
 - `extractSchemaDefaults(schema, configKey)` — extracts defaults from JSON Schema as config params
-- `extensionNameToConfigKey(name)` — converts kebab-case extension name to camelCase config key
 - `emitConfigRegistration(extension, configRegistry)` — emits config registration hooks (for programmatic control)
 
 ### Agent (`src/core/agent.js`)

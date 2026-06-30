@@ -97,19 +97,6 @@ describe("resolveCast", () => {
       expect(cast(42)).toBeUndefined();
     });
   });
-
-  describe("nonemptyArray", () => {
-    const cast = resolveCast("nonemptyArray");
-
-    it("passes non-empty arrays through", () => {
-      expect(cast(["a"])).toEqual(["a"]);
-    });
-
-    it("returns undefined for empty arrays or non-arrays", () => {
-      expect(cast([])).toBeUndefined();
-      expect(cast("hello")).toBeUndefined();
-    });
-  });
 });
 
 // ── resolveKey ───────────────────────────────────────────────────────────

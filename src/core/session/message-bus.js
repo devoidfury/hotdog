@@ -12,6 +12,13 @@ import { parseCommand } from "../commands.js";
  * An event-driven message bus that owns the agent run loop.
  * Uses SessionManager for agent access.
  * No polling — enqueue() resolves a per-iteration deferred.
+ *
+ * Cancellation uses an AbortController instead of a boolean flag.
+ * cancel() aborts the controller, signaling the generator to exit.
+ * interrupt() does NOT abort the controller — the bus continues
+ * waiting for new input. This eliminates the race condition where
+ * the agent's _cancelled flag was cleared in the finally block of
+ * _processMessage, allowing a cancelled request to be retried.
  */
 export class MessageBus {
   /**
@@ -24,7 +31,9 @@ export class MessageBus {
     this._sink = sink;
     this._queue = [];
     this._isRunning = false;
-    this._cancelled = false;
+    // AbortController for the run loop. cancel() aborts it, signaling
+    // the generator to exit. interrupt() does NOT abort it.
+    this._abortController = new AbortController();
     // Single waiter slot: { resolve } or null. Created per generator
     // iteration, cleared synchronously after await.
     this._waiter = null;
@@ -39,8 +48,13 @@ export class MessageBus {
     this._wakeWaiter();
   }
 
+  /**
+   * Cancel the run loop. Aborts the controller so the generator exits,
+   * and cancels the agent's active request. The bus cannot process
+   * further messages after cancel() — create a new bus or call reset().
+   */
   cancel() {
-    this._cancelled = true;
+    this._abortController.abort();
     const agent = this._sessionManager.getAgent();
     if (agent) agent.cancel();
     this._wakeWaiter();
@@ -59,8 +73,24 @@ export class MessageBus {
     this._wakeWaiter();
   }
 
+  /**
+   * Reset the bus after cancellation. Creates a fresh AbortController
+   * so the bus can be used again. The queue is preserved.
+   */
+  reset() {
+    this._abortController = new AbortController();
+  }
+
+  /**
+   * Check if the bus has been cancelled.
+   * @returns {boolean}
+   */
+  get isCancelled() {
+    return this._abortController.signal.aborted;
+  }
+
   isIdle() {
-    return !this._isRunning && this._queue.length === 0;
+    return !this._isRunning && this._queue.length === 0 && !this._abortController.signal.aborted;
   }
 
   get sessionManager() {
@@ -115,22 +145,24 @@ export class MessageBus {
    * after draining so any messages queued after cancellation are
    * still processed before exit.
    *
-   * The waiter promise is created fresh each iteration so there's
-   * no risk of stale resolves.
+   * Uses the AbortController signal for cancellation instead of a
+   * boolean flag. The waiter promise is scoped to this iteration —
+   * _wakeWaiter nulls _waiter synchronously after await.
    *
    * @param {boolean} drain — If true, process remaining queued
    *   messages after cancellation before exiting.
    */
   async * _messages(drain = false) {
+    const signal = this._abortController.signal;
     while (true) {
       // Drain all currently queued messages synchronously
       while (this._queue.length > 0) {
-        if (this._cancelled && !drain) break;
+        if (signal.aborted && !drain) break;
         yield this._queue.shift();
       }
 
       // Check exit conditions after draining
-      if (this._cancelled) {
+      if (signal.aborted) {
         if (!drain) break;
         // Drain mode: if queue is empty after cancellation, exit.
         // Otherwise loop back to drain remaining items.
@@ -152,11 +184,28 @@ export class MessageBus {
   /**
    * Process a single message: run the input hook pipeline,
    * then hand off to the agent.
+   *
+   * Resets the agent's cancel flag at the start (before processing)
+   * instead of at the end. This eliminates the race condition where
+   * the flag was cleared in the finally block, potentially allowing
+   * a user-initiated cancel to be silently swallowed between:
+   *   1. agent.run() throws Cancelled
+   *   2. finally block calls agent.cancel(false)
+   *   3. user hits Ctrl+C again
+   *   4. agent.cancel(false) from step 2 wins, flag is false
+   *
+   * The flag is now only reset when a new message is about to be
+   * processed, which is the correct point: the agent is ready for
+   * new work.
    */
   async _processMessage(text) {
     this._isRunning = true;
     const agent = this._sessionManager.getAgent();
-    if (agent) agent.cancel(false);
+
+    // Reset the agent's cancel flag before processing.
+    // This clears any leftover cancelled state from the previous
+    // message (e.g., interrupt) so the agent is ready for new work.
+    if (agent) agent.resetCancel();
 
     // Input hook — sequential, handlers can transform or short-circuit.
     // Actions: { action: "continue" } | { action: "transform", text } | { action: "handled" }
@@ -174,7 +223,6 @@ export class MessageBus {
 
     // If input was handled by a hook, skip agent processing
     if (inputHandled) {
-      if (agent) agent.cancel(false);
       this._isRunning = false;
       this._sink.emit({ type: OUTPUT_EVENT.SESSION_STATE, key: "working", value: false });
       return;
@@ -198,7 +246,6 @@ export class MessageBus {
       }
     }
 
-    if (agent) agent.cancel(false);
     this._isRunning = false;
 
     // Signal that the agent is done working so the UI can hide the spinner

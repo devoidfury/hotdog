@@ -153,10 +153,10 @@ describe("normalizeConfigKeys", () => {
     expect(normalizeConfigKeys([])).toEqual([]);
   });
 
-  it("preserves non-snake_case keys like kebab-case", () => {
+  it("converts kebab-case keys to camelCase as well", () => {
     const input = { "kebab-case": "value", snake_case: "other" };
     const result = normalizeConfigKeys(input);
-    expect(result).toEqual({ "kebab-case": "value", snakeCase: "other" });
+    expect(result).toEqual({ kebabCase: "value", snakeCase: "other" });
   });
 
   it("handles real-world config structure", () => {

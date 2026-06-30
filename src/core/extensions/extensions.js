@@ -723,7 +723,7 @@ export function resolveExtensionDependencies(
   return Array.from(result.values());
 }
 
-// ── Metadata Registration (consolidated from main.js) ────────────────────────
+// ── Metadata Registration ────────────────────────────────────────────────────
 
 /**
  * Discover extensions and register their CLI flags, subcommands, and config params

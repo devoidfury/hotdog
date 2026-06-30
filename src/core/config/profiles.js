@@ -1,5 +1,5 @@
 /**
- * Profile loading and resolution — consolidated from config.js.
+ * Profile loading and resolution.
  *
  * Provides a single `resolveProfile()` function that replaces the overlapping
  * `loadProfileFile()`, `loadProfileFiles()`, `allProfilesForSwitch()`,
@@ -21,7 +21,11 @@ import { DEFAULT_PROFILES_SUBPATH } from "./defaults.js";
  * @param {string} [configProfilesPath] - Profiles path from config file.
  * @returns {string} Resolved profiles directory path.
  */
-export function resolveProfilesPath(cliProfilesPath, configDir, configProfilesPath) {
+export function resolveProfilesPath(
+  cliProfilesPath,
+  configDir,
+  configProfilesPath,
+) {
   if (cliProfilesPath) {
     return path.resolve(cliProfilesPath);
   }

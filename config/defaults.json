@@ -218,7 +218,11 @@
       "models": [
         {
           "name": "qwen3.6-27b",
-          "context-limit": 100000
+          "context-limit": 120000
+        },
+        {
+          "name": "ornith-9b",
+          "context-limit": 262144
         }
       ]
     }

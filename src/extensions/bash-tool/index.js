@@ -66,6 +66,15 @@ export class BashTool {
 
       let stdout = "";
       let stderr = "";
+      let done = false;
+
+      const finish = (result) => {
+        if (done) return;
+        done = true;
+        clearTimeout(termTimer);
+        clearTimeout(killTimer);
+        resolve(result);
+      };
 
       proc.stdout.on("data", (chunk) => {
         stdout += chunk.toString();
@@ -77,21 +86,19 @@ export class BashTool {
 
       const termTimer = setTimeout(() => {
         proc.kill("SIGTERM");
-        resolve(ToolResult.err(`Command timed out after ${timeout}ms`));
+        finish(ToolResult.err(`Command timed out after ${timeout}ms`));
       }, timeout);
 
       const killTimer = setTimeout(() => {
         proc.kill("SIGKILL");
-        resolve(ToolResult.err(`Command timed out after ${timeout}ms`));
+        finish(ToolResult.err(`Command timed out after ${timeout}ms`));
       }, timeout + 2000); // give it a two second grace period before hard killing
 
       const cmdFirstLine = command.trim().split("\n")[0];
       proc.on("close", (code) => {
-        clearTimeout(termTimer);
-        clearTimeout(killTimer);
         const output = [stdout, stderr].filter(Boolean).join("\n");
         const truncated = truncateOutput(output, this.maxOutputLines);
-        resolve(
+        finish(
           ToolResult.ok(truncated).withEntries({
             command:
               cmdFirstLine.length > 60
@@ -103,9 +110,7 @@ export class BashTool {
       });
 
       proc.on("error", (err) => {
-        clearTimeout(termTimer);
-        clearTimeout(killTimer);
-        resolve(ToolResult.err(`Error: ${err.message}`));
+        finish(ToolResult.err(`Error: ${err.message}`));
       });
     });
   }

@@ -84,7 +84,7 @@ export class MessageLog {
    * @returns {Message[]}
    */
   getSystem() {
-    return this._messages.filter((m) => m.role === "system");
+    return [...this._messages.filter((m) => m.role === "system")];
   }
 
   /**
@@ -92,7 +92,7 @@ export class MessageLog {
    * @returns {Message[]}
    */
   getNonSystem() {
-    return this._messages.filter((m) => m.role !== "system");
+    return [...this._messages.filter((m) => m.role !== "system")];
   }
 
   /**
@@ -101,7 +101,7 @@ export class MessageLog {
    * @returns {Message[]}
    */
   getRecent(n) {
-    return this._messages.slice(-n);
+    return [...this._messages.slice(-n)];
   }
 
   /**
@@ -111,7 +111,7 @@ export class MessageLog {
    * @returns {Message[]}
    */
   slice(start, end) {
-    return this._messages.slice(start, end);
+    return [...this._messages.slice(start, end)];
   }
 
   /**

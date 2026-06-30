@@ -8,7 +8,8 @@
   },
   "description": "AI agent harness with tool calling support",
   "scripts": {
-    "start": "bun src/core/main.js"
+    "start": "bun src/core/main.js",
+    "test": "bun test --only-failures --coverage"
   },
   "type": "module",
   "engines": {

@@ -78,20 +78,20 @@ export function resolveConfigDir(cliConfigDir) {
     return path.resolve(envConfigDir);
   }
 
-  const etcConfig = "/etc/oa-agent";
-  try {
-    fs.accessSync(etcConfig);
-    return etcConfig;
-  } catch {
-    // Not found
-  }
-
   const cwdConfig = path.resolve(cwd(), "config");
   try {
     fs.accessSync(cwdConfig);
     return cwdConfig;
   } catch {
     // Not a directory or doesn't exist
+  }
+
+  const etcConfig = "/etc/oa-agent";
+  try {
+    fs.accessSync(etcConfig);
+    return etcConfig;
+  } catch {
+    // Not found
   }
 
   return path.join(os.homedir(), ".config", "oa-agent");

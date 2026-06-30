@@ -1,14 +1,19 @@
 // Core module — the minimal foundation for the extension architecture.
 
 export * from "./hooks.js";
-export { logger, initializeLogger, LOG_LEVELS, resolveLogLevel, resolveLogTarget } from "./logger.js";
+export {
+  logger,
+  initializeLogger,
+  LOG_LEVELS,
+  resolveLogLevel,
+  resolveLogTarget,
+} from "./logger.js";
 
 // Extension system
 export {
   ExtensionLoader,
   createExtensionLoader,
   extractSchemaDefaults,
-  extensionNameToConfigKey,
   getExtensionConfigDefaults,
   emitConfigRegistration,
   registerExtensionMetadata,
@@ -19,9 +24,7 @@ export {
   createToolRegistry,
 } from "./extensions/tool-registry.js";
 
-export {
-  ToolContext,
-} from "./extensions/tool-context.js";
+export { ToolContext } from "./extensions/tool-context.js";
 
 export {
   ToolResult,

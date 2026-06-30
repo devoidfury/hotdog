@@ -4,7 +4,6 @@ export {
   ExtensionLoader,
   createExtensionLoader,
   extractSchemaDefaults,
-  extensionNameToConfigKey,
   getExtensionConfigDefaults,
   emitConfigRegistration,
   resolveExtensionPath,
@@ -22,14 +21,9 @@ export {
   EXTENSION_PROVIDES,
 } from "./extensions.js";
 
-export {
-  ToolRegistry,
-  createToolRegistry,
-} from "./tool-registry.js";
+export { ToolRegistry, createToolRegistry } from "./tool-registry.js";
 
-export {
-  ToolContext,
-} from "./tool-context.js";
+export { ToolContext } from "./tool-context.js";
 
 export {
   ToolResult,
@@ -58,16 +52,8 @@ export {
   createSubcommandRegistry,
 } from "./registries.js";
 
-export {
-  ConfigRegistry,
-  createConfigRegistry,
-} from "./config-registry.js";
+export { ConfigRegistry, createConfigRegistry } from "./config-registry.js";
 
-export {
-  ServiceRegistry,
-  createServiceRegistry,
-} from "./service-registry.js";
+export { ServiceRegistry, createServiceRegistry } from "./service-registry.js";
 
-export {
-  validateServiceContracts,
-} from "./extensions.js";
+export { validateServiceContracts } from "./extensions.js";

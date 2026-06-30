@@ -14,25 +14,16 @@ export class Message {
    * @param {Array<{type: string, mimeType: string, data: string}>} [opts.images] — Array of image objects
    *   Each image: { type: "image_url", mimeType: "image/png", data: "<base64>" }
    */
-  constructor({
-    role,
-    content,
-    reasoningContent,
-    reasoning_content,
-    toolCalls,
-    tool_calls,
-    toolCallId,
-    tool_call_id,
-    images,
-  } = {}) {
-    this.role = role;
-    this.content = content;
+  constructor(src = {}) {
+    this.role = src.role;
+    this.content = src.content;
     // Accept both camelCase (API) and snake_case (JSON / log files)
-    this.reasoningContent = reasoningContent ?? reasoning_content ?? null;
-    this.toolCalls = toolCalls ?? tool_calls ?? null;
-    this.toolCallId = toolCallId ?? tool_call_id ?? null;
+    this.reasoningContent =
+      src.reasoningContent ?? src.reasoning_content ?? null;
+    this.toolCalls = src.toolCalls ?? src.tool_calls ?? null;
+    this.toolCallId = src.toolCallId ?? src.tool_call_id ?? null;
     // Images: array of { type: "image_url", mimeType: "image/png", data: "<base64>" }
-    this.images = images ?? null;
+    this.images = src.images ?? null;
   }
 
   /**
@@ -80,9 +71,9 @@ export class Message {
   toJSON() {
     const obj = { role: this.role, content: this._buildContent() };
     if (this.reasoningContent) obj.reasoning_content = this.reasoningContent;
-    if (this.toolCalls !== null) obj.tool_calls = this.toolCalls;
-    if (this.toolCallId !== null) obj.tool_call_id = this.toolCallId;
-    if (this.images && this.images.length > 0) {
+    if (this.toolCalls) obj.tool_calls = this.toolCalls;
+    if (this.toolCallId) obj.tool_call_id = this.toolCallId;
+    if (this.images?.length > 0) {
       obj.images = this.images;
     }
     return obj;

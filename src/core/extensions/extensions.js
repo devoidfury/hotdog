@@ -434,6 +434,7 @@ export function resolveLoadOrder(extensions, serviceOverrides = {}) {
     .sort(cmp);
 
   const result = [];
+  const pending = [];
 
   while (queue.length > 0) {
     const current = queue.shift();
@@ -444,13 +445,20 @@ export function resolveLoadOrder(extensions, serviceOverrides = {}) {
       if (inDegree.get(dependent) === 0) {
         const depExt = extensions.find((e) => e.name === dependent);
         if (depExt) {
-          // Insert in sorted position instead of appending and re-sorting the
-          // entire queue each iteration (O(n) vs O(n log n) per iteration).
-          const insertIdx = queue.findIndex((e) => cmp(depExt, e) < 0);
-          queue.splice(insertIdx === -1 ? queue.length : insertIdx, 0, depExt);
+          // Collect newly freed nodes separately instead of inserting
+          // into the sorted queue. We sort the final result once,
+          // which is O(n log n) total instead of O(n²) from repeated
+          // findIndex + splice operations.
+          pending.push(depExt);
         }
       }
     }
+  }
+
+  // Process pending nodes in sorted order
+  const pendingSorted = pending.sort(cmp);
+  for (const ext of pendingSorted) {
+    result.push(ext);
   }
 
   if (result.length !== extensions.length) {

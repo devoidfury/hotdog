@@ -31,12 +31,11 @@ function _summarizeResult(value) {
   return `{ ${keys.slice(0, 3).join(", ")}, +${keys.length - 3} }`;
 }
 
-let _handlerCounter = 0;
-
 export class HookSystem {
   constructor() {
     this._hooks = new Map();
     this._trace = false;
+    this._handlerCounter = 0;
   }
 
   /**
@@ -50,7 +49,7 @@ export class HookSystem {
   on(hookName, handler, source) {
     if (!this._hooks.has(hookName)) this._hooks.set(hookName, []);
     const handlers = this._hooks.get(hookName);
-    const id = ++_handlerCounter;
+    const id = ++this._handlerCounter;
     handlers.push({ id, handler, source });
 
     // Return a removal function

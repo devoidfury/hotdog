@@ -223,6 +223,10 @@
         {
           "name": "ornith-9b",
           "context-limit": 262144
+        },
+        {
+          "name": "ornith-35b",
+          "context-limit": 262144
         }
       ]
     }

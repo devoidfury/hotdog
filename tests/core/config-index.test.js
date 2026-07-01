@@ -1,0 +1,201 @@
+// Tests for config/index.js functions not covered by config.test.js and config-resolution.test.js.
+
+import { describe, it, expect } from "bun:test";
+import path from "node:path";
+import {
+  resolveConfigDir,
+  mergeExtensionConfigDefaults,
+  getDefaultConfig,
+  loadConfig,
+  validateConfig,
+  failOnInvalidConfig,
+} from "../../src/core/config/index.js";
+
+describe("resolveConfigDir", () => {
+  it("returns CLI config-dir when provided", () => {
+    expect(resolveConfigDir("/my/config")).toBe("/my/config");
+  });
+
+  it("resolves relative CLI path", () => {
+    const result = resolveConfigDir("./config");
+    expect(result).toBe(path.resolve("./config"));
+  });
+
+  it("returns ./config when it exists in CWD", () => {
+    // In the test workspace, ./config exists
+    const result = resolveConfigDir();
+    expect(result).toContain("config");
+  });
+});
+
+describe("mergeExtensionConfigDefaults", () => {
+  it("returns default config when no ext params", () => {
+    const config = { key: "value" };
+    expect(mergeExtensionConfigDefaults(config, null)).toBe(config);
+    expect(mergeExtensionConfigDefaults(config, [])).toBe(config);
+    expect(mergeExtensionConfigDefaults(config, undefined)).toBe(config);
+  });
+
+  it("adds extension defaults for missing keys", () => {
+    const config = { existingKey: "value" };
+    const extParams = [
+      { key: "newKey", defaults: { timeout: 30 } },
+    ];
+    const result = mergeExtensionConfigDefaults(config, extParams);
+    expect(result.existingKey).toBe("value");
+    expect(result.newKey).toEqual({ timeout: 30 });
+  });
+
+  it("deep merges object defaults with existing objects", () => {
+    const config = { myExt: { existing: true } };
+    const extParams = [
+      { key: "myExt", defaults: { timeout: 30, shell: "/bin/bash" } },
+    ];
+    const result = mergeExtensionConfigDefaults(config, extParams);
+    expect(result.myExt).toEqual({
+      existing: true,
+      timeout: 30,
+      shell: "/bin/bash",
+    });
+  });
+
+  it("does not overwrite non-object values", () => {
+    const config = { myKey: "existing" };
+    const extParams = [
+      { key: "myKey", defaults: "new" },
+    ];
+    const result = mergeExtensionConfigDefaults(config, extParams);
+    expect(result.myKey).toBe("existing");
+  });
+
+  it("does not deep merge when existing is null", () => {
+    const config = { myKey: null };
+    const extParams = [
+      { key: "myKey", defaults: { nested: true } },
+    ];
+    const result = mergeExtensionConfigDefaults(config, extParams);
+    expect(result.myKey).toBe(null);
+  });
+
+  it("does not deep merge when defaults is null", () => {
+    const config = { myKey: { nested: true } };
+    const extParams = [
+      { key: "myKey", defaults: null },
+    ];
+    const result = mergeExtensionConfigDefaults(config, extParams);
+    expect(result.myKey).toEqual({ nested: true });
+  });
+});
+
+describe("getDefaultConfig", () => {
+  it("returns default config without ext params", () => {
+    const config = getDefaultConfig();
+    expect(config.providers).toEqual([]);
+    expect(config.defaultProvider).toBeNull();
+    expect(config.aiUrl).toBeNull();
+    expect(config.defaultModel).toBe("qwen3.5-0.8b");
+    expect(config.extensionPaths).toEqual(["builtins"]);
+    expect(config.extensionAutoload).toBe(false);
+    expect(config.extensions).toEqual([]);
+    expect(config.mcpServers).toEqual([]);
+    expect(config.showTokenUse).toBe(true);
+  });
+
+  it("merges extension defaults into config", () => {
+    const config = getDefaultConfig([
+      { key: "customExt", defaults: { enabled: true, timeout: 60 } },
+    ]);
+    expect(config.customExt).toEqual({ enabled: true, timeout: 60 });
+  });
+});
+
+describe("validateConfig", () => {
+  it("returns valid for empty config", () => {
+    const result = validateConfig({});
+    expect(result.valid).toBe(true);
+    expect(result.errors).toEqual([]);
+  });
+
+  it("detects wrong type for string field", () => {
+    const result = validateConfig({ defaultModel: 123 });
+    expect(result.valid).toBe(false);
+    expect(result.errors).toContainEqual(
+      expect.stringMatching(/defaultModel.*expected string/)
+    );
+  });
+
+  it("detects wrong type for number field", () => {
+    const result = validateConfig({ chatTimeout: "not-a-number" });
+    expect(result.valid).toBe(false);
+    expect(result.errors).toContainEqual(
+      expect.stringMatching(/chatTimeout.*expected number/)
+    );
+  });
+
+  it("detects wrong type for boolean field", () => {
+    const result = validateConfig({ noLog: "yes" });
+    expect(result.valid).toBe(false);
+    expect(result.errors).toContainEqual(
+      expect.stringMatching(/noLog.*expected boolean/)
+    );
+  });
+
+  it("detects wrong type for array field", () => {
+    const result = validateConfig({ extensionPaths: "not-array" });
+    expect(result.valid).toBe(false);
+    expect(result.errors).toContainEqual(
+      expect.stringMatching(/extensionPaths.*expected array/)
+    );
+  });
+
+  it("skips undefined and null values", () => {
+    const result = validateConfig({ defaultModel: undefined, hideTools: null });
+    expect(result.valid).toBe(true);
+  });
+
+  it("validates extension schemas when provided", () => {
+    const schema = {
+      type: "object",
+      properties: {
+        timeout: { type: "number" },
+      },
+      required: ["timeout"],
+    };
+    const result = validateConfig(
+      { myExt: {} },
+      [{ key: "myExt", schema }],
+    );
+    expect(result.valid).toBe(false);
+    expect(result.errors.length).toBeGreaterThan(0);
+  });
+});
+
+describe("failOnInvalidConfig", () => {
+  it("does not throw when config is valid", () => {
+    expect(() => failOnInvalidConfig({ valid: true, errors: [] })).not.toThrow();
+  });
+
+  it("throws ConfigError when config is invalid", () => {
+    const result = { valid: false, errors: ["error1", "error2"] };
+    expect(() => failOnInvalidConfig(result)).toThrow();
+  });
+});
+
+describe("loadConfig", () => {
+  it("loads config from explicit path", async () => {
+    const config = await loadConfig("./config/defaults.json");
+    expect(config).toBeDefined();
+    expect(config.defaultModel).toBeDefined();
+  });
+
+  it("throws on invalid JSON", async () => {
+    const { writeFileSync, unlinkSync } = await import("node:fs");
+    const tmpFile = "/tmp/test-bad-config.json";
+    try {
+      writeFileSync(tmpFile, "{ invalid json }");
+      await expect(loadConfig(tmpFile)).rejects.toThrow();
+    } finally {
+      try { unlinkSync(tmpFile); } catch {}
+    }
+  });
+});

@@ -6,6 +6,8 @@ import { join } from "node:path";
 import { parseFrontMatter, validateNameable } from "../../utils/file-utils.js";
 import { logger } from "../../core/logger.js";
 import { ParseError } from "../../core/error.js";
+import { Message } from "../../core/context/message.js";
+import { render } from "../../utils/render.js";
 
 /**
  * Parse a .prompt.md file into a Prompt object.
@@ -110,10 +112,9 @@ export class PromptsLoader {
         this.prompts.set(prompt.name, prompt);
         count++;
       } catch (e) {
-        logger.warn(
-          `Failed to load prompt '${entry.name}': ${e.message}`,
-          { error: e.message },
-        );
+        logger.warn(`Failed to load prompt '${entry.name}': ${e.message}`, {
+          error: e.message,
+        });
       }
     }
 
@@ -141,5 +142,28 @@ export class PromptsLoader {
    */
   directories() {
     return [...this.paths];
+  }
+
+  /**
+   * The handler for when a prompt should be loaded in response to a command
+   */
+  async promptHandler(agent, cmdValue) {
+    const rest = cmdValue.slice(7);
+    const spaceIdx = rest.indexOf(" ");
+    const name = spaceIdx >= 0 ? rest.slice(0, spaceIdx).trim() : rest.trim();
+    const args = spaceIdx >= 0 ? rest.slice(spaceIdx + 1).trim() : "";
+
+    const prompt = this.getPrompt(name);
+    if (!prompt) {
+      return { error: `Unknown prompt: ${name}` };
+    }
+
+    // Render the prompt template with args using the render engine
+    const content = render(prompt.content, { ARGS: args || "" });
+
+    // Add the rendered prompt as a user message
+    agent.addMessage(new Message({ role: "user", content }));
+
+    return { content: `Prompt '${prompt.name}' executed.` };
   }
 }

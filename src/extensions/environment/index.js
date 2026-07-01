@@ -1,5 +1,4 @@
-// Environment Extension
-// Contributes the Environment section chunk to the system prompt.
+// Environment - Contributes the Environment section chunk to the system prompt.
 // Hooks: systemPrompt:build
 
 import { join } from "node:path";

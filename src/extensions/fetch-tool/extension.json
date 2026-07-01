@@ -11,18 +11,10 @@
           "type": "boolean",
           "default": true,
           "description": "Whether this extension is enabled. Set to false to disable the extension entirely."
-        },
-        "toolEnabled": {
-          "type": "boolean",
-          "default": true,
-          "description": "Whether to register the fetch tool"
         }
       },
       "additionalProperties": false,
-      "layers": [
-        { "source": "config", "key": "fetchTool" },
-        { "default": {} }
-      ]
+      "layers": [{ "source": "config", "key": "fetchTool" }, { "default": {} }]
     }
   }
 }

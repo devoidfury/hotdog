@@ -26,12 +26,10 @@ export function create(core) {
   return {
     hooks: {
       /**
-       * Register the fetch tool (if enabled).
+       * Register the fetch tool.
        */
       [HOOKS.TOOLS_REGISTER]: async (registry) => {
-        if (config.toolEnabled) {
-          registry.register("fetch", fetchTool);
-        }
+        registry.register("fetch", fetchTool);
       },
     },
 
@@ -77,7 +75,7 @@ export class FetchTool {
   callDisplay(input) {
     return defaultCallDisplay(input, (args) => {
       const url = args.url;
-      const urlDisplay = url.length > 40 ? url.slice(0, 40) + "..." : url;
+      const urlDisplay = url.length > 60 ? url.slice(0, 60) + "..." : url;
       return `[${args.method}] ${urlDisplay}`;
     });
   }
@@ -97,9 +95,7 @@ export class FetchTool {
           "Content-Type": "application/json",
           ...headers,
         },
-        body: METHODS_WITH_BODY.includes(method)
-          ? body || undefined
-          : undefined,
+        body: (METHODS_WITH_BODY.includes(method) && body) || undefined,
       });
 
       const respHeaders = {};

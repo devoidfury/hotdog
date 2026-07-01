@@ -64,8 +64,10 @@ export function create(core) {
             if (!conn) continue;
             connections.push(conn);
 
-            // Register each discovered tool
+            // Register each discovered tool (skip blacklisted)
+            const blacklist = server.blacklistTools || [];
             for (const toolDef of conn.tools) {
+              if (blacklist.includes(toolDef.name)) continue;
               const tool = new McpTool(conn.serverName, toolDef, conn.handle());
               registry.register(tool.registeredName, tool);
             }

@@ -134,8 +134,8 @@ async function runFindFallback(pattern, fileType, cwd) {
 export class FindTool {
   static TOOL_NAME = "find";
   constructor(options = {}) {
-    this.maxResults = options.maxResults ?? extensionData.configSchema.properties.findMaxResults.default;
-    this.maxOutputLines = options.maxOutputLines ?? extensionData.configSchema.properties.maxToolOutputLines.default;
+    this.maxResults = options.maxResults ?? extensionData.configSchema.coreTools.properties.findMaxResults.default;
+    this.maxOutputLines = options.maxOutputLines ?? extensionData.configSchema.coreTools.properties.maxToolOutputLines.default;
   }
   toToolDef() {
     return toolDef(

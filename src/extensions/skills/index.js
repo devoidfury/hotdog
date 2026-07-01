@@ -23,7 +23,7 @@ export async function create(core) {
   const config = core.config?.skills || {};
   const skillsPath =
     config.skillsPath ??
-    extensionData.configSchema.properties.skillsPath.default;
+    extensionData.configSchema.skills.properties.skillsPath.default;
   const loader = new SkillsLoader(skillsPath);
   await loader.loadSkills();
 

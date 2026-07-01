@@ -4,14 +4,20 @@
   "loadOrder": 10,
   "description": "Shell command execution via /sh, !, and :! syntax",
   "configSchema": {
-    "type": "object",
-    "properties": {
-      "enabled": {
-        "type": "boolean",
-        "default": true,
-        "description": "Whether this extension is enabled. Set to false to disable the extension entirely."
-      }
-    },
-    "additionalProperties": false
+    "runShellCommand": {
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Whether this extension is enabled. Set to false to disable the extension entirely."
+        }
+      },
+      "additionalProperties": false,
+      "layers": [
+        { "source": "config", "key": "runShellCommand" },
+        { "default": {} }
+      ]
+    }
   }
 }

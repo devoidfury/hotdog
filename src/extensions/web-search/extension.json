@@ -4,45 +4,51 @@
   "loadOrder": 10,
   "description": "Web search tool — search the internet via DuckDuckGo, Brave, Tavily, or SearXNG",
   "configSchema": {
-    "type": "object",
-    "properties": {
-      "enabled": {
-        "type": "boolean",
-        "default": true,
-        "description": "Whether this extension is enabled"
+    "webSearch": {
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Whether this extension is enabled"
+        },
+        "provider": {
+          "type": "string",
+          "default": "duckduckgo",
+          "description": "Search provider: duckduckgo, brave, tavily, or searxng",
+          "enum": ["duckduckgo", "brave", "tavily", "searxng"]
+        },
+        "maxResults": {
+          "type": "number",
+          "default": 5,
+          "description": "Maximum number of search results to return (1-10)"
+        },
+        "timeout": {
+          "type": "number",
+          "default": 15,
+          "description": "Request timeout in seconds"
+        },
+        "braveApiKey": {
+          "type": "string",
+          "default": "",
+          "description": "Brave Search API key (required when provider=brave)"
+        },
+        "tavilyApiKey": {
+          "type": "string",
+          "default": "",
+          "description": "Tavily API key (required when provider=tavily)"
+        },
+        "searxngInstanceUrl": {
+          "type": "string",
+          "default": "",
+          "description": "SearXNG instance URL (e.g. https://searx.example.com) (required when provider=searxng)"
+        }
       },
-      "provider": {
-        "type": "string",
-        "default": "duckduckgo",
-        "description": "Search provider: duckduckgo, brave, tavily, or searxng",
-        "enum": ["duckduckgo", "brave", "tavily", "searxng"]
-      },
-      "maxResults": {
-        "type": "number",
-        "default": 5,
-        "description": "Maximum number of search results to return (1-10)"
-      },
-      "timeout": {
-        "type": "number",
-        "default": 15,
-        "description": "Request timeout in seconds"
-      },
-      "braveApiKey": {
-        "type": "string",
-        "default": "",
-        "description": "Brave Search API key (required when provider=brave)"
-      },
-      "tavilyApiKey": {
-        "type": "string",
-        "default": "",
-        "description": "Tavily API key (required when provider=tavily)"
-      },
-      "searxngInstanceUrl": {
-        "type": "string",
-        "default": "",
-        "description": "SearXNG instance URL (e.g. https://searx.example.com) (required when provider=searxng)"
-      }
-    },
-    "additionalProperties": false
+      "additionalProperties": false,
+      "layers": [
+        { "source": "config", "key": "webSearch" },
+        { "default": {} }
+      ]
+    }
   }
 }

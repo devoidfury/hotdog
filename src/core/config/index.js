@@ -12,6 +12,7 @@ import { parseFrontMatter } from "../../utils/file-utils.js";
 import { deepMerge } from "../../utils/objects.js";
 import { render } from "../../utils/render.js";
 import { validate as validateSchema } from "../../utils/json-schema.js";
+import { camelCase } from "../../utils/strings.js";
 
 export * from "./defaults.js";
 export * from "./schema-loader.js";
@@ -48,7 +49,6 @@ import {
 } from "./schema-loader.js";
 import { loadProfileFiles, allProfilesForSwitch } from "./profiles.js";
 import { buildModelRegistry, initSystemPromptTemplate } from "./providers.js";
-import { camelCase } from "../../utils/strings.js";
 
 // ── Config Directory Resolution ────────────────────────────────────────
 
@@ -98,7 +98,7 @@ export function resolveConfigDir(cliConfigDir) {
  * Merge extension-registered config defaults into the base config.
  *
  * @param {Object} defaultConfig - The default config object.
- * @param {Array<{key: string, defaults: Object}>} extParams - Extension config params.
+ * @param {Array<{key: string, defaults: *}>} extParams - Extension config params.
  * @returns {Object} Merged config.
  */
 export function mergeExtensionConfigDefaults(defaultConfig, extParams) {
@@ -110,10 +110,12 @@ export function mergeExtensionConfigDefaults(defaultConfig, extParams) {
 
   for (const param of extParams) {
     if (merged[param.key] === undefined) {
-      merged[param.key] = { ...param.defaults };
+      merged[param.key] = param.defaults;
     } else if (
       typeof merged[param.key] === "object" &&
-      merged[param.key] !== null
+      merged[param.key] !== null &&
+      typeof param.defaults === "object" &&
+      param.defaults !== null
     ) {
       // Deep merge with extension defaults
       merged[param.key] = deepMerge(merged[param.key], param.defaults);
@@ -126,7 +128,7 @@ export function mergeExtensionConfigDefaults(defaultConfig, extParams) {
 // ── Config Loading ─────────────────────────────────────────────────────
 
 /**
- * Normalize config keys from snake_case to camelCase.
+ * Normalize config keys from snake_case to camelCase recursively.
  * Handles nested objects like profiles and mcp_servers.
  *
  * @param {any} obj - The object to normalize.
@@ -353,7 +355,6 @@ export async function buildAgentConfig(options) {
     cli,
     config,
     configDir,
-    extensions: {},
   };
 
   // Resolve values that don't depend on profile/provider via schema layers
@@ -400,21 +401,6 @@ export async function buildAgentConfig(options) {
     };
   }
 
-  // ── Build extension config context ────────────────────────────────────
-  const extensions = {};
-  for (const [key, value] of Object.entries(config)) {
-    if (
-      typeof value === "object" &&
-      value !== null &&
-      !Array.isArray(value) &&
-      !["profiles", "provider"].includes(key)
-    ) {
-      if (/^[a-z][a-zA-Z]+$/.test(key) && key !== "defaultModel") {
-        extensions[key] = value;
-      }
-    }
-  }
-
   // ── Full declarative resolution ────────────────────────────────────────
   context = {
     ...context,
@@ -422,7 +408,6 @@ export async function buildAgentConfig(options) {
     profile,
     profileName,
     profilesPath,
-    extensions,
   };
   const resolved = resolveAll(CONFIG_SCHEMA, context);
 

@@ -53,7 +53,6 @@
     {
       "enabled": false,
       "name": "moo-tasks",
-      "type": "streamable-http",
       "url": "http://host.docker.internal:3000/api/boards/oUlvAvi_50SQ/mcp",
       "headers": {
         "Authorization": "Bearer mab_YEYp2-uzRj70bA_R2YtRuMf5Bn8G05ly"

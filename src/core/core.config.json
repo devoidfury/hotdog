@@ -335,7 +335,6 @@
   "coreTools": {
     "type": "object",
     "layers": [
-      { "source": "extension", "key": "coreTools" },
       { "source": "config", "key": "coreTools" },
       { "default": {} }
     ]
@@ -343,7 +342,6 @@
   "compaction": {
     "type": "object",
     "layers": [
-      { "source": "extension", "key": "compaction" },
       { "source": "config", "key": "compaction" },
       { "default": {} }
     ]

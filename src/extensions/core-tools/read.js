@@ -32,7 +32,7 @@ export class ReadTool {
   constructor(options = {}) {
     this.readLimit =
       options.readLimit ??
-      extensionData.configSchema.properties.readToolLimit.default;
+      extensionData.configSchema.coreTools.properties.readToolLimit.default;
     this.maxImageSize = options.maxImageSize ?? DEFAULT_MAX_IMAGE_SIZE;
   }
 

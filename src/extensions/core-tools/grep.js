@@ -301,10 +301,10 @@ export class GrepTool {
   constructor(options = {}) {
     this.maxResults =
       options.maxResults ??
-      extensionData.configSchema.properties.grepMaxResults.default;
+      extensionData.configSchema.coreTools.properties.grepMaxResults.default;
     this.maxOutputLines =
       options.maxOutputLines ??
-      extensionData.configSchema.properties.maxToolOutputLines.default;
+      extensionData.configSchema.coreTools.properties.maxToolOutputLines.default;
   }
 
   toToolDef() {

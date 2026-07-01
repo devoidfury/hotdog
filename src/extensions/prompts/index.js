@@ -14,7 +14,7 @@ import { render } from '../../utils/render.js';
 export async function create(core) {
   // Config defaults come from extension.json configSchema
   const config = core.config?.prompts || {};
-  const promptsPath = config.promptsPath ?? extensionData.configSchema.properties.promptsPath.default;
+  const promptsPath = config.promptsPath ?? extensionData.configSchema.prompts.properties.promptsPath.default;
   const loader = new PromptsLoader(promptsPath);
   await loader.loadPrompts();
 

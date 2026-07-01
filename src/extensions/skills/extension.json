@@ -5,35 +5,33 @@
   "dependsOn": ["core-tools"],
   "description": "Skills loading, activation, and system prompt integration",
   "configSchema": {
-    "type": "object",
-    "properties": {
-      "enabled": {
-        "type": "boolean",
-        "default": true,
-        "description": "Whether this extension is enabled. Set to false to disable the extension entirely."
-      },
-      "preloadSkills": {
-        "type": "array",
-        "items": {
-          "type": "string"
+    "skills": {
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Whether this extension is enabled. Set to false to disable the extension entirely."
         },
-        "default": [],
-        "description": "List of skill names to preload",
-        "layers": [
-          { "source": "config", "key": "preloadSkills", "predicate": "array" },
-          { "default": [] }
-        ]
+        "preloadSkills": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [],
+          "description": "List of skill names to preload"
+        },
+        "skillsPath": {
+          "type": "string",
+          "default": "/skills",
+          "description": "Directory path where skills are stored"
+        }
       },
-      "skillsPath": {
-        "type": "string",
-        "default": "/skills",
-        "description": "Directory path where skills are stored",
-        "layers": [
-          { "source": "config", "key": "skillsPath", "predicate": "nonempty" },
-          { "default": "/skills" }
-        ]
-      }
-    },
-    "additionalProperties": false
+      "additionalProperties": false,
+      "layers": [
+        { "source": "config", "key": "skills" },
+        { "default": {} }
+      ]
+    }
   }
 }

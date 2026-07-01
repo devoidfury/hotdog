@@ -4,32 +4,30 @@
   "loadOrder": 1,
   "description": "Switch the AI model at runtime (tool + slash commands)",
   "configSchema": {
-    "type": "object",
-    "properties": {
-      "enabled": {
-        "type": "boolean",
-        "default": true,
-        "description": "Whether this extension is enabled. Set to false to disable the extension entirely."
+    "modelSwitch": {
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Whether this extension is enabled. Set to false to disable the extension entirely."
+        },
+        "toolEnabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Whether to register the model tool"
+        },
+        "commandEnabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Whether to register the /model and /models slash commands"
+        }
       },
-      "toolEnabled": {
-        "type": "boolean",
-        "default": true,
-        "description": "Whether to register the model tool",
-        "layers": [
-          { "source": "config", "key": "modelToolEnabled" },
-          { "default": true }
-        ]
-      },
-      "commandEnabled": {
-        "type": "boolean",
-        "default": true,
-        "description": "Whether to register the /model and /models slash commands",
-        "layers": [
-          { "source": "config", "key": "modelCommandEnabled" },
-          { "default": true }
-        ]
-      }
-    },
-    "additionalProperties": false
+      "additionalProperties": false,
+      "layers": [
+        { "source": "config", "key": "modelSwitch" },
+        { "default": {} }
+      ]
+    }
   }
 }

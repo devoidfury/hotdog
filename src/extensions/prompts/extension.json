@@ -4,23 +4,25 @@
   "loadOrder": 10,
   "description": "Prompt template loading and execution",
   "configSchema": {
-    "type": "object",
-    "properties": {
-      "enabled": {
-        "type": "boolean",
-        "default": true,
-        "description": "Whether this extension is enabled. Set to false to disable the extension entirely."
+    "prompts": {
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Whether this extension is enabled. Set to false to disable the extension entirely."
+        },
+        "promptsPath": {
+          "type": "string",
+          "default": "config/prompts",
+          "description": "Directory path where prompt templates are stored (relative to config dir, or absolute)"
+        }
       },
-      "promptsPath": {
-        "type": "string",
-        "default": "config/prompts",
-        "description": "Directory path where prompt templates are stored (relative to config dir, or absolute)",
-        "layers": [
-          { "source": "config", "key": "promptsPath" },
-          { "default": "config/prompts" }
-        ]
-      }
-    },
-    "additionalProperties": false
+      "additionalProperties": false,
+      "layers": [
+        { "source": "config", "key": "prompts" },
+        { "default": {} }
+      ]
+    }
   }
 }

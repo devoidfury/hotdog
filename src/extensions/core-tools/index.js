@@ -37,7 +37,7 @@ export const CORE_TOOL_NAMES = TOOL_DESCRIPTORS.map((d) => d.name);
 
 // Tool constructor map with config — maps tool names to factory functions that accept config.
 // Config values are pre-resolved with defaults from extension.json configSchema.
-const cs = extensionData.configSchema.properties;
+const cs = extensionData.configSchema.coreTools.properties;
 const TOOL_FACTORIES = {
   write: () => new WriteTool(),
   read: (config) =>

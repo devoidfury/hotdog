@@ -14,72 +14,44 @@ export { HOOKS, EXTENSION_PROVIDES };
 // ── Schema Defaults Extraction ─────────────────────────────────────────────
 
 /**
- * Extract default values from a JSON Schema's properties.
- * Returns a single config param entry with all defaults merged into one object.
- * This format is compatible with ConfigRegistry.registerConfigParams().
+ * Extract default values from an extension's configSchema.
+ * Each top-level key in configSchema is a namespace the extension owns
+ * on the config object (e.g., { bashTool: { type: "object", ... } }).
  *
- * @param {Object} schema - JSON Schema with properties containing defaults.
- * @param {string} [configKey] - Optional config key override. If not provided,
- *   defaults are returned with individual property keys.
- * @returns {Array<{key: string, description?: string, defaults: Object, schema?: Object, layers?: Object}>}
+ * @param {Object} schema - Extension configSchema keyed by namespace name.
+ * @returns {Array<{key: string, description?: string, defaults: *, schema?: Object, layers?: Object}>}
  */
-export function extractSchemaDefaults(schema, configKey) {
-  if (!schema) return [];
+export function extractSchemaDefaults(schema) {
+  if (!schema || typeof schema !== "object") return [];
 
-  // For object-type schemas: collect all defaults into a single entry
-  if (schema.type === "object" && schema.properties) {
-    const defaults = {};
-    const layers = {};
-
-    for (const [propName, prop] of Object.entries(schema.properties)) {
-      if (prop.default !== undefined) {
-        defaults[propName] = prop.default;
-      } else if (prop.type === "object" && prop.properties) {
-        // Collect nested defaults
-        for (const [nestedKey, nestedProp] of Object.entries(prop.properties)) {
-          if (nestedProp.default !== undefined) {
-            defaults[nestedKey] = nestedProp.default;
-          }
+  const result = [];
+  for (const [keyName, keySchema] of Object.entries(schema)) {
+    // Build defaults from nested properties (for type: "object")
+    let defaults;
+    if (keySchema.type === "object" && keySchema.properties) {
+      defaults = {};
+      for (const [propName, prop] of Object.entries(keySchema.properties)) {
+        if (prop.default !== undefined) {
+          defaults[propName] = prop.default;
         }
       }
-
-      // Extract layers if defined (extension layer support)
-      if (prop.layers) {
-        layers[propName] = prop.layers;
-      }
+    } else if (keySchema.default !== undefined) {
+      // For arrays or other types with a direct default
+      defaults = keySchema.default;
     }
 
-    const result = [
-      {
-        key: configKey || schema.$id || "config",
-        description: schema.description || "",
-        defaults,
-        schema,
-      },
-    ];
-
-    // Attach layers if any were found
-    if (Object.keys(layers).length > 0) {
-      result[0].layers = layers;
+    const entry = {
+      key: keyName,
+      description: keySchema.description || "",
+      defaults,
+      schema: keySchema,
+    };
+    if (keySchema.layers) {
+      entry.layers = keySchema.layers;
     }
-
-    return Object.keys(defaults).length > 0 || Object.keys(layers).length > 0
-      ? result
-      : [];
+    result.push(entry);
   }
-
-  // For array-type schemas: check for top-level default
-  if (schema.type === "array" && schema.default !== undefined) {
-    return [
-      {
-        key: configKey || schema.$id || "config",
-        description: schema.description || "",
-        defaults: { items: schema.default },
-      },
-    ];
-  }
-
-  return [];
+  return result;
 }
 
 /**
@@ -95,8 +67,7 @@ export async function getExtensionConfigDefaults(extensionPaths) {
 
     for (const ext of discovered) {
       if (ext.configSchema) {
-        const configKey = camelCase(ext.name);
-        const defaults = extractSchemaDefaults(ext.configSchema, configKey);
+        const defaults = extractSchemaDefaults(ext.configSchema);
         params.push(...defaults);
       }
     }
@@ -781,8 +752,7 @@ export async function registerExtensionMetadata(
   // Extensions can still use CONFIG_PARAMS_REGISTER for additional/programmatic params.
   for (const ext of extensionsToLoad) {
     if (ext.configSchema) {
-      const configKey = camelCase(ext.name);
-      const params = extractSchemaDefaults(ext.configSchema, configKey);
+      const params = extractSchemaDefaults(ext.configSchema);
       if (params.length > 0) {
         configRegistry.registerConfigParams(params);
       }

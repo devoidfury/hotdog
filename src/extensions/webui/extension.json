@@ -6,35 +6,41 @@
   "description": "Web UI for agent interaction — login, chat, session management",
   "autoload": true,
   "configSchema": {
-    "type": "object",
-    "properties": {
-      "enabled": {
-        "type": "boolean",
-        "default": true,
-        "description": "Whether this extension is enabled. Set to false to disable the extension entirely."
+    "webui": {
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Whether this extension is enabled. Set to false to disable the extension entirely."
+        },
+        "port": {
+          "type": "number",
+          "default": 3000,
+          "description": "WebUI server port"
+        },
+        "host": {
+          "type": "string",
+          "default": "0.0.0.0",
+          "description": "WebUI server host"
+        },
+        "apiKey": {
+          "type": "string",
+          "default": null,
+          "description": "API key for login authentication. Falls back to OA_WEBUI_API_KEY env var."
+        },
+        "sessionTokenTtlMin": {
+          "type": "number",
+          "default": 1440,
+          "description": "Session token TTL in minutes (default: 24 hours)"
+        }
       },
-      "port": {
-        "type": "number",
-        "default": 3000,
-        "description": "WebUI server port"
-      },
-      "host": {
-        "type": "string",
-        "default": "0.0.0.0",
-        "description": "WebUI server host"
-      },
-      "apiKey": {
-        "type": "string",
-        "default": null,
-        "description": "API key for login authentication. Falls back to OA_WEBUI_API_KEY env var."
-      },
-      "sessionTokenTtlMin": {
-        "type": "number",
-        "default": 1440,
-        "description": "Session token TTL in minutes (default: 24 hours)"
-      }
-    },
-    "additionalProperties": false
+      "additionalProperties": false,
+      "layers": [
+        { "source": "config", "key": "webui" },
+        { "default": {} }
+      ]
+    }
   },
   "cli:subcommands": [
     {

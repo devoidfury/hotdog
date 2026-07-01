@@ -10,7 +10,6 @@
 import { join } from "node:path";
 import { getNested } from "../../utils/objects.js";
 import configSchema from "../core.config.json" with { type: "json" };
-import { camelCase } from "../../utils/strings.js";
 
 /**
  * Map of named cast strings to their function implementations.
@@ -244,7 +243,7 @@ export function getLayerDefault(schemaKey) {
 
 /**
  * Load extension schemas and merge them into the unified schema.
- * Extracts `layers` from extension configSchema properties.
+ * Each top-level key in configSchema is a namespace the extension owns.
  *
  * @param {Array<object>} extensions - Array of extension metadata with configSchema.
  * @returns {object} Unified schema with core + extension keys.
@@ -253,21 +252,14 @@ export function loadExtensionSchemas(extensions) {
   const extensionKeys = {};
 
   for (const ext of extensions) {
-    if (!ext.configSchema) continue;
+    if (!ext.configSchema || typeof ext.configSchema !== "object") continue;
 
-    const configKey = camelCase(ext.name);
-
-    // If extension has layers in its configSchema properties, extract them
-    if (ext.configSchema.properties) {
-      for (const [propName, propSchema] of Object.entries(
-        ext.configSchema.properties,
-      )) {
-        if (propSchema.layers) {
-          extensionKeys[`${configKey}.${propName}`] = compileSchemaKey({
-            type: propSchema.type,
-            layers: propSchema.layers,
-          });
-        }
+    for (const [keyName, keySchema] of Object.entries(ext.configSchema)) {
+      if (keySchema.layers) {
+        extensionKeys[keyName] = compileSchemaKey({
+          type: keySchema.type,
+          layers: keySchema.layers,
+        });
       }
     }
   }
@@ -343,8 +335,6 @@ export function resolveLayerValue(layer, context) {
       return undefined;
     case "profile":
       return getNested(context.profile, layer.key || layer.path);
-    case "extension":
-      return getNested(context.extensions, layer.key);
     default:
       return undefined;
   }

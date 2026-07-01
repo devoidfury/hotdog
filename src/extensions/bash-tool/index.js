@@ -19,10 +19,10 @@ export class BashTool {
   constructor(options = {}) {
     this.timeoutMs =
       options.timeoutMs ??
-      extensionData.configSchema.properties.bashTimeoutMs.default;
+      extensionData.configSchema.bashTool.properties.bashTimeoutMs.default;
     this.maxOutputLines =
       options.maxOutputLines ??
-      extensionData.configSchema.properties.maxToolOutputLines.default;
+      extensionData.configSchema.bashTool.properties.maxToolOutputLines.default;
   }
 
   toToolDef() {

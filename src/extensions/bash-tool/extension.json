@@ -4,32 +4,30 @@
   "loadOrder": 1,
   "description": "Bash tool — execute shell commands",
   "configSchema": {
-    "type": "object",
-    "properties": {
-      "enabled": {
-        "type": "boolean",
-        "default": true,
-        "description": "Whether this extension is enabled. Set to false to disable the extension entirely."
+    "bashTool": {
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Whether this extension is enabled. Set to false to disable the extension entirely."
+        },
+        "bashTimeoutMs": {
+          "type": "number",
+          "default": 60000,
+          "description": "Default timeout for bash commands in milliseconds"
+        },
+        "maxToolOutputLines": {
+          "type": "number",
+          "default": 600,
+          "description": "Maximum number of output lines for tool results"
+        }
       },
-      "bashTimeoutMs": {
-        "type": "number",
-        "default": 60000,
-        "description": "Default timeout for bash commands in milliseconds",
-        "layers": [
-          { "source": "config", "key": "bashTimeoutMs" },
-          { "default": 60000 }
-        ]
-      },
-      "maxToolOutputLines": {
-        "type": "number",
-        "default": 600,
-        "description": "Maximum number of output lines for tool results",
-        "layers": [
-          { "source": "config", "key": "bashMaxToolOutputLines" },
-          { "default": 600 }
-        ]
-      }
-    },
-    "additionalProperties": false
+      "additionalProperties": false,
+      "layers": [
+        { "source": "config", "key": "bashTool" },
+        { "default": {} }
+      ]
+    }
   }
 }

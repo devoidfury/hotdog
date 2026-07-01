@@ -18,7 +18,7 @@ export class EditTool {
   constructor(options = {}) {
     this.maxEditInputSize =
       options.maxEditInputSize ??
-      extensionData.configSchema.properties.maxEditInputSize.default;
+      extensionData.configSchema.coreTools.properties.maxEditInputSize.default;
   }
 
   toToolDef() {

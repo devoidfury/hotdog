@@ -26,7 +26,7 @@ import { Message } from '../../core/context/message.js';
 export function create(core) {
   // Config defaults come from extension.json configSchema
   const config = core.config?.compaction || {};
-  const cs = extensionData.configSchema.properties;
+  const cs = extensionData.configSchema.compaction.properties;
 
   const settings = {
     enabled: config.enabled ?? cs.enabled.default,

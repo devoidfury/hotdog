@@ -4,15 +4,21 @@
   "loadOrder": 10,
   "description": "Provides info and show-prompt CLI subcommands",
   "configSchema": {
-    "type": "object",
-    "properties": {
-      "enabled": {
-        "type": "boolean",
-        "default": true,
-        "description": "Whether this extension is enabled. Set to false to disable the extension entirely."
-      }
-    },
-    "additionalProperties": false
+    "uiInfoCli": {
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Whether this extension is enabled. Set to false to disable the extension entirely."
+        }
+      },
+      "additionalProperties": false,
+      "layers": [
+        { "source": "config", "key": "uiInfoCli" },
+        { "default": {} }
+      ]
+    }
   },
   "cli:flags": [
     {

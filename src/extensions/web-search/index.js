@@ -324,7 +324,7 @@ export function create(core) {
 
   const provider =
     config.provider ||
-    extensionData.configSchema.properties.provider.default;
+    extensionData.configSchema.webSearch.properties.provider.default;
 
   const braveApiKey =
     config.braveApiKey || process.env.BRAVE_API_KEY || "";

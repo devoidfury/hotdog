@@ -328,71 +328,60 @@ describe("ConfigRegistry", () => {
   });
 
   describe("extractSchemaDefaults", () => {
-    it("should extract defaults from object schema", () => {
+    it("should extract one entry per namespace key with merged property defaults", () => {
       const schema = {
-        type: "object",
-        properties: {
-          enabled: { type: "boolean", default: true },
-          timeout: { type: "number", default: 30 },
-          name: { type: "string" }, // no default
+        myExtension: {
+          type: "object",
+          properties: {
+            enabled: { type: "boolean", default: true },
+            timeout: { type: "number", default: 30 },
+            name: { type: "string" }, // no default
+          },
         },
       };
 
-      const params = extractSchemaDefaults(schema, "myExtension");
+      const params = extractSchemaDefaults(schema);
       expect(params).toHaveLength(1);
       expect(params[0].key).toBe("myExtension");
-      expect(params[0].defaults).toEqual({ enabled: true, timeout: 30 });
-    });
-
-    it("should handle nested object properties", () => {
-      const schema = {
-        type: "object",
-        properties: {
-          servers: {
-            type: "object",
-            properties: {
-              defaultServer: { type: "string", default: "localhost" },
-            },
-          },
-          enabled: { type: "boolean", default: false },
-        },
-      };
-
-      const params = extractSchemaDefaults(schema, "myExtension");
-      expect(params).toHaveLength(1);
       expect(params[0].defaults).toEqual({
-        defaultServer: "localhost",
-        enabled: false,
+        enabled: true,
+        timeout: 30,
       });
     });
 
-    it("should handle array schema with default", () => {
+    it("should handle array-type namespace keys", () => {
       const schema = {
-        type: "array",
-        default: [],
-        items: { type: "object" },
-      };
-
-      const params = extractSchemaDefaults(schema, "myArray");
-      expect(params).toHaveLength(1);
-      expect(params[0].key).toBe("myArray");
-      expect(params[0].defaults).toEqual({ items: [] });
-    });
-
-    it("should return empty array for schema without defaults", () => {
-      const schema = {
-        type: "object",
-        properties: {
-          name: { type: "string" },
+        mcpServers: {
+          type: "array",
+          default: [],
+          items: { type: "object" },
         },
       };
 
-      const params = extractSchemaDefaults(schema, "noDefaults");
-      expect(params).toHaveLength(0);
+      const params = extractSchemaDefaults(schema);
+      expect(params).toHaveLength(1);
+      expect(params[0].key).toBe("mcpServers");
+      expect(params[0].defaults).toEqual([]);
+    });
+
+    it("should return empty array for schema without properties or defaults", () => {
+      const schema = {
+        myExtension: {
+          type: "object",
+          properties: {
+            name: { type: "string" },
+          },
+        },
+      };
+
+      const params = extractSchemaDefaults(schema);
+      expect(params).toHaveLength(1);
+      expect(params[0].key).toBe("myExtension");
+      expect(params[0].defaults).toEqual({});
     });
 
     it("should return empty array for null schema", () => {
-      const params = extractSchemaDefaults(null, "test");
+      const params = extractSchemaDefaults(null);
       expect(params).toHaveLength(0);
     });
   });

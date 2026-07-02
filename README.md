@@ -228,4 +228,4 @@ Was any AI used in the process of writing this code? You betcha, yes, for sure. 
 
 ## License
 
-[Add your license here]
+[MIT](LICENSE) — Copyright (c) 2026 devoidfury / Thomas Hunkapiller

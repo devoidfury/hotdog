@@ -1,3 +1,17 @@
 Dockerfile
 docs/
 tmp/
+tests/
+coverage/
+*.lcov
+.git/
+.gitignore
+.env*
+.cache/
+.idea/
+.vscode/
+.vs/
+*.log
+*.tsbuildinfo
+.eslintcache
+node_modules/

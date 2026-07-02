@@ -23,8 +23,14 @@ describe("resolveConfigDir", () => {
 
   it("returns ./config when it exists in CWD", () => {
     // In the test workspace, ./config exists
-    const result = resolveConfigDir();
-    expect(result).toContain("config");
+    const saved = process.env.HOTDOG_CONFIG_DIR;
+    delete process.env.HOTDOG_CONFIG_DIR;
+    try {
+      const result = resolveConfigDir();
+      expect(result).toContain("config");
+    } finally {
+      process.env.HOTDOG_CONFIG_DIR = saved;
+    }
   });
 });
 

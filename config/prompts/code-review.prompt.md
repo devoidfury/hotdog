@@ -11,9 +11,9 @@ Please review the following code changes. Focus on:
 3. Code style and readability
 4. Security concerns
 
-## Recent Changes
+## View Recent Changes
 
-{{ "git log --oneline -10" | exec }}
+`git log --oneline -10`
 
 ## Specific Focus
 

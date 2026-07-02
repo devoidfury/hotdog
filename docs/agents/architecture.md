@@ -152,7 +152,7 @@ Centralized, swappable logging via the hook system. Singleton pattern with pre-i
 - `LOG_LEVELS` — `{ debug: 0, info: 1, warn: 2, error: 3 }`
 
 ### Template Engine (`src/utils/render.js`)
-Tera-like template engine supporting `{{ vars }}`, `{% if %}`, `{% for %}`, filters (`|trim`, `|length`, `|exec`, `|default`), and block tags. Key exports:
+Tera-like template engine supporting `{{ vars }}`, `{% if %}`, `{% for %}`, filters (`|trim`, `|length`, `|default`), and block tags. Key exports:
 - `render(template, context, cache)` — renders template string with context
 - `compile(template)` — compiles template into render function
 

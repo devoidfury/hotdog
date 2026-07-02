@@ -229,15 +229,6 @@ function applySimpleFilter(value, name) {
     return value === "" || value == null ? "" : String(value);
   if (name === "length") return String((value ?? "").length);
   if (name === "trim") return String(value).trim();
-  if (name === "exec") {
-    const { execSync } = require("child_process");
-    const cmd = typeof value === "string" ? value : String(value);
-    try {
-      return execSync(cmd, { encoding: "utf-8" }).trimEnd();
-    } catch {
-      return "";
-    }
-  }
   return String(value);
 }
 

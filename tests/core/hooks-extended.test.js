@@ -1,6 +1,6 @@
 // Extended tests for HookSystem — trace mode, error handling, edge cases.
 import { HookSystem, createHooks } from "../../src/core/hooks.js";
-import { describe, it, expect } from "bun:test";
+import { describe, it, expect, beforeEach, afterEach } from "bun:test";
 
 describe("HookSystem — trace mode", () => {
   it("enables trace mode via _trace flag", () => {
@@ -11,6 +11,17 @@ describe("HookSystem — trace mode", () => {
 });
 
 describe("_summarizeResult (via runHookPipeline trace)", () => {
+  let origStderr;
+
+  beforeEach(() => {
+    origStderr = process.stderr.write;
+    process.stderr.write = () => true;
+  });
+
+  afterEach(() => {
+    process.stderr.write = origStderr;
+  });
+
   it("trace captures handler source when provided", async () => {
     const hooks = new HookSystem();
     hooks._trace = true;
@@ -55,6 +66,17 @@ describe("_summarizeResult (via runHookPipeline trace)", () => {
 });
 
 describe("notifyHooks — handler errors", () => {
+  let origStderr;
+
+  beforeEach(() => {
+    origStderr = process.stderr.write;
+    process.stderr.write = () => true;
+  });
+
+  afterEach(() => {
+    process.stderr.write = origStderr;
+  });
+
   it("handler error in notifyHooks propagates", () => {
     const hooks = createHooks();
     hooks.on("test", () => { throw new Error("boom"); });
@@ -75,6 +97,17 @@ describe("notifyHooks — handler errors", () => {
 });
 
 describe("notifyHooksAsync — error handling", () => {
+  let origStderr;
+
+  beforeEach(() => {
+    origStderr = process.stderr.write;
+    process.stderr.write = () => true;
+  });
+
+  afterEach(() => {
+    process.stderr.write = origStderr;
+  });
+
   it("catches and logs errors from async handlers", async () => {
     const hooks = createHooks();
     hooks.on("test", async () => { throw new Error("async boom"); });

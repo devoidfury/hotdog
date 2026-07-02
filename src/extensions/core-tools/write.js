@@ -123,7 +123,12 @@ export class WriteTool {
 
   async execute(input, ctx) {
     const rawArgs = parseToolInput(input);
-    if (!rawArgs || !rawArgs.mode || !rawArgs.path || rawArgs.content === undefined) {
+    if (
+      !rawArgs ||
+      !rawArgs.mode ||
+      !rawArgs.path ||
+      rawArgs.content === undefined
+    ) {
       return ToolResult.err("Error parsing arguments");
     }
 
@@ -148,8 +153,8 @@ export class WriteTool {
       start_at,
       end_at,
     } = args;
-    const cwdBoundary = ctx?.get('cwdBoundary') || null;
-    const workspaceRoot = ctx?.get('workspaceRoot') || null;
+    const cwdBoundary = ctx?.get("cwdBoundary") || null;
+    const workspaceRoot = ctx?.get("workspaceRoot") || null;
 
     // Resolve path: cwdBoundary takes precedence, falls back to workspaceRoot
     const resolvedPath = resolvePath(filePath, cwdBoundary, workspaceRoot);
@@ -179,7 +184,7 @@ export class WriteTool {
       return ToolResult.err(`Error creating directory: ${e.message}`);
     }
 
-    const sourceContent = await fileExists(resolvedPath)
+    const sourceContent = (await fileExists(resolvedPath))
       ? await fs.readFile(resolvedPath, "utf-8")
       : "";
     const filesizeBefore = Buffer.byteLength(sourceContent, "utf-8");
@@ -225,45 +230,6 @@ export class WriteTool {
       bytes_changed: String(filesizeAfter - filesizeBefore),
     });
   }
-}
-
-/**
- * Parse and validate write tool arguments.
- */
-function parseArgs(input) {
-  if (!input || (typeof input === "string" && input.trim().length === 0)) {
-    return null;
-  }
-
-  let json;
-  if (typeof input === "string") {
-    try {
-      json = JSON.parse(input);
-    } catch {
-      return null;
-    }
-  } else {
-    json = input;
-  }
-
-  const mode = json.mode;
-  const filePath = json.path;
-  const content = json.content;
-
-  if (!mode || !filePath || !content) {
-    return null;
-  }
-
-  return {
-    mode,
-    path: filePath,
-    content,
-    search: json.search || null,
-    search_re: json.search_re || null,
-    start_at: typeof json.start_at === "number" ? json.start_at : null,
-    end_at: typeof json.end_at === "number" ? json.end_at : null,
-    replace_all: json.replace_all || false,
-  };
 }
 
 /**

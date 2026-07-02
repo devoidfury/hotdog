@@ -147,8 +147,8 @@ Tool definition helpers and utilities. Key exports:
 Centralized, swappable logging via the hook system. Singleton pattern with pre-init buffering. Key exports:
 - `logger` — singleton with `debug()`, `info()`, `warn()`, `error()` methods
 - `initializeLogger({ hooks, minLevel, target })` — bootstrap initialization
-- `resolveLogLevel(configLevel)` — resolves level from `OA_LOG_LEVEL` env or config
-- `resolveLogTarget(configTarget)` — resolves target from `OA_LOG_TARGET` env or config (`stderr`, `stdout`, `none`)
+- `resolveLogLevel(configLevel)` — resolves level from `HOTDOG_LOG_LEVEL` env or config
+- `resolveLogTarget(configTarget)` — resolves target from `HOTDOG_LOG_TARGET` env or config (`stderr`, `stdout`, `none`)
 - `LOG_LEVELS` — `{ debug: 0, info: 1, warn: 2, error: 3 }`
 
 ### Template Engine (`src/utils/render.js`)

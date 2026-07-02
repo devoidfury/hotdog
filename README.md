@@ -187,7 +187,7 @@ hotdog webui                     # Start the web UI server
 --show-tools                 Show tool calls in output
 --show-thinking              Show reasoning/thinking output
 --no-colors                  Disable colors
---hook-trace                 Trace hook execution (requires OA_LOG_LEVEL=debug)
+--hook-trace                 Trace hook execution (requires HOTDOG_LOG_LEVEL=debug)
 -v, --version                Show version
 -h, --help                   Show help
 ```

@@ -19,12 +19,12 @@ describe("LOG_LEVELS", () => {
 
 describe("resolveLogLevel", () => {
   it("returns default 'warn' with no config", () => {
-    const origLevel = process.env.OA_LOG_LEVEL;
-    delete process.env.OA_LOG_LEVEL;
+    const origLevel = process.env.HOTDOG_LOG_LEVEL;
+    delete process.env.HOTDOG_LOG_LEVEL;
     try {
       expect(resolveLogLevel()).toBe("warn");
     } finally {
-      if (origLevel !== undefined) process.env.OA_LOG_LEVEL = origLevel;
+      if (origLevel !== undefined) process.env.HOTDOG_LOG_LEVEL = origLevel;
     }
   });
 
@@ -35,47 +35,47 @@ describe("resolveLogLevel", () => {
   });
 
   it("prefers env var over config", () => {
-    const origLevel = process.env.OA_LOG_LEVEL;
-    process.env.OA_LOG_LEVEL = "debug";
+    const origLevel = process.env.HOTDOG_LOG_LEVEL;
+    process.env.HOTDOG_LOG_LEVEL = "debug";
     try {
       expect(resolveLogLevel("error")).toBe("debug");
     } finally {
-      if (origLevel !== undefined) process.env.OA_LOG_LEVEL = origLevel;
-      else delete process.env.OA_LOG_LEVEL;
+      if (origLevel !== undefined) process.env.HOTDOG_LOG_LEVEL = origLevel;
+      else delete process.env.HOTDOG_LOG_LEVEL;
     }
   });
 
   it("ignores invalid env var, falls back to config", () => {
-    const origLevel = process.env.OA_LOG_LEVEL;
-    process.env.OA_LOG_LEVEL = "invalid";
+    const origLevel = process.env.HOTDOG_LOG_LEVEL;
+    process.env.HOTDOG_LOG_LEVEL = "invalid";
     try {
       expect(resolveLogLevel("debug")).toBe("debug");
     } finally {
-      if (origLevel !== undefined) process.env.OA_LOG_LEVEL = origLevel;
-      else delete process.env.OA_LOG_LEVEL;
+      if (origLevel !== undefined) process.env.HOTDOG_LOG_LEVEL = origLevel;
+      else delete process.env.HOTDOG_LOG_LEVEL;
     }
   });
 
   it("handles case-insensitive env var", () => {
-    const origLevel = process.env.OA_LOG_LEVEL;
-    process.env.OA_LOG_LEVEL = "DEBUG";
+    const origLevel = process.env.HOTDOG_LOG_LEVEL;
+    process.env.HOTDOG_LOG_LEVEL = "DEBUG";
     try {
       expect(resolveLogLevel("error")).toBe("debug");
     } finally {
-      if (origLevel !== undefined) process.env.OA_LOG_LEVEL = origLevel;
-      else delete process.env.OA_LOG_LEVEL;
+      if (origLevel !== undefined) process.env.HOTDOG_LOG_LEVEL = origLevel;
+      else delete process.env.HOTDOG_LOG_LEVEL;
     }
   });
 });
 
 describe("resolveLogTarget", () => {
   it("returns default 'stderr' with no config", () => {
-    const origTarget = process.env.OA_LOG_TARGET;
-    delete process.env.OA_LOG_TARGET;
+    const origTarget = process.env.HOTDOG_LOG_TARGET;
+    delete process.env.HOTDOG_LOG_TARGET;
     try {
       expect(resolveLogTarget()).toBe("stderr");
     } finally {
-      if (origTarget !== undefined) process.env.OA_LOG_TARGET = origTarget;
+      if (origTarget !== undefined) process.env.HOTDOG_LOG_TARGET = origTarget;
     }
   });
 
@@ -86,35 +86,35 @@ describe("resolveLogTarget", () => {
   });
 
   it("prefers env var over config", () => {
-    const origTarget = process.env.OA_LOG_TARGET;
-    process.env.OA_LOG_TARGET = "stdout";
+    const origTarget = process.env.HOTDOG_LOG_TARGET;
+    process.env.HOTDOG_LOG_TARGET = "stdout";
     try {
       expect(resolveLogTarget("none")).toBe("stdout");
     } finally {
-      if (origTarget !== undefined) process.env.OA_LOG_TARGET = origTarget;
-      else delete process.env.OA_LOG_TARGET;
+      if (origTarget !== undefined) process.env.HOTDOG_LOG_TARGET = origTarget;
+      else delete process.env.HOTDOG_LOG_TARGET;
     }
   });
 
   it("ignores invalid env var, falls back to config", () => {
-    const origTarget = process.env.OA_LOG_TARGET;
-    process.env.OA_LOG_TARGET = "invalid";
+    const origTarget = process.env.HOTDOG_LOG_TARGET;
+    process.env.HOTDOG_LOG_TARGET = "invalid";
     try {
       expect(resolveLogTarget("stdout")).toBe("stdout");
     } finally {
-      if (origTarget !== undefined) process.env.OA_LOG_TARGET = origTarget;
-      else delete process.env.OA_LOG_TARGET;
+      if (origTarget !== undefined) process.env.HOTDOG_LOG_TARGET = origTarget;
+      else delete process.env.HOTDOG_LOG_TARGET;
     }
   });
 
   it("handles case-insensitive env var", () => {
-    const origTarget = process.env.OA_LOG_TARGET;
-    process.env.OA_LOG_TARGET = "STDOUT";
+    const origTarget = process.env.HOTDOG_LOG_TARGET;
+    process.env.HOTDOG_LOG_TARGET = "STDOUT";
     try {
       expect(resolveLogTarget("none")).toBe("stdout");
     } finally {
-      if (origTarget !== undefined) process.env.OA_LOG_TARGET = origTarget;
-      else delete process.env.OA_LOG_TARGET;
+      if (origTarget !== undefined) process.env.HOTDOG_LOG_TARGET = origTarget;
+      else delete process.env.HOTDOG_LOG_TARGET;
     }
   });
 });

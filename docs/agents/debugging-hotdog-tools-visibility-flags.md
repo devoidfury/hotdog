@@ -62,13 +62,13 @@ bun bin/hotdog review --session-id <ID> | \
 When multiple extensions hook into the same data-modifying hook (e.g., `context`, `tool:call`, `tool:result`), it can be hard to tell which extension modified what. Hook trace logs each handler invocation with execution order, source extension, timing, and return value.
 
 ```bash
-OA_LOG_LEVEL=debug bun bin/hotdog --hook-trace -c "hello"
+HOTDOG_LOG_LEVEL=debug bun bin/hotdog --hook-trace -c "hello"
 ```
 
 Or via env var or config:
 ```bash
 # Env var
-OA_HOOK_TRACE=1 OA_LOG_LEVEL=debug bun bin/hotdog -c "hello"
+HOTDOG_HOOK_TRACE=1 HOTDOG_LOG_LEVEL=debug bun bin/hotdog -c "hello"
 
 # Config file (config/defaults.json)
 { "hook_trace": true }
@@ -88,5 +88,5 @@ Each line shows: `hookName — N/M (source) — duration — return summary`
 - **return summary** -- what the handler returned, or "no return" if it didn't modify data
 - For `emitAsyncSeqUntil` hooks (e.g., `input`), an additional "stopped at handler N/M" line appears when the chain terminates early
 
-**Hooks traced:** All hooks except the internal `log` hook. Trace output uses `logger.debug()` so it requires `OA_LOG_LEVEL=debug` (or `OA_LOG_LEVEL=info` with `--loud`).
+**Hooks traced:** All hooks except the internal `log` hook. Trace output uses `logger.debug()` so it requires `HOTDOG_LOG_LEVEL=debug` (or `HOTDOG_LOG_LEVEL=info` with `--loud`).
 ```

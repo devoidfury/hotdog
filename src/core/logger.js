@@ -21,13 +21,13 @@ export const LOG_LEVELS = { debug: 0, info: 1, warn: 2, error: 3 };
 
 /**
  * Resolve a log level from env var or default.
- * Env var OA_LOG_LEVEL takes precedence.
+ * Env var HOTDOG_LOG_LEVEL takes precedence.
  *
  * @param {string} [configLevel] - Level from config (fallback)
  * @returns {string} Resolved level name
  */
 export function resolveLogLevel(configLevel) {
-  const envLevel = process.env.OA_LOG_LEVEL?.toLowerCase();
+  const envLevel = process.env.HOTDOG_LOG_LEVEL?.toLowerCase();
   if (envLevel && envLevel in LOG_LEVELS) return envLevel;
   if (configLevel && configLevel in LOG_LEVELS) return configLevel;
   return "warn";
@@ -35,13 +35,13 @@ export function resolveLogLevel(configLevel) {
 
 /**
  * Resolve log output target from env var or default.
- * Env var OA_LOG_TARGET takes precedence.
+ * Env var HOTDOG_LOG_TARGET takes precedence.
  *
  * @param {string} [configTarget] - Target from config (fallback)
  * @returns {string} Resolved target ("stderr", "stdout", or "none")
  */
 export function resolveLogTarget(configTarget) {
-  const envTarget = process.env.OA_LOG_TARGET?.toLowerCase();
+  const envTarget = process.env.HOTDOG_LOG_TARGET?.toLowerCase();
   if (envTarget && ["stderr", "stdout", "none"].includes(envTarget))
     return envTarget;
   if (configTarget && ["stderr", "stdout", "none"].includes(configTarget))

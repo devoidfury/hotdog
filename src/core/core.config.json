@@ -351,11 +351,11 @@
     "cliFlag": {
       "long": "--hook-trace",
       "type": "boolean",
-      "description": "Trace hook execution (requires OA_LOG_LEVEL=debug)"
+      "description": "Trace hook execution (requires HOTDOG_LOG_LEVEL=debug)"
     },
     "layers": [
       { "source": "cli", "key": "hookTrace", "cast": "truthy" },
-      { "source": "env", "key": "OA_HOOK_TRACE", "cast": "truthy" },
+      { "source": "env", "key": "HOTDOG_HOOK_TRACE", "cast": "truthy" },
       { "source": "config", "key": "hookTrace" },
       { "default": false }
     ]

@@ -29,7 +29,7 @@ Create `config/defaults.json` with your AI provider settings:
 
 ```json
 {
-  "default_model": "my-provider/model-1",
+  "default_model": "my-provider/hopus-popus",
   "providers": [
     {
       "name": "my-provider",
@@ -37,7 +37,7 @@ Create `config/defaults.json` with your AI provider settings:
       "api_key": "your-api-key",
       "models": [
         {
-          "name": "model-1",
+          "name": "hopus-popus",
           "context-limit": 262144
         }
       ]
@@ -205,36 +205,7 @@ hotdog webui                     # Start the web UI server
 /reasoning         Toggle reasoning effort
 ```
 
-## Architecture
-
-```
-hotdog/src/
-├── core/                # Minimal core
-│   ├── agent.js           # Agent run loop
-│   ├── hooks.js           # Hook system
-│   ├── extensions/        # Extension loader, registries, tool context
-│   ├── config/            # Config resolution
-│   ├── session/           # Session management, message bus, task manager
-│   ├── context/           # Messages, output, system prompt
-│   ├── llm-client/        # HTTP transport, streaming, retry
-│   └── ui/                # CLI output sink, colors
-│
-└── extensions/          # All features as extensions
-    ├── core-tools/        # File operations (read, write, edit, grep, find)
-    ├── bash-tool/         # Shell command execution
-    ├── fetch-tool/        # HTTP requests
-    ├── mcp-client/        # MCP server connections
-    ├── compaction/        # Context compaction strategies
-    ├── skills/            # Skill loading
-    ├── subagents/         # Task delegation
-    ├── webui/             # Web interface
-    ├── websocket/         # WebSocket server
-    └── ...                # And more
-```
-
-The core provides the agent run loop, hook system, extension loader, config resolution, session management, and tool registry. Everything else is an extension.
-
-### Extension Anatomy
+## Extension Anatomy
 
 ```
 my-extension/

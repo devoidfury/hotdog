@@ -1,5 +1,5 @@
 // Question tool — ask the user questions and collect answers.
-// Port of oa-agent/src/tools/question/mod.rs
+// Port of hotdog/src/tools/question/mod.rs
 //
 // The tool emits a QUESTION event via the agent's sink so the UI can display
 // the questions, then delegates answer collection to the Input interface

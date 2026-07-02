@@ -1,6 +1,6 @@
-# oa-agent — Domain Glossary
+# hotdog — Domain Glossary
 
-Domain concepts for the oa-agent AI agent harness. Implementation details are documented separately in `docs/agents/`.
+Domain concepts for the hotdog AI agent harness. Implementation details are documented separately in `docs/agents/`.
 
 ## Core Entities
 

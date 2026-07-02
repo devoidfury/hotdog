@@ -26,7 +26,7 @@ function truncateContent(content, maxLength) {
  */
 function sessionsDir() {
   const home = homedir();
-  return join(home, '.cache', 'oa-agent', 'sessions');
+  return join(home, '.cache', 'hotdog', 'sessions');
 }
 
 /**

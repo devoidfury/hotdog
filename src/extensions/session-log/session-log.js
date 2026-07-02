@@ -1,5 +1,5 @@
 // Session log — append-only JSONL audit trail for observability.
-// Each session gets a file at ~/.cache/oa-agent/sessions/<uuid>.jsonl.
+// Each session gets a file at ~/.cache/hotdog/sessions/<uuid>.jsonl.
 // Messages are appended as JSON lines. The file is never truncated or modified.
 
 import { homedir } from "node:os";
@@ -180,7 +180,7 @@ export function createPromptEntry(sessionId, content, images = null) {
  */
 function sessionsDir() {
   const home = homedir();
-  return join(home, ".cache", "oa-agent", "sessions");
+  return join(home, ".cache", "hotdog", "sessions");
 }
 
 /**

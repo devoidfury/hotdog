@@ -46,7 +46,7 @@ export function create(core) {
  * Run the review subcommand.
  */
 async function runReview(cli, config) {
-  const sessionsDirPath = join(homedir(), ".cache", "oa-agent", "sessions");
+  const sessionsDirPath = join(homedir(), ".cache", "hotdog", "sessions");
 
   const palette = await CliOutputSink.resolve(
     cli.theme,

@@ -144,12 +144,12 @@
       { "source": "cli", "key": "noLog", "cast": "truthy" },
       {
         "source": "env",
-        "key": "OA_AGENT_LOG",
+        "key": "HOTDOG_LOG",
         "cast": "falsy"
       },
       {
         "source": "env",
-        "key": "OA_AGENT_NO_LOG",
+        "key": "HOTDOG_NO_LOG",
         "cast": "truthy"
       },
       { "source": "config", "key": "noLog" },

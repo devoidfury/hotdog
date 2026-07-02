@@ -27,7 +27,7 @@ export const LOG_SOURCE = {
  */
 function sessionsDir() {
   const home = homedir();
-  return join(home, ".cache", "oa-agent", "sessions");
+  return join(home, ".cache", "hotdog", "sessions");
 }
 
 /**

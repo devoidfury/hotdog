@@ -2,7 +2,7 @@
 
 ## Overview
 
-`oa-agent` is an AI agent harness with tool calling support. It connects to an LLM API, sends conversation messages, handles tool calls from the LLM, and executes tools. The architecture is built around a **minimal core** with **extension-based features** -- all features (tools, compaction, MCP, skills, prompts, subcommands) live as extensions that plug into the core via hooks.
+`hotdog` is an AI agent harness with tool calling support. It connects to an LLM API, sends conversation messages, handles tool calls from the LLM, and executes tools. The architecture is built around a **minimal core** with **extension-based features** -- all features (tools, compaction, MCP, skills, prompts, subcommands) live as extensions that plug into the core via hooks.
 
 ## Architecture Philosophy
 
@@ -295,7 +295,7 @@ Parent agent calls delegate_task()
 
 ### Subcommand Dispatch
 ```
-User runs: bun bin/oa-agent info
+User runs: bun bin/hotdog info
   → parseArgs() detects subcommand
   → CliSubcommandRegistry.get("info") → handler
   → Load config

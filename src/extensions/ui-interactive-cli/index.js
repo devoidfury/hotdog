@@ -327,7 +327,7 @@ export function create(core) {
 
     // Print info
     const agent = sessionManager.getAgent();
-    console.log("oa-agent 0.1.0 (interactive mode)");
+    console.log("hotdog 0.1.0 (interactive mode)");
     console.log(`Model: ${resolved.model}`);
     console.log(`Profile: ${resolved.profileName}`);
     console.log(`Session: ${agent?.sessionId || "unknown"}`);

@@ -338,28 +338,28 @@ describe("Phase 2: Complex values", () => {
       expect(resolveKey("noLog", CONFIG_KEYS.noLog, { ...baseContext, cli: { noLog: true } })).toBe(true);
     });
 
-    it("resolves from OA_AGENT_LOG env with falsy cast", () => {
-      process.env.OA_AGENT_LOG = "false";
+    it("resolves from HOTDOG_LOG env with falsy cast", () => {
+      process.env.HOTDOG_LOG = "false";
       try {
         expect(resolveKey("noLog", CONFIG_KEYS.noLog, baseContext)).toBe(true);
       } finally {
-        delete process.env.OA_AGENT_LOG;
+        delete process.env.HOTDOG_LOG;
       }
 
-      process.env.OA_AGENT_LOG = "true";
+      process.env.HOTDOG_LOG = "true";
       try {
         expect(resolveKey("noLog", CONFIG_KEYS.noLog, baseContext)).toBe(false);
       } finally {
-        delete process.env.OA_AGENT_LOG;
+        delete process.env.HOTDOG_LOG;
       }
     });
 
-    it("resolves from OA_AGENT_NO_LOG env", () => {
-      process.env.OA_AGENT_NO_LOG = "1";
+    it("resolves from HOTDOG_NO_LOG env", () => {
+      process.env.HOTDOG_NO_LOG = "1";
       try {
         expect(resolveKey("noLog", CONFIG_KEYS.noLog, baseContext)).toBe(true);
       } finally {
-        delete process.env.OA_AGENT_NO_LOG;
+        delete process.env.HOTDOG_NO_LOG;
       }
     });
   });

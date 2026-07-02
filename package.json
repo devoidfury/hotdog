@@ -1,12 +1,12 @@
 {
-  "name": "oa-agent",
+  "name": "hotdog",
   "version": "0.1.0",
   "main": "src/core/index.js",
   "devDependencies": {},
   "bin": {
-    "oa-agent": "bin/oa-agent"
+    "hotdog": "bin/hotdog"
   },
-  "description": "AI agent harness with tool calling support",
+  "description": "AI agent harness with tool calling support. Zero dependencies, just bun.",
   "scripts": {
     "start": "bun src/core/main.js",
     "test": "bun test --only-failures --coverage"

@@ -55,10 +55,10 @@ import { buildModelRegistry, initSystemPromptTemplate } from "./providers.js";
 /**
  * Resolve the config directory with the following priority:
  * 1. CLI argument (--config-dir)
- * 2. OA_AGENT_CONFIG_DIR environment variable
+ * 2. HOTDOG_CONFIG_DIR environment variable
  * 3. ./config (CWD-relative)
- * 4. /etc/oa-agent
- * 5. ~/.config/oa-agent (XDG)
+ * 4. /etc/hotdog
+ * 5. ~/.config/hotdog (XDG)
  *
  * @param {string} [cliConfigDir] - Config directory from CLI --config-dir flag.
  * @returns {string} Resolved absolute config directory path.
@@ -68,7 +68,7 @@ export function resolveConfigDir(cliConfigDir) {
     return path.resolve(cliConfigDir);
   }
 
-  const envConfigDir = process.env.OA_AGENT_CONFIG_DIR;
+  const envConfigDir = process.env.HOTDOG_CONFIG_DIR;
   if (envConfigDir) {
     return path.resolve(envConfigDir);
   }
@@ -81,7 +81,7 @@ export function resolveConfigDir(cliConfigDir) {
     // Not a directory or doesn't exist
   }
 
-  const etcConfig = "/etc/oa-agent";
+  const etcConfig = "/etc/hotdog";
   try {
     fs.accessSync(etcConfig);
     return etcConfig;
@@ -89,7 +89,7 @@ export function resolveConfigDir(cliConfigDir) {
     // Not found
   }
 
-  return path.join(os.homedir(), ".config", "oa-agent");
+  return path.join(os.homedir(), ".config", "hotdog");
 }
 
 // ── Extension Config Helpers ──────────────────────────────────────────────
@@ -198,7 +198,7 @@ export function getDefaultConfig(extParams) {
  * Resolution order:
  * 1. If `configPath` is explicitly provided via CLI, load that file (exit on error).
  * 2. Otherwise, resolve the config directory and look for defaults.json there.
- *    Config dir resolution: CLI --config-dir > ./config > env > /etc/oa-agent > XDG
+ *    Config dir resolution: CLI --config-dir > ./config > env > /etc/hotdog > XDG
  *    Silently fall through to defaults if none exist.
  * 3. Return defaults as the final fallback.
  *

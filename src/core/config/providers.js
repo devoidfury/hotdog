@@ -111,7 +111,7 @@ export async function initSystemPromptTemplate(
           fs.accessSync(cwdConfig);
           configDir = cwdConfig;
         } catch {
-          const envConfigDir = process.env.OA_AGENT_CONFIG_DIR;
+          const envConfigDir = process.env.HOTDOG_CONFIG_DIR;
           if (envConfigDir) {
             configDir = path.resolve(envConfigDir);
           } else {

@@ -25,7 +25,7 @@ export const LOG_SOURCE = {
  * Get the cache directory for session logs.
  */
 async function getCacheDir() {
-  const cacheDir = join(homedir(), '.cache', 'oa-agent', 'sessions');
+  const cacheDir = join(homedir(), '.cache', 'hotdog', 'sessions');
   try {
     await access(cacheDir);
   } catch {
@@ -170,7 +170,7 @@ export async function create(core) {
  * Used by subcommands to review sessions.
  */
 export async function readSessionEntries(sessionId) {
-  const cacheDir = join(homedir(), '.cache', 'oa-agent', 'sessions');
+  const cacheDir = join(homedir(), '.cache', 'hotdog', 'sessions');
   const path = join(cacheDir, `${sessionId}.jsonl`);
   try {
     await access(path);

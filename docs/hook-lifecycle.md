@@ -1,6 +1,6 @@
 # Hook Lifecycle
 
-The hook system is the primary extension mechanism in oa-agent. It decouples the core from all features — tools, compaction, MCP, skills, prompts, logging, and CLI subcommands — via a simple pub-sub pipeline. Extensions register handlers; the core emits events at every stage of the agent lifecycle.
+The hook system is the primary extension mechanism in hotdog. It decouples the core from all features — tools, compaction, MCP, skills, prompts, logging, and CLI subcommands — via a simple pub-sub pipeline. Extensions register handlers; the core emits events at every stage of the agent lifecycle.
 
 ---
 

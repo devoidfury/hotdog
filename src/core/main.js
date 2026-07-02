@@ -213,7 +213,7 @@ export async function main() {
         logger.error(
           `Unknown subcommand: ${posLower}\n` +
             `Available subcommands: ${knownSubcommands.join(", ")}\n` +
-            `To send a prompt, use -c or --prompt: oa-agent -c "your prompt"`,
+            `To send a prompt, use -c or --prompt: hotdog -c "your prompt"`,
         );
       }
       return 1;
@@ -286,7 +286,7 @@ export async function main() {
       ),
     );
     const VERSION = pkg.version;
-    console.log(`oa-agent ${VERSION}`);
+    console.log(`hotdog ${VERSION}`);
     return 0;
   }
 

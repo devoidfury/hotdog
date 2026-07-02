@@ -14,7 +14,7 @@ import { logger } from "../../core/logger.js";
 
 // Resolve the path to the current binary (main.js)
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const BIN_PATH = path.resolve(__dirname, "..", "..", "..", "bin", "oa-agent");
+const BIN_PATH = path.resolve(__dirname, "..", "..", "..", "bin", "hotdog");
 
 export class ExploreTool {
   static TOOL_NAME = "explore";

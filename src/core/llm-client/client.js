@@ -250,7 +250,7 @@ export class LlmClient {
   async _doRequest(url, apiKey, request, signal) {
     const headers = {
       "Content-Type": "application/json",
-      "User-Agent": "oa-agent/alpha",
+      "User-Agent": "hotdog/alpha",
     };
     if (apiKey) headers["Authorization"] = `Bearer ${apiKey}`;
     if (this.sessionId) headers["x-session-affinity"] = this.sessionId;

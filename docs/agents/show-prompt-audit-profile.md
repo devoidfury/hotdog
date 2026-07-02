@@ -2,7 +2,7 @@
 
 ## Purpose
 
-`oa-agent show-prompt` renders and prints the system prompt to stdout, then exits — without connecting to any LLM or running the agent loop.
+`hotdog show-prompt` renders and prints the system prompt to stdout, then exits — without connecting to any LLM or running the agent loop.
 
 ## Usage
 

@@ -168,13 +168,13 @@ export function parseArgs(configRegistry = null, knownSubcommands = null) {
   return options;
 }
 
-export const HELP_TEXT = `oa-agent - AI agent harness with tool calling support
+export const HELP_TEXT = `hotdog - AI agent harness with tool calling support
 
-Usage: oa-agent [options] [prompt]
-       oa-agent info
-       oa-agent show-prompt
-       oa-agent review [--session-id <id>] [--json] [--tool-index]
-       oa-agent prompt "One-shot prompt"
+Usage: hotdog [options] [prompt]
+       hotdog info
+       hotdog show-prompt
+       hotdog review [--session-id <id>] [--json] [--tool-index]
+       hotdog prompt "One-shot prompt"
 
 Subcommands:
   <subcommands>

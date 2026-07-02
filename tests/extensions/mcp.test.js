@@ -54,7 +54,7 @@ describe("mcpInitializeRequest", () => {
     const req = mcpInitializeRequest();
     expect(req.protocolVersion).toBe("2025-11-25");
     expect(req.capabilities.roots).toBeDefined();
-    expect(req.clientInfo.name).toBe("oa-agent");
+    expect(req.clientInfo.name).toBe("hotdog");
   });
 });
 

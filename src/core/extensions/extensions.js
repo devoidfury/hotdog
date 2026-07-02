@@ -383,10 +383,24 @@ export function resolveLoadOrder(extensions, serviceOverrides = {}) {
     }
   }
 
-  // Process pending nodes in sorted order
-  const pendingSorted = pending.sort(cmp);
-  for (const ext of pendingSorted) {
-    result.push(ext);
+  // Drain pending nodes in sorted order. Loop until no more nodes are freed,
+  // to handle multi-level dependency chains (A → B → C where C depends on B
+  // which depends on A).
+  while (pending.length > 0) {
+    const batch = [...pending].sort(cmp);
+    pending.length = 0;
+    for (const ext of batch) {
+      result.push(ext);
+      for (const dependent of adjList.get(ext.name) || []) {
+        inDegree.set(dependent, inDegree.get(dependent) - 1);
+        if (inDegree.get(dependent) === 0) {
+          const depExt = extensions.find((e) => e.name === dependent);
+          if (depExt) {
+            pending.push(depExt);
+          }
+        }
+      }
+    }
   }
 
   if (result.length !== extensions.length) {

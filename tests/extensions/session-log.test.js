@@ -24,8 +24,8 @@ import { homedir } from "node:os";
 const TEST_SESSION_ID = "test-session-log";
 
 function setupTestDir() {
-  const dir = join(homedir(), ".cache", "oa-agent", "sessions");
-  if (!dir.includes("oa-agent")) throw new Error("bad path");
+  const dir = join(homedir(), ".cache", "hotdog", "sessions");
+  if (!dir.includes("hotdog")) throw new Error("bad path");
   mkdirSync(dir, { recursive: true });
   const testFile = join(dir, `${TEST_SESSION_ID}.jsonl`);
   try {
@@ -36,7 +36,7 @@ function setupTestDir() {
 }
 
 function teardown() {
-  const testFile = join(homedir(), ".cache", "oa-agent", "sessions", `${TEST_SESSION_ID}.jsonl`);
+  const testFile = join(homedir(), ".cache", "hotdog", "sessions", `${TEST_SESSION_ID}.jsonl`);
   try {
     rmSync(testFile);
   } catch {
@@ -390,7 +390,7 @@ test("SessionLog round-trip with images preserves image data", async () => {
 // ── readSessionEntries ─────────────────────────────────────────────────────
 
 test("readSessionEntries handles malformed JSON lines", async () => {
-  const dir = join(homedir(), ".cache", "oa-agent", "sessions");
+  const dir = join(homedir(), ".cache", "hotdog", "sessions");
   mkdirSync(dir, { recursive: true });
   const testFile = join(dir, `${TEST_SESSION_ID}.jsonl`);
 
@@ -418,7 +418,7 @@ test("readSessionEntries handles malformed JSON lines", async () => {
 
 test("readSessionEntries replays from last reset", async () => {
   const uniqueId = "test-reset-replay-" + Date.now();
-  const dir = join(homedir(), ".cache", "oa-agent", "sessions");
+  const dir = join(homedir(), ".cache", "hotdog", "sessions");
   mkdirSync(dir, { recursive: true });
   const testFile = join(dir, `${uniqueId}.jsonl`);
 
@@ -477,7 +477,7 @@ test("sessionExists returns false for non-existent session", async () => {
 });
 
 test("readAllSessions reads from multiple session files", async () => {
-  const dir = join(homedir(), ".cache", "oa-agent", "sessions");
+  const dir = join(homedir(), ".cache", "hotdog", "sessions");
   mkdirSync(dir, { recursive: true });
 
   const testId1 = "test-readall-1";

@@ -1,18 +1,18 @@
 # Agent Harness
 
-JS project `oa-js` — an AI agent harness with tool calling support.
+JS project `hotdog` — an AI agent harness with tool calling support.
 
 ## Quick Command Reference
 
-- **Run one-shot:** `bun bin/oa-agent -c "hello"` or `bun bin/oa-agent prompt "hello"`
-- **Interactive:** `bun bin/oa-agent` (starts readline session)
+- **Run one-shot:** `bun bin/hotdog -c "hello"` or `bun bin/hotdog prompt "hello"`
+- **Interactive:** `bun bin/hotdog` (starts readline session)
 - **With profile:** `--profile fixer`
 - **With model:** `--model qwen3.5-0.8b`
 - **Subcommands:**
-  - `bun bin/oa-agent info` — system info and diagnostics
-  - `bun bin/oa-agent show-prompt` — render system prompt to stdout
-  - `bun bin/oa-agent review` — review session logs
-  - `bun bin/oa-agent prompt "text"` — one-shot mode
+  - `bun bin/hotdog info` — system info and diagnostics
+  - `bun bin/hotdog show-prompt` — render system prompt to stdout
+  - `bun bin/hotdog review` — review session logs
+  - `bun bin/hotdog prompt "text"` — one-shot mode
 - **Run Tests:** `bun test --only-failures`
 - **Run Tests with Coverage report:** `bun test --coverage --only-failures`
 

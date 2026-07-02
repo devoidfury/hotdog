@@ -6,7 +6,7 @@ import { parseArgs, generateHelpText } from "../../src/core/cli.js";
 describe("parseArgs", () => {
   it("parses --config flag", () => {
     const origArgv = process.argv;
-    process.argv = ["bun", "oa-agent", "--config", "/path/to/config.json"];
+    process.argv = ["bun", "hotdog", "--config", "/path/to/config.json"];
     try {
       const result = parseArgs();
       expect(result.config).toBe("/path/to/config.json");
@@ -17,7 +17,7 @@ describe("parseArgs", () => {
 
   it("parses -f short flag for --config", () => {
     const origArgv = process.argv;
-    process.argv = ["bun", "oa-agent", "-f", "/path/to/config.json"];
+    process.argv = ["bun", "hotdog", "-f", "/path/to/config.json"];
     try {
       const result = parseArgs();
       expect(result.config).toBe("/path/to/config.json");
@@ -28,7 +28,7 @@ describe("parseArgs", () => {
 
   it("parses --model flag", () => {
     const origArgv = process.argv;
-    process.argv = ["bun", "oa-agent", "--model", "gpt-4"];
+    process.argv = ["bun", "hotdog", "--model", "gpt-4"];
     try {
       const result = parseArgs();
       expect(result.model).toBe("gpt-4");
@@ -39,7 +39,7 @@ describe("parseArgs", () => {
 
   it("parses -m short flag for --model", () => {
     const origArgv = process.argv;
-    process.argv = ["bun", "oa-agent", "-m", "gpt-4"];
+    process.argv = ["bun", "hotdog", "-m", "gpt-4"];
     try {
       const result = parseArgs();
       expect(result.model).toBe("gpt-4");
@@ -50,7 +50,7 @@ describe("parseArgs", () => {
 
   it("parses --ai-url flag", () => {
     const origArgv = process.argv;
-    process.argv = ["bun", "oa-agent", "--ai-url", "http://localhost:8080"];
+    process.argv = ["bun", "hotdog", "--ai-url", "http://localhost:8080"];
     try {
       const result = parseArgs();
       expect(result.aiUrl).toBe("http://localhost:8080");
@@ -61,7 +61,7 @@ describe("parseArgs", () => {
 
   it("parses --api-key flag", () => {
     const origArgv = process.argv;
-    process.argv = ["bun", "oa-agent", "--api-key", "secret-key"];
+    process.argv = ["bun", "hotdog", "--api-key", "secret-key"];
     try {
       const result = parseArgs();
       expect(result.apiKey).toBe("secret-key");
@@ -72,7 +72,7 @@ describe("parseArgs", () => {
 
   it("parses --profile flag", () => {
     const origArgv = process.argv;
-    process.argv = ["bun", "oa-agent", "--profile", "explorer"];
+    process.argv = ["bun", "hotdog", "--profile", "explorer"];
     try {
       const result = parseArgs();
       expect(result.profile).toBe("explorer");
@@ -83,7 +83,7 @@ describe("parseArgs", () => {
 
   it("parses --provider flag", () => {
     const origArgv = process.argv;
-    process.argv = ["bun", "oa-agent", "--provider", "openai"];
+    process.argv = ["bun", "hotdog", "--provider", "openai"];
     try {
       const result = parseArgs();
       expect(result.provider).toBe("openai");
@@ -94,7 +94,7 @@ describe("parseArgs", () => {
 
   it("parses boolean flags", () => {
     const origArgv = process.argv;
-    process.argv = ["bun", "oa-agent", "--loud", "--json", "--version"];
+    process.argv = ["bun", "hotdog", "--loud", "--json", "--version"];
     try {
       const result = parseArgs();
       expect(result.loud).toBe(true);
@@ -107,7 +107,7 @@ describe("parseArgs", () => {
 
   it("parses subcommand", () => {
     const origArgv = process.argv;
-    process.argv = ["bun", "oa-agent", "info"];
+    process.argv = ["bun", "hotdog", "info"];
     try {
       const result = parseArgs();
       expect(result.subcommand).toBe("info");
@@ -118,7 +118,7 @@ describe("parseArgs", () => {
 
   it("parses show-prompt subcommand", () => {
     const origArgv = process.argv;
-    process.argv = ["bun", "oa-agent", "show-prompt"];
+    process.argv = ["bun", "hotdog", "show-prompt"];
     try {
       const result = parseArgs();
       expect(result.subcommand).toBe("show-prompt");
@@ -129,7 +129,7 @@ describe("parseArgs", () => {
 
   it("parses positional args after subcommand", () => {
     const origArgv = process.argv;
-    process.argv = ["bun", "oa-agent", "review", "--session-id", "abc123"];
+    process.argv = ["bun", "hotdog", "review", "--session-id", "abc123"];
     try {
       const result = parseArgs();
       expect(result.subcommand).toBe("review");
@@ -140,7 +140,7 @@ describe("parseArgs", () => {
 
   it("throws on unknown subcommand", () => {
     const origArgv = process.argv;
-    process.argv = ["bun", "oa-agent", "unknown-subcommand"];
+    process.argv = ["bun", "hotdog", "unknown-subcommand"];
     try {
       expect(() => parseArgs()).toThrow(/Unknown subcommand/);
     } finally {
@@ -150,7 +150,7 @@ describe("parseArgs", () => {
 
   it("throws when flag with value is missing value", () => {
     const origArgv = process.argv;
-    process.argv = ["bun", "oa-agent", "--model"];
+    process.argv = ["bun", "hotdog", "--model"];
     try {
       expect(() => parseArgs()).toThrow(/requires a value/);
     } finally {
@@ -160,7 +160,7 @@ describe("parseArgs", () => {
 
   it("parses multiple flags together", () => {
     const origArgv = process.argv;
-    process.argv = ["bun", "oa-agent", "-m", "gpt-4", "-p", "default", "--loud"];
+    process.argv = ["bun", "hotdog", "-m", "gpt-4", "-p", "default", "--loud"];
     try {
       const result = parseArgs();
       expect(result.model).toBe("gpt-4");
@@ -173,7 +173,7 @@ describe("parseArgs", () => {
 
   it("handles known subcommands parameter", () => {
     const origArgv = process.argv;
-    process.argv = ["bun", "oa-agent", "custom-cmd", "arg1", "arg2"];
+    process.argv = ["bun", "hotdog", "custom-cmd", "arg1", "arg2"];
     try {
       const result = parseArgs(null, ["custom-cmd"]);
       expect(result.subcommand).toBe("custom-cmd");
@@ -185,7 +185,7 @@ describe("parseArgs", () => {
 
   it("handles empty args", () => {
     const origArgv = process.argv;
-    process.argv = ["bun", "oa-agent"];
+    process.argv = ["bun", "hotdog"];
     try {
       const result = parseArgs();
       expect(result.subcommand).toBeNull();
@@ -200,7 +200,7 @@ describe("parseArgs", () => {
 describe("generateHelpText", () => {
   it("returns help text without config flags when no registry", () => {
     const help = generateHelpText(null);
-    expect(help).toContain("oa-agent - AI agent harness");
+    expect(help).toContain("hotdog - AI agent harness with tool calling support");
     expect(help).toContain("<subcommands>");
   });
 

@@ -13,7 +13,7 @@ import { homedir } from "node:os";
 const TEST_SESSION_ID = "test-session-ext";
 
 function setupTestDir() {
-  const dir = join(homedir(), ".cache", "oa-agent", "sessions");
+  const dir = join(homedir(), ".cache", "hotdog", "sessions");
   mkdirSync(dir, { recursive: true });
   const testFile = join(dir, `${TEST_SESSION_ID}.jsonl`);
   try {
@@ -24,7 +24,7 @@ function setupTestDir() {
 }
 
 function teardown() {
-  const testFile = join(homedir(), ".cache", "oa-agent", "sessions", `${TEST_SESSION_ID}.jsonl`);
+  const testFile = join(homedir(), ".cache", "hotdog", "sessions", `${TEST_SESSION_ID}.jsonl`);
   try {
     rmSync(testFile);
   } catch {

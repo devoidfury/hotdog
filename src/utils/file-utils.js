@@ -196,7 +196,7 @@ export async function checkWritable(filePath) {
   const parentDir = dirname(filePath);
 
   if (parentDir && parentDir !== ".") {
-    const tempPath = join(parentDir, ".oa-agent-permission-test");
+    const tempPath = join(parentDir, ".hotdog-permission-test");
     try {
       await fsPromises.writeFile(tempPath, "");
       await fsPromises.unlink(tempPath);

@@ -4,11 +4,11 @@
 
 Run the agent with a single prompt and exit:
 ```bash
-bun bin/oa-agent -c "hello"
+bun bin/hotdog -c "hello"
 # or
-bun bin/oa-agent --prompt "hello"
+bun bin/hotdog --prompt "hello"
 # or
-bun bin/oa-agent prompt "hello"
+bun bin/hotdog prompt "hello"
 ```
 
 ## Debug Flags
@@ -35,7 +35,7 @@ bun bin/oa-agent prompt "hello"
 
 ### List Recent Sessions
 ```bash
-bun bin/oa-agent review
+bun bin/hotdog review
 ```
 - Shows last 10 sessions with timestamps and entry counts
 - `--json` for raw JSONL output
@@ -44,16 +44,16 @@ bun bin/oa-agent review
 
 ### Show System Info
 ```bash
-bun bin/oa-agent info
+bun bin/hotdog info
 # or
-bun bin/oa-agent info --json
+bun bin/hotdog info --json
 ```
 - Shows configuration, models, providers, skills, MCP servers, connectivity
 
 ### Examine Specific Tool Call Results
 ```bash
 # Extract a range of lines around the suspect tool calls
-bun bin/oa-agent review --session-id <ID> | \
+bun bin/hotdog review --session-id <ID> | \
   sed -n '700,720p'  # Adjust line numbers based on grep results
 ```
 
@@ -62,13 +62,13 @@ bun bin/oa-agent review --session-id <ID> | \
 When multiple extensions hook into the same data-modifying hook (e.g., `context`, `tool:call`, `tool:result`), it can be hard to tell which extension modified what. Hook trace logs each handler invocation with execution order, source extension, timing, and return value.
 
 ```bash
-OA_LOG_LEVEL=debug bun bin/oa-agent --hook-trace -c "hello"
+OA_LOG_LEVEL=debug bun bin/hotdog --hook-trace -c "hello"
 ```
 
 Or via env var or config:
 ```bash
 # Env var
-OA_HOOK_TRACE=1 OA_LOG_LEVEL=debug bun bin/oa-agent -c "hello"
+OA_HOOK_TRACE=1 OA_LOG_LEVEL=debug bun bin/hotdog -c "hello"
 
 # Config file (config/defaults.json)
 { "hook_trace": true }

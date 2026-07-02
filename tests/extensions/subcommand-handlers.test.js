@@ -61,8 +61,8 @@ function createMockCore(config = {}) {
     config: {
       theme: "dark",
       maxIterations: 100,
-      skillsPath: join(homedir(), ".oa-agent", "skills"),
-      promptsPath: join(homedir(), ".oa-agent", "prompts"),
+      skillsPath: join(homedir(), ".hotdog", "skills"),
+      promptsPath: join(homedir(), ".hotdog", "prompts"),
       ...config.coreConfig,
     },
     resolved,
@@ -86,7 +86,7 @@ function createMockCore(config = {}) {
 
 describe("Session Review Extension - exit codes", () => {
   const TEST_SESSION_ID = `test-subcmd-review-${Date.now()}`;
-  const sessionsDir = join(homedir(), ".cache", "oa-agent", "sessions");
+  const sessionsDir = join(homedir(), ".cache", "hotdog", "sessions");
 
   function setup() {
     mkdirSync(sessionsDir, { recursive: true });
@@ -230,7 +230,7 @@ describe("Session Review Extension - exit codes", () => {
       const { rmSync } = await import("node:fs");
       const { join } = await import("node:path");
       const { homedir } = await import("node:os");
-      rmSync(join(homedir(), ".cache", "oa-agent", "sessions", `${TEST_SESSION_ID}.jsonl`));
+      rmSync(join(homedir(), ".cache", "hotdog", "sessions", `${TEST_SESSION_ID}.jsonl`));
     } catch {}
 
     // Create a test session with multiple entries

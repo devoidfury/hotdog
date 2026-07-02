@@ -23,12 +23,12 @@ function uniqueSessionId(prefix) {
 }
 
 function setupSessionDir() {
-  const dir = join(homedir(), ".cache", "oa-agent", "sessions");
+  const dir = join(homedir(), ".cache", "hotdog", "sessions");
   mkdirSync(dir, { recursive: true });
 }
 
 function cleanupSession(sessionId) {
-  const testFile = join(homedir(), ".cache", "oa-agent", "sessions", `${sessionId}.jsonl`);
+  const testFile = join(homedir(), ".cache", "hotdog", "sessions", `${sessionId}.jsonl`);
   try { rmSync(testFile); } catch { /* ignore */ }
 }
 

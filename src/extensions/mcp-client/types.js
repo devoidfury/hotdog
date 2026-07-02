@@ -40,7 +40,7 @@ export function mcpInitializeRequest() {
       sampling: {},
     },
     clientInfo: {
-      name: "oa-agent",
+      name: "hotdog",
       version: "0.1.0",
     },
   };

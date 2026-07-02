@@ -215,6 +215,11 @@ my-extension/
 
 Extensions register tools, CLI subcommands, and system prompt chunks via hooks. See `docs/agents/extensions.md` for the full guide.
 
+> Extensions? For a hotdog? How long do you need the damn thing?
+
+_- Some old guy_
+
+
 ## Development
 
 ```sh

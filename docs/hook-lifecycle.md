@@ -277,8 +277,6 @@ Each tool call goes through a dedicated sub-pipeline:
 | Hook Constant | Name | Pattern | When |
 |---------------|------|---------|------|
 | `MODEL_CHANGE` | `model:change` | sync notify | Agent model changed |
-| `CONFIG_CLI_FLAGS_REGISTER` | `config:cliFlagsRegister` | sync notify | Register CLI flags for extension |
-| `CONFIG_PARAMS_REGISTER` | `config:paramsRegister` | sync notify | Register config params for extension |
 
 ### CLI / Commands
 

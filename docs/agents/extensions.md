@@ -7,7 +7,7 @@ When adding new functionality:
 3. Register tools via `HOOKS.TOOLS_REGISTER`
 4. Register CLI subcommands via `HOOKS.CLI_SUBCOMMANDS_REGISTER` (or via `core.cliSubcommandRegistry`)
 5. **Define config options in `configSchema` in `extension.json`** (single source of truth)
-6. Optionally use `HOOKS.CONFIG_CLI_FLAGS_REGISTER` for CLI flags that need programmatic control
+6. **Define CLI flags in `cli:flags` in `extension.json`**
 7. Contribute to system prompt via `HOOKS.SYSTEM_PROMPT_BUILD`
 
 When adding new subcommands, create a new extension in `src/extensions/` and register via `CliSubcommandRegistry`.
@@ -80,7 +80,7 @@ Every extension directory must contain an `extension.json` metadata file. This i
 
 ### Configuration
 
-**`configSchema` is the single source of truth** for extension configuration. Defaults defined in `configSchema` are automatically extracted and registered as config params. Extensions do NOT need to also register via `HOOKS.CONFIG_PARAMS_REGISTER` — the loader handles this automatically.
+**`configSchema` is the single source of truth** for extension configuration. Defaults defined in `configSchema` are automatically extracted and registered as config params. CLI flags are declared in `cli:flags`. The loader handles all registration automatically -- no imperative hooks needed.
 
 The extension name (kebab-case) is converted to camelCase for the config key:
 - `core-tools` → `coreTools`
@@ -96,10 +96,6 @@ export function create(core) {
   }
 }
 ```
-
-**When to use `HOOKS.CONFIG_PARAMS_REGISTER`**: Only use this hook when you need programmatic control over config registration (e.g., dynamic defaults based on runtime conditions). For the common case, define defaults in `configSchema` only.
-
-**When to use `HOOKS.CONFIG_CLI_FLAGS_REGISTER`**: Use this hook to register CLI flags that need programmatic control or custom parsers. Simple flags can be declared in `extension.json` via `cli:flags`.
 
 ### Dependencies
 

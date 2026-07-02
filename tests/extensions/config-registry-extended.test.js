@@ -45,51 +45,16 @@ describe("registerCliFlags — edge cases", () => {
 });
 
 describe("registerConfigParams — layers", () => {
-  it("registers config params with layers", () => {
+  it("registers config params without layers", () => {
     const registry = createConfigRegistry();
     registry.registerConfigParams([
       {
         key: "test",
         defaults: { value: 1 },
-        layers: [
-          { source: "cli", key: "testValue" },
-          { source: "config", key: "testValue" },
-        ],
       },
     ]);
-    expect(registry.getConfigLayers("test")).toEqual([
-      { source: "cli", key: "testValue" },
-      { source: "config", key: "testValue" },
-    ]);
-  });
-
-  it("getConfigLayers returns null when no layers registered", () => {
-    const registry = createConfigRegistry();
-    expect(registry.getConfigLayers("nonexistent")).toBeNull();
-  });
-
-  it("getAllConfigLayers returns all layers", () => {
-    const registry = createConfigRegistry();
-    registry.registerConfigParams([
-      {
-        key: "test1",
-        defaults: { a: 1 },
-        layers: [{ source: "cli" }],
-      },
-      {
-        key: "test2",
-        defaults: { b: 2 },
-        layers: [{ source: "config" }],
-      },
-    ]);
-    const allLayers = registry.getAllConfigLayers();
-    expect(allLayers.test1).toEqual([{ source: "cli" }]);
-    expect(allLayers.test2).toEqual([{ source: "config" }]);
-  });
-
-  it("getAllConfigLayers returns empty object when no layers", () => {
-    const registry = createConfigRegistry();
-    expect(registry.getAllConfigLayers()).toEqual({});
+    expect(registry.getConfigParams()).toHaveLength(1);
+    expect(registry.getConfigParams()[0].key).toBe("test");
   });
 });
 
@@ -185,30 +150,5 @@ describe("Schema Validation", () => {
     const result = registry.validateConfigByKey("nonexistent", {});
     expect(result.valid).toBe(true);
     expect(result.errors).toEqual([]);
-  });
-
-  it("registerConfigSchemaWithLayers stores schema and layers", () => {
-    const registry = createConfigRegistry();
-    const schema = { type: "object" };
-    const layers = [{ source: "cli" }];
-    registry.registerConfigSchemaWithLayers("test", schema, layers);
-    expect(registry.getConfigSchema("test")).toBe(schema);
-    expect(registry.getConfigLayers("test")).toEqual(layers);
-  });
-
-  it("registerConfigSchemaWithLayers throws for invalid key", () => {
-    const registry = createConfigRegistry();
-    expect(() => registry.registerConfigSchemaWithLayers("", {}, [])).toThrow("key must be a non-empty string");
-  });
-
-  it("registerConfigSchemaWithLayers throws for invalid schema", () => {
-    const registry = createConfigRegistry();
-    expect(() => registry.registerConfigSchemaWithLayers("key", null, [])).toThrow("schema must be a non-null object");
-  });
-
-  it("registerConfigSchemaWithLayers handles no layers", () => {
-    const registry = createConfigRegistry();
-    registry.registerConfigSchemaWithLayers("test", { type: "object" }, null);
-    expect(registry.getConfigSchema("test")).toEqual({ type: "object" });
   });
 });

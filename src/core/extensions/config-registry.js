@@ -1,44 +1,9 @@
 // Config Registry — manages extension-registered CLI flags and config params.
+//
+// Config params and CLI flags are defined in extension.json (configSchema and cli:flags).
+// The loader automatically extracts defaults from the schema and registers them here.
 
 import { ConfigError } from "../error.js";
-//
-// Config params are primarily defined in extension.json configSchema.
-// The loader automatically extracts defaults from the schema and registers
-// them as config params. Extensions can still use the CONFIG_CLI_FLAGS_REGISTER
-// and CONFIG_PARAMS_REGISTER hooks for programmatic control when needed.
-//
-// Usage in an extension (programmatic registration):
-//
-//   export function create(core) {
-//     return {
-//       hooks: {
-//         [HOOKS.CONFIG_CLI_FLAGS_REGISTER]: (configRegistry) => {
-//           configRegistry.registerCliFlags([
-//             {
-//               short: '-x',
-//               long: '--my-flag',
-//               description: 'My extension flag',
-//               type: 'string',       // 'string', 'boolean', 'number', 'array'
-//               default: null,
-//               parse: (value) => value,  // optional custom parser
-//             },
-//           ]);
-//         },
-//         // Optional: for programmatic config param registration
-//         [HOOKS.CONFIG_PARAMS_REGISTER]: () => [
-//           {
-//             key: 'myExtension',
-//             description: 'My extension config section',
-//             defaults: {
-//               enabled: true,
-//               timeout: 30,
-//             },
-//           },
-//         ],
-//       },
-//     };
-//   }
-
 import { validate } from "../../utils/json-schema.js";
 
 /**
@@ -49,14 +14,11 @@ export class ConfigRegistry {
     /** @type {Array<{short: string, long: string, description: string, type: string, default: any, parse?: Function}>} */
     this._cliFlags = [];
 
-    /** @type {Array<{key: string, description: string, defaults: Object, schema?: Object, layers?: Object}>} */
+    /** @type {Array<{key: string, description: string, defaults: Object, schema?: Object}>} */
     this._configParams = [];
 
     /** @type {Map<string, Object>|null} */
     this._configSchemas = null;
-
-    /** @type {Map<string, Array>|null} — extension resolution layers */
-    this._configLayers = null;
   }
 
   /**
@@ -93,7 +55,6 @@ export class ConfigRegistry {
    * @param {string} params[].description - Description for help text.
    * @param {Object} params[].defaults - Default values for this config section.
    * @param {Object} [params[].schema] - Optional JSON Schema for validation.
-   * @param {Array} [params[].layers] - Optional resolution layers for this config.
    */
   registerConfigParams(params) {
     if (!Array.isArray(params)) {
@@ -109,71 +70,7 @@ export class ConfigRegistry {
         );
       }
       this._configParams.push(param);
-
-      // If layers are provided, register them separately
-      if (param.layers) {
-        if (!this._configLayers) {
-          this._configLayers = new Map();
-        }
-        this._configLayers.set(param.key, param.layers);
-      }
     }
-  }
-
-  /**
-   * Register a config schema with resolution layers for a given key.
-   * This enables extensions to participate in the layer resolution system.
-   *
-   * @param {string} key - Config key (e.g., 'compaction').
-   * @param {Object} schema - JSON Schema (draft 2020-12) for validation.
-   * @param {Array<Object>} layers - Resolution layers array.
-   * @param {Object} layers[] - Layer definition.
-   * @param {string} layers[].source - Source type: 'cli', 'config', 'env', 'default'.
-   * @param {string} [layers[].key] - Key to look up in the source.
-   * @param {*} [layers[].default] - Default fallback value.
-   * @param {string|Function} [layers[].cast] - Cast function: converts value or returns undefined to skip.
-   */
-  registerConfigSchemaWithLayers(key, schema, layers) {
-    if (!key || typeof key !== "string") {
-      throw new TypeError("key must be a non-empty string");
-    }
-    if (!schema || typeof schema !== "object") {
-      throw new TypeError("schema must be a non-null object");
-    }
-    if (!this._configSchemas) {
-      this._configSchemas = new Map();
-    }
-    this._configSchemas.set(key, schema);
-
-    if (layers && Array.isArray(layers)) {
-      if (!this._configLayers) {
-        this._configLayers = new Map();
-      }
-      this._configLayers.set(key, layers);
-    }
-  }
-
-  /**
-   * Get registered resolution layers for a config key.
-   * @param {string} key - Config key.
-   * @returns {Array|null} Layers array or null.
-   */
-  getConfigLayers(key) {
-    if (!this._configLayers) return null;
-    return this._configLayers.get(key) || null;
-  }
-
-  /**
-   * Get all registered layers as an object keyed by config key.
-   * @returns {Object} Map of key -> layers array.
-   */
-  getAllConfigLayers() {
-    if (!this._configLayers) return {};
-    const result = {};
-    for (const [key, layers] of this._configLayers) {
-      result[key] = layers;
-    }
-    return result;
   }
 
   /**

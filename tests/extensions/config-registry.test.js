@@ -1,55 +1,16 @@
 /**
  * Tests for the ConfigRegistry system.
  *
- * The ConfigRegistry allows extensions to register their own CLI flags
- * and config parameters dynamically, instead of having these hardcoded
- * in src/cli.js and src/config.js.
- *
- * Config params are now primarily defined in extension.json configSchema,
- * which is the single source of truth. Extensions can still use the
- * CONFIG_PARAMS_REGISTER hook for programmatic control.
- *
- * Usage in an extension:
- *
- *   export function create(core) {
- *     return {
- *       hooks: {
- *         [HOOKS.CONFIG_CLI_FLAGS_REGISTER]: function(configRegistry) {
- *           configRegistry.registerCliFlags([
- *             {
- *               short: '-x',
- *               long: '--my-flag',
- *               description: 'My extension flag',
- *               type: 'string',
- *               default: 'default',
- *             },
- *           ]);
- *         },
- *         // Optional: CONFIG_PARAMS_REGISTER for programmatic control
- *         [HOOKS.CONFIG_PARAMS_REGISTER]: function(configRegistry) {
- *           configRegistry.registerConfigParams([
- *             {
- *               key: 'myExtension',
- *               description: 'My extension config section',
- *               defaults: {
- *                 enabled: true,
- *                 timeout: 30,
- *               },
- *             },
- *           ]);
- *         },
- *       },
- *     };
- *   }
+ * The ConfigRegistry manages extension-registered CLI flags and config params.
+ * Config params and CLI flags are defined in extension.json (configSchema and cli:flags)
+ * and automatically registered by the extension loader.
  */
 
 import { describe, it, expect } from "bun:test";
 import { createConfigRegistry } from "../../src/core/extensions/config-registry.js";
 import { parseArgs } from "../../src/core/cli.js";
 import { loadConfig } from "../../src/core/config/index.js";
-import { HOOKS } from "../../src/core/hooks.js";
 import {
-  emitConfigRegistration,
   extractSchemaDefaults,
   isExtensionEnabled,
   getExtensionsToLoad,
@@ -237,49 +198,6 @@ describe("ConfigRegistry", () => {
       const config = await loadConfig(null, null, registry.getConfigParams());
 
       expect(config.myExtension).toEqual({ enabled: true, timeout: 30 });
-    });
-  });
-
-  describe("emitConfigRegistration", () => {
-    it("should emit CLI flags registration hook", async () => {
-      const registry = createConfigRegistry();
-      const mockExtension = {
-        hooks: {
-          [HOOKS.CONFIG_CLI_FLAGS_REGISTER]: function (configRegistry) {
-            configRegistry.registerCliFlags([
-              { long: "--hook-flag", description: "Hook flag", type: "string" },
-            ]);
-          },
-        },
-      };
-
-      await emitConfigRegistration(mockExtension, registry);
-
-      const flags = registry.getCliFlags();
-      expect(flags).toHaveLength(1);
-      expect(flags[0].long).toBe("--hook-flag");
-    });
-
-    it("should emit config params registration hook", async () => {
-      const registry = createConfigRegistry();
-      const mockExtension = {
-        hooks: {
-          [HOOKS.CONFIG_PARAMS_REGISTER]: function (configRegistry) {
-            configRegistry.registerConfigParams([
-              {
-                key: "hookConfig",
-                defaults: { setting: "value" },
-              },
-            ]);
-          },
-        },
-      };
-
-      await emitConfigRegistration(mockExtension, registry);
-
-      const params = registry.getConfigParams();
-      expect(params).toHaveLength(1);
-      expect(params[0].key).toBe("hookConfig");
     });
   });
 

@@ -15,7 +15,6 @@ export {
   createExtensionLoader,
   extractSchemaDefaults,
   getExtensionConfigDefaults,
-  emitConfigRegistration,
   registerExtensionMetadata,
 } from "./extensions/extensions.js";
 

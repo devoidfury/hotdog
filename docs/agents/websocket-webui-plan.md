@@ -144,7 +144,7 @@ All messages are JSON objects with a `type` field. Every server→client message
 
 ### Websocket Extension
 
-Registered via `CONFIG_PARAMS_REGISTER`:
+Defined in `extension.json` configSchema:
 
 ```jsonc
 {
@@ -162,7 +162,7 @@ Registered via `CONFIG_PARAMS_REGISTER`:
 
 ### Webui Extension
 
-Registered via `CONFIG_PARAMS_REGISTER`:
+Defined in `extension.json` configSchema:
 
 ```jsonc
 {

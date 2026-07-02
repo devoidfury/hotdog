@@ -105,34 +105,6 @@ Profiles can also be defined as `.profile.md` files in a `profiles/` directory (
 
 ### Config Registry (`src/core/extensions/config-registry.js`)
 
-Allows extensions to register their own CLI flags and config parameters dynamically.
-
-**Usage in an extension** (via hooks):
-```javascript
-export function create(core) {
-  return {
-    hooks: {
-      [HOOKS.CONFIG_CLI_FLAGS_REGISTER]: (configRegistry) => {
-        configRegistry.registerCliFlags([
-          {
-            short: '-x',
-            long: '--my-flag',
-            description: 'My extension flag',
-            type: 'string',
-            default: null,
-          },
-        ]);
-      },
-      [HOOKS.CONFIG_PARAMS_REGISTER]: () => [
-        {
-          key: 'myExtension',
-          description: 'My extension config section',
-          defaults: { enabled: true, timeout: 30 },
-        },
-      ],
-    },
-  };
-}
-```
+Manages extension-registered CLI flags and config parameters. Config params and CLI flags are defined declaratively in `extension.json` (configSchema and cli:flags) and automatically registered by the extension loader.
 
 **Key methods**: `registerCliFlags(flags)`, `registerConfigParams(params)`, `getCliFlags()`, `getConfigParams()`, `getCliHelpText()`, `buildDefaults()`, `registerConfigSchema(key, schema)`, `validateConfig(config, schema)`.

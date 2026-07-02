@@ -192,11 +192,12 @@ describe("Model-switch extension", () => {
     expect(result.content).toContain("model-b");
   });
 
-  it("does not have CONFIG_PARAMS_REGISTER hook (config comes from extension.json)", () => {
+  it("does not have imperative config hooks (config comes from extension.json)", () => {
     const core = createMockCore();
     const ext = createModelSwitchExtension(core);
 
-    // Config params now come from extension.json configSchema, not from the hook
-    expect(ext.hooks[HOOKS.CONFIG_PARAMS_REGISTER]).toBeUndefined();
+    // Config params come from extension.json configSchema, not from imperative hooks
+    expect(ext.hooks).not.toHaveProperty("config:cliFlagsRegister");
+    expect(ext.hooks).not.toHaveProperty("config:paramsRegister");
   });
 });

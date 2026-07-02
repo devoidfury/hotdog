@@ -34,7 +34,7 @@ Split into sub-modules. The single source of truth is `src/core/core.config.json
 - `src/core/config/providers.js` — `buildModelRegistry()`, `initSystemPromptTemplate()`
 
 ### Config Registry (`src/core/extensions/config-registry.js`)
-Manages extension-registered CLI flags and config parameters. Config params are primarily defined in `extension.json` configSchema (single source of truth), with defaults automatically extracted and registered. Extensions can still use `CONFIG_CLI_FLAGS_REGISTER` and `CONFIG_PARAMS_REGISTER` hooks for programmatic control when needed.
+Manages extension-registered CLI flags and config parameters. Config params and CLI flags are defined in `extension.json` (configSchema and cli:fields), with defaults automatically extracted and registered by the extension loader.
 
 ### Hook System (`src/core/hooks.js`)
 The foundation for the extension architecture. `HookSystem` class with `on()`, `off()`, `notifyHooks()`, `notifyHooksAsync()`, `runHookPipeline()`, `clear()` methods. Standard hook names defined in `HOOKS` constant.
@@ -56,8 +56,6 @@ The foundation for the extension architecture. `HookSystem` class with `on()`, `
 **Shutdown:** `SHUTDOWN_CLEANUP`
 
 **CLI:** `CLI_SUBCOMMANDS_REGISTER`, `CLI_ARGS_PARSED`
-
-**Config:** `CONFIG_CLI_FLAGS_REGISTER`, `CONFIG_PARAMS_REGISTER`
 
 **Compaction:** `COMPACT_STRATEGY_LIST`, `COMPACT_STRATEGY_SET`
 
@@ -84,7 +82,6 @@ Discovers, loads, and manages extensions. Key exports:
 - `LOAD_ORDER` — constants for extension load ordering (REFRESH: 0, CORE_TOOLS: 1, CLI: 2, DEFAULT: 10)
 - `registerExtensionMetadata(config, configRegistry, cliSubcommandRegistry)` — reads extension.json metadata, auto-registers configSchema defaults
 - `extractSchemaDefaults(schema, configKey)` — extracts defaults from JSON Schema as config params
-- `emitConfigRegistration(extension, configRegistry)` — emits config registration hooks (for programmatic control)
 
 ### Agent (`src/core/agent.js`)
 Minimal Agent class that runs the LLM loop and delegates behavior to hooks. Key features:
@@ -238,8 +235,7 @@ Each extension has:
 3. All other extensions are loaded after config resolution
 4. Extensions register tools via `HOOKS.TOOLS_REGISTER`
 5. Extensions register CLI subcommands via `HOOKS.CLI_SUBCOMMANDS_REGISTER`
-6. Extensions register config params/flags via `HOOKS.CONFIG_PARAMS_REGISTER` / `HOOKS.CONFIG_CLI_FLAGS_REGISTER`
-7. Extensions contribute to system prompt via `HOOKS.SYSTEM_PROMPT_BUILD`
+6. Extensions contribute to system prompt via `HOOKS.SYSTEM_PROMPT_BUILD`
 
 ### Built-in Extensions
 

@@ -4,6 +4,13 @@
   "loadOrder": 10,
   "dependsOn": ["core-tools"],
   "description": "Skills loading, activation, and system prompt integration",
+  "cli:flags": [
+    {
+      "long": "--preload-skills",
+      "type": "array",
+      "description": "Preload skills by name (comma-separated)"
+    }
+  ],
   "configSchema": {
     "skills": {
       "type": "object",

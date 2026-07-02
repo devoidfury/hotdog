@@ -5,7 +5,6 @@ export {
   createExtensionLoader,
   extractSchemaDefaults,
   getExtensionConfigDefaults,
-  emitConfigRegistration,
   resolveExtensionPath,
   isExtensionDirectory,
   isExtensionEnabled,

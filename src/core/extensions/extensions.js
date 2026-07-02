@@ -76,49 +76,6 @@ export async function getExtensionConfigDefaults(extensionPaths) {
   return params;
 }
 
-// ── Config Registration ────────────────────────────────────────────────────
-
-/**
- * Emit config registration hooks for an extension.
- */
-export async function emitConfigRegistration(extension, configRegistry) {
-  if (!extension || !configRegistry) return [];
-
-  const errors = [];
-
-  const cliFlagsResult = extension.hooks?.[HOOKS.CONFIG_CLI_FLAGS_REGISTER];
-  if (cliFlagsResult) {
-    try {
-      const result =
-        typeof cliFlagsResult === "function"
-          ? await cliFlagsResult(configRegistry)
-          : await cliFlagsResult;
-      if (result && Array.isArray(result)) {
-        configRegistry.registerCliFlags(result);
-      }
-    } catch (e) {
-      errors.push(`CONFIG_CLI_FLAGS_REGISTER failed: ${e.message}`);
-    }
-  }
-
-  const configParamsResult = extension.hooks?.[HOOKS.CONFIG_PARAMS_REGISTER];
-  if (configParamsResult) {
-    try {
-      const result =
-        typeof configParamsResult === "function"
-          ? await configParamsResult(configRegistry)
-          : await configParamsResult;
-      if (result && Array.isArray(result)) {
-        configRegistry.registerConfigParams(result);
-      }
-    } catch (e) {
-      errors.push(`CONFIG_PARAMS_REGISTER failed: ${e.message}`);
-    }
-  }
-
-  return errors;
-}
-
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT_DIR = path.resolve(__dirname, "../../");
 
@@ -710,8 +667,6 @@ export function resolveExtensionDependencies(
  *
  * Config params are extracted from configSchema and registered automatically,
  * making extension.json the single source of truth for extension configuration.
- * Extensions can still use CONFIG_PARAMS_REGISTER for programmatic control,
- * but the common case is schema-only.
  *
  * @param {Object} config - Configuration with extension paths and autoload settings.
  * @param {Object} configRegistry - Config registry to register CLI flags and config params.
@@ -748,8 +703,6 @@ export async function registerExtensionMetadata(
   }
 
   // Register config params from configSchema (single source of truth)
-  // This makes extension.json the canonical config definition.
-  // Extensions can still use CONFIG_PARAMS_REGISTER for additional/programmatic params.
   for (const ext of extensionsToLoad) {
     if (ext.configSchema) {
       const params = extractSchemaDefaults(ext.configSchema);
@@ -842,17 +795,6 @@ export class ExtensionLoader {
       await instance.hooks[HOOKS.TOOLS_REGISTER](this._core.toolRegistry);
     } else if (instance.registerTools) {
       await instance.registerTools(this._core.toolRegistry);
-    }
-
-    if (this._configRegistry) {
-      const configErrors = await emitConfigRegistration(
-        instance,
-        this._configRegistry,
-      );
-      if (configErrors.length > 0) {
-        const msg = configErrors.join("; ");
-        throw ExtensionError.ConfigFailed(name, msg);
-      }
     }
 
     return instance;

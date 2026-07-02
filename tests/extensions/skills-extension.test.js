@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'bun:test';
 import { create } from '../../src/extensions/skills/index.js';
 import { HOOKS } from '../../src/core/hooks.js';
 import { ToolContext } from '../../src/core/extensions/tool-context.js';
+import { createConfigRegistry } from '../../src/core/extensions/config-registry.js';
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
@@ -114,20 +115,14 @@ describe('Skills Extension', () => {
     expect(ext.isToolAllowed('write_file')).toBe(false);
   });
 
-  it('CONFIG_CLI_FLAGS_REGISTER registers preload-skills flag', async () => {
-    const ext = await create({
-      config: { skills: { skillsPath: tmpDir } },
-    });
-
-    const flags = [];
-    const configRegistry = {
-      registerCliFlags: (f) => flags.push(...f),
-    };
-
-    ext.hooks[HOOKS.CONFIG_CLI_FLAGS_REGISTER](configRegistry);
-    expect(flags.length).toBe(1);
-    expect(flags[0].long).toBe('--preload-skills');
-    expect(flags[0].type).toBe('array');
+  it('extension.json defines --preload-skills CLI flag', async () => {
+    // CLI flags are defined declaratively in extension.json cli:flags,
+    // not via imperative hooks. Verify the extension.json has the flag.
+    const extensionData = (await import('../../src/extensions/skills/extension.json')).default;
+    expect(extensionData['cli:flags']).toBeDefined();
+    expect(extensionData['cli:flags'].length).toBe(1);
+    expect(extensionData['cli:flags'][0].long).toBe('--preload-skills');
+    expect(extensionData['cli:flags'][0].type).toBe('array');
   });
 
   it('AGENT_TOOL_CONTEXT sets skillsLoader on toolCtx', async () => {

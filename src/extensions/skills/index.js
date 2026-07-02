@@ -1,8 +1,7 @@
 // Skills Extension
 // Manages skills loading, activation, and system prompt integration.
 // Hooks: systemPrompt:build, agent:toolContext, tools:register, commands:register
-// Config defaults are defined in extension.json configSchema.
-// CLI flags are registered via the hook since they need programmatic control.
+// Config defaults and CLI flags are defined in extension.json.
 
 import extensionData from "./extension.json";
 import { readFile } from "node:fs/promises";
@@ -35,22 +34,6 @@ export async function create(core) {
 
   return {
     hooks: {
-      /**
-       * Register CLI flag for preloading skills.
-       * Kept here because CLI flags need programmatic registration.
-       */
-      [HOOKS.CONFIG_CLI_FLAGS_REGISTER]: (configRegistry) => {
-        configRegistry.registerCliFlags([
-          {
-            short: null,
-            long: "--preload-skills",
-            description: "Preload skills by name (comma-separated)",
-            type: "array",
-            default: [],
-          },
-        ]);
-      },
-
       /**
        * Build skills preamble for system prompt.
        */

@@ -65,6 +65,6 @@ Remember: The agents you create should be autonomous experts capable of handling
 ### Reviewing the rendered system prompt for a profile
 
 Use the following command to render the whole system prompt for a profile to see it all in context and verify it works:
-`./target/debug/oa-agent --profile <name> show-prompt`
+`./target/debug/hotdog --profile <name> show-prompt`
 
 Note: AGENTS.md inclusion is automatic when the working directory contains one, it is expected in the output of this tool.

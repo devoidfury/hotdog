@@ -22,7 +22,7 @@ All defaults live in `src/core/config/defaults.js` (sourced from `src/core/core.
 Extension-specific defaults (e.g., `DEFAULT_READ_TOOL_LIMIT`, `DEFAULT_FIND_MAX_RESULTS`, compaction settings) are defined in each extension's `extension.json` configSchema.
 
 ### Config Resolution
-- **`loadConfig(configPath, cliConfigDir, extParams)`** — loads config from file, falls back to resolved config dir (CLI `--config-dir` > `./config` > env > `/etc/oa-agent` > XDG). Merges extension defaults.
+- **`loadConfig(configPath, cliConfigDir, extParams)`** — loads config from file, falls back to resolved config dir (CLI `--config-dir` > `./config` > env > `/etc/hotdog` > XDG). Merges extension defaults.
 - **`buildConfig(cli)`** — single entry point for config resolution. Returns `{ resolved, modelRegistry, providers }`. Handles CLI args -> config file -> env var -> default priority chain.
 - **`mergeExtensionConfigDefaults(defaultConfig, extParams)`** — merges extension-registered config defaults into base config
 - **`normalizeConfigKeys(obj)`** — converts snake_case to camelCase

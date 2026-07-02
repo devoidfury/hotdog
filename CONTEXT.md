@@ -4,7 +4,7 @@ Domain concepts for the hotdog AI agent harness. Implementation details are docu
 
 ## Core Entities
 
-- **Application** — One `oa-agent` process. Manages zero or more agents.
+- **Application** — One `hotdog` process. Manages zero or more agents.
 - **Agent** — The core runtime unit: receives messages, calls LLM, executes tools, manages context. An application manages agent instances (potentially switching between them).
 - **Task Agent** — A sub-agent spawned from a parent agent for delegation. Runs in a background task with its own MessageLog and LLM loop. Controlled via TaskManager.
 - **Session** — One uninterrupted chat from start to finish (no reset/clearing). Complete capture of everything: messages, config, token usage, everything from user and model server. Resumable. Session fork (planned): go back N turns and branch with new input.
@@ -100,7 +100,7 @@ Domain concepts for the hotdog AI agent harness. Implementation details are docu
 
 ## Configuration
 
-- `config/defaults.json` — User-editable global defaults. Config dir resolution: CLI `--config-dir` > `OA_AGENT_CONFIG_DIR` env > `./config` (CWD) > `/etc/oa-agent` > `~/.config/oa-agent` (XDG).
+- `config/defaults.json` — User-editable global defaults. Config dir resolution: CLI `--config-dir` > `HOTDOG_CONFIG_DIR` env > `./config` (CWD) > `/etc/hotdog` > `~/.config/hotdog` (XDG).
 - `config/profiles/*.profile.md` — Named profile overlays (role, body, tools, aspects).
 - `config/system_prompt.md` — System prompt template.
 - `config/prompts/*.prompt.md` — Named prompt templates.

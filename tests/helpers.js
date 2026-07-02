@@ -41,7 +41,7 @@ export function getDisplay(result) {
 /**
  * Create a temporary directory for file-based tests.
  */
-export function tmpDir(prefix = 'oa-test-') {
+export function tmpDir(prefix = 'hotdog-test-') {
   return fs.mkdtempSync(path.join(os.tmpdir(), prefix));
 }
 

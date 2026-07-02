@@ -1,8 +1,8 @@
-# LSAP Implementation Plan for oa-js
+# LSAP Implementation Plan for hotdog
 
 > **Status**: Draft — for planning and discussion
 > **Source**: [LSAP Repository](https://github.com/lsp-client/LSAP)
-> **Target**: `ext/lsap/` in oa-js (JavaScript)
+> **Target**: `ext/lsap/` in hotdog (JavaScript)
 
 ---
 
@@ -36,7 +36,7 @@
 
 ### Example: References
 
-**LSP approach** (what oa-js does today):
+**LSP approach** (what hotdog does today):
 ```
 Agent → lsp-references { file, line, character } → [Location[]]
 Agent must manually: read files, extract context, format output
@@ -54,7 +54,7 @@ Agent → lsap-references { locate, mode, max_items }
 Agent ← lsap-references { items, total, pagination, markdown }
 ```
 
-### Key Design Decisions for oa-js
+### Key Design Decisions for hotdog
 
 | Decision | Choice | Rationale |
 |----------|--------|-----------|
@@ -62,7 +62,7 @@ Agent ← lsap-references { items, total, pagination, markdown }
 | **Transport** | `ext/lsp/LspClient` | Reuse existing JSON-RPC client |
 | **Templates** | String templates (no libraries) | Zero external dependencies |
 | **Models** | JSDoc + factory functions | No Pydantic — trust LSP server responses |
-| **Concurrency** | `Promise.allSettled()` | Already used in oa-js |
+| **Concurrency** | `Promise.allSettled()` | Already used in hotdog |
 | **Output** | `ToolResult` with XML/markdown | Matches existing tool patterns |
 
 ### Dependencies
@@ -718,9 +718,9 @@ class ReferenceCapability extends Capability {
 | **Syntax** | `{% for %}`, `{{ }}` | `${var}` |
 | **Complexity** | Full templating language | Simple substitution |
 | **Maintenance** | External library updates | No external deps |
-| **oa-js fit** | Adds dependency | Follows existing patterns |
+| **hotdog fit** | Adds dependency | Follows existing patterns |
 
-The oa-js codebase already uses string templates extensively (see `ext/lsp/tools/base.js` formatting methods). This approach is consistent with the existing codebase.
+The hotdog codebase already uses string templates extensively (see `ext/lsp/tools/base.js` formatting methods). This approach is consistent with the existing codebase.
 
 ---
 
@@ -864,7 +864,7 @@ if (toolName.startsWith('lsap-')) {
 | Convention | Example | Rationale |
 |------------|---------|-----------|
 | Prefix | `lsap-` | Distinguishes from raw LSP tools (`lsp-`) |
-| Format | `lsap-inspect`, `lsap-references` | Descriptive, follows oa-js naming |
+| Format | `lsap-inspect`, `lsap-references` | Descriptive, follows hotdog naming |
 | Registry | Separate from `LSP_TOOL_NAMES` | LSAP tools are optional, registered separately |
 
 ### Optional Registration
@@ -964,7 +964,7 @@ export function generateShortId() {
 
 #### No New Dependencies
 
-All modules use only Node.js built-ins (`fs`, `path`, `crypto`) and existing oa-js code (`ext/lsp/` utilities).
+All modules use only Node.js built-ins (`fs`, `path`, `crypto`) and existing hotdog code (`ext/lsp/` utilities).
 
 ---
 
@@ -1093,7 +1093,7 @@ export class ReferenceCapability extends Capability {
 
 #### Concurrency Pattern
 
-Uses `Promise.allSettled()` for parallel execution — matching existing oa-js patterns from `ext/lsp/client.js`:
+Uses `Promise.allSettled()` for parallel execution — matching existing hotdog patterns from `ext/lsp/client.js`:
 
 ```javascript
 // Existing pattern in ext/lsp/client.js:
@@ -1606,7 +1606,7 @@ Add TOC entries for new tools:
 
 ## Gap Analysis
 
-### What LSAP Adds That oa-js Doesn't Have
+### What LSAP Adds That hotdog Doesn't Have
 
 | Feature | Status | Notes |
 |---------|--------|-------|
@@ -1621,7 +1621,7 @@ Add TOC entries for new tools:
 | **Symbol Path Navigation** | New | Navigate via `module.Class.method` |
 | **Scoped Operations** | New | Limit to line ranges or symbol bodies |
 
-### What oa-js Already Has That LSAP Reuses
+### What hotdog Already Has That LSAP Reuses
 
 | Feature | Source | Notes |
 |---------|--------|-------|
@@ -1635,7 +1635,7 @@ Add TOC entries for new tools:
 
 ### Architecture Differences: Python LSAP vs JavaScript LSAP
 
-| Aspect | Python LSAP | JavaScript LSAP (oa-js) |
+| Aspect | Python LSAP | JavaScript LSAP (hotdog) |
 |--------|-------------|------------------------|
 | **Language** | Python | JavaScript (Node.js) |
 | **Transport** | `lsp-client` library | `ext/lsp/client.js` (LspClient) |
@@ -1720,7 +1720,7 @@ LSAP uses nested bracket notation for position markers:
 
 ---
 
-## Appendix B: oa-js File Reference
+## Appendix B: hotdog File Reference
 
 ### Existing LSP Files
 

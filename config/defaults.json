@@ -22,7 +22,7 @@
     "generate": {
       "model": "ai365/qwen3.6-35b:general"
     },
-    "oa-planner": {
+    "hotdog-planner": {
       "model": "ai365/qwen3.6-35b:general"
     },
     "fixer": {

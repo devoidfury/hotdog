@@ -8,13 +8,13 @@
 
 ```bash
 # Basic usage — renders with current config/model
-bun bin/oa-agent show-prompt
+bun bin/hotdog show-prompt
 
 # With profile
-bun bin/oa-agent show-prompt --profile fixer
+bun bin/hotdog show-prompt --profile fixer
 
 # With specific model
-bun bin/oa-agent show-prompt --model qwen3.5-0.8b
+bun bin/hotdog show-prompt --model qwen3.5-0.8b
 ```
 
 ## Output Format

@@ -9,7 +9,7 @@ describe('ProjectInfoTool', () => {
   let tmpDir;
 
   beforeEach(() => {
-    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'oa-test-pinfo-'));
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'hotdog-test-pinfo-'));
   });
 
   afterEach(() => {
@@ -77,7 +77,7 @@ describe('ProjectInfoTool language detection', () => {
   let tmpDir;
 
   beforeEach(() => {
-    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'oa-test-lang-'));
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'hotdog-test-lang-'));
   });
 
   afterEach(() => {

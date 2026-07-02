@@ -11,7 +11,7 @@ describe('Skills Extension', () => {
   let tmpDir;
 
   beforeEach(() => {
-    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'oa-test-skill-'));
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'hotdog-test-skill-'));
   });
 
   afterEach(() => {

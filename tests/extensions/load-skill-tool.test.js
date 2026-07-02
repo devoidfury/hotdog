@@ -12,7 +12,7 @@ describe('LoadSkillTool', () => {
   let loader;
 
   beforeEach(async () => {
-    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'oa-test-skill-'));
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'hotdog-test-skill-'));
     loader = new SkillsLoader(tmpDir);
     await loader.loadSkills();
   });

@@ -43,7 +43,7 @@ All error catches must use `formatError()` from `src/core/error.js`:
 | `docs/agents/extensions.md` | Extension system, adding and configuring extensions |
 | `docs/agents/tools-and-skills.md` | Tool system and skill system details |
 | `docs/agents/model-and-config.md` | Model registry, config system, profiles |
-| `docs/agents/debugging-oa-agent-tools-visibility-flags.md` | Debugging patterns, one-shot mode |
+| `docs/agents/debugging-hotdog-tools-visibility-flags.md` | Debugging patterns, one-shot mode |
 | `docs/agents/show-prompt-audit-profile.md` | show-prompt subcommand reference |
 | `docs/cli-subcommands.md` | CLI subcommand extension registration |
 | `docs/hook-lifecycle.md` | Hook system lifecycle and extension registration patterns |

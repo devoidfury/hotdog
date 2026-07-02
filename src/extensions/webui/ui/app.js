@@ -30,7 +30,7 @@ function showMain() {
  * Clears localStorage and shows the login screen so the user can re-authenticate.
  */
 function handleAuthFailure() {
-  localStorage.removeItem("oa-webui-token");
+  localStorage.removeItem("hotdog-webui-token");
   token = null;
   if (chat) {
     chat.disconnect();
@@ -65,7 +65,7 @@ async function verifyToken(tokenToCheck) {
 
 async function init() {
   // Check for existing token in localStorage
-  const savedToken = localStorage.getItem("oa-webui-token");
+  const savedToken = localStorage.getItem("hotdog-webui-token");
   if (savedToken) {
     token = savedToken;
     // Verify the token before starting the chat connection
@@ -83,7 +83,7 @@ async function init() {
   initLogin({
     onLogin: (newToken) => {
       token = newToken;
-      localStorage.setItem("oa-webui-token", token);
+      localStorage.setItem("hotdog-webui-token", token);
       startChat();
       showMain();
     },

@@ -425,7 +425,7 @@ describe("writeFileWithParents", () => {
   let tmpDir;
 
   beforeEach(() => {
-    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "oa-test-writefile-"));
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "hotdog-test-writefile-"));
   });
 
   afterEach(() => {
@@ -451,7 +451,7 @@ describe("resolvePathAndValidate", () => {
   let tmpDir;
 
   beforeEach(() => {
-    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "oa-test-resolve-"));
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "hotdog-test-resolve-"));
   });
 
   afterEach(() => {
@@ -505,7 +505,7 @@ describe("checkWritable", () => {
   let tmpDir;
 
   beforeEach(() => {
-    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "oa-test-writable-"));
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "hotdog-test-writable-"));
   });
 
   afterEach(() => {
@@ -548,7 +548,7 @@ describe("checkReadable", () => {
   let tmpDir;
 
   beforeEach(() => {
-    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "oa-test-readable-"));
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "hotdog-test-readable-"));
   });
 
   afterEach(() => {

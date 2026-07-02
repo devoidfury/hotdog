@@ -6,7 +6,7 @@ Two new extensions: a base **websocket** extension that provides the server-side
 
 | Decision | Resolution |
 |----------|-----------|
-| Lifecycle model | Subcommand mode — `oa-agent ws-server` and `oa-agent webui` are long-running processes |
+| Lifecycle model | Subcommand mode — `hotdog ws-server` and `hotdog webui` are long-running processes |
 | Connection-to-session | Connections can join existing sessions AND manage multiple sessions from one connection |
 | Wire protocol | Custom envelope (not JSON-RPC), maps directly to `OUTPUT_EVENT` types |
 | Extension dependency | Factory function — websocket exports `createWsServer()`, webui imports it |

@@ -86,10 +86,10 @@ Config is resolved in priority order: **CLI flags** > **config file** > **enviro
 The config directory is resolved in this order:
 
 1. `--config-dir <path>` CLI flag
-2. `OA_AGENT_CONFIG_DIR` environment variable
+2. `HOTDOG_CONFIG_DIR` environment variable
 3. `./config` (relative to CWD)
-4. `/etc/oa-agent`
-5. `~/.config/oa-agent` (XDG)
+4. `/etc/hotdog`
+5. `~/.config/hotdog` (XDG)
 
 The config file is `defaults.json` inside the resolved config directory.
 
@@ -153,7 +153,7 @@ Stdio transport is also supported via `command` and `args`.
 - **Subagent tasks** -- Delegate work to background task agents
 - **Session logging** -- JSONL session logs for debugging and auditing
 - **Interactive CLI** -- Readline-based interactive session
-- **Web UI** -- Optional web interface with WebSocket support (`oa-agent webui`)
+- **Web UI** -- Optional web interface with WebSocket support (`hotdog webui`)
 - **Streaming** -- Real-time streaming of LLM responses
 - **Retry with backoff** -- Automatic retry for transient LLM errors
 - **Prompt injection protection** -- Marker mangling to prevent crafted input from triggering internal behavior

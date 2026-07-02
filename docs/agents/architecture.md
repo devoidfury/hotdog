@@ -39,7 +39,7 @@ Manages extension-registered CLI flags and config parameters. Config params and 
 ### Hook System (`src/core/hooks.js`)
 The foundation for the extension architecture. `HookSystem` class with `on()`, `off()`, `notifyHooks()`, `notifyHooksAsync()`, `runHookPipeline()`, `clear()` methods. Standard hook names defined in `HOOKS` constant.
 
-**Hook trace:** Set `_trace = true` on the HookSystem instance (via `--hook-trace` CLI flag, `OA_HOOK_TRACE=1` env, or `hook_trace: true` config) to log each handler invocation with execution order, source extension, timing, and return value. Output uses `logger.debug()` so it requires `OA_LOG_LEVEL=debug`. See `docs/agents/debugging-oa-agent-tools-visibility-flags.md` for details.
+**Hook trace:** Set `_trace = true` on the HookSystem instance (via `--hook-trace` CLI flag, `HOTDOG_HOOK_TRACE=1` env, or `hook_trace: true` config) to log each handler invocation with execution order, source extension, timing, and return value. Output uses `logger.debug()` so it requires `HOTDOG_LOG_LEVEL=debug`. See `docs/agents/debugging-hotdog-tools-visibility-flags.md` for details.
 
 **Session:** `SESSION_CREATE`, `SESSION_SWAP`, `SESSION_SERIALIZE`, `SESSION_DESERIALIZE`, `SESSION_RESTORE_ACTIVE`
 

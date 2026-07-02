@@ -4,9 +4,8 @@
 import crypto from "node:crypto";
 import { Message } from "./context/message.js";
 import { MessageLog } from "./context/message-log.js";
-import { LlmError } from "./llm-client/client.js";
 import { OUTPUT_EVENT } from "./context/output.js";
-import { formatError, AgentError } from "./error.js";
+import { formatError, AgentError, LlmError } from "./error.js";
 import { HOOKS } from "./hooks.js";
 import { ToolContext } from "./extensions/tool-context.js";
 import { xmlEscape } from "./extensions/tool-utils.js";
@@ -244,15 +243,21 @@ export class Agent {
 
       // Before provider request — sequential, modifiable. Extensions can
       // log the request, modify messages, change model config, or alter tools.
-      const reqResult = await this._hooks.runHookPipeline(HOOKS.PROVIDER_REQUEST, {
-        messages,
-        modelConfig,
-        toolDefs,
-        agent: this,
-      });
-      if (reqResult.lastResult?.messages) messages = reqResult.lastResult.messages;
-      if (reqResult.lastResult?.modelConfig) modelConfig = reqResult.lastResult.modelConfig;
-      if (reqResult.lastResult?.toolDefs) toolDefs = reqResult.lastResult.toolDefs;
+      const reqResult = await this._hooks.runHookPipeline(
+        HOOKS.PROVIDER_REQUEST,
+        {
+          messages,
+          modelConfig,
+          toolDefs,
+          agent: this,
+        },
+      );
+      if (reqResult.lastResult?.messages)
+        messages = reqResult.lastResult.messages;
+      if (reqResult.lastResult?.modelConfig)
+        modelConfig = reqResult.lastResult.modelConfig;
+      if (reqResult.lastResult?.toolDefs)
+        toolDefs = reqResult.lastResult.toolDefs;
 
       // Create an AbortController for this LLM request.
       // Pass its signal so the HTTP client can properly abort fetch()
@@ -394,8 +399,7 @@ export class Agent {
     if (this._systemPrompt) return;
 
     // Import here to avoid circular dependency
-    const { buildSystemPrompt } =
-      await import("./context/system-prompt.js");
+    const { buildSystemPrompt } = await import("./context/system-prompt.js");
 
     // Collect chunks from extensions via hook return values.
     // Each handler returns a chunk object { name, priority, content } or
@@ -583,7 +587,10 @@ export class Agent {
       );
       return this._writeToolResult(toolName, input, blockedResult, toolCallId);
     }
-    if (callResult.lastResult?.action === "modify" && callResult.lastResult.input !== undefined) {
+    if (
+      callResult.lastResult?.action === "modify" &&
+      callResult.lastResult.input !== undefined
+    ) {
       // Extension modified the input args
       input = callResult.lastResult.input;
     }
@@ -864,10 +871,13 @@ export class Agent {
     }
 
     // 2. COMMAND_DISPATCH hook — extensions can handle specific commands.
-    const pipelineResult = await this._hooks.runHookPipeline(HOOKS.COMMAND_DISPATCH, {
-      command: cmd,
-      agent: this,
-    });
+    const pipelineResult = await this._hooks.runHookPipeline(
+      HOOKS.COMMAND_DISPATCH,
+      {
+        command: cmd,
+        agent: this,
+      },
+    );
     const lastResult = pipelineResult.lastResult;
     if (lastResult && typeof lastResult.then === "function") {
       const awaited = await lastResult;
@@ -926,6 +936,7 @@ export class Agent {
     this._log.replace(data.context.map((m) => new Message(m)));
     this.model = data.model;
     this._iterationCount = data.iterationCount || 0;
-    this._reasoningEffort = data.reasoningEffort !== undefined ? data.reasoningEffort : undefined;
+    this._reasoningEffort =
+      data.reasoningEffort !== undefined ? data.reasoningEffort : undefined;
   }
 }

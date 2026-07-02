@@ -116,7 +116,10 @@ export class LlmClient {
     };
 
     // Only include temperature if it's a valid number (omit null/undefined)
-    if (modelConfig.temperature !== undefined && modelConfig.temperature !== null) {
+    if (
+      modelConfig.temperature !== undefined &&
+      modelConfig.temperature !== null
+    ) {
       request.temperature = modelConfig.temperature;
     }
 
@@ -127,7 +130,10 @@ export class LlmClient {
       request.parallel_tool_calls = true;
     }
 
-    if (modelConfig.reasoningEffort !== undefined && modelConfig.reasoningEffort !== null) {
+    if (
+      modelConfig.reasoningEffort !== undefined &&
+      modelConfig.reasoningEffort !== null
+    ) {
       request.reasoning_effort = modelConfig.reasoningEffort;
     }
     if (stream) {
@@ -377,6 +383,3 @@ export class LlmClient {
     return events;
   }
 }
-
-// Re-export for backward compatibility (tests import LlmError from this module)
-export { LlmError };

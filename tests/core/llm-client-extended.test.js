@@ -1,6 +1,6 @@
 // Extended tests for LlmClient — _parseStreamData, _escapeMessages, cancel tokens.
 import { describe, it, expect } from "bun:test";
-import { LlmClient, LlmError } from "../../src/core/llm-client/client.js";
+import { LlmClient } from "../../src/core/llm-client/client.js";
 import { Message } from "../../src/core/context/message.js";
 
 describe("LlmClient._parseStreamData", () => {
@@ -65,9 +65,7 @@ describe("LlmClient._parseStreamData", () => {
       choices: [
         {
           delta: {
-            tool_calls: [
-              { index: 0, function: { arguments: '{"cmd":"ls"}' } },
-            ],
+            tool_calls: [{ index: 0, function: { arguments: '{"cmd":"ls"}' } }],
           },
         },
       ],
@@ -158,9 +156,7 @@ describe("LlmClient._parseStreamData", () => {
       choices: [
         {
           delta: {
-            tool_calls: [
-              { function: { name: "bash" } },
-            ],
+            tool_calls: [{ function: { name: "bash" } }],
           },
         },
       ],
@@ -262,11 +258,7 @@ describe("LlmClient — cancelled flag", () => {
 describe("LlmClient.buildChatRequest — no tools", () => {
   it("does not include tools fields when no tools provided", () => {
     const client = new LlmClient();
-    const request = client.buildChatRequest(
-      [],
-      { name: "gpt-4" },
-      [],
-    );
+    const request = client.buildChatRequest([], { name: "gpt-4" }, []);
     expect(request.tools).toBeUndefined();
     expect(request.tool_choice).toBeUndefined();
     expect(request.parallel_tool_calls).toBeUndefined();
@@ -274,11 +266,7 @@ describe("LlmClient.buildChatRequest — no tools", () => {
 
   it("does not include tools fields when tools is null", () => {
     const client = new LlmClient();
-    const request = client.buildChatRequest(
-      [],
-      { name: "gpt-4" },
-      null,
-    );
+    const request = client.buildChatRequest([], { name: "gpt-4" }, null);
     expect(request.tools).toBeUndefined();
   });
 

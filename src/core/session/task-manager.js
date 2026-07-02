@@ -1,7 +1,7 @@
 // TaskManager — manages background task agents using the Agent class.
 
 import { Message } from "../context/message.js";
-import { LlmError } from "../llm-client/client.js";
+import { LlmError } from "../error.js";
 import { OUTPUT_EVENT } from "../context/output.js";
 import { AgentSink } from "./agent-sink.js";
 import { loadProfileFile } from "../config/profiles.js";

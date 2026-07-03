@@ -2,7 +2,7 @@
 
 An AI agent harness with tool calling support. Connects to any OpenAI-compatible LLM API, manages conversation context, and executes tools -- all through an extensible hook-driven architecture.
 
-Zero dependencies, just the bun.
+Zero dependencies, just bring the bun.
 
 ## SAFETY DISCLAIMER
 
@@ -207,6 +207,10 @@ hotdog webui                     # Start the web UI server
 
 ## Extension Anatomy
 
+> Extensions? For a hotdog? How long do you need the damn thing?
+>
+> — Some old guy
+
 ```
 my-extension/
 ├── extension.json    # Metadata: name, provides, configSchema, services
@@ -214,11 +218,6 @@ my-extension/
 ```
 
 Extensions register tools, CLI subcommands, and system prompt chunks via hooks. See `docs/agents/extensions.md` for the full guide.
-
-> Extensions? For a hotdog? How long do you need the damn thing?
-
-_- Some old guy_
-
 
 ## Development
 
@@ -229,7 +228,7 @@ bun run test
 
 ## AI Usage Disclosure
 
-Was any AI used in the process of writing this code? You betcha, yes, for sure. I also put my own hands on it, it's not just a slopdog. Go on, audit it.
+*Was any AI used in the process of writing this code?* You betcha, yes, for sure. I also put my own hands on it, it's not just a slopdog. Go on, audit it.
 
 ## License
 

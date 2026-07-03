@@ -22,7 +22,7 @@ For every doc you touch:
 4. **Remove confirmed fluff** — if a paragraph is self-evident, redundant with another doc, or adds zero signal, delete it directly.
 
 ### What You Fix Directly
-- **Stale commands/flags**: Replace outdated CLI invocations with what actually compiles (`cargo check` output, clap definitions in `src/`).
+- **Stale commands/flags**: Replace outdated CLI invocations.
 - **Wrong type/struct names**: Update to match current source files.
 - **Outdated architecture descriptions**: Rewrite sections so the file tree and module boundaries match reality.
 - **Broken internal cross-references**: Fix or remove links to non-existent files.
@@ -60,7 +60,7 @@ Catalog all markdown docs. Read in this priority order:
 
 ### Step 2: Verify and Fix Each Doc
 For each doc, systematically check and correct:
-- **CLI commands**: Run `cargo check` to verify flags exist. Update any stale invocations in-place.
+- **CLI commands**: Verify flags exist. Update any stale invocations in-place.
 - **Struct/type names**: Spot-check at least 10 references against source files. Fix mismatches.
 - **Module/file structure**: Does the file tree described match `git ls-files` output? Rewrite sections that have drifted.
 - **Cross-references**: Follow every `[docs/...]` link. If it points to a non-existent file, either fix the path or remove the reference.
@@ -116,7 +116,7 @@ Your documentation should meet these standards:
 
 1. **Accuracy over completeness**: It's better to have 3 precise pages than 20 with half-stale content. Remove anything that no longer matches reality.
 2. **One canonical truth per concept**: If `AGENTS.md` says something about how config resolution works, that claim must match every other doc that references it. When you find a mismatch, fix the one that's wrong.
-3. **Actionable over descriptive**: "Run `cargo test`" beats "the project includes testing." Commands with specific flags beat vague descriptions.
+3. **Actionable over descriptive**: Running the test suite beats "the project includes testing." Commands with specific flags beat vague descriptions.
 4. **Docs are code**: They accumulate bugs (stale claims), duplicate logic (redundant explanations), and dead code (orphaned files). Treat them with the same rigor you'd treat source code — if you see a bug, fix it; if you see dead code, remove it.
 
 ## Your Mindset

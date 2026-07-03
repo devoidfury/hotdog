@@ -2,7 +2,7 @@ samples
 AGENTS.local.md
 
 # local configuration
-config/
+./config/
 
 # dependencies
 node_modules

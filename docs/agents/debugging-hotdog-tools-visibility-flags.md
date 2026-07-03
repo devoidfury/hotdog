@@ -89,4 +89,3 @@ Each line shows: `hookName — N/M (source) — duration — return summary`
 - For `emitAsyncSeqUntil` hooks (e.g., `input`), an additional "stopped at handler N/M" line appears when the chain terminates early
 
 **Hooks traced:** All hooks except the internal `log` hook. Trace output uses `logger.debug()` so it requires `HOTDOG_LOG_LEVEL=debug` (or `HOTDOG_LOG_LEVEL=info` with `--loud`).
-```

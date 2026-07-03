@@ -4,7 +4,7 @@
 
 ### Core Types
 - **ModelRegistry** — stores models by name from provider configs. Built by `buildModelRegistry(config)`.
-- **ModelEntry** — `{ name, temperature, maxTokens }` per model in registry
+- **ModelEntry** — `{ name, temperature, maxTokens, reasoningEffort }` per model in registry
 - Model names use `provider/model` format (e.g., `ai365/qwen3.5-4b`) when a provider is active
 
 ### Model Switching

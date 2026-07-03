@@ -27,14 +27,14 @@ Argument parsing with support for dynamic CLI flags registered by extensions via
 
 ### Config (`src/core/config/`)
 Split into sub-modules. The single source of truth is `src/core/core.config.json`. Key exports:
-- `src/core/config/index.js` — `loadConfig(configPath, cliConfigDir, extParams)`, `buildConfig(cli)`, `validateConfig()`, `getDefaultConfig()`, `normalizeConfigKeys()`
-- `src/core/config/defaults.js` — `DEFAULT_*` constants (model, URL, timeouts, role, paths, etc.)
-- `src/core/config/schema-loader.js` — reads `core.config.json`, builds `CONFIG_SCHEMA`, cast functions, CLI flags, and resolver (`resolveKey()`, `resolveAll()`, `resolveModel()`)
+- `src/core/config/index.js` — re-exports all from sub-modules; plus `resolveConfigDir()`, `mergeExtensionConfigDefaults()`, `normalizeConfigKeys()`, `getDefaultConfig()`, `loadConfig()`, `validateConfig()`, `failOnInvalidConfig()`, `buildConfig()`, `buildAgentConfig()`
+- `src/core/config/defaults.js` — `DEFAULT_*` constants (model, URL, thinker, tool format, timeouts, paths, max tokens)
+- `src/core/config/schema-loader.js` — reads `core.config.json`, builds `CONFIG_SCHEMA`, cast functions, CLI flags, and resolvers (`resolveKey()`, `resolveAll()`, `resolveModel()`, `resolveModelWithProvider()`, `resolveExtensionConfig()`, `cliFlagsFromSchema()`)
 - `src/core/config/profiles.js` — `loadProfileFile()`, `loadProfileFiles()`, `resolveProfile()`, `mergeProfile()`
-- `src/core/config/providers.js` — `buildModelRegistry()`, `initSystemPromptTemplate()`
+- `src/core/config/providers.js` — `buildModelRegistry()`, `resolveProvider()`, `initSystemPromptTemplate()`, `resetSystemPromptCache()`
 
 ### Config Registry (`src/core/extensions/config-registry.js`)
-Manages extension-registered CLI flags and config parameters. Config params and CLI flags are defined in `extension.json` (configSchema and cli:fields), with defaults automatically extracted and registered by the extension loader.
+Manages extension-registered CLI flags and config parameters. Config params and CLI flags are defined in `extension.json` (configSchema and cli:flags), with defaults automatically extracted and registered by the extension loader.
 
 ### Hook System (`src/core/hooks.js`)
 The foundation for the extension architecture. `HookSystem` class with `on()`, `off()`, `notifyHooks()`, `notifyHooksAsync()`, `runHookPipeline()`, `clear()` methods. Standard hook names defined in `HOOKS` constant.
@@ -90,7 +90,7 @@ Minimal Agent class that runs the LLM loop and delegates behavior to hooks. Key 
 - `_executeTools(toolCalls)` — executes tool calls with hook-based enrichment
 - `executeCommand(cmd)` — executes commands
 - `cancel()` — cancels the running agent loop
-- Properties: `model`, `log`, `isRestoring`, `iterationCount`, `sessionId`, `cancelled`, `hideTools`, `hideThinking`, `systemPrompt`
+- Properties: `model`, `log`, `isRestoring`, `iterationCount`, `sessionId`, `cancelled`, `hideTools`, `hideThinking`, `systemPrompt`, `llmClient`
 - Task agent support: `_abortSignal`, `_toolWhitelist`, `_followQueue`, `_notifyCompletion()`
 
 ### Commands (`src/core/commands.js`)
@@ -145,6 +145,8 @@ File I/O and path resolution helpers. Key exports:
 - `resolvePath(filePath, cwdBoundary, workspaceRoot)` — path resolution with safety
 - `resolvePathAndValidate(requested, cwdBoundary)` — resolves and validates a path
 - `parseFrontMatter(content)` — extracts YAML front matter from markdown
+- `loadAspects(aspectNames, aspectsDir)` — loads aspect files from a directory
+- `validateNameable(name, label, dirName)` — validates nameable entity names
 
 ### Logger (`src/core/logger.js`)
 Centralized, swappable logging via the hook system. Singleton pattern with pre-init buffering. Key exports:
@@ -183,7 +185,7 @@ Output event types and OutputSink base class. Key exports:
 - `OUTPUT_EVENT` — enum with 14 event types (USER_MESSAGE, ASSISTANT_MESSAGE, THINKING, TOOL_CALL, TOOL_RESULT, COMPACTING, COMMAND_RESULT, QUESTION, STREAMING_CHUNK, STREAMING_REASONING_CHUNK, TASK_PROGRESS, TOKEN_USAGE, COMPACTION_RESULT, SESSION_STATE)
 - `EVENT_HANDLERS` — maps event types to handler method names on OutputSink
 - `OutputSink` — base class with `emit()` plus convenience methods
-- `NoopSink` — no-op implementation for testing and show-prompt
+- `NoopSink` — no-op implementation for testing
 
 ### Messages (`src/core/context/message.js`)
 Message types and message log. Key exports:
@@ -204,7 +206,7 @@ Input parsing. Key exports:
 ### Session (`src/core/session/`)
 - `session-log.js` — Session log reading/replaying (JSONL format). Key exports: `readSessionEntries()`, `readAllSessions()`, `sessionExists()`, `replayEntriesIntoContext()`, `LOG_SOURCE` constants
 - `task-manager.js` — `TaskManager` manages background task agents. Key exports: `TASK_STATUS` (RUNNING, COMPLETED, FAILED, CANCELLED), `TaskHandle` (status, interrupt), `TaskManager` (spawnTask, taskStatus, sendFollowUp, interruptTask, activeTasks, taskCounts, progressMessage)
-- `agent-sink.js` — `AgentSink` bridges Agent output to Session Core. Two modes: normal (all events forwarded) and task (filtered, only TASK_PROGRESS passes through)
+- `agent-sink.js` — `AgentSink` bridges Agent output to Session Core. Two modes: normal (all events forwarded) and task (filtered — only TASK_PROGRESS and TOKEN_USAGE pass through)
 - `message-bus.js` — `MessageBus` owns the agent run loop. Drains messages sequentially through `agent.run()`. Provides input preprocessing via `INPUT` hook. Key exports: `MessageBus` (enqueue, cancel, isIdle, run, runUntilCancelled, executeCommand)
 
 ### Marker Mangler (`src/core/marker-mangler.js`)

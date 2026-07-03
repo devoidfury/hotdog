@@ -37,18 +37,21 @@ Every extension directory must contain an `extension.json` metadata file. This i
     }
   ],
   "configSchema": {
-    "type": "object",
-    "properties": {
-      "enabled": {
-        "type": "boolean",
-        "default": true,
-        "description": "Whether this extension is enabled"
+    "myExtension": {
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Whether this extension is enabled"
+        },
+        "timeout": {
+          "type": "number",
+          "default": 30,
+          "description": "Request timeout in seconds"
+        }
       },
-      "timeout": {
-        "type": "number",
-        "default": 30,
-        "description": "Request timeout in seconds"
-      }
+      "additionalProperties": false
     }
   }
 }
@@ -82,10 +85,10 @@ Every extension directory must contain an `extension.json` metadata file. This i
 
 **`configSchema` is the single source of truth** for extension configuration. Defaults defined in `configSchema` are automatically extracted and registered as config params. CLI flags are declared in `cli:flags`. The loader handles all registration automatically -- no imperative hooks needed.
 
-The extension name (kebab-case) is converted to camelCase for the config key:
-- `core-tools` → `coreTools`
-- `model-switch` → `modelSwitch`
-- `mcp-client` → `mcpClient`
+The config key is the property name defined in `configSchema` (typically camelCase of the extension name):
+- `core-tools` → configSchema key `coreTools` → `core.config.coreTools`
+- `model-switch` → configSchema key `modelSwitch` → `core.config.modelSwitch`
+- `mcp-client` → configSchema key `mcpServers` → `core.config.mcpServers`
 
 Config values are accessed via `core.config.<configKey>`:
 ```javascript

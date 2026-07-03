@@ -62,8 +62,8 @@ CLI Start
 Create Hooks ──────────────► Logger initializes via "log" hook
     │
     ▼
-Load Config ───────────────► "config:cliFlagsRegister" (extension CLI flags)
-                              "config:paramsRegister" (extension config params)
+Load Config ───────────────► ConfigRegistry.registerCliFlags() (extension CLI flags)
+                              ConfigRegistry.registerConfigParams() (extension config params)
     │
     ▼
 Discover Extensions ───────► Reads extension.json metadata (no code loaded yet)
@@ -87,8 +87,6 @@ Dispatch Subcommand ───────► Or start interactive session
 
 | Hook | When | Mechanism | Payload |
 |------|------|-----------|---------|
-| `config:cliFlagsRegister` | Before CLI arg parsing | sync notify | `configRegistry` |
-| `config:paramsRegister` | Before CLI arg parsing | sync notify | `configRegistry` |
 | `cli:argsParsed` | After CLI args parsed | sync notify | `{ cli }` |
 | `cli:subcommandsRegister` | After extensions loaded | sync notify | `cliSubcommandRegistry` |
 

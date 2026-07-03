@@ -26,7 +26,7 @@
         "strategy": {
           "type": "string",
           "default": "summarize",
-          "enum": ["summarize", "drop", "summarize-short", "token-aware"],
+          "enum": ["summarize", "drop", "summarize-short", "token-aware", "trim"],
           "description": "Compaction strategy to use"
         }
       },

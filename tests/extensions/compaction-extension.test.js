@@ -101,18 +101,20 @@ describe("Compaction Extension Creation", () => {
     expect(ext.registry.has("drop")).toBe(true);
     expect(ext.registry.has("summarize-short")).toBe(true);
     expect(ext.registry.has("token-aware")).toBe(true);
+    expect(ext.registry.has("trim")).toBe(true);
   });
 
   it("should provide getStrategyList", () => {
     const core = createMockCore();
     const ext = createCompactionExtension(core);
     const list = ext.getStrategyList();
-    expect(list.length).toBe(4);
+    expect(list.length).toBe(5);
     expect(list.map((s) => s.name)).toEqual([
       "summarize",
       "drop",
       "summarize-short",
       "token-aware",
+      "trim",
     ]);
   });
 });
@@ -224,7 +226,7 @@ describe("Strategy List", () => {
     const ext = createCompactionExtension(core);
     const list = ext.getStrategyList();
 
-    expect(list.length).toBe(4);
+    expect(list.length).toBe(5);
     for (const s of list) {
       expect(s.name).toBeDefined();
       expect(s.description).toBeDefined();

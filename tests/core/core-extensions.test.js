@@ -176,6 +176,7 @@ describe('ExtensionLoader', () => {
       expect(extACalls).toEqual([]); // A's handler removed
       expect(extBCalls).toEqual([{ from: 'emit2' }]); // B's handler still works
     });
+  });
 
   describe('all()', () => {
     it('should return all loaded extensions', async () => {

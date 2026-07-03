@@ -11,6 +11,7 @@ import { SummarizeStrategy } from './strategies/summarize.js';
 import { DropStrategy } from './strategies/drop.js';
 import { SummarizeShortStrategy } from './strategies/summarize-short.js';
 import { TokenAwareStrategy } from './strategies/token-aware.js';
+import { TrimStrategy } from './strategies/trim.js';
 import { estimateContextTokens } from './utils.js';
 import { HOOKS } from '../../core/hooks.js';
 import { logger } from '../../core/logger.js';
@@ -48,6 +49,7 @@ export function create(core) {
   registry.register(new DropStrategy());
   registry.register(new SummarizeShortStrategy());
   registry.register(new TokenAwareStrategy());
+  registry.register(new TrimStrategy());
 
   return {
     hooks: {
@@ -297,3 +299,4 @@ export { SummarizeStrategy } from './strategies/summarize.js';
 export { DropStrategy } from './strategies/drop.js';
 export { SummarizeShortStrategy } from './strategies/summarize-short.js';
 export { TokenAwareStrategy } from './strategies/token-aware.js';
+export { TrimStrategy } from './strategies/trim.js';

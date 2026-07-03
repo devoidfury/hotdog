@@ -46,29 +46,9 @@
   "webui": {
     "port": 3000,
     "host": "0.0.0.0",
-    "apiKey": "3419bc3140346d8bc20044d718bcc936a997a",
     "sessionTokenTtlMin": 1440
   },
   "mcp_servers": [
-    {
-      "enabled": false,
-      "name": "moo-tasks",
-      "url": "http://host.docker.internal:3000/api/boards/oUlvAvi_50SQ/mcp",
-      "headers": {
-        "Authorization": "Bearer mab_YEYp2-uzRj70bA_R2YtRuMf5Bn8G05ly"
-      },
-      "blacklist-tools": ["dangerous-tool"]
-    },
-    {
-      "enabled": false,
-      "name": "lightpanda",
-      "command": "/usr/local/bin/lightpanda",
-      "args": ["mcp"],
-      "env": {
-        "LIGHTPANDA_DISABLE_TELEMETRY": "true"
-      },
-      "blacklist-tools": []
-    },
     {
       "enabled": true,
       "name": "bun-docs-mcp",
@@ -79,7 +59,6 @@
     {
       "name": "ai365",
       "url": "http://ai365.home:9292",
-      "api_key": "8bc20044d7183419bc3140346dbcc936a997a",
       "models": [
         {
           "name": "dsv4",
@@ -125,6 +104,12 @@
           "name": "qwen3.6-27b",
           "context-limit": 160000,
           "tags": ["coder", "general", "powerful", "think"],
+          "parallel_tool_calling": true
+        },
+        {
+          "name": "qwen3.6-27b:instruct",
+          "context-limit": 160000,
+          "tags": ["coder", "general", "powerful", "instruct"],
           "parallel_tool_calling": true
         },
         {
@@ -218,7 +203,6 @@
     {
       "name": "home",
       "url": "http://mini.home:9292",
-      "api_key": "bcc936a997a8bc20044d7183419bc3140346d",
       "models": [
         {
           "name": "qwen3.6-27b",

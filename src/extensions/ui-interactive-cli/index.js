@@ -386,7 +386,6 @@ export async function runInteractiveSession(cli, core, options = {}) {
     if (interactiveSessionId) {
       console.log(`Session: ${interactiveSessionId}`);
     }
-    currentInput = null;
     core.extensions.cleanup();
     process.exit(0);
   });

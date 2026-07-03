@@ -337,7 +337,7 @@ export function resolveLoadOrder(extensions, serviceOverrides = {}) {
     deps.set(ext.name, allDeps);
   }
 
-  // Standard topological sort (Kahn's algorithm)
+  // topological sort
   const inDegree = new Map();
   const adjList = new Map();
 
@@ -373,10 +373,7 @@ export function resolveLoadOrder(extensions, serviceOverrides = {}) {
       if (inDegree.get(dependent) === 0) {
         const depExt = extensions.find((e) => e.name === dependent);
         if (depExt) {
-          // Collect newly freed nodes separately instead of inserting
-          // into the sorted queue. We sort the final result once,
-          // which is O(n log n) total instead of O(n²) from repeated
-          // findIndex + splice operations.
+          // Collect newly freed nodes separately instead of inserting into the sorted queue.
           pending.push(depExt);
         }
       }
@@ -679,9 +676,6 @@ export function resolveExtensionDependencies(
  * Discover extensions and register their CLI flags, subcommands, and config params
  * from metadata. This reads extension.json files without loading any extension code.
  *
- * Config params are extracted from configSchema and registered automatically,
- * making extension.json the single source of truth for extension configuration.
- *
  * @param {Object} config - Configuration with extension paths and autoload settings.
  * @param {Object} configRegistry - Config registry to register CLI flags and config params.
  * @param {Object} cliSubcommandRegistry - Subcommand registry to register subcommands.
@@ -812,14 +806,6 @@ export class ExtensionLoader {
     }
 
     return instance;
-  }
-
-  /**
-   * Hot-reload an extension: unload and reload.
-   */
-  async reload(name, entryPoint, createOptions = {}) {
-    await this.unload(name);
-    return await this.load(name, entryPoint, createOptions);
   }
 
   /**

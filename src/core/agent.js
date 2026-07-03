@@ -1,5 +1,4 @@
 // Agent - the core AI agent with tool calling support.
-// Thin orchestrator that delegates behavior to hooks.
 
 import crypto from "node:crypto";
 import { Message } from "./context/message.js";
@@ -513,7 +512,6 @@ export class Agent {
 
   /**
    * Execute tool calls from an LLM response.
-   * Thin loop that delegates per-call logic to _executeSingleToolCall.
    *
    * @param {Array} toolCalls
    * @returns {Promise<{outcome: string, toolResults: Array}>}
@@ -548,19 +546,15 @@ export class Agent {
    * @returns {Promise<{toolName: string, input: string, result: string}>}
    */
   async _executeSingleToolCall(tc) {
-    // Tool calls are normalized by _processStream to OpenAI format:
-    //   { id, type: "function", function: { name, arguments } }
     const toolName = tc.function?.name;
     const toolCallId = tc.id;
     let input = tc.function?.arguments || "{}";
 
-    // 1. Whitelist check (for task agents)
     if (this._toolWhitelist && !this._toolWhitelist.includes(toolName)) {
       const msg = `Tool '${toolName}' is not available for this agent`;
       return this._writeToolResult(toolName, input, msg, toolCallId);
     }
 
-    // 2. Emit tool call event + before-execute hook
     this._emitOutput("tool_call", { toolName, input, toolCallId });
     await this._hooks.notifyHooksAsync(HOOKS.TOOL_BEFORE_EXECUTE, {
       toolCallId,
@@ -569,8 +563,7 @@ export class Agent {
       agent: this,
     });
 
-    // 3. Tool call gate — sequential, modifiable. Handlers can block, modify
-    //    input args, or allow execution to proceed.
+    // Tool call gate — sequential, modifiable. Handlers can block, modify input args, or allow execution to proceed.
     //    Actions: { action: "continue" } | { action: "modify", input } | { action: "block", result }
     const callResult = await this._hooks.runHookPipeline(HOOKS.TOOL_CALL, {
       toolCallId,
@@ -595,7 +588,7 @@ export class Agent {
       input = callResult.lastResult.input;
     }
 
-    // 4. Build and enrich tool context via hook
+    // Build and enrich tool context via hook
     const toolCtx = this._buildToolContext(toolName);
     await this._hooks.notifyHooksAsync(HOOKS.AGENT_TOOL_CONTEXT, {
       toolCtx,
@@ -603,7 +596,7 @@ export class Agent {
       agent: this,
     });
 
-    // 5. Resolve tool from registry
+    // Resolve tool from registry
     const tool = this._toolRegistry.get(toolName);
     if (!tool) {
       return this._writeToolResult(
@@ -614,7 +607,7 @@ export class Agent {
       );
     }
 
-    // 6. Validate arguments against tool's JSON Schema
+    // Validate arguments against tool's JSON Schema
     const validationError = await this._toolRegistry.validateToolArgs(
       toolName,
       input,
@@ -628,7 +621,7 @@ export class Agent {
       );
     }
 
-    // 7. Execute the tool
+    // Execute the tool
     let result;
     let success;
     try {
@@ -639,7 +632,7 @@ export class Agent {
       success = false;
     }
 
-    // 8. After-execute hook + result modification hook
+    // After-execute hook + result modification hook
     await this._hooks.notifyHooksAsync(HOOKS.TOOL_AFTER_EXECUTE, {
       toolCallId,
       toolName,
@@ -663,11 +656,9 @@ export class Agent {
     if (resultHook.lastResult?.result !== undefined) {
       result = resultHook.lastResult.result;
     }
+    const images = result?.images ?? null;
 
-    // 9. Extract images from ToolResult before formatting
-    const images = result && result.images ? result.images : null;
-
-    // 10. Format and write result to context
+    // Format and write result to context
     const resultStr = this._formatToolResult(result, toolName, success);
     return this._writeToolResult(
       toolName,
@@ -689,7 +680,6 @@ export class Agent {
     const toolCtx = new ToolContext();
     toolCtx.set("agent", this);
     toolCtx.set("isSessionRestoring", this._isRestoring);
-    // Mount infrastructure properties from config
     if (this._config) {
       toolCtx.set("cwdBoundary", this._config.cwdBoundary || null);
       toolCtx.set("workspaceRoot", this._config.workspaceRoot || null);
@@ -821,8 +811,6 @@ export class Agent {
 
   /**
    * Cancel the current run.
-   * Sets the cancelled flag and aborts the active HTTP request
-   * via the per-iteration AbortController.
    */
   cancel() {
     this._cancelled = true;
@@ -834,10 +822,6 @@ export class Agent {
 
   /**
    * Reset the cancelled flag so the agent can process new input.
-   * Called by the MessageBus at the start of each new message,
-   * after a previous interrupt or cancellation has been handled.
-   * This replaces the old pattern of `agent.cancel(false)` which
-   * overloaded the cancel method with reset semantics.
    */
   resetCancel() {
     this._cancelled = false;
@@ -864,19 +848,16 @@ export class Agent {
    * @returns {Promise<Object>}
    */
   async executeCommand(cmd) {
-    // 1. Custom command with inline handler (from parseCommand registry match)
+    // Custom command with inline handler (from parseCommand registry match)
     if (cmd._customCommand && cmd._handler) {
       const result = await cmd._handler(this, cmd.value, cmd);
       if (result) return result;
     }
 
-    // 2. COMMAND_DISPATCH hook — extensions can handle specific commands.
+    // COMMAND_DISPATCH hook — extensions can handle specific commands.
     const pipelineResult = await this._hooks.runHookPipeline(
       HOOKS.COMMAND_DISPATCH,
-      {
-        command: cmd,
-        agent: this,
-      },
+      { command: cmd, agent: this },
     );
     const lastResult = pipelineResult.lastResult;
     if (lastResult && typeof lastResult.then === "function") {
@@ -886,15 +867,14 @@ export class Agent {
       return lastResult;
     }
 
-    // 3. Look up handler from command registry by command type.
-    //    Built-in commands are registered during construction;
-    //    extensions also register commands via COMMANDS_REGISTER hook.
+    // Look up handler from command registry by command type.
+    // Built-in commands are registered during construction;
+    // extensions also register commands via COMMANDS_REGISTER hook.
     const registered = this._commandRegistry.get(cmd.type);
     if (registered && registered.handler) {
       return await registered.handler(this, cmd.value, cmd);
     }
 
-    // 4. Unknown command
     return { error: `Unknown command: ${cmd.type}` };
   }
 
@@ -906,14 +886,8 @@ export class Agent {
     return this._commandRegistry;
   }
 
-  // ── Command Handlers (moved to command-handlers.js) ────────────────────────
-
   /**
    * Serialize the agent state for persistence.
-   * Messages are serialized via Message.toJSON() which handles:
-   * - Plain text content as string
-   * - Content with images as array of { type: "text", text } and { type: "image_url", image_url } parts
-   * - Images stored separately as { type: "image_url", mimeType, data } for session log
    * @returns {Object}
    */
   serialize() {
@@ -928,7 +902,6 @@ export class Agent {
 
   /**
    * Deserialize agent state from persisted data.
-   * Handles both plain text content and array content (with image_url parts).
    * @param {Object} data
    */
   deserialize(data) {

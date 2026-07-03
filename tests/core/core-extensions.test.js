@@ -204,28 +204,6 @@ describe('ExtensionLoader', () => {
     });
   });
 
-  describe('reload()', () => {
-    it('should unload and reload an extension', async () => {
-      let counter = 0;
-      const makeModule = () => ({
-        create: () => ({
-          name: 'test',
-          counter: ++counter,
-          shutdown: async () => {},
-        }),
-      });
-
-      await loader.load('test', makeModule());
-      const first = loader.get('test');
-      expect(first.counter).toBe(1);
-
-      await loader.reload('test', makeModule());
-      const second = loader.get('test');
-      expect(second.counter).toBe(2);
-      expect(loader.size()).toBe(1);
-    });
-  });
-
   describe('all()', () => {
     it('should return all loaded extensions', async () => {
       await loader.load('a', { create: () => ({ name: 'a' }) });

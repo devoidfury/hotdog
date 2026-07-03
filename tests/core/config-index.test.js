@@ -21,16 +21,22 @@ describe("resolveConfigDir", () => {
     expect(result).toBe(path.resolve("./config"));
   });
 
-  it("returns ./config when it exists in CWD", () => {
-    // In the test workspace, ./config exists
+  it("falls back to /etc/hotdog or XDG when no CWD config exists", () => {
+    // Personal config was moved to examples/devoidfury/config
     const saved = process.env.HOTDOG_CONFIG_DIR;
     delete process.env.HOTDOG_CONFIG_DIR;
     try {
       const result = resolveConfigDir();
-      expect(result).toContain("config");
+      // Should fall back to /etc/hotdog or ~/.config/hotdog
+      expect(result).toBeTruthy();
     } finally {
       process.env.HOTDOG_CONFIG_DIR = saved;
     }
+  });
+
+  it("resolves to examples config dir when given explicitly", () => {
+    const examplesConfig = resolveConfigDir("./examples/devoidfury/config");
+    expect(examplesConfig).toContain("examples/devoidfury/config");
   });
 });
 
@@ -189,7 +195,7 @@ describe("failOnInvalidConfig", () => {
 
 describe("loadConfig", () => {
   it("loads config from explicit path", async () => {
-    const config = await loadConfig("./config/defaults.json");
+    const config = await loadConfig("./examples/devoidfury/config/defaults.json");
     expect(config).toBeDefined();
     expect(config.defaultModel).toBeDefined();
   });

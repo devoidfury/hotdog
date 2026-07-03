@@ -190,7 +190,12 @@
         {
           "name": "north-mini-code-1.0-30b",
           "context-limit": 262144,
-          "tags": ["general", "powerful"]
+          "tags": ["general", "coder"]
+        },
+        {
+          "name": "ornith-1.0-35b",
+          "context-limit": 262144,
+          "tags": ["general", "coder"]
         },
         {
           "name": "qwen3.6-35b-unc",

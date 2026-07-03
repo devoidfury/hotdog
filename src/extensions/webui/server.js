@@ -75,18 +75,13 @@ export async function createWebuiServer(core, config, uiDir) {
   } = config;
 
   // Resolve API key from config or env
-  const resolvedApiKey = apiKey || process.env.OA_WEBUI_API_KEY || null;
-
-  // Fail-closed: require an API key to be configured at startup.
-  // The server won't start without one, preventing unauthenticated access.
+  const resolvedApiKey = apiKey || process.env.HOTDOG_WEBUI_API_KEY || null;
   if (!resolvedApiKey) {
-    const errorMsg =
-      "WebUI requires an API key. Set webui.apiKey in config or OA_WEBUI_API_KEY env var.";
-    console.error(`[webui] ${errorMsg}`);
-    process.exit(1);
+    throw new Error(
+      "No API key configured. Set webui.apiKey in config or HOTDOG_WEBUI_API_KEY env var.",
+    );
   }
 
-  // Create auth middleware
   const authMiddleware = createAuthMiddleware({
     validateApiKey: async (key) => key === resolvedApiKey,
     tokenTtlMin: sessionTokenTtlMin,

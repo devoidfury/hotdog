@@ -27,7 +27,7 @@
         "apiKey": {
           "type": "string",
           "default": null,
-          "description": "API key for login authentication. Falls back to OA_WEBUI_API_KEY env var."
+          "description": "API key for login authentication. Falls back to HOTDOG_WEBUI_API_KEY env var."
         },
         "sessionTokenTtlMin": {
           "type": "number",
@@ -36,10 +36,7 @@
         }
       },
       "additionalProperties": false,
-      "layers": [
-        { "source": "config", "key": "webui" },
-        { "default": {} }
-      ]
+      "layers": [{ "source": "config", "key": "webui" }, { "default": {} }]
     }
   },
   "cli:subcommands": [

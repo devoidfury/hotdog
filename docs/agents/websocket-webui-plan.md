@@ -171,7 +171,7 @@ Defined in `extension.json` configSchema:
   "defaults": {
     "port": 3000,
     "host": "0.0.0.0",
-    "apiKey": null,                // or from env OA_WEBUI_API_KEY
+    "apiKey": null,                // or from env HOTDOG_WEBUI_API_KEY
     "sessionTokenTtlMin": 1440,    // 24 hours
   }
 }
@@ -286,7 +286,7 @@ export function createWsServer(core, options) {
 ### Phase 2: Webui Extension (Auth + UI)
 
 1. **Scaffolding** — Create `extensions/webui/` with `extension.json`, `index.js`, `dependsOn: ["websocket"]`
-2. **Config** — Register config params (`webui.*`), read `OA_WEBUI_API_KEY` env
+2. **Config** — Register config params (`webui.*`), read `HOTDOG_WEBUI_API_KEY` env
 3. **Server** — Implement `Bun.serve()` with routing: static files, `/login`, `/ws`
 4. **Auth wiring** — Import `createAuthMiddleware` from websocket, wire API key validation
 5. **Subcommand** — Register `webui` subcommand

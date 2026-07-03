@@ -171,345 +171,318 @@ export class AsyncInteractiveCliInput {
 }
 
 /**
- * Create the interactive-cli extension.
- * Registers a "cli" subcommand for interactive mode.
- * main.js dispatches to "cli" when no subcommand is provided.
+ * Run the interactive CLI session.
  *
+ * Sets up the readline interface, message bus, task manager, and session
+ * manager, then enters the interactive loop. This is the main entry point
+ * for the interactive CLI subcommand.
+ *
+ * @param {Object} cli - Parsed CLI arguments
  * @param {Object} core - The core object with hooks, extensions, etc.
- * @returns {Object} Extension instance.
+ * @param {Object} [options] - Optional overrides for testing
+ * @param {Function} [options.createReadline] - Factory for readline interface (mock in tests)
+ * @param {Function} [options.onClose] - Custom close handler (mock in tests)
+ * @param {Function} [options.onSIGINT] - Custom SIGINT handler (mock in tests)
+ * @param {Function} [options.getShellCommandExt] - Factory for shell command extension
+ * @param {Function} [options.setupInput] - Custom input setup (mock in tests)
+ * @returns {Promise<void>}
  */
-export function create(core) {
-  // Lazily load shell command extension when needed
-  let shellCommandExt = null;
+export async function runInteractiveSession(cli, core, options = {}) {
+  const { resolved, config } = core;
 
-  // Store reference for tool context
-  let currentInput = null;
+  // Create output sink
+  const palette = await CliOutputSink.resolve(
+    cli.colors !== false,
+    resolved.theme || "dark",
+    config.colors || null,
+  );
 
-  return {
-    hooks: core.hooks
-      ? {
-          // Register "cli" subcommand via hook
-          [HOOKS.CLI_SUBCOMMANDS_REGISTER]: async (registry) => {
-            registry.register("cli", {
-              description: "Interactive CLI session",
-              handler: async (cli, core) => {
-                await runInteractiveSession(cli, core);
-              },
-            });
-          },
+  const sink = new CliOutputSink({
+    ...resolved,
+    palette,
+    thinkerFormat: cli.thinker ?? config.thinker ?? "[Thinking: {}]",
+    toolFormat: cli.toolfmt ?? config.toolfmt ?? "  → {} {}",
+    toolOutputFmt:
+      cli.toolOutputFmt ?? config.toolOutputFmt ?? "----\n{}\n----",
+  });
 
-          // Provide input interface to tool context
-          [HOOKS.AGENT_TOOL_CONTEXT]: ({ toolCtx }) => {
-            if (currentInput) {
-              toolCtx.set("input", currentInput);
-            }
-          },
-        }
-      : undefined,
+  // Build LLM client
+  const llmClient = new LlmClient({
+    baseUrl: resolved.baseUrl,
+    apiKey: resolved.apiKey,
+    stream: resolved.stream,
+    chatTimeoutSecs: resolved.chatTimeout,
+    providers: config.providers || [],
+    markerMangler: new MarkerMangler(),
+  });
 
-    cleanup: async () => {
-      currentInput = null;
-    },
-  };
-
-  /**
-   * Run the interactive CLI session.
-   */
-  async function runInteractiveSession(cli, core) {
-    const { resolved, config } = core;
-
-    // Create output sink
-    const palette = await CliOutputSink.resolve(
-      cli.colors !== false,
-      resolved.theme || "dark",
-      config.colors || null,
-    );
-
-    const sink = new CliOutputSink({
-      ...resolved,
-      palette,
-      thinkerFormat: cli.thinker ?? config.thinker ?? "[Thinking: {}]",
-      toolFormat: cli.toolfmt ?? config.toolfmt ?? "  → {} {}",
-      toolOutputFmt:
-        cli.toolOutputFmt ?? config.toolOutputFmt ?? "----\n{}\n----",
+  // Build agent function
+  const buildAgent = async (agentConfig) => {
+    const sessionId = agentConfig.sessionId || crypto.randomUUID();
+    const agent = new Agent({
+      hooks: core.hooks,
+      toolRegistry: core.toolRegistry,
+      llmClient,
+      model: agentConfig.model || resolved.model,
+      maxIterations: agentConfig.maxIterations || config.maxIterations || 1000,
+      maxTokens: config.maxTokens || 32000,
+      hideTools: agentConfig.hideTools ?? resolved.hideTools,
+      hideThinking: agentConfig.hideThinking ?? resolved.hideThinking,
+      showTokenUse: agentConfig.showTokenUse ?? resolved.showTokenUse,
+      sink: agentConfig.sink || sink,
+      modelRegistry: resolved.modelRegistry || {},
+      profileName: agentConfig.profileName || resolved.profileName,
+      role: agentConfig.role || resolved.role,
+      profileBody: agentConfig.profileBody || resolved.profileBody,
+      stream: agentConfig.stream ?? resolved.stream,
+      config,
+      sessionId,
+      abortSignal: agentConfig.abortSignal || null,
+      toolWhitelist: agentConfig.toolWhitelist || null,
     });
 
-    // Build LLM client
-    const llmClient = new LlmClient({
-      baseUrl: resolved.baseUrl,
-      apiKey: resolved.apiKey,
-      stream: resolved.stream,
-      chatTimeoutSecs: resolved.chatTimeout,
-      providers: config.providers || [],
-      markerMangler: new MarkerMangler(),
+    await agent.ensureSystemPrompt();
+
+    // Emit hook for extensions to register commands
+    core.hooks.notifyHooks(HOOKS.COMMANDS_REGISTER, {
+      registry: agent.getCommandRegistry(),
+      agent,
     });
 
-    // Build agent function
-    const buildAgent = async (agentConfig) => {
-      const sessionId = agentConfig.sessionId || crypto.randomUUID();
-      const agent = new Agent({
-        hooks: core.hooks,
-        toolRegistry: core.toolRegistry,
-        llmClient,
-        model: agentConfig.model || resolved.model,
-        maxIterations: agentConfig.maxIterations || config.maxIterations || 1000,
-        maxTokens: config.maxTokens || 32000,
-        hideTools: agentConfig.hideTools ?? resolved.hideTools,
-        hideThinking: agentConfig.hideThinking ?? resolved.hideThinking,
-        showTokenUse: agentConfig.showTokenUse ?? resolved.showTokenUse,
-        sink: agentConfig.sink || sink,
-        modelRegistry: resolved.modelRegistry || {},
-        profileName: agentConfig.profileName || resolved.profileName,
-        role: agentConfig.role || resolved.role,
-        profileBody: agentConfig.profileBody || resolved.profileBody,
-        stream: agentConfig.stream ?? resolved.stream,
-        config,
-        sessionId,
-        abortSignal: agentConfig.abortSignal || null,
-        toolWhitelist: agentConfig.toolWhitelist || null,
-      });
-
-      await agent.ensureSystemPrompt();
-
-      // Emit hook for extensions to register commands
-      core.hooks.notifyHooks(HOOKS.COMMANDS_REGISTER, {
-        registry: agent.getCommandRegistry(),
-        agent,
-      });
-
-      // Restore session from disk if a session ID was explicitly provided
-      const explicitSessionId = cli.sessionId;
-      if (explicitSessionId && sessionId === explicitSessionId) {
-        if (await sessionExists(explicitSessionId)) {
-          const entries = await readSessionEntries(explicitSessionId);
-          if (entries.length > 0) {
-            agent.isRestoring = true;
-            const replayed = replayEntriesIntoContext(agent, entries);
-            agent.isRestoring = false;
-            if (replayed > 0) {
-              console.log(
-                `Session restored: ${replayed} messages replayed from ${explicitSessionId}`,
-              );
-            }
+    // Restore session from disk if a session ID was explicitly provided
+    const explicitSessionId = cli.sessionId;
+    if (explicitSessionId && sessionId === explicitSessionId) {
+      if (await sessionExists(explicitSessionId)) {
+        const entries = await readSessionEntries(explicitSessionId);
+        if (entries.length > 0) {
+          agent.isRestoring = true;
+          const replayed = replayEntriesIntoContext(agent, entries);
+          agent.isRestoring = false;
+          if (replayed > 0) {
+            console.log(
+              `Session restored: ${replayed} messages replayed from ${explicitSessionId}`,
+            );
           }
         }
       }
-
-      return agent;
-    };
-
-    // Create TaskManager
-    const taskManager = new TaskManager({
-      buildAgent,
-      llmClient,
-      modelRegistry: resolved.modelRegistry,
-      config,
-      hooks: core.hooks,
-      maxIterations: config.maxIterations || 1000,
-    });
-
-    // Create SessionManager
-    const sessionManager = await SessionManager.create({
-      hooks: core.hooks,
-      extensions: core.extensions,
-      buildAgent,
-      initialConfig: { sessionId: cli.sessionId || null },
-    });
-
-    // Wire taskManager to sessionManager
-    taskManager.setSessionManager(sessionManager);
-
-    // Create MessageBus
-    const bus = new MessageBus({ sessionManager, sink });
-
-    // Wire up task completion
-    taskManager.setBus(bus);
-
-    // Print info
-    const agent = sessionManager.getAgent();
-    console.log("hotdog 0.1.0 (interactive mode)");
-    console.log(`Model: ${resolved.model}`);
-    console.log(`Profile: ${resolved.profileName}`);
-    console.log(`Session: ${agent?.sessionId || "unknown"}`);
-    console.log("Type /quit or /exit to exit.\n");
-
-    // Start interactive session
-    const rl = readline.createInterface({
-      input: process.stdin,
-      output: process.stdout,
-      prompt: `(${resolved.model})> `,
-    });
-
-    // Define the line handler so we can reference it for the input interface
-    /** @type {Function} */
-    let lineHandler;
-
-    // Helper to add line handler (used by AsyncInteractiveCliInput to restore)
-    const addLineHandler = (handler) => {
-      rl.on("line", handler);
-    };
-
-    // Create the input interface for question tool
-    // We need to set it up after defining lineHandler
-    const setupInput = () => {
-      currentInput = new AsyncInteractiveCliInput(rl, lineHandler, addLineHandler);
-    };
-
-    // Listen for model changes and update the readline prompt
-    core.hooks.on(HOOKS.MODEL_CHANGE, (data) => {
-      rl.setPrompt(`(${data.newModel})> `);
-    });
-
-    // Re-display prompt after agent finishes processing
-    core.hooks.on(HOOKS.TURN_END, (data) => {
-      if (data.stopped) {
-        setImmediate(() => rl.prompt());
-      }
-    });
-
-    // Define and register the line handler
-    lineHandler = async (line) => {
-      const trimmed = line.trim();
-
-      if (!trimmed) {
-        rl.prompt();
-        return;
-      }
-
-      // Handle shell commands directly (UI-specific, doesn't go through agent)
-      if (
-        trimmed.startsWith("/sh ") ||
-        trimmed.startsWith("/shell ") ||
-        trimmed.startsWith(":!") ||
-        trimmed.startsWith("!")
-      ) {
-        await handleShellCommand(trimmed, rl);
-        return;
-      }
-
-      // Handle slash commands — delegate to bus for execution
-      if (trimmed.startsWith("/")) {
-        const cmdText = trimmed.slice(1).trim().toLowerCase();
-        handleSlashCommand(cmdText, bus, rl);
-        return;
-      }
-
-      // Regular text input — enqueue for agent processing
-      bus.enqueue(trimmed);
-    };
-
-    rl.on("line", lineHandler);
-
-    // Now set up the input interface with the line handler
-    setupInput();
-
-    rl.on("close", async () => {
-      console.log("\nGoodbye!");
-      const interactiveSessionId = sessionManager.sessionId();
-      if (interactiveSessionId) {
-        console.log(`Session: ${interactiveSessionId}`);
-      }
-      currentInput = null;
-      await core.extensions.cleanup();
-      process.exit(0);
-    });
-
-    rl.on("SIGINT", () => {
-      bus.interrupt();
-      // Clear the input buffer so any typed-but-unsubmitted text is discarded
-      rl.line = "";
-      rl.cursor = 0;
-      console.log("Interrupted (/quit, /exit, or ctrl-d to exit)");
-      rl.prompt();
-    });
-
-    rl.prompt();
-
-    // Run the message bus — awaited so the process stays alive until the user quits.
-    await bus.run();
-  }
-
-  /**
-   * Handle shell commands directly (UI-specific, terminal-bound).
-   */
-  async function handleShellCommand(line, rl) {
-    let cmd;
-    if (line.startsWith("/sh ") || line.startsWith("sh ")) {
-      cmd = line.replace(/^\/?sh\s+/, "");
-    } else if (line.startsWith(":!") || line.startsWith("!")) {
-      cmd = line.replace(/^:?!/, "");
     }
 
-    if (!cmd) {
-      console.log("Usage: /sh <command>\n");
+    return agent;
+  };
+
+  // Create TaskManager
+  const taskManager = new TaskManager({
+    buildAgent,
+    llmClient,
+    modelRegistry: resolved.modelRegistry,
+    config,
+    hooks: core.hooks,
+    maxIterations: config.maxIterations || 1000,
+  });
+
+  // Create SessionManager
+  const sessionManager = await SessionManager.create({
+    hooks: core.hooks,
+    extensions: core.extensions,
+    buildAgent,
+    initialConfig: { sessionId: cli.sessionId || null },
+  });
+
+  // Wire taskManager to sessionManager
+  taskManager.setSessionManager(sessionManager);
+
+  // Create MessageBus
+  const bus = new MessageBus({ sessionManager, sink });
+
+  // Wire up task completion
+  taskManager.setBus(bus);
+
+  // Print info
+  const agent = sessionManager.getAgent();
+  console.log("hotdog 0.1.0 (interactive mode)");
+  console.log(`Model: ${resolved.model}`);
+  console.log(`Profile: ${resolved.profileName}`);
+  console.log(`Session: ${agent?.sessionId || "unknown"}`);
+  console.log("Type /quit or /exit to exit.\n");
+
+  // Start interactive session
+  const createReadline = options.createReadline || readline.createInterface;
+  const rl = createReadline({
+    input: process.stdin,
+    output: process.stdout,
+    prompt: `(${resolved.model})> `,
+  });
+
+  // Define the line handler so we can reference it for the input interface
+  /** @type {Function} */
+  let lineHandler;
+
+  // Helper to add line handler (used by AsyncInteractiveCliInput to restore)
+  const addLineHandler = (handler) => {
+    rl.on("line", handler);
+  };
+
+  // Lazily load shell command extension when needed
+  const getShellCommandExt = options.getShellCommandExt || createInlineShellCommand;
+
+  // Create the input interface for question tool
+  // We need to set it up after defining lineHandler
+  const setupInput = options.setupInput || (() => {
+    // This will be set after lineHandler is defined
+  });
+
+  // Listen for model changes and update the readline prompt
+  core.hooks.on(HOOKS.MODEL_CHANGE, (data) => {
+    rl.setPrompt(`(${data.newModel})> `);
+  });
+
+  // Re-display prompt after agent finishes processing
+  core.hooks.on(HOOKS.TURN_END, (data) => {
+    if (data.stopped) {
+      setImmediate(() => rl.prompt());
+    }
+  });
+
+  // Define and register the line handler
+  lineHandler = async (line) => {
+    const trimmed = line.trim();
+
+    if (!trimmed) {
       rl.prompt();
       return;
     }
 
-    console.log(`\n$ ${cmd}\n`);
-    const ext = await getShellCommandExt();
-    const result = await ext.execute(cmd);
-    if (result.content) {
-      console.log(result.content);
-    } else if (result.error) {
-      console.log(`${result.error}\n`);
+    // Handle shell commands directly (UI-specific, doesn't go through agent)
+    if (
+      trimmed.startsWith("/sh ") ||
+      trimmed.startsWith("/shell ") ||
+      trimmed.startsWith(":!") ||
+      trimmed.startsWith("!")
+    ) {
+      await handleShellCommand(trimmed, rl, getShellCommandExt);
+      return;
     }
-    console.log("");
+
+    // Handle slash commands — delegate to bus for execution
+    if (trimmed.startsWith("/")) {
+      const cmdText = trimmed.slice(1).trim().toLowerCase();
+      handleSlashCommand(cmdText, bus, rl);
+      return;
+    }
+
+    // Regular text input — enqueue for agent processing
+    bus.enqueue(trimmed);
+  };
+
+  rl.on("line", lineHandler);
+
+  // Now set up the input interface with the line handler
+  setupInput();
+
+  // Close handler
+  const handleClose = options.onClose || (() => {
+    console.log("\nGoodbye!");
+    const interactiveSessionId = sessionManager.sessionId();
+    if (interactiveSessionId) {
+      console.log(`Session: ${interactiveSessionId}`);
+    }
+    currentInput = null;
+    core.extensions.cleanup();
+    process.exit(0);
+  });
+
+  rl.on("close", handleClose);
+
+  // SIGINT handler
+  const handleSigint = options.onSIGINT || (() => {
+    bus.interrupt();
+    // Clear the input buffer so any typed-but-unsubmitted text is discarded
+    rl.line = "";
+    rl.cursor = 0;
+    console.log("Interrupted (/quit, /exit, or ctrl-d to exit)");
     rl.prompt();
+  });
+
+  rl.on("SIGINT", handleSigint);
+
+  rl.prompt();
+
+  // Run the message bus — awaited so the process stays alive until the user quits.
+  await bus.run();
+}
+
+/**
+ * Handle shell commands directly (UI-specific, terminal-bound).
+ *
+ * @param {string} line - The raw line input (e.g., "/sh ls -la")
+ * @param {Object} rl - The readline interface
+ * @param {Function} getShellCommandExt - Function to get shell command extension
+ * @returns {Promise<void>}
+ */
+export async function handleShellCommand(line, rl, getShellCommandExt) {
+  let cmd;
+  if (line.startsWith("/sh ") || line.startsWith("sh ")) {
+    cmd = line.replace(/^\/?sh\s+/, "");
+  } else if (line.startsWith(":!") || line.startsWith("!")) {
+    cmd = line.replace(/^:?!/, "");
   }
 
-  /**
-   * Handle a slash command by delegating to the bus.
-   */
-  function handleSlashCommand(cmdText, bus, rl) {
-    const cmd = parseCommand(cmdText);
-
-    // UI-only commands handled directly by the UI layer
-    switch (cmd.type) {
-      case Command.Help:
-        console.log(HELP_TEXT);
-        rl.prompt();
-        return;
-
-      case Command.Quit:
-        console.log("Goodbye!");
-        rl.close();
-        process.exit(0);
-        return;
-
-      case Command.Shell:
-        console.log("Shell commands are handled directly.\n");
-        rl.prompt();
-        return;
-    }
-
-    // All other commands go through the bus → agent → COMMAND_RESULT event
-    bus.executeCommand(cmdText).then(() => rl.prompt());
+  if (!cmd) {
+    console.log("Usage: /sh <command>\n");
+    rl.prompt();
+    return;
   }
 
-  /**
-   * Lazily load the shell command extension.
-   * @returns {Promise<Object>}
-   */
-  async function getShellCommandExt() {
-    if (!shellCommandExt) {
-      // Try to get from core extensions if available
-      if (core.extensions?.has("run-shell-command")) {
-        shellCommandExt = core.extensions.get("run-shell-command");
-      } else {
-        // Fallback: create inline shell command handler
-        shellCommandExt = createInlineShellCommand();
-      }
-    }
-    return shellCommandExt;
+  console.log(`\n$ ${cmd}\n`);
+  const ext = await getShellCommandExt();
+  const result = await ext.execute(cmd);
+  if (result.content) {
+    console.log(result.content);
+  } else if (result.error) {
+    console.log(`${result.error}\n`);
   }
+  console.log("");
+  rl.prompt();
+}
+
+/**
+ * Handle a slash command by delegating to the bus.
+ *
+ * @param {string} cmdText - The command text (without leading /)
+ * @param {Object} bus - The message bus
+ * @param {Object} rl - The readline interface
+ */
+export function handleSlashCommand(cmdText, bus, rl) {
+  const cmd = parseCommand(cmdText);
+
+  // UI-only commands handled directly by the UI layer
+  switch (cmd.type) {
+    case Command.Help:
+      console.log(HELP_TEXT);
+      rl.prompt();
+      return;
+
+    case Command.Quit:
+      console.log("Goodbye!");
+      rl.close();
+      process.exit(0);
+      return;
+
+    case Command.Shell:
+      console.log("Shell commands are handled directly.\n");
+      rl.prompt();
+      return;
+  }
+
+  // All other commands go through the bus → agent → COMMAND_RESULT event
+  bus.executeCommand(cmdText).then(() => rl.prompt());
 }
 
 /**
  * Create an inline shell command handler as fallback.
  * @returns {Object}
  */
-function createInlineShellCommand() {
+export function createInlineShellCommand() {
   return {
     execute(command) {
       return new Promise((resolve) => {
@@ -542,6 +515,62 @@ function createInlineShellCommand() {
           resolve({ error: `Error: ${err.message}` });
         });
       });
+    },
+  };
+}
+
+/**
+ * Create the interactive-cli extension.
+ * Registers a "cli" subcommand for interactive mode.
+ * main.js dispatches to "cli" when no subcommand is provided.
+ *
+ * @param {Object} core - The core object with hooks, extensions, etc.
+ * @returns {Object} Extension instance.
+ */
+export function create(core) {
+  // Lazily load shell command extension when needed
+  let shellCommandExt = null;
+
+  // Store reference for tool context
+  let currentInput = null;
+
+  const getShellCommandExt = async () => {
+    if (!shellCommandExt) {
+      // Try to get from core extensions if available
+      if (core.extensions?.has("run-shell-command")) {
+        shellCommandExt = core.extensions.get("run-shell-command");
+      } else {
+        // Fallback: create inline shell command handler
+        shellCommandExt = createInlineShellCommand();
+      }
+    }
+    return shellCommandExt;
+  };
+
+  return {
+    hooks: core.hooks
+      ? {
+          // Register "cli" subcommand via hook
+          [HOOKS.CLI_SUBCOMMANDS_REGISTER]: async (registry) => {
+            registry.register("cli", {
+              description: "Interactive CLI session",
+              handler: async (cli, core) => {
+                await runInteractiveSession(cli, core, { getShellCommandExt });
+              },
+            });
+          },
+
+          // Provide input interface to tool context
+          [HOOKS.AGENT_TOOL_CONTEXT]: ({ toolCtx }) => {
+            if (currentInput) {
+              toolCtx.set("input", currentInput);
+            }
+          },
+        }
+      : undefined,
+
+    cleanup: async () => {
+      currentInput = null;
     },
   };
 }

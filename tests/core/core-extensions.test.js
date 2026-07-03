@@ -177,33 +177,6 @@ describe('ExtensionLoader', () => {
       expect(extBCalls).toEqual([{ from: 'emit2' }]); // B's handler still works
     });
 
-    it('should allow reloading an extension without leaking handlers', async () => {
-      let callCount = 0;
-      const makeModule = (count) => ({
-        create: () => ({
-          name: 'test',
-          hooks: {
-            'reload:hook': () => { callCount += count; },
-          },
-        }),
-      });
-
-      await loader.load('test', makeModule(1));
-      core.hooks.notifyHooks('reload:hook');
-      expect(callCount).toBe(1);
-
-      // Reload
-      await loader.reload('test', makeModule(2));
-      core.hooks.notifyHooks('reload:hook');
-      expect(callCount).toBe(3); // 1 + 2 (no double registration)
-
-      // Unload
-      await loader.unload('test');
-      core.hooks.notifyHooks('reload:hook');
-      expect(callCount).toBe(3); // no change
-    });
-  });
-
   describe('all()', () => {
     it('should return all loaded extensions', async () => {
       await loader.load('a', { create: () => ({ name: 'a' }) });

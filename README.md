@@ -23,6 +23,8 @@ That's it. No `bun install` needed -- there are no dependencies. No build step, 
 
 ## Quick Start
 
+_Note - I wrote this using linux and haven't really tried it on macos or windows. Happy to accept PRs adding support or fixing issues there, if you find any._
+
 ### 1. Configure Your LLM Backend
 
 Create `config/defaults.json` with your AI provider settings:

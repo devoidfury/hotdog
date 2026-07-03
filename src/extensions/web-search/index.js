@@ -326,12 +326,11 @@ export function create(core) {
     config.provider ||
     extensionData.configSchema.webSearch.properties.provider.default;
 
-  const braveApiKey =
-    config.braveApiKey || process.env.BRAVE_API_KEY || "";
-  const tavilyApiKey =
-    config.tavilyApiKey || process.env.TAVILY_API_KEY || "";
-  const searxngInstanceUrl =
-    config.searxngInstanceUrl || process.env.SEARXNG_INSTANCE_URL || "";
+  // API keys are resolved declaratively via extension.json config layers —
+  // no imperative env var fallback needed here.
+  const braveApiKey = config.braveApiKey || "";
+  const tavilyApiKey = config.tavilyApiKey || "";
+  const searxngInstanceUrl = config.searxngInstanceUrl || "";
 
   return {
     hooks: {

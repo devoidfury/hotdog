@@ -27,7 +27,12 @@
         "apiKey": {
           "type": "string",
           "default": null,
-          "description": "API key for login authentication. Falls back to HOTDOG_WEBUI_API_KEY env var."
+          "description": "API key for login authentication.",
+          "layers": [
+            { "source": "config", "key": "webui.apiKey" },
+            { "source": "env", "key": "HOTDOG_WEBUI_API_KEY" },
+            { "default": null }
+          ]
         },
         "sessionTokenTtlMin": {
           "type": "number",

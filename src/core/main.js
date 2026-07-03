@@ -28,7 +28,11 @@ import {
   validateConfig,
   failOnInvalidConfig,
 } from "./config/index.js";
-import { cliFlagsFromSchema, CONFIG_SCHEMA } from "./config/schema-loader.js";
+import {
+  cliFlagsFromSchema,
+  CONFIG_SCHEMA,
+  resolveExtensionConfig,
+} from "./config/schema-loader.js";
 import { createConfigRegistry } from "./extensions/config-registry.js";
 import { formatError, CliError } from "./error.js";
 import { createSubcommandRegistry } from "./extensions/registries.js";
@@ -229,6 +233,22 @@ export async function main() {
 
   const extParams = configRegistry.getConfigParams();
   const config = await loadConfig(cli.config, cli.configDir, extParams);
+
+  // ── Resolve extension config keys through their declared layers ──────────
+  // Extension keys (e.g., webui, coreTools) are resolved using the layers
+  // defined in their extension.json configSchema. This allows nested properties
+  // to have their own layers (e.g., apiKey with config + env + default).
+  const extContext = {
+    cli,
+    config,
+    configDir: resolved.configDir,
+    provider: resolved.activeProvider ? { name: resolved.activeProvider } : null,
+    profile: resolved.profile,
+    profileName: resolved.profileName,
+  };
+  const resolvedExtConfig = resolveExtensionConfig(extParams, extContext);
+  // Merge resolved extension keys back into config so extensions see the resolved values
+  Object.assign(config, resolvedExtConfig);
 
   // ── Validate config against core schema and extension schemas ────────────
   const extensionSchemas = extParams

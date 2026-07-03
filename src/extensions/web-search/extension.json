@@ -31,17 +31,32 @@
         "braveApiKey": {
           "type": "string",
           "default": "",
-          "description": "Brave Search API key (required when provider=brave)"
+          "description": "Brave Search API key (required when provider=brave)",
+          "layers": [
+            { "source": "config", "key": "webSearch.braveApiKey" },
+            { "source": "env", "key": "BRAVE_API_KEY" },
+            { "default": "" }
+          ]
         },
         "tavilyApiKey": {
           "type": "string",
           "default": "",
-          "description": "Tavily API key (required when provider=tavily)"
+          "description": "Tavily API key (required when provider=tavily)",
+          "layers": [
+            { "source": "config", "key": "webSearch.tavilyApiKey" },
+            { "source": "env", "key": "TAVILY_API_KEY" },
+            { "default": "" }
+          ]
         },
         "searxngInstanceUrl": {
           "type": "string",
           "default": "",
-          "description": "SearXNG instance URL (e.g. https://searx.example.com) (required when provider=searxng)"
+          "description": "SearXNG instance URL (e.g. https://searx.example.com) (required when provider=searxng)",
+          "layers": [
+            { "source": "config", "key": "webSearch.searxngInstanceUrl" },
+            { "source": "env", "key": "SEARXNG_INSTANCE_URL" },
+            { "default": "" }
+          ]
         }
       },
       "additionalProperties": false,

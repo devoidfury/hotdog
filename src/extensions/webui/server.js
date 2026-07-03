@@ -74,16 +74,16 @@ export async function createWebuiServer(core, config, uiDir) {
     sessionTokenTtlMin = 1440,
   } = config;
 
-  // Resolve API key from config or env
-  const resolvedApiKey = apiKey || process.env.HOTDOG_WEBUI_API_KEY || null;
-  if (!resolvedApiKey) {
+  // API key is resolved declaratively via extension.json config layers —
+  // no imperative env var fallback needed here.
+  if (!apiKey) {
     throw new Error(
       "No API key configured. Set webui.apiKey in config or HOTDOG_WEBUI_API_KEY env var.",
     );
   }
 
   const authMiddleware = createAuthMiddleware({
-    validateApiKey: async (key) => key === resolvedApiKey,
+    validateApiKey: async (key) => key === apiKey,
     tokenTtlMin: sessionTokenTtlMin,
   });
 

@@ -171,6 +171,59 @@ export function loadCoreSchema() {
 }
 
 /**
+ * Compile layers within a property definition — resolves casts and computes.
+ *
+ * @param {object} rawProp - A property entry from a schema.
+ * @returns {object} Compiled property entry.
+ */
+function compilePropertyLayers(rawProp) {
+  if (!rawProp.layers) return rawProp;
+
+  const compiledLayers = rawProp.layers.map((layer) => {
+    const compiled = { ...layer };
+
+    // Resolve cast string to function
+    if (typeof compiled.cast === "string") {
+      compiled.cast = resolveCast(compiled.cast);
+    }
+
+    // Resolve compute layer to function
+    if (compiled.compute) {
+      const computeFn = resolveCompute(compiled.compute);
+      if (computeFn) {
+        compiled.default = computeFn;
+        delete compiled.compute;
+      }
+    }
+
+    return compiled;
+  });
+
+  return { ...rawProp, layers: compiledLayers };
+}
+
+/**
+ * Recursively compile layers within nested properties.
+ *
+ * @param {object} properties - The properties object from a schema.
+ * @returns {object} Properties with compiled layers.
+ */
+function compileNestedPropertyLayers(properties) {
+  if (!properties || typeof properties !== "object") return properties;
+
+  const compiled = {};
+  for (const [propName, prop] of Object.entries(properties)) {
+    compiled[propName] = compilePropertyLayers(prop);
+
+    // Recurse into nested object properties
+    if (prop.type === "object" && prop.properties) {
+      compiled[propName].properties = compileNestedPropertyLayers(prop.properties);
+    }
+  }
+  return compiled;
+}
+
+/**
  * Convert a raw JSON schema entry to a runtime-ready schema entry.
  * Resolves string casts to functions.
  * Preserves function defaults.
@@ -179,7 +232,7 @@ export function loadCoreSchema() {
  * @returns {object} Runtime-ready schema entry with resolved casts.
  */
 export function compileSchemaKey(rawKey) {
-  const { layers, ...rest } = rawKey;
+  const { layers, properties, ...rest } = rawKey;
 
   const compiledLayers = layers.map((layer) => {
     const compiled = { ...layer };
@@ -202,7 +255,10 @@ export function compileSchemaKey(rawKey) {
     return compiled;
   });
 
-  return { ...rest, layers: compiledLayers };
+  // Recursively compile layers within nested properties
+  const compiledProperties = compileNestedPropertyLayers(properties);
+
+  return { ...rest, layers: compiledLayers, ...(compiledProperties ? { properties: compiledProperties } : {}) };
 }
 
 /**
@@ -256,9 +312,11 @@ export function loadExtensionSchemas(extensions) {
 
     for (const [keyName, keySchema] of Object.entries(ext.configSchema)) {
       if (keySchema.layers) {
+        // Include properties so nested layers are preserved
         extensionKeys[keyName] = compileSchemaKey({
           type: keySchema.type,
           layers: keySchema.layers,
+          ...(keySchema.properties ? { properties: keySchema.properties } : {}),
         });
       }
     }
@@ -323,7 +381,7 @@ export function resolveLayerValue(layer, context) {
     case "cli":
       return context.cli[layer.key];
     case "config":
-      return context.config[layer.key];
+      return getNested(context.config, layer.key);
     case "env":
       return process.env[layer.key];
     case "provider":
@@ -341,6 +399,55 @@ export function resolveLayerValue(layer, context) {
 }
 
 /**
+ * Resolve nested properties that have their own layers.
+ * Called after the top-level value is resolved for an object-type schema.
+ * Each property with layers is resolved independently, and the resolved
+ * value overrides the corresponding key in the parent object.
+ * Properties without layers fall back to their default value if not
+ * already present in the parent object.
+ *
+ * @param {string} parentKey - The parent config key (e.g., "webui").
+ * @param {object} parentValue - The resolved parent object value.
+ * @param {object} properties - The schema properties object.
+ * @param {object} context - The resolution context.
+ * @returns {object} The parent object with nested properties resolved.
+ */
+function resolveNestedProperties(parentKey, parentValue, properties, context) {
+  if (!properties || typeof parentValue !== "object" || parentValue === null) {
+    return parentValue;
+  }
+
+  const result = { ...parentValue };
+
+  for (const [propName, propSchema] of Object.entries(properties)) {
+    // Build a full key for dot-notation lookups (e.g., "webui.apiKey")
+    const fullKey = `${parentKey}.${propName}`;
+
+    if (propSchema.layers) {
+      // Create a modified context where the config source includes the
+      // parent value as the base for dot-notation lookups
+      const propContext = {
+        ...context,
+        // Ensure the parent key exists in config for getNested lookups
+        config: context.config || {},
+      };
+
+      // Resolve the property using its own layers
+      const propValue = resolveKey(fullKey, { ...propSchema, layers: propSchema.layers }, propContext);
+
+      if (propValue !== undefined) {
+        result[propName] = propValue;
+      }
+    } else if (propSchema.default !== undefined && !(propName in result)) {
+      // Property without layers — use default if not already in parent
+      result[propName] = propSchema.default;
+    }
+  }
+
+  return result;
+}
+
+/**
  * Resolve a single config key by walking its declared layers.
  *
  * @param {string} keyName - The config key name (for debugging).
@@ -349,12 +456,17 @@ export function resolveLayerValue(layer, context) {
  * @returns {*} The resolved value.
  */
 export function resolveKey(keyName, schema, context) {
-  const { layers } = schema;
+  const { layers, properties } = schema;
 
   for (const layer of layers) {
     // Default layer always wins — return immediately, even if null
     if ("default" in layer) {
-      return resolveLayerValue(layer, context);
+      const value = resolveLayerValue(layer, context);
+      // If this is an object with nested property layers, resolve them too
+      if (properties && typeof value === "object" && value !== null) {
+        return resolveNestedProperties(keyName, value, properties, context);
+      }
+      return value;
     }
 
     const value = resolveLayerValue(layer, context);
@@ -363,14 +475,20 @@ export function resolveKey(keyName, schema, context) {
     if (value === undefined || value === null || value === "") continue;
 
     // Apply cast — converts value or returns undefined to skip
+    let resolved;
     if (layer.cast && typeof layer.cast === "function") {
       const casted = layer.cast(value, context);
       if (casted === undefined) continue;
-      return casted;
+      resolved = casted;
+    } else {
+      resolved = value;
     }
 
-    // No cast — return raw value
-    return value;
+    // If this is an object with nested property layers, resolve them too
+    if (properties && typeof resolved === "object" && resolved !== null) {
+      return resolveNestedProperties(keyName, resolved, properties, context);
+    }
+    return resolved;
   }
 
   // No layer matched — return undefined (should not happen if schema has a default)
@@ -389,6 +507,38 @@ export function resolveAll(schema, context) {
 
   for (const [keyName, keySchema] of Object.entries(schema)) {
     result[keyName] = resolveKey(keyName, keySchema, context);
+  }
+
+  return result;
+}
+
+/**
+ * Resolve extension config keys using their registered schemas.
+ * Each extension key is resolved through its layers (config > env > default).
+ * The resolved values are merged into the existing config object.
+ *
+ * @param {Array<{key: string, defaults: *, schema?: Object, layers?: Array}>} extParams
+ *   Config params from ConfigRegistry, each with optional schema and layers.
+ * @param {object} context - The resolution context (cli, config, provider, etc.).
+ * @returns {object} Object with resolved extension keys (only those with layers).
+ */
+export function resolveExtensionConfig(extParams, context) {
+  const result = {};
+
+  for (const param of extParams) {
+    if (!param.layers) continue;
+
+    // Build a compile schema entry from the param's layers and schema
+    const schemaEntry = compileSchemaKey({
+      type: param.schema?.type || "object",
+      layers: param.layers,
+      properties: param.schema?.properties,
+    });
+
+    const resolved = resolveKey(param.key, schemaEntry, context);
+    if (resolved !== undefined) {
+      result[param.key] = resolved;
+    }
   }
 
   return result;

@@ -57,8 +57,6 @@ The foundation for the extension architecture. `HookSystem` class with `on()`, `
 
 **CLI:** `CLI_SUBCOMMANDS_REGISTER`, `CLI_ARGS_PARSED`
 
-**Compaction:** `COMPACT_STRATEGY_LIST`, `COMPACT_STRATEGY_SET`
-
 **Model:** `MODEL_CHANGE`
 
 **Input:** `INPUT`
@@ -81,7 +79,7 @@ Discovers, loads, and manages extensions. Key exports:
 - `resolveExtensionPath(spec)` — resolves "builtins" or path specs to absolute directories
 - `LOAD_ORDER` — constants for extension load ordering (REFRESH: 0, CORE_TOOLS: 1, CLI: 2, DEFAULT: 10)
 - `registerExtensionMetadata(config, configRegistry, cliSubcommandRegistry)` — reads extension.json metadata, auto-registers configSchema defaults
-- `extractSchemaDefaults(schema, configKey)` — extracts defaults from JSON Schema as config params
+- `extractSchemaDefaults(schema)` — extracts defaults from JSON Schema as config params
 
 ### Agent (`src/core/agent.js`)
 Minimal Agent class that runs the LLM loop and delegates behavior to hooks. Key features:
@@ -136,12 +134,17 @@ Tool definition helpers and utilities. Key exports:
 - `toolResult(result, toolName)` — resolves tool result to string
 - `truncateOutput(text, maxLines)` — truncates output
 - `generateDiff(oldText, newText, maxLines)` — simple unified diff
-- `writeFileWithParents(filePath, content)` — writes file with parent dirs
-- `validateCwdBoundary(filePath, cwdBoundary)` — path safety check
-- `resolvePath(filePath, cwdBoundary, workspaceRoot)` — path resolution with safety
 - `parseToolInput(input)` — safer argument parsing returning null on failure
 - `defaultCallDisplay(input, templateFn, options)` — default display formatter for tools
 - `ToolContext` — context object for tool execution (defined in `src/core/extensions/tool-context.js`)
+
+### File Utilities (`src/utils/file-utils.js`)
+File I/O and path resolution helpers. Key exports:
+- `writeFileWithParents(filePath, content)` — writes file with parent dirs
+- `validateCwdBoundary(filePath, cwdBoundary)` — path safety check
+- `resolvePath(filePath, cwdBoundary, workspaceRoot)` — path resolution with safety
+- `resolvePathAndValidate(requested, cwdBoundary)` — resolves and validates a path
+- `parseFrontMatter(content)` — extracts YAML front matter from markdown
 
 ### Logger (`src/core/logger.js`)
 Centralized, swappable logging via the hook system. Singleton pattern with pre-init buffering. Key exports:
@@ -246,7 +249,7 @@ Each extension has:
 | `fetch-tool` | Fetch tool -- make HTTP requests |
 | `question-tool` | Question tool -- ask interactive questions |
 | `model-switch` | Model switching tool + `/model` slash commands |
-| `compaction` | Compaction strategies: summarize, summarize-short, drop, token-aware |
+| `compaction` | Compaction strategies: summarize, summarize-short, drop, token-aware, trim |
 | `mcp-client` | MCP server connections (HTTP + stdio) |
 | `skills` | Skills discovery and loading |
 | `prompts` | Prompt template loading |

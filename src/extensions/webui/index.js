@@ -1,7 +1,6 @@
 // WebUI Extension
 // Provides a full web interface for agent interaction using the websocket extension.
-// Registers the "webui" subcommand which starts Bun.serve() with static files,
-// login endpoint, and WebSocket upgrade.
+// Registers the "webui" subcommand which starts server.
 
 import path from "node:path";
 import { fileURLToPath } from "node:url";

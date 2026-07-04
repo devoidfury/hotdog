@@ -1,65 +1,12 @@
-// WebUI server — Bun.serve() with HTTP routing and WebSocket upgrade.
-// Owned by the webui extension. Uses createWsServer() from the websocket extension.
+// WebUI server — UI over HTTP with WebSockets.
 
-import path from "node:path";
+import { createHttpApp, serveStatic } from "../../utils/index.js";
 import { createWsServer } from "../websocket/server.js";
 import { createAuthMiddleware } from "../websocket/auth.js";
 
-// ── Static file serving ─────────────────────────────────────────────────────
-
-/**
- * MIME types for static file serving.
- */
-const MIME_TYPES = {
-  ".html": "text/html",
-  ".css": "text/css",
-  ".js": "application/javascript",
-  ".json": "application/json",
-  ".png": "image/png",
-  ".svg": "image/svg+xml",
-  ".ico": "image/x-icon",
-  ".woff2": "font/woff2",
-};
-
-/**
- * Serve a static file from the UI directory.
- */
-async function serveStaticFile(urlPath, documentRoot) {
-  // Normalize path — resolve to documentRoot, prevent directory traversal
-  const relPath = urlPath === "/" ? "/index.html" : urlPath;
-  const safePath = relPath.split("?").shift().split("#").shift();
-  const decoded = decodeURIComponent(safePath);
-
-  // Simple guard — only allow paths within documentRoot
-  const resolved = path.resolve(documentRoot, decoded);
-  if (!resolved.startsWith(path.resolve(documentRoot))) {
-    return new Response("Forbidden", { status: 403 });
-  }
-
-  const ext = decoded.match(/\.([a-z0-9]+)$/i);
-  const contentType = ext
-    ? MIME_TYPES[ext[0]] || "application/octet-stream"
-    : "text/html";
-
-  try {
-    const file = Bun.file(documentRoot + decoded);
-    const exists = await file.exists();
-    if (!exists) {
-      return new Response("Not found", { status: 404 });
-    }
-    return new Response(file, {
-      headers: { "Content-Type": contentType },
-    });
-  } catch {
-    return new Response("Internal error", { status: 500 });
-  }
-}
-
-// ── Server Factory ───────────────────────────────────────────────────────────
-
 /**
  * Create and start the webui server.
- * Owns Bun.serve(). Uses websocket extension for WS handling and auth.
+ * Uses websocket extension for WS handling and auth.
  *
  * @param {Object} core - The core object
  * @param {Object} config - Webui-specific config
@@ -67,15 +14,8 @@ async function serveStaticFile(urlPath, documentRoot) {
  * @returns {Promise<Object>} { server, wsServer, authMiddleware }
  */
 export async function createWebuiServer(core, config, uiDir) {
-  const {
-    port = 3000,
-    host = "0.0.0.0",
-    apiKey = null,
-    sessionTokenTtlMin = 1440,
-  } = config;
+  const { port, host, apiKey, sessionTokenTtlMin } = config;
 
-  // API key is resolved declaratively via extension.json config layers —
-  // no imperative env var fallback needed here.
   if (!apiKey) {
     throw new Error(
       "No API key configured. Set webui.apiKey in config or HOTDOG_WEBUI_API_KEY env var.",
@@ -99,77 +39,15 @@ export async function createWebuiServer(core, config, uiDir) {
   authMiddleware.startCleanup();
   wsServer.startCleanupLoop();
 
-  // ── Bun.serve ────────────────────────────────────────────────────────────
+  const app = createHttpApp();
 
-  const server = Bun.serve({
+  // Start the server — app.listen() wraps Bun.serve({ fetch: app.handler, ... })
+  const server = app.listen({
     port,
     hostname: host,
-
-    async fetch(req, server) {
-      const url = new URL(req.url);
-      const method = req.method;
-
-      // ── Route: POST /login ──────────────────────────────────────────
-      if (method === "POST" && url.pathname === "/login") {
-        return authMiddleware.loginHandler(req);
-      }
-
-      // ── Route: GET /verify ───────────────────────────────────────────
-      if (method === "GET" && url.pathname === "/verify") {
-        const token = url.searchParams.get("token");
-        const valid = token ? authMiddleware.validateToken(token) : false;
-        if (valid) {
-          return new Response(JSON.stringify({ valid: true }), {
-            status: 200,
-            headers: { "Content-Type": "application/json" },
-          });
-        }
-        return new Response(JSON.stringify({ valid: false }), {
-          status: 401,
-          headers: { "Content-Type": "application/json" },
-        });
-      }
-
-      // ── Route: WS upgrade ───────────────────────────────────────────
-      if (url.pathname === "/ws") {
-        // Check auth token from query param
-        const token = url.searchParams.get("token");
-        if (authMiddleware && token) {
-          if (!authMiddleware.validateToken(token)) {
-            return new Response(JSON.stringify({ error: "Invalid token" }), {
-              status: 401,
-              headers: { "Content-Type": "application/json" },
-            });
-          }
-        } else if (authMiddleware && !token) {
-          return new Response(
-            JSON.stringify({
-              error: "Token required. Use ?token= in WebSocket URL",
-            }),
-            { status: 401, headers: { "Content-Type": "application/json" } },
-          );
-        }
-
-        // Upgrade to WebSocket — pass token via ws.data
-        const upgraded = server.upgrade(req, {
-          data: { token, url: req.url },
-        });
-        if (!upgraded) {
-          return new Response("Upgrade failed", { status: 400 });
-        }
-        // Return undefined — Bun.serve handles the rest via websocket handlers
-        return;
-      }
-
-      // ── Route: Static files ──────────────────────────────────────────
-      return serveStaticFile(url.pathname, uiDir);
-    },
-
     // WebSocket handlers
     websocket: {
       open(ws) {
-        // ws.data contains { token, url } from the upgrade
-        // Create a session for this connection via wsServer
         const { url } = ws.data;
         const req = { url, headers: { host: "localhost" } };
         wsServer.onUpgrade(req, ws);
@@ -182,6 +60,79 @@ export async function createWebuiServer(core, config, uiDir) {
       },
     },
   });
+
+  // Custom 404
+  app.setNotFoundHandler((req, res) => {
+    res.statusCode = 404;
+    res.end("Not found");
+  });
+
+  // POST /login — authenticate and return session token
+  // Delegates to authMiddleware.loginHandler, then converts Bun Response
+  // to the Express-like res helper.
+  app.post("/login", async (req, res) => {
+    // Reconstruct a Bun Request from the Express-like req for loginHandler
+    const loginReq = new Request(req.url, {
+      method: "POST",
+      headers: req.headers,
+      body: req.body,
+    });
+    const loginResp = await authMiddleware.loginHandler(loginReq);
+    const text = await loginResp.text();
+    res
+      .status(loginResp.status)
+      .setHeader(
+        "Content-Type",
+        loginResp.headers.get("Content-Type") || "application/json",
+      )
+      .send(text);
+  });
+
+  // GET /verify — validate auth token
+  app.get("/verify", (req, res) => {
+    const token = req.query.token;
+    const valid = token ? authMiddleware.validateToken(token) : false;
+    if (valid) {
+      res.json({ valid: true });
+    } else {
+      res.status(401).json({ valid: false });
+    }
+  });
+
+  // GET /ws - Handles authenticated websocket upgrade
+  app.get("/ws", (req, res) => {
+    const url = new URL(req.url);
+    const token = url.searchParams.get("token");
+
+    if (!token) {
+      res.status(401).json({
+        error: "Token required. Use ?token= in WebSocket URL",
+      });
+      return;
+    }
+
+    if (!authMiddleware.validateToken(token)) {
+      res.status(401).json({ error: "Invalid token" });
+      return;
+    }
+
+    const upgraded = server.upgrade(req.originalRequest, {
+      data: { token, url: req.url },
+    });
+    if (!upgraded) {
+      res.status(400).end("Upgrade failed");
+    }
+    // On success, Bun.serve handles the upgrade — no response to send.
+  });
+
+  // Static files — SPA mode with index.html fallback
+  app.use(
+    serveStatic({
+      root: uiDir,
+      indexHtmlFallback: true,
+      maxAgeSecs: 3600,
+    }),
+  );
 
   console.log(`WebUI server listening on http://${host}:${port}`);
 

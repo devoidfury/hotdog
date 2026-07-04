@@ -23,6 +23,8 @@ That's it. No `bun install` needed -- there are no dependencies. No build step, 
 
 ## Quick Start
 
+I haven't tried it with any cloud service providers yet, just local (llama-swap, llama.cpp, vllm, ds4, ...), but it should work the same way with any openai / chat completions compatible endpoint given the right URL, an API key, and the right model config.
+
 _Note - I wrote this using linux and haven't really tried it on macos or windows. Happy to accept PRs adding support or fixing issues there, if you find any._
 
 ### 1. Configure Your LLM Backend

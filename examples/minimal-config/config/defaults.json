@@ -1,0 +1,57 @@
+{
+  "log_level": "warn",
+  "log_target": "stderr",
+  "default_model": "provider1/mystic-navel",
+  "thinker": " 🧠 ... {}",
+  "toolfmt": " 🔧 {} {}",
+  "hide_tools": true,
+  "show_token_use": true,
+  "skills_path": "/path/to/skills",
+  "extension_paths": ["builtins"],
+  "extension_autoload": true,
+  "default_subcommand": "cli",
+  "chat_timeout_secs": 1200,
+  "profiles": {
+    "default": {
+      "blacklist_tools": ["explore"]
+    }
+  },
+  "agents_md": {
+    "enabled": true,
+    "autoload": false
+  },
+  "mcp_servers": [
+    {
+      "enabled": false,
+      "name": "example",
+      "url": "https://example.com/mcp"
+    }
+  ],
+  "providers": [
+    {
+      "name": "provider1",
+      "url": "http://provider1.localnetwork:9292",
+      "models": [
+        {
+          "name": "mystic-navel",
+          "context-limit": 262144
+        },
+        {
+          "name": "hopus-popus",
+          "context-limit": 262144
+        }
+      ]
+    },
+
+    {
+      "name": "provider2",
+      "url": "http://example.com",
+      "models": [
+        {
+          "name": "g-p-p-d-t",
+          "context-limit": 120000
+        }
+      ]
+    }
+  ]
+}

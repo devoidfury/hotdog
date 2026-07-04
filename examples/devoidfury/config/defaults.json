@@ -13,11 +13,11 @@
   "chat_timeout_secs": 900,
   "profiles": {
     "default": {
-      "blacklist_tools": ["patch", "explore"]
+      "blacklist_tools": ["explore"]
     },
     "explorer": {
       "model": "ai365/lfm2.5-8b-a1b",
-      "blacklist_tools": ["patch", "write", "model", "explore"]
+      "blacklist_tools": ["write", "model", "explore"]
     },
     "generate": {
       "model": "ai365/qwen3.6-35b:general"

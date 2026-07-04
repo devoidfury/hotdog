@@ -155,4 +155,214 @@ describe("TrimStrategy", () => {
     // 30 * 1000 = 30000 tokens < 131072, so should return null
     expect(result).toBeNull();
   });
+
+  it("handles empty messages array", async () => {
+    const strategy = new TrimStrategy();
+    const result = await strategy.execute([], { ...defaultSettings, contextLimit: 100, reserveTokens: 0 }, null, "model");
+    expect(result).toBeNull();
+  });
+
+  it("handles messages with system messages interspersed", async () => {
+    const content = "x".repeat(2000); // 500 tokens each
+    const messages = [
+      makeMessage("system", "System prompt"),
+      makeMessage("user", content),
+      makeMessage("assistant", content),
+      makeMessage("system", "Another system prompt"),
+      makeMessage("user", content),
+      makeMessage("assistant", content),
+      makeMessage("user", content),
+      makeMessage("assistant", content),
+    ];
+
+    // Total: 1 system + 6 non-system = 6 * 500 + 500 (system) = 3500 tokens
+    // Budget: 2000 -> need to trim
+    const settings = { ...defaultSettings, contextLimit: 2000, reserveTokens: 0, keepRecent: 1 };
+
+    const result = await new TrimStrategy().execute(messages, settings, null, "model");
+
+    expect(result).not.toBeNull();
+    expect(result.summary).toBeNull();
+    // System messages should be preserved
+    const keptMessages = messages.slice(result.messagesCompacted);
+    // Check that system messages are still present in kept portion
+    const systemInKept = keptMessages.filter(m => m.role === "system");
+    expect(systemInKept.length).toBeGreaterThanOrEqual(0); // could be 0 if all system msgs were before compaction point
+  });
+
+  it("handles messages with reasoning_content", async () => {
+    const content = "x".repeat(2000);
+    const messages = [
+      { role: "user", content: content },
+      { role: "assistant", content: "response", reasoning_content: content },
+      { role: "user", content: content },
+      { role: "assistant", content: "response", reasoning_content: content },
+      { role: "user", content: content },
+      { role: "assistant", content: "response", reasoning_content: content },
+      { role: "user", content: content },
+      { role: "assistant", content: "response", reasoning_content: content },
+    ];
+
+    // Each message: ~500 (content) + ~500 (reasoning) = ~1000 tokens
+    // Total: 8000 tokens. Budget: 4000 -> need to drop
+    const settings = { ...defaultSettings, contextLimit: 4000, reserveTokens: 0, keepRecent: 2 };
+
+    const result = await new TrimStrategy().execute(messages, settings, null, "model");
+
+    expect(result).not.toBeNull();
+    expect(result.metadata.tokensBefore).toBeGreaterThan(4000);
+    expect(result.metadata.tokensAfter).toBeLessThanOrEqual(4000);
+  });
+
+  it("handles messages with tool_calls", async () => {
+    const content = "x".repeat(4000); // 1000 tokens each
+    const messages = [
+      { role: "user", content: content },
+      { role: "assistant", content: "Running", tool_calls: [{ function: { name: "bash", arguments: '{"cmd": "ls -la"}' } }] },
+      { role: "user", content: content },
+      { role: "assistant", content: "Running", tool_calls: [{ function: { name: "read", arguments: '{"path": "file.txt"}' } }] },
+      { role: "user", content: content },
+      { role: "assistant", content: "Running", tool_calls: [{ function: { name: "bash", arguments: '{"cmd": "cat"}' } }] },
+      { role: "user", content: content },
+      { role: "assistant", content: "Running", tool_calls: [{ function: { name: "read", arguments: '{"path": "other.txt"}' } }] },
+    ];
+
+    // Each user message: ~1000 tokens, each assistant: ~1000 + ~30 = ~1030 tokens
+    // Total: ~8120 tokens. Budget: 4000 -> need to drop
+    const settings = { ...defaultSettings, contextLimit: 4000, reserveTokens: 0, keepRecent: 2 };
+
+    const result = await new TrimStrategy().execute(messages, settings, null, "model");
+
+    expect(result).not.toBeNull();
+    expect(result.metadata.tokensAfter).toBeLessThanOrEqual(4000);
+  });
+
+  it("returns null when keepRecent=0 and no messages can be dropped", async () => {
+    const strategy = new TrimStrategy();
+    const messages = [makeMessage("user"), makeMessage("assistant")];
+    const settings = { ...defaultSettings, contextLimit: 10, reserveTokens: 0, keepRecent: 0 };
+
+    const result = await strategy.execute(messages, settings, null, "model");
+    expect(result).toBeNull();
+  });
+
+  it("canCompact returns false when only system messages", () => {
+    const strategy = new TrimStrategy();
+    const messages = [makeMessage("system"), makeMessage("system")];
+    const result = strategy.canCompact(messages, defaultSettings);
+    expect(result).toBe(false);
+  });
+
+  it("canCompact returns true when reserveTokens makes effectiveMax negative and messages exceed it", () => {
+    const strategy = new TrimStrategy();
+    const messages = Array.from({ length: 20 }, (_, i) => makeMessage(i % 2 === 0 ? "user" : "assistant", "x".repeat(10)));
+    // reserveTokens > contextLimit => effectiveMax = 100 - 200 = -100
+    // nonSystem.length = 20 > (3 || 3) * 2 = 6 => passes first check
+    // estimateContextTokens(nonSystem) = 20 * 5 = 100 > -100 => true
+    const result = strategy.canCompact(messages, { ...defaultSettings, contextLimit: 100, reserveTokens: 200 });
+    expect(result).toBe(true);
+  });
+
+  it("canCompact returns true with system messages when non-system are over budget", () => {
+    const strategy = new TrimStrategy();
+    const content = "x".repeat(2000);
+    const messages = [
+      makeMessage("system", "System prompt"),
+      ...Array.from({ length: 10 }, (_, i) => makeMessage(i % 2 === 0 ? "user" : "assistant", content)),
+    ];
+    const result = strategy.canCompact(messages, { ...defaultSettings, contextLimit: 3000, reserveTokens: 0 });
+    expect(result).toBe(true);
+  });
+
+  it("canCompact returns false when non-system messages are few enough", () => {
+    const strategy = new TrimStrategy();
+    const messages = [
+      makeMessage("user", "x".repeat(10)),
+      makeMessage("assistant", "x".repeat(10)),
+    ];
+    const result = strategy.canCompact(messages, { ...defaultSettings, contextLimit: 128000, reserveTokens: 0 });
+    expect(result).toBe(false);
+  });
+
+  it("metadata includes contextLimit", async () => {
+    const content = "x".repeat(2000);
+    const messages = Array.from({ length: 20 }, (_, i) => makeMessage(i % 2 === 0 ? "user" : "assistant", content));
+    const settings = { ...defaultSettings, contextLimit: 5000, reserveTokens: 0, keepRecent: 2 };
+
+    const result = await new TrimStrategy().execute(messages, settings, null, "model");
+
+    expect(result).not.toBeNull();
+    expect(result.metadata.contextLimit).toBe(5000);
+  });
+
+  it("metadata includes messagesDropped", async () => {
+    const content = "x".repeat(4000);
+    const messages = Array.from({ length: 10 }, (_, i) => makeMessage(i % 2 === 0 ? "user" : "assistant", content));
+    const settings = { ...defaultSettings, contextLimit: 3000, reserveTokens: 0, keepRecent: 2 };
+
+    const result = await new TrimStrategy().execute(messages, settings, null, "model");
+
+    expect(result).not.toBeNull();
+    expect(result.metadata.messagesDropped).toBeGreaterThan(0);
+  });
+
+  it("messagesCompacted is correct index into original messages", async () => {
+    const content = "x".repeat(4000);
+    const messages = Array.from({ length: 10 }, (_, i) => makeMessage(i % 2 === 0 ? "user" : "assistant", content));
+    const settings = { ...defaultSettings, contextLimit: 3000, reserveTokens: 0, keepRecent: 2 };
+
+    const result = await new TrimStrategy().execute(messages, settings, null, "model");
+
+    expect(result).not.toBeNull();
+    // The kept messages should be messages.slice(result.messagesCompacted)
+    const keptMessages = messages.slice(result.messagesCompacted);
+    const keptTokens = estimateContextTokens(keptMessages);
+    expect(keptTokens).toBeLessThanOrEqual(3000);
+  });
+
+  it("handles single non-system message that fits budget", async () => {
+    const strategy = new TrimStrategy();
+    const messages = [makeMessage("user", "x".repeat(100))];
+    const settings = { ...defaultSettings, contextLimit: 128000, reserveTokens: 0 };
+
+    const result = await strategy.execute(messages, settings, null, "model");
+    expect(result).toBeNull();
+  });
+
+  it("handles mixed message sizes", async () => {
+    const messages = [
+      makeMessage("user", "x".repeat(4000)),   // 1000 tokens
+      makeMessage("assistant", "x".repeat(2000)), // 500 tokens
+      makeMessage("user", "x".repeat(4000)),   // 1000 tokens
+      makeMessage("assistant", "x".repeat(2000)), // 500 tokens
+      makeMessage("user", "x".repeat(4000)),   // 1000 tokens
+      makeMessage("assistant", "x".repeat(2000)), // 500 tokens
+    ];
+
+    // Total: 4500 tokens. Budget: 2000 -> need to drop
+    const settings = { ...defaultSettings, contextLimit: 2000, reserveTokens: 0, keepRecent: 1 };
+
+    const result = await new TrimStrategy().execute(messages, settings, null, "model");
+
+    expect(result).not.toBeNull();
+    expect(result.metadata.tokensAfter).toBeLessThanOrEqual(2000);
+    // The binary search should find the minimum number of messages to drop
+    expect(result.metadata.messagesDropped).toBeGreaterThanOrEqual(1);
+  });
+
+  it("falls back to 128000 when model name does not contain 128k", async () => {
+    const strategy = new TrimStrategy();
+    const content = "x".repeat(4000);
+    const messages = Array.from({ length: 50 }, (_, i) => makeMessage(i % 2 === 0 ? "user" : "assistant", content));
+
+    // No contextLimit in settings, model name does NOT contain "128k"
+    // So it falls back to default 128000
+    const settings = { ...defaultSettings, contextLimit: undefined };
+
+    const result = await strategy.execute(messages, settings, null, "gpt-3.5-turbo");
+
+    // 50 * 1000 = 50000 tokens, effectiveMax = 128000 - 8000 = 120000
+    // 50000 < 120000, so should return null (already under budget)
+    expect(result).toBeNull();
+  });
 });

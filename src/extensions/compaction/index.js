@@ -44,12 +44,12 @@ export function create(core) {
   if (!settings.enabled) return null;
 
   // Register built-in strategies
-  const registry = new CompactionStrategyRegistry();
-  registry.register(new SummarizeStrategy());
-  registry.register(new DropStrategy());
-  registry.register(new SummarizeShortStrategy());
-  registry.register(new TokenAwareStrategy());
-  registry.register(new TrimStrategy());
+  const strategyRegistry = new CompactionStrategyRegistry();
+  strategyRegistry.register(new SummarizeStrategy());
+  strategyRegistry.register(new DropStrategy());
+  strategyRegistry.register(new SummarizeShortStrategy());
+  strategyRegistry.register(new TokenAwareStrategy());
+  strategyRegistry.register(new TrimStrategy());
 
   return {
     hooks: {
@@ -75,7 +75,7 @@ export function create(core) {
         if (estimatedTokens <= contextLimit - reserveTokens) return;
 
         // Get the strategy
-        const strategy = registry.get(settings.strategy) || registry.getDefault();
+        const strategy = strategyRegistry.get(settings.strategy) || strategyRegistry.getDefault();
         if (!strategy) return;
 
         // Check if compaction is applicable
@@ -125,7 +125,7 @@ export function create(core) {
             if (action === 'help') {
               return { content: `Usage: /compact:strategy [list|set <name>|help]\n  list   - Show available strategies\n  set    - Set the current strategy\n  help   - Show this help` };
             } else if (action === 'list' || action === '') {
-              const strategies = registry.getAll().map(s => ({
+              const strategies = strategyRegistry.getAll().map(s => ({
                 name: s.name,
                 description: s.description,
               }));
@@ -146,14 +146,14 @@ export function create(core) {
     },
 
     // Expose for external use
-    registry,
+    registry: strategyRegistry,
     settings,
 
     /**
      * Get all available strategies with descriptions.
      */
     getStrategyList() {
-      return registry.getAll().map(s => ({
+      return strategyRegistry.getAll().map(s => ({
         name: s.name,
         description: s.description,
       }));
@@ -181,7 +181,7 @@ export function create(core) {
     }
 
     // Get the strategy
-    const strategy = registry.get(settings.strategy) || registry.getDefault();
+    const strategy = strategyRegistry.get(settings.strategy) || strategyRegistry.getDefault();
     if (!strategy) {
       return { error: 'No compaction strategy available.' };
     }

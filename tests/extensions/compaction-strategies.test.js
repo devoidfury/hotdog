@@ -48,6 +48,45 @@ describe("estimateMessageTokens", () => {
     expect(estimateMessageTokens({ role: "tool", content: "Output here" })).toBeGreaterThan(0);
     expect(estimateMessageTokens({ role: "system", content: "You are helpful" })).toBeGreaterThan(0);
   });
+
+  it("estimates tokens for assistant with multiple tool calls", () => {
+    const msg = {
+      role: "assistant",
+      content: "Running two commands",
+      tool_calls: [
+        { function: { name: "bash", arguments: '{"cmd": "ls"}' } },
+        { function: { name: "read", arguments: '{"path": "file.txt"}' } },
+      ],
+    };
+    const tokens = estimateMessageTokens(msg);
+    const chars = "Running two commands".length + "bash".length + '{"cmd": "ls"}'.length + "read".length + '{"path": "file.txt"}'.length;
+    expect(tokens).toBe(Math.ceil(chars / 4));
+  });
+
+  it("estimates tokens for assistant without reasoning or tool calls", () => {
+    const msg = { role: "assistant", content: "Simple response" };
+    const tokens = estimateMessageTokens(msg);
+    expect(tokens).toBe(Math.ceil("Simple response".length / 4));
+  });
+
+  it("estimates tokens for message with unknown role", () => {
+    const msg = { role: "unknown", content: "something" };
+    const tokens = estimateMessageTokens(msg);
+    expect(tokens).toBeGreaterThan(0);
+  });
+
+  it("estimates tokens for assistant with empty reasoning_content", () => {
+    const msg = { role: "assistant", content: "Hi", reasoning_content: "" };
+    const tokens = estimateMessageTokens(msg);
+    // Empty reasoning_content should add 0 chars
+    expect(tokens).toBe(Math.ceil("Hi".length / 4));
+  });
+
+  it("estimates tokens for assistant with no tool_calls property", () => {
+    const msg = { role: "assistant", content: "Hi" };
+    const tokens = estimateMessageTokens(msg);
+    expect(tokens).toBe(Math.ceil("Hi".length / 4));
+  });
 });
 
 describe("estimateContextTokens", () => {
@@ -62,6 +101,25 @@ describe("estimateContextTokens", () => {
 
   it("returns 0 for empty array", () => {
     expect(estimateContextTokens([])).toBe(0);
+  });
+
+  it("handles messages with mixed roles", () => {
+    const messages = [
+      { role: "system", content: "System prompt" },
+      { role: "user", content: "User message" },
+      { role: "assistant", content: "Assistant response" },
+      { role: "tool", content: "Tool output" },
+    ];
+    const total = messages.reduce((sum, msg) => sum + estimateMessageTokens(msg), 0);
+    expect(estimateContextTokens(messages)).toBe(total);
+  });
+
+  it("handles messages with tool_calls", () => {
+    const messages = [
+      { role: "assistant", content: "Let me check", tool_calls: [{ function: { name: "bash", arguments: '{"cmd": "ls -la"}' } }] },
+    ];
+    const tokens = estimateContextTokens(messages);
+    expect(tokens).toBeGreaterThan(Math.ceil("Let me check".length / 4));
   });
 });
 
@@ -85,6 +143,31 @@ describe("shouldCompact", () => {
       { role: "assistant", content: "y".repeat(200) },
     ];
     expect(shouldCompact(messages, 100, 50)).toBe(true);
+  });
+
+  it("returns false when exactly at limit", () => {
+    // Create messages that total exactly contextLimit - reserveTokens
+    const content = "x".repeat(400); // 100 tokens each
+    const messages = [
+      { role: "user", content: content },
+      { role: "assistant", content: content },
+    ];
+    // Total: 200 tokens. Limit: 200, reserve: 0 => 200 - 0 = 200, not > 200
+    expect(shouldCompact(messages, 200, 0)).toBe(false);
+  });
+
+  it("returns true when just over limit", () => {
+    const content = "x".repeat(404); // ~101 tokens each
+    const messages = [
+      { role: "user", content: content },
+      { role: "assistant", content: content },
+    ];
+    // Total: ~202 tokens. Limit: 200, reserve: 0 => 202 > 200
+    expect(shouldCompact(messages, 200, 0)).toBe(true);
+  });
+
+  it("returns false for empty messages", () => {
+    expect(shouldCompact([], 100, 50)).toBe(false);
   });
 });
 
@@ -129,6 +212,38 @@ describe("findFirstKeptIndex", () => {
     ];
     expect(findFirstKeptIndex(messages, 1)).toBe(0);
   });
+
+  it("returns correct index when system messages are interspersed", () => {
+    const messages = [
+      { role: "user", content: "1" },
+      { role: "system", content: "mid-prompt" },
+      { role: "assistant", content: "2" },
+      { role: "user", content: "3" },
+      { role: "assistant", content: "4" },
+    ];
+    // Non-system: user(0), assistant(2), user(3), assistant(4) = 4 messages
+    // keepRecent=1 => need 2 from end => keep assistant(4), user(3) => firstKept = 4
+    expect(findFirstKeptIndex(messages, 1)).toBe(4);
+  });
+
+  it("returns 0 for empty messages array", () => {
+    expect(findFirstKeptIndex([], 1)).toBe(0);
+  });
+
+  it("returns correct index for keepRecent=3", () => {
+    const messages = [
+      { role: "user", content: "1" },
+      { role: "assistant", content: "2" },
+      { role: "user", content: "3" },
+      { role: "assistant", content: "4" },
+      { role: "user", content: "5" },
+      { role: "assistant", content: "6" },
+      { role: "user", content: "7" },
+      { role: "assistant", content: "8" },
+    ];
+    // 8 non-system messages, keepRecent=3 => need 6 from end => firstKept = 3
+    expect(findFirstKeptIndex(messages, 3)).toBe(3);
+  });
 });
 
 describe("serializeConversation", () => {
@@ -165,6 +280,71 @@ describe("serializeConversation", () => {
     const serialized = serializeConversation(messages);
     expect(serialized).not.toContain("[System]");
     expect(serialized).toContain("[User]: Hello");
+  });
+
+  it("includes reasoning_content in serialized conversation", () => {
+    const messages = [
+      { role: "assistant", content: "I think the answer is 42", reasoning_content: "Let me calculate this step by step..." },
+      { role: "user", content: "What is 6 * 7?" },
+    ];
+
+    const serialized = serializeConversation(messages);
+    expect(serialized).toContain("[Assistant thinking]");
+    expect(serialized).toContain("Let me calculate this step by step...");
+    expect(serialized).toContain("[Assistant]: I think the answer is 42");
+  });
+
+  it("includes both content and tool_calls for assistant", () => {
+    const messages = [
+      { role: "assistant", content: "I'll run these commands", tool_calls: [
+        { function: { name: "bash", arguments: '{"cmd": "ls"}' } },
+        { function: { name: "read", arguments: '{"path": "file.txt"}' } },
+      ]},
+    ];
+
+    const serialized = serializeConversation(messages);
+    expect(serialized).toContain("[Assistant]: I'll run these commands");
+    expect(serialized).toContain("[Assistant tool calls]");
+    expect(serialized).toContain("bash");
+    expect(serialized).toContain("read");
+  });
+
+  it("returns empty string for empty messages", () => {
+    expect(serializeConversation([])).toBe("");
+  });
+
+  it("handles unknown role gracefully", () => {
+    const messages = [{ role: "custom", content: "custom message" }];
+    const serialized = serializeConversation(messages);
+    expect(serialized).toContain("[custom]: custom message");
+  });
+
+  it("handles assistant with only reasoning_content (no content)", () => {
+    const messages = [
+      { role: "assistant", reasoning_content: "Thinking..." },
+    ];
+    const serialized = serializeConversation(messages);
+    expect(serialized).toContain("[Assistant thinking]: Thinking...");
+    // Should not have "[Assistant]:" since content is empty
+    expect(serialized).not.toContain("[Assistant]: ");
+  });
+
+  it("handles assistant with only tool_calls (no content)", () => {
+    const messages = [
+      { role: "assistant", tool_calls: [{ function: { name: "bash", arguments: '{"cmd": "echo"}' } }] },
+    ];
+    const serialized = serializeConversation(messages);
+    expect(serialized).toContain("[Assistant tool calls]");
+    expect(serialized).not.toContain("[Assistant]: ");
+  });
+
+  it("handles tool result under truncation threshold", () => {
+    const messages = [
+      { role: "tool", content: "short output" },
+    ];
+    const serialized = serializeConversation(messages);
+    expect(serialized).toBe("[Tool result]: short output");
+    expect(serialized).not.toContain("truncated");
   });
 });
 
@@ -216,6 +396,48 @@ describe("compactMessages", () => {
 
     await expect(compactMessages(messages, llmChat, "model", { enabled: true, keepRecent: 1 }))
       .rejects.toThrow("Summarization failed: API error");
+  });
+
+  it("skips system messages when compacting", async () => {
+    const messages = [
+      { role: "system", content: "System prompt" },
+      { role: "user", content: "Hello" },
+      { role: "assistant", content: "Hi there" },
+      { role: "user", content: "How are you?" },
+    ];
+
+    let capturedMessages = null;
+    const llmChat = async (msgs) => {
+      capturedMessages = msgs;
+      return "Summary";
+    };
+
+    const result = await compactMessages(messages, llmChat, "model", { enabled: true, keepRecent: 1 });
+
+    expect(result).not.toBeNull();
+    // System message should be excluded from the conversation sent to LLM
+    for (const msg of capturedMessages) {
+      if (msg.role === "user") {
+        expect(msg.content).not.toContain("System prompt");
+      }
+    }
+  });
+
+  it("passes model to llmChat", async () => {
+    const messages = [
+      { role: "user", content: "Hello" },
+      { role: "assistant", content: "Hi there" },
+      { role: "user", content: "How are you?" },
+    ];
+
+    let capturedModel = null;
+    const llmChat = async (msgs, model) => {
+      capturedModel = model;
+      return "Summary";
+    };
+
+    await compactMessages(messages, llmChat, "my-custom-model", { enabled: true, keepRecent: 1 });
+    expect(capturedModel).toBe("my-custom-model");
   });
 });
 
@@ -294,6 +516,91 @@ describe("SummarizeShortStrategy", () => {
 
     expect(result.metadata.tokensBefore).toBeGreaterThan(0);
     expect(result.metadata.tokensAfter).toBeGreaterThan(0);
+  });
+
+  it("uses the short prompt template (not the full template)", async () => {
+    const strategy = new SummarizeShortStrategy();
+    const messages = [
+      { role: "user", content: "Hello" },
+      { role: "assistant", content: "Hi there" },
+      { role: "user", content: "How are you?" },
+    ];
+
+    let capturedUserPrompt = null;
+    const llmChat = async (msgs) => {
+      capturedUserPrompt = msgs.find(m => m.role === "user").content;
+      return "summary";
+    };
+
+    await strategy.execute(messages, { keepRecent: 1 }, llmChat, "model");
+
+    // The short prompt should contain "CONCISE" and NOT contain "In Progress" or "Blocked"
+    expect(capturedUserPrompt).toContain("CONCISE");
+    expect(capturedUserPrompt).not.toContain("### Blocked");
+  });
+
+  it("handles messages with reasoning_content", async () => {
+    const strategy = new SummarizeShortStrategy();
+    const messages = [
+      { role: "user", content: "What is 2+2?" },
+      { role: "assistant", content: "4", reasoning_content: "Let me think about this..." },
+      { role: "user", content: "And 3+3?" },
+      { role: "assistant", content: "6", reasoning_content: "Simple math..." },
+    ];
+
+    let capturedMessages = null;
+    const llmChat = async (msgs) => {
+      capturedMessages = msgs;
+      return "summary";
+    };
+
+    const result = await strategy.execute(messages, { keepRecent: 1 }, llmChat, "model");
+
+    expect(result).not.toBeNull();
+    // The serialized conversation should include thinking content
+    const userMsg = capturedMessages.find(m => m.role === "user");
+    expect(userMsg.content).toContain("thinking");
+  });
+
+  it("handles messages with tool_calls", async () => {
+    const strategy = new SummarizeShortStrategy();
+    const messages = [
+      { role: "user", content: "List files" },
+      { role: "assistant", content: "Running ls", tool_calls: [{ function: { name: "bash", arguments: '{"cmd": "ls"}' } }] },
+      { role: "tool", content: "file1.txt", role: "tool" },
+      { role: "user", content: "And now read file1.txt" },
+      { role: "assistant", content: "Reading file", tool_calls: [{ function: { name: "read", arguments: '{"path": "file1.txt"}' } }] },
+    ];
+
+    let capturedMessages = null;
+    const llmChat = async (msgs) => {
+      capturedMessages = msgs;
+      return "summary";
+    };
+
+    const result = await strategy.execute(messages, { keepRecent: 1 }, llmChat, "model");
+
+    expect(result).not.toBeNull();
+    const userMsg = capturedMessages.find(m => m.role === "user");
+    expect(userMsg.content).toContain("tool calls");
+  });
+
+  it("passes model to llmChat", async () => {
+    const strategy = new SummarizeShortStrategy();
+    const messages = [
+      { role: "user", content: "Hello" },
+      { role: "assistant", content: "Hi" },
+      { role: "user", content: "How?" },
+    ];
+
+    let capturedModel = null;
+    const llmChat = async (msgs, model) => {
+      capturedModel = model;
+      return "summary";
+    };
+
+    await strategy.execute(messages, { keepRecent: 1 }, llmChat, "my-model");
+    expect(capturedModel).toBe("my-model");
   });
 });
 
@@ -385,6 +692,174 @@ describe("TokenAwareStrategy", () => {
     expect(result.metadata.targetTokens).toBe(100);
     expect(result.metadata.maxKeepTokens).toBe(50);
   });
+
+  it("uses targetTokens when explicitly provided", async () => {
+    const strategy = new TokenAwareStrategy();
+    const messages = [
+      { role: "user", content: "x".repeat(200) },
+      { role: "assistant", content: "y".repeat(200) },
+      { role: "user", content: "z".repeat(200) },
+      { role: "assistant", content: "w".repeat(200) },
+    ];
+    const llmChat = async () => "summary";
+
+    const result = await strategy.execute(messages, { targetTokens: 50, contextLimit: 150 }, llmChat, "model");
+
+    expect(result).not.toBeNull();
+    expect(result.metadata.targetTokens).toBe(50);
+  });
+
+  it("infers context limit from 32k model name", async () => {
+    const strategy = new TokenAwareStrategy();
+    // Need enough messages to exceed 32k context. Each message ~1250 tokens.
+    // 30 messages = ~37500 tokens > 32768.
+    const bigContent = "x".repeat(5000);
+    const messages = Array.from({ length: 30 }, (_, i) => ({
+      role: i % 2 === 0 ? "user" : "assistant",
+      content: bigContent,
+    }));
+    const llmChat = async () => "summary";
+
+    const result = await strategy.execute(messages, { reserveTokens: 100 }, llmChat, "gpt-3.5-turbo-32k");
+
+    expect(result).not.toBeNull();
+    // contextLimit should be ~32768, so maxKeepTokens = 32768 - 100 = 32668
+    expect(result.metadata.maxKeepTokens).toBe(32668);
+  });
+
+  it("infers context limit from 128k model name", async () => {
+    const strategy = new TokenAwareStrategy();
+    // Need enough messages to exceed 128k context. Each ~1250 tokens.
+    // 110 messages = ~137500 tokens > 131072.
+    const bigContent = "x".repeat(5000);
+    const messages = Array.from({ length: 110 }, (_, i) => ({
+      role: i % 2 === 0 ? "user" : "assistant",
+      content: bigContent,
+    }));
+    const llmChat = async () => "summary";
+
+    const result = await strategy.execute(messages, { reserveTokens: 100 }, llmChat, "gpt-4o-128k");
+
+    expect(result).not.toBeNull();
+    expect(result.metadata.maxKeepTokens).toBe(130972); // 131072 - 100
+  });
+
+  it("falls back to 128000 context limit for unknown model", async () => {
+    const strategy = new TokenAwareStrategy();
+    const bigContent = "x".repeat(5000);
+    const messages = Array.from({ length: 110 }, (_, i) => ({
+      role: i % 2 === 0 ? "user" : "assistant",
+      content: bigContent,
+    }));
+    const llmChat = async () => "summary";
+
+    const result = await strategy.execute(messages, { reserveTokens: 100 }, llmChat, "some-unknown-model");
+
+    expect(result).not.toBeNull();
+    expect(result.metadata.maxKeepTokens).toBe(127900); // 128000 - 100
+  });
+
+  it("skips system messages when counting tokens", async () => {
+    const strategy = new TokenAwareStrategy();
+    // Use small enough messages that at least one fits in maxKeepTokens
+    const messages = [
+      { role: "system", content: "x".repeat(10000) }, // 2500 tokens (skipped)
+      { role: "user", content: "x".repeat(200) },     // 50 tokens
+      { role: "assistant", content: "y".repeat(200) }, // 50 tokens
+      { role: "user", content: "z".repeat(200) },     // 50 tokens
+      { role: "assistant", content: "w".repeat(200) }, // 50 tokens
+    ];
+    const llmChat = async () => "summary";
+
+    // Note: reserveTokens: 0 is treated as falsy, so targetTokens falls back to 16384.
+    // Use targetTokens explicitly to test system message skipping.
+    // maxKeepTokens = 100 - 10 = 90. Non-system: 4 * 50 = 200 > 90 => need compact.
+    // From end: assistant(50) => cumulative=50, fits. lastKeptIndex=4.
+    // user(50): 50+50=100 > 90. break.
+    // lastKeptIndex=4, messagesToCompact=4
+    const result = await strategy.execute(messages, { targetTokens: 10, contextLimit: 100 }, llmChat, "model");
+
+    expect(result).not.toBeNull();
+    expect(result.metadata.maxKeepTokens).toBe(90);
+  });
+
+  it("returns null when cumulative tokens for all non-system messages exceed maxKeepTokens immediately", async () => {
+    const strategy = new TokenAwareStrategy();
+    // Single large message that exceeds maxKeepTokens
+    const messages = [
+      { role: "user", content: "x".repeat(1000) }, // 250 tokens
+    ];
+    const llmChat = async () => "summary";
+
+    const result = await strategy.execute(messages, { reserveTokens: 0, contextLimit: 100 }, llmChat, "model");
+
+    // maxKeepTokens = 100, first message is 250 tokens > 100 => lastKeptIndex stays 0 => return null
+    expect(result).toBeNull();
+  });
+
+  it("canCompact returns false when non-system messages are under budget", () => {
+    const strategy = new TokenAwareStrategy();
+    const messages = [
+      { role: "user", content: "hi" },
+      { role: "assistant", content: "hello" },
+    ];
+    expect(strategy.canCompact(messages, { reserveTokens: 1000, contextLimit: 128000 })).toBe(false);
+  });
+
+  it("canCompact returns true when non-system messages exceed budget", () => {
+    const strategy = new TokenAwareStrategy();
+    const messages = [
+      { role: "user", content: "x".repeat(5000) }, // ~1250 tokens
+      { role: "assistant", content: "y".repeat(5000) }, // ~1250 tokens
+    ];
+    expect(strategy.canCompact(messages, { reserveTokens: 100, contextLimit: 2000 })).toBe(true);
+  });
+
+  it("canCompact ignores system messages", () => {
+    const strategy = new TokenAwareStrategy();
+    const messages = [
+      { role: "system", content: "x".repeat(10000) }, // 2500 tokens
+      { role: "user", content: "hi" },
+      { role: "assistant", content: "hello" },
+    ];
+    // Non-system: 2 + 6 = 8 chars => 2 tokens, well under budget
+    expect(strategy.canCompact(messages, { reserveTokens: 100, contextLimit: 128000 })).toBe(false);
+  });
+
+  it("passes model to llmChat", async () => {
+    const strategy = new TokenAwareStrategy();
+    // Use small enough messages that at least one fits in maxKeepTokens=50
+    const messages = Array.from({ length: 20 }, (_, i) => ({
+      role: i % 2 === 0 ? "user" : "assistant",
+      content: "x".repeat(100), // ~25 tokens each
+    }));
+
+    let capturedModel = null;
+    const llmChat = async (msgs, model) => {
+      capturedModel = model;
+      return "summary";
+    };
+
+    await strategy.execute(messages, { reserveTokens: 100, contextLimit: 150 }, llmChat, "my-model");
+    expect(capturedModel).toBe("my-model");
+  });
+
+  it("uses reserveTokens as targetTokens when targetTokens not set", async () => {
+    const strategy = new TokenAwareStrategy();
+    const messages = Array.from({ length: 20 }, (_, i) => ({
+      role: i % 2 === 0 ? "user" : "assistant",
+      content: "x".repeat(100), // ~25 tokens each
+    }));
+    const llmChat = async () => "summary";
+
+    // targetTokens = 200 (from reserveTokens), contextLimit = 150
+    // maxKeepTokens = 150 - 200 = -50. No messages fit.
+    // Use different values: reserveTokens=50, contextLimit=150 => maxKeepTokens=100
+    const result = await strategy.execute(messages, { reserveTokens: 50, contextLimit: 150 }, llmChat, "model");
+
+    expect(result).not.toBeNull();
+    expect(result.metadata.targetTokens).toBe(50);
+  });
 });
 
 // ── DropStrategy ─────────────────────────────────────────────────────────────
@@ -421,6 +896,137 @@ describe("DropStrategy", () => {
     ];
     const result = await strategy.execute(messages, { keepRecent: 2 }, async () => "summary", "model");
     expect(result).toBeNull();
+  });
+
+  it("handles messages with system messages mixed in", async () => {
+    const strategy = new DropStrategy();
+    const messages = [
+      { role: "system", content: "System prompt" },
+      { role: "user", content: "old1" },
+      { role: "assistant", content: "old2" },
+      { role: "user", content: "recent1" },
+      { role: "assistant", content: "recent2" },
+    ];
+    const llmChat = async () => { throw new Error("Should not be called"); };
+
+    const result = await strategy.execute(messages, { keepRecent: 1 }, llmChat, "model");
+
+    expect(result).not.toBeNull();
+    expect(result.summary).toBeNull();
+    // Should compact past the system message and the first pair
+    expect(result.messagesCompacted).toBeGreaterThan(0);
+  });
+
+  it("handles messages with tool_calls", async () => {
+    const strategy = new DropStrategy();
+    const messages = [
+      { role: "user", content: "List files" },
+      { role: "assistant", content: "Running ls", tool_calls: [{ function: { name: "bash", arguments: '{"cmd": "ls"}' } }] },
+      { role: "tool", content: "file1.txt" },
+      { role: "user", content: "Read file1" },
+      { role: "assistant", content: "Reading", tool_calls: [{ function: { name: "read", arguments: '{"path": "file1.txt"}' } }] },
+    ];
+    const llmChat = async () => { throw new Error("Should not be called"); };
+
+    const result = await strategy.execute(messages, { keepRecent: 1 }, llmChat, "model");
+
+    expect(result).not.toBeNull();
+    expect(result.metadata.tokensBefore).toBeGreaterThan(result.metadata.tokensAfter);
+  });
+
+  it("handles messages with reasoning_content", async () => {
+    const strategy = new DropStrategy();
+    const messages = [
+      { role: "user", content: "What is 2+2?" },
+      { role: "assistant", content: "4", reasoning_content: "Simple math" },
+      { role: "user", content: "And 3+3?" },
+      { role: "assistant", content: "6", reasoning_content: "Easy" },
+    ];
+    const llmChat = async () => { throw new Error("Should not be called"); };
+
+    const result = await strategy.execute(messages, { keepRecent: 1 }, llmChat, "model");
+
+    expect(result).not.toBeNull();
+    expect(result.metadata.tokensBefore).toBeGreaterThan(result.metadata.tokensAfter);
+  });
+
+  it("returns null when all messages are system", async () => {
+    const strategy = new DropStrategy();
+    const messages = [
+      { role: "system", content: "prompt1" },
+      { role: "system", content: "prompt2" },
+    ];
+    const result = await strategy.execute(messages, { keepRecent: 1 }, async () => "summary", "model");
+    expect(result).toBeNull();
+  });
+
+  it("canCompact returns false with few non-system messages", () => {
+    const strategy = new DropStrategy();
+    const messages = [
+      { role: "user", content: "hi" },
+      { role: "assistant", content: "hello" },
+    ];
+    expect(strategy.canCompact(messages, { keepRecent: 3 })).toBe(false);
+  });
+
+  it("canCompact returns true with enough non-system messages", () => {
+    const strategy = new DropStrategy();
+    const messages = [
+      { role: "user", content: "1" },
+      { role: "assistant", content: "2" },
+      { role: "user", content: "3" },
+      { role: "assistant", content: "4" },
+      { role: "user", content: "5" },
+      { role: "assistant", content: "6" },
+    ];
+    expect(strategy.canCompact(messages, { keepRecent: 1 })).toBe(true);
+  });
+
+  it("canCompact ignores system messages", () => {
+    const strategy = new DropStrategy();
+    const messages = [
+      { role: "system", content: "prompt" },
+      { role: "system", content: "prompt2" },
+      { role: "user", content: "hi" },
+      { role: "assistant", content: "hello" },
+    ];
+    expect(strategy.canCompact(messages, { keepRecent: 3 })).toBe(false);
+  });
+
+  it("canCompact with default keepRecent of 3", () => {
+    const strategy = new DropStrategy();
+    // 6 non-system messages > 3*2=6? No, equal, so false
+    const messages = Array.from({ length: 6 }, (_, i) => ({
+      role: i % 2 === 0 ? "user" : "assistant",
+      content: "x",
+    }));
+    expect(strategy.canCompact(messages, {})).toBe(false);
+  });
+
+  it("canCompact with default keepRecent of 3 and 7 non-system messages", () => {
+    const strategy = new DropStrategy();
+    const messages = Array.from({ length: 7 }, (_, i) => ({
+      role: i % 2 === 0 ? "user" : "assistant",
+      content: "x",
+    }));
+    // 7 > 6 => true
+    expect(strategy.canCompact(messages, {})).toBe(true);
+  });
+
+  it("includes correct token metadata", async () => {
+    const strategy = new DropStrategy();
+    const messages = [
+      { role: "user", content: "x".repeat(200) },
+      { role: "assistant", content: "y".repeat(200) },
+      { role: "user", content: "z".repeat(200) },
+      { role: "assistant", content: "w".repeat(200) },
+    ];
+    const llmChat = async () => { throw new Error("Should not be called"); };
+
+    const result = await strategy.execute(messages, { keepRecent: 1 }, llmChat, "model");
+
+    expect(result.metadata.tokensBefore).toBeGreaterThan(0);
+    expect(result.metadata.tokensAfter).toBeLessThan(result.metadata.tokensBefore);
   });
 });
 
@@ -479,6 +1085,130 @@ describe("SummarizeStrategy", () => {
     await expect(strategy.execute(messages, { keepRecent: 1 }, llmChat, "model"))
       .rejects.toThrow("Summarization failed: API error");
   });
+
+  it("uses the full prompt template (not the short one)", async () => {
+    const strategy = new SummarizeStrategy();
+    const messages = [
+      { role: "user", content: "Hello" },
+      { role: "assistant", content: "Hi there" },
+      { role: "user", content: "How are you?" },
+    ];
+
+    let capturedUserPrompt = null;
+    const llmChat = async (msgs) => {
+      capturedUserPrompt = msgs.find(m => m.role === "user").content;
+      return "summary";
+    };
+
+    await strategy.execute(messages, { keepRecent: 1 }, llmChat, "model");
+
+    // The full prompt should contain "In Progress" and "Blocked"
+    expect(capturedUserPrompt).toContain("### In Progress");
+    expect(capturedUserPrompt).toContain("### Blocked");
+    // Should NOT contain "CONCISE" (which is the short prompt indicator)
+    expect(capturedUserPrompt).not.toContain("CONCISE");
+  });
+
+  it("handles messages with reasoning_content", async () => {
+    const strategy = new SummarizeStrategy();
+    const messages = [
+      { role: "user", content: "What is 2+2?" },
+      { role: "assistant", content: "4", reasoning_content: "Let me think about this..." },
+      { role: "user", content: "And 3+3?" },
+      { role: "assistant", content: "6", reasoning_content: "Simple math..." },
+    ];
+
+    let capturedMessages = null;
+    const llmChat = async (msgs) => {
+      capturedMessages = msgs;
+      return "summary";
+    };
+
+    const result = await strategy.execute(messages, { keepRecent: 1 }, llmChat, "model");
+
+    expect(result).not.toBeNull();
+    const userMsg = capturedMessages.find(m => m.role === "user");
+    expect(userMsg.content).toContain("thinking");
+  });
+
+  it("handles messages with tool_calls", async () => {
+    const strategy = new SummarizeStrategy();
+    const messages = [
+      { role: "user", content: "List files" },
+      { role: "assistant", content: "Running ls", tool_calls: [{ function: { name: "bash", arguments: '{"cmd": "ls"}' } }] },
+      { role: "tool", content: "file1.txt" },
+      { role: "user", content: "And now read file1.txt" },
+      { role: "assistant", content: "Reading file", tool_calls: [{ function: { name: "read", arguments: '{"path": "file1.txt"}' } }] },
+    ];
+
+    let capturedMessages = null;
+    const llmChat = async (msgs) => {
+      capturedMessages = msgs;
+      return "summary";
+    };
+
+    const result = await strategy.execute(messages, { keepRecent: 1 }, llmChat, "model");
+
+    expect(result).not.toBeNull();
+    const userMsg = capturedMessages.find(m => m.role === "user");
+    expect(userMsg.content).toContain("tool calls");
+  });
+
+  it("passes model to llmChat", async () => {
+    const strategy = new SummarizeStrategy();
+    const messages = [
+      { role: "user", content: "Hello" },
+      { role: "assistant", content: "Hi" },
+      { role: "user", content: "How?" },
+    ];
+
+    let capturedModel = null;
+    const llmChat = async (msgs, model) => {
+      capturedModel = model;
+      return "summary";
+    };
+
+    await strategy.execute(messages, { keepRecent: 1 }, llmChat, "my-model");
+    expect(capturedModel).toBe("my-model");
+  });
+
+  it("skips system messages in the conversation sent to LLM", async () => {
+    const strategy = new SummarizeStrategy();
+    const messages = [
+      { role: "system", content: "You are helpful" },
+      { role: "user", content: "Hello" },
+      { role: "assistant", content: "Hi there" },
+      { role: "user", content: "How are you?" },
+    ];
+
+    let capturedMessages = null;
+    const llmChat = async (msgs) => {
+      capturedMessages = msgs;
+      return "summary";
+    };
+
+    await strategy.execute(messages, { keepRecent: 1 }, llmChat, "model");
+
+    // The conversation sent to LLM should not include the system message
+    const userMsg = capturedMessages.find(m => m.role === "user");
+    expect(userMsg.content).not.toContain("You are helpful");
+  });
+
+  it("includes correct token metadata", async () => {
+    const strategy = new SummarizeStrategy();
+    const messages = [
+      { role: "user", content: "x".repeat(200) },
+      { role: "assistant", content: "y".repeat(200) },
+      { role: "user", content: "z".repeat(200) },
+      { role: "assistant", content: "w".repeat(200) },
+    ];
+    const llmChat = async () => "summary";
+
+    const result = await strategy.execute(messages, { keepRecent: 1 }, llmChat, "model");
+
+    expect(result.metadata.tokensBefore).toBeGreaterThan(0);
+    expect(result.metadata.tokensAfter).toBeGreaterThan(0);
+  });
 });
 
 // ── CompactionStrategyRegistry ───────────────────────────────────────────────
@@ -533,5 +1263,40 @@ describe("CompactionStrategyRegistry", () => {
   it("throws when registering strategy without name", () => {
     const registry = new CompactionStrategyRegistry();
     expect(() => registry.register({ name: null, execute: async () => {} })).toThrow("Strategy must have a name property");
+  });
+
+  it("registers all built-in strategies", () => {
+    const registry = new CompactionStrategyRegistry();
+    registry.register(new SummarizeStrategy());
+    registry.register(new SummarizeShortStrategy());
+    registry.register(new DropStrategy());
+    registry.register(new TokenAwareStrategy());
+    registry.register({ name: "trim", execute: async () => null });
+
+    expect(registry.getAll()).toHaveLength(5);
+    expect(registry.has("summarize")).toBe(true);
+    expect(registry.has("summarize-short")).toBe(true);
+    expect(registry.has("drop")).toBe(true);
+    expect(registry.has("token-aware")).toBe(true);
+    expect(registry.has("trim")).toBe(true);
+  });
+
+  it("getAll returns strategies in insertion order", () => {
+    const registry = new CompactionStrategyRegistry();
+    registry.register(new DropStrategy());
+    registry.register(new SummarizeStrategy());
+    registry.register(new SummarizeShortStrategy());
+
+    const all = registry.getAll();
+    expect(all[0].name).toBe("drop");
+    expect(all[1].name).toBe("summarize");
+    expect(all[2].name).toBe("summarize-short");
+  });
+
+  it("get returns the exact registered instance", () => {
+    const registry = new CompactionStrategyRegistry();
+    const strategy = new DropStrategy();
+    registry.register(strategy);
+    expect(registry.get("drop")).toBe(strategy);
   });
 });

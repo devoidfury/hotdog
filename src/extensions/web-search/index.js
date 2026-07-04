@@ -18,7 +18,7 @@ const USER_AGENT =
 // ── Provider Implementations ────────────────────────────────────────────────
 
 /**
- * Search DuckDuckGo by scraping the HTML results page.
+ * Search DuckDuckGo using HTMLRewriter for proper DOM parsing.
  * No API key required.
  */
 async function searchDuckDuckGo(query, maxResults, timeout) {
@@ -34,42 +34,53 @@ async function searchDuckDuckGo(query, maxResults, timeout) {
     throw new ToolError(`DuckDuckGo search failed with status ${response.status}`);
   }
 
-  const html = await response.text();
-  const results = parseDuckDuckGoResults(html, maxResults);
+  const results = [];
+  let currentResult = null;
 
-  if (results.length === 0) {
+  const rewriter = new HTMLRewriter()
+    // Extract result links: <a class="result__a" href="...">Title</a>
+    .on("a.result__a", {
+      element(el) {
+        const href = el.getAttribute("href");
+        currentResult = {
+          title: "",
+          url: href ? decodeDdgUrl(href) : "",
+          description: "",
+        };
+        results.push(currentResult);
+      },
+      text(text) {
+        if (currentResult && text.text.trim()) {
+          currentResult.title += (currentResult.title ? " " : "") + text.text.trim();
+        }
+      },
+    })
+    // Extract result snippets: <a class="result__snippet">...</a>
+    .on("a.result__snippet", {
+      text(text) {
+        if (currentResult && text.text.trim()) {
+          currentResult.description += (currentResult.description ? " " : "") + text.text.trim();
+        }
+      },
+    });
+
+  // Process the streaming response — discard the blob, we collected results in handlers
+  await rewriter.transform(response).blob();
+
+  // Trim to maxResults
+  const trimmed = results.slice(0, maxResults);
+
+  if (trimmed.length === 0) {
     return `No results found for: ${query}`;
   }
 
-  return formatResults(results, query, "DuckDuckGo");
+  return formatResults(trimmed, query, "DuckDuckGo");
 }
 
-function parseDuckDuckGoResults(html, maxResults) {
-  const results = [];
-
-  // Extract result links: <a class="result__a" href="...">Title</a>
-  const linkRegex = /<a[^>]*class="[^"]*result__a[^"]*"[^>]*href="([^"]+)"[^>]*>([\s\S]*?)<\/a>/g;
-  // Extract snippets: <a class="result__snippet">...</a> or <a class="result__snippet ...">...</a>
-  const snippetRegex = /<a class="result__snippet[^"]*"[^>]*>([\s\S]*?)<\/a>/g;
-
-  const links = [...html.matchAll(linkRegex)].slice(0, maxResults + 2);
-  const snippets = [...html.matchAll(snippetRegex)].slice(0, maxResults + 2);
-
-  for (let i = 0; i < links.length && i < maxResults; i++) {
-    const [, href, title] = links[i];
-    const url = decodeDdgUrl(href);
-    const snippet = i < snippets.length ? stripHtml(snippets[i][1]) : "";
-
-    results.push({
-      title: stripHtml(title).trim(),
-      url: url.trim(),
-      description: snippet.trim(),
-    });
-  }
-
-  return results;
-}
-
+/**
+ * Decode a DuckDuckGo redirect URL to extract the actual destination.
+ * DDG wraps results in https://duckduckgo.com/l/?uddg=ENCODED_URL
+ */
 function decodeDdgUrl(raw) {
   const idx = raw.indexOf("uddg=");
   if (idx === -1) return raw;
@@ -79,10 +90,6 @@ function decodeDdgUrl(raw) {
   } catch {
     return raw;
   }
-}
-
-function stripHtml(content) {
-  return content.replace(/<[^>]+>/g, "");
 }
 
 /**

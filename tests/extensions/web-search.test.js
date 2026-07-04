@@ -196,24 +196,20 @@ describe("WebSearchTool extension create", () => {
 // ── DuckDuckGo Parser ───────────────────────────────────────────────────────
 
 describe("WebSearchTool DuckDuckGo parser", () => {
-  // These tests verify the HTML parsing logic without making network calls.
-  // We test via mock fetch to control the HTML response.
+  // These tests verify the HTMLRewriter-based parsing logic without making network calls.
+  // We mock fetch to return Response objects so HTMLRewriter can process them.
 
   it("parses duckduckgo HTML results correctly", async () => {
-    const mockHtml = `
+    const mockHtml = `<html><body>
       <a class="result__a" href="https://duckduckgo.com/l/?uddg=https%3A%2F%2Fexample.com">Example Title</a>
       <a class="result__snippet">Example description text</a>
       <a class="result__a" href="https://duckduckgo.com/l/?uddg=https%3A%2F%2Fexample.org">Another Title</a>
       <a class="result__snippet">Another description</a>
-    `;
+    </body></html>`;
 
     const originalFetch = globalThis.fetch;
-    globalThis.fetch = (url, opts) =>
-      Promise.resolve({
-        ok: true,
-        status: 200,
-        text: () => Promise.resolve(mockHtml),
-      });
+    globalThis.fetch = () =>
+      Promise.resolve(new Response(mockHtml, { status: 200 }));
 
     try {
       const tool = new WebSearchTool({ provider: "duckduckgo", maxResults: 5 });
@@ -231,24 +227,21 @@ describe("WebSearchTool DuckDuckGo parser", () => {
   });
 
   it("handles duckduckgo results with HTML in titles", async () => {
-    const mockHtml = `
+    const mockHtml = `<html><body>
       <a class="result__a" href="https://duckduckgo.com/l/?uddg=https%3A%2F%2Fexample.com">Title with <b>bold</b> text</a>
       <a class="result__snippet">Snippet with <i>italic</i></a>
-    `;
+    </body></html>`;
 
     const originalFetch = globalThis.fetch;
     globalThis.fetch = () =>
-      Promise.resolve({
-        ok: true,
-        status: 200,
-        text: () => Promise.resolve(mockHtml),
-      });
+      Promise.resolve(new Response(mockHtml, { status: 200 }));
 
     try {
       const tool = new WebSearchTool({ provider: "duckduckgo" });
       const result = await tool.execute(JSON.stringify({ query: "test" }));
       expect(result.success).toBe(true);
       const output = resultStr(result);
+      // HTMLRewriter extracts text content, so <b> tags are stripped naturally
       expect(output).toContain("Title with bold text");
       expect(output).not.toContain("<b>");
     } finally {
@@ -259,11 +252,7 @@ describe("WebSearchTool DuckDuckGo parser", () => {
   it("handles empty duckduckgo results", async () => {
     const originalFetch = globalThis.fetch;
     globalThis.fetch = () =>
-      Promise.resolve({
-        ok: true,
-        status: 200,
-        text: () => Promise.resolve("<html><body>No results</body></html>"),
-      });
+      Promise.resolve(new Response("<html><body>No results</body></html>", { status: 200 }));
 
     try {
       const tool = new WebSearchTool({ provider: "duckduckgo" });
@@ -278,16 +267,61 @@ describe("WebSearchTool DuckDuckGo parser", () => {
   it("handles duckduckgo network error", async () => {
     const originalFetch = globalThis.fetch;
     globalThis.fetch = () =>
-      Promise.resolve({
-        ok: false,
-        status: 500,
-      });
+      Promise.resolve(new Response("error", { status: 500 }));
 
     try {
       const tool = new WebSearchTool({ provider: "duckduckgo" });
       const result = await tool.execute(JSON.stringify({ query: "test" }));
       expect(result.success).toBe(false);
       expect(resultStr(result)).toContain("Web search failed");
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it("handles malformed HTML gracefully", async () => {
+    // HTMLRewriter (lol-html) handles malformed HTML robustly
+    const mockHtml = `<html><body>
+      <a class="result__a" href="https://duckduckgo.com/l/?uddg=https%3A%2F%2Fexample.com">Unclosed link
+      <a class="result__snippet">Snippet for unclosed</a>
+      <a class="result__a" href="https://duckduckgo.com/l/?uddg=https%3A%2F%2Fexample.org">Normal link</a>
+      <a class="result__snippet">Normal snippet</a>
+    </body></html>`;
+
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = () =>
+      Promise.resolve(new Response(mockHtml, { status: 200 }));
+
+    try {
+      const tool = new WebSearchTool({ provider: "duckduckgo" });
+      const result = await tool.execute(JSON.stringify({ query: "test" }));
+      expect(result.success).toBe(true);
+      const output = resultStr(result);
+      expect(output).toContain("via DuckDuckGo");
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it("handles results with missing snippets", async () => {
+    const mockHtml = `<html><body>
+      <a class="result__a" href="https://duckduckgo.com/l/?uddg=https%3A%2F%2Fexample.com">Title Without Snippet</a>
+      <a class="result__a" href="https://duckduckgo.com/l/?uddg=https%3A%2F%2Fexample.org">Title With Snippet</a>
+      <a class="result__snippet">Only this one has a snippet</a>
+    </body></html>`;
+
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = () =>
+      Promise.resolve(new Response(mockHtml, { status: 200 }));
+
+    try {
+      const tool = new WebSearchTool({ provider: "duckduckgo" });
+      const result = await tool.execute(JSON.stringify({ query: "test" }));
+      expect(result.success).toBe(true);
+      const output = resultStr(result);
+      expect(output).toContain("Title Without Snippet");
+      expect(output).toContain("Title With Snippet");
+      expect(output).toContain("Only this one has a snippet");
     } finally {
       globalThis.fetch = originalFetch;
     }

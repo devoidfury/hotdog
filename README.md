@@ -83,30 +83,7 @@ hotdog -m "my-provider/hopus-popus" -c "See if you can improve the test coverage
 
 Config is resolved in priority order: **CLI flags** > **config file** > **environment variables** > **built-in defaults**.
 
-### Config File Location
-
-The config directory is resolved in this order:
-
-1. `--config-dir <path>` CLI flag
-2. `HOTDOG_CONFIG_DIR` environment variable
-3. `./config` (relative to CWD)
-4. `/etc/hotdog`
-5. `~/.config/hotdog` (XDG)
-
-The config file is `defaults.json` inside the resolved config directory.
-
-### Key Config Options
-
-| Key | Type | Default | Description |
-|-----|------|---------|-------------|
-| `defaultModel` | string | `qwen3.5-0.8b` | Default model name |
-| `providers` | array | `[]` | LLM provider configurations |
-| `chatTimeoutSecs` | number | `600` | Request timeout in seconds |
-| `hideTools` | boolean | `true` | Hide tool calls in output |
-| `hideThinking` | boolean | `false` | Hide reasoning/thinking output |
-| `showTokenUse` | boolean | `true` | Show token usage stats |
-| `noLog` | boolean | `false` | Disable session logging |
-| `defaultSubcommand` | string | `cli` | Default subcommand when no args given |
+See the [config reference](docs/config-reference.md) which covers all the configuration options and how it works in detail.
 
 ### Profiles
 
@@ -123,25 +100,9 @@ preload-skills: []
 Profile body content goes here.
 ```
 
+See also the Profiles section in [config reference](docs/config-reference.md#profiles-in-config)
+
 Use with `--profile coder`.
-
-### MCP Servers
-
-Connect to Model Context Protocol servers to expose third-party tools:
-
-```json
-{
-  "mcpServers": [
-    {
-      "name": "my-server",
-      "url": "http://localhost:3000/mcp",
-      "enabled": true
-    }
-  ]
-}
-```
-
-Stdio transport is also supported via `command` and `args`.
 
 ## Features
 

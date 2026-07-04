@@ -169,11 +169,12 @@ describe("FetchTool network integration", () => {
     }
     const tool = new FetchTool();
     const result = await tool.execute(JSON.stringify({ url: EXAMPLE_URL }));
-    const data = result?.output !== undefined ? result.output : String(result);
-    const parsed = typeof data === "string" ? JSON.parse(data) : data;
-    expect(parsed.content_type).toContain("text/html");
-    expect(parsed.body).toBeDefined();
-    expect(typeof parsed.body).toBe("string");
+    // output is the body string; metadata is in result.metadata (a Map)
+    expect(typeof result.output).toBe("string");
+    const contentType = result.metadata?.get("content_type") || "";
+    expect(contentType).toContain("text/html");
+    const bodyLength = result.metadata?.get("body_length");
+    expect(bodyLength).toBeDefined();
   });
 
   it("returns original HTML when showOriginal is true", async () => {
@@ -185,11 +186,10 @@ describe("FetchTool network integration", () => {
     const result = await tool.execute(
       JSON.stringify({ url: EXAMPLE_URL, showOriginal: true }),
     );
-    const data = result?.output !== undefined ? result.output : String(result);
-    const parsed = typeof data === "string" ? JSON.parse(data) : data;
-    expect(parsed.content_type).toContain("text/html");
-    expect(typeof parsed.body).toBe("string");
-    expect(parsed.body.toLowerCase()).toContain("<!doctype html>");
+    expect(typeof result.output).toBe("string");
+    const contentType = result.metadata?.get("content_type") || "";
+    expect(contentType).toContain("text/html");
+    expect(result.output.toLowerCase()).toContain("<!doctype html>");
   });
 
   it("returns non-HTML content unchanged when showOriginal is false", async () => {
@@ -199,9 +199,8 @@ describe("FetchTool network integration", () => {
     }
     const tool = new FetchTool();
     const result = await tool.execute(JSON.stringify({ url: JSON_URL }));
-    const data = result?.output !== undefined ? result.output : String(result);
-    const parsed = typeof data === "string" ? JSON.parse(data) : data;
-    expect(parsed.content_type).toContain("application/json");
-    expect(typeof parsed.body).toBe("object");
+    expect(typeof result.output).toBe("string");
+    const contentType = result.metadata?.get("content_type") || "";
+    expect(contentType).toContain("application/json");
   });
 });

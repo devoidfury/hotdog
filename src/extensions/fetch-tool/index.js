@@ -120,17 +120,9 @@ export class FetchTool {
 
       // If showOriginal is true, return raw body without conversion
       if (showOriginal) {
-        return ToolResult.ok({
-          status: resp.status,
-          status_text: reason,
-          method,
-          url,
-          content_type: contentType,
-          body_length: bodyLength,
-          ...(truncated ? { truncated: "true" } : {}),
-          body: respBody,
-          headers: respHeaders,
-        }).withEntries({
+        const bodyStr =
+          typeof respBody === "string" ? respBody : JSON.stringify(respBody);
+        return ToolResult.ok(bodyStr).withEntries({
           url,
           method,
           status: String(resp.status),
@@ -175,17 +167,11 @@ export class FetchTool {
           : JSON.stringify(bodyToReturn).length;
       const finalTruncated = finalBodyLength > 8000;
 
-      return ToolResult.ok({
-        status: resp.status,
-        status_text: reason,
-        method,
-        url,
-        content_type: contentType,
-        body_length: finalBodyLength,
-        ...(finalTruncated ? { truncated: "true" } : {}),
-        body: bodyToReturn,
-        headers: respHeaders,
-      }).withEntries({
+      const bodyStr =
+        typeof bodyToReturn === "string"
+          ? bodyToReturn
+          : JSON.stringify(bodyToReturn);
+      return ToolResult.ok(bodyStr).withEntries({
         url,
         method,
         status: String(resp.status),

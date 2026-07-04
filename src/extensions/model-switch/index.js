@@ -78,7 +78,6 @@ export function create(core) {
             }
 
             agent.model = modelName;
-            await agent.clearContext();
             return { content: `Switched to model: ${modelName}` };
           },
         });

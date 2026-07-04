@@ -1,0 +1,36 @@
+{
+  "name": "scheduler",
+  "provides": ["tools"],
+  "loadOrder": 10,
+  "description": "Timed and recurring task scheduler — schedule one-shot or interval-based tasks",
+  "services": {
+    "scheduler": ["schedule", "cancel", "list", "setBus", "cleanup"]
+  },
+  "configSchema": {
+    "scheduler": {
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Whether the scheduler is enabled"
+        },
+        "maxTasks": {
+          "type": "number",
+          "default": 50,
+          "description": "Maximum number of scheduled tasks allowed"
+        },
+        "logActivity": {
+          "type": "boolean",
+          "default": false,
+          "description": "Log scheduler activity (task fire, cancel, etc.)"
+        }
+      },
+      "additionalProperties": false,
+      "layers": [
+        { "source": "config", "key": "scheduler" },
+        { "default": {} }
+      ]
+    }
+  }
+}

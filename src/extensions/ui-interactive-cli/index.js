@@ -42,6 +42,10 @@ Commands:
   /reasoning none|minimal|low|high|xhigh|max|unset - Set reasoning effort level
   /sh <command> - Run a shell command and display output
   :!<command>   - Vim-like alias for shell commands (e.g., :!ls)
+  /schedule <secs> "text"       - Schedule a one-shot task
+  /schedule <secs> --every <n> "text" - Schedule a recurring task
+  /schedule:list                - Show active scheduled tasks
+  /schedule:cancel <id>         - Cancel a scheduled task
 `;
 
 /**
@@ -296,6 +300,11 @@ export async function runInteractiveSession(cli, core, options = {}) {
 
   // Wire up task completion
   taskManager.setBus(bus);
+
+  // Wire up the scheduler (if loaded) so scheduled tasks can enqueue messages
+  if (core.services && core.services.has("scheduler")) {
+    core.service("scheduler").setBus(bus);
+  }
 
   // Print info
   const agent = sessionManager.getAgent();

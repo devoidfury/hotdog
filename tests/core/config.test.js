@@ -25,7 +25,11 @@ tags: [a, b, c]
 ---
 Body`;
     const result = parseFrontMatter(input);
-    expect(result.frontMatter).toEqual({ active: true, count: 42, tags: ["a", "b", "c"] });
+    expect(result.frontMatter).toEqual({
+      active: true,
+      count: 42,
+      tags: ["a", "b", "c"],
+    });
   });
 
   it("returns null when no front matter", () => {
@@ -33,8 +37,14 @@ Body`;
   });
 
   it("handles empty body and missing trailing newline", () => {
-    expect(parseFrontMatter("---\ntitle: test\n---")).toEqual({ frontMatter: { title: "test" }, body: "" });
-    expect(parseFrontMatter("---\nname: test\n---\nBody")).toEqual({ frontMatter: { name: "test" }, body: "Body" });
+    expect(parseFrontMatter("---\ntitle: test\n---")).toEqual({
+      frontMatter: { title: "test" },
+      body: "",
+    });
+    expect(parseFrontMatter("---\nname: test\n---\nBody")).toEqual({
+      frontMatter: { name: "test" },
+      body: "Body",
+    });
   });
 });
 
@@ -101,7 +111,7 @@ describe("normalizeConfigKeys", () => {
       default_model: "test",
       hide_tools: true,
       profiles: {
-        default: { blacklist_tools: ["patch"] },
+        default: { blacklist_tools: [] },
       },
       mcp_servers: [
         { enabled: true, name: "test-server", blacklist_tools: ["dangerous"] },
@@ -112,7 +122,7 @@ describe("normalizeConfigKeys", () => {
       defaultModel: "test",
       hideTools: true,
       profiles: {
-        default: { blacklistTools: ["patch"] },
+        default: { blacklistTools: [] },
       },
       mcpServers: [
         { enabled: true, name: "test-server", blacklistTools: ["dangerous"] },
@@ -132,7 +142,11 @@ describe("normalizeConfigKeys", () => {
         {
           name: "test",
           models: [
-            { name: "model-1", context_limit: 1000, parallel_tool_calling: true },
+            {
+              name: "model-1",
+              context_limit: 1000,
+              parallel_tool_calling: true,
+            },
           ],
         },
       ],
@@ -170,25 +184,35 @@ describe("normalizeConfigKeys", () => {
       default_subcommand: "cli",
       chat_timeout_secs: 900,
       profiles: {
-        default: { blacklist_tools: ["patch", "explore"] },
-        explorer: { model: "ai365/lfm2.5-8b-a1b", blacklist_tools: ["patch", "write"] },
+        default: { blacklist_tools: ["explore"] },
+        explorer: { model: "ai365/lfm2.5-8b-a1b", blacklist_tools: ["write"] },
       },
       mcp_servers: [
-        { enabled: true, name: "bun-docs-mcp", url: "https://bun.com/docs/mcp" },
+        {
+          enabled: true,
+          name: "bun-docs-mcp",
+          url: "https://bun.com/docs/mcp",
+        },
       ],
       providers: [
         {
           name: "ai365",
           url: "http://localhost:9292",
           api_key: "test-key",
-          models: [{ name: "qwen3.5-4b", context_limit: 262144, tags: ["general", "fast"] }],
+          models: [
+            {
+              name: "qwen3.5-4b",
+              context_limit: 262144,
+              tags: ["general", "fast"],
+            },
+          ],
         },
       ],
     };
     const result = normalizeConfigKeys(input);
     expect(result.defaultModel).toBe("ai365/qwen3.6-27b");
     expect(result.hideTools).toBe(true);
-    expect(result.profiles.default.blacklistTools).toEqual(["patch", "explore"]);
+    expect(result.profiles.default.blacklistTools).toEqual(["explore"]);
     expect(result.providers[0].apiKey).toBe("test-key");
     expect(result.providers[0].models[0].contextLimit).toBe(262144);
   });

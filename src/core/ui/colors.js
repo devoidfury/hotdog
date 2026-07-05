@@ -93,26 +93,6 @@ const COLOR_MAP = {
 const RESET = "\x1b[0m";
 
 /**
- * Map a message kind tag to its color name from the palette.
- */
-export function kindColorName(kind, palette) {
-  const mapping = {
-    1: palette.thinking,
-    2: palette.tool_call,
-    3: palette.tool_result,
-    4: palette.final_response,
-    5: palette.final_response,
-    7: palette.final_response,
-    8: palette.final_response,
-    6: palette.compacting,
-    9: palette.final_response,
-    10: palette.thinking,
-    11: palette.progress,
-  };
-  return mapping[kind] ?? null;
-}
-
-/**
  * Apply a color name to a string.
  * If `use_colors` is false, returns the text unchanged.
  */

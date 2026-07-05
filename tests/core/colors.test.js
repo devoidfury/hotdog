@@ -6,7 +6,6 @@ import {
   light_palette,
   monochrome_palette,
   applyColor,
-  kindColorName,
   mergePalette,
   resolvePalette,
   applyThinking,
@@ -136,27 +135,6 @@ describe('resolvePalette', () => {
   it('resolves named theme via themeFile param', async () => {
     const p = await resolvePalette('light', null, null, true);
     expect(p.thinking).toBe('blue');
-  });
-});
-
-describe('kindColorName', () => {
-  it('maps kind numbers to palette colors', () => {
-    const palette = dark_palette();
-    expect(kindColorName(1, palette)).toBe('cyan');    // thinking
-    expect(kindColorName(2, palette)).toBe('yellow');  // tool_call
-    expect(kindColorName(3, palette)).toBe('green');   // tool_result
-    expect(kindColorName(4, palette)).toBe('bold_white'); // final_response
-    expect(kindColorName(5, palette)).toBe('bold_white');
-    expect(kindColorName(6, palette)).toBe('bold_red'); // compacting
-    expect(kindColorName(7, palette)).toBe('bold_white');
-    expect(kindColorName(8, palette)).toBe('bold_white');
-    expect(kindColorName(9, palette)).toBe('bold_white');
-    expect(kindColorName(10, palette)).toBe('cyan');    // thinking
-    expect(kindColorName(11, palette)).toBe('bright_black'); // progress
-  });
-
-  it('returns null for unknown kind', () => {
-    expect(kindColorName(99, dark_palette())).toBeNull();
   });
 });
 

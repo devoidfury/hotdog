@@ -1,9 +1,9 @@
 const CAMEL_CASE_REGEX = /[_-]([a-z])/g;
 const FLAG_PREFIX_REGEX = /^-+/;
 
-const _camel_transform = (_, c) => c.toUpperCase();
+const _camelTransform = (_, c) => c.toUpperCase();
 export function camelCase(str) {
-  return str.replace(CAMEL_CASE_REGEX, _camel_transform);
+  return str.replace(CAMEL_CASE_REGEX, _camelTransform);
 }
 
 export function parseCliFlagKey(str) {

@@ -69,7 +69,7 @@ export async function readSessionEntries(sessionId) {
     } catch {
       logger.warn(
         `[session-log] malformed JSON line in session ${sessionId}: ` +
-        `line ${i + 1} — "${trimmed.slice(0, 80)}${trimmed.length > 80 ? "..." : ""}"`,
+          `line ${i + 1} — "${trimmed.slice(0, 80)}${trimmed.length > 80 ? "..." : ""}"`,
       );
     }
   }
@@ -105,7 +105,7 @@ export async function readAllSessions() {
       } catch {
         logger.warn(
           `[session-log] malformed JSON in ${file}: ` +
-          `"${trimmed.slice(0, 80)}${trimmed.length > 80 ? "..." : ""}"`,
+            `"${trimmed.slice(0, 80)}${trimmed.length > 80 ? "..." : ""}"`,
         );
       }
     }
@@ -133,12 +133,8 @@ export async function sessionExists(sessionId) {
  * to Message objects, adding them to the agent's context. This allows the
  * agent to "continue" a previous conversation.
  *
- * System prompt entries are skipped — the agent regenerates them dynamically
+ * System prompt entries are skipped — the agent regenerates it dynamically
  * via ensureSystemPrompt().
- *
- * Compaction entries (role: "system", source: LOG_SOURCE.COMPACTION) are
- * added as user messages, since compaction summaries appear in context as
- * user messages wrapped in <m_ar7e78o7kuqn36jg> tags.
  *
  * @param {import("../core/agent.js").Agent} agent - The agent whose context to populate
  * @param {Array<object>} entries - Log entries from readSessionEntries()
@@ -209,10 +205,7 @@ export function replayEntriesIntoContext(agent, entries) {
 
       case LOG_SOURCE.COMPACTION: {
         // Compaction summary — added as user message in context
-        // (the agent sees it as a user message with <m_r3hthso4y9htef72> tags)
-        agent.addMessage(
-          new Message({ role: "user", content: entry.content }),
-        );
+        agent.addMessage(new Message({ role: "user", content: entry.content }));
         replayed++;
         break;
       }

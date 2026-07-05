@@ -89,7 +89,11 @@ See the [config reference](docs/config-reference.md) which covers all the config
 
 ### Profiles
 
-Profiles define agent behavior: role, tools, aspects, and model. Create profile files in `<config-dir>/profiles/`:
+Profiles define agent behavior: role, tools, aspects, and model. Create profile files in `<config-dir>/profiles/`.
+
+See also the Profiles section in [config reference](docs/config-reference.md#profiles-in-config)
+
+Example `coder.profile.md`, used with `--profile coder`:
 
 ```yaml
 ---
@@ -102,9 +106,6 @@ preload-skills: []
 Profile body content goes here.
 ```
 
-See also the Profiles section in [config reference](docs/config-reference.md#profiles-in-config)
-
-Use with `--profile coder`.
 
 ## Features
 

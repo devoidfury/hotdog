@@ -68,7 +68,7 @@ export class LlmClient {
     if (!this._mangler) return messages;
     return messages.map((msg) => {
       const json = msg.toJSON();
-      if (json.content !== undefined && json.content !== null) {
+      if (json.content != null) {
         if (Array.isArray(json.content)) {
           // Content is an array of parts (text + image_url)
           json.content = json.content.map((part) => {
@@ -116,10 +116,7 @@ export class LlmClient {
     };
 
     // Only include temperature if it's a valid number (omit null/undefined)
-    if (
-      modelConfig.temperature !== undefined &&
-      modelConfig.temperature !== null
-    ) {
+    if (modelConfig.temperature != null) {
       request.temperature = modelConfig.temperature;
     }
 
@@ -130,10 +127,7 @@ export class LlmClient {
       request.parallel_tool_calls = true;
     }
 
-    if (
-      modelConfig.reasoningEffort !== undefined &&
-      modelConfig.reasoningEffort !== null
-    ) {
+    if (modelConfig.reasoningEffort != null) {
       request.reasoning_effort = modelConfig.reasoningEffort;
     }
     if (stream) {

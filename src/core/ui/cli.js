@@ -157,7 +157,8 @@ export class CliOutputSink extends OutputSink {
     if (this._textBuf) {
       const stream =
         this[modeStreams[this._outputMode] ?? modeStreams[Modes.Default]];
-      const colorFn = modeColorFns[this._outputMode || Modes.Default];
+      const colorFn =
+        modeColorFns[this._outputMode] ?? modeColorFns[Modes.Default];
       const colored = colorFn(this._textBuf, this.palette);
       stream.write(colored);
       this._textBuf = "";
@@ -165,11 +166,7 @@ export class CliOutputSink extends OutputSink {
   }
 
   /**
-   * Process streaming content character by character through the newline buffer.
-   *
-   * Newlines go to _nlBuf; non-newline chars flush the newline buffer first,
-   * then accumulate in _textBuf for batched coloring. At the end of the content,
-   * any remaining _textBuf is flushed.
+   * Write to output / process streaming content and handle leading/trailing newlines.
    */
   _processContent(content) {
     let startContent, endContent;
@@ -270,11 +267,10 @@ export class CliOutputSink extends OutputSink {
   emitCommandResult(event) {
     this._transitionTo(Modes.System);
     this._processContent(event.content);
-    this._flushText();
-    this._flushNl();
   }
 
   emitQuestion(event) {
+    if (this.hideUserMessage) return;
     this._transitionTo(Modes.Question);
     for (const q of event.questions) {
       this._processContent(`\n${applyFinalResponse(q.prompt, this.palette)}\n`);
@@ -294,8 +290,6 @@ export class CliOutputSink extends OutputSink {
         this._processContent(`    (default: ${q.default})\n`);
       }
     }
-    this._flushText();
-    this._flushNl();
   }
 
   emitStreamingChunk(event) {
@@ -325,8 +319,6 @@ export class CliOutputSink extends OutputSink {
     if (!display) return;
     this._transitionTo(Modes.Progress);
     this._processContent(`[${applyProgress(display, this.palette)}]`);
-    this._flushText();
-    this._flushNl();
   }
 
   emitTokenUsage(event) {
@@ -338,8 +330,6 @@ export class CliOutputSink extends OutputSink {
       event.totalTokens,
     );
     this._processContent(display);
-    this._flushText();
-    this._flushNl();
   }
 
   emitSessionState(event) {

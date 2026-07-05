@@ -446,8 +446,9 @@ export class Agent {
    * @returns {Promise<Object>} { fullText, fullReasoning, finalToolCalls, usage }
    */
   async _processStream(stream) {
-    let fullText = "";
+    const textParts = [];
     let fullReasoning = null;
+    const reasoningParts = [];
     const toolCallsBuffer = new Map();
     let usage = null;
 
@@ -456,14 +457,13 @@ export class Agent {
 
       switch (event.type) {
         case "content":
-          fullText += event.content;
+          textParts.push(event.content);
           if (this._stream) {
             this._emitOutput("streaming_chunk", { content: event.content });
           }
           break;
         case "reasoning":
-          if (!fullReasoning) fullReasoning = "";
-          fullReasoning += event.content;
+          reasoningParts.push(event.content);
           if (this._stream) {
             this._emitOutput("streaming_reasoning_chunk", {
               content: event.content,
@@ -473,17 +473,17 @@ export class Agent {
         case "toolName":
           toolCallsBuffer.set(event.index, {
             name: event.name,
-            args: "",
+            args: [],
             id: event.toolCallId || "",
           });
           break;
         case "toolArgument": {
           const existing = toolCallsBuffer.get(event.index) || {
             name: "",
-            args: "",
+            args: [],
             id: "",
           };
-          existing.args += event.arguments;
+          existing.args.push(event.arguments);
           toolCallsBuffer.set(event.index, existing);
           break;
         }
@@ -500,12 +500,17 @@ export class Agent {
         (tc, index) => ({
           id: tc.id || crypto.randomUUID(),
           type: "function",
-          function: { name: tc.name, arguments: tc.args },
+          function: { name: tc.name, arguments: tc.args.join("") },
         }),
       );
     }
 
-    return { fullText, fullReasoning, finalToolCalls, usage };
+    return {
+      fullText: textParts.join(""),
+      fullReasoning: reasoningParts.length > 0 ? reasoningParts.join("") : null,
+      finalToolCalls,
+      usage,
+    };
   }
 
   // ── Tool Execution ────────────────────────────────────────────────────────

@@ -1,6 +1,5 @@
 // Fetch-tool extension — provides the fetch tool for making HTTP requests.
 
-import { spawnSync } from "node:child_process";
 import {
   toolDef,
   param,
@@ -8,6 +7,8 @@ import {
   parseToolInput,
   defaultCallDisplay,
 } from "../../core/extensions/tool-utils.js";
+
+import { htmlToMarkdown } from "../../utils/html-to-markdown.js";
 
 import { HOOKS } from "../../core/hooks.js";
 
@@ -47,7 +48,7 @@ export class FetchTool {
   toToolDef() {
     return toolDef(
       FetchTool.TOOL_NAME,
-      `Perform a web request to a URL. Supports ${VALID_METHODS.join(", ")} methods with optional headers and body. Returns the response body, status code, and content type. When showOriginal is true, returns the raw response body without pandoc conversion.`,
+      `Perform a web request to a URL. Supports ${VALID_METHODS.join(", ")} methods with optional headers and body. Returns the response body, status code, and content type. When showOriginal is true, returns the raw response body without markdown conversion.`,
       {
         schema: "https://json-schema.org/draft/2020-12/schema",
         properties: {
@@ -133,32 +134,15 @@ export class FetchTool {
         });
       }
 
-      // When showOriginal is not true, convert HTML through pandoc to GFM
+      // When showOriginal is not true, convert HTML to GFM using our
+      // built-in HTMLRewriter-based converter.
       let bodyToReturn = respBody;
       if (
         typeof respBody === "string" &&
         (contentType.includes("text/html") ||
           contentType.includes("application/xhtml+xml"))
       ) {
-        try {
-          const result = spawnSync("pandoc", ["-f", "html", "-t", "gfm"], {
-            input: respBody,
-            encoding: "utf-8",
-            maxBuffer: 10 * 1024 * 1024,
-          });
-          if (result.error) {
-            // pandoc not available or failed to spawn; use original body
-            bodyToReturn = respBody;
-          } else if (result.status === 0) {
-            bodyToReturn = result.stdout;
-          } else {
-            // pandoc failed for some other reason; use original body
-            bodyToReturn = respBody;
-          }
-        } catch {
-          // pandoc not available; use original body
-          bodyToReturn = respBody;
-        }
+        bodyToReturn = htmlToMarkdown(respBody);
       }
 
       const finalBodyLength =

@@ -18,7 +18,11 @@ import { TaskManager } from "../../core/session/task-manager.js";
 import { SessionManager } from "../../core/session/index.js";
 import { MessageBus } from "../../core/index.js";
 import { Agent } from "../../core/agent.js";
-import { readSessionEntries, sessionExists, replayEntriesIntoContext } from "../../core/session/session-log.js";
+import {
+  readSessionEntries,
+  sessionExists,
+  replayEntriesIntoContext,
+} from "../../core/session/session-log.js";
 import { Message } from "../../core/context/message.js";
 
 const HELP_TEXT = `
@@ -124,11 +128,7 @@ export class AsyncInteractiveCliInput {
           } else if (options.length > 0) {
             // Try to parse as a number index
             const idx = parseInt(trimmed, 10);
-            if (
-              !isNaN(idx) &&
-              idx >= 1 &&
-              idx <= options.length
-            ) {
+            if (!isNaN(idx) && idx >= 1 && idx <= options.length) {
               answer = options[idx - 1];
             } else if (options.includes(trimmed)) {
               // Exact match on option text
@@ -323,13 +323,16 @@ export async function runInteractiveSession(cli, core, options = {}) {
   };
 
   // Lazily load shell command extension when needed
-  const getShellCommandExt = options.getShellCommandExt || createInlineShellCommand;
+  const getShellCommandExt =
+    options.getShellCommandExt || createInlineShellCommand;
 
   // Create the input interface for question tool
   // We need to set it up after defining lineHandler
-  const setupInput = options.setupInput || (() => {
-    // This will be set after lineHandler is defined
-  });
+  const setupInput =
+    options.setupInput ||
+    (() => {
+      // This will be set after lineHandler is defined
+    });
 
   // Listen for model changes and update the readline prompt
   core.hooks.on(HOOKS.MODEL_CHANGE, (data) => {
@@ -380,27 +383,31 @@ export async function runInteractiveSession(cli, core, options = {}) {
   setupInput();
 
   // Close handler
-  const handleClose = options.onClose || (() => {
-    console.log("\nGoodbye!");
-    const interactiveSessionId = sessionManager.sessionId();
-    if (interactiveSessionId) {
-      console.log(`Session: ${interactiveSessionId}`);
-    }
-    core.extensions.cleanup();
-    process.exit(0);
-  });
+  const handleClose =
+    options.onClose ||
+    (() => {
+      console.log("\nGoodbye!");
+      const interactiveSessionId = sessionManager.sessionId();
+      if (interactiveSessionId) {
+        console.log(`Session: ${interactiveSessionId}`);
+      }
+      core.extensions.cleanup();
+      process.exit(0);
+    });
 
   rl.on("close", handleClose);
 
   // SIGINT handler
-  const handleSigint = options.onSIGINT || (() => {
-    bus.interrupt();
-    // Clear the input buffer so any typed-but-unsubmitted text is discarded
-    rl.line = "";
-    rl.cursor = 0;
-    console.log("Interrupted (/quit, /exit, or ctrl-d to exit)");
-    rl.prompt();
-  });
+  const handleSigint =
+    options.onSIGINT ||
+    (() => {
+      bus.interrupt();
+      // Clear the input buffer so any typed-but-unsubmitted text is discarded
+      rl.line = "";
+      rl.cursor = 0;
+      console.log("\nInterrupted (/quit, /exit, or ctrl-d to exit)");
+      rl.prompt();
+    });
 
   rl.on("SIGINT", handleSigint);
 

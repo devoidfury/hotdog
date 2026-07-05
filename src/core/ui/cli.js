@@ -16,6 +16,42 @@ import {
   resolvePalette,
 } from "./colors.js";
 
+const Modes = {
+  Default: "default",
+  Question: "question",
+  Progress: "progress",
+  System: "system",
+  Token: "token",
+  ToolCall: "toolCall",
+  ToolResult: "toolResult",
+  Thinking: "thinking",
+  User: "user",
+};
+
+const modeColorFns = {
+  [Modes.Default]: applyFinalResponse,
+  [Modes.Progress]: applyProgress,
+  [Modes.Question]: (text) => text,
+  [Modes.System]: applyCompacting,
+  [Modes.Thinking]: applyThinking,
+  [Modes.Token]: (text) => text,
+  [Modes.ToolCall]: applyToolCall,
+  [Modes.ToolResult]: applyToolResult,
+  [Modes.User]: (text) => text,
+};
+
+const modeStreams = {
+  [Modes.Default]: "outStream",
+  [Modes.Progress]: "altStream",
+  [Modes.Question]: "outStream",
+  [Modes.Token]: "altStream",
+  [Modes.System]: "altStream",
+  [Modes.Thinking]: "altStream",
+  [Modes.ToolCall]: "outStream",
+  [Modes.ToolResult]: "outStream",
+  [Modes.User]: "outStream",
+};
+
 /**
  * Format a compacting message.
  */
@@ -93,28 +129,36 @@ export class CliOutputSink extends OutputSink {
     // Buffers trailing newlines to normalize spacing between reasoning and
     // normal output segments. Some models emit many trailing newlines, some
     // emit none — this ensures exactly 1 newline separates segments.
-    this._nlBuf = []; // trailing newline buffer (max N)
-    this._maxNlBuf = 3; // max newlines to hold
+    this._nlBuf = 0; // trailing newline buffer
     this._textBuf = ""; // pending non-newline text (colored as batch)
-    this._streamMode = null; // 'reasoning' | 'normal' | null — for transition detection
+    this._outputMode = null; // for transition detection
+
+    this.outStream = process.stdout;
+    this.altStream = process.stderr;
   }
 
   /**
    * Flush buffered newlines to the given stream.
    */
-  _flushNl(stream) {
-    for (const nl of this._nlBuf) {
-      stream.write(nl);
+  _flushNl() {
+    if (this._nlBuf > 0) {
+      const stream =
+        this[modeStreams[this._outputMode] ?? modeStreams[Modes.Default]];
+      stream.write("\n".repeat(this._nlBuf));
+      this._nlBuf = 0;
     }
-    this._nlBuf = [];
   }
 
   /**
-   * Flush the pending text buffer (colored) to the given stream.
+   * Flush the given text or pending text buffer to the given stream.
    */
-  _flushText(stream, colorFn) {
+  _flushText() {
     if (this._textBuf) {
-      stream.write(colorFn(this._textBuf, this.palette));
+      const stream =
+        this[modeStreams[this._outputMode] ?? modeStreams[Modes.Default]];
+      const colorFn = modeColorFns[this._outputMode || Modes.Default];
+      const colored = colorFn(this._textBuf, this.palette);
+      stream.write(colored);
       this._textBuf = "";
     }
   }
@@ -126,23 +170,31 @@ export class CliOutputSink extends OutputSink {
    * then accumulate in _textBuf for batched coloring. At the end of the content,
    * any remaining _textBuf is flushed.
    */
-  _processContent(content, stream, colorFn) {
-    for (let i = 0; i < content.length; i++) {
-      const ch = content[i];
-      if (ch === "\n") {
-        // Flush any pending text first, then buffer the newline
-        this._flushText(stream, colorFn);
-        if (this._nlBuf.length < this._maxNlBuf) {
-          this._nlBuf.push(ch);
-        }
-      } else {
-        // Non-newline: flush buffered newlines, then accumulate text
-        this._flushNl(stream);
-        this._textBuf += ch;
-      }
+  _processContent(content) {
+    let startContent, endContent;
+
+    for (endContent = content.length; endContent > 0; endContent--) {
+      if (content[endContent - 1] !== "\n") break;
     }
-    // Flush remaining text buffer (in case content ends with non-newline)
-    this._flushText(stream, colorFn);
+
+    for (startContent = 0; startContent < endContent; startContent++) {
+      if (content[startContent] !== "\n") break;
+    }
+
+    if (startContent > 0) {
+      this._nlBuf += startContent;
+    }
+
+    if (endContent - startContent > 0) {
+      this._flushNl();
+      this._textBuf += content.substring(startContent, endContent + 1);
+      this._flushText();
+    }
+
+    const trailingNewlines = content.length - endContent;
+    if (trailingNewlines > 0) {
+      this._nlBuf += trailingNewlines;
+    }
   }
 
   /**
@@ -151,11 +203,11 @@ export class CliOutputSink extends OutputSink {
    * exactly one newline so the next segment gets a clean single-line separator.
    */
   _transitionTo(mode) {
-    const hadPreviousMode = this._streamMode !== null;
-    this._streamMode = mode;
+    const hadPreviousMode = this._outputMode !== null;
+    this._outputMode = mode;
     // Only add a separator newline when transitioning between modes,
     // not on the very first call when there's no previous segment.
-    this._nlBuf = hadPreviousMode ? ["\n"] : [];
+    this._nlBuf = hadPreviousMode ? 1 : 0;
     this._textBuf = "";
   }
 
@@ -179,87 +231,78 @@ export class CliOutputSink extends OutputSink {
   }
 
   emitUserMessage(event) {
-    this._flushNl(process.stdout);
-    this._flushText(process.stdout, applyFinalResponse);
-    process.stdout.write(`${event.content}\n`);
+    this._transitionTo(Modes.User);
+    this._processContent(event.content);
   }
 
   emitAssistantMessage(event) {
-    // Flush any remaining buffered newlines before printing the final message
-    this._flushNl(process.stdout);
-    this._flushText(process.stdout, applyFinalResponse);
-    process.stdout.write(applyFinalResponse(event.content, this.palette));
+    this._transitionTo(Modes.Default);
+    this._processContent(event.content);
   }
 
   emitThinking(event) {
     if (this.hideThinking) return;
-    // Thinking is streamed to stderr
-    const formatted = formatThinking(event.content, this.thinkerFormat);
-    const colored = applyThinking(formatted, this.palette);
-    process.stderr.write(colored + "\n");
+    this._transitionTo(Modes.Thinking);
+    this._processContent(formatThinking(event.content, this.thinkerFormat));
   }
 
   emitToolCall(event) {
-    const display = formatToolCall(
-      event.toolName,
-      event.input,
-      this.toolFormat,
+    this._transitionTo(Modes.ToolCall);
+    this._processContent(
+      formatToolCall(event.toolName, event.input, this.toolFormat),
     );
-    const colored = applyToolCall(display, this.palette);
-    process.stdout.write(`\n${colored}`);
   }
 
   emitToolResult(event) {
     if (this.hideTools) return;
-    const colored = applyToolResult(
-      formatToolResult(event.result, this.toolOutputFmt),
-      this.palette,
-    );
-    process.stdout.write(`${colored}\n\n`);
+    this._transitionTo(Modes.ToolResult);
+    this._processContent(formatToolResult(event.result, this.toolOutputFmt));
   }
 
   emitCompacting(event) {
     const display = formatCompacting(event.messageCount, event.keepRecent);
-    const colored = applyCompacting(display, this.palette);
-    process.stdout.write(`\n${colored}\n\n`);
+    this._transitionTo(Modes.System);
+    this._processContent(`${display}\n-----------`);
   }
 
   emitCommandResult(event) {
-    this._flushNl(process.stdout);
-    this._flushText(process.stdout, applyFinalResponse);
-    process.stdout.write(
-      applyFinalResponse(event.content, this.palette) + "\n",
-    );
+    this._transitionTo(Modes.System);
+    this._processContent(event.content);
+    this._flushText();
+    this._flushNl();
   }
 
   emitQuestion(event) {
+    this._transitionTo(Modes.Question);
     for (const q of event.questions) {
-      process.stdout.write(`\n${applyFinalResponse(q.prompt, this.palette)}\n`);
+      this._processContent(`\n${applyFinalResponse(q.prompt, this.palette)}\n`);
       if (q.options) {
         for (let i = 0; i < q.options.length; i++) {
-          process.stdout.write(`    [${i + 1}] ${q.options[i]}\n`);
+          this._processContent(`    [${i + 1}] ${q.options[i]}\n`);
         }
         if (q.allowOther) {
-          process.stdout.write("[Other] Type your own answer\n");
+          this._processContent("[Other] Type your own answer\n");
         } else {
-          process.stdout.write(
+          this._processContent(
             `    Choose a number 1-${q.options.length} or type one of: ${JSON.stringify(q.options)}\n`,
           );
         }
       }
       if (q.default !== undefined) {
-        process.stdout.write(`    (default: ${q.default})\n`);
+        this._processContent(`    (default: ${q.default})\n`);
       }
     }
+    this._flushText();
+    this._flushNl();
   }
 
   emitStreamingChunk(event) {
     if (this.stream) {
       // Detect transition from reasoning → normal
-      if (this._streamMode !== "normal") {
-        this._transitionTo("normal");
+      if (this._outputMode !== Modes.Default) {
+        this._transitionTo(Modes.Default);
       }
-      this._processContent(event.content, process.stdout, applyFinalResponse);
+      this._processContent(event.content);
     }
   }
 
@@ -268,29 +311,33 @@ export class CliOutputSink extends OutputSink {
     // Thinking is streamed to stderr
     if (this.stream) {
       // Detect transition from normal → reasoning
-      if (this._streamMode !== "reasoning") {
-        this._transitionTo("reasoning");
+      if (this._outputMode !== Modes.Thinking) {
+        this._transitionTo(Modes.Thinking);
       }
-      this._processContent(event.content, process.stderr, applyThinking);
+      this._processContent(event.content);
     }
   }
 
   emitTaskProgress(event) {
     const display = formatTaskProgress(event.activeTasks, event.totalTasks);
     if (!display) return;
-    const colored = applyProgress(display, this.palette);
-    process.stdout.write(`\n[${colored}] \n`);
+    this._transitionTo(Modes.Progress);
+    this._processContent(`[${applyProgress(display, this.palette)}]`);
+    this._flushText();
+    this._flushNl();
   }
 
   emitTokenUsage(event) {
+    this._transitionTo(Modes.Progress);
     const display = formatTokenUsage(
       event.promptTokens,
       event.cachedTokens,
       event.completionTokens,
       event.totalTokens,
     );
-    const colored = applyProgress(display, this.palette);
-    process.stdout.write(`\n${colored}\n`);
+    this._processContent(display);
+    this._flushText();
+    this._flushNl();
   }
 
   emitSessionState(event) {
@@ -306,8 +353,7 @@ export class CliOutputSink extends OutputSink {
   }
 
   reset() {
-    this._flushNl(process.stdout);
-    this._flushText(process.stdout, applyFinalResponse);
-    process.stdout.write("\x1b[0m\n");
+    this._flushNl();
+    this.outStream.write("\x1b[0m\n");
   }
 }

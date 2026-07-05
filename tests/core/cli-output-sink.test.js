@@ -71,14 +71,14 @@ describe("CliOutputSink", () => {
     expect(stdoutWrites).toHaveLength(0);
   });
 
-  it("emitCompacting writes to stdout", () => {
+  it("emitCompacting writes to stderr", () => {
     sink.emit({ type: OUTPUT_EVENT.COMPACTING, messageCount: 10, keepRecent: 5 });
-    expect(stdoutWrites.some((w) => w.includes("Compacting"))).toBe(true);
+    expect(stderrWrites.some((w) => w.includes("Compacting"))).toBe(true);
   });
 
-  it("emitCommandResult writes to stdout", () => {
+  it("emitCommandResult writes to stderr", () => {
     sink.emit({ type: OUTPUT_EVENT.COMMAND_RESULT, content: "command done" });
-    expect(stdoutWrites.some((w) => w.includes("command done"))).toBe(true);
+    expect(stderrWrites.some((w) => w.includes("command done"))).toBe(true);
   });
 
   it("emitQuestion writes questions to stdout", () => {
@@ -157,9 +157,9 @@ describe("CliOutputSink", () => {
     expect(stderrWrites).toHaveLength(0);
   });
 
-  it("emitTaskProgress writes progress to stdout", () => {
+  it("emitTaskProgress writes progress to stderr", () => {
     sink.emit({ type: OUTPUT_EVENT.TASK_PROGRESS, activeTasks: 2, totalTasks: 5 });
-    expect(stdoutWrites.some((w) => w.includes("2/5"))).toBe(true);
+    expect(stderrWrites.some((w) => w.includes("2/5"))).toBe(true);
   });
 
   it("emitTaskProgress suppressed when no active tasks", () => {
@@ -167,7 +167,7 @@ describe("CliOutputSink", () => {
     expect(stdoutWrites).toHaveLength(0);
   });
 
-  it("emitTokenUsage writes to stdout", () => {
+  it("emitTokenUsage writes to stderr", () => {
     sink.emit({
       type: OUTPUT_EVENT.TOKEN_USAGE,
       promptTokens: 100,
@@ -175,7 +175,7 @@ describe("CliOutputSink", () => {
       completionTokens: 200,
       totalTokens: 350,
     });
-    expect(stdoutWrites.some((w) => w.includes("tokens"))).toBe(true);
+    expect(stderrWrites.some((w) => w.includes("tokens"))).toBe(true);
   });
 
   it("emitSessionState updates hideTools", () => {

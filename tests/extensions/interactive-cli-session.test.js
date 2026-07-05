@@ -91,7 +91,8 @@ function createMockCore(config = {}) {
 describe("Interactive CLI - cli subcommand handler", () => {
   it("registers a handler that calls runInteractiveSession", async () => {
     const core = createMockCore();
-    const { create } = await import("../../src/extensions/ui-interactive-cli/index.js");
+    const { create } =
+      await import("../../src/extensions/ui-interactive-cli/index.js");
     const ext = create(core);
 
     await ext.hooks[HOOKS.CLI_SUBCOMMANDS_REGISTER](core.cliSubcommandRegistry);
@@ -108,7 +109,8 @@ describe("Interactive CLI - inline shell command", () => {
     const core = createMockCore();
     core.extensions.has = (name) => name === "run-shell-command";
 
-    const { create } = await import("../../src/extensions/ui-interactive-cli/index.js");
+    const { create } =
+      await import("../../src/extensions/ui-interactive-cli/index.js");
     const ext = create(core);
 
     // The extension should have the hooks registered
@@ -322,7 +324,9 @@ describe("Interactive CLI - readline event handling", () => {
 
     console.log = origLog;
 
-    expect(interrupted[0]).toBe("Interrupted (/quit, /exit, or ctrl-d to exit)");
+    expect(interrupted[0]).toBe(
+      "Interrupted (/quit, /exit, or ctrl-d to exit)",
+    );
   });
 });
 
@@ -496,7 +500,8 @@ describe("Interactive CLI - buildAgent function", () => {
     // The buildAgent function calls agent.ensureSystemPrompt()
     // We verify the flow by checking the extension registration
     const core = createMockCore();
-    const { create } = await import("../../src/extensions/ui-interactive-cli/index.js");
+    const { create } =
+      await import("../../src/extensions/ui-interactive-cli/index.js");
     const ext = create(core);
 
     expect(ext.hooks[HOOKS.CLI_SUBCOMMANDS_REGISTER]).toBeDefined();
@@ -526,7 +531,8 @@ describe("Interactive CLI - task manager wiring", () => {
   it("taskManager is wired to sessionManager", async () => {
     // Verify the wiring between taskManager and sessionManager
     const core = createMockCore();
-    const { create } = await import("../../src/extensions/ui-interactive-cli/index.js");
+    const { create } =
+      await import("../../src/extensions/ui-interactive-cli/index.js");
     const ext = create(core);
 
     // The extension registers the cli subcommand
@@ -540,7 +546,10 @@ describe("Interactive CLI - task manager wiring", () => {
 describe("Interactive CLI - message bus creation", () => {
   it("message bus is created with sessionManager and sink", () => {
     // Verify the MessageBus is created with the right parameters
-    const mockSessionManager = { getAgent: () => null, sessionId: () => "test" };
+    const mockSessionManager = {
+      getAgent: () => null,
+      sessionId: () => "test",
+    };
     const mockSink = { emit: () => {} };
 
     const bus = new MessageBus({
@@ -638,7 +647,10 @@ describe("Interactive CLI - AgentSink for task agents", () => {
 
     // Streaming events should be filtered
     taskSink.emit({ type: OUTPUT_EVENT.STREAMING_CHUNK, content: "test" });
-    taskSink.emit({ type: OUTPUT_EVENT.STREAMING_REASONING_CHUNK, content: "test" });
+    taskSink.emit({
+      type: OUTPUT_EVENT.STREAMING_REASONING_CHUNK,
+      content: "test",
+    });
     taskSink.emit({ type: OUTPUT_EVENT.TOOL_CALL, toolName: "read" });
     taskSink.emit({ type: OUTPUT_EVENT.TOOL_RESULT, result: "result" });
     taskSink.emit({ type: OUTPUT_EVENT.ASSISTANT_MESSAGE, content: "test" });
@@ -900,7 +912,7 @@ describe("Interactive CLI - CliOutputSink emit methods", () => {
     expect(written.length).toBe(0);
   });
 
-  it("emitCompacting writes to stdout", () => {
+  it("emitCommandResult writes to stderr", () => {
     const sink = new CliOutputSink({
       palette: ColorPalette.default(),
       hideTools: true,
@@ -908,30 +920,7 @@ describe("Interactive CLI - CliOutputSink emit methods", () => {
     });
 
     const written = [];
-    process.stdout.write = (chunk) => {
-      written.push(chunk);
-      return true;
-    };
-
-    sink.emit({
-      type: OUTPUT_EVENT.COMPACTING,
-      messageCount: 10,
-      keepRecent: 5,
-    });
-
-    expect(written.length).toBe(1);
-    expect(written[0]).toContain("Compacting");
-  });
-
-  it("emitCommandResult writes to stdout", () => {
-    const sink = new CliOutputSink({
-      palette: ColorPalette.default(),
-      hideTools: true,
-      hideThinking: false,
-    });
-
-    const written = [];
-    process.stdout.write = (chunk) => {
+    process.stderr.write = (chunk) => {
       written.push(chunk);
       return true;
     };
@@ -1043,7 +1032,7 @@ describe("Interactive CLI - CliOutputSink emit methods", () => {
     });
 
     const written = [];
-    process.stdout.write = (chunk) => {
+    process.stderr.write = (chunk) => {
       written.push(chunk);
       return true;
     };
@@ -1088,7 +1077,7 @@ describe("Interactive CLI - CliOutputSink emit methods", () => {
     });
 
     const written = [];
-    process.stdout.write = (chunk) => {
+    process.stderr.write = (chunk) => {
       written.push(chunk);
       return true;
     };
@@ -1212,7 +1201,9 @@ describe("Interactive CLI - handleShellCommand", () => {
   it("parses /sh prefix and extracts command", async () => {
     let promptCalled = false;
     const mockRl = {
-      prompt: () => { promptCalled = true; },
+      prompt: () => {
+        promptCalled = true;
+      },
     };
 
     const mockExt = {
@@ -1226,7 +1217,11 @@ describe("Interactive CLI - handleShellCommand", () => {
 
   it("parses /shell prefix and extracts command", async () => {
     let promptCalled = false;
-    const mockRl = { prompt: () => { promptCalled = true; } };
+    const mockRl = {
+      prompt: () => {
+        promptCalled = true;
+      },
+    };
     const mockExt = {
       execute: async (cmd) => ({ content: `result: ${cmd}` }),
     };
@@ -1238,7 +1233,11 @@ describe("Interactive CLI - handleShellCommand", () => {
 
   it("parses :! prefix and extracts command", async () => {
     let promptCalled = false;
-    const mockRl = { prompt: () => { promptCalled = true; } };
+    const mockRl = {
+      prompt: () => {
+        promptCalled = true;
+      },
+    };
     const mockExt = {
       execute: async (cmd) => ({ content: `done: ${cmd}` }),
     };
@@ -1250,7 +1249,11 @@ describe("Interactive CLI - handleShellCommand", () => {
 
   it("parses ! prefix and extracts command", async () => {
     let promptCalled = false;
-    const mockRl = { prompt: () => { promptCalled = true; } };
+    const mockRl = {
+      prompt: () => {
+        promptCalled = true;
+      },
+    };
     const mockExt = {
       execute: async (cmd) => ({ content: `done: ${cmd}` }),
     };
@@ -1266,7 +1269,9 @@ describe("Interactive CLI - handleShellCommand", () => {
 
     let promptCalled = false;
     const mockRl = {
-      prompt: () => { promptCalled = true; },
+      prompt: () => {
+        promptCalled = true;
+      },
     };
 
     const mockExt = { execute: async () => ({}) };
@@ -1283,7 +1288,9 @@ describe("Interactive CLI - handleShellCommand", () => {
 
     let promptCalled = false;
     const mockRl = {
-      prompt: () => { promptCalled = true; },
+      prompt: () => {
+        promptCalled = true;
+      },
     };
 
     const mockExt = { execute: async () => ({}) };
@@ -1300,7 +1307,9 @@ describe("Interactive CLI - handleShellCommand", () => {
 
     let promptCalled = false;
     const mockRl = {
-      prompt: () => { promptCalled = true; },
+      prompt: () => {
+        promptCalled = true;
+      },
     };
 
     const mockExt = { execute: async () => ({}) };
@@ -1341,7 +1350,11 @@ describe("Interactive CLI - handleShellCommand", () => {
 
   it("calls prompt after successful command", async () => {
     let promptCalled = false;
-    const mockRl = { prompt: () => { promptCalled = true; } };
+    const mockRl = {
+      prompt: () => {
+        promptCalled = true;
+      },
+    };
     const mockExt = {
       execute: async () => ({ content: "done" }),
     };
@@ -1367,7 +1380,9 @@ describe("Interactive CLI - handleSlashCommand", () => {
   it("handles help command", () => {
     let promptCalled = false;
     const mockRl = {
-      prompt: () => { promptCalled = true; },
+      prompt: () => {
+        promptCalled = true;
+      },
       close: () => {},
     };
 
@@ -1384,7 +1399,9 @@ describe("Interactive CLI - handleSlashCommand", () => {
     let closeCalled = false;
     const mockRl = {
       prompt: () => {},
-      close: () => { closeCalled = true; },
+      close: () => {
+        closeCalled = true;
+      },
     };
 
     const mockBus = {
@@ -1405,7 +1422,9 @@ describe("Interactive CLI - handleSlashCommand", () => {
     let closeCalled = false;
     const mockRl = {
       prompt: () => {},
-      close: () => { closeCalled = true; },
+      close: () => {
+        closeCalled = true;
+      },
     };
 
     const mockBus = {
@@ -1425,7 +1444,9 @@ describe("Interactive CLI - handleSlashCommand", () => {
   it("handles unknown commands by delegating to bus", async () => {
     let promptCalled = false;
     const mockRl = {
-      prompt: () => { promptCalled = true; },
+      prompt: () => {
+        promptCalled = true;
+      },
       close: () => {},
     };
 
@@ -1447,7 +1468,9 @@ describe("Interactive CLI - handleSlashCommand", () => {
   it("handles model command by delegating to bus", async () => {
     let promptCalled = false;
     const mockRl = {
-      prompt: () => { promptCalled = true; },
+      prompt: () => {
+        promptCalled = true;
+      },
       close: () => {},
     };
 
@@ -1469,7 +1492,9 @@ describe("Interactive CLI - handleSlashCommand", () => {
   it("handles clear command by delegating to bus", async () => {
     let promptCalled = false;
     const mockRl = {
-      prompt: () => { promptCalled = true; },
+      prompt: () => {
+        promptCalled = true;
+      },
       close: () => {},
     };
 
@@ -1512,7 +1537,9 @@ describe("Interactive CLI - createInlineShellCommand", () => {
 
   it("execute resolves with error for invalid command", async () => {
     const handler = createInlineShellCommand();
-    const result = await handler.execute("nonexistent-command-that-does-not-exist-xyz123");
+    const result = await handler.execute(
+      "nonexistent-command-that-does-not-exist-xyz123",
+    );
     expect(result).toBeDefined();
     // Could be content (with exit code) or error depending on shell behavior
     expect(result.content || result.error).toBeDefined();
@@ -1521,32 +1548,38 @@ describe("Interactive CLI - createInlineShellCommand", () => {
 
 describe("Interactive CLI - runInteractiveSession exports", () => {
   it("runInteractiveSession is exported", async () => {
-    const mod = await import("../../src/extensions/ui-interactive-cli/index.js");
+    const mod =
+      await import("../../src/extensions/ui-interactive-cli/index.js");
     expect(typeof mod.runInteractiveSession).toBe("function");
   });
 
   it("handleShellCommand is exported", async () => {
-    const mod = await import("../../src/extensions/ui-interactive-cli/index.js");
+    const mod =
+      await import("../../src/extensions/ui-interactive-cli/index.js");
     expect(typeof mod.handleShellCommand).toBe("function");
   });
 
   it("handleSlashCommand is exported", async () => {
-    const mod = await import("../../src/extensions/ui-interactive-cli/index.js");
+    const mod =
+      await import("../../src/extensions/ui-interactive-cli/index.js");
     expect(typeof mod.handleSlashCommand).toBe("function");
   });
 
   it("createInlineShellCommand is exported", async () => {
-    const mod = await import("../../src/extensions/ui-interactive-cli/index.js");
+    const mod =
+      await import("../../src/extensions/ui-interactive-cli/index.js");
     expect(typeof mod.createInlineShellCommand).toBe("function");
   });
 
   it("create is exported", async () => {
-    const mod = await import("../../src/extensions/ui-interactive-cli/index.js");
+    const mod =
+      await import("../../src/extensions/ui-interactive-cli/index.js");
     expect(typeof mod.create).toBe("function");
   });
 
   it("AsyncInteractiveCliInput is exported", async () => {
-    const mod = await import("../../src/extensions/ui-interactive-cli/index.js");
+    const mod =
+      await import("../../src/extensions/ui-interactive-cli/index.js");
     expect(typeof mod.AsyncInteractiveCliInput).toBe("function");
   });
 });
@@ -1570,4 +1603,3 @@ describe("Interactive CLI - createInlineShellCommand with options", () => {
     expect(result.content).toContain("hello world");
   });
 });
-

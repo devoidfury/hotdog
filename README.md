@@ -186,10 +186,14 @@ Extensions register tools, CLI subcommands, and system prompt chunks via hooks. 
 
 ## Development
 
+[Github Repo](https://github.com/devoidfury/hotdog)
+
 ```sh
 # Run tests, shows failures and coverage
 bun run test
 ```
+
+*Note*: test command can return non-zero when all tests pass if any files are under coverage threshold in bunfig.toml
 
 ## AI Usage Disclosure
 

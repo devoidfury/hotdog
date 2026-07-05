@@ -323,8 +323,8 @@ export async function buildConfig(cliArgv) {
     providers: config.providers || [],
     defaultModel: DEFAULT_MODEL,
     defaultRole: "",
-    profilesPath: cliArgv.skillsPath
-      ? path.join(cliArgv.skillsPath, "..", "profiles")
+    profilesPath: cliArgv.profilesPath
+      ? cliArgv.profilesPath
       : path.join(configDir, DEFAULT_PROFILES_SUBPATH),
   });
 

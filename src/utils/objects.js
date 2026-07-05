@@ -1,6 +1,5 @@
 /**
  * Safely access a nested property path on an object.
- * Returns undefined if any part of the path is missing.
  *
  * @param {object} obj - The object to traverse.
  * @param {string} path - Dot-separated path, e.g. "url" or "nested.value".
@@ -9,7 +8,7 @@
 export function getNested(obj, path) {
   if (!obj || !path) return undefined;
 
-  const parts = path.includes(".") ? path.split(".") : [path];
+  const parts = path.split(".");
   let current = obj;
 
   for (const part of parts) {

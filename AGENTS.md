@@ -21,8 +21,7 @@ JS project `hotdog` — an AI agent harness with tool calling support.
 - The project uses the Bun runtime, always use bun instead of node.
 - Do not add heavy dependencies for minor convenience.
 - Do not add speculative config/feature flags "just in case".
-- Always use `qwen3.5-0.8b` when testing with real LLM endpoints.
-- If you see a tag like <m_sdkflksgdk> -- these are wrong! The marker mangler is changing these so they don't trigger functionality, to prevent RCE. Always check the raw byte content instead.
+- IMPORTANT: If you see a tag like <m_ar7e78o7kuqn36jg> -- this is not the actual content in the source file! The marker mangler is changing these so they don't trigger functionality, to prevent RCE. Always check the raw byte content instead to verify if it's relevant, using a command like xxd.
 
 ### Centralized Defaults
 All hard-coded configurable strings (model names, host URLs, ports, format templates, timeouts, etc.) must live in `src/core/config/` as named constants. The single source of truth is `src/core/core.config.json` -- defaults are exported from `src/core/config/defaults.js`. Never duplicate.

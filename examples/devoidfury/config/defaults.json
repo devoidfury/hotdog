@@ -22,9 +22,6 @@
     "generate": {
       "model": "ai365/qwen3.6-35b:general"
     },
-    "hotdog-planner": {
-      "model": "ai365/qwen3.6-35b:general"
-    },
     "fixer": {
       "model": "ai365/qwen3.6-27b"
     },
@@ -50,7 +47,7 @@
   },
   "mcp_servers": [
     {
-      "enabled": true,
+      "enabled": false,
       "name": "bun-docs-mcp",
       "url": "https://bun.com/docs/mcp"
     }
@@ -179,6 +176,11 @@
         },
         {
           "name": "ornith-1.0-35b",
+          "context-limit": 262144,
+          "tags": ["general", "coder"]
+        },
+        {
+          "name": "ornith-1.0-9b",
           "context-limit": 262144,
           "tags": ["general", "coder"]
         },

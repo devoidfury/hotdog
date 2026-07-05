@@ -792,13 +792,23 @@ export class ExtensionLoader {
 
     if (instance.hooks) {
       for (const [hookName, handler] of Object.entries(instance.hooks)) {
+        // TOOLS_REGISTER and SERVICES_REGISTER are handled directly below,
+        // not wired through the hook system (they need the registry instance,
+        // not the hook notification pattern).
         if (hookName === HOOKS.TOOLS_REGISTER) continue;
+        if (hookName === HOOKS.SERVICES_REGISTER) continue;
         // Pass extension name as source for name prefixing (e.g., chunk names)
         const remove = this._core.hooks.on(hookName, handler, name);
         removers.push(remove);
       }
     }
 
+    // Register services synchronously so they're available to downstream extensions.
+    if (instance.hooks?.[HOOKS.SERVICES_REGISTER]) {
+      instance.hooks[HOOKS.SERVICES_REGISTER](this._core.services);
+    }
+
+    // Register tools (may be async).
     if (instance.hooks?.[HOOKS.TOOLS_REGISTER]) {
       await instance.hooks[HOOKS.TOOLS_REGISTER](this._core.toolRegistry);
     } else if (instance.registerTools) {

@@ -287,6 +287,11 @@ export const HOOKS = {
   // Tool execution
   TOOLS_REGISTER: "tools:register",
   TOOL_BEFORE_EXECUTE: "tool:beforeExecute",
+
+  // Service registration — extensions register abstract service implementations here.
+  // Fired synchronously during extension load so services are available to
+  // downstream extensions. Handler receives the ServiceRegistry instance.
+  SERVICES_REGISTER: "services:register",
   TOOL_AFTER_EXECUTE: "tool:afterExecute",
   LOOP_DETECTED: "loop:detected",
 

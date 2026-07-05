@@ -40,7 +40,8 @@ export {
 } from "./extensions/tool-utils.js";
 
 export {
-  CommandRegistry,
+  AgentCommandRegistry,
+  CliSubcommandRegistry,
   createCommandRegistry,
   createSubcommandRegistry,
 } from "./extensions/registries.js";

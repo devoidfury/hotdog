@@ -45,6 +45,8 @@ The foundation for the extension architecture. `HookSystem` class with `on()`, `
 
 **Tools:** `TOOLS_REGISTER`, `TOOL_BEFORE_EXECUTE`, `TOOL_AFTER_EXECUTE`, `AGENT_TOOL_CONTEXT`, `TOOL_CALL`, `TOOL_RESULT`
 
+**Services:** `SERVICES_REGISTER` — fired synchronously during extension load; handler receives the ServiceRegistry
+
 **Messages:** `CONTEXT`, `CONTEXT_MESSAGE`, `CONTEXT_REPLACED`, `MESSAGES_AFTER_LLM`
 
 **System prompt:** `SYSTEM_PROMPT_BUILD`
@@ -104,11 +106,13 @@ Command parsing — commands are the abstract concept, slash commands (/cmd) are
 - `SessionManager.create(options)` — static factory that builds initial agent
 
 ### Registries (`src/core/extensions/registries.js`)
-Unified command registries for extensions. Key exports:
-- `CommandRegistry` class — supports both agent-level commands and CLI subcommands
-- `createCommandRegistry()` — creates command registry for agent-level commands
-- `createSubcommandRegistry()` — creates CLI subcommand registry
-- Methods: `register()`, `has()`, `names()`, `get()`, `all()`, `match()`, `generateHelpText()`
+Separate registries for agent commands and CLI subcommands. Key exports:
+- `AgentCommandRegistry` — agent-level commands (e.g., /compact, /model). Supports `match()` for custom pattern matching and `isUiCommand` flag.
+- `CliSubcommandRegistry` — CLI subcommands (e.g., `hotdog info`, `hotdog review`). Supports metadata merging (extension.json placeholder → handler attachment).
+- `createCommandRegistry()` — factory for agent command registry
+- `createSubcommandRegistry()` — factory for CLI subcommand registry
+- Common methods: `register()`, `has()`, `names()`, `get()`, `all()`, `generateHelpText()`
+- Agent-only: `match(cmd)` — pattern matching for custom commands
 
 ### Tool Registry (`src/core/extensions/tool-registry.js`)
 Tool registry and common utilities. Key exports:
@@ -124,6 +128,7 @@ Shared context container for tool execution. Backed by a Map. Extensions mount o
 Maps abstract interface names to implementations. Extensions declare services via `extension.json` `services`/`requires` fields. Key exports:
 - `ServiceRegistry` class — `register(name, implementation)`, `get(name)`, `has(name)`, `names()`, `checkContract(name, expectedMethods)`
 - `createServiceRegistry()` — factory function
+- Extensions register services via the `SERVICES_REGISTER` hook, which fires synchronously during `ExtensionLoader.load()` so services are available to downstream extensions.
 
 ### Tool Utilities (`src/core/extensions/tool-utils.js`)
 Tool definition helpers and utilities. Key exports:

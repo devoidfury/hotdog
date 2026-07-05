@@ -96,3 +96,97 @@ describe("ServiceRegistry", () => {
     expect(registry.get("value")).toBe(42);
   });
 });
+
+describe("SERVICES_REGISTER hook integration", () => {
+  it("SERVICES_REGISTER hook is defined in HOOKS", async () => {
+    const { HOOKS } = await import("../../src/core/hooks.js");
+    expect(HOOKS.SERVICES_REGISTER).toBe("services:register");
+  });
+
+  it("ExtensionLoader fires SERVICES_REGISTER during load", async () => {
+    const { createHooks } = await import("../../src/core/hooks.js");
+    const { createToolRegistry } = await import(
+      "../../src/core/extensions/tool-registry.js"
+    );
+    const { createServiceRegistry } = await import(
+      "../../src/core/extensions/service-registry.js"
+    );
+    const { createExtensionLoader } = await import(
+      "../../src/core/extensions/extensions.js"
+    );
+    const { HOOKS } = await import("../../src/core/hooks.js");
+
+    const hooks = createHooks();
+    const toolRegistry = createToolRegistry();
+    const services = createServiceRegistry();
+
+    const core = { hooks, toolRegistry, services };
+    const loader = createExtensionLoader(core);
+
+    // Create a mock extension that registers a service via the hook
+    const mockExtension = {
+      hooks: {
+        [HOOKS.SERVICES_REGISTER]: (registry) => {
+          registry.register("test-service", {
+            doSomething: () => "works",
+          });
+        },
+      },
+    };
+
+    await loader.load("test-ext", mockExtension);
+
+    expect(services.has("test-service")).toBe(true);
+    expect(services.get("test-service").doSomething()).toBe("works");
+  });
+
+  it("services registered via hook are available to downstream extensions", async () => {
+    const { createHooks } = await import("../../src/core/hooks.js");
+    const { createToolRegistry } = await import(
+      "../../src/core/extensions/tool-registry.js"
+    );
+    const { createServiceRegistry } = await import(
+      "../../src/core/extensions/service-registry.js"
+    );
+    const { createExtensionLoader } = await import(
+        "../../src/core/extensions/extensions.js"
+    );
+    const { HOOKS } = await import("../../src/core/hooks.js");
+
+    const hooks = createHooks();
+    const toolRegistry = createToolRegistry();
+    const services = createServiceRegistry();
+
+    const core = { hooks, toolRegistry, services };
+    const loader = createExtensionLoader(core);
+
+    // Extension A provides a service
+    const extA = {
+      hooks: {
+        [HOOKS.SERVICES_REGISTER]: (registry) => {
+          registry.register("session", {
+            start: () => "started",
+            stop: () => "stopped",
+          });
+        },
+      },
+    };
+
+    // Extension B consumes the service — but since services are registered
+    // synchronously during load, the service is available in core.services
+    // by the time extension B's create() runs.
+    let consumedService = null;
+    const extB = {
+      hooks: {},
+    };
+
+    // Load A first
+    await loader.load("ext-a", extA);
+    expect(services.has("session")).toBe(true);
+
+    // At this point, core.services already has "session" available
+    // for any subsequent extension that needs it.
+    consumedService = services.get("session");
+    expect(consumedService.start()).toBe("started");
+  });
+});

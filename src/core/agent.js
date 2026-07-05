@@ -880,7 +880,7 @@ export class Agent {
 
   /**
    * Get the command registry.
-   * @returns {Object} CommandRegistry instance
+   * @returns {AgentCommandRegistry}
    */
   getCommandRegistry() {
     return this._commandRegistry;

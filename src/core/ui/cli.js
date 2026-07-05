@@ -1,7 +1,10 @@
 // CLI output sink — formats and displays agent output with color support.
 
 import { OutputSink, OUTPUT_EVENT, EVENT_HANDLERS } from "../context/output.js";
-import { DEFAULT_TOOL_FMT, DEFAULT_TOOL_OUTPUT_FMT } from "../config/defaults.js";
+import {
+  DEFAULT_TOOL_FMT,
+  DEFAULT_TOOL_OUTPUT_FMT,
+} from "../config/defaults.js";
 import {
   ColorPalette,
   applyThinking,
@@ -85,6 +88,75 @@ export class CliOutputSink extends OutputSink {
     this.palette = options.palette || ColorPalette.default();
     this.hideTools = options.hideTools;
     this.hideThinking = options.hideThinking;
+
+    // ── Newline buffer for streaming output ────────────────────────────────
+    // Buffers trailing newlines to normalize spacing between reasoning and
+    // normal output segments. Some models emit many trailing newlines, some
+    // emit none — this ensures exactly 1 newline separates segments.
+    this._nlBuf = []; // trailing newline buffer (max N)
+    this._maxNlBuf = 3; // max newlines to hold
+    this._textBuf = ""; // pending non-newline text (colored as batch)
+    this._streamMode = null; // 'reasoning' | 'normal' | null — for transition detection
+  }
+
+  /**
+   * Flush buffered newlines to the given stream.
+   */
+  _flushNl(stream) {
+    for (const nl of this._nlBuf) {
+      stream.write(nl);
+    }
+    this._nlBuf = [];
+  }
+
+  /**
+   * Flush the pending text buffer (colored) to the given stream.
+   */
+  _flushText(stream, colorFn) {
+    if (this._textBuf) {
+      stream.write(colorFn(this._textBuf, this.palette));
+      this._textBuf = "";
+    }
+  }
+
+  /**
+   * Process streaming content character by character through the newline buffer.
+   *
+   * Newlines go to _nlBuf; non-newline chars flush the newline buffer first,
+   * then accumulate in _textBuf for batched coloring. At the end of the content,
+   * any remaining _textBuf is flushed.
+   */
+  _processContent(content, stream, colorFn) {
+    for (let i = 0; i < content.length; i++) {
+      const ch = content[i];
+      if (ch === "\n") {
+        // Flush any pending text first, then buffer the newline
+        this._flushText(stream, colorFn);
+        if (this._nlBuf.length < this._maxNlBuf) {
+          this._nlBuf.push(ch);
+        }
+      } else {
+        // Non-newline: flush buffered newlines, then accumulate text
+        this._flushNl(stream);
+        this._textBuf += ch;
+      }
+    }
+    // Flush remaining text buffer (in case content ends with non-newline)
+    this._flushText(stream, colorFn);
+  }
+
+  /**
+   * Called when the streaming mode changes (reasoning ↔ normal).
+   * Flushes any pending text, then resets the newline buffer to contain
+   * exactly one newline so the next segment gets a clean single-line separator.
+   */
+  _transitionTo(mode) {
+    const hadPreviousMode = this._streamMode !== null;
+    this._streamMode = mode;
+    // Only add a separator newline when transitioning between modes,
+    // not on the very first call when there's no previous segment.
+    this._nlBuf = hadPreviousMode ? ["\n"] : [];
+    this._textBuf = "";
   }
 
   /**
@@ -107,10 +179,15 @@ export class CliOutputSink extends OutputSink {
   }
 
   emitUserMessage(event) {
-    process.stdout.write(`\n${event.content}\n\n`);
+    this._flushNl(process.stdout);
+    this._flushText(process.stdout, applyFinalResponse);
+    process.stdout.write(`${event.content}\n`);
   }
 
   emitAssistantMessage(event) {
+    // Flush any remaining buffered newlines before printing the final message
+    this._flushNl(process.stdout);
+    this._flushText(process.stdout, applyFinalResponse);
     process.stdout.write(applyFinalResponse(event.content, this.palette));
   }
 
@@ -129,7 +206,7 @@ export class CliOutputSink extends OutputSink {
       this.toolFormat,
     );
     const colored = applyToolCall(display, this.palette);
-    process.stdout.write(`\n${colored}\n`);
+    process.stdout.write(`\n${colored}`);
   }
 
   emitToolResult(event) {
@@ -148,6 +225,8 @@ export class CliOutputSink extends OutputSink {
   }
 
   emitCommandResult(event) {
+    this._flushNl(process.stdout);
+    this._flushText(process.stdout, applyFinalResponse);
     process.stdout.write(
       applyFinalResponse(event.content, this.palette) + "\n",
     );
@@ -176,7 +255,11 @@ export class CliOutputSink extends OutputSink {
 
   emitStreamingChunk(event) {
     if (this.stream) {
-      process.stdout.write(applyFinalResponse(event.content, this.palette));
+      // Detect transition from reasoning → normal
+      if (this._streamMode !== "normal") {
+        this._transitionTo("normal");
+      }
+      this._processContent(event.content, process.stdout, applyFinalResponse);
     }
   }
 
@@ -184,8 +267,11 @@ export class CliOutputSink extends OutputSink {
     if (this.hideThinking) return;
     // Thinking is streamed to stderr
     if (this.stream) {
-      const colored = applyThinking(event.content, this.palette);
-      process.stderr.write(colored);
+      // Detect transition from normal → reasoning
+      if (this._streamMode !== "reasoning") {
+        this._transitionTo("reasoning");
+      }
+      this._processContent(event.content, process.stderr, applyThinking);
     }
   }
 
@@ -220,6 +306,8 @@ export class CliOutputSink extends OutputSink {
   }
 
   reset() {
+    this._flushNl(process.stdout);
+    this._flushText(process.stdout, applyFinalResponse);
     process.stdout.write("\x1b[0m\n");
   }
 }

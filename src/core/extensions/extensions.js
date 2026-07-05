@@ -639,11 +639,15 @@ export function resolveExtensionDependencies(
   const serviceMap = buildServiceProviderMap(allDiscovered, serviceOverrides);
 
   const result = new Map();
+  const visiting = new Set();
 
   function addWithDeps(extName) {
     if (result.has(extName)) return;
+    if (visiting.has(extName)) return; // Guard against circular dependencies
     const ext = extMap.get(extName);
     if (!ext) return;
+
+    visiting.add(extName);
 
     // Concrete extension dependencies
     for (const dep of ext.dependsOn) {
@@ -660,6 +664,7 @@ export function resolveExtensionDependencies(
       }
     }
 
+    visiting.delete(extName);
     result.set(extName, ext);
   }
 
@@ -780,7 +785,7 @@ export class ExtensionLoader {
       this._entryPoints.set(name, entryPoint);
     }
 
-    if (createOptions.provides) {
+    if (createOptions.provides || createOptions.dependsOn) {
       this._metadata.set(name, {
         provides: createOptions.provides,
         dependsOn: createOptions.dependsOn || [],

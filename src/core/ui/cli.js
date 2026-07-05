@@ -124,6 +124,7 @@ export class CliOutputSink extends OutputSink {
     this.palette = options.palette || ColorPalette.default();
     this.hideTools = options.hideTools;
     this.hideThinking = options.hideThinking;
+    this.hideUserMessage = options.hideUserMessage;
 
     // ── Newline buffer for streaming output ────────────────────────────────
     // Buffers trailing newlines to normalize spacing between reasoning and
@@ -231,6 +232,7 @@ export class CliOutputSink extends OutputSink {
   }
 
   emitUserMessage(event) {
+    if (this.hideUserMessage) return;
     this._transitionTo(Modes.User);
     this._processContent(event.content);
   }

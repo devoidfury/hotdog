@@ -39,6 +39,12 @@ describe("CliOutputSink", () => {
     expect(stdoutWrites.some((w) => w.includes("hello"))).toBe(true);
   });
 
+  it("emitUserMessage is suppressed when hideUserMessage is true", () => {
+    sink.hideUserMessage = true;
+    sink.emit({ type: OUTPUT_EVENT.USER_MESSAGE, content: "hello" });
+    expect(stdoutWrites).toHaveLength(0);
+  });
+
   it("emitAssistantMessage writes to stdout", () => {
     sink.emit({ type: OUTPUT_EVENT.ASSISTANT_MESSAGE, content: "answer" });
     expect(stdoutWrites.some((w) => w.includes("answer"))).toBe(true);

@@ -204,6 +204,9 @@ export async function runInteractiveSession(cli, core, options = {}) {
     toolFormat: cli.toolfmt ?? config.toolfmt ?? "  → {} {}",
     toolOutputFmt:
       cli.toolOutputFmt ?? config.toolOutputFmt ?? "----\n{}\n----",
+    // Readline already echoes user input, so skip the sink's user message display.
+    // One-shot and websocket modes still need it (no readline echo).
+    hideUserMessage: true,
   });
 
   // Build LLM client

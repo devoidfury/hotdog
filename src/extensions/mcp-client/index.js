@@ -7,6 +7,7 @@
 
 import { HOOKS } from '../../core/hooks.js';
 import { logger } from '../../core/logger.js';
+import { formatError } from '../../core/error.js';
 import { McpConnection } from './connection.js';
 import { McpTool } from './tools.js';
 
@@ -72,7 +73,7 @@ export function create(core) {
               registry.register(tool.registeredName, tool);
             }
           } catch (e) {
-            logger.error(`[mcp] Failed to connect to server '${server.name}': ${e.message}`);
+            logger.error(`[mcp] Failed to connect to server '${server.name}': ${formatError(e)}`);
           }
         }
       },
@@ -124,7 +125,7 @@ async function _connectServer(server) {
     }
     return null;
   } catch (e) {
-    logger.error(`[mcp] Failed to connect to '${server.name}': ${e.message}`);
+    logger.error(`[mcp] Failed to connect to '${server.name}': ${formatError(e)}`);
     return null;
   }
 }
@@ -140,7 +141,7 @@ async function _shutdownAll(connections) {
     try {
       await conn.shutdown();
     } catch (e) {
-      logger.error(`[mcp] Error shutting down connection: ${e.message}`);
+      logger.error(`[mcp] Error shutting down connection: ${formatError(e)}`);
     }
   }
 }

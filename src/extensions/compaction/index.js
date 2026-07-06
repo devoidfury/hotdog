@@ -15,7 +15,7 @@ import { TrimStrategy } from './strategies/trim.js';
 import { estimateContextTokens } from './utils.js';
 import { HOOKS } from '../../core/hooks.js';
 import { logger } from '../../core/logger.js';
-import { LlmError } from '../../core/error.js';
+import { LlmError, formatError } from '../../core/error.js';
 import { Message } from '../../core/context/message.js';
 
 /**
@@ -286,7 +286,7 @@ export function create(core) {
 
     } catch (e) {
       // Compaction failure is non-fatal — log and continue
-      logger.error(`[compaction] error: ${e.message}`);
+      logger.error(`[compaction] error: ${formatError(e)}`);
     }
   }
 }

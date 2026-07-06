@@ -547,7 +547,7 @@ export class Agent {
         const toolName = tc.function?.name || "(unknown)";
         const toolCallId = tc.id || "";
         const errorMsg = `Tool execution failed: ${e.message}`;
-        logger.error(`[tool:error] ${toolName}: ${e.message}`);
+        logger.error(`[tool:error] ${toolName}: ${formatError(e)}`);
 
         result = await this._writeToolResult(
           toolName,

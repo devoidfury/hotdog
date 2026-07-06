@@ -4,7 +4,17 @@
 
 import { reactiveState, effect } from "./utils.js";
 import { createMessageList } from "./message-list.js";
-import { logger } from "../../core/logger.js";
+
+// Browser-compatible logger — avoids importing Node.js logger which uses
+// process.env and process.stdout that don't exist in browser environments.
+const logger = {
+  error: (msg, data) => {
+    console.error("[chat]", msg, data || "");
+  },
+  warn: (msg, data) => {
+    console.warn("[chat]", msg, data || "");
+  },
+};
 
 /**
  * Create a chat controller for a WebSocket connection.

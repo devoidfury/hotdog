@@ -7,6 +7,7 @@ import { spawn } from "node:child_process";
 import { Readable } from "node:stream";
 import { parseMcpInitializeResponse, parseMcpToolsListResponse, parseMcpToolCallResponse, contentBlocksToString, jsonRpcRequest, jsonRpcNotification, mcpToolCallRequest, mcpInitializeRequest } from "./types.js";
 import { logger } from "../../core/logger.js";
+import { formatError } from "../../core/error.js";
 
 /**
  * MCP error types.
@@ -122,7 +123,7 @@ export class McpClient {
         }
       } catch (e) {
         if (!this._cancelled) {
-          logger.error(`MCP reader error: ${e.message}`);
+          logger.error(`MCP reader error: ${formatError(e)}`);
         }
       }
     })();

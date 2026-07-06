@@ -88,7 +88,7 @@ export function formatTokenUsage(
   completionTokens,
   totalTokens,
 ) {
-  return `(tokens cached:${cachedTokens} prompt:${promptTokens - cachedTokens} completion:${completionTokens} total:${totalTokens})\n`;
+  return `(tokens cached:${cachedTokens} prompt:${promptTokens} completion:${completionTokens} total:${totalTokens})\n`;
 }
 
 /**
@@ -125,6 +125,7 @@ export class CliOutputSink extends OutputSink {
     this.hideTools = options.hideTools;
     this.hideThinking = options.hideThinking;
     this.hideUserMessage = options.hideUserMessage;
+    this.showTokenUse = options.showTokenUse !== false;
 
     // ── Newline buffer for streaming output ────────────────────────────────
     // Buffers trailing newlines to normalize spacing between reasoning and
@@ -322,6 +323,7 @@ export class CliOutputSink extends OutputSink {
   }
 
   emitTokenUsage(event) {
+    if (!this.showTokenUse) return;
     this._transitionTo(Modes.Progress);
     const display = formatTokenUsage(
       event.promptTokens,

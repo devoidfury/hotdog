@@ -26,7 +26,7 @@ describe("CliOutputSink", () => {
       stderrWrites.push(s);
       return true;
     });
-    sink = new CliOutputSink({ useColors: false });
+    sink = new CliOutputSink({ useColors: false, showTokenUse: true });
   });
 
   afterEach(() => {

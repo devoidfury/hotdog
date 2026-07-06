@@ -77,6 +77,20 @@ export class Agent {
     for (const [type, def] of Object.entries(CORE_COMMAND_HANDLERS)) {
       this._commandRegistry.register(type, def);
     }
+    // Token usage tracking — accumulates session totals and saves last-reported values.
+    this._tokenUsage = {
+      // Accumulated session totals (real prompt = prompt - cached).
+      promptTokens: 0,
+      cachedTokens: 0,
+      completionTokens: 0,
+      totalTokens: 0,
+      turns: 0,
+      // Last-reported values from the provider.
+      lastPromptTokens: 0,
+      lastCachedTokens: 0,
+      lastCompletionTokens: 0,
+      lastTotalTokens: 0,
+    };
   }
 
   // ── Properties ────────────────────────────────────────────────────────────
@@ -136,6 +150,19 @@ export class Agent {
   }
   get iterationCount() {
     return this._iterationCount;
+  }
+  /**
+   * Get token usage for this session — both accumulated totals and the
+   * last-reported values from the provider.
+   * @returns {{
+   *   promptTokens: number, cachedTokens: number, completionTokens: number,
+   *   totalTokens: number, turns: number,
+   *   lastPromptTokens: number, lastCachedTokens: number,
+   *   lastCompletionTokens: number, lastTotalTokens: number
+   * }}
+   */
+  getTokenUsage() {
+    return { ...this._tokenUsage };
   }
   get sessionId() {
     return this._sessionId;
@@ -359,20 +386,44 @@ export class Agent {
     throw AgentError.MaxIterations(this._maxIterations);
   }
 
-  /** Emit token usage. */
+  /** Emit token usage — always accumulates session totals and saves last-reported values. */
   _emitTokenUsage(response) {
-    if (
-      this._showTokenUse &&
-      response.usage &&
-      !response.usage.__didEmitTokenUsage
-    ) {
+    if (response.usage && !response.usage.__didEmitTokenUsage) {
       response.usage.__didEmitTokenUsage = true;
-      this._emitOutput("token_usage", {
-        promptTokens: response.usage.prompt_tokens || 0,
-        cachedTokens: response.usage.prompt_tokens_details?.cached_tokens || 0,
-        completionTokens: response.usage.completion_tokens || 0,
-        totalTokens: response.usage.total_tokens || 0,
-      });
+      const u = response.usage;
+
+      // Per-call values from the provider.
+      const promptTokens = u.prompt_tokens || 0;
+      const cachedTokens = u.prompt_tokens_details?.cached_tokens || 0;
+      const completionTokens = u.completion_tokens || 0;
+      const totalTokens = u.total_tokens || 0;
+
+      // Accumulate session totals. Real prompt = prompt - cached (cached tokens are free).
+      this._tokenUsage.promptTokens += promptTokens - cachedTokens;
+      this._tokenUsage.cachedTokens += cachedTokens;
+      this._tokenUsage.completionTokens += completionTokens;
+      this._tokenUsage.totalTokens += totalTokens;
+      this._tokenUsage.turns += 1;
+
+      // Save last-reported values for reference.
+      this._tokenUsage.lastPromptTokens = promptTokens;
+      this._tokenUsage.lastCachedTokens = cachedTokens;
+      this._tokenUsage.lastCompletionTokens = completionTokens;
+      this._tokenUsage.lastTotalTokens = totalTokens;
+
+      if (this._showTokenUse) {
+        this._emitOutput("token_usage", {
+          promptTokens: this._tokenUsage.promptTokens,
+          cachedTokens: this._tokenUsage.cachedTokens,
+          completionTokens: this._tokenUsage.completionTokens,
+          totalTokens: this._tokenUsage.totalTokens,
+          turns: this._tokenUsage.turns,
+          lastPromptTokens: this._tokenUsage.lastPromptTokens,
+          lastCachedTokens: this._tokenUsage.lastCachedTokens,
+          lastCompletionTokens: this._tokenUsage.lastCompletionTokens,
+          lastTotalTokens: this._tokenUsage.lastTotalTokens,
+        });
+      }
     }
   }
 
@@ -457,7 +508,6 @@ export class Agent {
    */
   async _processStream(stream) {
     const textParts = [];
-    let fullReasoning = null;
     const reasoningParts = [];
     const toolCallsBuffer = new Map();
     let usage = null;
@@ -585,9 +635,18 @@ export class Agent {
     const t0 = Date.now();
 
     // Guard: reject empty or missing tool names before any further processing.
-    if (!toolName || typeof toolName !== "string" || toolName.trim().length === 0) {
+    if (
+      !toolName ||
+      typeof toolName !== "string" ||
+      toolName.trim().length === 0
+    ) {
       const result = `Tool call missing a valid name (got: ${JSON.stringify(toolName)})`;
-      this._emitOutput("tool_result", { toolName: "(invalid)", input, result, toolCallId });
+      this._emitOutput("tool_result", {
+        toolName: "(invalid)",
+        input,
+        result,
+        toolCallId,
+      });
       const msg = new Message({
         role: "tool",
         content: result,
@@ -869,6 +928,17 @@ export class Agent {
     this._log.clear();
     this._systemPrompt = null;
     this._iterationCount = 0;
+    this._tokenUsage = {
+      promptTokens: 0,
+      cachedTokens: 0,
+      completionTokens: 0,
+      totalTokens: 0,
+      turns: 0,
+      lastPromptTokens: 0,
+      lastCachedTokens: 0,
+      lastCompletionTokens: 0,
+      lastTotalTokens: 0,
+    };
     await this.ensureSystemPrompt();
   }
 

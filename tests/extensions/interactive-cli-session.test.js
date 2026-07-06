@@ -1074,6 +1074,7 @@ describe("Interactive CLI - CliOutputSink emit methods", () => {
       palette: ColorPalette.default(),
       hideTools: true,
       hideThinking: false,
+      showTokenUse: true,
     });
 
     const written = [];
@@ -1166,7 +1167,7 @@ describe("Interactive CLI - format helpers", () => {
   it("formatTokenUsage produces correct format", () => {
     const result = formatTokenUsage(100, 50, 50, 150);
     expect(result).toBe(
-      "(tokens cached:50 prompt:50 completion:50 total:150)\n",
+      "(tokens cached:50 prompt:100 completion:50 total:150)\n",
     );
   });
 

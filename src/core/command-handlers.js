@@ -35,12 +35,48 @@ export function handleHelp() {
 }
 
 /**
- * Handler for /tokens — shows token stats.
+ * Handler for /tokens — shows accumulated token usage stats and last-reported values.
  *
+ * @param {Object} agent - Agent instance.
  * @returns {{content: string}} Response content.
  */
-export function handleTokens() {
-  return { content: "Token stats not yet tracked." };
+export function handleTokens(agent) {
+  const u = agent.getTokenUsage();
+  if (u.turns === 0) {
+    return { content: "No token usage recorded yet." };
+  }
+
+  const realPrompt = u.promptTokens; // already accumulated as (prompt - cached)
+  const lines = [
+    `Token usage (${u.turns} turn${u.turns === 1 ? "" : "s"}):`,
+    `  prompt:      ${realPrompt.toLocaleString()} tokens`,
+    `  cached:      ${u.cachedTokens.toLocaleString()} tokens`,
+    `  completion:  ${u.completionTokens.toLocaleString()} tokens`,
+    `  total:       ${u.totalTokens.toLocaleString()} tokens`,
+  ];
+
+  if (realPrompt > 0) {
+    const cacheRate = ((u.cachedTokens / (realPrompt + u.cachedTokens)) * 100).toFixed(1);
+    lines.push(`  cache hit:   ${cacheRate}% of prompt tokens`);
+  }
+
+  // Last-reported values from the provider.
+  lines.push("");
+  lines.push("Last call:");
+  lines.push(
+    `  prompt:      ${(u.lastPromptTokens || 0).toLocaleString()} tokens`,
+  );
+  lines.push(
+    `  cached:      ${(u.lastCachedTokens || 0).toLocaleString()} tokens`,
+  );
+  lines.push(
+    `  completion:  ${(u.lastCompletionTokens || 0).toLocaleString()} tokens`,
+  );
+  lines.push(
+    `  total:       ${(u.lastTotalTokens || 0).toLocaleString()} tokens`,
+  );
+
+  return { content: lines.join("\n") };
 }
 
 /**

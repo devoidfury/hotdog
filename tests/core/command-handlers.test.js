@@ -40,9 +40,89 @@ describe("handleHelp", () => {
 });
 
 describe("handleTokens", () => {
-  it("returns token stats placeholder", () => {
-    const result = handleTokens();
-    expect(result.content).toContain("not yet tracked");
+  it("returns no-usage message when no turns recorded", () => {
+    const agent = {
+      getTokenUsage: mock(() => ({
+        promptTokens: 0,
+        cachedTokens: 0,
+        completionTokens: 0,
+        totalTokens: 0,
+        turns: 0,
+        lastPromptTokens: 0,
+        lastCachedTokens: 0,
+        lastCompletionTokens: 0,
+        lastTotalTokens: 0,
+      })),
+    };
+    const result = handleTokens(agent);
+    expect(result.content).toContain("No token usage recorded");
+  });
+
+  it("displays accumulated totals with real prompt (prompt - cached)", () => {
+    const agent = {
+      getTokenUsage: mock(() => ({
+        // Accumulated: 2 calls, each with prompt=1000, cached=400, completion=200
+        promptTokens: 1200,    // (1000-400) + (1000-400) = 1200 real prompt
+        cachedTokens: 800,     // 400 + 400
+        completionTokens: 400, // 200 + 200
+        totalTokens: 2400,     // 1200 + 800 + 400
+        turns: 2,
+        // Last-reported from the most recent provider call
+        lastPromptTokens: 1000,
+        lastCachedTokens: 400,
+        lastCompletionTokens: 200,
+        lastTotalTokens: 1600,
+      })),
+    };
+    const result = handleTokens(agent);
+    expect(result.content).toContain("Token usage (2 turns):");
+    expect(result.content).toContain("prompt:      1,200 tokens");
+    expect(result.content).toContain("cached:      800 tokens");
+    expect(result.content).toContain("completion:  400 tokens");
+    expect(result.content).toContain("total:       2,400 tokens");
+    // cache hit: 800 / (1200 + 800) = 40.0%
+    expect(result.content).toContain("cache hit:   40.0% of prompt tokens");
+    expect(result.content).toContain("Last call:");
+    expect(result.content).toContain("prompt:      1,000 tokens");
+    expect(result.content).toContain("cached:      400 tokens");
+    expect(result.content).toContain("completion:  200 tokens");
+    expect(result.content).toContain("total:       1,600 tokens");
+  });
+
+  it("handles single turn (no plural)", () => {
+    const agent = {
+      getTokenUsage: mock(() => ({
+        promptTokens: 100,
+        cachedTokens: 0,
+        completionTokens: 50,
+        totalTokens: 150,
+        turns: 1,
+        lastPromptTokens: 100,
+        lastCachedTokens: 0,
+        lastCompletionTokens: 50,
+        lastTotalTokens: 150,
+      })),
+    };
+    const result = handleTokens(agent);
+    expect(result.content).toContain("Token usage (1 turn):");
+  });
+
+  it("omits cache hit line when real prompt tokens are zero", () => {
+    const agent = {
+      getTokenUsage: mock(() => ({
+        promptTokens: 0,       // all prompt was cached
+        cachedTokens: 100,
+        completionTokens: 50,
+        totalTokens: 150,
+        turns: 1,
+        lastPromptTokens: 100,
+        lastCachedTokens: 100,
+        lastCompletionTokens: 50,
+        lastTotalTokens: 150,
+      })),
+    };
+    const result = handleTokens(agent);
+    expect(result.content).not.toContain("cache hit");
   });
 });
 

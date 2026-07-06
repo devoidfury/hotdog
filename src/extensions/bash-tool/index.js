@@ -16,6 +16,11 @@ import extensionData from "./extension.json";
 export class BashTool {
   static TOOL_NAME = "bash";
 
+  /**
+   * @param {Object} [options]
+   * @param {number} [options.timeoutMs] - Command timeout in milliseconds.
+   * @param {number} [options.maxOutputLines] - Maximum output lines.
+   */
   constructor(options = {}) {
     this.timeoutMs =
       options.timeoutMs ??
@@ -25,6 +30,10 @@ export class BashTool {
       extensionData.configSchema.bashTool.properties.maxToolOutputLines.default;
   }
 
+  /**
+   * Get tool definition for OpenAI API.
+   * @returns {Object} Tool definition.
+   */
   toToolDef() {
     return toolDef(
       BashTool.TOOL_NAME,
@@ -41,10 +50,21 @@ export class BashTool {
     );
   }
 
+  /**
+   * Get display string for tool call.
+   * @param {string|Object|null} input - Tool input.
+   * @returns {string} Display string.
+   */
   callDisplay(input) {
     return defaultCallDisplay(input, (args) => `bash: ${args.command}`);
   }
 
+  /**
+   * Execute bash command.
+   * @param {string|Object|null} input - Tool input with command field.
+   * @param {Object} ctx - Tool context.
+   * @returns {Promise<ToolResult>} Tool execution result.
+   */
   async execute(input, ctx) {
     const args = parseToolInput(input);
     if (!args) {

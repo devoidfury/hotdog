@@ -6,6 +6,10 @@ import { Command } from "./commands.js";
 
 /**
  * Handler for /clear — clears context and resets system prompt.
+ *
+ * @param {Object} agent - Agent instance.
+ * @param {string} [value] - Optional value (ignored).
+ * @returns {void}
  */
 export async function handleClear(agent, value) {
   await agent.clearContext();
@@ -14,6 +18,8 @@ export async function handleClear(agent, value) {
 
 /**
  * Handler for /quit — tells the UI to quit.
+ *
+ * @returns {{error: string}} Error message.
  */
 export function handleQuit() {
   return { error: "UI command: quit" };
@@ -21,6 +27,8 @@ export function handleQuit() {
 
 /**
  * Handler for /help — tells the UI to show help.
+ *
+ * @returns {{error: string}} Error message.
  */
 export function handleHelp() {
   return { error: "UI command: help" };
@@ -28,6 +36,8 @@ export function handleHelp() {
 
 /**
  * Handler for /tokens — shows token stats.
+ *
+ * @returns {{content: string}} Response content.
  */
 export function handleTokens() {
   return { content: "Token stats not yet tracked." };
@@ -35,6 +45,9 @@ export function handleTokens() {
 
 /**
  * Handler for /tools — toggles tool call display.
+ *
+ * @param {Object} agent - Agent instance.
+ * @returns {{content: string}} Response content.
  */
 export function handleTools(agent) {
   agent.hideTools = !agent.hideTools;
@@ -47,6 +60,9 @@ export function handleTools(agent) {
 
 /**
  * Handler for /thinking — toggles thinking display.
+ *
+ * @param {Object} agent - Agent instance.
+ * @returns {{content: string}} Response content.
  */
 export function handleThinking(agent) {
   agent.hideThinking = !agent.hideThinking;
@@ -61,6 +77,9 @@ export function handleThinking(agent) {
 
 /**
  * Handler for /regenerate — regenerates the system prompt.
+ *
+ * @param {Object} agent - Agent instance.
+ * @returns {Promise<{content: string}>} Response content.
  */
 export async function handleRegenerate(agent) {
   agent._systemPrompt = null;
@@ -70,6 +89,10 @@ export async function handleRegenerate(agent) {
 
 /**
  * Handler for /reasoning — sets the reasoning effort level.
+ *
+ * @param {Object} agent - Agent instance.
+ * @param {string} [value] - Reasoning effort level ("none", "minimal", "low", "high", "xhigh", "max", "unset").
+ * @returns {{content: string}} Response content.
  */
 export function handleReasoning(agent, value) {
   const valid = ["none", "minimal", "low", "high", "xhigh", "max", "unset"];

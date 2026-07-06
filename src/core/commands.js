@@ -22,9 +22,9 @@ export const Command = {
 /**
  * Parse a raw command string into a typed command object.
  *
- * @param {string} cmd - Raw command string
- * @param {Object} [registry] - Optional CommandRegistry for custom commands
- * @returns {Object} Parsed command object { type, value }
+ * @param {string} cmd - Raw command string.
+ * @param {Object} [registry] - Optional CommandRegistry for custom commands.
+ * @returns {Object} Parsed command object { type, value }.
  */
 export function parseCommand(cmd, registry) {
   if (!cmd) return { type: Command.Unknown, value: null };

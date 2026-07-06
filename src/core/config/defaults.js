@@ -13,6 +13,7 @@ import { CONFIG_SCHEMA, getLayerDefault } from "./schema-loader.js";
  * Get the default value for a schema key.
  * Handles both static values and function defaults.
  *
+ * @private
  * @param {string} keyName - The config key name.
  * @returns {*} The default value (static, not function-evaluated).
  */

@@ -40,6 +40,10 @@ export const EVENT_HANDLERS = {
 
 /**
  * Create an output event.
+ *
+ * @param {number} type - Event type constant.
+ * @param {Object} [data] - Event data payload.
+ * @returns {{type: number, ...data}} Output event object.
  */
 export function outputEvent(type, data = {}) {
   return { type, ...data };
@@ -50,76 +54,143 @@ export function outputEvent(type, data = {}) {
  * The Agent only depends on this interface, never on a specific UI.
  */
 export class OutputSink {
+  /**
+   * @param {Object} [options]
+   * @param {boolean} [options.stream=true] - Enable streaming output
+   */
   constructor(options = {}) {
     this.stream = options.stream !== false;
   }
 
+  /**
+   * Emit an output event.
+   * @param {Object} event - Output event object.
+   */
   emit(event) {
     const handler = EVENT_HANDLERS[event.type];
     if (handler) this[handler](event);
   }
 
+  /**
+   * Emit user message event.
+   * @param {Object} event - Event with content field.
+   */
   emitUserMessage(event) {
     // User messages are typically echoed back
   }
 
+  /**
+   * Emit assistant message event.
+   * @param {Object} event - Event with content field.
+   */
   emitAssistantMessage(event) {
     process.stdout.write(event.content);
   }
 
+  /**
+   * Emit thinking event.
+   * @param {Object} event - Event with content field.
+   */
   emitThinking(event) {
     process.stderr.write(event.content);
   }
 
+  /**
+   * Emit tool call event.
+   * @param {Object} event - Event with tool call details.
+   */
   emitToolCall(event) {
     // Tool calls are displayed by the agent loop
   }
 
+  /**
+   * Emit tool result event.
+   * @param {Object} event - Event with tool result details.
+   */
   emitToolResult(event) {
     // Tool results are displayed by the agent loop
   }
 
+  /**
+   * Emit compacting event.
+   * @param {Object} event - Event with compacting details.
+   */
   emitCompacting(event) {
     // Compacting is displayed by the agent loop
   }
 
+  /**
+   * Emit compaction result event.
+   * @param {Object} event - Event with compaction result details.
+   */
   emitCompactionResult(event) {
     // Compaction result is displayed by the agent loop
   }
 
+  /**
+   * Emit session state event.
+   * @param {Object} event - Event with state change details.
+   */
   emitSessionState(event) {
     // Session state changes (e.g., hideTools toggle) — no-op in base class
     // Subclasses can override to react to state changes
   }
 
+  /**
+   * Emit command result event.
+   * @param {Object} event - Event with command result details.
+   */
   emitCommandResult(event) {
     process.stdout.write(event.content + "\n");
   }
 
+  /**
+   * Emit question event.
+   * @param {Object} event - Event with question details.
+   */
   emitQuestion(event) {
     // Questions are handled by the agent loop
   }
 
+  /**
+   * Emit streaming chunk event.
+   * @param {Object} event - Event with streaming content.
+   */
   emitStreamingChunk(event) {
     if (this.stream) {
       process.stdout.write(event.content);
     }
   }
 
+  /**
+   * Emit streaming reasoning chunk event.
+   * @param {Object} event - Event with reasoning content.
+   */
   emitStreamingReasoningChunk(event) {
     if (this.stream) {
       process.stderr.write(event.content);
     }
   }
 
+  /**
+   * Emit task progress event.
+   * @param {Object} event - Event with task progress details.
+   */
   emitTaskProgress(event) {
     // Task progress is displayed by the agent loop
   }
 
+  /**
+   * Emit token usage event.
+   * @param {Object} event - Event with token usage details.
+   */
   emitTokenUsage(event) {
     // Token usage is displayed by the agent loop
   }
 
+  /**
+   * Reset the output sink.
+   */
   reset() {}
 }
 
@@ -127,5 +198,9 @@ export class OutputSink {
  * No-op output sink that silently discards all events.
  */
 export class NoopSink {
+  /**
+   * Emit event (silently ignored).
+   * @param {Object} _event - Output event object (unused).
+   */
   emit(_event) {}
 }

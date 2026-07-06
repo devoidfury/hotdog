@@ -11,9 +11,22 @@ import { createMarkerMangler } from "../marker-mangler.js";
 import { LlmError } from "../error.js";
 
 /**
- * LLM client builder.
+ * LLM client for communicating with AI providers.
+ * Provides HTTP transport, streaming (SSE), and retry logic.
  */
 export class LlmClient {
+  /**
+   * @param {Object} options
+   * @param {string} [options.baseUrl] - Base URL for API requests
+   * @param {string} [options.apiKey] - API key for authentication
+   * @param {string} [options.sessionId] - Session ID for affinity
+   * @param {boolean} [options.loud] - Log full JSON responses
+   * @param {number} [options.chatTimeoutSecs] - Request timeout in seconds
+   * @param {boolean} [options.stream] - Enable streaming responses
+   * @param {Array<{name: string, url: string, apiKey?: string}>} [options.providers] - Provider configurations
+   * @param {boolean} [options.cancelled] - Cancellation flag
+   * @param {Object} [options.markerMangler] - Custom marker mangler for escaping
+   */
   constructor(options = {}) {
     this.baseUrl = options.baseUrl || process.env.AI_URL || DEFAULT_AI_URL;
     this.apiKey = options.apiKey || process.env.AI_API_KEY || null;
@@ -32,6 +45,9 @@ export class LlmClient {
   /**
    * Resolve provider-specific settings from a model name.
    * Model names are in `provider/model` format.
+   *
+   * @param {string} modelName - Model name with optional provider prefix (e.g., "openai/gpt-4").
+   * @returns {{url: string, apiKey: string|null}} Provider-specific URL and API key.
    */
   resolveProviderSettings(modelName) {
     const providerName = modelName.split("/")[0];
@@ -47,6 +63,8 @@ export class LlmClient {
 
   /**
    * Check connectivity to the AI URL.
+   *
+   * @returns {Promise<void>} Resolves if the URL is reachable, rejects on error.
    */
   async ping() {
     try {
@@ -63,6 +81,10 @@ export class LlmClient {
    * Escape protected markers in messages before sending to the model.
    * Returns a new array of cloned messages with escaped content.
    * Handles both string content and array content (with image_url parts).
+   *
+   * @private
+   * @param {Array<{role: string, content: string|Array, toolCalls?: Array}>} messages - Messages to escape.
+   * @returns {Array} Escaped messages.
    */
   _escapeMessages(messages) {
     if (!this._mangler) return messages;
@@ -103,7 +125,17 @@ export class LlmClient {
   }
 
   /**
-   * Build a chat request body.
+   * Build a chat request body for the LLM API.
+   *
+   * @param {Array<{role: string, content: string|Array}>} messages - Chat messages.
+   * @param {Object} modelConfig - Model configuration.
+   * @param {string} modelConfig.name - Model name.
+   * @param {number|null} [modelConfig.temperature] - Sampling temperature.
+   * @param {number|null} [modelConfig.maxTokens] - Maximum tokens.
+   * @param {number|null} [modelConfig.reasoningEffort] - Reasoning effort level.
+   * @param {Array} [tools] - Tool definitions.
+   * @param {boolean} [stream] - Whether to enable streaming.
+   * @returns {Object} OpenAI-compatible request body.
    */
   buildChatRequest(messages, modelConfig, tools, stream = this.stream) {
     const modelName = modelConfig.name.split("/").pop() || modelConfig.name;
@@ -138,6 +170,11 @@ export class LlmClient {
 
   /**
    * Send a chat request with retries.
+   *
+   * @param {Array<{role: string, content: string|Array}>} messages - Chat messages.
+   * @param {string} model - Model name.
+   * @param {Array} [tools] - Tool definitions.
+   * @returns {Promise<Object>} Response with { type: "content", fullText, reasoningContent, toolCalls, usage }.
    */
   async chat(messages, model, tools = []) {
     const modelConfig = {
@@ -158,6 +195,11 @@ export class LlmClient {
 
   /**
    * Send a chat request with streaming. Returns an async generator of StreamEvents.
+   *
+   * @param {Array<{role: string, content: string|Array}>} messages - Chat messages.
+   * @param {string} model - Model name.
+   * @param {Array} [tools] - Tool definitions.
+   * @returns {AsyncGenerator<{type: string, content?: string, reasoningContent?: string, name?: string, index?: number, arguments?: string, data?: Object}>} Async generator yielding stream events.
    */
   async *chatStream(messages, model, tools = []) {
     const modelConfig = {
@@ -171,6 +213,16 @@ export class LlmClient {
   /**
    * Send a chat request with streaming and cancellation support.
    * Uses retryWithBackoff for transient error handling.
+   *
+   * @param {Array<{role: string, content: string|Array}>} messages - Chat messages.
+   * @param {Object} modelConfig - Model configuration.
+   * @param {string} modelConfig.name - Model name.
+   * @param {number|null} [modelConfig.temperature] - Sampling temperature.
+   * @param {number|null} [modelConfig.maxTokens] - Maximum tokens.
+   * @param {number|null} [modelConfig.reasoningEffort] - Reasoning effort level.
+   * @param {Array} [tools] - Tool definitions.
+   * @param {AbortSignal|null} [cancelToken] - AbortSignal for cancellation.
+   * @returns {AsyncGenerator<{type: string, content?: string, reasoningContent?: string, name?: string, index?: number, arguments?: string, data?: Object}>} Async generator yielding stream events.
    */
   async *chatStreamCancellable(
     messages,
@@ -246,6 +298,13 @@ export class LlmClient {
 
   /**
    * Send an HTTP request to the chat completions endpoint.
+   *
+   * @private
+   * @param {string} url - API endpoint URL.
+   * @param {string|null} apiKey - API key for authentication.
+   * @param {Object} request - Request body.
+   * @param {AbortSignal} signal - Abort signal for cancellation.
+   * @returns {Promise<Response>} HTTP response.
    */
   async _doRequest(url, apiKey, request, signal) {
     const headers = {
@@ -272,6 +331,10 @@ export class LlmClient {
 
   /**
    * Process an SSE response stream, yielding StreamEvents.
+   *
+   * @private
+   * @param {Response} response - HTTP response object.
+   * @returns {AsyncGenerator<{type: string, content?: string, reasoningContent?: string, name?: string, index?: number, arguments?: string, data?: Object}>} Async generator yielding stream events.
    */
   async *_processSSE(response) {
     const reader = response.body.getReader();
@@ -317,6 +380,10 @@ export class LlmClient {
    *   { type: "toolName", index, name, toolCallId }  — toolCallId is the OpenAI `id` field
    *   { type: "toolArgument", index, arguments }
    *   { type: "usage", data }
+   *
+   * @private
+   * @param {Object} data - SSE data object.
+   * @returns {Array<{type: string, content?: string, reasoningContent?: string, name?: string, index?: number, arguments?: string, data?: Object}>} Array of stream events.
    */
   _parseStreamData(data) {
     const events = [];

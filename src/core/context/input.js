@@ -13,6 +13,9 @@ export const INPUT_EVENT = {
  *
  * Returns { type: 'command', value } if the input starts with '/',
  * otherwise { type: 'text', value }.
+ *
+ * @param {string} input - Raw user input.
+ * @returns {{type: 'text'|'command', value: string}} Parsed input event.
  */
 export function parseInput(input) {
   const trimmed = input.trim();
@@ -31,10 +34,19 @@ export function parseInput(input) {
  * Used in non-interactive modes (CI, pipes, one-shot).
  */
 export class NoopInput {
+  /**
+   * Check if input is interactive.
+   * @returns {boolean} Always false.
+   */
   isInteractive() {
     return false;
   }
 
+  /**
+   * Collect answers for a set of questions, returning defaults.
+   * @param {Array<{key: string, default?: any}>} questions - Question definitions.
+   * @returns {Object} Answers object with default values.
+   */
   collectAnswers(questions) {
     const answers = {};
     for (const q of questions) {

@@ -7,11 +7,20 @@ import { HOOKS } from "../hooks.js";
  * Session store — holds agents keyed by session ID.
  */
 export class SessionStore {
-  constructor() {
+  /**
+   * @param {Object} [options]
+   * @param {string} [options.initialSessionId] - Optional initial session ID
+   */
+  constructor(options = {}) {
     this._agents = new Map();
-    this._initialSessionId = null;
+    this._initialSessionId = options.initialSessionId || null;
   }
 
+  /**
+   * Add an agent to the store.
+   * @param {Object} agent - Agent instance.
+   * @returns {string} Session ID.
+   */
   addAgent(agent) {
     const sessionId = agent.sessionId || crypto.randomUUID();
     this._agents.set(sessionId, agent);
@@ -21,24 +30,46 @@ export class SessionStore {
     return sessionId;
   }
 
+  /**
+   * Get an agent by session ID.
+   * @param {string} sessionId - Session ID.
+   * @returns {Object|undefined} Agent instance.
+   */
   getAgent(sessionId) {
     return this._agents.get(sessionId);
   }
 
+  /**
+   * Get the initial session ID.
+   * @returns {string|null} Initial session ID.
+   */
   initialSessionId() {
     return this._initialSessionId;
   }
 
+  /**
+   * Get the number of agents in the store.
+   * @returns {number} Agent count.
+   */
   size() {
     return this._agents.size;
   }
 
+  /**
+   * Remove an agent from the store.
+   * @param {string} sessionId - Session ID.
+   * @returns {boolean} True if agent was removed.
+   */
   removeAgent(sessionId) {
     if (!this._agents.has(sessionId)) return false;
     this._agents.delete(sessionId);
     return true;
   }
 
+  /**
+   * Get all agents in the store.
+   * @returns {Array<Object>} Array of agent instances.
+   */
   agents() {
     return Array.from(this._agents.values());
   }
@@ -56,7 +87,7 @@ export class SessionManager {
    * @param {Function} options.buildAgent — Function(config) → Agent
    * @param {Object} [options.serializer] — Optional session serializer
    * @param {Object} [options.initialConfig] — Config for initial agent
-   * @returns {Promise<SessionManager>}
+   * @returns {Promise<SessionManager>} Session manager instance.
    */
   static async create(options) {
     const instance = new SessionManager(options);
@@ -85,8 +116,8 @@ export class SessionManager {
 
   /**
    * Create a new agent and add it to the store.
-   * @param {Object} config — Agent config
-   * @returns {Promise<string>} Session ID
+   * @param {Object} config — Agent config.
+   * @returns {Promise<string>} Session ID.
    */
   async create(config) {
     const agent = await this._buildAgent(config);
@@ -101,8 +132,8 @@ export class SessionManager {
 
   /**
    * Construct a new agent and swap it in, replacing the current one.
-   * @param {Object} config — New agent config
-   * @returns {Promise<Object>} The new agent
+   * @param {Object} config — New agent config.
+   * @returns {Promise<Object>} The new agent instance.
    */
   async swap(config) {
     const oldAgent = this._store.getAgent(this._currentSessionId);
@@ -162,7 +193,7 @@ export class SessionManager {
 
   /**
    * Serialize the current agent state.
-   * @returns {Object}
+   * @returns {Object|null} Serialized state, or null if no agent is active.
    */
   serialize() {
     const agent = this.getAgent();

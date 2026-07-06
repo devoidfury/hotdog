@@ -99,6 +99,8 @@ export class ToolRegistry {
 
 /**
  * Create a new ToolRegistry instance.
+ *
+ * @returns {ToolRegistry} New tool registry.
  */
 export function createToolRegistry() {
   return new ToolRegistry();

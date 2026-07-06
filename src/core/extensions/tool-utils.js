@@ -27,6 +27,9 @@ const SHORT_META_KEYS = new Set([
 
 /**
  * Minimal XML escaping for attribute/text content.
+ *
+ * @param {string} s - String to escape.
+ * @returns {string} Escaped string.
  */
 export function xmlEscape(s) {
   return s
@@ -105,12 +108,23 @@ export class ToolResult {
     });
   }
 
+  /**
+   * Add a metadata entry.
+   * @param {string} key - Metadata key.
+   * @param {*} value - Metadata value (converted to string).
+   * @returns {ToolResult} This result for chaining.
+   */
   withEntry(key, value) {
     this.metadata = this.metadata || new Map();
     this.metadata.set(key, String(value));
     return this;
   }
 
+  /**
+   * Add multiple metadata entries.
+   * @param {Object} entries - Object with key-value pairs.
+   * @returns {ToolResult} This result for chaining.
+   */
   withEntries(entries) {
     this.metadata = this.metadata || new Map();
     for (const [key, value] of Object.entries(entries)) {
@@ -119,24 +133,46 @@ export class ToolResult {
     return this;
   }
 
+  /**
+   * Set output XML tag.
+   * @param {string|null} tag - Output tag name.
+   * @returns {ToolResult} This result for chaining.
+   */
   withOutputTag(tag) {
     this.outputTag = tag;
     return this;
   }
 
+  /**
+   * Set images.
+   * @param {Array|null} images - Array of image objects.
+   * @returns {ToolResult} This result for chaining.
+   */
   withImages(images) {
     this.images = images;
     return this;
   }
 
+  /**
+   * Check if result is successful.
+   * @returns {boolean} True if success.
+   */
   isOk() {
     return this.success;
   }
 
+  /**
+   * Check if result is an error.
+   * @returns {boolean} True if error.
+   */
   isErr() {
     return !this.success;
   }
 
+  /**
+   * Get displayable text (output + error).
+   * @returns {string} Display text.
+   */
   toDisplay() {
     const parts = this.output ? [this.output] : [];
     if (this.error) {
@@ -145,6 +181,11 @@ export class ToolResult {
     return parts.join("\n");
   }
 
+  /**
+   * Get API-serialized content as XML string.
+   * @param {string} toolName - Tool name.
+   * @returns {string} XML string.
+   */
   toApiContent(toolName) {
     const status = this.success ? "success" : "failure";
     const tag = this.outputTag || "output";
@@ -179,6 +220,14 @@ export class ToolResult {
 
 /**
  * Tool definition (OpenAI function-calling schema).
+ *
+ * @param {string} name - Tool name.
+ * @param {string} description - Tool description.
+ * @param {Object} [parameters] - Parameter schema.
+ * @param {Object} [parameters.schema] - JSON Schema.
+ * @param {Object} [parameters.properties] - Property definitions.
+ * @param {string[]} [parameters.required] - Required property names.
+ * @returns {Object} OpenAI-compatible tool definition.
  */
 export function toolDef(name, description, parameters) {
   return {
@@ -198,6 +247,11 @@ export function toolDef(name, description, parameters) {
 
 /**
  * Create a parameter definition.
+ *
+ * @param {string} typeName - Parameter type.
+ * @param {string} description - Parameter description.
+ * @param {Object} [extra] - Additional properties.
+ * @returns {Object} Parameter definition.
  */
 export function param(typeName, description, extra = {}) {
   return { type: typeName, description: description || "", ...extra };
@@ -205,6 +259,9 @@ export function param(typeName, description, extra = {}) {
 
 /**
  * Parse tool arguments from JSON input string.
+ *
+ * @param {string|Object} input - Input argument (string JSON or object).
+ * @returns {*} Parsed arguments object or original input if parsing fails.
  */
 export function parseToolArgs(input) {
   if (typeof input === "string") {
@@ -248,6 +305,12 @@ export function toolResult(result, toolName) {
 
 /**
  * Wrap content in XML tool tags for API output.
+ *
+ * @private
+ * @param {string} toolName - Tool name.
+ * @param {string} status - Status ("success" or "failure").
+ * @param {*} content - Content to wrap.
+ * @returns {string} XML string.
  */
 function xmlWrap(toolName, status, content) {
   const attrs = [`name="${xmlEscape(toolName)}"`, `status="${status}"`];
@@ -276,6 +339,10 @@ function xmlWrap(toolName, status, content) {
 
 /**
  * Truncate output to max lines.
+ *
+ * @param {string} text - Input text.
+ * @param {number} maxLines - Maximum number of lines to keep.
+ * @returns {string} Truncated text or original if within limit.
  */
 export function truncateOutput(text, maxLines) {
   if (!text) return "";
@@ -287,6 +354,9 @@ export function truncateOutput(text, maxLines) {
 
 /**
  * Parse and validate tool input from the LLM.
+ *
+ * @param {string|Object|null} input - Input from LLM (JSON string or object).
+ * @returns {Object|null} Parsed input object, or null if invalid.
  */
 export function parseToolInput(input) {
   if (!input || (typeof input === "string" && input.trim().length === 0)) {
@@ -309,6 +379,11 @@ export function parseToolInput(input) {
 
 /**
  * Default callDisplay implementation.
+ *
+ * @param {string|Object|null} input - Tool input from LLM.
+ * @param {Function} templateFn - Function to format the display.
+ * @param {string|Function|Object} options - Options for display formatting.
+ * @returns {string} Formatted display string.
  */
 export function defaultCallDisplay(input, templateFn, options) {
   let fallback,
@@ -342,6 +417,11 @@ export function defaultCallDisplay(input, templateFn, options) {
 
 /**
  * Generate a simple unified diff between old and new text.
+ *
+ * @param {string} oldText - Original text.
+ * @param {string} newText - New text.
+ * @param {number} [maxLines=80] - Maximum number of diff lines to return.
+ * @returns {string} Unified diff string.
  */
 export function generateDiff(oldText, newText, maxLines = 80) {
   const oldLines = oldText.split("\n");
@@ -377,6 +457,11 @@ export function generateDiff(oldText, newText, maxLines = 80) {
 
 /**
  * Extract a required string from a JSON value.
+ *
+ * @param {Object} value - JSON value object.
+ * @param {string} key - Key to extract.
+ * @returns {string} Extracted string value.
+ * @throws {ToolError} If key is missing or not a string.
  */
 export function getRequiredStr(value, key) {
   const v = value?.[key];

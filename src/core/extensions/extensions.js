@@ -57,6 +57,9 @@ export function extractSchemaDefaults(schema) {
 /**
  * Get extension config defaults from extension.json schemas.
  * Returns config params in the format expected by ConfigRegistry.registerConfigParams().
+ *
+ * @param {string[]|string} [extensionPaths] - Array of extension path specs, or "builtins".
+ * @returns {Promise<Array<{key: string, description?: string, defaults: *, schema?: Object, layers?: Object}>>} Config params.
  */
 export async function getExtensionConfigDefaults(extensionPaths) {
   const params = [];
@@ -83,6 +86,9 @@ const ROOT_DIR = path.resolve(__dirname, "../../");
 
 /**
  * Resolve an extension path spec to an absolute directory path.
+ *
+ * @param {string} spec - Extension path spec (e.g., "builtins", "./my-extension", or absolute path).
+ * @returns {string} Absolute path to the extension directory.
  */
 export function resolveExtensionPath(spec) {
   if (spec === "builtins") {
@@ -96,6 +102,9 @@ export function resolveExtensionPath(spec) {
 
 /**
  * Check if a directory is a valid extension.
+ *
+ * @param {string} dirPath - Directory path to check.
+ * @returns {Promise<boolean>} True if the directory is a valid extension.
  */
 export async function isExtensionDirectory(dirPath) {
   const metaPath = path.join(dirPath, "extension.json");
@@ -115,6 +124,10 @@ export async function isExtensionDirectory(dirPath) {
 
 /**
  * Read extension metadata from extension.json file.
+ *
+ * @private
+ * @param {string} dirPath - Directory path containing the extension.
+ * @returns {Promise<Object>} Extension metadata object.
  */
 async function readExtensionMetadata(dirPath) {
   const metaPath = path.join(dirPath, "extension.json");
@@ -226,6 +239,9 @@ async function readExtensionMetadata(dirPath) {
 
 /**
  * Discover extensions in a directory recursively.
+ *
+ * @param {string} dirPath - Directory to scan for extensions.
+ * @returns {Promise<Array<{name: string, path: string, dirPath: string, provides: string[], loadOrder: number, dependsOn: string[], autoload: boolean, configSchema: Object|null, cliSubcommands: Array, cliFlags: Array, services: Object, requires: Object}>>>} Array of discovered extensions.
  */
 export async function discoverExtensionsInDir(dirPath) {
   const extensions = [];
@@ -306,6 +322,10 @@ export const LOAD_ORDER = {
  * Resolve load order based on extension dependencies using topological sort.
  * Supports both concrete extension dependencies (dependsOn) and abstract service
  * dependencies (requires → services).
+ *
+ * @param {Array<Object>} extensions - Array of extension objects.
+ * @param {Object} [serviceOverrides] - Map of abstract service names to concrete extension names.
+ * @returns {Array<Object>} Extensions sorted by load order.
  */
 export function resolveLoadOrder(extensions, serviceOverrides = {}) {
   const nameSet = new Set(extensions.map((e) => e.name));
@@ -416,9 +436,10 @@ export function resolveLoadOrder(extensions, serviceOverrides = {}) {
  * If multiple extensions provide the same service, serviceOverrides picks which one to use.
  * If no override, the first provider in the list wins (with a warning).
  *
- * @param {Array} extensions - Extension objects with `services` and `name` fields.
+ * @private
+ * @param {Array<Object>} extensions - Extension objects with `services` and `name` fields.
  * @param {Object} serviceOverrides - Config-driven overrides: { "session": "my-session-ext" }
- * @returns {Map<string, string>}
+ * @returns {Map<string, string>} Map of service name to extension name.
  */
 function buildServiceProviderMap(extensions, serviceOverrides) {
   const serviceMap = new Map();

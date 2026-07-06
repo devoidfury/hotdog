@@ -4,11 +4,11 @@ Extensions can register CLI subcommands that are automatically discovered and di
 
 ## How It Works
 
-1. At startup, the CLI discovers extensions by reading `extension.json` files (no code loading needed)
-2. CLI flags and subcommand declarations from `extension.json` are registered immediately
-3. This enables `--help` and subcommand discovery without loading any extension code
-4. When a subcommand is invoked, extensions are loaded and their handlers are registered
-5. Help text is generated from the registered subcommands
+At startup, the CLI discovers extensions by reading `extension.json` files.
+CLI flags and subcommand declarations from `extension.json` are registered immediately.
+
+This enables `--help`, subcommand discovery, config loading without loading any extension code.
+When a subcommand is invoked, extensions are loaded.
 
 ## Extension Metadata (extension.json)
 
@@ -144,11 +144,3 @@ export function create(core) {
 | `prompt` | `ui-one-shot` | One-shot prompt mode — run a single prompt and exit |
 | `cli` | `ui-interactive-cli` | Interactive CLI session (default when stdin is TTY) |
 | `webui` | `webui` | Start the WebUI server (HTTP + WebSocket + frontend) |
-
-## Benefits
-
-1. **No manual wiring**: Extensions self-register their subcommands
-2. **Static discovery**: Help text and subcommand discovery work without loading extension code
-3. **Dynamic help**: Help text automatically includes all registered subcommands
-4. **Consistent API**: All subcommands receive the same `(cliArgs, core)` interface
-5. **Config management**: Extensions can opt-in to having config loaded automatically

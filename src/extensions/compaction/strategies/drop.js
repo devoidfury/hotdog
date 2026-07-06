@@ -1,14 +1,15 @@
 // Drop old messages without summarizing.
 
-import { findFirstKeptIndex, estimateContextTokens } from '../utils.js';
-import { CompactionStrategy } from '../strategies.js';
+import { findFirstKeptIndex, estimateContextTokens } from "../utils.js";
+import { CompactionStrategy } from "../strategies.js";
 
 /**
- * Remove old messages without summarizing. No LLM cost.
+ * Keep the last N messages and remove older messages without summarizing.
  */
 export class DropStrategy extends CompactionStrategy {
-  name = 'drop';
-  description = 'Remove old messages without summarizing. Fastest option, no LLM cost, but loses all context from compacted messages.';
+  name = "drop";
+  description =
+    "Keep the last N messages and remove older messages without summarizing. Fastest option, no LLM cost, but loses all context from compacted messages.";
 
   async execute(messages, settings, llmChat, model) {
     const firstKept = findFirstKeptIndex(messages, settings.keepRecent);
@@ -18,7 +19,7 @@ export class DropStrategy extends CompactionStrategy {
       summary: null,
       messagesCompacted: firstKept,
       metadata: {
-        strategyName: 'drop',
+        strategyName: "drop",
         tokensBefore: estimateContextTokens(messages),
         tokensAfter: estimateContextTokens(messages.slice(firstKept)),
       },
@@ -26,7 +27,7 @@ export class DropStrategy extends CompactionStrategy {
   }
 
   canCompact(messages, settings) {
-    const nonSystem = messages.filter(m => m.role !== 'system');
+    const nonSystem = messages.filter((m) => m.role !== "system");
     return nonSystem.length > (settings.keepRecent || 3) * 2;
   }
 }

@@ -42,6 +42,10 @@
     {
       "name": "show-prompt",
       "description": "Show rendered system prompt with tool definitions"
+    },
+    {
+      "name": "profile-list",
+      "description": "List all available profiles with their roles and tool restrictions"
     }
   ]
 }

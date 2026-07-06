@@ -57,6 +57,7 @@ export async function loadProfileFile(profilesPath, profileName) {
     const body = parsed.body;
     return {
       name: fm.name || profileName,
+      description: fm.description || "",
       role: fm.role || null,
       body: body || "",
       model: fm.model || null,
@@ -112,6 +113,7 @@ export async function loadProfileFiles(profilesPath) {
       whitelistTools: fm["whitelist-tools"] || fm.whitelist_tools || null,
       model: fm.model || null,
       manager: fm.manager || false,
+      visibleWorker: fm["visible-worker"] || fm.visible_worker || false,
     };
   }
 

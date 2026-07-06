@@ -136,6 +136,7 @@ hotdog prompt "your prompt"      # One-shot mode
 hotdog -c "your prompt"          # One-shot mode (shorthand)
 hotdog info                      # System diagnostics
 hotdog show-prompt               # Render system prompt to stdout
+hotdog profile-list              # List all available profiles
 hotdog review                    # Review session logs
 hotdog webui                     # Start the web UI server
 ```
@@ -175,10 +176,6 @@ hotdog webui                     # Start the web UI server
 
 ## Extension Anatomy
 
-> Extensions? For a hotdog? How long do you need the damn thing?
->
-> — Some old guy
-
 ```
 my-extension/
 ├── extension.json    # Metadata: name, provides, configSchema, services
@@ -186,6 +183,10 @@ my-extension/
 ```
 
 Extensions register tools, CLI subcommands, and system prompt chunks via hooks. See `docs/agents/extensions.md` for the full guide.
+
+> Extensions? For a hotdog? How long do you need the damn thing?
+>
+> — Some old guy
 
 ## Development
 

@@ -489,6 +489,275 @@ async function runShowPrompt(cli, core, config, buildConfig) {
   return 0;
 }
 
+// ── Profile List Subcommand ─────────────────────────────────────────────
+
+/**
+ * Run the profile-list subcommand.
+ * Lists all available profiles with their roles, tool restrictions, and metadata.
+ */
+async function runProfileList(cli, config, buildConfig) {
+  const { resolved } = await buildConfig(cli);
+
+  // Resolve config dir: prefer resolved value, fall back to --config-dir,
+  // or derive from --config file path. resolveConfigDir() ignores --config,
+  // so we handle that here.
+  let configDir = resolved.configDir;
+  if (!configDir) {
+    if (cli.configDir) {
+      configDir = path.isAbsolute(cli.configDir)
+        ? cli.configDir
+        : path.resolve(cli.configDir);
+    } else if (cli.config) {
+      // Derive config dir from the config file path
+      configDir = path.dirname(
+        path.isAbsolute(cli.config) ? cli.config : path.resolve(cli.config),
+      );
+    } else {
+      configDir = resolveConfigDir();
+    }
+  }
+
+  // Resolve profiles path. Prefer the schema-resolved value if absolute
+  // (the compute layer joined it to configDir correctly). If relative or
+  // missing, fall back to configDir/profiles. We avoid using the raw config
+  // profilesPath directly because defaults like "./config/profiles" are
+  // uncomputed and CWD-relative, not configDir-relative.
+  let profilesPath;
+  if (resolved.profilesPath && path.isAbsolute(resolved.profilesPath)) {
+    profilesPath = resolved.profilesPath;
+  } else {
+    profilesPath = path.join(configDir, DEFAULT_PROFILES_SUBPATH);
+  }
+
+  // Load all profile files from disk
+  const profileFiles = await loadProfileFiles(profilesPath);
+
+  // Get config-defined profiles
+  const configProfiles = config.profiles || {};
+
+  // Aspects — from global resolved config (extension-resolved)
+  const aspects = resolved.aspects || [];
+
+  // Collect all profile names from both sources
+  const allNames = new Set([
+    ...Object.keys(configProfiles),
+    ...Object.keys(profileFiles),
+  ]);
+
+  // Visible worker names (available as subagents)
+  const visibleWorkerNames = Object.entries(profileFiles)
+    .filter(([, p]) => p.visibleWorker)
+    .map(([name]) => name);
+
+  if (cli.wantsJson) {
+    return printProfileListJson(
+      profileFiles,
+      configProfiles,
+      allNames,
+      aspects,
+      resolved.profileName,
+      profilesPath,
+      visibleWorkerNames,
+    );
+  }
+
+  return printProfileListText(
+    profileFiles,
+    configProfiles,
+    allNames,
+    resolved.profileName,
+    aspects,
+    profilesPath,
+    visibleWorkerNames,
+  );
+}
+
+/**
+ * Print profile list as formatted text.
+ */
+function printProfileListText(
+  profileFiles,
+  configProfiles,
+  allNames,
+  currentProfile,
+  globalAspects,
+  profilesPath,
+  visibleWorkerNames,
+) {
+  const names = Array.from(allNames).sort();
+
+  if (names.length === 0) {
+    console.log("No profiles configured.");
+    console.log(
+      `Profiles directory: (not found or empty)`,
+    );
+    return 0;
+  }
+
+  console.log(`=== Profiles (${names.length}) ===`);
+  console.log();
+
+  for (const name of names) {
+    const fileProfile = profileFiles[name] || null;
+    const configProfile = configProfiles[name] || null;
+    const isCurrent = name === currentProfile;
+    const marker = isCurrent ? "  ← current" : "";
+
+    console.log(`Profile: ${name}${marker}`);
+
+    // Description
+    const description = fileProfile?.description || configProfile?.description || null;
+    if (description) {
+      console.log(`  Description: ${description}`);
+    }
+
+    // Role
+    const role = fileProfile?.role || configProfile?.role || null;
+    if (role) {
+      // Truncate long roles for display
+      const roleDisplay = role.length > 200
+        ? `${role.slice(0, 200)}...`
+        : role;
+      console.log(`  Role: ${roleDisplay}`);
+    }
+
+    // Model override
+    const model = configProfile?.model || fileProfile?.model || null;
+    if (model) {
+      console.log(`  Model: ${model}`);
+    }
+
+    // Aspects — from global resolved config (extension-resolved)
+    if (globalAspects && globalAspects.length > 0) {
+      console.log(`  Aspects: ${globalAspects.join(", ")}`);
+    }
+
+    // Tool restrictions — file profile values take priority, but only if non-empty
+    const fileBlacklist = fileProfile?.blacklistTools || [];
+    const cfgBlacklist = configProfile?.blacklist_tools || configProfile?.blacklistTools || [];
+    const blacklistTools = fileBlacklist.length > 0 ? fileBlacklist : cfgBlacklist;
+
+    const fileWhitelist = fileProfile?.whitelistTools;
+    const cfgWhitelist = configProfile?.whitelist_tools || configProfile?.whitelistTools;
+    const whitelistTools = (fileWhitelist && fileWhitelist.length > 0)
+      ? fileWhitelist
+      : cfgWhitelist;
+
+    if (blacklistTools.length > 0) {
+      console.log(`  Blacklisted tools: ${blacklistTools.join(", ")}`);
+    }
+    if (whitelistTools && whitelistTools.length > 0) {
+      console.log(`  Whitelisted tools: ${whitelistTools.join(", ")}`);
+    }
+
+    // Manager / subagents
+    if (fileProfile?.manager) {
+      const available = visibleWorkerNames.filter((n) => n !== name);
+      if (available.length > 0) {
+        console.log(`  Manager: yes (subagents: ${available.join(", ")})`);
+      } else {
+        console.log(`  Manager: yes (no subagents available)`);
+      }
+    }
+    if (fileProfile?.visibleWorker) {
+      console.log(`  Subagent: yes`);
+    }
+
+    // Body length
+    if (fileProfile?.body) {
+      const bodyLen = fileProfile.body.trim().length;
+      console.log(`  Body: ${bodyLen} chars`);
+    }
+
+    // Source + relative path
+    const sources = [];
+    if (fileProfile) sources.push("file");
+    if (configProfile) sources.push("config");
+    console.log(`  Source: ${sources.join(" + ")}`);
+    if (fileProfile && profilesPath) {
+      try {
+        const filePath = path.join(profilesPath, `${name}.profile.md`);
+        const relativePath = path.relative(process.cwd(), filePath);
+        console.log(`  Profile: ${relativePath}`);
+      } catch {
+        // Ignore path resolution errors
+      }
+    }
+
+    console.log();
+  }
+
+  return 0;
+}
+
+/**
+ * Print profile list as JSON.
+ */
+function printProfileListJson(
+  profileFiles,
+  configProfiles,
+  allNames,
+  globalAspects,
+  currentProfile,
+  profilesPath,
+  visibleWorkerNames,
+) {
+  const names = Array.from(allNames).sort();
+  const profiles = [];
+
+  for (const name of names) {
+    const fileProfile = profileFiles[name] || null;
+    const configProfile = configProfiles[name] || null;
+
+    // Tool restrictions — file profile values take priority, but only if non-empty
+    const fileBlacklist = fileProfile?.blacklistTools || [];
+    const cfgBlacklist = configProfile?.blacklist_tools || configProfile?.blacklistTools || [];
+    const blacklistTools = fileBlacklist.length > 0 ? fileBlacklist : cfgBlacklist;
+
+    const fileWhitelist = fileProfile?.whitelistTools;
+    const cfgWhitelist = configProfile?.whitelist_tools || configProfile?.whitelistTools;
+    const whitelistTools = (fileWhitelist && fileWhitelist.length > 0)
+      ? fileWhitelist
+      : cfgWhitelist;
+
+    // Compute relative path for file-sourced profiles
+    let profileRelPath = null;
+    if (fileProfile && profilesPath) {
+      try {
+        const filePath = path.join(profilesPath, `${name}.profile.md`);
+        profileRelPath = path.relative(process.cwd(), filePath);
+      } catch {
+        // Ignore path resolution errors
+      }
+    }
+
+    profiles.push({
+      name,
+      current: name === currentProfile,
+      description: fileProfile?.description || configProfile?.description || null,
+      role: fileProfile?.role || configProfile?.role || null,
+      model: configProfile?.model || fileProfile?.model || null,
+      aspects: globalAspects && globalAspects.length > 0 ? globalAspects : null,
+      blacklistTools: blacklistTools.length > 0 ? blacklistTools : null,
+      whitelistTools,
+      manager: fileProfile?.manager || false,
+      subagent: fileProfile?.visibleWorker || false,
+      availableSubagents: fileProfile?.manager
+        ? visibleWorkerNames.filter((n) => n !== name)
+        : null,
+      bodyLength: fileProfile?.body ? fileProfile.body.trim().length : 0,
+      sources: [
+        fileProfile ? "file" : null,
+        configProfile ? "config" : null,
+      ].filter(Boolean),
+      profileRelPath,
+    });
+  }
+
+  console.log(JSON.stringify(profiles, null, 2));
+  return 0;
+}
+
 // ── Extension Entry Point ───────────────────────────────────────────────────
 
 /**
@@ -513,6 +782,14 @@ export function create(core) {
               handler: async (cli, core) => {
                 const { config, buildConfig } = core;
                 return await runShowPrompt(cli, core, config, buildConfig);
+              },
+            });
+
+            registry.register("profile-list", {
+              description: "List all available profiles with their roles and tool restrictions",
+              handler: async (cli, core) => {
+                const { config, buildConfig } = core;
+                return await runProfileList(cli, config, buildConfig);
               },
             });
           },

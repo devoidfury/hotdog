@@ -326,10 +326,10 @@ export class CliOutputSink extends OutputSink {
     if (!this.showTokenUse) return;
     this._transitionTo(Modes.Progress);
     const display = formatTokenUsage(
-      event.promptTokens,
-      event.cachedTokens,
-      event.completionTokens,
-      event.totalTokens,
+      event.lastPromptTokens,
+      event.lastCachedTokens,
+      event.lastCompletionTokens,
+      event.lastTotalTokens,
     );
     this._processContent(display);
   }

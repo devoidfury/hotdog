@@ -49,7 +49,6 @@ export class Agent {
     this._maxTokens = options.maxTokens || DEFAULT_MAX_TOKENS;
     this._hideTools = options.hideTools !== false;
     this._hideThinking = options.hideThinking === true;
-    this._showTokenUse = options.showTokenUse !== false;
     this._sink = options.sink || null;
     this._modelRegistry = options.modelRegistry || {};
     this._profileName = options.profileName;
@@ -406,24 +405,22 @@ export class Agent {
       this._tokenUsage.turns += 1;
 
       // Save last-reported values for reference.
-      this._tokenUsage.lastPromptTokens = promptTokens;
+      this._tokenUsage.lastPromptTokens = promptTokens - cachedTokens;
       this._tokenUsage.lastCachedTokens = cachedTokens;
       this._tokenUsage.lastCompletionTokens = completionTokens;
       this._tokenUsage.lastTotalTokens = totalTokens;
 
-      if (this._showTokenUse) {
-        this._emitOutput("token_usage", {
-          promptTokens: this._tokenUsage.promptTokens,
-          cachedTokens: this._tokenUsage.cachedTokens,
-          completionTokens: this._tokenUsage.completionTokens,
-          totalTokens: this._tokenUsage.totalTokens,
-          turns: this._tokenUsage.turns,
-          lastPromptTokens: this._tokenUsage.lastPromptTokens,
-          lastCachedTokens: this._tokenUsage.lastCachedTokens,
-          lastCompletionTokens: this._tokenUsage.lastCompletionTokens,
-          lastTotalTokens: this._tokenUsage.lastTotalTokens,
-        });
-      }
+      this._emitOutput("token_usage", {
+        promptTokens: this._tokenUsage.promptTokens,
+        cachedTokens: this._tokenUsage.cachedTokens,
+        completionTokens: this._tokenUsage.completionTokens,
+        totalTokens: this._tokenUsage.totalTokens,
+        turns: this._tokenUsage.turns,
+        lastPromptTokens: this._tokenUsage.lastPromptTokens,
+        lastCachedTokens: this._tokenUsage.lastCachedTokens,
+        lastCompletionTokens: this._tokenUsage.lastCompletionTokens,
+        lastTotalTokens: this._tokenUsage.lastTotalTokens,
+      });
     }
   }
 

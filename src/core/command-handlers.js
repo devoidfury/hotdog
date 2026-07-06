@@ -46,17 +46,20 @@ export function handleTokens(agent) {
     return { content: "No token usage recorded yet." };
   }
 
-  const realPrompt = u.promptTokens; // already accumulated as (prompt - cached)
+  const promptProcessed = u.promptTokens; // accumulated as (prompt - cached)
   const lines = [
     `Token usage (${u.turns} turn${u.turns === 1 ? "" : "s"}):`,
-    `  prompt:      ${realPrompt.toLocaleString()} tokens`,
+    `  prompt:      ${promptProcessed.toLocaleString()} tokens`,
     `  cached:      ${u.cachedTokens.toLocaleString()} tokens`,
     `  completion:  ${u.completionTokens.toLocaleString()} tokens`,
     `  total:       ${u.totalTokens.toLocaleString()} tokens`,
   ];
 
-  if (realPrompt > 0) {
-    const cacheRate = ((u.cachedTokens / (realPrompt + u.cachedTokens)) * 100).toFixed(1);
+  if (promptProcessed > 0) {
+    const cacheRate = (
+      (u.cachedTokens / (promptProcessed + u.cachedTokens)) *
+      100
+    ).toFixed(1);
     lines.push(`  cache hit:   ${cacheRate}% of prompt tokens`);
   }
 

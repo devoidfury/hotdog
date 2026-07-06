@@ -62,10 +62,10 @@ describe("handleTokens", () => {
     const agent = {
       getTokenUsage: mock(() => ({
         // Accumulated: 2 calls, each with prompt=1000, cached=400, completion=200
-        promptTokens: 1200,    // (1000-400) + (1000-400) = 1200 real prompt
-        cachedTokens: 800,     // 400 + 400
+        promptTokens: 1200, // (1000-400) + (1000-400) = 1200 real prompt
+        cachedTokens: 800, // 400 + 400
         completionTokens: 400, // 200 + 200
-        totalTokens: 2400,     // 1200 + 800 + 400
+        totalTokens: 2400, // 1200 + 800 + 400
         turns: 2,
         // Last-reported from the most recent provider call
         lastPromptTokens: 1000,
@@ -110,7 +110,7 @@ describe("handleTokens", () => {
   it("omits cache hit line when real prompt tokens are zero", () => {
     const agent = {
       getTokenUsage: mock(() => ({
-        promptTokens: 0,       // all prompt was cached
+        promptTokens: 0, // all prompt was cached
         cachedTokens: 100,
         completionTokens: 50,
         totalTokens: 150,

@@ -8,10 +8,15 @@ import { validateParams, formatValidationErrors } from "../../utils/json-schema.
 export class ToolRegistry {
   constructor() {
     this.tools = new Map();
+    /** @type {Map<string, Promise<any>>} tool name → cached tool def promise */
+    this._toolDefCache = new Map();
   }
 
   register(name, tool) {
     this.tools.set(name, tool);
+    // Invalidate caches for this tool and the all-tools cache
+    this._toolDefCache.delete(name);
+    this._allToolDefsCache = null;
   }
 
   get(name) {
@@ -26,7 +31,40 @@ export class ToolRegistry {
     return Array.from(this.tools.entries());
   }
 
+  /**
+   * Get the tool definition for a single tool, with caching.
+   * The first call computes and caches the result; subsequent calls return the cached value.
+   * Cache is invalidated when the tool is re-registered, removed, or when clearToolDefs() is called.
+   *
+   * @param {string} name - Tool name.
+   * @returns {Promise<any|null>} Tool definition or null.
+   */
+  async getToolDef(name) {
+    const cached = this._toolDefCache.get(name);
+    if (cached) return cached;
+
+    const tool = this.tools.get(name);
+    if (!tool || !tool.toToolDef) {
+      const nullPromise = Promise.resolve(null);
+      this._toolDefCache.set(name, nullPromise);
+      return nullPromise;
+    }
+
+    const defPromise = tool.toToolDef();
+    this._toolDefCache.set(name, defPromise);
+    return defPromise;
+  }
+
+  /**
+   * Get all tool definitions, with caching.
+   * Returns cached definitions unless the cache has been cleared.
+   *
+   * @returns {Promise<Array>} Array of tool definitions.
+   */
   async getToolDefs() {
+    const cached = this._allToolDefsCache;
+    if (cached) return cached;
+
     const defs = [];
     for (const t of this.tools.values()) {
       if (t.toToolDef) {
@@ -34,27 +72,50 @@ export class ToolRegistry {
         if (def) defs.push(def);
       }
     }
+    this._allToolDefsCache = Promise.resolve(defs);
     return defs;
   }
 
   /**
+   * Clear the tool definition cache.
+   * Call this when tools change dynamically (e.g., MCP server reconnect).
+   */
+  clearToolDefs() {
+    this._allToolDefsCache = null;
+    this._toolDefCache.clear();
+  }
+
+  /**
    * Remove a single tool from the registry by name.
+   * Invalidates caches so stale definitions are not returned.
    * @param {string} name - Tool name to remove.
    * @returns {boolean} true if the tool existed and was removed.
    */
   remove(name) {
-    return this.tools.delete(name);
+    const existed = this.tools.delete(name);
+    if (existed) {
+      this._toolDefCache.delete(name);
+      this._allToolDefsCache = null;
+    }
+    return existed;
   }
 
   /**
    * Remove multiple tools from the registry by name.
+   * Invalidates caches so stale definitions are not returned.
    * @param {string[]} names - Tool names to remove.
    * @returns {number} Number of tools removed.
    */
   removeAll(names) {
     let count = 0;
     for (const name of names) {
-      if (this.tools.delete(name)) count++;
+      if (this.tools.delete(name)) {
+        this._toolDefCache.delete(name);
+        count++;
+      }
+    }
+    if (count > 0) {
+      this._allToolDefsCache = null;
     }
     return count;
   }
@@ -87,7 +148,7 @@ export class ToolRegistry {
     const tool = this.get(toolName);
     if (!tool || !tool.toToolDef) return null;
 
-    const def = await tool.toToolDef();
+    const def = await this.getToolDef(toolName);
     const params = def?.function?.parameters || null;
     if (!params) return null;
 

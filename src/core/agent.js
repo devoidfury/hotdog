@@ -94,6 +94,9 @@ export class Agent {
       // the user can re-override via /reasoning if needed.
       this._reasoningEffort = entry.reasoningEffort;
     }
+    // Clear tool def cache — different models may have different tool
+    // requirements or capabilities, so stale definitions would be incorrect.
+    this._toolRegistry.clearToolDefs();
     this._hooks.notifyHooks(HOOKS.MODEL_CHANGE, {
       agent: this,
       oldModel,
@@ -225,7 +228,6 @@ export class Agent {
 
       // Build messages (extensions can modify via hook)
       let messages = this.buildMessages();
-
       // Context hook — sequential, modifiable. Each handler sees prior
       // transformations and can return { messages } to replace the array.
       const contextResult = await this._hooks.runHookPipeline(HOOKS.CONTEXT, {
@@ -236,7 +238,6 @@ export class Agent {
         messages = contextResult.lastResult.messages;
       }
 
-      // LLM call
       let toolDefs = await this._toolRegistry.getToolDefs();
       let modelConfig = this._resolveModelConfig();
 

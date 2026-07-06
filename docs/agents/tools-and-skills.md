@@ -12,6 +12,9 @@ Core tools are provided by the `core-tools` extension. Tools are registered via 
 - Result can be: string, ToolResult instance, or object
 
 **ToolRegistry** — stores tools by name, provides lookup, serialization, and `getToolDefs()` accessor. Located in `src/core/extensions/tool-registry.js`.
+- Tool definitions are cached after first computation; cache is invalidated on `register()`, `remove()`, or `clearToolDefs()`.
+- `getToolDef(name)` — get a single tool's definition with caching.
+- `clearToolDefs()` — explicitly clear the definition cache (e.g., after MCP server reconnect).
 
 **Tool definition helpers** (from `src/core/extensions/tool-utils.js`):
 - `toolDef(name, description, parameters)` — creates OpenAI function-calling schema

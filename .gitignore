@@ -3,6 +3,7 @@ AGENTS.local.md
 
 # local configuration
 ./config/
+*secret-sauce*
 
 # dependencies
 node_modules

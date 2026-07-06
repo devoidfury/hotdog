@@ -6,7 +6,7 @@ Zero dependencies, just bring the bun.
 
 ## SAFETY DISCLAIMER
 
-This hotdog comes with minimal guardrails. A dedicated host or a vm or at least a container is recommended. See ./examples/
+This hotdog comes with minimal guardrails. A dedicated host or a vm or at least a container is recommended. See [examples/](examples/)
 
 ## Requirements
 
@@ -29,7 +29,7 @@ _Note - I wrote this using linux and haven't really tried it on macos or windows
 
 ### 1. Configure Your LLM Backend
 
-Create `config/defaults.json` with your AI provider settings:
+Copy [the minimal config example](./examples/minimal-config/config) directory to `./config`, then edit `config/defaults.json` with your AI provider settings:
 
 ```json
 {
@@ -86,6 +86,8 @@ hotdog -m "my-provider/hopus-popus" -c "See if you can improve the test coverage
 Config is resolved in priority order: **CLI flags** > **config file** > **environment variables** > **built-in defaults**.
 
 See the [config reference](docs/config-reference.md) which covers all the configuration options and how it works in detail.
+
+There are [example configurations](examples/) including the [developer's daily driver](examples/devoidfury/).
 
 ### Profiles
 

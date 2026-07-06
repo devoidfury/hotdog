@@ -564,6 +564,19 @@ export class Agent {
     const toolCallId = tc.id;
     let input = tc.function?.arguments || "{}";
 
+    // Guard: reject empty or missing tool names before any further processing.
+    if (!toolName || typeof toolName !== "string" || toolName.trim().length === 0) {
+      const result = `Tool call missing a valid name (got: ${JSON.stringify(toolName)})`;
+      this._emitOutput("tool_result", { toolName: "(invalid)", input, result, toolCallId });
+      const msg = new Message({
+        role: "tool",
+        content: result,
+        toolCallId,
+      });
+      this.addMessage(msg);
+      return { toolName: "(invalid)", input, result };
+    }
+
     if (this._toolWhitelist && !this._toolWhitelist.includes(toolName)) {
       const msg = `Tool '${toolName}' is not available for this agent`;
       return this._writeToolResult(toolName, input, msg, toolCallId);

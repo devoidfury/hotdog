@@ -2,6 +2,8 @@
 // Implements only the JSON-RPC 2.0 and MCP message types needed for
 // connecting to MCP servers, listing tools, and calling tools.
 
+import pkg from "../../../package.json" with { type: "json" };
+
 // ── JSON-RPC 2.0 ──────────────────────────────────────────────────────────
 
 /**
@@ -41,7 +43,7 @@ export function mcpInitializeRequest() {
     },
     clientInfo: {
       name: "hotdog",
-      version: "0.1.0",
+      version: pkg.version,
     },
   };
 }

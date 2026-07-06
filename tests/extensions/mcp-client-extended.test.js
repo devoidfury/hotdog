@@ -18,6 +18,7 @@ import {
 import { McpTool } from "../../src/extensions/mcp-client/tools.js";
 import { create as createExtension } from "../../src/extensions/mcp-client/index.js";
 import { HOOKS } from "../../src/core/hooks.js";
+import pkg from "../../package.json" with { type: "json" };
 
 // ── Helper: create a readable stream from lines ─────────────────────────────
 
@@ -1019,7 +1020,7 @@ describe("Types module completeness", () => {
     expect(req.capabilities.roots.listChanged).toBe(false);
     expect(req.capabilities.sampling).toEqual({});
     expect(req.clientInfo.name).toBe("hotdog");
-    expect(req.clientInfo.version).toBe("0.1.0");
+    expect(req.clientInfo.version).toBe(pkg.version);
   });
 
   it("parseMcpInitializeResponse handles missing serverInfo", () => {

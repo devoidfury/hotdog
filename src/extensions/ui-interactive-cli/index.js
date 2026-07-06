@@ -18,6 +18,7 @@ import { TaskManager } from "../../core/session/task-manager.js";
 import { SessionManager } from "../../core/session/index.js";
 import { MessageBus } from "../../core/index.js";
 import { Agent } from "../../core/agent.js";
+import pkg from "../../../package.json" with { type: "json" };
 import {
   readSessionEntries,
   sessionExists,
@@ -302,7 +303,7 @@ export async function runInteractiveSession(cli, core, options = {}) {
 
   // Print info
   const agent = sessionManager.getAgent();
-  console.log("hotdog 0.1.0 (interactive mode)");
+  console.log(`hotdog ${pkg.version} (interactive mode)`);
   console.log(`Model: ${resolved.model}`);
   console.log(`Profile: ${resolved.profileName}`);
   console.log(`Session: ${agent?.sessionId || "unknown"}`);

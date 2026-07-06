@@ -471,7 +471,7 @@ async function checkFileExists(filePath) {
 
 /**
  * Run the show-prompt subcommand.
- * Creates an agent, outputs the generated system prompt.
+ * Creates an agent, outputs the generated system prompt and tool definitions.
  */
 async function runShowPrompt(cli, core, config, buildConfig) {
   const { resolved } = await buildConfig(cli);
@@ -491,6 +491,28 @@ async function runShowPrompt(cli, core, config, buildConfig) {
   await agent.ensureSystemPrompt();
   // Output the actual system prompt
   console.log(agent.systemPrompt);
+
+  // Output tool definitions
+  const toolDefs = await core.toolRegistry.getToolDefs();
+  if (toolDefs.length > 0) {
+    console.log();
+    console.log("# Tools");
+    console.log();
+    console.log(
+      "Note: actual format of tools prompt may be different than this output depending on provider.",
+    );
+    console.log();
+    for (const def of toolDefs) {
+      const name = def.function?.name || "(unknown)";
+      const description = def.function?.description || "";
+      const params = def.function?.parameters || {};
+      console.log(`## ${name}`);
+      console.log(description);
+      console.log();
+      console.log(JSON.stringify(params));
+      console.log();
+    }
+  }
   return 0;
 }
 

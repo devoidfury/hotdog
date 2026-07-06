@@ -17,6 +17,8 @@ function createMockCore(config = {}) {
     model: "test-model",
     stream: false,
     chatTimeout: 30,
+    maxIterations: 100,
+    maxTokens: 4096,
     profileName: "default",
     profile: {},
     hideTools: false,

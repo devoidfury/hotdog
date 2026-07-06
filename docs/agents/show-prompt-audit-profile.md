@@ -2,7 +2,7 @@
 
 ## Purpose
 
-`hotdog show-prompt` renders and prints the system prompt to stdout, then exits — without connecting to any LLM or running the agent loop.
+`hotdog show-prompt` renders and prints the system prompt and tool definitions to stdout, then exits — without connecting to any LLM or running the agent loop.
 
 ## Usage
 
@@ -21,6 +21,20 @@ bun bin/hotdog show-prompt --model qwen3.5-0.8b
 
 ```
 [rendered system prompt with {model}, {cwd}, {platform}, {date}, {role} placeholders filled]
+
+# Tools
+
+Note: actual format of these may be different depending on provider.
+
+## ToolName
+description
+
+{compact config json}
+
+## AnotherTool
+description
+
+{compact config json}
 ```
 
 ## Implementation Details
@@ -28,6 +42,7 @@ bun bin/hotdog show-prompt --model qwen3.5-0.8b
 - **No API calls**: The prompt is rendered entirely locally using templates and the available tool definitions. No LLM connection is needed.
 - **Hook-based**: The agent uses the real hook mechanism to build the system prompt, so extensions (skills, compaction, etc.) contribute to the prompt as they would in normal operation.
 - **No session**: No session is actually started.
+- **Tool definitions**: After the system prompt, each tool is printed as a `## ToolName` heading, its description, and its compact JSON parameter schema.
 
 ## Related Subcommands
 

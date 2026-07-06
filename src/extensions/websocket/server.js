@@ -80,7 +80,7 @@ export class SessionRegistry {
 
     // Start the bus run loop (non-blocking — it awaits messages as they arrive)
     const runLoop = bus.run().catch(err => {
-      console.error(`[session ${sessionId}] bus error:`, err);
+      logger.error(`[session ${sessionId}] bus error:`, err);
     });
 
     const session = {

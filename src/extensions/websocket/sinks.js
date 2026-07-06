@@ -1,10 +1,7 @@
-// Output sinks for WebSocket-based agent output.
-// FanoutSink — distributes events to multiple sinks.
-// WebSocketOutputSink — sends events to a WS connection.
-// BackgroundSink — silent sink for disconnected sessions.
-
 import { OUTPUT_EVENT, EVENT_HANDLERS } from "../../core/context/output.js";
 import { S2C } from "./protocol.js";
+import { logger } from "../../core/logger.js";
+import { formatError } from "../../core/error.js";
 
 // ── FanoutSink ──────────────────────────────────────────────────────────────
 
@@ -30,7 +27,7 @@ export class FanoutSink {
         s.emit(event);
       } catch (e) {
         // Sink errors are non-fatal — log and continue
-        console.error(`[fanout] sink error:`, e);
+        logger.error(formatError(e));
       }
     }
   }
@@ -168,7 +165,7 @@ export class WebSocketOutputSink {
  * Silent sink for sessions with no connected clients.
  * Silently drops streaming chunks (no one to show them to).
  * Logs QUESTION events so they can be surfaced when a client reconnects.
- * All other events are no-ops (the session-log extension handles persistence).
+ * All other events: no-op (persistence handled by session-log extension)
  */
 export class BackgroundSink {
   #pendingQuestions = [];

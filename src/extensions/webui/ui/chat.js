@@ -4,6 +4,7 @@
 
 import { reactiveState, effect } from "./utils.js";
 import { createMessageList } from "./message-list.js";
+import { logger } from "../../core/logger.js";
 
 /**
  * Create a chat controller for a WebSocket connection.
@@ -114,7 +115,7 @@ export function createChat({
         console.warn("[chat] Auth required but not provided");
         return;
       case "authError":
-        console.error("[chat] Auth error:", data.message);
+        logger.error("[chat] Auth error:", data.message);
         return;
     }
 
@@ -197,7 +198,7 @@ export function createChat({
     try {
       ws = new WebSocket(wsUrl);
     } catch (e) {
-      console.error("[chat] WS connection failed:", e);
+      logger.error("[chat] WS connection failed:", e);
       connectedAtom(false);
       verifyTokenAndReconnect();
       return;
@@ -388,7 +389,6 @@ export function createChat({
     cancel();
   });
 
-  // Wire up session buttons
   document.getElementById("new-session-btn").addEventListener("click", () => {
     createSession({});
   });

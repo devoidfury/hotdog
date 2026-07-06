@@ -50,6 +50,8 @@ describe("buildModelRegistry", () => {
       name: "openai/gpt-4",
       temperature: 0.7,
       maxTokens: 32000,
+      reasoningEffort: undefined,
+      tags: [],
     });
   });
 

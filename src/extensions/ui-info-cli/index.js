@@ -89,6 +89,8 @@ function printInfoText(
   console.log("=== Agent Harness Info ===");
   console.log();
   console.log("Configuration:");
+  const configDirAbs = resolved.configDir || resolveConfigDir(cli.configDir);
+  console.log(`  Config Dir:      ${configDirAbs}`);
   console.log(`  AI URL:          ${resolved.baseUrl}`);
   console.log(`  Default Model:   ${resolved.model}`);
   console.log(
@@ -569,6 +571,7 @@ async function runProfileList(cli, config, buildConfig) {
     aspects,
     profilesPath,
     visibleWorkerNames,
+    configDir,
   );
 }
 
@@ -583,14 +586,13 @@ function printProfileListText(
   globalAspects,
   profilesPath,
   visibleWorkerNames,
+  configDir,
 ) {
   const names = Array.from(allNames).sort();
 
   if (names.length === 0) {
     console.log("No profiles configured.");
-    console.log(
-      `Profiles directory: (not found or empty)`,
-    );
+    console.log(`Profiles directory: (not found or empty)`);
     return 0;
   }
 
@@ -606,7 +608,8 @@ function printProfileListText(
     console.log(`Profile: ${name}${marker}`);
 
     // Description
-    const description = fileProfile?.description || configProfile?.description || null;
+    const description =
+      fileProfile?.description || configProfile?.description || null;
     if (description) {
       console.log(`  Description: ${description}`);
     }
@@ -615,9 +618,7 @@ function printProfileListText(
     const role = fileProfile?.role || configProfile?.role || null;
     if (role) {
       // Truncate long roles for display
-      const roleDisplay = role.length > 200
-        ? `${role.slice(0, 200)}...`
-        : role;
+      const roleDisplay = role.length > 200 ? `${role.slice(0, 200)}...` : role;
       console.log(`  Role: ${roleDisplay}`);
     }
 
@@ -634,14 +635,16 @@ function printProfileListText(
 
     // Tool restrictions — file profile values take priority, but only if non-empty
     const fileBlacklist = fileProfile?.blacklistTools || [];
-    const cfgBlacklist = configProfile?.blacklist_tools || configProfile?.blacklistTools || [];
-    const blacklistTools = fileBlacklist.length > 0 ? fileBlacklist : cfgBlacklist;
+    const cfgBlacklist =
+      configProfile?.blacklist_tools || configProfile?.blacklistTools || [];
+    const blacklistTools =
+      fileBlacklist.length > 0 ? fileBlacklist : cfgBlacklist;
 
     const fileWhitelist = fileProfile?.whitelistTools;
-    const cfgWhitelist = configProfile?.whitelist_tools || configProfile?.whitelistTools;
-    const whitelistTools = (fileWhitelist && fileWhitelist.length > 0)
-      ? fileWhitelist
-      : cfgWhitelist;
+    const cfgWhitelist =
+      configProfile?.whitelist_tools || configProfile?.whitelistTools;
+    const whitelistTools =
+      fileWhitelist && fileWhitelist.length > 0 ? fileWhitelist : cfgWhitelist;
 
     if (blacklistTools.length > 0) {
       console.log(`  Blacklisted tools: ${blacklistTools.join(", ")}`);
@@ -677,8 +680,7 @@ function printProfileListText(
     if (fileProfile && profilesPath) {
       try {
         const filePath = path.join(profilesPath, `${name}.profile.md`);
-        const relativePath = path.relative(process.cwd(), filePath);
-        console.log(`  Profile: ${relativePath}`);
+        console.log(`  Profile: ${filePath}`);
       } catch {
         // Ignore path resolution errors
       }
@@ -711,21 +713,23 @@ function printProfileListJson(
 
     // Tool restrictions — file profile values take priority, but only if non-empty
     const fileBlacklist = fileProfile?.blacklistTools || [];
-    const cfgBlacklist = configProfile?.blacklist_tools || configProfile?.blacklistTools || [];
-    const blacklistTools = fileBlacklist.length > 0 ? fileBlacklist : cfgBlacklist;
+    const cfgBlacklist =
+      configProfile?.blacklist_tools || configProfile?.blacklistTools || [];
+    const blacklistTools =
+      fileBlacklist.length > 0 ? fileBlacklist : cfgBlacklist;
 
     const fileWhitelist = fileProfile?.whitelistTools;
-    const cfgWhitelist = configProfile?.whitelist_tools || configProfile?.whitelistTools;
-    const whitelistTools = (fileWhitelist && fileWhitelist.length > 0)
-      ? fileWhitelist
-      : cfgWhitelist;
+    const cfgWhitelist =
+      configProfile?.whitelist_tools || configProfile?.whitelistTools;
+    const whitelistTools =
+      fileWhitelist && fileWhitelist.length > 0 ? fileWhitelist : cfgWhitelist;
 
-    // Compute relative path for file-sourced profiles
+    // Compute path for file-sourced profiles
     let profileRelPath = null;
     if (fileProfile && profilesPath) {
       try {
         const filePath = path.join(profilesPath, `${name}.profile.md`);
-        profileRelPath = path.relative(process.cwd(), filePath);
+        profileRelPath = filePath;
       } catch {
         // Ignore path resolution errors
       }
@@ -734,7 +738,8 @@ function printProfileListJson(
     profiles.push({
       name,
       current: name === currentProfile,
-      description: fileProfile?.description || configProfile?.description || null,
+      description:
+        fileProfile?.description || configProfile?.description || null,
       role: fileProfile?.role || configProfile?.role || null,
       model: configProfile?.model || fileProfile?.model || null,
       aspects: globalAspects && globalAspects.length > 0 ? globalAspects : null,
@@ -786,7 +791,8 @@ export function create(core) {
             });
 
             registry.register("profile-list", {
-              description: "List all available profiles with their roles and tool restrictions",
+              description:
+                "List all available profiles with their roles and tool restrictions",
               handler: async (cli, core) => {
                 const { config, buildConfig } = core;
                 return await runProfileList(cli, config, buildConfig);

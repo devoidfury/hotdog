@@ -35,6 +35,7 @@ export function buildModelRegistry(config) {
           modelEntry.reasoning_effort ||
           modelEntry.reasoningEffort ||
           undefined,
+        tags: modelEntry.tags || [],
       };
     }
     // Also add provider-level models (models defined at provider level)
@@ -44,6 +45,7 @@ export function buildModelRegistry(config) {
         name: `${provider.name}/${provider.defaultModel}`,
         temperature: provider.temperature,
         maxTokens: provider.maxTokens || DEFAULT_MAX_TOKENS,
+        tags: provider.tags || [],
       };
     }
   }

@@ -1281,7 +1281,10 @@ describe("Info CLI - profile-list subcommand", () => {
         const exitCode = await def.handler(cli, core);
         expect(exitCode).toBe(0);
         const output = logs.capturedOutput();
-        expect(output).toContain("Manager: yes (subagents: worker1, worker2)");
+        // Subagent order may vary depending on filesystem enumeration
+        expect(output).toContain("Manager: yes (subagents:");
+        expect(output).toContain("worker1");
+        expect(output).toContain("worker2");
       } finally {
         logs.restore();
       }

@@ -89,7 +89,7 @@ function printInfoText(
   console.log("=== Agent Harness Info ===");
   console.log();
   console.log("Configuration:");
-  const configDirAbs = resolved.configDir || resolveConfigDir(cli.configDir);
+  const configDirAbs = resolved.configDir || resolveConfigDir(null);
   console.log(`  Config Dir:      ${configDirAbs}`);
   console.log(`  AI URL:          ${resolved.baseUrl}`);
   console.log(`  Default Model:   ${resolved.model}`);

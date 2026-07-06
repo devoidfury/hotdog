@@ -4,7 +4,10 @@ import { describe, it, expect } from "bun:test";
 import { LlmClient } from "../../src/core/llm-client/client.js";
 import { LlmError } from "../../src/core/error.js";
 import { Message } from "../../src/core/context/message.js";
-import { MarkerMangler, createMarkerMangler } from "../../src/core/marker-mangler.js";
+import {
+  MarkerMangler,
+  createMarkerMangler,
+} from "../../src/core/marker-mangler.js";
 
 describe("LlmClient._escapeMessages", () => {
   it("escapes string content with mangler", () => {
@@ -24,7 +27,10 @@ describe("LlmClient._escapeMessages", () => {
         role: "user",
         content: [
           { type: "text", text: "Hello" },
-          { type: "image_url", image_url: { url: "data:image/png;base64,abc" } },
+          {
+            type: "image_url",
+            image_url: { url: "data:image/png;base64,abc" },
+          },
         ],
       }),
     ];
@@ -42,7 +48,10 @@ describe("LlmClient._escapeMessages", () => {
       new Message({
         role: "user",
         content: [
-          { type: "image_url", image_url: { url: "data:image/png;base64,abc" } },
+          {
+            type: "image_url",
+            image_url: { url: "data:image/png;base64,abc" },
+          },
         ],
       }),
     ];
@@ -79,7 +88,10 @@ describe("LlmClient._escapeMessages", () => {
         role: "assistant",
         content: null,
         toolCalls: [
-          { id: "tc1", function: { name: "read_file", arguments: '{"path":"test.txt"}' } },
+          {
+            id: "tc1",
+            function: { name: "read_file", arguments: '{"path":"test.txt"}' },
+          },
         ],
       }),
     ];
@@ -94,38 +106,6 @@ describe("LlmClient._escapeMessages", () => {
     const messages = [new Message({ role: "assistant", content: null })];
     const escaped = client._escapeMessages(messages);
     expect(escaped).toHaveLength(1);
-  });
-});
-
-describe("LlmClient.chat", () => {
-  it("throws InvalidResponse when tool calls are in chat response", async () => {
-    const client = new LlmClient({ baseUrl: "http://test.com" });
-
-    // Mock chatWithModelConfig to return a tool call response
-    client.chatWithModelConfig = async () => ({
-      type: "toolCall",
-      toolCalls: [{ name: "bash", arguments: "{}" }],
-    });
-
-    await expect(
-      client.chat([{ role: "user", content: "Hi" }], "test-model")
-    ).rejects.toThrow("Unexpected tool calls in chat response");
-  });
-
-  it("returns content when response type is content", async () => {
-    const client = new LlmClient({ baseUrl: "http://test.com" });
-
-    client.chatWithModelConfig = async () => ({
-      type: "content",
-      content: "Hello from model",
-    });
-
-    const result = await client.chat(
-      [{ role: "user", content: "Hi" }],
-      "test-model",
-    );
-    expect(result.type).toBe("content");
-    expect(result.content).toBe("Hello from model");
   });
 });
 
@@ -516,10 +496,18 @@ data: {"choices":[{"delta":{"content":"valid"}}]}
           read: async () => {
             callCount++;
             if (callCount === 1) {
-              return { done: false, value: new TextEncoder().encode('data: {"choices":[{"delta":{"content":"Hello"}}]}') };
+              return {
+                done: false,
+                value: new TextEncoder().encode(
+                  'data: {"choices":[{"delta":{"content":"Hello"}}]}',
+                ),
+              };
             }
             if (callCount === 2) {
-              return { done: false, value: new TextEncoder().encode('\ndata: [DONE]\n\n') };
+              return {
+                done: false,
+                value: new TextEncoder().encode("\ndata: [DONE]\n\n"),
+              };
             }
             return { done: true, value: undefined };
           },
@@ -583,7 +571,10 @@ describe("LlmClient constructor edge cases", () => {
 
 describe("LlmClient._doRequest", () => {
   it("includes Authorization header when apiKey is set", async () => {
-    const client = new LlmClient({ baseUrl: "http://test.com", apiKey: "secret" });
+    const client = new LlmClient({
+      baseUrl: "http://test.com",
+      apiKey: "secret",
+    });
     let capturedHeaders = null;
 
     globalThis.fetch = async (url, opts) => {
@@ -607,7 +598,10 @@ describe("LlmClient._doRequest", () => {
   });
 
   it("includes x-session-affinity header when sessionId is set", async () => {
-    const client = new LlmClient({ baseUrl: "http://test.com", sessionId: "sess-123" });
+    const client = new LlmClient({
+      baseUrl: "http://test.com",
+      sessionId: "sess-123",
+    });
     let capturedHeaders = null;
 
     globalThis.fetch = async (url, opts) => {
@@ -671,7 +665,7 @@ describe("LlmClient._doRequest", () => {
         "key",
         { model: "test" },
         new AbortController().signal,
-      )
+      ),
     ).rejects.toThrow(/HTTP 500/);
   });
 
@@ -859,7 +853,11 @@ describe("LlmClient.chatStream", () => {
     const client = new LlmClient({ baseUrl: "http://test.com" });
     let capturedTools = null;
 
-    client.chatStreamWithModelConfig = async function* (messages, modelConfig, tools) {
+    client.chatStreamWithModelConfig = async function* (
+      messages,
+      modelConfig,
+      tools,
+    ) {
       capturedTools = tools;
     };
 
@@ -872,7 +870,8 @@ describe("LlmClient.chatStream", () => {
 
     // Consume the generator
     try {
-      for await (const _ of gen) {}
+      for await (const _ of gen) {
+      }
     } catch {}
 
     expect(capturedTools).toBe(tools);

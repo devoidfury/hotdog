@@ -583,6 +583,8 @@ describe("Interactive CLI - output sink creation", () => {
   it("CliOutputSink is created with correct options", () => {
     const palette = ColorPalette.default();
     const sink = new CliOutputSink({
+      toolFormat: "  2192 {} {}",
+      toolOutputFmt: "----\n{}\n----",
       palette,
       thinkerFormat: "[Thinking: {}]",
       toolFormat: "  → {} {}",
@@ -761,6 +763,8 @@ describe("Interactive CLI - CliOutputSink emit methods", () => {
 
   it("emitUserMessage writes to stdout", () => {
     const sink = new CliOutputSink({
+      toolFormat: "  2192 {} {}",
+      toolOutputFmt: "----\n{}\n----",
       palette: ColorPalette.default(),
       hideTools: true,
       hideThinking: false,
@@ -783,6 +787,8 @@ describe("Interactive CLI - CliOutputSink emit methods", () => {
 
   it("emitAssistantMessage writes to stdout", () => {
     const sink = new CliOutputSink({
+      toolFormat: "  2192 {} {}",
+      toolOutputFmt: "----\n{}\n----",
       palette: ColorPalette.default(),
       hideTools: true,
       hideThinking: false,
@@ -805,6 +811,8 @@ describe("Interactive CLI - CliOutputSink emit methods", () => {
 
   it("emitThinking writes to stderr when not hidden", () => {
     const sink = new CliOutputSink({
+      toolFormat: "  2192 {} {}",
+      toolOutputFmt: "----\n{}\n----",
       palette: ColorPalette.default(),
       hideTools: true,
       hideThinking: false,
@@ -827,6 +835,8 @@ describe("Interactive CLI - CliOutputSink emit methods", () => {
 
   it("emitThinking does not write when hidden", () => {
     const sink = new CliOutputSink({
+      toolFormat: "  2192 {} {}",
+      toolOutputFmt: "----\n{}\n----",
       palette: ColorPalette.default(),
       hideTools: true,
       hideThinking: true,
@@ -848,6 +858,8 @@ describe("Interactive CLI - CliOutputSink emit methods", () => {
 
   it("emitToolCall writes to stdout", () => {
     const sink = new CliOutputSink({
+      toolFormat: "  2192 {} {}",
+      toolOutputFmt: "----\n{}\n----",
       palette: ColorPalette.default(),
       hideTools: false,
       hideThinking: false,
@@ -871,6 +883,8 @@ describe("Interactive CLI - CliOutputSink emit methods", () => {
 
   it("emitToolResult writes to stdout when not hidden", () => {
     const sink = new CliOutputSink({
+      toolFormat: "  2192 {} {}",
+      toolOutputFmt: "----\n{}\n----",
       palette: ColorPalette.default(),
       hideTools: false,
       hideThinking: false,
@@ -893,6 +907,8 @@ describe("Interactive CLI - CliOutputSink emit methods", () => {
 
   it("emitToolResult does not write when hidden", () => {
     const sink = new CliOutputSink({
+      toolFormat: "  2192 {} {}",
+      toolOutputFmt: "----\n{}\n----",
       palette: ColorPalette.default(),
       hideTools: true,
       hideThinking: false,
@@ -914,6 +930,8 @@ describe("Interactive CLI - CliOutputSink emit methods", () => {
 
   it("emitCommandResult writes to stderr", () => {
     const sink = new CliOutputSink({
+      toolFormat: "  2192 {} {}",
+      toolOutputFmt: "----\n{}\n----",
       palette: ColorPalette.default(),
       hideTools: true,
       hideThinking: false,
@@ -936,6 +954,8 @@ describe("Interactive CLI - CliOutputSink emit methods", () => {
 
   it("emitStreamingChunk writes when stream is enabled", () => {
     const sink = new CliOutputSink({
+      toolFormat: "  2192 {} {}",
+      toolOutputFmt: "----\n{}\n----",
       palette: ColorPalette.default(),
       hideTools: true,
       hideThinking: false,
@@ -959,6 +979,8 @@ describe("Interactive CLI - CliOutputSink emit methods", () => {
 
   it("emitStreamingChunk does not write when stream is disabled", () => {
     const sink = new CliOutputSink({
+      toolFormat: "  2192 {} {}",
+      toolOutputFmt: "----\n{}\n----",
       palette: ColorPalette.default(),
       hideTools: true,
       hideThinking: false,
@@ -981,6 +1003,8 @@ describe("Interactive CLI - CliOutputSink emit methods", () => {
 
   it("emitStreamingReasoningChunk writes to stderr when not hidden and streaming", () => {
     const sink = new CliOutputSink({
+      toolFormat: "  2192 {} {}",
+      toolOutputFmt: "----\n{}\n----",
       palette: ColorPalette.default(),
       hideTools: true,
       hideThinking: false,
@@ -1004,6 +1028,8 @@ describe("Interactive CLI - CliOutputSink emit methods", () => {
 
   it("emitStreamingReasoningChunk does not write when thinking is hidden", () => {
     const sink = new CliOutputSink({
+      toolFormat: "  2192 {} {}",
+      toolOutputFmt: "----\n{}\n----",
       palette: ColorPalette.default(),
       hideTools: true,
       hideThinking: true,
@@ -1026,6 +1052,8 @@ describe("Interactive CLI - CliOutputSink emit methods", () => {
 
   it("emitTaskProgress writes when there are active tasks", () => {
     const sink = new CliOutputSink({
+      toolFormat: "  2192 {} {}",
+      toolOutputFmt: "----\n{}\n----",
       palette: ColorPalette.default(),
       hideTools: true,
       hideThinking: false,
@@ -1049,6 +1077,8 @@ describe("Interactive CLI - CliOutputSink emit methods", () => {
 
   it("emitTaskProgress does not write when no active tasks", () => {
     const sink = new CliOutputSink({
+      toolFormat: "  2192 {} {}",
+      toolOutputFmt: "----\n{}\n----",
       palette: ColorPalette.default(),
       hideTools: true,
       hideThinking: false,
@@ -1071,6 +1101,8 @@ describe("Interactive CLI - CliOutputSink emit methods", () => {
 
   it("emitTokenUsage writes token stats", () => {
     const sink = new CliOutputSink({
+      toolFormat: "  2192 {} {}",
+      toolOutputFmt: "----\n{}\n----",
       palette: ColorPalette.default(),
       hideTools: true,
       hideThinking: false,
@@ -1097,6 +1129,8 @@ describe("Interactive CLI - CliOutputSink emit methods", () => {
 
   it("emitQuestion displays questions with options", () => {
     const sink = new CliOutputSink({
+      toolFormat: "  2192 {} {}",
+      toolOutputFmt: "----\n{}\n----",
       palette: ColorPalette.default(),
       hideTools: true,
       hideThinking: false,
@@ -1130,6 +1164,8 @@ describe("Interactive CLI - CliOutputSink emit methods", () => {
 
   it("reset writes reset sequence", () => {
     const sink = new CliOutputSink({
+      toolFormat: "  2192 {} {}",
+      toolOutputFmt: "----\n{}\n----",
       palette: ColorPalette.default(),
       hideTools: true,
       hideThinking: false,

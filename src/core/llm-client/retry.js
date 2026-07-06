@@ -42,8 +42,12 @@ export function isRetryableHttpStatus(status) {
  * @param {AbortSignal} [options.signal] - AbortSignal for cancellation.
  * @returns {Promise<T>} The result of the async function.
  */
-export async function retryWithBackoff(fn, maxRetries = 12, options = {}) {
+export async function retryWithBackoff(fn, maxRetries, options = {}) {
   const { signal } = options;
+
+  if (maxRetries == null) {
+    throw new Error("missing required maxRetries");
+  }
 
   if (signal?.aborted) {
     throw LlmError.Cancelled("request was cancelled");

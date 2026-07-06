@@ -6,20 +6,20 @@ import fsPromises from "node:fs/promises";
 import path from "node:path";
 
 import {
-  DEFAULT_MAX_TOKENS,
-  DEFAULT_MODEL,
   DEFAULT_SYSTEM_PROMPT_FILENAME,
+  DEFAULT_SYSTEM_PROMPT_TEMPLATE,
 } from "./defaults.js";
 
 /**
  * Build a model registry from config providers.
- * Accepts a config object with a `providers` array.
+ * Accepts a config object with a `providers` array and `maxTokens`.
  * Returns a map of model_name -> { name, temperature, maxTokens }
  *
  * @param {object} config - Config object with providers array.
+ * @param {number} maxTokens - Default max tokens for models without explicit setting (from resolved config).
  * @returns {object} Model registry map.
  */
-export function buildModelRegistry(config) {
+export function buildModelRegistry(config, maxTokens) {
   const registry = {};
   const providers = config.providers || [];
 
@@ -30,7 +30,7 @@ export function buildModelRegistry(config) {
       registry[modelName] = {
         name: modelName,
         temperature: modelEntry.temperature,
-        maxTokens: modelEntry.maxTokens || DEFAULT_MAX_TOKENS,
+        maxTokens: modelEntry.maxTokens || maxTokens,
         reasoningEffort:
           modelEntry.reasoning_effort ||
           modelEntry.reasoningEffort ||
@@ -44,7 +44,7 @@ export function buildModelRegistry(config) {
       registry[`${provider.name}/${provider.defaultModel}`] = {
         name: `${provider.name}/${provider.defaultModel}`,
         temperature: provider.temperature,
-        maxTokens: provider.maxTokens || DEFAULT_MAX_TOKENS,
+        maxTokens: provider.maxTokens || maxTokens,
         tags: provider.tags || [],
       };
     }
@@ -131,8 +131,8 @@ export async function initSystemPromptTemplate(
       "utf-8",
     );
   } catch {
-    // Fallback: minimal template
-    cachedSystemPromptTemplate = `{{ role }}\n\n{{ body }}\n{% for chunk in chunks %}{{ chunk.content }}{% endfor %}`;
+    // Fallback: minimal template (from schema)
+    cachedSystemPromptTemplate = DEFAULT_SYSTEM_PROMPT_TEMPLATE;
   }
 
   return cachedSystemPromptTemplate;

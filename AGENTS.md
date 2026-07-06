@@ -24,7 +24,12 @@ JS project `hotdog` — an AI agent harness with tool calling support.
 - IMPORTANT: If you see a tag like <m_ar7e78o7kuqn36jg> -- this is not the actual content in the source file! The marker mangler is changing these so they don't trigger functionality, to prevent RCE. Always check the raw byte content instead to verify if it's relevant, using a command like xxd.
 
 ### Centralized Defaults
-All hard-coded configurable strings (model names, host URLs, ports, format templates, timeouts, etc.) must live in `src/core/config/` as named constants. The single source of truth is `src/core/core.config.json` -- defaults are exported from `src/core/config/defaults.js`. Never duplicate.
+The single source of truth for all configurable values is `src/core/core.config.json`.
+Defaults are exported from `src/core/config/defaults.js` for use by the config resolution
+layer (`getDefaultConfig()`). Components (`Agent`, `LlmClient`, `TaskManager`, etc.) receive
+resolved values from callers — do not import `DEFAULT_*` constants in components.
+Static path constants (`DEFAULT_SKILLS_PATH`, etc.) and runtime fallbacks
+(`DEFAULT_AI_URL_FALLBACK`) are exempt from this rule.
 
 ### Error Handling
 All error catches must use `formatError()` from `src/core/error.js`:

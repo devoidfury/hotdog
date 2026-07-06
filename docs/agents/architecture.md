@@ -28,7 +28,7 @@ Argument parsing with support for dynamic CLI flags registered by extensions via
 ### Config (`src/core/config/`)
 Split into sub-modules. The single source of truth is `src/core/core.config.json`. Key exports:
 - `src/core/config/index.js` — re-exports all from sub-modules; plus `resolveConfigDir()`, `mergeExtensionConfigDefaults()`, `normalizeConfigKeys()`, `getDefaultConfig()`, `loadConfig()`, `validateConfig()`, `failOnInvalidConfig()`, `buildConfig()`, `buildAgentConfig()`
-- `src/core/config/defaults.js` — `DEFAULT_*` constants (model, URL, thinker, tool format, timeouts, paths, max tokens)
+- `src/core/config/defaults.js` — exports constants for the config resolution layer (`getDefaultConfig()`) and static path defaults; components receive resolved values from callers instead of importing these directly
 - `src/core/config/schema-loader.js` — reads `core.config.json`, builds `CONFIG_SCHEMA`, cast functions, CLI flags, and resolvers (`resolveKey()`, `resolveAll()`, `resolveModel()`, `resolveModelWithProvider()`, `resolveExtensionConfig()`, `cliFlagsFromSchema()`)
 - `src/core/config/profiles.js` — `loadProfileFile()`, `loadProfileFiles()`, `resolveProfile()`, `mergeProfile()`
 - `src/core/config/providers.js` — `buildModelRegistry()`, `resolveProvider()`, `initSystemPromptTemplate()`, `resetSystemPromptCache()`

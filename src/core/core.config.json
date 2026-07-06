@@ -314,7 +314,16 @@
   },
   "maxIterations": {
     "type": "number",
-    "layers": [{ "default": 1000 }]
+    "cliFlag": {
+      "long": "--max-iterations",
+      "type": "number",
+      "description": "Maximum agent loop iterations"
+    },
+    "layers": [
+      { "source": "cli", "key": "maxIterations", "cast": "number" },
+      { "source": "config", "key": "maxIterations", "cast": "number" },
+      { "default": 1000 }
+    ]
   },
   "maxRetries": {
     "type": "number",
@@ -459,5 +468,17 @@
       { "source": "config", "key": "defaultProvider" },
       { "default": null }
     ]
+  },
+  "defaultAiUrl": {
+    "type": "string",
+    "layers": [{ "default": "http://localhost:8080" }]
+  },
+  "taskDefaultRole": {
+    "type": "string",
+    "layers": [{ "default": "A focused worker that executes tasks autonomously" }]
+  },
+  "systemPromptDefaultTemplate": {
+    "type": "string",
+    "layers": [{ "default": "{{ role }}\n\n{{ body }}\n{% for chunk in chunks %}{{ chunk.content }}{% endfor %}" }]
   }
 }

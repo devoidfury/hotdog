@@ -32,12 +32,16 @@ describe("LlmClient constructor", () => {
     delete process.env.AI_API_KEY;
     delete process.env.AI_URL;
     try {
-      const client = new LlmClient();
-      // Default baseUrl is null (configured at runtime via config resolution)
-      expect(client.baseUrl).toBeNull();
+      const client = new LlmClient({
+        chatTimeoutSecs: 600,
+        maxRetries: 12,
+      });
+      // Default baseUrl falls back to localhost:8080 (from schema defaultAiUrl)
+      expect(client.baseUrl).toBe("http://localhost:8080");
       expect(client.apiKey).toBeNull();
       expect(client.stream).toBe(true);
       expect(client.chatTimeoutSecs).toBe(600);
+      expect(client.maxRetries).toBe(12);
     } finally {
       if (origKey !== undefined) process.env.AI_API_KEY = origKey;
       else delete process.env.AI_API_KEY;
@@ -52,11 +56,13 @@ describe("LlmClient constructor", () => {
       apiKey: "test-key",
       stream: false,
       chatTimeoutSecs: 30,
+      maxRetries: 5,
     });
     expect(client.baseUrl).toBe("http://custom.com");
     expect(client.apiKey).toBe("test-key");
     expect(client.stream).toBe(false);
     expect(client.chatTimeoutSecs).toBe(30);
+    expect(client.maxRetries).toBe(5);
   });
 
   it("reads from environment variables", () => {
@@ -65,7 +71,10 @@ describe("LlmClient constructor", () => {
     process.env.AI_URL = "http://env-url.com";
     process.env.AI_API_KEY = "env-key";
     try {
-      const client = new LlmClient();
+      const client = new LlmClient({
+        chatTimeoutSecs: 600,
+        maxRetries: 12,
+      });
       expect(client.baseUrl).toBe("http://env-url.com");
       expect(client.apiKey).toBe("env-key");
     } finally {
@@ -85,6 +94,8 @@ describe("LlmClient constructor", () => {
       const client = new LlmClient({
         baseUrl: "http://explicit.com",
         apiKey: "explicit-key",
+        chatTimeoutSecs: 600,
+        maxRetries: 12,
       });
       expect(client.baseUrl).toBe("http://explicit.com");
       expect(client.apiKey).toBe("explicit-key");
@@ -102,6 +113,8 @@ describe("LlmClient.resolveProviderSettings", () => {
     const client = new LlmClient({
       baseUrl: "http://default.com",
       apiKey: "default-key",
+      chatTimeoutSecs: 600,
+      maxRetries: 12,
     });
     const settings = client.resolveProviderSettings("unknown/model");
     expect(settings.url).toBe("http://default.com");
@@ -112,6 +125,8 @@ describe("LlmClient.resolveProviderSettings", () => {
     const client = new LlmClient({
       baseUrl: "http://default.com",
       apiKey: "default-key",
+      chatTimeoutSecs: 600,
+      maxRetries: 12,
       providers: [
         { name: "openai", url: "http://openai.com", apiKey: "openai-key" },
       ],
@@ -125,6 +140,8 @@ describe("LlmClient.resolveProviderSettings", () => {
     const client = new LlmClient({
       baseUrl: "http://default.com",
       apiKey: "default-key",
+      chatTimeoutSecs: 600,
+      maxRetries: 12,
       providers: [{ name: "openai", url: "http://openai.com" }],
     });
     const settings = client.resolveProviderSettings("openai/gpt-4");
@@ -135,7 +152,7 @@ describe("LlmClient.resolveProviderSettings", () => {
 
 describe("LlmClient.buildChatRequest", () => {
   it("builds request with all fields", () => {
-    const client = new LlmClient();
+    const client = new LlmClient({ chatTimeoutSecs: 600, maxRetries: 12 });
     const messages = [new Message({ role: "user", content: "Hello" })];
     const request = client.buildChatRequest(
       messages,
@@ -152,7 +169,7 @@ describe("LlmClient.buildChatRequest", () => {
   });
 
   it("strips provider prefix from model name", () => {
-    const client = new LlmClient();
+    const client = new LlmClient({ chatTimeoutSecs: 600, maxRetries: 12 });
     const request = client.buildChatRequest(
       [],
       {
@@ -166,31 +183,44 @@ describe("LlmClient.buildChatRequest", () => {
   });
 
   it("disables stream when requested", () => {
-    const client = new LlmClient();
-    const request = client.buildChatRequest([], { name: "gpt-4" }, null, false);
+    const client = new LlmClient({ chatTimeoutSecs: 600, maxRetries: 12 });
+    const request = client.buildChatRequest(
+      [],
+      { name: "gpt-4", maxTokens: 32000 },
+      null,
+      false,
+    );
     expect(request.stream).toBe(false);
     expect(request.stream_options).toBeUndefined();
   });
 
   it("handles Message objects with tool_calls", () => {
-    const client = new LlmClient();
+    const client = new LlmClient({ chatTimeoutSecs: 600, maxRetries: 12 });
     const msg = new Message({
       role: "assistant",
       content: "I will run a command",
       toolCalls: [{ id: "tc1", function: { name: "bash", arguments: "{}" } }],
     });
-    const request = client.buildChatRequest([msg], { name: "gpt-4" }, null);
+    const request = client.buildChatRequest(
+      [msg],
+      { name: "gpt-4", maxTokens: 32000 },
+      null,
+    );
     expect(request.messages[0].tool_calls).toHaveLength(1);
   });
 
   it("handles Message objects with toolCallId", () => {
-    const client = new LlmClient();
+    const client = new LlmClient({ chatTimeoutSecs: 600, maxRetries: 12 });
     const msg = new Message({
       role: "tool",
       content: "output",
       toolCallId: "tc1",
     });
-    const request = client.buildChatRequest([msg], { name: "gpt-4" }, null);
+    const request = client.buildChatRequest(
+      [msg],
+      { name: "gpt-4", maxTokens: 32000 },
+      null,
+    );
     // Messages are escaped to JSON which includes tool_call_id
     expect(request.messages[0].tool_call_id).toBe("tc1");
   });
@@ -198,10 +228,16 @@ describe("LlmClient.buildChatRequest", () => {
 
 describe("LlmClient.chatStream", () => {
   it("returns an async generator", () => {
-    const client = new LlmClient({ baseUrl: "http://test.com" });
+    const client = new LlmClient({
+      baseUrl: "http://test.com",
+      chatTimeoutSecs: 600,
+      maxRetries: 12,
+    });
     const gen = client.chatStream(
       [{ role: "user", content: "Hi" }],
       "test-model",
+      [],
+      32000,
     );
     expect(gen[Symbol.asyncIterator]).toBeDefined();
   });
@@ -209,7 +245,7 @@ describe("LlmClient.chatStream", () => {
 
 describe("LlmClient.buildChatRequest reasoning_effort", () => {
   it("includes reasoning_effort when present in modelConfig", () => {
-    const client = new LlmClient();
+    const client = new LlmClient({ chatTimeoutSecs: 600, maxRetries: 12 });
     const request = client.buildChatRequest(
       [],
       {
@@ -224,7 +260,7 @@ describe("LlmClient.buildChatRequest reasoning_effort", () => {
   });
 
   it("omits reasoning_effort when undefined in modelConfig", () => {
-    const client = new LlmClient();
+    const client = new LlmClient({ chatTimeoutSecs: 600, maxRetries: 12 });
     const request = client.buildChatRequest(
       [],
       { name: "gpt-4", temperature: null, maxTokens: 100 },
@@ -234,7 +270,7 @@ describe("LlmClient.buildChatRequest reasoning_effort", () => {
   });
 
   it("omits reasoning_effort when null in modelConfig", () => {
-    const client = new LlmClient();
+    const client = new LlmClient({ chatTimeoutSecs: 600, maxRetries: 12 });
     const request = client.buildChatRequest(
       [],
       {
@@ -249,7 +285,7 @@ describe("LlmClient.buildChatRequest reasoning_effort", () => {
   });
 
   it("supports all reasoning effort values", () => {
-    const client = new LlmClient();
+    const client = new LlmClient({ chatTimeoutSecs: 600, maxRetries: 12 });
     const values = ["none", "minimal", "low", "high", "xhigh", "max"];
     for (const v of values) {
       const request = client.buildChatRequest(

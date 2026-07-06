@@ -31,6 +31,7 @@ async function runOneShot(
     apiKey: resolved.apiKey,
     stream: resolved.stream,
     chatTimeoutSecs: resolved.chatTimeout,
+    maxRetries: resolved.maxRetries,
     providers: config.providers || [],
     markerMangler: new MarkerMangler(),
   });
@@ -41,7 +42,9 @@ async function runOneShot(
     modelRegistry,
     config,
     hooks: core.hooks,
-    maxIterations: config.maxIterations || 1000,
+    maxIterations: resolved.maxIterations,
+    taskProfile: resolved.taskProfile,
+    taskRole: resolved.taskDefaultRole,
   });
 
   // Create SessionManager
@@ -100,10 +103,9 @@ async function handlePromptSubcommand(cli, core) {
   const sink = new CliOutputSink({
     ...resolved,
     palette,
-    thinkerFormat: cli.thinker ?? config.thinker ?? "[Thinking: {}]",
-    toolFormat: cli.toolfmt ?? config.toolfmt ?? "  → {} {}",
-    toolOutputFmt:
-      cli.toolOutputFmt ?? config.toolOutputFmt ?? "----\n{}\n----",
+    thinkerFormat: resolved.thinkerFormat,
+    toolFormat: resolved.toolFormat,
+    toolOutputFmt: resolved.toolOutputFmt,
   });
 
   // Build agent function (same as in main.js)
@@ -112,6 +114,7 @@ async function handlePromptSubcommand(cli, core) {
     apiKey: resolved.apiKey,
     stream: resolved.stream,
     chatTimeoutSecs: resolved.chatTimeout,
+    maxRetries: resolved.maxRetries,
     providers: config.providers || [],
     markerMangler: new MarkerMangler(),
   });
@@ -123,8 +126,8 @@ async function handlePromptSubcommand(cli, core) {
       toolRegistry: core.toolRegistry,
       llmClient,
       model: agentConfig.model || resolved.model,
-      maxIterations: agentConfig.maxIterations || config.maxIterations || 1000,
-      maxTokens: config.maxTokens || 32000,
+      maxIterations: agentConfig.maxIterations || resolved.maxIterations,
+      maxTokens: resolved.maxTokens,
       hideTools: agentConfig.hideTools ?? resolved.hideTools,
       hideThinking: agentConfig.hideThinking ?? resolved.hideThinking,
       showTokenUse: agentConfig.showTokenUse ?? resolved.showTokenUse,

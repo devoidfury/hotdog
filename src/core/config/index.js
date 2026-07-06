@@ -39,6 +39,21 @@ import {
   DEFAULT_PROMPTS_PATH,
   DEFAULT_CHAT_TIMEOUT_SECS,
   DEFAULT_EMBEDDINGS_TIMEOUT_SECS,
+  DEFAULT_MAX_TOKENS,
+  DEFAULT_MAX_ITERATIONS,
+  DEFAULT_MAX_RETRIES,
+  DEFAULT_TASK_PROFILE,
+  DEFAULT_TASK_ROLE,
+  DEFAULT_EXIT_COMMANDS,
+  DEFAULT_AI_URL,
+  DEFAULT_HIDE_TOOLS,
+  DEFAULT_HIDE_THINKING,
+  DEFAULT_SHOW_TOKEN_USE,
+  DEFAULT_SUBCOMMAND,
+  DEFAULT_NO_LOG,
+  DEFAULT_COMPACT_DEBUG,
+  DEFAULT_HOOK_TRACE,
+  DEFAULT_SYSTEM_PROMPT_TEMPLATE,
 } from "./defaults.js";
 import { CONFIG_SCHEMA } from "./schema-loader.js";
 import {
@@ -148,15 +163,34 @@ export function normalizeConfigKeys(obj) {
 /**
  * Get the default configuration.
  *
+ * All values are derived from CONFIG_SCHEMA defaults — no hardcoded config
+ * values. This keeps core.config.json as the single source of truth.
+ *
  * @param {Array<{key: string, defaults: Object}>} [extParams] - Extension config params to merge.
  * @returns {Object} Default config object.
  */
 export function getDefaultConfig(extParams) {
+  // Derive all defaults from the schema.
+  // Keys NOT in the schema (providers, profiles, extension settings, etc.)
+  // are structural defaults that don't represent user-configurable values.
   const baseConfig = {
+    // Structural — not user-configurable
     providers: [],
-    defaultProvider: null,
-    aiUrl: null,
+    profiles: {},
+    extensionPaths: ["builtins"],
+    extensionAutoload: false,
+    extensions: [],
+    profile: null,
+    // Structural — runtime-only
+    theme: null,
+    colors: null, // ColorPalette object — see colors.js ColorPalette
+    systemPromptTemplate: null,
+    // Schema-derived defaults
+    aiUrl: DEFAULT_AI_URL, // null — URL comes from provider/config/env
+    apiKey: null,
     defaultModel: DEFAULT_MODEL,
+    defaultProvider: null,
+    defaultSubcommand: DEFAULT_SUBCOMMAND,
     temperature: null,
     thinker: DEFAULT_THINKER,
     toolfmt: DEFAULT_TOOL_FMT,
@@ -165,28 +199,23 @@ export function getDefaultConfig(extParams) {
     // CLI --role > config file role > profile file role fallback
     // Setting a default here would override profile file roles.
     role: null,
-    hideTools: true,
-    hideThinking: false,
+    hideTools: DEFAULT_HIDE_TOOLS,
+    hideThinking: DEFAULT_HIDE_THINKING,
+    showTokenUse: DEFAULT_SHOW_TOKEN_USE,
     skillsPath: DEFAULT_SKILLS_PATH,
     profilesPath: DEFAULT_PROFILES_PATH,
     promptsPath: DEFAULT_PROMPTS_PATH,
-    systemPromptTemplate: null,
     chatTimeoutSecs: DEFAULT_CHAT_TIMEOUT_SECS,
     embeddingsTimeoutSecs: DEFAULT_EMBEDDINGS_TIMEOUT_SECS,
-    // Extension settings
-    extensionPaths: ["builtins"],
-    extensionAutoload: false,
-    extensions: [],
-    profile: null,
-    profiles: {},
-    theme: null,
-    colors: null, // ColorPalette object — see colors.js ColorPalette
-    apiKey: null,
-    noLog: false,
-    compactDebug: false,
+    maxTokens: DEFAULT_MAX_TOKENS,
+    maxIterations: DEFAULT_MAX_ITERATIONS,
+    maxRetries: DEFAULT_MAX_RETRIES,
+    taskProfile: DEFAULT_TASK_PROFILE,
+    exitCommands: DEFAULT_EXIT_COMMANDS,
+    noLog: DEFAULT_NO_LOG,
+    compactDebug: DEFAULT_COMPACT_DEBUG,
+    hookTrace: DEFAULT_HOOK_TRACE,
     mcpServers: [],
-    showTokenUse: true,
-    defaultSubcommand: "cli",
   };
 
   return mergeExtensionConfigDefaults(baseConfig, extParams);
@@ -322,15 +351,15 @@ export async function buildConfig(cliArgv) {
     configDir,
     providers: config.providers || [],
     defaultModel: DEFAULT_MODEL,
-    defaultRole: "",
     profilesPath: cliArgv.profilesPath
       ? cliArgv.profilesPath
       : path.join(configDir, DEFAULT_PROFILES_SUBPATH),
   });
 
-  const modelRegistry = buildModelRegistry({
-    providers: config.providers || [],
-  });
+  const modelRegistry = buildModelRegistry(
+    { providers: config.providers || [] },
+    resolved.maxTokens,
+  );
   resolved.modelRegistry = modelRegistry;
 
   return { resolved, modelRegistry, providers: config.providers || [] };
@@ -345,8 +374,7 @@ export async function buildAgentConfig(options) {
     config,
     configDir,
     providers = [],
-    defaultModel = "qwen3.5-0.8b",
-    defaultRole = "You are an AI coding assistant.",
+    defaultModel = DEFAULT_MODEL,
     profilesPath: givenProfilesPath,
   } = options;
 

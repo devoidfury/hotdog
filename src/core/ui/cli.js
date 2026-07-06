@@ -2,10 +2,6 @@
 
 import { OutputSink, OUTPUT_EVENT, EVENT_HANDLERS } from "../context/output.js";
 import {
-  DEFAULT_TOOL_FMT,
-  DEFAULT_TOOL_OUTPUT_FMT,
-} from "../config/defaults.js";
-import {
   ColorPalette,
   applyThinking,
   applyToolCall,
@@ -63,20 +59,14 @@ export function formatCompacting(messageCount, keepRecent) {
  * Format a tool call display using the tool formatter.
  */
 export function formatToolCall(toolName, input, toolFmt) {
-  if (toolFmt) {
-    return toolFmt.replace("{}", toolName).replace("{}", input);
-  }
-  return DEFAULT_TOOL_FMT.replace("{}", toolName).replace("{}", input);
+  return toolFmt.replace("{}", toolName).replace("{}", input);
 }
 
 /**
  * Format a tool result display using the tool output formatter.
  */
 export function formatToolResult(result, toolOutputFmt) {
-  if (toolOutputFmt) {
-    return toolOutputFmt.replace("{}", result);
-  }
-  return DEFAULT_TOOL_OUTPUT_FMT.replace("{}", result);
+  return toolOutputFmt.replace("{}", result);
 }
 
 /**
@@ -119,8 +109,8 @@ export class CliOutputSink extends OutputSink {
   constructor(options = {}) {
     super(options);
     this.thinkerFormat = options.thinkerFormat || "[Thinking: {}]";
-    this.toolFormat = options.toolFormat || DEFAULT_TOOL_FMT;
-    this.toolOutputFmt = options.toolOutputFmt || DEFAULT_TOOL_OUTPUT_FMT;
+    this.toolFormat = options.toolFormat;
+    this.toolOutputFmt = options.toolOutputFmt;
     this.palette = options.palette || ColorPalette.default();
     this.hideTools = options.hideTools;
     this.hideThinking = options.hideThinking;

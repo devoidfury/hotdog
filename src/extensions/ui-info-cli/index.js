@@ -41,6 +41,7 @@ async function runInfo(cli, config, buildConfig) {
     apiKey: resolved.apiKey,
     stream: false,
     chatTimeoutSecs: resolved.chatTimeout,
+    maxRetries: resolved.maxRetries,
     providers: rawConfig.providers || [],
   });
 
@@ -479,6 +480,8 @@ async function runShowPrompt(cli, core, config, buildConfig) {
     toolRegistry: core.toolRegistry,
     llmClient: null, // Not needed — we only want the system prompt
     model: resolved.model || "",
+    maxIterations: resolved.maxIterations,
+    maxTokens: resolved.maxTokens,
     profileName: resolved.profileName || "default",
     role: resolved.role || "",
     profileBody: resolved.profileBody || "",

@@ -24,7 +24,7 @@ describe("formatCompacting", () => {
 
 describe("formatToolCall", () => {
   it("formats with default formatter", () => {
-    expect(formatToolCall("bash", '{"cmd":"ls"}')).toBe(
+    expect(formatToolCall("bash", '{"cmd":"ls"}', "  → {} {}")).toBe(
       '  → bash {"cmd":"ls"}',
     );
   });
@@ -38,7 +38,9 @@ describe("formatToolCall", () => {
 
 describe("formatToolResult", () => {
   it("formats with default formatter", () => {
-    expect(formatToolResult("output here")).toBe("----\noutput here\n----");
+    expect(formatToolResult("output here", "----\n{}\n----")).toBe(
+      "----\noutput here\n----",
+    );
   });
 
   it("formats with custom formatter", () => {

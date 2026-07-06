@@ -58,7 +58,9 @@ export class TaskManager {
    * @param {Object} options.config — Config reference
    * @param {Object} options.hooks — HookSystem instance
    * @param {Object} [options.sessionManager] — SessionManager for context injection
-   * @param {number} [options.maxIterations=1000] — Max iterations per task
+   * @param {number} options.maxIterations — Max iterations per task (from resolved config)
+   * @param {string} options.taskProfile — Default task profile name (from resolved config)
+   * @param {string} options.taskRole — Default task role (from resolved config)
    */
   constructor(options = {}) {
     this._buildAgent = options.buildAgent;
@@ -67,7 +69,9 @@ export class TaskManager {
     this._config = options.config || {};
     this._hooks = options.hooks || null;
     this._sessionManager = options.sessionManager || null;
-    this._maxIterations = options.maxIterations || 1000;
+    this._maxIterations = options.maxIterations;
+    this._taskProfile = options.taskProfile;
+    this._taskRole = options.taskRole;
     this._tasks = new Map();
     this._bus = null;
   }
@@ -128,7 +132,7 @@ export class TaskManager {
    */
   async spawnTask(taskId, taskDescription, options = {}) {
     // 1. Load task profile
-    const profileName = options.profile || "task-default";
+    const profileName = options.profile || this._taskProfile;
     const taskProfile = loadProfileFile(this._config.profilesPath, profileName);
 
     // 2. Resolve model
@@ -140,7 +144,7 @@ export class TaskManager {
 
     // 3. Build system prompt from profile
     const resolvedRole =
-      taskProfile?.role || "A focused worker that executes tasks autonomously";
+      taskProfile?.role || this._taskRole;
     const resolvedProfileBody = taskProfile?.body || "";
 
     // 4. Resolve allowed tools: profile whitelist takes precedence

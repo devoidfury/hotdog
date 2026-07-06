@@ -45,7 +45,7 @@ describe("buildModelRegistry", () => {
         { name: "openai", models: [{ name: "gpt-4", temperature: 0.7 }] },
       ],
     };
-    const registry = buildModelRegistry(config);
+    const registry = buildModelRegistry(config, 32000);
     expect(registry["openai/gpt-4"]).toEqual({
       name: "openai/gpt-4",
       temperature: 0.7,
@@ -59,20 +59,20 @@ describe("buildModelRegistry", () => {
     const config = {
       providers: [{ name: "test", defaultModel: "gpt-3.5", temperature: 0.5 }],
     };
-    const registry = buildModelRegistry(config);
+    const registry = buildModelRegistry(config, 32000);
     expect(registry["test/gpt-3.5"]).toBeDefined();
     expect(registry["test/gpt-3.5"].temperature).toBe(0.5);
   });
 
   it("handles empty or multiple providers", () => {
-    expect(buildModelRegistry({})).toEqual({});
+    expect(buildModelRegistry({}, 32000)).toEqual({});
     const config = {
       providers: [
         { name: "a", models: [{ name: "m1" }] },
         { name: "b", models: [{ name: "m2" }] },
       ],
     };
-    const registry = buildModelRegistry(config);
+    const registry = buildModelRegistry(config, 32000);
     expect(registry["a/m1"]).toBeDefined();
     expect(registry["b/m2"]).toBeDefined();
   });
@@ -90,7 +90,7 @@ describe("buildModelRegistry", () => {
         },
       ],
     };
-    const registry = buildModelRegistry(config);
+    const registry = buildModelRegistry(config, 32000);
     expect(registry["ai365/dsv4"].reasoningEffort).toBe("max");
     expect(registry["ai365/qwen"].reasoningEffort).toBe("high");
     expect(registry["ai365/basic"].reasoningEffort).toBeUndefined();

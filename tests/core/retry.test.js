@@ -9,10 +9,13 @@ import { LlmError } from "../../src/core/error.js";
 describe("retryWithBackoff", () => {
   it("succeeds on first try", async () => {
     let calls = 0;
-    const result = await retryWithBackoff(() => {
-      calls++;
-      return Promise.resolve("ok");
-    });
+    const result = await retryWithBackoff(
+      () => {
+        calls++;
+        return Promise.resolve("ok");
+      },
+      12,
+    );
     expect(result).toBe("ok");
     expect(calls).toBe(1);
   });

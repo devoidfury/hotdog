@@ -11,7 +11,6 @@ import { ToolContext } from "./extensions/tool-context.js";
 import { xmlEscape } from "./extensions/tool-utils.js";
 import { createCommandRegistry } from "./extensions/registries.js";
 import { CORE_COMMAND_HANDLERS } from "./command-handlers.js";
-import { DEFAULT_MAX_TOKENS } from "./config/defaults.js";
 
 /**
  * Minimal Agent that runs the LLM loop and delegates behavior to hooks.
@@ -23,8 +22,8 @@ export class Agent {
    * @param {Object} options.toolRegistry — ToolRegistry instance
    * @param {Object} options.llmClient — LlmClient instance
    * @param {string} options.model — Model name
-   * @param {number} [options.maxIterations=1000] — Max loop iterations
-   * @param {number} [options.maxTokens] — Token threshold for context:full (default: DEFAULT_MAX_TOKENS)
+   * @param {number} options.maxIterations — Max loop iterations (from resolved config)
+   * @param {number} options.maxTokens — Token threshold for context:full (from resolved config)
    * @param {boolean} [options.hideTools=true] — Hide tool display
    * @param {boolean} [options.hideThinking=false] — Hide thinking display
    * @param {boolean} [options.showTokenUse=true] — Show token usage
@@ -40,13 +39,19 @@ export class Agent {
    * @param {string[]} [options.toolWhitelist] — Allowed tool names (restricts available tools)
    */
   constructor(options = {}) {
+    if (options.maxIterations == null) {
+      throw new Error("missing required maxIterations");
+    }
+    if (options.maxTokens == null) {
+      throw new Error("missing required maxTokens");
+    }
     this._hooks = options.hooks;
     this._toolRegistry = options.toolRegistry;
     this._llmClient = options.llmClient;
     this._log = new MessageLog();
     this._model = options.model;
-    this._maxIterations = options.maxIterations || 1000;
-    this._maxTokens = options.maxTokens || DEFAULT_MAX_TOKENS;
+    this._maxIterations = options.maxIterations;
+    this._maxTokens = options.maxTokens;
     this._hideTools = options.hideTools !== false;
     this._hideThinking = options.hideThinking === true;
     this._sink = options.sink || null;
@@ -103,7 +108,7 @@ export class Agent {
     // Pull in the new model's config from the registry
     const entry = this._modelRegistry[v];
     if (entry) {
-      this._maxTokens = entry.maxTokens || DEFAULT_MAX_TOKENS;
+      this._maxTokens = entry.maxTokens ?? this._maxTokens;
       // Reset reasoning effort to the new model's default —
       // the user can re-override via /reasoning if needed.
       this._reasoningEffort = entry.reasoningEffort;
@@ -896,7 +901,7 @@ export class Agent {
     const fromRegistry = this._modelRegistry[this._model] || {
       name: this._model,
       temperature: null,
-      maxTokens: DEFAULT_MAX_TOKENS,
+      maxTokens: this._maxTokens,
       reasoningEffort: undefined,
     };
     // Runtime override via /reasoning command takes priority

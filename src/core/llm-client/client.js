@@ -1,11 +1,7 @@
 // LLM client for communicating with AI providers.
 // Provides HTTP transport, streaming (SSE), and retry logic.
 
-import {
-  DEFAULT_AI_URL,
-  DEFAULT_CHAT_TIMEOUT_SECS,
-  DEFAULT_MAX_TOKENS,
-} from "../config/defaults.js";
+import { DEFAULT_AI_URL, DEFAULT_AI_URL_FALLBACK } from "../config/defaults.js";
 import { retryWithBackoff } from "./retry.js";
 import { createMarkerMangler } from "../marker-mangler.js";
 import { LlmError } from "../error.js";
@@ -21,18 +17,30 @@ export class LlmClient {
    * @param {string} [options.apiKey] - API key for authentication
    * @param {string} [options.sessionId] - Session ID for affinity
    * @param {boolean} [options.loud] - Log full JSON responses
-   * @param {number} [options.chatTimeoutSecs] - Request timeout in seconds
+   * @param {number} options.chatTimeoutSecs - Request timeout in seconds (from resolved config)
+   * @param {number} options.maxRetries - Maximum retry attempts (from resolved config)
    * @param {boolean} [options.stream] - Enable streaming responses
    * @param {Array<{name: string, url: string, apiKey?: string}>} [options.providers] - Provider configurations
    * @param {boolean} [options.cancelled] - Cancellation flag
    * @param {Object} [options.markerMangler] - Custom marker mangler for escaping
    */
   constructor(options = {}) {
-    this.baseUrl = options.baseUrl || process.env.AI_URL || DEFAULT_AI_URL;
+    if (options.chatTimeoutSecs == null) {
+      throw new Error("missing required chatTimeoutSecs");
+    }
+    if (options.maxRetries == null) {
+      throw new Error("missing required maxRetries");
+    }
+    this.baseUrl =
+      options.baseUrl ||
+      process.env.AI_URL ||
+      DEFAULT_AI_URL ||
+      DEFAULT_AI_URL_FALLBACK;
     this.apiKey = options.apiKey || process.env.AI_API_KEY || null;
     this.sessionId = options.sessionId || "";
     this.loud = options.loud || false;
-    this.chatTimeoutSecs = options.chatTimeoutSecs || DEFAULT_CHAT_TIMEOUT_SECS;
+    this.chatTimeoutSecs = options.chatTimeoutSecs;
+    this.maxRetries = options.maxRetries;
     this.stream = options.stream !== false;
     this.providers = options.providers || [];
     this.cancelled = false;
@@ -143,7 +151,7 @@ export class LlmClient {
     const request = {
       model: modelName,
       messages: escapedMessages,
-      max_tokens: modelConfig.maxTokens || DEFAULT_MAX_TOKENS,
+      max_tokens: modelConfig.maxTokens,
       stream: stream,
     };
 
@@ -169,43 +177,19 @@ export class LlmClient {
   }
 
   /**
-   * Send a chat request with retries.
-   *
-   * @param {Array<{role: string, content: string|Array}>} messages - Chat messages.
-   * @param {string} model - Model name.
-   * @param {Array} [tools] - Tool definitions.
-   * @returns {Promise<Object>} Response with { type: "content", fullText, reasoningContent, toolCalls, usage }.
-   */
-  async chat(messages, model, tools = []) {
-    const modelConfig = {
-      name: model,
-      temperature: null,
-      maxTokens: DEFAULT_MAX_TOKENS,
-    };
-    const response = await this.chatWithModelConfig(
-      messages,
-      modelConfig,
-      tools,
-    );
-    if (response.type === "content") {
-      return response;
-    }
-    throw LlmError.InvalidResponse("Unexpected tool calls in chat response");
-  }
-
-  /**
    * Send a chat request with streaming. Returns an async generator of StreamEvents.
    *
    * @param {Array<{role: string, content: string|Array}>} messages - Chat messages.
    * @param {string} model - Model name.
    * @param {Array} [tools] - Tool definitions.
+   * @param {number} [maxTokens] - Maximum tokens.
    * @returns {AsyncGenerator<{type: string, content?: string, reasoningContent?: string, name?: string, index?: number, arguments?: string, data?: Object}>} Async generator yielding stream events.
    */
-  async *chatStream(messages, model, tools = []) {
+  async *chatStream(messages, model, tools = [], maxTokens) {
     const modelConfig = {
       name: model,
       temperature: null,
-      maxTokens: DEFAULT_MAX_TOKENS,
+      maxTokens,
     };
     yield* this.chatStreamWithModelConfig(messages, modelConfig, tools);
   }
@@ -285,9 +269,13 @@ export class LlmClient {
       };
 
       // Use retryWithBackoff for transient errors
-      const response = await retryWithBackoff(doRequestWithTimeout, 12, {
-        signal: abortController.signal,
-      });
+      const response = await retryWithBackoff(
+        doRequestWithTimeout,
+        this.maxRetries,
+        {
+          signal: abortController.signal,
+        },
+      );
 
       yield* this._processSSE(response);
     } finally {

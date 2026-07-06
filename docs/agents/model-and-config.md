@@ -14,10 +14,15 @@
 ## Config System (`src/core/config/`)
 
 ### Core Defaults
-All defaults live in `src/core/config/defaults.js` (sourced from `src/core/core.config.json`):
-- `DEFAULT_MODEL`, `DEFAULT_AI_URL`, `DEFAULT_THINKER`, `DEFAULT_TOOL_FMT`, `DEFAULT_TOOL_OUTPUT_FMT`
-- `DEFAULT_SKILLS_PATH`, `DEFAULT_PROFILES_SUBPATH`, `DEFAULT_CONFIG_FILENAME`, `DEFAULT_SYSTEM_PROMPT_FILENAME`, `DEFAULT_PROFILES_PATH`, `DEFAULT_PROMPTS_PATH`
-- `DEFAULT_CHAT_TIMEOUT_SECS`, `DEFAULT_EMBEDDINGS_TIMEOUT_SECS`, `DEFAULT_MAX_TOKENS`
+All configurable defaults are defined in `src/core/core.config.json` as schema default layers.
+The config resolution system (`buildConfig` → `buildAgentConfig` → `resolveAll`) resolves
+values through the priority chain: CLI → config file → env → provider → profile → default.
+
+Components (`Agent`, `LlmClient`, `TaskManager`, etc.) receive resolved values from callers
+rather than importing constants directly. The `src/core/config/defaults.js` module exports
+constants for use by the config resolution layer (`getDefaultConfig()`) and for static
+path defaults (`DEFAULT_SKILLS_PATH`, `DEFAULT_PROFILES_SUBPATH`, etc.) that are not
+schema-configurable.
 
 Extension-specific defaults (e.g., `DEFAULT_READ_TOOL_LIMIT`, `DEFAULT_FIND_MAX_RESULTS`, compaction settings) are defined in each extension's `extension.json` configSchema.
 

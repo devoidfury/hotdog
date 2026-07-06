@@ -201,10 +201,9 @@ export async function runInteractiveSession(cli, core, options = {}) {
   const sink = new CliOutputSink({
     ...resolved,
     palette,
-    thinkerFormat: cli.thinker ?? config.thinker ?? "[Thinking: {}]",
-    toolFormat: cli.toolfmt ?? config.toolfmt ?? "  → {} {}",
-    toolOutputFmt:
-      cli.toolOutputFmt ?? config.toolOutputFmt ?? "----\n{}\n----",
+    thinkerFormat: resolved.thinkerFormat,
+    toolFormat: resolved.toolFormat,
+    toolOutputFmt: resolved.toolOutputFmt,
     // Readline already echoes user input, so skip the sink's user message display.
     // One-shot and websocket modes still need it (no readline echo).
     hideUserMessage: true,
@@ -216,6 +215,7 @@ export async function runInteractiveSession(cli, core, options = {}) {
     apiKey: resolved.apiKey,
     stream: resolved.stream,
     chatTimeoutSecs: resolved.chatTimeout,
+    maxRetries: resolved.maxRetries,
     providers: config.providers || [],
     markerMangler: new MarkerMangler(),
   });
@@ -228,8 +228,8 @@ export async function runInteractiveSession(cli, core, options = {}) {
       toolRegistry: core.toolRegistry,
       llmClient,
       model: agentConfig.model || resolved.model,
-      maxIterations: agentConfig.maxIterations || config.maxIterations || 1000,
-      maxTokens: config.maxTokens || 32000,
+      maxIterations: agentConfig.maxIterations || resolved.maxIterations,
+      maxTokens: resolved.maxTokens,
       hideTools: agentConfig.hideTools ?? resolved.hideTools,
       hideThinking: agentConfig.hideThinking ?? resolved.hideThinking,
       showTokenUse: agentConfig.showTokenUse ?? resolved.showTokenUse,
@@ -281,7 +281,9 @@ export async function runInteractiveSession(cli, core, options = {}) {
     modelRegistry: resolved.modelRegistry,
     config,
     hooks: core.hooks,
-    maxIterations: config.maxIterations || 1000,
+    maxIterations: resolved.maxIterations,
+    taskProfile: resolved.taskProfile,
+    taskRole: resolved.taskDefaultRole,
   });
 
   // Create SessionManager

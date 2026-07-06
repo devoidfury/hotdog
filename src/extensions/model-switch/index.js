@@ -53,8 +53,7 @@ export function create(core) {
             const lines = ["Available models:"];
             for (const name of models) {
               const m = agent._modelRegistry[name];
-              const tags = m?.tags ? ` [${m.tags.join(", ")}]` : "";
-              lines.push(`  ${name}${tags}`);
+              lines.push(`  ${name}`);
             }
             lines.push(`\nCurrently using: ${agent.model}`);
             return { content: lines.join("\n") };

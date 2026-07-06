@@ -403,7 +403,20 @@ export function resolveLoadOrder(extensions, serviceOverrides = {}) {
   // Drain pending nodes in sorted order. Loop until no more nodes are freed,
   // to handle multi-level dependency chains (A → B → C where C depends on B
   // which depends on A).
+  // Safety bound: total iterations cannot exceed extensions.length * extensions.length,
+  // preventing infinite loops from misconfigured dependency graphs.
+  const maxIterations = extensions.length * extensions.length + 1;
+  let iterationCount = 0;
   while (pending.length > 0) {
+    iterationCount++;
+    if (iterationCount > maxIterations) {
+      // Should never happen with valid input — guard against infinite loops
+      const remaining = extensions.filter(
+        (e) => !result.find((r) => r.name === e.name),
+      );
+      const cycleNames = remaining.map((e) => e.name).join(", ");
+      throw ExtensionError.CircularDependency(cycleNames);
+    }
     const batch = [...pending].sort(cmp);
     pending.length = 0;
     for (const ext of batch) {

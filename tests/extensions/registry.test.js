@@ -241,6 +241,35 @@ describe("ToolRegistry", () => {
     expect(filtered.has("bash")).toBe(false);
     expect(filtered.has("write")).toBe(true);
   });
+
+  it("removes a single tool", () => {
+    const reg = new ToolRegistry();
+    reg.register("bash", {});
+    reg.register("write", {});
+    expect(reg.remove("bash")).toBe(true);
+    expect(reg.has("bash")).toBe(false);
+    expect(reg.has("write")).toBe(true);
+  });
+
+  it("removeAll removes multiple tools and returns count", () => {
+    const reg = new ToolRegistry();
+    reg.register("bash", {});
+    reg.register("write", {});
+    reg.register("read", {});
+    const count = reg.removeAll(["bash", "read", "nonexistent"]);
+    expect(count).toBe(2);
+    expect(reg.has("bash")).toBe(false);
+    expect(reg.has("read")).toBe(false);
+    expect(reg.has("write")).toBe(true);
+  });
+
+  it("clears all tools", () => {
+    const reg = new ToolRegistry();
+    reg.register("bash", {});
+    reg.register("write", {});
+    reg.clear();
+    expect(reg.getAll()).toHaveLength(0);
+  });
 });
 
 describe("ToolContext", () => {

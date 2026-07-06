@@ -720,6 +720,7 @@ export async function registerExtensionMetadata(
     extensionPaths,
     extensionAutoload,
     extensionsList,
+    config,
   );
 
   // Register CLI flags from extension metadata
@@ -777,6 +778,7 @@ export class ExtensionLoader {
     this._handlerRemovers = new Map();
     this._entryPoints = new Map();
     this._metadata = new Map();
+    this._toolOwners = new Map(); // extName → Set of tool names it registered
     this._configRegistry = core.configRegistry || null;
     this._cliSubcommandRegistry = core.cliSubcommandRegistry || null;
   }
@@ -834,11 +836,30 @@ export class ExtensionLoader {
       instance.hooks[HOOKS.SERVICES_REGISTER](this._core.services);
     }
 
-    // Register tools (may be async).
+    // Register tools (may be async). Track which tools this extension owns
+    // so we can clean them up on unload.
+    const toolNamesBefore = new Set(
+      Array.from(this._core.toolRegistry.getAll().map(([n]) => n)),
+    );
+
     if (instance.hooks?.[HOOKS.TOOLS_REGISTER]) {
       await instance.hooks[HOOKS.TOOLS_REGISTER](this._core.toolRegistry);
     } else if (instance.registerTools) {
       await instance.registerTools(this._core.toolRegistry);
+    }
+
+    // Compute the delta: tools that were added by this extension.
+    const toolNamesAfter = new Set(
+      Array.from(this._core.toolRegistry.getAll().map(([n]) => n)),
+    );
+    const newlyRegistered = [];
+    for (const name of toolNamesAfter) {
+      if (!toolNamesBefore.has(name)) {
+        newlyRegistered.push(name);
+      }
+    }
+    if (newlyRegistered.length > 0) {
+      this._toolOwners.set(name, newlyRegistered);
     }
 
     return instance;
@@ -846,6 +867,7 @@ export class ExtensionLoader {
 
   /**
    * Unload an extension.
+   * Removes the extension instance, its hook handlers, and any tools it registered.
    */
   async unload(name) {
     const ext = this._extensions.get(name);
@@ -864,6 +886,16 @@ export class ExtensionLoader {
           remove();
         }
         this._handlerRemovers.delete(name);
+      }
+
+      // Remove tools that this extension registered.
+      // This prevents stale tools from lingering in the registry after unload.
+      const ownedTools = this._toolOwners.get(name);
+      if (ownedTools) {
+        for (const toolName of ownedTools) {
+          this._core.toolRegistry.remove(toolName);
+        }
+        this._toolOwners.delete(name);
       }
 
       this._extensions.delete(name);

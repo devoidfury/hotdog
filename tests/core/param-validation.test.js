@@ -232,4 +232,32 @@ describe("ToolRegistry.validateToolArgs", () => {
     });
     expect(await registry.validateToolArgs("testtool", '{"mode": "delete"}')).toContain("not in enum");
   });
+
+  it("handles non-object input with a clear error message", async () => {
+    const registry = new ToolRegistry();
+    registerTool(registry, "testtool", {
+      type: "object",
+      properties: { name: { type: "string" } },
+      required: ["name"],
+    });
+    // null input
+    const nullResult = await registry.validateToolArgs("testtool", null);
+    expect(nullResult).toContain("null");
+
+    // number input
+    const numResult = await registry.validateToolArgs("testtool", 42);
+    expect(numResult).toContain("number");
+
+    // boolean input
+    const boolResult = await registry.validateToolArgs("testtool", true);
+    expect(boolResult).toContain("boolean");
+
+    // array input (not an object)
+    const arrResult = await registry.validateToolArgs("testtool", [1, 2, 3]);
+    expect(arrResult).toContain("array");
+
+    // undefined input
+    const undefResult = await registry.validateToolArgs("testtool", undefined);
+    expect(undefResult).toContain("undefined");
+  });
 });

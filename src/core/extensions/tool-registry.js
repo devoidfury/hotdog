@@ -47,6 +47,19 @@ export class ToolRegistry {
   }
 
   /**
+   * Remove multiple tools from the registry by name.
+   * @param {string[]} names - Tool names to remove.
+   * @returns {number} Number of tools removed.
+   */
+  removeAll(names) {
+    let count = 0;
+    for (const name of names) {
+      if (this.tools.delete(name)) count++;
+    }
+    return count;
+  }
+
+  /**
    * Clear all tools from the registry.
    */
   clear() {
@@ -83,10 +96,21 @@ export class ToolRegistry {
       try {
         args = JSON.parse(input);
       } catch {
+        // If JSON parsing fails, treat as raw string input.
+        // validateParams expects an object; a bare string will fail
+        // validation with a clear type error rather than a confusing crash.
         args = input;
       }
     } else {
       args = input;
+    }
+
+    // Non-object input (null, number, boolean, etc.) can't satisfy an object
+    // schema — return a clear error rather than letting the validator produce
+    // a confusing message about missing properties.
+    if (args === null || args === undefined || typeof args !== "object" || Array.isArray(args)) {
+      const typeName = args === null ? "null" : Array.isArray(args) ? "array" : typeof args;
+      return `Tool '${toolName}' expects an object with parameters, got ${typeName}`;
     }
 
     const result = validateParams(args, params);

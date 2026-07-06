@@ -15,6 +15,8 @@ import { logger } from "./logger.js";
  */
 function _summarizeResult(value) {
   if (value == null) return "null";
+  // Error objects — show the message, not internal properties
+  if (value instanceof Error) return `Error: ${value.message}`;
   if (typeof value !== "object") return JSON.stringify(value);
   if (Array.isArray(value)) return `Array(${value.length})`;
   const keys = Object.keys(value);

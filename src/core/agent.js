@@ -298,17 +298,6 @@ export class Agent {
           messages: this._log.getAll(),
         });
 
-        // Emit token usage
-        if (this._showTokenUse && response.usage) {
-          this._emitOutput("token_usage", {
-            promptTokens: response.usage.prompt_tokens || 0,
-            cachedTokens:
-              response.usage.prompt_tokens_details?.cached_tokens || 0,
-            completionTokens: response.usage.completion_tokens || 0,
-            totalTokens: response.usage.total_tokens || 0,
-          });
-        }
-
         const assistantMsg = new Message({
           role: "assistant",
           content: response.fullText,
@@ -322,6 +311,7 @@ export class Agent {
           const { outcome, toolResults } = await this._executeTools(
             response.finalToolCalls,
           );
+          this._emitTokenUsage(response);
           if (outcome !== "continue") {
             // Turn end — agent has stopped (e.g., wait tool yielded control).
             await this._hooks.notifyHooksAsync(HOOKS.TURN_END, {
@@ -342,6 +332,7 @@ export class Agent {
             agent: this,
           });
         } else {
+          this._emitTokenUsage(response);
           await this._hooks.notifyHooksAsync(HOOKS.CONTEXT_MESSAGE, {
             message: assistantMsg,
             agent: this,
@@ -364,6 +355,23 @@ export class Agent {
     }
 
     throw AgentError.MaxIterations(this._maxIterations);
+  }
+
+  /** Emit token usage. */
+  _emitTokenUsage(response) {
+    if (
+      this._showTokenUse &&
+      response.usage &&
+      !response.usage.__didEmitTokenUsage
+    ) {
+      response.usage.__didEmitTokenUsage = true;
+      this._emitOutput("token_usage", {
+        promptTokens: response.usage.prompt_tokens || 0,
+        cachedTokens: response.usage.prompt_tokens_details?.cached_tokens || 0,
+        completionTokens: response.usage.completion_tokens || 0,
+        totalTokens: response.usage.total_tokens || 0,
+      });
+    }
   }
 
   /**

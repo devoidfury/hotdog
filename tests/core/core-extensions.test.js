@@ -176,6 +176,50 @@ describe('ExtensionLoader', () => {
       expect(extACalls).toEqual([]); // A's handler removed
       expect(extBCalls).toEqual([{ from: 'emit2' }]); // B's handler still works
     });
+
+    it('removes tools from registry on unload', async () => {
+      const extModule = {
+        create: () => ({
+          name: 'tool-ext',
+          hooks: {
+            [HOOKS.TOOLS_REGISTER]: async (registry) => {
+              registry.register('my-tool', { execute: () => 'result' });
+              registry.register('another-tool', { execute: () => 'result2' });
+            },
+          },
+        }),
+      };
+
+      await loader.load('tool-ext', extModule);
+      expect(core.toolRegistry.has('my-tool')).toBe(true);
+      expect(core.toolRegistry.has('another-tool')).toBe(true);
+
+      // Pre-existing tool should survive unload
+      core.toolRegistry.register('shared-tool', { execute: () => 'shared' });
+      expect(core.toolRegistry.has('shared-tool')).toBe(true);
+
+      await loader.unload('tool-ext');
+
+      // Tools from unloaded extension should be removed
+      expect(core.toolRegistry.has('my-tool')).toBe(false);
+      expect(core.toolRegistry.has('another-tool')).toBe(false);
+      // Pre-existing tool should still be there
+      expect(core.toolRegistry.has('shared-tool')).toBe(true);
+    });
+
+    it('does not track tools for extensions that did not register any', async () => {
+      const extModule = {
+        create: () => ({
+          name: 'no-tools',
+          hooks: {},
+        }),
+      };
+
+      await loader.load('no-tools', extModule);
+      // Should not throw or cause issues
+      await loader.unload('no-tools');
+      expect(loader.has('no-tools')).toBe(false);
+    });
   });
 
   describe('all()', () => {

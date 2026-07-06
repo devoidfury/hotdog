@@ -195,6 +195,11 @@
           "tags": ["general", "powerful"]
         },
         {
+          "name": "llama-3.1-70b",
+          "context-limit": 131072,
+          "tags": ["general"]
+        },
+        {
           "name": "lfm2.5-8b-a1b",
           "context-limit": 128000,
           "tags": ["general", "fast"]

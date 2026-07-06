@@ -1,8 +1,6 @@
-import { describe, it, expect, beforeAll } from "bun:test";
+import { test, describe, it, expect } from "bun:test";
 import { WebSearchTool } from "../../src/extensions/web-search/index.js";
-import { resultStr, getDisplay } from "../helpers.js";
-
-// ── Tool Definition ─────────────────────────────────────────────────────────
+import { resultStr } from "../helpers.js";
 
 describe("WebSearchTool", () => {
   it("has correct tool name", () => {
@@ -20,14 +18,10 @@ describe("WebSearchTool", () => {
 
   it("generates call display", () => {
     const tool = new WebSearchTool();
-    const display = tool.callDisplay(
-      JSON.stringify({ query: "test query" }),
-    );
+    const display = tool.callDisplay(JSON.stringify({ query: "test query" }));
     expect(display).toContain("test query");
   });
 });
-
-// ── Input Validation ────────────────────────────────────────────────────────
 
 describe("WebSearchTool input validation", () => {
   it("returns error for missing query", async () => {
@@ -72,8 +66,6 @@ describe("WebSearchTool input validation", () => {
     expect(resultStr(result)).toContain("Unknown search provider");
   });
 });
-
-// ── Provider Configuration ──────────────────────────────────────────────────
 
 describe("WebSearchTool provider configuration", () => {
   it("defaults to duckduckgo provider", () => {
@@ -121,8 +113,6 @@ describe("WebSearchTool provider configuration", () => {
   });
 });
 
-// ── Provider Error Handling (no API keys) ───────────────────────────────────
-
 describe("WebSearchTool provider error handling", () => {
   it("brave returns error without API key", async () => {
     const tool = new WebSearchTool({ provider: "brave", braveApiKey: "" });
@@ -139,14 +129,15 @@ describe("WebSearchTool provider error handling", () => {
   });
 
   it("searxng returns error without instance URL", async () => {
-    const tool = new WebSearchTool({ provider: "searxng", searxngInstanceUrl: "" });
+    const tool = new WebSearchTool({
+      provider: "searxng",
+      searxngInstanceUrl: "",
+    });
     const result = await tool.execute(JSON.stringify({ query: "test" }));
     expect(result.success).toBe(false);
     expect(resultStr(result)).toContain("SearXNG instance URL not configured");
   });
 });
-
-// ── Extension create() ──────────────────────────────────────────────────────
 
 describe("WebSearchTool extension create", () => {
   it("creates extension with default config", async () => {
@@ -171,7 +162,8 @@ describe("WebSearchTool extension create", () => {
     };
     const ext = create(core);
     const { HOOKS } = await import("../../src/core/hooks.js");
-    const { createToolRegistry } = await import("../../src/core/extensions/tool-registry.js");
+    const { createToolRegistry } =
+      await import("../../src/core/extensions/tool-registry.js");
 
     const registry = createToolRegistry();
     await ext.hooks[HOOKS.TOOLS_REGISTER](registry);
@@ -192,8 +184,6 @@ describe("WebSearchTool extension create", () => {
     expect(ext).toBeDefined();
   });
 });
-
-// ── DuckDuckGo Parser ───────────────────────────────────────────────────────
 
 describe("WebSearchTool DuckDuckGo parser", () => {
   // These tests verify the HTMLRewriter-based parsing logic without making network calls.
@@ -252,7 +242,9 @@ describe("WebSearchTool DuckDuckGo parser", () => {
   it("handles empty duckduckgo results", async () => {
     const originalFetch = globalThis.fetch;
     globalThis.fetch = () =>
-      Promise.resolve(new Response("<html><body>No results</body></html>", { status: 200 }));
+      Promise.resolve(
+        new Response("<html><body>No results</body></html>", { status: 200 }),
+      );
 
     try {
       const tool = new WebSearchTool({ provider: "duckduckgo" });
@@ -328,8 +320,6 @@ describe("WebSearchTool DuckDuckGo parser", () => {
   });
 });
 
-// ── Brave API Parser ────────────────────────────────────────────────────────
-
 describe("WebSearchTool Brave parser", () => {
   it("parses brave API response correctly", async () => {
     const mockResponse = {
@@ -390,8 +380,6 @@ describe("WebSearchTool Brave parser", () => {
   });
 });
 
-// ── Tavily API Parser ───────────────────────────────────────────────────────
-
 describe("WebSearchTool Tavily parser", () => {
   it("parses tavily API response correctly", async () => {
     const mockResponse = {
@@ -429,8 +417,6 @@ describe("WebSearchTool Tavily parser", () => {
   });
 });
 
-// ── SearXNG Parser ──────────────────────────────────────────────────────────
-
 describe("WebSearchTool SearXNG parser", () => {
   it("parses searxng API response correctly", async () => {
     const mockResponse = {
@@ -466,9 +452,8 @@ describe("WebSearchTool SearXNG parser", () => {
   });
 });
 
-// ── Network Integration ─────────────────────────────────────────────────────
-
-describe("WebSearchTool DuckDuckGo network integration", () => {
+// avoid hitting the real endpoint in automated tests for now
+test.skip("WebSearchTool DuckDuckGo network integration", () => {
   it("performs a real DuckDuckGo search", async () => {
     const tool = new WebSearchTool({
       provider: "duckduckgo",

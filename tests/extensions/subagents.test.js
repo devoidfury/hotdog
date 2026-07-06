@@ -177,7 +177,7 @@ describe("DelegateTaskTool", () => {
 });
 
 describe("TaskStatusTool", () => {
-  function createMockOrchestrator(status = "running") {
+  function createMockBackend(status = "running") {
     return {
       taskStatus: (id) => status,
     };
@@ -202,8 +202,7 @@ describe("TaskStatusTool", () => {
   });
 
   it("returns task status", async () => {
-    const mockOrchestrator = createMockOrchestrator("running");
-    const mockBackend = { taskOrchestrator: mockOrchestrator };
+    const mockBackend = createMockBackend("running");
     const tool = new TaskStatusTool({ taskManager: mockBackend });
     const result = await tool.execute(
       JSON.stringify({ task_id: "t1" }),
@@ -214,8 +213,7 @@ describe("TaskStatusTool", () => {
   });
 
   it("returns error when task not found", async () => {
-    const mockOrchestrator = createMockOrchestrator(null);
-    const mockBackend = { taskOrchestrator: mockOrchestrator };
+    const mockBackend = createMockBackend(null);
     const tool = new TaskStatusTool({ taskManager: mockBackend });
     const result = await tool.execute(
       JSON.stringify({ task_id: "nonexistent" }),
@@ -240,9 +238,9 @@ describe("TaskStatusTool", () => {
 });
 
 describe("TaskFollowupTool", () => {
-  function createMockOrchestrator(followUpOk = true) {
+  function createMockBackend(followUpOk = true) {
     return {
-      followUp: (id, msg) => followUpOk,
+      sendFollowUp: (id, msg) => followUpOk,
     };
   }
 
@@ -275,8 +273,7 @@ describe("TaskFollowupTool", () => {
   });
 
   it("sends follow-up successfully", async () => {
-    const mockOrchestrator = createMockOrchestrator(true);
-    const mockBackend = { taskOrchestrator: mockOrchestrator };
+    const mockBackend = createMockBackend(true);
     const tool = new TaskFollowupTool({ taskManager: mockBackend });
     const result = await tool.execute(
       JSON.stringify({ task_id: "t1", message: "Please hurry" }),
@@ -285,8 +282,7 @@ describe("TaskFollowupTool", () => {
   });
 
   it("returns error when follow-up fails", async () => {
-    const mockOrchestrator = createMockOrchestrator(false);
-    const mockBackend = { taskOrchestrator: mockOrchestrator };
+    const mockBackend = createMockBackend(false);
     const tool = new TaskFollowupTool({ taskManager: mockBackend });
     const result = await tool.execute(
       JSON.stringify({ task_id: "t1", message: "hello" }),
@@ -315,9 +311,9 @@ describe("TaskFollowupTool", () => {
 });
 
 describe("TaskInterruptTool", () => {
-  function createMockOrchestrator(interruptOk = true) {
+  function createMockBackend(interruptOk = true) {
     return {
-      interrupt: (id) => interruptOk,
+      interruptTask: (id) => interruptOk,
     };
   }
 
@@ -340,8 +336,7 @@ describe("TaskInterruptTool", () => {
   });
 
   it("interrupts task successfully", async () => {
-    const mockOrchestrator = createMockOrchestrator(true);
-    const mockBackend = { taskOrchestrator: mockOrchestrator };
+    const mockBackend = createMockBackend(true);
     const tool = new TaskInterruptTool({ taskManager: mockBackend });
     const result = await tool.execute(
       JSON.stringify({ task_id: "t1" }),
@@ -350,8 +345,7 @@ describe("TaskInterruptTool", () => {
   });
 
   it("returns error when interrupt fails", async () => {
-    const mockOrchestrator = createMockOrchestrator(false);
-    const mockBackend = { taskOrchestrator: mockOrchestrator };
+    const mockBackend = createMockBackend(false);
     const tool = new TaskInterruptTool({ taskManager: mockBackend });
     const result = await tool.execute(
       JSON.stringify({ task_id: "t1" }),
@@ -375,7 +369,7 @@ describe("TaskInterruptTool", () => {
 });
 
 describe("PlanStatusTool", () => {
-  function createMockOrchestrator(activeTaskIds = [], statuses = {}) {
+  function createMockBackend(activeTaskIds = [], statuses = {}) {
     return {
       activeTasks: () => activeTaskIds,
       taskStatus: (id) => (id in statuses ? statuses[id] : null),
@@ -393,8 +387,7 @@ describe("PlanStatusTool", () => {
   });
 
   it("returns specific task status when task_id provided", async () => {
-    const mockOrchestrator = createMockOrchestrator(["t1"], { t1: "running" });
-    const mockBackend = { taskOrchestrator: mockOrchestrator };
+    const mockBackend = createMockBackend(["t1"], { t1: "running" });
     const tool = new PlanStatusTool({ taskManager: mockBackend });
     const result = await tool.execute(
       JSON.stringify({ task_id: "t1" }),
@@ -403,8 +396,7 @@ describe("PlanStatusTool", () => {
   });
 
   it("returns error for unknown task_id", async () => {
-    const mockOrchestrator = createMockOrchestrator([], {});
-    const mockBackend = { taskOrchestrator: mockOrchestrator };
+    const mockBackend = createMockBackend([], {});
     const tool = new PlanStatusTool({ taskManager: mockBackend });
     const result = await tool.execute(
       JSON.stringify({ task_id: "nonexistent" }),
@@ -413,11 +405,10 @@ describe("PlanStatusTool", () => {
   });
 
   it("returns all active tasks when no task_id provided", async () => {
-    const mockOrchestrator = createMockOrchestrator(
+    const mockBackend = createMockBackend(
       ["t1", "t2"],
       { t1: "running", t2: "running" },
     );
-    const mockBackend = { taskOrchestrator: mockOrchestrator };
     const tool = new PlanStatusTool({ taskManager: mockBackend });
     const result = await tool.execute(JSON.stringify({}));
     expect(result.output).toContain("Active tasks:");
@@ -426,8 +417,7 @@ describe("PlanStatusTool", () => {
   });
 
   it("returns no active tasks message", async () => {
-    const mockOrchestrator = createMockOrchestrator([], {});
-    const mockBackend = { taskOrchestrator: mockOrchestrator };
+    const mockBackend = createMockBackend([], {});
     const tool = new PlanStatusTool({ taskManager: mockBackend });
     const result = await tool.execute(JSON.stringify({}));
     expect(result.output).toContain("No active tasks");

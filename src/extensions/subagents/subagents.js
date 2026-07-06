@@ -152,7 +152,7 @@ export class TaskStatusTool extends SubagentTool {
     const backend = this._ensureBackend();
     if (typeof backend === "string") return ToolResult.err(backend);
 
-    const status = backend.value.taskOrchestrator.taskStatus(args.task_id);
+    const status = backend.value.taskStatus(args.task_id);
 
     if (status === null) {
       return ToolResult.err(`Task ${args.task_id} not found`);
@@ -197,7 +197,7 @@ export class TaskFollowupTool extends SubagentTool {
     const backend = this._ensureBackend();
     if (typeof backend === "string") return ToolResult.err(backend);
 
-    const ok = backend.value.taskOrchestrator.followUp(
+    const ok = backend.value.sendFollowUp(
       args.task_id,
       args.message,
     );
@@ -247,7 +247,7 @@ export class TaskInterruptTool extends SubagentTool {
     const backend = this._ensureBackend();
     if (typeof backend === "string") return ToolResult.err(backend);
 
-    const ok = backend.value.taskOrchestrator.interrupt(args.task_id);
+    const ok = backend.value.interruptTask(args.task_id);
 
     if (ok) {
       return ToolResult.ok(`Task ${args.task_id} interrupted`).withEntry(
@@ -290,7 +290,7 @@ export class PlanStatusTool extends SubagentTool {
     if (typeof backend === "string") return ToolResult.err(backend);
 
     if (args.task_id) {
-      const status = backend.value.taskOrchestrator.taskStatus(args.task_id);
+      const status = backend.value.taskStatus(args.task_id);
       if (status === null) {
         return ToolResult.err(`Task ${args.task_id} not found`);
       }
@@ -300,7 +300,7 @@ export class PlanStatusTool extends SubagentTool {
       });
     }
 
-    const active = backend.value.taskOrchestrator.activeTasks();
+    const active = backend.value.activeTasks();
 
     if (active.length === 0) {
       return ToolResult.ok("No active tasks").withEntry(
@@ -311,7 +311,7 @@ export class PlanStatusTool extends SubagentTool {
 
     const lines = ["Active tasks:"];
     for (const taskId of active) {
-      const status = backend.value.taskOrchestrator.taskStatus(taskId);
+      const status = backend.value.taskStatus(taskId);
       lines.push(`  ${taskId} — ${status}`);
     }
     return ToolResult.ok(lines.join("\n")).withEntry(

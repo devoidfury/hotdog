@@ -6,6 +6,7 @@ import { MessageLog } from "./context/message-log.js";
 import { OUTPUT_EVENT } from "./context/output.js";
 import { formatError, AgentError, LlmError } from "./error.js";
 import { HOOKS } from "./hooks.js";
+import { logger } from "./logger.js";
 import { ToolContext } from "./extensions/tool-context.js";
 import { xmlEscape } from "./extensions/tool-utils.js";
 import { createCommandRegistry } from "./extensions/registries.js";
@@ -536,7 +537,25 @@ export class Agent {
     const toolResults = [];
 
     for (const tc of toolCalls) {
-      const result = await this._executeSingleToolCall(tc);
+      let result;
+      try {
+        result = await this._executeSingleToolCall(tc);
+      } catch (e) {
+        // Isolate failures: one tool error shouldn't kill the entire batch.
+        // Log the error and produce a fallback result so the LLM sees a
+        // structured failure rather than losing the tool call entirely.
+        const toolName = tc.function?.name || "(unknown)";
+        const toolCallId = tc.id || "";
+        const errorMsg = `Tool execution failed: ${e.message}`;
+        logger.error(`[tool:error] ${toolName}: ${e.message}`);
+
+        result = await this._writeToolResult(
+          toolName,
+          tc.function?.arguments || "{}",
+          errorMsg,
+          toolCallId,
+        );
+      }
       toolResults.push(result);
 
       // Check for wait tool — model is yielding control
@@ -563,6 +582,7 @@ export class Agent {
     const toolName = tc.function?.name;
     const toolCallId = tc.id;
     let input = tc.function?.arguments || "{}";
+    const t0 = Date.now();
 
     // Guard: reject empty or missing tool names before any further processing.
     if (!toolName || typeof toolName !== "string" || toolName.trim().length === 0) {
@@ -687,6 +707,22 @@ export class Agent {
 
     // Format and write result to context
     const resultStr = this._formatToolResult(result, toolName, success);
+
+    // Fire metrics notification (fire-and-forget — non-blocking).
+    // Enables telemetry, profiling, and anomaly detection without
+    // adding latency to the tool execution path.
+    const durationMs = Date.now() - t0;
+    const resultSize = typeof resultStr === "string" ? resultStr.length : 0;
+    this._hooks.notifyHooks(HOOKS.TOOL_METRICS, {
+      toolName,
+      toolCallId,
+      durationMs,
+      success,
+      resultSize,
+      input,
+      agent: this,
+    });
+
     return this._writeToolResult(
       toolName,
       input,

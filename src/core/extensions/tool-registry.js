@@ -65,15 +65,23 @@ export class ToolRegistry {
     const cached = this._allToolDefsCache;
     if (cached) return cached;
 
-    const defs = [];
-    for (const t of this.tools.values()) {
-      if (t.toToolDef) {
-        const def = t.toToolDef();
-        if (def) defs.push(def);
+    try {
+      const defs = [];
+      for (const t of this.tools.values()) {
+        if (t.toToolDef) {
+          const def = t.toToolDef();
+          if (def) defs.push(def);
+        }
       }
+      this._allToolDefsCache = Promise.resolve(defs);
+      return defs;
+    } catch (err) {
+      // Clear the cache on error so a transient failure doesn't poison
+      // future calls. The next call to getToolDefs() will re-attempt.
+      this._allToolDefsCache = null;
+      this._toolDefCache.clear();
+      throw err;
     }
-    this._allToolDefsCache = Promise.resolve(defs);
-    return defs;
   }
 
   /**

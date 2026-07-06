@@ -375,6 +375,12 @@ export const HOOKS = {
   // Enables: per-turn analysis, cost tracking, audit logging, UI prompt control.
   TURN_END: "turn:end",
 
+  // Tool metrics — notification hook fired after each individual tool execution.
+  // Handlers receive { toolName, toolCallId, durationMs, success, resultSize, input, agent }
+  // as notification (not modifiable — use runHookPipeline, not fire-and-forget).
+  // Enables: telemetry, performance profiling, cost tracking, anomaly detection.
+  TOOL_METRICS: "tool:metrics",
+
   // Logging — emitted by the logger module, intercepted by handlers.
   // Payload: { level: "debug"|"info"|"warn"|"error", message: string, metadata?: object }
   LOG: "log",

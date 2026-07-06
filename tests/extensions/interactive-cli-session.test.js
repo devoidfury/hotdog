@@ -1165,7 +1165,9 @@ describe("Interactive CLI - format helpers", () => {
 
   it("formatTokenUsage produces correct format", () => {
     const result = formatTokenUsage(100, 50, 50, 150);
-    expect(result).toBe("(tokens cached:50 prompt:50 completion:50 total:150)");
+    expect(result).toBe(
+      "(tokens cached:50 prompt:50 completion:50 total:150)\n",
+    );
   });
 
   it("formatThinking uses custom format", () => {

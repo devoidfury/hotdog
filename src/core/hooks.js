@@ -38,6 +38,7 @@ export class HookSystem {
     this._hooks = new Map();
     this._trace = false;
     this._handlerCounter = 0;
+    this._traceOptions = { enabledHooks: [], disabledSources: [] };
   }
 
   /**
@@ -88,12 +89,21 @@ export class HookSystem {
    */
   notifyHooks(hookName, data) {
     const handlers = this._hooks.get(hookName) || [];
-    const doTrace = this._trace && hookName !== "log";
+    let doTrace = false;
+    if (typeof this._trace === "boolean") {
+      doTrace = this._trace && hookName !== "log";
+    } else if (typeof this._trace === "object" && this._trace !== null) {
+      doTrace = this._trace.enabled && hookName !== "log";
+      if (this._traceOptions.enabledHooks.length > 0) {
+        doTrace = doTrace && this._traceOptions.enabledHooks.includes(hookName);
+      }
+    }
+
     for (let i = 0; i < handlers.length; i++) {
       const entry = handlers[i];
       const t0 = doTrace ? Date.now() : 0;
       entry.handler(data);
-      if (doTrace) {
+      if (doTrace && !this._traceOptions.disabledSources.includes(entry.source)) {
         const ms = Date.now() - t0;
         const label = entry.source ? ` (${entry.source})` : "";
         logger.debug(
@@ -113,7 +123,16 @@ export class HookSystem {
   async notifyHooksAsync(hookName, data) {
     const handlers = this._hooks.get(hookName) || [];
     const promises = [];
-    const doTrace = this._trace && hookName !== "log";
+    let doTrace = false;
+    if (typeof this._trace === "boolean") {
+      doTrace = this._trace && hookName !== "log";
+    } else if (typeof this._trace === "object" && this._trace !== null) {
+      doTrace = this._trace.enabled && hookName !== "log";
+      if (this._traceOptions.enabledHooks.length > 0) {
+        doTrace = doTrace && this._traceOptions.enabledHooks.includes(hookName);
+      }
+    }
+
     if (doTrace && handlers.length > 0) {
       logger.debug(
         `[hook:trace] ${hookName} — ${handlers.length} handler(s) fired concurrently`,
@@ -128,7 +147,7 @@ export class HookSystem {
           promises.push(
             result.then(
               (v) => {
-                if (doTrace) {
+                if (doTrace && !this._traceOptions.disabledSources.includes(entry.source)) {
                   const ms = Date.now() - t0;
                   const label = entry.source ? ` (${entry.source})` : "";
                   logger.debug(
@@ -137,7 +156,7 @@ export class HookSystem {
                 }
               },
               (e) => {
-                if (doTrace) {
+                if (doTrace && !this._traceOptions.disabledSources.includes(entry.source)) {
                   const ms = Date.now() - t0;
                   const label = entry.source ? ` (${entry.source})` : "";
                   logger.debug(
@@ -148,7 +167,7 @@ export class HookSystem {
               },
             ),
           );
-        } else if (doTrace) {
+        } else if (doTrace && !this._traceOptions.disabledSources.includes(entry.source)) {
           const ms = Date.now() - t0;
           const label = entry.source ? ` (${entry.source})` : "";
           logger.debug(
@@ -156,7 +175,7 @@ export class HookSystem {
           );
         }
       } catch (e) {
-        if (doTrace) {
+        if (doTrace && !this._traceOptions.disabledSources.includes(entry.source)) {
           const ms = Date.now() - t0;
           const label = entry.source ? ` (${entry.source})` : "";
           logger.debug(
@@ -189,7 +208,16 @@ export class HookSystem {
     const results = [];
     let lastResult;
     let stopped = false;
-    const doTrace = this._trace && hookName !== "log";
+    let doTrace = false;
+    if (typeof this._trace === "boolean") {
+      doTrace = this._trace && hookName !== "log";
+    } else if (typeof this._trace === "object" && this._trace !== null) {
+      doTrace = this._trace.enabled && hookName !== "log";
+      if (this._traceOptions.enabledHooks.length > 0) {
+        doTrace = doTrace && this._traceOptions.enabledHooks.includes(hookName);
+      }
+    }
+
     for (let i = 0; i < handlers.length; i++) {
       const entry = handlers[i];
       const t0 = doTrace ? Date.now() : 0;
@@ -201,7 +229,7 @@ export class HookSystem {
           results.push({ result: resolved, source: entry.source || null });
           lastResult = resolved;
         }
-        if (doTrace) {
+        if (doTrace && !this._traceOptions.disabledSources.includes(entry.source)) {
           const ms = Date.now() - t0;
           const label = entry.source ? ` (${entry.source})` : "";
           const action =
@@ -214,7 +242,7 @@ export class HookSystem {
         }
         if (opts.shouldStop && resolved && opts.shouldStop(resolved)) {
           stopped = true;
-          if (doTrace) {
+          if (doTrace && !this._traceOptions.disabledSources.includes(entry.source)) {
             logger.debug(
               `[hook:trace] ${hookName} — stopped at handler ${i + 1}/${handlers.length}`,
             );
@@ -222,7 +250,7 @@ export class HookSystem {
           break;
         }
       } catch (e) {
-        if (doTrace) {
+        if (doTrace && !this._traceOptions.disabledSources.includes(entry.source)) {
           const ms = Date.now() - t0;
           const label = entry.source ? ` (${entry.source})` : "";
           logger.debug(

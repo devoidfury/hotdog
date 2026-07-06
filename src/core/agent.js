@@ -593,7 +593,6 @@ export class Agent {
       try {
         result = await this._executeSingleToolCall(tc);
       } catch (e) {
-        // Isolate failures: one tool error shouldn't kill the entire batch.
         // Log the error and produce a fallback result so the LLM sees a
         // structured failure rather than losing the tool call entirely.
         const toolName = tc.function?.name || "(unknown)";
@@ -623,9 +622,6 @@ export class Agent {
    * Execute a single tool call through the full pipeline:
    *   whitelist → gate hook → context build → resolve → validate → execute
    *   → after-execute hook → result hook → format → write to context.
-   *
-   * Tool call shape (normalized by _processStream to match OpenAI format):
-   *   { id, type: "function", function: { name, arguments } }
    *
    * @param {Object} tc — Tool call from the LLM response (normalized format).
    * @returns {Promise<{toolName: string, input: string, result: string}>}

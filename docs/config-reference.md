@@ -296,6 +296,32 @@ Enable or disable colored output.
 { "colors": true }
 ```
 
+### `stream`
+
+- **Type:** `boolean`
+- **CLI flag:** `--no-stream`
+- **Default:** `true`
+- **Resolution:** CLI > default
+
+Enable streaming output. `--no-stream` disables streaming (text appears after full generation).
+
+```json
+{ "stream": true }
+```
+
+### `sessionId`
+
+- **Type:** `string`
+- **CLI flag:** `--session-id`
+- **Default:** `null`
+- **Resolution:** CLI > default
+
+Resumable session ID. Restores from disk if a session with this ID exists.
+
+```json
+{ "sessionId": "my-session-id" }
+```
+
 ### `chatTimeoutSecs`
 
 - **Type:** `number`
@@ -434,6 +460,15 @@ The default subcommand to run when no subcommand is specified.
 ```json
 { "defaultSubcommand": "cli" }
 ```
+
+### `configDebug`
+
+- **Type:** `boolean`
+- **CLI flag:** `--config-debug`
+- **Default:** `false`
+- **Resolution:** CLI > config > default
+
+Show config resolution details (sources and layers). Extension-provided flag from `ui-info-cli`.
 
 ### `coreTools`
 
@@ -716,6 +751,22 @@ An array of MCP server definitions. Each server can use either HTTP transport (`
 |-------|------|---------|-------------|
 | `enabled` | `boolean` | `true` | Enable/disable the extension. |
 
+### `skills`
+
+[Skills](../src/extensions/skills) — Skills loading, activation, and system prompt integration.
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `enabled` | `boolean` | `true` | Enable/disable the extension. |
+| `preloadSkills` | `array` | `[]` | List of skill names to preload. |
+| `skillsPath` | `string` | `"/skills"` | Directory path where skills are stored. |
+
+CLI flag: `--preload-skills` (comma-separated skill names).
+
+```json
+{ "skills": { "preloadSkills": ["my-skill", "another-skill"] } }
+```
+
 ### `subagents`
 
 [Subagents](../src/extensions/subagents) — Task delegation tools (manager-only).
@@ -731,6 +782,9 @@ An array of MCP server definitions. Each server can use either HTTP transport (`
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
 | `enabled` | `boolean` | `true` | Enable/disable the extension. |
+| `shellMode` | `boolean` | `false` | When enabled, lines starting with a recognized system command are executed directly instead of sent to the agent. |
+
+CLI flag: `--shell-mode`.
 
 ### `webSearch`
 

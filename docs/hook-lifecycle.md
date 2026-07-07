@@ -235,7 +235,7 @@ Each tool call goes through a dedicated sub-pipeline:
 | `CONTEXT_MESSAGE` | `context:message` | async notify | A message added to agent context |
 | `CONTEXT_REPLACED` | `context:replaced` | async notify | Entire context replaced (compaction, reset) |
 | `MESSAGES_AFTER_LLM` | `messages:afterLLM` | async notify | After LLM response received |
-| `LOOP_DETECTED` | `loop:detected` | — | Tool loop detected (not yet emitted) |
+| `LOOP_DETECTED` | `loop:detected` | — | **Unimplemented** — defined in source but not yet emitted |
 
 ### Context / Prompt Building
 

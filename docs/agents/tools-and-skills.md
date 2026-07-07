@@ -42,7 +42,7 @@ Core tools are provided by the `core-tools` extension. Tools are registered via 
 | `pager` | `core-tools` | Show a previously cached tool output for pagination | `tool_call_id` |
 | `project_info` | `core-tools` | Gathers project information | `path` |
 | `explore` *(disabled)* | `core-tools` | Runs the agent in explorer mode against a project directory | `path`, `outline` |
-| `bash` | `bash-tool` | Executes shell commands via `bash -c` | `command`, `timeoutMs` |
+| `bash` | `bash-tool` | Executes shell commands via system shell | `command`, `timeoutMs` |
 | `fetch` | `fetch-tool` | Fetches URLs via HTTP | `url`, `method`, `headers`, `body`, `showOriginal` |
 | `question` | `question-tool` | Asks interactive questions to the user | `questions` array with `key`, `prompt`, `options`, `required`, `default` |
 | `model` | `model-switch` | Switches to a different model mid-conversation | `name` |

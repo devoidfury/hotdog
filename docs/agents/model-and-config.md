@@ -15,8 +15,10 @@
 
 ### Core Defaults
 All configurable defaults are defined in `src/core/core.config.json` as schema default layers.
-The config resolution system (`buildConfig` → `buildAgentConfig` → `resolveAll`) resolves
-values through the priority chain: CLI → config file → env → provider → profile → default.
+Each config key defines its own resolution layers. Common patterns:
+- **`defaultModel`**: CLI → profile → config → default
+- **`role`**: CLI → config → profile → default
+- **`aiUrl`/`apiKey`**: provider → CLI → config → env → default (provider is the natural source)
 
 Components (`Agent`, `LlmClient`, `TaskManager`, etc.) receive resolved values from callers
 rather than importing constants directly. The `src/core/config/defaults.js` module exports
@@ -28,7 +30,7 @@ Extension-specific defaults (e.g., `DEFAULT_READ_TOOL_LIMIT`, `DEFAULT_FIND_MAX_
 
 ### Config Resolution
 - **`loadConfig(configPath, cliConfigDir, extParams)`** — loads config from file, falls back to resolved config dir (CLI `--config-dir` > `./config` > env > `/etc/hotdog` > XDG). Merges extension defaults.
-- **`buildConfig(cli)`** — single entry point for config resolution. Returns `{ resolved, modelRegistry, providers }`. Handles CLI args -> config file -> env var -> default priority chain.
+- **`buildConfig(cli)`** — single entry point for config resolution. Returns `{ resolved, modelRegistry, providers }`. Resolves each config key through its declared layers (CLI, config file, env, provider, profile, default).
 - **`mergeExtensionConfigDefaults(defaultConfig, extParams)`** — merges extension-registered config defaults into base config
 - **`normalizeConfigKeys(obj)`** — converts snake_case to camelCase
 - **`validateConfig(config, extensionSchemas)`** — validates config against core schema and extension schemas
@@ -106,7 +108,7 @@ Profiles can also be defined as `.profile.md` files in a `profiles/` directory (
 
 **Resolution chain for role**: CLI `--role` > config `role` > profile file `role` > core config schema default (no `DEFAULT_ROLE` constant exists)
 
-**Config file settings take precedence** over profile file settings for tool restrictions.
+**Merge rules**: When both a config profile and a `.profile.md` file profile exist for the same name, the file profile wins for `role`, `whitelistTools`, `blacklistTools`, and `manager`. The config profile wins for `model` and all other fields.
 
 ### Config Registry (`src/core/extensions/config-registry.js`)
 

@@ -230,7 +230,7 @@ Escapes input that triggers special behavior (tool call actions, internal marker
 - `colors.js` — Color palettes, ANSI helpers, theme resolution. Key exports: `ColorPalette`, `resolvePalette()`, `applyThinking()`, `applyToolCall()`, `applyToolResult()`, `applyFinalResponse()`, `applyCompacting()`, `applyProgress()`
 
 ### Core Index (`src/core/index.js`)
-Re-exports core modules for programmatic use: hooks, extensions, tool-registry, tool-utils, registries, config-registry, agent, session, agent-sink, task-manager, message-bus.
+Re-exports core modules for programmatic use: hooks, logger, extension utilities (ExtensionLoader, createExtensionLoader, extractSchemaDefaults, registerExtensionMetadata), tool-registry, tool-utils, registries, config-registry, service-registry, agent, session, agent-sink, task-manager, message-bus.
 
 ## Extensions (`src/extensions/`)
 

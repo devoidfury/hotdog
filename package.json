@@ -8,7 +8,7 @@
   },
   "description": "AI agent harness with tool calling support. Zero dependencies, just bun.",
   "scripts": {
-    "start": "bun src/core/main.js",
+    "start": "bun bin/hotdog",
     "test": "bun test --only-failures --coverage"
   },
   "type": "module",

@@ -88,8 +88,13 @@ async function loadExtensions(core, { taskManager, config } = {}) {
 
   // Validate service contracts after all extensions are loaded.
   // Only validate extensions that were actually loaded (create() returned non-null).
-  const loadedExtensions = extensionsToLoad.filter((ext) => core.extensions.has(ext.name));
-  const serviceErrors = validateServiceContracts(loadedExtensions, core.services);
+  const loadedExtensions = extensionsToLoad.filter((ext) =>
+    core.extensions.has(ext.name),
+  );
+  const serviceErrors = validateServiceContracts(
+    loadedExtensions,
+    core.services,
+  );
   for (const err of serviceErrors) {
     logger.warn(`[services] ${err.message}`);
   }
@@ -242,7 +247,9 @@ export async function main() {
     cli,
     config,
     configDir: resolved.configDir,
-    provider: resolved.activeProvider ? { name: resolved.activeProvider } : null,
+    provider: resolved.activeProvider
+      ? { name: resolved.activeProvider }
+      : null,
     profile: resolved.profile,
     profileName: resolved.profileName,
   };
@@ -333,18 +340,4 @@ export async function main() {
     `Available subcommands: ${core.cliSubcommandRegistry.names().join(", ") || "(none)"}`,
   );
   return 1;
-}
-
-// Only run main() when this module is the entry point (not when imported by tests).
-if (import.meta.main) {
-  // Initialize logger early for the top-level catch block
-  const bootHooks = createHooks();
-  initializeLogger({ hooks: bootHooks, minLevel: "error", target: "stderr" });
-
-  main()
-    .catch(async (e) => {
-      logger.error(formatError(e));
-      return 1;
-    })
-    .then((code) => process.exit(code));
 }

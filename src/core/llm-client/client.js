@@ -1,10 +1,24 @@
 // LLM client for communicating with AI providers.
 // Provides HTTP transport, streaming (SSE), and retry logic.
 
+import { readFile } from "node:fs/promises";
+import { fileURLToPath } from "node:url";
+import { dirname, join } from "node:path";
 import { DEFAULT_AI_URL, DEFAULT_AI_URL_FALLBACK } from "../config/defaults.js";
 import { retryWithBackoff } from "./retry.js";
 import { createMarkerMangler } from "../marker-mangler.js";
 import { LlmError } from "../error.js";
+
+// Resolve version from package.json at module load time (cached, not per-request).
+const __dirname = dirname(fileURLToPath(import.meta.url));
+const PKG_PATH = join(__dirname, "../../../package.json");
+let VERSION = "unknown";
+try {
+  const pkg = JSON.parse(await readFile(PKG_PATH, "utf-8"));
+  VERSION = pkg.version || VERSION;
+} catch {
+  // Silently fall back to "unknown" if package.json is unreadable.
+}
 
 /**
  * LLM client for communicating with AI providers.
@@ -297,7 +311,7 @@ export class LlmClient {
   async _doRequest(url, apiKey, request, signal) {
     const headers = {
       "Content-Type": "application/json",
-      "User-Agent": "hotdog/alpha",
+      "User-Agent": `hotdog/${VERSION}`,
     };
     if (apiKey) headers["Authorization"] = `Bearer ${apiKey}`;
     if (this.sessionId) headers["x-session-affinity"] = this.sessionId;

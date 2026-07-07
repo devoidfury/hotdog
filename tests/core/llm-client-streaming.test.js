@@ -1,5 +1,6 @@
 // Extended tests for LlmClient streaming, SSE parsing, cancellation, and escape methods.
 
+import { readFileSync } from "node:fs";
 import { describe, it, expect } from "bun:test";
 import { LlmClient } from "../../src/core/llm-client/client.js";
 import { LlmError } from "../../src/core/error.js";
@@ -716,7 +717,8 @@ describe("LlmClient._doRequest", () => {
       // Expected to fail
     }
 
-    expect(capturedHeaders["User-Agent"]).toBe("hotdog/alpha");
+    const pkg = JSON.parse(readFileSync(process.cwd() + "/package.json", "utf-8"));
+    expect(capturedHeaders["User-Agent"]).toBe(`hotdog/${pkg.version}`);
   });
 
   it("sends request to /v1/chat/completions endpoint", async () => {

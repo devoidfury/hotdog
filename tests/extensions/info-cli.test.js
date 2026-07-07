@@ -925,7 +925,7 @@ describe("Info CLI - model tags in text output", () => {
   });
 });
 
-describe("Info CLI - profile-list subcommand", () => {
+describe("Info CLI - profiles subcommand", () => {
   function captureLogs() {
     let capturedOutput = "";
     const originalLog = console.log;
@@ -935,19 +935,19 @@ describe("Info CLI - profile-list subcommand", () => {
     return { capturedOutput: () => capturedOutput, restore: () => { console.log = originalLog; } };
   }
 
-  it("registers the profile-list subcommand", async () => {
+  it("registers the profiles subcommand", async () => {
     const core = createMockCore();
     const { create } = await import("../../src/extensions/ui-info-cli/index.js");
     const ext = create(core);
     await ext.hooks[HOOKS.CLI_SUBCOMMANDS_REGISTER](core.cliSubcommandRegistry);
 
-    const def = core.cliSubcommandRegistry.get("profile-list");
+    const def = core.cliSubcommandRegistry.get("profiles");
     expect(def).toBeDefined();
     expect(def.description).toBe("List all available profiles with their roles and tool restrictions");
   });
 
   it("shows no profiles when directory is empty", async () => {
-    const tmpDir = mkdtempSync(join(tmpdir(), "hotdog-test-profile-list-empty-"));
+    const tmpDir = mkdtempSync(join(tmpdir(), "hotdog-test-profiles-empty-"));
     try {
       const core = createMockCore({
         buildConfig: async () => ({
@@ -962,7 +962,7 @@ describe("Info CLI - profile-list subcommand", () => {
       const ext = create(core);
       await ext.hooks[HOOKS.CLI_SUBCOMMANDS_REGISTER](core.cliSubcommandRegistry);
 
-      const def = core.cliSubcommandRegistry.get("profile-list");
+      const def = core.cliSubcommandRegistry.get("profiles");
       const cli = {
         wantsJson: false,
         profile: null,
@@ -983,7 +983,7 @@ describe("Info CLI - profile-list subcommand", () => {
   });
 
   it("lists profiles from file system", async () => {
-    const tmpDir = mkdtempSync(join(tmpdir(), "hotdog-test-profile-list-files-"));
+    const tmpDir = mkdtempSync(join(tmpdir(), "hotdog-test-profiles-files-"));
     const profilesDir = join(tmpDir, "profiles");
     mkdirSync(profilesDir, { recursive: true });
 
@@ -1010,7 +1010,7 @@ describe("Info CLI - profile-list subcommand", () => {
       const ext = create(core);
       await ext.hooks[HOOKS.CLI_SUBCOMMANDS_REGISTER](core.cliSubcommandRegistry);
 
-      const def = core.cliSubcommandRegistry.get("profile-list");
+      const def = core.cliSubcommandRegistry.get("profiles");
       const cli = {
         wantsJson: false,
         profile: null,
@@ -1041,7 +1041,7 @@ describe("Info CLI - profile-list subcommand", () => {
   });
 
   it("merges file and config profiles", async () => {
-    const tmpDir = mkdtempSync(join(tmpdir(), "hotdog-test-profile-list-merge-"));
+    const tmpDir = mkdtempSync(join(tmpdir(), "hotdog-test-profiles-merge-"));
     const profilesDir = join(tmpDir, "profiles");
     mkdirSync(profilesDir, { recursive: true });
 
@@ -1073,7 +1073,7 @@ describe("Info CLI - profile-list subcommand", () => {
       const ext = create(core);
       await ext.hooks[HOOKS.CLI_SUBCOMMANDS_REGISTER](core.cliSubcommandRegistry);
 
-      const def = core.cliSubcommandRegistry.get("profile-list");
+      const def = core.cliSubcommandRegistry.get("profiles");
       const cli = {
         wantsJson: false,
         profile: null,
@@ -1104,7 +1104,7 @@ describe("Info CLI - profile-list subcommand", () => {
   });
 
   it("outputs JSON when wantsJson is true", async () => {
-    const tmpDir = mkdtempSync(join(tmpdir(), "hotdog-test-profile-list-json-"));
+    const tmpDir = mkdtempSync(join(tmpdir(), "hotdog-test-profiles-json-"));
     const profilesDir = join(tmpDir, "profiles");
     mkdirSync(profilesDir, { recursive: true });
 
@@ -1127,7 +1127,7 @@ describe("Info CLI - profile-list subcommand", () => {
       const ext = create(core);
       await ext.hooks[HOOKS.CLI_SUBCOMMANDS_REGISTER](core.cliSubcommandRegistry);
 
-      const def = core.cliSubcommandRegistry.get("profile-list");
+      const def = core.cliSubcommandRegistry.get("profiles");
       const cli = {
         wantsJson: true,
         profile: null,
@@ -1156,7 +1156,7 @@ describe("Info CLI - profile-list subcommand", () => {
   });
 
   it("handles non-existent profiles directory gracefully", async () => {
-    const tmpDir = mkdtempSync(join(tmpdir(), "hotdog-test-profile-list-noexist-"));
+    const tmpDir = mkdtempSync(join(tmpdir(), "hotdog-test-profiles-noexist-"));
     // Intentionally do NOT create a profiles subdirectory
 
     try {
@@ -1173,7 +1173,7 @@ describe("Info CLI - profile-list subcommand", () => {
       const ext = create(core);
       await ext.hooks[HOOKS.CLI_SUBCOMMANDS_REGISTER](core.cliSubcommandRegistry);
 
-      const def = core.cliSubcommandRegistry.get("profile-list");
+      const def = core.cliSubcommandRegistry.get("profiles");
       const cli = {
         wantsJson: false,
         profile: null,
@@ -1194,7 +1194,7 @@ describe("Info CLI - profile-list subcommand", () => {
   });
 
   it("shows visible-worker flag for profiles that have it", async () => {
-    const tmpDir = mkdtempSync(join(tmpdir(), "hotdog-test-profile-list-visible-"));
+    const tmpDir = mkdtempSync(join(tmpdir(), "hotdog-test-profiles-visible-"));
     const profilesDir = join(tmpDir, "profiles");
     mkdirSync(profilesDir, { recursive: true });
 
@@ -1221,7 +1221,7 @@ describe("Info CLI - profile-list subcommand", () => {
       const ext = create(core);
       await ext.hooks[HOOKS.CLI_SUBCOMMANDS_REGISTER](core.cliSubcommandRegistry);
 
-      const def = core.cliSubcommandRegistry.get("profile-list");
+      const def = core.cliSubcommandRegistry.get("profiles");
       const cli = {
         wantsJson: false,
         profile: null,
@@ -1247,7 +1247,7 @@ describe("Info CLI - profile-list subcommand", () => {
   });
 
   it("shows manager with available subagents", async () => {
-    const tmpDir = mkdtempSync(join(tmpdir(), "hotdog-test-profile-list-manager-"));
+    const tmpDir = mkdtempSync(join(tmpdir(), "hotdog-test-profiles-manager-"));
     const profilesDir = join(tmpDir, "profiles");
     mkdirSync(profilesDir, { recursive: true });
 
@@ -1278,7 +1278,7 @@ describe("Info CLI - profile-list subcommand", () => {
       const ext = create(core);
       await ext.hooks[HOOKS.CLI_SUBCOMMANDS_REGISTER](core.cliSubcommandRegistry);
 
-      const def = core.cliSubcommandRegistry.get("profile-list");
+      const def = core.cliSubcommandRegistry.get("profiles");
       const cli = { wantsJson: false, profile: null, configDir: null };
 
       const logs = captureLogs();
@@ -1299,7 +1299,7 @@ describe("Info CLI - profile-list subcommand", () => {
   });
 
   it("shows manager with no subagents available", async () => {
-    const tmpDir = mkdtempSync(join(tmpdir(), "hotdog-test-profile-list-managernone-"));
+    const tmpDir = mkdtempSync(join(tmpdir(), "hotdog-test-profiles-managernone-"));
     const profilesDir = join(tmpDir, "profiles");
     mkdirSync(profilesDir, { recursive: true });
 
@@ -1322,7 +1322,7 @@ describe("Info CLI - profile-list subcommand", () => {
       const ext = create(core);
       await ext.hooks[HOOKS.CLI_SUBCOMMANDS_REGISTER](core.cliSubcommandRegistry);
 
-      const def = core.cliSubcommandRegistry.get("profile-list");
+      const def = core.cliSubcommandRegistry.get("profiles");
       const cli = { wantsJson: false, profile: null, configDir: null };
 
       const logs = captureLogs();
@@ -1340,7 +1340,7 @@ describe("Info CLI - profile-list subcommand", () => {
   });
 
   it("shows relative profile file path from cwd", async () => {
-    const tmpDir = mkdtempSync(join(tmpdir(), "hotdog-test-profile-list-relpath-"));
+    const tmpDir = mkdtempSync(join(tmpdir(), "hotdog-test-profiles-relpath-"));
     const profilesDir = join(tmpDir, "profiles");
     mkdirSync(profilesDir, { recursive: true });
 
@@ -1363,7 +1363,7 @@ describe("Info CLI - profile-list subcommand", () => {
       const ext = create(core);
       await ext.hooks[HOOKS.CLI_SUBCOMMANDS_REGISTER](core.cliSubcommandRegistry);
 
-      const def = core.cliSubcommandRegistry.get("profile-list");
+      const def = core.cliSubcommandRegistry.get("profiles");
       const cli = { wantsJson: false, profile: null, configDir: null };
 
       const logs = captureLogs();
@@ -1382,7 +1382,7 @@ describe("Info CLI - profile-list subcommand", () => {
   });
 
   it("includes subagent and availableSubagents in JSON output", async () => {
-    const tmpDir = mkdtempSync(join(tmpdir(), "hotdog-test-profile-list-json-sub-"));
+    const tmpDir = mkdtempSync(join(tmpdir(), "hotdog-test-profiles-json-sub-"));
     const profilesDir = join(tmpDir, "profiles");
     mkdirSync(profilesDir, { recursive: true });
 
@@ -1409,7 +1409,7 @@ describe("Info CLI - profile-list subcommand", () => {
       const ext = create(core);
       await ext.hooks[HOOKS.CLI_SUBCOMMANDS_REGISTER](core.cliSubcommandRegistry);
 
-      const def = core.cliSubcommandRegistry.get("profile-list");
+      const def = core.cliSubcommandRegistry.get("profiles");
       const cli = { wantsJson: true, profile: null, configDir: null };
 
       const logs = captureLogs();

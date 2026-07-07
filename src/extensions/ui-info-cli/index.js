@@ -519,7 +519,7 @@ async function runShowPrompt(cli, core, config, buildConfig) {
 // ── Profile List Subcommand ─────────────────────────────────────────────
 
 /**
- * Run the profile-list subcommand.
+ * Run the profiles subcommand.
  * Lists all available profiles with their roles, tool restrictions, and metadata.
  */
 async function runProfileList(cli, config, buildConfig) {
@@ -815,7 +815,7 @@ export function create(core) {
               },
             });
 
-            registry.register("profile-list", {
+            registry.register("profiles", {
               description:
                 "List all available profiles with their roles and tool restrictions",
               handler: async (cli, core) => {

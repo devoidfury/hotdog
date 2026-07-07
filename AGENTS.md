@@ -11,7 +11,7 @@ JS project `hotdog` — an AI agent harness with tool calling support.
 - **Subcommands:**
   - `bun bin/hotdog info` — system info and diagnostics
   - `bun bin/hotdog show-prompt` — render system prompt to stdout
-  - `bun bin/hotdog profile-list` — list all available profiles
+  - `bun bin/hotdog profiles` — list all available profiles
   - `bun bin/hotdog review` — review session logs
   - `bun bin/hotdog prompt "text"` — one-shot mode
   - `bun bin/hotdog webui` — start the Web UI server

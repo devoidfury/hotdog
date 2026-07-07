@@ -30,18 +30,12 @@ export function createAuthMiddleware({ validateApiKey, tokenTtlMin = 1440 }) {
       const apiKey = body?.apiKey || "";
 
       if (!apiKey || typeof apiKey !== "string") {
-        return new Response(
-          JSON.stringify({ error: "API key required" }),
-          { status: 401, headers: { "Content-Type": "application/json" } },
-        );
+        return Response.json({ error: "API key required" }, { status: 401 });
       }
 
       const valid = await validateApiKey(apiKey);
       if (!valid) {
-        return new Response(
-          JSON.stringify({ error: "Invalid API key" }),
-          { status: 401, headers: { "Content-Type": "application/json" } },
-        );
+        return Response.json({ error: "Invalid API key" }, { status: 401 });
       }
 
       // Generate session token
@@ -52,15 +46,9 @@ export function createAuthMiddleware({ validateApiKey, tokenTtlMin = 1440 }) {
         expiresAt: now + tokenTtlMin * 60 * 1000,
       });
 
-      return new Response(
-        JSON.stringify({ token }),
-        { status: 200, headers: { "Content-Type": "application/json" } },
-      );
+      return Response.json({ token });
     } catch {
-      return new Response(
-        JSON.stringify({ error: "Invalid request body" }),
-        { status: 400, headers: { "Content-Type": "application/json" } },
-      );
+      return Response.json({ error: "Invalid request body" }, { status: 400 });
     }
   }
 

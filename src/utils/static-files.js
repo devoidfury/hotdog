@@ -1,19 +1,20 @@
-// static-files.js — Static file serving middleware for createHttpApp().
+// static-files.js — Static file serving for Bun.serve() fetch handlers.
 //
-// Provides serveStatic() middleware with directory traversal protection,
-// MIME type detection, fallback to index.html for SPA routing, and caching headers.
+// Provides serveStaticFile() with MIME type detection, caching headers,
+// SPA fallback to index.html, and directory traversal protection.
 //
 // Usage:
-//   const { createHttpApp } = await import('./http-app.js')
-//   const { serveStatic } = await import('./static-files.js')
-//   const app = createHttpApp()
-//   app.use(serveStatic('/path/to/public'))
+//   const { serveStaticFile } = await import('./static-files.js')
+//
+//   Bun.serve({
+//     fetch: async (req) => {
+//       const resp = serveStaticFile(uiDir, maxAgeSecs, new URL(req.url).pathname)
+//       return resp || new Response('Not found', { status: 404 })
+//     }
+//   })
 
 import fs from "node:fs"
 
-/**
- * MIME types for common file extensions.
- */
 const MIME_TYPES = {
   ".html": "text/html; charset=utf-8",
   ".htm": "text/html; charset=utf-8",
@@ -61,111 +62,69 @@ export function getMimeType(filePath) {
 }
 
 /**
- * Create a static file serving middleware.
+ * Serve a static file from a directory.
+ * Handles MIME types, caching headers, SPA fallback to index.html,
+ * and directory traversal protection.
  *
- * @param {Object} options
- * @param {string} options.root — Absolute path to the static files directory
- * @param {string} [options.prefix=''] — URL path prefix to mount under (e.g. '/static/')
- * @param {boolean} [options.indexHtmlFallback=false] — If true, serve index.html for unmatched paths (SPA mode)
- * @param {number} [options.maxAgeSecs=3600] — Cache-Control max-age in seconds
- * @param {boolean} [options.dotfiles=false] — Whether to serve dotfiles
- * @returns {Function} Middleware function for createHttpApp().use()
+ * @param {string} rootDir - Absolute path to the static files root directory.
+ * @param {number} maxAgeSecs - Cache-Control max-age in seconds.
+ * @param {string} pathname - The URL pathname to serve (from `new URL(req.url).pathname`).
+ * @returns {Response|null} A Response if the file was found, or null for 404.
  */
-export function serveStatic({
-  root,
-  prefix = "",
-  indexHtmlFallback = false,
-  maxAgeSecs = 3600,
-  dotfiles = false,
-} = {}) {
-  if (!root) {
-    throw new Error("serveStatic() requires a 'root' path")
+export function serveStaticFile(rootDir, maxAgeSecs, pathname) {
+  // Strip query string and fragment
+  let filePath = pathname.split("?")[0].split("#")[0]
+
+  // Default to index.html for directory requests
+  if (filePath === "/" || filePath.endsWith("/")) {
+    filePath = filePath + "index.html"
   }
 
-  // Resolve root to absolute path once
-  const resolvedRoot = new URL(root, "file://").pathname
-
-  return function serveStaticMiddleware(req, res, next) {
-    // Check prefix match
-    if (prefix && !req.path.startsWith(prefix)) {
-      return next()
-    }
-
-    // Strip prefix from path
-    let filePath = prefix ? req.path.substring(prefix.length) : req.path
-
-    // Default to index.html for directory requests
-    if (filePath === "/" || filePath.endsWith("/")) {
-      filePath = filePath + "index.html"
-    }
-
-    // Strip query string and fragment
-    filePath = filePath.split("?").shift().split("#").shift()
-
-    // Decode URI components
-    try {
-      filePath = decodeURIComponent(filePath)
-    } catch {
-      res.statusCode = 400
-      res.end("Bad Request")
-      return
-    }
-
-    // Security: check for directory traversal BEFORE normalizing
-    // (URL normalization can silently resolve ../ sequences)
-    const segments = filePath.split("/")
-    if (segments.some((seg) => seg === "..")) {
-      res.statusCode = 403
-      res.end("Forbidden")
-      return
-    }
-
-    // Normalize path — remove leading slashes, collapse ./
-    const normalized = filePath.replace(/^\/+/, "").replace(/\/\.\//g, "/")
-
-    // Security: ensure the resolved path is within the root directory
-    const resolvedPath = new URL(normalized, `file://${resolvedRoot}/`).pathname
-    if (!resolvedPath.startsWith(resolvedRoot)) {
-      res.statusCode = 403
-      res.end("Forbidden")
-      return
-    }
-
-    // Security: block dotfiles if not explicitly enabled
-    if (!dotfiles && normalized.split("/").some((segment) => segment.startsWith("."))) {
-      res.statusCode = 403
-      res.end("Forbidden")
-      return
-    }
-
-    try {
-      const exists = fs.existsSync(resolvedPath)
-
-      // For SPA fallback, try index.html if the file doesn't exist
-      if (!exists && indexHtmlFallback) {
-        const indexPath = new URL("index.html", `file://${resolvedRoot}/`).pathname
-        if (fs.existsSync(indexPath)) {
-          const indexFile = Bun.file(indexPath)
-          const mimeType = getMimeType("index.html")
-          res.setHeader("Content-Type", mimeType)
-          res.setHeader("Cache-Control", `public, max-age=${maxAgeSecs}`)
-          res.file(indexFile)
-          return
-        }
-      }
-
-      if (!exists) {
-        return next()
-      }
-
-      const file = Bun.file(resolvedPath)
-      const mimeType = getMimeType(resolvedPath)
-      res.setHeader("Content-Type", mimeType)
-      res.setHeader("Cache-Control", `public, max-age=${maxAgeSecs}`)
-      res.file(file)
-    } catch {
-      res.statusCode = 500
-      res.end("Internal Server Error")
-    }
+  // Decode URI components
+  try {
+    filePath = decodeURIComponent(filePath)
+  } catch {
+    return new Response("Bad Request", { status: 400 })
   }
+
+  // Security: check for directory traversal BEFORE normalizing
+  const segments = filePath.split("/")
+  if (segments.some((seg) => seg === "..")) {
+    return new Response("Forbidden", { status: 403 })
+  }
+
+  // Normalize path
+  const normalized = filePath.replace(/^\/+/, "").replace(/\/\.\//g, "/")
+
+  // Security: ensure the resolved path is within the root directory
+  const resolvedPath = new URL(normalized, `file://${rootDir}/`).pathname
+  if (!resolvedPath.startsWith(rootDir)) {
+    return new Response("Forbidden", { status: 403 })
+  }
+
+  // Try to serve the file
+  if (fs.existsSync(resolvedPath)) {
+    const file = Bun.file(resolvedPath)
+    const mimeType = getMimeType(resolvedPath)
+    return new Response(file, {
+      headers: {
+        "Content-Type": mimeType,
+        "Cache-Control": `public, max-age=${maxAgeSecs}`,
+      },
+    })
+  }
+
+  // SPA fallback: serve index.html for unmatched paths
+  const indexPath = new URL("index.html", `file://${rootDir}/`).pathname
+  if (fs.existsSync(indexPath)) {
+    const indexFile = Bun.file(indexPath)
+    return new Response(indexFile, {
+      headers: {
+        "Content-Type": "text/html; charset=utf-8",
+        "Cache-Control": `public, max-age=${maxAgeSecs}`,
+      },
+    })
+  }
+
+  return null // 404
 }

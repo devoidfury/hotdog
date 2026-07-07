@@ -23,6 +23,5 @@ export {
 } from "./file-utils.js";
 export { stripNulls, deepMerge } from "./objects.js";
 
-// ── HTTP utilities (Express-like middleware for Bun.serve) ────────────────────
-export { createHttpApp } from "./http-app.js";
-export { serveStatic, getMimeType } from "./static-files.js";
+// ── Static file serving ──────────────────────────────────────────────────────
+export { serveStaticFile, getMimeType } from "./static-files.js";

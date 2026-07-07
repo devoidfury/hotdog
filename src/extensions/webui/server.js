@@ -1,12 +1,12 @@
 // WebUI server — UI over HTTP with WebSockets.
 
-import { createHttpApp, serveStatic } from "../../utils/index.js";
+import { serveStaticFile } from "../../utils/index.js";
 import { createWsServer } from "../websocket/server.js";
 import { createAuthMiddleware } from "../websocket/auth.js";
+import { logger } from "../../core/logger.js";
 
 /**
  * Create and start the webui server.
- * Uses websocket extension for WS handling and auth.
  *
  * @param {Object} core - The core object
  * @param {Object} config - Webui-specific config
@@ -22,6 +22,10 @@ export async function createWebuiServer(core, config, uiDir) {
     );
   }
 
+  const maxAgeSecs = core.config?.webui?.maxAgeSecs;
+  if (!maxAgeSecs)
+    throw new Error("missing required webui.maxAgeSecs configuration");
+
   const authMiddleware = createAuthMiddleware({
     validateApiKey: async (key) => key === apiKey,
     tokenTtlMin: sessionTokenTtlMin,
@@ -30,27 +34,74 @@ export async function createWebuiServer(core, config, uiDir) {
   // Create WebSocket server handler
   const wsServer = createWsServer(core, {
     auth: authMiddleware,
-    sessionTimeoutMin: core.config?.websocket?.sessionTimeoutMin || 30,
-    questionTimeoutSecs: core.config?.websocket?.questionTimeoutSecs || 300,
-    questionStrategy: core.config?.websocket?.questionStrategy || "wait",
+    sessionTimeoutMin: core.config?.websocket?.sessionTimeoutMin,
+    questionTimeoutSecs: core.config?.websocket?.questionTimeoutSecs,
+    questionStrategy: core.config?.websocket?.questionStrategy,
   });
 
   // Start cleanup loops
   authMiddleware.startCleanup();
   wsServer.startCleanupLoop();
 
-  const app = createHttpApp();
+  const fetchHandler = async (req) => {
+    const url = new URL(req.url);
+    const pathname = url.pathname;
 
-  // Start the server — app.listen() wraps Bun.serve({ fetch: app.handler, ... })
-  const server = app.listen({
+    // POST /login — authenticate and return session token
+    if (req.method === "POST" && pathname === "/login") {
+      const loginResp = await authMiddleware.loginHandler(req);
+      return loginResp;
+    }
+
+    // GET /verify — validate auth token
+    if (req.method === "GET" && pathname === "/verify") {
+      const token = url.searchParams.get("token");
+      const valid = token ? authMiddleware.validateToken(token) : false;
+      return valid
+        ? Response.json({ valid })
+        : Response.json({ valid }, { status: 401 });
+    }
+
+    // GET /ws — handle authenticated WebSocket upgrade
+    if (req.method === "GET" && pathname === "/ws") {
+      const token = url.searchParams.get("token");
+      if (!token) {
+        return Response.json(
+          { error: "Token required. Use ?token= in WebSocket URL" },
+          { status: 401 },
+        );
+      }
+      if (!authMiddleware.validateToken(token)) {
+        return Response.json({ error: "Invalid token" }, { status: 401 });
+      }
+      // Try to upgrade — Bun.serve handles the rest
+      const upgraded = server.upgrade(req, { data: { token, url: req.url } });
+      if (!upgraded) {
+        return Response.json({ error: "Upgrade failed" }, { status: 400 });
+      }
+      return;
+    }
+
+    // Everything else — serve static files
+    const staticResp = serveStaticFile(uiDir, maxAgeSecs, pathname);
+    if (staticResp) {
+      return staticResp;
+    }
+
+    return new Response("Not found", { status: 404 });
+  };
+
+  // ── Start the server ───────────────────────────────────────────────────
+
+  const server = Bun.serve({
     port,
     hostname: host,
+    fetch: fetchHandler,
     // WebSocket handlers
     websocket: {
       open(ws) {
         const { url } = ws.data;
-        const req = { url, headers: { host: "localhost" } };
-        wsServer.onUpgrade(req, ws);
+        wsServer.onUpgrade({ url, headers: { host: "localhost" } }, ws);
       },
       message(ws, data) {
         wsServer.onMessage(ws, data);
@@ -61,80 +112,7 @@ export async function createWebuiServer(core, config, uiDir) {
     },
   });
 
-  // Custom 404
-  app.setNotFoundHandler((req, res) => {
-    res.statusCode = 404;
-    res.end("Not found");
-  });
-
-  // POST /login — authenticate and return session token
-  // Delegates to authMiddleware.loginHandler, then converts Bun Response
-  // to the Express-like res helper.
-  app.post("/login", async (req, res) => {
-    // Reconstruct a Bun Request from the Express-like req for loginHandler
-    const loginReq = new Request(req.url, {
-      method: "POST",
-      headers: req.headers,
-      body: req.body,
-    });
-    const loginResp = await authMiddleware.loginHandler(loginReq);
-    const text = await loginResp.text();
-    res
-      .status(loginResp.status)
-      .setHeader(
-        "Content-Type",
-        loginResp.headers.get("Content-Type") || "application/json",
-      )
-      .send(text);
-  });
-
-  // GET /verify — validate auth token
-  app.get("/verify", (req, res) => {
-    const token = req.query.token;
-    const valid = token ? authMiddleware.validateToken(token) : false;
-    if (valid) {
-      res.json({ valid: true });
-    } else {
-      res.status(401).json({ valid: false });
-    }
-  });
-
-  // GET /ws - Handles authenticated websocket upgrade
-  app.get("/ws", (req, res) => {
-    const url = new URL(req.url);
-    const token = url.searchParams.get("token");
-
-    if (!token) {
-      res.status(401).json({
-        error: "Token required. Use ?token= in WebSocket URL",
-      });
-      return;
-    }
-
-    if (!authMiddleware.validateToken(token)) {
-      res.status(401).json({ error: "Invalid token" });
-      return;
-    }
-
-    const upgraded = server.upgrade(req.originalRequest, {
-      data: { token, url: req.url },
-    });
-    if (!upgraded) {
-      res.status(400).end("Upgrade failed");
-    }
-    // On success, Bun.serve handles the upgrade — no response to send.
-  });
-
-  // Static files — SPA mode with index.html fallback
-  app.use(
-    serveStatic({
-      root: uiDir,
-      indexHtmlFallback: true,
-      maxAgeSecs: 3600,
-    }),
-  );
-
-  console.log(`WebUI server listening on http://${host}:${port}`);
+  logger.log(`WebUI server listening on http://${host}:${port}`);
 
   return { server, wsServer, authMiddleware };
 }

@@ -21,6 +21,8 @@ function createMockAgent(options = {}) {
     llmClient,
     model: options.model || 'test-model',
     sessionId: options.sessionId || crypto.randomUUID(),
+    maxIterations: 100,
+    maxTokens: 4096,
     ...options,
   });
 }

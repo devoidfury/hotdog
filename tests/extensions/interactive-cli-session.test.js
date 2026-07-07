@@ -623,6 +623,7 @@ describe("Interactive CLI - LLM client creation", () => {
       apiKey: "test-key",
       stream: false,
       chatTimeoutSecs: 30,
+      maxRetries: 3,
       providers: [],
       markerMangler: new MarkerMangler(),
     });

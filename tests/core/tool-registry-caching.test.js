@@ -193,6 +193,8 @@ describe("Agent model setter clears tool def cache", () => {
       llmClient,
       model: "test-model-v1",
       modelRegistry: { "test-model-v1": {}, "test-model-v2": {} },
+      maxIterations: 100,
+      maxTokens: 4096,
     });
 
     // Prime the cache by getting tool defs

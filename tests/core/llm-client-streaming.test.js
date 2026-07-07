@@ -12,7 +12,7 @@ import {
 describe("LlmClient._escapeMessages", () => {
   it("escapes string content with mangler", () => {
     const mangler = new MarkerMangler();
-    const client = new LlmClient({ markerMangler: mangler });
+    const client = new LlmClient({ chatTimeoutSecs: 30, maxRetries: 3, markerMangler: mangler });
     const messages = [new Message({ role: "user", content: "Hello" })];
     const escaped = client._escapeMessages(messages);
     expect(escaped).toHaveLength(1);
@@ -21,7 +21,7 @@ describe("LlmClient._escapeMessages", () => {
 
   it("escapes array content with text parts", () => {
     const mangler = new MarkerMangler();
-    const client = new LlmClient({ markerMangler: mangler });
+    const client = new LlmClient({ chatTimeoutSecs: 30, maxRetries: 3, markerMangler: mangler });
     const messages = [
       new Message({
         role: "user",
@@ -43,7 +43,7 @@ describe("LlmClient._escapeMessages", () => {
 
   it("passes through image_url parts unchanged", () => {
     const mangler = new MarkerMangler();
-    const client = new LlmClient({ markerMangler: mangler });
+    const client = new LlmClient({ chatTimeoutSecs: 30, maxRetries: 3, markerMangler: mangler });
     const messages = [
       new Message({
         role: "user",
@@ -61,7 +61,7 @@ describe("LlmClient._escapeMessages", () => {
 
   it("escapes tool_calls in messages", () => {
     const mangler = new MarkerMangler();
-    const client = new LlmClient({ markerMangler: mangler });
+    const client = new LlmClient({ chatTimeoutSecs: 30, maxRetries: 3, markerMangler: mangler });
     const messages = [
       new Message({
         role: "assistant",
@@ -74,7 +74,7 @@ describe("LlmClient._escapeMessages", () => {
   });
 
   it("returns messages unchanged when mangler is null", () => {
-    const client = new LlmClient({ markerMangler: null });
+    const client = new LlmClient({ chatTimeoutSecs: 30, maxRetries: 3, markerMangler: null });
     const messages = [new Message({ role: "user", content: "Hello" })];
     const escaped = client._escapeMessages(messages);
     expect(escaped).toHaveLength(1);
@@ -82,7 +82,7 @@ describe("LlmClient._escapeMessages", () => {
 
   it("escapes tool_calls with function name and arguments", () => {
     const mangler = new MarkerMangler();
-    const client = new LlmClient({ markerMangler: mangler });
+    const client = new LlmClient({ chatTimeoutSecs: 30, maxRetries: 3, markerMangler: mangler });
     const messages = [
       new Message({
         role: "assistant",
@@ -102,7 +102,7 @@ describe("LlmClient._escapeMessages", () => {
 
   it("handles messages with null content", () => {
     const mangler = new MarkerMangler();
-    const client = new LlmClient({ markerMangler: mangler });
+    const client = new LlmClient({ chatTimeoutSecs: 30, maxRetries: 3, markerMangler: mangler });
     const messages = [new Message({ role: "assistant", content: null })];
     const escaped = client._escapeMessages(messages);
     expect(escaped).toHaveLength(1);
@@ -111,7 +111,7 @@ describe("LlmClient._escapeMessages", () => {
 
 describe("LlmClient._parseStreamData", () => {
   it("parses content delta", () => {
-    const client = new LlmClient();
+    const client = new LlmClient({ chatTimeoutSecs: 30, maxRetries: 3 });
     const events = client._parseStreamData({
       choices: [{ delta: { content: "Hello" } }],
     });
@@ -121,7 +121,7 @@ describe("LlmClient._parseStreamData", () => {
   });
 
   it("parses reasoning_content delta", () => {
-    const client = new LlmClient();
+    const client = new LlmClient({ chatTimeoutSecs: 30, maxRetries: 3 });
     const events = client._parseStreamData({
       choices: [{ delta: { reasoning_content: "Thinking..." } }],
     });
@@ -131,7 +131,7 @@ describe("LlmClient._parseStreamData", () => {
   });
 
   it("parses tool call name", () => {
-    const client = new LlmClient();
+    const client = new LlmClient({ chatTimeoutSecs: 30, maxRetries: 3 });
     const events = client._parseStreamData({
       choices: [
         {
@@ -149,7 +149,7 @@ describe("LlmClient._parseStreamData", () => {
   });
 
   it("parses tool call arguments", () => {
-    const client = new LlmClient();
+    const client = new LlmClient({ chatTimeoutSecs: 30, maxRetries: 3 });
     const events = client._parseStreamData({
       choices: [
         {
@@ -167,7 +167,7 @@ describe("LlmClient._parseStreamData", () => {
   });
 
   it("parses usage data", () => {
-    const client = new LlmClient();
+    const client = new LlmClient({ chatTimeoutSecs: 30, maxRetries: 3 });
     const events = client._parseStreamData({
       choices: [],
       usage: { prompt_tokens: 10, completion_tokens: 20 },
@@ -178,13 +178,13 @@ describe("LlmClient._parseStreamData", () => {
   });
 
   it("returns empty array for data with no choices", () => {
-    const client = new LlmClient();
+    const client = new LlmClient({ chatTimeoutSecs: 30, maxRetries: 3 });
     const events = client._parseStreamData({});
     expect(events).toEqual([]);
   });
 
   it("parses multiple events from single data block", () => {
-    const client = new LlmClient();
+    const client = new LlmClient({ chatTimeoutSecs: 30, maxRetries: 3 });
     const events = client._parseStreamData({
       choices: [
         {
@@ -199,7 +199,7 @@ describe("LlmClient._parseStreamData", () => {
   });
 
   it("handles empty content delta", () => {
-    const client = new LlmClient();
+    const client = new LlmClient({ chatTimeoutSecs: 30, maxRetries: 3 });
     const events = client._parseStreamData({
       choices: [{ delta: {} }],
     });
@@ -207,7 +207,7 @@ describe("LlmClient._parseStreamData", () => {
   });
 
   it("handles null content in delta", () => {
-    const client = new LlmClient();
+    const client = new LlmClient({ chatTimeoutSecs: 30, maxRetries: 3 });
     const events = client._parseStreamData({
       choices: [{ delta: { content: null } }],
     });
@@ -215,14 +215,14 @@ describe("LlmClient._parseStreamData", () => {
   });
 
   it("handles undefined choices", () => {
-    const client = new LlmClient();
+    const client = new LlmClient({ chatTimeoutSecs: 30, maxRetries: 3 });
     const events = client._parseStreamData({ choices: undefined });
     expect(events).toEqual([]);
   });
 
   it("unescape content with mangler", () => {
     const mangler = new MarkerMangler();
-    const client = new LlmClient({ markerMangler: mangler });
+    const client = new LlmClient({ chatTimeoutSecs: 30, maxRetries: 3, markerMangler: mangler });
     const rawContent = mangler.escape("Hello World");
     const events = client._parseStreamData({
       choices: [{ delta: { content: rawContent } }],
@@ -233,7 +233,7 @@ describe("LlmClient._parseStreamData", () => {
 
   it("unescape reasoning content with mangler", () => {
     const mangler = new MarkerMangler();
-    const client = new LlmClient({ markerMangler: mangler });
+    const client = new LlmClient({ chatTimeoutSecs: 30, maxRetries: 3, markerMangler: mangler });
     const rawContent = mangler.escape("Thinking process");
     const events = client._parseStreamData({
       choices: [{ delta: { reasoning_content: rawContent } }],
@@ -243,7 +243,7 @@ describe("LlmClient._parseStreamData", () => {
   });
 
   it("handles tool call without id", () => {
-    const client = new LlmClient();
+    const client = new LlmClient({ chatTimeoutSecs: 30, maxRetries: 3 });
     const events = client._parseStreamData({
       choices: [
         {
@@ -258,7 +258,7 @@ describe("LlmClient._parseStreamData", () => {
   });
 
   it("handles tool call without index", () => {
-    const client = new LlmClient();
+    const client = new LlmClient({ chatTimeoutSecs: 30, maxRetries: 3 });
     const events = client._parseStreamData({
       choices: [
         {
@@ -272,7 +272,7 @@ describe("LlmClient._parseStreamData", () => {
   });
 
   it("handles tool call with only arguments (no name)", () => {
-    const client = new LlmClient();
+    const client = new LlmClient({ chatTimeoutSecs: 30, maxRetries: 3 });
     const events = client._parseStreamData({
       choices: [
         {
@@ -289,7 +289,7 @@ describe("LlmClient._parseStreamData", () => {
   });
 
   it("handles tool call with only name (no arguments)", () => {
-    const client = new LlmClient();
+    const client = new LlmClient({ chatTimeoutSecs: 30, maxRetries: 3 });
     const events = client._parseStreamData({
       choices: [
         {
@@ -305,7 +305,7 @@ describe("LlmClient._parseStreamData", () => {
   });
 
   it("handles empty string content", () => {
-    const client = new LlmClient();
+    const client = new LlmClient({ chatTimeoutSecs: 30, maxRetries: 3 });
     const events = client._parseStreamData({
       choices: [{ delta: { content: "" } }],
     });
@@ -316,7 +316,7 @@ describe("LlmClient._parseStreamData", () => {
 
 describe("LlmClient.chatStreamCancellable", () => {
   it("returns an async generator", () => {
-    const client = new LlmClient({ baseUrl: "http://test.com" });
+    const client = new LlmClient({ chatTimeoutSecs: 30, maxRetries: 3, baseUrl: "http://test.com" });
     const gen = client.chatStreamCancellable(
       [{ role: "user", content: "Hi" }],
       { name: "test-model", temperature: null, maxTokens: 100 },
@@ -325,7 +325,7 @@ describe("LlmClient.chatStreamCancellable", () => {
   });
 
   it("accepts a cancelToken parameter", () => {
-    const client = new LlmClient({ baseUrl: "http://test.com" });
+    const client = new LlmClient({ chatTimeoutSecs: 30, maxRetries: 3, baseUrl: "http://test.com" });
     const abortController = new AbortController();
     const gen = client.chatStreamCancellable(
       [{ role: "user", content: "Hi" }],
@@ -337,7 +337,7 @@ describe("LlmClient.chatStreamCancellable", () => {
   });
 
   it("accepts custom cancel token with .aborted property", () => {
-    const client = new LlmClient({ baseUrl: "http://test.com" });
+    const client = new LlmClient({ chatTimeoutSecs: 30, maxRetries: 3, baseUrl: "http://test.com" });
     const customCancel = { aborted: false };
     const gen = client.chatStreamCancellable(
       [{ role: "user", content: "Hi" }],
@@ -349,7 +349,7 @@ describe("LlmClient.chatStreamCancellable", () => {
   });
 
   it("accepts already-aborted cancel token", () => {
-    const client = new LlmClient({ baseUrl: "http://test.com" });
+    const client = new LlmClient({ chatTimeoutSecs: 30, maxRetries: 3, baseUrl: "http://test.com" });
     const abortController = new AbortController();
     abortController.abort();
     const gen = client.chatStreamCancellable(
@@ -362,7 +362,7 @@ describe("LlmClient.chatStreamCancellable", () => {
   });
 
   it("accepts cancel token with signal property", () => {
-    const client = new LlmClient({ baseUrl: "http://test.com" });
+    const client = new LlmClient({ chatTimeoutSecs: 30, maxRetries: 3, baseUrl: "http://test.com" });
     const customCancel = {
       signal: new AbortController().signal,
     };
@@ -378,7 +378,7 @@ describe("LlmClient.chatStreamCancellable", () => {
 
 describe("LlmClient._processSSE", () => {
   it("handles empty stream", async () => {
-    const client = new LlmClient({ baseUrl: "http://test.com" });
+    const client = new LlmClient({ chatTimeoutSecs: 30, maxRetries: 3, baseUrl: "http://test.com" });
     const mockResponse = {
       body: {
         getReader: () => ({
@@ -396,7 +396,7 @@ describe("LlmClient._processSSE", () => {
   });
 
   it("parses SSE content events", async () => {
-    const client = new LlmClient({ baseUrl: "http://test.com" });
+    const client = new LlmClient({ chatTimeoutSecs: 30, maxRetries: 3, baseUrl: "http://test.com" });
     const sseData = `data: {"choices":[{"delta":{"content":"Hello"}}]}
 data: {"choices":[{"delta":{"content":" World"}}]}
 data: [DONE]
@@ -433,7 +433,7 @@ data: [DONE]
   });
 
   it("skips non-data lines", async () => {
-    const client = new LlmClient({ baseUrl: "http://test.com" });
+    const client = new LlmClient({ chatTimeoutSecs: 30, maxRetries: 3, baseUrl: "http://test.com" });
     const sseData = `event: message
 data: {"choices":[{"delta":{"content":"test"}}]}
 
@@ -461,7 +461,7 @@ data: {"choices":[{"delta":{"content":"test"}}]}
   });
 
   it("handles malformed JSON gracefully", async () => {
-    const client = new LlmClient({ baseUrl: "http://test.com" });
+    const client = new LlmClient({ chatTimeoutSecs: 30, maxRetries: 3, baseUrl: "http://test.com" });
     const sseData = `data: {invalid json}
 data: {"choices":[{"delta":{"content":"valid"}}]}
 `;
@@ -488,7 +488,7 @@ data: {"choices":[{"delta":{"content":"valid"}}]}
   });
 
   it("handles multi-chunk streams", async () => {
-    const client = new LlmClient({ baseUrl: "http://test.com" });
+    const client = new LlmClient({ chatTimeoutSecs: 30, maxRetries: 3, baseUrl: "http://test.com" });
     let callCount = 0;
     const mockResponse = {
       body: {
@@ -528,43 +528,43 @@ data: {"choices":[{"delta":{"content":"valid"}}]}
 describe("LlmClient constructor edge cases", () => {
   it("creates with markerMangler option", () => {
     const mangler = createMarkerMangler();
-    const client = new LlmClient({ markerMangler: mangler });
+    const client = new LlmClient({ chatTimeoutSecs: 30, maxRetries: 3, markerMangler: mangler });
     expect(client._mangler).toBe(mangler);
   });
 
   it("creates default mangler when not provided", () => {
-    const client = new LlmClient();
+    const client = new LlmClient({ chatTimeoutSecs: 30, maxRetries: 3 });
     expect(client._mangler).toBeDefined();
     expect(typeof client._mangler.escape).toBe("function");
   });
 
   it("accepts null markerMangler", () => {
-    const client = new LlmClient({ markerMangler: null });
+    const client = new LlmClient({ chatTimeoutSecs: 30, maxRetries: 3, markerMangler: null });
     expect(client._mangler).toBeNull();
   });
 
   it("sets cancelled flag to false by default", () => {
-    const client = new LlmClient();
+    const client = new LlmClient({ chatTimeoutSecs: 30, maxRetries: 3 });
     expect(client.cancelled).toBe(false);
   });
 
   it("sets sessionId from options", () => {
-    const client = new LlmClient({ sessionId: "test-session" });
+    const client = new LlmClient({ chatTimeoutSecs: 30, maxRetries: 3, sessionId: "test-session" });
     expect(client.sessionId).toBe("test-session");
   });
 
   it("sets loud flag from options", () => {
-    const client = new LlmClient({ loud: true });
+    const client = new LlmClient({ chatTimeoutSecs: 30, maxRetries: 3, loud: true });
     expect(client.loud).toBe(true);
   });
 
   it("stream defaults to true", () => {
-    const client = new LlmClient();
+    const client = new LlmClient({ chatTimeoutSecs: 30, maxRetries: 3 });
     expect(client.stream).toBe(true);
   });
 
   it("stream can be set to false", () => {
-    const client = new LlmClient({ stream: false });
+    const client = new LlmClient({ chatTimeoutSecs: 30, maxRetries: 3, stream: false });
     expect(client.stream).toBe(false);
   });
 });
@@ -572,6 +572,8 @@ describe("LlmClient constructor edge cases", () => {
 describe("LlmClient._doRequest", () => {
   it("includes Authorization header when apiKey is set", async () => {
     const client = new LlmClient({
+      chatTimeoutSecs: 30,
+      maxRetries: 3,
       baseUrl: "http://test.com",
       apiKey: "secret",
     });
@@ -599,6 +601,8 @@ describe("LlmClient._doRequest", () => {
 
   it("includes x-session-affinity header when sessionId is set", async () => {
     const client = new LlmClient({
+      chatTimeoutSecs: 30,
+      maxRetries: 3,
       baseUrl: "http://test.com",
       sessionId: "sess-123",
     });
@@ -625,7 +629,7 @@ describe("LlmClient._doRequest", () => {
   });
 
   it("does not include Authorization header when apiKey is null", async () => {
-    const client = new LlmClient({ baseUrl: "http://test.com", apiKey: null });
+    const client = new LlmClient({ chatTimeoutSecs: 30, maxRetries: 3, baseUrl: "http://test.com", apiKey: null });
     let capturedHeaders = null;
 
     globalThis.fetch = async (url, opts) => {
@@ -649,7 +653,7 @@ describe("LlmClient._doRequest", () => {
   });
 
   it("throws LlmError.Api on non-OK response", async () => {
-    const client = new LlmClient({ baseUrl: "http://test.com" });
+    const client = new LlmClient({ chatTimeoutSecs: 30, maxRetries: 3, baseUrl: "http://test.com" });
 
     globalThis.fetch = async () => {
       return {
@@ -670,7 +674,7 @@ describe("LlmClient._doRequest", () => {
   });
 
   it("sets Connection: keep-alive header", async () => {
-    const client = new LlmClient({ baseUrl: "http://test.com" });
+    const client = new LlmClient({ chatTimeoutSecs: 30, maxRetries: 3, baseUrl: "http://test.com" });
     let capturedHeaders = null;
 
     globalThis.fetch = async (url, opts) => {
@@ -693,7 +697,7 @@ describe("LlmClient._doRequest", () => {
   });
 
   it("sets User-Agent header", async () => {
-    const client = new LlmClient({ baseUrl: "http://test.com" });
+    const client = new LlmClient({ chatTimeoutSecs: 30, maxRetries: 3, baseUrl: "http://test.com" });
     let capturedHeaders = null;
 
     globalThis.fetch = async (url, opts) => {
@@ -716,7 +720,7 @@ describe("LlmClient._doRequest", () => {
   });
 
   it("sends request to /v1/chat/completions endpoint", async () => {
-    const client = new LlmClient({ baseUrl: "http://test.com" });
+    const client = new LlmClient({ chatTimeoutSecs: 30, maxRetries: 3, baseUrl: "http://test.com" });
     let capturedUrl = null;
 
     globalThis.fetch = async (url, opts) => {
@@ -739,7 +743,7 @@ describe("LlmClient._doRequest", () => {
   });
 
   it("sends request body as JSON", async () => {
-    const client = new LlmClient({ baseUrl: "http://test.com" });
+    const client = new LlmClient({ chatTimeoutSecs: 30, maxRetries: 3, baseUrl: "http://test.com" });
     let capturedBody = null;
 
     globalThis.fetch = async (url, opts) => {
@@ -764,7 +768,7 @@ describe("LlmClient._doRequest", () => {
   });
 
   it("passes signal to fetch", async () => {
-    const client = new LlmClient({ baseUrl: "http://test.com" });
+    const client = new LlmClient({ chatTimeoutSecs: 30, maxRetries: 3, baseUrl: "http://test.com" });
     let capturedSignal = null;
     const abortController = new AbortController();
 
@@ -790,7 +794,7 @@ describe("LlmClient._doRequest", () => {
 
 describe("LlmClient.ping", () => {
   it("returns undefined on successful health check", async () => {
-    const client = new LlmClient({ baseUrl: "http://test.com" });
+    const client = new LlmClient({ chatTimeoutSecs: 30, maxRetries: 3, baseUrl: "http://test.com" });
 
     globalThis.fetch = async () => ({ ok: true });
 
@@ -799,7 +803,7 @@ describe("LlmClient.ping", () => {
   });
 
   it("throws LlmError.Api on non-OK health check", async () => {
-    const client = new LlmClient({ baseUrl: "http://test.com" });
+    const client = new LlmClient({ chatTimeoutSecs: 30, maxRetries: 3, baseUrl: "http://test.com" });
 
     globalThis.fetch = async () => ({ ok: false, status: 503 });
 
@@ -807,7 +811,7 @@ describe("LlmClient.ping", () => {
   });
 
   it("throws LlmError.Http on network error", async () => {
-    const client = new LlmClient({ baseUrl: "http://test.com" });
+    const client = new LlmClient({ chatTimeoutSecs: 30, maxRetries: 3, baseUrl: "http://test.com" });
 
     globalThis.fetch = async () => {
       throw new Error("ECONNREFUSED");
@@ -817,7 +821,7 @@ describe("LlmClient.ping", () => {
   });
 
   it("re-throws LlmError without wrapping", async () => {
-    const client = new LlmClient({ baseUrl: "http://test.com" });
+    const client = new LlmClient({ chatTimeoutSecs: 30, maxRetries: 3, baseUrl: "http://test.com" });
 
     globalThis.fetch = async () => {
       throw LlmError.Api("already typed");
@@ -829,7 +833,7 @@ describe("LlmClient.ping", () => {
 
 describe("LlmClient.chatStream", () => {
   it("yields stream events from chatStreamWithModelConfig", async () => {
-    const client = new LlmClient({ baseUrl: "http://test.com" });
+    const client = new LlmClient({ chatTimeoutSecs: 30, maxRetries: 3, baseUrl: "http://test.com" });
 
     // Override chatStreamWithModelConfig to return known events
     client.chatStreamWithModelConfig = async function* () {
@@ -850,7 +854,7 @@ describe("LlmClient.chatStream", () => {
   });
 
   it("passes tools to chatStreamWithModelConfig", async () => {
-    const client = new LlmClient({ baseUrl: "http://test.com" });
+    const client = new LlmClient({ chatTimeoutSecs: 30, maxRetries: 3, baseUrl: "http://test.com" });
     let capturedTools = null;
 
     client.chatStreamWithModelConfig = async function* (

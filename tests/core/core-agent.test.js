@@ -685,6 +685,8 @@ describe('Agent — end-to-end loop', () => {
       toolRegistry: createToolRegistry(),
       llmClient: new MockLLMClient(),
       model: 'test-model',
+      maxIterations: 100,
+      maxTokens: 4096,
     });
     freshAgent.deserialize(serialized);
 
@@ -721,6 +723,7 @@ describe('Agent — end-to-end loop', () => {
         llmClient,
         model: 'custom',
         maxIterations: 42,
+        maxTokens: 4096,
         hideTools: false,
         hideThinking: true,
       });
@@ -866,6 +869,8 @@ describe('Agent — end-to-end loop', () => {
         toolRegistry: createToolRegistry(),
         llmClient: new MockLLMClient(),
         model: 'test',
+        maxIterations: 100,
+        maxTokens: 4096,
       });
       newAgent.deserialize(serialized);
       expect(newAgent._reasoningEffort).toBe('max');
@@ -881,6 +886,8 @@ describe('Agent — end-to-end loop', () => {
         toolRegistry: createToolRegistry(),
         llmClient: new MockLLMClient(),
         model: 'test',
+        maxIterations: 100,
+        maxTokens: 4096,
       });
       newAgent._reasoningEffort = 'high';
       newAgent.deserialize(serialized);

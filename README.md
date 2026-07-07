@@ -108,9 +108,12 @@ preload-skills: []
 Profile body content goes here.
 ```
 
+## UI Modes
+- **One-shot CLI** -- Single prompt non-interactive session. _(stable, ready for use)_
+- **Interactive CLI** -- Readline-based interactive session. _(stable, ready for use)_
+- **Web UI** -- Optional web interface with WebSocket support (`hotdog webui`). (alpha until 0.2)
 
 ## Features
-
 - **Tool calling** -- File operations, bash, HTTP requests, web search, and more
 - **Extension architecture** -- All features are extensions; add your own via `extension.json` + `index.js`
 - **Hook system** -- Three hook patterns: notification, sequential pipeline, and gate/mutate
@@ -120,8 +123,6 @@ Profile body content goes here.
 - **MCP client** -- Connect to Model Context Protocol servers (HTTP + stdio)
 - **Subagent tasks** -- Delegate work to background task agents
 - **Session logging** -- JSONL session logs for debugging and auditing
-- **Interactive CLI** -- Readline-based interactive session
-- **Web UI** -- Optional web interface with WebSocket support (`hotdog webui`)
 - **Streaming** -- Real-time streaming of LLM responses
 - **Retry with backoff** -- Automatic retry for transient LLM errors
 - **Prompt injection protection** -- Marker mangling to prevent crafted input from triggering internal behavior
@@ -138,7 +139,7 @@ hotdog info                      # System diagnostics
 hotdog show-prompt               # Render system prompt to stdout
 hotdog profiles                  # List all available profiles
 hotdog review                    # Review session logs
-hotdog webui                     # Start the web UI server
+hotdog webui                     # Start the web UI server (alpha)
 ```
 
 ### CLI Options

@@ -255,6 +255,13 @@ Each tool call goes through a dedicated sub-pipeline:
 | `TOOL_CALL` | `tool:call` | pipeline | Gate — block, modify, or allow tool calls |
 | `TOOL_RESULT` | `tool:result` | pipeline | Modify tool result before LLM sees it |
 | `AGENT_TOOL_CONTEXT` | `agent:toolContext` | async notify | Enrich shared tool context |
+| `TOOL_METRICS` | `tool:metrics` | async notify | After each individual tool execution — telemetry, profiling |
+
+### Services
+
+| Hook Constant | Name | Pattern | When |
+|---------------|------|---------|------|
+| `SERVICES_REGISTER` | `services:register` | sync notify | Register abstract service implementations (fired during extension load) |
 
 ### Provider Interaction
 

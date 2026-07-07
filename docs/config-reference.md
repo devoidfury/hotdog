@@ -53,20 +53,23 @@ All three forms above are equivalent.
 Every config value is resolved through a priority chain. Values from higher-priority sources override lower ones:
 
 ```
-CLI flags  >  defaults.json  >  environment variables  >  provider defaults  >  profile settings  >  extension defaults  >  schema defaults
+CLI flags  >  defaults.json  >  environment variables  >  profile settings  >  extension defaults  >  schema defaults
 ```
+
+**Exception:** `aiUrl` and `apiKey` resolve from the active **provider first** (provider > CLI > config > default), since the provider's URL and API key are the natural defaults.
 
 ### Layer Details
 
 | Layer | Source | Description |
 |-------|--------|-------------|
-| **CLI** | `--flag` arguments | Highest priority. Set via the command line. |
+| **CLI** | `--flag` arguments | Highest priority for most keys. Set via the command line. |
 | **Config** | `defaults.json` | Your config file values. |
 | **Env** | Environment variables | Set via `export` or shell. |
-| **Provider** | Active provider settings | Values from the selected provider (e.g. API key, URL). |
 | **Profile** | Active profile | Values from the selected profile (role, model, tool restrictions). |
 | **Extension** | Extension defaults | Defaults registered by loaded extensions. |
 | **Default** | Schema defaults | Hardcoded fallbacks from `core.config.json`. |
+
+**Provider layer** (for `aiUrl`/`apiKey` only): The active provider's URL and API key are resolved before CLI/config, since the provider is the natural source for these values.
 
 ---
 
@@ -282,12 +285,12 @@ UI theme. Built-in options: `dark`, `light`, `monochrome`. Also accepts a file p
 
 ### `colors`
 
-- **Type:** `boolean` or `ColorPalette`
+- **Type:** `boolean`
 - **CLI flag:** `--colors` / `--no-colors`
 - **Default:** `true`
 - **Resolution:** CLI > config > default
 
-Enable or disable colored output. Can also be a `ColorPalette` object for custom colors.
+Enable or disable colored output.
 
 ```json
 { "colors": true }

@@ -69,6 +69,8 @@ The foundation for the extension architecture. `HookSystem` class with `on()`, `
 
 **Loop:** `LOOP_DETECTED`
 
+**Tool metrics:** `TOOL_METRICS`
+
 **Logging:** `LOG`
 
 ### Extension Loader (`src/core/extensions/extensions.js`)
@@ -118,7 +120,7 @@ Separate registries for agent commands and CLI subcommands. Key exports:
 Tool registry and common utilities. Key exports:
 - `ToolRegistry` — stores tools by name, provides lookup, serialization, and `getToolDefs()` accessor
 - `createToolRegistry()` — factory function
-- Methods: `register()`, `get()`, `has()`, `getAll()`, `getToolDefs()`, `clear()`, `filter()`, `validateToolArgs()`
+- Methods: `register()`, `get()`, `has()`, `getAll()`, `getToolDefs()`, `getToolDef(name)`, `clearToolDefs()`, `remove(name)`, `removeAll(names)`, `clear()`, `filter()`, `validateToolArgs()`
 
 ### Tool Context (`src/core/extensions/tool-context.js`)
 Shared context container for tool execution. Backed by a Map. Extensions mount objects via `AGENT_TOOL_CONTEXT` hook so tools can access them during execution. Key exports:

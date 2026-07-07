@@ -13,6 +13,8 @@ bun bin/hotdog prompt "hello"
 
 ## Debug Flags
 
+- **`--config <path>`** (`-f`) — config file path
+- **`--config-dir <path>`** (`-d`) — config directory
 - **`--loud`** (`-l`) — verbose stderr logging for LLM requests/responses
 - **`--no-stream`** — batch mode: text appears after full generation (no streaming)
 - **`--compact-debug`** — write compaction details to `compaction.out.json`
@@ -26,10 +28,23 @@ bun bin/hotdog prompt "hello"
 - **`--thinker <fmt>`** — custom thinking format string
 - **`--toolfmt <fmt>`** — custom tool call format string
 - **`--tool-output-fmt <fmt>`** — custom tool result format string
-- **`--session-id <id>`** — resumable session ID (restores from disk)
+- **`--session-id <id>`** (`-s`) — resumable session ID (restores from disk)
 - **`--json`** — output in JSON format (for subcommands)
 - **`--theme <name>`** — theme (dark, light, monochrome, or file path)
 - **`--colors`** / **`--no-colors`** — enable/disable colors
+- **`--config-debug`** — show config resolution details (sources and layers)
+- **`--preload-skills <names>`** — preload skills by name (comma-separated)
+- **`--max-iterations <n>`** — maximum agent loop iterations
+- **`--role <text>`** — override the system prompt role
+- **`--provider <name>`** — override the AI provider
+- **`--embeddings-timeout <secs>`** — timeout for embeddings requests
+- **`--chat-timeout <secs>`** — timeout for chat/API requests
+- **`--system-prompt-template <path>`** — custom system prompt template file
+- **`--skills-path <path>`** — skills directory path
+- **`--profiles-path <path>`** — profiles directory path
+- **`--prompts-path <path>`** — prompts directory path
+- **`--ai-url <url>`** — override the AI backend URL
+- **`--api-key <key>`** (`-k`) — override the API key
 
 ## Common Debugging Patterns
 

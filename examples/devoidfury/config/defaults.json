@@ -4,7 +4,7 @@
   "default_model": "ai365/dsv4",
   "thinker": " 🧠 ... {}",
   "toolfmt": " 🔧 {} {}",
-  "hide_tools": true,
+  "hide_tools": false,
   "show_token_use": true,
   "skills_path": "/skills",
   "extension_paths": ["builtins"],
@@ -13,11 +13,11 @@
   "chat_timeout_secs": 900,
   "profiles": {
     "default": {
-      "blacklist_tools": ["explore"]
+      "blacklist-tools": ["explore"]
     },
     "explorer": {
       "model": "ai365/lfm2.5-8b-a1b",
-      "blacklist_tools": ["write", "model", "explore"]
+      "blacklist-tools": ["write", "model", "explore"]
     },
     "generate": {
       "model": "ai365/qwen3.6-35b:general"
@@ -29,23 +29,26 @@
       "model": "ai365/qwen3.5-4b:coder"
     }
   },
-  "agents_md": {
+  "agents-md": {
     "enabled": true,
     "autoload": false
+  },
+  "ui-interactive-cli": {
+    "shell-mode": true
   },
   "websocket": {
     "port": 3000,
     "host": "0.0.0.0",
-    "sessionTimeoutMin": 30,
-    "questionTimeoutSecs": 300,
-    "questionStrategy": "wait"
+    "session-timeout-min": 30,
+    "question-timeout-secs": 300,
+    "question-strategy": "wait"
   },
   "webui": {
     "port": 3000,
     "host": "0.0.0.0",
-    "sessionTokenTtlMin": 1440
+    "session-token-ttl-min": 1440
   },
-  "mcp_servers": [
+  "mcp-servers": [
     {
       "enabled": false,
       "name": "bun-docs-mcp",
@@ -61,7 +64,7 @@
           "name": "dsv4",
           "context-limit": 350000,
           "tags": ["general", "huge", "coder"],
-          "reasoning_effort": "max"
+          "reasoning-effort": "max"
         },
         {
           "name": "qwen3.5-4b",
@@ -72,7 +75,7 @@
           "name": "qwen3.5-4b:coder",
           "context-limit": 262144,
           "tags": ["coder", "general", "fast", "think"],
-          "parallel_tool_calling": true
+          "parallel-tool-calling": true
         },
         {
           "name": "qwen3.5-0.8b",
@@ -83,31 +86,31 @@
           "name": "qwen3.6-35b",
           "context-limit": 160000,
           "tags": ["coder", "general", "powerful", "think"],
-          "parallel_tool_calling": true
+          "parallel-tool-calling": true
         },
         {
           "name": "qwen3.6-35b:general",
           "context-limit": 160000,
           "tags": ["general", "powerful", "think"],
-          "parallel_tool_calling": true
+          "parallel-tool-calling": true
         },
         {
           "name": "qwen3.6-35b:instruct",
           "context-limit": 160000,
           "tags": ["general", "powerful", "instruct"],
-          "parallel_tool_calling": true
+          "parallel-tool-calling": true
         },
         {
           "name": "qwen3.6-27b",
           "context-limit": 160000,
           "tags": ["coder", "general", "powerful", "think"],
-          "parallel_tool_calling": true
+          "parallel-tool-calling": true
         },
         {
           "name": "qwen3.6-27b:instruct",
           "context-limit": 160000,
           "tags": ["coder", "general", "powerful", "instruct"],
-          "parallel_tool_calling": true
+          "parallel-tool-calling": true
         },
         {
           "name": "gemma-4-E2B",
@@ -117,17 +120,20 @@
         {
           "name": "gemma-4-31b",
           "context-limit": 256000,
-          "tags": ["coder", "general", "powerful"]
+          "tags": ["coder", "general", "powerful"],
+          "parallel-tool-calling": true
         },
         {
           "name": "gemma-4-12b",
           "context-limit": 256000,
-          "tags": ["coder", "general", "powerful"]
+          "tags": ["coder", "general", "powerful"],
+          "parallel-tool-calling": true
         },
         {
           "name": "glm4.7-flash",
           "context-limit": 131072,
-          "tags": ["coder", "general"]
+          "tags": ["coder", "general"],
+          "parallel-tool-calling": true
         },
         {
           "name": "granite-4.1-30b",

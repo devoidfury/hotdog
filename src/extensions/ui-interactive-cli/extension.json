@@ -2,7 +2,7 @@
   "name": "ui-interactive-cli",
   "provides": ["interactive-session", "cli:subcommands"],
   "loadOrder": 10,
-  "description": "Interactive CLI session with readline loop, slash commands, and shell execution",
+  "description": "Interactive CLI session with readline loop, slash commands, and optional shell mode",
   "configSchema": {
     "uiInteractiveCli": {
       "type": "object",
@@ -11,15 +11,28 @@
           "type": "boolean",
           "default": true,
           "description": "Whether this extension is enabled. Set to false to disable the extension entirely."
+        },
+        "shellMode": {
+          "type": "boolean",
+          "default": false,
+          "description": "When enabled, lines starting with a recognized system command are executed directly instead of sent to the agent."
         }
       },
       "additionalProperties": false,
       "layers": [
+        { "source": "cli", "key": "shellMode", "cast": "truthy" },
         { "source": "config", "key": "uiInteractiveCli" },
         { "default": {} }
       ]
     }
   },
+  "cli:flags": [
+    {
+      "long": "--shell-mode",
+      "description": "Execute lines starting with a recognized system command directly",
+      "type": "boolean"
+    }
+  ],
   "cli:subcommands": [
     {
       "name": "cli",

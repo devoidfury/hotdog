@@ -1,6 +1,6 @@
 // Tests for the interactive CLI session internals — runInteractiveSession,
 // Tests for the interactive CLI session internals — runInteractiveSession,
-// handleShellCommand, handleSlashCommand, createInlineShellCommand, and
+// handleSlashCommand and
 // readline event handling. These are the paths NOT covered by the existing
 // interactive-cli.test.js (which covers create(), parseCommand, and
 // AsyncInteractiveCliInput).
@@ -29,9 +29,7 @@ import { MessageBus } from "../../src/core/session/message-bus.js";
 import { TaskManager } from "../../src/core/session/task-manager.js";
 import { parseCommand, Command } from "../../src/core/commands.js";
 import {
-  handleShellCommand,
   handleSlashCommand,
-  createInlineShellCommand,
 } from "../../src/extensions/ui-interactive-cli/index.js";
 
 // ── Mock Helpers ──────────────────────────────────────────────────────────────
@@ -104,47 +102,6 @@ describe("Interactive CLI - cli subcommand handler", () => {
   });
 });
 
-describe("Interactive CLI - inline shell command", () => {
-  it("shell command extension fallback creates a working execute function", async () => {
-    const core = createMockCore();
-    core.extensions.has = (name) => name === "run-shell-command";
-
-    const { create } =
-      await import("../../src/extensions/ui-interactive-cli/index.js");
-    const ext = create(core);
-
-    // The extension should have the hooks registered
-    expect(ext.hooks[HOOKS.CLI_SUBCOMMANDS_REGISTER]).toBeDefined();
-  });
-});
-
-describe("Interactive CLI - shell command prefix detection", () => {
-  it("detects /sh prefix", () => {
-    expect("/sh ls".startsWith("/sh ")).toBe(true);
-  });
-
-  it("detects /shell prefix", () => {
-    expect("/shell ls".startsWith("/shell ")).toBe(true);
-  });
-
-  it("detects :! prefix", () => {
-    expect(":!ls".startsWith(":!")).toBe(true);
-  });
-
-  it("detects ! prefix", () => {
-    expect("!ls".startsWith("!")).toBe(true);
-  });
-
-  it("does not treat /sh without space as shell command", () => {
-    expect("/sh".startsWith("/sh ")).toBe(false);
-  });
-
-  it("does not treat :! without content as shell command", () => {
-    // :! alone is still detected as shell command prefix
-    expect(":!".startsWith(":!")).toBe(true);
-  });
-});
-
 describe("Interactive CLI - slash command dispatch", () => {
   it("parseCommand handles help", () => {
     const cmd = parseCommand("help");
@@ -159,13 +116,6 @@ describe("Interactive CLI - slash command dispatch", () => {
   it("parseCommand handles exit", () => {
     const cmd = parseCommand("exit");
     expect(cmd.type).toBe(Command.Quit);
-  });
-
-  it("parseCommand treats sh as unknown (handled by line handler)", () => {
-    const cmd = parseCommand("sh ls");
-    // Shell commands are handled directly by the line handler, not parseCommand
-    expect(cmd.type).toBe(Command.Unknown);
-    expect(cmd.value).toBe("sh ls");
   });
 
   it("parseCommand handles clear", () => {
@@ -253,13 +203,6 @@ describe("Interactive CLI - line handler behavior", () => {
     // The handler would console.log("Goodbye!") and process.exit(0)
   });
 
-  it("shell commands are handled directly", () => {
-    const line = "/sh ls -la";
-    const trimmed = line.trim();
-
-    expect(trimmed.startsWith("/sh ")).toBe(true);
-    // The handler would call handleShellCommand(trimmed, rl)
-  });
 });
 
 describe("Interactive CLI - readline event handling", () => {
@@ -1226,185 +1169,6 @@ describe("Interactive CLI - format helpers", () => {
   });
 });
 
-describe("Interactive CLI - handleShellCommand", () => {
-  let origLog;
-
-  beforeEach(() => {
-    origLog = console.log;
-    console.log = () => {};
-  });
-
-  afterEach(() => {
-    console.log = origLog;
-  });
-
-  it("parses /sh prefix and extracts command", async () => {
-    let promptCalled = false;
-    const mockRl = {
-      prompt: () => {
-        promptCalled = true;
-      },
-    };
-
-    const mockExt = {
-      execute: async (cmd) => ({ content: `output of ${cmd}` }),
-    };
-
-    await handleShellCommand("/sh ls -la", mockRl, async () => mockExt);
-
-    expect(promptCalled).toBe(true);
-  });
-
-  it("parses /shell prefix and extracts command", async () => {
-    let promptCalled = false;
-    const mockRl = {
-      prompt: () => {
-        promptCalled = true;
-      },
-    };
-    const mockExt = {
-      execute: async (cmd) => ({ content: `result: ${cmd}` }),
-    };
-
-    await handleShellCommand("/shell echo hello", mockRl, async () => mockExt);
-
-    expect(promptCalled).toBe(true);
-  });
-
-  it("parses :! prefix and extracts command", async () => {
-    let promptCalled = false;
-    const mockRl = {
-      prompt: () => {
-        promptCalled = true;
-      },
-    };
-    const mockExt = {
-      execute: async (cmd) => ({ content: `done: ${cmd}` }),
-    };
-
-    await handleShellCommand(":!pwd", mockRl, async () => mockExt);
-
-    expect(promptCalled).toBe(true);
-  });
-
-  it("parses ! prefix and extracts command", async () => {
-    let promptCalled = false;
-    const mockRl = {
-      prompt: () => {
-        promptCalled = true;
-      },
-    };
-    const mockExt = {
-      execute: async (cmd) => ({ content: `done: ${cmd}` }),
-    };
-
-    await handleShellCommand("!ls", mockRl, async () => mockExt);
-
-    expect(promptCalled).toBe(true);
-  });
-
-  it("shows usage for empty /sh command", async () => {
-    const logs = [];
-    console.log = (...args) => logs.push(args.join(" "));
-
-    let promptCalled = false;
-    const mockRl = {
-      prompt: () => {
-        promptCalled = true;
-      },
-    };
-
-    const mockExt = { execute: async () => ({}) };
-
-    await handleShellCommand("/sh ", mockRl, async () => mockExt);
-
-    expect(logs.some((l) => l.includes("Usage: /sh <command>"))).toBe(true);
-    expect(promptCalled).toBe(true);
-  });
-
-  it("shows usage for empty :! command", async () => {
-    const logs = [];
-    console.log = (...args) => logs.push(args.join(" "));
-
-    let promptCalled = false;
-    const mockRl = {
-      prompt: () => {
-        promptCalled = true;
-      },
-    };
-
-    const mockExt = { execute: async () => ({}) };
-
-    await handleShellCommand(":!", mockRl, async () => mockExt);
-
-    expect(logs.some((l) => l.includes("Usage: /sh <command>"))).toBe(true);
-    expect(promptCalled).toBe(true);
-  });
-
-  it("shows usage for empty ! command", async () => {
-    const logs = [];
-    console.log = (...args) => logs.push(args.join(" "));
-
-    let promptCalled = false;
-    const mockRl = {
-      prompt: () => {
-        promptCalled = true;
-      },
-    };
-
-    const mockExt = { execute: async () => ({}) };
-
-    await handleShellCommand("!", mockRl, async () => mockExt);
-
-    expect(logs.some((l) => l.includes("Usage: /sh <command>"))).toBe(true);
-    expect(promptCalled).toBe(true);
-  });
-
-  it("displays error from shell command", async () => {
-    const logs = [];
-    console.log = (...args) => logs.push(args.join(" "));
-
-    const mockRl = { prompt: () => {} };
-    const mockExt = {
-      execute: async () => ({ error: "Command not found" }),
-    };
-
-    await handleShellCommand("/sh nonexistent", mockRl, async () => mockExt);
-
-    expect(logs.some((l) => l.includes("Command not found"))).toBe(true);
-  });
-
-  it("displays content from shell command", async () => {
-    const logs = [];
-    console.log = (...args) => logs.push(args.join(" "));
-
-    const mockRl = { prompt: () => {} };
-    const mockExt = {
-      execute: async () => ({ content: "my output" }),
-    };
-
-    await handleShellCommand("/sh echo test", mockRl, async () => mockExt);
-
-    expect(logs.some((l) => l.includes("my output"))).toBe(true);
-  });
-
-  it("calls prompt after successful command", async () => {
-    let promptCalled = false;
-    const mockRl = {
-      prompt: () => {
-        promptCalled = true;
-      },
-    };
-    const mockExt = {
-      execute: async () => ({ content: "done" }),
-    };
-
-    await handleShellCommand("/sh true", mockRl, async () => mockExt);
-
-    expect(promptCalled).toBe(true);
-  });
-});
-
 describe("Interactive CLI - handleSlashCommand", () => {
   let origLog;
 
@@ -1554,38 +1318,6 @@ describe("Interactive CLI - handleSlashCommand", () => {
   });
 });
 
-describe("Interactive CLI - createInlineShellCommand", () => {
-  it("creates a shell command handler with execute method", () => {
-    const handler = createInlineShellCommand();
-    expect(handler).toBeDefined();
-    expect(typeof handler.execute).toBe("function");
-  });
-
-  it("execute returns a promise", () => {
-    const handler = createInlineShellCommand();
-    const result = handler.execute("echo hello");
-    expect(result).toBeInstanceOf(Promise);
-  });
-
-  it("execute resolves with content for successful command", async () => {
-    const handler = createInlineShellCommand();
-    const result = await handler.execute("echo test-output");
-    expect(result).toBeDefined();
-    expect(result.content).toBeDefined();
-    expect(result.content).toContain("test-output");
-  });
-
-  it("execute resolves with error for invalid command", async () => {
-    const handler = createInlineShellCommand();
-    const result = await handler.execute(
-      "nonexistent-command-that-does-not-exist-xyz123",
-    );
-    expect(result).toBeDefined();
-    // Could be content (with exit code) or error depending on shell behavior
-    expect(result.content || result.error).toBeDefined();
-  });
-});
-
 describe("Interactive CLI - runInteractiveSession exports", () => {
   it("runInteractiveSession is exported", async () => {
     const mod =
@@ -1593,22 +1325,10 @@ describe("Interactive CLI - runInteractiveSession exports", () => {
     expect(typeof mod.runInteractiveSession).toBe("function");
   });
 
-  it("handleShellCommand is exported", async () => {
-    const mod =
-      await import("../../src/extensions/ui-interactive-cli/index.js");
-    expect(typeof mod.handleShellCommand).toBe("function");
-  });
-
   it("handleSlashCommand is exported", async () => {
     const mod =
       await import("../../src/extensions/ui-interactive-cli/index.js");
     expect(typeof mod.handleSlashCommand).toBe("function");
-  });
-
-  it("createInlineShellCommand is exported", async () => {
-    const mod =
-      await import("../../src/extensions/ui-interactive-cli/index.js");
-    expect(typeof mod.createInlineShellCommand).toBe("function");
   });
 
   it("create is exported", async () => {
@@ -1621,25 +1341,5 @@ describe("Interactive CLI - runInteractiveSession exports", () => {
     const mod =
       await import("../../src/extensions/ui-interactive-cli/index.js");
     expect(typeof mod.AsyncInteractiveCliInput).toBe("function");
-  });
-});
-
-describe("Interactive CLI - createInlineShellCommand with options", () => {
-  it("creates handler with execute method that returns content", () => {
-    const handler = createInlineShellCommand();
-    expect(handler.execute).toBeDefined();
-    expect(typeof handler.execute).toBe("function");
-  });
-
-  it("execute resolves with content object", async () => {
-    const handler = createInlineShellCommand();
-    const result = await handler.execute("true");
-    expect(result).toHaveProperty("content");
-  });
-
-  it("execute handles commands that produce output", async () => {
-    const handler = createInlineShellCommand();
-    const result = await handler.execute("echo 'hello world'");
-    expect(result.content).toContain("hello world");
   });
 });

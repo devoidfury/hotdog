@@ -267,7 +267,6 @@ Each extension has:
 | `ui-info-cli` | Info + show-prompt CLI subcommands |
 | `ui-one-shot` | One-shot prompt mode (`-c`/`--prompt` flag, `prompt` subcommand) |
 | `ui-interactive-cli` | Interactive CLI session with readline loop |
-| `run-shell-command` | Shell command execution via `/sh`, `!`, and `:!` syntax |
 | `subagents` | Subagent tools for task delegation (manager-only) |
 | `agents-md` | Loads AGENTS.md and contributes Project Context section |
 | `aspects` | Loads aspect files and contributes Guidelines section |

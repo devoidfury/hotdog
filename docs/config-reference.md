@@ -716,14 +716,6 @@ An array of MCP server definitions. Each server can use either HTTP transport (`
 |-------|------|---------|-------------|
 | `enabled` | `boolean` | `true` | Enable/disable the extension. |
 
-### `runShellCommand`
-
-[Run Shell Command](../src/extensions/run-shell-command) — Shell execution via `/sh`, `!`, `:!`.
-
-| Field | Type | Default | Description |
-|-------|------|---------|-------------|
-| `enabled` | `boolean` | `true` | Enable/disable the extension. |
-
 ### `subagents`
 
 [Subagents](../src/extensions/subagents) — Task delegation tools (manager-only).

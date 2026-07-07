@@ -45,9 +45,61 @@ Commands:
   /theme <name> - Set theme (dark, light, monochrome)
   /regenerate   - Regenerate system prompt
   /reasoning none|minimal|low|high|xhigh|max|unset - Set reasoning effort level
-  /sh <command> - Run a shell command and display output
-  :!<command>   - Vim-like alias for shell commands (e.g., :!ls)
 `;
+
+/**
+ * Check if a command name resolves to an executable on the system.
+ * Uses `which` on Unix-like systems.
+ *
+ * @param {string} cmd - The command name to check.
+ * @returns {Promise<boolean>} True if the command is found in PATH.
+ */
+export async function isSystemCommand(cmd) {
+  return new Promise((resolve) => {
+    const proc = spawn("which", [cmd], { stdio: ["pipe", "pipe", "pipe"] });
+    proc.on("close", (code) => resolve(code === 0));
+    proc.on("error", () => resolve(false));
+  });
+}
+
+/**
+ * Execute a shell command and return the output.
+ *
+ * @param {string} command - The shell command to execute.
+ * @returns {Promise<{content?: string, error?: string}>}
+ */
+export async function executeShellCommand(command) {
+  return new Promise((resolve) => {
+    const proc = spawn(command, [], {
+      shell: true,
+      stdio: ["pipe", "pipe", "pipe"],
+    });
+
+    let stdout = "";
+    let stderr = "";
+
+    proc.stdout.on("data", (chunk) => {
+      stdout += chunk.toString();
+    });
+
+    proc.stderr.on("data", (chunk) => {
+      stderr += chunk.toString();
+    });
+
+    proc.on("close", (code) => {
+      const output = [stdout, stderr].filter(Boolean).join("\n");
+      resolve({
+        content: output
+          ? `${output}\n\n[exited with code ${code}]`
+          : `[exited with code ${code}]`,
+      });
+    });
+
+    proc.on("error", (err) => {
+      resolve({ error: `Error: ${err.message}` });
+    });
+  });
+}
 
 /**
  * AsyncInteractiveCliInput — collects answers using the CLI's readline interface.
@@ -184,7 +236,6 @@ export class AsyncInteractiveCliInput {
  * @param {Function} [options.createReadline] - Factory for readline interface (mock in tests)
  * @param {Function} [options.onClose] - Custom close handler (mock in tests)
  * @param {Function} [options.onSIGINT] - Custom SIGINT handler (mock in tests)
- * @param {Function} [options.getShellCommandExt] - Factory for shell command extension
  * @param {Function} [options.setupInput] - Custom input setup (mock in tests)
  * @returns {Promise<void>}
  */
@@ -328,10 +379,6 @@ export async function runInteractiveSession(cli, core, options = {}) {
     rl.on("line", handler);
   };
 
-  // Lazily load shell command extension when needed
-  const getShellCommandExt =
-    options.getShellCommandExt || createInlineShellCommand;
-
   // Create the input interface for question tool
   // We need to set it up after defining lineHandler
   const setupInput =
@@ -352,6 +399,9 @@ export async function runInteractiveSession(cli, core, options = {}) {
     }
   });
 
+  // Resolve shell mode flag: CLI flag > config > default
+  const shellMode = config.uiInteractiveCli?.shellMode ?? false;
+
   // Define and register the line handler
   lineHandler = async (line) => {
     const trimmed = line.trim();
@@ -361,22 +411,29 @@ export async function runInteractiveSession(cli, core, options = {}) {
       return;
     }
 
-    // Handle shell commands directly (UI-specific, doesn't go through agent)
-    if (
-      trimmed.startsWith("/sh ") ||
-      trimmed.startsWith("/shell ") ||
-      trimmed.startsWith(":!") ||
-      trimmed.startsWith("!")
-    ) {
-      await handleShellCommand(trimmed, rl, getShellCommandExt);
-      return;
-    }
-
     // Handle slash commands — delegate to bus for execution
     if (trimmed.startsWith("/")) {
       const cmdText = trimmed.slice(1).trim().toLowerCase();
       handleSlashCommand(cmdText, bus, rl);
       return;
+    }
+
+    // Shell mode gate: check if the first word is a system command.
+    // If it is, execute it directly and skip the user input message.
+    if (shellMode) {
+      const firstWord = trimmed.split(/\s+/)[0];
+      if (firstWord && await isSystemCommand(firstWord)) {
+        console.log(`\n$ ${trimmed}\n`);
+        const result = await executeShellCommand(trimmed);
+        if (result.content) {
+          console.log(result.content);
+        } else if (result.error) {
+          console.log(`${result.error}\n`);
+        }
+        console.log("");
+        rl.prompt();
+        return;
+      }
     }
 
     // Regular text input — enqueue for agent processing
@@ -424,40 +481,6 @@ export async function runInteractiveSession(cli, core, options = {}) {
 }
 
 /**
- * Handle shell commands directly (UI-specific, terminal-bound).
- *
- * @param {string} line - The raw line input (e.g., "/sh ls -la")
- * @param {Object} rl - The readline interface
- * @param {Function} getShellCommandExt - Function to get shell command extension
- * @returns {Promise<void>}
- */
-export async function handleShellCommand(line, rl, getShellCommandExt) {
-  let cmd;
-  if (line.startsWith("/sh ") || line.startsWith("sh ")) {
-    cmd = line.replace(/^\/?sh\s+/, "");
-  } else if (line.startsWith(":!") || line.startsWith("!")) {
-    cmd = line.replace(/^:?!/, "");
-  }
-
-  if (!cmd) {
-    console.log("Usage: /sh <command>\n");
-    rl.prompt();
-    return;
-  }
-
-  console.log(`\n$ ${cmd}\n`);
-  const ext = await getShellCommandExt();
-  const result = await ext.execute(cmd);
-  if (result.content) {
-    console.log(result.content);
-  } else if (result.error) {
-    console.log(`${result.error}\n`);
-  }
-  console.log("");
-  rl.prompt();
-}
-
-/**
  * Handle a slash command by delegating to the bus.
  *
  * @param {string} cmdText - The command text (without leading /)
@@ -479,56 +502,10 @@ export function handleSlashCommand(cmdText, bus, rl) {
       rl.close();
       process.exit(0);
       return;
-
-    case Command.Shell:
-      console.log("Shell commands are handled directly.\n");
-      rl.prompt();
-      return;
   }
 
   // All other commands go through the bus → agent → COMMAND_RESULT event
   bus.executeCommand(cmdText).then(() => rl.prompt());
-}
-
-/**
- * Create an inline shell command handler as fallback.
- * @returns {Object}
- */
-export function createInlineShellCommand() {
-  return {
-    execute(command) {
-      return new Promise((resolve) => {
-        const proc = spawn(command, [], {
-          shell: true,
-          stdio: ["pipe", "pipe", "pipe"],
-        });
-
-        let stdout = "";
-        let stderr = "";
-
-        proc.stdout.on("data", (chunk) => {
-          stdout += chunk.toString();
-        });
-
-        proc.stderr.on("data", (chunk) => {
-          stderr += chunk.toString();
-        });
-
-        proc.on("close", (code) => {
-          const output = [stdout, stderr].filter(Boolean).join("\n");
-          resolve({
-            content: output
-              ? `${output}\n\n[exited with code ${code}]`
-              : `[exited with code ${code}]`,
-          });
-        });
-
-        proc.on("error", (err) => {
-          resolve({ error: `Error: ${err.message}` });
-        });
-      });
-    },
-  };
 }
 
 /**
@@ -540,24 +517,8 @@ export function createInlineShellCommand() {
  * @returns {Object} Extension instance.
  */
 export function create(core) {
-  // Lazily load shell command extension when needed
-  let shellCommandExt = null;
-
   // Store reference for tool context
   let currentInput = null;
-
-  const getShellCommandExt = async () => {
-    if (!shellCommandExt) {
-      // Try to get from core extensions if available
-      if (core.extensions?.has("run-shell-command")) {
-        shellCommandExt = core.extensions.get("run-shell-command");
-      } else {
-        // Fallback: create inline shell command handler
-        shellCommandExt = createInlineShellCommand();
-      }
-    }
-    return shellCommandExt;
-  };
 
   return {
     hooks: core.hooks
@@ -567,7 +528,7 @@ export function create(core) {
             registry.register("cli", {
               description: "Interactive CLI session",
               handler: async (cli, core) => {
-                await runInteractiveSession(cli, core, { getShellCommandExt });
+                await runInteractiveSession(cli, core);
               },
             });
           },

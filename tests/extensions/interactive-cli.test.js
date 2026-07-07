@@ -180,38 +180,6 @@ describe("Interactive CLI - parseCommand for slash commands", () => {
   });
 });
 
-describe("Interactive CLI - shell command detection", () => {
-  it("detects /sh command", () => {
-    const line = "/sh ls -la";
-    expect(line.startsWith("/sh ")).toBe(true);
-  });
-
-  it("detects /shell command", () => {
-    const line = "/shell ls -la";
-    expect(line.startsWith("/shell ")).toBe(true);
-  });
-
-  it("detects :! command", () => {
-    const line = ":!ls -la";
-    expect(line.startsWith(":!")).toBe(true);
-  });
-
-  it("detects ! command", () => {
-    const line = "!ls -la";
-    expect(line.startsWith("!")).toBe(true);
-  });
-
-  it("does not detect regular text as shell command", () => {
-    const line = "Hello world";
-    expect(
-      line.startsWith("/sh ") ||
-        line.startsWith("/shell ") ||
-        line.startsWith(":!") ||
-        line.startsWith("!")
-    ).toBe(false);
-  });
-});
-
 describe("Interactive CLI - AsyncInteractiveCliInput", () => {
   let lineHandler;
   let origStdout;

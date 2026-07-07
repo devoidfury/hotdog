@@ -39,8 +39,6 @@ describe('parseCommand', () => {
     expect(parseCommand('models')).toEqual({ type: Command.Unknown, value: 'models' });
     expect(parseCommand('model qwen3.5')).toEqual({ type: Command.Unknown, value: 'model qwen3.5' });
     expect(parseCommand('compact')).toEqual({ type: Command.Unknown, value: 'compact' });
-    expect(parseCommand('sh ls')).toEqual({ type: Command.Unknown, value: 'sh ls' });
-    expect(parseCommand('!ls')).toEqual({ type: Command.Unknown, value: '!ls' });
   });
 
   it('parses unknown commands and empty string', () => {

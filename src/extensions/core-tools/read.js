@@ -12,7 +12,7 @@ import {
   parseToolInput,
   defaultCallDisplay,
 } from "../../core/extensions/tool-utils.js";
-import { validateCwdBoundary, resolvePath } from "../../utils/file-utils.js";
+import { validateCwdBoundary, resolvePath, correctCommonPathMistakes } from "../../utils/file-utils.js";
 import { DEFAULT_MAX_IMAGE_SIZE } from "./defaults.js";
 
 /**
@@ -148,7 +148,7 @@ function parseArgs(input, defaultLimit) {
     return null; // Invalid JSON — error
   }
 
-  const filePath = json.path;
+  let filePath = json.path;
   if (!filePath || typeof filePath !== "string") {
     return null;
   }
@@ -159,6 +159,8 @@ function parseArgs(input, defaultLimit) {
       : defaultLimit;
   const offset =
     typeof json.offset === "number" && json.offset >= 0 ? json.offset : 0;
+
+  [filePath] = correctCommonPathMistakes(filePath);
 
   return { path: filePath, limit, offset };
 }

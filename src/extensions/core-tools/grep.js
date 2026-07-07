@@ -14,6 +14,7 @@ import {
   parseToolInput,
   defaultCallDisplay,
 } from "../../core/extensions/tool-utils.js";
+import { correctCommonPathMistakes } from "../../utils/file-utils.js";
 
 const execFileAsync = util.promisify(execFile);
 
@@ -278,12 +279,12 @@ function parseArgs(input, defaultMaxResults) {
   const json = parseToolInput(input);
   if (!json) return null;
 
-  const pattern = json.pattern;
+  let pattern = json.pattern;
   if (!pattern || typeof pattern !== "string") {
     return null;
   }
 
-  const path = typeof json.path === "string" ? json.path : null;
+  let path = typeof json.path === "string" ? json.path : null;
   const maxResults =
     typeof json.max_results === "number" && json.max_results >= 1
       ? json.max_results
@@ -291,6 +292,8 @@ function parseArgs(input, defaultMaxResults) {
   const context =
     typeof json.context === "number" && json.context >= 0 ? json.context : 0;
   const type = typeof json.type === "string" ? json.type : null;
+
+  [pattern, path] = correctCommonPathMistakes(pattern, path);
 
   return { pattern, path, maxResults, context, type };
 }

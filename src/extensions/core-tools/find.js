@@ -6,6 +6,7 @@ import { execFile } from "node:child_process";
 import util from "node:util";
 import extensionData from "./extension.json";
 import { toolDef, param, ToolResult, truncateOutput, parseToolInput, defaultCallDisplay } from "../../core/extensions/tool-utils.js";
+import { correctCommonPathMistakes } from "../../utils/file-utils";
 
 const execFileAsync = util.promisify(execFile);
 
@@ -24,18 +25,14 @@ function parseArgs(input, defaultMaxResults) {
   if (!json) return null;
 
   // pattern is required
-  const pattern = json.pattern;
+  let pattern = json.pattern;
   if (!pattern || typeof pattern !== "string") return null;
-
-  // file_type: pass through as-is (buildFdArgs handles aliases)
+  
+  // optional params
   const file_type = typeof json.file_type === "string" ? json.file_type : null;
-
-  // max_results: default to constant
   const max_results = typeof json.max_results === "number" && json.max_results >= 0 ? json.max_results : defaultMaxResults;
-
-  // path: optional
-  const path = typeof json.path === "string" ? json.path : null;
-
+  let path = typeof json.path === "string" ? json.path : null;
+  [pattern, path] = correctCommonPathMistakes(pattern, path);
   return { pattern, file_type, max_results, path };
 }
 

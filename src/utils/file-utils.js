@@ -1,5 +1,11 @@
 import fsPromises from "node:fs/promises";
-import { join, dirname, isAbsolute, resolve as resolveAbs, sep } from "node:path";
+import {
+  join,
+  dirname,
+  isAbsolute,
+  resolve as resolveAbs,
+  sep,
+} from "node:path";
 import { cwd } from "node:process";
 import { YAML } from "bun";
 
@@ -138,6 +144,27 @@ export function validateCwdBoundary(filePath, cwdBoundary) {
     return `Error: path ${filePath} is outside cwd boundary ${cwdBoundary}`;
   }
   return null;
+}
+
+/**
+ * String transform on paths to fix common llm typos
+ * @param {string} strPath
+ * @param {string} dirPath
+ * @returns {[string, string]}
+ */
+export function correctCommonPathMistakes(strPath, dirPath) {
+  if (strPath === "/.") strPath = "./";
+  if (dirPath === "/.") dirPath = "./";
+
+  if (strPath === "/**/*" || strPath === "/*") {
+    strPath = strPath.substring(1);
+  }
+
+  if (strPath === "**/*" && (!dirPath || dirPath === "/")) {
+    dirPath = "./";
+  }
+
+  return [strPath, dirPath];
 }
 
 /**

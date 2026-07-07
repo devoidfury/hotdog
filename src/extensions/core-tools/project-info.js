@@ -6,6 +6,7 @@ import { execFile } from "node:child_process";
 import util from "node:util";
 import { toolDef, param, ToolResult, toolResult, defaultCallDisplay } from "../../core/extensions/tool-utils.js";
 import { DEFAULT_GREP_MAX_RESULTS } from "./defaults.js";
+import { correctCommonPathMistakes } from "../../utils/file-utils.js";
 
 const execFileAsync = util.promisify(execFile);
 
@@ -50,9 +51,11 @@ export class ProjectInfoTool {
 
   async execute(input, ctx) {
     const args = typeof input === "string" ? JSON.parse(input) : input;
-    const cwd = args.path || ".";
+    let cwd = args.path || ".";
     const maxDepth = args.max_depth || DEFAULT_DU_DEPTH;
     const maxFiles = args.max_files || DEFAULT_GREP_MAX_RESULTS;
+
+    [cwd] = correctCommonPathMistakes(cwd);
 
     // Resolve working directory
     let workdir;

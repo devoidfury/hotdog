@@ -2,9 +2,12 @@
 
 import { describe, it, expect } from "bun:test";
 import path from "node:path";
+import fs from "node:fs";
+import os from "node:os";
 import {
   normalizeConfigKeys,
   buildAgentConfig,
+  buildConfig,
 } from "../../src/core/config/index.js";
 
 describe("normalizeConfigKeys", () => {
@@ -296,5 +299,39 @@ describe("buildAgentConfig", () => {
     });
 
     expect(result.hideThinking).toBe(true);
+  });
+
+  it("buildConfig resolves config directory", async () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'hotdog-config-test-'));
+    try {
+      // Create minimal config files
+      fs.writeFileSync(path.join(tmpDir, 'defaults.json'), JSON.stringify({ providers: [], defaultModel: "test" }));
+      fs.mkdirSync(path.join(tmpDir, 'profiles'));
+      fs.writeFileSync(path.join(tmpDir, 'profiles', 'test.profile.md'), `---\nmodel: test\n---\nTest profile`);
+      const result = await buildConfig({ configDir: tmpDir });
+      expect(result.resolved).toBeDefined();
+      expect(result.resolved.model).toBe('test');
+    } finally {
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
+  });
+
+  it("buildConfig handles missing config dir gracefully", async () => {
+    const result = await buildConfig({ configDir: '/nonexistent/path' });
+    expect(result.resolved).toBeDefined();
+    expect(result.modelRegistry).toBeDefined();
+  });
+
+  it("buildConfig merges profile from file", async () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'hotdog-config-test-'));
+    try {
+      fs.writeFileSync(path.join(tmpDir, 'defaults.json'), JSON.stringify({ providers: [], defaultModel: "test" }));
+      fs.mkdirSync(path.join(tmpDir, 'profiles'));
+      fs.writeFileSync(path.join(tmpDir, 'profiles', 'fixer.profile.md'), `---\nrole: fixer\nwhitelistTools: [bash, read]\nmanager: true\n---\nFixer profile`);
+      const result = await buildConfig({ configDir: tmpDir, profile: 'fixer' });
+      expect(result.resolved.profileName).toBe('fixer');
+    } finally {
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
   });
 });

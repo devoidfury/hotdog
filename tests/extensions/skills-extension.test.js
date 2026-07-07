@@ -3,6 +3,7 @@ import { create } from '../../src/extensions/skills/index.js';
 import { HOOKS } from '../../src/core/hooks.js';
 import { ToolContext } from '../../src/core/extensions/tool-context.js';
 import { createConfigRegistry } from '../../src/core/extensions/config-registry.js';
+import { patternMatches, parseSkillFromMd, SkillsLoader } from '../../src/extensions/skills/loader.js';
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
@@ -259,5 +260,93 @@ describe('Skills Extension', () => {
 
     expect(ext.getActiveSkills().length).toBe(1);
     expect(ext.getActiveSkills()[0].name).toBe('greet');
+  });
+});
+
+describe("SkillLoader — patternMatches", () => {
+  it("matches exact pattern", () => {
+    expect(patternMatches("bash", "bash")).toBe(true);
+  });
+
+  it("matches wildcard pattern", () => {
+    expect(patternMatches("read*", "read_file")).toBe(true);
+    expect(patternMatches("*tool", "bash_tool")).toBe(true);
+  });
+
+  it("returns false for non-matching pattern", () => {
+    expect(patternMatches("write", "read")).toBe(false);
+    expect(patternMatches("read*", "write")).toBe(false);
+  });
+
+  it("handles pattern without wildcards", () => {
+    expect(patternMatches("test", "test")).toBe(true);
+    expect(patternMatches("test", "other")).toBe(false);
+  });
+});
+
+describe("SkillLoader — parseSkillFromMd", () => {
+  it("throws on missing frontmatter", () => {
+    expect(() => parseSkillFromMd("no frontmatter", "test", "")).toThrow();
+  });
+
+  it("throws on missing description", () => {
+    const content = `---\nname: test\n---\nBody`;
+    expect(() => parseSkillFromMd(content, "test", "")).toThrow();
+  });
+
+  it("parses a valid skill with description", () => {
+    const content = `---\nname: test\ndescription: A test skill\nallowed-tools: bash, read\n---\nBody content`;
+    const skill = parseSkillFromMd(content, "test", "/skills/test");
+    expect(skill.name).toBe("test");
+    expect(skill.description).toBe("A test skill");
+    expect(skill.allowedTools).toContain("bash");
+    expect(skill.content).toContain("Body content");
+  });
+
+  it("uses directory name when name missing", () => {
+    const content = `---\ndescription: A test\n---\nBody`;
+    const skill = parseSkillFromMd(content, "dir-name", "");
+    expect(skill.name).toBe("dir-name");
+  });
+
+  it("parses include-tools and tool-dependencies", () => {
+    const content = `---\nname: test\ndescription: Test\ninclude-tools: tool_a, tool_b\ntool-dependencies: dep*\n---\nBody`;
+    const skill = parseSkillFromMd(content, "test", "");
+    expect(skill.includeTools).toContain("tool_a");
+    expect(skill.toolDependencies).toContain("dep*");
+  });
+
+  it("warns on long description", () => {
+    const longDesc = "x".repeat(1025);
+    const content = `---\nname: test\ndescription: ${longDesc}\n---\nBody`;
+    // Should not throw, just warn
+    const skill = parseSkillFromMd(content, "test", "");
+    expect(skill.description.length).toBeGreaterThan(1024);
+  });
+});
+
+describe("SkillsLoader — setAvailableTools", () => {
+  it("marks skills without dependencies as visible", () => {
+    const loader = new SkillsLoader("/tmp/skills", console);
+    const skill = { name: "test", description: "Test", toolDependencies: [], visible: false };
+    loader.skills.set("test", skill);
+    loader.setAvailableTools(["bash", "read"]);
+    expect(skill.visible).toBe(true);
+  });
+
+  it("marks skills with matching dependencies as visible", () => {
+    const loader = new SkillsLoader("/tmp/skills", console);
+    const skill = { name: "test", description: "Test", toolDependencies: ["bash*"], visible: false };
+    loader.skills.set("test", skill);
+    loader.setAvailableTools(["bash_tool", "read"]);
+    expect(skill.visible).toBe(true);
+  });
+
+  it("marks skills with non-matching dependencies as hidden", () => {
+    const loader = new SkillsLoader("/tmp/skills", console);
+    const skill = { name: "test", description: "Test", toolDependencies: ["write*"], visible: false };
+    loader.skills.set("test", skill);
+    loader.setAvailableTools(["bash", "read"]);
+    expect(skill.visible).toBe(false);
   });
 });

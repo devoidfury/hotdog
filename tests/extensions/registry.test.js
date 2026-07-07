@@ -448,6 +448,74 @@ describe("ToolResult", () => {
     const err = ToolResult.err("boom");
     expect(toolResult(err)).toBe("Error: boom");
   });
+
+  it("toolResult with toolName wraps ToolResult in XML", () => {
+    const r = ToolResult.ok("hello");
+    const result = toolResult(r, "bash");
+    expect(result).toContain('<tool name="bash"');
+    expect(result).toContain('status="success"');
+    expect(result).toContain("<output>hello</output>");
+  });
+
+  it("toolResult with toolName wraps string in XML", () => {
+    const result = toolResult("plain text", "read");
+    expect(result).toContain('<tool name="read"');
+    expect(result).toContain("<output>plain text</output>");
+  });
+
+  it("toolResult with toolName wraps object in XML", () => {
+    const result = toolResult({ key: "val" }, "fetch");
+    expect(result).toContain('<tool name="fetch"');
+    expect(result).toContain("<output>");
+    expect(result).toContain('{"key":"val"}');
+  });
+
+  it("toolResult with toolName wraps number in XML", () => {
+    const result = toolResult(42, "calc");
+    expect(result).toContain('<tool name="calc"');
+    expect(result).toContain("<output>42</output>");
+  });
+
+  it("ToolResult.from() creates a result with defaults", () => {
+    const r = ToolResult.from({ output: "hello", error: null });
+    expect(r.success).toBe(true);
+    expect(r.output).toBe("hello");
+    expect(r.error).toBeNull();
+  });
+
+  it("ToolResult.from() auto-fails when error provided", () => {
+    const r = ToolResult.from({ output: "", error: "fail" });
+    expect(r.success).toBe(false);
+    expect(r.error).toBe("fail");
+  });
+
+  it("ToolResult.from() overrides success when error provided (even if success=true)", () => {
+    const r = ToolResult.from({ output: "partial", error: "warning", success: true });
+    expect(r.success).toBe(false); // error overrides success
+    expect(r.output).toBe("partial");
+    expect(r.error).toBe("warning");
+  });
+
+  it("ToolResult.from() preserves success=false with error", () => {
+    const r = ToolResult.from({ output: "partial", error: "warning", success: false });
+    expect(r.success).toBe(false);
+    expect(r.output).toBe("partial");
+    expect(r.error).toBe("warning");
+  });
+
+  it("ToolResult.from() accepts metadata and outputTag", () => {
+    const metadata = new Map();
+    metadata.set("key", "value");
+    const r = ToolResult.from({ output: "out", error: null, metadata, outputTag: "result" });
+    expect(r.metadata).toBe(metadata);
+    expect(r.outputTag).toBe("result");
+  });
+
+  it("ToolResult.from() accepts images", () => {
+    const images = [{ type: "image_url", mimeType: "image/png", data: "base64..." }];
+    const r = ToolResult.from({ output: "img", images });
+    expect(r.images).toBe(images);
+  });
 });
 
 describe("writeFileWithParents", () => {

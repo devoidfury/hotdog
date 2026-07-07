@@ -4,6 +4,7 @@ import { Agent, HOOKS } from '../../src/core/index.js';
 import { createHooks } from '../../src/core/hooks.js';
 import { createToolRegistry } from '../../src/core/extensions/tool-registry.js';
 import { Message } from '../../src/core/context/message.js';
+import { ToolResult } from '../../src/core/extensions/tool-utils.js';
 import { describe, it, expect, beforeEach, afterEach } from 'bun:test';
 import {
   MockLLMClient,
@@ -892,6 +893,411 @@ describe('Agent — end-to-end loop', () => {
       newAgent._reasoningEffort = 'high';
       newAgent.deserialize(serialized);
       expect(newAgent._reasoningEffort).toBeUndefined();
+    });
+  });
+
+  describe('setSink', () => {
+    it('should replace the output sink', () => {
+      const { agent } = createFixture({});
+      const sink1 = { emit: () => {} };
+      const sink2 = { emit: () => {} };
+      agent.setSink(sink1);
+      expect(agent._sink).toBe(sink1);
+      agent.setSink(sink2);
+      expect(agent._sink).toBe(sink2);
+    });
+
+    it('should accept null to detach sink', () => {
+      const { agent } = createFixture({});
+      agent.setSink(null);
+      expect(agent._sink).toBeNull();
+    });
+  });
+
+  describe('model setter with sink', () => {
+    it('should emit session_state when sink is attached', () => {
+      const events = [];
+      const sink = { emit: (e) => events.push(e) };
+      const { agent } = createFixture({ sink, model: 'old-model' });
+      agent.model = 'new-model';
+      expect(events.some(e => e.type === 14 && e.key === 'model' && e.value === 'new-model')).toBe(true);
+    });
+
+    it('should not emit when no sink', () => {
+      const { agent } = createFixture({ model: 'old-model' });
+      agent.model = 'new-model';
+      expect(agent.model).toBe('new-model');
+    });
+  });
+
+  describe('isRestoring', () => {
+    it('should notify hook on change', () => {
+      const hooks = createHooks();
+      const hookCalls = [];
+      hooks.on('session:restoreActive', (data) => hookCalls.push(data));
+      const { agent } = createFixture({ hooks });
+      expect(agent.isRestoring).toBe(false);
+      agent.isRestoring = true;
+      expect(agent.isRestoring).toBe(true);
+      expect(hookCalls.length).toBeGreaterThan(0);
+      expect(hookCalls[0].isRestoring).toBe(true);
+    });
+
+    it('should not notify hook when value unchanged', () => {
+      const hooks = createHooks();
+      const hookCalls = [];
+      hooks.on('session:restoreActive', (data) => hookCalls.push(data));
+      const { agent } = createFixture({ hooks });
+      agent.isRestoring = false;
+      expect(hookCalls.length).toBe(0);
+    });
+  });
+
+  describe('cancel with abortController', () => {
+    it('should abort the run abort controller', () => {
+      const { agent } = createFixture({});
+      agent._runAbortController = new AbortController();
+      expect(agent._runAbortController.signal.aborted).toBe(false);
+      agent.cancel();
+      expect(agent.cancelled).toBe(true);
+      expect(agent._runAbortController.signal.aborted).toBe(true);
+    });
+
+    it('should handle missing abort controller', () => {
+      const { agent } = createFixture({});
+      agent._runAbortController = null;
+      expect(() => agent.cancel()).not.toThrow();
+      expect(agent.cancelled).toBe(true);
+    });
+  });
+
+  describe('_executeTools error handling', () => {
+    it('should catch tool execution errors and return fallback result', async () => {
+      const tool = failingTool('bad-tool', 'oops');
+      const mockLLM = new MockLLMClient({
+        responseSequences: [
+          buildStreamResponse({
+            content: 'Using tool...',
+            toolCalls: [{ index: 0, name: 'bad-tool', arguments: '{}', id: 'call_1' }],
+            usage: { prompt_tokens: 10, completion_tokens: 20, total_tokens: 30 },
+          }),
+        ],
+      });
+      const { agent, toolRegistry } = createFixture({ mockLLM });
+      toolRegistry.register('bad-tool', tool);
+      const result = await agent.run('do something');
+      expect(typeof result).toBe('string');
+    });
+
+    it('should return outcome "return" for wait tool', async () => {
+      const waitTool = simpleTool('wait', 'waiting');
+      const mockLLM = new MockLLMClient({
+        responseSequences: [
+          buildStreamResponse({
+            content: 'Waiting...',
+            toolCalls: [{ index: 0, name: 'wait', arguments: '{}', id: 'call_wait' }],
+            usage: { prompt_tokens: 10, completion_tokens: 20, total_tokens: 30 },
+          }),
+        ],
+      });
+      const { agent, toolRegistry } = createFixture({ mockLLM });
+      toolRegistry.register('wait', waitTool);
+      const result = await agent.run('wait');
+      expect(typeof result).toBe('string');
+    });
+  });
+
+  describe('_executeSingleToolCall empty tool name', () => {
+    it('should reject tool call with empty name', async () => {
+      const mockLLM = new MockLLMClient({
+        responseSequences: [
+          buildStreamResponse({
+            content: '',
+            toolCalls: [{ index: 0, name: '', arguments: '{}', id: 'call_1' }],
+            usage: { prompt_tokens: 10, completion_tokens: 20, total_tokens: 30 },
+          }),
+          buildStreamResponse({
+            content: 'Error handled',
+            usage: { prompt_tokens: 5, completion_tokens: 5, total_tokens: 10 },
+          }),
+        ],
+      });
+      const { agent } = createFixture({ mockLLM });
+      const result = await agent.run('test');
+      expect(result).toBe('Error handled');
+      const msgs = agent.log.getAll();
+      expect(msgs.some(m => m.role === 'tool' && m.content.includes('missing a valid name'))).toBe(true);
+    });
+
+    it('should reject tool call with whitespace name', async () => {
+      const mockLLM = new MockLLMClient({
+        responseSequences: [
+          buildStreamResponse({
+            content: '',
+            toolCalls: [{ index: 0, name: '  ', arguments: '{}', id: 'call_1' }],
+            usage: { prompt_tokens: 10, completion_tokens: 20, total_tokens: 30 },
+          }),
+          buildStreamResponse({
+            content: 'Error handled',
+            usage: { prompt_tokens: 5, completion_tokens: 5, total_tokens: 10 },
+          }),
+        ],
+      });
+      const { agent } = createFixture({ mockLLM });
+      const result = await agent.run('test');
+      expect(result).toBe('Error handled');
+      const msgs = agent.log.getAll();
+      expect(msgs.some(m => m.role === 'tool' && m.content.includes('missing a valid name'))).toBe(true);
+    });
+
+    it('should reject tool call with null name', async () => {
+      const mockLLM = new MockLLMClient({
+        responseSequences: [
+          buildStreamResponse({
+            content: '',
+            toolCalls: [{ index: 0, name: null, arguments: '{}', id: 'call_1' }],
+            usage: { prompt_tokens: 10, completion_tokens: 20, total_tokens: 30 },
+          }),
+          buildStreamResponse({
+            content: 'Error handled',
+            usage: { prompt_tokens: 5, completion_tokens: 5, total_tokens: 10 },
+          }),
+        ],
+      });
+      const { agent } = createFixture({ mockLLM });
+      const result = await agent.run('test');
+      expect(result).toBe('Error handled');
+      const msgs = agent.log.getAll();
+      expect(msgs.some(m => m.role === 'tool' && m.content.includes('missing a valid name'))).toBe(true);
+    });
+  });
+
+  describe('_formatToolResult', () => {
+    it('should handle ToolResult with toApiContent', () => {
+      const { agent } = createFixture({});
+      const tr = ToolResult.ok('hello');
+      const formatted = agent._formatToolResult(tr, 'bash', true);
+      expect(formatted).toContain('<tool name="bash"');
+      expect(formatted).toContain('status="success"');
+    });
+
+    it('should format string result as XML', () => {
+      const { agent } = createFixture({});
+      const formatted = agent._formatToolResult('hello', 'bash', true);
+      expect(formatted).toContain('<tool name="bash"');
+      expect(formatted).toContain('<output>hello</output>');
+    });
+
+    it('should format object result as XML', () => {
+      const { agent } = createFixture({});
+      const formatted = agent._formatToolResult({ key: 'val' }, 'bash', true);
+      expect(formatted).toContain('<tool name="bash"');
+      expect(formatted).toContain('key');
+      expect(formatted).toContain('val');
+    });
+
+    it('should format number result as XML', () => {
+      const { agent } = createFixture({});
+      const formatted = agent._formatToolResult(42, 'calc', true);
+      expect(formatted).toContain('<tool name="calc"');
+      expect(formatted).toContain('<output>42</output>');
+    });
+
+    it('should format boolean result as XML', () => {
+      const { agent } = createFixture({});
+      const formatted = agent._formatToolResult(true, 'check', true);
+      expect(formatted).toContain('<tool name="check"');
+      expect(formatted).toContain('<output>true</output>');
+    });
+
+    it('should use error status for failed results', () => {
+      const { agent } = createFixture({});
+      const formatted = agent._formatToolResult('error', 'bash', false);
+      expect(formatted).toContain('status="error"');
+    });
+  });
+
+  describe('executeCommand', () => {
+    it('should dispatch custom commands', async () => {
+      const { agent } = createFixture({});
+      let called = false;
+      const cmd = { type: 'custom', value: 'test', _customCommand: true, _handler: async () => { called = true; return { content: 'handled' }; } };
+      const result = await agent.executeCommand(cmd);
+      expect(called).toBe(true);
+      expect(result.content).toBe('handled');
+    });
+
+    it('should fall through to hooks when custom handler returns null', async () => {
+      const { agent, hooks } = createFixture({});
+      hooks.on('command:dispatch', (data) => {
+        if (data.command.type === 'fallback') return { content: 'hook handled' };
+      });
+      const cmd = { type: 'fallback', value: 'test', _customCommand: true, _handler: async () => null };
+      const result = await agent.executeCommand(cmd);
+      expect(result.content).toBe('hook handled');
+    });
+
+    it('should fall through to command registry', async () => {
+      const { agent } = createFixture({});
+      const registry = agent.getCommandRegistry();
+      registry.register('test-cmd', { handler: async () => ({ content: 'registered' }) });
+      const result = await agent.executeCommand({ type: 'test-cmd', value: '' });
+      expect(result.content).toBe('registered');
+    });
+
+    it('should return error for unknown command', async () => {
+      const { agent } = createFixture({});
+      const result = await agent.executeCommand({ type: 'nonexistent', value: '' });
+      expect(result.error).toContain('Unknown command');
+    });
+  });
+
+  describe('_resolveModelConfig', () => {
+    it('should override reasoning effort at runtime', () => {
+      const mr = { 'test-model': { name: 'test-model', temperature: 0.5, maxTokens: 100 } };
+      const { agent } = createFixture({ modelRegistry: mr });
+      agent._reasoningEffort = 'high';
+      const config = agent._resolveModelConfig();
+      expect(config.reasoningEffort).toBe('high');
+    });
+
+    it('should fall back to model registry', () => {
+      const mr = { 'test-model': { name: 'test-model', temperature: 0.5, maxTokens: 100, reasoningEffort: 'low' } };
+      const { agent } = createFixture({ modelRegistry: mr });
+      const config = agent._resolveModelConfig();
+      expect(config.reasoningEffort).toBe('low');
+    });
+
+    it('should return undefined when not configured', () => {
+      const mr = { 'test-model': { name: 'test-model', temperature: 0.5, maxTokens: 100 } };
+      const { agent } = createFixture({ modelRegistry: mr });
+      const config = agent._resolveModelConfig();
+      expect(config.reasoningEffort).toBeUndefined();
+    });
+  });
+
+  describe('getToolNames', () => {
+    it('should return empty list when no tools', () => {
+      const { agent } = createFixture({});
+      expect(agent.getToolNames()).toEqual([]);
+    });
+
+    it('should return registered tool names', () => {
+      const { agent, toolRegistry } = createFixture({});
+      toolRegistry.register('tool-a', simpleTool('tool-a', 'a'));
+      toolRegistry.register('tool-b', simpleTool('tool-b', 'b'));
+      const names = agent.getToolNames();
+      expect(names).toContain('tool-a');
+      expect(names).toContain('tool-b');
+    });
+  });
+
+  describe('_buildToolContext', () => {
+    it('should include agent and config info', () => {
+      const { agent } = createFixture({ config: { cwdBoundary: '/b', workspaceRoot: '/r' } });
+      const ctx = agent._buildToolContext('test');
+      expect(ctx.get('agent')).toBe(agent);
+      expect(ctx.get('isSessionRestoring')).toBe(false);
+      expect(ctx.get('cwdBoundary')).toBe('/b');
+      expect(ctx.get('workspaceRoot')).toBe('/r');
+    });
+
+    it('should handle missing config', () => {
+      const { agent } = createFixture({ config: null });
+      const ctx = agent._buildToolContext('test');
+      expect(ctx.get('agent')).toBe(agent);
+      expect(ctx.get('cwdBoundary')).toBeUndefined();
+      expect(ctx.get('workspaceRoot')).toBeUndefined();
+    });
+  });
+
+  describe('_notifyCompletion', () => {
+    it('should call onTaskComplete on sink', () => {
+      let called = false;
+      const sink = { onTaskComplete: (r) => { called = true; } };
+      const { agent } = createFixture({ sink });
+      agent._notifyCompletion('done');
+      expect(called).toBe(true);
+    });
+
+    it('should handle missing sink', () => {
+      const { agent } = createFixture({ sink: null });
+      expect(() => agent._notifyCompletion('done')).not.toThrow();
+    });
+
+    it('should handle sink without onTaskComplete', () => {
+      const { agent } = createFixture({ sink: { emit: () => {} } });
+      expect(() => agent._notifyCompletion('done')).not.toThrow();
+    });
+  });
+
+  describe('_processStream finish reason', () => {
+    it('should handle length finish reason', async () => {
+      const mockLLM = new MockLLMClient({
+        responseSequences: [[
+          { type: 'content', content: 'Hello' },
+          { type: 'finish', reason: 'length' },
+          { type: 'usage', data: { prompt_tokens: 5, completion_tokens: 10, total_tokens: 15 } },
+        ]],
+      });
+      const { agent } = createFixture({ mockLLM, stream: true });
+      const result = await agent.run('test');
+      expect(result).toBe('Hello');
+    });
+
+    it('should handle stop finish reason', async () => {
+      const mockLLM = new MockLLMClient({
+        responseSequences: [[
+          { type: 'content', content: 'Hi' },
+          { type: 'finish', reason: 'stop' },
+          { type: 'usage', data: { prompt_tokens: 5, completion_tokens: 10, total_tokens: 15 } },
+        ]],
+      });
+      const { agent } = createFixture({ mockLLM, stream: true });
+      const result = await agent.run('test');
+      expect(result).toBe('Hi');
+    });
+  });
+
+  describe('addMessage / replaceContext', () => {
+    it('addMessage fires CONTEXT_MESSAGE hook', () => {
+      const hooks = createHooks();
+      const calls = [];
+      hooks.on('context:message', (data) => calls.push(data));
+      const { agent } = createFixture({ hooks });
+      const msg = new Message({ role: 'user', content: 'hello' });
+      agent.addMessage(msg);
+      expect(agent.log.length).toBe(1);
+      expect(calls.length).toBeGreaterThan(0);
+      expect(calls[0].message).toBe(msg);
+    });
+
+    it('replaceContext fires CONTEXT_REPLACED hook', () => {
+      const hooks = createHooks();
+      const calls = [];
+      hooks.on('context:replaced', (data) => calls.push(data));
+      const { agent } = createFixture({ hooks });
+      const msgs = [new Message({ role: 'user', content: 'new' })];
+      agent.replaceContext(msgs);
+      expect(agent.log.length).toBe(1);
+      expect(calls.length).toBeGreaterThan(0);
+      expect(calls[0].newContext).toBe(msgs);
+    });
+  });
+
+  describe('serialize/deserialize edge cases', () => {
+    it('should serialize with no context', () => {
+      const { agent } = createFixture({ sessionId: 'test-session' });
+      const serialized = agent.serialize();
+      expect(serialized.sessionId).toBe('test-session');
+      expect(serialized.context).toEqual([]);
+    });
+
+    it('should handle deserialize with empty data', () => {
+      const { agent } = createFixture({});
+      agent.deserialize({ sessionId: 'new-id', context: [], model: 'new-model' });
+      expect(agent.sessionId).toBe('new-id');
+      expect(agent.model).toBe('new-model');
     });
   });
 });

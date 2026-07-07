@@ -13,6 +13,7 @@ import {
   SUBAGENT_TOOL_NAMES,
   SUBAGENT_TOOL_CONSTRUCTORS,
 } from "../../src/extensions/subagents/subagents.js";
+import { create } from "../../src/extensions/subagents/index.js";
 
 describe("SubagentTool base class", () => {
   it("creates with options object", () => {
@@ -554,5 +555,84 @@ describe("SUBAGENT_TOOL_CONSTRUCTORS", () => {
     expect(SUBAGENT_TOOL_CONSTRUCTORS.plan_status(opts).constructor.name).toBe("PlanStatusTool");
     expect(SUBAGENT_TOOL_CONSTRUCTORS.complete_task(opts).constructor.name).toBe("CompleteTaskTool");
     expect(SUBAGENT_TOOL_CONSTRUCTORS.wait(opts).constructor.name).toBe("WaitTool");
+  });
+});
+
+describe("Subagents extension create()", () => {
+  it("returns null when no taskManager", () => {
+    const result = create(null, {});
+    expect(result).toBeNull();
+  });
+
+  it("returns null when no taskManager in options", () => {
+    const result = create({ config: { profile: { manager: true } } }, {});
+    expect(result).toBeNull();
+  });
+
+  it("returns null when profile is not manager", () => {
+    const result = create(
+      { config: { profile: { manager: false } } },
+      { taskManager: {} },
+    );
+    expect(result).toBeNull();
+  });
+
+  it("returns extension object when taskManager and manager profile", () => {
+    const taskManager = {};
+    const sessionCore = {};
+    const result = create(
+      { config: { profile: { manager: true } } },
+      { taskManager, sessionCore },
+    );
+    expect(result).not.toBeNull();
+    expect(result.hooks).toBeDefined();
+    expect(result.SUBAGENT_TOOL_NAMES).toBe(SUBAGENT_TOOL_NAMES);
+    expect(result.SUBAGENT_TOOL_CONSTRUCTORS).toBe(SUBAGENT_TOOL_CONSTRUCTORS);
+  });
+
+  it("returns extension with AGENT_TOOL_CONTEXT hook", async () => {
+    const taskManager = {};
+    const result = create(
+      { config: { profile: { manager: true } } },
+      { taskManager },
+    );
+    const toolCtx = new Map();
+    await result.hooks['agent:toolContext']({ toolCtx });
+    expect(toolCtx.get('taskManager')).toBe(taskManager);
+    expect(toolCtx.get('sessionCore')).toBeNull();
+  });
+
+  it("returns extension with TOOLS_REGISTER hook", async () => {
+    const taskManager = {};
+    const sessionCore = {};
+    const result = create(
+      { config: { profile: { manager: true } } },
+      { taskManager, sessionCore },
+    );
+    const registered = [];
+    const registry = {
+      register: (name, tool) => registered.push(name),
+    };
+    await result.hooks['tools:register'](registry);
+    expect(registered.length).toBeGreaterThan(0);
+    expect(registered).toContain('delegate_task');
+    expect(registered).toContain('task_status');
+  });
+
+  it("handles tool creation errors gracefully", async () => {
+    // Verify that TOOLS_REGISTER hook doesn't throw even if there are issues
+    const taskManager = {};
+    const result = create(
+      { config: { profile: { manager: true } } },
+      { taskManager },
+    );
+    const registered = [];
+    const registry = {
+      register: (name, tool) => registered.push(name),
+    };
+    // Should not throw
+    await result.hooks['tools:register'](registry);
+    expect(registered.length).toBeGreaterThan(0);
+    expect(registered).toContain('delegate_task');
   });
 });

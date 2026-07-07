@@ -261,3 +261,101 @@ describe("ToolRegistry.validateToolArgs", () => {
     expect(undefResult).toContain("undefined");
   });
 });
+
+describe("validateWithSchema edge cases", () => {
+  it("validates const values", () => {
+    const result = validateParams(
+      { value: "hello" },
+      {
+        type: "object",
+        properties: {
+          value: { type: "string", const: "hello" },
+        },
+      },
+    );
+    expect(result.valid).toBe(true);
+  });
+
+  it("rejects non-const values", () => {
+    const result = validateParams(
+      { value: "world" },
+      {
+        type: "object",
+        properties: {
+          value: { type: "string", const: "hello" },
+        },
+      },
+    );
+    expect(result.valid).toBe(false);
+    expect(result.errors.length).toBeGreaterThan(0);
+  });
+
+  it("validates pattern matching", () => {
+    const result = validateParams(
+      { value: "abc123" },
+      {
+        type: "object",
+        properties: {
+          value: { type: "string", pattern: "^[a-z]+[0-9]+$" },
+        },
+      },
+    );
+    expect(result.valid).toBe(true);
+  });
+
+  it("rejects pattern mismatch", () => {
+    const result = validateParams(
+      { value: "123abc" },
+      {
+        type: "object",
+        properties: {
+          value: { type: "string", pattern: "^[a-z]+[0-9]+$" },
+        },
+      },
+    );
+    expect(result.valid).toBe(false);
+  });
+
+  it("validates exclusiveMaximum", () => {
+    const result = validateParams(
+      { value: 5 },
+      {
+        type: "object",
+        properties: {
+          value: { type: "integer", exclusiveMaximum: 10 },
+        },
+      },
+    );
+    expect(result.valid).toBe(true);
+  });
+
+  it("rejects exclusiveMaximum violation", () => {
+    const result = validateParams(
+      { value: 15 },
+      {
+        type: "object",
+        properties: {
+          value: { type: "integer", exclusiveMaximum: 10 },
+        },
+      },
+    );
+    expect(result.valid).toBe(false);
+  });
+
+  it("handles matchesDefault with non-stringifiable values", () => {
+    // Create a circular reference to test the error handling in matchesDefault
+    // But avoid triggering JSON.stringify in error message by using a non-circular const
+    const circular = {};
+    circular.self = circular;
+    const result = validateParams(
+      circular,
+      {
+        type: "object",
+        const: { simple: "value" }, // Non-circular const
+      },
+    );
+    // matchesDefault catches the JSON.stringify error and returns false
+    // so the const check fails, adding an error
+    expect(result.valid).toBe(false);
+  });
+});

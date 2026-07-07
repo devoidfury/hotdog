@@ -646,4 +646,125 @@ describe("resolveKey — edge cases", () => {
     // 0 is not null/undefined/empty, so it passes through any cast
     expect(result).toBe(0);
   });
+
+  it("resolves nested properties for object types", () => {
+    const schema = {
+      type: "object",
+      layers: [
+        { default: { host: "localhost", port: 8080 } },
+      ],
+      properties: {
+        host: {
+          type: "string",
+          layers: [
+            { source: "cli", key: "webui.host", cast: resolveCast("string") },
+          ],
+        },
+        port: {
+          type: "number",
+          layers: [
+            { source: "cli", key: "webui.port", cast: resolveCast("number") },
+          ],
+        },
+      },
+    };
+
+    // Without CLI overrides, defaults should be preserved
+    const result = resolveKey("webui", schema, { cli: {} });
+    expect(result.host).toBe("localhost");
+    expect(result.port).toBe(8080);
+  });
+
+  it("overrides nested properties with CLI values", () => {
+    const schema = {
+      type: "object",
+      layers: [
+        { default: { host: "localhost", port: 8080 } },
+      ],
+      properties: {
+        host: {
+          type: "string",
+          layers: [
+            { source: "cli", key: "webui.host", cast: resolveCast("string") },
+          ],
+        },
+        port: {
+          type: "number",
+          layers: [
+            { source: "cli", key: "webui.port", cast: resolveCast("number") },
+          ],
+        },
+      },
+    };
+
+    const result = resolveKey("webui", schema, { cli: { "webui.host": "0.0.0.0", "webui.port": "9000" } });
+    expect(result.host).toBe("0.0.0.0");
+    expect(result.port).toBe(9000);
+  });
+
+  it("handles non-object parent value in resolveNestedProperties", () => {
+    const schema = {
+      type: "object",
+      layers: [
+        { default: "string-instead-of-object" },
+      ],
+      properties: {
+        host: { type: "string", layers: [{ default: "localhost" }] },
+      },
+    };
+
+    // Non-object default should pass through without nested resolution
+    const result = resolveKey("test", schema, { cli: {} });
+    expect(result).toBe("string-instead-of-object");
+  });
+
+  it("handles null parent value in resolveNestedProperties", () => {
+    const schema = {
+      type: "object",
+      layers: [
+        { default: null },
+      ],
+      properties: {
+        host: { type: "string", layers: [{ default: "localhost" }] },
+      },
+    };
+
+    const result = resolveKey("test", schema, { cli: {} });
+    expect(result).toBeNull();
+  });
+
+  it("applies defaults for properties without layers", () => {
+    const schema = {
+      type: "object",
+      layers: [
+        { default: {} },
+      ],
+      properties: {
+        host: { type: "string", default: "default-host" },
+        port: { type: "number", default: 8080 },
+      },
+    };
+
+    const result = resolveKey("server", schema, { cli: {} });
+    expect(result.host).toBe("default-host");
+    expect(result.port).toBe(8080);
+  });
+
+  it("does not override existing parent values with property defaults", () => {
+    const schema = {
+      type: "object",
+      layers: [
+        { default: { host: "explicit-host", port: 3000 } },
+      ],
+      properties: {
+        host: { type: "string", default: "default-host" },
+        port: { type: "number", default: 8080 },
+      },
+    };
+
+    const result = resolveKey("server", schema, { cli: {} });
+    // Parent values should take precedence over property defaults
+    expect(result.host).toBe("explicit-host");
+    expect(result.port).toBe(3000);
+  });
 });

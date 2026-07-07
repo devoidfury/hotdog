@@ -883,3 +883,390 @@ describe("LlmClient.chatStream", () => {
     expect(capturedTools).toBe(tools);
   });
 });
+
+describe("LlmClient.chatStreamCancellable cancel token variations", () => {
+  function makeMsg(role, content) {
+    return { role, content, toJSON: () => ({ role, content }) };
+  }
+
+  function setupClient() {
+    const client = new LlmClient({ chatTimeoutSecs: 30, maxRetries: 3, baseUrl: "http://test.com" });
+    // Override _doRequest to return a mock SSE response instead of making real HTTP calls
+    client._doRequest = async (url, apiKey, request, signal) => {
+      // If signal is already aborted, simulate a cancelled request
+      if (signal?.aborted) {
+        throw new Error("request was cancelled");
+      }
+      return {
+        headers: new Map([["content-type", "text/event-stream"]]),
+        get: (name) => "text/event-stream",
+        body: {
+          getReader: () => {
+            let done = false;
+            return {
+              read: async () => {
+                if (done) return { done: true, value: undefined };
+                done = true;
+                return {
+                  done: false,
+                  value: new TextEncoder().encode(
+                    'data: {"choices":[{"delta":{"content":"Hello"}}]}\n\n',
+                  ),
+                };
+              },
+              releaseLock: () => {},
+            };
+          },
+        },
+      };
+    };
+    return client;
+  }
+
+  it("handles AbortSignal as cancelToken", async () => {
+    const client = setupClient();
+    const abortController = new AbortController();
+
+    const gen = client.chatStreamCancellable(
+      [makeMsg("user", "Hi")],
+      { name: "test-model", temperature: null, maxTokens: 100 },
+      [],
+      abortController.signal,
+    );
+
+    const events = [];
+    for await (const event of gen) {
+      events.push(event);
+    }
+
+    expect(events).toHaveLength(1);
+    expect(events[0].content).toBe("Hello");
+  });
+
+  it("handles cancelToken with signal property", async () => {
+    const client = setupClient();
+    const abortController = new AbortController();
+
+    const cancelToken = { signal: abortController.signal };
+    const gen = client.chatStreamCancellable(
+      [makeMsg("user", "Hi")],
+      { name: "test-model", temperature: null, maxTokens: 100 },
+      [],
+      cancelToken,
+    );
+
+    const events = [];
+    for await (const event of gen) {
+      events.push(event);
+    }
+
+    expect(events).toHaveLength(1);
+    expect(events[0].content).toBe("Hello");
+  });
+
+  it("handles already aborted cancelToken", async () => {
+    const client = setupClient();
+    const abortController = new AbortController();
+    abortController.abort();
+
+    const gen = client.chatStreamCancellable(
+      [makeMsg("user", "Hi")],
+      { name: "test-model", temperature: null, maxTokens: 100 },
+      [],
+      { aborted: true },
+    );
+
+    // Generator should throw because retryWithBackoff detects aborted signal
+    let threw = false;
+    try {
+      const events = [];
+      for await (const event of gen) {
+        events.push(event);
+      }
+    } catch (e) {
+      threw = true;
+      expect(e.message).toMatch(/cancelled/i);
+    }
+    expect(threw).toBe(true);
+  });
+
+  it("handles null cancelToken", async () => {
+    const client = setupClient();
+
+    const gen = client.chatStreamCancellable(
+      [makeMsg("user", "Hi")],
+      { name: "test-model", temperature: null, maxTokens: 100 },
+      [],
+      null,
+    );
+
+    const events = [];
+    for await (const event of gen) {
+      events.push(event);
+    }
+
+    expect(events).toHaveLength(1);
+    expect(events[0].content).toBe("Hello");
+  });
+
+  it("handles cancelToken with addEventListener", async () => {
+    const client = setupClient();
+
+    // Create a custom token with addEventListener
+    const listeners = [];
+    const customToken = {
+      addEventListener: (event, cb, opts) => {
+        listeners.push({ event, cb, opts });
+      },
+      removeEventListener: (event, cb) => {
+        const idx = listeners.findIndex(l => l.cb === cb);
+        if (idx !== -1) listeners.splice(idx, 1);
+      },
+    };
+
+    const gen = client.chatStreamCancellable(
+      [makeMsg("user", "Hi")],
+      { name: "test-model", temperature: null, maxTokens: 100 },
+      [],
+      customToken,
+    );
+
+    const events = [];
+    for await (const event of gen) {
+      events.push(event);
+    }
+
+    expect(events).toHaveLength(1);
+    expect(events[0].content).toBe("Hello");
+  });
+});
+
+describe("LlmClient._processSSE edge cases", () => {
+  it("handles non-SSE content-type by parsing JSON", async () => {
+    const client = new LlmClient({ chatTimeoutSecs: 30, maxRetries: 3, baseUrl: "http://test.com" });
+
+    const mockResponse = {
+      headers: new Map([["content-type", "application/json"]]),
+      get: (name) => "application/json",
+      json: async () => ({
+        choices: [{ delta: { content: "Hello" } }],
+      }),
+    };
+
+    const events = [];
+    for await (const event of client._processSSE(mockResponse)) {
+      events.push(event);
+    }
+
+    expect(events).toHaveLength(1);
+    expect(events[0].content).toBe("Hello");
+  });
+
+  it("throws on non-JSON non-SSE response", async () => {
+    const client = new LlmClient({ chatTimeoutSecs: 30, maxRetries: 3, baseUrl: "http://test.com" });
+
+    const mockResponse = {
+      headers: new Map([["content-type", "application/xml"]]),
+      get: (name) => "application/xml",
+      json: async () => { throw new Error("not json"); },
+    };
+
+    try {
+      for await (const _ of client._processSSE(mockResponse)) {
+      }
+      // Should have thrown
+      expect(true).toBe(false);
+    } catch (e) {
+      expect(e.message).toMatch(/Unexpected Content-Type/);
+    }
+  });
+
+  it("flushes remaining jsonBuffer at EOF", async () => {
+    const client = new LlmClient({ chatTimeoutSecs: 30, maxRetries: 3, baseUrl: "http://test.com" });
+
+    // Simulate SSE stream where a data line's JSON doesn't parse on its own
+    // (accumulates in jsonBuffer), and the JSON is completed at EOF.
+    const encoder = new TextEncoder();
+    let readCount = 0;
+    const mockResponse = {
+      body: {
+        getReader: () => ({
+          read: async () => {
+            readCount++;
+            if (readCount === 1) {
+              // A complete data line with JSON that doesn't parse (missing closing brace)
+              // The data line is followed by \n\n so it's processed, but JSON parsing fails
+              return { done: false, value: encoder.encode('data: {"choices":[{"delta":{"content":"Hello"}}\n\n') };
+            }
+            // EOF — no more data, jsonBuffer should be flushed
+            return { done: true, value: undefined };
+          },
+          releaseLock: () => {},
+        }),
+      },
+    };
+
+    const events = [];
+    for await (const event of client._processSSE(mockResponse)) {
+      events.push(event);
+    }
+
+    // The JSON in the data line is incomplete (missing closing braces)
+    // so it accumulates in jsonBuffer. At EOF, jsonBuffer is flushed,
+    // but the JSON is still incomplete, so no events are yielded.
+    expect(events).toHaveLength(0);
+  });
+
+  it("handles SSE comment lines", async () => {
+    const client = new LlmClient({ chatTimeoutSecs: 30, maxRetries: 3, baseUrl: "http://test.com" });
+
+    const encoder = new TextEncoder();
+    let readCount = 0;
+    const mockResponse = {
+      body: {
+        getReader: () => ({
+          read: async () => {
+            readCount++;
+            if (readCount === 1) {
+              return { done: false, value: encoder.encode(': hello\n\ndata: {"choices":[{"delta":{"content":"Hi"}}]}\n\n') };
+            }
+            return { done: true, value: undefined };
+          },
+          releaseLock: () => {},
+        }),
+      },
+    };
+
+    const events = [];
+    for await (const event of client._processSSE(mockResponse)) {
+      events.push(event);
+    }
+
+    expect(events).toHaveLength(1);
+    expect(events[0].content).toBe("Hi");
+  });
+
+  it("handles SSE event type filtering", async () => {
+    const client = new LlmClient({ chatTimeoutSecs: 30, maxRetries: 3, baseUrl: "http://test.com" });
+
+    const encoder = new TextEncoder();
+    let readCount = 0;
+    const mockResponse = {
+      body: {
+        getReader: () => ({
+          read: async () => {
+            readCount++;
+            if (readCount === 1) {
+              return { done: false, value: encoder.encode('event: ping\ndata: {"x":"y"}\n\n') };
+            }
+            if (readCount === 2) {
+              return { done: false, value: encoder.encode('event: message\ndata: {"choices":[{"delta":{"content":"Real"}}]}\n\n') };
+            }
+            return { done: true, value: undefined };
+          },
+          releaseLock: () => {},
+        }),
+      },
+    };
+
+    const events = [];
+    for await (const event of client._processSSE(mockResponse)) {
+      events.push(event);
+    }
+
+    expect(events).toHaveLength(1);
+    expect(events[0].content).toBe("Real");
+  });
+
+  it("handles data: [DONE] signal with jsonBuffer flush", async () => {
+    const client = new LlmClient({ chatTimeoutSecs: 30, maxRetries: 3, baseUrl: "http://test.com" });
+
+    const encoder = new TextEncoder();
+    let readCount = 0;
+    const mockResponse = {
+      body: {
+        getReader: () => ({
+          read: async () => {
+            readCount++;
+            if (readCount === 1) {
+              // Partial JSON followed by [DONE]
+              return { done: false, value: encoder.encode('data: {"choices":[{"delta":{"content":"Partia') };
+            }
+            if (readCount === 2) {
+              return { done: false, value: encoder.encode('l"}}]}\ndata: [DONE]\n\n') };
+            }
+            return { done: true, value: undefined };
+          },
+          releaseLock: () => {},
+        }),
+      },
+    };
+
+    const events = [];
+    for await (const event of client._processSSE(mockResponse)) {
+      events.push(event);
+    }
+
+    expect(events).toHaveLength(1);
+    expect(events[0].content).toBe("Partial");
+  });
+
+  it("handles large malformed JSON buffer with reset", async () => {
+    const client = new LlmClient({ chatTimeoutSecs: 30, maxRetries: 3, baseUrl: "http://test.com" });
+
+    const encoder = new TextEncoder();
+    let readCount = 0;
+    const mockResponse = {
+      body: {
+        getReader: () => ({
+          read: async () => {
+            readCount++;
+            if (readCount === 1) {
+              // Send garbage that won't parse
+              return { done: false, value: encoder.encode('data: ' + 'x'.repeat(600000)) };
+            }
+            return { done: true, value: undefined };
+          },
+          releaseLock: () => {},
+        }),
+      },
+    };
+
+    // Should not throw — just log warning and reset
+    const events = [];
+    for await (const event of client._processSSE(mockResponse)) {
+      events.push(event);
+    }
+
+    expect(events).toHaveLength(0);
+  });
+
+  it("handles empty content-type with SSE fallback", async () => {
+    const client = new LlmClient({ chatTimeoutSecs: 30, maxRetries: 3, baseUrl: "http://test.com" });
+
+    const encoder = new TextEncoder();
+    let readCount = 0;
+    const mockResponse = {
+      body: {
+        getReader: () => ({
+          read: async () => {
+            readCount++;
+            if (readCount === 1) {
+              return { done: false, value: encoder.encode('data: {"choices":[{"delta":{"content":"Hello"}}]}\n\n') };
+            }
+            return { done: true, value: undefined };
+          },
+          releaseLock: () => {},
+        }),
+      },
+    };
+
+    const events = [];
+    for await (const event of client._processSSE(mockResponse)) {
+      events.push(event);
+    }
+
+    expect(events).toHaveLength(1);
+    expect(events[0].content).toBe("Hello");
+  });
+});

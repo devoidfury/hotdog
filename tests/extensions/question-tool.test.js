@@ -1,7 +1,7 @@
 // Tests for the question tool — non-interactive mode only.
 
 import { describe, it, expect, beforeEach } from "bun:test";
-import { QuestionTool } from "../../src/extensions/question-tool/index.js";
+import { QuestionTool, create } from "../../src/extensions/question-tool/index.js";
 
 describe("QuestionTool", () => {
   let tool;
@@ -145,5 +145,21 @@ describe("QuestionTool", () => {
       expect(result.success).toBe(false);
       expect(result.error).toContain("missing a prompt");
     });
+  });
+});
+
+describe("QuestionTool create() extension", () => {
+  it("returns extension with tools:register hook", async () => {
+    const ext = create({});
+    expect(ext).toBeDefined();
+    expect(ext.hooks).toBeDefined();
+    expect(ext.hooks['tools:register']).toBeDefined();
+    expect(ext.QuestionTool).toBe(QuestionTool);
+  });
+
+  it("registers question tool via hook", async () => {
+    const ext = create({});
+    const registry = { register: (name, tool) => { expect(name).toBe('question'); expect(tool).toBeInstanceOf(QuestionTool); } };
+    await ext.hooks['tools:register'](registry);
   });
 });

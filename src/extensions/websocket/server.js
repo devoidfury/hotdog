@@ -7,6 +7,7 @@ import { HOOKS } from "../../core/hooks.js";
 import { MessageBus } from "../../core/session/message-bus.js";
 import { FanoutSink, WebSocketOutputSink, BackgroundSink } from "./sinks.js";
 import { C2S, S2C } from "./protocol.js";
+import { logger } from "../../core/logger.js";
 
 // ── SessionRegistry ─────────────────────────────────────────────────────────
 

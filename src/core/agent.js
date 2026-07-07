@@ -506,13 +506,14 @@ export class Agent {
    * Normalizes tool calls to OpenAI format: { id, type, function: { name, arguments } }.
    *
    * @param {AsyncIterable} stream
-   * @returns {Promise<Object>} { fullText, fullReasoning, finalToolCalls, usage }
+   * @returns {Promise<Object>} { fullText, fullReasoning, finalToolCalls, usage, finishReason }
    */
   async _processStream(stream) {
     const textParts = [];
     const reasoningParts = [];
     const toolCallsBuffer = new Map();
     let usage = null;
+    let finishReason = null;
 
     for await (const event of stream) {
       if (this._cancelled) throw LlmError.Cancelled("Agent cancelled");
@@ -552,6 +553,15 @@ export class Agent {
         case "usage":
           usage = event.data;
           break;
+        case "finish":
+          finishReason = event.reason;
+          // Emit truncation warning if the model hit its token limit
+          if (event.reason === "length") {
+            logger.warn(
+              `[agent] response truncated — hit max token limit (reason: ${event.reason})`,
+            );
+          }
+          break;
       }
     }
 
@@ -572,6 +582,7 @@ export class Agent {
       fullReasoning: reasoningParts.length > 0 ? reasoningParts.join("") : null,
       finalToolCalls,
       usage,
+      finishReason,
     };
   }
 

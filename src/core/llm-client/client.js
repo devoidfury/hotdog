@@ -8,6 +8,7 @@ import { DEFAULT_AI_URL, DEFAULT_AI_URL_FALLBACK } from "../config/defaults.js";
 import { retryWithBackoff } from "./retry.js";
 import { createMarkerMangler } from "../marker-mangler.js";
 import { LlmError } from "../error.js";
+import { logger } from "../logger.js";
 
 // Resolve version from package.json at module load time (cached, not per-request).
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -334,14 +335,52 @@ export class LlmClient {
   /**
    * Process an SSE response stream, yielding StreamEvents.
    *
+   * Handles:
+   *   - Multi-chunk JSON assembly (large payloads split across TCP packets)
+   *   - SSE comment lines (`:` prefix)
+   *   - Named event types (`event:` field) — only processes `message` events
+   *   - Content-Type validation (falls back to JSON parse for non-SSE responses)
+   *   - TextDecoder cleanup
+   *   - Silent JSON parse failure detection (logs warning on large malformed payloads)
+   *
    * @private
    * @param {Response} response - HTTP response object.
    * @returns {AsyncGenerator<{type: string, content?: string, reasoningContent?: string, name?: string, index?: number, arguments?: string, data?: Object}>} Async generator yielding stream events.
    */
   async *_processSSE(response) {
+    // Content-Type validation — if the response isn't SSE, try to parse it
+    // as a single JSON object (some backends return non-streaming responses).
+    const contentType =
+      typeof response.headers?.get === "function"
+        ? response.headers.get("content-type") || ""
+        : "";
+    const isSse =
+      contentType.includes("text/event-stream") ||
+      contentType.includes("text/plain") ||
+      contentType === ""; // Some backends omit Content-Type for SSE
+
+    if (!isSse) {
+      try {
+        const data = await response.json();
+        yield* this._parseStreamData(data);
+        return;
+      } catch {
+        throw LlmError.InvalidResponse(
+          `Unexpected Content-Type: ${contentType}`,
+        );
+      }
+    }
+
     const reader = response.body.getReader();
     const decoder = new TextDecoder();
     let buffer = "";
+    let jsonBuffer = "";
+    let currentEvent = "message"; // Default SSE event type
+
+    // Threshold for distinguishing incomplete JSON from real parse errors.
+    // A single SSE data line for chat completions rarely exceeds this;
+    // if we accumulate beyond it and still can't parse, it's likely a backend bug.
+    const MAX_JSON_BUFFER = 500_000;
 
     try {
       while (true) {
@@ -354,18 +393,85 @@ export class LlmClient {
 
         for (const line of lines) {
           const trimmed = line.trim();
-          if (!trimmed || trimmed === "data: [DONE]") continue;
-          if (!trimmed.startsWith("data: ")) continue;
 
-          const jsonStr = trimmed.slice(6);
-          let data;
-          try {
-            data = JSON.parse(jsonStr);
-          } catch {
+          // Skip empty lines (event boundary in SSE spec)
+          if (!trimmed) continue;
+
+          // SSE comment lines — spec says clients must ignore them
+          if (trimmed.startsWith(":")) continue;
+
+          // Event type field — track for filtering
+          if (trimmed.startsWith("event: ")) {
+            currentEvent = trimmed.slice(7);
             continue;
           }
 
+          // Only process data lines for the default event type ("message")
+          // Other event types (e.g., "ping", "heartbeat") are ignored.
+          if (!trimmed.startsWith("data: ")) continue;
+          if (currentEvent !== "message" && currentEvent !== "") continue;
+
+          // Signal end of stream
+          if (trimmed === "data: [DONE]") {
+            // Flush any remaining jsonBuffer on [DONE]
+            if (jsonBuffer) {
+              try {
+                const data = JSON.parse(jsonBuffer);
+                yield* this._parseStreamData(data);
+              } catch {
+                logger.warn(
+                  `[sse] malformed JSON on [DONE] flush (${jsonBuffer.length} chars)`,
+                );
+              }
+              jsonBuffer = "";
+            }
+            continue;
+          }
+
+          // Accumulate data payload into jsonBuffer for multi-chunk assembly.
+          // Large tool call arguments or content chunks can span multiple
+          // data: lines when split across TCP packet boundaries.
+          const payload = trimmed.slice(6);
+
+          // Strategy: try parsing the payload on its own first (common case —
+          // each data: line is a complete JSON object). If that fails and we
+          // already have a jsonBuffer, try appending (multi-chunk assembly).
+          // If both fail, the payload is garbage — reset and move on.
+          try {
+            const data = JSON.parse(payload);
+            yield* this._parseStreamData(data);
+          } catch {
+            // Payload alone isn't valid JSON — try multi-chunk assembly
+            jsonBuffer += payload;
+
+            try {
+              const data = JSON.parse(jsonBuffer);
+              yield* this._parseStreamData(data);
+              jsonBuffer = ""; // Reset on successful parse
+            } catch {
+              // Still can't parse — could be incomplete JSON or real error.
+              // If we've accumulated a large buffer, it's likely a backend bug.
+              if (jsonBuffer.length > MAX_JSON_BUFFER) {
+                logger.warn(
+                  `[sse] malformed JSON (${jsonBuffer.length} chars): ${jsonBuffer.slice(0, 100)}...`,
+                );
+                jsonBuffer = ""; // Reset to avoid memory leak
+              }
+              // Otherwise keep accumulating — the JSON is just split across chunks
+            }
+          }
+        }
+      }
+
+      // Handle any remaining jsonBuffer at EOF (stream ended without [DONE])
+      if (jsonBuffer) {
+        try {
+          const data = JSON.parse(jsonBuffer);
           yield* this._parseStreamData(data);
+        } catch {
+          logger.warn(
+            `[sse] truncated JSON at EOF (${jsonBuffer.length} chars)`,
+          );
         }
       }
     } finally {
@@ -382,6 +488,7 @@ export class LlmClient {
    *   { type: "toolName", index, name, toolCallId }  — toolCallId is the OpenAI `id` field
    *   { type: "toolArgument", index, arguments }
    *   { type: "usage", data }
+   *   { type: "finish", reason }  — finish_reason from the model (stop, tool_calls, length)
    *
    * @private
    * @param {Object} data - SSE data object.
@@ -435,6 +542,13 @@ export class LlmClient {
             });
           }
         }
+      }
+
+      // Finish reason — emitted on the final chunk.
+      // "stop" = normal completion, "tool_calls" = tool calls issued,
+      // "length" = hit max token limit (truncated), "content_filter" = filtered.
+      if (choice.finish_reason) {
+        events.push({ type: "finish", reason: choice.finish_reason });
       }
     }
 

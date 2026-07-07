@@ -414,7 +414,7 @@ export function createHttpApp() {
           return;
         }
       } catch (e) {
-        next(e);
+        await next(e);
       }
 
       // If middleware sent a response synchronously, capture it

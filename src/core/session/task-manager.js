@@ -106,10 +106,11 @@ export class TaskManager {
     if (this._sessionManager) {
       const agent = this._sessionManager.getAgent();
       if (agent) {
+        const tag = "system-notice"; // this keeps the marker mangler from interfering with the tag
         agent.addMessage(
           new Message({
             role: "user",
-            content: `<system-notice>[Task ${taskId} completed]\n${result}</system-notice>`,
+            content: `<${tag}>[Task ${taskId} completed]\n${result}</${tag}>`,
           }),
         );
       }
@@ -143,8 +144,7 @@ export class TaskManager {
       "";
 
     // 3. Build system prompt from profile
-    const resolvedRole =
-      taskProfile?.role || this._taskRole;
+    const resolvedRole = taskProfile?.role || this._taskRole;
     const resolvedProfileBody = taskProfile?.body || "";
 
     // 4. Resolve allowed tools: profile whitelist takes precedence

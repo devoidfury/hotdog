@@ -2,6 +2,7 @@
   "name": "hotdog",
   "version": "0.1.3",
   "main": "src/core/index.js",
+  "dependencies": {},
   "devDependencies": {},
   "bin": {
     "hotdog": "bin/hotdog"

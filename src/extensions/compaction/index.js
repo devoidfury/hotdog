@@ -263,9 +263,10 @@ export function create(core) {
       // Replace compacted messages with summary
       if (result.summary) {
         // Create a summary message with marker wrapper
+        const tag = 'previous-context-summary'
         const summaryMsg = new Message({
           role: 'user',
-          content: `<previous-context-summary>${result.summary}</previous-context-summary>`,
+          content: `<${tag}>${result.summary}</${tag}>`,
         });
 
         // Replace the compacted portion

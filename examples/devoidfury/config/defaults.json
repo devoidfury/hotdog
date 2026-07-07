@@ -4,7 +4,7 @@
   "default_model": "ai365/dsv4",
   "thinker": " 🧠 ... {}",
   "toolfmt": " 🔧 {} {}",
-  "hide_tools": false,
+  "hide_tools": true,
   "show_token_use": true,
   "skills_path": "/skills",
   "extension_paths": ["builtins"],

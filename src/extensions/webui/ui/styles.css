@@ -616,9 +616,7 @@ body {
 .tool-call-block {
     background: var(--bg-tertiary);
     border: 1px solid var(--border);
-    border-radius: var(--radius);
     margin: 6px 0 6px 42px;
-    overflow: hidden;
     max-width: 85%;
     animation: messageIn 0.25s var(--ease-out) both;
 }
@@ -655,7 +653,7 @@ body {
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
-    max-width: 200px;
+    max-width: 50%;
 }
 
 .tool-call-body {

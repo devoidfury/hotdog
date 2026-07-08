@@ -222,13 +222,7 @@ export class WriteTool {
         filesize_before: filesizeBefore,
         filesize_after: filesizeAfter,
       }),
-    ).withEntries({
-      path: filePath,
-      mode,
-      filesize_before: String(filesizeBefore),
-      filesize_after: String(filesizeAfter),
-      bytes_changed: String(filesizeAfter - filesizeBefore),
-    });
+    );
   }
 }
 

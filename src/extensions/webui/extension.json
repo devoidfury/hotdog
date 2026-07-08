@@ -38,6 +38,11 @@
           "type": "number",
           "default": 1440,
           "description": "Session token TTL in minutes (default: 24 hours)"
+        },
+        "maxAgeSecs": {
+          "type": "number",
+          "default": 3600,
+          "description": "Cache-Control max-age for static assets in seconds"
         }
       },
       "additionalProperties": false,

@@ -5,6 +5,10 @@ import { main } from "../src/core/main.js";
 main()
   .catch(async (e) => {
     console.error(formatError(e));
-    return 1;
+    process.exit(1);
   })
-  .then((code) => process.exit(code));
+  .then((code) => {
+    if (typeof code === "number") {
+      process.exit(code);
+    }
+  });

@@ -18,7 +18,7 @@ export class FanoutSink {
   }
 
   remove(sink) {
-    this.#sinks = this.#sinks.filter(s => s !== sink);
+    this.#sinks = this.#sinks.filter((s) => s !== sink);
   }
 
   emit(event) {
@@ -136,9 +136,13 @@ export class WebSocketOutputSink {
         if (event.message !== undefined) msg.message = event.message;
         break;
       case OUTPUT_EVENT.TOKEN_USAGE:
-        msg.inputTokens = event.promptTokens || 0;
-        msg.outputTokens = event.completionTokens || 0;
+        msg.promptTokens = event.promptTokens || 0;
+        msg.completionTokens = event.completionTokens || 0;
         msg.totalTokens = event.totalTokens || 0;
+        msg.lastPromptTokens = event.lastPromptTokens || 0;
+        msg.lastCompletionTokens = event.lastCompletionTokens || 0;
+        msg.lastTotalTokens = event.lastTotalTokens || 0;
+        msg.lastCachedTokens = event.lastCachedTokens || 0;
         break;
       case OUTPUT_EVENT.COMPACTION_RESULT:
         msg.summary = event.summary;

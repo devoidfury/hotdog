@@ -181,6 +181,11 @@
           "tags": ["general", "coder"]
         },
         {
+          "name": "nemotron-3-nano-30b-a3b",
+          "context-limit": 1048576,
+          "tags": ["general"]
+        },
+        {
           "name": "ornith-1.0-35b",
           "context-limit": 262144,
           "tags": ["general", "coder"]

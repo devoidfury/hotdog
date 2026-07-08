@@ -75,14 +75,19 @@ describe("HookSystem", () => {
   });
 
   describe("notifyHooksAsync()", () => {
-    it("should call async handlers", async () => {
+    it("should fire async handlers without waiting", async () => {
       const hooks = createHooks();
       const results = [];
       hooks.on("test:hook", async (data) => {
         await new Promise((r) => setTimeout(r, 10));
         results.push(data.value);
       });
-      await hooks.notifyHooksAsync("test:hook", { value: 1 });
+      // notifyHooksAsync is fire-and-forget — returns immediately
+      hooks.notifyHooksAsync("test:hook", { value: 1 });
+      expect(results).toEqual([]); // handler hasn't completed yet
+
+      // Wait for the async handler to finish
+      await new Promise((r) => setTimeout(r, 50));
       expect(results).toEqual([1]);
     });
   });

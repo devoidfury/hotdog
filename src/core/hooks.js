@@ -116,13 +116,13 @@ export class HookSystem {
   /**
    * Notify hooks asynchronously (fire-and-forget, concurrent).
    * All handlers launch concurrently. Errors are caught and logged.
+   * Returns immediately — does not wait for handlers to complete.
    * @param {string} hookName
    * @param {*} data
-   * @returns {Promise<void>}
+   * @returns {void}
    */
-  async notifyHooksAsync(hookName, data) {
+  notifyHooksAsync(hookName, data) {
     const handlers = this._hooks.get(hookName) || [];
-    const promises = [];
     let doTrace = false;
     if (typeof this._trace === "boolean") {
       doTrace = this._trace && hookName !== "log";
@@ -144,28 +144,26 @@ export class HookSystem {
       try {
         const result = entry.handler(data);
         if (result && typeof result.then === "function") {
-          promises.push(
-            result.then(
-              (v) => {
-                if (doTrace && !this._traceOptions.disabledSources.includes(entry.source)) {
-                  const ms = Date.now() - t0;
-                  const label = entry.source ? ` (${entry.source})` : "";
-                  logger.debug(
-                    `[hook:trace] ${hookName} — handler${label} — ${ms}ms`,
-                  );
-                }
-              },
-              (e) => {
-                if (doTrace && !this._traceOptions.disabledSources.includes(entry.source)) {
-                  const ms = Date.now() - t0;
-                  const label = entry.source ? ` (${entry.source})` : "";
-                  logger.debug(
-                    `[hook:trace] ${hookName} — handler${label} — ${ms}ms — error`,
-                  );
-                }
-                logger.error(`[hook:${hookName}] ${formatError(e)}`);
-              },
-            ),
+          result.then(
+            (v) => {
+              if (doTrace && !this._traceOptions.disabledSources.includes(entry.source)) {
+                const ms = Date.now() - t0;
+                const label = entry.source ? ` (${entry.source})` : "";
+                logger.debug(
+                  `[hook:trace] ${hookName} — handler${label} — ${ms}ms`,
+                );
+              }
+            },
+            (e) => {
+              if (doTrace && !this._traceOptions.disabledSources.includes(entry.source)) {
+                const ms = Date.now() - t0;
+                const label = entry.source ? ` (${entry.source})` : "";
+                logger.debug(
+                  `[hook:trace] ${hookName} — handler${label} — ${ms}ms — error`,
+                );
+              }
+              logger.error(`[hook:${hookName}] ${formatError(e)}`);
+            },
           );
         } else if (doTrace && !this._traceOptions.disabledSources.includes(entry.source)) {
           const ms = Date.now() - t0;
@@ -185,7 +183,6 @@ export class HookSystem {
         logger.error(`[hook:${hookName}] ${formatError(e)}`);
       }
     }
-    await Promise.all(promises);
   }
 
   /**

@@ -21,9 +21,21 @@ export function createMessageList(sessionId, { hideThinking = false } = {}) {
     if (!currentAssistantEl) {
       currentAssistantEl = document.createElement("div");
       currentAssistantEl.className = "message assistant streaming";
+
+      // Avatar
+      const avatar = document.createElement("div");
+      avatar.className = "avatar";
+      avatar.textContent = "🤖";
+      currentAssistantEl.appendChild(avatar);
+
+      // Bubble
+      const bubble = document.createElement("div");
+      bubble.className = "bubble";
       const contentEl = document.createElement("div");
       contentEl.className = "content";
-      currentAssistantEl.appendChild(contentEl);
+      bubble.appendChild(contentEl);
+      currentAssistantEl.appendChild(bubble);
+
       container.appendChild(currentAssistantEl);
     }
     return currentAssistantEl;
@@ -53,7 +65,22 @@ export function createMessageList(sessionId, { hideThinking = false } = {}) {
     finalizeAssistant();
     const el = document.createElement("div");
     el.className = "message user";
-    el.innerHTML = `<div class="content">${sanitize(content)}</div>`;
+
+    // Avatar
+    const avatar = document.createElement("div");
+    avatar.className = "avatar";
+    avatar.textContent = "👤";
+    el.appendChild(avatar);
+
+    // Bubble
+    const bubble = document.createElement("div");
+    bubble.className = "bubble";
+    const contentEl = document.createElement("div");
+    contentEl.className = "content";
+    contentEl.textContent = content;
+    bubble.appendChild(contentEl);
+    el.appendChild(bubble);
+
     container.appendChild(el);
     scrollBottom();
   }
@@ -63,7 +90,22 @@ export function createMessageList(sessionId, { hideThinking = false } = {}) {
     finalizeAssistant();
     const el = document.createElement("div");
     el.className = "message assistant";
-    el.innerHTML = `<div class="content">${sanitize(content)}</div>`;
+
+    // Avatar
+    const avatar = document.createElement("div");
+    avatar.className = "avatar";
+    avatar.textContent = "🤖";
+    el.appendChild(avatar);
+
+    // Bubble
+    const bubble = document.createElement("div");
+    bubble.className = "bubble";
+    const contentEl = document.createElement("div");
+    contentEl.className = "content";
+    contentEl.textContent = content;
+    bubble.appendChild(contentEl);
+    el.appendChild(bubble);
+
     container.appendChild(el);
     scrollBottom();
   }
@@ -161,7 +203,10 @@ export function createMessageList(sessionId, { hideThinking = false } = {}) {
     // Show compacting notice
     const el = document.createElement("div");
     el.className = "message compacting";
-    el.textContent = `⚡ ${message}`;
+    const bubble = document.createElement("div");
+    bubble.className = "bubble";
+    bubble.textContent = `⚡ ${message}`;
+    el.appendChild(bubble);
     container.appendChild(el);
     scrollBottom();
   }
@@ -169,7 +214,13 @@ export function createMessageList(sessionId, { hideThinking = false } = {}) {
   function handleCommandResult({ content }) {
     const el = document.createElement("div");
     el.className = "message command-result";
-    el.innerHTML = `<div class="content">${sanitize(content)}</div>`;
+    const bubble = document.createElement("div");
+    bubble.className = "bubble";
+    const contentEl = document.createElement("div");
+    contentEl.className = "content";
+    contentEl.textContent = content;
+    bubble.appendChild(contentEl);
+    el.appendChild(bubble);
     container.appendChild(el);
     scrollBottom();
   }
@@ -178,17 +229,29 @@ export function createMessageList(sessionId, { hideThinking = false } = {}) {
     finalizeAssistant();
     const el = document.createElement("div");
     el.className = "message question";
-    let html = `<div class="content"><strong>Question:</strong><br>`;
+
+    // Avatar
+    const avatar = document.createElement("div");
+    avatar.className = "avatar";
+    avatar.textContent = "🤖";
+    el.appendChild(avatar);
+
+    // Bubble
+    const bubble = document.createElement("div");
+    bubble.className = "bubble";
+    const contentEl = document.createElement("div");
+    contentEl.className = "content";
+    contentEl.innerHTML = `<strong>Question:</strong><br>`;
     for (const q of questions) {
-      html += `${sanitize(q.message || q.prompt)}<br>`;
+      contentEl.innerHTML += `${sanitize(q.message || q.prompt)}<br>`;
       if (q.options) {
         for (const opt of q.options) {
-          html += `  • ${sanitize(opt)}<br>`;
+          contentEl.innerHTML += `  • ${sanitize(opt)}<br>`;
         }
       }
     }
-    html += `</div>`;
-    el.innerHTML = html;
+    bubble.appendChild(contentEl);
+    el.appendChild(bubble);
     container.appendChild(el);
     scrollBottom();
   }
@@ -202,9 +265,15 @@ export function createMessageList(sessionId, { hideThinking = false } = {}) {
       el = document.createElement("div");
       el.className = "message task-progress";
       el.dataset.taskId = taskId;
+      const bubble = document.createElement("div");
+      bubble.className = "bubble";
+      bubble.textContent = `⚡ ${status}${message ? ": " + message : ""}`;
+      el.appendChild(bubble);
       container.appendChild(el);
+    } else {
+      const bubble = el.querySelector(".bubble");
+      bubble.textContent = `⚡ ${status}${message ? ": " + message : ""}`;
     }
-    el.textContent = `⚡ ${status}${message ? ": " + message : ""}`;
     scrollBottom();
   }
 
@@ -216,7 +285,10 @@ export function createMessageList(sessionId, { hideThinking = false } = {}) {
   }) {
     const el = document.createElement("div");
     el.className = "message token-usage";
-    el.textContent = `(tokens cached: ${lastCachedTokens} prpmpt:${lastPromptTokens} completion:${lastCompletionTokens} total:${lastTotalTokens})`;
+    const bubble = document.createElement("div");
+    bubble.className = "bubble";
+    bubble.textContent = `(tokens cached: ${lastCachedTokens} prompt:${lastPromptTokens} completion:${lastCompletionTokens} total:${lastTotalTokens})`;
+    el.appendChild(bubble);
     container.appendChild(el);
     scrollBottom();
   }
@@ -224,7 +296,10 @@ export function createMessageList(sessionId, { hideThinking = false } = {}) {
   function handleCompactionResult({ summary, messagesCompacted }) {
     const el = document.createElement("div");
     el.className = "message compaction-result";
-    el.textContent = `Compacted ${messagesCompacted} messages. Summary: ${summary}`;
+    const bubble = document.createElement("div");
+    bubble.className = "bubble";
+    bubble.textContent = `Compacted ${messagesCompacted} messages. Summary: ${summary}`;
+    el.appendChild(bubble);
     container.appendChild(el);
     scrollBottom();
   }
@@ -239,7 +314,22 @@ export function createMessageList(sessionId, { hideThinking = false } = {}) {
     finalizeAssistant();
     const el = document.createElement("div");
     el.className = "message error";
-    el.textContent = `Error: ${sanitize(message)}`;
+
+    // Avatar
+    const avatar = document.createElement("div");
+    avatar.className = "avatar";
+    avatar.textContent = "⚠️";
+    el.appendChild(avatar);
+
+    // Bubble
+    const bubble = document.createElement("div");
+    bubble.className = "bubble";
+    const contentEl = document.createElement("div");
+    contentEl.className = "content";
+    contentEl.textContent = `Error: ${sanitize(message)}`;
+    bubble.appendChild(contentEl);
+    el.appendChild(bubble);
+
     container.appendChild(el);
     scrollBottom();
   }

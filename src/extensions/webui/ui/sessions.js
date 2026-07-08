@@ -16,6 +16,14 @@ export function initSessions({ onCreate, onSwitch, onDelete }) {
   newBtn.addEventListener("click", () => onCreate());
 
   /**
+   * Get a friendly profile name for display.
+   */
+  function getProfileDisplay(profile) {
+    if (!profile) return "default";
+    return sanitize(profile);
+  }
+
+  /**
    * Update the session list display.
    * @param {Array<{id: string, profile: string, model: string, createdAt: number, lastActivityAt: number, connectedClients: number}>} sessions
    * @param {string|null} activeSessionId
@@ -30,11 +38,17 @@ export function initSessions({ onCreate, onSwitch, onDelete }) {
         item.classList.add("active");
       }
 
+      const profileDisplay = getProfileDisplay(s.profile);
+      const modelDisplay = s.model ? sanitize(s.model) : "?";
+      const timeDisplay = formatTime(s.createdAt);
+      const clientInfo = s.connectedClients > 0
+        ? ` · ${s.connectedClients} client${s.connectedClients > 1 ? "s" : ""}`
+        : "";
+
       item.innerHTML = `
-        <div class="session-name">${sanitize(s.profile || "default")}</div>
+        <div class="session-name">${profileDisplay}</div>
         <div class="session-meta">
-          ${sanitize(s.model || "?")} · ${formatTime(s.createdAt)}
-          ${s.connectedClients > 0 ? ` · ${s.connectedClients} client(s)` : ""}
+          ${modelDisplay} · ${timeDisplay}${clientInfo}
         </div>
       `;
 
@@ -43,7 +57,7 @@ export function initSessions({ onCreate, onSwitch, onDelete }) {
         onSwitch(s.id);
       });
 
-      // Right-click / long-press to delete (simple UX)
+      // Right-click to delete (simple UX)
       item.addEventListener("contextmenu", (e) => {
         e.preventDefault();
         if (confirm(`Delete session ${shortId(s.id)}?`)) {

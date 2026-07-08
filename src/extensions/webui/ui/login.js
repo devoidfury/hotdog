@@ -18,6 +18,11 @@ export function initLogin({ onLogin }) {
     errorEl.classList.add("hidden");
     input.disabled = true;
 
+    const btn = form.querySelector("button");
+    const originalText = btn.textContent;
+    btn.textContent = "Signing in...";
+    btn.disabled = true;
+
     try {
       const res = await fetch("/login", {
         method: "POST",
@@ -29,6 +34,8 @@ export function initLogin({ onLogin }) {
         const err = await res.json().catch(() => ({ error: "Login failed" }));
         showError(errorEl, err.error || `Status ${res.status}`);
         input.disabled = false;
+        btn.textContent = originalText;
+        btn.disabled = false;
         return;
       }
 
@@ -37,6 +44,8 @@ export function initLogin({ onLogin }) {
     } catch (err) {
       showError(errorEl, `Connection error: ${err.message}`);
       input.disabled = false;
+      btn.textContent = originalText;
+      btn.disabled = false;
     }
   });
 

@@ -59,6 +59,7 @@ export function createMessageList(sessionId, { hideThinking = false } = {}) {
   }
 
   function handleAssistantMessage({ content }) {
+    if (!content?.trim()) return; // skip empty messages (e.g. tool-only turns during replay)
     finalizeAssistant();
     const el = document.createElement("div");
     el.className = "message assistant";

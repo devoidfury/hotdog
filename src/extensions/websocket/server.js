@@ -284,12 +284,15 @@ function replaySessionHistory(session, ws) {
             }));
           }
         }
-        // Then emit the assistant message text
-        ws.send(JSON.stringify({
-          type: S2C.ASSISTANT_MESSAGE,
-          sessionId: session.id,
-          content: msg.getTextContent(),
-        }));
+        // Then emit the assistant message text (only if there is any)
+        const textContent = msg.getTextContent();
+        if (textContent) {
+          ws.send(JSON.stringify({
+            type: S2C.ASSISTANT_MESSAGE,
+            sessionId: session.id,
+            content: textContent,
+          }));
+        }
         break;
       }
 

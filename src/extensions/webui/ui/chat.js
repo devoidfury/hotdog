@@ -399,9 +399,7 @@ export function createChat({
     cancel();
   });
 
-  document.getElementById("new-session-btn").addEventListener("click", () => {
-    createSession({});
-  });
+
 
   // Model dropdown change — send /model command to switch
   document.getElementById("model-select").addEventListener("change", (e) => {

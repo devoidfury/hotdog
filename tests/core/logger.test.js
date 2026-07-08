@@ -18,11 +18,11 @@ describe("LOG_LEVELS", () => {
 });
 
 describe("resolveLogLevel", () => {
-  it("returns default 'warn' with no config", () => {
+  it("returns default 'info' with no config", () => {
     const origLevel = process.env.HOTDOG_LOG_LEVEL;
     delete process.env.HOTDOG_LOG_LEVEL;
     try {
-      expect(resolveLogLevel()).toBe("warn");
+      expect(resolveLogLevel()).toBe("info");
     } finally {
       if (origLevel !== undefined) process.env.HOTDOG_LOG_LEVEL = origLevel;
     }

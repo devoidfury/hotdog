@@ -148,7 +148,9 @@ export function createMessageList(sessionId, { hideThinking = false } = {}) {
       body.dataset.truncated = "true";
 
       // Show truncated preview in the body, but keep it hidden until clicked
-      if (output) body.textContent = output.slice(0, 2000) + "\n\n<click to show full response>";
+      if (output)
+        body.textContent =
+          output.slice(0, 2000) + "\n\n<click to show full response>";
       else if (error) body.textContent = `Error: ${error}`;
       // Don't auto-show the body — let the user click to expand
     }
@@ -193,7 +195,9 @@ export function createMessageList(sessionId, { hideThinking = false } = {}) {
 
   function handleTaskProgress({ taskId, status, message }) {
     // Task progress — subtle indicator
-    let el = container.querySelector(`.task-progress[data-task-id="${sanitize(taskId)}"]`);
+    let el = container.querySelector(
+      `.task-progress[data-task-id="${sanitize(taskId)}"]`,
+    );
     if (!el) {
       el = document.createElement("div");
       el.className = "message task-progress";
@@ -204,10 +208,15 @@ export function createMessageList(sessionId, { hideThinking = false } = {}) {
     scrollBottom();
   }
 
-  function handleTokenUsage({ inputTokens, outputTokens, totalTokens }) {
+  function handleTokenUsage({
+    lastCachedTokens,
+    lastPromptTokens,
+    lastCompletionTokens,
+    lastTotalTokens,
+  }) {
     const el = document.createElement("div");
     el.className = "message token-usage";
-    el.textContent = `(tokens: ${inputTokens} in → ${outputTokens} out, ${totalTokens} total)`;
+    el.textContent = `(tokens cached: ${lastCachedTokens} prpmpt:${lastPromptTokens} completion:${lastCompletionTokens} total:${lastTotalTokens})`;
     container.appendChild(el);
     scrollBottom();
   }

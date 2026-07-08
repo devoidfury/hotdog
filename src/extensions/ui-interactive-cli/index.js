@@ -47,6 +47,36 @@ Commands:
   /reasoning none|minimal|low|high|xhigh|max|unset - Set reasoning effort level
 `;
 
+const IGNORED_CMDS = new Set([
+  "alert",
+  "as",
+  "clear",
+  "continue",
+  "do",
+  "done",
+  "else",
+  "enable",
+  "eval",
+  "export",
+  "false",
+  "for",
+  "help",
+  "hotdog",
+  "if",
+  "in",
+  "let",
+  "local",
+  "login",
+  "logout",
+  "man",
+  "test",
+  "then",
+  "true",
+  "wait",
+  "yes",
+]);
+const MIN_CMD_LEN = 2;
+
 /**
  * Check if a command name resolves to an executable on the system.
  * Uses `which` on Unix-like systems.
@@ -422,7 +452,12 @@ export async function runInteractiveSession(cli, core, options = {}) {
     // If it is, execute it directly and skip the user input message.
     if (shellMode) {
       const firstWord = trimmed.split(/\s+/)[0];
-      if (firstWord && await isSystemCommand(firstWord)) {
+      if (
+        firstWord &&
+        firstWord.length >= MIN_CMD_LEN &&
+        !IGNORED_CMDS.has(firstWord) &&
+        (await isSystemCommand(firstWord))
+      ) {
         console.log(`\n$ ${trimmed}\n`);
         const result = await executeShellCommand(trimmed);
         if (result.content) {

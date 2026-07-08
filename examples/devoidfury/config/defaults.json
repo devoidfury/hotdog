@@ -113,7 +113,7 @@
           "parallel-tool-calling": true
         },
         {
-          "name": "gemma-4-E2B",
+          "name": "gemma-4-e2b",
           "context-limit": 128000,
           "tags": ["fast", "general"]
         },
@@ -154,6 +154,11 @@
           "name": "qwen3.5-9b-dsv4f-d:general",
           "context-limit": 262144,
           "tags": ["general", "powerful", "instruct"]
+        },
+        {
+          "name": "qwen3.5-9b-npu",
+          "context-limit": 262144,
+          "tags": ["general", "instruct"]
         },
         {
           "name": "qwopus3.6-27b",

@@ -30,7 +30,7 @@ export function resolveLogLevel(configLevel) {
   const envLevel = process.env.HOTDOG_LOG_LEVEL?.toLowerCase();
   if (envLevel && envLevel in LOG_LEVELS) return envLevel;
   if (configLevel && configLevel in LOG_LEVELS) return configLevel;
-  return "warn";
+  return "info";
 }
 
 /**

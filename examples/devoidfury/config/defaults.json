@@ -61,10 +61,18 @@
       "url": "http://ai365.home:9292",
       "models": [
         {
+          "name": "agent-a1-35b-moe",
+          "context-limit": 262144
+        },
+        {
           "name": "dsv4",
           "context-limit": 350000,
           "tags": ["general", "huge", "coder"],
           "reasoning-effort": "max"
+        },
+        {
+          "name": "qwen3.5-122b-a10b",
+          "context-limit": 262144
         },
         {
           "name": "qwen3.5-4b",

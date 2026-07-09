@@ -67,7 +67,6 @@
         {
           "name": "dsv4",
           "context-limit": 350000,
-          "tags": ["general", "huge", "coder"],
           "reasoning-effort": "max"
         },
         {
@@ -76,157 +75,119 @@
         },
         {
           "name": "qwen3.5-4b",
-          "context-limit": 262144,
-          "tags": ["general", "fast", "instruct"]
+          "context-limit": 262144
         },
         {
           "name": "qwen3.5-4b:coder",
-          "context-limit": 262144,
-          "tags": ["coder", "general", "fast", "think"],
-          "parallel-tool-calling": true
+          "context-limit": 262144
         },
         {
           "name": "qwen3.5-0.8b",
-          "context-limit": 262144,
-          "tags": ["small", "general", "fast", "speedy"]
+          "context-limit": 262144
         },
         {
           "name": "qwen3.6-35b",
-          "context-limit": 160000,
-          "tags": ["coder", "general", "powerful", "think"],
-          "parallel-tool-calling": true
+          "context-limit": 160000
         },
         {
           "name": "qwen3.6-35b:general",
-          "context-limit": 160000,
-          "tags": ["general", "powerful", "think"],
-          "parallel-tool-calling": true
+          "context-limit": 160000
         },
         {
           "name": "qwen3.6-35b:instruct",
-          "context-limit": 160000,
-          "tags": ["general", "powerful", "instruct"],
-          "parallel-tool-calling": true
+          "context-limit": 160000
         },
         {
           "name": "qwen3.6-27b",
-          "context-limit": 160000,
-          "tags": ["coder", "general", "powerful", "think"],
-          "parallel-tool-calling": true
+          "context-limit": 160000
         },
         {
           "name": "qwen3.6-27b:instruct",
-          "context-limit": 160000,
-          "tags": ["coder", "general", "powerful", "instruct"],
-          "parallel-tool-calling": true
+          "context-limit": 160000
         },
         {
           "name": "gemma-4-e2b",
-          "context-limit": 128000,
-          "tags": ["fast", "general"]
+          "context-limit": 128000
         },
         {
           "name": "gemma-4-31b",
-          "context-limit": 256000,
-          "tags": ["coder", "general", "powerful"],
-          "parallel-tool-calling": true
+          "context-limit": 256000
         },
         {
           "name": "gemma-4-12b",
-          "context-limit": 256000,
-          "tags": ["coder", "general", "powerful"],
-          "parallel-tool-calling": true
+          "context-limit": 256000
         },
         {
           "name": "glm4.7-flash",
-          "context-limit": 131072,
-          "tags": ["coder", "general"],
-          "parallel-tool-calling": true
+          "context-limit": 131072
         },
         {
           "name": "granite-4.1-30b",
-          "context-limit": 131072,
-          "tags": ["coder", "general"]
+          "context-limit": 131072
         },
         {
           "name": "smollm3-3b",
-          "context-limit": 64000,
-          "tags": ["fast", "general"]
+          "context-limit": 64000
         },
         {
           "name": "qwen3.5-9b-dsv4f-d",
-          "context-limit": 262144,
-          "tags": ["general", "powerful", "coding", "instruct"]
+          "context-limit": 262144
         },
         {
           "name": "qwen3.5-9b-dsv4f-d:general",
-          "context-limit": 262144,
-          "tags": ["general", "powerful", "instruct"]
+          "context-limit": 262144
         },
         {
           "name": "qwen3.5-9b-npu",
-          "context-limit": 262144,
-          "tags": ["general", "instruct"]
+          "context-limit": 262144
         },
         {
           "name": "qwopus3.6-27b",
-          "context-limit": 262144,
-          "tags": ["general", "powerful", "slow"]
+          "context-limit": 262144
         },
         {
           "name": "step-3.7-flash",
-          "context-limit": 100000,
-          "tags": ["general", "powerful", "slow"]
+          "context-limit": 100000
         },
         {
           "name": "mistral-medium-3.5",
-          "context-limit": 80000,
-          "tags": ["general", "powerful", "slow"]
+          "context-limit": 80000
         },
         {
           "name": "minimax-m2.7",
-          "context-limit": 196608,
-          "tags": ["general", "powerful", "slow"]
+          "context-limit": 196608
         },
         {
           "name": "north-mini-code-1.0-30b",
-          "context-limit": 262144,
-          "tags": ["general", "coder"]
+          "context-limit": 262144
         },
         {
           "name": "nemotron-3-nano-30b-a3b",
-          "context-limit": 1048576,
-          "tags": ["general"]
+          "context-limit": 1048576
         },
         {
           "name": "ornith-1.0-35b",
-          "context-limit": 262144,
-          "tags": ["general", "coder"]
+          "context-limit": 262144
         },
         {
           "name": "ornith-1.0-9b",
-          "context-limit": 262144,
-          "tags": ["general", "coder"]
+          "context-limit": 262144
         },
         {
           "name": "qwen3.6-35b-unc",
-          "context-limit": 262144,
-          "tags": ["general", "powerful", "slow", "vision", "unrestricted"]
+          "context-limit": 262144
         },
         {
           "name": "qwen-coder-next",
-          "context-limit": 262144,
-          "tags": ["general", "powerful"]
+          "context-limit": 262144
         },
         {
           "name": "llama-3.1-70b",
-          "context-limit": 131072,
-          "tags": ["general"]
+          "context-limit": 131072
         },
         {
           "name": "lfm2.5-8b-a1b",
-          "context-limit": 128000,
-          "tags": ["general", "fast"]
+          "context-limit": 128000
         }
       ]
     },

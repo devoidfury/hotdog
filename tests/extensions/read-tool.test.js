@@ -265,50 +265,31 @@ describe('ReadTool.execute — image files', () => {
     fsSync.rmSync(dir, { recursive: true, force: true });
   });
 
-  it('reads JPEG file (.jpg) and returns image', async () => {
-    const dir = tmpDir();
-    const filePath = path.join(dir, 'test.jpg');
-    fsSync.writeFileSync(filePath, MINIMAL_JPEG);
+  for (const ext of ['jpg', 'jpeg']) {
+    it(`reads JPEG file (.${ext}) and returns image`, async () => {
+      const dir = tmpDir();
+      const filePath = path.join(dir, `test.${ext}`);
+      fsSync.writeFileSync(filePath, MINIMAL_JPEG);
 
-    const tool = new ReadTool();
-    const result = await tool.execute(
-      { path: 'test.jpg' },
-      toolCtx({ workspaceRoot: dir })
-    );
+      const tool = new ReadTool();
+      const result = await tool.execute(
+        { path: `test.${ext}` },
+        toolCtx({ workspaceRoot: dir })
+      );
 
-    expect(result.success).toBe(true);
-    expect(result.output).toContain('test.jpg');
-    expect(result.output).toContain('image/jpeg');
-    expect(result.images).toEqual([
-      {
-        type: 'image_url',
-        mimeType: 'image/jpeg',
-        data: MINIMAL_JPEG.toString('base64'),
-      },
-    ]);
-    fsSync.rmSync(dir, { recursive: true, force: true });
-  });
-
-  it('reads JPEG file (.jpeg) and returns image', async () => {
-    const dir = tmpDir();
-    const filePath = path.join(dir, 'test.jpeg');
-    fsSync.writeFileSync(filePath, MINIMAL_JPEG);
-
-    const tool = new ReadTool();
-    const result = await tool.execute(
-      { path: 'test.jpeg' },
-      toolCtx({ workspaceRoot: dir })
-    );
-
-    expect(result.images).toEqual([
-      {
-        type: 'image_url',
-        mimeType: 'image/jpeg',
-        data: MINIMAL_JPEG.toString('base64'),
-      },
-    ]);
-    fsSync.rmSync(dir, { recursive: true, force: true });
-  });
+      expect(result.success).toBe(true);
+      expect(result.output).toContain(`test.${ext}`);
+      expect(result.output).toContain('image/jpeg');
+      expect(result.images).toEqual([
+        {
+          type: 'image_url',
+          mimeType: 'image/jpeg',
+          data: MINIMAL_JPEG.toString('base64'),
+        },
+      ]);
+      fsSync.rmSync(dir, { recursive: true, force: true });
+    });
+  }
 
   it('reads WebP file and returns image', async () => {
     const dir = tmpDir();

@@ -31,66 +31,36 @@ describe('WriteTool.toToolDef', () => {
 // ── callDisplay ─────────────────────────────────────────────────────────────
 
 describe('WriteTool.callDisplay', () => {
-  it('shows overwrite mode', () => {
-    const display = new WriteTool().callDisplay({ mode: 'overwrite', path: 'foo.txt', content: 'hello' });
-    expect(display).toContain('overwrite');
-    expect(display).toContain('foo.txt');
-  });
+  const tool = new WriteTool();
 
-  it('shows insert_before mode', () => {
-    const display = new WriteTool().callDisplay({ mode: 'insert_before', path: 'foo.txt', content: 'hello', start_at: 5 });
-    expect(display).toContain('insert_before');
-    expect(display).toContain('foo.txt');
-    expect(display).toContain('line 5');
-  });
+  const modeCases = [
+    { input: { mode: 'overwrite', path: 'foo.txt', content: 'hello' }, expects: ['overwrite', 'foo.txt'] },
+    { input: { mode: 'insert_before', path: 'foo.txt', content: 'hello', start_at: 5 }, expects: ['insert_before', 'foo.txt', 'line 5'] },
+    { input: { mode: 'replace_all', path: 'foo.txt', content: 'new', search: 'old' }, expects: ['replace_all', '/old/'] },
+    { input: { mode: 'regex_replace', path: 'foo.txt', content: 'new', search_re: 'old\\d+' }, expects: ['regex_replace', 'old\\d+'] },
+    { input: { mode: 'replace_range', path: 'foo.txt', content: 'new', start_at: 1, end_at: 3 }, expects: ['replace_range', 'lines 1–3'] },
+    { input: { mode: 'replace_range_literal', path: 'foo.txt', content: 'new', search: 'old', start_at: 1, end_at: 3 }, expects: ['replace_range_literal', 'lines 1–3'] },
+    { input: { mode: 'replace_range_regex', path: 'foo.txt', content: 'new', search_re: 'old', start_at: 1 }, expects: ['replace_range_regex', '1–EOF'] },
+  ];
 
-  it('shows replace_all mode', () => {
-    const display = new WriteTool().callDisplay({ mode: 'replace_all', path: 'foo.txt', content: 'new', search: 'old' });
-    expect(display).toContain('replace_all');
-    expect(display).toContain('/old/');
-  });
-
-  it('shows regex_replace mode', () => {
-    const display = new WriteTool().callDisplay({ mode: 'regex_replace', path: 'foo.txt', content: 'new', search_re: 'old\\d+' });
-    expect(display).toContain('regex_replace');
-    expect(display).toContain('old\\d+');
-  });
-
-  it('shows replace_range mode', () => {
-    const display = new WriteTool().callDisplay({ mode: 'replace_range', path: 'foo.txt', content: 'new', start_at: 1, end_at: 3 });
-    expect(display).toContain('replace_range');
-    expect(display).toContain('lines 1–3');
-  });
-
-  it('shows replace_range_literal mode', () => {
-    const display = new WriteTool().callDisplay({ mode: 'replace_range_literal', path: 'foo.txt', content: 'new', search: 'old', start_at: 1, end_at: 3 });
-    expect(display).toContain('replace_range_literal');
-    expect(display).toContain('lines 1–3');
-  });
-
-  it('shows replace_range_regex mode without end_at', () => {
-    const display = new WriteTool().callDisplay({ mode: 'replace_range_regex', path: 'foo.txt', content: 'new', search_re: 'old', start_at: 1 });
-    expect(display).toContain('replace_range_regex');
-    expect(display).toContain('1–EOF');
-  });
+  for (const { input, expects } of modeCases) {
+    it(`displays ${input.mode} correctly`, () => {
+      const display = tool.callDisplay(input);
+      for (const str of expects) {
+        expect(display).toContain(str);
+      }
+    });
+  }
 
   it('handles invalid input gracefully', () => {
-    const tool = new WriteTool();
     expect(tool.callDisplay('not json')).toBe('not json');
     expect(tool.callDisplay({})).toBe('');
     expect(tool.callDisplay(null)).toBe('');
   });
 
-  it('handles multi-line content', () => {
-    const display = new WriteTool().callDisplay({ mode: 'overwrite', path: 'foo.txt', content: 'line1\nline2\nline3' });
-    expect(display).toContain('overwrite');
-    expect(display).toContain('foo.txt');
-  });
-
-  it('handles empty content — splits to one empty line', () => {
-    const display = new WriteTool().callDisplay({ mode: 'overwrite', path: 'foo.txt', content: '' });
-    expect(display).toContain('overwrite');
-    expect(display).toContain('foo.txt');
+  it('handles edge-case content', () => {
+    expect(tool.callDisplay({ mode: 'overwrite', path: 'foo.txt', content: 'line1\nline2\nline3' })).toContain('overwrite');
+    expect(tool.callDisplay({ mode: 'overwrite', path: 'foo.txt', content: '' })).toContain('overwrite');
   });
 });
 

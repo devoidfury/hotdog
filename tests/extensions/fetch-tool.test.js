@@ -102,35 +102,17 @@ describe("FetchTool input validation", () => {
     expect(str).not.toContain("Error parsing arguments");
   });
 
-  it("accepts showOriginal: true without parse error", async () => {
-    const tool = new FetchTool();
-    const result = await tool.execute(
-      JSON.stringify({ url: "https://example.com", showOriginal: true }),
-    );
-    const str = getDisplay(result);
-    expect(str).not.toContain("Error parsing arguments");
-    expect(str).not.toContain("Invalid");
-  });
-
-  it("accepts showOriginal: false without parse error", async () => {
-    const tool = new FetchTool();
-    const result = await tool.execute(
-      JSON.stringify({ url: "https://example.com", showOriginal: false }),
-    );
-    const str = getDisplay(result);
-    expect(str).not.toContain("Error parsing arguments");
-    expect(str).not.toContain("Invalid");
-  });
-
-  it('accepts showOriginal: "true" (string) without parse error', async () => {
-    const tool = new FetchTool();
-    const result = await tool.execute(
-      JSON.stringify({ url: "https://example.com", showOriginal: "true" }),
-    );
-    const str = getDisplay(result);
-    expect(str).not.toContain("Error parsing arguments");
-    expect(str).not.toContain("Invalid");
-  });
+  for (const val of [true, false, "true"]) {
+    it(`accepts showOriginal: ${JSON.stringify(val)} without parse error`, async () => {
+      const tool = new FetchTool();
+      const result = await tool.execute(
+        JSON.stringify({ url: "https://example.com", showOriginal: val }),
+      );
+      const str = getDisplay(result);
+      expect(str).not.toContain("Error parsing arguments");
+      expect(str).not.toContain("Invalid");
+    });
+  }
 });
 
 // ── Network-dependent tests (skipped when offline) ──────────────────────────

@@ -176,34 +176,15 @@ describe("McpClient._handleLine", () => {
   it("skips unparseable JSON", async () => {
     const client = new McpClient();
     await client._handleLine("not valid json at all");
-    // Should not throw, just skip
     expect(client._buffered).toHaveLength(0);
   });
 
-  it("skips empty lines", async () => {
+  it("skips invalid input: empty lines, no jsonrpc, no result/error", async () => {
     const client = new McpClient();
     await client._handleLine("");
     await client._handleLine("   ");
-    expect(client._buffered).toHaveLength(0);
-  });
-
-  it("skips lines without jsonrpc field", async () => {
-    const client = new McpClient();
-    await client._handleLine(
-      JSON.stringify({ method: "notifications/initialized" }),
-    );
-    expect(client._buffered).toHaveLength(0);
-  });
-
-  it("skips messages with both result and error undefined", async () => {
-    const client = new McpClient();
-    await client._handleLine(
-      JSON.stringify({
-        jsonrpc: "2.0",
-        id: 1,
-        // No result, no error — notification-like
-      }),
-    );
+    await client._handleLine(JSON.stringify({ method: "notifications/initialized" }));
+    await client._handleLine(JSON.stringify({ jsonrpc: "2.0", id: 1 }));
     expect(client._buffered).toHaveLength(0);
   });
 
@@ -1286,26 +1267,18 @@ describe("McpTool schema conversion edge cases", () => {
 describe("McpConnectionHandle edge cases", () => {
   it("callTool with image content returns formatted string", async () => {
     const mockClient = {
-      callTool: async () => ({
-        content: [{ type: "image", data: "abc123", mimeType: "image/png" }],
-        isError: false,
-      }),
+      callTool: async () => ({ content: [{ type: "image", data: "abc123", mimeType: "image/png" }], isError: false }),
     };
     const handle = new McpConnectionHandle(mockClient, "test-server");
-    const result = await handle.callTool("show", {});
-    expect(result).toBe("[Image: image/png (6 bytes)]");
+    expect(await handle.callTool("show", {})).toBe("[Image: image/png (6 bytes)]");
   });
 
   it("callTool with resource content returns formatted string", async () => {
     const mockClient = {
-      callTool: async () => ({
-        content: [{ type: "resource", uri: "file:///test.txt", mimeType: "text/plain", text: "file content here" }],
-        isError: false,
-      }),
+      callTool: async () => ({ content: [{ type: "resource", uri: "file:///test.txt", mimeType: "text/plain", text: "file content here" }], isError: false }),
     };
     const handle = new McpConnectionHandle(mockClient, "test-server");
-    const result = await handle.callTool("read", {});
-    expect(result).toBe("[Resource: file:///test.txt]\nfile content here");
+    expect(await handle.callTool("read", {})).toBe("[Resource: file:///test.txt]\nfile content here");
   });
 
   it("callTool with mixed content blocks", async () => {
@@ -1329,24 +1302,13 @@ describe("McpConnectionHandle edge cases", () => {
   });
 
   it("callTool with empty content returns empty string", async () => {
-    const mockClient = {
-      callTool: async () => ({
-        content: [],
-        isError: false,
-      }),
-    };
+    const mockClient = { callTool: async () => ({ content: [], isError: false }) };
     const handle = new McpConnectionHandle(mockClient, "test-server");
-    const result = await handle.callTool("empty", {});
-    expect(result).toBe("");
+    expect(await handle.callTool("empty", {})).toBe("");
   });
 
   it("callTool with error content includes error message", async () => {
-    const mockClient = {
-      callTool: async () => ({
-        content: [{ type: "text", text: "Disk full" }],
-        isError: true,
-      }),
-    };
+    const mockClient = { callTool: async () => ({ content: [{ type: "text", text: "Disk full" }], isError: true }) };
     const handle = new McpConnectionHandle(mockClient, "test-server");
     await expect(handle.callTool("write", { path: "/full" })).rejects.toThrow("Disk full");
   });
@@ -1499,37 +1461,20 @@ describe("Full HTTP connection flow", () => {
 // ── SSE parsing edge cases ───────────────────────────────────────────────────
 
 describe("SSE parsing edge cases", () => {
-  it("handles SSE with extra blank lines", () => {
-    const client = new McpClient();
-    const text = "\n\nevent: message\ndata: {\"key\":\"value\"}\n\n\n";
-    const messages = client._parseSse(text);
-    expect(messages).toHaveLength(1);
-    expect(messages[0]).toEqual({ key: "value" });
-  });
+  const sseScenarios = [
+    { name: "extra blank lines", text: "\n\nevent: message\ndata: {\"key\":\"value\"}\n\n\n", expected: [{ key: "value" }] },
+    { name: "multiple data lines (last wins)", text: "data: {\"first\":1}\ndata: {\"second\":2}\n\n", expected: [{ second: 2 }] },
+    { name: "empty data lines", text: "data: \n\n", expected: [] },
+    { name: "colon in data value", text: 'data: {"url":"http://example.com:8080"}\n\n', expected: [{ url: "http://example.com:8080" }] },
+  ];
 
-  it("handles SSE with multiple data lines (last wins)", () => {
-    const client = new McpClient();
-    // Note: each "data:" line overwrites previous, so last one wins
-    const text = "data: {\"first\":1}\ndata: {\"second\":2}\n\n";
-    const messages = client._parseSse(text);
-    expect(messages).toHaveLength(1);
-    expect(messages[0]).toEqual({ second: 2 });
-  });
-
-  it("handles SSE with empty data lines", () => {
-    const client = new McpClient();
-    const text = "data: \n\n";
-    const messages = client._parseSse(text);
-    expect(messages).toHaveLength(0);
-  });
-
-  it("handles SSE with colon in data value", () => {
-    const client = new McpClient();
-    const text = 'data: {"url":"http://example.com:8080"}\n\n';
-    const messages = client._parseSse(text);
-    expect(messages).toHaveLength(1);
-    expect(messages[0].url).toBe("http://example.com:8080");
-  });
+  for (const { name, text, expected } of sseScenarios) {
+    it(`handles SSE with ${name}`, () => {
+      const client = new McpClient();
+      const messages = client._parseSse(text);
+      expect(messages).toEqual(expected);
+    });
+  }
 });
 
 // ── McpConnectionHandle serverName property ──────────────────────────────────
@@ -1887,48 +1832,20 @@ describe("Index.js _shutdownAll error handling", () => {
 // ── McpClient._handleLine with error code 0 ──────────────────────────────────
 
 describe("McpClient._handleLine edge cases", () => {
-  it("handles error with code 0 (note: code 0 falls through to -1 due to ||)", async () => {
+  it("handles error with code 0 (falls through to -1 due to ||)", async () => {
     const client = new McpClient();
-
     let rejected = null;
-    client._pending.set(1, {
-      resolve: () => {},
-      reject: (e) => { rejected = e; },
-      timer: null,
-    });
-
-    await client._handleLine(
-      JSON.stringify({
-        jsonrpc: "2.0",
-        id: 1,
-        error: { code: 0, message: "Unknown error" },
-      }),
-    );
-
+    client._pending.set(1, { resolve: () => {}, reject: (e) => { rejected = e; }, timer: null });
+    await client._handleLine(JSON.stringify({ jsonrpc: "2.0", id: 1, error: { code: 0, message: "Unknown error" } }));
     expect(rejected).toBeInstanceOf(McpError);
-    // Note: the || operator treats 0 as falsy, so code 0 becomes -1
-    // This is a known quirk in the codebase
     expect(rejected.code).toBe(-1);
   });
 
   it("handles error with code 0 and no message", async () => {
     const client = new McpClient();
-
     let rejected = null;
-    client._pending.set(1, {
-      resolve: () => {},
-      reject: (e) => { rejected = e; },
-      timer: null,
-    });
-
-    await client._handleLine(
-      JSON.stringify({
-        jsonrpc: "2.0",
-        id: 1,
-        error: { code: 0 },
-      }),
-    );
-
+    client._pending.set(1, { resolve: () => {}, reject: (e) => { rejected = e; }, timer: null });
+    await client._handleLine(JSON.stringify({ jsonrpc: "2.0", id: 1, error: { code: 0 } }));
     expect(rejected.message).toContain("MCP error code 0");
   });
 });
@@ -1937,28 +1854,19 @@ describe("McpClient._handleLine edge cases", () => {
 
 describe("McpClient.forStdio with args and env", () => {
   it("passes args to spawn", async () => {
-    let capturedArgs = null;
-    const originalSpawn = spawn;
-
-    // We can't easily mock spawn, so let's just verify the constructor works
     try {
       const client = await McpClient.forStdio("echo", ["-n", "hello"]);
       expect(client._args).toEqual(["-n", "hello"]);
       await client.shutdown();
-    } catch {
-      // Ignore spawn errors
-    }
+    } catch { /* Ignore spawn errors */ }
   });
 
   it("passes env to spawn", async () => {
-    // We can't easily mock spawn, so just verify the constructor works
     try {
       const client = await McpClient.forStdio("echo", [], { CUSTOM_VAR: "value" });
       expect(client._env).toEqual({ CUSTOM_VAR: "value" });
       await client.shutdown();
-    } catch {
-      // Ignore spawn errors
-    }
+    } catch { /* Ignore spawn errors */ }
   });
 });
 
@@ -1969,7 +1877,6 @@ describe("McpClient shutdown with no child", () => {
     const client = new McpClient();
     client._cancelled = true;
     await client.shutdown();
-    // Should not throw
   });
 
   it("shutdown with cancelled child doesn't throw", async () => {
@@ -1977,7 +1884,6 @@ describe("McpClient shutdown with no child", () => {
     client._cancelled = true;
     client._child = { pid: 1234, kill: () => {} };
     await client.shutdown();
-    // Should not throw
   });
 });
 
@@ -1986,27 +1892,18 @@ describe("McpClient shutdown with no child", () => {
 describe("McpClient buffered error responses", () => {
   it("throws on buffered error with code", async () => {
     const client = new McpClient();
-
     client._buffered.push({
-      id: 1,
-      result: null,
-      error: { code: -32602, message: "Invalid params" },
+      id: 1, result: null, error: { code: -32602, message: "Invalid params" },
       raw: '{"error":{"code":-32602,"message":"Invalid params"}}',
     });
-
     await expect(client._sendRequest("test", {})).rejects.toThrow("Invalid params");
   });
 
   it("throws on buffered error with no code defaulting to -1", async () => {
     const client = new McpClient();
-
     client._buffered.push({
-      id: 1,
-      result: null,
-      error: { message: "Buffered error" },
-      raw: "",
+      id: 1, result: null, error: { message: "Buffered error" }, raw: "",
     });
-
     try {
       await client._sendRequest("test", {});
     } catch (e) {

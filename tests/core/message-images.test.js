@@ -2,12 +2,7 @@ import { test, expect } from "bun:test";
 import { Message } from "../../src/core/context/message.js";
 
 // ── Message with images ──────────────────────────────────────────────────────
-
-test("Message.toJSON() returns plain string content when no images", () => {
-  const msg = new Message({ role: "user", content: "Hello" });
-  const json = msg.toJSON();
-  expect(json).toEqual({ role: "user", content: "Hello" });
-});
+// Note: basic toJSON() without images is already covered by message.test.js.
 
 test("Message.toJSON() returns array content when images present", () => {
   const msg = new Message({
@@ -166,16 +161,9 @@ test("Message with images preserves other fields", () => {
   ]);
 });
 
-test("Message with no images does not include images in toJSON", () => {
-  const msg = new Message({ role: "user", content: "Hello" });
-  const json = msg.toJSON();
-  expect(json.images).toBeUndefined();
-});
-
-test("Message with empty images array does not include images in toJSON", () => {
-  const msg = new Message({ role: "user", content: "Hello", images: [] });
-  const json = msg.toJSON();
-  expect(json.images).toBeUndefined();
+test("Message omits images in toJSON when absent or empty", () => {
+  expect(new Message({ role: "user", content: "Hello" }).toJSON().images).toBeUndefined();
+  expect(new Message({ role: "user", content: "Hello", images: [] }).toJSON().images).toBeUndefined();
 });
 
 // ── Default mimeType fallback ────────────────────────────────────────────────

@@ -20,19 +20,12 @@ describe('ReviewTool', () => {
     expect(def.function.parameters.required).toEqual(['operation']);
   });
 
-  it('defaults to list operation with no input', async () => {
+  it('defaults to list operation with empty or null input', async () => {
     const tool = new ReviewTool();
-    const result = await tool.execute('');
-    // Should return JSON array (may be empty)
-    const parsed = JSON.parse(resultStr(result));
-    expect(Array.isArray(parsed)).toBe(true);
-  });
-
-  it('defaults to list operation with null input', async () => {
-    const tool = new ReviewTool();
-    const result = await tool.execute(null);
-    const parsed = JSON.parse(resultStr(result));
-    expect(Array.isArray(parsed)).toBe(true);
+    for (const input of ['', null]) {
+      const parsed = JSON.parse(resultStr(await tool.execute(input)));
+      expect(Array.isArray(parsed)).toBe(true);
+    }
   });
 
   it('returns error for get without session_id', async () => {

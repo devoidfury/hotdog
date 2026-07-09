@@ -75,9 +75,7 @@ describe("Compaction Extension Creation", () => {
   });
 
   it("should return null when compaction is disabled", () => {
-    const core = createMockCore({ enabled: false });
-    const ext = createCompactionExtension(core);
-    expect(ext).toBeNull();
+    expect(createCompactionExtension(createMockCore({ enabled: false }))).toBeNull();
   });
 
   it("should apply custom config values", () => {
@@ -95,66 +93,46 @@ describe("Compaction Extension Creation", () => {
   });
 
   it("should register all built-in strategies", () => {
-    const core = createMockCore();
-    const ext = createCompactionExtension(core);
-    expect(ext.registry.has("summarize")).toBe(true);
-    expect(ext.registry.has("drop")).toBe(true);
-    expect(ext.registry.has("summarize-short")).toBe(true);
-    expect(ext.registry.has("token-aware")).toBe(true);
-    expect(ext.registry.has("trim")).toBe(true);
+    const ext = createCompactionExtension(createMockCore());
+    for (const name of ["summarize", "drop", "summarize-short", "token-aware", "trim"]) {
+      expect(ext.registry.has(name)).toBe(true);
+    }
   });
 
-  it("should provide getStrategyList", () => {
-    const core = createMockCore();
-    const ext = createCompactionExtension(core);
+  it("should provide getStrategyList with correct names and order", () => {
+    const ext = createCompactionExtension(createMockCore());
     const list = ext.getStrategyList();
     expect(list.length).toBe(5);
     expect(list.map((s) => s.name)).toEqual([
-      "summarize",
-      "drop",
-      "summarize-short",
-      "token-aware",
-      "trim",
+      "summarize", "drop", "summarize-short", "token-aware", "trim",
     ]);
   });
 
   it("should normalize keepRecentMessages to keepRecent in settings", () => {
-    const core = createMockCore({
-      enabled: true,
-      keepRecentMessages: 4,
-    });
-    const ext = createCompactionExtension(core);
+    const ext = createCompactionExtension(createMockCore({ enabled: true, keepRecentMessages: 4 }));
     expect(ext.settings.keepRecent).toBe(4);
     expect(ext.settings.keepRecentMessages).toBe(4);
   });
 
   it("should use config defaults when config is empty object", () => {
-    const core = createMockCore({});
-    const ext = createCompactionExtension(core);
+    const ext = createCompactionExtension(createMockCore({}));
     expect(ext.settings.enabled).toBe(true);
     expect(ext.settings.keepRecentMessages).toBe(3);
     expect(ext.settings.strategy).toBe("summarize");
   });
 
-  it("should create extension with token-aware strategy", () => {
-    const core = createMockCore({
-      enabled: true,
-      strategy: "token-aware",
-      reserveTokens: 4096,
+  for (const { strategy, extra } of [
+    { strategy: "token-aware", extra: { reserveTokens: 4096 } },
+    { strategy: "trim", extra: {} },
+  ]) {
+    it(`should create extension with ${strategy} strategy`, () => {
+      const ext = createCompactionExtension(createMockCore({ enabled: true, strategy, ...extra }));
+      expect(ext.settings.strategy).toBe(strategy);
+      if (extra.reserveTokens) {
+        expect(ext.settings.reserveTokens).toBe(extra.reserveTokens);
+      }
     });
-    const ext = createCompactionExtension(core);
-    expect(ext.settings.strategy).toBe("token-aware");
-    expect(ext.settings.reserveTokens).toBe(4096);
-  });
-
-  it("should create extension with trim strategy", () => {
-    const core = createMockCore({
-      enabled: true,
-      strategy: "trim",
-    });
-    const ext = createCompactionExtension(core);
-    expect(ext.settings.strategy).toBe("trim");
-  });
+  }
 });
 
 // ── Hook Integration ─────────────────────────────────────────────────────────

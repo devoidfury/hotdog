@@ -811,6 +811,33 @@ describe('Agent — end-to-end loop', () => {
       const result = await agent.executeCommand({ type: 'unknown-cmd' });
       expect(result).toEqual({ error: 'Unknown command: unknown-cmd' });
     });
+
+    it('should dispatch custom commands', async () => {
+      const { agent } = createFixture({});
+      let called = false;
+      const cmd = { type: 'custom', value: 'test', _customCommand: true, _handler: async () => { called = true; return { content: 'handled' }; } };
+      const result = await agent.executeCommand(cmd);
+      expect(called).toBe(true);
+      expect(result.content).toBe('handled');
+    });
+
+    it('should fall through to hooks when custom handler returns null', async () => {
+      const { agent, hooks } = createFixture({});
+      hooks.on('command:dispatch', (data) => {
+        if (data.command.type === 'fallback') return { content: 'hook handled' };
+      });
+      const cmd = { type: 'fallback', value: 'test', _customCommand: true, _handler: async () => null };
+      const result = await agent.executeCommand(cmd);
+      expect(result.content).toBe('hook handled');
+    });
+
+    it('should fall through to command registry', async () => {
+      const { agent } = createFixture({});
+      const registry = agent.getCommandRegistry();
+      registry.register('test-cmd', { handler: async () => ({ content: 'registered' }) });
+      const result = await agent.executeCommand({ type: 'test-cmd', value: '' });
+      expect(result.content).toBe('registered');
+    });
   });
 
   describe('hooks integration (existing)', () => {
@@ -1096,83 +1123,25 @@ describe('Agent — end-to-end loop', () => {
       expect(formatted).toContain('val');
     });
 
-    it('should format number result as XML', () => {
-      const { agent } = createFixture({});
-      const formatted = agent._formatToolResult(42, 'calc', true);
-      expect(formatted).toContain('<tool name="calc"');
-      expect(formatted).toContain('<output>42</output>');
-    });
+    // Parameterized tests for simple result types
+    const simpleResults = [
+      { type: 'number', value: 42, tool: 'calc', expected: '<output>42</output>' },
+      { type: 'boolean', value: true, tool: 'check', expected: '<output>true</output>' },
+    ];
 
-    it('should format boolean result as XML', () => {
-      const { agent } = createFixture({});
-      const formatted = agent._formatToolResult(true, 'check', true);
-      expect(formatted).toContain('<tool name="check"');
-      expect(formatted).toContain('<output>true</output>');
-    });
+    for (const { type, value, tool, expected } of simpleResults) {
+      it(`should format ${type} result as XML`, () => {
+        const { agent } = createFixture({});
+        const formatted = agent._formatToolResult(value, tool, true);
+        expect(formatted).toContain(`<tool name="${tool}"`);
+        expect(formatted).toContain(expected);
+      });
+    }
 
     it('should use error status for failed results', () => {
       const { agent } = createFixture({});
       const formatted = agent._formatToolResult('error', 'bash', false);
       expect(formatted).toContain('status="error"');
-    });
-  });
-
-  describe('executeCommand', () => {
-    it('should dispatch custom commands', async () => {
-      const { agent } = createFixture({});
-      let called = false;
-      const cmd = { type: 'custom', value: 'test', _customCommand: true, _handler: async () => { called = true; return { content: 'handled' }; } };
-      const result = await agent.executeCommand(cmd);
-      expect(called).toBe(true);
-      expect(result.content).toBe('handled');
-    });
-
-    it('should fall through to hooks when custom handler returns null', async () => {
-      const { agent, hooks } = createFixture({});
-      hooks.on('command:dispatch', (data) => {
-        if (data.command.type === 'fallback') return { content: 'hook handled' };
-      });
-      const cmd = { type: 'fallback', value: 'test', _customCommand: true, _handler: async () => null };
-      const result = await agent.executeCommand(cmd);
-      expect(result.content).toBe('hook handled');
-    });
-
-    it('should fall through to command registry', async () => {
-      const { agent } = createFixture({});
-      const registry = agent.getCommandRegistry();
-      registry.register('test-cmd', { handler: async () => ({ content: 'registered' }) });
-      const result = await agent.executeCommand({ type: 'test-cmd', value: '' });
-      expect(result.content).toBe('registered');
-    });
-
-    it('should return error for unknown command', async () => {
-      const { agent } = createFixture({});
-      const result = await agent.executeCommand({ type: 'nonexistent', value: '' });
-      expect(result.error).toContain('Unknown command');
-    });
-  });
-
-  describe('_resolveModelConfig', () => {
-    it('should override reasoning effort at runtime', () => {
-      const mr = { 'test-model': { name: 'test-model', temperature: 0.5, maxTokens: 100 } };
-      const { agent } = createFixture({ modelRegistry: mr });
-      agent._reasoningEffort = 'high';
-      const config = agent._resolveModelConfig();
-      expect(config.reasoningEffort).toBe('high');
-    });
-
-    it('should fall back to model registry', () => {
-      const mr = { 'test-model': { name: 'test-model', temperature: 0.5, maxTokens: 100, reasoningEffort: 'low' } };
-      const { agent } = createFixture({ modelRegistry: mr });
-      const config = agent._resolveModelConfig();
-      expect(config.reasoningEffort).toBe('low');
-    });
-
-    it('should return undefined when not configured', () => {
-      const mr = { 'test-model': { name: 'test-model', temperature: 0.5, maxTokens: 100 } };
-      const { agent } = createFixture({ modelRegistry: mr });
-      const config = agent._resolveModelConfig();
-      expect(config.reasoningEffort).toBeUndefined();
     });
   });
 

@@ -73,25 +73,12 @@ describe("WebSearchTool provider configuration", () => {
     expect(tool.provider).toBe("duckduckgo");
   });
 
-  it("accepts duckduckgo provider", () => {
-    const tool = new WebSearchTool({ provider: "duckduckgo" });
-    expect(tool.provider).toBe("duckduckgo");
-  });
-
-  it("accepts brave provider", () => {
-    const tool = new WebSearchTool({ provider: "brave" });
-    expect(tool.provider).toBe("brave");
-  });
-
-  it("accepts tavily provider", () => {
-    const tool = new WebSearchTool({ provider: "tavily" });
-    expect(tool.provider).toBe("tavily");
-  });
-
-  it("accepts searxng provider", () => {
-    const tool = new WebSearchTool({ provider: "searxng" });
-    expect(tool.provider).toBe("searxng");
-  });
+  for (const provider of ["duckduckgo", "brave", "tavily", "searxng"]) {
+    it(`accepts ${provider} provider`, () => {
+      const tool = new WebSearchTool({ provider });
+      expect(tool.provider).toBe(provider);
+    });
+  }
 
   it("normalizes provider to lowercase", () => {
     const tool = new WebSearchTool({ provider: "DUCKDUCKGO" });

@@ -1,89 +1,9 @@
 import { describe, it, expect, beforeEach, afterEach } from "bun:test";
-import { HookSystem, HOOKS } from "../../src/core/hooks.js";
-import { ToolRegistry } from "../../src/core/extensions/tool-registry.js";
-import { createSubcommandRegistry } from "../../src/core/extensions/registries.js";
+import { HOOKS } from "../../src/core/hooks.js";
 import { mkdirSync, rmSync, writeFileSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { homedir } from "node:os";
-
-// ── Helpers ──────────────────────────────────────────────────────────────────
-
-function createMockCore(config = {}) {
-  const hooks = new HookSystem();
-  const toolRegistry = new ToolRegistry();
-  const cliSubcommandRegistry = createSubcommandRegistry();
-
-  const resolved = {
-    baseUrl: "http://localhost:8080",
-    apiKey: "test-key",
-    model: "test-model",
-    stream: false,
-    chatTimeout: 30,
-    maxRetries: 3,
-    maxIterations: 100,
-    maxTokens: 4096,
-    profileName: "default",
-    profile: {},
-    hideTools: false,
-    hideThinking: false,
-    showTokenUse: false,
-    role: "",
-    profileBody: "",
-    ...config.resolved,
-  };
-
-  // Mock service registry with a default in-memory session service
-  const serviceRegistry = {
-    _services: new Map(),
-    register(name, impl) {
-      this._services.set(name, impl);
-    },
-    get(name) {
-      const impl = this._services.get(name);
-      if (impl === undefined) throw new Error(`Service "${name}" is not registered.`);
-      return impl;
-    },
-    has(name) {
-      return this._services.has(name);
-    },
-    names() {
-      return Array.from(this._services.keys());
-    },
-    checkContract(name, expectedMethods) {
-      const impl = this._services.get(name);
-      if (!impl) return { valid: false, missing: expectedMethods };
-      const missing = expectedMethods.filter((m) => typeof impl[m] !== "function");
-      return { valid: missing.length === 0, missing };
-    },
-  };
-
-  return {
-    hooks,
-    toolRegistry,
-    cliSubcommandRegistry,
-    config: {
-      theme: "dark",
-      maxIterations: 100,
-      skillsPath: join(homedir(), ".hotdog", "skills"),
-      promptsPath: join(homedir(), ".hotdog", "prompts"),
-      ...config.coreConfig,
-    },
-    resolved,
-    modelRegistry: config.modelRegistry || {},
-    extensions: {
-      has: () => false,
-      load: async () => null,
-      cleanup: async () => {},
-    },
-    buildConfig:
-      config.buildConfig ||
-      (async () => ({
-        resolved,
-        modelRegistry: config.modelRegistry || {},
-        providers: [],
-      })),
-  };
-}
+import { createMockCore } from "../helpers.js";
 
 // ── Session Review Extension Tests ───────────────────────────────────────────
 
@@ -300,53 +220,20 @@ describe("Info Show-Prompt Extension - exit codes", () => {
     expect(core.cliSubcommandRegistry.has("show-prompt")).toBe(true);
   });
 
-  it("info subcommand returns exit code 0", async () => {
+  it("info subcommand returns exit code 0 for both JSON and text output", async () => {
     const core = createMockCore();
     const { create } = await import("../../src/extensions/ui-info-cli/index.js");
     const ext = create(core);
     await ext.hooks[HOOKS.CLI_SUBCOMMANDS_REGISTER](core.cliSubcommandRegistry);
 
     const def = core.cliSubcommandRegistry.get("info");
-    const cli = {
-      wantsJson: true,
-      colors: false,
-      theme: "dark",
-      config: null,
-      skillsPath: null,
-    };
-
-    // Suppress console output during handler execution
     const originalLog = console.log;
     console.log = () => {};
     try {
-      const exitCode = await def.handler(cli, core);
-      expect(exitCode).toBe(0);
-    } finally {
-      console.log = originalLog;
-    }
-  });
-
-  it("info subcommand returns 0 for text output", async () => {
-    const core = createMockCore();
-    const { create } = await import("../../src/extensions/ui-info-cli/index.js");
-    const ext = create(core);
-    await ext.hooks[HOOKS.CLI_SUBCOMMANDS_REGISTER](core.cliSubcommandRegistry);
-
-    const def = core.cliSubcommandRegistry.get("info");
-    const cli = {
-      wantsJson: false,
-      colors: false,
-      theme: "dark",
-      config: null,
-      skillsPath: null,
-    };
-
-    // Suppress console output during handler execution
-    const originalLog = console.log;
-    console.log = () => {};
-    try {
-      const exitCode = await def.handler(cli, core);
-      expect(exitCode).toBe(0);
+      for (const wantsJson of [true, false]) {
+        const exitCode = await def.handler({ wantsJson, colors: false, theme: "dark", config: null, skillsPath: null }, core);
+        expect(exitCode).toBe(0);
+      }
     } finally {
       console.log = originalLog;
     }
@@ -359,18 +246,10 @@ describe("Info Show-Prompt Extension - exit codes", () => {
     await ext.hooks[HOOKS.CLI_SUBCOMMANDS_REGISTER](core.cliSubcommandRegistry);
 
     const def = core.cliSubcommandRegistry.get("show-prompt");
-    const cli = {
-      wantsJson: false,
-      colors: false,
-      theme: "dark",
-      config: null,
-    };
-
-    // Suppress console output during handler execution
     const originalLog = console.log;
     console.log = () => {};
     try {
-      const exitCode = await def.handler(cli, core);
+      const exitCode = await def.handler({ wantsJson: false, colors: false, theme: "dark", config: null }, core);
       expect(exitCode).toBe(0);
     } finally {
       console.log = originalLog;
@@ -379,6 +258,7 @@ describe("Info Show-Prompt Extension - exit codes", () => {
 });
 
 // ── One-Shot Extension Tests ─────────────────────────────────────────────────
+// CLI_ARGS_PARSED hook tests are in one-shot-cli.test.js
 
 describe("One-Shot Extension - exit codes", () => {
   it("registers prompt subcommand via CLI_SUBCOMMANDS_REGISTER hook", async () => {
@@ -394,28 +274,6 @@ describe("One-Shot Extension - exit codes", () => {
     expect(core.cliSubcommandRegistry.has("prompt")).toBe(true);
     const def = core.cliSubcommandRegistry.get("prompt");
     expect(def.handler).toBeDefined();
-  });
-
-  it("CLI_ARGS_PARSED hook sets subcommand when --prompt flag is used", async () => {
-    const core = createMockCore();
-    const { create } = await import("../../src/extensions/ui-one-shot/index.js");
-    const ext = create(core);
-
-    const cli = { prompt: "test prompt" };
-    ext.hooks[HOOKS.CLI_ARGS_PARSED]({ cli });
-
-    expect(cli.subcommand).toBe("prompt");
-  });
-
-  it("CLI_ARGS_PARSED hook does nothing when --prompt flag is not used", async () => {
-    const core = createMockCore();
-    const { create } = await import("../../src/extensions/ui-one-shot/index.js");
-    const ext = create(core);
-
-    const cli = { prompt: null };
-    ext.hooks[HOOKS.CLI_ARGS_PARSED]({ cli });
-
-    expect(cli.subcommand).toBeUndefined();
   });
 });
 

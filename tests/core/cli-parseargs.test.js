@@ -14,53 +14,30 @@ function withArgs(args, fn) {
 }
 
 describe("parseArgs", () => {
-  it("parses --config flag", () => {
-    withArgs(["--config", "/path/to/config.json"], () => {
-      expect(parseArgs().config).toBe("/path/to/config.json");
-    });
-  });
+  const flagTests = [
+    { long: "--config", short: "-f", resultKey: "config", value: "/path/to/config.json" },
+    { long: "--model", short: "-m", resultKey: "model", value: "gpt-4" },
+    { long: "--ai-url", short: null, resultKey: "aiUrl", value: "http://localhost:8080" },
+    { long: "--api-key", short: null, resultKey: "apiKey", value: "secret-key" },
+    { long: "--profile", short: "-p", resultKey: "profile", value: "explorer" },
+    { long: "--provider", short: null, resultKey: "provider", value: "openai" },
+  ];
 
-  it("parses -f short flag for --config", () => {
-    withArgs(["-f", "/path/to/config.json"], () => {
-      expect(parseArgs().config).toBe("/path/to/config.json");
+  for (const { long, short, resultKey, value } of flagTests) {
+    it(`parses ${long} flag`, () => {
+      withArgs([long, value], () => {
+        expect(parseArgs()[resultKey]).toBe(value);
+      });
     });
-  });
 
-  it("parses --model flag", () => {
-    withArgs(["--model", "gpt-4"], () => {
-      expect(parseArgs().model).toBe("gpt-4");
-    });
-  });
-
-  it("parses -m short flag for --model", () => {
-    withArgs(["-m", "gpt-4"], () => {
-      expect(parseArgs().model).toBe("gpt-4");
-    });
-  });
-
-  it("parses --ai-url flag", () => {
-    withArgs(["--ai-url", "http://localhost:8080"], () => {
-      expect(parseArgs().aiUrl).toBe("http://localhost:8080");
-    });
-  });
-
-  it("parses --api-key flag", () => {
-    withArgs(["--api-key", "secret-key"], () => {
-      expect(parseArgs().apiKey).toBe("secret-key");
-    });
-  });
-
-  it("parses --profile flag", () => {
-    withArgs(["--profile", "explorer"], () => {
-      expect(parseArgs().profile).toBe("explorer");
-    });
-  });
-
-  it("parses --provider flag", () => {
-    withArgs(["--provider", "openai"], () => {
-      expect(parseArgs().provider).toBe("openai");
-    });
-  });
+    if (short) {
+      it(`parses ${short} short flag for ${long}`, () => {
+        withArgs([short, value], () => {
+          expect(parseArgs()[resultKey]).toBe(value);
+        });
+      });
+    }
+  }
 
   it("parses boolean flags", () => {
     withArgs(["--loud", "--json", "--version"], () => {

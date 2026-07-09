@@ -69,23 +69,15 @@ describe("estimateMessageTokens", () => {
     expect(tokens).toBe(Math.ceil("Simple response".length / 4));
   });
 
-  it("estimates tokens for message with unknown role", () => {
-    const msg = { role: "unknown", content: "something" };
-    const tokens = estimateMessageTokens(msg);
-    expect(tokens).toBeGreaterThan(0);
-  });
-
-  it("estimates tokens for assistant with empty reasoning_content", () => {
-    const msg = { role: "assistant", content: "Hi", reasoning_content: "" };
-    const tokens = estimateMessageTokens(msg);
-    // Empty reasoning_content should add 0 chars
-    expect(tokens).toBe(Math.ceil("Hi".length / 4));
-  });
-
-  it("estimates tokens for assistant with no tool_calls property", () => {
-    const msg = { role: "assistant", content: "Hi" };
-    const tokens = estimateMessageTokens(msg);
-    expect(tokens).toBe(Math.ceil("Hi".length / 4));
+  it("handles edge cases: unknown role, empty reasoning, no tool_calls", () => {
+    // Unknown role should still estimate > 0
+    expect(estimateMessageTokens({ role: "unknown", content: "something" })).toBeGreaterThan(0);
+    // Empty reasoning_content adds 0 chars
+    expect(estimateMessageTokens({ role: "assistant", content: "Hi", reasoning_content: "" }))
+      .toBe(Math.ceil("Hi".length / 4));
+    // No tool_calls property is same as empty
+    expect(estimateMessageTokens({ role: "assistant", content: "Hi" }))
+      .toBe(Math.ceil("Hi".length / 4));
   });
 });
 
@@ -124,61 +116,27 @@ describe("estimateContextTokens", () => {
 });
 
 describe("shouldCompact", () => {
-  it("returns true when over limit", () => {
-    const messages = [
-      { role: "user", content: "x".repeat(200) },
-      { role: "assistant", content: "y".repeat(200) },
-    ];
-    expect(shouldCompact(messages, 100, 50)).toBe(true);
-  });
+  const scenarios = [
+    { name: "over limit", messages: [{ role: "user", content: "x".repeat(200) }, { role: "assistant", content: "y".repeat(200) }], limit: 100, reserve: 50, expected: true },
+    { name: "under limit", messages: [{ role: "user", content: "Hi" }], limit: 1000, reserve: 100, expected: false },
+    { name: "exactly at limit", messages: [{ role: "user", content: "x".repeat(400) }, { role: "assistant", content: "x".repeat(400) }], limit: 200, reserve: 0, expected: false },
+    { name: "just over limit", messages: [{ role: "user", content: "x".repeat(404) }, { role: "assistant", content: "x".repeat(404) }], limit: 200, reserve: 0, expected: true },
+    { name: "empty messages", messages: [], limit: 100, reserve: 50, expected: false },
+  ];
 
-  it("returns false when under limit", () => {
-    const messages = [{ role: "user", content: "Hi" }];
-    expect(shouldCompact(messages, 1000, 100)).toBe(false);
-  });
-
-  it("accounts for reserve tokens", () => {
-    const messages = [
-      { role: "user", content: "x".repeat(200) },
-      { role: "assistant", content: "y".repeat(200) },
-    ];
-    expect(shouldCompact(messages, 100, 50)).toBe(true);
-  });
-
-  it("returns false when exactly at limit", () => {
-    // Create messages that total exactly contextLimit - reserveTokens
-    const content = "x".repeat(400); // 100 tokens each
-    const messages = [
-      { role: "user", content: content },
-      { role: "assistant", content: content },
-    ];
-    // Total: 200 tokens. Limit: 200, reserve: 0 => 200 - 0 = 200, not > 200
-    expect(shouldCompact(messages, 200, 0)).toBe(false);
-  });
-
-  it("returns true when just over limit", () => {
-    const content = "x".repeat(404); // ~101 tokens each
-    const messages = [
-      { role: "user", content: content },
-      { role: "assistant", content: content },
-    ];
-    // Total: ~202 tokens. Limit: 200, reserve: 0 => 202 > 200
-    expect(shouldCompact(messages, 200, 0)).toBe(true);
-  });
-
-  it("returns false for empty messages", () => {
-    expect(shouldCompact([], 100, 50)).toBe(false);
-  });
+  for (const { name, messages, limit, reserve, expected } of scenarios) {
+    it(`returns ${expected} when ${name}`, () => {
+      expect(shouldCompact(messages, limit, reserve)).toBe(expected);
+    });
+  }
 });
 
 describe("findFirstKeptIndex", () => {
-  it("returns 0 when keepRecent is 0", () => {
+  it("returns 0 for edge cases: keepRecent=0, not enough messages, all system, empty array", () => {
     expect(findFirstKeptIndex([{ role: "user", content: "test" }], 0)).toBe(0);
-  });
-
-  it("returns 0 when not enough messages", () => {
-    const messages = [{ role: "user", content: "test" }];
-    expect(findFirstKeptIndex(messages, 1)).toBe(0);
+    expect(findFirstKeptIndex([{ role: "user", content: "test" }], 1)).toBe(0);
+    expect(findFirstKeptIndex([{ role: "system", content: "a" }, { role: "system", content: "b" }], 1)).toBe(0);
+    expect(findFirstKeptIndex([], 1)).toBe(0);
   });
 
   it("skips system messages", () => {
@@ -191,26 +149,6 @@ describe("findFirstKeptIndex", () => {
     ];
     // 4 non-system messages, keepRecent=1 => need 2 from end => return 4
     expect(findFirstKeptIndex(messages, 1)).toBe(4);
-  });
-
-  it("returns correct index for keepRecent=2", () => {
-    const messages = [
-      { role: "user", content: "1" },
-      { role: "assistant", content: "2" },
-      { role: "user", content: "3" },
-      { role: "assistant", content: "4" },
-      { role: "user", content: "5" },
-      { role: "assistant", content: "6" },
-    ];
-    expect(findFirstKeptIndex(messages, 2)).toBe(3);
-  });
-
-  it("returns 0 when all messages are system", () => {
-    const messages = [
-      { role: "system", content: "a" },
-      { role: "system", content: "b" },
-    ];
-    expect(findFirstKeptIndex(messages, 1)).toBe(0);
   });
 
   it("returns correct index when system messages are interspersed", () => {
@@ -226,24 +164,21 @@ describe("findFirstKeptIndex", () => {
     expect(findFirstKeptIndex(messages, 1)).toBe(4);
   });
 
-  it("returns 0 for empty messages array", () => {
-    expect(findFirstKeptIndex([], 1)).toBe(0);
-  });
+  // Parameterized keepRecent tests
+  const keepRecentScenarios = [
+    { keepRecent: 2, messages: 6, expected: 3 },
+    { keepRecent: 3, messages: 8, expected: 3 },
+  ];
 
-  it("returns correct index for keepRecent=3", () => {
-    const messages = [
-      { role: "user", content: "1" },
-      { role: "assistant", content: "2" },
-      { role: "user", content: "3" },
-      { role: "assistant", content: "4" },
-      { role: "user", content: "5" },
-      { role: "assistant", content: "6" },
-      { role: "user", content: "7" },
-      { role: "assistant", content: "8" },
-    ];
-    // 8 non-system messages, keepRecent=3 => need 6 from end => firstKept = 3
-    expect(findFirstKeptIndex(messages, 3)).toBe(3);
-  });
+  for (const { keepRecent, messages, expected } of keepRecentScenarios) {
+    it(`returns correct index for keepRecent=${keepRecent} with ${messages} messages`, () => {
+      const msgs = Array.from({ length: messages }, (_, i) => ({
+        role: i % 2 === 0 ? "user" : "assistant",
+        content: String(i + 1),
+      }));
+      expect(findFirstKeptIndex(msgs, keepRecent)).toBe(expected);
+    });
+  }
 });
 
 describe("serializeConversation", () => {
@@ -313,29 +248,19 @@ describe("serializeConversation", () => {
     expect(serializeConversation([])).toBe("");
   });
 
-  it("handles unknown role gracefully", () => {
-    const messages = [{ role: "custom", content: "custom message" }];
-    const serialized = serializeConversation(messages);
-    expect(serialized).toContain("[custom]: custom message");
-  });
+  it("handles edge cases: unknown role, reasoning-only, tool_calls-only", () => {
+    expect(serializeConversation([{ role: "custom", content: "custom message" }]))
+      .toContain("[custom]: custom message");
 
-  it("handles assistant with only reasoning_content (no content)", () => {
-    const messages = [
-      { role: "assistant", reasoning_content: "Thinking..." },
-    ];
-    const serialized = serializeConversation(messages);
-    expect(serialized).toContain("[Assistant thinking]: Thinking...");
-    // Should not have "[Assistant]:" since content is empty
-    expect(serialized).not.toContain("[Assistant]: ");
-  });
+    const reasoningOnly = serializeConversation([{ role: "assistant", reasoning_content: "Thinking..." }]);
+    expect(reasoningOnly).toContain("[Assistant thinking]: Thinking...");
+    expect(reasoningOnly).not.toContain("[Assistant]: ");
 
-  it("handles assistant with only tool_calls (no content)", () => {
-    const messages = [
-      { role: "assistant", tool_calls: [{ function: { name: "bash", arguments: '{"cmd": "echo"}' } }] },
-    ];
-    const serialized = serializeConversation(messages);
-    expect(serialized).toContain("[Assistant tool calls]");
-    expect(serialized).not.toContain("[Assistant]: ");
+    const toolCallsOnly = serializeConversation([{
+      role: "assistant", tool_calls: [{ function: { name: "bash", arguments: '{"cmd": "echo"}' } }]
+    }]);
+    expect(toolCallsOnly).toContain("[Assistant tool calls]");
+    expect(toolCallsOnly).not.toContain("[Assistant]: ");
   });
 
   it("handles tool result under truncation threshold", () => {
@@ -917,30 +842,14 @@ describe("DropStrategy", () => {
     expect(result.messagesCompacted).toBeGreaterThan(0);
   });
 
-  it("handles messages with tool_calls", async () => {
+  it("handles messages with tool_calls and reasoning_content", async () => {
     const strategy = new DropStrategy();
     const messages = [
       { role: "user", content: "List files" },
       { role: "assistant", content: "Running ls", tool_calls: [{ function: { name: "bash", arguments: '{"cmd": "ls"}' } }] },
       { role: "tool", content: "file1.txt" },
-      { role: "user", content: "Read file1" },
-      { role: "assistant", content: "Reading", tool_calls: [{ function: { name: "read", arguments: '{"path": "file1.txt"}' } }] },
-    ];
-    const llmChat = async () => { throw new Error("Should not be called"); };
-
-    const result = await strategy.execute(messages, { keepRecent: 1 }, llmChat, "model");
-
-    expect(result).not.toBeNull();
-    expect(result.metadata.tokensBefore).toBeGreaterThan(result.metadata.tokensAfter);
-  });
-
-  it("handles messages with reasoning_content", async () => {
-    const strategy = new DropStrategy();
-    const messages = [
       { role: "user", content: "What is 2+2?" },
       { role: "assistant", content: "4", reasoning_content: "Simple math" },
-      { role: "user", content: "And 3+3?" },
-      { role: "assistant", content: "6", reasoning_content: "Easy" },
     ];
     const llmChat = async () => { throw new Error("Should not be called"); };
 
@@ -960,58 +869,21 @@ describe("DropStrategy", () => {
     expect(result).toBeNull();
   });
 
-  it("canCompact returns false with few non-system messages", () => {
-    const strategy = new DropStrategy();
-    const messages = [
-      { role: "user", content: "hi" },
-      { role: "assistant", content: "hello" },
-    ];
-    expect(strategy.canCompact(messages, { keepRecent: 3 })).toBe(false);
-  });
+  // Parameterized canCompact tests
+  const canCompactScenarios = [
+    { name: "few non-system messages", messages: [{ role: "user", content: "hi" }, { role: "assistant", content: "hello" }], opts: { keepRecent: 3 }, expected: false },
+    { name: "enough non-system messages", messages: Array.from({ length: 6 }, (_, i) => ({ role: i % 2 === 0 ? "user" : "assistant", content: "x" })), opts: { keepRecent: 1 }, expected: true },
+    { name: "ignores system messages", messages: [{ role: "system", content: "p" }, { role: "system", content: "p2" }, { role: "user", content: "hi" }, { role: "assistant", content: "hello" }], opts: { keepRecent: 3 }, expected: false },
+    { name: "default keepRecent of 3, 6 messages (equal)", messages: Array.from({ length: 6 }, (_, i) => ({ role: i % 2 === 0 ? "user" : "assistant", content: "x" })), opts: {}, expected: false },
+    { name: "default keepRecent of 3, 7 messages (exceeds)", messages: Array.from({ length: 7 }, (_, i) => ({ role: i % 2 === 0 ? "user" : "assistant", content: "x" })), opts: {}, expected: true },
+  ];
 
-  it("canCompact returns true with enough non-system messages", () => {
-    const strategy = new DropStrategy();
-    const messages = [
-      { role: "user", content: "1" },
-      { role: "assistant", content: "2" },
-      { role: "user", content: "3" },
-      { role: "assistant", content: "4" },
-      { role: "user", content: "5" },
-      { role: "assistant", content: "6" },
-    ];
-    expect(strategy.canCompact(messages, { keepRecent: 1 })).toBe(true);
-  });
-
-  it("canCompact ignores system messages", () => {
-    const strategy = new DropStrategy();
-    const messages = [
-      { role: "system", content: "prompt" },
-      { role: "system", content: "prompt2" },
-      { role: "user", content: "hi" },
-      { role: "assistant", content: "hello" },
-    ];
-    expect(strategy.canCompact(messages, { keepRecent: 3 })).toBe(false);
-  });
-
-  it("canCompact with default keepRecent of 3", () => {
-    const strategy = new DropStrategy();
-    // 6 non-system messages > 3*2=6? No, equal, so false
-    const messages = Array.from({ length: 6 }, (_, i) => ({
-      role: i % 2 === 0 ? "user" : "assistant",
-      content: "x",
-    }));
-    expect(strategy.canCompact(messages, {})).toBe(false);
-  });
-
-  it("canCompact with default keepRecent of 3 and 7 non-system messages", () => {
-    const strategy = new DropStrategy();
-    const messages = Array.from({ length: 7 }, (_, i) => ({
-      role: i % 2 === 0 ? "user" : "assistant",
-      content: "x",
-    }));
-    // 7 > 6 => true
-    expect(strategy.canCompact(messages, {})).toBe(true);
-  });
+  for (const { name, messages, opts, expected } of canCompactScenarios) {
+    it(`canCompact returns ${expected} when ${name}`, () => {
+      const strategy = new DropStrategy();
+      expect(strategy.canCompact(messages, opts)).toBe(expected);
+    });
+  }
 
   it("includes correct token metadata", async () => {
     const strategy = new DropStrategy();
@@ -1219,35 +1091,23 @@ describe("CompactionStrategyRegistry", () => {
     expect(registry.getAll()).toEqual([]);
   });
 
-  it("registers and retrieves strategies", () => {
+  it("registers, retrieves, and checks strategy existence", () => {
     const registry = new CompactionStrategyRegistry();
     registry.register(new DropStrategy());
     expect(registry.get("drop")).toBeDefined();
     expect(registry.getAll()).toHaveLength(1);
-  });
-
-  it("returns undefined for unknown strategy", () => {
-    const registry = new CompactionStrategyRegistry();
     expect(registry.get("nonexistent")).toBeUndefined();
-  });
-
-  it("has() checks for strategy existence", () => {
-    const registry = new CompactionStrategyRegistry();
-    registry.register(new DropStrategy());
     expect(registry.has("drop")).toBe(true);
     expect(registry.has("nonexistent")).toBe(false);
   });
 
-  it("getDefault returns summarize strategy when registered", () => {
-    const registry = new CompactionStrategyRegistry();
-    registry.register(new DropStrategy());
-    registry.register(new SummarizeStrategy());
-    expect(registry.getDefault()).toBeDefined();
-  });
+  it("getDefault returns summarize when registered, undefined otherwise", () => {
+    const empty = new CompactionStrategyRegistry();
+    expect(empty.getDefault()).toBeUndefined();
 
-  it("getDefault returns undefined when no summarize strategy registered", () => {
-    const registry = new CompactionStrategyRegistry();
-    expect(registry.getDefault()).toBeUndefined();
+    const withSummarize = new CompactionStrategyRegistry();
+    withSummarize.register(new SummarizeStrategy());
+    expect(withSummarize.getDefault()).toBeDefined();
   });
 
   it("overwrites strategy with same name", () => {

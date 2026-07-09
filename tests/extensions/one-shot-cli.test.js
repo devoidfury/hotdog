@@ -1,116 +1,37 @@
 import { describe, it, expect, beforeEach, afterEach } from "bun:test";
-import { HookSystem, HOOKS } from "../../src/core/hooks.js";
-import { ToolRegistry } from "../../src/core/extensions/tool-registry.js";
-import { createSubcommandRegistry } from "../../src/core/extensions/registries.js";
-import { join } from "node:path";
-import { homedir } from "node:os";
-
-function createMockCore(config = {}) {
-  const hooks = new HookSystem();
-  const toolRegistry = new ToolRegistry();
-  const cliSubcommandRegistry = createSubcommandRegistry();
-
-  const resolved = {
-    baseUrl: "http://localhost:8080",
-    apiKey: "test-key",
-    model: "test-model",
-    stream: false,
-    chatTimeout: 30,
-    profileName: "default",
-    profile: {},
-    hideTools: false,
-    hideThinking: false,
-    showTokenUse: false,
-    role: "",
-    profileBody: "",
-    activeProvider: null,
-    configDir: join(homedir(), ".config", "hotdog"),
-    ...config.resolved,
-  };
-
-  return {
-    hooks,
-    toolRegistry,
-    cliSubcommandRegistry,
-    config: {
-      theme: "dark",
-      maxIterations: 100,
-      skillsPath: join(homedir(), ".hotdog", "skills"),
-      ...config.coreConfig,
-    },
-    resolved,
-    modelRegistry: config.modelRegistry || {},
-    extensions: {
-      has: () => false,
-      load: async () => null,
-      cleanup: async () => {},
-    },
-    buildConfig:
-      config.buildConfig ||
-      (async () => ({
-        resolved,
-        modelRegistry: config.modelRegistry || {},
-        providers: config.providers || [],
-      })),
-  };
-}
+import { HOOKS } from "../../src/core/hooks.js";
+import { createMockCore } from "../helpers.js";
 
 describe("One-Shot Extension - CLI_ARGS_PARSED hook", () => {
-  it("sets subcommand to 'prompt' when --prompt flag is present", async () => {
-    const core = createMockCore();
-    const { create } = await import("../../src/extensions/ui-one-shot/index.js");
-    const ext = create(core);
+  const truthyCases = [
+    { value: "test prompt", expected: "prompt" },
+    { value: "  hello  ", expected: "prompt" },
+  ];
+  const falsyCases = [
+    { value: null, expected: undefined },
+    { value: "", expected: undefined },
+    { value: 0, expected: undefined },
+  ];
 
-    const cli = { prompt: "test prompt" };
-    ext.hooks[HOOKS.CLI_ARGS_PARSED]({ cli });
+  for (const { value, expected } of truthyCases) {
+    it(`sets subcommand when --prompt is truthy (${JSON.stringify(value)})`, async () => {
+      const { create } = await import("../../src/extensions/ui-one-shot/index.js");
+      const ext = create(createMockCore());
+      const cli = { prompt: value };
+      ext.hooks[HOOKS.CLI_ARGS_PARSED]({ cli });
+      expect(cli.subcommand).toBe(expected);
+    });
+  }
 
-    expect(cli.subcommand).toBe("prompt");
-  });
-
-  it("does not set subcommand when --prompt flag is absent", async () => {
-    const core = createMockCore();
-    const { create } = await import("../../src/extensions/ui-one-shot/index.js");
-    const ext = create(core);
-
-    const cli = { prompt: null };
-    ext.hooks[HOOKS.CLI_ARGS_PARSED]({ cli });
-
-    expect(cli.subcommand).toBeUndefined();
-  });
-
-  it("does not set subcommand when --prompt is empty string", async () => {
-    const core = createMockCore();
-    const { create } = await import("../../src/extensions/ui-one-shot/index.js");
-    const ext = create(core);
-
-    const cli = { prompt: "" };
-    ext.hooks[HOOKS.CLI_ARGS_PARSED]({ cli });
-
-    expect(cli.subcommand).toBeUndefined();
-  });
-
-  it("sets subcommand when --prompt has whitespace", async () => {
-    const core = createMockCore();
-    const { create } = await import("../../src/extensions/ui-one-shot/index.js");
-    const ext = create(core);
-
-    const cli = { prompt: "  hello  " };
-    ext.hooks[HOOKS.CLI_ARGS_PARSED]({ cli });
-
-    expect(cli.subcommand).toBe("prompt");
-  });
-
-  it("sets subcommand when --prompt is 0 (falsy but present)", async () => {
-    const core = createMockCore();
-    const { create } = await import("../../src/extensions/ui-one-shot/index.js");
-    const ext = create(core);
-
-    const cli = { prompt: 0 };
-    ext.hooks[HOOKS.CLI_ARGS_PARSED]({ cli });
-
-    // 0 is falsy, so subcommand should not be set
-    expect(cli.subcommand).toBeUndefined();
-  });
+  for (const { value, expected } of falsyCases) {
+    it(`does not set subcommand when --prompt is falsy (${JSON.stringify(value)})`, async () => {
+      const { create } = await import("../../src/extensions/ui-one-shot/index.js");
+      const ext = create(createMockCore());
+      const cli = { prompt: value };
+      ext.hooks[HOOKS.CLI_ARGS_PARSED]({ cli });
+      expect(cli.subcommand).toBe(expected);
+    });
+  }
 });
 
 describe("One-Shot Extension - prompt subcommand registration", () => {

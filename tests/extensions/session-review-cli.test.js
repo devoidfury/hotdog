@@ -1,55 +1,9 @@
 import { describe, it, expect, beforeEach, afterEach } from "bun:test";
-import { HookSystem, HOOKS } from "../../src/core/hooks.js";
-import { ToolRegistry } from "../../src/core/extensions/tool-registry.js";
-import { createSubcommandRegistry } from "../../src/core/extensions/registries.js";
+import { HOOKS } from "../../src/core/hooks.js";
 import { mkdirSync, rmSync, writeFileSync, readFileSync, readdirSync, mkdtempSync } from "node:fs";
 import { join } from "node:path";
 import { homedir, tmpdir } from "node:os";
-
-function createMockCore(config = {}) {
-  const hooks = new HookSystem();
-  const toolRegistry = new ToolRegistry();
-  const cliSubcommandRegistry = createSubcommandRegistry();
-
-  const resolved = {
-    baseUrl: "http://localhost:8080",
-    apiKey: "test-key",
-    model: "test-model",
-    stream: false,
-    chatTimeout: 30,
-    profileName: "default",
-    profile: {},
-    hideTools: false,
-    hideThinking: false,
-    showTokenUse: false,
-    role: "",
-    profileBody: "",
-  };
-
-  return {
-    hooks,
-    toolRegistry,
-    cliSubcommandRegistry,
-    config: {
-      theme: "dark",
-      maxIterations: 100,
-      skillsPath: join(homedir(), ".hotdog", "skills"),
-      ...config.coreConfig,
-    },
-    resolved,
-    modelRegistry: {},
-    extensions: {
-      has: () => false,
-      load: async () => null,
-      cleanup: async () => {},
-    },
-    buildConfig: async () => ({
-      resolved,
-      modelRegistry: {},
-      providers: [],
-    }),
-  };
-}
+import { createMockCore } from "../helpers.js";
 
 describe("Session Review CLI - listSessions", () => {
   const sessionsDir = join(homedir(), ".cache", "hotdog", "sessions");
@@ -82,24 +36,15 @@ describe("Session Review CLI - listSessions", () => {
     await ext.hooks[HOOKS.CLI_SUBCOMMANDS_REGISTER](core.cliSubcommandRegistry);
 
     const def = core.cliSubcommandRegistry.get("review");
-    const cli = {
-      sessionId: null,
-      wantsJson: true,
-      toolIndex: false,
-      colors: false,
-      theme: "dark",
-    };
+    const cli = { sessionId: null, wantsJson: true, toolIndex: false, colors: false, theme: "dark" };
 
     let capturedOutput = "";
     const originalLog = console.log;
-    console.log = (msg) => {
-      capturedOutput += msg + "\n";
-    };
+    console.log = (msg) => { capturedOutput += msg + "\n"; };
 
     try {
       const exitCode = await def.handler(cli, core);
       expect(exitCode).toBe(0);
-
       const parsed = JSON.parse(capturedOutput.trim());
       expect(Array.isArray(parsed)).toBe(true);
       const found = parsed.find((s) => s.id === TEST_SESSION_ID);
@@ -127,19 +72,11 @@ describe("Session Review CLI - listSessions", () => {
     await ext.hooks[HOOKS.CLI_SUBCOMMANDS_REGISTER](core.cliSubcommandRegistry);
 
     const def = core.cliSubcommandRegistry.get("review");
-    const cli = {
-      sessionId: null,
-      wantsJson: false,
-      toolIndex: false,
-      colors: false,
-      theme: "dark",
-    };
+    const cli = { sessionId: null, wantsJson: false, toolIndex: false, colors: false, theme: "dark" };
 
     let capturedOutput = "";
     const originalLog = console.log;
-    console.log = (msg) => {
-      capturedOutput += msg + "\n";
-    };
+    console.log = (msg) => { capturedOutput += msg + "\n"; };
 
     try {
       const exitCode = await def.handler(cli, core);

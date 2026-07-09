@@ -1,145 +1,93 @@
 import { describe, it, expect, beforeEach, afterEach } from "bun:test";
-import { HookSystem, HOOKS } from "../../src/core/hooks.js";
-import { ToolRegistry } from "../../src/core/extensions/tool-registry.js";
-import { createSubcommandRegistry } from "../../src/core/extensions/registries.js";
+import { HOOKS } from "../../src/core/hooks.js";
 import { mkdirSync, rmSync, writeFileSync, mkdtempSync } from "node:fs";
 import { join } from "node:path";
 import { homedir, tmpdir } from "node:os";
+import { createMockCore } from "../helpers.js";
 
-function createMockCore(config = {}) {
-  const hooks = new HookSystem();
-  const toolRegistry = new ToolRegistry();
-  const cliSubcommandRegistry = createSubcommandRegistry();
+// ── Shared helper to reduce boilerplate ─────────────────────────────────────
 
-  const resolved = {
-    baseUrl: "http://localhost:8080",
-    apiKey: "test-key",
-    model: "test-model",
-    stream: false,
-    chatTimeout: 30,
-    maxRetries: 3,
-    maxIterations: 100,
-    maxTokens: 4096,
-    profileName: "default",
-    profile: {},
-    hideTools: false,
-    hideThinking: false,
-    showTokenUse: false,
-    role: "",
-    profileBody: "",
-    activeProvider: null,
-    configDir: join(homedir(), ".config", "hotdog"),
-    ...config.resolved,
+/**
+ * Creates an info CLI extension, registers it, and returns a runner that
+ * captures console.log output.
+ *
+ * Usage:
+ *   const runner = await infoCliRunner(coreConfig, { wantsJson: true });
+ *   const output = await runner("info", cliOverrides);
+ *   // or
+ *   const output = await runner("profiles", cliOverrides);
+ */
+async function infoCliRunner(coreConfig = {}, defaultCli = {}) {
+  const core = createMockCore(coreConfig);
+  const { create } = await import("../../src/extensions/ui-info-cli/index.js");
+  const ext = create(core);
+  await ext.hooks[HOOKS.CLI_SUBCOMMANDS_REGISTER](core.cliSubcommandRegistry);
+
+  const baseCli = {
+    wantsJson: false,
+    colors: false,
+    theme: "dark",
+    config: null,
+    skillsPath: null,
+    configDir: null,
+    config_debug: false,
+    profile: null,
+    provider: null,
+    ...defaultCli,
   };
 
-  return {
-    hooks,
-    toolRegistry,
-    cliSubcommandRegistry,
-    config: {
-      theme: "dark",
-      maxIterations: 100,
-      skillsPath: join(homedir(), ".hotdog", "skills"),
-      ...config.coreConfig,
-    },
-    resolved,
-    modelRegistry: config.modelRegistry || {},
-    extensions: {
-      has: () => false,
-      load: async () => null,
-      cleanup: async () => {},
-    },
-    buildConfig:
-      config.buildConfig ||
-      (async () => ({
-        resolved,
-        modelRegistry: config.modelRegistry || {},
-        providers: config.providers || [],
-      })),
+  return async (subcommand, cliOverrides = {}) => {
+    const def = core.cliSubcommandRegistry.get(subcommand);
+    const cli = { ...baseCli, ...cliOverrides };
+
+    let capturedOutput = "";
+    const originalLog = console.log;
+    console.log = (...args) => {
+      capturedOutput += args.join(" ") + "\n";
+    };
+
+    try {
+      const exitCode = await def.handler(cli, core);
+      return { exitCode, output: capturedOutput };
+    } finally {
+      console.log = originalLog;
+    }
   };
 }
 
+// ── printInfoText branches ──────────────────────────────────────────────────
+
 describe("Info CLI - printInfoText branches", () => {
   it("shows whitelist tools when profile has whitelistTools", async () => {
-    const core = createMockCore({
+    const run = await infoCliRunner({
       resolved: {
         profileName: "test",
         profile: { whitelistTools: ["read", "write"] },
       },
     });
-    const { create } = await import("../../src/extensions/ui-info-cli/index.js");
-    const ext = create(core);
-    await ext.hooks[HOOKS.CLI_SUBCOMMANDS_REGISTER](core.cliSubcommandRegistry);
-
-    const def = core.cliSubcommandRegistry.get("info");
-    const cli = {
-      wantsJson: false,
-      colors: false,
-      theme: "dark",
-      config: null,
-      skillsPath: null,
-      configDir: null,
-      config_debug: false,
-    };
-
-    let capturedOutput = "";
-    const originalLog = console.log;
-    console.log = (msg) => {
-      capturedOutput += msg + "\n";
-    };
-
-    try {
-      const exitCode = await def.handler(cli, core);
-      expect(exitCode).toBe(0);
-      expect(capturedOutput).toContain("Whitelist Tools:");
-      expect(capturedOutput).toContain("read");
-      expect(capturedOutput).toContain("write");
-    } finally {
-      console.log = originalLog;
-    }
+    const { exitCode, output } = await run("info");
+    expect(exitCode).toBe(0);
+    expect(output).toContain("Whitelist Tools:");
+    expect(output).toContain("read");
+    expect(output).toContain("write");
   });
 
   it("shows blacklist tools when profile has blacklistTools", async () => {
-    const core = createMockCore({
+    const run = await infoCliRunner({
       resolved: {
         profileName: "test",
         profile: { blacklistTools: ["bash", "fetch"] },
       },
     });
-    const { create } = await import("../../src/extensions/ui-info-cli/index.js");
-    const ext = create(core);
-    await ext.hooks[HOOKS.CLI_SUBCOMMANDS_REGISTER](core.cliSubcommandRegistry);
-
-    const def = core.cliSubcommandRegistry.get("info");
-    const cli = {
-      wantsJson: false,
-      colors: false,
-      theme: "dark",
-      config: null,
-      skillsPath: null,
-      configDir: null,
-      config_debug: false,
-    };
-
-    let capturedOutput = "";
-    const originalLog = console.log;
-    console.log = (msg) => {
-      capturedOutput += msg + "\n";
-    };
-
-    try {
-      const exitCode = await def.handler(cli, core);
-      expect(exitCode).toBe(0);
-      expect(capturedOutput).toContain("Blacklist Tools:");
-      expect(capturedOutput).toContain("bash");
-      expect(capturedOutput).toContain("fetch");
-    } finally {
-      console.log = originalLog;
-    }
+    const { exitCode, output } = await run("info");
+    expect(exitCode).toBe(0);
+    expect(output).toContain("Blacklist Tools:");
+    expect(output).toContain("bash");
+    expect(output).toContain("fetch");
   });
 
   it("shows providers when configured", async () => {
-    const core = createMockCore({
+    const run = await infoCliRunner({
       providers: [
         {
           name: "test-provider",
@@ -154,42 +102,16 @@ describe("Info CLI - printInfoText branches", () => {
         activeProvider: "test-provider",
       },
     });
-    const { create } = await import("../../src/extensions/ui-info-cli/index.js");
-    const ext = create(core);
-    await ext.hooks[HOOKS.CLI_SUBCOMMANDS_REGISTER](core.cliSubcommandRegistry);
-
-    const def = core.cliSubcommandRegistry.get("info");
-    const cli = {
-      wantsJson: false,
-      colors: false,
-      theme: "dark",
-      config: null,
-      skillsPath: null,
-      configDir: null,
-      config_debug: false,
-    };
-
-    let capturedOutput = "";
-    const originalLog = console.log;
-    console.log = (msg) => {
-      capturedOutput += msg + "\n";
-    };
-
-    try {
-      const exitCode = await def.handler(cli, core);
-      expect(exitCode).toBe(0);
-      expect(capturedOutput).toContain("Providers:");
-      expect(capturedOutput).toContain("test-provider");
-      expect(capturedOutput).toContain("(active)");
-      expect(capturedOutput).toContain("model-1");
-      expect(capturedOutput).toContain("Active Provider:");
-    } finally {
-      console.log = originalLog;
-    }
+    const { exitCode, output } = await run("info");
+    expect(exitCode).toBe(0);
+    expect(output).toContain("Providers:");
+    expect(output).toContain("test-provider");
+    expect(output).toContain("(active)");
+    expect(output).toContain("model-1");
+    expect(output).toContain("Active Provider:");
   });
 
   it("shows MCP servers when configured", async () => {
-    // Create a temp config file with MCP servers
     const tmpDir = mkdtempSync(join(tmpdir(), "hotdog-test-mcp-"));
     const configPath = join(tmpDir, "defaults.json");
     writeFileSync(
@@ -203,52 +125,23 @@ describe("Info CLI - printInfoText branches", () => {
     );
 
     try {
-      const core = createMockCore();
-      const { create } = await import("../../src/extensions/ui-info-cli/index.js");
-      const ext = create(core);
-      await ext.hooks[HOOKS.CLI_SUBCOMMANDS_REGISTER](core.cliSubcommandRegistry);
-
-      const def = core.cliSubcommandRegistry.get("info");
-      const cli = {
-        wantsJson: false,
-        colors: false,
-        theme: "dark",
-        config: configPath,
-        skillsPath: null,
-        configDir: null,
-        config_debug: false,
-      };
-
-      let capturedOutput = "";
-      const originalLog = console.log;
-      console.log = (msg) => {
-        capturedOutput += msg + "\n";
-      };
-
-      try {
-        const exitCode = await def.handler(cli, core);
-        expect(exitCode).toBe(0);
-        expect(capturedOutput).toContain("MCP Servers:");
-        expect(capturedOutput).toContain("server-http");
-        expect(capturedOutput).toContain("HTTP");
-        expect(capturedOutput).toContain("enabled");
-        expect(capturedOutput).toContain("server-stdio");
-        expect(capturedOutput).toContain("stdio");
-        expect(capturedOutput).toContain("disabled");
-      } finally {
-        console.log = originalLog;
-      }
+      const run = await infoCliRunner({}, { config: configPath });
+      const { exitCode, output } = await run("info");
+      expect(exitCode).toBe(0);
+      expect(output).toContain("MCP Servers:");
+      expect(output).toContain("server-http");
+      expect(output).toContain("HTTP");
+      expect(output).toContain("enabled");
+      expect(output).toContain("server-stdio");
+      expect(output).toContain("stdio");
+      expect(output).toContain("disabled");
     } finally {
-      try {
-        rmSync(configPath);
-        rmSync(tmpDir);
-      } catch {}
+      try { rmSync(configPath); rmSync(tmpDir); } catch {}
     }
   });
 
   it("shows connectivity unreachable when ping fails", async () => {
-    // Create a core with a buildConfig that returns a client that fails ping
-    const core = createMockCore({
+    const run = await infoCliRunner({
       buildConfig: async () => ({
         resolved: {
           baseUrl: "http://nonexistent.invalid:99999",
@@ -266,38 +159,14 @@ describe("Info CLI - printInfoText branches", () => {
         providers: [],
       }),
     });
-
-    const { create } = await import("../../src/extensions/ui-info-cli/index.js");
-    const ext = create(core);
-    await ext.hooks[HOOKS.CLI_SUBCOMMANDS_REGISTER](core.cliSubcommandRegistry);
-
-    const def = core.cliSubcommandRegistry.get("info");
-    const cli = {
-      wantsJson: false,
-      colors: false,
-      theme: "dark",
-      config: null,
-      skillsPath: null,
-      configDir: null,
-      config_debug: false,
-    };
-
-    let capturedOutput = "";
-    const originalLog = console.log;
-    console.log = (msg) => {
-      capturedOutput += msg + "\n";
-    };
-
-    try {
-      const exitCode = await def.handler(cli, core);
-      expect(exitCode).toBe(0);
-      expect(capturedOutput).toContain("Connectivity:");
-      expect(capturedOutput).toContain("unreachable");
-    } finally {
-      console.log = originalLog;
-    }
+    const { exitCode, output } = await run("info");
+    expect(exitCode).toBe(0);
+    expect(output).toContain("Connectivity:");
+    expect(output).toContain("unreachable");
   });
 });
+
+// ── printInfoJson branches ──────────────────────────────────────────────────
 
 describe("Info CLI - printInfoJson branches", () => {
   it("includes mcp_servers in JSON output", async () => {
@@ -313,50 +182,22 @@ describe("Info CLI - printInfoJson branches", () => {
     );
 
     try {
-      const core = createMockCore();
-      const { create } = await import("../../src/extensions/ui-info-cli/index.js");
-      const ext = create(core);
-      await ext.hooks[HOOKS.CLI_SUBCOMMANDS_REGISTER](core.cliSubcommandRegistry);
+      const run = await infoCliRunner({}, { wantsJson: true, config: configPath });
+      const { exitCode, output } = await run("info");
+      expect(exitCode).toBe(0);
 
-      const def = core.cliSubcommandRegistry.get("info");
-      const cli = {
-        wantsJson: true,
-        colors: false,
-        theme: "dark",
-        config: configPath,
-        skillsPath: null,
-        configDir: null,
-        config_debug: false,
-      };
-
-      let capturedOutput = "";
-      const originalLog = console.log;
-      console.log = (msg) => {
-        capturedOutput += msg + "\n";
-      };
-
-      try {
-        const exitCode = await def.handler(cli, core);
-        expect(exitCode).toBe(0);
-
-        const parsed = JSON.parse(capturedOutput.trim());
-        expect(parsed.mcp_servers).toBeDefined();
-        expect(parsed.mcp_servers.length).toBe(1);
-        expect(parsed.mcp_servers[0].name).toBe("test-server");
-        expect(parsed.mcp_servers[0].enabled).toBe(true);
-      } finally {
-        console.log = originalLog;
-      }
+      const parsed = JSON.parse(output.trim());
+      expect(parsed.mcp_servers).toBeDefined();
+      expect(parsed.mcp_servers.length).toBe(1);
+      expect(parsed.mcp_servers[0].name).toBe("test-server");
+      expect(parsed.mcp_servers[0].enabled).toBe(true);
     } finally {
-      try {
-        rmSync(configPath);
-        rmSync(tmpDir);
-      } catch {}
+      try { rmSync(configPath); rmSync(tmpDir); } catch {}
     }
   });
 
   it("includes connectivity error in JSON output", async () => {
-    const core = createMockCore({
+    const run = await infoCliRunner({
       buildConfig: async () => ({
         resolved: {
           baseUrl: "http://nonexistent.invalid:99999",
@@ -373,43 +214,17 @@ describe("Info CLI - printInfoJson branches", () => {
         modelRegistry: {},
         providers: [],
       }),
-    });
+    }, { wantsJson: true });
+    const { exitCode, output } = await run("info");
+    expect(exitCode).toBe(0);
 
-    const { create } = await import("../../src/extensions/ui-info-cli/index.js");
-    const ext = create(core);
-    await ext.hooks[HOOKS.CLI_SUBCOMMANDS_REGISTER](core.cliSubcommandRegistry);
-
-    const def = core.cliSubcommandRegistry.get("info");
-    const cli = {
-      wantsJson: true,
-      colors: false,
-      theme: "dark",
-      config: null,
-      skillsPath: null,
-      configDir: null,
-      config_debug: false,
-    };
-
-    let capturedOutput = "";
-    const originalLog = console.log;
-    console.log = (msg) => {
-      capturedOutput += msg + "\n";
-    };
-
-    try {
-      const exitCode = await def.handler(cli, core);
-      expect(exitCode).toBe(0);
-
-      const parsed = JSON.parse(capturedOutput.trim());
-      expect(parsed.connectivity.reachable).toBe(false);
-      expect(parsed.connectivity.error).not.toBeNull();
-    } finally {
-      console.log = originalLog;
-    }
+    const parsed = JSON.parse(output.trim());
+    expect(parsed.connectivity.reachable).toBe(false);
+    expect(parsed.connectivity.error).not.toBeNull();
   });
 
   it("includes profile whitelist and blacklist in JSON", async () => {
-    const core = createMockCore({
+    const run = await infoCliRunner({
       resolved: {
         profileName: "test",
         profile: {
@@ -417,42 +232,17 @@ describe("Info CLI - printInfoJson branches", () => {
           blacklistTools: ["bash"],
         },
       },
-    });
-    const { create } = await import("../../src/extensions/ui-info-cli/index.js");
-    const ext = create(core);
-    await ext.hooks[HOOKS.CLI_SUBCOMMANDS_REGISTER](core.cliSubcommandRegistry);
+    }, { wantsJson: true });
+    const { exitCode, output } = await run("info");
+    expect(exitCode).toBe(0);
 
-    const def = core.cliSubcommandRegistry.get("info");
-    const cli = {
-      wantsJson: true,
-      colors: false,
-      theme: "dark",
-      config: null,
-      skillsPath: null,
-      configDir: null,
-      config_debug: false,
-    };
-
-    let capturedOutput = "";
-    const originalLog = console.log;
-    console.log = (msg) => {
-      capturedOutput += msg + "\n";
-    };
-
-    try {
-      const exitCode = await def.handler(cli, core);
-      expect(exitCode).toBe(0);
-
-      const parsed = JSON.parse(capturedOutput.trim());
-      expect(parsed.config.profile_whitelist).toEqual(["read", "write"]);
-      expect(parsed.config.profile_blacklist).toEqual(["bash"]);
-    } finally {
-      console.log = originalLog;
-    }
+    const parsed = JSON.parse(output.trim());
+    expect(parsed.config.profile_whitelist).toEqual(["read", "write"]);
+    expect(parsed.config.profile_blacklist).toEqual(["bash"]);
   });
 
   it("includes providers in JSON output", async () => {
-    const core = createMockCore({
+    const run = await infoCliRunner({
       providers: [
         {
           name: "test-provider",
@@ -463,159 +253,55 @@ describe("Info CLI - printInfoJson branches", () => {
       resolved: {
         activeProvider: "test-provider",
       },
-    });
-    const { create } = await import("../../src/extensions/ui-info-cli/index.js");
-    const ext = create(core);
-    await ext.hooks[HOOKS.CLI_SUBCOMMANDS_REGISTER](core.cliSubcommandRegistry);
+    }, { wantsJson: true });
+    const { exitCode, output } = await run("info");
+    expect(exitCode).toBe(0);
 
-    const def = core.cliSubcommandRegistry.get("info");
-    const cli = {
-      wantsJson: true,
-      colors: false,
-      theme: "dark",
-      config: null,
-      skillsPath: null,
-      configDir: null,
-      config_debug: false,
-    };
-
-    let capturedOutput = "";
-    const originalLog = console.log;
-    console.log = (msg) => {
-      capturedOutput += msg + "\n";
-    };
-
-    try {
-      const exitCode = await def.handler(cli, core);
-      expect(exitCode).toBe(0);
-
-      const parsed = JSON.parse(capturedOutput.trim());
-      expect(parsed.providers.configured.length).toBe(1);
-      expect(parsed.providers.configured[0].name).toBe("test-provider");
-      expect(parsed.providers.active).toBe("test-provider");
-    } finally {
-      console.log = originalLog;
-    }
+    const parsed = JSON.parse(output.trim());
+    expect(parsed.providers.configured.length).toBe(1);
+    expect(parsed.providers.configured[0].name).toBe("test-provider");
+    expect(parsed.providers.active).toBe("test-provider");
   });
 
   it("includes model tags in JSON output", async () => {
-    const core = createMockCore({
+    const run = await infoCliRunner({
       modelRegistry: {
         "test-model": { tags: ["fast", "coding"], provider: "test" },
       },
-    });
-    const { create } = await import("../../src/extensions/ui-info-cli/index.js");
-    const ext = create(core);
-    await ext.hooks[HOOKS.CLI_SUBCOMMANDS_REGISTER](core.cliSubcommandRegistry);
+    }, { wantsJson: true });
+    const { exitCode, output } = await run("info");
+    expect(exitCode).toBe(0);
 
-    const def = core.cliSubcommandRegistry.get("info");
-    const cli = {
-      wantsJson: true,
-      colors: false,
-      theme: "dark",
-      config: null,
-      skillsPath: null,
-      configDir: null,
-      config_debug: false,
-    };
-
-    let capturedOutput = "";
-    const originalLog = console.log;
-    console.log = (msg) => {
-      capturedOutput += msg + "\n";
-    };
-
-    try {
-      const exitCode = await def.handler(cli, core);
-      expect(exitCode).toBe(0);
-
-      const parsed = JSON.parse(capturedOutput.trim());
-      const model = parsed.models.find((m) => m.name === "test-model");
-      expect(model).toBeDefined();
-      expect(model.tags).toContain("fast");
-      expect(model.tags).toContain("coding");
-    } finally {
-      console.log = originalLog;
-    }
+    const parsed = JSON.parse(output.trim());
+    const model = parsed.models.find((m) => m.name === "test-model");
+    expect(model).toBeDefined();
+    expect(model.tags).toContain("fast");
+    expect(model.tags).toContain("coding");
   });
 });
 
+// ── config_debug ────────────────────────────────────────────────────────────
+
 describe("Info CLI - config_debug", () => {
   it("runs config_debug when cli.config_debug is true", async () => {
-    const core = createMockCore();
-    const { create } = await import("../../src/extensions/ui-info-cli/index.js");
-    const ext = create(core);
-    await ext.hooks[HOOKS.CLI_SUBCOMMANDS_REGISTER](core.cliSubcommandRegistry);
-
-    const def = core.cliSubcommandRegistry.get("info");
-    const cli = {
-      wantsJson: false,
-      colors: false,
-      theme: "dark",
-      config: null,
-      skillsPath: null,
-      configDir: null,
-      config_debug: true,
-      profile: null,
-      provider: null,
-    };
-
-    let capturedOutput = "";
-    const originalLog = console.log;
-    console.log = (msg) => {
-      capturedOutput += msg + "\n";
-    };
-
-    try {
-      const exitCode = await def.handler(cli, core);
-      expect(exitCode).toBe(0);
-      expect(capturedOutput).toContain("=== Config Resolution Debug ===");
-      expect(capturedOutput).toContain("Profile:");
-      expect(capturedOutput).toContain("Provider:");
-      expect(capturedOutput).toContain("=== Non-Declarative Values ===");
-      expect(capturedOutput).toContain("=== Config File Sources ===");
-      expect(capturedOutput).toContain("=== Extension Config ===");
-    } finally {
-      console.log = originalLog;
-    }
+    const run = await infoCliRunner({}, { config_debug: true });
+    const { exitCode, output } = await run("info");
+    expect(exitCode).toBe(0);
+    expect(output).toContain("=== Config Resolution Debug ===");
+    expect(output).toContain("Profile:");
+    expect(output).toContain("Provider:");
+    expect(output).toContain("=== Non-Declarative Values ===");
+    expect(output).toContain("=== Config File Sources ===");
+    expect(output).toContain("=== Extension Config ===");
   });
 
   it("config_debug shows extension config when present", async () => {
-    const core = createMockCore({
-      coreConfig: {
-        customExtensionKey: "customValue",
-      },
-    });
-    const { create } = await import("../../src/extensions/ui-info-cli/index.js");
-    const ext = create(core);
-    await ext.hooks[HOOKS.CLI_SUBCOMMANDS_REGISTER](core.cliSubcommandRegistry);
-
-    const def = core.cliSubcommandRegistry.get("info");
-    const cli = {
-      wantsJson: false,
-      colors: false,
-      theme: "dark",
-      config: null,
-      skillsPath: null,
-      configDir: null,
-      config_debug: true,
-      profile: null,
-      provider: null,
-    };
-
-    let capturedOutput = "";
-    const originalLog = console.log;
-    console.log = (msg) => {
-      capturedOutput += msg + "\n";
-    };
-
-    try {
-      const exitCode = await def.handler(cli, core);
-      expect(exitCode).toBe(0);
-      expect(capturedOutput).toContain("=== Extension Config ===");
-    } finally {
-      console.log = originalLog;
-    }
+    const run = await infoCliRunner({
+      coreConfig: { customExtensionKey: "customValue" },
+    }, { config_debug: true });
+    const { exitCode, output } = await run("info");
+    expect(exitCode).toBe(0);
+    expect(output).toContain("=== Extension Config ===");
   });
 
   it("config_debug with provider shows provider name", async () => {
@@ -636,7 +322,7 @@ describe("Info CLI - config_debug", () => {
     );
 
     try {
-      const core = createMockCore({
+      const run = await infoCliRunner({
         providers: [
           {
             name: "test-provider",
@@ -644,298 +330,105 @@ describe("Info CLI - config_debug", () => {
             models: [{ name: "m1", provider: "test-provider" }],
           },
         ],
-      });
-      const { create } = await import("../../src/extensions/ui-info-cli/index.js");
-      const ext = create(core);
-      await ext.hooks[HOOKS.CLI_SUBCOMMANDS_REGISTER](core.cliSubcommandRegistry);
-
-      const def = core.cliSubcommandRegistry.get("info");
-      const cli = {
-        wantsJson: false,
-        colors: false,
-        theme: "dark",
-        config: configPath,
-        skillsPath: null,
-        configDir: null,
-        config_debug: true,
-        profile: null,
-        provider: null,
-      };
-
-      let capturedOutput = "";
-      const originalLog = console.log;
-      console.log = (msg) => {
-        capturedOutput += msg + "\n";
-      };
-
-      try {
-        const exitCode = await def.handler(cli, core);
-        expect(exitCode).toBe(0);
-        expect(capturedOutput).toContain("test-provider");
-      } finally {
-        console.log = originalLog;
-      }
+      }, { config: configPath, config_debug: true });
+      const { exitCode, output } = await run("info");
+      expect(exitCode).toBe(0);
+      expect(output).toContain("test-provider");
     } finally {
-      try {
-        rmSync(configPath);
-        rmSync(tmpDir);
-      } catch {}
+      try { rmSync(configPath); rmSync(tmpDir); } catch {}
     }
   });
 
   it("config_debug shows config file content when exists", async () => {
-    // Create a temporary config file
     const tmpDir = join(homedir(), ".config", "hotdog-test-debug");
     mkdirSync(tmpDir, { recursive: true });
     const configPath = join(tmpDir, "defaults.json");
     writeFileSync(configPath, JSON.stringify({ defaultModel: "test-model" }));
 
     try {
-      const core = createMockCore({
-        resolved: {
-          configDir: tmpDir,
-        },
-      });
-      const { create } = await import("../../src/extensions/ui-info-cli/index.js");
-      const ext = create(core);
-      await ext.hooks[HOOKS.CLI_SUBCOMMANDS_REGISTER](core.cliSubcommandRegistry);
-
-      const def = core.cliSubcommandRegistry.get("info");
-      const cli = {
-        wantsJson: false,
-        colors: false,
-        theme: "dark",
-        config: null,
-        skillsPath: null,
-        configDir: tmpDir,
-        config_debug: true,
-        profile: null,
-        provider: null,
-      };
-
-      let capturedOutput = "";
-      const originalLog = console.log;
-      console.log = (msg) => {
-        capturedOutput += msg + "\n";
-      };
-
-      try {
-        const exitCode = await def.handler(cli, core);
-        expect(exitCode).toBe(0);
-        expect(capturedOutput).toContain("EXISTS");
-      } finally {
-        console.log = originalLog;
-      }
+      const run = await infoCliRunner({
+        resolved: { configDir: tmpDir },
+      }, { configDir: tmpDir, config_debug: true });
+      const { exitCode, output } = await run("info");
+      expect(exitCode).toBe(0);
+      expect(output).toContain("EXISTS");
     } finally {
-      try {
-        rmSync(configPath);
-        rmSync(tmpDir);
-      } catch {}
+      try { rmSync(configPath); rmSync(tmpDir); } catch {}
     }
   });
 
   it("config_debug shows config file not found when absent", async () => {
     const tmpDir = join(homedir(), ".config", "hotdog-test-debug-absent");
-    // Don't create the dir
 
     try {
-      const core = createMockCore({
-        resolved: {
-          configDir: tmpDir,
-        },
-      });
-      const { create } = await import("../../src/extensions/ui-info-cli/index.js");
-      const ext = create(core);
-      await ext.hooks[HOOKS.CLI_SUBCOMMANDS_REGISTER](core.cliSubcommandRegistry);
-
-      const def = core.cliSubcommandRegistry.get("info");
-      const cli = {
-        wantsJson: false,
-        colors: false,
-        theme: "dark",
-        config: null,
-        skillsPath: null,
-        configDir: tmpDir,
-        config_debug: true,
-        profile: null,
-        provider: null,
-      };
-
-      let capturedOutput = "";
-      const originalLog = console.log;
-      console.log = (msg) => {
-        capturedOutput += msg + "\n";
-      };
-
-      try {
-        const exitCode = await def.handler(cli, core);
-        expect(exitCode).toBe(0);
-        expect(capturedOutput).toContain("not found");
-      } finally {
-        console.log = originalLog;
-      }
+      const run = await infoCliRunner({
+        resolved: { configDir: tmpDir },
+      }, { configDir: tmpDir, config_debug: true });
+      const { exitCode, output } = await run("info");
+      expect(exitCode).toBe(0);
+      expect(output).toContain("not found");
     } finally {
-      try {
-        rmSync(tmpDir, { recursive: true, force: true });
-      } catch {}
+      try { rmSync(tmpDir, { recursive: true, force: true }); } catch {}
     }
   });
 });
+
+// ── traceConfigResolution ───────────────────────────────────────────────────
 
 describe("Info CLI - traceConfigResolution", () => {
   it("traces config resolution with default values", async () => {
-    const core = createMockCore();
-    const { create } = await import("../../src/extensions/ui-info-cli/index.js");
-    const ext = create(core);
-    await ext.hooks[HOOKS.CLI_SUBCOMMANDS_REGISTER](core.cliSubcommandRegistry);
-
-    const def = core.cliSubcommandRegistry.get("info");
-    const cli = {
-      wantsJson: false,
-      colors: false,
-      theme: "dark",
-      config: null,
-      skillsPath: null,
-      configDir: null,
-      config_debug: true,
-      profile: null,
-      provider: null,
-    };
-
-    let capturedOutput = "";
-    const originalLog = console.log;
-    console.log = (msg) => {
-      capturedOutput += msg + "\n";
-    };
-
-    try {
-      const exitCode = await def.handler(cli, core);
-      expect(exitCode).toBe(0);
-      // Verify that layer trace markers appear
-      expect(capturedOutput).toContain("Source:");
-      expect(capturedOutput).toContain("Type:");
-    } finally {
-      console.log = originalLog;
-    }
+    const run = await infoCliRunner({}, { config_debug: true });
+    const { exitCode, output } = await run("info");
+    expect(exitCode).toBe(0);
+    expect(output).toContain("Source:");
+    expect(output).toContain("Type:");
   });
 });
 
+// ── show-prompt subcommand ──────────────────────────────────────────────────
+
 describe("Info CLI - show-prompt subcommand", () => {
   it("shows system prompt and returns 0", async () => {
-    const core = createMockCore();
-    const { create } = await import("../../src/extensions/ui-info-cli/index.js");
-    const ext = create(core);
-    await ext.hooks[HOOKS.CLI_SUBCOMMANDS_REGISTER](core.cliSubcommandRegistry);
-
-    const def = core.cliSubcommandRegistry.get("show-prompt");
-    const cli = {
-      wantsJson: false,
-      colors: false,
-      theme: "dark",
-      config: null,
-    };
-
-    let capturedOutput = "";
-    const originalLog = console.log;
-    console.log = (msg) => {
-      capturedOutput += msg + "\n";
-    };
-
-    try {
-      const exitCode = await def.handler(cli, core);
-      expect(exitCode).toBe(0);
-      // Should output the system prompt
-      expect(capturedOutput.length).toBeGreaterThan(0);
-    } finally {
-      console.log = originalLog;
-    }
+    const run = await infoCliRunner();
+    const { exitCode, output } = await run("show-prompt");
+    expect(exitCode).toBe(0);
+    expect(output.length).toBeGreaterThan(0);
   });
 
   it("show-prompt with model registry", async () => {
-    const core = createMockCore({
+    const run = await infoCliRunner({
       modelRegistry: {
         "test-model": { tags: ["fast"], provider: "test" },
       },
     });
-    const { create } = await import("../../src/extensions/ui-info-cli/index.js");
-    const ext = create(core);
-    await ext.hooks[HOOKS.CLI_SUBCOMMANDS_REGISTER](core.cliSubcommandRegistry);
-
-    const def = core.cliSubcommandRegistry.get("show-prompt");
-    const cli = {
-      wantsJson: false,
-      colors: false,
-      theme: "dark",
-      config: null,
-    };
-
-    let capturedOutput = "";
-    const originalLog = console.log;
-    console.log = (msg) => {
-      capturedOutput += msg + "\n";
-    };
-
-    try {
-      const exitCode = await def.handler(cli, core);
-      expect(exitCode).toBe(0);
-    } finally {
-      console.log = originalLog;
-    }
+    const { exitCode } = await run("show-prompt");
+    expect(exitCode).toBe(0);
   });
 });
 
+// ── model tags in text output ───────────────────────────────────────────────
+
 describe("Info CLI - model tags in text output", () => {
   it("shows model tags in text output", async () => {
-    const core = createMockCore({
+    const run = await infoCliRunner({
       modelRegistry: {
         "test-model": { tags: ["fast", "coding"], provider: "test" },
         "empty-tags": { tags: [], provider: "test" },
         "no-tags": { provider: "test" },
       },
     });
-    const { create } = await import("../../src/extensions/ui-info-cli/index.js");
-    const ext = create(core);
-    await ext.hooks[HOOKS.CLI_SUBCOMMANDS_REGISTER](core.cliSubcommandRegistry);
-
-    const def = core.cliSubcommandRegistry.get("info");
-    const cli = {
-      wantsJson: false,
-      colors: false,
-      theme: "dark",
-      config: null,
-      skillsPath: null,
-      configDir: null,
-      config_debug: false,
-    };
-
-    let capturedOutput = "";
-    const originalLog = console.log;
-    console.log = (msg) => {
-      capturedOutput += msg + "\n";
-    };
-
-    try {
-      const exitCode = await def.handler(cli, core);
-      expect(exitCode).toBe(0);
-      expect(capturedOutput).toContain("fast, coding");
-      expect(capturedOutput).toContain("no tags");
-    } finally {
-      console.log = originalLog;
-    }
+    const { exitCode, output } = await run("info");
+    expect(exitCode).toBe(0);
+    expect(output).toContain("fast, coding");
+    expect(output).toContain("no tags");
   });
 });
 
-describe("Info CLI - profiles subcommand", () => {
-  function captureLogs() {
-    let capturedOutput = "";
-    const originalLog = console.log;
-    console.log = (...args) => {
-      capturedOutput += args.join(" ") + "\n";
-    };
-    return { capturedOutput: () => capturedOutput, restore: () => { console.log = originalLog; } };
-  }
+// ── profiles subcommand ─────────────────────────────────────────────────────
 
+describe("Info CLI - profiles subcommand", () => {
   it("registers the profiles subcommand", async () => {
+    const run = await infoCliRunner();
     const core = createMockCore();
     const { create } = await import("../../src/extensions/ui-info-cli/index.js");
     const ext = create(core);
@@ -949,34 +442,14 @@ describe("Info CLI - profiles subcommand", () => {
   it("shows no profiles when directory is empty", async () => {
     const tmpDir = mkdtempSync(join(tmpdir(), "hotdog-test-profiles-empty-"));
     try {
-      const core = createMockCore({
+      const run = await infoCliRunner({
         buildConfig: async () => ({
-          resolved: {
-            configDir: tmpDir,
-            profileName: "default",
-            aspects: [],
-          },
+          resolved: { configDir: tmpDir, profileName: "default", aspects: [] },
         }),
       });
-      const { create } = await import("../../src/extensions/ui-info-cli/index.js");
-      const ext = create(core);
-      await ext.hooks[HOOKS.CLI_SUBCOMMANDS_REGISTER](core.cliSubcommandRegistry);
-
-      const def = core.cliSubcommandRegistry.get("profiles");
-      const cli = {
-        wantsJson: false,
-        profile: null,
-        configDir: null,
-      };
-
-      const logs = captureLogs();
-      try {
-        const exitCode = await def.handler(cli, core);
-        expect(exitCode).toBe(0);
-        expect(logs.capturedOutput()).toContain("No profiles configured.");
-      } finally {
-        logs.restore();
-      }
+      const { exitCode, output } = await run("profiles");
+      expect(exitCode).toBe(0);
+      expect(output).toContain("No profiles configured.");
     } finally {
       rmSync(tmpDir, { recursive: true, force: true });
     }
@@ -997,44 +470,23 @@ describe("Info CLI - profiles subcommand", () => {
     );
 
     try {
-      const core = createMockCore({
+      const run = await infoCliRunner({
         buildConfig: async () => ({
-          resolved: {
-            configDir: tmpDir,
-            profileName: "default",
-            aspects: [],
-          },
+          resolved: { configDir: tmpDir, profileName: "default", aspects: [] },
         }),
       });
-      const { create } = await import("../../src/extensions/ui-info-cli/index.js");
-      const ext = create(core);
-      await ext.hooks[HOOKS.CLI_SUBCOMMANDS_REGISTER](core.cliSubcommandRegistry);
-
-      const def = core.cliSubcommandRegistry.get("profiles");
-      const cli = {
-        wantsJson: false,
-        profile: null,
-        configDir: null,
-      };
-
-      const logs = captureLogs();
-      try {
-        const exitCode = await def.handler(cli, core);
-        expect(exitCode).toBe(0);
-        const output = logs.capturedOutput();
-        expect(output).toContain("=== Profiles (2) ===");
-        expect(output).toContain("Profile: coder");
-        expect(output).toContain("Profile: default");
-        expect(output).toContain("← current");
-        expect(output).toContain("Coding specialist");
-        expect(output).toContain("You are a coding expert.");
-        expect(output).toContain("Blacklisted tools: browser");
-        expect(output).toContain("Manager: yes");
-        expect(output).toContain("Body: 12 chars");
-        expect(output).toContain("Source: file");
-      } finally {
-        logs.restore();
-      }
+      const { exitCode, output } = await run("profiles");
+      expect(exitCode).toBe(0);
+      expect(output).toContain("=== Profiles (2) ===");
+      expect(output).toContain("Profile: coder");
+      expect(output).toContain("Profile: default");
+      expect(output).toContain("← current");
+      expect(output).toContain("Coding specialist");
+      expect(output).toContain("You are a coding expert.");
+      expect(output).toContain("Blacklisted tools: browser");
+      expect(output).toContain("Manager: yes");
+      expect(output).toContain("Body: 12 chars");
+      expect(output).toContain("Source: file");
     } finally {
       rmSync(tmpDir, { recursive: true, force: true });
     }
@@ -1051,7 +503,7 @@ describe("Info CLI - profiles subcommand", () => {
     );
 
     try {
-      const core = createMockCore({
+      const run = await infoCliRunner({
         coreConfig: {
           profiles: {
             test: {
@@ -1062,42 +514,17 @@ describe("Info CLI - profiles subcommand", () => {
           },
         },
         buildConfig: async () => ({
-          resolved: {
-            configDir: tmpDir,
-            profileName: "test",
-            aspects: [],
-          },
+          resolved: { configDir: tmpDir, profileName: "test", aspects: [] },
         }),
       });
-      const { create } = await import("../../src/extensions/ui-info-cli/index.js");
-      const ext = create(core);
-      await ext.hooks[HOOKS.CLI_SUBCOMMANDS_REGISTER](core.cliSubcommandRegistry);
-
-      const def = core.cliSubcommandRegistry.get("profiles");
-      const cli = {
-        wantsJson: false,
-        profile: null,
-        configDir: null,
-      };
-
-      const logs = captureLogs();
-      try {
-        const exitCode = await def.handler(cli, core);
-        expect(exitCode).toBe(0);
-        const output = logs.capturedOutput();
-        expect(output).toContain("Profile: test");
-        expect(output).toContain("← current");
-        // File description takes priority
-        expect(output).toContain("From file");
-        // Config model shows up
-        expect(output).toContain("Model: gpt-4");
-        // Config blacklist shows up
-        expect(output).toContain("Blacklisted tools: network");
-        // Source shows both
-        expect(output).toContain("Source: file + config");
-      } finally {
-        logs.restore();
-      }
+      const { exitCode, output } = await run("profiles");
+      expect(exitCode).toBe(0);
+      expect(output).toContain("Profile: test");
+      expect(output).toContain("← current");
+      expect(output).toContain("From file");
+      expect(output).toContain("Model: gpt-4");
+      expect(output).toContain("Blacklisted tools: network");
+      expect(output).toContain("Source: file + config");
     } finally {
       rmSync(tmpDir, { recursive: true, force: true });
     }
@@ -1114,42 +541,22 @@ describe("Info CLI - profiles subcommand", () => {
     );
 
     try {
-      const core = createMockCore({
+      const run = await infoCliRunner({
         buildConfig: async () => ({
-          resolved: {
-            configDir: tmpDir,
-            profileName: "worker",
-            aspects: ["guidelines"],
-          },
+          resolved: { configDir: tmpDir, profileName: "worker", aspects: ["guidelines"] },
         }),
-      });
-      const { create } = await import("../../src/extensions/ui-info-cli/index.js");
-      const ext = create(core);
-      await ext.hooks[HOOKS.CLI_SUBCOMMANDS_REGISTER](core.cliSubcommandRegistry);
-
-      const def = core.cliSubcommandRegistry.get("profiles");
-      const cli = {
-        wantsJson: true,
-        profile: null,
-        configDir: null,
-      };
-
-      const logs = captureLogs();
-      try {
-        const exitCode = await def.handler(cli, core);
-        expect(exitCode).toBe(0);
-        const parsed = JSON.parse(logs.capturedOutput().trim());
-        expect(parsed).toHaveLength(1);
-        expect(parsed[0].name).toBe("worker");
-        expect(parsed[0].current).toBe(true);
-        expect(parsed[0].description).toBe("A worker profile");
-        expect(parsed[0].role).toBe("Do work.");
-        expect(parsed[0].subagent).toBe(true);
-        expect(parsed[0].aspects).toEqual(["guidelines"]);
-        expect(parsed[0].sources).toEqual(["file"]);
-      } finally {
-        logs.restore();
-      }
+      }, { wantsJson: true });
+      const { exitCode, output } = await run("profiles");
+      expect(exitCode).toBe(0);
+      const parsed = JSON.parse(output.trim());
+      expect(parsed).toHaveLength(1);
+      expect(parsed[0].name).toBe("worker");
+      expect(parsed[0].current).toBe(true);
+      expect(parsed[0].description).toBe("A worker profile");
+      expect(parsed[0].role).toBe("Do work.");
+      expect(parsed[0].subagent).toBe(true);
+      expect(parsed[0].aspects).toEqual(["guidelines"]);
+      expect(parsed[0].sources).toEqual(["file"]);
     } finally {
       rmSync(tmpDir, { recursive: true, force: true });
     }
@@ -1157,37 +564,16 @@ describe("Info CLI - profiles subcommand", () => {
 
   it("handles non-existent profiles directory gracefully", async () => {
     const tmpDir = mkdtempSync(join(tmpdir(), "hotdog-test-profiles-noexist-"));
-    // Intentionally do NOT create a profiles subdirectory
 
     try {
-      const core = createMockCore({
+      const run = await infoCliRunner({
         buildConfig: async () => ({
-          resolved: {
-            configDir: tmpDir,
-            profileName: "default",
-            aspects: [],
-          },
+          resolved: { configDir: tmpDir, profileName: "default", aspects: [] },
         }),
       });
-      const { create } = await import("../../src/extensions/ui-info-cli/index.js");
-      const ext = create(core);
-      await ext.hooks[HOOKS.CLI_SUBCOMMANDS_REGISTER](core.cliSubcommandRegistry);
-
-      const def = core.cliSubcommandRegistry.get("profiles");
-      const cli = {
-        wantsJson: false,
-        profile: null,
-        configDir: null,
-      };
-
-      const logs = captureLogs();
-      try {
-        const exitCode = await def.handler(cli, core);
-        expect(exitCode).toBe(0);
-        expect(logs.capturedOutput()).toContain("No profiles configured.");
-      } finally {
-        logs.restore();
-      }
+      const { exitCode, output } = await run("profiles");
+      expect(exitCode).toBe(0);
+      expect(output).toContain("No profiles configured.");
     } finally {
       rmSync(tmpDir, { recursive: true, force: true });
     }
@@ -1208,39 +594,17 @@ describe("Info CLI - profiles subcommand", () => {
     );
 
     try {
-      const core = createMockCore({
+      const run = await infoCliRunner({
         buildConfig: async () => ({
-          resolved: {
-            configDir: tmpDir,
-            profileName: "default",
-            aspects: [],
-          },
+          resolved: { configDir: tmpDir, profileName: "default", aspects: [] },
         }),
       });
-      const { create } = await import("../../src/extensions/ui-info-cli/index.js");
-      const ext = create(core);
-      await ext.hooks[HOOKS.CLI_SUBCOMMANDS_REGISTER](core.cliSubcommandRegistry);
-
-      const def = core.cliSubcommandRegistry.get("profiles");
-      const cli = {
-        wantsJson: false,
-        profile: null,
-        configDir: null,
-      };
-
-      const logs = captureLogs();
-      try {
-        const exitCode = await def.handler(cli, core);
-        expect(exitCode).toBe(0);
-        const output = logs.capturedOutput();
-        expect(output).toContain("Subagent: yes");
-        // hidden profile should not have subagent line
-        const hiddenIdx = output.indexOf("Profile: hidden");
-        const subagentIdx = output.indexOf("Subagent: yes");
-        expect(hiddenIdx).toBeLessThan(subagentIdx);
-      } finally {
-        logs.restore();
-      }
+      const { exitCode, output } = await run("profiles");
+      expect(exitCode).toBe(0);
+      expect(output).toContain("Subagent: yes");
+      const hiddenIdx = output.indexOf("Profile: hidden");
+      const subagentIdx = output.indexOf("Subagent: yes");
+      expect(hiddenIdx).toBeLessThan(subagentIdx);
     } finally {
       rmSync(tmpDir, { recursive: true, force: true });
     }
@@ -1265,34 +629,16 @@ describe("Info CLI - profiles subcommand", () => {
     );
 
     try {
-      const core = createMockCore({
+      const run = await infoCliRunner({
         buildConfig: async () => ({
-          resolved: {
-            configDir: tmpDir,
-            profileName: "default",
-            aspects: [],
-          },
+          resolved: { configDir: tmpDir, profileName: "default", aspects: [] },
         }),
       });
-      const { create } = await import("../../src/extensions/ui-info-cli/index.js");
-      const ext = create(core);
-      await ext.hooks[HOOKS.CLI_SUBCOMMANDS_REGISTER](core.cliSubcommandRegistry);
-
-      const def = core.cliSubcommandRegistry.get("profiles");
-      const cli = { wantsJson: false, profile: null, configDir: null };
-
-      const logs = captureLogs();
-      try {
-        const exitCode = await def.handler(cli, core);
-        expect(exitCode).toBe(0);
-        const output = logs.capturedOutput();
-        // Subagent order may vary depending on filesystem enumeration
-        expect(output).toContain("Manager: yes (subagents:");
-        expect(output).toContain("worker1");
-        expect(output).toContain("worker2");
-      } finally {
-        logs.restore();
-      }
+      const { exitCode, output } = await run("profiles");
+      expect(exitCode).toBe(0);
+      expect(output).toContain("Manager: yes (subagents:");
+      expect(output).toContain("worker1");
+      expect(output).toContain("worker2");
     } finally {
       rmSync(tmpDir, { recursive: true, force: true });
     }
@@ -1309,31 +655,14 @@ describe("Info CLI - profiles subcommand", () => {
     );
 
     try {
-      const core = createMockCore({
+      const run = await infoCliRunner({
         buildConfig: async () => ({
-          resolved: {
-            configDir: tmpDir,
-            profileName: "default",
-            aspects: [],
-          },
+          resolved: { configDir: tmpDir, profileName: "default", aspects: [] },
         }),
       });
-      const { create } = await import("../../src/extensions/ui-info-cli/index.js");
-      const ext = create(core);
-      await ext.hooks[HOOKS.CLI_SUBCOMMANDS_REGISTER](core.cliSubcommandRegistry);
-
-      const def = core.cliSubcommandRegistry.get("profiles");
-      const cli = { wantsJson: false, profile: null, configDir: null };
-
-      const logs = captureLogs();
-      try {
-        const exitCode = await def.handler(cli, core);
-        expect(exitCode).toBe(0);
-        const output = logs.capturedOutput();
-        expect(output).toContain("Manager: yes (no subagents available)");
-      } finally {
-        logs.restore();
-      }
+      const { exitCode, output } = await run("profiles");
+      expect(exitCode).toBe(0);
+      expect(output).toContain("Manager: yes (no subagents available)");
     } finally {
       rmSync(tmpDir, { recursive: true, force: true });
     }
@@ -1350,32 +679,15 @@ describe("Info CLI - profiles subcommand", () => {
     );
 
     try {
-      const core = createMockCore({
+      const run = await infoCliRunner({
         buildConfig: async () => ({
-          resolved: {
-            configDir: tmpDir,
-            profileName: "default",
-            aspects: [],
-          },
+          resolved: { configDir: tmpDir, profileName: "default", aspects: [] },
         }),
       });
-      const { create } = await import("../../src/extensions/ui-info-cli/index.js");
-      const ext = create(core);
-      await ext.hooks[HOOKS.CLI_SUBCOMMANDS_REGISTER](core.cliSubcommandRegistry);
-
-      const def = core.cliSubcommandRegistry.get("profiles");
-      const cli = { wantsJson: false, profile: null, configDir: null };
-
-      const logs = captureLogs();
-      try {
-        const exitCode = await def.handler(cli, core);
-        expect(exitCode).toBe(0);
-        const output = logs.capturedOutput();
-        expect(output).toContain("Profile:");
-        expect(output).toContain("profiles/test.profile.md");
-      } finally {
-        logs.restore();
-      }
+      const { exitCode, output } = await run("profiles");
+      expect(exitCode).toBe(0);
+      expect(output).toContain("Profile:");
+      expect(output).toContain("profiles/test.profile.md");
     } finally {
       rmSync(tmpDir, { recursive: true, force: true });
     }
@@ -1396,39 +708,23 @@ describe("Info CLI - profiles subcommand", () => {
     );
 
     try {
-      const core = createMockCore({
+      const run = await infoCliRunner({
         buildConfig: async () => ({
-          resolved: {
-            configDir: tmpDir,
-            profileName: "default",
-            aspects: [],
-          },
+          resolved: { configDir: tmpDir, profileName: "default", aspects: [] },
         }),
-      });
-      const { create } = await import("../../src/extensions/ui-info-cli/index.js");
-      const ext = create(core);
-      await ext.hooks[HOOKS.CLI_SUBCOMMANDS_REGISTER](core.cliSubcommandRegistry);
-
-      const def = core.cliSubcommandRegistry.get("profiles");
-      const cli = { wantsJson: true, profile: null, configDir: null };
-
-      const logs = captureLogs();
-      try {
-        const exitCode = await def.handler(cli, core);
-        expect(exitCode).toBe(0);
-        const parsed = JSON.parse(logs.capturedOutput().trim());
-        const boss = parsed.find((p) => p.name === "boss");
-        const labeller = parsed.find((p) => p.name === "labeller");
-        expect(boss.manager).toBe(true);
-        expect(boss.subagent).toBe(false);
-        expect(boss.availableSubagents).toEqual(["labeller"]);
-        expect(labeller.subagent).toBe(true);
-        expect(labeller.availableSubagents).toBeNull();
-        expect(boss.profileRelPath).toBeDefined();
-        expect(boss.profileRelPath).toContain("boss.profile.md");
-      } finally {
-        logs.restore();
-      }
+      }, { wantsJson: true });
+      const { exitCode, output } = await run("profiles");
+      expect(exitCode).toBe(0);
+      const parsed = JSON.parse(output.trim());
+      const boss = parsed.find((p) => p.name === "boss");
+      const labeller = parsed.find((p) => p.name === "labeller");
+      expect(boss.manager).toBe(true);
+      expect(boss.subagent).toBe(false);
+      expect(boss.availableSubagents).toEqual(["labeller"]);
+      expect(labeller.subagent).toBe(true);
+      expect(labeller.availableSubagents).toBeNull();
+      expect(boss.profileRelPath).toBeDefined();
+      expect(boss.profileRelPath).toContain("boss.profile.md");
     } finally {
       rmSync(tmpDir, { recursive: true, force: true });
     }

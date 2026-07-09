@@ -70,6 +70,25 @@ export function cleanupDir(dir) {
   }
 }
 
+/**
+ * Run an async test body inside a temporary directory, cleaning up afterward.
+ * Eliminates the repeated tmpDir() + rmSync() pattern in every test.
+ *
+ * @param {Object} [opts]
+ * @param {string} [opts.prefix='hotdog-test-'] — Prefix for mkdtemp
+ * @param {Function} [opts.cleanup] — Optional extra cleanup function
+ */
+export function withTempDir(opts = {}) {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), opts.prefix || 'hotdog-test-'));
+  return {
+    dir,
+    cleanup() {
+      if (opts.cleanup) opts.cleanup();
+      cleanupDir(dir);
+    },
+  };
+}
+
 // ── Mock LLM Client ────────────────────────────────────────────────────────
 //
 // Produces programmable streams of events. Each call to chatStreamCancellable
@@ -483,6 +502,9 @@ export function createMockCore(config = {}) {
     model: "test-model",
     stream: false,
     chatTimeout: 30,
+    maxRetries: 3,
+    maxIterations: 100,
+    maxTokens: 4096,
     profileName: "default",
     profile: {},
     hideTools: false,

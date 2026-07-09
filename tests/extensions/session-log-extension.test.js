@@ -41,108 +41,55 @@ describe("disabledSessionLog", () => {
 });
 
 describe("session-log extension create()", () => {
-  it("returns hooks for CONTEXT_MESSAGE and OUTPUT_EVENT", async () => {
+  let ext, core;
+
+  async function createExt() {
     const { create } = await import("../../src/extensions/session-log/index.js");
-    const core = { hooks: {} };
-    const ext = await create(core);
+    core = { hooks: {} };
+    return create(core);
+  }
+
+  it("returns hooks for CONTEXT_MESSAGE and OUTPUT_EVENT", async () => {
+    ext = await createExt();
     expect(ext.hooks).toBeDefined();
     expect(ext.hooks["context:message"]).toBeDefined();
     expect(ext.hooks["output:event"]).toBeDefined();
     expect(ext.hooks["session:restoreActive"]).toBeDefined();
   });
 
-  it("CONTEXT_MESSAGE hook logs user messages with INPUT source", async () => {
-    setupTestDir();
-    try {
-      const { create } = await import("../../src/extensions/session-log/index.js");
-      const core = { hooks: {} };
-      const ext = await create(core);
+  // Parameterized CONTEXT_MESSAGE hook tests for different message roles
+  const messageScenarios = [
+    { role: "user", content: "Hello", expectedSource: "input" },
+    { role: "assistant", content: "I can help", expectedSource: "llm" },
+    { role: "tool", content: "ls output", toolCallId: "tc1", expectedSource: "tool_result" },
+  ];
 
-      await ext.hooks["context:message"]({
-        message: { role: "user", content: "Hello", sessionId: TEST_SESSION_ID },
-        agent: { sessionId: TEST_SESSION_ID },
-      });
+  for (const scenario of messageScenarios) {
+    it(`CONTEXT_MESSAGE hook logs ${scenario.role} messages with ${scenario.expectedSource} source`, async () => {
+      setupTestDir();
+      try {
+        ext = await createExt();
 
-      const entries = await readSessionEntries(TEST_SESSION_ID);
-      expect(entries.length).toBeGreaterThanOrEqual(1);
-      const lastEntry = entries[entries.length - 1];
-      expect(lastEntry.source).toBe("input");
-      expect(lastEntry.content).toBe("Hello");
-    } finally {
-      teardown();
-    }
-  });
+        await ext.hooks["context:message"]({
+          message: { role: scenario.role, content: scenario.content, sessionId: TEST_SESSION_ID, ...scenario },
+          agent: { sessionId: TEST_SESSION_ID },
+        });
 
-  it("CONTEXT_MESSAGE hook logs assistant messages with LLM source", async () => {
-    setupTestDir();
-    try {
-      const { create } = await import("../../src/extensions/session-log/index.js");
-      const core = { hooks: {} };
-      const ext = await create(core);
-
-      await ext.hooks["context:message"]({
-        message: { role: "assistant", content: "I can help", sessionId: TEST_SESSION_ID },
-        agent: { sessionId: TEST_SESSION_ID },
-      });
-
-      const entries = await readSessionEntries(TEST_SESSION_ID);
-      const lastEntry = entries[entries.length - 1];
-      expect(lastEntry.source).toBe("llm");
-    } finally {
-      teardown();
-    }
-  });
-
-  it("CONTEXT_MESSAGE hook logs tool messages with TOOL_RESULT source", async () => {
-    setupTestDir();
-    try {
-      const { create } = await import("../../src/extensions/session-log/index.js");
-      const core = { hooks: {} };
-      const ext = await create(core);
-
-      await ext.hooks["context:message"]({
-        message: { role: "tool", content: "ls output", toolCallId: "tc1", sessionId: TEST_SESSION_ID },
-        agent: { sessionId: TEST_SESSION_ID },
-      });
-
-      const entries = await readSessionEntries(TEST_SESSION_ID);
-      const lastEntry = entries[entries.length - 1];
-      expect(lastEntry.source).toBe("tool_result");
-    } finally {
-      teardown();
-    }
-  });
-
-  it("CONTEXT_MESSAGE hook uses agent sessionId for log file path", async () => {
-    setupTestDir();
-    try {
-      const { create } = await import("../../src/extensions/session-log/index.js");
-      const core = { hooks: {} };
-      const ext = await create(core);
-
-      // The hook uses agent.sessionId for the log file path,
-      // and message.sessionId for the log entry's session_id field.
-      // Both should be consistent for correct logging.
-      await ext.hooks["context:message"]({
-        message: { role: "user", content: "Hello", sessionId: TEST_SESSION_ID },
-        agent: { sessionId: TEST_SESSION_ID },
-      });
-
-      // Verify the log was written to the correct file (based on agent.sessionId)
-      const entries = await readSessionEntries(TEST_SESSION_ID);
-      expect(entries.length).toBeGreaterThanOrEqual(1);
-      expect(entries[entries.length - 1].content).toBe("Hello");
-    } finally {
-      teardown();
-    }
-  });
+        const entries = await readSessionEntries(TEST_SESSION_ID);
+        expect(entries.length).toBeGreaterThanOrEqual(1);
+        const lastEntry = entries[entries.length - 1];
+        expect(lastEntry.source).toBe(scenario.expectedSource);
+        expect(lastEntry.content).toBe(scenario.content);
+      } finally {
+        teardown();
+      }
+    });
+  }
 
   it("OUTPUT_EVENT hook logs compaction results", async () => {
     setupTestDir();
     try {
-      const { create } = await import("../../src/extensions/session-log/index.js");
-      const core = { hooks: {} };
-      const ext = await create(core);
+      ext = await createExt();
 
       await ext.hooks["output:event"]({
         type: "compaction_result",
@@ -164,9 +111,7 @@ describe("session-log extension create()", () => {
   it("OUTPUT_EVENT hook ignores non-compaction events", async () => {
     setupTestDir();
     try {
-      const { create } = await import("../../src/extensions/session-log/index.js");
-      const core = { hooks: {} };
-      const ext = await create(core);
+      ext = await createExt();
 
       // Write a message first so we know the entry count
       await ext.hooks["context:message"]({
@@ -192,9 +137,7 @@ describe("session-log extension create()", () => {
   it("getLogPath returns the path for the last session", async () => {
     setupTestDir();
     try {
-      const { create } = await import("../../src/extensions/session-log/index.js");
-      const core = { hooks: {} };
-      const ext = await create(core);
+      ext = await createExt();
 
       expect(ext.getLogPath()).toBeNull();
 
@@ -214,9 +157,7 @@ describe("session-log extension create()", () => {
   it("SESSION_RESTORE_ACTIVE hook tracks restoring state", async () => {
     setupTestDir();
     try {
-      const { create } = await import("../../src/extensions/session-log/index.js");
-      const core = { hooks: {} };
-      const ext = await create(core);
+      ext = await createExt();
 
       // Enable restoring mode
       ext.hooks["session:restoreActive"]({ isRestoring: true });

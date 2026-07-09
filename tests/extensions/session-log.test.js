@@ -70,14 +70,10 @@ test("stripNulls only strips top-level nulls", () => {
   expect(result.c).toEqual([1, null, 3]); // arrays are NOT recursively processed
 });
 
-test("stripNulls handles empty object", () => {
+test("stripNulls handles empty object and preserves falsy non-null values", () => {
   expect(stripNulls({})).toEqual({});
-});
-
-test("stripNulls preserves falsy but non-null values", () => {
   const obj = { a: 0, b: false, c: "", d: [], e: {} };
-  const result = stripNulls(obj);
-  expect(result).toEqual({ a: 0, b: false, c: "", d: [], e: {} });
+  expect(stripNulls(obj)).toEqual({ a: 0, b: false, c: "", d: [], e: {} });
 });
 
 // ── disabledSessionLog ──────────────────────────────────────────────────────

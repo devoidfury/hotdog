@@ -1,16 +1,10 @@
 // Tests for the interactive CLI session internals — runInteractiveSession,
-// Tests for the interactive CLI session internals — runInteractiveSession,
-// handleSlashCommand and
-// readline event handling. These are the paths NOT covered by the existing
-// interactive-cli.test.js (which covers create(), parseCommand, and
-// AsyncInteractiveCliInput).
+// handleSlashCommand and readline event handling. These are the paths NOT
+// covered by the existing interactive-cli.test.js (which covers create(),
+// parseCommand, and AsyncInteractiveCliInput).
 
 import { describe, it, expect, beforeEach, afterEach } from "bun:test";
 import { HookSystem, HOOKS } from "../../src/core/hooks.js";
-import { ToolRegistry } from "../../src/core/extensions/tool-registry.js";
-import { createSubcommandRegistry } from "../../src/core/extensions/registries.js";
-import { join } from "node:path";
-import { homedir } from "node:os";
 import {
   CliOutputSink,
   formatCompacting,
@@ -31,58 +25,7 @@ import { parseCommand, Command } from "../../src/core/commands.js";
 import {
   handleSlashCommand,
 } from "../../src/extensions/ui-interactive-cli/index.js";
-
-// ── Mock Helpers ──────────────────────────────────────────────────────────────
-
-function createMockCore(config = {}) {
-  const hooks = new HookSystem();
-  const toolRegistry = new ToolRegistry();
-  const cliSubcommandRegistry = createSubcommandRegistry();
-
-  const resolved = {
-    baseUrl: "http://localhost:8080",
-    apiKey: "test-key",
-    model: "test-model",
-    stream: false,
-    chatTimeout: 30,
-    profileName: "default",
-    profile: {},
-    hideTools: false,
-    hideThinking: false,
-    showTokenUse: false,
-    role: "",
-    profileBody: "",
-    activeProvider: null,
-    configDir: join(homedir(), ".config", "hotdog"),
-    ...config.resolved,
-  };
-
-  return {
-    hooks,
-    toolRegistry,
-    cliSubcommandRegistry,
-    config: {
-      theme: "dark",
-      maxIterations: 100,
-      skillsPath: join(homedir(), ".hotdog", "skills"),
-      ...config.coreConfig,
-    },
-    resolved,
-    modelRegistry: config.modelRegistry || {},
-    extensions: {
-      has: () => false,
-      load: async () => null,
-      cleanup: async () => {},
-    },
-    buildConfig:
-      config.buildConfig ||
-      (async () => ({
-        resolved,
-        modelRegistry: config.modelRegistry || {},
-        providers: config.providers || [],
-      })),
-  };
-}
+import { createMockCore } from "../helpers.js";
 
 // ── Tests ─────────────────────────────────────────────────────────────────────
 
@@ -103,61 +46,16 @@ describe("Interactive CLI - cli subcommand handler", () => {
 });
 
 describe("Interactive CLI - slash command dispatch", () => {
-  it("parseCommand handles help", () => {
+  // parseCommand basics are covered by interactive-cli.test.js;
+  // here we verify the dispatch path for a few key commands.
+  it("dispatches help command", () => {
     const cmd = parseCommand("help");
     expect(cmd.type).toBe(Command.Help);
   });
 
-  it("parseCommand handles quit", () => {
+  it("dispatches quit command", () => {
     const cmd = parseCommand("quit");
     expect(cmd.type).toBe(Command.Quit);
-  });
-
-  it("parseCommand handles exit", () => {
-    const cmd = parseCommand("exit");
-    expect(cmd.type).toBe(Command.Quit);
-  });
-
-  it("parseCommand handles clear", () => {
-    const cmd = parseCommand("clear");
-    expect(cmd.type).toBe(Command.Clear);
-  });
-
-  it("parseCommand handles tools", () => {
-    const cmd = parseCommand("tools");
-    expect(cmd.type).toBe(Command.Tools);
-  });
-
-  it("parseCommand handles thinking", () => {
-    const cmd = parseCommand("thinking");
-    expect(cmd.type).toBe(Command.Thinking);
-  });
-
-  it("parseCommand handles tokens", () => {
-    const cmd = parseCommand("tokens");
-    expect(cmd.type).toBe(Command.Tokens);
-  });
-
-  it("parseCommand handles regenerate", () => {
-    const cmd = parseCommand("regenerate");
-    expect(cmd.type).toBe(Command.Regenerate);
-  });
-
-  it("parseCommand handles reasoning without value", () => {
-    const cmd = parseCommand("reasoning");
-    expect(cmd.type).toBe(Command.Reasoning);
-    expect(cmd.value).toBeNull();
-  });
-
-  it("parseCommand handles reasoning with value", () => {
-    const cmd = parseCommand("reasoning high");
-    expect(cmd.type).toBe(Command.Reasoning);
-    expect(cmd.value).toBe("high");
-  });
-
-  it("parseCommand handles unknown commands", () => {
-    const cmd = parseCommand("foobar");
-    expect(cmd.type).toBe(Command.Unknown);
   });
 });
 

@@ -11,6 +11,9 @@ import { Agent } from '../src/core/agent.js';
 import { MessageLog } from '../src/core/context/message-log.js';
 import { createHooks } from '../src/core/hooks.js';
 import { createToolRegistry } from '../src/core/extensions/tool-registry.js';
+import { HookSystem } from '../src/core/hooks.js';
+import { ToolRegistry } from '../src/core/extensions/tool-registry.js';
+import { createSubcommandRegistry } from '../src/core/extensions/registries.js';
 
 // ── General utilities ──────────────────────────────────────────────────────
 
@@ -406,4 +409,115 @@ export class MockSink {
   emit(event) {
     this.events.push(event);
   }
+}
+
+/**
+ * Create a mock readline interface that queues preset responses.
+ * Each call to rl.question consumes the next response from the queue.
+ * Tracks handlers added via rl.on("line", ...) for verification.
+ *
+ * @param {string[]} [responses=[]] — Preset responses to return via question()
+ * @returns {{ rl: Object, addedHandlers: string[] }}
+ */
+export function createMockRl(responses = []) {
+  let responseIndex = 0;
+  const addedHandlers = [];
+
+  const rl = {
+    removeListener: function () {},
+    question: function (prompt, cb) {
+      if (responseIndex < responses.length) {
+        cb(responses[responseIndex]);
+        responseIndex++;
+      }
+    },
+    on: function (event, handler) {
+      if (event === "line") addedHandlers.push(handler);
+    },
+  };
+
+  return { rl, addedHandlers };
+}
+
+/**
+ * Set up the session log test directory and clean up any existing test file.
+ * @param {string} sessionId — Session ID for the test
+ */
+export function setupSessionTestDir(sessionId) {
+  const { mkdirSync, rmSync } = fs;
+  const { join } = path;
+  const { homedir } = os;
+  const dir = join(homedir(), ".cache", "hotdog", "sessions");
+  mkdirSync(dir, { recursive: true });
+  const testFile = join(dir, `${sessionId}.jsonl`);
+  try { rmSync(testFile); } catch { /* doesn't exist yet */ }
+}
+
+/**
+ * Clean up a session log test file.
+ * @param {string} sessionId — Session ID for the test
+ */
+export function cleanupSessionTest(sessionId) {
+  const { rmSync } = fs;
+  const { join } = path;
+  const { homedir } = os;
+  const testFile = join(homedir(), ".cache", "hotdog", "sessions", `${sessionId}.jsonl`);
+  try { rmSync(testFile); } catch { /* ignore */ }
+}
+
+/**
+ * Create a mock core object for testing interactive CLI and related extensions.
+ * Provides hooks, toolRegistry, cliSubcommandRegistry, config, resolved, and modelRegistry.
+ *
+ * @param {Object} [config={}] — Optional overrides for resolved/core config
+ * @returns {Object} Mock core object
+ */
+export function createMockCore(config = {}) {
+  const hooks = new HookSystem();
+  const toolRegistry = new ToolRegistry();
+  const cliSubcommandRegistry = createSubcommandRegistry();
+
+  const resolved = {
+    baseUrl: "http://localhost:8080",
+    apiKey: "test-key",
+    model: "test-model",
+    stream: false,
+    chatTimeout: 30,
+    profileName: "default",
+    profile: {},
+    hideTools: false,
+    hideThinking: false,
+    showTokenUse: false,
+    role: "",
+    profileBody: "",
+    activeProvider: null,
+    configDir: path.join(os.homedir(), ".config", "hotdog"),
+    ...config.resolved,
+  };
+
+  return {
+    hooks,
+    toolRegistry,
+    cliSubcommandRegistry,
+    config: {
+      theme: "dark",
+      maxIterations: 100,
+      skillsPath: path.join(os.homedir(), ".hotdog", "skills"),
+      ...config.coreConfig,
+    },
+    resolved,
+    modelRegistry: config.modelRegistry || {},
+    extensions: {
+      has: () => false,
+      load: async () => null,
+      cleanup: async () => {},
+    },
+    buildConfig:
+      config.buildConfig ||
+      (async () => ({
+        resolved,
+        modelRegistry: config.modelRegistry || {},
+        providers: config.providers || [],
+      })),
+  };
 }

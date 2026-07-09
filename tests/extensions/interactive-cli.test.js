@@ -1,61 +1,8 @@
 import { describe, it, expect, beforeEach, afterEach } from "bun:test";
-import { HookSystem, HOOKS } from "../../src/core/hooks.js";
-import { ToolRegistry } from "../../src/core/extensions/tool-registry.js";
-import { createSubcommandRegistry } from "../../src/core/extensions/registries.js";
+import { HOOKS } from "../../src/core/hooks.js";
 import { AsyncInteractiveCliInput } from "../../src/extensions/ui-interactive-cli/index.js";
 import { parseCommand, Command } from "../../src/core/commands.js";
-import { join } from "node:path";
-import { homedir } from "node:os";
-
-function createMockCore(config = {}) {
-  const hooks = new HookSystem();
-  const toolRegistry = new ToolRegistry();
-  const cliSubcommandRegistry = createSubcommandRegistry();
-
-  const resolved = {
-    baseUrl: "http://localhost:8080",
-    apiKey: "test-key",
-    model: "test-model",
-    stream: false,
-    chatTimeout: 30,
-    profileName: "default",
-    profile: {},
-    hideTools: false,
-    hideThinking: false,
-    showTokenUse: false,
-    role: "",
-    profileBody: "",
-    activeProvider: null,
-    configDir: join(homedir(), ".config", "hotdog"),
-    ...config.resolved,
-  };
-
-  return {
-    hooks,
-    toolRegistry,
-    cliSubcommandRegistry,
-    config: {
-      theme: "dark",
-      maxIterations: 100,
-      skillsPath: join(homedir(), ".hotdog", "skills"),
-      ...config.coreConfig,
-    },
-    resolved,
-    modelRegistry: config.modelRegistry || {},
-    extensions: {
-      has: () => false,
-      load: async () => null,
-      cleanup: async () => {},
-    },
-    buildConfig:
-      config.buildConfig ||
-      (async () => ({
-        resolved,
-        modelRegistry: config.modelRegistry || {},
-        providers: config.providers || [],
-      })),
-  };
-}
+import { createMockCore, createMockRl } from "../helpers.js";
 
 describe("Interactive CLI - create function", () => {
   it("registers cli subcommand via CLI_SUBCOMMANDS_REGISTER hook", async () => {
@@ -197,26 +144,6 @@ describe("Interactive CLI - AsyncInteractiveCliInput", () => {
     process.stdout.write = origStdout;
     process.stderr.write = origStderr;
   });
-
-  function createMockRl(responses = []) {
-    let responseIndex = 0;
-    const addedHandlers = [];
-
-    const rl = {
-      removeListener: function () {},
-      question: function (prompt, cb) {
-        if (responseIndex < responses.length) {
-          cb(responses[responseIndex]);
-          responseIndex++;
-        }
-      },
-      on: function (event, handler) {
-        if (event === "line") addedHandlers.push(handler);
-      },
-    };
-
-    return { rl, addedHandlers };
-  }
 
   it("is interactive", () => {
     const { rl } = createMockRl();

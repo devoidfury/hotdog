@@ -102,209 +102,70 @@ describe("normalizeConfigKeys", () => {
 });
 
 describe("buildAgentConfig", () => {
-  it("resolves basic config with minimal options", async () => {
-    const result = await buildAgentConfig({
-      cli: {},
-      config: {
-        providers: [],
-        defaultModel: "test-model",
-        hideTools: true,
-        profilesPath: "./config/profiles",
-      },
-      configDir: "/tmp/test-config",
-      providers: [],
-      defaultModel: "qwen3.5-0.8b",
-      profilesPath: "/tmp/test-config/profiles",
-    });
+  const baseOpts = {
+    cli: {},
+    config: { providers: [], defaultModel: "test-model", hideTools: true, profilesPath: "./config/profiles" },
+    configDir: "/tmp/test-config",
+    providers: [],
+    defaultModel: "qwen3.5-0.8b",
+    profilesPath: "/tmp/test-config/profiles",
+  };
 
+  it("resolves basic config with all expected fields", async () => {
+    const result = await buildAgentConfig(baseOpts);
     expect(result.model).toBeDefined();
     expect(result.configDir).toBe("/tmp/test-config");
+    expect(result.profileName).toBeDefined();
+    expect(result.systemPromptTemplate).toBeDefined();
+    expect(result.profiles).toBeDefined();
+    expect(result.modelRegistry).toBeDefined();
   });
 
   it("resolves model from CLI override", async () => {
-    const result = await buildAgentConfig({
-      cli: { model: "cli-model" },
-      config: {
-        providers: [],
-        defaultModel: "config-model",
-        hideTools: true,
-      },
-      configDir: "/tmp/test-config",
-      providers: [],
-      defaultModel: "default-model",
-      profilesPath: "/tmp/test-config/profiles",
-    });
-
+    const result = await buildAgentConfig({ ...baseOpts, cli: { model: "cli-model" }, config: { ...baseOpts.config, defaultModel: "config-model" }, defaultModel: "default-model" });
     expect(result.model).toBe("cli-model");
   });
 
   it("resolves model from provider default", async () => {
-    const provider = {
-      name: "test-provider",
-      models: [{ name: "provider-model" }],
-    };
+    const provider = { name: "test-provider", models: [{ name: "provider-model" }] };
     const result = await buildAgentConfig({
+      ...baseOpts,
       cli: { provider: "test-provider" },
-      config: {
-        providers: [provider],
-        defaultModel: "config-model",
-        hideTools: true,
-      },
-      configDir: "/tmp/test-config",
+      config: { ...baseOpts.config, providers: [provider], defaultModel: "config-model" },
       providers: [provider],
       defaultModel: "default-model",
-      profilesPath: "/tmp/test-config/profiles",
     });
-
     expect(result.activeProvider).toBe("test-provider");
   });
 
-  it("resolves with default profile when none specified", async () => {
-    const result = await buildAgentConfig({
-      cli: {},
-      config: {
-        providers: [],
-        defaultModel: "test-model",
-        hideTools: true,
-        profilesPath: "./config/profiles",
-      },
-      configDir: "/tmp/test-config",
-      providers: [],
-      defaultModel: "qwen3.5-0.8b",
-      profilesPath: "/tmp/test-config/profiles",
-    });
-
-    expect(result.profileName).toBeDefined();
-  });
-
   it("resolves profile from config", async () => {
-    const result = await buildAgentConfig({
-      cli: {},
-      config: {
-        providers: [],
-        defaultModel: "test-model",
-        hideTools: true,
-        profile: "fixer",
-        profilesPath: "./config/profiles",
-      },
-      configDir: "/tmp/test-config",
-      providers: [],
-      defaultModel: "qwen3.5-0.8b",
-      profilesPath: "/tmp/test-config/profiles",
-    });
-
+    const result = await buildAgentConfig({ ...baseOpts, config: { ...baseOpts.config, profile: "fixer" } });
     expect(result.profileName).toBe("fixer");
   });
 
-  it("resolves profile from CLI override", async () => {
+  it("CLI profile overrides config profile", async () => {
     const result = await buildAgentConfig({
+      ...baseOpts,
       cli: { profile: "explorer" },
-      config: {
-        providers: [],
-        defaultModel: "test-model",
-        hideTools: true,
-        profile: "fixer",
-        profilesPath: "./config/profiles",
-      },
-      configDir: "/tmp/test-config",
-      providers: [],
-      defaultModel: "qwen3.5-0.8b",
-      profilesPath: "/tmp/test-config/profiles",
+      config: { ...baseOpts.config, profile: "fixer" },
     });
-
     expect(result.profileName).toBe("explorer");
   });
 
-  it("includes systemPromptTemplate in result", async () => {
+  it("resolves hideTools and hideThinking from config", async () => {
     const result = await buildAgentConfig({
-      cli: {},
-      config: {
-        providers: [],
-        defaultModel: "test-model",
-        hideTools: true,
-      },
-      configDir: "/tmp/test-config",
-      providers: [],
-      defaultModel: "qwen3.5-0.8b",
-      profilesPath: "/tmp/test-config/profiles",
+      ...baseOpts,
+      config: { ...baseOpts.config, hideTools: false, hideThinking: true },
     });
-
-    expect(result.systemPromptTemplate).toBeDefined();
-  });
-
-  it("includes profiles in result", async () => {
-    const result = await buildAgentConfig({
-      cli: {},
-      config: {
-        providers: [],
-        defaultModel: "test-model",
-        hideTools: true,
-      },
-      configDir: "/tmp/test-config",
-      providers: [],
-      defaultModel: "qwen3.5-0.8b",
-      profilesPath: "/tmp/test-config/profiles",
-    });
-
-    expect(result.profiles).toBeDefined();
-  });
-
-  it("includes modelRegistry in result", async () => {
-    const result = await buildAgentConfig({
-      cli: {},
-      config: {
-        providers: [],
-        defaultModel: "test-model",
-        hideTools: true,
-      },
-      configDir: "/tmp/test-config",
-      providers: [],
-      defaultModel: "qwen3.5-0.8b",
-      profilesPath: "/tmp/test-config/profiles",
-    });
-
-    expect(result.modelRegistry).toBeDefined();
-  });
-
-  it("resolves hideTools from config", async () => {
-    const result = await buildAgentConfig({
-      cli: {},
-      config: {
-        providers: [],
-        defaultModel: "test-model",
-        hideTools: false,
-      },
-      configDir: "/tmp/test-config",
-      providers: [],
-      defaultModel: "qwen3.5-0.8b",
-      profilesPath: "/tmp/test-config/profiles",
-    });
-
     expect(result.hideTools).toBe(false);
-  });
-
-  it("resolves hideThinking from config", async () => {
-    const result = await buildAgentConfig({
-      cli: {},
-      config: {
-        providers: [],
-        defaultModel: "test-model",
-        hideTools: true,
-        hideThinking: true,
-      },
-      configDir: "/tmp/test-config",
-      providers: [],
-      defaultModel: "qwen3.5-0.8b",
-      profilesPath: "/tmp/test-config/profiles",
-    });
-
     expect(result.hideThinking).toBe(true);
   });
+});
 
-  it("buildConfig resolves config directory", async () => {
+describe("buildConfig", () => {
+  it("resolves config directory", async () => {
     const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'hotdog-config-test-'));
     try {
-      // Create minimal config files
       fs.writeFileSync(path.join(tmpDir, 'defaults.json'), JSON.stringify({ providers: [], defaultModel: "test" }));
       fs.mkdirSync(path.join(tmpDir, 'profiles'));
       fs.writeFileSync(path.join(tmpDir, 'profiles', 'test.profile.md'), `---\nmodel: test\n---\nTest profile`);
@@ -316,13 +177,13 @@ describe("buildAgentConfig", () => {
     }
   });
 
-  it("buildConfig handles missing config dir gracefully", async () => {
+  it("handles missing config dir gracefully", async () => {
     const result = await buildConfig({ configDir: '/nonexistent/path' });
     expect(result.resolved).toBeDefined();
     expect(result.modelRegistry).toBeDefined();
   });
 
-  it("buildConfig merges profile from file", async () => {
+  it("merges profile from file", async () => {
     const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'hotdog-config-test-'));
     try {
       fs.writeFileSync(path.join(tmpDir, 'defaults.json'), JSON.stringify({ providers: [], defaultModel: "test" }));

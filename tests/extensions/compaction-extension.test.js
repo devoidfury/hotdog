@@ -210,130 +210,52 @@ describe("Hook Integration", () => {
     const largeContext = makeMessages(100, "x".repeat(500));
     const agent = createMockAgent(largeContext);
 
-    // Override model config with small maxTokens to force compaction
     core.modelRegistry = {
       "test-model": { name: "test-model", temperature: null, maxTokens: 8000 },
     };
 
     const messages = [{ role: "system", content: "" }, ...largeContext];
-
     const result = await ext.hooks[HOOKS.CONTEXT]({ messages, agent });
 
-    // Context should be compacted (fewer messages)
     expect(agent.log.length).toBeLessThan(largeContext.length);
-
-    // Should return the new messages array
     expect(result.messages).toBeDefined();
     expect(result.messages.length).toBeLessThan(messages.length);
   });
 
-  it("should use drop strategy when configured", async () => {
-    const core = createMockCore({
-      enabled: true,
-      keepRecentMessages: 2,
-      strategy: "drop",
-      reserveTokens: 100,
+  // Parameterized: each strategy should compact when over budget
+  const strategyTests = [
+    { strategy: "drop", msgCount: 100, maxTokens: 8000, contextLimit: null },
+    { strategy: "summarize-short", msgCount: 50, maxTokens: 5000, contextLimit: null },
+    { strategy: "token-aware", msgCount: 50, maxTokens: 5000, contextLimit: 5000 },
+    { strategy: "trim", msgCount: 50, maxTokens: 5000, contextLimit: 5000 },
+  ];
+
+  for (const { strategy, msgCount, maxTokens, contextLimit } of strategyTests) {
+    it(`should use ${strategy} strategy when configured`, async () => {
+      const core = createMockCore({
+        enabled: true,
+        keepRecentMessages: 2,
+        strategy,
+        reserveTokens: 100,
+      });
+      const ext = createCompactionExtension(core);
+
+      const largeContext = makeMessages(msgCount, "x".repeat(500));
+      const agent = createMockAgent(largeContext);
+
+      core.modelRegistry = {
+        "test-model": { name: "test-model", temperature: null, maxTokens },
+      };
+
+      if (contextLimit) ext.settings.contextLimit = contextLimit;
+
+      const messages = [{ role: "system", content: "" }, ...largeContext];
+      const result = await ext.hooks[HOOKS.CONTEXT]({ messages, agent });
+
+      expect(agent.log.length).toBeLessThan(largeContext.length);
+      expect(result.messages).toBeDefined();
     });
-    const ext = createCompactionExtension(core);
-
-    const largeContext = makeMessages(100, "x".repeat(500));
-    const agent = createMockAgent(largeContext);
-
-    core.modelRegistry = {
-      "test-model": { name: "test-model", temperature: null, maxTokens: 8000 },
-    };
-
-    const messages = [{ role: "system", content: "" }, ...largeContext];
-
-    const result = await ext.hooks[HOOKS.CONTEXT]({ messages, agent });
-
-    // Drop strategy: just shortened context without summary marker
-    expect(agent.log.length).toBeLessThan(largeContext.length);
-
-    // Should return the new messages array
-    expect(result.messages).toBeDefined();
-    expect(result.messages.length).toBeLessThan(messages.length);
-  });
-
-  it("should use summarize-short strategy when configured", async () => {
-    const core = createMockCore({
-      enabled: true,
-      keepRecentMessages: 2,
-      strategy: "summarize-short",
-      reserveTokens: 100,
-    });
-    const ext = createCompactionExtension(core);
-
-    const largeContext = makeMessages(50, "x".repeat(500));
-    const agent = createMockAgent(largeContext);
-
-    core.modelRegistry = {
-      "test-model": { name: "test-model", temperature: null, maxTokens: 5000 },
-    };
-
-    const messages = [{ role: "system", content: "" }, ...largeContext];
-
-    const result = await ext.hooks[HOOKS.CONTEXT]({ messages, agent });
-
-    expect(agent.log.length).toBeLessThan(largeContext.length);
-    expect(result.messages).toBeDefined();
-  });
-
-  it("should use token-aware strategy when configured", async () => {
-    const core = createMockCore({
-      enabled: true,
-      keepRecentMessages: 2,
-      strategy: "token-aware",
-      reserveTokens: 100,
-    });
-    const ext = createCompactionExtension(core);
-
-    const largeContext = makeMessages(50, "x".repeat(500));
-    const agent = createMockAgent(largeContext);
-
-    core.modelRegistry = {
-      "test-model": { name: "test-model", temperature: null, maxTokens: 5000 },
-    };
-
-    const messages = [{ role: "system", content: "" }, ...largeContext];
-
-    // The hook passes settings to the strategy, which uses settings.contextLimit
-    // Since the hook doesn't set contextLimit in settings, we need to add it
-    // to make the token-aware strategy work properly with the hook
-    ext.settings.contextLimit = 5000;
-
-    const result = await ext.hooks[HOOKS.CONTEXT]({ messages, agent });
-
-    expect(agent.log.length).toBeLessThan(largeContext.length);
-    expect(result.messages).toBeDefined();
-  });
-
-  it("should use trim strategy when configured", async () => {
-    const core = createMockCore({
-      enabled: true,
-      keepRecentMessages: 2,
-      strategy: "trim",
-      reserveTokens: 100,
-    });
-    const ext = createCompactionExtension(core);
-
-    const largeContext = makeMessages(50, "x".repeat(500));
-    const agent = createMockAgent(largeContext);
-
-    core.modelRegistry = {
-      "test-model": { name: "test-model", temperature: null, maxTokens: 5000 },
-    };
-
-    const messages = [{ role: "system", content: "" }, ...largeContext];
-
-    // The hook passes settings to the strategy, which uses settings.contextLimit
-    ext.settings.contextLimit = 5000;
-
-    const result = await ext.hooks[HOOKS.CONTEXT]({ messages, agent });
-
-    expect(agent.log.length).toBeLessThan(largeContext.length);
-    expect(result.messages).toBeDefined();
-  });
+  }
 
   it("should not trigger compaction when no modelRegistry", async () => {
     const core = createMockCore({
@@ -403,62 +325,32 @@ describe("Hook Integration", () => {
 // ── Strategy List ────────────────────────────────────────────────────────────
 
 describe("Strategy List", () => {
-  it("should return all strategies with descriptions", () => {
+  it("returns all strategies with correct names and descriptions", () => {
     const core = createMockCore();
     const ext = createCompactionExtension(core);
     const list = ext.getStrategyList();
 
     expect(list.length).toBe(5);
+
+    const strategies = {
+      summarize: "summarization",
+      drop: "without summarizing",
+      "summarize-short": "Aggressive",
+      "token-aware": "token count",
+      trim: "binary-search",
+    };
+
     for (const s of list) {
       expect(s.name).toBeDefined();
       expect(s.description).toBeDefined();
       expect(s.description.length).toBeGreaterThan(0);
     }
-  });
 
-  it("should include summarize strategy with description", () => {
-    const core = createMockCore();
-    const ext = createCompactionExtension(core);
-    const list = ext.getStrategyList();
-    const summarize = list.find(s => s.name === "summarize");
-    expect(summarize).toBeDefined();
-    expect(summarize.description).toContain("summarization");
-  });
-
-  it("should include drop strategy with description", () => {
-    const core = createMockCore();
-    const ext = createCompactionExtension(core);
-    const list = ext.getStrategyList();
-    const drop = list.find(s => s.name === "drop");
-    expect(drop).toBeDefined();
-    expect(drop.description).toContain("without summarizing");
-  });
-
-  it("should include summarize-short strategy with description", () => {
-    const core = createMockCore();
-    const ext = createCompactionExtension(core);
-    const list = ext.getStrategyList();
-    const short = list.find(s => s.name === "summarize-short");
-    expect(short).toBeDefined();
-    expect(short.description).toContain("Aggressive");
-  });
-
-  it("should include token-aware strategy with description", () => {
-    const core = createMockCore();
-    const ext = createCompactionExtension(core);
-    const list = ext.getStrategyList();
-    const token = list.find(s => s.name === "token-aware");
-    expect(token).toBeDefined();
-    expect(token.description).toContain("token count");
-  });
-
-  it("should include trim strategy with description", () => {
-    const core = createMockCore();
-    const ext = createCompactionExtension(core);
-    const list = ext.getStrategyList();
-    const trim = list.find(s => s.name === "trim");
-    expect(trim).toBeDefined();
-    expect(trim.description.toLowerCase()).toContain("binary-search");
+    for (const [name, keyword] of Object.entries(strategies)) {
+      const strategy = list.find(s => s.name === name);
+      expect(strategy).toBeDefined();
+      expect(strategy.description.toLowerCase()).toContain(keyword.toLowerCase());
+    }
   });
 });
 

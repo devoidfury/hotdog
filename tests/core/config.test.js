@@ -1,6 +1,5 @@
 import { describe, it, expect } from "bun:test";
 import { buildModelRegistry } from "../../src/core/config/providers.js";
-import { normalizeConfigKeys } from "../../src/core/config/index.js";
 import { parseFrontMatter } from "../../src/utils/file-utils.js";
 
 describe("parseFrontMatter", () => {
@@ -94,104 +93,5 @@ describe("buildModelRegistry", () => {
     expect(registry["ai365/dsv4"].reasoningEffort).toBe("max");
     expect(registry["ai365/qwen"].reasoningEffort).toBe("high");
     expect(registry["ai365/basic"].reasoningEffort).toBeUndefined();
-  });
-});
-
-describe("normalizeConfigKeys", () => {
-  it("converts snake_case keys to camelCase recursively", () => {
-    const input = {
-      default_model: "test",
-      hide_tools: true,
-      profiles: {
-        default: { blacklist_tools: ["patch"] },
-      },
-      mcp_servers: [
-        { enabled: true, name: "test-server", blacklist_tools: ["dangerous"] },
-      ],
-    };
-    const result = normalizeConfigKeys(input);
-    expect(result).toEqual({
-      defaultModel: "test",
-      hideTools: true,
-      profiles: {
-        default: { blacklistTools: ["patch"] },
-      },
-      mcpServers: [
-        { enabled: true, name: "test-server", blacklistTools: ["dangerous"] },
-      ],
-    });
-  });
-
-  it("leaves camelCase keys unchanged", () => {
-    const input = { defaultModel: "test", hideTools: true };
-    const result = normalizeConfigKeys(input);
-    expect(result).toEqual({ defaultModel: "test", hideTools: true });
-  });
-
-  it("handles deeply nested structures", () => {
-    const input = {
-      providers: [
-        {
-          name: "test",
-          models: [
-            { name: "model-1", context_limit: 1000, parallel_tool_calling: true },
-          ],
-        },
-      ],
-    };
-    const result = normalizeConfigKeys(input);
-    expect(result.providers[0].models[0]).toEqual({
-      name: "model-1",
-      contextLimit: 1000,
-      parallelToolCalling: true,
-    });
-  });
-
-  it("handles null, primitives, and empty values", () => {
-    expect(normalizeConfigKeys(null)).toBeNull();
-    expect(normalizeConfigKeys("string")).toBe("string");
-    expect(normalizeConfigKeys(42)).toBe(42);
-    expect(normalizeConfigKeys({})).toEqual({});
-    expect(normalizeConfigKeys([])).toEqual([]);
-  });
-
-  it("converts kebab-case keys to camelCase as well", () => {
-    const input = { "kebab-case": "value", snake_case: "other" };
-    const result = normalizeConfigKeys(input);
-    expect(result).toEqual({ kebabCase: "value", snakeCase: "other" });
-  });
-
-  it("handles real-world config structure", () => {
-    const input = {
-      default_model: "ai365/qwen3.6-27b",
-      hide_tools: true,
-      show_token_use: true,
-      skills_path: "/skills",
-      extension_paths: ["builtins"],
-      extension_autoload: true,
-      default_subcommand: "cli",
-      chat_timeout_secs: 900,
-      profiles: {
-        default: { blacklist_tools: ["patch", "explore"] },
-        explorer: { model: "ai365/lfm2.5-8b-a1b", blacklist_tools: ["patch", "write"] },
-      },
-      mcp_servers: [
-        { enabled: true, name: "bun-docs-mcp", url: "https://bun.com/docs/mcp" },
-      ],
-      providers: [
-        {
-          name: "ai365",
-          url: "http://localhost:9292",
-          api_key: "test-key",
-          models: [{ name: "qwen3.5-4b", context_limit: 262144, tags: ["general", "fast"] }],
-        },
-      ],
-    };
-    const result = normalizeConfigKeys(input);
-    expect(result.defaultModel).toBe("ai365/qwen3.6-27b");
-    expect(result.hideTools).toBe(true);
-    expect(result.profiles.default.blacklistTools).toEqual(["patch", "explore"]);
-    expect(result.providers[0].apiKey).toBe("test-key");
-    expect(result.providers[0].models[0].contextLimit).toBe(262144);
   });
 });

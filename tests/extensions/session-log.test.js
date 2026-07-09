@@ -20,28 +20,16 @@ import { stripNulls } from "../../src/utils/objects.js";
 import { mkdirSync, rmSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { homedir } from "node:os";
+import { setupSessionTestDir, cleanupSessionTest } from "../helpers.js";
 
 const TEST_SESSION_ID = "test-session-log";
 
 function setupTestDir() {
-  const dir = join(homedir(), ".cache", "hotdog", "sessions");
-  if (!dir.includes("hotdog")) throw new Error("bad path");
-  mkdirSync(dir, { recursive: true });
-  const testFile = join(dir, `${TEST_SESSION_ID}.jsonl`);
-  try {
-    rmSync(testFile);
-  } catch {
-    // doesn't exist yet
-  }
+  setupSessionTestDir(TEST_SESSION_ID);
 }
 
 function teardown() {
-  const testFile = join(homedir(), ".cache", "hotdog", "sessions", `${TEST_SESSION_ID}.jsonl`);
-  try {
-    rmSync(testFile);
-  } catch {
-    // ignore
-  }
+  cleanupSessionTest(TEST_SESSION_ID);
 }
 
 function createMockAgent() {

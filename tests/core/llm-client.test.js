@@ -3,28 +3,6 @@ import { LlmClient } from "../../src/core/llm-client/client.js";
 import { LlmError } from "../../src/core/error.js";
 import { Message } from "../../src/core/context/message.js";
 
-describe("LlmError", () => {
-  it("creates error with type", () => {
-    const err = new LlmError("test", "http");
-    expect(err.message).toBe("test");
-    expect(err.type).toBe("http");
-  });
-
-  it("factory methods create typed errors", () => {
-    expect(LlmError.Http("fail").type).toBe("http");
-    expect(LlmError.Api("bad input").type).toBe("api");
-    expect(LlmError.Timeout("timed out").type).toBe("timeout");
-    expect(LlmError.Cancelled("cancelled").type).toBe("cancelled");
-    expect(LlmError.InvalidResponse("malformed").type).toBe("invalid_response");
-  });
-
-  it("isCancelled checks type", () => {
-    expect(LlmError.isCancelled(LlmError.Cancelled("x"))).toBe(true);
-    expect(LlmError.isCancelled(LlmError.Http("x"))).toBe(false);
-    expect(LlmError.isCancelled(new Error("x"))).toBe(false);
-  });
-});
-
 describe("LlmClient constructor", () => {
   it("creates with defaults", () => {
     const origKey = process.env.AI_API_KEY;
@@ -300,5 +278,66 @@ describe("LlmClient.buildChatRequest reasoning_effort", () => {
       );
       expect(request.reasoning_effort).toBe(v);
     }
+  });
+});
+
+describe("LlmClient — sessionId/loud/cancelled flags", () => {
+  it("sets sessionId from options", () => {
+    const client = new LlmClient({ chatTimeoutSecs: 600, maxRetries: 12, sessionId: "session-123" });
+    expect(client.sessionId).toBe("session-123");
+  });
+
+  it("sessionId defaults to empty string", () => {
+    const client = new LlmClient({ chatTimeoutSecs: 600, maxRetries: 12 });
+    expect(client.sessionId).toBe("");
+  });
+
+  it("accepts loud option", () => {
+    const client = new LlmClient({ chatTimeoutSecs: 600, maxRetries: 12, loud: true });
+    expect(client.loud).toBe(true);
+  });
+
+  it("loud defaults to false", () => {
+    const client = new LlmClient({ chatTimeoutSecs: 600, maxRetries: 12 });
+    expect(client.loud).toBe(false);
+  });
+
+  it("cancelled defaults to false", () => {
+    const client = new LlmClient({ chatTimeoutSecs: 600, maxRetries: 12 });
+    expect(client.cancelled).toBe(false);
+  });
+});
+
+describe("LlmClient.buildChatRequest — edge cases", () => {
+  it("does not include tools fields when no tools provided", () => {
+    const client = new LlmClient({ chatTimeoutSecs: 600, maxRetries: 12 });
+    const request = client.buildChatRequest([], { name: "gpt-4" }, []);
+    expect(request.tools).toBeUndefined();
+    expect(request.tool_choice).toBeUndefined();
+    expect(request.parallel_tool_calls).toBeUndefined();
+  });
+
+  it("does not include tools fields when tools is null", () => {
+    const client = new LlmClient({ chatTimeoutSecs: 600, maxRetries: 12 });
+    const request = client.buildChatRequest([], { name: "gpt-4" }, null);
+    expect(request.tools).toBeUndefined();
+  });
+
+  it("does not include temperature when null", () => {
+    const client = new LlmClient({ chatTimeoutSecs: 600, maxRetries: 12 });
+    const request = client.buildChatRequest([], { name: "gpt-4", temperature: null }, null);
+    expect(request.temperature).toBeUndefined();
+  });
+
+  it("does not include temperature when undefined", () => {
+    const client = new LlmClient({ chatTimeoutSecs: 600, maxRetries: 12 });
+    const request = client.buildChatRequest([], { name: "gpt-4", temperature: undefined }, null);
+    expect(request.temperature).toBeUndefined();
+  });
+
+  it("includes temperature 0", () => {
+    const client = new LlmClient({ chatTimeoutSecs: 600, maxRetries: 12 });
+    const request = client.buildChatRequest([], { name: "gpt-4", temperature: 0 }, null);
+    expect(request.temperature).toBe(0);
   });
 });

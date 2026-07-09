@@ -17,106 +17,64 @@ describe("LOG_LEVELS", () => {
   });
 });
 
-describe("resolveLogLevel", () => {
-  it("returns default 'info' with no config", () => {
-    const origLevel = process.env.HOTDOG_LOG_LEVEL;
-    delete process.env.HOTDOG_LOG_LEVEL;
-    try {
-      expect(resolveLogLevel()).toBe("info");
-    } finally {
-      if (origLevel !== undefined) process.env.HOTDOG_LOG_LEVEL = origLevel;
-    }
-  });
+describe("resolveLogLevel and resolveLogTarget", () => {
+  // Both functions share the same resolution pattern: env var > config param > default,
+  // with case-insensitive env var handling and invalid env var fallback.
+  const resolvers = [
+    { name: "resolveLogLevel", fn: resolveLogLevel, env: "HOTDOG_LOG_LEVEL", default: "info", validEnv: "debug", validConfig: "error" },
+    { name: "resolveLogTarget", fn: resolveLogTarget, env: "HOTDOG_LOG_TARGET", default: "stderr", validEnv: "stdout", validConfig: "none" },
+  ];
 
-  it("returns configLevel when provided", () => {
-    expect(resolveLogLevel("debug")).toBe("debug");
-    expect(resolveLogLevel("info")).toBe("info");
-    expect(resolveLogLevel("error")).toBe("error");
-  });
+  for (const { name, fn, env, default: def, validEnv, validConfig } of resolvers) {
+    describe(name, () => {
+      it("returns default with no config", () => {
+        const orig = process.env[env];
+        delete process.env[env];
+        try {
+          expect(fn()).toBe(def);
+        } finally {
+          if (orig !== undefined) process.env[env] = orig;
+        }
+      });
 
-  it("prefers env var over config", () => {
-    const origLevel = process.env.HOTDOG_LOG_LEVEL;
-    process.env.HOTDOG_LOG_LEVEL = "debug";
-    try {
-      expect(resolveLogLevel("error")).toBe("debug");
-    } finally {
-      if (origLevel !== undefined) process.env.HOTDOG_LOG_LEVEL = origLevel;
-      else delete process.env.HOTDOG_LOG_LEVEL;
-    }
-  });
+      it("returns config value when provided", () => {
+        expect(fn(validEnv)).toBe(validEnv);
+      });
 
-  it("ignores invalid env var, falls back to config", () => {
-    const origLevel = process.env.HOTDOG_LOG_LEVEL;
-    process.env.HOTDOG_LOG_LEVEL = "invalid";
-    try {
-      expect(resolveLogLevel("debug")).toBe("debug");
-    } finally {
-      if (origLevel !== undefined) process.env.HOTDOG_LOG_LEVEL = origLevel;
-      else delete process.env.HOTDOG_LOG_LEVEL;
-    }
-  });
+      it("prefers env var over config", () => {
+        const orig = process.env[env];
+        process.env[env] = validEnv;
+        try {
+          expect(fn(validConfig)).toBe(validEnv);
+        } finally {
+          if (orig !== undefined) process.env[env] = orig;
+          else delete process.env[env];
+        }
+      });
 
-  it("handles case-insensitive env var", () => {
-    const origLevel = process.env.HOTDOG_LOG_LEVEL;
-    process.env.HOTDOG_LOG_LEVEL = "DEBUG";
-    try {
-      expect(resolveLogLevel("error")).toBe("debug");
-    } finally {
-      if (origLevel !== undefined) process.env.HOTDOG_LOG_LEVEL = origLevel;
-      else delete process.env.HOTDOG_LOG_LEVEL;
-    }
-  });
-});
+      it("ignores invalid env var, falls back to config", () => {
+        const orig = process.env[env];
+        process.env[env] = "invalid";
+        try {
+          expect(fn(validEnv)).toBe(validEnv);
+        } finally {
+          if (orig !== undefined) process.env[env] = orig;
+          else delete process.env[env];
+        }
+      });
 
-describe("resolveLogTarget", () => {
-  it("returns default 'stderr' with no config", () => {
-    const origTarget = process.env.HOTDOG_LOG_TARGET;
-    delete process.env.HOTDOG_LOG_TARGET;
-    try {
-      expect(resolveLogTarget()).toBe("stderr");
-    } finally {
-      if (origTarget !== undefined) process.env.HOTDOG_LOG_TARGET = origTarget;
-    }
-  });
-
-  it("returns configTarget when provided", () => {
-    expect(resolveLogTarget("stdout")).toBe("stdout");
-    expect(resolveLogTarget("stderr")).toBe("stderr");
-    expect(resolveLogTarget("none")).toBe("none");
-  });
-
-  it("prefers env var over config", () => {
-    const origTarget = process.env.HOTDOG_LOG_TARGET;
-    process.env.HOTDOG_LOG_TARGET = "stdout";
-    try {
-      expect(resolveLogTarget("none")).toBe("stdout");
-    } finally {
-      if (origTarget !== undefined) process.env.HOTDOG_LOG_TARGET = origTarget;
-      else delete process.env.HOTDOG_LOG_TARGET;
-    }
-  });
-
-  it("ignores invalid env var, falls back to config", () => {
-    const origTarget = process.env.HOTDOG_LOG_TARGET;
-    process.env.HOTDOG_LOG_TARGET = "invalid";
-    try {
-      expect(resolveLogTarget("stdout")).toBe("stdout");
-    } finally {
-      if (origTarget !== undefined) process.env.HOTDOG_LOG_TARGET = origTarget;
-      else delete process.env.HOTDOG_LOG_TARGET;
-    }
-  });
-
-  it("handles case-insensitive env var", () => {
-    const origTarget = process.env.HOTDOG_LOG_TARGET;
-    process.env.HOTDOG_LOG_TARGET = "STDOUT";
-    try {
-      expect(resolveLogTarget("none")).toBe("stdout");
-    } finally {
-      if (origTarget !== undefined) process.env.HOTDOG_LOG_TARGET = origTarget;
-      else delete process.env.HOTDOG_LOG_TARGET;
-    }
-  });
+      it("handles case-insensitive env var", () => {
+        const orig = process.env[env];
+        process.env[env] = validEnv.toUpperCase();
+        try {
+          expect(fn(validConfig)).toBe(validEnv);
+        } finally {
+          if (orig !== undefined) process.env[env] = orig;
+          else delete process.env[env];
+        }
+      });
+    });
+  }
 });
 
 describe("logger", () => {

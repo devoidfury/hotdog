@@ -40,201 +40,115 @@ describe("resolveCast", () => {
   });
 });
 
-describe("CAST_BUILTINS — truthy", () => {
-  let truthy;
-  beforeEach(() => {
-    truthy = resolveCast("truthy");
+describe("CAST_BUILTINS", () => {
+  describe("truthy", () => {
+    const truthy = resolveCast("truthy");
+
+    it("casts booleans through", () => {
+      expect(truthy(true)).toBe(true);
+      expect(truthy(false)).toBe(false);
+    });
+
+    it("casts truthy strings/numbers to true", () => {
+      for (const v of [1, 42, "true", "on", "1", "TRUE", "On", "  true  "]) {
+        expect(truthy(v)).toBe(true);
+      }
+    });
+
+    it("casts falsy strings/numbers to false", () => {
+      for (const v of [0, "false", "off", "0", "FALSE", "OFF", "  false  "]) {
+        expect(truthy(v)).toBe(false);
+      }
+    });
+
+    it("returns undefined for unrecognized values", () => {
+      expect(truthy("yes")).toBeUndefined();
+      expect(truthy("no")).toBeUndefined();
+      expect(truthy({})).toBeUndefined();
+      expect(truthy([])).toBeUndefined();
+    });
   });
 
-  it("accepts boolean true", () => {
-    expect(truthy(true)).toBe(true);
+  describe("falsy", () => {
+    const falsy = resolveCast("falsy");
+
+    it("negates boolean and string values", () => {
+      expect(falsy(true)).toBe(false);
+      expect(falsy(false)).toBe(true);
+      expect(falsy("true")).toBe(false);
+      expect(falsy("false")).toBe(true);
+    });
+
+    it("returns undefined for unrecognized input", () => {
+      expect(falsy("yes")).toBeUndefined();
+    });
   });
 
-  it("accepts boolean false", () => {
-    expect(truthy(false)).toBe(false);
+  describe("number", () => {
+    const number = resolveCast("number");
+
+    it("passes numbers through", () => {
+      expect(number(42)).toBe(42);
+      expect(number(-10)).toBe(-10);
+      expect(number(3.14)).toBe(3.14);
+    });
+
+    it("parses numeric strings", () => {
+      expect(number("42")).toBe(42);
+      expect(number("  42  ")).toBe(42);
+      expect(number("-10")).toBe(-10);
+    });
+
+    it("returns undefined for non-numeric input", () => {
+      expect(number("abc")).toBeUndefined();
+      expect(number("")).toBeUndefined();
+      expect(number("   ")).toBeUndefined();
+      expect(number({})).toBeUndefined();
+      expect(number(null)).toBeUndefined();
+      expect(number(true)).toBeUndefined();
+    });
   });
 
-  it("accepts number non-zero", () => {
-    expect(truthy(1)).toBe(true);
-    expect(truthy(42)).toBe(true);
+  describe("string", () => {
+    const string = resolveCast("string");
+
+    it("trims and returns non-empty strings", () => {
+      expect(string("hello")).toBe("hello");
+      expect(string("  hello  ")).toBe("hello");
+    });
+
+    it("returns undefined for empty or non-strings", () => {
+      expect(string("")).toBeUndefined();
+      expect(string("   ")).toBeUndefined();
+      expect(string(42)).toBeUndefined();
+      expect(string(null)).toBeUndefined();
+    });
   });
 
-  it("accepts number zero as false", () => {
-    expect(truthy(0)).toBe(false);
+  describe("any", () => {
+    const any = resolveCast("any");
+
+    it("accepts any value as-is", () => {
+      expect(any(42)).toBe(42);
+      expect(any("hello")).toBe("hello");
+      expect(any(null)).toBeNull();
+      expect(any(undefined)).toBeUndefined();
+      expect(any({})).toEqual({});
+    });
   });
 
-  it("accepts string 'true'", () => {
-    expect(truthy("true")).toBe(true);
-  });
+  describe("array", () => {
+    const array = resolveCast("array");
 
-  it("accepts string 'false'", () => {
-    expect(truthy("false")).toBe(false);
-  });
+    it("accepts arrays", () => {
+      expect(array([1, 2, 3])).toEqual([1, 2, 3]);
+    });
 
-  it("accepts string 'on'", () => {
-    expect(truthy("on")).toBe(true);
-  });
-
-  it("accepts string 'off'", () => {
-    expect(truthy("off")).toBe(false);
-  });
-
-  it("accepts string '1'", () => {
-    expect(truthy("1")).toBe(true);
-  });
-
-  it("accepts string '0'", () => {
-    expect(truthy("0")).toBe(false);
-  });
-
-  it("returns undefined for unrecognized string", () => {
-    expect(truthy("yes")).toBeUndefined();
-    expect(truthy("no")).toBeUndefined();
-  });
-
-  it("returns undefined for non-string, non-number, non-boolean", () => {
-    expect(truthy({})).toBeUndefined();
-    expect(truthy([])).toBeUndefined();
-  });
-
-  it("handles whitespace-padded strings", () => {
-    expect(truthy("  true  ")).toBe(true);
-    expect(truthy("  false  ")).toBe(false);
-  });
-
-  it("is case-insensitive", () => {
-    expect(truthy("TRUE")).toBe(true);
-    expect(truthy("FALSE")).toBe(false);
-    expect(truthy("On")).toBe(true);
-    expect(truthy("OFF")).toBe(false);
-  });
-});
-
-describe("CAST_BUILTINS — falsy", () => {
-  let falsy;
-  beforeEach(() => {
-    falsy = resolveCast("falsy");
-  });
-
-  it("negates boolean true", () => {
-    expect(falsy(true)).toBe(false);
-  });
-
-  it("negates boolean false", () => {
-    expect(falsy(false)).toBe(true);
-  });
-
-  it("negates string 'true'", () => {
-    expect(falsy("true")).toBe(false);
-  });
-
-  it("negates string 'false'", () => {
-    expect(falsy("false")).toBe(true);
-  });
-
-  it("returns undefined for unrecognized input", () => {
-    expect(falsy("yes")).toBeUndefined();
-  });
-});
-
-describe("CAST_BUILTINS — number", () => {
-  let number;
-  beforeEach(() => {
-    number = resolveCast("number");
-  });
-
-  it("accepts numeric values", () => {
-    expect(number(42)).toBe(42);
-    expect(number(-10)).toBe(-10);
-    expect(number(3.14)).toBe(3.14);
-  });
-
-  it("parses numeric strings", () => {
-    expect(number("42")).toBe(42);
-    expect(number("-10")).toBe(-10);
-    expect(number("3.14")).toBe(3.14);
-  });
-
-  it("returns undefined for non-numeric strings", () => {
-    expect(number("abc")).toBeUndefined();
-  });
-
-  it("handles whitespace-padded numeric strings", () => {
-    expect(number("  42  ")).toBe(42);
-  });
-
-  it("returns undefined for empty string", () => {
-    expect(number("")).toBeUndefined();
-  });
-
-  it("returns undefined for whitespace-only string", () => {
-    expect(number("   ")).toBeUndefined();
-  });
-
-  it("returns undefined for non-string, non-number types", () => {
-    expect(number({})).toBeUndefined();
-    expect(number(null)).toBeUndefined();
-    expect(number(true)).toBeUndefined();
-  });
-});
-
-describe("CAST_BUILTINS — string", () => {
-  let string;
-  beforeEach(() => {
-    string = resolveCast("string");
-  });
-
-  it("accepts non-empty strings", () => {
-    expect(string("hello")).toBe("hello");
-  });
-
-  it("trims whitespace", () => {
-    expect(string("  hello  ")).toBe("hello");
-  });
-
-  it("returns undefined for empty string", () => {
-    expect(string("")).toBeUndefined();
-  });
-
-  it("returns undefined for whitespace-only string", () => {
-    expect(string("   ")).toBeUndefined();
-  });
-
-  it("returns undefined for non-string types", () => {
-    expect(string(42)).toBeUndefined();
-    expect(string(null)).toBeUndefined();
-  });
-});
-
-describe("CAST_BUILTINS — any", () => {
-  let any;
-  beforeEach(() => {
-    any = resolveCast("any");
-  });
-
-  it("accepts any value as-is", () => {
-    expect(any(42)).toBe(42);
-    expect(any("hello")).toBe("hello");
-    expect(any(null)).toBeNull();
-    expect(any(undefined)).toBeUndefined();
-    expect(any({})).toEqual({});
-  });
-});
-
-describe("CAST_BUILTINS — array", () => {
-  let array;
-  beforeEach(() => {
-    array = resolveCast("array");
-  });
-
-  it("accepts arrays", () => {
-    expect(array([1, 2, 3])).toEqual([1, 2, 3]);
-  });
-
-  it("returns undefined for non-arrays", () => {
-    expect(array("not-array")).toBeUndefined();
-    expect(array({})).toBeUndefined();
-    expect(array(null)).toBeUndefined();
+    it("returns undefined for non-arrays", () => {
+      expect(array("not-array")).toBeUndefined();
+      expect(array({})).toBeUndefined();
+      expect(array(null)).toBeUndefined();
+    });
   });
 });
 

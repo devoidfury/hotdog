@@ -162,72 +162,10 @@ describe("handleSlashCommand", () => {
   });
 });
 
-describe("Interactive CLI — parseCommand edge cases", () => {
-  it("parses 'clear' command", () => {
-    const cmd = parseCommand("clear");
-    expect(cmd.type).toBe(Command.Clear);
-  });
-
-  it("parses 'clear' with profile name", () => {
-    const cmd = parseCommand("clear default");
-    expect(cmd.type).toBe(Command.Clear);
-    expect(cmd.value).toBe("default");
-  });
-
-  it("parses 'tools' command", () => {
-    const cmd = parseCommand("tools");
-    expect(cmd.type).toBe(Command.Tools);
-  });
-
-  it("parses 'thinking' command", () => {
-    const cmd = parseCommand("thinking");
-    expect(cmd.type).toBe(Command.Thinking);
-  });
-
-  it("parses 'tokens' command", () => {
-    const cmd = parseCommand("tokens");
-    expect(cmd.type).toBe(Command.Tokens);
-  });
-
-  it("parses 'regenerate' command", () => {
-    const cmd = parseCommand("regenerate");
-    expect(cmd.type).toBe(Command.Regenerate);
-  });
-
-  it("parses 'reasoning' command without value", () => {
-    const cmd = parseCommand("reasoning");
-    expect(cmd.type).toBe(Command.Reasoning);
-    expect(cmd.value).toBeNull();
-  });
-
-  it("parses 'reasoning' command with value", () => {
-    const cmd = parseCommand("reasoning high");
-    expect(cmd.type).toBe(Command.Reasoning);
-    expect(cmd.value).toBe("high");
-  });
-
-  it("parses unknown command", () => {
-    const cmd = parseCommand("unknown-command");
-    expect(cmd.type).toBe(Command.Unknown);
-    expect(cmd.value).toBe("unknown-command");
-  });
-
-  it("parses null command", () => {
-    const cmd = parseCommand(null);
-    expect(cmd.type).toBe(Command.Unknown);
-    expect(cmd.value).toBeNull();
-  });
-
-  it("parses empty string command", () => {
-    const cmd = parseCommand("");
-    expect(cmd.type).toBe(Command.Unknown);
-    expect(cmd.value).toBeNull();
-  });
-
+describe("parseCommand edge cases not covered by interactive-cli.test.js", () => {
   it("does not trim whitespace-only input (returns value as-is)", () => {
     const cmd = parseCommand("   ");
     expect(cmd.type).toBe(Command.Unknown);
-    // parseCommand does not trim — "   " is passed through as value
     expect(cmd.value).toBe("   ");
   });
 

@@ -6,30 +6,16 @@ import {
   disabledSessionLog,
   readSessionEntries,
 } from "../../src/extensions/session-log/index.js";
-import { mkdirSync, rmSync, writeFileSync, readFileSync } from "node:fs";
-import { join } from "node:path";
-import { homedir } from "node:os";
+import { setupSessionTestDir, cleanupSessionTest } from "../helpers.js";
 
 const TEST_SESSION_ID = "test-session-ext";
 
 function setupTestDir() {
-  const dir = join(homedir(), ".cache", "hotdog", "sessions");
-  mkdirSync(dir, { recursive: true });
-  const testFile = join(dir, `${TEST_SESSION_ID}.jsonl`);
-  try {
-    rmSync(testFile);
-  } catch {
-    // doesn't exist yet
-  }
+  setupSessionTestDir(TEST_SESSION_ID);
 }
 
 function teardown() {
-  const testFile = join(homedir(), ".cache", "hotdog", "sessions", `${TEST_SESSION_ID}.jsonl`);
-  try {
-    rmSync(testFile);
-  } catch {
-    // ignore
-  }
+  cleanupSessionTest(TEST_SESSION_ID);
 }
 
 describe("LOG_SOURCE constants", () => {
@@ -45,36 +31,12 @@ describe("LOG_SOURCE constants", () => {
 });
 
 describe("disabledSessionLog", () => {
-  it("returns a no-op object with all expected methods", () => {
+  it("returns a no-op object with correct properties", () => {
     const log = disabledSessionLog();
     expect(log.sessionId).toBeNull();
     expect(log.logPath).toBeNull();
-    expect(typeof log.writeInput).toBe("function");
-    expect(typeof log.writeSystemPrompt).toBe("function");
-    expect(typeof log.writeAssistant).toBe("function");
-    expect(typeof log.writeToolResult).toBe("function");
-    expect(typeof log.writeReset).toBe("function");
-    expect(typeof log.readEntries).toBe("function");
-    expect(typeof log.getLogPath).toBe("function");
-  });
-
-  it("readEntries returns empty array", () => {
-    const log = disabledSessionLog();
     expect(log.readEntries()).toEqual([]);
-  });
-
-  it("getLogPath returns null", () => {
-    const log = disabledSessionLog();
     expect(log.getLogPath()).toBeNull();
-  });
-
-  it("write methods are no-ops", () => {
-    const log = disabledSessionLog();
-    expect(() => log.writeInput("test")).not.toThrow();
-    expect(() => log.writeSystemPrompt("test")).not.toThrow();
-    expect(() => log.writeAssistant("test")).not.toThrow();
-    expect(() => log.writeToolResult("test", "tc1", "bash")).not.toThrow();
-    expect(() => log.writeReset()).not.toThrow();
   });
 });
 

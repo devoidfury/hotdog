@@ -165,7 +165,7 @@ describe("isRetryableHttpStatus", () => {
   });
 });
 
-describe("retryWithBackoff - HTTP status retry", () => {
+describe("retryWithBackoff — HTTP status retry", () => {
   it("retries on retryable HTTP status codes via LlmError.Api", async () => {
     let calls = 0;
     const result = await retryWithBackoff(
@@ -195,20 +195,5 @@ describe("retryWithBackoff - HTTP status retry", () => {
       ),
     ).rejects.toThrow("HTTP 400");
     expect(calls).toBe(1);
-  });
-
-  it("exhausts retries and throws", async () => {
-    let calls = 0;
-    await expect(
-      retryWithBackoff(
-        () => {
-          calls++;
-          throw LlmError.Http("fail");
-        },
-        2,
-        { signal: new AbortController().signal },
-      ),
-    ).rejects.toThrow("fail");
-    expect(calls).toBe(2);
   });
 });

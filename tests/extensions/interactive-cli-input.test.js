@@ -3,6 +3,7 @@
 import { describe, it, expect, beforeEach, afterEach } from "bun:test";
 import { AsyncInteractiveCliInput } from "../../src/extensions/ui-interactive-cli/index.js";
 import { NoopInput } from "../../src/core/context/input.js";
+import { createMockRl } from "../helpers.js";
 
 describe("NoopInput", () => {
   it("is not interactive", () => {
@@ -20,31 +21,6 @@ describe("NoopInput", () => {
     expect(answers.notes).toBe("");
   });
 });
-
-/**
- * Create a mock readline that queues responses.
- * Each call to rl.question will consume the next response from the queue.
- */
-function createMockRl(responses = []) {
-  let responseIndex = 0;
-  const addedHandlers = [];
-
-  const rl = {
-    removeListener: function () {},
-    question: function (prompt, cb) {
-      // Immediately invoke callback with next queued response
-      if (responseIndex < responses.length) {
-        cb(responses[responseIndex]);
-        responseIndex++;
-      }
-    },
-    on: function (event, handler) {
-      if (event === "line") addedHandlers.push(handler);
-    },
-  };
-
-  return { rl, addedHandlers };
-}
 
 describe("AsyncInteractiveCliInput", () => {
   let lineHandler;

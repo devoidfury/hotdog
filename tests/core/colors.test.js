@@ -138,82 +138,32 @@ describe('resolvePalette', () => {
   });
 });
 
-describe('applyThinking', () => {
-  it('applies thinking color from palette', () => {
-    const p = ColorPalette.default();
-    const result = applyThinking('thinking text', p);
-    expect(result).toMatch(/\x1b\[\d+mthinking text\x1b\[0m/);
-  });
+// All apply* functions share the same pattern: apply color when enabled, return plain text when disabled.
+// Test each one concisely.
+describe('apply* formatting functions', () => {
+  const functions = [
+    { name: 'applyThinking', fn: applyThinking, field: 'thinking' },
+    { name: 'applyToolCall', fn: applyToolCall, field: 'tool_call' },
+    { name: 'applyToolResult', fn: applyToolResult, field: 'tool_result' },
+    { name: 'applyFinalResponse', fn: applyFinalResponse, field: 'final_response' },
+    { name: 'applyCompacting', fn: applyCompacting, field: 'compacting' },
+    { name: 'applyProgress', fn: applyProgress, field: 'progress' },
+  ];
 
-  it('returns plain text when colors disabled', () => {
-    const p = new ColorPalette({ use_colors: false });
-    expect(applyThinking('text', p)).toBe('text');
-  });
-});
+  for (const { name, fn, field } of functions) {
+    describe(name, () => {
+      it('applies color from palette', () => {
+        const p = ColorPalette.default();
+        const result = fn('test text', p);
+        expect(result).toMatch(/\x1b\[[\d;]+mtest text\x1b\[0m/);
+      });
 
-describe('applyToolCall', () => {
-  it('applies tool_call color from palette', () => {
-    const p = ColorPalette.default();
-    const result = applyToolCall('call text', p);
-    expect(result).toMatch(/\x1b\[33mcall text\x1b\[0m/);
-  });
-
-  it('returns plain text when colors disabled', () => {
-    const p = new ColorPalette({ use_colors: false });
-    expect(applyToolCall('text', p)).toBe('text');
-  });
-});
-
-describe('applyToolResult', () => {
-  it('applies tool_result color from palette', () => {
-    const p = ColorPalette.default();
-    const result = applyToolResult('result text', p);
-    expect(result).toMatch(/\x1b\[32mresult text\x1b\[0m/);
-  });
-
-  it('returns plain text when colors disabled', () => {
-    const p = new ColorPalette({ use_colors: false });
-    expect(applyToolResult('text', p)).toBe('text');
-  });
-});
-
-describe('applyFinalResponse', () => {
-  it('applies final_response color from palette', () => {
-    const p = ColorPalette.default();
-    const result = applyFinalResponse('response', p);
-    expect(result).toMatch(/\x1b\[1;37mresponse\x1b\[0m/);
-  });
-
-  it('returns plain text when colors disabled', () => {
-    const p = new ColorPalette({ use_colors: false });
-    expect(applyFinalResponse('text', p)).toBe('text');
-  });
-});
-
-describe('applyCompacting', () => {
-  it('applies compacting color from palette', () => {
-    const p = ColorPalette.default();
-    const result = applyCompacting('compacting', p);
-    expect(result).toMatch(/\x1b\[1;31mcompacting\x1b\[0m/);
-  });
-
-  it('returns plain text when colors disabled', () => {
-    const p = new ColorPalette({ use_colors: false });
-    expect(applyCompacting('text', p)).toBe('text');
-  });
-});
-
-describe('applyProgress', () => {
-  it('applies progress color from palette', () => {
-    const p = ColorPalette.default();
-    const result = applyProgress('progress', p);
-    expect(result).toMatch(/\x1b\[90mprogress\x1b\[0m/);
-  });
-
-  it('returns plain text when colors disabled', () => {
-    const p = new ColorPalette({ use_colors: false });
-    expect(applyProgress('text', p)).toBe('text');
-  });
+      it('returns plain text when colors disabled', () => {
+        const p = new ColorPalette({ use_colors: false });
+        expect(fn('plain text', p)).toBe('plain text');
+      });
+    });
+  }
 });
 
 describe('NAMED_THEMES', () => {

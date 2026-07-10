@@ -242,12 +242,10 @@ Each extension has:
 - `extension.json` — metadata file with `provides` array (e.g., `["cli:subcommands"]`)
 
 ### Extension Loading
-1. Extensions are discovered via `discoverExtensions()` which walks configured paths
-2. CLI extensions (provides: `["cli:subcommands"]`) are loaded early for subcommand registration
-3. All other extensions are loaded after config resolution
-4. Extensions register tools via `HOOKS.TOOLS_REGISTER`
-5. Extensions register CLI subcommands via `HOOKS.CLI_SUBCOMMANDS_REGISTER`
-6. Extensions contribute to system prompt via `HOOKS.SYSTEM_PROMPT_BUILD`
+1. **Static metadata discovery** — `registerExtensionMetadata()` reads `extension.json` files without loading any extension code. This enables `--help`, subcommand discovery, and config defaults to work immediately.
+2. **CLI arg parsing** — `parseArgs()` uses the registered CLI flags and subcommand names.
+3. **Config resolution** — `buildConfig()` resolves all config values.
+4. **Extension loading** — `loadExtensions()` loads all extensions in dependency order. Extensions register tools via `HOOKS.TOOLS_REGISTER`, CLI subcommands via `HOOKS.CLI_SUBCOMMANDS_REGISTER`, and contribute to the system prompt via `HOOKS.SYSTEM_PROMPT_BUILD`.
 
 ### Built-in Extensions
 
@@ -264,7 +262,7 @@ Each extension has:
 | `prompts` | Prompt template loading |
 | `session-log` | JSONL session logging |
 | `ui-session-review-cli` | Review CLI subcommand + review tool |
-| `ui-info-cli` | Info + show-prompt CLI subcommands |
+| `ui-info-cli` | Info, show-prompt, and profiles CLI subcommands |
 | `ui-one-shot` | One-shot prompt mode (`-c`/`--prompt` flag, `prompt` subcommand) |
 | `ui-interactive-cli` | Interactive CLI session with readline loop |
 | `subagents` | Subagent tools for task delegation (manager-only) |
@@ -276,7 +274,7 @@ Each extension has:
 | `webui` | Web UI for agent interaction — login, chat, session management |
 
 ### Extension Load Order
-Extensions are loaded in order: REFRESH (0) → CORE_TOOLS (1) → CLI (2) → DEFAULT (10). This ensures CLI extensions register subcommands before config is loaded, and core tools are available before other extensions that depend on them.
+Extensions are loaded in order: REFRESH (0) → CORE_TOOLS (1) → CLI (2) → DEFAULT (10). CLI extensions are loaded early so their subcommand handlers are registered before dispatch. Core tools load before other extensions that depend on them.
 
 ## Data Flow
 
@@ -310,6 +308,6 @@ User runs: bun bin/hotdog info
   → parseArgs() detects subcommand
   → CliSubcommandRegistry.get("info") → handler
   → Load config
-  → Load all non-CLI extensions (for full hook chain)
+  → Load all extensions (full hook chain)
   → Execute handler(cli, core)
 ```

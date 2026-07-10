@@ -6,6 +6,7 @@
 //   - commandEnabled: bool  (default: true)  — register /model and /models commands
 
 import { HOOKS } from "../../core/hooks.js";
+import { ACTIONS } from "../../core/commands.js";
 import { ModelTool } from "./model.js";
 
 /**
@@ -46,6 +47,7 @@ export function create(core) {
             const models = Object.keys(agent._modelRegistry || {});
             if (models.length === 0) {
               return {
+                action: ACTIONS.DISPLAY,
                 content:
                   "No models configured. Add providers to your config file.",
               };
@@ -56,7 +58,7 @@ export function create(core) {
               lines.push(`  ${name}`);
             }
             lines.push(`\nCurrently using: ${agent.model}`);
-            return { content: lines.join("\n") };
+            return { action: ACTIONS.DISPLAY, content: lines.join("\n") };
           },
         });
 
@@ -72,12 +74,13 @@ export function create(core) {
               // No model name — show available models
               const models = Object.keys(agent._modelRegistry || {});
               return {
+                action: ACTIONS.DISPLAY,
                 content: `Available models: ${models.join(", ")}`,
               };
             }
 
             agent.model = modelName;
-            return { content: `Switched to model: ${modelName}` };
+            return { action: ACTIONS.DISPLAY, content: `Switched to model: ${modelName}` };
           },
         });
       },

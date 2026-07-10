@@ -9,7 +9,7 @@
 
 import readline from "node:readline";
 import { spawn } from "node:child_process";
-import { parseCommand, Command } from "../../core/commands.js";
+import { parseCommand, Command, ACTIONS } from "../../core/commands.js";
 import { HOOKS } from "../../core/hooks.js";
 import { CliOutputSink } from "../../core/ui/cli.js";
 import { LlmClient } from "../../core/llm-client/client.js";
@@ -425,7 +425,10 @@ export async function runInteractiveSession(cli, core, options = {}) {
   // Re-display prompt after agent finishes processing
   core.hooks.on(HOOKS.TURN_END, (data) => {
     if (data.stopped) {
-      setImmediate(() => rl.prompt());
+      setImmediate(() => {
+        console.log("");
+        rl.prompt();
+      });
     }
   });
 
@@ -463,9 +466,8 @@ export async function runInteractiveSession(cli, core, options = {}) {
         if (result.content) {
           console.log(result.content);
         } else if (result.error) {
-          console.log(`${result.error}\n`);
+          console.log(`${result.error}`);
         }
-        console.log("");
         rl.prompt();
         return;
       }
@@ -540,7 +542,19 @@ export function handleSlashCommand(cmdText, bus, rl) {
   }
 
   // All other commands go through the bus → agent → COMMAND_RESULT event
-  bus.executeCommand(cmdText).then(() => rl.prompt());
+  bus.executeCommand(cmdText).then(
+    (action) => {
+      if (!(action & ACTIONS.PROMPT)) {
+        console.log("");
+        rl.prompt();
+      }
+    },
+    () => {
+      // On error, always re-display the prompt so the CLI stays responsive.
+      console.log("");
+      rl.prompt();
+    },
+  );
 }
 
 /**

@@ -58,6 +58,7 @@ export {
 
 export * from "./context/message-log.js";
 export * from "./agent.js";
+export * from "./commands.js";
 export * from "./command-handlers.js";
 export * from "./session/index.js";
 

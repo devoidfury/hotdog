@@ -8,6 +8,7 @@ import { logger } from "../../core/logger.js";
 import { ParseError } from "../../core/error.js";
 import { Message } from "../../core/context/message.js";
 import { render } from "../../utils/render.js";
+import { ACTIONS } from "../../core/commands.js";
 
 /**
  * Parse a .prompt.md file into a Prompt object.
@@ -49,15 +50,16 @@ export function parsePromptFromMd(content, fileName, location) {
  * PromptsLoader — loads and manages prompt templates.
  */
 export class PromptsLoader {
-  constructor(paths) {
+  constructor(paths, display = true) {
     // paths can be a string (colon-separated) or array
     this.paths = Array.isArray(paths)
       ? paths
-      : paths
+      : (paths || "")
           .split(":")
           .map((p) => p.trim())
           .filter(Boolean);
     this.prompts = new Map();
+    this.displayPrompt = display;
   }
 
   /**
@@ -155,15 +157,20 @@ export class PromptsLoader {
 
     const prompt = this.getPrompt(name);
     if (!prompt) {
-      return { error: `Unknown prompt: ${name}` };
+      return { action: ACTIONS.ERROR, error: `Unknown prompt: ${name}` };
     }
 
     // Render the prompt template with args using the render engine
     const content = render(prompt.content, { ARGS: args || "" });
 
-    // Add the rendered prompt as a user message
-    agent.addMessage(new Message({ role: "user", content }));
+    // Build action flags. PROMPT always enqueues for LLM processing.
+    // DISPLAY is added when displayPrompt is true so the rendered prompt
+    // appears in chat before the LLM responds.
+    let action = ACTIONS.PROMPT;
+    if (this.displayPrompt !== false) {
+      action |= ACTIONS.DISPLAY;
+    }
 
-    return { content: `Prompt '${prompt.name}' executed.` };
+    return { action, content };
   }
 }

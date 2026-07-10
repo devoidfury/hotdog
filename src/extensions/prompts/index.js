@@ -4,18 +4,22 @@
 
 import extensionData from "./extension.json";
 import { HOOKS } from "../../core/hooks.js";
+import { logger } from "../../core/logger.js";
 import { PromptsLoader } from "./loader.js";
 
 /**
  * Create the prompts extension.
  */
 export async function create(core) {
-  // Config defaults come from extension.json configSchema
   const config = core.config?.prompts || {};
-  const promptsPath =
-    config.promptsPath ??
-    extensionData.configSchema.prompts.properties.promptsPath.default;
-  const loader = new PromptsLoader(promptsPath);
+  // Backward compat: support old top-level promptsPath key alongside new path key.
+  const resolvedPath = config.path ?? config.promptsPath;
+  if (config.promptsPath !== undefined && config.path === undefined) {
+    logger.warn(
+      "prompts.promptsPath is deprecated; use prompts.path instead",
+    );
+  }
+  const loader = new PromptsLoader(resolvedPath, config.displayPrompt);
   await loader.loadPrompts();
 
   return {
@@ -26,7 +30,8 @@ export async function create(core) {
       [HOOKS.COMMANDS_REGISTER]: async ({ registry }) => {
         registry.register("prompt", {
           description: "Execute a prompt template (prompt:<name> [args])",
-          matches: (cmd) => cmd.startsWith("prompt:"),
+          matches: (cmd) =>
+            cmd.startsWith("prompt:") || cmd.startsWith("prompt "),
           handler: loader.promptHandler.bind(loader),
         });
       },

@@ -3,6 +3,13 @@
   "provides": [],
   "loadOrder": 10,
   "description": "Prompt template loading and execution",
+  "cli:flags": [
+    {
+      "long": "--prompts-path",
+      "type": "string",
+      "description": "Prompts directory path (relative to config dir, or absolute)"
+    }
+  ],
   "configSchema": {
     "prompts": {
       "type": "object",
@@ -12,17 +19,23 @@
           "default": true,
           "description": "Whether this extension is enabled. Set to false to disable the extension entirely."
         },
-        "promptsPath": {
+        "path": {
           "type": "string",
-          "default": "config/prompts",
-          "description": "Directory path where prompt templates are stored (relative to config dir, or absolute)"
+          "description": "Directory path where prompt templates are stored (relative to config dir, or absolute)",
+          "layers": [
+            { "source": "cli", "key": "promptsPath" },
+            { "source": "config", "key": "prompts.promptsPath" },
+            { "compute": "joinConfigDir:prompts" }
+          ]
+        },
+        "displayPrompt": {
+          "type": "boolean",
+          "default": true,
+          "description": "When true, the rendered prompt is shown in the chat before LLM processing. When false, it is enqueued silently."
         }
       },
       "additionalProperties": false,
-      "layers": [
-        { "source": "config", "key": "prompts" },
-        { "default": {} }
-      ]
+      "layers": [{ "source": "config", "key": "prompts" }, { "default": {} }]
     }
   }
 }

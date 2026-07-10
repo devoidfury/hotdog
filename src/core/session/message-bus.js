@@ -6,7 +6,7 @@
 import { formatError, isExpectedError, LlmError } from "../error.js";
 import { OUTPUT_EVENT } from "../context/output.js";
 import { HOOKS } from "../hooks.js";
-import { parseCommand } from "../commands.js";
+import { parseCommand, ACTIONS } from "../commands.js";
 
 /**
  * An event-driven message bus that owns the agent run loop.
@@ -90,7 +90,11 @@ export class MessageBus {
   }
 
   isIdle() {
-    return !this._isRunning && this._queue.length === 0 && !this._abortController.signal.aborted;
+    return (
+      !this._isRunning &&
+      this._queue.length === 0 &&
+      !this._abortController.signal.aborted
+    );
   }
 
   get sessionManager() {
@@ -152,7 +156,7 @@ export class MessageBus {
    * @param {boolean} drain — If true, process remaining queued
    *   messages after cancellation before exiting.
    */
-  async * _messages(drain = false) {
+  async *_messages(drain = false) {
     const signal = this._abortController.signal;
     while (true) {
       // Drain all currently queued messages synchronously
@@ -224,7 +228,11 @@ export class MessageBus {
     // If input was handled by a hook, skip agent processing
     if (inputHandled) {
       this._isRunning = false;
-      this._sink.emit({ type: OUTPUT_EVENT.SESSION_STATE, key: "working", value: false });
+      this._sink.emit({
+        type: OUTPUT_EVENT.SESSION_STATE,
+        key: "working",
+        value: false,
+      });
       return;
     }
 
@@ -234,7 +242,7 @@ export class MessageBus {
       // Suppress cancellation errors on interrupt — the UI already
       // prints an "Interrupted" message, so the full error is noise.
       const isCancellation =
-        e instanceof LlmError && e.type === "cancelled" ||
+        (e instanceof LlmError && e.type === "cancelled") ||
         e.name === "AbortError" ||
         LlmError.isCancelled(e);
 
@@ -249,7 +257,11 @@ export class MessageBus {
     this._isRunning = false;
 
     // Signal that the agent is done working so the UI can hide the spinner
-    this._sink.emit({ type: OUTPUT_EVENT.SESSION_STATE, key: "working", value: false });
+    this._sink.emit({
+      type: OUTPUT_EVENT.SESSION_STATE,
+      key: "working",
+      value: false,
+    });
   }
 
   /**
@@ -269,16 +281,46 @@ export class MessageBus {
 
     const result = await agent.executeCommand(cmd);
 
-    if (result && result.error) {
-      this._sink.emit({
-        type: OUTPUT_EVENT.COMMAND_RESULT,
-        content: result.error,
-      });
-    } else if (result && result.content) {
-      this._sink.emit({
-        type: OUTPUT_EVENT.COMMAND_RESULT,
-        content: result.content,
-      });
+    if (result) {
+      // Bitflags: multiple actions can fire simultaneously.
+      // PROMPT — enqueue the rendered content as a user message so the
+      // agent's normal run loop processes it and sends it to the LLM.
+      if (result.action & ACTIONS.PROMPT && result.content) {
+        this.enqueue(result.content);
+      }
+
+      // ERROR — display the error message to the user.
+      if (result.action & ACTIONS.ERROR && result.error) {
+        this._sink.emit({
+          type: OUTPUT_EVENT.COMMAND_RESULT,
+          content: result.error,
+        });
+      }
+
+      // DISPLAY — show the result content as a command response.
+      if (result.action & ACTIONS.DISPLAY && result.content) {
+        this._sink.emit({
+          type: OUTPUT_EVENT.COMMAND_RESULT,
+          content: result.content,
+        });
+      }
+
+      // Backward compat — handler returned error/content without action field.
+      // These only trigger when action is absent (null/undefined), not when
+      // it's explicitly set to 0 (which is a valid "no action" bitflag).
+      if (result.action == null && result.error) {
+        this._sink.emit({
+          type: OUTPUT_EVENT.COMMAND_RESULT,
+          content: result.error,
+        });
+      }
+      if (result.action == null && result.content) {
+        this._sink.emit({
+          type: OUTPUT_EVENT.COMMAND_RESULT,
+          content: result.content,
+        });
+      }
     }
+    return result?.action;
   }
 }

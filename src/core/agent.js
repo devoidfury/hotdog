@@ -6,6 +6,7 @@ import { MessageLog } from "./context/message-log.js";
 import { OUTPUT_EVENT } from "./context/output.js";
 import { formatError, AgentError, LlmError } from "./error.js";
 import { HOOKS } from "./hooks.js";
+import { ACTIONS } from "./commands.js";
 import { logger } from "./logger.js";
 import { ToolContext } from "./extensions/tool-context.js";
 import { xmlEscape } from "./extensions/tool-utils.js";
@@ -984,7 +985,7 @@ export class Agent {
   }
 
   /**
-   * Execute a command. Returns { content } or { error }.
+   * Execute a command. Returns { action, content } or { action, error }.
    * Dispatches via: custom handler → extension hooks → command registry.
    * @param {Object} cmd - Command object { type, value }
    * @returns {Promise<Object>}
@@ -1017,7 +1018,7 @@ export class Agent {
       return await registered.handler(this, cmd.value, cmd);
     }
 
-    return { error: `Unknown command: ${cmd.type}` };
+    return { action: ACTIONS.ERROR, error: `Unknown command: ${cmd.type}` };
   }
 
   /**

@@ -53,13 +53,13 @@ describe("formatToolResult", () => {
 describe("formatTokenUsage", () => {
   it("formats token usage correctly", () => {
     expect(formatTokenUsage(100, 50, 200, 350)).toBe(
-      "(tokens cached:50 prompt:100 completion:200 total:350)\n",
+      "(tokens cached:50 prompt:100 completion:200 total:350)",
     );
   });
 
   it("handles large numbers", () => {
     expect(formatTokenUsage(10000, 6000, 20000, 35000)).toBe(
-      "(tokens cached:6000 prompt:10000 completion:20000 total:35000)\n",
+      "(tokens cached:6000 prompt:10000 completion:20000 total:35000)",
     );
   });
 });

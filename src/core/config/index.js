@@ -204,7 +204,6 @@ export function getDefaultConfig(extParams) {
     showTokenUse: DEFAULT_SHOW_TOKEN_USE,
     skillsPath: DEFAULT_SKILLS_PATH,
     profilesPath: DEFAULT_PROFILES_PATH,
-    promptsPath: DEFAULT_PROMPTS_PATH,
     chatTimeoutSecs: DEFAULT_CHAT_TIMEOUT_SECS,
     embeddingsTimeoutSecs: DEFAULT_EMBEDDINGS_TIMEOUT_SECS,
     maxTokens: DEFAULT_MAX_TOKENS,

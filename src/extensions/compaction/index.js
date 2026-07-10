@@ -14,6 +14,7 @@ import { TokenAwareStrategy } from './strategies/token-aware.js';
 import { TrimStrategy } from './strategies/trim.js';
 import { estimateContextTokens } from './utils.js';
 import { HOOKS } from '../../core/hooks.js';
+import { ACTIONS } from '../../core/commands.js';
 import { logger } from '../../core/logger.js';
 import { LlmError, formatError } from '../../core/error.js';
 import { Message } from '../../core/context/message.js';
@@ -123,7 +124,7 @@ export function create(core) {
             const name = parts[1] || null;
 
             if (action === 'help') {
-              return { content: `Usage: /compact:strategy [list|set <name>|help]\n  list   - Show available strategies\n  set    - Set the current strategy\n  help   - Show this help` };
+              return { action: ACTIONS.DISPLAY, content: `Usage: /compact:strategy [list|set <name>|help]\n  list   - Show available strategies\n  set    - Set the current strategy\n  help   - Show this help` };
             } else if (action === 'list' || action === '') {
               const strategies = strategyRegistry.getAll().map(s => ({
                 name: s.name,
@@ -134,11 +135,11 @@ export function create(core) {
                 const marker = s.name === settings.strategy ? ' (current)' : '';
                 lines.push(`  ${s.name}${marker} - ${s.description}`);
               }
-              return { content: lines.join('\n') };
+              return { action: ACTIONS.DISPLAY, content: lines.join('\n') };
             } else {
               // Set strategy
               settings.strategy = action;
-              return { content: `Compaction strategy set to: ${action}` };
+              return { action: ACTIONS.DISPLAY, content: `Compaction strategy set to: ${action}` };
             }
           },
         });
@@ -169,7 +170,7 @@ export function create(core) {
     const nonSystemMessages = agent.log.getNonSystem();
 
     if (nonSystemMessages.length <= 2) {
-      return { content: 'Not enough messages to compact.' };
+      return { action: ACTIONS.DISPLAY, content: 'Not enough messages to compact.' };
     }
 
     // If keep is specified, just trim to that many messages
@@ -177,17 +178,17 @@ export function create(core) {
       const systemMessages = agent.log.getSystem();
       const keptMessages = nonSystemMessages.slice(-keep);
       agent.replaceContext([...systemMessages, ...keptMessages]);
-      return { content: `Context compacted to ${keptMessages.length} messages.` };
+      return { action: ACTIONS.DISPLAY, content: `Context compacted to ${keptMessages.length} messages.` };
     }
 
     // Get the strategy
     const strategy = strategyRegistry.get(settings.strategy) || strategyRegistry.getDefault();
     if (!strategy) {
-      return { error: 'No compaction strategy available.' };
+      return { action: ACTIONS.ERROR, error: 'No compaction strategy available.' };
     }
 
     if (!strategy.canCompact(nonSystemMessages, settings)) {
-      return { content: 'Compaction not applicable with current settings.' };
+      return { action: ACTIONS.DISPLAY, content: 'Compaction not applicable with current settings.' };
     }
 
     // Perform compaction
@@ -195,9 +196,9 @@ export function create(core) {
 
     const resultContent = `Context compacted using '${settings.strategy}' strategy.`;
     if (debug) {
-      return { content: resultContent + '\n(Debug mode: debug file written.)' };
+      return { action: ACTIONS.DISPLAY, content: resultContent + '\n(Debug mode: debug file written.)' };
     }
-    return { content: resultContent };
+    return { action: ACTIONS.DISPLAY, content: resultContent };
   }
 
   /**

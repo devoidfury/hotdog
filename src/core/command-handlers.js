@@ -2,7 +2,7 @@
 // These are extracted from agent.js so that agent.js only does generic dispatch.
 // Each handler is a function (agent, value, cmd) => { content?, error? }.
 
-import { Command } from "./commands.js";
+import { Command, ACTIONS } from "./commands.js";
 
 /**
  * Handler for /clear — clears context and resets system prompt.
@@ -13,7 +13,7 @@ import { Command } from "./commands.js";
  */
 export async function handleClear(agent, value) {
   await agent.clearContext();
-  return { content: "Context cleared." };
+  return { action: ACTIONS.DISPLAY, content: "Context cleared." };
 }
 
 /**
@@ -22,7 +22,7 @@ export async function handleClear(agent, value) {
  * @returns {{error: string}} Error message.
  */
 export function handleQuit() {
-  return { error: "UI command: quit" };
+  return { action: ACTIONS.ERROR, error: "UI command: quit" };
 }
 
 /**
@@ -31,7 +31,7 @@ export function handleQuit() {
  * @returns {{error: string}} Error message.
  */
 export function handleHelp() {
-  return { error: "UI command: help" };
+  return { action: ACTIONS.ERROR, error: "UI command: help" };
 }
 
 /**
@@ -43,7 +43,7 @@ export function handleHelp() {
 export function handleTokens(agent) {
   const u = agent.getTokenUsage();
   if (u.turns === 0) {
-    return { content: "No token usage recorded yet." };
+    return { action: ACTIONS.DISPLAY, content: "No token usage recorded yet." };
   }
 
   const promptProcessed = u.promptTokens; // accumulated as (prompt - cached)
@@ -79,7 +79,7 @@ export function handleTokens(agent) {
     `  total:       ${(u.lastTotalTokens || 0).toLocaleString()} tokens`,
   );
 
-  return { content: lines.join("\n") };
+  return { action: ACTIONS.DISPLAY, content: lines.join("\n") };
 }
 
 /**
@@ -94,7 +94,10 @@ export function handleTools(agent) {
     key: "hideTools",
     value: agent.hideTools,
   });
-  return { content: `Tool display: ${agent.hideTools ? "hidden" : "shown"}` };
+  return {
+    action: ACTIONS.DISPLAY,
+    content: `Tool display: ${agent.hideTools ? "hidden" : "shown"}`,
+  };
 }
 
 /**
@@ -110,6 +113,7 @@ export function handleThinking(agent) {
     value: agent.hideThinking,
   });
   return {
+    action: ACTIONS.DISPLAY,
     content: `Thinking display: ${agent.hideThinking ? "hidden" : "shown"}`,
   };
 }
@@ -123,7 +127,7 @@ export function handleThinking(agent) {
 export async function handleRegenerate(agent) {
   agent._systemPrompt = null;
   await agent.ensureSystemPrompt();
-  return { content: "System prompt regenerated." };
+  return { action: ACTIONS.DISPLAY, content: "System prompt regenerated." };
 }
 
 /**
@@ -140,17 +144,18 @@ export function handleReasoning(agent, value) {
       agent._reasoningEffort !== undefined
         ? agent._reasoningEffort
         : "(not set, omitted from requests)";
-    return { content: `Current reasoning effort: ${current}` };
+    return { action: ACTIONS.DISPLAY, content: `Current reasoning effort: ${current}` };
   }
   if (value === "unset") {
     agent._reasoningEffort = undefined;
-    return { content: "Reasoning effort unset (omitted from requests)." };
+    return { action: ACTIONS.DISPLAY, content: "Reasoning effort unset (omitted from requests)." };
   }
   if (valid.includes(value)) {
     agent._reasoningEffort = value;
-    return { content: `Reasoning effort set to: ${value}` };
+    return { action: ACTIONS.DISPLAY, content: `Reasoning effort set to: ${value}` };
   }
   return {
+    action: ACTIONS.ERROR,
     error: `Invalid reasoning effort '${value}'. Valid: none, minimal, low, high, xhigh, max, unset`,
   };
 }

@@ -20,6 +20,20 @@ export const Command = {
 };
 
 /**
+ * Action constants — returned by command handlers to tell the core
+ * how to proceed after executing a command.
+ *
+ *   DISPLAY — show the result content as a command response (default)
+ *   PROMPT  — enqueue the content as a user message for LLM processing
+ *   ERROR   — show the error as a command response
+ */
+export const ACTIONS = {
+  DISPLAY: 1 << 0, // 1
+  PROMPT: 1 << 1,  // 2
+  ERROR: 1 << 2,   // 4
+};
+
+/**
  * Parse a raw command string into a typed command object.
  *
  * @param {string} cmd - Raw command string.

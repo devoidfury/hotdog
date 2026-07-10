@@ -1,6 +1,6 @@
 // Tests for the core Agent class — full end-to-end agent loop.
 
-import { Agent, HOOKS } from '../../src/core/index.js';
+import { Agent, HOOKS, ACTIONS } from '../../src/core/index.js';
 import { createHooks } from '../../src/core/hooks.js';
 import { createToolRegistry } from '../../src/core/extensions/tool-registry.js';
 import { Message } from '../../src/core/context/message.js';
@@ -788,14 +788,14 @@ describe('Agent — end-to-end loop', () => {
       const { agent } = createFixture({});
       agent.addMessage(new Message({ role: 'user', content: 'hello' }));
       const result = await agent.executeCommand({ type: 'clear' });
-      expect(result).toEqual({ content: 'Context cleared.' });
+      expect(result).toEqual({ action: ACTIONS.DISPLAY, content: 'Context cleared.' });
       expect(agent.log.getAll()).toEqual([]);
     });
 
     it('should handle reasoning command to set effort', async () => {
       const { agent } = createFixture({});
       const result = await agent.executeCommand({ type: 'reasoning', value: 'high' });
-      expect(result).toEqual({ content: 'Reasoning effort set to: high' });
+      expect(result).toEqual({ action: ACTIONS.DISPLAY, content: 'Reasoning effort set to: high' });
       expect(agent._reasoningEffort).toBe('high');
     });
 
@@ -803,13 +803,15 @@ describe('Agent — end-to-end loop', () => {
       const { agent, hooks } = createFixture({});
       hooks.on(HOOKS.COMMAND_DISPATCH, () => ({ content: 'custom handled' }));
       const result = await agent.executeCommand({ type: 'custom' });
+      // Hook results are passed through unchanged — no default action is added.
+      // The MessageBus backward-compat path handles results without an action field.
       expect(result).toEqual({ content: 'custom handled' });
     });
 
     it('should return error for unknown commands', async () => {
       const { agent } = createFixture({});
       const result = await agent.executeCommand({ type: 'unknown-cmd' });
-      expect(result).toEqual({ error: 'Unknown command: unknown-cmd' });
+      expect(result).toEqual({ action: ACTIONS.ERROR, error: 'Unknown command: unknown-cmd' });
     });
 
     it('should dispatch custom commands', async () => {

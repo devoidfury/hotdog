@@ -1,17 +1,17 @@
-import { describe, it, expect, beforeEach, afterEach } from 'bun:test';
-import { create } from '../../src/extensions/prompts/index.js';
-import { HOOKS } from '../../src/core/hooks.js';
-import { MockAgent } from '../helpers.js';
-import fs from 'node:fs';
-import fsPromises from 'node:fs/promises';
-import os from 'node:os';
-import path from 'node:path';
+import { describe, it, expect, beforeEach, afterEach } from "bun:test";
+import { create } from "../../src/extensions/prompts/index.js";
+import { HOOKS } from "../../src/core/hooks.js";
+import { ACTIONS } from "../../src/core/commands.js";
+import { MockAgent } from "../helpers.js";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 
-describe('Prompts Extension', () => {
+describe("Prompts Extension", () => {
   let tmpDir;
 
   beforeEach(async () => {
-    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'prompts-test-'));
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "prompts-test-"));
   });
 
   afterEach(() => {
@@ -24,8 +24,11 @@ describe('Prompts Extension', () => {
     return filePath;
   }
 
-  it('creates extension with loader', async () => {
-    writePromptFile('greet', '---\ndescription: Greet someone\n---\nHello {ARGS}');
+  it("creates extension with loader", async () => {
+    writePromptFile(
+      "greet",
+      "---\ndescription: Greet someone\n---\nHello {ARGS}",
+    );
 
     const ext = await create({
       config: { prompts: { promptsPath: tmpDir } },
@@ -35,9 +38,9 @@ describe('Prompts Extension', () => {
     expect(ext.loader).toBeDefined();
   });
 
-  it('getAllPrompts returns all loaded prompts', async () => {
-    writePromptFile('greet', '---\ndescription: Greet\n---\nHello');
-    writePromptFile('farewell', '---\ndescription: Farewell\n---\nGoodbye');
+  it("getAllPrompts returns all loaded prompts", async () => {
+    writePromptFile("greet", "---\ndescription: Greet\n---\nHello");
+    writePromptFile("farewell", "---\ndescription: Farewell\n---\nGoodbye");
 
     const ext = await create({
       config: { prompts: { promptsPath: tmpDir } },
@@ -47,31 +50,37 @@ describe('Prompts Extension', () => {
     expect(prompts.length).toBe(2);
   });
 
-  it('getPrompt returns a prompt by name', async () => {
-    writePromptFile('greet', '---\ndescription: Greet someone\n---\nHello {{ARGS}}');
+  it("getPrompt returns a prompt by name", async () => {
+    writePromptFile(
+      "greet",
+      "---\ndescription: Greet someone\n---\nHello {{ARGS}}",
+    );
 
     const ext = await create({
       config: { prompts: { promptsPath: tmpDir } },
     });
 
-    const prompt = ext.getPrompt('greet');
+    const prompt = ext.getPrompt("greet");
     expect(prompt).toBeDefined();
-    expect(prompt.name).toBe('greet');
-    expect(prompt.description).toBe('Greet someone');
+    expect(prompt.name).toBe("greet");
+    expect(prompt.description).toBe("Greet someone");
   });
 
-  it('getPrompt returns null for unknown prompt', async () => {
-    writePromptFile('greet', '---\ndescription: Greet\n---\nHello');
+  it("getPrompt returns null for unknown prompt", async () => {
+    writePromptFile("greet", "---\ndescription: Greet\n---\nHello");
 
     const ext = await create({
       config: { prompts: { promptsPath: tmpDir } },
     });
 
-    expect(ext.getPrompt('unknown')).toBeNull();
+    expect(ext.getPrompt("unknown")).toBeNull();
   });
 
-  it('COMMANDS_REGISTER registers the prompt command', async () => {
-    writePromptFile('greet', '---\ndescription: Greet someone\n---\nHello {ARGS}');
+  it("COMMANDS_REGISTER registers the prompt command", async () => {
+    writePromptFile(
+      "greet",
+      "---\ndescription: Greet someone\n---\nHello {ARGS}",
+    );
 
     const ext = await create({
       config: { prompts: { promptsPath: tmpDir } },
@@ -80,17 +89,22 @@ describe('Prompts Extension', () => {
     expect(ext.hooks[HOOKS.COMMANDS_REGISTER]).toBeDefined();
 
     const registrations = [];
-    const registry = { register: (name, handler) => registrations.push({ name, handler }) };
+    const registry = {
+      register: (name, handler) => registrations.push({ name, handler }),
+    };
     await ext.hooks[HOOKS.COMMANDS_REGISTER]({ registry });
 
     expect(registrations.length).toBe(1);
-    expect(registrations[0].name).toBe('prompt');
-    expect(registrations[0].handler.matches('prompt:greet')).toBe(true);
-    expect(registrations[0].handler.matches('other')).toBe(false);
+    expect(registrations[0].name).toBe("prompt");
+    expect(registrations[0].handler.matches("prompt:greet")).toBe(true);
+    expect(registrations[0].handler.matches("other")).toBe(false);
   });
 
-  it('prompt command handler executes a prompt', async () => {
-    writePromptFile('greet', '---\ndescription: Greet someone\n---\nHello {{ARGS}}');
+  it("prompt command handler executes a prompt", async () => {
+    writePromptFile(
+      "greet",
+      "---\ndescription: Greet someone\n---\nHello {{ARGS}}",
+    );
 
     const ext = await create({
       config: { prompts: { promptsPath: tmpDir } },
@@ -105,17 +119,47 @@ describe('Prompts Extension', () => {
     };
 
     const registrations = [];
-    const testRegistry = { register: (name, handler) => registrations.push({ name, ...handler }) };
+    const testRegistry = {
+      register: (name, handler) => registrations.push({ name, ...handler }),
+    };
     await ext.hooks[HOOKS.COMMANDS_REGISTER]({ registry: testRegistry });
 
     const handler = registrations[0];
-    const result = await handler.handler(agent, 'prompt:greet world');
-    expect(result.content).toContain('executed');
-    expect(messagesAdded.length).toBe(1);
-    expect(messagesAdded[0].content).toBe('Hello world');
+    const result = await handler.handler(agent, "prompt:greet world");
+    // By default displayPrompt is true, so the handler returns both DISPLAY
+    // and PROMPT flags — the bus will show the rendered prompt AND
+    // enqueue it for LLM processing.
+    expect(result.action).toBe(ACTIONS.DISPLAY | ACTIONS.PROMPT);
+    expect(result.content).toBe("Hello world");
+    expect(messagesAdded.length).toBe(0);
   });
 
-  it('prompt command returns error for unknown prompt', async () => {
+  it("prompt command handler suppresses display when displayPrompt is false", async () => {
+    writePromptFile(
+      "greet",
+      "---\ndescription: Greet someone\n---\nHello {{ARGS}}",
+    );
+
+    const ext = await create({
+      config: { prompts: { promptsPath: tmpDir, displayPrompt: false } },
+    });
+
+    const agent = new MockAgent();
+
+    const registrations = [];
+    const testRegistry = {
+      register: (name, handler) => registrations.push({ name, ...handler }),
+    };
+    await ext.hooks[HOOKS.COMMANDS_REGISTER]({ registry: testRegistry });
+
+    const handler = registrations[0];
+    const result = await handler.handler(agent, "prompt:greet world");
+    // displayPrompt: false → only PROMPT flag, no DISPLAY
+    expect(result.action).toBe(ACTIONS.PROMPT);
+    expect(result.content).toBe("Hello world");
+  });
+
+  it("prompt command returns error for unknown prompt", async () => {
     const ext = await create({
       config: { prompts: { promptsPath: tmpDir } },
     });
@@ -123,15 +167,17 @@ describe('Prompts Extension', () => {
     const agent = new MockAgent();
 
     const registrations = [];
-    const testRegistry = { register: (name, handler) => registrations.push({ name, ...handler }) };
+    const testRegistry = {
+      register: (name, handler) => registrations.push({ name, ...handler }),
+    };
     await ext.hooks[HOOKS.COMMANDS_REGISTER]({ registry: testRegistry });
 
     const handler = registrations[0];
-    const result = await handler.handler(agent, 'prompt:unknown');
-    expect(result.error).toContain('Unknown prompt');
+    const result = await handler.handler(agent, "prompt:unknown");
+    expect(result.error).toContain("Unknown prompt");
   });
 
-  it('handles default promptsPath when not configured', async () => {
+  it("handles default promptsPath when not configured", async () => {
     const ext = await create({ config: {} });
     expect(ext.loader).toBeDefined();
   });

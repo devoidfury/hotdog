@@ -192,8 +192,6 @@ Options:
   --json                    Output as JSON
   -v, --version             Show version
   -h, --help                Show help
-
-Config flags (from schema):
   <config_flags>`;
 
 /**

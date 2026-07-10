@@ -8,6 +8,7 @@ import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { cwd } from "node:process";
 import { HOOKS } from "../../core/hooks.js";
+import { ACTIONS } from "../../core/commands.js";
 import { render } from "../../utils/render.js";
 import { patternMatches, SkillsLoader } from "./loader.js";
 import { LoadSkillTool } from "./load-skill.js";
@@ -79,11 +80,11 @@ export async function create(core) {
                     `${s.loaded ? "[x]" : "[ ]"} ${s.name}: ${s.description}`,
                 )
                 .join("\n");
-              return { content: `## Available Skills\n\n${lines}` };
+              return { action: ACTIONS.DISPLAY, content: `## Available Skills\n\n${lines}` };
             }
             // Activate skill
             loader.activateSkill(name);
-            return { content: `Skill '${name}' activated.` };
+            return { action: ACTIONS.DISPLAY, content: `Skill '${name}' activated.` };
           },
         });
       },

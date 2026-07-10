@@ -425,7 +425,6 @@ async function printConfigDebug(cli, config, providers, resolved) {
         "hideThinking",
         "skillsPath",
         "profilesPath",
-        "promptsPath",
         "systemPromptTemplate",
         "chatTimeoutSecs",
         "embeddingsTimeoutSecs",

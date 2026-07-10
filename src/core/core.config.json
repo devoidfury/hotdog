@@ -107,19 +107,6 @@
       { "compute": "joinConfigDir:skills" }
     ]
   },
-  "promptsPath": {
-    "type": "string",
-    "cliFlag": {
-      "long": "--prompts-path",
-      "type": "string",
-      "description": "Prompts directory path"
-    },
-    "layers": [
-      { "source": "cli", "key": "promptsPath" },
-      { "source": "config", "key": "promptsPath" },
-      { "compute": "joinConfigDir:prompts" }
-    ]
-  },
   "compactDebug": {
     "type": "boolean",
     "cliFlag": {

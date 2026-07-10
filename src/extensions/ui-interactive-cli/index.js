@@ -253,6 +253,9 @@ export class AsyncInteractiveCliInput {
   }
 }
 
+// Store reference for tool context
+let currentInput = null;
+
 /**
  * Run the interactive CLI session.
  *
@@ -409,14 +412,6 @@ export async function runInteractiveSession(cli, core, options = {}) {
     rl.on("line", handler);
   };
 
-  // Create the input interface for question tool
-  // We need to set it up after defining lineHandler
-  const setupInput =
-    options.setupInput ||
-    (() => {
-      // This will be set after lineHandler is defined
-    });
-
   // Listen for model changes and update the readline prompt
   core.hooks.on(HOOKS.MODEL_CHANGE, (data) => {
     rl.setPrompt(`(${data.newModel})> `);
@@ -479,7 +474,16 @@ export async function runInteractiveSession(cli, core, options = {}) {
 
   rl.on("line", lineHandler);
 
-  // Now set up the input interface with the line handler
+  // Create the input interface for question tool
+  const setupInput =
+    options.setupInput ||
+    (() => {
+      currentInput = new AsyncInteractiveCliInput(
+        rl,
+        lineHandler,
+        addLineHandler,
+      );
+    });
   setupInput();
 
   // Close handler
@@ -566,9 +570,6 @@ export function handleSlashCommand(cmdText, bus, rl) {
  * @returns {Object} Extension instance.
  */
 export function create(core) {
-  // Store reference for tool context
-  let currentInput = null;
-
   return {
     hooks: core.hooks
       ? {

@@ -6,7 +6,7 @@ import {
 } from '../prompts.js';
 import { serializeConversation, estimateContextTokens, estimateMessageTokens } from '../utils.js';
 import { CompactionStrategy } from '../strategies.js';
-import { AgentError } from '../../../core/error.js';
+import { AgentError } from '../../../core/error.ts';
 
 /**
  * Compact to a target token count.

@@ -14,8 +14,8 @@ import {
   createPromptEntry,
   replayEntriesIntoContext,
 } from "../../src/extensions/session-log/session-log.js";
-import { Message } from "../../src/core/context/message.js";
-import { MessageLog } from "../../src/core/context/message-log.js";
+import { Message } from "../../src/core/context/message.ts";
+import { MessageLog } from "../../src/core/context/message-log.ts";
 import { stripNulls } from "../../src/utils/objects.js";
 import { mkdirSync, rmSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";

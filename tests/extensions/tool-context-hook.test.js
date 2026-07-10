@@ -1,7 +1,7 @@
 import { test, expect, describe, beforeEach } from "bun:test";
-import { createHooks, HOOKS } from "../../src/core/hooks.js";
-import { Agent } from "../../src/core/agent.js";
-import { ToolRegistry } from "../../src/core/extensions/tool-registry.js";
+import { createHooks, HOOKS } from "../../src/core/hooks.ts";
+import { Agent } from "../../src/core/agent.ts";
+import { ToolRegistry } from "../../src/core/extensions/tool-registry.ts";
 import { MockLLMClient } from "../helpers.js";
 
 // ── Helpers ──────────────────────────────────────────────────────────────────

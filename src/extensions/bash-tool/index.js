@@ -9,7 +9,7 @@ import {
   truncateOutput,
   parseToolInput,
   defaultCallDisplay,
-} from "../../core/extensions/tool-utils.js";
+} from "../../core/extensions/tool-utils.ts";
 
 import extensionData from "./extension.json";
 

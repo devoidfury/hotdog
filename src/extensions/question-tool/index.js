@@ -12,7 +12,7 @@ import {
   ToolResult,
   parseToolInput,
   defaultCallDisplay,
-} from "../../core/extensions/tool-utils.js";
+} from "../../core/extensions/tool-utils.ts";
 import { NoopInput } from "../../core/context/input.js";
 
 import { HOOKS } from "../../core/hooks.js";

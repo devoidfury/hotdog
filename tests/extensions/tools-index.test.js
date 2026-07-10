@@ -4,7 +4,7 @@ import {
   createToolFactory,
 } from "../../src/extensions/core-tools/index.js";
 import { SUBAGENT_TOOL_NAMES } from "../../src/extensions/subagents/index.js";
-import { ToolRegistry } from "../../src/core/extensions/tool-registry.js";
+import { ToolRegistry } from "../../src/core/extensions/tool-registry.ts";
 
 describe("CORE_TOOL_NAMES", () => {
   it("contains all expected core tools", () => {

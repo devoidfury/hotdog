@@ -6,7 +6,7 @@
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { appendFile, readFile, access, mkdir } from 'node:fs/promises';
-import { HOOKS } from '../../core/hooks.js';
+import { HOOKS } from '../../core/hooks.ts';
 import { stripNulls } from '../../utils/objects.js';
 
 // ── Log Source Types ────────────────────────────────────────────────────────

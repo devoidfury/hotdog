@@ -5,15 +5,15 @@ import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import crypto from 'node:crypto';
-import { ToolResult } from '../src/core/extensions/tool-utils.js';
-import { ToolContext } from '../src/core/extensions/tool-context.js';
-import { Agent } from '../src/core/agent.js';
-import { MessageLog } from '../src/core/context/message-log.js';
-import { createHooks } from '../src/core/hooks.js';
-import { createToolRegistry } from '../src/core/extensions/tool-registry.js';
-import { HookSystem } from '../src/core/hooks.js';
-import { ToolRegistry } from '../src/core/extensions/tool-registry.js';
-import { createSubcommandRegistry } from '../src/core/extensions/registries.js';
+import { ToolResult } from '../src/core/extensions/tool-utils.ts';
+import { ToolContext } from '../src/core/extensions/tool-context.ts';
+import { Agent } from '../src/core/agent.ts';
+import { MessageLog } from '../src/core/context/message-log.ts';
+import { createHooks } from '../src/core/hooks.ts';
+import { createToolRegistry } from '../src/core/extensions/tool-registry.ts';
+import { HookSystem } from '../src/core/hooks.ts';
+import { ToolRegistry } from '../src/core/extensions/tool-registry.ts';
+import { createSubcommandRegistry } from '../src/core/extensions/registries.ts';
 
 // ── General utilities ──────────────────────────────────────────────────────
 

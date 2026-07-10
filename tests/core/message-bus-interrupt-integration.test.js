@@ -5,9 +5,9 @@
 //   - the bus continues running (does not exit)
 
 import { describe, it, expect } from 'bun:test';
-import { MessageBus } from '../../src/core/index.js';
-import { LlmError } from '../../src/core/error.js';
-import { OUTPUT_EVENT } from '../../src/core/context/output.js';
+import { MessageBus } from '../../src/core/index.ts';
+import { LlmError } from '../../src/core/error.ts';
+import { OUTPUT_EVENT } from '../../src/core/context/output.ts';
 
 // ── Mocks ───────────────────────────────────────────────────────────────────
 

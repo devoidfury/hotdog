@@ -10,8 +10,8 @@ import {
   SessionLog,
   disabledSessionLog,
 } from "../../src/extensions/session-log/session-log.js";
-import { Message } from "../../src/core/context/message.js";
-import { MessageLog } from "../../src/core/context/message-log.js";
+import { Message } from "../../src/core/context/message.ts";
+import { MessageLog } from "../../src/core/context/message-log.ts";
 import { mkdirSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { homedir } from "node:os";

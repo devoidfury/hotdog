@@ -1,7 +1,7 @@
 // Tests for TaskManager -- manages background task agents.
 
 import { describe, it, expect } from "bun:test";
-import { TaskManager, TaskHandle, TASK_STATUS } from "../../src/core/session/task-manager.js";
+import { TaskManager, TaskHandle, TASK_STATUS } from "../../src/core/session/task-manager.ts";
 
 describe("TaskHandle", () => {
   it("creates with taskId and status", () => {

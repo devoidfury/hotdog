@@ -6,7 +6,7 @@ import {
   ToolResult,
   parseToolInput,
   defaultCallDisplay,
-} from "../../core/extensions/tool-utils.js";
+} from "../../core/extensions/tool-utils.ts";
 
 import { htmlToMarkdown } from "../../utils/html-to-markdown.js";
 

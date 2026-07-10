@@ -17,7 +17,7 @@ import {
 } from "../../src/extensions/mcp-client/types.js";
 import { McpTool } from "../../src/extensions/mcp-client/tools.js";
 import { create as createExtension } from "../../src/extensions/mcp-client/index.js";
-import { HOOKS } from "../../src/core/hooks.js";
+import { HOOKS } from "../../src/core/hooks.ts";
 import pkg from "../../package.json" with { type: "json" };
 
 // ── Helper: create a readable stream from lines ─────────────────────────────

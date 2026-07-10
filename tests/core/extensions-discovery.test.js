@@ -10,13 +10,13 @@ import {
   resolveExtensionDependencies,
   validateServiceContracts,
   LOAD_ORDER,
-} from "../../src/core/extensions/extensions.js";
+} from "../../src/core/extensions/extensions.ts";
 
 describe("discoverExtensionsInDir", async () => {
   let discoverExtensionsInDir;
 
   beforeAll(async () => {
-    const mod = await import("../../src/core/extensions/extensions.js");
+    const mod = await import("../../src/core/extensions/extensions.ts");
     discoverExtensionsInDir = mod.discoverExtensionsInDir;
   });
 
@@ -86,7 +86,7 @@ describe("discoverExtensionsInDir", async () => {
 
   it("returns empty array for a file path", async () => {
     const result = await discoverExtensionsInDir(
-      "/workspace/src/core/extensions/extensions.js",
+      "/workspace/src/core/extensions/extensions.ts",
     );
     expect(result).toEqual([]);
   });
@@ -96,7 +96,7 @@ describe("getExtensionConfigDefaults", async () => {
   let getExtensionConfigDefaults;
 
   beforeAll(async () => {
-    const mod = await import("../../src/core/extensions/extensions.js");
+    const mod = await import("../../src/core/extensions/extensions.ts");
     getExtensionConfigDefaults = mod.getExtensionConfigDefaults;
   });
 
@@ -123,7 +123,7 @@ describe("getExtensionConfigSchemas", async () => {
   let getExtensionConfigSchemas;
 
   beforeAll(async () => {
-    const mod = await import("../../src/core/extensions/extensions.js");
+    const mod = await import("../../src/core/extensions/extensions.ts");
     getExtensionConfigSchemas = mod.getExtensionConfigSchemas;
   });
 
@@ -142,7 +142,7 @@ describe("getExtensionsToLoad", async () => {
   let getExtensionsToLoad;
 
   beforeAll(async () => {
-    const mod = await import("../../src/core/extensions/extensions.js");
+    const mod = await import("../../src/core/extensions/extensions.ts");
     getExtensionsToLoad = mod.getExtensionsToLoad;
   });
 
@@ -328,7 +328,7 @@ describe("registerExtensionMetadata", async () => {
   let registerExtensionMetadata;
 
   beforeAll(async () => {
-    const mod = await import("../../src/core/extensions/extensions.js");
+    const mod = await import("../../src/core/extensions/extensions.ts");
     registerExtensionMetadata = mod.registerExtensionMetadata;
   });
 
@@ -425,13 +425,13 @@ describe("ExtensionLoader — additional methods", () => {
   let ExtensionLoader;
 
   beforeAll(async () => {
-    const mod = await import("../../src/core/extensions/extensions.js");
+    const mod = await import("../../src/core/extensions/extensions.ts");
     ExtensionLoader = mod.ExtensionLoader;
   });
 
   async function createMockCore() {
-    const { HookSystem } = await import("../../src/core/hooks.js");
-    const { ToolRegistry } = await import("../../src/core/extensions/tool-registry.js");
+    const { HookSystem } = await import("../../src/core/hooks.ts");
+    const { ToolRegistry } = await import("../../src/core/extensions/tool-registry.ts");
     return {
       hooks: new HookSystem(),
       toolRegistry: new ToolRegistry(),

@@ -1,11 +1,11 @@
 // Tests for ToolRegistry caching and enhanced ToolResult.
 
 import { describe, it, expect, test } from "bun:test";
-import { ToolRegistry } from "../../src/core/extensions/tool-registry.js";
-import { ToolResult } from "../../src/core/extensions/tool-utils.js";
-import { Agent } from "../../src/core/agent.js";
-import { HookSystem, HOOKS } from "../../src/core/hooks.js";
-import { createToolRegistry } from "../../src/core/extensions/tool-registry.js";
+import { ToolRegistry } from "../../src/core/extensions/tool-registry.ts";
+import { ToolResult } from "../../src/core/extensions/tool-utils.ts";
+import { Agent } from "../../src/core/agent.ts";
+import { HookSystem, HOOKS } from "../../src/core/hooks.ts";
+import { createToolRegistry } from "../../src/core/extensions/tool-registry.ts";
 
 describe("ToolRegistry", () => {
   it("caches tool definitions on first call", async () => {

@@ -8,13 +8,13 @@
     "hotdog": "bin/hotdog"
   },
   "description": "AI agent harness with tool calling support. Zero dependencies, just bun.",
+  "engines": {
+    "bun": ">=1.0"
+  },
   "scripts": {
     "start": "bun bin/hotdog",
     "test": "bun test --only-failures",
     "coverage": "bun test --only-failures --coverage"
   },
-  "type": "module",
-  "engines": {
-    "bun": ">=1.0"
-  }
+  "type": "module"
 }

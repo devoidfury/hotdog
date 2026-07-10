@@ -148,9 +148,9 @@ describe("WebSearchTool extension create", () => {
       },
     };
     const ext = create(core);
-    const { HOOKS } = await import("../../src/core/hooks.js");
+    const { HOOKS } = await import("../../src/core/hooks.ts");
     const { createToolRegistry } =
-      await import("../../src/core/extensions/tool-registry.js");
+      await import("../../src/core/extensions/tool-registry.ts");
 
     const registry = createToolRegistry();
     await ext.hooks[HOOKS.TOOLS_REGISTER](registry);

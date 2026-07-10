@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from "bun:test";
-import { HOOKS } from "../../src/core/hooks.js";
+import { HOOKS } from "../../src/core/hooks.ts";
 import { createMockCore } from "../helpers.js";
 
 describe("One-Shot Extension - CLI_ARGS_PARSED hook", () => {

@@ -14,10 +14,10 @@ import {
   generateDiff,
   getRequiredStr,
   ToolResult,
-} from "../../src/core/extensions/tool-utils.js";
+} from "../../src/core/extensions/tool-utils.ts";
 import { validateCwdBoundary, writeFileWithParents, fileSize, resolvePathAndValidate, checkWritable, checkReadable, IOError } from "../../src/utils/file-utils.js";
-import { ToolRegistry } from "../../src/core/extensions/tool-registry.js";
-import { ToolContext } from "../../src/core/extensions/tool-context.js";
+import { ToolRegistry } from "../../src/core/extensions/tool-registry.ts";
+import { ToolContext } from "../../src/core/extensions/tool-context.ts";
 
 describe("toolDef", () => {
   it("creates a tool definition", () => {
@@ -592,7 +592,7 @@ describe("resolvePathAndValidate", () => {
 
 describe("fileSize", () => {
   it("returns file size in bytes", async () => {
-    const size = await fileSize(path.join(ROOT, "src/core/extensions/tool-registry.js"));
+    const size = await fileSize(path.join(ROOT, "src/core/extensions/tool-registry.ts"));
     expect(typeof size).toBe("number");
     expect(size).toBeGreaterThan(0);
   });

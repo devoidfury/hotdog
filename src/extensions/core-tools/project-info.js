@@ -4,7 +4,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { execFile } from "node:child_process";
 import util from "node:util";
-import { toolDef, param, ToolResult, toolResult, defaultCallDisplay } from "../../core/extensions/tool-utils.js";
+import { toolDef, param, ToolResult, toolResult, defaultCallDisplay } from "../../core/extensions/tool-utils.ts";
 import { DEFAULT_GREP_MAX_RESULTS } from "./defaults.js";
 import { correctCommonPathMistakes } from "../../utils/file-utils.js";
 

@@ -1,7 +1,7 @@
 // Tests for ToolContext class methods.
 
 import { describe, it, expect } from "bun:test";
-import { ToolContext } from "../../src/core/extensions/tool-context.js";
+import { ToolContext } from "../../src/core/extensions/tool-context.ts";
 
 describe("ToolContext", () => {
   it("creates empty context", () => {

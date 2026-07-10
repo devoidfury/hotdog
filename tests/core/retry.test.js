@@ -3,8 +3,8 @@ import {
   retryWithBackoff,
   extractHttpStatus,
   isRetryableHttpStatus,
-} from "../../src/core/llm-client/retry.js";
-import { LlmError } from "../../src/core/error.js";
+} from "../../src/core/llm-client/retry.ts";
+import { LlmError } from "../../src/core/error.ts";
 
 describe("retryWithBackoff", () => {
   it("succeeds on first try", async () => {

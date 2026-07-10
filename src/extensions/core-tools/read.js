@@ -11,7 +11,7 @@ import {
   toolResult,
   parseToolInput,
   defaultCallDisplay,
-} from "../../core/extensions/tool-utils.js";
+} from "../../core/extensions/tool-utils.ts";
 import { validateCwdBoundary, resolvePath, correctCommonPathMistakes } from "../../utils/file-utils.js";
 import { DEFAULT_MAX_IMAGE_SIZE } from "./defaults.js";
 

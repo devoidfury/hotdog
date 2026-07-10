@@ -9,7 +9,7 @@ import {
   parseToolArgs,
   ToolResult,
   defaultCallDisplay,
-} from "../../core/extensions/tool-utils.js";
+} from "../../core/extensions/tool-utils.ts";
 import { getVisibleWorkerProfiles } from "../../core/config/profiles.js";
 
 // ── Base class for subagent tools ──────────────────────────────────────────

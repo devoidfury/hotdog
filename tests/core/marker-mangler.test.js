@@ -1,5 +1,5 @@
 import { describe, it, expect } from "bun:test";
-import { MarkerMangler } from "../../src/core/marker-mangler.js";
+import { MarkerMangler } from "../../src/core/marker-mangler.ts";
 
 function createMangler() {
   return new MarkerMangler();

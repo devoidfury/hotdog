@@ -22,7 +22,7 @@ import {
   ToolResult,
   toolResult,
   parseToolInput,
-} from "../../core/extensions/tool-utils.js";
+} from "../../core/extensions/tool-utils.ts";
 import { validateCwdBoundary, resolvePath } from "../../utils/file-utils.js";
 
 export class WriteTool {

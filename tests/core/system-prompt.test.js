@@ -2,7 +2,7 @@ import { describe, it, expect } from "bun:test";
 import {
   buildSystemPrompt,
   loadSystemPromptTemplate,
-} from "../../src/core/context/system-prompt.js";
+} from "../../src/core/context/system-prompt.ts";
 import { loadAspects } from "../../src/utils/file-utils.js";
 
 describe("loadAspects (utility)", () => {

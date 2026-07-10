@@ -9,7 +9,7 @@ import {
   mergeProfile,
   allProfilesForSwitch,
   resolveProfile,
-} from "../../src/core/config/profiles.js";
+} from "../../src/core/config/profiles.ts";
 import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";

@@ -1,5 +1,5 @@
 import { describe, it, expect } from "bun:test";
-import { ServiceRegistry, createServiceRegistry } from "../../src/core/extensions/service-registry.js";
+import { ServiceRegistry, createServiceRegistry } from "../../src/core/extensions/service-registry.ts";
 
 describe("ServiceRegistry", () => {
   it("createServiceRegistry returns a new instance", () => {
@@ -99,22 +99,22 @@ describe("ServiceRegistry", () => {
 
 describe("SERVICES_REGISTER hook integration", () => {
   it("SERVICES_REGISTER hook is defined in HOOKS", async () => {
-    const { HOOKS } = await import("../../src/core/hooks.js");
+    const { HOOKS } = await import("../../src/core/hooks.ts");
     expect(HOOKS.SERVICES_REGISTER).toBe("services:register");
   });
 
   it("ExtensionLoader fires SERVICES_REGISTER during load", async () => {
-    const { createHooks } = await import("../../src/core/hooks.js");
+    const { createHooks } = await import("../../src/core/hooks.ts");
     const { createToolRegistry } = await import(
-      "../../src/core/extensions/tool-registry.js"
+      "../../src/core/extensions/tool-registry.ts"
     );
     const { createServiceRegistry } = await import(
-      "../../src/core/extensions/service-registry.js"
+      "../../src/core/extensions/service-registry.ts"
     );
     const { createExtensionLoader } = await import(
-      "../../src/core/extensions/extensions.js"
+      "../../src/core/extensions/extensions.ts"
     );
-    const { HOOKS } = await import("../../src/core/hooks.js");
+    const { HOOKS } = await import("../../src/core/hooks.ts");
 
     const hooks = createHooks();
     const toolRegistry = createToolRegistry();
@@ -141,17 +141,17 @@ describe("SERVICES_REGISTER hook integration", () => {
   });
 
   it("services registered via hook are available to downstream extensions", async () => {
-    const { createHooks } = await import("../../src/core/hooks.js");
+    const { createHooks } = await import("../../src/core/hooks.ts");
     const { createToolRegistry } = await import(
-      "../../src/core/extensions/tool-registry.js"
+      "../../src/core/extensions/tool-registry.ts"
     );
     const { createServiceRegistry } = await import(
-      "../../src/core/extensions/service-registry.js"
+      "../../src/core/extensions/service-registry.ts"
     );
     const { createExtensionLoader } = await import(
-        "../../src/core/extensions/extensions.js"
+        "../../src/core/extensions/extensions.ts"
     );
-    const { HOOKS } = await import("../../src/core/hooks.js");
+    const { HOOKS } = await import("../../src/core/hooks.ts");
 
     const hooks = createHooks();
     const toolRegistry = createToolRegistry();

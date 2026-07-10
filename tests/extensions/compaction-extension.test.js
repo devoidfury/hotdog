@@ -1,8 +1,8 @@
 import { describe, it, expect } from "bun:test";
-import { HookSystem, HOOKS } from "../../src/core/hooks.js";
-import { ToolRegistry } from "../../src/core/extensions/tool-registry.js";
-import { MessageLog } from "../../src/core/context/message-log.js";
-import { Message } from "../../src/core/context/message.js";
+import { HookSystem, HOOKS } from "../../src/core/hooks.ts";
+import { ToolRegistry } from "../../src/core/extensions/tool-registry.ts";
+import { MessageLog } from "../../src/core/context/message-log.ts";
+import { Message } from "../../src/core/context/message.ts";
 import { create as createCompactionExtension } from "../../src/extensions/compaction/index.js";
 
 // ── Helpers ──────────────────────────────────────────────────────────────────

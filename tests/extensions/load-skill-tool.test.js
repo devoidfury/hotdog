@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import { LoadSkillTool } from '../../src/extensions/skills/load-skill.js';
-import { ToolContext } from '../../src/core/extensions/tool-context.js';
+import { ToolContext } from '../../src/core/extensions/tool-context.ts';
 import { SkillsLoader } from '../../src/extensions/skills/loader.js';
 import { getDisplay } from '../helpers.js';
 

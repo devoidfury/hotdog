@@ -9,13 +9,13 @@
 //   - format helpers: core/cli-output.test.js
 
 import { describe, it, expect, beforeEach, afterEach } from "bun:test";
-import { HookSystem, HOOKS } from "../../src/core/hooks.js";
-import { MessageBus } from "../../src/core/session/message-bus.js";
-import { TaskManager } from "../../src/core/session/task-manager.js";
-import { LlmClient } from "../../src/core/llm-client/client.js";
-import { MarkerMangler } from "../../src/core/marker-mangler.js";
-import { CliOutputSink } from "../../src/core/ui/cli.js";
-import { ColorPalette } from "../../src/core/ui/colors.js";
+import { HookSystem, HOOKS } from "../../src/core/hooks.ts";
+import { MessageBus } from "../../src/core/session/message-bus.ts";
+import { TaskManager } from "../../src/core/session/task-manager.ts";
+import { LlmClient } from "../../src/core/llm-client/client.ts";
+import { MarkerMangler } from "../../src/core/marker-mangler.ts";
+import { CliOutputSink } from "../../src/core/ui/cli.ts";
+import { ColorPalette } from "../../src/core/ui/colors.ts";
 
 // ── Model Change Hook ────────────────────────────────────────────────────────
 

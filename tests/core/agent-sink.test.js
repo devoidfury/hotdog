@@ -1,8 +1,8 @@
 // Tests for AgentSink — bridges Agent output to the Session Core.
 
 import { describe, it, expect } from "bun:test";
-import { AgentSink } from "../../src/core/session/agent-sink.js";
-import { OUTPUT_EVENT } from "../../src/core/context/output.js";
+import { AgentSink } from "../../src/core/session/agent-sink.ts";
+import { OUTPUT_EVENT } from "../../src/core/context/output.ts";
 
 describe("AgentSink", () => {
   describe("constructor", () => {

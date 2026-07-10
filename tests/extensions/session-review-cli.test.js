@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from "bun:test";
-import { HOOKS } from "../../src/core/hooks.js";
+import { HOOKS } from "../../src/core/hooks.ts";
 import { mkdirSync, rmSync, writeFileSync, readFileSync, readdirSync, mkdtempSync } from "node:fs";
 import { join } from "node:path";
 import { homedir, tmpdir } from "node:os";

@@ -8,7 +8,7 @@ import {
   normalizeConfigKeys,
   buildAgentConfig,
   buildConfig,
-} from "../../src/core/config/index.js";
+} from "../../src/core/config/index.ts";
 
 describe("normalizeConfigKeys", () => {
   it("converts snake_case keys to camelCase", () => {

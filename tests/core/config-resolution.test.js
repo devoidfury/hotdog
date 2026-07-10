@@ -4,7 +4,7 @@ import {
   resolveAll,
   CONFIG_SCHEMA as CONFIG_KEYS,
   resolveCast,
-} from "../../src/core/config/schema-loader.js";
+} from "../../src/core/config/schema-loader.ts";
 import { getNested } from "../../src/utils/objects.js";
 
 describe("getNested", () => {

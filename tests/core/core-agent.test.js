@@ -1,11 +1,11 @@
 // Tests for the core Agent class — full end-to-end agent loop.
 
-import { Agent, HOOKS, ACTIONS } from '../../src/core/index.js';
-import { createHooks } from '../../src/core/hooks.js';
-import { createToolRegistry } from '../../src/core/extensions/tool-registry.js';
-import { Message } from '../../src/core/context/message.js';
-import { ToolResult, formatToolResult } from '../../src/core/extensions/tool-utils.js';
-import { resolveModelConfig } from '../../src/core/config/providers.js';
+import { Agent, HOOKS, ACTIONS } from '../../src/core/index.ts';
+import { createHooks } from '../../src/core/hooks.ts';
+import { createToolRegistry } from '../../src/core/extensions/tool-registry.ts';
+import { Message } from '../../src/core/context/message.ts';
+import { ToolResult, formatToolResult } from '../../src/core/extensions/tool-utils.ts';
+import { resolveModelConfig } from '../../src/core/config/providers.ts';
 import { describe, it, expect, beforeEach, afterEach } from 'bun:test';
 import {
   MockLLMClient,

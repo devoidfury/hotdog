@@ -13,11 +13,11 @@ import { SummarizeShortStrategy } from './strategies/summarize-short.js';
 import { TokenAwareStrategy } from './strategies/token-aware.js';
 import { TrimStrategy } from './strategies/trim.js';
 import { estimateContextTokens } from './utils.js';
-import { HOOKS } from '../../core/hooks.js';
+import { HOOKS } from '../../core/hooks.ts';
 import { ACTIONS } from '../../core/commands.js';
-import { logger } from '../../core/logger.js';
-import { LlmError, formatError } from '../../core/error.js';
-import { Message } from '../../core/context/message.js';
+import { logger } from '../../core/logger.ts';
+import { LlmError, formatError } from '../../core/error.ts';
+import { Message } from '../../core/context/message.ts';
 
 /**
  * Create the compaction extension.

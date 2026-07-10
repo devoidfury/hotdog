@@ -10,8 +10,8 @@ import {
   resolveExtensionDependencies,
   validateServiceContracts,
   LOAD_ORDER,
-} from "../../src/core/extensions/extensions.js";
-import { ExtensionError } from "../../src/core/error.js";
+} from "../../src/core/extensions/extensions.ts";
+import { ExtensionError } from "../../src/core/error.ts";
 
 describe("extractSchemaDefaults", () => {
   it("returns empty array for null schema", () => {

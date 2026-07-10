@@ -2,7 +2,7 @@
 
 import { describe, it, expect, beforeEach, afterEach } from "bun:test";
 import { AsyncInteractiveCliInput } from "../../src/extensions/ui-interactive-cli/index.js";
-import { NoopInput } from "../../src/core/context/input.js";
+import { NoopInput } from "../../src/core/context/input.ts";
 import { createMockRl } from "../helpers.js";
 
 describe("NoopInput", () => {

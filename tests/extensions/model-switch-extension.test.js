@@ -1,8 +1,8 @@
 import { describe, it, expect } from "bun:test";
 import { create as createModelSwitchExtension } from "../../src/extensions/model-switch/index.js";
-import { HookSystem, HOOKS } from "../../src/core/hooks.js";
-import { ToolRegistry } from "../../src/core/extensions/tool-registry.js";
-import { createCommandRegistry } from "../../src/core/extensions/registries.js";
+import { HookSystem, HOOKS } from "../../src/core/hooks.ts";
+import { ToolRegistry } from "../../src/core/extensions/tool-registry.ts";
+import { createCommandRegistry } from "../../src/core/extensions/registries.ts";
 
 function createMockCore(config = {}) {
   return {

@@ -11,7 +11,7 @@ import {
   resolveExtensionConfig,
   buildConfigSchema,
   CONFIG_SCHEMA,
-} from "../../src/core/config/schema-loader.js";
+} from "../../src/core/config/schema-loader.ts";
 
 describe("resolveCast", () => {
   it("returns null for non-string input", () => {

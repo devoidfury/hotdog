@@ -1,8 +1,8 @@
 // Tests for MessageBus — event-driven dispatch loop, cancellation, interruption.
 
 import { describe, it, expect, beforeEach } from "bun:test";
-import { MessageBus } from "../../src/core/session/message-bus.js";
-import { OUTPUT_EVENT } from "../../src/core/context/output.js";
+import { MessageBus } from "../../src/core/session/message-bus.ts";
+import { OUTPUT_EVENT } from "../../src/core/context/output.ts";
 
 describe("MessageBus constructor", () => {
   function createMockSessionManager() {
@@ -438,7 +438,7 @@ describe("MessageBus._processMessage()", () => {
   });
 
   it("handles cancellation error silently", async () => {
-    const { LlmError } = await import("../../src/core/error.js");
+    const { LlmError } = await import("../../src/core/error.ts");
     const mockAgent = {
       resetCancel: () => {},
       run: async () => { throw LlmError.Cancelled("cancelled"); },

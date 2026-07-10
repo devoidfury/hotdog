@@ -4,7 +4,7 @@ import {
   param,
   ToolResult,
   defaultCallDisplay,
-} from "../../core/extensions/tool-utils.js";
+} from "../../core/extensions/tool-utils.ts";
 
 export class LoadSkillTool {
   static TOOL_NAME = "load_skill";

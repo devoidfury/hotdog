@@ -1,6 +1,6 @@
 // Model tool — switch the AI model at runtime.
 
-import { toolDef, param, ToolResult, toolResult, parseToolInput, defaultCallDisplay } from "../../core/extensions/tool-utils.js";
+import { toolDef, param, ToolResult, toolResult, parseToolInput, defaultCallDisplay } from "../../core/extensions/tool-utils.ts";
 
 export class ModelTool {
   static TOOL_NAME = "model";

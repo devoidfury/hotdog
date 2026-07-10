@@ -1,8 +1,8 @@
 import { describe, it, expect, beforeEach, afterEach } from 'bun:test';
 import { create } from '../../src/extensions/skills/index.js';
-import { HOOKS } from '../../src/core/hooks.js';
-import { ToolContext } from '../../src/core/extensions/tool-context.js';
-import { createConfigRegistry } from '../../src/core/extensions/config-registry.js';
+import { HOOKS } from '../../src/core/hooks.ts';
+import { ToolContext } from '../../src/core/extensions/tool-context.ts';
+import { createConfigRegistry } from '../../src/core/extensions/config-registry.ts';
 import { patternMatches, parseSkillFromMd, SkillsLoader } from '../../src/extensions/skills/loader.js';
 import fs from 'node:fs';
 import path from 'node:path';

@@ -5,7 +5,7 @@
 import { execFile } from "node:child_process";
 import util from "node:util";
 import extensionData from "./extension.json";
-import { toolDef, param, ToolResult, truncateOutput, parseToolInput, defaultCallDisplay } from "../../core/extensions/tool-utils.js";
+import { toolDef, param, ToolResult, truncateOutput, parseToolInput, defaultCallDisplay } from "../../core/extensions/tool-utils.ts";
 import { correctCommonPathMistakes } from "../../utils/file-utils";
 
 const execFileAsync = util.promisify(execFile);

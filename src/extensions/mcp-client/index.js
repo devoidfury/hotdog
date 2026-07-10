@@ -5,9 +5,9 @@
 // As an extension, it connects to configured MCP servers and registers
 // their discovered tools via the tools:register hook.
 
-import { HOOKS } from '../../core/hooks.js';
-import { logger } from '../../core/logger.js';
-import { formatError } from '../../core/error.js';
+import { HOOKS } from '../../core/hooks.ts';
+import { logger } from '../../core/logger.ts';
+import { formatError } from '../../core/error.ts';
 import { McpConnection } from './connection.js';
 import { McpTool } from './tools.js';
 

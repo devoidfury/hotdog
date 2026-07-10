@@ -9,7 +9,7 @@ import {
   ToolResult,
   toolResult,
   defaultCallDisplay,
-} from "../../core/extensions/tool-utils.js";
+} from "../../core/extensions/tool-utils.ts";
 import { logger } from "../../core/logger.js";
 
 // Resolve the path to the current binary (main.js)

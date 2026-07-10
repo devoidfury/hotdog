@@ -1,6 +1,6 @@
 // Tests for the core hook system.
 
-import { HookSystem, createHooks } from "../../src/core/hooks.js";
+import { HookSystem, createHooks } from "../../src/core/hooks.ts";
 import { describe, it, expect, beforeEach, afterEach } from "bun:test";
 
 describe("HookSystem.on() / notifyHooks()", () => {

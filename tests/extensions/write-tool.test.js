@@ -3,7 +3,7 @@ import fsSync from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import { WriteTool } from '../../src/extensions/core-tools/write.js';
-import { ToolContext } from '../../src/core/extensions/tool-context.js';
+import { ToolContext } from '../../src/core/extensions/tool-context.ts';
 import { resultStr, tmpDir, toolCtx } from '../helpers.js';
 
 // ── Tool Definition ─────────────────────────────────────────────────────────

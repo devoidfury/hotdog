@@ -1,14 +1,14 @@
 // Tests for input.js parseInput() and output.js OutputSink/NoopSink.
 
 import { describe, it, expect, beforeEach } from "bun:test";
-import { parseInput, INPUT_EVENT, NoopInput } from "../../src/core/context/input.js";
+import { parseInput, INPUT_EVENT, NoopInput } from "../../src/core/context/input.ts";
 import {
   OutputSink,
   NoopSink,
   OUTPUT_EVENT,
   outputEvent,
   EVENT_HANDLERS,
-} from "../../src/core/context/output.js";
+} from "../../src/core/context/output.ts";
 
 describe("parseInput", () => {
   it("parses command input starting with /", () => {

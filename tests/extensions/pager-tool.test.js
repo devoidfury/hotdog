@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'bun:test';
 import { PagerTool } from '../../src/extensions/core-tools/pager.js';
-import { ToolContext } from '../../src/core/extensions/tool-context.js';
+import { ToolContext } from '../../src/core/extensions/tool-context.ts';
 import { resultStr } from '../helpers.js';
 
 describe('PagerTool', () => {

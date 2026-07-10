@@ -1,5 +1,5 @@
 import { test, expect } from "bun:test";
-import { Message } from "../../src/core/context/message.js";
+import { Message } from "../../src/core/context/message.ts";
 
 // ── Message with images ──────────────────────────────────────────────────────
 // Note: basic toJSON() without images is already covered by message.test.js.

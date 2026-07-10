@@ -5,8 +5,8 @@ import {
   resolveLogTarget,
   initializeLogger,
   logger,
-} from "../../src/core/logger.js";
-import { HookSystem } from "../../src/core/hooks.js";
+} from "../../src/core/logger.ts";
+import { HookSystem } from "../../src/core/hooks.ts";
 
 describe("LOG_LEVELS", () => {
   it("has correct numeric ordering", () => {

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'bun:test';
-import { SessionStore } from '../../src/core/session/index.js';
+import { SessionStore } from '../../src/core/session/index.ts';
 import { MockAgent } from '../helpers.js';
 
 describe('SessionStore', () => {

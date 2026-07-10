@@ -11,7 +11,7 @@ import { readSessionEntries } from '../../core/session/session-log.js';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { readdir, access, stat } from 'node:fs/promises';
-import { ToolResult, defaultCallDisplay } from '../../core/extensions/tool-utils.js';
+import { ToolResult, defaultCallDisplay } from '../../core/extensions/tool-utils.ts';
 
 /**
  * Truncate content to max_len bytes, appending '…' if truncated.

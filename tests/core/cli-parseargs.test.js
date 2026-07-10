@@ -1,7 +1,7 @@
 // Tests for cli.js parseArgs() and generateHelpText().
 
 import { describe, it, expect } from "bun:test";
-import { parseArgs, generateHelpText } from "../../src/core/cli.js";
+import { parseArgs, generateHelpText } from "../../src/core/cli.ts";
 
 function withArgs(args, fn) {
   const origArgv = process.argv;

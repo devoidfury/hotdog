@@ -7,14 +7,14 @@
  */
 
 import { describe, it, expect } from "bun:test";
-import { ConfigRegistry, createConfigRegistry } from "../../src/core/extensions/config-registry.js";
-import { parseArgs } from "../../src/core/cli.js";
-import { loadConfig } from "../../src/core/config/index.js";
+import { ConfigRegistry, createConfigRegistry } from "../../src/core/extensions/config-registry.ts";
+import { parseArgs } from "../../src/core/cli.ts";
+import { loadConfig } from "../../src/core/config/index.ts";
 import {
   extractSchemaDefaults,
   isExtensionEnabled,
   getExtensionsToLoad,
-} from "../../src/core/extensions/extensions.js";
+} from "../../src/core/extensions/extensions.ts";
 
 describe("ConfigRegistry", () => {
   describe("registerCliFlags", () => {

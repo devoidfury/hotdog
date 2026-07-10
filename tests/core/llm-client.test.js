@@ -1,7 +1,7 @@
 import { describe, it, expect } from "bun:test";
-import { LlmClient } from "../../src/core/llm-client/client.js";
-import { LlmError } from "../../src/core/error.js";
-import { Message } from "../../src/core/context/message.js";
+import { LlmClient } from "../../src/core/llm-client/client.ts";
+import { LlmError } from "../../src/core/error.ts";
+import { Message } from "../../src/core/context/message.ts";
 
 describe("LlmClient constructor", () => {
   it("creates with defaults", () => {

@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach } from "bun:test";
 import { create } from "../../src/extensions/prompts/index.js";
-import { HOOKS } from "../../src/core/hooks.js";
-import { ACTIONS } from "../../src/core/commands.js";
+import { HOOKS } from "../../src/core/hooks.ts";
+import { ACTIONS } from "../../src/core/commands.ts";
 import { MockAgent } from "../helpers.js";
 import fs from "node:fs";
 import os from "node:os";

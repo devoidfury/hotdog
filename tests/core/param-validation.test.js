@@ -3,7 +3,7 @@ import {
   validateParams,
   formatValidationErrors,
 } from "../../src/utils/json-schema.js";
-import { ToolRegistry } from "../../src/core/extensions/tool-registry.js";
+import { ToolRegistry } from "../../src/core/extensions/tool-registry.ts";
 
 function schema(props, required = []) {
   return { type: "object", properties: props, required };

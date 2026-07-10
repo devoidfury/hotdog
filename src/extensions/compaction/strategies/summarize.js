@@ -6,7 +6,7 @@ import {
 } from '../prompts.js';
 import { serializeConversation, findFirstKeptIndex, estimateContextTokens } from '../utils.js';
 import { CompactionStrategy } from '../strategies.js';
-import { AgentError } from '../../../core/error.js';
+import { AgentError } from '../../../core/error.ts';
 
 /**
  * Default compaction strategy: LLM-based summarization of older messages.

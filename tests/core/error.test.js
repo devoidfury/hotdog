@@ -12,7 +12,7 @@ import {
   isExpectedError,
   formatError,
   withContext,
-} from "../../src/core/error.js";
+} from "../../src/core/error.ts";
 
 describe("Error types", () => {
   const errorClasses = [

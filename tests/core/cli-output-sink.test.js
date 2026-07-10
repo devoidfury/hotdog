@@ -7,8 +7,8 @@ import {
   formatTokenUsage,
   formatThinking,
   formatTaskProgress,
-} from "../../src/core/ui/cli.js";
-import { OUTPUT_EVENT } from "../../src/core/context/output.js";
+} from "../../src/core/ui/cli.ts";
+import { OUTPUT_EVENT } from "../../src/core/context/output.ts";
 
 describe("CliOutputSink", () => {
   let sink;

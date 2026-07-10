@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'bun:test';
 import { BashTool, create } from '../../src/extensions/bash-tool/index.js';
 import { resultStr } from '../helpers.js';
-import { HOOKS } from '../../src/core/hooks.js';
+import { HOOKS } from '../../src/core/hooks.ts';
 
 describe('BashTool', () => {
   it('has correct tool name', () => {

@@ -1,5 +1,5 @@
 import { describe, it, expect } from "bun:test";
-import { buildModelRegistry } from "../../src/core/config/providers.js";
+import { buildModelRegistry } from "../../src/core/config/providers.ts";
 import { parseFrontMatter } from "../../src/utils/file-utils.js";
 
 describe("parseFrontMatter", () => {

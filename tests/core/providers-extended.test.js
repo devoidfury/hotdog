@@ -5,7 +5,7 @@ import {
   resolveProvider,
   initSystemPromptTemplate,
   resetSystemPromptCache,
-} from "../../src/core/config/providers.js";
+} from "../../src/core/config/providers.ts";
 import { writeFileSync, unlinkSync } from "node:fs";
 
 describe("resolveProvider", () => {

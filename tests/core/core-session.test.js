@@ -1,11 +1,11 @@
 // Tests for the core SessionManager class.
 
-import { SessionManager } from '../../src/core/session/index.js';
-import { Agent } from '../../src/core/agent.js';
-import { createHooks } from '../../src/core/hooks.js';
-import { ExtensionLoader, createExtensionLoader } from '../../src/core/extensions/extensions.js';
-import { createToolRegistry } from '../../src/core/extensions/tool-registry.js';
-import { Message } from '../../src/core/context/message.js';
+import { SessionManager } from '../../src/core/session/index.ts';
+import { Agent } from '../../src/core/agent.ts';
+import { createHooks } from '../../src/core/hooks.ts';
+import { ExtensionLoader, createExtensionLoader } from '../../src/core/extensions/extensions.ts';
+import { createToolRegistry } from '../../src/core/extensions/tool-registry.ts';
+import { Message } from '../../src/core/context/message.ts';
 import { describe, it, expect, beforeEach } from 'bun:test';
 import { MockLLMClient } from '../helpers.js';
 

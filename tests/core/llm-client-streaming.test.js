@@ -2,13 +2,13 @@
 
 import { readFileSync } from "node:fs";
 import { describe, it, expect } from "bun:test";
-import { LlmClient } from "../../src/core/llm-client/client.js";
-import { LlmError } from "../../src/core/error.js";
-import { Message } from "../../src/core/context/message.js";
+import { LlmClient } from "../../src/core/llm-client/client.ts";
+import { LlmError } from "../../src/core/error.ts";
+import { Message } from "../../src/core/context/message.ts";
 import {
   MarkerMangler,
   createMarkerMangler,
-} from "../../src/core/marker-mangler.js";
+} from "../../src/core/marker-mangler.ts";
 
 describe("LlmClient._escapeMessages", () => {
   it("escapes string content with mangler", () => {

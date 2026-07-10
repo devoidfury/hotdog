@@ -1,5 +1,5 @@
 import { describe, it, expect, mock } from "bun:test";
-import { Command } from "../../src/core/commands.js";
+import { Command } from "../../src/core/commands.ts";
 import {
   handleClear,
   handleQuit,
@@ -10,7 +10,7 @@ import {
   handleRegenerate,
   handleReasoning,
   CORE_COMMAND_HANDLERS,
-} from "../../src/core/command-handlers.js";
+} from "../../src/core/command-handlers.ts";
 
 // ── Handler Tests ──────────────────────────────────────────────────────
 

@@ -2,7 +2,7 @@
 // parseCommand edge cases, isSystemCommand, executeShellCommand.
 
 import { describe, it, expect, beforeEach, afterEach } from "bun:test";
-import { parseCommand, Command } from "../../src/core/commands.js";
+import { parseCommand, Command } from "../../src/core/commands.ts";
 import {
   handleSlashCommand,
 } from "../../src/extensions/ui-interactive-cli/index.js";

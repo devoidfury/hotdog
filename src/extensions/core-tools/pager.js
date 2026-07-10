@@ -1,6 +1,6 @@
 // Pager tool — paginate through large tool outputs.
 
-import { toolDef, param, ToolResult, toolResult, parseToolInput, defaultCallDisplay } from '../../core/extensions/tool-utils.js';
+import { toolDef, param, ToolResult, toolResult, parseToolInput, defaultCallDisplay } from '../../core/extensions/tool-utils.ts';
 
 export class PagerTool {
   static TOOL_NAME = 'pager';

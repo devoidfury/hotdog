@@ -1,6 +1,6 @@
 #!/usr/bin/env bun
-import { formatError } from "../src/core/error.js";
-import { main } from "../src/core/main.js";
+import { formatError } from "../src/core/error.ts";
+import { main } from "../src/core/main.ts";
 
 main()
   .catch(async (e) => {

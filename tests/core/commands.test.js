@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'bun:test';
-import { parseCommand, Command } from '../../src/core/commands.js';
-import { createCommandRegistry } from '../../src/core/extensions/registries.js';
+import { parseCommand, Command } from '../../src/core/commands.ts';
+import { createCommandRegistry } from '../../src/core/extensions/registries.ts';
 
 describe('parseCommand', () => {
   it('parses help, quit, exit, clear commands', () => {

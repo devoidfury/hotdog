@@ -4,7 +4,7 @@ import {
   CliSubcommandRegistry,
   createCommandRegistry,
   createSubcommandRegistry,
-} from "../../src/core/extensions/registries.js";
+} from "../../src/core/extensions/registries.ts";
 
 // ── Agent Command Registry ───────────────────────────────────────────────────
 

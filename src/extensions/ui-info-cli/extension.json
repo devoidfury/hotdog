@@ -14,17 +14,14 @@
         }
       },
       "additionalProperties": false,
-      "layers": [
-        { "source": "config", "key": "uiInfoCli" },
-        { "default": {} }
-      ]
+      "layers": [{ "source": "config", "key": "uiInfoCli" }, { "default": {} }]
     }
   },
   "cli:flags": [
     {
       "long": "--config-debug",
       "type": "boolean",
-      "description": "Show config resolution details (sources and layers)"
+      "description": "Show config resolution details (info subcommand)"
     }
   ],
   "cli:subcommands": [

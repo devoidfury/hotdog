@@ -68,6 +68,36 @@ export function resolveProvider(cli, config) {
   return providers.find((p) => p.name === providerName) ?? null;
 }
 
+/**
+ * Resolve model config from the registry with runtime overrides.
+ * Looks up the model in the registry, falls back to a minimal config,
+ * and applies any runtime reasoning effort override.
+ *
+ * @param {string} modelName - The model name to resolve.
+ * @param {object} modelRegistry - Map of model name to config.
+ * @param {number} maxTokens - Default max tokens if not in registry.
+ * @param {string|undefined} reasoningEffort - Runtime override for reasoning effort.
+ * @returns {object} Resolved model config { name, temperature, maxTokens, reasoningEffort }.
+ */
+export function resolveModelConfig(modelName, modelRegistry, maxTokens, reasoningEffort) {
+  const fromRegistry = modelRegistry[modelName] || {
+    name: modelName,
+    temperature: null,
+    maxTokens,
+    reasoningEffort: undefined,
+  };
+
+  // Runtime override via /reasoning command takes priority
+  if (reasoningEffort !== undefined) {
+    return {
+      ...fromRegistry,
+      reasoningEffort,
+    };
+  }
+
+  return fromRegistry;
+}
+
 // ── System Prompt Template ─────────────────────────────────────────────
 
 let cachedSystemPromptTemplate = null;

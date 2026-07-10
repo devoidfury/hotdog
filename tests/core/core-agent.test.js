@@ -4,7 +4,8 @@ import { Agent, HOOKS, ACTIONS } from '../../src/core/index.js';
 import { createHooks } from '../../src/core/hooks.js';
 import { createToolRegistry } from '../../src/core/extensions/tool-registry.js';
 import { Message } from '../../src/core/context/message.js';
-import { ToolResult } from '../../src/core/extensions/tool-utils.js';
+import { ToolResult, formatToolResult } from '../../src/core/extensions/tool-utils.js';
+import { resolveModelConfig } from '../../src/core/config/providers.js';
 import { describe, it, expect, beforeEach, afterEach } from 'bun:test';
 import {
   MockLLMClient,
@@ -854,35 +855,28 @@ describe('Agent — end-to-end loop', () => {
     });
   });
 
-  describe('_resolveModelConfig (existing)', () => {
+  describe('resolveModelConfig', () => {
     it('should include reasoning_effort from model registry', () => {
-      const { agent } = createFixture({
-        modelRegistry: {
-          'test-model': { name: 'test-model', temperature: 0.5, maxTokens: 100, reasoningEffort: 'high' },
-        },
-      });
-      const config = agent._resolveModelConfig();
+      const registry = {
+        'test-model': { name: 'test-model', temperature: 0.5, maxTokens: 100, reasoningEffort: 'high' },
+      };
+      const config = resolveModelConfig('test-model', registry, 4096, undefined);
       expect(config.reasoningEffort).toBe('high');
     });
 
     it('should override reasoning_effort from runtime setting', () => {
-      const { agent } = createFixture({
-        modelRegistry: {
-          'test-model': { name: 'test-model', temperature: 0.5, maxTokens: 100, reasoningEffort: 'low' },
-        },
-      });
-      agent._reasoningEffort = 'max';
-      const config = agent._resolveModelConfig();
+      const registry = {
+        'test-model': { name: 'test-model', temperature: 0.5, maxTokens: 100, reasoningEffort: 'low' },
+      };
+      const config = resolveModelConfig('test-model', registry, 4096, 'max');
       expect(config.reasoningEffort).toBe('max');
     });
 
     it('should omit reasoning_effort when not set anywhere', () => {
-      const { agent } = createFixture({
-        modelRegistry: {
-          'test-model': { name: 'test-model', temperature: 0.5, maxTokens: 100 },
-        },
-      });
-      const config = agent._resolveModelConfig();
+      const registry = {
+        'test-model': { name: 'test-model', temperature: 0.5, maxTokens: 100 },
+      };
+      const config = resolveModelConfig('test-model', registry, 4096, undefined);
       expect(config.reasoningEffort).toBeUndefined();
     });
   });
@@ -1101,25 +1095,22 @@ describe('Agent — end-to-end loop', () => {
     });
   });
 
-  describe('_formatToolResult', () => {
+  describe('formatToolResult', () => {
     it('should handle ToolResult with toApiContent', () => {
-      const { agent } = createFixture({});
       const tr = ToolResult.ok('hello');
-      const formatted = agent._formatToolResult(tr, 'bash', true);
+      const formatted = formatToolResult(tr, 'bash', true);
       expect(formatted).toContain('<tool name="bash"');
       expect(formatted).toContain('status="success"');
     });
 
     it('should format string result as XML', () => {
-      const { agent } = createFixture({});
-      const formatted = agent._formatToolResult('hello', 'bash', true);
+      const formatted = formatToolResult('hello', 'bash', true);
       expect(formatted).toContain('<tool name="bash"');
       expect(formatted).toContain('<output>hello</output>');
     });
 
     it('should format object result as XML', () => {
-      const { agent } = createFixture({});
-      const formatted = agent._formatToolResult({ key: 'val' }, 'bash', true);
+      const formatted = formatToolResult({ key: 'val' }, 'bash', true);
       expect(formatted).toContain('<tool name="bash"');
       expect(formatted).toContain('key');
       expect(formatted).toContain('val');
@@ -1133,16 +1124,14 @@ describe('Agent — end-to-end loop', () => {
 
     for (const { type, value, tool, expected } of simpleResults) {
       it(`should format ${type} result as XML`, () => {
-        const { agent } = createFixture({});
-        const formatted = agent._formatToolResult(value, tool, true);
+        const formatted = formatToolResult(value, tool, true);
         expect(formatted).toContain(`<tool name="${tool}"`);
         expect(formatted).toContain(expected);
       });
     }
 
     it('should use error status for failed results', () => {
-      const { agent } = createFixture({});
-      const formatted = agent._formatToolResult('error', 'bash', false);
+      const formatted = formatToolResult('error', 'bash', false);
       expect(formatted).toContain('status="error"');
     });
   });

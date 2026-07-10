@@ -22,7 +22,36 @@ export async function loadSystemPromptTemplate(templatePath) {
   return cachedTemplate;
 }
 
-// ── Public API ─────────────────────────────────────────────────────────────
+/**
+ * Collect system prompt chunks from the hook pipeline.
+ * Each hook handler returns a chunk object { name, priority, content } or
+ * an array of such objects. Source prefixing is applied based on the
+ * handler's registration source. Chunks are sorted by priority.
+ *
+ * @param {Array<object>} results results from the hook.
+ * @param {Object} agent - The agent instance (passed to hooks as context).
+ * @returns {Array<{name: string, priority: number, content: string}>} Sorted chunks.
+ */
+export function collectSystemPromptChunks(results, agent) {
+  const chunks = [];
+  for (const { result, source } of results) {
+    const items = Array.isArray(result) ? result : [result];
+    for (const item of items) {
+      if (item && item.name && item.content) {
+        const fullName = source ? `${source}:${item.name}` : item.name;
+        chunks.push({
+          name: fullName,
+          priority: item.priority,
+          content: item.content,
+        });
+      }
+    }
+  }
+
+  // Sort by priority (lower = earlier in the prompt)
+  chunks.sort((a, b) => a.priority - b.priority);
+  return chunks;
+}
 
 /**
  * Build the full system prompt.

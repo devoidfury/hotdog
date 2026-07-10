@@ -9,9 +9,15 @@ import { HOOKS } from "./hooks.js";
 import { ACTIONS } from "./commands.js";
 import { logger } from "./logger.js";
 import { ToolContext } from "./extensions/tool-context.js";
-import { xmlEscape } from "./extensions/tool-utils.js";
+import { formatToolResult } from "./extensions/tool-utils.js";
 import { createCommandRegistry } from "./extensions/registries.js";
 import { CORE_COMMAND_HANDLERS } from "./command-handlers.js";
+import { resolveModelConfig } from "./config/providers.js";
+
+import {
+  collectSystemPromptChunks,
+  buildSystemPrompt,
+} from "./context/system-prompt.js";
 
 /**
  * Minimal Agent that runs the LLM loop and delegates behavior to hooks.
@@ -272,7 +278,12 @@ export class Agent {
       }
 
       let toolDefs = await this._toolRegistry.getToolDefs();
-      let modelConfig = this._resolveModelConfig();
+      let modelConfig = resolveModelConfig(
+        this._model,
+        this._modelRegistry,
+        this._maxTokens,
+        this._reasoningEffort,
+      );
 
       // Before provider request — sequential, modifiable. Extensions can
       // log the request, modify messages, change model config, or alter tools.
@@ -461,34 +472,13 @@ export class Agent {
   async ensureSystemPrompt() {
     if (this._systemPrompt) return;
 
-    // Import here to avoid circular dependency
-    const { buildSystemPrompt } = await import("./context/system-prompt.js");
-
-    // Collect chunks from extensions via hook return values.
-    // Each handler returns a chunk object { name, priority, content } or
-    // an array of such objects. Source prefixing is applied by the agent
-    // based on the handler's registration source.
-    const chunks = [];
     const { results } = await this._hooks.runHookPipeline(
       HOOKS.SYSTEM_PROMPT_BUILD,
-      { agent: this },
+      {
+        agent: this,
+      },
     );
-    for (const { result, source } of results) {
-      const items = Array.isArray(result) ? result : [result];
-      for (const item of items) {
-        if (item && item.name && item.content) {
-          const fullName = source ? `${source}:${item.name}` : item.name;
-          chunks.push({
-            name: fullName,
-            priority: item.priority,
-            content: item.content,
-          });
-        }
-      }
-    }
-
-    // Sort by priority (lower = earlier in the prompt)
-    chunks.sort((a, b) => a.priority - b.priority);
+    const chunks = collectSystemPromptChunks(results, this);
 
     // Build the system prompt
     this._systemPrompt = await buildSystemPrompt({
@@ -689,7 +679,7 @@ export class Agent {
     });
     if (callResult.lastResult?.action === "block") {
       // Extension blocked this tool call — use provided result
-      const blockedResult = this._formatToolResult(
+      const blockedResult = formatToolResult(
         callResult.lastResult.result,
         toolName,
         false,
@@ -775,7 +765,7 @@ export class Agent {
     const images = result?.images ?? null;
 
     // Format and write result to context
-    const resultStr = this._formatToolResult(result, toolName, success);
+    const resultStr = formatToolResult(result, toolName, success);
 
     // Fire metrics notification (fire-and-forget — non-blocking).
     // Enables telemetry, profiling, and anomaly detection without
@@ -842,33 +832,6 @@ export class Agent {
     return { toolName, input, result };
   }
 
-  /**
-   * Format a tool result for the API.
-   * Default: XML format. Extensions can register custom formatters.
-   * @param {*} result
-   * @param {string} toolName
-   * @returns {string}
-   */
-  _formatToolResult(result, toolName, success) {
-    // If the result has a toApiContent method, use it (ToolResult)
-    if (result && typeof result.toApiContent === "function") {
-      return result.toApiContent(toolName);
-    }
-    const successStr = success ? "success" : "error";
-    // String: wrap in XML
-    if (typeof result === "string") {
-      return `<tool name="${toolName}" status="${successStr}">\n  <output>${xmlEscape(result)}</output>\n</tool>`;
-    }
-    // Object: serialize and wrap
-    if (typeof result === "object" && result !== null) {
-      const json = JSON.stringify(result);
-      return `<tool name="${toolName}" status="${successStr}">\n  <output>${xmlEscape(json)}</output>\n</tool>`;
-    }
-    // Primitive
-    const str = String(result);
-    return `<tool name="${toolName}" status="${successStr}">\n  <output>${xmlEscape(str)}</output>\n</tool>`;
-  }
-
   // ── Public Context API ────────────────────────────────────────────────────
 
   /**
@@ -904,23 +867,6 @@ export class Agent {
   }
 
   // ── Helpers ───────────────────────────────────────────────────────────────
-
-  _resolveModelConfig() {
-    const fromRegistry = this._modelRegistry[this._model] || {
-      name: this._model,
-      temperature: null,
-      maxTokens: this._maxTokens,
-      reasoningEffort: undefined,
-    };
-    // Runtime override via /reasoning command takes priority
-    if (this._reasoningEffort !== undefined) {
-      return {
-        ...fromRegistry,
-        reasoningEffort: this._reasoningEffort,
-      };
-    }
-    return fromRegistry;
-  }
 
   _emitOutput(type, data) {
     if (this._sink) {

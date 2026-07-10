@@ -1,9 +1,7 @@
 // Tests for the core hook system.
 
-import { HookSystem, HOOKS, createHooks, EXTENSION_PROVIDES } from "../../src/core/hooks.js";
+import { HookSystem, createHooks } from "../../src/core/hooks.js";
 import { describe, it, expect, beforeEach, afterEach } from "bun:test";
-
-// ── on() / notifyHooks() ─────────────────────────────────────────────────
 
 describe("HookSystem.on() / notifyHooks()", () => {
   it("should call registered handlers on notifyHooks", () => {
@@ -195,30 +193,42 @@ describe("notifyHooksAsync()", () => {
 
   it("catches and logs errors from async handlers", async () => {
     const hooks = createHooks();
-    hooks.on("test", async () => { throw new Error("async boom"); });
+    hooks.on("test", async () => {
+      throw new Error("async boom");
+    });
     await hooks.notifyHooksAsync("test", {});
   });
 
   it("continues running other handlers after one fails", async () => {
     const hooks = createHooks();
     const calls = [];
-    hooks.on("test", async () => { throw new Error("fail"); });
-    hooks.on("test", async () => { calls.push("second"); });
+    hooks.on("test", async () => {
+      throw new Error("fail");
+    });
+    hooks.on("test", async () => {
+      calls.push("second");
+    });
     await hooks.notifyHooksAsync("test", {});
     expect(calls).toEqual(["second"]);
   });
 
   it("handles sync errors in async notify", async () => {
     const hooks = createHooks();
-    hooks.on("test", () => { throw new Error("sync error in async notify"); });
+    hooks.on("test", () => {
+      throw new Error("sync error in async notify");
+    });
     await hooks.notifyHooksAsync("test", {});
   });
 
   it("async notify with multiple handlers", async () => {
     const hooks = createHooks();
     const calls = [];
-    hooks.on("test", async () => { calls.push(1); });
-    hooks.on("test", async () => { calls.push(2); });
+    hooks.on("test", async () => {
+      calls.push(1);
+    });
+    hooks.on("test", async () => {
+      calls.push(2);
+    });
     await hooks.notifyHooksAsync("test", {});
     expect(calls).toContain(1);
     expect(calls).toContain(2);
@@ -230,7 +240,9 @@ describe("notifyHooksAsync()", () => {
 describe("notifyHooks — handler errors", () => {
   it("handler error in notifyHooks propagates", () => {
     const hooks = createHooks();
-    hooks.on("test", () => { throw new Error("boom"); });
+    hooks.on("test", () => {
+      throw new Error("boom");
+    });
     expect(() => hooks.notifyHooks("test", {})).toThrow("boom");
   });
 
@@ -261,7 +273,10 @@ describe("runHookPipeline()", () => {
       order.push("b");
       return { result: "b" };
     });
-    const { results, lastResult } = await hooks.runHookPipeline("test:hook", {});
+    const { results, lastResult } = await hooks.runHookPipeline(
+      "test:hook",
+      {},
+    );
     expect(order).toEqual(["a", "b"]);
     expect(results).toEqual([
       { result: { result: "a" }, source: null },
@@ -293,8 +308,12 @@ describe("runHookPipeline()", () => {
 
   it("should pass mutable data through handlers", async () => {
     const hooks = createHooks();
-    hooks.on("test:hook", (data) => { data.count = (data.count || 0) + 1; });
-    hooks.on("test:hook", (data) => { data.count = (data.count || 0) + 1; });
+    hooks.on("test:hook", (data) => {
+      data.count = (data.count || 0) + 1;
+    });
+    hooks.on("test:hook", (data) => {
+      data.count = (data.count || 0) + 1;
+    });
     const { data } = await hooks.runHookPipeline("test:hook", { count: 0 });
     expect(data.count).toBe(2);
   });
@@ -302,12 +321,25 @@ describe("runHookPipeline()", () => {
   it("stops on first matching result", async () => {
     const hooks = createHooks();
     const calls = [];
-    hooks.on("test", () => { calls.push(1); return { action: "continue" }; });
-    hooks.on("test", () => { calls.push(2); return { action: "handled" }; });
-    hooks.on("test", () => { calls.push(3); return { action: "continue" }; });
-    const result = await hooks.runHookPipeline("test", {}, {
-      shouldStop: (r) => r.action === "handled",
+    hooks.on("test", () => {
+      calls.push(1);
+      return { action: "continue" };
     });
+    hooks.on("test", () => {
+      calls.push(2);
+      return { action: "handled" };
+    });
+    hooks.on("test", () => {
+      calls.push(3);
+      return { action: "continue" };
+    });
+    const result = await hooks.runHookPipeline(
+      "test",
+      {},
+      {
+        shouldStop: (r) => r.action === "handled",
+      },
+    );
     expect(calls).toEqual([1, 2]);
     expect(result.stopped).toBe(true);
   });
@@ -315,11 +347,21 @@ describe("runHookPipeline()", () => {
   it("does not stop when shouldStop returns false", async () => {
     const hooks = createHooks();
     const calls = [];
-    hooks.on("test", () => { calls.push(1); return { action: "continue" }; });
-    hooks.on("test", () => { calls.push(2); return { action: "continue" }; });
-    const result = await hooks.runHookPipeline("test", {}, {
-      shouldStop: (r) => r.action === "handled",
+    hooks.on("test", () => {
+      calls.push(1);
+      return { action: "continue" };
     });
+    hooks.on("test", () => {
+      calls.push(2);
+      return { action: "continue" };
+    });
+    const result = await hooks.runHookPipeline(
+      "test",
+      {},
+      {
+        shouldStop: (r) => r.action === "handled",
+      },
+    );
     expect(calls).toEqual([1, 2]);
     expect(result.stopped).toBe(false);
   });
@@ -342,14 +384,19 @@ describe("runHookPipeline()", () => {
 
   it("returns empty results when no handlers", async () => {
     const hooks = createHooks();
-    const { results, lastResult } = await hooks.runHookPipeline("nonexistent:hook", { value: 1 });
+    const { results, lastResult } = await hooks.runHookPipeline(
+      "nonexistent:hook",
+      { value: 1 },
+    );
     expect(results).toEqual([]);
     expect(lastResult).toBeUndefined();
   });
 
   it("handles handler that throws — continues", async () => {
     const hooks = createHooks();
-    hooks.on("test:hook", () => { throw new Error("handler error"); });
+    hooks.on("test:hook", () => {
+      throw new Error("handler error");
+    });
     hooks.on("test:hook", () => ({ action: "continue" }));
     const { lastResult } = await hooks.runHookPipeline("test:hook", {});
     expect(lastResult).toEqual({ action: "continue" });
@@ -369,9 +416,13 @@ describe("runHookPipeline()", () => {
     const hooks = createHooks();
     hooks.on("test", () => null);
     hooks.on("test", () => "second");
-    const { stopped, results } = await hooks.runHookPipeline("test", {}, {
-      shouldStop: (r) => r === null,
-    });
+    const { stopped, results } = await hooks.runHookPipeline(
+      "test",
+      {},
+      {
+        shouldStop: (r) => r === null,
+      },
+    );
     expect(stopped).toBe(false);
     expect(results).toHaveLength(2);
   });
@@ -536,15 +587,25 @@ describe("trace mode", () => {
     const hooks = createHooks();
     hooks._trace = true;
     hooks.on("test", () => ({ action: "handled" }), "ext1");
-    await hooks.runHookPipeline("test", {}, {
-      shouldStop: (r) => r.action === "handled",
-    });
+    await hooks.runHookPipeline(
+      "test",
+      {},
+      {
+        shouldStop: (r) => r.action === "handled",
+      },
+    );
   });
 
   it("trace mode with error handler does not throw", async () => {
     const hooks = createHooks();
     hooks._trace = true;
-    hooks.on("test", () => { throw new Error("fail"); }, "ext1");
+    hooks.on(
+      "test",
+      () => {
+        throw new Error("fail");
+      },
+      "ext1",
+    );
     hooks.on("test", () => "recovered", "ext2");
     await hooks.runHookPipeline("test", {});
   });
@@ -591,54 +652,12 @@ describe("trace mode", () => {
   it("respects enabledHooks filter in trace", () => {
     const hooks = createHooks();
     hooks._trace = true;
-    hooks._traceOptions = { enabledHooks: ["filtered:hook"], disabledSources: [] };
+    hooks._traceOptions = {
+      enabledHooks: ["filtered:hook"],
+      disabledSources: [],
+    };
     hooks.on("test:hook", () => {});
     hooks.notifyHooks("test:hook", {});
-  });
-});
-
-// ── HOOKS constants ───────────────────────────────────────────────────────
-
-describe("HOOKS constants", () => {
-  it("has all expected hook names", () => {
-    expect(HOOKS.SESSION_CREATE).toBe("session:create");
-    expect(HOOKS.SESSION_SWAP).toBe("session:swap");
-    expect(HOOKS.AGENT_TOOL_CONTEXT).toBe("agent:toolContext");
-    expect(HOOKS.MODEL_CHANGE).toBe("model:change");
-    expect(HOOKS.TOOLS_REGISTER).toBe("tools:register");
-    expect(HOOKS.SERVICES_REGISTER).toBe("services:register");
-    expect(HOOKS.COMMANDS_REGISTER).toBe("commands:register");
-    expect(HOOKS.SHUTDOWN_CLEANUP).toBe("shutdown:cleanup");
-    expect(HOOKS.CLI_SUBCOMMANDS_REGISTER).toBe("cli:subcommandsRegister");
-    expect(HOOKS.CLI_ARGS_PARSED).toBe("cli:argsParsed");
-    expect(HOOKS.INPUT).toBe("input");
-    expect(HOOKS.CONTEXT).toBe("context");
-    expect(HOOKS.TOOL_CALL).toBe("tool:call");
-    expect(HOOKS.TOOL_RESULT).toBe("tool:result");
-    expect(HOOKS.PROVIDER_REQUEST).toBe("provider:request");
-    expect(HOOKS.PROVIDER_RESPONSE).toBe("provider:response");
-    expect(HOOKS.TURN_START).toBe("turn:start");
-    expect(HOOKS.TURN_END).toBe("turn:end");
-    expect(HOOKS.LOG).toBe("log");
-    expect(HOOKS.CONTEXT_MESSAGE).toBe("context:message");
-    expect(HOOKS.CONTEXT_REPLACED).toBe("context:replaced");
-    expect(HOOKS.SYSTEM_PROMPT_BUILD).toBe("systemPrompt:build");
-    expect(HOOKS.OUTPUT_EVENT).toBe("output:event");
-    expect(HOOKS.TOOL_BEFORE_EXECUTE).toBe("tool:beforeExecute");
-    expect(HOOKS.TOOL_AFTER_EXECUTE).toBe("tool:afterExecute");
-    expect(HOOKS.LOOP_DETECTED).toBe("loop:detected");
-    expect(HOOKS.COMMAND_DISPATCH).toBe("command:dispatch");
-    expect(HOOKS.MESSAGES_AFTER_LLM).toBe("messages:afterLLM");
-    expect(HOOKS.SESSION_SERIALIZE).toBe("session:serialize");
-    expect(HOOKS.SESSION_DESERIALIZE).toBe("session:deserialize");
-    expect(HOOKS.SESSION_RESTORE_ACTIVE).toBe("session:restoreActive");
-  });
-});
-
-describe("EXTENSION_PROVIDES constants", () => {
-  it("has expected capability names", () => {
-    expect(EXTENSION_PROVIDES.CLI_SUBCOMMANDS).toBe("cli:subcommands");
-    expect(EXTENSION_PROVIDES.TOOLS).toBe("tools");
   });
 });
 

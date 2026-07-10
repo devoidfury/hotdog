@@ -470,3 +470,38 @@ export function getRequiredStr(value, key) {
   }
   return v;
 }
+
+/**
+ * Format a tool result for the LLM API.
+ * Handles ToolResult instances, strings, objects, and primitives.
+ * ToolResult objects use their own toApiContent() method.
+ * Everything else is wrapped in <tool> XML tags.
+ *
+ * @param {*} result - The tool execution result.
+ * @param {string} toolName - The tool name.
+ * @param {boolean} success - Whether the tool executed successfully.
+ * @returns {string} Formatted result string.
+ */
+export function formatToolResult(result, toolName, success) {
+  // If the result has a toApiContent method, use it (ToolResult)
+  if (result && typeof result.toApiContent === "function") {
+    return result.toApiContent(toolName);
+  }
+
+  const status = success ? "success" : "error";
+
+  // String: wrap in XML
+  if (typeof result === "string") {
+    return `<tool name="${toolName}" status="${status}">\n  <output>${xmlEscape(result)}</output>\n</tool>`;
+  }
+
+  // Object: serialize and wrap
+  if (typeof result === "object" && result !== null) {
+    const json = JSON.stringify(result);
+    return `<tool name="${toolName}" status="${status}">\n  <output>${xmlEscape(json)}</output>\n</tool>`;
+  }
+
+  // Primitive: convert to string and wrap
+  const str = String(result);
+  return `<tool name="${toolName}" status="${status}">\n  <output>${xmlEscape(str)}</output>\n</tool>`;
+}

@@ -1,8 +1,8 @@
 // Tests for the core extension loader.
 
-import { ExtensionLoader, createExtensionLoader, HOOKS } from '../../src/core/extensions/extensions.js';
-import { HookSystem, createHooks } from '../../src/core/hooks.js';
-import { ToolRegistry, createToolRegistry } from '../../src/core/extensions/tool-registry.js';
+import { ExtensionLoader, HOOKS } from '../../src/core/extensions/extensions.js';
+import { createHooks } from '../../src/core/hooks.js';
+import { createToolRegistry } from '../../src/core/extensions/tool-registry.js';
 import { describe, it, expect, beforeEach } from 'bun:test';
 
 describe('ExtensionLoader', () => {

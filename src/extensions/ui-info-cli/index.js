@@ -20,7 +20,6 @@ import {
 import { Agent } from "../../core/agent.js";
 import path from "node:path";
 import fs from "node:fs/promises";
-import os from "node:os";
 
 /**
  * Run the info subcommand.
@@ -54,7 +53,7 @@ async function runInfo(cli, config, buildConfig) {
   }
 
   const skillsLoader = new SkillsLoader(
-    cli.skillsPath || rawConfig.skillsPath || DEFAULT_SKILLS_PATH,
+    cli.skillsPath || rawConfig.skills?.path || DEFAULT_SKILLS_PATH,
   );
   await skillsLoader.loadSkills();
 

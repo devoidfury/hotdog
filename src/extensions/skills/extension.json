@@ -21,28 +21,29 @@
           "description": "Whether this extension is enabled. Set to false to disable the extension entirely."
         },
         "preloadSkills": {
-      "preloadSkills": {
-        "type": "array",
-        "items": {
-          "type": "string"
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [],
+          "layers": [
+            { "source": "cli", "key": "preloadSkills" },
+            { "source": "config", "key": "skills.preloadSkills" }
+          ],
+          "description": "List of skill names to preload"
         },
-        "default": [],
-        "layers": [
-          { "source": "cli", "key": "preloadSkills" },
-          { "source": "config", "key": "skills.preloadSkills" }
-        ],
-        "description": "List of skill names to preload"
-      },
+        "path": {
           "type": "string",
-          "default": "/skills",
-          "description": "Directory path where skills are stored"
+          "description": "Directory path where skills are stored",
+          "layers": [
+            { "source": "config", "key": "skills.path" },
+            { "source": "config", "key": "skillsPath" },
+            { "compute": "joinConfigDir:skills" }
+          ]
         }
       },
       "additionalProperties": false,
-      "layers": [
-        { "source": "config", "key": "skills" },
-        { "default": {} }
-      ]
+      "layers": [{ "source": "config", "key": "skills" }, { "default": {} }]
     }
   }
 }

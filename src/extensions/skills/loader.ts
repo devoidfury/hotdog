@@ -75,7 +75,11 @@ interface ParsedFrontMatter {
 /**
  * Parse a SKILL.md file into a Skill object.
  */
-export function parseSkillFromMd(content: string, dirName: string, location: string): Skill {
+export function parseSkillFromMd(
+  content: string,
+  dirName: string,
+  location: string,
+): Skill {
   const parsed = parseFrontMatter(content) as ParsedFrontMatter | null;
   if (!parsed) {
     throw ParseError.FrontmatterNotFound();
@@ -91,7 +95,8 @@ export function parseSkillFromMd(content: string, dirName: string, location: str
   }
 
   // Warn on description length
-  const descLen = typeof fm.description === "string" ? fm.description.length : 0;
+  const descLen =
+    typeof fm.description === "string" ? fm.description.length : 0;
   if (descLen > 1024) {
     logger.warn(
       `Skill '${fm.name || dirName}' description exceeds 1024 characters (${descLen} chars), truncating`,
@@ -108,13 +113,19 @@ export function parseSkillFromMd(content: string, dirName: string, location: str
 
   // Parse tool-related fields
   const allowedTools = parseToolList(
-    (fm["allowed-tools"] as string | string[]) || (fm.allowed_tools as string | string[]) || "",
+    (fm["allowed-tools"] as string | string[]) ||
+      (fm.allowed_tools as string | string[]) ||
+      "",
   );
   const includeTools = parseToolList(
-    (fm["include-tools"] as string | string[]) || (fm.include_tools as string | string[]) || "",
+    (fm["include-tools"] as string | string[]) ||
+      (fm.include_tools as string | string[]) ||
+      "",
   );
   const toolDependencies = parseToolList(
-    (fm["tool-dependencies"] as string | string[]) || (fm.tool_dependencies as string | string[]) || "",
+    (fm["tool-dependencies"] as string | string[]) ||
+      (fm.tool_dependencies as string | string[]) ||
+      "",
   );
 
   return {
@@ -128,7 +139,9 @@ export function parseSkillFromMd(content: string, dirName: string, location: str
     toolDependencies,
     visible: toolDependencies.length === 0, // visible by default if no dependencies
     disableModelInvocation:
-      (fm["disable-model-invocation"] as boolean) || (fm.disable_model_invocation as boolean) || false,
+      (fm["disable-model-invocation"] as boolean) ||
+      (fm.disable_model_invocation as boolean) ||
+      false,
     loaded: false,
     content: body,
     location,
@@ -160,7 +173,11 @@ function parseToolList(val: string | string[] | undefined): string[] {
  * Recursively collect additional files from a skill directory.
  * Stores paths relative to the skill root
  */
-async function collectAdditionalFiles(dirPath: string, parentDir: string, files: string[] = []): Promise<string[]> {
+async function collectAdditionalFiles(
+  dirPath: string,
+  parentDir: string,
+  files: string[] = [],
+): Promise<string[]> {
   try {
     const entries = await fs.readdir(dirPath, { withFileTypes: true });
     for (const entry of entries) {
@@ -194,10 +211,10 @@ export class SkillsLoader {
   constructor(paths: string | string[]) {
     this.paths = Array.isArray(paths)
       ? paths
-      : paths
+      : (paths
           .split(":")
           .map((p: string) => p.trim())
-          .filter(Boolean) as string[];
+          .filter(Boolean) as string[]);
     this.skills = new Map();
   }
 
@@ -277,7 +294,9 @@ export class SkillsLoader {
    * Get all skills.
    */
   allSkills(): Skill[] {
-    return Array.from(this.skills.values());
+    return Array.from(this.skills.values()).sort((a, b) =>
+      a.name.localeCompare(b.name),
+    );
   }
 
   /**
@@ -288,7 +307,7 @@ export class SkillsLoader {
   }
 
   agentViewableSkills(): Skill[] {
-    return this.activeSkills().filter((s) => !s.disableModelInvocation);
+    return this.allSkills().filter((s) => !s.disableModelInvocation);
   }
 
   /**

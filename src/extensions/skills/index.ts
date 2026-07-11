@@ -16,7 +16,6 @@ import {
   CommandsRegisterPayload,
   getExtensionConfig,
   getConfigSchemaProperties,
-  getConfigDefault,
 } from "../../core/extensions/types.ts";
 
 interface Skill {
@@ -32,7 +31,7 @@ interface ToolCtx {
 }
 
 interface SkillsLoaderConfig {
-  skillsPath?: string;
+  path?: string;
   preloadSkills?: string[];
 }
 
@@ -43,14 +42,16 @@ interface SkillsLoaderConfig {
 export async function create(core: CoreContext): Promise<ExtensionInstance> {
   // Config defaults come from extension.json configSchema
   const config = getExtensionConfig(core, "skills") as SkillsLoaderConfig;
-  const cs = getConfigSchemaProperties(extensionData.configSchema, "skills");
-  const defaultSkillsPath = getConfigDefault<string>(cs, "skillsPath") || "";
-  const skillsPath = config.skillsPath ?? defaultSkillsPath;
-  const loader = new SkillsLoader(skillsPath);
+
+  if (!config.path) {
+    throw new Error("skills path not configured");
+  }
+
+  const loader = new SkillsLoader(config.path);
   await loader.loadSkills();
 
-  // Preload skills from config (CLI → config file priority)
-  const preloadSkills = _resolvePreloadSkills(core, config);
+  // Preload skills from config
+  const preloadSkills = config.preloadSkills ?? [];
   if (preloadSkills.length > 0) {
     loader.preloadSkills(preloadSkills);
   }
@@ -108,27 +109,35 @@ export async function create(core: CoreContext): Promise<ExtensionInstance> {
       /**
        * Register commands for skills.
        */
-      [HOOKS.COMMANDS_REGISTER]: async ({ registry }: { registry: CommandsRegisterPayload }) => {
+      [HOOKS.COMMANDS_REGISTER]: async ({
+        registry,
+      }: {
+        registry: CommandsRegisterPayload;
+      }) => {
         registry.register("skill", {
           description: "List skills or activate a skill (skill:<name>)",
           matches: (cmd: string) => cmd.startsWith("skill"),
           handler: async (_agent: unknown, cmdValue: string) => {
             const name = cmdValue.slice(6).trim();
             if (!name) {
-              // List all skills
-              const skills = loader.allSkills();
-              const active = loader.activeSkills();
+              const skills = loader.agentViewableSkills();
               const lines = skills
                 .map(
                   (s: Skill) =>
                     `${s.loaded ? "[x]" : "[ ]"} ${s.name}: ${s.description}`,
                 )
-                .join("\n");
-              return { action: ACTIONS.DISPLAY, content: `## Available Skills\n\n${lines}` };
+                .join("\n\n");
+              return {
+                action: ACTIONS.DISPLAY,
+                content: `## Available Skills\n\n${lines}`,
+              };
             }
             // Activate skill
             loader.activateSkill(name);
-            return { action: ACTIONS.DISPLAY, content: `Skill '${name}' activated.` };
+            return {
+              action: ACTIONS.DISPLAY,
+              content: `Skill '${name}' activated.`,
+            };
           },
         });
       },
@@ -167,7 +176,10 @@ export async function create(core: CoreContext): Promise<ExtensionInstance> {
  * Resolve preload skills from CLI args or config.
  * Priority: CLI args → config file → empty.
  */
-function _resolvePreloadSkills(_core: CoreContext, config: SkillsLoaderConfig): string[] {
+function _resolvePreloadSkills(
+  _core: CoreContext,
+  config: SkillsLoaderConfig,
+): string[] {
   // CLI args are resolved through the config layer system (extension.json layers).
   // After resolution, the final value is in config.preloadSkills.
   const configSkills = config.preloadSkills;

@@ -6,7 +6,6 @@
   "toolfmt": " 🔧 {} {}",
   "hide_tools": true,
   "show_token_use": true,
-  "skills_path": "/skills",
   "extension_paths": ["builtins"],
   "extension_autoload": true,
   "default_subcommand": "cli",
@@ -28,6 +27,9 @@
     "test": {
       "model": "ai365/qwen3.5-4b:coder"
     }
+  },
+  "skills": {
+    "path": "/skills"
   },
   "agents-md": {
     "enabled": true,

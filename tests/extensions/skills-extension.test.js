@@ -30,7 +30,7 @@ describe('Skills Extension', () => {
 
   it('creates extension with loader', async () => {
     const ext = await create({
-      config: { skills: { skillsPath: tmpDir } },
+      config: { skills: { path: tmpDir } },
     });
 
     expect(ext).toBeDefined();
@@ -42,7 +42,7 @@ describe('Skills Extension', () => {
     writeSkill('farewell', 'Farewell skill', '# Farewell');
 
     const ext = await create({
-      config: { skills: { skillsPath: tmpDir } },
+      config: { skills: { path: tmpDir } },
     });
 
     const skills = ext.getAllSkills();
@@ -53,7 +53,7 @@ describe('Skills Extension', () => {
     writeSkill('greet', 'Greet skill', '# Greet');
 
     const ext = await create({
-      config: { skills: { skillsPath: tmpDir } },
+      config: { skills: { path: tmpDir } },
     });
 
     expect(ext.getActiveSkills()).toHaveLength(0);
@@ -73,7 +73,7 @@ describe('Skills Extension', () => {
     );
 
     const ext = await create({
-      config: { skills: { skillsPath: tmpDir } },
+      config: { skills: { path: tmpDir } },
     });
 
     ext.loader.activateSkill('toolskill');
@@ -84,7 +84,7 @@ describe('Skills Extension', () => {
 
   it('getCombinedToolPatterns returns empty set when no skills active', async () => {
     const ext = await create({
-      config: { skills: { skillsPath: tmpDir } },
+      config: { skills: { path: tmpDir } },
     });
 
     const patterns = ext.getCombinedToolPatterns();
@@ -93,7 +93,7 @@ describe('Skills Extension', () => {
 
   it('isToolAllowed returns true when no active skill patterns', async () => {
     const ext = await create({
-      config: { skills: { skillsPath: tmpDir } },
+      config: { skills: { path: tmpDir } },
     });
 
     expect(ext.isToolAllowed('anything')).toBe(true);
@@ -108,7 +108,7 @@ describe('Skills Extension', () => {
     );
 
     const ext = await create({
-      config: { skills: { skillsPath: tmpDir } },
+      config: { skills: { path: tmpDir } },
     });
 
     ext.loader.activateSkill('toolskill');
@@ -128,7 +128,7 @@ describe('Skills Extension', () => {
 
   it('AGENT_TOOL_CONTEXT sets skillsLoader on toolCtx', async () => {
     const ext = await create({
-      config: { skills: { skillsPath: tmpDir } },
+      config: { skills: { path: tmpDir } },
     });
 
     const toolCtx = new ToolContext();
@@ -142,7 +142,7 @@ describe('Skills Extension', () => {
     writeSkill('greet', 'Greet skill', '# Greet');
 
     const ext = await create({
-      config: { skills: { skillsPath: tmpDir } },
+      config: { skills: { path: tmpDir } },
     });
 
     const registrations = [];
@@ -156,11 +156,11 @@ describe('Skills Extension', () => {
     expect(registrations[0].matches('other')).toBe(false);
   });
 
-  it('skill command lists all skills when no name provided', async () => {
+  it('skill command lists all viewable skills when no name provided', async () => {
     writeSkill('greet', 'Greet skill', '# Greet');
 
     const ext = await create({
-      config: { skills: { skillsPath: tmpDir } },
+      config: { skills: { path: tmpDir } },
     });
 
     const registrations = [];
@@ -177,7 +177,7 @@ describe('Skills Extension', () => {
     writeSkill('greet', 'Greet skill', '# Greet');
 
     const ext = await create({
-      config: { skills: { skillsPath: tmpDir } },
+      config: { skills: { path: tmpDir } },
     });
 
     const registrations = [];
@@ -190,15 +190,15 @@ describe('Skills Extension', () => {
     expect(ext.getActiveSkills().length).toBe(1);
   });
 
-  it('SYSTEM_PROMPT_BUILD returns preamble with active skills', async () => {
+  it('SYSTEM_PROMPT_BUILD returns preamble with all viewable skills', async () => {
     writeSkill('greet', 'Greet skill', '# Greet\n\nDo greeting stuff.');
 
     const ext = await create({
-      config: { skills: { skillsPath: tmpDir } },
+      config: { skills: { path: tmpDir } },
     });
 
-    ext.loader.activateSkill('greet');
-
+    // agentViewableSkills now returns all skills (not just active),
+    // so preamble is returned without explicit activation
     const result = await ext.hooks[HOOKS.SYSTEM_PROMPT_BUILD]({ agent: {} });
     expect(result).toBeDefined();
     expect(result.name).toBe('preamble');
@@ -206,9 +206,9 @@ describe('Skills Extension', () => {
     expect(result.content).toContain('greet');
   });
 
-  it('SYSTEM_PROMPT_BUILD returns undefined when no active skills', async () => {
+  it('SYSTEM_PROMPT_BUILD returns undefined when no skills at all', async () => {
     const ext = await create({
-      config: { skills: { skillsPath: tmpDir } },
+      config: { skills: { path: tmpDir } },
     });
 
     const result = await ext.hooks[HOOKS.SYSTEM_PROMPT_BUILD]({ agent: {} });
@@ -217,7 +217,7 @@ describe('Skills Extension', () => {
 
   it('TOOLS_REGISTER registers load_skill tool', async () => {
     const ext = await create({
-      config: { skills: { skillsPath: tmpDir } },
+      config: { skills: { path: tmpDir } },
     });
 
     const registrations = [];
@@ -234,7 +234,7 @@ describe('Skills Extension', () => {
     const ext = await create({
       config: {
         skills: {
-          skillsPath: tmpDir,
+          path: tmpDir,
           preloadSkills: ['greet'],
         },
       },
@@ -253,7 +253,7 @@ describe('Skills Extension', () => {
     const ext = await create({
       config: {
         skills: {
-          skillsPath: tmpDir,
+          path: tmpDir,
           preloadSkills: ['greet'], // resolved: CLI took priority over config
         },
       },
@@ -261,6 +261,10 @@ describe('Skills Extension', () => {
 
     expect(ext.getActiveSkills().length).toBe(1);
     expect(ext.getActiveSkills()[0].name).toBe('greet');
+  });
+
+  it('throws when skills path not configured', async () => {
+    await expect(create({ config: {} })).rejects.toThrow('skills path not configured');
   });
 });
 
@@ -328,7 +332,7 @@ describe("SkillLoader — parseSkillFromMd", () => {
 
 describe("SkillsLoader — setAvailableTools", () => {
   it("marks skills without dependencies as visible", () => {
-    const loader = new SkillsLoader("/tmp/skills", console);
+    const loader = new SkillsLoader("/tmp/skills");
     const skill = { name: "test", description: "Test", toolDependencies: [], visible: false };
     loader.skills.set("test", skill);
     loader.setAvailableTools(["bash", "read"]);
@@ -336,7 +340,7 @@ describe("SkillsLoader — setAvailableTools", () => {
   });
 
   it("marks skills with matching dependencies as visible", () => {
-    const loader = new SkillsLoader("/tmp/skills", console);
+    const loader = new SkillsLoader("/tmp/skills");
     const skill = { name: "test", description: "Test", toolDependencies: ["bash*"], visible: false };
     loader.skills.set("test", skill);
     loader.setAvailableTools(["bash_tool", "read"]);
@@ -344,7 +348,7 @@ describe("SkillsLoader — setAvailableTools", () => {
   });
 
   it("marks skills with non-matching dependencies as hidden", () => {
-    const loader = new SkillsLoader("/tmp/skills", console);
+    const loader = new SkillsLoader("/tmp/skills");
     const skill = { name: "test", description: "Test", toolDependencies: ["write*"], visible: false };
     loader.skills.set("test", skill);
     loader.setAvailableTools(["bash", "read"]);

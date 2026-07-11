@@ -44,7 +44,7 @@ function createMockCore(config = {}) {
         keepRecentMessages: 3,
         strategy: "summarize",
       },
-      skillsPath: config.skillsPath || "/tmp/skills-test",
+      skills: config.skills || { path: "/tmp/skills-test" },
       promptsPath: config.promptsPath || "/tmp/prompts-test",
       ...config,
     },

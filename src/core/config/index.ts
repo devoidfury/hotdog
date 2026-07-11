@@ -6,8 +6,6 @@ import path from "node:path";
 import os from "node:os";
 import { cwd } from "node:process";
 import { ConfigError } from "../error.ts";
-import { logger } from "../logger.ts";
-import { parseFrontMatter } from "../../utils/file-utils.js";
 import { deepMerge } from "../../utils/objects.js";
 import { render } from "../../utils/render.js";
 import { validate as validateSchema } from "../../utils/json-schema.js";

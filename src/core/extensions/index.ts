@@ -50,3 +50,20 @@ export { ConfigRegistry, createConfigRegistry } from "./config-registry.ts";
 export { ServiceRegistry, createServiceRegistry } from "./service-registry.ts";
 
 export { validateServiceContracts } from "./extensions.ts";
+
+// Type-only exports (stripped at runtime by Bun)
+export type {
+  CoreContext,
+  ResolvedConfig,
+  ExtensionInstance,
+  ToolsRegisterPayload,
+  CommandsRegisterPayload,
+  ContextHookPayload,
+} from "./types.ts";
+
+// Value exports
+export {
+  getExtensionConfig,
+  getConfigSchemaProperties,
+  getConfigDefault,
+} from "./types.ts";

@@ -21,14 +21,18 @@
           "description": "Whether this extension is enabled. Set to false to disable the extension entirely."
         },
         "preloadSkills": {
-          "type": "array",
-          "items": {
-            "type": "string"
-          },
-          "default": [],
-          "description": "List of skill names to preload"
+      "preloadSkills": {
+        "type": "array",
+        "items": {
+          "type": "string"
         },
-        "skillsPath": {
+        "default": [],
+        "layers": [
+          { "source": "cli", "key": "preloadSkills" },
+          { "source": "config", "key": "skills.preloadSkills" }
+        ],
+        "description": "List of skill names to preload"
+      },
           "type": "string",
           "default": "/skills",
           "description": "Directory path where skills are stored"

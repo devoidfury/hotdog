@@ -1,8 +1,5 @@
 /**
  * Default configuration constants — sourced from core.config.json.
- *
- * Instead of hardcoded values, each constant reads from the schema's
- * default layer. This keeps the JSON file as the single source of truth.
  */
 
 import { CONFIG_SCHEMA, getLayerDefault } from "./schema-loader.ts";

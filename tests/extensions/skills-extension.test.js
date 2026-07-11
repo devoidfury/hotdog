@@ -248,14 +248,15 @@ describe('Skills Extension', () => {
     writeSkill('greet', 'Greet skill', '# Greet');
     writeSkill('farewell', 'Farewell skill', '# Farewell');
 
+    // After config layer resolution, CLI wins and config.preloadSkills
+    // reflects the resolved value.
     const ext = await create({
       config: {
         skills: {
           skillsPath: tmpDir,
-          preloadSkills: ['farewell'],
+          preloadSkills: ['greet'], // resolved: CLI took priority over config
         },
       },
-      cli: { preloadSkills: ['greet'] },
     });
 
     expect(ext.getActiveSkills().length).toBe(1);

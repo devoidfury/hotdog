@@ -1,7 +1,6 @@
 /**
  * Schema loader — reads core.config.json and builds the unified config schema.
  */
-
 import { join } from "node:path";
 import { getNested } from "../../utils/objects.js";
 import configSchema from "../core.config.json" with { type: "json" };
@@ -80,20 +79,22 @@ const CAST_BUILTINS: Record<string, CastFn> = {
 /**
  * Map of compute function names to their implementations.
  */
-const COMPUTE_BUILTINS: Record<string, (arg: unknown, ctx: unknown) => unknown> =
-  {
-    joinConfigDir: (subPath: string, ctx: { configDir?: string }): string => {
-      if (ctx.configDir) {
-        return join(ctx.configDir, subPath);
-      }
-      const fallbacks: Record<string, string> = {
-        skills: "/skills",
-        prompts: "./config/prompts",
-        profiles: "./config/profiles",
-      };
-      return fallbacks[subPath] || join("./config", subPath);
-    },
-  };
+const COMPUTE_BUILTINS: Record<
+  string,
+  (arg: unknown, ctx: unknown) => unknown
+> = {
+  joinConfigDir: (subPath: string, ctx: { configDir?: string }): string => {
+    if (ctx.configDir) {
+      return join(ctx.configDir, subPath);
+    }
+    const fallbacks: Record<string, string> = {
+      skills: "/skills",
+      prompts: "./config/prompts",
+      profiles: "./config/profiles",
+    };
+    return fallbacks[subPath] || join("./config", subPath);
+  },
+};
 
 /**
  * Parse a cast string and return a function.
@@ -193,7 +194,9 @@ function compileNestedPropertyLayers(
     compiled[propName] = compilePropertyLayers(prop);
 
     if (prop.type === "object" && prop.properties) {
-      compiled[propName].properties = compileNestedPropertyLayers(prop.properties);
+      compiled[propName].properties = compileNestedPropertyLayers(
+        prop.properties,
+      );
     }
   }
   return compiled;
@@ -294,9 +297,7 @@ export function buildUnifiedSchema(
   extensions?: Array<{ configSchema?: unknown }>,
 ): ConfigSchema {
   const coreSchema = buildConfigSchema();
-  const extensionSchema = extensions
-    ? loadExtensionSchemas(extensions)
-    : {};
+  const extensionSchema = extensions ? loadExtensionSchemas(extensions) : {};
 
   return { ...coreSchema, ...extensionSchema };
 }
@@ -360,16 +361,25 @@ export function resolveLayerValue(
     case "env":
       return process.env[layer.key as string];
     case "provider":
-      return getNested(context.provider as Record<string, unknown>, layer.path as string);
+      return getNested(
+        context.provider as Record<string, unknown>,
+        layer.path as string,
+      );
     case "providerDefault":
       if (
         context.provider &&
         Array.isArray((context.provider as Record<string, unknown>).models) &&
-        ((context.provider as Record<string, unknown>).models as Array<Record<string, unknown>>)[0]
-          ?.name
+        (
+          (context.provider as Record<string, unknown>).models as Array<
+            Record<string, unknown>
+          >
+        )[0]?.name
       ) {
-        return ((context.provider as Record<string, unknown>).models as Array<Record<string, unknown>>)[0]
-          .name;
+        return (
+          (context.provider as Record<string, unknown>).models as Array<
+            Record<string, unknown>
+          >
+        )[0].name;
       }
       return undefined;
     case "profile":
@@ -441,11 +451,7 @@ export function resolveKey(
   for (const layer of layers) {
     if ("default" in layer) {
       const value = resolveLayerValue(layer, context);
-      if (
-        properties &&
-        typeof value === "object" &&
-        value !== null
-      ) {
+      if (properties && typeof value === "object" && value !== null) {
         return resolveNestedProperties(
           keyName,
           value as Record<string, unknown>,
@@ -469,11 +475,7 @@ export function resolveKey(
       resolved = value;
     }
 
-    if (
-      properties &&
-      typeof resolved === "object" &&
-      resolved !== null
-    ) {
+    if (properties && typeof resolved === "object" && resolved !== null) {
       return resolveNestedProperties(
         keyName,
         resolved as Record<string, unknown>,

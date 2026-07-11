@@ -32,7 +32,6 @@ import {
   DEFAULT_THINKER,
   DEFAULT_TOOL_FMT,
   DEFAULT_TOOL_OUTPUT_FMT,
-  DEFAULT_SKILLS_PATH,
   DEFAULT_PROMPTS_PATH,
   DEFAULT_CHAT_TIMEOUT_SECS,
   DEFAULT_EMBEDDINGS_TIMEOUT_SECS,
@@ -173,7 +172,6 @@ export interface DefaultConfig {
   hideTools: boolean;
   hideThinking: boolean;
   showTokenUse: boolean;
-  skillsPath: string;
   profilesPath: string;
   chatTimeoutSecs: number;
   embeddingsTimeoutSecs: number;
@@ -185,7 +183,6 @@ export interface DefaultConfig {
   noLog: boolean;
   compactDebug: boolean;
   hookTrace: boolean;
-  mcpServers: unknown[];
 }
 
 /**
@@ -217,7 +214,6 @@ export function getDefaultConfig(
     hideTools: DEFAULT_HIDE_TOOLS,
     hideThinking: DEFAULT_HIDE_THINKING,
     showTokenUse: DEFAULT_SHOW_TOKEN_USE,
-    skillsPath: DEFAULT_SKILLS_PATH,
     profilesPath: DEFAULT_PROFILES_PATH,
     chatTimeoutSecs: DEFAULT_CHAT_TIMEOUT_SECS,
     embeddingsTimeoutSecs: DEFAULT_EMBEDDINGS_TIMEOUT_SECS,
@@ -229,7 +225,6 @@ export function getDefaultConfig(
     noLog: DEFAULT_NO_LOG,
     compactDebug: DEFAULT_COMPACT_DEBUG,
     hookTrace: DEFAULT_HOOK_TRACE,
-    mcpServers: [],
   };
 
   return mergeExtensionConfigDefaults(baseConfig, extParams) as DefaultConfig;
@@ -445,7 +440,6 @@ export async function buildAgentConfig(options: {
     profile = {
       whitelistTools: null,
       blacklistTools: [],
-      skills: [],
       manager: false,
       cwdBoundary: null,
     };

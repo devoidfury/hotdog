@@ -211,9 +211,9 @@ describe("compileSchemaKey", () => {
     const rawKey = {
       type: "string",
       layers: [
-        { source: "cli", key: "skillsPath" },
-        { compute: "joinConfigDir('skills')" },
-        { default: "./config/skills" },
+        { source: "cli", key: "dataPath" },
+        { compute: "joinConfigDir('data')" },
+        { default: "./config/data" },
       ],
     };
     const compiled = compileSchemaKey(rawKey);
@@ -541,12 +541,12 @@ describe("resolveKey — edge cases", () => {
   it("resolveKey with compute function default", () => {
     const schema = {
       layers: [
-        { source: "cli", key: "skillsPath", cast: resolveCast("string") },
-        { default: resolveCompute("joinConfigDir('skills')") },
+        { source: "cli", key: "dataPath", cast: resolveCast("string") },
+        { default: resolveCompute("joinConfigDir('data')") },
       ],
     };
     const result = resolveKey("test", schema, { cli: {}, configDir: "/tmp/config" });
-    expect(result).toBe("/tmp/config/skills");
+    expect(result).toBe("/tmp/config/data");
   });
 
   it("resolveKey with any cast", () => {

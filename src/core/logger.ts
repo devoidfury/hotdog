@@ -10,7 +10,7 @@
 //   logger.debug("Starting session", { sessionId: "abc123" });
 //   logger.info("Connected to provider");
 //   logger.warn("Skill description exceeds 1024 chars");
-//   logger.error("Failed to connect to MCP server", { server: "my-server" });
+//   logger.error("Failed to connect to server", { server: "my-server" });
 
 // ── Log Level Constants ─────────────────────────────────────────────────────
 
@@ -52,10 +52,7 @@ export function resolveLogTarget(configTarget?: string): LogTarget {
   const envTarget = process.env.HOTDOG_LOG_TARGET?.toLowerCase();
   if (envTarget && ["stderr", "stdout", "none"].includes(envTarget))
     return envTarget as LogTarget;
-  if (
-    configTarget &&
-    ["stderr", "stdout", "none"].includes(configTarget)
-  )
+  if (configTarget && ["stderr", "stdout", "none"].includes(configTarget))
     return configTarget as LogTarget;
   return "stderr";
 }
@@ -99,8 +96,7 @@ export function initializeLogger({
 
   // Register default handler if target is not "none"
   if (target !== "none") {
-    const stream =
-      target === "stdout" ? process.stdout : process.stderr;
+    const stream = target === "stdout" ? process.stdout : process.stderr;
     hooks.on("log", ({ level, message, metadata }: LogEvent) => {
       if (LOG_LEVELS[level] < _minLevelNum) return;
       const ts = new Date().toISOString().slice(11, 19);

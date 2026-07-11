@@ -60,7 +60,6 @@ export const DEFAULT_COMPACT_DEBUG: boolean = defaultFor("compactDebug");
 export const DEFAULT_HOOK_TRACE: boolean = defaultFor("hookTrace");
 
 // Path constants (not computed — static defaults for display/fallback)
-export const DEFAULT_SKILLS_PATH = "/skills";
 export const DEFAULT_PROFILES_SUBPATH = "profiles";
 export const DEFAULT_CONFIG_FILENAME = "defaults.json";
 export const DEFAULT_SYSTEM_PROMPT_FILENAME = "system_prompt.md";

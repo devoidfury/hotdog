@@ -25,10 +25,10 @@ describe("normalizeConfigKeys", () => {
 
   it("recursively normalizes nested objects", () => {
     const obj = {
-      mcp_servers: [
+      custom_servers: [
         {
           server_name: "my-server",
-          command_path: "/usr/bin/mcp",
+          command_path: "/usr/bin/server",
         },
       ],
       profile_settings: {
@@ -37,8 +37,8 @@ describe("normalizeConfigKeys", () => {
       },
     };
     const result = normalizeConfigKeys(obj);
-    expect(result.mcpServers[0].serverName).toBe("my-server");
-    expect(result.mcpServers[0].commandPath).toBe("/usr/bin/mcp");
+    expect(result.customServers[0].serverName).toBe("my-server");
+    expect(result.customServers[0].commandPath).toBe("/usr/bin/server");
     expect(result.profileSettings.hideThinking).toBe(true);
   });
 

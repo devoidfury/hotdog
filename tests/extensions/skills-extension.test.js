@@ -121,9 +121,11 @@ describe('Skills Extension', () => {
     // not via imperative hooks. Verify the extension.json has the flag.
     const extensionData = (await import('../../src/extensions/skills/extension.json')).default;
     expect(extensionData['cli:flags']).toBeDefined();
-    expect(extensionData['cli:flags'].length).toBe(1);
+    expect(extensionData['cli:flags'].length).toBe(2);
     expect(extensionData['cli:flags'][0].long).toBe('--preload-skills');
     expect(extensionData['cli:flags'][0].type).toBe('array');
+    expect(extensionData['cli:flags'][1].long).toBe('--skills-path');
+    expect(extensionData['cli:flags'][1].type).toBe('string');
   });
 
   it('AGENT_TOOL_CONTEXT sets skillsLoader on toolCtx', async () => {

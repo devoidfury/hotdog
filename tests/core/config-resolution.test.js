@@ -210,10 +210,6 @@ describe("CONFIG_KEYS schema", () => {
     expect(resolveKey("chatTimeout", CONFIG_KEYS.chatTimeout, baseContext)).toBe(600);
   });
 
-  it("paths resolve with correct fallback", () => {
-    expect(resolveKey("skillsPath", CONFIG_KEYS.skillsPath, baseContext)).toBe("/skills");
-    expect(resolveKey("skillsPath", CONFIG_KEYS.skillsPath, { ...baseContext, cli: { skillsPath: "/custom" } })).toBe("/custom");
-  });
 });
 
 describe("Phase 2: Complex values", () => {
@@ -329,7 +325,6 @@ describe("integration: resolveAll with CONFIG_KEYS", () => {
         tokens: true,
         chatTimeout: 300,
         sessionId: "test-session",
-        skillsPath: "/my/skills",
         compactDebug: true,
         theme: "  light  ",
         role: "  CLI role  ",
@@ -345,7 +340,6 @@ describe("integration: resolveAll with CONFIG_KEYS", () => {
         toolOutputFmt: "config-output",
         chatTimeoutSecs: 900,
         embeddingsTimeoutSecs: 60,
-        skillsPath: "/config/skills",
         promptsPath: "/config/prompts",
         compactDebug: false,
         hideTools: false,
@@ -377,7 +371,6 @@ describe("integration: resolveAll with CONFIG_KEYS", () => {
     // CLI wins for timeouts and paths
     expect(result.chatTimeout).toBe(300);
     expect(result.sessionId).toBe("test-session");
-    expect(result.skillsPath).toBe("/my/skills");
 
     // Phase 2: Complex values
     expect(result.theme).toBe("light");

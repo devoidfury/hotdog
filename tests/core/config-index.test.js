@@ -109,7 +109,6 @@ describe("getDefaultConfig", () => {
     expect(config.extensionPaths).toEqual(["builtins"]);
     expect(config.extensionAutoload).toBe(false);
     expect(config.extensions).toEqual([]);
-    expect(config.mcpServers).toEqual([]);
     expect(config.showTokenUse).toBe(true);
   });
 

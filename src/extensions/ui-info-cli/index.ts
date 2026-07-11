@@ -6,7 +6,6 @@ import { HOOKS } from "../../core/hooks.ts";
 import { LlmClient } from "../../core/llm-client/client.ts";
 import { SkillsLoader } from "../skills/loader.ts";
 import {
-  DEFAULT_SKILLS_PATH,
   DEFAULT_PROFILES_SUBPATH,
   DEFAULT_CONFIG_FILENAME,
 } from "../../core/config/defaults.ts";
@@ -136,7 +135,7 @@ async function runInfo(
   }
 
   const skillsLoader = new SkillsLoader(
-    cli.skillsPath || (rawConfig.skills as Record<string, unknown>)?.path || DEFAULT_SKILLS_PATH,
+    cli.skillsPath || (rawConfig.skills as Record<string, unknown>)?.path || "/skills",
   );
   await skillsLoader.loadSkills();
 
@@ -177,7 +176,7 @@ function printInfoText(
   console.log(`  AI URL:          ${resolved.baseUrl}`);
   console.log(`  Default Model:   ${resolved.model}`);
   console.log(
-    `  Skills Path:     ${(config?.skillsPath as string) || DEFAULT_SKILLS_PATH}`,
+    `  Skills Path:     ${(config?.skillsPath as string) || (config?.skills as Record<string, unknown>)?.path || "/skills"}`,
   );
   console.log(`  Chat Timeout:    ${resolved.chatTimeout}s`);
   console.log(`  Profile:         ${resolved.profileName}`);
@@ -261,7 +260,7 @@ function printInfoJson(
       ai_url: resolved.baseUrl,
       default_model: resolved.model,
       chat_timeout_secs: resolved.chatTimeout,
-      skills_path: (config?.skillsPath as string) || DEFAULT_SKILLS_PATH,
+      skills_path: (config?.skillsPath as string) || (config?.skills as Record<string, unknown>)?.path || "/skills",
       profile: resolved.profileName,
       profile_whitelist: (resolved.profile?.whitelistTools as string[]) || null,
       profile_blacklist: (resolved.profile?.blacklistTools as string[]) || [],

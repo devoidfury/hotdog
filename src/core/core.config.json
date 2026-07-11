@@ -94,19 +94,6 @@
     },
     "layers": [{ "source": "cli", "key": "sessionId" }, { "default": null }]
   },
-  "skillsPath": {
-    "type": "string",
-    "cliFlag": {
-      "long": "--skills-path",
-      "type": "string",
-      "description": "Skills directory path"
-    },
-    "layers": [
-      { "source": "cli", "key": "skillsPath" },
-      { "source": "config", "key": "skillsPath" },
-      { "compute": "joinConfigDir:skills" }
-    ]
-  },
   "compactDebug": {
     "type": "boolean",
     "cliFlag": {
@@ -430,10 +417,6 @@
   "extensions": {
     "type": "array",
     "layers": [{ "source": "config", "key": "extensions" }, { "default": [] }]
-  },
-  "mcpServers": {
-    "type": "array",
-    "layers": [{ "source": "config", "key": "mcpServers" }, { "default": [] }]
   },
   "defaultSubcommand": {
     "type": "string",

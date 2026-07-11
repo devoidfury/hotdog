@@ -9,6 +9,11 @@
       "long": "--preload-skills",
       "type": "array",
       "description": "Preload skills by name (comma-separated)"
+    },
+    {
+      "long": "--skills-path",
+      "type": "string",
+      "description": "Skills directory path"
     }
   ],
   "configSchema": {
@@ -36,6 +41,7 @@
           "type": "string",
           "description": "Directory path where skills are stored",
           "layers": [
+            { "source": "cli", "key": "skillsPath" },
             { "source": "config", "key": "skills.path" },
             { "source": "config", "key": "skillsPath" },
             { "compute": "joinConfigDir:skills" }

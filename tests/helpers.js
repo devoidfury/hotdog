@@ -524,7 +524,6 @@ export function createMockCore(config = {}) {
     config: {
       theme: "dark",
       maxIterations: 100,
-      skillsPath: path.join(os.homedir(), ".hotdog", "skills"),
       ...config.coreConfig,
     },
     resolved,

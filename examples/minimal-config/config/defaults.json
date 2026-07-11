@@ -6,7 +6,6 @@
   "toolfmt": " 🔧 {} {}",
   "hide_tools": true,
   "show_token_use": true,
-  "skills_path": "/path/to/skills",
   "extension_paths": ["builtins"],
   "extension_autoload": true,
   "default_subcommand": "cli",

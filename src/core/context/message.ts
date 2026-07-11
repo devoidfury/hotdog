@@ -24,7 +24,7 @@ export class Message {
   reasoningContent: string | null;
   toolCalls: unknown;
   toolCallId: string | null;
-  images: ImageAttachment[] | null;
+  images: ImageAttachment[] | null | undefined;
 
   /**
    * @param opts
@@ -100,7 +100,7 @@ export class Message {
     if (this.reasoningContent) obj.reasoning_content = this.reasoningContent;
     if (this.toolCalls) obj.tool_calls = this.toolCalls;
     if (this.toolCallId) obj.tool_call_id = this.toolCallId;
-    if (this.images?.length > 0) {
+    if (this.images && this.images.length > 0) {
       obj.images = this.images;
     }
     return obj;

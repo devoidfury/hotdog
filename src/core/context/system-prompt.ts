@@ -45,7 +45,7 @@ export function collectSystemPromptChunks(
     const items = Array.isArray(result) ? result : [result];
     for (const item of items as Record<string, unknown>[]) {
       if (item && item.name && item.content) {
-        const fullName = source ? `${source}:${item.name}` : item.name;
+        const fullName = source ? `${source}:${item.name}` : `${item.name}`;
         chunks.push({
           name: fullName,
           priority: item.priority as number,

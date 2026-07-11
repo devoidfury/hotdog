@@ -68,7 +68,7 @@ export class ExtensionError extends AppError {
 
   static CircularDependency(names: string[]): ExtensionError {
     return new ExtensionError(
-      `Circular dependency detected among extensions: ${names}`,
+      `Circular dependency detected among extensions: ${names.join(", ")}`,
     );
   }
 

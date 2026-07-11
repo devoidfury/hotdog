@@ -16,12 +16,37 @@ import {
 
 describe("Error types", () => {
   const errorClasses = [
-    { cls: AppError, type: "app", msg: "test message", args: ["test message", "app"] },
+    {
+      cls: AppError,
+      type: "app",
+      msg: "test message",
+      args: ["test message", "app"],
+    },
     { cls: CliError, type: "cli", msg: "bad args", args: ["bad args"] },
-    { cls: ExtensionError, type: "extension", msg: "load failed", args: ["load failed"] },
-    { cls: ToolError, type: "tool", msg: "file not found", args: ["file not found"] },
-    { cls: AgentError, type: "agent", msg: "max iterations", args: ["max iterations"] },
-    { cls: ConfigError, type: "config", msg: "bad config", args: ["bad config"] },
+    {
+      cls: ExtensionError,
+      type: "extension",
+      msg: "load failed",
+      args: ["load failed"],
+    },
+    {
+      cls: ToolError,
+      type: "tool",
+      msg: "file not found",
+      args: ["file not found"],
+    },
+    {
+      cls: AgentError,
+      type: "agent",
+      msg: "max iterations",
+      args: ["max iterations"],
+    },
+    {
+      cls: ConfigError,
+      type: "config",
+      msg: "bad config",
+      args: ["bad config"],
+    },
     { cls: ParseError, type: "parse", msg: "bad yaml", args: ["bad yaml"] },
     { cls: LlmError, type: "llm", msg: "test", args: ["test", "llm"] },
   ];
@@ -61,7 +86,7 @@ describe("Error types", () => {
 
   describe("ExtensionError factories", () => {
     it("CircularDependency", () => {
-      const err = ExtensionError.CircularDependency("a, b, c");
+      const err = ExtensionError.CircularDependency(["a", "b", "c"]);
       expect(err.message).toContain("Circular dependency detected");
       expect(err.message).toContain("a, b, c");
     });
@@ -81,7 +106,9 @@ describe("Error types", () => {
 
   describe("ToolError factories", () => {
     it("PathNotFound", () => {
-      expect(ToolError.PathNotFound("/missing/file").message).toContain("Path not found: /missing/file");
+      expect(ToolError.PathNotFound("/missing/file").message).toContain(
+        "Path not found: /missing/file",
+      );
     });
 
     it("PathOutside", () => {
@@ -91,19 +118,27 @@ describe("Error types", () => {
     });
 
     it("NotWritable", () => {
-      expect(ToolError.NotWritable("/readonly", "EACCES").message).toContain("not writable");
+      expect(ToolError.NotWritable("/readonly", "EACCES").message).toContain(
+        "not writable",
+      );
     });
 
     it("NotReadable", () => {
-      expect(ToolError.NotReadable("/missing").message).toContain("not readable");
+      expect(ToolError.NotReadable("/missing").message).toContain(
+        "not readable",
+      );
     });
 
     it("MissingArg", () => {
-      expect(ToolError.MissingArg("path").message).toBe("Missing required argument: path");
+      expect(ToolError.MissingArg("path").message).toBe(
+        "Missing required argument: path",
+      );
     });
 
     it("UnknownMode", () => {
-      expect(ToolError.UnknownMode("badmode").message).toBe("Unknown mode: badmode");
+      expect(ToolError.UnknownMode("badmode").message).toBe(
+        "Unknown mode: badmode",
+      );
     });
 
     it("EndExceedsLines", () => {
@@ -113,7 +148,9 @@ describe("Error types", () => {
     });
 
     it("NotAvailable", () => {
-      expect(ToolError.NotAvailable("mcp-tool").message).toBe("mcp-tool not available");
+      expect(ToolError.NotAvailable("mcp-tool").message).toBe(
+        "mcp-tool not available",
+      );
     });
   });
 
@@ -123,21 +160,30 @@ describe("Error types", () => {
     });
 
     it("SummarizationFailed", () => {
-      expect(AgentError.SummarizationFailed("API error").message).toContain("Summarization failed");
+      expect(AgentError.SummarizationFailed("API error").message).toContain(
+        "Summarization failed",
+      );
     });
 
     it("NotImplemented", () => {
-      expect(AgentError.NotImplemented().message).toBe("execute() not implemented");
+      expect(AgentError.NotImplemented().message).toBe(
+        "execute() not implemented",
+      );
     });
   });
 
   describe("ConfigError factories", () => {
     it("LoadFailed", () => {
-      expect(ConfigError.LoadFailed("/path/to/config", "ENOENT").message).toContain("/path/to/config");
+      expect(
+        ConfigError.LoadFailed("/path/to/config", "ENOENT").message,
+      ).toContain("/path/to/config");
     });
 
     it("ValidationError", () => {
-      const err = ConfigError.ValidationError(["field1: required", "field2: invalid"]);
+      const err = ConfigError.ValidationError([
+        "field1: required",
+        "field2: invalid",
+      ]);
       expect(err.message).toContain("field1");
       expect(err.message).toContain("field2");
     });
@@ -145,11 +191,15 @@ describe("Error types", () => {
 
   describe("ParseError factories", () => {
     it("FrontmatterNotFound", () => {
-      expect(ParseError.FrontmatterNotFound().message).toContain("No YAML frontmatter found");
+      expect(ParseError.FrontmatterNotFound().message).toContain(
+        "No YAML frontmatter found",
+      );
     });
 
     it("MissingDescription", () => {
-      expect(ParseError.MissingDescription("skill").message).toContain("skill description is missing");
+      expect(ParseError.MissingDescription("skill").message).toContain(
+        "skill description is missing",
+      );
     });
   });
 });
@@ -236,7 +286,9 @@ describe("withContext", () => {
     const err = new Error("api failure");
     err.type = "api";
     await expect(
-      withContext("test label", async () => { throw err; }),
+      withContext("test label", async () => {
+        throw err;
+      }),
     ).rejects.toBe(err);
   });
 

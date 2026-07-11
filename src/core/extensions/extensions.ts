@@ -31,10 +31,7 @@ export function extractSchemaDefaults(
   const result: SchemaDefaultEntry[] = [];
   for (const [keyName, keySchema] of Object.entries(schema)) {
     let defaults: unknown;
-    if (
-      (keySchema.type as string) === "object" &&
-      keySchema.properties
-    ) {
+    if ((keySchema.type as string) === "object" && keySchema.properties) {
       defaults = {};
       for (const [propName, prop] of Object.entries(
         keySchema.properties as Record<string, Record<string, unknown>>,
@@ -98,8 +95,18 @@ export interface ExtensionMetadata {
   dependsOn: string[];
   autoload: boolean;
   configSchema: Record<string, unknown> | null;
-  cliSubcommands: Array<{ name: string; description: string; options: unknown[] }>;
-  cliFlags: Array<{ short: string | null; long: string; description: string; type: string; default: unknown }>;
+  cliSubcommands: Array<{
+    name: string;
+    description: string;
+    options: unknown[];
+  }>;
+  cliFlags: Array<{
+    short: string | null;
+    long: string;
+    description: string;
+    type: string;
+    default: unknown;
+  }>;
   services: Record<string, unknown[]>;
   requires: Record<string, unknown[]>;
 }
@@ -145,13 +152,17 @@ export async function isExtensionDirectory(dirPath: string): Promise<boolean> {
  *
  * @private
  */
-async function readExtensionMetadata(dirPath: string): Promise<ExtensionMetadata> {
+async function readExtensionMetadata(
+  dirPath: string,
+): Promise<ExtensionMetadata> {
   const metaPath = path.join(dirPath, "extension.json");
+  const name = path.basename(dirPath);
   try {
     await fsPromises.access(metaPath);
   } catch {
     return {
-      name: "",
+      name,
+      path: metaPath,
       provides: [],
       loadOrder: LOAD_ORDER.DEFAULT,
       description: "",
@@ -164,11 +175,14 @@ async function readExtensionMetadata(dirPath: string): Promise<ExtensionMetadata
       requires: {},
     };
   }
+  let meta: Record<string, unknown> | null = null;
   try {
     const content = await fsPromises.readFile(metaPath, "utf-8");
-    const meta = JSON.parse(content) as Record<string, unknown>;
+    meta = JSON.parse(content) as Record<string, unknown>;
 
-    const provides = Array.isArray(meta.provides) ? (meta.provides as string[]) : [];
+    const provides = Array.isArray(meta.provides)
+      ? (meta.provides as string[])
+      : [];
     const description =
       typeof meta.description === "string" ? meta.description : "";
     const dependsOn = Array.isArray(meta.dependsOn)
@@ -183,11 +197,13 @@ async function readExtensionMetadata(dirPath: string): Promise<ExtensionMetadata
         : null;
 
     const cliSubcommands = Array.isArray(meta["cli:subcommands"])
-      ? (meta["cli:subcommands"] as Array<Record<string, unknown>>).map((sc) => ({
-          name: (sc.name as string) || "",
-          description: (sc.description as string) || "",
-          options: Array.isArray(sc.options) ? (sc.options as unknown[]) : [],
-        }))
+      ? (meta["cli:subcommands"] as Array<Record<string, unknown>>).map(
+          (sc) => ({
+            name: (sc.name as string) || "",
+            description: (sc.description as string) || "",
+            options: Array.isArray(sc.options) ? (sc.options as unknown[]) : [],
+          }),
+        )
       : [];
 
     const cliFlags = Array.isArray(meta["cli:flags"])
@@ -214,7 +230,7 @@ async function readExtensionMetadata(dirPath: string): Promise<ExtensionMetadata
         ? (meta.requires as Record<string, unknown[]>)
         : {};
 
-    let loadOrder = LOAD_ORDER.DEFAULT;
+    let loadOrder: number = LOAD_ORDER.DEFAULT;
     if (meta.loadOrder !== undefined) {
       loadOrder = meta.loadOrder as number;
     } else if (provides.includes(EXTENSION_PROVIDES.CLI_SUBCOMMANDS)) {
@@ -222,7 +238,7 @@ async function readExtensionMetadata(dirPath: string): Promise<ExtensionMetadata
     }
 
     return {
-      name: (meta.name as string) || "",
+      name: meta.name ? `${meta.name}` : name,
       provides,
       loadOrder,
       description,
@@ -236,7 +252,7 @@ async function readExtensionMetadata(dirPath: string): Promise<ExtensionMetadata
     };
   } catch {
     return {
-      name: "",
+      name: meta?.name ? `${meta.name}` : name,
       provides: [],
       loadOrder: LOAD_ORDER.DEFAULT,
       description: "",
@@ -290,32 +306,11 @@ export async function discoverExtensionsInDir(
         : entry.name;
 
       if (await isExtensionDirectory(dirFull)) {
-        const {
-          name,
-          provides,
-          loadOrder,
-          dependsOn,
-          autoload,
-          configSchema,
-          cliSubcommands,
-          cliFlags,
-          services,
-          requires,
-        } = await readExtensionMetadata(dirFull);
-
+        const metadata = await readExtensionMetadata(dirFull);
         extensions.push({
-          name: name || entry.name,
-          path: `./extensions/${relativePath}/index.js`,
-          dirPath: dirFull,
-          provides,
-          loadOrder,
-          dependsOn,
-          autoload,
-          configSchema,
-          cliSubcommands,
-          cliFlags,
-          services,
-          requires,
+          ...metadata,
+          path: metadata.path || relativePath,
+          dirPath,
         });
       }
 
@@ -418,8 +413,7 @@ export function resolveLoadOrder(
       const remaining = extensions.filter(
         (e) => !result.find((r) => r.name === e.name),
       );
-      const cycleNames = remaining.map((e) => e.name).join(", ");
-      throw ExtensionError.CircularDependency(cycleNames);
+      throw ExtensionError.CircularDependency(remaining.map((e) => e.name));
     }
     const batch = [...pending].sort(cmp);
     pending.length = 0;
@@ -441,8 +435,7 @@ export function resolveLoadOrder(
     const remaining = extensions.filter(
       (e) => !result.find((r) => r.name === e.name),
     );
-    const cycleNames = remaining.map((e) => e.name).join(", ");
-    throw ExtensionError.CircularDependency(cycleNames);
+    throw ExtensionError.CircularDependency(remaining.map((e) => e.name));
   }
 
   return result;
@@ -750,11 +743,21 @@ export async function registerExtensionMetadata(
 // Forward references for types
 interface ConfigRegistry {
   registerCliFlags(flags: unknown[]): void;
-  registerConfigParams(params: Array<{ key: string; description: string; defaults: Record<string, unknown>; schema?: Record<string, unknown> }>): void;
+  registerConfigParams(
+    params: Array<{
+      key: string;
+      description: string;
+      defaults: Record<string, unknown>;
+      schema?: Record<string, unknown>;
+    }>,
+  ): void;
 }
 
 interface CliSubcommandRegistry {
-  register(name: string, definition: { description: string; options: unknown[]; handler: unknown }): void;
+  register(
+    name: string,
+    definition: { description: string; options: unknown[]; handler: unknown },
+  ): void;
 }
 
 /**
@@ -780,8 +783,10 @@ export class ExtensionLoader {
     this.#entryPoints = new Map();
     this.#metadata = new Map();
     this.#toolOwners = new Map();
-    this.#configRegistry = (core as Record<string, unknown>).configRegistry as ConfigRegistry | null;
-    this.#cliSubcommandRegistry = (core as Record<string, unknown>).cliSubcommandRegistry as CliSubcommandRegistry | null;
+    this.#configRegistry = (core as Record<string, unknown>)
+      .configRegistry as ConfigRegistry | null;
+    this.#cliSubcommandRegistry = (core as Record<string, unknown>)
+      .cliSubcommandRegistry as CliSubcommandRegistry | null;
   }
 
   async load(
@@ -791,7 +796,10 @@ export class ExtensionLoader {
   ): Promise<unknown> {
     let extModule: Record<string, unknown>;
     if (typeof entryPoint === "string") {
-      extModule = (await import(entryPoint)) as unknown as Record<string, unknown>;
+      extModule = (await import(entryPoint)) as unknown as Record<
+        string,
+        unknown
+      >;
     } else {
       extModule = entryPoint;
     }
@@ -826,7 +834,18 @@ export class ExtensionLoader {
       )) {
         if (hookName === HOOKS.TOOLS_REGISTER) continue;
         if (hookName === HOOKS.SERVICES_REGISTER) continue;
-        const hooks = (this.#core as Record<string, { on: (name: string, handler: unknown, source: string) => () => void }>).hooks;
+        const hooks = (
+          this.#core as Record<
+            string,
+            {
+              on: (
+                name: string,
+                handler: unknown,
+                source: string,
+              ) => () => void;
+            }
+          >
+        ).hooks;
         const remove = hooks.on(hookName, handler, name);
         removers.push(remove);
       }
@@ -834,7 +853,9 @@ export class ExtensionLoader {
 
     if (
       (instance as Record<string, unknown>).hooks &&
-      (instance as Record<string, Record<string, unknown>>).hooks[HOOKS.SERVICES_REGISTER]
+      (instance as Record<string, Record<string, unknown>>).hooks[
+        HOOKS.SERVICES_REGISTER
+      ]
     ) {
       (
         (instance as Record<string, Record<string, unknown>>).hooks[
@@ -845,20 +866,29 @@ export class ExtensionLoader {
 
     const toolNamesBefore = new Set(
       Array.from(
-        ((this.#core as Record<string, { getAll: () => [string, unknown][] }>).toolRegistry as {
-          getAll: () => [string, unknown][];
-        }).getAll().map(([n]) => n),
+        (
+          (this.#core as Record<string, { getAll: () => [string, unknown][] }>)
+            .toolRegistry as {
+            getAll: () => [string, unknown][];
+          }
+        )
+          .getAll()
+          .map(([n]) => n),
       ),
     );
 
     if (
-      (instance as Record<string, Record<string, unknown>>).hooks?.[HOOKS.TOOLS_REGISTER]
+      (instance as Record<string, Record<string, unknown>>).hooks?.[
+        HOOKS.TOOLS_REGISTER
+      ]
     ) {
       await ((
         (instance as Record<string, Record<string, unknown>>).hooks[
           HOOKS.TOOLS_REGISTER
         ] as Function
-      )((this.#core as Record<string, unknown>).toolRegistry) as Promise<unknown>);
+      )(
+        (this.#core as Record<string, unknown>).toolRegistry,
+      ) as Promise<unknown>);
     } else if ((instance as Record<string, unknown>).registerTools) {
       await ((instance.registerTools as Function)(
         (this.#core as Record<string, unknown>).toolRegistry,
@@ -867,9 +897,14 @@ export class ExtensionLoader {
 
     const toolNamesAfter = new Set(
       Array.from(
-        ((this.#core as Record<string, { getAll: () => [string, unknown][] }>).toolRegistry as {
-          getAll: () => [string, unknown][];
-        }).getAll().map(([n]) => n),
+        (
+          (this.#core as Record<string, { getAll: () => [string, unknown][] }>)
+            .toolRegistry as {
+            getAll: () => [string, unknown][];
+          }
+        )
+          .getAll()
+          .map(([n]) => n),
       ),
     );
     const newlyRegistered: string[] = [];
@@ -892,10 +927,7 @@ export class ExtensionLoader {
         try {
           await ((ext as Record<string, unknown>).shutdown as Function)();
         } catch (e) {
-          throw ExtensionError.ShutdownFailed(
-            name,
-            (e as Error).message,
-          );
+          throw ExtensionError.ShutdownFailed(name, (e as Error).message);
         }
       }
 
@@ -910,9 +942,16 @@ export class ExtensionLoader {
       const ownedTools = this.#toolOwners.get(name);
       if (ownedTools) {
         for (const toolName of ownedTools) {
-          ((this.#core as Record<string, { remove: (name: string) => boolean }>).toolRegistry as {
-            remove: (name: string) => boolean;
-          }).remove(toolName);
+          (
+            (
+              this.#core as Record<
+                string,
+                { remove: (name: string) => boolean }
+              >
+            ).toolRegistry as {
+              remove: (name: string) => boolean;
+            }
+          ).remove(toolName);
         }
         this.#toolOwners.delete(name);
       }
@@ -973,9 +1012,16 @@ export class ExtensionLoader {
   }
 
   async cleanup(): Promise<void> {
-    await ((this.#core as Record<string, { notifyHooksAsync: (name: string, data: unknown) => void }>).hooks as {
-      notifyHooksAsync: (name: string, data: unknown) => void;
-    }).notifyHooksAsync(HOOKS.SHUTDOWN_CLEANUP, null);
+    await (
+      (
+        this.#core as Record<
+          string,
+          { notifyHooksAsync: (name: string, data: unknown) => void }
+        >
+      ).hooks as {
+        notifyHooksAsync: (name: string, data: unknown) => void;
+      }
+    ).notifyHooksAsync(HOOKS.SHUTDOWN_CLEANUP, null);
   }
 }
 
@@ -995,10 +1041,23 @@ export function validateServiceContracts(
   loadedExtensions: ExtensionMetadata[],
   serviceRegistry: {
     has(name: string): boolean;
-    checkContract(name: string, methods: string[]): { valid: boolean; missing: string[] };
+    checkContract(
+      name: string,
+      methods: string[],
+    ): { valid: boolean; missing: string[] };
   },
-): Array<{ extension: string; service: string; missing: string[]; message: string }> {
-  const errors: Array<{ extension: string; service: string; missing: string[]; message: string }> = [];
+): Array<{
+  extension: string;
+  service: string;
+  missing: string[];
+  message: string;
+}> {
+  const errors: Array<{
+    extension: string;
+    service: string;
+    missing: string[];
+    message: string;
+  }> = [];
 
   for (const ext of loadedExtensions) {
     if (!ext.requires || typeof ext.requires !== "object") continue;

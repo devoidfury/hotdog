@@ -205,7 +205,7 @@ function compileNestedPropertyLayers(
 export function compileSchemaKey(rawKey: SchemaProperty): SchemaProperty {
   const { layers, properties, ...rest } = rawKey;
 
-  const compiledLayers = layers.map((layer) => {
+  const compiledLayers = (layers || []).map((layer) => {
     const compiled = { ...layer };
 
     if (typeof compiled.cast === "string") {

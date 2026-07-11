@@ -37,7 +37,7 @@ export class BashTool {
   toToolDef() {
     return toolDef(
       BashTool.TOOL_NAME,
-      "Execute a bash command. Returns stdout + stderr.",
+      `Execute a bash command, from the working directory '${process.cwd()}'`,
       {
         properties: {
           command: param("string", "The shell command to execute."),
@@ -82,6 +82,12 @@ export class BashTool {
       const proc = spawn(command, [], {
         shell: true,
         stdio: ["pipe", "pipe", "pipe"],
+        env: {
+          ...process.env,
+          // enable agent-friendly test output in bun test, maybe others
+          // https://bun.com/docs/test#ai-agent-integration
+          AGENT: "1",
+        },
       });
 
       let stdout = "";

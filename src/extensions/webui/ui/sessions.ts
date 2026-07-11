@@ -1,34 +1,51 @@
 // Session list/management sidebar component.
 
-import { sanitize, formatTime, shortId } from "./utils.js";
+import { sanitize, formatTime, shortId } from "./utils.ts";
+
+// ── Types ───────────────────────────────────────────────────────────────────
+
+interface SessionInfo {
+  id: string;
+  profile?: string;
+  model?: string;
+  createdAt: number;
+  lastActivityAt: number;
+  connectedClients: number;
+}
+
+interface SessionsConfig {
+  onCreate: () => void;
+  onSwitch: (sessionId: string) => void;
+  onDelete: (sessionId: string) => void;
+}
+
+type UpdateSessionsFn = (sessions: SessionInfo[], activeSessionId: string | null) => void;
 
 /**
  * Initialize the session sidebar.
- * @param {Object} config
- * @param {Function} config.onCreate - Called to create a new session
- * @param {Function} config.onSwitch - Called with sessionId to switch to
- * @param {Function} config.onDelete - Called with sessionId to delete
+ * @param config - Configuration with create/switch/delete callbacks
+ * @returns Function to update the session list display
  */
-export function initSessions({ onCreate, onSwitch, onDelete }) {
-  const listEl = document.getElementById("session-list");
-  const newBtn = document.getElementById("new-session-btn");
+export function initSessions({ onCreate, onSwitch, onDelete }: SessionsConfig): UpdateSessionsFn {
+  const listEl = document.getElementById("session-list") as HTMLDivElement;
+  const newBtn = document.getElementById("new-session-btn") as HTMLButtonElement;
 
   newBtn.addEventListener("click", () => onCreate());
 
   /**
    * Get a friendly profile name for display.
    */
-  function getProfileDisplay(profile) {
+  function getProfileDisplay(profile: string | undefined): string {
     if (!profile) return "default";
     return sanitize(profile);
   }
 
   /**
    * Update the session list display.
-   * @param {Array<{id: string, profile: string, model: string, createdAt: number, lastActivityAt: number, connectedClients: number}>} sessions
-   * @param {string|null} activeSessionId
+   * @param sessions - Array of session info objects
+   * @param activeSessionId - Currently active session ID
    */
-  return function updateSessions(sessions, activeSessionId) {
+  return function updateSessions(sessions: SessionInfo[], activeSessionId: string | null): void {
     listEl.innerHTML = "";
 
     for (const s of sessions) {
@@ -58,7 +75,7 @@ export function initSessions({ onCreate, onSwitch, onDelete }) {
       });
 
       // Right-click to delete (simple UX)
-      item.addEventListener("contextmenu", (e) => {
+      item.addEventListener("contextmenu", (e: MouseEvent) => {
         e.preventDefault();
         if (confirm(`Delete session ${shortId(s.id)}?`)) {
           onDelete(s.id);

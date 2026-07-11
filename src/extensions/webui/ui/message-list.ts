@@ -1,23 +1,85 @@
 // Message rendering — displays all OUTPUT_EVENT types in the chat view.
 // Manages a message list per session, with streaming, tool calls, and thinking.
 
-import { sanitize } from "./utils.js";
+import { sanitize } from "./utils.ts";
+
+// ── Message event types ─────────────────────────────────────────────────────
+
+interface UserMessage { content: string; }
+interface AssistantMessage { content: string; }
+interface StreamingChunk { content: string; }
+interface ThinkingMessage { content: string; }
+interface ToolCallMessage { name: string; args: string; }
+interface ToolResultMessage { name: string; output?: string; error?: string; }
+interface CompactingMessage { message: string; }
+interface CommandResultMessage { content: string; }
+
+interface QuestionOption {
+  message?: string;
+  prompt?: string;
+  options?: string[];
+}
+interface QuestionMessage { questions: QuestionOption[]; }
+
+interface TaskProgressMessage { taskId: string; status: string; message?: string; }
+
+interface TokenUsageMessage {
+  lastCachedTokens: number;
+  lastPromptTokens: number;
+  lastCompletionTokens: number;
+  lastTotalTokens: number;
+}
+
+interface CompactionResultMessage { summary: string; messagesCompacted: number; }
+interface SessionStateMessage { key: string; value: unknown; }
+interface ErrorMessage { message: string; }
+
+// ── Options ─────────────────────────────────────────────────────────────────
+
+interface MessageListOptions {
+  hideThinking?: boolean;
+}
+
+// ── Return type ─────────────────────────────────────────────────────────────
+
+export interface MessageListManager {
+  handleUserMessage: (data: UserMessage) => void;
+  handleAssistantMessage: (data: AssistantMessage) => void;
+  handleStreamingChunk: (data: StreamingChunk) => void;
+  handleStreamingReasoningChunk: (data: StreamingChunk) => void;
+  handleThinking: (data: ThinkingMessage) => void;
+  handleToolCall: (data: ToolCallMessage) => void;
+  handleToolResult: (data: ToolResultMessage) => void;
+  handleCompacting: (data: CompactingMessage) => void;
+  handleCommandResult: (data: CommandResultMessage) => void;
+  handleQuestion: (data: QuestionMessage) => void;
+  handleTaskProgress: (data: TaskProgressMessage) => void;
+  handleTokenUsage: (data: TokenUsageMessage) => void;
+  handleCompactionResult: (data: CompactionResultMessage) => void;
+  handleSessionState: (data: SessionStateMessage) => void;
+  handleError: (data: ErrorMessage) => void;
+  finalizeAssistant: () => void;
+  clear: () => void;
+}
 
 /**
  * Create a message list manager for a single session.
- * @param {string} sessionId
- * @param {Object} options
- * @param {boolean} [options.hideThinking=false]
- * @returns {Object} Message list manager
+ * @param sessionId - The session identifier
+ * @param options - Display options
+ * @returns Message list manager with handlers for each message type
  */
-export function createMessageList(sessionId, { hideThinking = false } = {}) {
-  const container = document.getElementById("message-list");
-  let currentAssistantEl = null;
-  let currentThinkingEl = null;
-  let currentToolCalls = [];
+export function createMessageList(
+  _sessionId: string,
+  { hideThinking = false }: MessageListOptions = {},
+): MessageListManager {
+  const container = document.getElementById("message-list") as HTMLDivElement;
+  let currentAssistantEl: HTMLDivElement | null = null;
+  let currentThinkingEl: HTMLDivElement | null = null;
+  let currentToolCalls: HTMLDivElement[] = [];
   let hasToolCallsSinceLastAssistant = false;
+  let hideThinkingValue = hideThinking;
 
-  function ensureAssistantEl() {
+  function ensureAssistantEl(): HTMLDivElement {
     if (!currentAssistantEl) {
       currentAssistantEl = document.createElement("div");
       currentAssistantEl.className = "message assistant streaming";
@@ -41,19 +103,19 @@ export function createMessageList(sessionId, { hideThinking = false } = {}) {
     return currentAssistantEl;
   }
 
-  function ensureThinkingEl() {
+  function ensureThinkingEl(): HTMLDivElement {
     if (!currentThinkingEl) {
       currentThinkingEl = document.createElement("div");
       currentThinkingEl.className = "thinking-block";
-      if (hideThinking) currentThinkingEl.classList.add("hidden");
+      if (hideThinkingValue) currentThinkingEl.classList.add("hidden");
       container.appendChild(currentThinkingEl);
     }
     return currentThinkingEl;
   }
 
   /** Show/hide thinking blocks. */
-  function setHideThinking(v) {
-    hideThinking = v;
+  function setHideThinking(v: boolean): void {
+    hideThinkingValue = v;
     if (currentThinkingEl) {
       currentThinkingEl.classList.toggle("hidden", v);
     }
@@ -61,7 +123,7 @@ export function createMessageList(sessionId, { hideThinking = false } = {}) {
 
   // ── Message Handlers ──────────────────────────────────────────────────────
 
-  function handleUserMessage({ content }) {
+  function handleUserMessage({ content }: UserMessage): void {
     finalizeAssistant();
     const el = document.createElement("div");
     el.className = "message user";
@@ -85,7 +147,7 @@ export function createMessageList(sessionId, { hideThinking = false } = {}) {
     scrollBottom();
   }
 
-  function handleAssistantMessage({ content }) {
+  function handleAssistantMessage({ content }: AssistantMessage): void {
     if (!content?.trim()) return; // skip empty messages (e.g. tool-only turns during replay)
     finalizeAssistant();
     const el = document.createElement("div");
@@ -110,7 +172,7 @@ export function createMessageList(sessionId, { hideThinking = false } = {}) {
     scrollBottom();
   }
 
-  function handleStreamingChunk({ content }) {
+  function handleStreamingChunk({ content }: StreamingChunk): void {
     // If we've had tool calls since the last assistant message, start a new
     // assistant element so tool calls appear sequentially before the final text.
     if (hasToolCallsSinceLastAssistant) {
@@ -118,24 +180,24 @@ export function createMessageList(sessionId, { hideThinking = false } = {}) {
       hasToolCallsSinceLastAssistant = false;
     }
     const el = ensureAssistantEl();
-    const contentDiv = el.querySelector(".content");
+    const contentDiv = el.querySelector(".content") as HTMLDivElement;
     contentDiv.textContent += content;
     scrollBottom();
   }
 
-  function handleStreamingReasoningChunk({ content }) {
+  function handleStreamingReasoningChunk({ content }: StreamingChunk): void {
     const el = ensureThinkingEl();
     el.textContent += content;
     scrollBottom();
   }
 
-  function handleThinking({ content }) {
+  function handleThinking({ content }: ThinkingMessage): void {
     // Final thinking block (non-streaming)
     const el = ensureThinkingEl();
     el.textContent = content;
   }
 
-  function handleToolCall({ name, args }) {
+  function handleToolCall({ name, args }: ToolCallMessage): void {
     // Finalize the current assistant message so tool calls appear as
     // separate blocks after the user message, not nested inside the assistant.
     finalizeAssistant();
@@ -154,8 +216,8 @@ export function createMessageList(sessionId, { hideThinking = false } = {}) {
     header.addEventListener("click", () => {
       // When expanding, show the full tool output (not truncated preview)
       const isHidden = body.classList.contains("hidden");
-      if (isHidden && body.dataset.fullOutput) {
-        body.textContent = body.dataset.fullOutput;
+      if (isHidden && (body as HTMLElement).dataset.fullOutput) {
+        body.textContent = (body as HTMLElement).dataset.fullOutput;
       }
       body.classList.toggle("hidden");
     });
@@ -169,20 +231,20 @@ export function createMessageList(sessionId, { hideThinking = false } = {}) {
     scrollBottom();
   }
 
-  function handleToolResult({ name, output, error }) {
+  function handleToolResult({ name, output, error }: ToolResultMessage): void {
     // Find the last tool call block for this tool and add result
-    const blocks = container.querySelectorAll(".tool-call-block");
-    let target = null;
+    const blocks = container.querySelectorAll<HTMLDivElement>(".tool-call-block");
+    let target: HTMLDivElement | null = null;
     for (let i = blocks.length - 1; i >= 0; i--) {
       const hdr = blocks[i].querySelector(".tool-call-header span");
-      if (hdr && hdr.textContent.includes(name)) {
+      if (hdr && hdr.textContent?.includes(name)) {
         target = blocks[i];
         break;
       }
     }
     if (!target) return;
 
-    const body = target.querySelector(".tool-call-body");
+    const body = target.querySelector<HTMLDivElement>(".tool-call-body");
     if (body) {
       // Store the full output on the body element for toggling
       const fullOutput = output || error || "";
@@ -199,7 +261,7 @@ export function createMessageList(sessionId, { hideThinking = false } = {}) {
     scrollBottom();
   }
 
-  function handleCompacting({ message }) {
+  function handleCompacting({ message }: CompactingMessage): void {
     // Show compacting notice
     const el = document.createElement("div");
     el.className = "message compacting";
@@ -211,7 +273,7 @@ export function createMessageList(sessionId, { hideThinking = false } = {}) {
     scrollBottom();
   }
 
-  function handleCommandResult({ content }) {
+  function handleCommandResult({ content }: CommandResultMessage): void {
     const el = document.createElement("div");
     el.className = "message command-result";
     const bubble = document.createElement("div");
@@ -225,7 +287,7 @@ export function createMessageList(sessionId, { hideThinking = false } = {}) {
     scrollBottom();
   }
 
-  function handleQuestion({ questions }) {
+  function handleQuestion({ questions }: QuestionMessage): void {
     finalizeAssistant();
     const el = document.createElement("div");
     el.className = "message question";
@@ -256,9 +318,9 @@ export function createMessageList(sessionId, { hideThinking = false } = {}) {
     scrollBottom();
   }
 
-  function handleTaskProgress({ taskId, status, message }) {
+  function handleTaskProgress({ taskId, status, message }: TaskProgressMessage): void {
     // Task progress — subtle indicator
-    let el = container.querySelector(
+    let el = container.querySelector<HTMLDivElement>(
       `.task-progress[data-task-id="${sanitize(taskId)}"]`,
     );
     if (!el) {
@@ -271,8 +333,10 @@ export function createMessageList(sessionId, { hideThinking = false } = {}) {
       el.appendChild(bubble);
       container.appendChild(el);
     } else {
-      const bubble = el.querySelector(".bubble");
-      bubble.textContent = `⚡ ${status}${message ? ": " + message : ""}`;
+      const bubble = el.querySelector<HTMLDivElement>(".bubble");
+      if (bubble) {
+        bubble.textContent = `⚡ ${status}${message ? ": " + message : ""}`;
+      }
     }
     scrollBottom();
   }
@@ -282,7 +346,7 @@ export function createMessageList(sessionId, { hideThinking = false } = {}) {
     lastPromptTokens,
     lastCompletionTokens,
     lastTotalTokens,
-  }) {
+  }: TokenUsageMessage): void {
     const el = document.createElement("div");
     el.className = "message token-usage";
     const bubble = document.createElement("div");
@@ -293,7 +357,7 @@ export function createMessageList(sessionId, { hideThinking = false } = {}) {
     scrollBottom();
   }
 
-  function handleCompactionResult({ summary, messagesCompacted }) {
+  function handleCompactionResult({ summary, messagesCompacted }: CompactionResultMessage): void {
     const el = document.createElement("div");
     el.className = "message compaction-result";
     const bubble = document.createElement("div");
@@ -304,13 +368,13 @@ export function createMessageList(sessionId, { hideThinking = false } = {}) {
     scrollBottom();
   }
 
-  function handleSessionState({ key, value }) {
+  function handleSessionState({ key, value }: SessionStateMessage): void {
     if (key === "hideThinking") {
-      setHideThinking(value);
+      setHideThinking(Boolean(value));
     }
   }
 
-  function handleError({ message }) {
+  function handleError({ message }: ErrorMessage): void {
     finalizeAssistant();
     const el = document.createElement("div");
     el.className = "message error";
@@ -335,7 +399,7 @@ export function createMessageList(sessionId, { hideThinking = false } = {}) {
   }
 
   /** Finalize the current streaming assistant message. */
-  function finalizeAssistant() {
+  function finalizeAssistant(): void {
     if (currentAssistantEl) {
       currentAssistantEl.classList.remove("streaming");
       currentAssistantEl = null;
@@ -345,7 +409,7 @@ export function createMessageList(sessionId, { hideThinking = false } = {}) {
     hasToolCallsSinceLastAssistant = false;
   }
 
-  function scrollBottom() {
+  function scrollBottom(): void {
     // Only auto-scroll if the user is within 150px of the bottom,
     // so they can scroll up to view history without being yanked down.
     const threshold = 150;
@@ -356,7 +420,7 @@ export function createMessageList(sessionId, { hideThinking = false } = {}) {
     }
   }
 
-  function clear() {
+  function clear(): void {
     container.innerHTML = "";
     currentAssistantEl = null;
     currentThinkingEl = null;

@@ -1,16 +1,24 @@
 // Login screen component — API key input → POST /login → store token.
 
+interface LoginConfig {
+  /** Called with token string on successful login */
+  onLogin: (token: string) => void;
+}
+
+interface LoginError {
+  error?: string;
+}
+
 /**
  * Initialize the login screen.
- * @param {Object} config
- * @param {Function} config.onLogin - Called with token string on successful login
+ * @param config - Configuration object with login callback
  */
-export function initLogin({ onLogin }) {
-  const form = document.getElementById("login-form");
-  const input = document.getElementById("api-key-input");
-  const errorEl = document.getElementById("login-error");
+export function initLogin({ onLogin }: LoginConfig): void {
+  const form = document.getElementById("login-form") as HTMLFormElement;
+  const input = document.getElementById("api-key-input") as HTMLInputElement;
+  const errorEl = document.getElementById("login-error") as HTMLParagraphElement;
 
-  form.addEventListener("submit", async (e) => {
+  form.addEventListener("submit", async (e: SubmitEvent) => {
     e.preventDefault();
     const apiKey = input.value.trim();
     if (!apiKey) return;
@@ -18,7 +26,7 @@ export function initLogin({ onLogin }) {
     errorEl.classList.add("hidden");
     input.disabled = true;
 
-    const btn = form.querySelector("button");
+    const btn = form.querySelector("button") as HTMLButtonElement;
     const originalText = btn.textContent;
     btn.textContent = "Signing in...";
     btn.disabled = true;
@@ -31,7 +39,7 @@ export function initLogin({ onLogin }) {
       });
 
       if (!res.ok) {
-        const err = await res.json().catch(() => ({ error: "Login failed" }));
+        const err = await res.json().catch<LoginError>(() => ({ error: "Login failed" }));
         showError(errorEl, err.error || `Status ${res.status}`);
         input.disabled = false;
         btn.textContent = originalText;
@@ -39,10 +47,10 @@ export function initLogin({ onLogin }) {
         return;
       }
 
-      const data = await res.json();
+      const data = await res.json() as { token: string };
       onLogin(data.token);
     } catch (err) {
-      showError(errorEl, `Connection error: ${err.message}`);
+      showError(errorEl, `Connection error: ${(err as Error).message}`);
       input.disabled = false;
       btn.textContent = originalText;
       btn.disabled = false;
@@ -53,7 +61,7 @@ export function initLogin({ onLogin }) {
   input.focus();
 }
 
-function showError(el, msg) {
+function showError(el: HTMLParagraphElement, msg: string): void {
   el.textContent = msg;
   el.classList.remove("hidden");
 }

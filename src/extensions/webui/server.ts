@@ -6,6 +6,8 @@ import { createAuthMiddleware } from "../websocket/auth.ts";
 import { logger } from "../../core/logger.ts";
 import type { CoreContext } from "../../core/extensions/types.ts";
 
+import webuiFrontend from "./ui/index.html";
+
 // ── Types ───────────────────────────────────────────────────────────────────
 
 interface WebuiConfig {
@@ -51,77 +53,83 @@ export async function createWebuiServer(
   // Create WebSocket server handler
   const wsServer = createWsServer(core, {
     auth: authMiddleware,
-    sessionTimeoutMin: core.config?.websocket?.sessionTimeoutMin as number | undefined,
-    questionTimeoutSecs: core.config?.websocket?.questionTimeoutSecs as number | undefined,
-    questionStrategy: core.config?.websocket?.questionStrategy as string | undefined,
+    sessionTimeoutMin: core.config?.websocket?.sessionTimeoutMin as
+      number | undefined,
+    questionTimeoutSecs: core.config?.websocket?.questionTimeoutSecs as
+      number | undefined,
+    questionStrategy: core.config?.websocket?.questionStrategy as
+      string | undefined,
   });
 
   // Start cleanup loops
   authMiddleware.startCleanup();
   wsServer.startCleanupLoop();
 
-  // Declare server variable for use in fetch handler
-  let server: ReturnType<typeof Bun.serve>;
-
-  const fetchHandler = async (req: Request): Promise<Response | void> => {
-    const url = new URL(req.url);
-    const pathname = url.pathname;
-
-    // POST /login — authenticate and return session token
-    if (req.method === "POST" && pathname === "/login") {
-      const loginResp = await authMiddleware.loginHandler(req);
-      return loginResp;
-    }
-
-    // GET /verify — validate auth token
-    if (req.method === "GET" && pathname === "/verify") {
-      const token = url.searchParams.get("token");
-      const valid = token ? authMiddleware.validateToken(token) : false;
-      return valid
-        ? Response.json({ valid })
-        : Response.json({ valid }, { status: 401 });
-    }
-
-    // GET /ws — handle authenticated WebSocket upgrade
-    if (req.method === "GET" && pathname === "/ws") {
-      const token = url.searchParams.get("token");
-      if (!token) {
-        return Response.json(
-          { error: "Token required. Use ?token= in WebSocket URL" },
-          { status: 401 },
-        );
-      }
-      if (!authMiddleware.validateToken(token)) {
-        return Response.json({ error: "Invalid token" }, { status: 401 });
-      }
-      // Try to upgrade — Bun.serve handles the rest
-      const upgraded = server.upgrade(req, { data: { token, url: req.url } });
-      if (!upgraded) {
-        return Response.json({ error: "Upgrade failed" }, { status: 400 });
-      }
-      return;
-    }
-
-    // Everything else — serve static files
-    const staticResp = serveStaticFile(uiDir, maxAgeSecs, pathname);
-    if (staticResp) {
-      return staticResp;
-    }
-
-    return new Response("Not found", { status: 404 });
-  };
-
-  // ── Start the server ───────────────────────────────────────────────────
-
-  server = Bun.serve({
+  // Start the server
+  let server = Bun.serve({
     port,
     hostname: host,
-    fetch: fetchHandler,
+    routes: {
+      "/": webuiFrontend,
+
+      // GET /verify — validate auth token
+      "/verify": async function (req) {
+        const url = new URL(req.url);
+        const token = url.searchParams.get("token");
+        const valid = token ? authMiddleware.validateToken(token) : false;
+        return valid
+          ? Response.json({ valid })
+          : Response.json({ valid }, { status: 401 });
+      },
+
+      // GET /ws — handle authenticated WebSocket upgrade
+      "/ws": async function (req) {
+        const url = new URL(req.url);
+        const token = url.searchParams.get("token");
+        if (!token) {
+          return Response.json(
+            { error: "Token required. Use ?token= in WebSocket URL" },
+            { status: 401 },
+          );
+        }
+        if (!authMiddleware.validateToken(token)) {
+          return Response.json({ error: "Invalid token" }, { status: 401 });
+        }
+        // Try to upgrade — Bun.serve handles the rest
+        const upgraded = server.upgrade(req, { data: { token, url: req.url } });
+        if (!upgraded) {
+          return Response.json({ error: "Upgrade failed" }, { status: 400 });
+        }
+      },
+    },
+
+    fetch: async function fetchHandler(req: Request): Promise<Response | void> {
+      const url = new URL(req.url);
+      const pathname = url.pathname;
+
+      // POST /login — authenticate and return session token
+      if (req.method === "POST" && pathname === "/login") {
+        const loginResp = await authMiddleware.loginHandler(req);
+        return loginResp;
+      }
+
+      // Everything else — serve static files
+      // const staticResp = serveStaticFile(uiDir, maxAgeSecs, pathname);
+      // if (staticResp) {
+      //   return staticResp;
+      // }
+
+      return new Response("Not found", { status: 404 });
+    },
+
     // WebSocket handlers
     websocket: {
       open(ws) {
         const { url } = ws.data as { url?: string };
-        wsServer.onUpgrade({ url: url || "", headers: { host: "localhost" } }, ws);
+        wsServer.onUpgrade(
+          { url: url || "", headers: { host: "localhost" } },
+          ws,
+        );
       },
       message(ws, data) {
         wsServer.onMessage(ws, data);

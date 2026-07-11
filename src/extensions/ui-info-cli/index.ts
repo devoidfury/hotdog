@@ -2,29 +2,112 @@
 // Provides CLI subcommands (info, show-prompt) that run outside the agent loop.
 // Registers subcommands via the cli:subcommandsRegister hook.
 
-import { HOOKS } from "../../core/hooks.js";
-import { LlmClient } from "../../core/llm-client/client.js";
-import { SkillsLoader } from "../skills/loader.js";
+import { HOOKS } from "../../core/hooks.ts";
+import { LlmClient } from "../../core/llm-client/client.ts";
+import { SkillsLoader } from "../skills/loader.ts";
 import {
   DEFAULT_SKILLS_PATH,
   DEFAULT_PROFILES_SUBPATH,
   DEFAULT_CONFIG_FILENAME,
-} from "../../core/config/defaults.js";
-import { loadConfig, resolveConfigDir } from "../../core/config/index.js";
-import { loadProfileFiles } from "../../core/config/profiles.js";
+} from "../../core/config/defaults.ts";
+import { loadConfig, resolveConfigDir } from "../../core/config/index.ts";
+import { loadProfileFiles, ProfileDef } from "../../core/config/profiles.ts";
 import {
   CONFIG_SCHEMA as CONFIG_KEYS,
   resolveKey,
   resolveLayerValue,
-} from "../../core/config/schema-loader.js";
-import { Agent } from "../../core/agent.js";
+  SchemaProperty,
+  SchemaLayer,
+} from "../../core/config/schema-loader.ts";
+import { Agent } from "../../core/agent.ts";
+import { CoreContext, ExtensionInstance } from "../../core/extensions/types.ts";
 import path from "node:path";
 import fs from "node:fs/promises";
+
+// ── Types ──────────────────────────────────────────────────────────────────
+
+interface CliArgs {
+  config?: string;
+  configDir?: string;
+  config_debug?: boolean;
+  wantsJson?: boolean;
+  skillsPath?: string;
+  profile?: string;
+  provider?: string;
+  [key: string]: unknown;
+}
+
+interface ResolvedConfig {
+  baseUrl: string;
+  apiKey: string;
+  model: string;
+  chatTimeout: number;
+  maxRetries: number;
+  profileName: string;
+  profile: Record<string, unknown>;
+  activeProvider?: string;
+  configDir?: string;
+  modelRegistry: Record<string, unknown>;
+  maxIterations?: number;
+  maxTokens?: number;
+  profileBody?: string;
+  role?: string;
+  profilesPath?: string;
+  aspects?: string[];
+  [key: string]: unknown;
+}
+
+interface Provider {
+  name: string;
+  url: string;
+  models?: Array<{ name: string }>;
+}
+
+interface BuildConfigResult {
+  resolved: ResolvedConfig;
+  modelRegistry: Record<string, unknown>;
+  providers: Provider[];
+}
+
+interface ConnectivityResult {
+  reachable: boolean;
+  error: string | null;
+}
+
+interface TraceLayer extends SchemaLayer {
+  matched?: boolean;
+  value?: unknown;
+  castSkipped?: boolean;
+  castedValue?: unknown;
+}
+
+interface TraceResult {
+  key: string;
+  type: string;
+  layers: TraceLayer[];
+  resolvedValue: unknown;
+  resolvedFrom: string | null;
+}
+
+interface TraceContext {
+  cli: CliArgs;
+  config: Record<string, unknown>;
+  provider: Provider | null;
+  profile: Record<string, unknown>;
+  profileName: string;
+  profilesPath: string;
+}
+
+// ── Info Subcommand ────────────────────────────────────────────────────────
 
 /**
  * Run the info subcommand.
  */
-async function runInfo(cli, config, buildConfig) {
+async function runInfo(
+  cli: CliArgs,
+  config: Record<string, unknown>,
+  buildConfig: (cli: Record<string, unknown>) => Promise<BuildConfigResult>,
+): Promise<number> {
   const { resolved, modelRegistry, providers } = await buildConfig(cli);
   const configDir = resolved.configDir || resolveConfigDir(cli.configDir);
   const rawConfig = await loadConfig(cli.config, cli.configDir);
@@ -41,19 +124,19 @@ async function runInfo(cli, config, buildConfig) {
     stream: false,
     chatTimeoutSecs: resolved.chatTimeout,
     maxRetries: resolved.maxRetries,
-    providers: rawConfig.providers || [],
+    providers: (rawConfig.providers as Provider[]) || [],
   });
 
-  let connectivity;
+  let connectivity: ConnectivityResult;
   try {
     if (client.ping) await client.ping();
     connectivity = { reachable: true, error: null };
-  } catch (e) {
-    connectivity = { reachable: false, error: e.message };
+  } catch (e: unknown) {
+    connectivity = { reachable: false, error: (e as Error).message };
   }
 
   const skillsLoader = new SkillsLoader(
-    cli.skillsPath || rawConfig.skills?.path || DEFAULT_SKILLS_PATH,
+    cli.skillsPath || (rawConfig.skills as Record<string, unknown>)?.path || DEFAULT_SKILLS_PATH,
   );
   await skillsLoader.loadSkills();
 
@@ -79,13 +162,13 @@ async function runInfo(cli, config, buildConfig) {
 }
 
 function printInfoText(
-  resolved,
-  modelRegistry,
-  providers,
-  skillsLoader,
-  connectivity,
-  config,
-) {
+  resolved: ResolvedConfig,
+  modelRegistry: Record<string, unknown>,
+  providers: Provider[],
+  skillsLoader: SkillsLoader,
+  connectivity: ConnectivityResult,
+  config: Record<string, unknown>,
+): number {
   console.log("=== Agent Harness Info ===");
   console.log();
   console.log("Configuration:");
@@ -94,18 +177,18 @@ function printInfoText(
   console.log(`  AI URL:          ${resolved.baseUrl}`);
   console.log(`  Default Model:   ${resolved.model}`);
   console.log(
-    `  Skills Path:     ${config?.skillsPath || DEFAULT_SKILLS_PATH}`,
+    `  Skills Path:     ${(config?.skillsPath as string) || DEFAULT_SKILLS_PATH}`,
   );
   console.log(`  Chat Timeout:    ${resolved.chatTimeout}s`);
   console.log(`  Profile:         ${resolved.profileName}`);
   if (resolved.profile?.whitelistTools) {
     console.log(
-      `  Whitelist Tools: ${resolved.profile.whitelistTools.join(", ")}`,
+      `  Whitelist Tools: ${(resolved.profile.whitelistTools as string[]).join(", ")}`,
     );
   }
-  if (resolved.profile?.blacklistTools?.length > 0) {
+  if ((resolved.profile?.blacklistTools as string[])?.length > 0) {
     console.log(
-      `  Blacklist Tools: ${resolved.profile.blacklistTools.join(", ")}`,
+      `  Blacklist Tools: ${(resolved.profile.blacklistTools as string[]).join(", ")}`,
     );
   }
 
@@ -114,7 +197,7 @@ function printInfoText(
     console.log("Providers:");
     for (const p of providers) {
       const isActive = resolved.activeProvider === p.name;
-      const isDefault = config?.defaultProvider === p.name;
+      const isDefault = (config?.defaultProvider as string) === p.name;
       const marker = isActive ? " (active)" : isDefault ? " (default)" : "";
       const modelNames = (p.models || []).map((m) => m.name).join(", ");
       console.log(`  ${p.name}${marker} → ${p.url}  [${modelNames}]`);
@@ -128,14 +211,19 @@ function printInfoText(
   console.log();
   console.log(`Models (${Object.keys(modelRegistry).length}):`);
   for (const name of Object.keys(modelRegistry)) {
-    const m = modelRegistry[name];
-    const tagStr = (m.tags || []).length > 0 ? m.tags.join(", ") : "no tags";
+    const m = modelRegistry[name] as Record<string, unknown>;
+    const tagStr = ((m.tags as string[]) || []).length > 0 ? (m.tags as string[]).join(", ") : "no tags";
     console.log(`  ${name} [${tagStr}]`);
   }
   console.log();
   console.log(`Skills: ${skillsLoader.activeSkills().length} loaded`);
 
-  const mcpServers = config?.mcpServers || [];
+  const mcpServers = (config?.mcpServers as Array<{
+    name: string;
+    enabled?: boolean;
+    url?: string;
+    command?: string;
+  }>) || [];
   if (mcpServers.length > 0) {
     console.log();
     console.log("MCP Servers:");
@@ -161,22 +249,22 @@ function printInfoText(
 }
 
 function printInfoJson(
-  resolved,
-  modelRegistry,
-  providers,
-  skillsLoader,
-  connectivity,
-  config,
-) {
+  resolved: ResolvedConfig,
+  modelRegistry: Record<string, unknown>,
+  providers: Provider[],
+  skillsLoader: SkillsLoader,
+  connectivity: ConnectivityResult,
+  config: Record<string, unknown>,
+): number {
   const json = {
     config: {
       ai_url: resolved.baseUrl,
       default_model: resolved.model,
       chat_timeout_secs: resolved.chatTimeout,
-      skills_path: config?.skillsPath || DEFAULT_SKILLS_PATH,
+      skills_path: (config?.skillsPath as string) || DEFAULT_SKILLS_PATH,
       profile: resolved.profileName,
-      profile_whitelist: resolved.profile?.whitelistTools || null,
-      profile_blacklist: resolved.profile?.blacklistTools || [],
+      profile_whitelist: (resolved.profile?.whitelistTools as string[]) || null,
+      profile_blacklist: (resolved.profile?.blacklistTools as string[]) || [],
     },
     providers: {
       configured: providers.map((p) => ({
@@ -187,11 +275,16 @@ function printInfoJson(
       active: resolved.activeProvider || null,
     },
     models: Object.keys(modelRegistry).map((name) => {
-      const m = modelRegistry[name];
-      return { name, tags: m.tags || [] };
+      const m = modelRegistry[name] as Record<string, unknown>;
+      return { name, tags: (m.tags as string[]) || [] };
     }),
     skills_loaded: skillsLoader.activeSkills(),
-    mcp_servers: (config?.mcpServers || []).map((s) => ({
+    mcp_servers: ((config?.mcpServers as Array<{
+      name: string;
+      enabled?: boolean;
+      url?: string;
+      command?: string;
+    }>) || []).map((s) => ({
       name: s.name,
       enabled: s.enabled !== false,
       url: s.url || null,
@@ -207,14 +300,20 @@ function printInfoJson(
   return 0;
 }
 
+// ── Config Debug ────────────────────────────────────────────────────────────
+
 /**
  * Trace config resolution for a single key, showing which layer provided the value.
  * Uses resolveKey() from the schema-loader for the core resolution logic, then
  * walks layers separately to build the trace display.
  */
-function traceConfigResolution(keyName, schema, context) {
-  const { layers } = schema;
-  const result = {
+function traceConfigResolution(
+  keyName: string,
+  schema: SchemaProperty,
+  context: TraceContext,
+): TraceResult {
+  const layers = schema.layers as SchemaLayer[] | undefined;
+  const result: TraceResult = {
     key: keyName,
     type: schema.type || "unknown",
     layers: [],
@@ -226,8 +325,8 @@ function traceConfigResolution(keyName, schema, context) {
   result.resolvedValue = resolveKey(keyName, schema, context);
 
   // Walk layers to build trace display info (separate from resolution logic)
-  for (const layer of layers) {
-    const layerInfo = { ...layer, matched: false, value: undefined };
+  for (const layer of layers || []) {
+    const layerInfo: TraceLayer = { ...layer, matched: false, value: undefined };
 
     if ("default" in layer) {
       const defaultValue = resolveLayerValue(layer, context);
@@ -271,23 +370,28 @@ function traceConfigResolution(keyName, schema, context) {
  * Print config resolution debug output.
  * Shows each config key, its resolved value, and which source (layer) provided it.
  */
-async function printConfigDebug(cli, config, providers, resolved) {
-  const profileName = cli.profile || config.profile || "default";
+async function printConfigDebug(
+  cli: CliArgs,
+  config: Record<string, unknown>,
+  providers: Provider[],
+  resolved: ResolvedConfig,
+): Promise<number> {
+  const profileName = cli.profile || (config.profile as string) || "default";
   const configDir = resolved.configDir || resolveConfigDir(cli.configDir);
   const profilesPath =
-    config.profilesPath || path.join(configDir, DEFAULT_PROFILES_SUBPATH);
+    (config.profilesPath as string) || path.join(configDir, DEFAULT_PROFILES_SUBPATH);
   const profileFiles = await loadProfileFiles(profilesPath);
-  const configProfile = config.profiles?.[profileName] ?? null;
+  const configProfile = (config.profiles as Record<string, ProfileDef>)?.[profileName] ?? null;
   const fileProfile = profileFiles[profileName] ?? null;
 
   // Provider resolution
-  const providerName = cli.provider || config.defaultProvider;
+  const providerName = (cli.provider as string) || (config.defaultProvider as string);
   const provider = providerName
     ? (providers.find((p) => p.name === providerName) ?? null)
     : null;
 
   // Profile merge
-  let profile;
+  let profile: Record<string, unknown>;
   if (configProfile || fileProfile) {
     profile = { ...configProfile };
     if (fileProfile) {
@@ -310,7 +414,7 @@ async function printConfigDebug(cli, config, providers, resolved) {
     };
   }
 
-  const context = {
+  const context: TraceContext = {
     cli,
     config,
     provider,
@@ -325,7 +429,7 @@ async function printConfigDebug(cli, config, providers, resolved) {
   console.log(`Provider: ${provider?.name || "(none)"}`);
   console.log(`CLI config path: ${cli.config || "(none)"}`);
   console.log(
-    `Config file: ${cli.config || (config.profilesPath ? path.join(config.profilesPath, "..", "defaults.json") : "(defaults only)")}`,
+    `Config file: ${cli.config || ((config.profilesPath as string) ? path.join(config.profilesPath as string, "..", "defaults.json") : "(defaults only)")}`,
   );
   console.log();
 
@@ -366,17 +470,17 @@ async function printConfigDebug(cli, config, providers, resolved) {
     `  ${"activeProvider".padEnd(25)} → ${resolved.activeProvider || "(none)"}`,
   );
   console.log(
-    `  ${"profile.whitelistTools".padEnd(25)} → ${resolved.profile?.whitelistTools ? JSON.stringify(resolved.profile.whitelistTools) : "(none)"}`,
+    `  ${"profile.whitelistTools".padEnd(25)} → ${(resolved.profile?.whitelistTools as string[]) ? JSON.stringify(resolved.profile.whitelistTools) : "(none)"}`,
   );
   console.log(
-    `  ${"profile.blacklistTools".padEnd(25)} → ${JSON.stringify(resolved.profile?.blacklistTools || [])}`,
+    `  ${"profile.blacklistTools".padEnd(25)} → ${JSON.stringify((resolved.profile?.blacklistTools as string[]) || [])}`,
   );
   console.log(
-    `  ${"profile.manager".padEnd(25)} → ${resolved.profile?.manager || false}`,
+    `  ${"profile.manager".padEnd(25)} → ${(resolved.profile?.manager as boolean) || false}`,
   );
   console.log(`  ${"profile.role".padEnd(25)} → ${resolved.profile?.role}`);
   console.log(
-    `  ${"profile.body".padEnd(25)} → ${resolved.profileBody ? `(${resolved.profileBody.length} chars)` : "(none)"}`,
+    `  ${"profile.body".padEnd(25)} → ${resolved.profileBody ? `(${(resolved.profileBody as string).length} chars)` : "(none)"}`,
   );
   console.log();
 
@@ -385,17 +489,17 @@ async function printConfigDebug(cli, config, providers, resolved) {
   console.log();
   const resolvedConfigDir =
     resolved.configDir || resolveConfigDir(cli.configDir);
-  const resolvedConfig = path.join(resolvedConfigDir, DEFAULT_CONFIG_FILENAME);
+  const resolvedConfigPath = path.join(resolvedConfigDir, DEFAULT_CONFIG_FILENAME);
 
-  const resolvedExists = await checkFileExists(resolvedConfig);
+  const resolvedExists = await checkFileExists(resolvedConfigPath);
 
   console.log(`  Config dir: ${resolvedConfigDir}`);
   console.log(
-    `  Config file (${resolvedConfig}): ${resolvedExists ? "EXISTS" : "not found"}`,
+    `  Config file (${resolvedConfigPath}): ${resolvedExists ? "EXISTS" : "not found"}`,
   );
   if (resolvedExists) {
     try {
-      const content = await fs.readFile(resolvedConfig, "utf-8");
+      const content = await fs.readFile(resolvedConfigPath, "utf-8");
       console.log(
         `    Content: ${content.trim().slice(0, 200)}${content.trim().length > 200 ? "..." : ""}`,
       );
@@ -408,38 +512,38 @@ async function printConfigDebug(cli, config, providers, resolved) {
   // Extension config
   console.log("=== Extension Config ===");
   console.log();
+  const coreConfigKeys = new Set([
+    "providers",
+    "defaultProvider",
+    "aiUrl",
+    "defaultModel",
+    "temperature",
+    "thinker",
+    "toolfmt",
+    "toolOutputFmt",
+    "role",
+    "hideTools",
+    "hideThinking",
+    "skillsPath",
+    "profilesPath",
+    "systemPromptTemplate",
+    "chatTimeoutSecs",
+    "embeddingsTimeoutSecs",
+    "extensionPaths",
+    "extensionAutoload",
+    "extensions",
+    "profile",
+    "profiles",
+    "theme",
+    "colors",
+    "apiKey",
+    "noLog",
+    "compactDebug",
+    "mcpServers",
+    "showTokenUse",
+  ]);
   const extConfigs = Object.entries(config).filter(
-    ([k]) =>
-      ![
-        "providers",
-        "defaultProvider",
-        "aiUrl",
-        "defaultModel",
-        "temperature",
-        "thinker",
-        "toolfmt",
-        "toolOutputFmt",
-        "role",
-        "hideTools",
-        "hideThinking",
-        "skillsPath",
-        "profilesPath",
-        "systemPromptTemplate",
-        "chatTimeoutSecs",
-        "embeddingsTimeoutSecs",
-        "extensionPaths",
-        "extensionAutoload",
-        "extensions",
-        "profile",
-        "profiles",
-        "theme",
-        "colors",
-        "apiKey",
-        "noLog",
-        "compactDebug",
-        "mcpServers",
-        "showTokenUse",
-      ].includes(k),
+    ([k]) => !coreConfigKeys.has(k),
   );
   if (extConfigs.length > 0) {
     for (const [extKey, extVal] of extConfigs) {
@@ -458,7 +562,7 @@ async function printConfigDebug(cli, config, providers, resolved) {
 /**
  * Check if a file exists.
  */
-async function checkFileExists(filePath) {
+async function checkFileExists(filePath: string): Promise<boolean> {
   try {
     await fs.access(filePath);
     return true;
@@ -467,22 +571,29 @@ async function checkFileExists(filePath) {
   }
 }
 
+// ── Show-Prompt Subcommand ─────────────────────────────────────────────────
+
 /**
  * Run the show-prompt subcommand.
  * Creates an agent, outputs the generated system prompt and tool definitions.
  */
-async function runShowPrompt(cli, core, config, buildConfig) {
+async function runShowPrompt(
+  cli: CliArgs,
+  core: CoreContext,
+  config: Record<string, unknown>,
+  buildConfig: (cli: Record<string, unknown>) => Promise<BuildConfigResult>,
+): Promise<number> {
   const { resolved } = await buildConfig(cli);
   const agent = new Agent({
     hooks: core.hooks,
     toolRegistry: core.toolRegistry,
     llmClient: null, // Not needed — we only want the system prompt
     model: resolved.model || "",
-    maxIterations: resolved.maxIterations,
-    maxTokens: resolved.maxTokens,
+    maxIterations: resolved.maxIterations as number | undefined,
+    maxTokens: resolved.maxTokens as number | undefined,
     profileName: resolved.profileName || "default",
-    role: resolved.role || "",
-    profileBody: resolved.profileBody || "",
+    role: resolved.role as string | undefined,
+    profileBody: resolved.profileBody as string | undefined,
     config,
   });
   // Build the system prompt via the real hook mechanism
@@ -501,9 +612,9 @@ async function runShowPrompt(cli, core, config, buildConfig) {
     );
     console.log();
     for (const def of toolDefs) {
-      const name = def.function?.name || "(unknown)";
-      const description = def.function?.description || "";
-      const params = def.function?.parameters || {};
+      const name = (def.function as { name?: string })?.name || "(unknown)";
+      const description = (def.function as { description?: string })?.description || "";
+      const params = (def.function as { parameters?: Record<string, unknown> })?.parameters || {};
       console.log(`## ${name}`);
       console.log(description);
       console.log();
@@ -514,13 +625,17 @@ async function runShowPrompt(cli, core, config, buildConfig) {
   return 0;
 }
 
-// ── Profile List Subcommand ─────────────────────────────────────────────
+// ── Profile List Subcommand ────────────────────────────────────────────────
 
 /**
  * Run the profiles subcommand.
  * Lists all available profiles with their roles, tool restrictions, and metadata.
  */
-async function runProfileList(cli, config, buildConfig) {
+async function runProfileList(
+  cli: CliArgs,
+  config: Record<string, unknown>,
+  buildConfig: (cli: Record<string, unknown>) => Promise<BuildConfigResult>,
+): Promise<number> {
   const { resolved } = await buildConfig(cli);
 
   // Resolve config dir: prefer resolved value, fall back to --config-dir,
@@ -547,9 +662,9 @@ async function runProfileList(cli, config, buildConfig) {
   // missing, fall back to configDir/profiles. We avoid using the raw config
   // profilesPath directly because defaults like "./config/profiles" are
   // uncomputed and CWD-relative, not configDir-relative.
-  let profilesPath;
-  if (resolved.profilesPath && path.isAbsolute(resolved.profilesPath)) {
-    profilesPath = resolved.profilesPath;
+  let profilesPath: string;
+  if (resolved.profilesPath && path.isAbsolute(resolved.profilesPath as string)) {
+    profilesPath = resolved.profilesPath as string;
   } else {
     profilesPath = path.join(configDir, DEFAULT_PROFILES_SUBPATH);
   }
@@ -558,10 +673,10 @@ async function runProfileList(cli, config, buildConfig) {
   const profileFiles = await loadProfileFiles(profilesPath);
 
   // Get config-defined profiles
-  const configProfiles = config.profiles || {};
+  const configProfiles = (config.profiles as Record<string, ProfileDef>) || {};
 
   // Aspects — from global resolved config (extension-resolved)
-  const aspects = resolved.aspects || [];
+  const aspects = resolved.aspects as string[] | undefined;
 
   // Collect all profile names from both sources
   const allNames = new Set([
@@ -602,15 +717,15 @@ async function runProfileList(cli, config, buildConfig) {
  * Print profile list as formatted text.
  */
 function printProfileListText(
-  profileFiles,
-  configProfiles,
-  allNames,
-  currentProfile,
-  globalAspects,
-  profilesPath,
-  visibleWorkerNames,
-  configDir,
-) {
+  profileFiles: Record<string, ProfileDef>,
+  configProfiles: Record<string, ProfileDef>,
+  allNames: Set<string>,
+  currentProfile: string,
+  globalAspects: string[] | undefined,
+  profilesPath: string,
+  visibleWorkerNames: string[],
+  configDir: string,
+): number {
   const names = Array.from(allNames).sort();
 
   if (names.length === 0) {
@@ -659,13 +774,13 @@ function printProfileListText(
     // Tool restrictions — file profile values take priority, but only if non-empty
     const fileBlacklist = fileProfile?.blacklistTools || [];
     const cfgBlacklist =
-      configProfile?.blacklist_tools || configProfile?.blacklistTools || [];
+      (configProfile?.blacklist_tools as string[]) || configProfile?.blacklistTools || [];
     const blacklistTools =
       fileBlacklist.length > 0 ? fileBlacklist : cfgBlacklist;
 
     const fileWhitelist = fileProfile?.whitelistTools;
     const cfgWhitelist =
-      configProfile?.whitelist_tools || configProfile?.whitelistTools;
+      (configProfile?.whitelist_tools as string[]) || configProfile?.whitelistTools;
     const whitelistTools =
       fileWhitelist && fileWhitelist.length > 0 ? fileWhitelist : cfgWhitelist;
 
@@ -696,7 +811,7 @@ function printProfileListText(
     }
 
     // Source + relative path
-    const sources = [];
+    const sources: string[] = [];
     if (fileProfile) sources.push("file");
     if (configProfile) sources.push("config");
     console.log(`  Source: ${sources.join(" + ")}`);
@@ -719,16 +834,16 @@ function printProfileListText(
  * Print profile list as JSON.
  */
 function printProfileListJson(
-  profileFiles,
-  configProfiles,
-  allNames,
-  globalAspects,
-  currentProfile,
-  profilesPath,
-  visibleWorkerNames,
-) {
+  profileFiles: Record<string, ProfileDef>,
+  configProfiles: Record<string, ProfileDef>,
+  allNames: Set<string>,
+  globalAspects: string[] | undefined,
+  currentProfile: string,
+  profilesPath: string,
+  visibleWorkerNames: string[],
+): number {
   const names = Array.from(allNames).sort();
-  const profiles = [];
+  const profiles: Array<Record<string, unknown>> = [];
 
   for (const name of names) {
     const fileProfile = profileFiles[name] || null;
@@ -737,18 +852,18 @@ function printProfileListJson(
     // Tool restrictions — file profile values take priority, but only if non-empty
     const fileBlacklist = fileProfile?.blacklistTools || [];
     const cfgBlacklist =
-      configProfile?.blacklist_tools || configProfile?.blacklistTools || [];
+      (configProfile?.blacklist_tools as string[]) || configProfile?.blacklistTools || [];
     const blacklistTools =
       fileBlacklist.length > 0 ? fileBlacklist : cfgBlacklist;
 
     const fileWhitelist = fileProfile?.whitelistTools;
     const cfgWhitelist =
-      configProfile?.whitelist_tools || configProfile?.whitelistTools;
+      (configProfile?.whitelist_tools as string[]) || configProfile?.whitelistTools;
     const whitelistTools =
       fileWhitelist && fileWhitelist.length > 0 ? fileWhitelist : cfgWhitelist;
 
     // Compute path for file-sourced profiles
-    let profileRelPath = null;
+    let profileRelPath: string | null = null;
     if (fileProfile && profilesPath) {
       try {
         const filePath = path.join(profilesPath, `${name}.profile.md`);
@@ -792,33 +907,48 @@ function printProfileListJson(
  * Create the info-show-prompt extension.
  * Registers subcommands via the cli:subcommandsRegister hook.
  */
-export function create(core) {
+export function create(core: CoreContext): ExtensionInstance {
   return {
     hooks: core.hooks
       ? {
-          [HOOKS.CLI_SUBCOMMANDS_REGISTER]: async (registry) => {
+          [HOOKS.CLI_SUBCOMMANDS_REGISTER]: async (
+            registry: { register: (name: string, opts: Record<string, unknown>) => void },
+          ) => {
             registry.register("info", {
               description: "Show system info and diagnostics",
-              handler: async (cli, core) => {
+              handler: async (cli: CliArgs, core: CoreContext) => {
                 const { config, buildConfig } = core;
-                return await runInfo(cli, config, buildConfig);
+                return await runInfo(
+                  cli,
+                  config as Record<string, unknown>,
+                  buildConfig as (cli: Record<string, unknown>) => Promise<BuildConfigResult>,
+                );
               },
             });
 
             registry.register("show-prompt", {
               description: "Show rendered system prompt with tool definitions",
-              handler: async (cli, core) => {
+              handler: async (cli: CliArgs, core: CoreContext) => {
                 const { config, buildConfig } = core;
-                return await runShowPrompt(cli, core, config, buildConfig);
+                return await runShowPrompt(
+                  cli,
+                  core,
+                  config as Record<string, unknown>,
+                  buildConfig as (cli: Record<string, unknown>) => Promise<BuildConfigResult>,
+                );
               },
             });
 
             registry.register("profiles", {
               description:
                 "List all available profiles with their roles and tool restrictions",
-              handler: async (cli, core) => {
+              handler: async (cli: CliArgs, core: CoreContext) => {
                 const { config, buildConfig } = core;
-                return await runProfileList(cli, config, buildConfig);
+                return await runProfileList(
+                  cli,
+                  config as Record<string, unknown>,
+                  buildConfig as (cli: Record<string, unknown>) => Promise<BuildConfigResult>,
+                );
               },
             });
           },

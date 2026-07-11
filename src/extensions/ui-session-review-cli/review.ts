@@ -7,16 +7,38 @@
 //
 // Disabled by default; enable via profile whitelist.
 
-import { readSessionEntries } from '../../core/session/session-log.js';
+import { readSessionEntries } from '../../core/session/session-log.ts';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { readdir, access, stat } from 'node:fs/promises';
 import { ToolResult, defaultCallDisplay } from '../../core/extensions/tool-utils.ts';
 
+// ── Types ──────────────────────────────────────────────────────────────────
+
+interface SessionSummary {
+  id: string;
+  last_modified: string;
+  entry_count: number;
+}
+
+interface ToolIndexEntry {
+  index: number;
+  tool_name: string;
+  arguments: string;
+}
+
+interface ParsedArgs {
+  operation: string;
+  session_id: string | null;
+  limit: number;
+}
+
+// ── Helpers ────────────────────────────────────────────────────────────────
+
 /**
  * Truncate content to max_len bytes, appending '…' if truncated.
  */
-function truncateContent(content, maxLength) {
+function truncateContent(content: string, maxLength: number): string {
   if (content.length <= maxLength) return content;
   return content.slice(0, maxLength) + '\u2026';
 }
@@ -24,7 +46,7 @@ function truncateContent(content, maxLength) {
 /**
  * Get the sessions directory path.
  */
-function sessionsDir() {
+function sessionsDir(): string {
   const home = homedir();
   return join(home, '.cache', 'hotdog', 'sessions');
 }
@@ -32,7 +54,7 @@ function sessionsDir() {
 /**
  * List sessions, returning JSON array of summaries.
  */
-async function listSessions(limit) {
+async function listSessions(limit: number): Promise<SessionSummary[]> {
   const dir = sessionsDir();
 
   try {
@@ -41,10 +63,10 @@ async function listSessions(limit) {
     return [];
   }
 
-  const files = (await readdir(dir)).filter(f => f.endsWith('.jsonl'));
+  const files = (await readdir(dir)).filter((f: string) => f.endsWith('.jsonl'));
   if (files.length === 0) return [];
 
-  const sessions = [];
+  const sessions: Array<{ id: string; last_modified: string; entry_count: number; mtime: number }> = [];
   for (const file of files) {
     const sessionId = file.replace(/\.jsonl$/, '');
     const filePath = join(dir, file);
@@ -67,7 +89,7 @@ async function listSessions(limit) {
   sessions.sort((a, b) => a.mtime - b.mtime);
   const len = sessions.length;
   const start = Math.max(0, len - limit);
-  return sessions.slice(start).map(s => ({
+  return sessions.slice(start).map((s) => ({
     id: s.id,
     last_modified: s.last_modified,
     entry_count: s.entry_count,
@@ -77,7 +99,7 @@ async function listSessions(limit) {
 /**
  * Get a specific session's entries as a JSON array.
  */
-async function getSession(sessionId) {
+async function getSession(sessionId: string): Promise<Record<string, unknown>[]> {
   const entries = await readSessionEntries(sessionId);
   return entries;
 }
@@ -85,14 +107,18 @@ async function getSession(sessionId) {
 /**
  * Get a lightweight index of tool calls in a session.
  */
-async function getToolIndex(sessionId) {
+async function getToolIndex(sessionId: string): Promise<ToolIndexEntry[]> {
   const entries = await readSessionEntries(sessionId);
-  const indexEntries = [];
+  const indexEntries: ToolIndexEntry[] = [];
 
   for (let i = 0; i < entries.length; i++) {
-    const entry = entries[i];
-    if (entry.tool_calls) {
-      for (const tc of entry.tool_calls) {
+    const entry = entries[i] as Record<string, unknown>;
+    const toolCalls = entry.tool_calls as Array<{
+      function?: { name?: string; arguments?: string };
+    }> | null | undefined;
+
+    if (toolCalls) {
+      for (const tc of toolCalls) {
         const args = truncateContent(tc.function?.arguments || '', 500);
         indexEntries.push({
           index: i,
@@ -109,26 +135,28 @@ async function getToolIndex(sessionId) {
 /**
  * Parse tool arguments from JSON string.
  */
-function parseArgs(input) {
+function parseArgs(input: string): ParsedArgs {
   if (!input || input.trim().length === 0) {
     return { operation: 'list', session_id: null, limit: 10 };
   }
   try {
-    const parsed = JSON.parse(input);
+    const parsed = JSON.parse(input) as Record<string, unknown>;
     return {
-      operation: parsed.operation || 'list',
-      session_id: parsed.session_id || null,
-      limit: parsed.limit || 10,
+      operation: (parsed.operation as string) || 'list',
+      session_id: (parsed.session_id as string) || null,
+      limit: (parsed.limit as number) || 10,
     };
   } catch {
     return { operation: 'list', session_id: null, limit: 10 };
   }
 }
 
+// ── ReviewTool Class ──────────────────────────────────────────────────────
+
 export class ReviewTool {
   static TOOL_NAME = 'review';
 
-  toToolDef() {
+  toToolDef(): Record<string, unknown> {
     return {
       type: 'function',
       function: {
@@ -163,8 +191,8 @@ export class ReviewTool {
     };
   }
 
-  callDisplay(input) {
-    return defaultCallDisplay(input, (args) => {
+  callDisplay(input: string | Record<string, unknown> | null): string {
+    return defaultCallDisplay(input, (args: Record<string, unknown>) => {
       switch (args.operation) {
         case 'list':
           return `(list, limit=${args.limit})`;
@@ -178,7 +206,7 @@ export class ReviewTool {
     });
   }
 
-  async execute(input) {
+  async execute(input: string): Promise<ToolResult> {
     const args = parseArgs(input);
 
     switch (args.operation) {

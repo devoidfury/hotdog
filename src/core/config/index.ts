@@ -60,7 +60,11 @@ import {
   resolveModelWithProvider,
 } from "./schema-loader.ts";
 import { loadProfileFiles, allProfilesForSwitch } from "./profiles.ts";
-import { buildModelRegistry, initSystemPromptTemplate } from "./providers.ts";
+import {
+  buildModelRegistry,
+  initSystemPromptTemplate,
+  ProviderDef,
+} from "./providers.ts";
 
 // ── Config Directory Resolution ────────────────────────────────────────
 
@@ -120,7 +124,10 @@ export function mergeExtensionConfigDefaults(
       typeof param.defaults === "object" &&
       param.defaults !== null
     ) {
-      merged[param.key] = deepMerge(merged[param.key] as object, param.defaults as object);
+      merged[param.key] = deepMerge(
+        merged[param.key] as object,
+        param.defaults as object,
+      );
     }
   }
 
@@ -255,7 +262,10 @@ export async function loadConfig(
   try {
     const content = await fsPromises.readFile(configPathToUse, "utf-8");
     const raw = JSON.parse(content);
-    return deepMerge(getDefaultConfig(extParams), normalizeConfigKeys(raw) as object) as DefaultConfig;
+    return deepMerge(
+      getDefaultConfig(extParams),
+      normalizeConfigKeys(raw) as object,
+    ) as DefaultConfig;
   } catch (e) {
     const err = ConfigError.LoadFailed(configPathToUse, (e as Error).message);
     err.cause = e;
@@ -349,7 +359,7 @@ export async function buildConfig(cliArgv: CliArgv) {
   });
 
   const modelRegistry = buildModelRegistry(
-    { providers: config.providers || [] },
+    { providers: (config.providers || []) as ProviderDef[] },
     resolved.maxTokens as number,
   );
   resolved.modelRegistry = modelRegistry;
@@ -390,11 +400,16 @@ export async function buildAgentConfig(options: {
   ) as string;
   const profilesPath =
     givenProfilesPath ||
-    (resolveKey("profilesPath", CONFIG_SCHEMA.profilesPath, context as Record<string, unknown>) as string);
+    (resolveKey(
+      "profilesPath",
+      CONFIG_SCHEMA.profilesPath,
+      context as Record<string, unknown>,
+    ) as string);
 
   const profileFiles = await loadProfileFiles(profilesPath);
-  const configProfile =
-    ((config.profiles as Record<string, unknown>)?.[profileName] ?? null) as Record<string, unknown> | null;
+  const configProfile = ((config.profiles as Record<string, unknown>)?.[
+    profileName
+  ] ?? null) as Record<string, unknown> | null;
   const fileProfile = profileFiles[profileName] || null;
 
   const providerName = resolveKey(
@@ -403,7 +418,9 @@ export async function buildAgentConfig(options: {
     context as Record<string, unknown>,
   ) as string | undefined;
   const provider = providerName
-    ? ((providers as Array<{ name: string }>).find((p) => (p as { name: string }).name === providerName) ?? null)
+    ? ((providers as Array<{ name: string }>).find(
+        (p) => (p as { name: string }).name === providerName,
+      ) ?? null)
     : null;
 
   // Profile merge
@@ -413,12 +430,14 @@ export async function buildAgentConfig(options: {
     if (fileProfile) {
       if ((fileProfile as Record<string, unknown>).role)
         profile.role = (fileProfile as Record<string, unknown>).role;
-      if (
-        (fileProfile as Record<string, unknown>).whitelistTools != null
-      )
-        profile.whitelistTools = (fileProfile as Record<string, unknown>).whitelistTools;
+      if ((fileProfile as Record<string, unknown>).whitelistTools != null)
+        profile.whitelistTools = (
+          fileProfile as Record<string, unknown>
+        ).whitelistTools;
       if ((fileProfile as Record<string, unknown>).blacklistTools?.length)
-        profile.blacklistTools = (fileProfile as Record<string, unknown>).blacklistTools;
+        profile.blacklistTools = (
+          fileProfile as Record<string, unknown>
+        ).blacklistTools;
       if ((fileProfile as Record<string, unknown>).manager)
         profile.manager = true;
     }
@@ -439,13 +458,17 @@ export async function buildAgentConfig(options: {
     profileName,
     profilesPath,
   };
-  const resolved = resolveAll(CONFIG_SCHEMA, context as Record<string, unknown>) as Record<string, unknown>;
+  const resolved = resolveAll(
+    CONFIG_SCHEMA,
+    context as Record<string, unknown>,
+  ) as Record<string, unknown>;
 
   const model = resolveModel(
     cli.model,
     configProfile?.model as string | null | undefined,
     config.defaultModel as string | null | undefined,
-    provider as { name: string; models: Array<{ name: string }> } | undefined | null,
+    provider as
+      { name: string; models: Array<{ name: string }> } | undefined | null,
     defaultModel,
   );
 

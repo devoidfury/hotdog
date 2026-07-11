@@ -3,68 +3,72 @@
 // Registers subcommands via the cli:subcommandsRegister hook.
 // Also registers the `review` tool via tools:register hook.
 
-import { HOOKS } from "../../core/hooks.js";
-import { CliOutputSink } from "../../core/ui/cli.js";
-import { readSessionEntries } from "../session-log/index.js";
+import { HOOKS } from "../../core/hooks.ts";
+import { CliOutputSink, PaletteOptions } from "../../core/ui/cli.ts";
+import { ColorPalette } from "../../core/ui/colors.ts";
+import { readSessionEntries } from "../session-log/index.ts";
 import { readdir, access, stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { ReviewTool } from "./review.js";
+import { ReviewTool } from "./review.ts";
+import { CoreContext, ExtensionInstance, ToolsRegisterPayload } from "../../core/extensions/types.ts";
 
-/**
- * Create the session-review extension.
- * Registers CLI subcommands and the review tool.
- */
-export function create(core) {
-  return {
-    hooks: core.hooks
-      ? {
-          // Register CLI subcommand via hook
-          [HOOKS.CLI_SUBCOMMANDS_REGISTER]: async (registry) => {
-            registry.register("review", {
-              description: "Review session logs",
-              handler: async (cli, core) => {
-                const { config } = core;
-                return await runReview(cli, config);
-              },
-            });
-          },
+// ── Types ──────────────────────────────────────────────────────────────────
 
-          // Register the review tool
-          [HOOKS.TOOLS_REGISTER]: async (registry) => {
-            const tool = new ReviewTool();
-            registry.register("review", tool);
-          },
-        }
-      : undefined,
-  };
+interface CliArgs {
+  theme?: string;
+  colors?: boolean;
+  sessionId?: string;
+  wantsJson?: boolean;
+  toolIndex?: boolean;
+  [key: string]: unknown;
 }
 
-// ── Review Subcommand ────────────────────────────────────────────────────────
+interface SessionInfo {
+  id: string;
+  last_modified: string;
+  entry_count: number;
+  mtime: number;
+}
+
+interface LogEntry {
+  ts?: string;
+  source?: string;
+  role?: string;
+  content?: string;
+  result?: string;
+  tool_name?: string;
+  [key: string]: unknown;
+}
+
+// ── Review Subcommand ──────────────────────────────────────────────────────
 
 /**
  * Run the review subcommand.
  */
-async function runReview(cli, config) {
+async function runReview(
+  cli: CliArgs,
+  config: Record<string, unknown>,
+): Promise<number> {
   const sessionsDirPath = join(homedir(), ".cache", "hotdog", "sessions");
 
   const palette = await CliOutputSink.resolve(
-    cli.theme,
-    config.colors || null,
     cli.colors,
+    cli.theme,
+    (config.colors as PaletteOptions) || null,
   );
 
   const sessionId = cli.sessionId;
   if (sessionId) {
     return await reviewSession(
       sessionId,
-      cli.wantsJson,
-      cli.toolIndex,
+      cli.wantsJson ?? false,
+      cli.toolIndex ?? false,
       palette,
     );
   }
   if (cli.toolIndex) {
-    const files = (await readdir(sessionsDirPath)).filter((f) =>
+    const files = (await readdir(sessionsDirPath)).filter((f: string) =>
       f.endsWith(".jsonl"),
     );
     if (files.length === 0) {
@@ -72,21 +76,25 @@ async function runReview(cli, config) {
       return 1;
     }
     const fileInfos = await Promise.all(
-      files.map(async (f) => ({
+      files.map(async (f: string) => ({
         name: f.replace(/\.jsonl$/, ""),
         path: join(sessionsDirPath, f),
         mtime: (await stat(join(sessionsDirPath, f))).mtime.getTime(),
       })),
     );
-    fileInfos.sort((a, b) => b.mtime - a.mtime);
-    const mostRecent = fileInfos[0];
+    fileInfos.sort((a: { mtime: number }, b: { mtime: number }) => b.mtime - a.mtime);
+    const mostRecent = fileInfos[0] as { name: string };
     const entries = await readSessionEntries(mostRecent.name);
-    return printToolIndex(entries, cli.wantsJson);
+    return printToolIndex(entries as LogEntry[], cli.wantsJson ?? false);
   }
-  return listSessions(cli.wantsJson, sessionsDirPath, palette);
+  return listSessions(cli.wantsJson ?? false, sessionsDirPath, palette);
 }
 
-async function listSessions(json, sessionsDirPath, palette) {
+async function listSessions(
+  json: boolean,
+  sessionsDirPath: string,
+  palette: ColorPalette,
+): Promise<number> {
   const dir = sessionsDirPath;
   try {
     await access(dir);
@@ -96,14 +104,14 @@ async function listSessions(json, sessionsDirPath, palette) {
     return 1;
   }
 
-  const files = (await readdir(dir)).filter((f) => f.endsWith(".jsonl"));
+  const files = (await readdir(dir)).filter((f: string) => f.endsWith(".jsonl"));
   if (files.length === 0) {
     if (json) console.log("[]");
     else console.log("No log entries found.");
     return 1;
   }
 
-  const sessions = [];
+  const sessions: SessionInfo[] = [];
   for (const file of files) {
     const sessionId = file.replace(/\.jsonl$/, "");
     const filePath = join(dir, file);
@@ -141,7 +149,12 @@ async function listSessions(json, sessionsDirPath, palette) {
   return 0;
 }
 
-async function reviewSession(sessionId, json, toolIndex, palette) {
+async function reviewSession(
+  sessionId: string,
+  json: boolean,
+  toolIndex: boolean,
+  palette: ColorPalette,
+): Promise<number> {
   const entries = await readSessionEntries(sessionId);
   if (entries.length === 0) {
     if (json) console.log("{}");
@@ -150,7 +163,7 @@ async function reviewSession(sessionId, json, toolIndex, palette) {
   }
 
   if (toolIndex) {
-    return printToolIndex(entries, json);
+    return printToolIndex(entries as LogEntry[], json);
   }
 
   if (json) {
@@ -159,10 +172,10 @@ async function reviewSession(sessionId, json, toolIndex, palette) {
   }
 
   console.log(`=== Session: ${sessionId} ===`);
-  console.log(`Entries: ${entries.length}\n`);
+  console.log(`Entries: ${(entries as unknown[]).length}\n`);
 
-  for (const entry of entries) {
-    const ts = new Date(entry.ts).toLocaleTimeString();
+  for (const entry of entries as LogEntry[]) {
+    const ts = entry.ts ? new Date(entry.ts).toLocaleTimeString() : "unknown";
     const role = entry.role || entry.source;
     const content = entry.content || entry.result || "";
 
@@ -186,8 +199,8 @@ async function reviewSession(sessionId, json, toolIndex, palette) {
   return 0;
 }
 
-function printToolIndex(entries, json) {
-  const toolUsage = new Map();
+function printToolIndex(entries: LogEntry[], json: boolean): number {
+  const toolUsage = new Map<string, number>();
 
   for (const entry of entries) {
     if (entry.source === "tool_result" && entry.tool_name) {
@@ -197,7 +210,7 @@ function printToolIndex(entries, json) {
   }
 
   if (json) {
-    const result = {};
+    const result: Record<string, number> = {};
     for (const [name, count] of toolUsage) {
       result[name] = count;
     }
@@ -215,4 +228,37 @@ function printToolIndex(entries, json) {
     }
   }
   return 0;
+}
+
+// ── Extension Entry Point ──────────────────────────────────────────────────
+
+/**
+ * Create the session-review extension.
+ * Registers CLI subcommands and the review tool.
+ */
+export function create(core: CoreContext): ExtensionInstance {
+  return {
+    hooks: core.hooks
+      ? {
+          // Register CLI subcommand via hook
+          [HOOKS.CLI_SUBCOMMANDS_REGISTER]: async (
+            registry: { register: (name: string, opts: Record<string, unknown>) => void },
+          ) => {
+            registry.register("review", {
+              description: "Review session logs",
+              handler: async (cli: CliArgs, core: CoreContext) => {
+                const { config } = core;
+                return await runReview(cli, config as Record<string, unknown>);
+              },
+            });
+          },
+
+          // Register the review tool
+          [HOOKS.TOOLS_REGISTER]: async (registry: ToolsRegisterPayload) => {
+            const tool = new ReviewTool();
+            registry.register("review", tool);
+          },
+        }
+      : undefined,
+  };
 }

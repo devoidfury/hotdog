@@ -1,6 +1,6 @@
 // Web search tool — search the internet via DuckDuckGo, Brave, Tavily, or SearXNG.
 
-import { ToolError } from "../../core/error.js";
+import { ToolError } from "../../core/error.ts";
 import {
   toolDef,
   param,
@@ -10,10 +10,43 @@ import {
   defaultCallDisplay,
 } from "../../core/extensions/tool-utils.ts";
 
-import extensionData from "./extension.json";
+import { HOOKS } from "../../core/hooks.ts";
+
+import extensionData from "./extension.json" with { type: "json" };
 
 const USER_AGENT =
   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
+
+// ── Types ───────────────────────────────────────────────────────────────────
+
+interface SearchResult {
+  title: string;
+  url: string;
+  description: string;
+}
+
+interface WebSearchToolOptions {
+  provider?: string;
+  maxResults?: number;
+  timeout?: number;
+  braveApiKey?: string;
+  tavilyApiKey?: string;
+  searxngInstanceUrl?: string;
+}
+
+interface WebSearchConfig {
+  provider?: string;
+  maxResults?: number;
+  timeout?: number;
+  braveApiKey?: string;
+  tavilyApiKey?: string;
+  searxngInstanceUrl?: string;
+}
+
+interface ToolInput {
+  query?: string;
+  [key: string]: unknown;
+}
 
 // ── Provider Implementations ────────────────────────────────────────────────
 
@@ -21,7 +54,7 @@ const USER_AGENT =
  * Search DuckDuckGo using HTMLRewriter for proper DOM parsing.
  * No API key required.
  */
-async function searchDuckDuckGo(query, maxResults, timeout) {
+async function searchDuckDuckGo(query: string, maxResults: number, timeout: number): Promise<string> {
   const encoded = encodeURIComponent(query);
   const url = `https://html.duckduckgo.com/html/?q=${encoded}`;
 
@@ -34,8 +67,8 @@ async function searchDuckDuckGo(query, maxResults, timeout) {
     throw new ToolError(`DuckDuckGo search failed with status ${response.status}`);
   }
 
-  const results = [];
-  let currentResult = null;
+  const results: SearchResult[] = [];
+  let currentResult: SearchResult | null = null;
 
   const rewriter = new HTMLRewriter()
     // Extract result links: <a class="result__a" href="...">Title</a>
@@ -81,7 +114,7 @@ async function searchDuckDuckGo(query, maxResults, timeout) {
  * Decode a DuckDuckGo redirect URL to extract the actual destination.
  * DDG wraps results in https://duckduckgo.com/l/?uddg=ENCODED_URL
  */
-function decodeDdgUrl(raw) {
+function decodeDdgUrl(raw: string): string {
   const idx = raw.indexOf("uddg=");
   if (idx === -1) return raw;
   const encoded = raw.slice(idx + 5).split("&")[0];
@@ -96,7 +129,7 @@ function decodeDdgUrl(raw) {
  * Search via Brave Search API.
  * Requires BRAVE_API_KEY.
  */
-async function searchBrave(query, maxResults, timeout, apiKey) {
+async function searchBrave(query: string, maxResults: number, timeout: number, apiKey: string): Promise<string> {
   if (!apiKey) {
     throw new ToolError(
       "Brave API key not configured. Set webSearch.braveApiKey in config or BRAVE_API_KEY env var."
@@ -118,14 +151,14 @@ async function searchBrave(query, maxResults, timeout, apiKey) {
     throw new ToolError(`Brave search failed with status ${response.status}`);
   }
 
-  const json = await response.json();
+  const json = await response.json() as { web?: { results: Array<{ title?: string; url?: string; description?: string }> } };
   const webResults = json?.web?.results || [];
 
   if (webResults.length === 0) {
     return `No results found for: ${query}`;
   }
 
-  const results = webResults.slice(0, maxResults).map((r) => ({
+  const results: SearchResult[] = webResults.slice(0, maxResults).map((r) => ({
     title: r.title || "No title",
     url: r.url || "",
     description: r.description || "",
@@ -138,7 +171,7 @@ async function searchBrave(query, maxResults, timeout, apiKey) {
  * Search via Tavily API.
  * Requires TAVILY_API_KEY.
  */
-async function searchTavily(query, maxResults, timeout, apiKey) {
+async function searchTavily(query: string, maxResults: number, timeout: number, apiKey: string): Promise<string> {
   if (!apiKey) {
     throw new ToolError(
       "Tavily API key not configured. Set webSearch.tavilyApiKey in config or TAVILY_API_KEY env var."
@@ -167,14 +200,14 @@ async function searchTavily(query, maxResults, timeout, apiKey) {
     throw new ToolError(`Tavily search failed with status ${response.status}`);
   }
 
-  const json = await response.json();
+  const json = await response.json() as { results?: Array<{ title?: string; url?: string; content?: string }> };
   const items = json?.results || [];
 
   if (items.length === 0) {
     return `No results found for: ${query}`;
   }
 
-  const results = items.slice(0, maxResults).map((r) => ({
+  const results: SearchResult[] = items.slice(0, maxResults).map((r) => ({
     title: r.title || "No title",
     url: r.url || "",
     description: r.content || "",
@@ -187,7 +220,7 @@ async function searchTavily(query, maxResults, timeout, apiKey) {
  * Search via a self-hosted SearXNG instance.
  * Requires SEARXNG_INSTANCE_URL.
  */
-async function searchSearXNG(query, maxResults, timeout, instanceUrl) {
+async function searchSearXNG(query: string, maxResults: number, timeout: number, instanceUrl: string): Promise<string> {
   if (!instanceUrl) {
     throw new ToolError(
       "SearXNG instance URL not configured. Set webSearch.searxngInstanceUrl in config."
@@ -209,14 +242,14 @@ async function searchSearXNG(query, maxResults, timeout, instanceUrl) {
     throw new ToolError(`SearXNG search failed with status ${response.status}`);
   }
 
-  const json = await response.json();
+  const json = await response.json() as { results?: Array<{ title?: string; url?: string; content?: string }> };
   const items = json?.results || [];
 
   if (items.length === 0) {
     return `No results found for: ${query}`;
   }
 
-  const results = items.slice(0, maxResults).map((r) => ({
+  const results: SearchResult[] = items.slice(0, maxResults).map((r) => ({
     title: r.title || "No title",
     url: r.url || "",
     description: r.content || "",
@@ -227,8 +260,8 @@ async function searchSearXNG(query, maxResults, timeout, instanceUrl) {
 
 // ── Result Formatting ───────────────────────────────────────────────────────
 
-function formatResults(results, query, provider) {
-  const lines = [`Search results for: ${query} (via ${provider})`];
+function formatResults(results: SearchResult[], query: string, provider: string): string {
+  const lines: string[] = [`Search results for: ${query} (via ${provider})`];
 
   for (let i = 0; i < results.length; i++) {
     const r = results[i];
@@ -245,9 +278,16 @@ function formatResults(results, query, provider) {
 // ── Tool Class ──────────────────────────────────────────────────────────────
 
 export class WebSearchTool {
-  static TOOL_NAME = "web_search";
+  static readonly TOOL_NAME = "web_search";
 
-  constructor(options = {}) {
+  private provider: string;
+  private maxResults: number;
+  private timeout: number;
+  private braveApiKey: string;
+  private tavilyApiKey: string;
+  private searxngInstanceUrl: string;
+
+  constructor(options: WebSearchToolOptions = {}) {
     this.provider = options.provider ?? "duckduckgo";
     this.maxResults = Math.min(10, Math.max(1, options.maxResults ?? 5));
     this.timeout = Math.max(1, options.timeout ?? 15);
@@ -256,7 +296,7 @@ export class WebSearchTool {
     this.searxngInstanceUrl = options.searxngInstanceUrl ?? "";
   }
 
-  toToolDef() {
+  toToolDef(): Record<string, unknown> {
     return toolDef(
       WebSearchTool.TOOL_NAME,
       "Search the web for information. Returns relevant results with titles, URLs, and descriptions. Use this to find current information, news, or research topics.",
@@ -269,11 +309,11 @@ export class WebSearchTool {
     );
   }
 
-  callDisplay(input) {
-    return defaultCallDisplay(input, (args) => `web_search: ${args.query}`);
+  callDisplay(input: string | Record<string, unknown> | null): string {
+    return defaultCallDisplay(input, (args) => `web_search: ${(args as ToolInput).query}`);
   }
 
-  async execute(input) {
+  async execute(input: string | Record<string, unknown> | null): Promise<ToolResult> {
     const args = parseToolInput(input);
     if (!args) {
       return ToolResult.err("Error parsing arguments");
@@ -287,19 +327,19 @@ export class WebSearchTool {
     const provider = this.provider.toLowerCase().trim();
 
     try {
-      let result;
+      let result: string;
       switch (provider) {
         case "duckduckgo":
-          result = await searchDuckDuckGo(query, this.maxResults, this.timeout);
+          result = await searchDuckDuckGo(query as string, this.maxResults, this.timeout);
           break;
         case "brave":
-          result = await searchBrave(query, this.maxResults, this.timeout, this.braveApiKey);
+          result = await searchBrave(query as string, this.maxResults, this.timeout, this.braveApiKey);
           break;
         case "tavily":
-          result = await searchTavily(query, this.maxResults, this.timeout, this.tavilyApiKey);
+          result = await searchTavily(query as string, this.maxResults, this.timeout, this.tavilyApiKey);
           break;
         case "searxng":
-          result = await searchSearXNG(query, this.maxResults, this.timeout, this.searxngInstanceUrl);
+          result = await searchSearXNG(query as string, this.maxResults, this.timeout, this.searxngInstanceUrl);
           break;
         default:
           return ToolResult.err(`Unknown search provider: ${provider}`);
@@ -311,27 +351,24 @@ export class WebSearchTool {
         results: String(result.split("\n").length - 1 > 0 ? result.split("\n").length - 1 : 0),
       });
     } catch (err) {
-      return ToolResult.err(`Web search failed: ${err.message}`);
+      return ToolResult.err(`Web search failed: ${(err as Error).message}`);
     }
   }
 }
 
 // ── Extension Entry Point ───────────────────────────────────────────────────
 
-import { HOOKS } from "../../core/hooks.js";
+import type { CoreContext, ExtensionInstance } from "../../core/extensions/types.ts";
 
 /**
  * Create the web-search extension.
- *
- * @param {Object} core - The core object.
- * @returns {Object} The extension instance.
  */
-export function create(core) {
-  const config = core.config?.webSearch || {};
+export function create(core: CoreContext): ExtensionInstance {
+  const config = (core.config?.webSearch as WebSearchConfig) || {};
 
   const provider =
     config.provider ||
-    extensionData.configSchema.webSearch.properties.provider.default;
+    (extensionData.configSchema?.webSearch?.properties?.provider?.default as string);
 
   // API keys are resolved declaratively via extension.json config layers —
   // no imperative env var fallback needed here.
@@ -341,7 +378,7 @@ export function create(core) {
 
   return {
     hooks: {
-      [HOOKS.TOOLS_REGISTER]: async (registry) => {
+      [HOOKS.TOOLS_REGISTER]: async (registry: { register: (name: string, tool: unknown) => void }) => {
         const tool = new WebSearchTool({
           provider,
           maxResults: config.maxResults,

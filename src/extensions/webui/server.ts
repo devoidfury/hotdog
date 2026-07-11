@@ -1,19 +1,35 @@
 // WebUI server — UI over HTTP with WebSockets.
 
-import { serveStaticFile } from "../../utils/index.js";
-import { createWsServer } from "../websocket/server.js";
-import { createAuthMiddleware } from "../websocket/auth.js";
-import { logger } from "../../core/logger.js";
+import { serveStaticFile } from "../../utils/index.ts";
+import { createWsServer } from "../websocket/server.ts";
+import { createAuthMiddleware } from "../websocket/auth.ts";
+import { logger } from "../../core/logger.ts";
+import type { CoreContext } from "../../core/extensions/types.ts";
+
+// ── Types ───────────────────────────────────────────────────────────────────
+
+interface WebuiConfig {
+  port?: number;
+  host?: string;
+  apiKey?: string | null;
+  sessionTokenTtlMin?: number;
+  maxAgeSecs?: number;
+}
+
+interface WebuiServerResult {
+  server: ReturnType<typeof Bun.serve>;
+  wsServer: ReturnType<typeof createWsServer>;
+  authMiddleware: ReturnType<typeof createAuthMiddleware>;
+}
 
 /**
  * Create and start the webui server.
- *
- * @param {Object} core - The core object
- * @param {Object} config - Webui-specific config
- * @param {string} uiDir - Path to UI static files directory
- * @returns {Promise<Object>} { server, wsServer, authMiddleware }
  */
-export async function createWebuiServer(core, config, uiDir) {
+export async function createWebuiServer(
+  core: CoreContext,
+  config: WebuiConfig,
+  uiDir: string,
+): Promise<WebuiServerResult> {
   const { port, host, apiKey, sessionTokenTtlMin } = config;
 
   if (!apiKey) {
@@ -22,28 +38,32 @@ export async function createWebuiServer(core, config, uiDir) {
     );
   }
 
-  const maxAgeSecs = core.config?.webui?.maxAgeSecs;
-  if (!maxAgeSecs)
+  const maxAgeSecs = core.config?.webui?.maxAgeSecs as number | undefined;
+  if (!maxAgeSecs) {
     throw new Error("missing required webui.maxAgeSecs configuration");
+  }
 
   const authMiddleware = createAuthMiddleware({
-    validateApiKey: async (key) => key === apiKey,
+    validateApiKey: async (key: string) => key === apiKey,
     tokenTtlMin: sessionTokenTtlMin,
   });
 
   // Create WebSocket server handler
   const wsServer = createWsServer(core, {
     auth: authMiddleware,
-    sessionTimeoutMin: core.config?.websocket?.sessionTimeoutMin,
-    questionTimeoutSecs: core.config?.websocket?.questionTimeoutSecs,
-    questionStrategy: core.config?.websocket?.questionStrategy,
+    sessionTimeoutMin: core.config?.websocket?.sessionTimeoutMin as number | undefined,
+    questionTimeoutSecs: core.config?.websocket?.questionTimeoutSecs as number | undefined,
+    questionStrategy: core.config?.websocket?.questionStrategy as string | undefined,
   });
 
   // Start cleanup loops
   authMiddleware.startCleanup();
   wsServer.startCleanupLoop();
 
-  const fetchHandler = async (req) => {
+  // Declare server variable for use in fetch handler
+  let server: ReturnType<typeof Bun.serve>;
+
+  const fetchHandler = async (req: Request): Promise<Response | void> => {
     const url = new URL(req.url);
     const pathname = url.pathname;
 
@@ -93,15 +113,15 @@ export async function createWebuiServer(core, config, uiDir) {
 
   // ── Start the server ───────────────────────────────────────────────────
 
-  const server = Bun.serve({
+  server = Bun.serve({
     port,
     hostname: host,
     fetch: fetchHandler,
     // WebSocket handlers
     websocket: {
       open(ws) {
-        const { url } = ws.data;
-        wsServer.onUpgrade({ url, headers: { host: "localhost" } }, ws);
+        const { url } = ws.data as { url?: string };
+        wsServer.onUpgrade({ url: url || "", headers: { host: "localhost" } }, ws);
       },
       message(ws, data) {
         wsServer.onMessage(ws, data);

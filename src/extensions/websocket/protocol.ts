@@ -14,7 +14,7 @@ export const C2S = {
   CANCEL: "cancel",
   QUESTION_ANSWER: "questionAnswer",
   COMMAND: "command",
-};
+} as const;
 
 // ── Server → Client ─────────────────────────────────────────────────────────
 
@@ -44,4 +44,20 @@ export const S2C = {
 
   // Connection management
   ERROR: "error",
-};
+} as const;
+
+// ── Type helpers ────────────────────────────────────────────────────────────
+
+export type C2SType = (typeof C2S)[keyof typeof C2S];
+export type S2CType = (typeof S2C)[keyof typeof S2C];
+
+export interface C2SMessage {
+  type: C2SType;
+  [key: string]: unknown;
+}
+
+export interface S2CMessage {
+  type: S2CType;
+  sessionId?: string;
+  [key: string]: unknown;
+}

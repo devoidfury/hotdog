@@ -1,7 +1,13 @@
-import { OUTPUT_EVENT, EVENT_HANDLERS } from "../../core/context/output.js";
-import { S2C } from "./protocol.js";
-import { logger } from "../../core/logger.js";
-import { formatError } from "../../core/error.js";
+import { OUTPUT_EVENT, OutputEvent, OutputEventType } from "../../core/context/output.ts";
+import { S2C, S2CType } from "./protocol.ts";
+import { logger } from "../../core/logger.ts";
+import { formatError } from "../../core/error.ts";
+
+// ── Types ───────────────────────────────────────────────────────────────────
+
+interface Sink {
+  emit(event: OutputEvent): void;
+}
 
 // ── FanoutSink ──────────────────────────────────────────────────────────────
 
@@ -11,17 +17,17 @@ import { formatError } from "../../core/error.js";
  * coupling to the base class's stream behavior.
  */
 export class FanoutSink {
-  #sinks = [];
+  #sinks: Sink[] = [];
 
-  add(sink) {
+  add(sink: Sink): void {
     this.#sinks.push(sink);
   }
 
-  remove(sink) {
+  remove(sink: Sink): void {
     this.#sinks = this.#sinks.filter((s) => s !== sink);
   }
 
-  emit(event) {
+  emit(event: OutputEvent): void {
     for (const s of this.#sinks) {
       try {
         s.emit(event);
@@ -32,7 +38,7 @@ export class FanoutSink {
     }
   }
 
-  get size() {
+  get size(): number {
     return this.#sinks.length;
   }
 }
@@ -42,7 +48,7 @@ export class FanoutSink {
 /**
  * Map OUTPUT_EVENT numeric types to S2C string message types.
  */
-const EVENT_TO_PROTOCOL = {
+const EVENT_TO_PROTOCOL: Record<OutputEventType, S2CType> = {
   [OUTPUT_EVENT.USER_MESSAGE]: S2C.USER_MESSAGE,
   [OUTPUT_EVENT.ASSISTANT_MESSAGE]: S2C.ASSISTANT_MESSAGE,
   [OUTPUT_EVENT.THINKING]: S2C.THINKING,
@@ -66,39 +72,39 @@ const EVENT_TO_PROTOCOL = {
  * Maps each OUTPUT_EVENT type to a protocol message type.
  */
 export class WebSocketOutputSink {
-  #ws;
-  #sessionId;
-  #ready;
+  #ws: WebSocket;
+  #sessionId: string;
+  #ready: boolean;
 
   /**
-   * @param {WebSocket} ws - Bun WebSocket instance
-   * @param {string} sessionId - Session ID to include in each message
+   * @param ws - Bun WebSocket instance
+   * @param sessionId - Session ID to include in each message
    */
-  constructor(ws, sessionId) {
+  constructor(ws: WebSocket, sessionId: string) {
     this.#ws = ws;
     this.#sessionId = sessionId;
     this.#ready = true;
   }
 
   /** Mark this sink as disconnected — stop sending. */
-  disconnect() {
+  disconnect(): void {
     this.#ready = false;
   }
 
   /** Reconnect with a new WS instance. */
-  reconnect(ws) {
+  reconnect(ws: WebSocket): void {
     this.#ws = ws;
     this.#ready = true;
   }
 
-  emit(event) {
+  emit(event: OutputEvent): void {
     if (!this.#ready) return;
 
     const protoType = EVENT_TO_PROTOCOL[event.type];
     if (!protoType) return;
 
     // Build the protocol message from the event data
-    const msg = { type: protoType, sessionId: this.#sessionId };
+    const msg: Record<string, unknown> = { type: protoType, sessionId: this.#sessionId };
 
     // Copy relevant event fields into the message
     switch (event.type) {
@@ -172,9 +178,9 @@ export class WebSocketOutputSink {
  * All other events: no-op (persistence handled by session-log extension)
  */
 export class BackgroundSink {
-  #pendingQuestions = [];
+  #pendingQuestions: unknown[][] = [];
 
-  emit(event) {
+  emit(event: OutputEvent): void {
     switch (event.type) {
       case OUTPUT_EVENT.STREAMING_CHUNK:
       case OUTPUT_EVENT.STREAMING_REASONING_CHUNK:
@@ -182,7 +188,7 @@ export class BackgroundSink {
         break;
       case OUTPUT_EVENT.QUESTION:
         // Buffer questions so they can be replayed when a client connects
-        this.#pendingQuestions.push(event.questions);
+        this.#pendingQuestions.push(event.questions as unknown[][]);
         break;
       default:
         // All other events: no-op (persistence handled by session-log extension)
@@ -191,7 +197,7 @@ export class BackgroundSink {
   }
 
   /** Get pending questions and clear the buffer. */
-  drainPendingQuestions() {
+  drainPendingQuestions(): unknown[][] {
     const qs = this.#pendingQuestions;
     this.#pendingQuestions = [];
     return qs;

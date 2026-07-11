@@ -5,28 +5,46 @@
 
 import crypto from "node:crypto";
 
+// ── Types ───────────────────────────────────────────────────────────────────
+
+interface SessionEntry {
+  createdAt: number;
+  expiresAt: number;
+}
+
+interface AuthMiddlewareOptions {
+  validateApiKey: (apiKey: string) => Promise<boolean>;
+  tokenTtlMin?: number;
+}
+
+export interface AuthMiddleware {
+  loginHandler: (req: Request) => Promise<Response>;
+  validateToken: (token: string) => boolean;
+  cleanup: () => void;
+  startCleanup: () => void;
+  stopCleanup: () => void;
+}
+
 /**
  * Create an authentication middleware instance.
- *
- * @param {Object} options
- * @param {Function} options.validateApiKey - Async function(apiKey) => boolean
- * @param {number} options.tokenTtlMin - Token time-to-live in minutes (default: 1440 / 24h)
- * @returns {Object} Auth middleware with loginHandler, validateToken, cleanup
  */
-export function createAuthMiddleware({ validateApiKey, tokenTtlMin = 1440 }) {
-  const sessions = new Map(); // token → { createdAt, expiresAt }
+export function createAuthMiddleware({
+  validateApiKey,
+  tokenTtlMin = 1440,
+}: AuthMiddlewareOptions): AuthMiddleware {
+  const sessions = new Map<string, SessionEntry>(); // token → { createdAt, expiresAt }
 
   // Cleanup interval handle
-  let cleanupInterval = null;
+  let cleanupInterval: ReturnType<typeof setInterval> | null = null;
 
   /**
    * POST /login handler.
    * Expects JSON body: { apiKey: "..." }
    * Returns { token } on success, 401 on failure.
    */
-  async function loginHandler(req) {
+  async function loginHandler(req: Request): Promise<Response> {
     try {
-      const body = await req.json();
+      const body = (await req.json()) as { apiKey?: string };
       const apiKey = body?.apiKey || "";
 
       if (!apiKey || typeof apiKey !== "string") {
@@ -54,10 +72,8 @@ export function createAuthMiddleware({ validateApiKey, tokenTtlMin = 1440 }) {
 
   /**
    * Validate a session token.
-   * @param {string} token
-   * @returns {boolean} true if token exists and is not expired
    */
-  function validateToken(token) {
+  function validateToken(token: string): boolean {
     if (!token || typeof token !== "string") return false;
     const session = sessions.get(token);
     if (!session) return false;
@@ -71,7 +87,7 @@ export function createAuthMiddleware({ validateApiKey, tokenTtlMin = 1440 }) {
   /**
    * Remove expired tokens from the store.
    */
-  function cleanup() {
+  function cleanup(): void {
     const now = Date.now();
     for (const [token, session] of sessions) {
       if (now > session.expiresAt) {
@@ -83,7 +99,7 @@ export function createAuthMiddleware({ validateApiKey, tokenTtlMin = 1440 }) {
   /**
    * Start periodic cleanup (runs every minute).
    */
-  function startCleanup() {
+  function startCleanup(): void {
     if (cleanupInterval) return;
     cleanupInterval = setInterval(cleanup, 60_000);
   }
@@ -91,7 +107,7 @@ export function createAuthMiddleware({ validateApiKey, tokenTtlMin = 1440 }) {
   /**
    * Stop periodic cleanup.
    */
-  function stopCleanup() {
+  function stopCleanup(): void {
     if (cleanupInterval) {
       clearInterval(cleanupInterval);
       cleanupInterval = null;

@@ -1,17 +1,32 @@
 import { ParseError } from "../core/error.js";
 
-export function compile(template) {
+interface Token {
+  type: "text" | "print" | "tag";
+  value: string;
+  stripLeft?: boolean;
+  stripRight?: boolean;
+}
+
+/**
+ * Compile a template string into a render function.
+ */
+export function compile(template: string): (context: Record<string, unknown>) => string {
   const tokens = tokenize(template);
-  return function render(context) {
+  return function render(context: Record<string, unknown>): string {
     return walkTokens(tokens, context);
   };
 }
 
-const templateCache = new Map();
+const templateCache = new Map<string, (context: Record<string, unknown>) => string>();
 
 /** Render a template string directly with a context object. */
-export function render(template, context, cache = false) {
-  if (templateCache.has(template)) return templateCache.get(template)(context);
+export function render(
+  template: string,
+  context: Record<string, unknown>,
+  cache: boolean = false,
+): string {
+  const cached = templateCache.get(template);
+  if (cached) return cached(context);
   const artifact = compile(template);
   if (cache) templateCache.set(template, artifact);
   return artifact(context);
@@ -19,8 +34,8 @@ export function render(template, context, cache = false) {
 
 // ── Tokenizer ──────────────────────────────────────────────────────
 
-function tokenize(template) {
-  const tokens = [];
+function tokenize(template: string): Token[] {
+  const tokens: Token[] = [];
   let i = 0;
   let plainStart = 0;
   let prevStripRight = false;
@@ -70,14 +85,21 @@ function tokenize(template) {
   return tokens;
 }
 
-function pushText(tokens, template, start, end, stripLeft) {
+function pushText(
+  tokens: Token[],
+  template: string,
+  start: number,
+  end: number,
+  stripLeft: boolean,
+): void {
   let text = template.slice(start, end);
   if (stripLeft) text = text.replace(/^\s+/, "");
-  if (text.length > 0 || stripLeft)
+  if (text.length > 0 || stripLeft) {
     tokens.push({ type: "text", value: text, stripLeft });
+  }
 }
 
-function findClose(str, from, delim) {
+function findClose(str: string, from: number, delim: string): number {
   const idx = str.indexOf(delim, from + 2);
   if (idx === -1) throw new ParseError(`Unclosed ${delim}`);
   return idx;
@@ -85,11 +107,14 @@ function findClose(str, from, delim) {
 
 // ── Main render loop ───────────────────────────────────────────────
 
-function walkTokens(tokens, context) {
+function walkTokens(
+  tokens: Token[],
+  context: Record<string, unknown>,
+): string {
   let output = "";
   let idx = 0;
   while (idx < tokens.length) {
-    const tok = tokens[idx];
+    const tok = tokens[idx]!;
     if (tok.type === "text") {
       output += tok.value;
       idx++;
@@ -111,18 +136,23 @@ function walkTokens(tokens, context) {
   return output;
 }
 
-function skipPast(tokens, idx, openTag, closeTag) {
-  let depth = 1,
-    j = idx + 1;
+function skipPast(
+  tokens: Token[],
+  idx: number,
+  openTag: string,
+  closeTag: string,
+): number {
+  let depth = 1;
+  let j = idx + 1;
   while (j < tokens.length) {
-    if (tokens[j].type !== "tag") {
+    if (tokens[j]!.type !== "tag") {
       j++;
       continue;
     }
-    if (tokens[j].value.match(new RegExp(`^${openTag}\\s`))) {
+    if (tokens[j]!.value.match(new RegExp(`^${openTag}\\s`))) {
       depth++;
       j++;
-    } else if (tokens[j].value === closeTag) {
+    } else if (tokens[j]!.value === closeTag) {
       depth--;
       if (depth === 0) return j + 1;
       j++;
@@ -133,8 +163,12 @@ function skipPast(tokens, idx, openTag, closeTag) {
   return tokens.length;
 }
 
-function walkIf(tokens, idx, context) {
-  const tok = tokens[idx];
+function walkIf(
+  tokens: Token[],
+  idx: number,
+  context: Record<string, unknown>,
+): string {
+  const tok = tokens[idx]!;
   const cond = tok.value.slice(3);
   const { bodyStart, elseIdx, bodyEnd } = findBlock(
     tokens,
@@ -144,15 +178,23 @@ function walkIf(tokens, idx, context) {
     "else",
   );
   const condValue = evalExpr(cond, context);
-  const start = condValue ? bodyStart : elseIdx > 0 ? elseIdx + 1 : bodyEnd;
+  const start = condValue
+    ? bodyStart
+    : elseIdx > 0
+      ? elseIdx + 1
+      : bodyEnd;
   const end = condValue ? (elseIdx > 0 ? elseIdx : bodyEnd) : bodyEnd;
   let output = walkTokens(tokens.slice(start, end), context);
   if (tok.stripRight) output = output.replace(/^\s+/, "");
   return output;
 }
 
-function walkFor(tokens, idx, context) {
-  const tok = tokens[idx];
+function walkFor(
+  tokens: Token[],
+  idx: number,
+  context: Record<string, unknown>,
+): string {
+  const tok = tokens[idx]!;
   const { varName, expr } = parseFor(tok.value);
   const { bodyStart, bodyEnd } = findBlock(tokens, idx, "for", "endfor");
   const items = resolveValue(expr, context);
@@ -169,28 +211,35 @@ function walkFor(tokens, idx, context) {
   return output;
 }
 
-function parseFor(tag) {
+function parseFor(tag: string): { varName: string; expr: string } {
   const m = tag.match(/^for\s+(\w+)\s+in\s+(.+)$/);
+  if (!m) throw new ParseError(`Invalid for tag: ${tag}`);
   return { varName: m[1], expr: m[2] };
 }
 
 // ── Block finding ──────────────────────────────────────────────────
 
-function findBlock(tokens, fromIdx, openTag, closeTag, elseTag) {
-  let depth = 1,
-    bodyStart = fromIdx + 1,
-    elseIdx = -1,
-    bodyEnd = tokens.length;
+function findBlock(
+  tokens: Token[],
+  fromIdx: number,
+  openTag: string,
+  closeTag: string,
+  elseTag?: string,
+): { bodyStart: number; elseIdx: number; bodyEnd: number } {
+  let depth = 1;
+  let bodyStart = fromIdx + 1;
+  let elseIdx = -1;
+  let bodyEnd = tokens.length;
   for (let j = bodyStart; j < tokens.length; j++) {
-    if (tokens[j].type !== "tag") continue;
-    if (tokens[j].value.match(new RegExp(`^${openTag}\s`))) depth++;
-    else if (tokens[j].value === closeTag) {
+    if (tokens[j]!.type !== "tag") continue;
+    if (tokens[j]!.value.match(new RegExp(`^${openTag}\\s`))) depth++;
+    else if (tokens[j]!.value === closeTag) {
       depth--;
       if (depth === 0) {
         bodyEnd = j;
         break;
       }
-    } else if (elseTag && tokens[j].value === elseTag && depth === 1)
+    } else if (elseTag && tokens[j]!.value === elseTag && depth === 1)
       elseIdx = j;
   }
   return { bodyStart, elseIdx, bodyEnd };
@@ -198,14 +247,17 @@ function findBlock(tokens, fromIdx, openTag, closeTag, elseTag) {
 
 // ── Expressions & filters ──────────────────────────────────────────
 
-function evalPrint(expr, context) {
+function evalPrint(
+  expr: string,
+  context: Record<string, unknown>,
+): string {
   const pipeIdx = expr.indexOf("|");
   if (pipeIdx === -1) return resolveExpr(expr.trim(), context);
   const value = resolveExpr(expr.slice(0, pipeIdx).trim(), context);
   return applyFilter(value, expr.slice(pipeIdx + 1).trim());
 }
 
-function applyFilter(value, filterSpec) {
+function applyFilter(value: unknown, filterSpec: string): string {
   const parenIdx = filterSpec.indexOf("(");
   if (parenIdx === -1) return applySimpleFilter(value, filterSpec.trim());
   const name = filterSpec.slice(0, parenIdx).trim();
@@ -224,7 +276,7 @@ function applyFilter(value, filterSpec) {
   return String(value);
 }
 
-function applySimpleFilter(value, name) {
+function applySimpleFilter(value: unknown, name: string): string {
   if (name === "default")
     return value === "" || value == null ? "" : String(value);
   if (name === "length") return String((value ?? "").length);
@@ -232,40 +284,48 @@ function applySimpleFilter(value, name) {
   return String(value);
 }
 
-function parseNamedArgs(str) {
+function parseNamedArgs(str: string): Record<string, string> {
   const m = str.match(/(\w+)\s*=\s*["']([^'"]*)["']/);
   return m ? { [m[1]]: m[2] } : {};
 }
 
-function resolveExpr(expr, context) {
+function resolveExpr(
+  expr: string,
+  context: Record<string, unknown>,
+): string {
   expr = expr.trim();
   if (expr.startsWith("not "))
-    return !resolveExpr(expr.slice(4).trim(), context);
+    return !resolveExpr(expr.slice(4).trim(), context) ? "true" : "false";
   if (isStringLit(expr)) return expr.slice(1, -1);
-  let value = context;
+  let value: unknown = context;
   for (const key of expr.split(".")) {
     if (value == null) return "";
-    value = value[key];
+    value = (value as Record<string, unknown>)[key];
   }
   return value ?? "";
 }
 
-function resolveValue(expr, context) {
+function resolveValue(
+  expr: string,
+  context: Record<string, unknown>,
+): unknown {
   expr = expr.trim();
   if (expr.startsWith("not "))
     return !resolveValue(expr.slice(4).trim(), context);
-  let value = context;
+  let value: unknown = context;
   for (const key of expr.split(".")) {
     if (value == null) return undefined;
-    value = value[key];
+    value = (value as Record<string, unknown>)[key];
   }
   return value;
 }
 
-function evalExpr(expr, context) {
+function evalExpr(expr: string, context: Record<string, unknown>): boolean {
   expr = expr.trim();
-  if (expr.startsWith("not ")) return !evalExpr(expr.slice(4).trim(), context);
-  if (expr.startsWith("!")) return !evalExpr(expr.slice(1).trim(), context);
+  if (expr.startsWith("not "))
+    return !evalExpr(expr.slice(4).trim(), context);
+  if (expr.startsWith("!"))
+    return !evalExpr(expr.slice(1).trim(), context);
   const pipeIdx = expr.indexOf("|");
   if (pipeIdx !== -1) {
     const value = resolveExpr(expr.slice(0, pipeIdx).trim(), context);
@@ -276,7 +336,7 @@ function evalExpr(expr, context) {
   return Boolean(resolveValue(expr, context));
 }
 
-function isStringLit(s) {
+function isStringLit(s: string): boolean {
   return (
     (s.startsWith('"') && s.endsWith('"')) ||
     (s.startsWith("'") && s.endsWith("'"))

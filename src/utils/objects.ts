@@ -1,29 +1,25 @@
 /**
  * Safely access a nested property path on an object.
- *
- * @param {object} obj - The object to traverse.
- * @param {string} path - Dot-separated path, e.g. "url" or "nested.value".
- * @returns {*} The value at the path, or undefined.
  */
-export function getNested(obj, path) {
+export function getNested<T = unknown>(obj: unknown, path: string): T | undefined {
   if (!obj || !path) return undefined;
 
   const parts = path.split(".");
-  let current = obj;
+  let current: unknown = obj;
 
   for (const part of parts) {
     if (current == null || typeof current !== "object") return undefined;
-    current = current[part];
+    current = (current as Record<string, unknown>)[part];
   }
 
-  return current;
+  return current as T | undefined;
 }
 
 /**
  * Strip null fields from an object for serialization.
  */
-export function stripNulls(obj) {
-  const result = {};
+export function stripNulls<T extends Record<string, unknown>>(obj: T): Partial<T> {
+  const result: Partial<T> = {};
   for (const [k, v] of Object.entries(obj)) {
     if (v !== null) {
       result[k] = v;
@@ -40,8 +36,8 @@ export function stripNulls(obj) {
  * - null/undefined sources are skipped.
  * - Returns a new object — source objects are not mutated.
  */
-export function deepMerge(...sources) {
-  const result = {};
+export function deepMerge<T extends object>(...sources: (T | null | undefined)[]): T {
+  const result = {} as T;
 
   for (const source of sources) {
     if (source == null || typeof source !== "object") continue;
@@ -51,15 +47,18 @@ export function deepMerge(...sources) {
         value != null &&
         typeof value === "object" &&
         !Array.isArray(value) &&
-        result[key] != null &&
-        typeof result[key] === "object" &&
-        !Array.isArray(result[key])
+        (result as Record<string, unknown>)[key] != null &&
+        typeof (result as Record<string, unknown>)[key] === "object" &&
+        !Array.isArray((result as Record<string, unknown>)[key])
       ) {
         // Both are plain objects → recurse
-        result[key] = deepMerge(result[key], value);
+        (result as Record<string, unknown>)[key] = deepMerge(
+          (result as Record<string, unknown>)[key] as object,
+          value as object,
+        );
       } else {
         // Arrays, primitives, or first-seen value → replace
-        result[key] = value;
+        (result as Record<string, unknown>)[key] = value;
       }
     }
   }

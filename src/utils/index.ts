@@ -1,11 +1,11 @@
 // ── JSON Schema validation ──────────────────────────────────────────────────
-export { validate, validateParams, formatValidationErrors, typeName } from "./json-schema.js";
+export { validate, validateParams, formatValidationErrors, typeName } from "./json-schema.ts";
 
 // ── Template rendering (Mustache-like) ──────────────────────────────────────
-export { compile, render } from "./render.js";
+export { compile, render } from "./render.ts";
 
 // ── Reactive state (signal/atom) ──────────────────────────────────────────────
-export { reactiveState, effect } from "./reactive-state.js";
+export { reactiveState, effect } from "./reactive-state.ts";
 
 // ── General utilities ────────────────────────────────────────────────────────
 export {
@@ -20,8 +20,15 @@ export {
   checkWritable,
   checkReadable,
   IOError,
-} from "./file-utils.js";
-export { stripNulls, deepMerge } from "./objects.js";
+  correctCommonPathMistakes,
+} from "./file-utils.ts";
+export { stripNulls, deepMerge, getNested } from "./objects.ts";
 
 // ── Static file serving ──────────────────────────────────────────────────────
-export { serveStaticFile, getMimeType } from "./static-files.js";
+export { serveStaticFile, getMimeType } from "./static-files.ts";
+
+// ── HTML to Markdown ─────────────────────────────────────────────────────────
+export { htmlToMarkdown } from "./html-to-markdown.ts";
+
+// ── String utilities ─────────────────────────────────────────────────────────
+export { camelCase, parseCliFlagKey } from "./strings.ts";

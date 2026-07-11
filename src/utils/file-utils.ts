@@ -8,28 +8,29 @@ import {
 } from "node:path";
 import { cwd } from "node:process";
 import { YAML } from "bun";
+import { logger } from "../core/logger.js";
 
 /**
  * IO error class for file system operations.
  * Standalone -- does not depend on core error classes.
  */
 export class IOError extends Error {
-  static PathNotFound(requested) {
+  static PathNotFound(requested: string): IOError {
     return new IOError(`Path not found: ${requested}`);
   }
 
-  static PathOutside(requested, boundary) {
+  static PathOutside(requested: string, boundary: string): IOError {
     return new IOError(
       `Path '${requested}' is outside the allowed directory '${boundary}'. ` +
         "File operations are restricted to the boundary directory.",
     );
   }
 
-  static NotWritable(dir, msg) {
+  static NotWritable(dir: string, msg: string): IOError {
     return new IOError(`Directory '${dir}' is not writable: ${msg}`);
   }
 
-  static NotReadable(filePath) {
+  static NotReadable(filePath: string): IOError {
     return new IOError(`Path '${filePath}' does not exist or is not readable`);
   }
 }
@@ -38,7 +39,10 @@ export class IOError extends Error {
  * Parse YAML front matter from a markdown string.
  * Returns { frontMatter: object, body: string } or null if no front matter.
  */
-export function parseFrontMatter(content) {
+export function parseFrontMatter(content: string): {
+  frontMatter: unknown;
+  body: string;
+} | null {
   const m = content.match(/^---\n([\s\S]*?)\n---\n?([\s\S]*)$/);
   if (!m) return null;
   const body = m[2] || "";
@@ -49,12 +53,11 @@ export function parseFrontMatter(content) {
 /**
  * Load aspect files from a directory.
  * Files are named `<name>.aspect.md`.
- *
- * @param {string[]} aspectNames - Names of aspects to load.
- * @param {string} [aspectsDir] - Directory containing `.aspect.md` files. Defaults to CWD/config/aspects.
- * @returns {{name: string, content: string}[]} Array of loaded aspects.
  */
-export async function loadAspects(aspectNames, aspectsDir) {
+export async function loadAspects(
+  aspectNames: string[],
+  aspectsDir?: string,
+): Promise<{ name: string; content: string }[]> {
   if (!aspectNames || aspectNames.length === 0) return [];
 
   const dir = aspectsDir || join(cwd(), "config", "aspects");
@@ -68,22 +71,30 @@ export async function loadAspects(aspectNames, aspectsDir) {
       if (trimmed.length > 0) {
         return { name, content: trimmed };
       }
-    } catch {
-      // Silent skip — aspect file not found or unreadable
+    } catch (e) {
+      logger.warn(`Failed to load aspect '${name}' from '${filePath}'`, {
+        error: (e as Error).message,
+      });
     }
     return null;
   });
 
   const results = await Promise.all(promises);
-  return results.filter(Boolean);
+  return results.filter(
+    (r): r is { name: string; content: string } => r !== null,
+  );
 }
 
 /**
  * Validate a nameable entity (skill, prompt) per spec constraints.
  * Returns warnings — loading still proceeds with warnings.
  */
-export function validateNameable(name, label, dirName) {
-  const warnings = [];
+export function validateNameable(
+  name: string | null | undefined,
+  label: string,
+  dirName: string,
+): string[] {
+  const warnings: string[] = [];
 
   if (name && name !== dirName) {
     warnings.push(
@@ -122,7 +133,10 @@ export function validateNameable(name, label, dirName) {
 /**
  * Write a file, creating parent directories as needed.
  */
-export async function writeFileWithParents(filePath, content) {
+export async function writeFileWithParents(
+  filePath: string,
+  content: string | Uint8Array,
+): Promise<void> {
   const parentDir = dirname(filePath);
   if (parentDir && parentDir !== ".") {
     await fsPromises.mkdir(parentDir, { recursive: true });
@@ -133,7 +147,10 @@ export async function writeFileWithParents(filePath, content) {
 /**
  * Validate that a path is within the cwd boundary.
  */
-export function validateCwdBoundary(filePath, cwdBoundary) {
+export function validateCwdBoundary(
+  filePath: string,
+  cwdBoundary: string | null | undefined,
+): string | null {
   if (!cwdBoundary) return null;
   const boundaryResolved = resolveAbs(cwdBoundary);
   const fileResolved = resolveAbs(filePath);
@@ -147,12 +164,12 @@ export function validateCwdBoundary(filePath, cwdBoundary) {
 }
 
 /**
- * String transform on paths to fix common llm typos
- * @param {string} strPath
- * @param {string} dirPath
- * @returns {[string, string]}
+ * String transform on paths to fix common llm typos.
  */
-export function correctCommonPathMistakes(strPath, dirPath) {
+export function correctCommonPathMistakes(
+  strPath: string,
+  dirPath?: string,
+): [string, string] {
   if (strPath === "/.") strPath = "./";
   if (dirPath === "/.") dirPath = "./";
 
@@ -170,7 +187,11 @@ export function correctCommonPathMistakes(strPath, dirPath) {
 /**
  * Resolve a path against cwdBoundary or workspaceRoot.
  */
-export function resolvePath(filePath, cwdBoundary, workspaceRoot) {
+export function resolvePath(
+  filePath: string,
+  cwdBoundary?: string | null,
+  workspaceRoot?: string | null,
+): string {
   if (isAbsolute(filePath)) {
     return filePath;
   }
@@ -186,7 +207,7 @@ export function resolvePath(filePath, cwdBoundary, workspaceRoot) {
 /**
  * Get file size in bytes.
  */
-export async function fileSize(filePath) {
+export async function fileSize(filePath: string): Promise<number> {
   const stats = await fsPromises.stat(filePath);
   return stats.size;
 }
@@ -194,7 +215,10 @@ export async function fileSize(filePath) {
 /**
  * Resolve a path and verify it stays within the cwd boundary.
  */
-export async function resolvePathAndValidate(requested, cwdBoundary = null) {
+export async function resolvePathAndValidate(
+  requested: string,
+  cwdBoundary: string | null = null,
+): Promise<string> {
   const resolved = resolveAbs(requested);
 
   try {
@@ -219,7 +243,7 @@ export async function resolvePathAndValidate(requested, cwdBoundary = null) {
 /**
  * Check if a path is writable.
  */
-export async function checkWritable(filePath) {
+export async function checkWritable(filePath: string): Promise<boolean> {
   const parentDir = dirname(filePath);
 
   if (parentDir && parentDir !== ".") {
@@ -228,7 +252,7 @@ export async function checkWritable(filePath) {
       await fsPromises.writeFile(tempPath, "");
       await fsPromises.unlink(tempPath);
     } catch (e) {
-      throw IOError.NotWritable(parentDir, e.message);
+      throw IOError.NotWritable(parentDir, (e as Error).message);
     }
   }
 
@@ -244,7 +268,7 @@ export async function checkWritable(filePath) {
 /**
  * Check if a path is readable.
  */
-export async function checkReadable(filePath) {
+export async function checkReadable(filePath: string): Promise<boolean> {
   try {
     await fsPromises.access(filePath, fsPromises.constants.R_OK);
   } catch {

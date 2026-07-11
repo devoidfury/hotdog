@@ -9,10 +9,12 @@
 
 // ── Type checking helpers ────────────────────────────────────────────────────
 
+type TypeCheckFn = (v: unknown) => boolean;
+
 /**
  * Map JSON Schema type names to JavaScript type checks.
  */
-const TYPE_CHECKS = {
+const TYPE_CHECKS: Record<string, TypeCheckFn> = {
   string: (v) => typeof v === "string",
   number: (v) => typeof v === "number" && !Number.isNaN(v),
   integer: (v) =>
@@ -26,7 +28,7 @@ const TYPE_CHECKS = {
 /**
  * Get a human-readable type name for a JavaScript value.
  */
-export function typeName(value) {
+export function typeName(value: unknown): string {
   if (value === null) return "null";
   if (Array.isArray(value)) return "array";
   return typeof value;
@@ -38,7 +40,7 @@ export function typeName(value) {
  * Check if a value matches a schema's default (deep equality).
  * Used to skip validation when value equals default.
  */
-function matchesDefault(value, defaultValue) {
+function matchesDefault(value: unknown, defaultValue: unknown): boolean {
   try {
     return JSON.stringify(value) === JSON.stringify(defaultValue);
   } catch {
@@ -51,48 +53,55 @@ function matchesDefault(value, defaultValue) {
 /**
  * Validate a single value against a schema node.
  * Returns an array of error strings (empty if valid).
- *
- * @param {any} value - Value to validate.
- * @param {object} schema - JSON Schema fragment.
- * @param {string} path - Current JSON path (for error messages).
- * @returns {string[]} Array of error strings.
  */
-export function validate(value, schema, path = "") {
-  const errors = [];
+export function validate(
+  value: unknown,
+  schema: unknown,
+  path: string = "",
+): string[] {
+  const errors: string[] = [];
 
   if (!schema || typeof schema !== "object") return errors;
 
+  const schemaObj = schema as Record<string, unknown>;
+
   // ── Default: skip validation if value matches ──
-  if (schema.default !== undefined && matchesDefault(value, schema.default)) {
+  if (
+    schemaObj.default !== undefined &&
+    matchesDefault(value, schemaObj.default)
+  ) {
     return errors;
   }
 
   // ── Const check ──
-  if (schema.const !== undefined) {
-    if (!matchesDefault(value, schema.const)) {
-      errors.push(`${path || "root"}: must be ${JSON.stringify(schema.const)}`);
+  if (schemaObj.const !== undefined) {
+    if (!matchesDefault(value, schemaObj.const)) {
+      errors.push(
+        `${path || "root"}: must be ${JSON.stringify(schemaObj.const)}`,
+      );
     }
     return errors;
   }
 
   // ── Enum check ──
-  if (schema.enum !== undefined && Array.isArray(schema.enum)) {
-    const matches = schema.enum.some(
-      (e) => JSON.stringify(e) === JSON.stringify(value),
+  if (schemaObj.enum !== undefined && Array.isArray(schemaObj.enum)) {
+    const matches = schemaObj.enum.some(
+      (e: unknown) => JSON.stringify(e) === JSON.stringify(value),
     );
     if (!matches) {
       errors.push(
-        `${path || "root"}: value ${JSON.stringify(value)} not in enum [${schema.enum.map((e) => JSON.stringify(e)).join(", ")}]`,
+        `${path || "root"}: value ${JSON.stringify(value)} not in enum [${schemaObj.enum.map((e: unknown) => JSON.stringify(e)).join(", ")}]`,
       );
     }
   }
 
   // ── Type check ──
-  if (schema.type !== undefined) {
-    const checkFn = TYPE_CHECKS[schema.type];
+  if (schemaObj.type !== undefined) {
+    const typeStr = schemaObj.type as string;
+    const checkFn = TYPE_CHECKS[typeStr];
     if (checkFn && !checkFn(value)) {
       errors.push(
-        `${path || "root"}: expected ${schema.type}, got ${typeName(value)}`,
+        `${path || "root"}: expected ${typeStr}, got ${typeName(value)}`,
       );
       return errors; // No point checking further constraints on wrong type
     }
@@ -100,21 +109,27 @@ export function validate(value, schema, path = "") {
 
   // ── String constraints ──
   if (typeof value === "string") {
-    if (schema.minLength !== undefined && value.length < schema.minLength) {
+    if (
+      schemaObj.minLength !== undefined &&
+      value.length < (schemaObj.minLength as number)
+    ) {
       errors.push(
-        `${path || "root"}: string length ${value.length} is less than minimum ${schema.minLength}`,
+        `${path || "root"}: string length ${value.length} is less than minimum ${schemaObj.minLength}`,
       );
     }
-    if (schema.maxLength !== undefined && value.length > schema.maxLength) {
+    if (
+      schemaObj.maxLength !== undefined &&
+      value.length > (schemaObj.maxLength as number)
+    ) {
       errors.push(
-        `${path || "root"}: string length ${value.length} exceeds maximum ${schema.maxLength}`,
+        `${path || "root"}: string length ${value.length} exceeds maximum ${schemaObj.maxLength}`,
       );
     }
-    if (schema.pattern !== undefined) {
-      const regex = new RegExp(schema.pattern);
+    if (schemaObj.pattern !== undefined) {
+      const regex = new RegExp(schemaObj.pattern as string);
       if (!regex.test(value)) {
         errors.push(
-          `${path || "root"}: must match pattern "${schema.pattern}"`,
+          `${path || "root"}: must match pattern "${schemaObj.pattern}"`,
         );
       }
     }
@@ -122,40 +137,48 @@ export function validate(value, schema, path = "") {
 
   // ── Number constraints ──
   if (typeof value === "number") {
-    if (schema.minimum !== undefined && value < schema.minimum) {
+    if (
+      schemaObj.minimum !== undefined &&
+      value < (schemaObj.minimum as number)
+    ) {
       errors.push(
-        `${path || "root"}: value ${value} is less than minimum ${schema.minimum}`,
-      );
-    }
-    if (schema.maximum !== undefined && value > schema.maximum) {
-      errors.push(
-        `${path || "root"}: value ${value} exceeds maximum ${schema.maximum}`,
+        `${path || "root"}: value ${value} is less than minimum ${schemaObj.minimum}`,
       );
     }
     if (
-      schema.exclusiveMinimum !== undefined &&
-      value <= schema.exclusiveMinimum
+      schemaObj.maximum !== undefined &&
+      value > (schemaObj.maximum as number)
     ) {
       errors.push(
-        `${path || "root"}: value ${value} must be greater than ${schema.exclusiveMinimum}`,
+        `${path || "root"}: value ${value} exceeds maximum ${schemaObj.maximum}`,
       );
     }
     if (
-      schema.exclusiveMaximum !== undefined &&
-      value >= schema.exclusiveMaximum
+      schemaObj.exclusiveMinimum !== undefined &&
+      value <= (schemaObj.exclusiveMinimum as number)
     ) {
       errors.push(
-        `${path || "root"}: value ${value} must be less than ${schema.exclusiveMaximum}`,
+        `${path || "root"}: value ${value} must be greater than ${schemaObj.exclusiveMinimum}`,
+      );
+    }
+    if (
+      schemaObj.exclusiveMaximum !== undefined &&
+      value >= (schemaObj.exclusiveMaximum as number)
+    ) {
+      errors.push(
+        `${path || "root"}: value ${value} must be less than ${schemaObj.exclusiveMaximum}`,
       );
     }
   }
 
   // ── Object: properties + required ──
   if (typeof value === "object" && value !== null && !Array.isArray(value)) {
+    const valueObj = value as Record<string, unknown>;
+
     // Required fields
-    if (schema.required && Array.isArray(schema.required)) {
-      for (const field of schema.required) {
-        if (!(field in value)) {
+    if (schemaObj.required && Array.isArray(schemaObj.required)) {
+      for (const field of schemaObj.required as string[]) {
+        if (!(field in valueObj)) {
           errors.push(
             `${path ? `${path}.` : ""}${field}: missing required field`,
           );
@@ -164,11 +187,16 @@ export function validate(value, schema, path = "") {
     }
 
     // Validate known properties
-    if (schema.properties && typeof schema.properties === "object") {
-      for (const [key, propSchema] of Object.entries(schema.properties)) {
-        if (key in value) {
+    if (
+      schemaObj.properties &&
+      typeof schemaObj.properties === "object"
+    ) {
+      for (const [key, propSchema] of Object.entries(
+        schemaObj.properties as Record<string, unknown>,
+      )) {
+        if (key in valueObj) {
           const childErrors = validate(
-            value[key],
+            valueObj[key],
             propSchema,
             path ? `${path}.${key}` : key,
           );
@@ -178,12 +206,12 @@ export function validate(value, schema, path = "") {
     }
 
     // Additional properties check
-    if (schema.additionalProperties === false) {
+    if (schemaObj.additionalProperties === false) {
       const allowedKeys = new Set([
-        ...Object.keys(schema.properties || {}),
-        ...(schema.required || []),
+        ...Object.keys(schemaObj.properties as Record<string, unknown> || {}),
+        ...(schemaObj.required as string[] || []),
       ]);
-      for (const key of Object.keys(value)) {
+      for (const key of Object.keys(valueObj)) {
         if (!allowedKeys.has(key)) {
           errors.push(
             `${path ? `${path}.` : ""}${key}: additional property not allowed`,
@@ -195,24 +223,30 @@ export function validate(value, schema, path = "") {
 
   // ── Array: items ──
   if (Array.isArray(value)) {
-    if (schema.items) {
+    if (schemaObj.items) {
       for (let i = 0; i < value.length; i++) {
         const itemErrors = validate(
-          value[i],
-          schema.items,
+          value[i]!,
+          schemaObj.items,
           `${path ? `${path}[` : "["}${i}]`,
         );
         errors.push(...itemErrors);
       }
     }
-    if (schema.minItems !== undefined && value.length < schema.minItems) {
+    if (
+      schemaObj.minItems !== undefined &&
+      value.length < (schemaObj.minItems as number)
+    ) {
       errors.push(
-        `${path || "root"}: array length ${value.length} is less than minimum ${schema.minItems}`,
+        `${path || "root"}: array length ${value.length} is less than minimum ${schemaObj.minItems}`,
       );
     }
-    if (schema.maxItems !== undefined && value.length > schema.maxItems) {
+    if (
+      schemaObj.maxItems !== undefined &&
+      value.length > (schemaObj.maxItems as number)
+    ) {
       errors.push(
-        `${path || "root"}: array length ${value.length} exceeds maximum ${schema.maxItems}`,
+        `${path || "root"}: array length ${value.length} exceeds maximum ${schemaObj.maxItems}`,
       );
     }
   }
@@ -220,14 +254,18 @@ export function validate(value, schema, path = "") {
   return errors;
 }
 
+export interface ValidationResult {
+  valid: boolean;
+  errors: string[];
+}
+
 /**
  * Validate arguments against a JSON Schema.
- *
- * @param {object} args - Parsed arguments to validate
- * @param {object} schema - JSON Schema object
- * @returns {object} { valid: boolean, errors: string[] }
  */
-export function validateParams(args, schema) {
+export function validateParams(
+  args: unknown,
+  schema: unknown,
+): ValidationResult {
   if (!args || typeof args !== "object" || Array.isArray(args)) {
     return { valid: false, errors: ["Arguments must be an object"] };
   }
@@ -241,11 +279,8 @@ export function validateParams(args, schema) {
 
 /**
  * Format validation errors as a human-readable message.
- *
- * @param {string[]} errors - Array of error strings
- * @returns {string} Formatted error message
  */
-export function formatValidationErrors(errors) {
+export function formatValidationErrors(errors: string[]): string {
   if (errors.length === 0) return "";
   const header = "Parameter validation failed:";
   const body = errors.map((e, i) => `  ${i + 1}. ${e}`).join("\n");

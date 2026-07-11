@@ -1,22 +1,22 @@
 /** Inject markdown markers for a heading. */
-function heading(el, level) {
+function heading(el: Element, level: number): void {
   const prefix = "\n" + "#".repeat(level) + " ";
-  el.before(prefix, { html: true });
+  el.before(prefix, { html: true } as Parameters<Element["before"]>[0]);
   el.after("\n");
 }
 
 /** Inject markdown markers for an inline element. */
-function inline(el, open, close) {
-  open && el.before(open);
-  close && el.after(close);
+function inline(el: Element, open: string, close: string): void {
+  if (open) el.before(open);
+  if (close) el.after(close);
 }
 
-function replaceWith(el, replacement) {
+function replaceWith(el: Element, replacement: string): void {
   el.remove();
   el.after(replacement);
 }
 
-function decodeEntities(text) {
+function decodeEntities(text: string): string {
   return text
     .replace(/&gt;/g, ">")
     .replace(/&lt;/g, "<")
@@ -28,15 +28,12 @@ function decodeEntities(text) {
 
 /**
  * Convert an HTML string to simplified GitHub Flavored Markdown.
- *
- * @param {string} html - The HTML string to convert.
- * @returns {string} GitHub Flavored Markdown.
  */
-export function htmlToMarkdown(html) {
+export function htmlToMarkdown(html: string): string {
   if (!html || typeof html !== "string") return "";
 
   // Shared mutable state for tracking context across handlers.
-  const ctx = {
+  const ctx: { inPre: boolean; olCount: number[] } = {
     inPre: false, // inside a <pre> block
     olCount: [], // per-<ol> item counter stack
   };
@@ -77,7 +74,7 @@ export function htmlToMarkdown(html) {
         const src = el.getAttribute("src") || "";
         const alt = (el.getAttribute("alt") || "").replace(/"/g, '\\"');
         el.remove();
-        el.after(`![${alt}](${src})`, { html: true });
+        el.after(`![${alt}](${src})`, { html: true } as Parameters<Element["after"]>[0]);
       },
     })
 
@@ -105,7 +102,7 @@ export function htmlToMarkdown(html) {
 
     .on("blockquote", {
       element: (el) => {
-        el.before("\n> ", { html: true });
+        el.before("\n> ", { html: true } as Parameters<Element["before"]>[0]);
         el.after("\n");
       },
     })
@@ -113,8 +110,8 @@ export function htmlToMarkdown(html) {
     .on("pre", {
       element: (el) => {
         ctx.inPre = true;
-        el.before("\n```\n", { html: true });
-        el.after("\n```\n", { html: true });
+        el.before("\n```\n", { html: true } as Parameters<Element["before"]>[0]);
+        el.after("\n```\n", { html: true } as Parameters<Element["after"]>[0]);
         el.onEndTag(() => {
           ctx.inPre = false;
         });

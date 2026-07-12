@@ -8,19 +8,19 @@ import { contentBlocksToString } from "./types.ts";
  * Shared client handle for use by McpTool instances.
  */
 export class McpConnectionHandle {
-  private readonly _client: McpClient;
-  private readonly _serverName: string;
+  private readonly #client: McpClient;
+  private readonly #serverName: string;
 
   constructor(client: McpClient, serverName: string) {
-    this._client = client;
-    this._serverName = serverName;
+    this.#client = client;
+    this.#serverName = serverName;
   }
 
   /**
    * Call a tool by name with the given arguments.
    */
   async callTool(name: string, arguments_: Record<string, unknown>): Promise<string> {
-    const response = await this._client.callTool(name, arguments_) as Record<string, unknown>;
+    const response = await this.#client.callTool(name, arguments_) as Record<string, unknown>;
     const output = contentBlocksToString((response.content as Record<string, unknown>[]) || []);
 
     if (response.isError) {
@@ -31,7 +31,7 @@ export class McpConnectionHandle {
   }
 
   get serverName(): string {
-    return this._serverName;
+    return this.#serverName;
   }
 }
 
@@ -59,17 +59,17 @@ export class McpConnection {
     return conn;
   }
 
-  private readonly _client: McpClient;
-  private readonly _serverName: string;
-  private _tools: Record<string, unknown>[] = [];
+  private readonly #client: McpClient;
+  private readonly #serverName: string;
+  private #tools: Record<string, unknown>[] = [];
 
   constructor(client: McpClient, serverName: string) {
-    this._client = client;
-    this._serverName = serverName;
+    this.#client = client;
+    this.#serverName = serverName;
   }
 
   private async _initialize(): Promise<void> {
-    await this._client.initialize();
+    await this.#client.initialize();
     await this._discoverTools();
   }
 
@@ -81,39 +81,39 @@ export class McpConnection {
     let cursor: string | null = null;
 
     do {
-      const result = await this._client.listTools() as Record<string, unknown>;
+      const result = await this.#client.listTools() as Record<string, unknown>;
       allTools.push(...(result.tools as Record<string, unknown>[]));
       cursor = result.nextCursor as string | null;
     } while (cursor);
 
-    this._tools = allTools;
+    this.#tools = allTools;
   }
 
   /**
    * Get all discovered tools.
    */
   get tools(): Record<string, unknown>[] {
-    return this._tools;
+    return this.#tools;
   }
 
   /**
    * Get the server name.
    */
   get serverName(): string {
-    return this._serverName;
+    return this.#serverName;
   }
 
   /**
    * Create a shared handle for use by tool instances.
    */
   handle(): McpConnectionHandle {
-    return new McpConnectionHandle(this._client, this._serverName);
+    return new McpConnectionHandle(this.#client, this.#serverName);
   }
 
   /**
    * Shutdown the connection.
    */
   async shutdown(): Promise<void> {
-    await this._client.shutdown();
+    await this.#client.shutdown();
   }
 }

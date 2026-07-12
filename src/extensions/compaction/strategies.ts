@@ -58,7 +58,7 @@ export class CompactionStrategy {
  * Follows the ToolRegistry pattern for consistency.
  */
 export class CompactionStrategyRegistry {
-  private readonly _strategies: Map<string, CompactionStrategy> = new Map();
+  private readonly #strategies: Map<string, CompactionStrategy> = new Map();
 
   /**
    * Register a strategy.
@@ -67,34 +67,34 @@ export class CompactionStrategyRegistry {
     if (!strategy.name) {
       throw new AgentError("Strategy must have a name property");
     }
-    this._strategies.set(strategy.name, strategy);
+    this.#strategies.set(strategy.name, strategy);
   }
 
   /**
    * Get a strategy by name.
    */
   get(name: string): CompactionStrategy | undefined {
-    return this._strategies.get(name);
+    return this.#strategies.get(name);
   }
 
   /**
    * Check if a strategy exists.
    */
   has(name: string): boolean {
-    return this._strategies.has(name);
+    return this.#strategies.has(name);
   }
 
   /**
    * Get all registered strategies.
    */
   getAll(): CompactionStrategy[] {
-    return Array.from(this._strategies.values());
+    return Array.from(this.#strategies.values());
   }
 
   /**
    * Get the default strategy.
    */
   getDefault(): CompactionStrategy | undefined {
-    return this._strategies.get("summarize");
+    return this.#strategies.get("summarize");
   }
 }

@@ -13,7 +13,7 @@ export interface SessionManager {
 }
 
 export interface Agent {
-  _hooks: {
+  hooks: {
     runHookPipeline(
       hookName: string,
       data: unknown,
@@ -49,12 +49,12 @@ export interface MessageBusOptions {
  * _processMessage, allowing a cancelled request to be retried.
  */
 export class MessageBus {
-  _sessionManager: SessionManager;
-  _sink: Sink;
-  _queue: string[];
-  _isRunning: boolean;
-  _abortController: AbortController;
-  _waiter: { resolve: () => void } | null;
+  #sessionManager: SessionManager;
+  #sink: Sink;
+  #queue: string[];
+  #isRunning: boolean;
+  #abortController: AbortController;
+  #waiter: { resolve: () => void } | null;
 
   /**
    * @param options
@@ -62,16 +62,16 @@ export class MessageBus {
    * @param options.sink
    */
   constructor({ sessionManager, sink }: MessageBusOptions) {
-    this._sessionManager = sessionManager;
-    this._sink = sink;
-    this._queue = [];
-    this._isRunning = false;
+    this.#sessionManager = sessionManager;
+    this.#sink = sink;
+    this.#queue = [];
+    this.#isRunning = false;
     // AbortController for the run loop. cancel() aborts it, signaling
     // the generator to exit. interrupt() does NOT abort it.
-    this._abortController = new AbortController();
+    this.#abortController = new AbortController();
     // Single waiter slot: { resolve } or null. Created per generator
     // iteration, cleared synchronously after await.
-    this._waiter = null;
+    this.#waiter = null;
   }
 
   /**
@@ -79,7 +79,7 @@ export class MessageBus {
    * If the generator is waiting, this wakes it immediately.
    */
   enqueue(text: string): void {
-    this._queue.push(text);
+    this.#queue.push(text);
     this._wakeWaiter();
   }
 
@@ -89,8 +89,8 @@ export class MessageBus {
    * further messages after cancel() — create a new bus or call reset().
    */
   cancel(): void {
-    this._abortController.abort();
-    const agent = this._sessionManager.getAgent();
+    this.#abortController.abort();
+    const agent = this.#sessionManager.getAgent();
     if (agent) agent.cancel();
     this._wakeWaiter();
   }
@@ -102,9 +102,9 @@ export class MessageBus {
    * Used by Ctrl-C in interactive mode.
    */
   interrupt(): void {
-    const agent = this._sessionManager.getAgent();
+    const agent = this.#sessionManager.getAgent();
     if (agent) agent.cancel();
-    this._queue = [];
+    this.#queue = [];
     this._wakeWaiter();
   }
 
@@ -113,7 +113,7 @@ export class MessageBus {
    * so the bus can be used again. The queue is preserved.
    */
   reset(): void {
-    this._abortController = new AbortController();
+    this.#abortController = new AbortController();
   }
 
   /**
@@ -121,23 +121,54 @@ export class MessageBus {
    * @returns Whether the bus has been cancelled.
    */
   get isCancelled(): boolean {
-    return this._abortController.signal.aborted;
+    return this.#abortController.signal.aborted;
   }
 
   isIdle(): boolean {
     return (
-      !this._isRunning &&
-      this._queue.length === 0 &&
-      !this._abortController.signal.aborted
+      !this.#isRunning &&
+      this.#queue.length === 0 &&
+      !this.#abortController.signal.aborted
     );
   }
 
   get sessionManager(): SessionManager {
-    return this._sessionManager;
+    return this.#sessionManager;
   }
 
   get agent(): Agent | undefined {
-    return this._sessionManager.getAgent();
+    return this.#sessionManager.getAgent();
+  }
+
+  // ── Test-only accessors ─────────────────────────────────────────────────
+
+  /** @internal Exposed for testing. */
+  get queue(): string[] {
+    return this.#queue;
+  }
+  set queue(v: string[]) {
+    this.#queue = v;
+  }
+
+  /** @internal Exposed for testing. */
+  get isRunning(): boolean {
+    return this.#isRunning;
+  }
+  set isRunning(v: boolean) {
+    this.#isRunning = v;
+  }
+
+  /** @internal Exposed for testing. */
+  get abortController(): AbortController {
+    return this.#abortController;
+  }
+
+  /** @internal Exposed for testing. */
+  get waiter(): { resolve: () => void } | null {
+    return this.#waiter;
+  }
+  set waiter(v: { resolve: () => void } | null) {
+    this.#waiter = v;
   }
 
   /**
@@ -165,9 +196,9 @@ export class MessageBus {
    * even if no waiter is waiting.
    */
   _wakeWaiter(): void {
-    if (this._waiter) {
-      const resolve = this._waiter.resolve;
-      this._waiter = null;
+    if (this.#waiter) {
+      const resolve = this.#waiter.resolve;
+      this.#waiter = null;
       resolve();
     }
   }
@@ -186,18 +217,18 @@ export class MessageBus {
    *
    * Uses the AbortController signal for cancellation instead of a
    * boolean flag. The waiter promise is scoped to this iteration —
-   * _wakeWaiter nulls _waiter synchronously after await.
+   * _wakeWaiter nulls #waiter synchronously after await.
    *
    * @param drain — If true, process remaining queued
    *   messages after cancellation before exiting.
    */
   async *_messages(drain: boolean = false): AsyncGenerator<string> {
-    const signal = this._abortController.signal;
+    const signal = this.#abortController.signal;
     while (true) {
       // Drain all currently queued messages synchronously
-      while (this._queue.length > 0) {
+      while (this.#queue.length > 0) {
         if (signal.aborted && !drain) break;
-        yield this._queue.shift()!;
+        yield this.#queue.shift()!;
       }
 
       // Check exit conditions after draining
@@ -205,18 +236,18 @@ export class MessageBus {
         if (!drain) break;
         // Drain mode: if queue is empty after cancellation, exit.
         // Otherwise loop back to drain remaining items.
-        if (this._queue.length === 0) break;
+        if (this.#queue.length === 0) break;
         continue;
       }
 
       // Wait for the next message or cancellation.
       // The promise is scoped to this iteration — _wakeWaiter nulls
-      // _waiter synchronously after await, so there's no lifecycle leak.
+      // #waiter synchronously after await, so there's no lifecycle leak.
       const promise = new Promise<void>((resolve) => {
-        this._waiter = { resolve };
+        this.#waiter = { resolve };
       });
       await promise;
-      this._waiter = null;
+      this.#waiter = null;
     }
   }
 
@@ -238,8 +269,8 @@ export class MessageBus {
    * new work.
    */
   async _processMessage(text: string): Promise<void> {
-    this._isRunning = true;
-    const agent = this._sessionManager.getAgent();
+    this.#isRunning = true;
+    const agent = this.#sessionManager.getAgent();
 
     // Reset the agent's cancel flag before processing.
     // This clears any leftover cancelled state from the previous
@@ -250,8 +281,8 @@ export class MessageBus {
     // Actions: { action: "continue" } | { action: "transform", text } | { action: "handled" }
     const inputData = { text, source: "interactive", agent };
     let inputHandled = false;
-    if (agent?._hooks) {
-      const inputResult = await agent._hooks.runHookPipeline(
+    if (agent?.hooks) {
+      const inputResult = await agent.hooks.runHookPipeline(
         HOOKS.INPUT,
         inputData,
         { shouldStop: (result: unknown) => (result as { action?: string })?.action === "handled" },
@@ -262,8 +293,8 @@ export class MessageBus {
 
     // If input was handled by a hook, skip agent processing
     if (inputHandled) {
-      this._isRunning = false;
-      this._sink.emit({
+      this.#isRunning = false;
+      this.#sink.emit({
         type: OUTPUT_EVENT.SESSION_STATE,
         key: "working",
         value: false,
@@ -282,17 +313,17 @@ export class MessageBus {
         LlmError.isCancelled(e);
 
       if (!isCancellation) {
-        this._sink.emit({
+        this.#sink.emit({
           type: OUTPUT_EVENT.COMMAND_RESULT,
           content: isExpectedError(e) ? (e as Error).message : formatError(e),
         });
       }
     }
 
-    this._isRunning = false;
+    this.#isRunning = false;
 
     // Signal that the agent is done working so the UI can hide the spinner
-    this._sink.emit({
+    this.#sink.emit({
       type: OUTPUT_EVENT.SESSION_STATE,
       key: "working",
       value: false,
@@ -303,11 +334,11 @@ export class MessageBus {
    * Execute a command through the agent.
    */
   async executeCommand(cmdText: string): Promise<number | undefined> {
-    const agent = this._sessionManager.getAgent();
+    const agent = this.#sessionManager.getAgent();
     const cmd = parseCommand(cmdText, agent?.getCommandRegistry());
 
     if (!agent) {
-      this._sink.emit({
+      this.#sink.emit({
         type: OUTPUT_EVENT.COMMAND_RESULT,
         content: "No agent available.",
       });
@@ -327,7 +358,7 @@ export class MessageBus {
 
       // ERROR — display the error message to the user.
       if (r.action && (r.action & ACTIONS.ERROR) && r.error) {
-        this._sink.emit({
+        this.#sink.emit({
           type: OUTPUT_EVENT.COMMAND_RESULT,
           content: r.error,
         });
@@ -335,7 +366,7 @@ export class MessageBus {
 
       // DISPLAY — show the result content as a command response.
       if (r.action && (r.action & ACTIONS.DISPLAY) && r.content) {
-        this._sink.emit({
+        this.#sink.emit({
           type: OUTPUT_EVENT.COMMAND_RESULT,
           content: r.content,
         });
@@ -345,13 +376,13 @@ export class MessageBus {
       // These only trigger when action is absent (null/undefined), not when
       // it's explicitly set to 0 (which is a valid "no action" bitflag).
       if (r.action == null && r.error) {
-        this._sink.emit({
+        this.#sink.emit({
           type: OUTPUT_EVENT.COMMAND_RESULT,
           content: r.error,
         });
       }
       if (r.action == null && r.content) {
-        this._sink.emit({
+        this.#sink.emit({
           type: OUTPUT_EVENT.COMMAND_RESULT,
           content: r.content,
         });

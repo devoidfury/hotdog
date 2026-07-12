@@ -24,7 +24,7 @@ describe("AgentSink", () => {
 
       const events = [];
       const parent = { emit: (e) => events.push(e) };
-      sink._parentSink = parent;
+      sink.parentSink = parent;
 
       sink.onTaskComplete("done");
 

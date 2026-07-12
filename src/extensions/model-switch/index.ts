@@ -17,7 +17,7 @@ import {
 } from "../../core/extensions/types.ts";
 
 interface Agent {
-  _modelRegistry?: Record<string, unknown>;
+  modelRegistry?: Record<string, unknown>;
   model?: string;
 }
 
@@ -53,7 +53,7 @@ export function create(core: CoreContext): ExtensionInstance {
           description: "List available models",
           matches: (cmd: string) => cmd === "models",
           handler: async (agent: Agent) => {
-            const models = Object.keys(agent._modelRegistry || {});
+            const models = Object.keys(agent.modelRegistry || {});
             if (models.length === 0) {
               return {
                 action: ACTIONS.DISPLAY,
@@ -80,7 +80,7 @@ export function create(core: CoreContext): ExtensionInstance {
 
             if (!modelName) {
               // No model name — show available models
-              const models = Object.keys(agent._modelRegistry || {});
+              const models = Object.keys(agent.modelRegistry || {});
               return {
                 action: ACTIONS.DISPLAY,
                 content: `Available models: ${models.join(", ")}`,

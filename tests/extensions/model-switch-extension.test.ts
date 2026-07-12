@@ -20,7 +20,7 @@ function createMockCore(config = {}) {
 
 function createMockAgent(modelRegistry = {}) {
   return {
-    _modelRegistry: modelRegistry,
+    modelRegistry: modelRegistry,
     model: "model-a",
     context: [],
     clearContext: async function () {

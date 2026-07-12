@@ -14,21 +14,21 @@ interface McpToolDefinition {
  * A tool that wraps an MCP server tool.
  */
 export class McpTool {
-  private readonly _serverName: string;
-  private readonly _toolName: string;
-  private readonly _toolDef: McpToolDefinition;
-  private readonly _connection: McpConnectionHandle;
-  private readonly _registeredName: string;
+  private readonly #serverName: string;
+  private readonly #toolName: string;
+  private readonly #toolDef: McpToolDefinition;
+  private readonly #connection: McpConnectionHandle;
+  private readonly #registeredName: string;
 
   /**
    * Create a new McpTool from an MCP tool definition.
    */
   constructor(serverName: string, toolDef: McpToolDefinition, connectionHandle: McpConnectionHandle) {
-    this._serverName = serverName;
-    this._toolName = toolDef.name;
-    this._toolDef = toolDef;
-    this._connection = connectionHandle;
-    this._registeredName = `${serverName}/${toolDef.name}`;
+    this.#serverName = serverName;
+    this.#toolName = toolDef.name;
+    this.#toolDef = toolDef;
+    this.#connection = connectionHandle;
+    this.#registeredName = `${serverName}/${toolDef.name}`;
   }
 
   /**
@@ -47,7 +47,7 @@ export class McpTool {
     }
 
     try {
-      const result = await this._connection.callTool(this._toolName, args);
+      const result = await this.#connection.callTool(this.#toolName, args);
       return { success: true, output: result };
     } catch (e: unknown) {
       return {
@@ -62,15 +62,15 @@ export class McpTool {
    * Convert to a tool definition for the agent API.
    */
   toToolDef(): Record<string, unknown> {
-    const mcpSchema = this._toolDef.inputSchema || {};
+    const mcpSchema = this.#toolDef.inputSchema || {};
     const properties = convertSchemaProperties(mcpSchema);
     const required = extractRequired(mcpSchema);
 
     return {
       type: "function",
       function: {
-        description: this._toolDef.description || "",
-        name: this._registeredName,
+        description: this.#toolDef.description || "",
+        name: this.#registeredName,
         parameters: {
           schema: "https://json-schema.org/draft/2020-12/schema",
           type: "object",
@@ -85,14 +85,14 @@ export class McpTool {
    * Display string for tool call.
    */
   callDisplay(input: string | Record<string, unknown> | null): string {
-    return `MCP [${this._serverName}] ${input}`;
+    return `MCP [${this.#serverName}] ${input}`;
   }
 
   /**
    * Get the registered tool name.
    */
   get registeredName(): string {
-    return this._registeredName;
+    return this.#registeredName;
   }
 }
 

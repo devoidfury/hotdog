@@ -247,7 +247,7 @@ export async function main(): Promise<number> {
   const { resolved, modelRegistry, providers } = await buildConfig(cli);
 
   // Enable hook tracing if configured
-  hooks._trace = resolved.hookTrace;
+  hooks.trace = resolved.hookTrace;
 
   const extParams = configRegistry.getConfigParams();
   const config = await loadConfig(cli.config, cli.configDir, extParams);

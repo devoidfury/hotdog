@@ -59,14 +59,14 @@ export interface HookTraceOptions {
 }
 
 export class HookSystem {
-  _hooks: Map<string, HookHandlerEntry[]>;
-  _trace: boolean | HookTraceOptions;
-  _handlerCounter: number;
+  #hooks: Map<string, HookHandlerEntry[]>;
+  #trace: boolean | HookTraceOptions;
+  #handlerCounter: number;
 
   constructor() {
-    this._hooks = new Map();
-    this._trace = false;
-    this._handlerCounter = 0;
+    this.#hooks = new Map();
+    this.#trace = false;
+    this.#handlerCounter = 0;
   }
 
   /**
@@ -82,9 +82,9 @@ export class HookSystem {
     handler: HookHandler,
     source?: string,
   ): () => void {
-    if (!this._hooks.has(hookName)) this._hooks.set(hookName, []);
-    const handlers = this._hooks.get(hookName)!;
-    const id = ++this._handlerCounter;
+    if (!this.#hooks.has(hookName)) this.#hooks.set(hookName, []);
+    const handlers = this.#hooks.get(hookName)!;
+    const id = ++this.#handlerCounter;
     handlers.push({ id, handler, source });
 
     // Return a removal function
@@ -103,7 +103,7 @@ export class HookSystem {
    * @returns true if handler was found and removed.
    */
   off(hookName: string, handler: HookHandler): boolean {
-    const handlers = this._hooks.get(hookName);
+    const handlers = this.#hooks.get(hookName);
     if (!handlers) return false;
     const idx = handlers.findIndex((h) => h.handler === handler);
     if (idx !== -1) {
@@ -118,7 +118,7 @@ export class HookSystem {
    * All handlers run synchronously in order. Return values are ignored.
    */
   notifyHooks(hookName: string, data: unknown): void {
-    const handlers = this._hooks.get(hookName) || [];
+    const handlers = this.#hooks.get(hookName) || [];
     let doTrace = this._shouldTrace(hookName);
 
     for (let i = 0; i < handlers.length; i++) {
@@ -141,7 +141,7 @@ export class HookSystem {
    * Returns immediately — does not wait for handlers to complete.
    */
   notifyHooksAsync(hookName: string, data: unknown): void {
-    const handlers = this._hooks.get(hookName) || [];
+    const handlers = this.#hooks.get(hookName) || [];
     let doTrace = this._shouldTrace(hookName);
 
     if (doTrace && handlers.length > 0) {
@@ -215,7 +215,7 @@ export class HookSystem {
     data: unknown,
     opts: HookPipelineOptions = {},
   ): Promise<HookPipelineResult> {
-    const handlers = this._hooks.get(hookName) || [];
+    const handlers = this.#hooks.get(hookName) || [];
     const results: Array<{ result: unknown; source: string | null }> = [];
     let lastResult: unknown;
     let stopped = false;
@@ -274,9 +274,9 @@ export class HookSystem {
    */
   clear(hookName?: string): void {
     if (hookName) {
-      this._hooks.delete(hookName);
+      this.#hooks.delete(hookName);
     } else {
-      this._hooks.clear();
+      this.#hooks.clear();
     }
   }
 
@@ -286,7 +286,7 @@ export class HookSystem {
    * @returns number of handlers
    */
   handlerCount(hookName: string): number {
-    return (this._hooks.get(hookName) || []).length;
+    return (this.#hooks.get(hookName) || []).length;
   }
 
   /**
@@ -294,20 +294,39 @@ export class HookSystem {
    * @returns array of hook names
    */
   hookNames(): string[] {
-    return Array.from(this._hooks.keys());
+    return Array.from(this.#hooks.keys());
+  }
+
+  /**
+   * Enable/disable trace logging for hooks.
+   * @param value — boolean or HookTraceOptions
+   */
+  get trace(): boolean | HookTraceOptions {
+    return this.#trace;
+  }
+  set trace(value: boolean | HookTraceOptions) {
+    this.#trace = value;
+  }
+
+  /**
+   * Get the internal handler map (exposed for testing).
+   * @returns Map of hook name → handler entries
+   */
+  get hooksMap(): Map<string, HookHandlerEntry[]> {
+    return this.#hooks;
   }
 
   // ── Private helpers ──────────────────────────────────────────────────────
 
   private _shouldTrace(hookName: string): boolean {
     if (hookName === "log") return false;
-    if (typeof this._trace === "boolean") {
-      return this._trace;
+    if (typeof this.#trace === "boolean") {
+      return this.#trace;
     }
-    if (typeof this._trace === "object" && this._trace !== null) {
-      let doTrace = this._trace.enabled ?? false;
-      if (this._trace.enabledHooks && this._trace.enabledHooks.length > 0) {
-        doTrace = doTrace && this._trace.enabledHooks.includes(hookName);
+    if (typeof this.#trace === "object" && this.#trace !== null) {
+      let doTrace = this.#trace.enabled ?? false;
+      if (this.#trace.enabledHooks && this.#trace.enabledHooks.length > 0) {
+        doTrace = doTrace && this.#trace.enabledHooks.includes(hookName);
       }
       return doTrace;
     }
@@ -315,10 +334,10 @@ export class HookSystem {
   }
 
   private _isTraceDisabled(source: string | undefined): boolean {
-    if (typeof this._trace === "object" && this._trace !== null) {
+    if (typeof this.#trace === "object" && this.#trace !== null) {
       return (
-        this._trace.disabledSources &&
-        this._trace.disabledSources.includes(source ?? "")
+        this.#trace.disabledSources &&
+        this.#trace.disabledSources.includes(source ?? "")
       );
     }
     return false;

@@ -19,8 +19,8 @@ describe("MessageBus constructor", () => {
       sink: createMockSink(),
     });
     expect(bus).toBeDefined();
-    expect(bus._queue).toEqual([]);
-    expect(bus._isRunning).toBe(false);
+    expect(bus.queue).toEqual([]);
+    expect(bus.isRunning).toBe(false);
   });
 
   it("creates AbortController", () => {
@@ -28,7 +28,7 @@ describe("MessageBus constructor", () => {
       sessionManager: createMockSessionManager(),
       sink: createMockSink(),
     });
-    expect(bus._abortController).toBeDefined();
+    expect(bus.abortController).toBeDefined();
   });
 
   it("isCancelled returns false initially", () => {
@@ -68,7 +68,7 @@ describe("MessageBus.enqueue()", () => {
       sink: { emit: () => {} },
     });
     bus.enqueue("hello");
-    expect(bus._queue).toEqual(["hello"]);
+    expect(bus.queue).toEqual(["hello"]);
   });
 
   it("adds multiple messages to queue", () => {
@@ -78,7 +78,7 @@ describe("MessageBus.enqueue()", () => {
     });
     bus.enqueue("msg1");
     bus.enqueue("msg2");
-    expect(bus._queue).toEqual(["msg1", "msg2"]);
+    expect(bus.queue).toEqual(["msg1", "msg2"]);
   });
 
   it("wakes waiter when present", () => {
@@ -89,11 +89,11 @@ describe("MessageBus.enqueue()", () => {
 
     // Simulate a waiter
     let resolved = false;
-    bus._waiter = { resolve: () => { resolved = true; } };
+    bus.waiter = { resolve: () => { resolved = true; } };
 
     bus.enqueue("test");
     expect(resolved).toBe(true);
-    expect(bus._waiter).toBeNull();
+    expect(bus.waiter).toBeNull();
   });
 });
 
@@ -125,7 +125,7 @@ describe("MessageBus.cancel()", () => {
     });
 
     let resolved = false;
-    bus._waiter = { resolve: () => { resolved = true; } };
+    bus.waiter = { resolve: () => { resolved = true; } };
 
     bus.cancel();
     expect(resolved).toBe(true);
@@ -161,7 +161,7 @@ describe("MessageBus.interrupt()", () => {
     bus.enqueue("msg1");
     bus.enqueue("msg2");
     bus.interrupt();
-    expect(bus._queue).toEqual([]);
+    expect(bus.queue).toEqual([]);
   });
 
   it("does NOT abort the controller (bus continues running)", () => {
@@ -180,7 +180,7 @@ describe("MessageBus.interrupt()", () => {
     });
 
     let resolved = false;
-    bus._waiter = { resolve: () => { resolved = true; } };
+    bus.waiter = { resolve: () => { resolved = true; } };
 
     bus.interrupt();
     expect(resolved).toBe(true);
@@ -217,7 +217,7 @@ describe("MessageBus.reset()", () => {
     bus.enqueue("msg1");
     bus.cancel();
     bus.reset();
-    expect(bus._queue).toEqual(["msg1"]);
+    expect(bus.queue).toEqual(["msg1"]);
   });
 
   it("allows the bus to be used again after reset", () => {
@@ -228,7 +228,7 @@ describe("MessageBus.reset()", () => {
     bus.cancel();
     bus.reset();
     bus.enqueue("new-msg");
-    expect(bus._queue).toEqual(["new-msg"]);
+    expect(bus.queue).toEqual(["new-msg"]);
     expect(bus.isCancelled).toBe(false);
   });
 });
@@ -265,7 +265,7 @@ describe("MessageBus.isIdle()", () => {
       sessionManager: { getAgent: () => null },
       sink: { emit: () => {} },
     });
-    bus._isRunning = true;
+    bus.isRunning = true;
     expect(bus.isIdle()).toBe(false);
   });
 });
@@ -357,7 +357,7 @@ describe("MessageBus._processMessage()", () => {
     });
 
     await bus._processMessage("test");
-    expect(bus._isRunning).toBe(false); // Should be false after processing
+    expect(bus.isRunning).toBe(false); // Should be false after processing
   });
 
   it("resets agent cancel flag before processing", async () => {
@@ -400,7 +400,7 @@ describe("MessageBus._processMessage()", () => {
     const mockAgent = {
       resetCancel: () => {},
       run: async () => { runCalled = true; },
-      _hooks: {
+      hooks: {
         runHookPipeline: async (hookName, data, opts) => ({
           stopped: true,
           data: { text: data.text },
@@ -421,7 +421,7 @@ describe("MessageBus._processMessage()", () => {
     const mockAgent = {
       resetCancel: () => {},
       run: async (text) => { receivedText = text; },
-      _hooks: {
+      hooks: {
         runHookPipeline: async (hookName, data, opts) => ({
           stopped: false,
           data: { text: "transformed: " + data.text },
@@ -522,7 +522,7 @@ describe("MessageBus._processMessage()", () => {
     await bus._processMessage("test");
     // Should not throw, should still emit working=false
     expect(emittedEvent.type).toBe(OUTPUT_EVENT.SESSION_STATE);
-    expect(bus._isRunning).toBe(false);
+    expect(bus.isRunning).toBe(false);
   });
 });
 
@@ -534,10 +534,10 @@ describe("MessageBus._wakeWaiter()", () => {
     });
 
     let resolved = false;
-    bus._waiter = { resolve: () => { resolved = true; } };
+    bus.waiter = { resolve: () => { resolved = true; } };
     bus._wakeWaiter();
     expect(resolved).toBe(true);
-    expect(bus._waiter).toBeNull();
+    expect(bus.waiter).toBeNull();
   });
 
   it("is idempotent — does nothing when no waiter", () => {
@@ -556,7 +556,7 @@ describe("MessageBus._wakeWaiter()", () => {
       sink: { emit: () => {} },
     });
 
-    bus._waiter = { resolve: () => {} };
+    bus.waiter = { resolve: () => {} };
     bus._wakeWaiter();
     // Should not throw on second call
     bus._wakeWaiter();

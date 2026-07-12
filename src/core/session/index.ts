@@ -17,16 +17,16 @@ export interface Serializer {
  * Session store — holds agents keyed by session ID.
  */
 export class SessionStore {
-  _agents: Map<string, AgentLike>;
-  _initialSessionId: string | null;
+  #agents: Map<string, AgentLike>;
+  #initialSessionId: string | null;
 
   /**
    * @param options
    * @param options.initialSessionId - Optional initial session ID
    */
   constructor(options: { initialSessionId?: string } = {}) {
-    this._agents = new Map();
-    this._initialSessionId = options.initialSessionId || null;
+    this.#agents = new Map();
+    this.#initialSessionId = options.initialSessionId || null;
   }
 
   /**
@@ -36,9 +36,9 @@ export class SessionStore {
    */
   addAgent(agent: AgentLike): string {
     const sessionId = agent.sessionId || crypto.randomUUID();
-    this._agents.set(sessionId, agent);
-    if (!this._initialSessionId) {
-      this._initialSessionId = sessionId;
+    this.#agents.set(sessionId, agent);
+    if (!this.#initialSessionId) {
+      this.#initialSessionId = sessionId;
     }
     return sessionId;
   }
@@ -49,7 +49,7 @@ export class SessionStore {
    * @returns Agent instance or undefined.
    */
   getAgent(sessionId: string): AgentLike | undefined {
-    return this._agents.get(sessionId);
+    return this.#agents.get(sessionId);
   }
 
   /**
@@ -57,7 +57,7 @@ export class SessionStore {
    * @returns Initial session ID or null.
    */
   initialSessionId(): string | null {
-    return this._initialSessionId;
+    return this.#initialSessionId;
   }
 
   /**
@@ -65,7 +65,7 @@ export class SessionStore {
    * @returns Agent count.
    */
   size(): number {
-    return this._agents.size;
+    return this.#agents.size;
   }
 
   /**
@@ -74,8 +74,8 @@ export class SessionStore {
    * @returns True if agent was removed.
    */
   removeAgent(sessionId: string): boolean {
-    if (!this._agents.has(sessionId)) return false;
-    this._agents.delete(sessionId);
+    if (!this.#agents.has(sessionId)) return false;
+    this.#agents.delete(sessionId);
     return true;
   }
 
@@ -84,7 +84,15 @@ export class SessionStore {
    * @returns Array of agent instances.
    */
   agents(): AgentLike[] {
-    return Array.from(this._agents.values());
+    return Array.from(this.#agents.values());
+  }
+
+  /**
+   * Get all session IDs in the store.
+   * @returns Array of session IDs.
+   */
+  sessionIds(): string[] {
+    return Array.from(this.#agents.keys());
   }
 }
 
@@ -103,12 +111,12 @@ export interface SessionManagerOptions {
  * Manages the session lifecycle: owns agents, enables swaps.
  */
 export class SessionManager {
-  _hooks: SessionManagerOptions["hooks"];
-  _extensions: unknown;
-  _buildAgent: (config: Record<string, unknown>) => Promise<AgentLike>;
-  _serializer: Serializer | null;
-  _store: SessionStore;
-  _currentSessionId: string | null;
+  #hooks: SessionManagerOptions["hooks"];
+  #extensions: unknown;
+  #buildAgent: (config: Record<string, unknown>) => Promise<AgentLike>;
+  #serializer: Serializer | null;
+  #store: SessionStore;
+  #currentSessionId: string | null;
 
   /**
    * Create a new SessionManager with an initial agent.
@@ -127,20 +135,20 @@ export class SessionManager {
     if (options.buildAgent) {
       const initialConfig = options.initialConfig || {};
       const agent = await options.buildAgent(initialConfig);
-      const sessionId = instance._store.addAgent(agent);
-      instance._currentSessionId = sessionId;
+      const sessionId = instance.#store.addAgent(agent);
+      instance.#currentSessionId = sessionId;
     }
 
     return instance;
   }
 
   constructor(options: SessionManagerOptions) {
-    this._hooks = options.hooks;
-    this._extensions = options.extensions;
-    this._buildAgent = options.buildAgent;
-    this._serializer = options.serializer || null;
-    this._store = new SessionStore();
-    this._currentSessionId = null;
+    this.#hooks = options.hooks;
+    this.#extensions = options.extensions;
+    this.#buildAgent = options.buildAgent;
+    this.#serializer = options.serializer || null;
+    this.#store = new SessionStore();
+    this.#currentSessionId = null;
   }
 
   // ── Session Lifecycle ─────────────────────────────────────────────────────
@@ -151,10 +159,10 @@ export class SessionManager {
    * @returns Session ID.
    */
   async create(config: Record<string, unknown>): Promise<string> {
-    const agent = await this._buildAgent(config);
-    const sessionId = this._store.addAgent(agent);
-    this._currentSessionId = sessionId;
-    await this._hooks.notifyHooksAsync(HOOKS.SESSION_CREATE, {
+    const agent = await this.#buildAgent(config);
+    const sessionId = this.#store.addAgent(agent);
+    this.#currentSessionId = sessionId;
+    await this.#hooks.notifyHooksAsync(HOOKS.SESSION_CREATE, {
       session: this,
       config,
     });
@@ -167,11 +175,11 @@ export class SessionManager {
    * @returns The new agent instance.
    */
   async swap(config: Record<string, unknown>): Promise<AgentLike> {
-    const oldAgent = this._store.getAgent(this._currentSessionId!);
-    const newAgent = await this._buildAgent(config);
-    this._store.addAgent(newAgent);
-    this._currentSessionId = newAgent.sessionId;
-    await this._hooks.notifyHooksAsync(HOOKS.SESSION_SWAP, {
+    const oldAgent = this.#store.getAgent(this.#currentSessionId!);
+    const newAgent = await this.#buildAgent(config);
+    this.#store.addAgent(newAgent);
+    this.#currentSessionId = newAgent.sessionId;
+    await this.#hooks.notifyHooksAsync(HOOKS.SESSION_SWAP, {
       oldAgent,
       newAgent,
     });
@@ -183,7 +191,7 @@ export class SessionManager {
    * @returns Agent instance or undefined.
    */
   getAgent(): AgentLike | undefined {
-    return this._store.getAgent(this._currentSessionId!);
+    return this.#store.getAgent(this.#currentSessionId!);
   }
 
   /**
@@ -192,7 +200,7 @@ export class SessionManager {
    * @returns Agent instance or undefined.
    */
   getAgentBySessionId(sessionId: string): AgentLike | undefined {
-    return this._store.getAgent(sessionId);
+    return this.#store.getAgent(sessionId);
   }
 
   /**
@@ -201,10 +209,10 @@ export class SessionManager {
    * @returns Agent instance or undefined.
    */
   switchSession(sessionId: string): AgentLike | undefined {
-    const agent = this._store.getAgent(sessionId);
+    const agent = this.#store.getAgent(sessionId);
     if (agent) {
-      this._currentSessionId = sessionId;
-      this._hooks.notifyHooks(HOOKS.SESSION_SWAP, {
+      this.#currentSessionId = sessionId;
+      this.#hooks.notifyHooks(HOOKS.SESSION_SWAP, {
         oldAgent: agent,
         newAgent: agent,
       });
@@ -217,7 +225,7 @@ export class SessionManager {
    * @returns Session ID or undefined.
    */
   sessionId(): string | null {
-    return this._currentSessionId;
+    return this.#currentSessionId;
   }
 
   // ── Serialization ─────────────────────────────────────────────────────────
@@ -229,8 +237,8 @@ export class SessionManager {
   serialize(): Record<string, unknown> | null {
     const agent = this.getAgent();
     if (!agent) return null;
-    if (this._serializer) {
-      return this._serializer.serialize(agent);
+    if (this.#serializer) {
+      return this.#serializer.serialize(agent);
     }
     return agent.serialize();
   }
@@ -241,12 +249,12 @@ export class SessionManager {
    * @returns The deserialized agent
    */
   async deserialize(data: Record<string, unknown>): Promise<AgentLike> {
-    await this._hooks.notifyHooksAsync(HOOKS.SESSION_DESERIALIZE, { data });
+    await this.#hooks.notifyHooksAsync(HOOKS.SESSION_DESERIALIZE, { data });
 
-    const agent = await this._buildAgent({ model: data.model });
+    const agent = await this.#buildAgent({ model: data.model });
     agent.deserialize(data);
-    this._store.addAgent(agent);
-    this._currentSessionId = data.sessionId as string;
+    this.#store.addAgent(agent);
+    this.#currentSessionId = data.sessionId as string;
     return agent;
   }
 
@@ -256,20 +264,20 @@ export class SessionManager {
    * Get the session store.
    */
   getStore(): SessionStore {
-    return this._store;
+    return this.#store;
   }
 
   /**
    * Get all session IDs.
    */
   sessionIds(): string[] {
-    return Array.from(this._store._agents.keys());
+    return this.#store.sessionIds();
   }
 
   /**
    * Get the number of sessions.
    */
   sessionCount(): number {
-    return this._store.size();
+    return this.#store.size();
   }
 }

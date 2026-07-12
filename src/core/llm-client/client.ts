@@ -75,7 +75,7 @@ export class LlmClient {
   stream: boolean;
   providers: ProviderConfig[];
   cancelled: boolean;
-  _mangler: MarkerMangler | null;
+  #mangler: MarkerMangler | null;
 
   /**
    * @param options
@@ -104,10 +104,17 @@ export class LlmClient {
     this.stream = options.stream !== false;
     this.providers = options.providers || [];
     this.cancelled = false;
-    this._mangler =
+    this.#mangler =
       options.markerMangler !== undefined
         ? options.markerMangler
         : createMarkerMangler();
+  }
+
+  /**
+   * Get the marker mangler instance (exposed for testing).
+   */
+  get markerMangler(): MarkerMangler | null {
+    return this.#mangler;
   }
 
   /**
@@ -155,7 +162,7 @@ export class LlmClient {
    * @returns Escaped messages.
    */
   _escapeMessages(messages: Array<Record<string, unknown>>): Array<Record<string, unknown>> {
-    if (!this._mangler) return messages;
+    if (!this.#mangler) return messages;
     return messages.map((msg) => {
       const json = msg.toJSON
         ? (msg.toJSON() as Record<string, unknown>)
@@ -165,12 +172,12 @@ export class LlmClient {
           // Content is an array of parts (text + image_url)
           json.content = (json.content as Array<Record<string, unknown>>).map((part) => {
             if (part.type === "text" && typeof part.text === "string") {
-              return { ...part, text: this._mangler!.escape(part.text as string) };
+              return { ...part, text: this.#mangler!.escape(part.text as string) };
             }
             return part; // image_url parts pass through unchanged
           });
         } else if (typeof json.content === "string") {
-          json.content = this._mangler.escape(json.content);
+          json.content = this.#mangler.escape(json.content);
         }
       }
       if (json.tool_calls) {
@@ -179,11 +186,11 @@ export class LlmClient {
           if (clonedTc.function) {
             clonedTc.function = { ...(clonedTc.function as Record<string, unknown>) };
             if (clonedTc.function.name)
-              clonedTc.function.name = this._mangler!.escape(
+              clonedTc.function.name = this.#mangler!.escape(
                 clonedTc.function.name as string,
               );
             if (clonedTc.function.arguments)
-              clonedTc.function.arguments = this._mangler!.escape(
+              clonedTc.function.arguments = this.#mangler!.escape(
                 clonedTc.function.arguments as string,
               );
           }
@@ -595,14 +602,14 @@ export class LlmClient {
       // Reasoning/thinking content
       if (delta.reasoning_content) {
         let content = delta.reasoning_content as string;
-        if (this._mangler) content = this._mangler.unescape(content);
+        if (this.#mangler) content = this.#mangler.unescape(content);
         events.push({ type: "reasoning", content });
       }
 
       // Regular content
       if (delta.content) {
         let content = delta.content as string;
-        if (this._mangler) content = this._mangler.unescape(content);
+        if (this.#mangler) content = this.#mangler.unescape(content);
         events.push({ type: "content", content });
       }
 
@@ -612,9 +619,9 @@ export class LlmClient {
         if (tc.function) {
           let name = (tc.function as Record<string, unknown>).name as string | undefined;
           let arguments_ = (tc.function as Record<string, unknown>).arguments as string | undefined;
-          if (this._mangler) {
-            if (name) name = this._mangler.unescape(name);
-            if (arguments_) arguments_ = this._mangler.unescape(arguments_);
+          if (this.#mangler) {
+            if (name) name = this.#mangler.unescape(name);
+            if (arguments_) arguments_ = this.#mangler.unescape(arguments_);
           }
           if (name) {
             events.push({

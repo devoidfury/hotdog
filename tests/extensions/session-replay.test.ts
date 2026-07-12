@@ -34,21 +34,19 @@ function cleanupSession(sessionId) {
 
 function createMockAgent(sessionId) {
   const log = new MessageLog();
+  let _isRestoring = false;
   const agent = {
     _log: log,
     _sessionId: sessionId || crypto.randomUUID(),
-    _isRestoring: false,
     _systemPrompt: null,
     _iterationCount: 0,
     get log() { return log; },
     get sessionId() { return this._sessionId; },
+    get isRestoring() { return _isRestoring; },
+    set isRestoring(v: boolean) { _isRestoring = v; },
     ensureSystemPrompt: () => {},
     addMessage(msg) { log.push(msg); },
   };
-  Object.defineProperty(agent, 'isRestoring', {
-    get() { return agent._isRestoring; },
-    set(v) { agent._isRestoring = v; },
-  });
   return agent;
 }
 

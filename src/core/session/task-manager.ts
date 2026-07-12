@@ -22,23 +22,23 @@ export type TaskStatus = (typeof TASK_STATUS)[keyof typeof TASK_STATUS];
 /** Handle to a running task agent. Provides status checks, follow-up sending, and interruption. */
 export class TaskHandle {
   taskId: string;
-  _statusRef: { value: TaskStatus };
-  _abortController: AbortController;
+  #statusRef: { value: TaskStatus };
+  #abortController: AbortController;
 
   constructor(taskId: string, statusRef: { value: TaskStatus }, abortController: AbortController) {
     this.taskId = taskId;
-    this._statusRef = statusRef;
-    this._abortController = abortController;
+    this.#statusRef = statusRef;
+    this.#abortController = abortController;
   }
 
   get status(): TaskStatus {
-    return this._statusRef.value;
+    return this.#statusRef.value;
   }
 
   /** Interrupt (cancel) a running task. */
   interrupt(): boolean {
     if (this.status === TASK_STATUS.RUNNING) {
-      this._abortController.abort();
+      this.#abortController.abort();
       return true;
     }
     return false;
@@ -48,11 +48,11 @@ export class TaskHandle {
 // ── TaskManager ─────────────────────────────────────────────────────────────
 
 export interface TaskAgent {
-  _abortSignal: AbortSignal | null;
+  abortSignal: AbortSignal | null;
   run(description: string): Promise<string | undefined>;
   _notifyCompletion(result: string): void;
   addMessage(msg: Message): void;
-  _followQueue?: string[];
+  followQueue?: string[];
 }
 
 export interface SpawnTaskOptions {
@@ -84,22 +84,22 @@ export interface TaskManagerRequiredOptions {
  * - Background execution with AbortController
  */
 export class TaskManager {
-  _buildAgent: (config: Record<string, unknown>) => Promise<TaskAgent>;
-  _llmClient: unknown;
-  _modelRegistry: Record<string, unknown>;
-  _config: Record<string, unknown>;
-  _hooks: unknown;
-  _sessionManager: { getAgent: () => TaskAgent | undefined } | null;
-  _maxIterations: number;
-  _taskProfile: string;
-  _taskRole: string;
-  _tasks: Map<string, {
+  #buildAgent: (config: Record<string, unknown>) => Promise<TaskAgent>;
+  #llmClient: unknown;
+  #modelRegistry: Record<string, unknown>;
+  #config: Record<string, unknown>;
+  #hooks: unknown;
+  #sessionManager: { getAgent: () => TaskAgent | undefined } | null;
+  #maxIterations: number;
+  #taskProfile: string;
+  #taskRole: string;
+  #tasks: Map<string, {
     agent: TaskAgent;
     abortController: AbortController;
     statusRef: { value: TaskStatus };
     runPromise: Promise<string>;
   }>;
-  _bus: { enqueue: (text: string) => void } | null;
+  #bus: { enqueue: (text: string) => void } | null;
 
   /**
    * @param options
@@ -114,17 +114,17 @@ export class TaskManager {
    * @param options.taskRole — Default task role (from resolved config)
    */
   constructor(options: TaskManagerOptions & TaskManagerRequiredOptions) {
-    this._buildAgent = options.buildAgent;
-    this._llmClient = options.llmClient;
-    this._modelRegistry = options.modelRegistry || {};
-    this._config = options.config || {};
-    this._hooks = options.hooks || null;
-    this._sessionManager = options.sessionManager || null;
-    this._maxIterations = options.maxIterations;
-    this._taskProfile = options.taskProfile;
-    this._taskRole = options.taskRole;
-    this._tasks = new Map();
-    this._bus = null;
+    this.#buildAgent = options.buildAgent;
+    this.#llmClient = options.llmClient;
+    this.#modelRegistry = options.modelRegistry || {};
+    this.#config = options.config || {};
+    this.#hooks = options.hooks || null;
+    this.#sessionManager = options.sessionManager || null;
+    this.#maxIterations = options.maxIterations;
+    this.#taskProfile = options.taskProfile;
+    this.#taskRole = options.taskRole;
+    this.#tasks = new Map();
+    this.#bus = null;
   }
 
   /**
@@ -133,7 +133,7 @@ export class TaskManager {
    * @param sessionManager — SessionManager instance
    */
   setSessionManager(sessionManager: { getAgent: () => TaskAgent | undefined }): void {
-    this._sessionManager = sessionManager;
+    this.#sessionManager = sessionManager;
   }
 
   /**
@@ -142,7 +142,14 @@ export class TaskManager {
    * @param bus — MessageBus instance with enqueue() method
    */
   setBus(bus: { enqueue: (text: string) => void }): void {
-    this._bus = bus;
+    this.#bus = bus;
+  }
+
+  /**
+   * Get the config reference (exposed for extensions).
+   */
+  get config(): Record<string, unknown> {
+    return this.#config;
   }
 
   /**
@@ -154,8 +161,8 @@ export class TaskManager {
    */
   _onTaskComplete(taskId: string, result: string): void {
     // Append result to manager's context
-    if (this._sessionManager) {
-      const agent = this._sessionManager.getAgent();
+    if (this.#sessionManager) {
+      const agent = this.#sessionManager.getAgent();
       if (agent) {
         const tag = "system-notice"; // this keeps the marker mangler from interfering with the tag
         agent.addMessage(
@@ -168,8 +175,8 @@ export class TaskManager {
     }
 
     // Wake up the manager via bus
-    if (this._bus) {
-      this._bus.enqueue(`[Task ${taskId} completed]\n${result}`);
+    if (this.#bus) {
+      this.#bus.enqueue(`[Task ${taskId} completed]\n${result}`);
     }
   }
 
@@ -188,18 +195,18 @@ export class TaskManager {
     options: SpawnTaskOptions = {} as SpawnTaskOptions,
   ): Promise<TaskHandle> {
     // 1. Load task profile
-    const profileName = options.profile || this._taskProfile;
-    const taskProfile = loadProfileFile((this._config as Record<string, unknown>).profilesPath as string, profileName);
+    const profileName = options.profile || this.#taskProfile;
+    const taskProfile = loadProfileFile((this.#config as Record<string, unknown>).profilesPath as string, profileName);
 
     // 2. Resolve model
     const resolvedModel =
       options.workerModel ||
       (taskProfile && (taskProfile as Record<string, unknown>).model) ||
-      (this._modelRegistry as { default?: string }).default ||
+      (this.#modelRegistry as { default?: string }).default ||
       "";
 
     // 3. Build system prompt from profile
-    const resolvedRole = (taskProfile as Record<string, unknown>)?.role || this._taskRole;
+    const resolvedRole = (taskProfile as Record<string, unknown>)?.role || this.#taskRole;
     const resolvedProfileBody = (taskProfile as Record<string, unknown>)?.body || "";
 
     // 4. Resolve allowed tools: profile whitelist takes precedence
@@ -222,11 +229,11 @@ export class TaskManager {
       hideTools: true,
       hideThinking: true,
       showTokenUse: false,
-      maxIterations: this._maxIterations,
+      maxIterations: this.#maxIterations,
     };
 
     // 7. Create the agent
-    const agent = await this._buildAgent(agentConfig);
+    const agent = await this.#buildAgent(agentConfig);
 
     // 8. Create abort controller and status ref
     const abortController = new AbortController();
@@ -241,7 +248,7 @@ export class TaskManager {
     );
 
     // 10. Store task info
-    this._tasks.set(taskId, {
+    this.#tasks.set(taskId, {
       agent,
       abortController,
       statusRef,
@@ -269,7 +276,7 @@ export class TaskManager {
 
     try {
       // Run with abort signal support
-      agent._abortSignal = abortController.signal;
+      agent.abortSignal = abortController.signal;
 
       result = (await agent.run(description)) as string;
 
@@ -301,7 +308,7 @@ export class TaskManager {
    * @returns Task status or null if not found.
    */
   taskStatus(taskId: string): TaskStatus | null {
-    const task = this._tasks.get(taskId);
+    const task = this.#tasks.get(taskId);
     if (!task) return null;
     return task.statusRef.value;
   }
@@ -313,7 +320,7 @@ export class TaskManager {
    * @returns Whether the follow-up was sent.
    */
   sendFollowUp(taskId: string, message: string): boolean {
-    const task = this._tasks.get(taskId);
+    const task = this.#tasks.get(taskId);
     if (!task || task.statusRef.value !== TASK_STATUS.RUNNING) {
       return false;
     }
@@ -336,7 +343,7 @@ export class TaskManager {
    * @returns Whether the task was interrupted.
    */
   interruptTask(taskId: string): boolean {
-    const task = this._tasks.get(taskId);
+    const task = this.#tasks.get(taskId);
     if (!task) return false;
     return task.abortController.abort();
   }
@@ -347,7 +354,7 @@ export class TaskManager {
    */
   activeTasks(): string[] {
     const active: string[] = [];
-    for (const [id, task] of this._tasks) {
+    for (const [id, task] of this.#tasks) {
       if (task.statusRef.value === TASK_STATUS.RUNNING) {
         active.push(id);
       }
@@ -362,7 +369,7 @@ export class TaskManager {
   taskCounts(): [number, number] | null {
     const active = this.activeTasks().length;
     if (active === 0) return null;
-    return [active, this._tasks.size];
+    return [active, this.#tasks.size];
   }
 
   /**

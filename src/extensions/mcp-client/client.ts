@@ -93,21 +93,40 @@ export class McpClient {
   }
 
   // Request ID counter
-  private _idCounter: number = 0;
+  private #idCounter: number = 0;
   // Pending requests: id -> PendingRequest
-  private _pending: Map<number, PendingRequest> = new Map();
+  private #pending: Map<number, PendingRequest> = new Map();
   // Buffered responses not yet matched
-  private _buffered: { id: number; result: unknown; error: unknown; raw: string }[] = [];
+  private #buffered: { id: number; result: unknown; error: unknown; raw: string }[] = [];
   // Server capabilities (filled after initialize)
-  private _serverCapabilities: unknown = null;
-  private _serverInfo: unknown = null;
+  private #serverCapabilities: unknown = null;
+  private #serverInfo: unknown = null;
   // Cancellation
-  private _cancelled: boolean = false;
+  private #cancelled: boolean = false;
   // Reader task references
-  private _readerTask: Promise<void> | null = null;
-  private _stderrTask: Promise<void> | null = null;
+  private #readerTask: Promise<void> | null = null;
+  private #stderrTask: Promise<void> | null = null;
   // Stderr capture
-  private _stderrOutput: string = "";
+  private #stderrOutput: string = "";
+
+  // ── Test-only accessors ─────────────────────────────────────────────────
+
+  /** @internal Exposed for testing. */
+  get idCounter(): number { return this.#idCounter; }
+
+  /** @internal Exposed for testing. */
+  get pending(): Map<number, PendingRequest> { return this.#pending; }
+
+  /** @internal Exposed for testing. */
+  get buffered(): { id: number; result: unknown; error: unknown; raw: string }[] { return this.#buffered; }
+
+  /** @internal Exposed for testing. */
+  get cancelled(): boolean { return this.#cancelled; }
+  set cancelled(v: boolean) { this.#cancelled = v; }
+
+  /** @internal Exposed for testing. */
+  get stderrOutput(): string { return this.#stderrOutput; }
+  set stderrOutput(v: string) { this.#stderrOutput = v; }
 
   // ── Stdio reader ────────────────────────────────────────────────────────
 
@@ -117,10 +136,10 @@ export class McpClient {
 
     let buffer = "";
 
-    this._readerTask = (async () => {
+    this.#readerTask = (async () => {
       try {
         for await (const chunk of readStream) {
-          if (this._cancelled) break;
+          if (this.#cancelled) break;
           buffer += chunk.toString();
 
           // Process complete lines
@@ -132,7 +151,7 @@ export class McpClient {
           }
         }
       } catch (e: unknown) {
-        if (!this._cancelled) {
+        if (!this.#cancelled) {
           logger.error(`MCP reader error: ${formatError(e)}`);
         }
       }
@@ -143,10 +162,10 @@ export class McpClient {
     const stderr = (this as Record<string, unknown>)._stderr as NodeJS.ReadableStream | undefined;
     if (!stderr) return;
 
-    this._stderrTask = (async () => {
+    this.#stderrTask = (async () => {
       try {
         for await (const chunk of stderr) {
-          this._stderrOutput += chunk.toString();
+          this.#stderrOutput += chunk.toString();
         }
       } catch {
         // Ignore
@@ -169,9 +188,9 @@ export class McpClient {
     if (msg.jsonrpc === "2.0" && msg.id !== undefined) {
       // This is a response or notification with an ID
       if (msg.result !== undefined || msg.error !== undefined) {
-        const pending = this._pending.get(msg.id as number);
+        const pending = this.#pending.get(msg.id as number);
         if (pending) {
-          this._pending.delete(msg.id as number);
+          this.#pending.delete(msg.id as number);
           if (msg.error) {
             const errMsg = (msg.error as Record<string, unknown>).message as string || `MCP error code ${(msg.error as Record<string, unknown>).code}`;
             const fullMsg = `${errMsg}\nRaw response: ${line}`;
@@ -181,7 +200,7 @@ export class McpClient {
           }
         } else {
           // Buffer it in case it arrives before the request
-          this._buffered.push({ id: msg.id as number, result: msg.result, error: msg.error, raw: line });
+          this.#buffered.push({ id: msg.id as number, result: msg.result, error: msg.error, raw: line });
         }
       }
     }
@@ -190,19 +209,19 @@ export class McpClient {
   // ── Request dispatch ────────────────────────────────────────────────────
 
   private async _sendRequest(method: string, params: unknown): Promise<unknown> {
-    if (this._cancelled) {
+    if (this.#cancelled) {
       throw new McpError("Client is cancelled");
     }
 
-    const id = ++this._idCounter;
+    const id = ++this.#idCounter;
     const request = jsonRpcRequest(id, method, params);
     const serialized = JSON.stringify(request);
 
     // Check buffered responses first
-    for (let i = 0; i < this._buffered.length; i++) {
-      const buf = this._buffered[i];
+    for (let i = 0; i < this.#buffered.length; i++) {
+      const buf = this.#buffered[i];
       if (buf.id === id) {
-        this._buffered.splice(i, 1);
+        this.#buffered.splice(i, 1);
         if (buf.error) {
           throw new McpError(
             (buf.error as Record<string, unknown>).message as string || `MCP error code ${(buf.error as Record<string, unknown>).code}`,
@@ -222,7 +241,7 @@ export class McpClient {
     // Stdio mode: use pending request mechanism
     const writeStream = (this as Record<string, unknown>)._writeStream as NodeJS.WritableStream | undefined;
     const pending = new PendingRequest(id);
-    this._pending.set(id, pending);
+    this.#pending.set(id, pending);
 
     // Send the request
     writeStream?.write(serialized + "\n");
@@ -232,13 +251,13 @@ export class McpClient {
       pending.resolve = resolve;
       pending.reject = reject;
       pending.timer = setTimeout(() => {
-        this._pending.delete(id);
+        this.#pending.delete(id);
         reject(new McpError("Timeout waiting for response"));
       }, 30000);
     });
 
     // Clean up
-    this._pending.delete(id);
+    this.#pending.delete(id);
     if (pending.timer) clearTimeout(pending.timer);
 
     return result;
@@ -355,8 +374,8 @@ export class McpClient {
     const result = await this._sendRequest("initialize", mcpInitializeRequest());
     const response = parseMcpInitializeResponse(result as Record<string, unknown>);
 
-    this._serverCapabilities = response.capabilities;
-    this._serverInfo = response.serverInfo;
+    this.#serverCapabilities = response.capabilities;
+    this.#serverInfo = response.serverInfo;
 
     // Send initialized notification
     const writeStream = (this as Record<string, unknown>)._writeStream as NodeJS.WritableStream | undefined;
@@ -388,25 +407,25 @@ export class McpClient {
    * Get server capabilities.
    */
   get serverCapabilities(): unknown {
-    return this._serverCapabilities;
+    return this.#serverCapabilities;
   }
 
   /**
    * Get server info.
    */
   get serverInfo(): unknown {
-    return this._serverInfo;
+    return this.#serverInfo;
   }
 
   /**
    * Shutdown the connection.
    */
   async shutdown(): Promise<void> {
-    this._cancelled = true;
+    this.#cancelled = true;
 
     // Reject all pending requests
-    for (const [id, pending] of this._pending) {
-      this._pending.delete(id);
+    for (const [id, pending] of this.#pending) {
+      this.#pending.delete(id);
       if (pending.timer) clearTimeout(pending.timer);
       if (pending.reject) pending.reject(new McpError("Cancelled"));
     }
@@ -422,8 +441,8 @@ export class McpClient {
     }
 
     // Print stderr if any
-    if (this._stderrOutput && this._stderrOutput.trim()) {
-      logger.error(`MCP server stderr: ${this._stderrOutput.trim()}`);
+    if (this.#stderrOutput && this.#stderrOutput.trim()) {
+      logger.error(`MCP server stderr: ${this.#stderrOutput.trim()}`);
     }
   }
 }

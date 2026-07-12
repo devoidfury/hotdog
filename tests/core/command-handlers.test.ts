@@ -181,11 +181,11 @@ describe("handleThinking", () => {
 describe("handleRegenerate", () => {
   it("regenerates system prompt", async () => {
     const agent = {
-      _systemPrompt: "old prompt",
+      systemPrompt: "old prompt",
       ensureSystemPrompt: mock(async () => {}),
     };
     const result = await handleRegenerate(agent);
-    expect(agent._systemPrompt).toBeNull();
+    expect(agent.systemPrompt).toBeNull();
     expect(agent.ensureSystemPrompt).toHaveBeenCalled();
     expect(result.content).toBe("System prompt regenerated.");
   });
@@ -193,21 +193,21 @@ describe("handleRegenerate", () => {
 
 describe("handleReasoning", () => {
   it("shows current reasoning effort when no value given", () => {
-    const agent = { _reasoningEffort: "high" };
+    const agent = { reasoningEffort: "high" };
     const result = handleReasoning(agent, "");
     expect(result.content).toContain("high");
   });
 
   it("shows '(not set)' when reasoning effort is undefined", () => {
-    const agent = { _reasoningEffort: undefined };
+    const agent = { reasoningEffort: undefined };
     const result = handleReasoning(agent, "");
     expect(result.content).toContain("not set");
   });
 
   it("sets reasoning effort to valid value", () => {
-    const agent = { _reasoningEffort: undefined };
+    const agent = { reasoningEffort: undefined };
     const result = handleReasoning(agent, "low");
-    expect(agent._reasoningEffort).toBe("low");
+    expect(agent.reasoningEffort).toBe("low");
     expect(result.content).toContain("low");
   });
 
@@ -216,15 +216,15 @@ describe("handleReasoning", () => {
     for (const v of valid) {
       const agent = {};
       const result = handleReasoning(agent, v);
-      expect(agent._reasoningEffort).toBe(v);
+      expect(agent.reasoningEffort).toBe(v);
       expect(result.content).toContain(v);
     }
   });
 
   it("unsets reasoning effort", () => {
-    const agent = { _reasoningEffort: "high" };
+    const agent = { reasoningEffort: "high" };
     const result = handleReasoning(agent, "unset");
-    expect(agent._reasoningEffort).toBeUndefined();
+    expect(agent.reasoningEffort).toBeUndefined();
     expect(result.content).toContain("unset");
   });
 

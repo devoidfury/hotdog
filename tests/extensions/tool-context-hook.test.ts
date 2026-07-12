@@ -45,13 +45,13 @@ describe("HOOKS.AGENT_TOOL_CONTEXT", () => {
     });
 
     const agent = createTestAgent({ hooks });
-    agent._isRestoring = false;
+    agent.isRestoring = false;
 
     // Simulate what _executeTools does
     await hooks.notifyHooksAsync(HOOKS.AGENT_TOOL_CONTEXT, {
       toolCtx: {
         agent,
-        isSessionRestoring: agent._isRestoring,
+        isSessionRestoring: agent.isRestoring,
       },
       toolName: "test-tool",
       agent,
@@ -71,12 +71,12 @@ describe("HOOKS.AGENT_TOOL_CONTEXT", () => {
     });
 
     const agent = createTestAgent({ hooks });
-    agent._isRestoring = true;
+    agent.isRestoring = true;
 
     await hooks.notifyHooksAsync(HOOKS.AGENT_TOOL_CONTEXT, {
       toolCtx: {
         agent,
-        isSessionRestoring: agent._isRestoring,
+        isSessionRestoring: agent.isRestoring,
       },
       toolName: "test-tool",
       agent,

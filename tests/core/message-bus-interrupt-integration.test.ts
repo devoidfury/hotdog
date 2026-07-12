@@ -58,7 +58,7 @@ describe('MessageBus interrupt integration', () => {
 
     // interrupt() should clear queue and cancel agent
     bus.interrupt();
-    expect(agent._cancelled).toBe(true);
+    expect(agent.cancelled).toBe(true);
     expect(bus.isIdle()).toBe(true);
 
     // After interrupt, bus should still accept new messages
@@ -154,7 +154,7 @@ describe('MessageBus interrupt integration', () => {
 
     // Agent cancelled flag is NOT reset here — it's reset at the start
     // of the next message processing, not after catching cancellation.
-    expect(agent._cancelled).toBe(true);
+    expect(agent.cancelled).toBe(true);
 
     // End the loop
     bus.cancel();

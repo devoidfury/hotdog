@@ -258,7 +258,7 @@ describe("McpClient HTTP mode", () => {
 
   it("_sendRequest throws when client is cancelled", async () => {
     const client = await McpClient.forHttp("http://localhost:3000/mcp");
-    client._cancelled = true;
+    client.cancelled = true;
     await expect(client._sendRequest("test", {})).rejects.toThrow("Client is cancelled");
   });
 });
@@ -269,7 +269,7 @@ describe("McpClient shutdown", () => {
   it("shutdown sets cancelled flag", async () => {
     const client = await McpClient.forHttp("http://localhost:3000/mcp");
     await client.shutdown();
-    expect(client._cancelled).toBe(true);
+    expect(client.cancelled).toBe(true);
   });
 
   it("shutdown can be called multiple times", async () => {

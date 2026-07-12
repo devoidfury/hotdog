@@ -144,8 +144,8 @@ export function handleThinking(agent: unknown): CommandResult {
  * @param agent - Agent instance.
  */
 export async function handleRegenerate(agent: unknown): Promise<CommandResult> {
-  const a = agent as { _systemPrompt: string | null; ensureSystemPrompt: () => Promise<void> };
-  a._systemPrompt = null;
+  const a = agent as { systemPrompt: string | null; ensureSystemPrompt: () => Promise<void> };
+  a.systemPrompt = null;
   await a.ensureSystemPrompt();
   return { action: ACTIONS.DISPLAY, content: "System prompt regenerated." };
 }
@@ -157,21 +157,21 @@ export async function handleRegenerate(agent: unknown): Promise<CommandResult> {
  * @param value - Reasoning effort level ("none", "minimal", "low", "high", "xhigh", "max", "unset").
  */
 export function handleReasoning(agent: unknown, value?: string | null): CommandResult {
-  const a = agent as { _reasoningEffort: string | undefined };
+  const a = agent as { reasoningEffort: string | undefined };
   const valid = ["none", "minimal", "low", "high", "xhigh", "max", "unset"];
   if (!value) {
     const current =
-      a._reasoningEffort !== undefined
-        ? a._reasoningEffort
+      a.reasoningEffort !== undefined
+        ? a.reasoningEffort
         : "(not set, omitted from requests)";
     return { action: ACTIONS.DISPLAY, content: `Current reasoning effort: ${current}` };
   }
   if (value === "unset") {
-    a._reasoningEffort = undefined;
+    a.reasoningEffort = undefined;
     return { action: ACTIONS.DISPLAY, content: "Reasoning effort unset (omitted from requests)." };
   }
   if (valid.includes(value)) {
-    a._reasoningEffort = value;
+    a.reasoningEffort = value;
     return { action: ACTIONS.DISPLAY, content: `Reasoning effort set to: ${value}` };
   }
   return {

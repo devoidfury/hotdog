@@ -14,15 +14,15 @@ export interface AgentSinkOptions {
  * through the Session Core for further processing.
  *
  * Two modes:
- * 1. Normal agent: `_isTaskAgent = false` — all events forwarded to parent sink.
- * 2. Task agent: `_isTaskAgent = true` — filters streaming/tool events,
+ * 1. Normal agent: `#isTaskAgent = false` — all events forwarded to parent sink.
+ * 2. Task agent: `#isTaskAgent = true` — filters streaming/tool events,
  *    only TASK_PROGRESS passes through. On completion, calls onTaskComplete().
  */
 export class AgentSink {
-  _parentSink: { emit: (event: OutputEvent) => void } | null;
-  _isTaskAgent: boolean;
-  _onTaskComplete: ((taskId: string | null, result: string) => void) | null;
-  _taskId: string | null;
+  #parentSink: { emit: (event: OutputEvent) => void } | null;
+  #isTaskAgent: boolean;
+  #onTaskComplete: ((taskId: string | null, result: string) => void) | null;
+  #taskId: string | null;
 
   /**
    * @param options
@@ -31,10 +31,10 @@ export class AgentSink {
    * @param options.onTaskComplete — Called when task agent finishes
    */
   constructor(options: AgentSinkOptions = {}) {
-    this._parentSink = options.parentSink || null;
-    this._isTaskAgent = options.isTaskAgent || false;
-    this._onTaskComplete = options.onTaskComplete || null;
-    this._taskId = null;
+    this.#parentSink = options.parentSink || null;
+    this.#isTaskAgent = options.isTaskAgent || false;
+    this.#onTaskComplete = options.onTaskComplete || null;
+    this.#taskId = null;
   }
 
   /**
@@ -43,7 +43,7 @@ export class AgentSink {
    * @param event
    */
   emit(event: OutputEvent): void {
-    if (this._isTaskAgent) {
+    if (this.#isTaskAgent) {
       // Task agents are silent to the UI — filter most events
       const filterTypes = [
         OUTPUT_EVENT.STREAMING_CHUNK,
@@ -61,15 +61,15 @@ export class AgentSink {
 
       // TASK_PROGRESS events pass through
       if (event.type === OUTPUT_EVENT.TASK_PROGRESS) {
-        if (this._parentSink) {
-          this._parentSink.emit(event);
+        if (this.#parentSink) {
+          this.#parentSink.emit(event);
         }
       }
 
       // Token usage always passes through for task agents
       if (event.type === OUTPUT_EVENT.TOKEN_USAGE) {
-        if (this._parentSink) {
-          this._parentSink.emit(event);
+        if (this.#parentSink) {
+          this.#parentSink.emit(event);
         }
       }
 
@@ -77,8 +77,8 @@ export class AgentSink {
     }
 
     // Normal agent: forward all events to parent sink
-    if (this._parentSink) {
-      this._parentSink.emit(event);
+    if (this.#parentSink) {
+      this.#parentSink.emit(event);
     }
   }
 
@@ -87,7 +87,7 @@ export class AgentSink {
    * @param taskId
    */
   setTaskAgentId(taskId: string): void {
-    this._taskId = taskId;
+    this.#taskId = taskId;
   }
 
   /**
@@ -97,16 +97,16 @@ export class AgentSink {
    */
   onTaskComplete(result: string): void {
     // Emit TASK_PROGRESS for the completion
-    if (this._parentSink) {
-      this._parentSink.emit({
+    if (this.#parentSink) {
+      this.#parentSink.emit({
         type: OUTPUT_EVENT.TASK_PROGRESS,
-        taskId: this._taskId,
-        content: `Task ${this._taskId} completed`,
+        taskId: this.#taskId,
+        content: `Task ${this.#taskId} completed`,
       });
     }
 
-    if (this._onTaskComplete) {
-      this._onTaskComplete(this._taskId, result);
+    if (this.#onTaskComplete) {
+      this.#onTaskComplete(this.#taskId, result);
     }
   }
 
@@ -115,6 +115,14 @@ export class AgentSink {
    * @returns Whether this is a task agent sink.
    */
   get isTaskAgent(): boolean {
-    return this._isTaskAgent;
+    return this.#isTaskAgent;
+  }
+
+  /**
+   * Set the parent sink (exposed for testing).
+   * @param sink — The parent sink to forward events to.
+   */
+  set parentSink(sink: { emit: (event: OutputEvent) => void } | null) {
+    this.#parentSink = sink;
   }
 }

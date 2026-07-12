@@ -173,18 +173,18 @@ interface InputInterface {
  * collecting answers via rl.question(), then restoring the handler.
  */
 export class AsyncInteractiveCliInput implements InputInterface {
-  private readonly _rl: readline.Interface;
-  private readonly _onLine: (line: string) => void;
-  private readonly _addLineHandler: (handler: (line: string) => void) => void;
+  private readonly #rl: readline.Interface;
+  private readonly #onLine: (line: string) => void;
+  private readonly #addLineHandler: (handler: (line: string) => void) => void;
 
   constructor(
     rl: readline.Interface,
     onLine: (line: string) => void,
     addLineHandler: (handler: (line: string) => void) => void,
   ) {
-    this._rl = rl;
-    this._onLine = onLine;
-    this._addLineHandler = addLineHandler;
+    this.#rl = rl;
+    this.#onLine = onLine;
+    this.#addLineHandler = addLineHandler;
   }
 
   isInteractive(): boolean {
@@ -196,10 +196,10 @@ export class AsyncInteractiveCliInput implements InputInterface {
    * Temporarily takes over readline input, collects answers, then restores.
    */
   async collectAnswers(questions: QuestionDef[]): Promise<Record<string, string>> {
-    const rl = this._rl;
+    const rl = this.#rl;
 
     // Temporarily take over readline by removing the main line handler
-    rl.removeListener("line", this._onLine);
+    rl.removeListener("line", this.#onLine);
 
     const answers: Record<string, string> = {};
     try {
@@ -279,7 +279,7 @@ export class AsyncInteractiveCliInput implements InputInterface {
       }
     } finally {
       // Always restore the main line handler
-      this._addLineHandler(this._onLine);
+      this.#addLineHandler(this.#onLine);
     }
 
     return answers;

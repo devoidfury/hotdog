@@ -47,7 +47,7 @@ interface Agent {
       signal: AbortSignal,
     ): AsyncIterable<Record<string, unknown>>;
   };
-  _abortSignal?: AbortSignal;
+  abortSignal?: AbortSignal;
   _cancelled?: boolean;
 }
 
@@ -117,11 +117,11 @@ export function create(core: CoreContext): ExtensionInstance | null {
       const abortController = new AbortController();
 
       // Wire to task-agent abort signal if present
-      if (agent._abortSignal) {
-        if (agent._abortSignal.aborted) {
+      if (agent.abortSignal) {
+        if (agent.abortSignal.aborted) {
           abortController.abort();
         } else {
-          agent._abortSignal.addEventListener(
+          agent.abortSignal.addEventListener(
             "abort",
             () => abortController.abort(),
             { once: true },

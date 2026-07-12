@@ -59,18 +59,18 @@ function escapeRegex(str: string): string {
 }
 
 export class MarkerMangler {
-  _mappings: Map<string, string>;
-  _reverse: Map<string, string>;
+  #mappings: Map<string, string>;
+  #reverse: Map<string, string>;
 
   /**
    * @param options
    * @param options.preserveCase - Preserve case when mangling
    */
   constructor(options: { preserveCase?: boolean } = {}) {
-    this._mappings = buildMappings();
-    this._reverse = new Map<string, string>();
-    for (const [k, v] of this._mappings) {
-      this._reverse.set(v, k);
+    this.#mappings = buildMappings();
+    this.#reverse = new Map<string, string>();
+    for (const [k, v] of this.#mappings) {
+      this.#reverse.set(v, k);
     }
   }
 
@@ -81,7 +81,7 @@ export class MarkerMangler {
    */
   escape(text: string | null | undefined) {
     if (!text) return text;
-    return this._transform(text, this._mappings);
+    return this.#transform(text, this.#mappings);
   }
 
   /**
@@ -91,7 +91,7 @@ export class MarkerMangler {
    */
   unescape(text: string | null | undefined) {
     if (!text) return text;
-    return this._transform(text, this._reverse);
+    return this.#transform(text, this.#reverse);
   }
 
   /**
@@ -101,7 +101,7 @@ export class MarkerMangler {
    * @param nameMap - Mapping from original names to aliases.
    * @returns Transformed text.
    */
-  _transform(text: string, nameMap: Map<string, string>): string {
+  #transform(text: string, nameMap: Map<string, string>): string {
     let result = text;
 
     for (const [origName, newName] of nameMap) {

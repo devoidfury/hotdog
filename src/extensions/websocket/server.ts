@@ -410,7 +410,7 @@ function routeMessage(ws: WebSocket, msg: C2SMessage, registry: SessionRegistry,
           sessionId,
           profile: (agent as { profileName?: string })?.profileName || "default",
           currentModel: (agent as { model?: string })?.model,
-          models: Object.keys((agent as { _modelRegistry?: Record<string, unknown> })?._modelRegistry || {}),
+          models: Object.keys((agent as { modelRegistry?: Record<string, unknown> })?.modelRegistry || {}),
         }));
       }).catch((err: unknown) => {
         ws.send(JSON.stringify({ type: "error", message: (err as Error).message }));
@@ -455,7 +455,7 @@ function routeMessage(ws: WebSocket, msg: C2SMessage, registry: SessionRegistry,
           ws.send(JSON.stringify({
             type: S2C.SESSION_STATE,
             key: "models",
-            value: Object.keys((agent as { _modelRegistry?: Record<string, unknown> })?._modelRegistry || {}),
+            value: Object.keys((agent as { modelRegistry?: Record<string, unknown> })?.modelRegistry || {}),
           }));
           ws.send(JSON.stringify({
             type: S2C.SESSION_STATE,
@@ -565,7 +565,7 @@ function attachToMostRecentSession(ws: WebSocket, registry: SessionRegistry): vo
     sessionId,
     profile: (agent as { profileName?: string })?.profileName || mostRecent.profile || "default",
     currentModel: (agent as { model?: string })?.model || mostRecent.model || "?",
-    models: Object.keys((agent as { _modelRegistry?: Record<string, unknown> })?._modelRegistry || {}),
+    models: Object.keys((agent as { modelRegistry?: Record<string, unknown> })?.modelRegistry || {}),
   }));
 
   // Replay session history so the client sees the full conversation
@@ -584,7 +584,7 @@ function createAndAttachSession(ws: WebSocket, registry: SessionRegistry): void 
       sessionId,
       profile: (agent as { profileName?: string })?.profileName || "default",
       currentModel: (agent as { model?: string })?.model,
-      models: Object.keys((agent as { _modelRegistry?: Record<string, unknown> })?._modelRegistry || {}),
+      models: Object.keys((agent as { modelRegistry?: Record<string, unknown> })?.modelRegistry || {}),
     }));
   }).catch((err: unknown) => {
     ws.send(JSON.stringify({ type: "error", message: (err as Error).message }));

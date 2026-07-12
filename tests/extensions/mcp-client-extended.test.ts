@@ -76,7 +76,7 @@ describe("PendingRequest", () => {
   it("creates with id and null resolvers", () => {
     // Access via internal mechanism — we test behavior through _sendRequest
     const client = new McpClient();
-    expect(client._idCounter).toBe(0);
+    expect(client.idCounter).toBe(0);
   });
 });
 
@@ -87,11 +87,11 @@ describe("McpClient._handleLine", () => {
     const client = new McpClient();
     const writable = createWritableStub();
     client._writeStream = writable;
-    client._pending.set(1, { resolve: null, reject: null, timer: null });
+    client.pending.set(1, { resolve: null, reject: null, timer: null });
 
     let resolved = null;
     let rejected = null;
-    client._pending.set(1, {
+    client.pending.set(1, {
       resolve: (v) => { resolved = v; },
       reject: (e) => { rejected = e; },
       timer: null,
@@ -115,7 +115,7 @@ describe("McpClient._handleLine", () => {
     client._writeStream = writable;
 
     let rejected = null;
-    client._pending.set(1, {
+    client.pending.set(1, {
       resolve: () => {},
       reject: (e) => { rejected = e; },
       timer: null,
@@ -138,7 +138,7 @@ describe("McpClient._handleLine", () => {
     const client = new McpClient();
 
     let rejected = null;
-    client._pending.set(1, {
+    client.pending.set(1, {
       resolve: () => {},
       reject: (e) => { rejected = e; },
       timer: null,
@@ -168,15 +168,15 @@ describe("McpClient._handleLine", () => {
       }),
     );
 
-    expect(client._buffered).toHaveLength(1);
-    expect(client._buffered[0].id).toBe(99);
-    expect(client._buffered[0].result).toEqual({ buffered: true });
+    expect(client.buffered).toHaveLength(1);
+    expect(client.buffered[0].id).toBe(99);
+    expect(client.buffered[0].result).toEqual({ buffered: true });
   });
 
   it("skips unparseable JSON", async () => {
     const client = new McpClient();
     await client._handleLine("not valid json at all");
-    expect(client._buffered).toHaveLength(0);
+    expect(client.buffered).toHaveLength(0);
   });
 
   it("skips invalid input: empty lines, no jsonrpc, no result/error", async () => {
@@ -185,13 +185,13 @@ describe("McpClient._handleLine", () => {
     await client._handleLine("   ");
     await client._handleLine(JSON.stringify({ method: "notifications/initialized" }));
     await client._handleLine(JSON.stringify({ jsonrpc: "2.0", id: 1 }));
-    expect(client._buffered).toHaveLength(0);
+    expect(client.buffered).toHaveLength(0);
   });
 
   it("trims whitespace from line", async () => {
     const client = new McpClient();
     let resolved = null;
-    client._pending.set(1, {
+    client.pending.set(1, {
       resolve: (v) => { resolved = v; },
       reject: () => {},
       timer: null,
@@ -210,7 +210,7 @@ describe("McpClient._handleLine", () => {
     const client = new McpClient();
 
     let rejected = null;
-    client._pending.set(1, {
+    client.pending.set(1, {
       resolve: () => {},
       reject: (e) => { rejected = e; },
       timer: null,
@@ -269,7 +269,7 @@ describe("McpClient._sendRequest stdio mode", () => {
     client._writeStream = writable;
 
     // Pre-buffer a response
-    client._buffered.push({
+    client.buffered.push({
       id: 1,
       result: { fromBuffer: true },
       error: null,
@@ -283,7 +283,7 @@ describe("McpClient._sendRequest stdio mode", () => {
   it("throws on buffered error response", async () => {
     const client = new McpClient();
 
-    client._buffered.push({
+    client.buffered.push({
       id: 1,
       result: null,
       error: { code: -32600, message: "Buffered error" },
@@ -300,9 +300,9 @@ describe("McpClient._sendRequest stdio mode", () => {
     client._writeStream = writable;
 
     const promise = client._sendRequest("test", {});
-    const id = client._idCounter;
-    expect(client._pending.has(id)).toBe(true);
-    const pending = client._pending.get(id);
+    const id = client.idCounter;
+    expect(client.pending.has(id)).toBe(true);
+    const pending = client.pending.get(id);
     expect(pending.id).toBe(id);
     expect(pending.resolve).toBeDefined();
     expect(pending.reject).toBeDefined();
@@ -310,7 +310,7 @@ describe("McpClient._sendRequest stdio mode", () => {
     expect(pending.timer).not.toBeNull();
 
     // Clean up
-    client._pending.delete(id);
+    client.pending.delete(id);
     if (pending.timer) clearTimeout(pending.timer);
     promise.catch(() => {});
   });
@@ -322,22 +322,22 @@ describe("McpClient._sendRequest stdio mode", () => {
 
     // Send a request and resolve it quickly
     const promise1 = client._sendRequest("method1", {});
-    const id1 = client._idCounter;
+    const id1 = client.idCounter;
     client._handleLine(
       JSON.stringify({ jsonrpc: "2.0", id: id1, result: {} }),
     );
     await promise1;
 
-    expect(client._idCounter).toBe(1);
+    expect(client.idCounter).toBe(1);
 
     const promise2 = client._sendRequest("method2", {});
-    const id2 = client._idCounter;
+    const id2 = client.idCounter;
     client._handleLine(
       JSON.stringify({ jsonrpc: "2.0", id: id2, result: {} }),
     );
     await promise2;
 
-    expect(client._idCounter).toBe(2);
+    expect(client.idCounter).toBe(2);
   });
 
   it("cleans up pending after response", async () => {
@@ -346,13 +346,13 @@ describe("McpClient._sendRequest stdio mode", () => {
     client._writeStream = writable;
 
     const promise = client._sendRequest("initialize", {});
-    const id = client._idCounter;
+    const id = client.idCounter;
     client._handleLine(
       JSON.stringify({ jsonrpc: "2.0", id, result: {} }),
     );
     await promise;
 
-    expect(client._pending.has(id)).toBe(false);
+    expect(client.pending.has(id)).toBe(false);
   });
 });
 
@@ -365,7 +365,7 @@ describe("McpClient.initialize", () => {
     client._writeStream = writable;
 
     const initPromise = client.initialize();
-    const id = client._idCounter;
+    const id = client.idCounter;
 
     client._handleLine(
       JSON.stringify({
@@ -395,7 +395,7 @@ describe("McpClient.initialize", () => {
     client._writeStream = writable;
 
     client.initialize();
-    const initId = client._idCounter;
+    const initId = client.idCounter;
 
     client._handleLine(
       JSON.stringify({
@@ -426,7 +426,7 @@ describe("McpClient.initialize", () => {
     client._writeStream = writable;
 
     const initPromise = client.initialize();
-    const id = client._idCounter;
+    const id = client.idCounter;
 
     client._handleLine(
       JSON.stringify({
@@ -449,7 +449,7 @@ describe("McpClient.listTools", () => {
     client._writeStream = writable;
 
     const resultPromise = client.listTools();
-    const id = client._idCounter;
+    const id = client.idCounter;
 
     client._handleLine(
       JSON.stringify({
@@ -477,7 +477,7 @@ describe("McpClient.listTools", () => {
     client._writeStream = writable;
 
     const resultPromise = client.listTools();
-    const id = client._idCounter;
+    const id = client.idCounter;
 
     client._handleLine(
       JSON.stringify({
@@ -497,7 +497,7 @@ describe("McpClient.listTools", () => {
     client._writeStream = writable;
 
     const resultPromise = client.listTools();
-    const id = client._idCounter;
+    const id = client.idCounter;
 
     client._handleLine(
       JSON.stringify({
@@ -524,7 +524,7 @@ describe("McpClient.callTool", () => {
     client._writeStream = writable;
 
     const resultPromise = client.callTool("echo", { text: "hello" });
-    const id = client._idCounter;
+    const id = client.idCounter;
 
     client._handleLine(
       JSON.stringify({
@@ -548,7 +548,7 @@ describe("McpClient.callTool", () => {
     client._writeStream = writable;
 
     const resultPromise = client.callTool("multi", { key: "value" });
-    const id = client._idCounter;
+    const id = client.idCounter;
 
     client._handleLine(
       JSON.stringify({
@@ -575,7 +575,7 @@ describe("McpClient.callTool", () => {
     client._writeStream = writable;
 
     const resultPromise = client.callTool("fail", {});
-    const id = client._idCounter;
+    const id = client.idCounter;
 
     client._handleLine(
       JSON.stringify({
@@ -708,8 +708,8 @@ describe("McpClient stderr capture", () => {
     // Wait for stderr to be read
     await new Promise((r) => setTimeout(r, 50));
 
-    expect(client._stderrOutput).toContain("stderr line 1");
-    expect(client._stderrOutput).toContain("stderr line 2");
+    expect(client.stderrOutput).toContain("stderr line 1");
+    expect(client.stderrOutput).toContain("stderr line 2");
   });
 
   it("stderr reader handles errors gracefully", async () => {
@@ -772,7 +772,7 @@ describe("McpClient shutdown with subprocess", () => {
 
   it("prints stderr on shutdown if present", async () => {
     const client = new McpClient();
-    client._stderrOutput = "some stderr output\n";
+    client.stderrOutput = "some stderr output\n";
 
     // Shutdown should not throw even with stderr
     await client.shutdown();
@@ -799,7 +799,7 @@ describe("McpClient getters", () => {
     client._writeStream = writable;
 
     client.initialize();
-    const id = client._idCounter;
+    const id = client.idCounter;
     client._handleLine(
       JSON.stringify({
         jsonrpc: "2.0",
@@ -1543,7 +1543,7 @@ describe("McpClient._startReader", () => {
         this.push(null);
       },
     });
-    client._cancelled = true;
+    client.cancelled = true;
 
     client._startReader();
     await new Promise((r) => setTimeout(r, 50));
@@ -1835,7 +1835,7 @@ describe("McpClient._handleLine edge cases", () => {
   it("handles error with code 0 (falls through to -1 due to ||)", async () => {
     const client = new McpClient();
     let rejected = null;
-    client._pending.set(1, { resolve: () => {}, reject: (e) => { rejected = e; }, timer: null });
+    client.pending.set(1, { resolve: () => {}, reject: (e) => { rejected = e; }, timer: null });
     await client._handleLine(JSON.stringify({ jsonrpc: "2.0", id: 1, error: { code: 0, message: "Unknown error" } }));
     expect(rejected).toBeInstanceOf(McpError);
     expect(rejected.code).toBe(-1);
@@ -1844,7 +1844,7 @@ describe("McpClient._handleLine edge cases", () => {
   it("handles error with code 0 and no message", async () => {
     const client = new McpClient();
     let rejected = null;
-    client._pending.set(1, { resolve: () => {}, reject: (e) => { rejected = e; }, timer: null });
+    client.pending.set(1, { resolve: () => {}, reject: (e) => { rejected = e; }, timer: null });
     await client._handleLine(JSON.stringify({ jsonrpc: "2.0", id: 1, error: { code: 0 } }));
     expect(rejected.message).toContain("MCP error code 0");
   });
@@ -1875,13 +1875,13 @@ describe("McpClient.forStdio with args and env", () => {
 describe("McpClient shutdown with no child", () => {
   it("shutdown without child doesn't throw", async () => {
     const client = new McpClient();
-    client._cancelled = true;
+    client.cancelled = true;
     await client.shutdown();
   });
 
   it("shutdown with cancelled child doesn't throw", async () => {
     const client = new McpClient();
-    client._cancelled = true;
+    client.cancelled = true;
     client._child = { pid: 1234, kill: () => {} };
     await client.shutdown();
   });
@@ -1892,7 +1892,7 @@ describe("McpClient shutdown with no child", () => {
 describe("McpClient buffered error responses", () => {
   it("throws on buffered error with code", async () => {
     const client = new McpClient();
-    client._buffered.push({
+    client.buffered.push({
       id: 1, result: null, error: { code: -32602, message: "Invalid params" },
       raw: '{"error":{"code":-32602,"message":"Invalid params"}}',
     });
@@ -1901,7 +1901,7 @@ describe("McpClient buffered error responses", () => {
 
   it("throws on buffered error with no code defaulting to -1", async () => {
     const client = new McpClient();
-    client._buffered.push({
+    client.buffered.push({
       id: 1, result: null, error: { message: "Buffered error" }, raw: "",
     });
     try {

@@ -140,9 +140,9 @@ export class CliOutputSink extends OutputSink {
   showTokenUse: boolean;
 
   // ── Newline buffer for streaming output ────────────────────────────────
-  _nlBuf: number;
-  _textBuf: string;
-  _outputMode: Mode | null;
+  #nlBuf: number;
+  #textBuf: string;
+  #outputMode: Mode | null;
 
   outStream: NodeJS.WriteStream;
   altStream: NodeJS.WriteStream;
@@ -162,9 +162,9 @@ export class CliOutputSink extends OutputSink {
     // Buffers trailing newlines to normalize spacing between reasoning and
     // normal output segments. Some models emit many trailing newlines, some
     // emit none — this ensures exactly 1 newline separates segments.
-    this._nlBuf = 0; // trailing newline buffer
-    this._textBuf = ""; // pending non-newline text (colored as batch)
-    this._outputMode = null; // for transition detection
+    this.#nlBuf = 0; // trailing newline buffer
+    this.#textBuf = ""; // pending non-newline text (colored as batch)
+    this.#outputMode = null; // for transition detection
 
     this.outStream = process.stdout;
     this.altStream = process.stderr;
@@ -174,11 +174,11 @@ export class CliOutputSink extends OutputSink {
    * Flush buffered newlines to the given stream.
    */
   _flushNl(): void {
-    if (this._nlBuf > 0) {
+    if (this.#nlBuf > 0) {
       const stream =
-        (this as Record<string, unknown>)[modeStreams[this._outputMode ?? Modes.Default]] as NodeJS.WriteStream;
-      stream.write("\n".repeat(this._nlBuf));
-      this._nlBuf = 0;
+        (this as Record<string, unknown>)[modeStreams[this.#outputMode ?? Modes.Default]] as NodeJS.WriteStream;
+      stream.write("\n".repeat(this.#nlBuf));
+      this.#nlBuf = 0;
     }
   }
 
@@ -186,14 +186,14 @@ export class CliOutputSink extends OutputSink {
    * Flush the given text or pending text buffer to the given stream.
    */
   _flushText(): void {
-    if (this._textBuf) {
+    if (this.#textBuf) {
       const stream =
-        (this as Record<string, unknown>)[modeStreams[this._outputMode ?? Modes.Default]] as NodeJS.WriteStream;
+        (this as Record<string, unknown>)[modeStreams[this.#outputMode ?? Modes.Default]] as NodeJS.WriteStream;
       const colorFn =
-        modeColorFns[this._outputMode ?? Modes.Default];
-      const colored = colorFn(this._textBuf, this.palette);
+        modeColorFns[this.#outputMode ?? Modes.Default];
+      const colored = colorFn(this.#textBuf, this.palette);
       stream.write(colored);
-      this._textBuf = "";
+      this.#textBuf = "";
     }
   }
 
@@ -213,18 +213,18 @@ export class CliOutputSink extends OutputSink {
     }
 
     if (startContent > 0) {
-      this._nlBuf += startContent;
+      this.#nlBuf += startContent;
     }
 
     if (endContent - startContent > 0) {
       this._flushNl();
-      this._textBuf += content.substring(startContent, endContent);
+      this.#textBuf += content.substring(startContent, endContent);
       this._flushText();
     }
 
     const trailingNewlines = content.length - endContent;
     if (trailingNewlines > 0) {
-      this._nlBuf += trailingNewlines;
+      this.#nlBuf += trailingNewlines;
     }
   }
 
@@ -234,12 +234,12 @@ export class CliOutputSink extends OutputSink {
    * exactly one newline so the next segment gets a clean single-line separator.
    */
   _transitionTo(mode: Mode): void {
-    const hadPreviousMode = this._outputMode !== null;
-    this._outputMode = mode;
+    const hadPreviousMode = this.#outputMode !== null;
+    this.#outputMode = mode;
     // Only add a separator newline when transitioning between modes,
     // not on the very first call when there's no previous segment.
-    this._nlBuf = hadPreviousMode ? 1 : 0;
-    this._textBuf = "";
+    this.#nlBuf = hadPreviousMode ? 1 : 0;
+    this.#textBuf = "";
   }
 
   /**
@@ -340,7 +340,7 @@ export class CliOutputSink extends OutputSink {
   emitStreamingChunk(event: OutputEvent): void {
     if (this.stream) {
       // Detect transition from reasoning → normal
-      if (this._outputMode !== Modes.Default) {
+      if (this.#outputMode !== Modes.Default) {
         this._transitionTo(Modes.Default);
       }
       this._processContent(event.content as string);
@@ -352,7 +352,7 @@ export class CliOutputSink extends OutputSink {
     // Thinking is streamed to stderr
     if (this.stream) {
       // Detect transition from normal → reasoning
-      if (this._outputMode !== Modes.Thinking) {
+      if (this.#outputMode !== Modes.Thinking) {
         this._transitionTo(Modes.Thinking);
       }
       this._processContent(event.content as string);

@@ -647,7 +647,7 @@ describe('Agent — end-to-end loop', () => {
     toolRegistry.register('worker', tool);
 
     // Queue a follow-up before running
-    agent._followQueue.push('Follow-up message');
+    agent.followQueue.push('Follow-up message');
 
     const result = await agent.run('Do work');
 
@@ -672,7 +672,7 @@ describe('Agent — end-to-end loop', () => {
       reasoningContent: 'thinking...',
       toolCalls: [{ id: 'call_1', type: 'function', function: { name: 'test', arguments: '{}' } }],
     }));
-    agent._reasoningEffort = 'high';
+    agent.reasoningEffort = 'high';
 
     const serialized = agent.serialize();
 
@@ -699,7 +699,7 @@ describe('Agent — end-to-end loop', () => {
     expect(freshAgent.log.at(1).role).toBe('assistant');
     expect(freshAgent.log.at(1).reasoningContent).toBe('thinking...');
     expect(freshAgent.log.at(1).toolCalls.length).toBe(1);
-    expect(freshAgent._reasoningEffort).toBe('high');
+    expect(freshAgent.reasoningEffort).toBe('high');
     expect(freshAgent.model).toBe('test-model');
   });
 
@@ -797,7 +797,7 @@ describe('Agent — end-to-end loop', () => {
       const { agent } = createFixture({});
       const result = await agent.executeCommand({ type: 'reasoning', value: 'high' });
       expect(result).toEqual({ action: ACTIONS.DISPLAY, content: 'Reasoning effort set to: high' });
-      expect(agent._reasoningEffort).toBe('high');
+      expect(agent.reasoningEffort).toBe('high');
     });
 
     it('should delegate to hooks for custom commands', async () => {
@@ -851,7 +851,7 @@ describe('Agent — end-to-end loop', () => {
       });
 
       await agent.ensureSystemPrompt();
-      expect(agent._systemPrompt).toContain('Test Chunk');
+      expect(agent.systemPrompt).toContain('Test Chunk');
     });
   });
 
@@ -884,7 +884,7 @@ describe('Agent — end-to-end loop', () => {
   describe('serialize/deserialize (existing)', () => {
     it('should serialize and deserialize reasoning_effort', () => {
       const { agent } = createFixture({});
-      agent._reasoningEffort = 'max';
+      agent.reasoningEffort = 'max';
       const serialized = agent.serialize();
       expect(serialized.reasoningEffort).toBe('max');
 
@@ -897,7 +897,7 @@ describe('Agent — end-to-end loop', () => {
         maxTokens: 4096,
       });
       newAgent.deserialize(serialized);
-      expect(newAgent._reasoningEffort).toBe('max');
+      expect(newAgent.reasoningEffort).toBe('max');
     });
 
     it('should handle undefined reasoning_effort in deserialize', () => {
@@ -913,9 +913,9 @@ describe('Agent — end-to-end loop', () => {
         maxIterations: 100,
         maxTokens: 4096,
       });
-      newAgent._reasoningEffort = 'high';
+      newAgent.reasoningEffort = 'high';
       newAgent.deserialize(serialized);
-      expect(newAgent._reasoningEffort).toBeUndefined();
+      expect(newAgent.reasoningEffort).toBeUndefined();
     });
   });
 
@@ -925,15 +925,15 @@ describe('Agent — end-to-end loop', () => {
       const sink1 = { emit: () => {} };
       const sink2 = { emit: () => {} };
       agent.setSink(sink1);
-      expect(agent._sink).toBe(sink1);
+      expect(agent.sink).toBe(sink1);
       agent.setSink(sink2);
-      expect(agent._sink).toBe(sink2);
+      expect(agent.sink).toBe(sink2);
     });
 
     it('should accept null to detach sink', () => {
       const { agent } = createFixture({});
       agent.setSink(null);
-      expect(agent._sink).toBeNull();
+      expect(agent.sink).toBeNull();
     });
   });
 
@@ -979,16 +979,16 @@ describe('Agent — end-to-end loop', () => {
   describe('cancel with abortController', () => {
     it('should abort the run abort controller', () => {
       const { agent } = createFixture({});
-      agent._runAbortController = new AbortController();
-      expect(agent._runAbortController.signal.aborted).toBe(false);
+      agent.runAbortController = new AbortController();
+      expect(agent.runAbortController.signal.aborted).toBe(false);
       agent.cancel();
       expect(agent.cancelled).toBe(true);
-      expect(agent._runAbortController.signal.aborted).toBe(true);
+      expect(agent.runAbortController.signal.aborted).toBe(true);
     });
 
     it('should handle missing abort controller', () => {
       const { agent } = createFixture({});
-      agent._runAbortController = null;
+      agent.runAbortController = null;
       expect(() => agent.cancel()).not.toThrow();
       expect(agent.cancelled).toBe(true);
     });

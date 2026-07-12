@@ -530,18 +530,18 @@ describe("LlmClient constructor edge cases", () => {
   it("creates with markerMangler option", () => {
     const mangler = createMarkerMangler();
     const client = new LlmClient({ chatTimeoutSecs: 30, maxRetries: 3, markerMangler: mangler });
-    expect(client._mangler).toBe(mangler);
+    expect(client.markerMangler).toBe(mangler);
   });
 
   it("creates default mangler when not provided", () => {
     const client = new LlmClient({ chatTimeoutSecs: 30, maxRetries: 3 });
-    expect(client._mangler).toBeDefined();
-    expect(typeof client._mangler.escape).toBe("function");
+    expect(client.markerMangler).toBeDefined();
+    expect(typeof client.markerMangler.escape).toBe("function");
   });
 
   it("accepts null markerMangler", () => {
     const client = new LlmClient({ chatTimeoutSecs: 30, maxRetries: 3, markerMangler: null });
-    expect(client._mangler).toBeNull();
+    expect(client.markerMangler).toBeNull();
   });
 
   it("sets cancelled flag to false by default", () => {

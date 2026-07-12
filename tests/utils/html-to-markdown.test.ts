@@ -167,6 +167,23 @@ describe("htmlToMarkdown", () => {
     expect(result).toContain("Content");
   });
 
+  it("strips DOCTYPE declaration", () => {
+    const result = htmlToMarkdown(
+      "<!DOCTYPE html>\n<html><body><p>Content</p></body></html>",
+    );
+    expect(result).not.toContain("<!DOCTYPE");
+    expect(result).not.toContain("DOCTYPE");
+    expect(result).toContain("Content");
+  });
+
+  it("strips DOCTYPE with system identifier", () => {
+    const result = htmlToMarkdown(
+      '<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01//EN" "http://www.w3.org/TR/html4/strict.dtd">\n<p>Content</p>',
+    );
+    expect(result).not.toContain("<!DOCTYPE");
+    expect(result).toContain("Content");
+  });
+
   it("strips <script> tags", () => {
     const result = htmlToMarkdown(
       "<p>Before</p><script>alert('xss')</script><p>After</p>",

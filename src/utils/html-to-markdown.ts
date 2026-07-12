@@ -136,5 +136,7 @@ export function htmlToMarkdown(html: string): string {
 
   return decodeEntities(markdown)
     .replace(/\n{3,}/g, "\n\n")
+    .trim()
+    .replace(/^<!DOCTYPE[^>]*>/i, "")
     .trim();
 }

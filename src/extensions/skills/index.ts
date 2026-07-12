@@ -3,7 +3,6 @@
 // Hooks: systemPrompt:build, agent:toolContext, tools:register, commands:register
 // Config defaults and CLI flags are defined in extension.json.
 
-import extensionData from "./extension.json" with { type: "json" };
 import { HOOKS } from "../../core/hooks.ts";
 import { ACTIONS } from "../../core/commands.ts";
 import { patternMatches, SkillsLoader } from "./loader.ts";
@@ -15,7 +14,6 @@ import {
   ToolsRegisterPayload,
   CommandsRegisterPayload,
   getExtensionConfig,
-  getConfigSchemaProperties,
 } from "../../core/extensions/types.ts";
 
 interface Skill {

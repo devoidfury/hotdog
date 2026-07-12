@@ -84,7 +84,7 @@ export function parseSkillFromMd(
   const body = parsed.body;
 
   // Validate description
-  const description = fm.description as string | undefined;
+  const description = fm?.description as string | null;
   if (!description || !description.trim()) {
     throw ParseError.MissingDescription("Skill");
   }

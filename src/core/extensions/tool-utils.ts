@@ -331,7 +331,7 @@ export function parseToolInput(
 export function defaultCallDisplay(
   input: string | Record<string, unknown> | null,
   templateFn: (args: Record<string, unknown>) => string,
-  options:
+  options?:
     | string
     | ((input: string | Record<string, unknown> | null) => string)
     | { fallback?: string | ((input: string | Record<string, unknown> | null) => string); returnRawOnParseError?: boolean }

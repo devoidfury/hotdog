@@ -7,8 +7,6 @@
  * minItems/maxItems, pattern (regex), and default (skip validation).
  */
 
-// ── Type checking helpers ────────────────────────────────────────────────────
-
 type TypeCheckFn = (v: unknown) => boolean;
 
 /**
@@ -34,8 +32,6 @@ export function typeName(value: unknown): string {
   return typeof value;
 }
 
-// ── Default matching ─────────────────────────────────────────────────────────
-
 /**
  * Check if a value matches a schema's default (deep equality).
  * Used to skip validation when value equals default.
@@ -47,8 +43,6 @@ function matchesDefault(value: unknown, defaultValue: unknown): boolean {
     return false;
   }
 }
-
-// ── Recursive validation ─────────────────────────────────────────────────────
 
 /**
  * Validate a single value against a schema node.
@@ -187,10 +181,7 @@ export function validate(
     }
 
     // Validate known properties
-    if (
-      schemaObj.properties &&
-      typeof schemaObj.properties === "object"
-    ) {
+    if (schemaObj.properties && typeof schemaObj.properties === "object") {
       for (const [key, propSchema] of Object.entries(
         schemaObj.properties as Record<string, unknown>,
       )) {
@@ -208,8 +199,8 @@ export function validate(
     // Additional properties check
     if (schemaObj.additionalProperties === false) {
       const allowedKeys = new Set([
-        ...Object.keys(schemaObj.properties as Record<string, unknown> || {}),
-        ...(schemaObj.required as string[] || []),
+        ...Object.keys((schemaObj.properties as Record<string, unknown>) || {}),
+        ...((schemaObj.required as string[]) || []),
       ]);
       for (const key of Object.keys(valueObj)) {
         if (!allowedKeys.has(key)) {

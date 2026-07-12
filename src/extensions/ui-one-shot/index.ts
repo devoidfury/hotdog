@@ -8,7 +8,7 @@ import { formatError } from "../../core/error.ts";
 import { HOOKS } from "../../core/hooks.ts";
 import { logger } from "../../core/logger.ts";
 import { CliOutputSink } from "../../core/ui/cli.ts";
-import { LlmClient } from "../../core/llm-client/client.ts";
+import { LlmClient, ProviderConfig } from "../../core/llm-client/client.ts";
 import { MarkerMangler } from "../../core/marker-mangler.ts";
 import { TaskManager } from "../../core/session/task-manager.ts";
 import { SessionManager } from "../../core/session/index.ts";
@@ -70,7 +70,7 @@ async function runOneShot(
     stream: resolved.stream,
     chatTimeoutSecs: resolved.chatTimeout,
     maxRetries: resolved.maxRetries,
-    providers: (config.providers as unknown[]) || [],
+    providers: (config.providers as ProviderConfig[]) || [],
     markerMangler: new MarkerMangler(),
   });
 

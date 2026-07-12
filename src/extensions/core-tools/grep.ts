@@ -413,7 +413,18 @@ export class GrepTool {
     }
 
     const { pattern, path: searchPath, maxResults, context, type } = args;
-    const searchDir = searchPath || ".";
+
+    // sometimes models forget to prefix a path (eg $PWD/subpath or ./subpath -> /subpath)
+    // here we can detect it and fix it automatically:
+    // if the path starts with "/", the absolute path doesn't exist,
+    // but the relative path (./...) does exist → model forgot the "./" prefix.
+    const modelForgotPathPrefix =
+      searchPath?.startsWith("/") &&
+      !(await fs.exists(searchPath)) &&
+      await fs.exists(`.${searchPath}`);
+    const searchDir = modelForgotPathPrefix
+      ? `.${searchPath}`
+      : searchPath || ".";
 
     // Validate regex
     try {

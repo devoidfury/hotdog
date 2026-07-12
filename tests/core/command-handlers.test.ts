@@ -128,10 +128,10 @@ describe("handleTokens", () => {
 
 describe("handleTools", () => {
   it("toggles hideTools from false to true", () => {
-    const outputs = [];
+    const outputs: Array<{type: string; data: Record<string, unknown>}> = [];
     const agent = {
       hideTools: false,
-      _emitOutput: mock((type, data) => outputs.push({ type, data })),
+      emitOutput: mock((type: string, data: Record<string, unknown>) => outputs.push({ type, data })),
     };
     const result = handleTools(agent);
     expect(agent.hideTools).toBe(true);
@@ -141,10 +141,10 @@ describe("handleTools", () => {
   });
 
   it("toggles hideTools from true to false", () => {
-    const outputs = [];
+    const outputs: Array<{type: string; data: Record<string, unknown>}> = [];
     const agent = {
       hideTools: true,
-      _emitOutput: mock((type, data) => outputs.push({ type, data })),
+      emitOutput: mock((type: string, data: Record<string, unknown>) => outputs.push({ type, data })),
     };
     const result = handleTools(agent);
     expect(agent.hideTools).toBe(false);
@@ -154,10 +154,10 @@ describe("handleTools", () => {
 
 describe("handleThinking", () => {
   it("toggles hideThinking from false to true", () => {
-    const outputs = [];
+    const outputs: Array<{type: string; data: Record<string, unknown>}> = [];
     const agent = {
       hideThinking: false,
-      _emitOutput: mock((type, data) => outputs.push({ type, data })),
+      emitOutput: mock((type: string, data: Record<string, unknown>) => outputs.push({ type, data })),
     };
     const result = handleThinking(agent);
     expect(agent.hideThinking).toBe(true);
@@ -167,10 +167,10 @@ describe("handleThinking", () => {
   });
 
   it("toggles hideThinking from true to false", () => {
-    const outputs = [];
+    const outputs: Array<{type: string; data: Record<string, unknown>}> = [];
     const agent = {
       hideThinking: true,
-      _emitOutput: mock((type, data) => outputs.push({ type, data })),
+      emitOutput: mock((type: string, data: Record<string, unknown>) => outputs.push({ type, data })),
     };
     const result = handleThinking(agent);
     expect(agent.hideThinking).toBe(false);

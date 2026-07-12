@@ -1,12 +1,8 @@
 import { describe, it, expect } from "bun:test";
 import fsSync from "node:fs";
 import path from "node:path";
-import os from "node:os";
 import { GrepTool } from "../../src/extensions/core-tools/grep.ts";
-import { ToolContext } from "../../src/core/extensions/tool-context.ts";
 import { resultStr, getDisplay, tmpDir, toolCtx } from "../helpers.ts";
-
-// ── Tool Definition ─────────────────────────────────────────────────────────
 
 describe("GrepTool.toToolDef", () => {
   it("returns a tool definition with correct name", () => {
@@ -20,8 +16,6 @@ describe("GrepTool.toToolDef", () => {
     expect(def.function.parameters.required).toEqual(["pattern"]);
   });
 });
-
-// ── callDisplay ─────────────────────────────────────────────────────────────
 
 describe("GrepTool.callDisplay", () => {
   it("shows pattern and path", () => {
@@ -43,8 +37,6 @@ describe("GrepTool.callDisplay", () => {
     expect(new GrepTool().callDisplay(null)).toBe("");
   });
 });
-
-// ── execute ─────────────────────────────────────────────────────────────────
 
 describe("GrepTool.execute", () => {
   it("finds matches in files", async () => {
@@ -192,28 +184,6 @@ describe("GrepTool.execute", () => {
 
     expect(resultStr(result)).toContain("root.js");
     expect(resultStr(result)).toContain("nested.js");
-    fsSync.rmSync(dir, { recursive: true, force: true });
-  });
-
-  it("skips node_modules in native fallback", async () => {
-    // The SKIP_DIRS behavior is in the native fallback, not ripgrep.
-    // We test that the native grepNative function handles this correctly
-    // by checking the module's internal behavior indirectly.
-    // Since ripgrep is available, we verify the native path exists
-    // by checking that the tool works correctly overall.
-    const dir = tmpDir();
-    fsSync.writeFileSync(path.join(dir, "good.js"), "hello");
-    fsSync.mkdirSync(path.join(dir, "node_modules"), { recursive: true });
-    fsSync.writeFileSync(path.join(dir, "node_modules", "bad.js"), "hello");
-
-    const tool = new GrepTool();
-    const result = getDisplay(
-      await tool.execute({ pattern: "hello", path: dir }, toolCtx()),
-    );
-
-    // With ripgrep, both files are found (ripgrep doesn't skip node_modules)
-    // The SKIP_DIRS logic is in the native fallback
-    expect(resultStr(result)).toContain("good.js");
     fsSync.rmSync(dir, { recursive: true, force: true });
   });
 });

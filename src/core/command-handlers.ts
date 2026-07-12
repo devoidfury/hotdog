@@ -16,6 +16,35 @@ export interface CommandHandlerDef {
   isUiCommand?: boolean;
 }
 
+// ── Agent Interface (public API contract) ───────────────────────────────────
+// These interfaces describe the public methods that command handlers need
+// from the Agent class, avoiding circular imports and anonymous type casts.
+
+/** Token usage stats exposed by Agent.getTokenUsage() */
+interface TokenUsage {
+  promptTokens: number;
+  cachedTokens: number;
+  completionTokens: number;
+  totalTokens: number;
+  turns: number;
+  lastPromptTokens: number;
+  lastCachedTokens: number;
+  lastCompletionTokens: number;
+  lastTotalTokens: number;
+}
+
+/** Public API surface of Agent that command handlers rely on. */
+interface AgentHandle {
+  clearContext(): Promise<void>;
+  getTokenUsage(): TokenUsage;
+  hideTools: boolean;
+  hideThinking: boolean;
+  systemPrompt: string | null;
+  reasoningEffort: string | undefined;
+  ensureSystemPrompt(): Promise<void>;
+  emitOutput(type: string, data: Record<string, unknown>): void;
+}
+
 /**
  * Handler for /clear — clears context and resets system prompt.
  *
@@ -23,7 +52,7 @@ export interface CommandHandlerDef {
  * @param value - Optional value (ignored).
  */
 export async function handleClear(agent: unknown, _value?: string | null): Promise<CommandResult> {
-  const a = agent as { clearContext: () => Promise<void> };
+  const a = agent as AgentHandle;
   await a.clearContext();
   return { action: ACTIONS.DISPLAY, content: "Context cleared." };
 }
@@ -48,7 +77,7 @@ export function handleHelp(): CommandResult {
  * @param agent - Agent instance.
  */
 export function handleTokens(agent: unknown): CommandResult {
-  const a = agent as { getTokenUsage: () => TokenUsage };
+  const a = agent as AgentHandle;
   const u = a.getTokenUsage();
   if (u.turns === 0) {
     return { action: ACTIONS.DISPLAY, content: "No token usage recorded yet." };
@@ -90,27 +119,15 @@ export function handleTokens(agent: unknown): CommandResult {
   return { action: ACTIONS.DISPLAY, content: lines.join("\n") };
 }
 
-interface TokenUsage {
-  promptTokens: number;
-  cachedTokens: number;
-  completionTokens: number;
-  totalTokens: number;
-  turns: number;
-  lastPromptTokens: number;
-  lastCachedTokens: number;
-  lastCompletionTokens: number;
-  lastTotalTokens: number;
-}
-
 /**
  * Handler for /tools — toggles tool call display.
  *
  * @param agent - Agent instance.
  */
 export function handleTools(agent: unknown): CommandResult {
-  const a = agent as { hideTools: boolean; _emitOutput: (type: string, data: Record<string, unknown>) => void };
+  const a = agent as AgentHandle;
   a.hideTools = !a.hideTools;
-  a._emitOutput("session_state", {
+  a.emitOutput("session_state", {
     key: "hideTools",
     value: a.hideTools,
   });
@@ -126,9 +143,9 @@ export function handleTools(agent: unknown): CommandResult {
  * @param agent - Agent instance.
  */
 export function handleThinking(agent: unknown): CommandResult {
-  const a = agent as { hideThinking: boolean; _emitOutput: (type: string, data: Record<string, unknown>) => void };
+  const a = agent as AgentHandle;
   a.hideThinking = !a.hideThinking;
-  a._emitOutput("session_state", {
+  a.emitOutput("session_state", {
     key: "hideThinking",
     value: a.hideThinking,
   });
@@ -144,7 +161,7 @@ export function handleThinking(agent: unknown): CommandResult {
  * @param agent - Agent instance.
  */
 export async function handleRegenerate(agent: unknown): Promise<CommandResult> {
-  const a = agent as { systemPrompt: string | null; ensureSystemPrompt: () => Promise<void> };
+  const a = agent as AgentHandle;
   a.systemPrompt = null;
   await a.ensureSystemPrompt();
   return { action: ACTIONS.DISPLAY, content: "System prompt regenerated." };
@@ -157,7 +174,7 @@ export async function handleRegenerate(agent: unknown): Promise<CommandResult> {
  * @param value - Reasoning effort level ("none", "minimal", "low", "high", "xhigh", "max", "unset").
  */
 export function handleReasoning(agent: unknown, value?: string | null): CommandResult {
-  const a = agent as { reasoningEffort: string | undefined };
+  const a = agent as AgentHandle;
   const valid = ["none", "minimal", "low", "high", "xhigh", "max", "unset"];
   if (!value) {
     const current =

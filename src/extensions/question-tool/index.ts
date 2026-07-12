@@ -44,7 +44,7 @@ interface InputInterface {
 }
 
 interface Agent {
-  _emitOutput(type: string, data: unknown): void;
+  emitOutput(type: string, data: unknown): void;
 }
 
 /**
@@ -169,7 +169,7 @@ export class QuestionTool {
     // Get the agent from context to emit the QUESTION event
     const agent = ctx?.get("agent") as Agent | undefined;
     if (agent) {
-      agent._emitOutput("question", { questions });
+      agent.emitOutput("question", { questions });
     }
 
     // Get the input interface from context, fall back to NoopInput

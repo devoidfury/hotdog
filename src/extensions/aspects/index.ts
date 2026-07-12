@@ -14,11 +14,6 @@ import { CoreContext, ExtensionInstance } from "../../core/extensions/types.ts";
 
 const TEMPLATE_PATH = path.join(import.meta.dirname, "aspects_chunk.md");
 
-interface ParsedFrontMatter {
-  frontMatter?: Record<string, unknown>;
-  body?: string;
-}
-
 /**
  * Resolve aspect names from profile file and/or config.
  * Priority: profile file front matter > config file aspects array.
@@ -38,8 +33,12 @@ async function resolveAspectNames(core: CoreContext): Promise<string[]> {
   const profileFilePath = path.join(profilesPath, `${profileName}.profile.md`);
   try {
     const content = await fsPromises.readFile(profileFilePath, "utf-8");
-    const parsed = parseFrontMatter(content) as ParsedFrontMatter | null;
-    if (parsed?.frontMatter?.aspects && Array.isArray(parsed.frontMatter.aspects) && parsed.frontMatter.aspects.length) {
+    const parsed = parseFrontMatter(content);
+    if (
+      parsed?.frontMatter?.aspects &&
+      Array.isArray(parsed.frontMatter.aspects) &&
+      parsed.frontMatter.aspects.length
+    ) {
       return parsed.frontMatter.aspects as string[];
     }
   } catch {
@@ -58,7 +57,10 @@ async function resolveAspectNames(core: CoreContext): Promise<string[]> {
 /**
  * Build the aspects chunk content.
  */
-async function buildAspectsChunk(aspectNames: string[], profilesPath: string): Promise<string> {
+async function buildAspectsChunk(
+  aspectNames: string[],
+  profilesPath: string,
+): Promise<string> {
   if (!aspectNames || aspectNames.length === 0) {
     return "";
   }

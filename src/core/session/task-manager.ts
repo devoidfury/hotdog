@@ -50,7 +50,7 @@ export class TaskHandle {
 export interface TaskAgent {
   abortSignal: AbortSignal | null;
   run(description: string): Promise<string | undefined>;
-  _notifyCompletion(result: string): void;
+  notifyCompletion(result: string): void;
   addMessage(msg: Message): void;
   followQueue?: string[];
 }
@@ -285,9 +285,9 @@ export class TaskManager {
       }
 
       // Notify sink of completion (for task agents)
-      agent._notifyCompletion(result);
+      agent.notifyCompletion(result);
     } catch (err: unknown) {
-      if (err instanceof LlmError.Cancelled || abortController.signal.aborted) {
+      if (LlmError.isCancelled(err) || abortController.signal.aborted) {
         statusRef.value = TASK_STATUS.CANCELLED;
         result = `Task aborted`;
       } else {
@@ -296,7 +296,7 @@ export class TaskManager {
       }
 
       // Still notify sink even on error
-      agent._notifyCompletion(result);
+      agent.notifyCompletion(result);
     }
 
     return result;
@@ -327,8 +327,8 @@ export class TaskManager {
 
     // Add follow-up to the agent's context
     // Note: This works if the agent is between LLM calls (draining follow-ups)
-    if (task.agent._followQueue) {
-      task.agent._followQueue.push(message);
+    if (task.agent.followQueue) {
+      task.agent.followQueue.push(message);
       return true;
     }
 

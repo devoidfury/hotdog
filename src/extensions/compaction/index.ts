@@ -48,7 +48,7 @@ interface Agent {
     ): AsyncIterable<Record<string, unknown>>;
   };
   abortSignal?: AbortSignal;
-  _cancelled?: boolean;
+  cancelled?: boolean;
 }
 
 interface CompactionSettings {
@@ -143,7 +143,7 @@ export function create(core: CoreContext): ExtensionInstance | null {
       let fullText = "";
       for await (const event of stream) {
         // Check main-agent cancellation flag each iteration (Ctrl+C, etc.)
-        if (agent._cancelled) {
+        if (agent.cancelled) {
           abortController.abort();
           throw LlmError.Cancelled("Compaction cancelled");
         }

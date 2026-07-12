@@ -275,6 +275,62 @@ export class Agent {
     this.#hideThinking = v;
   }
 
+  /**
+   * The profile name for this agent.
+   */
+  get profileName(): string | undefined {
+    return this.#profileName;
+  }
+
+  /**
+   * The config object reference.
+   */
+  get config(): Record<string, unknown> | null {
+    return this.#config;
+  }
+
+  /**
+   * The tool whitelist restricting available tools.
+   */
+  get toolWhitelist(): string[] | null {
+    return this.#toolWhitelist;
+  }
+
+  /**
+   * The maximum number of agent loop iterations.
+   */
+  get maxIterations(): number {
+    return this.#maxIterations;
+  }
+
+  /**
+   * The maximum token threshold for context compaction.
+   */
+  get maxTokens(): number {
+    return this.#maxTokens;
+  }
+
+  /**
+   * The role description for this agent.
+   */
+  get role(): string | undefined {
+    return this.#role;
+  }
+
+  /**
+   * The profile body content.
+   */
+  get profileBody(): string | undefined {
+    return this.#profileBody;
+  }
+
+  /**
+   * Whether streaming is enabled.
+   */
+  get stream(): boolean {
+    return this.#stream;
+  }
+
   get systemPrompt(): string | null {
     return this.#systemPrompt;
   }
@@ -380,7 +436,7 @@ export class Agent {
     this.addMessage(userMsg);
 
     // Emit user message to output sinks so connected clients see it
-    this._emitOutput("user_message", { content: userInput });
+    this.emitOutput("user_message", { content: userInput });
 
     let iteration = 0;
     while (iteration < this.#maxIterations) {
@@ -571,7 +627,7 @@ export class Agent {
       this.#tokenUsage.lastCompletionTokens = completionTokens;
       this.#tokenUsage.lastTotalTokens = totalTokens;
 
-      this._emitOutput("token_usage", {
+      this.emitOutput("token_usage", {
         promptTokens: this.#tokenUsage.promptTokens,
         cachedTokens: this.#tokenUsage.cachedTokens,
         completionTokens: this.#tokenUsage.completionTokens,
@@ -589,7 +645,7 @@ export class Agent {
    * Called when the agent completes (for task agents).
    * @param result - The final result text
    */
-  _notifyCompletion(result: string): void {
+  notifyCompletion(result: string): void {
     if (this.#sink && typeof (this.#sink as OutputSink & { onTaskComplete?: (result: string) => void }).onTaskComplete === "function") {
       (this.#sink as OutputSink & { onTaskComplete: (result: string) => void }).onTaskComplete!(result);
     }
@@ -665,13 +721,13 @@ export class Agent {
         case "content":
           textParts.push(event.content as string);
           if (this.#stream) {
-            this._emitOutput("streaming_chunk", { content: event.content });
+            this.emitOutput("streaming_chunk", { content: event.content });
           }
           break;
         case "reasoning":
           reasoningParts.push(event.content as string);
           if (this.#stream) {
-            this._emitOutput("streaming_reasoning_chunk", {
+            this.emitOutput("streaming_reasoning_chunk", {
               content: event.content,
             });
           }
@@ -795,7 +851,7 @@ export class Agent {
       toolName.trim().length === 0
     ) {
       const result = `Tool call missing a valid name (got: ${JSON.stringify(toolName)})`;
-      this._emitOutput("tool_result", {
+      this.emitOutput("tool_result", {
         toolName: "(invalid)",
         input,
         result,
@@ -815,7 +871,7 @@ export class Agent {
       return this._writeToolResult(toolName, input, msg, toolCallId);
     }
 
-    this._emitOutput("tool_call", { toolName, input, toolCallId });
+    this.emitOutput("tool_call", { toolName, input, toolCallId });
     await this.#hooks.notifyHooksAsync(HOOKS.TOOL_BEFORE_EXECUTE, {
       toolCallId,
       toolName,
@@ -982,7 +1038,7 @@ export class Agent {
     toolCallId: string,
     images?: ImageAttachment[] | null,
   ): Promise<{ toolName: string; input: string; result: string }> {
-    this._emitOutput("tool_result", { toolName, input, result });
+    this.emitOutput("tool_result", { toolName, input, result });
     const msg = new Message({
       role: "tool",
       content: result,
@@ -1029,7 +1085,7 @@ export class Agent {
 
   // ── Helpers ───────────────────────────────────────────────────────────────
 
-  _emitOutput(type: string, data: Record<string, unknown>): void {
+  emitOutput(type: string, data: Record<string, unknown>): void {
     if (this.#sink) {
       const key = type.toUpperCase() as keyof typeof OUTPUT_EVENT;
       if (key in OUTPUT_EVENT) {

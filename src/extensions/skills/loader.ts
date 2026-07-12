@@ -67,11 +67,6 @@ interface Skill {
   additionalFiles: string[];
 }
 
-interface ParsedFrontMatter {
-  frontMatter: Record<string, unknown>;
-  body: string;
-}
-
 /**
  * Parse a SKILL.md file into a Skill object.
  */
@@ -80,7 +75,7 @@ export function parseSkillFromMd(
   dirName: string,
   location: string,
 ): Skill {
-  const parsed = parseFrontMatter(content) as ParsedFrontMatter | null;
+  const parsed = parseFrontMatter(content);
   if (!parsed) {
     throw ParseError.FrontmatterNotFound();
   }

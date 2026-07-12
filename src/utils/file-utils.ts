@@ -35,20 +35,23 @@ export class IOError extends Error {
   }
 }
 
+export interface ParsedFrontMatter {
+  frontMatter?: Record<string, unknown>;
+  body?: string;
+}
+
 /**
  * Parse YAML front matter from a markdown string.
  * Returns { frontMatter: object, body: string } or null if no front matter.
  */
-export function parseFrontMatter(content: string): {
-  frontMatter: unknown;
-  body: string;
-} | null {
-  const m = content.match(/^---\n([\s\S]*?)\n---\n?([\s\S]*)$/);
-  if (!m) return null;
+export function parseFrontMatter(content: string): ParsedFrontMatter | null {
+  const m = content.replaceAll("\r", "").match(FRONTMATTER_RE);
+  if (!m || !m[1]) return null;
   const body = m[2] || "";
   const fm = YAML.parse(m[1]);
   return { frontMatter: fm, body };
 }
+const FRONTMATTER_RE = /^-{3,}\n([\s\S]*?)\n-{3,}\n?([\s\S]*)$/;
 
 /**
  * Load aspect files from a directory.

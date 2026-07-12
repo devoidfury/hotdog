@@ -1171,23 +1171,23 @@ describe('Agent — end-to-end loop', () => {
     });
   });
 
-  describe('_notifyCompletion', () => {
+  describe('notifyCompletion', () => {
     it('should call onTaskComplete on sink', () => {
       let called = false;
-      const sink = { onTaskComplete: (r) => { called = true; } };
+      const sink = { onTaskComplete: (r: unknown) => { called = true; } };
       const { agent } = createFixture({ sink });
-      agent._notifyCompletion('done');
+      agent.notifyCompletion('done');
       expect(called).toBe(true);
     });
 
     it('should handle missing sink', () => {
       const { agent } = createFixture({ sink: null });
-      expect(() => agent._notifyCompletion('done')).not.toThrow();
+      expect(() => agent.notifyCompletion('done')).not.toThrow();
     });
 
     it('should handle sink without onTaskComplete', () => {
       const { agent } = createFixture({ sink: { emit: () => {} } });
-      expect(() => agent._notifyCompletion('done')).not.toThrow();
+      expect(() => agent.notifyCompletion('done')).not.toThrow();
     });
   });
 

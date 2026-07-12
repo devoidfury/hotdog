@@ -9,11 +9,6 @@ import { ParseError } from "../../core/error.ts";
 import { render } from "../../utils/render.ts";
 import { ACTIONS } from "../../core/commands.ts";
 
-interface ParsedFrontMatter {
-  frontMatter: Record<string, unknown>;
-  body: string;
-}
-
 interface Prompt {
   name: string;
   description: string;
@@ -25,8 +20,12 @@ interface Prompt {
 /**
  * Parse a .prompt.md file into a Prompt object.
  */
-export function parsePromptFromMd(content: string, fileName: string, location: string): Prompt {
-  const parsed = parseFrontMatter(content) as ParsedFrontMatter | null;
+export function parsePromptFromMd(
+  content: string,
+  fileName: string,
+  location: string,
+): Prompt {
+  const parsed = parseFrontMatter(content);
   if (!parsed) {
     throw ParseError.FrontmatterNotFound();
   }
@@ -166,7 +165,10 @@ export class PromptsLoader {
   /**
    * The handler for when a prompt should be loaded in response to a command
    */
-  async promptHandler(_agent: unknown, cmdValue: string): Promise<Record<string, unknown>> {
+  async promptHandler(
+    _agent: unknown,
+    cmdValue: string,
+  ): Promise<Record<string, unknown>> {
     const rest = cmdValue.slice(7);
     const spaceIdx = rest.indexOf(" ");
     const name = spaceIdx >= 0 ? rest.slice(0, spaceIdx).trim() : rest.trim();

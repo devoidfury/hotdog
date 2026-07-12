@@ -56,10 +56,10 @@ describe("TaskManager", () => {
 
   describe("spawnTask", () => {
     it("creates a task handle", async () => {
-      const buildAgent = (config) => ({
+      const buildAgent = (config: Record<string, unknown>) => ({
         context: [],
-        run: async (input) => "Task result",
-        _notifyCompletion: () => {},
+        run: async (input: string) => "Task result",
+        notifyCompletion: () => {},
       });
 
       const manager = new TaskManager({
@@ -75,13 +75,13 @@ describe("TaskManager", () => {
     });
 
     it("uses custom worker model when provided", async () => {
-      let agentConfig = null;
-      const buildAgent = (config) => {
+      let agentConfig: Record<string, unknown> | null = null;
+      const buildAgent = (config: Record<string, unknown>) => {
         agentConfig = config;
         return {
           context: [],
           run: async () => "result",
-          _notifyCompletion: () => {},
+          notifyCompletion: () => {},
         };
       };
 
@@ -93,7 +93,7 @@ describe("TaskManager", () => {
       });
 
       await manager.spawnTask("task-1", "Do something", { workerModel: "custom-model" });
-      expect(agentConfig.model).toBe("custom-model");
+      expect(agentConfig?.model).toBe("custom-model");
     });
   });
 

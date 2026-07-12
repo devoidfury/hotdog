@@ -4,7 +4,7 @@
 
 import { logger } from "./logger.ts";
 import { CliError } from "./error.ts";
-import { parseCliFlagKey } from "../utils/strings.js";
+import { parseCliFlagKey } from "../utils/strings.ts";
 
 export interface CliFlag {
   short?: string | null;

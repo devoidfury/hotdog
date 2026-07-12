@@ -149,7 +149,7 @@ async function handlePromptSubcommand(
     toolOutputFmt: (resolved as ResolvedConfig).toolOutputFmt,
   });
 
-  // Build agent function (same as in main.js)
+  // Build agent function (same as in main.ts)
   const llmClient = new LlmClient({
     baseUrl: (resolved as ResolvedConfig).baseUrl,
     apiKey: (resolved as ResolvedConfig).apiKey,

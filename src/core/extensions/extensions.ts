@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url";
 import { HOOKS, EXTENSION_PROVIDES } from "../hooks.ts";
 import { ExtensionError } from "../error.ts";
 import { logger } from "../logger.ts";
-import { camelCase } from "../../utils/strings.js";
+import { camelCase } from "../../utils/strings.ts";
 
 export { HOOKS, EXTENSION_PROVIDES };
 
@@ -515,11 +515,11 @@ export async function discoverExtensions(
     for (const ext of discovered) {
       let basePath: string;
       if (spec === "builtins") {
-        basePath = `../../extensions/${ext.name}/index.js`;
+        basePath = `../../extensions/${ext.name}/index.ts`;
       } else {
         const relPath = path.relative(
           ROOT_DIR,
-          path.join(resolved, ext.name, "index.js"),
+          path.join(resolved, ext.name, "index.ts"),
         );
         basePath = relPath.startsWith("..") ? relPath : `./${relPath}`;
       }

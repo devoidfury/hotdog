@@ -5,7 +5,7 @@
 import fsPromises from "node:fs/promises";
 import path from "node:path";
 
-import { parseFrontMatter } from "../../utils/file-utils.js";
+import { parseFrontMatter } from "../../utils/file-utils.ts";
 import { DEFAULT_PROFILES_SUBPATH } from "./defaults.ts";
 
 export interface ProfileDef {

@@ -12,7 +12,7 @@ import {
 import { logger } from "../../core/logger.ts";
 import { ToolExecutionContext } from "../../core/extensions/types.ts";
 
-// Resolve the path to the current binary (main.js)
+// Resolve the path to the current binary (main.ts)
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const BIN_PATH = path.resolve(__dirname, "..", "..", "..", "bin", "hotdog");
 
@@ -69,7 +69,7 @@ export class ExploreTool {
     const prompt = `Explore project at '${args.path}'. ${args.outline}`;
 
     logger.debug(`Explore: ${BIN_PATH}`);
-    // Build command: bun main.js -c "<prompt>" --profile explorer
+    // Build command: bun main.ts -c "<prompt>" --profile explorer
     const command = [
       BIN_PATH,
       "-c",

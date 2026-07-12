@@ -8,7 +8,7 @@ import {
 } from "node:path";
 import { cwd } from "node:process";
 import { YAML } from "bun";
-import { logger } from "../core/logger.js";
+import { logger } from "../core/logger.ts";
 
 /**
  * IO error class for file system operations.

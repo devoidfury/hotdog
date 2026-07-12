@@ -4,7 +4,7 @@
 // this module renders the template with those chunks.
 
 import { initSystemPromptTemplate as _initTemplate } from "../config/providers.ts";
-import { render } from "../../utils/render.js";
+import { render } from "../../utils/render.ts";
 
 // ── System Prompt Template ─────────────────────────────────────────────────
 
@@ -12,7 +12,7 @@ let cachedTemplate: string | null = null;
 
 /**
  * Load the system prompt template.
- * Uses the pre-initialized template from config.js if available,
+ * Uses the pre-initialized template from config/providers.ts if available,
  * otherwise loads from disk or falls back to minimal template.
  */
 export async function loadSystemPromptTemplate(

@@ -180,7 +180,7 @@ hotdog webui                     # Start the web UI server (alpha)
 ```
 my-extension/
 ├── extension.json    # Metadata: name, provides, configSchema, services
-└── index.js          # Entry point: export function create(core, options)
+└── index.ts          # Entry point: export function create(core, options)
 ```
 
 Extensions register tools, CLI subcommands, and system prompt chunks via hooks. See `docs/agents/extensions.md` for the full guide.

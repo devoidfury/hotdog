@@ -3,7 +3,7 @@ telemetry = false
 [test]
 coveragePathIgnorePatterns = [
     "config/**",
-    "**/*.test.js",
+    "**/*.test.ts",
     "tests/**",
 ]
 coverageThreshold = 0.80

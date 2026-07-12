@@ -1,6 +1,6 @@
 # CLI Subcommand Registration
 
-Extensions can register CLI subcommands that are automatically discovered and dispatched without needing to be explicitly wired up in `src/main.js`.
+Extensions can register CLI subcommands that are automatically discovered and dispatched without needing to be explicitly wired up in `src/main.ts`.
 
 ## How It Works
 
@@ -74,7 +74,7 @@ Subcommands and CLI flags are declared in `extension.json`:
 ### Minimal Example
 
 ```javascript
-// extensions/my-subcommand/index.js
+// extensions/my-subcommand/index.ts
 
 export function create(core) {
   // Register subcommands if the registry is available
@@ -116,7 +116,7 @@ The `cli:subcommands` array is used for **discovery** (help text, `--help`, unkn
 For more complex setups, extensions can register via the hook:
 
 ```javascript
-import { HOOKS } from '../../core/hooks.js';
+import { HOOKS } from '../../core/hooks.ts';
 
 export function create(core) {
   return {

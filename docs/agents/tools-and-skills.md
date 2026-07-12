@@ -11,19 +11,19 @@ Core tools are provided by the `core-tools` extension. Tools are registered via 
 - `ctx` — `ToolContext` with agent, isSessionRestoring, cwdBoundary, workspaceRoot
 - Result can be: string, ToolResult instance, or object
 
-**ToolRegistry** — stores tools by name, provides lookup, serialization, and `getToolDefs()` accessor. Located in `src/core/extensions/tool-registry.js`.
+**ToolRegistry** — stores tools by name, provides lookup, serialization, and `getToolDefs()` accessor. Located in `src/core/extensions/tool-registry.ts`.
 - Tool definitions are cached after first computation; cache is invalidated on `register()`, `remove()`, or `clearToolDefs()`.
 - `getToolDef(name)` — get a single tool's definition with caching.
 - `clearToolDefs()` — explicitly clear the definition cache (e.g., after MCP server reconnect).
 
-**Tool definition helpers** (from `src/core/extensions/tool-utils.js`):
+**Tool definition helpers** (from `src/core/extensions/tool-utils.ts`):
 - `toolDef(name, description, parameters)` — creates OpenAI function-calling schema
 - `param(typeName, description, extra)` — creates parameter definition with JSON Schema fields (enum, min/max, etc.)
 - `ToolResult` — structured result with `output`, `error`, `metadata`, `success`, `outputTag`, `toDisplay()`, `toApiContent()`
 - `parseToolInput(input)` — safe argument parsing returning null on failure
 - `defaultCallDisplay(input, templateFn, options)` — default display formatter for tools
 
-**Tool descriptors** — declarative table in `src/extensions/core-tools/index.js`:
+**Tool descriptors** — declarative table in `src/extensions/core-tools/index.ts`:
 - `TOOL_DESCRIPTORS` — array of `{ name, disabled }` for all core tools
 - `CORE_TOOL_NAMES` — all core tool names
 - `TOOL_FACTORIES` — declarative map of tool names to factory functions

@@ -1,4 +1,4 @@
-import { ParseError } from "../core/error.js";
+import { ParseError } from "../core/error.ts";
 
 interface Token {
   type: "text" | "print" | "tag";

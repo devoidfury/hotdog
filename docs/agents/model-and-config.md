@@ -21,7 +21,7 @@ Each config key defines its own resolution layers. Common patterns:
 - **`aiUrl`/`apiKey`**: provider → CLI → config → env → default (provider is the natural source)
 
 Components (`Agent`, `LlmClient`, `TaskManager`, etc.) receive resolved values from callers
-rather than importing constants directly. The `src/core/config/defaults.js` module exports
+rather than importing constants directly. The `src/core/config/defaults.ts` module exports
 constants for use by the config resolution layer (`getDefaultConfig()`) and for static
 path defaults (`DEFAULT_SKILLS_PATH`, `DEFAULT_PROFILES_SUBPATH`, etc.) that are not
 schema-configurable.
@@ -110,7 +110,7 @@ Profiles can also be defined as `.profile.md` files in a `profiles/` directory (
 
 **Merge rules**: When both a config profile and a `.profile.md` file profile exist for the same name, the file profile wins for `role`, `whitelistTools`, `blacklistTools`, and `manager`. The config profile wins for `model` and all other fields.
 
-### Config Registry (`src/core/extensions/config-registry.js`)
+### Config Registry (`src/core/extensions/config-registry.ts`)
 
 Manages extension-registered CLI flags and config parameters. Config params and CLI flags are defined declaratively in `extension.json` (configSchema and cli:flags) and automatically registered by the extension loader.
 

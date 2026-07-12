@@ -1,6 +1,6 @@
 // Interactive CLI Extension
 // Provides the interactive CLI session with readline loop.
-// Registers a default subcommand (empty name) that main.js dispatches to
+// Registers a default subcommand (empty name) that main.ts dispatches to
 // when no subcommand is provided.
 //
 // This extension implements "slash commands" as the UI syntax for invoking
@@ -598,7 +598,7 @@ export function handleSlashCommand(
 /**
  * Create the interactive-cli extension.
  * Registers a "cli" subcommand for interactive mode.
- * main.js dispatches to "cli" when no subcommand is provided.
+ * main.ts dispatches to "cli" when no subcommand is provided.
  */
 export function create(core: CoreContext): ExtensionInstance {
   return {

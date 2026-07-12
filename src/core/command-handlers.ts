@@ -1,5 +1,5 @@
 // Built-in command handlers for the agent.
-// These are extracted from agent.js so that agent.js only does generic dispatch.
+// These are extracted from agent.ts so that agent.ts only does generic dispatch.
 // Each handler is a function (agent, value, cmd) => { content?, error? }.
 
 import { Command, ACTIONS, ParsedCommand } from "./commands.ts";

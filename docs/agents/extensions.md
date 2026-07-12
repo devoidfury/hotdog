@@ -1,5 +1,5 @@
 ### Extension Architecture
-The core is minimal -- all features (tools, compaction, MCP, skills, prompts, subcommands) live as extensions in `src/extensions/`. Extensions plug into the core via hooks defined in `src/core/hooks.js`.
+The core is minimal -- all features (tools, compaction, MCP, skills, prompts, subcommands) live as extensions in `src/extensions/`. Extensions plug into the core via hooks defined in `src/core/hooks.ts`.
 
 When adding new functionality:
 1. Check if an existing extension can be extended
@@ -71,7 +71,7 @@ Every extension directory must contain an `extension.json` metadata file. This i
 | `services` | object | No | Abstract services this extension provides. Keys are service names, values are method arrays. |
 | `requires` | object | No | Abstract services this extension requires. Keys are service names, values are expected method arrays. |
 
-**Load Order Constants** (from `LOAD_ORDER` in `extensions.js`):
+**Load Order Constants** (from `LOAD_ORDER` in `extensions.ts`):
 - `0` — REFRESH (must load first, tracks other extensions)
 - `1` — CORE_TOOLS (needed by other extensions)
 - `2` — CLI (loaded early for CLI subcommand registration)

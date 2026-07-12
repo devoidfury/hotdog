@@ -6,10 +6,10 @@ import path from "node:path";
 import os from "node:os";
 import { cwd } from "node:process";
 import { ConfigError } from "../error.ts";
-import { deepMerge } from "../../utils/objects.js";
-import { render } from "../../utils/render.js";
-import { validate as validateSchema } from "../../utils/json-schema.js";
-import { camelCase } from "../../utils/strings.js";
+import { deepMerge } from "../../utils/objects.ts";
+import { render } from "../../utils/render.ts";
+import { validate as validateSchema } from "../../utils/json-schema.ts";
+import { camelCase } from "../../utils/strings.ts";
 
 export * from "./defaults.ts";
 export * from "./schema-loader.ts";

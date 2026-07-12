@@ -12,7 +12,7 @@ Domain concepts for the hotdog AI agent harness. Implementation details are docu
 ## Context Layer
 
 - **Context** — Everything the LLM sees. The high-level concept. Managed via MessageLog (implementation).
-- **MessageLog** — Class in `src/core/context/message-log.js` that wraps the agent's message array. Provides `push()`, `replace()`, `getAll()`, `clear()`, `toJSON()`, and `buildMessages()`. The agent's `log` property returns this instance. Messages are `Message` objects with `role`, `content`, `reasoningContent`, `toolCalls`, `toolCallId`.
+- **MessageLog** — Class in `src/core/context/message-log.ts` that wraps the agent's message array. Provides `push()`, `replace()`, `getAll()`, `clear()`, `toJSON()`, and `buildMessages()`. The agent's `log` property returns this instance. Messages are `Message` objects with `role`, `content`, `reasoningContent`, `toolCalls`, `toolCallId`.
 - **Cache Invalidation** — Triggers: compaction, reset, model switch. These are the known break points. Critical performance concern (can mean difference between 20s and 5m response).
 - **Selective Pruning** (experimental) — Tail-popping messages to reuse older cache layers. Not yet validated.
 

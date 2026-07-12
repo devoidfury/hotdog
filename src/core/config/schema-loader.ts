@@ -2,7 +2,7 @@
  * Schema loader — reads core.config.json and builds the unified config schema.
  */
 import { join } from "node:path";
-import { getNested } from "../../utils/objects.js";
+import { getNested } from "../../utils/objects.ts";
 import configSchema from "../core.config.json" with { type: "json" };
 
 export type CastFn = (v: unknown, ctx?: unknown) => unknown;

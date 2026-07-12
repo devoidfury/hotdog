@@ -27,14 +27,14 @@ JS project `hotdog` — an AI agent harness with tool calling support.
 
 ### Centralized Defaults
 The single source of truth for all configurable values is `src/core/core.config.json`.
-Defaults are exported from `src/core/config/defaults.js` for use by the config resolution
+Defaults are exported from `src/core/config/defaults.ts` for use by the config resolution
 layer (`getDefaultConfig()`). Components (`Agent`, `LlmClient`, `TaskManager`, etc.) receive
 resolved values from callers — do not import `DEFAULT_*` constants in components.
 Static path constants (`DEFAULT_SKILLS_PATH`, etc.) and runtime fallbacks
 (`DEFAULT_AI_URL_FALLBACK`) are exempt from this rule.
 
 ### Error Handling
-All error catches must use `formatError()` from `src/core/error.js`:
+All error catches must use `formatError()` from `src/core/error.ts`:
 - Expected errors (cancelled, http, api, timeout, invalid_response, cli, tool, config): message only
 - Unexpected errors (bugs, iteration errors, null derefs): message + full stack
 - Never use `console.error(e.message)` directly — always use `formatError(e)`

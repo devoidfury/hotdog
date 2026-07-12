@@ -1,17 +1,21 @@
 /** Inject markdown markers for a heading. */
-function heading(el: Element, level: number): void {
+function heading(el: HTMLRewriterTypes.Element, level: number): void {
   const prefix = "\n" + "#".repeat(level) + " ";
-  el.before(prefix, { html: true } as Parameters<Element["before"]>[0]);
+  el.before(prefix, { html: true });
   el.after("\n");
 }
 
 /** Inject markdown markers for an inline element. */
-function inline(el: Element, open: string, close: string): void {
+function inline(
+  el: HTMLRewriterTypes.Element,
+  open?: string,
+  close?: string,
+): void {
   if (open) el.before(open);
   if (close) el.after(close);
 }
 
-function replaceWith(el: Element, replacement: string): void {
+function replaceWith(el: HTMLRewriterTypes.Element, replacement: string): void {
   el.remove();
   el.after(replacement);
 }
@@ -74,7 +78,7 @@ export function htmlToMarkdown(html: string): string {
         const src = el.getAttribute("src") || "";
         const alt = (el.getAttribute("alt") || "").replace(/"/g, '\\"');
         el.remove();
-        el.after(`![${alt}](${src})`, { html: true } as Parameters<Element["after"]>[0]);
+        el.after(`![${alt}](${src})`, { html: true });
       },
     })
 
@@ -102,7 +106,7 @@ export function htmlToMarkdown(html: string): string {
 
     .on("blockquote", {
       element: (el) => {
-        el.before("\n> ", { html: true } as Parameters<Element["before"]>[0]);
+        el.before("\n> ", { html: true });
         el.after("\n");
       },
     })
@@ -110,8 +114,8 @@ export function htmlToMarkdown(html: string): string {
     .on("pre", {
       element: (el) => {
         ctx.inPre = true;
-        el.before("\n```\n", { html: true } as Parameters<Element["before"]>[0]);
-        el.after("\n```\n", { html: true } as Parameters<Element["after"]>[0]);
+        el.before("\n```\n", { html: true });
+        el.after("\n```\n", { html: true });
         el.onEndTag(() => {
           ctx.inPre = false;
         });
@@ -123,11 +127,15 @@ export function htmlToMarkdown(html: string): string {
     .on("th, td", { element: (el) => inline(el, "| ") })
 
     .on("head, script, style, meta, iframe, link, title, svg", {
-      element: (el) => el.remove(),
+      element: (el) => {
+        el.remove();
+      },
     });
 
   const stripHtmlRewrite = new HTMLRewriter().on("*", {
-    element: (el) => el.removeAndKeepContent(),
+    element: (el) => {
+      el.removeAndKeepContent();
+    },
   });
 
   const markdown = stripHtmlRewrite.transform(

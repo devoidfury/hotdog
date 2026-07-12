@@ -1,11 +1,21 @@
-import { describe, it, expect } from "bun:test";
+import { describe, it, expect, beforeAll, afterAll } from "bun:test";
 import fsSync from "node:fs";
 import path from "node:path";
 import os from "node:os";
 import { FindTool } from "../../src/extensions/core-tools/find.ts";
 import { ToolContext } from "../../src/core/extensions/tool-context.ts";
 import { DEFAULT_FIND_MAX_RESULTS } from "../../src/extensions/core-tools/defaults.ts";
-import { resultStr, getDisplay, tmpDir, toolCtx } from "../helpers.ts";
+import { resultStr, getDisplay, tmpDir, toolCtx, cleanupDir } from "../helpers.ts";
+
+let dir: string;
+
+beforeAll(() => {
+  dir = tmpDir();
+});
+
+afterAll(() => {
+  cleanupDir(dir);
+});
 
 // ── Tool Definition ─────────────────────────────────────────────────────────
 
@@ -58,7 +68,6 @@ describe("FindTool.callDisplay", () => {
 
 describe("FindTool.execute — basic find", () => {
   it("finds files matching pattern", async () => {
-    const dir = tmpDir();
     fsSync.writeFileSync(path.join(dir, "hello.txt"), "hello");
     fsSync.writeFileSync(path.join(dir, "world.txt"), "world");
     fsSync.writeFileSync(path.join(dir, "data.json"), '{"key": "value"}');
@@ -72,11 +81,9 @@ describe("FindTool.execute — basic find", () => {
     expect(getDisplay(result)).toContain("hello.txt");
     expect(getDisplay(result)).toContain("world.txt");
     expect(getDisplay(result)).not.toContain("data.json");
-    fsSync.rmSync(dir, { recursive: true, force: true });
   });
 
   it("finds files recursively", async () => {
-    const dir = tmpDir();
     fsSync.mkdirSync(path.join(dir, "sub"), { recursive: true });
     fsSync.writeFileSync(path.join(dir, "root.txt"), "root");
     fsSync.writeFileSync(path.join(dir, "sub", "nested.txt"), "nested");
@@ -89,11 +96,9 @@ describe("FindTool.execute — basic find", () => {
 
     expect(getDisplay(result)).toContain("root.txt");
     expect(getDisplay(result)).toContain("nested.txt");
-    fsSync.rmSync(dir, { recursive: true, force: true });
   });
 
   it('returns "No files found" when nothing matches', async () => {
-    const dir = tmpDir();
     fsSync.writeFileSync(path.join(dir, "hello.txt"), "hello");
 
     const tool = new FindTool();
@@ -103,7 +108,6 @@ describe("FindTool.execute — basic find", () => {
     );
 
     expect(getDisplay(result)).toContain("No files found");
-    fsSync.rmSync(dir, { recursive: true, force: true });
   });
 });
 
@@ -111,9 +115,8 @@ describe("FindTool.execute — basic find", () => {
 
 describe("FindTool.execute — file type filter", () => {
   it("finds only files with file_type f", async () => {
-    const dir = tmpDir();
-    fsSync.writeFileSync(path.join(dir, "file.txt"), "file");
-    fsSync.mkdirSync(path.join(dir, "subdir"));
+    fsSync.writeFileSync(path.join(dir, "type_file.txt"), "file");
+    fsSync.mkdirSync(path.join(dir, "type_subdir"));
 
     const tool = new FindTool();
     const result = await tool.execute(
@@ -121,15 +124,13 @@ describe("FindTool.execute — file type filter", () => {
       toolCtx(),
     );
 
-    expect(getDisplay(result)).toContain("file.txt");
-    expect(getDisplay(result)).not.toContain("subdir");
-    fsSync.rmSync(dir, { recursive: true, force: true });
+    expect(getDisplay(result)).toContain("type_file.txt");
+    expect(getDisplay(result)).not.toContain("type_subdir");
   });
 
   it("finds only directories with file_type d", async () => {
-    const dir = tmpDir();
-    fsSync.writeFileSync(path.join(dir, "file.txt"), "file");
-    fsSync.mkdirSync(path.join(dir, "subdir"));
+    fsSync.writeFileSync(path.join(dir, "type_dir_file.txt"), "file");
+    fsSync.mkdirSync(path.join(dir, "type_dir_subdir"));
 
     const tool = new FindTool();
     const result = await tool.execute(
@@ -137,9 +138,8 @@ describe("FindTool.execute — file type filter", () => {
       toolCtx(),
     );
 
-    expect(getDisplay(result)).toContain("subdir");
-    expect(getDisplay(result)).not.toContain("file.txt");
-    fsSync.rmSync(dir, { recursive: true, force: true });
+    expect(getDisplay(result)).toContain("type_dir_subdir");
+    expect(getDisplay(result)).not.toContain("type_dir_file.txt");
   });
 });
 
@@ -147,42 +147,38 @@ describe("FindTool.execute — file type filter", () => {
 
 describe("FindTool.execute — max_results", () => {
   it("limits results to max_results", async () => {
-    const dir = tmpDir();
     for (let i = 0; i < 10; i++) {
-      fsSync.writeFileSync(path.join(dir, `file${i}.txt`), `content ${i}`);
+      fsSync.writeFileSync(path.join(dir, `max_file${i}.txt`), `content ${i}`);
     }
 
     const tool = new FindTool();
     const result = await tool.execute(
-      { pattern: "*.txt", path: dir, max_results: 3 },
+      { pattern: "max_file*.txt", path: dir, max_results: 3 },
       toolCtx(),
     );
 
     // Should have at most 3 results
     const lines = getDisplay(result)
       .split("\n")
-      .filter((l) => l.includes("file"));
+      .filter((l) => l.includes("max_file"));
     expect(lines.length).toBeLessThanOrEqual(3);
-    fsSync.rmSync(dir, { recursive: true, force: true });
   });
 
   it("uses default max_results when not specified", async () => {
-    const dir = tmpDir();
     for (let i = 0; i < 5; i++) {
-      fsSync.writeFileSync(path.join(dir, `file${i}.txt`), `content ${i}`);
+      fsSync.writeFileSync(path.join(dir, `default_file${i}.txt`), `content ${i}`);
     }
 
     const tool = new FindTool();
     const result = await tool.execute(
-      { pattern: "*.txt", path: dir },
+      { pattern: "default_file*.txt", path: dir },
       toolCtx(),
     );
 
     const lines = getDisplay(result)
       .split("\n")
-      .filter((l) => l.includes("file"));
+      .filter((l) => l.includes("default_file"));
     expect(lines.length).toBe(5);
-    fsSync.rmSync(dir, { recursive: true, force: true });
   });
 });
 

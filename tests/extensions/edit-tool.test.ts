@@ -1,10 +1,20 @@
-import { describe, it, expect } from 'bun:test';
+import { describe, it, expect, beforeAll, afterAll } from 'bun:test';
 import fsSync from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import { EditTool } from '../../src/extensions/core-tools/edit.ts';
 import { ToolContext } from '../../src/core/extensions/tool-context.ts';
-import { resultStr, tmpDir, toolCtx } from '../helpers.ts';
+import { resultStr, tmpDir, toolCtx, cleanupDir } from '../helpers.ts';
+
+let dir: string;
+
+beforeAll(() => {
+  dir = tmpDir();
+});
+
+afterAll(() => {
+  cleanupDir(dir);
+});
 
 // ── Tool Definition ─────────────────────────────────────────────────────────
 
@@ -62,7 +72,6 @@ describe('EditTool.callDisplay', () => {
 
 describe('EditTool.execute — exact match', () => {
   it('replaces a single occurrence', async () => {
-    const dir = tmpDir();
     const filePath = path.join(dir, 'file.txt');
     fsSync.writeFileSync(filePath, 'hello world hello');
 
@@ -75,11 +84,9 @@ describe('EditTool.execute — exact match', () => {
     expect(fsSync.readFileSync(filePath, 'utf-8')).toBe('hello universe hello');
     expect(resultStr(result)).toContain('Successfully edited');
     expect(resultStr(result)).toContain('found 1 match');
-    fsSync.rmSync(dir, { recursive: true, force: true });
   });
 
   it('replaces all occurrences with replace_all', async () => {
-    const dir = tmpDir();
     const filePath = path.join(dir, 'file.txt');
     fsSync.writeFileSync(filePath, 'foo bar foo baz foo');
 
@@ -90,11 +97,9 @@ describe('EditTool.execute — exact match', () => {
     );
 
     expect(fsSync.readFileSync(filePath, 'utf-8')).toBe('qux bar qux baz qux');
-    fsSync.rmSync(dir, { recursive: true, force: true });
   });
 
   it('replaces only first by default', async () => {
-    const dir = tmpDir();
     const filePath = path.join(dir, 'file.txt');
     fsSync.writeFileSync(filePath, 'foo bar foo baz foo');
 
@@ -105,11 +110,9 @@ describe('EditTool.execute — exact match', () => {
     );
 
     expect(fsSync.readFileSync(filePath, 'utf-8')).toBe('qux bar foo baz foo');
-    fsSync.rmSync(dir, { recursive: true, force: true });
   });
 
   it('replaces multi-line content', async () => {
-    const dir = tmpDir();
     const filePath = path.join(dir, 'file.txt');
     fsSync.writeFileSync(filePath, 'line1\nhello\nline3');
 
@@ -120,11 +123,9 @@ describe('EditTool.execute — exact match', () => {
     );
 
     expect(fsSync.readFileSync(filePath, 'utf-8')).toBe('line1\nworld\nline3');
-    fsSync.rmSync(dir, { recursive: true, force: true });
   });
 
   it('creates parent directories for new file', async () => {
-    const dir = tmpDir();
     const tool = new EditTool();
     const filePath = path.join(dir, 'a', 'b', 'new.txt');
 
@@ -138,7 +139,6 @@ describe('EditTool.execute — exact match', () => {
     );
 
     expect(fsSync.readFileSync(filePath, 'utf-8')).toBe('new content');
-    fsSync.rmSync(dir, { recursive: true, force: true });
   });
 });
 
@@ -146,7 +146,6 @@ describe('EditTool.execute — exact match', () => {
 
 describe('EditTool.execute — line-trimmed fallback', () => {
   it('matches with different indentation', async () => {
-    const dir = tmpDir();
     const filePath = path.join(dir, 'file.txt');
     fsSync.writeFileSync(filePath, '  hello world  \n  foo bar  ');
 
@@ -157,11 +156,9 @@ describe('EditTool.execute — line-trimmed fallback', () => {
     );
 
     expect(fsSync.readFileSync(filePath, 'utf-8')).toBe('  universe  \n  foo bar  ');
-    fsSync.rmSync(dir, { recursive: true, force: true });
   });
 
   it('provides helpful error when text not found', async () => {
-    const dir = tmpDir();
     const filePath = path.join(dir, 'file.txt');
     fsSync.writeFileSync(filePath, 'line1\nline2\nline3');
 
@@ -175,7 +172,6 @@ describe('EditTool.execute — line-trimmed fallback', () => {
     expect(resultStr(result)).toContain('Searched for');
     expect(resultStr(result)).toContain('File content');
     expect(resultStr(result)).toContain('Tip');
-    fsSync.rmSync(dir, { recursive: true, force: true });
   });
 });
 
@@ -183,7 +179,6 @@ describe('EditTool.execute — line-trimmed fallback', () => {
 
 describe('EditTool.execute — error cases', () => {
   it('rejects empty oldString', async () => {
-    const dir = tmpDir();
     const filePath = path.join(dir, 'file.txt');
     fsSync.writeFileSync(filePath, 'hello');
 
@@ -194,11 +189,9 @@ describe('EditTool.execute — error cases', () => {
     );
 
     expect(resultStr(result)).toContain('oldString must not be empty');
-    fsSync.rmSync(dir, { recursive: true, force: true });
   });
 
   it('rejects identical oldString and newString', async () => {
-    const dir = tmpDir();
     const filePath = path.join(dir, 'file.txt');
     fsSync.writeFileSync(filePath, 'hello');
 
@@ -209,63 +202,51 @@ describe('EditTool.execute — error cases', () => {
     );
 
     expect(resultStr(result)).toContain('no changes to apply');
-    fsSync.rmSync(dir, { recursive: true, force: true });
   });
 
   it('returns error on invalid JSON input', async () => {
-    const dir = tmpDir();
     const tool = new EditTool();
     const result = await tool.execute('not json', toolCtx({ workspaceRoot: dir }));
     expect(resultStr(result)).toContain('Error parsing arguments');
-    fsSync.rmSync(dir, { recursive: true, force: true });
   });
 
   it('returns error on missing path', async () => {
-    const dir = tmpDir();
     const tool = new EditTool();
     const result = await tool.execute(
       { oldString: 'a', newString: 'b' },
       toolCtx({ workspaceRoot: dir })
     );
     expect(resultStr(result)).toContain('Error parsing arguments');
-    fsSync.rmSync(dir, { recursive: true, force: true });
   });
 
   it('returns error on missing oldString', async () => {
-    const dir = tmpDir();
     const tool = new EditTool();
     const result = await tool.execute(
       { path: 'file.txt', newString: 'b' },
       toolCtx({ workspaceRoot: dir })
     );
     expect(resultStr(result)).toContain('Error parsing arguments');
-    fsSync.rmSync(dir, { recursive: true, force: true });
   });
 
   it('returns error on missing newString', async () => {
-    const dir = tmpDir();
     const tool = new EditTool();
     const result = await tool.execute(
       { path: 'file.txt', oldString: 'a' },
       toolCtx({ workspaceRoot: dir })
     );
     expect(resultStr(result)).toContain('Error parsing arguments');
-    fsSync.rmSync(dir, { recursive: true, force: true });
   });
 
   it('rejects path outside cwd boundary', async () => {
-    const dir = tmpDir();
     const tool = new EditTool();
     const result = await tool.execute(
       { path: '/etc/evil.txt', oldString: 'a', newString: 'b' },
       toolCtx({ cwdBoundary: dir })
     );
     expect(resultStr(result)).toContain('outside cwd boundary');
-    fsSync.rmSync(dir, { recursive: true, force: true });
   });
 
   it('rejects input that is too large', async () => {
-    const dir = tmpDir();
     const filePath = path.join(dir, 'file.txt');
     fsSync.writeFileSync(filePath, 'hello');
 
@@ -276,11 +257,9 @@ describe('EditTool.execute — error cases', () => {
       toolCtx({ workspaceRoot: dir })
     );
     expect(resultStr(result)).toContain('Edit input too large');
-    fsSync.rmSync(dir, { recursive: true, force: true });
   });
 
   it('handles input as string JSON', async () => {
-    const dir = tmpDir();
     const filePath = path.join(dir, 'file.txt');
     fsSync.writeFileSync(filePath, 'hello world');
 
@@ -291,7 +270,6 @@ describe('EditTool.execute — error cases', () => {
     );
 
     expect(fsSync.readFileSync(filePath, 'utf-8')).toBe('goodbye world');
-    fsSync.rmSync(dir, { recursive: true, force: true });
   });
 });
 
@@ -299,7 +277,6 @@ describe('EditTool.execute — error cases', () => {
 
 describe('EditTool.execute — snake_case aliases', () => {
   it('accepts old_string and new_string', async () => {
-    const dir = tmpDir();
     const filePath = path.join(dir, 'file.txt');
     fsSync.writeFileSync(filePath, 'hello world');
 
@@ -310,6 +287,5 @@ describe('EditTool.execute — snake_case aliases', () => {
     );
 
     expect(fsSync.readFileSync(filePath, 'utf-8')).toBe('goodbye world');
-    fsSync.rmSync(dir, { recursive: true, force: true });
   });
 });

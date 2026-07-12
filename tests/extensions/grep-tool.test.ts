@@ -1,8 +1,18 @@
-import { describe, it, expect } from "bun:test";
+import { describe, it, expect, beforeAll, afterAll } from "bun:test";
 import fsSync from "node:fs";
 import path from "node:path";
 import { GrepTool } from "../../src/extensions/core-tools/grep.ts";
-import { resultStr, getDisplay, tmpDir, toolCtx } from "../helpers.ts";
+import { resultStr, getDisplay, tmpDir, toolCtx, cleanupDir } from "../helpers.ts";
+
+let dir: string;
+
+beforeAll(() => {
+  dir = tmpDir();
+});
+
+afterAll(() => {
+  cleanupDir(dir);
+});
 
 describe("GrepTool.toToolDef", () => {
   it("returns a tool definition with correct name", () => {
@@ -40,7 +50,6 @@ describe("GrepTool.callDisplay", () => {
 
 describe("GrepTool.execute", () => {
   it("finds matches in files", async () => {
-    const dir = tmpDir();
     fsSync.writeFileSync(
       path.join(dir, "hello.js"),
       'console.log("hello world")',
@@ -54,11 +63,9 @@ describe("GrepTool.execute", () => {
 
     expect(resultStr(result)).toContain("hello.js");
     expect(resultStr(result)).toContain("hello world");
-    fsSync.rmSync(dir, { recursive: true, force: true });
   });
 
   it("finds regex matches", async () => {
-    const dir = tmpDir();
     fsSync.writeFileSync(
       path.join(dir, "test.py"),
       "item1 = 1\nitem2 = 2\nfoo = 3",
@@ -72,11 +79,9 @@ describe("GrepTool.execute", () => {
     expect(resultStr(result)).toContain("test.py");
     expect(resultStr(result)).toContain("item1");
     expect(resultStr(result)).toContain("item2");
-    fsSync.rmSync(dir, { recursive: true, force: true });
   });
 
   it("filters by file type", async () => {
-    const dir = tmpDir();
     fsSync.writeFileSync(path.join(dir, "test.js"), "hello world");
     fsSync.writeFileSync(path.join(dir, "test.py"), "hello world");
     fsSync.writeFileSync(path.join(dir, "test.txt"), "hello world");
@@ -92,11 +97,9 @@ describe("GrepTool.execute", () => {
     expect(resultStr(result)).toContain("test.py");
     expect(result).not.toContain("test.js");
     expect(result).not.toContain("test.txt");
-    fsSync.rmSync(dir, { recursive: true, force: true });
   });
 
   it("respects max_results", async () => {
-    const dir = tmpDir();
     for (let i = 0; i < 10; i++) {
       fsSync.writeFileSync(
         path.join(dir, `file${i}.js`),
@@ -115,11 +118,9 @@ describe("GrepTool.execute", () => {
     // Should have at most 3 results
     const lines = result.split("\n").filter((l) => l.includes("file"));
     expect(lines.length).toBeLessThanOrEqual(3);
-    fsSync.rmSync(dir, { recursive: true, force: true });
   });
 
   it("returns no matches when nothing found", async () => {
-    const dir = tmpDir();
     fsSync.writeFileSync(path.join(dir, "file.txt"), "hello world");
 
     const tool = new GrepTool();
@@ -128,18 +129,15 @@ describe("GrepTool.execute", () => {
     );
 
     expect(resultStr(result)).toContain("No matches found");
-    fsSync.rmSync(dir, { recursive: true, force: true });
   });
 
   it("rejects invalid regex", async () => {
-    const dir = tmpDir();
     const tool = new GrepTool();
     const result = getDisplay(
       await tool.execute({ pattern: "[invalid", path: dir }, toolCtx()),
     );
 
     expect(resultStr(result)).toContain("Invalid regex");
-    fsSync.rmSync(dir, { recursive: true, force: true });
   });
 
   it("returns error on invalid JSON input", async () => {
@@ -155,7 +153,6 @@ describe("GrepTool.execute", () => {
   });
 
   it("handles input as string JSON", async () => {
-    const dir = tmpDir();
     fsSync.writeFileSync(path.join(dir, "file.js"), "hello world");
 
     const tool = new GrepTool();
@@ -168,11 +165,9 @@ describe("GrepTool.execute", () => {
 
     expect(resultStr(result)).toContain("file.js");
     expect(resultStr(result)).toContain("hello world");
-    fsSync.rmSync(dir, { recursive: true, force: true });
   });
 
   it("searches recursively", async () => {
-    const dir = tmpDir();
     fsSync.mkdirSync(path.join(dir, "sub"), { recursive: true });
     fsSync.writeFileSync(path.join(dir, "root.js"), "hello");
     fsSync.writeFileSync(path.join(dir, "sub", "nested.js"), "hello");
@@ -184,6 +179,5 @@ describe("GrepTool.execute", () => {
 
     expect(resultStr(result)).toContain("root.js");
     expect(resultStr(result)).toContain("nested.js");
-    fsSync.rmSync(dir, { recursive: true, force: true });
   });
 });

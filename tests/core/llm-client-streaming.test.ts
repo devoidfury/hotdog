@@ -1,7 +1,7 @@
 // Extended tests for LlmClient streaming, SSE parsing, cancellation, and escape methods.
 
 import { readFileSync } from "node:fs";
-import { describe, it, expect } from "bun:test";
+import { describe, it, expect, beforeEach, afterEach } from "bun:test";
 import { LlmClient } from "../../src/core/llm-client/client.ts";
 import { LlmError } from "../../src/core/error.ts";
 import { Message } from "../../src/core/context/message.ts";
@@ -571,6 +571,16 @@ describe("LlmClient constructor edge cases", () => {
 });
 
 describe("LlmClient._doRequest", () => {
+  let originalFetch: typeof globalThis.fetch;
+
+  beforeEach(() => {
+    originalFetch = globalThis.fetch;
+  });
+
+  afterEach(() => {
+    globalThis.fetch = originalFetch;
+  });
+
   it("includes Authorization header when apiKey is set", async () => {
     const client = new LlmClient({
       chatTimeoutSecs: 30,
@@ -795,6 +805,16 @@ describe("LlmClient._doRequest", () => {
 });
 
 describe("LlmClient.ping", () => {
+  let originalFetch: typeof globalThis.fetch;
+
+  beforeEach(() => {
+    originalFetch = globalThis.fetch;
+  });
+
+  afterEach(() => {
+    globalThis.fetch = originalFetch;
+  });
+
   it("returns undefined on successful health check", async () => {
     const client = new LlmClient({ chatTimeoutSecs: 30, maxRetries: 3, baseUrl: "http://test.com" });
 

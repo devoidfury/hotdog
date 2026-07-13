@@ -175,12 +175,14 @@ export class SessionManager {
    * @returns The new agent instance.
    */
   async swap(config: Record<string, unknown>): Promise<AgentLike> {
-    const oldAgent = this.#store.getAgent(this.#currentSessionId!);
+    const oldAgent = this.#currentSessionId
+      ? this.#store.getAgent(this.#currentSessionId)
+      : undefined;
     const newAgent = await this.#buildAgent(config);
     this.#store.addAgent(newAgent);
     this.#currentSessionId = newAgent.sessionId;
     await this.#hooks.notifyHooksAsync(HOOKS.SESSION_SWAP, {
-      oldAgent,
+      oldAgent: oldAgent ?? null,
       newAgent,
     });
     return newAgent;

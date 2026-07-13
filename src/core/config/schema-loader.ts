@@ -445,7 +445,7 @@ export function resolveKey(
   keyName: string,
   schema: SchemaProperty,
   context: ResolutionContext,
-): unknown {
+): SchemaToType<SchemaProperty['type']> | undefined {
   const { layers, properties } = schema;
 
   for (const layer of layers) {
@@ -490,12 +490,33 @@ export function resolveKey(
 }
 
 /**
+ * Resolved config type derived from the schema.
+ * Keys match the schema's top-level property names; values are inferred from
+ * the schema's `type` field. Falls back to `unknown` for missing types.
+ */
+export type ResolvedConfigFromSchema<S extends ConfigSchema> = {
+  [K in keyof S & string]: S[K] extends SchemaProperty
+    ? S[K]['type'] extends 'string'
+      ? string | undefined
+      : S[K]['type'] extends 'number'
+        ? number | undefined
+        : S[K]['type'] extends 'boolean'
+          ? boolean | undefined
+          : S[K]['type'] extends 'array'
+            ? unknown[] | undefined
+            : S[K]['type'] extends 'object'
+              ? Record<string, unknown> | undefined
+              : unknown
+    : unknown;
+};
+
+/**
  * Resolve all config keys from a schema against a context.
  */
 export function resolveAll(
   schema: ConfigSchema,
   context: ResolutionContext,
-): Record<string, unknown> {
+): ResolvedConfigFromSchema<ConfigSchema> {
   const result: Record<string, unknown> = {};
 
   for (const [keyName, keySchema] of Object.entries(schema)) {

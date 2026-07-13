@@ -293,52 +293,19 @@ export class LlmClient {
     const { url, apiKey } = this.resolveProviderSettings(modelConfig.name);
 
     // Build an AbortController for cancellation + timeout.
-    // Uses event-based cancellation (no polling) when the cancelToken
-    // is an AbortSignal or has a .signal property. Falls back to
-    // directly checking .aborted for custom cancel tokens.
     const abortController = new AbortController();
     let removeCancelListener: (() => void) | null = null;
 
     if (cancelToken) {
-      const onAbort = () => abortController.abort();
-
-      // Prefer standard AbortSignal event listener
-      if (
-        "signal" in cancelToken &&
-        typeof (cancelToken as { signal: { addEventListener?: (event: string, cb: () => void, opts: { once: boolean }) => void } }).signal?.addEventListener === "function"
-      ) {
-        (cancelToken as { signal: { addEventListener: (event: string, cb: () => void, opts: { once: boolean }) => void; removeEventListener: (event: string, cb: () => void) => void } }).signal.addEventListener(
-          "abort",
-          onAbort,
-          { once: true },
-        );
-        removeCancelListener = () =>
-          (cancelToken as { signal: { removeEventListener: (event: string, cb: () => void) => void } }).signal.removeEventListener(
-            "abort",
-            onAbort,
-          );
-      } else if (typeof (cancelToken as { addEventListener?: (event: string, cb: () => void, opts: { once: boolean }) => void }).addEventListener === "function") {
-        // cancelToken itself is an AbortSignal
-        (cancelToken as { addEventListener: (event: string, cb: () => void, opts: { once: boolean }) => void; removeEventListener: (event: string, cb: () => void) => void }).addEventListener(
-          "abort",
-          onAbort,
-          { once: true },
-        );
-        removeCancelListener = () =>
-          (cancelToken as { removeEventListener: (event: string, cb: () => void) => void }).removeEventListener(
-            "abort",
-            onAbort,
-          );
-      } else if (
-        "aborted" in cancelToken &&
-        (cancelToken as { aborted: boolean }).aborted
-      ) {
-        // Already aborted — abort immediately
+      // If the signal is already aborted, abort immediately — addEventListener
+      // won't fire on an already-aborted signal.
+      if (cancelToken.aborted) {
         abortController.abort();
+      } else {
+        const onAbort = () => abortController.abort();
+        cancelToken.addEventListener("abort", onAbort, { once: true });
+        removeCancelListener = () => cancelToken.removeEventListener("abort", onAbort);
       }
-      // If cancelToken has neither addEventListener nor is already aborted,
-      // we can't listen for it. The caller can still abort via the agent's
-      // cancel() flag which is checked in the stream processing loop.
     }
 
     try {

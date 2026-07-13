@@ -1,6 +1,7 @@
 // Tool registry — holds all available tools.
 
 import { validateParams, formatValidationErrors } from "../../utils/json-schema.js";
+import { logger } from "../logger.ts";
 
 export interface ToolDef {
   type: string;
@@ -75,21 +76,32 @@ export class ToolRegistry {
     const cached = this.#allToolDefsCache;
     if (cached) return cached;
 
-    try {
-      const defs: ToolDef[] = [];
-      for (const t of this.tools.values()) {
-        if (t.toToolDef) {
+    const defs: ToolDef[] = [];
+    let hadError = false;
+
+    for (const t of this.tools.values()) {
+      if (t.toToolDef) {
+        try {
           const def = await t.toToolDef();
           if (def) defs.push(def as ToolDef);
+        } catch (err) {
+          // Individual tool def failed — log and skip, don't invalidate the
+          // entire cache. The failed tool's individual cache entry will be
+          // stale (it may have a cached null from a prior attempt), but the
+          // next call to getToolDef(name) will retry because we clear it here.
+          const name = (t as { name?: string }).name || "unknown";
+          logger.warn(
+            `[tools] Failed to get tool def for "${name}": ${(err as Error).message}`,
+          );
+          hadError = true;
         }
       }
-      this.#allToolDefsCache = Promise.resolve(defs);
-      return defs;
-    } catch (err) {
-      this.#allToolDefsCache = null;
-      this.#toolDefCache.clear();
-      throw err;
     }
+
+    if (!hadError) {
+      this.#allToolDefsCache = Promise.resolve(defs);
+    }
+    return defs;
   }
 
   /**

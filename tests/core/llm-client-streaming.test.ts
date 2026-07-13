@@ -967,12 +967,11 @@ describe("LlmClient.chatStreamCancellable cancel token variations", () => {
     const client = setupClient();
     const abortController = new AbortController();
 
-    const cancelToken = { signal: abortController.signal };
     const gen = client.chatStreamCancellable(
       [makeMsg("user", "Hi")],
       { name: "test-model", temperature: null, maxTokens: 100 },
       [],
-      cancelToken,
+      abortController.signal,
     );
 
     const events = [];
@@ -993,7 +992,7 @@ describe("LlmClient.chatStreamCancellable cancel token variations", () => {
       [makeMsg("user", "Hi")],
       { name: "test-model", temperature: null, maxTokens: 100 },
       [],
-      { aborted: true },
+      abortController.signal,
     );
 
     // Generator should throw because retryWithBackoff detects aborted signal

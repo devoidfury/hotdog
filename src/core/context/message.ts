@@ -6,15 +6,16 @@ export interface ImageAttachment {
   data: string;
 }
 
-export interface MessageOptions {
+/**
+ * Canonical constructor parameters — camelCase only.
+ * Use Message.fromJSON() to deserialize from snake_case persistence.
+ */
+export interface MessageParams {
   role?: string;
   content?: string | Array<unknown>;
   reasoningContent?: string | null;
-  reasoning_content?: string | null;
   toolCalls?: unknown;
-  tool_calls?: unknown;
   toolCallId?: string | null;
-  tool_call_id?: string | null;
   images?: ImageAttachment[];
 }
 
@@ -27,28 +28,34 @@ export class Message {
   images: ImageAttachment[] | null | undefined;
 
   /**
-   * @param opts
-   * @param opts.role
-   * @param opts.content — Plain text string or array of content parts
-   * @param opts.reasoningContent — camelCase (API / JS)
-   * @param opts.reasoning_content — snake_case (JSON / log files)
-   * @param opts.toolCalls — camelCase (API / JS)
-   * @param opts.tool_calls — snake_case (JSON / log files)
-   * @param opts.toolCallId — camelCase (API / JS)
-   * @param opts.tool_call_id — snake_case (JSON / log files)
-   * @param opts.images — Array of image objects
-   *   Each image: { type: "image_url", mimeType: "image/png", data: "<base64>" }
+   * @param opts — camelCase parameters only.
+   *   content: Plain text string or array of content parts.
+   *   images: Array of { type: "image_url", mimeType, data }.
    */
-  constructor(src: MessageOptions = {}) {
-    this.role = src.role;
-    this.content = src.content;
-    // Accept both camelCase (API) and snake_case (JSON / log files)
-    this.reasoningContent =
-      src.reasoningContent ?? src.reasoning_content ?? null;
-    this.toolCalls = src.toolCalls ?? src.tool_calls ?? null;
-    this.toolCallId = src.toolCallId ?? src.tool_call_id ?? null;
-    // Images: array of { type: "image_url", mimeType: "image/png", data: "<base64>" }
-    this.images = src.images ?? null;
+  constructor(opts: MessageParams = {}) {
+    this.role = opts.role;
+    this.content = opts.content;
+    this.reasoningContent = opts.reasoningContent ?? null;
+    this.toolCalls = opts.toolCalls ?? null;
+    this.toolCallId = opts.toolCallId ?? null;
+    this.images = opts.images ?? null;
+  }
+
+  /**
+   * Deserialize from JSON/snake_case data (persistence/log format).
+   * Normalizes snake_case keys to camelCase.
+   *
+   * @param data — Raw deserialized object, possibly with snake_case keys.
+   */
+  static fromJSON(data: Record<string, unknown>): Message {
+    return new Message({
+      role: data.role as string | undefined,
+      content: data.content as string | Array<unknown> | undefined,
+      reasoningContent: (data.reasoning_content ?? data.reasoningContent) as string | null,
+      toolCalls: data.tool_calls ?? data.toolCalls ?? null,
+      toolCallId: (data.tool_call_id ?? data.toolCallId) as string | null,
+      images: data.images as ImageAttachment[] | null | undefined,
+    });
   }
 
   /**

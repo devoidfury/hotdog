@@ -7,6 +7,94 @@ import type { ExtensionLoader } from "./extensions.ts";
 import type { ServiceRegistry } from "./service-registry.ts";
 import type { CliSubcommandRegistry } from "./registries.ts";
 import type { ModelConfig } from "../config/providers.ts";
+import type { Agent } from "../agent.ts";
+import type { Message } from "../context/message.ts";
+import type { ParsedCommand } from "../commands.ts";
+
+// ── Hook Payload Types ──────────────────────────────────────────────────────
+
+/**
+ * Payload shapes for every standard hook name.
+ * Each key maps to the data object passed to handlers registered on that hook.
+ */
+export interface HookPayloads {
+  // Session lifecycle
+  "session:create": { session: unknown; config: Record<string, unknown> };
+  "session:swap": { oldAgent: unknown; newAgent: unknown };
+  "session:serialize": { agent: unknown };
+  "session:deserialize": { data: Record<string, unknown> };
+  "session:restoreActive": { agent: unknown; isRestoring: boolean };
+
+  // Tool context enrichment
+  "agent:toolContext": { toolCtx: unknown; toolName: string; agent: Agent };
+
+  // Model changes
+  "model:change": { agent: Agent; oldModel: string; newModel: string };
+
+  // Message flow after LLM
+  "messages:afterLLM": { response: unknown; messages: Message[] };
+
+  // Tool execution lifecycle
+  "tools:register": ToolsRegisterPayload;
+  "tool:beforeExecute": { toolCallId: string; toolName: string; input: string; agent: Agent };
+  "services:register": ServiceRegistry;
+  "tool:afterExecute": { toolCallId: string; toolName: string; result: unknown; input: string; agent: Agent; success: boolean };
+  "loop:detected": { agent: Agent };
+  "tool:metrics": { toolName: string; toolCallId: string; durationMs: number; success: boolean; resultSize: number; input: string; agent: Agent };
+
+  // Context management
+  "context:message": { message: Message; agent: Agent };
+  "context:replaced": { agent: Agent; oldContext: Message[]; newContext: Message[] };
+
+  // System prompt — handlers return a chunk object { name, priority, content }
+  // or an array of chunk objects.
+  "systemPrompt:build": { agent: Agent };
+
+  // Commands
+  "command:dispatch": { command: ParsedCommand; agent: Agent };
+  "commands:register": CommandsRegisterPayload;
+
+  // Output
+  "output:event": { type: string; data: Record<string, unknown>; agent: Agent };
+
+  // Shutdown
+  "shutdown:cleanup": Record<string, never>;
+
+  // CLI
+  "cli:subcommandsRegister": CliSubcommandRegistry;
+  "cli:argsParsed": { cli: Record<string, unknown> };
+
+  // Input preprocessing
+  "input": { text: string; images: unknown[] | null };
+
+  // Context modification pipeline — run sequentially before each LLM call
+  "context": { messages: Message[]; agent: Agent };
+
+  // Tool call gate — BLOCK or MUTATE tool input before execution
+  "tool:call": { toolCallId: string; toolName: string; input: string; agent: Agent };
+
+  // Tool result modification — MODIFY tool output before it reaches the LLM context
+  "tool:result": { toolCallId: string; toolName: string; result: unknown; success: boolean; input: string; agent: Agent };
+
+  // Provider request — run BEFORE the HTTP request to the LLM
+  "provider:request": { messages: Message[]; modelConfig: ModelConfig; toolDefs: ToolDef[]; agent: Agent };
+
+  // Provider response — emitted AFTER the LLM response is fully received
+  "provider:response": { response: unknown; modelConfig: ModelConfig; agent: Agent };
+
+  // Turn lifecycle
+  "turn:start": { turnIndex: number; timestamp: number; agent: Agent };
+  "turn:end": { turnIndex: number; message: string; toolResults: Array<{ toolName: string; input: string; result: string }>; stopped: boolean; agent: Agent };
+
+  // Logging
+  "log": { level: string; message: string; metadata?: Record<string, unknown> };
+}
+
+/**
+ * Derive the handler type for a given hook name.
+ */
+export type HookHandlerFor<K extends keyof HookPayloads> =
+  (payload: HookPayloads[K]) => void | Promise<void> | unknown;
 
 // ── Core Context ─────────────────────────────────────────────────────────────
 
@@ -71,12 +159,18 @@ export interface ResolvedConfig {
 
 /**
  * Shape of the object an extension's `create()` function returns.
+ *
+ * Hook handlers are keyed by hook name (e.g., HOOKS.TOOLS_REGISTER).
+ * The type system checks that the handler function matches the expected payload
+ * for that hook name.
  */
 export interface ExtensionInstance {
   /**
-   * Hook handlers keyed by hook name (e.g., HOOKS.TOOLS_REGISTER).
+   * Hook handlers keyed by hook name.
    */
-  hooks?: Record<string, (data: unknown) => unknown | Promise<unknown>>;
+  hooks?: Partial<HookPayloads> & {
+    [key: string]: (data: unknown) => unknown | Promise<unknown>;
+  };
 
   /**
    * Optional shutdown hook called during extension unload.
@@ -94,7 +188,7 @@ export interface ExtensionInstance {
   [key: string]: unknown;
 }
 
-// ── Hook Payload Types ──────────────────────────────────────────────────────
+// ── Specific Hook Payload Types ──────────────────────────────────────────────
 
 /**
  * Payload for the `tools:register` hook.

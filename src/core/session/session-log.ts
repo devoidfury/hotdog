@@ -195,8 +195,8 @@ export function replayEntriesIntoContext(agent: AgentForReplay, entries: LogEntr
           new Message({
             role: "assistant",
             content: entry.content,
-            reasoningContent: entry.reasoning_content || null,
-            toolCalls: entry.tool_calls || null,
+            reasoningContent: entry.reasoningContent ?? entry.reasoning_content ?? null,
+            toolCalls: entry.toolCalls ?? entry.tool_calls ?? null,
           }),
         );
         replayed++;
@@ -209,9 +209,7 @@ export function replayEntriesIntoContext(agent: AgentForReplay, entries: LogEntr
           new Message({
             role: "tool",
             content: entry.content,
-            reasoningContent: null,
-            toolCalls: null,
-            toolCallId: entry.tool_call_id || null,
+            toolCallId: entry.toolCallId ?? entry.tool_call_id ?? null,
           }),
         );
         replayed++;

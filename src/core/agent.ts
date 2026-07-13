@@ -55,6 +55,16 @@ export interface ImageAttachment {
   data: string;
 }
 
+/**
+ * The subset of config keys that the Agent class actually reads.
+ * Extensions may read additional keys via core.config.
+ */
+export interface AgentConfig {
+  cwdBoundary?: string | null;
+  workspaceRoot?: string | null;
+  [key: string]: unknown;
+}
+
 export interface AgentOptions {
   hooks: HookSystem;
   toolRegistry: ToolRegistry;
@@ -68,7 +78,7 @@ export interface AgentOptions {
   sink?: OutputSink | null;
   modelRegistry?: ModelRegistry;
   profileName?: string;
-  config?: Record<string, unknown>;
+  config?: AgentConfig;
   sessionId?: string;
   role?: string;
   profileBody?: string;
@@ -94,7 +104,7 @@ export class Agent {
   #sink: OutputSink | null;
   #modelRegistry: ModelRegistry;
   #profileName: string | undefined;
-  #config: Record<string, unknown> | null;
+  #config: AgentConfig | null;
   #sessionId: string;
   #role: string | undefined;
   #profileBody: string | undefined;
@@ -285,7 +295,7 @@ export class Agent {
   /**
    * The config object reference.
    */
-  get config(): Record<string, unknown> | null {
+  get config(): AgentConfig | null {
     return this.#config;
   }
 
@@ -1217,7 +1227,7 @@ export class Agent {
     this.#sessionId = data.sessionId as string;
     this.#log.replace(
       (data.context as Array<Record<string, unknown>>).map(
-        (m: Record<string, unknown>) => new Message(m),
+        (m: Record<string, unknown>) => Message.fromJSON(m),
       ),
     );
     this.model = data.model as string;

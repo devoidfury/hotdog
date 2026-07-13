@@ -90,6 +90,16 @@ export class BashTool {
           // enable agent-friendly test output in bun test, maybe others
           // https://bun.com/docs/test#ai-agent-integration
           AGENT: "1",
+          CLAUDECODE: "1",
+          // prior art -- used for automated builds, exporting this ensures
+          // that compilers, interactive CLIs, and scripts suppress blocking
+          // prompt traps (Press any key to continue...), escape sequences, colors
+          CI: "true",
+          TERM: "dumb",
+          NO_COLOR: "1",
+          // prevent git from opening a blocking nano/vim/etc prompt during a commit
+          GIT_TERMINAL_PROMPT: "0",
+          GIT_EDITOR: "cat",
         },
       });
 

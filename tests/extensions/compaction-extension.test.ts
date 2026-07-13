@@ -422,7 +422,7 @@ describe("COMMANDS_REGISTER Hook", () => {
 
     const result = await compactCmd.handler(agent, "compact 5");
     expect(result.content).toContain("Context compacted to 5 messages");
-    expect(agent.log.length).toBe(5);
+    expect(agent.log.length).toBe(6);
   });
 
   it("compact command with too few messages returns message", async () => {

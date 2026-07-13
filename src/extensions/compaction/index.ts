@@ -105,9 +105,29 @@ export function create(core: CoreContext): ExtensionInstance | null {
   // ── Helper functions (inside create() to close over core, settings, registry) ──
 
   /**
+   * Ensure the conversation ends with a user turn.
+   * Some strict chat templates (e.g. in LM Studio/llama.cpp) fail if the
+   * message history ends with an assistant or tool message.
+   */
+  function ensureUserTurnGuard(messages: Message[]): Message[] {
+    if (messages.length === 0) return messages;
+    const lastMsg = messages[messages.length - 1];
+    if (lastMsg.role === "user") return messages;
+
+    return [
+      ...messages,
+      new Message({
+        role: "user",
+        content: "Continue from the compressed conversation context above.",
+      }),
+    ];
+  }
+
+  /**
    * Perform the actual compaction.
    */
   async function _performCompaction(agent: Agent, strategy: CompactionStrategy): Promise<void> {
+
     const messages = agent.log.getAll(); // defensive copy — strategies expect Message[]
     const model = agent.model;
     const modelConfig = getModelConfig(core, model);
@@ -170,13 +190,13 @@ export function create(core: CoreContext): ExtensionInstance | null {
         });
 
         // Replace the compacted portion
-        agent.replaceContext([
+        agent.replaceContext(ensureUserTurnGuard([
           summaryMsg,
           ...messages.slice(compactedCount),
-        ]);
+        ]));
       } else {
         // Drop strategy — just remove the old messages
-        agent.replaceContext(messages.slice(compactedCount));
+        agent.replaceContext(ensureUserTurnGuard(messages.slice(compactedCount)));
       }
 
       // Emit compaction result event
@@ -205,7 +225,7 @@ export function create(core: CoreContext): ExtensionInstance | null {
     if (opts.keep !== null) {
       const systemMessages = agent.log.getSystem();
       const keptMessages = nonSystemMessages.slice(-opts.keep);
-      agent.replaceContext([...systemMessages, ...keptMessages]);
+      agent.replaceContext(ensureUserTurnGuard([...systemMessages, ...keptMessages]));
       return { action: ACTIONS.DISPLAY, content: `Context compacted to ${keptMessages.length} messages.` };
     }
 

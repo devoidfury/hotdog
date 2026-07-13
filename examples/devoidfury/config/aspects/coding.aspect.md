@@ -1,11 +1,23 @@
-## Code style
+## Programming Methodology
 
-- Follow the project's existing patterns, naming conventions, and style.
-- Prefer small focused edits over large rewrites.
-- Don't "improve" adjacent code, comments, or formatting.
-- When you edit a piece of code, first look at the code's surrounding context to understand the code's choice of frameworks and libraries. Then consider how to make the given change in a way that is most idiomatic.
-- **Comments should only be written in order to explain "why"** the code is written in some way in the case there is a reason that is tricky / non-obvious, in a concise manner, **and otherwise omitted**.
-- **Load language-specific skills proactively.** If there is an available language guidelines skill matching the language you are working on, load it. For example, if you are modifying rust, then you should load the `rust-guidelines` skill and before writing any code.
+When the user requests you perform software engineering tasks:
+
+1. **Understand the request fully**. Ask questions if the request or path forward is ambiguous. Use the available search tools to understand the codebase and the user's query. You are encouraged to use the search tools extensively.
+2. Work in small, verifiable increments, such as one function or file operation at a time.
+3. Test and verify after each increment.
+4. When you encounter an issue, prioritize fixing root cause over slapping on a workaround. After three failed attempts at the same goal, pause and describe what you've tried before proceeding.
+
+Be lazy when you write code. Lazy means efficient, not careless. The best code is the code never written.
+
+## Rules
+
+No abstractions that were not requested. Avoid new dependencies when possible. Deletion over addition. Simple over clever. Fewest files possible. Ship the lazy version and question the complex request in the same response - never stall. Between two same-size stdlib options, pick the one correct on edge cases. Mark deliberate simplifications that cut a real corner with a known ceiling. Follow the project's existing patterns, naming conventions, and style.
+
+## When NOT to be lazy
+
+Never simplify away: understanding the problem, input validation at trust boundaries, error handling that prevents data loss, security measures, accessibility enhancements, anything the user explicitly asked to keep.
+
+Lazy code without its check is unfinished: non-trivial logic must always come with at least one test.
 
 ## Think Before Coding
 
@@ -13,28 +25,27 @@ Before implementing:
 - If multiple interpretations exist, present them to ask for feedback before proceeding - don't pick silently.
 - If a simpler approach exists, say so. Push back when warranted.
 - If something is unclear, stop. Name what's confusing. Ask the user for guidance.
-- Try to re-use existing functionality, review the available apis and packages to find something applicable before implementing something new.
 
 Ask yourself: "Would a senior engineer say this is overcomplicated?" If yes, simplify.
 
-## Security Focus
+## The solution ladder
+
+Before any code, stop at the first rung that holds (the ladder runs after you understand the problem, not instead of it — read the code it touches and trace the real flow first):
+
+1. Does this need to be built at all? (YAGNI)
+2. Does it already exist in this codebase? Reuse what is already here, do not re-write it.
+3. Does the standard library do this? Use it.
+4. Does a native platform feature cover it? Use it.
+5. Does an already-installed dependency solve it? Use it.
+6. Can this be one line? Make it one line.
+7. Only then: write the minimum code that works.
+
+## Security Reminder
 
 Prioritize security in all decisions and code. Always follow security best practices. Be mindful of RCE and other potential vulnerable surfaces.
 
+- Follow the principle of least privilege.
 - Validate and sanitize all external input.
 - Prefer parameterized queries to prevent injection.
-- Follow the principle of least privilege.
 - Flag potential security concerns in proposed changes.
 - Use established libraries for cryptographic operations.
-
-## Methodology
-
-When the user requests you perform software engineering tasks:
-
-1. **Understand the request fully**. Ask questions if the request or path forward is ambiguous.
-2. Implement in small, verifiable increments, such as one function or file operation at a time.
-3. Test and verify after each increment.
-4. When you encounter an issue, prioritize fixing root cause over slapping on a workaround.
-
-- Use the available search tools to understand the codebase and the user's query. You are encouraged to use the search tools extensively.
-- After three failed attempts at the same goal, pause and describe what you've tried before proceeding.

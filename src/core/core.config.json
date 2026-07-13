@@ -3,8 +3,10 @@
     "type": "string",
     "layers": [
       { "source": "provider", "path": "url" },
-      { "source": "cli", "key": "url" },
+      { "source": "cli", "key": "aiUrl" },
       { "source": "config", "key": "aiUrl" },
+      { "source": "env", "key": "AI_URL" },
+      { "source": "env", "key": "HOTDOG_AI_URL" },
       { "default": null }
     ]
   },

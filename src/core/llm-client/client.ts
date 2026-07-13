@@ -90,11 +90,8 @@ export class LlmClient {
    * @param options.markerMangler - Custom marker mangler for escaping
    */
   constructor(options: LlmClientOptions & LlmClientRequiredOptions) {
-    this.baseUrl =
-      options.baseUrl ||
-      process.env.AI_URL ||
-      null;
-    this.apiKey = options.apiKey || process.env.AI_API_KEY || null;
+    this.baseUrl = options.baseUrl || null;
+    this.apiKey = options.apiKey || null;
     this.sessionId = options.sessionId || "";
     this.loud = options.loud || false;
     this.chatTimeoutSecs = options.chatTimeoutSecs;
@@ -136,7 +133,7 @@ export class LlmClient {
     }
     if (!url) {
       throw new LlmError(
-        "No AI URL configured. Set a URL via --ai-url, aiUrl in config, provider.url, or HOTDOG_AI_URL environment variable.",
+        "No AI URL configured. Set a URL via --ai-url, aiUrl in config, or provider.url.",
         "config",
       );
     }

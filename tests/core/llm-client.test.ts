@@ -5,27 +5,16 @@ import { Message } from "../../src/core/context/message.ts";
 
 describe("LlmClient constructor", () => {
   it("creates with defaults", () => {
-    const origKey = process.env.AI_API_KEY;
-    const origUrl = process.env.AI_URL;
-    delete process.env.AI_API_KEY;
-    delete process.env.AI_URL;
-    try {
-      const client = new LlmClient({
-        chatTimeoutSecs: 600,
-        maxRetries: 12,
-      });
-      // No fallback — baseUrl is null when not configured
-      expect(client.baseUrl).toBeNull();
-      expect(client.apiKey).toBeNull();
-      expect(client.stream).toBe(true);
-      expect(client.chatTimeoutSecs).toBe(600);
-      expect(client.maxRetries).toBe(12);
-    } finally {
-      if (origKey !== undefined) process.env.AI_API_KEY = origKey;
-      else delete process.env.AI_API_KEY;
-      if (origUrl !== undefined) process.env.AI_URL = origUrl;
-      else delete process.env.AI_URL;
-    }
+    const client = new LlmClient({
+      chatTimeoutSecs: 600,
+      maxRetries: 12,
+    });
+    // No fallback — baseUrl is null when not configured
+    expect(client.baseUrl).toBeNull();
+    expect(client.apiKey).toBeNull();
+    expect(client.stream).toBe(true);
+    expect(client.chatTimeoutSecs).toBe(600);
+    expect(client.maxRetries).toBe(12);
   });
 
   it("accepts custom options", () => {
@@ -43,46 +32,25 @@ describe("LlmClient constructor", () => {
     expect(client.maxRetries).toBe(5);
   });
 
-  it("reads from environment variables", () => {
-    const origUrl = process.env.AI_URL;
-    const origKey = process.env.AI_API_KEY;
-    process.env.AI_URL = "http://env-url.com";
-    process.env.AI_API_KEY = "env-key";
-    try {
-      const client = new LlmClient({
-        chatTimeoutSecs: 600,
-        maxRetries: 12,
-      });
-      expect(client.baseUrl).toBe("http://env-url.com");
-      expect(client.apiKey).toBe("env-key");
-    } finally {
-      if (origUrl !== undefined) process.env.AI_URL = origUrl;
-      else delete process.env.AI_URL;
-      if (origKey !== undefined) process.env.AI_API_KEY = origKey;
-      else delete process.env.AI_API_KEY;
-    }
+  it("ignores environment variables — config layer handles resolution", () => {
+    const client = new LlmClient({
+      chatTimeoutSecs: 600,
+      maxRetries: 12,
+    });
+    // baseUrl/apiKey come from options only, not process.env
+    expect(client.baseUrl).toBeNull();
+    expect(client.apiKey).toBeNull();
   });
 
-  it("explicit options override environment", () => {
-    const origUrl = process.env.AI_URL;
-    const origKey = process.env.AI_API_KEY;
-    process.env.AI_URL = "http://env-url.com";
-    process.env.AI_API_KEY = "env-key";
-    try {
-      const client = new LlmClient({
-        baseUrl: "http://explicit.com",
-        apiKey: "explicit-key",
-        chatTimeoutSecs: 600,
-        maxRetries: 12,
-      });
-      expect(client.baseUrl).toBe("http://explicit.com");
-      expect(client.apiKey).toBe("explicit-key");
-    } finally {
-      if (origUrl !== undefined) process.env.AI_URL = origUrl;
-      else delete process.env.AI_URL;
-      if (origKey !== undefined) process.env.AI_API_KEY = origKey;
-      else delete process.env.AI_API_KEY;
-    }
+  it("explicit options are passed directly", () => {
+    const client = new LlmClient({
+      baseUrl: "http://explicit.com",
+      apiKey: "explicit-key",
+      chatTimeoutSecs: 600,
+      maxRetries: 12,
+    });
+    expect(client.baseUrl).toBe("http://explicit.com");
+    expect(client.apiKey).toBe("explicit-key");
   });
 });
 

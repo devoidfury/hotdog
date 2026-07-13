@@ -134,18 +134,18 @@ describe("CONFIG_KEYS schema", () => {
     profilesPath: "./config/profiles",
   };
 
-  it("baseUrl resolves with correct priority: provider > cli > config > default", () => {
+  it("baseUrl resolves with correct priority: provider > cli > config > env > default", () => {
     // Provider wins
     let context = {
       ...baseContext,
       provider: { url: "http://provider" },
-      cli: { url: "http://cli" },
+      cli: { aiUrl: "http://cli" },
       config: { aiUrl: "http://config" },
     };
     expect(resolveKey("baseUrl", CONFIG_KEYS.baseUrl, context)).toBe("http://provider");
 
     // CLI when no provider
-    context = { ...baseContext, cli: { url: "http://cli" } };
+    context = { ...baseContext, cli: { aiUrl: "http://cli" } };
     expect(resolveKey("baseUrl", CONFIG_KEYS.baseUrl, context)).toBe("http://cli");
 
     // Config when no provider or cli

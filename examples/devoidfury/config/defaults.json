@@ -60,7 +60,6 @@
   "providers": [
     {
       "name": "ai365",
-      "url": "http://ai365.home:9292",
       "models": [
         {
           "name": "agent-a1-35b-moe",

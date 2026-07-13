@@ -13,10 +13,13 @@
   "engines": {
     "bun": ">=1.0"
   },
+  "author": "Thomas Hunkapiller <tom@furycodes.com> (http://furycodes.com/)",
+  "repository": "github:devoidfury/hotdog",
   "scripts": {
     "start": "bun bin/hotdog",
     "test": "bun test --only-failures",
     "coverage": "bun test --only-failures --coverage"
   },
-  "type": "module"
+  "type": "module",
+  "license": "MIT"
 }

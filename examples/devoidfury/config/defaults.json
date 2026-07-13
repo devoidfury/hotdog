@@ -208,6 +208,10 @@
         {
           "name": "ornith-35b",
           "context-limit": 262144
+        },
+        {
+          "name": "gemma-4-12b",
+          "context-limit": 140000
         }
       ]
     }

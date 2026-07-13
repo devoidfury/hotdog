@@ -14,13 +14,11 @@ import { createCommandRegistry, AgentCommandRegistry } from "./extensions/regist
 import { CORE_COMMAND_HANDLERS, CommandHandlerDef } from "./command-handlers.ts";
 import { resolveModelConfig } from "./config/providers.ts";
 
-import {
-  collectSystemPromptChunks,
-  buildSystemPrompt,
-} from "./context/system-prompt.ts";
+import { createSystemPromptBuilder } from "./context/system-prompt.ts";
 
 import type { LlmClient, StreamEvent } from "./llm-client/client.ts";
 import type { ToolRegistry } from "./extensions/tool-registry.ts";
+import type { SystemPromptBuilder } from "./context/system-prompt.ts";
 
 export type { StreamEvent } from "./llm-client/client.ts";
 
@@ -86,6 +84,7 @@ export interface AgentOptions {
   abortSignal?: AbortSignal | null;
   toolWhitelist?: string[] | null;
   commandRegistry?: AgentCommandRegistry;
+  systemPromptBuilder?: SystemPromptBuilder;
 }
 
 /**
@@ -120,6 +119,7 @@ export class Agent {
   #runAbortController: AbortController | null;
   #commandRegistry: AgentCommandRegistry;
   #tokenUsage: TokenUsage;
+  #systemPromptBuilder: SystemPromptBuilder;
 
   /**
    * @param options
@@ -199,6 +199,9 @@ export class Agent {
       lastCompletionTokens: 0,
       lastTotalTokens: 0,
     };
+    // System prompt builder — manages system prompt lifecycle
+    this.#systemPromptBuilder =
+      options.systemPromptBuilder || createSystemPromptBuilder();
   }
 
   // ── Properties ────────────────────────────────────────────────────────────
@@ -341,11 +344,11 @@ export class Agent {
     return this.#stream;
   }
 
+  /**
+   * Get the current system prompt (from the builder's cache).
+   */
   get systemPrompt(): string | null {
-    return this.#systemPrompt;
-  }
-  set systemPrompt(v: string | null) {
-    this.#systemPrompt = v;
+    return this.#systemPromptBuilder.getPrompt();
   }
 
   /**
@@ -551,6 +554,7 @@ export class Agent {
         await this.#hooks.notifyHooksAsync(HOOKS.MESSAGES_AFTER_LLM, {
           response,
           messages: this.#log.getAll(),
+          agent: this,
         });
 
         const assistantMsg = new Message({
@@ -671,7 +675,7 @@ export class Agent {
    * @returns Array of messages.
    */
   buildMessages(): Message[] {
-    return this.#log.buildMessages(this.#systemPrompt);
+    return this.#log.buildMessages(this.#systemPromptBuilder.getPrompt());
   }
 
   /**
@@ -680,23 +684,11 @@ export class Agent {
    * Chunks are sorted by priority and rendered via the template.
    */
   async ensureSystemPrompt(): Promise<void> {
-    if (this.#systemPrompt) return;
-
-    const { results } = await this.#hooks.runHookPipeline(
-      HOOKS.SYSTEM_PROMPT_BUILD,
-      {
-        agent: this,
-      },
-    );
-    const chunks = collectSystemPromptChunks(results, this);
-
-    // Build the system prompt
-    this.#systemPrompt = await buildSystemPrompt({
-      role: this.#role || "",
-      body: this.#profileBody || "",
-      model: this.#model || "",
-      profileName: this.#profileName || "default",
-      chunks,
+    await this.#systemPromptBuilder.ensureBuilt(this.#hooks, this, {
+      role: this.#role,
+      profileBody: this.#profileBody,
+      model: this.#model,
+      profileName: this.#profileName,
     });
   }
 
@@ -1112,7 +1104,7 @@ export class Agent {
    */
   async clearContext(): Promise<void> {
     this.#log.clear();
-    this.#systemPrompt = null;
+    this.#systemPromptBuilder.clear();
     this.#iterationCount = 0;
     this.#tokenUsage = {
       promptTokens: 0,

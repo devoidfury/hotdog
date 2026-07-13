@@ -14,8 +14,8 @@ import { MessageBus } from "../../src/core/session/message-bus.ts";
 import { TaskManager } from "../../src/core/session/task-manager.ts";
 import { LlmClient } from "../../src/core/llm-client/client.ts";
 import { MarkerMangler } from "../../src/core/marker-mangler.ts";
-import { CliOutputSink } from "../../src/core/ui/cli.ts";
-import { ColorPalette } from "../../src/core/ui/colors.ts";
+import { CliOutputSink } from "../../src/utils/cli/cli.ts";
+import { ColorPalette } from "../../src/utils/cli/colors.ts";
 
 // ── Model Change Hook ────────────────────────────────────────────────────────
 

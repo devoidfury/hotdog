@@ -225,7 +225,7 @@ Escapes input that triggers special behavior (tool call actions, internal marker
 - `render.ts` — Template engine with `{{ vars }}`, `{% if %}`, `{% for %}`, filters
 - `json-schema.js` — `validate()`, `validateParams()`, `formatValidationErrors()`
 
-### UI Layer (`src/core/ui/`)
+### CLI Utilities (`src/utils/cli/`)
 - `cli.ts` — `CliOutputSink` class: formatting + color emission, extends `OutputSink`. Key exports: `formatCompacting()`, `formatToolCall()`, `formatToolResult()`, `formatTokenUsage()`, `formatThinking()`, `formatTaskProgress()`, `CliOutputSink`
 - `colors.ts` — Color palettes, ANSI helpers, theme resolution. Key exports: `ColorPalette`, `resolvePalette()`, `applyThinking()`, `applyToolCall()`, `applyToolResult()`, `applyFinalResponse()`, `applyCompacting()`, `applyProgress()`
 

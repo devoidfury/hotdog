@@ -11,7 +11,7 @@ import readline from "node:readline";
 import { spawn } from "node:child_process";
 import { parseCommand, Command, ACTIONS, ParsedCommand } from "../../core/commands.ts";
 import { HOOKS } from "../../core/hooks.ts";
-import { CliOutputSink } from "../../core/ui/cli.ts";
+import { CliOutputSink } from "../../utils/cli/cli.ts";
 import { LlmClient } from "../../core/llm-client/client.ts";
 import { MarkerMangler } from "../../core/marker-mangler.ts";
 import { TaskManager } from "../../core/session/task-manager.ts";
@@ -304,6 +304,10 @@ export async function runInteractiveSession(
   options: InteractiveSessionOptions = {},
 ): Promise<void> {
   const { resolved, config } = core;
+
+  if (!resolved) {
+    throw new Error("configuration must be resolved first")
+  }
 
   // Create output sink
   const palette = await CliOutputSink.resolve(

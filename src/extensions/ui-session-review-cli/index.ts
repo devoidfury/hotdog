@@ -4,8 +4,8 @@
 // Also registers the `review` tool via tools:register hook.
 
 import { HOOKS } from "../../core/hooks.ts";
-import { CliOutputSink, PaletteOptions } from "../../core/ui/cli.ts";
-import { ColorPalette } from "../../core/ui/colors.ts";
+import { CliOutputSink, PaletteOptions } from "../../utils/cli/cli.ts";
+import { ColorPalette } from "../../utils/cli/colors.ts";
 import { readSessionEntries } from "../session-log/index.ts";
 import { readdir, access, stat } from "node:fs/promises";
 import { homedir } from "node:os";

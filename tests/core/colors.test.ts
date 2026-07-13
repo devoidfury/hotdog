@@ -14,7 +14,7 @@ import {
   applyFinalResponse,
   applyCompacting,
   applyProgress,
-} from '../../src/core/ui/colors.ts';
+} from '../../src/utils/cli/colors.ts';
 import fs from 'node:fs';
 import fsPromises from 'node:fs/promises';
 import os from 'node:os';

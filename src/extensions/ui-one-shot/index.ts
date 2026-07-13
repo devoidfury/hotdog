@@ -7,7 +7,7 @@ import { MessageBus } from "../../core/session/message-bus.ts";
 import { formatError } from "../../core/error.ts";
 import { HOOKS } from "../../core/hooks.ts";
 import { logger } from "../../core/logger.ts";
-import { CliOutputSink } from "../../core/ui/cli.ts";
+import { CliOutputSink } from "../../utils/cli/cli.ts";
 import { LlmClient, ProviderConfig } from "../../core/llm-client/client.ts";
 import { MarkerMangler } from "../../core/marker-mangler.ts";
 import { TaskManager } from "../../core/session/task-manager.ts";

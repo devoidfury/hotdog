@@ -1,6 +1,6 @@
 // CLI output sink — formats and displays agent output with color support.
 
-import { OutputSink, OUTPUT_EVENT, EVENT_HANDLERS, OutputEvent } from "../context/output.ts";
+import { OutputSink, OUTPUT_EVENT, EVENT_HANDLERS, OutputEvent } from "../../core/context/output.ts";
 import {
   ColorPalette,
   applyThinking,

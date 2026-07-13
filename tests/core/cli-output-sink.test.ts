@@ -7,7 +7,7 @@ import {
   formatTokenUsage,
   formatThinking,
   formatTaskProgress,
-} from "../../src/core/ui/cli.ts";
+} from "../../src/utils/cli/cli.ts";
 import { OUTPUT_EVENT } from "../../src/core/context/output.ts";
 
 describe("CliOutputSink", () => {

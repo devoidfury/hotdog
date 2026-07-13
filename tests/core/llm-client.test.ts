@@ -14,8 +14,8 @@ describe("LlmClient constructor", () => {
         chatTimeoutSecs: 600,
         maxRetries: 12,
       });
-      // Default baseUrl falls back to localhost:8080 (from schema defaultAiUrl)
-      expect(client.baseUrl).toBe("http://localhost:8080");
+      // No fallback — baseUrl is null when not configured
+      expect(client.baseUrl).toBeNull();
       expect(client.apiKey).toBeNull();
       expect(client.stream).toBe(true);
       expect(client.chatTimeoutSecs).toBe(600);

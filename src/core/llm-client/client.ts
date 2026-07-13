@@ -4,7 +4,6 @@
 import { readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
-import { DEFAULT_AI_URL, DEFAULT_AI_URL_FALLBACK } from "../config/defaults.ts";
 import { retryWithBackoff } from "./retry.ts";
 import { createMarkerMangler, MarkerMangler } from "../marker-mangler.ts";
 import { LlmError } from "../error.ts";
@@ -94,8 +93,7 @@ export class LlmClient {
     this.baseUrl =
       options.baseUrl ||
       process.env.AI_URL ||
-      DEFAULT_AI_URL ||
-      DEFAULT_AI_URL_FALLBACK;
+      null;
     this.apiKey = options.apiKey || process.env.AI_API_KEY || null;
     this.sessionId = options.sessionId || "";
     this.loud = options.loud || false;
@@ -127,13 +125,22 @@ export class LlmClient {
   resolveProviderSettings(modelName: string): { url: string; apiKey: string | null } {
     const providerName = modelName.split("/")[0];
     const provider = this.providers.find((p) => p.name === providerName);
+    let url: string;
+    let apiKey: string | null;
     if (provider) {
-      return {
-        url: provider.url || this.baseUrl,
-        apiKey: provider.apiKey || this.apiKey,
-      };
+      url = provider.url || this.baseUrl;
+      apiKey = provider.apiKey || this.apiKey;
+    } else {
+      url = this.baseUrl;
+      apiKey = this.apiKey;
     }
-    return { url: this.baseUrl, apiKey: this.apiKey };
+    if (!url) {
+      throw new LlmError(
+        "No AI URL configured. Set a URL via --ai-url, aiUrl in config, provider.url, or HOTDOG_AI_URL environment variable.",
+        "config",
+      );
+    }
+    return { url, apiKey };
   }
 
   /**

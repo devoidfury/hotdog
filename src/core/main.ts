@@ -246,6 +246,14 @@ export async function main(): Promise<number> {
   // ── Build complete config ───────────────────────────────────────────────
   const { resolved, modelRegistry, providers } = await buildConfig(cli);
 
+  // Warn if no AI URL is configured
+  if (!resolved.baseUrl) {
+    logger.warn(
+      "No AI URL configured. Set a URL via --ai-url, aiUrl in config, provider.url, or HOTDOG_AI_URL environment variable. " +
+        "LLM calls will fail until a URL is provided.",
+    );
+  }
+
   // Enable hook tracing if configured
   hooks.trace = resolved.hookTrace;
 

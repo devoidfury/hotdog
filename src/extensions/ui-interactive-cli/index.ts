@@ -82,6 +82,7 @@ const MIN_CMD_LEN = 2;
 interface ShellCommandResult {
   content?: string;
   error?: string;
+  exitCode?: number;
 }
 
 interface InteractiveSessionOptions {
@@ -132,12 +133,11 @@ export async function executeShellCommand(command: string): Promise<ShellCommand
       stderr += chunk.toString();
     });
 
-    proc.on("close", (code: number) => {
+    proc.on("close", (exitCode: number) => {
       const output = [stdout, stderr].filter(Boolean).join("\n");
       resolve({
-        content: output
-          ? `${output}\n\n[exited with code ${code}]`
-          : `[exited with code ${code}]`,
+        content: output,
+        exitCode,
       });
     });
 
@@ -486,13 +486,14 @@ export async function runInteractiveSession(
         !IGNORED_CMDS.has(firstWord) &&
         (await isSystemCommand(firstWord))
       ) {
-        console.log(`\n$ ${trimmed}\n`);
+        console.log(`[exec: ${trimmed}]\n`);
         const result = await executeShellCommand(trimmed);
         if (result.content) {
           console.log(result.content);
         } else if (result.error) {
           console.log(`${result.error}`);
         }
+        console.log(`[exec: exit code ${result.exitCode}]`);
         rl.prompt();
         return;
       }

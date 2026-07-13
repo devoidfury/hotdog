@@ -114,11 +114,11 @@ describe("isSystemCommand", () => {
 });
 
 describe("executeShellCommand", () => {
-  it("executes a simple command and returns output", async () => {
+  it("executes a simple command and returns output with exit code", async () => {
     const { executeShellCommand } = await import("../../src/extensions/ui-interactive-cli/index.ts");
     const result = await executeShellCommand("echo hello world");
     expect(result.content).toContain("hello world");
-    expect(result.content).toContain("[exited with code 0]");
+    expect(result.exitCode).toBe(0);
   });
 
   it("handles command errors", async () => {
@@ -130,6 +130,7 @@ describe("executeShellCommand", () => {
   it("handles empty output command", async () => {
     const { executeShellCommand } = await import("../../src/extensions/ui-interactive-cli/index.ts");
     const result = await executeShellCommand("true");
-    expect(result.content).toContain("[exited with code 0]");
+    expect(result.exitCode).toBe(0);
+    expect(result.content).toBe("");
   });
 });

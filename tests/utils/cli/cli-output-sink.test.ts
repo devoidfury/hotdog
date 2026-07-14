@@ -7,9 +7,9 @@ import {
   formatTokenUsage,
   formatThinking,
   formatTaskProgress,
-} from "../../src/utils/cli/cli.ts";
-import { OUTPUT_EVENT, OutputEvent } from "../../src/core/context/output.ts";
-import { ColorPalette } from "../../src/utils/cli/colors.ts";
+} from "../../../src/utils/cli/cli.ts";
+import { OUTPUT_EVENT, OutputEvent } from "../../../src/core/context/output.ts";
+import { ColorPalette } from "../../../src/utils/cli/colors.ts";
 
 describe("CliOutputSink", () => {
   let sink: CliOutputSink;

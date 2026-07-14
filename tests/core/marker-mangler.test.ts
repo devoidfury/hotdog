@@ -1,5 +1,5 @@
 import { describe, it, expect } from "bun:test";
-import { MarkerMangler } from "../../src/core/marker-mangler.ts";
+import { MarkerMangler, createMarkerMangler } from "../../src/core/marker-mangler.ts";
 
 function createMangler() {
   return new MarkerMangler();
@@ -93,5 +93,49 @@ describe("MarkerMangler", () => {
       const unescaped = mangler.unescape(escaped);
       expect(unescaped).toBe(input);
     }
+  });
+});
+
+describe("MarkerMangler - wrapper methods", () => {
+  it("escapeInput delegates to escape", () => {
+    const mangler = createMangler();
+    const input = "<tool_call>test</tool_call>";
+    expect(mangler.escapeInput(input)).toBe(mangler.escape(input));
+    expect(mangler.escapeInput("plain text")).toBe("plain text");
+  });
+
+  it("escapeToolOutput delegates to escape", () => {
+    const mangler = createMangler();
+    const input = "<function>test</function>";
+    expect(mangler.escapeToolOutput(input)).toBe(mangler.escape(input));
+    expect(mangler.escapeToolOutput("plain output")).toBe("plain output");
+  });
+
+  it("unescapeOutput delegates to unescape", () => {
+    const mangler = createMangler();
+    const escaped = mangler.escape("<tool_call>test</tool_call>");
+    expect(mangler.unescapeOutput(escaped)).toBe(mangler.unescape(escaped));
+    expect(mangler.unescapeOutput("plain text")).toBe("plain text");
+  });
+
+  it("unescapeToolInput delegates to unescape", () => {
+    const mangler = createMangler();
+    const escaped = mangler.escape("<function>test</function>");
+    expect(mangler.unescapeToolInput(escaped)).toBe(mangler.unescape(escaped));
+    expect(mangler.unescapeToolInput("plain input")).toBe("plain input");
+  });
+});
+
+describe("createMarkerMangler", () => {
+  it("returns a new MarkerMangler instance", () => {
+    const mangler = createMarkerMangler();
+    expect(mangler).toBeInstanceOf(MarkerMangler);
+    expect(mangler.escape("test")).toBe("test");
+  });
+
+  it("returns independent instances", () => {
+    const m1 = createMarkerMangler();
+    const m2 = createMarkerMangler();
+    expect(m1).not.toBe(m2);
   });
 });

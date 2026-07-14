@@ -1260,4 +1260,152 @@ describe('Agent — end-to-end loop', () => {
       expect(agent.model).toBe('new-model');
     });
   });
+
+  describe('Agent getters and setters', () => {
+    it('getTokenUsage returns usage object', async () => {
+      const mockLLM = new MockLLMClient({
+        responseSequences: [[
+          { type: 'content', content: 'Hello' },
+          { type: 'usage', data: { prompt_tokens: 5, completion_tokens: 10, total_tokens: 15 } },
+        ]],
+      });
+      const { agent } = createFixture({ mockLLM });
+      await agent.run('test');
+      const usage = agent.getTokenUsage();
+      expect(usage.promptTokens).toBe(5);
+      expect(usage.completionTokens).toBe(10);
+      expect(usage.totalTokens).toBe(15);
+    });
+
+    it('cancelled getter returns false initially', () => {
+      const { agent } = createFixture({});
+      expect(agent.cancelled).toBe(false);
+    });
+
+    it('hideTools getter and setter', () => {
+      const { agent } = createFixture({});
+      const initial = agent.hideTools;
+      expect(typeof initial).toBe('boolean');
+      agent.hideTools = true;
+      expect(agent.hideTools).toBe(true);
+      agent.hideTools = false;
+      expect(agent.hideTools).toBe(false);
+    });
+
+    it('hideThinking getter and setter', () => {
+      const { agent } = createFixture({});
+      expect(agent.hideThinking).toBe(false);
+      agent.hideThinking = true;
+      expect(agent.hideThinking).toBe(true);
+      agent.hideThinking = false;
+      expect(agent.hideThinking).toBe(false);
+    });
+
+    it('profileName getter', () => {
+      const { agent } = createFixture({ profileName: 'custom-profile' });
+      expect(agent.profileName).toBe('custom-profile');
+    });
+
+    it('config getter', () => {
+      const customConfig = { customKey: 'customValue' };
+      const { agent } = createFixture({ config: customConfig });
+      expect(agent.config).toBe(customConfig);
+    });
+
+    it('toolWhitelist getter', () => {
+      const { agent } = createFixture({ toolWhitelist: ['read', 'write'] });
+      expect(agent.toolWhitelist).toEqual(['read', 'write']);
+    });
+
+    it('maxIterations getter', () => {
+      const { agent } = createFixture({ maxIterations: 10 });
+      expect(agent.maxIterations).toBe(10);
+    });
+
+    it('maxTokens getter', () => {
+      const { agent } = createFixture({ maxTokens: 10000 });
+      expect(agent.maxTokens).toBe(10000);
+    });
+
+    it('role getter', () => {
+      const { agent } = createFixture({ role: 'custom role' });
+      expect(agent.role).toBe('custom role');
+    });
+
+    it('profileBody getter', () => {
+      const { agent } = createFixture({ profileBody: 'custom body' });
+      expect(agent.profileBody).toBe('custom body');
+    });
+
+    it('stream getter', () => {
+      const { agent } = createFixture({ stream: true });
+      expect(agent.stream).toBe(true);
+    });
+
+    it('systemPrompt getter', () => {
+      const { agent } = createFixture({});
+      // systemPrompt may be null before ensureSystemPrompt is called
+      expect(agent.systemPrompt === null || typeof agent.systemPrompt === 'string').toBe(true);
+    });
+
+    it('hooks getter', () => {
+      const hooks = createHooks();
+      const { agent } = createFixture({ hooks });
+      expect(agent.hooks).toBe(hooks);
+    });
+
+    it('reasoningEffort getter and setter', () => {
+      const { agent } = createFixture({});
+      expect(agent.reasoningEffort).toBeUndefined();
+      agent.reasoningEffort = 'high';
+      expect(agent.reasoningEffort).toBe('high');
+      agent.reasoningEffort = undefined;
+      expect(agent.reasoningEffort).toBeUndefined();
+    });
+
+    it('abortSignal getter and setter', () => {
+      const { agent } = createFixture({});
+      expect(agent.abortSignal).toBeNull();
+      const signal = new AbortController().signal;
+      agent.abortSignal = signal;
+      expect(agent.abortSignal).toBe(signal);
+      agent.abortSignal = null;
+      expect(agent.abortSignal).toBeNull();
+    });
+
+    it('modelRegistry getter', () => {
+      const { agent } = createFixture({});
+      expect(typeof agent.modelRegistry).toBe('object');
+    });
+
+    it('followQueue getter and setter', () => {
+      const { agent } = createFixture({});
+      expect(Array.isArray(agent.followQueue)).toBe(true);
+      agent.followQueue = ['follow1', 'follow2'];
+      expect(agent.followQueue).toEqual(['follow1', 'follow2']);
+    });
+
+    it('runAbortController getter and setter', () => {
+      const { agent } = createFixture({});
+      expect(agent.runAbortController).toBeNull();
+      const controller = new AbortController();
+      agent.runAbortController = controller;
+      expect(agent.runAbortController).toBe(controller);
+      agent.runAbortController = null;
+      expect(agent.runAbortController).toBeNull();
+    });
+
+    it('llmClient getter', () => {
+      const mockLLM = new MockLLMClient({ responseSequences: [] });
+      const { agent } = createFixture({ mockLLM });
+      expect(agent.llmClient).toBe(mockLLM);
+    });
+
+    it('sink getter and setter', () => {
+      const { agent } = createFixture({});
+      const newSink = { emit: () => {} };
+      agent.setSink(newSink as any);
+      expect(agent.sink).toBe(newSink);
+    });
+  });
 });

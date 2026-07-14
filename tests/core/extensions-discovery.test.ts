@@ -335,9 +335,12 @@ describe("registerExtensionMetadata", async () => {
   function createMockConfigRegistry() {
     const flags = [];
     const params = [];
+    const schemas = new Map();
     return {
       registerCliFlags: (f) => flags.push(...f),
       registerConfigParams: (p) => params.push(...p),
+      registerConfigSchema: (key, schema) => schemas.set(key, schema),
+      getConfigSchema: (key) => schemas.get(key) || null,
       _flags: flags,
       _params: params,
     };

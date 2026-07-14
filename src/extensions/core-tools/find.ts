@@ -157,7 +157,7 @@ export class FindTool {
     this.maxOutputLines = options.maxOutputLines ?? config.coreTools?.properties.maxToolOutputLines.default;
   }
 
-  toToolDef(): Record<string, unknown> {
+  toToolDef() {
     return toolDef(
       FindTool.TOOL_NAME,
       "Find files and directories matching a glob pattern. Use this tool when you need to find files by name patterns.",

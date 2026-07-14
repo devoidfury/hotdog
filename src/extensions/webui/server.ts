@@ -4,7 +4,7 @@ import { serveStaticFile } from "../../utils/index.ts";
 import { createWsServer } from "../websocket/server.ts";
 import { createAuthMiddleware } from "../websocket/auth.ts";
 import { logger } from "../../core/logger.ts";
-import type { CoreContext } from "../../core/extensions/types.ts";
+import { CoreContext, getExtensionConfig } from "../../core/extensions/types.ts";
 
 import webuiFrontend from "./ui/index.html";
 
@@ -40,7 +40,8 @@ export async function createWebuiServer(
     );
   }
 
-  const maxAgeSecs = core.config?.webui?.maxAgeSecs as number | undefined;
+  const webuiConfig = getExtensionConfig<WebuiConfig>(core, "webui");
+  const maxAgeSecs = webuiConfig.maxAgeSecs;
   if (!maxAgeSecs) {
     throw new Error("missing required webui.maxAgeSecs configuration");
   }

@@ -19,7 +19,7 @@ const BIN_PATH = path.resolve(__dirname, "..", "..", "..", "bin", "hotdog");
 export class ExploreTool {
   static readonly TOOL_NAME = "explore";
 
-  toToolDef(): Record<string, unknown> {
+  toToolDef() {
     return toolDef(
       ExploreTool.TOOL_NAME,
       "Run the agent in explorer mode against a project directory. Executes the agent with the explorer profile and a prompt describing what to explore.",

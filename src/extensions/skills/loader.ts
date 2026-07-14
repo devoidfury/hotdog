@@ -27,25 +27,25 @@ export function patternMatches(pattern: string, toolName: string): boolean {
   const dp: boolean[][] = Array.from({ length: patLen + 1 }, () =>
     Array(nameLen + 1).fill(false),
   );
-  dp[0][0] = true;
+  dp[0]![0] = true;
 
   // Handle leading * patterns
   for (let i = 1; i <= patLen; i++) {
-    if (pat[i - 1] === "*") dp[i][0] = dp[i - 1][0];
+    if (pat[i - 1] === "*") dp[i]![0] = dp[i - 1]![0]!;
     else break;
   }
 
   for (let i = 1; i <= patLen; i++) {
     for (let j = 1; j <= nameLen; j++) {
       if (pat[i - 1] === "*") {
-        dp[i][j] = dp[i - 1][j] || dp[i][j - 1];
+        dp[i]![j] = dp[i - 1]![j]! || dp[i]![j - 1]!;
       } else if (pat[i - 1] === name[j - 1]) {
-        dp[i][j] = dp[i - 1][j - 1];
+        dp[i]![j] = dp[i - 1]![j - 1]!;
       }
     }
   }
 
-  return dp[patLen][nameLen];
+  return dp[patLen]![nameLen] || false;
 }
 
 // ── Skill Parsing ──────────────────────────────────────────────────────────
@@ -80,8 +80,8 @@ export function parseSkillFromMd(
     throw ParseError.FrontmatterNotFound();
   }
 
-  const fm = parsed.frontMatter;
-  const body = parsed.body;
+  const fm = parsed.frontMatter ?? {};
+  const body = parsed.body ?? "";
 
   // Validate description
   const description = fm?.description as string | null;

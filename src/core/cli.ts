@@ -20,7 +20,6 @@ export interface FlagEntry {
   structural?: boolean;
   isSubcommand?: boolean;
   description?: string;
-  longName?: string;
   parse?: (value: string) => unknown;
 }
 
@@ -119,7 +118,6 @@ export function parseArgs(
         type: flag.type || "string",
         hasValue: flag.type !== "boolean",
         description: flag.description,
-        longName: flag.long,
         long: flag.long,
         short: flag.short || null,
       };
@@ -132,6 +130,7 @@ export function parseArgs(
   let i = 0;
   while (i < args.length) {
     const arg = args[i];
+    if (arg === undefined) break;
     const flagDef = flagMap.get(arg);
 
     if (flagDef) {
@@ -148,9 +147,9 @@ export function parseArgs(
       // Handle boolean flags — all handled generically now
       if (!flagDef.hasValue) {
         const key = parseCliFlagKey(flagDef.long || arg);
-        // Semantic renames only — camelCase conversion is handled by parseCliFlagKey()
-        const keyMap: Record<string, string> = { json: "wantsJson" };
-        options[keyMap[key] || key] = true;
+        // Special mapping for --json flag
+        const mappedKey = key === "json" ? "wantsJson" : key;
+        options[mappedKey] = true;
         i++;
         continue;
       }
@@ -160,7 +159,7 @@ export function parseArgs(
         throw CliError.MissingValue(arg);
       }
 
-      const value = args[++i];
+      const value = args[++i]!;
 
       // Parse the value based on type
       let parsedValue: unknown = value;
@@ -176,8 +175,7 @@ export function parseArgs(
       }
 
       // Store in options using the extracted key
-      const flagLong = flagDef.longName || flagDef.long;
-      const key = parseCliFlagKey(flagLong);
+      const key = parseCliFlagKey(flagDef.long);
       options[key] = parsedValue;
       i++;
       continue;

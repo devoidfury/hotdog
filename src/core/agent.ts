@@ -12,7 +12,8 @@ import { ToolContext } from "./extensions/tool-context.ts";
 import { formatToolResult } from "./extensions/tool-utils.ts";
 import { createCommandRegistry, AgentCommandRegistry } from "./extensions/registries.ts";
 import { CORE_COMMAND_HANDLERS, CommandHandlerDef } from "./command-handlers.ts";
-import { resolveModelConfig } from "./config/providers.ts";
+import { resolveModelConfig, type ModelConfig } from "./config/providers.ts";
+import { type CoreConfig } from "./config/schema-loader.ts";
 
 import { createSystemPromptBuilder } from "./context/system-prompt.ts";
 
@@ -29,6 +30,11 @@ export interface ModelRegistry {
     [key: string]: unknown;
   };
 }
+
+/**
+ * Typed model registry — maps model name to ModelConfig.
+ */
+export type TypedModelRegistry = Record<string, ModelConfig>;
 
 export interface TokenUsage {
   promptTokens: number;
@@ -57,7 +63,7 @@ export interface ImageAttachment {
  * The subset of config keys that the Agent class actually reads.
  * Extensions may read additional keys via core.config.
  */
-export interface AgentConfig {
+export interface AgentConfig extends CoreConfig {
   cwdBoundary?: string | null;
   workspaceRoot?: string | null;
   [key: string]: unknown;

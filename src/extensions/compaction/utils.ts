@@ -70,7 +70,7 @@ export function findFirstKeptIndex(messages: Message[], keepRecent: number): num
   const target = keepRecent * 2;
 
   for (let i = messages.length - 1; i >= 0; i--) {
-    if (messages[i].role === "system") continue;
+    if (messages[i]!.role === "system") continue;
     count++;
     if (count >= target) return i + 1;
   }

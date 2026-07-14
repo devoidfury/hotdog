@@ -7,13 +7,16 @@ import os from 'node:os';
 import crypto from 'node:crypto';
 import { ToolResult } from '../src/core/extensions/tool-utils.ts';
 import { ToolContext } from '../src/core/extensions/tool-context.ts';
-import { Agent } from '../src/core/agent.ts';
+import { Agent, ModelRegistry, AgentConfig } from '../src/core/agent.ts';
+import type { Message } from '../src/core/context/message.ts';
 import { MessageLog } from '../src/core/context/message-log.ts';
+import type { LlmClient } from '../src/core/llm-client/client.ts';
 import { createHooks } from '../src/core/hooks.ts';
 import { createToolRegistry } from '../src/core/extensions/tool-registry.ts';
 import { HookSystem } from '../src/core/hooks.ts';
 import { ToolRegistry } from '../src/core/extensions/tool-registry.ts';
 import { createSubcommandRegistry } from '../src/core/extensions/registries.ts';
+import type { OutputEvent } from '../src/core/context/output.ts';
 
 // ── General utilities ──────────────────────────────────────────────────────
 
@@ -21,22 +24,22 @@ import { createSubcommandRegistry } from '../src/core/extensions/registries.ts';
  * Extract string output from a tool result (handles ToolResult or plain string).
  * For error results, includes the error message.
  */
-export function resultStr(result) {
+export function resultStr(result: unknown): string {
   if (result instanceof ToolResult) {
     if (result.error) {
       return result.error;
     }
     return result.output;
   }
-  return result;
+  return String(result);
 }
 
 /**
  * Get display string from a tool result (calls toDisplay()).
  */
-export function getDisplay(result) {
-  if (result?.toDisplay) {
-    return result.toDisplay();
+export function getDisplay(result: unknown): string {
+  if (result && typeof result === 'object' && 'toDisplay' in result && typeof (result as any).toDisplay === 'function') {
+    return (result as any).toDisplay();
   }
   return String(result);
 }
@@ -51,10 +54,10 @@ export function tmpDir(prefix = 'hotdog-test-') {
 /**
  * Create a ToolContext with optional overrides.
  */
-export function toolCtx(opts = {}) {
+export function toolCtx(opts: Record<string, unknown> = {}) {
   return new ToolContext({
-    cwdBoundary: opts.cwdBoundary || null,
-    workspaceRoot: opts.workspaceRoot || null,
+    cwdBoundary: opts.cwdBoundary ?? null,
+    workspaceRoot: opts.workspaceRoot ?? null,
     ...opts,
   });
 }
@@ -62,7 +65,7 @@ export function toolCtx(opts = {}) {
 /**
  * Clean up a temporary directory recursively.
  */
-export function cleanupDir(dir) {
+export function cleanupDir(dir: string): void {
   try {
     fs.rmSync(dir, { recursive: true, force: true });
   } catch {
@@ -78,7 +81,7 @@ export function cleanupDir(dir) {
  * @param {string} [opts.prefix='hotdog-test-'] — Prefix for mkdtemp
  * @param {Function} [opts.cleanup] — Optional extra cleanup function
  */
-export function withTempDir(opts = {}) {
+export function withTempDir(opts: { prefix?: string; cleanup?: () => void } = {}) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), opts.prefix || 'hotdog-test-'));
   return {
     dir,
@@ -99,7 +102,12 @@ export function withTempDir(opts = {}) {
  * Build a tool-call event sequence for a single tool call.
  * Returns [toolName, toolArgument] events.
  */
-export function buildToolCallEvents({ index, name, arguments: args, id }) {
+export function buildToolCallEvents({ index, name, arguments: args, id }: {
+  index: number;
+  name: string;
+  arguments: string;
+  id?: string;
+}): Record<string, unknown>[] {
   return [
     { type: 'toolName', index, name, toolCallId: id || `call_${index}` },
     { type: 'toolArgument', index, arguments: args },
@@ -114,8 +122,13 @@ export function buildStreamResponse({
   reasoning = null,
   toolCalls = null,
   usage = { prompt_tokens: 10, completion_tokens: 20, total_tokens: 30 },
-}) {
-  const events = [];
+}: {
+  content?: string;
+  reasoning?: string | null;
+  toolCalls?: Array<{ index: number; name: string; arguments: string; id?: string }> | null;
+  usage?: Record<string, unknown>;
+}): Record<string, unknown>[] {
+  const events: Record<string, unknown>[] = [];
 
   // Reasoning before content (typical LLM order)
   if (reasoning) {
@@ -148,13 +161,22 @@ export function buildStreamResponse({
  * stops yielding after the current event.
  */
 export class MockLLMClient {
+  _responseSequences: Record<string, unknown>[][] | undefined;
+  _callIndex: number;
+  cancelable: boolean;
+  callCount: number;
+  lastMessages: unknown[] | null;
+  lastModelConfig: Record<string, unknown> | null;
+  lastToolDefs: Record<string, unknown>[] | null;
+  lastCancelSignal: AbortSignal | null;
+
   /**
    * @param {Array<Array<Object>>} responseSequences — One array per call.
    *   Each array is a list of stream events.
    * @param {boolean} [cancelable=false] — If true, respects abort signal.
    */
-  constructor({ responseSequences = [], cancelable = false } = {}) {
-    this._responseSequences = responseSequences;
+  constructor({ responseSequences = [], cancelable = false }: { responseSequences?: Record<string, unknown>[][]; cancelable?: boolean } = {}) {
+    this._responseSequences = responseSequences as Record<string, unknown>[][];
     this._callIndex = 0;
     this.cancelable = cancelable;
     this.callCount = 0;
@@ -167,7 +189,7 @@ export class MockLLMClient {
   /**
    * Reset call tracking for a fresh test.
    */
-  reset(sequences) {
+  reset(sequences?: Record<string, unknown>[][]): void {
     this._responseSequences = sequences || this._responseSequences;
     this._callIndex = 0;
     this.callCount = 0;
@@ -177,23 +199,31 @@ export class MockLLMClient {
     this.lastCancelSignal = null;
   }
 
-  chatStreamCancellable(messages, modelConfig, toolDefs, cancelSignal) {
+  chatStreamCancellable(
+    messages: unknown[],
+    modelConfig: Record<string, unknown>,
+    toolDefs: Record<string, unknown>[],
+    cancelSignal: AbortSignal | null | undefined,
+  ): AsyncGenerator<Record<string, unknown>, void, unknown> | (() => AsyncGenerator<Record<string, unknown>, void, unknown>) {
     this.callCount++;
     this.lastMessages = messages;
     this.lastModelConfig = modelConfig;
     this.lastToolDefs = toolDefs;
-    this.lastCancelSignal = cancelSignal;
+    this.lastCancelSignal = cancelSignal ?? null;
 
-    const sequence = this._responseSequences[this._callIndex++];
+    const sequence = this._responseSequences?.[this._callIndex++];
     if (!sequence) {
       // No sequence defined — return empty stream
-      return (async function* () {})();
+      return (async function* (): AsyncGenerator<Record<string, unknown>> {})();
     }
 
     return this._makeStream(sequence, cancelSignal);
   }
 
-  async *_makeStream(events, cancelSignal) {
+  async *_makeStream(
+    events: Record<string, unknown>[],
+    cancelSignal: AbortSignal | null | undefined,
+  ): AsyncGenerator<Record<string, unknown>> {
     for (const event of events) {
       // Check cancellation
       if (cancelSignal?.aborted) {
@@ -209,11 +239,24 @@ export class MockLLMClient {
 // ── Mock Tool ───────────────────────────────────────────────────────────────
 
 export class MockTool {
-  constructor({ name, execute, toToolDef, callDisplay } = {}) {
+  name: string;
+  _executeFn: (input: unknown, ctx: unknown) => unknown | Promise<unknown>;
+  _toToolDefFn: () => Record<string, unknown>;
+  _callDisplayFn: ((input: unknown) => string) | null;
+  executeCount: number;
+  lastInput: unknown;
+  lastContext: unknown;
+
+  constructor({ name, execute, toToolDef, callDisplay }: {
+    name?: string;
+    execute?: (input: unknown, ctx: unknown) => unknown | Promise<unknown>;
+    toToolDef?: () => Record<string, unknown>;
+    callDisplay?: (input: unknown) => string;
+  } = {}) {
     this.name = name || 'mock-tool';
     this._executeFn = execute || (async () => 'mock result');
     this._toToolDefFn = toToolDef || (() => ({
-      type: 'function',
+      type: 'function' as const,
       function: {
         name: this.name,
         description: 'Mock tool for testing',
@@ -226,18 +269,18 @@ export class MockTool {
     this.lastContext = null;
   }
 
-  toToolDef() {
+  toToolDef(): Record<string, unknown> {
     return this._toToolDefFn();
   }
 
-  async execute(input, ctx) {
+  async execute(input: unknown, ctx: unknown): Promise<unknown> {
     this.executeCount++;
     this.lastInput = input;
     this.lastContext = ctx;
     return this._executeFn(input, ctx);
   }
 
-  callDisplay(input) {
+  callDisplay(input: unknown): string {
     if (this._callDisplayFn) return this._callDisplayFn(input);
     return `mock-tool(${JSON.stringify(input)})`;
   }
@@ -248,7 +291,7 @@ export class MockTool {
 /**
  * Create a simple mock tool that returns a fixed result.
  */
-export function simpleTool(name, result = 'done') {
+export function simpleTool(name: string, result: unknown = 'done'): MockTool {
   return new MockTool({
     name,
     execute: async () => result,
@@ -266,7 +309,11 @@ export function simpleTool(name, result = 'done') {
 /**
  * Create a mock tool that validates its input against a schema.
  */
-export function validatedTool(name, schema, execute) {
+export function validatedTool(
+  name: string,
+  schema: { properties?: Record<string, unknown>; required?: string[] },
+  execute: (input: unknown, ctx: unknown) => unknown | Promise<unknown>,
+): MockTool {
   return new MockTool({
     name,
     execute,
@@ -288,7 +335,7 @@ export function validatedTool(name, schema, execute) {
 /**
  * Create a mock tool that fails on execute.
  */
-export function failingTool(name, errorMsg = 'intentional failure') {
+export function failingTool(name: string, errorMsg = 'intentional failure'): MockTool {
   return new MockTool({
     name,
     execute: async () => { throw new Error(errorMsg); },
@@ -306,7 +353,7 @@ export function failingTool(name, errorMsg = 'intentional failure') {
 /**
  * Create a mock tool that returns a ToolResult with metadata.
  */
-export function metadataTool(name, metadata) {
+export function metadataTool(name: string, metadata: Record<string, unknown>): MockTool {
   return new MockTool({
     name,
     execute: async () => ToolResult.ok('output').withEntries(metadata),
@@ -346,9 +393,29 @@ export function metadataTool(name, metadata) {
  * @param {string} [options.sessionId] — Session ID (default: 'test-session')
  * @param {AbortSignal} [options.abortSignal] — Abort signal
  * @param {string[]} [options.toolWhitelist] — Tool whitelist
- * @returns {{ hooks: Object, toolRegistry: Object, mockLLM: MockLLMClient, agent: Agent }}
+ * @returns {{ hooks: HookSystem; toolRegistry: ToolRegistry; mockLLM: MockLLMClient; agent: Agent }}
  */
-export function createFixture(options = {}) {
+export function createFixture(options: {
+  hooks?: HookSystem;
+  toolRegistry?: ToolRegistry;
+  mockLLM?: MockLLMClient;
+  model?: string;
+  maxIterations?: number;
+  maxTokens?: number;
+  hideTools?: boolean;
+  hideThinking?: boolean;
+  showTokenUse?: boolean;
+  stream?: boolean;
+  sink?: { emit: (event: OutputEvent) => void } | null;
+  modelRegistry?: Record<string, unknown>;
+  profileName?: string;
+  role?: string;
+  profileBody?: string;
+  config?: Record<string, unknown> | null;
+  sessionId?: string;
+  abortSignal?: AbortSignal | null;
+  toolWhitelist?: string[] | null;
+} = {}): { hooks: HookSystem; toolRegistry: ToolRegistry; mockLLM: MockLLMClient; agent: Agent } {
   const hooks = options.hooks || createHooks();
   const toolRegistry = options.toolRegistry || createToolRegistry();
 
@@ -357,7 +424,7 @@ export function createFixture(options = {}) {
   const agent = new Agent({
     hooks,
     toolRegistry,
-    llmClient: mockLLM,
+    llmClient: mockLLM as unknown as LlmClient,
     model: options.model || 'test-model',
     maxIterations: options.maxIterations || 10,
     maxTokens: options.maxTokens || 4096,
@@ -366,11 +433,11 @@ export function createFixture(options = {}) {
     showTokenUse: options.showTokenUse ?? false,
     stream: options.stream ?? false,
     sink: options.sink || null,
-    modelRegistry: options.modelRegistry || {},
+    modelRegistry: (options.modelRegistry || {}) as ModelRegistry,
     profileName: options.profileName || 'test',
     role: options.role || 'Test agent',
     profileBody: options.profileBody || '',
-    config: options.config || null,
+    config: options.config as AgentConfig | undefined,
     sessionId: options.sessionId || 'test-session',
     abortSignal: options.abortSignal || null,
     toolWhitelist: options.toolWhitelist || null,
@@ -389,7 +456,15 @@ export function createFixture(options = {}) {
  * @param {string} [sessionId] — Optional explicit session ID (default: random UUID)
  */
 export class MockAgent {
-  constructor(runResult = 'done', sessionId) {
+  _cancelled: boolean;
+  _runCalled: boolean;
+  _runResult: string;
+  _runError: Error | null;
+  _sessionId: string;
+  _log: MessageLog;
+  _systemPrompt: string | null;
+
+  constructor(runResult = 'done', sessionId?: string) {
     this._cancelled = false;
     this._runCalled = false;
     this._runResult = runResult;
@@ -405,13 +480,13 @@ export class MockAgent {
   get systemPrompt() { return this._systemPrompt; }
 
   cancel(reset = true) { this._cancelled = reset; }
-  async run(text) {
+  async run(text: string): Promise<string> {
     this._runCalled = true;
     if (this._runError) throw this._runError;
     return this._runResult;
   }
-  getCommandRegistry() { return null; }
-  addMessage(msg) {
+  getCommandRegistry(): null { return null; }
+  addMessage(msg: Message): void {
     this._log.push(msg);
   }
 }
@@ -422,10 +497,12 @@ export class MockAgent {
  * A mock output sink that captures emitted events for assertion.
  */
 export class MockSink {
+  events: OutputEvent[];
+
   constructor() {
     this.events = [];
   }
-  emit(event) {
+  emit(event: OutputEvent): void {
     this.events.push(event);
   }
 }
@@ -436,21 +513,29 @@ export class MockSink {
  * Tracks handlers added via rl.on("line", ...) for verification.
  *
  * @param {string[]} [responses=[]] — Preset responses to return via question()
- * @returns {{ rl: Object, addedHandlers: string[] }}
+ * @returns {{ rl: { removeListener: () => void; question: (prompt: string, cb: (response: string) => void) => void; on: (event: string, handler: (...args: unknown[]) => void) => void }; addedHandlers: unknown[] }}
  */
-export function createMockRl(responses = []) {
+export function createMockRl(responses: string[] = []): {
+  rl: {
+    removeListener: () => void;
+    question: (prompt: string, cb: (response: string) => void) => void;
+    on: (event: string, handler: (...args: unknown[]) => void) => void;
+  };
+  addedHandlers: unknown[];
+} {
   let responseIndex = 0;
-  const addedHandlers = [];
+  const addedHandlers: unknown[] = [];
 
   const rl = {
     removeListener: function () {},
-    question: function (prompt, cb) {
+    question: function (prompt: string, cb: (response: string) => void) {
       if (responseIndex < responses.length) {
-        cb(responses[responseIndex]);
+        const r = responses[responseIndex];
+        if (r !== undefined) cb(r);
         responseIndex++;
       }
     },
-    on: function (event, handler) {
+    on: function (event: string, handler: (...args: unknown[]) => void) {
       if (event === "line") addedHandlers.push(handler);
     },
   };
@@ -462,7 +547,7 @@ export function createMockRl(responses = []) {
  * Set up the session log test directory and clean up any existing test file.
  * @param {string} sessionId — Session ID for the test
  */
-export function setupSessionTestDir(sessionId) {
+export function setupSessionTestDir(sessionId: string): void {
   const { mkdirSync, rmSync } = fs;
   const { join } = path;
   const { homedir } = os;
@@ -476,7 +561,7 @@ export function setupSessionTestDir(sessionId) {
  * Clean up a session log test file.
  * @param {string} sessionId — Session ID for the test
  */
-export function cleanupSessionTest(sessionId) {
+export function cleanupSessionTest(sessionId: string): void {
   const { rmSync } = fs;
   const { join } = path;
   const { homedir } = os;
@@ -491,12 +576,35 @@ export function cleanupSessionTest(sessionId) {
  * @param {Object} [config={}] — Optional overrides for resolved/core config
  * @returns {Object} Mock core object
  */
-export function createMockCore(config = {}) {
+export function createMockCore(config: {
+  resolved?: Record<string, unknown>;
+  coreConfig?: Record<string, unknown>;
+  modelRegistry?: Record<string, unknown>;
+  providers?: unknown[];
+  buildConfig?: (cli: Record<string, unknown>) => Promise<{
+    resolved: Record<string, unknown>;
+    modelRegistry: Record<string, unknown>;
+    providers: unknown[];
+  }>;
+} = {}): {
+  hooks: HookSystem;
+  toolRegistry: ToolRegistry;
+  cliSubcommandRegistry: ReturnType<typeof createSubcommandRegistry>;
+  config: Record<string, unknown>;
+  resolved: Record<string, unknown>;
+  modelRegistry: Record<string, unknown>;
+  extensions: { has: (name: string) => boolean; load: (name: string) => Promise<unknown>; cleanup: () => Promise<void> };
+  buildConfig: (cli: Record<string, unknown>) => Promise<{
+    resolved: Record<string, unknown>;
+    modelRegistry: Record<string, unknown>;
+    providers: unknown[];
+  }>;
+} {
   const hooks = new HookSystem();
   const toolRegistry = new ToolRegistry();
   const cliSubcommandRegistry = createSubcommandRegistry();
 
-  const resolved = {
+  const resolved: Record<string, unknown> = {
     baseUrl: "http://localhost:8080",
     apiKey: "test-key",
     model: "test-model",

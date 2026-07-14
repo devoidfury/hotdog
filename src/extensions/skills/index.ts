@@ -39,7 +39,7 @@ interface SkillsLoaderConfig {
  */
 export async function create(core: CoreContext): Promise<ExtensionInstance> {
   // Config defaults come from extension.json configSchema
-  const config = getExtensionConfig(core, "skills") as SkillsLoaderConfig;
+  const config = getExtensionConfig<SkillsLoaderConfig>(core, "skills");
 
   if (!config.path) {
     throw new Error("skills path not configured");

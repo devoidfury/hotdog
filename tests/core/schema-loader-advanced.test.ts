@@ -35,14 +35,14 @@ describe("resolveCast", () => {
   });
 
   it("passes through function input", () => {
-    const fn = (v) => v;
+    const fn = (v: unknown) => v;
     expect(resolveCast(fn)).toBe(fn);
   });
 });
 
 describe("CAST_BUILTINS", () => {
   describe("truthy", () => {
-    const truthy = resolveCast("truthy");
+    const truthy = resolveCast("truthy")!;
 
     it("casts booleans through", () => {
       expect(truthy(true)).toBe(true);
@@ -70,7 +70,7 @@ describe("CAST_BUILTINS", () => {
   });
 
   describe("falsy", () => {
-    const falsy = resolveCast("falsy");
+    const falsy = resolveCast("falsy")!;
 
     it("negates boolean and string values", () => {
       expect(falsy(true)).toBe(false);
@@ -85,7 +85,7 @@ describe("CAST_BUILTINS", () => {
   });
 
   describe("number", () => {
-    const number = resolveCast("number");
+    const number = resolveCast("number")!;
 
     it("passes numbers through", () => {
       expect(number(42)).toBe(42);
@@ -110,7 +110,7 @@ describe("CAST_BUILTINS", () => {
   });
 
   describe("string", () => {
-    const string = resolveCast("string");
+    const string = resolveCast("string")!;
 
     it("trims and returns non-empty strings", () => {
       expect(string("hello")).toBe("hello");
@@ -126,7 +126,7 @@ describe("CAST_BUILTINS", () => {
   });
 
   describe("any", () => {
-    const any = resolveCast("any");
+    const any = resolveCast("any")!;
 
     it("accepts any value as-is", () => {
       expect(any(42)).toBe(42);
@@ -138,7 +138,7 @@ describe("CAST_BUILTINS", () => {
   });
 
   describe("array", () => {
-    const array = resolveCast("array");
+    const array = resolveCast("array")!;
 
     it("accepts arrays", () => {
       expect(array([1, 2, 3])).toEqual([1, 2, 3]);
@@ -159,7 +159,7 @@ describe("resolveCompute", () => {
   });
 
   it("parses name('arg') form", () => {
-    const fn = resolveCompute("joinConfigDir('skills')");
+    const fn = resolveCompute("joinConfigDir('skills')")!;
     expect(typeof fn).toBe("function");
     const result = fn({ configDir: "/tmp/config" });
     expect(result).toBe("/tmp/config/skills");
@@ -204,7 +204,7 @@ describe("compileSchemaKey", () => {
       ],
     };
     const compiled = compileSchemaKey(rawKey);
-    expect(typeof compiled.layers[0].cast).toBe("function");
+    expect(typeof compiled.layers![0]!.cast).toBe("function");
   });
 
   it("resolves compute to default function", () => {
@@ -218,8 +218,8 @@ describe("compileSchemaKey", () => {
     };
     const compiled = compileSchemaKey(rawKey);
     // The compute layer should be converted to a default layer with function
-    expect(typeof compiled.layers[1].default).toBe("function");
-    expect(compiled.layers[1].compute).toBeUndefined();
+    expect(typeof compiled.layers![1]!.default).toBe("function");
+    expect(compiled.layers![1]!.compute).toBeUndefined();
   });
 
   it("compiles nested property layers", () => {
@@ -238,7 +238,7 @@ describe("compileSchemaKey", () => {
     };
     const compiled = compileSchemaKey(rawKey);
     expect(compiled.properties).toBeDefined();
-    expect(typeof compiled.properties.apiKey.layers[0].cast).toBe("function");
+    expect(typeof compiled.properties!.apiKey.layers![0]!.cast).toBe("function");
   });
 
   it("handles key without layers", () => {
@@ -257,7 +257,7 @@ describe("compileSchemaKey", () => {
     };
     const compiled = compileSchemaKey(rawKey);
     expect(compiled.description).toBe("Test key");
-    expect(compiled.cliFlag.long).toBe("test");
+    expect(compiled.cliFlag!.long).toBe("test");
   });
 });
 
@@ -584,7 +584,7 @@ describe("resolveKey — edge cases", () => {
     };
 
     // Without CLI overrides, defaults should be preserved
-    const result = resolveKey("webui", schema, { cli: {} });
+    const result = resolveKey("webui", schema, { cli: {} }) as Record<string, unknown>;
     expect(result.host).toBe("localhost");
     expect(result.port).toBe(8080);
   });
@@ -611,7 +611,7 @@ describe("resolveKey — edge cases", () => {
       },
     };
 
-    const result = resolveKey("webui", schema, { cli: { "webui.host": "0.0.0.0", "webui.port": "9000" } });
+    const result = resolveKey("webui", schema, { cli: { "webui.host": "0.0.0.0", "webui.port": "9000" } }) as Record<string, unknown>;
     expect(result.host).toBe("0.0.0.0");
     expect(result.port).toBe(9000);
   });
@@ -659,7 +659,7 @@ describe("resolveKey — edge cases", () => {
       },
     };
 
-    const result = resolveKey("server", schema, { cli: {} });
+    const result = resolveKey("server", schema, { cli: {} }) as Record<string, unknown>;
     expect(result.host).toBe("default-host");
     expect(result.port).toBe(8080);
   });
@@ -676,7 +676,7 @@ describe("resolveKey — edge cases", () => {
       },
     };
 
-    const result = resolveKey("server", schema, { cli: {} });
+    const result = resolveKey("server", schema, { cli: {} }) as Record<string, unknown>;
     // Parent values should take precedence over property defaults
     expect(result.host).toBe("explicit-host");
     expect(result.port).toBe(3000);

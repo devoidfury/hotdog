@@ -9,7 +9,6 @@ import {
   defaultCallDisplay,
 } from "../../core/extensions/tool-utils.ts";
 import { HOOKS } from "../../core/hooks.ts";
-import extensionData from "./extension.json" with { type: "json" };
 import {
   CoreContext,
   ExtensionInstance,
@@ -19,17 +18,8 @@ import {
 } from "../../core/extensions/types.ts";
 
 interface BashToolOptions {
-  timeoutMs?: number;
-  maxOutputLines?: number;
-}
-
-interface BashToolConfig {
-  bashTool?: {
-    properties: {
-      bashTimeoutMs: { default: number };
-      maxToolOutputLines: { default: number };
-    };
-  };
+  timeoutMs: number;
+  maxOutputLines: number;
 }
 
 export class BashTool {
@@ -38,17 +28,12 @@ export class BashTool {
   readonly timeoutMs: number;
   readonly maxOutputLines: number;
 
-  constructor(options: BashToolOptions = {}) {
-    const config = extensionData.configSchema as BashToolConfig;
-    this.timeoutMs =
-      options.timeoutMs ??
-      config.bashTool?.properties.bashTimeoutMs.default;
-    this.maxOutputLines =
-      options.maxOutputLines ??
-      config.bashTool?.properties.maxToolOutputLines.default;
+  constructor(options: BashToolOptions) {
+    this.timeoutMs = options.timeoutMs;
+    this.maxOutputLines = options.maxOutputLines;
   }
 
-  toToolDef(): Record<string, unknown> {
+  toToolDef() {
     return toolDef(
       BashTool.TOOL_NAME,
       `Execute a bash command, from the working directory '${process.cwd()}'`,
@@ -65,17 +50,26 @@ export class BashTool {
   }
 
   callDisplay(input: string | Record<string, unknown> | null): string {
-    return defaultCallDisplay(input, (args: Record<string, unknown>) => `bash: ${args.command as string}`);
+    return defaultCallDisplay(
+      input,
+      (args: Record<string, unknown>) => `bash: ${args.command as string}`,
+    );
   }
 
-  async execute(input: string | Record<string, unknown> | null, ctx: ToolExecutionContext): Promise<ToolResult> {
+  async execute(
+    input: string | Record<string, unknown> | null,
+    ctx: ToolExecutionContext,
+  ): Promise<ToolResult> {
     const args = parseToolInput(input);
     if (!args) {
       return ToolResult.err("Error parsing arguments");
     }
     const command = args.command as string;
     // Support both camelCase (timeoutMs) and snake_case (timeout_ms)
-    const timeout = (args.timeoutMs as number) ?? (args.timeout_ms as number) ?? this.timeoutMs;
+    const timeout =
+      (args.timeoutMs as number) ??
+      (args.timeout_ms as number) ??
+      this.timeoutMs;
 
     if (!command) {
       return ToolResult.err("Error: command is required");
@@ -115,11 +109,11 @@ export class BashTool {
         resolve(result);
       };
 
-      proc.stdout.on("data", (chunk: Buffer) => {
+      proc.stdout?.on("data", (chunk: Buffer) => {
         stdout += chunk.toString();
       });
 
-      proc.stderr.on("data", (chunk: Buffer) => {
+      proc.stderr?.on("data", (chunk: Buffer) => {
         stderr += chunk.toString();
       });
 
@@ -133,7 +127,7 @@ export class BashTool {
         finish(ToolResult.err(`Command timed out after ${timeout}ms`));
       }, timeout + 2000); // give it a two second grace period before hard killing
 
-      const cmdFirstLine = command.trim().split("\n")[0];
+      const cmdFirstLine = command.trim().split("\n")[0] ?? "";
       proc.on("close", (code: number | null) => {
         const output = [stdout, stderr].filter(Boolean).join("\n");
         const truncated = this.truncateOutput(output, this.maxOutputLines);
@@ -170,9 +164,12 @@ export class BashTool {
  */
 export function create(core: CoreContext): ExtensionInstance {
   // Config defaults come from extension.json configSchema
-  const config = getExtensionConfig(core, "bashTool");
-  const timeoutMs = config.bashTimeoutMs as number | undefined;
-  const maxOutputLines = config.maxToolOutputLines as number | undefined;
+  const config = getExtensionConfig<{
+    bashTimeoutMs: number;
+    maxToolOutputLines: number;
+  }>(core, "bashTool");
+  const timeoutMs = config.bashTimeoutMs;
+  const maxOutputLines = config.maxToolOutputLines;
 
   return {
     hooks: {

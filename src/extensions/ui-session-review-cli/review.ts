@@ -156,7 +156,7 @@ function parseArgs(input: string): ParsedArgs {
 export class ReviewTool {
   static TOOL_NAME = 'review';
 
-  toToolDef(): Record<string, unknown> {
+  toToolDef() {
     return {
       type: 'function',
       function: {

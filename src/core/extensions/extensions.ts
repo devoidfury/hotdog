@@ -3,10 +3,15 @@
 import fsPromises from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { HOOKS, EXTENSION_PROVIDES } from "../hooks.ts";
+import { HOOKS, EXTENSION_PROVIDES, type HookSystem, type HookHandler } from "../hooks.ts";
 import { ExtensionError } from "../error.ts";
 import { logger } from "../logger.ts";
 import { camelCase } from "../../utils/strings.ts";
+import type { ToolRegistry } from "./tool-registry.ts";
+import type { ServiceRegistry } from "./service-registry.ts";
+import type { ConfigRegistry } from "./config-registry.ts";
+import type { CliSubcommandRegistry } from "./registries.ts";
+import type { CoreConfig } from "../config/schema-loader.ts";
 
 export { HOOKS, EXTENSION_PROVIDES };
 
@@ -24,19 +29,22 @@ export interface SchemaDefaultEntry {
  * Extract default values from an extension's configSchema.
  */
 export function extractSchemaDefaults(
-  schema: Record<string, Record<string, unknown>> | null,
+  schema: Record<string, unknown> | null,
 ): SchemaDefaultEntry[] {
   if (!schema || typeof schema !== "object") return [];
 
   const result: SchemaDefaultEntry[] = [];
-  for (const [keyName, keySchema] of Object.entries(schema)) {
+  for (const [keyName, keySchemaRaw] of Object.entries(schema)) {
+    const keySchema = keySchemaRaw as Record<string, unknown>;
     let defaults: unknown;
     if ((keySchema.type as string) === "object" && keySchema.properties) {
       defaults = {};
-      for (const [propName, prop] of Object.entries(
-        keySchema.properties as Record<string, Record<string, unknown>>,
+      for (const [propName, propRaw] of Object.entries(
+        keySchema.properties as Record<string, unknown>,
       )) {
-        if (prop.default !== undefined) {
+        const prop = propRaw as Record<string, unknown>;
+        // Treat null defaults as "no default" — they represent optional values
+        if (prop.default !== undefined && prop.default !== null) {
           (defaults as Record<string, unknown>)[propName] = prop.default;
         }
       }
@@ -375,7 +383,8 @@ export function resolveLoadOrder(
   for (const [name, depList] of deps) {
     for (const dep of depList) {
       if (!adjList.has(dep)) adjList.set(dep, []);
-      adjList.get(dep).push(name);
+      const adj = adjList.get(dep)!;
+      adj.push(name);
       inDegree.set(name, (inDegree.get(name) || 0) + 1);
     }
   }
@@ -571,11 +580,11 @@ export async function getExtensionConfigSchemas(
  */
 export function isExtensionEnabled(
   extName: string,
-  config: Record<string, unknown> | null,
+  config: CoreConfig | null,
 ): boolean {
   if (!config) return true;
   const configKey = camelCase(extName);
-  const extConfig = config[configKey];
+  const extConfig = (config as Record<string, unknown>)[configKey];
   if (extConfig && typeof extConfig === "object") {
     return (extConfig as Record<string, unknown>).enabled !== false;
   }
@@ -589,9 +598,10 @@ export async function getExtensionsToLoad(
   extensionPaths: string[],
   extensionAutoload: boolean,
   extensions: string[],
-  config?: Record<string, unknown>,
+  config?: CoreConfig,
 ): Promise<ExtensionMetadata[]> {
-  const serviceOverrides = (config?.services as Record<string, string>) || {};
+  const configAny = config as Record<string, unknown> | undefined;
+  const serviceOverrides = (configAny?.services as Record<string, string>) || {};
 
   const discovered = await discoverExtensions(extensionPaths, serviceOverrides);
 
@@ -678,7 +688,7 @@ export function resolveExtensionDependencies(
  * Discover extensions and register their CLI flags, subcommands, and config params.
  */
 export async function registerExtensionMetadata(
-  config: Record<string, unknown>,
+  config: CoreConfig,
   configRegistry: ConfigRegistry,
   cliSubcommandRegistry: CliSubcommandRegistry,
 ): Promise<ExtensionMetadata[]> {
@@ -696,7 +706,7 @@ export async function registerExtensionMetadata(
   for (const ext of extensionsToLoad) {
     if (ext.cliFlags && ext.cliFlags.length > 0) {
       const flags = ext.cliFlags.map((flag) => ({
-        short: flag.short,
+        short: flag.short ?? undefined,
         long: flag.long,
         description: flag.description,
         type: flag.type,
@@ -714,11 +724,15 @@ export async function registerExtensionMetadata(
           params.map((p) => ({
             key: p.key,
             description: p.description || "",
-            defaults: p.defaults as Record<string, unknown>,
+            defaults: (p.defaults ?? {}) as Record<string, unknown>,
             schema: p.schema,
-            layers: p.layers,
+            layers: Array.isArray(p.layers) ? p.layers : undefined,
           })),
         );
+      }
+      // Register full schemas for runtime validation
+      for (const [keyName, keySchema] of Object.entries(ext.configSchema)) {
+        configRegistry.registerConfigSchema(keyName, keySchema as Record<string, unknown>);
       }
     }
   }
@@ -728,8 +742,8 @@ export async function registerExtensionMetadata(
       for (const sc of ext.cliSubcommands) {
         cliSubcommandRegistry.register(sc.name, {
           description: sc.description || "",
-          options: sc.options || [],
-          handler: null,
+          options: (sc.options?.length ? { items: sc.options } : undefined) as Record<string, unknown> | undefined,
+          handler: undefined,
         });
       }
     }
@@ -740,31 +754,24 @@ export async function registerExtensionMetadata(
 
 // ── Extension Loader ─────────────────────────────────────────────────────────
 
-// Forward references for types
-interface ConfigRegistry {
-  registerCliFlags(flags: unknown[]): void;
-  registerConfigParams(
-    params: Array<{
-      key: string;
-      description: string;
-      defaults: Record<string, unknown>;
-      schema?: Record<string, unknown>;
-    }>,
-  ): void;
-}
-
-interface CliSubcommandRegistry {
-  register(
-    name: string,
-    definition: { description: string; options: unknown[]; handler: unknown },
-  ): void;
+/**
+ * Internal core interface that ExtensionLoader expects from the core object.
+ * This is a private contract — not exported or used by extensions.
+ */
+export interface LoaderCore {
+  hooks: HookSystem;
+  toolRegistry: ToolRegistry;
+  services: ServiceRegistry;
+  config?: CoreConfig;
+  configRegistry: ConfigRegistry;
+  cliSubcommandRegistry: CliSubcommandRegistry;
 }
 
 /**
  * Extension loader — manages the lifecycle of extensions.
  */
 export class ExtensionLoader {
-  #core: unknown;
+  #core: LoaderCore;
   #extensions: Map<string, unknown>;
   #handlerRemovers: Map<string, Array<() => void>>;
   #entryPoints: Map<string, string>;
@@ -776,17 +783,15 @@ export class ExtensionLoader {
   /**
    * @param core - The core object with hooks and toolRegistry.
    */
-  constructor(core: unknown) {
+  constructor(core: LoaderCore) {
     this.#core = core;
     this.#extensions = new Map();
     this.#handlerRemovers = new Map();
     this.#entryPoints = new Map();
     this.#metadata = new Map();
     this.#toolOwners = new Map();
-    this.#configRegistry = (core as Record<string, unknown>)
-      .configRegistry as ConfigRegistry | null;
-    this.#cliSubcommandRegistry = (core as Record<string, unknown>)
-      .cliSubcommandRegistry as CliSubcommandRegistry | null;
+    this.#configRegistry = core.configRegistry;
+    this.#cliSubcommandRegistry = core.cliSubcommandRegistry;
   }
 
   async load(
@@ -796,16 +801,14 @@ export class ExtensionLoader {
   ): Promise<unknown> {
     let extModule: Record<string, unknown>;
     if (typeof entryPoint === "string") {
-      extModule = (await import(entryPoint)) as unknown as Record<
-        string,
-        unknown
-      >;
+      extModule = (await import(entryPoint)) as Record<string, unknown>;
     } else {
       extModule = entryPoint;
     }
 
-    const instance = extModule.create
-      ? await (extModule.create as Function)(this.#core, createOptions)
+    const createFn = extModule.create as ((core: LoaderCore, opts: Record<string, unknown>) => unknown) | undefined;
+    const instance = createFn
+      ? await createFn(this.#core, createOptions)
       : extModule;
 
     if (!instance) {
@@ -828,83 +831,38 @@ export class ExtensionLoader {
     const removers: Array<() => void> = [];
     this.#handlerRemovers.set(name, removers);
 
-    if ((instance as Record<string, unknown>).hooks) {
-      for (const [hookName, handler] of Object.entries(
-        (instance as Record<string, unknown>).hooks as Record<string, unknown>,
-      )) {
+    const instanceHooks = (instance as Record<string, unknown>).hooks as Record<string, unknown> | undefined;
+    if (instanceHooks) {
+      for (const [hookName, handler] of Object.entries(instanceHooks)) {
         if (hookName === HOOKS.TOOLS_REGISTER) continue;
         if (hookName === HOOKS.SERVICES_REGISTER) continue;
-        const hooks = (
-          this.#core as Record<
-            string,
-            {
-              on: (
-                name: string,
-                handler: unknown,
-                source: string,
-              ) => () => void;
-            }
-          >
-        ).hooks;
-        const remove = hooks.on(hookName, handler, name);
+        const remove = this.#core.hooks.on(hookName, handler as HookHandler<unknown>, name);
         removers.push(remove);
       }
     }
 
     if (
-      (instance as Record<string, unknown>).hooks &&
-      (instance as Record<string, Record<string, unknown>>).hooks[
-        HOOKS.SERVICES_REGISTER
-      ]
+      instanceHooks &&
+      instanceHooks[HOOKS.SERVICES_REGISTER]
     ) {
-      (
-        (instance as Record<string, Record<string, unknown>>).hooks[
-          HOOKS.SERVICES_REGISTER
-        ] as Function
-      )((this.#core as Record<string, unknown>).services);
+      (instanceHooks[HOOKS.SERVICES_REGISTER] as (registry: ServiceRegistry) => unknown)(this.#core.services);
     }
 
     const toolNamesBefore = new Set(
       Array.from(
-        (
-          (this.#core as Record<string, { getAll: () => [string, unknown][] }>)
-            .toolRegistry as {
-            getAll: () => [string, unknown][];
-          }
-        )
-          .getAll()
-          .map(([n]) => n),
+        this.#core.toolRegistry.getAll().map(([n]) => n),
       ),
     );
 
-    if (
-      (instance as Record<string, Record<string, unknown>>).hooks?.[
-        HOOKS.TOOLS_REGISTER
-      ]
-    ) {
-      await ((
-        (instance as Record<string, Record<string, unknown>>).hooks[
-          HOOKS.TOOLS_REGISTER
-        ] as Function
-      )(
-        (this.#core as Record<string, unknown>).toolRegistry,
-      ) as Promise<unknown>);
+    if (instanceHooks?.[HOOKS.TOOLS_REGISTER]) {
+      await (instanceHooks[HOOKS.TOOLS_REGISTER] as (registry: ToolRegistry) => Promise<unknown>)(this.#core.toolRegistry);
     } else if ((instance as Record<string, unknown>).registerTools) {
-      await ((instance.registerTools as Function)(
-        (this.#core as Record<string, unknown>).toolRegistry,
-      ) as Promise<unknown>);
+      await ((instance as Record<string, unknown>).registerTools as (registry: ToolRegistry) => Promise<unknown>)(this.#core.toolRegistry);
     }
 
     const toolNamesAfter = new Set(
       Array.from(
-        (
-          (this.#core as Record<string, { getAll: () => [string, unknown][] }>)
-            .toolRegistry as {
-            getAll: () => [string, unknown][];
-          }
-        )
-          .getAll()
-          .map(([n]) => n),
+        this.#core.toolRegistry.getAll().map(([n]) => n),
       ),
     );
     const newlyRegistered: string[] = [];
@@ -942,16 +900,7 @@ export class ExtensionLoader {
       const ownedTools = this.#toolOwners.get(name);
       if (ownedTools) {
         for (const toolName of ownedTools) {
-          (
-            (
-              this.#core as Record<
-                string,
-                { remove: (name: string) => boolean }
-              >
-            ).toolRegistry as {
-              remove: (name: string) => boolean;
-            }
-          ).remove(toolName);
+          this.#core.toolRegistry.remove(toolName);
         }
         this.#toolOwners.delete(name);
       }
@@ -1012,23 +961,14 @@ export class ExtensionLoader {
   }
 
   async cleanup(): Promise<void> {
-    await (
-      (
-        this.#core as Record<
-          string,
-          { notifyHooksAsync: (name: string, data: unknown) => void }
-        >
-      ).hooks as {
-        notifyHooksAsync: (name: string, data: unknown) => void;
-      }
-    ).notifyHooksAsync(HOOKS.SHUTDOWN_CLEANUP, null);
+    await this.#core.hooks.notifyHooksAsync(HOOKS.SHUTDOWN_CLEANUP, null);
   }
 }
 
 /**
  * Create a new ExtensionLoader instance.
  */
-export function createExtensionLoader(core: unknown): ExtensionLoader {
+export function createExtensionLoader(core: LoaderCore): ExtensionLoader {
   return new ExtensionLoader(core);
 }
 

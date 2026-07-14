@@ -29,7 +29,7 @@ export class LoadSkillTool {
     this.loader = options.loader || null;
   }
 
-  toToolDef(): Record<string, unknown> {
+  toToolDef() {
     return toolDef(
       LoadSkillTool.TOOL_NAME,
       "Load a skill. Skills are Markdown files that provide specialized workflows.",

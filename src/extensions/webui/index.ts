@@ -6,9 +6,10 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { HOOKS } from "../../core/hooks.ts";
 import { createWebuiServer } from "./server.ts";
-import type {
+import {
   CoreContext,
   ExtensionInstance,
+  getExtensionConfig,
 } from "../../core/extensions/types.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -37,7 +38,7 @@ async function handleWebuiSubcommand(
   _cli: SubcommandCli,
   core: CoreContext,
 ): Promise<void> {
-  const config = (core.config?.webui as Record<string, unknown>) || {};
+  const config = getExtensionConfig<{ port?: number; host?: string; apiKey?: string; sessionTokenTtlMin?: number; maxAgeSecs?: number }>(core, "webui");
   const { server } = await createWebuiServer(core, config, UI_DIR);
 }
 

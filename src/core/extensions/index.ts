@@ -59,7 +59,10 @@ export type {
   ToolsRegisterPayload,
   CommandsRegisterPayload,
   ContextHookPayload,
+  ToolExecutionContext,
 } from "./types.ts";
+
+export type { LoaderCore } from "./extensions.ts";
 
 // Value exports
 export {

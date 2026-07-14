@@ -25,9 +25,9 @@ interface Agent {
  * Create the model-switch extension.
  */
 export function create(core: CoreContext): ExtensionInstance {
-  const modelRegistry = core.resolved?.modelRegistry as Record<string, unknown> || {};
+  const modelRegistry = core.resolved?.modelRegistry ?? {};
   // Config defaults come from extension.json configSchema
-  const config = getExtensionConfig(core, "modelSwitch");
+  const config = getExtensionConfig<{ toolEnabled?: boolean; commandEnabled?: boolean }>(core, "modelSwitch");
 
   const modelTool = new ModelTool(modelRegistry);
 

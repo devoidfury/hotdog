@@ -48,7 +48,7 @@ const CAST_BUILTINS: Record<string, CastFn> = {
   },
 
   falsy: (v: unknown): boolean | undefined => {
-    const result = CAST_BUILTINS.truthy(v);
+    const result = CAST_BUILTINS.truthy!(v);
     if (result === undefined) return undefined;
     return !result;
   },
@@ -83,9 +83,11 @@ const COMPUTE_BUILTINS: Record<
   string,
   (arg: unknown, ctx: unknown) => unknown
 > = {
-  joinConfigDir: (subPath: string, ctx: { configDir?: string }): string => {
-    if (ctx.configDir) {
-      return join(ctx.configDir, subPath);
+  joinConfigDir: (arg: unknown, ctx: unknown): string => {
+    const subPath = arg as string;
+    const configDir = (ctx as { configDir?: string }).configDir;
+    if (configDir) {
+      return join(configDir, subPath);
     }
     const fallbacks: Record<string, string> = {
       skills: "/skills",
@@ -110,7 +112,7 @@ export function resolveCast(cast: unknown): CastFn | null {
 /**
  * Parse a compute string and return a function.
  */
-export function resolveCompute(compute: string): ComputeFn | null {
+export function resolveCompute(compute: unknown): ComputeFn | null {
   if (typeof compute !== "string") return null;
 
   let name: string | undefined;
@@ -252,7 +254,7 @@ export function buildConfigSchema(): ConfigSchema {
 /**
  * Extract the default value from a schema key's layers.
  */
-export function getLayerDefault(schemaKey: SchemaProperty): unknown {
+export function getLayerDefault(schemaKey: SchemaProperty | undefined | null): unknown {
   if (!schemaKey || !schemaKey.layers) return undefined;
 
   for (const layer of schemaKey.layers) {
@@ -332,8 +334,8 @@ export function cliFlagsFromSchema(schema: ConfigSchema): CliFlagDef[] {
 }
 
 export interface ResolutionContext {
-  cli: Record<string, unknown>;
-  config: Record<string, unknown>;
+  cli?: Record<string, unknown>;
+  config?: Record<string, unknown>;
   provider?: Record<string, unknown> | null;
   profile?: Record<string, unknown> | null;
   configDir?: string;
@@ -355,7 +357,7 @@ export function resolveLayerValue(
 
   switch (layer.source) {
     case "cli":
-      return context.cli[layer.key as string];
+      return context.cli?.[layer.key as string];
     case "config":
       return getNested(context.config, layer.key as string);
     case "env":
@@ -368,18 +370,12 @@ export function resolveLayerValue(
     case "providerDefault":
       if (
         context.provider &&
-        Array.isArray((context.provider as Record<string, unknown>).models) &&
-        (
-          (context.provider as Record<string, unknown>).models as Array<
-            Record<string, unknown>
-          >
-        )[0]?.name
+        Array.isArray((context.provider as Record<string, unknown>).models)
       ) {
-        return (
-          (context.provider as Record<string, unknown>).models as Array<
-            Record<string, unknown>
-          >
-        )[0].name;
+        const models = (context.provider as Record<string, unknown>).models as Array<Record<string, unknown>>;
+        if (models.length > 0 && models[0]?.name) {
+          return models[0].name;
+        }
       }
       return undefined;
     case "profile":
@@ -428,10 +424,10 @@ function resolveNestedProperties(
       );
 
       if (propValue !== undefined) {
-        result[propName] = propValue;
+        (result as Record<string, unknown>)[propName] = propValue;
       }
     } else if (propSchema.default !== undefined && !(propName in result)) {
-      result[propName] = propSchema.default;
+      (result as Record<string, unknown>)[propName] = propSchema.default;
     }
   }
 
@@ -443,12 +439,13 @@ function resolveNestedProperties(
  */
 export function resolveKey(
   keyName: string,
-  schema: SchemaProperty,
+  schema: SchemaProperty | undefined,
   context: ResolutionContext,
-): SchemaToType<SchemaProperty['type']> | undefined {
+): unknown {
+  if (!schema) return undefined;
   const { layers, properties } = schema;
 
-  for (const layer of layers) {
+  for (const layer of (layers ?? [])) {
     if ("default" in layer) {
       const value = resolveLayerValue(layer, context);
       if (properties && typeof value === "object" && value !== null) {
@@ -509,6 +506,64 @@ export type ResolvedConfigFromSchema<S extends ConfigSchema> = {
               : unknown
     : unknown;
 };
+
+/**
+ * The resolved shape of the core schema keys.
+ * Provides compile-time type checking for commonly used config keys.
+ * Extension-specific config keys are not included — access them via
+ * Record<string, unknown> or a generic parameter.
+ *
+ * This is a manually defined interface matching the core.config.json schema.
+ * It documents the expected types of resolved config values.
+ */
+export interface CoreConfig {
+  baseUrl?: string;
+  apiKey?: string;
+  thinkerFormat?: string;
+  toolFormat?: string;
+  toolOutputFmt?: string;
+  chatTimeout?: number;
+  embeddingsTimeout?: number;
+  sessionId?: string;
+  compactDebug?: boolean;
+  noLog?: boolean;
+  showTokenUse?: boolean;
+  stream?: boolean;
+  hideTools?: boolean;
+  hideThinking?: boolean;
+  useColors?: boolean;
+  theme?: string;
+  role?: string;
+  aspects?: unknown[];
+  defaultModel?: string;
+  maxTokens?: number;
+  maxIterations?: number;
+  maxRetries?: number;
+  prompt?: string;
+  exitCommands?: string[];
+  taskProfile?: string;
+  coreTools?: Record<string, unknown>;
+  compaction?: Record<string, unknown>;
+  hookTrace?: boolean;
+  profileName?: string;
+  /** Resolved profile object (includes manager flag, whitelistTools, etc.). Not from schema — set at runtime. */
+  profile?: Record<string, unknown>;
+  profilesPath?: string;
+  provider?: string;
+  systemPromptTemplate?: string;
+  profiles?: Record<string, unknown>;
+  extensionPaths?: string[];
+  extensionAutoload?: boolean;
+  extensions?: string[];
+  defaultSubcommand?: string;
+  temperature?: number;
+  defaultProvider?: string;
+  defaultAiUrl?: string;
+  taskDefaultRole?: string;
+  systemPromptDefaultTemplate?: string;
+  // Allow access to extension-specific config keys
+  [key: string]: unknown;
+}
 
 /**
  * Resolve all config keys from a schema against a context.
@@ -594,7 +649,7 @@ export function resolveModel(
   if (profileModel) return resolveModelWithProvider(profileModel, provider);
   if (cliModel) return resolveModelWithProvider(cliModel, provider);
   if (provider?.models?.length)
-    return resolveModelWithProvider(provider.models[0].name, provider);
+    return resolveModelWithProvider(provider.models[0]!.name, provider);
   if (configModel) return resolveModelWithProvider(configModel, provider);
   return defaultModel;
 }

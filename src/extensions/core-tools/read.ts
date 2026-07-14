@@ -59,7 +59,7 @@ export class ReadTool {
     this.maxImageSize = options.maxImageSize ?? DEFAULT_MAX_IMAGE_SIZE;
   }
 
-  toToolDef(): Record<string, unknown> {
+  toToolDef() {
     return toolDef(
       ReadTool.TOOL_NAME,
       `Read a file's contents with optional pagination. Supports text files (line-based extraction with offset/limit) and image files (jpeg, png, webp, base64). Returns an error for directories with a depth-1 listing instead.`,

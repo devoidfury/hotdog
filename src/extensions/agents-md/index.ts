@@ -50,7 +50,7 @@ async function buildAgentsMdChunk(autoload: boolean): Promise<string> {
  * Config defaults come from extension.json configSchema.
  */
 export function create(core: CoreContext): ExtensionInstance {
-  const config = getExtensionConfig(core, "agentsMd");
+  const config = getExtensionConfig<{ autoload?: boolean }>(core, "agentsMd");
   const autoload = config.autoload !== false;
 
   return {

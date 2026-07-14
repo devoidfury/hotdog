@@ -35,11 +35,15 @@ function _summarizeResult(value: unknown): string {
 
 export interface HookHandlerEntry {
   id: number;
-  handler: HookHandler;
+  handler: HookHandler<unknown>;
   source: string | undefined;
 }
 
-export type HookHandler = (data: unknown) => unknown;
+/**
+ * Hook handler function type.
+ * @template T — The expected payload type for this hook.
+ */
+export type HookHandler<T = unknown> = (data: T) => void | Promise<void> | unknown;
 
 export interface HookPipelineOptions {
   shouldStop?: (result: unknown) => boolean;
@@ -77,15 +81,15 @@ export class HookSystem {
    *   Used for tracking which extension registered a handler.
    * @returns A removal function that unregisters this handler.
    */
-  on(
+  on<T = unknown>(
     hookName: string,
-    handler: HookHandler,
+    handler: HookHandler<T>,
     source?: string,
   ): () => void {
     if (!this.#hooks.has(hookName)) this.#hooks.set(hookName, []);
     const handlers = this.#hooks.get(hookName)!;
     const id = ++this.#handlerCounter;
-    handlers.push({ id, handler, source });
+    handlers.push({ id, handler: handler as HookHandler<unknown>, source });
 
     // Return a removal function
     return () => {
@@ -102,7 +106,7 @@ export class HookSystem {
    * @param handler - The exact handler function to remove.
    * @returns true if handler was found and removed.
    */
-  off(hookName: string, handler: HookHandler): boolean {
+  off<T = unknown>(hookName: string, handler: HookHandler<T>): boolean {
     const handlers = this.#hooks.get(hookName);
     if (!handlers) return false;
     const idx = handlers.findIndex((h) => h.handler === handler);
@@ -123,6 +127,7 @@ export class HookSystem {
 
     for (let i = 0; i < handlers.length; i++) {
       const entry = handlers[i];
+      if (!entry) continue;
       const t0 = doTrace ? Date.now() : 0;
       entry.handler(data);
       if (doTrace && !this._isTraceDisabled(entry.source)) {
@@ -151,6 +156,7 @@ export class HookSystem {
     }
     for (let i = 0; i < handlers.length; i++) {
       const entry = handlers[i];
+      if (!entry) continue;
       const t0 = doTrace ? Date.now() : 0;
       try {
         const result = entry.handler(data);
@@ -223,6 +229,7 @@ export class HookSystem {
 
     for (let i = 0; i < handlers.length; i++) {
       const entry = handlers[i];
+      if (!entry) continue;
       const t0 = doTrace ? Date.now() : 0;
       try {
         const result = entry.handler(data);
@@ -335,10 +342,9 @@ export class HookSystem {
 
   private _isTraceDisabled(source: string | undefined): boolean {
     if (typeof this.#trace === "object" && this.#trace !== null) {
-      return (
-        this.#trace.disabledSources &&
-        this.#trace.disabledSources.includes(source ?? "")
-      );
+      return this.#trace.disabledSources
+        ? this.#trace.disabledSources.includes(source ?? "")
+        : false;
     }
     return false;
   }

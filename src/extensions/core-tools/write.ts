@@ -38,7 +38,7 @@ interface WriteArgs {
 export class WriteTool {
   static readonly TOOL_NAME = "write";
 
-  toToolDef(): Record<string, unknown> {
+  toToolDef() {
     return toolDef(
       WriteTool.TOOL_NAME,
       "Writes a file to the local filesystem. Each call performs a single operation. Modes:\n\n1. **overwrite** — replaces entire file content. Requires: path, content.\n2. **insert_before** — inserts content at the given line, shifting existing lines down. Requires: path, start_at, content.\n3. **replace_all** — replaces all occurrences of literal string. Requires: path, search, content.\n4. **regex_replace** — replaces all matches of regex pattern. Requires: path, search_re, content.\n5. **replace_range** — replaces lines from start_at through end_at (inclusive) with new content. Requires: path, start_at, end_at, content.\n6. **replace_range_literal** — replaces literal string on each line from start_at to end_at (or EOF). Requires: path, search, start_at, content.\n7. **replace_range_regex** — applies regex replacement on each line from start_at to end_at (or EOF). Requires: path, search_re, start_at, content.\n\nAll line numbers are 1-indexed.",

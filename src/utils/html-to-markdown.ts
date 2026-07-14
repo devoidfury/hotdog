@@ -33,7 +33,7 @@ function decodeEntities(text: string): string {
 /**
  * Convert an HTML string to simplified GitHub Flavored Markdown.
  */
-export function htmlToMarkdown(html: string): string {
+export function htmlToMarkdown(html: string | null | undefined): string {
   if (!html || typeof html !== "string") return "";
 
   // Shared mutable state for tracking context across handlers.

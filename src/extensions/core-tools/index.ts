@@ -5,8 +5,6 @@ import {
   ExtensionInstance,
   ToolsRegisterPayload,
   getExtensionConfig,
-  getConfigSchemaProperties,
-  getConfigDefault,
 } from "../../core/extensions/types.ts";
 
 export * from "./write.ts";
@@ -50,7 +48,6 @@ export const CORE_TOOL_NAMES = TOOL_DESCRIPTORS.map((d) => d.name);
 
 // Tool constructor map with config — maps tool names to factory functions that accept config.
 // Config values are pre-resolved with defaults from extension.json configSchema.
-const cs = getConfigSchemaProperties(extensionData.configSchema, "coreTools");
 
 interface CoreToolConfig {
   readToolLimit?: number;
@@ -64,24 +61,22 @@ const TOOL_FACTORIES: Record<string, (config: CoreToolConfig) => unknown> = {
   write: () => new WriteTool(),
   read: (config) =>
     new ReadTool({
-      readLimit: config.readToolLimit ?? getConfigDefault<number>(cs, "readToolLimit"),
+      readLimit: config.readToolLimit ?? 500,
       maxImageSize: DEFAULT_MAX_IMAGE_SIZE,
     }),
   edit: (config) =>
     new EditTool({
-      maxEditInputSize: config.maxEditInputSize ?? getConfigDefault<number>(cs, "maxEditInputSize"),
+      maxEditInputSize: config.maxEditInputSize ?? 16000,
     }),
   grep: (config) =>
     new GrepTool({
-      maxResults: config.grepMaxResults ?? getConfigDefault<number>(cs, "grepMaxResults"),
-      maxOutputLines:
-        config.maxToolOutputLines ?? getConfigDefault<number>(cs, "maxToolOutputLines"),
+      maxResults: config.grepMaxResults ?? 100,
+      maxOutputLines: config.maxToolOutputLines ?? 600,
     }),
   find: (config) =>
     new FindTool({
-      maxResults: config.findMaxResults ?? getConfigDefault<number>(cs, "findMaxResults"),
-      maxOutputLines:
-        config.maxToolOutputLines ?? getConfigDefault<number>(cs, "maxToolOutputLines"),
+      maxResults: config.findMaxResults ?? 200,
+      maxOutputLines: config.maxToolOutputLines ?? 600,
     }),
   pager: () => new PagerTool(),
   explore: () => new ExploreTool(),
@@ -136,7 +131,7 @@ export function createToolFactory(config: CoreToolConfig = {}): ToolFactory {
  */
 export function create(core: CoreContext): ExtensionInstance {
   // Config defaults come from extension.json configSchema
-  const config = getExtensionConfig(core, "coreTools") as CoreToolConfig;
+  const config = getExtensionConfig<CoreToolConfig>(core, "coreTools");
 
   return {
     hooks: {

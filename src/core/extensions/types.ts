@@ -6,10 +6,14 @@ import type { ToolRegistry, ToolDef } from "./tool-registry.ts";
 import type { ExtensionLoader } from "./extensions.ts";
 import type { ServiceRegistry } from "./service-registry.ts";
 import type { CliSubcommandRegistry } from "./registries.ts";
+import type { ConfigRegistry } from "./config-registry.ts";
 import type { ModelConfig } from "../config/providers.ts";
+import type { CoreConfig } from "../config/schema-loader.ts";
 import type { Agent } from "../agent.ts";
 import type { Message } from "../context/message.ts";
 import type { ParsedCommand } from "../commands.ts";
+import type { ToolContext } from "./tool-context.ts";
+import { logger } from "../logger.ts";
 
 // ── Hook Payload Types ──────────────────────────────────────────────────────
 
@@ -116,10 +120,13 @@ export interface CoreContext {
   services: ServiceRegistry;
 
   /** Resolved configuration, including extension-specific config blocks. */
-  config: Record<string, unknown>;
+  config: CoreConfig & Record<string, unknown>;
 
   /** CLI subcommand registry. */
   cliSubcommandRegistry: CliSubcommandRegistry;
+
+  /** Config registry for extension-registered CLI flags, config params, and schemas. */
+  configRegistry: ConfigRegistry;
 
   /**
    * Look up a registered service by name.
@@ -145,6 +152,7 @@ export interface CoreContext {
 
 /**
  * Resolved configuration attached to core after buildConfig().
+ * Includes all resolved schema keys plus agent-specific extras.
  */
 export interface ResolvedConfig {
   modelRegistry?: Record<string, ModelConfig>;
@@ -164,12 +172,17 @@ export interface ResolvedConfig {
  * The type system checks that the handler function matches the expected payload
  * for that hook name.
  */
-export interface ExtensionInstance {
+export type ExtensionInstance = {
   /**
    * Hook handlers keyed by hook name.
+   * Only known hook names from HookPayloads are allowed.
+   * Custom extensions can use known hooks only — no arbitrary string keys.
+   *
+   * Each handler receives the typed payload for that hook name, ensuring
+   * type-safe access to hook data at compile time.
    */
-  hooks?: Partial<HookPayloads> & {
-    [key: string]: (data: unknown) => unknown | Promise<unknown>;
+  hooks?: {
+    [K in keyof HookPayloads]?: (payload: HookPayloads[K]) => void | Promise<void> | unknown;
   };
 
   /**
@@ -186,7 +199,7 @@ export interface ExtensionInstance {
    * Arbitrary extension-specific properties exposed for external use.
    */
   [key: string]: unknown;
-}
+};
 
 // ── Specific Hook Payload Types ──────────────────────────────────────────────
 
@@ -213,37 +226,68 @@ export interface ContextHookPayload {
   agent: unknown;
 }
 
+// ── Tool Execution Context ───────────────────────────────────────────────────
+
+/**
+ * Context passed to tool `execute()` methods.
+ * Provides access to shared state and configuration.
+ */
+export type ToolExecutionContext = ToolContext;
+
 // ── Extension Config Helpers ─────────────────────────────────────────────────
 
 /**
  * Safely extract an extension's config block from core.config.
+ * Generic type T allows extensions to declare their expected config shape.
+ *
+ * Runtime validation: if the config registry has a schema registered for this key,
+ * the value is validated against it and a warning is logged on mismatch.
+ * Also warns if the extension that owns this key is not loaded.
  */
-export function getExtensionConfig(
+export function getExtensionConfig<T = Record<string, unknown>>(
   core: CoreContext,
   key: string,
-): Record<string, unknown> {
+): T {
   const block = core.config?.[key];
-  if (block && typeof block === "object" && !Array.isArray(block)) {
-    return block as Record<string, unknown>;
+
+  // Runtime validation: check schema if registered
+  if (core.configRegistry) {
+    const result = core.configRegistry.validateConfigByKey(key, block);
+    if (!result.valid) {
+      logger.warn(
+        `[config] Extension config "${key}" validation failed: ${result.errors.join("; ")} ` +
+        `— config may be ignored or have unexpected values`,
+      );
+    }
   }
-  return {};
+
+  // Note: we don't check if the extension is loaded here because config keys
+  // may not match extension names — an extension can define multiple config
+  // keys with arbitrary names. The schema validation above is the right check.
+
+  if (block && typeof block === "object" && !Array.isArray(block)) {
+    return block as T;
+  }
+  return {} as T;
 }
 
 /**
  * Safely extract schema defaults from an extension's configSchema.
  */
-export function getConfigSchemaProperties(
+export function getConfigSchemaProperties<
+  T extends Record<string, unknown> = Record<string, unknown>,
+>(
   configSchema: Record<string, unknown> | null | undefined,
   key: string,
-): Record<string, unknown> {
+): T {
   const block = configSchema?.[key];
   if (block && typeof block === "object" && !Array.isArray(block)) {
     const props = (block as Record<string, unknown>).properties;
     if (props && typeof props === "object" && !Array.isArray(props)) {
-      return props as Record<string, unknown>;
+      return props as T;
     }
   }
-  return {};
+  return {} as T;
 }
 
 /**
@@ -255,7 +299,10 @@ export function getConfigDefault<T = unknown>(
 ): T | undefined {
   const prop = props[propName];
   if (prop && typeof prop === "object" && !Array.isArray(prop)) {
-    return (prop as Record<string, unknown>).default as T | undefined;
+    const defaultVal = (prop as Record<string, unknown>).default;
+    // Treat null as "no default" to avoid overwriting user-provided values with null
+    if (defaultVal === null) return undefined;
+    return defaultVal as T | undefined;
   }
   return undefined;
 }

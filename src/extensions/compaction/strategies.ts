@@ -58,7 +58,7 @@ export class CompactionStrategy {
  * Follows the ToolRegistry pattern for consistency.
  */
 export class CompactionStrategyRegistry {
-  private readonly #strategies: Map<string, CompactionStrategy> = new Map();
+  #strategies: Map<string, CompactionStrategy> = new Map();
 
   /**
    * Register a strategy.

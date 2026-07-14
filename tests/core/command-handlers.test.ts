@@ -137,7 +137,7 @@ describe("handleTools", () => {
     expect(agent.hideTools).toBe(true);
     expect(result.content).toContain("hidden");
     expect(outputs).toHaveLength(1);
-    expect(outputs[0].data.key).toBe("hideTools");
+    expect(outputs[0]!.data.key).toBe("hideTools");
   });
 
   it("toggles hideTools from true to false", () => {
@@ -163,7 +163,7 @@ describe("handleThinking", () => {
     expect(agent.hideThinking).toBe(true);
     expect(result.content).toContain("hidden");
     expect(outputs).toHaveLength(1);
-    expect(outputs[0].data.key).toBe("hideThinking");
+    expect(outputs[0]!.data.key).toBe("hideThinking");
   });
 
   it("toggles hideThinking from true to false", () => {
@@ -205,16 +205,16 @@ describe("handleReasoning", () => {
   });
 
   it("sets reasoning effort to valid value", () => {
-    const agent = { reasoningEffort: undefined };
+    const agent: { reasoningEffort?: string } = { reasoningEffort: undefined };
     const result = handleReasoning(agent, "low");
     expect(agent.reasoningEffort).toBe("low");
     expect(result.content).toContain("low");
   });
 
   it("handles all valid values", () => {
-    const valid = ["none", "minimal", "low", "high", "xhigh", "max"];
+    const valid = ["none", "minimal", "low", "high", "xhigh", "max"] as const;
     for (const v of valid) {
-      const agent = {};
+      const agent = {} as { reasoningEffort?: string };
       const result = handleReasoning(agent, v);
       expect(agent.reasoningEffort).toBe(v);
       expect(result.content).toContain(v);
@@ -222,14 +222,14 @@ describe("handleReasoning", () => {
   });
 
   it("unsets reasoning effort", () => {
-    const agent = { reasoningEffort: "high" };
+    const agent: { reasoningEffort?: string } = { reasoningEffort: "high" };
     const result = handleReasoning(agent, "unset");
     expect(agent.reasoningEffort).toBeUndefined();
     expect(result.content).toContain("unset");
   });
 
   it("returns error for invalid value", () => {
-    const agent = {};
+    const agent: { reasoningEffort?: string } = {};
     const result = handleReasoning(agent, "invalid");
     expect(result.error).toContain("Invalid reasoning effort");
     expect(result.error).toContain("invalid");
@@ -250,9 +250,9 @@ describe("CORE_COMMAND_HANDLERS", () => {
   });
 
   it("UI commands are marked as isUiCommand", () => {
-    expect(CORE_COMMAND_HANDLERS[Command.Quit].isUiCommand).toBe(true);
-    expect(CORE_COMMAND_HANDLERS[Command.Help].isUiCommand).toBe(true);
-    expect(CORE_COMMAND_HANDLERS[Command.Clear].isUiCommand).toBeUndefined();
+    expect(CORE_COMMAND_HANDLERS[Command.Quit]!.isUiCommand).toBe(true);
+    expect(CORE_COMMAND_HANDLERS[Command.Help]!.isUiCommand).toBe(true);
+    expect(CORE_COMMAND_HANDLERS[Command.Clear]!.isUiCommand).toBeUndefined();
   });
 
   it("handlers have descriptions", () => {

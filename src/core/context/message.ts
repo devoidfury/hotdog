@@ -54,7 +54,7 @@ export class Message {
       reasoningContent: (data.reasoning_content ?? data.reasoningContent) as string | null,
       toolCalls: data.tool_calls ?? data.toolCalls ?? null,
       toolCallId: (data.tool_call_id ?? data.toolCallId) as string | null,
-      images: data.images as ImageAttachment[] | null | undefined,
+      images: data.images as ImageAttachment[] | undefined,
     });
   }
 

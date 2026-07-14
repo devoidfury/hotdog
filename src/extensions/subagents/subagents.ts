@@ -116,7 +116,7 @@ export class DelegateTaskTool extends SubagentTool {
     });
   }
 
-  toToolDef(): Record<string, unknown> {
+  toToolDef() {
     const config = this._taskManager?.config;
     const visibleProfiles = config ? getVisibleWorkerProfiles(config) : [];
     const profileList =
@@ -181,7 +181,7 @@ export class TaskStatusTool extends SubagentTool {
     });
   }
 
-  toToolDef(): Record<string, unknown> {
+  toToolDef() {
     return toolDef(
       "task_status",
       "[DO NOT USE for polling] Check the status of a specific running task agent. WARNING: Do NOT use this tool to poll for task progress after delegation. Tasks notify you automatically when complete via system messages. Only call this when the user explicitly asks you to check the status of a specific task.",
@@ -229,7 +229,7 @@ export class TaskFollowupTool extends SubagentTool {
     return ToolResult.err(`Failed to send follow-up to task ${args.task_id}`);
   }
 
-  toToolDef(): Record<string, unknown> {
+  toToolDef() {
     return toolDef(
       "task_followup",
       "Send a follow-up message to a running task agent. WARNING: Do NOT use this to check on task progress. Tasks are autonomous and will notify you when complete. Only use this to send additional instructions or clarifications to a running task.",
@@ -276,7 +276,7 @@ export class TaskInterruptTool extends SubagentTool {
     return ToolResult.err(`Failed to interrupt task ${args.task_id}`);
   }
 
-  toToolDef(): Record<string, unknown> {
+  toToolDef() {
     return toolDef(
       "task_interrupt",
       "Interrupt (cancel) a running task agent. The task will stop and its status will be set to Cancelled. WARNING: Do NOT use this to check status. Only use this to cancel a task that is no longer needed.",
@@ -338,7 +338,7 @@ export class PlanStatusTool extends SubagentTool {
     );
   }
 
-  toToolDef(): Record<string, unknown> {
+  toToolDef() {
     return toolDef(
       "plan_status",
       "[DO NOT USE for polling] Check the status of task agents. Shows all active tasks or the status of a specific task. WARNING: Do NOT use this tool to poll for task progress after delegation. Tasks notify you automatically when complete. Only call this when the user explicitly asks you to check status.",
@@ -378,7 +378,7 @@ export class CompleteTaskTool extends SubagentTool {
     );
   }
 
-  toToolDef(): Record<string, unknown> {
+  toToolDef() {
     return toolDef(
       "complete_task",
       "Mark a task as complete. The task agent's result is already appended to the manager's context.",
@@ -414,7 +414,7 @@ export class WaitTool extends SubagentTool {
     });
   }
 
-  toToolDef(): Record<string, unknown> {
+  toToolDef() {
     return toolDef(
       "wait",
       "Signal that you have nothing more to do and are yielding control back to the user. Call this when all work is complete and you are done.",

@@ -17,15 +17,15 @@ import {
  * Create the prompts extension.
  */
 export async function create(core: CoreContext): Promise<ExtensionInstance> {
-  const config = getExtensionConfig(core, "prompts");
+  const config = getExtensionConfig<{ path?: string; promptsPath?: string; displayPrompt?: boolean }>(core, "prompts");
   // Backward compat: support old top-level promptsPath key alongside new path key.
-  const resolvedPath = (config.path as string) ?? (config.promptsPath as string);
+  const resolvedPath = config.path ?? config.promptsPath ?? "";
   if (config.promptsPath !== undefined && config.path === undefined) {
     logger.warn(
       "prompts.promptsPath is deprecated; use prompts.path instead",
     );
   }
-  const loader = new PromptsLoader(resolvedPath, config.displayPrompt as boolean);
+  const loader = new PromptsLoader(resolvedPath, config.displayPrompt ?? false);
   await loader.loadPrompts();
 
   return {

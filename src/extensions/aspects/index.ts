@@ -1,6 +1,6 @@
 // Aspects Extension
-// Loads .aspect.md files and contributes the Guidelines section chunk.
 // Reads aspect names from profile file front matter or config file.
+// Loads .aspect.md files, composable system prompt chunks.
 
 import fsPromises from "node:fs/promises";
 import path from "node:path";

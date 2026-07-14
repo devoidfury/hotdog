@@ -16,7 +16,7 @@ const DEFAULT_DU_DEPTH = 1;
 export class ProjectInfoTool {
   static readonly TOOL_NAME = "project_info";
 
-  toToolDef(): Record<string, unknown> {
+  toToolDef() {
     return toolDef(
       ProjectInfoTool.TOOL_NAME,
       "Get a compact overview of the project structure, file list, sizes, and git status for a directory.",

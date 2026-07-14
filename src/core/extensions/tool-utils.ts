@@ -1,6 +1,7 @@
 // Tool utilities — shared helpers for tool definitions and execution.
 
 import { ToolError } from "../error.ts";
+import { ToolDef } from "./tool-registry.ts";
 
 const SHORT_META_KEYS = new Set([
   "truncated",
@@ -182,18 +183,18 @@ export function toolDef(
   name: string,
   description: string,
   parameters?: {
-    schema?: Record<string, unknown>;
+    schema?: string;
     properties?: Record<string, unknown>;
     required?: string[];
   },
-): Record<string, unknown> {
+): ToolDef {
   return {
     type: "function",
     function: {
       name,
       description,
       parameters: {
-        ...(parameters?.schema ? { schema: parameters.schema } : {}),
+        schema: parameters?.schema ?? "https://json-schema.org/draft/2020-12/schema",
         type: "object",
         properties: parameters?.properties || {},
         required: parameters?.required || [],

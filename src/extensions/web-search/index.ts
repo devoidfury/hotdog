@@ -296,7 +296,7 @@ export class WebSearchTool {
     this.searxngInstanceUrl = options.searxngInstanceUrl ?? "";
   }
 
-  toToolDef(): Record<string, unknown> {
+  toToolDef() {
     return toolDef(
       WebSearchTool.TOOL_NAME,
       "Search the web for information. Returns relevant results with titles, URLs, and descriptions. Use this to find current information, news, or research topics.",

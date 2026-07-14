@@ -66,7 +66,7 @@ describe("formatTokenUsage", () => {
 
 describe("formatThinking", () => {
   it("formats with default formatter", () => {
-    expect(formatThinking("Let me think about this")).toBe(
+    expect(formatThinking("Let me think about this", null)).toBe(
       "[Thinking: Let me think about this]",
     );
   });

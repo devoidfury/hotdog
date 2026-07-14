@@ -8,26 +8,27 @@ import {
   formatThinking,
   formatTaskProgress,
 } from "../../src/utils/cli/cli.ts";
-import { OUTPUT_EVENT } from "../../src/core/context/output.ts";
+import { OUTPUT_EVENT, OutputEvent } from "../../src/core/context/output.ts";
+import { ColorPalette } from "../../src/utils/cli/colors.ts";
 
 describe("CliOutputSink", () => {
-  let sink;
-  let stdoutWrites = [];
-  let stderrWrites = [];
+  let sink: CliOutputSink;
+  let stdoutWrites: string[] = [];
+  let stderrWrites: string[] = [];
 
   beforeEach(() => {
     stdoutWrites = [];
     stderrWrites = [];
-    spyOn(process.stdout, "write").mockImplementation((s) => {
+    spyOn(process.stdout, "write").mockImplementation((s: string) => {
       stdoutWrites.push(s);
       return true;
     });
-    spyOn(process.stderr, "write").mockImplementation((s) => {
+    spyOn(process.stderr, "write").mockImplementation((s: string) => {
       stderrWrites.push(s);
       return true;
     });
     sink = new CliOutputSink({
-      useColors: false,
+      palette: new ColorPalette({ use_colors: false }),
       showTokenUse: true,
       toolFormat: "  → {} {}",
       toolOutputFmt: "----\n{}\n----",
@@ -35,8 +36,8 @@ describe("CliOutputSink", () => {
   });
 
   afterEach(() => {
-    process.stdout.write.mockRestore();
-    process.stderr.write.mockRestore();
+    (process.stdout.write as any).mockRestore();
+    (process.stderr.write as any).mockRestore();
   });
 
   it("emitUserMessage writes to stdout", () => {
@@ -207,7 +208,7 @@ describe("CliOutputSink", () => {
   });
 
   it("setPalette updates the palette", () => {
-    const palette = { thinking: "red", use_colors: false };
+    const palette = new ColorPalette({ thinking: "red", use_colors: false });
     sink.setPalette(palette);
     expect(sink.palette).toBe(palette);
   });

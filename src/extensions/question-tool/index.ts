@@ -65,7 +65,7 @@ function ensureKey(question: Question, index: number): string | null {
 export class QuestionTool {
   static readonly TOOL_NAME = "question";
 
-  toToolDef(): Record<string, unknown> {
+  toToolDef() {
     return toolDef(
       QuestionTool.TOOL_NAME,
       "Ask the user one or more questions. Supports required/optional questions, options (enum-style choices), free-text answers, and defaults. The agent loop pauses, asks the user, collects answers, and resumes with the answers as the tool result.",

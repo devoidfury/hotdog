@@ -56,7 +56,7 @@ export class EditTool {
       config.coreTools?.properties.maxEditInputSize.default;
   }
 
-  toToolDef(): Record<string, unknown> {
+  toToolDef() {
     return toolDef(
       EditTool.TOOL_NAME,
       "Single mode tool that replaces text in a file. Finds oldString, replaces with newString. Use this instead of the write tool for precise code edits.",

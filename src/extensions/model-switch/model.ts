@@ -23,7 +23,7 @@ export class ModelTool {
     this.modelRegistry = modelRegistry || {};
   }
 
-  toToolDef(): Record<string, unknown> {
+  toToolDef() {
     const models = Object.keys(this.modelRegistry).sort();
     const description =
       models.length > 0

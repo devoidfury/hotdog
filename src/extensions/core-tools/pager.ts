@@ -6,7 +6,7 @@ import { ToolExecutionContext } from "../../core/extensions/types.ts";
 export class PagerTool {
   static readonly TOOL_NAME = "pager";
 
-  toToolDef(): Record<string, unknown> {
+  toToolDef() {
     return toolDef(
       PagerTool.TOOL_NAME,
       "Show a previously cached tool output for pagination.",

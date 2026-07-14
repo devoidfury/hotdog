@@ -115,7 +115,7 @@ describe("getDefaultConfig", () => {
   it("merges extension defaults into config", () => {
     const config = getDefaultConfig([
       { key: "customExt", defaults: { enabled: true, timeout: 60 } },
-    ]);
+    ]) as unknown as Record<string, unknown>;
     expect(config.customExt).toEqual({ enabled: true, timeout: 60 });
   });
 });

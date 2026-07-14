@@ -47,7 +47,7 @@ describe("resolveProfilesPath", () => {
 });
 
 describe("loadProfileFile", () => {
-  let tmpDir;
+  let tmpDir: string;
 
   beforeEach(() => {
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "profiles-test-"));
@@ -73,14 +73,14 @@ Profile body content here`;
     const profile = await loadProfileFile(tmpDir, "test-profile");
 
     expect(profile).not.toBeNull();
-    expect(profile.name).toBe("test-profile");
-    expect(profile.role).toBe("Test role");
-    expect(profile.model).toBe("test-model");
-    expect(profile.blacklistTools).toEqual(["bash"]);
-    expect(profile.whitelistTools).toEqual(["read", "write"]);
-    expect(profile.manager).toBe(true);
-    expect(profile.visibleWorker).toBe(true);
-    expect(profile.body).toBe("Profile body content here");
+    expect(profile!.name).toBe("test-profile");
+    expect(profile!.role).toBe("Test role");
+    expect(profile!.model).toBe("test-model");
+    expect(profile!.blacklistTools).toEqual(["bash"]);
+    expect(profile!.whitelistTools).toEqual(["read", "write"]);
+    expect(profile!.manager).toBe(true);
+    expect(profile!.visibleWorker).toBe(true);
+    expect(profile!.body).toBe("Profile body content here");
   });
 
   it("returns null for non-existent profile", async () => {
@@ -102,8 +102,8 @@ Body`;
     fs.writeFileSync(path.join(tmpDir, "my-profile.profile.md"), content);
 
     const profile = await loadProfileFile(tmpDir, "my-profile");
-    expect(profile.name).toBe("my-profile");
-    expect(profile.role).toBe("Some role");
+    expect(profile!.name).toBe("my-profile");
+    expect(profile!.role).toBe("Some role");
   });
 
   it("handles snake_case front matter keys", async () => {
@@ -119,9 +119,9 @@ Body`;
     fs.writeFileSync(path.join(tmpDir, "snake-profile.profile.md"), content);
 
     const profile = await loadProfileFile(tmpDir, "snake-profile");
-    expect(profile.blacklistTools).toEqual(["bash"]);
-    expect(profile.whitelistTools).toEqual(["read"]);
-    expect(profile.visibleWorker).toBe(true);
+    expect(profile!.blacklistTools).toEqual(["bash"]);
+    expect(profile!.whitelistTools).toEqual(["read"]);
+    expect(profile!.visibleWorker).toBe(true);
   });
 
   it("handles empty profile directory", async () => {
@@ -131,7 +131,7 @@ Body`;
 });
 
 describe("loadProfileFiles", () => {
-  let tmpDir;
+  let tmpDir: string;
 
   beforeEach(() => {
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "profiles-test-"));
@@ -158,8 +158,8 @@ Body B`,
     const profiles = await loadProfileFiles(tmpDir);
 
     expect(Object.keys(profiles)).toHaveLength(2);
-    expect(profiles["profile-a"].role).toBe("Role A");
-    expect(profiles["profile-b"].role).toBe("Role B");
+    expect(profiles["profile-a"]!.role).toBe("Role A");
+    expect(profiles["profile-b"]!.role).toBe("Role B");
   });
 
   it("ignores non-.profile.md files", async () => {
@@ -196,12 +196,12 @@ Body`,
     );
 
     const profiles = await loadProfileFiles(tmpDir);
-    expect(profiles["described"].description).toBe("A described profile");
+    expect(profiles["described"]!.description).toBe("A described profile");
   });
 });
 
 describe("getVisibleWorkerProfiles", () => {
-  let tmpDir;
+  let tmpDir: string;
 
   beforeEach(() => {
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "profiles-test-"));
@@ -323,8 +323,8 @@ describe("allProfilesForSwitch", () => {
     });
 
     expect(Object.keys(result)).toHaveLength(2);
-    expect(result["file1"].role).toBe("file role");
-    expect(result["config1"].role).toBe("config role");
+    expect(result["file1"]!.role).toBe("file role");
+    expect(result["config1"]!.role).toBe("config role");
   });
 
   it("file profile role wins over config role", () => {
@@ -340,7 +340,7 @@ describe("allProfilesForSwitch", () => {
       configProfiles,
     });
 
-    expect(result["shared"].role).toBe("file role");
+    expect(result["shared"]!.role).toBe("file role");
   });
 
   it("handles empty inputs", () => {
@@ -366,12 +366,12 @@ describe("allProfilesForSwitch", () => {
       configProfiles,
     });
 
-    expect(result["withModel"].model).toBe("gpt-4");
+    expect(result["withModel"]!.model).toBe("gpt-4");
   });
 });
 
 describe("resolveProfile", () => {
-  let tmpDir;
+  let tmpDir: string;
 
   beforeEach(() => {
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "profiles-resolve-"));
@@ -536,6 +536,6 @@ Body`,
 
     expect(result.profileFiles).toBeDefined();
     expect(result.profileFiles["x"]).toBeDefined();
-    expect(result.profileFiles["x"].role).toBe("X Role");
+    expect(result.profileFiles["x"]!.role).toBe("X Role");
   });
 });

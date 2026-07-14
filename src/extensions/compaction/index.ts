@@ -2,7 +2,6 @@
 // Handles context compaction when the conversation grows too long.
 // Hooks into `context:full` to trigger compaction.
 
-import extensionData from "./extension.json" with { type: "json" };
 import {
   CompactionStrategy,
   CompactionStrategyRegistry,
@@ -24,8 +23,6 @@ import {
   CommandsRegisterPayload,
   ContextHookPayload,
   getExtensionConfig,
-  getConfigSchemaProperties,
-  getConfigDefault,
 } from "../../core/extensions/types.ts";
 import type { ModelConfig } from "../../core/config/providers.ts";
 
@@ -77,14 +74,13 @@ function getModelConfig(core: CoreContext, modelName: string): Record<string, un
  */
 export function create(core: CoreContext): ExtensionInstance | null {
   // Config defaults come from extension.json configSchema
-  const config = getExtensionConfig(core, "compaction");
-  const cs = getConfigSchemaProperties(extensionData.configSchema, "compaction");
+  const config = getExtensionConfig<CompactionSettings>(core, "compaction");
 
   const settings: CompactionSettings = {
-    enabled: (config.enabled as boolean) ?? getConfigDefault<boolean>(cs, "enabled") ?? true,
-    reserveTokens: (config.reserveTokens as number) ?? getConfigDefault<number>(cs, "reserveTokens") ?? 16384,
-    keepRecentMessages: (config.keepRecentMessages as number) ?? getConfigDefault<number>(cs, "keepRecentMessages") ?? 8,
-    strategy: (config.strategy as string) ?? getConfigDefault<string>(cs, "strategy") ?? "summarize",
+    enabled: config.enabled ?? true,
+    reserveTokens: config.reserveTokens ?? 16384,
+    keepRecentMessages: config.keepRecentMessages ?? 8,
+    strategy: config.strategy ?? "summarize",
   };
 
   // Normalize: config uses keepRecentMessages, strategies use keepRecent

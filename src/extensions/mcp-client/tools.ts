@@ -61,7 +61,7 @@ export class McpTool {
   /**
    * Convert to a tool definition for the agent API.
    */
-  toToolDef(): Record<string, unknown> {
+  toToolDef() {
     const mcpSchema = this.#toolDef.inputSchema || {};
     const properties = convertSchemaProperties(mcpSchema);
     const required = extractRequired(mcpSchema);

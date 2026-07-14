@@ -3,7 +3,7 @@
 import { describe, it, expect } from "bun:test";
 import { parseArgs, generateHelpText } from "../../src/core/cli.ts";
 
-function withArgs(args, fn) {
+function withArgs(args: string[], fn: () => void) {
   const origArgv = process.argv;
   process.argv = ["bun", "hotdog", ...args];
   try {

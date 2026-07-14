@@ -2,7 +2,7 @@
 
 import { describe, it, expect } from "bun:test";
 import { AgentSink } from "../../src/core/session/agent-sink.ts";
-import { OUTPUT_EVENT } from "../../src/core/context/output.ts";
+import { OUTPUT_EVENT, OutputEvent } from "../../src/core/context/output.ts";
 
 describe("AgentSink", () => {
   describe("constructor", () => {
@@ -22,8 +22,8 @@ describe("AgentSink", () => {
       const sink = new AgentSink({ isTaskAgent: true });
       sink.setTaskAgentId("task-123");
 
-      const events = [];
-      const parent = { emit: (e) => events.push(e) };
+      const events: OutputEvent[] = [];
+      const parent = { emit: (e: OutputEvent) => events.push(e) };
       sink.parentSink = parent;
 
       sink.onTaskComplete("done");
@@ -34,8 +34,8 @@ describe("AgentSink", () => {
 
   describe("normal agent mode (isTaskAgent=false)", () => {
     it("forwards all events to parent sink", () => {
-      const events = [];
-      const parent = { emit: (e) => events.push(e) };
+      const events: OutputEvent[] = [];
+      const parent = { emit: (e: OutputEvent) => events.push(e) };
       const sink = new AgentSink({ parentSink: parent });
 
       sink.emit({ type: OUTPUT_EVENT.STREAMING_CHUNK, content: "chunk" });
@@ -54,8 +54,8 @@ describe("AgentSink", () => {
 
   describe("task agent mode (isTaskAgent=true)", () => {
     it("filters verbose events (streaming, tool, assistant, thinking)", () => {
-      const events = [];
-      const parent = { emit: (e) => events.push(e) };
+      const events: OutputEvent[] = [];
+      const parent = { emit: (e: OutputEvent) => events.push(e) };
       const sink = new AgentSink({ parentSink: parent, isTaskAgent: true });
 
       // These should all be filtered
@@ -71,8 +71,8 @@ describe("AgentSink", () => {
     });
 
     it("forwards TASK_PROGRESS and TOKEN_USAGE events", () => {
-      const events = [];
-      const parent = { emit: (e) => events.push(e) };
+      const events: OutputEvent[] = [];
+      const parent = { emit: (e: OutputEvent) => events.push(e) };
       const sink = new AgentSink({ parentSink: parent, isTaskAgent: true });
 
       sink.emit({ type: OUTPUT_EVENT.TASK_PROGRESS, status: "running" });
@@ -84,19 +84,19 @@ describe("AgentSink", () => {
     });
 
     it("handles unknown event types silently", () => {
-      const events = [];
-      const parent = { emit: (e) => events.push(e) };
+      const events: OutputEvent[] = [];
+      const parent = { emit: (e: OutputEvent) => events.push(e) };
       const sink = new AgentSink({ parentSink: parent, isTaskAgent: true });
 
-      sink.emit({ type: 999, data: "unknown" });
+      sink.emit({ type: 999 as OutputEvent["type"], data: "unknown" });
       expect(events).toHaveLength(0);
     });
   });
 
   describe("onTaskComplete", () => {
     it("emits TASK_PROGRESS to parent sink", () => {
-      const events = [];
-      const parent = { emit: (e) => events.push(e) };
+      const events: OutputEvent[] = [];
+      const parent = { emit: (e: OutputEvent) => events.push(e) };
       const sink = new AgentSink({ parentSink: parent, isTaskAgent: true });
       sink.setTaskAgentId("task-1");
 
@@ -108,9 +108,9 @@ describe("AgentSink", () => {
     });
 
     it("calls onTaskComplete callback with task id and result", () => {
-      let capturedId = null;
-      let capturedResult = null;
-      const onTaskComplete = (id, result) => {
+      let capturedId: string | null = null;
+      let capturedResult: string | null = null;
+      const onTaskComplete = (id: string | null, result: string) => {
         capturedId = id;
         capturedResult = result;
       };

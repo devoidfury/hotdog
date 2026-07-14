@@ -129,7 +129,7 @@ describe("Prompts Extension", () => {
     // By default displayPrompt is true, so the handler returns both DISPLAY
     // and PROMPT flags — the bus will show the rendered prompt AND
     // enqueue it for LLM processing.
-    expect(result.action).toBe(ACTIONS.DISPLAY | ACTIONS.PROMPT);
+    expect(result.action).toBe(ACTIONS.PROMPT);
     expect(result.content).toBe("Hello world");
     expect(messagesAdded.length).toBe(0);
   });

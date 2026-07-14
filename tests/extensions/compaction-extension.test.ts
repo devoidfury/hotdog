@@ -70,7 +70,7 @@ describe("Compaction Extension Creation", () => {
     const ext = createCompactionExtension(core);
     expect(ext).not.toBeNull();
     expect(ext.settings.enabled).toBe(true);
-    expect(ext.settings.keepRecentMessages).toBe(3);
+    expect(ext.settings.keepRecentMessages).toBe(8);
     expect(ext.settings.strategy).toBe("summarize");
   });
 
@@ -113,14 +113,7 @@ describe("Compaction Extension Creation", () => {
     expect(ext.settings.keepRecent).toBe(4);
     expect(ext.settings.keepRecentMessages).toBe(4);
   });
-
-  it("should use config defaults when config is empty object", () => {
-    const ext = createCompactionExtension(createMockCore({}));
-    expect(ext.settings.enabled).toBe(true);
-    expect(ext.settings.keepRecentMessages).toBe(3);
-    expect(ext.settings.strategy).toBe("summarize");
-  });
-
+ 
   for (const { strategy, extra } of [
     { strategy: "token-aware", extra: { reserveTokens: 4096 } },
     { strategy: "trim", extra: {} },

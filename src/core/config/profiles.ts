@@ -30,9 +30,9 @@ export interface SwitchProfile {
  * Resolve the profiles directory path.
  */
 export function resolveProfilesPath(
-  cliProfilesPath?: string,
-  configDir?: string,
-  configProfilesPath?: string,
+  cliProfilesPath?: string | null,
+  configDir?: string | null,
+  configProfilesPath?: string | null,
 ): string {
   if (cliProfilesPath) {
     return path.resolve(cliProfilesPath);
@@ -188,8 +188,8 @@ function resolveSwitchProfile(
 }
 
 export interface AllProfilesOptions {
-  profileFiles?: Record<string, ProfileDef>;
-  configProfiles?: Record<string, ProfileDef>;
+  profileFiles?: Record<string, Partial<ProfileDef>> | null;
+  configProfiles?: Record<string, Partial<ProfileDef>> | null;
   profilesPath?: string;
 }
 
@@ -223,8 +223,8 @@ export function allProfilesForSwitch(
  * File profile wins for role, whitelist, blacklist, manager.
  */
 export function mergeProfile(
-  configProfile?: ProfileDef | null,
-  fileProfile?: ProfileDef | null,
+  configProfile?: Partial<ProfileDef> | null,
+  fileProfile?: Partial<ProfileDef> | null,
 ): ProfileDef {
   if (configProfile || fileProfile) {
     const profile = { ...configProfile } as ProfileDef;
@@ -271,7 +271,7 @@ export interface ProfileCliArgs {
 export async function resolveProfile(
   cliArgs: ProfileCliArgs,
   fileConfig: Record<string, unknown>,
-  configDir: string,
+  configDir: string | null,
 ): Promise<ResolveProfileResult> {
   const profilesPath = resolveProfilesPath(
     cliArgs.profilesPath,

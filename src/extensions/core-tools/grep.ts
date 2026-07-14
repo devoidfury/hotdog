@@ -358,12 +358,11 @@ export class GrepTool {
       config.coreTools?.properties.maxToolOutputLines.default;
   }
 
-  toToolDef(): Record<string, unknown> {
+  toToolDef() {
     return toolDef(
       GrepTool.TOOL_NAME,
       "Search file contents for a pattern. Supports regex, file type filtering, and context lines. Returns matching lines with file paths.",
       {
-        schema: "https://json-schema.org/draft/2020-12/schema",
         properties: {
           pattern: param("string", "Search pattern (regex)"),
           path: param(

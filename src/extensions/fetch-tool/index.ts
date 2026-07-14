@@ -35,12 +35,11 @@ interface ParseResult {
 export class FetchTool {
   static readonly TOOL_NAME = "fetch";
 
-  toToolDef(): Record<string, unknown> {
+  toToolDef() {
     return toolDef(
       FetchTool.TOOL_NAME,
       `Perform a web request to a URL. Supports ${VALID_METHODS.join(", ")} methods with optional headers and body. Returns the response body, status code, and content type. When showOriginal is true, returns the raw response body without markdown conversion.`,
       {
-        schema: "https://json-schema.org/draft/2020-12/schema",
         properties: {
           url: param("string", "The URL to fetch"),
           method: param("string", "HTTP method to use", {

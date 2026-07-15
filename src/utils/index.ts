@@ -32,3 +32,6 @@ export { htmlToMarkdown } from "./html-to-markdown.ts";
 
 // ── String utilities ─────────────────────────────────────────────────────────
 export { camelCase, parseCliFlagKey } from "./strings.ts";
+
+// ── Gitignore filtering ──────────────────────────────────────────────────────
+export { compileGitignore } from "./gitignore.ts";

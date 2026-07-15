@@ -7,6 +7,7 @@ import util from "node:util";
 import { toolDef, param, ToolResult, defaultCallDisplay } from "../../core/extensions/tool-utils.ts";
 import { DEFAULT_GREP_MAX_RESULTS } from "./defaults.ts";
 import { correctCommonPathMistakes } from "../../utils/file-utils.ts";
+import { compileGitignore } from "../../utils/gitignore.ts";
 import { ToolExecutionContext } from "../../core/extensions/types.ts";
 
 const execFileAsync = util.promisify(execFile);
@@ -115,7 +116,8 @@ export class ProjectInfoTool {
     const lastCommit = await this._getLastCommitTime(workdir);
     const gitStatus = await this._getGitStatus(workdir);
     const langs = this._countByLanguage(gitFiles);
-    const dirSizes = await this._getDirSizes(maxDepth, workdir);
+    const gitignoreFilter = await this._loadGitignoreFilter(workdir);
+    const dirSizes = await this._getDirSizes(maxDepth, workdir, gitignoreFilter);
 
     // Build output
     const lines: string[] = [];
@@ -196,15 +198,11 @@ export class ProjectInfoTool {
     }
 
     // Directory sizes
-    const dirSizes = await this._getDirSizes(maxDepth, cwd);
-    const filteredSizes = dirSizes.filter(([, p]) => {
-      if (p === ".") return true;
-      const clean = p.replace(/^\.\//, "");
-      return !clean.startsWith(".");
-    });
-    if (filteredSizes.length > 0) {
+    const gitignoreFilter = await this._loadGitignoreFilter(cwd, []);
+    const dirSizes = await this._getDirSizes(maxDepth, cwd, gitignoreFilter);
+    if (dirSizes.length > 0) {
       lines.push("── Directories ────────────────────────");
-      for (const [size, dirPath] of filteredSizes) {
+      for (const [size, dirPath] of dirSizes) {
         const displayPath =
           dirPath === "." ? "." : dirPath.replace(/^\.\//, "");
         lines.push(`${size}  ${displayPath}`);
@@ -306,23 +304,49 @@ export class ProjectInfoTool {
     }
   }
 
-  private async _getDirSizes(maxDepth: number, cwd: string): Promise<[string, string][]> {
+  private async _getDirSizes(
+    maxDepth: number,
+    cwd: string,
+    shouldInclude?: (path: string) => boolean,
+  ): Promise<[string, string][]> {
     try {
       const { stdout } = await execFileAsync(
         "du",
         ["--max-depth", String(maxDepth), "-h", "."],
         { cwd, maxBuffer: 10 * 1024 * 1024 },
       );
-      return stdout
+      let entries = stdout
         .split("\n")
         .filter((l: string) => l.trim())
-        .filter((l: string) => !l.includes(".git"))
         .map((l: string) => {
           const parts = l.split("\t");
-          return [parts[0] || "", parts[1] || ""];
-        }) as [string, string][];
+          return [parts[0] || "", parts[1] || ""] as [string, string];
+        });
+
+      if (shouldInclude) {
+        entries = entries.filter(([, dirPath]) => shouldInclude(dirPath));
+      }
+
+      return entries;
     } catch {
       return [];
+    }
+  }
+
+  private async _loadGitignoreFilter(
+    cwd: string,
+    implicitPatterns: string[] = [".git"],
+  ): Promise<((path: string) => boolean) | undefined> {
+    try {
+      const gitignorePath = path.join(cwd, ".gitignore");
+      const content = await fs.readFile(gitignorePath, "utf-8");
+      return compileGitignore(content, { implicitPatterns });
+    } catch {
+      // No .gitignore file — use implicit patterns only
+      if (implicitPatterns.length > 0) {
+        return compileGitignore("", { implicitPatterns });
+      }
+      return undefined;
     }
   }
 

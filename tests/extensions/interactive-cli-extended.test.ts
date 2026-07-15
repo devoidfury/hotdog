@@ -6,14 +6,11 @@ import { parseCommand, Command } from "../../src/core/commands.ts";
 import {
   handleSlashCommand,
 } from "../../src/extensions/ui-interactive-cli/index.ts";
+import { createMockRl } from "../helpers.ts";
 
 describe("handleSlashCommand", () => {
-  function createMockRl() {
-    return { prompt: () => {} };
-  }
-
   it("handles /help command", () => {
-    const rl = createMockRl();
+    const { rl } = createMockRl();
     let output = "";
     const origLog = console.log;
     console.log = (...args) => { output += args.join(" "); };
@@ -24,7 +21,7 @@ describe("handleSlashCommand", () => {
   });
 
   it("handles /quit command", () => {
-    const rl = createMockRl();
+    const { rl } = createMockRl();
     let output = "";
     let closed = false;
     const origLog = console.log;
@@ -41,7 +38,7 @@ describe("handleSlashCommand", () => {
   });
 
   it("handles /exit command", () => {
-    const rl = createMockRl();
+    const { rl } = createMockRl();
     let closed = false;
     const origExit = process.exit;
     process.exit = () => {};
@@ -53,7 +50,7 @@ describe("handleSlashCommand", () => {
   });
 
   it("delegates commands to bus.executeCommand", async () => {
-    const rl = createMockRl();
+    const { rl } = createMockRl();
     const executedCommands = [];
     const bus = {
       executeCommand: async (cmd) => { executedCommands.push(cmd); },

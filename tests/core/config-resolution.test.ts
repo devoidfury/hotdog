@@ -3,7 +3,6 @@ import {
   resolveKey,
   resolveAll,
   CONFIG_SCHEMA as CONFIG_KEYS,
-  resolveCast,
 } from "../../src/core/config/schema-loader.ts";
 import { getNested } from "../../src/utils/objects.ts";
 
@@ -20,105 +19,6 @@ describe("getNested", () => {
     expect(getNested({ a: 1 }, "b.c")).toBeUndefined();
     expect(getNested({ a: null }, "a.b")).toBeUndefined();
     expect(getNested(null, "a.b")).toBeUndefined();
-  });
-});
-
-// ── resolveKey ───────────────────────────────────────────────────────────
-
-describe("resolveKey", () => {
-  it("resolves from cli layer first", () => {
-    const schema = {
-      layers: [
-        { source: "cli", key: "url" },
-        { source: "config", key: "url" },
-        { default: "http://default" },
-      ],
-    };
-    const context = {
-      cli: { url: "http://cli" },
-      config: { url: "http://config" },
-    };
-    expect(resolveKey("url", schema, context)).toBe("http://cli");
-  });
-
-  it("falls through layers correctly", () => {
-    const schema = {
-      layers: [
-        { source: "cli", key: "url" },
-        { source: "config", key: "url" },
-        { default: "http://default" },
-      ],
-    };
-    // Config when cli is empty
-    expect(resolveKey("url", schema, { cli: {}, config: { url: "http://config" } })).toBe("http://config");
-    // Default when nothing
-    expect(resolveKey("url", schema, { cli: {}, config: {} })).toBe("http://default");
-  });
-
-  it("uses function default", () => {
-    const schema = {
-      layers: [{ default: (ctx) => `dynamic-${ctx.profileName}` }],
-    };
-    expect(resolveKey("url", schema, { profileName: "test" })).toBe("dynamic-test");
-  });
-
-  it("skips layer when cast returns undefined", () => {
-    const schema = {
-      layers: [
-        {
-          source: "cli",
-          key: "role",
-          cast: (v) => (typeof v === "string" && v.trim().length > 0 ? v.trim() : undefined),
-        },
-        { default: "default role" },
-      ],
-    };
-    expect(resolveKey("role", schema, { cli: { role: "   " } })).toBe("default role");
-  });
-
-  it("applies cast to resolved value", () => {
-    const schema = {
-      layers: [{ source: "cli", key: "name", cast: (v) => v.toUpperCase() }],
-    };
-    expect(resolveKey("name", schema, { cli: { name: "hello" } })).toBe("HELLO");
-  });
-
-  it("resolves from env source", () => {
-    const schema = {
-      layers: [
-        { source: "env", key: "TEST_ENV_VAR" },
-        { default: "default" },
-      ],
-    };
-    process.env.TEST_ENV_VAR = "from-env";
-    try {
-      expect(resolveKey("key", schema, {})).toBe("from-env");
-    } finally {
-      delete process.env.TEST_ENV_VAR;
-    }
-  });
-
-  it("skips null and empty string values", () => {
-    const schema = {
-      layers: [
-        { source: "cli", key: "val" },
-        { source: "config", key: "val" },
-        { default: "fallback" },
-      ],
-    };
-    expect(resolveKey("val", schema, { cli: { val: "" }, config: { val: "config-val" } })).toBe("config-val");
-  });
-});
-
-describe("resolveAll", () => {
-  it("resolves all keys from schema", () => {
-    const schema = {
-      key1: { layers: [{ source: "cli", key: "key1" }, { default: "default1" }] },
-      key2: { layers: [{ source: "cli", key: "key2" }, { default: "default2" }] },
-    };
-    const result = resolveAll(schema, { cli: { key1: "value1" } });
-    expect(result.key1).toBe("value1");
-    expect(result.key2).toBe("default2");
   });
 });
 

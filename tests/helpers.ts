@@ -520,6 +520,8 @@ export function createMockRl(responses: string[] = []): {
     removeListener: () => void;
     question: (prompt: string, cb: (response: string) => void) => void;
     on: (event: string, handler: (...args: unknown[]) => void) => void;
+    prompt: () => void;
+    close: () => void;
   };
   addedHandlers: unknown[];
 } {
@@ -538,6 +540,8 @@ export function createMockRl(responses: string[] = []): {
     on: function (event: string, handler: (...args: unknown[]) => void) {
       if (event === "line") addedHandlers.push(handler);
     },
+    prompt: function () {},
+    close: function () {},
   };
 
   return { rl, addedHandlers };

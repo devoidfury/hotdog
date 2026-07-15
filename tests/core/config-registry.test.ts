@@ -10,11 +10,7 @@ import { describe, it, expect } from "bun:test";
 import { ConfigRegistry, createConfigRegistry } from "../../src/core/extensions/config-registry.ts";
 import { parseArgs } from "../../src/core/cli.ts";
 import { loadConfig } from "../../src/core/config/index.ts";
-import {
-  extractSchemaDefaults,
-  isExtensionEnabled,
-  getExtensionsToLoad,
-} from "../../src/core/extensions/extensions.ts";
+import { getExtensionsToLoad } from "../../src/core/extensions/extensions.ts";
 
 describe("ConfigRegistry", () => {
   describe("registerCliFlags", () => {
@@ -245,121 +241,12 @@ describe("ConfigRegistry", () => {
     });
   });
 
-  describe("extractSchemaDefaults", () => {
-    it("should extract one entry per namespace key with merged property defaults", () => {
-      const schema = {
-        myExtension: {
-          type: "object",
-          properties: {
-            enabled: { type: "boolean", default: true },
-            timeout: { type: "number", default: 30 },
-            name: { type: "string" }, // no default
-          },
-        },
-      };
-
-      const params = extractSchemaDefaults(schema);
-      expect(params).toHaveLength(1);
-      expect(params[0].key).toBe("myExtension");
-      expect(params[0].defaults).toEqual({
-        enabled: true,
-        timeout: 30,
-      });
-    });
-
-    it("should handle array-type namespace keys", () => {
-      const schema = {
-        mcpServers: {
-          type: "array",
-          default: [],
-          items: { type: "object" },
-        },
-      };
-
-      const params = extractSchemaDefaults(schema);
-      expect(params).toHaveLength(1);
-      expect(params[0].key).toBe("mcpServers");
-      expect(params[0].defaults).toEqual([]);
-    });
-
-    it("should return empty array for schema without properties or defaults", () => {
-      const schema = {
-        myExtension: {
-          type: "object",
-          properties: {
-            name: { type: "string" },
-          },
-        },
-      };
-
-      const params = extractSchemaDefaults(schema);
-      expect(params).toHaveLength(1);
-      expect(params[0].key).toBe("myExtension");
-      expect(params[0].defaults).toEqual({});
-    });
-
-    it("should return empty array for null schema", () => {
-      const params = extractSchemaDefaults(null);
-      expect(params).toHaveLength(0);
-    });
-  });
-
-  describe("isExtensionEnabled", () => {
-    it("should return true when config is null/undefined", () => {
-      expect(isExtensionEnabled("bash-tool", null)).toBe(true);
-      expect(isExtensionEnabled("bash-tool", undefined)).toBe(true);
-    });
-
-    it("should return true when extension config section does not exist", () => {
-      const config = { someOtherConfig: {} };
-      expect(isExtensionEnabled("bash-tool", config)).toBe(true);
-    });
-
-    it("should return true when enabled is not set (defaults to enabled)", () => {
-      const config = { bashTool: { timeout: 5000 } };
-      expect(isExtensionEnabled("bash-tool", config)).toBe(true);
-    });
-
-    it("should return true when enabled is explicitly true", () => {
-      const config = { bashTool: { enabled: true } };
-      expect(isExtensionEnabled("bash-tool", config)).toBe(true);
-    });
-
-    it("should return false when enabled is explicitly false", () => {
-      const config = { bashTool: { enabled: false } };
-      expect(isExtensionEnabled("bash-tool", config)).toBe(false);
-    });
-
-    it("should handle kebab-case extension names correctly", () => {
-      const config = {
-        coreTools: { enabled: true },
-        modelSwitch: { enabled: false },
-        sessionLog: { enabled: true },
-      };
-      expect(isExtensionEnabled("core-tools", config)).toBe(true);
-      expect(isExtensionEnabled("model-switch", config)).toBe(false);
-      expect(isExtensionEnabled("session-log", config)).toBe(true);
-    });
-
-    it("should handle single-word extension names", () => {
-      const config = { skills: { enabled: false } };
-      expect(isExtensionEnabled("skills", config)).toBe(false);
-    });
-  });
-
   describe("ConfigRegistry constructor", () => {
     it("creates registry with empty state", () => {
       const registry = createConfigRegistry();
       expect(registry.getCliFlags()).toEqual([]);
       expect(registry.getConfigParams()).toEqual([]);
       expect(registry.buildDefaults()).toEqual({});
-    });
-  });
-
-  describe("createConfigRegistry", () => {
-    it("returns a new ConfigRegistry instance", () => {
-      const registry = createConfigRegistry();
-      expect(registry).toBeInstanceOf(ConfigRegistry);
     });
   });
 

@@ -1,10 +1,20 @@
-import { describe, it, expect } from 'bun:test';
+import { describe, it, expect, beforeAll, afterAll } from 'bun:test';
 import fsSync from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import { ReadTool } from '../../src/extensions/core-tools/read.ts';
 import { ToolContext } from '../../src/core/extensions/tool-context.ts';
-import { resultStr, tmpDir, toolCtx } from '../helpers.ts';
+import { resultStr, tmpDir, toolCtx, cleanupDir } from '../helpers.ts';
+
+let dir: string;
+
+beforeAll(() => {
+  dir = tmpDir();
+});
+
+afterAll(() => {
+  cleanupDir(dir);
+});
 
 // ── Tool Definition ─────────────────────────────────────────────────────────
 
@@ -50,7 +60,6 @@ describe('ReadTool.callDisplay', () => {
 
 describe('ReadTool.execute — read lines', () => {
   it('reads entire file by default', async () => {
-    const dir = tmpDir();
     const filePath = path.join(dir, 'file.txt');
     fsSync.writeFileSync(filePath, 'line1\nline2\nline3');
 
@@ -61,11 +70,9 @@ describe('ReadTool.execute — read lines', () => {
     );
 
     expect(resultStr(result)).toBe('line1\nline2\nline3');
-    fsSync.rmSync(dir, { recursive: true, force: true });
   });
 
   it('respects limit', async () => {
-    const dir = tmpDir();
     const filePath = path.join(dir, 'file.txt');
     fsSync.writeFileSync(filePath, 'line1\nline2\nline3\nline4\nline5');
 
@@ -76,11 +83,9 @@ describe('ReadTool.execute — read lines', () => {
     );
 
     expect(resultStr(result)).toBe('line1\nline2');
-    fsSync.rmSync(dir, { recursive: true, force: true });
   });
 
   it('respects offset', async () => {
-    const dir = tmpDir();
     const filePath = path.join(dir, 'file.txt');
     fsSync.writeFileSync(filePath, 'line1\nline2\nline3\nline4');
 
@@ -91,11 +96,9 @@ describe('ReadTool.execute — read lines', () => {
     );
 
     expect(resultStr(result)).toBe('line3\nline4');
-    fsSync.rmSync(dir, { recursive: true, force: true });
   });
 
   it('handles offset beyond file length', async () => {
-    const dir = tmpDir();
     const filePath = path.join(dir, 'file.txt');
     fsSync.writeFileSync(filePath, 'line1\nline2');
 
@@ -107,11 +110,9 @@ describe('ReadTool.execute — read lines', () => {
 
     expect(resultStr(result)).toContain('offset 10 is beyond end');
     expect(resultStr(result)).toContain('[empty]');
-    fsSync.rmSync(dir, { recursive: true, force: true });
   });
 
   it('handles empty file', async () => {
-    const dir = tmpDir();
     const filePath = path.join(dir, 'file.txt');
     fsSync.writeFileSync(filePath, '');
 
@@ -122,11 +123,9 @@ describe('ReadTool.execute — read lines', () => {
     );
 
     expect(resultStr(result)).toBe('');
-    fsSync.rmSync(dir, { recursive: true, force: true });
   });
 
   it('handles single line file', async () => {
-    const dir = tmpDir();
     const filePath = path.join(dir, 'file.txt');
     fsSync.writeFileSync(filePath, 'only line');
 
@@ -137,7 +136,6 @@ describe('ReadTool.execute — read lines', () => {
     );
 
     expect(resultStr(result)).toBe('only line');
-    fsSync.rmSync(dir, { recursive: true, force: true });
   });
 });
 
@@ -145,7 +143,6 @@ describe('ReadTool.execute — read lines', () => {
 
 describe('ReadTool.execute — directory listing', () => {
   it('lists directory contents at depth 1', async () => {
-    const dir = tmpDir();
     fsSync.writeFileSync(path.join(dir, 'a.txt'), 'a');
     fsSync.writeFileSync(path.join(dir, 'b.txt'), 'b');
     fsSync.mkdirSync(path.join(dir, 'subdir'));
@@ -160,7 +157,6 @@ describe('ReadTool.execute — directory listing', () => {
     expect(resultStr(result)).toContain('a.txt');
     expect(resultStr(result)).toContain('b.txt');
     expect(resultStr(result)).toContain('subdir/');
-    fsSync.rmSync(dir, { recursive: true, force: true });
   });
 });
 
@@ -168,7 +164,6 @@ describe('ReadTool.execute — directory listing', () => {
 
 describe('ReadTool.execute — error cases', () => {
   it('returns error on file not found', async () => {
-    const dir = tmpDir();
     const tool = new ReadTool();
     const result = await tool.execute(
       { path: 'nonexistent.txt' },
@@ -176,38 +171,30 @@ describe('ReadTool.execute — error cases', () => {
     );
 
     expect(resultStr(result)).toContain('File not found');
-    fsSync.rmSync(dir, { recursive: true, force: true });
   });
 
   it('returns error on invalid JSON input', async () => {
-    const dir = tmpDir();
     const tool = new ReadTool();
     const result = await tool.execute('not json', toolCtx({ workspaceRoot: dir }));
     expect(resultStr(result)).toContain('Error parsing arguments');
-    fsSync.rmSync(dir, { recursive: true, force: true });
   });
 
   it('returns error on missing path', async () => {
-    const dir = tmpDir();
     const tool = new ReadTool();
     const result = await tool.execute({ limit: 10 }, toolCtx({ workspaceRoot: dir }));
     expect(resultStr(result)).toContain('Error parsing arguments');
-    fsSync.rmSync(dir, { recursive: true, force: true });
   });
 
   it('rejects path outside cwd boundary', async () => {
-    const dir = tmpDir();
     const tool = new ReadTool();
     const result = await tool.execute(
       { path: '/etc/passwd' },
       toolCtx({ cwdBoundary: dir })
     );
     expect(resultStr(result)).toContain('outside cwd boundary');
-    fsSync.rmSync(dir, { recursive: true, force: true });
   });
 
   it('handles input as string JSON', async () => {
-    const dir = tmpDir();
     const filePath = path.join(dir, 'file.txt');
     fsSync.writeFileSync(filePath, 'hello world');
 
@@ -218,7 +205,6 @@ describe('ReadTool.execute — error cases', () => {
     );
 
     expect(resultStr(result)).toBe('hello world');
-    fsSync.rmSync(dir, { recursive: true, force: true });
   });
 });
 
@@ -242,7 +228,6 @@ describe('ReadTool.execute — image files', () => {
   );
 
   it('reads PNG file and returns image', async () => {
-    const dir = tmpDir();
     const filePath = path.join(dir, 'test.png');
     fsSync.writeFileSync(filePath, MINIMAL_PNG);
 
@@ -262,12 +247,10 @@ describe('ReadTool.execute — image files', () => {
         data: MINIMAL_PNG.toString('base64'),
       },
     ]);
-    fsSync.rmSync(dir, { recursive: true, force: true });
   });
 
   for (const ext of ['jpg', 'jpeg']) {
     it(`reads JPEG file (.${ext}) and returns image`, async () => {
-      const dir = tmpDir();
       const filePath = path.join(dir, `test.${ext}`);
       fsSync.writeFileSync(filePath, MINIMAL_JPEG);
 
@@ -287,12 +270,10 @@ describe('ReadTool.execute — image files', () => {
           data: MINIMAL_JPEG.toString('base64'),
         },
       ]);
-      fsSync.rmSync(dir, { recursive: true, force: true });
     });
   }
 
   it('reads WebP file and returns image', async () => {
-    const dir = tmpDir();
     // Minimal WebP (RIFF container with VP8 bitstream)
     const webp = Buffer.from(
       '524946461a000000574542505650380a00000001000100000100407200000000405249464600000000',
@@ -317,11 +298,9 @@ describe('ReadTool.execute — image files', () => {
         data: webp.toString('base64'),
       },
     ]);
-    fsSync.rmSync(dir, { recursive: true, force: true });
   });
 
   it('reads .base64 file and returns image with text content', async () => {
-    const dir = tmpDir();
     const base64Content = 'SGVsbG8gV29ybGQh'; // "Hello World!" in base64
     const filePath = path.join(dir, 'data.base64');
     fsSync.writeFileSync(filePath, base64Content);
@@ -340,11 +319,9 @@ describe('ReadTool.execute — image files', () => {
         data: base64Content,
       },
     ]);
-    fsSync.rmSync(dir, { recursive: true, force: true });
   });
 
   it('handles uppercase extensions', async () => {
-    const dir = tmpDir();
     const filePath = path.join(dir, 'test.PNG');
     fsSync.writeFileSync(filePath, MINIMAL_PNG);
 
@@ -357,11 +334,9 @@ describe('ReadTool.execute — image files', () => {
     expect(result.success).toBe(true);
     expect(result.images).toBeDefined();
     expect(result.images[0].mimeType).toBe('image/png');
-    fsSync.rmSync(dir, { recursive: true, force: true });
   });
 
   it('includes file size in metadata', async () => {
-    const dir = tmpDir();
     const filePath = path.join(dir, 'test.png');
     fsSync.writeFileSync(filePath, MINIMAL_PNG);
 
@@ -373,11 +348,9 @@ describe('ReadTool.execute — image files', () => {
 
     expect(result.metadata.get('size')).toBe(String(MINIMAL_PNG.length));
     expect(result.metadata.get('mime_type')).toBe('image/png');
-    fsSync.rmSync(dir, { recursive: true, force: true });
   });
 
   it('reads image with absolute path', async () => {
-    const dir = tmpDir();
     const filePath = path.join(dir, 'test.png');
     fsSync.writeFileSync(filePath, MINIMAL_PNG);
 
@@ -390,11 +363,9 @@ describe('ReadTool.execute — image files', () => {
     expect(result.success).toBe(true);
     expect(result.images).toBeDefined();
     expect(result.images[0].mimeType).toBe('image/png');
-    fsSync.rmSync(dir, { recursive: true, force: true });
   });
 
   it('rejects path outside cwd boundary for images', async () => {
-    const dir = tmpDir();
     const filePath = path.join(dir, 'test.png');
     fsSync.writeFileSync(filePath, MINIMAL_PNG);
 
@@ -406,11 +377,9 @@ describe('ReadTool.execute — image files', () => {
 
     expect(result.success).toBe(false);
     expect(result.error).toContain('outside cwd boundary');
-    fsSync.rmSync(dir, { recursive: true, force: true });
   });
 
   it('text files are not treated as images', async () => {
-    const dir = tmpDir();
     const filePath = path.join(dir, 'file.txt');
     fsSync.writeFileSync(filePath, 'hello world');
 
@@ -423,6 +392,5 @@ describe('ReadTool.execute — image files', () => {
     expect(result.success).toBe(true);
     expect(result.output).toBe('hello world');
     expect(result.images).toBeNull();
-    fsSync.rmSync(dir, { recursive: true, force: true });
   });
 });

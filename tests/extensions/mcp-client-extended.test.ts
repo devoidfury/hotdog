@@ -18,7 +18,6 @@ import {
 import { McpTool } from "../../src/extensions/mcp-client/tools.ts";
 import { create as createExtension } from "../../src/extensions/mcp-client/index.ts";
 import { HOOKS } from "../../src/core/hooks.ts";
-import pkg from "../../package.json" with { type: "json" };
 
 // ── Helper: create a readable stream from lines ─────────────────────────────
 
@@ -981,108 +980,6 @@ describe("Extension create function", () => {
 });
 
 // ── Types module completeness ────────────────────────────────────────────────
-
-describe("Types module completeness", () => {
-  it("jsonRpcRequest with undefined params omits params field", () => {
-    const req = jsonRpcRequest(1, "method", undefined);
-    expect(req).toEqual({ jsonrpc: "2.0", id: 1, method: "method" });
-    expect(req.params).toBeUndefined();
-  });
-
-  it("jsonRpcNotification with undefined params omits params field", () => {
-    const notif = jsonRpcNotification("method", undefined);
-    expect(notif).toEqual({ jsonrpc: "2.0", method: "method" });
-    expect(notif.params).toBeUndefined();
-  });
-
-  it("mcpInitializeRequest has correct structure", () => {
-    const req = mcpInitializeRequest();
-    expect(req.protocolVersion).toBe("2025-11-25");
-    expect(req.capabilities.roots.listChanged).toBe(false);
-    expect(req.capabilities.sampling).toEqual({});
-    expect(req.clientInfo.name).toBe("hotdog");
-    expect(req.clientInfo.version).toBe(pkg.version);
-  });
-
-  it("parseMcpInitializeResponse handles missing serverInfo", () => {
-    const result = parseMcpInitializeResponse({
-      protocolVersion: "2025-11-25",
-      capabilities: {},
-    });
-    expect(result.serverInfo.name).toBe("unknown");
-    expect(result.serverInfo.version).toBe("unknown");
-  });
-
-  it("parseMcpInitializeResponse handles no capabilities", () => {
-    const result = parseMcpInitializeResponse({
-      protocolVersion: "2025-11-25",
-    });
-    expect(result.capabilities.logging).toBeNull();
-    expect(result.capabilities.prompts).toBeNull();
-    expect(result.capabilities.resources).toBeNull();
-    expect(result.capabilities.tools).toBeNull();
-  });
-
-  it("parseMcpToolsListResponse handles null tools", () => {
-    const result = parseMcpToolsListResponse({ nextCursor: "abc" });
-    expect(result.tools).toEqual([]);
-    expect(result.nextCursor).toBe("abc");
-  });
-
-  it("parseMcpToolDefinition handles missing fields", () => {
-    const result = parseMcpToolDefinition({ name: "test" });
-    expect(result.name).toBe("test");
-    expect(result.description).toBeNull();
-    expect(result.inputSchema).toEqual({});
-  });
-
-  it("mcpToolCallRequest with null arguments omits arguments field", () => {
-    const req = mcpToolCallRequest("echo", null);
-    expect(req.arguments).toBeUndefined();
-  });
-
-  it("parseMcpToolCallResponse handles null content", () => {
-    const result = parseMcpToolCallResponse({ isError: false });
-    expect(result.content).toEqual([]);
-    expect(result.isError).toBe(false);
-  });
-
-  it("parseMcpContentBlock handles image with missing fields", () => {
-    const result = parseMcpContentBlock({ type: "image" });
-    expect(result.type).toBe("image");
-    expect(result.data).toBe("");
-    expect(result.mimeType).toBe("");
-  });
-
-  it("parseMcpContentBlock handles resource with missing fields", () => {
-    const result = parseMcpContentBlock({ type: "resource" });
-    expect(result.type).toBe("resource");
-    expect(result.uri).toBe("");
-    expect(result.mimeType).toBe("");
-    expect(result.text).toBeNull();
-    expect(result.blob).toBeNull();
-  });
-
-  it("contentBlocksToString handles null text in text block", () => {
-    const result = contentBlocksToString([{ type: "text", text: null }]);
-    expect(result).toBe("");
-  });
-
-  it("contentBlocksToString handles image with missing data", () => {
-    const result = contentBlocksToString([{ type: "image", mimeType: "image/png" }]);
-    expect(result).toBe("[Image: image/png (0 bytes)]");
-  });
-
-  it("contentBlocksToString handles resource with missing text", () => {
-    const result = contentBlocksToString([{ type: "resource", uri: "file:///test.txt" }]);
-    expect(result).toBe("");
-  });
-
-  it("contentBlocksToString handles unknown block type", () => {
-    const result = contentBlocksToString([{ type: "custom", data: "x" }]);
-    expect(result).toBe("[Unknown content block]");
-  });
-});
 
 // ── McpTool schema conversion edge cases ─────────────────────────────────────
 

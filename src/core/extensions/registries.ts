@@ -6,7 +6,7 @@ import { logger } from "../logger.ts";
 
 export interface CommandDefinition {
   description?: string;
-  handler?: (agent: unknown, value: string, cmd: string) => { content?: string; error?: string };
+  handler?: (agent: unknown, value?: string | null, cmd?: unknown) => { content?: string; error?: string } | Promise<{ content?: string; error?: string }>;
   isUiCommand?: boolean;
   matches?: (cmd: string) => boolean;
 }

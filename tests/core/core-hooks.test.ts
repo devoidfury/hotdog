@@ -6,7 +6,7 @@ import { describe, it, expect, beforeEach, afterEach } from "bun:test";
 describe("HookSystem.on() / notifyHooks()", () => {
   it("should call registered handlers on notifyHooks", () => {
     const hooks = createHooks();
-    const calls = [];
+    const calls: unknown[] = [];
     hooks.on("test:hook", (data) => calls.push(data));
     hooks.notifyHooks("test:hook", { value: 42 });
     expect(calls).toEqual([{ value: 42 }]);
@@ -14,7 +14,7 @@ describe("HookSystem.on() / notifyHooks()", () => {
 
   it("should call multiple handlers in order", () => {
     const hooks = createHooks();
-    const order = [];
+    const order: string[] = [];
     hooks.on("test:hook", () => order.push("a"));
     hooks.on("test:hook", () => order.push("b"));
     hooks.notifyHooks("test:hook", {});
@@ -44,7 +44,7 @@ describe("HookSystem.on() / notifyHooks()", () => {
 describe("HookSystem — removal function from on()", () => {
   it("should return a function that removes the handler", () => {
     const hooks = createHooks();
-    const calls = [];
+    const calls: unknown[] = [];
     const remove = hooks.on("test:hook", (data) => calls.push(data));
     hooks.notifyHooks("test:hook", { value: 1 });
     expect(calls).toEqual([{ value: 1 }]);
@@ -179,10 +179,10 @@ describe("HookSystem.clear()", () => {
 describe("notifyHooksAsync()", () => {
   it("should fire async handlers without waiting", async () => {
     const hooks = createHooks();
-    const results = [];
+    const results: unknown[] = [];
     hooks.on("test:hook", async (data) => {
       await new Promise((r) => setTimeout(r, 10));
-      results.push(data.value);
+      results.push((data as any).value);
     });
     hooks.notifyHooksAsync("test:hook", { value: 1 });
     expect(results).toEqual([]);
@@ -201,7 +201,7 @@ describe("notifyHooksAsync()", () => {
 
   it("continues running other handlers after one fails", async () => {
     const hooks = createHooks();
-    const calls = [];
+    const calls: string[] = [];
     hooks.on("test", async () => {
       throw new Error("fail");
     });
@@ -222,7 +222,7 @@ describe("notifyHooksAsync()", () => {
 
   it("async notify with multiple handlers", async () => {
     const hooks = createHooks();
-    const calls = [];
+    const calls: number[] = [];
     hooks.on("test", async () => {
       calls.push(1);
     });
@@ -248,7 +248,7 @@ describe("notifyHooks — handler errors", () => {
 
   it("subsequent handlers are not called after error in notifyHooks", () => {
     const hooks = createHooks();
-    const calls = [];
+    const calls: number[] = [];
     hooks.on("test", () => {
       calls.push(1);
       throw new Error("boom");
@@ -264,7 +264,7 @@ describe("notifyHooks — handler errors", () => {
 describe("runHookPipeline()", () => {
   it("should run handlers sequentially and collect results", async () => {
     const hooks = createHooks();
-    const order = [];
+    const order: string[] = [];
     hooks.on("test:hook", () => {
       order.push("a");
       return { result: "a" };
@@ -287,7 +287,7 @@ describe("runHookPipeline()", () => {
 
   it("should stop early when shouldStop returns true", async () => {
     const hooks = createHooks();
-    const order = [];
+    const order: string[] = [];
     hooks.on("test:hook", () => {
       order.push("a");
       return { action: "handled" };
@@ -299,7 +299,7 @@ describe("runHookPipeline()", () => {
     const { stopped, results } = await hooks.runHookPipeline(
       "test:hook",
       {},
-      { shouldStop: (r) => r?.action === "handled" },
+      { shouldStop: (r: any) => r?.action === "handled" },
     );
     expect(stopped).toBe(true);
     expect(order).toEqual(["a"]);
@@ -308,10 +308,10 @@ describe("runHookPipeline()", () => {
 
   it("should pass mutable data through handlers", async () => {
     const hooks = createHooks();
-    hooks.on("test:hook", (data) => {
+    hooks.on("test:hook", (data: any) => {
       data.count = (data.count || 0) + 1;
     });
-    hooks.on("test:hook", (data) => {
+    hooks.on("test:hook", (data: any) => {
       data.count = (data.count || 0) + 1;
     });
     const { data } = await hooks.runHookPipeline("test:hook", { count: 0 });

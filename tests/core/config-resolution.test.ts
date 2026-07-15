@@ -3,16 +3,17 @@ import {
   resolveKey,
   resolveAll,
   CONFIG_SCHEMA as CONFIG_KEYS,
+  type ResolutionContext,
 } from "../../src/core/config/schema-loader.ts";
 import { getNested } from "../../src/utils/objects.ts";
 
 describe("getNested", () => {
   it("returns top-level property", () => {
-    expect(getNested({ url: "http://test" }, "url")).toBe("http://test");
+    expect(getNested<string>({ url: "http://test" }, "url")).toBe("http://test");
   });
 
   it("returns nested property with dot path", () => {
-    expect(getNested({ nested: { value: 42 } }, "nested.value")).toBe(42);
+    expect(getNested<number>({ nested: { value: 42 } }, "nested.value")).toBe(42);
   });
 
   it("returns undefined for missing or null paths", () => {
@@ -36,7 +37,7 @@ describe("CONFIG_KEYS schema", () => {
 
   it("baseUrl resolves with correct priority: provider > cli > config > env > default", () => {
     // Provider wins
-    let context = {
+    let context: ResolutionContext = {
       ...baseContext,
       provider: { url: "http://provider" },
       cli: { aiUrl: "http://cli" },
@@ -57,7 +58,7 @@ describe("CONFIG_KEYS schema", () => {
     process.env.AI_API_KEY = "env-key";
     try {
       // Provider wins
-      let context = {
+      let context: ResolutionContext = {
         ...baseContext,
         provider: { apiKey: "provider-key" },
         cli: { apiKey: "cli-key" },

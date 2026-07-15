@@ -5,8 +5,8 @@ import {
 } from "../../src/utils/json-schema.ts";
 import { ToolRegistry } from "../../src/core/extensions/tool-registry.ts";
 
-function schema(props, required = []) {
-  return { type: "object", properties: props, required };
+function schema(props: Record<string, Record<string, unknown>>, required: string[] = []) {
+  return { type: "object" as const, properties: props, required };
 }
 
 describe("validateParams — type checking", () => {
@@ -193,7 +193,7 @@ describe("Integration — validation blocks invalid tool execution", () => {
 });
 
 describe("ToolRegistry.validateToolArgs", () => {
-  function registerTool(registry, name, params) {
+  function registerTool(registry: ToolRegistry, name: string, params: Record<string, unknown>) {
     registry.register(name, {
       toToolDef() {
         return { type: "function", function: { name, description: "test", parameters: params } };
@@ -345,7 +345,7 @@ describe("validateWithSchema edge cases", () => {
   it("handles matchesDefault with non-stringifiable values", () => {
     // Create a circular reference to test the error handling in matchesDefault
     // But avoid triggering JSON.stringify in error message by using a non-circular const
-    const circular = {};
+    const circular: Record<string, unknown> = {};
     circular.self = circular;
     const result = validateParams(
       circular,

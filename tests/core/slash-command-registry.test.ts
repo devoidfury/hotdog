@@ -25,14 +25,14 @@ describe("AgentCommandRegistry", () => {
     });
     expect(registry.has("test")).toBe(true);
     expect(registry.names()).toContain("test");
-    expect(registry.get("test").description).toBe("Test command");
+    expect(registry.get("test")!.description).toBe("Test command");
   });
 
   it("overwrites existing commands with warning", () => {
     const registry = createCommandRegistry();
     registry.register("test", { description: "First" });
     registry.register("test", { description: "Second" });
-    expect(registry.get("test").description).toBe("Second");
+    expect(registry.get("test")!.description).toBe("Second");
   });
 
   it("normalizes isUiCommand flag", () => {
@@ -40,9 +40,9 @@ describe("AgentCommandRegistry", () => {
     registry.register("ui-cmd", { isUiCommand: true });
     registry.register("agent-cmd", { isUiCommand: false });
     registry.register("no-flag", {});
-    expect(registry.get("ui-cmd").isUiCommand).toBe(true);
-    expect(registry.get("agent-cmd").isUiCommand).toBe(false);
-    expect(registry.get("no-flag").isUiCommand).toBe(false);
+    expect(registry.get("ui-cmd")!.isUiCommand).toBe(true);
+    expect(registry.get("agent-cmd")!.isUiCommand).toBe(false);
+    expect(registry.get("no-flag")!.isUiCommand).toBe(false);
   });
 
   it("checks if raw command matches registered command", () => {
@@ -92,8 +92,8 @@ describe("AgentCommandRegistry with custom matches", () => {
       matches: () => true,
     });
     expect(registry.match("")).toBeNull();
-    expect(registry.match(null)).toBeNull();
-    expect(registry.match(undefined)).toBeNull();
+    expect(registry.match(null as any)).toBeNull();
+    expect(registry.match(undefined as any)).toBeNull();
   });
 });
 
@@ -116,14 +116,14 @@ describe("CliSubcommandRegistry", () => {
     });
     expect(registry.has("info")).toBe(true);
     expect(registry.names()).toContain("info");
-    expect(registry.get("info").description).toBe("Show system info");
+    expect(registry.get("info")!.description).toBe("Show system info");
   });
 
   it("overwrites existing subcommands with warning", () => {
     const registry = createSubcommandRegistry();
     registry.register("test", { description: "First" });
     registry.register("test", { description: "Second" });
-    expect(registry.get("test").description).toBe("Second");
+    expect(registry.get("test")!.description).toBe("Second");
   });
 
   it("merges handler with existing metadata placeholder", () => {
@@ -131,16 +131,16 @@ describe("CliSubcommandRegistry", () => {
     // Simulate metadata pre-registration from extension.json
     registry.register("review", {
       description: "Review sessions",
-      options: [{ name: "--session-id" }],
+      options: [{ name: "--session-id" }] as unknown as Record<string, unknown>,
     });
     // Simulate hook attaching handler
     registry.register("review", {
       handler: async () => 0,
     });
-    const def = registry.get("review");
+    const def = registry.get("review")!;
     expect(def.handler).toBeDefined();
     expect(def.description).toBe("Review sessions");
-    expect(def.options).toEqual([{ name: "--session-id" }]);
+    expect(def.options).toEqual([{ name: "--session-id" }] as unknown as Record<string, unknown>);
   });
 
   it("generates help text without / prefix", () => {
@@ -177,6 +177,6 @@ describe("Backward compatibility", () => {
   it("createSubcommandRegistry returns CliSubcommandRegistry", () => {
     const registry = createSubcommandRegistry();
     expect(registry).toBeInstanceOf(CliSubcommandRegistry);
-    expect(typeof registry.match).toBe("undefined");
+    expect("match" in registry).toBe(false);
   });
 });

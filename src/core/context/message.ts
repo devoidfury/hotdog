@@ -12,11 +12,11 @@ export interface ImageAttachment {
  */
 export interface MessageParams {
   role?: string;
-  content?: string | Array<unknown>;
+  content?: string | Array<unknown> | null;
   reasoningContent?: string | null;
   toolCalls?: unknown;
   toolCallId?: string | null;
-  images?: ImageAttachment[];
+  images?: ImageAttachment[] | null;
 }
 
 export class Message {
@@ -122,8 +122,8 @@ export class Message {
     if (typeof this.content === "string") return this.content;
     if (Array.isArray(this.content)) {
       return this.content
-        .filter((part: Record<string, unknown>) => part.type === "text")
-        .map((part: Record<string, unknown>) => part.text as string)
+        .filter((part): part is Record<string, unknown> => (part as Record<string, unknown>).type === "text")
+        .map((part) => part.text as string)
         .join("\n");
     }
     return String(this.content);

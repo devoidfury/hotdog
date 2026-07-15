@@ -65,7 +65,7 @@ export interface StreamEvent {
  * Provides HTTP transport, streaming (SSE), and retry logic.
  */
 export class LlmClient {
-  baseUrl: string;
+  baseUrl: string | null;
   apiKey: string | null;
   sessionId: string;
   loud: boolean;
@@ -122,7 +122,7 @@ export class LlmClient {
   resolveProviderSettings(modelName: string): { url: string; apiKey: string | null } {
     const providerName = modelName.split("/")[0];
     const provider = this.providers.find((p) => p.name === providerName);
-    let url: string;
+    let url: string | null;
     let apiKey: string | null;
     if (provider) {
       url = provider.url || this.baseUrl;
@@ -147,7 +147,8 @@ export class LlmClient {
    */
   async ping(): Promise<void> {
     try {
-      const resp = await fetch(this.baseUrl + "/health");
+      const url = this.baseUrl ?? "";
+      const resp = await fetch(url + "/health");
       if (resp.ok) return;
       throw LlmError.Api(`HTTP ${resp.status}`);
     } catch (e: unknown) {
@@ -167,35 +168,38 @@ export class LlmClient {
    */
   _escapeMessages(messages: Array<Record<string, unknown>>): Array<Record<string, unknown>> {
     if (!this.#mangler) return messages;
+    const mangler = this.#mangler;
     return messages.map((msg) => {
-      const json = msg.toJSON
-        ? (msg.toJSON() as Record<string, unknown>)
+      const toJSON = (msg as { toJSON?: () => Record<string, unknown> }).toJSON;
+      const json = typeof toJSON === "function"
+        ? (toJSON as () => Record<string, unknown>).call(msg)
         : { ...msg };
       if (json.content != null) {
         if (Array.isArray(json.content)) {
           // Content is an array of parts (text + image_url)
           json.content = (json.content as Array<Record<string, unknown>>).map((part) => {
             if (part.type === "text" && typeof part.text === "string") {
-              return { ...part, text: this.#mangler!.escape(part.text as string) };
+              return { ...part, text: mangler.escape(part.text as string) };
             }
             return part; // image_url parts pass through unchanged
           });
         } else if (typeof json.content === "string") {
-          json.content = this.#mangler.escape(json.content);
+          json.content = mangler.escape(json.content);
         }
       }
       if (json.tool_calls) {
         json.tool_calls = (json.tool_calls as Array<Record<string, unknown>>).map((tc) => {
-          const clonedTc = { ...tc };
-          if (clonedTc.function) {
-            clonedTc.function = { ...(clonedTc.function as Record<string, unknown>) };
-            if (clonedTc.function.name)
-              clonedTc.function.name = this.#mangler!.escape(
-                clonedTc.function.name as string,
+          const clonedTc: Record<string, unknown> = { ...tc };
+          const fn = clonedTc.function as Record<string, unknown> | undefined;
+          if (fn) {
+            clonedTc.function = { ...fn };
+            if (clonedTc.function && typeof (clonedTc.function as Record<string, unknown>).name === "string")
+              (clonedTc.function as Record<string, unknown>).name = mangler.escape(
+                (clonedTc.function as Record<string, unknown>).name as string,
               );
-            if (clonedTc.function.arguments)
-              clonedTc.function.arguments = this.#mangler!.escape(
-                clonedTc.function.arguments as string,
+            if (clonedTc.function && typeof (clonedTc.function as Record<string, unknown>).arguments === "string")
+              (clonedTc.function as Record<string, unknown>).arguments = mangler.escape(
+                (clonedTc.function as Record<string, unknown>).arguments as string,
               );
           }
           return clonedTc;
@@ -268,7 +272,7 @@ export class LlmClient {
     const modelConfig: ModelConfig = {
       name: model,
       temperature: null,
-      maxTokens,
+      maxTokens: maxTokens ?? null,
     };
     yield* this.chatStreamWithModelConfig(messages, modelConfig, tools);
   }
@@ -429,7 +433,7 @@ export class LlmClient {
 
     if (!isSse) {
       try {
-        const data = await response.json();
+        const data = (await response.json()) as Record<string, unknown>;
         yield* this._parseStreamData(data);
         return;
       } catch {
@@ -571,25 +575,27 @@ export class LlmClient {
       const delta = (choice.delta as Record<string, unknown>) || {};
 
       // Reasoning/thinking content
-      if (delta.reasoning_content) {
-        let content = delta.reasoning_content as string;
-        if (this.#mangler) content = this.#mangler.unescape(content);
-        events.push({ type: "reasoning", content });
+      const reasoningContent = delta.reasoning_content as string | null | undefined;
+      if (reasoningContent) {
+        let content = reasoningContent;
+        if (this.#mangler) content = this.#mangler.unescape(content) ?? "";
+        events.push({ type: "reasoning", content: content as string });
       }
 
       // Regular content
-      if (delta.content) {
-        let content = delta.content as string;
-        if (this.#mangler) content = this.#mangler.unescape(content);
-        events.push({ type: "content", content });
+      const contentVal = delta.content as string | null | undefined;
+      if (contentVal) {
+        let content = contentVal;
+        if (this.#mangler) content = this.#mangler.unescape(content) ?? "";
+        events.push({ type: "content", content: content as string });
       }
 
       // Tool calls
       const toolCalls = (delta.tool_calls as Array<Record<string, unknown>>) || [];
       for (const tc of toolCalls) {
         if (tc.function) {
-          let name = (tc.function as Record<string, unknown>).name as string | undefined;
-          let arguments_ = (tc.function as Record<string, unknown>).arguments as string | undefined;
+          let name = (tc.function as Record<string, unknown>).name as string | null | undefined;
+          let arguments_ = (tc.function as Record<string, unknown>).arguments as string | null | undefined;
           if (this.#mangler) {
             if (name) name = this.#mangler.unescape(name);
             if (arguments_) arguments_ = this.#mangler.unescape(arguments_);

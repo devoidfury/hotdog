@@ -25,7 +25,7 @@ describe("agents-md extension", () => {
     const extension = create(core);
     expect(extension).toBeDefined();
     expect(extension.hooks).toBeDefined();
-    expect(extension.hooks[HOOKS.SYSTEM_PROMPT_BUILD]).toBeInstanceOf(Function);
+    expect(extension.hooks![HOOKS.SYSTEM_PROMPT_BUILD]!).toBeInstanceOf(Function);
   });
 
   it("hook returns project-context chunk with priority 300", async () => {
@@ -36,10 +36,11 @@ describe("agents-md extension", () => {
 
     const core = { config: {} } as any;
     const extension = create(core);
-    const result = await extension.hooks[HOOKS.SYSTEM_PROMPT_BUILD](null);
-    expect(result.name).toBe("project-context");
-    expect(result.priority).toBe(300);
-    expect(typeof result.content).toBe("string");
+    const hook = extension.hooks![HOOKS.SYSTEM_PROMPT_BUILD]!;
+    const result = await hook({} as any);
+    expect((result as any).name).toBe("project-context");
+    expect((result as any).priority).toBe(300);
+    expect(typeof (result as any).content).toBe("string");
   });
 
   it("hook includes AGENTS.md content when file exists", async () => {
@@ -49,9 +50,10 @@ describe("agents-md extension", () => {
 
     const core = { config: {} } as any;
     const extension = create(core);
-    const result = await extension.hooks[HOOKS.SYSTEM_PROMPT_BUILD](null);
-    expect(result.content).toContain("My Project");
-    expect(result.content).toContain("Important context here");
+    const hook = extension.hooks![HOOKS.SYSTEM_PROMPT_BUILD]!;
+    const result = await hook({} as any);
+    expect((result as any).content).toContain("My Project");
+    expect((result as any).content).toContain("Important context here");
   });
 
   it("hook returns empty content when no AGENTS.md exists", async () => {
@@ -59,9 +61,10 @@ describe("agents-md extension", () => {
 
     const core = { config: {} } as any;
     const extension = create(core);
-    const result = await extension.hooks[HOOKS.SYSTEM_PROMPT_BUILD](null);
-    expect(result.name).toBe("project-context");
-    expect(result.priority).toBe(300);
+    const hook = extension.hooks![HOOKS.SYSTEM_PROMPT_BUILD]!;
+    const result = await hook({} as any);
+    expect((result as any).name).toBe("project-context");
+    expect((result as any).priority).toBe(300);
     // Content should be the template without actual AGENTS.md content
   });
 
@@ -74,8 +77,9 @@ describe("agents-md extension", () => {
       config: { agentsMd: { autoload: false } },
     } as any;
     const extension = create(core);
-    const result = await extension.hooks[HOOKS.SYSTEM_PROMPT_BUILD](null);
-    expect(result.content).not.toContain("Should Not Appear");
+    const hook = extension.hooks![HOOKS.SYSTEM_PROMPT_BUILD]!;
+    const result = await hook({} as any);
+    expect((result as any).content).not.toContain("Should Not Appear");
   });
 
   it("autoloads by default when config is absent", async () => {
@@ -85,8 +89,9 @@ describe("agents-md extension", () => {
 
     const core = { config: {} } as any;
     const extension = create(core);
-    const result = await extension.hooks[HOOKS.SYSTEM_PROMPT_BUILD](null);
-    expect(result.content).toContain("Default Autoload Test");
+    const hook = extension.hooks![HOOKS.SYSTEM_PROMPT_BUILD]!;
+    const result = await hook({} as any);
+    expect((result as any).content).toContain("Default Autoload Test");
   });
 
   it("autoloads when autoload is explicitly true", async () => {
@@ -98,7 +103,8 @@ describe("agents-md extension", () => {
       config: { agentsMd: { autoload: true } },
     } as any;
     const extension = create(core);
-    const result = await extension.hooks[HOOKS.SYSTEM_PROMPT_BUILD](null);
-    expect(result.content).toContain("Explicit Autoload Test");
+    const hook = extension.hooks![HOOKS.SYSTEM_PROMPT_BUILD]!;
+    const result = await hook({} as any);
+    expect((result as any).content).toContain("Explicit Autoload Test");
   });
 });

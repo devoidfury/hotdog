@@ -2,7 +2,7 @@
 // Connects to the WebSocket server and routes messages to the message list.
 // Uses reactiveState atoms so DOM updates happen automatically via effects.
 
-import { reactiveState, effect, ReactiveAtom } from "./utils.ts";
+import { reactiveState, effect, Atom } from "./utils.ts";
 import { createMessageList, MessageListManager } from "./message-list.ts";
 
 // Browser-compatible logger — avoids importing Node.js logger which uses
@@ -176,11 +176,11 @@ export interface ChatController {
   sendQuestionAnswer: (answers: unknown) => void;
   setSession: (sessionId: string) => void;
   ws: WebSocket | null;
-  sessionIdAtom: ReactiveAtom<string | null>;
-  currentModelAtom: ReactiveAtom<string>;
-  modelsAtom: ReactiveAtom<string[]>;
-  connectedAtom: ReactiveAtom<boolean>;
-  workingAtom: ReactiveAtom<boolean>;
+  sessionIdAtom: Atom<string | null>;
+  currentModelAtom: Atom<string>;
+  modelsAtom: Atom<string[]>;
+  connectedAtom: Atom<boolean>;
+  workingAtom: Atom<boolean>;
 }
 
 /**
@@ -501,7 +501,7 @@ export function createChat({
   function switchSession(sessionId: string): void {
     send({ type: "switchSession", sessionId });
     sessionIdAtom(sessionId);
-    messageList.clear();
+    messageList?.clear();
     workingAtom(false);
     listSessions(); // Refresh sidebar so the active session is highlighted correctly
   }

@@ -33,7 +33,7 @@ function isObjectLike(v: unknown): v is object {
  */
 export interface Atom<T> {
   (): T;
-  (newValue: T): void;
+  (newValue: T): T;
   effect(fn: () => void): () => void;
 }
 
@@ -84,7 +84,7 @@ export function reactiveState<T>(initialValue: T): Atom<T> {
  */
 export function effect(
   fn: () => void,
-  dependencies: Atom<unknown>[],
+  dependencies: Atom<any>[],
 ): () => void {
   // Wrap so the same function reference is used across all deps
   const wrapped = (): void => {

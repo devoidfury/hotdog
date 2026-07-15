@@ -85,7 +85,7 @@ describe("PromptsLoader", () => {
     try {
       fs.writeFileSync(path.join(tmpDir, 'greet.prompt.md'), `---\ndescription: Greeting prompt\n---\nHello world`);
       const loader = new PromptsLoader(tmpDir);
-      await loader.loadFromDirectory(tmpDir);
+      await (loader as any).loadFromDirectory(tmpDir);
       const prompts = loader.allPrompts();
       expect(prompts.length).toBeGreaterThan(0);
     } finally {
@@ -98,7 +98,7 @@ describe("PromptsLoader", () => {
     try {
       fs.writeFileSync(path.join(tmpDir, 'bad.prompt.md'), 'No frontmatter here');
       const loader = new PromptsLoader(tmpDir);
-      await loader.loadFromDirectory(tmpDir);
+      await (loader as any).loadFromDirectory(tmpDir);
       // Should not throw — just log warning
       expect(true).toBe(true);
     } finally {
@@ -127,7 +127,7 @@ describe("PromptsLoader", () => {
       // Create a directory that looks like a prompt file
       fs.mkdirSync(path.join(tmpDir, 'not-a-file.prompt.md'));
       const loader = new PromptsLoader(tmpDir);
-      await loader.loadFromDirectory(tmpDir);
+      await (loader as any).loadFromDirectory(tmpDir);
       // Should not throw — just log warning
       expect(true).toBe(true);
     } finally {

@@ -6,6 +6,7 @@ import {
   ToolsRegisterPayload,
   getExtensionConfig,
 } from "../../core/extensions/types.ts";
+import { Tool } from "../../core/extensions/tool-registry.ts";
 
 export * from "./write.ts";
 export * from "./read.ts";
@@ -37,6 +38,11 @@ const TOOL_DESCRIPTORS: ToolDescriptor[] = [
   { name: "write", disabled: false },
   { name: "read", disabled: false },
   { name: "pager", disabled: false },
+  // explore tool is disabled by default because it invokes another sub LLM session,
+  // which is not desirable in lots of default workflows. Currently hardware in
+  // local ai circles is more often than not limited.
+  // This can cause the model to be unloaded and lose the whole cached session
+  // if the hardware is limited or the models are misconfigured, safer to default to off.
   { name: "explore", disabled: true },
   { name: "find", disabled: false },
   { name: "grep", disabled: false },
@@ -84,7 +90,7 @@ const TOOL_FACTORIES: Record<string, (config: CoreToolConfig) => unknown> = {
 };
 
 interface ToolFactory {
-  createTool(toolName: string, whitelist?: string[] | null): unknown;
+  createTool(toolName: string, whitelist?: string[] | null): Tool | null;
   createAndRegister(toolName: string, registry: ToolsRegisterPayload, whitelist?: string[] | null): void;
 }
 

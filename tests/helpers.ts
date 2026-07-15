@@ -4,10 +4,12 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
+import readline from 'node:readline';
 import crypto from 'node:crypto';
 import { ToolResult } from '../src/core/extensions/tool-utils.ts';
 import { ToolContext } from '../src/core/extensions/tool-context.ts';
 import { Agent, ModelRegistry, AgentConfig } from '../src/core/agent.ts';
+import type { Tool, ToolDef } from '../src/core/extensions/tool-registry.ts';
 import type { Message } from '../src/core/context/message.ts';
 import { MessageLog } from '../src/core/context/message-log.ts';
 import type { LlmClient } from '../src/core/llm-client/client.ts';
@@ -16,6 +18,8 @@ import { createToolRegistry } from '../src/core/extensions/tool-registry.ts';
 import { HookSystem } from '../src/core/hooks.ts';
 import { ToolRegistry } from '../src/core/extensions/tool-registry.ts';
 import { createSubcommandRegistry } from '../src/core/extensions/registries.ts';
+import { createServiceRegistry, ServiceRegistry } from '../src/core/extensions/service-registry.ts';
+import { createConfigRegistry, ConfigRegistry } from '../src/core/extensions/config-registry.ts';
 import type { OutputEvent } from '../src/core/context/output.ts';
 
 // ── General utilities ──────────────────────────────────────────────────────
@@ -161,6 +165,18 @@ export function buildStreamResponse({
  * stops yielding after the current event.
  */
 export class MockLLMClient {
+  // Required LlmClient properties
+  baseUrl: string | null = null;
+  apiKey: string | null = null;
+  sessionId: string = '';
+  loud: boolean = false;
+  chatTimeoutSecs: number = 30;
+  maxRetries: number = 3;
+  stream: boolean = true;
+  providers: Array<{ name: string; url: string; apiKey?: string | null }> = [];
+  cancelled: boolean = false;
+
+  // Mock-specific properties
   _responseSequences: Record<string, unknown>[][] | undefined;
   _callIndex: number;
   cancelable: boolean;
@@ -238,7 +254,7 @@ export class MockLLMClient {
 
 // ── Mock Tool ───────────────────────────────────────────────────────────────
 
-export class MockTool {
+export class MockTool implements Tool {
   name: string;
   _executeFn: (input: unknown, ctx: unknown) => unknown | Promise<unknown>;
   _toToolDefFn: () => Record<string, unknown>;
@@ -246,6 +262,7 @@ export class MockTool {
   executeCount: number;
   lastInput: unknown;
   lastContext: unknown;
+  [key: string]: unknown;
 
   constructor({ name, execute, toToolDef, callDisplay }: {
     name?: string;
@@ -269,8 +286,8 @@ export class MockTool {
     this.lastContext = null;
   }
 
-  toToolDef(): Record<string, unknown> {
-    return this._toToolDefFn();
+  toToolDef(): ToolDef {
+    return this._toToolDefFn() as unknown as ToolDef;
   }
 
   async execute(input: unknown, ctx: unknown): Promise<unknown> {
@@ -489,6 +506,14 @@ export class MockAgent {
   addMessage(msg: Message): void {
     this._log.push(msg);
   }
+  serialize(): Record<string, unknown> {
+    return { sessionId: this._sessionId };
+  }
+  deserialize(data: Record<string, unknown>): void {
+    if (data.sessionId) {
+      this._sessionId = data.sessionId as string;
+    }
+  }
 }
 
 // ── Mock Sink ──────────────────────────────────────────────────────────────
@@ -516,35 +541,31 @@ export class MockSink {
  * @returns {{ rl: { removeListener: () => void; question: (prompt: string, cb: (response: string) => void) => void; on: (event: string, handler: (...args: unknown[]) => void) => void }; addedHandlers: unknown[] }}
  */
 export function createMockRl(responses: string[] = []): {
-  rl: {
-    removeListener: () => void;
-    question: (prompt: string, cb: (response: string) => void) => void;
-    on: (event: string, handler: (...args: unknown[]) => void) => void;
-    prompt: () => void;
-    close: () => void;
-  };
+  rl: readline.Interface;
   addedHandlers: unknown[];
 } {
   let responseIndex = 0;
   const addedHandlers: unknown[] = [];
 
-  const rl = {
-    removeListener: function () {},
-    question: function (prompt: string, cb: (response: string) => void) {
+  const mockRl = {
+    removeListener: function () { return mockRl; },
+    question: function (_prompt: string, cb: (response: string) => void) {
       if (responseIndex < responses.length) {
         const r = responses[responseIndex];
         if (r !== undefined) cb(r);
         responseIndex++;
       }
+      return mockRl as any;
     },
     on: function (event: string, handler: (...args: unknown[]) => void) {
       if (event === "line") addedHandlers.push(handler);
+      return mockRl;
     },
-    prompt: function () {},
+    prompt: function () { return mockRl as any; },
     close: function () {},
-  };
+  } as unknown as readline.Interface;
 
-  return { rl, addedHandlers };
+  return { rl: mockRl, addedHandlers };
 }
 
 /**
@@ -603,10 +624,15 @@ export function createMockCore(config: {
     modelRegistry: Record<string, unknown>;
     providers: unknown[];
   }>;
+  services: ServiceRegistry;
+  configRegistry: ConfigRegistry;
+  service: (name: string) => unknown;
 } {
   const hooks = new HookSystem();
   const toolRegistry = new ToolRegistry();
   const cliSubcommandRegistry = createSubcommandRegistry();
+  const services = createServiceRegistry();
+  const configRegistry = createConfigRegistry();
 
   const resolved: Record<string, unknown> = {
     baseUrl: "http://localhost:8080",
@@ -633,6 +659,9 @@ export function createMockCore(config: {
     hooks,
     toolRegistry,
     cliSubcommandRegistry,
+    services,
+    configRegistry,
+    service: (name: string) => services.get(name),
     config: {
       theme: "dark",
       maxIterations: 100,

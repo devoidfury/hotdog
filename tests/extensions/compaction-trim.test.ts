@@ -4,9 +4,11 @@ import { estimateContextTokens, findFirstKeptIndex } from "../../src/extensions/
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
-function makeMessage(role, content = "x".repeat(100)) {
+function makeMessage(role: string, content = "x".repeat(100)) {
   return { role, content };
 }
+
+const noopLlmChat = async (): Promise<string> => "";
 
 const defaultSettings = {
   enabled: true,
@@ -28,7 +30,7 @@ describe("TrimStrategy", () => {
     const messages = Array.from({ length: 10 }, (_, i) => makeMessage(i % 2 === 0 ? "user" : "assistant"));
     const settings = { ...defaultSettings, contextLimit: 128000 };
 
-    const result = await new TrimStrategy().execute(messages, settings, null, "test-model");
+    const result = await new TrimStrategy().execute(messages, settings, noopLlmChat, "test-model");
     expect(result).toBeNull();
   });
 
@@ -36,7 +38,7 @@ describe("TrimStrategy", () => {
     const messages = [makeMessage("user")];
     const settings = { ...defaultSettings, contextLimit: 10 };
 
-    const result = await new TrimStrategy().execute(messages, settings, null, "test-model");
+    const result = await new TrimStrategy().execute(messages, settings, noopLlmChat, "test-model");
     expect(result).toBeNull();
   });
 
@@ -48,14 +50,14 @@ describe("TrimStrategy", () => {
     // Budget: only room for ~10 messages (10 * 500 = 5000 tokens)
     const settings = { ...defaultSettings, contextLimit: 6000, reserveTokens: 0, keepRecent: 2 };
 
-    const result = await new TrimStrategy().execute(messages, settings, null, "test-model");
+    const result = await new TrimStrategy().execute(messages, settings, noopLlmChat, "test-model");
 
     expect(result).not.toBeNull();
-    expect(result.summary).toBeNull();
-    expect(result.messagesCompacted).toBeGreaterThan(0);
-    expect(result.metadata.strategyName).toBe("trim");
-    expect(result.metadata.tokensBefore).toBeGreaterThan(6000);
-    expect(result.metadata.tokensAfter).toBeLessThanOrEqual(6000);
+    expect(result!.summary).toBeNull();
+    expect(result!.messagesCompacted).toBeGreaterThan(0);
+    expect(result!.metadata!.strategyName).toBe("trim");
+    expect(result!.metadata!.tokensBefore).toBeGreaterThan(6000);
+    expect(result!.metadata!.tokensAfter).toBeLessThanOrEqual(6000);
   });
 
   it("preserves system messages while trimming", async () => {
@@ -68,11 +70,11 @@ describe("TrimStrategy", () => {
     // Budget: 20000 tokens -> room for ~20 messages but we have 21 total (1 system + 20 non-system)
     const settings = { ...defaultSettings, contextLimit: 18000, reserveTokens: 0, keepRecent: 2 };
 
-    const result = await new TrimStrategy().execute(messages, settings, null, "test-model");
+    const result = await new TrimStrategy().execute(messages, settings, noopLlmChat, "test-model");
 
     expect(result).not.toBeNull();
     // messagesCompacted should be > 1 (skipping system message at index 0)
-    expect(result.messagesCompacted).toBeGreaterThan(1);
+    expect(result!.messagesCompacted).toBeGreaterThan(1);
   });
 
   it("respects keepRecent zone", async () => {
@@ -82,7 +84,7 @@ describe("TrimStrategy", () => {
     const keepRecent = 3;
     const settings = { ...defaultSettings, contextLimit: 5000, reserveTokens: 0, keepRecent };
 
-    const result = await new TrimStrategy().execute(messages, settings, null, "test-model");
+    const result = await new TrimStrategy().execute(messages, settings, noopLlmChat, "test-model");
 
     if (result) {
       // The firstKept index from findFirstKeptIndex should not be trimmed
@@ -98,7 +100,7 @@ describe("TrimStrategy", () => {
     // Budget: only room for 1 message
     const settings = { ...defaultSettings, contextLimit: 3000, reserveTokens: 0, keepRecent: 1 };
 
-    const result = await new TrimStrategy().execute(messages, settings, null, "test-model");
+    const result = await new TrimStrategy().execute(messages, settings, noopLlmChat, "test-model");
 
     // If we can't fit even after dropping everything droppable, return null
     // This is acceptable -- the caller should fall back to another strategy
@@ -134,13 +136,13 @@ describe("TrimStrategy", () => {
     // Total: 10000 tokens. Budget: 5000 -> need to drop at least 5 messages
     const settings = { ...defaultSettings, contextLimit: 5000, reserveTokens: 0, keepRecent: 2 };
 
-    const result = await new TrimStrategy().execute(messages, settings, null, "test-model");
+    const result = await new TrimStrategy().execute(messages, settings, noopLlmChat, "test-model");
 
     expect(result).not.toBeNull();
     // After dropping 5 messages, we have 5 * 1000 = 5000 tokens (fits exactly)
     // But keepRecent=2 means last 4 messages are protected, so we can drop up to 6
-    expect(result.metadata.messagesDropped).toBeGreaterThanOrEqual(5);
-    expect(result.metadata.tokensAfter).toBeLessThanOrEqual(5000);
+    expect(result!.metadata!.messagesDropped).toBeGreaterThanOrEqual(5);
+    expect(result!.metadata!.tokensAfter).toBeLessThanOrEqual(5000);
   });
 
   it("uses model name to infer context limit", async () => {
@@ -150,7 +152,7 @@ describe("TrimStrategy", () => {
     // No contextLimit in settings, model name contains "128k"
     const settings = { ...defaultSettings, contextLimit: undefined };
 
-    const result = await new TrimStrategy().execute(messages, settings, null, "gpt-4o-128k");
+    const result = await new TrimStrategy().execute(messages, settings, noopLlmChat, "gpt-4o-128k");
 
     // 30 * 1000 = 30000 tokens < 131072, so should return null
     expect(result).toBeNull();
@@ -158,7 +160,7 @@ describe("TrimStrategy", () => {
 
   it("handles empty messages array", async () => {
     const strategy = new TrimStrategy();
-    const result = await strategy.execute([], { ...defaultSettings, contextLimit: 100, reserveTokens: 0 }, null, "model");
+    const result = await strategy.execute([], { ...defaultSettings, contextLimit: 100, reserveTokens: 0 }, noopLlmChat, "model");
     expect(result).toBeNull();
   });
 
@@ -179,12 +181,12 @@ describe("TrimStrategy", () => {
     // Budget: 2000 -> need to trim
     const settings = { ...defaultSettings, contextLimit: 2000, reserveTokens: 0, keepRecent: 1 };
 
-    const result = await new TrimStrategy().execute(messages, settings, null, "model");
+    const result = await new TrimStrategy().execute(messages, settings, noopLlmChat, "model");
 
     expect(result).not.toBeNull();
-    expect(result.summary).toBeNull();
+    expect(result!.summary).toBeNull();
     // System messages should be preserved
-    const keptMessages = messages.slice(result.messagesCompacted);
+    const keptMessages = messages.slice(result!.messagesCompacted);
     // Check that system messages are still present in kept portion
     const systemInKept = keptMessages.filter(m => m.role === "system");
     expect(systemInKept.length).toBeGreaterThanOrEqual(0); // could be 0 if all system msgs were before compaction point
@@ -207,11 +209,11 @@ describe("TrimStrategy", () => {
     // Total: 8000 tokens. Budget: 4000 -> need to drop
     const settings = { ...defaultSettings, contextLimit: 4000, reserveTokens: 0, keepRecent: 2 };
 
-    const result = await new TrimStrategy().execute(messages, settings, null, "model");
+    const result = await new TrimStrategy().execute(messages, settings, noopLlmChat, "model");
 
     expect(result).not.toBeNull();
-    expect(result.metadata.tokensBefore).toBeGreaterThan(4000);
-    expect(result.metadata.tokensAfter).toBeLessThanOrEqual(4000);
+    expect(result!.metadata!.tokensBefore).toBeGreaterThan(4000);
+    expect(result!.metadata!.tokensAfter).toBeLessThanOrEqual(4000);
   });
 
   it("handles messages with tool_calls", async () => {
@@ -231,10 +233,10 @@ describe("TrimStrategy", () => {
     // Total: ~8120 tokens. Budget: 4000 -> need to drop
     const settings = { ...defaultSettings, contextLimit: 4000, reserveTokens: 0, keepRecent: 2 };
 
-    const result = await new TrimStrategy().execute(messages, settings, null, "model");
+    const result = await new TrimStrategy().execute(messages, settings, noopLlmChat, "model");
 
     expect(result).not.toBeNull();
-    expect(result.metadata.tokensAfter).toBeLessThanOrEqual(4000);
+    expect(result!.metadata!.tokensAfter).toBeLessThanOrEqual(4000);
   });
 
   it("returns null when keepRecent=0 and no messages can be dropped", async () => {
@@ -242,7 +244,7 @@ describe("TrimStrategy", () => {
     const messages = [makeMessage("user"), makeMessage("assistant")];
     const settings = { ...defaultSettings, contextLimit: 10, reserveTokens: 0, keepRecent: 0 };
 
-    const result = await strategy.execute(messages, settings, null, "model");
+    const result = await strategy.execute(messages, settings, noopLlmChat, "model");
     expect(result).toBeNull();
   });
 
@@ -289,10 +291,10 @@ describe("TrimStrategy", () => {
     const messages = Array.from({ length: 20 }, (_, i) => makeMessage(i % 2 === 0 ? "user" : "assistant", content));
     const settings = { ...defaultSettings, contextLimit: 5000, reserveTokens: 0, keepRecent: 2 };
 
-    const result = await new TrimStrategy().execute(messages, settings, null, "model");
+    const result = await new TrimStrategy().execute(messages, settings, noopLlmChat, "model");
 
     expect(result).not.toBeNull();
-    expect(result.metadata.contextLimit).toBe(5000);
+    expect(result!.metadata!.contextLimit).toBe(5000);
   });
 
   it("metadata includes messagesDropped", async () => {
@@ -300,10 +302,10 @@ describe("TrimStrategy", () => {
     const messages = Array.from({ length: 10 }, (_, i) => makeMessage(i % 2 === 0 ? "user" : "assistant", content));
     const settings = { ...defaultSettings, contextLimit: 3000, reserveTokens: 0, keepRecent: 2 };
 
-    const result = await new TrimStrategy().execute(messages, settings, null, "model");
+    const result = await new TrimStrategy().execute(messages, settings, noopLlmChat, "model");
 
     expect(result).not.toBeNull();
-    expect(result.metadata.messagesDropped).toBeGreaterThan(0);
+    expect(result!.metadata!.messagesDropped).toBeGreaterThan(0);
   });
 
   it("messagesCompacted is correct index into original messages", async () => {
@@ -311,11 +313,11 @@ describe("TrimStrategy", () => {
     const messages = Array.from({ length: 10 }, (_, i) => makeMessage(i % 2 === 0 ? "user" : "assistant", content));
     const settings = { ...defaultSettings, contextLimit: 3000, reserveTokens: 0, keepRecent: 2 };
 
-    const result = await new TrimStrategy().execute(messages, settings, null, "model");
+    const result = await new TrimStrategy().execute(messages, settings, noopLlmChat, "model");
 
     expect(result).not.toBeNull();
     // The kept messages should be messages.slice(result.messagesCompacted)
-    const keptMessages = messages.slice(result.messagesCompacted);
+    const keptMessages = messages.slice(result!.messagesCompacted);
     const keptTokens = estimateContextTokens(keptMessages);
     expect(keptTokens).toBeLessThanOrEqual(3000);
   });
@@ -325,7 +327,7 @@ describe("TrimStrategy", () => {
     const messages = [makeMessage("user", "x".repeat(100))];
     const settings = { ...defaultSettings, contextLimit: 128000, reserveTokens: 0 };
 
-    const result = await strategy.execute(messages, settings, null, "model");
+    const result = await strategy.execute(messages, settings, noopLlmChat, "model");
     expect(result).toBeNull();
   });
 
@@ -342,12 +344,12 @@ describe("TrimStrategy", () => {
     // Total: 4500 tokens. Budget: 2000 -> need to drop
     const settings = { ...defaultSettings, contextLimit: 2000, reserveTokens: 0, keepRecent: 1 };
 
-    const result = await new TrimStrategy().execute(messages, settings, null, "model");
+    const result = await new TrimStrategy().execute(messages, settings, noopLlmChat, "model");
 
     expect(result).not.toBeNull();
-    expect(result.metadata.tokensAfter).toBeLessThanOrEqual(2000);
+    expect(result!.metadata!.tokensAfter).toBeLessThanOrEqual(2000);
     // The binary search should find the minimum number of messages to drop
-    expect(result.metadata.messagesDropped).toBeGreaterThanOrEqual(1);
+    expect(result!.metadata!.messagesDropped).toBeGreaterThanOrEqual(1);
   });
 
   it("falls back to 128000 when model name does not contain 128k", async () => {
@@ -359,7 +361,7 @@ describe("TrimStrategy", () => {
     // So it falls back to default 128000
     const settings = { ...defaultSettings, contextLimit: undefined };
 
-    const result = await strategy.execute(messages, settings, null, "gpt-3.5-turbo");
+    const result = await strategy.execute(messages, settings, noopLlmChat, "gpt-3.5-turbo");
 
     // 50 * 1000 = 50000 tokens, effectiveMax = 128000 - 8000 = 120000
     // 50000 < 120000, so should return null (already under budget)

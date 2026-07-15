@@ -1,7 +1,7 @@
 // Agent - the core AI agent with tool calling support.
 
 import crypto from "node:crypto";
-import { Message } from "./context/message.ts";
+import { Message, type ImageAttachment as MessageImageAttachment } from "./context/message.ts";
 import { MessageLog } from "./context/message-log.ts";
 import { OUTPUT_EVENT, OutputEvent } from "./context/output.ts";
 import { formatError, AgentError, LlmError } from "./error.ts";
@@ -10,7 +10,7 @@ import { ACTIONS, ParsedCommand, Command } from "./commands.ts";
 import { logger } from "./logger.ts";
 import { ToolContext } from "./extensions/tool-context.ts";
 import { formatToolResult } from "./extensions/tool-utils.ts";
-import { createCommandRegistry, AgentCommandRegistry } from "./extensions/registries.ts";
+import { createCommandRegistry, AgentCommandRegistry, type CommandDefinition } from "./extensions/registries.ts";
 import { CORE_COMMAND_HANDLERS, CommandHandlerDef } from "./command-handlers.ts";
 import { resolveModelConfig, type ModelConfig } from "./config/providers.ts";
 import { type CoreConfig } from "./config/schema-loader.ts";
@@ -189,7 +189,7 @@ export class Agent {
     this.#commandRegistry = options.commandRegistry || createCommandRegistry();
     // Register core built-in commands with their handlers
     for (const [type, def] of Object.entries(CORE_COMMAND_HANDLERS)) {
-      this.#commandRegistry.register(type, def as CommandHandlerDef);
+      this.#commandRegistry.register(type, def as unknown as CommandDefinition);
     }
     // Token usage tracking — accumulates session totals and saves last-reported values.
     this.#tokenUsage = {
@@ -451,7 +451,7 @@ export class Agent {
     await this.ensureSystemPrompt();
 
     // Add user input to context
-    const userMsg = new Message({ role: "user", content: userInput, images });
+    const userMsg = new Message({ role: "user", content: userInput, images: images as MessageImageAttachment[] | null });
     this.addMessage(userMsg);
 
     // Emit user message to output sinks so connected clients see it
@@ -499,7 +499,7 @@ export class Agent {
       let toolDefs = await this.#toolRegistry.getToolDefs();
       let modelConfig = resolveModelConfig(
         this.#model,
-        this.#modelRegistry,
+        this.#modelRegistry as unknown as Record<string, ModelConfig>,
         this.#maxTokens,
         this.#reasoningEffort,
       );
@@ -541,9 +541,9 @@ export class Agent {
 
       try {
         const stream = this.#llmClient.chatStreamCancellable(
-          messages,
+          messages.map((m) => m.toJSON()) as Array<Record<string, unknown>>,
           modelConfig,
-          toolDefs,
+          toolDefs as unknown as Array<Record<string, unknown>>,
           cancelSignal,
         );
 
@@ -1051,7 +1051,7 @@ export class Agent {
       role: "tool",
       content: result,
       toolCallId,
-      images,
+      images: images as MessageImageAttachment[] | null | undefined,
     });
     this.addMessage(msg);
     return { toolName, input, result };

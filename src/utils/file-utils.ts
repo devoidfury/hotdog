@@ -58,7 +58,7 @@ const FRONTMATTER_RE = /^-{3,}\n([\s\S]*?)\n-{3,}\n?([\s\S]*)$/;
  * Files are named `<name>.aspect.md`.
  */
 export async function loadAspects(
-  aspectNames: string[],
+  aspectNames: string[] | null,
   aspectsDir?: string,
 ): Promise<{ name: string; content: string }[]> {
   if (!aspectNames || aspectNames.length === 0) return [];

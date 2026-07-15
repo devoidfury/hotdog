@@ -100,7 +100,7 @@ describe("reactiveState", () => {
   });
 
   it("works with null/undefined values", () => {
-    const atom = reactiveState(null);
+    const atom = reactiveState(null as null | undefined);
     expect(atom()).toBeNull();
     atom(undefined);
     expect(atom()).toBeUndefined();

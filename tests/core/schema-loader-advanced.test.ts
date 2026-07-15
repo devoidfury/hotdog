@@ -161,14 +161,14 @@ describe("resolveCompute", () => {
   it("parses name('arg') form", () => {
     const fn = resolveCompute("joinConfigDir('skills')")!;
     expect(typeof fn).toBe("function");
-    const result = fn({ configDir: "/tmp/config" });
+    const result = fn!({ configDir: "/tmp/config" });
     expect(result).toBe("/tmp/config/skills");
   });
 
   it("parses name:arg form", () => {
     const fn = resolveCompute("joinConfigDir:profiles");
     expect(typeof fn).toBe("function");
-    const result = fn({ configDir: "/tmp/config" });
+    const result = fn!({ configDir: "/tmp/config" });
     expect(result).toBe("/tmp/config/profiles");
   });
 
@@ -178,13 +178,13 @@ describe("resolveCompute", () => {
 
   it("handles fallback when configDir not available", () => {
     const fn = resolveCompute("joinConfigDir('skills')");
-    const result = fn({});
+    const result = fn!({});
     expect(result).toContain("skills");
   });
 
   it("handles unknown subpath in fallback", () => {
     const fn = resolveCompute("joinConfigDir('custom')");
-    const result = fn({});
+    const result = fn!({});
     expect(result).toContain("custom");
   });
 
@@ -238,7 +238,7 @@ describe("compileSchemaKey", () => {
     };
     const compiled = compileSchemaKey(rawKey);
     expect(compiled.properties).toBeDefined();
-    expect(typeof compiled.properties!.apiKey.layers![0]!.cast).toBe("function");
+    expect(typeof compiled.properties!.apiKey!.layers![0]!.cast).toBe("function");
   });
 
   it("handles key without layers", () => {

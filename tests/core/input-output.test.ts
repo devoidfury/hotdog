@@ -62,8 +62,8 @@ describe("NoopInput", () => {
 });
 
 describe("OutputSink", () => {
-  let capturedStdout = [];
-  let capturedStderr = [];
+  let capturedStdout: string[] = [];
+  let capturedStderr: string[] = [];
 
   describe("constructor", () => {
     it("defaults stream to true", () => {
@@ -92,7 +92,7 @@ describe("OutputSink", () => {
 
     it("ignores unknown event types", () => {
       const sink = new OutputSink();
-      expect(() => sink.emit({ type: 999 })).not.toThrow();
+      expect(() => sink.emit({ type: 999 as any })).not.toThrow();
     });
   });
 
@@ -104,11 +104,11 @@ describe("OutputSink", () => {
 
     it("writes content to stdout", () => {
       const origWrite = process.stdout.write;
-      process.stdout.write = (data) => { capturedStdout.push(data); return true; };
+      process.stdout.write = (data) => { capturedStdout.push(data as string); return true; };
 
       try {
         const sink = new OutputSink({ stream: false });
-        sink.emitAssistantMessage({ content: "Hello" });
+        sink.emitAssistantMessage({ type: OUTPUT_EVENT.ASSISTANT_MESSAGE, content: "Hello" });
         expect(capturedStdout).toContain("Hello");
       } finally {
         process.stdout.write = origWrite;
@@ -119,11 +119,11 @@ describe("OutputSink", () => {
   describe("emitThinking", () => {
     it("writes content to stderr", () => {
       const origWrite = process.stderr.write;
-      process.stderr.write = (data) => { capturedStderr.push(data); return true; };
+      process.stderr.write = (data) => { capturedStderr.push(data as string); return true; };
 
       try {
         const sink = new OutputSink({ stream: false });
-        sink.emitThinking({ content: "Thinking..." });
+        sink.emitThinking({ type: OUTPUT_EVENT.THINKING, content: "Thinking..." });
         expect(capturedStderr).toContain("Thinking...");
       } finally {
         process.stderr.write = origWrite;
@@ -134,11 +134,11 @@ describe("OutputSink", () => {
   describe("emitCommandResult", () => {
     it("writes content with newline to stdout", () => {
       const origWrite = process.stdout.write;
-      process.stdout.write = (data) => { capturedStdout.push(data); return true; };
+      process.stdout.write = (data) => { capturedStdout.push(data as string); return true; };
 
       try {
         const sink = new OutputSink({ stream: false });
-        sink.emitCommandResult({ content: "Result" });
+        sink.emitCommandResult({ type: OUTPUT_EVENT.COMMAND_RESULT, content: "Result" });
         expect(capturedStdout).toContain("Result\n");
       } finally {
         process.stdout.write = origWrite;
@@ -149,11 +149,11 @@ describe("OutputSink", () => {
   describe("emitStreamingChunk", () => {
     it("writes content when stream is true", () => {
       const origWrite = process.stdout.write;
-      process.stdout.write = (data) => { capturedStdout.push(data); return true; };
+      process.stdout.write = (data) => { capturedStdout.push(data as string); return true; };
 
       try {
         const sink = new OutputSink({ stream: true });
-        sink.emitStreamingChunk({ content: "chunk" });
+        sink.emitStreamingChunk({ type: OUTPUT_EVENT.STREAMING_CHUNK, content: "chunk" });
         expect(capturedStdout).toContain("chunk");
       } finally {
         process.stdout.write = origWrite;
@@ -167,7 +167,7 @@ describe("OutputSink", () => {
 
       try {
         const sink = new OutputSink({ stream: false });
-        sink.emitStreamingChunk({ content: "chunk" });
+        sink.emitStreamingChunk({ type: OUTPUT_EVENT.STREAMING_CHUNK, content: "chunk" });
         expect(writeCalled).toBe(false);
       } finally {
         process.stdout.write = origWrite;
@@ -178,11 +178,11 @@ describe("OutputSink", () => {
   describe("emitStreamingReasoningChunk", () => {
     it("writes content to stderr when stream is true", () => {
       const origWrite = process.stderr.write;
-      process.stderr.write = (data) => { capturedStderr.push(data); return true; };
+      process.stderr.write = (data) => { capturedStderr.push(data as string); return true; };
 
       try {
         const sink = new OutputSink({ stream: true });
-        sink.emitStreamingReasoningChunk({ content: "reasoning" });
+        sink.emitStreamingReasoningChunk({ type: OUTPUT_EVENT.STREAMING_REASONING_CHUNK, content: "reasoning" });
         expect(capturedStderr).toContain("reasoning");
       } finally {
         process.stderr.write = origWrite;
@@ -193,37 +193,37 @@ describe("OutputSink", () => {
   describe("no-op handlers", () => {
     it("emitUserMessage is a no-op", () => {
       const sink = new OutputSink();
-      expect(() => sink.emitUserMessage({ content: "test" })).not.toThrow();
+      expect(() => sink.emitUserMessage({ type: OUTPUT_EVENT.USER_MESSAGE, content: "test" })).not.toThrow();
     });
 
     it("emitToolCall is a no-op", () => {
       const sink = new OutputSink();
-      expect(() => sink.emitToolCall({ tool: "bash" })).not.toThrow();
+      expect(() => sink.emitToolCall({ type: OUTPUT_EVENT.TOOL_CALL, tool: "bash" })).not.toThrow();
     });
 
     it("emitToolResult is a no-op", () => {
       const sink = new OutputSink();
-      expect(() => sink.emitToolResult({ output: "done" })).not.toThrow();
+      expect(() => sink.emitToolResult({ type: OUTPUT_EVENT.TOOL_RESULT, output: "done" })).not.toThrow();
     });
 
     it("emitCompacting is a no-op", () => {
       const sink = new OutputSink();
-      expect(() => sink.emitCompacting({})).not.toThrow();
+      expect(() => sink.emitCompacting({ type: OUTPUT_EVENT.COMPACTING } as any)).not.toThrow();
     });
 
     it("emitQuestion is a no-op", () => {
       const sink = new OutputSink();
-      expect(() => sink.emitQuestion({ questions: [] })).not.toThrow();
+      expect(() => sink.emitQuestion({ type: OUTPUT_EVENT.QUESTION, questions: [] })).not.toThrow();
     });
 
     it("emitTaskProgress is a no-op", () => {
       const sink = new OutputSink();
-      expect(() => sink.emitTaskProgress({})).not.toThrow();
+      expect(() => sink.emitTaskProgress({ type: OUTPUT_EVENT.TASK_PROGRESS } as any)).not.toThrow();
     });
 
     it("emitTokenUsage is a no-op", () => {
       const sink = new OutputSink();
-      expect(() => sink.emitTokenUsage({})).not.toThrow();
+      expect(() => sink.emitTokenUsage({ type: OUTPUT_EVENT.TOKEN_USAGE } as any)).not.toThrow();
     });
 
     it("reset is a no-op", () => {
@@ -241,9 +241,9 @@ describe("NoopSink", () => {
 
   it("handles any event without error", () => {
     const sink = new NoopSink();
-    sink.emit({ type: 999 });
-    sink.emit(null);
-    sink.emit(undefined);
+    sink.emit({ type: 999 as any });
+    sink.emit(null as any);
+    sink.emit(undefined as any);
   });
 });
 

@@ -21,8 +21,8 @@ describe("resolveLogLevel and resolveLogTarget", () => {
   // Both functions share the same resolution pattern: env var > config param > default,
   // with case-insensitive env var handling and invalid env var fallback.
   const resolvers = [
-    { name: "resolveLogLevel", fn: resolveLogLevel, env: "HOTDOG_LOG_LEVEL", default: "info", validEnv: "debug", validConfig: "error" },
-    { name: "resolveLogTarget", fn: resolveLogTarget, env: "HOTDOG_LOG_TARGET", default: "stderr", validEnv: "stdout", validConfig: "none" },
+    { name: "resolveLogLevel", fn: resolveLogLevel as (c?: string) => string, env: "HOTDOG_LOG_LEVEL", default: "info", validEnv: "debug", validConfig: "error" },
+    { name: "resolveLogTarget", fn: resolveLogTarget as (c?: string) => string, env: "HOTDOG_LOG_TARGET", default: "stderr", validEnv: "stdout", validConfig: "none" },
   ];
 
   for (const { name, fn, env, default: def, validEnv, validConfig } of resolvers) {

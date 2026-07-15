@@ -5,9 +5,9 @@ import { McpConnectionHandle } from "./connection.ts";
 
 interface McpToolDefinition {
   name: string;
-  title: string | null;
-  description: string | null;
-  inputSchema: Record<string, unknown>;
+  title?: string | null;
+  description?: string | null;
+  inputSchema?: Record<string, unknown>;
 }
 
 /**

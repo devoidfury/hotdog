@@ -56,11 +56,7 @@ export class ExploreTool {
     if (!args.outline || args.outline.trim().length === 0) {
       const error =
         "The 'outline' argument is required. Provide an outline of what you're specifically interested in or any particular questions you have.";
-      return ToolResult.ok({
-        error,
-        path: args.path,
-        outline: args.outline,
-      }).withEntries({
+      return ToolResult.err(error).withEntries({
         path: args.path,
         outline: args.outline,
       });
@@ -79,7 +75,7 @@ export class ExploreTool {
       "--hide-tools",
       "--hide-thinking",
     ];
-    const cp: ChildProcess = spawn("bun", command, {
+    const proc: ChildProcess = spawn("bun", command, {
       cwd: args.path,
       stdio: ["pipe", "pipe", "pipe"],
     });
@@ -87,16 +83,16 @@ export class ExploreTool {
     let stdout = "";
     let stderr = "";
 
-    cp.stdout.on("data", (chunk: Buffer) => {
+    proc.stdout?.on("data", (chunk: Buffer) => {
       stdout += chunk.toString();
     });
 
-    cp.stderr.on("data", (chunk: Buffer) => {
+    proc.stderr?.on("data", (chunk: Buffer) => {
       stderr += chunk.toString();
     });
 
     const exitCode = await new Promise<number>((resolve) => {
-      cp.on("close", resolve);
+      proc.on("close", resolve);
     });
 
     if (exitCode !== 0) {

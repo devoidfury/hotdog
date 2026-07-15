@@ -2,9 +2,10 @@
 
 import { describe, it, expect, beforeEach } from "bun:test";
 import { QuestionTool, create } from "../../src/extensions/question-tool/index.ts";
+import type { CoreContext } from "../../src/core/extensions/types.ts";
 
 describe("QuestionTool", () => {
-  let tool;
+  let tool: QuestionTool;
 
   beforeEach(() => {
     tool = new QuestionTool();
@@ -24,7 +25,7 @@ describe("QuestionTool", () => {
 
     it("defines question item schema with key and prompt", () => {
       const def = tool.toToolDef();
-      const questionsParam = def.function.parameters.properties.questions;
+      const questionsParam = (def.function.parameters.properties as Record<string, unknown>).questions as { items: { properties: Record<string, unknown> } };
       expect(questionsParam.items.properties.key).toBeDefined();
       expect(questionsParam.items.properties.prompt).toBeDefined();
       expect(questionsParam.items.properties.options).toBeDefined();
@@ -68,7 +69,7 @@ describe("QuestionTool", () => {
           { key: "notes", prompt: "Notes?", default: "None" },
         ],
       });
-      const result = await tool.execute(input);
+      const result = await tool.execute(input, null!);
       expect(result.success).toBe(true);
       const output = JSON.parse(result.output);
       expect(output.name).toBe("Anonymous");
@@ -79,7 +80,7 @@ describe("QuestionTool", () => {
       const input = JSON.stringify({
         questions: [{ key: "color", prompt: "Pick a color" }],
       });
-      const result = await tool.execute(input);
+      const result = await tool.execute(input, null!);
       expect(result.success).toBe(true);
       const output = JSON.parse(result.output);
       expect(output.color).toBe("");
@@ -87,13 +88,13 @@ describe("QuestionTool", () => {
 
     it("rejects empty questions array", async () => {
       const input = JSON.stringify({ questions: [] });
-      const result = await tool.execute(input);
+      const result = await tool.execute(input, null!);
       expect(result.success).toBe(false);
       expect(result.error).toContain("At least one question");
     });
 
     it("rejects invalid JSON", async () => {
-      const result = await tool.execute("not json");
+      const result = await tool.execute("not json", null!);
       expect(result.success).toBe(false);
     });
 
@@ -103,7 +104,7 @@ describe("QuestionTool", () => {
           { key: "choice", question: "Which one?", choices: ["A", "B"] },
         ],
       });
-      const result = await tool.execute(input);
+      const result = await tool.execute(input, null!);
       expect(result.success).toBe(true);
     });
 
@@ -111,7 +112,7 @@ describe("QuestionTool", () => {
       const input = JSON.stringify({
         questions: [{ prompt: "What is your name?" }],
       });
-      const result = await tool.execute(input);
+      const result = await tool.execute(input, null!);
       expect(result.success).toBe(true);
       const output = JSON.parse(result.output);
       expect("what_is_your_name" in output).toBe(true);
@@ -121,18 +122,18 @@ describe("QuestionTool", () => {
       const input = JSON.stringify({
         questions: [{ key: "a", prompt: "Q?" }],
       });
-      const result = await tool.execute(input);
+      const result = await tool.execute(input, null!);
       expect(result.success).toBe(true);
-      expect(result.metadata.get("mode")).toBe("non-interactive");
-      expect(result.metadata.get("questions_asked")).toBe("1");
-      expect(result.metadata.get("questions_answered")).toBe("1");
+      expect(result.metadata!.get("mode")).toBe("non-interactive");
+      expect(result.metadata!.get("questions_asked")).toBe("1");
+      expect(result.metadata!.get("questions_answered")).toBe("1");
     });
 
     it("rejects empty key", async () => {
       const input = JSON.stringify({
         questions: [{ key: "", prompt: "Q?" }],
       });
-      const result = await tool.execute(input);
+      const result = await tool.execute(input, null!);
       expect(result.success).toBe(false);
       expect(result.error).toContain("key cannot be empty");
     });
@@ -141,7 +142,7 @@ describe("QuestionTool", () => {
       const input = JSON.stringify({
         questions: [{ key: "a" }],
       });
-      const result = await tool.execute(input);
+      const result = await tool.execute(input, null!);
       expect(result.success).toBe(false);
       expect(result.error).toContain("missing a prompt");
     });
@@ -150,16 +151,16 @@ describe("QuestionTool", () => {
 
 describe("QuestionTool create() extension", () => {
   it("returns extension with tools:register hook", async () => {
-    const ext = create({});
+    const ext = create({} as CoreContext);
     expect(ext).toBeDefined();
     expect(ext.hooks).toBeDefined();
-    expect(ext.hooks['tools:register']).toBeDefined();
+    expect(ext.hooks!['tools:register']).toBeDefined();
     expect(ext.QuestionTool).toBe(QuestionTool);
   });
 
   it("registers question tool via hook", async () => {
-    const ext = create({});
-    const registry = { register: (name, tool) => { expect(name).toBe('question'); expect(tool).toBeInstanceOf(QuestionTool); } };
-    await ext.hooks['tools:register'](registry);
+    const ext = create({} as CoreContext);
+    const registry = { register: (name: string, tool: unknown) => { expect(name).toBe('question'); expect(tool).toBeInstanceOf(QuestionTool); }, getAll: () => [] };
+    await (ext.hooks!['tools:register'] as Function)(registry);
   });
 });

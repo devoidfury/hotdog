@@ -3,16 +3,18 @@
 // deferred lifecycle management. Event-driven: enqueue() wakes the
 // generator instead of polling.
 
-import { formatError, isExpectedError, LlmError, OutputEvent } from "../error.ts";
-import { OUTPUT_EVENT } from "../context/output.ts";
+import { formatError, isExpectedError, LlmError } from "../error.ts";
+import { OUTPUT_EVENT, OutputEvent } from "../context/output.ts";
 import { HOOKS } from "../hooks.ts";
 import { parseCommand, ACTIONS, ParsedCommand } from "../commands.ts";
 
-export interface SessionManager {
-  getAgent(): Agent | undefined;
+/** Minimal SessionManager interface for message bus usage. */
+export interface MessageBusSessionManager {
+  getAgent(): MessageBusAgent | undefined;
 }
 
-export interface Agent {
+/** Minimal Agent interface for message bus usage. */
+export interface MessageBusAgent {
   hooks: {
     runHookPipeline(
       hookName: string,
@@ -32,7 +34,7 @@ export interface Sink {
 }
 
 export interface MessageBusOptions {
-  sessionManager: SessionManager;
+  sessionManager: MessageBusSessionManager;
   sink: Sink;
 }
 
@@ -49,7 +51,7 @@ export interface MessageBusOptions {
  * _processMessage, allowing a cancelled request to be retried.
  */
 export class MessageBus {
-  #sessionManager: SessionManager;
+  #sessionManager: MessageBusSessionManager;
   #sink: Sink;
   #queue: string[];
   #isRunning: boolean;
@@ -132,11 +134,11 @@ export class MessageBus {
     );
   }
 
-  get sessionManager(): SessionManager {
+  get sessionManager(): MessageBusSessionManager {
     return this.#sessionManager;
   }
 
-  get agent(): Agent | undefined {
+  get agent(): MessageBusAgent | undefined {
     return this.#sessionManager.getAgent();
   }
 
@@ -271,11 +273,20 @@ export class MessageBus {
   async _processMessage(text: string): Promise<void> {
     this.#isRunning = true;
     const agent = this.#sessionManager.getAgent();
+    if (!agent) {
+      this.#isRunning = false;
+      this.#sink.emit({
+        type: OUTPUT_EVENT.SESSION_STATE,
+        key: "working",
+        value: false,
+      });
+      return;
+    }
 
     // Reset the agent's cancel flag before processing.
     // This clears any leftover cancelled state from the previous
     // message (e.g., interrupt) so the agent is ready for new work.
-    if (agent) agent.resetCancel();
+    agent.resetCancel();
 
     // Input hook — sequential, handlers can transform or short-circuit.
     // Actions: { action: "continue" } | { action: "transform", text } | { action: "handled" }

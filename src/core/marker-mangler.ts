@@ -166,7 +166,7 @@ export class MarkerMangler {
    * @param text - Model output text.
    * @returns Unescaped text.
    */
-  unescapeOutput(text: string) {
+  unescapeOutput(text: string | null | undefined) {
     return this.unescape(text);
   }
 
@@ -175,7 +175,7 @@ export class MarkerMangler {
    * @param text - Tool call arguments.
    * @returns Unescaped arguments.
    */
-  unescapeToolInput(text: string) {
+  unescapeToolInput(text: string | null | undefined) {
     return this.unescape(text);
   }
 }

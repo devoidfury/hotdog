@@ -99,7 +99,7 @@ async function listSessions(limit: number): Promise<SessionSummary[]> {
 /**
  * Get a specific session's entries as a JSON array.
  */
-async function getSession(sessionId: string): Promise<Record<string, unknown>[]> {
+async function getSession(sessionId: string): ReturnType<typeof readSessionEntries> {
   const entries = await readSessionEntries(sessionId);
   return entries;
 }
@@ -112,7 +112,7 @@ async function getToolIndex(sessionId: string): Promise<ToolIndexEntry[]> {
   const indexEntries: ToolIndexEntry[] = [];
 
   for (let i = 0; i < entries.length; i++) {
-    const entry = entries[i] as Record<string, unknown>;
+    const entry = entries[i]!;
     const toolCalls = entry.tool_calls as Array<{
       function?: { name?: string; arguments?: string };
     }> | null | undefined;
@@ -135,7 +135,7 @@ async function getToolIndex(sessionId: string): Promise<ToolIndexEntry[]> {
 /**
  * Parse tool arguments from JSON string.
  */
-function parseArgs(input: string): ParsedArgs {
+function parseArgs(input: string | null): ParsedArgs {
   if (!input || input.trim().length === 0) {
     return { operation: 'list', session_id: null, limit: 10 };
   }
@@ -206,7 +206,7 @@ export class ReviewTool {
     });
   }
 
-  async execute(input: string): Promise<ToolResult> {
+  async execute(input: string | null): Promise<ToolResult> {
     const args = parseArgs(input);
 
     switch (args.operation) {

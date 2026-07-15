@@ -28,7 +28,7 @@ describe("AgentSink", () => {
 
       sink.onTaskComplete("done");
 
-      expect(events[0].taskId).toBe("task-123");
+      expect(events[0]!.taskId).toBe("task-123");
     });
   });
 
@@ -79,8 +79,8 @@ describe("AgentSink", () => {
       sink.emit({ type: OUTPUT_EVENT.TOKEN_USAGE, totalTokens: 100 });
 
       expect(events).toHaveLength(2);
-      expect(events[0].type).toBe(OUTPUT_EVENT.TASK_PROGRESS);
-      expect(events[1].type).toBe(OUTPUT_EVENT.TOKEN_USAGE);
+      expect(events[0]!.type).toBe(OUTPUT_EVENT.TASK_PROGRESS);
+      expect(events[1]!.type).toBe(OUTPUT_EVENT.TOKEN_USAGE);
     });
 
     it("handles unknown event types silently", () => {
@@ -103,8 +103,8 @@ describe("AgentSink", () => {
       sink.onTaskComplete("Result text");
 
       expect(events).toHaveLength(1);
-      expect(events[0].type).toBe(OUTPUT_EVENT.TASK_PROGRESS);
-      expect(events[0].taskId).toBe("task-1");
+      expect(events[0]!.type).toBe(OUTPUT_EVENT.TASK_PROGRESS);
+      expect(events[0]!.taskId).toBe("task-1");
     });
 
     it("calls onTaskComplete callback with task id and result", () => {
@@ -119,8 +119,8 @@ describe("AgentSink", () => {
 
       sink.onTaskComplete("Done!");
 
-      expect(capturedId).toBe("task-2");
-      expect(capturedResult).toBe("Done!");
+      expect(capturedId! as string).toBe("task-2");
+      expect(capturedResult! as string).toBe("Done!");
     });
 
     it("handles null parent sink and callback gracefully", () => {

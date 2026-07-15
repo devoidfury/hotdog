@@ -29,7 +29,7 @@ export interface SchemaDefaultEntry {
  * Extract default values from an extension's configSchema.
  */
 export function extractSchemaDefaults(
-  schema: Record<string, unknown> | null,
+  schema: Record<string, unknown> | null | undefined,
 ): SchemaDefaultEntry[] {
   if (!schema || typeof schema !== "object") return [];
 
@@ -580,7 +580,7 @@ export async function getExtensionConfigSchemas(
  */
 export function isExtensionEnabled(
   extName: string,
-  config: CoreConfig | null,
+  config: CoreConfig | null | undefined,
 ): boolean {
   if (!config) return true;
   const configKey = camelCase(extName);

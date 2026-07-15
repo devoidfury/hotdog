@@ -10,6 +10,7 @@ import {
   resolveExtensionDependencies,
   validateServiceContracts,
   LOAD_ORDER,
+  ExtensionMetadata,
 } from "../../src/core/extensions/extensions.ts";
 import { ExtensionError } from "../../src/core/error.ts";
 
@@ -34,13 +35,13 @@ describe("extractSchemaDefaults", () => {
     };
     const result = extractSchemaDefaults(schema);
     expect(result).toHaveLength(1);
-    expect(result[0].key).toBe("bashTool");
-    expect(result[0].description).toBe("Bash tool config");
-    expect(result[0].defaults).toEqual({
+    expect(result[0]!.key).toBe("bashTool");
+    expect(result[0]!.description).toBe("Bash tool config");
+    expect(result[0]!.defaults).toEqual({
       timeout: 30,
       shell: "/bin/bash",
     });
-    expect(result[0].schema).toBe(schema.bashTool);
+    expect(result[0]!.schema).toBe(schema.bashTool);
   });
 
   it("extracts defaults from array-type schema with direct default", () => {
@@ -52,8 +53,8 @@ describe("extractSchemaDefaults", () => {
     };
     const result = extractSchemaDefaults(schema);
     expect(result).toHaveLength(1);
-    expect(result[0].key).toBe("extensions");
-    expect(result[0].defaults).toEqual(["bash-tool", "read-tool"]);
+    expect(result[0]!.key).toBe("extensions");
+    expect(result[0]!.defaults).toEqual(["bash-tool", "read-tool"]);
   });
 
   it("includes layers when present", () => {
@@ -67,7 +68,7 @@ describe("extractSchemaDefaults", () => {
       },
     };
     const result = extractSchemaDefaults(schema);
-    expect(result[0].layers).toEqual([{ source: "cli", key: "myExt" }]);
+    expect(result[0]!.layers).toEqual([{ source: "cli", key: "myExt" }]);
   });
 
   it("handles schema without defaults", () => {
@@ -81,7 +82,7 @@ describe("extractSchemaDefaults", () => {
     };
     const result = extractSchemaDefaults(schema);
     expect(result).toHaveLength(1);
-    expect(result[0].defaults).toEqual({});
+    expect(result[0]!.defaults).toEqual({});
   });
 });
 
@@ -156,9 +157,9 @@ describe("resolveLoadOrder", () => {
       { name: "cli", loadOrder: 2, dependsOn: [], requires: {} },
       { name: "tools", loadOrder: 1, dependsOn: [], requires: {} },
     ];
-    const result = resolveLoadOrder(extensions);
-    expect(result[0].name).toBe("tools");
-    expect(result[1].name).toBe("cli");
+    const result = resolveLoadOrder(extensions as any);
+    expect(result[0]!.name).toBe("tools");
+    expect(result[1]!.name).toBe("cli");
   });
 
   it("handles no dependencies — alphabetical order", () => {
@@ -166,7 +167,7 @@ describe("resolveLoadOrder", () => {
       { name: "b", loadOrder: 10, dependsOn: [], requires: {} },
       { name: "a", loadOrder: 10, dependsOn: [], requires: {} },
     ];
-    const result = resolveLoadOrder(extensions);
+    const result = resolveLoadOrder(extensions as any);
     expect(result.map((e) => e.name)).toEqual(["a", "b"]);
   });
 
@@ -175,16 +176,16 @@ describe("resolveLoadOrder", () => {
       { name: "a", loadOrder: 10, dependsOn: ["b"], requires: {} },
       { name: "b", loadOrder: 10, dependsOn: ["a"], requires: {} },
     ];
-    expect(() => resolveLoadOrder(extensions)).toThrow(/Circular dependency/);
+    expect(() => resolveLoadOrder(extensions as any)).toThrow(/Circular dependency/);
   });
 
   it("filters out unknown dependsOn entries", () => {
     const extensions = [
       { name: "a", loadOrder: 10, dependsOn: ["nonexistent"], requires: {} },
     ];
-    const result = resolveLoadOrder(extensions);
+    const result = resolveLoadOrder(extensions as any);
     expect(result).toHaveLength(1);
-    expect(result[0].name).toBe("a");
+    expect(result[0]!.name).toBe("a");
   });
 
   it("resolves abstract service dependencies", () => {
@@ -204,7 +205,7 @@ describe("resolveLoadOrder", () => {
         services: {},
       },
     ];
-    const result = resolveLoadOrder(extensions);
+    const result = resolveLoadOrder(extensions as any);
     const names = result.map((e) => e.name);
     expect(names.indexOf("session-provider")).toBeLessThan(
       names.indexOf("session-user"),
@@ -235,7 +236,7 @@ describe("resolveLoadOrder", () => {
         services: {},
       },
     ];
-    const result = resolveLoadOrder(extensions, { myService: "provider-b" });
+    const result = resolveLoadOrder(extensions as any, { myService: "provider-b" });
     const names = result.map((e) => e.name);
     expect(names.indexOf("provider-b")).toBeLessThan(names.indexOf("user"));
   });
@@ -245,7 +246,7 @@ describe("resolveLoadOrder", () => {
       { name: "a", loadOrder: 1, dependsOn: [], requires: {} },
       { name: "b", loadOrder: 2, dependsOn: ["a"], requires: {} },
     ];
-    const result = resolveLoadOrder(extensions);
+    const result = resolveLoadOrder(extensions as any);
     expect(result.map((e) => e.name)).toEqual(["a", "b"]);
   });
 });
@@ -258,7 +259,7 @@ describe("resolveExtensionDependencies", () => {
       { name: "c", loadOrder: 1, dependsOn: ["b"], requires: {}, services: {}, provides: [] },
     ];
     const selected = [{ name: "c", loadOrder: 1, dependsOn: ["b"], requires: {}, services: {}, provides: [] }];
-    const result = resolveExtensionDependencies(selected, allDiscovered);
+    const result = resolveExtensionDependencies(selected as any, allDiscovered as any);
     const names = result.map((e) => e.name);
     expect(names).toContain("a");
     expect(names).toContain("b");
@@ -284,8 +285,8 @@ describe("resolveExtensionDependencies", () => {
         provides: [],
       },
     ];
-    const selected = [allDiscovered.find((e) => e.name === "user")];
-    const result = resolveExtensionDependencies(selected, allDiscovered);
+    const selected = [allDiscovered.find((e) => e.name === "user")!];
+    const result = resolveExtensionDependencies(selected as any, allDiscovered as any);
     const names = result.map((e) => e.name);
     expect(names).toContain("provider");
     expect(names).toContain("user");
@@ -307,22 +308,22 @@ describe("resolveExtensionDependencies", () => {
       },
     ];
     const selected = [allDiscovered[0]];
-    const result = resolveExtensionDependencies(selected, allDiscovered);
+    const result = resolveExtensionDependencies(selected as any, allDiscovered as any);
     expect(result.map((e) => e.name)).toEqual(["self-service"]);
   });
 });
 
 describe("validateServiceContracts", () => {
   function createMockServiceRegistry() {
-    const services = new Map();
+    const services = new Map<string, Record<string, unknown>>();
     return {
-      has: (name) => services.has(name),
-      register: (name, impl) => services.set(name, impl),
-      checkContract: (serviceName, expectedMethods) => {
+      has: (name: string) => services.has(name),
+      register: (name: string, impl: Record<string, unknown>) => services.set(name, impl),
+      checkContract: (serviceName: string, expectedMethods: string[]) => {
         const service = services.get(serviceName);
         if (!service) return { valid: false, missing: expectedMethods };
         const missing = expectedMethods.filter(
-          (m) => typeof service[m] !== "function",
+          (m: string) => typeof service[m] !== "function",
         );
         return { valid: missing.length === 0, missing };
       },
@@ -339,7 +340,7 @@ describe("validateServiceContracts", () => {
         requires: { session: ["list", "get"] },
       },
     ];
-    const errors = validateServiceContracts(extensions, registry);
+    const errors = validateServiceContracts(extensions as any, registry);
     expect(errors).toEqual([]);
   });
 
@@ -352,11 +353,11 @@ describe("validateServiceContracts", () => {
         requires: { session: ["list", "get"] },
       },
     ];
-    const errors = validateServiceContracts(extensions, registry);
+    const errors = validateServiceContracts(extensions as any, registry);
     expect(errors).toHaveLength(1);
-    expect(errors[0].extension).toBe("my-ext");
-    expect(errors[0].service).toBe("session");
-    expect(errors[0].missing).toEqual(["list", "get"]);
+    expect(errors[0]!.extension).toBe("my-ext");
+    expect(errors[0]!.service).toBe("session");
+    expect(errors[0]!.missing).toEqual(["list", "get"]);
   });
 
   it("returns error when some methods are missing", () => {
@@ -369,9 +370,9 @@ describe("validateServiceContracts", () => {
         requires: { session: ["list", "get", "create"] },
       },
     ];
-    const errors = validateServiceContracts(extensions, registry);
+    const errors = validateServiceContracts(extensions as any, registry);
     expect(errors).toHaveLength(1);
-    expect(errors[0].missing).toEqual(["get", "create"]);
+    expect(errors[0]!.missing).toEqual(["get", "create"]);
   });
 
   it("skips extensions without requires", () => {
@@ -382,7 +383,7 @@ describe("validateServiceContracts", () => {
       { name: "no-requires-field" },
       { name: "empty-requires", requires: {} },
     ];
-    const errors = validateServiceContracts(extensions, registry);
+    const errors = validateServiceContracts(extensions as any, registry);
     expect(errors).toEqual([]);
   });
 
@@ -400,9 +401,9 @@ describe("validateServiceContracts", () => {
         requires: { resourceLoader: ["read"] },
       },
     ];
-    const errors = validateServiceContracts(extensions, registry);
+    const errors = validateServiceContracts(extensions as any, registry);
     expect(errors).toHaveLength(2);
-    expect(errors[0].extension).toBe("ext-a");
-    expect(errors[1].extension).toBe("ext-b");
+    expect(errors[0]!.extension).toBe("ext-a");
+    expect(errors[1]!.extension).toBe("ext-b");
   });
 });

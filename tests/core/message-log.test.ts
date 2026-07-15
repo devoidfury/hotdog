@@ -27,14 +27,14 @@ describe("MessageLog", () => {
 
     it("throws when pushing non-Message", () => {
       const log = new MessageLog();
-      expect(() => log.push({ role: "user", content: "hello" })).toThrow(
+      expect(() => log.push({ role: "user", content: "hello" } as any)).toThrow(
         "requires a Message instance",
       );
     });
 
     it("throws when pushing null", () => {
       const log = new MessageLog();
-      expect(() => log.push(null)).toThrow("requires a Message instance");
+      expect(() => log.push(null as any)).toThrow("requires a Message instance");
     });
   });
 
@@ -49,12 +49,12 @@ describe("MessageLog", () => {
       ];
       log.replace(newMsgs);
       expect(log.length).toBe(2);
-      expect(log.at(0).content).toBe("new1");
+      expect(log.at(0)!.content).toBe("new1");
     });
 
     it("throws when replacing with non-array", () => {
       const log = new MessageLog();
-      expect(() => log.replace("not an array")).toThrow("requires an array");
+      expect(() => log.replace("not an array" as any)).toThrow("requires an array");
     });
 
     it("throws when replacing with array containing non-Message", () => {
@@ -62,7 +62,7 @@ describe("MessageLog", () => {
       expect(() =>
         log.replace([
           new Message({ role: "user", content: "ok" }),
-          { role: "assistant", content: "bad" },
+          { role: "assistant", content: "bad" } as any,
         ]),
       ).toThrow("element 1 is");
     });
@@ -94,15 +94,15 @@ describe("MessageLog", () => {
         new Message({ role: "user", content: "first" }),
         new Message({ role: "assistant", content: "second" }),
       ]);
-      expect(log.at(0).content).toBe("first");
-      expect(log.at(1).content).toBe("second");
+      expect(log.at(0)!.content).toBe("first");
+      expect(log.at(1)!.content).toBe("second");
     });
 
     it("returns undefined for out-of-bounds index", () => {
       const log = new MessageLog([
         new Message({ role: "user", content: "only" }),
       ]);
-      expect(log.at(5)).toBeUndefined();
+      expect(log.at(5)!).toBeUndefined();
     });
   });
 
@@ -125,8 +125,8 @@ describe("MessageLog", () => {
       ]);
       const sys = log.getSystem();
       expect(sys.length).toBe(2);
-      expect(sys[0].role).toBe("system");
-      expect(sys[1].role).toBe("system");
+      expect(sys[0]!.role).toBe("system");
+      expect(sys[1]!.role).toBe("system");
     });
 
     it("returns empty array when no system messages", () => {
@@ -146,7 +146,7 @@ describe("MessageLog", () => {
       ]);
       const nonSys = log.getNonSystem();
       expect(nonSys.length).toBe(2);
-      expect(nonSys[0].role).toBe("user");
+      expect(nonSys[0]!.role).toBe("user");
     });
   });
 
@@ -159,8 +159,8 @@ describe("MessageLog", () => {
       ]);
       const recent = log.getRecent(2);
       expect(recent.length).toBe(2);
-      expect(recent[0].content).toBe("msg2");
-      expect(recent[1].content).toBe("msg3");
+      expect(recent[0]!.content).toBe("msg2");
+      expect(recent[1]!.content).toBe("msg3");
     });
 
     it("returns all messages when N >= length", () => {
@@ -181,7 +181,7 @@ describe("MessageLog", () => {
       ]);
       const sliced = log.slice(1, 3);
       expect(sliced.length).toBe(2);
-      expect(sliced[0].content).toBe("msg2");
+      expect(sliced[0]!.content).toBe("msg2");
     });
 
     it("slices with no arguments", () => {
@@ -200,9 +200,9 @@ describe("MessageLog", () => {
       ]);
       const msgs = log.buildMessages("You are helpful.");
       expect(msgs.length).toBe(2);
-      expect(msgs[0].role).toBe("system");
-      expect(msgs[0].content).toBe("You are helpful.");
-      expect(msgs[1].role).toBe("user");
+      expect(msgs[0]!.role).toBe("system");
+      expect(msgs[0]!.content).toBe("You are helpful.");
+      expect(msgs[1]!.role).toBe("user");
     });
 
     it("returns copy without system prompt when null", () => {
@@ -211,7 +211,7 @@ describe("MessageLog", () => {
       ]);
       const msgs = log.buildMessages(null);
       expect(msgs.length).toBe(1);
-      expect(msgs[0].role).toBe("user");
+      expect(msgs[0]!.role).toBe("user");
     });
   });
 

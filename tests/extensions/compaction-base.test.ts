@@ -3,6 +3,7 @@ import { describe, it, expect } from "bun:test";
 import {
   CompactionStrategy,
   CompactionStrategyRegistry,
+  CompactionSettings,
 } from "../../src/extensions/compaction/strategies.ts";
 
 describe("CompactionStrategy", () => {
@@ -14,8 +15,9 @@ describe("CompactionStrategy", () => {
 
   it("execute throws NotImplementedException", async () => {
     const strategy = new CompactionStrategy();
+    const settings: CompactionSettings = { enabled: true, reserveTokens: 0, keepRecent: 0 };
     await expect(
-      strategy.execute([], { keepRecent: 0 }, async () => "", "model"),
+      strategy.execute([], settings, async () => "", "model"),
     ).rejects.toThrow("execute() not implemented");
   });
 
@@ -26,7 +28,8 @@ describe("CompactionStrategy", () => {
         { role: "user", content: "hello" },
         { role: "assistant", content: "hi" },
       ];
-      expect(strategy.canCompact(messages, { keepRecent: 2 })).toBe(false);
+      const settings: CompactionSettings = { enabled: true, reserveTokens: 0, keepRecent: 2 };
+      expect(strategy.canCompact(messages, settings)).toBe(false);
     });
 
     it("returns true when messages exceed threshold", () => {
@@ -34,52 +37,60 @@ describe("CompactionStrategy", () => {
       const messages = Array.from({ length: 6 }, (_, i) => ({
         role: i % 2 === 0 ? "user" : "assistant", content: "x",
       }));
-      expect(strategy.canCompact(messages, { keepRecent: 1 })).toBe(true);
+      const settings: CompactionSettings = { enabled: true, reserveTokens: 0, keepRecent: 1 };
+      expect(strategy.canCompact(messages, settings)).toBe(true);
     });
 
     it("returns false for empty messages", () => {
-      expect(new CompactionStrategy().canCompact([], { keepRecent: 1 })).toBe(false);
+      const settings: CompactionSettings = { enabled: true, reserveTokens: 0, keepRecent: 1 };
+      expect(new CompactionStrategy().canCompact([], settings)).toBe(false);
     });
 
     it("handles keepRecent=0 (uses default 3)", () => {
       const strategy = new CompactionStrategy();
-      expect(strategy.canCompact([], {})).toBe(false);
+      const emptySettings: CompactionSettings = { enabled: true, reserveTokens: 0, keepRecent: 0 };
+      expect(strategy.canCompact([], emptySettings)).toBe(false);
+      const settings: CompactionSettings = { enabled: true, reserveTokens: 0, keepRecent: 0 };
       expect(strategy.canCompact(
         Array.from({ length: 10 }, (_, i) => ({ role: i % 2 === 0 ? "user" : "assistant", content: "x" })),
-        { keepRecent: 0 },
+        settings,
       )).toBe(true);
     });
 
     it("ignores system messages in count", () => {
       const strategy = new CompactionStrategy();
+      const settings1: CompactionSettings = { enabled: true, reserveTokens: 0, keepRecent: 3 };
       expect(strategy.canCompact(
         [{ role: "system", content: "p1" }, { role: "system", content: "p2" }],
-        { keepRecent: 3 },
+        settings1,
       )).toBe(false);
 
+      const settings2: CompactionSettings = { enabled: true, reserveTokens: 0, keepRecent: 1 };
       expect(strategy.canCompact(
         [
           { role: "system", content: "prompt" },
           ...Array.from({ length: 6 }, (_, i) => ({ role: i % 2 === 0 ? "user" : "assistant", content: "x" })),
         ],
-        { keepRecent: 1 },
+        settings2,
       )).toBe(true);
     });
 
     it("boundary: exactly at threshold returns false, one above returns true", () => {
       const strategy = new CompactionStrategy();
       const four = Array.from({ length: 4 }, (_, i) => ({ role: i % 2 === 0 ? "user" : "assistant", content: "x" }));
-      expect(strategy.canCompact(four, { keepRecent: 2 })).toBe(false); // 4 > 4 => false
-      expect(strategy.canCompact([...four, { role: "user", content: "x" }], { keepRecent: 2 })).toBe(true); // 5 > 4 => true
+      const settings1: CompactionSettings = { enabled: true, reserveTokens: 0, keepRecent: 2 };
+      expect(strategy.canCompact(four, settings1)).toBe(false); // 4 > 4 => false
+      const settings2: CompactionSettings = { enabled: true, reserveTokens: 0, keepRecent: 2 };
+      expect(strategy.canCompact([...four, { role: "user", content: "x" }], settings2)).toBe(true); // 5 > 4 => true
     });
   });
 
   describe("subclassing", () => {
     it("can be subclassed with custom properties", () => {
       class CustomStrategy extends CompactionStrategy {
-        name = "custom";
-        description = "A custom strategy";
-        async execute() {
+        override name = "custom";
+        override description = "A custom strategy";
+        override async execute() {
           return { summary: "custom", messagesCompacted: 0, metadata: {} };
         }
       }
@@ -90,23 +101,24 @@ describe("CompactionStrategy", () => {
 
     it("execute can be overridden", async () => {
       class TestStrategy extends CompactionStrategy {
-        name = "test";
-        async execute() {
+        override name = "test";
+        override async execute(_messages: any, _settings: any, _llmChat: any, _model: any) {
           return { summary: "test result", messagesCompacted: 5, metadata: { test: true } };
         }
       }
       const strategy = new TestStrategy();
-      const result = await strategy.execute([], {}, async () => "", "model");
-      expect(result.summary).toBe("test result");
-      expect(result.messagesCompacted).toBe(5);
+      const settings: CompactionSettings = { enabled: true, reserveTokens: 0, keepRecent: 0 };
+      const result = await strategy.execute([], settings, async () => "", "model");
+      expect(result!.summary).toBe("test result");
+      expect(result!.messagesCompacted).toBe(5);
     });
 
     it("canCompact can be overridden", () => {
       class TestStrategy extends CompactionStrategy {
-        name = "test";
-        canCompact() { return true; }
+        override name = "test";
+        override canCompact(_messages: any, _settings: any) { return true; }
       }
-      expect(new TestStrategy().canCompact([], {})).toBe(true);
+      expect(new TestStrategy().canCompact([], { enabled: true, reserveTokens: 0, keepRecent: 0 })).toBe(true);
     });
   });
 });
@@ -121,7 +133,10 @@ describe("CompactionStrategyRegistry", () => {
 
   it("registers and retrieves strategies", () => {
     const registry = new CompactionStrategyRegistry();
-    const strategy = { name: "my-strategy", execute: async () => null };
+    const strategy = new (class extends CompactionStrategy {
+      override name = "my-strategy";
+      override async execute() { return null; }
+    })();
     registry.register(strategy);
     expect(registry.get("my-strategy")).toBe(strategy);
     expect(registry.has("my-strategy")).toBe(true);
@@ -133,39 +148,42 @@ describe("CompactionStrategyRegistry", () => {
 
   it("getAll returns strategies in registration order", () => {
     const registry = new CompactionStrategyRegistry();
-    registry.register({ name: "a", execute: async () => null });
-    registry.register({ name: "b", execute: async () => null });
-    registry.register({ name: "c", execute: async () => null });
+    registry.register(new (class extends CompactionStrategy { override name = "a"; override async execute() { return null; } })());
+    registry.register(new (class extends CompactionStrategy { override name = "b"; override async execute() { return null; } })());
+    registry.register(new (class extends CompactionStrategy { override name = "c"; override async execute() { return null; } })());
     const all = registry.getAll();
     expect(all.map(s => s.name)).toEqual(["a", "b", "c"]);
   });
 
   it("register replaces strategy with same name", () => {
     const registry = new CompactionStrategyRegistry();
-    registry.register({ name: "test", version: 1, execute: async () => null });
-    registry.register({ name: "test", version: 2, execute: async () => null });
-    expect(registry.get("test").version).toBe(2);
+    const s1 = new (class extends CompactionStrategy { override name = "test"; override async execute() { return null; } })();
+    const s2 = new (class extends CompactionStrategy { override name = "test"; override async execute() { return null; } })();
+    (s2 as any).version = 2;
+    registry.register(s1);
+    registry.register(s2);
+    expect(registry.get("test")).toBe(s2);
     expect(registry.getAll()).toHaveLength(1);
   });
 
   it("throws when registering strategy without name", () => {
     const registry = new CompactionStrategyRegistry();
-    expect(() => registry.register({ name: "", description: "test" })).toThrow(
-      "Strategy must have a name property",
-    );
-    expect(() => registry.register({ name: null })).toThrow(
-      "Strategy must have a name property",
-    );
-    expect(() => registry.register({ name: undefined })).toThrow(
+    const noName = new (class extends CompactionStrategy {
+      override name = "";
+      override async execute() { return null; }
+    })();
+    expect(() => registry.register(noName)).toThrow(
       "Strategy must have a name property",
     );
   });
 
   it("getDefault returns summarize strategy when registered", () => {
     const registry = new CompactionStrategyRegistry();
-    const summarizeStrategy = {
-      name: "summarize", description: "Summarize", execute: async () => null,
-    };
+    const summarizeStrategy = new (class extends CompactionStrategy {
+      override name = "summarize";
+      override description = "Summarize";
+      override async execute() { return null; }
+    })();
     registry.register(summarizeStrategy);
     expect(registry.getDefault()).toBe(summarizeStrategy);
   });

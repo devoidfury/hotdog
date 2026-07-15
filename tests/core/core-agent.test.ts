@@ -21,7 +21,7 @@ import {
 // ── Tests ───────────────────────────────────────────────────────────────────
 
 describe('Agent — end-to-end loop', () => {
-  let fixture;
+  let fixture: ReturnType<typeof createFixture> | null;
 
   beforeEach(() => {
     fixture = null; // created per-test

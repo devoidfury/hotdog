@@ -214,7 +214,7 @@ describe('ReviewTool', () => {
       }));
       const parsed = JSON.parse(resultStr(result));
       expect(Array.isArray(parsed)).toBe(true);
-      const found = parsed.find(s => s.id === TEST_SESSION_ID);
+      const found = parsed.find((s: Record<string, unknown>) => s.id === TEST_SESSION_ID);
       expect(found).toBeDefined();
       expect(found.entry_count).toBe(2);
     } finally {

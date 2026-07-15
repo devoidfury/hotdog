@@ -53,35 +53,35 @@ describe("createToolFactory", () => {
     const factory = createToolFactory();
     const tool = factory.createTool("write");
     expect(tool).not.toBeNull();
-    expect(typeof tool.execute).toBe("function");
+    expect(typeof tool!.execute).toBe("function");
   });
 
   it("creates read tool", () => {
     const factory = createToolFactory();
     const tool = factory.createTool("read");
     expect(tool).not.toBeNull();
-    expect(typeof tool.execute).toBe("function");
+    expect(typeof tool!.execute).toBe("function");
   });
 
   it("creates edit tool", () => {
     const factory = createToolFactory();
     const tool = factory.createTool("edit");
     expect(tool).not.toBeNull();
-    expect(typeof tool.execute).toBe("function");
+    expect(typeof tool!.execute).toBe("function");
   });
 
   it("creates grep tool", () => {
     const factory = createToolFactory();
     const tool = factory.createTool("grep");
     expect(tool).not.toBeNull();
-    expect(typeof tool.execute).toBe("function");
+    expect(typeof tool!.execute).toBe("function");
   });
 
   it("creates find tool", () => {
     const factory = createToolFactory();
     const tool = factory.createTool("find");
     expect(tool).not.toBeNull();
-    expect(typeof tool.execute).toBe("function");
+    expect(typeof tool!.execute).toBe("function");
   });
 
   // question is registered by the question-tool extension, not core-tools
@@ -95,7 +95,7 @@ describe("createToolFactory", () => {
     const factory = createToolFactory();
     const tool = factory.createTool("pager");
     expect(tool).not.toBeNull();
-    expect(typeof tool.execute).toBe("function");
+    expect(typeof tool!.execute).toBe("function");
   });
 
   // model is registered by the model-switch extension, not core-tools

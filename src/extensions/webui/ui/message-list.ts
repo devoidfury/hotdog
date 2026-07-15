@@ -216,8 +216,8 @@ export function createMessageList(
     header.addEventListener("click", () => {
       // When expanding, show the full tool output (not truncated preview)
       const isHidden = body.classList.contains("hidden");
-      if (isHidden && (body as HTMLElement).dataset.fullOutput) {
-        body.textContent = (body as HTMLElement).dataset.fullOutput;
+      if (isHidden && body.dataset.fullOutput) {
+        body.textContent = body.dataset.fullOutput;
       }
       body.classList.toggle("hidden");
     });
@@ -236,9 +236,9 @@ export function createMessageList(
     const blocks = container.querySelectorAll<HTMLDivElement>(".tool-call-block");
     let target: HTMLDivElement | null = null;
     for (let i = blocks.length - 1; i >= 0; i--) {
-      const hdr = blocks[i].querySelector(".tool-call-header span");
+      const hdr = blocks[i]!.querySelector(".tool-call-header span");
       if (hdr && hdr.textContent?.includes(name)) {
-        target = blocks[i];
+        target = blocks[i]!;
         break;
       }
     }

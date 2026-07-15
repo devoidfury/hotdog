@@ -1,6 +1,10 @@
 import { test, describe, it, expect } from "bun:test";
 import { WebSearchTool } from "../../src/extensions/web-search/index.ts";
 import { resultStr } from "../helpers.ts";
+import type { CoreContext } from "../../src/core/extensions/types.ts";
+
+/** Helper to cast a mock function to typeof fetch */
+const mockFetch = (fn: () => Promise<unknown>) => fn as unknown as typeof fetch;
 
 describe("WebSearchTool", () => {
   it("has correct tool name", () => {
@@ -12,8 +16,9 @@ describe("WebSearchTool", () => {
     const def = tool.toToolDef();
     expect(def.function.name).toBe("web_search");
     expect(def.function.parameters.required).toEqual(["query"]);
-    expect(def.function.parameters.properties).toHaveProperty("query");
-    expect(def.function.parameters.properties.query.type).toBe("string");
+    const props = def.function.parameters.properties as Record<string, unknown>;
+    expect(props).toHaveProperty("query");
+    expect((props.query as Record<string, string>).type).toBe("string");
   });
 
   it("generates call display", () => {
@@ -129,7 +134,7 @@ describe("WebSearchTool provider error handling", () => {
 describe("WebSearchTool extension create", () => {
   it("creates extension with default config", async () => {
     const { create } = await import("../../src/extensions/web-search/index.ts");
-    const core = { config: {} };
+    const core = { config: {} } as unknown as CoreContext;
     const ext = create(core);
     expect(ext).toBeDefined();
     expect(ext.WebSearchTool).toBeDefined();
@@ -146,14 +151,14 @@ describe("WebSearchTool extension create", () => {
           timeout: 10,
         },
       },
-    };
+    } as unknown as CoreContext;
     const ext = create(core);
     const { HOOKS } = await import("../../src/core/hooks.ts");
     const { createToolRegistry } =
       await import("../../src/core/extensions/tool-registry.ts");
 
     const registry = createToolRegistry();
-    await ext.hooks[HOOKS.TOOLS_REGISTER](registry);
+    await ext.hooks![HOOKS.TOOLS_REGISTER]!(registry);
     expect(registry.has("web_search")).toBe(true);
   });
 
@@ -166,7 +171,7 @@ describe("WebSearchTool extension create", () => {
           tavilyApiKey: "test-api-key",
         },
       },
-    };
+    } as unknown as CoreContext;
     const ext = create(core);
     expect(ext).toBeDefined();
   });
@@ -185,8 +190,8 @@ describe("WebSearchTool DuckDuckGo parser", () => {
     </body></html>`;
 
     const originalFetch = globalThis.fetch;
-    globalThis.fetch = () =>
-      Promise.resolve(new Response(mockHtml, { status: 200 }));
+    globalThis.fetch = mockFetch(() =>
+      Promise.resolve(new Response(mockHtml, { status: 200 })));
 
     try {
       const tool = new WebSearchTool({ provider: "duckduckgo", maxResults: 5 });
@@ -210,8 +215,8 @@ describe("WebSearchTool DuckDuckGo parser", () => {
     </body></html>`;
 
     const originalFetch = globalThis.fetch;
-    globalThis.fetch = () =>
-      Promise.resolve(new Response(mockHtml, { status: 200 }));
+    globalThis.fetch = mockFetch(() =>
+      Promise.resolve(new Response(mockHtml, { status: 200 })));
 
     try {
       const tool = new WebSearchTool({ provider: "duckduckgo" });
@@ -228,10 +233,10 @@ describe("WebSearchTool DuckDuckGo parser", () => {
 
   it("handles empty duckduckgo results", async () => {
     const originalFetch = globalThis.fetch;
-    globalThis.fetch = () =>
+    globalThis.fetch = mockFetch(() =>
       Promise.resolve(
         new Response("<html><body>No results</body></html>", { status: 200 }),
-      );
+      ));
 
     try {
       const tool = new WebSearchTool({ provider: "duckduckgo" });
@@ -245,8 +250,8 @@ describe("WebSearchTool DuckDuckGo parser", () => {
 
   it("handles duckduckgo network error", async () => {
     const originalFetch = globalThis.fetch;
-    globalThis.fetch = () =>
-      Promise.resolve(new Response("error", { status: 500 }));
+    globalThis.fetch = mockFetch(() =>
+      Promise.resolve(new Response("error", { status: 500 })));
 
     try {
       const tool = new WebSearchTool({ provider: "duckduckgo" });
@@ -268,8 +273,8 @@ describe("WebSearchTool DuckDuckGo parser", () => {
     </body></html>`;
 
     const originalFetch = globalThis.fetch;
-    globalThis.fetch = () =>
-      Promise.resolve(new Response(mockHtml, { status: 200 }));
+    globalThis.fetch = mockFetch(() =>
+      Promise.resolve(new Response(mockHtml, { status: 200 })));
 
     try {
       const tool = new WebSearchTool({ provider: "duckduckgo" });
@@ -290,8 +295,8 @@ describe("WebSearchTool DuckDuckGo parser", () => {
     </body></html>`;
 
     const originalFetch = globalThis.fetch;
-    globalThis.fetch = () =>
-      Promise.resolve(new Response(mockHtml, { status: 200 }));
+    globalThis.fetch = mockFetch(() =>
+      Promise.resolve(new Response(mockHtml, { status: 200 })));
 
     try {
       const tool = new WebSearchTool({ provider: "duckduckgo" });
@@ -322,12 +327,12 @@ describe("WebSearchTool Brave parser", () => {
     };
 
     const originalFetch = globalThis.fetch;
-    globalThis.fetch = () =>
+    globalThis.fetch = mockFetch(() =>
       Promise.resolve({
         ok: true,
         status: 200,
         json: () => Promise.resolve(mockResponse),
-      });
+      }));
 
     try {
       const tool = new WebSearchTool({
@@ -346,12 +351,12 @@ describe("WebSearchTool Brave parser", () => {
 
   it("handles brave empty results", async () => {
     const originalFetch = globalThis.fetch;
-    globalThis.fetch = () =>
+    globalThis.fetch = mockFetch(() =>
       Promise.resolve({
         ok: true,
         status: 200,
         json: () => Promise.resolve({ web: { results: [] } }),
-      });
+      }));
 
     try {
       const tool = new WebSearchTool({
@@ -380,12 +385,12 @@ describe("WebSearchTool Tavily parser", () => {
     };
 
     const originalFetch = globalThis.fetch;
-    globalThis.fetch = () =>
+    globalThis.fetch = mockFetch(() =>
       Promise.resolve({
         ok: true,
         status: 200,
         json: () => Promise.resolve(mockResponse),
-      });
+      }));
 
     try {
       const tool = new WebSearchTool({
@@ -417,12 +422,12 @@ describe("WebSearchTool SearXNG parser", () => {
     };
 
     const originalFetch = globalThis.fetch;
-    globalThis.fetch = () =>
+    globalThis.fetch = mockFetch(() =>
       Promise.resolve({
         ok: true,
         status: 200,
         json: () => Promise.resolve(mockResponse),
-      });
+      }));
 
     try {
       const tool = new WebSearchTool({

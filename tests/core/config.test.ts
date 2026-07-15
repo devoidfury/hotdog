@@ -24,7 +24,7 @@ tags: [a, b, c]
 ---
 Body`;
     const result = parseFrontMatter(input);
-    expect(result.frontMatter).toEqual({ active: true, count: 42, tags: ["a", "b", "c"] });
+    expect(result!.frontMatter).toEqual({ active: true, count: 42, tags: ["a", "b", "c"] });
   });
 
   it("returns null when no front matter", () => {
@@ -56,11 +56,11 @@ describe("buildModelRegistry", () => {
 
   it("handles provider-level default model", () => {
     const config = {
-      providers: [{ name: "test", defaultModel: "gpt-3.5", temperature: 0.5 }],
+      providers: [{ name: "test", defaultModel: "gpt-3.5", temperature: 0.5, models: [] }],
     };
     const registry = buildModelRegistry(config, 32000);
     expect(registry["test/gpt-3.5"]).toBeDefined();
-    expect(registry["test/gpt-3.5"].temperature).toBe(0.5);
+    expect(registry["test/gpt-3.5"]!.temperature).toBe(0.5);
   });
 
   it("handles empty or multiple providers", () => {
@@ -90,8 +90,8 @@ describe("buildModelRegistry", () => {
       ],
     };
     const registry = buildModelRegistry(config, 32000);
-    expect(registry["ai365/dsv4"].reasoningEffort).toBe("max");
-    expect(registry["ai365/qwen"].reasoningEffort).toBe("high");
-    expect(registry["ai365/basic"].reasoningEffort).toBeUndefined();
+    expect(registry["ai365/dsv4"]!.reasoningEffort).toBe("max");
+    expect(registry["ai365/qwen"]!.reasoningEffort).toBe("high");
+    expect(registry["ai365/basic"]!.reasoningEffort).toBeUndefined();
   });
 });

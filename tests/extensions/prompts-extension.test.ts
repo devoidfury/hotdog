@@ -8,7 +8,7 @@ import os from "node:os";
 import path from "node:path";
 
 describe("Prompts Extension", () => {
-  let tmpDir;
+  let tmpDir: string;
 
   beforeEach(async () => {
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "prompts-test-"));
@@ -18,7 +18,7 @@ describe("Prompts Extension", () => {
     fs.rmSync(tmpDir, { recursive: true, force: true });
   });
 
-  function writePromptFile(name, content) {
+  function writePromptFile(name: string, content: string) {
     const filePath = path.join(tmpDir, `${name}.prompt.md`);
     fs.writeFileSync(filePath, content);
     return filePath;
@@ -32,10 +32,10 @@ describe("Prompts Extension", () => {
 
     const ext = await create({
       config: { prompts: { promptsPath: tmpDir } },
-    });
+    } as any);
 
     expect(ext).toBeDefined();
-    expect(ext.loader).toBeDefined();
+    expect((ext as any).loader).toBeDefined();
   });
 
   it("getAllPrompts returns all loaded prompts", async () => {
@@ -44,9 +44,9 @@ describe("Prompts Extension", () => {
 
     const ext = await create({
       config: { prompts: { promptsPath: tmpDir } },
-    });
+    } as any);
 
-    const prompts = ext.getAllPrompts();
+    const prompts = (ext as any).getAllPrompts();
     expect(prompts.length).toBe(2);
   });
 
@@ -58,9 +58,9 @@ describe("Prompts Extension", () => {
 
     const ext = await create({
       config: { prompts: { promptsPath: tmpDir } },
-    });
+    } as any);
 
-    const prompt = ext.getPrompt("greet");
+    const prompt = (ext as any).getPrompt("greet");
     expect(prompt).toBeDefined();
     expect(prompt.name).toBe("greet");
     expect(prompt.description).toBe("Greet someone");
@@ -71,9 +71,9 @@ describe("Prompts Extension", () => {
 
     const ext = await create({
       config: { prompts: { promptsPath: tmpDir } },
-    });
+    } as any);
 
-    expect(ext.getPrompt("unknown")).toBeNull();
+    expect((ext as any).getPrompt("unknown")).toBeNull();
   });
 
   it("COMMANDS_REGISTER registers the prompt command", async () => {
@@ -84,20 +84,20 @@ describe("Prompts Extension", () => {
 
     const ext = await create({
       config: { prompts: { promptsPath: tmpDir } },
-    });
+    } as any);
 
-    expect(ext.hooks[HOOKS.COMMANDS_REGISTER]).toBeDefined();
+    expect(ext.hooks![HOOKS.COMMANDS_REGISTER]).toBeDefined();
 
-    const registrations = [];
+    const registrations: any[] = [];
     const registry = {
-      register: (name, handler) => registrations.push({ name, handler }),
+      register: (name: string, handler: any) => registrations.push({ name, ...handler }),
     };
-    await ext.hooks[HOOKS.COMMANDS_REGISTER]({ registry });
+    await ext.hooks![HOOKS.COMMANDS_REGISTER]!({ registry } as any);
 
     expect(registrations.length).toBe(1);
     expect(registrations[0].name).toBe("prompt");
-    expect(registrations[0].handler.matches("prompt:greet")).toBe(true);
-    expect(registrations[0].handler.matches("other")).toBe(false);
+    expect(registrations[0].matches("prompt:greet")).toBe(true);
+    expect(registrations[0].matches("other")).toBe(false);
   });
 
   it("prompt command handler executes a prompt", async () => {
@@ -108,21 +108,21 @@ describe("Prompts Extension", () => {
 
     const ext = await create({
       config: { prompts: { promptsPath: tmpDir } },
-    });
+    } as any);
 
     const agent = new MockAgent();
-    const messagesAdded = [];
+    const messagesAdded: any[] = [];
     const originalAddMessage = agent.addMessage.bind(agent);
-    agent.addMessage = (msg) => {
+    agent.addMessage = (msg: any) => {
       messagesAdded.push(msg);
       originalAddMessage(msg);
     };
 
-    const registrations = [];
+    const registrations: any[] = [];
     const testRegistry = {
-      register: (name, handler) => registrations.push({ name, ...handler }),
+      register: (name: string, handler: any) => registrations.push({ name, ...handler }),
     };
-    await ext.hooks[HOOKS.COMMANDS_REGISTER]({ registry: testRegistry });
+    await ext.hooks![HOOKS.COMMANDS_REGISTER]!({ registry: testRegistry } as any);
 
     const handler = registrations[0];
     const result = await handler.handler(agent, "prompt:greet world");
@@ -142,15 +142,15 @@ describe("Prompts Extension", () => {
 
     const ext = await create({
       config: { prompts: { promptsPath: tmpDir, displayPrompt: false } },
-    });
+    } as any);
 
     const agent = new MockAgent();
 
-    const registrations = [];
+    const registrations: any[] = [];
     const testRegistry = {
-      register: (name, handler) => registrations.push({ name, ...handler }),
+      register: (name: string, handler: any) => registrations.push({ name, ...handler }),
     };
-    await ext.hooks[HOOKS.COMMANDS_REGISTER]({ registry: testRegistry });
+    await ext.hooks![HOOKS.COMMANDS_REGISTER]!({ registry: testRegistry } as any);
 
     const handler = registrations[0];
     const result = await handler.handler(agent, "prompt:greet world");
@@ -162,15 +162,15 @@ describe("Prompts Extension", () => {
   it("prompt command returns error for unknown prompt", async () => {
     const ext = await create({
       config: { prompts: { promptsPath: tmpDir } },
-    });
+    } as any);
 
     const agent = new MockAgent();
 
-    const registrations = [];
+    const registrations: any[] = [];
     const testRegistry = {
-      register: (name, handler) => registrations.push({ name, ...handler }),
+      register: (name: string, handler: any) => registrations.push({ name, ...handler }),
     };
-    await ext.hooks[HOOKS.COMMANDS_REGISTER]({ registry: testRegistry });
+    await ext.hooks![HOOKS.COMMANDS_REGISTER]!({ registry: testRegistry } as any);
 
     const handler = registrations[0];
     const result = await handler.handler(agent, "prompt:unknown");
@@ -178,7 +178,7 @@ describe("Prompts Extension", () => {
   });
 
   it("handles default promptsPath when not configured", async () => {
-    const ext = await create({ config: {} });
-    expect(ext.loader).toBeDefined();
+    const ext = await create({ config: {} } as any);
+    expect((ext as any).loader).toBeDefined();
   });
 });

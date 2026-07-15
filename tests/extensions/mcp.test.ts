@@ -51,10 +51,10 @@ describe("jsonRpcNotification", () => {
 
 describe("mcpInitializeRequest", () => {
   it("creates initialize request", () => {
-    const req = mcpInitializeRequest();
+    const req = mcpInitializeRequest() as Record<string, { roots?: unknown; } | { name?: string } | string>;
     expect(req.protocolVersion).toBe("2025-11-25");
-    expect(req.capabilities.roots).toBeDefined();
-    expect(req.clientInfo.name).toBe("hotdog");
+    expect((req.capabilities as Record<string, unknown>).roots).toBeDefined();
+    expect((req.clientInfo as Record<string, unknown>).name).toBe("hotdog");
   });
 });
 
@@ -68,7 +68,7 @@ describe("parseMcpInitializeResponse", () => {
     };
     const result = parseMcpInitializeResponse(data);
     expect(result.protocolVersion).toBe("2025-11-25");
-    expect(result.capabilities.tools.listChanged).toBe(true);
+    expect(result.capabilities.tools!.listChanged).toBe(true);
     expect(result.capabilities.logging).toBe(true);
     expect(result.serverInfo.name).toBe("test-server");
     expect(result.instructions).toBe("Some instructions");
@@ -98,8 +98,8 @@ describe("parseMcpToolsListResponse", () => {
     };
     const result = parseMcpToolsListResponse(data);
     expect(result.tools).toHaveLength(2);
-    expect(result.tools[0].name).toBe("echo");
-    expect(result.tools[1].name).toBe("greet");
+    expect(result.tools[0]!.name).toBe("echo");
+    expect(result.tools[1]!.name).toBe("greet");
     expect(result.nextCursor).toBe("abc123");
   });
 
@@ -232,8 +232,8 @@ describe("contentBlocksToString", () => {
 
 describe("McpTool", () => {
   const mockHandle = {
-    callTool: async (name, args) => ({ content: [{ type: "text", text: "result" }] }),
-  };
+    callTool: async (_name: string, _args: Record<string, unknown>) => ({ content: [{ type: "text", text: "result" }] }),
+  } as any;
 
   it("creates tool with registered name", () => {
     const toolDef = { name: "echo", description: "Echo text", inputSchema: { type: "object", properties: {} } };
@@ -259,7 +259,7 @@ describe("McpTool", () => {
 
     expect(def.function.name).toBe("server/greet");
     expect(def.function.description).toBe("Greet someone");
-    expect(def.function.parameters.properties.name.description).toBe("The name");
+    expect(def.function.parameters.properties.name!.description).toBe("The name");
     expect(def.function.parameters.required).toEqual(["name"]);
   });
 
@@ -286,31 +286,31 @@ describe("McpTool", () => {
   });
 
   it("executes tool with valid JSON input", async () => {
-    let receivedArgs = null;
+    let receivedArgs: Record<string, unknown> | null = null;
     const mockHandle2 = {
-      callTool: async (name, args) => {
+      callTool: async (_name: string, args: Record<string, unknown>) => {
         receivedArgs = args;
         return { content: [{ type: "text", text: "ok" }] };
       },
-    };
+    } as any;
     const toolDef = { name: "test", description: "test", inputSchema: {} };
     const tool = new McpTool("server", toolDef, mockHandle2);
     await tool.execute(JSON.stringify({ key: "value" }));
-    expect(receivedArgs).toEqual({ key: "value" });
+    expect(receivedArgs as unknown as Record<string, unknown>).toEqual({ key: "value" });
   });
 
   it("executes tool with object input", async () => {
-    let receivedArgs = null;
+    let receivedArgs: Record<string, unknown> | null = null;
     const mockHandle2 = {
-      callTool: async (name, args) => {
+      callTool: async (_name: string, args: Record<string, unknown>) => {
         receivedArgs = args;
         return { content: [{ type: "text", text: "ok" }] };
       },
-    };
+    } as any;
     const toolDef = { name: "test", description: "test", inputSchema: {} };
     const tool = new McpTool("server", toolDef, mockHandle2);
     await tool.execute({ key: "value" });
-    expect(receivedArgs).toEqual({ key: "value" });
+    expect(receivedArgs as unknown as Record<string, unknown>).toEqual({ key: "value" });
   });
 
   it("returns error on invalid JSON input", async () => {
@@ -324,7 +324,7 @@ describe("McpTool", () => {
   it("returns error when MCP call fails", async () => {
     const mockHandle2 = {
       callTool: async () => { throw new Error("MCP server error"); },
-    };
+    } as any;
     const toolDef = { name: "test", description: "test", inputSchema: {} };
     const tool = new McpTool("server", toolDef, mockHandle2);
     const result = await tool.execute("{}");
@@ -343,7 +343,7 @@ describe("McpTool", () => {
     };
     const tool = new McpTool("server", toolDef, mockHandle);
     const def = tool.toToolDef();
-    expect(def.function.parameters.properties.mode.enum).toEqual(["debug", "release"]);
+    expect(def.function.parameters.properties.mode!.enum).toEqual(["debug", "release"]);
   });
 
   it("handles tool with numeric constraints", () => {
@@ -360,9 +360,9 @@ describe("McpTool", () => {
     };
     const tool = new McpTool("server", toolDef, mockHandle);
     const def = tool.toToolDef();
-    expect(def.function.parameters.properties.count.minimum).toBe(0);
-    expect(def.function.parameters.properties.count.maximum).toBe(100);
-    expect(def.function.parameters.properties.rate.exclusiveMaximum).toBe(1.0);
+    expect(def.function.parameters.properties.count!.minimum).toBe(0);
+    expect(def.function.parameters.properties.count!.maximum).toBe(100);
+    expect(def.function.parameters.properties.rate!.exclusiveMaximum).toBe(1.0);
   });
 
   it("handles tool with string constraints", () => {
@@ -376,8 +376,8 @@ describe("McpTool", () => {
     };
     const tool = new McpTool("server", toolDef, mockHandle);
     const def = tool.toToolDef();
-    expect(def.function.parameters.properties.name.minLength).toBe(1);
-    expect(def.function.parameters.properties.name.maxLength).toBe(50);
-    expect(def.function.parameters.properties.name.pattern).toBe("^[a-z]+$");
+    expect(def.function.parameters.properties.name!.minLength).toBe(1);
+    expect(def.function.parameters.properties.name!.maxLength).toBe(50);
+    expect(def.function.parameters.properties.name!.pattern).toBe("^[a-z]+$");
   });
 });

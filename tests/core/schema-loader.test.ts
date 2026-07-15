@@ -83,9 +83,9 @@ describe("loadExtensionSchemas", () => {
 
   it("skips extensions without configSchema", () => {
     const result = loadExtensionSchemas([
-      { name: "no-schema" },
-      { name: "null-schema", configSchema: null },
-      { name: "array-schema", configSchema: [] },
+      { configSchema: undefined } as any,
+      { configSchema: null } as any,
+      { configSchema: [] } as any,
     ]);
     expect(result).toEqual({});
   });
@@ -107,7 +107,7 @@ describe("loadExtensionSchemas", () => {
     ];
     const result = loadExtensionSchemas(extensions);
     expect(result).toHaveProperty("myExt");
-    expect(Array.isArray(result.myExt.layers)).toBe(true);
+    expect(Array.isArray(result.myExt!.layers)).toBe(true);
   });
 
   it("skips extension keys without layers", () => {
@@ -187,12 +187,12 @@ describe("cliFlagsFromSchema", () => {
     };
     const flags = cliFlagsFromSchema(schema);
     expect(flags).toHaveLength(2);
-    expect(flags[0].key).toBe("model");
-    expect(flags[0].short).toBe("-m");
-    expect(flags[0].long).toBe("model");
-    expect(flags[0].hasValue).toBe(true);
-    expect(flags[1].key).toBe("showTools");
-    expect(flags[1].hasValue).toBe(false);
+    expect(flags[0]!.key).toBe("model");
+    expect(flags[0]!.short).toBe("-m");
+    expect(flags[0]!.long).toBe("model");
+    expect(flags[0]!.hasValue).toBe(true);
+    expect(flags[1]!.key).toBe("showTools");
+    expect(flags[1]!.hasValue).toBe(false);
   });
 });
 
@@ -203,7 +203,7 @@ describe("resolveLayerValue", () => {
   });
 
   it("resolves default function layer", () => {
-    const layer = { default: (ctx) => `value-${ctx.profileName}` };
+    const layer = { default: (ctx: { profileName: string }) => `value-${ctx.profileName}` };
     expect(resolveLayerValue(layer, { profileName: "my-profile" })).toBe("value-my-profile");
   });
 
@@ -284,44 +284,44 @@ describe("resolveModel", () => {
 
   it("CLI model takes second priority", () => {
     expect(
-      resolveModel("cli-model", null, "config-model", null, "default")
+      resolveModel("cli-model", undefined, "config-model", null, "default")
     ).toBe("cli-model");
   });
 
   it("CLI model with provider prefix", () => {
     const provider = { name: "openai", models: [{ name: "cli-model" }] };
     expect(
-      resolveModel("cli-model", null, "config-model", provider, "default")
+      resolveModel("cli-model", undefined, "config-model", provider, "default")
     ).toBe("openai/cli-model");
   });
 
   it("provider default model takes third priority", () => {
     expect(
-      resolveModel(null, null, "config-model", { name: "provider", models: [{ name: "m1" }] }, "default")
+      resolveModel(undefined, undefined, "config-model", { name: "provider", models: [{ name: "m1" }] }, "default")
     ).toBe("provider/m1");
   });
 
   it("config model takes fourth priority", () => {
     expect(
-      resolveModel(null, null, "config-model", null, "default")
+      resolveModel(undefined, undefined, "config-model", null, "default")
     ).toBe("config-model");
   });
 
   it("falls back to default model", () => {
     expect(
-      resolveModel(null, null, null, null, "qwen3.5-0.8b")
+      resolveModel(undefined, undefined, null, null, "qwen3.5-0.8b")
     ).toBe("qwen3.5-0.8b");
   });
 
   it("returns model with provider prefix when provider matches", () => {
     expect(
-      resolveModel(null, "gpt-4", null, { name: "openai", models: [{ name: "gpt-4" }, { name: "gpt-3.5" }] }, "default")
+      resolveModel(undefined, "gpt-4", undefined, { name: "openai", models: [{ name: "gpt-4" }, { name: "gpt-3.5" }] }, "default")
     ).toBe("openai/gpt-4");
   });
 
   it("returns model name as-is when provider has no matching model", () => {
     expect(
-      resolveModel(null, "unknown-model", null, { name: "provider", models: [{ name: "m1" }] }, "default")
+      resolveModel(undefined, "unknown-model", undefined, { name: "provider", models: [{ name: "m1" }] }, "default")
     ).toBe("unknown-model");
   });
 });
@@ -332,7 +332,7 @@ describe("resolveModelWithProvider", () => {
   });
 
   it("returns name as-is when null", () => {
-    expect(resolveModelWithProvider(null, null)).toBeNull();
+    expect(resolveModelWithProvider(null as any, undefined)).toBeNull();
   });
 
   it("prefixes with provider name when model found", () => {
@@ -346,10 +346,10 @@ describe("resolveModelWithProvider", () => {
   });
 
   it("returns name as-is when provider is null", () => {
-    expect(resolveModelWithProvider("gpt-4", null)).toBe("gpt-4");
+    expect(resolveModelWithProvider("gpt-4", undefined)).toBe("gpt-4");
   });
 
   it("returns name as-is when provider has no models", () => {
-    expect(resolveModelWithProvider("gpt-4", { name: "test" })).toBe("gpt-4");
+    expect(resolveModelWithProvider("gpt-4", { name: "test", models: [] } as any)).toBe("gpt-4");
   });
 });

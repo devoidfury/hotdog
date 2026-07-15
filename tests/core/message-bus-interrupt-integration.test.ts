@@ -12,23 +12,23 @@ import { OUTPUT_EVENT } from '../../src/core/context/output.ts';
 // ── Mocks ───────────────────────────────────────────────────────────────────
 
 class MockSessionManager {
-  constructor(agent) {
+  _agent: unknown;
+  _sessionId: string;
+  constructor(agent: unknown) {
     this._agent = agent;
     this._sessionId = 'integ-test';
   }
-  getAgent() { return this._agent; }
+  getAgent() { return this._agent as { hooks: { runHookPipeline: (name: string, data: unknown) => Promise<void> } } | undefined; }
   sessionId() { return this._sessionId; }
 }
 
 class TrackingSink {
-  constructor() {
-    this.events = [];
-  }
-  emit(event) {
+  events: unknown[] = [];
+  emit(event: unknown) {
     this.events.push(event);
   }
   commandResults() {
-    return this.events.filter(e => e.type === OUTPUT_EVENT.COMMAND_RESULT);
+    return this.events.filter((e) => (e as { type: number }).type === OUTPUT_EVENT.COMMAND_RESULT);
   }
 }
 
@@ -48,7 +48,7 @@ describe('MessageBus interrupt integration', () => {
     };
     const sink = new TrackingSink();
     const bus = new MessageBus({
-      sessionManager: new MockSessionManager(agent),
+      sessionManager: new MockSessionManager(agent) as any,
       sink,
     });
 
@@ -72,7 +72,7 @@ describe('MessageBus interrupt integration', () => {
       _cancelled: false,
       cancel() { this._cancelled = true; },
       resetCancel() { this._cancelled = false; },
-      run: async (text) => {
+      run: async (text: string) => {
         runCount++;
         return `processed: ${text}`;
       },
@@ -82,7 +82,7 @@ describe('MessageBus interrupt integration', () => {
     };
     const sink = new TrackingSink();
     const bus = new MessageBus({
-      sessionManager: new MockSessionManager(agent),
+      sessionManager: new MockSessionManager(agent) as any,
       sink,
     });
 
@@ -100,17 +100,17 @@ describe('MessageBus interrupt integration', () => {
   });
 
   it('suppresses LlmError.Cancelled during message processing', async () => {
-    let resolveRun;
+    let resolveRun: ((value: unknown) => void) | undefined;
     const agent = {
       _cancelled: false,
       cancel() {
         this._cancelled = true;
         if (resolveRun) {
-          resolveRun();
+          resolveRun(undefined);
         }
       },
       resetCancel() { this._cancelled = false; },
-      async run(text) {
+      async run(text: string) {
         await new Promise((r) => { resolveRun = r; });
         if (this._cancelled) throw LlmError.Cancelled('Agent cancelled');
         return 'done';
@@ -121,7 +121,7 @@ describe('MessageBus interrupt integration', () => {
     };
     const sink = new TrackingSink();
     const bus = new MessageBus({
-      sessionManager: new MockSessionManager(agent),
+      sessionManager: new MockSessionManager(agent) as any,
       sink,
     });
 
@@ -166,14 +166,14 @@ describe('MessageBus interrupt integration', () => {
       _cancelled: false,
       cancel() { this._cancelled = true; },
       resetCancel() { this._cancelled = false; },
-      async run(text) { throw new Error('Real error'); },
+      async run(text: string) { throw new Error('Real error'); },
       get cancelled() { return this._cancelled; },
       get sessionName() { return 'test'; },
       get taskManager() { return null; },
     };
     const sink = new TrackingSink();
     const bus = new MessageBus({
-      sessionManager: new MockSessionManager(agent),
+      sessionManager: new MockSessionManager(agent) as any,
       sink,
     });
 
@@ -184,7 +184,7 @@ describe('MessageBus interrupt integration', () => {
 
     const cmdResults = sink.commandResults();
     expect(cmdResults.length).toBe(1);
-    expect(cmdResults[0].content).toContain('Real error');
+    expect((cmdResults[0] as { content: string }).content).toContain('Real error');
   });
 
 });

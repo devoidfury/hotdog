@@ -32,9 +32,9 @@ describe('ReadTool.toToolDef', () => {
 
   it('has optional limit and offset', () => {
     const def = new ReadTool().toToolDef();
-    const props = def.function.parameters.properties;
-    expect(props.limit.type).toBe('integer');
-    expect(props.offset.type).toBe('integer');
+    const props = def.function.parameters.properties as Record<string, { type?: string }>;
+    expect(props.limit!.type).toBe('integer');
+    expect(props.offset!.type).toBe('integer');
     expect(props.type).toBeUndefined();
   });
 });
@@ -333,7 +333,7 @@ describe('ReadTool.execute — image files', () => {
 
     expect(result.success).toBe(true);
     expect(result.images).toBeDefined();
-    expect(result.images[0].mimeType).toBe('image/png');
+    expect((result.images![0] as { mimeType: string }).mimeType).toBe('image/png');
   });
 
   it('includes file size in metadata', async () => {
@@ -346,8 +346,8 @@ describe('ReadTool.execute — image files', () => {
       toolCtx({ workspaceRoot: dir })
     );
 
-    expect(result.metadata.get('size')).toBe(String(MINIMAL_PNG.length));
-    expect(result.metadata.get('mime_type')).toBe('image/png');
+    expect(result.metadata!.get('size')).toBe(String(MINIMAL_PNG.length));
+    expect(result.metadata!.get('mime_type')).toBe('image/png');
   });
 
   it('reads image with absolute path', async () => {
@@ -362,7 +362,7 @@ describe('ReadTool.execute — image files', () => {
 
     expect(result.success).toBe(true);
     expect(result.images).toBeDefined();
-    expect(result.images[0].mimeType).toBe('image/png');
+    expect((result.images![0] as { mimeType: string }).mimeType).toBe('image/png');
   });
 
   it('rejects path outside cwd boundary for images', async () => {

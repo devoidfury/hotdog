@@ -32,7 +32,8 @@ describe('EditTool.toToolDef', () => {
 
   it('has replace_all as optional boolean', () => {
     const def = new EditTool().toToolDef();
-    expect(def.function.parameters.properties.replace_all.type).toBe('boolean');
+    const props = def.function.parameters.properties as Record<string, unknown>;
+    expect((props.replace_all as Record<string, string>).type).toBe('boolean');
   });
 });
 

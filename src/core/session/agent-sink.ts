@@ -45,7 +45,7 @@ export class AgentSink {
   emit(event: OutputEvent): void {
     if (this.#isTaskAgent) {
       // Task agents are silent to the UI — filter most events
-      const filterTypes = [
+      const filterTypes: OutputEventType[] = [
         OUTPUT_EVENT.STREAMING_CHUNK,
         OUTPUT_EVENT.STREAMING_REASONING_CHUNK,
         OUTPUT_EVENT.TOOL_CALL,

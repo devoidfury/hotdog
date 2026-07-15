@@ -7,7 +7,7 @@ import { resultStr, getDisplay } from "../helpers.ts";
 const TEST_PORT = 18932;
 const BASE_URL = `http://localhost:${TEST_PORT}`;
 
-let server: Bun.ServeTypes.Server | null = null;
+let server: ReturnType<typeof Bun.serve> | null = null;
 
 const sampleHtml = `<!DOCTYPE html>
 <html>
@@ -58,7 +58,7 @@ function startTestServer(): void {
 
       // /status/:code — returns a specific HTTP status code
       if (url.pathname.startsWith("/status/")) {
-        const code = parseInt(url.pathname.split("/")[2], 10);
+        const code = parseInt(url.pathname.split("/")[2] ?? "404", 10);
         return new Response(`Status ${code}`, {
           status: code,
           headers: { "Content-Type": "text/plain" },
@@ -118,11 +118,12 @@ describe("FetchTool", () => {
     const def = tool.toToolDef();
     expect(def.function.name).toBe("fetch");
     expect(def.function.parameters.required).toEqual(["url"]);
-    expect(def.function.parameters.properties).toHaveProperty("method");
-    expect(def.function.parameters.properties).toHaveProperty("headers");
-    expect(def.function.parameters.properties).toHaveProperty("body");
-    expect(def.function.parameters.properties).toHaveProperty("showOriginal");
-    expect(def.function.parameters.properties.showOriginal.type).toBe("boolean");
+    const props = def.function.parameters.properties as Record<string, unknown>;
+    expect(props).toHaveProperty("method");
+    expect(props).toHaveProperty("headers");
+    expect(props).toHaveProperty("body");
+    expect(props).toHaveProperty("showOriginal");
+    expect((props.showOriginal as Record<string, unknown>).type).toBe("boolean");
   });
 
   it("generates call display for GET request", () => {

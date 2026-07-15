@@ -1,7 +1,11 @@
 import { describe, it, expect, beforeEach } from "bun:test";
 import { HookSystem, HOOKS } from "../../src/core/hooks.ts";
-import { ExtensionLoader } from "../../src/core/extensions/extensions.ts";
+import { ExtensionLoader, type LoaderCore } from "../../src/core/extensions/extensions.ts";
 import { ToolRegistry } from "../../src/core/extensions/tool-registry.ts";
+import type { CoreContext } from "../../src/core/extensions/types.ts";
+import type { ServiceRegistry } from "../../src/core/extensions/service-registry.ts";
+import type { ConfigRegistry } from "../../src/core/extensions/config-registry.ts";
+import type { CliSubcommandRegistry } from "../../src/core/extensions/registries.ts";
 import { create as createCompactionExtension } from "../../src/extensions/compaction/index.ts";
 import { create as createCoreToolsExtension } from "../../src/extensions/core-tools/index.ts";
 import { create as createSkillsExtension } from "../../src/extensions/skills/index.ts";
@@ -10,29 +14,29 @@ import { create as createSessionLogExtension } from "../../src/extensions/sessio
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
-function createMockCore(config = {}) {
+function createMockCore(config: Record<string, unknown> = {}): CoreContext {
   const hooks = new HookSystem();
   const toolRegistry = new ToolRegistry();
   const serviceRegistry = {
-    _services: new Map(),
-    register(name, impl) {
+    _services: new Map<string, unknown>(),
+    register(name: string, impl: unknown) {
       this._services.set(name, impl);
     },
-    get(name) {
+    get(name: string): unknown {
       const impl = this._services.get(name);
       if (impl === undefined) throw new Error(`Service "${name}" is not registered.`);
       return impl;
     },
-    has(name) {
+    has(name: string): boolean {
       return this._services.has(name);
     },
-    names() {
+    names(): string[] {
       return Array.from(this._services.keys());
     },
-    checkContract(name, expectedMethods) {
+    checkContract(name: string, expectedMethods: string[]) {
       const impl = this._services.get(name);
       if (!impl) return { valid: false, missing: expectedMethods };
-      const missing = expectedMethods.filter((m) => typeof impl[m] !== "function");
+      const missing = expectedMethods.filter((m: string) => typeof (impl as Record<string, unknown>)[m] !== "function");
       return { valid: missing.length === 0, missing };
     },
   };
@@ -47,15 +51,21 @@ function createMockCore(config = {}) {
       skills: config.skills || { path: "/tmp/skills-test" },
       promptsPath: config.promptsPath || "/tmp/prompts-test",
       ...config,
-    },
+    } as Record<string, unknown>,
     modelRegistry: {},
     toolRegistry,
-    services: serviceRegistry,
-  };
+    services: serviceRegistry as unknown as ServiceRegistry,
+    configRegistry: {
+      validateConfigByKey: (_key: string, _config: unknown) => ({ valid: true, errors: [] }),
+    } as unknown as ConfigRegistry,
+    cliSubcommandRegistry: {} as unknown as CliSubcommandRegistry,
+    extensions: {} as unknown as ExtensionLoader,
+    service: (name: string) => serviceRegistry.get(name),
+  } as unknown as CoreContext;
 }
 
 // Helper to wrap factory functions for ExtensionLoader
-function wrapFactory(factory) {
+function wrapFactory(factory: (core: CoreContext) => unknown) {
   return { create: factory };
 }
 
@@ -64,7 +74,7 @@ function wrapFactory(factory) {
 describe("Hook + Extension Integration", () => {
   it("should wire up an extension to the hook system", async () => {
     const core = createMockCore();
-    const loader = new ExtensionLoader(core);
+    const loader = new ExtensionLoader(core as unknown as LoaderCore);
 
     const ext = await loader.load(
       "compaction",
@@ -76,7 +86,7 @@ describe("Hook + Extension Integration", () => {
 
   it("should support multiple extensions on the same hook", async () => {
     const core = createMockCore();
-    const loader = new ExtensionLoader(core);
+    const loader = new ExtensionLoader(core as unknown as LoaderCore);
 
     await loader.load("compaction", wrapFactory(createCompactionExtension));
     await loader.load("session-log", wrapFactory(createSessionLogExtension));
@@ -90,7 +100,7 @@ describe("Hook + Extension Integration", () => {
 
   it("should register tools from an extension", async () => {
     const core = createMockCore();
-    const loader = new ExtensionLoader(core);
+    const loader = new ExtensionLoader(core as unknown as LoaderCore);
 
     await loader.load("core-tools", wrapFactory(createCoreToolsExtension));
 
@@ -123,7 +133,7 @@ describe("Hook + Extension Integration", () => {
 
   it("should handle extension lifecycle: load -> use -> unload", async () => {
     const core = createMockCore();
-    const loader = new ExtensionLoader(core);
+    const loader = new ExtensionLoader(core as unknown as LoaderCore);
 
     // Load
     const ext = await loader.load(
@@ -145,7 +155,7 @@ describe("Hook + Extension Integration", () => {
 
   it("should support disabled extensions (create returns null)", async () => {
     const core = createMockCore({ compaction: { enabled: false } });
-    const loader = new ExtensionLoader(core);
+    const loader = new ExtensionLoader(core as unknown as LoaderCore);
 
     const ext = await loader.load(
       "compaction",
@@ -168,7 +178,7 @@ describe("Skills Extension", () => {
 
   it("should register load_skill tool", async () => {
     const core = createMockCore();
-    const loader = new ExtensionLoader(core);
+    const loader = new ExtensionLoader(core as unknown as LoaderCore);
     await loader.load("skills", wrapFactory(createSkillsExtension));
 
     // Tools are registered during load() - no need to emit hook again
@@ -201,7 +211,7 @@ describe("Session Log Extension", () => {
   it("should register hooks for message logging", async () => {
     const core = createMockCore();
     const ext = await createSessionLogExtension(core);
-    expect(ext.hooks[HOOKS.CONTEXT_MESSAGE]).toBeDefined();
+    expect(ext.hooks![HOOKS.CONTEXT_MESSAGE]).toBeDefined();
     // Tool results are logged via CONTEXT_MESSAGE (for tool role messages)
   });
 });
@@ -211,7 +221,7 @@ describe("Session Log Extension", () => {
 describe("Full Extension Chain", () => {
   it("should load all extensions and have them all registered", async () => {
     const core = createMockCore();
-    const loader = new ExtensionLoader(core);
+    const loader = new ExtensionLoader(core as unknown as LoaderCore);
 
     await loader.load("compaction", wrapFactory(createCompactionExtension));
     await loader.load("core-tools", wrapFactory(createCoreToolsExtension));

@@ -10,19 +10,19 @@ interface Token {
 /**
  * Compile a template string into a render function.
  */
-export function compile(template: string): (context: Record<string, unknown>) => string {
+export function compile(template: string): (context: Record<string, unknown> | null) => string {
   const tokens = tokenize(template);
-  return function render(context: Record<string, unknown>): string {
+  return function render(context: Record<string, unknown> | null): string {
     return walkTokens(tokens, context);
   };
 }
 
-const templateCache = new Map<string, (context: Record<string, unknown>) => string>();
+const templateCache = new Map<string, (context: Record<string, unknown> | null) => string>();
 
 /** Render a template string directly with a context object. */
 export function render(
   template: string,
-  context: Record<string, unknown>,
+  context: Record<string, unknown> | null,
   cache: boolean = false,
 ): string {
   const cached = templateCache.get(template);
@@ -109,7 +109,7 @@ function findClose(str: string, from: number, delim: string): number {
 
 function walkTokens(
   tokens: Token[],
-  context: Record<string, unknown>,
+  context: Record<string, unknown> | null,
 ): string {
   let output = "";
   let idx = 0;
@@ -166,7 +166,7 @@ function skipPast(
 function walkIf(
   tokens: Token[],
   idx: number,
-  context: Record<string, unknown>,
+  context: Record<string, unknown> | null,
 ): string {
   const tok = tokens[idx]!;
   const cond = tok.value.slice(3);
@@ -192,7 +192,7 @@ function walkIf(
 function walkFor(
   tokens: Token[],
   idx: number,
-  context: Record<string, unknown>,
+  context: Record<string, unknown> | null,
 ): string {
   const tok = tokens[idx]!;
   const { varName, expr } = parseFor(tok.value);
@@ -249,7 +249,7 @@ function findBlock(
 
 function evalPrint(
   expr: string,
-  context: Record<string, unknown>,
+  context: Record<string, unknown> | null,
 ): string {
   const pipeIdx = expr.indexOf("|");
   if (pipeIdx === -1) return resolveExpr(expr.trim(), context);
@@ -291,7 +291,7 @@ function parseNamedArgs(str: string): Record<string, string> {
 
 function resolveExpr(
   expr: string,
-  context: Record<string, unknown>,
+  context: Record<string, unknown> | null,
 ): string {
   expr = expr.trim();
   if (expr.startsWith("not "))
@@ -307,7 +307,7 @@ function resolveExpr(
 
 function resolveValue(
   expr: string,
-  context: Record<string, unknown>,
+  context: Record<string, unknown> | null,
 ): unknown {
   expr = expr.trim();
   if (expr.startsWith("not "))
@@ -320,7 +320,7 @@ function resolveValue(
   return value;
 }
 
-function evalExpr(expr: string, context: Record<string, unknown>): boolean {
+function evalExpr(expr: string, context: Record<string, unknown> | null): boolean {
   expr = expr.trim();
   if (expr.startsWith("not "))
     return !evalExpr(expr.slice(4).trim(), context);

@@ -16,8 +16,9 @@ describe('ModelTool', () => {
     const tool = new ModelTool(registry);
     const def = tool.toToolDef();
     expect(def.function.name).toBe('model');
-    expect(def.function.parameters.properties).toHaveProperty('name');
-    expect(def.function.parameters.properties.name.enum).toEqual(['model-1', 'model-2']);
+    const props = def.function.parameters.properties as Record<string, unknown>;
+    expect(props).toHaveProperty('name');
+    expect((props.name as Record<string, unknown>).enum).toEqual(['model-1', 'model-2']);
   });
 
   it('generates tool definition with empty registry', () => {
@@ -70,7 +71,7 @@ describe('ModelTool', () => {
     const registry = { 'model-1': { name: 'Model 1' } };
     let switched = false;
     const ctx = new ToolContext();
-    ctx.set('onSwitchModel', async (name) => { switched = true; });
+    ctx.set('onSwitchModel', async (name: string) => { switched = true; });
     const tool = new ModelTool(registry);
     const result = await tool.execute(JSON.stringify({ name: 'model-1' }), ctx);
     expect(switched).toBe(true);
@@ -113,7 +114,8 @@ describe('ModelTool', () => {
     };
     const tool = new ModelTool(registry);
     const def = tool.toToolDef();
-    const models = def.function.parameters.properties.name.enum;
+    const props = def.function.parameters.properties as Record<string, unknown>;
+    const models = (props.name as Record<string, unknown>).enum;
     expect(models).toEqual(['alpha-model', 'beta-model', 'zebra-model']);
   });
 });

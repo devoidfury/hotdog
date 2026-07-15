@@ -172,7 +172,7 @@ export class ToolRegistry {
    */
   async validateToolArgs(
     toolName: string,
-    input: string | Record<string, unknown>,
+    input: unknown,
   ): Promise<string | null> {
     const tool = this.get(toolName);
     if (!tool || !tool.toToolDef) return null;

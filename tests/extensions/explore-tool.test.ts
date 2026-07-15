@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'bun:test';
 import { ExploreTool } from '../../src/extensions/core-tools/explore.ts';
+import { ToolContext } from '../../src/core/extensions/tool-context.ts';
 import { resultStr } from '../helpers.ts';
 
 describe('ExploreTool', () => {
@@ -43,22 +44,22 @@ describe('ExploreTool > _parseArgs', () => {
   const tool = new ExploreTool();
 
   it('returns defaults for empty input', () => {
-    const args = tool._parseArgs('');
+    const args = (tool as any)._parseArgs('');
     expect(args).toEqual({ path: '.', outline: '' });
   });
 
   it('parses path and outline from JSON', () => {
-    const args = tool._parseArgs(JSON.stringify({ path: '/var', outline: 'check structure' }));
+    const args = (tool as any)._parseArgs(JSON.stringify({ path: '/var', outline: 'check structure' }));
     expect(args).toEqual({ path: '/var', outline: 'check structure' });
   });
 
   it('defaults unknown fields', () => {
-    const args = tool._parseArgs(JSON.stringify({ path: '/tmp', unknown: true }));
+    const args = (tool as any)._parseArgs(JSON.stringify({ path: '/tmp', unknown: true }));
     expect(args).toEqual({ path: '/tmp', outline: '' });
   });
 
   it('handles non-string input', () => {
-    const args = tool._parseArgs({ path: '/home', outline: 'test' });
+    const args = (tool as any)._parseArgs({ path: '/home', outline: 'test' });
     expect(args).toEqual({ path: '/home', outline: 'test' });
   });
 });
@@ -66,19 +67,16 @@ describe('ExploreTool > _parseArgs', () => {
 describe('ExploreTool > execute', () => {
   it('rejects missing outline', async () => {
     const tool = new ExploreTool();
-    const result = await tool.execute(JSON.stringify({ path: '/tmp' }), {});
+    const result = await tool.execute(JSON.stringify({ path: '/tmp' }), new ToolContext());
     const output = resultStr(result);
-    // ExploreTool returns objects, not JSON strings
-    const parsed = typeof output === 'string' ? JSON.parse(output) : output;
-    expect(parsed.error).toContain("The 'outline' argument is required");
-    expect(parsed.path).toBe('/tmp');
+    // resultStr returns the error string directly for error results
+    expect(output).toContain("The 'outline' argument is required");
   });
 
   it('rejects empty input', async () => {
     const tool = new ExploreTool();
-    const result = await tool.execute('', {});
+    const result = await tool.execute('', new ToolContext());
     const output = resultStr(result);
-    const parsed = typeof output === 'string' ? JSON.parse(output) : output;
-    expect(parsed.error).toContain("The 'outline' argument is required");
+    expect(output).toContain("The 'outline' argument is required");
   });
 });

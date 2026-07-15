@@ -9,12 +9,12 @@ describe("tool:call hook", () => {
   test("hook can block tool execution", async () => {
     const hooks = new HookSystem();
 
-    hooks.on(HOOKS.TOOL_CALL, ({ toolName }) => {
+    hooks.on(HOOKS.TOOL_CALL, (({ toolName }: { toolName: string }) => {
       if (toolName === "dangerous-tool") {
         return { action: "block", result: "Blocked for safety" };
       }
       return { action: "continue" };
-    });
+    }) as (data: unknown) => unknown);
 
     const { lastResult: blockResult } = await hooks.runHookPipeline(HOOKS.TOOL_CALL, {
       toolCallId: "1",
@@ -22,7 +22,7 @@ describe("tool:call hook", () => {
       input: '{"cmd": "rm -rf /"}',
       agent: null,
     });
-    expect(blockResult.action).toBe("block");
+    expect((blockResult as Record<string, unknown>).action).toBe("block");
 
     const { lastResult: allowResult } = await hooks.runHookPipeline(HOOKS.TOOL_CALL, {
       toolCallId: "2",
@@ -30,20 +30,20 @@ describe("tool:call hook", () => {
       input: '{"path": "/tmp/test"}',
       agent: null,
     });
-    expect(allowResult.action).toBe("continue");
+    expect((allowResult as Record<string, unknown>).action).toBe("continue");
   });
 
   test("hook can modify tool input", async () => {
     const hooks = new HookSystem();
 
-    hooks.on(HOOKS.TOOL_CALL, ({ toolName, input }) => {
+    hooks.on(HOOKS.TOOL_CALL, (({ toolName, input }: { toolName: string; input: string }) => {
       if (toolName === "bash") {
         const args = JSON.parse(input);
         args.command = `set -euo pipefail; ${args.command}`;
         return { action: "modify", input: JSON.stringify(args) };
       }
       return { action: "continue" };
-    });
+    }) as (data: unknown) => unknown);
 
     const { lastResult } = await hooks.runHookPipeline(HOOKS.TOOL_CALL, {
       toolCallId: "1",
@@ -52,30 +52,30 @@ describe("tool:call hook", () => {
       agent: null,
     });
 
-    expect(lastResult.action).toBe("modify");
-    expect(JSON.parse(lastResult.input).command).toBe("set -euo pipefail; ls");
+    expect((lastResult as Record<string, unknown>).action).toBe("modify");
+    expect(JSON.parse((lastResult as Record<string, unknown>).input as string).command).toBe("set -euo pipefail; ls");
   });
 
   test("multiple handlers can chain modifications via data mutation", async () => {
     const hooks = new HookSystem();
 
-    hooks.on(HOOKS.TOOL_CALL, (data) => {
+    hooks.on(HOOKS.TOOL_CALL, ((data: { toolName: string; input: string }) => {
       if (data.toolName === "read") {
         const args = JSON.parse(data.input);
         args.cwd = "/workspace";
         data.input = JSON.stringify(args);
       }
       return { action: "continue" };
-    });
+    }) as (data: unknown) => unknown);
 
-    hooks.on(HOOKS.TOOL_CALL, (data) => {
+    hooks.on(HOOKS.TOOL_CALL, ((data: { toolName: string; input: string }) => {
       if (data.toolName === "read") {
         const args = JSON.parse(data.input);
         args.path = args.path.startsWith("/") ? args.path : `${args.cwd}/${args.path}`;
         data.input = JSON.stringify(args);
       }
       return { action: "continue" };
-    });
+    }) as (data: unknown) => unknown);
 
     const data = {
       toolCallId: "1",
@@ -90,17 +90,16 @@ describe("tool:call hook", () => {
     expect(finalArgs.path).toBe("/workspace/test.txt");
   });
 });
-
 describe("tool:result hook", () => {
   test("hook can redact sensitive data in results", async () => {
     const hooks = new HookSystem();
 
-    hooks.on(HOOKS.TOOL_RESULT, ({ result }) => {
+    hooks.on(HOOKS.TOOL_RESULT, (({ result }: { result: string }) => {
       if (typeof result === "string" && result.includes("sk-")) {
         return { result: result.replace(/sk-[a-zA-Z0-9]+/g, "[REDACTED]") };
       }
       return { result };
-    });
+    }) as (data: unknown) => unknown);
 
     const { lastResult } = await hooks.runHookPipeline(HOOKS.TOOL_RESULT, {
       toolCallId: "1",
@@ -110,13 +109,13 @@ describe("tool:result hook", () => {
       agent: null,
     });
 
-    expect(lastResult.result).toBe("API key is [REDACTED]");
+    expect((lastResult as Record<string, unknown>).result).toBe("API key is [REDACTED]");
   });
 
   test("hook can truncate large results", async () => {
     const hooks = new HookSystem();
 
-    hooks.on(HOOKS.TOOL_RESULT, ({ result }) => {
+    hooks.on(HOOKS.TOOL_RESULT, (({ result }: { result: string }) => {
       if (typeof result === "string") {
         const lines = result.split("\n");
         if (lines.length > 100) {
@@ -126,7 +125,7 @@ describe("tool:result hook", () => {
         }
       }
       return { result };
-    });
+    }) as (data: unknown) => unknown);
 
     const bigResult = Array(200).fill("line").join("\n");
     const { lastResult } = await hooks.runHookPipeline(HOOKS.TOOL_RESULT, {
@@ -137,8 +136,8 @@ describe("tool:result hook", () => {
       agent: null,
     });
 
-    expect(lastResult.result).toContain("[100 more lines]");
-    expect(lastResult.result.split("\n").length).toBe(101);
+    expect((lastResult as Record<string, unknown>).result).toContain("[100 more lines]");
+    expect(((lastResult as Record<string, unknown>).result as string).split("\n").length).toBe(101);
   });
 });
 
@@ -146,9 +145,9 @@ describe("CONTEXT hook via runHookPipeline", () => {
   test("handlers can filter messages", async () => {
     const hooks = new HookSystem();
 
-    hooks.on(HOOKS.CONTEXT, ({ messages }) => {
-      return { messages: messages.filter((m) => m.content?.length > 0) };
-    });
+    hooks.on(HOOKS.CONTEXT, (({ messages }: { messages: { content: string }[] }) => {
+      return { messages: messages.filter((m: { content: string }) => m.content?.length > 0) };
+    }) as (data: unknown) => unknown);
 
     const { lastResult } = await hooks.runHookPipeline(HOOKS.CONTEXT, {
       messages: [
@@ -159,30 +158,30 @@ describe("CONTEXT hook via runHookPipeline", () => {
       agent: null,
     });
 
-    expect(lastResult.messages).toHaveLength(2);
-    expect(lastResult.messages[0].content).toBe("hello");
-    expect(lastResult.messages[1].content).toBe("world");
+    expect((lastResult as Record<string, unknown>).messages).toHaveLength(2);
+    expect(((lastResult as Record<string, unknown>).messages as { content: string }[])[0]!.content).toBe("hello");
+    expect(((lastResult as Record<string, unknown>).messages as { content: string }[])[1]!.content).toBe("world");
   });
 
   test("handlers can inject messages", async () => {
     const hooks = new HookSystem();
 
-    hooks.on(HOOKS.CONTEXT, ({ messages }) => {
+    hooks.on(HOOKS.CONTEXT, (({ messages }: { messages: { role: string; content: string }[] }) => {
       return {
         messages: [
           { role: "system", content: "You are helpful." },
           ...messages,
         ],
       };
-    });
+    }) as (data: unknown) => unknown);
 
     const { lastResult } = await hooks.runHookPipeline(HOOKS.CONTEXT, {
       messages: [{ role: "user", content: "hi" }],
       agent: null,
     });
 
-    expect(lastResult.messages).toHaveLength(2);
-    expect(lastResult.messages[0].role).toBe("system");
-    expect(lastResult.messages[1].content).toBe("hi");
+    expect((lastResult as Record<string, unknown>).messages).toHaveLength(2);
+    expect(((lastResult as Record<string, unknown>).messages as { role: string }[])[0]!.role).toBe("system");
+    expect(((lastResult as Record<string, unknown>).messages as { content: string }[])[1]!.content).toBe("hi");
   });
 });

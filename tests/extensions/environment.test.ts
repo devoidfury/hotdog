@@ -7,77 +7,85 @@ describe("environment extension", () => {
     const extension = create();
     expect(extension).toBeDefined();
     expect(extension.hooks).toBeDefined();
-    expect(extension.hooks[HOOKS.SYSTEM_PROMPT_BUILD]).toBeInstanceOf(Function);
+    expect(extension.hooks![HOOKS.SYSTEM_PROMPT_BUILD]!).toBeInstanceOf(Function);
   });
 
   it("hook returns info chunk with priority 100", async () => {
     const extension = create();
-    const result = await extension.hooks[HOOKS.SYSTEM_PROMPT_BUILD]({
-      agent: { model: "test-model", _profileName: "test-profile" },
+    const hook = extension.hooks![HOOKS.SYSTEM_PROMPT_BUILD]!;
+    const result = await hook({
+      agent: { model: "test-model", _profileName: "test-profile" } as any,
     });
-    expect(result.name).toBe("info");
-    expect(result.priority).toBe(100);
-    expect(typeof result.content).toBe("string");
+    expect((result as any).name).toBe("info");
+    expect((result as any).priority).toBe(100);
+    expect(typeof (result as any).content).toBe("string");
   });
 
   it("hook renders model name in content", async () => {
     const extension = create();
-    const result = await extension.hooks[HOOKS.SYSTEM_PROMPT_BUILD]({
-      agent: { model: "gpt-4", _profileName: "default" },
+    const hook = extension.hooks![HOOKS.SYSTEM_PROMPT_BUILD]!;
+    const result = await hook({
+      agent: { model: "gpt-4", _profileName: "default" } as any,
     });
-    expect(result.content).toContain("gpt-4");
+    expect((result as any).content).toContain("gpt-4");
   });
 
   it("hook renders profile name in content", async () => {
     const extension = create();
-    const result = await extension.hooks[HOOKS.SYSTEM_PROMPT_BUILD]({
-      agent: { model: "test", _profileName: "custom-profile" },
+    const hook = extension.hooks![HOOKS.SYSTEM_PROMPT_BUILD]!;
+    const result = await hook({
+      agent: { model: "test", _profileName: "custom-profile" } as any,
     });
-    expect(result.content).toContain("custom-profile");
+    expect((result as any).content).toContain("custom-profile");
   });
 
   it("hook renders platform in content", async () => {
     const extension = create();
-    const result = await extension.hooks[HOOKS.SYSTEM_PROMPT_BUILD]({
-      agent: { model: "test" },
+    const hook = extension.hooks![HOOKS.SYSTEM_PROMPT_BUILD]!;
+    const result = await hook({
+      agent: { model: "test" } as any,
     });
     // Should contain the current platform (linux, darwin, win32)
     const platform = process.platform;
-    expect(result.content).toContain(platform);
+    expect((result as any).content).toContain(platform);
   });
 
   it("hook renders session date in content", async () => {
     const extension = create();
-    const result = await extension.hooks[HOOKS.SYSTEM_PROMPT_BUILD]({
-      agent: { model: "test" },
+    const hook = extension.hooks![HOOKS.SYSTEM_PROMPT_BUILD]!;
+    const result = await hook({
+      agent: { model: "test" } as any,
     });
     // Should contain today's date in YYYY-MM-DD format
     const today = new Date().toISOString().slice(0, 10);
-    expect(result.content).toContain(today);
+    expect((result as any).content).toContain(today);
   });
 
   it("hook handles agent with no model", async () => {
     const extension = create();
-    const result = await extension.hooks[HOOKS.SYSTEM_PROMPT_BUILD]({
-      agent: {},
+    const hook = extension.hooks![HOOKS.SYSTEM_PROMPT_BUILD]!;
+    const result = await hook({
+      agent: {} as any,
     });
-    expect(result.name).toBe("info");
-    expect(typeof result.content).toBe("string");
+    expect((result as any).name).toBe("info");
+    expect(typeof (result as any).content).toBe("string");
   });
 
   it("hook handles agent with no profile name", async () => {
     const extension = create();
-    const result = await extension.hooks[HOOKS.SYSTEM_PROMPT_BUILD]({
-      agent: { model: "test" },
+    const hook = extension.hooks![HOOKS.SYSTEM_PROMPT_BUILD]!;
+    const result = await hook({
+      agent: { model: "test" } as any,
     });
-    expect(result.content).toContain("default");
+    expect((result as any).content).toContain("default");
   });
 
   it("hook renders cwd in content", async () => {
     const extension = create();
-    const result = await extension.hooks[HOOKS.SYSTEM_PROMPT_BUILD]({
-      agent: { model: "test" },
+    const hook = extension.hooks![HOOKS.SYSTEM_PROMPT_BUILD]!;
+    const result = await hook({
+      agent: { model: "test" } as any,
     });
-    expect(result.content).toContain(process.cwd());
+    expect((result as any).content).toContain(process.cwd());
   });
 });

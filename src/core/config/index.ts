@@ -207,7 +207,7 @@ export function getDefaultConfig(
     hookTrace: getLayerDefault(CONFIG_SCHEMA.hookTrace) as boolean,
   };
 
-  return mergeExtensionConfigDefaults(baseConfig as Record<string, unknown>, extParams) as unknown as DefaultConfig;
+  return mergeExtensionConfigDefaults(baseConfig as unknown as Record<string, unknown>, extParams) as unknown as DefaultConfig;
 }
 
 /**
@@ -272,7 +272,7 @@ export interface ValidationResult {
  * Validate a loaded config object against extension schemas.
  */
 export function validateConfig(
-  config: CoreConfig,
+  config: unknown,
   extensionSchemas?: Array<{ key: string; schema: unknown }>,
 ): ValidationResult {
   const errors: string[] = [];
@@ -361,7 +361,7 @@ export async function buildConfig(cliArgv: CliArgv): Promise<{
 
   const resolved = await buildAgentConfig({
     cli: cliArgv,
-    config: config as Record<string, unknown>,
+    config: config as unknown as Record<string, unknown>,
     configDir,
     providers: config.providers || [],
     defaultModel: getLayerDefault(CONFIG_SCHEMA.defaultModel) as string,

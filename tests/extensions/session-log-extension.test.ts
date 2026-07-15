@@ -25,7 +25,7 @@ describe("session-log extension create()", () => {
   });
 
   it("returns extension with hooks", async () => {
-    const ext = await create(createMockCore() as any);
+    const ext = await create(createMockCore() as any) as any;
     expect(ext.hooks).toBeDefined();
     expect(ext.hooks[HOOKS.CONTEXT_MESSAGE]).toBeDefined();
     expect(ext.hooks[HOOKS.OUTPUT_EVENT]).toBeDefined();
@@ -35,7 +35,7 @@ describe("session-log extension create()", () => {
   it("CONTEXT_MESSAGE hook logs assistant messages with LLM source", async () => {
     const sessionId = `test-assistant-${Date.now()}`;
     try {
-      const ext = await create(createMockCore() as any);
+      const ext = await create(createMockCore() as any) as any;
       const hook = ext.hooks[HOOKS.CONTEXT_MESSAGE] as (ctx: any) => Promise<void>;
 
       await hook({
@@ -55,7 +55,7 @@ describe("session-log extension create()", () => {
   it("CONTEXT_MESSAGE hook logs system messages as INPUT source", async () => {
     const sessionId = `test-system-${Date.now()}`;
     try {
-      const ext = await create(createMockCore() as any);
+      const ext = await create(createMockCore() as any) as any;
       const hook = ext.hooks[HOOKS.CONTEXT_MESSAGE] as (ctx: any) => Promise<void>;
 
       await hook({
@@ -74,7 +74,7 @@ describe("session-log extension create()", () => {
   it("CONTEXT_MESSAGE hook skips logging during restoration", async () => {
     const sessionId = `test-restoring-${Date.now()}`;
     try {
-      const ext = await create(createMockCore() as any);
+      const ext = await create(createMockCore() as any) as any;
       const restoreHook = ext.hooks[HOOKS.SESSION_RESTORE_ACTIVE] as (ctx: any) => void;
       const messageHook = ext.hooks[HOOKS.CONTEXT_MESSAGE] as (ctx: any) => Promise<void>;
 
@@ -97,7 +97,7 @@ describe("session-log extension create()", () => {
   it("readEntries() returns entries for the last session", async () => {
     const sessionId = `test-readentries-${Date.now()}`;
     try {
-      const ext = await create(createMockCore() as any);
+      const ext = await create(createMockCore() as any) as any;
       const hook = ext.hooks[HOOKS.CONTEXT_MESSAGE] as (ctx: any) => Promise<void>;
 
       await hook({
@@ -119,13 +119,13 @@ describe("session-log extension create()", () => {
   });
 
   it("readEntries() returns empty array when no session ID tracked", async () => {
-    const ext = await create(createMockCore() as any);
+    const ext = await create(createMockCore() as any) as any;
     const entries = await ext.readEntries();
     expect(entries).toEqual([]);
   });
 
   it("readEntries() returns empty array when log file does not exist", async () => {
-    const ext = await create(createMockCore() as any);
+    const ext = await create(createMockCore() as any) as any;
     const hook = ext.hooks[HOOKS.CONTEXT_MESSAGE] as (ctx: any) => Promise<void>;
 
     // Trigger hook to set lastSessionId but don't write any entries
@@ -148,7 +148,7 @@ describe("session-log extension create()", () => {
   it("getLogPath() returns path for last session", async () => {
     const sessionId = `test-logpath-${Date.now()}`;
     try {
-      const ext = await create(createMockCore() as any);
+      const ext = await create(createMockCore() as any) as any;
       const hook = ext.hooks[HOOKS.CONTEXT_MESSAGE] as (ctx: any) => Promise<void>;
 
       await hook({
@@ -165,14 +165,14 @@ describe("session-log extension create()", () => {
   });
 
   it("getLogPath() returns null when no session ID tracked", async () => {
-    const ext = await create(createMockCore() as any);
+    const ext = await create(createMockCore() as any) as any;
     expect(ext.getLogPath()).toBeNull();
   });
 
   it("OUTPUT_EVENT hook logs compaction results", async () => {
     const sessionId = `test-compaction-${Date.now()}`;
     try {
-      const ext = await create(createMockCore() as any);
+      const ext = await create(createMockCore() as any) as any;
       const hook = ext.hooks[HOOKS.OUTPUT_EVENT] as (ctx: any) => Promise<void>;
 
       await hook({
@@ -194,7 +194,7 @@ describe("session-log extension create()", () => {
   it("OUTPUT_EVENT hook ignores non-compaction events", async () => {
     const sessionId = `test-noncompaction-${Date.now()}`;
     try {
-      const ext = await create(createMockCore() as any);
+      const ext = await create(createMockCore() as any) as any;
       const hook = ext.hooks[HOOKS.OUTPUT_EVENT] as (ctx: any) => Promise<void>;
 
       await hook({

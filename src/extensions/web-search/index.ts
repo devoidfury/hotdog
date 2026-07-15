@@ -264,7 +264,7 @@ function formatResults(results: SearchResult[], query: string, provider: string)
   const lines: string[] = [`Search results for: ${query} (via ${provider})`];
 
   for (let i = 0; i < results.length; i++) {
-    const r = results[i];
+    const r = results[i]!;
     lines.push(`${i + 1}. ${r.title}`);
     lines.push(`   ${r.url}`);
     if (r.description) {
@@ -280,17 +280,21 @@ function formatResults(results: SearchResult[], query: string, provider: string)
 export class WebSearchTool {
   static readonly TOOL_NAME = "web_search";
 
-  private provider: string;
-  private maxResults: number;
-  private timeout: number;
+  #provider: string;
+  #maxResults: number;
+  #timeout: number;
   private braveApiKey: string;
   private tavilyApiKey: string;
   private searxngInstanceUrl: string;
 
+  get provider(): string { return this.#provider; }
+  get maxResults(): number { return this.#maxResults; }
+  get timeout(): number { return this.#timeout; }
+
   constructor(options: WebSearchToolOptions = {}) {
-    this.provider = options.provider ?? "duckduckgo";
-    this.maxResults = Math.min(10, Math.max(1, options.maxResults ?? 5));
-    this.timeout = Math.max(1, options.timeout ?? 15);
+    this.#provider = options.provider ?? "duckduckgo";
+    this.#maxResults = Math.min(10, Math.max(1, options.maxResults ?? 5));
+    this.#timeout = Math.max(1, options.timeout ?? 15);
     this.braveApiKey = options.braveApiKey ?? "";
     this.tavilyApiKey = options.tavilyApiKey ?? "";
     this.searxngInstanceUrl = options.searxngInstanceUrl ?? "";

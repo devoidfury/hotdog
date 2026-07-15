@@ -15,7 +15,7 @@ describe("handleSlashCommand", () => {
     const origLog = console.log;
     console.log = (...args) => { output += args.join(" "); };
 
-    handleSlashCommand("help", { executeCommand: async () => {} }, rl);
+    handleSlashCommand("help", { executeCommand: async (cmd: string) => 0 } as any, rl as any);
     console.log = origLog;
     expect(output).toContain("Commands:");
   });
@@ -27,12 +27,20 @@ describe("handleSlashCommand", () => {
     const origLog = console.log;
     const origExit = process.exit;
     console.log = (...args) => { output += args.join(" "); };
-    process.exit = () => {};
-    rl.close = () => { closed = true; };
+    process.exit = ((_code?: string | number | null | undefined) => {
+      throw new Error("exit");
+    }) as never;
+    (rl as any).close = () => { closed = true; };
 
-    handleSlashCommand("quit", { executeCommand: async () => {} }, rl);
+    let exited = false;
+    try {
+      handleSlashCommand("quit", { executeCommand: async (cmd: string) => 0 } as any, rl as any);
+    } catch (e) {
+      if ((e as Error).message === "exit") exited = true;
+    }
     console.log = origLog;
     process.exit = origExit;
+    expect(exited).toBe(true);
     expect(output).toContain("Goodbye!");
     expect(closed).toBe(true);
   });
@@ -41,30 +49,40 @@ describe("handleSlashCommand", () => {
     const { rl } = createMockRl();
     let closed = false;
     const origExit = process.exit;
-    process.exit = () => {};
-    rl.close = () => { closed = true; };
+    process.exit = ((_code?: string | number | null | undefined) => {
+      throw new Error("exit");
+    }) as never;
+    (rl as any).close = () => { closed = true; };
 
-    handleSlashCommand("exit", { executeCommand: async () => {} }, rl);
+    let exited = false;
+    try {
+      handleSlashCommand("exit", { executeCommand: async (cmd: string) => 0 } as any, rl as any);
+    } catch (e) {
+      if ((e as Error).message === "exit") exited = true;
+    }
     process.exit = origExit;
+    expect(exited).toBe(true);
     expect(closed).toBe(true);
   });
 
   it("delegates commands to bus.executeCommand", async () => {
     const { rl } = createMockRl();
-    const executedCommands = [];
+    const executedCommands: string[] = [];
     const bus = {
-      executeCommand: async (cmd) => { executedCommands.push(cmd); },
+      executeCommand: async (cmd: string) => { executedCommands.push(cmd); return 0; },
+      interrupt: async () => {},
+      run: async () => {},
     };
 
     // Test multiple commands in one test to reduce verbosity
-    handleSlashCommand("clear", bus, rl);
-    handleSlashCommand("tokens", bus, rl);
-    handleSlashCommand("tools", bus, rl);
-    handleSlashCommand("thinking", bus, rl);
-    handleSlashCommand("regenerate", bus, rl);
-    handleSlashCommand("reasoning high", bus, rl);
-    handleSlashCommand("compact", bus, rl);
-    handleSlashCommand("prompt:explainer", bus, rl);
+    handleSlashCommand("clear", bus, rl as any);
+    handleSlashCommand("tokens", bus, rl as any);
+    handleSlashCommand("tools", bus, rl as any);
+    handleSlashCommand("thinking", bus, rl as any);
+    handleSlashCommand("regenerate", bus, rl as any);
+    handleSlashCommand("reasoning high", bus, rl as any);
+    handleSlashCommand("compact", bus, rl as any);
+    handleSlashCommand("prompt:explainer", bus, rl as any);
 
     await new Promise((r) => setTimeout(r, 50));
     expect(executedCommands).toEqual([

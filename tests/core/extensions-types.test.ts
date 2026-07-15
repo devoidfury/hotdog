@@ -131,8 +131,8 @@ describe("getConfigDefault", () => {
       enabled: { type: "boolean", default: true },
       timeout: { type: "number", default: 30 },
     };
-    expect(getConfigDefault(props, "enabled")).toBe(true);
-    expect(getConfigDefault(props, "timeout")).toBe(30);
+    expect(getConfigDefault<boolean>(props, "enabled")).toBe(true);
+    expect(getConfigDefault<number>(props, "timeout")).toBe(30);
   });
 
   it("returns undefined when property not found", () => {
@@ -142,21 +142,21 @@ describe("getConfigDefault", () => {
 
   it("returns undefined when property is not an object", () => {
     const props = { enabled: "not-an-object" } as any;
-    expect(getConfigDefault(props, "enabled")).toBeUndefined();
+    expect(getConfigDefault<boolean>(props, "enabled")).toBeUndefined();
   });
 
   it("returns undefined when default is null", () => {
     const props = {
       enabled: { type: "boolean", default: null },
     };
-    expect(getConfigDefault(props, "enabled")).toBeUndefined();
+    expect(getConfigDefault<boolean>(props, "enabled")).toBeUndefined();
   });
 
   it("returns undefined when no default is set", () => {
     const props = {
       enabled: { type: "boolean" },
     };
-    expect(getConfigDefault(props, "enabled")).toBeUndefined();
+    expect(getConfigDefault<boolean>(props, "enabled")).toBeUndefined();
   });
 
   it("returns falsy defaults like 0 and empty string", () => {
@@ -165,9 +165,9 @@ describe("getConfigDefault", () => {
       name: { type: "string", default: "" },
       flag: { type: "boolean", default: false },
     };
-    expect(getConfigDefault(props, "count")).toBe(0);
-    expect(getConfigDefault(props, "name")).toBe("");
-    expect(getConfigDefault(props, "flag")).toBe(false);
+    expect(getConfigDefault<number>(props, "count")).toBe(0);
+    expect(getConfigDefault<string>(props, "name")).toBe("");
+    expect(getConfigDefault<boolean>(props, "flag")).toBe(false);
   });
 
   it("returns complex default values", () => {
@@ -175,7 +175,7 @@ describe("getConfigDefault", () => {
       tags: { type: "array", default: ["a", "b"] },
       options: { type: "object", default: { nested: true } },
     };
-    expect(getConfigDefault(props, "tags")).toEqual(["a", "b"]);
-    expect(getConfigDefault(props, "options")).toEqual({ nested: true });
+    expect(getConfigDefault<string[]>(props, "tags")).toEqual(["a", "b"]);
+    expect(getConfigDefault<{ nested: boolean }>(props, "options")).toEqual({ nested: true });
   });
 });

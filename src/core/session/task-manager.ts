@@ -159,7 +159,7 @@ export class TaskManager {
    * @param result
    * @private
    */
-  _onTaskComplete(taskId: string, result: string): void {
+  _onTaskComplete(taskId: string | null, result: string): void {
     // Append result to manager's context
     if (this.#sessionManager) {
       const agent = this.#sessionManager.getAgent();
@@ -196,21 +196,21 @@ export class TaskManager {
   ): Promise<TaskHandle> {
     // 1. Load task profile
     const profileName = options.profile || this.#taskProfile;
-    const taskProfile = loadProfileFile((this.#config as Record<string, unknown>).profilesPath as string, profileName);
+    const taskProfile = await loadProfileFile((this.#config as unknown as Record<string, unknown>).profilesPath as string, profileName);
 
     // 2. Resolve model
     const resolvedModel =
       options.workerModel ||
-      (taskProfile && (taskProfile as Record<string, unknown>).model) ||
+      (taskProfile && (taskProfile as unknown as Record<string, unknown>).model) ||
       (this.#modelRegistry as { default?: string }).default ||
       "";
 
     // 3. Build system prompt from profile
-    const resolvedRole = (taskProfile as Record<string, unknown>)?.role || this.#taskRole;
-    const resolvedProfileBody = (taskProfile as Record<string, unknown>)?.body || "";
+    const resolvedRole = (taskProfile as unknown as Record<string, unknown>)?.role || this.#taskRole;
+    const resolvedProfileBody = (taskProfile as unknown as Record<string, unknown>)?.body || "";
 
     // 4. Resolve allowed tools: profile whitelist takes precedence
-    const toolWhitelist = (taskProfile as Record<string, unknown>)?.whitelistTools || null;
+    const toolWhitelist = (taskProfile as unknown as Record<string, unknown>)?.whitelistTools || null;
 
     // 5. Create task-specific sink (filters output, captures completion)
     const sink = new AgentSink({
@@ -345,7 +345,8 @@ export class TaskManager {
   interruptTask(taskId: string): boolean {
     const task = this.#tasks.get(taskId);
     if (!task) return false;
-    return task.abortController.abort();
+    task.abortController.abort();
+    return true;
   }
 
   /**

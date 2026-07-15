@@ -1,6 +1,7 @@
 // Tests for AsyncInteractiveCliInput — the Input interface for interactive CLI.
 
 import { describe, it, expect, beforeEach, afterEach } from "bun:test";
+import readline from "readline";
 import { AsyncInteractiveCliInput } from "../../src/extensions/ui-interactive-cli/index.ts";
 import { NoopInput } from "../../src/core/context/input.ts";
 import { createMockRl } from "../helpers.ts";
@@ -23,9 +24,9 @@ describe("NoopInput", () => {
 });
 
 describe("AsyncInteractiveCliInput", () => {
-  let lineHandler;
-  let origStdout;
-  let origStderr;
+  let lineHandler: (line: string) => void;
+  let origStdout: typeof process.stdout.write;
+  let origStderr: typeof process.stderr.write;
 
   beforeEach(() => {
     lineHandler = function () {};
@@ -42,13 +43,13 @@ describe("AsyncInteractiveCliInput", () => {
   });
 
   it("is interactive", () => {
-    const { rl } = createMockRl();
+    const { rl }: { rl: readline.Interface; addedHandlers: unknown[] } = createMockRl();
     const input = new AsyncInteractiveCliInput(rl, lineHandler, (h) => rl.on("line", h));
     expect(input.isInteractive()).toBe(true);
   });
 
   it("collects answers for a single question", async () => {
-    const { rl, addedHandlers } = createMockRl(["Alice"]);
+    const { rl, addedHandlers }: { rl: readline.Interface; addedHandlers: unknown[] } = createMockRl(["Alice"]);
     const input = new AsyncInteractiveCliInput(rl, lineHandler, (h) => rl.on("line", h));
 
     const answers = await input.collectAnswers([
@@ -59,7 +60,7 @@ describe("AsyncInteractiveCliInput", () => {
   });
 
   it("uses default when user presses enter", async () => {
-    const { rl } = createMockRl([""]);
+    const { rl }: { rl: readline.Interface; addedHandlers: unknown[] } = createMockRl([""]);
     const input = new AsyncInteractiveCliInput(rl, lineHandler, (h) => rl.on("line", h));
 
     const answers = await input.collectAnswers([
@@ -70,7 +71,7 @@ describe("AsyncInteractiveCliInput", () => {
   });
 
   it("collects answers for multiple questions", async () => {
-    const { rl } = createMockRl(["Alice", "30"]);
+    const { rl }: { rl: readline.Interface; addedHandlers: unknown[] } = createMockRl(["Alice", "30"]);
     const input = new AsyncInteractiveCliInput(rl, lineHandler, (h) => rl.on("line", h));
 
     const answers = await input.collectAnswers([
@@ -83,7 +84,7 @@ describe("AsyncInteractiveCliInput", () => {
   });
 
   it("handles option selection by number", async () => {
-    const { rl } = createMockRl(["2"]);
+    const { rl }: { rl: readline.Interface; addedHandlers: unknown[] } = createMockRl(["2"]);
     const input = new AsyncInteractiveCliInput(rl, lineHandler, (h) => rl.on("line", h));
 
     const answers = await input.collectAnswers([
@@ -98,7 +99,7 @@ describe("AsyncInteractiveCliInput", () => {
   });
 
   it("handles option selection by text", async () => {
-    const { rl } = createMockRl(["blue"]);
+    const { rl }: { rl: readline.Interface; addedHandlers: unknown[] } = createMockRl(["blue"]);
     const input = new AsyncInteractiveCliInput(rl, lineHandler, (h) => rl.on("line", h));
 
     const answers = await input.collectAnswers([
@@ -113,7 +114,7 @@ describe("AsyncInteractiveCliInput", () => {
   });
 
   it("allows free text with allow_other (default)", async () => {
-    const { rl } = createMockRl(["purple"]);
+    const { rl }: { rl: readline.Interface; addedHandlers: unknown[] } = createMockRl(["purple"]);
     const input = new AsyncInteractiveCliInput(rl, lineHandler, (h) => rl.on("line", h));
 
     const answers = await input.collectAnswers([
@@ -130,7 +131,7 @@ describe("AsyncInteractiveCliInput", () => {
 
   it("rejects invalid option when allow_other is false", async () => {
     // First response is invalid, second is valid
-    const { rl } = createMockRl(["purple", "2"]);
+    const { rl }: { rl: readline.Interface; addedHandlers: unknown[] } = createMockRl(["purple", "2"]);
     const input = new AsyncInteractiveCliInput(rl, lineHandler, (h) => rl.on("line", h));
 
     const answers = await input.collectAnswers([
@@ -147,7 +148,7 @@ describe("AsyncInteractiveCliInput", () => {
 
   it("requires answer when required is true", async () => {
     // First response is empty (rejected), second is valid
-    const { rl } = createMockRl(["", "Alice"]);
+    const { rl }: { rl: readline.Interface; addedHandlers: unknown[] } = createMockRl(["", "Alice"]);
     const input = new AsyncInteractiveCliInput(rl, lineHandler, (h) => rl.on("line", h));
 
     const answers = await input.collectAnswers([
@@ -158,7 +159,7 @@ describe("AsyncInteractiveCliInput", () => {
   });
 
   it("allows empty answer when required is false", async () => {
-    const { rl } = createMockRl([""]);
+    const { rl }: { rl: readline.Interface; addedHandlers: unknown[] } = createMockRl([""]);
     const input = new AsyncInteractiveCliInput(rl, lineHandler, (h) => rl.on("line", h));
 
     const answers = await input.collectAnswers([
@@ -169,7 +170,7 @@ describe("AsyncInteractiveCliInput", () => {
   });
 
   it("restores line handler after collecting answers", async () => {
-    const { rl, addedHandlers } = createMockRl(["answer"]);
+    const { rl, addedHandlers }: { rl: readline.Interface; addedHandlers: unknown[] } = createMockRl(["answer"]);
     const input = new AsyncInteractiveCliInput(rl, lineHandler, (h) => rl.on("line", h));
 
     await input.collectAnswers([{ key: "a", prompt: "Q?" }]);

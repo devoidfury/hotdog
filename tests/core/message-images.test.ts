@@ -1,6 +1,8 @@
 import { test, expect } from "bun:test";
 import { Message } from "../../src/core/context/message.ts";
 
+type ContentPart = { type: string; text?: string; image_url?: { url: string } };
+
 // ── Message with images ──────────────────────────────────────────────────────
 // Note: basic toJSON() without images is already covered by message.test.js.
 
@@ -12,8 +14,9 @@ test("Message.toJSON() returns array content when images present", () => {
   });
   const json = msg.toJSON();
 
-  expect(Array.isArray(json.content)).toBe(true);
-  expect(json.content).toEqual([
+  const content = json.content as ContentPart[];
+  expect(Array.isArray(content)).toBe(true);
+  expect(content).toEqual([
     { type: "text", text: "What is in this image?" },
     {
       type: "image_url",
@@ -37,17 +40,18 @@ test("Message.toJSON() handles multiple images", () => {
   });
   const json = msg.toJSON();
 
-  expect(json.content.length).toBe(4); // 1 text + 3 images
-  expect(json.content[0]).toEqual({ type: "text", text: "Compare these images" });
-  expect(json.content[1]).toEqual({
+  const content = json.content as ContentPart[];
+  expect(content.length).toBe(4); // 1 text + 3 images
+  expect(content[0]).toEqual({ type: "text", text: "Compare these images" });
+  expect(content[1]).toEqual({
     type: "image_url",
     image_url: { url: "data:image/png;base64,img1" },
   });
-  expect(json.content[2]).toEqual({
+  expect(content[2]).toEqual({
     type: "image_url",
     image_url: { url: "data:image/jpeg;base64,img2" },
   });
-  expect(json.content[3]).toEqual({
+  expect(content[3]).toEqual({
     type: "image_url",
     image_url: { url: "data:image/webp;base64,img3" },
   });
@@ -66,8 +70,9 @@ test("Message.toJSON() handles images with data: URI already present", () => {
     ],
   });
   const json = msg.toJSON();
+  const content1 = json.content as ContentPart[];
 
-  expect(json.content[1]).toEqual({
+  expect(content1[1]).toEqual({
     type: "image_url",
     image_url: { url: "data:image/png;base64,alreadyencoded" },
   });
@@ -80,9 +85,10 @@ test("Message.toJSON() handles images without text content", () => {
     images: [{ type: "image_url", mimeType: "image/png", data: "img" }],
   });
   const json = msg.toJSON();
+  const content2 = json.content as ContentPart[];
 
-  expect(json.content.length).toBe(1);
-  expect(json.content[0]).toEqual({
+  expect(content2.length).toBe(1);
+  expect(content2[0]).toEqual({
     type: "image_url",
     image_url: { url: "data:image/png;base64,img" },
   });
@@ -98,11 +104,12 @@ test("Message.toJSON() handles array content with images", () => {
     images: [{ type: "image_url", mimeType: "image/png", data: "img" }],
   });
   const json = msg.toJSON();
+  const content3 = json.content as ContentPart[];
 
-  expect(json.content.length).toBe(3);
-  expect(json.content[0]).toEqual({ type: "text", text: "Part 1" });
-  expect(json.content[1]).toEqual({ type: "text", text: "Part 2" });
-  expect(json.content[2]).toEqual({
+  expect(content3.length).toBe(3);
+  expect(content3[0]).toEqual({ type: "text", text: "Part 1" });
+  expect(content3[1]).toEqual({ type: "text", text: "Part 2" });
+  expect(content3[2]).toEqual({
     type: "image_url",
     image_url: { url: "data:image/png;base64,img" },
   });
@@ -172,11 +179,12 @@ test("Message.toJSON() defaults to image/png when mimeType not specified", () =>
   const msg = new Message({
     role: "user",
     content: "Test",
-    images: [{ type: "image_url", data: "abc" }],
+    images: [{ type: "image_url", mimeType: "image/png", data: "abc" }],
   });
   const json = msg.toJSON();
+  const content4 = json.content as ContentPart[];
 
-  expect(json.content[1]).toEqual({
+  expect(content4[1]).toEqual({
     type: "image_url",
     image_url: { url: "data:image/png;base64,abc" },
   });

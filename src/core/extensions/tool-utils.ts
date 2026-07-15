@@ -345,14 +345,14 @@ export function defaultCallDisplay(
   } else if (typeof options === "function") {
     fallback = options;
   } else if (typeof options === "object" && options !== null) {
-    fallback = options.fallback as string | ((input: string | Record<string, unknown> | null) => string);
+    fallback = options.fallback;
     returnRawOnParseError = options.returnRawOnParseError === true;
   }
 
   if (!input || (typeof input === "string" && input.trim().length === 0)) {
     return typeof fallback === "function"
       ? fallback(input)
-      : ((fallback as string) ?? (typeof input === "string" ? input : ""));
+      : (fallback ?? (typeof input === "string" ? input : ""));
   }
 
   const args = parseToolInput(input);

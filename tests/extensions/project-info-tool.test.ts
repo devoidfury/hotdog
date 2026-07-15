@@ -3,10 +3,10 @@ import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import { ProjectInfoTool } from '../../src/extensions/core-tools/project-info.ts';
-import { resultStr, tmpDir } from '../helpers.ts';
+import { resultStr } from '../helpers.ts';
 
 describe('ProjectInfoTool', () => {
-  let tmpDir;
+  let tmpDir: string;
 
   beforeEach(() => {
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'hotdog-test-pinfo-'));
@@ -30,13 +30,13 @@ describe('ProjectInfoTool', () => {
 
   it('returns directory not found for non-existent path', async () => {
     const tool = new ProjectInfoTool();
-    const result = await tool.execute(JSON.stringify({ path: '/nonexistent/path/xyz' }));
+    const result = await tool.execute(JSON.stringify({ path: '/nonexistent/path/xyz' }), null!);
     expect(resultStr(result)).toContain('Directory not found');
   });
 
   it('returns info for current directory', async () => {
     const tool = new ProjectInfoTool();
-    const result = await tool.execute(JSON.stringify({ path: tmpDir }));
+    const result = await tool.execute(JSON.stringify({ path: tmpDir }), null!);
     expect(resultStr(result)).toContain('=== Project Info ===');
   });
 
@@ -60,13 +60,13 @@ describe('ProjectInfoTool', () => {
 
   it('handles object input', async () => {
     const tool = new ProjectInfoTool();
-    const result = await tool.execute({ path: tmpDir });
+    const result = await tool.execute({ path: tmpDir }, null!);
     expect(resultStr(result)).toContain('=== Project Info ===');
   });
 
   it('handles non-git directory (falls back to partial info)', async () => {
     const tool = new ProjectInfoTool();
-    const result = await tool.execute(JSON.stringify({ path: tmpDir }));
+    const result = await tool.execute(JSON.stringify({ path: tmpDir }), null!);
     // Should return partial info since tmpDir is not a git repo
     expect(resultStr(result)).toContain('=== Project Info ===');
   });
@@ -74,7 +74,7 @@ describe('ProjectInfoTool', () => {
 
 // Test the extensionToLanguage mapping through the tool's output
 describe('ProjectInfoTool language detection', () => {
-  let tmpDir;
+  let tmpDir: string;
 
   beforeEach(() => {
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'hotdog-test-lang-'));
@@ -87,21 +87,21 @@ describe('ProjectInfoTool language detection', () => {
   it('detects JavaScript files', async () => {
     fs.writeFileSync(path.join(tmpDir, 'test.js'), '');
     const tool = new ProjectInfoTool();
-    const result = await tool.execute(JSON.stringify({ path: tmpDir }));
+    const result = await tool.execute(JSON.stringify({ path: tmpDir }), null!);
     expect(resultStr(result)).toContain('JavaScript');
   });
 
   it('detects TypeScript files', async () => {
     fs.writeFileSync(path.join(tmpDir, 'test.ts'), '');
     const tool = new ProjectInfoTool();
-    const result = await tool.execute(JSON.stringify({ path: tmpDir }));
+    const result = await tool.execute(JSON.stringify({ path: tmpDir }), null!);
     expect(resultStr(result)).toContain('TypeScript');
   });
 
   it('detects Markdown files', async () => {
     fs.writeFileSync(path.join(tmpDir, 'readme.md'), '');
     const tool = new ProjectInfoTool();
-    const result = await tool.execute(JSON.stringify({ path: tmpDir }));
+    const result = await tool.execute(JSON.stringify({ path: tmpDir }), null!);
     expect(resultStr(result)).toContain('Markdown');
   });
 });

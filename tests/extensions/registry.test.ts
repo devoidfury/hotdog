@@ -45,7 +45,7 @@ describe("toolDef", () => {
   });
 
   it("handles missing parameters", () => {
-    const def = toolDef("test", "desc");
+    const def = toolDef("test", "desc", {});
     expect(def.function.parameters.properties).toEqual({});
     expect(def.function.parameters.required).toEqual([]);
   });
@@ -60,7 +60,7 @@ describe("param", () => {
   });
 
   it("creates a parameter without description", () => {
-    expect(param("integer")).toEqual({ type: "integer", description: "" });
+    expect(param("integer", "")).toEqual({ type: "integer", description: "" });
   });
 });
 
@@ -99,11 +99,11 @@ describe("toolResult", () => {
 
 describe("truncateOutput", () => {
   it("returns empty string for null", () => {
-    expect(truncateOutput(null, 10)).toBe("");
+    expect(truncateOutput(null as any, 10)).toBe("");
   });
 
   it("returns empty string for undefined", () => {
-    expect(truncateOutput(undefined, 10)).toBe("");
+    expect(truncateOutput(undefined as any, 10)).toBe("");
   });
 
   it("returns text under limit", () => {
@@ -165,7 +165,7 @@ describe("generateDiff", () => {
 
 describe("validateCwdBoundary", () => {
   it("returns null when no boundary", () => {
-    expect(validateCwdBoundary("/any/path", null)).toBeNull();
+    expect(validateCwdBoundary("/any/path", undefined)).toBeNull();
   });
 
   it("returns null for path within boundary", () => {
@@ -218,7 +218,7 @@ describe("ToolRegistry", () => {
     reg.register("bash", {});
     reg.register("write", {});
     reg.register("read", {});
-    const filtered = reg.filter(["bash", "write"], null);
+    const filtered = reg.filter(["bash", "write"], undefined);
     expect(filtered.getAll()).toHaveLength(2);
   });
 
@@ -227,7 +227,7 @@ describe("ToolRegistry", () => {
     reg.register("bash", {});
     reg.register("write", {});
     reg.register("read", {});
-    const filtered = reg.filter(null, ["bash"]);
+    const filtered = reg.filter(undefined, ["bash"]);
     expect(filtered.getAll()).toHaveLength(2);
   });
 
@@ -296,9 +296,9 @@ describe("ToolContext", () => {
     let cancelled = false;
     const ctx = new ToolContext();
     ctx.set("isCancelled", () => cancelled);
-    expect(ctx.get("isCancelled")()).toBe(false);
+    expect((ctx.get("isCancelled") as () => boolean)()).toBe(false);
     cancelled = true;
-    expect(ctx.get("isCancelled")()).toBe(true);
+    expect((ctx.get("isCancelled") as () => boolean)()).toBe(true);
   });
 
   it("mounts and retrieves properties via get()", () => {
@@ -345,14 +345,14 @@ describe("ToolResult", () => {
 
   it("chains withEntry to add metadata", () => {
     const r = ToolResult.ok("out").withEntry("key", "val");
-    expect(r.metadata).toBeInstanceOf(Map);
-    expect(r.metadata.get("key")).toBe("val");
+    expect(r.metadata!).toBeInstanceOf(Map);
+    expect(r.metadata!.get("key")).toBe("val");
   });
 
   it("chains withEntries to add multiple metadata", () => {
     const r = ToolResult.ok("out").withEntries({ a: "1", b: "2" });
-    expect(r.metadata.get("a")).toBe("1");
-    expect(r.metadata.get("b")).toBe("2");
+    expect(r.metadata!.get("a")).toBe("1");
+    expect(r.metadata!.get("b")).toBe("2");
   });
 
   it("chains withOutputTag", () => {
@@ -520,7 +520,7 @@ describe("ToolResult", () => {
 });
 
 describe("writeFileWithParents", () => {
-  let tmpDir;
+  let tmpDir: string;
 
   beforeEach(() => {
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "hotdog-test-writefile-"));
@@ -546,7 +546,7 @@ describe("writeFileWithParents", () => {
 });
 
 describe("resolvePathAndValidate", () => {
-  let tmpDir;
+  let tmpDir: string;
 
   beforeEach(() => {
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "hotdog-test-resolve-"));
@@ -600,7 +600,7 @@ describe("fileSize", () => {
 });
 
 describe("checkWritable", () => {
-  let tmpDir;
+  let tmpDir: string;
 
   beforeEach(() => {
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "hotdog-test-writable-"));
@@ -643,7 +643,7 @@ describe("checkWritable", () => {
 });
 
 describe("checkReadable", () => {
-  let tmpDir;
+  let tmpDir: string;
 
   beforeEach(() => {
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "hotdog-test-readable-"));
@@ -692,7 +692,7 @@ describe("getRequiredStr", () => {
   });
 
   it("throws for null input", () => {
-    expect(() => getRequiredStr(null, "key")).toThrow(
+    expect(() => getRequiredStr(null as any, "key")).toThrow(
       "Missing required argument: key",
     );
   });

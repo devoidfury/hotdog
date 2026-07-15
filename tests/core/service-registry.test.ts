@@ -10,7 +10,7 @@ describe("ServiceRegistry", () => {
   it("register and get a service", () => {
     const registry = new ServiceRegistry();
     registry.register("session", { sessionId: "abc" });
-    const result = registry.get("session");
+    const result = registry.get("session") as { sessionId: string };
     expect(result.sessionId).toBe("abc");
   });
 
@@ -48,7 +48,7 @@ describe("ServiceRegistry", () => {
     const registry = new ServiceRegistry();
     registry.register("session", { v: 1 });
     registry.register("session", { v: 2 });
-    expect(registry.get("session").v).toBe(2);
+    expect((registry.get("session") as { v: number }).v).toBe(2);
   });
 
   it("checkContract returns valid when all methods present", () => {
@@ -91,7 +91,7 @@ describe("ServiceRegistry", () => {
   it("register accepts non-object implementations", () => {
     const registry = new ServiceRegistry();
     registry.register("handler", () => "callback");
-    expect(registry.get("handler")()).toBe("callback");
+    expect((registry.get("handler") as () => string)()).toBe("callback");
     registry.register("value", 42);
     expect(registry.get("value")).toBe(42);
   });
@@ -114,19 +114,27 @@ describe("SERVICES_REGISTER hook integration", () => {
     const { createExtensionLoader } = await import(
       "../../src/core/extensions/extensions.ts"
     );
+    const { createConfigRegistry } = await import(
+      "../../src/core/extensions/config-registry.ts"
+    );
+    const { createSubcommandRegistry } = await import(
+      "../../src/core/extensions/registries.ts"
+    );
     const { HOOKS } = await import("../../src/core/hooks.ts");
 
     const hooks = createHooks();
     const toolRegistry = createToolRegistry();
     const services = createServiceRegistry();
+    const configRegistry = createConfigRegistry();
+    const cliSubcommandRegistry = createSubcommandRegistry();
 
-    const core = { hooks, toolRegistry, services };
+    const core = { hooks, toolRegistry, services, configRegistry, cliSubcommandRegistry };
     const loader = createExtensionLoader(core);
 
     // Create a mock extension that registers a service via the hook
     const mockExtension = {
       hooks: {
-        [HOOKS.SERVICES_REGISTER]: (registry) => {
+        [HOOKS.SERVICES_REGISTER]: (registry: ServiceRegistry) => {
           registry.register("test-service", {
             doSomething: () => "works",
           });
@@ -137,7 +145,7 @@ describe("SERVICES_REGISTER hook integration", () => {
     await loader.load("test-ext", mockExtension);
 
     expect(services.has("test-service")).toBe(true);
-    expect(services.get("test-service").doSomething()).toBe("works");
+    expect((services.get("test-service") as { doSomething: () => string }).doSomething()).toBe("works");
   });
 
   it("services registered via hook are available to downstream extensions", async () => {
@@ -151,19 +159,27 @@ describe("SERVICES_REGISTER hook integration", () => {
     const { createExtensionLoader } = await import(
         "../../src/core/extensions/extensions.ts"
     );
+    const { createConfigRegistry } = await import(
+      "../../src/core/extensions/config-registry.ts"
+    );
+    const { createSubcommandRegistry } = await import(
+      "../../src/core/extensions/registries.ts"
+    );
     const { HOOKS } = await import("../../src/core/hooks.ts");
 
     const hooks = createHooks();
     const toolRegistry = createToolRegistry();
     const services = createServiceRegistry();
+    const configRegistry = createConfigRegistry();
+    const cliSubcommandRegistry = createSubcommandRegistry();
 
-    const core = { hooks, toolRegistry, services };
+    const core = { hooks, toolRegistry, services, configRegistry, cliSubcommandRegistry };
     const loader = createExtensionLoader(core);
 
     // Extension A provides a service
     const extA = {
       hooks: {
-        [HOOKS.SERVICES_REGISTER]: (registry) => {
+        [HOOKS.SERVICES_REGISTER]: (registry: ServiceRegistry) => {
           registry.register("session", {
             start: () => "started",
             stop: () => "stopped",
@@ -175,7 +191,7 @@ describe("SERVICES_REGISTER hook integration", () => {
     // Extension B consumes the service — but since services are registered
     // synchronously during load, the service is available in core.services
     // by the time extension B's create() runs.
-    let consumedService = null;
+    let consumedService: { start: () => string } | null = null;
     const extB = {
       hooks: {},
     };
@@ -186,7 +202,7 @@ describe("SERVICES_REGISTER hook integration", () => {
 
     // At this point, core.services already has "session" available
     // for any subsequent extension that needs it.
-    consumedService = services.get("session");
+    consumedService = services.get("session") as { start: () => string };
     expect(consumedService.start()).toBe("started");
   });
 });

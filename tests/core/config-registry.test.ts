@@ -28,13 +28,13 @@ describe("ConfigRegistry", () => {
 
       const flags = registry.getCliFlags();
       expect(flags).toHaveLength(1);
-      expect(flags[0].short).toBe("-x");
-      expect(flags[0].long).toBe("--my-flag");
+      expect(flags[0]!.short).toBe("-x");
+      expect(flags[0]!.long).toBe("--my-flag");
     });
 
     it("should reject invalid flags", () => {
       const registry = createConfigRegistry();
-      expect(() => registry.registerCliFlags([{ type: "string" }])).toThrow(
+      expect(() => registry.registerCliFlags([{ type: "string", long: "", description: "" }])).toThrow(
         "Each CLI flag must have a short or long form",
       );
     });
@@ -70,15 +70,15 @@ describe("ConfigRegistry", () => {
 
       const params = registry.getConfigParams();
       expect(params).toHaveLength(1);
-      expect(params[0].key).toBe("myExtension");
+      expect(params[0]!.key).toBe("myExtension");
     });
 
     it("should reject invalid params", () => {
       const registry = createConfigRegistry();
-      expect(() => registry.registerConfigParams([{ defaults: {} }])).toThrow(
+      expect(() => registry.registerConfigParams([{ defaults: {}, key: "", description: "" }])).toThrow(
         "Each config param must have a key",
       );
-      expect(() => registry.registerConfigParams([{ key: "test" }])).toThrow(
+      expect(() => registry.registerConfigParams([{ key: "test", description: "" as never }] as any[])).toThrow(
         "must have a defaults object",
       );
     });
@@ -88,6 +88,7 @@ describe("ConfigRegistry", () => {
       registry.registerConfigParams([
         {
           key: "myExtension",
+          description: "My extension config",
           defaults: { enabled: true, timeout: 30 },
         },
       ]);
@@ -187,13 +188,14 @@ describe("ConfigRegistry", () => {
       registry.registerConfigParams([
         {
           key: "myExtension",
+          description: "My extension config",
           defaults: { enabled: true, timeout: 30 },
         },
       ]);
 
-      const config = await loadConfig(null, null, registry.getConfigParams());
+      const config = await loadConfig(undefined, undefined, registry.getConfigParams());
 
-      expect(config.myExtension).toEqual({ enabled: true, timeout: 30 });
+      expect((config as unknown as Record<string, unknown>).myExtension).toEqual({ enabled: true, timeout: 30 });
     });
   });
 
@@ -204,7 +206,6 @@ describe("ConfigRegistry", () => {
       // Simulate skills extension registration
       registry.registerCliFlags([
         {
-          short: null,
           long: "--preload-skills",
           description: "Preload skills by name (comma-separated)",
           type: "array",
@@ -214,8 +215,8 @@ describe("ConfigRegistry", () => {
 
       const flags = registry.getCliFlags();
       expect(flags).toHaveLength(1);
-      expect(flags[0].long).toBe("--preload-skills");
-      expect(flags[0].type).toBe("array");
+      expect(flags[0]!.long).toBe("--preload-skills");
+      expect(flags[0]!.type).toBe("array");
     });
 
     it("should register skills config params with preloadSkills", async () => {
@@ -234,10 +235,11 @@ describe("ConfigRegistry", () => {
 
       const params = registry.getConfigParams();
       expect(params).toHaveLength(1);
-      expect(params[0].key).toBe("skills");
+      expect(params[0]!.key).toBe("skills");
 
       const defaults = registry.buildDefaults();
-      expect(defaults.skills.preloadSkills).toEqual([]);
+      expect((defaults as Record<string, unknown>).skills).toBeDefined();
+      expect(((defaults as Record<string, unknown>).skills as Record<string, unknown>).preloadSkills).toEqual([]);
     });
   });
 
@@ -253,18 +255,18 @@ describe("ConfigRegistry", () => {
   describe("registerCliFlags — edge cases", () => {
     it("throws for non-array input", () => {
       const registry = createConfigRegistry();
-      expect(() => registry.registerCliFlags("not-an-array")).toThrow("must be an array");
+      expect(() => registry.registerCliFlags("not-an-array" as unknown as Array<{ short?: string; long: string; description: string; type: string }>)).toThrow("must be an array");
     });
 
     it("defaults type to string when not provided", () => {
       const registry = createConfigRegistry();
-      registry.registerCliFlags([{ long: "--test" }]);
-      expect(registry.getCliFlags()[0].type).toBe("string");
+      registry.registerCliFlags([{ long: "--test", description: "Test flag", type: "" }]);
+      expect(registry.getCliFlags()[0]!.type).toBe("string");
     });
 
     it("handles flags with only short form", () => {
       const registry = createConfigRegistry();
-      registry.registerCliFlags([{ short: "-t", type: "string" }]);
+      registry.registerCliFlags([{ short: "-t", long: "--test", description: "Test flag", type: "string" }]);
       const help = registry.getCliHelpText();
       expect(help).toContain("-t");
     });
@@ -317,13 +319,13 @@ describe("ConfigRegistry", () => {
     it("registerConfigSchema throws for invalid key", () => {
       const registry = createConfigRegistry();
       expect(() => registry.registerConfigSchema("", {})).toThrow("key must be a non-empty string");
-      expect(() => registry.registerConfigSchema(123, {})).toThrow("key must be a non-empty string");
+      expect(() => registry.registerConfigSchema(123 as unknown as string, {})).toThrow("key must be a non-empty string");
     });
 
     it("registerConfigSchema throws for invalid schema", () => {
       const registry = createConfigRegistry();
-      expect(() => registry.registerConfigSchema("key", null)).toThrow("schema must be a non-null object");
-      expect(() => registry.registerConfigSchema("key", "not-an-object")).toThrow("schema must be a non-null object");
+      expect(() => registry.registerConfigSchema("key", null as unknown as Record<string, unknown>)).toThrow("schema must be a non-null object");
+      expect(() => registry.registerConfigSchema("key", "not-an-object" as unknown as Record<string, unknown>)).toThrow("schema must be a non-null object");
     });
 
     it("validateConfig validates against schema", () => {
@@ -355,6 +357,7 @@ describe("ConfigRegistry", () => {
       registry.registerConfigParams([
         {
           key: "test",
+          description: "Test config param",
           defaults: { value: 1 },
           schema: { type: "object", properties: { value: { type: "number" } } },
         },

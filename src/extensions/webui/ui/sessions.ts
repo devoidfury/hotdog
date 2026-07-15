@@ -19,7 +19,7 @@ interface SessionsConfig {
   onDelete: (sessionId: string) => void;
 }
 
-type UpdateSessionsFn = (sessions: SessionInfo[], activeSessionId: string | null) => void;
+export type UpdateSessionsFn = (sessions: SessionInfo[], activeSessionId: string | null) => void;
 
 /**
  * Initialize the session sidebar.

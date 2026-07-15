@@ -29,8 +29,14 @@ describe("TaskHandle", () => {
 describe("TaskManager", () => {
   function createManager(options = {}) {
     return new TaskManager({
-      buildAgent: () => ({}),
-      llmClient: {},
+      buildAgent: async () => ({} as any),
+      llmClient: {} as any,
+      modelRegistry: {} as any,
+      config: {} as any,
+      hooks: {} as any,
+      maxIterations: 100,
+      taskProfile: "default",
+      taskRole: "",
       ...options,
     });
   }
@@ -56,56 +62,64 @@ describe("TaskManager", () => {
 
   describe("spawnTask", () => {
     it("creates a task handle", async () => {
-      const buildAgent = (config: Record<string, unknown>) => ({
+      const buildAgent = async (config: Record<string, unknown>) => ({
         context: [],
         run: async (input: string) => "Task result",
         notifyCompletion: () => {},
-      });
+      } as any);
 
       const manager = new TaskManager({
         buildAgent,
-        llmClient: {},
-        modelRegistry: { default: "test-model" },
-        config: { profilesPath: "./config/profiles" },
+        llmClient: {} as any,
+        modelRegistry: { default: "test-model" } as any,
+        config: { profilesPath: "./config/profiles" } as any,
+        hooks: {} as any,
+        maxIterations: 100,
+        taskProfile: "default",
+        taskRole: "",
       });
 
       const handle = await manager.spawnTask("task-1", "Do something");
       expect(handle.taskId).toBe("task-1");
-      expect([TASK_STATUS.RUNNING, TASK_STATUS.COMPLETED]).toContain(handle.status);
+      expect([TASK_STATUS.RUNNING, TASK_STATUS.COMPLETED]).toContain(handle.status as typeof TASK_STATUS.RUNNING | typeof TASK_STATUS.COMPLETED);
     });
 
     it("uses custom worker model when provided", async () => {
       let agentConfig: Record<string, unknown> | null = null;
-      const buildAgent = (config: Record<string, unknown>) => {
+      const buildAgent = async (config: Record<string, unknown>) => {
         agentConfig = config;
         return {
           context: [],
           run: async () => "result",
           notifyCompletion: () => {},
-        };
+        } as any;
       };
 
       const manager = new TaskManager({
         buildAgent,
-        llmClient: {},
-        modelRegistry: { default: "default-model" },
-        config: { profilesPath: "./config/profiles" },
+        llmClient: {} as any,
+        modelRegistry: { default: "default-model" } as any,
+        config: { profilesPath: "./config/profiles" } as any,
+        hooks: {} as any,
+        maxIterations: 100,
+        taskProfile: "default",
+        taskRole: "",
       });
 
       await manager.spawnTask("task-1", "Do something", { workerModel: "custom-model" });
-      expect(agentConfig?.model).toBe("custom-model");
+      expect((agentConfig as any)?.model).toBe("custom-model");
     });
   });
 
   describe("_onTaskComplete", () => {
     it("appends result to manager context via session manager", () => {
-      const managerContext = [];
+      const managerContext: any[] = [];
       const manager = createManager();
       manager.setSessionManager({
         getAgent: () => ({
           context: managerContext,
-          addMessage(msg) { managerContext.push(msg); },
-        }),
+          addMessage(msg: any) { managerContext.push(msg); },
+        }) as any,
       });
 
       manager._onTaskComplete("task-1", "Result text");
@@ -117,9 +131,9 @@ describe("TaskManager", () => {
     });
 
     it("enqueues message via bus", () => {
-      const enqueued = [];
+      const enqueued: any[] = [];
       const manager = createManager();
-      manager.setBus({ enqueue: (msg) => enqueued.push(msg) });
+      manager.setBus({ enqueue: (msg: any) => enqueued.push(msg) } as any);
 
       manager._onTaskComplete("task-2", "Result text");
 

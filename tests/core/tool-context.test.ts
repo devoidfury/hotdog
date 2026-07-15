@@ -61,7 +61,8 @@ describe("ToolContext", () => {
     const ctx = new ToolContext({ agent: "agent1", input: "input1" });
     const json = ctx.toJSON();
     expect(json).toEqual({ agent: "agent1", input: "input1" });
-    expect(json).not.toBe(ctx._data); // should be a plain object, not the Map
+    expect(typeof json).toBe("object");
+    expect(Array.isArray(json)).toBe(false); // should be a plain object
   });
 
   it("mount adds multiple properties", () => {

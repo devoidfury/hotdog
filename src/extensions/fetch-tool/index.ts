@@ -70,7 +70,7 @@ export class FetchTool {
     });
   }
 
-  async execute(input: string | Record<string, unknown> | null, _ctx: ToolExecutionContext): Promise<ToolResult> {
+  async execute(input: string | Record<string, unknown> | null, _ctx?: ToolExecutionContext): Promise<ToolResult> {
     const { args, error } = parseArgs(input);
     if (!args) {
       return ToolResult.err(error);

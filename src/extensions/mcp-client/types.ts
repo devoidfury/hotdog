@@ -132,7 +132,7 @@ export function parseMcpToolDefinition(tool: Record<string, unknown>): McpToolDe
 /**
  * Create MCP tools/call request.
  */
-export function mcpToolCallRequest(name: string, arguments_: Record<string, unknown>): Record<string, unknown> {
+export function mcpToolCallRequest(name: string, arguments_?: Record<string, unknown> | null): Record<string, unknown> {
   return {
     name,
     ...(arguments_ !== undefined && arguments_ !== null
@@ -168,7 +168,7 @@ export function parseMcpToolCallResponse(data: Record<string, unknown>): McpTool
 /**
  * Parse a content block in a tool call response.
  */
-export function parseMcpContentBlock(block: Record<string, unknown>): McpContentBlock {
+export function parseMcpContentBlock(block: Record<string, unknown> | null): McpContentBlock {
   if (!block || !block.type) return { type: "unknown" };
 
   switch (block.type as string) {

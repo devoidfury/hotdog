@@ -2,8 +2,8 @@ import { describe, it, expect } from "bun:test";
 import { validateNameable } from "../../src/utils/file-utils.ts";
 import { deepMerge } from "../../src/utils/objects.ts";
 
-const hasWarning = (warnings, substring) =>
-  warnings.some((w) => w.includes(substring));
+const hasWarning = (warnings: string[], substring: string) =>
+  warnings.some((w: string) => w.includes(substring));
 
 describe("validateNameable", () => {
   it("returns no warnings for valid names", () => {

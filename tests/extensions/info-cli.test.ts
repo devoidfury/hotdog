@@ -4,6 +4,7 @@ import { mkdirSync, rmSync, writeFileSync, mkdtempSync } from "node:fs";
 import { join } from "node:path";
 import { homedir, tmpdir } from "node:os";
 import { createMockCore } from "../helpers.ts";
+import type { CoreContext } from "../../src/core/extensions/types.ts";
 
 // ── Shared helper to reduce boilerplate ─────────────────────────────────────
 
@@ -18,10 +19,10 @@ import { createMockCore } from "../helpers.ts";
  *   const output = await runner("profiles", cliOverrides);
  */
 async function infoCliRunner(coreConfig = {}, defaultCli = {}) {
-  const core = createMockCore(coreConfig);
+  const core = createMockCore(coreConfig) as unknown as CoreContext;
   const { create } = await import("../../src/extensions/ui-info-cli/index.ts");
   const ext = create(core);
-  await ext.hooks[HOOKS.CLI_SUBCOMMANDS_REGISTER](core.cliSubcommandRegistry);
+  await (ext.hooks![HOOKS.CLI_SUBCOMMANDS_REGISTER] as (registry: unknown) => void)(core.cliSubcommandRegistry);
 
   const baseCli = {
     wantsJson: false,
@@ -36,18 +37,18 @@ async function infoCliRunner(coreConfig = {}, defaultCli = {}) {
     ...defaultCli,
   };
 
-  return async (subcommand, cliOverrides = {}) => {
-    const def = core.cliSubcommandRegistry.get(subcommand);
+  return async (subcommand: string, cliOverrides = {}) => {
+    const def = core.cliSubcommandRegistry.get(subcommand)!;
     const cli = { ...baseCli, ...cliOverrides };
 
     let capturedOutput = "";
     const originalLog = console.log;
-    console.log = (...args) => {
+    console.log = (...args: unknown[]) => {
       capturedOutput += args.join(" ") + "\n";
     };
 
     try {
-      const exitCode = await def.handler(cli, core);
+      const exitCode = await def.handler!(cli, core);
       return { exitCode, output: capturedOutput };
     } finally {
       console.log = originalLog;
@@ -273,7 +274,7 @@ describe("Info CLI - printInfoJson branches", () => {
     expect(exitCode).toBe(0);
 
     const parsed = JSON.parse(output.trim());
-    const model = parsed.models.find((m) => m.name === "test-model");
+    const model = parsed.models.find((m: { name: string }) => m.name === "test-model");
     expect(model).toBeDefined();
     expect(model.tags).toContain("fast");
     expect(model.tags).toContain("coding");
@@ -429,12 +430,12 @@ describe("Info CLI - model tags in text output", () => {
 describe("Info CLI - profiles subcommand", () => {
   it("registers the profiles subcommand", async () => {
     const run = await infoCliRunner();
-    const core = createMockCore();
+    const core = createMockCore() as unknown as CoreContext;
     const { create } = await import("../../src/extensions/ui-info-cli/index.ts");
     const ext = create(core);
-    await ext.hooks[HOOKS.CLI_SUBCOMMANDS_REGISTER](core.cliSubcommandRegistry);
+    await (ext.hooks![HOOKS.CLI_SUBCOMMANDS_REGISTER] as (registry: unknown) => void)(core.cliSubcommandRegistry);
 
-    const def = core.cliSubcommandRegistry.get("profiles");
+    const def = core.cliSubcommandRegistry.get("profiles")!;
     expect(def).toBeDefined();
     expect(def.description).toBe("List all available profiles with their roles and tool restrictions");
   });
@@ -716,8 +717,8 @@ describe("Info CLI - profiles subcommand", () => {
       const { exitCode, output } = await run("profiles");
       expect(exitCode).toBe(0);
       const parsed = JSON.parse(output.trim());
-      const boss = parsed.find((p) => p.name === "boss");
-      const labeller = parsed.find((p) => p.name === "labeller");
+      const boss = parsed.find((p: { name: string }) => p.name === "boss");
+      const labeller = parsed.find((p: { name: string }) => p.name === "labeller");
       expect(boss.manager).toBe(true);
       expect(boss.subagent).toBe(false);
       expect(boss.availableSubagents).toEqual(["labeller"]);

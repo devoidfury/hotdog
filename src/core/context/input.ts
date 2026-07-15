@@ -17,7 +17,12 @@ export interface InputEvent {
 
 export interface QuestionDef {
   key: string;
+  prompt?: string;
+  options?: string[];
   default?: unknown;
+  required?: boolean;
+  allowOther?: boolean;
+  allow_other?: boolean;
 }
 
 /**

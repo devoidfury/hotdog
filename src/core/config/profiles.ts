@@ -100,9 +100,10 @@ export async function loadProfileFiles(
   }
 
   for (const entry of entries) {
-    if (!entry.isFile() || !entry.name.endsWith(".profile.md")) continue;
+    const entryName = typeof entry.name === "string" ? entry.name : entry.name.toString();
+    if (!entry.isFile() || !entryName.endsWith(".profile.md")) continue;
 
-    const filePath = path.join(profilesPath, entry.name);
+    const filePath = path.join(profilesPath, entryName);
     let content: string;
     try {
       content = await fsPromises.readFile(filePath, "utf-8");
@@ -114,7 +115,7 @@ export async function loadProfileFiles(
     if (!parsed) continue;
 
     const fm = parsed.frontMatter as Record<string, unknown>;
-    const fileStem = entry.name.replace(/\.profile\.md$/, "");
+    const fileStem = entryName.replace(/\.profile\.md$/, "");
 
     result[fileStem] = {
       name: (fm.name as string) || fileStem,
@@ -209,8 +210,8 @@ export function allProfilesForSwitch(
   ]);
 
   for (const name of allNames) {
-    const fileProfile = profileFiles?.[name] || null;
-    const configProfile = configProfiles?.[name] || null;
+    const fileProfile = (profileFiles?.[name] as ProfileDef) || null;
+    const configProfile = (configProfiles?.[name] as ProfileDef) || null;
     const sp = resolveSwitchProfile(name, fileProfile, configProfile);
     result[name] = sp;
   }

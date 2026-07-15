@@ -4,8 +4,6 @@
 
 export { reactiveState, effect, type Atom } from "../../../utils/reactive-state.ts";
 
-/** Alias for compatibility with existing ChatController interface. */
-export type ReactiveAtom<T> = Atom<T>;
 
 // ── Formatting & sanitisation ───────────────────────────────────────────────
 

@@ -28,7 +28,7 @@ describe("aspects extension", () => {
     const extension = create(core);
     expect(extension).toBeDefined();
     expect(extension.hooks).toBeDefined();
-    expect(extension.hooks[HOOKS.SYSTEM_PROMPT_BUILD]).toBeInstanceOf(Function);
+    expect(extension.hooks![HOOKS.SYSTEM_PROMPT_BUILD]!).toBeInstanceOf(Function);
   });
 
   it("hook returns guidelines chunk with priority 200", async () => {
@@ -53,10 +53,11 @@ describe("aspects extension", () => {
       },
     } as any;
     const extension = create(core);
-    const result = await extension.hooks[HOOKS.SYSTEM_PROMPT_BUILD](null);
-    expect(result.name).toBe("guidelines");
-    expect(result.priority).toBe(200);
-    expect(typeof result.content).toBe("string");
+    const hook = extension.hooks![HOOKS.SYSTEM_PROMPT_BUILD]!;
+    const result = await hook({} as any);
+    expect((result as any).name).toBe("guidelines");
+    expect((result as any).priority).toBe(200);
+    expect(typeof (result as any).content).toBe("string");
   });
 
   it("hook includes aspect content when aspect file exists", async () => {
@@ -79,9 +80,10 @@ describe("aspects extension", () => {
       },
     } as any;
     const extension = create(core);
-    const result = await extension.hooks[HOOKS.SYSTEM_PROMPT_BUILD](null);
-    expect(result.content).toContain("Coding Guidelines");
-    expect(result.content).toContain("Always write tests");
+    const hook = extension.hooks![HOOKS.SYSTEM_PROMPT_BUILD]!;
+    const result = await hook({} as any);
+    expect((result as any).content).toContain("Coding Guidelines");
+    expect((result as any).content).toContain("Always write tests");
   });
 
   it("hook returns empty content when no aspects are configured", async () => {
@@ -94,9 +96,10 @@ describe("aspects extension", () => {
       },
     } as any;
     const extension = create(core);
-    const result = await extension.hooks[HOOKS.SYSTEM_PROMPT_BUILD](null);
-    expect(result.name).toBe("guidelines");
-    expect(result.priority).toBe(200);
+    const hook = extension.hooks![HOOKS.SYSTEM_PROMPT_BUILD]!;
+    const result = await hook({} as any);
+    expect((result as any).name).toBe("guidelines");
+    expect((result as any).priority).toBe(200);
   });
 
   it("hook resolves aspects from config when profile has none", async () => {
@@ -120,8 +123,9 @@ describe("aspects extension", () => {
       },
     } as any;
     const extension = create(core);
-    const result = await extension.hooks[HOOKS.SYSTEM_PROMPT_BUILD](null);
-    expect(result.content).toContain("Concise");
+    const hook = extension.hooks![HOOKS.SYSTEM_PROMPT_BUILD]!;
+    const result = await hook({} as any);
+    expect((result as any).content).toContain("Concise");
   });
 
   it("profile front matter aspects take priority over config aspects", async () => {
@@ -148,9 +152,10 @@ describe("aspects extension", () => {
       },
     } as any;
     const extension = create(core);
-    const result = await extension.hooks[HOOKS.SYSTEM_PROMPT_BUILD](null);
-    expect(result.content).toContain("Profile Aspect");
-    expect(result.content).not.toContain("Config Aspect");
+    const hook = extension.hooks![HOOKS.SYSTEM_PROMPT_BUILD]!;
+    const result = await hook({} as any);
+    expect((result as any).content).toContain("Profile Aspect");
+    expect((result as any).content).not.toContain("Config Aspect");
   });
 
   it("handles missing profile file gracefully", async () => {
@@ -163,9 +168,10 @@ describe("aspects extension", () => {
       },
     } as any;
     const extension = create(core);
-    const result = await extension.hooks[HOOKS.SYSTEM_PROMPT_BUILD](null);
-    expect(result.name).toBe("guidelines");
-    expect(result.priority).toBe(200);
+    const hook = extension.hooks![HOOKS.SYSTEM_PROMPT_BUILD]!;
+    const result = await hook({} as any);
+    expect((result as any).name).toBe("guidelines");
+    expect((result as any).priority).toBe(200);
   });
 
   it("handles multiple aspects", async () => {
@@ -192,8 +198,9 @@ describe("aspects extension", () => {
       },
     } as any;
     const extension = create(core);
-    const result = await extension.hooks[HOOKS.SYSTEM_PROMPT_BUILD](null);
-    expect(result.content).toContain("Coding");
-    expect(result.content).toContain("Concise");
+    const hook = extension.hooks![HOOKS.SYSTEM_PROMPT_BUILD]!;
+    const result = await hook({} as any);
+    expect((result as any).content).toContain("Coding");
+    expect((result as any).content).toContain("Concise");
   });
 });

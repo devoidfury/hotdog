@@ -19,7 +19,7 @@ describe('PagerTool', () => {
     const tool = new PagerTool();
     const mockCached = 'Previously cached output data';
     const ctx = new ToolContext();
-    ctx.set('onGetCachedToolOutput', (toolCallId) => {
+    ctx.set('onGetCachedToolOutput', (toolCallId: string) => {
       if (toolCallId === 'call_123') return mockCached;
       return null;
     });
@@ -38,13 +38,13 @@ describe('PagerTool', () => {
 
   it('returns not found when context has no callback', async () => {
     const tool = new PagerTool();
-    const result = await tool.execute(JSON.stringify({ tool_call_id: 'call_789' }));
+    const result = await tool.execute(JSON.stringify({ tool_call_id: 'call_789' }), new ToolContext());
     expect(resultStr(result)).toContain('No cached output found');
   });
 
   it('returns not found when context is null', async () => {
     const tool = new PagerTool();
-    const result = await tool.execute(JSON.stringify({ tool_call_id: 'call_789' }), null);
+    const result = await tool.execute(JSON.stringify({ tool_call_id: 'call_789' }), new ToolContext());
     expect(resultStr(result)).toContain('No cached output found');
   });
 
@@ -56,7 +56,7 @@ describe('PagerTool', () => {
 
   it('handles object input', async () => {
     const tool = new PagerTool();
-    const result = await tool.execute({ tool_call_id: 'call_obj' });
+    const result = await tool.execute({ tool_call_id: 'call_obj' }, new ToolContext());
     expect(resultStr(result)).toContain('No cached output found');
     expect(resultStr(result)).toContain('call_obj');
   });

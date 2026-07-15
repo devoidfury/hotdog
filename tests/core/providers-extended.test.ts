@@ -11,12 +11,12 @@ import { writeFileSync, unlinkSync } from "node:fs";
 describe("resolveProvider", () => {
   it("returns null when no provider name is given", () => {
     expect(resolveProvider({}, { providers: [] })).toBeNull();
-    expect(resolveProvider({ provider: null }, { providers: [] })).toBeNull();
+    expect(resolveProvider({ provider: undefined }, { providers: [] })).toBeNull();
     expect(resolveProvider({}, {})).toBeNull();
   });
 
   it("returns null when no defaultProvider is set", () => {
-    expect(resolveProvider({}, { defaultProvider: null, providers: [] })).toBeNull();
+    expect(resolveProvider({}, { defaultProvider: undefined, providers: [] })).toBeNull();
     expect(resolveProvider({}, { providers: [] })).toBeNull();
   });
 
@@ -26,10 +26,10 @@ describe("resolveProvider", () => {
         { name: "openai", url: "http://openai.com" },
         { name: "anthropic", url: "http://anthropic.com" },
       ],
-    };
+    } as any;
     const result = resolveProvider({ provider: "openai" }, config);
-    expect(result.name).toBe("openai");
-    expect(result.url).toBe("http://openai.com");
+    expect(result!.name).toBe("openai");
+    expect((result as any).url).toBe("http://openai.com");
   });
 
   it("returns provider when config defaultProvider matches", () => {
@@ -39,9 +39,9 @@ describe("resolveProvider", () => {
         { name: "openai", url: "http://openai.com" },
         { name: "anthropic", url: "http://anthropic.com" },
       ],
-    };
+    } as any;
     const result = resolveProvider({}, config);
-    expect(result.name).toBe("anthropic");
+    expect(result!.name).toBe("anthropic");
   });
 
   it("CLI provider overrides config defaultProvider", () => {
@@ -51,14 +51,14 @@ describe("resolveProvider", () => {
         { name: "openai", url: "http://openai.com" },
         { name: "anthropic", url: "http://anthropic.com" },
       ],
-    };
+    } as any;
     const result = resolveProvider({ provider: "openai" }, config);
-    expect(result.name).toBe("openai");
+    expect(result!.name).toBe("openai");
   });
 
   it("returns null when provider name not found in providers list", () => {
     const config = {
-      providers: [{ name: "openai" }],
+      providers: [{ name: "openai" }] as any,
     };
     expect(resolveProvider({ provider: "nonexistent" }, config)).toBeNull();
   });
@@ -82,7 +82,7 @@ describe("initSystemPromptTemplate", () => {
     writeFileSync(tmpFile, "This is a test template {{ role }}");
 
     try {
-      const template = await initSystemPromptTemplate(tmpFile, null, null);
+      const template = await initSystemPromptTemplate(tmpFile, undefined, undefined);
       expect(template).toContain("This is a test template");
       expect(template).toContain("{{ role }}");
     } finally {
@@ -95,13 +95,13 @@ describe("initSystemPromptTemplate", () => {
     writeFileSync(tmpFile, "Template v1");
 
     try {
-      const template1 = await initSystemPromptTemplate(tmpFile, null, null);
+      const template1 = await initSystemPromptTemplate(tmpFile, undefined, undefined);
       expect(template1).toBe("Template v1");
 
       // Change the file content (should not matter due to caching)
       writeFileSync(tmpFile, "Template v2");
 
-      const template2 = await initSystemPromptTemplate(tmpFile, null, null);
+      const template2 = await initSystemPromptTemplate(tmpFile, undefined, undefined);
       expect(template2).toBe("Template v1"); // cached
     } finally {
       try { unlinkSync(tmpFile); } catch {}
@@ -109,7 +109,7 @@ describe("initSystemPromptTemplate", () => {
   });
 
   it("falls back to default template when file not found", async () => {
-    const template = await initSystemPromptTemplate("/nonexistent/path.md", null, null);
+    const template = await initSystemPromptTemplate("/nonexistent/path.md", undefined, undefined);
     expect(template).toContain("{{ role }}");
     expect(template).toContain("{{ body }}");
   });
@@ -117,7 +117,7 @@ describe("initSystemPromptTemplate", () => {
   it("falls back to config directory when no explicit path", async () => {
     // This will try to load from ./config/system_prompt.md in the workspace
     // which exists, so it should return the real template
-    const template = await initSystemPromptTemplate(null, null, () => "./config");
+    const template = await initSystemPromptTemplate(undefined, undefined, () => "./config");
     expect(template.length).toBeGreaterThan(0);
     expect(typeof template).toBe("string");
   });
@@ -127,13 +127,13 @@ describe("initSystemPromptTemplate", () => {
     writeFileSync(tmpFile, "Template before reset");
 
     try {
-      const template1 = await initSystemPromptTemplate(tmpFile, null, null);
+      const template1 = await initSystemPromptTemplate(tmpFile, undefined, undefined);
       expect(template1).toBe("Template before reset");
 
       resetSystemPromptCache();
       writeFileSync(tmpFile, "Template after reset");
 
-      const template2 = await initSystemPromptTemplate(tmpFile, null, null);
+      const template2 = await initSystemPromptTemplate(tmpFile, undefined, undefined);
       expect(template2).toBe("Template after reset");
     } finally {
       try { unlinkSync(tmpFile); } catch {}

@@ -39,7 +39,7 @@ describe("McpClient._parseSSE", () => {
   it("parses single SSE event", () => {
     const client = new McpClient();
     const text = "event: message\ndata: {\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{\"ok\":true}}\n\n";
-    const messages = client._parseSse(text);
+    const messages = (client as any)._parseSse(text);
     expect(messages).toHaveLength(1);
     expect(messages[0]).toEqual({ jsonrpc: "2.0", id: 1, result: { ok: true } });
   });
@@ -48,7 +48,7 @@ describe("McpClient._parseSSE", () => {
     const client = new McpClient();
     const text =
       "event: message\ndata: {\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{\"a\":1}}\n\nevent: message\ndata: {\"jsonrpc\":\"2.0\",\"id\":2,\"result\":{\"b\":2}}\n\n";
-    const messages = client._parseSse(text);
+    const messages = (client as any)._parseSse(text);
     expect(messages).toHaveLength(2);
     expect(messages[0].result).toEqual({ a: 1 });
     expect(messages[1].result).toEqual({ b: 2 });
@@ -57,7 +57,7 @@ describe("McpClient._parseSSE", () => {
   it("parses SSE without explicit event line", () => {
     const client = new McpClient();
     const text = "data: {\"key\":\"value\"}\n\n";
-    const messages = client._parseSse(text);
+    const messages = (client as any)._parseSse(text);
     expect(messages).toHaveLength(1);
     expect(messages[0]).toEqual({ key: "value" });
   });
@@ -65,7 +65,7 @@ describe("McpClient._parseSSE", () => {
   it("handles trailing data without final empty line", () => {
     const client = new McpClient();
     const text = "event: message\ndata: {\"trailing\":true}";
-    const messages = client._parseSse(text);
+    const messages = (client as any)._parseSse(text);
     expect(messages).toHaveLength(1);
     expect(messages[0]).toEqual({ trailing: true });
   });
@@ -73,21 +73,21 @@ describe("McpClient._parseSSE", () => {
   it("skips unparseable data", () => {
     const client = new McpClient();
     const text = "data: not-valid-json\n\ndata: {\"valid\":true}\n\n";
-    const messages = client._parseSse(text);
+    const messages = (client as any)._parseSse(text);
     expect(messages).toHaveLength(1);
     expect(messages[0]).toEqual({ valid: true });
   });
 
   it("returns empty array for empty input", () => {
     const client = new McpClient();
-    const messages = client._parseSse("");
+    const messages = (client as any)._parseSse("");
     expect(messages).toEqual([]);
   });
 
   it("handles CRLF line endings", () => {
     const client = new McpClient();
     const text = "event: message\r\ndata: {\"crlf\":true}\r\n\r\n";
-    const messages = client._parseSse(text);
+    const messages = (client as any)._parseSse(text);
     expect(messages).toHaveLength(1);
     expect(messages[0]).toEqual({ crlf: true });
   });
@@ -95,7 +95,7 @@ describe("McpClient._parseSSE", () => {
   it("ignores non-data and non-event lines", () => {
     const client = new McpClient();
     const text = "id: 123\nevent: message\ndata: {\"ignored\":true}\nretry: 5000\n\n";
-    const messages = client._parseSse(text);
+    const messages = (client as any)._parseSse(text);
     expect(messages).toHaveLength(1);
     expect(messages[0]).toEqual({ ignored: true });
   });
@@ -103,7 +103,7 @@ describe("McpClient._parseSSE", () => {
   it("parses event type change", () => {
     const client = new McpClient();
     const text = "event: custom\ndata: {\"type\":\"custom\"}\n\nevent: message\ndata: {\"type\":\"message\"}\n\n";
-    const messages = client._parseSse(text);
+    const messages = (client as any)._parseSse(text);
     expect(messages).toHaveLength(2);
   });
 });
@@ -115,13 +115,13 @@ describe("McpClient HTTP mode", () => {
     const client = await McpClient.forHttp("http://localhost:3000/mcp", {
       "X-Custom": "header",
     });
-    expect(client._url).toBe("http://localhost:3000/mcp");
-    expect(client._httpHeaders).toEqual({ "X-Custom": "header" });
+    expect((client as any)._url).toBe("http://localhost:3000/mcp");
+    expect((client as any)._httpHeaders).toEqual({ "X-Custom": "header" });
   });
 
   it("forHttp with no headers", async () => {
     const client = await McpClient.forHttp("http://localhost:3000/mcp");
-    expect(client._httpHeaders).toEqual({});
+    expect((client as any)._httpHeaders).toEqual({});
   });
 
   it("_httpRequest returns result from direct JSON response", async () => {
@@ -141,10 +141,10 @@ describe("McpClient HTTP mode", () => {
 
     const client = await McpClient.forHttp("http://localhost:3000/mcp");
     const originalFetch = globalThis.fetch;
-    globalThis.fetch = mockFetch;
+    globalThis.fetch = mockFetch as unknown as typeof fetch;
 
     try {
-      const result = await client._httpRequest(
+      const result = await (client as any)._httpRequest(
         JSON.stringify({ jsonrpc: "2.0", id: 1, method: "initialize", params: {} }),
       );
       expect(result.protocolVersion).toBe("2025-11-25");
@@ -166,10 +166,10 @@ describe("McpClient HTTP mode", () => {
 
     const client = await McpClient.forHttp("http://localhost:3000/mcp");
     const originalFetch = globalThis.fetch;
-    globalThis.fetch = mockFetch;
+    globalThis.fetch = mockFetch as unknown as typeof fetch;
 
     try {
-      const result = await client._httpRequest(
+      const result = await (client as any)._httpRequest(
         JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list", params: {} }),
       );
       expect(result.tools).toEqual([]);
@@ -189,11 +189,11 @@ describe("McpClient HTTP mode", () => {
 
     const client = await McpClient.forHttp("http://localhost:3000/mcp");
     const originalFetch = globalThis.fetch;
-    globalThis.fetch = mockFetch;
+    globalThis.fetch = mockFetch as unknown as typeof fetch;
 
     try {
       await expect(
-        client._httpRequest(
+        (client as any)._httpRequest(
           JSON.stringify({ jsonrpc: "2.0", id: 1, method: "initialize" }),
         ),
       ).rejects.toThrow("MCP HTTP error (500)");
@@ -212,11 +212,11 @@ describe("McpClient HTTP mode", () => {
 
     const client = await McpClient.forHttp("http://localhost:3000/mcp");
     const originalFetch = globalThis.fetch;
-    globalThis.fetch = mockFetch;
+    globalThis.fetch = mockFetch as unknown as typeof fetch;
 
     try {
       await expect(
-        client._httpRequest(
+        (client as any)._httpRequest(
           JSON.stringify({ jsonrpc: "2.0", id: 1, method: "test" }),
         ),
       ).rejects.toThrow("No SSE messages found");
@@ -230,7 +230,6 @@ describe("McpClient HTTP mode", () => {
       return Promise.resolve({
         ok: true,
         text: () =>
-          Promise.stringify?.({}) ||
           Promise.resolve(
             JSON.stringify({
               jsonrpc: "2.0",
@@ -243,11 +242,11 @@ describe("McpClient HTTP mode", () => {
 
     const client = await McpClient.forHttp("http://localhost:3000/mcp");
     const originalFetch = globalThis.fetch;
-    globalThis.fetch = mockFetch;
+    globalThis.fetch = mockFetch as unknown as typeof fetch;
 
     try {
       await expect(
-        client._httpRequest(
+        (client as any)._httpRequest(
           JSON.stringify({ jsonrpc: "2.0", id: 1, method: "test" }),
         ),
       ).rejects.toThrow("Invalid request");
@@ -259,7 +258,7 @@ describe("McpClient HTTP mode", () => {
   it("_sendRequest throws when client is cancelled", async () => {
     const client = await McpClient.forHttp("http://localhost:3000/mcp");
     client.cancelled = true;
-    await expect(client._sendRequest("test", {})).rejects.toThrow("Client is cancelled");
+    await expect((client as any)._sendRequest("test", {})).rejects.toThrow("Client is cancelled");
   });
 });
 
@@ -334,7 +333,7 @@ describe("McpConnection", () => {
     });
 
     const originalFetch = globalThis.fetch;
-    globalThis.fetch = mockFetch;
+    globalThis.fetch = mockFetch as unknown as typeof fetch;
 
     try {
       const conn = await McpConnection.connectHttp(
@@ -345,7 +344,7 @@ describe("McpConnection", () => {
       expect(listToolsCalled).toBe(true);
       expect(conn.serverName).toBe("test-server");
       expect(conn.tools).toHaveLength(1);
-      expect(conn.tools[0].name).toBe("echo");
+      expect(conn.tools[0]!.name).toBe("echo");
       await conn.shutdown();
     } finally {
       globalThis.fetch = originalFetch;
@@ -372,15 +371,15 @@ describe("McpConnection", () => {
     });
 
     const originalFetch = globalThis.fetch;
-    globalThis.fetch = mockFetch;
+    globalThis.fetch = mockFetch as unknown as typeof fetch;
 
     try {
       // This will fail on listTools but we can check headers were set
-      const headersSet = {};
+      const headersSet: Record<string, string> = {};
       mockFetch.mockImplementation((url, opts) => {
         if (opts?.headers) {
           Object.keys(opts.headers).forEach((k) => {
-            headersSet[k] = opts.headers[k];
+            headersSet[k] = (opts.headers as Record<string, string>)[k]!;
           });
         }
         const body = opts?.body ? JSON.parse(opts.body) : {};
@@ -491,7 +490,7 @@ describe("McpConnection", () => {
     });
 
     const originalFetch = globalThis.fetch;
-    globalThis.fetch = mockFetch;
+    globalThis.fetch = mockFetch as unknown as typeof fetch;
 
     try {
       const conn = await McpConnection.connectHttp(
@@ -499,8 +498,8 @@ describe("McpConnection", () => {
         "http://localhost:3000/mcp",
       );
       expect(conn.tools).toHaveLength(2);
-      expect(conn.tools[0].name).toBe("tool1");
-      expect(conn.tools[1].name).toBe("tool2");
+      expect(conn.tools[0]!.name).toBe("tool1");
+      expect(conn.tools[1]!.name).toBe("tool2");
       await conn.shutdown();
     } finally {
       globalThis.fetch = originalFetch;
@@ -537,7 +536,7 @@ describe("McpConnection", () => {
     });
 
     const originalFetch = globalThis.fetch;
-    globalThis.fetch = mockFetch;
+    globalThis.fetch = mockFetch as unknown as typeof fetch;
 
     try {
       const conn = await McpConnection.connectHttp(
@@ -559,11 +558,11 @@ describe("McpConnection", () => {
 describe("McpConnectionHandle", () => {
   it("callTool returns string content", async () => {
     const mockClient = {
-      callTool: async (name, args) => ({
+      callTool: async (_name: string, _args: Record<string, unknown>) => ({
         content: [{ type: "text", text: "hello" }],
         isError: false,
       }),
-    };
+    } as any;
     const handle = new McpConnectionHandle(mockClient, "test-server");
     const result = await handle.callTool("echo", { text: "hello" });
     expect(result).toBe("hello");
@@ -571,11 +570,11 @@ describe("McpConnectionHandle", () => {
 
   it("callTool throws McpError on error response", async () => {
     const mockClient = {
-      callTool: async (name, args) => ({
+      callTool: async (_name: string, _args: Record<string, unknown>) => ({
         content: [{ type: "text", text: "Something went wrong" }],
         isError: true,
       }),
-    };
+    } as any;
     const handle = new McpConnectionHandle(mockClient, "test-server");
     await expect(
       handle.callTool("echo", { text: "hello" }),
@@ -584,21 +583,21 @@ describe("McpConnectionHandle", () => {
 
   it("callTool joins multiple text blocks", async () => {
     const mockClient = {
-      callTool: async (name, args) => ({
+      callTool: async (_name: string, _args: Record<string, unknown>) => ({
         content: [
           { type: "text", text: "line1" },
           { type: "text", text: "line2" },
         ],
         isError: false,
       }),
-    };
+    } as any;
     const handle = new McpConnectionHandle(mockClient, "test-server");
     const result = await handle.callTool("echo", {});
     expect(result).toBe("line1\nline2");
   });
 
   it("serverName getter", () => {
-    const handle = new McpConnectionHandle({}, "my-server");
+    const handle = new McpConnectionHandle({} as any, "my-server");
     expect(handle.serverName).toBe("my-server");
   });
 });

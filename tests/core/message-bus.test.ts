@@ -7,7 +7,7 @@ import { OUTPUT_EVENT } from "../../src/core/context/output.ts";
 // ── Shared mock factories ────────────────────────────────────────────────
 
 function createMockSessionManager(getAgent?: () => unknown) {
-  return { getAgent: getAgent ?? (() => null) };
+  return { getAgent: getAgent ?? (() => null) } as any;
 }
 
 function createMockSink(): { emit: (event: unknown) => void; _emitted: unknown[] } {
@@ -69,7 +69,7 @@ describe("MessageBus constructor", () => {
   it("agent getter returns agent from session manager", () => {
     const agent = createMockAgent();
     const bus = new MessageBus({ sessionManager: createMockSessionManager(() => agent), sink: createMockSink() });
-    expect(bus.agent).toBe(agent);
+    expect(bus.agent as unknown as Record<string, unknown>).toBe(agent);
   });
 });
 
@@ -221,7 +221,7 @@ describe("MessageBus.executeCommand()", () => {
     const bus = new MessageBus({ sessionManager: createMockSessionManager(), sink });
     await bus.executeCommand("clear");
     expect(sink._emitted).toHaveLength(1);
-    expect(sink._emitted[0].content).toBe("No agent available.");
+    expect((sink._emitted[0] as Record<string, unknown>).content).toBe("No agent available.");
   });
 
   it("executes command through agent", async () => {
@@ -230,7 +230,7 @@ describe("MessageBus.executeCommand()", () => {
     const bus = new MessageBus({ sessionManager: createMockSessionManager(() => agent), sink });
     await bus.executeCommand("clear");
     expect(sink._emitted).toHaveLength(1);
-    expect(sink._emitted[0].content).toBe("Cleared");
+    expect((sink._emitted[0] as Record<string, unknown>).content).toBe("Cleared");
   });
 
   it("emits error when command returns error", async () => {
@@ -239,7 +239,7 @@ describe("MessageBus.executeCommand()", () => {
     const bus = new MessageBus({ sessionManager: createMockSessionManager(() => agent), sink });
     await bus.executeCommand("unknown");
     expect(sink._emitted).toHaveLength(1);
-    expect(sink._emitted[0].content).toBe("Unknown command");
+    expect((sink._emitted[0] as Record<string, unknown>).content).toBe("Unknown command");
   });
 
   it("does not emit when command returns null", async () => {
@@ -273,9 +273,9 @@ describe("MessageBus._processMessage()", () => {
     const sink = createMockSink();
     const bus = new MessageBus({ sessionManager: createMockSessionManager(() => agent), sink });
     await bus._processMessage("test");
-    expect(sink._emitted.at(-1).type).toBe(OUTPUT_EVENT.SESSION_STATE);
-    expect(sink._emitted.at(-1).key).toBe("working");
-    expect(sink._emitted.at(-1).value).toBe(false);
+    expect((sink._emitted.at(-1) as Record<string, unknown>).type).toBe(OUTPUT_EVENT.SESSION_STATE);
+    expect((sink._emitted.at(-1) as Record<string, unknown>).key).toBe("working");
+    expect((sink._emitted.at(-1) as Record<string, unknown>).value).toBe(false);
   });
 
   it("handles input hook that short-circuits", async () => {
@@ -297,7 +297,7 @@ describe("MessageBus._processMessage()", () => {
   it("handles input hook that transforms text", async () => {
     let receivedText: string | null = null;
     const agent = createMockAgent({
-      run: async (text: string) => { receivedText = text; },
+      run: async (text?: string) => { receivedText = text ?? null; },
       hooks: {
         runHookPipeline: async (_hook: string, data: unknown) => ({
           stopped: false,
@@ -307,7 +307,7 @@ describe("MessageBus._processMessage()", () => {
     });
     const bus = new MessageBus({ sessionManager: createMockSessionManager(() => agent), sink: createMockSink() });
     await bus._processMessage("test");
-    expect(receivedText).toBe("transformed: test");
+    expect(receivedText as unknown as string).toBe("transformed: test");
   });
 
   it("handles cancellation error silently", async () => {
@@ -348,7 +348,7 @@ describe("MessageBus._processMessage()", () => {
     const sink = createMockSink();
     const bus = new MessageBus({ sessionManager: createMockSessionManager(), sink });
     await bus._processMessage("test");
-    expect(sink._emitted.at(-1).type).toBe(OUTPUT_EVENT.SESSION_STATE);
+    expect((sink._emitted.at(-1) as Record<string, unknown>).type).toBe(OUTPUT_EVENT.SESSION_STATE);
     expect(bus.isRunning).toBe(false);
   });
 });

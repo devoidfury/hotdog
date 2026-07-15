@@ -8,8 +8,8 @@ import { SkillsLoader } from '../../src/extensions/skills/loader.ts';
 import { getDisplay } from '../helpers.ts';
 
 describe('LoadSkillTool', () => {
-  let tmpDir;
-  let loader;
+  let tmpDir: string;
+  let loader: SkillsLoader;
 
   beforeEach(async () => {
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'hotdog-test-skill-'));
@@ -58,7 +58,7 @@ describe('LoadSkillTool', () => {
     await loader.loadSkills();
     let activated = false;
     const ctx = new ToolContext();
-    ctx.set('onActivateSkill', (name) => { activated = true; expect(name).toBe('activated-skill'); });
+    ctx.set('onActivateSkill', (name: string) => { activated = true; expect(name).toBe('activated-skill'); });
 
     const tool = new LoadSkillTool({ loader });
     await tool.execute(JSON.stringify({ name: 'activated-skill' }), ctx);

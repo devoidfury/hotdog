@@ -5,7 +5,7 @@
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { readFile, access, readdir } from "node:fs/promises";
-import { Message } from "../context/message.ts";
+import { Message, type ImageAttachment as MessageImageAttachment } from "../context/message.ts";
 import { logger } from "../logger.ts";
 
 // ── Log Source Types ────────────────────────────────────────────────────────
@@ -67,7 +67,9 @@ export async function readSessionEntries(sessionId: string): Promise<LogEntry[]>
   let lastResetIdx: number | null = null;
 
   for (let i = 0; i < lines.length; i++) {
-    const trimmed = lines[i].trim();
+    const line = lines[i];
+    if (!line) continue;
+    const trimmed = line.trim();
     if (!trimmed) continue;
 
     try {
@@ -182,7 +184,7 @@ export function replayEntriesIntoContext(agent: AgentForReplay, entries: LogEntr
           new Message({
             role: "user",
             content: entry.content,
-            images: entry.images || null,
+            images: entry.images as MessageImageAttachment[] | null | undefined,
           }),
         );
         replayed++;
@@ -195,8 +197,8 @@ export function replayEntriesIntoContext(agent: AgentForReplay, entries: LogEntr
           new Message({
             role: "assistant",
             content: entry.content,
-            reasoningContent: entry.reasoningContent ?? entry.reasoning_content ?? null,
-            toolCalls: entry.toolCalls ?? entry.tool_calls ?? null,
+            reasoningContent: entry.reasoning_content ?? null,
+            toolCalls: entry.tool_calls ?? null,
           }),
         );
         replayed++;
@@ -209,7 +211,7 @@ export function replayEntriesIntoContext(agent: AgentForReplay, entries: LogEntr
           new Message({
             role: "tool",
             content: entry.content,
-            toolCallId: entry.toolCallId ?? entry.tool_call_id ?? null,
+            toolCallId: entry.tool_call_id ?? null,
           }),
         );
         replayed++;

@@ -54,9 +54,9 @@ describe("Error types", () => {
   for (const { cls, type, msg, args } of errorClasses) {
     describe(cls.name, () => {
       it(`creates error with type "${type}"`, () => {
-        const err = new cls(...args);
+        const err = new (cls as new (...a: string[]) => AppError)(...(args as string[]));
         expect(err.message).toBe(msg);
-        expect(err.type).toBe(type);
+        expect(err.type).toBe(type as any);
         expect(err).toBeInstanceOf(Error);
       });
     });
@@ -228,7 +228,7 @@ describe("isExpectedError", () => {
   });
 
   it("returns false for unexpected error types", () => {
-    const err = new Error("bug");
+    const err = new Error("bug") as Error & { type: string };
     err.type = "agent";
     expect(isExpectedError(err)).toBe(false);
   });
@@ -269,7 +269,7 @@ describe("formatError", () => {
   });
 
   it("formats error with empty message using String(err)", () => {
-    const err = new Error("");
+    const err = new Error("") as Error & { type: string };
     err.type = "http";
     // formatError uses err.message || String(err) — empty string falls through
     expect(formatError(err)).toBe("Error");
@@ -283,7 +283,7 @@ describe("withContext", () => {
   });
 
   it("re-throws expected errors as-is", async () => {
-    const err = new Error("api failure");
+    const err = new Error("api failure") as Error & { type: string };
     err.type = "api";
     await expect(
       withContext("test label", async () => {
@@ -297,29 +297,31 @@ describe("withContext", () => {
       await withContext("building agent", async () => {
         throw new Error("null reference");
       });
-      expect.fail("should have thrown");
+      throw new Error("should have thrown");
     } catch (e) {
-      expect(e.message).toContain("[building agent]");
-      expect(e.message).toContain("null reference");
-      expect(e.stack).toContain("null reference");
+      const err = e as Error;
+      expect(err.message).toContain("[building agent]");
+      expect(err.message).toContain("null reference");
+      expect(err.stack).toContain("null reference");
     }
   });
 
   it("wraps unexpected errors preserving stack trace", async () => {
     try {
       await withContext("processing", async () => {
-        const obj = null;
-        obj.foo; // TypeError
+        const obj: unknown = null;
+        (obj as any).foo; // TypeError
       });
-      expect.fail("should have thrown");
+      throw new Error("should have thrown");
     } catch (e) {
-      expect(e.message).toContain("[processing]");
-      expect(e.stack).toContain("at "); // stack preserved
+      const err = e as Error;
+      expect(err.message).toContain("[processing]");
+      expect(err.stack).toContain("at "); // stack preserved
     }
   });
 
   it("handles sync functions", async () => {
-    const result = await withContext("sync test", () => "sync result");
+    const result = await withContext("sync test", async () => "sync result");
     expect(result).toBe("sync result");
   });
 });

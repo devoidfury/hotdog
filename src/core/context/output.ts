@@ -75,8 +75,9 @@ export class OutputSink {
    */
   emit(event: OutputEvent): void {
     const handler = EVENT_HANDLERS[event.type];
-    if (handler && typeof (this as Record<string, unknown>)[handler] === "function") {
-      (this as Record<string, (event: OutputEvent) => void>)[handler](event);
+    const handlerFn = ((this as unknown) as Record<string, (event: OutputEvent) => void>)[handler];
+    if (handlerFn) {
+      handlerFn(event);
     }
   }
 

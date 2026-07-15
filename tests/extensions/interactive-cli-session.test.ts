@@ -22,16 +22,16 @@ import { ColorPalette } from "../../src/utils/cli/colors.ts";
 describe("Interactive CLI - model change hook", () => {
   it("model change hook updates readline prompt", () => {
     const hooks = new HookSystem();
-    let lastPrompt = null;
+    let lastPrompt: string | null = null;
 
     const mockRl = {
-      setPrompt: (prompt) => {
+      setPrompt: (prompt: string) => {
         lastPrompt = prompt;
       },
     };
 
-    hooks.on(HOOKS.MODEL_CHANGE, (data) => {
-      mockRl.setPrompt(`(${data.newModel})> `);
+    hooks.on(HOOKS.MODEL_CHANGE, (data: unknown) => {
+      mockRl.setPrompt(`(${(data as { newModel: string }).newModel})> `);
     });
 
     hooks.notifyHooks(HOOKS.MODEL_CHANGE, {
@@ -40,21 +40,21 @@ describe("Interactive CLI - model change hook", () => {
       newModel: "new-model",
     });
 
-    expect(lastPrompt).toBe("(new-model)> ");
+    expect(lastPrompt!).toBe("(new-model)> ");
   });
 
   it("model change hook handles multiple changes", () => {
     const hooks = new HookSystem();
-    const prompts = [];
+    const prompts: string[] = [];
 
     const mockRl = {
-      setPrompt: (prompt) => {
+      setPrompt: (prompt: string) => {
         prompts.push(prompt);
       },
     };
 
-    hooks.on(HOOKS.MODEL_CHANGE, (data) => {
-      mockRl.setPrompt(`(${data.newModel})> `);
+    hooks.on(HOOKS.MODEL_CHANGE, (data: unknown) => {
+      mockRl.setPrompt(`(${(data as { newModel: string }).newModel})> `);
     });
 
     hooks.notifyHooks(HOOKS.MODEL_CHANGE, { agent: {}, oldModel: "model-1", newModel: "model-2" });
@@ -75,8 +75,8 @@ describe("Interactive CLI - turn end hook", () => {
       prompt: () => { promptCalled = true; },
     };
 
-    hooks.on(HOOKS.TURN_END, (data) => {
-      if (data.stopped) {
+    hooks.on(HOOKS.TURN_END, (data: unknown) => {
+      if ((data as { stopped: boolean }).stopped) {
         setImmediate(() => mockRl.prompt());
       }
     });
@@ -98,8 +98,8 @@ describe("Interactive CLI - turn end hook", () => {
       prompt: () => { promptCalled = true; },
     };
 
-    hooks.on(HOOKS.TURN_END, (data) => {
-      if (data.stopped) {
+    hooks.on(HOOKS.TURN_END, (data: unknown) => {
+      if ((data as { stopped: boolean }).stopped) {
         setImmediate(() => mockRl.prompt());
       }
     });
@@ -118,8 +118,7 @@ describe("Interactive CLI - turn end hook", () => {
 describe("Interactive CLI - message bus creation", () => {
   it("message bus is created with sessionManager and sink", () => {
     const mockSessionManager = {
-      getAgent: () => null,
-      sessionId: () => "test",
+      getAgent: () => undefined,
     };
     const mockSink = { emit: () => {} };
 
@@ -131,11 +130,14 @@ describe("Interactive CLI - message bus creation", () => {
 
   it("taskManager setBus is called", () => {
     const taskManager = new TaskManager({
-      buildAgent: () => {},
-      llmClient: {},
-      modelRegistry: {},
-      config: {},
+      buildAgent: async () => ({} as any),
+      llmClient: {} as any,
+      modelRegistry: {} as any,
+      config: {} as any,
       hooks: new HookSystem(),
+      maxIterations: 100,
+      taskProfile: "default",
+      taskRole: "",
     });
 
     const mockBus = { enqueue: () => {} };
@@ -197,7 +199,7 @@ describe("Interactive CLI - module exports", () => {
   it("exports all expected functions", async () => {
     const mod = await import("../../src/extensions/ui-interactive-cli/index.ts");
     for (const name of ["runInteractiveSession", "handleSlashCommand", "create", "AsyncInteractiveCliInput"]) {
-      expect(typeof mod[name]).toBe("function");
+      expect(typeof (mod as Record<string, unknown>)[name]).toBe("function");
     }
   });
 });

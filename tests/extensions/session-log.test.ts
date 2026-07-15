@@ -38,7 +38,7 @@ function createMockAgent() {
     get log() { return log; },
     sessionLog: disabledSessionLog(),
     ensureSystemPrompt: () => {},
-    addMessage(msg) { log.push(msg); },
+    addMessage(msg: unknown) { log.push(msg as any); },
   };
 }
 
@@ -48,8 +48,8 @@ test("stripNulls removes null fields", () => {
   const obj = { a: 1, b: null, c: "hello", d: null };
   const result = stripNulls(obj);
   expect(Object.keys(result).sort()).toEqual(["a", "c"]);
-  expect(result.a).toBe(1);
-  expect(result.c).toBe("hello");
+  expect(result.a!).toBe(1);
+  expect(result.c!).toBe("hello");
 });
 
 test("stripNulls preserves non-null values", () => {
@@ -65,9 +65,9 @@ test("stripNulls only strips top-level nulls", () => {
     c: [1, null, 3],
   };
   const result = stripNulls(obj);
-  expect(result.b).toBeUndefined();
-  expect(result.a.nullField).toBeNull(); // nested objects are NOT recursively processed
-  expect(result.c).toEqual([1, null, 3]); // arrays are NOT recursively processed
+  expect(result.b!).toBeUndefined();
+  expect(result.a!.nullField).toBeNull(); // nested objects are NOT recursively processed
+  expect(result.c!).toEqual([1, null, 3]); // arrays are NOT recursively processed
 });
 
 test("stripNulls handles empty object and preserves falsy non-null values", () => {
@@ -79,15 +79,15 @@ test("stripNulls handles empty object and preserves falsy non-null values", () =
 // ── disabledSessionLog ──────────────────────────────────────────────────────
 
 test("disabledSessionLog is a no-op", () => {
-  const log = disabledSessionLog();
-  expect(() => log.append({})).not.toThrow();
-  expect(() => log.writeSystemPrompt("x")).not.toThrow();
-  expect(() => log.writeInput("x")).not.toThrow();
-  expect(() => log.writeAssistant("x")).not.toThrow();
-  expect(() => log.writeToolResult("x", "tc1", "bash")).not.toThrow();
-  expect(() => log.writeReset()).not.toThrow();
-  expect(() => log.writeCompaction(5, "summary")).not.toThrow();
-  expect(() => log.writePrompt("x")).not.toThrow();
+  const log = disabledSessionLog() as Record<string, (...args: unknown[]) => void>;
+  expect(() => log.append!({})).not.toThrow();
+  expect(() => log.writeSystemPrompt!("x")).not.toThrow();
+  expect(() => log.writeInput!("x")).not.toThrow();
+  expect(() => log.writeAssistant!("x")).not.toThrow();
+  expect(() => log.writeToolResult!("x", "tc1", "bash")).not.toThrow();
+  expect(() => log.writeReset!()).not.toThrow();
+  expect(() => log.writeCompaction!(5, "summary")).not.toThrow();
+  expect(() => log.writePrompt!("x")).not.toThrow();
 });
 
 // ── SessionLog serialization ───────────────────────────────────────────────
@@ -103,9 +103,9 @@ test("SessionLog serializes without null fields", async () => {
     const lines = content.trim().split("\n");
     expect(lines.length).toBe(2);
 
-    const firstLine = JSON.parse(lines[0]);
-    expect(firstLine).toEqual({
-      ts: expect.any(String),
+    const firstLine = JSON.parse(lines[0]!) as Record<string, unknown>;
+    expect(firstLine as any).toEqual({
+      ts: expect.anything(),
       session_id: TEST_SESSION_ID,
       role: "user",
       source: LOG_SOURCE.INPUT,
@@ -116,9 +116,9 @@ test("SessionLog serializes without null fields", async () => {
     expect(firstLine).not.toHaveProperty("tool_call_id");
     expect(firstLine).not.toHaveProperty("tool_name");
 
-    const resetLine = JSON.parse(lines[1]);
-    expect(resetLine).toEqual({
-      ts: expect.any(String),
+    const resetLine = JSON.parse(lines[1]!) as Record<string, unknown>;
+    expect(resetLine as any).toEqual({
+      ts: expect.anything(),
       session_id: TEST_SESSION_ID,
       role: "user",
       source: LOG_SOURCE.RESET,
@@ -256,7 +256,7 @@ test("SessionLog handles empty content", async () => {
     const lines = content.trim().split("\n");
     expect(lines.length).toBe(4);
 
-    const firstLine = JSON.parse(lines[0]);
+    const firstLine = JSON.parse(lines[0]!) as Record<string, unknown>;
     expect(firstLine.content).toBe("");
   } finally {
     teardown();
@@ -301,8 +301,8 @@ test("SessionLog.writeInput stores images in log file", async () => {
 
     const entries = await readSessionEntries(TEST_SESSION_ID);
     expect(entries.length).toBe(1);
-    expect(entries[0].content).toBe("What is in this image?");
-    expect(entries[0].images).toEqual([
+    expect(entries[0]!.content).toBe("What is in this image?");
+    expect(entries[0]!.images).toEqual([
       { type: "image_url", mimeType: "image/png", data: "base64data" },
     ]);
   } finally {
@@ -319,7 +319,7 @@ test("SessionLog.writeInput without images stores null", async () => {
     const entries = await readSessionEntries(TEST_SESSION_ID);
     expect(entries.length).toBe(1);
     // stripNulls removes null images from the log
-    expect(entries[0].images).toBeUndefined();
+    expect(entries[0]!.images).toBeUndefined();
   } finally {
     teardown();
   }
@@ -341,10 +341,10 @@ test("SessionLog round-trip with images preserves image data", async () => {
     const entries = await readSessionEntries(TEST_SESSION_ID);
     expect(entries.length).toBe(4);
 
-    expect(entries[0].images).toEqual([
+    expect(entries[0]!.images).toEqual([
       { type: "image_url", mimeType: "image/png", data: "testbase64data" },
     ]);
-    expect(entries[2].images).toEqual([
+    expect(entries[2]!.images).toEqual([
       { type: "image_url", mimeType: "image/jpeg", data: "anotherimage" },
     ]);
 
@@ -352,17 +352,17 @@ test("SessionLog round-trip with images preserves image data", async () => {
     const replayed = replayEntriesIntoContext(agent, entries);
     expect(replayed).toBe(4);
 
-    expect(agent.log.at(0).images).toEqual([
+    expect(agent.log.at(0)!.images).toEqual([
       { type: "image_url", mimeType: "image/png", data: "testbase64data" },
     ]);
-    expect(agent.log.at(2).images).toEqual([
+    expect(agent.log.at(2)!.images).toEqual([
       { type: "image_url", mimeType: "image/jpeg", data: "anotherimage" },
     ]);
 
-    const json0 = agent.log.at(0).toJSON();
+    const json0 = agent.log.at(0)!.toJSON() as Record<string, unknown>;
     expect(Array.isArray(json0.content)).toBe(true);
-    expect(json0.content[0]).toEqual({ type: "text", text: "Analyze this image" });
-    expect(json0.content[1]).toEqual({
+    expect((json0.content as any[])[0]).toEqual({ type: "text", text: "Analyze this image" });
+    expect((json0.content as any[])[1]).toEqual({
       type: "image_url",
       image_url: { url: "data:image/png;base64,testbase64data" },
     });
@@ -393,7 +393,7 @@ test("readSessionEntries handles malformed JSON lines", async () => {
 
     const entries = await readSessionEntries(TEST_SESSION_ID);
     expect(entries.length).toBeGreaterThanOrEqual(1);
-    const lastEntry = entries[entries.length - 1];
+    const lastEntry = entries[entries.length - 1]!;
     expect(lastEntry.content).toBe("after reset");
   } finally {
     try { rmSync(testFile); } catch {}
@@ -415,8 +415,8 @@ test("readSessionEntries replays from last reset", async () => {
 
     const entries = await readSessionEntries(uniqueId);
     expect(entries.length).toBe(2);
-    expect(entries[0].content).toBe("after reset");
-    expect(entries[1].content).toBe("response");
+    expect(entries[0]!.content).toBe("after reset");
+    expect(entries[1]!.content).toBe("response");
   } finally {
     try { rmSync(testFile); } catch {}
   }
@@ -432,9 +432,9 @@ test("readSessionEntries returns all entries when no reset", async () => {
 
     const entries = await readSessionEntries(TEST_SESSION_ID);
     expect(entries.length).toBe(3);
-    expect(entries[0].content).toBe("msg1");
-    expect(entries[1].content).toBe("resp1");
-    expect(entries[2].content).toBe("msg2");
+    expect(entries[0]!.content).toBe("msg1");
+    expect(entries[1]!.content).toBe("resp1");
+    expect(entries[2]!.content).toBe("msg2");
   } finally {
     teardown();
   }
@@ -500,7 +500,7 @@ test("replayEntriesIntoContext preserves images in user messages", () => {
 
   const replayed = replayEntriesIntoContext(agent, entries);
   expect(replayed).toBe(1);
-  expect(agent.log.at(0).images).toEqual([
+  expect(agent.log.at(0)!.images).toEqual([
     { type: "image_url", mimeType: "image/png", data: "abc" },
   ]);
 });
@@ -521,9 +521,9 @@ test("replayEntriesIntoContext handles multiple images", () => {
 
   const replayed = replayEntriesIntoContext(agent, entries);
   expect(replayed).toBe(1);
-  expect(agent.log.at(0).images.length).toBe(2);
-  expect(agent.log.at(0).images[0].mimeType).toBe("image/png");
-  expect(agent.log.at(0).images[1].mimeType).toBe("image/jpeg");
+  expect(agent.log.at(0)!.images!.length).toBe(2);
+  expect(agent.log.at(0)!.images![0]!.mimeType).toBe("image/png");
+  expect(agent.log.at(0)!.images![1]!.mimeType).toBe("image/jpeg");
 });
 
 test("replayEntriesIntoContext handles PROMPT source with images", () => {
@@ -534,8 +534,8 @@ test("replayEntriesIntoContext handles PROMPT source with images", () => {
 
   const replayed = replayEntriesIntoContext(agent, entries);
   expect(replayed).toBe(1);
-  expect(agent.log.at(0).role).toBe("user");
-  expect(agent.log.at(0).images).toEqual([
+  expect(agent.log.at(0)!.role).toBe("user");
+  expect(agent.log.at(0)!.images).toEqual([
     { type: "image_url", mimeType: "image/webp", data: "webpimg" },
   ]);
 });
@@ -547,5 +547,5 @@ test("replayed message getTextContent returns text without images", () => {
   ];
 
   replayEntriesIntoContext(agent, entries);
-  expect(agent.log.at(0).getTextContent()).toBe("What is this?");
+  expect(agent.log.at(0)!.getTextContent()).toBe("What is this?");
 });

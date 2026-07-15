@@ -11,7 +11,7 @@ import { LlmError } from "../error.ts";
  */
 export function extractHttpStatus(message: string): number | null {
   const match = message.match(/^HTTP (\d+)/);
-  return match ? parseInt(match[1], 10) : null;
+  return match ? parseInt(match[1] ?? "", 10) : null;
 }
 
 /**

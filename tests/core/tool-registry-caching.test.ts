@@ -58,7 +58,7 @@ describe("ToolRegistry", () => {
     // Cache should be invalidated, so toToolDef is called again
     const defs = await registry.getToolDefs();
     expect(callCount).toBe(2);
-    expect(defs[0].function.description).toBe("v2");
+    expect(defs[0]!.function.description).toBe("v2");
   });
 
   it("clearToolDefs clears the cache", async () => {
@@ -185,7 +185,7 @@ describe("Agent model setter clears tool def cache", () => {
 
     const llmClient = {
       chatStreamCancellable: async function* () {},
-    };
+    } as unknown as import("../../src/core/llm-client/client.ts").LlmClient;
 
     const agent = new Agent({
       hooks,

@@ -26,7 +26,7 @@ describe("retryWithBackoff", () => {
       () => {
         calls++;
         if (calls < 3) throw LlmError.Http("Service unavailable");
-        return "ok";
+        return Promise.resolve("ok");
       },
       5,
       { signal: new AbortController().signal },
@@ -93,7 +93,7 @@ describe("retryWithBackoff", () => {
           setTimeout(() => controller.abort(), 10);
           throw LlmError.Http("fail");
         }
-        return "ok";
+        return Promise.resolve("ok");
       },
       3,
       { signal: controller.signal },
@@ -173,7 +173,7 @@ describe("retryWithBackoff — HTTP status retry", () => {
         calls++;
         if (calls < 3)
           throw LlmError.Api("HTTP 500 (body: Internal Server Error)");
-        return "ok";
+        return Promise.resolve("ok");
       },
       5,
       { signal: new AbortController().signal },

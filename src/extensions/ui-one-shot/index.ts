@@ -107,7 +107,7 @@ async function runOneShot(
 
   let exitCode = 0;
   try {
-    await (bus as { runUntilCancelled: () => Promise<void> }).runUntilCancelled();
+    await bus.runUntilCancelled();
     console.log("\n");
   } catch (e: unknown) {
     logger.error(formatError(e));

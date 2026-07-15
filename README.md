@@ -111,7 +111,7 @@ Profile body content goes here.
 ## UI Modes
 - **One-shot CLI** -- Single prompt non-interactive session. _(stable, ready for use)_
 - **Interactive CLI** -- Readline-based interactive session. _(stable, ready for use)_
-- **Web UI** -- Optional web interface with WebSocket support (`hotdog webui`). (alpha until 0.2)
+- **Web UI** -- Optional web interface with WebSocket support (`hotdog webui`). (beta - missing old session replay)
 
 ## Features
 - **Tool calling** -- File operations, bash, HTTP requests, web search, and more

@@ -6,6 +6,8 @@
 import { describe, it, expect } from "bun:test";
 import { main } from "../../src/core/main.ts";
 
+import pkg from "../../package.json" with { type: "json" };
+
 /**
  * Run main() with given CLI args, capturing console.log output.
  * Restores process.argv and console.log after each run.
@@ -151,6 +153,6 @@ describe("main --help", () => {
 
     expect(exitCode).toBe(0);
     expect(stdout).toContain("hotdog ");
-    expect(stdout).toContain("0.1");
+    expect(stdout).toContain(pkg.version);
   });
 });

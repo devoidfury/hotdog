@@ -42,7 +42,7 @@ Copy [the minimal config example](./examples/minimal-config/config) directory to
       "models": [
         {
           "name": "hopus-popus",
-          "context-limit": 262144
+          "contextLimit": 262144
         }
       ]
     }

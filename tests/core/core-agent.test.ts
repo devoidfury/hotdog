@@ -690,7 +690,7 @@ describe('Agent — end-to-end loop', () => {
       llmClient: new MockLLMClient() as unknown as LlmClient,
       model: 'test-model',
       maxIterations: 100,
-      maxTokens: 4096,
+      contextLimit: 128000,
     });
     freshAgent.deserialize(serialized);
 
@@ -727,7 +727,7 @@ describe('Agent — end-to-end loop', () => {
         llmClient,
         model: 'custom',
         maxIterations: 42,
-        maxTokens: 4096,
+        contextLimit: 128000,
         hideTools: false,
         hideThinking: true,
       });
@@ -859,26 +859,26 @@ describe('Agent — end-to-end loop', () => {
 
   describe('resolveModelConfig', () => {
     it('should include reasoning_effort from model registry', () => {
-      const registry: Record<string, { name: string; temperature: number | null; maxTokens: number; reasoningEffort: string; tags: string[] }> = {
-        'test-model': { name: 'test-model', temperature: 0.5, maxTokens: 100, reasoningEffort: 'high', tags: [] },
+      const registry: Record<string, { name: string; temperature: number | null; contextLimit: number; reasoningEffort: string; tags: string[] }> = {
+        'test-model': { name: 'test-model', temperature: 0.5, contextLimit: 100, reasoningEffort: 'high', tags: [] },
       };
-      const config = resolveModelConfig('test-model', registry, 4096, undefined);
+      const config = resolveModelConfig('test-model', registry, 128000, undefined);
       expect(config.reasoningEffort).toBe('high');
     });
 
     it('should override reasoning_effort from runtime setting', () => {
-      const registry: Record<string, { name: string; temperature: number | null; maxTokens: number; reasoningEffort: string; tags: string[] }> = {
-        'test-model': { name: 'test-model', temperature: 0.5, maxTokens: 100, reasoningEffort: 'low', tags: [] },
+      const registry: Record<string, { name: string; temperature: number | null; contextLimit: number; reasoningEffort: string; tags: string[] }> = {
+        'test-model': { name: 'test-model', temperature: 0.5, contextLimit: 100, reasoningEffort: 'low', tags: [] },
       };
-      const config = resolveModelConfig('test-model', registry, 4096, 'max');
+      const config = resolveModelConfig('test-model', registry, 128000, 'max');
       expect(config.reasoningEffort).toBe('max');
     });
 
     it('should omit reasoning_effort when not set anywhere', () => {
-      const registry: Record<string, { name: string; temperature: number | null; maxTokens: number; tags: string[] }> = {
-        'test-model': { name: 'test-model', temperature: 0.5, maxTokens: 100, tags: [] },
+      const registry: Record<string, { name: string; temperature: number | null; contextLimit: number; tags: string[] }> = {
+        'test-model': { name: 'test-model', temperature: 0.5, contextLimit: 100, tags: [] },
       };
-      const config = resolveModelConfig('test-model', registry, 4096, undefined);
+      const config = resolveModelConfig('test-model', registry, 128000, undefined);
       expect(config.reasoningEffort).toBeUndefined();
     });
   });
@@ -896,7 +896,7 @@ describe('Agent — end-to-end loop', () => {
         llmClient: new MockLLMClient() as unknown as LlmClient,
         model: 'test',
         maxIterations: 100,
-        maxTokens: 4096,
+        contextLimit: 128000,
       });
       newAgent.deserialize(serialized);
       expect(newAgent.reasoningEffort).toBe('max');
@@ -913,7 +913,7 @@ describe('Agent — end-to-end loop', () => {
         llmClient: new MockLLMClient() as unknown as LlmClient,
         model: 'test',
         maxIterations: 100,
-        maxTokens: 4096,
+        contextLimit: 128000,
       });
       newAgent.reasoningEffort = 'high';
       newAgent.deserialize(serialized);
@@ -1324,9 +1324,9 @@ describe('Agent — end-to-end loop', () => {
       expect(agent.maxIterations).toBe(10);
     });
 
-    it('maxTokens getter', () => {
-      const { agent } = createFixture({ maxTokens: 10000 });
-      expect(agent.maxTokens).toBe(10000);
+    it('contextLimit getter', () => {
+      const { agent } = createFixture({ contextLimit: 10000 });
+      expect(agent.contextLimit).toBe(10000);
     });
 
     it('role getter', () => {

@@ -536,7 +536,6 @@ export interface CoreConfig {
   role?: string;
   aspects?: unknown[];
   defaultModel?: string;
-  maxTokens?: number;
   maxIterations?: number;
   maxRetries?: number;
   prompt?: string;

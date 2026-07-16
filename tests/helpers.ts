@@ -397,7 +397,7 @@ export function metadataTool(name: string, metadata: Record<string, unknown>): M
  * @param {Object} [options.mockLLM] — MockLLMClient instance (default: empty, non-cancelable)
  * @param {string} [options.model] — Model name (default: 'test-model')
  * @param {number} [options.maxIterations] — Max iterations (default: 10)
- * @param {number} [options.maxTokens] — Max tokens (default: 4096)
+ * @param {number} [options.contextLimit] — Context window limit (default: 128000)
  * @param {boolean} [options.hideTools] — Hide tool display (default: true)
  * @param {boolean} [options.hideThinking] — Hide thinking (default: false)
  * @param {boolean} [options.showTokenUse] — Show token usage (default: false)
@@ -419,7 +419,7 @@ export function createFixture(options: {
   mockLLM?: MockLLMClient;
   model?: string;
   maxIterations?: number;
-  maxTokens?: number;
+  contextLimit?: number;
   hideTools?: boolean;
   hideThinking?: boolean;
   showTokenUse?: boolean;
@@ -445,7 +445,7 @@ export function createFixture(options: {
     llmClient: mockLLM as unknown as LlmClient,
     model: options.model || 'test-model',
     maxIterations: options.maxIterations || 10,
-    maxTokens: options.maxTokens || 4096,
+    contextLimit: options.contextLimit || 128000,
     hideTools: options.hideTools ?? true,
     hideThinking: options.hideThinking ?? false,
     showTokenUse: options.showTokenUse ?? false,
@@ -627,7 +627,7 @@ export function createMockCore(config: {
     chatTimeout: 30,
     maxRetries: 3,
     maxIterations: 100,
-    maxTokens: 4096,
+    contextLimit: 128000,
     profileName: "default",
     profile: {},
     hideTools: false,

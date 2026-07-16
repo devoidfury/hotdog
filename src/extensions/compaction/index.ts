@@ -125,7 +125,7 @@ export function create(core: CoreContext): ExtensionInstance | null {
       );
       const stream = agent.llmClient.chatStreamCancellable(
         wrapped.map((m) => m.toJSON()),
-        (modelConfig as unknown as ModelConfig) || { name: chatModel, temperature: null, maxTokens: 4096 },
+        (modelConfig as unknown as ModelConfig) || { name: chatModel, temperature: null },
         [],
         abortController.signal,
       );
@@ -236,7 +236,7 @@ export function create(core: CoreContext): ExtensionInstance | null {
         const estimatedTokens = estimateContextTokens(nonSystemMessages);
         const reserveTokens = settings.reserveTokens;
         const modelConfig = getModelConfig(core, agent.model);
-        const contextLimit = (modelConfig?.maxTokens as number) || 128000;
+        const contextLimit = (modelConfig?.contextLimit as number) || 128000;
 
         if (estimatedTokens <= contextLimit - reserveTokens) return;
 

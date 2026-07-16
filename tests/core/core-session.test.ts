@@ -24,7 +24,7 @@ function createMockAgent(options: Record<string, unknown> = {}) {
     model: (options.model as string) || 'test-model',
     sessionId: (options.sessionId as string) || crypto.randomUUID(),
     maxIterations: 100,
-    maxTokens: 4096,
+    contextLimit: 128000,
     ...options,
   });
 }

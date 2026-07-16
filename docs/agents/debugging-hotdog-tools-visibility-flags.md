@@ -101,6 +101,6 @@ Each line shows: `hookName — N/M (source) — duration — return summary`
 - **N/M** -- handler position in the chain (e.g., 1 of 3)
 - **source** -- extension name that registered the handler
 - **return summary** -- what the handler returned, or "no return" if it didn't modify data
-- For `emitAsyncSeqUntil` hooks (e.g., `input`), an additional "stopped at handler N/M" line appears when the chain terminates early
+- For `runHookPipeline` hooks (e.g., `input`), an additional "stopped at handler N/M" line appears when the chain terminates early
 
 **Hooks traced:** All hooks except the internal `log` hook. Trace output uses `logger.debug()` so it requires `HOTDOG_LOG_LEVEL=debug` (or `HOTDOG_LOG_LEVEL=info` with `--loud`).

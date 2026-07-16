@@ -13,7 +13,7 @@ import {
 export interface ModelConfig {
   name: string;
   temperature: number | null;
-  maxTokens: number;
+  contextLimit: number;
   reasoningEffort?: string;
   tags: string[];
 }
@@ -21,7 +21,7 @@ export interface ModelConfig {
 export interface ProviderModelEntry {
   name: string;
   temperature?: number;
-  maxTokens?: number;
+  contextLimit?: number;
   reasoning_effort?: string;
   reasoningEffort?: string;
   tags?: string[];
@@ -32,7 +32,7 @@ export interface ProviderDef {
   models: ProviderModelEntry[];
   defaultModel?: string;
   temperature?: number;
-  maxTokens?: number;
+  contextLimit?: number;
   tags?: string[];
 }
 
@@ -41,7 +41,7 @@ export interface ProviderDef {
  */
 export function buildModelRegistry(
   config: { providers?: ProviderDef[] },
-  maxTokens: number,
+  contextLimit: number,
 ): Record<string, ModelConfig> {
   const registry: Record<string, ModelConfig> = {};
   const providers = config.providers || [];
@@ -53,7 +53,7 @@ export function buildModelRegistry(
       registry[modelName] = {
         name: modelName,
         temperature: modelEntry.temperature ?? null,
-        maxTokens: modelEntry.maxTokens || maxTokens,
+        contextLimit: modelEntry.contextLimit || contextLimit,
         reasoningEffort:
           modelEntry.reasoning_effort ||
           modelEntry.reasoningEffort ||
@@ -66,7 +66,7 @@ export function buildModelRegistry(
       registry[`${provider.name}/${provider.defaultModel}`] = {
         name: `${provider.name}/${provider.defaultModel}`,
         temperature: provider.temperature ?? null,
-        maxTokens: provider.maxTokens || maxTokens,
+        contextLimit: provider.contextLimit || contextLimit,
         tags: provider.tags || [],
       };
     }
@@ -95,13 +95,13 @@ export function resolveProvider(
 export function resolveModelConfig(
   modelName: string,
   modelRegistry: Record<string, ModelConfig>,
-  maxTokens: number,
+  contextLimit: number,
   reasoningEffort: string | undefined,
 ): ModelConfig {
   const fromRegistry = modelRegistry[modelName] || {
     name: modelName,
     temperature: null,
-    maxTokens,
+    contextLimit,
     reasoningEffort: undefined,
     tags: [],
   };

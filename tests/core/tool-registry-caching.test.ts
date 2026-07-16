@@ -194,7 +194,7 @@ describe("Agent model setter clears tool def cache", () => {
       model: "test-model-v1",
       modelRegistry: { "test-model-v1": {}, "test-model-v2": {} },
       maxIterations: 100,
-      maxTokens: 4096,
+      contextLimit: 128000,
     });
 
     // Prime the cache by getting tool defs

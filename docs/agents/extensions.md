@@ -3,7 +3,7 @@ The core is minimal -- all features (tools, compaction, MCP, skills, prompts, su
 
 When adding new functionality:
 1. Check if an existing extension can be extended
-2. If creating a new extension, place it in `src/extensions/<name>/` with `index.js` and a `extension.json` metadata file
+2. If creating a new extension, place it in `src/extensions/<name>/` with `index.ts` and an `extension.json` metadata file
 3. Register tools via `HOOKS.TOOLS_REGISTER`
 4. Register CLI subcommands via `HOOKS.CLI_SUBCOMMANDS_REGISTER` (or via `core.cliSubcommandRegistry`)
 5. **Define config options in `configSchema` in `extension.json`** (single source of truth)
@@ -77,7 +77,7 @@ Every extension directory must contain an `extension.json` metadata file. This i
 - `2` — CLI (loaded early for CLI subcommand registration)
 - `10` — DEFAULT (most extensions)
 
-**Discovery flow**: `extension.json` exists → `index.js` exists → valid extension.
+**Discovery flow**: `extension.json` exists → `index.ts` exists → valid extension.
 
 **Static discovery**: CLI flags, subcommand declarations, and config params from `configSchema` are read at startup without loading extension code. This enables `--help`, subcommand discovery, and config defaults to work immediately.
 

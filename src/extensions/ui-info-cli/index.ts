@@ -48,7 +48,7 @@ interface ResolvedConfig {
   configDir?: string;
   modelRegistry: Record<string, unknown>;
   maxIterations?: number;
-  maxTokens?: number;
+  contextLimit?: number;
   profileBody?: string;
   role?: string;
   profilesPath?: string;
@@ -594,7 +594,7 @@ async function runShowPrompt(
     llmClient: new LlmClient({ baseUrl: "", apiKey: "", stream: false, chatTimeoutSecs: 30, maxRetries: 3 }),
     model: resolved.model || "",
     maxIterations: (resolved.maxIterations as number) || 100,
-    maxTokens: (resolved.maxTokens as number) || 4096,
+    contextLimit: 128000,
     profileName: resolved.profileName || "default",
     role: resolved.role as string | undefined,
     profileBody: resolved.profileBody as string | undefined,

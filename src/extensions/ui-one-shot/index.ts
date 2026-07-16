@@ -34,7 +34,7 @@ interface ResolvedConfig {
   maxRetries: number;
   model: string;
   maxIterations: number;
-  maxTokens?: number;
+  contextLimit?: number;
   hideTools?: boolean;
   hideThinking?: boolean;
   showTokenUse?: boolean;
@@ -173,12 +173,12 @@ async function handlePromptSubcommand(
       model: (agentConfig.model as string) || (resolved as ResolvedConfig).model,
       maxIterations:
         (agentConfig.maxIterations as number) || (resolved as ResolvedConfig).maxIterations || 100,
-      maxTokens: (resolved as ResolvedConfig).maxTokens || 4096,
+      contextLimit: 128000,
       hideTools: typeof agentConfig.hideTools === "boolean" ? agentConfig.hideTools : (resolved as ResolvedConfig).hideTools,
       hideThinking: typeof agentConfig.hideThinking === "boolean" ? agentConfig.hideThinking : (resolved as ResolvedConfig).hideThinking,
       showTokenUse: typeof agentConfig.showTokenUse === "boolean" ? agentConfig.showTokenUse : (resolved as ResolvedConfig).showTokenUse,
       sink: (agentConfig.sink as { emit: (event: unknown) => void } | undefined) || sink,
-      modelRegistry: modelRegistry as { [key: string]: { maxTokens?: number; reasoningEffort?: string; [key: string]: unknown } },
+      modelRegistry: modelRegistry as { [key: string]: { contextLimit?: number; reasoningEffort?: string; [key: string]: unknown } },
       profileName: (agentConfig.profileName as string) || (resolved as ResolvedConfig).profileName,
       role: (agentConfig.role as string) || (resolved as ResolvedConfig).role,
       profileBody: (agentConfig.profileBody as string) || (resolved as ResolvedConfig).profileBody,

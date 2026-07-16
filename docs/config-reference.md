@@ -82,7 +82,7 @@ These are the top-level configuration keys available in `defaults.json`. Keys no
 - **Type:** `string`
 - **CLI flag:** `--model`
 - **Default:** `"qwen3.5-0.8b"`
-- **Resolution:** profile > config > default
+- **Resolution:** CLI `--model` > profile > config > default
 
 The default AI model used when no other model is specified. Format: `providerName/modelName`.
 
@@ -93,8 +93,9 @@ The default AI model used when no other model is specified. Format: `providerNam
 ### `aiUrl`
 
 - **Type:** `string`
+- **CLI flag:** `--ai-url`
 - **Default:** `null` (inherited from active provider)
-- **Resolution:** provider > CLI `--url` > config > default
+- **Resolution:** provider > CLI `--ai-url` > config > env `AI_URL`/`HOTDOG_AI_URL` > default
 
 The base URL for the AI API. If not set here, it is inherited from the active [provider](#providers--models).
 
@@ -105,8 +106,9 @@ The base URL for the AI API. If not set here, it is inherited from the active [p
 ### `apiKey`
 
 - **Type:** `string`
+- **CLI flag:** `-k, --api-key`
 - **Default:** `null`
-- **Resolution:** provider > CLI > config > env `AI_API_KEY` > default
+- **Resolution:** provider > CLI `--api-key` > config > env `AI_API_KEY` > default
 
 API key for authentication. Can also be set via the `AI_API_KEY` environment variable.
 
@@ -117,8 +119,9 @@ API key for authentication. Can also be set via the `AI_API_KEY` environment var
 ### `defaultProvider`
 
 - **Type:** `string`
+- **CLI flag:** `--provider`
 - **Default:** `null`
-- **Resolution:** config > default
+- **Resolution:** CLI `--provider` > config > default
 
 The name of the default provider to use (must match a `name` in the `providers` array).
 
@@ -193,7 +196,7 @@ Format string for tool result display. `{}` is replaced with the tool output.
 ### `hideTools`
 
 - **Type:** `boolean`
-- **CLI flag:** `--show-tools` (inverted: shows tools when `false`)
+- **CLI flag:** `--show-tools` / `--hide-tools`
 - **Default:** `true`
 - **Resolution:** CLI > config > default
 
@@ -206,7 +209,7 @@ When `true`, tool calls are hidden from output. Set to `false` to show them.
 ### `hideThinking`
 
 - **Type:** `boolean`
-- **CLI flag:** `--hide-thinking`
+- **CLI flag:** `--hide-thinking` / `--show-thinking`
 - **Default:** `false`
 - **Resolution:** CLI > config > default
 
@@ -234,11 +237,11 @@ Display token usage statistics at the end of responses.
 - **Type:** `boolean`
 - **CLI flag:** `--no-log`
 - **Default:** `false`
-- **Resolution:** CLI > env `HOTDOG_NO_LOG` > env `HOTDOG_LOG` (inverted) > config > default
+- **Resolution:** CLI > env `HOTDOG_LOG` (inverted) > env `HOTDOG_NO_LOG` > config > default
 
 Disable session logging. Can also be controlled via environment variables:
+- `HOTDOG_LOG=false` enables no-log mode (inverted)
 - `HOTDOG_NO_LOG=true` enables no-log mode
-- `HOTDOG_LOG=false` enables no-log mode
 
 ```json
 { "noLog": true }
@@ -352,14 +355,10 @@ Timeout in seconds for embeddings requests.
 
 - **Type:** `string`
 - **CLI flag:** `--skills-path`
-- **Default:** `<configDir>/skills`
+- **Default:** `<configDir>/skills` (computed)
 - **Resolution:** CLI > config > computed (configDir + "skills")
 
 Path to the skills directory. Falls back to `<configDir>/skills` if not set.
-
-```json
-{ "skillsPath": "/path/to/skills" }
-```
 
 ### `profilesPath`
 
@@ -520,7 +519,7 @@ The `providers` array defines available AI providers and their models. Each prov
 | `apiKey` | `string` | no | — | API key for this provider. Also resolves to the `apiKey` config key. |
 | `defaultModel` | `string` | no | — | Default model name for this provider (used when no models array is present). |
 | `temperature` | `number` | no | — | Default temperature for all models in this provider. |
-| `maxTokens` | `number` | no | 32000 | Default max tokens for all models in this provider. |
+| `contextLimit` | `number` | no | 128000 | Context window size limit for all models in this provider (triggers compaction when exceeded). |
 | `models` | `array` | no | `[]` | Array of model definitions. |
 
 ### Model Object (inside `providers[].models[]`)
@@ -528,11 +527,9 @@ The `providers` array defines available AI providers and their models. Each prov
 | Field | Type | Required | Default | Description |
 |-------|------|----------|---------|-------------|
 | `name` | `string` | yes | — | Model identifier. Full reference: `providerName/modelName`. |
-| `context-limit` | `number` | no | — | Context window size in tokens. |
+| `contextLimit` | `number` | no | 128000 | Context window size limit for this model (triggers compaction when exceeded). |
 | `temperature` | `number` | no | — | Override temperature for this model. |
-| `maxTokens` | `number` | no | 32000 | Max output tokens for this model. |
 | `reasoning_effort` | `string` | no | — | Reasoning effort level (e.g. `"max"`, `"medium"`, `"low"`). Also accepts camelCase `reasoningEffort`. |
-| `parallel_tool_calling` | `boolean` | no | — | Whether this model supports parallel tool calling. |
 | `tags` | `array` | no | `[]` | Arbitrary tags for model discovery and filtering. |
 
 ### Example Providers Configuration
@@ -547,13 +544,13 @@ The `providers` array defines available AI providers and their models. Each prov
       "models": [
         {
           "name": "dsv4",
-          "context-limit": 350000,
+          "contextLimit": 350000,
           "tags": ["general", "huge", "coder"],
           "reasoning_effort": "max"
         },
         {
           "name": "qwen3.5-4b",
-          "context-limit": 262144,
+          "contextLimit": 262144,
           "tags": ["general", "fast", "instruct"]
         }
       ]
@@ -564,13 +561,13 @@ The `providers` array defines available AI providers and their models. Each prov
       "apiKey": "sk-...",
       "defaultModel": "gpt-4o",
       "temperature": 0.7,
-      "maxTokens": 8192
+      "contextLimit": 128000
     }
   ]
 }
 ```
 
-When a provider has no `models` array but defines `defaultModel`, that model is automatically registered with the provider's `temperature` and `maxTokens`.
+When a provider has no `models` array but defines `defaultModel`, that model is automatically registered with the provider's `temperature` and `contextLimit`.
 
 ---
 
@@ -759,7 +756,7 @@ An array of MCP server definitions. Each server can use either HTTP transport (`
 |-------|------|---------|-------------|
 | `enabled` | `boolean` | `true` | Enable/disable the extension. |
 | `preloadSkills` | `array` | `[]` | List of skill names to preload. |
-| `skillsPath` | `string` | `"/skills"` | Directory path where skills are stored. |
+| `path` | `string` | `<configDir>/skills` | Directory path where skills are stored. |
 
 CLI flag: `--preload-skills` (comma-separated skill names).
 
@@ -834,6 +831,7 @@ CLI flag: `--shell-mode`.
 | Variable | Related Config | Description |
 |----------|---------------|-------------|
 | `AI_API_KEY` | `apiKey` | API key for the AI provider. |
+| `AI_URL` | `aiUrl` | AI provider URL (also `HOTDOG_AI_URL`). |
 | `HOTDOG_CONFIG_DIR` | Config directory | Override the config directory path. |
 | `HOTDOG_LOG` | `noLog` | Set to `false` to disable logging (inverted). |
 | `HOTDOG_NO_LOG` | `noLog` | Set to `true` to disable logging. |
@@ -842,6 +840,7 @@ CLI flag: `--shell-mode`.
 | `BRAVE_API_KEY` | `webSearch.braveApiKey` | Brave Search API key. |
 | `TAVILY_API_KEY` | `webSearch.tavilyApiKey` | Tavily API key. |
 | `SEARXNG_INSTANCE_URL` | `webSearch.searxngInstanceUrl` | SearXNG instance URL. |
+| `HOTDOG_WEBUI_API_KEY` | `webui.apiKey` | WebUI API key for login authentication. |
 
 ---
 

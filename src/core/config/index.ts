@@ -155,7 +155,6 @@ export interface DefaultConfig extends Record<string, unknown> {
   profilesPath: string;
   chatTimeoutSecs: number;
   embeddingsTimeoutSecs: number;
-  maxTokens: number;
   maxIterations: number;
   maxRetries: number;
   taskProfile: string | null;
@@ -197,7 +196,6 @@ export function getDefaultConfig(
     profilesPath: DEFAULT_PROFILES_PATH,
     chatTimeoutSecs: getLayerDefault(CONFIG_SCHEMA.chatTimeout) as number,
     embeddingsTimeoutSecs: getLayerDefault(CONFIG_SCHEMA.embeddingsTimeout) as number,
-    maxTokens: getLayerDefault(CONFIG_SCHEMA.maxTokens) as number,
     maxIterations: getLayerDefault(CONFIG_SCHEMA.maxIterations) as number,
     maxRetries: getLayerDefault(CONFIG_SCHEMA.maxRetries) as number,
     taskProfile: getLayerDefault(CONFIG_SCHEMA.taskProfile) as string | null,
@@ -372,7 +370,7 @@ export async function buildConfig(cliArgv: CliArgv): Promise<{
 
   const modelRegistry = buildModelRegistry(
     { providers: (config.providers || []) as unknown as ProviderDef[] },
-    resolved.maxTokens as number,
+    128000,
   );
   resolved.modelRegistry = modelRegistry;
 

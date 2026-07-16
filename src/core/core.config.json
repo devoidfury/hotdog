@@ -284,10 +284,6 @@
       { "default": "qwen3.5-0.8b" }
     ]
   },
-  "maxTokens": {
-    "type": "number",
-    "layers": [{ "default": 32000 }]
-  },
   "maxIterations": {
     "type": "number",
     "cliFlag": {

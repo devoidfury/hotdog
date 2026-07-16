@@ -4,7 +4,7 @@
 
 ### Core Types
 - **ModelRegistry** — stores models by name from provider configs. Built by `buildModelRegistry(config)`.
-- **ModelEntry** — `{ name, temperature, maxTokens, reasoningEffort }` per model in registry
+- **ModelEntry** — `{ name, temperature, contextLimit, reasoningEffort }` per model in registry
 - Model names use `provider/model` format (e.g., `ai365/qwen3.5-4b`) when a provider is active
 
 ### Model Switching
@@ -23,8 +23,8 @@ Each config key defines its own resolution layers. Common patterns:
 Components (`Agent`, `LlmClient`, `TaskManager`, etc.) receive resolved values from callers
 rather than importing constants directly. The `src/core/config/defaults.ts` module exports
 constants for use by the config resolution layer (`getDefaultConfig()`) and for static
-path defaults (`DEFAULT_SKILLS_PATH`, `DEFAULT_PROFILES_SUBPATH`, etc.) that are not
-schema-configurable.
+path defaults (`DEFAULT_PROFILES_SUBPATH`, `DEFAULT_PROFILES_PATH`, `DEFAULT_PROMPTS_PATH`, etc.) that are not
+schema-configurable. The skills path is computed dynamically via the config schema's `joinConfigDir:skills` compute function.
 
 Extension-specific defaults (e.g., `DEFAULT_READ_TOOL_LIMIT`, `DEFAULT_FIND_MAX_RESULTS`, compaction settings) are defined in each extension's `extension.json` configSchema.
 
@@ -51,12 +51,12 @@ Models are declared inside providers. Each provider has `name`, `url`, optional 
           "name": "qwen3.5-4b",
           "tags": ["fast", "general"],
           "temperature": 0.3,
-          "max_tokens": 32000
+          "contextLimit": 32000
         },
         {
           "name": "qwen3.6-35b",
           "tags": ["powerful", "think"],
-          "max_tokens": 64000
+          "contextLimit": 64000
         }
       ]
     }
@@ -106,7 +106,7 @@ Profiles can also be defined as `.profile.md` files in a `profiles/` directory (
 
 **Markdown body**: Content that fills the `{body}` placeholder in the system prompt template.
 
-**Resolution chain for role**: CLI `--role` > config `role` > profile file `role` > core config schema default (no `DEFAULT_ROLE` constant exists)
+**Resolution chain for role**: CLI `--role` > config `role` > profile file `role` > core config schema default
 
 **Merge rules**: When both a config profile and a `.profile.md` file profile exist for the same name, the file profile wins for `role`, `whitelistTools`, `blacklistTools`, and `manager`. The config profile wins for `model` and all other fields.
 

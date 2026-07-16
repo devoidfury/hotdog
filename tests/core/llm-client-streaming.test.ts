@@ -320,7 +320,7 @@ describe("LlmClient.chatStreamCancellable", () => {
     const client = new LlmClient({ chatTimeoutSecs: 30, maxRetries: 3, baseUrl: "http://test.com" });
     const gen = client.chatStreamCancellable(
       [{ role: "user", content: "Hi" }],
-      { name: "test-model", temperature: null, maxTokens: 100 },
+      { name: "test-model", temperature: null },
     );
     expect(gen[Symbol.asyncIterator]).toBeDefined();
   });
@@ -330,7 +330,7 @@ describe("LlmClient.chatStreamCancellable", () => {
     const abortController = new AbortController();
     const gen = client.chatStreamCancellable(
       [{ role: "user", content: "Hi" }],
-      { name: "test-model", temperature: null, maxTokens: 100 },
+      { name: "test-model", temperature: null },
       [],
       abortController as unknown as AbortSignal,
     );
@@ -342,7 +342,7 @@ describe("LlmClient.chatStreamCancellable", () => {
     const customCancel = { aborted: false } as unknown as AbortSignal;
     const gen = client.chatStreamCancellable(
       [{ role: "user", content: "Hi" }],
-      { name: "test-model", temperature: null, maxTokens: 100 },
+      { name: "test-model", temperature: null },
       [],
       customCancel,
     );
@@ -355,7 +355,7 @@ describe("LlmClient.chatStreamCancellable", () => {
     abortController.abort();
     const gen = client.chatStreamCancellable(
       [{ role: "user", content: "Hi" }],
-      { name: "test-model", temperature: null, maxTokens: 100 },
+      { name: "test-model", temperature: null },
       [],
       abortController as unknown as AbortSignal,
     );
@@ -369,7 +369,7 @@ describe("LlmClient.chatStreamCancellable", () => {
     } as unknown as AbortSignal;
     const gen = client.chatStreamCancellable(
       [{ role: "user", content: "Hi" }],
-      { name: "test-model", temperature: null, maxTokens: 100 },
+      { name: "test-model", temperature: null },
       [],
       customCancel,
     );
@@ -949,7 +949,7 @@ describe("LlmClient.chatStreamCancellable cancel token variations", () => {
 
     const gen = client.chatStreamCancellable(
       [makeMsg("user", "Hi")],
-      { name: "test-model", temperature: null, maxTokens: 100 },
+      { name: "test-model", temperature: null },
       [],
       abortController.signal,
     );
@@ -969,7 +969,7 @@ describe("LlmClient.chatStreamCancellable cancel token variations", () => {
 
     const gen = client.chatStreamCancellable(
       [makeMsg("user", "Hi")],
-      { name: "test-model", temperature: null, maxTokens: 100 },
+      { name: "test-model", temperature: null },
       [],
       abortController.signal,
     );
@@ -990,7 +990,7 @@ describe("LlmClient.chatStreamCancellable cancel token variations", () => {
 
     const gen = client.chatStreamCancellable(
       [makeMsg("user", "Hi")],
-      { name: "test-model", temperature: null, maxTokens: 100 },
+      { name: "test-model", temperature: null },
       [],
       abortController.signal,
     );
@@ -1014,7 +1014,7 @@ describe("LlmClient.chatStreamCancellable cancel token variations", () => {
 
     const gen = client.chatStreamCancellable(
       [makeMsg("user", "Hi")],
-      { name: "test-model", temperature: null, maxTokens: 100 },
+      { name: "test-model", temperature: null },
       [],
       null,
     );
@@ -1045,7 +1045,7 @@ describe("LlmClient.chatStreamCancellable cancel token variations", () => {
 
     const gen = client.chatStreamCancellable(
       [makeMsg("user", "Hi")],
-      { name: "test-model", temperature: null, maxTokens: 100 },
+      { name: "test-model", temperature: null },
       [],
       customToken,
     );

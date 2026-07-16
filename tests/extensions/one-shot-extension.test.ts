@@ -22,7 +22,7 @@ describe("One-Shot Extension", () => {
         chatTimeout: 30,
         maxRetries: 3,
         maxIterations: 100,
-        maxTokens: 4096,
+        contextLimit: 128000,
         hideTools: false,
         hideThinking: true,
         showTokenUse: true,

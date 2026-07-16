@@ -29,7 +29,7 @@ Argument parsing with support for dynamic CLI flags registered by extensions via
 Split into sub-modules. The single source of truth is `src/core/core.config.json`. Key exports:
 - `src/core/config/index.ts` — re-exports all from sub-modules; plus `resolveConfigDir()`, `mergeExtensionConfigDefaults()`, `normalizeConfigKeys()`, `getDefaultConfig()`, `loadConfig()`, `validateConfig()`, `failOnInvalidConfig()`, `buildConfig()`, `buildAgentConfig()`
 - `src/core/config/defaults.ts` — exports constants for the config resolution layer (`getDefaultConfig()`) and static path defaults; components receive resolved values from callers instead of importing these directly
-- `src/core/config/schema-loader.js` — reads `core.config.json`, builds `CONFIG_SCHEMA`, cast functions, CLI flags, and resolvers (`resolveKey()`, `resolveAll()`, `resolveModel()`, `resolveModelWithProvider()`, `resolveExtensionConfig()`, `cliFlagsFromSchema()`)
+- `src/core/config/schema-loader.ts` — reads `core.config.json`, builds `CONFIG_SCHEMA`, cast functions, CLI flags, and resolvers (`resolveKey()`, `resolveAll()`, `resolveModel()`, `resolveModelWithProvider()`, `resolveExtensionConfig()`, `cliFlagsFromSchema()`)
 - `src/core/config/profiles.ts` — `loadProfileFile()`, `loadProfileFiles()`, `resolveProfile()`, `mergeProfile()`
 - `src/core/config/providers.ts` — `buildModelRegistry()`, `resolveProvider()`, `initSystemPromptTemplate()`, `resetSystemPromptCache()`
 
@@ -87,7 +87,7 @@ Discovers, loads, and manages extensions. Key exports:
 
 ### Agent (`src/core/agent.ts`)
 Minimal Agent class that runs the LLM loop and delegates behavior to hooks. Key features:
-- Constructor takes `options` object: `hooks`, `toolRegistry`, `llmClient`, `model`, `maxIterations`, `maxTokens`, `hideTools`, `hideThinking`, `showTokenUse`, `sink`, `modelRegistry`, `profileName`, `role`, `profileBody`, `stream`, `config`, `sessionId`, `abortSignal`, `toolWhitelist`, `commandRegistry`
+- Constructor takes `options` object: `hooks`, `toolRegistry`, `llmClient`, `model`, `maxIterations`, `contextLimit`, `hideTools`, `hideThinking`, `showTokenUse`, `sink`, `modelRegistry`, `profileName`, `role`, `profileBody`, `stream`, `config`, `sessionId`, `abortSignal`, `toolWhitelist`, `commandRegistry`
 - `run(userInput)` — main iteration loop: add user message → build messages → LLM call → process stream → execute tools → repeat
 - `ensureSystemPrompt()` — builds system prompt via hooks (extensions contribute)
 - `_processStream(stream)` — processes streaming LLM response (content, reasoning, tool calls, usage)
@@ -170,8 +170,11 @@ Tera-like template engine supporting `{{ vars }}`, `{% if %}`, `{% for %}`, filt
 
 ### System Prompt (`src/core/context/system-prompt.ts`)
 System prompt building. Key exports:
-- `buildSystemPrompt(options)` — builds full system prompt from chunks contributed by extensions via `SYSTEM_PROMPT_BUILD` hook. Options: `role`, `body`, `model`, `profileName`, `chunks`, `templatePath`.
+- `buildSystemPrompt(role, body, model, profileName, chunks, templatePath?)` — builds full system prompt from chunks contributed by extensions via `SYSTEM_PROMPT_BUILD` hook
 - `loadSystemPromptTemplate(templatePath)` — loads the system prompt template from disk
+- `collectSystemPromptChunks(results)` — collects and sorts system prompt chunks from hook results
+- `SystemPromptBuilder` class — manages system prompt lifecycle with caching (`build()`, `ensureBuilt()`, `getPrompt()`, `clear()`)
+- `createSystemPromptBuilder(templatePath?)` — factory for SystemPromptBuilder
 
 **Note**: `loadAspects()` lives in `src/utils/file-utils.ts` and `loadAgentsMd()` lives in `src/extensions/agents-md/index.ts` — neither is in this file.
 

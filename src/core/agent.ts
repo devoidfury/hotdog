@@ -25,7 +25,7 @@ export type { StreamEvent } from "./llm-client/client.ts";
 
 export interface ModelRegistry {
   [key: string]: {
-    maxTokens?: number;
+    contextLimit?: number;
     reasoningEffort?: string;
     [key: string]: unknown;
   };
@@ -75,7 +75,7 @@ export interface AgentOptions {
   llmClient: LlmClient;
   model: string;
   maxIterations: number;
-  maxTokens: number;
+  contextLimit: number;
   hideTools?: boolean;
   hideThinking?: boolean;
   showTokenUse?: boolean;
@@ -103,7 +103,7 @@ export class Agent {
   #log: MessageLog;
   #model: string;
   #maxIterations: number;
-  #maxTokens: number;
+  #contextLimit: number;
   #hideTools: boolean;
   #hideThinking: boolean;
   #sink: OutputSink | null;
@@ -134,7 +134,7 @@ export class Agent {
    * @param options.llmClient — LlmClient instance
    * @param options.model — Model name
    * @param options.maxIterations — Max loop iterations (from resolved config)
-   * @param options.maxTokens — Token threshold for context:full (from resolved config)
+   * @param options.contextLimit — Context window limit for compaction (from model config)
    * @param options.hideTools — Hide tool display
    * @param options.hideThinking — Hide thinking display
    * @param options.showTokenUse — Show token usage
@@ -153,8 +153,8 @@ export class Agent {
     if (options.maxIterations == null) {
       throw new Error("missing required maxIterations");
     }
-    if (options.maxTokens == null) {
-      throw new Error("missing required maxTokens");
+    if (options.contextLimit == null) {
+      throw new Error("missing required contextLimit");
     }
     this.#hooks = options.hooks;
     this.#toolRegistry = options.toolRegistry;
@@ -162,7 +162,7 @@ export class Agent {
     this.#log = new MessageLog();
     this.#model = options.model;
     this.#maxIterations = options.maxIterations;
-    this.#maxTokens = options.maxTokens;
+    this.#contextLimit = options.contextLimit;
     this.#hideTools = options.hideTools !== false;
     this.#hideThinking = options.hideThinking === true;
     this.#sink = options.sink || null;
@@ -221,7 +221,7 @@ export class Agent {
     // Pull in the new model's config from the registry
     const entry = this.#modelRegistry[v];
     if (entry) {
-      this.#maxTokens = (entry.maxTokens as number) ?? this.#maxTokens;
+      this.#contextLimit = (entry.contextLimit as number) ?? this.#contextLimit;
       // Reset reasoning effort to the new model's default —
       // the user can re-override via /reasoning if needed.
       this.#reasoningEffort = entry.reasoningEffort as string | undefined;
@@ -323,10 +323,10 @@ export class Agent {
   }
 
   /**
-   * The maximum token threshold for context compaction.
+   * The context window limit for compaction.
    */
-  get maxTokens(): number {
-    return this.#maxTokens;
+  get contextLimit(): number {
+    return this.#contextLimit;
   }
 
   /**
@@ -500,7 +500,7 @@ export class Agent {
       let modelConfig = resolveModelConfig(
         this.#model,
         this.#modelRegistry as unknown as Record<string, ModelConfig>,
-        this.#maxTokens,
+        this.#contextLimit,
         this.#reasoningEffort,
       );
 

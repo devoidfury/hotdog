@@ -48,7 +48,7 @@ describe("buildModelRegistry", () => {
     expect(registry["openai/gpt-4"]).toEqual({
       name: "openai/gpt-4",
       temperature: 0.7,
-      maxTokens: 32000,
+      contextLimit: 32000,
       reasoningEffort: undefined,
       tags: [],
     });

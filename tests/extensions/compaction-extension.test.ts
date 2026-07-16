@@ -26,7 +26,7 @@ function createMockCore(config: any = {}) {
     hooks,
     config: { compaction: config },
     modelRegistry: {
-      "test-model": { name: "test-model", temperature: null, maxTokens: 32000 },
+      "test-model": { name: "test-model", temperature: null, contextLimit: 32000 },
     },
     toolRegistry,
   } as any;
@@ -183,7 +183,7 @@ describe("Hook Integration", () => {
     const agent = createMockAgent(largeContext);
 
     core.modelRegistry = {
-      "test-model": { name: "test-model", temperature: null, maxTokens: 8000 },
+            "test-model": { name: "test-model", temperature: null, contextLimit: 8000 },
     };
 
     const messages = [{ role: "system", content: "" }, ...largeContext];
@@ -196,13 +196,13 @@ describe("Hook Integration", () => {
 
   // Parameterized: each strategy should compact when over budget
   const strategyTests = [
-    { strategy: "drop", msgCount: 100, maxTokens: 8000, contextLimit: null },
-    { strategy: "summarize-short", msgCount: 50, maxTokens: 5000, contextLimit: null },
-    { strategy: "token-aware", msgCount: 50, maxTokens: 5000, contextLimit: 5000 },
-    { strategy: "trim", msgCount: 50, maxTokens: 5000, contextLimit: 5000 },
+    { strategy: "drop", msgCount: 100, contextLimit: 8000, strategyContextLimit: null },
+    { strategy: "summarize-short", msgCount: 50, contextLimit: 5000, strategyContextLimit: null },
+    { strategy: "token-aware", msgCount: 50, contextLimit: 5000, strategyContextLimit: 5000 },
+    { strategy: "trim", msgCount: 50, contextLimit: 5000, strategyContextLimit: 5000 },
   ];
 
-  for (const { strategy, msgCount, maxTokens, contextLimit } of strategyTests) {
+  for (const { strategy, msgCount, contextLimit, strategyContextLimit } of strategyTests) {
     it(`should use ${strategy} strategy when configured`, async () => {
       const core = createMockCore({
         enabled: true,
@@ -216,10 +216,10 @@ describe("Hook Integration", () => {
       const agent = createMockAgent(largeContext);
 
       core.modelRegistry = {
-        "test-model": { name: "test-model", temperature: null, maxTokens },
+        "test-model": { name: "test-model", temperature: null, contextLimit },
       };
 
-      if (contextLimit) (ext as any).settings.contextLimit = contextLimit;
+      if (strategyContextLimit) (ext as any).settings.contextLimit = strategyContextLimit;
 
       const messages = [{ role: "system", content: "" }, ...largeContext];
       const result = await (ext as any).hooks![HOOKS.CONTEXT]!({ messages: messages as any, agent });
@@ -284,7 +284,7 @@ describe("Hook Integration", () => {
     ];
 
     core.modelRegistry = {
-      "test-model": { name: "test-model", temperature: null, maxTokens: 5000 },
+            "test-model": { name: "test-model", temperature: null, contextLimit: 5000 },
     };
 
     await (ext as any).hooks![HOOKS.CONTEXT]!({ messages: messages as any, agent });
@@ -454,7 +454,7 @@ describe("COMMANDS_REGISTER Hook", () => {
     const agent = createMockAgent(context);
 
     core.modelRegistry = {
-      "test-model": { name: "test-model", temperature: null, maxTokens: 5000 },
+            "test-model": { name: "test-model", temperature: null, contextLimit: 5000 },
     };
 
     const result = await (compactCmd!.handler as any)(agent, "compact --compact-debug");
@@ -477,7 +477,7 @@ describe("Edge Cases", () => {
     const agent = createMockAgent(context, "test-model");
 
     core.modelRegistry = {
-      "test-model": { name: "test-model", temperature: null, maxTokens: 5000 },
+            "test-model": { name: "test-model", temperature: null, contextLimit: 5000 },
     };
 
     const messages = [{ role: "system", content: "" }, ...context];
@@ -559,7 +559,7 @@ describe("Edge Cases", () => {
     const messages = [{ role: "system", content: "" }, ...context];
 
     core.modelRegistry = {
-      "test-model": { name: "test-model", temperature: null, maxTokens: 2000 },
+            "test-model": { name: "test-model", temperature: null, contextLimit: 2000 },
     };
 
     await (ext as any).hooks![HOOKS.CONTEXT]!({ messages: messages as any, agent });

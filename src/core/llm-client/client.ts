@@ -29,7 +29,6 @@ export interface ProviderConfig {
 export interface ModelConfig {
   name: string;
   temperature: number | null;
-  maxTokens: number | null;
   reasoningEffort?: string;
 }
 
@@ -229,7 +228,6 @@ export class LlmClient {
     const request: Record<string, unknown> = {
       model: modelName,
       messages: escapedMessages,
-      max_tokens: modelConfig.maxTokens,
       stream: stream,
     };
 
@@ -260,19 +258,16 @@ export class LlmClient {
    * @param messages - Chat messages.
    * @param model - Model name.
    * @param tools - Tool definitions.
-   * @param maxTokens - Maximum tokens.
    * @returns Async generator yielding stream events.
    */
   async *chatStream(
     messages: Array<Record<string, unknown>>,
     model: string,
     tools: Array<Record<string, unknown>> = [],
-    maxTokens?: number,
   ): AsyncGenerator<StreamEvent> {
     const modelConfig: ModelConfig = {
       name: model,
       temperature: null,
-      maxTokens: maxTokens ?? null,
     };
     yield* this.chatStreamWithModelConfig(messages, modelConfig, tools);
   }

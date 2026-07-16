@@ -25,7 +25,7 @@ function createTestAgent(options: { hooks?: HookSystem; registry?: ToolRegistry 
     llmClient: new MockLLMClient() as unknown as LlmClient,
     model: "test-model",
     maxIterations: 100,
-    maxTokens: 4096,
+    contextLimit: 128000,
     ...options,
   });
 }

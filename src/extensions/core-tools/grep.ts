@@ -118,10 +118,78 @@ async function isBinary(filePath: string): Promise<boolean> {
 }
 
 /**
+ * Search a single file for a pattern.
+ */
+async function searchFile(
+  filePath: string,
+  re: RegExp,
+  maxResults: number,
+  context: number,
+  typeFilter: string | null,
+  outputLines: string[],
+  totalMatches: { count: number },
+): Promise<void> {
+  if (outputLines.length >= maxResults) return;
+
+  // Check file type filter
+  const ext = extname(filePath).slice(1);
+  if (!matchesType(ext, typeFilter)) return;
+
+  // Skip binary files
+  if (await isBinary(filePath)) return;
+
+  let content: string;
+  try {
+    content = await fs.readFile(filePath, "utf-8");
+  } catch {
+    return;
+  }
+
+  const lines = content.split("\n");
+  const pathStr = filePath;
+
+  for (
+    let i = 0;
+    i < lines.length && outputLines.length < maxResults;
+    i++
+  ) {
+    const line = lines[i];
+    if (!line || !re.test(line)) continue;
+
+    re.lastIndex = 0; // Reset regex state
+    totalMatches.count++;
+    const lineNum = i + 1;
+
+    // Add context lines before
+    const start = context > 0 ? Math.max(1, lineNum - context) : lineNum;
+    for (let ctxLine = start; ctxLine < lineNum; ctxLine++) {
+      const idx = ctxLine - 1;
+      if (idx < lines.length) {
+        outputLines.push(`${pathStr}:${ctxLine}:${lines[idx]}`);
+      }
+    }
+
+    // Add matching line
+    outputLines.push(`${pathStr}:${lineNum}:${line}`);
+
+    // Add context lines after
+    const end =
+      context > 0 ? Math.min(lines.length, lineNum + context) : lineNum;
+    for (let ctxLine = lineNum + 1; ctxLine <= end; ctxLine++) {
+      const idx = ctxLine - 1;
+      if (idx < lines.length) {
+        outputLines.push(`${pathStr}:${ctxLine}:${lines[idx]}`);
+      }
+    }
+  }
+}
+
+/**
  * Recursively walk a directory and search files for a pattern.
+ * If the path is a single file (not a directory), search that file directly.
  */
 async function walkAndSearch(
-  dir: string,
+  path: string,
   re: RegExp,
   maxResults: number,
   context: number,
@@ -130,7 +198,19 @@ async function walkAndSearch(
   totalMatches: { count: number },
 ): Promise<void> {
   try {
-    const stats = await fs.stat(dir);
+    const stats = await fs.stat(path);
+    if (stats.isFile()) {
+      await searchFile(
+        path,
+        re,
+        maxResults,
+        context,
+        typeFilter,
+        outputLines,
+        totalMatches,
+      );
+      return;
+    }
     if (!stats.isDirectory()) {
       return;
     }
@@ -138,12 +218,12 @@ async function walkAndSearch(
     return;
   }
 
-  const entries = await fs.readdir(dir, { withFileTypes: true });
+  const entries = await fs.readdir(path, { withFileTypes: true });
 
   for (const entry of entries) {
     if (outputLines.length >= maxResults) return;
 
-    const fullPath = join(dir, entry.name);
+    const fullPath = join(path, entry.name);
 
     if (entry.isDirectory()) {
       // Skip common non-source directories
@@ -158,58 +238,15 @@ async function walkAndSearch(
         totalMatches,
       );
     } else if (entry.isFile()) {
-      // Check file type filter
-      const ext = extname(entry.name).slice(1); // Remove leading dot
-      if (!matchesType(ext, typeFilter)) continue;
-
-      // Skip binary files
-      if (await isBinary(fullPath)) continue;
-
-      // Read file and search
-      let content: string;
-      try {
-        content = await fs.readFile(fullPath, "utf-8");
-      } catch {
-        continue;
-      }
-
-      const lines = content.split("\n");
-      const pathStr = fullPath;
-
-      for (
-        let i = 0;
-        i < lines.length && outputLines.length < maxResults;
-        i++
-      ) {
-        const line = lines[i];
-        if (!line || !re.test(line)) continue;
-
-        re.lastIndex = 0; // Reset regex state
-        totalMatches.count++;
-        const lineNum = i + 1;
-
-        // Add context lines before
-        const start = context > 0 ? Math.max(1, lineNum - context) : lineNum;
-        for (let ctxLine = start; ctxLine < lineNum; ctxLine++) {
-          const idx = ctxLine - 1;
-          if (idx < lines.length) {
-            outputLines.push(`${pathStr}:${ctxLine}:${lines[idx]}`);
-          }
-        }
-
-        // Add matching line
-        outputLines.push(`${pathStr}:${lineNum}:${line}`);
-
-        // Add context lines after
-        const end =
-          context > 0 ? Math.min(lines.length, lineNum + context) : lineNum;
-        for (let ctxLine = lineNum + 1; ctxLine <= end; ctxLine++) {
-          const idx = ctxLine - 1;
-          if (idx < lines.length) {
-            outputLines.push(`${pathStr}:${ctxLine}:${lines[idx]}`);
-          }
-        }
-      }
+      await searchFile(
+        fullPath,
+        re,
+        maxResults,
+        context,
+        typeFilter,
+        outputLines,
+        totalMatches,
+      );
     }
   }
 }

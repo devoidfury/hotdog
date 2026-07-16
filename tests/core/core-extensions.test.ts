@@ -3,42 +3,49 @@
 import { ExtensionLoader, HOOKS } from '../../src/core/extensions/extensions.ts';
 import { createHooks } from '../../src/core/hooks.ts';
 import { createToolRegistry } from '../../src/core/extensions/tool-registry.ts';
+import { createServiceRegistry } from '../../src/core/extensions/service-registry.ts';
+import { createConfigRegistry } from '../../src/core/extensions/config-registry.ts';
+import { createSubcommandRegistry } from '../../src/core/extensions/registries.ts';
+import type { LoaderCore } from '../../src/core/extensions/extensions.ts';
 import { describe, it, expect, beforeEach } from 'bun:test';
 
 describe('ExtensionLoader', () => {
-  let core;
-  let loader;
+  let core: LoaderCore;
+  let loader: ExtensionLoader;
 
   beforeEach(() => {
     const hooks = createHooks();
     const toolRegistry = createToolRegistry();
-    core = { hooks, toolRegistry };
+    const services = createServiceRegistry();
+    const configRegistry = createConfigRegistry();
+    const cliSubcommandRegistry = createSubcommandRegistry();
+    core = { hooks, toolRegistry, services, configRegistry, cliSubcommandRegistry };
     loader = new ExtensionLoader(core);
   });
 
   describe('load()', () => {
     it('should load an extension with a create function', async () => {
       const extModule = {
-        create: (c) => ({
+        create: (c: LoaderCore) => ({
           name: 'test-ext',
           hooks: {
-            'test:hook': (data) => {},
+            'test:hook': (data: unknown) => {},
           },
         }),
       };
 
       const ext = await loader.load('test', extModule);
-      expect(ext.name).toBe('test-ext');
+      expect((ext as any).name).toBe('test-ext');
       expect(loader.has('test')).toBe(true);
       expect(loader.size()).toBe(1);
     });
 
     it('should register hooks from the extension', async () => {
-      const hookCalled = [];
+      const hookCalled: unknown[] = [];
       const extModule = {
-        create: (c) => ({
+        create: (c: LoaderCore) => ({
           hooks: {
-            'test:hook': (data) => hookCalled.push(data),
+            'test:hook': (data: unknown) => hookCalled.push(data),
           },
         }),
       };
@@ -49,10 +56,10 @@ describe('ExtensionLoader', () => {
     });
 
     it('should register tools via registerTools callback', async () => {
-      let registryRef = null;
+      let registryRef: any = null;
       const extModule = {
-        create: (c) => ({
-          registerTools: (registry) => {
+        create: (c: LoaderCore) => ({
+          registerTools: (registry: any) => {
             registryRef = registry;
             registry.register('my-tool', { execute: () => 'result' });
           },
@@ -88,7 +95,7 @@ describe('ExtensionLoader', () => {
       };
 
       const ext = await loader.load('minimal', extModule);
-      expect(ext.name).toBe('minimal');
+      expect((ext as any).name).toBe('minimal');
     });
   });
 
@@ -133,15 +140,15 @@ describe('ExtensionLoader', () => {
     });
 
     it('should only remove this extension\'s handlers, not others on the same hook', async () => {
-      const extACalls = [];
-      const extBCalls = [];
+      const extACalls: unknown[] = [];
+      const extBCalls: unknown[] = [];
 
       // Load extension A with a handler on 'shared:hook'
       const extAModule = {
         create: () => ({
           name: 'extA',
           hooks: {
-            'shared:hook': (data) => extACalls.push(data),
+            'shared:hook': (data: unknown) => extACalls.push(data),
           },
         }),
       };
@@ -151,7 +158,7 @@ describe('ExtensionLoader', () => {
         create: () => ({
           name: 'extB',
           hooks: {
-            'shared:hook': (data) => extBCalls.push(data),
+            'shared:hook': (data: unknown) => extBCalls.push(data),
           },
         }),
       };
@@ -182,7 +189,7 @@ describe('ExtensionLoader', () => {
         create: () => ({
           name: 'tool-ext',
           hooks: {
-            [HOOKS.TOOLS_REGISTER]: async (registry) => {
+            [HOOKS.TOOLS_REGISTER]: async (registry: any) => {
               registry.register('my-tool', { execute: () => 'result' });
               registry.register('another-tool', { execute: () => 'result2' });
             },
@@ -195,7 +202,7 @@ describe('ExtensionLoader', () => {
       expect(core.toolRegistry.has('another-tool')).toBe(true);
 
       // Pre-existing tool should survive unload
-      core.toolRegistry.register('shared-tool', { execute: () => 'shared' });
+      core.toolRegistry.register('shared-tool', { execute: async () => 'shared' });
       expect(core.toolRegistry.has('shared-tool')).toBe(true);
 
       await loader.unload('tool-ext');

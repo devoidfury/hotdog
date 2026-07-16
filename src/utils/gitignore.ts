@@ -37,6 +37,7 @@ function patternToRegex(pattern: string, isNegated: boolean): {
 
   while (i < pattern.length) {
     const ch = pattern[i];
+    if (ch === undefined) break;
 
     if (ch === "*") {
       if (pattern[i + 1] === "*") {

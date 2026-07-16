@@ -10,10 +10,10 @@ import { CompactionStrategy, Message, CompactionSettings, CompactResult } from "
  * No LLM call required. More precise than 'drop' which uses a fixed message count.
  */
 export class TrimStrategy extends CompactionStrategy {
-  name = "trim";
-  description = "Binary-search trim: drop the minimum number of oldest messages to fit under budget. No LLM cost.";
+  override name = "trim";
+  override description = "Binary-search trim: drop the minimum number of oldest messages to fit under budget. No LLM cost.";
 
-  async execute(
+  override async execute(
     messages: Message[],
     settings: CompactionSettings,
     _llmChat: (messages: Array<{ role: string; content: string }>, model: string) => Promise<string>,
@@ -27,7 +27,9 @@ export class TrimStrategy extends CompactionStrategy {
     const systemMessages: number[] = [];
     const nonSystemIndices: number[] = [];
     for (let i = 0; i < messages.length; i++) {
-      if (messages[i].role === "system") {
+      const msg = messages[i];
+      if (!msg) continue;
+      if (msg.role === "system") {
         systemMessages.push(i);
       } else {
         nonSystemIndices.push(i);
@@ -44,7 +46,7 @@ export class TrimStrategy extends CompactionStrategy {
     if (tokensBefore <= effectiveMax) return null;
 
     // Protect the keepRecent zone
-    const firstKept = findFirstKeptIndex(messages, settings.keepRecent);
+    const firstKept = findFirstKeptIndex(messages, settings.keepRecent ?? 8);
     const droppableCount = nonSystemIndices.filter((i) => i < firstKept).length;
     if (droppableCount === 0) return null;
 
@@ -58,7 +60,7 @@ export class TrimStrategy extends CompactionStrategy {
 
       // Build candidate: system messages + non-system messages starting from dropCount
       const keptIndices = [...systemMessages, ...nonSystemIndices.slice(mid)];
-      const candidate = keptIndices.map((i) => messages[i]);
+      const candidate = keptIndices.map((i) => messages[i]!).filter((m): m is Message => m !== undefined);
       const tokens = estimateContextTokens(candidate);
 
       if (tokens <= effectiveMax) {
@@ -76,6 +78,7 @@ export class TrimStrategy extends CompactionStrategy {
     // messagesCompacted must be an index into the original messages array
     // such that messages.slice(compactedCount) gives us the kept portion.
     const firstKeptIndex = nonSystemIndices[bestDrop];
+    if (firstKeptIndex === undefined) return null;
 
     return {
       summary: null,
@@ -90,7 +93,7 @@ export class TrimStrategy extends CompactionStrategy {
     };
   }
 
-  canCompact(messages: Message[], settings: CompactionSettings): boolean {
+  override canCompact(messages: Message[], settings: CompactionSettings): boolean {
     const nonSystem = messages.filter((m) => m.role !== "system");
     if (nonSystem.length <= (settings.keepRecent || 3) * 2) return false;
 

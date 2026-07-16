@@ -29,7 +29,7 @@ interface FindArgs {
   pattern: string;
   file_type: string | null;
   max_results: number;
-  path: string | null;
+  path: string | undefined;
 }
 
 /**
@@ -38,7 +38,7 @@ interface FindArgs {
 function parseArgs(input: string | Record<string, unknown> | null, defaultMaxResults: number): FindArgs | null {
   // Empty input → defaults
   if (!input || (typeof input === "string" && input.trim().length === 0)) {
-    return { pattern: "*", file_type: null, max_results: defaultMaxResults, path: null };
+    return { pattern: "*", file_type: null, max_results: defaultMaxResults, path: undefined };
   }
 
   const json = parseToolInput(input);
@@ -51,7 +51,7 @@ function parseArgs(input: string | Record<string, unknown> | null, defaultMaxRes
   // optional params
   const file_type = typeof json.file_type === "string" ? json.file_type : null;
   const max_results = typeof json.max_results === "number" && json.max_results >= 0 ? json.max_results : defaultMaxResults;
-  let path = typeof json.path === "string" ? json.path : null;
+  let path = typeof json.path === "string" ? json.path : undefined;
   [pattern, path] = correctCommonPathMistakes(pattern, path);
   return { pattern, file_type, max_results, path };
 }
@@ -153,8 +153,8 @@ export class FindTool {
 
   constructor(options: FindToolOptions = {}) {
     const config = extensionData.configSchema as FindToolConfig;
-    this.maxResults = options.maxResults ?? config.coreTools?.properties.findMaxResults.default;
-    this.maxOutputLines = options.maxOutputLines ?? config.coreTools?.properties.maxToolOutputLines.default;
+    this.maxResults = options.maxResults ?? config.coreTools?.properties.findMaxResults.default ?? 200;
+    this.maxOutputLines = options.maxOutputLines ?? config.coreTools?.properties.maxToolOutputLines.default ?? 100;
   }
 
   toToolDef() {
@@ -198,7 +198,7 @@ export class FindTool {
         return `${args.pattern} in ${pathStr} (max ${max})`;
       }
       return `${args.pattern} in ${pathStr} (${file_type}, max ${max})`;
-    }, (raw: string) => `* in . (max ${this.maxResults})`);
+    }, { fallback: `* in . (max ${this.maxResults})` });
   }
 
   async execute(input: string | Record<string, unknown> | null, _ctx: ToolExecutionContext): Promise<ToolResult> {

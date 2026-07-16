@@ -92,8 +92,8 @@ export async function create(core: CoreContext): Promise<ExtensionInstance> {
        * Mount the skills loader on the shared context container.
        * Tools access it via toolCtx.get('skillsLoader').
        */
-      [HOOKS.AGENT_TOOL_CONTEXT]: async ({ toolCtx }: { toolCtx: ToolCtx }) => {
-        toolCtx.set("skillsLoader", loader);
+      [HOOKS.AGENT_TOOL_CONTEXT]: async ({ toolCtx }) => {
+        (toolCtx as { set: (key: string, value: unknown) => void }).set("skillsLoader", loader);
       },
 
       /**
@@ -107,11 +107,8 @@ export async function create(core: CoreContext): Promise<ExtensionInstance> {
       /**
        * Register commands for skills.
        */
-      [HOOKS.COMMANDS_REGISTER]: async ({
-        registry,
-      }: {
-        registry: CommandsRegisterPayload;
-      }) => {
+      [HOOKS.COMMANDS_REGISTER]: async (payload: CommandsRegisterPayload) => {
+        const { registry } = payload;
         registry.register("skill", {
           description: "List skills or activate a skill (skill:<name>)",
           matches: (cmd: string) => cmd.startsWith("skill"),

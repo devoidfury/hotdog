@@ -81,7 +81,7 @@ interface GrepToolConfig {
 
 interface GrepArgs {
   pattern: string;
-  path: string | null;
+  path: string | undefined;
   maxResults: number;
   context: number;
   type: string | null;
@@ -182,7 +182,7 @@ async function walkAndSearch(
         i++
       ) {
         const line = lines[i];
-        if (!re.test(line)) continue;
+        if (!line || !re.test(line)) continue;
 
         re.lastIndex = 0; // Reset regex state
         totalMatches.count++;
@@ -285,17 +285,13 @@ async function grepWithRg(
     for (const line of lines) {
       try {
         const match = JSON.parse(line) as Record<string, unknown>;
-        if (match.type === "match" && match.data) {
-          const path =
-            ((match.data as Record<string, unknown>).path?.text as string) ||
-            ((match.data as Record<string, unknown>).absolute_path as string) ||
-            "";
-          const text =
-            ((match.data as Record<string, unknown>).lines?.text as string) ||
-            "";
-          const lineNum =
-            ((match.data as Record<string, unknown>).line_number as number) ||
-            0;
+        if (match.type === "match" && match.data && typeof match.data === "object") {
+          const data = match.data as Record<string, unknown>;
+          const pathObj = data.path as Record<string, unknown> | undefined;
+          const path = (pathObj?.text as string) || (data.absolute_path as string) || "";
+          const linesObj = data.lines as Record<string, unknown> | undefined;
+          const text = (linesObj?.text as string) || "";
+          const lineNum = (data.line_number as number) || 0;
 
           if (outputLines.length < maxResults) {
             totalMatches++;
@@ -329,7 +325,7 @@ function parseArgs(
     return null;
   }
 
-  let path = typeof json.path === "string" ? json.path : null;
+  let path = typeof json.path === "string" ? json.path : undefined;
   const maxResults =
     typeof json.max_results === "number" && json.max_results >= 1
       ? json.max_results
@@ -352,10 +348,10 @@ export class GrepTool {
   constructor(options: GrepToolOptions = {}) {
     const config = extensionData.configSchema as GrepToolConfig;
     this.maxResults =
-      options.maxResults ?? config.coreTools?.properties.grepMaxResults.default;
+      options.maxResults ?? config.coreTools?.properties.grepMaxResults.default ?? 100;
     this.maxOutputLines =
       options.maxOutputLines ??
-      config.coreTools?.properties.maxToolOutputLines.default;
+      config.coreTools?.properties.maxToolOutputLines.default ?? 100;
   }
 
   toToolDef() {
@@ -468,6 +464,6 @@ export class GrepTool {
       metadata.set("type", type);
     }
 
-    return ToolResult.ok(content).withEntries(metadata);
+    return ToolResult.ok(content).withEntries(Object.fromEntries(metadata));
   }
 }

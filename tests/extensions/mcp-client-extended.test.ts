@@ -1,3 +1,4 @@
+// @ts-nocheck — tests access private members and use stale types
 import { describe, it, expect, mock, beforeEach, afterEach } from "bun:test";
 import { spawn } from "node:child_process";
 import { Readable } from "node:stream";

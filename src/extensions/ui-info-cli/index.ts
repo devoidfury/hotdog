@@ -60,6 +60,7 @@ interface Provider {
   name: string;
   url: string;
   models?: Array<{ name: string }>;
+  [key: string]: unknown;
 }
 
 interface BuildConfigResult {
@@ -95,6 +96,7 @@ interface TraceContext {
   profile: Record<string, unknown>;
   profileName: string;
   profilesPath: string;
+  [key: string]: unknown;
 }
 
 // ── Info Subcommand ────────────────────────────────────────────────────────
@@ -135,7 +137,10 @@ async function runInfo(
   }
 
   const skillsLoader = new SkillsLoader(
-    cli.skillsPath || (rawConfig.skills as Record<string, unknown>)?.path || "/skills",
+    (cli.skillsPath as string | string[] | undefined) ||
+      (typeof rawConfig.skills === "object" && rawConfig.skills !== null
+        ? ((rawConfig.skills as Record<string, unknown>).path as string) || "/skills"
+        : "/skills"),
   );
   await skillsLoader.loadSkills();
 
@@ -171,7 +176,7 @@ function printInfoText(
   console.log("=== Agent Harness Info ===");
   console.log();
   console.log("Configuration:");
-  const configDirAbs = resolved.configDir || resolveConfigDir(null);
+  const configDirAbs = resolved.configDir || resolveConfigDir(undefined);
   console.log(`  Config Dir:      ${configDirAbs}`);
   console.log(`  AI URL:          ${resolved.baseUrl}`);
   console.log(`  Default Model:   ${resolved.model}`);
@@ -586,10 +591,10 @@ async function runShowPrompt(
   const agent = new Agent({
     hooks: core.hooks,
     toolRegistry: core.toolRegistry,
-    llmClient: null, // Not needed — we only want the system prompt
+    llmClient: new LlmClient({ baseUrl: "", apiKey: "", stream: false, chatTimeoutSecs: 30, maxRetries: 3 }),
     model: resolved.model || "",
-    maxIterations: resolved.maxIterations as number | undefined,
-    maxTokens: resolved.maxTokens as number | undefined,
+    maxIterations: (resolved.maxIterations as number) || 100,
+    maxTokens: (resolved.maxTokens as number) || 4096,
     profileName: resolved.profileName || "default",
     role: resolved.role as string | undefined,
     profileBody: resolved.profileBody as string | undefined,

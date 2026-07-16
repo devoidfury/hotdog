@@ -19,13 +19,13 @@ export function getNested<T = unknown>(obj: unknown, path: string): T | undefine
  * Strip null fields from an object for serialization.
  */
 export function stripNulls<T extends Record<string, unknown>>(obj: T): Partial<T> {
-  const result: Partial<T> = {};
+  const result: Partial<Record<string, unknown>> = {};
   for (const [k, v] of Object.entries(obj)) {
     if (v !== null) {
       result[k] = v;
     }
   }
-  return result;
+  return result as Partial<T>;
 }
 
 /**
@@ -39,7 +39,7 @@ export function stripNulls<T extends Record<string, unknown>>(obj: T): Partial<T
 export function deepMerge(
   ...sources: (Record<string, any> | null | undefined | unknown)[]
 ): Record<string, any> {
-  const result = {} as T;
+  const result: Record<string, any> = {};
 
   for (const source of sources) {
     if (source == null || typeof source !== "object") continue;

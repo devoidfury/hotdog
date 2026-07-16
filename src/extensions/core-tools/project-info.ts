@@ -410,5 +410,5 @@ function extensionToLanguage(ext: string | undefined): string {
     sql: "SQL",
     env: "Env",
   };
-  return map[ext] || "Other";
+  return ext ? (map[ext] || "Other") : "Other";
 }

@@ -12,7 +12,7 @@ import { spawn } from "node:child_process";
 import { parseCommand, Command, ACTIONS, ParsedCommand } from "../../core/commands.ts";
 import { HOOKS } from "../../core/hooks.ts";
 import { CliOutputSink } from "../../utils/cli/cli.ts";
-import { LlmClient } from "../../core/llm-client/client.ts";
+import { LlmClient, type ProviderConfig } from "../../core/llm-client/client.ts";
 import { MarkerMangler } from "../../core/marker-mangler.ts";
 import { TaskManager } from "../../core/session/task-manager.ts";
 import { SessionManager } from "../../core/session/index.ts";
@@ -86,7 +86,7 @@ interface ShellCommandResult {
 }
 
 interface InteractiveSessionOptions {
-  createReadline?: (opts: readline.InterfaceOptions) => readline.Interface;
+  createReadline?: (opts: Record<string, unknown>) => readline.Interface;
   onClose?: () => void;
   onSIGINT?: () => void;
   setupInput?: () => void;
@@ -173,9 +173,9 @@ interface InputInterface {
  * collecting answers via rl.question(), then restoring the handler.
  */
 export class AsyncInteractiveCliInput implements InputInterface {
-  private readonly #rl: readline.Interface;
-  private readonly #onLine: (line: string) => void;
-  private readonly #addLineHandler: (handler: (line: string) => void) => void;
+  readonly #rl: readline.Interface;
+  readonly #onLine: (line: string) => void;
+  readonly #addLineHandler: (handler: (line: string) => void) => void;
 
   constructor(
     rl: readline.Interface,
@@ -245,7 +245,7 @@ export class AsyncInteractiveCliInput implements InputInterface {
             // Try to parse as a number index
             const idx = parseInt(trimmed, 10);
             if (!isNaN(idx) && idx >= 1 && idx <= options.length) {
-              answer = options[idx - 1];
+              answer = options[idx - 1] ?? "";
             } else if (options.includes(trimmed)) {
               // Exact match on option text
               answer = trimmed;
@@ -334,7 +334,7 @@ export async function runInteractiveSession(
     stream: resolved.stream as boolean | undefined,
     chatTimeoutSecs: resolved.chatTimeout as number,
     maxRetries: resolved.maxRetries as number,
-    providers: (config.providers as unknown[]) || [],
+    providers: (config.providers as ProviderConfig[]) || [],
     markerMangler: new MarkerMangler(),
   });
 
@@ -347,17 +347,17 @@ export async function runInteractiveSession(
       llmClient,
       model: (agentConfig.model as string) || (resolved.model as string),
       maxIterations:
-        (agentConfig.maxIterations as number) || (resolved.maxIterations as number),
-      maxTokens: resolved.maxTokens as number | undefined,
-      hideTools: agentConfig.hideTools ?? (resolved.hideTools as boolean | undefined),
-      hideThinking: agentConfig.hideThinking ?? (resolved.hideThinking as boolean | undefined),
-      showTokenUse: agentConfig.showTokenUse ?? (resolved.showTokenUse as boolean | undefined),
-      sink: (agentConfig.sink as unknown) || sink,
-      modelRegistry: (resolved.modelRegistry as Record<string, unknown>) || {},
+        (agentConfig.maxIterations as number) || (resolved.maxIterations as number) || 100,
+      maxTokens: (resolved.maxTokens as number) || 4096,
+      hideTools: typeof agentConfig.hideTools === "boolean" ? agentConfig.hideTools : (resolved.hideTools as boolean | undefined),
+      hideThinking: typeof agentConfig.hideThinking === "boolean" ? agentConfig.hideThinking : (resolved.hideThinking as boolean | undefined),
+      showTokenUse: typeof agentConfig.showTokenUse === "boolean" ? agentConfig.showTokenUse : (resolved.showTokenUse as boolean | undefined),
+      sink: (agentConfig.sink as { emit: (event: unknown) => void } | undefined) || sink,
+      modelRegistry: (resolved.modelRegistry as unknown as { [key: string]: { maxTokens?: number; reasoningEffort?: string; [key: string]: unknown } }) || {},
       profileName: (agentConfig.profileName as string) || (resolved.profileName as string),
       role: (agentConfig.role as string) || (resolved.role as string | undefined),
       profileBody: (agentConfig.profileBody as string) || (resolved.profileBody as string | undefined),
-      stream: agentConfig.stream ?? (resolved.stream as boolean | undefined),
+      stream: typeof agentConfig.stream === "boolean" ? agentConfig.stream : (resolved.stream as boolean | undefined),
       config,
       sessionId,
       abortSignal: (agentConfig.abortSignal as AbortSignal) || null,
@@ -400,24 +400,27 @@ export async function runInteractiveSession(
     modelRegistry: resolved.modelRegistry as Record<string, unknown>,
     config,
     hooks: core.hooks,
-    maxIterations: resolved.maxIterations as number,
-    taskProfile: resolved.taskProfile as string | undefined,
-    taskRole: resolved.taskDefaultRole as string | undefined,
+    maxIterations: (resolved.maxIterations as number) || 100,
+    taskProfile: (resolved.taskProfile as string) || "task-default",
+    taskRole: (resolved.taskDefaultRole as string) || "",
   });
 
   // Create SessionManager
   const sessionManager = await SessionManager.create({
-    hooks: core.hooks,
+    hooks: core.hooks as unknown as { notifyHooksAsync: (hookName: string, data: unknown) => Promise<void>; notifyHooks: (hookName: string, data: unknown) => void },
     extensions: core.extensions,
     buildAgent,
     initialConfig: { sessionId: cli.sessionId || null },
   });
 
   // Wire taskManager to sessionManager
-  taskManager.setSessionManager(sessionManager);
+  taskManager.setSessionManager(sessionManager as { getAgent: () => { abortSignal: AbortSignal | null; run: (description: string) => Promise<string | undefined>; notifyCompletion: (result: string) => void; addMessage: (msg: unknown) => void; followQueue?: string[] } | undefined });
 
   // Create MessageBus
-  const bus = new MessageBus({ sessionManager, sink });
+  const bus = new MessageBus({
+    sessionManager: sessionManager as unknown as { getAgent: () => { hooks: { runHookPipeline: (hookName: string, data: unknown, opts?: { shouldStop?: (result: unknown) => boolean }) => Promise<unknown> }; run: (text: string) => Promise<unknown>; resetCancel: () => void; cancel: () => void; getCommandRegistry: () => unknown; executeCommand: (cmd: unknown) => Promise<unknown> } | undefined },
+    sink,
+  });
 
   // Wire up task completion
   taskManager.setBus(bus);
@@ -476,7 +479,7 @@ export async function runInteractiveSession(
     // Handle slash commands — delegate to bus for execution
     if (trimmed.startsWith("/")) {
       const cmdText = trimmed.slice(1).trim().toLowerCase();
-      handleSlashCommand(cmdText, bus, rl);
+      handleSlashCommand(cmdText, bus as MessageBusRef, rl);
       return;
     }
 
@@ -542,8 +545,8 @@ export async function runInteractiveSession(
     (() => {
       (bus as MessageBusRef).interrupt();
       // Clear the input buffer so any typed-but-unsubmitted text is discarded
-      rl.line = "";
-      rl.cursor = 0;
+      (rl as { line: string; cursor: number }).line = "";
+      (rl as { line: string; cursor: number }).cursor = 0;
       console.log("\nInterrupted (/quit, /exit, or ctrl-d to exit)");
       rl.prompt();
     });
@@ -610,9 +613,8 @@ export function create(core: CoreContext): ExtensionInstance {
     hooks: core.hooks
       ? {
           // Register "cli" subcommand via hook
-          [HOOKS.CLI_SUBCOMMANDS_REGISTER]: async (
-            registry: { register: (name: string, opts: Record<string, unknown>) => void },
-          ) => {
+          [HOOKS.CLI_SUBCOMMANDS_REGISTER]: async (payload: unknown) => {
+            const registry = (payload as { register: (name: string, opts: Record<string, unknown>) => void });
             registry.register("cli", {
               description: "Interactive CLI session",
               handler: async (cli: Record<string, unknown>, core: CoreContext) => {
@@ -622,7 +624,8 @@ export function create(core: CoreContext): ExtensionInstance {
           },
 
           // Provide input interface to tool context
-          [HOOKS.AGENT_TOOL_CONTEXT]: ({ toolCtx }: { toolCtx: { set: (key: string, value: unknown) => void } }) => {
+          [HOOKS.AGENT_TOOL_CONTEXT]: (payload: unknown) => {
+            const toolCtx = (payload as { toolCtx: { set: (key: string, value: unknown) => void } }).toolCtx;
             if (currentInput) {
               toolCtx.set("input", currentInput);
             }

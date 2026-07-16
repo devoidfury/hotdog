@@ -6,6 +6,8 @@ import { createToolRegistry } from '../../src/core/extensions/tool-registry.ts';
 import { Message } from '../../src/core/context/message.ts';
 import { ToolResult, formatToolResult } from '../../src/core/extensions/tool-utils.ts';
 import { resolveModelConfig } from '../../src/core/config/providers.ts';
+import type { LlmClient } from '../../src/core/llm-client/client.ts';
+import type { OutputEvent } from '../../src/core/context/output.ts';
 import { describe, it, expect, beforeEach, afterEach } from 'bun:test';
 import {
   MockLLMClient,
@@ -49,10 +51,10 @@ describe('Agent — end-to-end loop', () => {
     // Note: agent.log only contains user/assistant/tool messages,
     // NOT the system prompt. The system prompt is prepended at build time.
     expect(agent.log.length).toBe(2); // user + assistant
-    expect(agent.log.at(0).role).toBe('user');
-    expect(agent.log.at(0).content).toBe('Hi');
-    expect(agent.log.at(1).role).toBe('assistant');
-    expect(agent.log.at(1).content).toBe('Hello! I am an AI assistant.');
+    expect(agent.log.at(0)!.role).toBe('user');
+    expect(agent.log.at(0)!.content).toBe('Hi');
+    expect(agent.log.at(1)!.role).toBe('assistant');
+    expect(agent.log.at(1)!.content).toBe('Hello! I am an AI assistant.');
     expect(mockLLM.callCount).toBe(1);
   });
 
@@ -70,7 +72,7 @@ describe('Agent — end-to-end loop', () => {
     const result = await agent.run('Think step by step');
 
     expect(result).toBe('Here is my answer.');
-    expect(agent.log.at(1).reasoningContent).toBe('I need to think about this carefully.');
+    expect(agent.log.at(1)!.reasoningContent).toBe('I need to think about this carefully.');
   });
 
   // ── Single tool call ───────────────────────────────────────────────────────
@@ -108,13 +110,13 @@ describe('Agent — end-to-end loop', () => {
     //   [0] user → [1] assistant (tool call) → [2] tool result → [3] assistant (final)
     const ctx = agent.log.getAll();
     expect(ctx.length).toBe(4);
-    expect(ctx[0].role).toBe('user');
-    expect(ctx[1].role).toBe('assistant');
-    expect(ctx[1].toolCalls.length).toBe(1);
-    expect(ctx[2].role).toBe('tool');
-    expect(ctx[2].content).toContain('42');
-    expect(ctx[3].role).toBe('assistant');
-    expect(ctx[3].content).toBe('The answer is 42.');
+    expect(ctx[0]!.role).toBe('user');
+    expect(ctx[1]!.role).toBe('assistant');
+    expect((ctx[1]!.toolCalls as Array<unknown>).length).toBe(1);
+    expect(ctx[2]!.role).toBe('tool');
+    expect(ctx[2]!.content as string).toContain('42');
+    expect(ctx[3]!.role).toBe('assistant');
+    expect(ctx[3]!.content).toBe('The answer is 42.');
   });
 
   // ── Multiple tool calls in one turn ────────────────────────────────────────
@@ -155,13 +157,13 @@ describe('Agent — end-to-end loop', () => {
     //   [0] user → [1] assistant (2 tool calls) → [2] tool result → [3] tool result → [4] assistant (final)
     const ctx = agent.log.getAll();
     expect(ctx.length).toBe(5);
-    expect(ctx[0].role).toBe('user');
-    expect(ctx[1].role).toBe('assistant');
-    expect(ctx[1].toolCalls.length).toBe(2);
-    expect(ctx[2].role).toBe('tool');
-    expect(ctx[3].role).toBe('tool');
-    expect(ctx[4].role).toBe('assistant');
-    expect(ctx[4].content).toBe('Both operations completed.');
+    expect(ctx[0]!.role).toBe('user');
+    expect(ctx[1]!.role).toBe('assistant');
+    expect((ctx[1]!.toolCalls as Array<unknown>).length).toBe(2);
+    expect(ctx[2]!.role).toBe('tool');
+    expect(ctx[3]!.role).toBe('tool');
+    expect(ctx[4]!.role).toBe('assistant');
+    expect(ctx[4]!.content).toBe('Both operations completed.');
   });
 
   // ── Tool validation error ─────────────────────────────────────────────────
@@ -170,7 +172,7 @@ describe('Agent — end-to-end loop', () => {
     const tool = validatedTool('greet', {
       properties: { name: { type: 'string', description: 'Name to greet' } },
       required: ['name'],
-    }, async (input) => `Hello ${input?.name}!`);
+    }, async (input) => `Hello ${(input as { name?: string })?.name}!`);
 
     const mockLLM = new MockLLMClient({
       responseSequences: [
@@ -198,8 +200,8 @@ describe('Agent — end-to-end loop', () => {
     // Context after full run:
     //   [0] user → [1] assistant (tool call) → [2] tool result (validation error) → [3] assistant (final)
     const ctx = agent.log.getAll();
-    expect(ctx[2].role).toBe('tool');
-    expect(ctx[2].content).toContain('validation');
+    expect(ctx[2]!.role).toBe('tool');
+    expect(ctx[2]!.content as string).toContain('validation');
   });
 
   // ── Unknown tool ─────────────────────────────────────────────────────────
@@ -229,8 +231,8 @@ describe('Agent — end-to-end loop', () => {
     // Context after full run:
     //   [0] user → [1] assistant (tool call) → [2] tool result (unknown tool) → [3] assistant (final)
     const ctx = agent.log.getAll();
-    expect(ctx[2].role).toBe('tool');
-    expect(ctx[2].content).toContain('Unknown tool');
+    expect(ctx[2]!.role).toBe('tool');
+    expect(ctx[2]!.content as string).toContain('Unknown tool');
   });
 
   // ── Tool execution error ──────────────────────────────────────────────────
@@ -263,8 +265,8 @@ describe('Agent — end-to-end loop', () => {
     // Context after full run:
     //   [0] user → [1] assistant (tool call) → [2] tool result (error) → [3] assistant (final)
     const ctx = agent.log.getAll();
-    expect(ctx[2].role).toBe('tool');
-    expect(ctx[2].content).toContain('Error executing');
+    expect(ctx[2]!.role).toBe('tool');
+    expect(ctx[2]!.content as string).toContain('Error executing');
   });
 
   // ── Wait tool (yield control) ─────────────────────────────────────────────
@@ -333,10 +335,10 @@ describe('Agent — end-to-end loop', () => {
     //   [0] user → [1] assistant (2 tool calls) → [2] tool result (allowed) → [3] tool result (blocked) → [4] assistant (final)
     const ctx = agent.log.getAll();
     expect(ctx.length).toBe(5);
-    expect(ctx[2].role).toBe('tool');
-    expect(ctx[2].content).toContain('allowed result');
-    expect(ctx[3].role).toBe('tool');
-    expect(ctx[3].content).toContain('not available');
+    expect(ctx[2]!.role).toBe('tool');
+    expect(ctx[2]!.content as string).toContain('allowed result');
+    expect(ctx[3]!.role).toBe('tool');
+    expect(ctx[3]!.content as string).toContain('not available');
   });
 
   // ── Cancellation during streaming ─────────────────────────────────────────
@@ -344,13 +346,13 @@ describe('Agent — end-to-end loop', () => {
   it('should abort when cancelled during LLM streaming', async () => {
     const mockLLM = new MockLLMClient({
       responseSequences: [
-      // Generator that yields one event then hangs
-      (async function* () {
-        yield { type: 'content', content: 'Starting...' };
-        // Simulate a long stream — yield nothing, test cancels
-        await new Promise(() => {}); // never resolves
-      })(),
-    ],
+        // Generator that yields one event then hangs
+        (async function* () {
+          yield { type: 'content', content: 'Starting...' };
+          // Simulate a long stream — yield nothing, test cancels
+          await new Promise(() => {}); // never resolves
+        })() as unknown as Record<string, unknown>[],
+      ],
       cancelable: true,
     });
 
@@ -369,11 +371,11 @@ describe('Agent — end-to-end loop', () => {
 
     const mockLLM = new MockLLMClient({
       responseSequences: [
-      (async function* () {
-        yield { type: 'content', content: 'Starting...' };
-        await new Promise(() => {}); // never resolves
-      })(),
-    ],
+        (async function* () {
+          yield { type: 'content', content: 'Starting...' };
+          await new Promise(() => {}); // never resolves
+        })() as unknown as Record<string, unknown>[],
+      ],
       cancelable: true,
     });
 
@@ -408,10 +410,10 @@ describe('Agent — end-to-end loop', () => {
 
     const { agent, toolRegistry, hooks } = createFixture({ mockLLM });
     toolRegistry.register('hook_test_tool', tool);
-    const requestHookCalls = [];
+    const requestHookCalls: string[] = [];
 
-    hooks.on(HOOKS.PROVIDER_REQUEST, (data) => {
-      requestHookCalls.push(data.modelConfig?.name || data.agent.model);
+    hooks.on(HOOKS.PROVIDER_REQUEST, (data: { modelConfig?: { name?: string }; agent?: { model: string } }) => {
+      requestHookCalls.push(data.modelConfig?.name || data.agent!.model);
     });
 
     await agent.run('Hi');
@@ -438,9 +440,9 @@ describe('Agent — end-to-end loop', () => {
 
     const { agent, toolRegistry, hooks } = createFixture({ mockLLM });
     toolRegistry.register('hook_test_tool', tool);
-    const responseHookCalls = [];
+    const responseHookCalls: string[] = [];
 
-    hooks.on(HOOKS.PROVIDER_RESPONSE, (data) => {
+    hooks.on(HOOKS.PROVIDER_RESPONSE, (data: { response: { fullText: string } }) => {
       responseHookCalls.push(data.response.fullText);
     });
 
@@ -459,24 +461,24 @@ describe('Agent — end-to-end loop', () => {
     });
 
     const { agent, hooks } = createFixture({ mockLLM });
-    const turnEvents = [];
+    const turnEvents: Array<{ type: string; index?: number; stopped?: boolean }> = [];
 
-    hooks.on(HOOKS.TURN_START, (data) => {
+    hooks.on(HOOKS.TURN_START, (data: { turnIndex: number }) => {
       turnEvents.push({ type: 'start', index: data.turnIndex });
     });
 
-    hooks.on(HOOKS.TURN_END, (data) => {
+    hooks.on(HOOKS.TURN_END, (data: { turnIndex: number; stopped: boolean }) => {
       turnEvents.push({ type: 'end', index: data.turnIndex, stopped: data.stopped });
     });
 
     await agent.run('Hi');
 
     expect(turnEvents.length).toBe(2);
-    expect(turnEvents[0].type).toBe('start');
-    expect(turnEvents[0].index).toBe(1);
-    expect(turnEvents[1].type).toBe('end');
-    expect(turnEvents[1].index).toBe(1);
-    expect(turnEvents[1].stopped).toBe(true);
+    expect(turnEvents[0]!.type).toBe('start');
+    expect(turnEvents[0]!.index).toBe(1);
+    expect(turnEvents[1]!.type).toBe('end');
+    expect(turnEvents[1]!.index).toBe(1);
+    expect(turnEvents[1]!.stopped).toBe(true);
   });
 
   it('should allow CONTEXT hook to modify messages before LLM call', async () => {
@@ -488,7 +490,7 @@ describe('Agent — end-to-end loop', () => {
 
     const { agent, hooks } = createFixture({ mockLLM });
 
-    hooks.on(HOOKS.CONTEXT, ({ messages }) => {
+    hooks.on(HOOKS.CONTEXT, ({ messages }: { messages: Message[] }) => {
       // Add a system instruction before each LLM call
       return {
         messages: [
@@ -500,8 +502,8 @@ describe('Agent — end-to-end loop', () => {
 
     await agent.run('Hi');
 
-    expect(mockLLM.lastMessages[0].role).toBe('system');
-    expect(mockLLM.lastMessages[0].content).toBe('Be concise.');
+    expect(mockLLM.lastMessages![0] as Message).toHaveProperty('role', 'system');
+    expect((mockLLM.lastMessages![0] as Message).content).toBe('Be concise.');
   });
 
   it('should fire TOOL_CALL gate hook and allow blocking/modifying', async () => {
@@ -525,7 +527,7 @@ describe('Agent — end-to-end loop', () => {
     toolRegistry.register('sensitive_tool', tool);
 
     // Block the tool via gate hook
-    hooks.on(HOOKS.TOOL_CALL, ({ toolName }) => {
+    hooks.on(HOOKS.TOOL_CALL, ({ toolName }: { toolName: string }) => {
       if (toolName === 'sensitive_tool') {
         return { action: 'block', result: 'Blocked: sensitive tool not allowed' };
       }
@@ -540,8 +542,8 @@ describe('Agent — end-to-end loop', () => {
     // Context after full run:
     //   [0] user → [1] assistant (tool call) → [2] tool result (blocked) → [3] assistant (final)
     const ctx = agent.log.getAll();
-    expect(ctx[2].role).toBe('tool');
-    expect(ctx[2].content).toContain('Blocked');
+    expect(ctx[2]!.role).toBe('tool');
+    expect(ctx[2]!.content as string).toContain('Blocked');
   });
 
   it('should fire TOOL_RESULT hook and allow modifying result', async () => {
@@ -565,7 +567,7 @@ describe('Agent — end-to-end loop', () => {
     toolRegistry.register('modify_tool', tool);
 
     // Modify the tool result
-    hooks.on(HOOKS.TOOL_RESULT, ({ result }) => {
+    hooks.on(HOOKS.TOOL_RESULT, ({ result }: { result: unknown }) => {
       return { result: `[MODIFIED] ${result}` };
     });
 
@@ -577,8 +579,8 @@ describe('Agent — end-to-end loop', () => {
     // Context after full run:
     //   [0] user → [1] assistant (tool call) → [2] tool result (modified) → [3] assistant (final)
     const ctx = agent.log.getAll();
-    expect(ctx[2].role).toBe('tool');
-    expect(ctx[2].content).toContain('MODIFIED');
+    expect(ctx[2]!.role).toBe('tool');
+    expect(ctx[2]!.content as string).toContain('MODIFIED');
   });
 
   // ── Max iterations ───────────────────────────────────────────────────────
@@ -677,7 +679,7 @@ describe('Agent — end-to-end loop', () => {
     const serialized = agent.serialize();
 
     expect(serialized.sessionId).toBe('test-session');
-    expect(serialized.context.length).toBe(2);
+    expect((serialized.context as unknown[]).length).toBe(2);
     expect(serialized.reasoningEffort).toBe('high');
     expect(serialized.model).toBe('test-model');
 
@@ -685,7 +687,7 @@ describe('Agent — end-to-end loop', () => {
     const freshAgent = new Agent({
       hooks: createHooks(),
       toolRegistry: createToolRegistry(),
-      llmClient: new MockLLMClient(),
+      llmClient: new MockLLMClient() as unknown as LlmClient,
       model: 'test-model',
       maxIterations: 100,
       maxTokens: 4096,
@@ -694,11 +696,11 @@ describe('Agent — end-to-end loop', () => {
 
     expect(freshAgent.sessionId).toBe('test-session');
     expect(freshAgent.log.length).toBe(2);
-    expect(freshAgent.log.at(0).role).toBe('user');
-    expect(freshAgent.log.at(0).content).toBe('test message');
-    expect(freshAgent.log.at(1).role).toBe('assistant');
-    expect(freshAgent.log.at(1).reasoningContent).toBe('thinking...');
-    expect(freshAgent.log.at(1).toolCalls.length).toBe(1);
+    expect(freshAgent.log.at(0)!.role).toBe('user');
+    expect(freshAgent.log.at(0)!.content).toBe('test message');
+    expect(freshAgent.log.at(1)!.role).toBe('assistant');
+    expect(freshAgent.log.at(1)!.reasoningContent).toBe('thinking...');
+    expect((freshAgent.log.at(1)!.toolCalls as Array<unknown>).length).toBe(1);
     expect(freshAgent.reasoningEffort).toBe('high');
     expect(freshAgent.model).toBe('test-model');
   });
@@ -718,7 +720,7 @@ describe('Agent — end-to-end loop', () => {
     it('should accept custom options', () => {
       const hooks = createHooks();
       const toolRegistry = createToolRegistry();
-      const llmClient = new MockLLMClient();
+      const llmClient = new MockLLMClient() as unknown as LlmClient;
       const a = new Agent({
         hooks,
         toolRegistry,
@@ -773,7 +775,7 @@ describe('Agent — end-to-end loop', () => {
       const tool = {
         toToolDef: () => ({ type: 'function', function: { name: 'test-tool' } }),
         execute: async () => 'result',
-      };
+      } as any;
       toolRegistry.register('test-tool', tool);
 
       const defs = await agent.getToolDefs();
@@ -788,7 +790,7 @@ describe('Agent — end-to-end loop', () => {
     it('should handle clear command', async () => {
       const { agent } = createFixture({});
       agent.addMessage(new Message({ role: 'user', content: 'hello' }));
-      const result = await agent.executeCommand({ type: 'clear' });
+      const result = await agent.executeCommand({ type: 'clear', value: null });
       expect(result).toEqual({ action: ACTIONS.DISPLAY, content: 'Context cleared.' });
       expect(agent.log.getAll()).toEqual([]);
     });
@@ -803,7 +805,7 @@ describe('Agent — end-to-end loop', () => {
     it('should delegate to hooks for custom commands', async () => {
       const { agent, hooks } = createFixture({});
       hooks.on(HOOKS.COMMAND_DISPATCH, () => ({ content: 'custom handled' }));
-      const result = await agent.executeCommand({ type: 'custom' });
+      const result = await agent.executeCommand({ type: 'custom', value: null });
       // Hook results are passed through unchanged — no default action is added.
       // The MessageBus backward-compat path handles results without an action field.
       expect(result).toEqual({ content: 'custom handled' });
@@ -811,14 +813,14 @@ describe('Agent — end-to-end loop', () => {
 
     it('should return error for unknown commands', async () => {
       const { agent } = createFixture({});
-      const result = await agent.executeCommand({ type: 'unknown-cmd' });
+      const result = await agent.executeCommand({ type: 'unknown-cmd', value: null });
       expect(result).toEqual({ action: ACTIONS.ERROR, error: 'Unknown command: unknown-cmd' });
     });
 
     it('should dispatch custom commands', async () => {
       const { agent } = createFixture({});
       let called = false;
-      const cmd = { type: 'custom', value: 'test', _customCommand: true, _handler: async () => { called = true; return { content: 'handled' }; } };
+      const cmd = { type: 'custom', value: 'test', _customCommand: true, _handler: async () => { called = true; return { content: 'handled' }; } } as any;
       const result = await agent.executeCommand(cmd);
       expect(called).toBe(true);
       expect(result.content).toBe('handled');
@@ -826,10 +828,10 @@ describe('Agent — end-to-end loop', () => {
 
     it('should fall through to hooks when custom handler returns null', async () => {
       const { agent, hooks } = createFixture({});
-      hooks.on('command:dispatch', (data) => {
+      hooks.on('command:dispatch', (data: { command: { type: string } }) => {
         if (data.command.type === 'fallback') return { content: 'hook handled' };
       });
-      const cmd = { type: 'fallback', value: 'test', _customCommand: true, _handler: async () => null };
+      const cmd = { type: 'fallback', value: 'test', _customCommand: true, _handler: async () => null } as any;
       const result = await agent.executeCommand(cmd);
       expect(result.content).toBe('hook handled');
     });
@@ -846,7 +848,7 @@ describe('Agent — end-to-end loop', () => {
   describe('hooks integration (existing)', () => {
     it('should call SYSTEM_PROMPT_BUILD handlers and collect returned chunks', async () => {
       const { agent, hooks } = createFixture({});
-      hooks.on(HOOKS.SYSTEM_PROMPT_BUILD, async ({ agent: a }) => {
+      hooks.on(HOOKS.SYSTEM_PROMPT_BUILD, async ({ agent: a }: { agent: unknown }) => {
         return { name: 'test-chunk', priority: 500, content: '\n# Test Chunk' };
       });
 
@@ -857,24 +859,24 @@ describe('Agent — end-to-end loop', () => {
 
   describe('resolveModelConfig', () => {
     it('should include reasoning_effort from model registry', () => {
-      const registry = {
-        'test-model': { name: 'test-model', temperature: 0.5, maxTokens: 100, reasoningEffort: 'high' },
+      const registry: Record<string, { name: string; temperature: number | null; maxTokens: number; reasoningEffort: string; tags: string[] }> = {
+        'test-model': { name: 'test-model', temperature: 0.5, maxTokens: 100, reasoningEffort: 'high', tags: [] },
       };
       const config = resolveModelConfig('test-model', registry, 4096, undefined);
       expect(config.reasoningEffort).toBe('high');
     });
 
     it('should override reasoning_effort from runtime setting', () => {
-      const registry = {
-        'test-model': { name: 'test-model', temperature: 0.5, maxTokens: 100, reasoningEffort: 'low' },
+      const registry: Record<string, { name: string; temperature: number | null; maxTokens: number; reasoningEffort: string; tags: string[] }> = {
+        'test-model': { name: 'test-model', temperature: 0.5, maxTokens: 100, reasoningEffort: 'low', tags: [] },
       };
       const config = resolveModelConfig('test-model', registry, 4096, 'max');
       expect(config.reasoningEffort).toBe('max');
     });
 
     it('should omit reasoning_effort when not set anywhere', () => {
-      const registry = {
-        'test-model': { name: 'test-model', temperature: 0.5, maxTokens: 100 },
+      const registry: Record<string, { name: string; temperature: number | null; maxTokens: number; tags: string[] }> = {
+        'test-model': { name: 'test-model', temperature: 0.5, maxTokens: 100, tags: [] },
       };
       const config = resolveModelConfig('test-model', registry, 4096, undefined);
       expect(config.reasoningEffort).toBeUndefined();
@@ -891,7 +893,7 @@ describe('Agent — end-to-end loop', () => {
       const newAgent = new Agent({
         hooks: createHooks(),
         toolRegistry: createToolRegistry(),
-        llmClient: new MockLLMClient(),
+        llmClient: new MockLLMClient() as unknown as LlmClient,
         model: 'test',
         maxIterations: 100,
         maxTokens: 4096,
@@ -908,7 +910,7 @@ describe('Agent — end-to-end loop', () => {
       const newAgent = new Agent({
         hooks: createHooks(),
         toolRegistry: createToolRegistry(),
-        llmClient: new MockLLMClient(),
+        llmClient: new MockLLMClient() as unknown as LlmClient,
         model: 'test',
         maxIterations: 100,
         maxTokens: 4096,
@@ -939,8 +941,8 @@ describe('Agent — end-to-end loop', () => {
 
   describe('model setter with sink', () => {
     it('should emit session_state when sink is attached', () => {
-      const events = [];
-      const sink = { emit: (e) => events.push(e) };
+      const events: OutputEvent[] = [];
+      const sink = { emit: (e: OutputEvent) => events.push(e) };
       const { agent } = createFixture({ sink, model: 'old-model' });
       agent.model = 'new-model';
       expect(events.some(e => e.type === 14 && e.key === 'model' && e.value === 'new-model')).toBe(true);
@@ -956,19 +958,19 @@ describe('Agent — end-to-end loop', () => {
   describe('isRestoring', () => {
     it('should notify hook on change', () => {
       const hooks = createHooks();
-      const hookCalls = [];
+      const hookCalls: unknown[] = [];
       hooks.on('session:restoreActive', (data) => hookCalls.push(data));
       const { agent } = createFixture({ hooks });
       expect(agent.isRestoring).toBe(false);
       agent.isRestoring = true;
       expect(agent.isRestoring).toBe(true);
       expect(hookCalls.length).toBeGreaterThan(0);
-      expect(hookCalls[0].isRestoring).toBe(true);
+      expect((hookCalls[0] as { isRestoring: boolean }).isRestoring).toBe(true);
     });
 
     it('should not notify hook when value unchanged', () => {
       const hooks = createHooks();
-      const hookCalls = [];
+      const hookCalls: unknown[] = [];
       hooks.on('session:restoreActive', (data) => hookCalls.push(data));
       const { agent } = createFixture({ hooks });
       agent.isRestoring = false;
@@ -1049,7 +1051,7 @@ describe('Agent — end-to-end loop', () => {
       const result = await agent.run('test');
       expect(result).toBe('Error handled');
       const msgs = agent.log.getAll();
-      expect(msgs.some(m => m.role === 'tool' && m.content.includes('missing a valid name'))).toBe(true);
+      expect(msgs.some(m => m.role === 'tool' && (m.content as string).includes('missing a valid name'))).toBe(true);
     });
 
     it('should reject tool call with whitespace name', async () => {
@@ -1070,7 +1072,7 @@ describe('Agent — end-to-end loop', () => {
       const result = await agent.run('test');
       expect(result).toBe('Error handled');
       const msgs = agent.log.getAll();
-      expect(msgs.some(m => m.role === 'tool' && m.content.includes('missing a valid name'))).toBe(true);
+      expect(msgs.some(m => m.role === 'tool' && (m.content as string).includes('missing a valid name'))).toBe(true);
     });
 
     it('should reject tool call with null name', async () => {
@@ -1078,7 +1080,7 @@ describe('Agent — end-to-end loop', () => {
         responseSequences: [
           buildStreamResponse({
             content: '',
-            toolCalls: [{ index: 0, name: null, arguments: '{}', id: 'call_1' }],
+            toolCalls: [{ index: 0, name: null as unknown as string, arguments: '{}', id: 'call_1' }],
             usage: { prompt_tokens: 10, completion_tokens: 20, total_tokens: 30 },
           }),
           buildStreamResponse({
@@ -1091,7 +1093,7 @@ describe('Agent — end-to-end loop', () => {
       const result = await agent.run('test');
       expect(result).toBe('Error handled');
       const msgs = agent.log.getAll();
-      expect(msgs.some(m => m.role === 'tool' && m.content.includes('missing a valid name'))).toBe(true);
+      expect(msgs.some(m => m.role === 'tool' && (m.content as string).includes('missing a valid name'))).toBe(true);
     });
   });
 
@@ -1174,7 +1176,7 @@ describe('Agent — end-to-end loop', () => {
   describe('notifyCompletion', () => {
     it('should call onTaskComplete on sink', () => {
       let called = false;
-      const sink = { onTaskComplete: (r: unknown) => { called = true; } };
+      const sink = { emit: () => {}, onTaskComplete: (r: unknown) => { called = true; } };
       const { agent } = createFixture({ sink });
       agent.notifyCompletion('done');
       expect(called).toBe(true);
@@ -1222,26 +1224,26 @@ describe('Agent — end-to-end loop', () => {
   describe('addMessage / replaceContext', () => {
     it('addMessage fires CONTEXT_MESSAGE hook', () => {
       const hooks = createHooks();
-      const calls = [];
+      const calls: unknown[] = [];
       hooks.on('context:message', (data) => calls.push(data));
       const { agent } = createFixture({ hooks });
       const msg = new Message({ role: 'user', content: 'hello' });
       agent.addMessage(msg);
       expect(agent.log.length).toBe(1);
       expect(calls.length).toBeGreaterThan(0);
-      expect(calls[0].message).toBe(msg);
+      expect((calls[0] as { message: Message }).message).toBe(msg);
     });
 
     it('replaceContext fires CONTEXT_REPLACED hook', () => {
       const hooks = createHooks();
-      const calls = [];
+      const calls: unknown[] = [];
       hooks.on('context:replaced', (data) => calls.push(data));
       const { agent } = createFixture({ hooks });
       const msgs = [new Message({ role: 'user', content: 'new' })];
       agent.replaceContext(msgs);
       expect(agent.log.length).toBe(1);
       expect(calls.length).toBeGreaterThan(0);
-      expect(calls[0].newContext).toBe(msgs);
+      expect((calls[0] as { newContext: Message[] }).newContext).toBe(msgs);
     });
   });
 
@@ -1398,7 +1400,7 @@ describe('Agent — end-to-end loop', () => {
     it('llmClient getter', () => {
       const mockLLM = new MockLLMClient({ responseSequences: [] });
       const { agent } = createFixture({ mockLLM });
-      expect(agent.llmClient).toBe(mockLLM);
+      expect(agent.llmClient).toBe(mockLLM as unknown as LlmClient);
     });
 
     it('sink getter and setter', () => {

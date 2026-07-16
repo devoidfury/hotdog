@@ -8,8 +8,8 @@ import { contentBlocksToString } from "./types.ts";
  * Shared client handle for use by McpTool instances.
  */
 export class McpConnectionHandle {
-  private readonly #client: McpClient;
-  private readonly #serverName: string;
+  readonly #client: McpClient;
+  readonly #serverName: string;
 
   constructor(client: McpClient, serverName: string) {
     this.#client = client;
@@ -21,7 +21,7 @@ export class McpConnectionHandle {
    */
   async callTool(name: string, arguments_: Record<string, unknown>): Promise<string> {
     const response = await this.#client.callTool(name, arguments_) as Record<string, unknown>;
-    const output = contentBlocksToString((response.content as Record<string, unknown>[]) || []);
+    const output = contentBlocksToString((response.content as Array<{ type: string; text?: string }>) || []);
 
     if (response.isError) {
       throw new McpError(output, -1);
@@ -59,9 +59,9 @@ export class McpConnection {
     return conn;
   }
 
-  private readonly #client: McpClient;
-  private readonly #serverName: string;
-  private #tools: Record<string, unknown>[] = [];
+  readonly #client: McpClient;
+  readonly #serverName: string;
+  #tools: Record<string, unknown>[] = [];
 
   constructor(client: McpClient, serverName: string) {
     this.#client = client;

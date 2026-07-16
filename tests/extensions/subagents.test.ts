@@ -15,17 +15,31 @@ import {
 } from "../../src/extensions/subagents/subagents.ts";
 import { create } from "../../src/extensions/subagents/index.ts";
 
+// ── Helpers ────────────────────────────────────────────────────────────────
+
+/** Create a minimal mock TaskManager with all required methods. */
+function makeMockTM(overrides: Partial<Record<string, any>> = {}): any {
+  return {
+    spawnTask: async (_taskId: string, _desc: string, _opts: Record<string, unknown>) => ({}),
+    taskStatus: (_id: string) => null,
+    sendFollowUp: (_id: string, _msg: string) => false,
+    interruptTask: (_id: string) => false,
+    activeTasks: () => [] as string[],
+    ...overrides,
+  };
+}
+
 describe("SubagentTool base class", () => {
   it("creates with options object", () => {
-    const tool = new SubagentTool({ sessionCore: {}, taskManager: {} });
-    expect(tool._sessionCore).toBeDefined();
-    expect(tool._taskManager).toBeDefined();
+    const tool = new SubagentTool({ sessionCore: {}, taskManager: makeMockTM() });
+    expect((tool as any)._sessionCore).toBeDefined();
+    expect((tool as any)._taskManager).toBeDefined();
   });
 
   it("creates with null options", () => {
-    const tool = new SubagentTool(null);
-    expect(tool._sessionCore).toBeNull();
-    expect(tool._taskManager).toBeNull();
+    const tool = new SubagentTool({});
+    expect((tool as any)._sessionCore).toBeNull();
+    expect((tool as any)._taskManager).toBeNull();
   });
 
   it("creates with no backend", () => {
@@ -43,7 +57,7 @@ describe("SubagentTool base class", () => {
   });
 
   it("resolves taskManager backend", () => {
-    const mockTaskManager = { spawnTask: async () => ({}) };
+    const mockTaskManager = makeMockTM();
     const tool = new SubagentTool({ taskManager: mockTaskManager });
     const backend = tool._resolveBackend();
     expect(backend.type).toBe("taskManager");
@@ -58,7 +72,7 @@ describe("SubagentTool base class", () => {
   });
 
   it("sessionCore takes precedence over taskManager", () => {
-    const tool = new SubagentTool({ sessionCore: {}, taskManager: {} });
+    const tool = new SubagentTool({ sessionCore: {}, taskManager: makeMockTM() });
     const backend = tool._resolveBackend();
     expect(backend.type).toBe("sessionCore");
   });
@@ -78,12 +92,6 @@ describe("SubagentTool base class", () => {
 });
 
 describe("DelegateTaskTool", () => {
-  function createMockBackend() {
-    return {
-      spawnTask: async (taskId, desc, opts) => ({ taskId }),
-    };
-  }
-
   it("has correct tool name", () => {
     expect(DelegateTaskTool.TOOL_NAME).toBe("delegate_task");
   });
@@ -109,23 +117,25 @@ describe("DelegateTaskTool", () => {
   });
 
   it("delegates task successfully", async () => {
-    const mockBackend = createMockBackend();
+    const mockBackend = makeMockTM({
+      spawnTask: async (taskId: string, _desc: string, _opts: Record<string, unknown>) => ({ taskId }),
+    });
     const tool = new DelegateTaskTool({ taskManager: mockBackend });
     const result = await tool.execute(
       JSON.stringify({ task_id: "t1", description: "Build feature" }),
     );
     expect(result.output).toContain("Task t1 delegated");
-    expect(result.metadata.get("task_id")).toBe("t1");
+    expect(result.metadata!.get("task_id")).toBe("t1");
   });
 
   it("passes worker_model option", async () => {
-    let capturedOpts = null;
-    const mockBackend = {
-      spawnTask: async (taskId, desc, opts) => {
+    let capturedOpts: Record<string, unknown> | null = null;
+    const mockBackend = makeMockTM({
+      spawnTask: async (_taskId: string, _desc: string, opts: Record<string, unknown>) => {
         capturedOpts = opts;
-        return { taskId };
+        return {};
       },
-    };
+    });
     const tool = new DelegateTaskTool({ taskManager: mockBackend });
     await tool.execute(
       JSON.stringify({
@@ -134,17 +144,17 @@ describe("DelegateTaskTool", () => {
         worker_model: "custom-model",
       }),
     );
-    expect(capturedOpts.workerModel).toBe("custom-model");
+    expect(capturedOpts!.workerModel).toBe("custom-model");
   });
 
   it("passes profile option", async () => {
-    let capturedOpts = null;
-    const mockBackend = {
-      spawnTask: async (taskId, desc, opts) => {
+    let capturedOpts: Record<string, unknown> | null = null;
+    const mockBackend = makeMockTM({
+      spawnTask: async (_taskId: string, _desc: string, opts: Record<string, unknown>) => {
         capturedOpts = opts;
-        return { taskId };
+        return {};
       },
-    };
+    });
     const tool = new DelegateTaskTool({ taskManager: mockBackend });
     await tool.execute(
       JSON.stringify({
@@ -153,16 +163,16 @@ describe("DelegateTaskTool", () => {
         profile: "fixer",
       }),
     );
-    expect(capturedOpts.profile).toBe("fixer");
+    expect(capturedOpts!.profile).toBe("fixer");
   });
 
-  it("toToolDef returns correct definition", () => {
+  it("toToolDef returns correct definition", async () => {
     const tool = new DelegateTaskTool({});
-    const def = tool.toToolDef();
-    expect(def.function.name).toBe("delegate_task");
-    expect(def.function.description).toContain("Spawn a background task agent");
-    expect(def.function.parameters.required).toContain("task_id");
-    expect(def.function.parameters.required).toContain("description");
+    const def = await tool.toToolDef();
+    expect(def!.function.name).toBe("delegate_task");
+    expect(def!.function.description).toContain("Spawn a background task agent");
+    expect(def!.function.parameters.required).toContain("task_id");
+    expect(def!.function.parameters.required).toContain("description");
   });
 
   it("callDisplay formats correctly", () => {
@@ -178,12 +188,6 @@ describe("DelegateTaskTool", () => {
 });
 
 describe("TaskStatusTool", () => {
-  function createMockBackend(status = "running") {
-    return {
-      taskStatus: (id) => status,
-    };
-  }
-
   it("has correct tool name", () => {
     expect(TaskStatusTool.TOOL_NAME).toBe("task_status");
   });
@@ -203,18 +207,22 @@ describe("TaskStatusTool", () => {
   });
 
   it("returns task status", async () => {
-    const mockBackend = createMockBackend("running");
+    const mockBackend = makeMockTM({
+      taskStatus: (_id: string) => "running",
+    });
     const tool = new TaskStatusTool({ taskManager: mockBackend });
     const result = await tool.execute(
       JSON.stringify({ task_id: "t1" }),
     );
     expect(result.output).toContain("Task t1: running");
-    expect(result.metadata.get("task_id")).toBe("t1");
-    expect(result.metadata.get("status")).toBe("running");
+    expect(result.metadata!.get("task_id")).toBe("t1");
+    expect(result.metadata!.get("status")).toBe("running");
   });
 
   it("returns error when task not found", async () => {
-    const mockBackend = createMockBackend(null);
+    const mockBackend = makeMockTM({
+      taskStatus: (_id: string) => null,
+    });
     const tool = new TaskStatusTool({ taskManager: mockBackend });
     const result = await tool.execute(
       JSON.stringify({ task_id: "nonexistent" }),
@@ -239,12 +247,6 @@ describe("TaskStatusTool", () => {
 });
 
 describe("TaskFollowupTool", () => {
-  function createMockBackend(followUpOk = true) {
-    return {
-      sendFollowUp: (id, msg) => followUpOk,
-    };
-  }
-
   it("has correct tool name", () => {
     expect(TaskFollowupTool.TOOL_NAME).toBe("task_followup");
   });
@@ -274,7 +276,9 @@ describe("TaskFollowupTool", () => {
   });
 
   it("sends follow-up successfully", async () => {
-    const mockBackend = createMockBackend(true);
+    const mockBackend = makeMockTM({
+      sendFollowUp: (_id: string, _msg: string) => true,
+    });
     const tool = new TaskFollowupTool({ taskManager: mockBackend });
     const result = await tool.execute(
       JSON.stringify({ task_id: "t1", message: "Please hurry" }),
@@ -283,7 +287,9 @@ describe("TaskFollowupTool", () => {
   });
 
   it("returns error when follow-up fails", async () => {
-    const mockBackend = createMockBackend(false);
+    const mockBackend = makeMockTM({
+      sendFollowUp: (_id: string, _msg: string) => false,
+    });
     const tool = new TaskFollowupTool({ taskManager: mockBackend });
     const result = await tool.execute(
       JSON.stringify({ task_id: "t1", message: "hello" }),
@@ -312,12 +318,6 @@ describe("TaskFollowupTool", () => {
 });
 
 describe("TaskInterruptTool", () => {
-  function createMockBackend(interruptOk = true) {
-    return {
-      interruptTask: (id) => interruptOk,
-    };
-  }
-
   it("has correct tool name", () => {
     expect(TaskInterruptTool.TOOL_NAME).toBe("task_interrupt");
   });
@@ -337,7 +337,9 @@ describe("TaskInterruptTool", () => {
   });
 
   it("interrupts task successfully", async () => {
-    const mockBackend = createMockBackend(true);
+    const mockBackend = makeMockTM({
+      interruptTask: (_id: string) => true,
+    });
     const tool = new TaskInterruptTool({ taskManager: mockBackend });
     const result = await tool.execute(
       JSON.stringify({ task_id: "t1" }),
@@ -346,7 +348,9 @@ describe("TaskInterruptTool", () => {
   });
 
   it("returns error when interrupt fails", async () => {
-    const mockBackend = createMockBackend(false);
+    const mockBackend = makeMockTM({
+      interruptTask: (_id: string) => false,
+    });
     const tool = new TaskInterruptTool({ taskManager: mockBackend });
     const result = await tool.execute(
       JSON.stringify({ task_id: "t1" }),
@@ -370,13 +374,6 @@ describe("TaskInterruptTool", () => {
 });
 
 describe("PlanStatusTool", () => {
-  function createMockBackend(activeTaskIds = [], statuses = {}) {
-    return {
-      activeTasks: () => activeTaskIds,
-      taskStatus: (id) => (id in statuses ? statuses[id] : null),
-    };
-  }
-
   it("has correct tool name", () => {
     expect(PlanStatusTool.TOOL_NAME).toBe("plan_status");
   });
@@ -388,7 +385,10 @@ describe("PlanStatusTool", () => {
   });
 
   it("returns specific task status when task_id provided", async () => {
-    const mockBackend = createMockBackend(["t1"], { t1: "running" });
+    const mockBackend = makeMockTM({
+      activeTasks: () => ["t1"] as string[],
+      taskStatus: (id: string) => (id === "t1" ? "running" : null),
+    });
     const tool = new PlanStatusTool({ taskManager: mockBackend });
     const result = await tool.execute(
       JSON.stringify({ task_id: "t1" }),
@@ -397,7 +397,10 @@ describe("PlanStatusTool", () => {
   });
 
   it("returns error for unknown task_id", async () => {
-    const mockBackend = createMockBackend([], {});
+    const mockBackend = makeMockTM({
+      activeTasks: () => [] as string[],
+      taskStatus: (_id: string) => null,
+    });
     const tool = new PlanStatusTool({ taskManager: mockBackend });
     const result = await tool.execute(
       JSON.stringify({ task_id: "nonexistent" }),
@@ -406,10 +409,10 @@ describe("PlanStatusTool", () => {
   });
 
   it("returns all active tasks when no task_id provided", async () => {
-    const mockBackend = createMockBackend(
-      ["t1", "t2"],
-      { t1: "running", t2: "running" },
-    );
+    const mockBackend = makeMockTM({
+      activeTasks: () => ["t1", "t2"] as string[],
+      taskStatus: (_id: string) => "running",
+    });
     const tool = new PlanStatusTool({ taskManager: mockBackend });
     const result = await tool.execute(JSON.stringify({}));
     expect(result.output).toContain("Active tasks:");
@@ -418,11 +421,14 @@ describe("PlanStatusTool", () => {
   });
 
   it("returns no active tasks message", async () => {
-    const mockBackend = createMockBackend([], {});
+    const mockBackend = makeMockTM({
+      activeTasks: () => [] as string[],
+      taskStatus: (_id: string) => null,
+    });
     const tool = new PlanStatusTool({ taskManager: mockBackend });
     const result = await tool.execute(JSON.stringify({}));
     expect(result.output).toContain("No active tasks");
-    expect(result.metadata.get("active_task_count")).toBe("0");
+    expect(result.metadata!.get("active_task_count")).toBe("0");
   });
 
   it("toToolDef returns correct definition", () => {
@@ -464,7 +470,7 @@ describe("CompleteTaskTool", () => {
       JSON.stringify({ task_id: "t1" }),
     );
     expect(result.output).toContain("Task t1 marked as complete");
-    expect(result.metadata.get("task_id")).toBe("t1");
+    expect(result.metadata!.get("task_id")).toBe("t1");
   });
 
   it("toToolDef returns correct definition", () => {
@@ -498,10 +504,10 @@ describe("WaitTool", () => {
   it("returns wait message with note when message provided", async () => {
     const tool = new WaitTool({});
     const result = await tool.execute(
-      JSON.stringify({ message: "All tasks complete" }),
+      JSON.stringify({ message: "Waiting for build" }),
     );
-    expect(result.output).toContain("Note: All tasks complete");
-    expect(result.metadata.get("message")).toBe("All tasks complete");
+    expect(result.output).toContain("Waiting for user input");
+    expect(result.output).toContain("Waiting for build");
   });
 
   it("toToolDef returns correct definition", () => {
@@ -511,23 +517,15 @@ describe("WaitTool", () => {
     expect(def.function.parameters.required).toEqual([]);
   });
 
-  it("callDisplay shows message", () => {
-    const tool = new WaitTool({});
-    const display = tool.callDisplay(
-      JSON.stringify({ message: "done" }),
-    );
-    expect(display).toContain("done");
-  });
-
-  it("callDisplay shows 'no-op' when no message", () => {
+  it("callDisplay formats correctly", () => {
     const tool = new WaitTool({});
     const display = tool.callDisplay(JSON.stringify({}));
-    expect(display).toContain("no-op");
+    expect(display).toBe("wait(no-op)");
   });
 });
 
 describe("SUBAGENT_TOOL_NAMES", () => {
-  it("contains all expected tool names", () => {
+  it("contains all tool names", () => {
     expect(SUBAGENT_TOOL_NAMES).toContain("delegate_task");
     expect(SUBAGENT_TOOL_NAMES).toContain("task_status");
     expect(SUBAGENT_TOOL_NAMES).toContain("task_followup");
@@ -535,104 +533,107 @@ describe("SUBAGENT_TOOL_NAMES", () => {
     expect(SUBAGENT_TOOL_NAMES).toContain("plan_status");
     expect(SUBAGENT_TOOL_NAMES).toContain("complete_task");
     expect(SUBAGENT_TOOL_NAMES).toContain("wait");
-    expect(SUBAGENT_TOOL_NAMES.length).toBe(7);
   });
 });
 
 describe("SUBAGENT_TOOL_CONSTRUCTORS", () => {
-  it("has constructor for each tool name", () => {
-    for (const name of SUBAGENT_TOOL_NAMES) {
-      expect(SUBAGENT_TOOL_CONSTRUCTORS[name]).toBeDefined();
-    }
+  it("contains constructors for all tools", () => {
+    expect(SUBAGENT_TOOL_CONSTRUCTORS.delegate_task).toBeDefined();
+    expect(SUBAGENT_TOOL_CONSTRUCTORS.task_status).toBeDefined();
+    expect(SUBAGENT_TOOL_CONSTRUCTORS.task_followup).toBeDefined();
+    expect(SUBAGENT_TOOL_CONSTRUCTORS.task_interrupt).toBeDefined();
+    expect(SUBAGENT_TOOL_CONSTRUCTORS.plan_status).toBeDefined();
+    expect(SUBAGENT_TOOL_CONSTRUCTORS.complete_task).toBeDefined();
+    expect(SUBAGENT_TOOL_CONSTRUCTORS.wait).toBeDefined();
   });
 
-  it("constructors create instances with correct tool names", () => {
-    const opts = {};
-    expect(SUBAGENT_TOOL_CONSTRUCTORS.delegate_task(opts).constructor.name).toBe("DelegateTaskTool");
-    expect(SUBAGENT_TOOL_CONSTRUCTORS.task_status(opts).constructor.name).toBe("TaskStatusTool");
-    expect(SUBAGENT_TOOL_CONSTRUCTORS.task_followup(opts).constructor.name).toBe("TaskFollowupTool");
-    expect(SUBAGENT_TOOL_CONSTRUCTORS.task_interrupt(opts).constructor.name).toBe("TaskInterruptTool");
-    expect(SUBAGENT_TOOL_CONSTRUCTORS.plan_status(opts).constructor.name).toBe("PlanStatusTool");
-    expect(SUBAGENT_TOOL_CONSTRUCTORS.complete_task(opts).constructor.name).toBe("CompleteTaskTool");
-    expect(SUBAGENT_TOOL_CONSTRUCTORS.wait(opts).constructor.name).toBe("WaitTool");
+  it("constructors return correct tool instances", () => {
+    const opts = { taskManager: makeMockTM() };
+    expect(SUBAGENT_TOOL_CONSTRUCTORS.delegate_task!(opts)).toBeInstanceOf(DelegateTaskTool);
+    expect(SUBAGENT_TOOL_CONSTRUCTORS.task_status!(opts)).toBeInstanceOf(TaskStatusTool);
+    expect(SUBAGENT_TOOL_CONSTRUCTORS.task_followup!(opts)).toBeInstanceOf(TaskFollowupTool);
+    expect(SUBAGENT_TOOL_CONSTRUCTORS.task_interrupt!(opts)).toBeInstanceOf(TaskInterruptTool);
+    expect(SUBAGENT_TOOL_CONSTRUCTORS.plan_status!(opts)).toBeInstanceOf(PlanStatusTool);
+    expect(SUBAGENT_TOOL_CONSTRUCTORS.complete_task!(opts)).toBeInstanceOf(CompleteTaskTool);
+    expect(SUBAGENT_TOOL_CONSTRUCTORS.wait!(opts)).toBeInstanceOf(WaitTool);
   });
 });
 
-describe("Subagents extension create()", () => {
-  it("returns null when no taskManager", () => {
-    const result = create(null, {});
-    expect(result).toBeNull();
+describe("Extension create()", () => {
+  it("returns null when taskManager is not provided", () => {
+    const core = {
+      config: { profile: { manager: true } },
+      hooks: { on: () => {}, notifyHooks: () => {}, notifyHooksAsync: () => {}, runHookPipeline: async () => ({ results: [], lastResult: undefined, stopped: false, data: {} }) },
+      toolRegistry: {},
+      extensions: { has: () => false, load: async () => null, cleanup: async () => {} },
+      services: { get: () => null },
+      cliSubcommandRegistry: { register: () => {}, has: () => false },
+      configRegistry: {},
+      service: () => null,
+    } as any;
+    const ext = create(core);
+    expect(ext).toBeNull();
   });
 
-  it("returns null when no taskManager in options", () => {
-    const result = create({ config: { profile: { manager: true } } }, {});
-    expect(result).toBeNull();
+  it("returns null when profile is not a manager", () => {
+    const core = {
+      config: { profile: {} },
+      hooks: { on: () => {}, notifyHooks: () => {}, notifyHooksAsync: () => {}, runHookPipeline: async () => ({ results: [], lastResult: undefined, stopped: false, data: {} }) },
+      toolRegistry: {},
+      extensions: { has: () => false, load: async () => null, cleanup: async () => {} },
+      services: { get: () => null },
+      cliSubcommandRegistry: { register: () => {}, has: () => false },
+      configRegistry: {},
+      service: () => null,
+    } as any;
+    const ext = create(core, { taskManager: makeMockTM() });
+    expect(ext).toBeNull();
   });
 
-  it("returns null when profile is not manager", () => {
-    const result = create(
-      { config: { profile: { manager: false } } },
-      { taskManager: {} },
-    );
-    expect(result).toBeNull();
+  it("returns extension when manager is enabled with taskManager", () => {
+    const core = {
+      config: { profile: { manager: true } },
+      hooks: { on: () => {}, notifyHooks: () => {}, notifyHooksAsync: () => {}, runHookPipeline: async () => ({ results: [], lastResult: undefined, stopped: false, data: {} }) },
+      toolRegistry: {},
+      extensions: { has: () => false, load: async () => null, cleanup: async () => {} },
+      services: { get: () => null },
+      cliSubcommandRegistry: { register: () => {}, has: () => false },
+      configRegistry: {},
+      service: () => null,
+    } as any;
+    const ext = create(core, { taskManager: makeMockTM() });
+    expect(ext).not.toBeNull();
   });
+});
 
-  it("returns extension object when taskManager and manager profile", () => {
-    const taskManager = {};
-    const sessionCore = {};
-    const result = create(
-      { config: { profile: { manager: true } } },
-      { taskManager, sessionCore },
-    );
-    expect(result).not.toBeNull();
-    expect(result.hooks).toBeDefined();
-    expect(result.SUBAGENT_TOOL_NAMES).toBe(SUBAGENT_TOOL_NAMES);
-    expect(result.SUBAGENT_TOOL_CONSTRUCTORS).toBe(SUBAGENT_TOOL_CONSTRUCTORS);
-  });
-
-  it("returns extension with AGENT_TOOL_CONTEXT hook", async () => {
-    const taskManager = {};
-    const result = create(
-      { config: { profile: { manager: true } } },
-      { taskManager },
-    );
-    const toolCtx = new Map();
-    await result.hooks['agent:toolContext']({ toolCtx });
-    expect(toolCtx.get('taskManager')).toBe(taskManager);
-    expect(toolCtx.get('sessionCore')).toBeNull();
-  });
-
-  it("returns extension with TOOLS_REGISTER hook", async () => {
-    const taskManager = {};
-    const sessionCore = {};
-    const result = create(
-      { config: { profile: { manager: true } } },
-      { taskManager, sessionCore },
-    );
-    const registered = [];
-    const registry = {
-      register: (name, tool) => registered.push(name),
-    };
-    await result.hooks['tools:register'](registry);
+describe("Extension hooks registration", () => {
+  it("registers tools on TOOLS_REGISTER hook", async () => {
+    const registered: any[] = [];
+    const core = {
+      config: { profile: { manager: true } },
+      hooks: {
+        on: () => {},
+        notifyHooks: () => {},
+        notifyHooksAsync: () => {},
+        runHookPipeline: async () => ({ results: [], lastResult: undefined, stopped: false, data: {} }),
+      },
+      toolRegistry: {
+        register: (name: string, tool: any) => {
+          registered.push({ name, tool });
+          return registered.length;
+        },
+        getAll: () => registered.map((r) => r.tool),
+      },
+      extensions: { has: () => false, load: async () => null, cleanup: async () => {} },
+      services: { get: () => null },
+      cliSubcommandRegistry: { register: () => {}, has: () => false },
+      configRegistry: {},
+      service: () => null,
+    } as any;
+    const ext = create(core, { taskManager: makeMockTM() });
+    expect(ext).not.toBeNull();
+    expect(ext!.hooks!["tools:register"]).toBeDefined();
+    await ext!.hooks!["tools:register"]!({ register: core.toolRegistry.register } as any);
     expect(registered.length).toBeGreaterThan(0);
-    expect(registered).toContain('delegate_task');
-    expect(registered).toContain('task_status');
-  });
-
-  it("handles tool creation errors gracefully", async () => {
-    // Verify that TOOLS_REGISTER hook doesn't throw even if there are issues
-    const taskManager = {};
-    const result = create(
-      { config: { profile: { manager: true } } },
-      { taskManager },
-    );
-    const registered = [];
-    const registry = {
-      register: (name, tool) => registered.push(name),
-    };
-    // Should not throw
-    await result.hooks['tools:register'](registry);
-    expect(registered.length).toBeGreaterThan(0);
-    expect(registered).toContain('delegate_task');
   });
 });

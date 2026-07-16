@@ -1,14 +1,20 @@
 // Compaction utilities — token estimation, message serialization, helpers.
 
 import { AgentError } from "../../core/error.ts";
+import { Message } from "../../core/context/message.ts";
 
 const TOOL_RESULT_MAX_CHARS = 2000;
 
-interface Message {
-  role: string;
-  content: string;
+// Use a local interface for flexibility (accepts both core Message and plain objects)
+interface MessageLike {
+  role: string | undefined;
+  content?: string | Array<unknown> | undefined;
+  reasoningContent?: string | null;
   reasoning_content?: string;
+  toolCalls?: unknown;
   tool_calls?: Array<{ function?: { name?: string; arguments?: string } }>;
+  toolCallId?: string | null;
+  images?: unknown[] | null;
 }
 
 // ── Token Estimation ────────────────────────────────────────────────────────
@@ -16,7 +22,7 @@ interface Message {
 /**
  * Estimate token count for a message using chars/4 heuristic (conservative overestimate).
  */
-export function estimateMessageTokens(msg: Message): number {
+export function estimateMessageTokens(msg: MessageLike): number {
   const chars = _messageCharCount(msg);
   return Math.ceil(chars / 4);
 }
@@ -24,34 +30,41 @@ export function estimateMessageTokens(msg: Message): number {
 /**
  * Count characters in a message for token estimation.
  */
-function _messageCharCount(msg: Message): number {
+function _messageCharCount(msg: MessageLike): number {
+  const getContentLength = (content: string | Array<unknown> | undefined): number => {
+    if (typeof content === "string") return content.length;
+    if (Array.isArray(content)) return content.map((p) => String(p).length).reduce((a, b) => a + b, 0);
+    return 0;
+  };
+
   switch (msg.role) {
     case "user":
     case "system":
-      return msg.content.length;
+      return getContentLength(msg.content);
     case "assistant": {
-      let chars = msg.content.length;
-      if (msg.reasoning_content) chars += msg.reasoning_content.length;
-      if (msg.tool_calls) {
-        for (const tc of msg.tool_calls) {
-          chars +=
-            (tc.function?.name || "").length +
-            (tc.function?.arguments || "").length;
+      let chars = getContentLength(msg.content);
+      const reasoning = msg.reasoningContent ?? msg.reasoning_content;
+      if (reasoning) chars += reasoning.length;
+      const toolCalls = msg.toolCalls ?? msg.tool_calls;
+      if (Array.isArray(toolCalls)) {
+        for (const tc of toolCalls) {
+          const fn = (tc as { function?: { name?: string; arguments?: string } }).function;
+          chars += (fn?.name || "").length + (fn?.arguments || "").length;
         }
       }
       return chars;
     }
     case "tool":
-      return msg.content.length;
+      return getContentLength(msg.content);
     default:
-      return msg.content.length;
+      return getContentLength(msg.content);
   }
 }
 
 /**
  * Estimate total token count for all messages in context.
  */
-export function estimateContextTokens(messages: Message[]): number {
+export function estimateContextTokens(messages: MessageLike[]): number {
   return messages.reduce((sum, msg) => sum + estimateMessageTokens(msg), 0);
 }
 
@@ -63,7 +76,7 @@ export function estimateContextTokens(messages: Message[]): number {
  * `keepRecent * 2` messages (roughly `keepRecent` user+assistant pairs).
  * Returns 0 if keepRecent=0 or not enough messages found.
  */
-export function findFirstKeptIndex(messages: Message[], keepRecent: number): number {
+export function findFirstKeptIndex(messages: MessageLike[], keepRecent: number): number {
   if (keepRecent === 0) return 0;
 
   let count = 0;
@@ -83,7 +96,7 @@ export function findFirstKeptIndex(messages: Message[], keepRecent: number): num
 /**
  * Check if compaction should be triggered.
  */
-export function shouldCompact(messages: Message[], contextLimit: number, reserveTokens: number): boolean {
+export function shouldCompact(messages: MessageLike[], contextLimit: number, reserveTokens: number = 16384): boolean {
   const estimated = estimateContextTokens(messages);
   return estimated > contextLimit - reserveTokens;
 }
@@ -94,25 +107,34 @@ export function shouldCompact(messages: Message[], contextLimit: number, reserve
  * Serialize messages to text for summarization.
  * Wraps in role tags to prevent the model from treating it as a conversation.
  */
-export function serializeConversation(messages: Message[]): string {
+export function serializeConversation(messages: MessageLike[]): string {
   const parts: string[] = [];
+
+  const getContentStr = (content: string | Array<unknown> | undefined): string => {
+    if (typeof content === "string") return content;
+    if (Array.isArray(content)) return content.map((p) => String(p)).join("\n");
+    return "";
+  };
 
   for (const msg of messages) {
     switch (msg.role) {
       case "user":
-        parts.push(`[User]: ${msg.content}`);
+        parts.push(`[User]: ${getContentStr(msg.content)}`);
         break;
       case "assistant": {
-        if (msg.reasoning_content) {
-          parts.push(`[Assistant thinking]: ${msg.reasoning_content}`);
+        const reasoning = msg.reasoningContent ?? msg.reasoning_content;
+        if (reasoning) {
+          parts.push(`[Assistant thinking]: ${reasoning}`);
         }
-        if (msg.content) {
-          parts.push(`[Assistant]: ${msg.content}`);
+        const content = getContentStr(msg.content);
+        if (content) {
+          parts.push(`[Assistant]: ${content}`);
         }
-        if (msg.tool_calls) {
-          const calls = msg.tool_calls
+        const toolCalls = msg.toolCalls ?? msg.tool_calls;
+        if (Array.isArray(toolCalls)) {
+          const calls = toolCalls
             .map(
-              (tc) => `${tc.function?.name}(${tc.function?.arguments || ""})`,
+              (tc) => `${(tc as { function?: { name?: string; arguments?: string } }).function?.name}(${(tc as { function?: { name?: string; arguments?: string } }).function?.arguments || ""})`,
             )
             .join("; ");
           parts.push(`[Assistant tool calls]: ${calls}`);
@@ -120,10 +142,11 @@ export function serializeConversation(messages: Message[]): string {
         break;
       }
       case "tool": {
+        const contentStr = getContentStr(msg.content);
         const truncated =
-          msg.content.length > TOOL_RESULT_MAX_CHARS
-            ? `${msg.content.slice(0, TOOL_RESULT_MAX_CHARS)}\n\n[... ${msg.content.length - TOOL_RESULT_MAX_CHARS} more characters truncated]`
-            : msg.content;
+          contentStr.length > TOOL_RESULT_MAX_CHARS
+            ? `${contentStr.slice(0, TOOL_RESULT_MAX_CHARS)}\n\n[... ${contentStr.length - TOOL_RESULT_MAX_CHARS} more characters truncated]`
+            : contentStr;
         parts.push(`[Tool result]: ${truncated}`);
         break;
       }
@@ -131,7 +154,7 @@ export function serializeConversation(messages: Message[]): string {
         // Skip system messages in summary (they're re-injected)
         break;
       default:
-        parts.push(`[${msg.role}]: ${msg.content}`);
+        parts.push(`[${msg.role ?? "unknown"}]: ${getContentStr(msg.content)}`);
     }
   }
 
@@ -146,9 +169,9 @@ import {
 } from "./prompts.ts";
 
 interface CompactionSettings {
-  enabled: boolean;
-  reserveTokens: number;
-  keepRecent: number;
+  enabled?: boolean;
+  reserveTokens?: number;
+  keepRecent?: number;
 }
 
 interface CompactResult {
@@ -160,14 +183,14 @@ interface CompactResult {
  * Compact the context by summarizing older messages.
  */
 export async function compactMessages(
-  messages: Message[],
+  messages: MessageLike[],
   llmChat: (messages: Array<{ role: string; content: string }>, model: string) => Promise<string>,
   model: string,
   settings: CompactionSettings,
 ): Promise<CompactResult | null> {
   if (!settings.enabled) return null;
 
-  const firstKept = findFirstKeptIndex(messages, settings.keepRecent);
+  const firstKept = findFirstKeptIndex(messages, settings.keepRecent ?? 8);
   if (firstKept === 0) return null;
 
   const messagesToCompact = messages.slice(0, firstKept);

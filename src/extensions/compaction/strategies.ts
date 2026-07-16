@@ -4,16 +4,20 @@
 import { AgentError } from "../../core/error.ts";
 
 export interface Message {
-  role: string;
-  content: string;
+  role: string | undefined;
+  content: string | Array<unknown> | undefined;
+  reasoningContent?: string | null;
   reasoning_content?: string;
+  toolCalls?: unknown;
   tool_calls?: Array<{ function?: { name?: string; arguments?: string } }>;
+  toolCallId?: string | null;
+  images?: unknown[] | null;
 }
 
 export interface CompactionSettings {
-  enabled: boolean;
-  reserveTokens: number;
-  keepRecent: number;
+  enabled?: boolean;
+  reserveTokens?: number;
+  keepRecent?: number;
   targetTokens?: number;
   contextLimit?: number;
 }

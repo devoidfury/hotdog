@@ -171,7 +171,7 @@ export async function resolvePalette(
       }
     }
   } else if (namedTheme && NAMED_THEMES[namedTheme.toLowerCase()]) {
-    palette = new ColorPalette(NAMED_THEMES[namedTheme.toLowerCase()]());
+    palette = new ColorPalette(NAMED_THEMES[namedTheme.toLowerCase()]!());
   } else {
     palette = new ColorPalette(dark_palette());
   }

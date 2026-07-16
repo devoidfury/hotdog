@@ -1,3 +1,4 @@
+/// <reference lib="dom" />
 // Main application — wires login, chat, and session management together.
 // Uses reactiveState atoms for cross-component coordination.
 

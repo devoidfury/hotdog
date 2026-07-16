@@ -2,7 +2,7 @@
 
 import { readFileSync } from "node:fs";
 import { describe, it, expect, beforeEach, afterEach } from "bun:test";
-import { LlmClient } from "../../src/core/llm-client/client.ts";
+import { LlmClient, StreamEvent } from "../../src/core/llm-client/client.ts";
 import { LlmError } from "../../src/core/error.ts";
 import { Message } from "../../src/core/context/message.ts";
 import {
@@ -15,9 +15,9 @@ describe("LlmClient._escapeMessages", () => {
     const mangler = new MarkerMangler();
     const client = new LlmClient({ chatTimeoutSecs: 30, maxRetries: 3, markerMangler: mangler });
     const messages = [new Message({ role: "user", content: "Hello" })];
-    const escaped = client._escapeMessages(messages);
+    const escaped = client._escapeMessages(messages as unknown as Record<string, unknown>[]);
     expect(escaped).toHaveLength(1);
-    expect(typeof escaped[0].content).toBe("string");
+    expect(typeof (escaped[0] as any).content).toBe("string");
   });
 
   it("escapes array content with text parts", () => {
@@ -35,11 +35,11 @@ describe("LlmClient._escapeMessages", () => {
         ],
       }),
     ];
-    const escaped = client._escapeMessages(messages);
+    const escaped = client._escapeMessages(messages as unknown as Record<string, unknown>[]);
     expect(escaped).toHaveLength(1);
-    expect(Array.isArray(escaped[0].content)).toBe(true);
-    expect(escaped[0].content[0].type).toBe("text");
-    expect(escaped[0].content[1].type).toBe("image_url");
+    expect(Array.isArray((escaped[0] as any).content)).toBe(true);
+    expect((((escaped[0] as any).content as any)[0] as any).type).toBe("text");
+    expect((((escaped[0] as any).content as any)[1] as any).type).toBe("image_url");
   });
 
   it("passes through image_url parts unchanged", () => {
@@ -56,8 +56,8 @@ describe("LlmClient._escapeMessages", () => {
         ],
       }),
     ];
-    const escaped = client._escapeMessages(messages);
-    expect(escaped[0].content[0].type).toBe("image_url");
+    const escaped = client._escapeMessages(messages as unknown as Record<string, unknown>[]);
+    expect((((escaped[0] as any).content as any)[0] as any).type).toBe("image_url");
   });
 
   it("escapes tool_calls in messages", () => {
@@ -70,14 +70,14 @@ describe("LlmClient._escapeMessages", () => {
         toolCalls: [{ id: "tc1", function: { name: "bash", arguments: "{}" } }],
       }),
     ];
-    const escaped = client._escapeMessages(messages);
-    expect(escaped[0].tool_calls).toHaveLength(1);
+    const escaped = client._escapeMessages(messages as unknown as Record<string, unknown>[]);
+    expect((escaped[0] as any).tool_calls).toHaveLength(1);
   });
 
   it("returns messages unchanged when mangler is null", () => {
-    const client = new LlmClient({ chatTimeoutSecs: 30, maxRetries: 3, markerMangler: null });
+    const client = new LlmClient({ chatTimeoutSecs: 30, maxRetries: 3, markerMangler: undefined });
     const messages = [new Message({ role: "user", content: "Hello" })];
-    const escaped = client._escapeMessages(messages);
+    const escaped = client._escapeMessages(messages as unknown as Record<string, unknown>[]);
     expect(escaped).toHaveLength(1);
   });
 
@@ -96,16 +96,16 @@ describe("LlmClient._escapeMessages", () => {
         ],
       }),
     ];
-    const escaped = client._escapeMessages(messages);
-    expect(escaped[0].tool_calls).toHaveLength(1);
-    expect(escaped[0].tool_calls[0].function.name).toBeDefined();
+    const escaped = client._escapeMessages(messages as unknown as Record<string, unknown>[]);
+    expect((escaped[0] as any).tool_calls).toHaveLength(1);
+    expect((escaped[0] as any).tool_calls[0].function.name).toBeDefined();
   });
 
   it("handles messages with null content", () => {
     const mangler = new MarkerMangler();
     const client = new LlmClient({ chatTimeoutSecs: 30, maxRetries: 3, markerMangler: mangler });
     const messages = [new Message({ role: "assistant", content: null })];
-    const escaped = client._escapeMessages(messages);
+    const escaped = client._escapeMessages(messages as unknown as Record<string, unknown>[]);
     expect(escaped).toHaveLength(1);
   });
 });
@@ -117,8 +117,8 @@ describe("LlmClient._parseStreamData", () => {
       choices: [{ delta: { content: "Hello" } }],
     });
     expect(events).toHaveLength(1);
-    expect(events[0].type).toBe("content");
-    expect(events[0].content).toBe("Hello");
+    expect(events[0]!.type).toBe("content");
+    expect(events[0]!.content).toBe("Hello");
   });
 
   it("parses reasoning_content delta", () => {
@@ -127,8 +127,8 @@ describe("LlmClient._parseStreamData", () => {
       choices: [{ delta: { reasoning_content: "Thinking..." } }],
     });
     expect(events).toHaveLength(1);
-    expect(events[0].type).toBe("reasoning");
-    expect(events[0].content).toBe("Thinking...");
+    expect(events[0]!.type).toBe("reasoning");
+    expect(events[0]!.content).toBe("Thinking...");
   });
 
   it("parses tool call name", () => {
@@ -143,10 +143,10 @@ describe("LlmClient._parseStreamData", () => {
       ],
     });
     expect(events).toHaveLength(1);
-    expect(events[0].type).toBe("toolName");
-    expect(events[0].name).toBe("bash");
-    expect(events[0].index).toBe(0);
-    expect(events[0].toolCallId).toBe("tc1");
+    expect(events[0]!.type).toBe("toolName");
+    expect(events[0]!.name).toBe("bash");
+    expect(events[0]!.index).toBe(0);
+    expect(events[0]!.toolCallId).toBe("tc1");
   });
 
   it("parses tool call arguments", () => {
@@ -163,8 +163,8 @@ describe("LlmClient._parseStreamData", () => {
       ],
     });
     expect(events).toHaveLength(1);
-    expect(events[0].type).toBe("toolArgument");
-    expect(events[0].arguments).toBe('{"path":"test"}');
+    expect(events[0]!.type).toBe("toolArgument");
+    expect(events[0]!.arguments).toBe('{"path":"test"}');
   });
 
   it("parses usage data", () => {
@@ -174,8 +174,8 @@ describe("LlmClient._parseStreamData", () => {
       usage: { prompt_tokens: 10, completion_tokens: 20 },
     });
     expect(events).toHaveLength(1);
-    expect(events[0].type).toBe("usage");
-    expect(events[0].data.prompt_tokens).toBe(10);
+    expect(events[0]!.type).toBe("usage");
+    expect((events[0]!.data as any).prompt_tokens).toBe(10);
   });
 
   it("returns empty array for data with no choices", () => {
@@ -228,8 +228,8 @@ describe("LlmClient._parseStreamData", () => {
     const events = client._parseStreamData({
       choices: [{ delta: { content: rawContent } }],
     });
-    expect(events[0].type).toBe("content");
-    expect(events[0].content).toBe("Hello World");
+    expect(events[0]!.type).toBe("content");
+    expect(events[0]!.content).toBe("Hello World");
   });
 
   it("unescape reasoning content with mangler", () => {
@@ -239,8 +239,8 @@ describe("LlmClient._parseStreamData", () => {
     const events = client._parseStreamData({
       choices: [{ delta: { reasoning_content: rawContent } }],
     });
-    expect(events[0].type).toBe("reasoning");
-    expect(events[0].content).toBe("Thinking process");
+    expect(events[0]!.type).toBe("reasoning");
+    expect(events[0]!.content).toBe("Thinking process");
   });
 
   it("handles tool call without id", () => {
@@ -254,8 +254,8 @@ describe("LlmClient._parseStreamData", () => {
         },
       ],
     });
-    expect(events[0].type).toBe("toolName");
-    expect(events[0].toolCallId).toBe("");
+    expect(events[0]!.type).toBe("toolName");
+    expect(events[0]!.toolCallId).toBe("");
   });
 
   it("handles tool call without index", () => {
@@ -269,7 +269,7 @@ describe("LlmClient._parseStreamData", () => {
         },
       ],
     });
-    expect(events[0].index).toBe(0);
+    expect(events[0]!.index).toBe(0);
   });
 
   it("handles tool call with only arguments (no name)", () => {
@@ -332,14 +332,14 @@ describe("LlmClient.chatStreamCancellable", () => {
       [{ role: "user", content: "Hi" }],
       { name: "test-model", temperature: null, maxTokens: 100 },
       [],
-      abortController,
+      abortController as unknown as AbortSignal,
     );
     expect(gen[Symbol.asyncIterator]).toBeDefined();
   });
 
   it("accepts custom cancel token with .aborted property", () => {
     const client = new LlmClient({ chatTimeoutSecs: 30, maxRetries: 3, baseUrl: "http://test.com" });
-    const customCancel = { aborted: false };
+    const customCancel = { aborted: false } as unknown as AbortSignal;
     const gen = client.chatStreamCancellable(
       [{ role: "user", content: "Hi" }],
       { name: "test-model", temperature: null, maxTokens: 100 },
@@ -357,7 +357,7 @@ describe("LlmClient.chatStreamCancellable", () => {
       [{ role: "user", content: "Hi" }],
       { name: "test-model", temperature: null, maxTokens: 100 },
       [],
-      abortController,
+      abortController as unknown as AbortSignal,
     );
     expect(gen[Symbol.asyncIterator]).toBeDefined();
   });
@@ -366,7 +366,7 @@ describe("LlmClient.chatStreamCancellable", () => {
     const client = new LlmClient({ chatTimeoutSecs: 30, maxRetries: 3, baseUrl: "http://test.com" });
     const customCancel = {
       signal: new AbortController().signal,
-    };
+    } as unknown as AbortSignal;
     const gen = client.chatStreamCancellable(
       [{ role: "user", content: "Hi" }],
       { name: "test-model", temperature: null, maxTokens: 100 },
@@ -390,7 +390,7 @@ describe("LlmClient._processSSE", () => {
     };
 
     const events = [];
-    for await (const event of client._processSSE(mockResponse)) {
+    for await (const event of client._processSSE(mockResponse as unknown as Response)) {
       events.push(event);
     }
     expect(events).toEqual([]);
@@ -417,7 +417,7 @@ data: [DONE]
     let called = false;
     mockResponse.body.getReader = () => ({
       read: async () => {
-        if (called) return { done: true, value: undefined };
+        if (called) return { done: true, value: undefined as any };
         called = true;
         return { done: false, value: new TextEncoder().encode(sseData) };
       },
@@ -425,12 +425,12 @@ data: [DONE]
     });
 
     const events = [];
-    for await (const event of client._processSSE(mockResponse)) {
+    for await (const event of client._processSSE(mockResponse as unknown as Response)) {
       events.push(event);
     }
     expect(events.length).toBeGreaterThanOrEqual(2);
     const contentEvents = events.filter((e) => e.type === "content");
-    expect(contentEvents[0].content).toBe("Hello");
+    expect(contentEvents[0]!.content).toBe("Hello");
   });
 
   it("skips non-data lines", async () => {
@@ -444,7 +444,7 @@ data: {"choices":[{"delta":{"content":"test"}}]}
       body: {
         getReader: () => ({
           read: async () => {
-            if (called) return { done: true, value: undefined };
+            if (called) return { done: true, value: undefined as any };
             called = true;
             return { done: false, value: new TextEncoder().encode(sseData) };
           },
@@ -454,11 +454,11 @@ data: {"choices":[{"delta":{"content":"test"}}]}
     };
 
     const events = [];
-    for await (const event of client._processSSE(mockResponse)) {
+    for await (const event of client._processSSE(mockResponse as unknown as Response)) {
       events.push(event);
     }
     expect(events).toHaveLength(1);
-    expect(events[0].content).toBe("test");
+    expect(events[0]!.content).toBe("test");
   });
 
   it("handles malformed JSON gracefully", async () => {
@@ -471,7 +471,7 @@ data: {"choices":[{"delta":{"content":"valid"}}]}
       body: {
         getReader: () => ({
           read: async () => {
-            if (called) return { done: true, value: undefined };
+            if (called) return { done: true, value: undefined as any };
             called = true;
             return { done: false, value: new TextEncoder().encode(sseData) };
           },
@@ -481,11 +481,11 @@ data: {"choices":[{"delta":{"content":"valid"}}]}
     };
 
     const events = [];
-    for await (const event of client._processSSE(mockResponse)) {
+    for await (const event of client._processSSE(mockResponse as unknown as Response)) {
       events.push(event);
     }
     expect(events).toHaveLength(1);
-    expect(events[0].content).toBe("valid");
+    expect(events[0]!.content).toBe("valid");
   });
 
   it("handles multi-chunk streams", async () => {
@@ -510,7 +510,7 @@ data: {"choices":[{"delta":{"content":"valid"}}]}
                 value: new TextEncoder().encode("\ndata: [DONE]\n\n"),
               };
             }
-            return { done: true, value: undefined };
+            return { done: true, value: undefined as any };
           },
           releaseLock: () => {},
         }),
@@ -518,11 +518,11 @@ data: {"choices":[{"delta":{"content":"valid"}}]}
     };
 
     const events = [];
-    for await (const event of client._processSSE(mockResponse)) {
+    for await (const event of client._processSSE(mockResponse as unknown as Response)) {
       events.push(event);
     }
     expect(events).toHaveLength(1);
-    expect(events[0].content).toBe("Hello");
+    expect(events[0]!.content).toBe("Hello");
   });
 });
 
@@ -536,11 +536,11 @@ describe("LlmClient constructor edge cases", () => {
   it("creates default mangler when not provided", () => {
     const client = new LlmClient({ chatTimeoutSecs: 30, maxRetries: 3 });
     expect(client.markerMangler).toBeDefined();
-    expect(typeof client.markerMangler.escape).toBe("function");
+    expect(typeof client.markerMangler!.escape).toBe("function");
   });
 
   it("accepts null markerMangler", () => {
-    const client = new LlmClient({ chatTimeoutSecs: 30, maxRetries: 3, markerMangler: null });
+    const client = new LlmClient({ chatTimeoutSecs: 30, maxRetries: 3, markerMangler: null as any });
     expect(client.markerMangler).toBeNull();
   });
 
@@ -588,12 +588,12 @@ describe("LlmClient._doRequest", () => {
       baseUrl: "http://test.com",
       apiKey: "secret",
     });
-    let capturedHeaders = null;
+    let capturedHeaders: any = null;
 
-    globalThis.fetch = async (url, opts) => {
-      capturedHeaders = opts.headers;
+    globalThis.fetch = (async (url: string, opts?: any) => {
+      capturedHeaders = (opts || {}).headers;
       throw new Error("mock");
-    };
+    }) as unknown as typeof fetch;
 
     try {
       await client._doRequest(
@@ -602,7 +602,7 @@ describe("LlmClient._doRequest", () => {
         { model: "test" },
         new AbortController().signal,
       );
-    } catch (e) {
+    } catch (e: any) {
       // Expected to fail
     }
 
@@ -617,12 +617,12 @@ describe("LlmClient._doRequest", () => {
       baseUrl: "http://test.com",
       sessionId: "sess-123",
     });
-    let capturedHeaders = null;
+    let capturedHeaders: any = null;
 
-    globalThis.fetch = async (url, opts) => {
-      capturedHeaders = opts.headers;
+    globalThis.fetch = (async (url: string, opts?: any) => {
+      capturedHeaders = (opts || {}).headers;
       throw new Error("mock");
-    };
+    }) as unknown as typeof fetch;
 
     try {
       await client._doRequest(
@@ -631,7 +631,7 @@ describe("LlmClient._doRequest", () => {
         { model: "test" },
         new AbortController().signal,
       );
-    } catch (e) {
+    } catch (e: any) {
       // Expected to fail
     }
 
@@ -641,12 +641,12 @@ describe("LlmClient._doRequest", () => {
 
   it("does not include Authorization header when apiKey is null", async () => {
     const client = new LlmClient({ chatTimeoutSecs: 30, maxRetries: 3, baseUrl: "http://test.com", apiKey: null });
-    let capturedHeaders = null;
+    let capturedHeaders: any = null;
 
-    globalThis.fetch = async (url, opts) => {
-      capturedHeaders = opts.headers;
+    globalThis.fetch = (async (url: string, opts?: any) => {
+      capturedHeaders = (opts || {}).headers;
       throw new Error("mock");
-    };
+    }) as unknown as typeof fetch;
 
     try {
       await client._doRequest(
@@ -655,7 +655,7 @@ describe("LlmClient._doRequest", () => {
         { model: "test" },
         new AbortController().signal,
       );
-    } catch (e) {
+    } catch (e: any) {
       // Expected to fail
     }
 
@@ -666,13 +666,13 @@ describe("LlmClient._doRequest", () => {
   it("throws LlmError.Api on non-OK response", async () => {
     const client = new LlmClient({ chatTimeoutSecs: 30, maxRetries: 3, baseUrl: "http://test.com" });
 
-    globalThis.fetch = async () => {
+    globalThis.fetch = (async () => {
       return {
         ok: false,
         status: 500,
         text: async () => "Internal Server Error",
       };
-    };
+    }) as unknown as typeof fetch;
 
     await expect(
       client._doRequest(
@@ -686,12 +686,12 @@ describe("LlmClient._doRequest", () => {
 
   it("sets Connection: keep-alive header", async () => {
     const client = new LlmClient({ chatTimeoutSecs: 30, maxRetries: 3, baseUrl: "http://test.com" });
-    let capturedHeaders = null;
+    let capturedHeaders: any = null;
 
-    globalThis.fetch = async (url, opts) => {
-      capturedHeaders = opts.headers;
+    globalThis.fetch = (async (url: string, opts?: any) => {
+      capturedHeaders = (opts || {}).headers;
       throw new Error("mock");
-    };
+    }) as unknown as typeof fetch;
 
     try {
       await client._doRequest(
@@ -700,7 +700,7 @@ describe("LlmClient._doRequest", () => {
         { model: "test" },
         new AbortController().signal,
       );
-    } catch (e) {
+    } catch (e: any) {
       // Expected to fail
     }
 
@@ -709,12 +709,12 @@ describe("LlmClient._doRequest", () => {
 
   it("sets User-Agent header", async () => {
     const client = new LlmClient({ chatTimeoutSecs: 30, maxRetries: 3, baseUrl: "http://test.com" });
-    let capturedHeaders = null;
+    let capturedHeaders: any = null;
 
-    globalThis.fetch = async (url, opts) => {
-      capturedHeaders = opts.headers;
+    globalThis.fetch = (async (url: string, opts?: any) => {
+      capturedHeaders = (opts || {}).headers;
       throw new Error("mock");
-    };
+    }) as unknown as typeof fetch;
 
     try {
       await client._doRequest(
@@ -723,7 +723,7 @@ describe("LlmClient._doRequest", () => {
         { model: "test" },
         new AbortController().signal,
       );
-    } catch (e) {
+    } catch (e: any) {
       // Expected to fail
     }
 
@@ -733,12 +733,12 @@ describe("LlmClient._doRequest", () => {
 
   it("sends request to /v1/chat/completions endpoint", async () => {
     const client = new LlmClient({ chatTimeoutSecs: 30, maxRetries: 3, baseUrl: "http://test.com" });
-    let capturedUrl = null;
+    let capturedUrl: string | null = null;
 
-    globalThis.fetch = async (url, opts) => {
+    globalThis.fetch = (async (url: string, opts?: any) => {
       capturedUrl = url;
       throw new Error("mock");
-    };
+    }) as unknown as typeof fetch;
 
     try {
       await client._doRequest(
@@ -747,21 +747,21 @@ describe("LlmClient._doRequest", () => {
         { model: "test" },
         new AbortController().signal,
       );
-    } catch (e) {
+    } catch (e: any) {
       // Expected to fail
     }
 
-    expect(capturedUrl).toBe("http://test.com/v1/chat/completions");
+    expect(capturedUrl!).toBe("http://test.com/v1/chat/completions");
   });
 
   it("sends request body as JSON", async () => {
     const client = new LlmClient({ chatTimeoutSecs: 30, maxRetries: 3, baseUrl: "http://test.com" });
-    let capturedBody = null;
+    let capturedBody: any = null;
 
-    globalThis.fetch = async (url, opts) => {
+    globalThis.fetch = (async (url: string, opts?: any) => {
       capturedBody = opts.body;
       throw new Error("mock");
-    };
+    }) as unknown as typeof fetch;
 
     try {
       await client._doRequest(
@@ -770,7 +770,7 @@ describe("LlmClient._doRequest", () => {
         { model: "test", messages: [] },
         new AbortController().signal,
       );
-    } catch (e) {
+    } catch (e: any) {
       // Expected to fail
     }
 
@@ -781,13 +781,13 @@ describe("LlmClient._doRequest", () => {
 
   it("passes signal to fetch", async () => {
     const client = new LlmClient({ chatTimeoutSecs: 30, maxRetries: 3, baseUrl: "http://test.com" });
-    let capturedSignal = null;
+    let capturedSignal: AbortSignal | null = null;
     const abortController = new AbortController();
 
-    globalThis.fetch = async (url, opts) => {
+    globalThis.fetch = (async (url: string, opts?: any) => {
       capturedSignal = opts.signal;
       throw new Error("mock");
-    };
+    }) as unknown as typeof fetch;
 
     try {
       await client._doRequest(
@@ -796,11 +796,11 @@ describe("LlmClient._doRequest", () => {
         { model: "test" },
         abortController.signal,
       );
-    } catch (e) {
+    } catch (e: any) {
       // Expected to fail
     }
 
-    expect(capturedSignal).toBe(abortController.signal);
+    expect(capturedSignal!).toBe(abortController.signal);
   });
 });
 
@@ -818,7 +818,7 @@ describe("LlmClient.ping", () => {
   it("returns undefined on successful health check", async () => {
     const client = new LlmClient({ chatTimeoutSecs: 30, maxRetries: 3, baseUrl: "http://test.com" });
 
-    globalThis.fetch = async () => ({ ok: true });
+    globalThis.fetch = (async () => ({ ok: true })) as unknown as typeof fetch;
 
     const result = await client.ping();
     expect(result).toBeUndefined();
@@ -827,7 +827,7 @@ describe("LlmClient.ping", () => {
   it("throws LlmError.Api on non-OK health check", async () => {
     const client = new LlmClient({ chatTimeoutSecs: 30, maxRetries: 3, baseUrl: "http://test.com" });
 
-    globalThis.fetch = async () => ({ ok: false, status: 503 });
+    globalThis.fetch = (async () => ({ ok: false, status: 503 })) as unknown as typeof fetch;
 
     await expect(client.ping()).rejects.toThrow(/HTTP 503/);
   });
@@ -835,9 +835,9 @@ describe("LlmClient.ping", () => {
   it("throws LlmError.Http on network error", async () => {
     const client = new LlmClient({ chatTimeoutSecs: 30, maxRetries: 3, baseUrl: "http://test.com" });
 
-    globalThis.fetch = async () => {
+    globalThis.fetch = (async () => {
       throw new Error("ECONNREFUSED");
-    };
+    }) as unknown as typeof fetch;
 
     await expect(client.ping()).rejects.toThrow(/ECONNREFUSED/);
   });
@@ -845,9 +845,9 @@ describe("LlmClient.ping", () => {
   it("re-throws LlmError without wrapping", async () => {
     const client = new LlmClient({ chatTimeoutSecs: 30, maxRetries: 3, baseUrl: "http://test.com" });
 
-    globalThis.fetch = async () => {
+    globalThis.fetch = (async () => {
       throw LlmError.Api("already typed");
-    };
+    }) as unknown as typeof fetch;
 
     await expect(client.ping()).rejects.toThrow(/already typed/);
   });
@@ -872,7 +872,7 @@ describe("LlmClient.chatStream", () => {
     }
 
     expect(events).toHaveLength(2);
-    expect(events[0].content).toBe("Hello");
+    expect(events[0]!.content).toBe("Hello");
   });
 
   it("passes tools to chatStreamWithModelConfig", async () => {
@@ -900,32 +900,32 @@ describe("LlmClient.chatStream", () => {
       }
     } catch {}
 
-    expect(capturedTools).toBe(tools);
+    expect(capturedTools!).toBe(tools);
   });
 });
 
 describe("LlmClient.chatStreamCancellable cancel token variations", () => {
-  function makeMsg(role, content) {
+  function makeMsg(role: string, content: string) {
     return { role, content, toJSON: () => ({ role, content }) };
   }
 
   function setupClient() {
     const client = new LlmClient({ chatTimeoutSecs: 30, maxRetries: 3, baseUrl: "http://test.com" });
     // Override _doRequest to return a mock SSE response instead of making real HTTP calls
-    client._doRequest = async (url, apiKey, request, signal) => {
+    client._doRequest = async (url: string, apiKey: string | null, request: Record<string, unknown>, signal: AbortSignal | null): Promise<Response> => {
       // If signal is already aborted, simulate a cancelled request
       if (signal?.aborted) {
         throw new Error("request was cancelled");
       }
       return {
         headers: new Map([["content-type", "text/event-stream"]]),
-        get: (name) => "text/event-stream",
+        get: (name: string) => "text/event-stream",
         body: {
           getReader: () => {
             let done = false;
             return {
               read: async () => {
-                if (done) return { done: true, value: undefined };
+                if (done) return { done: true, value: undefined as any };
                 done = true;
                 return {
                   done: false,
@@ -935,10 +935,10 @@ describe("LlmClient.chatStreamCancellable cancel token variations", () => {
                 };
               },
               releaseLock: () => {},
-            };
+            } as any;
           },
         },
-      };
+      } as unknown as Response;
     };
     return client;
   }
@@ -960,7 +960,7 @@ describe("LlmClient.chatStreamCancellable cancel token variations", () => {
     }
 
     expect(events).toHaveLength(1);
-    expect(events[0].content).toBe("Hello");
+    expect(events[0]!.content).toBe("Hello");
   });
 
   it("handles cancelToken with signal property", async () => {
@@ -980,7 +980,7 @@ describe("LlmClient.chatStreamCancellable cancel token variations", () => {
     }
 
     expect(events).toHaveLength(1);
-    expect(events[0].content).toBe("Hello");
+    expect(events[0]!.content).toBe("Hello");
   });
 
   it("handles already aborted cancelToken", async () => {
@@ -1002,7 +1002,7 @@ describe("LlmClient.chatStreamCancellable cancel token variations", () => {
       for await (const event of gen) {
         events.push(event);
       }
-    } catch (e) {
+    } catch (e: any) {
       threw = true;
       expect(e.message).toMatch(/cancelled/i);
     }
@@ -1025,23 +1025,23 @@ describe("LlmClient.chatStreamCancellable cancel token variations", () => {
     }
 
     expect(events).toHaveLength(1);
-    expect(events[0].content).toBe("Hello");
+    expect(events[0]!.content).toBe("Hello");
   });
 
   it("handles cancelToken with addEventListener", async () => {
     const client = setupClient();
 
     // Create a custom token with addEventListener
-    const listeners = [];
+    const listeners: any[] = [];
     const customToken = {
-      addEventListener: (event, cb, opts) => {
+      addEventListener: (event: any, cb: any, opts: any) => {
         listeners.push({ event, cb, opts });
       },
-      removeEventListener: (event, cb) => {
+      removeEventListener: (event: any, cb: any) => {
         const idx = listeners.findIndex(l => l.cb === cb);
         if (idx !== -1) listeners.splice(idx, 1);
       },
-    };
+    } as unknown as AbortSignal;
 
     const gen = client.chatStreamCancellable(
       [makeMsg("user", "Hi")],
@@ -1056,7 +1056,7 @@ describe("LlmClient.chatStreamCancellable cancel token variations", () => {
     }
 
     expect(events).toHaveLength(1);
-    expect(events[0].content).toBe("Hello");
+    expect(events[0]!.content).toBe("Hello");
   });
 });
 
@@ -1066,19 +1066,19 @@ describe("LlmClient._processSSE edge cases", () => {
 
     const mockResponse = {
       headers: new Map([["content-type", "application/json"]]),
-      get: (name) => "application/json",
+      get: (name: string) => "application/json",
       json: async () => ({
         choices: [{ delta: { content: "Hello" } }],
       }),
     };
 
     const events = [];
-    for await (const event of client._processSSE(mockResponse)) {
+    for await (const event of client._processSSE(mockResponse as unknown as Response)) {
       events.push(event);
     }
 
     expect(events).toHaveLength(1);
-    expect(events[0].content).toBe("Hello");
+    expect(events[0]!.content).toBe("Hello");
   });
 
   it("throws on non-JSON non-SSE response", async () => {
@@ -1086,16 +1086,16 @@ describe("LlmClient._processSSE edge cases", () => {
 
     const mockResponse = {
       headers: new Map([["content-type", "application/xml"]]),
-      get: (name) => "application/xml",
+      get: (name: string) => "application/xml",
       json: async () => { throw new Error("not json"); },
     };
 
     try {
-      for await (const _ of client._processSSE(mockResponse)) {
+      for await (const _ of client._processSSE(mockResponse as unknown as Response)) {
       }
       // Should have thrown
       expect(true).toBe(false);
-    } catch (e) {
+    } catch (e: any) {
       expect(e.message).toMatch(/Unexpected Content-Type/);
     }
   });
@@ -1118,7 +1118,7 @@ describe("LlmClient._processSSE edge cases", () => {
               return { done: false, value: encoder.encode('data: {"choices":[{"delta":{"content":"Hello"}}\n\n') };
             }
             // EOF — no more data, jsonBuffer should be flushed
-            return { done: true, value: undefined };
+            return { done: true, value: undefined as any };
           },
           releaseLock: () => {},
         }),
@@ -1126,7 +1126,7 @@ describe("LlmClient._processSSE edge cases", () => {
     };
 
     const events = [];
-    for await (const event of client._processSSE(mockResponse)) {
+    for await (const event of client._processSSE(mockResponse as unknown as Response)) {
       events.push(event);
     }
 
@@ -1149,7 +1149,7 @@ describe("LlmClient._processSSE edge cases", () => {
             if (readCount === 1) {
               return { done: false, value: encoder.encode(': hello\n\ndata: {"choices":[{"delta":{"content":"Hi"}}]}\n\n') };
             }
-            return { done: true, value: undefined };
+            return { done: true, value: undefined as any };
           },
           releaseLock: () => {},
         }),
@@ -1157,12 +1157,12 @@ describe("LlmClient._processSSE edge cases", () => {
     };
 
     const events = [];
-    for await (const event of client._processSSE(mockResponse)) {
+    for await (const event of client._processSSE(mockResponse as unknown as Response)) {
       events.push(event);
     }
 
     expect(events).toHaveLength(1);
-    expect(events[0].content).toBe("Hi");
+    expect(events[0]!.content).toBe("Hi");
   });
 
   it("handles SSE event type filtering", async () => {
@@ -1181,7 +1181,7 @@ describe("LlmClient._processSSE edge cases", () => {
             if (readCount === 2) {
               return { done: false, value: encoder.encode('event: message\ndata: {"choices":[{"delta":{"content":"Real"}}]}\n\n') };
             }
-            return { done: true, value: undefined };
+            return { done: true, value: undefined as any };
           },
           releaseLock: () => {},
         }),
@@ -1189,12 +1189,12 @@ describe("LlmClient._processSSE edge cases", () => {
     };
 
     const events = [];
-    for await (const event of client._processSSE(mockResponse)) {
+    for await (const event of client._processSSE(mockResponse as unknown as Response)) {
       events.push(event);
     }
 
     expect(events).toHaveLength(1);
-    expect(events[0].content).toBe("Real");
+    expect(events[0]!.content).toBe("Real");
   });
 
   it("handles data: [DONE] signal with jsonBuffer flush", async () => {
@@ -1214,7 +1214,7 @@ describe("LlmClient._processSSE edge cases", () => {
             if (readCount === 2) {
               return { done: false, value: encoder.encode('l"}}]}\ndata: [DONE]\n\n') };
             }
-            return { done: true, value: undefined };
+            return { done: true, value: undefined as any };
           },
           releaseLock: () => {},
         }),
@@ -1222,12 +1222,12 @@ describe("LlmClient._processSSE edge cases", () => {
     };
 
     const events = [];
-    for await (const event of client._processSSE(mockResponse)) {
+    for await (const event of client._processSSE(mockResponse as unknown as Response)) {
       events.push(event);
     }
 
     expect(events).toHaveLength(1);
-    expect(events[0].content).toBe("Partial");
+    expect(events[0]!.content).toBe("Partial");
   });
 
   it("handles large malformed JSON buffer with reset", async () => {
@@ -1244,7 +1244,7 @@ describe("LlmClient._processSSE edge cases", () => {
               // Send garbage that won't parse
               return { done: false, value: encoder.encode('data: ' + 'x'.repeat(600000)) };
             }
-            return { done: true, value: undefined };
+            return { done: true, value: undefined as any };
           },
           releaseLock: () => {},
         }),
@@ -1253,7 +1253,7 @@ describe("LlmClient._processSSE edge cases", () => {
 
     // Should not throw — just log warning and reset
     const events = [];
-    for await (const event of client._processSSE(mockResponse)) {
+    for await (const event of client._processSSE(mockResponse as unknown as Response)) {
       events.push(event);
     }
 
@@ -1273,7 +1273,7 @@ describe("LlmClient._processSSE edge cases", () => {
             if (readCount === 1) {
               return { done: false, value: encoder.encode('data: {"choices":[{"delta":{"content":"Hello"}}]}\n\n') };
             }
-            return { done: true, value: undefined };
+            return { done: true, value: undefined as any };
           },
           releaseLock: () => {},
         }),
@@ -1281,11 +1281,11 @@ describe("LlmClient._processSSE edge cases", () => {
     };
 
     const events = [];
-    for await (const event of client._processSSE(mockResponse)) {
+    for await (const event of client._processSSE(mockResponse as unknown as Response)) {
       events.push(event);
     }
 
     expect(events).toHaveLength(1);
-    expect(events[0].content).toBe("Hello");
+    expect(events[0]!.content).toBe("Hello");
   });
 });

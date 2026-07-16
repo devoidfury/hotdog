@@ -50,9 +50,9 @@ interface Agent {
 /**
  * Generate a key from the prompt if one is not provided.
  */
-function ensureKey(question: Question, index: number): string | null {
+function ensureKey(question: Question, index: number): string {
   // If key was explicitly provided (even as empty string), use it as-is.
-  if ("key" in question) return question.key as string | null;
+  if ("key" in question && question.key !== undefined) return question.key;
   // Derive a key from the prompt text
   const prompt = question.prompt || question.question || "";
   const slug = prompt
@@ -117,7 +117,10 @@ export class QuestionTool {
   callDisplay(input: string | Record<string, unknown> | null): string {
     return defaultCallDisplay(
       input,
-      (args: Record<string, unknown>) => `asking ${args.questions?.length || 0} question(s)...`,
+      (args: Record<string, unknown>) => {
+        const qs = args.questions as Question[] | undefined;
+        return `asking ${Array.isArray(qs) ? qs.length : 0} question(s)...`;
+      },
       { fallback: "asking questions...", returnRawOnParseError: false },
     );
   }
@@ -137,6 +140,7 @@ export class QuestionTool {
     // Normalize questions: ensure keys, handle field aliases
     for (let i = 0; i < questions.length; i++) {
       const q = questions[i];
+      if (!q) continue;
 
       // Ensure key
       q.key = ensureKey(q, i);

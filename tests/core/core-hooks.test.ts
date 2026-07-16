@@ -315,12 +315,12 @@ describe("runHookPipeline()", () => {
       data.count = (data.count || 0) + 1;
     });
     const { data } = await hooks.runHookPipeline("test:hook", { count: 0 });
-    expect(data.count).toBe(2);
+    expect((data as any).count).toBe(2);
   });
 
   it("stops on first matching result", async () => {
     const hooks = createHooks();
-    const calls = [];
+    const calls: number[] = [];
     hooks.on("test", () => {
       calls.push(1);
       return { action: "continue" };
@@ -337,7 +337,7 @@ describe("runHookPipeline()", () => {
       "test",
       {},
       {
-        shouldStop: (r) => r.action === "handled",
+        shouldStop: (r: any) => r.action === "handled",
       },
     );
     expect(calls).toEqual([1, 2]);
@@ -346,7 +346,7 @@ describe("runHookPipeline()", () => {
 
   it("does not stop when shouldStop returns false", async () => {
     const hooks = createHooks();
-    const calls = [];
+    const calls: number[] = [];
     hooks.on("test", () => {
       calls.push(1);
       return { action: "continue" };
@@ -359,7 +359,7 @@ describe("runHookPipeline()", () => {
       "test",
       {},
       {
-        shouldStop: (r) => r.action === "handled",
+        shouldStop: (r: any) => r.action === "handled",
       },
     );
     expect(calls).toEqual([1, 2]);
@@ -409,7 +409,7 @@ describe("runHookPipeline()", () => {
       return { async: true };
     });
     const { results } = await hooks.runHookPipeline("test", {});
-    expect(results[0].result.async).toBe(true);
+    expect((results[0]!.result as any).async).toBe(true);
   });
 
   it("shouldStop with null return value — does not stop", async () => {
@@ -445,7 +445,7 @@ describe("runHookPipeline()", () => {
     hooks.on("test", () => "value");
     const { results } = await hooks.runHookPipeline("test", {});
     expect(results).toHaveLength(1);
-    expect(results[0].result).toBe("value");
+    expect(results[0]!.result).toBe("value");
   });
 });
 
@@ -479,17 +479,17 @@ describe("HookSystem — handler ID uniqueness", () => {
     const hooks = new HookSystem();
     hooks.on("test", () => {});
     hooks.on("test", () => {});
-    const handlers = hooks.hooksMap.get("test");
-    expect(handlers[0].id).not.toBe(handlers[1].id);
+    const handlers = hooks.hooksMap.get("test")!;
+    expect(handlers[0]!.id).not.toBe(handlers[1]!.id);
   });
 
   it("handler counter increments across different hooks", () => {
     const hooks = new HookSystem();
     hooks.on("hook-a", () => {});
     hooks.on("hook-b", () => {});
-    const handlersA = hooks.hooksMap.get("hook-a");
-    const handlersB = hooks.hooksMap.get("hook-b");
-    expect(handlersB[0].id).toBeGreaterThan(handlersA[0].id);
+    const handlersA = hooks.hooksMap.get("hook-a")!;
+    const handlersB = hooks.hooksMap.get("hook-b")!;
+    expect(handlersB[0]!.id).toBeGreaterThan(handlersA[0]!.id);
   });
 });
 
@@ -499,15 +499,15 @@ describe("HookSystem — source tracking", () => {
   it("tracks source when provided", () => {
     const hooks = new HookSystem();
     hooks.on("test", () => {}, "my-extension");
-    const handlers = hooks.hooksMap.get("test");
-    expect(handlers[0].source).toBe("my-extension");
+    const handlers = hooks.hooksMap.get("test")!;
+    expect(handlers[0]!.source).toBe("my-extension");
   });
 
   it("source is undefined when not provided", () => {
     const hooks = new HookSystem();
     hooks.on("test", () => {});
-    const handlers = hooks.hooksMap.get("test");
-    expect(handlers[0].source).toBeUndefined();
+    const handlers = hooks.hooksMap.get("test")!;
+    expect(handlers[0]!.source).toBeUndefined();
   });
 
   it("source is tracked in pipeline results", async () => {
@@ -515,22 +515,22 @@ describe("HookSystem — source tracking", () => {
     hooks.on("test", () => ({ from: "ext1" }), "extension-1");
     hooks.on("test", () => ({ from: "ext2" }), "extension-2");
     const { results } = await hooks.runHookPipeline("test", {});
-    expect(results[0].source).toBe("extension-1");
-    expect(results[1].source).toBe("extension-2");
+    expect(results[0]!.source).toBe("extension-1");
+    expect(results[1]!.source).toBe("extension-2");
   });
 
   it("source is null in results when not provided", async () => {
     const hooks = new HookSystem();
     hooks.on("test", () => ({ value: 1 }));
     const { results } = await hooks.runHookPipeline("test", {});
-    expect(results[0].source).toBeNull();
+    expect(results[0]!.source).toBeNull();
   });
 });
 
 // ── trace mode ────────────────────────────────────────────────────────────
 
 describe("trace mode", () => {
-  let origStderr;
+  let origStderr: typeof process.stderr.write;
 
   beforeEach(() => {
     origStderr = process.stderr.write;
@@ -538,7 +538,7 @@ describe("trace mode", () => {
   });
 
   afterEach(() => {
-    process.stderr.write = origStderr;
+    process.stderr.write = origStderr!;
   });
 
   it("enables boolean trace", () => {
@@ -591,7 +591,7 @@ describe("trace mode", () => {
       "test",
       {},
       {
-        shouldStop: (r) => r.action === "handled",
+        shouldStop: (r: any) => r.action === "handled",
       },
     );
   });
@@ -632,7 +632,7 @@ describe("trace mode", () => {
     hooks.trace = true;
     hooks.on("test", () => ({ action: "modify", input: {} }));
     const { results } = await hooks.runHookPipeline("test", {});
-    expect(results[0].result.action).toBe("modify");
+    expect((results[0]!.result as any).action).toBe("modify");
   });
 
   it("async notify with trace does not throw", async () => {
@@ -651,8 +651,8 @@ describe("trace mode", () => {
 
   it("respects enabledHooks filter in trace", () => {
     const hooks = createHooks();
-    hooks.trace = true;
-    hooks.traceOptions = {
+    hooks.trace = {
+      enabled: true,
       enabledHooks: ["filtered:hook"],
       disabledSources: [],
     };

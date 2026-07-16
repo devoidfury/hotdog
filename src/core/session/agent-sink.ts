@@ -1,7 +1,7 @@
 // AgentSink — bridges Agent output to the Session Core.
 // Two modes: normal agent (all events forwarded) and task agent (filtered).
 
-import { OUTPUT_EVENT, OutputEvent } from "../context/output.ts";
+import { OUTPUT_EVENT, OutputEvent, OutputEventType } from "../context/output.ts";
 
 export interface AgentSinkOptions {
   parentSink?: { emit: (event: OutputEvent) => void } | null;

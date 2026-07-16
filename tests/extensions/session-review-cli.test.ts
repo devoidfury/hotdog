@@ -4,6 +4,7 @@ import { mkdirSync, rmSync, writeFileSync, readFileSync, readdirSync, mkdtempSyn
 import { join } from "node:path";
 import { homedir, tmpdir } from "node:os";
 import { createMockCore } from "../helpers.ts";
+import type { CoreContext } from "../../src/core/extensions/types.ts";
 
 describe("Session Review CLI - listSessions", () => {
   const sessionsDir = join(homedir(), ".cache", "hotdog", "sessions");
@@ -33,7 +34,7 @@ describe("Session Review CLI - listSessions", () => {
       "../../src/extensions/ui-session-review-cli/index.ts"
     );
     const ext = create(core);
-    await ext.hooks[HOOKS.CLI_SUBCOMMANDS_REGISTER](core.cliSubcommandRegistry);
+    await ext.hooks![HOOKS.CLI_SUBCOMMANDS_REGISTER]!(core.cliSubcommandRegistry);
 
     const def = core.cliSubcommandRegistry.get("review");
     const cli = { sessionId: null, wantsJson: true, toolIndex: false, colors: false, theme: "dark" };
@@ -43,11 +44,11 @@ describe("Session Review CLI - listSessions", () => {
     console.log = (msg) => { capturedOutput += msg + "\n"; };
 
     try {
-      const exitCode = await def.handler(cli, core);
+      const exitCode = await def!.handler!(cli, core);
       expect(exitCode).toBe(0);
       const parsed = JSON.parse(capturedOutput.trim());
       expect(Array.isArray(parsed)).toBe(true);
-      const found = parsed.find((s) => s.id === TEST_SESSION_ID);
+      const found = parsed.find((s: any) => s.id === TEST_SESSION_ID);
       expect(found).toBeDefined();
       expect(found.entry_count).toBe(2);
     } finally {
@@ -69,7 +70,7 @@ describe("Session Review CLI - listSessions", () => {
       "../../src/extensions/ui-session-review-cli/index.ts"
     );
     const ext = create(core);
-    await ext.hooks[HOOKS.CLI_SUBCOMMANDS_REGISTER](core.cliSubcommandRegistry);
+    await ext.hooks![HOOKS.CLI_SUBCOMMANDS_REGISTER]!(core.cliSubcommandRegistry);
 
     const def = core.cliSubcommandRegistry.get("review");
     const cli = { sessionId: null, wantsJson: false, toolIndex: false, colors: false, theme: "dark" };
@@ -79,7 +80,7 @@ describe("Session Review CLI - listSessions", () => {
     console.log = (msg) => { capturedOutput += msg + "\n"; };
 
     try {
-      const exitCode = await def.handler(cli, core);
+      const exitCode = await def!.handler!(cli, core);
       expect(exitCode).toBe(0);
       expect(capturedOutput).toContain("=== Sessions ===");
       expect(capturedOutput).toContain(TEST_SESSION_ID);
@@ -108,7 +109,7 @@ describe("Session Review CLI - listSessions", () => {
       "../../src/extensions/ui-session-review-cli/index.ts"
     );
     const ext = create(core);
-    await ext.hooks[HOOKS.CLI_SUBCOMMANDS_REGISTER](core.cliSubcommandRegistry);
+    await ext.hooks![HOOKS.CLI_SUBCOMMANDS_REGISTER]!(core.cliSubcommandRegistry);
 
     const def = core.cliSubcommandRegistry.get("review");
     const cli = {
@@ -126,16 +127,16 @@ describe("Session Review CLI - listSessions", () => {
     };
 
     try {
-      const exitCode = await def.handler(cli, core);
+      const exitCode = await def!.handler!(cli, core);
       expect(exitCode).toBe(0);
 
       const parsed = JSON.parse(capturedOutput.trim());
       expect(Array.isArray(parsed)).toBe(true);
       // The single-entry session should not be in the list
-      const singleEntry = parsed.find((s) => s.id === singleEntryId);
+      const singleEntry = parsed.find((s: any) => s.id === singleEntryId);
       expect(singleEntry).toBeUndefined();
       // But the 2-entry session should be
-      const found = parsed.find((s) => s.id === TEST_SESSION_ID);
+      const found = parsed.find((s: any) => s.id === TEST_SESSION_ID);
       expect(found).toBeDefined();
     } finally {
       console.log = originalLog;
@@ -166,7 +167,7 @@ describe("Session Review CLI - reviewSession", () => {
       "../../src/extensions/ui-session-review-cli/index.ts"
     );
     const ext = create(core);
-    await ext.hooks[HOOKS.CLI_SUBCOMMANDS_REGISTER](core.cliSubcommandRegistry);
+    await ext.hooks![HOOKS.CLI_SUBCOMMANDS_REGISTER]!(core.cliSubcommandRegistry);
 
     const def = core.cliSubcommandRegistry.get("review");
     const cli = {
@@ -184,7 +185,7 @@ describe("Session Review CLI - reviewSession", () => {
     };
 
     try {
-      const exitCode = await def.handler(cli, core);
+      const exitCode = await def!.handler!(cli, core);
       expect(exitCode).toBe(1);
       expect(capturedOutput.trim()).toBe("{}");
     } finally {
@@ -198,7 +199,7 @@ describe("Session Review CLI - reviewSession", () => {
       "../../src/extensions/ui-session-review-cli/index.ts"
     );
     const ext = create(core);
-    await ext.hooks[HOOKS.CLI_SUBCOMMANDS_REGISTER](core.cliSubcommandRegistry);
+    await ext.hooks![HOOKS.CLI_SUBCOMMANDS_REGISTER]!(core.cliSubcommandRegistry);
 
     const def = core.cliSubcommandRegistry.get("review");
     const cli = {
@@ -216,7 +217,7 @@ describe("Session Review CLI - reviewSession", () => {
     };
 
     try {
-      const exitCode = await def.handler(cli, core);
+      const exitCode = await def!.handler!(cli, core);
       expect(exitCode).toBe(1);
       expect(capturedOutput).toContain("not found or empty");
     } finally {
@@ -238,7 +239,7 @@ describe("Session Review CLI - reviewSession", () => {
       "../../src/extensions/ui-session-review-cli/index.ts"
     );
     const ext = create(core);
-    await ext.hooks[HOOKS.CLI_SUBCOMMANDS_REGISTER](core.cliSubcommandRegistry);
+    await ext.hooks![HOOKS.CLI_SUBCOMMANDS_REGISTER]!(core.cliSubcommandRegistry);
 
     const def = core.cliSubcommandRegistry.get("review");
     const cli = {
@@ -256,7 +257,7 @@ describe("Session Review CLI - reviewSession", () => {
     };
 
     try {
-      const exitCode = await def.handler(cli, core);
+      const exitCode = await def!.handler!(cli, core);
       expect(exitCode).toBe(0);
 
       const parsed = JSON.parse(capturedOutput.trim());
@@ -287,7 +288,7 @@ describe("Session Review CLI - reviewSession", () => {
       "../../src/extensions/ui-session-review-cli/index.ts"
     );
     const ext = create(core);
-    await ext.hooks[HOOKS.CLI_SUBCOMMANDS_REGISTER](core.cliSubcommandRegistry);
+    await ext.hooks![HOOKS.CLI_SUBCOMMANDS_REGISTER]!(core.cliSubcommandRegistry);
 
     const def = core.cliSubcommandRegistry.get("review");
     const cli = {
@@ -305,7 +306,7 @@ describe("Session Review CLI - reviewSession", () => {
     };
 
     try {
-      const exitCode = await def.handler(cli, core);
+      const exitCode = await def!.handler!(cli, core);
       expect(exitCode).toBe(0);
       expect(capturedOutput).toContain("=== Session:");
       expect(capturedOutput).toContain("[SYSTEM]");
@@ -341,7 +342,7 @@ describe("Session Review CLI - reviewSession", () => {
       "../../src/extensions/ui-session-review-cli/index.ts"
     );
     const ext = create(core);
-    await ext.hooks[HOOKS.CLI_SUBCOMMANDS_REGISTER](core.cliSubcommandRegistry);
+    await ext.hooks![HOOKS.CLI_SUBCOMMANDS_REGISTER]!(core.cliSubcommandRegistry);
 
     const def = core.cliSubcommandRegistry.get("review");
     const cli = {
@@ -359,7 +360,7 @@ describe("Session Review CLI - reviewSession", () => {
     };
 
     try {
-      const exitCode = await def.handler(cli, core);
+      const exitCode = await def!.handler!(cli, core);
       expect(exitCode).toBe(0);
 
       const parsed = JSON.parse(capturedOutput.trim());
@@ -388,7 +389,7 @@ describe("Session Review CLI - reviewSession", () => {
       "../../src/extensions/ui-session-review-cli/index.ts"
     );
     const ext = create(core);
-    await ext.hooks[HOOKS.CLI_SUBCOMMANDS_REGISTER](core.cliSubcommandRegistry);
+    await ext.hooks![HOOKS.CLI_SUBCOMMANDS_REGISTER]!(core.cliSubcommandRegistry);
 
     const def = core.cliSubcommandRegistry.get("review");
     const cli = {
@@ -406,7 +407,7 @@ describe("Session Review CLI - reviewSession", () => {
     };
 
     try {
-      const exitCode = await def.handler(cli, core);
+      const exitCode = await def!.handler!(cli, core);
       expect(exitCode).toBe(0);
       expect(capturedOutput).toContain("=== Tool Usage ===");
       expect(capturedOutput).toContain("bash: 1x");
@@ -429,7 +430,7 @@ describe("Session Review CLI - reviewSession", () => {
       "../../src/extensions/ui-session-review-cli/index.ts"
     );
     const ext = create(core);
-    await ext.hooks[HOOKS.CLI_SUBCOMMANDS_REGISTER](core.cliSubcommandRegistry);
+    await ext.hooks![HOOKS.CLI_SUBCOMMANDS_REGISTER]!(core.cliSubcommandRegistry);
 
     const def = core.cliSubcommandRegistry.get("review");
     const cli = {
@@ -447,7 +448,7 @@ describe("Session Review CLI - reviewSession", () => {
     };
 
     try {
-      const exitCode = await def.handler(cli, core);
+      const exitCode = await def!.handler!(cli, core);
       expect(exitCode).toBe(0);
       expect(capturedOutput).toContain("No tools used");
     } finally {
@@ -469,7 +470,7 @@ describe("Session Review CLI - reviewSession", () => {
       "../../src/extensions/ui-session-review-cli/index.ts"
     );
     const ext = create(core);
-    await ext.hooks[HOOKS.CLI_SUBCOMMANDS_REGISTER](core.cliSubcommandRegistry);
+    await ext.hooks![HOOKS.CLI_SUBCOMMANDS_REGISTER]!(core.cliSubcommandRegistry);
 
     const def = core.cliSubcommandRegistry.get("review");
     const cli = {
@@ -487,7 +488,7 @@ describe("Session Review CLI - reviewSession", () => {
     };
 
     try {
-      const exitCode = await def.handler(cli, core);
+      const exitCode = await def!.handler!(cli, core);
       expect(exitCode).toBe(0);
 
       const parsed = JSON.parse(capturedOutput.trim());
@@ -530,7 +531,7 @@ describe("Session Review CLI - toolIndex without sessionId", () => {
       "../../src/extensions/ui-session-review-cli/index.ts"
     );
     const ext = create(core);
-    await ext.hooks[HOOKS.CLI_SUBCOMMANDS_REGISTER](core.cliSubcommandRegistry);
+    await ext.hooks![HOOKS.CLI_SUBCOMMANDS_REGISTER]!(core.cliSubcommandRegistry);
 
     const def = core.cliSubcommandRegistry.get("review");
     const cli = {
@@ -548,7 +549,7 @@ describe("Session Review CLI - toolIndex without sessionId", () => {
     };
 
     try {
-      const exitCode = await def.handler(cli, core);
+      const exitCode = await def!.handler!(cli, core);
       expect(exitCode).toBe(0);
       const parsed = JSON.parse(capturedOutput.trim());
       expect(parsed).toHaveProperty("bash");
@@ -567,9 +568,9 @@ describe("Session Review CLI - registers review tool", () => {
     const ext = create(core);
 
     expect(ext).not.toBeNull();
-    expect(ext.hooks[HOOKS.TOOLS_REGISTER]).toBeDefined();
+    expect(ext.hooks![HOOKS.TOOLS_REGISTER]).toBeDefined();
 
-    await ext.hooks[HOOKS.TOOLS_REGISTER](core.toolRegistry);
+    await ext.hooks![HOOKS.TOOLS_REGISTER]!(core.toolRegistry);
 
     expect(core.toolRegistry.has("review")).toBe(true);
   });

@@ -10,6 +10,7 @@ import {
   ToolResult,
   defaultCallDisplay,
 } from "../../core/extensions/tool-utils.ts";
+import type { ToolDef } from "../../core/extensions/tool-registry.ts";
 import { getVisibleWorkerProfiles } from "../../core/config/profiles.ts";
 
 // ── Base class for subagent tools ──────────────────────────────────────────
@@ -74,6 +75,20 @@ export class SubagentTool {
   }
 
   /**
+   * Execute the tool. Override in subclasses.
+   */
+  async execute(_input: string | Record<string, unknown> | null): Promise<ToolResult> {
+    return ToolResult.err("Not implemented");
+  }
+
+  /**
+   * Get the tool definition. Override in subclasses.
+   */
+  toToolDef(): ToolDef | Promise<ToolDef> | null {
+    return null;
+  }
+
+  /**
    * Default callDisplay: parse args and show tool name with task_id.
    * Override in subclasses for custom display.
    */
@@ -91,8 +106,8 @@ export class SubagentTool {
 export class DelegateTaskTool extends SubagentTool {
   static readonly TOOL_NAME = "delegate_task";
 
-  async execute(input: string | Record<string, unknown> | null): Promise<ToolResult> {
-    const args = parseToolArgs(input);
+  override async execute(input: string | Record<string, unknown> | null): Promise<ToolResult> {
+    const args = parseToolArgs(input ?? {});
     if (!args.task_id || !args.description) {
       return ToolResult.err("Error: task_id and description are required");
     }
@@ -116,40 +131,46 @@ export class DelegateTaskTool extends SubagentTool {
     });
   }
 
-  toToolDef() {
-    const config = this._taskManager?.config;
-    const visibleProfiles = config ? getVisibleWorkerProfiles(config) : [];
-    const profileList =
-      visibleProfiles.length > 0
-        ? `\n\nAvailable worker profiles (visible-worker: true): ${visibleProfiles.join(", ")}.`
-        : "";
+  override toToolDef() {
+    const config = this._taskManager?._config;
+    const profilesPath = (config?.profilesPath as string) || null;
+    const profileListPromise = profilesPath
+      ? getVisibleWorkerProfiles(profilesPath).then((profiles) => {
+          if (profiles.length > 0) {
+            return `\n\nAvailable worker profiles (visible-worker: true): ${profiles.join(", ")}.`;
+          }
+          return "";
+        })
+      : Promise.resolve("");
 
-    return toolDef(
-      "delegate_task",
-      `Spawn a background task agent to perform work. The task runs concurrently and its result is appended to the manager\'s context when complete. IMPORTANT: Task agents are expensive — only delegate substantial autonomous work (build features, fix bugs, implement plans, audit code). Do NOT delegate trivial operations like creating a single file, running a command, or reading a file — do those directly with your tools. Batch related changes into a single task.${profileList}`,
-      {
-        properties: {
-          task_id: param("string", "Unique identifier for this task"),
-          description: param(
-            "string",
-            "Description of what the task agent should do",
-          ),
-          worker_model: param(
-            "string",
-            "Optional model name for the worker agent (e.g. 'ai365/qwen3.5-4b'). If omitted, uses the manager's model.",
-          ),
-          profile: param(
-            "string",
-            `Optional profile name to customize the worker agent\'s behavior (role, tools, model). Defaults to 'task-default'.${visibleProfiles.length > 0 ? ` Available profiles: ${visibleProfiles.join(", ")}.` : ""}`,
-          ),
+    return profileListPromise.then((profileList) =>
+      toolDef(
+        "delegate_task",
+        `Spawn a background task agent to perform work. The task runs concurrently and its result is appended to the manager\'s context when complete. IMPORTANT: Task agents are expensive — only delegate substantial autonomous work (build features, fix bugs, implement plans, audit code). Do NOT delegate trivial operations like creating a single file, running a command, or reading a file — do those directly with your tools. Batch related changes into a single task.${profileList}`,
+        {
+          properties: {
+            task_id: param("string", "Unique identifier for this task"),
+            description: param(
+              "string",
+              "Description of what the task agent should do",
+            ),
+            worker_model: param(
+              "string",
+              "Optional model name for the worker agent (e.g. 'ai365/qwen3.5-4b'). If omitted, uses the manager's model.",
+            ),
+            profile: param(
+              "string",
+              `Optional profile name to customize the worker agent\'s behavior (role, tools, model). Defaults to 'task-default'.${profileList}`,
+            ),
+          },
+          required: ["task_id", "description"],
         },
-        required: ["task_id", "description"],
-      },
+      ),
     );
   }
 
-  callDisplay(input: string | Record<string, unknown> | null): string {
-    const args = parseToolArgs(input);
+  override callDisplay(input: string | Record<string, unknown> | null): string {
+    const args = parseToolArgs(input ?? {});
     const display = ((args.description as string) || "...").slice(0, 40);
     return `delegate_task(${args.task_id || "?"} -> ${display})`;
   }
@@ -161,8 +182,8 @@ export class DelegateTaskTool extends SubagentTool {
 export class TaskStatusTool extends SubagentTool {
   static readonly TOOL_NAME = "task_status";
 
-  async execute(input: string | Record<string, unknown> | null): Promise<ToolResult> {
-    const args = parseToolArgs(input);
+  override async execute(input: string | Record<string, unknown> | null): Promise<ToolResult> {
+    const args = parseToolArgs(input ?? {});
     if (!args.task_id) {
       return ToolResult.err("Error: task_id is required");
     }
@@ -181,7 +202,7 @@ export class TaskStatusTool extends SubagentTool {
     });
   }
 
-  toToolDef() {
+  override toToolDef() {
     return toolDef(
       "task_status",
       "[DO NOT USE for polling] Check the status of a specific running task agent. WARNING: Do NOT use this tool to poll for task progress after delegation. Tasks notify you automatically when complete via system messages. Only call this when the user explicitly asks you to check the status of a specific task.",
@@ -194,8 +215,8 @@ export class TaskStatusTool extends SubagentTool {
     );
   }
 
-  callDisplay(input: string | Record<string, unknown> | null): string {
-    const args = parseToolArgs(input);
+  override callDisplay(input: string | Record<string, unknown> | null): string {
+    const args = parseToolArgs(input ?? {});
     return `task_status(${args.task_id || "?"})`;
   }
 }
@@ -206,8 +227,8 @@ export class TaskStatusTool extends SubagentTool {
 export class TaskFollowupTool extends SubagentTool {
   static readonly TOOL_NAME = "task_followup";
 
-  async execute(input: string | Record<string, unknown> | null): Promise<ToolResult> {
-    const args = parseToolArgs(input);
+  override async execute(input: string | Record<string, unknown> | null): Promise<ToolResult> {
+    const args = parseToolArgs(input ?? {});
     if (!args.task_id || !args.message) {
       return ToolResult.err("Error: task_id and message are required");
     }
@@ -229,7 +250,7 @@ export class TaskFollowupTool extends SubagentTool {
     return ToolResult.err(`Failed to send follow-up to task ${args.task_id}`);
   }
 
-  toToolDef() {
+  override toToolDef() {
     return toolDef(
       "task_followup",
       "Send a follow-up message to a running task agent. WARNING: Do NOT use this to check on task progress. Tasks are autonomous and will notify you when complete. Only use this to send additional instructions or clarifications to a running task.",
@@ -243,8 +264,8 @@ export class TaskFollowupTool extends SubagentTool {
     );
   }
 
-  callDisplay(input: string | Record<string, unknown> | null): string {
-    const args = parseToolArgs(input);
+  override callDisplay(input: string | Record<string, unknown> | null): string {
+    const args = parseToolArgs(input ?? {});
     const display = ((args.message as string) || "...").slice(0, 40);
     return `task_followup(${args.task_id || "?"} -> ${display})`;
   }
@@ -256,8 +277,8 @@ export class TaskFollowupTool extends SubagentTool {
 export class TaskInterruptTool extends SubagentTool {
   static readonly TOOL_NAME = "task_interrupt";
 
-  async execute(input: string | Record<string, unknown> | null): Promise<ToolResult> {
-    const args = parseToolArgs(input);
+  override async execute(input: string | Record<string, unknown> | null): Promise<ToolResult> {
+    const args = parseToolArgs(input ?? {});
     if (!args.task_id) {
       return ToolResult.err("Error: task_id is required");
     }
@@ -276,7 +297,7 @@ export class TaskInterruptTool extends SubagentTool {
     return ToolResult.err(`Failed to interrupt task ${args.task_id}`);
   }
 
-  toToolDef() {
+  override toToolDef() {
     return toolDef(
       "task_interrupt",
       "Interrupt (cancel) a running task agent. The task will stop and its status will be set to Cancelled. WARNING: Do NOT use this to check status. Only use this to cancel a task that is no longer needed.",
@@ -289,8 +310,8 @@ export class TaskInterruptTool extends SubagentTool {
     );
   }
 
-  callDisplay(input: string | Record<string, unknown> | null): string {
-    const args = parseToolArgs(input);
+  override callDisplay(input: string | Record<string, unknown> | null): string {
+    const args = parseToolArgs(input ?? {});
     return `task_interrupt(${args.task_id || "?"})`;
   }
 }
@@ -301,8 +322,8 @@ export class TaskInterruptTool extends SubagentTool {
 export class PlanStatusTool extends SubagentTool {
   static readonly TOOL_NAME = "plan_status";
 
-  async execute(input: string | Record<string, unknown> | null): Promise<ToolResult> {
-    const args = parseToolArgs(input);
+  override async execute(input: string | Record<string, unknown> | null): Promise<ToolResult> {
+    const args = parseToolArgs(input ?? {});
 
     const backend = this._ensureBackend();
     if (typeof backend === "string") return ToolResult.err(backend);
@@ -338,7 +359,7 @@ export class PlanStatusTool extends SubagentTool {
     );
   }
 
-  toToolDef() {
+  override toToolDef() {
     return toolDef(
       "plan_status",
       "[DO NOT USE for polling] Check the status of task agents. Shows all active tasks or the status of a specific task. WARNING: Do NOT use this tool to poll for task progress after delegation. Tasks notify you automatically when complete. Only call this when the user explicitly asks you to check status.",
@@ -354,8 +375,8 @@ export class PlanStatusTool extends SubagentTool {
     );
   }
 
-  callDisplay(input: string | Record<string, unknown> | null): string {
-    const args = parseToolArgs(input);
+  override callDisplay(input: string | Record<string, unknown> | null): string {
+    const args = parseToolArgs(input ?? {});
     return `plan_status(task=${args.task_id || "all"})`;
   }
 }
@@ -366,8 +387,8 @@ export class PlanStatusTool extends SubagentTool {
 export class CompleteTaskTool extends SubagentTool {
   static readonly TOOL_NAME = "complete_task";
 
-  async execute(input: string | Record<string, unknown> | null): Promise<ToolResult> {
-    const args = parseToolArgs(input);
+  override async execute(input: string | Record<string, unknown> | null): Promise<ToolResult> {
+    const args = parseToolArgs(input ?? {});
     if (!args.task_id) {
       return ToolResult.err("Error: task_id is required");
     }
@@ -378,7 +399,7 @@ export class CompleteTaskTool extends SubagentTool {
     );
   }
 
-  toToolDef() {
+  override toToolDef() {
     return toolDef(
       "complete_task",
       "Mark a task as complete. The task agent's result is already appended to the manager's context.",
@@ -391,8 +412,8 @@ export class CompleteTaskTool extends SubagentTool {
     );
   }
 
-  callDisplay(input: string | Record<string, unknown> | null): string {
-    const args = parseToolArgs(input);
+  override callDisplay(input: string | Record<string, unknown> | null): string {
+    const args = parseToolArgs(input ?? {});
     return `complete_task(${args.task_id || "?"})`;
   }
 }
@@ -403,8 +424,8 @@ export class CompleteTaskTool extends SubagentTool {
 export class WaitTool extends SubagentTool {
   static readonly TOOL_NAME = "wait";
 
-  async execute(input: string | Record<string, unknown> | null): Promise<ToolResult> {
-    const args = parseToolArgs(input);
+  override async execute(input: string | Record<string, unknown> | null): Promise<ToolResult> {
+    const args = parseToolArgs(input ?? {});
     const message = args.message as string | null;
     const note = message ? ` Note: ${message}` : "";
     return ToolResult.ok(
@@ -414,7 +435,7 @@ export class WaitTool extends SubagentTool {
     });
   }
 
-  toToolDef() {
+  override toToolDef() {
     return toolDef(
       "wait",
       "Signal that you have nothing more to do and are yielding control back to the user. Call this when all work is complete and you are done.",
@@ -430,8 +451,8 @@ export class WaitTool extends SubagentTool {
     );
   }
 
-  callDisplay(input: string | Record<string, unknown> | null): string {
-    const args = parseToolArgs(input);
+  override callDisplay(input: string | Record<string, unknown> | null): string {
+    const args = parseToolArgs(input ?? {});
     const message = args.message as string;
     return `wait(${message || "no-op"})`;
   }

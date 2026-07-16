@@ -4,6 +4,7 @@ import { mkdirSync, rmSync, writeFileSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { homedir } from "node:os";
 import { createMockCore } from "../helpers.ts";
+import type { CoreContext } from "../../src/core/extensions/types.ts";
 
 // ── Session Review Extension Tests ───────────────────────────────────────────
 
@@ -33,14 +34,14 @@ describe("Session Review Extension - exit codes", () => {
     const ext = create(core);
 
     expect(ext).not.toBeNull();
-    expect(ext.hooks[HOOKS.CLI_SUBCOMMANDS_REGISTER]).toBeDefined();
+    expect(ext.hooks![HOOKS.CLI_SUBCOMMANDS_REGISTER]).toBeDefined();
 
     // Trigger the hook to register the subcommand
-    await ext.hooks[HOOKS.CLI_SUBCOMMANDS_REGISTER](core.cliSubcommandRegistry);
+    await ext.hooks![HOOKS.CLI_SUBCOMMANDS_REGISTER]!(core.cliSubcommandRegistry);
 
     expect(core.cliSubcommandRegistry.has("review")).toBe(true);
     const def = core.cliSubcommandRegistry.get("review");
-    expect(def.handler).toBeDefined();
+    expect(def!.handler).toBeDefined();
   });
 
   it("review subcommand returns exit code 0 for existing session", async () => {
@@ -56,7 +57,7 @@ describe("Session Review Extension - exit codes", () => {
     const core = createMockCore();
     const { create } = await import("../../src/extensions/ui-session-review-cli/index.ts");
     const ext = create(core);
-    await ext.hooks[HOOKS.CLI_SUBCOMMANDS_REGISTER](core.cliSubcommandRegistry);
+    await ext.hooks![HOOKS.CLI_SUBCOMMANDS_REGISTER]!(core.cliSubcommandRegistry);
 
     const def = core.cliSubcommandRegistry.get("review");
     const cli = {
@@ -71,7 +72,7 @@ describe("Session Review Extension - exit codes", () => {
     const originalLog = console.log;
     console.log = () => {};
     try {
-      const exitCode = await def.handler(cli, core);
+      const exitCode = await def!.handler!(cli, core);
       expect(exitCode).toBe(0);
     } finally {
       console.log = originalLog;
@@ -82,7 +83,7 @@ describe("Session Review Extension - exit codes", () => {
     const core = createMockCore();
     const { create } = await import("../../src/extensions/ui-session-review-cli/index.ts");
     const ext = create(core);
-    await ext.hooks[HOOKS.CLI_SUBCOMMANDS_REGISTER](core.cliSubcommandRegistry);
+    await ext.hooks![HOOKS.CLI_SUBCOMMANDS_REGISTER]!(core.cliSubcommandRegistry);
 
     const def = core.cliSubcommandRegistry.get("review");
     const cli = {
@@ -97,7 +98,7 @@ describe("Session Review Extension - exit codes", () => {
     const originalLog = console.log;
     console.log = () => {};
     try {
-      const exitCode = await def.handler(cli, core);
+      const exitCode = await def!.handler!(cli, core);
       expect(exitCode).toBe(1);
     } finally {
       console.log = originalLog;
@@ -121,7 +122,7 @@ describe("Session Review Extension - exit codes", () => {
     const core = createMockCore();
     const { create } = await import("../../src/extensions/ui-session-review-cli/index.ts");
     const ext = create(core);
-    await ext.hooks[HOOKS.CLI_SUBCOMMANDS_REGISTER](core.cliSubcommandRegistry);
+    await ext.hooks![HOOKS.CLI_SUBCOMMANDS_REGISTER]!(core.cliSubcommandRegistry);
 
     const def = core.cliSubcommandRegistry.get("review");
     const cli = {
@@ -136,7 +137,7 @@ describe("Session Review Extension - exit codes", () => {
     const originalLog = console.log;
     console.log = () => {};
     try {
-      const exitCode = await def.handler(cli, core);
+      const exitCode = await def!.handler!(cli, core);
       expect(exitCode).toBe(0);
     } finally {
       console.log = originalLog;
@@ -166,7 +167,7 @@ describe("Session Review Extension - exit codes", () => {
     const core = createMockCore();
     const { create } = await import("../../src/extensions/ui-session-review-cli/index.ts");
     const ext = create(core);
-    await ext.hooks[HOOKS.CLI_SUBCOMMANDS_REGISTER](core.cliSubcommandRegistry);
+    await ext.hooks![HOOKS.CLI_SUBCOMMANDS_REGISTER]!(core.cliSubcommandRegistry);
 
     const def = core.cliSubcommandRegistry.get("review");
     const cli = {
@@ -185,7 +186,7 @@ describe("Session Review Extension - exit codes", () => {
     };
 
     try {
-      const exitCode = await def.handler(cli, core);
+      const exitCode = await def!.handler!(cli, core);
       expect(exitCode).toBe(0);
 
       // Verify output is valid JSON array
@@ -193,7 +194,7 @@ describe("Session Review Extension - exit codes", () => {
       expect(Array.isArray(parsed)).toBe(true);
       // Our test session should be in the list
       const foundSession = parsed.find(
-        (s) => s.id === TEST_SESSION_ID,
+        (s: any) => s.id === TEST_SESSION_ID,
       );
       expect(foundSession).toBeDefined();
       expect(foundSession.entry_count).toBe(4);
@@ -212,9 +213,9 @@ describe("Info Show-Prompt Extension - exit codes", () => {
     const ext = create(core);
 
     expect(ext).not.toBeNull();
-    expect(ext.hooks[HOOKS.CLI_SUBCOMMANDS_REGISTER]).toBeDefined();
+    expect(ext.hooks![HOOKS.CLI_SUBCOMMANDS_REGISTER]).toBeDefined();
 
-    await ext.hooks[HOOKS.CLI_SUBCOMMANDS_REGISTER](core.cliSubcommandRegistry);
+    await ext.hooks![HOOKS.CLI_SUBCOMMANDS_REGISTER]!(core.cliSubcommandRegistry);
 
     expect(core.cliSubcommandRegistry.has("info")).toBe(true);
     expect(core.cliSubcommandRegistry.has("show-prompt")).toBe(true);
@@ -224,14 +225,14 @@ describe("Info Show-Prompt Extension - exit codes", () => {
     const core = createMockCore();
     const { create } = await import("../../src/extensions/ui-info-cli/index.ts");
     const ext = create(core);
-    await ext.hooks[HOOKS.CLI_SUBCOMMANDS_REGISTER](core.cliSubcommandRegistry);
+    await ext.hooks![HOOKS.CLI_SUBCOMMANDS_REGISTER]!(core.cliSubcommandRegistry);
 
     const def = core.cliSubcommandRegistry.get("info");
     const originalLog = console.log;
     console.log = () => {};
     try {
       for (const wantsJson of [true, false]) {
-        const exitCode = await def.handler({ wantsJson, colors: false, theme: "dark", config: null, skillsPath: null }, core);
+        const exitCode = await def!.handler!({ wantsJson, colors: false, theme: "dark", config: null, skillsPath: null }, core);
         expect(exitCode).toBe(0);
       }
     } finally {
@@ -243,13 +244,13 @@ describe("Info Show-Prompt Extension - exit codes", () => {
     const core = createMockCore();
     const { create } = await import("../../src/extensions/ui-info-cli/index.ts");
     const ext = create(core);
-    await ext.hooks[HOOKS.CLI_SUBCOMMANDS_REGISTER](core.cliSubcommandRegistry);
+    await ext.hooks![HOOKS.CLI_SUBCOMMANDS_REGISTER]!(core.cliSubcommandRegistry);
 
     const def = core.cliSubcommandRegistry.get("show-prompt");
     const originalLog = console.log;
     console.log = () => {};
     try {
-      const exitCode = await def.handler({ wantsJson: false, colors: false, theme: "dark", config: null }, core);
+      const exitCode = await def!.handler!({ wantsJson: false, colors: false, theme: "dark", config: null }, core);
       expect(exitCode).toBe(0);
     } finally {
       console.log = originalLog;
@@ -267,13 +268,13 @@ describe("One-Shot Extension - exit codes", () => {
     const ext = create(core);
 
     expect(ext).not.toBeNull();
-    expect(ext.hooks[HOOKS.CLI_SUBCOMMANDS_REGISTER]).toBeDefined();
+    expect(ext.hooks![HOOKS.CLI_SUBCOMMANDS_REGISTER]).toBeDefined();
 
-    await ext.hooks[HOOKS.CLI_SUBCOMMANDS_REGISTER](core.cliSubcommandRegistry);
+    await ext.hooks![HOOKS.CLI_SUBCOMMANDS_REGISTER]!(core.cliSubcommandRegistry);
 
     expect(core.cliSubcommandRegistry.has("prompt")).toBe(true);
     const def = core.cliSubcommandRegistry.get("prompt");
-    expect(def.handler).toBeDefined();
+    expect(def!.handler).toBeDefined();
   });
 });
 
@@ -293,9 +294,9 @@ describe("Subcommand handler return types", () => {
     const oneShotExt = createOneShot(core);
 
     // Register all subcommands
-    await reviewExt.hooks[HOOKS.CLI_SUBCOMMANDS_REGISTER](core.cliSubcommandRegistry);
-    await infoExt.hooks[HOOKS.CLI_SUBCOMMANDS_REGISTER](core.cliSubcommandRegistry);
-    await oneShotExt.hooks[HOOKS.CLI_SUBCOMMANDS_REGISTER](core.cliSubcommandRegistry);
+    await reviewExt.hooks![HOOKS.CLI_SUBCOMMANDS_REGISTER]!(core.cliSubcommandRegistry);
+    await infoExt.hooks![HOOKS.CLI_SUBCOMMANDS_REGISTER]!(core.cliSubcommandRegistry);
+    await oneShotExt.hooks![HOOKS.CLI_SUBCOMMANDS_REGISTER]!(core.cliSubcommandRegistry);
 
     // Verify all subcommands are registered
     const subcommands = core.cliSubcommandRegistry.names();
@@ -307,8 +308,8 @@ describe("Subcommand handler return types", () => {
     // Verify all have handlers
     for (const name of subcommands) {
       const def = core.cliSubcommandRegistry.get(name);
-      expect(def.handler).toBeDefined();
-      expect(typeof def.handler).toBe("function");
+      expect(def!.handler).toBeDefined();
+      expect(typeof def!.handler).toBe("function");
     }
   });
 });
@@ -327,22 +328,24 @@ describe("Main entry point - exit code flow", () => {
       return 0;
     };
 
-    let capturedCode = null;
-    const originalExit = process.exit;
-    process.exit = (code) => {
-      capturedCode = code;
+    let capturedCode: number | null = null;
+    const mockExit = (code: number | undefined | null) => {
+      capturedCode = code ?? 0;
       throw new Error("process.exit called with: " + code);
     };
+    const originalExit = process.exit;
+    (process as any).exit = mockExit;
 
     try {
       await mockMain()
-        .catch((e) => {
+        .catch((_e) => {
           return 1;
         })
-        .then((code) => process.exit(code));
+        .then((code) => (process as any).exit(code));
     } catch (e) {
-      if (e.message.startsWith("process.exit called with:")) {
-        expect(capturedCode).toBe(0);
+      const err = e as Error;
+      if (err.message.startsWith("process.exit called with:")) {
+        expect(capturedCode as unknown as number).toBe(0);
       } else {
         throw e;
       }
@@ -356,22 +359,24 @@ describe("Main entry point - exit code flow", () => {
       throw new Error("Test error");
     };
 
-    let capturedCode = null;
-    const originalExit = process.exit;
-    process.exit = (code) => {
-      capturedCode = code;
+    let capturedCode: number | null = null;
+    const mockExit = (code: number | undefined | null) => {
+      capturedCode = code ?? 0;
       throw new Error("process.exit called with: " + code);
     };
+    const originalExit = process.exit;
+    (process as any).exit = mockExit;
 
     try {
       await mockMain()
-        .catch((e) => {
+        .catch((_e) => {
           return 1;
         })
-        .then((code) => process.exit(code));
+        .then((code) => (process as any).exit(code));
     } catch (e) {
-      if (e.message.startsWith("process.exit called with:")) {
-        expect(capturedCode).toBe(1);
+      const err = e as Error;
+      if (err.message.startsWith("process.exit called with:")) {
+        expect(capturedCode as unknown as number).toBe(1);
       } else {
         throw e;
       }
@@ -382,7 +387,7 @@ describe("Main entry point - exit code flow", () => {
 
   it("error with custom exitCode preserves the code", async () => {
     const mockMain = async () => {
-      const err = new Error("Custom error");
+      const err = new Error("Custom error") as Error & { exitCode: number };
       err.exitCode = 42;
       throw err;
     };
@@ -392,7 +397,7 @@ describe("Main entry point - exit code flow", () => {
     try {
       await mockMain();
     } catch (e) {
-      exitCode = e.exitCode ?? 1;
+      exitCode = (e as Error & { exitCode?: number }).exitCode ?? 1;
     }
     expect(exitCode).toBe(42);
   });

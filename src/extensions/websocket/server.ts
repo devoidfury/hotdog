@@ -5,6 +5,7 @@ import crypto from "node:crypto";
 import { OUTPUT_EVENT } from "../../core/context/output.ts";
 import { HOOKS } from "../../core/hooks.ts";
 import { MessageBus } from "../../core/session/message-bus.ts";
+import type { ProviderConfig } from "../../core/llm-client/client.ts";
 import { FanoutSink, WebSocketOutputSink, BackgroundSink } from "./sinks.ts";
 import { C2S, S2C, C2SMessage } from "./protocol.ts";
 import { logger } from "../../core/logger.ts";
@@ -69,7 +70,7 @@ interface CreateWsServerOptions {
   auth?: AuthMiddleware;
 }
 
-interface WsServer {
+export interface WsServer {
   sessionRegistry: SessionRegistry;
   onUpgrade: (req: { url: string; headers?: Record<string, string> }, ws: WebSocket) => void;
   onMessage: (ws: WebSocket, raw: string | Buffer) => void;
@@ -126,7 +127,7 @@ export class SessionRegistry {
 
     // Create the message bus
     const bus = new MessageBus({
-      sessionManager,
+      sessionManager: sessionManager as unknown as { getAgent: () => { hooks: { runHookPipeline: (hookName: string, data: unknown, opts?: { shouldStop?: (result: unknown) => boolean }) => Promise<unknown> }; run: (text: string) => Promise<unknown>; resetCancel: () => void; cancel: () => void; getCommandRegistry: () => unknown; executeCommand: (cmd: unknown) => Promise<unknown> } | undefined },
       sink: fanout,
     });
 
@@ -135,7 +136,7 @@ export class SessionRegistry {
 
     // Start the bus run loop (non-blocking — it awaits messages as they arrive)
     const runLoop = bus.run().catch((err: unknown) => {
-      logger.error(`[session ${sessionId}] bus error:`, err);
+      logger.error(`[session ${sessionId}] bus error:`, err as Record<string, unknown>);
     });
 
     const session: Session = {
@@ -204,9 +205,9 @@ export class SessionRegistry {
   /**
    * Attach a WebSocket output sink to a session.
    */
-  attachSink(sessionId: string, ws: WebSocket): WebSocketOutputSink | null {
+  attachSink(sessionId: string, ws: WebSocket): WebSocketOutputSink | undefined {
     const s = this.#sessions.get(sessionId);
-    if (!s) return null;
+    if (!s) return undefined;
 
     const wsSink = new WebSocketOutputSink(ws, sessionId);
     s.fanoutSink.add(wsSink);
@@ -329,9 +330,10 @@ function replaySessionHistory(session: Session, ws: WebSocket): void {
         }
 
         // Emit tool calls next (if any) so the UI renders them before the text
-        if (msg.toolCalls && msg.toolCalls.length > 0) {
-          pendingToolCalls = msg.toolCalls;
-          for (const tc of msg.toolCalls) {
+        const toolCalls = msg.toolCalls as Array<{ id: string; function?: { name?: string; arguments?: string } }> | undefined;
+        if (toolCalls && toolCalls.length > 0) {
+          pendingToolCalls = toolCalls;
+          for (const tc of toolCalls) {
             ws.send(JSON.stringify({
               type: S2C.TOOL_CALL,
               sessionId: session.id,
@@ -390,7 +392,7 @@ function routeMessage(ws: WebSocket, msg: C2SMessage, registry: SessionRegistry,
           // If no session exists yet, attach to existing or create new
           if (!(ws as WebSocket & { activeSessionId?: string }).activeSessionId) {
             if (registry.size > 0) {
-              attachToMostRecentSession(ws);
+              attachToMostRecentSession(ws, registry);
             } else {
               createAndAttachSession(ws, registry);
             }
@@ -631,9 +633,9 @@ export function createWsServer(core: CoreContext, options: CreateWsServerOptions
       baseUrl: core.resolved?.baseUrl as string | undefined,
       apiKey: core.resolved?.apiKey as string | undefined,
       stream: core.resolved?.stream !== false,
-      chatTimeoutSecs: core.resolved?.chatTimeout as number | undefined,
-      maxRetries: core.resolved?.maxRetries as number | undefined,
-      providers: core.config?.providers as unknown[] | undefined,
+      chatTimeoutSecs: (core.resolved?.chatTimeout as number) || 30,
+      maxRetries: (core.resolved?.maxRetries as number) || 3,
+      providers: core.config?.providers as ProviderConfig[] | undefined,
       markerMangler: new MarkerMangler(),
     });
 
@@ -642,15 +644,15 @@ export function createWsServer(core: CoreContext, options: CreateWsServerOptions
       hooks: core.hooks,
       toolRegistry: core.toolRegistry,
       llmClient,
-      model: agentConfig.model || core.resolved?.model as string | undefined,
-      maxIterations: core.resolved?.maxIterations as number | undefined,
-      maxTokens: core.resolved?.maxTokens as number | undefined,
-      hideTools: agentConfig.hideTools ?? core.resolved?.hideTools ?? false,
-      hideThinking: agentConfig.hideThinking ?? core.resolved?.hideThinking ?? true,
-      showTokenUse: agentConfig.showTokenUse ?? core.resolved?.showTokenUse ?? true,
-      sink: agentConfig.sink || null,
-      modelRegistry: core.resolved?.modelRegistry as Record<string, unknown> | undefined,
-      profileName: agentConfig.profileName || core.resolved?.profileName as string | undefined || "default",
+      model: (agentConfig as { model?: string }).model || (core.resolved?.model as string) || "",
+      maxIterations: (core.resolved?.maxIterations as number) || 100,
+      maxTokens: (core.resolved?.maxTokens as number) || 4096,
+      hideTools: (agentConfig as { hideTools?: boolean }).hideTools ?? (core.resolved?.hideTools as boolean) ?? false,
+      hideThinking: (agentConfig as { hideThinking?: boolean }).hideThinking ?? (core.resolved?.hideThinking as boolean) ?? true,
+      showTokenUse: (agentConfig as { showTokenUse?: boolean }).showTokenUse ?? (core.resolved?.showTokenUse as boolean) ?? true,
+      sink: ((agentConfig as { sink?: { emit: (event: unknown) => void } }).sink as { emit: (event: unknown) => void } | null) || null,
+      modelRegistry: core.resolved?.modelRegistry as { [key: string]: { maxTokens?: number; reasoningEffort?: string; [key: string]: unknown } } | undefined,
+      profileName: (agentConfig as { profileName?: string }).profileName || (core.resolved?.profileName as string) || "default",
       config: core.config || {},
       sessionId,
       abortSignal: null,

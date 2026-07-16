@@ -41,7 +41,14 @@ interface ToolCtx {
 }
 
 interface SubagentOptions {
-  taskManager?: unknown;
+  taskManager?: {
+    _config?: Record<string, unknown>;
+    spawnTask(taskId: string, description: string, options: Record<string, unknown>): Promise<Record<string, string>>;
+    taskStatus(taskId: string): string | null;
+    sendFollowUp(taskId: string, message: string): boolean;
+    interruptTask(taskId: string): boolean;
+    activeTasks(): string[];
+  } | null;
   sessionCore?: unknown;
 }
 
@@ -67,9 +74,9 @@ export function create(core: CoreContext, options: SubagentOptions = {}): Extens
        * Mount taskManager and sessionCore on the shared context container.
        * Tools access them via toolCtx.get('taskManager') and toolCtx.get('sessionCore').
        */
-      [HOOKS.AGENT_TOOL_CONTEXT]: async ({ toolCtx }: { toolCtx: ToolCtx }) => {
-        toolCtx.set("taskManager", taskManager);
-        toolCtx.set("sessionCore", sessionCore || null);
+      [HOOKS.AGENT_TOOL_CONTEXT]: async ({ toolCtx }) => {
+        (toolCtx as { set: (key: string, value: unknown) => void }).set("taskManager", taskManager);
+        (toolCtx as { set: (key: string, value: unknown) => void }).set("sessionCore", sessionCore || null);
       },
 
       /**

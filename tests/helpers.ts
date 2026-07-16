@@ -13,6 +13,7 @@ import type { Tool, ToolDef } from '../src/core/extensions/tool-registry.ts';
 import type { Message } from '../src/core/context/message.ts';
 import { MessageLog } from '../src/core/context/message-log.ts';
 import type { LlmClient } from '../src/core/llm-client/client.ts';
+import type { CoreContext } from '../src/core/extensions/types.ts';
 import { createHooks } from '../src/core/hooks.ts';
 import { createToolRegistry } from '../src/core/extensions/tool-registry.ts';
 import { HookSystem } from '../src/core/hooks.ts';
@@ -611,23 +612,7 @@ export function createMockCore(config: {
     modelRegistry: Record<string, unknown>;
     providers: unknown[];
   }>;
-} = {}): {
-  hooks: HookSystem;
-  toolRegistry: ToolRegistry;
-  cliSubcommandRegistry: ReturnType<typeof createSubcommandRegistry>;
-  config: Record<string, unknown>;
-  resolved: Record<string, unknown>;
-  modelRegistry: Record<string, unknown>;
-  extensions: { has: (name: string) => boolean; load: (name: string) => Promise<unknown>; cleanup: () => Promise<void> };
-  buildConfig: (cli: Record<string, unknown>) => Promise<{
-    resolved: Record<string, unknown>;
-    modelRegistry: Record<string, unknown>;
-    providers: unknown[];
-  }>;
-  services: ServiceRegistry;
-  configRegistry: ConfigRegistry;
-  service: (name: string) => unknown;
-} {
+} = {}): CoreContext {
   const hooks = new HookSystem();
   const toolRegistry = new ToolRegistry();
   const cliSubcommandRegistry = createSubcommandRegistry();
@@ -673,13 +658,13 @@ export function createMockCore(config: {
       has: () => false,
       load: async () => null,
       cleanup: async () => {},
-    },
+    } as unknown as NonNullable<CoreContext["extensions"]>,
     buildConfig:
       config.buildConfig ||
       (async () => ({
         resolved,
         modelRegistry: config.modelRegistry || {},
         providers: config.providers || [],
-      })),
-  };
+      })) as CoreContext["buildConfig"],
+  } as CoreContext;
 }

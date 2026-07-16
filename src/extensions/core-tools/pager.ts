@@ -30,7 +30,7 @@ export class PagerTool {
     }
     const toolCallId = args.tool_call_id as string;
 
-    const onGetCachedToolOutput = (ctx as Record<string, unknown>)?.get?.("onGetCachedToolOutput") as ((id: string) => string | null) | undefined;
+    const onGetCachedToolOutput = ctx.get("onGetCachedToolOutput") as ((id: string) => string | null) | undefined;
     if (onGetCachedToolOutput) {
       const cached = onGetCachedToolOutput(toolCallId);
       if (cached) {

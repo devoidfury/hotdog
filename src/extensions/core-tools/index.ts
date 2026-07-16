@@ -63,30 +63,30 @@ interface CoreToolConfig {
   maxToolOutputLines?: number;
 }
 
-const TOOL_FACTORIES: Record<string, (config: CoreToolConfig) => unknown> = {
-  write: () => new WriteTool(),
+const TOOL_FACTORIES: Record<string, (config: CoreToolConfig) => Tool> = {
+  write: () => new WriteTool() as Tool,
   read: (config) =>
     new ReadTool({
       readLimit: config.readToolLimit ?? 500,
       maxImageSize: DEFAULT_MAX_IMAGE_SIZE,
-    }),
+    }) as Tool,
   edit: (config) =>
     new EditTool({
       maxEditInputSize: config.maxEditInputSize ?? 16000,
-    }),
+    }) as Tool,
   grep: (config) =>
     new GrepTool({
       maxResults: config.grepMaxResults ?? 100,
       maxOutputLines: config.maxToolOutputLines ?? 600,
-    }),
+    }) as Tool,
   find: (config) =>
     new FindTool({
       maxResults: config.findMaxResults ?? 200,
       maxOutputLines: config.maxToolOutputLines ?? 600,
-    }),
-  pager: () => new PagerTool(),
-  explore: () => new ExploreTool(),
-  project_info: () => new ProjectInfoTool(),
+    }) as Tool,
+  pager: () => new PagerTool() as Tool,
+  explore: () => new ExploreTool() as Tool,
+  project_info: () => new ProjectInfoTool() as Tool,
 };
 
 interface ToolFactory {
@@ -98,7 +98,7 @@ interface ToolFactory {
  * Create a tool factory that can create and register core tools.
  */
 export function createToolFactory(config: CoreToolConfig = {}): ToolFactory {
-  const createTool = (toolName: string, whitelist: string[] | null = null) => {
+  const createTool = (toolName: string, whitelist: string[] | null = null): Tool | null => {
     const descriptor = TOOL_DESCRIPTORS.find((d) => d.name === toolName);
     if (descriptor) {
       // Check disabled status

@@ -53,7 +53,8 @@ export class EditTool {
     const config = extensionData.configSchema as EditToolConfig;
     this.maxEditInputSize =
       options.maxEditInputSize ??
-      config.coreTools?.properties.maxEditInputSize.default;
+      config.coreTools?.properties.maxEditInputSize.default ??
+      10000;
   }
 
   toToolDef() {

@@ -27,7 +27,7 @@ export {
 
 // ── Session Log Entry ───────────────────────────────────────────────────────
 
-interface LogEntry {
+interface LogEntry extends Record<string, unknown> {
   ts: string;
   session_id: string;
   role: string;

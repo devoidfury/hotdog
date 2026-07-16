@@ -129,7 +129,7 @@ export function normalizeConfigKeys(obj: unknown): unknown {
   return normalized;
 }
 
-export interface DefaultConfig {
+export interface DefaultConfig extends Record<string, unknown> {
   providers: unknown[];
   profiles: Record<string, unknown>;
   extensionPaths: string[];

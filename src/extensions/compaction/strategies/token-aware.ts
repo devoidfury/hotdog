@@ -12,10 +12,10 @@ import { AgentError } from "../../../core/error.ts";
  * Compact to a target token count.
  */
 export class TokenAwareStrategy extends CompactionStrategy {
-  name = "token-aware";
-  description = "Compact to a target token count. Dynamically determines how many messages to keep based on precise token estimation.";
+  override name = "token-aware";
+  override description = "Compact to a target token count. Dynamically determines how many messages to keep based on precise token estimation.";
 
-  async execute(
+  override async execute(
     messages: Message[],
     settings: CompactionSettings,
     llmChat: (messages: Array<{ role: string; content: string }>, model: string) => Promise<string>,
@@ -30,8 +30,9 @@ export class TokenAwareStrategy extends CompactionStrategy {
     let lastKeptIndex = 0;
 
     for (let i = messages.length - 1; i >= 0; i--) {
-      if (messages[i].role === "system") continue;
-      const msgTokens = estimateMessageTokens(messages[i]);
+      const msg = messages[i];
+      if (!msg || msg.role === "system") continue;
+      const msgTokens = estimateMessageTokens(msg);
       if (cumulativeTokens + msgTokens > maxKeepTokens) break;
       cumulativeTokens += msgTokens;
       lastKeptIndex = i;
@@ -59,7 +60,7 @@ export class TokenAwareStrategy extends CompactionStrategy {
     }
 
     const tokensBefore = estimateContextTokens(messages);
-    const summaryTokens = estimateMessageTokens({ content: summary });
+    const summaryTokens = estimateMessageTokens({ role: "assistant", content: summary });
     const tokensAfter = cumulativeTokens + summaryTokens;
 
     return {
@@ -75,7 +76,7 @@ export class TokenAwareStrategy extends CompactionStrategy {
     };
   }
 
-  canCompact(messages: Message[], settings: CompactionSettings): boolean {
+  override canCompact(messages: Message[], settings: CompactionSettings): boolean {
     const nonSystem = messages.filter((m) => m.role !== "system");
     const targetTokens = settings.targetTokens || settings.reserveTokens || 16384;
     const contextLimit = settings.contextLimit || 128000;

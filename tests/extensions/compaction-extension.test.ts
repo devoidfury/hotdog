@@ -1,9 +1,10 @@
 import { describe, it, expect } from "bun:test";
 import { HookSystem, HOOKS } from "../../src/core/hooks.ts";
-import { ToolRegistry } from "../../src/core/extensions/tool-registry.ts";
+import { AgentCommandRegistry } from "../../src/core/extensions/registries.ts";
 import { MessageLog } from "../../src/core/context/message-log.ts";
 import { Message } from "../../src/core/context/message.ts";
 import { create as createCompactionExtension } from "../../src/extensions/compaction/index.ts";
+import { ToolRegistry } from "../../src/core/index.ts";
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -332,7 +333,7 @@ describe("COMMANDS_REGISTER Hook", () => {
     const core = createMockCore();
     const ext = createCompactionExtension(core);
 
-    const commandRegistry = new ToolRegistry();
+    const commandRegistry = new AgentCommandRegistry();
     await (ext as any).hooks![HOOKS.COMMANDS_REGISTER]!({ registry: commandRegistry });
 
     // The compact command should be registered
@@ -345,7 +346,7 @@ describe("COMMANDS_REGISTER Hook", () => {
     const core = createMockCore();
     const ext = createCompactionExtension(core);
 
-    const commandRegistry = new ToolRegistry();
+    const commandRegistry = new AgentCommandRegistry();
     await (ext as any).hooks![HOOKS.COMMANDS_REGISTER]!({ registry: commandRegistry });
 
     const strategyCmd = commandRegistry.get("compact:strategy");
@@ -357,7 +358,7 @@ describe("COMMANDS_REGISTER Hook", () => {
     const core = createMockCore();
     const ext = createCompactionExtension(core);
 
-    const commandRegistry = new ToolRegistry();
+    const commandRegistry = new AgentCommandRegistry();
     await (ext as any).hooks![HOOKS.COMMANDS_REGISTER]!({ registry: commandRegistry });
 
     const strategyCmd = commandRegistry.get("compact:strategy");
@@ -375,7 +376,7 @@ describe("COMMANDS_REGISTER Hook", () => {
     const core = createMockCore();
     const ext = createCompactionExtension(core);
 
-    const commandRegistry = new ToolRegistry();
+    const commandRegistry = new AgentCommandRegistry();
     await (ext as any).hooks![HOOKS.COMMANDS_REGISTER]!({ registry: commandRegistry });
 
     const strategyCmd = commandRegistry.get("compact:strategy");
@@ -390,7 +391,7 @@ describe("COMMANDS_REGISTER Hook", () => {
     const core = createMockCore();
     const ext = createCompactionExtension(core);
 
-    const commandRegistry = new ToolRegistry();
+    const commandRegistry = new AgentCommandRegistry();
     await (ext as any).hooks![HOOKS.COMMANDS_REGISTER]!({ registry: commandRegistry });
 
     const strategyCmd = commandRegistry.get("compact:strategy");
@@ -404,7 +405,7 @@ describe("COMMANDS_REGISTER Hook", () => {
     const core = createMockCore();
     const ext = createCompactionExtension(core);
 
-    const commandRegistry = new ToolRegistry();
+    const commandRegistry = new AgentCommandRegistry();
     await (ext as any).hooks![HOOKS.COMMANDS_REGISTER]!({ registry: commandRegistry });
 
     const compactCmd = commandRegistry.get("compact")!;
@@ -422,7 +423,7 @@ describe("COMMANDS_REGISTER Hook", () => {
     const core = createMockCore();
     const ext = createCompactionExtension(core);
 
-    const commandRegistry = new ToolRegistry();
+    const commandRegistry = new AgentCommandRegistry();
     await (ext as any).hooks![HOOKS.COMMANDS_REGISTER]!({ registry: commandRegistry });
 
     const compactCmd = commandRegistry.get("compact")!;
@@ -443,7 +444,7 @@ describe("COMMANDS_REGISTER Hook", () => {
     });
     const ext = createCompactionExtension(core);
 
-    const commandRegistry = new ToolRegistry();
+    const commandRegistry = new AgentCommandRegistry();
     await (ext as any).hooks![HOOKS.COMMANDS_REGISTER]!({ registry: commandRegistry });
 
     const compactCmd = commandRegistry.get("compact")!;

@@ -213,9 +213,13 @@ export interface ToolsRegisterPayload {
 
 /**
  * Payload for the `commands:register` hook.
+ * Carries the agent's command registry and the agent instance.
  */
 export interface CommandsRegisterPayload {
-  register(name: string, definition: Record<string, unknown>): void;
+  /** The agent's command registry for registering slash commands. */
+  registry: { register(name: string, definition: Record<string, unknown>): void };
+  /** The agent instance for accessing agent state. */
+  agent: unknown;
 }
 
 /**

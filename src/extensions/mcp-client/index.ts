@@ -83,8 +83,9 @@ export function create(core: CoreContext): ExtensionInstance | null {
             // Register each discovered tool (skip blacklisted)
             const blacklist = server.blacklistTools || [];
             for (const toolDef of conn.tools) {
-              if (blacklist.includes((toolDef as Record<string, unknown>).name as string)) continue;
-              const tool = new McpTool(server.name, toolDef as Record<string, unknown>, conn.handle());
+              const def = toolDef as { name: string; title?: string | null; description?: string | null; inputSchema?: Record<string, unknown> };
+              if (blacklist.includes(def.name as string)) continue;
+              const tool = new McpTool(server.name, def, conn.handle());
               registry.register(tool.registeredName, tool);
             }
           } catch (e: unknown) {

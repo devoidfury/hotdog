@@ -214,7 +214,7 @@ function walkFor(
 function parseFor(tag: string): { varName: string; expr: string } {
   const m = tag.match(/^for\s+(\w+)\s+in\s+(.+)$/);
   if (!m) throw new ParseError(`Invalid for tag: ${tag}`);
-  return { varName: m[1], expr: m[2] };
+  return { varName: m[1]!, expr: m[2]! };
 }
 
 // ── Block finding ──────────────────────────────────────────────────
@@ -272,21 +272,21 @@ function applyFilter(value: unknown, filterSpec: string): string {
         : argsStr.replace(/^['"']/, "").replace(/['"']$/, "");
     return value === "" || value == null ? fallback : String(value);
   }
-  if (name === "length") return String((value ?? "").length);
+  if (name === "length") return String(String(value ?? "").length);
   return String(value);
 }
 
 function applySimpleFilter(value: unknown, name: string): string {
   if (name === "default")
     return value === "" || value == null ? "" : String(value);
-  if (name === "length") return String((value ?? "").length);
+  if (name === "length") return String(String(value ?? "").length);
   if (name === "trim") return String(value).trim();
   return String(value);
 }
 
 function parseNamedArgs(str: string): Record<string, string> {
   const m = str.match(/(\w+)\s*=\s*["']([^'"]*)["']/);
-  return m ? { [m[1]]: m[2] } : {};
+  return m ? { [m[1]!]: m[2]! } : {};
 }
 
 function resolveExpr(
@@ -302,7 +302,7 @@ function resolveExpr(
     if (value == null) return "";
     value = (value as Record<string, unknown>)[key];
   }
-  return value ?? "";
+  return String(value ?? "");
 }
 
 function resolveValue(

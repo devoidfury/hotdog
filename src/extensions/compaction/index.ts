@@ -17,36 +17,14 @@ import { ACTIONS } from "../../core/commands.ts";
 import { logger } from "../../core/logger.ts";
 import { LlmError, formatError } from "../../core/error.ts";
 import { Message } from "../../core/context/message.ts";
+import type { Agent } from "../../core/agent.ts";
 import {
   CoreContext,
   ExtensionInstance,
   CommandsRegisterPayload,
-  ContextHookPayload,
   getExtensionConfig,
 } from "../../core/extensions/types.ts";
 import type { ModelConfig } from "../../core/config/providers.ts";
-
-interface Agent {
-  model: string;
-  sessionId: string;
-  log: {
-    getAll(): Message[];
-    getNonSystem(): Message[];
-    getSystem(): Message[];
-  };
-  buildMessages(): Message[];
-  replaceContext(messages: Message[]): void;
-  llmClient: {
-    chatStreamCancellable(
-      messages: Message[],
-      modelConfig: Record<string, unknown>,
-      toolDefs: unknown[],
-      signal: AbortSignal,
-    ): AsyncIterable<Record<string, unknown>>;
-  };
-  abortSignal?: AbortSignal;
-  cancelled?: boolean;
-}
 
 interface CompactionSettings {
   enabled: boolean;
@@ -62,7 +40,7 @@ interface CompactionSettings {
  */
 function getModelConfig(core: CoreContext, modelName: string): Record<string, unknown> | undefined {
   // Check core.resolved?.modelRegistry first, then fall back to core.modelRegistry
-  const registry = core.resolved?.modelRegistry || (core as Record<string, unknown>).modelRegistry;
+  const registry = core.resolved?.modelRegistry || ((core as unknown) as Record<string, unknown>).modelRegistry;
   if (registry) {
     return (registry as Record<string, ModelConfig>)[modelName] as Record<string, unknown> | undefined;
   }
@@ -80,13 +58,9 @@ export function create(core: CoreContext): ExtensionInstance | null {
     enabled: config.enabled ?? true,
     reserveTokens: config.reserveTokens ?? 16384,
     keepRecentMessages: config.keepRecentMessages ?? 8,
+    keepRecent: config.keepRecent ?? config.keepRecentMessages ?? 8,
     strategy: config.strategy ?? "summarize",
   };
-
-  // Normalize: config uses keepRecentMessages, strategies use keepRecent
-  if (settings.keepRecentMessages !== undefined) {
-    settings.keepRecent = settings.keepRecentMessages;
-  }
 
   if (!settings.enabled) return null;
 
@@ -108,7 +82,7 @@ export function create(core: CoreContext): ExtensionInstance | null {
   function ensureUserTurnGuard(messages: Message[]): Message[] {
     if (messages.length === 0) return messages;
     const lastMsg = messages[messages.length - 1];
-    if (lastMsg.role === "user") return messages;
+    if (!lastMsg || lastMsg.role === "user") return messages;
 
     return [
       ...messages,
@@ -150,8 +124,8 @@ export function create(core: CoreContext): ExtensionInstance | null {
         (m) => new Message({ role: m.role, content: m.content }),
       );
       const stream = agent.llmClient.chatStreamCancellable(
-        wrapped,
-        modelConfig || { name: chatModel, temperature: null, maxTokens: 4096 },
+        wrapped.map((m) => m.toJSON()),
+        (modelConfig as unknown as ModelConfig) || { name: chatModel, temperature: null, maxTokens: 4096 },
         [],
         abortController.signal,
       );
@@ -250,7 +224,7 @@ export function create(core: CoreContext): ExtensionInstance | null {
       /**
        * Handle context hook — check if compaction is needed before each LLM call.
        */
-      [HOOKS.CONTEXT]: async ({ messages, agent }: ContextHookPayload & { messages: Message[]; agent: Agent }) => {
+      [HOOKS.CONTEXT]: async ({ messages, agent }) => {
         if (!settings.enabled) return;
 
         const nonSystemMessages = messages.filter((m) => m.role !== "system");
@@ -284,7 +258,8 @@ export function create(core: CoreContext): ExtensionInstance | null {
       /**
        * Register commands for compaction.
        */
-      [HOOKS.COMMANDS_REGISTER]: async ({ registry }: { registry: CommandsRegisterPayload }) => {
+      [HOOKS.COMMANDS_REGISTER]: async (payload: CommandsRegisterPayload) => {
+        const { registry } = payload;
         // /compact [n] [--compact-debug]
         registry.register("compact", {
           description: "Compact context (compact [n] [--compact-debug])",

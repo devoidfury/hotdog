@@ -185,8 +185,8 @@ export function parseMcpContentBlock(block: Record<string, unknown> | null): Mcp
         type: "resource",
         uri: (block.uri as string) || "",
         mimeType: (block.mimeType as string) || "",
-        text: (block.text as string) || null,
-        blob: (block.blob as string) || null,
+        text: (block.text as string) || undefined,
+        blob: (block.blob as string) || undefined,
       };
     default:
       return { type: "unknown" };

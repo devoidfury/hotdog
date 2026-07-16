@@ -13,16 +13,16 @@ import { AgentError } from "../../../core/error.ts";
  * Less context preserved but more efficient.
  */
 export class SummarizeShortStrategy extends CompactionStrategy {
-  name = "summarize-short";
-  description = "Aggressive LLM summarization with shorter output. Less context preserved but more efficient.";
+  override name = "summarize-short";
+  override description = "Aggressive LLM summarization with shorter output. Less context preserved but more efficient.";
 
-  async execute(
+  override async execute(
     messages: Message[],
     settings: CompactionSettings,
     llmChat: (messages: Array<{ role: string; content: string }>, model: string) => Promise<string>,
     model: string,
   ): Promise<CompactResult | null> {
-    const firstKept = findFirstKeptIndex(messages, settings.keepRecent);
+    const firstKept = findFirstKeptIndex(messages, settings.keepRecent ?? 8);
     if (firstKept === 0) return null;
 
     const messagesToCompact = messages.slice(0, firstKept);

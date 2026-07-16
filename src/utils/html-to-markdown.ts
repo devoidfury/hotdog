@@ -96,8 +96,9 @@ export function htmlToMarkdown(html: string | null | undefined): string {
       element: (el) => {
         const isOl = ctx.olCount.length > 0;
         if (isOl) {
-          ctx.olCount[ctx.olCount.length - 1]++;
-          el.before(`\n${ctx.olCount[ctx.olCount.length - 1]}. `);
+          const lastIdx = ctx.olCount.length - 1;
+          ctx.olCount[lastIdx] = (ctx.olCount[lastIdx] ?? 0) + 1;
+          el.before(`\n${ctx.olCount[lastIdx]}. `);
         } else {
           el.before("\n- ");
         }

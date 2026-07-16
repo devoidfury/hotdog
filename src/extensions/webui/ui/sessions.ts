@@ -1,10 +1,11 @@
+/// <reference lib="dom" />
 // Session list/management sidebar component.
 
 import { sanitize, formatTime, shortId } from "./utils.ts";
 
 // ── Types ───────────────────────────────────────────────────────────────────
 
-interface SessionInfo {
+export interface SessionInfo {
   id: string;
   profile?: string;
   model?: string;

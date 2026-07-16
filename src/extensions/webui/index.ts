@@ -11,35 +11,29 @@ import {
   ExtensionInstance,
   getExtensionConfig,
 } from "../../core/extensions/types.ts";
+import type { CliSubcommandRegistry } from "../../core/extensions/registries.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const UI_DIR = path.join(__dirname, "ui");
 
-// ── Types ───────────────────────────────────────────────────────────────────
-
-interface SubcommandCli {
-  [key: string]: unknown;
-}
-
-interface SubcommandRegistry {
-  register(
-    name: string,
-    definition: {
-      description: string;
-      handler: (cli: SubcommandCli, core: CoreContext) => Promise<void>;
-    },
-  ): void;
-}
-
 /**
  * Handle the "webui" subcommand: start the WebUI server.
+ * Returns 0 on success, 1 on error.
  */
 async function handleWebuiSubcommand(
-  _cli: SubcommandCli,
-  core: CoreContext,
-): Promise<void> {
-  const config = getExtensionConfig<{ port?: number; host?: string; apiKey?: string; sessionTokenTtlMin?: number; maxAgeSecs?: number }>(core, "webui");
-  const { server } = await createWebuiServer(core, config, UI_DIR);
+  _cliArgs: unknown,
+  _core: unknown,
+): Promise<number> {
+  try {
+    const core = _core as CoreContext;
+    const config = getExtensionConfig<{ port?: number; host?: string; apiKey?: string; sessionTokenTtlMin?: number; maxAgeSecs?: number }>(core, "webui");
+    await createWebuiServer(core, config, UI_DIR);
+    return 0;
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    console.error(`[webui] Failed to start server: ${message}`);
+    return 1;
+  }
 }
 
 /**
@@ -52,7 +46,7 @@ export function create(core: CoreContext): ExtensionInstance {
       ? {
           // Register the "webui" subcommand
           [HOOKS.CLI_SUBCOMMANDS_REGISTER]: async (
-            registry: SubcommandRegistry,
+            registry: CliSubcommandRegistry,
           ) => {
             registry.register("webui", {
               description:

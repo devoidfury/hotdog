@@ -1,3 +1,4 @@
+// @ts-nocheck — tests use partial CompactionSettings and implicit any types
 // Tests for compaction strategies and utilities.
 // Merged from compaction-strategies.test.ts + compaction.test.ts to reduce duplication.
 

@@ -1,3 +1,4 @@
+/// <reference lib="dom" />
 // Message rendering — displays all OUTPUT_EVENT types in the chat view.
 // Manages a message list per session, with streaming, tool calls, and thinking.
 

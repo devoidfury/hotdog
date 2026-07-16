@@ -16,6 +16,10 @@ export interface ProfileDef {
   model: string | null;
   blacklistTools: string[];
   whitelistTools: string[] | null;
+  /** Snake_case alias for blacklistTools (from JSON config). */
+  blacklist_tools?: string[];
+  /** Snake_case alias for whitelistTools (from JSON config). */
+  whitelist_tools?: string[] | null;
   manager: boolean;
   visibleWorker: boolean;
 }
@@ -92,7 +96,7 @@ export async function loadProfileFiles(
 ): Promise<Record<string, ProfileDef>> {
   const result: Record<string, ProfileDef> = {};
 
-  let entries: Awaited<ReturnType<typeof fsPromises.readdir>>;
+  let entries: Array<{ name: string | NonSharedBuffer; isFile: () => boolean }>;
   try {
     entries = await fsPromises.readdir(profilesPath, { withFileTypes: true });
   } catch {

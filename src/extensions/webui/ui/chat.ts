@@ -1,9 +1,11 @@
+/// <reference lib="dom" />
 // Chat view component — WS client, message routing, input handling.
 // Connects to the WebSocket server and routes messages to the message list.
 // Uses reactiveState atoms so DOM updates happen automatically via effects.
 
 import { reactiveState, effect, Atom } from "./utils.ts";
 import { createMessageList, MessageListManager } from "./message-list.ts";
+import type { SessionInfo } from "./sessions.ts";
 
 // Browser-compatible logger — avoids importing Node.js logger which uses
 // process.env and process.stdout that don't exist in browser environments.
@@ -157,7 +159,7 @@ interface ChatConfig {
   token: string | null;
   host?: string;
   onSessionCreated?: (data: { sessionId: string }) => void;
-  onSessionsUpdate?: (sessions: unknown[], activeSessionId: string | null) => void;
+  onSessionsUpdate?: (sessions: SessionInfo[], activeSessionId: string | null) => void;
   onConnectionChange?: (connected: boolean) => void;
   onAuthFailure?: () => void;
 }
@@ -279,7 +281,7 @@ export function createChat({
         }
         return;
       case "sessions":
-        onSessionsUpdate?.(data.sessions, sessionIdAtom());
+        onSessionsUpdate?.(data.sessions as SessionInfo[], sessionIdAtom());
         return;
       case "authRequired":
         console.warn("[chat] Auth required but not provided");

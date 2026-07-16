@@ -7,6 +7,7 @@ import { appendFile, readFile, access, mkdir } from "node:fs/promises";
 import { HOOKS } from "../../core/hooks.ts";
 import { stripNulls } from "../../utils/objects.ts";
 import { CoreContext, ExtensionInstance } from "../../core/extensions/types.ts";
+import type { Message as CoreMessage } from "../../core/context/message.ts";
 
 // ── Log Source Types ────────────────────────────────────────────────────────
 
@@ -20,16 +21,16 @@ export const LOG_SOURCE = {
   PROMPT: "prompt",
 } as const;
 
-interface Message {
+interface SessionLogMessage {
   sessionId?: string;
-  role: string;
-  content?: string;
+  role: string | undefined;
+  content?: string | Array<unknown>;
   reasoningContent?: string | null;
   toolCalls?: unknown;
   toolCallId?: string | null;
 }
 
-interface Agent {
+interface SessionLogAgent {
   sessionId?: string;
 }
 
@@ -61,7 +62,7 @@ async function getCacheDir(): Promise<string> {
 /**
  * Create a log entry from a message.
  */
-function messageToLogEntry(message: Message, source: string): LogEntry {
+function messageToLogEntry(message: SessionLogMessage, source: string): LogEntry {
   return stripNulls({
     ts: new Date().toISOString(),
     session_id: message.sessionId || "unknown",
@@ -110,13 +111,13 @@ export async function create(_core: CoreContext): Promise<ExtensionInstance> {
         message,
         agent,
       }: {
-        message: Message;
-        agent?: Agent;
+        message: CoreMessage;
+        agent: SessionLogAgent & { sessionId?: string };
       }) => {
         // Skip logging during session restoration to avoid duplicate entries
         if (isRestoring) return;
 
-        const sessionId = agent?.sessionId || message.sessionId || "unknown";
+        const sessionId = (agent as { sessionId?: string })?.sessionId || "unknown";
         lastSessionId = sessionId;
         const logPath = join(cacheDir, `${sessionId}.jsonl`);
 
@@ -144,7 +145,14 @@ export async function create(_core: CoreContext): Promise<ExtensionInstance> {
             source = LOG_SOURCE.INPUT;
         }
 
-        const entry = messageToLogEntry(message, source);
+        const entry = messageToLogEntry({
+          sessionId: (agent as { sessionId?: string })?.sessionId,
+          role: message.role,
+          content: typeof message.getTextContent === "function" ? message.getTextContent() : (message.content as string | undefined) || "",
+          reasoningContent: message.reasoningContent,
+          toolCalls: message.toolCalls,
+          toolCallId: message.toolCallId,
+        }, source);
         await appendFile(logPath, JSON.stringify(entry) + "\n");
       },
 
@@ -158,7 +166,7 @@ export async function create(_core: CoreContext): Promise<ExtensionInstance> {
       }: {
         type: string;
         data?: Record<string, unknown>;
-        agent?: Agent;
+        agent?: SessionLogAgent;
       }) => {
         if (type === "compaction_result" && data?.summary) {
           const sessionId = agent?.sessionId || "unknown";

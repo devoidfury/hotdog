@@ -117,7 +117,7 @@ async function searchDuckDuckGo(query: string, maxResults: number, timeout: numb
 function decodeDdgUrl(raw: string): string {
   const idx = raw.indexOf("uddg=");
   if (idx === -1) return raw;
-  const encoded = raw.slice(idx + 5).split("&")[0];
+  const encoded = raw.slice(idx + 5).split("&")[0] || "";
   try {
     return decodeURIComponent(encoded);
   } catch {

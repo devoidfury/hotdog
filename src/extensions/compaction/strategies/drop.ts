@@ -7,12 +7,12 @@ import { CompactionStrategy, Message, CompactionSettings, CompactResult } from "
  * Keep the last N messages and remove older messages without summarizing.
  */
 export class DropStrategy extends CompactionStrategy {
-  name = "drop";
-  description =
+  override name = "drop";
+  override description =
     "Keep the last N messages and remove older messages without summarizing. Fastest option, no LLM cost, but loses all context from compacted messages.";
 
-  async execute(messages: Message[], settings: CompactionSettings): Promise<CompactResult | null> {
-    const firstKept = findFirstKeptIndex(messages, settings.keepRecent);
+  override async execute(messages: Message[], settings: CompactionSettings): Promise<CompactResult | null> {
+    const firstKept = findFirstKeptIndex(messages, settings.keepRecent ?? 8);
     if (firstKept === 0) return null;
 
     return {
@@ -26,7 +26,7 @@ export class DropStrategy extends CompactionStrategy {
     };
   }
 
-  canCompact(messages: Message[], settings: CompactionSettings): boolean {
+  override canCompact(messages: Message[], settings: CompactionSettings): boolean {
     const nonSystem = messages.filter((m) => m.role !== "system");
     return nonSystem.length > (settings.keepRecent || 3) * 2;
   }

@@ -55,7 +55,8 @@ export class ReadTool {
     const config = extensionData.configSchema as ReadToolConfig;
     this.readLimit =
       options.readLimit ??
-      config.coreTools?.properties.readToolLimit.default;
+      config.coreTools?.properties.readToolLimit.default ??
+      500;
     this.maxImageSize = options.maxImageSize ?? DEFAULT_MAX_IMAGE_SIZE;
   }
 

@@ -60,7 +60,7 @@ export function resolveLogTarget(configTarget?: string): LogTarget {
 // ── Singleton Logger ────────────────────────────────────────────────────────
 
 interface HookSystem {
-  on(hookName: string, handler: (data: unknown) => void): void;
+  on<T = unknown>(hookName: string, handler: (data: T) => void | Promise<void> | unknown): void;
   notifyHooks(hookName: string, data: unknown): void;
 }
 

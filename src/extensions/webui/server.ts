@@ -52,14 +52,12 @@ export async function createWebuiServer(
   });
 
   // Create WebSocket server handler
+  const wsConfig = core.config?.websocket as Record<string, unknown> | undefined;
   const wsServer = createWsServer(core, {
     auth: authMiddleware,
-    sessionTimeoutMin: core.config?.websocket?.sessionTimeoutMin as
-      number | undefined,
-    questionTimeoutSecs: core.config?.websocket?.questionTimeoutSecs as
-      number | undefined,
-    questionStrategy: core.config?.websocket?.questionStrategy as
-      string | undefined,
+    sessionTimeoutMin: wsConfig?.sessionTimeoutMin as number | undefined,
+    questionTimeoutSecs: wsConfig?.questionTimeoutSecs as number | undefined,
+    questionStrategy: wsConfig?.questionStrategy as string | undefined,
   });
 
   // Start cleanup loops
@@ -97,7 +95,7 @@ export async function createWebuiServer(
           return Response.json({ error: "Invalid token" }, { status: 401 });
         }
         // Try to upgrade — Bun.serve handles the rest
-        const upgraded = server.upgrade(req, { data: { token, url: req.url } });
+        const upgraded = server.upgrade(req, { data: { token, url: req.url } as unknown as undefined });
         if (!upgraded) {
           return Response.json({ error: "Upgrade failed" }, { status: 400 });
         }
@@ -126,17 +124,18 @@ export async function createWebuiServer(
     // WebSocket handlers
     websocket: {
       open(ws) {
-        const { url } = ws.data as { url?: string };
+        const wsData = ws.data as unknown as { url?: string };
+        const { url } = wsData;
         wsServer.onUpgrade(
           { url: url || "", headers: { host: "localhost" } },
-          ws,
+          ws as unknown as WebSocket,
         );
       },
       message(ws, data) {
-        wsServer.onMessage(ws, data);
+        wsServer.onMessage(ws as unknown as WebSocket, data);
       },
       close(ws) {
-        wsServer.onClose(ws);
+        wsServer.onClose(ws as unknown as WebSocket);
       },
     },
   });

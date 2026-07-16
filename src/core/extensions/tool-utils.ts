@@ -251,7 +251,7 @@ export function toolResult(
   }
   if (typeof result === "object" && result !== null) {
     if (toolName) {
-      return xmlWrap(toolName, "success", result);
+      return xmlWrap(toolName, "success", result as Record<string, unknown>);
     }
     return JSON.stringify(result);
   }

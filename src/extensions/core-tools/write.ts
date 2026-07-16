@@ -239,7 +239,7 @@ export class WriteTool {
 /**
  * Validate mode-specific required parameters.
  */
-function validateMode(mode: string, { search, search_re, start_at, end_at }: WriteArgs): string | null {
+function validateMode(mode: string, { search, search_re, start_at, end_at }: Pick<WriteArgs, "search" | "search_re" | "start_at" | "end_at">): string | null {
   switch (mode) {
     case "overwrite":
       return null;

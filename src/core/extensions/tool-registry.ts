@@ -14,7 +14,8 @@ export interface ToolDef {
 
 export interface Tool {
   toToolDef?: () => ToolDef | Promise<ToolDef> | null;
-  [key: string]: unknown;
+  callDisplay?: (input: string | Record<string, unknown> | null) => string;
+  execute?: (input: string | Record<string, unknown> | null, ctx?: unknown) => Promise<unknown>;
 }
 
 /**

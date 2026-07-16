@@ -81,23 +81,26 @@ async function runOneShot(
     config,
     hooks: core.hooks,
     maxIterations: resolved.maxIterations,
-    taskProfile: resolved.taskProfile,
-    taskRole: resolved.taskDefaultRole,
+    taskProfile: resolved.taskProfile || "task-default",
+    taskRole: resolved.taskDefaultRole || "",
   });
 
   // Create SessionManager
   const sessionManager = await SessionManager.create({
-    hooks: core.hooks,
+    hooks: core.hooks as unknown as { notifyHooksAsync: (hookName: string, data: unknown) => Promise<void>; notifyHooks: (hookName: string, data: unknown) => void },
     extensions: core.extensions,
     buildAgent,
     initialConfig: { sessionId: cli.sessionId || null },
   });
 
   // Wire taskManager to sessionManager
-  taskManager.setSessionManager(sessionManager);
+  taskManager.setSessionManager(sessionManager as { getAgent: () => { abortSignal: AbortSignal | null; run: (description: string) => Promise<string | undefined>; notifyCompletion: (result: string) => void; addMessage: (msg: unknown) => void; followQueue?: string[] } | undefined });
 
   // Create MessageBus
-  const bus = new MessageBus({ sessionManager, sink });
+  const bus = new MessageBus({
+    sessionManager: sessionManager as unknown as { getAgent: () => { hooks: { runHookPipeline: (hookName: string, data: unknown, opts?: { shouldStop?: (result: unknown) => boolean }) => Promise<unknown> }; run: (text: string) => Promise<unknown>; resetCancel: () => void; cancel: () => void; getCommandRegistry: () => unknown; executeCommand: (cmd: unknown) => Promise<unknown> } | undefined },
+    sink,
+  });
 
   // Wire up task completion
   taskManager.setBus(bus);
@@ -132,7 +135,8 @@ async function handlePromptSubcommand(
   cli: CliArgs,
   core: CoreContext,
 ): Promise<number> {
-  const { config, buildConfig, resolved, modelRegistry } = core;
+  const { config, buildConfig, resolved } = core;
+  const modelRegistry = (core.resolved?.modelRegistry as Record<string, unknown>) || {};
 
   // Build output sink
   const palette = await CliOutputSink.resolve(
@@ -156,7 +160,7 @@ async function handlePromptSubcommand(
     stream: (resolved as ResolvedConfig).stream,
     chatTimeoutSecs: (resolved as ResolvedConfig).chatTimeout,
     maxRetries: (resolved as ResolvedConfig).maxRetries,
-    providers: (config.providers as unknown[]) || [],
+    providers: (config.providers as ProviderConfig[]) || [],
     markerMangler: new MarkerMangler(),
   });
 
@@ -168,17 +172,17 @@ async function handlePromptSubcommand(
       llmClient,
       model: (agentConfig.model as string) || (resolved as ResolvedConfig).model,
       maxIterations:
-        (agentConfig.maxIterations as number) || (resolved as ResolvedConfig).maxIterations,
-      maxTokens: (resolved as ResolvedConfig).maxTokens,
-      hideTools: agentConfig.hideTools ?? (resolved as ResolvedConfig).hideTools,
-      hideThinking: agentConfig.hideThinking ?? (resolved as ResolvedConfig).hideThinking,
-      showTokenUse: agentConfig.showTokenUse ?? (resolved as ResolvedConfig).showTokenUse,
-      sink: (agentConfig.sink as unknown) || sink,
-      modelRegistry: modelRegistry as Record<string, unknown>,
+        (agentConfig.maxIterations as number) || (resolved as ResolvedConfig).maxIterations || 100,
+      maxTokens: (resolved as ResolvedConfig).maxTokens || 4096,
+      hideTools: typeof agentConfig.hideTools === "boolean" ? agentConfig.hideTools : (resolved as ResolvedConfig).hideTools,
+      hideThinking: typeof agentConfig.hideThinking === "boolean" ? agentConfig.hideThinking : (resolved as ResolvedConfig).hideThinking,
+      showTokenUse: typeof agentConfig.showTokenUse === "boolean" ? agentConfig.showTokenUse : (resolved as ResolvedConfig).showTokenUse,
+      sink: (agentConfig.sink as { emit: (event: unknown) => void } | undefined) || sink,
+      modelRegistry: modelRegistry as { [key: string]: { maxTokens?: number; reasoningEffort?: string; [key: string]: unknown } },
       profileName: (agentConfig.profileName as string) || (resolved as ResolvedConfig).profileName,
       role: (agentConfig.role as string) || (resolved as ResolvedConfig).role,
       profileBody: (agentConfig.profileBody as string) || (resolved as ResolvedConfig).profileBody,
-      stream: agentConfig.stream ?? (resolved as ResolvedConfig).stream,
+      stream: typeof agentConfig.stream === "boolean" ? agentConfig.stream : (resolved as ResolvedConfig).stream,
       config,
       sessionId,
       abortSignal: (agentConfig.abortSignal as AbortSignal) || null,

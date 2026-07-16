@@ -45,7 +45,8 @@ export function create(core: CoreContext): ExtensionInstance {
       /**
        * Register /model and /models commands (if enabled).
        */
-      [HOOKS.COMMANDS_REGISTER]: async ({ registry }: { registry: CommandsRegisterPayload }) => {
+      [HOOKS.COMMANDS_REGISTER]: async (payload: CommandsRegisterPayload) => {
+        const { registry } = payload;
         if (config.commandEnabled === false) return;
 
         // /models — list available models

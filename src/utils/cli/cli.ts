@@ -10,6 +10,7 @@ import {
   applyCompacting,
   applyProgress,
   resolvePalette,
+  type PaletteOptions,
 } from "./colors.ts";
 
 const Modes = {
@@ -60,16 +61,6 @@ export interface CliOutputSinkOptions {
   hideUserMessage?: boolean;
   showTokenUse?: boolean;
   stream?: boolean;
-}
-
-export interface PaletteOptions {
-  thinking?: string;
-  tool_call?: string;
-  tool_result?: string;
-  final_response?: string;
-  compacting?: string;
-  progress?: string;
-  use_colors?: boolean;
 }
 
 /**
@@ -260,55 +251,55 @@ export class CliOutputSink extends OutputSink {
     return resolvePalette(theme, configPalette, null, useColors);
   }
 
-  emit(event: OutputEvent): void {
+  override emit(event: OutputEvent): void {
     const handler = EVENT_HANDLERS[event.type];
     if (handler && typeof (this as Record<string, unknown>)[handler] === "function") {
-      (this as Record<string, (event: OutputEvent) => void>)[handler](event);
+      ((this as unknown as Record<string, (event: OutputEvent) => void>)[handler] as (event: OutputEvent) => void)(event);
     }
   }
 
-  emitUserMessage(event: OutputEvent): void {
+  override emitUserMessage(event: OutputEvent): void {
     if (this.hideUserMessage) return;
     this._transitionTo(Modes.User);
     this._processContent(event.content as string);
   }
 
-  emitAssistantMessage(event: OutputEvent): void {
+  override emitAssistantMessage(event: OutputEvent): void {
     this._transitionTo(Modes.Default);
     this._processContent(event.content as string);
   }
 
-  emitThinking(event: OutputEvent): void {
+  override emitThinking(event: OutputEvent): void {
     if (this.hideThinking) return;
     this._transitionTo(Modes.Thinking);
     this._processContent(formatThinking(event.content as string, this.thinkerFormat));
   }
 
-  emitToolCall(event: OutputEvent): void {
+  override emitToolCall(event: OutputEvent): void {
     this._transitionTo(Modes.ToolCall);
     this._processContent(
       formatToolCall(event.toolName as string, event.input as string, this.toolFormat || "{}: {}"),
     );
   }
 
-  emitToolResult(event: OutputEvent): void {
+  override emitToolResult(event: OutputEvent): void {
     if (this.hideTools) return;
     this._transitionTo(Modes.ToolResult);
     this._processContent(formatToolResult(event.result as string, this.toolOutputFmt || "{}"));
   }
 
-  emitCompacting(event: OutputEvent): void {
+  override emitCompacting(event: OutputEvent): void {
     const display = formatCompacting(event.messageCount as number, event.keepRecent as number);
     this._transitionTo(Modes.System);
     this._processContent(`${display}\n-----------`);
   }
 
-  emitCommandResult(event: OutputEvent): void {
+  override emitCommandResult(event: OutputEvent): void {
     this._transitionTo(Modes.System);
     this._processContent(event.content as string);
   }
 
-  emitQuestion(event: OutputEvent): void {
+  override emitQuestion(event: OutputEvent): void {
     if (this.hideUserMessage) return;
     this._transitionTo(Modes.Question);
     const questions = event.questions as Array<{
@@ -337,7 +328,7 @@ export class CliOutputSink extends OutputSink {
     }
   }
 
-  emitStreamingChunk(event: OutputEvent): void {
+  override emitStreamingChunk(event: OutputEvent): void {
     if (this.stream) {
       // Detect transition from reasoning → normal
       if (this.#outputMode !== Modes.Default) {
@@ -347,7 +338,7 @@ export class CliOutputSink extends OutputSink {
     }
   }
 
-  emitStreamingReasoningChunk(event: OutputEvent): void {
+  override emitStreamingReasoningChunk(event: OutputEvent): void {
     if (this.hideThinking) return;
     // Thinking is streamed to stderr
     if (this.stream) {
@@ -359,14 +350,14 @@ export class CliOutputSink extends OutputSink {
     }
   }
 
-  emitTaskProgress(event: OutputEvent): void {
+  override emitTaskProgress(event: OutputEvent): void {
     const display = formatTaskProgress(event.activeTasks as number, event.totalTasks as number);
     if (!display) return;
     this._transitionTo(Modes.Progress);
     this._processContent(`[${applyProgress(display, this.palette)}]`);
   }
 
-  emitTokenUsage(event: OutputEvent): void {
+  override emitTokenUsage(event: OutputEvent): void {
     if (!this.showTokenUse) return;
     this._transitionTo(Modes.Progress);
     const display = formatTokenUsage(
@@ -378,7 +369,7 @@ export class CliOutputSink extends OutputSink {
     this._processContent(display);
   }
 
-  emitSessionState(event: OutputEvent): void {
+  override emitSessionState(event: OutputEvent): void {
     // React to agent state changes emitted by the agent
     switch (event.key as string) {
       case "hideTools":
@@ -390,7 +381,7 @@ export class CliOutputSink extends OutputSink {
     }
   }
 
-  reset(): void {
+  override reset(): void {
     this._flushNl();
     this.outStream.write("\x1b[0m\n");
   }

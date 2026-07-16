@@ -33,7 +33,8 @@ export async function create(core: CoreContext): Promise<ExtensionInstance> {
       /**
        * Register commands for prompts.
        */
-      [HOOKS.COMMANDS_REGISTER]: async ({ registry }: { registry: CommandsRegisterPayload }) => {
+      [HOOKS.COMMANDS_REGISTER]: async (payload: CommandsRegisterPayload) => {
+        const { registry } = payload;
         registry.register("prompt", {
           description: "Execute a prompt template (prompt:<name> [args])",
           matches: (cmd: string) =>

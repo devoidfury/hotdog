@@ -4,8 +4,8 @@
 // Also registers the `review` tool via tools:register hook.
 
 import { HOOKS } from "../../core/hooks.ts";
-import { CliOutputSink, PaletteOptions } from "../../utils/cli/cli.ts";
-import { ColorPalette } from "../../utils/cli/colors.ts";
+import { CliOutputSink } from "../../utils/cli/cli.ts";
+import { ColorPalette, type PaletteOptions } from "../../utils/cli/colors.ts";
 import { readSessionEntries } from "../session-log/index.ts";
 import { readdir, access, stat } from "node:fs/promises";
 import { homedir } from "node:os";
@@ -53,7 +53,7 @@ async function runReview(
   const sessionsDirPath = join(homedir(), ".cache", "hotdog", "sessions");
 
   const palette = await CliOutputSink.resolve(
-    cli.colors,
+    cli.colors ?? true,
     cli.theme,
     (config.colors as PaletteOptions) || null,
   );

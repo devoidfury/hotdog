@@ -34,7 +34,7 @@ export class Message {
    */
   constructor(opts: MessageParams = {}) {
     this.role = opts.role;
-    this.content = opts.content;
+    this.content = opts.content ?? undefined;
     this.reasoningContent = opts.reasoningContent ?? null;
     this.toolCalls = opts.toolCalls ?? null;
     this.toolCallId = opts.toolCallId ?? null;

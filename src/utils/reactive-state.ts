@@ -47,9 +47,9 @@ export function reactiveState<T>(initialValue: T): Atom<T> {
 
     // For primitives: skip if same value (prevents no-op re-triggers)
     // For objects: always fire because internal mutation can't be tracked
-    if (!isObjectLike(newValue) && newValue === currentValue) return currentValue;
+    if (newValue !== undefined && !isObjectLike(newValue) && newValue === currentValue) return currentValue;
 
-    currentValue = newValue;
+    currentValue = newValue as T;
 
     // Run every registered effect synchronously
     for (const fn of effects) {

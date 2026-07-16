@@ -1,3 +1,4 @@
+/// <reference lib="dom" />
 // Login screen component — API key input → POST /login → store token.
 
 interface LoginConfig {
@@ -39,7 +40,12 @@ export function initLogin({ onLogin }: LoginConfig): void {
       });
 
       if (!res.ok) {
-        const err = await res.json().catch<LoginError>(() => ({ error: "Login failed" }));
+        let err: LoginError = { error: "Login failed" };
+        try {
+          err = (await res.json()) as LoginError;
+        } catch {
+          // keep default error message
+        }
         showError(errorEl, err.error || `Status ${res.status}`);
         input.disabled = false;
         btn.textContent = originalText;

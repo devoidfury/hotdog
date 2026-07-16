@@ -48,7 +48,7 @@ export function parseFrontMatter(content: string): ParsedFrontMatter | null {
   const m = content.replaceAll("\r", "").match(FRONTMATTER_RE);
   if (!m || !m[1]) return null;
   const body = m[2] || "";
-  const fm = YAML.parse(m[1]);
+  const fm = YAML.parse(m[1]) as Record<string, unknown> | undefined;
   return { frontMatter: fm, body };
 }
 const FRONTMATTER_RE = /^-{3,}\n([\s\S]*?)\n-{3,}\n?([\s\S]*)$/;
@@ -172,7 +172,7 @@ export function validateCwdBoundary(
 export function correctCommonPathMistakes(
   strPath: string,
   dirPath?: string,
-): [string, string] {
+): [string, string | undefined] {
   if (strPath === "/.") strPath = "./";
   if (dirPath === "/.") dirPath = "./";
 

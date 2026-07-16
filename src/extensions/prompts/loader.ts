@@ -30,8 +30,8 @@ export function parsePromptFromMd(
     throw ParseError.FrontmatterNotFound();
   }
 
-  const fm = parsed.frontMatter;
-  const body = parsed.body;
+  const fm = parsed.frontMatter || {};
+  const body = parsed.body || "";
 
   // Validate description
   const description = fm.description as string | undefined;

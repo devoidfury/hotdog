@@ -14,11 +14,11 @@ interface McpToolDefinition {
  * A tool that wraps an MCP server tool.
  */
 export class McpTool {
-  private readonly #serverName: string;
-  private readonly #toolName: string;
-  private readonly #toolDef: McpToolDefinition;
-  private readonly #connection: McpConnectionHandle;
-  private readonly #registeredName: string;
+  readonly #serverName: string;
+  readonly #toolName: string;
+  readonly #toolDef: McpToolDefinition;
+  readonly #connection: McpConnectionHandle;
+  readonly #registeredName: string;
 
   /**
    * Create a new McpTool from an MCP tool definition.

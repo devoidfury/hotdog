@@ -13,7 +13,7 @@ import {
 } from "../../src/core/extensions/extensions.ts";
 
 describe("discoverExtensionsInDir", async () => {
-  let discoverExtensionsInDir;
+  let discoverExtensionsInDir: typeof import("../../src/core/extensions/extensions.ts").discoverExtensionsInDir;
 
   beforeAll(async () => {
     const mod = await import("../../src/core/extensions/extensions.ts");
@@ -93,7 +93,7 @@ describe("discoverExtensionsInDir", async () => {
 });
 
 describe("getExtensionConfigDefaults", async () => {
-  let getExtensionConfigDefaults;
+  let getExtensionConfigDefaults: typeof import("../../src/core/extensions/extensions.ts").getExtensionConfigDefaults;
 
   beforeAll(async () => {
     const mod = await import("../../src/core/extensions/extensions.ts");
@@ -120,7 +120,7 @@ describe("getExtensionConfigDefaults", async () => {
 });
 
 describe("getExtensionConfigSchemas", async () => {
-  let getExtensionConfigSchemas;
+  let getExtensionConfigSchemas: typeof import("../../src/core/extensions/extensions.ts").getExtensionConfigSchemas;
 
   beforeAll(async () => {
     const mod = await import("../../src/core/extensions/extensions.ts");
@@ -139,7 +139,7 @@ describe("getExtensionConfigSchemas", async () => {
 });
 
 describe("getExtensionsToLoad", async () => {
-  let getExtensionsToLoad;
+  let getExtensionsToLoad: typeof import("../../src/core/extensions/extensions.ts").getExtensionsToLoad;
 
   beforeAll(async () => {
     const mod = await import("../../src/core/extensions/extensions.ts");
@@ -151,7 +151,7 @@ describe("getExtensionsToLoad", async () => {
       ["builtins"],
       true,
       [],
-      null,
+      undefined,
     );
     expect(Array.isArray(result)).toBe(true);
     expect(result.length).toBeGreaterThan(0);
@@ -162,7 +162,7 @@ describe("getExtensionsToLoad", async () => {
       ["builtins"],
       false,
       [],
-      null,
+      undefined,
     );
     expect(result).toEqual([]);
   });
@@ -172,7 +172,7 @@ describe("getExtensionsToLoad", async () => {
       ["builtins"],
       false,
       ["core-tools"],
-      null,
+      undefined,
     );
     expect(Array.isArray(result)).toBe(true);
     // Should include core-tools and its dependencies
@@ -205,7 +205,7 @@ describe("getExtensionsToLoad", async () => {
   });
 
   it("handles empty extension paths", async () => {
-    const result = await getExtensionsToLoad([], true, [], null);
+    const result = await getExtensionsToLoad([], true, [], undefined);
     expect(result).toEqual([]);
   });
 
@@ -214,7 +214,7 @@ describe("getExtensionsToLoad", async () => {
       ["/nonexistent/path"],
       true,
       [],
-      null,
+      undefined,
     );
     expect(result).toEqual([]);
   });
@@ -223,7 +223,7 @@ describe("getExtensionsToLoad", async () => {
 describe("resolveExtensionDependencies — additional cases", () => {
   it("handles missing extension in allDiscovered", () => {
     const selected = [{ name: "missing", loadOrder: 1, dependsOn: [], requires: {}, services: {}, provides: [] }];
-    const result = resolveExtensionDependencies(selected, []);
+    const result = resolveExtensionDependencies(selected as any, []);
     expect(result).toEqual([]);
   });
 
@@ -231,7 +231,7 @@ describe("resolveExtensionDependencies — additional cases", () => {
     const allDiscovered = [
       { name: "a", loadOrder: 1, dependsOn: ["nonexistent"], requires: {}, services: {}, provides: [] },
     ];
-    const result = resolveExtensionDependencies(allDiscovered, allDiscovered);
+    const result = resolveExtensionDependencies(allDiscovered as any, allDiscovered as any);
     expect(result.map((e) => e.name)).toEqual(["a"]);
   });
 
@@ -241,7 +241,7 @@ describe("resolveExtensionDependencies — additional cases", () => {
       { name: "b", loadOrder: 1, dependsOn: ["a"], requires: {}, services: {}, provides: [] },
     ];
     // This should not infinite loop
-    const result = resolveExtensionDependencies(allDiscovered, allDiscovered);
+    const result = resolveExtensionDependencies(allDiscovered as any, allDiscovered as any);
     expect(result.length).toBeGreaterThan(0);
   });
 
@@ -264,8 +264,8 @@ describe("resolveExtensionDependencies — additional cases", () => {
         provides: [],
       },
     ];
-    const selected = [allDiscovered.find((e) => e.name === "consumer")];
-    const result = resolveExtensionDependencies(selected, allDiscovered);
+    const selected = [allDiscovered.find((e) => e.name === "consumer")] as any[];
+    const result = resolveExtensionDependencies(selected, allDiscovered as any);
     const names = result.map((e) => e.name);
     expect(names).toContain("provider");
     expect(names).toContain("consumer");
@@ -298,10 +298,10 @@ describe("resolveExtensionDependencies — additional cases", () => {
         provides: [],
       },
     ];
-    const selected = [allDiscovered.find((e) => e.name === "consumer")];
+    const selected = [allDiscovered.find((e) => e.name === "consumer")] as any[];
     const result = resolveExtensionDependencies(
       selected,
-      allDiscovered,
+      allDiscovered as any,
       { myService: "provider-b" },
     );
     const names = result.map((e) => e.name);
@@ -319,13 +319,13 @@ describe("resolveExtensionDependencies — additional cases", () => {
         provides: [],
       },
     ];
-    const result = resolveExtensionDependencies(allDiscovered, allDiscovered);
+    const result = resolveExtensionDependencies(allDiscovered as any, allDiscovered as any);
     expect(result.map((e) => e.name)).toEqual(["a"]);
   });
 });
 
 describe("registerExtensionMetadata", async () => {
-  let registerExtensionMetadata;
+  let registerExtensionMetadata: typeof import("../../src/core/extensions/extensions.ts").registerExtensionMetadata;
 
   beforeAll(async () => {
     const mod = await import("../../src/core/extensions/extensions.ts");
@@ -333,25 +333,25 @@ describe("registerExtensionMetadata", async () => {
   });
 
   function createMockConfigRegistry() {
-    const flags = [];
-    const params = [];
-    const schemas = new Map();
+    const flags: any[] = [];
+    const params: any[] = [];
+    const schemas = new Map<string, any>();
     return {
-      registerCliFlags: (f) => flags.push(...f),
-      registerConfigParams: (p) => params.push(...p),
-      registerConfigSchema: (key, schema) => schemas.set(key, schema),
-      getConfigSchema: (key) => schemas.get(key) || null,
+      registerCliFlags: (f: any[]) => flags.push(...f),
+      registerConfigParams: (p: any[]) => params.push(...p),
+      registerConfigSchema: (key: string, schema: any) => schemas.set(key, schema),
+      getConfigSchema: (key: string) => schemas.get(key) || undefined,
       _flags: flags,
       _params: params,
-    };
+    } as any;
   }
 
   function createMockSubcommandRegistry() {
-    const subcommands = {};
+    const subcommands: Record<string, any> = {};
     return {
-      register: (name, def) => { subcommands[name] = def; },
+      register: (name: string, def: any) => { subcommands[name] = def; },
       _subcommands: subcommands,
-    };
+    } as any;
   }
 
   it("registers CLI flags from extensions", async () => {
@@ -415,9 +415,9 @@ describe("registerExtensionMetadata", async () => {
     const configRegistry = createMockConfigRegistry();
     const subcommandRegistry = createMockSubcommandRegistry();
 
-    // Should not throw with null config
+    // Should not throw with undefined config
     try {
-      await registerExtensionMetadata(null, configRegistry, subcommandRegistry);
+      await registerExtensionMetadata(null as any, configRegistry, subcommandRegistry);
     } catch (e) {
       // May throw depending on implementation — either way it's handled
     }
@@ -425,7 +425,7 @@ describe("registerExtensionMetadata", async () => {
 });
 
 describe("ExtensionLoader — additional methods", () => {
-  let ExtensionLoader;
+  let ExtensionLoader: typeof import("../../src/core/extensions/extensions.ts").ExtensionLoader;
 
   beforeAll(async () => {
     const mod = await import("../../src/core/extensions/extensions.ts");
@@ -439,7 +439,9 @@ describe("ExtensionLoader — additional methods", () => {
       hooks: new HookSystem(),
       toolRegistry: new ToolRegistry(),
       services: { register: () => {}, has: () => false },
-    };
+      configRegistry: {} as any,
+      cliSubcommandRegistry: {} as any,
+    } as any;
   }
 
   it("entryPoints returns entry point paths", async () => {
@@ -566,7 +568,7 @@ describe("ExtensionLoader — additional methods", () => {
 
   it("unload removes hook handlers", async () => {
     const core = await createMockCore();
-    let calls = [];
+    const calls: number[] = [];
     await new ExtensionLoader(core).load("test", {
       create: () => ({
         hooks: {
@@ -587,7 +589,7 @@ describe("ExtensionLoader — additional methods", () => {
     core.hooks.notifyHooks("test:hook", {});
     expect(calls).toContain(2);
     await loader.unload("test2");
-    calls = [];
+    calls.length = 0;
     core.hooks.notifyHooks("test:hook", {});
     // test2's handler should be removed
   });
@@ -613,7 +615,7 @@ describe("ExtensionLoader — additional methods", () => {
     await loader.load("test", {
       create: () => ({
         hooks: {
-          "services:register": (registry) => { servicesRegistered = true; },
+          "services:register": (_registry: any) => { servicesRegistered = true; },
         },
       }),
     });
@@ -627,7 +629,7 @@ describe("ExtensionLoader — additional methods", () => {
     await loader.load("test", {
       create: () => ({
         hooks: {
-          "tools:register": async (registry) => { toolsRegistered = true; },
+          "tools:register": async (_registry: any) => { toolsRegistered = true; },
         },
       }),
     });
@@ -640,7 +642,7 @@ describe("ExtensionLoader — additional methods", () => {
     const loader = new ExtensionLoader(core);
     await loader.load("test", {
       create: () => ({
-        registerTools: async (registry) => { toolsRegistered = true; },
+        registerTools: async (_registry: any) => { toolsRegistered = true; },
       }),
     });
     expect(toolsRegistered).toBe(true);

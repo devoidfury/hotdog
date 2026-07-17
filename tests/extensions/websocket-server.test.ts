@@ -55,8 +55,9 @@ describe("SessionRegistry", () => {
     });
 
     it("wires agent sink to fanout", async () => {
-      await registry.create();
-      expect(mockAgent.setSink).toHaveBeenCalled();
+      const result = await registry.create();
+      // Source assigns agent.sink directly (no setSink method)
+      expect((result.agent as any).sink).toBeInstanceOf(FanoutSink);
     });
 
     it("starts bus run loop", async () => {

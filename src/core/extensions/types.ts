@@ -88,7 +88,7 @@ export interface HookPayloads {
 
   // Turn lifecycle
   "turn:start": { turnIndex: number; timestamp: number; agent: Agent };
-  "turn:end": { turnIndex: number; message: string; toolResults: Array<{ toolName: string; input: string; result: string }>; stopped: boolean; agent: Agent };
+  "turn:end": { turnIndex: number; message: string; toolResults: Array<{ toolName: string; input: string; result: string }>; stopped: boolean; cancelled?: boolean; agent: Agent };
 
   // Logging
   "log": { level: string; message: string; metadata?: Record<string, unknown> };

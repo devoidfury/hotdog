@@ -1,0 +1,23 @@
+{
+  "name": "loop",
+  "loadOrder": 10,
+  "description": "/loop slash command — repeatedly run a prompt until cancelled",
+  "configSchema": {
+    "loop": {
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Whether the /loop command is available"
+        },
+        "maxLoops": {
+          "type": "number",
+          "default": -1,
+          "description": "Maximum number of loops (-1 = unlimited)"
+        }
+      },
+      "additionalProperties": false
+    }
+  }
+}

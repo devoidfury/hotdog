@@ -453,12 +453,14 @@ export const HOOKS = {
   // Enables: per-turn metrics, timing, analytics.
   TURN_START: "turn:start",
 
-  // Turn end — emitted at the end of each agent loop iteration.
-  // Handlers receive { turnIndex, message, toolResults, stopped, agent } as notification.
-  // - message: the assistant's text response (may be empty if only tool calls)
+  // Turn end — emitted at the end of each agent loop iteration, and always
+  // emitted with stopped: true when the agent exits (even on cancellation).
+  // Handlers receive { turnIndex, message, toolResults, stopped, cancelled, agent } as notification.
+  // - message: the assistant's text response (may be empty if only tool calls or cancelled)
   // - toolResults: array of { toolName, input, result } for tools executed this turn
   // - stopped: boolean indicating if the agent has finished processing (true) or
   //   will continue to the next iteration (false)
+  // - cancelled: boolean indicating if processing ended due to cancellation (default: false)
   // Enables: per-turn analysis, cost tracking, audit logging, UI prompt control.
   TURN_END: "turn:end",
 

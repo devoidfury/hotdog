@@ -31,6 +31,7 @@ Commands:
   /quit, /exit  - Exit
   /help         - Show help
   /clear        - Clear context
+  /loop <prompt> - Repeatedly run prompt until cancelled
   /model <name> - Switch model
   /models       - List available models
   /tokens       - Show token usage
@@ -424,6 +425,16 @@ export async function runInteractiveSession(
 
   // Wire up task completion
   taskManager.setBus(bus);
+
+  // Wire enqueue callback so the agent (and extensions via hooks)
+  // can queue messages on the bus for later processing.
+  const initialAgent = sessionManager.getAgent();
+  if (initialAgent) {
+    const anyAgent = initialAgent as unknown as Record<string, unknown>;
+    if (typeof anyAgent.setEnqueueCallback === "function") {
+      anyAgent.setEnqueueCallback((text: string) => bus.enqueue(text));
+    }
+  }
 
   // Print info
   const agent = sessionManager.getAgent();

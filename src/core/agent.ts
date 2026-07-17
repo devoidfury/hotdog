@@ -91,6 +91,12 @@ export interface AgentOptions {
   toolWhitelist?: string[] | null;
   commandRegistry?: AgentCommandRegistry;
   systemPromptBuilder?: SystemPromptBuilder;
+  /**
+   * Optional callback to enqueue a message on the owning MessageBus.
+   * Set by the MessageBus after agent construction so the agent (and
+   * extensions via hooks) can queue messages for later processing.
+   */
+  enqueueCallback?: (text: string) => void;
 }
 
 /**
@@ -126,6 +132,7 @@ export class Agent {
   #commandRegistry: AgentCommandRegistry;
   #tokenUsage: TokenUsage;
   #systemPromptBuilder: SystemPromptBuilder;
+  #enqueueCallback: ((text: string) => void) | null;
 
   /**
    * @param options
@@ -208,6 +215,9 @@ export class Agent {
     // System prompt builder — manages system prompt lifecycle
     this.#systemPromptBuilder =
       options.systemPromptBuilder || createSystemPromptBuilder();
+    // Enqueue callback — set by the owning MessageBus so the agent
+    // (and extensions via hooks) can queue messages for processing.
+    this.#enqueueCallback = options.enqueueCallback || null;
   }
 
   // ── Properties ────────────────────────────────────────────────────────────
@@ -437,6 +447,30 @@ export class Agent {
     this.#sink = sink;
   }
 
+  /**
+   * Enqueue a message on the owning MessageBus for later processing.
+   * No-op if no enqueue callback is configured (e.g., standalone agent).
+   * Used by extensions (via hooks) to queue follow-up messages.
+   *
+   * @param text — Message text to enqueue
+   */
+  enqueue(text: string): void {
+    if (this.#enqueueCallback) {
+      this.#enqueueCallback(text);
+    }
+  }
+
+  /**
+   * Set the enqueue callback after construction.
+   * Used by the MessageBus to wire itself into the agent.
+   *
+   * @param cb — Function to call when a message should be enqueued,
+   *   or null to clear the callback.
+   */
+  setEnqueueCallback(cb: ((text: string) => void) | null): void {
+    this.#enqueueCallback = cb;
+  }
+
   // ── Run Loop ──────────────────────────────────────────────────────────────
 
   /**
@@ -447,17 +481,23 @@ export class Agent {
    * @returns Final text response, or undefined if tool calls
    */
   async run(userInput: string, images: ImageAttachment[] | null = null): Promise<string | undefined> {
-    // Ensure system prompt is built (e.g. after /clear or /regenerate)
-    await this.ensureSystemPrompt();
+    // Track whether TURN_END(stopped: true) was already emitted during
+    // normal processing. If not, the finally block emits it so extensions
+    // (e.g., loop) always get a completion signal even on cancellation.
+    let stoppedEmitted = false;
 
-    // Add user input to context
-    const userMsg = new Message({ role: "user", content: userInput, images: images as MessageImageAttachment[] | null });
-    this.addMessage(userMsg);
+    try {
+      // Ensure system prompt is built (e.g. after /clear or /regenerate)
+      await this.ensureSystemPrompt();
 
-    // Emit user message to output sinks so connected clients see it
-    this.emitOutput("user_message", { content: userInput });
+      // Add user input to context
+      const userMsg = new Message({ role: "user", content: userInput, images: images as MessageImageAttachment[] | null });
+      this.addMessage(userMsg);
 
-    let iteration = 0;
+      // Emit user message to output sinks so connected clients see it
+      this.emitOutput("user_message", { content: userInput });
+
+      let iteration = 0;
     while (iteration < this.#maxIterations) {
       iteration++;
       this.#iterationCount = iteration;
@@ -579,11 +619,13 @@ export class Agent {
           this._emitTokenUsage(response);
           if (outcome !== "continue") {
             // Turn end — agent has stopped (e.g., wait tool yielded control).
+            stoppedEmitted = true;
             await this.#hooks.notifyHooksAsync(HOOKS.TURN_END, {
               turnIndex: iteration,
               message: response.fullText,
               toolResults,
               stopped: true,
+              cancelled: false,
               agent: this,
             });
             return outcome;
@@ -594,6 +636,7 @@ export class Agent {
             message: response.fullText,
             toolResults,
             stopped: false,
+            cancelled: false,
             agent: this,
           });
         } else {
@@ -603,11 +646,13 @@ export class Agent {
             agent: this,
           });
           // Turn end (final response, no tools).
+          stoppedEmitted = true;
           await this.#hooks.notifyHooksAsync(HOOKS.TURN_END, {
             turnIndex: iteration,
             message: response.fullText,
             toolResults: [],
             stopped: true,
+            cancelled: false,
             agent: this,
           });
           return response.fullText;
@@ -620,6 +665,20 @@ export class Agent {
     }
 
     throw AgentError.MaxIterations(this.#maxIterations);
+  } finally {
+    // Ensure TURN_END(stopped: true) always fires so extensions
+    // (e.g., loop) get a completion signal even on cancellation or error.
+    if (!stoppedEmitted) {
+      await this.#hooks.notifyHooksAsync(HOOKS.TURN_END, {
+        turnIndex: this.#iterationCount,
+        message: "",
+        toolResults: [],
+        stopped: true,
+        cancelled: this.#cancelled,
+        agent: this,
+      });
+    }
+  }
   }
 
   /** Emit token usage — always accumulates session totals and saves last-reported values. */

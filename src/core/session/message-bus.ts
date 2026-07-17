@@ -6,7 +6,7 @@
 import { formatError, isExpectedError, LlmError } from "../error.ts";
 import { OUTPUT_EVENT, OutputEvent } from "../context/output.ts";
 import { HOOKS } from "../hooks.ts";
-import { parseCommand, ACTIONS, ParsedCommand } from "../commands.ts";
+import { parseCommand, ACTIONS, ParsedCommand, type CommandRegistryLike } from "../commands.ts";
 
 /** Minimal SessionManager interface for message bus usage. */
 export interface MessageBusSessionManager {
@@ -25,7 +25,7 @@ export interface MessageBusAgent {
   run(text: string): Promise<unknown>;
   resetCancel(): void;
   cancel(): void;
-  commandRegistry: unknown;
+  commandRegistry: CommandRegistryLike | undefined;
   executeCommand(cmd: ParsedCommand): Promise<unknown>;
 }
 

@@ -9,7 +9,7 @@
 
 import readline from "node:readline";
 import { spawn } from "node:child_process";
-import { parseCommand, Command, ACTIONS, ParsedCommand } from "../../core/commands.ts";
+import { parseCommand, Command, ACTIONS, ParsedCommand, type CommandRegistryLike } from "../../core/commands.ts";
 import { HOOKS } from "../../core/hooks.ts";
 import { CliOutputSink } from "../../utils/cli/cli.ts";
 import { LlmClient, type ProviderConfig } from "../../core/llm-client/client.ts";
@@ -419,7 +419,7 @@ export async function runInteractiveSession(
 
   // Create MessageBus
   const bus = new MessageBus({
-    sessionManager: sessionManager as unknown as { getAgent: () => { hooks: { runHookPipeline: (hookName: string, data: unknown, opts?: { shouldStop?: (result: unknown) => boolean }) => Promise<unknown> }; run: (text: string) => Promise<unknown>; resetCancel: () => void; cancel: () => void; commandRegistry: unknown; executeCommand: (cmd: unknown) => Promise<unknown> } | undefined },
+    sessionManager: sessionManager as unknown as { getAgent: () => { hooks: { runHookPipeline: (hookName: string, data: unknown, opts?: { shouldStop?: (result: unknown) => boolean }) => Promise<unknown> }; run: (text: string) => Promise<unknown>; resetCancel: () => void; cancel: () => void; commandRegistry: CommandRegistryLike | undefined; executeCommand: (cmd: unknown) => Promise<unknown> } | undefined },
     sink,
   });
 

@@ -12,14 +12,46 @@ import {
   CORE_COMMAND_HANDLERS,
 } from "../../src/core/command-handlers.ts";
 
+type TokenUsage = {
+  turns: number;
+  promptTokens: number;
+  cachedTokens: number;
+  completionTokens: number;
+  totalTokens: number;
+  lastPromptTokens?: number;
+  lastCachedTokens?: number;
+  lastCompletionTokens?: number;
+  lastTotalTokens?: number;
+};
+
+// ── Mock Agent Factory ────────────────────────────────────────────────
+
+function makeMockAgent(overrides: Record<string, unknown> = {}): Record<string, unknown> {
+  return {
+    cancelled: false,
+    clearContext: mock(async () => {}),
+    enqueue: mock((text: string) => {}),
+    getTokenUsage: mock((): TokenUsage => ({
+      promptTokens: 0, cachedTokens: 0, completionTokens: 0, totalTokens: 0,
+      turns: 0, lastPromptTokens: 0, lastCachedTokens: 0,
+      lastCompletionTokens: 0, lastTotalTokens: 0,
+    })),
+    hideTools: false,
+    hideThinking: false,
+    systemPrompt: null,
+    reasoningEffort: undefined,
+    ensureSystemPrompt: mock(async () => {}),
+    emitOutput: mock((type: string, data: Record<string, unknown>) => {}),
+    ...overrides,
+  };
+}
+
 // ── Handler Tests ──────────────────────────────────────────────────────
 
 describe("handleClear", () => {
   it("clears context and returns message", async () => {
-    const agent = {
-      clearContext: mock(async () => {}),
-    };
-    const result = await handleClear(agent, null);
+    const agent = makeMockAgent();
+    const result = await handleClear(agent as any, null);
     expect(result.content).toBe("Context cleared.");
     expect(agent.clearContext).toHaveBeenCalled();
   });
@@ -41,46 +73,25 @@ describe("handleHelp", () => {
 
 describe("handleTokens", () => {
   it("returns no-usage message when no turns recorded", () => {
-    const agent = {
-      getTokenUsage: mock(() => ({
-        promptTokens: 0,
-        cachedTokens: 0,
-        completionTokens: 0,
-        totalTokens: 0,
-        turns: 0,
-        lastPromptTokens: 0,
-        lastCachedTokens: 0,
-        lastCompletionTokens: 0,
-        lastTotalTokens: 0,
-      })),
-    };
-    const result = handleTokens(agent);
+    const agent = makeMockAgent();
+    const result = handleTokens(agent as any);
     expect(result.content).toContain("No token usage recorded");
   });
 
   it("displays accumulated totals with real prompt (prompt - cached)", () => {
-    const agent = {
-      getTokenUsage: mock(() => ({
-        // Accumulated: 2 calls, each with prompt=1000, cached=400, completion=200
-        promptTokens: 1200, // (1000-400) + (1000-400) = 1200 real prompt
-        cachedTokens: 800, // 400 + 400
-        completionTokens: 400, // 200 + 200
-        totalTokens: 2400, // 1200 + 800 + 400
-        turns: 2,
-        // Last-reported from the most recent provider call
-        lastPromptTokens: 1000,
-        lastCachedTokens: 400,
-        lastCompletionTokens: 200,
-        lastTotalTokens: 1600,
+    const agent = makeMockAgent({
+      getTokenUsage: mock((): TokenUsage => ({
+        promptTokens: 1200, cachedTokens: 800, completionTokens: 400, totalTokens: 2400,
+        turns: 2, lastPromptTokens: 1000, lastCachedTokens: 400,
+        lastCompletionTokens: 200, lastTotalTokens: 1600,
       })),
-    };
-    const result = handleTokens(agent);
+    });
+    const result = handleTokens(agent as any);
     expect(result.content).toContain("Token usage (2 turns):");
     expect(result.content).toContain("prompt:      1,200 tokens");
     expect(result.content).toContain("cached:      800 tokens");
     expect(result.content).toContain("completion:  400 tokens");
     expect(result.content).toContain("total:       2,400 tokens");
-    // cache hit: 800 / (1200 + 800) = 40.0%
     expect(result.content).toContain("cache hit:   40.0% of prompt tokens");
     expect(result.content).toContain("Last call:");
     expect(result.content).toContain("prompt:      1,000 tokens");
@@ -90,38 +101,26 @@ describe("handleTokens", () => {
   });
 
   it("handles single turn (no plural)", () => {
-    const agent = {
-      getTokenUsage: mock(() => ({
-        promptTokens: 100,
-        cachedTokens: 0,
-        completionTokens: 50,
-        totalTokens: 150,
-        turns: 1,
-        lastPromptTokens: 100,
-        lastCachedTokens: 0,
-        lastCompletionTokens: 50,
-        lastTotalTokens: 150,
+    const agent = makeMockAgent({
+      getTokenUsage: mock((): TokenUsage => ({
+        promptTokens: 100, cachedTokens: 0, completionTokens: 50, totalTokens: 150,
+        turns: 1, lastPromptTokens: 100, lastCachedTokens: 0,
+        lastCompletionTokens: 50, lastTotalTokens: 150,
       })),
-    };
-    const result = handleTokens(agent);
+    });
+    const result = handleTokens(agent as any);
     expect(result.content).toContain("Token usage (1 turn):");
   });
 
   it("omits cache hit line when real prompt tokens are zero", () => {
-    const agent = {
-      getTokenUsage: mock(() => ({
-        promptTokens: 0, // all prompt was cached
-        cachedTokens: 100,
-        completionTokens: 50,
-        totalTokens: 150,
-        turns: 1,
-        lastPromptTokens: 100,
-        lastCachedTokens: 100,
-        lastCompletionTokens: 50,
-        lastTotalTokens: 150,
+    const agent = makeMockAgent({
+      getTokenUsage: mock((): TokenUsage => ({
+        promptTokens: 0, cachedTokens: 100, completionTokens: 50, totalTokens: 150,
+        turns: 1, lastPromptTokens: 100, lastCachedTokens: 100,
+        lastCompletionTokens: 50, lastTotalTokens: 150,
       })),
-    };
-    const result = handleTokens(agent);
+    });
+    const result = handleTokens(agent as any);
     expect(result.content).not.toContain("cache hit");
   });
 });
@@ -129,11 +128,11 @@ describe("handleTokens", () => {
 describe("handleTools", () => {
   it("toggles hideTools from false to true", () => {
     const outputs: Array<{type: string; data: Record<string, unknown>}> = [];
-    const agent = {
+    const agent = makeMockAgent({
       hideTools: false,
       emitOutput: mock((type: string, data: Record<string, unknown>) => outputs.push({ type, data })),
-    };
-    const result = handleTools(agent);
+    });
+    const result = handleTools(agent as any);
     expect(agent.hideTools).toBe(true);
     expect(result.content).toContain("hidden");
     expect(outputs).toHaveLength(1);
@@ -142,11 +141,11 @@ describe("handleTools", () => {
 
   it("toggles hideTools from true to false", () => {
     const outputs: Array<{type: string; data: Record<string, unknown>}> = [];
-    const agent = {
+    const agent = makeMockAgent({
       hideTools: true,
       emitOutput: mock((type: string, data: Record<string, unknown>) => outputs.push({ type, data })),
-    };
-    const result = handleTools(agent);
+    });
+    const result = handleTools(agent as any);
     expect(agent.hideTools).toBe(false);
     expect(result.content).toContain("shown");
   });
@@ -155,11 +154,11 @@ describe("handleTools", () => {
 describe("handleThinking", () => {
   it("toggles hideThinking from false to true", () => {
     const outputs: Array<{type: string; data: Record<string, unknown>}> = [];
-    const agent = {
+    const agent = makeMockAgent({
       hideThinking: false,
       emitOutput: mock((type: string, data: Record<string, unknown>) => outputs.push({ type, data })),
-    };
-    const result = handleThinking(agent);
+    });
+    const result = handleThinking(agent as any);
     expect(agent.hideThinking).toBe(true);
     expect(result.content).toContain("hidden");
     expect(outputs).toHaveLength(1);
@@ -168,11 +167,11 @@ describe("handleThinking", () => {
 
   it("toggles hideThinking from true to false", () => {
     const outputs: Array<{type: string; data: Record<string, unknown>}> = [];
-    const agent = {
+    const agent = makeMockAgent({
       hideThinking: true,
       emitOutput: mock((type: string, data: Record<string, unknown>) => outputs.push({ type, data })),
-    };
-    const result = handleThinking(agent);
+    });
+    const result = handleThinking(agent as any);
     expect(agent.hideThinking).toBe(false);
     expect(result.content).toContain("shown");
   });
@@ -180,11 +179,8 @@ describe("handleThinking", () => {
 
 describe("handleRegenerate", () => {
   it("regenerates system prompt", async () => {
-    const agent = {
-      systemPrompt: "old prompt",
-      ensureSystemPrompt: mock(async () => {}),
-    };
-    const result = await handleRegenerate(agent);
+    const agent = makeMockAgent({ systemPrompt: "old prompt" });
+    const result = await handleRegenerate(agent as any);
     expect(agent.systemPrompt).toBeNull();
     expect(agent.ensureSystemPrompt).toHaveBeenCalled();
     expect(result.content).toBe("System prompt regenerated.");
@@ -193,20 +189,20 @@ describe("handleRegenerate", () => {
 
 describe("handleReasoning", () => {
   it("shows current reasoning effort when no value given", () => {
-    const agent = { reasoningEffort: "high" };
-    const result = handleReasoning(agent, "");
+    const agent = makeMockAgent({ reasoningEffort: "high" });
+    const result = handleReasoning(agent as any, "");
     expect(result.content).toContain("high");
   });
 
   it("shows '(not set)' when reasoning effort is undefined", () => {
-    const agent = { reasoningEffort: undefined };
-    const result = handleReasoning(agent, "");
+    const agent = makeMockAgent({ reasoningEffort: undefined });
+    const result = handleReasoning(agent as any, "");
     expect(result.content).toContain("not set");
   });
 
   it("sets reasoning effort to valid value", () => {
-    const agent: { reasoningEffort?: string } = { reasoningEffort: undefined };
-    const result = handleReasoning(agent, "low");
+    const agent = makeMockAgent({ reasoningEffort: undefined });
+    const result = handleReasoning(agent as any, "low");
     expect(agent.reasoningEffort).toBe("low");
     expect(result.content).toContain("low");
   });
@@ -214,23 +210,23 @@ describe("handleReasoning", () => {
   it("handles all valid values", () => {
     const valid = ["none", "minimal", "low", "high", "xhigh", "max"] as const;
     for (const v of valid) {
-      const agent = {} as { reasoningEffort?: string };
-      const result = handleReasoning(agent, v);
+      const agent = makeMockAgent({ reasoningEffort: undefined });
+      const result = handleReasoning(agent as any, v);
       expect(agent.reasoningEffort).toBe(v);
       expect(result.content).toContain(v);
     }
   });
 
   it("unsets reasoning effort", () => {
-    const agent: { reasoningEffort?: string } = { reasoningEffort: "high" };
-    const result = handleReasoning(agent, "unset");
+    const agent = makeMockAgent({ reasoningEffort: "high" });
+    const result = handleReasoning(agent as any, "unset");
     expect(agent.reasoningEffort).toBeUndefined();
     expect(result.content).toContain("unset");
   });
 
   it("returns error for invalid value", () => {
-    const agent: { reasoningEffort?: string } = {};
-    const result = handleReasoning(agent, "invalid");
+    const agent = makeMockAgent({});
+    const result = handleReasoning(agent as any, "invalid");
     expect(result.error).toContain("Invalid reasoning effort");
     expect(result.error).toContain("invalid");
     expect(result.error).toContain("none");

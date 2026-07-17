@@ -2,7 +2,9 @@
 // These are extracted from agent.ts so that agent.ts only does generic dispatch.
 // Each handler is a function (agent, value, cmd) => { content?, error? }.
 
-import { Command, ACTIONS, ParsedCommand } from "./commands.ts";
+import { Command, ACTIONS, type ParsedCommand } from "./commands.ts";
+import type { TokenUsage } from "./token-tracker.ts";
+import type { CommandAgent, CommandHandler } from "./extensions/registries.ts";
 
 export interface CommandResult {
   action?: number;
@@ -11,49 +13,24 @@ export interface CommandResult {
 }
 
 export interface CommandHandlerDef {
-  handler: (agent: unknown, value?: string | null, cmd?: ParsedCommand) => CommandResult | Promise<CommandResult>;
+  handler: CommandHandler;
   description: string;
   isUiCommand?: boolean;
 }
 
-// ── Agent Interface (public API contract) ───────────────────────────────────
-// These interfaces describe the public methods that command handlers need
-// from the Agent class, avoiding circular imports and anonymous type casts.
+// Re-export for external use
+export type { CommandHandler } from "./extensions/registries.ts";
 
-/** Token usage stats exposed by Agent.getTokenUsage() */
-interface TokenUsage {
-  promptTokens: number;
-  cachedTokens: number;
-  completionTokens: number;
-  totalTokens: number;
-  turns: number;
-  lastPromptTokens: number;
-  lastCachedTokens: number;
-  lastCompletionTokens: number;
-  lastTotalTokens: number;
-}
-
-/** Public API surface of Agent that command handlers rely on. */
-interface AgentHandle {
-  clearContext(): Promise<void>;
-  getTokenUsage(): TokenUsage;
-  hideTools: boolean;
-  hideThinking: boolean;
-  systemPrompt: string | null;
-  reasoningEffort: string | undefined;
-  ensureSystemPrompt(): Promise<void>;
-  emitOutput(type: string, data: Record<string, unknown>): void;
-}
+// ── Command Handlers ─────────────────────────────────────────────────────────
 
 /**
  * Handler for /clear — clears context and resets system prompt.
  *
  * @param agent - Agent instance.
- * @param value - Optional value (ignored).
+ * @param _value - Optional value (ignored).
  */
-export async function handleClear(agent: unknown, _value?: string | null): Promise<CommandResult> {
-  const a = agent as AgentHandle;
-  await a.clearContext();
+export async function handleClear(agent: CommandAgent, _value?: string | null): Promise<CommandResult> {
+  await agent.clearContext();
   return { action: ACTIONS.DISPLAY, content: "Context cleared." };
 }
 
@@ -76,9 +53,8 @@ export function handleHelp(): CommandResult {
  *
  * @param agent - Agent instance.
  */
-export function handleTokens(agent: unknown): CommandResult {
-  const a = agent as AgentHandle;
-  const u = a.getTokenUsage();
+export function handleTokens(agent: CommandAgent): CommandResult {
+  const u = agent.getTokenUsage();
   if (u.turns === 0) {
     return { action: ACTIONS.DISPLAY, content: "No token usage recorded yet." };
   }
@@ -124,16 +100,15 @@ export function handleTokens(agent: unknown): CommandResult {
  *
  * @param agent - Agent instance.
  */
-export function handleTools(agent: unknown): CommandResult {
-  const a = agent as AgentHandle;
-  a.hideTools = !a.hideTools;
-  a.emitOutput("session_state", {
+export function handleTools(agent: CommandAgent): CommandResult {
+  agent.hideTools = !agent.hideTools;
+  agent.emitOutput("session_state", {
     key: "hideTools",
-    value: a.hideTools,
+    value: agent.hideTools,
   });
   return {
     action: ACTIONS.DISPLAY,
-    content: `Tool display: ${a.hideTools ? "hidden" : "shown"}`,
+    content: `Tool display: ${agent.hideTools ? "hidden" : "shown"}`,
   };
 }
 
@@ -142,16 +117,15 @@ export function handleTools(agent: unknown): CommandResult {
  *
  * @param agent - Agent instance.
  */
-export function handleThinking(agent: unknown): CommandResult {
-  const a = agent as AgentHandle;
-  a.hideThinking = !a.hideThinking;
-  a.emitOutput("session_state", {
+export function handleThinking(agent: CommandAgent): CommandResult {
+  agent.hideThinking = !agent.hideThinking;
+  agent.emitOutput("session_state", {
     key: "hideThinking",
-    value: a.hideThinking,
+    value: agent.hideThinking,
   });
   return {
     action: ACTIONS.DISPLAY,
-    content: `Thinking display: ${a.hideThinking ? "hidden" : "shown"}`,
+    content: `Thinking display: ${agent.hideThinking ? "hidden" : "shown"}`,
   };
 }
 
@@ -160,10 +134,9 @@ export function handleThinking(agent: unknown): CommandResult {
  *
  * @param agent - Agent instance.
  */
-export async function handleRegenerate(agent: unknown): Promise<CommandResult> {
-  const a = agent as AgentHandle;
-  a.systemPrompt = null;
-  await a.ensureSystemPrompt();
+export async function handleRegenerate(agent: CommandAgent): Promise<CommandResult> {
+  agent.systemPrompt = null;
+  await agent.ensureSystemPrompt();
   return { action: ACTIONS.DISPLAY, content: "System prompt regenerated." };
 }
 
@@ -173,22 +146,21 @@ export async function handleRegenerate(agent: unknown): Promise<CommandResult> {
  * @param agent - Agent instance.
  * @param value - Reasoning effort level ("none", "minimal", "low", "high", "xhigh", "max", "unset").
  */
-export function handleReasoning(agent: unknown, value?: string | null): CommandResult {
-  const a = agent as AgentHandle;
+export function handleReasoning(agent: CommandAgent, value?: string | null): CommandResult {
   const valid = ["none", "minimal", "low", "high", "xhigh", "max", "unset"];
   if (!value) {
     const current =
-      a.reasoningEffort !== undefined
-        ? a.reasoningEffort
+      agent.reasoningEffort !== undefined
+        ? agent.reasoningEffort
         : "(not set, omitted from requests)";
     return { action: ACTIONS.DISPLAY, content: `Current reasoning effort: ${current}` };
   }
   if (value === "unset") {
-    a.reasoningEffort = undefined;
+    agent.reasoningEffort = undefined;
     return { action: ACTIONS.DISPLAY, content: "Reasoning effort unset (omitted from requests)." };
   }
   if (valid.includes(value)) {
-    a.reasoningEffort = value;
+    agent.reasoningEffort = value;
     return { action: ACTIONS.DISPLAY, content: `Reasoning effort set to: ${value}` };
   }
   return {

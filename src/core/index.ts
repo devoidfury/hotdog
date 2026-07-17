@@ -61,6 +61,7 @@ export * from "./context/message-log.ts";
 export * from "./agent.ts";
 export * from "./commands.ts";
 export * from "./command-handlers.ts";
+export * from "./token-tracker.ts";
 export * from "./session/index.ts";
 
 // Session components

@@ -132,7 +132,7 @@ describe("Model-switch extension", () => {
 
     const def = registry.get("models")!;
     const agent = createMockAgent(core.resolved.modelRegistry) as any;
-    const result = await def.handler!(agent);
+    const result = await def.handler!(agent, null);
 
     expect((result as any).content).toContain("Available models:");
     expect((result as any).content).toContain("model-a");
@@ -152,7 +152,7 @@ describe("Model-switch extension", () => {
 
     const def = registry.get("models")!;
     const agent = createMockAgent({}) as any;
-    const result = await def.handler!(agent);
+    const result = await def.handler!(agent, null);
 
     expect((result as any).content).toContain("No models configured");
   });

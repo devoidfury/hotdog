@@ -30,6 +30,16 @@ function createMockAgent() {
     wasContextCleared: () => contextCleared,
     enqueue: (text: string) => enqueued.push(text),
     getEnqueued: () => [...enqueued],
+    getTokenUsage: () => ({
+      promptTokens: 0, cachedTokens: 0, completionTokens: 0, totalTokens: 0,
+      turns: 0, lastPromptTokens: 0, lastCachedTokens: 0,
+      lastCompletionTokens: 0, lastTotalTokens: 0,
+    }),
+    hideTools: false,
+    hideThinking: false,
+    systemPrompt: null,
+    reasoningEffort: undefined,
+    ensureSystemPrompt: async () => {},
     emitOutput: (type: string, data: Record<string, unknown>) => {
       emitted.push({ type, content: (data.content as string) ?? "" });
     },

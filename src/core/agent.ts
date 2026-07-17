@@ -11,12 +11,13 @@ import { ACTIONS, ParsedCommand, Command } from "./commands.ts";
 import { logger } from "./logger.ts";
 import { ToolContext } from "./extensions/tool-context.ts";
 import { formatToolResult } from "./extensions/tool-utils.ts";
-import { createCommandRegistry, AgentCommandRegistry, type CommandDefinition } from "./extensions/registries.ts";
-import { CORE_COMMAND_HANDLERS, CommandHandlerDef } from "./command-handlers.ts";
+import { createCommandRegistry, AgentCommandRegistry } from "./extensions/registries.ts";
+import { CORE_COMMAND_HANDLERS } from "./command-handlers.ts";
 import { resolveModelConfig, type ModelConfig } from "./config/providers.ts";
 import { type CoreConfig } from "./config/schema-loader.ts";
 
 import { createSystemPromptBuilder } from "./context/system-prompt.ts";
+import { TokenTracker, createTokenTracker, type TokenUsage } from "./token-tracker.ts";
 
 import type { LlmClient, StreamEvent } from "./llm-client/client.ts";
 import type { ToolRegistry } from "./extensions/tool-registry.ts";
@@ -36,18 +37,6 @@ export interface ModelRegistry {
  * Typed model registry — maps model name to ModelConfig.
  */
 export type TypedModelRegistry = Record<string, ModelConfig>;
-
-export interface TokenUsage {
-  promptTokens: number;
-  cachedTokens: number;
-  completionTokens: number;
-  totalTokens: number;
-  turns: number;
-  lastPromptTokens: number;
-  lastCachedTokens: number;
-  lastCompletionTokens: number;
-  lastTotalTokens: number;
-}
 
 export interface OutputSink {
   emit(event: OutputEvent): void;
@@ -131,7 +120,7 @@ export class Agent {
   followQueue: string[];
   runAbortController: AbortController | null;
   commandRegistry: AgentCommandRegistry;
-  #tokenUsage: TokenUsage;
+  #tokenTracker: TokenTracker;
   #systemPromptBuilder: SystemPromptBuilder;
   enqueueCallback: ((text: string) => void) | null;
 
@@ -197,22 +186,10 @@ export class Agent {
     this.commandRegistry = options.commandRegistry || createCommandRegistry();
     // Register core built-in commands with their handlers
     for (const [type, def] of Object.entries(CORE_COMMAND_HANDLERS)) {
-      this.commandRegistry.register(type, def as unknown as CommandDefinition);
+      this.commandRegistry.register(type, def);
     }
     // Token usage tracking — accumulates session totals and saves last-reported values.
-    this.#tokenUsage = {
-      // Accumulated session totals (real prompt = prompt - cached).
-      promptTokens: 0,
-      cachedTokens: 0,
-      completionTokens: 0,
-      totalTokens: 0,
-      turns: 0,
-      // Last-reported values from the provider.
-      lastPromptTokens: 0,
-      lastCachedTokens: 0,
-      lastCompletionTokens: 0,
-      lastTotalTokens: 0,
-    };
+    this.#tokenTracker = createTokenTracker();
     // System prompt builder — manages system prompt lifecycle
     this.#systemPromptBuilder =
       options.systemPromptBuilder || createSystemPromptBuilder();
@@ -281,7 +258,7 @@ export class Agent {
    * last-reported values from the provider.
    */
   getTokenUsage(): TokenUsage {
-    return { ...this.#tokenUsage };
+    return this.#tokenTracker.getUsage();
   }
 
   /**
@@ -507,43 +484,11 @@ export class Agent {
   }
   }
 
-  /** Emit token usage — always accumulates session totals and saves last-reported values. */
+  /** Emit token usage — delegates to TokenTracker for accumulation and emits the event. */
   _emitTokenUsage(response: { usage?: Record<string, unknown> | null }): void {
-    if (response.usage && !(response.usage as Record<string, unknown>).__didEmitTokenUsage) {
-      (response.usage as Record<string, unknown>).__didEmitTokenUsage = true;
-      const u = response.usage as Record<string, unknown>;
-
-      // Per-call values from the provider.
-      const promptTokens = (u.prompt_tokens as number) || 0;
-      const cachedTokens = ((u.prompt_tokens_details as Record<string, unknown>)?.cached_tokens as number) || 0;
-      const completionTokens = (u.completion_tokens as number) || 0;
-      const totalTokens = (u.total_tokens as number) || 0;
-
-      // Accumulate session totals. Real prompt = prompt - cached (cached tokens are free).
-      this.#tokenUsage.promptTokens += promptTokens - cachedTokens;
-      this.#tokenUsage.cachedTokens += cachedTokens;
-      this.#tokenUsage.completionTokens += completionTokens;
-      this.#tokenUsage.totalTokens += totalTokens;
-      this.#tokenUsage.turns += 1;
-
-      // Save last-reported values for reference.
-      this.#tokenUsage.lastPromptTokens = promptTokens - cachedTokens;
-      this.#tokenUsage.lastCachedTokens = cachedTokens;
-      this.#tokenUsage.lastCompletionTokens = completionTokens;
-      this.#tokenUsage.lastTotalTokens = totalTokens;
-
-      this.emitOutput("token_usage", {
-        promptTokens: this.#tokenUsage.promptTokens,
-        cachedTokens: this.#tokenUsage.cachedTokens,
-        completionTokens: this.#tokenUsage.completionTokens,
-        totalTokens: this.#tokenUsage.totalTokens,
-        turns: this.#tokenUsage.turns,
-        lastPromptTokens: this.#tokenUsage.lastPromptTokens,
-        lastCachedTokens: this.#tokenUsage.lastCachedTokens,
-        lastCompletionTokens: this.#tokenUsage.lastCompletionTokens,
-        lastTotalTokens: this.#tokenUsage.lastTotalTokens,
-      });
-    }
+    this.#tokenTracker.record(response.usage, (usage) => {
+      this.emitOutput("token_usage", usage as unknown as Record<string, unknown>);
+    });
   }
 
   /**
@@ -997,17 +942,7 @@ export class Agent {
     this.log.clear();
     this.#systemPromptBuilder.clear();
     this.iterationCount = 0;
-    this.#tokenUsage = {
-      promptTokens: 0,
-      cachedTokens: 0,
-      completionTokens: 0,
-      totalTokens: 0,
-      turns: 0,
-      lastPromptTokens: 0,
-      lastCachedTokens: 0,
-      lastCompletionTokens: 0,
-      lastTotalTokens: 0,
-    };
+    this.#tokenTracker.clear();
     await this.ensureSystemPrompt();
   }
 

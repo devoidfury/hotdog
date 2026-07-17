@@ -12,6 +12,7 @@
 
 import { HOOKS } from "../../core/hooks.ts";
 import { ACTIONS } from "../../core/commands.ts";
+import { CommandAgent } from "../../core/extensions/registries.ts";
 import {
   CoreContext,
   ExtensionInstance,
@@ -26,13 +27,6 @@ interface LoopState {
   count: number;
   startTime: number;
   active: boolean;
-}
-
-interface LoopAgent {
-  cancelled: boolean;
-  clearContext(): Promise<void>;
-  enqueue(text: string): void;
-  emitOutput(type: string, data: Record<string, unknown>): void;
 }
 
 // ── Extension Entry Point ──────────────────────────────────────────────────
@@ -66,14 +60,14 @@ export function create(core: CoreContext): ExtensionInstance {
    * Emit output via the agent's sink (and hooks).
    * Uses emitOutput which routes to both the output sink and hook listeners.
    */
-  function emit(agent: LoopAgent, content: string): void {
+  function emit(agent: CommandAgent, content: string): void {
     agent.emitOutput("command_result", { content });
   }
 
   /**
    * Stop the loop and emit a summary.
    */
-  function stopLoop(agent: LoopAgent, cancelled: boolean): void {
+  function stopLoop(agent: CommandAgent, cancelled: boolean): void {
     loop.active = false;
     const elapsed = ((Date.now() - loop.startTime) / 1000).toFixed(1);
     const reason = cancelled ? " (cancelled by user)" : "";
@@ -91,7 +85,7 @@ export function create(core: CoreContext): ExtensionInstance {
         registry.register("loop", {
           description: "Loop a prompt until cancelled (loop <prompt>)",
           matches: (cmd: string) => cmd === "loop" || cmd.startsWith("loop "),
-          handler: async (_agent: LoopAgent, cmdValue: string | null) => {
+          handler: async (agent: CommandAgent, cmdValue: string | null) => {
             const prompt = (cmdValue ?? "").slice(5).trim();
 
             if (!prompt) {
@@ -107,11 +101,11 @@ export function create(core: CoreContext): ExtensionInstance {
             loop.startTime = Date.now();
             loop.active = true;
 
-            emit(_agent, `Starting loop with prompt: "${prompt}"`);
+            emit(agent, `Starting loop with prompt: "${prompt}"`);
 
             // Enqueue the first prompt — the TURN_END hook will re-enqueue
             // after each completion until the loop is stopped.
-            _agent.enqueue(prompt);
+            agent.enqueue(prompt);
 
             return {
               action: ACTIONS.DISPLAY,
@@ -130,7 +124,7 @@ export function create(core: CoreContext): ExtensionInstance {
       [HOOKS.TURN_END]: async (payload: Record<string, unknown>) => {
         const stopped = payload.stopped as boolean | undefined;
         const cancelled = payload.cancelled as boolean | undefined;
-        const agent = payload.agent as LoopAgent | undefined;
+        const agent = payload.agent as CommandAgent | undefined;
 
         if (!stopped || !agent || !loop.active) return;
 
@@ -172,7 +166,7 @@ export function create(core: CoreContext): ExtensionInstance {
        */
       [HOOKS.INPUT]: (payload: Record<string, unknown>) => {
         const text = payload.text as string | undefined;
-        const agent = payload.agent as LoopAgent | undefined;
+        const agent = payload.agent as CommandAgent | undefined;
 
         if (!loop.active || !text || !agent) return undefined;
 

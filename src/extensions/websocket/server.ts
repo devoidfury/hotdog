@@ -9,6 +9,7 @@ import type { ProviderConfig } from "../../core/llm-client/client.ts";
 import { FanoutSink, WebSocketOutputSink, BackgroundSink } from "./sinks.ts";
 import { C2S, S2C, C2SMessage } from "./protocol.ts";
 import { logger } from "../../core/logger.ts";
+import { type CommandRegistryLike } from "../../core/commands.ts";
 import type { CoreContext } from "../../core/extensions/types.ts";
 import type { AuthMiddleware } from "./auth.ts";
 
@@ -127,7 +128,7 @@ export class SessionRegistry {
 
     // Create the message bus
     const bus = new MessageBus({
-      sessionManager: sessionManager as unknown as { getAgent: () => { hooks: { runHookPipeline: (hookName: string, data: unknown, opts?: { shouldStop?: (result: unknown) => boolean }) => Promise<unknown> }; run: (text: string) => Promise<unknown>; resetCancel: () => void; cancel: () => void; commandRegistry: unknown; executeCommand: (cmd: unknown) => Promise<unknown> } | undefined },
+      sessionManager: sessionManager as unknown as { getAgent: () => { hooks: { runHookPipeline: (hookName: string, data: unknown, opts?: { shouldStop?: (result: unknown) => boolean }) => Promise<unknown> }; run: (text: string) => Promise<unknown>; resetCancel: () => void; cancel: () => void; commandRegistry: CommandRegistryLike | undefined; executeCommand: (cmd: unknown) => Promise<unknown> } | undefined },
       sink: fanout,
     });
 

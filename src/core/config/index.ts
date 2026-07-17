@@ -317,12 +317,12 @@ export function failOnInvalidConfig(result: ValidationResult): void {
 // ── Unified Config Builder ─────────────────────────────────────────────
 
 export interface CliArgv {
-  config?: string;
-  configDir?: string;
-  profilesPath?: string;
-  model?: string;
-  prompt?: string;
-  systemPromptTemplate?: string;
+  config?: string | null;
+  configDir?: string | null;
+  profilesPath?: string | null;
+  model?: string | null;
+  prompt?: string | null;
+  systemPromptTemplate?: string | null;
   [key: string]: unknown;
 }
 
@@ -353,9 +353,9 @@ export async function buildConfig(cliArgv: CliArgv): Promise<{
   modelRegistry: Record<string, ModelConfig>;
   providers: ProviderDef[];
 }> {
-  const configDir = resolveConfigDir(cliArgv.configDir);
+  const configDir = resolveConfigDir(cliArgv.configDir ?? undefined);
 
-  const config = await loadConfig(cliArgv.config, cliArgv.configDir);
+  const config = await loadConfig(cliArgv.config ?? undefined, cliArgv.configDir ?? undefined);
 
   const resolved = await buildAgentConfig({
     cli: cliArgv,
@@ -465,7 +465,7 @@ export async function buildAgentConfig(options: {
   );
 
   const model = resolveModel(
-    cli.model,
+    cli.model ?? undefined,
     (configProfile as { model?: string } | null)?.model,
     config.defaultModel as string | null | undefined,
     provider as { name: string; models: Array<{ name: string }> } | undefined | null,
@@ -486,7 +486,7 @@ export async function buildAgentConfig(options: {
 
   const systemPromptTemplate = await initSystemPromptTemplate(
     cli.systemPromptTemplate || config.systemPromptTemplate as string | undefined,
-    cli.configDir,
+    cli.configDir ?? undefined,
     resolveConfigDir,
   );
 

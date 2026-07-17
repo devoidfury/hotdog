@@ -3,6 +3,11 @@
 // menu items, API calls) is a UI implementation detail.
 // This module handles parsing raw command text into typed command objects.
 
+import type { CommandHandler, ParsedCommand as TypedParsedCommand } from "./extensions/registries.ts";
+
+// Re-export the typed ParsedCommand so consumers use the canonical definition
+export type { ParsedCommand } from "./extensions/registries.ts";
+
 /**
  * Built-in command type constants.
  * These are core commands that the agent always understands.
@@ -37,12 +42,18 @@ export const ACTIONS = {
 
 export type ActionFlag = (typeof ACTIONS)[keyof typeof ACTIONS];
 
-export interface ParsedCommand {
-  type: CommandType | string;
-  value: string | null;
-  _customCommand?: string;
-  _handler?: ((agent: unknown, value: string | null, cmd: ParsedCommand) => unknown) | null;
+// ── Command Registry Interface ───────────────────────────────────────────────
+
+/**
+ * Minimal command registry interface for parseCommand.
+ * Allows passing any registry that has match() and get() methods.
+ */
+export interface CommandRegistryLike {
+  match(cmd: string): string | null;
+  get(name: string): { handler?: CommandHandler } | undefined;
 }
+
+// ── Parsing ──────────────────────────────────────────────────────────────────
 
 /**
  * Parse a raw command string into a typed command object.
@@ -51,20 +62,22 @@ export interface ParsedCommand {
  * @param registry - Optional CommandRegistry for custom commands.
  * @returns Parsed command object { type, value }.
  */
-export function parseCommand(cmd: string | null | undefined, registry?: unknown): ParsedCommand {
+export function parseCommand(
+  cmd: string | null | undefined,
+  registry?: CommandRegistryLike,
+): TypedParsedCommand {
   if (!cmd) return { type: Command.Unknown, value: null };
 
   // Check custom commands first (via registry)
-  if (registry && typeof (registry as Record<string, unknown>).match === "function") {
-    const reg = registry as { match: (cmd: string) => string | null; get: (name: string) => unknown };
-    const customName = reg.match(cmd);
+  if (registry) {
+    const customName = registry.match(cmd);
     if (customName) {
-      const def = reg.get(customName) as { handler?: unknown } | undefined;
+      const def = registry.get(customName);
       return {
         type: customName,
         value: cmd,
         _customCommand: customName,
-        _handler: (def?.handler as ((agent: unknown, value: string | null, cmd: ParsedCommand) => unknown) | null) ?? null,
+        _handler: (def?.handler as CommandHandler | null) ?? null,
       };
     }
   }

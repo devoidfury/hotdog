@@ -14,6 +14,7 @@ import { TaskManager } from "../../core/session/task-manager.ts";
 import { SessionManager } from "../../core/session/index.ts";
 import { Agent } from "../../core/agent.ts";
 import { CoreContext, ExtensionInstance } from "../../core/extensions/types.ts";
+import { type CommandRegistryLike } from "../../core/commands.ts";
 
 // ── Types ──────────────────────────────────────────────────────────────────
 
@@ -98,7 +99,7 @@ async function runOneShot(
 
   // Create MessageBus
   const bus = new MessageBus({
-    sessionManager: sessionManager as unknown as { getAgent: () => { hooks: { runHookPipeline: (hookName: string, data: unknown, opts?: { shouldStop?: (result: unknown) => boolean }) => Promise<unknown> }; run: (text: string) => Promise<unknown>; resetCancel: () => void; cancel: () => void; commandRegistry: unknown; executeCommand: (cmd: unknown) => Promise<unknown> } | undefined },
+    sessionManager: sessionManager as unknown as { getAgent: () => { hooks: { runHookPipeline: (hookName: string, data: unknown, opts?: { shouldStop?: (result: unknown) => boolean }) => Promise<unknown> }; run: (text: string) => Promise<unknown>; resetCancel: () => void; cancel: () => void; commandRegistry: CommandRegistryLike | undefined; executeCommand: (cmd: unknown) => Promise<unknown> } | undefined },
     sink,
   });
 

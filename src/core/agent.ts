@@ -6,6 +6,7 @@ import { MessageLog } from "./context/message-log.ts";
 import { OUTPUT_EVENT, OutputEvent } from "./context/output.ts";
 import { formatError, AgentError, LlmError } from "./error.ts";
 import { HOOKS, HookSystem } from "./hooks.ts";
+import { isPromise } from "../utils/promise.ts";
 import { ACTIONS, ParsedCommand, Command } from "./commands.ts";
 import { logger } from "./logger.ts";
 import { ToolContext } from "./extensions/tool-context.ts";
@@ -1236,7 +1237,7 @@ export class Agent {
       { command: cmd, agent: this },
     );
     const lastResult = pipelineResult.lastResult;
-    if (lastResult && typeof ((lastResult as Promise<unknown>).then as Function) === "function") {
+    if (isPromise(lastResult)) {
       const awaited = await lastResult;
       if (awaited) return awaited as Record<string, unknown>;
     } else if (lastResult) {

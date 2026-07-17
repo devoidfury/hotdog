@@ -6,6 +6,7 @@
 
 import { formatError } from "./error.ts";
 import { logger } from "./logger.ts";
+import { isPromise } from "../utils/promise.ts";
 
 // ── Trace Helpers ────────────────────────────────────────────────────────────
 
@@ -160,7 +161,7 @@ export class HookSystem {
       const t0 = doTrace ? Date.now() : 0;
       try {
         const result = entry.handler(data);
-        if (result && typeof (result as Promise<unknown>).then === "function") {
+        if (isPromise(result)) {
           (result as Promise<unknown>).then(
             () => {
               if (doTrace && !this._isTraceDisabled(entry.source)) {
@@ -233,10 +234,7 @@ export class HookSystem {
       const t0 = doTrace ? Date.now() : 0;
       try {
         const result = entry.handler(data);
-        const resolved: unknown =
-          result && typeof (result as Promise<unknown>).then === "function"
-            ? await result
-            : result;
+        const resolved: unknown = isPromise(result) ? await result : result;
         if (resolved !== undefined) {
           results.push({ result: resolved, source: entry.source || null });
           lastResult = resolved;

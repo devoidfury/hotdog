@@ -1,6 +1,7 @@
 // Core module — the minimal foundation for the extension architecture.
 
 export * from "./hooks.ts";
+export { isPromise } from "../utils/promise.ts";
 export {
   logger,
   initializeLogger,

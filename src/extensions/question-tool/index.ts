@@ -14,6 +14,7 @@ import {
   defaultCallDisplay,
 } from "../../core/extensions/tool-utils.ts";
 import { NoopInput } from "../../core/context/input.ts";
+import { isPromise } from "../../utils/promise.ts";
 import { HOOKS } from "../../core/hooks.ts";
 import {
   CoreContext,
@@ -181,8 +182,8 @@ export class QuestionTool {
 
     // Collect answers via the input interface (may be async)
     let answers: QuestionAnswers = inputInterface.collectAnswers(questions) as QuestionAnswers;
-    if (answers && typeof (answers as unknown as Promise<QuestionAnswers>).then === "function") {
-      answers = await answers;
+    if (isPromise(answers)) {
+      answers = (await answers) as QuestionAnswers;
     }
 
     const mode = inputInterface.isInteractive() ? "interactive" : "non-interactive";

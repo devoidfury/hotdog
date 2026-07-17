@@ -35,3 +35,6 @@ export { camelCase, parseCliFlagKey } from "./strings.ts";
 
 // ── Gitignore filtering ──────────────────────────────────────────────────────
 export { compileGitignore } from "./gitignore.ts";
+
+// ── Promise utilities ────────────────────────────────────────────────────────
+export { isPromise } from "./promise.ts";

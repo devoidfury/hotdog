@@ -24,8 +24,8 @@ interface AgentHandle {
   profileName: string | undefined;
   modelRegistry: Record<string, unknown>;
   log: import("../../core/context/message-log.js").MessageLog;
-  setSink(sink: unknown): void;
-  getCommandRegistry(): unknown;
+  sink: unknown;
+  commandRegistry: unknown;
 }
 
 interface SessionMetadata {
@@ -127,12 +127,12 @@ export class SessionRegistry {
 
     // Create the message bus
     const bus = new MessageBus({
-      sessionManager: sessionManager as unknown as { getAgent: () => { hooks: { runHookPipeline: (hookName: string, data: unknown, opts?: { shouldStop?: (result: unknown) => boolean }) => Promise<unknown> }; run: (text: string) => Promise<unknown>; resetCancel: () => void; cancel: () => void; getCommandRegistry: () => unknown; executeCommand: (cmd: unknown) => Promise<unknown> } | undefined },
+      sessionManager: sessionManager as unknown as { getAgent: () => { hooks: { runHookPipeline: (hookName: string, data: unknown, opts?: { shouldStop?: (result: unknown) => boolean }) => Promise<unknown> }; run: (text: string) => Promise<unknown>; resetCancel: () => void; cancel: () => void; commandRegistry: unknown; executeCommand: (cmd: unknown) => Promise<unknown> } | undefined },
       sink: fanout,
     });
 
     // Wire agent's sink to the fanout so agent emits events to fanout
-    (agent as AgentHandle)?.setSink(fanout);
+    if (agent) (agent as AgentHandle).sink = fanout;
 
     // Start the bus run loop (non-blocking — it awaits messages as they arrive)
     const runLoop = bus.run().catch((err: unknown) => {
@@ -664,7 +664,7 @@ export function createWsServer(core: CoreContext, options: CreateWsServerOptions
     // Emit COMMANDS_REGISTER so extensions can register commands
     if (core.hooks) {
       core.hooks.notifyHooks(HOOKS.COMMANDS_REGISTER, {
-        registry: (agent as AgentHandle)?.getCommandRegistry(),
+        registry: (agent as AgentHandle)?.commandRegistry,
         agent,
       });
     }

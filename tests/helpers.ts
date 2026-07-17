@@ -503,7 +503,7 @@ export class MockAgent {
     if (this._runError) throw this._runError;
     return this._runResult;
   }
-  getCommandRegistry(): null { return null; }
+  commandRegistry: null = null;
   addMessage(msg: Message): void {
     this._log.push(msg);
   }

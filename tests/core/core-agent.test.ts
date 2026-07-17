@@ -838,7 +838,7 @@ describe('Agent — end-to-end loop', () => {
 
     it('should fall through to command registry', async () => {
       const { agent } = createFixture({});
-      const registry = agent.getCommandRegistry();
+      const registry = agent.commandRegistry;
       registry.register('test-cmd', { handler: async () => ({ content: 'registered' }) });
       const result = await agent.executeCommand({ type: 'test-cmd', value: '' });
       expect(result.content).toBe('registered');
@@ -926,15 +926,15 @@ describe('Agent — end-to-end loop', () => {
       const { agent } = createFixture({});
       const sink1 = { emit: () => {} };
       const sink2 = { emit: () => {} };
-      agent.setSink(sink1);
+      agent.sink = sink1;
       expect(agent.sink).toBe(sink1);
-      agent.setSink(sink2);
+      agent.sink = sink2;
       expect(agent.sink).toBe(sink2);
     });
 
     it('should accept null to detach sink', () => {
       const { agent } = createFixture({});
-      agent.setSink(null);
+      agent.sink = null;
       expect(agent.sink).toBeNull();
     });
   });
@@ -1406,7 +1406,7 @@ describe('Agent — end-to-end loop', () => {
     it('sink getter and setter', () => {
       const { agent } = createFixture({});
       const newSink = { emit: () => {} };
-      agent.setSink(newSink as any);
+      agent.sink = newSink as any;
       expect(agent.sink).toBe(newSink);
     });
   });

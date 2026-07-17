@@ -25,7 +25,7 @@ export interface MessageBusAgent {
   run(text: string): Promise<unknown>;
   resetCancel(): void;
   cancel(): void;
-  getCommandRegistry(): unknown;
+  commandRegistry: unknown;
   executeCommand(cmd: ParsedCommand): Promise<unknown>;
 }
 
@@ -346,7 +346,7 @@ export class MessageBus {
    */
   async executeCommand(cmdText: string): Promise<number | undefined> {
     const agent = this.#sessionManager.getAgent();
-    const cmd = parseCommand(cmdText, agent?.getCommandRegistry());
+    const cmd = parseCommand(cmdText, agent?.commandRegistry);
 
     if (!agent) {
       this.#sink.emit({

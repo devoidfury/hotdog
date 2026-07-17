@@ -104,36 +104,36 @@ export interface AgentOptions {
  * Minimal Agent that runs the LLM loop and delegates behavior to hooks.
  */
 export class Agent {
-  #hooks: HookSystem;
+  hooks: HookSystem;
   #toolRegistry: ToolRegistry;
-  #llmClient: LlmClient;
-  #log: MessageLog;
+  llmClient: LlmClient;
+  log: MessageLog;
   #model: string;
-  #maxIterations: number;
-  #contextLimit: number;
-  #hideTools: boolean;
-  #hideThinking: boolean;
-  #sink: OutputSink | null;
-  #modelRegistry: ModelRegistry;
-  #profileName: string | undefined;
-  #config: AgentConfig | null;
-  #sessionId: string;
-  #role: string | undefined;
-  #profileBody: string | undefined;
-  #stream: boolean;
-  #cancelled: boolean;
-  #iterationCount: number;
+  maxIterations: number;
+  contextLimit: number;
+  hideTools: boolean;
+  hideThinking: boolean;
+  sink: OutputSink | null;
+  modelRegistry: ModelRegistry;
+  profileName: string | undefined;
+  config: AgentConfig | null;
+  sessionId: string;
+  role: string | undefined;
+  profileBody: string | undefined;
+  stream: boolean;
+  cancelled: boolean;
+  iterationCount: number;
   #systemPrompt: string | null;
-  #reasoningEffort: string | undefined;
+  reasoningEffort: string | undefined;
   #isRestoring: boolean;
-  #abortSignal: AbortSignal | null;
-  #toolWhitelist: string[] | null;
-  #followQueue: string[];
-  #runAbortController: AbortController | null;
-  #commandRegistry: AgentCommandRegistry;
+  abortSignal: AbortSignal | null;
+  toolWhitelist: string[] | null;
+  followQueue: string[];
+  runAbortController: AbortController | null;
+  commandRegistry: AgentCommandRegistry;
   #tokenUsage: TokenUsage;
   #systemPromptBuilder: SystemPromptBuilder;
-  #enqueueCallback: ((text: string) => void) | null;
+  enqueueCallback: ((text: string) => void) | null;
 
   /**
    * @param options
@@ -164,40 +164,40 @@ export class Agent {
     if (options.contextLimit == null) {
       throw new Error("missing required contextLimit");
     }
-    this.#hooks = options.hooks;
+    this.hooks = options.hooks;
     this.#toolRegistry = options.toolRegistry;
-    this.#llmClient = options.llmClient;
-    this.#log = new MessageLog();
+    this.llmClient = options.llmClient;
+    this.log = new MessageLog();
     this.#model = options.model;
-    this.#maxIterations = options.maxIterations;
-    this.#contextLimit = options.contextLimit;
-    this.#hideTools = options.hideTools !== false;
-    this.#hideThinking = options.hideThinking === true;
-    this.#sink = options.sink || null;
-    this.#modelRegistry = options.modelRegistry || {};
-    this.#profileName = options.profileName;
-    this.#config = options.config || null;
-    this.#sessionId = options.sessionId || crypto.randomUUID();
-    this.#role = options.role;
-    this.#profileBody = options.profileBody;
-    this.#stream = options.stream !== false;
-    this.#cancelled = false;
-    this.#iterationCount = 0;
+    this.maxIterations = options.maxIterations;
+    this.contextLimit = options.contextLimit;
+    this.hideTools = options.hideTools !== false;
+    this.hideThinking = options.hideThinking === true;
+    this.sink = options.sink || null;
+    this.modelRegistry = options.modelRegistry || {};
+    this.profileName = options.profileName;
+    this.config = options.config || null;
+    this.sessionId = options.sessionId || crypto.randomUUID();
+    this.role = options.role;
+    this.profileBody = options.profileBody;
+    this.stream = options.stream !== false;
+    this.cancelled = false;
+    this.iterationCount = 0;
     this.#systemPrompt = null;
-    this.#reasoningEffort = undefined;
+    this.reasoningEffort = undefined;
     this.#isRestoring = false;
     // Task agent support
-    this.#abortSignal = options.abortSignal || null;
-    this.#toolWhitelist = options.toolWhitelist || null;
-    this.#followQueue = [];
+    this.abortSignal = options.abortSignal || null;
+    this.toolWhitelist = options.toolWhitelist || null;
+    this.followQueue = [];
     // AbortController for the current LLM request — created per iteration,
     // aborted on cancel() so the HTTP client properly terminates fetch().
-    this.#runAbortController = null;
+    this.runAbortController = null;
     // Command registry — extensions register commands here
-    this.#commandRegistry = options.commandRegistry || createCommandRegistry();
+    this.commandRegistry = options.commandRegistry || createCommandRegistry();
     // Register core built-in commands with their handlers
     for (const [type, def] of Object.entries(CORE_COMMAND_HANDLERS)) {
-      this.#commandRegistry.register(type, def as unknown as CommandDefinition);
+      this.commandRegistry.register(type, def as unknown as CommandDefinition);
     }
     // Token usage tracking — accumulates session totals and saves last-reported values.
     this.#tokenUsage = {
@@ -218,7 +218,7 @@ export class Agent {
       options.systemPromptBuilder || createSystemPromptBuilder();
     // Enqueue callback — set by the owning MessageBus so the agent
     // (and extensions via hooks) can queue messages for processing.
-    this.#enqueueCallback = options.enqueueCallback || null;
+    this.enqueueCallback = options.enqueueCallback || null;
   }
 
   // ── Properties ────────────────────────────────────────────────────────────
@@ -230,24 +230,24 @@ export class Agent {
     const oldModel = this.#model;
     this.#model = v;
     // Pull in the new model's config from the registry
-    const entry = this.#modelRegistry[v];
+    const entry = this.modelRegistry[v];
     if (entry) {
-      this.#contextLimit = (entry.contextLimit as number) ?? this.#contextLimit;
+      this.contextLimit = (entry.contextLimit as number) ?? this.contextLimit;
       // Reset reasoning effort to the new model's default —
       // the user can re-override via /reasoning if needed.
-      this.#reasoningEffort = entry.reasoningEffort as string | undefined;
+      this.reasoningEffort = entry.reasoningEffort as string | undefined;
     }
     // Clear tool def cache — different models may have different tool
     // requirements or capabilities, so stale definitions would be incorrect.
     this.#toolRegistry.clearToolDefs();
-    this.#hooks.notifyHooks(HOOKS.MODEL_CHANGE, {
+    this.hooks.notifyHooks(HOOKS.MODEL_CHANGE, {
       agent: this,
       oldModel,
       newModel: v,
     });
     // Emit through the output sink so connected WS clients get notified
-    if (this.#sink) {
-      this.#sink.emit({
+    if (this.sink) {
+      this.sink.emit({
         type: OUTPUT_EVENT.SESSION_STATE,
         key: "model",
         value: v,
@@ -262,103 +262,11 @@ export class Agent {
     const oldVal = this.#isRestoring;
     this.#isRestoring = v;
     if (oldVal !== v) {
-      this.#hooks.notifyHooks(HOOKS.SESSION_RESTORE_ACTIVE, {
+      this.hooks.notifyHooks(HOOKS.SESSION_RESTORE_ACTIVE, {
         agent: this,
         isRestoring: v,
       });
     }
-  }
-
-  /**
-   * The MessageLog instance — the canonical way to read or mutate messages.
-   */
-  get log(): MessageLog {
-    return this.#log;
-  }
-  get iterationCount(): number {
-    return this.#iterationCount;
-  }
-  /**
-   * Get token usage for this session — both accumulated totals and the
-   * last-reported values from the provider.
-   */
-  getTokenUsage(): TokenUsage {
-    return { ...this.#tokenUsage };
-  }
-  get sessionId(): string {
-    return this.#sessionId;
-  }
-  get cancelled(): boolean {
-    return this.#cancelled;
-  }
-  get hideTools(): boolean {
-    return this.#hideTools;
-  }
-  set hideTools(v: boolean) {
-    this.#hideTools = v;
-  }
-
-  get hideThinking(): boolean {
-    return this.#hideThinking;
-  }
-  set hideThinking(v: boolean) {
-    this.#hideThinking = v;
-  }
-
-  /**
-   * The profile name for this agent.
-   */
-  get profileName(): string | undefined {
-    return this.#profileName;
-  }
-
-  /**
-   * The config object reference.
-   */
-  get config(): AgentConfig | null {
-    return this.#config;
-  }
-
-  /**
-   * The tool whitelist restricting available tools.
-   */
-  get toolWhitelist(): string[] | null {
-    return this.#toolWhitelist;
-  }
-
-  /**
-   * The maximum number of agent loop iterations.
-   */
-  get maxIterations(): number {
-    return this.#maxIterations;
-  }
-
-  /**
-   * The context window limit for compaction.
-   */
-  get contextLimit(): number {
-    return this.#contextLimit;
-  }
-
-  /**
-   * The role description for this agent.
-   */
-  get role(): string | undefined {
-    return this.#role;
-  }
-
-  /**
-   * The profile body content.
-   */
-  get profileBody(): string | undefined {
-    return this.#profileBody;
-  }
-
-  /**
-   * Whether streaming is enabled.
-   */
-  get stream(): boolean {
-    return this.#stream;
   }
 
   /**
@@ -369,83 +277,11 @@ export class Agent {
   }
 
   /**
-   * Access to the hook system for extensions that need to run hook pipelines.
+   * Get token usage for this session — both accumulated totals and the
+   * last-reported values from the provider.
    */
-  get hooks(): HookSystem {
-    return this.#hooks;
-  }
-
-  /**
-   * Get/set the reasoning effort level.
-   */
-  get reasoningEffort(): string | undefined {
-    return this.#reasoningEffort;
-  }
-  set reasoningEffort(v: string | undefined) {
-    this.#reasoningEffort = v;
-  }
-
-  /**
-   * Get/set the abort signal for this agent (used by task agents).
-   */
-  get abortSignal(): AbortSignal | null {
-    return this.#abortSignal;
-  }
-  set abortSignal(signal: AbortSignal | null) {
-    this.#abortSignal = signal;
-  }
-
-  /**
-   * Get the model registry (exposed for extensions).
-   */
-  get modelRegistry(): ModelRegistry {
-    return this.#modelRegistry;
-  }
-
-  /**
-   * Get/set the follow-up message queue (used by task agents).
-   */
-  get followQueue(): string[] {
-    return this.#followQueue;
-  }
-  set followQueue(v: string[]) {
-    this.#followQueue = v;
-  }
-
-  /**
-   * Get/set the AbortController for the current LLM request.
-   * Exposed for testing cancellation behavior.
-   */
-  get runAbortController(): AbortController | null {
-    return this.#runAbortController;
-  }
-  set runAbortController(v: AbortController | null) {
-    this.#runAbortController = v;
-  }
-
-  /**
-   * The LLM client used for API calls.
-   */
-  get llmClient(): LlmClient {
-    return this.#llmClient;
-  }
-
-  /**
-   * Get the current output sink.
-   */
-  get sink(): OutputSink | null {
-    return this.#sink;
-  }
-
-  /**
-   * Replace the output sink at runtime.
-   * Allows the agent's event emissions to be re-routed (e.g., from a CLI sink
-   * to a fanout sink for WebSocket sessions) without reaching into private state.
-   *
-   * @param sink — The new output sink, or null to detach.
-   */
-  setSink(sink: OutputSink | null): void {
-    this.#sink = sink;
+  getTokenUsage(): TokenUsage {
+    return { ...this.#tokenUsage };
   }
 
   /**
@@ -456,20 +292,9 @@ export class Agent {
    * @param text — Message text to enqueue
    */
   enqueue(text: string): void {
-    if (this.#enqueueCallback) {
-      this.#enqueueCallback(text);
+    if (this.enqueueCallback) {
+      this.enqueueCallback(text);
     }
-  }
-
-  /**
-   * Set the enqueue callback after construction.
-   * Used by the MessageBus to wire itself into the agent.
-   *
-   * @param cb — Function to call when a message should be enqueued,
-   *   or null to clear the callback.
-   */
-  setEnqueueCallback(cb: ((text: string) => void) | null): void {
-    this.#enqueueCallback = cb;
   }
 
   // ── Run Loop ──────────────────────────────────────────────────────────────
@@ -499,28 +324,28 @@ export class Agent {
       this.emitOutput("user_message", { content: userInput });
 
       let iteration = 0;
-    while (iteration < this.#maxIterations) {
+    while (iteration < this.maxIterations) {
       iteration++;
-      this.#iterationCount = iteration;
+      this.iterationCount = iteration;
 
       // Turn start — emitted at the beginning of each agent loop iteration.
-      await this.#hooks.notifyHooksAsync(HOOKS.TURN_START, {
+      await this.hooks.notifyHooksAsync(HOOKS.TURN_START, {
         turnIndex: iteration,
         timestamp: Date.now(),
         agent: this,
       });
 
       // Check cancellation flags
-      if (this.#cancelled) {
+      if (this.cancelled) {
         throw LlmError.Cancelled("Agent cancelled");
       }
-      if (this.#abortSignal?.aborted) {
+      if (this.abortSignal?.aborted) {
         throw LlmError.Cancelled("Agent aborted");
       }
 
       // Drain follow-up queue (for task agents)
-      while (this.#followQueue.length > 0) {
-        const followUp = this.#followQueue.shift()!;
+      while (this.followQueue.length > 0) {
+        const followUp = this.followQueue.shift()!;
         const followUpMsg = new Message({ role: "user", content: followUp });
         this.addMessage(followUpMsg);
       }
@@ -529,7 +354,7 @@ export class Agent {
       let messages = this.buildMessages();
       // Context hook — sequential, modifiable. Each handler sees prior
       // transformations and can return { messages } to replace the array.
-      const contextResult = await this.#hooks.runHookPipeline(HOOKS.CONTEXT, {
+      const contextResult = await this.hooks.runHookPipeline(HOOKS.CONTEXT, {
         messages,
         agent: this,
       });
@@ -540,14 +365,14 @@ export class Agent {
       let toolDefs = await this.#toolRegistry.getToolDefs();
       let modelConfig = resolveModelConfig(
         this.#model,
-        this.#modelRegistry as unknown as Record<string, ModelConfig>,
-        this.#contextLimit,
-        this.#reasoningEffort,
+        this.modelRegistry as unknown as Record<string, ModelConfig>,
+        this.contextLimit,
+        this.reasoningEffort,
       );
 
       // Before provider request — sequential, modifiable. Extensions can
       // log the request, modify messages, change model config, or alter tools.
-      const reqResult = await this.#hooks.runHookPipeline(
+      const reqResult = await this.hooks.runHookPipeline(
         HOOKS.PROVIDER_REQUEST,
         {
           messages,
@@ -566,22 +391,22 @@ export class Agent {
       // Create an AbortController for this LLM request.
       // Pass its signal so the HTTP client can properly abort fetch()
       // when cancel() is called (e.g., Ctrl+C).
-      this.#runAbortController = new AbortController();
-      const cancelSignal = this.#runAbortController.signal;
+      this.runAbortController = new AbortController();
+      const cancelSignal = this.runAbortController.signal;
 
       // Also honor the external abortSignal (for task agents)
-      if (this.#abortSignal?.aborted) {
-        this.#runAbortController.abort();
-      } else if (this.#abortSignal) {
-        this.#abortSignal.addEventListener(
+      if (this.abortSignal?.aborted) {
+        this.runAbortController.abort();
+      } else if (this.abortSignal) {
+        this.abortSignal.addEventListener(
           "abort",
-          () => this.#runAbortController!.abort(),
+          () => this.runAbortController!.abort(),
           { once: true },
         );
       }
 
       try {
-        const stream = this.#llmClient.chatStreamCancellable(
+        const stream = this.llmClient.chatStreamCancellable(
           messages.map((m) => m.toJSON()) as Array<Record<string, unknown>>,
           modelConfig,
           toolDefs as unknown as Array<Record<string, unknown>>,
@@ -592,15 +417,15 @@ export class Agent {
 
         // After provider response — notification with full response data.
         // Enables: response logging, metrics, cost tracking, telemetry.
-        await this.#hooks.notifyHooksAsync(HOOKS.PROVIDER_RESPONSE, {
+        await this.hooks.notifyHooksAsync(HOOKS.PROVIDER_RESPONSE, {
           response,
           modelConfig,
           agent: this,
         });
 
-        await this.#hooks.notifyHooksAsync(HOOKS.MESSAGES_AFTER_LLM, {
+        await this.hooks.notifyHooksAsync(HOOKS.MESSAGES_AFTER_LLM, {
           response,
-          messages: this.#log.getAll(),
+          messages: this.log.getAll(),
           agent: this,
         });
 
@@ -621,7 +446,7 @@ export class Agent {
           if (outcome !== "continue") {
             // Turn end — agent has stopped (e.g., wait tool yielded control).
             stoppedEmitted = true;
-            await this.#hooks.notifyHooksAsync(HOOKS.TURN_END, {
+            await this.hooks.notifyHooksAsync(HOOKS.TURN_END, {
               turnIndex: iteration,
               message: response.fullText,
               toolResults,
@@ -632,7 +457,7 @@ export class Agent {
             return outcome;
           }
           // Turn end (tool execution continues to next iteration).
-          await this.#hooks.notifyHooksAsync(HOOKS.TURN_END, {
+          await this.hooks.notifyHooksAsync(HOOKS.TURN_END, {
             turnIndex: iteration,
             message: response.fullText,
             toolResults,
@@ -642,13 +467,13 @@ export class Agent {
           });
         } else {
           this._emitTokenUsage(response);
-          await this.#hooks.notifyHooksAsync(HOOKS.CONTEXT_MESSAGE, {
+          await this.hooks.notifyHooksAsync(HOOKS.CONTEXT_MESSAGE, {
             message: assistantMsg,
             agent: this,
           });
           // Turn end (final response, no tools).
           stoppedEmitted = true;
-          await this.#hooks.notifyHooksAsync(HOOKS.TURN_END, {
+          await this.hooks.notifyHooksAsync(HOOKS.TURN_END, {
             turnIndex: iteration,
             message: response.fullText,
             toolResults: [],
@@ -661,21 +486,21 @@ export class Agent {
       } finally {
         // Always clean up the AbortController so it doesn't leak
         // and cancel() doesn't affect the next iteration.
-        this.#runAbortController = null;
+        this.runAbortController = null;
       }
     }
 
-    throw AgentError.MaxIterations(this.#maxIterations);
+    throw AgentError.MaxIterations(this.maxIterations);
   } finally {
     // Ensure TURN_END(stopped: true) always fires so extensions
     // (e.g., loop) get a completion signal even on cancellation or error.
     if (!stoppedEmitted) {
-      await this.#hooks.notifyHooksAsync(HOOKS.TURN_END, {
-        turnIndex: this.#iterationCount,
+      await this.hooks.notifyHooksAsync(HOOKS.TURN_END, {
+        turnIndex: this.iterationCount,
         message: "",
         toolResults: [],
         stopped: true,
-        cancelled: this.#cancelled,
+        cancelled: this.cancelled,
         agent: this,
       });
     }
@@ -726,8 +551,8 @@ export class Agent {
    * @param result - The final result text
    */
   notifyCompletion(result: string): void {
-    if (this.#sink && typeof (this.#sink as OutputSink & { onTaskComplete?: (result: string) => void }).onTaskComplete === "function") {
-      (this.#sink as OutputSink & { onTaskComplete: (result: string) => void }).onTaskComplete!(result);
+    if (this.sink && typeof (this.sink as OutputSink & { onTaskComplete?: (result: string) => void }).onTaskComplete === "function") {
+      (this.sink as OutputSink & { onTaskComplete: (result: string) => void }).onTaskComplete!(result);
     }
   }
 
@@ -741,7 +566,7 @@ export class Agent {
    * @returns Array of messages.
    */
   buildMessages(): Message[] {
-    return this.#log.buildMessages(this.#systemPromptBuilder.getPrompt());
+    return this.log.buildMessages(this.#systemPromptBuilder.getPrompt());
   }
 
   /**
@@ -750,11 +575,11 @@ export class Agent {
    * Chunks are sorted by priority and rendered via the template.
    */
   async ensureSystemPrompt(): Promise<void> {
-    await this.#systemPromptBuilder.ensureBuilt(this.#hooks, this, {
-      role: this.#role,
-      profileBody: this.#profileBody,
+    await this.#systemPromptBuilder.ensureBuilt(this.hooks, this, {
+      role: this.role,
+      profileBody: this.profileBody,
       model: this.#model,
-      profileName: this.#profileName,
+      profileName: this.profileName,
     });
   }
 
@@ -783,18 +608,18 @@ export class Agent {
     let finishReason: string | null = null;
 
     for await (const event of stream) {
-      if (this.#cancelled) throw LlmError.Cancelled("Agent cancelled");
+      if (this.cancelled) throw LlmError.Cancelled("Agent cancelled");
 
       switch (event.type) {
         case "content":
           textParts.push(event.content as string);
-          if (this.#stream) {
+          if (this.stream) {
             this.emitOutput("streaming_chunk", { content: event.content });
           }
           break;
         case "reasoning":
           reasoningParts.push(event.content as string);
-          if (this.#stream) {
+          if (this.stream) {
             this.emitOutput("streaming_reasoning_chunk", {
               content: event.content,
             });
@@ -934,13 +759,13 @@ export class Agent {
       return { toolName: "(invalid)", input, result };
     }
 
-    if (this.#toolWhitelist && !this.#toolWhitelist.includes(toolName)) {
+    if (this.toolWhitelist && !this.toolWhitelist.includes(toolName)) {
       const msg = `Tool '${toolName}' is not available for this agent`;
       return this._writeToolResult(toolName, input, msg, toolCallId);
     }
 
     this.emitOutput("tool_call", { toolName, input, toolCallId });
-    await this.#hooks.notifyHooksAsync(HOOKS.TOOL_BEFORE_EXECUTE, {
+    await this.hooks.notifyHooksAsync(HOOKS.TOOL_BEFORE_EXECUTE, {
       toolCallId,
       toolName,
       input,
@@ -949,7 +774,7 @@ export class Agent {
 
     // Tool call gate — sequential, modifiable. Handlers can block, modify input args, or allow execution to proceed.
     //    Actions: { action: "continue" } | { action: "modify", input } | { action: "block", result }
-    const callResult = await this.#hooks.runHookPipeline(HOOKS.TOOL_CALL, {
+    const callResult = await this.hooks.runHookPipeline(HOOKS.TOOL_CALL, {
       toolCallId,
       toolName,
       input,
@@ -975,7 +800,7 @@ export class Agent {
 
     // Build and enrich tool context via hook
     const toolCtx = this._buildToolContext(toolName);
-    await this.#hooks.notifyHooksAsync(HOOKS.AGENT_TOOL_CONTEXT, {
+    await this.hooks.notifyHooksAsync(HOOKS.AGENT_TOOL_CONTEXT, {
       toolCtx,
       toolName,
       agent: this,
@@ -1018,7 +843,7 @@ export class Agent {
     }
 
     // After-execute hook + result modification hook
-    await this.#hooks.notifyHooksAsync(HOOKS.TOOL_AFTER_EXECUTE, {
+    await this.hooks.notifyHooksAsync(HOOKS.TOOL_AFTER_EXECUTE, {
       toolCallId,
       toolName,
       result,
@@ -1030,7 +855,7 @@ export class Agent {
     // Tool result — sequential, modifiable. Handlers can transform the
     // result before it reaches the LLM context.
     // Returns { result } to replace the result (any value: string, ToolResult, object)
-    const resultHook = await this.#hooks.runHookPipeline(HOOKS.TOOL_RESULT, {
+    const resultHook = await this.hooks.runHookPipeline(HOOKS.TOOL_RESULT, {
       toolCallId,
       toolName,
       result,
@@ -1051,7 +876,7 @@ export class Agent {
     // adding latency to the tool execution path.
     const durationMs = Date.now() - t0;
     const resultSize = typeof resultStr === "string" ? resultStr.length : 0;
-    this.#hooks.notifyHooks(HOOKS.TOOL_METRICS, {
+    this.hooks.notifyHooks(HOOKS.TOOL_METRICS, {
       toolName,
       toolCallId,
       durationMs,
@@ -1081,9 +906,9 @@ export class Agent {
     const toolCtx = new ToolContext();
     toolCtx.set("agent", this);
     toolCtx.set("isSessionRestoring", this.#isRestoring);
-    if (this.#config) {
-      toolCtx.set("cwdBoundary", this.#config.cwdBoundary || null);
-      toolCtx.set("workspaceRoot", this.#config.workspaceRoot || null);
+    if (this.config) {
+      toolCtx.set("cwdBoundary", this.config.cwdBoundary || null);
+      toolCtx.set("workspaceRoot", this.config.workspaceRoot || null);
     }
     return toolCtx;
   }
@@ -1127,8 +952,8 @@ export class Agent {
    * @param msg - The message to add.
    */
   addMessage(msg: Message): void {
-    this.#log.push(msg);
-    this.#hooks.notifyHooksAsync(HOOKS.CONTEXT_MESSAGE, {
+    this.log.push(msg);
+    this.hooks.notifyHooksAsync(HOOKS.CONTEXT_MESSAGE, {
       message: msg,
       agent: this,
     });
@@ -1142,9 +967,9 @@ export class Agent {
    * @param newContext - The new context array (array of Message instances).
    */
   replaceContext(newContext: Message[]): void {
-    const oldContext = this.#log.getAll();
-    this.#log.replace(newContext);
-    this.#hooks.notifyHooksAsync(HOOKS.CONTEXT_REPLACED, {
+    const oldContext = this.log.getAll();
+    this.log.replace(newContext);
+    this.hooks.notifyHooksAsync(HOOKS.CONTEXT_REPLACED, {
       agent: this,
       oldContext,
       newContext,
@@ -1154,13 +979,13 @@ export class Agent {
   // ── Helpers ───────────────────────────────────────────────────────────────
 
   emitOutput(type: string, data: Record<string, unknown>): void {
-    if (this.#sink) {
+    if (this.sink) {
       const key = type.toUpperCase() as keyof typeof OUTPUT_EVENT;
       if (key in OUTPUT_EVENT) {
-        this.#sink.emit({ type: OUTPUT_EVENT[key], ...data });
+        this.sink.emit({ type: OUTPUT_EVENT[key], ...data });
       }
     }
-    this.#hooks.notifyHooks(HOOKS.OUTPUT_EVENT, { type, data, agent: this });
+    this.hooks.notifyHooks(HOOKS.OUTPUT_EVENT, { type, data, agent: this });
   }
 
   // ── Session Management ────────────────────────────────────────────────────
@@ -1169,9 +994,9 @@ export class Agent {
    * Clear the context and start fresh.
    */
   async clearContext(): Promise<void> {
-    this.#log.clear();
+    this.log.clear();
     this.#systemPromptBuilder.clear();
-    this.#iterationCount = 0;
+    this.iterationCount = 0;
     this.#tokenUsage = {
       promptTokens: 0,
       cachedTokens: 0,
@@ -1190,10 +1015,10 @@ export class Agent {
    * Cancel the current run.
    */
   cancel(): void {
-    this.#cancelled = true;
+    this.cancelled = true;
     // Abort the active LLM request so the HTTP client terminates fetch().
-    if (this.#runAbortController && !this.#runAbortController.signal.aborted) {
-      this.#runAbortController.abort();
+    if (this.runAbortController && !this.runAbortController.signal.aborted) {
+      this.runAbortController.abort();
     }
   }
 
@@ -1201,7 +1026,7 @@ export class Agent {
    * Reset the cancelled flag so the agent can process new input.
    */
   resetCancel(): void {
-    this.#cancelled = false;
+    this.cancelled = false;
   }
 
   /**
@@ -1232,7 +1057,7 @@ export class Agent {
     }
 
     // COMMAND_DISPATCH hook — extensions can handle specific commands.
-    const pipelineResult = await this.#hooks.runHookPipeline(
+    const pipelineResult = await this.hooks.runHookPipeline(
       HOOKS.COMMAND_DISPATCH,
       { command: cmd, agent: this },
     );
@@ -1247,7 +1072,7 @@ export class Agent {
     // Look up handler from command registry by command type.
     // Built-in commands are registered during construction;
     // extensions also register commands via COMMANDS_REGISTER hook.
-    const registered = this.#commandRegistry.get(cmd.type);
+    const registered = this.commandRegistry.get(cmd.type);
     if (registered && registered.handler) {
       return await registered.handler(this, cmd.value, cmd);
     }
@@ -1256,24 +1081,16 @@ export class Agent {
   }
 
   /**
-   * Get the command registry.
-   * @returns AgentCommandRegistry
-   */
-  getCommandRegistry(): AgentCommandRegistry {
-    return this.#commandRegistry;
-  }
-
-  /**
    * Serialize the agent state for persistence.
    * @returns Serialized state object.
    */
   serialize(): Record<string, unknown> {
     return {
-      sessionId: this.#sessionId,
-      context: this.#log.toJSON(),
+      sessionId: this.sessionId,
+      context: this.log.toJSON(),
       model: this.model,
-      iterationCount: this.#iterationCount,
-      reasoningEffort: this.#reasoningEffort,
+      iterationCount: this.iterationCount,
+      reasoningEffort: this.reasoningEffort,
     };
   }
 
@@ -1282,14 +1099,14 @@ export class Agent {
    * @param data
    */
   deserialize(data: Record<string, unknown>): void {
-    this.#sessionId = data.sessionId as string;
-    this.#log.replace(
+    this.sessionId = data.sessionId as string;
+    this.log.replace(
       (data.context as Array<Record<string, unknown>>).map(
         (m: Record<string, unknown>) => Message.fromJSON(m),
       ),
     );
     this.model = data.model as string;
-    this.#iterationCount = (data.iterationCount as number) || 0;
-    this.#reasoningEffort = data.reasoningEffort as string | undefined;
+    this.iterationCount = (data.iterationCount as number) || 0;
+    this.reasoningEffort = data.reasoningEffort as string | undefined;
   }
 }

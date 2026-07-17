@@ -20,13 +20,12 @@ function createMockCore(config: Record<string, unknown> = {}) {
 function createMockAgent() {
   const enqueued: string[] = [];
   const emitted: Array<{ type: string; content?: string }> = [];
-  let cancelled = false;
+  let _cancelled = false;
   let contextCleared = false;
 
   return {
-    cancelled: false,
-    set cancelled(v: boolean) { cancelled = v; },
-    get cancelled() { return cancelled; },
+    get cancelled() { return _cancelled; },
+    set cancelled(v: boolean) { _cancelled = v; },
     clearContext: async () => { contextCleared = true; },
     wasContextCleared: () => contextCleared,
     enqueue: (text: string) => enqueued.push(text),
@@ -137,7 +136,7 @@ describe("Loop extension", () => {
 
       // Simulate TURN_END with stopped: true
       const turnEndHook = ext.hooks![HOOKS.TURN_END]!;
-      await turnEndHook({ stopped: true, agent });
+      await turnEndHook({ stopped: true, agent: agent as any });
 
       // Should have re-enqueued the prompt
       const enqueued = agent.getEnqueued();
@@ -163,7 +162,7 @@ describe("Loop extension", () => {
 
       // TURN_END with stopped: false — should not re-enqueue
       const turnEndHook = ext.hooks![HOOKS.TURN_END]!;
-      await turnEndHook({ stopped: false, agent });
+      await turnEndHook({ stopped: false, agent: agent as any });
 
       expect(agent.getEnqueued().length).toBe(enqueuedBefore);
     });
@@ -180,7 +179,7 @@ describe("Loop extension", () => {
       await def.handler!(agent, "loop test");
 
       const turnEndHook = ext.hooks![HOOKS.TURN_END]!;
-      await turnEndHook({ stopped: true, agent });
+      await turnEndHook({ stopped: true, agent: agent as any });
 
       const emitted = agent.getEmitted();
       expect(emitted.find((e: any) => e.content?.includes("── Loop 1 ──"))).toBeDefined();
@@ -202,7 +201,7 @@ describe("Loop extension", () => {
       agent.cancelled = true;
 
       const turnEndHook = ext.hooks![HOOKS.TURN_END]!;
-      await turnEndHook({ stopped: true, cancelled: true, agent });
+      await turnEndHook({ stopped: true, cancelled: true, agent: agent as any });
 
       // Should emit summary with cancelled reason
       const emitted = agent.getEmitted();
@@ -228,7 +227,7 @@ describe("Loop extension", () => {
 
       // Simulate TURN_END from agent's finally block on Ctrl+C
       const turnEndHook = ext.hooks![HOOKS.TURN_END]!;
-      await turnEndHook({ stopped: true, cancelled: true, agent });
+      await turnEndHook({ stopped: true, cancelled: true, agent: agent as any });
 
       const emitted = agent.getEmitted();
       const summary = emitted.find((e: any) => e.content?.includes("Loop ended"));
@@ -253,11 +252,11 @@ describe("Loop extension", () => {
       const turnEndHook = ext.hooks![HOOKS.TURN_END]!;
 
       // First iteration
-      await turnEndHook({ stopped: true, agent });
+      await turnEndHook({ stopped: true, agent: agent as any });
       // Second iteration
-      await turnEndHook({ stopped: true, agent });
+      await turnEndHook({ stopped: true, agent: agent as any });
       // Third call — should hit max and stop
-      await turnEndHook({ stopped: true, agent });
+      await turnEndHook({ stopped: true, agent: agent as any });
 
       const emitted = agent.getEmitted();
       expect(emitted.find((e: any) => e.content?.includes("Max loops (2) reached"))).toBeDefined();
@@ -277,7 +276,7 @@ describe("Loop extension", () => {
       await def.handler!(agent, "loop test");
 
       const turnEndHook = ext.hooks![HOOKS.TURN_END]!;
-      await turnEndHook({ stopped: true, agent });
+      await turnEndHook({ stopped: true, agent: agent as any });
 
       const emitted = agent.getEmitted();
       expect(emitted.find((e: any) => e.content?.includes("failed to clear context"))).toBeDefined();
@@ -305,7 +304,7 @@ describe("Loop extension", () => {
 
       // Loop should be stopped — verify via TURN_END not re-enqueuing
       const turnEndHook = ext.hooks![HOOKS.TURN_END]!;
-      await turnEndHook({ stopped: true, agent });
+      await turnEndHook({ stopped: true, agent: agent as any });
 
       const enqueued = agent.getEnqueued();
       expect(enqueued.filter((t: string) => t === "test")).toHaveLength(1); // only initial
@@ -372,7 +371,7 @@ describe("Loop extension", () => {
 
       // Simulate one iteration completing
       const turnEndHook = ext.hooks![HOOKS.TURN_END]!;
-      await turnEndHook({ stopped: true, agent });
+      await turnEndHook({ stopped: true, agent: agent as any });
 
       // Now quit
       const inputHook = ext.hooks![HOOKS.INPUT]!;

@@ -369,7 +369,7 @@ export async function runInteractiveSession(
 
     // Emit hook for extensions to register commands
     core.hooks.notifyHooks(HOOKS.COMMANDS_REGISTER, {
-      registry: agent.getCommandRegistry(),
+      registry: agent.commandRegistry,
       agent,
     });
 
@@ -419,7 +419,7 @@ export async function runInteractiveSession(
 
   // Create MessageBus
   const bus = new MessageBus({
-    sessionManager: sessionManager as unknown as { getAgent: () => { hooks: { runHookPipeline: (hookName: string, data: unknown, opts?: { shouldStop?: (result: unknown) => boolean }) => Promise<unknown> }; run: (text: string) => Promise<unknown>; resetCancel: () => void; cancel: () => void; getCommandRegistry: () => unknown; executeCommand: (cmd: unknown) => Promise<unknown> } | undefined },
+    sessionManager: sessionManager as unknown as { getAgent: () => { hooks: { runHookPipeline: (hookName: string, data: unknown, opts?: { shouldStop?: (result: unknown) => boolean }) => Promise<unknown> }; run: (text: string) => Promise<unknown>; resetCancel: () => void; cancel: () => void; commandRegistry: unknown; executeCommand: (cmd: unknown) => Promise<unknown> } | undefined },
     sink,
   });
 
@@ -431,8 +431,8 @@ export async function runInteractiveSession(
   const initialAgent = sessionManager.getAgent();
   if (initialAgent) {
     const anyAgent = initialAgent as unknown as Record<string, unknown>;
-    if (typeof anyAgent.setEnqueueCallback === "function") {
-      anyAgent.setEnqueueCallback((text: string) => bus.enqueue(text));
+    if ("enqueueCallback" in anyAgent) {
+      anyAgent.enqueueCallback = (text: string) => bus.enqueue(text);
     }
   }
 

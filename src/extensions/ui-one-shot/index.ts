@@ -98,7 +98,7 @@ async function runOneShot(
 
   // Create MessageBus
   const bus = new MessageBus({
-    sessionManager: sessionManager as unknown as { getAgent: () => { hooks: { runHookPipeline: (hookName: string, data: unknown, opts?: { shouldStop?: (result: unknown) => boolean }) => Promise<unknown> }; run: (text: string) => Promise<unknown>; resetCancel: () => void; cancel: () => void; getCommandRegistry: () => unknown; executeCommand: (cmd: unknown) => Promise<unknown> } | undefined },
+    sessionManager: sessionManager as unknown as { getAgent: () => { hooks: { runHookPipeline: (hookName: string, data: unknown, opts?: { shouldStop?: (result: unknown) => boolean }) => Promise<unknown> }; run: (text: string) => Promise<unknown>; resetCancel: () => void; cancel: () => void; commandRegistry: unknown; executeCommand: (cmd: unknown) => Promise<unknown> } | undefined },
     sink,
   });
 
@@ -192,7 +192,7 @@ async function handlePromptSubcommand(
     await agent.ensureSystemPrompt();
 
     core.hooks.notifyHooks(HOOKS.COMMANDS_REGISTER, {
-      registry: agent.getCommandRegistry(),
+      registry: agent.commandRegistry,
       agent,
     });
 

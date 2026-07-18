@@ -88,7 +88,7 @@ async function runOneShot(
 
   // Create SessionManager
   const sessionManager = await SessionManager.create({
-    hooks: core.hooks as unknown as { notifyHooksAsync: (hookName: string, data: unknown) => Promise<void>; notifyHooks: (hookName: string, data: unknown) => void },
+    hooks: core.hooks as unknown as { notifyHooks: (hookName: string, data: unknown) => void },
     extensions: core.extensions,
     buildAgent,
     initialConfig: { sessionId: cli.sessionId || null },

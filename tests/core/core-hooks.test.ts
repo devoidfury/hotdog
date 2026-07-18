@@ -174,9 +174,9 @@ describe("HookSystem.clear()", () => {
   });
 });
 
-// ── notifyHooksAsync() ────────────────────────────────────────────────────
+// ── notifyHooks() — unified fire-and-forget (handles both sync and async) ──
 
-describe("notifyHooksAsync()", () => {
+describe("notifyHooks()", () => {
   it("should fire async handlers without waiting", async () => {
     const hooks = createHooks();
     const results: unknown[] = [];
@@ -184,7 +184,7 @@ describe("notifyHooksAsync()", () => {
       await new Promise((r) => setTimeout(r, 10));
       results.push((data as any).value);
     });
-    hooks.notifyHooksAsync("test:hook", { value: 1 });
+    hooks.notifyHooks("test:hook", { value: 1 });
     expect(results).toEqual([]);
 
     await new Promise((r) => setTimeout(r, 50));
@@ -196,7 +196,8 @@ describe("notifyHooksAsync()", () => {
     hooks.on("test", async () => {
       throw new Error("async boom");
     });
-    await hooks.notifyHooksAsync("test", {});
+    hooks.notifyHooks("test", {});
+    // Errors are caught and logged, not thrown
   });
 
   it("continues running other handlers after one fails", async () => {
@@ -208,54 +209,58 @@ describe("notifyHooksAsync()", () => {
     hooks.on("test", async () => {
       calls.push("second");
     });
-    await hooks.notifyHooksAsync("test", {});
+    hooks.notifyHooks("test", {});
+    // Wait for async handlers to settle
+    await new Promise((r) => setTimeout(r, 50));
     expect(calls).toEqual(["second"]);
   });
 
-  it("handles sync errors in async notify", async () => {
+  it("handles sync errors in notifyHooks by catching and logging", async () => {
     const hooks = createHooks();
     hooks.on("test", () => {
-      throw new Error("sync error in async notify");
+      throw new Error("sync error in notifyHooks");
     });
-    await hooks.notifyHooksAsync("test", {});
+    // Errors are caught and logged, not thrown
+    hooks.notifyHooks("test", {});
   });
 
-  it("async notify with multiple handlers", async () => {
+  it("handles both sync and async handlers together", async () => {
     const hooks = createHooks();
-    const calls: number[] = [];
+    const calls: string[] = [];
+    hooks.on("test", () => {
+      calls.push("sync");
+    });
     hooks.on("test", async () => {
-      calls.push(1);
+      await new Promise((r) => setTimeout(r, 10));
+      calls.push("async");
+    });
+    hooks.notifyHooks("test", {});
+    expect(calls).toContain("sync");
+    // Wait for async to complete
+    await new Promise((r) => setTimeout(r, 50));
+    expect(calls).toContain("async");
+  });
+
+  it("processes handlers in order", async () => {
+    const hooks = createHooks();
+    const calls: string[] = [];
+    hooks.on("test", () => {
+      calls.push("first");
     });
     hooks.on("test", async () => {
-      calls.push(2);
+      await new Promise((r) => setTimeout(r, 10));
+      calls.push("second");
     });
-    await hooks.notifyHooksAsync("test", {});
-    expect(calls).toContain(1);
-    expect(calls).toContain(2);
-  });
-});
-
-// ── notifyHooks — handler errors ──────────────────────────────────────────
-
-describe("notifyHooks — handler errors", () => {
-  it("handler error in notifyHooks propagates", () => {
-    const hooks = createHooks();
     hooks.on("test", () => {
-      throw new Error("boom");
+      calls.push("third");
     });
-    expect(() => hooks.notifyHooks("test", {})).toThrow("boom");
-  });
-
-  it("subsequent handlers are not called after error in notifyHooks", () => {
-    const hooks = createHooks();
-    const calls: number[] = [];
-    hooks.on("test", () => {
-      calls.push(1);
-      throw new Error("boom");
-    });
-    hooks.on("test", () => calls.push(2));
-    expect(() => hooks.notifyHooks("test", {})).toThrow("boom");
-    expect(calls).toEqual([1]);
+    hooks.notifyHooks("test", {});
+    // Sync handlers run in order immediately
+    expect(calls).toEqual(["first", "third"]);
+    // Wait for async
+    await new Promise((r) => setTimeout(r, 50));
+    // Async handlers were started in order
+    expect(calls).toContain("second");
   });
 });
 
@@ -639,14 +644,14 @@ describe("trace mode", () => {
     const hooks = createHooks();
     hooks.trace = true;
     hooks.on("test", async () => {}, "ext1");
-    await hooks.notifyHooksAsync("test", {});
+    hooks.notifyHooks("test", {});
   });
 
   it("async notify with trace skips 'log' hook", async () => {
     const hooks = createHooks();
     hooks.trace = true;
     hooks.on("log", () => {});
-    await hooks.notifyHooksAsync("log", { level: "info", message: "test" });
+    hooks.notifyHooks("log", { level: "info", message: "test" });
   });
 
   it("respects enabledHooks filter in trace", () => {

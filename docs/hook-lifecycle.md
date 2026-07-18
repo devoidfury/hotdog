@@ -13,7 +13,6 @@ The hook system is the primary extension mechanism in hotdog. It decouples the c
 │  │  Agent     │───▶│  HookSystem  │          │
 │  │  (run      │    │              │          │
 │   │   loop)    │    │  .notifyHooks()       │
-│   │           │    │  .notifyHooksAsync()    │
 │   │           │    │  .runHookPipeline()     │
 │  └───────────┘    └──────┬───────┘          │
 │                           │                  │
@@ -29,8 +28,7 @@ The hook system is the primary extension mechanism in hotdog. It decouples the c
 
 | Method | Pattern | Use Case |
 |--------|---------|----------|
-| `notifyHooks(name, data)` | Sync fire-and-forget | Notifications, logging, tracing |
-| `notifyHooksAsync(name, data)` | Async fire-and-forget | Concurrent notifications (e.g., turn start/end) |
+| `notifyHooks(name, data)` | Fire-and-forget (sync or async handlers) | Notifications, logging, tracing, side effects |
 | `runHookPipeline(name, data, opts)` | Sequential, returns results | Modifications that chain (e.g., context, tool call gate) |
 
 **Key distinction:**

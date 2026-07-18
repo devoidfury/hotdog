@@ -42,7 +42,6 @@ export interface CommandAgent {
  */
 export interface SubcommandCore {
   hooks: {
-    notifyHooksAsync(hookName: string, data: unknown): void;
     notifyHooks(hookName: string, data: unknown): void;
   };
   toolRegistry: {

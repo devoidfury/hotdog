@@ -98,7 +98,6 @@ export class SessionStore {
 
 export interface SessionManagerOptions {
   hooks: {
-    notifyHooksAsync(hookName: string, data: unknown): Promise<void>;
     notifyHooks(hookName: string, data: unknown): void;
   };
   extensions: unknown;
@@ -162,7 +161,7 @@ export class SessionManager {
     const agent = await this.#buildAgent(config);
     const sessionId = this.#store.addAgent(agent);
     this.#currentSessionId = sessionId;
-    await this.#hooks.notifyHooksAsync(HOOKS.SESSION_CREATE, {
+    this.#hooks.notifyHooks(HOOKS.SESSION_CREATE, {
       session: this,
       config,
     });
@@ -181,7 +180,7 @@ export class SessionManager {
     const newAgent = await this.#buildAgent(config);
     this.#store.addAgent(newAgent);
     this.#currentSessionId = newAgent.sessionId;
-    await this.#hooks.notifyHooksAsync(HOOKS.SESSION_SWAP, {
+    this.#hooks.notifyHooks(HOOKS.SESSION_SWAP, {
       oldAgent: oldAgent ?? null,
       newAgent,
     });
@@ -251,7 +250,7 @@ export class SessionManager {
    * @returns The deserialized agent
    */
   async deserialize(data: Record<string, unknown>): Promise<AgentLike> {
-    await this.#hooks.notifyHooksAsync(HOOKS.SESSION_DESERIALIZE, { data });
+    this.#hooks.notifyHooks(HOOKS.SESSION_DESERIALIZE, { data });
 
     const agent = await this.#buildAgent({ model: data.model });
     agent.deserialize(data);

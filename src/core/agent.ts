@@ -307,7 +307,7 @@ export class Agent {
       this.iterationCount = iteration;
 
       // Turn start — emitted at the beginning of each agent loop iteration.
-      await this.hooks.notifyHooksAsync(HOOKS.TURN_START, {
+      this.hooks.notifyHooks(HOOKS.TURN_START, {
         turnIndex: iteration,
         timestamp: Date.now(),
         agent: this,
@@ -395,13 +395,13 @@ export class Agent {
 
         // After provider response — notification with full response data.
         // Enables: response logging, metrics, cost tracking, telemetry.
-        await this.hooks.notifyHooksAsync(HOOKS.PROVIDER_RESPONSE, {
+        this.hooks.notifyHooks(HOOKS.PROVIDER_RESPONSE, {
           response,
           modelConfig,
           agent: this,
         });
 
-        await this.hooks.notifyHooksAsync(HOOKS.MESSAGES_AFTER_LLM, {
+        this.hooks.notifyHooks(HOOKS.MESSAGES_AFTER_LLM, {
           response,
           messages: this.log.getAll(),
           agent: this,
@@ -424,7 +424,7 @@ export class Agent {
           if (outcome !== "continue") {
             // Turn end — agent has stopped (e.g., wait tool yielded control).
             stoppedEmitted = true;
-            await this.hooks.notifyHooksAsync(HOOKS.TURN_END, {
+            this.hooks.notifyHooks(HOOKS.TURN_END, {
               turnIndex: iteration,
               message: response.fullText,
               toolResults,
@@ -435,7 +435,7 @@ export class Agent {
             return outcome;
           }
           // Turn end (tool execution continues to next iteration).
-          await this.hooks.notifyHooksAsync(HOOKS.TURN_END, {
+          this.hooks.notifyHooks(HOOKS.TURN_END, {
             turnIndex: iteration,
             message: response.fullText,
             toolResults,
@@ -445,13 +445,13 @@ export class Agent {
           });
         } else {
           this._emitTokenUsage(response);
-          await this.hooks.notifyHooksAsync(HOOKS.CONTEXT_MESSAGE, {
+          this.hooks.notifyHooks(HOOKS.CONTEXT_MESSAGE, {
             message: assistantMsg,
             agent: this,
           });
           // Turn end (final response, no tools).
           stoppedEmitted = true;
-          await this.hooks.notifyHooksAsync(HOOKS.TURN_END, {
+          this.hooks.notifyHooks(HOOKS.TURN_END, {
             turnIndex: iteration,
             message: response.fullText,
             toolResults: [],
@@ -473,7 +473,7 @@ export class Agent {
     // Ensure TURN_END(stopped: true) always fires so extensions
     // (e.g., loop) get a completion signal even on cancellation or error.
     if (!stoppedEmitted) {
-      await this.hooks.notifyHooksAsync(HOOKS.TURN_END, {
+      this.hooks.notifyHooks(HOOKS.TURN_END, {
         turnIndex: this.iterationCount,
         message: "",
         toolResults: [],
@@ -711,7 +711,7 @@ export class Agent {
     }
 
     this.emitOutput("tool_call", { toolName, input, toolCallId });
-    await this.hooks.notifyHooksAsync(HOOKS.TOOL_BEFORE_EXECUTE, {
+    this.hooks.notifyHooks(HOOKS.TOOL_BEFORE_EXECUTE, {
       toolCallId,
       toolName,
       input,
@@ -746,7 +746,7 @@ export class Agent {
 
     // Build and enrich tool context via hook
     const toolCtx = this._buildToolContext(toolName);
-    await this.hooks.notifyHooksAsync(HOOKS.AGENT_TOOL_CONTEXT, {
+    this.hooks.notifyHooks(HOOKS.AGENT_TOOL_CONTEXT, {
       toolCtx,
       toolName,
       agent: this,
@@ -789,7 +789,7 @@ export class Agent {
     }
 
     // After-execute hook + result modification hook
-    await this.hooks.notifyHooksAsync(HOOKS.TOOL_AFTER_EXECUTE, {
+    this.hooks.notifyHooks(HOOKS.TOOL_AFTER_EXECUTE, {
       toolCallId,
       toolName,
       result,
@@ -899,7 +899,7 @@ export class Agent {
    */
   addMessage(msg: Message): void {
     this.log.push(msg);
-    this.hooks.notifyHooksAsync(HOOKS.CONTEXT_MESSAGE, {
+    this.hooks.notifyHooks(HOOKS.CONTEXT_MESSAGE, {
       message: msg,
       agent: this,
     });
@@ -915,7 +915,7 @@ export class Agent {
   replaceContext(newContext: Message[]): void {
     const oldContext = this.log.getAll();
     this.log.replace(newContext);
-    this.hooks.notifyHooksAsync(HOOKS.CONTEXT_REPLACED, {
+    this.hooks.notifyHooks(HOOKS.CONTEXT_REPLACED, {
       agent: this,
       oldContext,
       newContext,

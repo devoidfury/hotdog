@@ -1,7 +1,6 @@
 // Hook system — the foundation for the extension architecture.
 // Extensions register handlers via `on()`. The core notifies hooks via:
-//   notifyHooks(hookName, data)         — sync,  fire-and-forget
-//   notifyHooksAsync(hookName, data)    — async, fire-and-forget (concurrent)
+//   notifyHooks(hookName, data)         — fire-and-forget (handles both sync and async handlers)
 //   runHookPipeline(hookName, data, opts?) — async, sequential, returns results
 
 import { formatError } from "./error.ts";
@@ -119,8 +118,9 @@ export class HookSystem {
   }
 
   /**
-   * Notify hooks synchronously (fire-and-forget).
-   * All handlers run synchronously in order. Return values are ignored.
+   * Notify hooks (fire-and-forget).
+   * All handlers are invoked synchronously in order. Return values are ignored.
+   * Handlers may return Promises; these are not awaited but errors are caught and logged.
    */
   notifyHooks(hookName: string, data: unknown): void {
     const handlers = this.#hooks.get(hookName) || [];
@@ -129,46 +129,21 @@ export class HookSystem {
     for (let i = 0; i < handlers.length; i++) {
       const entry = handlers[i];
       if (!entry) continue;
-      const t0 = doTrace ? Date.now() : 0;
-      entry.handler(data);
-      if (doTrace && !this._isTraceDisabled(entry.source)) {
-        const ms = Date.now() - t0;
-        const label = entry.source ? ` (${entry.source})` : "";
-        logger.debug(
-          `[hook:trace] ${hookName} — ${i + 1}/${handlers.length}${label} — ${ms}ms`,
-        );
-      }
-    }
-  }
 
-  /**
-   * Notify hooks asynchronously (fire-and-forget, concurrent).
-   * All handlers launch concurrently. Errors are caught and logged.
-   * Returns immediately — does not wait for handlers to complete.
-   */
-  notifyHooksAsync(hookName: string, data: unknown): void {
-    const handlers = this.#hooks.get(hookName) || [];
-    let doTrace = this._shouldTrace(hookName);
-
-    if (doTrace && handlers.length > 0) {
-      logger.debug(
-        `[hook:trace] ${hookName} — ${handlers.length} handler(s) fired concurrently`,
-      );
-    }
-    for (let i = 0; i < handlers.length; i++) {
-      const entry = handlers[i];
-      if (!entry) continue;
       const t0 = doTrace ? Date.now() : 0;
       try {
         const result = entry.handler(data);
+
+        // Check if the handler returned a Promise
         if (isPromise(result)) {
+          // Attach error handling to catch async errors without blocking
           (result as Promise<unknown>).then(
             () => {
               if (doTrace && !this._isTraceDisabled(entry.source)) {
                 const ms = Date.now() - t0;
                 const label = entry.source ? ` (${entry.source})` : "";
                 logger.debug(
-                  `[hook:trace] ${hookName} — handler${label} — ${ms}ms`,
+                  `[hook:trace] ${hookName} — ${i + 1}/${handlers.length}${label} — ${ms}ms`,
                 );
               }
             },
@@ -177,25 +152,29 @@ export class HookSystem {
                 const ms = Date.now() - t0;
                 const label = entry.source ? ` (${entry.source})` : "";
                 logger.debug(
-                  `[hook:trace] ${hookName} — handler${label} — ${ms}ms — error`,
+                  `[hook:trace] ${hookName} — ${i + 1}/${handlers.length}${label} — ${ms}ms — error`,
                 );
               }
               logger.error(`[hook:${hookName}] ${formatError(e)}`);
             },
           );
-        } else if (doTrace && !this._isTraceDisabled(entry.source)) {
-          const ms = Date.now() - t0;
-          const label = entry.source ? ` (${entry.source})` : "";
-          logger.debug(
-            `[hook:trace] ${hookName} — handler${label} — ${ms}ms (sync)`,
-          );
+        } else {
+          // Synchronous handler completed
+          if (doTrace && !this._isTraceDisabled(entry.source)) {
+            const ms = Date.now() - t0;
+            const label = entry.source ? ` (${entry.source})` : "";
+            logger.debug(
+              `[hook:trace] ${hookName} — ${i + 1}/${handlers.length}${label} — ${ms}ms`,
+            );
+          }
         }
       } catch (e) {
+        // Synchronous error from the handler call itself
         if (doTrace && !this._isTraceDisabled(entry.source)) {
           const ms = Date.now() - t0;
           const label = entry.source ? ` (${entry.source})` : "";
           logger.debug(
-            `[hook:trace] ${hookName} — handler${label} — ${ms}ms — error`,
+            `[hook:trace] ${hookName} — ${i + 1}/${handlers.length}${label} — ${ms}ms — error`,
           );
         }
         logger.error(`[hook:${hookName}] ${formatError(e)}`);

@@ -961,7 +961,7 @@ export class ExtensionLoader {
   }
 
   async cleanup(): Promise<void> {
-    await this.#core.hooks.notifyHooksAsync(HOOKS.SHUTDOWN_CLEANUP, null);
+    this.#core.hooks.notifyHooks(HOOKS.SHUTDOWN_CLEANUP, null);
   }
 }
 

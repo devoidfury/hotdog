@@ -37,7 +37,7 @@ Split into sub-modules. The single source of truth is `src/core/core.config.json
 Manages extension-registered CLI flags and config parameters. Config params and CLI flags are defined in `extension.json` (configSchema and cli:flags), with defaults automatically extracted and registered by the extension loader.
 
 ### Hook System (`src/core/hooks.ts`)
-The foundation for the extension architecture. `HookSystem` class with `on()`, `off()`, `notifyHooks()`, `notifyHooksAsync()`, `runHookPipeline()`, `clear()` methods. Standard hook names defined in `HOOKS` constant.
+The foundation for the extension architecture. `HookSystem` class with `on()`, `off()`, `notifyHooks()`, `runHookPipeline()`, `clear()` methods. Standard hook names defined in `HOOKS` constant.
 
 **Hook trace:** Set `_trace = true` on the HookSystem instance (via `--hook-trace` CLI flag, `HOTDOG_HOOK_TRACE=1` env, or `hook_trace: true` config) to log each handler invocation with execution order, source extension, timing, and return value. Output uses `logger.debug()` so it requires `HOTDOG_LOG_LEVEL=debug`. See `docs/agents/debugging-hotdog-tools-visibility-flags.md` for details.
 

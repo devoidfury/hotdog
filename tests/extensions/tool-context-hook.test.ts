@@ -46,7 +46,7 @@ describe("HOOKS.AGENT_TOOL_CONTEXT", () => {
     agent.isRestoring = false;
 
     // Simulate what _executeTools does
-    await hooks.notifyHooksAsync(HOOKS.AGENT_TOOL_CONTEXT, {
+    hooks.notifyHooks(HOOKS.AGENT_TOOL_CONTEXT, {
       toolCtx: {
         agent,
         isSessionRestoring: agent.isRestoring,
@@ -71,7 +71,7 @@ describe("HOOKS.AGENT_TOOL_CONTEXT", () => {
     const agent = createTestAgent({ hooks });
     agent.isRestoring = true;
 
-    await hooks.notifyHooksAsync(HOOKS.AGENT_TOOL_CONTEXT, {
+    hooks.notifyHooks(HOOKS.AGENT_TOOL_CONTEXT, {
       toolCtx: {
         agent,
         isSessionRestoring: agent.isRestoring,
@@ -152,7 +152,7 @@ describe("Integration: toolContext enrichment flow", () => {
       agent,
       isSessionRestoring: false,
     };
-    await hooks.notifyHooksAsync(HOOKS.AGENT_TOOL_CONTEXT, {
+    hooks.notifyHooks(HOOKS.AGENT_TOOL_CONTEXT, {
       toolCtx,
       toolName: "any-tool",
       agent,

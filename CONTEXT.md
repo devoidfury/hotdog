@@ -112,7 +112,7 @@ Domain concepts for the hotdog AI agent harness. Implementation details are docu
 - **Single-threaded event loop** — The JS runtime runs on a single thread with async/await. No separate backend/frontend threads.
 - **Core** (`src/core/`) — Minimal foundation: Agent, hooks, session management, tool registry, config, CLI parsing. No extension dependencies.
 - **Extensions** (`src/extensions/`) — All features (tools, compaction, MCP, skills, prompts, subcommands) live as extensions that plug into the core via hooks.
-- **Hook System** — The primary extension mechanism. `HookSystem` with `on()`, `off()`, `notifyHooks()`, `notifyHooksAsync()`, `runHookPipeline()`, `clear()`. Extensions register handlers; core emits events.
+- **Hook System** — The primary extension mechanism. `HookSystem` with `on()`, `off()`, `notifyHooks()`, `runHookPipeline()`, `clear()`. Extensions register handlers; core emits events.
 - **MessageBus** — Owns the agent run loop. Drains queued messages sequentially through `agent.run()`. Provides input preprocessing via `INPUT` hook.
 - **OutputSink** — Decouples agent from UI. Agent emits events via `sink.emit()`; `CliOutputSink` formats and displays with color support.
 

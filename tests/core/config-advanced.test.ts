@@ -10,6 +10,7 @@ import {
   buildConfig,
 } from "../../src/core/config/index.ts";
 import type { DefaultConfig } from "../../src/core/config/index.ts";
+import type { CoreConfig } from "../../src/core/config/schema-loader.ts";
 
 describe("normalizeConfigKeys", () => {
   it("converts snake_case keys to camelCase", () => {
@@ -18,7 +19,7 @@ describe("normalizeConfigKeys", () => {
       hide_tools: true,
       chat_timeout_secs: 30,
     };
-    const result = normalizeConfigKeys(obj) as Record<string, unknown>;
+    const result = normalizeConfigKeys(obj) as CoreConfig;
     expect(result.defaultModel).toBe("gpt-4");
     expect(result.hideTools).toBe(true);
     expect(result.chatTimeoutSecs).toBe(30);
@@ -37,7 +38,7 @@ describe("normalizeConfigKeys", () => {
         max_iterations: 100,
       },
     };
-    const result = normalizeConfigKeys(obj) as Record<string, unknown>;
+    const result = normalizeConfigKeys(obj) as CoreConfig;
     expect((result.customServers as Record<string, unknown>[])[0]!.serverName).toBe("my-server");
     expect((result.customServers as Record<string, unknown>[])[0]!.commandPath).toBe("/usr/bin/server");
     expect((result.profileSettings as Record<string, unknown>).hideThinking).toBe(true);
@@ -71,7 +72,7 @@ describe("normalizeConfigKeys", () => {
         },
       },
     };
-    const result = normalizeConfigKeys(obj) as Record<string, unknown>;
+    const result = normalizeConfigKeys(obj) as CoreConfig;
     expect(((result.levelOne as Record<string, unknown>).levelTwo as Record<string, unknown>).levelThreeKey).toBe("deep");
   });
 
@@ -93,7 +94,7 @@ describe("normalizeConfigKeys", () => {
         42,
       ],
     };
-    const result = normalizeConfigKeys(obj) as Record<string, unknown>;
+    const result = normalizeConfigKeys(obj) as CoreConfig;
     expect(result.simpleKey).toBe("value");
     expect((result.nestedKey as Record<string, unknown>).innerKey).toBe("inner");
     expect((result.arrayKey as Record<string, unknown>[])[0]!.itemKey).toBe("item");
@@ -113,7 +114,7 @@ describe("buildAgentConfig", () => {
   };
 
   it("resolves basic config with all expected fields", async () => {
-    const result = await buildAgentConfig(baseOpts) as Record<string, unknown>;
+    const result = await buildAgentConfig(baseOpts) as CoreConfig;
     expect(result.model).toBeDefined();
     expect(result.configDir).toBe("/tmp/test-config");
     expect(result.profileName).toBeDefined();
@@ -123,7 +124,7 @@ describe("buildAgentConfig", () => {
   });
 
   it("resolves model from CLI override", async () => {
-    const result = await buildAgentConfig({ ...baseOpts, cli: { model: "cli-model" }, config: { ...baseOpts.config, defaultModel: "config-model" }, defaultModel: "default-model" }) as Record<string, unknown>;
+    const result = await buildAgentConfig({ ...baseOpts, cli: { model: "cli-model" }, config: { ...baseOpts.config, defaultModel: "config-model" }, defaultModel: "default-model" }) as CoreConfig;
     expect(result.model).toBe("cli-model");
   });
 
@@ -135,12 +136,12 @@ describe("buildAgentConfig", () => {
       config: { ...baseOpts.config, providers: [provider], defaultModel: "config-model" },
       providers: [provider],
       defaultModel: "default-model",
-    }) as Record<string, unknown>;
+    }) as CoreConfig;
     expect(result.activeProvider).toBe("test-provider");
   });
 
   it("resolves profile from config", async () => {
-    const result = await buildAgentConfig({ ...baseOpts, config: { ...baseOpts.config, profile: "fixer" } }) as Record<string, unknown>;
+    const result = await buildAgentConfig({ ...baseOpts, config: { ...baseOpts.config, profile: "fixer" as unknown as CoreConfig["profile"] } }) as CoreConfig;
     expect(result.profileName).toBe("fixer");
   });
 
@@ -148,8 +149,8 @@ describe("buildAgentConfig", () => {
     const result = await buildAgentConfig({
       ...baseOpts,
       cli: { profile: "explorer" },
-      config: { ...baseOpts.config, profile: "fixer" },
-    }) as Record<string, unknown>;
+      config: { ...baseOpts.config, profile: "fixer" as unknown as CoreConfig["profile"] },
+    }) as CoreConfig;
     expect(result.profileName).toBe("explorer");
   });
 
@@ -157,7 +158,7 @@ describe("buildAgentConfig", () => {
     const result = await buildAgentConfig({
       ...baseOpts,
       config: { ...baseOpts.config, hideTools: false, hideThinking: true },
-    }) as Record<string, unknown>;
+    }) as CoreConfig;
     expect(result.hideTools).toBe(false);
     expect(result.hideThinking).toBe(true);
   });
@@ -190,8 +191,8 @@ describe("buildConfig", () => {
       fs.writeFileSync(path.join(tmpDir, 'defaults.json'), JSON.stringify({ providers: [], defaultModel: "test" }));
       fs.mkdirSync(path.join(tmpDir, 'profiles'));
       fs.writeFileSync(path.join(tmpDir, 'profiles', 'fixer.profile.md'), `---\nrole: fixer\nwhitelistTools: [bash, read]\nmanager: true\n---\nFixer profile`);
-      const result = await buildConfig({ configDir: tmpDir, profile: 'fixer' }) as Record<string, unknown>;
-      expect((result.resolved as Record<string, unknown>).profileName).toBe('fixer');
+      const result = await buildConfig({ configDir: tmpDir, profile: 'fixer' }) as CoreConfig;
+      expect((result.resolved as CoreConfig).profileName).toBe('fixer');
     } finally {
       fs.rmSync(tmpDir, { recursive: true, force: true });
     }

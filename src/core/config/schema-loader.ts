@@ -3,6 +3,7 @@
  */
 import { join } from "node:path";
 import { getNested } from "../../utils/objects.ts";
+import { parseAs } from "../../utils/json-schema.ts";
 import configSchema from "../core.config.json" with { type: "json" };
 
 export type CastFn = (v: unknown, ctx?: unknown) => unknown;
@@ -487,34 +488,12 @@ export function resolveKey(
 }
 
 /**
- * Resolved config type derived from the schema.
- * Keys match the schema's top-level property names; values are inferred from
- * the schema's `type` field. Falls back to `unknown` for missing types.
- */
-export type ResolvedConfigFromSchema<S extends ConfigSchema> = {
-  [K in keyof S & string]: S[K] extends SchemaProperty
-    ? S[K]['type'] extends 'string'
-      ? string | undefined
-      : S[K]['type'] extends 'number'
-        ? number | undefined
-        : S[K]['type'] extends 'boolean'
-          ? boolean | undefined
-          : S[K]['type'] extends 'array'
-            ? unknown[] | undefined
-            : S[K]['type'] extends 'object'
-              ? Record<string, unknown> | undefined
-              : unknown
-    : unknown;
-};
-
-/**
  * The resolved shape of the core schema keys.
  * Provides compile-time type checking for commonly used config keys.
  * Extension-specific config keys are not included — access them via
  * Record<string, unknown> or a generic parameter.
  *
  * This is a manually defined interface matching the core.config.json schema.
- * It documents the expected types of resolved config values.
  */
 export interface CoreConfig {
   baseUrl?: string;
@@ -566,18 +545,20 @@ export interface CoreConfig {
 
 /**
  * Resolve all config keys from a schema against a context.
+ * Returns a typed CoreConfig — known keys have their declared types,
+ * extension keys fall through to the index signature (unknown).
  */
 export function resolveAll(
   schema: ConfigSchema,
   context: ResolutionContext,
-): ResolvedConfigFromSchema<ConfigSchema> {
+): CoreConfig {
   const result: Record<string, unknown> = {};
 
   for (const [keyName, keySchema] of Object.entries(schema)) {
     result[keyName] = resolveKey(keyName, keySchema, context);
   }
 
-  return result;
+  return parseAs<CoreConfig>(result);
 }
 
 export interface ExtensionConfigParam {

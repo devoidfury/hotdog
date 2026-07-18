@@ -5,6 +5,8 @@ import { LlmError } from "../error.ts";
 import { OUTPUT_EVENT } from "../context/output.ts";
 import { AgentSink } from "./agent-sink.ts";
 import { loadProfileFile } from "../config/profiles.ts";
+import { parseAs } from "../../utils/json-schema.ts";
+import { type CoreConfig } from "../config/schema-loader.ts";
 
 // ── Task Status ─────────────────────────────────────────────────────────────
 
@@ -63,7 +65,7 @@ export interface SpawnTaskOptions {
 export interface TaskManagerOptions {
   llmClient: unknown;
   modelRegistry: Record<string, unknown>;
-  config: Record<string, unknown>;
+  config: CoreConfig;
   hooks: unknown;
   sessionManager?: { getAgent: () => TaskAgent | undefined } | null;
 }
@@ -87,7 +89,7 @@ export class TaskManager {
   #buildAgent: (config: Record<string, unknown>) => Promise<TaskAgent>;
   #llmClient: unknown;
   #modelRegistry: Record<string, unknown>;
-  #config: Record<string, unknown>;
+  #config: CoreConfig;
   #hooks: unknown;
   #sessionManager: { getAgent: () => TaskAgent | undefined } | null;
   #maxIterations: number;
@@ -196,21 +198,24 @@ export class TaskManager {
   ): Promise<TaskHandle> {
     // 1. Load task profile
     const profileName = options.profile || this.#taskProfile;
-    const taskProfile = await loadProfileFile((this.#config as unknown as Record<string, unknown>).profilesPath as string, profileName);
+    const taskProfile = await loadProfileFile(
+      this.#config.profilesPath ?? "",
+      profileName,
+    );
 
     // 2. Resolve model
     const resolvedModel =
       options.workerModel ||
-      (taskProfile && (taskProfile as unknown as Record<string, unknown>).model) ||
+      (taskProfile?.model ?? undefined) ||
       (this.#modelRegistry as { default?: string }).default ||
       "";
 
     // 3. Build system prompt from profile
-    const resolvedRole = (taskProfile as unknown as Record<string, unknown>)?.role || this.#taskRole;
-    const resolvedProfileBody = (taskProfile as unknown as Record<string, unknown>)?.body || "";
+    const resolvedRole = taskProfile?.role || this.#taskRole;
+    const resolvedProfileBody = taskProfile?.body || "";
 
     // 4. Resolve allowed tools: profile whitelist takes precedence
-    const toolWhitelist = (taskProfile as unknown as Record<string, unknown>)?.whitelistTools || null;
+    const toolWhitelist = taskProfile?.whitelistTools || null;
 
     // 5. Create task-specific sink (filters output, captures completion)
     const sink = new AgentSink({

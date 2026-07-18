@@ -6,6 +6,7 @@ import { join } from "node:path";
 import { appendFile, readFile, access, mkdir } from "node:fs/promises";
 import { HOOKS } from "../../core/hooks.ts";
 import { stripNulls } from "../../utils/objects.ts";
+import { parseAs } from "../../utils/json-schema.ts";
 import { CoreContext, ExtensionInstance } from "../../core/extensions/types.ts";
 import type { Message as CoreMessage } from "../../core/context/message.ts";
 
@@ -73,7 +74,7 @@ function messageToLogEntry(message: SessionLogMessage, source: string): LogEntry
     tool_calls: message.toolCalls || null,
     tool_call_id: message.toolCallId || null,
     tool_name: null,
-  }) as unknown as LogEntry;
+  }) as LogEntry;
 }
 
 /**

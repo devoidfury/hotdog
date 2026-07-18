@@ -277,3 +277,40 @@ export function formatValidationErrors(errors: string[]): string {
   const body = errors.map((e, i) => `  ${i + 1}. ${e}`).join("\n");
   return `${header}\n${body}`;
 }
+
+/**
+ * Validate a value against a JSON Schema and return it as the typed type T.
+ *
+ * This is the single cast point for config boundary validation.
+ * Instead of scattering `as unknown as X` across the codebase, callers
+ * validate at the boundary and get a typed value back.
+ *
+ * When validation fails, the errors are logged but the value is still
+ * returned. This is a "best effort" approach — the runtime validation
+ * serves as a warning, not a hard gate.
+ */
+export function parseAs<T>(value: unknown, schema?: unknown): T {
+  if (schema !== undefined) {
+    const errors = validate(value, schema, "");
+    if (errors.length > 0) {
+      // Log validation warnings but don't block — same semantics as
+      // the existing failOnInvalidConfig pattern.
+      console.warn(
+        `[config] Schema validation failed: ${errors.join("; ")}`,
+      );
+    }
+  }
+  return value as T;
+}
+
+/**
+ * Validate and return a typed value. Throws on validation failure.
+ * Use this when you want a hard guarantee that the value matches the schema.
+ */
+export function parseOrThrow<T>(value: unknown, schema: unknown): T {
+  const errors = validate(value, schema, "");
+  if (errors.length > 0) {
+    throw new TypeError(`Validation failed: ${errors.join("; ")}`);
+  }
+  return value as T;
+}

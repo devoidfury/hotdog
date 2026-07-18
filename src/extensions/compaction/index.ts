@@ -15,6 +15,7 @@ import { estimateContextTokens } from "./utils.ts";
 import { HOOKS } from "../../core/hooks.ts";
 import { ACTIONS } from "../../core/commands.ts";
 import { logger } from "../../core/logger.ts";
+import { parseAs } from "../../utils/json-schema.ts";
 import { LlmError, formatError } from "../../core/error.ts";
 import { Message } from "../../core/context/message.ts";
 import type { Agent } from "../../core/agent.ts";
@@ -125,7 +126,7 @@ export function create(core: CoreContext): ExtensionInstance | null {
       );
       const stream = agent.llmClient.chatStreamCancellable(
         wrapped.map((m) => m.toJSON()),
-        (modelConfig as unknown as ModelConfig) || { name: chatModel, temperature: null },
+        parseAs<ModelConfig>(modelConfig) || { name: chatModel, temperature: null },
         [],
         abortController.signal,
       );

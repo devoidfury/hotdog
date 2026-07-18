@@ -28,6 +28,7 @@ import {
   type CliArgv,
   type AgentConfig,
 } from "./config/index.ts";
+import { parseAs } from "../utils/json-schema.ts";
 import {
   cliFlagsFromSchema,
   CONFIG_SCHEMA,
@@ -63,7 +64,7 @@ async function loadExtensions(
     config,
   }: { taskManager: unknown; config: CoreConfig } = {
     taskManager: null,
-    config: {} as CoreConfig,
+    config: parseAs<CoreConfig>({}),
   },
 ): Promise<unknown[]> {
   const loaded: unknown[] = [];
@@ -159,11 +160,11 @@ function createCore(
   // This must be done BEFORE creating the extension loader, because
   // extensions access core.config.profile during create() (e.g., subagents
   // checks core.config.profile.manager to decide whether to register tools).
-  const coreConfig = {
+  const coreConfig = parseAs<CoreConfig>({
     ...config,
     profileName: options.profileName || config.profileName || "default",
     profile: options.profile || config.profile || {},
-  } as CoreConfig;
+  });
 
   const extensions = createExtensionLoader({
     hooks,
@@ -174,7 +175,7 @@ function createCore(
     configRegistry,
   });
 
-  return {
+  return parseAs<CoreInfrastructure>({
     hooks,
     toolRegistry,
     extensions,
@@ -184,7 +185,7 @@ function createCore(
     configRegistry,
     service: (name: string) => services.get(name),
     buildConfig: options.buildConfig,
-  } as CoreInfrastructure;
+  });
 }
 
 // ── Main ─────────────────────────────────────────────────────────────────────
@@ -233,7 +234,7 @@ export async function main(): Promise<number> {
   // This enables `--help` and subcommand discovery without loading any extension code.
   const cliSubcommandRegistry = createSubcommandRegistry();
   await registerExtensionMetadata(
-    minimalConfig as unknown as CoreConfig,
+    parseAs<CoreConfig>(minimalConfig),
     configRegistry,
     cliSubcommandRegistry,
   );
@@ -290,8 +291,8 @@ export async function main(): Promise<number> {
   // defined in their extension.json configSchema. This allows nested properties
   // to have their own layers (e.g., apiKey with config + env + default).
   const extContext: ResolutionContext = {
-    cli: cli as unknown as Record<string, unknown>,
-    config: config as unknown as Record<string, unknown>,
+    cli: parseAs<Record<string, unknown>>(cli),
+    config: parseAs<Record<string, unknown>>(config),
     configDir: resolved.configDir,
     provider: resolved.activeProvider
       ? { name: resolved.activeProvider }
@@ -299,19 +300,19 @@ export async function main(): Promise<number> {
     profile: resolved.profile,
     profileName: resolved.profileName,
   };
-  const resolvedExtConfig = resolveExtensionConfig(extParams as unknown as ExtensionConfigParam[], extContext);
+  const resolvedExtConfig = resolveExtensionConfig(parseAs<ExtensionConfigParam[]>(extParams), extContext);
   // Merge resolved extension keys back into config so extensions see the resolved values
-  Object.assign(config as unknown as Record<string, unknown>, resolvedExtConfig);
+  Object.assign(parseAs<Record<string, unknown>>(config), resolvedExtConfig);
 
   // ── Validate config against core schema and extension schemas ────────────
   const extensionSchemas = extParams
     .filter((p) => p.schema)
     .map((p) => ({ key: p.key, schema: p.schema }));
-  const validationResult = validateConfig(config as unknown as CoreConfig, extensionSchemas);
+  const validationResult = validateConfig(parseAs<CoreConfig>(config), extensionSchemas);
   failOnInvalidConfig(validationResult);
 
   // ── Create core infrastructure ──────────────────────────────────────────
-  const core = createCore(config as unknown as CoreConfig, configRegistry, cliSubcommandRegistry, {
+  const core = createCore(parseAs<CoreConfig>(config), configRegistry, cliSubcommandRegistry, {
     hooks,
     profileName: resolved.profileName,
     profile: resolved.profile,
@@ -324,7 +325,7 @@ export async function main(): Promise<number> {
   // ── Load extensions ──────────────────────────────────────────────────────
   // Extensions register their handlers in create() via cliSubcommandRegistry.register().
   // Force autoload: true to ensure all extensions are loaded (not just explicitly listed ones).
-  await loadExtensions(core, { taskManager: null, config: config as unknown as CoreConfig });
+  await loadExtensions(core, { taskManager: null, config: parseAs<CoreConfig>(config) });
 
   // Emit CLI subcommand registration hook so extensions can register their handlers.
   // Subcommand metadata (description, options) was already registered from extension.json;

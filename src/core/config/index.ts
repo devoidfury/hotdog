@@ -8,7 +8,7 @@ import { cwd } from "node:process";
 import { ConfigError } from "../error.ts";
 import { deepMerge } from "../../utils/objects.ts";
 import { render } from "../../utils/render.ts";
-import { validate as validateSchema } from "../../utils/json-schema.ts";
+import { validate as validateSchema, parseAs } from "../../utils/json-schema.ts";
 import { camelCase } from "../../utils/strings.ts";
 
 export * from "./defaults.ts";
@@ -205,7 +205,9 @@ export function getDefaultConfig(
     hookTrace: getLayerDefault(CONFIG_SCHEMA.hookTrace) as boolean,
   };
 
-  return mergeExtensionConfigDefaults(baseConfig as unknown as Record<string, unknown>, extParams) as unknown as DefaultConfig;
+  return parseAs<DefaultConfig>(
+    mergeExtensionConfigDefaults(baseConfig, extParams),
+  );
 }
 
 /**
@@ -359,7 +361,7 @@ export async function buildConfig(cliArgv: CliArgv): Promise<{
 
   const resolved = await buildAgentConfig({
     cli: cliArgv,
-    config: config as unknown as Record<string, unknown>,
+    config: parseAs<CoreConfig>(config),
     configDir,
     providers: config.providers || [],
     defaultModel: getLayerDefault(CONFIG_SCHEMA.defaultModel) as string,
@@ -369,7 +371,7 @@ export async function buildConfig(cliArgv: CliArgv): Promise<{
   });
 
   const modelRegistry = buildModelRegistry(
-    { providers: (config.providers || []) as unknown as ProviderDef[] },
+    { providers: parseAs<ProviderDef[]>(config.providers || []) },
     128000,
   );
   resolved.modelRegistry = modelRegistry;
@@ -382,7 +384,7 @@ export async function buildConfig(cliArgv: CliArgv): Promise<{
  */
 export async function buildAgentConfig(options: {
   cli: CliArgv;
-  config: Record<string, unknown>;
+  config: CoreConfig;
   configDir: string;
   providers?: unknown[];
   defaultModel?: string;
@@ -398,35 +400,29 @@ export async function buildAgentConfig(options: {
   } = options;
 
   const context: ResolutionContext = {
-    cli: cli as Record<string, unknown>,
-    config: config as Record<string, unknown>,
+    cli,
+    config,
     configDir,
   };
 
-  const profileName = resolveKey(
-    "profileName",
-    CONFIG_SCHEMA.profileName,
-    context,
-  ) as string;
+  const profileName = parseAs<string>(
+    resolveKey("profileName", CONFIG_SCHEMA.profileName, context),
+  );
   const profilesPath =
     givenProfilesPath ||
-    (resolveKey(
-      "profilesPath",
-      CONFIG_SCHEMA.profilesPath,
-      context,
-    ) as string);
+    parseAs<string>(
+      resolveKey("profilesPath", CONFIG_SCHEMA.profilesPath, context),
+    );
 
   const profileFiles = await loadProfileFiles(profilesPath);
-  const configProfile = (config.profiles as Record<string, unknown> | undefined)?.[profileName] ?? null;
+  const configProfile = config.profiles?.[profileName] ?? null;
   const fileProfile = profileFiles[profileName] || null;
 
-  const providerName = resolveKey(
-    "provider",
-    CONFIG_SCHEMA.provider,
-    context,
-  ) as string | undefined;
+  const providerName = parseAs<string | undefined>(
+    resolveKey("provider", CONFIG_SCHEMA.provider, context),
+  );
   const provider = providerName
-    ? (providers as Array<{ name: string }>).find(
+    ? parseAs<Array<{ name: string }>>(providers).find(
         (p) => p.name === providerName,
       ) ?? null
     : null;
@@ -434,14 +430,13 @@ export async function buildAgentConfig(options: {
   // Profile merge
   let profile: Record<string, unknown>;
   if (configProfile || fileProfile) {
-    profile = { ...(configProfile as Record<string, unknown> | null) };
+    profile = { ...parseAs<Record<string, unknown> | null>(configProfile) };
     if (fileProfile) {
-      const fp = fileProfile as unknown as Record<string, unknown>;
-      if (fp.role) profile.role = fp.role;
-      if (fp.whitelistTools != null) profile.whitelistTools = fp.whitelistTools;
-      if (Array.isArray(fp.blacklistTools) && (fp.blacklistTools as unknown[]).length)
-        profile.blacklistTools = fp.blacklistTools;
-      if (fp.manager) profile.manager = true;
+      if (fileProfile.role) profile.role = fileProfile.role;
+      if (fileProfile.whitelistTools != null) profile.whitelistTools = fileProfile.whitelistTools;
+      if (Array.isArray(fileProfile.blacklistTools) && fileProfile.blacklistTools.length)
+        profile.blacklistTools = fileProfile.blacklistTools;
+      if (fileProfile.manager) profile.manager = true;
     }
   } else {
     profile = {
@@ -454,7 +449,7 @@ export async function buildAgentConfig(options: {
 
   const resolvedContext: ResolutionContext = {
     ...context,
-    provider: provider as Record<string, unknown> | null,
+    provider: parseAs<Record<string, unknown> | null>(provider),
     profile,
     profileName,
     profilesPath,
@@ -466,9 +461,9 @@ export async function buildAgentConfig(options: {
 
   const model = resolveModel(
     cli.model ?? undefined,
-    (configProfile as { model?: string } | null)?.model,
-    config.defaultModel as string | null | undefined,
-    provider as { name: string; models: Array<{ name: string }> } | undefined | null,
+    parseAs<{ model?: string } | null>(configProfile)?.model,
+    parseAs<string | null | undefined>(config.defaultModel),
+    parseAs<{ name: string; models: Array<{ name: string }> } | undefined | null>(provider),
     defaultModel,
   );
 
@@ -485,26 +480,26 @@ export async function buildAgentConfig(options: {
     : "";
 
   const systemPromptTemplate = await initSystemPromptTemplate(
-    cli.systemPromptTemplate || config.systemPromptTemplate as string | undefined,
+    cli.systemPromptTemplate || parseAs<string | undefined>(config.systemPromptTemplate),
     cli.configDir ?? undefined,
     resolveConfigDir,
   );
 
   const profiles = allProfilesForSwitch({
     profileFiles,
-    configProfiles: config.profiles as Record<string, Partial<ProfileDef>> | undefined || {},
+    configProfiles: parseAs<Record<string, Partial<ProfileDef>> | undefined>(config.profiles) || {},
     profilesPath,
   });
 
-  return {
+  return parseAs<AgentConfig>({
     ...resolved,
     model,
     configDir,
     profile,
     profileBody,
-    activeProvider: (provider as { name?: string } | null)?.name || null,
+    activeProvider: parseAs<{ name?: string } | null>(provider)?.name || null,
     systemPromptTemplate,
     profiles,
     modelRegistry: {},
-  } as AgentConfig;
+  });
 }

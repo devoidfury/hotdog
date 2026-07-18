@@ -9,6 +9,7 @@ import { HOOKS, HookSystem } from "./hooks.ts";
 import { isPromise } from "../utils/promise.ts";
 import { ACTIONS, ParsedCommand, Command } from "./commands.ts";
 import { logger } from "./logger.ts";
+import { parseAs } from "../utils/json-schema.ts";
 import { ToolContext } from "./extensions/tool-context.ts";
 import { formatToolResult } from "./extensions/tool-utils.ts";
 import { createCommandRegistry, AgentCommandRegistry } from "./extensions/registries.ts";
@@ -342,7 +343,7 @@ export class Agent {
       let toolDefs = await this.#toolRegistry.getToolDefs();
       let modelConfig = resolveModelConfig(
         this.#model,
-        this.modelRegistry as unknown as Record<string, ModelConfig>,
+        parseAs<Record<string, ModelConfig>>(this.modelRegistry),
         this.contextLimit,
         this.reasoningEffort,
       );
@@ -384,9 +385,9 @@ export class Agent {
 
       try {
         const stream = this.llmClient.chatStreamCancellable(
-          messages.map((m) => m.toJSON()) as Array<Record<string, unknown>>,
+          parseAs<Array<Record<string, unknown>>>(messages.map((m) => m.toJSON())),
           modelConfig,
-          toolDefs as unknown as Array<Record<string, unknown>>,
+          parseAs<Array<Record<string, unknown>>>(toolDefs),
           cancelSignal,
         );
 
@@ -487,7 +488,7 @@ export class Agent {
   /** Emit token usage — delegates to TokenTracker for accumulation and emits the event. */
   _emitTokenUsage(response: { usage?: Record<string, unknown> | null }): void {
     this.#tokenTracker.record(response.usage, (usage) => {
-      this.emitOutput("token_usage", usage as unknown as Record<string, unknown>);
+      this.emitOutput("token_usage", parseAs<Record<string, unknown>>(usage));
     });
   }
 

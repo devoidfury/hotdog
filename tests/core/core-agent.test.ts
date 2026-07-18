@@ -1154,24 +1154,7 @@ describe('Agent — end-to-end loop', () => {
     });
   });
 
-  describe('_buildToolContext', () => {
-    it('should include agent and config info', () => {
-      const { agent } = createFixture({ config: { cwdBoundary: '/b', workspaceRoot: '/r' } });
-      const ctx = agent._buildToolContext('test');
-      expect(ctx.get('agent')).toBe(agent);
-      expect(ctx.get('isSessionRestoring')).toBe(false);
-      expect(ctx.get('cwdBoundary')).toBe('/b');
-      expect(ctx.get('workspaceRoot')).toBe('/r');
-    });
-
-    it('should handle missing config', () => {
-      const { agent } = createFixture({ config: null });
-      const ctx = agent._buildToolContext('test');
-      expect(ctx.get('agent')).toBe(agent);
-      expect(ctx.get('cwdBoundary')).toBeUndefined();
-      expect(ctx.get('workspaceRoot')).toBeUndefined();
-    });
-  });
+  // Tool context building is now tested in tests/core/tool-executor.test.ts
 
   describe('notifyCompletion', () => {
     it('should call onTaskComplete on sink', () => {

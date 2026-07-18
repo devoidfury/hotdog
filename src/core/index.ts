@@ -27,6 +27,14 @@ export {
 export { ToolContext } from "./extensions/tool-context.ts";
 
 export {
+  ToolExecutor,
+  createToolExecutor,
+  type ToolExecutorDeps,
+  type ToolCall,
+  type ToolResult as ToolExecutorResult,
+} from "./tool-executor.ts";
+
+export {
   ToolResult,
   toolDef,
   param,

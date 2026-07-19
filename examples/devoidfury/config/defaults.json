@@ -189,6 +189,10 @@
         {
           "name": "lfm2.5-8b-a1b",
           "context-limit": 128000
+        },
+        {
+          "name": "thinkingcap-27b",
+          "context-limit": 180000
         }
       ]
     },

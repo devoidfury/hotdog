@@ -564,8 +564,8 @@ export function resolveAll(
 export interface ExtensionConfigParam {
   key: string;
   defaults?: unknown;
-  schema?: SchemaProperty;
-  layers?: SchemaLayer[];
+  schema?: Record<string, unknown>;
+  layers?: unknown[];
 }
 
 /**
@@ -581,9 +581,9 @@ export function resolveExtensionConfig(
     if (!param.layers) continue;
 
     const schemaEntry = compileSchemaKey({
-      type: param.schema?.type || "object",
-      layers: param.layers,
-      properties: param.schema?.properties,
+      type: (param.schema as SchemaProperty | undefined)?.type || "object",
+      layers: param.layers as SchemaLayer[],
+      properties: (param.schema as SchemaProperty | undefined)?.properties,
     });
 
     const resolved = resolveKey(param.key, schemaEntry, context);

@@ -14,7 +14,6 @@ import type { Message } from "../context/message.ts";
 import type { ParsedCommand } from "../commands.ts";
 import type { ToolContext } from "./tool-context.ts";
 import { logger } from "../logger.ts";
-import { parseAs } from "../../utils/json-schema.ts";
 
 // ── Hook Payload Types ──────────────────────────────────────────────────────
 
@@ -271,9 +270,9 @@ export function getExtensionConfig<T = Record<string, unknown>>(
   // keys with arbitrary names. The schema validation above is the right check.
 
   if (block && typeof block === "object" && !Array.isArray(block)) {
-    return parseAs<T>(block);
+    return block as T;
   }
-  return parseAs<T>({});
+  return {} as T;
 }
 
 /**

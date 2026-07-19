@@ -12,22 +12,8 @@ import { logger } from "../../core/logger.ts";
 import { type CommandRegistryLike } from "../../core/commands.ts";
 import type { CoreContext } from "../../core/extensions/types.ts";
 import type { AuthMiddleware } from "./auth.ts";
+import { Agent } from "../../core/agent.ts";
 
-// ── Types ───────────────────────────────────────────────────────────────────
-
-/**
- * Public API surface of Agent that WebSocket handlers rely on.
- * Defined locally to avoid circular imports from core/agent.ts.
- */
-interface AgentHandle {
-  sessionId: string;
-  model: string;
-  profileName: string | undefined;
-  modelRegistry: Record<string, unknown>;
-  log: import("../../core/context/message-log.js").MessageLog;
-  sink: unknown;
-  commandRegistry: unknown;
-}
 
 interface SessionMetadata {
   profile: string;
@@ -118,7 +104,7 @@ export class SessionRegistry {
     // Create a minimal session-manager-like wrapper so the bus can access the agent
     const sessionManager = {
       getAgent: () => agent,
-      sessionId: () => (agent as AgentHandle)?.sessionId,
+      sessionId: () => (agent as Agent)?.sessionId,
     };
 
     // Build fanout sink with background sink
@@ -133,7 +119,7 @@ export class SessionRegistry {
     });
 
     // Wire agent's sink to the fanout so agent emits events to fanout
-    if (agent) (agent as AgentHandle).sink = fanout;
+    if (agent) (agent as Agent).sink = fanout;
 
     // Start the bus run loop (non-blocking — it awaits messages as they arrive)
     const runLoop = bus.run().catch((err: unknown) => {
@@ -149,7 +135,7 @@ export class SessionRegistry {
       bgSink,
       metadata: {
         profile: profile || "default",
-        model: (agent as AgentHandle)?.model || "",
+        model: (agent as Agent)?.model || "",
         createdAt: Date.now(),
         lastActivityAt: Date.now(),
         connectedClients: 0,
@@ -178,7 +164,7 @@ export class SessionRegistry {
       result.push({
         id,
         profile: s.metadata.profile,
-        model: (s.agent as AgentHandle)?.model || s.metadata.model,
+        model: (s.agent as Agent)?.model || s.metadata.model,
         createdAt: s.metadata.createdAt,
         lastActivityAt: s.metadata.lastActivityAt,
         connectedClients: s.metadata.connectedClients,
@@ -301,7 +287,7 @@ interface Message {
  * OUTPUT_EVENT-derived messages so the frontend can reconstruct the chat.
  */
 function replaySessionHistory(session: Session, ws: WebSocket): void {
-  const agent = session.agent as AgentHandle;
+  const agent = session.agent as Agent;
   if (!agent || !agent.log) return;
 
   // Collect tool calls from the most recent assistant message to match
@@ -425,9 +411,9 @@ function routeMessage(ws: WebSocket, msg: C2SMessage, registry: SessionRegistry,
         ws.send(JSON.stringify({
           type: "sessionCreated",
           sessionId,
-          profile: (agent as AgentHandle)?.profileName || "default",
-          currentModel: (agent as AgentHandle)?.model,
-          models: Object.keys((agent as AgentHandle)?.modelRegistry || {}),
+          profile: (agent as Agent)?.profileName || "default",
+          currentModel: (agent as Agent)?.model,
+          models: Object.keys((agent as Agent)?.modelRegistry || {}),
         }));
       }).catch((err: unknown) => {
         ws.send(JSON.stringify({ type: "error", message: (err as Error).message }));
@@ -463,7 +449,7 @@ function routeMessage(ws: WebSocket, msg: C2SMessage, registry: SessionRegistry,
           typedWs.activeSessionId = msg.sessionId as string;
           typedWs.activeSink = wsSink;
           // Send session metadata so the frontend can update reactively
-          const agent = session.agent as AgentHandle;
+          const agent = session.agent as Agent;
           ws.send(JSON.stringify({
             type: S2C.SESSION_STATE,
             key: "model",
@@ -576,7 +562,7 @@ function attachToMostRecentSession(ws: WebSocket, registry: SessionRegistry): vo
   typedWs.activeSink = wsSink;
 
   // Send sessionCreated so the client sets up its UI for this session
-  const agent = session.agent as AgentHandle;
+  const agent = session.agent as Agent;
   ws.send(JSON.stringify({
     type: "sessionCreated",
     sessionId,
@@ -599,9 +585,9 @@ function createAndAttachSession(ws: WebSocket, registry: SessionRegistry): void 
     ws.send(JSON.stringify({
       type: "sessionCreated",
       sessionId,
-      profile: (agent as AgentHandle)?.profileName || "default",
-      currentModel: (agent as AgentHandle)?.model,
-      models: Object.keys((agent as AgentHandle)?.modelRegistry || {}),
+      profile: (agent as Agent)?.profileName || "default",
+      currentModel: (agent as Agent)?.model,
+      models: Object.keys((agent as Agent)?.modelRegistry || {}),
     }));
   }).catch((err: unknown) => {
     ws.send(JSON.stringify({ type: "error", message: (err as Error).message }));
@@ -665,7 +651,7 @@ export function createWsServer(core: CoreContext, options: CreateWsServerOptions
     // Emit COMMANDS_REGISTER so extensions can register commands
     if (core.hooks) {
       core.hooks.notifyHooks(HOOKS.COMMANDS_REGISTER, {
-        registry: (agent as AgentHandle)?.commandRegistry,
+        registry: agent?.commandRegistry,
         agent,
       });
     }

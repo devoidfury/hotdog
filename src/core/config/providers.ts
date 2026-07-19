@@ -94,11 +94,24 @@ export function resolveProvider(
  */
 export function resolveModelConfig(
   modelName: string,
-  modelRegistry: Record<string, ModelConfig>,
+  modelRegistry: Record<string, {
+    name?: string;
+    temperature?: number | null;
+    contextLimit?: number;
+    reasoningEffort?: string;
+    [key: string]: unknown;
+  }>,
   contextLimit: number,
   reasoningEffort: string | undefined,
 ): ModelConfig {
-  const fromRegistry = modelRegistry[modelName] || {
+  const entry = modelRegistry[modelName];
+  const fromRegistry: ModelConfig = entry ? {
+    name: entry.name || modelName,
+    temperature: entry.temperature ?? null,
+    contextLimit: entry.contextLimit ?? contextLimit,
+    reasoningEffort: entry.reasoningEffort,
+    tags: (entry.tags as string[]) || [],
+  } : {
     name: modelName,
     temperature: null,
     contextLimit,

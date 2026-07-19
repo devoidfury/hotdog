@@ -15,7 +15,6 @@ import { estimateContextTokens } from "./utils.ts";
 import { HOOKS } from "../../core/hooks.ts";
 import { ACTIONS } from "../../core/commands.ts";
 import { logger } from "../../core/logger.ts";
-import { parseAs } from "../../utils/json-schema.ts";
 import { LlmError, formatError } from "../../core/error.ts";
 import { Message } from "../../core/context/message.ts";
 import type { Agent } from "../../core/agent.ts";
@@ -39,13 +38,20 @@ interface CompactionSettings {
  * Resolve the model config from core.
  * Checks core.resolved.modelRegistry first, falls back to a default config.
  */
-function getModelConfig(core: CoreContext, modelName: string): Record<string, unknown> | undefined {
+function getModelConfig(core: CoreContext, modelName: string): { name: string; temperature: number | null; contextLimit: number; reasoningEffort?: string } | null {
   // Check core.resolved?.modelRegistry first, then fall back to core.modelRegistry
   const registry = core.resolved?.modelRegistry || ((core as unknown) as Record<string, unknown>).modelRegistry;
   if (registry) {
-    return (registry as Record<string, ModelConfig>)[modelName] as Record<string, unknown> | undefined;
+    const entry = (registry as Record<string, ModelConfig>)[modelName];
+    if (!entry) return null;
+    return {
+      name: entry.name || modelName,
+      temperature: entry.temperature ?? null,
+      contextLimit: entry.contextLimit ?? 128000,
+      reasoningEffort: entry.reasoningEffort,
+    };
   }
-  return undefined;
+  return null;
 }
 
 /**
@@ -126,7 +132,7 @@ export function create(core: CoreContext): ExtensionInstance | null {
       );
       const stream = agent.llmClient.chatStreamCancellable(
         wrapped.map((m) => m.toJSON()),
-        parseAs<ModelConfig>(modelConfig) || { name: chatModel, temperature: null },
+        modelConfig ?? { name: chatModel, temperature: null },
         [],
         abortController.signal,
       );

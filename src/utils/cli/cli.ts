@@ -1,7 +1,6 @@
 // CLI output sink — formats and displays agent output with color support.
 
 import { OutputSink, OUTPUT_EVENT, EVENT_HANDLERS, OutputEvent } from "../../core/context/output.ts";
-import { parseAs } from "../json-schema.ts";
 import {
   ColorPalette,
   applyThinking,
@@ -255,7 +254,7 @@ export class CliOutputSink extends OutputSink {
   override emit(event: OutputEvent): void {
     const handler = EVENT_HANDLERS[event.type];
     if (handler && typeof (this as Record<string, unknown>)[handler] === "function") {
-      (parseAs<Record<string, (event: OutputEvent) => void>>(this)[handler] as (event: OutputEvent) => void)(event);
+      ((this as Record<string, (event: OutputEvent) => void>)[handler] as (event: OutputEvent) => void)(event);
     }
   }
 

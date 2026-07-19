@@ -33,7 +33,6 @@ import {
   cliFlagsFromSchema,
   CONFIG_SCHEMA,
   resolveExtensionConfig,
-  type ExtensionConfigParam,
   type ResolutionContext,
   type CoreConfig,
 } from "./config/schema-loader.ts";
@@ -64,7 +63,7 @@ async function loadExtensions(
     config,
   }: { taskManager: unknown; config: CoreConfig } = {
     taskManager: null,
-    config: parseAs<CoreConfig>({}),
+    config: {} as CoreConfig,
   },
 ): Promise<unknown[]> {
   const loaded: unknown[] = [];
@@ -160,11 +159,11 @@ function createCore(
   // This must be done BEFORE creating the extension loader, because
   // extensions access core.config.profile during create() (e.g., subagents
   // checks core.config.profile.manager to decide whether to register tools).
-  const coreConfig = parseAs<CoreConfig>({
+  const coreConfig: CoreConfig = {
     ...config,
     profileName: options.profileName || config.profileName || "default",
     profile: options.profile || config.profile || {},
-  });
+  };
 
   const extensions = createExtensionLoader({
     hooks,
@@ -175,7 +174,7 @@ function createCore(
     configRegistry,
   });
 
-  return parseAs<CoreInfrastructure>({
+  return {
     hooks,
     toolRegistry,
     extensions,
@@ -185,7 +184,7 @@ function createCore(
     configRegistry,
     service: (name: string) => services.get(name),
     buildConfig: options.buildConfig,
-  });
+  } as CoreInfrastructure;
 }
 
 // ── Main ─────────────────────────────────────────────────────────────────────
@@ -291,8 +290,8 @@ export async function main(): Promise<number> {
   // defined in their extension.json configSchema. This allows nested properties
   // to have their own layers (e.g., apiKey with config + env + default).
   const extContext: ResolutionContext = {
-    cli: parseAs<Record<string, unknown>>(cli),
-    config: parseAs<Record<string, unknown>>(config),
+    cli: cli as Record<string, unknown>,
+    config: config as Record<string, unknown>,
     configDir: resolved.configDir,
     provider: resolved.activeProvider
       ? { name: resolved.activeProvider }
@@ -300,9 +299,9 @@ export async function main(): Promise<number> {
     profile: resolved.profile,
     profileName: resolved.profileName,
   };
-  const resolvedExtConfig = resolveExtensionConfig(parseAs<ExtensionConfigParam[]>(extParams), extContext);
+  const resolvedExtConfig = resolveExtensionConfig(extParams, extContext);
   // Merge resolved extension keys back into config so extensions see the resolved values
-  Object.assign(parseAs<Record<string, unknown>>(config), resolvedExtConfig);
+  Object.assign(config as Record<string, unknown>, resolvedExtConfig);
 
   // ── Validate config against core schema and extension schemas ────────────
   const extensionSchemas = extParams

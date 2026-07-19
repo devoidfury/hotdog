@@ -640,6 +640,18 @@ Extensions register their own configuration namespaces. Each extension's config 
 { "agentsMd": { "enabled": true, "autoload": false } }
 ```
 
+### `environment`
+
+[Environment](../src/extensions/environment) — Contributes Environment section to the system prompt.
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `enabled` | `boolean` | `true` | Enable/disable the extension. |
+
+```json
+{ "environment": { "enabled": true } }
+```
+
 ### `bashTool`
 
 [Bash Tool](../src/extensions/bash-tool) — Execute shell commands.
@@ -652,6 +664,18 @@ Extensions register their own configuration namespaces. Each extension's config 
 
 ```json
 { "bashTool": { "bashTimeoutMs": 30000 } }
+```
+
+### `fetchTool`
+
+[Fetch Tool](../src/extensions/fetch-tool) — Make HTTP requests.
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `enabled` | `boolean` | `true` | Enable/disable the extension. |
+
+```json
+{ "fetchTool": { "enabled": true } }
 ```
 
 ### `compaction`
@@ -740,6 +764,19 @@ An array of MCP server definitions. Each server can use either HTTP transport (`
 { "modelSwitch": { "toolEnabled": true } }
 ```
 
+### `loop`
+
+[Loop](../src/extensions/loop) — `/loop` slash command for repeatedly running a prompt until cancelled.
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `enabled` | `boolean` | `true` | Enable/disable the `/loop` command. |
+| `maxLoops` | `number` | `-1` | Maximum loop iterations (`-1` = unlimited). |
+
+```json
+{ "loop": { "maxLoops": 10 } }
+```
+
 ### `questionTool`
 
 [Question Tool](../src/extensions/question-tool) — Ask the user questions.
@@ -762,6 +799,22 @@ CLI flag: `--preload-skills` (comma-separated skill names).
 
 ```json
 { "skills": { "preloadSkills": ["my-skill", "another-skill"] } }
+```
+
+### `prompts`
+
+[Prompts](../src/extensions/prompts) — Prompt template loading and execution.
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `enabled` | `boolean` | `true` | Enable/disable the extension. |
+| `path` | `string` | `<configDir>/prompts` | Directory path for prompt templates. |
+| `displayPrompt` | `boolean` | `true` | Show rendered prompt in chat before LLM processing. |
+
+CLI flag: `--prompts-path`.
+
+```json
+{ "prompts": { "path": "./my-prompts", "displayPrompt": false } }
 ```
 
 ### `subagents`
@@ -822,6 +875,23 @@ CLI flag: `--shell-mode`.
 
 ```json
 { "websocket": { "port": 8080, "sessionTimeoutMin": 60 } }
+```
+
+### `webui`
+
+[WebUI](../src/extensions/webui) — Web UI for agent interaction (login, chat, session management).
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `enabled` | `boolean` | `true` | Enable/disable the extension. |
+| `port` | `number` | `3000` | WebUI server port. |
+| `host` | `string` | `"0.0.0.0"` | WebUI server host. |
+| `apiKey` | `string` | `null` | API key for login authentication (also from env `HOTDOG_WEBUI_API_KEY`). |
+| `sessionTokenTtlMin` | `number` | `1440` | Session token TTL in minutes (default: 24 hours). |
+| `maxAgeSecs` | `number` | `3600` | Cache-Control max-age for static assets (seconds). |
+
+```json
+{ "webui": { "port": 8080, "apiKey": "your-key" } }
 ```
 
 ---

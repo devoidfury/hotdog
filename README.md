@@ -64,10 +64,10 @@ export AI_API_KEY="your-api-key"
 bun bin/hotdog
 
 # One-shot prompt
-bun bin/hotdog -c "What files are in this project?"
+bun bin/hotdog -p "What files are in this project?"
 
 # With a specific model
-bun bin/hotdog -m "my-provider/hopus-popus" -c "Summarize this codebase"
+bun bin/hotdog -m "my-provider/hopus-popus" -p "Summarize this codebase"
 ```
 
 If you want to add the bin/ directory to your path, you can shorten it to just `hotdog`, for example:
@@ -78,7 +78,7 @@ If you want to add the bin/ directory to your path, you can shorten it to just `
 # put in .profile/.bashrc/.zshrc or similar place to make it available in future sessions
 export PATH="$PATH:/path/to/hotdog/bin"
 
-hotdog -m "my-provider/hopus-popus" -c "See if you can improve the test coverage."
+hotdog -m "my-provider/hopus-popus" -p "See if you can improve the test coverage."
 ```
 
 ## Configuration

@@ -4,7 +4,7 @@ JS project `hotdog` — an AI agent harness with tool calling support.
 
 ## Quick Command Reference
 
-- **Run one-shot:** `bun bin/hotdog -c "hello"` or `bun bin/hotdog prompt "hello"`
+- **Run one-shot:** `bun bin/hotdog -p "hello"` or `bun bin/hotdog prompt "hello"`
 - **Interactive:** `bun bin/hotdog` (starts readline session)
 - **With profile:** `--profile fixer`
 - **With model:** `--model qwen3.5-0.8b`

@@ -75,27 +75,30 @@ The foundation for the extension architecture. `HookSystem` class with `on()`, `
 
 ### Extension Loader (`src/core/extensions/extensions.ts`)
 Discovers, loads, and manages extensions. Key exports:
-- `HookSystem`, `HOOKS`, `EXTENSION_PROVIDES` — re-exported from hooks.ts
+- `HOOKS`, `EXTENSION_PROVIDES` — re-exported from hooks.ts
 - `ExtensionLoader` class — manages extension lifecycle (load, unload, reload, get, all, has, size)
 - `createExtensionLoader(core)` — factory function
 - `discoverExtensions(extensionPaths)` — discovers extensions from configured paths
+- `discoverExtensionsInDir(dirPath)` — discovers extensions in a single directory
 - `getExtensionsToLoad(extensionPaths, extensionAutoload, extensions)` — filters extensions based on config
 - `resolveExtensionPath(spec)` — resolves "builtins" or path specs to absolute directories
 - `LOAD_ORDER` — constants for extension load ordering (REFRESH: 0, CORE_TOOLS: 1, CLI: 2, DEFAULT: 10)
-- `registerExtensionMetadata(config, configRegistry, cliSubcommandRegistry)` — reads extension.json metadata, auto-registers configSchema defaults
+- `registerExtensionMetadata(configRegistry, cliSubcommandRegistry)` — reads extension.json metadata, auto-registers configSchema defaults
 - `extractSchemaDefaults(schema)` — extracts defaults from JSON Schema as config params
 
 ### Agent (`src/core/agent.ts`)
 Minimal Agent class that runs the LLM loop and delegates behavior to hooks. Key features:
-- Constructor takes `options` object: `hooks`, `toolRegistry`, `llmClient`, `model`, `maxIterations`, `contextLimit`, `hideTools`, `hideThinking`, `showTokenUse`, `sink`, `modelRegistry`, `profileName`, `role`, `profileBody`, `stream`, `config`, `sessionId`, `abortSignal`, `toolWhitelist`, `commandRegistry`
+- Constructor takes `options` object: `hooks`, `toolRegistry`, `llmClient`, `model`, `maxIterations`, `contextLimit`, `hideTools`, `hideThinking`, `showTokenUse`, `sink`, `modelRegistry`, `profileName`, `role`, `profileBody`, `stream`, `config`, `sessionId`, `abortSignal`, `toolWhitelist`, `commandRegistry`, `systemPromptBuilder`, `enqueueCallback`
 - `run(userInput)` — main iteration loop: add user message → build messages → LLM call → process stream → execute tools → repeat
 - `ensureSystemPrompt()` — builds system prompt via hooks (extensions contribute)
 - `_processStream(stream)` — processes streaming LLM response (content, reasoning, tool calls, usage)
 - `_executeTools(toolCalls)` — executes tool calls with hook-based enrichment
 - `executeCommand(cmd)` — executes commands
 - `cancel()` — cancels the running agent loop
-- Properties: `model`, `log`, `isRestoring`, `iterationCount`, `sessionId`, `cancelled`, `hideTools`, `hideThinking`, `systemPrompt`, `llmClient`
-- Task agent support: `_abortSignal`, `_toolWhitelist`, `_followQueue`, `_notifyCompletion()`
+- Properties: `model`, `log`, `isRestoring`, `iterationCount`, `sessionId`, `cancelled`, `hideTools`, `hideThinking`, `systemPrompt`, `llmClient`, `reasoningEffort`, `followQueue`, `commandRegistry`, `enqueueCallback`
+- Task agent support: `abortSignal`, `toolWhitelist`, `followQueue`
+- `getTokenUsage()` — returns accumulated token usage for the session
+- `enqueue(text)` — enqueue a message on the owning MessageBus
 
 ### Commands (`src/core/commands.ts`)
 Command parsing — commands are the abstract concept, slash commands (/cmd) are one UI implementation. Key exports:
@@ -134,7 +137,7 @@ Maps abstract interface names to implementations. Extensions declare services vi
 
 ### Tool Utilities (`src/core/extensions/tool-utils.ts`)
 Tool definition helpers and utilities. Key exports:
-- `ToolResult` — structured result with `output`, `error`, `metadata`, `success`, `outputTag`, `toDisplay()`, `toApiContent()`
+- `ToolResult` — structured result with `output`, `error`, `metadata`, `success`, `outputTag`, `images`. Static constructors: `ok(output)`, `err(message)`, `from({...})`
 - `toolDef(name, description, parameters)` — creates OpenAI function-calling schema
 - `param(typeName, description, extra)` — creates parameter definition with JSON Schema fields
 - `parseToolArgs(input)` — parses JSON tool arguments
@@ -183,6 +186,19 @@ Built-in command handler implementations for core commands. Extracted from `agen
 - `CORE_COMMAND_HANDLERS` — Map of Command enum values to handler functions: `handleClear`, `handleQuit`, `handleHelp`, `handleTokens`, `handleTools`, `handleThinking`, `handleRegenerate`, `handleReasoning`
 - Each handler is `(agent, value, cmd) => { content?, error? }`
 
+### Tool Executor (`src/core/tool-executor.ts`)
+Runs the full tool call pipeline (TOOL_CALL gate → AGENT_TOOL_CONTEXT → validate → execute → TOOL_RESULT). Extracted from Agent so tool execution is testable independently. Key exports:
+- `ToolExecutor` class — manages the tool execution pipeline
+- `createToolExecutor(deps)` — factory function
+- `ToolExecutorDeps` — dependency interface (toolRegistry, hooks, addMessage, emitOutput, toolWhitelist, cwdBoundary, workspaceRoot, isRestoring, agent)
+- `ToolCall` — typed tool call object
+
+### Token Tracker (`src/core/token-tracker.ts`)
+Accumulates session token usage and tracks last-reported values. Key exports:
+- `TokenTracker` class — `record(rawUsage, onRecorded?)`, `getUsage()`, `clear()`
+- `createTokenTracker()` — factory function
+- `TokenUsage` — `{ turns, promptTokens, cachedTokens, completionTokens, totalTokens, lastPromptTokens?, lastCachedTokens?, lastCompletionTokens?, lastTotalTokens? }`
+
 ### Error Handling (`src/core/error.ts`)
 Centralized error formatting. Key exports:
 - `EXPECTED_ERROR_TYPES` — Set of expected error types (cancelled, http, api, timeout, invalid_response, cli, tool, config)
@@ -226,7 +242,7 @@ Escapes input that triggers special behavior (tool call actions, internal marker
 - `file-utils.ts` — `parseFrontMatter(content)`, `validateNameable(name, label, dirName)`
 - `objects.ts` — `deepMerge(...sources)`
 - `render.ts` — Template engine with `{{ vars }}`, `{% if %}`, `{% for %}`, filters
-- `json-schema.js` — `validate()`, `validateParams()`, `formatValidationErrors()`
+- `json-schema.ts` — `validate()`, `validateParams()`, `formatValidationErrors()`
 
 ### CLI Utilities (`src/utils/cli/`)
 - `cli.ts` — `CliOutputSink` class: formatting + color emission, extends `OutputSink`. Key exports: `formatCompacting()`, `formatToolCall()`, `formatToolResult()`, `formatTokenUsage()`, `formatThinking()`, `formatTaskProgress()`, `CliOutputSink`
@@ -272,6 +288,7 @@ Each extension has:
 | `agents-md` | Loads AGENTS.md and contributes Project Context section |
 | `aspects` | Loads aspect files and contributes Guidelines section |
 | `environment` | Contributes Environment section to system prompt |
+| `loop` | `/loop` slash command — repeatedly run a prompt until cancelled |
 | `web-search` | Web search tool — search the web for information |
 | `websocket` | WebSocket server for agent session management — core backend utility for UI extensions |
 | `webui` | Web UI for agent interaction — login, chat, session management |

@@ -4,7 +4,7 @@
 
 Run the agent with a single prompt and exit:
 ```bash
-bun bin/hotdog -c "hello"
+bun bin/hotdog -p "hello"
 # or
 bun bin/hotdog --prompt "hello"
 # or
@@ -77,13 +77,13 @@ bun bin/hotdog sessions show --session-id <ID> | \
 When multiple extensions hook into the same data-modifying hook (e.g., `context`, `tool:call`, `tool:result`), it can be hard to tell which extension modified what. Hook trace logs each handler invocation with execution order, source extension, timing, and return value.
 
 ```bash
-HOTDOG_LOG_LEVEL=debug bun bin/hotdog --hook-trace -c "hello"
+HOTDOG_LOG_LEVEL=debug bun bin/hotdog --hook-trace -p "hello"
 ```
 
 Or via env var or config:
 ```bash
 # Env var
-HOTDOG_HOOK_TRACE=1 HOTDOG_LOG_LEVEL=debug bun bin/hotdog -c "hello"
+HOTDOG_HOOK_TRACE=1 HOTDOG_LOG_LEVEL=debug bun bin/hotdog -p "hello"
 
 # Config file (config/defaults.json)
 { "hook_trace": true }

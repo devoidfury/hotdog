@@ -36,6 +36,8 @@ export interface Sink {
 export interface MessageBusOptions {
   sessionManager: MessageBusSessionManager;
   sink: Sink;
+  /** Optional callback to broadcast events to all connected clients. */
+  broadcastCallback?: (msg: Record<string, unknown>) => void;
 }
 
 /**
@@ -57,15 +59,18 @@ export class MessageBus {
   #isRunning: boolean;
   #abortController: AbortController;
   #waiter: { resolve: () => void } | null;
+  #broadcastCallback: ((msg: Record<string, unknown>) => void) | undefined;
 
   /**
    * @param options
    * @param options.sessionManager
    * @param options.sink
+   * @param options.broadcastCallback - Optional callback to broadcast events to all clients
    */
-  constructor({ sessionManager, sink }: MessageBusOptions) {
+  constructor({ sessionManager, sink, broadcastCallback }: MessageBusOptions) {
     this.#sessionManager = sessionManager;
     this.#sink = sink;
+    this.#broadcastCallback = broadcastCallback;
     this.#queue = [];
     this.#isRunning = false;
     // AbortController for the run loop. cancel() aborts it, signaling
@@ -254,6 +259,31 @@ export class MessageBus {
   }
 
   /**
+   * Emit a SESSION_STATE event and broadcast it to all clients.
+   * This ensures all connected clients receive working state changes,
+   * not just clients attached to this session.
+   */
+  #emitSessionState(key: string, value: unknown, sessionId?: string): void {
+    const event: OutputEvent = {
+      type: OUTPUT_EVENT.SESSION_STATE,
+      key,
+      value,
+      sessionId,
+    };
+    this.#sink.emit(event);
+
+    // Broadcast to all connected clients so sidebars update everywhere
+    if (this.#broadcastCallback) {
+      this.#broadcastCallback({
+        type: "sessionState",
+        key,
+        value,
+        sessionId,
+      });
+    }
+  }
+
+  /**
    * Process a single message: run the input hook pipeline,
    * then hand off to the agent.
    *
@@ -275,13 +305,14 @@ export class MessageBus {
     const agent = this.#sessionManager.getAgent();
     if (!agent) {
       this.#isRunning = false;
-      this.#sink.emit({
-        type: OUTPUT_EVENT.SESSION_STATE,
-        key: "working",
-        value: false,
-      });
+      this.#emitSessionState("working", false);
       return;
     }
+
+    // Signal that the agent is now working.
+    // Include sessionId so the frontend can track per-session working state.
+    const agentSid = (agent as { sessionId?: string }).sessionId;
+    this.#emitSessionState("working", true, agentSid);
 
     // Reset the agent's cancel flag before processing.
     // This clears any leftover cancelled state from the previous
@@ -305,11 +336,7 @@ export class MessageBus {
     // If input was handled by a hook, skip agent processing
     if (inputHandled) {
       this.#isRunning = false;
-      this.#sink.emit({
-        type: OUTPUT_EVENT.SESSION_STATE,
-        key: "working",
-        value: false,
-      });
+      this.#emitSessionState("working", false, agentSid);
       return;
     }
 
@@ -334,11 +361,8 @@ export class MessageBus {
     this.#isRunning = false;
 
     // Signal that the agent is done working so the UI can hide the spinner
-    this.#sink.emit({
-      type: OUTPUT_EVENT.SESSION_STATE,
-      key: "working",
-      value: false,
-    });
+    // Include sessionId so the frontend can track per-session working state.
+    this.#emitSessionState("working", false, agentSid);
   }
 
   /**

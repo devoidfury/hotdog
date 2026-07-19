@@ -357,6 +357,45 @@ body {
     color: rgba(124, 92, 255, 0.7);
 }
 
+/* ── Session Working Indicator (sidebar) ─────────────────────────────────── */
+
+.session-working-indicator {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-top: 4px;
+}
+
+.session-spinner {
+    display: inline-block;
+    width: 10px;
+    height: 10px;
+    border: 2px solid var(--border);
+    border-top-color: var(--accent);
+    border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+}
+
+.session-cancel-btn {
+    padding: 2px 8px;
+    border: 1px solid var(--error-soft);
+    border-radius: var(--radius-sm);
+    background: var(--error-soft);
+    color: var(--error);
+    font-size: 0.7rem;
+    font-weight: 600;
+    font-family: var(--font-sans);
+    cursor: pointer;
+    transition: all 0.15s;
+    line-height: 1.4;
+}
+
+.session-cancel-btn:hover {
+    background: var(--error);
+    color: var(--text-inverse);
+    border-color: var(--error);
+}
+
 /* ═══════════════════════════════════════════════════════════════════════════
    CHAT AREA
    ═══════════════════════════════════════════════════════════════════════════ */
@@ -974,4 +1013,57 @@ body {
     .thinking-block {
         margin-left: 42px;
     }
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   CONTEXT MENU
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+.context-menu {
+    position: fixed;
+    z-index: 9999;
+    min-width: 140px;
+    background: var(--bg-tertiary);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    box-shadow: var(--shadow-lg);
+    padding: 4px;
+    animation: contextMenuFadeIn 0.12s var(--ease-out);
+}
+
+@keyframes contextMenuFadeIn {
+    from {
+        opacity: 0;
+        transform: scale(0.95);
+    }
+    to {
+        opacity: 1;
+        transform: scale(1);
+    }
+}
+
+.context-menu-item {
+    padding: 8px 14px;
+    border-radius: var(--radius-sm);
+    cursor: pointer;
+    font-size: 0.85rem;
+    color: var(--text-primary);
+    transition: all 0.1s;
+    user-select: none;
+}
+
+.context-menu-item:hover {
+    background: var(--bg-hover);
+}
+
+.context-menu-item:active {
+    background: var(--bg-active);
+}
+
+.context-menu-item-danger {
+    color: var(--error);
+}
+
+.context-menu-item-danger:hover {
+    background: var(--error-soft);
 }

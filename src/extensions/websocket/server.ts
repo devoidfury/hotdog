@@ -83,12 +83,45 @@ export class SessionRegistry {
   #questionStrategy: string;
   #cleanupTimer: ReturnType<typeof setInterval> | null = null;
   #timeoutMin: number;
+  // All active WebSocket connections — used for broadcasting events to all clients.
+  #allConnections = new Set<WebSocket>();
 
   constructor({ buildAgent, questionTimeoutSecs = 300, questionStrategy = "wait", sessionTimeoutMin = 30 }: SessionRegistryOptions) {
     this.#buildAgent = buildAgent;
     this.#questionTimeoutSecs = questionTimeoutSecs;
     this.#questionStrategy = questionStrategy;
     this.#timeoutMin = sessionTimeoutMin;
+  }
+
+  /**
+   * Register a WebSocket connection for broadcast purposes.
+   */
+  registerConnection(ws: WebSocket): void {
+    this.#allConnections.add(ws);
+  }
+
+  /**
+   * Unregister a WebSocket connection.
+   */
+  unregisterConnection(ws: WebSocket): void {
+    this.#allConnections.delete(ws);
+  }
+
+  /**
+   * Broadcast a JSON message to all connected WebSocket clients.
+   * Silently skips connections that are closed or error.
+   */
+  broadcast(msg: Record<string, unknown>): void {
+    const payload = JSON.stringify(msg);
+    for (const ws of this.#allConnections) {
+      try {
+        if (ws.readyState === 1) { // WebSocket.OPEN
+          ws.send(payload);
+        }
+      } catch {
+        // Connection error — connection will be cleaned up on close
+      }
+    }
   }
 
   /**
@@ -112,10 +145,13 @@ export class SessionRegistry {
     const bgSink = new BackgroundSink();
     fanout.add(bgSink);
 
-    // Create the message bus
+    // Create the message bus with a broadcast callback for session state events.
+    // This ensures all connected clients receive working state changes,
+    // not just clients attached to this session.
     const bus = new MessageBus({
       sessionManager: sessionManager as unknown as { getAgent: () => { hooks: { runHookPipeline: (hookName: string, data: unknown, opts?: { shouldStop?: (result: unknown) => boolean }) => Promise<unknown> }; run: (text: string) => Promise<unknown>; resetCancel: () => void; cancel: () => void; commandRegistry: CommandRegistryLike | undefined; executeCommand: (cmd: unknown) => Promise<unknown> } | undefined },
       sink: fanout,
+      broadcastCallback: (msg: Record<string, unknown>) => this.broadcast(msg),
     });
 
     // Wire agent's sink to the fanout so agent emits events to fanout
@@ -186,6 +222,16 @@ export class SessionRegistry {
     // Remove sinks from fanout
     s.fanoutSink.remove(s.bgSink);
     this.#sessions.delete(sessionId);
+    return true;
+  }
+
+  /**
+   * Rename a session (update its profile label).
+   */
+  rename(sessionId: string, newName: string): boolean {
+    const s = this.#sessions.get(sessionId);
+    if (!s) return false;
+    s.metadata.profile = newName;
     return true;
   }
 
@@ -408,13 +454,16 @@ function routeMessage(ws: WebSocket, msg: C2SMessage, registry: SessionRegistry,
         typedWs.activeSessionId = sessionId;
         typedWs.activeSink = wsSink;
 
-        ws.send(JSON.stringify({
+        const sessionCreatedMsg = {
           type: "sessionCreated",
           sessionId,
           profile: (agent as Agent)?.profileName || "default",
           currentModel: (agent as Agent)?.model,
           models: Object.keys((agent as Agent)?.modelRegistry || {}),
-        }));
+        };
+        // Send to requesting client and broadcast to all clients
+        ws.send(JSON.stringify(sessionCreatedMsg));
+        registry.broadcast(sessionCreatedMsg);
       }).catch((err: unknown) => {
         ws.send(JSON.stringify({ type: "error", message: (err as Error).message }));
       });
@@ -424,7 +473,17 @@ function routeMessage(ws: WebSocket, msg: C2SMessage, registry: SessionRegistry,
     case C2S.DELETE_SESSION: {
       if (msg.sessionId) {
         registry.delete(msg.sessionId as string);
-        ws.send(JSON.stringify({ type: "sessionDeleted", sessionId: msg.sessionId }));
+        const sessionDeletedMsg = { type: "sessionDeleted", sessionId: msg.sessionId };
+        // Send to requesting client and broadcast to all clients
+        ws.send(JSON.stringify(sessionDeletedMsg));
+        registry.broadcast(sessionDeletedMsg);
+      }
+      break;
+    }
+
+    case C2S.RENAME_SESSION: {
+      if (msg.sessionId && msg.newName) {
+        registry.rename(msg.sessionId as string, msg.newName as string);
       }
       break;
     }
@@ -671,6 +730,9 @@ export function createWsServer(core: CoreContext, options: CreateWsServerOptions
    * Validates auth if middleware is configured, then creates a session.
    */
   function onUpgrade(req: { url: string; headers?: Record<string, string> }, ws: WebSocket): void {
+    // Register this connection for broadcast purposes
+    registry.registerConnection(ws);
+
     // Auth: validate token from query param
     const url = new URL(req.url, `http://${req.headers?.host || "localhost"}`);
     const token = url.searchParams.get("token");
@@ -729,6 +791,8 @@ export function createWsServer(core: CoreContext, options: CreateWsServerOptions
     if (typedWs.activeSessionId && typedWs.activeSink) {
       registry.detachSink(typedWs.activeSessionId, typedWs.activeSink);
     }
+    // Unregister from broadcast
+    registry.unregisterConnection(ws);
   }
 
   return {

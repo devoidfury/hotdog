@@ -162,6 +162,7 @@ interface ChatConfig {
   onSessionsUpdate?: (sessions: SessionInfo[], activeSessionId: string | null) => void;
   onConnectionChange?: (connected: boolean) => void;
   onAuthFailure?: () => void;
+  onWorkingMapChange?: () => void;
 }
 
 export interface ChatController {
@@ -173,16 +174,21 @@ export interface ChatController {
   createSession: (opts?: Record<string, unknown>) => void;
   switchSession: (sessionId: string) => void;
   deleteSession: (sessionId: string) => void;
+  renameSession: (sessionId: string, newName: string) => void;
   listSessions: () => void;
   sendCommand: (command: string) => void;
   sendQuestionAnswer: (answers: unknown) => void;
   setSession: (sessionId: string) => void;
+  /** Send a raw WS message (used for canceling non-active sessions from sidebar) */
+  send: (obj: Record<string, unknown>) => void;
   ws: WebSocket | null;
   sessionIdAtom: Atom<string | null>;
   currentModelAtom: Atom<string>;
   modelsAtom: Atom<string[]>;
   connectedAtom: Atom<boolean>;
   workingAtom: Atom<boolean>;
+  /** Per-session working state map — sessionId → isWorking */
+  sessionWorkingMap: Map<string, boolean>;
 }
 
 /**
@@ -197,6 +203,7 @@ export function createChat({
   onSessionsUpdate,
   onConnectionChange,
   onAuthFailure,
+  onWorkingMapChange,
 }: ChatConfig): ChatController {
   const wsUrl = `ws://${host}/ws?token=${token}`;
   let ws: WebSocket | null = null;
@@ -213,6 +220,11 @@ export function createChat({
   const modelsAtom = reactiveState<string[]>([]);
   const connectedAtom = reactiveState<boolean>(false);
   const workingAtom = reactiveState<boolean>(false);
+
+  // Per-session working state map — tracks which sessions have active agents.
+  // This allows the UI to show working indicators on individual sessions
+  // even when viewing a different session.
+  const sessionWorkingMap = new Map<string, boolean>();
 
   // ── Effects — auto-wire DOM to atoms ─────────────────────────────────────
 
@@ -335,9 +347,20 @@ export function createChat({
         messageList.handleCompactionResult(data);
         break;
       case "sessionState":
-        // Handle working state signals from the server
+        // Handle working state signals from the server.
+        // Track per-session working state using the sessionId from the message.
         if (data.key === "working") {
-          workingAtom(Boolean(data.value));
+          const sid = (data as { sessionId?: string }).sessionId;
+          if (sid) {
+            sessionWorkingMap.set(sid, Boolean(data.value));
+          }
+          // Also update the global workingAtom based on the active session.
+          const activeSid = sessionIdAtom();
+          if (sid === activeSid) {
+            workingAtom(Boolean(data.value));
+          }
+          // Notify so the sidebar can refresh its working indicators
+          onWorkingMapChange?.();
         }
         // Handle model changes (e.g. after /model command or session switch)
         if (data.key === "model") {
@@ -492,6 +515,10 @@ export function createChat({
   function cancel(): void {
     if (!sessionIdAtom()) return;
     send({ type: "cancel", sessionId: sessionIdAtom() });
+    // Optimistically clear working state for this session
+    const sid = sessionIdAtom();
+    if (sid) sessionWorkingMap.set(sid, false);
+    workingAtom(false);
   }
 
   /** Create a new session. */
@@ -504,14 +531,23 @@ export function createChat({
     send({ type: "switchSession", sessionId });
     sessionIdAtom(sessionId);
     messageList?.clear();
-    workingAtom(false);
+    // Restore working state from the per-session map
+    workingAtom(sessionWorkingMap.get(sessionId) ?? false);
     listSessions(); // Refresh sidebar so the active session is highlighted correctly
   }
 
   /** Delete a session. */
   function deleteSession(sessionId: string): void {
     send({ type: "deleteSession", sessionId });
+    // Clean up per-session working state
+    sessionWorkingMap.delete(sessionId);
     listSessions(); // Refresh sidebar so the deleted session is removed
+  }
+
+  /** Rename a session (update its profile label). */
+  function renameSession(sessionId: string, newName: string): void {
+    send({ type: "renameSession", sessionId, newName });
+    listSessions(); // Refresh sidebar so the renamed session shows new name
   }
 
   /** List sessions. */
@@ -589,10 +625,12 @@ export function createChat({
     createSession,
     switchSession,
     deleteSession,
+    renameSession,
     listSessions,
     sendCommand,
     sendQuestionAnswer,
     setSession,
+    send,
     ws,
     // Expose atoms for external reactive coordination
     sessionIdAtom,
@@ -600,5 +638,6 @@ export function createChat({
     modelsAtom,
     connectedAtom,
     workingAtom,
+    sessionWorkingMap,
   };
 }

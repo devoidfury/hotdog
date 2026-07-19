@@ -8,6 +8,7 @@ export const C2S = {
   AUTH: "auth",
   CREATE_SESSION: "createSession",
   DELETE_SESSION: "deleteSession",
+  RENAME_SESSION: "renameSession",
   LIST_SESSIONS: "listSessions",
   SWITCH_SESSION: "switchSession",
   SEND: "send",

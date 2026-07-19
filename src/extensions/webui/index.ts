@@ -18,17 +18,28 @@ const UI_DIR = path.join(__dirname, "ui");
 
 /**
  * Handle the "webui" subcommand: start the WebUI server.
- * Returns 0 on success, 1 on error.
+ * Blocks until the server is shut down (SIGINT/SIGTERM).
  */
 async function handleWebuiSubcommand(
   _cliArgs: unknown,
   _core: unknown,
-): Promise<number> {
+): Promise<number | undefined> {
   try {
     const core = _core as CoreContext;
     const config = getExtensionConfig<{ port?: number; host?: string; apiKey?: string; sessionTokenTtlMin?: number; maxAgeSecs?: number }>(core, "webui");
-    await createWebuiServer(core, config, UI_DIR);
-    return 0;
+    const { server, wsServer } = await createWebuiServer(core, config, UI_DIR);
+
+    // Keep the process alive until the server is stopped
+    await new Promise<void>((resolve) => {
+      const shutdown = () => {
+        server.stop();
+        wsServer.stopCleanupLoop();
+        resolve();
+      };
+
+      process.once("SIGINT", shutdown);
+      process.once("SIGTERM", shutdown);
+    });
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     console.error(`[webui] Failed to start server: ${message}`);

@@ -101,6 +101,18 @@ async function init(): Promise<void> {
     onDelete: (sessionId: string) => {
       chat!.deleteSession(sessionId);
     },
+    onRename: (sessionId: string, newName: string) => {
+      chat!.renameSession(sessionId, newName);
+    },
+    onCancel: (sessionId: string) => {
+      // Cancel a session by ID — even if it's not the active one
+      chat!.send({ type: "cancel", sessionId });
+      chat!.sessionWorkingMap.set(sessionId, false);
+      // If the cancelled session is the active one, update workingAtom too
+      if (chat!.sessionIdAtom() === sessionId) {
+        chat!.workingAtom(false);
+      }
+    },
   });
 
   // Logout button (via keyboard shortcut)
@@ -122,13 +134,19 @@ function startChat(): void {
     },
     onSessionsUpdate: (sessions, activeSessionId) => {
       if (updateSessions) {
-        updateSessions(sessions, activeSessionId);
+        updateSessions(sessions, activeSessionId, chat!.sessionWorkingMap);
       }
     },
     onConnectionChange: (_connected) => {
       // Connection recovery is handled by chat.js internally
     },
     onAuthFailure: handleAuthFailure,
+    onWorkingMapChange: () => {
+      // Refresh sidebar to show/hide per-session working indicators
+      if (updateSessions && chat) {
+        chat.listSessions();
+      }
+    },
   });
 
   // After chat is created, wire up reactive model changes to the sidebar.

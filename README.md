@@ -138,7 +138,9 @@ hotdog -p "your prompt"          # One-shot mode (shorthand)
 hotdog info                      # System diagnostics
 hotdog show-prompt               # Render system prompt to stdout
 hotdog profiles                  # List all available profiles
-hotdog review                    # Review session logs
+hotdog sessions show             # Show session logs
+hotdog sessions delete <id>      # Delete a session
+hotdog sessions cleanup          # Remove old sessions
 hotdog webui                     # Start the web UI server (alpha)
 ```
 

@@ -36,8 +36,8 @@ describe("Session Review CLI - listSessions", () => {
     const ext = create(core);
     await ext.hooks![HOOKS.CLI_SUBCOMMANDS_REGISTER]!(core.cliSubcommandRegistry);
 
-    const def = core.cliSubcommandRegistry.get("review");
-    const cli = { sessionId: null, wantsJson: true, toolIndex: false, colors: false, theme: "dark" };
+    const def = core.cliSubcommandRegistry.get("sessions");
+    const cli = { sessionId: null, wantsJson: true, toolIndex: false, colors: false, theme: "dark", args: ["show"] };
 
     let capturedOutput = "";
     const originalLog = console.log;
@@ -72,8 +72,8 @@ describe("Session Review CLI - listSessions", () => {
     const ext = create(core);
     await ext.hooks![HOOKS.CLI_SUBCOMMANDS_REGISTER]!(core.cliSubcommandRegistry);
 
-    const def = core.cliSubcommandRegistry.get("review");
-    const cli = { sessionId: null, wantsJson: false, toolIndex: false, colors: false, theme: "dark" };
+    const def = core.cliSubcommandRegistry.get("sessions");
+    const cli = { sessionId: null, wantsJson: false, toolIndex: false, colors: false, theme: "dark", args: ["show"] };
 
     let capturedOutput = "";
     const originalLog = console.log;
@@ -111,13 +111,14 @@ describe("Session Review CLI - listSessions", () => {
     const ext = create(core);
     await ext.hooks![HOOKS.CLI_SUBCOMMANDS_REGISTER]!(core.cliSubcommandRegistry);
 
-    const def = core.cliSubcommandRegistry.get("review");
+    const def = core.cliSubcommandRegistry.get("sessions");
     const cli = {
       sessionId: null,
       wantsJson: true,
       toolIndex: false,
       colors: false,
       theme: "dark",
+      args: ["show"],
     };
 
     let capturedOutput = "";
@@ -169,13 +170,14 @@ describe("Session Review CLI - reviewSession", () => {
     const ext = create(core);
     await ext.hooks![HOOKS.CLI_SUBCOMMANDS_REGISTER]!(core.cliSubcommandRegistry);
 
-    const def = core.cliSubcommandRegistry.get("review");
+    const def = core.cliSubcommandRegistry.get("sessions");
     const cli = {
       sessionId: "non-existent-session-xyz",
       wantsJson: true,
       toolIndex: false,
       colors: false,
       theme: "dark",
+      args: ["show"],
     };
 
     let capturedOutput = "";
@@ -201,13 +203,14 @@ describe("Session Review CLI - reviewSession", () => {
     const ext = create(core);
     await ext.hooks![HOOKS.CLI_SUBCOMMANDS_REGISTER]!(core.cliSubcommandRegistry);
 
-    const def = core.cliSubcommandRegistry.get("review");
+    const def = core.cliSubcommandRegistry.get("sessions");
     const cli = {
       sessionId: "non-existent-session-xyz",
       wantsJson: false,
       toolIndex: false,
       colors: false,
       theme: "dark",
+      args: ["show"],
     };
 
     let capturedOutput = "";
@@ -241,13 +244,14 @@ describe("Session Review CLI - reviewSession", () => {
     const ext = create(core);
     await ext.hooks![HOOKS.CLI_SUBCOMMANDS_REGISTER]!(core.cliSubcommandRegistry);
 
-    const def = core.cliSubcommandRegistry.get("review");
+    const def = core.cliSubcommandRegistry.get("sessions");
     const cli = {
       sessionId: TEST_SESSION_ID,
       wantsJson: true,
       toolIndex: false,
       colors: false,
       theme: "dark",
+      args: ["show"],
     };
 
     let capturedOutput = "";
@@ -290,13 +294,14 @@ describe("Session Review CLI - reviewSession", () => {
     const ext = create(core);
     await ext.hooks![HOOKS.CLI_SUBCOMMANDS_REGISTER]!(core.cliSubcommandRegistry);
 
-    const def = core.cliSubcommandRegistry.get("review");
+    const def = core.cliSubcommandRegistry.get("sessions");
     const cli = {
       sessionId: TEST_SESSION_ID,
       wantsJson: false,
       toolIndex: false,
       colors: false,
       theme: "dark",
+      args: ["show"],
     };
 
     let capturedOutput = "";
@@ -344,13 +349,14 @@ describe("Session Review CLI - reviewSession", () => {
     const ext = create(core);
     await ext.hooks![HOOKS.CLI_SUBCOMMANDS_REGISTER]!(core.cliSubcommandRegistry);
 
-    const def = core.cliSubcommandRegistry.get("review");
+    const def = core.cliSubcommandRegistry.get("sessions");
     const cli = {
       sessionId: TEST_SESSION_ID,
       wantsJson: true,
       toolIndex: true,
       colors: false,
       theme: "dark",
+      args: ["show"],
     };
 
     let capturedOutput = "";
@@ -391,13 +397,14 @@ describe("Session Review CLI - reviewSession", () => {
     const ext = create(core);
     await ext.hooks![HOOKS.CLI_SUBCOMMANDS_REGISTER]!(core.cliSubcommandRegistry);
 
-    const def = core.cliSubcommandRegistry.get("review");
+    const def = core.cliSubcommandRegistry.get("sessions");
     const cli = {
       sessionId: TEST_SESSION_ID,
       wantsJson: false,
       toolIndex: true,
       colors: false,
       theme: "dark",
+      args: ["show"],
     };
 
     let capturedOutput = "";
@@ -432,13 +439,14 @@ describe("Session Review CLI - reviewSession", () => {
     const ext = create(core);
     await ext.hooks![HOOKS.CLI_SUBCOMMANDS_REGISTER]!(core.cliSubcommandRegistry);
 
-    const def = core.cliSubcommandRegistry.get("review");
+    const def = core.cliSubcommandRegistry.get("sessions");
     const cli = {
       sessionId: TEST_SESSION_ID,
       wantsJson: false,
       toolIndex: true,
       colors: false,
       theme: "dark",
+      args: ["show"],
     };
 
     let capturedOutput = "";
@@ -472,13 +480,14 @@ describe("Session Review CLI - reviewSession", () => {
     const ext = create(core);
     await ext.hooks![HOOKS.CLI_SUBCOMMANDS_REGISTER]!(core.cliSubcommandRegistry);
 
-    const def = core.cliSubcommandRegistry.get("review");
+    const def = core.cliSubcommandRegistry.get("sessions");
     const cli = {
       sessionId: TEST_SESSION_ID,
       wantsJson: true,
       toolIndex: true,
       colors: false,
       theme: "dark",
+      args: ["show"],
     };
 
     let capturedOutput = "";
@@ -499,9 +508,9 @@ describe("Session Review CLI - reviewSession", () => {
   });
 });
 
-describe("Session Review CLI - toolIndex without sessionId", () => {
+describe("Session Review CLI - sessions delete", () => {
   const sessionsDir = join(homedir(), ".cache", "hotdog", "sessions");
-  const TEST_SESSION_ID = `test-review-toolindex-${Date.now()}`;
+  const TEST_SESSION_ID = `test-review-delete-${Date.now()}`;
 
   beforeEach(() => {
     mkdirSync(sessionsDir, { recursive: true });
@@ -513,18 +522,14 @@ describe("Session Review CLI - toolIndex without sessionId", () => {
     } catch {}
   });
 
-  it("toolIndex without sessionId uses most recent session", async () => {
+  it("deletes an existing session with --yes", async () => {
     const { SessionLog } = await import(
       "../../src/extensions/session-log/session-log.ts"
     );
 
     const log = new SessionLog(TEST_SESSION_ID);
-    await log.writeInput("run bash");
-    await log.writeAssistant(
-      "running",
-      [{ id: "tc_1", type: "function", function: { name: "bash", arguments: "ls" } }],
-    );
-    await log.writeToolResult("<output>done</output>", "tc_1", "bash");
+    await log.writeInput("hello");
+    await log.writeAssistant("world");
 
     const core = createMockCore();
     const { create } = await import(
@@ -533,26 +538,195 @@ describe("Session Review CLI - toolIndex without sessionId", () => {
     const ext = create(core);
     await ext.hooks![HOOKS.CLI_SUBCOMMANDS_REGISTER]!(core.cliSubcommandRegistry);
 
-    const def = core.cliSubcommandRegistry.get("review");
+    const def = core.cliSubcommandRegistry.get("sessions");
     const cli = {
-      sessionId: null,
-      wantsJson: true,
-      toolIndex: true,
+      args: ["delete", TEST_SESSION_ID],
+      yes: true,
       colors: false,
       theme: "dark",
     };
 
     let capturedOutput = "";
     const originalLog = console.log;
-    console.log = (msg) => {
-      capturedOutput += msg + "\n";
-    };
+    console.log = (msg) => { capturedOutput += msg + "\n"; };
 
     try {
       const exitCode = await def!.handler!(cli, core);
       expect(exitCode).toBe(0);
-      const parsed = JSON.parse(capturedOutput.trim());
-      expect(parsed).toHaveProperty("bash");
+      expect(capturedOutput).toContain(`Deleted session '${TEST_SESSION_ID}'.`);
+
+      // Verify file is gone
+      const files = readdirSync(sessionsDir).filter((f: string) => f.endsWith(".jsonl"));
+      const found = files.find((f: string) => f.startsWith(TEST_SESSION_ID));
+      expect(found).toBeUndefined();
+    } finally {
+      console.log = originalLog;
+    }
+  });
+
+  it("returns exit code 1 for non-existent session", async () => {
+    const core = createMockCore();
+    const { create } = await import(
+      "../../src/extensions/ui-session-review-cli/index.ts"
+    );
+    const ext = create(core);
+    await ext.hooks![HOOKS.CLI_SUBCOMMANDS_REGISTER]!(core.cliSubcommandRegistry);
+
+    const def = core.cliSubcommandRegistry.get("sessions");
+    const cli = {
+      args: ["delete", "non-existent-session"],
+      yes: true,
+      colors: false,
+      theme: "dark",
+    };
+
+    let capturedOutput = "";
+    const originalErr = console.error;
+    console.error = (msg) => { capturedOutput += msg + "\n"; };
+
+    try {
+      const exitCode = await def!.handler!(cli, core);
+      expect(exitCode).toBe(1);
+      expect(capturedOutput).toContain("not found");
+    } finally {
+      console.error = originalErr;
+    }
+  });
+
+  it("returns exit code 1 when no session id provided", async () => {
+    const core = createMockCore();
+    const { create } = await import(
+      "../../src/extensions/ui-session-review-cli/index.ts"
+    );
+    const ext = create(core);
+    await ext.hooks![HOOKS.CLI_SUBCOMMANDS_REGISTER]!(core.cliSubcommandRegistry);
+
+    const def = core.cliSubcommandRegistry.get("sessions");
+    const cli = {
+      args: ["delete"],
+      yes: true,
+      colors: false,
+      theme: "dark",
+    };
+
+    let capturedOutput = "";
+    const originalErr = console.error;
+    console.error = (msg) => { capturedOutput += msg + "\n"; };
+
+    try {
+      const exitCode = await def!.handler!(cli, core);
+      expect(exitCode).toBe(1);
+      expect(capturedOutput).toContain("Usage:");
+    } finally {
+      console.error = originalErr;
+    }
+  });
+});
+
+describe("Session Review CLI - sessions cleanup", () => {
+  const sessionsDir = join(homedir(), ".cache", "hotdog", "sessions");
+  const OLD_SESSION_ID = `test-cleanup-old-${Date.now()}`;
+  const NEW_SESSION_ID = `test-cleanup-new-${Date.now()}`;
+
+  beforeEach(() => {
+    mkdirSync(sessionsDir, { recursive: true });
+  });
+
+  afterEach(() => {
+    try { rmSync(join(sessionsDir, `${OLD_SESSION_ID}.jsonl`)); } catch {}
+    try { rmSync(join(sessionsDir, `${NEW_SESSION_ID}.jsonl`)); } catch {}
+  });
+
+  it("removes old sessions with --yes", async () => {
+    const { SessionLog } = await import(
+      "../../src/extensions/session-log/session-log.ts"
+    );
+
+    // Create a new session
+    const newLog = new SessionLog(NEW_SESSION_ID);
+    await newLog.writeInput("hello");
+    await newLog.writeAssistant("world");
+
+    // Create an old session
+    const oldLog = new SessionLog(OLD_SESSION_ID);
+    await oldLog.writeInput("old");
+    await oldLog.writeAssistant("data");
+
+    // Make the old session file appear old by touching its mtime
+    const oldPath = join(sessionsDir, `${OLD_SESSION_ID}.jsonl`);
+    const oldDate = new Date(Date.now() - 60 * 24 * 60 * 60 * 1000); // 60 days ago
+    const { utimesSync } = await import("node:fs");
+    utimesSync(oldPath, oldDate, oldDate);
+
+    const core = createMockCore();
+    const { create } = await import(
+      "../../src/extensions/ui-session-review-cli/index.ts"
+    );
+    const ext = create(core);
+    await ext.hooks![HOOKS.CLI_SUBCOMMANDS_REGISTER]!(core.cliSubcommandRegistry);
+
+    const def = core.cliSubcommandRegistry.get("sessions");
+    const cli = {
+      args: ["cleanup"],
+      olderThan: 30,
+      yes: true,
+      colors: false,
+      theme: "dark",
+    };
+
+    let capturedOutput = "";
+    const originalLog = console.log;
+    console.log = (msg) => { capturedOutput += msg + "\n"; };
+
+    try {
+      const exitCode = await def!.handler!(cli, core);
+      expect(exitCode).toBe(0);
+      expect(capturedOutput).toContain("Deleted 1 session");
+
+      // Verify old session is gone but new one remains
+      const files = readdirSync(sessionsDir).filter((f: string) =>
+        f.endsWith(".jsonl") && (f.startsWith(OLD_SESSION_ID) || f.startsWith(NEW_SESSION_ID))
+      );
+      expect(files.length).toBe(1);
+      expect(files[0]).toContain(NEW_SESSION_ID);
+    } finally {
+      console.log = originalLog;
+    }
+  });
+
+  it("reports nothing to clean when all sessions are recent", async () => {
+    const { SessionLog } = await import(
+      "../../src/extensions/session-log/session-log.ts"
+    );
+
+    const log = new SessionLog(NEW_SESSION_ID);
+    await log.writeInput("hello");
+    await log.writeAssistant("world");
+
+    const core = createMockCore();
+    const { create } = await import(
+      "../../src/extensions/ui-session-review-cli/index.ts"
+    );
+    const ext = create(core);
+    await ext.hooks![HOOKS.CLI_SUBCOMMANDS_REGISTER]!(core.cliSubcommandRegistry);
+
+    const def = core.cliSubcommandRegistry.get("sessions");
+    const cli = {
+      args: ["cleanup"],
+      olderThan: 30,
+      yes: true,
+      colors: false,
+      theme: "dark",
+    };
+
+    let capturedOutput = "";
+    const originalLog = console.log;
+    console.log = (msg) => { capturedOutput += msg + "\n"; };
+
+    try {
+      const exitCode = await def!.handler!(cli, core);
+      expect(exitCode).toBe(0);
+      expect(capturedOutput).toContain("No sessions older than 30 days");
     } finally {
       console.log = originalLog;
     }
@@ -566,11 +740,9 @@ describe("Session Review CLI - registers review tool", () => {
       "../../src/extensions/ui-session-review-cli/index.ts"
     );
     const ext = create(core);
-
-    expect(ext).not.toBeNull();
-    expect(ext.hooks![HOOKS.TOOLS_REGISTER]).toBeDefined();
-
-    await ext.hooks![HOOKS.TOOLS_REGISTER]!(core.toolRegistry);
+    await ext.hooks![HOOKS.TOOLS_REGISTER]!({
+      register: core.toolRegistry.register.bind(core.toolRegistry),
+    } as any);
 
     expect(core.toolRegistry.has("review")).toBe(true);
   });

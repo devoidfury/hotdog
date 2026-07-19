@@ -110,7 +110,7 @@ Command parsing — commands are the abstract concept, slash commands (/cmd) are
 ### Registries (`src/core/extensions/registries.ts`)
 Separate registries for agent commands and CLI subcommands. Key exports:
 - `AgentCommandRegistry` — agent-level commands (e.g., /compact, /model). Supports `match()` for custom pattern matching and `isUiCommand` flag.
-- `CliSubcommandRegistry` — CLI subcommands (e.g., `hotdog info`, `hotdog review`). Supports metadata merging (extension.json placeholder → handler attachment).
+- `CliSubcommandRegistry` — CLI subcommands (e.g., `hotdog info`, `hotdog sessions`). Supports metadata merging (extension.json placeholder → handler attachment).
 - `createCommandRegistry()` — factory for agent command registry
 - `createSubcommandRegistry()` — factory for CLI subcommand registry
 - Common methods: `register()`, `has()`, `names()`, `get()`, `all()`, `generateHelpText()`

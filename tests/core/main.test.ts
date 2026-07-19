@@ -63,7 +63,7 @@ describe("main --help", () => {
     expect(stdout).toContain("Usage: hotdog [options] [prompt]");
     expect(stdout).toContain("hotdog info");
     expect(stdout).toContain("hotdog show-prompt");
-    expect(stdout).toContain("hotdog review");
+    expect(stdout).toContain("hotdog sessions show");
 
     // Subcommands section
     expect(stdout).toContain("Subcommands:");

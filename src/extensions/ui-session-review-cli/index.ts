@@ -1,5 +1,5 @@
 // Session Review Extension
-// Provides the `review` CLI subcommand for inspecting session logs.
+// Provides the `sessions` CLI subcommand for managing session logs.
 // Registers subcommands via the cli:subcommandsRegister hook.
 // Also registers the `review` tool via tools:register hook.
 
@@ -7,11 +7,12 @@ import { HOOKS } from "../../core/hooks.ts";
 import { CliOutputSink } from "../../utils/cli/cli.ts";
 import { ColorPalette, type PaletteOptions } from "../../utils/cli/colors.ts";
 import { readSessionEntries } from "../session-log/index.ts";
-import { readdir, access, stat } from "node:fs/promises";
+import { readdir, access, stat, unlink } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { ReviewTool } from "./review.ts";
 import { CoreContext, ExtensionInstance, ToolsRegisterPayload } from "../../core/extensions/types.ts";
+import readline from "node:readline";
 
 // ── Types ──────────────────────────────────────────────────────────────────
 
@@ -21,6 +22,9 @@ interface CliArgs {
   sessionId?: string;
   wantsJson?: boolean;
   toolIndex?: boolean;
+  olderThan?: number;
+  yes?: boolean;
+  args?: string[];
   [key: string]: unknown;
 }
 
@@ -41,16 +45,67 @@ interface LogEntry {
   [key: string]: unknown;
 }
 
-// ── Review Subcommand ──────────────────────────────────────────────────────
+// ── Helpers ────────────────────────────────────────────────────────────────
+
+function sessionsDirPath(): string {
+  return join(homedir(), ".cache", "hotdog", "sessions");
+}
 
 /**
- * Run the review subcommand.
+ * Prompt user for confirmation. Resolves true if yes, false otherwise.
  */
-async function runReview(
+function confirm(prompt: string): Promise<boolean> {
+  return new Promise((resolve) => {
+    if (!process.stdin.isTTY || !process.stdout.isTTY) {
+      // Non-interactive: default to no
+      resolve(false);
+      return;
+    }
+    const rl = readline.createInterface({
+      input: process.stdin,
+      output: process.stdout,
+    });
+    rl.question(`${prompt} (y/N) `, (answer) => {
+      rl.close();
+      resolve(answer.toLowerCase().startsWith("y"));
+    });
+  });
+}
+
+// ── Sessions Subcommand ────────────────────────────────────────────────────
+
+/**
+ * Run the sessions subcommand dispatcher.
+ * Routes to show, delete, or cleanup based on the first positional arg.
+ */
+async function runSessions(
   cli: CliArgs,
   config: Record<string, unknown>,
 ): Promise<number> {
-  const sessionsDirPath = join(homedir(), ".cache", "hotdog", "sessions");
+  const action = (cli.args as string[] | undefined)?.[0] || "show";
+
+  switch (action) {
+    case "show":
+      return await runShow(cli, config);
+    case "delete":
+      return await runDelete(cli, config);
+    case "cleanup":
+      return await runCleanup(cli, config);
+    default:
+      console.error(`Unknown sessions action: ${action}`);
+      console.error(`Available actions: show, delete, cleanup`);
+      return 1;
+  }
+}
+
+/**
+ * `sessions show` — display session entries (replaces old `review` subcommand).
+ */
+async function runShow(
+  cli: CliArgs,
+  config: Record<string, unknown>,
+): Promise<number> {
+  const sessionsDir = sessionsDirPath();
 
   const palette = await CliOutputSink.resolve(
     cli.colors ?? true,
@@ -68,7 +123,7 @@ async function runReview(
     );
   }
   if (cli.toolIndex) {
-    const files = (await readdir(sessionsDirPath)).filter((f: string) =>
+    const files = (await readdir(sessionsDir)).filter((f: string) =>
       f.endsWith(".jsonl"),
     );
     if (files.length === 0) {
@@ -78,8 +133,8 @@ async function runReview(
     const fileInfos = await Promise.all(
       files.map(async (f: string) => ({
         name: f.replace(/\.jsonl$/, ""),
-        path: join(sessionsDirPath, f),
-        mtime: (await stat(join(sessionsDirPath, f))).mtime.getTime(),
+        path: join(sessionsDir, f),
+        mtime: (await stat(join(sessionsDir, f))).mtime.getTime(),
       })),
     );
     fileInfos.sort((a: { mtime: number }, b: { mtime: number }) => b.mtime - a.mtime);
@@ -87,8 +142,112 @@ async function runReview(
     const entries = await readSessionEntries(mostRecent.name);
     return printToolIndex(entries as LogEntry[], cli.wantsJson ?? false);
   }
-  return listSessions(cli.wantsJson ?? false, sessionsDirPath, palette);
+  return listSessions(cli.wantsJson ?? false, sessionsDir, palette);
 }
+
+/**
+ * `sessions delete <id>` — delete a specific session.
+ */
+async function runDelete(
+  cli: CliArgs,
+  _config: Record<string, unknown>,
+): Promise<number> {
+  const sessionId = (cli.args as string[] | undefined)?.[1];
+
+  if (!sessionId) {
+    console.error("Usage: hotdog sessions delete <session-id>");
+    return 1;
+  }
+
+  const filePath = join(sessionsDirPath(), `${sessionId}.jsonl`);
+
+  try {
+    await access(filePath);
+  } catch {
+    console.error(`Session '${sessionId}' not found.`);
+    return 1;
+  }
+
+  if (!cli.yes) {
+    const ok = await confirm(`Delete session '${sessionId}'?`);
+    if (!ok) {
+      console.log("Aborted.");
+      return 0;
+    }
+  }
+
+  await unlink(filePath);
+  console.log(`Deleted session '${sessionId}'.`);
+  return 0;
+}
+
+/**
+ * `sessions cleanup [--older-than <days>]` — remove sessions older than N days.
+ */
+async function runCleanup(
+  cli: CliArgs,
+  _config: Record<string, unknown>,
+): Promise<number> {
+  const olderThanDays = cli.olderThan ?? 30;
+  const cutoffMs = Date.now() - olderThanDays * 24 * 60 * 60 * 1000;
+  const sessionsDir = sessionsDirPath();
+
+  try {
+    await access(sessionsDir);
+  } catch {
+    console.log("No sessions directory found. Nothing to clean up.");
+    return 0;
+  }
+
+  const files = (await readdir(sessionsDir)).filter((f: string) =>
+    f.endsWith(".jsonl"),
+  );
+
+  const toDelete: Array<{ id: string; last_modified: string }> = [];
+
+  for (const file of files) {
+    const filePath = join(sessionsDir, file);
+    const metadata = await stat(filePath);
+    if (metadata.mtime.getTime() < cutoffMs) {
+      toDelete.push({
+        id: file.replace(/\.jsonl$/, ""),
+        last_modified: new Date(metadata.mtime).toISOString(),
+      });
+    }
+  }
+
+  if (toDelete.length === 0) {
+    console.log(`No sessions older than ${olderThanDays} days.`);
+    return 0;
+  }
+
+  if (!cli.yes) {
+    console.log(`Found ${toDelete.length} session(s) older than ${olderThanDays} days:`);
+    for (const s of toDelete) {
+      console.log(`  ${s.id}  (${s.last_modified})`);
+    }
+    const ok = await confirm("Delete these sessions?");
+    if (!ok) {
+      console.log("Aborted.");
+      return 0;
+    }
+  }
+
+  let deleted = 0;
+  for (const s of toDelete) {
+    try {
+      await unlink(join(sessionsDir, `${s.id}.jsonl`));
+      deleted++;
+    } catch {
+      // Skip files that can't be deleted
+    }
+  }
+
+  console.log(`Deleted ${deleted} session(s).`);
+  return 0;
+}
+
+// ── Shared Functions ───────────────────────────────────────────────────────
 
 async function listSessions(
   json: boolean,
@@ -244,11 +403,11 @@ export function create(core: CoreContext): ExtensionInstance {
           [HOOKS.CLI_SUBCOMMANDS_REGISTER]: async (
             registry: { register: (name: string, opts: Record<string, unknown>) => void },
           ) => {
-            registry.register("review", {
-              description: "Review session logs",
+            registry.register("sessions", {
+              description: "Manage session logs (show, delete, cleanup)",
               handler: async (cli: CliArgs, core: CoreContext) => {
                 const { config } = core;
-                return await runReview(cli, config as Record<string, unknown>);
+                return await runSessions(cli, config as Record<string, unknown>);
               },
             });
           },

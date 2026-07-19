@@ -61,8 +61,8 @@ describe("parseArgs", () => {
   });
 
   it("parses positional args after subcommand", () => {
-    withArgs(["review", "--session-id", "abc123"], () => {
-      expect(parseArgs().subcommand).toBe("review");
+    withArgs(["sessions", "show", "--session-id", "abc123"], () => {
+      expect(parseArgs().subcommand).toBe("sessions");
     });
   });
 

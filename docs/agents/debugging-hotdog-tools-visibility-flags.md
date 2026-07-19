@@ -50,7 +50,7 @@ bun bin/hotdog prompt "hello"
 
 ### List Recent Sessions
 ```bash
-bun bin/hotdog review
+bun bin/hotdog sessions show
 ```
 - Shows last 10 sessions with timestamps and entry counts
 - `--json` for raw JSONL output
@@ -68,7 +68,7 @@ bun bin/hotdog info --json
 ### Examine Specific Tool Call Results
 ```bash
 # Extract a range of lines around the suspect tool calls
-bun bin/hotdog review --session-id <ID> | \
+bun bin/hotdog sessions show --session-id <ID> | \
   sed -n '700,720p'  # Adjust line numbers based on grep results
 ```
 

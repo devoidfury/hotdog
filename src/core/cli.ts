@@ -192,7 +192,7 @@ export function parseArgs(
     if (!options.subcommand) {
       const isKnownSubcommand = knownSubcommands
         ? knownSubcommands.includes(arg)
-        : arg === "info" || arg === "show-prompt" || arg === "review";
+        : arg === "info" || arg === "show-prompt" || arg === "sessions";
 
       if (isKnownSubcommand) {
         options.subcommand = arg;
@@ -213,7 +213,9 @@ export const HELP_TEXT = `hotdog - AI agent harness with tool calling support
 Usage: hotdog [options] [prompt]
        hotdog info
        hotdog show-prompt
-       hotdog review [--session-id <id>] [--json] [--tool-index]
+       hotdog sessions show [--session-id <id>] [--json] [--tool-index]
+       hotdog sessions delete <id>
+       hotdog sessions cleanup [--older-than <days>]
        hotdog prompt "One-shot prompt"
 
 Subcommands:

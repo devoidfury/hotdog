@@ -2,7 +2,7 @@
   "name": "ui-session-review-cli",
   "provides": ["cli:subcommands", "tools"],
   "loadOrder": 10,
-  "description": "Provides the review CLI subcommand and review tool for session log inspection",
+  "description": "Provides the sessions CLI subcommand (show, delete, cleanup) and review tool for session log management",
   "configSchema": {
     "uiSessionReviewCli": {
       "type": "object",
@@ -25,17 +25,27 @@
       "long": "--tool-index",
       "type": "boolean",
       "description": "Show tool usage index"
+    },
+    {
+      "long": "--older-than",
+      "type": "number",
+      "description": "Number of days (for sessions cleanup)"
+    },
+    {
+      "long": "--yes",
+      "type": "boolean",
+      "description": "Skip confirmation prompt (for sessions delete/cleanup)"
     }
   ],
   "cli:subcommands": [
     {
-      "name": "review",
-      "description": "Review session logs",
+      "name": "sessions",
+      "description": "Manage session logs (show, delete, cleanup)",
       "options": [
         {
           "name": "--session-id",
           "type": "string",
-          "description": "Session ID to review"
+          "description": "Session ID to show"
         },
         {
           "name": "--json",
@@ -46,6 +56,16 @@
           "name": "--tool-index",
           "type": "boolean",
           "description": "Show tool usage index"
+        },
+        {
+          "name": "--older-than",
+          "type": "number",
+          "description": "Days threshold for cleanup"
+        },
+        {
+          "name": "--yes",
+          "type": "boolean",
+          "description": "Skip confirmation prompt"
         }
       ]
     }

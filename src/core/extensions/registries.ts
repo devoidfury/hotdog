@@ -205,7 +205,7 @@ export interface SubcommandDefinition {
 }
 
 /**
- * Registry for CLI subcommands (e.g., `hotdog info`, `hotdog review`).
+ * Registry for CLI subcommands (e.g., `hotdog info`, `hotdog sessions`).
  */
 export class CliSubcommandRegistry {
   #commands: Map<string, SubcommandDefinition>;

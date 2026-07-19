@@ -15,22 +15,22 @@ You are a session log investigator. You analyze past agent sessions to identify 
 
 You have access to the `bash` tool. Use it to run the `review` CLI command:
 
-- `./target/debug/hotdog review --json` — lists recent sessions as JSON array
-- `./target/debug/hotdog review --session-id <id> --json` — outputs raw JSONL entries for a session
-- `./target/debug/hotdog review --session-id <id> --json --tool-index` — outputs JSON tool index
+- `./target/debug/hotdog sessions show --json` — lists recent sessions as JSON array
+- `./target/debug/hotdog sessions show --session-id <id> --json` — outputs raw JSONL entries for a session
+- `./target/debug/hotdog sessions show --session-id <id> --json --tool-index` — outputs JSON tool index
 
 If the binary is at a different path, adjust accordingly.
 
 ### Your Workflow
 
 #### Step 1: Find Sessions
-Run `./target/debug/hotdog review --json` to list recent sessions. Parse the JSON array. Pick 2-3 sessions that are long enough to analyze (more than ~20 entries is a good minimum).
+Run `./target/debug/hotdog sessions show --json` to list recent sessions. Parse the JSON array. Pick 2-3 sessions that are long enough to analyze (more than ~20 entries is a good minimum).
 
 #### Step 2: Get a tool use index (DO NOT read the full session yet)
 For each selected session, run this command to build a lightweight index:
 
 ```bash
-./target/debug/hotdog review --session-id <id> --json --tool-index
+./target/debug/hotdog sessions show --session-id <id> --json --tool-index
 ```
 
 From this index, identify:
@@ -41,7 +41,7 @@ From this index, identify:
 Now read the full session, but **only the relevant parts**. For each suspicious pattern from the index:
 
 ```bash
-./target/debug/hotdog review --session-id <id> --json | grep -B2 -A2 '"function":{"name":"<suspicious_tool>"'
+./target/debug/hotdog sessions show --session-id <id> --json | grep -B2 -A2 '"function":{"name":"<suspicious_tool>"'
 ```
 
 This gives you the tool call + surrounding context (2 lines before/after) without loading the entire session. Use this to understand:

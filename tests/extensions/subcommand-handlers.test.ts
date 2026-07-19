@@ -9,7 +9,7 @@ import type { CoreContext } from "../../src/core/extensions/types.ts";
 // ── Session Review Extension Tests ───────────────────────────────────────────
 
 describe("Session Review Extension - exit codes", () => {
-  const TEST_SESSION_ID = `test-subcmd-review-${Date.now()}`;
+  const TEST_SESSION_ID = `test-subcmd-sessions-${Date.now()}`;
   const sessionsDir = join(homedir(), ".cache", "hotdog", "sessions");
 
   function setup() {
@@ -28,7 +28,7 @@ describe("Session Review Extension - exit codes", () => {
   beforeEach(setup);
   afterEach(teardown);
 
-  it("registers review subcommand via CLI_SUBCOMMANDS_REGISTER hook", async () => {
+  it("registers sessions subcommand via CLI_SUBCOMMANDS_REGISTER hook", async () => {
     const core = createMockCore();
     const { create } = await import("../../src/extensions/ui-session-review-cli/index.ts");
     const ext = create(core);
@@ -39,12 +39,12 @@ describe("Session Review Extension - exit codes", () => {
     // Trigger the hook to register the subcommand
     await ext.hooks![HOOKS.CLI_SUBCOMMANDS_REGISTER]!(core.cliSubcommandRegistry);
 
-    expect(core.cliSubcommandRegistry.has("review")).toBe(true);
-    const def = core.cliSubcommandRegistry.get("review");
+    expect(core.cliSubcommandRegistry.has("sessions")).toBe(true);
+    const def = core.cliSubcommandRegistry.get("sessions");
     expect(def!.handler).toBeDefined();
   });
 
-  it("review subcommand returns exit code 0 for existing session", async () => {
+  it("sessions show returns exit code 0 for existing session", async () => {
     const { SessionLog } = await import(
       "../../src/extensions/session-log/session-log.ts"
     );
@@ -59,13 +59,14 @@ describe("Session Review Extension - exit codes", () => {
     const ext = create(core);
     await ext.hooks![HOOKS.CLI_SUBCOMMANDS_REGISTER]!(core.cliSubcommandRegistry);
 
-    const def = core.cliSubcommandRegistry.get("review");
+    const def = core.cliSubcommandRegistry.get("sessions");
     const cli = {
       sessionId: TEST_SESSION_ID,
       wantsJson: true,
       toolIndex: false,
       colors: false,
       theme: "dark",
+      args: ["show"],
     };
 
     // Suppress console output during handler execution
@@ -79,19 +80,20 @@ describe("Session Review Extension - exit codes", () => {
     }
   });
 
-  it("review subcommand returns exit code 1 for non-existent session", async () => {
+  it("sessions show returns exit code 1 for non-existent session", async () => {
     const core = createMockCore();
     const { create } = await import("../../src/extensions/ui-session-review-cli/index.ts");
     const ext = create(core);
     await ext.hooks![HOOKS.CLI_SUBCOMMANDS_REGISTER]!(core.cliSubcommandRegistry);
 
-    const def = core.cliSubcommandRegistry.get("review");
+    const def = core.cliSubcommandRegistry.get("sessions");
     const cli = {
       sessionId: "non-existent-session-xyz",
       wantsJson: true,
       toolIndex: false,
       colors: false,
       theme: "dark",
+      args: ["show"],
     };
 
     // Suppress console output during handler execution
@@ -105,7 +107,7 @@ describe("Session Review Extension - exit codes", () => {
     }
   });
 
-  it("review subcommand with --tool-index returns 0", async () => {
+  it("sessions show with --tool-index returns 0", async () => {
     const { SessionLog } = await import(
       "../../src/extensions/session-log/session-log.ts"
     );
@@ -124,13 +126,14 @@ describe("Session Review Extension - exit codes", () => {
     const ext = create(core);
     await ext.hooks![HOOKS.CLI_SUBCOMMANDS_REGISTER]!(core.cliSubcommandRegistry);
 
-    const def = core.cliSubcommandRegistry.get("review");
+    const def = core.cliSubcommandRegistry.get("sessions");
     const cli = {
       sessionId: TEST_SESSION_ID,
       wantsJson: true,
       toolIndex: true,
       colors: false,
       theme: "dark",
+      args: ["show"],
     };
 
     // Suppress console output during handler execution
@@ -144,7 +147,7 @@ describe("Session Review Extension - exit codes", () => {
     }
   });
 
-  it("review subcommand lists sessions (returns 0 when sessions exist)", async () => {
+  it("sessions show lists sessions (returns 0 when sessions exist)", async () => {
     const { SessionLog } = await import(
       "../../src/extensions/session-log/session-log.ts"
     );
@@ -169,13 +172,14 @@ describe("Session Review Extension - exit codes", () => {
     const ext = create(core);
     await ext.hooks![HOOKS.CLI_SUBCOMMANDS_REGISTER]!(core.cliSubcommandRegistry);
 
-    const def = core.cliSubcommandRegistry.get("review");
+    const def = core.cliSubcommandRegistry.get("sessions");
     const cli = {
       sessionId: null, // No session ID = list mode
       wantsJson: true,
       toolIndex: false,
       colors: false,
       theme: "dark",
+      args: ["show"],
     };
 
     // Capture console output to verify it's valid JSON
@@ -300,7 +304,7 @@ describe("Subcommand handler return types", () => {
 
     // Verify all subcommands are registered
     const subcommands = core.cliSubcommandRegistry.names();
-    expect(subcommands).toContain("review");
+    expect(subcommands).toContain("sessions");
     expect(subcommands).toContain("info");
     expect(subcommands).toContain("show-prompt");
     expect(subcommands).toContain("prompt");

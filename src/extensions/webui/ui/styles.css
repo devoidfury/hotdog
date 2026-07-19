@@ -67,7 +67,6 @@
     --radius-xl: 20px;
     --radius-full: 9999px;
     --sidebar-width: 300px;
-    --header-height: 52px;
     --input-height: 64px;
 
     /* Transitions */
@@ -270,9 +269,8 @@ body {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    padding: 16px 18px;
+    padding: 6px 6px 6px 12px;
     border-bottom: 1px solid var(--border);
-    min-height: var(--header-height);
 }
 
 .sidebar-header h2 {
@@ -414,8 +412,7 @@ body {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    padding: 0 20px;
-    min-height: var(--header-height);
+    padding: 2px 6px;
     background: var(--bg-primary);
     border-bottom: 1px solid var(--border);
     font-size: 0.85rem;
@@ -428,11 +425,6 @@ body {
     display: flex;
     align-items: center;
     gap: 6px;
-}
-
-#session-label::before {
-    content: "💬";
-    font-size: 0.85rem;
 }
 
 #current-session-id {
@@ -452,11 +444,6 @@ body {
     display: flex;
     align-items: center;
     gap: 6px;
-}
-
-#model-selector::before {
-    content: "🤖";
-    font-size: 0.85rem;
 }
 
 #model-select {

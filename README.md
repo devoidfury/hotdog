@@ -134,7 +134,7 @@ Profile body content goes here.
 ```
 hotdog                           # Interactive CLI (default)
 hotdog prompt "your prompt"      # One-shot mode
-hotdog -c "your prompt"          # One-shot mode (shorthand)
+hotdog -p "your prompt"          # One-shot mode (shorthand)
 hotdog info                      # System diagnostics
 hotdog show-prompt               # Render system prompt to stdout
 hotdog profiles                  # List all available profiles
@@ -150,7 +150,7 @@ hotdog webui                     # Start the web UI server (alpha)
 -m, --model <name>           Model name
     --ai-url <url>           AI backend URL
 -k, --api-key <key>          API key
--p, --profile <name>         Profile name
+    --profile <name>         Profile name
     --provider <name>        AI provider name
 -l, --loud                   Print full JSON API responses
 --json                       Output as JSON

@@ -1,6 +1,6 @@
 # Debugging
 
-## One-Shot Mode (`-c` / `--prompt`)
+## One-Shot Mode (`-p` / `--prompt`)
 
 Run the agent with a single prompt and exit:
 ```bash

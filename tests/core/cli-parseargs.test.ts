@@ -19,7 +19,7 @@ describe("parseArgs", () => {
     { long: "--model", short: "-m", resultKey: "model", value: "gpt-4" },
     { long: "--ai-url", short: null, resultKey: "aiUrl", value: "http://localhost:8080" },
     { long: "--api-key", short: null, resultKey: "apiKey", value: "secret-key" },
-    { long: "--profile", short: "-p", resultKey: "profile", value: "explorer" },
+    { long: "--profile", short: null, resultKey: "profile", value: "explorer" },
     { long: "--provider", short: null, resultKey: "provider", value: "openai" },
   ];
 
@@ -79,7 +79,7 @@ describe("parseArgs", () => {
   });
 
   it("parses multiple flags together", () => {
-    withArgs(["-m", "gpt-4", "-p", "default", "--loud"], () => {
+    withArgs(["-m", "gpt-4", "--profile", "default", "--loud"], () => {
       const result = parseArgs();
       expect(result.model).toBe("gpt-4");
       expect(result.profile).toBe("default");

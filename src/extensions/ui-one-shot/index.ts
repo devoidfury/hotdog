@@ -1,7 +1,7 @@
 // One-Shot Extension
 // Provides one-shot prompt mode as a CLI subcommand.
 // Runs a single prompt and exits — no interactive session.
-// Registers CLI flag (-c/--prompt), subcommand, and CLI args hook handler.
+// Registers CLI flag (-p/--prompt), subcommand, and CLI args hook handler.
 
 import { MessageBus } from "../../core/session/message-bus.ts";
 import { formatError } from "../../core/error.ts";
@@ -213,14 +213,14 @@ async function handlePromptSubcommand(
 
 /**
  * Create the one-shot extension.
- * Registers the "prompt" subcommand and -c/--prompt CLI flag for one-shot mode.
+ * Registers the "prompt" subcommand and -p/--prompt CLI flag for one-shot mode.
  * All registration happens through hooks.
  */
 export function create(core: CoreContext): ExtensionInstance {
   return {
     hooks: core.hooks
       ? {
-          // Handle -c/--prompt flag by setting subcommand
+          // Handle -p/--prompt flag by setting subcommand
           // (flag itself is declared in extension.json for static discovery)
           [HOOKS.CLI_ARGS_PARSED]: ({ cli }: { cli: CliArgs }) => {
             if (cli.prompt) {

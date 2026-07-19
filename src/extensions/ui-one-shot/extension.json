@@ -22,7 +22,7 @@
   },
   "cli:flags": [
     {
-      "short": "-c",
+      "short": "-p",
       "long": "--prompt",
       "description": "One-shot prompt — run a single prompt and exit",
       "type": "string"

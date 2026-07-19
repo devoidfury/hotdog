@@ -402,7 +402,7 @@ Path to a custom system prompt template file. If not set, hotdog looks for `syst
 ### `profile`
 
 - **Type:** `string`
-- **CLI flag:** `--profile` / `-p`
+- **CLI flag:** `--profile`
 - **Default:** `"default"`
 - **Resolution:** CLI > config > default
 

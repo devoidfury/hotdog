@@ -344,7 +344,6 @@
   "profileName": {
     "type": "string",
     "cliFlag": {
-      "short": "-p",
       "long": "--profile",
       "type": "string",
       "description": "Profile name"

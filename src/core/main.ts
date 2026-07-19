@@ -260,7 +260,7 @@ export async function main(): Promise<number> {
         logger.error(
           `Unknown subcommand: ${posLower}\n` +
             `Available subcommands: ${knownSubcommands.join(", ")}\n` +
-            `To send a prompt, use -c or --prompt: hotdog -c "your prompt"`,
+            `To send a prompt, use -p or --prompt: hotdog -p "your prompt"`,
         );
       }
       return 1;

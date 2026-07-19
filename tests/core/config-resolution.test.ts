@@ -5,23 +5,6 @@ import {
   CONFIG_SCHEMA as CONFIG_KEYS,
   type ResolutionContext,
 } from "../../src/core/config/schema-loader.ts";
-import { getNested } from "../../src/utils/objects.ts";
-
-describe("getNested", () => {
-  it("returns top-level property", () => {
-    expect(getNested<string>({ url: "http://test" }, "url")).toBe("http://test");
-  });
-
-  it("returns nested property with dot path", () => {
-    expect(getNested<number>({ nested: { value: 42 } }, "nested.value")).toBe(42);
-  });
-
-  it("returns undefined for missing or null paths", () => {
-    expect(getNested({ a: 1 }, "b.c")).toBeUndefined();
-    expect(getNested({ a: null }, "a.b")).toBeUndefined();
-    expect(getNested(null, "a.b")).toBeUndefined();
-  });
-});
 
 // ── CONFIG_KEYS schema ───────────────────────────────────────────────────
 

@@ -251,4 +251,63 @@ describe('ExtensionLoader', () => {
       expect(loader.get('test')).toBe(expected);
     });
   });
+
+  describe('metadata methods', () => {
+    it('getProvides returns provides for loaded extension', async () => {
+      await loader.load('test', {
+        create: () => ({ name: 'test' }),
+      }, { provides: ['tools'] });
+      expect(loader.getProvides('test')).toEqual(['tools']);
+    });
+
+    it('getProvides returns undefined for unknown extension', () => {
+      expect(loader.getProvides('unknown')).toBeUndefined();
+    });
+
+    it('getDependsOn returns dependsOn for loaded extension', async () => {
+      await loader.load('test', {
+        create: () => ({ name: 'test' }),
+      }, { dependsOn: ['dep1'] });
+      expect(loader.getDependsOn('test')).toEqual(['dep1']);
+    });
+
+    it('getDependsOn returns undefined for unknown extension', () => {
+      expect(loader.getDependsOn('unknown')).toBeUndefined();
+    });
+
+    it('hasCapability returns true when extension provides capability', async () => {
+      await loader.load('test', {
+        create: () => ({ name: 'test' }),
+      }, { provides: ['tools'] });
+      expect(loader.hasCapability('tools')).toBe(true);
+    });
+
+    it('hasCapability returns false when no extension provides capability', () => {
+      expect(loader.hasCapability('nonexistent')).toBe(false);
+    });
+
+    it('getProviders returns extensions providing a capability', async () => {
+      await loader.load('ext1', { create: () => ({ name: 'ext1' }) }, { provides: ['tools'] });
+      await loader.load('ext2', { create: () => ({ name: 'ext2' }) }, { provides: ['tools'] });
+      const providers = loader.getProviders('tools');
+      expect(providers).toContain('ext1');
+      expect(providers).toContain('ext2');
+    });
+
+    it('getProviders returns empty array when no providers', () => {
+      expect(loader.getProviders('nonexistent')).toEqual([]);
+    });
+
+    it('entryPoints returns entry point paths', async () => {
+      await loader.load('test', { create: () => ({ name: 'test' }) });
+      expect(loader.entryPoints()).toBeDefined();
+    });
+
+    it('cleanup calls SHUTDOWN_CLEANUP hook', async () => {
+      let shutdownCalled = false;
+      core.hooks.on('shutdown:cleanup', () => { shutdownCalled = true; });
+      await loader.cleanup();
+      expect(shutdownCalled).toBe(true);
+    });
+  });
 });

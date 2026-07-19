@@ -42,12 +42,6 @@ describe('PagerTool', () => {
     expect(resultStr(result)).toContain('No cached output found');
   });
 
-  it('returns not found when context is null', async () => {
-    const tool = new PagerTool();
-    const result = await tool.execute(JSON.stringify({ tool_call_id: 'call_789' }), new ToolContext());
-    expect(resultStr(result)).toContain('No cached output found');
-  });
-
   it('generates call display', () => {
     const tool = new PagerTool();
     const display = tool.callDisplay(JSON.stringify({ tool_call_id: 'call_abc' }));

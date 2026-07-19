@@ -49,108 +49,44 @@ describe("SUBAGENT_TOOL_NAMES", () => {
 });
 
 describe("createToolFactory", () => {
-  it("creates write tool", () => {
+  it("creates all expected core tools", () => {
     const factory = createToolFactory();
-    const tool = factory.createTool("write");
-    expect(tool).not.toBeNull();
-    expect(typeof tool!.execute).toBe("function");
+    for (const name of ["write", "read", "edit", "grep", "find", "pager", "project_info"]) {
+      const tool = factory.createTool(name);
+      expect(tool, `${name} tool should be created`).not.toBeNull();
+      expect(typeof tool!.execute, `${name}.execute should be a function`).toBe("function");
+    }
   });
 
-  it("creates read tool", () => {
+  it("returns null for tools registered by other extensions", () => {
     const factory = createToolFactory();
-    const tool = factory.createTool("read");
-    expect(tool).not.toBeNull();
-    expect(typeof tool!.execute).toBe("function");
+    // question → question-tool extension
+    expect(factory.createTool("question")).toBeNull();
+    // model → model-switch extension
+    expect(factory.createTool("model")).toBeNull();
+    // load_skill → skills extension
+    expect(factory.createTool("load_skill")).toBeNull();
+    // review → session-review extension
+    expect(factory.createTool("review")).toBeNull();
+    // nonexistent
+    expect(factory.createTool("nonexistent-tool")).toBeNull();
   });
 
-  it("creates edit tool", () => {
+  it("returns null for disabled-by-default tools", () => {
     const factory = createToolFactory();
-    const tool = factory.createTool("edit");
-    expect(tool).not.toBeNull();
-    expect(typeof tool!.execute).toBe("function");
-  });
-
-  it("creates grep tool", () => {
-    const factory = createToolFactory();
-    const tool = factory.createTool("grep");
-    expect(tool).not.toBeNull();
-    expect(typeof tool!.execute).toBe("function");
-  });
-
-  it("creates find tool", () => {
-    const factory = createToolFactory();
-    const tool = factory.createTool("find");
-    expect(tool).not.toBeNull();
-    expect(typeof tool!.execute).toBe("function");
-  });
-
-  // question is registered by the question-tool extension, not core-tools
-  it("returns null for question (registered by question-tool extension)", () => {
-    const factory = createToolFactory();
-    const tool = factory.createTool("question");
-    expect(tool).toBeNull();
-  });
-
-  it("creates pager tool", () => {
-    const factory = createToolFactory();
-    const tool = factory.createTool("pager");
-    expect(tool).not.toBeNull();
-    expect(typeof tool!.execute).toBe("function");
-  });
-
-  // model is registered by the model-switch extension, not core-tools
-  it("returns null for model (registered by model-switch extension)", () => {
-    const factory = createToolFactory();
-    const tool = factory.createTool("model");
-    expect(tool).toBeNull();
-  });
-
-  // load_skill is registered by the skills extension, not the core-tools factory
-  it("returns null for load_skill (registered by skills extension)", () => {
-    const factory = createToolFactory();
-    const tool = factory.createTool("load_skill");
-    expect(tool).toBeNull();
-  });
-
-  // review is registered by the session-review extension, not core-tools
-  it("returns null for review (registered by session-review extension)", () => {
-    const factory = createToolFactory();
-    const tool = factory.createTool("review");
-    expect(tool).toBeNull();
-  });
-
-  it("returns null for unknown tool", () => {
-    const factory = createToolFactory();
-    const tool = factory.createTool("nonexistent-tool");
-    expect(tool).toBeNull();
+    // explore is disabled by default (descriptor.disabled = true)
+    expect(factory.createTool("explore")).toBeNull();
   });
 
   it("respects whitelist", () => {
     const factory = createToolFactory();
-    const tool = factory.createTool("write", ["write", "read"]);
-    expect(tool).not.toBeNull();
-    const otherTool = factory.createTool("edit", ["write", "read"]);
-    expect(otherTool).toBeNull();
-  });
-
-  it("handles project_info as enabled by default", () => {
-    const factory = createToolFactory();
-    // project_info is enabled by default (descriptor.disabled = false)
-    const tool = factory.createTool("project_info");
-    expect(tool).not.toBeNull();
-  });
-
-  it("handles explore as disabled by default", () => {
-    const factory = createToolFactory();
-    // explore is disabled by default (descriptor.disabled = true)
-    const tool = factory.createTool("explore");
-    expect(tool).toBeNull();
+    expect(factory.createTool("write", ["write", "read"])).not.toBeNull();
+    expect(factory.createTool("edit", ["write", "read"])).toBeNull();
   });
 
   it("enables disabled tools when in whitelist", () => {
     const factory = createToolFactory();
-    const tool = factory.createTool("explore", ["explore"]);
-    expect(tool).not.toBeNull();
+    expect(factory.createTool("explore", ["explore"])).not.toBeNull();
   });
 });
 

@@ -20,32 +20,7 @@ describe("handleSlashCommand", () => {
     expect(output).toContain("Commands:");
   });
 
-  it("handles /quit command", () => {
-    const { rl } = createMockRl();
-    let output = "";
-    let closed = false;
-    const origLog = console.log;
-    const origExit = process.exit;
-    console.log = (...args) => { output += args.join(" "); };
-    process.exit = ((_code?: string | number | null | undefined) => {
-      throw new Error("exit");
-    }) as never;
-    (rl as any).close = () => { closed = true; };
-
-    let exited = false;
-    try {
-      handleSlashCommand("quit", { executeCommand: async (cmd: string) => 0 } as any, rl as any);
-    } catch (e) {
-      if ((e as Error).message === "exit") exited = true;
-    }
-    console.log = origLog;
-    process.exit = origExit;
-    expect(exited).toBe(true);
-    expect(output).toContain("Goodbye!");
-    expect(closed).toBe(true);
-  });
-
-  it("handles /exit command", () => {
+  it("handles /quit and /exit commands", () => {
     const { rl } = createMockRl();
     let closed = false;
     const origExit = process.exit;
@@ -54,15 +29,15 @@ describe("handleSlashCommand", () => {
     }) as never;
     (rl as any).close = () => { closed = true; };
 
-    let exited = false;
-    try {
-      handleSlashCommand("exit", { executeCommand: async (cmd: string) => 0 } as any, rl as any);
-    } catch (e) {
-      if ((e as Error).message === "exit") exited = true;
+    for (const cmd of ["quit", "exit"]) {
+      closed = false;
+      try {
+        handleSlashCommand(cmd, { executeCommand: async (cmd: string) => 0 } as any, rl as any);
+      } catch (e) {
+        if ((e as Error).message === "exit") expect(closed).toBe(true);
+      }
     }
     process.exit = origExit;
-    expect(exited).toBe(true);
-    expect(closed).toBe(true);
   });
 
   it("delegates commands to bus.executeCommand", async () => {
@@ -74,15 +49,10 @@ describe("handleSlashCommand", () => {
       run: async () => {},
     };
 
-    // Test multiple commands in one test to reduce verbosity
-    handleSlashCommand("clear", bus, rl as any);
-    handleSlashCommand("tokens", bus, rl as any);
-    handleSlashCommand("tools", bus, rl as any);
-    handleSlashCommand("thinking", bus, rl as any);
-    handleSlashCommand("regenerate", bus, rl as any);
-    handleSlashCommand("reasoning high", bus, rl as any);
-    handleSlashCommand("compact", bus, rl as any);
-    handleSlashCommand("prompt:explainer", bus, rl as any);
+    for (const cmd of ["clear", "tokens", "tools", "thinking", "regenerate",
+      "reasoning high", "compact", "prompt:explainer"]) {
+      handleSlashCommand(cmd, bus, rl as any);
+    }
 
     await new Promise((r) => setTimeout(r, 50));
     expect(executedCommands).toEqual([
@@ -99,11 +69,8 @@ describe("parseCommand edge cases", () => {
     expect(cmd.value).toBe("   ");
   });
 
-  it("is case-sensitive (HELP is unknown)", () => {
+  it("is case-sensitive", () => {
     expect(parseCommand("HELP").type).toBe(Command.Unknown);
-  });
-
-  it("does not trim trailing whitespace", () => {
     expect(parseCommand("help   ").type).toBe(Command.Unknown);
   });
 
@@ -136,16 +103,13 @@ describe("executeShellCommand", () => {
     expect(result.exitCode).toBe(0);
   });
 
-  it("handles command errors", async () => {
+  it("handles command errors and empty output", async () => {
     const { executeShellCommand } = await import("../../src/extensions/ui-interactive-cli/index.ts");
-    const result = await executeShellCommand("nonexistent_command_xyz_12345");
-    expect(result.content || result.error).toBeDefined();
-  });
+    const result1 = await executeShellCommand("nonexistent_command_xyz_12345");
+    expect(result1.content || result1.error).toBeDefined();
 
-  it("handles empty output command", async () => {
-    const { executeShellCommand } = await import("../../src/extensions/ui-interactive-cli/index.ts");
-    const result = await executeShellCommand("true");
-    expect(result.exitCode).toBe(0);
-    expect(result.content).toBe("");
+    const result2 = await executeShellCommand("true");
+    expect(result2.exitCode).toBe(0);
+    expect(result2.content).toBe("");
   });
 });

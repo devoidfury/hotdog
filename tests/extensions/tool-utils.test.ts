@@ -1,10 +1,7 @@
-import { describe, it, expect, beforeEach, afterEach } from "bun:test";
-import fs from "node:fs";
-import path from "node:path";
-import os from "node:os";
-import { fileURLToPath } from "node:url";
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const ROOT = path.resolve(__dirname, "../..");
+// Tests for core/extensions/tool-utils.ts — tool definition helpers,
+// argument parsing, result formatting, and XML utilities.
+
+import { describe, it, expect, beforeAll } from "bun:test";
 import {
   toolDef,
   param,
@@ -15,9 +12,6 @@ import {
   getRequiredStr,
   ToolResult,
 } from "../../src/core/extensions/tool-utils.ts";
-import { validateCwdBoundary, writeFileWithParents, fileSize, resolvePathAndValidate, checkWritable, checkReadable, IOError } from "../../src/utils/file-utils.ts";
-import { ToolRegistry } from "../../src/core/extensions/tool-registry.ts";
-import { ToolContext } from "../../src/core/extensions/tool-context.ts";
 
 describe("toolDef", () => {
   it("creates a tool definition", () => {
@@ -163,167 +157,6 @@ describe("generateDiff", () => {
   });
 });
 
-describe("validateCwdBoundary", () => {
-  it("returns null when no boundary", () => {
-    expect(validateCwdBoundary("/any/path", undefined)).toBeNull();
-  });
-
-  it("returns null for path within boundary", () => {
-    expect(
-      validateCwdBoundary("/home/user/project/file.txt", "/home/user/project"),
-    ).toBeNull();
-  });
-
-  it("returns null for boundary itself", () => {
-    expect(
-      validateCwdBoundary("/home/user/project", "/home/user/project"),
-    ).toBeNull();
-  });
-
-  it("returns error string for path outside boundary", () => {
-    const result = validateCwdBoundary(
-      "/home/other/file.txt",
-      "/home/user/project",
-    );
-    expect(typeof result).toBe("string");
-    expect(result).toContain("outside cwd boundary");
-  });
-});
-
-describe("ToolRegistry", () => {
-  it("registers and retrieves tools", () => {
-    const reg = new ToolRegistry();
-    reg.register("bash", {});
-    expect(reg.get("bash")).toBeDefined();
-  });
-
-  it("checks tool existence", () => {
-    const reg = new ToolRegistry();
-    reg.register("bash", {});
-    expect(reg.has("bash")).toBe(true);
-    expect(reg.has("write")).toBe(false);
-  });
-
-  it("lists all tools", () => {
-    const reg = new ToolRegistry();
-    reg.register("bash", {});
-    reg.register("write", {});
-    const all = reg.getAll();
-    expect(all).toHaveLength(2);
-    expect(all.map(([name]) => name)).toContain("bash");
-  });
-
-  it("filters by whitelist", () => {
-    const reg = new ToolRegistry();
-    reg.register("bash", {});
-    reg.register("write", {});
-    reg.register("read", {});
-    const filtered = reg.filter(["bash", "write"], undefined);
-    expect(filtered.getAll()).toHaveLength(2);
-  });
-
-  it("filters by blacklist", () => {
-    const reg = new ToolRegistry();
-    reg.register("bash", {});
-    reg.register("write", {});
-    reg.register("read", {});
-    const filtered = reg.filter(undefined, ["bash"]);
-    expect(filtered.getAll()).toHaveLength(2);
-  });
-
-  it("filters by both whitelist and blacklist", () => {
-    const reg = new ToolRegistry();
-    reg.register("bash", {});
-    reg.register("write", {});
-    reg.register("read", {});
-    // whitelist wins: only bash and write allowed, but bash is blacklisted
-    const filtered = reg.filter(["bash", "write"], ["bash"]);
-    expect(filtered.getAll()).toHaveLength(1);
-    expect(filtered.has("bash")).toBe(false);
-    expect(filtered.has("write")).toBe(true);
-  });
-
-  it("removes a single tool", () => {
-    const reg = new ToolRegistry();
-    reg.register("bash", {});
-    reg.register("write", {});
-    expect(reg.remove("bash")).toBe(true);
-    expect(reg.has("bash")).toBe(false);
-    expect(reg.has("write")).toBe(true);
-  });
-
-  it("removeAll removes multiple tools and returns count", () => {
-    const reg = new ToolRegistry();
-    reg.register("bash", {});
-    reg.register("write", {});
-    reg.register("read", {});
-    const count = reg.removeAll(["bash", "read", "nonexistent"]);
-    expect(count).toBe(2);
-    expect(reg.has("bash")).toBe(false);
-    expect(reg.has("read")).toBe(false);
-    expect(reg.has("write")).toBe(true);
-  });
-
-  it("clears all tools", () => {
-    const reg = new ToolRegistry();
-    reg.register("bash", {});
-    reg.register("write", {});
-    reg.clear();
-    expect(reg.getAll()).toHaveLength(0);
-  });
-});
-
-describe("ToolContext", () => {
-  it("creates context with defaults", () => {
-    const ctx = new ToolContext();
-    expect(ctx.get("skills")).toBeUndefined();
-    expect(ctx.get("allSkills")).toBeUndefined();
-    expect(ctx.get("skillDirectories")).toBeUndefined();
-    expect(ctx.get("modelRegistry")).toBeUndefined();
-    expect(ctx.get("cwdBoundary")).toBeUndefined();
-  });
-
-  it("accepts custom options", () => {
-    const ctx = new ToolContext({
-      skills: ["skill1"],
-      cwdBoundary: "/project",
-    });
-    expect(ctx.get("skills")).toEqual(["skill1"]);
-    expect(ctx.get("cwdBoundary")).toBe("/project");
-  });
-
-  it("handles cancelled callback", () => {
-    let cancelled = false;
-    const ctx = new ToolContext();
-    ctx.set("isCancelled", () => cancelled);
-    expect((ctx.get("isCancelled") as () => boolean)()).toBe(false);
-    cancelled = true;
-    expect((ctx.get("isCancelled") as () => boolean)()).toBe(true);
-  });
-
-  it("mounts and retrieves properties via get()", () => {
-    const ctx = new ToolContext();
-    ctx.mount({
-      workspaceRoot: "/project",
-      currentFile: "/project/src/main.js",
-      modelNames: ["qwen3.5-0.8b", "qwen3.5-4b"],
-      activeProvider: "openai",
-    });
-    expect(ctx.get("workspaceRoot")).toBe("/project");
-    expect(ctx.get("currentFile")).toBe("/project/src/main.js");
-    expect(ctx.get("modelNames")).toEqual(["qwen3.5-0.8b", "qwen3.5-4b"]);
-    expect(ctx.get("activeProvider")).toBe("openai");
-  });
-
-  it("returns undefined for unmounted properties", () => {
-    const ctx = new ToolContext();
-    expect(ctx.get("workspaceRoot")).toBeUndefined();
-    expect(ctx.get("currentFile")).toBeUndefined();
-    expect(ctx.get("modelNames")).toBeUndefined();
-    expect(ctx.get("activeProvider")).toBeUndefined();
-  });
-});
-
 describe("ToolResult", () => {
   it("creates success result with ok()", () => {
     const r = ToolResult.ok("hello");
@@ -358,6 +191,12 @@ describe("ToolResult", () => {
   it("chains withOutputTag", () => {
     const r = ToolResult.ok("data").withOutputTag("result");
     expect(r.outputTag).toBe("result");
+  });
+
+  it("chains withImages", () => {
+    const images = [{ type: "image_url", mimeType: "image/png", data: "base64..." }];
+    const r = ToolResult.ok("img").withImages(images);
+    expect(r.images).toBe(images);
   });
 
   it("toDisplay returns output", () => {
@@ -519,161 +358,6 @@ describe("ToolResult", () => {
   });
 });
 
-describe("writeFileWithParents", () => {
-  let tmpDir: string;
-
-  beforeEach(() => {
-    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "hotdog-test-writefile-"));
-  });
-
-  afterEach(() => {
-    fs.rmSync(tmpDir, { recursive: true, force: true });
-  });
-
-  it("writes file and creates parent dirs", async () => {
-    const filePath = path.join(tmpDir, "a", "b", "c", "test.txt");
-    await writeFileWithParents(filePath, "content");
-    expect(fs.existsSync(filePath)).toBe(true);
-    expect(fs.readFileSync(filePath, "utf-8")).toBe("content");
-  });
-
-  it("overwrites existing file", async () => {
-    const filePath = path.join(tmpDir, "test.txt");
-    await writeFileWithParents(filePath, "v1");
-    await writeFileWithParents(filePath, "v2");
-    expect(fs.readFileSync(filePath, "utf-8")).toBe("v2");
-  });
-});
-
-describe("resolvePathAndValidate", () => {
-  let tmpDir: string;
-
-  beforeEach(() => {
-    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "hotdog-test-resolve-"));
-  });
-
-  afterEach(() => {
-    fs.rmSync(tmpDir, { recursive: true, force: true });
-  });
-
-  it("resolves existing path", async () => {
-    const existingFile = path.join(tmpDir, "exists.txt");
-    fs.writeFileSync(existingFile, "content");
-    const resolved = await resolvePathAndValidate(existingFile);
-    expect(resolved).toBe(existingFile);
-  });
-
-  it("throws for non-existent path", async () => {
-    await expect(resolvePathAndValidate(path.join(tmpDir, "nonexistent.txt"))).rejects.toThrow(
-      "Path not found",
-    );
-  });
-
-  it("throws when path escapes boundary", async () => {
-    await expect(resolvePathAndValidate("/etc/passwd", tmpDir)).rejects.toThrow(
-      "outside the allowed directory",
-    );
-  });
-
-  it("allows path within boundary", async () => {
-    const existingFile = path.join(tmpDir, "inside.txt");
-    fs.writeFileSync(existingFile, "content");
-    const resolved = await resolvePathAndValidate(existingFile, tmpDir);
-    expect(resolved).toBe(existingFile);
-  });
-
-  it("allows path outside cwd when no boundary is set", async () => {
-    // When cwdBoundary is null, paths outside the current directory should be allowed
-    const existingFile = path.join(tmpDir, "outside.txt");
-    fs.writeFileSync(existingFile, "content");
-    const resolved = await resolvePathAndValidate(existingFile);
-    expect(resolved).toBe(existingFile);
-  });
-});
-
-describe("fileSize", () => {
-  it("returns file size in bytes", async () => {
-    const size = await fileSize(path.join(ROOT, "src/core/extensions/tool-registry.ts"));
-    expect(typeof size).toBe("number");
-    expect(size).toBeGreaterThan(0);
-  });
-});
-
-describe("checkWritable", () => {
-  let tmpDir: string;
-
-  beforeEach(() => {
-    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "hotdog-test-writable-"));
-  });
-
-  afterEach(() => {
-    fs.rmSync(tmpDir, { recursive: true, force: true });
-  });
-
-  it("returns true for writable file", async () => {
-    const filePath = path.join(tmpDir, "test.txt");
-    fs.writeFileSync(filePath, "data");
-    expect(await checkWritable(filePath)).toBe(true);
-  });
-
-  it("returns true for new file in writable dir", async () => {
-    const filePath = path.join(tmpDir, "new-file.txt");
-    expect(await checkWritable(filePath)).toBe(true);
-  });
-
-  it("throws for unwritable directory", async () => {
-    // Create a read-only directory
-    const roDir = path.join(tmpDir, "readonly");
-    fs.mkdirSync(roDir, { recursive: true });
-    fs.chmodSync(roDir, 0o555);
-    const filePath = path.join(roDir, "test.txt");
-    await expect(checkWritable(filePath)).rejects.toThrow("not writable");
-    fs.chmodSync(roDir, 0o755);
-  });
-
-  it("returns true for existing read-only file (parent dir is writable)", async () => {
-    const filePath = path.join(tmpDir, "readonly-file.txt");
-    fs.writeFileSync(filePath, "data");
-    fs.chmodSync(filePath, 0o444);
-    // checkWritable returns true for existing files in writable directories
-    // (it only throws for unwritable parent directories)
-    expect(await checkWritable(filePath)).toBe(true);
-    fs.chmodSync(filePath, 0o644);
-  });
-});
-
-describe("checkReadable", () => {
-  let tmpDir: string;
-
-  beforeEach(() => {
-    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "hotdog-test-readable-"));
-  });
-
-  afterEach(() => {
-    fs.rmSync(tmpDir, { recursive: true, force: true });
-  });
-
-  it("returns true for readable file", async () => {
-    const filePath = path.join(tmpDir, "test.txt");
-    fs.writeFileSync(filePath, "data");
-    expect(await checkReadable(filePath)).toBe(true);
-  });
-
-  it("throws for non-existent path", async () => {
-    await expect(checkReadable("/nonexistent/path/file.txt")).rejects.toThrow(
-      "does not exist",
-    );
-  });
-
-  it("throws for unreadable file", async () => {
-    const filePath = path.join(tmpDir, "no-read.txt");
-    fs.writeFileSync(filePath, "data");
-    fs.chmodSync(filePath, 0o000);
-    await expect(checkReadable(filePath)).rejects.toThrow("not readable");
-    fs.chmodSync(filePath, 0o644);
-  });
-});
-
 describe("getRequiredStr", () => {
   it("returns string value", () => {
     expect(getRequiredStr({ name: "Alice" }, "name")).toBe("Alice");
@@ -698,3 +382,146 @@ describe("getRequiredStr", () => {
   });
 });
 
+// ── Additional tool-utils.ts coverage ────────────────────────────────────────
+
+describe("xmlEscape", () => {
+  let xmlEscape: (s: string) => string;
+
+  beforeAll(async () => {
+    const mod = await import("../../src/core/extensions/tool-utils.ts");
+    xmlEscape = mod.xmlEscape;
+  });
+
+  it("escapes & < > \" '", () => {
+    expect(xmlEscape("a & b < c > d \"e\" 'f'")).toBe("a &amp; b &lt; c &gt; d &quot;e&quot; &apos;f&apos;");
+  });
+
+  it("returns unchanged string with no special chars", () => {
+    expect(xmlEscape("hello world")).toBe("hello world");
+  });
+
+  it("handles empty string", () => {
+    expect(xmlEscape("")).toBe("");
+  });
+});
+
+describe("parseToolInput", () => {
+  let parseToolInput: (input: string | Record<string, unknown> | null) => Record<string, unknown> | null;
+
+  beforeAll(async () => {
+    const mod = await import("../../src/core/extensions/tool-utils.ts");
+    parseToolInput = mod.parseToolInput;
+  });
+
+  it("parses valid JSON string", () => {
+    expect(parseToolInput('{"key": "value"}')).toEqual({ key: "value" });
+  });
+
+  it("returns null for invalid JSON string", () => {
+    expect(parseToolInput("not json")).toBeNull();
+  });
+
+  it("returns null for empty string", () => {
+    expect(parseToolInput("")).toBeNull();
+  });
+
+  it("returns null for whitespace-only string", () => {
+    expect(parseToolInput("   ")).toBeNull();
+  });
+
+  it("returns null for null input", () => {
+    expect(parseToolInput(null)).toBeNull();
+  });
+
+  it("returns object as-is", () => {
+    const obj = { key: "value" };
+    expect(parseToolInput(obj)).toBe(obj);
+  });
+});
+
+describe("defaultCallDisplay", () => {
+  let defaultCallDisplay: (
+    input: string | Record<string, unknown> | null,
+    templateFn: (args: Record<string, unknown>) => string,
+    options?: string | ((input: string | Record<string, unknown> | null) => string) | { fallback?: string | ((input: string | Record<string, unknown> | null) => string); returnRawOnParseError?: boolean } | undefined,
+  ) => string;
+
+  beforeAll(async () => {
+    const mod = await import("../../src/core/extensions/tool-utils.ts");
+    defaultCallDisplay = mod.defaultCallDisplay;
+  });
+
+  it("renders template from valid JSON input", () => {
+    const result = defaultCallDisplay('{"path": "/tmp"}', (args) => args.path as string);
+    expect(result).toBe("/tmp");
+  });
+
+  it("renders template from object input", () => {
+    const result = defaultCallDisplay({ path: "/tmp" }, (args) => args.path as string);
+    expect(result).toBe("/tmp");
+  });
+
+  it("returns fallback string on parse error", () => {
+    const result = defaultCallDisplay("not json", () => "template", "fallback");
+    expect(result).toBe("fallback");
+  });
+
+  it("returns fallback function result on parse error", () => {
+    const result = defaultCallDisplay("not json", () => "template", (input) => `raw: ${input}`);
+    expect(result).toBe("raw: not json");
+  });
+
+  it("returns raw input on parse error when returnRawOnParseError is true", () => {
+    const result = defaultCallDisplay("not json", () => "template", { returnRawOnParseError: true });
+    expect(result).toBe("not json");
+  });
+
+  it("returns empty string for null input", () => {
+    const result = defaultCallDisplay(null, () => "template");
+    expect(result).toBe("");
+  });
+
+  it("returns empty string for empty string input", () => {
+    const result = defaultCallDisplay("", () => "template");
+    expect(result).toBe("");
+  });
+});
+
+describe("formatToolResult", () => {
+  let formatToolResult: (result: unknown, toolName: string, success: boolean) => string;
+
+  beforeAll(async () => {
+    const mod = await import("../../src/core/extensions/tool-utils.ts");
+    formatToolResult = mod.formatToolResult;
+  });
+
+  it("delegates to toApiContent for ToolResult instances", () => {
+    const r = ToolResult.ok("hello");
+    const result = formatToolResult(r, "bash", true);
+    expect(result).toContain("bash");
+    expect(result).toContain("hello");
+  });
+
+  it("wraps string in XML on success", () => {
+    const result = formatToolResult("output", "read", true);
+    expect(result).toContain('name="read"');
+    expect(result).toContain('status="success"');
+    expect(result).toContain("<output>output</output>");
+  });
+
+  it("wraps string in XML on failure", () => {
+    const result = formatToolResult("output", "read", false);
+    expect(result).toContain('name="read"');
+    expect(result).toContain('status="error"');
+  });
+
+  it("stringifies objects (with XML escaping)", () => {
+    const result = formatToolResult({ key: "val" }, "fetch", true);
+    expect(result).toContain("&quot;key&quot;:&quot;val&quot;");
+  });
+
+  it("escapes XML in string content", () => {
+    const result = formatToolResult("a < b", "bash", true);
+    expect(result).toContain("&lt;");
+  });
+});

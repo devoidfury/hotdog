@@ -1,23 +1,82 @@
-// Tests for providers.js resolveProvider() and initSystemPromptTemplate().
+// Tests for providers.ts — buildModelRegistry, resolveProvider, initSystemPromptTemplate.
 
 import { describe, it, expect, beforeEach, afterEach } from "bun:test";
 import {
+  buildModelRegistry,
   resolveProvider,
   initSystemPromptTemplate,
   resetSystemPromptCache,
 } from "../../src/core/config/providers.ts";
 import { writeFileSync, unlinkSync } from "node:fs";
 
+// ── buildModelRegistry ──────────────────────────────────────────────────────
+
+describe("buildModelRegistry", () => {
+  it("registers models from providers with defaults", () => {
+    const config = {
+      providers: [
+        { name: "openai", models: [{ name: "gpt-4", temperature: 0.7 }] },
+      ],
+    };
+    const registry = buildModelRegistry(config, 32000);
+    expect(registry["openai/gpt-4"]).toEqual({
+      name: "openai/gpt-4",
+      temperature: 0.7,
+      contextLimit: 32000,
+      reasoningEffort: undefined,
+      tags: [],
+    });
+  });
+
+  it("handles provider-level default model", () => {
+    const config = {
+      providers: [{ name: "test", defaultModel: "gpt-3.5", temperature: 0.5, models: [] }],
+    };
+    const registry = buildModelRegistry(config, 32000);
+    expect(registry["test/gpt-3.5"]).toBeDefined();
+    expect(registry["test/gpt-3.5"]!.temperature).toBe(0.5);
+  });
+
+  it("handles empty or multiple providers", () => {
+    expect(buildModelRegistry({}, 32000)).toEqual({});
+    const config = {
+      providers: [
+        { name: "a", models: [{ name: "m1" }] },
+        { name: "b", models: [{ name: "m2" }] },
+      ],
+    };
+    const registry = buildModelRegistry(config, 32000);
+    expect(registry["a/m1"]).toBeDefined();
+    expect(registry["b/m2"]).toBeDefined();
+  });
+
+  it("extracts reasoning_effort from model entries", () => {
+    const config = {
+      providers: [
+        {
+          name: "ai365",
+          models: [
+            { name: "dsv4", reasoning_effort: "max" },
+            { name: "qwen", reasoning_effort: "high" },
+            { name: "basic" },
+          ],
+        },
+      ],
+    };
+    const registry = buildModelRegistry(config, 32000);
+    expect(registry["ai365/dsv4"]!.reasoningEffort).toBe("max");
+    expect(registry["ai365/qwen"]!.reasoningEffort).toBe("high");
+    expect(registry["ai365/basic"]!.reasoningEffort).toBeUndefined();
+  });
+});
+
+// ── resolveProvider ─────────────────────────────────────────────────────────
+
 describe("resolveProvider", () => {
-  it("returns null when no provider name is given", () => {
+  it("returns null when no provider name or default is given", () => {
     expect(resolveProvider({}, { providers: [] })).toBeNull();
     expect(resolveProvider({ provider: undefined }, { providers: [] })).toBeNull();
     expect(resolveProvider({}, {})).toBeNull();
-  });
-
-  it("returns null when no defaultProvider is set", () => {
-    expect(resolveProvider({}, { defaultProvider: undefined, providers: [] })).toBeNull();
-    expect(resolveProvider({}, { providers: [] })).toBeNull();
   });
 
   it("returns provider when CLI provider matches", () => {
@@ -56,26 +115,17 @@ describe("resolveProvider", () => {
     expect(result!.name).toBe("openai");
   });
 
-  it("returns null when provider name not found in providers list", () => {
-    const config = {
-      providers: [{ name: "openai" }] as any,
-    };
-    expect(resolveProvider({ provider: "nonexistent" }, config)).toBeNull();
-  });
-
-  it("returns null when config has no providers array", () => {
+  it("returns null when provider name not found", () => {
+    expect(resolveProvider({ provider: "nonexistent" }, { providers: [{ name: "openai" }] as any })).toBeNull();
     expect(resolveProvider({ provider: "test" }, {})).toBeNull();
   });
 });
 
-describe("initSystemPromptTemplate", () => {
-  beforeEach(() => {
-    resetSystemPromptCache();
-  });
+// ── initSystemPromptTemplate ────────────────────────────────────────────────
 
-  afterEach(() => {
-    resetSystemPromptCache();
-  });
+describe("initSystemPromptTemplate", () => {
+  beforeEach(() => { resetSystemPromptCache(); });
+  afterEach(() => { resetSystemPromptCache(); });
 
   it("loads template from explicit path", async () => {
     const tmpFile = "/tmp/test-system-prompt.md";
@@ -98,9 +148,7 @@ describe("initSystemPromptTemplate", () => {
       const template1 = await initSystemPromptTemplate(tmpFile, undefined, undefined);
       expect(template1).toBe("Template v1");
 
-      // Change the file content (should not matter due to caching)
       writeFileSync(tmpFile, "Template v2");
-
       const template2 = await initSystemPromptTemplate(tmpFile, undefined, undefined);
       expect(template2).toBe("Template v1"); // cached
     } finally {
@@ -115,11 +163,8 @@ describe("initSystemPromptTemplate", () => {
   });
 
   it("falls back to config directory when no explicit path", async () => {
-    // This will try to load from ./config/system_prompt.md in the workspace
-    // which exists, so it should return the real template
     const template = await initSystemPromptTemplate(undefined, undefined, () => "./config");
     expect(template.length).toBeGreaterThan(0);
-    expect(typeof template).toBe("string");
   });
 
   it("resetSystemPromptCache clears the cache", async () => {

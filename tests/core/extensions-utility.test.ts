@@ -9,8 +9,6 @@ import {
   resolveLoadOrder,
   resolveExtensionDependencies,
   validateServiceContracts,
-  LOAD_ORDER,
-  ExtensionMetadata,
 } from "../../src/core/extensions/extensions.ts";
 import { ExtensionError } from "../../src/core/error.ts";
 
@@ -139,15 +137,6 @@ describe("isExtensionEnabled", () => {
   it("handles multi-kebab-case names", () => {
     const config = { mySuperCoolExt: { enabled: false } };
     expect(isExtensionEnabled("my-super-cool-ext", config)).toBe(false);
-  });
-});
-
-describe("LOAD_ORDER", () => {
-  it("has correct constants", () => {
-    expect(LOAD_ORDER.REFRESH).toBe(0);
-    expect(LOAD_ORDER.CORE_TOOLS).toBe(1);
-    expect(LOAD_ORDER.CLI).toBe(2);
-    expect(LOAD_ORDER.DEFAULT).toBe(10);
   });
 });
 

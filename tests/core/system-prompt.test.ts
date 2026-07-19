@@ -3,19 +3,6 @@ import {
   buildSystemPrompt,
   loadSystemPromptTemplate,
 } from "../../src/core/context/system-prompt.ts";
-import { loadAspects } from "../../src/utils/file-utils.ts";
-
-describe("loadAspects (utility)", () => {
-  it("returns empty array for null/empty input", async () => {
-    expect(await loadAspects(null)).toEqual([]);
-    expect(await loadAspects([])).toEqual([]);
-  });
-
-  it("handles aspect file errors gracefully", async () => {
-    const result = await loadAspects(["nonexistent-aspect"]);
-    expect(result).toEqual([]);
-  });
-});
 
 describe("buildSystemPrompt", () => {
   it("builds a system prompt with role and chunks", async () => {

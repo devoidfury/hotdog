@@ -1,7 +1,7 @@
-// Tests for input.js parseInput() and output.js OutputSink/NoopSink.
+// Tests for context/output.ts — OutputSink, NoopSink, outputEvent, EVENT_HANDLERS.
+// parseInput and NoopInput are tested in input.test.ts.
 
 import { describe, it, expect, beforeEach } from "bun:test";
-import { parseInput, INPUT_EVENT, NoopInput } from "../../src/core/context/input.ts";
 import {
   OutputSink,
   NoopSink,
@@ -10,70 +10,22 @@ import {
   EVENT_HANDLERS,
 } from "../../src/core/context/output.ts";
 
-describe("parseInput", () => {
-  it("parses command input starting with /", () => {
-    expect(parseInput("/quit")).toEqual({ type: INPUT_EVENT.COMMAND, value: "quit" });
-    expect(parseInput("/help")).toEqual({ type: INPUT_EVENT.COMMAND, value: "help" });
-    expect(parseInput("/compact 5")).toEqual({ type: INPUT_EVENT.COMMAND, value: "compact 5" });
-  });
-
-  it("parses regular text input", () => {
-    expect(parseInput("hello world")).toEqual({ type: INPUT_EVENT.TEXT, value: "hello world" });
-    expect(parseInput("What is 2+2?")).toEqual({ type: INPUT_EVENT.TEXT, value: "What is 2+2?" });
-  });
-
-  it("handles bare / as text (empty command)", () => {
-    expect(parseInput("/")).toEqual({ type: INPUT_EVENT.TEXT, value: "/" });
-    // / followed by spaces is trimmed to empty command, so treated as text
-    expect(parseInput("/  ")).toEqual({ type: INPUT_EVENT.TEXT, value: "/" });
-  });
-
-  it("trims input", () => {
-    expect(parseInput("  hello  ")).toEqual({ type: INPUT_EVENT.TEXT, value: "hello" });
-    expect(parseInput("  /help  ")).toEqual({ type: INPUT_EVENT.COMMAND, value: "help" });
-  });
-
-  it("handles empty string", () => {
-    expect(parseInput("")).toEqual({ type: INPUT_EVENT.TEXT, value: "" });
-    expect(parseInput("   ")).toEqual({ type: INPUT_EVENT.TEXT, value: "" });
-  });
-});
-
-describe("NoopInput", () => {
-  it("returns false for isInteractive", () => {
-    const input = new NoopInput();
-    expect(input.isInteractive()).toBe(false);
-  });
-
-  it("collects default answers", () => {
-    const input = new NoopInput();
-    const answers = input.collectAnswers([
-      { key: "name", default: "Anonymous" },
-      { key: "age", default: "25" },
-      { key: "notes" }, // no default
-    ]);
-    expect(answers).toEqual({ name: "Anonymous", age: "25", notes: "" });
-  });
-
-  it("collects answers for empty question list", () => {
-    const input = new NoopInput();
-    expect(input.collectAnswers([])).toEqual({});
-  });
-});
-
 describe("OutputSink", () => {
   let capturedStdout: string[] = [];
   let capturedStderr: string[] = [];
 
+  beforeEach(() => {
+    capturedStdout.length = 0;
+    capturedStderr.length = 0;
+  });
+
   describe("constructor", () => {
     it("defaults stream to true", () => {
-      const sink = new OutputSink();
-      expect(sink.stream).toBe(true);
+      expect(new OutputSink().stream).toBe(true);
     });
 
     it("respects stream option", () => {
       expect(new OutputSink({ stream: false }).stream).toBe(false);
-      expect(new OutputSink({ stream: true }).stream).toBe(true);
     });
   });
 
@@ -81,12 +33,9 @@ describe("OutputSink", () => {
     it("dispatches events to correct handlers", () => {
       const sink = new OutputSink({ stream: false });
       let callCount = 0;
-
-      // Override a handler to verify it's called
       sink.emitAssistantMessage = () => { callCount++; };
 
-      const event = { type: OUTPUT_EVENT.ASSISTANT_MESSAGE, content: "test" };
-      sink.emit(event);
+      sink.emit({ type: OUTPUT_EVENT.ASSISTANT_MESSAGE, content: "test" });
       expect(callCount).toBe(1);
     });
 
@@ -97,11 +46,6 @@ describe("OutputSink", () => {
   });
 
   describe("emitAssistantMessage", () => {
-    beforeEach(() => {
-      capturedStdout.length = 0;
-      capturedStderr.length = 0;
-    });
-
     it("writes content to stdout", () => {
       const origWrite = process.stdout.write;
       process.stdout.write = (data) => { capturedStdout.push(data as string); return true; };
@@ -191,59 +135,27 @@ describe("OutputSink", () => {
   });
 
   describe("no-op handlers", () => {
-    it("emitUserMessage is a no-op", () => {
+    it("user message, tool call, tool result, compacting, question, task progress, token usage, and reset are no-ops", () => {
       const sink = new OutputSink();
+      // All these handlers should be no-ops that don't throw
       expect(() => sink.emitUserMessage({ type: OUTPUT_EVENT.USER_MESSAGE, content: "test" })).not.toThrow();
-    });
-
-    it("emitToolCall is a no-op", () => {
-      const sink = new OutputSink();
       expect(() => sink.emitToolCall({ type: OUTPUT_EVENT.TOOL_CALL, tool: "bash" })).not.toThrow();
-    });
-
-    it("emitToolResult is a no-op", () => {
-      const sink = new OutputSink();
       expect(() => sink.emitToolResult({ type: OUTPUT_EVENT.TOOL_RESULT, output: "done" })).not.toThrow();
-    });
-
-    it("emitCompacting is a no-op", () => {
-      const sink = new OutputSink();
       expect(() => sink.emitCompacting({ type: OUTPUT_EVENT.COMPACTING } as any)).not.toThrow();
-    });
-
-    it("emitQuestion is a no-op", () => {
-      const sink = new OutputSink();
       expect(() => sink.emitQuestion({ type: OUTPUT_EVENT.QUESTION, questions: [] })).not.toThrow();
-    });
-
-    it("emitTaskProgress is a no-op", () => {
-      const sink = new OutputSink();
       expect(() => sink.emitTaskProgress({ type: OUTPUT_EVENT.TASK_PROGRESS } as any)).not.toThrow();
-    });
-
-    it("emitTokenUsage is a no-op", () => {
-      const sink = new OutputSink();
       expect(() => sink.emitTokenUsage({ type: OUTPUT_EVENT.TOKEN_USAGE } as any)).not.toThrow();
-    });
-
-    it("reset is a no-op", () => {
-      const sink = new OutputSink();
       expect(() => sink.reset()).not.toThrow();
     });
   });
 });
 
 describe("NoopSink", () => {
-  it("emit is a no-op", () => {
+  it("emit is a no-op for any input", () => {
     const sink = new NoopSink();
     expect(() => sink.emit({ type: 1, content: "test" })).not.toThrow();
-  });
-
-  it("handles any event without error", () => {
-    const sink = new NoopSink();
-    sink.emit({ type: 999 as any });
-    sink.emit(null as any);
-    sink.emit(undefined as any);
+    expect(() => sink.emit(null as any)).not.toThrow();
+    expect(() => sink.emit(undefined as any)).not.toThrow();
   });
 });
 

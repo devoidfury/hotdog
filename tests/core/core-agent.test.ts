@@ -4,7 +4,6 @@ import { Agent, HOOKS, ACTIONS } from '../../src/core/index.ts';
 import { createHooks } from '../../src/core/hooks.ts';
 import { createToolRegistry } from '../../src/core/extensions/tool-registry.ts';
 import { Message } from '../../src/core/context/message.ts';
-import { ToolResult, formatToolResult } from '../../src/core/extensions/tool-utils.ts';
 import { resolveModelConfig } from '../../src/core/config/providers.ts';
 import type { LlmClient } from '../../src/core/llm-client/client.ts';
 import type { OutputEvent } from '../../src/core/context/output.ts';
@@ -1097,47 +1096,6 @@ describe('Agent — end-to-end loop', () => {
     });
   });
 
-  describe('formatToolResult', () => {
-    it('should handle ToolResult with toApiContent', () => {
-      const tr = ToolResult.ok('hello');
-      const formatted = formatToolResult(tr, 'bash', true);
-      expect(formatted).toContain('<tool name="bash"');
-      expect(formatted).toContain('status="success"');
-    });
-
-    it('should format string result as XML', () => {
-      const formatted = formatToolResult('hello', 'bash', true);
-      expect(formatted).toContain('<tool name="bash"');
-      expect(formatted).toContain('<output>hello</output>');
-    });
-
-    it('should format object result as XML', () => {
-      const formatted = formatToolResult({ key: 'val' }, 'bash', true);
-      expect(formatted).toContain('<tool name="bash"');
-      expect(formatted).toContain('key');
-      expect(formatted).toContain('val');
-    });
-
-    // Parameterized tests for simple result types
-    const simpleResults = [
-      { type: 'number', value: 42, tool: 'calc', expected: '<output>42</output>' },
-      { type: 'boolean', value: true, tool: 'check', expected: '<output>true</output>' },
-    ];
-
-    for (const { type, value, tool, expected } of simpleResults) {
-      it(`should format ${type} result as XML`, () => {
-        const formatted = formatToolResult(value, tool, true);
-        expect(formatted).toContain(`<tool name="${tool}"`);
-        expect(formatted).toContain(expected);
-      });
-    }
-
-    it('should use error status for failed results', () => {
-      const formatted = formatToolResult('error', 'bash', false);
-      expect(formatted).toContain('status="error"');
-    });
-  });
-
   describe('getToolNames', () => {
     it('should return empty list when no tools', () => {
       const { agent } = createFixture({});
@@ -1247,7 +1205,7 @@ describe('Agent — end-to-end loop', () => {
   });
 
   describe('Agent getters and setters', () => {
-    it('getTokenUsage returns usage object', async () => {
+    it('getTokenUsage returns usage object after run', async () => {
       const mockLLM = new MockLLMClient({
         responseSequences: [[
           { type: 'content', content: 'Hello' },
@@ -1262,132 +1220,89 @@ describe('Agent — end-to-end loop', () => {
       expect(usage.totalTokens).toBe(15);
     });
 
-    it('cancelled getter returns false initially', () => {
-      const { agent } = createFixture({});
+    it('exposes all constructor properties via getters', () => {
+      const hooks = createHooks();
+      const mockLLM = new MockLLMClient({ responseSequences: [] });
+      const customConfig = { customKey: 'customValue' };
+      const { agent } = createFixture({
+        hooks,
+        mockLLM,
+        model: 'test-model',
+        maxIterations: 42,
+        contextLimit: 10000,
+        hideTools: false,
+        hideThinking: true,
+        stream: true,
+        profileName: 'custom-profile',
+        role: 'custom role',
+        profileBody: 'custom body',
+        config: customConfig,
+        toolWhitelist: ['read', 'write'],
+      });
+
+      // Verify all properties are accessible
+      expect(agent.model).toBe('test-model');
+      expect(agent.maxIterations).toBe(42);
+      expect(agent.contextLimit).toBe(10000);
+      expect(agent.hideTools).toBe(false);
+      expect(agent.hideThinking).toBe(true);
+      expect(agent.stream).toBe(true);
+      expect(agent.profileName).toBe('custom-profile');
+      expect(agent.role).toBe('custom role');
+      expect(agent.profileBody).toBe('custom body');
+      expect(agent.config).toBe(customConfig);
+      expect(agent.toolWhitelist).toEqual(['read', 'write']);
+      expect(agent.hooks).toBe(hooks);
+      expect(agent.llmClient).toBe(mockLLM as unknown as LlmClient);
+      expect(typeof agent.modelRegistry).toBe('object');
+      expect(Array.isArray(agent.followQueue)).toBe(true);
+      expect(agent.abortSignal).toBeNull();
+      expect(agent.runAbortController).toBeNull();
       expect(agent.cancelled).toBe(false);
+      expect(agent.reasoningEffort).toBeUndefined();
+      // systemPrompt is lazy-loaded
+      expect(agent.systemPrompt === null || typeof agent.systemPrompt === 'string').toBe(true);
     });
 
-    it('hideTools getter and setter', () => {
+    it('supports mutable setters', () => {
       const { agent } = createFixture({});
-      const initial = agent.hideTools;
-      expect(typeof initial).toBe('boolean');
+
+      // Boolean toggles
       agent.hideTools = true;
       expect(agent.hideTools).toBe(true);
       agent.hideTools = false;
       expect(agent.hideTools).toBe(false);
-    });
 
-    it('hideThinking getter and setter', () => {
-      const { agent } = createFixture({});
-      expect(agent.hideThinking).toBe(false);
       agent.hideThinking = true;
       expect(agent.hideThinking).toBe(true);
       agent.hideThinking = false;
       expect(agent.hideThinking).toBe(false);
-    });
 
-    it('profileName getter', () => {
-      const { agent } = createFixture({ profileName: 'custom-profile' });
-      expect(agent.profileName).toBe('custom-profile');
-    });
-
-    it('config getter', () => {
-      const customConfig = { customKey: 'customValue' };
-      const { agent } = createFixture({ config: customConfig });
-      expect(agent.config).toBe(customConfig);
-    });
-
-    it('toolWhitelist getter', () => {
-      const { agent } = createFixture({ toolWhitelist: ['read', 'write'] });
-      expect(agent.toolWhitelist).toEqual(['read', 'write']);
-    });
-
-    it('maxIterations getter', () => {
-      const { agent } = createFixture({ maxIterations: 10 });
-      expect(agent.maxIterations).toBe(10);
-    });
-
-    it('contextLimit getter', () => {
-      const { agent } = createFixture({ contextLimit: 10000 });
-      expect(agent.contextLimit).toBe(10000);
-    });
-
-    it('role getter', () => {
-      const { agent } = createFixture({ role: 'custom role' });
-      expect(agent.role).toBe('custom role');
-    });
-
-    it('profileBody getter', () => {
-      const { agent } = createFixture({ profileBody: 'custom body' });
-      expect(agent.profileBody).toBe('custom body');
-    });
-
-    it('stream getter', () => {
-      const { agent } = createFixture({ stream: true });
-      expect(agent.stream).toBe(true);
-    });
-
-    it('systemPrompt getter', () => {
-      const { agent } = createFixture({});
-      // systemPrompt may be null before ensureSystemPrompt is called
-      expect(agent.systemPrompt === null || typeof agent.systemPrompt === 'string').toBe(true);
-    });
-
-    it('hooks getter', () => {
-      const hooks = createHooks();
-      const { agent } = createFixture({ hooks });
-      expect(agent.hooks).toBe(hooks);
-    });
-
-    it('reasoningEffort getter and setter', () => {
-      const { agent } = createFixture({});
-      expect(agent.reasoningEffort).toBeUndefined();
+      // String/undefined setters
       agent.reasoningEffort = 'high';
       expect(agent.reasoningEffort).toBe('high');
       agent.reasoningEffort = undefined;
       expect(agent.reasoningEffort).toBeUndefined();
-    });
 
-    it('abortSignal getter and setter', () => {
-      const { agent } = createFixture({});
-      expect(agent.abortSignal).toBeNull();
+      // AbortSignal
       const signal = new AbortController().signal;
       agent.abortSignal = signal;
       expect(agent.abortSignal).toBe(signal);
       agent.abortSignal = null;
       expect(agent.abortSignal).toBeNull();
-    });
 
-    it('modelRegistry getter', () => {
-      const { agent } = createFixture({});
-      expect(typeof agent.modelRegistry).toBe('object');
-    });
-
-    it('followQueue getter and setter', () => {
-      const { agent } = createFixture({});
-      expect(Array.isArray(agent.followQueue)).toBe(true);
-      agent.followQueue = ['follow1', 'follow2'];
-      expect(agent.followQueue).toEqual(['follow1', 'follow2']);
-    });
-
-    it('runAbortController getter and setter', () => {
-      const { agent } = createFixture({});
-      expect(agent.runAbortController).toBeNull();
+      // AbortController
       const controller = new AbortController();
       agent.runAbortController = controller;
       expect(agent.runAbortController).toBe(controller);
       agent.runAbortController = null;
       expect(agent.runAbortController).toBeNull();
-    });
 
-    it('llmClient getter', () => {
-      const mockLLM = new MockLLMClient({ responseSequences: [] });
-      const { agent } = createFixture({ mockLLM });
-      expect(agent.llmClient).toBe(mockLLM as unknown as LlmClient);
-    });
+      // followQueue
+      agent.followQueue = ['follow1', 'follow2'];
+      expect(agent.followQueue).toEqual(['follow1', 'follow2']);
 
-    it('sink getter and setter', () => {
-      const { agent } = createFixture({});
+      // sink
       const newSink = { emit: () => {} };
       agent.sink = newSink as any;
       expect(agent.sink).toBe(newSink);

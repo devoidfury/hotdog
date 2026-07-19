@@ -179,4 +179,68 @@ describe("effect (multi-dependency)", () => {
 
     expect(calls).toEqual(["run"]); // runs once initially
   });
+
+  it("runs effect for each dependency change independently", () => {
+    const a = reactiveState(0);
+    const b = reactiveState(0);
+    const calls: number[] = [];
+
+    effect(() => {
+      calls.push(a() + b());
+    }, [a, b]);
+
+    a(1); // calls: [0, 1]
+    a(2); // calls: [0, 1, 2]
+    b(10); // calls: [0, 1, 2, 12]
+    expect(calls).toEqual([0, 1, 2, 12]);
+  });
+
+  it("throws when an effect throws", () => {
+    const a = reactiveState(0);
+
+    a.effect(() => { throw new Error("boom"); });
+
+    expect(() => a(1)).toThrow("boom");
+  });
+
+  it("stops at first throwing effect (subsequent effects not run)", () => {
+    const a = reactiveState(0);
+    const calls: string[] = [];
+
+    a.effect(() => { throw new Error("boom"); });
+    a.effect(() => { calls.push("should not run"); });
+
+    expect(() => a(1)).toThrow("boom");
+    expect(calls).toEqual([]); // second effect never runs
+  });
+
+  it("handles same object reference set twice", () => {
+    const obj = { x: 1 };
+    const atom = reactiveState(obj);
+    const calls: number[] = [];
+
+    atom.effect(() => { calls.push(atom().x); });
+
+    atom(obj); // same reference — still triggers (objects always trigger)
+    expect(calls.length).toBe(1); // triggered once for same reference
+  });
+
+  it("handles three or more dependencies", () => {
+    const a = reactiveState(1);
+    const b = reactiveState(2);
+    const c = reactiveState(3);
+    const calls: number[] = [];
+
+    effect(() => {
+      calls.push(a() + b() + c());
+    }, [a, b, c]);
+
+    expect(calls).toEqual([6]); // initial
+    a(10);
+    expect(calls).toEqual([6, 15]);
+    b(20);
+    expect(calls).toEqual([6, 15, 33]);
+    c(30);
+    expect(calls).toEqual([6, 15, 33, 60]);
+  });
 });

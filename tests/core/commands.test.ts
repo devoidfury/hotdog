@@ -23,7 +23,7 @@ describe('parseCommand', () => {
     expect(parseCommand('regenerate')).toEqual({ type: Command.Regenerate, value: null });
   });
 
-  it('parses reasoning command', () => {
+  it('parses reasoning command with levels', () => {
     expect(parseCommand('reasoning')).toEqual({ type: Command.Reasoning, value: null });
     expect(parseCommand('reasoning high')).toEqual({ type: Command.Reasoning, value: 'high' });
     expect(parseCommand('reasoning none')).toEqual({ type: Command.Reasoning, value: 'none' });
@@ -34,14 +34,10 @@ describe('parseCommand', () => {
     expect(parseCommand('reasoning unset')).toEqual({ type: Command.Reasoning, value: 'unset' });
   });
 
-  it('parses extension-handled commands as unknown', () => {
-    // These are handled by extensions, not core
+  it('parses extension-handled commands and unknowns', () => {
     expect(parseCommand('models')).toEqual({ type: Command.Unknown, value: 'models' });
     expect(parseCommand('model qwen3.5')).toEqual({ type: Command.Unknown, value: 'model qwen3.5' });
     expect(parseCommand('compact')).toEqual({ type: Command.Unknown, value: 'compact' });
-  });
-
-  it('parses unknown commands and empty string', () => {
     expect(parseCommand('foobar')).toEqual({ type: Command.Unknown, value: 'foobar' });
     expect(parseCommand('')).toEqual({ type: Command.Unknown, value: null });
   });
@@ -56,10 +52,12 @@ describe('parseCommand with registry', () => {
     const result1 = parseCommand('skill:rust-guidelines', registry);
     expect(result1.type).toBe('skill');
     expect(result1._customCommand).toBe('skill');
+    expect(result1.value).toBe('skill:rust-guidelines');
 
     const result2 = parseCommand('compact 10', registry);
     expect(result2.type).toBe('compact');
     expect(result2._customCommand).toBe('compact');
+    expect(result2.value).toBe('compact 10');
   });
 
   it('passes full command value to custom commands', () => {

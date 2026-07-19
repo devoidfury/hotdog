@@ -1,4 +1,4 @@
-// Tests for config/index.js functions not covered by config.test.js and config-resolution.test.js.
+// Tests for config/index.ts and config/defaults.ts.
 
 import { describe, it, expect } from "bun:test";
 import path from "node:path";
@@ -10,6 +10,14 @@ import {
   validateConfig,
   failOnInvalidConfig,
 } from "../../src/core/config/index.ts";
+import {
+  DEFAULT_PROFILES_SUBPATH,
+  DEFAULT_CONFIG_FILENAME,
+  DEFAULT_SYSTEM_PROMPT_FILENAME,
+  DEFAULT_PROFILES_PATH,
+  DEFAULT_PROMPTS_PATH,
+  DEFAULT_SYSTEM_PROMPT_TEMPLATE,
+} from "../../src/core/config/defaults.ts";
 
 describe("resolveConfigDir", () => {
   it("returns CLI config-dir when provided", () => {
@@ -208,5 +216,30 @@ describe("loadConfig", () => {
     } finally {
       try { unlinkSync(tmpFile); } catch {}
     }
+  });
+});
+
+// ── Config Defaults ──────────────────────────────────────────────────────────
+
+describe("config defaults — path constants", () => {
+  it("has correct default subpaths", () => {
+    expect(DEFAULT_PROFILES_SUBPATH).toBe("profiles");
+    expect(DEFAULT_CONFIG_FILENAME).toBe("defaults.json");
+    expect(DEFAULT_SYSTEM_PROMPT_FILENAME).toBe("system_prompt.md");
+  });
+
+  it("has correct default full paths", () => {
+    expect(DEFAULT_PROFILES_PATH).toBe("./config/profiles");
+    expect(DEFAULT_PROMPTS_PATH).toBe("./config/prompts");
+  });
+});
+
+describe("DEFAULT_SYSTEM_PROMPT_TEMPLATE", () => {
+  it("contains expected placeholders and loop syntax", () => {
+    expect(DEFAULT_SYSTEM_PROMPT_TEMPLATE).toContain("{{ role }}");
+    expect(DEFAULT_SYSTEM_PROMPT_TEMPLATE).toContain("{{ body }}");
+    expect(DEFAULT_SYSTEM_PROMPT_TEMPLATE).toContain("{% for chunk in chunks %}");
+    expect(DEFAULT_SYSTEM_PROMPT_TEMPLATE).toContain("{% endfor %}");
+    expect(DEFAULT_SYSTEM_PROMPT_TEMPLATE).toContain("{{ chunk.content }}");
   });
 });

@@ -1,42 +1,36 @@
-import { describe, it, expect, beforeEach, afterEach } from "bun:test";
+import { describe, it, expect } from "bun:test";
 import { HOOKS } from "../../src/core/hooks.ts";
 import { createMockCore } from "../helpers.ts";
 import type { CoreContext } from "../../src/core/extensions/types.ts";
 
 describe("One-Shot Extension - CLI_ARGS_PARSED hook", () => {
-  const truthyCases = [
-    { value: "test prompt", expected: "prompt" },
-    { value: "  hello  ", expected: "prompt" },
-  ];
-  const falsyCases = [
-    { value: null, expected: undefined },
-    { value: "", expected: undefined },
-    { value: 0, expected: undefined },
-  ];
+  it("sets subcommand when --prompt is truthy", async () => {
+    const { create } = await import("../../src/extensions/ui-one-shot/index.ts");
+    const ext = create(createMockCore() as unknown as CoreContext);
 
-  for (const { value, expected } of truthyCases) {
-    it(`sets subcommand when --prompt is truthy (${JSON.stringify(value)})`, async () => {
-      const { create } = await import("../../src/extensions/ui-one-shot/index.ts");
-      const ext = create(createMockCore() as unknown as CoreContext);
+    const cli1: Record<string, unknown> = { prompt: "test prompt" };
+    (ext.hooks![HOOKS.CLI_ARGS_PARSED] as Function)({ cli: cli1 });
+    expect(cli1.subcommand).toBe("prompt");
+
+    const cli2: Record<string, unknown> = { prompt: "  hello  " };
+    (ext.hooks![HOOKS.CLI_ARGS_PARSED] as Function)({ cli: cli2 });
+    expect(cli2.subcommand).toBe("prompt");
+  });
+
+  it("does not set subcommand when --prompt is falsy", async () => {
+    const { create } = await import("../../src/extensions/ui-one-shot/index.ts");
+    const ext = create(createMockCore() as unknown as CoreContext);
+
+    for (const value of [null, "", 0]) {
       const cli: Record<string, unknown> = { prompt: value };
       (ext.hooks![HOOKS.CLI_ARGS_PARSED] as Function)({ cli });
-      expect(cli.subcommand).toBe(expected);
-    });
-  }
-
-  for (const { value, expected } of falsyCases) {
-    it(`does not set subcommand when --prompt is falsy (${JSON.stringify(value)})`, async () => {
-      const { create } = await import("../../src/extensions/ui-one-shot/index.ts");
-      const ext = create(createMockCore() as unknown as CoreContext);
-      const cli: Record<string, unknown> = { prompt: value };
-      (ext.hooks![HOOKS.CLI_ARGS_PARSED] as Function)({ cli });
-      expect(cli.subcommand).toBe(expected);
-    });
-  }
+      expect(cli.subcommand).toBeUndefined();
+    }
+  });
 });
 
 describe("One-Shot Extension - prompt subcommand registration", () => {
-  it("registers prompt subcommand via CLI_SUBCOMMANDS_REGISTER hook", async () => {
+  it("registers prompt subcommand with correct description", async () => {
     const core = createMockCore() as unknown as CoreContext;
     const { create } = await import("../../src/extensions/ui-one-shot/index.ts");
     const ext = create(core);
@@ -48,18 +42,7 @@ describe("One-Shot Extension - prompt subcommand registration", () => {
 
     expect(core.cliSubcommandRegistry.has("prompt")).toBe(true);
     const def = core.cliSubcommandRegistry.get("prompt")!;
-    expect(def.handler).toBeDefined();
     expect(typeof def.handler).toBe("function");
-  });
-
-  it("prompt subcommand has correct description", async () => {
-    const core = createMockCore() as unknown as CoreContext;
-    const { create } = await import("../../src/extensions/ui-one-shot/index.ts");
-    const ext = create(core);
-
-    await (ext.hooks![HOOKS.CLI_SUBCOMMANDS_REGISTER] as Function)(core.cliSubcommandRegistry);
-
-    const def = core.cliSubcommandRegistry.get("prompt")!;
     expect(def.description).toContain("One-shot");
     expect(def.description).toContain("single prompt");
   });
@@ -67,9 +50,8 @@ describe("One-Shot Extension - prompt subcommand registration", () => {
 
 describe("One-Shot Extension - create function", () => {
   it("returns object with hooks when core.hooks exists", async () => {
-    const core = createMockCore() as unknown as CoreContext;
     const { create } = await import("../../src/extensions/ui-one-shot/index.ts");
-    const ext = create(core);
+    const ext = create(createMockCore() as unknown as CoreContext);
 
     expect(ext.hooks).toBeDefined();
     expect(ext.hooks![HOOKS.CLI_ARGS_PARSED]).toBeDefined();
@@ -79,7 +61,6 @@ describe("One-Shot Extension - create function", () => {
   it("returns object with undefined hooks when core.hooks is null", async () => {
     const { create } = await import("../../src/extensions/ui-one-shot/index.ts");
     const ext = create({ hooks: null! } as unknown as CoreContext);
-
     expect(ext.hooks).toBeUndefined();
   });
 });

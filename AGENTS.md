@@ -55,4 +55,5 @@ All error catches must use `formatError()` from `src/core/error.ts`:
 | `docs/agents/debugging-hotdog-tools-visibility-flags.md` | Debugging patterns, one-shot mode |
 | `docs/agents/show-prompt-audit-profile.md` | show-prompt subcommand reference |
 | `docs/cli-subcommands.md` | CLI subcommand extension registration |
+| `docs/config-reference.md` | Complete `defaults.json` config reference — all settings, extensions, providers |
 | `docs/hook-lifecycle.md` | Hook system lifecycle and extension registration patterns |

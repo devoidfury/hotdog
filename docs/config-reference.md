@@ -465,9 +465,9 @@ The default subcommand to run when no subcommand is specified.
 - **Type:** `boolean`
 - **CLI flag:** `--config-debug`
 - **Default:** `false`
-- **Resolution:** CLI > config > default
+- **Resolution:** CLI only (no config file layer)
 
-Show config resolution details (sources and layers). Extension-provided flag from `ui-info-cli`.
+Show config resolution details (sources and layers). Extension-provided flag from `ui-info-cli` (used with the `info` subcommand).
 
 ### `coreTools`
 

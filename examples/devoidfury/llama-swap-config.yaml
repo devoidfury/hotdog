@@ -1,0 +1,831 @@
+macros:
+  llama-server: >
+    llama-server
+    --port ${PORT}
+    --n-gpu-layers all
+    --flash-attn on
+    --no-mmap
+    --fit off
+    --mlock
+    --threads-http 2
+    --threads 4
+    --threads-batch 8
+    --prio 3
+    --kv-unified
+    --no-warmup
+  spec-ngram: >
+    --spec-ngram-mod-n-match 28
+    --spec-ngram-mod-n-min 48
+    --spec-ngram-mod-n-max 64
+  qwen-server: >
+    ${llama-server}
+    --jinja
+    --chat-template-file /storage/templates/qwen-custom.jinja
+
+apiKeys:
+  - REDACTED_PUT-YOUR-KEY-HERE
+
+healthCheckTimeout: 600
+
+models:
+  agent-a1-35b-moe:
+    cmd: |
+      ${llama-server}
+      -m /storage/models/agents-a1-35b-moe/Agents-A1-Q8_0.gguf
+      --mmproj /storage/models/agents-a1-35b-moe/Agents-A1-mmproj.gguf
+      --image-min-tokens 1024
+      -b 1024
+      -ub 512
+      --spec-type ngram-mod
+      ${spec-ngram}
+      -np 1
+      --ctx-size 262144
+      --checkpoint-min-step 2048
+      --ctx-checkpoints 18
+    filters:
+      setParamsByID:
+        "${MODEL_ID}":
+          chat_template_kwargs:
+            enable_thinking: true
+          temperature: 0.85
+          top_p: 0.95
+          top_k: 20
+          min_p: 0.00
+          presence_penalty: 1.1
+          repetition_penalty: 1.0
+    capabilities:
+      in:
+        - text
+      out:
+        - text
+      tools: true
+      context: 262144
+  dsv4:
+    # Minimum context for max reasoning effort is 393216;
+    # happens to just barely fit in memory on a headless server strix halo 128GB UMA.
+    # KV cache will leak here if /tmp is pointed at memory; it's okay if this goes
+    # to swap but make sure to have swap configured enabled, space for it on disk, and an ssd
+    cmd: |
+      /storage/opensrc/ds4/ds4-server
+      --chdir /storage/opensrc/ds4
+      --port ${PORT}
+      --power 100
+      --ctx 393216
+      --kv-disk-dir /tmp/ds4-kv
+      --kv-disk-space-mb 8192
+    checkEndpoint: /v1/models
+    capabilities:
+      in:
+        - text
+      out:
+        - text
+      tools: true
+      context: 393216
+  glm4.7-flash:
+    cmd: |
+      ${llama-server}
+      -m /storage/models/GLM-4.7-Flash-UD-Q8_K_XL.gguf
+      -b 4096
+      -ub 1024
+      --spec-type ngram-mod
+      ${spec-ngram}
+      -np 1
+      --ctx-size 131072
+      --repeat-penalty 1.0
+      --temp 0.7
+      --top-p 1.0
+      --min-p 0.01
+      --jinja
+      --no-mmproj
+    capabilities:
+      in:
+        - text
+      out:
+        - text
+      tools: true
+      context: 131072
+  gemma-4-12b:
+    cmd: |
+      ${llama-server}
+      -m /storage/models/gemma-4-12b-qat/gemma-4-12B-it-qat-UD-Q4_K_XL.gguf
+      --mmproj /storage/models/gemma-4-12b-qat/mmproj-F16.gguf
+      --spec-draft-model /storage/models/gemma-4-12b-qat/mtp-gemma-4-12B-it.gguf
+      --spec-type draft-mtp,ngram-mod
+      --spec-draft-n-max 4
+      ${spec-ngram}
+      -np 1
+      --ctx-size 262144
+      --jinja
+      --ctx-checkpoints 40
+      --checkpoint-min-step 2048
+    capabilities:
+      in:
+        - text
+        - image
+      out:
+        - text
+      tools: true
+      context: 262144
+    filters:
+      setParamsByID:
+        "${MODEL_ID}":
+          temperature: 1.0
+          top_p: 0.95
+          top_k: 64
+          chat_template_kwargs:
+            enable_thinking: true
+  gemma-4-31b:
+    cmd: |
+      ${llama-server}
+      -m /storage/models/gemma-4-31b/gemma-4-31B-it-UD-Q8_K_XL.gguf
+      --model-draft /storage/models/gemma-4-31b/gemma-4-31B-it-Q8_0-MTP.gguf
+      --spec-type draft-mtp,ngram-mod
+      --spec-draft-n-max 2
+      ${spec-ngram}
+      -np 1
+      --ctx-size 262144
+      --jinja
+      --chat-template-file /storage/models/gemma-4-31b/chat_template.jinja
+      --mmproj /storage/models/gemma-4-31b/mmproj-F16.gguf
+    capabilities:
+      in:
+        - text
+      out:
+        - text
+      tools: true
+      context: 262144
+    filters:
+      setParamsByID:
+        "${MODEL_ID}":
+          temperature: 1.0
+          top_p: 0.95
+          top_k: 64
+          chat_template_kwargs:
+            enable_thinking: true
+  gemma-4-e2b:
+    cmd: |
+      ${llama-server}
+      -m /storage/models/gemma-4-E2B-it-UD-Q4_K_XL.gguf
+      --temp 1.0
+      --top-p 0.95
+      --top-k 64
+      --spec-type ngram-mod
+      ${spec-ngram}
+      -np 1
+      --ctx-size 131072
+      --jinja
+      --no-mmproj
+    capabilities:
+      in:
+        - text
+        - image
+        - audio
+      out:
+        - text
+      tools: true
+      context: 131072
+  granite-4.1-30b:
+    cmd: |
+      ${llama-server}
+      -m /storage/models/ibm-granite-4.1/granite-4.1-30b-UD-Q8_K_XL.gguf
+      --ctx-size 131072
+      -np 1
+    capabilities:
+      in:
+        - text
+      out:
+        - text
+      tools: true
+      context: 131072
+    filters:
+      setParamsByID:
+        "${MODEL_ID}":
+          temperature: 0.02
+          top_p: 1.0
+          top_k: 0
+  llama-3.1-70b:
+    cmd: |
+      ${llama-server}
+      -m /storage/models/llama-3.1-70b/Meta-Llama-3.1-70B-Instruct-Q6_K-00001-of-00002.gguf
+      --ctx-size 131072
+      -np 1
+    capabilities:
+      in:
+        - text
+      out:
+        - text
+      tools: true
+      context: 131072
+  lfm2.5-8b-a1b:
+    cmd: |
+      ${llama-server}
+      -m /storage/models/lfm2.5/LFM2.5-8B-A1B-F16.gguf
+      -b 2048
+      -ub 1024
+      --ctx-size 131072
+      -np 1
+      -ndio
+      --warmup
+    capabilities:
+      in:
+        - text
+      out:
+        - text
+      tools: true
+      context: 131072
+    filters:
+      setParamsByID:
+        "${MODEL_ID}":
+          temperature: 0.2
+          top_k: 80
+          repetition_penalty: 1.05
+  minimax-m2.7:
+    cmd: |
+      ${llama-server}
+      -m /storage/models/minimax-m2.7/MiniMax-M2.7-UD-IQ2_XXS-00001-of-00003.gguf
+      --cache-ram 0
+      --no-context-shift
+      -b 512
+      -ub 512
+      --threads 4
+      --threads-batch 6
+      --spec-type ngram-mod
+      ${spec-ngram}
+      -np 1
+      --no-mmproj
+      --ctx-size 100000
+    capabilities:
+      in:
+        - text
+      out:
+        - text
+      tools: true
+      context: 100000
+    filters:
+      setParamsByID:
+        "${MODEL_ID}":
+          temperature: 1
+          top_p: 0.95
+          top_k: 40
+          min_p: 0.01
+  mistral-medium-3.5:
+    cmd: |
+      ${llama-server}
+      -m /storage/models/mistral-medium-3.5/Mistral-Medium-3.5-128B-UD-Q4_K_XL-00001-of-00003.gguf
+      -b 1024
+      -ub 1024
+      --threads 4
+      --threads-batch 6
+      -np 1
+      --spec-type ngram-mod
+      ${spec-ngram}
+      --cache-type-k q8_0
+      --cache-type-v q8_0
+      --ctx-size 100000
+    # --ctx-size 262144
+    capabilities:
+      in:
+        - text
+      out:
+        - text
+      tools: true
+      context: 140000
+    filters:
+      setParamsByID:
+        "${MODEL_ID}":
+          temperature: 0.7
+          repetition_penalty: 1.00
+          chat_template_kwargs:
+            reasoning_effort: "high"
+        "${MODEL_ID}:chat":
+          temperature: 0.7
+          repetition_penalty: 1.00
+          chat_template_kwargs:
+            reasoning_effort: "none"
+  nemotron-3-nano-30b-a3b:
+    cmd: |
+      ${llama-server}
+      -m /storage/models/nemotron-3-nano-30b-a3b/Nemotron-3-Nano-30B-A3B-UD-Q8_K_XL.gguf
+      -b 2048
+      -ub 1024
+      -np 1
+      --spec-type ngram-mod
+      ${spec-ngram}
+      --jinja
+    # --ctx-size 1048576
+    capabilities:
+      in:
+        - text
+      out:
+        - text
+      tools: true
+      context: 1048576
+    filters:
+      setParamsByID:
+        "${MODEL_ID}":
+          temperature: 0.6
+          top_p: 0.95
+          chat_template_kwargs:
+            enable_thinking: true
+            truncate_history_thinking: false
+  north-mini-code-1.0-30b:
+    cmd: |
+      ${llama-server}
+      -m /storage/models/north-mini-code-1.0/North-Mini-Code-1.0-UD-Q8_K_XL.gguf
+      --jinja
+      -b 1024
+      -ub 1024
+      -np 1
+      --spec-type ngram-mod
+      ${spec-ngram}
+      --ctx-size 262144
+      --checkpoint-min-step 512
+      --ctx-checkpoints 20
+    capabilities:
+      in:
+        - text
+      out:
+        - text
+      tools: true
+      context: 262144
+    filters:
+      setParamsByID:
+        "${MODEL_ID}":
+          temperature: 1.0
+          top_p: 0.95
+          chat_template_kwargs:
+            enable_thinking: true
+  ornith-1.0-35b:
+    cmd: |
+      ${llama-server}
+      -m /storage/models/ornith-1.0-35b/ornith-1.0-35b-Q8_0.gguf
+      --n-gpu-layers 99
+      -fa on
+      -b 1024
+      -ub 1024
+      --spec-type ngram-mod
+      ${spec-ngram}
+      -np 1
+      --checkpoint-min-step 512
+      --ctx-checkpoints 20
+      --jinja
+    filters:
+      setParamsByID:
+        "${MODEL_ID}":
+          temperature: 0.6
+          top_p: 0.95
+          top_k: 20
+          chat_template_kwargs:
+            enable_thinking: true
+  ornith-1.0-9b:
+    cmd: |
+      ${llama-server}
+      -m /storage/models/ornith-1.0-9b/ornith-1.0-9b-Q8_0.gguf
+      --n-gpu-layers 99
+      -fa on
+      -b 1024
+      -ub 1024
+      --spec-type ngram-mod
+      ${spec-ngram}
+      -np 1
+      --checkpoint-min-step 512
+      --ctx-checkpoints 20
+      --jinja
+    filters:
+      setParamsByID:
+        "${MODEL_ID}":
+          temperature: 0.6
+          top_p: 0.95
+          top_k: 20
+          chat_template_kwargs:
+            enable_thinking: true
+  qwen3.6-35b:
+    cmd: |
+      ${qwen-server}
+      -m /storage/models/qwen3.6-35b/Qwen3.6-35B-A3B-UD-Q8_K_XL.gguf
+      -b 1024
+      -ub 512
+      --spec-type draft-mtp,ngram-mod
+      --spec-draft-n-max 4
+      --spec-draft-p-min 0.8
+      ${spec-ngram}
+      -np 1
+      --ctx-size 131072
+      --checkpoint-min-step 512
+      --ctx-checkpoints 20
+    capabilities:
+      in:
+        - text
+        # - image
+      out:
+        - text
+      tools: true
+      context: 131072
+    filters:
+      setParamsByID:
+        "${MODEL_ID}":
+          temperature: 0.6
+          top_p: 0.95
+          top_k: 20
+          min_p: 0.05
+          presence_penalty: 0.0
+          repeat_penalty: 1.0
+          chat_template_kwargs:
+            enable_thinking: true
+            preserve_thinking: true
+        "${MODEL_ID}:general":
+          temperature: 1.0
+          top_p: 0.95
+          top_k: 20
+          min_p: 0.0
+          presence_penalty: 1.5
+          repeat_penalty: 1.0
+          chat_template_kwargs:
+            enable_thinking: true
+            preserve_thinking: true
+        "${MODEL_ID}:instruct":
+          temperature: 0.7
+          top_p: 0.8
+          top_k: 20
+          min_p: 0.05
+          presence_penalty: 1.5
+          repeat_penalty: 1.0
+          chat_template_kwargs:
+            enable_thinking: false
+  qwen3.6-27b:
+    cmd: |
+      ${qwen-server}
+      ${spec-ngram}
+      -b 1024
+      -ub 512
+      -np 1
+      --ctx-size 180000
+      --checkpoint-min-step 512
+      --ctx-checkpoints 20
+      --no-mmproj
+      -m /storage/models/qwen3.6-27b/Qwen3.6-27B-MT-UD-Q8_K_XL.gguf
+      --spec-type draft-mtp,ngram-mod
+      --spec-draft-n-max 2
+      --spec-draft-p-min 0.75
+    capabilities:
+      in:
+        - text
+        # - image
+      out:
+        - text
+      tools: true
+      context: 160000
+    filters:
+      setParamsByID:
+        "${MODEL_ID}":
+          temperature: 0.61
+          top_p: 0.95
+          top_k: 20
+          min_p: 0.05
+          presence_penalty: 0.0
+          chat_template_kwargs:
+            enable_thinking: true
+            preserve_thinking: true
+        "${MODEL_ID}:general":
+          temperature: 1.0
+          top_p: 0.95
+          top_k: 20
+          min_p: 0.0
+          presence_penalty: 1.5
+          chat_template_kwargs:
+            enable_thinking: true
+            preserve_thinking: true
+        "${MODEL_ID}:instruct":
+          temperature: 0.7
+          top_p: 0.8
+          top_k: 20
+          min_p: 0.05
+          presence_penalty: 1.5
+          chat_template_kwargs:
+            enable_thinking: false
+  qwen-coder-next:
+    cmd: |
+      ${llama-server}
+      -m /storage/models/qwen-coder-next/Qwen3-Coder-Next-UD-Q8_K_XL-00001-of-00003.gguf
+      -b 1024
+      -ub 512
+      --spec-type ngram-mod
+      ${spec-ngram}
+      -np 1
+      --ctx-size 262144
+      --checkpoint-min-step 2048
+      --ctx-checkpoints 18
+      --no-mmproj
+    filters:
+      setParamsByID:
+        "${MODEL_ID}":
+          temperature: 1.0
+          top_p: 0.95
+          top_k: 40
+    capabilities:
+      in:
+        - text
+      out:
+        - text
+      tools: true
+      context: 262144
+  qwen3.5-122b-a10b:
+    cmd: |
+      ${qwen-server}
+      -m /storage/models/hf/Qwen3.5-122B-A10B-MTP/Qwen3.5-122B-A10B-UD-Q4_K_XL-00001-of-00003.gguf
+      -b 1024
+      -ub 512
+      --spec-type draft-mtp,ngram-mod
+      --spec-draft-n-max 6
+      ${spec-ngram}
+      -np 1
+      --ctx-size 262144
+      --checkpoint-min-step 2048
+      --ctx-checkpoints 18
+      --no-mmproj
+    capabilities:
+      in:
+        - text
+      out:
+        - text
+      tools: true
+      context: 262144
+    filters:
+      setParamsByID:
+        "${MODEL_ID}":
+          temperature: 0.6
+          top_p: 0.95
+          top_k: 20
+          min_p: 0.0
+          presence_penalty: 0.0
+          repeat_penalty: 1.0
+          chat_template_kwargs:
+            enable_thinking: true
+            preserve_thinking: true
+        "${MODEL_ID}:general":
+          temperature: 1.0
+          top_p: 0.95
+          top_k: 20
+          min_p: 0.0
+          presence_penalty: 1.5
+          repeat_penalty: 1.0
+          chat_template_kwargs:
+            enable_thinking: true
+            preserve_thinking: true
+  qwen3.5-9b-dsv4f-d:
+    cmd: |
+      ${qwen-server}
+      -m /storage/models/Qwen3.5-9B-DeepSeek-V4-Flash-Q5_K_M.gguf
+      -b 1024
+      -ub 1024
+      --spec-type ngram-mod
+      ${spec-ngram}
+      -np 1
+      --ctx-size 262144
+      --checkpoint-min-step 2048
+      --ctx-checkpoints 18
+      --no-mmproj
+    capabilities:
+      in:
+        - text
+      out:
+        - text
+      tools: true
+      context: 262144
+    filters:
+      setParamsByID:
+        "${MODEL_ID}":
+          temperature: 0.7
+          top_p: 0.95
+          chat_template_kwargs:
+            enable_thinking: true
+            preserve_thinking: true
+        "${MODEL_ID}:general":
+          temperature: 1.0
+          top_p: 0.95
+          chat_template_kwargs:
+            enable_thinking: true
+            preserve_thinking: true
+  qwen3.5-9b-npu:
+    env:
+      - FLM_MODEL_PATH=/storage/models/flm
+    cmd: |
+      flm serve
+      qwen3.5:9b
+      --port ${PORT}
+      --cors 0
+    checkEndpoint: none
+    useModelName: qwen3.5:9b
+    setParamsByID:
+      "${MODEL_ID}":
+        temperature: 0.6
+        top_p: 0.95
+        top_k: 20
+        min_p: 0.0
+        presence_penalty: 0.0
+        repeat_penalty: 1.0
+        chat_template_kwargs:
+          enable_thinking: false
+    capabilities:
+      in:
+        - text
+        - image
+      out:
+        - text
+      tools: true
+      context: 262144
+  qwen3.5-4b:
+    cmd: |
+      ${qwen-server}
+      -m /storage/models/qwen3.5-4b/Qwen3.5-4B-Q8_0.gguf
+      -b 1024
+      -ub 1024
+      --spec-type ngram-mod
+      ${spec-ngram}
+      -np 1
+      --ctx-size 262144
+      --checkpoint-min-step 2048
+      --ctx-checkpoints 32
+      --mmproj /storage/models/qwen3.5-4b/mmproj-F16.gguf
+    filters:
+      setParamsByID:
+        "${MODEL_ID}":
+          temperature: 0.7
+          top_p: 0.8
+          top_k: 20
+          min_p: 0.0
+          presence_penalty: 1.5
+          repeat_penalty: 1.0
+          chat_template_kwargs:
+            enable_thinking: false
+        "${MODEL_ID}:coder":
+          temperature: 0.6
+          top_p: 0.95
+          top_k: 20
+          min_p: 0.0
+          presence_penalty: 0.0
+          repeat_penalty: 1.0
+          chat_template_kwargs:
+            enable_thinking: true
+    capabilities:
+      in:
+        - text
+      out:
+        - text
+      tools: true
+      context: 262144
+  qwen3.5-0.8b:
+    cmd: |
+      ${qwen-server}
+      -m /storage/models/qwen3.5-0.8b/Qwen3.5-0.8B-BF16.gguf
+      -b 1024
+      -ub 1024
+      -np 1
+      --ctx-size 262144
+      --no-mmproj
+    filters:
+      temperature: 0.6
+      top_p: 0.95
+      top_k: 20
+      min_p: 0.0
+      presence_penalty: 0.0
+      repeat_penalty: 1.0
+      chat_template_kwargs:
+        enable_thinking: true
+        preserve_thinking: true
+    capabilities:
+      in:
+        - text
+      out:
+        - text
+      tools: true
+      context: 262144
+  smollm3-3b:
+    cmd: |
+      ${llama-server}
+      -m /storage/models/smollm3-3b-q4_k_m.gguf
+      --temp 0.6
+      --top-p 0.95
+      --jinja
+      -np 1
+    capabilities:
+      in:
+        - text
+      out:
+        - text
+      tools: true
+      context: 65536
+  step-3.7-flash:
+    cmd: |
+      ${llama-server}
+      -m /storage/models/step-3.7-flash/Step-3.7-Flash-APEX-I-Compact.gguf
+      -b 1024
+      -ub 512
+      -np 1
+      --spec-type ngram-mod
+      ${spec-ngram}
+      --ctx-size 120000
+      --checkpoint-min-step 756
+      --ctx-checkpoints 10
+      --cache-ram 6144
+      --jinja
+      --chat-template-file /storage/models/step-3.7-flash/3.7-mt-chat_template.jinja
+      --no-mmproj
+    # --mmproj /storage/models/step-3.7-flash/mmproj-F16.gguf
+    # --ctx-size 262144
+    capabilities:
+      in:
+        - text
+        - image
+      out:
+        - text
+      tools: true
+      context: 120000
+    filters:
+      setParamsByID:
+        "${MODEL_ID}":
+          temperature: 1
+          min_p: 0.01
+  thinkingcap-27b:
+    cmd: |
+      ${qwen-server}
+      ${spec-ngram}
+      -b 1024
+      -ub 512
+      -np 1
+      --ctx-size 180000
+      --checkpoint-min-step 512
+      --ctx-checkpoints 20
+      -m /storage/models/thinking-cap-27b/ThinkingCap-Qwen3.6-27B-Q8_0-MTP.gguf
+      --mmproj /storage/models/thinking-cap-27b/mmproj-ThinkingCap-Qwen3.6-27B-f16.gguf
+      --spec-type draft-mtp,ngram-mod
+      --spec-draft-n-max 2
+      --spec-draft-p-min 0.75
+    capabilities:
+      in:
+        - text
+        - image
+      out:
+        - text
+      tools: true
+      context: 160000
+    filters:
+      setParamsByID:
+        "${MODEL_ID}":
+          temperature: 0.61
+          top_p: 0.95
+          top_k: 20
+          min_p: 0.05
+          presence_penalty: 0.0
+          chat_template_kwargs:
+            enable_thinking: true
+            preserve_thinking: true
+        "${MODEL_ID}:general":
+          temperature: 1.0
+          top_p: 0.95
+          top_k: 20
+          min_p: 0.0
+          presence_penalty: 1.5
+          chat_template_kwargs:
+            enable_thinking: true
+            preserve_thinking: true
+        "${MODEL_ID}:instruct":
+          temperature: 0.7
+          top_p: 0.8
+          top_k: 20
+          min_p: 0.05
+          presence_penalty: 1.5
+          chat_template_kwargs:
+            enable_thinking: false
+
+# Subset semantics: a set [a, b, c] means any subset is valid.
+# Only the requested model is started — others are not preloaded.
+#
+# A model not appearing in any set can only run alone.
+matrix:
+  # vars: short names for models (alphanumeric, 1-8 chars)
+  # - required for sets and evict_costs settings.
+  # - each entry is a short name to a real model ID. Do not use an alias.
+  # - sets and evict_costs only use identifiers defined in vars
+  vars:
+    c: qwen3.6-27b
+    d: qwen3.6-35b
+    e: qwen3.5-0.8b
+    f: qwen3.5-9b-dsv4f-d
+    g: qwen3.5-4b
+    k: glm4.7-flash
+    l: lfm2.5-8b-a1b
+    m: mistral-medium-3.5
+    s: smollm3-3b
+    t: gemma-4-31b
+    u: gemma-4-e2b
+    v: step-3.7-flash
+    w: nemotron-3-nano-30b-a3b
+
+  sets:
+    tiny: s | e | g | u | l
+    fast: f | (+tiny)
+    medium: c | d | t | k | w
+    large: (+medium)
+    huge: v | m
+    standard: "(+large) & (+medium) & (+fast)"

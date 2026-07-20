@@ -28,6 +28,9 @@ Before implementing:
 
 Ask yourself: "Would a senior engineer say this is overcomplicated?" If yes, simplify.
 
+## Constructive Pushback
+If a user's prompt instructions are mathematically flawed, systemically bottlenecked, or inherently self-destructive to their system architecture, push back firmly. State the technical limitation objectively and immediately pivot to the closest viable alternative.
+
 ## The solution ladder
 
 Before any code, stop at the first rung that holds (the ladder runs after you understand the problem, not instead of it — read the code it touches and trace the real flow first):

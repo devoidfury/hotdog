@@ -64,6 +64,9 @@ export class WebSocketChannel extends Channel {
 
     // Attach to the given session
     this.attach(options.sessionId);
+
+    // Drain and replay any questions that were emitted while no channels were connected
+    this.#replayPendingQuestions();
   }
 
   // ── Abstract Protocol Methods ───────────────────────────────────────────
@@ -184,6 +187,20 @@ export class WebSocketChannel extends Channel {
    */
   protected _cleanup(): void {
     this.#ready = false;
+  }
+
+  /**
+   * Drain and replay any QUESTION events that were buffered while
+   * no channels were connected to this session.
+   */
+  #replayPendingQuestions(): void {
+    const pending = this.sessionManager.drainPendingQuestions(this.#sessionId);
+    for (const questions of pending) {
+      this.write({
+        type: OUTPUT_EVENT.QUESTION,
+        questions,
+      });
+    }
   }
 
   // ── Public API ────────────────────────────────────────────────────────────

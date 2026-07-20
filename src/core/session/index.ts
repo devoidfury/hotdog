@@ -5,7 +5,9 @@ import crypto from "node:crypto";
 import { HOOKS } from "../hooks.ts";
 import { MessageBus } from "./message-bus.ts";
 import { TaskManager } from "./task-manager.ts";
-import { OutputEvent } from "../context/output.ts";
+import { OUTPUT_EVENT, OutputEvent } from "../context/output.ts";
+import { formatError } from "../error.ts";
+import { logger } from "../logger.ts";
 import type { CommandRegistryLike } from "../commands.ts";
 
 export interface AgentLike {
@@ -161,6 +163,9 @@ export class SessionManager {
   #taskManager: TaskManager | null;
   /** LLM client — owned by SessionManager, passed through buildAgent config. */
   #llmClient: unknown;
+  /** Per-session QUESTION event buffer — holds questions emitted while no channels
+   *  are connected, so they can be replayed when a channel reconnects. */
+  #questionBuffers: Map<string, unknown[][]>;
 
   /**
    * Create a new SessionManager with an initial agent.
@@ -198,6 +203,7 @@ export class SessionManager {
     this.#eventHandlers = new Map();
     this.#taskManager = null;
     this.#llmClient = options.llmClient || null;
+    this.#questionBuffers = new Map();
 
     // Wrap buildAgent to inject llmClient and modelRegistry into config
     const rawBuildAgent = options.buildAgent;
@@ -296,7 +302,8 @@ export class SessionManager {
    */
   registerAgent(agent: AgentLike, config?: Record<string, unknown>): string {
     const sessionId = this.#store.addAgent(agent);
-    this.#currentSessionId = sessionId;
+    // Don't override #currentSessionId — the caller may have an active session
+    // (e.g., CLI session) that shouldn't be displaced by a websocket session.
     this.#createSessionEntry(sessionId, agent, config || {});
     return sessionId;
   }
@@ -316,6 +323,9 @@ export class SessionManager {
 
     // Remove event handlers
     this.#eventHandlers.delete(sessionId);
+
+    // Remove question buffer
+    this.#questionBuffers.delete(sessionId);
 
     // Remove from store
     return this.#store.removeAgent(sessionId);
@@ -428,15 +438,37 @@ export class SessionManager {
    */
   emitToChannels(sessionId: string, event: OutputEvent): void {
     const handlers = this.#eventHandlers.get(sessionId);
-    if (!handlers) return;
 
-    for (const handler of handlers) {
-      try {
-        handler(event);
-      } catch {
-        // Handler errors are non-fatal
+    if (handlers && handlers.length > 0) {
+      for (const handler of handlers) {
+        try {
+          handler(event);
+        } catch {
+          // Handler errors are non-fatal
+        }
       }
+    } else if (event.type === OUTPUT_EVENT.QUESTION && event.questions) {
+      // Buffer QUESTION events when no channels are connected,
+      // so they can be replayed when a channel reconnects.
+      if (!this.#questionBuffers.has(sessionId)) {
+        this.#questionBuffers.set(sessionId, []);
+      }
+      this.#questionBuffers.get(sessionId)!.push(event.questions as unknown[]);
     }
+  }
+
+  /**
+   * Drain buffered QUESTION events for a session.
+   * Returns any questions that were emitted while no channels were connected,
+   * and clears the buffer. Callers should replay these to newly connected channels.
+   * @param sessionId — Session ID
+   * @returns Buffered question arrays, or empty array if none
+   */
+  drainPendingQuestions(sessionId: string): unknown[][] {
+    const buffer = this.#questionBuffers.get(sessionId);
+    if (!buffer || buffer.length === 0) return [];
+    this.#questionBuffers.delete(sessionId);
+    return buffer;
   }
 
   // ── Session Info ─────────────────────────────────────────────────────────
@@ -562,7 +594,7 @@ export class SessionManager {
 
     // Start the bus run loop (non-blocking)
     const runLoop = bus.run().catch((err: unknown) => {
-      console.error(`[session ${sessionId}] bus error:`, err);
+      logger.error(`[session ${sessionId}] bus error: ${formatError(err)}`);
     });
 
     this.#sessions.set(sessionId, {

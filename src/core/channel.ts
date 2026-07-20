@@ -44,6 +44,8 @@ export interface ChannelSessionManager {
   sessionIds(): string[];
   /** Get session metadata. */
   getSessionInfo(sessionId: string): { id: string; model?: string; profile?: string } | null;
+  /** Drain buffered QUESTION events for a session (replay on reconnect). */
+  drainPendingQuestions(sessionId: string): unknown[][];
 }
 
 // ── Channel Base Class ────────────────────────────────────────────────────

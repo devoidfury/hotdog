@@ -225,6 +225,66 @@ describe("SessionRegistry", () => {
       expect(registry.size).toBe(0);
     });
   });
+
+  describe("question buffering", () => {
+    it("buffers QUESTION events when no channels are connected", async () => {
+      const result = await registry.create();
+      const sessionManager = registry.getSessionManager();
+
+      // Emit a QUESTION event with no channels connected
+      sessionManager.emitToChannels(result.sessionId, {
+        type: OUTPUT_EVENT.QUESTION,
+        questions: [{ key: "name", prompt: "What is your name?" }],
+      });
+
+      // Drain should return the buffered question
+      const pending = sessionManager.drainPendingQuestions(result.sessionId);
+      expect(pending).toHaveLength(1);
+      expect(pending[0]).toEqual([{ key: "name", prompt: "What is your name?" }]);
+    });
+
+    it("drainPendingQuestions returns empty array when no questions buffered", async () => {
+      const result = await registry.create();
+      const sessionManager = registry.getSessionManager();
+
+      const pending = sessionManager.drainPendingQuestions(result.sessionId);
+      expect(pending).toEqual([]);
+    });
+
+    it("drainPendingQuestions clears the buffer", async () => {
+      const result = await registry.create();
+      const sessionManager = registry.getSessionManager();
+
+      sessionManager.emitToChannels(result.sessionId, {
+        type: OUTPUT_EVENT.QUESTION,
+        questions: [{ key: "q1", prompt: "Q1?" }],
+      });
+
+      const first = sessionManager.drainPendingQuestions(result.sessionId);
+      expect(first).toHaveLength(1);
+
+      const second = sessionManager.drainPendingQuestions(result.sessionId);
+      expect(second).toEqual([]);
+    });
+
+    it("non-QUESTION events are not buffered when no channels connected", async () => {
+      const result = await registry.create();
+      const sessionManager = registry.getSessionManager();
+
+      // Emit non-QUESTION events — should not be buffered
+      sessionManager.emitToChannels(result.sessionId, {
+        type: OUTPUT_EVENT.USER_MESSAGE,
+        content: "hello",
+      });
+      sessionManager.emitToChannels(result.sessionId, {
+        type: OUTPUT_EVENT.ASSISTANT_MESSAGE,
+        content: "hi",
+      });
+
+      const pending = sessionManager.drainPendingQuestions(result.sessionId);
+      expect(pending).toEqual([]);
+    });
+  });
 });
 
 // ── createWsServer Tests ────────────────────────────────────────────────────

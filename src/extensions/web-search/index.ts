@@ -350,9 +350,10 @@ export class WebSearchTool {
       }
 
       const truncated = truncateOutput(result, 600);
+      const lines = result.split("\n");
       return ToolResult.ok(truncated).withEntries({
         provider,
-        results: String(result.split("\n").length - 1 > 0 ? result.split("\n").length - 1 : 0),
+        results: String(lines.length - 1 > 0 ? lines.length - 1 : 0),
       });
     } catch (err) {
       return ToolResult.err(`Web search failed: ${(err as Error).message}`);

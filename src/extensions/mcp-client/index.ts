@@ -14,7 +14,6 @@ import {
   CoreContext,
   ExtensionInstance,
   ToolsRegisterPayload,
-  getExtensionConfig,
 } from "../../core/extensions/types.ts";
 
 // Re-exports for external use

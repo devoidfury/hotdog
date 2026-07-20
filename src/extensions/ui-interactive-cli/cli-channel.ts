@@ -59,7 +59,7 @@ export class CliChannel extends Channel {
    * Yields lines as the user types them.
    */
   async *read(): AsyncIterable<string> {
-    return (this.#rl as unknown as AsyncIterable<string>)[Symbol.asyncIterator]();
+    return this.#rl[Symbol.asyncIterator]();
   }
 
   /**

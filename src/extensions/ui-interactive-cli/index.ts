@@ -320,7 +320,7 @@ export async function runInteractiveSession(
     const agent = new Agent({
       hooks: core.hooks,
       toolRegistry: core.toolRegistry,
-      llmClient: agentConfig.llmClient || llmClient,
+      llmClient: (agentConfig.llmClient as LlmClient | undefined) || llmClient,
       model: (agentConfig.model as string) || (resolved.model as string),
       maxIterations:
         (agentConfig.maxIterations as number) || (resolved.maxIterations as number) || 100,
@@ -533,7 +533,7 @@ export function handleSlashCommand(
   channel: CliChannel,
   rl: readline.Interface,
 ): void {
-  const cmd = parseCommand(cmdText) as ParsedCommand;
+  const cmd = parseCommand(cmdText);
 
   // UI-only commands handled directly by the UI layer
   switch (cmd.type) {

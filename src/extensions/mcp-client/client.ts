@@ -8,7 +8,6 @@ import {
   parseMcpInitializeResponse,
   parseMcpToolsListResponse,
   parseMcpToolCallResponse,
-  contentBlocksToString,
   jsonRpcRequest,
   jsonRpcNotification,
   mcpToolCallRequest,

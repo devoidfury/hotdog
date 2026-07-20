@@ -166,21 +166,3 @@ export async function create(core: CoreContext): Promise<ExtensionInstance> {
     isToolAllowed,
   };
 }
-
-/**
- * Resolve preload skills from CLI args or config.
- * Priority: CLI args → config file → empty.
- */
-function _resolvePreloadSkills(
-  _core: CoreContext,
-  config: SkillsLoaderConfig,
-): string[] {
-  // CLI args are resolved through the config layer system (extension.json layers).
-  // After resolution, the final value is in config.preloadSkills.
-  const configSkills = config.preloadSkills;
-  if (configSkills && configSkills.length > 0) {
-    return configSkills;
-  }
-
-  return [];
-}

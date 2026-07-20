@@ -1,14 +1,7 @@
 // Model tool — switch the AI model at runtime.
 
 import { toolDef, param, ToolResult, parseToolInput, defaultCallDisplay } from "../../core/extensions/tool-utils.ts";
-
-interface ModelRegistry {
-  [key: string]: unknown;
-}
-
-interface ToolContext {
-  get(key: string): unknown;
-}
+import { ModelRegistry, ToolContext } from "../../core/index.ts";
 
 interface OnSwitchModel {
   (name: string): Promise<void>;

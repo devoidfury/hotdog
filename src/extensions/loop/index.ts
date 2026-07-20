@@ -1,11 +1,6 @@
 // Loop extension — provides the /loop slash command for repeatedly
 // running a prompt until cancelled by the user.
 //
-// Architecture: fully event-driven via hooks. No blocking loops, no
-// readline manipulation. The loop state is stored in the extension
-// instance and driven by TURN_END (detect agent completion) and
-// INPUT (detect /quit during loop).
-//
 // Config (loop) — defined in extension.json configSchema:
 //   - enabled:  bool  (default: true)  — whether /loop is available
 //   - maxLoops: number (default: -1)   — max iterations (-1 = unlimited)

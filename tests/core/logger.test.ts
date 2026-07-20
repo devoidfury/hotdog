@@ -38,7 +38,13 @@ describe("resolveLogLevel and resolveLogTarget", () => {
       });
 
       it("returns config value when provided", () => {
-        expect(fn(validEnv)).toBe(validEnv);
+        const orig = process.env[env];
+        delete process.env[env];
+        try {
+          expect(fn(validEnv)).toBe(validEnv);
+        } finally {
+          if (orig !== undefined) process.env[env] = orig;
+        }
       });
 
       it("prefers env var over config", () => {

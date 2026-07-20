@@ -17,8 +17,8 @@
   "repository": "github:devoidfury/hotdog",
   "scripts": {
     "start": "bun bin/hotdog",
-    "test": "bun test --only-failures",
-    "coverage": "bun test --only-failures --coverage"
+    "test": "bun test --only-failures --preload ./tests/setup.ts",
+    "coverage": "HOTDOG_LOG_LEVEL=error HOTDOG_LOG_TARGET=none bun test --only-failures --preload ./tests/setup.ts --coverage"
   },
   "type": "module",
   "license": "MIT"

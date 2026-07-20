@@ -4,6 +4,7 @@ import path from 'node:path';
 import os from 'node:os';
 import { ProjectInfoTool } from '../../src/extensions/core-tools/project-info.ts';
 import { resultStr } from '../helpers.ts';
+import { execFileAsync } from 'node:child_process';
 
 describe('ProjectInfoTool', () => {
   let tmpDir: string;
@@ -103,5 +104,188 @@ describe('ProjectInfoTool language detection', () => {
     const tool = new ProjectInfoTool();
     const result = await tool.execute(JSON.stringify({ path: tmpDir }), null!);
     expect(resultStr(result)).toContain('Markdown');
+  });
+});
+
+// Test git-related methods
+describe('ProjectInfoTool > git methods', () => {
+  it('_getGitBranch returns null in non-git directory', async () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'hotdog-test-git-'));
+    try {
+      const tool = new ProjectInfoTool();
+      const branch = await (tool as any)._getGitBranch(tmpDir);
+      expect(branch).toBeNull();
+    } finally {
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
+  });
+
+  it('_getLastCommitTime returns null in non-git directory', async () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'hotdog-test-git-'));
+    try {
+      const tool = new ProjectInfoTool();
+      const time = await (tool as any)._getLastCommitTime(tmpDir);
+      expect(time).toBeNull();
+    } finally {
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
+  });
+
+  it('_getGitStatus returns empty array in non-git directory', async () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'hotdog-test-git-'));
+    try {
+      const tool = new ProjectInfoTool();
+      const status = await (tool as any)._getGitStatus(tmpDir);
+      expect(status).toEqual([]);
+    } finally {
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
+  });
+
+  it('_getGitBranch returns branch name in git repo', async () => {
+    const tool = new ProjectInfoTool();
+    const branch = await (tool as any)._getGitBranch('/workspace');
+    expect(typeof branch).toBe('string');
+    expect(branch.length).toBeGreaterThan(0);
+  });
+
+  it('_getLastCommitTime returns time in git repo', async () => {
+    const tool = new ProjectInfoTool();
+    const time = await (tool as any)._getLastCommitTime('/workspace');
+    expect(typeof time).toBe('string');
+    expect(time.length).toBeGreaterThan(0);
+  });
+
+  it('_getGitStatus returns status entries in git repo', async () => {
+    const tool = new ProjectInfoTool();
+    const status = await (tool as any)._getGitStatus('/workspace');
+    expect(Array.isArray(status)).toBe(true);
+  });
+});
+
+// Test _walkDir method
+describe('ProjectInfoTool > _walkDir', () => {
+  let tmpDir: string;
+
+  beforeEach(() => {
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'hotdog-test-walk-'));
+  });
+
+  afterEach(() => {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  it('walks directory and collects files', async () => {
+    fs.writeFileSync(path.join(tmpDir, 'file1.ts'), '');
+    fs.writeFileSync(path.join(tmpDir, 'file2.js'), '');
+    fs.mkdirSync(path.join(tmpDir, 'subdir'));
+    fs.writeFileSync(path.join(tmpDir, 'subdir', 'file3.ts'), '');
+
+    const tool = new ProjectInfoTool();
+    const results: string[] = [];
+    await (tool as any)._walkDir(tmpDir, 0, 10, results, 100);
+
+    expect(results.length).toBe(3);
+  });
+
+  it('respects maxDepth limit', async () => {
+    fs.writeFileSync(path.join(tmpDir, 'file1.ts'), '');
+    fs.mkdirSync(path.join(tmpDir, 'subdir'));
+    fs.writeFileSync(path.join(tmpDir, 'subdir', 'file2.ts'), '');
+
+    const tool = new ProjectInfoTool();
+    const results: string[] = [];
+    await (tool as any)._walkDir(tmpDir, 0, 0, results, 100);
+
+    // maxDepth=0 means only top-level files
+    expect(results.length).toBe(1);
+  });
+
+  it('respects maxFiles limit', async () => {
+    for (let i = 0; i < 10; i++) {
+      fs.writeFileSync(path.join(tmpDir, `file${i}.ts`), '');
+    }
+
+    const tool = new ProjectInfoTool();
+    const results: string[] = [];
+    await (tool as any)._walkDir(tmpDir, 0, 10, results, 3);
+
+    expect(results.length).toBe(3);
+  });
+
+  it('skips hidden files', async () => {
+    fs.writeFileSync(path.join(tmpDir, '.hidden'), '');
+    fs.writeFileSync(path.join(tmpDir, 'visible.ts'), '');
+
+    const tool = new ProjectInfoTool();
+    const results: string[] = [];
+    await (tool as any)._walkDir(tmpDir, 0, 10, results, 100);
+
+    expect(results.length).toBe(1);
+    expect(results[0]).toContain('visible.ts');
+  });
+
+  it('handles unreadable directories gracefully', async () => {
+    const unreadableDir = path.join(tmpDir, 'unreadable');
+    fs.mkdirSync(unreadableDir);
+    fs.chmodSync(unreadableDir, 0o000);
+
+    const tool = new ProjectInfoTool();
+    const results: string[] = [];
+    // Should not throw even with unreadable dir
+    await (tool as any)._walkDir(tmpDir, 0, 10, results, 100);
+
+    // Restore permissions for cleanup
+    fs.chmodSync(unreadableDir, 0o755);
+  });
+});
+
+// Test _getDirSizes method
+describe('ProjectInfoTool > _getDirSizes', () => {
+  let tmpDir: string;
+
+  beforeEach(() => {
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'hotdog-test-sizes-'));
+  });
+
+  afterEach(() => {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  it('returns directory sizes', async () => {
+    fs.writeFileSync(path.join(tmpDir, 'file1.ts'), 'a'.repeat(1000));
+    fs.writeFileSync(path.join(tmpDir, 'file2.ts'), 'b'.repeat(2000));
+
+    const tool = new ProjectInfoTool();
+    const sizes = await (tool as any)._getDirSizes(1, tmpDir);
+
+    expect(Array.isArray(sizes)).toBe(true);
+  });
+});
+
+// Test execute with various inputs
+describe('ProjectInfoTool > execute edge cases', () => {
+  it('handles object input with path', async () => {
+    const tool = new ProjectInfoTool();
+    const result = await tool.execute({ path: '/workspace' }, null!);
+    expect(resultStr(result)).toContain('=== Project Info ===');
+  });
+
+  it('handles empty object input', async () => {
+    const tool = new ProjectInfoTool();
+    const result = await tool.execute({}, null!);
+    expect(resultStr(result)).toContain('=== Project Info ===');
+  });
+
+  it('handles max_depth parameter', async () => {
+    const tool = new ProjectInfoTool();
+    const result = await tool.execute(JSON.stringify({ path: '/workspace', max_depth: 2 }), null!);
+    expect(resultStr(result)).toContain('=== Project Info ===');
+  });
+
+  it('handles max_files parameter', async () => {
+    const tool = new ProjectInfoTool();
+    const result = await tool.execute(JSON.stringify({ path: '/workspace', max_files: 10 }), null!);
+    expect(resultStr(result)).toContain('=== Project Info ===');
   });
 });

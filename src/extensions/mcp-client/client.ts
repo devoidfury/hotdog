@@ -308,7 +308,7 @@ export class McpClient {
     // For MCP requests, we expect exactly one response message
     // (though SSE can carry multiple events)
     const lastMsg = messages[messages.length - 1];
-    if (!lastMsg) {
+    if (!lastMsg || (lastMsg.result === undefined && lastMsg.error === undefined)) {
       throw new McpError(`No response message found in SSE: ${body.slice(0, 200)}`);
     }
     if (lastMsg.error) {

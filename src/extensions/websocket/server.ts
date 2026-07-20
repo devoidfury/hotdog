@@ -135,13 +135,14 @@ export class SessionRegistry {
    * The SessionManager creates the internal MessageBus automatically.
    */
   async create({ profile, model, questionStrategy, questionTimeoutSecs }: CreateSessionOptions = {}): Promise<{ sessionId: string; agent: unknown }> {
-    const sessionId = crypto.randomUUID();
+    const proposedSessionId = crypto.randomUUID();
 
-    // Build the agent
-    const agent = await this.#buildAgent({ model, sessionId });
+    // Build the agent — pass proposed sessionId but use the agent's actual sessionId
+    const agent = await this.#buildAgent({ model, sessionId: proposedSessionId });
+    const actualSessionId = (agent as Agent)?.sessionId || proposedSessionId;
 
-    // Store metadata
-    this.#metadata.set(sessionId, {
+    // Store metadata under the agent's actual sessionId
+    this.#metadata.set(actualSessionId, {
       profile: profile || "default",
       model: (agent as Agent)?.model || "",
       createdAt: Date.now(),
@@ -157,7 +158,7 @@ export class SessionRegistry {
       model,
     });
 
-    return { sessionId, agent };
+    return { sessionId: actualSessionId, agent };
   }
 
   /**
@@ -317,6 +318,18 @@ export class SessionRegistry {
   getSessionManager(): SessionManager {
     return this.#sessionManager;
   }
+
+  // ── Test-only accessors ─────────────────────────────────────────────────
+
+  /** @internal Exposed for testing. */
+  get _test_metadata(): Map<string, SessionMetadata> { return this.#metadata; }
+
+  /** @internal Exposed for testing. */
+  get _test_timeoutMin(): number { return this.#timeoutMin; }
+  set _test_timeoutMin(v: number) { this.#timeoutMin = v; }
+
+  /** @internal Exposed for testing. */
+  _test_cleanupIdleSessions(): void { this.#cleanupIdleSessions(); }
 }
 
 // ── Session History Replay ──────────────────────────────────────────────────

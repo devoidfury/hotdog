@@ -181,16 +181,16 @@ describe("SessionRegistry Extended", () => {
       const result = await registry.create();
 
       // Manually set lastActivityAt to be in the past
-      const meta = (registry as any).#metadata?.get(result.sessionId);
+      const meta = registry._test_metadata.get(result.sessionId);
       if (meta) {
         meta.lastActivityAt = Date.now() - 100 * 60 * 1000; // 100 minutes ago
       }
 
       // Set a short timeout
-      (registry as any).#timeoutMin = 30;
+      registry._test_timeoutMin = 30;
 
       // Trigger cleanup manually
-      (registry as any).#cleanupIdleSessions();
+      registry._test_cleanupIdleSessions();
 
       // Session should be deleted
       expect(registry.get(result.sessionId)).toBeNull();
@@ -200,14 +200,14 @@ describe("SessionRegistry Extended", () => {
       const result = await registry.create();
 
       // Set lastActivityAt to be in the past
-      const meta = (registry as any).#metadata?.get(result.sessionId);
+      const meta = registry._test_metadata.get(result.sessionId);
       if (meta) {
         meta.lastActivityAt = Date.now() - 100 * 60 * 1000;
         meta.connectedClients = 1; // Has connected clients
       }
 
-      (registry as any).#timeoutMin = 30;
-      (registry as any).#cleanupIdleSessions();
+      registry._test_timeoutMin = 30;
+      registry._test_cleanupIdleSessions();
 
       // Session should NOT be deleted
       expect(registry.get(result.sessionId)).not.toBeNull();
@@ -216,8 +216,8 @@ describe("SessionRegistry Extended", () => {
     it("does not clean up recently active sessions", async () => {
       const result = await registry.create();
 
-      (registry as any).#timeoutMin = 30;
-      (registry as any).#cleanupIdleSessions();
+      registry._test_timeoutMin = 30;
+      registry._test_cleanupIdleSessions();
 
       // Session should NOT be deleted (just created, so recent)
       expect(registry.get(result.sessionId)).not.toBeNull();

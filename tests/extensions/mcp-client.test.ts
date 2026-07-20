@@ -1,6 +1,8 @@
 import { describe, it, expect, mock, beforeEach, afterEach } from "bun:test";
 import { McpClient, McpError } from "../../src/extensions/mcp-client/client.ts";
 import { McpConnection, McpConnectionHandle } from "../../src/extensions/mcp-client/connection.ts";
+import { create } from "../../src/extensions/mcp-client/index.ts";
+import { HOOKS } from "../../src/core/hooks.ts";
 
 // ── McpError ────────────────────────────────────────────────────────────────
 
@@ -599,5 +601,281 @@ describe("McpConnectionHandle", () => {
   it("serverName getter", () => {
     const handle = new McpConnectionHandle({} as any, "my-server");
     expect(handle.serverName).toBe("my-server");
+  });
+});
+
+// ── McpClient HTTP Integration Tests ────────────────────────────────────────
+
+function createMockFetch(response: Response) {
+  return Object.assign(
+    mock(() => Promise.resolve(response)),
+    { preconnect: () => {} },
+  ) as unknown as typeof globalThis.fetch;
+}
+
+describe("McpClient HTTP integration", () => {
+  describe("forHttp", () => {
+    it("creates client with HTTP transport", async () => {
+      const client = await McpClient.forHttp("http://localhost:3000/mcp");
+      expect(client).toBeDefined();
+      expect(client.idCounter).toBe(0);
+      expect(client.pending.size).toBe(0);
+      expect(client.buffered).toEqual([]);
+      expect(client.cancelled).toBe(false);
+      await client.shutdown();
+    });
+
+    it("creates client with custom headers", async () => {
+      const client = await McpClient.forHttp("http://localhost:3000/mcp", {
+        "Authorization": "Bearer token",
+      });
+      expect(client).toBeDefined();
+      await client.shutdown();
+    });
+
+    it("throws when client is cancelled", async () => {
+      const client = await McpClient.forHttp("http://localhost:3000/mcp");
+      client.cancelled = true;
+      await expect(client.callTool("test", {})).rejects.toThrow("Client is cancelled");
+    });
+  });
+
+  describe("SSE parsing via HTTP", () => {
+    it("parses SSE messages correctly", async () => {
+      const originalFetch = globalThis.fetch;
+      globalThis.fetch = createMockFetch({
+        ok: true, status: 200,
+        text: () => Promise.resolve(
+          'event: message\ndata: {"jsonrpc":"2.0","id":1,"result":{"content":[{"type":"text","text":"Hello"}]}}\n\n',
+        ),
+      } as Response);
+
+      try {
+        const client = await McpClient.forHttp("http://localhost:3000/mcp");
+        const result = await client.callTool("test", {});
+        expect((result as any).content).toEqual([{ type: "text", text: "Hello" }]);
+        await client.shutdown();
+      } finally {
+        globalThis.fetch = originalFetch;
+      }
+    });
+
+    it("parses direct JSON response", async () => {
+      const originalFetch = globalThis.fetch;
+      globalThis.fetch = createMockFetch({
+        ok: true, status: 200,
+        text: () => Promise.resolve(JSON.stringify({
+          jsonrpc: "2.0", id: 1,
+          result: { content: [{ type: "text", text: "Direct JSON" }] },
+        })),
+      } as Response);
+
+      try {
+        const client = await McpClient.forHttp("http://localhost:3000/mcp");
+        const result = await client.callTool("test", {});
+        expect((result as any).content).toEqual([{ type: "text", text: "Direct JSON" }]);
+        await client.shutdown();
+      } finally {
+        globalThis.fetch = originalFetch;
+      }
+    });
+
+    it("handles HTTP error response", async () => {
+      const originalFetch = globalThis.fetch;
+      globalThis.fetch = createMockFetch({
+        ok: false, status: 500,
+        text: () => Promise.resolve("Internal Server Error"),
+      } as Response);
+
+      try {
+        const client = await McpClient.forHttp("http://localhost:3000/mcp");
+        await expect(client.callTool("test", {})).rejects.toThrow("MCP HTTP error (500)");
+        await client.shutdown();
+      } finally {
+        globalThis.fetch = originalFetch;
+      }
+    });
+
+    it("handles JSON-RPC error in response", async () => {
+      const originalFetch = globalThis.fetch;
+      globalThis.fetch = createMockFetch({
+        ok: true, status: 200,
+        text: () => Promise.resolve(JSON.stringify({
+          jsonrpc: "2.0", id: 1,
+          error: { code: -32600, message: "Invalid Request" },
+        })),
+      } as Response);
+
+      try {
+        const client = await McpClient.forHttp("http://localhost:3000/mcp");
+        await expect(client.callTool("test", {})).rejects.toThrow("Invalid Request");
+        await client.shutdown();
+      } finally {
+        globalThis.fetch = originalFetch;
+      }
+    });
+
+    it("handles SSE error response", async () => {
+      const originalFetch = globalThis.fetch;
+      globalThis.fetch = createMockFetch({
+        ok: true, status: 200,
+        text: () => Promise.resolve(
+          'event: message\ndata: {"jsonrpc":"2.0","id":1,"error":{"code":-32601,"message":"Method not found"}}\n\n',
+        ),
+      } as Response);
+
+      try {
+        const client = await McpClient.forHttp("http://localhost:3000/mcp");
+        await expect(client.callTool("test", {})).rejects.toThrow("Method not found");
+        await client.shutdown();
+      } finally {
+        globalThis.fetch = originalFetch;
+      }
+    });
+
+    it("handles response with no SSE messages", async () => {
+      const originalFetch = globalThis.fetch;
+      globalThis.fetch = createMockFetch({
+        ok: true, status: 200,
+        text: () => Promise.resolve("Not an SSE response"),
+      } as Response);
+
+      try {
+        const client = await McpClient.forHttp("http://localhost:3000/mcp");
+        await expect(client.callTool("test", {})).rejects.toThrow("No SSE messages found");
+        await client.shutdown();
+      } finally {
+        globalThis.fetch = originalFetch;
+      }
+    });
+  });
+
+  describe("server capabilities", () => {
+    it("stores server capabilities after initialize", async () => {
+      const originalFetch = globalThis.fetch;
+      globalThis.fetch = createMockFetch({
+        ok: true, status: 200,
+        text: () => Promise.resolve(JSON.stringify({
+          jsonrpc: "2.0", id: 1,
+          result: {
+            protocolVersion: "2025-11-25",
+            capabilities: { tools: { listChanged: true } },
+            serverInfo: { name: "test-server", version: "1.0.0" },
+          },
+        })),
+      } as Response);
+
+      try {
+        const client = await McpClient.forHttp("http://localhost:3000/mcp");
+        await client.initialize();
+        expect(client.serverCapabilities).toBeDefined();
+        expect(client.serverInfo).toBeDefined();
+        await client.shutdown();
+      } finally {
+        globalThis.fetch = originalFetch;
+      }
+    });
+  });
+
+  describe("listTools", () => {
+    it("calls tools/list endpoint", async () => {
+      const originalFetch = globalThis.fetch;
+      globalThis.fetch = createMockFetch({
+        ok: true, status: 200,
+        text: () => Promise.resolve(JSON.stringify({
+          jsonrpc: "2.0", id: 1,
+          result: { tools: [{ name: "echo", description: "Echo tool", inputSchema: {} }] },
+        })),
+      } as Response);
+
+      try {
+        const client = await McpClient.forHttp("http://localhost:3000/mcp");
+        const result = await client.listTools();
+        expect((result as any).tools).toHaveLength(1);
+        expect((result as any).tools[0].name).toBe("echo");
+        await client.shutdown();
+      } finally {
+        globalThis.fetch = originalFetch;
+      }
+    });
+  });
+});
+
+// ── MCP Extension Tests ─────────────────────────────────────────────────────
+
+describe("MCP Extension", () => {
+  const originalConnectStdio = McpConnection.connectStdio;
+  const originalConnectHttp = McpConnection.connectHttp;
+
+  beforeEach(() => {
+    (McpConnection as any).connectStdio = async () => null;
+    (McpConnection as any).connectHttp = async () => null;
+  });
+
+  afterEach(() => {
+    (McpConnection as any).connectStdio = originalConnectStdio;
+    (McpConnection as any).connectHttp = originalConnectHttp;
+  });
+
+  it("returns null when no MCP servers configured", () => {
+    expect(create({ config: {} } as any)).toBeNull();
+  });
+
+  it("returns null when all servers are disabled", () => {
+    expect(create({ config: { mcpServers: [{ name: "s1", command: "t", enabled: false }] } } as any)).toBeNull();
+  });
+
+  it("creates extension with enabled servers", () => {
+    const result = create({ config: { mcpServers: [{ name: "test", command: "echo" }] } } as any);
+    expect(result).not.toBeNull();
+    expect(result!.hooks![HOOKS.TOOLS_REGISTER]).toBeDefined();
+    expect(result!.hooks![HOOKS.SHUTDOWN_CLEANUP]).toBeDefined();
+  });
+
+  it("has shutdown method", () => {
+    const result = create({ config: { mcpServers: [{ name: "test", command: "echo" }] } } as any);
+    expect(typeof result!.shutdown).toBe("function");
+  });
+
+  it("tracks connections array", () => {
+    const result = create({ config: { mcpServers: [{ name: "test", command: "echo" }] } } as any);
+    expect(result!.connections).toEqual([]);
+  });
+
+  it("handles server with URL (HTTP transport)", () => {
+    expect(create({ config: { mcpServers: [{ name: "s", url: "http://localhost:3000/mcp" }] } } as any)).not.toBeNull();
+  });
+
+  it("handles server with blacklistTools", () => {
+    expect(create({ config: { mcpServers: [{ name: "s", command: "echo", blacklistTools: ["dangerous"] }] } } as any)).not.toBeNull();
+  });
+
+  it("handles server with custom headers", () => {
+    expect(create({ config: { mcpServers: [{ name: "s", url: "http://localhost:3000/mcp", headers: { Authorization: "Bearer token" } }] } } as any)).not.toBeNull();
+  });
+
+  it("handles server with custom env", () => {
+    expect(create({ config: { mcpServers: [{ name: "s", command: "echo", env: { API_KEY: "secret" } }] } } as any)).not.toBeNull();
+  });
+
+  it("handles connection failure gracefully", async () => {
+    (McpConnection as any).connectStdio = async () => { throw new Error("Connection failed"); };
+    const result = create({ config: { mcpServers: [{ name: "failing", command: "echo" }] } } as any);
+    expect(result).not.toBeNull();
+    await result!.hooks![HOOKS.TOOLS_REGISTER]!({ register: () => {} } as any);
+  });
+
+  it("calls shutdown on SHUTDOWN_CLEANUP hook", async () => {
+    let shutdownCalled = false;
+    const result = create({ config: { mcpServers: [{ name: "test", command: "echo" }] } } as any) as any;
+    result.connections.push({ shutdown: async () => { shutdownCalled = true; } });
+    await result.hooks![HOOKS.SHUTDOWN_CLEANUP]!();
+    expect(shutdownCalled).toBe(true);
+  });
+
+  it("handles shutdown error gracefully", async () => {
+    const result = create({ config: { mcpServers: [{ name: "test", command: "echo" }] } } as any) as any;
+    result.connections.push({ shutdown: async () => { throw new Error("fail"); } });
+    await expect(result.shutdown()).resolves.toBeUndefined();
   });
 });

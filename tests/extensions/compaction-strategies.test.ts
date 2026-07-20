@@ -1,6 +1,7 @@
 // Tests for compaction strategies: DropStrategy, SummarizeStrategy,
 // SummarizeShortStrategy, TokenAwareStrategy.
 // TrimStrategy is tested separately in compaction-trim.test.ts.
+// Merged from compaction-strategies.test.ts + compaction-prompts.test.ts.
 
 import { describe, it, expect } from "bun:test";
 import { DropStrategy } from "../../src/extensions/compaction/strategies/drop.ts";
@@ -8,6 +9,11 @@ import { SummarizeStrategy } from "../../src/extensions/compaction/strategies/su
 import { SummarizeShortStrategy } from "../../src/extensions/compaction/strategies/summarize-short.ts";
 import { TokenAwareStrategy } from "../../src/extensions/compaction/strategies/token-aware.ts";
 import { estimateContextTokens } from "../../src/extensions/compaction/utils.ts";
+import {
+  SUMMARIZATION_SYSTEM_PROMPT,
+  SUMMARIZATION_USER_PROMPT_TEMPLATE,
+  SUMMARIZATION_USER_PROMPT_SHORT,
+} from "../../src/extensions/compaction/prompts.ts";
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -112,6 +118,41 @@ describe("DropStrategy", () => {
     // returns index 5 (i+1 where i=4). messagesCompacted = 5.
     expect(result!.messagesCompacted).toBe(5);
   });
+
+  it("returns null when all messages are system messages", async () => {
+    const messages = [
+      { role: "system", content: "System 1" },
+      { role: "system", content: "System 2" },
+    ];
+    const settings = { ...defaultSettings, keepRecent: 1 };
+
+    const result = await new DropStrategy().execute(messages, settings, noopLlmChat, "model");
+    expect(result).toBeNull();
+  });
+
+  it("canCompact with custom keepRecent threshold", () => {
+    const strategy = new DropStrategy();
+    const messages = Array.from({ length: 10 }, (_, i) => makeMessage(i % 2 === 0 ? "user" : "assistant"));
+
+    // keepRecent=3 -> threshold = 3*2 = 6, 10 > 6 -> true
+    expect(strategy.canCompact(messages, { ...defaultSettings, keepRecent: 3 })).toBe(true);
+
+    // keepRecent=6 -> threshold = 6*2 = 12, 10 > 12 -> false
+    expect(strategy.canCompact(messages, { ...defaultSettings, keepRecent: 6 })).toBe(false);
+  });
+
+  it("canCompact with keepRecent=0 uses default 3", () => {
+    const strategy = new DropStrategy();
+    const messages = Array.from({ length: 10 }, (_, i) => makeMessage(i % 2 === 0 ? "user" : "assistant"));
+
+    // keepRecent=0 -> uses default 3, threshold = 3*2 = 6, 10 > 6 -> true
+    expect(strategy.canCompact(messages, { ...defaultSettings, keepRecent: 0 })).toBe(true);
+  });
+
+  it("handles empty messages array", async () => {
+    const result = await new DropStrategy().execute([], defaultSettings, noopLlmChat, "model");
+    expect(result).toBeNull();
+  });
 });
 
 // ── SummarizeStrategy Tests ─────────────────────────────────────────────────
@@ -214,6 +255,72 @@ describe("SummarizeStrategy", () => {
       defaultSettings
     )).toBe(true);
   });
+
+  it("uses default keepRecent of 8 when not specified", async () => {
+    const messages = Array.from({ length: 20 }, (_, i) => makeMessage(i % 2 === 0 ? "user" : "assistant"));
+    const settings = { ...defaultSettings, keepRecent: undefined };
+
+    const result = await new SummarizeStrategy().execute(messages, settings, noopLlmChat, "model");
+
+    expect(result).not.toBeNull();
+    // keepRecent defaults to 8, so firstKept = 5 (same as DropStrategy)
+    expect(result!.messagesCompacted).toBe(5);
+  });
+
+  it("returns null when all messages are system messages", async () => {
+    const messages = [
+      { role: "system", content: "System 1" },
+      { role: "system", content: "System 2" },
+    ];
+    const settings = { ...defaultSettings, keepRecent: 1 };
+
+    const result = await new SummarizeStrategy().execute(messages, settings, noopLlmChat, "model");
+    expect(result).toBeNull();
+  });
+
+  it("uses SUMMARIZATION_USER_PROMPT_TEMPLATE (full template)", async () => {
+    let capturedUserPrompt = "";
+    const mockLlmChat = async (msgs: Array<{ role: string; content: string }>, _model: string) => {
+      capturedUserPrompt = msgs.find(m => m.role === "user")!.content;
+      return "summary";
+    };
+
+    const messages = [
+      makeMessage("user", "Hello"),
+      makeMessage("assistant", "Hi there"),
+      makeMessage("user", "Third message"),
+    ];
+    const settings = { ...defaultSettings, keepRecent: 1 };
+
+    await new SummarizeStrategy().execute(messages, settings, mockLlmChat, "model");
+
+    // Full template should contain all format sections
+    expect(capturedUserPrompt).toContain("## Goal");
+    expect(capturedUserPrompt).toContain("## Progress");
+  });
+
+  it("passes correct model to llmChat", async () => {
+    let capturedModel = "";
+    const mockLlmChat = async (_msgs: Array<{ role: string; content: string }>, model: string) => {
+      capturedModel = model;
+      return "summary";
+    };
+
+    const messages = [
+      makeMessage("user", "Hello"),
+      makeMessage("assistant", "Hi there"),
+      makeMessage("user", "Third message"),
+    ];
+    const settings = { ...defaultSettings, keepRecent: 1 };
+
+    await new SummarizeStrategy().execute(messages, settings, mockLlmChat, "custom-model");
+    expect(capturedModel).toBe("custom-model");
+  });
+
+  it("handles empty messages array", async () => {
+    const result = await new SummarizeStrategy().execute([], defaultSettings, noopLlmChat, "model");
+    expect(result).toBeNull();
+  });
 });
 
 // ── SummarizeShortStrategy Tests ────────────────────────────────────────────
@@ -273,6 +380,100 @@ describe("SummarizeShortStrategy", () => {
     const result = await new SummarizeShortStrategy().execute(messages, settings, noopLlmChat, "model");
 
     expect(result!.metadata!.strategyName).toBe("summarize-short");
+  });
+
+  it("uses default keepRecent of 8 when not specified", async () => {
+    const messages = Array.from({ length: 20 }, (_, i) => makeMessage(i % 2 === 0 ? "user" : "assistant"));
+    const settings = { ...defaultSettings, keepRecent: undefined };
+
+    const result = await new SummarizeShortStrategy().execute(messages, settings, noopLlmChat, "model");
+
+    expect(result).not.toBeNull();
+    // keepRecent defaults to 8, so firstKept = 5 (same as DropStrategy)
+    expect(result!.messagesCompacted).toBe(5);
+  });
+
+  it("returns null when all messages are system messages", async () => {
+    const messages = [
+      { role: "system", content: "System 1" },
+      { role: "system", content: "System 2" },
+    ];
+    const settings = { ...defaultSettings, keepRecent: 1 };
+
+    const result = await new SummarizeShortStrategy().execute(messages, settings, noopLlmChat, "model");
+    expect(result).toBeNull();
+  });
+
+  it("includes token counts in metadata", async () => {
+    const content = "x".repeat(2000);
+    const messages = Array.from({ length: 10 }, (_, i) => makeMessage(i % 2 === 0 ? "user" : "assistant", content));
+    const settings = { ...defaultSettings, keepRecent: 2 };
+
+    const result = await new SummarizeShortStrategy().execute(messages, settings, noopLlmChat, "model");
+
+    expect(result!.metadata!.tokensBefore).toBeGreaterThan(0);
+    expect(result!.metadata!.tokensAfter).toBeGreaterThan(0);
+    expect(result!.metadata!.tokensAfter).toBeLessThan(result!.metadata!.tokensBefore);
+  });
+
+  it("canCompact uses base class implementation", () => {
+    const strategy = new SummarizeShortStrategy();
+
+    // Few messages
+    expect(strategy.canCompact(
+      [makeMessage("user"), makeMessage("assistant")],
+      defaultSettings
+    )).toBe(false);
+
+    // Many messages
+    expect(strategy.canCompact(
+      Array.from({ length: 20 }, (_, i) => makeMessage(i % 2 === 0 ? "user" : "assistant")),
+      defaultSettings
+    )).toBe(true);
+  });
+
+  it("uses SUMMARIZATION_USER_PROMPT_SHORT template", async () => {
+    let capturedSystemPrompt = "";
+    let capturedUserPrompt = "";
+    const mockLlmChat = async (msgs: Array<{ role: string; content: string }>, _model: string) => {
+      capturedSystemPrompt = msgs.find(m => m.role === "system")!.content;
+      capturedUserPrompt = msgs.find(m => m.role === "user")!.content;
+      return "summary";
+    };
+
+    const messages = [
+      makeMessage("user", "Hello"),
+      makeMessage("assistant", "Hi there"),
+      makeMessage("user", "Third message"),
+    ];
+    const settings = { ...defaultSettings, keepRecent: 1 };
+
+    await new SummarizeShortStrategy().execute(messages, settings, mockLlmChat, "model");
+
+    // System prompt should be the summarization system prompt
+    expect(capturedSystemPrompt).toContain("summarization");
+    // User prompt should use the SHORT template (not the full template)
+    expect(capturedUserPrompt).toContain("Hello");
+    // Short template should be shorter than full template
+    expect(capturedUserPrompt.length).toBeLessThan(SUMMARIZATION_USER_PROMPT_TEMPLATE.length + 100);
+  });
+
+  it("passes correct model to llmChat", async () => {
+    let capturedModel = "";
+    const mockLlmChat = async (_msgs: Array<{ role: string; content: string }>, model: string) => {
+      capturedModel = model;
+      return "summary";
+    };
+
+    const messages = [
+      makeMessage("user", "Hello"),
+      makeMessage("assistant", "Hi there"),
+      makeMessage("user", "Third message"),
+    ];
+    const settings = { ...defaultSettings, keepRecent: 1 };
+
+    await new SummarizeShortStrategy().execute(messages, settings, mockLlmChat, "custom-model");
+    expect(capturedModel).toBe("custom-model");
   });
 });
 
@@ -451,5 +652,65 @@ describe("TokenAwareStrategy", () => {
     // 10 * 1000 = 10000 tokens, maxKeepTokens = 131072 - 1000 = 130072
     // Should be under budget, so result should be null
     expect(result).toBeNull();
+  });
+});
+
+// ── Prompt Templates ─────────────────────────────────────────────────────────
+
+describe("SUMMARIZATION_SYSTEM_PROMPT", () => {
+  it("is non-empty", () => {
+    expect(SUMMARIZATION_SYSTEM_PROMPT.length).toBeGreaterThan(0);
+  });
+  it("mentions summarization role", () => {
+    expect(SUMMARIZATION_SYSTEM_PROMPT.toLowerCase()).toContain("summarization");
+  });
+  it("instructs not to continue the conversation", () => {
+    expect(SUMMARIZATION_SYSTEM_PROMPT).toContain("Do NOT continue the conversation");
+  });
+});
+
+describe("SUMMARIZATION_USER_PROMPT_TEMPLATE", () => {
+  it("is non-empty", () => {
+    expect(SUMMARIZATION_USER_PROMPT_TEMPLATE.length).toBeGreaterThan(0);
+  });
+  it("contains all required format sections", () => {
+    const prompt = SUMMARIZATION_USER_PROMPT_TEMPLATE;
+    expect(prompt).toContain("## Goal");
+    expect(prompt).toContain("## Progress");
+    expect(prompt).toContain("### Done");
+    expect(prompt).toContain("### In Progress");
+    expect(prompt).toContain("### Blocked");
+    expect(prompt).toContain("## Key Decisions");
+    expect(prompt).toContain("## Next Steps");
+    expect(prompt).toContain("## Critical Context");
+  });
+  it("contains conversation placeholder", () => {
+    expect(SUMMARIZATION_USER_PROMPT_TEMPLATE).toContain("{conversation}");
+    expect(SUMMARIZATION_USER_PROMPT_TEMPLATE).toContain("<conversation>");
+  });
+});
+
+describe("SUMMARIZATION_USER_PROMPT_SHORT", () => {
+  it("is non-empty", () => {
+    expect(SUMMARIZATION_USER_PROMPT_SHORT.length).toBeGreaterThan(0);
+  });
+  it("is shorter than the full template", () => {
+    expect(SUMMARIZATION_USER_PROMPT_SHORT.length).toBeLessThan(SUMMARIZATION_USER_PROMPT_TEMPLATE.length);
+  });
+  it("contains the same format sections", () => {
+    const prompt = SUMMARIZATION_USER_PROMPT_SHORT;
+    expect(prompt).toContain("## Goal");
+    expect(prompt).toContain("## Progress");
+    expect(prompt).toContain("### Done");
+    expect(prompt).toContain("### In Progress");
+    expect(prompt).toContain("## Key Decisions");
+    expect(prompt).toContain("## Next Steps");
+    expect(prompt).toContain("## Critical Context");
+  });
+  it("mentions concise/short output", () => {
+    expect(SUMMARIZATION_USER_PROMPT_SHORT.toLowerCase()).toMatch(/concise|brief|short/);
+  });
+  it("contains conversation placeholder", () => {
+    expect(SUMMARIZATION_USER_PROMPT_SHORT).toContain("{conversation}");
   });
 });

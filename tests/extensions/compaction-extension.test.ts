@@ -567,4 +567,254 @@ describe("Edge Cases", () => {
     // Should handle mixed messages without crashing
     expect(agent.log.length).toBeDefined();
   });
+
+  it("should handle abortSignal that is already aborted", async () => {
+    const core = createMockCore({
+      enabled: true,
+      keepRecentMessages: 2,
+      reserveTokens: 100,
+    });
+    const ext = createCompactionExtension(core);
+
+    const context = makeMessages(50, "x".repeat(500));
+    const abortController = new AbortController();
+    abortController.abort(); // Already aborted
+
+    const agent = createMockAgent(context);
+    (agent as any).abortSignal = abortController.signal;
+
+    core.modelRegistry = {
+      "test-model": { name: "test-model", temperature: null, contextLimit: 5000 },
+    };
+
+    const messages = [{ role: "system", content: "" }, ...context];
+
+    // Should not throw, should handle abort gracefully
+    await expect(
+      (ext as any).hooks![HOOKS.CONTEXT]!({ messages: messages as any, agent })
+    ).resolves.toBeDefined();
+  });
+
+  it("should handle abortSignal that is not yet aborted", async () => {
+    const core = createMockCore({
+      enabled: true,
+      keepRecentMessages: 2,
+      reserveTokens: 100,
+    });
+    const ext = createCompactionExtension(core);
+
+    const context = makeMessages(50, "x".repeat(500));
+    const abortController = new AbortController(); // Not aborted
+
+    const agent = createMockAgent(context);
+    (agent as any).abortSignal = abortController.signal;
+
+    core.modelRegistry = {
+      "test-model": { name: "test-model", temperature: null, contextLimit: 5000 },
+    };
+
+    const messages = [{ role: "system", content: "" }, ...context];
+
+    // Should work normally
+    const result = await (ext as any).hooks![HOOKS.CONTEXT]!({ messages: messages as any, agent });
+    expect(result).toBeDefined();
+  });
+
+  it("should handle cancellation during streaming (agent.cancelled)", async () => {
+    const core = createMockCore({
+      enabled: true,
+      keepRecentMessages: 2,
+      reserveTokens: 100,
+    });
+    const ext = createCompactionExtension(core);
+
+    const context = makeMessages(50, "x".repeat(500));
+
+    // Create an agent that is cancelled
+    const mockLlmClient = {
+      chatStreamCancellable: () =>
+        (async function* () {
+          // Simulate checking cancelled flag
+          yield { type: "content", content: "partial" };
+        })(),
+    };
+    const log = new MessageLog(context);
+    const agent = {
+      get log() { return log; },
+      model: "test-model",
+      sessionId: "test-session",
+      cancelled: true, // Agent is cancelled
+      _llmClient: mockLlmClient,
+      get llmClient() { return mockLlmClient; },
+      buildMessages() {
+        return [{ role: "system", content: "" }, ...log.getAll()];
+      },
+      addMessage(msg: any) { log.push(msg); },
+      replaceContext(newContext: any) { log.replace(newContext); },
+    } as any;
+
+    core.modelRegistry = {
+      "test-model": { name: "test-model", temperature: null, contextLimit: 5000 },
+    };
+
+    const messages = [{ role: "system", content: "" }, ...context];
+
+    // Should handle cancellation gracefully without throwing
+    await expect(
+      (ext as any).hooks![HOOKS.CONTEXT]!({ messages: messages as any, agent })
+    ).resolves.toBeDefined();
+  });
+
+  it("should handle compaction error gracefully", async () => {
+    const core = createMockCore({
+      enabled: true,
+      keepRecentMessages: 2,
+      reserveTokens: 100,
+      strategy: "summarize",
+    });
+    const ext = createCompactionExtension(core);
+
+    const context = makeMessages(50, "x".repeat(500));
+
+    // Create an LLM client that throws
+    const mockLlmClient = {
+      chatStreamCancellable: () =>
+        (async function* () {
+          throw new Error("LLM error during compaction");
+        })(),
+    };
+    const log = new MessageLog(context);
+    const agent = {
+      get log() { return log; },
+      model: "test-model",
+      sessionId: "test-session",
+      cancelled: false,
+      _llmClient: mockLlmClient,
+      get llmClient() { return mockLlmClient; },
+      buildMessages() {
+        return [{ role: "system", content: "" }, ...log.getAll()];
+      },
+      addMessage(msg: any) { log.push(msg); },
+      replaceContext(newContext: any) { log.replace(newContext); },
+    } as any;
+
+    core.modelRegistry = {
+      "test-model": { name: "test-model", temperature: null, contextLimit: 5000 },
+    };
+
+    const messages = [{ role: "system", content: "" }, ...context];
+
+    // Should handle error gracefully without throwing
+    await expect(
+      (ext as any).hooks![HOOKS.CONTEXT]!({ messages: messages as any, agent })
+    ).resolves.toBeDefined();
+  });
+});
+
+// ── /compact Command Tests ───────────────────────────────────────────────────
+
+describe("/compact Command", () => {
+  it("returns error when not enough messages to compact", async () => {
+    const core = createMockCore({
+      enabled: true,
+      keepRecentMessages: 2,
+    });
+    const ext = createCompactionExtension(core);
+
+    const commandRegistry = new AgentCommandRegistry();
+    await (ext as any).hooks![HOOKS.COMMANDS_REGISTER]!({ registry: commandRegistry });
+    const compactCmd = commandRegistry.get("compact")!;
+
+    // Only 1 non-system message
+    const context = [new Message({ role: "user", content: "hello" })];
+    const agent = createMockAgent(context);
+
+    const result = await (compactCmd!.handler as any)(agent, "compact");
+
+    expect((result as any).content).toContain("Not enough messages");
+  });
+
+  it("handles /compact with keep option", async () => {
+    const core = createMockCore({
+      enabled: true,
+      keepRecentMessages: 2,
+    });
+    const ext = createCompactionExtension(core);
+
+    const commandRegistry = new AgentCommandRegistry();
+    await (ext as any).hooks![HOOKS.COMMANDS_REGISTER]!({ registry: commandRegistry });
+    const compactCmd = commandRegistry.get("compact")!;
+
+    // 10 non-system messages
+    const context = makeMessages(10, "x".repeat(100));
+    const agent = createMockAgent(context);
+
+    const result = await (compactCmd!.handler as any)(agent, "compact 4");
+
+    expect((result as any).content).toContain("Context compacted to 4 messages");
+    // The user turn guard adds an extra message
+    expect(agent.log.getNonSystem().length).toBeGreaterThanOrEqual(4);
+  });
+
+  it("handles /compact with keep=0 (slice(-0) keeps all)", async () => {
+    const core = createMockCore({
+      enabled: true,
+      keepRecentMessages: 2,
+    });
+    const ext = createCompactionExtension(core);
+
+    const commandRegistry = new AgentCommandRegistry();
+    await (ext as any).hooks![HOOKS.COMMANDS_REGISTER]!({ registry: commandRegistry });
+    const compactCmd = commandRegistry.get("compact")!;
+
+    const context = makeMessages(10, "x".repeat(100));
+    const agent = createMockAgent(context);
+
+    const result = await (compactCmd!.handler as any)(agent, "compact 0");
+
+    // slice(-0) returns the full array, so all messages are kept
+    expect((result as any).content).toContain("Context compacted");
+    expect(agent.log.getNonSystem().length).toBeGreaterThanOrEqual(10);
+  });
+
+  it("handles /compact with nonexistent strategy (falls back to default)", async () => {
+    const core = createMockCore({
+      enabled: true,
+      keepRecentMessages: 2,
+      strategy: "nonexistent-strategy",
+    });
+    const ext = createCompactionExtension(core);
+
+    const commandRegistry = new AgentCommandRegistry();
+    await (ext as any).hooks![HOOKS.COMMANDS_REGISTER]!({ registry: commandRegistry });
+    const compactCmd = commandRegistry.get("compact")!;
+
+    const context = makeMessages(20, "x".repeat(100));
+    const agent = createMockAgent(context);
+
+    const result = await (compactCmd!.handler as any)(agent, "compact");
+
+    // Falls back to default strategy (summarize)
+    expect((result as any).content).toContain("Context compacted");
+  });
+
+  it("handles /compact when strategy.canCompact returns false", async () => {
+    const core = createMockCore({
+      enabled: true,
+      keepRecentMessages: 100, // Very high keepRecent, so canCompact will return false
+      strategy: "drop",
+    });
+    const ext = createCompactionExtension(core);
+
+    const commandRegistry = new AgentCommandRegistry();
+    await (ext as any).hooks![HOOKS.COMMANDS_REGISTER]!({ registry: commandRegistry });
+    const compactCmd = commandRegistry.get("compact")!;
+
+    const context = makeMessages(10, "x".repeat(100));
+    const agent = createMockAgent(context);
+
+    const result = await (compactCmd!.handler as any)(agent, "compact");
+
+    expect((result as any).content).toContain("Compaction not applicable");
+  });
 });

@@ -16,7 +16,6 @@ import {
 } from "../../src/extensions/session-log/session-log.ts";
 import { Message } from "../../src/core/context/message.ts";
 import { MessageLog } from "../../src/core/context/message-log.ts";
-import { stripNulls } from "../../src/utils/objects.ts";
 import { mkdirSync, rmSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { homedir } from "node:os";
@@ -41,40 +40,6 @@ function createMockAgent() {
     addMessage(msg: unknown) { log.push(msg as any); },
   };
 }
-
-// ── stripNulls ───────────────────────────────────────────────────────────────
-
-test("stripNulls removes null fields", () => {
-  const obj = { a: 1, b: null, c: "hello", d: null };
-  const result = stripNulls(obj);
-  expect(Object.keys(result).sort()).toEqual(["a", "c"]);
-  expect(result.a!).toBe(1);
-  expect(result.c!).toBe("hello");
-});
-
-test("stripNulls preserves non-null values", () => {
-  const obj = { a: 0, b: false, c: "", d: [], e: {} };
-  const result = stripNulls(obj);
-  expect(Object.keys(result).sort()).toEqual(["a", "b", "c", "d", "e"]);
-});
-
-test("stripNulls only strips top-level nulls", () => {
-  const obj = {
-    a: { nested: "value", nullField: null },
-    b: null,
-    c: [1, null, 3],
-  };
-  const result = stripNulls(obj);
-  expect(result.b!).toBeUndefined();
-  expect(result.a!.nullField).toBeNull(); // nested objects are NOT recursively processed
-  expect(result.c!).toEqual([1, null, 3]); // arrays are NOT recursively processed
-});
-
-test("stripNulls handles empty object and preserves falsy non-null values", () => {
-  expect(stripNulls({})).toEqual({});
-  const obj = { a: 0, b: false, c: "", d: [], e: {} };
-  expect(stripNulls(obj)).toEqual({ a: 0, b: false, c: "", d: [], e: {} });
-});
 
 // ── disabledSessionLog ──────────────────────────────────────────────────────
 

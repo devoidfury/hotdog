@@ -777,21 +777,6 @@ An array of MCP server definitions. Each server can use either HTTP transport (`
 { "loop": { "maxLoops": 10 } }
 ```
 
-### `metrics`
-
-[Metrics](../src/extensions/metrics) — Export per-run LLM metrics to a CSV file.
-
-Captures model, backend, prompt tokens, completion tokens, TTFT (time to first token), tok/s (throughput), memory usage, and workload label. Each completed run appends a row to the CSV.
-
-| Field | Type | Default | Description |
-|-------|------|---------|-------------|
-| `enabled` | `boolean` | `true` | Enable/disable the extension. |
-| `outputFile` | `string` | `~/.cache/hotdog/metrics.csv` | Path to the CSV output file. |
-
-```json
-{ "metrics": { "outputFile": "./my-metrics.csv" } }
-```
-
 ### `questionTool`
 
 [Question Tool](../src/extensions/question-tool) — Ask the user questions.

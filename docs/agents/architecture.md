@@ -292,7 +292,6 @@ Each extension has:
 | `web-search` | Web search tool — search the web for information |
 | `websocket` | WebSocket server for agent session management — core backend utility for UI extensions |
 | `webui` | Web UI for agent interaction — login, chat, session management |
-| `metrics` | Export per-run LLM metrics to CSV (model, tokens, TTFT, tok/s, memory, workload) |
 
 ### Extension Load Order
 Extensions are loaded in order: REFRESH (0) → CORE_TOOLS (1) → CLI (2) → DEFAULT (10). CLI extensions are loaded early so their subcommand handlers are registered before dispatch. Core tools load before other extensions that depend on them.

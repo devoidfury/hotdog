@@ -38,3 +38,31 @@ export { compileGitignore } from "./gitignore.ts";
 
 // ── Promise utilities ────────────────────────────────────────────────────────
 export { isPromise } from "./promise.ts";
+
+// ── Markdown Parser ──────────────────────────────────────────────────────────
+export {
+  parseMarkdown,
+  createStreamingParser,
+  mdTreeToPlainText,
+  walkTree,
+} from "./md-parser.ts";
+export type {
+  MdDocument,
+  MdBlock,
+  MdInline,
+  MdHeading,
+  MdParagraph,
+  MdCodeBlock,
+  MdList,
+  MdListItem,
+  MdBlockquote,
+  MdHorizontalRule,
+  MdThematicBreak,
+  MdText,
+  MdBold,
+  MdItalic,
+  MdStrikethrough,
+  MdInlineCode,
+  MdLink,
+  MdImage,
+} from "./md-parser.ts";

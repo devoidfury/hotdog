@@ -243,6 +243,7 @@ Escapes input that triggers special behavior (tool call actions, internal marker
 - `objects.ts` — `deepMerge(...sources)`
 - `render.ts` — Template engine with `{{ vars }}`, `{% if %}`, `{% for %}`, filters
 - `json-schema.ts` — `validate()`, `validateParams()`, `formatValidationErrors()`
+- `md-parser.ts` — Markdown parser for LLM output formatting. Key exports: `parseMarkdown(markdown)` — parse complete markdown to `MdDocument` tree; `StreamingMdParser` — incremental/streaming parser with `feed()`, `finalize()`, `reset()`; `createStreamingParser()` — factory; `mdTreeToPlainText(tree)` — flatten tree to plain text; `walkTree(tree, callback)` — tree walker; Block types: `MdHeading`, `MdParagraph`, `MdCodeBlock`, `MdList`, `MdBlockquote`, `MdHorizontalRule`, `MdThematicBreak`; Inline types: `MdText`, `MdBold`, `MdItalic`, `MdStrikethrough`, `MdInlineCode`, `MdLink`, `MdImage`
 
 ### CLI Utilities (`src/utils/cli/`)
 - `cli.ts` — `CliOutputSink` class: formatting + color emission, extends `OutputSink`. Key exports: `formatCompacting()`, `formatToolCall()`, `formatToolResult()`, `formatTokenUsage()`, `formatThinking()`, `formatTaskProgress()`, `CliOutputSink`

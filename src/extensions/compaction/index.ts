@@ -135,6 +135,7 @@ export function create(core: CoreContext): ExtensionInstance | null {
         modelConfig ?? { name: chatModel, temperature: null },
         [],
         abortController.signal,
+        agent.sessionId,
       );
 
       let fullText = "";

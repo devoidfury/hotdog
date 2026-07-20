@@ -115,7 +115,6 @@ export type CommandHandler = (
 export interface CommandDefinition {
   description?: string;
   handler?: CommandHandler;
-  isUiCommand?: boolean;
   matches?: (cmd: string) => boolean;
 }
 
@@ -139,12 +138,7 @@ export class AgentCommandRegistry {
       );
     }
 
-    const normalized: CommandDefinition = {
-      ...definition,
-      isUiCommand: definition.isUiCommand === true,
-    };
-
-    this.#commands.set(name, normalized);
+    this.#commands.set(name, { ...definition });
   }
 
   has(name: string): boolean {

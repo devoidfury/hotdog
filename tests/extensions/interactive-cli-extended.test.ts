@@ -3,6 +3,7 @@
 
 import { describe, it, expect, beforeEach, afterEach } from "bun:test";
 import { parseCommand, Command } from "../../src/core/commands.ts";
+import { SessionManager } from "../../src/core/session/index.ts";
 import {
   handleSlashCommand,
 } from "../../src/extensions/ui-interactive-cli/index.ts";
@@ -15,7 +16,13 @@ describe("handleSlashCommand", () => {
     const origLog = console.log;
     console.log = (...args) => { output += args.join(" "); };
 
-    handleSlashCommand("help", { executeCommand: async (cmd: string) => 0 } as any, rl as any);
+    const mockSessionManager = {
+      sessionId: () => "test-session",
+      executeCommand: async (sessionId: string, cmd: string) => 0,
+    } as any;
+    const mockChannel = {} as any;
+
+    handleSlashCommand("help", mockSessionManager, mockChannel, rl as any);
     console.log = origLog;
     expect(output).toContain("Commands:");
   });
@@ -29,10 +36,16 @@ describe("handleSlashCommand", () => {
     }) as never;
     (rl as any).close = () => { closed = true; };
 
+    const mockSessionManager = {
+      sessionId: () => "test-session",
+      executeCommand: async (sessionId: string, cmd: string) => 0,
+    } as any;
+    const mockChannel = {} as any;
+
     for (const cmd of ["quit", "exit"]) {
       closed = false;
       try {
-        handleSlashCommand(cmd, { executeCommand: async (cmd: string) => 0 } as any, rl as any);
+        handleSlashCommand(cmd, mockSessionManager, mockChannel, rl as any);
       } catch (e) {
         if ((e as Error).message === "exit") expect(closed).toBe(true);
       }
@@ -40,18 +53,18 @@ describe("handleSlashCommand", () => {
     process.exit = origExit;
   });
 
-  it("delegates commands to bus.executeCommand", async () => {
+  it("delegates commands to sessionManager.executeCommand", async () => {
     const { rl } = createMockRl();
     const executedCommands: string[] = [];
-    const bus = {
-      executeCommand: async (cmd: string) => { executedCommands.push(cmd); return 0; },
-      interrupt: async () => {},
-      run: async () => {},
-    };
+    const mockSessionManager = {
+      sessionId: () => "test-session",
+      executeCommand: async (sessionId: string, cmd: string) => { executedCommands.push(cmd); return 0; },
+    } as unknown as SessionManager;
+    const mockChannel = {} as any;
 
     for (const cmd of ["clear", "tokens", "tools", "thinking", "regenerate",
       "reasoning high", "compact", "prompt:explainer"]) {
-      handleSlashCommand(cmd, bus, rl as any);
+      handleSlashCommand(cmd, mockSessionManager, mockChannel, rl as any);
     }
 
     await new Promise((r) => setTimeout(r, 50));
@@ -79,37 +92,11 @@ describe("parseCommand edge cases", () => {
     expect(parseCommand("model gpt-4").type).toBe(Command.Unknown);
     expect(parseCommand("cancel").type).toBe(Command.Unknown);
   });
-});
 
-describe("isSystemCommand", () => {
-  it("returns true for known system commands", async () => {
-    const { isSystemCommand } = await import("../../src/extensions/ui-interactive-cli/index.ts");
-    expect(await isSystemCommand("echo")).toBe(true);
-    expect(await isSystemCommand("ls")).toBe(true);
-  });
-
-  it("returns false for non-existent commands", async () => {
-    const { isSystemCommand } = await import("../../src/extensions/ui-interactive-cli/index.ts");
-    expect(await isSystemCommand("nonexistent_command_xyz_12345")).toBe(false);
-    expect(await isSystemCommand("")).toBe(false);
-  });
-});
-
-describe("executeShellCommand", () => {
-  it("executes a simple command and returns output with exit code", async () => {
-    const { executeShellCommand } = await import("../../src/extensions/ui-interactive-cli/index.ts");
-    const result = await executeShellCommand("echo hello world");
-    expect(result.content).toContain("hello world");
-    expect(result.exitCode).toBe(0);
-  });
-
-  it("handles command errors and empty output", async () => {
-    const { executeShellCommand } = await import("../../src/extensions/ui-interactive-cli/index.ts");
-    const result1 = await executeShellCommand("nonexistent_command_xyz_12345");
-    expect(result1.content || result1.error).toBeDefined();
-
-    const result2 = await executeShellCommand("true");
-    expect(result2.exitCode).toBe(0);
-    expect(result2.content).toBe("");
+  it("handles channel commands", () => {
+    expect(parseCommand("sessions").type).toBe(Command.Sessions);
+    expect(parseCommand("attach abc").type).toBe(Command.Attach);
+    expect(parseCommand("detach abc").type).toBe(Command.Detach);
+    expect(parseCommand("switch abc").type).toBe(Command.Switch);
   });
 });

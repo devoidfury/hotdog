@@ -73,6 +73,8 @@ export * from "./token-tracker.ts";
 export * from "./session/index.ts";
 
 // Session components
-export * from "./session/agent-sink.ts";
 export * from "./session/task-manager.ts";
 export * from "./session/message-bus.ts";
+
+// Channel
+export * from "./channel.ts";

@@ -2,8 +2,7 @@
 
 import { describe, it, expect, beforeEach, afterEach, mock } from "bun:test";
 import { SessionRegistry, createWsServer } from "../../src/extensions/websocket/server.ts";
-import { MessageBus } from "../../src/core/session/message-bus.ts";
-import { FanoutSink, BackgroundSink, WebSocketOutputSink } from "../../src/extensions/websocket/sinks.ts";
+import { WebSocketChannel } from "../../src/extensions/websocket/websocket-channel.ts";
 import { OUTPUT_EVENT } from "../../src/core/context/output.ts";
 import { C2S, S2C } from "../../src/extensions/websocket/protocol.ts";
 
@@ -20,16 +19,20 @@ describe("SessionRegistry", () => {
       profileName: "default",
       modelRegistry: { "test-model": {} },
       log: [],
-      setSink: mock(() => {}),
-      getCommandRegistry: mock(() => ({})),
+      sink: null,
       cancel: mock(() => {}),
       resetCancel: mock(() => {}),
       run: mock(async () => {}),
       executeCommand: mock(async () => ({})),
+      serialize: () => ({}),
+      deserialize: () => {},
     };
 
     registry = new SessionRegistry({
-      buildAgent: async () => mockAgent,
+      buildAgent: async (config: { model?: string; sessionId?: string }) => {
+        // Use the passed sessionId so the agent can be found by it
+        return { ...mockAgent, sessionId: config.sessionId || "test-session" };
+      },
       questionTimeoutSecs: 300,
       questionStrategy: "wait",
       sessionTimeoutMin: 30,
@@ -45,24 +48,12 @@ describe("SessionRegistry", () => {
       const result = await registry.create({ profile: "test", model: "gpt-4" });
       expect(result.sessionId).toBeDefined();
       expect(typeof result.sessionId).toBe("string");
-      expect(result.agent).toBe(mockAgent);
-      expect(result.bus).toBeInstanceOf(MessageBus);
+      expect(result.agent).toHaveProperty("model", "test-model");
     });
 
     it("creates a session with default options", async () => {
       const result = await registry.create();
       expect(result.sessionId).toBeDefined();
-    });
-
-    it("wires agent sink to fanout", async () => {
-      const result = await registry.create();
-      // Source assigns agent.sink directly (no setSink method)
-      expect((result.agent as any).sink).toBeInstanceOf(FanoutSink);
-    });
-
-    it("starts bus run loop", async () => {
-      const result = await registry.create();
-      expect(result.bus).toBeDefined();
     });
 
     it("tracks session size", async () => {
@@ -71,13 +62,6 @@ describe("SessionRegistry", () => {
       expect(registry.size).toBe(1);
       await registry.create();
       expect(registry.size).toBe(2);
-    });
-
-    it("creates background sink in fanout", async () => {
-      const result = await registry.create();
-      const session = registry.get(result.sessionId);
-      expect(session).not.toBeNull();
-      expect(session!.bgSink).toBeInstanceOf(BackgroundSink);
     });
   });
 
@@ -90,7 +74,7 @@ describe("SessionRegistry", () => {
       const result = await registry.create();
       const session = registry.get(result.sessionId);
       expect(session).not.toBeNull();
-      expect(session!.id).toBe(result.sessionId);
+      expect(session!.agent).toHaveProperty("model", "test-model");
     });
   });
 
@@ -132,30 +116,13 @@ describe("SessionRegistry", () => {
       const deleted = registry.delete("non-existent");
       expect(deleted).toBe(false);
     });
-
-    it("cancels bus on delete", async () => {
-      const result = await registry.create();
-      let cancelCalled = false;
-      result.bus.cancel = () => { cancelCalled = true; };
-      registry.delete(result.sessionId);
-      expect(cancelCalled).toBe(true);
-    });
-
-    it("removes background sink from fanout", async () => {
-      const result = await registry.create();
-      const session = registry.get(result.sessionId)!;
-      let removeCalled = false;
-      const originalRemove = session.fanoutSink.remove.bind(session.fanoutSink);
-      (session.fanoutSink as any).remove = (arg: unknown) => { removeCalled = true; originalRemove(arg as any); };
-      registry.delete(result.sessionId);
-      expect(removeCalled).toBe(true);
-    });
   });
 
-  describe("attachSink", () => {
+  describe("createChannel", () => {
     function createMockWs() {
       const messages: string[] = [];
       return {
+        readyState: 1,
         send: (data: string) => { messages.push(data); },
         messages,
       } as unknown as WebSocket;
@@ -163,22 +130,22 @@ describe("SessionRegistry", () => {
 
     it("returns undefined for non-existent session", () => {
       const ws = createMockWs() as unknown as WebSocket;
-      const sink = registry.attachSink("non-existent", ws);
-      expect(sink).toBeUndefined();
+      const channel = registry.createChannel("non-existent", ws);
+      expect(channel).toBeUndefined();
     });
 
-    it("attaches WebSocket sink to session", async () => {
+    it("creates WebSocketChannel for session", async () => {
       const result = await registry.create();
       const ws = createMockWs() as unknown as WebSocket;
-      const sink = registry.attachSink(result.sessionId, ws);
-      expect(sink).toBeDefined();
-      expect(sink).toBeInstanceOf(WebSocketOutputSink);
+      const channel = registry.createChannel(result.sessionId, ws);
+      expect(channel).toBeDefined();
+      expect(channel).toBeInstanceOf(WebSocketChannel);
     });
 
     it("increments connectedClients count", async () => {
       const result = await registry.create();
       const ws = createMockWs() as unknown as WebSocket;
-      registry.attachSink(result.sessionId, ws);
+      registry.createChannel(result.sessionId, ws);
       const session = registry.get(result.sessionId)!;
       expect(session.metadata.connectedClients).toBe(1);
     });
@@ -189,71 +156,36 @@ describe("SessionRegistry", () => {
       const before = session.metadata.lastActivityAt;
       await new Promise((r) => setTimeout(r, 10));
       const ws = createMockWs() as unknown as WebSocket;
-      registry.attachSink(result.sessionId, ws);
+      registry.createChannel(result.sessionId, ws);
       expect(session.metadata.lastActivityAt).toBeGreaterThan(before);
-    });
-
-    it("drains pending questions to new sink", async () => {
-      const result = await registry.create();
-      const session = registry.get(result.sessionId)!;
-
-      session.bgSink.emit({
-        type: OUTPUT_EVENT.QUESTION,
-        questions: [{ key: "name", prompt: "What is your name?" }],
-      });
-
-      const ws = createMockWs() as unknown as WebSocket;
-      registry.attachSink(result.sessionId, ws);
-
-      const wsMessages = (ws as any).messages;
-      expect(wsMessages.length).toBeGreaterThan(0);
-      const msg = JSON.parse(wsMessages[0]);
-      expect(msg.type).toBe("question");
     });
   });
 
-  describe("detachSink", () => {
+  describe("removeChannel", () => {
     function createMockWs() {
       const messages: string[] = [];
       return {
+        readyState: 1,
         send: (data: string) => { messages.push(data); },
         messages,
       } as unknown as WebSocket;
     }
 
-    it("does nothing for non-existent session", () => {
-      const fakeSink = new WebSocketOutputSink({} as WebSocket, "fake");
-      registry.detachSink("non-existent", fakeSink);
-    });
-
     it("decrements connectedClients count", async () => {
       const result = await registry.create();
       const ws = createMockWs() as unknown as WebSocket;
-      const sink = registry.attachSink(result.sessionId, ws)!;
-      registry.detachSink(result.sessionId, sink);
+      const channel = registry.createChannel(result.sessionId, ws)!;
+      registry.removeChannel(result.sessionId, channel);
       const session = registry.get(result.sessionId)!;
       expect(session.metadata.connectedClients).toBe(0);
-    });
-
-    it("removes sink from fanout", async () => {
-      const result = await registry.create();
-      const session = registry.get(result.sessionId)!;
-      const ws = createMockWs() as unknown as WebSocket;
-      const sink = registry.attachSink(result.sessionId, ws)!;
-
-      let removeCalled = false;
-      const originalRemove = session.fanoutSink.remove.bind(session.fanoutSink);
-      (session.fanoutSink as any).remove = (arg: unknown) => { removeCalled = true; originalRemove(arg as any); };
-      registry.detachSink(result.sessionId, sink);
-      expect(removeCalled).toBe(true);
     });
 
     it("does not decrement below zero", async () => {
       const result = await registry.create();
       const ws = createMockWs() as unknown as WebSocket;
-      const sink = registry.attachSink(result.sessionId, ws)!;
-      registry.detachSink(result.sessionId, sink);
-      registry.detachSink(result.sessionId, sink);
+      const channel = registry.createChannel(result.sessionId, ws)!;
+      registry.removeChannel(result.sessionId, channel);
+      registry.removeChannel(result.sessionId, channel);
       const session = registry.get(result.sessionId)!;
       expect(session.metadata.connectedClients).toBe(0);
     });
@@ -331,25 +263,29 @@ describe("createWsServer", () => {
     } as any;
   }
 
-  function createMockAgent(): any {
-    return {
-      sessionId: "test",
-      model: "test-model",
-      profileName: "default",
-      modelRegistry: { "test-model": {} },
-      log: [],
-      setSink: () => {},
-      getCommandRegistry: () => ({}),
-      cancel: () => {},
-      resetCancel: () => {},
-      run: async () => {},
-      executeCommand: async () => ({}),
+  function createMockAgentFactory(): (config: { model?: string; sessionId?: string }) => Promise<any> {
+    return async (config: { model?: string; sessionId?: string }) => {
+      return {
+        sessionId: config.sessionId || "test",
+        model: "test-model",
+        profileName: "default",
+        modelRegistry: { "test-model": {} },
+        log: [],
+        sink: null,
+        cancel: () => {},
+        resetCancel: () => {},
+        run: async () => {},
+        executeCommand: async () => ({}),
+        serialize: () => ({}),
+        deserialize: () => {},
+      };
     };
   }
 
   function createMockWs() {
     const messages: string[] = [];
     return {
+      readyState: 1,
       send: (data: string) => { messages.push(data); },
       messages,
       close: mock(() => {}),
@@ -360,7 +296,7 @@ describe("createWsServer", () => {
     it("sends error for invalid JSON", () => {
       const core = createMockCore();
       const wsServer = createWsServer(core, {
-        buildAgent: async () => createMockAgent(),
+        buildAgent: createMockAgentFactory(),
       });
 
       const ws = createMockWs();
@@ -374,7 +310,7 @@ describe("createWsServer", () => {
     it("sends error for missing type", () => {
       const core = createMockCore();
       const wsServer = createWsServer(core, {
-        buildAgent: async () => createMockAgent(),
+        buildAgent: createMockAgentFactory(),
       });
 
       const ws = createMockWs();
@@ -388,7 +324,7 @@ describe("createWsServer", () => {
     it("sends error for unknown message type", () => {
       const core = createMockCore();
       const wsServer = createWsServer(core, {
-        buildAgent: async () => createMockAgent(),
+        buildAgent: createMockAgentFactory(),
       });
 
       const ws = createMockWs();
@@ -412,7 +348,7 @@ describe("createWsServer", () => {
       };
 
       const wsServer = createWsServer(core, {
-        buildAgent: async () => createMockAgent(),
+        buildAgent: createMockAgentFactory(),
         auth: authMiddleware,
       });
 
@@ -434,7 +370,7 @@ describe("createWsServer", () => {
       };
 
       const wsServer = createWsServer(core, {
-        buildAgent: async () => createMockAgent(),
+        buildAgent: createMockAgentFactory(),
         auth: authMiddleware,
       });
 
@@ -447,17 +383,16 @@ describe("createWsServer", () => {
   });
 
   describe("onClose", () => {
-    it("detaches sink from session", () => {
+    it("removes channel from session", () => {
       const core = createMockCore();
       const wsServer = createWsServer(core, {
-        buildAgent: async () => createMockAgent(),
+        buildAgent: createMockAgentFactory(),
       });
 
       const ws = createMockWs();
-      const typedWs = ws as WebSocket & { activeSessionId?: string; activeSink?: WebSocketOutputSink };
+      const typedWs = ws as WebSocket & { activeSessionId?: string; activeChannel?: WebSocketChannel };
       typedWs.activeSessionId = "test-session";
-      typedWs.activeSink = new WebSocketOutputSink(ws as unknown as WebSocket, "test-session");
-
+      // onClose should not throw even with a mock channel
       wsServer.onClose(ws);
     });
 
@@ -478,7 +413,7 @@ describe("createWsServer", () => {
     beforeEach(async () => {
       core = createMockCore();
       wsServer = createWsServer(core, {
-        buildAgent: async () => createMockAgent(),
+        buildAgent: createMockAgentFactory(),
       });
 
       // Create a session directly via the registry

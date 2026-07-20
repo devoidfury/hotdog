@@ -15,7 +15,6 @@ export interface CommandResult {
 export interface CommandHandlerDef {
   handler: CommandHandler;
   description: string;
-  isUiCommand?: boolean;
 }
 
 // Re-export for external use
@@ -35,17 +34,19 @@ export async function handleClear(agent: CommandAgent, _value?: string | null): 
 }
 
 /**
- * Handler for /quit — tells the UI to quit.
+ * Handler for /quit — handled at the Channel level.
+ * This fallback exists for direct agent command execution.
  */
 export function handleQuit(): CommandResult {
-  return { action: ACTIONS.ERROR, error: "UI command: quit" };
+  return { action: ACTIONS.DISPLAY, content: "Quit (use /quit to exit)" };
 }
 
 /**
- * Handler for /help — tells the UI to show help.
+ * Handler for /help — handled at the Channel level.
+ * This fallback exists for direct agent command execution.
  */
 export function handleHelp(): CommandResult {
-  return { action: ACTIONS.ERROR, error: "UI command: help" };
+  return { action: ACTIONS.DISPLAY, content: "Help (use /help for commands)" };
 }
 
 /**
@@ -175,8 +176,8 @@ export function handleReasoning(agent: CommandAgent, value?: string | null): Com
  */
 export const CORE_COMMAND_HANDLERS: Record<string, CommandHandlerDef> = {
   [Command.Clear]: { handler: handleClear, description: "Clear context" },
-  [Command.Quit]: { handler: handleQuit, description: "Exit", isUiCommand: true },
-  [Command.Help]: { handler: handleHelp, description: "Show help", isUiCommand: true },
+  [Command.Quit]: { handler: handleQuit, description: "Exit" },
+  [Command.Help]: { handler: handleHelp, description: "Show help" },
   [Command.Tokens]: { handler: handleTokens, description: "Show token usage" },
   [Command.Tools]: { handler: handleTools, description: "Toggle tool call display" },
   [Command.Thinking]: { handler: handleThinking, description: "Toggle thinking display" },

@@ -35,14 +35,12 @@ describe("AgentCommandRegistry", () => {
     expect(registry.get("test")!.description).toBe("Second");
   });
 
-  it("normalizes isUiCommand flag", () => {
+  it("stores command definitions without isUiCommand", () => {
     const registry = createCommandRegistry();
-    registry.register("ui-cmd", { isUiCommand: true });
-    registry.register("agent-cmd", { isUiCommand: false });
-    registry.register("no-flag", {});
-    expect(registry.get("ui-cmd")!.isUiCommand).toBe(true);
-    expect(registry.get("agent-cmd")!.isUiCommand).toBe(false);
-    expect(registry.get("no-flag")!.isUiCommand).toBe(false);
+    registry.register("ui-cmd", { description: "UI command" });
+    registry.register("agent-cmd", { description: "Agent command" });
+    expect(registry.get("ui-cmd")!.description).toBe("UI command");
+    expect(registry.get("agent-cmd")!.description).toBe("Agent command");
   });
 
   it("checks if raw command matches registered command", () => {

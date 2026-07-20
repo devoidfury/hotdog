@@ -35,6 +35,7 @@ export interface ModelConfig {
 export interface LlmClientOptions {
   baseUrl?: string | null;
   apiKey?: string | null;
+  /** Default sessionId for x-session-affinity header — overridden by per-request sessionId. */
   sessionId?: string;
   loud?: boolean;
   stream?: boolean;
@@ -258,18 +259,20 @@ export class LlmClient {
    * @param messages - Chat messages.
    * @param model - Model name.
    * @param tools - Tool definitions.
+   * @param sessionId - Optional session ID for x-session-affinity header (overrides instance default).
    * @returns Async generator yielding stream events.
    */
   async *chatStream(
     messages: Array<Record<string, unknown>>,
     model: string,
     tools: Array<Record<string, unknown>> = [],
+    sessionId?: string,
   ): AsyncGenerator<StreamEvent> {
     const modelConfig: ModelConfig = {
       name: model,
       temperature: null,
     };
-    yield* this.chatStreamWithModelConfig(messages, modelConfig, tools);
+    yield* this.chatStreamWithModelConfig(messages, modelConfig, tools, sessionId);
   }
 
   /**
@@ -280,6 +283,7 @@ export class LlmClient {
    * @param modelConfig - Model configuration.
    * @param tools - Tool definitions.
    * @param cancelToken - AbortSignal for cancellation.
+   * @param sessionId - Optional session ID for x-session-affinity header (overrides instance default).
    * @returns Async generator yielding stream events.
    */
   async *chatStreamCancellable(
@@ -287,6 +291,7 @@ export class LlmClient {
     modelConfig: ModelConfig,
     tools: Array<Record<string, unknown>> = [],
     cancelToken: AbortSignal | null = null,
+    sessionId?: string,
   ): AsyncGenerator<StreamEvent> {
     const request = this.buildChatRequest(messages, modelConfig, tools, true);
     const { url, apiKey } = this.resolveProviderSettings(modelConfig.name);
@@ -309,6 +314,7 @@ export class LlmClient {
 
     try {
       // Wrap the request in a timeout
+      const effectiveSessionId = sessionId || this.sessionId;
       const doRequestWithTimeout = async () => {
         const timeoutId = setTimeout(
           () => abortController.abort(),
@@ -320,6 +326,7 @@ export class LlmClient {
             apiKey,
             request,
             abortController.signal,
+            effectiveSessionId,
           );
         } finally {
           clearTimeout(timeoutId);
@@ -347,17 +354,19 @@ export class LlmClient {
    * @param messages - Chat messages.
    * @param modelConfig - Model configuration.
    * @param tools - Tool definitions.
+   * @param sessionId - Optional session ID for x-session-affinity header (overrides instance default).
    * @returns Async generator yielding stream events.
    */
   async *chatStreamWithModelConfig(
     messages: Array<Record<string, unknown>>,
     modelConfig: ModelConfig,
     tools: Array<Record<string, unknown>> = [],
+    sessionId?: string,
   ): AsyncGenerator<StreamEvent> {
     const request = this.buildChatRequest(messages, modelConfig, tools, true);
     const { url, apiKey } = this.resolveProviderSettings(modelConfig.name);
 
-    const resp = await this._doRequest(url, apiKey, request, null);
+    const resp = await this._doRequest(url, apiKey, request, null, sessionId || this.sessionId);
     yield* this._processSSE(resp);
   }
 
@@ -369,6 +378,7 @@ export class LlmClient {
    * @param apiKey - API key for authentication.
    * @param request - Request body.
    * @param signal - Abort signal for cancellation.
+   * @param sessionId - Session ID for x-session-affinity header (per-request, overrides instance default).
    * @returns HTTP response.
    */
   async _doRequest(
@@ -376,13 +386,15 @@ export class LlmClient {
     apiKey: string | null,
     request: Record<string, unknown>,
     signal: AbortSignal | null,
+    sessionId?: string,
   ): Promise<Response> {
     const headers: Record<string, string> = {
       "Content-Type": "application/json",
       "User-Agent": `hotdog/${VERSION}`,
     };
     if (apiKey) headers["Authorization"] = `Bearer ${apiKey}`;
-    if (this.sessionId) headers["x-session-affinity"] = this.sessionId;
+    const effectiveSessionId = sessionId || this.sessionId;
+    if (effectiveSessionId) headers["x-session-affinity"] = effectiveSessionId;
     headers["Connection"] = "keep-alive";
 
     const resp = await fetch(`${url}/v1/chat/completions`, {

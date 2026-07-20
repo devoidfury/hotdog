@@ -58,16 +58,16 @@ describe("handleClear", () => {
 });
 
 describe("handleQuit", () => {
-  it("returns UI quit command error", () => {
+  it("returns quit message", () => {
     const result = handleQuit();
-    expect(result.error).toBe("UI command: quit");
+    expect(result.content).toContain("Quit");
   });
 });
 
 describe("handleHelp", () => {
-  it("returns UI help command error", () => {
+  it("returns help message", () => {
     const result = handleHelp();
-    expect(result.error).toBe("UI command: help");
+    expect(result.content).toContain("Help");
   });
 });
 
@@ -245,10 +245,11 @@ describe("CORE_COMMAND_HANDLERS", () => {
     expect(CORE_COMMAND_HANDLERS[Command.Reasoning]).toBeDefined();
   });
 
-  it("UI commands are marked as isUiCommand", () => {
-    expect(CORE_COMMAND_HANDLERS[Command.Quit]!.isUiCommand).toBe(true);
-    expect(CORE_COMMAND_HANDLERS[Command.Help]!.isUiCommand).toBe(true);
-    expect(CORE_COMMAND_HANDLERS[Command.Clear]!.isUiCommand).toBeUndefined();
+  it("quit and help are channel-level commands (no isUiCommand)", () => {
+    const quitDef = CORE_COMMAND_HANDLERS[Command.Quit]! as unknown as Record<string, unknown>;
+    const helpDef = CORE_COMMAND_HANDLERS[Command.Help]! as unknown as Record<string, unknown>;
+    expect(quitDef.isUiCommand).toBeUndefined();
+    expect(helpDef.isUiCommand).toBeUndefined();
   });
 
   it("handlers have descriptions", () => {

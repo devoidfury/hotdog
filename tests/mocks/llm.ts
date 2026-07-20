@@ -104,6 +104,7 @@ export class MockLLMClient {
     modelConfig: Record<string, unknown>,
     toolDefs: Record<string, unknown>[],
     cancelSignal: AbortSignal | null | undefined,
+    sessionId?: string,
   ): AsyncGenerator<Record<string, unknown>, void, unknown> | (() => AsyncGenerator<Record<string, unknown>, void, unknown>) {
     this.callCount++;
     this.lastMessages = messages;

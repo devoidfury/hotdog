@@ -21,6 +21,10 @@ export const Command = {
   Tokens: "tokens",
   Regenerate: "regenerate",
   Reasoning: "reasoning",
+  Sessions: "sessions",
+  Attach: "attach",
+  Detach: "detach",
+  Switch: "switch",
   Unknown: "unknown",
 } as const;
 
@@ -121,6 +125,23 @@ export function parseCommand(
     const parts = cmd.split(/\s+/);
     const effort = parts.slice(1).join(" ").trim();
     return { type: Command.Reasoning, value: effort || null };
+  }
+
+  // Channel-level commands
+  if (cmd === "sessions") {
+    return { type: Command.Sessions, value: null };
+  }
+  if (cmd === "attach" || cmd.startsWith("attach ")) {
+    const sessionId = cmd.replace("attach ", "").trim();
+    return { type: Command.Attach, value: sessionId || null };
+  }
+  if (cmd === "detach" || cmd.startsWith("detach ")) {
+    const sessionId = cmd.replace("detach ", "").trim();
+    return { type: Command.Detach, value: sessionId || null };
+  }
+  if (cmd === "switch" || cmd.startsWith("switch ")) {
+    const sessionId = cmd.replace("switch ", "").trim();
+    return { type: Command.Switch, value: sessionId || null };
   }
 
   return { type: Command.Unknown, value: cmd };

@@ -4,16 +4,17 @@
 import crypto from "node:crypto";
 import { OUTPUT_EVENT } from "../../core/context/output.ts";
 import { HOOKS } from "../../core/hooks.ts";
-import { MessageBus } from "../../core/session/message-bus.ts";
-import type { ProviderConfig } from "../../core/llm-client/client.ts";
-import { FanoutSink, WebSocketOutputSink, BackgroundSink } from "./sinks.ts";
+import { SessionManager } from "../../core/session/index.ts";
+import { WebSocketChannel } from "./websocket-channel.ts";
 import { C2S, S2C, C2SMessage } from "./protocol.ts";
 import { logger } from "../../core/logger.ts";
-import { type CommandRegistryLike } from "../../core/commands.ts";
+import { LlmClient, type ProviderConfig } from "../../core/llm-client/client.ts";
+import { MarkerMangler } from "../../core/marker-mangler.ts";
 import type { CoreContext } from "../../core/extensions/types.ts";
 import type { AuthMiddleware } from "./auth.ts";
 import { Agent } from "../../core/agent.ts";
 
+// ── Types ───────────────────────────────────────────────────────────────────
 
 interface SessionMetadata {
   profile: string;
@@ -25,16 +26,6 @@ interface SessionMetadata {
   questionTimeoutSecs: number;
 }
 
-interface Session {
-  id: string;
-  agent: unknown;
-  bus: MessageBus;
-  busRunLoop: Promise<unknown>;
-  fanoutSink: FanoutSink;
-  bgSink: BackgroundSink;
-  metadata: SessionMetadata;
-}
-
 interface CreateSessionOptions {
   profile?: string;
   model?: string;
@@ -44,6 +35,7 @@ interface CreateSessionOptions {
 
 interface SessionRegistryOptions {
   buildAgent: (config: { model?: string; sessionId?: string }) => Promise<unknown>;
+  llmClient?: unknown;
   questionTimeoutSecs?: number;
   questionStrategy?: string;
   sessionTimeoutMin?: number;
@@ -69,15 +61,15 @@ export interface WsServer {
 // ── SessionRegistry ─────────────────────────────────────────────────────────
 
 /**
- * Registry of agent sessions.
- * Each session has an agent, a message bus, and a FanoutSink that
- * distributes output to connected WebSocket clients + a background sink.
+ * Registry of agent sessions backed by SessionManager.
+ * Each session has an agent, a message bus (owned by SessionManager),
+ * and WebSocketChannel instances for connected clients.
  *
  * Sessions persist even when no clients are connected. Idle sessions
  * are cleaned up after a configurable timeout.
  */
 export class SessionRegistry {
-  #sessions = new Map<string, Session>(); // sessionId → Session
+  #sessionManager: SessionManager;
   #buildAgent: (config: { model?: string; sessionId?: string }) => Promise<unknown>;
   #questionTimeoutSecs: number;
   #questionStrategy: string;
@@ -85,12 +77,26 @@ export class SessionRegistry {
   #timeoutMin: number;
   // All active WebSocket connections — used for broadcasting events to all clients.
   #allConnections = new Set<WebSocket>();
+  // Per-session metadata
+  #metadata: Map<string, SessionMetadata>;
+  // Per-session WebSocketChannel instances
+  #channels: Map<string, Set<WebSocketChannel>>;
 
-  constructor({ buildAgent, questionTimeoutSecs = 300, questionStrategy = "wait", sessionTimeoutMin = 30 }: SessionRegistryOptions) {
+  constructor({ buildAgent, llmClient, questionTimeoutSecs = 300, questionStrategy = "wait", sessionTimeoutMin = 30 }: SessionRegistryOptions) {
     this.#buildAgent = buildAgent;
     this.#questionTimeoutSecs = questionTimeoutSecs;
     this.#questionStrategy = questionStrategy;
     this.#timeoutMin = sessionTimeoutMin;
+    this.#metadata = new Map();
+    this.#channels = new Map();
+
+    // Create SessionManager — passes llmClient through buildAgent config
+    this.#sessionManager = new SessionManager({
+      hooks: { notifyHooks: () => {} }, // No-op hooks for now
+      extensions: null,
+      buildAgent: buildAgent as (config: Record<string, unknown>) => Promise<import("../../core/session/index.ts").AgentLike>,
+      llmClient,
+    });
   }
 
   /**
@@ -125,70 +131,45 @@ export class SessionRegistry {
   }
 
   /**
-   * Create a new session with its own agent and message bus.
-   * The bus run loop starts immediately.
+   * Create a new session with its own agent.
+   * The SessionManager creates the internal MessageBus automatically.
    */
-  async create({ profile, model, questionStrategy, questionTimeoutSecs }: CreateSessionOptions = {}): Promise<{ sessionId: string; agent: unknown; bus: MessageBus }> {
+  async create({ profile, model, questionStrategy, questionTimeoutSecs }: CreateSessionOptions = {}): Promise<{ sessionId: string; agent: unknown }> {
     const sessionId = crypto.randomUUID();
 
     // Build the agent
     const agent = await this.#buildAgent({ model, sessionId });
 
-    // Create a minimal session-manager-like wrapper so the bus can access the agent
-    const sessionManager = {
-      getAgent: () => agent,
-      sessionId: () => (agent as Agent)?.sessionId,
-    };
-
-    // Build fanout sink with background sink
-    const fanout = new FanoutSink();
-    const bgSink = new BackgroundSink();
-    fanout.add(bgSink);
-
-    // Create the message bus with a broadcast callback for session state events.
-    // This ensures all connected clients receive working state changes,
-    // not just clients attached to this session.
-    const bus = new MessageBus({
-      sessionManager: sessionManager as unknown as { getAgent: () => { hooks: { runHookPipeline: (hookName: string, data: unknown, opts?: { shouldStop?: (result: unknown) => boolean }) => Promise<unknown> }; run: (text: string) => Promise<unknown>; resetCancel: () => void; cancel: () => void; commandRegistry: CommandRegistryLike | undefined; executeCommand: (cmd: unknown) => Promise<unknown> } | undefined },
-      sink: fanout,
-      broadcastCallback: (msg: Record<string, unknown>) => this.broadcast(msg),
+    // Store metadata
+    this.#metadata.set(sessionId, {
+      profile: profile || "default",
+      model: (agent as Agent)?.model || "",
+      createdAt: Date.now(),
+      lastActivityAt: Date.now(),
+      connectedClients: 0,
+      questionStrategy: questionStrategy || this.#questionStrategy,
+      questionTimeoutSecs: questionTimeoutSecs || this.#questionTimeoutSecs,
     });
 
-    // Wire agent's sink to the fanout so agent emits events to fanout
-    if (agent) (agent as Agent).sink = fanout;
-
-    // Start the bus run loop (non-blocking — it awaits messages as they arrive)
-    const runLoop = bus.run().catch((err: unknown) => {
-      logger.error(`[session ${sessionId}] bus error:`, err as Record<string, unknown>);
+    // Register with SessionManager — this creates the MessageBus and wires the sink
+    this.#sessionManager.registerAgent(agent as unknown as import("../../core/session/index.ts").AgentLike, {
+      profile: profile || "default",
+      model,
     });
 
-    const session: Session = {
-      id: sessionId,
-      agent,
-      bus,
-      busRunLoop: runLoop,
-      fanoutSink: fanout,
-      bgSink,
-      metadata: {
-        profile: profile || "default",
-        model: (agent as Agent)?.model || "",
-        createdAt: Date.now(),
-        lastActivityAt: Date.now(),
-        connectedClients: 0,
-        questionStrategy: questionStrategy || this.#questionStrategy,
-        questionTimeoutSecs: questionTimeoutSecs || this.#questionTimeoutSecs,
-      },
-    };
-
-    this.#sessions.set(sessionId, session);
-    return { sessionId, agent, bus };
+    return { sessionId, agent };
   }
 
   /**
    * Get a session by ID.
    */
-  get(sessionId: string): Session | null {
-    return this.#sessions.get(sessionId) || null;
+  get(sessionId: string): { agent: unknown; metadata: SessionMetadata } | null {
+    const metadata = this.#metadata.get(sessionId);
+    if (!metadata) return null;
+    // Look up agent from the store — try by sessionId first, then from SessionStore
+    const agent = this.#sessionManager.getAgentBySessionId(sessionId);
+    if (!agent) return null;
+    return { agent, metadata };
   }
 
   /**
@@ -196,32 +177,39 @@ export class SessionRegistry {
    */
   list(): Array<{ id: string; profile: string; model: string; createdAt: number; lastActivityAt: number; connectedClients: number }> {
     const result: Array<{ id: string; profile: string; model: string; createdAt: number; lastActivityAt: number; connectedClients: number }> = [];
-    for (const [id, s] of this.#sessions) {
+    for (const [id, meta] of this.#metadata) {
+      const agent = this.#sessionManager.getAgentBySessionId(id);
       result.push({
         id,
-        profile: s.metadata.profile,
-        model: (s.agent as Agent)?.model || s.metadata.model,
-        createdAt: s.metadata.createdAt,
-        lastActivityAt: s.metadata.lastActivityAt,
-        connectedClients: s.metadata.connectedClients,
+        profile: meta.profile,
+        model: (agent as Agent)?.model || meta.model,
+        createdAt: meta.createdAt,
+        lastActivityAt: meta.lastActivityAt,
+        connectedClients: meta.connectedClients,
       });
     }
     return result;
   }
 
   /**
-   * Delete a session — stops the bus, cleans up sinks.
+   * Delete a session — cancels the bus, cleans up metadata.
    */
   delete(sessionId: string): boolean {
-    const s = this.#sessions.get(sessionId);
-    if (!s) return false;
+    const meta = this.#metadata.get(sessionId);
+    if (!meta) return false;
 
-    // Cancel the bus so the run loop exits
-    s.bus.cancel();
+    // Clean up channels
+    const channels = this.#channels.get(sessionId);
+    if (channels) {
+      for (const ch of channels) {
+        ch.close();
+      }
+      this.#channels.delete(sessionId);
+    }
 
-    // Remove sinks from fanout
-    s.fanoutSink.remove(s.bgSink);
-    this.#sessions.delete(sessionId);
+    // Delete session — cancels bus, removes event handlers, removes from store
+    this.#sessionManager.deleteSession(sessionId);
+    this.#metadata.delete(sessionId);
     return true;
   }
 
@@ -229,53 +217,60 @@ export class SessionRegistry {
    * Rename a session (update its profile label).
    */
   rename(sessionId: string, newName: string): boolean {
-    const s = this.#sessions.get(sessionId);
-    if (!s) return false;
-    s.metadata.profile = newName;
+    const meta = this.#metadata.get(sessionId);
+    if (!meta) return false;
+    meta.profile = newName;
     return true;
   }
 
   /**
-   * Attach a WebSocket output sink to a session.
+   * Create a WebSocketChannel for a session and attach it.
    */
-  attachSink(sessionId: string, ws: WebSocket): WebSocketOutputSink | undefined {
-    const s = this.#sessions.get(sessionId);
-    if (!s) return undefined;
+  createChannel(sessionId: string, ws: WebSocket): WebSocketChannel | undefined {
+    const session = this.get(sessionId);
+    if (!session) return undefined;
 
-    const wsSink = new WebSocketOutputSink(ws, sessionId);
-    s.fanoutSink.add(wsSink);
-    s.metadata.connectedClients += 1;
-    s.metadata.lastActivityAt = Date.now();
+    const channel = new WebSocketChannel({
+      sessionManager: this.#sessionManager,
+      ws,
+      sessionId,
+      broadcastCallback: (msg: Record<string, unknown>) => this.broadcast(msg),
+    });
 
-    // Drain any pending questions to the new sink
-    const pending = s.bgSink.drainPendingQuestions();
-    for (const questions of pending) {
-      wsSink.emit({
-        type: OUTPUT_EVENT.QUESTION,
-        questions,
-      });
+    // Track the channel
+    if (!this.#channels.has(sessionId)) {
+      this.#channels.set(sessionId, new Set());
     }
+    this.#channels.get(sessionId)!.add(channel);
 
-    return wsSink;
+    // Update metadata
+    session.metadata.connectedClients += 1;
+    session.metadata.lastActivityAt = Date.now();
+
+    return channel;
   }
 
   /**
-   * Detach a WebSocket output sink from a session.
+   * Remove a WebSocketChannel from a session.
    */
-  detachSink(sessionId: string, wsSink: WebSocketOutputSink): void {
-    const s = this.#sessions.get(sessionId);
-    if (!s) return;
-    s.fanoutSink.remove(wsSink);
-    s.metadata.connectedClients = Math.max(0, s.metadata.connectedClients - 1);
+  removeChannel(sessionId: string, channel: WebSocketChannel): void {
+    const channels = this.#channels.get(sessionId);
+    if (!channels) return;
+    channels.delete(channel);
+
+    const meta = this.#metadata.get(sessionId);
+    if (meta) {
+      meta.connectedClients = Math.max(0, meta.connectedClients - 1);
+    }
   }
 
   /**
    * Touch session (update lastActivityAt) to prevent idle cleanup.
    */
   touch(sessionId: string): void {
-    const s = this.#sessions.get(sessionId);
-    if (s) {
-      s.metadata.lastActivityAt = Date.now();
+    const meta = this.#metadata.get(sessionId);
+    if (meta) {
+      meta.lastActivityAt = Date.now();
     }
   }
 
@@ -303,8 +298,8 @@ export class SessionRegistry {
   #cleanupIdleSessions(): void {
     const now = Date.now();
     const timeoutMs = this.#timeoutMin * 60 * 1000;
-    for (const [id, s] of this.#sessions) {
-      if (now - s.metadata.lastActivityAt > timeoutMs && s.metadata.connectedClients === 0) {
+    for (const [id, meta] of this.#metadata) {
+      if (now - meta.lastActivityAt > timeoutMs && meta.connectedClients === 0) {
         this.delete(id);
       }
     }
@@ -312,7 +307,15 @@ export class SessionRegistry {
 
   /** Number of active sessions. */
   get size(): number {
-    return this.#sessions.size;
+    return this.#metadata.size;
+  }
+
+  /**
+   * Get the SessionManager for direct access.
+   * @internal
+   */
+  getSessionManager(): SessionManager {
+    return this.#sessionManager;
   }
 }
 
@@ -332,55 +335,54 @@ interface Message {
  * Iterates through the agent's context and emits the appropriate
  * OUTPUT_EVENT-derived messages so the frontend can reconstruct the chat.
  */
-function replaySessionHistory(session: Session, ws: WebSocket): void {
-  const agent = session.agent as Agent;
-  if (!agent || !agent.log) return;
+function replaySessionHistory(sessionId: string, agent: unknown, ws: WebSocket): void {
+  if (!agent || !(agent as Agent).log) return;
 
+  const agentInstance = agent as Agent;
   // Collect tool calls from the most recent assistant message to match
   // tool results by toolCallId.
   let pendingToolCalls: Array<{ id: string; function?: { name?: string; arguments?: string } }> = [];
 
-  for (const msg of agent.log) {
+  for (const msg of agentInstance.log) {
     switch (msg.role) {
       case "user": {
         ws.send(JSON.stringify({
           type: S2C.USER_MESSAGE,
-          sessionId: session.id,
+          sessionId,
           content: typeof msg.getTextContent === "function" ? msg.getTextContent() : (msg.content || ""),
         }));
         break;
       }
 
       case "assistant": {
-        // Emit reasoning/thinking content first (if any) so the UI
-        // renders it before the text or tool calls
+        // Emit reasoning/thinking content first (if any)
         if (msg.reasoningContent) {
           ws.send(JSON.stringify({
             type: S2C.THINKING,
-            sessionId: session.id,
+            sessionId,
             content: msg.reasoningContent,
           }));
         }
 
-        // Emit tool calls next (if any) so the UI renders them before the text
+        // Emit tool calls next
         const toolCalls = msg.toolCalls as Array<{ id: string; function?: { name?: string; arguments?: string } }> | undefined;
         if (toolCalls && toolCalls.length > 0) {
           pendingToolCalls = toolCalls;
           for (const tc of toolCalls) {
             ws.send(JSON.stringify({
               type: S2C.TOOL_CALL,
-              sessionId: session.id,
+              sessionId,
               name: tc.function?.name || "unknown",
               args: tc.function?.arguments || "{}",
             }));
           }
         }
-        // Then emit the assistant message text (only if there is any)
+        // Then emit the assistant message text
         const textContent = typeof msg.getTextContent === "function" ? msg.getTextContent() : (msg.content || "");
         if (textContent) {
           ws.send(JSON.stringify({
             type: S2C.ASSISTANT_MESSAGE,
-            sessionId: session.id,
+            sessionId,
             content: textContent,
           }));
         }
@@ -388,20 +390,18 @@ function replaySessionHistory(session: Session, ws: WebSocket): void {
       }
 
       case "tool": {
-        // Match this tool result to the pending tool calls by toolCallId
         const matchedCall = pendingToolCalls.find(
           (tc) => tc.id === msg.toolCallId,
         );
         ws.send(JSON.stringify({
           type: S2C.TOOL_RESULT,
-          sessionId: session.id,
+          sessionId,
           name: matchedCall?.function?.name || "unknown",
           output: msg.content || "",
         }));
         break;
       }
 
-      // system messages are skipped — they are not user-visible
       default:
         break;
     }
@@ -414,15 +414,15 @@ function replaySessionHistory(session: Session, ws: WebSocket): void {
  * Route incoming WS messages to the right session handler.
  */
 function routeMessage(ws: WebSocket, msg: C2SMessage, registry: SessionRegistry, authMiddleware: AuthMiddleware | undefined): void {
+  const sessionManager = registry.getSessionManager();
+
   switch (msg.type) {
     case C2S.AUTH: {
-      // Authenticate via in-band message (alternative to query param)
       if (authMiddleware && msg.token) {
         const valid = authMiddleware.validateToken(msg.token as string);
         if (valid) {
           (ws as WebSocket & { authToken?: string }).authToken = msg.token as string;
           ws.send(JSON.stringify({ type: "authOk" }));
-          // If no session exists yet, attach to existing or create new
           if (!(ws as WebSocket & { activeSessionId?: string }).activeSessionId) {
             if (registry.size > 0) {
               attachToMostRecentSession(ws, registry);
@@ -438,10 +438,10 @@ function routeMessage(ws: WebSocket, msg: C2SMessage, registry: SessionRegistry,
     }
 
     case C2S.CREATE_SESSION: {
-      // Detach from old session first, if any
-      const typedWs = ws as WebSocket & { activeSessionId?: string; activeSink?: WebSocketOutputSink };
-      if (typedWs.activeSessionId && typedWs.activeSink) {
-        registry.detachSink(typedWs.activeSessionId, typedWs.activeSink);
+      // Detach from old session first
+      const typedWs = ws as WebSocket & { activeSessionId?: string; activeChannel?: WebSocketChannel };
+      if (typedWs.activeSessionId && typedWs.activeChannel) {
+        registry.removeChannel(typedWs.activeSessionId, typedWs.activeChannel);
       }
       registry.create({
         profile: msg.profile as string | undefined,
@@ -449,10 +449,10 @@ function routeMessage(ws: WebSocket, msg: C2SMessage, registry: SessionRegistry,
         questionStrategy: msg.questionStrategy as string | undefined,
         questionTimeoutSecs: msg.questionTimeoutSecs as number | undefined,
       }).then(({ sessionId, agent }) => {
-        // Attach this WS to the new session
-        const wsSink = registry.attachSink(sessionId, ws);
+        // Create WebSocketChannel for this session
+        const channel = registry.createChannel(sessionId, ws);
         typedWs.activeSessionId = sessionId;
-        typedWs.activeSink = wsSink;
+        typedWs.activeChannel = channel;
 
         const sessionCreatedMsg = {
           type: "sessionCreated",
@@ -461,7 +461,6 @@ function routeMessage(ws: WebSocket, msg: C2SMessage, registry: SessionRegistry,
           currentModel: (agent as Agent)?.model,
           models: Object.keys((agent as Agent)?.modelRegistry || {}),
         };
-        // Send to requesting client and broadcast to all clients
         ws.send(JSON.stringify(sessionCreatedMsg));
         registry.broadcast(sessionCreatedMsg);
       }).catch((err: unknown) => {
@@ -474,7 +473,6 @@ function routeMessage(ws: WebSocket, msg: C2SMessage, registry: SessionRegistry,
       if (msg.sessionId) {
         registry.delete(msg.sessionId as string);
         const sessionDeletedMsg = { type: "sessionDeleted", sessionId: msg.sessionId };
-        // Send to requesting client and broadcast to all clients
         ws.send(JSON.stringify(sessionDeletedMsg));
         registry.broadcast(sessionDeletedMsg);
       }
@@ -499,33 +497,37 @@ function routeMessage(ws: WebSocket, msg: C2SMessage, registry: SessionRegistry,
         const session = registry.get(msg.sessionId as string);
         if (session) {
           // Detach from old session
-          const typedWs = ws as WebSocket & { activeSessionId?: string; activeSink?: WebSocketOutputSink };
-          if (typedWs.activeSessionId && typedWs.activeSink) {
-            registry.detachSink(typedWs.activeSessionId, typedWs.activeSink);
+          const typedWs = ws as WebSocket & { activeSessionId?: string; activeChannel?: WebSocketChannel };
+          if (typedWs.activeSessionId && typedWs.activeChannel) {
+            registry.removeChannel(typedWs.activeSessionId, typedWs.activeChannel);
           }
           // Attach to new session
-          const wsSink = registry.attachSink(msg.sessionId as string, ws);
+          const channel = registry.createChannel(msg.sessionId as string, ws);
           typedWs.activeSessionId = msg.sessionId as string;
-          typedWs.activeSink = wsSink;
-          // Send session metadata so the frontend can update reactively
+          typedWs.activeChannel = channel;
+
+          // Send session metadata
           const agent = session.agent as Agent;
           ws.send(JSON.stringify({
             type: S2C.SESSION_STATE,
+            sessionId: msg.sessionId,
             key: "model",
             value: agent?.model || session.metadata.model || "?",
           }));
           ws.send(JSON.stringify({
             type: S2C.SESSION_STATE,
+            sessionId: msg.sessionId,
             key: "models",
             value: Object.keys(agent?.modelRegistry || {}),
           }));
           ws.send(JSON.stringify({
             type: S2C.SESSION_STATE,
+            sessionId: msg.sessionId,
             key: "profile",
             value: agent?.profileName || session.metadata.profile || "default",
           }));
-          // Replay session history so the client sees the full conversation
-          replaySessionHistory(session, ws);
+          // Replay session history
+          replaySessionHistory(msg.sessionId as string, session.agent, ws);
         }
       }
       break;
@@ -534,31 +536,20 @@ function routeMessage(ws: WebSocket, msg: C2SMessage, registry: SessionRegistry,
     case C2S.SEND: {
       if (msg.sessionId && msg.content) {
         registry.touch(msg.sessionId as string);
-        const session = registry.get(msg.sessionId as string);
-        if (session) {
-          session.bus.enqueue(msg.content as string);
-        }
+        sessionManager.enqueue(msg.sessionId as string, msg.content as string);
       }
       break;
     }
 
     case C2S.CANCEL: {
       if (msg.sessionId) {
-        const session = registry.get(msg.sessionId as string);
-        if (session) {
-          session.bus.cancel();
-        }
+        sessionManager.cancel(msg.sessionId as string);
       }
       break;
     }
 
     case C2S.QUESTION_ANSWER: {
       if (msg.sessionId && msg.answers) {
-        // Forward answers to the question tool via the agent
-        // This is handled by the Input interface — we need to set up
-        // a mechanism for the agent to receive answers.
-        // For now, this is a placeholder — the question tool integration
-        // will be implemented in Phase 3.
         console.warn("[ws] questionAnswer received — question tool integration pending");
       }
       break;
@@ -567,15 +558,11 @@ function routeMessage(ws: WebSocket, msg: C2SMessage, registry: SessionRegistry,
     case C2S.COMMAND: {
       if (msg.sessionId && msg.command) {
         registry.touch(msg.sessionId as string);
-        const session = registry.get(msg.sessionId as string);
-        if (session) {
-          // Strip leading `/` and lowercase, matching the CLI behavior
-          let cmdText = msg.command as string;
-          if (cmdText.startsWith("/")) {
-            cmdText = cmdText.slice(1).trim().toLowerCase();
-          }
-          session.bus.executeCommand(cmdText);
+        let cmdText = msg.command as string;
+        if (cmdText.startsWith("/")) {
+          cmdText = cmdText.slice(1).trim().toLowerCase();
         }
+        sessionManager.executeCommand(msg.sessionId as string, cmdText);
       }
       break;
     }
@@ -587,10 +574,9 @@ function routeMessage(ws: WebSocket, msg: C2SMessage, registry: SessionRegistry,
   }
 }
 
-// ── Helper functions (used by createWsServer) ────────────────────────────────
+// ── Helper functions ────────────────────────────────────────────────────────
 
 function attachToMostRecentSession(ws: WebSocket, registry: SessionRegistry): void {
-  // Find the session with the most recent lastActivityAt
   const sessions = registry.list();
   let mostRecent: { id: string; lastActivityAt: number; profile: string; model: string } | null = null;
   let mostRecentTime = 0;
@@ -602,7 +588,6 @@ function attachToMostRecentSession(ws: WebSocket, registry: SessionRegistry): vo
   }
 
   if (!mostRecent) {
-    // Fallback — create a new session
     createAndAttachSession(ws, registry);
     return;
   }
@@ -614,13 +599,13 @@ function attachToMostRecentSession(ws: WebSocket, registry: SessionRegistry): vo
     return;
   }
 
-  // Attach the WebSocket sink to the existing session
-  const wsSink = registry.attachSink(sessionId, ws);
-  const typedWs = ws as WebSocket & { activeSessionId?: string; activeSink?: WebSocketOutputSink };
+  // Create WebSocketChannel for the existing session
+  const channel = registry.createChannel(sessionId, ws);
+  const typedWs = ws as WebSocket & { activeSessionId?: string; activeChannel?: WebSocketChannel };
   typedWs.activeSessionId = sessionId;
-  typedWs.activeSink = wsSink;
+  typedWs.activeChannel = channel;
 
-  // Send sessionCreated so the client sets up its UI for this session
+  // Send sessionCreated
   const agent = session.agent as Agent;
   ws.send(JSON.stringify({
     type: "sessionCreated",
@@ -630,16 +615,16 @@ function attachToMostRecentSession(ws: WebSocket, registry: SessionRegistry): vo
     models: Object.keys(agent?.modelRegistry || {}),
   }));
 
-  // Replay session history so the client sees the full conversation
-  replaySessionHistory(session, ws);
+  // Replay session history
+  replaySessionHistory(sessionId, session.agent, ws);
 }
 
 function createAndAttachSession(ws: WebSocket, registry: SessionRegistry): void {
   registry.create({}).then(({ sessionId, agent }) => {
-    const wsSink = registry.attachSink(sessionId, ws);
-    const typedWs = ws as WebSocket & { activeSessionId?: string; activeSink?: WebSocketOutputSink };
+    const channel = registry.createChannel(sessionId, ws);
+    const typedWs = ws as WebSocket & { activeSessionId?: string; activeChannel?: WebSocketChannel };
     typedWs.activeSessionId = sessionId;
-    typedWs.activeSink = wsSink;
+    typedWs.activeChannel = channel;
 
     ws.send(JSON.stringify({
       type: "sessionCreated",
@@ -669,34 +654,31 @@ export function createWsServer(core: CoreContext, options: CreateWsServerOptions
     auth,
   } = options;
 
-  // Default agent builder — creates a basic agent using core infrastructure
+  // Single LLM client shared across all sessions
+  const sharedLlmClient = new LlmClient({
+    baseUrl: core.resolved?.baseUrl as string | undefined,
+    apiKey: core.resolved?.apiKey as string | undefined,
+    stream: core.resolved?.stream !== false,
+    chatTimeoutSecs: (core.resolved?.chatTimeout as number) || 30,
+    maxRetries: (core.resolved?.maxRetries as number) || 3,
+    providers: core.config?.providers as ProviderConfig[] | undefined,
+    markerMangler: new MarkerMangler(),
+  });
+
+  // Default agent builder — uses shared LlmClient from config (injected by SessionManager)
   const buildAgent = customBuildAgent || (async (agentConfig: { model?: string; sessionId?: string }) => {
-    const { LlmClient } = await import("../../core/llm-client/client.ts");
-    const { MarkerMangler } = await import("../../core/marker-mangler.ts");
-    const { Agent } = await import("../../core/agent.ts");
-
-    const llmClient = new LlmClient({
-      baseUrl: core.resolved?.baseUrl as string | undefined,
-      apiKey: core.resolved?.apiKey as string | undefined,
-      stream: core.resolved?.stream !== false,
-      chatTimeoutSecs: (core.resolved?.chatTimeout as number) || 30,
-      maxRetries: (core.resolved?.maxRetries as number) || 3,
-      providers: core.config?.providers as ProviderConfig[] | undefined,
-      markerMangler: new MarkerMangler(),
-    });
-
     const sessionId = agentConfig.sessionId || crypto.randomUUID();
     const agent = new Agent({
       hooks: core.hooks,
       toolRegistry: core.toolRegistry,
-      llmClient,
+      llmClient: (agentConfig as Record<string, unknown>).llmClient || sharedLlmClient,
       model: (agentConfig as { model?: string }).model || (core.resolved?.model as string) || "",
       maxIterations: (core.resolved?.maxIterations as number) || 100,
       contextLimit: 128000,
       hideTools: (agentConfig as { hideTools?: boolean }).hideTools ?? (core.resolved?.hideTools as boolean) ?? false,
       hideThinking: (agentConfig as { hideThinking?: boolean }).hideThinking ?? (core.resolved?.hideThinking as boolean) ?? true,
       showTokenUse: (agentConfig as { showTokenUse?: boolean }).showTokenUse ?? (core.resolved?.showTokenUse as boolean) ?? true,
-      sink: ((agentConfig as { sink?: { emit: (event: unknown) => void } }).sink as { emit: (event: unknown) => void } | null) || null,
+      sink: null, // Sink is managed by WebSocketChannel
       modelRegistry: core.resolved?.modelRegistry as { [key: string]: { contextLimit?: number; reasoningEffort?: string; [key: string]: unknown } } | undefined,
       profileName: (agentConfig as { profileName?: string }).profileName || (core.resolved?.profileName as string) || "default",
       config: core.config || {},
@@ -707,7 +689,6 @@ export function createWsServer(core: CoreContext, options: CreateWsServerOptions
 
     await agent.ensureSystemPrompt();
 
-    // Emit COMMANDS_REGISTER so extensions can register commands
     if (core.hooks) {
       core.hooks.notifyHooks(HOOKS.COMMANDS_REGISTER, {
         registry: agent?.commandRegistry,
@@ -720,6 +701,7 @@ export function createWsServer(core: CoreContext, options: CreateWsServerOptions
 
   const registry = new SessionRegistry({
     buildAgent,
+    llmClient: sharedLlmClient,
     questionTimeoutSecs,
     questionStrategy,
     sessionTimeoutMin,
@@ -727,13 +709,10 @@ export function createWsServer(core: CoreContext, options: CreateWsServerOptions
 
   /**
    * WS upgrade handler — called when a WebSocket connection opens.
-   * Validates auth if middleware is configured, then creates a session.
    */
   function onUpgrade(req: { url: string; headers?: Record<string, string> }, ws: WebSocket): void {
-    // Register this connection for broadcast purposes
     registry.registerConnection(ws);
 
-    // Auth: validate token from query param
     const url = new URL(req.url, `http://${req.headers?.host || "localhost"}`);
     const token = url.searchParams.get("token");
 
@@ -745,16 +724,10 @@ export function createWsServer(core: CoreContext, options: CreateWsServerOptions
       }
       (ws as WebSocket & { authToken?: string }).authToken = token;
     } else if (auth && !token) {
-      // No token — require auth via first message
       ws.send(JSON.stringify({ type: "authRequired" }));
-      // Don't close — client can send auth message later
-      // Don't create a session yet — wait for auth message
       return;
     }
 
-    // Auth check passed (or auth disabled) — check for existing sessions
-    // If there are existing sessions, attach to the most recently active one
-    // instead of creating a new one.
     const existingCount = registry.size;
     if (existingCount > 0) {
       attachToMostRecentSession(ws, registry);
@@ -784,14 +757,14 @@ export function createWsServer(core: CoreContext, options: CreateWsServerOptions
   }
 
   /**
-   * Handle WS close — detach sink from session.
+   * Handle WS close — remove channel from session.
    */
   function onClose(ws: WebSocket): void {
-    const typedWs = ws as WebSocket & { activeSessionId?: string; activeSink?: WebSocketOutputSink };
-    if (typedWs.activeSessionId && typedWs.activeSink) {
-      registry.detachSink(typedWs.activeSessionId, typedWs.activeSink);
+    const typedWs = ws as WebSocket & { activeSessionId?: string; activeChannel?: WebSocketChannel };
+    if (typedWs.activeSessionId && typedWs.activeChannel) {
+      registry.removeChannel(typedWs.activeSessionId, typedWs.activeChannel);
+      typedWs.activeChannel.close();
     }
-    // Unregister from broadcast
     registry.unregisterConnection(ws);
   }
 

@@ -2,8 +2,6 @@
 
 import { Message } from "../context/message.ts";
 import { LlmError } from "../error.ts";
-import { OUTPUT_EVENT } from "../context/output.ts";
-import { AgentSink } from "./agent-sink.ts";
 import { loadProfileFile } from "../config/profiles.ts";
 import { parseAs } from "../../utils/json-schema.ts";
 import { type CoreConfig } from "../config/schema-loader.ts";
@@ -217,12 +215,12 @@ export class TaskManager {
     // 4. Resolve allowed tools: profile whitelist takes precedence
     const toolWhitelist = taskProfile?.whitelistTools || null;
 
-    // 5. Create task-specific sink (filters output, captures completion)
-    const sink = new AgentSink({
-      isTaskAgent: true,
-      onTaskComplete: (id, result) => this._onTaskComplete(id, result),
-    });
-    sink.setTaskAgentId(taskId);
+    // 5. Create task-specific sink — minimal object that captures task completion.
+    // Task agents are silent to the UI (emit is a no-op); only onTaskComplete matters.
+    const sink = {
+      emit: (_event: unknown) => { /* task agents are silent */ },
+      onTaskComplete: (result: string) => this._onTaskComplete(taskId, result),
+    };
 
     // 6. Build agent config
     const agentConfig: Record<string, unknown> = {

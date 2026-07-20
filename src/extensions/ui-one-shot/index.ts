@@ -3,18 +3,16 @@
 // Runs a single prompt and exits — no interactive session.
 // Registers CLI flag (-p/--prompt), subcommand, and CLI args hook handler.
 
-import { MessageBus } from "../../core/session/message-bus.ts";
 import { formatError } from "../../core/error.ts";
 import { HOOKS } from "../../core/hooks.ts";
 import { logger } from "../../core/logger.ts";
 import { CliOutputSink } from "../../utils/cli/cli.ts";
 import { LlmClient, ProviderConfig } from "../../core/llm-client/client.ts";
 import { MarkerMangler } from "../../core/marker-mangler.ts";
-import { TaskManager } from "../../core/session/task-manager.ts";
 import { SessionManager } from "../../core/session/index.ts";
 import { Agent } from "../../core/agent.ts";
+import { OneShotChannel } from "./oneshot-channel.ts";
 import { CoreContext, ExtensionInstance } from "../../core/extensions/types.ts";
-import { type CommandRegistryLike } from "../../core/commands.ts";
 
 // ── Types ──────────────────────────────────────────────────────────────────
 
@@ -64,54 +62,40 @@ async function runOneShot(
   modelRegistry: Record<string, unknown>,
   sink: CliOutputSink,
   buildAgent: (agentConfig: Record<string, unknown>) => Promise<Agent>,
+  llmClient: unknown,
 ): Promise<number> {
-  const llmClient = new LlmClient({
-    baseUrl: resolved.baseUrl,
-    apiKey: resolved.apiKey,
-    stream: resolved.stream,
-    chatTimeoutSecs: resolved.chatTimeout,
-    maxRetries: resolved.maxRetries,
-    providers: (config.providers as ProviderConfig[]) || [],
-    markerMangler: new MarkerMangler(),
-  });
-
-  const taskManager = new TaskManager({
-    buildAgent,
-    llmClient,
-    modelRegistry,
-    config,
-    hooks: core.hooks,
-    maxIterations: resolved.maxIterations,
-    taskProfile: resolved.taskProfile || "task-default",
-    taskRole: resolved.taskDefaultRole || "",
-  });
-
-  // Create SessionManager
+  // Create SessionManager — owns the MessageBus and TaskManager internally
   const sessionManager = await SessionManager.create({
     hooks: core.hooks as unknown as { notifyHooks: (hookName: string, data: unknown) => void },
     extensions: core.extensions,
     buildAgent,
     initialConfig: { sessionId: cli.sessionId || null },
+    llmClient,
+    modelRegistry,
+    coreConfig: config,
+    taskConfig: {
+      maxIterations: resolved.maxIterations,
+      taskProfile: resolved.taskProfile || "task-default",
+      taskRole: resolved.taskDefaultRole || "",
+    },
   });
 
-  // Wire taskManager to sessionManager
-  taskManager.setSessionManager(sessionManager as { getAgent: () => { abortSignal: AbortSignal | null; run: (description: string) => Promise<string | undefined>; notifyCompletion: (result: string) => void; addMessage: (msg: unknown) => void; followQueue?: string[] } | undefined });
-
-  // Create MessageBus
-  const bus = new MessageBus({
-    sessionManager: sessionManager as unknown as { getAgent: () => { hooks: { runHookPipeline: (hookName: string, data: unknown, opts?: { shouldStop?: (result: unknown) => boolean }) => Promise<unknown> }; run: (text: string) => Promise<unknown>; resetCancel: () => void; cancel: () => void; commandRegistry: CommandRegistryLike | undefined; executeCommand: (cmd: unknown) => Promise<unknown> } | undefined },
+  // Create OneShotChannel
+  const channel = new OneShotChannel({
+    sessionManager,
+    sessionId: sessionManager.sessionId()!,
     sink,
   });
 
-  // Wire up task completion
-  taskManager.setBus(bus);
-
-  // Enqueue the prompt
-  (bus as { enqueue: (text: string) => void }).enqueue(cli.prompt || (cli.args || []).join(" "));
+  // Enqueue the prompt via the SessionManager
+  sessionManager.enqueue(sessionManager.sessionId()!, cli.prompt || (cli.args || []).join(" "));
 
   let exitCode = 0;
   try {
-    await bus.runUntilCancelled();
+    const bus = sessionManager.getBus(sessionManager.sessionId()!);
+    if (bus) {
+      await bus.runUntilCancelled();
+    }
     console.log("\n");
   } catch (e: unknown) {
     logger.error(formatError(e));
@@ -154,7 +138,7 @@ async function handlePromptSubcommand(
     toolOutputFmt: (resolved as ResolvedConfig).toolOutputFmt,
   });
 
-  // Build agent function (same as in main.ts)
+  // Build agent function
   const llmClient = new LlmClient({
     baseUrl: (resolved as ResolvedConfig).baseUrl,
     apiKey: (resolved as ResolvedConfig).apiKey,
@@ -170,7 +154,7 @@ async function handlePromptSubcommand(
     const agent = new Agent({
       hooks: core.hooks,
       toolRegistry: core.toolRegistry,
-      llmClient,
+      llmClient: agentConfig.llmClient || llmClient,
       model: (agentConfig.model as string) || (resolved as ResolvedConfig).model,
       maxIterations:
         (agentConfig.maxIterations as number) || (resolved as ResolvedConfig).maxIterations || 100,
@@ -178,8 +162,9 @@ async function handlePromptSubcommand(
       hideTools: typeof agentConfig.hideTools === "boolean" ? agentConfig.hideTools : (resolved as ResolvedConfig).hideTools,
       hideThinking: typeof agentConfig.hideThinking === "boolean" ? agentConfig.hideThinking : (resolved as ResolvedConfig).hideThinking,
       showTokenUse: typeof agentConfig.showTokenUse === "boolean" ? agentConfig.showTokenUse : (resolved as ResolvedConfig).showTokenUse,
-      sink: (agentConfig.sink as { emit: (event: unknown) => void } | undefined) || sink,
-      modelRegistry: modelRegistry as { [key: string]: { contextLimit?: number; reasoningEffort?: string; [key: string]: unknown } },
+      sink: null, // Sink is managed by OneShotChannel via SessionManager
+      modelRegistry: (agentConfig.modelRegistry as { [key: string]: { contextLimit?: number; reasoningEffort?: string; [key: string]: unknown } }) ||
+        (modelRegistry as { [key: string]: { contextLimit?: number; reasoningEffort?: string; [key: string]: unknown } }),
       profileName: (agentConfig.profileName as string) || (resolved as ResolvedConfig).profileName,
       role: (agentConfig.role as string) || (resolved as ResolvedConfig).role,
       profileBody: (agentConfig.profileBody as string) || (resolved as ResolvedConfig).profileBody,
@@ -208,27 +193,23 @@ async function handlePromptSubcommand(
     modelRegistry as Record<string, unknown>,
     sink,
     buildAgent,
+    llmClient,
   );
 }
 
 /**
  * Create the one-shot extension.
- * Registers the "prompt" subcommand and -p/--prompt CLI flag for one-shot mode.
- * All registration happens through hooks.
  */
 export function create(core: CoreContext): ExtensionInstance {
   return {
     hooks: core.hooks
       ? {
-          // Handle -p/--prompt flag by setting subcommand
-          // (flag itself is declared in extension.json for static discovery)
           [HOOKS.CLI_ARGS_PARSED]: ({ cli }: { cli: CliArgs }) => {
             if (cli.prompt) {
               cli.subcommand = "prompt";
             }
           },
 
-          // Register the "prompt" subcommand
           [HOOKS.CLI_SUBCOMMANDS_REGISTER]: async (
             registry: { register: (name: string, opts: Record<string, unknown>) => void },
           ) => {

@@ -401,6 +401,7 @@ export class Agent {
           modelConfig,
           toolDefs,
           cancelSignal,
+          this.sessionId,
         );
 
         const response = await this._processStream(stream);

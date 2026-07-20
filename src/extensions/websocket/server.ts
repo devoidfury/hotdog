@@ -543,7 +543,11 @@ function routeMessage(ws: WebSocket, msg: C2SMessage, registry: SessionRegistry,
 
     case C2S.CANCEL: {
       if (msg.sessionId) {
-        sessionManager.cancel(msg.sessionId as string);
+        // Use interrupt() instead of cancel() — interrupt stops the current
+        // agent processing but keeps the message bus alive so the user can
+        // send new messages afterward. cancel() aborts the bus entirely,
+        // making it impossible to trigger another LLM request.
+        sessionManager.interrupt(msg.sessionId as string);
       }
       break;
     }

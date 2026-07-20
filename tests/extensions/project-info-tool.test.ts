@@ -144,21 +144,21 @@ describe('ProjectInfoTool > git methods', () => {
 
   it('_getGitBranch returns branch name in git repo', async () => {
     const tool = new ProjectInfoTool();
-    const branch = await (tool as any)._getGitBranch('/workspace');
+    const branch = await (tool as any)._getGitBranch(process.cwd());
     expect(typeof branch).toBe('string');
     expect(branch.length).toBeGreaterThan(0);
   });
 
   it('_getLastCommitTime returns time in git repo', async () => {
     const tool = new ProjectInfoTool();
-    const time = await (tool as any)._getLastCommitTime('/workspace');
+    const time = await (tool as any)._getLastCommitTime(process.cwd());
     expect(typeof time).toBe('string');
     expect(time.length).toBeGreaterThan(0);
   });
 
   it('_getGitStatus returns status entries in git repo', async () => {
     const tool = new ProjectInfoTool();
-    const status = await (tool as any)._getGitStatus('/workspace');
+    const status = await (tool as any)._getGitStatus(process.cwd());
     expect(Array.isArray(status)).toBe(true);
   });
 });

@@ -54,6 +54,22 @@ export interface MdThematicBreak {
   type: "thematic_break";
 }
 
+// ── Table types (GFM-style) ─────────────────────────────────────────────────
+
+export interface MdTableCell {
+  children: MdInline[];
+}
+
+export interface MdTableRow {
+  cells: MdTableCell[];
+}
+
+export interface MdTable {
+  type: "table";
+  header: MdTableRow;
+  rows: MdTableRow[];
+}
+
 /** Union of all block-level nodes. */
 export type MdBlock =
   | MdHeading
@@ -62,7 +78,8 @@ export type MdBlock =
   | MdList
   | MdBlockquote
   | MdHorizontalRule
-  | MdThematicBreak;
+  | MdThematicBreak
+  | MdTable;
 
 // ── Inline-level node types ──────────────────────────────────────────────────
 
@@ -177,6 +194,14 @@ export function parseMarkdown(markdown: string): MdDocument {
       continue;
     }
 
+    // Table (GFM-style) — check if this line and the next form a table header + delimiter
+    if (isTableHeaderLine(trimmed) && i + 1 < lines.length && isTableDelimiter(lines[i + 1]!.trim())) {
+      const table = parseTable(lines, i);
+      blocks.push(table);
+      i = table._nextIndex;
+      continue;
+    }
+
     // Default: paragraph
     const paragraph = parseParagraph(lines, i);
     blocks.push(paragraph);
@@ -281,6 +306,41 @@ function areBlocksEqual(a: MdBlock, b: MdBlock): boolean {
           )
         )
           return false;
+      }
+      return true;
+    }
+    case "table": {
+      const ta = a as MdTable;
+      const tb = b as MdTable;
+      if (
+        ta.header.cells.length !== tb.header.cells.length ||
+        ta.rows.length !== tb.rows.length
+      )
+        return false;
+      // Compare header cells
+      for (let i = 0; i < ta.header.cells.length; i++) {
+        if (
+          !inlineArraysEqual(
+            ta.header.cells[i]!.children,
+            tb.header.cells[i]!.children,
+          )
+        )
+          return false;
+      }
+      // Compare rows
+      for (let r = 0; r < ta.rows.length; r++) {
+        const ra = ta.rows[r]!;
+        const rb = tb.rows[r]!;
+        if (ra.cells.length !== rb.cells.length) return false;
+        for (let c = 0; c < ra.cells.length; c++) {
+          if (
+            !inlineArraysEqual(
+              ra.cells[c]!.children,
+              rb.cells[c]!.children,
+            )
+          )
+            return false;
+        }
       }
       return true;
     }
@@ -418,6 +478,16 @@ export function mdTreeToPlainText(tree: MdDocument): string {
       case "thematic_break":
         parts.push("---\n");
         break;
+      case "table":
+        // Flatten table to pipe-separated text
+        const allRows: MdTableRow[] = [block.header, ...block.rows];
+        for (const row of allRows) {
+          const cellTexts = row.cells.map((cell) =>
+            cell.children.map(flatInline).join(""),
+          );
+          parts.push("| " + cellTexts.join(" | ") + " |\n");
+        }
+        break;
     }
   }
 
@@ -487,6 +557,20 @@ function blockToHtml(block: MdBlock): string {
       return `<hr />`;
     case "thematic_break":
       return `<hr />`;
+    case "table": {
+      const headerCells = block.header.cells
+        .map((cell) => `<th>${cell.children.map(inlineToHtml).join("")}</th>`)
+        .join("");
+      const bodyRows = block.rows
+        .map(
+          (row) =>
+            `<tr>${row.cells
+              .map((cell) => `<td>${cell.children.map(inlineToHtml).join("")}</td>`)
+              .join("")}</tr>`,
+        )
+        .join("");
+      return `<table class="md-table"><thead><tr>${headerCells}</tr></thead><tbody>${bodyRows}</tbody></table>`;
+    }
   }
 }
 
@@ -565,6 +649,22 @@ function walkBlock(
     case "blockquote":
       for (const child of block.children) {
         walkBlock(child, block, callback);
+      }
+      break;
+    case "table":
+      // Walk header cells
+      for (const cell of block.header.cells) {
+        for (const child of cell.children) {
+          callback(child, block);
+        }
+      }
+      // Walk row cells
+      for (const row of block.rows) {
+        for (const cell of row.cells) {
+          for (const child of cell.children) {
+            callback(child, block);
+          }
+        }
       }
       break;
   }
@@ -660,6 +760,88 @@ function parseList(
   }
 
   return { type: "list", ordered, items, _nextIndex: i };
+}
+
+function parseTable(
+  lines: string[],
+  start: number,
+): MdTable & { _nextIndex: number } {
+  // Line `start` is the header row, line `start+1` is the delimiter row
+  const headerLine = lines[start]!.trim();
+  const headerCells = parseTableRowCells(headerLine);
+
+  let i = start + 2; // skip header + delimiter
+  const rows: MdTableRow[] = [];
+
+  while (i < lines.length) {
+    const trimmed = lines[i]!.trim();
+
+    if (trimmed === "") {
+      // Blank line ends the table
+      break;
+    }
+    if (!isTableRowLine(trimmed)) {
+      break;
+    }
+
+    const cells = parseTableRowCells(trimmed);
+    rows.push({ cells });
+    i++;
+  }
+
+  return {
+    type: "table",
+    header: { cells: headerCells },
+    rows,
+    _nextIndex: i,
+  };
+}
+
+function parseTableRowCells(line: string): MdTableCell[] {
+  // Strip leading/trailing pipes if present
+  const stripped = line.trim();
+  const inner =
+    stripped.startsWith("|") && stripped.endsWith("|")
+      ? stripped.slice(1, -1)
+      : stripped;
+
+  // Split on pipes, but handle empty cells correctly
+  const rawCells = inner.split("|");
+  return rawCells.map((raw) => ({
+    children: parseInline(raw.trim()),
+  }));
+}
+
+// ── Table detection helpers ─────────────────────────────────────────────────
+
+function isTableHeaderLine(line: string): boolean {
+  // Must contain at least one pipe and look like a row (not a horizontal rule)
+  if (!line.includes("|")) return false;
+  const trimmed = line.trim();
+  // Reject lines that are pure horizontal rules (e.g., "|---|---|")
+  // A header should have actual content, not just dashes/underscores/asterisks
+  const cells = trimmed
+    .replace(/^\|/, "")
+    .replace(/\|$/, "")
+    .split("|")
+    .map((c) => c.trim());
+  return cells.some(
+    (c) => c !== "" && !/^[-:*_]+$/.test(c),
+  );
+}
+
+function isTableDelimiter(line: string): boolean {
+  const trimmed = line.trim();
+  if (!trimmed.startsWith("|") || !trimmed.endsWith("|")) return false;
+  const inner = trimmed.slice(1, -1);
+  const cells = inner.split("|");
+  // Every cell must match: optional spaces, colons, dashes, colons, optional spaces
+  const cellPattern = /^\s*:?-+:?\s*$/;
+  return cells.length > 0 && cells.every((c) => cellPattern.test(c));
+}
+
+function isTableRowLine(line: string): boolean {
+  return line.trim().startsWith("|") && line.trim().endsWith("|");
 }
 
 function parseParagraph(
@@ -865,8 +1047,11 @@ function parseEmphasis(
 
   let node: MdBold | MdItalic | MdStrikethrough;
 
-  if (kind === "bold" || kind === "bold_italic") {
+  if (kind === "bold") {
     node = { type: "bold", children: inner };
+  } else if (kind === "bold_italic") {
+    // ***text*** → <strong><em>text</em></strong>
+    node = { type: "bold", children: [{ type: "italic", children: inner }] };
   } else if (kind === "italic") {
     node = { type: "italic", children: inner };
   } else {

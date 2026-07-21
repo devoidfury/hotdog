@@ -789,6 +789,45 @@ body {
     color: var(--text-muted);
 }
 
+/* Tables */
+.md-content table.md-table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 0.6em 0;
+    font-size: 0.9em;
+    line-height: 1.5;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    overflow: hidden;
+}
+
+.md-content table.md-table thead {
+    background: var(--bg-elevated);
+}
+
+.md-content table.md-table th {
+    padding: 8px 12px;
+    text-align: left;
+    font-weight: 600;
+    color: var(--text-primary);
+    border-bottom: 2px solid var(--border-light);
+    white-space: nowrap;
+}
+
+.md-content table.md-table td {
+    padding: 7px 12px;
+    color: var(--text-secondary);
+    border-bottom: 1px solid var(--border);
+}
+
+.md-content table.md-table tbody tr:last-child td {
+    border-bottom: none;
+}
+
+.md-content table.md-table tbody tr:hover {
+    background: var(--bg-hover);
+}
+
 /* ── Tool Call Blocks ─────────────────────────────────────────────────────── */
 
 .tool-call-block {

@@ -10,7 +10,7 @@ import {
   type MdHeading,
   type MdList,
 } from "../../src/utils/md-parser.ts";
-import type { MdBlock, MdInline, MdDocument } from "../../src/utils/md-parser.ts";
+import type { MdBlock, MdInline, MdDocument, MdBold, MdItalic, MdText } from "../../src/utils/md-parser.ts";
 
 describe("parseMarkdown", () => {
   // ── Edge cases ────────────────────────────────────────────────────
@@ -273,6 +273,26 @@ describe("parseMarkdown", () => {
     expect(bold).toBeDefined();
   });
 
+  it("parses ***bold italic*** as nested bold+italic", () => {
+    const doc = parseMarkdown("This is ***bold italic*** text");
+    expect(doc.children).toHaveLength(1);
+    const para = doc.children[0] as { type: "paragraph"; children: MdInline[] };
+    const bold = para.children.find((c) => c.type === "bold");
+    expect(bold).toBeDefined();
+    expect(bold?.type).toBe("bold");
+    const boldChildren = (bold as MdBold).children;
+    expect(boldChildren).toHaveLength(1);
+    expect(boldChildren[0]?.type).toBe("italic");
+    const italic = boldChildren[0] as MdItalic;
+    expect(italic.children[0]?.type).toBe("text");
+    expect((italic.children[0] as MdText).content).toBe("bold italic");
+  });
+
+  it("renders ***bold italic*** to nested HTML", () => {
+    const html = markdownToHtml("***bold italic***");
+    expect(html).toContain("<strong><em>bold italic</em></strong>");
+  });
+
   // ── Complex documents ─────────────────────────────────────────────
 
   it("parses a document with mixed block types", () => {
@@ -299,6 +319,72 @@ describe("parseMarkdown", () => {
     expect(types).toContain("code_block");
     expect(types).toContain("blockquote");
     expect(types).toContain("horizontal_rule");
+  });
+
+  // ── Tables ────────────────────────────────────────────────────────
+
+  it("parses a simple table", () => {
+    const doc = parseMarkdown("| Name | Age |\n| --- | --- |\n| Alice | 30 |\n| Bob | 25 |");
+    expect(doc.children).toHaveLength(1);
+    expect(doc.children[0]?.type).toBe("table");
+    const table = doc.children[0] as { type: "table"; header: { cells: { children: MdInline[] }[] }; rows: { cells: { children: MdInline[] }[] }[] };
+    expect(table.header.cells).toHaveLength(2);
+    expect(table.rows).toHaveLength(2);
+  });
+
+  it("parses table header content correctly", () => {
+    const doc = parseMarkdown("| Col A | Col B |\n| --- | --- |\n| x | y |");
+    const table = doc.children[0] as { type: "table"; header: { cells: { children: MdInline[] }[] } };
+    const headerTexts = table.header.cells.map((c) =>
+      c.children.filter((n) => n.type === "text").map((n) => (n as { content: string }).content).join(""),
+    );
+    expect(headerTexts).toEqual(["Col A", "Col B"]);
+  });
+
+  it("parses table row content correctly", () => {
+    const doc = parseMarkdown("| Name | Value |\n| --- | --- |\n| foo | 123 |\n| bar | 456 |");
+    const table = doc.children[0] as { type: "table"; rows: { cells: { children: MdInline[] }[] }[] };
+    const row0Texts = table.rows[0]!.cells.map((c) =>
+      c.children.filter((n) => n.type === "text").map((n) => (n as { content: string }).content).join(""),
+    );
+    const row1Texts = table.rows[1]!.cells.map((c) =>
+      c.children.filter((n) => n.type === "text").map((n) => (n as { content: string }).content).join(""),
+    );
+    expect(row0Texts).toEqual(["foo", "123"]);
+    expect(row1Texts).toEqual(["bar", "456"]);
+  });
+
+  it("parses table with inline formatting in cells", () => {
+    const doc = parseMarkdown("| Feature | Status |\n| --- | --- |\n| **Bold** | *done* |");
+    const table = doc.children[0] as { type: "table"; rows: { cells: { children: MdInline[] }[] }[] };
+    const cell0 = table.rows[0]!.cells[0]!;
+    const cell1 = table.rows[0]!.cells[1]!;
+    expect(cell0.children.some((n) => n.type === "bold")).toBe(true);
+    expect(cell1.children.some((n) => n.type === "italic")).toBe(true);
+  });
+
+  it("parses table with left-aligned, center-aligned, and right-aligned columns", () => {
+    const doc = parseMarkdown("| Left | Center | Right |\n| :--- | :---: | ---: |\n| a | b | c |");
+    expect(doc.children[0]?.type).toBe("table");
+  });
+
+  it("parses table with empty cells", () => {
+    const doc = parseMarkdown("| A | B | C |\n| --- | --- | --- |\n| x | | z |");
+    const table = doc.children[0] as { type: "table"; rows: { cells: { children: MdInline[] }[] }[] };
+    expect(table.rows[0]!.cells).toHaveLength(3);
+    expect(table.rows[0]!.cells[1]!.children).toHaveLength(0);
+  });
+
+  it("does not parse a pipe-only line as a table", () => {
+    const doc = parseMarkdown("|---|---|");
+    // No header row with content, so not a table
+    expect(doc.children[0]?.type).not.toBe("table");
+  });
+
+  it("does not parse a paragraph with a pipe as a table", () => {
+    const doc = parseMarkdown("x | y");
+    // No leading/trailing pipes and no delimiter row
+    expect(doc.children[0]?.type).toBe("paragraph");
   });
 
   // ── Edge cases ────────────────────────────────────────────────────
@@ -583,6 +669,13 @@ describe("mdTreeToPlainText", () => {
     expect(plain).toContain("- one");
     expect(plain).toContain("- two");
   });
+
+  it("converts tables to pipe-separated text", () => {
+    const doc = parseMarkdown("| A | B |\n| --- | --- |\n| 1 | 2 |");
+    const plain = mdTreeToPlainText(doc);
+    expect(plain).toContain("| A | B |");
+    expect(plain).toContain("| 1 | 2 |");
+  });
 });
 
 describe("walkTree", () => {
@@ -635,6 +728,18 @@ describe("walkTree", () => {
 
     expect(visited).toContain("blockquote");
     expect(visited).toContain("heading");
+  });
+
+  it("visits table cells", () => {
+    const doc = parseMarkdown("| A | B |\n| --- | --- |\n| 1 | 2 |");
+    const visited: string[] = [];
+
+    walkTree(doc, (node) => {
+      visited.push(node.type);
+    });
+
+    expect(visited).toContain("table");
+    expect(visited).toContain("text");
   });
 
   it("visits list item children", () => {
@@ -718,6 +823,24 @@ describe("mdTreeToHtml", () => {
     const html = mdTreeToHtml(doc);
     expect(html).toContain('<a href="https://example.com"');
     expect(html).toContain("click here");
+  });
+
+  it("renders tables with thead and tbody", () => {
+    const doc = parseMarkdown("| A | B |\n| --- | --- |\n| 1 | 2 |");
+    const html = mdTreeToHtml(doc);
+    expect(html).toContain('<table class="md-table">');
+    expect(html).toContain("<thead>");
+    expect(html).toContain("<tbody>");
+    expect(html).toContain("<th>A</th>");
+    expect(html).toContain("<th>B</th>");
+    expect(html).toContain("<td>1</td>");
+    expect(html).toContain("<td>2</td>");
+  });
+
+  it("renders table with inline formatting in cells", () => {
+    const doc = parseMarkdown("| Col |\n| --- |\n| **bold** |");
+    const html = mdTreeToHtml(doc);
+    expect(html).toContain("<td><strong>bold</strong></td>");
   });
 
   it("escapes HTML special characters", () => {

@@ -1,7 +1,15 @@
 // Shared types for the extension system.
 // Describes the contract between core and extensions.
 
-import type { HookSystem } from "../hooks.ts";
+import type {
+  HookSystem,
+  GateAction,
+  ContextHookResult,
+  ProviderRequestHookResult,
+  ToolResultHookResult,
+  InputHookResult,
+  SystemPromptChunk,
+} from "../hooks.ts";
 import type { ToolRegistry, ToolDef } from "./tool-registry.ts";
 import type { ExtensionLoader } from "./extensions.ts";
 import type { ServiceRegistry } from "./service-registry.ts";
@@ -20,6 +28,13 @@ import { logger } from "../logger.ts";
 /**
  * Payload shapes for every standard hook name.
  * Each key maps to the data object passed to handlers registered on that hook.
+ *
+ * Return types for pipeline hooks are documented in each entry:
+ * - Gate hooks (tool:call, input): return GateAction
+ * - Context hooks (context): return ContextHookResult
+ * - Provider hooks (provider:request): return ProviderRequestHookResult
+ * - Tool result hooks (tool:result): return ToolResultHookResult
+ * - System prompt hooks (systemPrompt:build): return SystemPromptChunk | SystemPromptChunk[]
  */
 export interface HookPayloads {
   // Session lifecycle
@@ -30,28 +45,42 @@ export interface HookPayloads {
   "session:restoreActive": { agent: unknown; isRestoring: boolean };
 
   // Tool context enrichment
-  "agent:toolContext": { toolCtx: unknown; toolName: string; agent: Agent };
+  "agent:toolContext": { toolCtx: ToolContext; toolName: string; agent: Agent };
 
   // Model changes
   "model:change": { agent: Agent; oldModel: string; newModel: string };
 
   // Message flow after LLM
-  "messages:afterLLM": { response: unknown; messages: Message[] };
+  "messages:afterLLM": { response: unknown; messages: Message[]; agent: Agent };
 
   // Tool execution lifecycle
   "tools:register": ToolsRegisterPayload;
   "tool:beforeExecute": { toolCallId: string; toolName: string; input: string; agent: Agent };
   "services:register": ServiceRegistry;
-  "tool:afterExecute": { toolCallId: string; toolName: string; result: unknown; input: string; agent: Agent; success: boolean };
+  "tool:afterExecute": {
+    toolCallId: string;
+    toolName: string;
+    result: unknown;
+    input: string;
+    agent: Agent;
+    success: boolean;
+  };
   "loop:detected": { agent: Agent };
-  "tool:metrics": { toolName: string; toolCallId: string; durationMs: number; success: boolean; resultSize: number; input: string; agent: Agent };
+  "tool:metrics": {
+    toolName: string;
+    toolCallId: string;
+    durationMs: number;
+    success: boolean;
+    resultSize: number;
+    input: string;
+    agent: Agent;
+  };
 
   // Context management
   "context:message": { message: Message; agent: Agent };
   "context:replaced": { agent: Agent; oldContext: Message[]; newContext: Message[] };
 
-  // System prompt — handlers return a chunk object { name, priority, content }
-  // or an array of chunk objects.
+  // System prompt — handlers return SystemPromptChunk or SystemPromptChunk[]
   "systemPrompt:build": { agent: Agent };
 
   // Commands
@@ -59,36 +88,66 @@ export interface HookPayloads {
   "commands:register": CommandsRegisterPayload;
 
   // Output
-  "output:event": { type: string; data: Record<string, unknown>; agent: Agent };
+  "output:event": { type: string; data: unknown; agent: Agent };
 
   // Shutdown
-  "shutdown:cleanup": Record<string, never>;
+  "shutdown:cleanup": unknown;
 
   // CLI
   "cli:subcommandsRegister": CliSubcommandRegistry;
   "cli:argsParsed": { cli: Record<string, unknown> };
 
-  // Input preprocessing
+  // Input preprocessing — return InputHookResult
+  //   { action: "continue" }
+  //   { action: "transform", text, images? }
+  //   { action: "handled" }
   "input": { text: string; images: unknown[] | null };
 
-  // Context modification pipeline — run sequentially before each LLM call
+  // Context modification pipeline — return ContextHookResult
+  //   { messages } — replace the messages array
   "context": { messages: Message[]; agent: Agent };
 
-  // Tool call gate — BLOCK or MUTATE tool input before execution
+  // Tool call gate — return GateAction
+  //   { action: "continue" }
+  //   { action: "modify", input }
+  //   { action: "block", result }
   "tool:call": { toolCallId: string; toolName: string; input: string; agent: Agent };
 
-  // Tool result modification — MODIFY tool output before it reaches the LLM context
-  "tool:result": { toolCallId: string; toolName: string; result: unknown; success: boolean; input: string; agent: Agent };
+  // Tool result modification — return ToolResultHookResult
+  //   { result } — replace the result
+  "tool:result": {
+    toolCallId: string;
+    toolName: string;
+    result: unknown;
+    success: boolean;
+    input: string;
+    agent: Agent;
+  };
 
-  // Provider request — run BEFORE the HTTP request to the LLM
-  "provider:request": { messages: Message[]; modelConfig: ModelConfig; toolDefs: ToolDef[]; agent: Agent };
+  // Provider request — return ProviderRequestHookResult
+  //   { messages } — replace the messages array
+  //   { modelConfig } — replace the model config
+  //   { toolDefs } — replace the tool definitions
+  "provider:request": {
+    messages: Message[];
+    modelConfig: ModelConfig;
+    toolDefs: ToolDef[];
+    agent: Agent;
+  };
 
   // Provider response — emitted AFTER the LLM response is fully received
   "provider:response": { response: unknown; modelConfig: ModelConfig; agent: Agent };
 
   // Turn lifecycle
   "turn:start": { turnIndex: number; timestamp: number; agent: Agent };
-  "turn:end": { turnIndex: number; message: string; toolResults: Array<{ toolName: string; input: string; result: string }>; stopped: boolean; cancelled?: boolean; agent: Agent };
+  "turn:end": {
+    turnIndex: number;
+    message: string;
+    toolResults: Array<{ toolName: string; input: string; result: string }>;
+    stopped: boolean;
+    cancelled?: boolean;
+    agent: Agent;
+  };
 
   // Logging
   "log": { level: string; message: string; metadata?: Record<string, unknown> };
@@ -96,9 +155,23 @@ export interface HookPayloads {
 
 /**
  * Derive the handler type for a given hook name.
+ * Re-exported for convenience; aliases HookHandler from hooks.ts.
  */
 export type HookHandlerFor<K extends keyof HookPayloads> =
   (payload: HookPayloads[K]) => void | Promise<void> | unknown;
+
+/**
+ * Expected return types for pipeline hooks.
+ * Used by callers to type-check hook results.
+ */
+export interface HookReturnTypes {
+  "tool:call": GateAction;
+  "input": InputHookResult;
+  "context": ContextHookResult;
+  "tool:result": ToolResultHookResult;
+  "provider:request": ProviderRequestHookResult;
+  "systemPrompt:build": SystemPromptChunk | SystemPromptChunk[];
+}
 
 // ── Core Context ─────────────────────────────────────────────────────────────
 
@@ -176,10 +249,17 @@ export type ExtensionInstance = {
   /**
    * Hook handlers keyed by hook name.
    * Only known hook names from HookPayloads are allowed.
-   * Custom extensions can use known hooks only — no arbitrary string keys.
    *
    * Each handler receives the typed payload for that hook name, ensuring
    * type-safe access to hook data at compile time.
+   *
+   * Pipeline hooks should return the appropriate type:
+   * - tool:call → GateAction ({ action: "continue"|"block"|"modify" })
+   * - input → InputHookResult ({ action: "continue"|"transform"|"handled" })
+   * - context → ContextHookResult ({ messages })
+   * - tool:result → ToolResultHookResult ({ result })
+   * - provider:request → ProviderRequestHookResult ({ messages?, modelConfig?, toolDefs? })
+   * - systemPrompt:build → SystemPromptChunk | SystemPromptChunk[]
    */
   hooks?: {
     [K in keyof HookPayloads]?: (payload: HookPayloads[K]) => void | Promise<void> | unknown;
@@ -219,14 +299,6 @@ export interface CommandsRegisterPayload {
   /** The agent's command registry for registering slash commands. */
   registry: { register(name: string, definition: Record<string, unknown>): void };
   /** The agent instance for accessing agent state. */
-  agent: unknown;
-}
-
-/**
- * Payload for the `context` hook (context modification pipeline).
- */
-export interface ContextHookPayload {
-  messages: unknown[];
   agent: unknown;
 }
 

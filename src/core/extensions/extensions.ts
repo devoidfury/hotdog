@@ -3,7 +3,7 @@
 import fsPromises from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { HOOKS, EXTENSION_PROVIDES, type HookSystem, type HookHandler } from "../hooks.ts";
+import { HOOKS, EXTENSION_PROVIDES, type HookSystem, type HookHandlerAny } from "../hooks.ts";
 import { ExtensionError } from "../error.ts";
 import { logger } from "../logger.ts";
 import { camelCase } from "../../utils/strings.ts";
@@ -836,7 +836,7 @@ export class ExtensionLoader {
       for (const [hookName, handler] of Object.entries(instanceHooks)) {
         if (hookName === HOOKS.TOOLS_REGISTER) continue;
         if (hookName === HOOKS.SERVICES_REGISTER) continue;
-        const remove = this.#core.hooks.on(hookName, handler as HookHandler<unknown>, name);
+        const remove = this.#core.hooks.on(hookName, handler as HookHandlerAny, name);
         removers.push(remove);
       }
     }

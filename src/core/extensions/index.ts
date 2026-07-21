@@ -58,8 +58,10 @@ export type {
   ExtensionInstance,
   ToolsRegisterPayload,
   CommandsRegisterPayload,
-  ContextHookPayload,
   ToolExecutionContext,
+  HookPayloads,
+  HookHandlerFor,
+  HookReturnTypes,
 } from "./types.ts";
 
 export type { LoaderCore } from "./extensions.ts";

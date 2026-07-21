@@ -164,23 +164,22 @@ export async function create(_core: CoreContext): Promise<ExtensionInstance> {
         type,
         data,
         agent,
-      }: {
-        type: string;
-        data?: Record<string, unknown>;
-        agent?: SessionLogAgent;
       }) => {
-        if (type === "compaction_result" && data?.summary) {
-          const sessionId = agent?.sessionId || "unknown";
-          lastSessionId = sessionId;
-          const logPath = join(cacheDir, `${sessionId}.jsonl`);
-          const entry = stripNulls({
-            ts: new Date().toISOString(),
-            session_id: sessionId,
-            source: LOG_SOURCE.COMPACTION,
-            summary: data.summary,
-            messages_compacted: data.messagesCompacted,
-          });
-          await appendFile(logPath, JSON.stringify(entry) + "\n");
+        if (type === "compaction_result") {
+          const compactionData = data as { summary?: string; messagesCompacted?: number };
+          if (compactionData?.summary) {
+            const sessionId = (agent as { sessionId?: string })?.sessionId || "unknown";
+            lastSessionId = sessionId;
+            const logPath = join(cacheDir, `${sessionId}.jsonl`);
+            const entry = stripNulls({
+              ts: new Date().toISOString(),
+              session_id: sessionId,
+              source: LOG_SOURCE.COMPACTION,
+              summary: compactionData.summary,
+              messages_compacted: compactionData.messagesCompacted,
+            });
+            await appendFile(logPath, JSON.stringify(entry) + "\n");
+          }
         }
       },
     },

@@ -181,6 +181,7 @@ export function create(core: CoreContext): ExtensionInstance | null {
       core.hooks.notifyHooks(HOOKS.OUTPUT_EVENT, {
         type: "compaction_result",
         data: result,
+        agent,
       });
 
     } catch (e: unknown) {

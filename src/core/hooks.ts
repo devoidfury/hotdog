@@ -7,6 +7,59 @@ import { formatError } from "./error.ts";
 import { logger } from "./logger.ts";
 import { isPromise } from "../utils/promise.ts";
 
+// ── Gate Action Discriminated Unions ─────────────────────────────────────────
+
+/**
+ * Result returned by gate hooks (TOOL_CALL, INPUT, etc.).
+ * Controls whether processing continues, is modified, or is blocked.
+ */
+export type GateAction =
+  | { action: "continue" }
+  | { action: "modify"; input?: string; result?: unknown }
+  | { action: "block"; result: unknown }
+  | { action: "handled" };
+
+/**
+ * Result returned by the CONTEXT hook pipeline.
+ * Allows handlers to replace the messages array.
+ */
+export type ContextHookResult = { messages: unknown[] };
+
+/**
+ * Result returned by the PROVIDER_REQUEST hook pipeline.
+ * Allows handlers to replace messages, modelConfig, or toolDefs.
+ */
+export type ProviderRequestHookResult = {
+  messages?: unknown[];
+  modelConfig?: unknown;
+  toolDefs?: unknown[];
+};
+
+/**
+ * Result returned by the TOOL_RESULT hook pipeline.
+ * Allows handlers to replace the tool result before it reaches the LLM.
+ */
+export type ToolResultHookResult = { result: unknown };
+
+/**
+ * Result returned by the INPUT hook pipeline.
+ * Allows handlers to transform input text/images or short-circuit entirely.
+ */
+export type InputHookResult =
+  | { action: "continue" }
+  | { action: "transform"; text: string; images?: unknown[] }
+  | { action: "handled" };
+
+/**
+ * Chunk returned by the SYSTEM_PROMPT_BUILD hook.
+ * Chunks are sorted by priority and rendered into the system prompt template.
+ */
+export type SystemPromptChunk = {
+  name: string;
+  priority: number;
+  content: string;
+};
+
 // ── Trace Helpers ────────────────────────────────────────────────────────────
 
 /**
@@ -33,25 +86,42 @@ function _summarizeResult(value: unknown): string {
   return `{ ${keys.slice(0, 3).join(", ")}, +${keys.length - 3} }`;
 }
 
+import type { HookPayloads } from "./extensions/types.ts";
+
 export interface HookHandlerEntry {
   id: number;
-  handler: HookHandler<unknown>;
+  handler: HookHandlerAny;
   source: string | undefined;
 }
 
 /**
- * Hook handler function type.
- * @template T — The expected payload type for this hook.
+ * Hook handler function type, typed by hook name.
+ * Uses HookPayloads to derive the correct payload type for each hook.
+ * For known hook names, the data parameter is automatically typed.
+ * For unknown hook names, data is `unknown`.
+ * @template H — The hook name. If it's a key of HookPayloads, data is typed.
  */
-export type HookHandler<T = unknown> = (data: T) => void | Promise<void> | unknown;
+export type HookHandler<H extends string> = (
+  data: H extends keyof HookPayloads ? HookPayloads[H] : unknown,
+) => void | Promise<void> | unknown;
+
+/**
+ * Fallback handler type for hooks not in HookPayloads.
+ * Used for backward compatibility and custom hooks.
+ */
+export type HookHandlerAny = (data: unknown) => void | Promise<void> | unknown;
 
 export interface HookPipelineOptions {
   shouldStop?: (result: unknown) => boolean;
 }
 
-export interface HookPipelineResult {
-  results: Array<{ result: unknown; source: string | null }>;
-  lastResult: unknown;
+/**
+ * Result of running a hook pipeline.
+ * @template R — The expected return type of handlers in this pipeline.
+ */
+export interface HookPipelineResult<R = unknown> {
+  results: Array<{ result: R; source: string | null }>;
+  lastResult: R | undefined;
   stopped: boolean;
   data: unknown;
 }
@@ -76,20 +146,23 @@ export class HookSystem {
   /**
    * Register a handler for a hook.
    * @param hookName - The hook name (e.g., "context:message").
+   *   When using a known hook name from HookPayloads, the handler's
+   *   data parameter is automatically typed.
    * @param handler - Function(data) or async Function(data).
+   *   The data parameter is typed based on the hook name.
    * @param source - Optional source identifier (e.g., extension name).
    *   Used for tracking which extension registered a handler.
    * @returns A removal function that unregisters this handler.
    */
-  on<T = unknown>(
-    hookName: string,
-    handler: HookHandler<T>,
+  on<H extends string>(
+    hookName: H,
+    handler: HookHandler<H>,
     source?: string,
   ): () => void {
     if (!this.#hooks.has(hookName)) this.#hooks.set(hookName, []);
     const handlers = this.#hooks.get(hookName)!;
     const id = ++this.#handlerCounter;
-    handlers.push({ id, handler: handler as HookHandler<unknown>, source });
+    handlers.push({ id, handler: handler as HookHandlerAny, source });
 
     // Return a removal function
     return () => {
@@ -106,7 +179,7 @@ export class HookSystem {
    * @param handler - The exact handler function to remove.
    * @returns true if handler was found and removed.
    */
-  off<T = unknown>(hookName: string, handler: HookHandler<T>): boolean {
+  off(hookName: string, handler: HookHandlerAny): boolean {
     const handlers = this.#hooks.get(hookName);
     if (!handlers) return false;
     const idx = handlers.findIndex((h) => h.handler === handler);
@@ -121,8 +194,13 @@ export class HookSystem {
    * Notify hooks (fire-and-forget).
    * All handlers are invoked synchronously in order. Return values are ignored.
    * Handlers may return Promises; these are not awaited but errors are caught and logged.
+   * @param hookName - The hook name. Data is type-checked against HookPayloads.
+   * @param data - The payload, typed based on the hook name.
    */
-  notifyHooks(hookName: string, data: unknown): void {
+  notifyHooks<H extends string>(
+    hookName: H,
+    data: H extends keyof HookPayloads ? HookPayloads[H] : unknown,
+  ): void {
     const handlers = this.#hooks.get(hookName) || [];
     let doTrace = this._shouldTrace(hookName);
 
@@ -186,8 +264,8 @@ export class HookSystem {
    * Run a hook pipeline sequentially.
    * Handlers run one at a time, each seeing the accumulated state.
    *
-   * @param hookName
-   * @param data — Mutable data object passed to each handler.
+   * @param hookName - The hook name. Data is type-checked against HookPayloads.
+   * @param data — Mutable data object passed to each handler, typed by hook name.
    * @param opts
    * @param opts.shouldStop — Called with each handler's return value.
    *   Return true to stop processing further handlers.
@@ -196,14 +274,14 @@ export class HookSystem {
    *   stopped — true if shouldStop caused early termination
    *   data — the (possibly mutated) data object
    */
-  async runHookPipeline(
-    hookName: string,
-    data: unknown,
+  async runHookPipeline<R = unknown, H extends string = keyof HookPayloads>(
+    hookName: H,
+    data: H extends keyof HookPayloads ? HookPayloads[H] : unknown,
     opts: HookPipelineOptions = {},
-  ): Promise<HookPipelineResult> {
+  ): Promise<HookPipelineResult<R>> {
     const handlers = this.#hooks.get(hookName) || [];
-    const results: Array<{ result: unknown; source: string | null }> = [];
-    let lastResult: unknown;
+    const results: Array<{ result: R; source: string | null }> = [];
+    let lastResult: R | undefined;
     let stopped = false;
     let doTrace = this._shouldTrace(hookName);
 
@@ -213,7 +291,7 @@ export class HookSystem {
       const t0 = doTrace ? Date.now() : 0;
       try {
         const result = entry.handler(data);
-        const resolved: unknown = isPromise(result) ? await result : result;
+        const resolved = (isPromise(result) ? await result : result) as R;
         if (resolved !== undefined) {
           results.push({ result: resolved, source: entry.source || null });
           lastResult = resolved;

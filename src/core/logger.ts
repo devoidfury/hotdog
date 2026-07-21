@@ -60,8 +60,8 @@ export function resolveLogTarget(configTarget?: string): LogTarget {
 // ── Singleton Logger ────────────────────────────────────────────────────────
 
 interface HookSystem {
-  on<T = unknown>(hookName: string, handler: (data: T) => void | Promise<void> | unknown): void;
-  notifyHooks(hookName: string, data: unknown): void;
+  on<H extends string>(hookName: H, handler: (data: unknown) => void | Promise<void> | unknown, source?: string): () => void;
+  notifyHooks<H extends string>(hookName: H, data: unknown): void;
 }
 
 let _hooks: HookSystem | null = null;
@@ -97,7 +97,8 @@ export function initializeLogger({
   // Register default handler if target is not "none"
   if (target !== "none") {
     const stream = target === "stdout" ? process.stdout : process.stderr;
-    hooks.on("log", ({ level, message, metadata }: LogEvent) => {
+    hooks.on("log", (data) => {
+      const { level, message, metadata } = data as LogEvent;
       if (LOG_LEVELS[level] < _minLevelNum) return;
       const ts = new Date().toISOString().slice(11, 19);
       const prefix = `[${level.toUpperCase()}] ${ts}`;

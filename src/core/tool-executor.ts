@@ -4,11 +4,12 @@
 
 import { Message, type ImageAttachment } from "./context/message.ts";
 import { formatError } from "./error.ts";
-import { HOOKS, type HookSystem } from "./hooks.ts";
+import { HOOKS, type HookSystem, type GateAction, type ToolResultHookResult } from "./hooks.ts";
 import { logger } from "./logger.ts";
 import { ToolContext } from "./extensions/tool-context.ts";
 import { formatToolResult } from "./extensions/tool-utils.ts";
 import type { ToolRegistry } from "./extensions/tool-registry.ts";
+import type { Agent } from "./agent.ts";
 
 /**
  * Minimal tool call shape from the LLM (normalized OpenAI format).
@@ -43,7 +44,7 @@ export interface ToolExecutorDeps {
   /** Dynamic getter — isRestoring can change at runtime. */
   isRestoring: () => boolean;
   /** Agent reference for hook payloads (not used for method calls). */
-  agent: unknown;
+  agent: Agent;
 }
 
 /**
@@ -166,32 +167,21 @@ export class ToolExecutor {
     });
 
     // Tool call gate — sequential, modifiable. Handlers can block, modify input args, or allow execution to proceed.
-    //    Actions: { action: "continue" } | { action: "modify", input } | { action: "block", result }
-    const callResult = await hooks.runHookPipeline(HOOKS.TOOL_CALL, {
+    // Returns GateAction: { action: "continue" } | { action: "modify", input } | { action: "block", result }
+    const callResult = await hooks.runHookPipeline<GateAction>(HOOKS.TOOL_CALL, {
       toolCallId,
       toolName,
       input,
       agent,
     });
-    if (
-      callResult.lastResult &&
-      (callResult.lastResult as { action?: string }).action === "block"
-    ) {
+    if (callResult.lastResult?.action === "block") {
       // Extension blocked this tool call — use provided result
-      const blockedResult = formatToolResult(
-        (callResult.lastResult as { result?: unknown }).result,
-        toolName,
-        false,
-      );
+      const blockedResult = formatToolResult(callResult.lastResult.result, toolName, false);
       return this.#writeToolResult(toolName, input, blockedResult, toolCallId);
     }
-    if (
-      callResult.lastResult &&
-      (callResult.lastResult as { action?: string }).action === "modify" &&
-      (callResult.lastResult as { input?: unknown }).input !== undefined
-    ) {
+    if (callResult.lastResult?.action === "modify" && callResult.lastResult.input !== undefined) {
       // Extension modified the input args
-      input = (callResult.lastResult as { input: string }).input;
+      input = callResult.lastResult.input;
     }
 
     // Build and enrich tool context via hook
@@ -254,8 +244,8 @@ export class ToolExecutor {
 
     // Tool result — sequential, modifiable. Handlers can transform the
     // result before it reaches the LLM context.
-    // Returns { result } to replace the result (any value: string, ToolResult, object)
-    const resultHook = await hooks.runHookPipeline(HOOKS.TOOL_RESULT, {
+    // Returns ToolResultHookResult: { result } to replace the result
+    const resultHook = await hooks.runHookPipeline<ToolResultHookResult>(HOOKS.TOOL_RESULT, {
       toolCallId,
       toolName,
       result,
@@ -263,11 +253,8 @@ export class ToolExecutor {
       input,
       agent,
     });
-    if (
-      resultHook.lastResult &&
-      (resultHook.lastResult as { result?: unknown }).result !== undefined
-    ) {
-      result = (resultHook.lastResult as { result: unknown }).result;
+    if (resultHook.lastResult?.result !== undefined) {
+      result = resultHook.lastResult.result;
     }
     const images = (result as { images?: unknown })?.images ?? null;
 

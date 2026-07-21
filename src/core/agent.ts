@@ -5,7 +5,7 @@ import { Message, type ImageAttachment as MessageImageAttachment } from "./conte
 import { MessageLog } from "./context/message-log.ts";
 import { OUTPUT_EVENT, OutputEvent } from "./context/output.ts";
 import { AgentError, LlmError } from "./error.ts";
-import { HOOKS, HookSystem } from "./hooks.ts";
+import { HOOKS, HookSystem, type ContextHookResult, type ProviderRequestHookResult } from "./hooks.ts";
 import { isPromise } from "../utils/promise.ts";
 import { ACTIONS, ParsedCommand, Command } from "./commands.ts";
 import { logger } from "./logger.ts";
@@ -369,12 +369,12 @@ export class Agent {
       let messages = this.buildMessages();
       // Context hook — sequential, modifiable. Each handler sees prior
       // transformations and can return { messages } to replace the array.
-      const contextResult = await this.hooks.runHookPipeline(HOOKS.CONTEXT, {
+      const contextResult = await this.hooks.runHookPipeline<ContextHookResult>(HOOKS.CONTEXT, {
         messages,
         agent: this,
       });
-      if ((contextResult.lastResult as { messages?: unknown })?.messages) {
-        messages = (contextResult.lastResult as { messages: Message[] }).messages;
+      if (contextResult.lastResult?.messages) {
+        messages = contextResult.lastResult.messages as Message[];
       }
 
       let toolDefs = await this.#toolRegistry.getToolDefs();
@@ -387,7 +387,7 @@ export class Agent {
 
       // Before provider request — sequential, modifiable. Extensions can
       // log the request, modify messages, change model config, or alter tools.
-      const reqResult = await this.hooks.runHookPipeline(
+      const reqResult = await this.hooks.runHookPipeline<ProviderRequestHookResult>(
         HOOKS.PROVIDER_REQUEST,
         {
           messages,
@@ -396,12 +396,12 @@ export class Agent {
           agent: this,
         },
       );
-      if ((reqResult.lastResult as { messages?: unknown })?.messages)
-        messages = (reqResult.lastResult as { messages: Message[] }).messages;
-      if ((reqResult.lastResult as { modelConfig?: unknown })?.modelConfig)
-        modelConfig = (reqResult.lastResult as { modelConfig: typeof modelConfig }).modelConfig;
-      if ((reqResult.lastResult as { toolDefs?: unknown })?.toolDefs)
-        toolDefs = (reqResult.lastResult as { toolDefs: typeof toolDefs }).toolDefs;
+      if (reqResult.lastResult?.messages)
+        messages = reqResult.lastResult.messages as Message[];
+      if (reqResult.lastResult?.modelConfig)
+        modelConfig = reqResult.lastResult.modelConfig as typeof modelConfig;
+      if (reqResult.lastResult?.toolDefs)
+        toolDefs = reqResult.lastResult.toolDefs as typeof toolDefs;
 
       // Create an AbortController for this LLM request.
       // Pass its signal so the HTTP client can properly abort fetch()

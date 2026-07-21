@@ -637,6 +637,158 @@ body {
     }
 }
 
+/* ═══════════════════════════════════════════════════════════════════════════
+   MARKDOWN RENDERED CONTENT (.md-content)
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+/* Base: md-content uses normal flow (not pre-wrap) */
+.message .content.md-content {
+    white-space: normal;
+}
+
+/* Headings */
+.md-content h1,
+.md-content h2,
+.md-content h3,
+.md-content h4,
+.md-content h5,
+.md-content h6 {
+    margin: 0.6em 0 0.4em;
+    font-weight: 600;
+    line-height: 1.3;
+    color: var(--text-primary);
+}
+
+.md-content h1 { font-size: 1.4em; }
+.md-content h2 { font-size: 1.2em; }
+.md-content h3 { font-size: 1.1em; }
+.md-content h4 { font-size: 1em; }
+.md-content h5 { font-size: 0.95em; }
+.md-content h6 { font-size: 0.9em; color: var(--text-secondary); }
+
+/* First child heading shouldn't have top margin */
+.md-content > h1:first-child,
+.md-content > h2:first-child,
+.md-content > h3:first-child,
+.md-content > h4:first-child,
+.md-content > h5:first-child,
+.md-content > h6:first-child {
+    margin-top: 0;
+}
+
+/* Paragraphs */
+.md-content p {
+    margin: 0.4em 0;
+}
+
+.md-content p:first-child {
+    margin-top: 0;
+}
+
+.md-content p:last-child {
+    margin-bottom: 0;
+}
+
+/* Inline code */
+.md-content code.inline-code {
+    background: var(--bg-elevated);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 1px 5px;
+    font-family: var(--font-mono);
+    font-size: 0.88em;
+    color: var(--accent);
+}
+
+/* Code blocks */
+.md-content pre.code-block {
+    background: var(--bg-base);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 12px 14px;
+    margin: 0.6em 0;
+    overflow-x: auto;
+    font-size: 0.85em;
+    line-height: 1.5;
+}
+
+.md-content pre.code-block code {
+    font-family: var(--font-mono);
+    color: var(--text-secondary);
+    background: none;
+    border: none;
+    padding: 0;
+}
+
+/* Lists */
+.md-content ul,
+.md-content ol {
+    margin: 0.4em 0;
+    padding-left: 1.5em;
+}
+
+.md-content ul {
+    list-style-type: disc;
+}
+
+.md-content ol {
+    list-style-type: decimal;
+}
+
+.md-content li {
+    margin: 0.2em 0;
+    line-height: 1.6;
+}
+
+.md-content li + li {
+    margin-top: 0.3em;
+}
+
+/* Blockquotes */
+.md-content blockquote {
+    border-left: 3px solid var(--accent);
+    margin: 0.4em 0;
+    padding: 4px 0 4px 12px;
+    color: var(--text-secondary);
+}
+
+.md-content blockquote p {
+    margin: 0.2em 0;
+}
+
+/* Horizontal rules */
+.md-content hr {
+    border: none;
+    border-top: 1px solid var(--border);
+    margin: 1em 0;
+}
+
+/* Links */
+.md-content a {
+    color: var(--accent);
+    text-decoration: none;
+    border-bottom: 1px solid transparent;
+    transition: border-color 0.15s;
+}
+
+.md-content a:hover {
+    border-bottom-color: var(--accent);
+}
+
+/* Bold and italic */
+.md-content strong {
+    font-weight: 600;
+}
+
+.md-content em {
+    font-style: italic;
+}
+
+.md-content del {
+    text-decoration: line-through;
+    color: var(--text-muted);
+}
+
 /* ── Tool Call Blocks ─────────────────────────────────────────────────────── */
 
 .tool-call-block {
@@ -723,6 +875,11 @@ body {
     max-width: 80%;
     animation: messageIn 0.25s var(--ease-out) both;
     line-height: 1.5;
+}
+
+/* When thinking blocks render markdown, use normal whitespace */
+.thinking-block.md-content {
+    white-space: normal;
 }
 
 /* ── Special Message Types ────────────────────────────────────────────────── */

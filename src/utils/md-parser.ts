@@ -188,25 +188,161 @@ export function parseMarkdown(markdown: string): MdDocument {
 
 // ── Streaming Parser ─────────────────────────────────────────────────────────
 
+// ── Streaming Parser (incremental with diff) ─────────────────────────────
+
+/**
+ * Result of feeding a chunk into a streaming parser.
+ * `stableFrom` is the index of the first block that changed since the
+ * previous feed — blocks before this index are unchanged and their DOM
+ * can be left alone.
+ */
+export interface FeedResult {
+  tree: MdDocument;
+  stableFrom: number;
+}
+
+/**
+ * Deep-compare two inline nodes for structural equality.
+ */
+function inlinesEqual(a: MdInline, b: MdInline): boolean {
+  if (a.type !== b.type) return false;
+
+  switch (a.type) {
+    case "text":
+      return (a as MdText).content === (b as MdText).content;
+    case "bold":
+    case "italic":
+    case "strikethrough":
+      return inlineArraysEqual(
+        (a as MdBold | MdItalic).children,
+        (b as MdBold | MdItalic).children,
+      );
+    case "inline_code":
+      return (a as MdInlineCode).content === (b as MdInlineCode).content;
+    case "link":
+      return (
+        (a as MdLink).url === (b as MdLink).url &&
+        inlineArraysEqual(
+          (a as MdLink).children,
+          (b as MdLink).children,
+        )
+      );
+    case "image":
+      return (
+        (a as MdImage).url === (b as MdImage).url &&
+        (a as MdImage).alt === (b as MdImage).alt
+      );
+  }
+}
+
+function inlineArraysEqual(a: MdInline[], b: MdInline[]): boolean {
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i++) {
+    if (!inlinesEqual(a[i]!, b[i]!)) return false;
+  }
+  return true;
+}
+
+/**
+ * Deep-compare two block nodes for structural equality.
+ */
+function areBlocksEqual(a: MdBlock, b: MdBlock): boolean {
+  if (a.type !== b.type) return false;
+
+  switch (a.type) {
+    case "heading":
+      return (
+        (a as MdHeading).level === (b as MdHeading).level &&
+        inlineArraysEqual(
+          (a as MdHeading).children,
+          (b as MdHeading).children,
+        )
+      );
+    case "paragraph":
+      return inlineArraysEqual(
+        (a as MdParagraph).children,
+        (b as MdParagraph).children,
+      );
+    case "code_block": {
+      const ca = a as MdCodeBlock;
+      const cb = b as MdCodeBlock;
+      return ca.content === cb.content && ca.language === cb.language;
+    }
+    case "list": {
+      const la = a as MdList;
+      const lb = b as MdList;
+      if (la.ordered !== lb.ordered || la.items.length !== lb.items.length)
+        return false;
+      for (let i = 0; i < la.items.length; i++) {
+        if (
+          !inlineArraysEqual(
+            la.items[i]!.children,
+            lb.items[i]!.children,
+          )
+        )
+          return false;
+      }
+      return true;
+    }
+    case "blockquote": {
+      const ba = a as MdBlockquote;
+      const bb = b as MdBlockquote;
+      if (ba.children.length !== bb.children.length) return false;
+      for (let i = 0; i < ba.children.length; i++) {
+        if (!areBlocksEqual(ba.children[i]!, bb.children[i]!)) return false;
+      }
+      return true;
+    }
+    case "horizontal_rule":
+    case "thematic_break":
+      return true;
+  }
+}
+
+/**
+ * Given two parse trees (previous and current), find the index of the
+ * first block that differs.  Returns `prev.children.length` if the new
+ * tree only appended blocks, or `0` if everything changed.
+ */
+export function getStablePrefix(prev: MdDocument, next: MdDocument): number {
+  const len = Math.min(prev.children.length, next.children.length);
+  for (let i = 0; i < len; i++) {
+    if (!areBlocksEqual(prev.children[i]!, next.children[i]!)) {
+      return i;
+    }
+  }
+  return len;
+}
+
 /**
  * Incremental/streaming markdown parser.
  *
- * Feed chunks of markdown as they arrive (e.g., from an LLM streaming response),
- * and get the current parse tree at any point. Incomplete elements at the end
- * are buffered and parsed when more data arrives.
+ * Feed chunks of markdown as they arrive (e.g., from an LLM streaming response).
+ * Each call to `feed()` returns the full tree plus a `stableFrom` index so
+ * the renderer only re-renders the changed tail of the document.
  */
 export class StreamingMdParser {
   private buffer = "";
+  private prevTree: MdDocument | null = null;
 
   /**
    * Feed a new chunk of markdown text into the parser.
    *
    * @param chunk — A new chunk of markdown text.
-   * @returns The current best-effort parse tree.
+   * @returns The current parse tree and the index of the first changed block.
    */
-  feed(chunk: string): MdDocument {
+  feed(chunk: string): FeedResult {
     this.buffer += chunk;
-    return parseMarkdown(this.buffer);
+    const tree = parseMarkdown(this.buffer);
+
+    if (this.prevTree === null) {
+      this.prevTree = tree;
+      return { tree, stableFrom: 0 };
+    }
+
+    const stableFrom = getStablePrefix(this.prevTree, tree);
+    this.prevTree = tree;
+    return { tree, stableFrom };
   }
 
   /**
@@ -223,6 +359,7 @@ export class StreamingMdParser {
    */
   reset(): void {
     this.buffer = "";
+    this.prevTree = null;
   }
 
   /**
@@ -285,6 +422,111 @@ export function mdTreeToPlainText(tree: MdDocument): string {
   }
 
   return parts.join("").replace(/\n{3,}/g, "\n\n").trim();
+}
+
+// ── HTML Renderer ────────────────────────────────────────────────────────────
+
+/**
+ * Escape HTML special characters in text content.
+ */
+function escapeHtml(text: string): string {
+  return text
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}
+
+/**
+ * Render inline nodes to HTML.
+ */
+function inlineToHtml(node: MdInline): string {
+  switch (node.type) {
+    case "text":
+      return escapeHtml(node.content);
+    case "bold":
+      return `<strong>${node.children.map(inlineToHtml).join("")}</strong>`;
+    case "italic":
+      return `<em>${node.children.map(inlineToHtml).join("")}</em>`;
+    case "strikethrough":
+      return `<del>${node.children.map(inlineToHtml).join("")}</del>`;
+    case "inline_code":
+      return `<code class="inline-code">${escapeHtml(node.content)}</code>`;
+    case "link":
+      return `<a href="${escapeHtml(node.url)}" target="_blank" rel="noopener noreferrer">${node.children.map(inlineToHtml).join("")}</a>`;
+    case "image":
+      return `<img src="${escapeHtml(node.url)}" alt="${escapeHtml(node.alt)}" />`;
+  }
+}
+
+/**
+ * Render a single block node to HTML.
+ */
+function blockToHtml(block: MdBlock): string {
+  switch (block.type) {
+    case "heading": {
+      const tag = `h${block.level}`;
+      return `<${tag}>${block.children.map(inlineToHtml).join("")}</${tag}>`;
+    }
+    case "paragraph":
+      return `<p>${block.children.map(inlineToHtml).join("")}</p>`;
+    case "code_block": {
+      const classes = block.language ? `code-block lang-${escapeHtml(block.language)}` : "code-block";
+      return `<pre class="${classes}"><code>${escapeHtml(block.content)}</code></pre>`;
+    }
+    case "list": {
+      const tag = block.ordered ? "ol" : "ul";
+      const items = block.items
+        .map((item) => `<li>${item.children.map(inlineToHtml).join("")}</li>`)
+        .join("");
+      return `<${tag}>${items}</${tag}>`;
+    }
+    case "blockquote":
+      return `<blockquote>${block.children.map(blockToHtml).join("")}</blockquote>`;
+    case "horizontal_rule":
+      return `<hr />`;
+    case "thematic_break":
+      return `<hr />`;
+  }
+}
+
+/**
+ * Render a parsed markdown tree to an HTML string.
+ *
+ * @param tree — The MdDocument tree from parseMarkdown().
+ * @returns An HTML string suitable for innerHTML assignment.
+ */
+export function mdTreeToHtml(tree: MdDocument): string {
+  return tree.children.map(blockToHtml).join("\n");
+}
+
+/**
+ * Render a range of blocks from a tree to an HTML string.
+ * Useful for incremental re-rendering during streaming.
+ *
+ * @param tree — The MdDocument tree from parseMarkdown().
+ * @param from — Start index (inclusive, 0-based).
+ * @param to — End index (exclusive). Defaults to tree.children.length.
+ * @returns An HTML string for the specified block range.
+ */
+export function renderBlocksToHtml(
+  tree: MdDocument,
+  from: number,
+  to?: number,
+): string {
+  const end = to ?? tree.children.length;
+  return tree.children.slice(from, end).map(blockToHtml).join("\n");
+}
+
+/**
+ * Convenience function: parse markdown and render to HTML in one step.
+ *
+ * @param markdown — The markdown source text.
+ * @returns An HTML string suitable for innerHTML assignment.
+ */
+export function markdownToHtml(markdown: string): string {
+  const tree = parseMarkdown(markdown);
+  return mdTreeToHtml(tree);
 }
 
 /**
@@ -433,9 +675,13 @@ function parseParagraph(
     if (trimmed === "") {
       break;
     }
-    // Stop if we hit a block-level element
+    // Stop if we hit a block-level element.
+    // Use the heading regex (not just startsWith("#")) so that bare "#"
+    // or "#no-space" are treated as paragraph text, not as a heading.
+    // This prevents an infinite loop when parseParagraph breaks with
+    // _nextIndex === start.
     if (
-      trimmed.startsWith("#") ||
+      /^#{1,6}\s+/.test(trimmed) ||
       trimmed.startsWith("```") ||
       trimmed.startsWith(">") ||
       isListLine(trimmed) ||
@@ -596,7 +842,7 @@ function parseImageOrLink(
 }
 
 interface EmphasisResult {
-  node: MdBold | MdItalic;
+  node: MdBold | MdItalic | MdStrikethrough;
   endIndex: number;
 }
 
@@ -617,15 +863,14 @@ function parseEmphasis(
   const innerText = text.slice(openEnd, closeIdx);
   const inner = parseInline(innerText);
 
-  let node: MdBold | MdItalic;
+  let node: MdBold | MdItalic | MdStrikethrough;
 
   if (kind === "bold" || kind === "bold_italic") {
     node = { type: "bold", children: inner };
   } else if (kind === "italic") {
     node = { type: "italic", children: inner };
   } else {
-    // strikethrough falls through to bold for now
-    node = { type: "bold", children: inner };
+    node = { type: "strikethrough", children: inner };
   }
 
   return { node, endIndex: closeIdx + markerLen };
@@ -634,22 +879,44 @@ function parseEmphasis(
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
 function isListLine(trimmed: string): boolean {
+  // Match standard list items: "- text", "* text", "1. text", etc.
+  // Also match bare markers (e.g. "*") which can occur during streaming
+  // when the content hasn't arrived yet.
   return (
     /^[-*+]\s+/.test(trimmed) ||
-    /^\d+[\.\)]\s+/.test(trimmed)
+    /^[-*+]$/.test(trimmed) ||
+    /^\d+[\.\)]\s+/.test(trimmed) ||
+    /^\d+[\.\)]$/.test(trimmed)
   );
 }
 
 function isOrderedListLine(trimmed: string): boolean {
-  return /^\d+[\.\)]\s+/.test(trimmed);
+  return /^\d+[\.\)]\s+/.test(trimmed) || /^\d+[\.\)]$/.test(trimmed);
 }
 
 function getListContent(trimmed: string): string {
-  // Remove list marker: "- ", "* ", "+ ", "1. ", "1) "
-  return trimmed.replace(/^[-*+]\s+/, "").replace(/^\d+[\.\)]\s+/, "");
+  // Remove list marker: "- ", "* ", "+ ", "1. ", "1) ", or bare marker "-" / "*" / "+"
+  return trimmed
+    .replace(/^[-*+]\s+/, "")
+    .replace(/^[-*+]$/, "")
+    .replace(/^\d+[\.\)]\s+/, "")
+    .replace(/^\d+[\.\)]$/, "");
 }
 
 function isHorizontalRule(trimmed: string): boolean {
+  // Must be exclusively one character type (+ optional spaces), not mixed
+  // with other content.  This prevents "* **bold**" from matching as HR.
+  // Valid: "***", "* * *", "---", "- - -", "___", "_ _ _"
+  // Invalid: "*** extra", "* **", "---text"
+
+  // Reject if the line looks like a list item (marker followed by non-marker content)
+  if (/^[-*+][\s\S]/.test(trimmed) && !/^[-*+][\s*-]*$/.test(trimmed)) {
+    return false;
+  }
+  if (/^_[\s\S]/.test(trimmed) && !/^_[\s_]*$/.test(trimmed)) {
+    return false;
+  }
+
   const cleaned = trimmed.replace(/\s/g, "");
   return (
     (cleaned.startsWith("---") && cleaned.length >= 3) ||

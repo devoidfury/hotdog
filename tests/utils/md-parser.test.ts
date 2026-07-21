@@ -4,6 +4,9 @@ import {
   createStreamingParser,
   mdTreeToPlainText,
   walkTree,
+  mdTreeToHtml,
+  markdownToHtml,
+  getStablePrefix,
 } from "../../src/utils/md-parser.ts";
 import type { MdBlock, MdInline, MdDocument } from "../../src/utils/md-parser.ts";
 
@@ -332,14 +335,15 @@ describe("createStreamingParser", () => {
   it("feeds chunks incrementally and produces a valid tree", () => {
     const parser = createStreamingParser();
 
-    const chunk1 = parser.feed("# Hello");
-    expect(chunk1.children[0]?.type).toBe("heading");
+    const r1 = parser.feed("# Hello");
+    expect(r1.tree.children[0]?.type).toBe("heading");
+    expect(r1.stableFrom).toBe(0); // first feed — nothing stable yet
 
-    const chunk2 = parser.feed("\n\nThis is a ");
-    expect(chunk2.children.length).toBeGreaterThanOrEqual(1);
+    const r2 = parser.feed("\n\nThis is a ");
+    expect(r2.tree.children.length).toBeGreaterThanOrEqual(1);
 
-    const chunk3 = parser.feed("paragraph.");
-    expect(chunk3.children.length).toBeGreaterThanOrEqual(1);
+    const r3 = parser.feed("paragraph.");
+    expect(r3.tree.children.length).toBeGreaterThanOrEqual(1);
   });
 
   it("handles code blocks split across chunks", () => {
@@ -347,10 +351,10 @@ describe("createStreamingParser", () => {
 
     parser.feed("```\n");
     parser.feed("const x = 1;\n");
-    const final = parser.feed("```");
+    const r = parser.feed("```");
 
-    expect(final.children[0]?.type).toBe("code_block");
-    const code = final.children[0] as { type: "code_block"; content: string };
+    expect(r.tree.children[0]?.type).toBe("code_block");
+    const code = r.tree.children[0] as { type: "code_block"; content: string };
     expect(code.content).toContain("const x = 1;");
   });
 
@@ -368,10 +372,10 @@ describe("createStreamingParser", () => {
     parser.feed("# Old content");
     parser.reset();
 
-    const afterReset = parser.feed("# New content");
-    expect(afterReset.children[0]?.type).toBe("heading");
+    const r = parser.feed("# New content");
+    expect(r.tree.children[0]?.type).toBe("heading");
     // Should only have the new content
-    const heading = afterReset.children[0] as { type: "heading"; children: MdInline[] };
+    const heading = r.tree.children[0] as { type: "heading"; children: MdInline[] };
     if (heading.type === "heading") {
       const text = heading.children.find((c) => c.type === "text");
       if (text?.type === "text") {
@@ -385,6 +389,164 @@ describe("createStreamingParser", () => {
     parser.feed("Hello ");
     parser.feed("world");
     expect(parser.getBuffer()).toBe("Hello world");
+  });
+
+  it("reports stableFrom correctly for unchanged prefix", () => {
+    const parser = createStreamingParser();
+
+    // First feed: heading + paragraph
+    const r1 = parser.feed("# Title\n\nHello ");
+    expect(r1.stableFrom).toBe(0);
+    expect(r1.tree.children.length).toBe(2); // heading + paragraph
+
+    // Second feed: append to paragraph — heading is stable
+    const r2 = parser.feed("world");
+    expect(r2.stableFrom).toBe(1); // block 0 (heading) is stable
+    expect(r2.tree.children.length).toBe(2);
+  });
+
+  it("reports stableFrom=full when tree is unchanged", () => {
+    const parser = createStreamingParser();
+
+    // First feed: just a paragraph
+    const r1 = parser.feed("Hello ");
+    expect(r1.tree.children[0]?.type).toBe("paragraph");
+
+    // Second feed: empty string — tree unchanged
+    const r2 = parser.feed("");
+    expect(r2.stableFrom).toBe(1); // all 1 block is stable
+  });
+
+  it("handles code block closing fence that restructures the tree", () => {
+    const parser = createStreamingParser();
+
+    // Feed paragraph text + opening fence
+    const r1 = parser.feed("Hello\n```\n");
+    expect(r1.tree.children.length).toBe(2); // paragraph + unclosed code block
+    expect(r1.tree.children[0]?.type).toBe("paragraph");
+    expect(r1.tree.children[1]?.type).toBe("code_block");
+
+    // Feed code content
+    const r2 = parser.feed("const x = 1;\n");
+    expect(r2.tree.children.length).toBe(2);
+
+    // Feed closing fence — tree stays at 2 blocks (paragraph + now-closed code block)
+    const r3 = parser.feed("```");
+    expect(r3.tree.children.length).toBe(2);
+    expect(r3.tree.children[0]?.type).toBe("paragraph");
+    expect(r3.tree.children[1]?.type).toBe("code_block");
+    const code = r3.tree.children[1] as { type: "code_block"; content: string };
+    expect(code.content).toContain("const x = 1;");
+
+    // Feed more text after code block
+    const r4 = parser.feed("\n\nWorld");
+    expect(r4.tree.children.length).toBe(3); // paragraph + code block + paragraph
+    expect(r4.tree.children[0]?.type).toBe("paragraph");
+    expect(r4.tree.children[1]?.type).toBe("code_block");
+    expect(r4.tree.children[2]?.type).toBe("paragraph");
+  });
+
+  it("handles streaming with tree shrinking and growing correctly", () => {
+    const parser = createStreamingParser();
+
+    // Build up: heading + paragraph
+    parser.feed("# Title\n\nHello");
+    // Tree: [heading, paragraph] = 2 blocks
+
+    // Append to paragraph
+    const r1 = parser.feed(" world");
+    expect(r1.stableFrom).toBe(1); // heading stable, paragraph changed
+
+    // Add a code block start
+    const r2 = parser.feed("\n\n```\ncode");
+    expect(r2.tree.children.length).toBe(3); // heading, paragraph, unclosed code
+
+    // Close the code block
+    const r3 = parser.feed("```");
+    expect(r3.tree.children[2]?.type).toBe("code_block");
+    // heading and paragraph should still be stable
+    expect(r3.stableFrom).toBeGreaterThanOrEqual(0);
+  });
+
+  it("does not confuse list marker + bold (***text) with horizontal rule", () => {
+    // Simulates streaming: "*" arrives, then "**", then "Zero Deps:**"
+    const parser = createStreamingParser();
+
+    parser.feed("### Features\n\n*");
+    // The "*" should be parsed as a list item (bare marker), not HR
+
+    const r2 = parser.feed(" **Zero");
+    // "***Zero" should NOT become a horizontal_rule
+    const blocks = r2.tree.children;
+    const types = blocks.map((b) => b.type);
+    expect(types).not.toContain("horizontal_rule");
+
+    const r3 = parser.feed(" Deps:** great");
+    const types2 = r3.tree.children.map((b) => b.type);
+    expect(types2).not.toContain("horizontal_rule");
+    // Should have a list
+    expect(types2).toContain("list");
+  });
+
+  it("still parses valid horizontal rules correctly", () => {
+    const doc = parseMarkdown("---");
+    expect(doc.children[0]?.type).toBe("horizontal_rule");
+
+    const doc2 = parseMarkdown("* * *");
+    expect(doc2.children[0]?.type).toBe("horizontal_rule");
+
+    const doc3 = parseMarkdown("- - -");
+    expect(doc3.children[0]?.type).toBe("horizontal_rule");
+
+    const doc4 = parseMarkdown("___");
+    expect(doc4.children[0]?.type).toBe("horizontal_rule");
+  });
+
+  it("does not treat '*** bold' as horizontal rule", () => {
+    const doc = parseMarkdown("*** bold text");
+    // This is emphasis + text, not an HR
+    expect(doc.children[0]?.type).not.toBe("horizontal_rule");
+  });
+});
+
+describe("getStablePrefix", () => {
+  it("returns 0 for empty previous tree", () => {
+    const prev = parseMarkdown("");
+    const next = parseMarkdown("# Hello");
+    expect(getStablePrefix(prev, next)).toBe(0);
+  });
+
+  it("returns full length when trees are identical", () => {
+    const a = parseMarkdown("# Hello\n\nWorld");
+    const b = parseMarkdown("# Hello\n\nWorld");
+    expect(getStablePrefix(a, b)).toBe(2);
+  });
+
+  it("returns index of first changed block", () => {
+    const a = parseMarkdown("# Hello\n\nFirst\n\nThird");
+    const b = parseMarkdown("# Hello\n\nChanged\n\nThird");
+    expect(getStablePrefix(a, b)).toBe(1); // block 0 stable, block 1 changed
+  });
+
+  it("returns previous length when new tree only appended", () => {
+    const a = parseMarkdown("# Hello\n\nWorld");
+    const b = parseMarkdown("# Hello\n\nWorld\n\nNew block");
+    expect(getStablePrefix(a, b)).toBe(2);
+  });
+
+  it("returns correct stable prefix when code block closes", () => {
+    // "Hello\n```\ncode" → 2 blocks (paragraph + unclosed code)
+    const a = parseMarkdown("Hello\n```\ncode");
+    expect(a.children.length).toBe(2);
+
+    // "Hello\n```\ncode\n```" → still 2 blocks (paragraph + closed code block)
+    const b = parseMarkdown("Hello\n```\ncode\n```");
+    expect(b.children.length).toBe(2);
+    expect(b.children[0]?.type).toBe("paragraph");
+    expect(b.children[1]?.type).toBe("code_block");
+
+    // Both blocks are structurally identical (same content "code")
+    expect(getStablePrefix(a, b)).toBe(2);
   });
 });
 
@@ -485,3 +647,787 @@ describe("walkTree", () => {
     expect(visited).toContain("text");
   });
 });
+
+// ── HTML Renderer ────────────────────────────────────────────────────────────
+
+describe("mdTreeToHtml", () => {
+  it("renders bold text as <strong>", () => {
+    const doc = parseMarkdown("**bold** text");
+    const html = mdTreeToHtml(doc);
+    expect(html).toContain("<strong>bold</strong>");
+  });
+
+  it("renders italic text as <em>", () => {
+    const doc = parseMarkdown("*italic* text");
+    const html = mdTreeToHtml(doc);
+    expect(html).toContain("<em>italic</em>");
+  });
+
+  it("renders inline code as <code>", () => {
+    const doc = parseMarkdown("Use `foo()` to call");
+    const html = mdTreeToHtml(doc);
+    expect(html).toContain('<code class="inline-code">foo()</code>');
+  });
+
+  it("renders headings", () => {
+    const doc = parseMarkdown("# Title\n## Subtitle");
+    const html = mdTreeToHtml(doc);
+    expect(html).toContain("<h1>Title</h1>");
+    expect(html).toContain("<h2>Subtitle</h2>");
+  });
+
+  it("renders code blocks with language class", () => {
+    const doc = parseMarkdown("```typescript\nconst x = 1;\n```");
+    const html = mdTreeToHtml(doc);
+    expect(html).toContain('<pre class="code-block lang-typescript">');
+    expect(html).toContain("const x = 1;");
+  });
+
+  it("renders unordered lists", () => {
+    const doc = parseMarkdown("- item one\n- item two");
+    const html = mdTreeToHtml(doc);
+    expect(html).toContain("<ul>");
+    expect(html).toContain("<li>item one</li>");
+    expect(html).toContain("<li>item two</li>");
+  });
+
+  it("renders ordered lists", () => {
+    const doc = parseMarkdown("1. first\n2. second");
+    const html = mdTreeToHtml(doc);
+    expect(html).toContain("<ol>");
+    expect(html).toContain("<li>first</li>");
+    expect(html).toContain("<li>second</li>");
+  });
+
+  it("renders blockquotes", () => {
+    const doc = parseMarkdown("> This is a quote");
+    const html = mdTreeToHtml(doc);
+    expect(html).toContain("<blockquote>");
+  });
+
+  it("renders horizontal rules", () => {
+    const doc = parseMarkdown("---");
+    const html = mdTreeToHtml(doc);
+    expect(html).toContain("<hr />");
+  });
+
+  it("renders links", () => {
+    const doc = parseMarkdown("[click here](https://example.com)");
+    const html = mdTreeToHtml(doc);
+    expect(html).toContain('<a href="https://example.com"');
+    expect(html).toContain("click here");
+  });
+
+  it("escapes HTML special characters", () => {
+    const doc = parseMarkdown("Use <div> & \"quotes\"");
+    const html = mdTreeToHtml(doc);
+    expect(html).toContain("&lt;div&gt;");
+    expect(html).toContain("&amp;");
+    expect(html).toContain("&quot;quotes&quot;");
+  });
+
+  it("renders strikethrough as <del>", () => {
+    const doc = parseMarkdown("~~deleted~~ text");
+    const html = mdTreeToHtml(doc);
+    expect(html).toContain("<del>deleted</del>");
+  });
+
+  it("renders images", () => {
+    const doc = parseMarkdown("![alt](image.png)");
+    const html = mdTreeToHtml(doc);
+    expect(html).toContain('<img src="image.png" alt="alt" />');
+  });
+
+  it("renders empty document as empty string", () => {
+    const doc = parseMarkdown("");
+    const html = mdTreeToHtml(doc);
+    expect(html).toBe("");
+  });
+});
+
+describe("markdownToHtml", () => {
+  it("parses and renders in one step", () => {
+    const html = markdownToHtml("# Hello\n\n**bold** and *italic*");
+    expect(html).toContain("<h1>Hello</h1>");
+    expect(html).toContain("<strong>bold</strong>");
+    expect(html).toContain("<em>italic</em>");
+  });
+
+  it("renders a complex document", () => {
+    const md = `## Analysis
+
+Here are the key findings:
+
+1. First finding with **bold** emphasis
+2. Second finding with \`code reference\`
+
+### Details
+
+\`\`\`
+function analyze() {
+  return true;
+}
+\`\`\`
+
+> Note: This is important.
+
+---
+
+See [documentation](https://example.com) for more.`;
+
+    const html = markdownToHtml(md);
+    expect(html).toContain("<h2>Analysis</h2>");
+    expect(html).toContain("<ol>");
+    expect(html).toContain("<strong>bold</strong>");
+    expect(html).toContain('<code class="inline-code">code reference</code>');
+    expect(html).toContain("<h3>Details</h3>");
+    expect(html).toContain("<pre class=\"code-block\">");
+    expect(html).toContain("<blockquote>");
+    expect(html).toContain("<hr />");
+    expect(html).toContain('<a href="https://example.com"');
+  });
+});
+
+// ── Streaming: tiny-chunk assertions ──────────────────────────────────────────
+
+/**
+ * Helper: split a string into deterministic chunks of 1–3 characters so we can simulate
+ * an LLM streaming response arriving in small bursts.
+ * Uses a rotating pattern [2, 1, 3, 2, 1] for reproducibility.
+ */
+function* chunkify(text: string): Generator<string> {
+  const sizes = [2, 1, 3, 2, 1];
+  let si = 0;
+  let i = 0;
+  while (i < text.length) {
+    const size = Math.min(sizes[si % sizes.length], text.length - i);
+    yield text.slice(i, i + size);
+    i += size;
+    si++;
+  }
+}
+
+describe("StreamingMdParser — tiny chunks (1-3 chars) with per-step assertions", () => {
+
+  it("streams a document with 3 codeblocks, lists, headings, and a blockquote", () => {
+    const md = `# Getting Started
+
+Here is a quick overview.
+
+\`\`\`python
+def hello():
+    print("hello")
+\`\`\`
+
+- first item
+- second item
+
+## Code Example Two
+
+\`\`\`javascript
+function add(a, b) {
+  return a + b;
+}
+\`\`\`
+
+> This is an important note.
+
+1. ordered one
+2. ordered two
+
+\`\`\`markdown
+# This is a codeblock
+- not a real list
+- just text inside code
+\`\`\`
+
+Final paragraph.`;
+
+    const parser = createStreamingParser();
+    const chunks = Array.from(chunkify(md));
+
+    // Verify we actually got many small chunks
+    expect(chunks.length).toBeGreaterThan(20);
+    for (const c of chunks) {
+      expect(c.length).toBeLessThanOrEqual(3);
+    }
+
+    let prevResult: ReturnType<typeof parser.feed> | null = null;
+
+    for (const chunk of chunks) {
+      const result = parser.feed(chunk);
+
+      // --- Invariant checks at every step ---
+
+      // Tree must always be a document
+      expect(result.tree.type).toBe("document");
+
+      // stableFrom must be >= 0
+      expect(result.stableFrom).toBeGreaterThanOrEqual(0);
+
+      // stableFrom must not exceed current block count
+      expect(result.stableFrom).toBeLessThanOrEqual(result.tree.children.length);
+
+      // If we had a previous result, verify stable prefix is truly stable
+      if (prevResult !== null) {
+        for (let i = 0; i < result.stableFrom; i++) {
+          const prevBlock = prevResult.tree.children[i];
+          const currBlock = result.tree.children[i];
+          expect(currBlock?.type).toBe(prevBlock?.type);
+        }
+      }
+
+      prevResult = result;
+    }
+
+    // --- Final assertions ---
+
+    const final = parser.finalize();
+    const types = final.children.map((b) => b.type);
+
+    // We expect: heading, paragraph, code_block, list, heading, code_block,
+    //            blockquote, list, code_block, paragraph
+    expect(types).toContain("heading");
+    expect(types).toContain("paragraph");
+    expect(types).toContain("blockquote");
+    expect(types).toContain("list");
+
+    // Count code blocks — should be exactly 3
+    const codeBlocks = types.filter((t) => t === "code_block");
+    expect(codeBlocks).toHaveLength(3);
+
+    // Verify the third codeblock contains the "fake" markdown list
+    const codeBlockNodes = final.children.filter(
+      (b): b is typeof b & { type: "code_block" } => b.type === "code_block",
+    );
+    expect(codeBlockNodes[0]?.content).toContain("def hello()");
+    expect(codeBlockNodes[1]?.content).toContain("function add");
+    expect(codeBlockNodes[2]?.content).toContain("- not a real list");
+
+    // Render to HTML and verify key elements
+    const html = mdTreeToHtml(final);
+    expect(html).toContain("<h1>Getting Started</h1>");
+    expect(html).toContain("<h2>Code Example Two</h2>");
+    expect(html).toContain('<pre class="code-block lang-python">');
+    expect(html).toContain('<pre class="code-block lang-javascript">');
+    expect(html).toContain('<pre class="code-block lang-markdown">');
+    expect(html).toContain("<blockquote>");
+    expect(html).toContain("<ul>");
+    expect(html).toContain("<ol>");
+    expect(html).toContain("- not a real list"); // inside code, escaped
+  });
+
+  it("streams a codeblock containing markdown syntax that should NOT be parsed as markdown", () => {
+    // This codeblock contains headings, lists, bold, links — all as plain text
+    const md = `\`\`\`
+# Fake heading
+- fake list item
+**fake bold**
+[fake link](http://example.com)
+> fake blockquote
+---
+\`\`\``;
+
+    const parser = createStreamingParser();
+    const chunks = Array.from(chunkify(md));
+
+    for (const chunk of chunks) {
+      const result = parser.feed(chunk);
+      expect(result.tree.type).toBe("document");
+      expect(result.stableFrom).toBeGreaterThanOrEqual(0);
+    }
+
+    const final = parser.finalize();
+    expect(final.children.length).toBe(1);
+    expect(final.children[0]?.type).toBe("code_block");
+
+    const code = final.children[0] as { type: "code_block"; content: string };
+    expect(code.content).toContain("# Fake heading");
+    expect(code.content).toContain("- fake list item");
+    expect(code.content).toContain("**fake bold**");
+    expect(code.content).toContain("[fake link](http://example.com)");
+
+    // HTML should NOT contain <h1>, <ul>, <strong>, <a> for this content
+    const html = mdTreeToHtml(final);
+    expect(html).not.toContain("<h1>");
+    expect(html).not.toContain("<ul>");
+    expect(html).not.toContain("<strong>");
+    expect(html).not.toContain("<a href=");
+    // But it should contain the raw content inside <pre><code>
+    expect(html).toContain("# Fake heading");
+    expect(html).toContain("- fake list item");
+  });
+
+  it("streams a complex document with nested inline formatting inside lists and codeblocks", () => {
+    const md = `## Features
+
+- **Bold** item with \`inline code\`
+- *Italic* item with a [link](https://example.com)
+- ~~Strikethrough~~ item
+
+\`\`\`typescript
+// A TypeScript snippet
+interface Config {
+  name: string;
+  items: string[];
+}
+\`\`\`
+
+### Installation
+
+1. Run \`npm install\`
+2. Configure your settings
+
+\`\`\`yaml
+name: my-project
+items:
+  - one
+  - two
+  - three
+\`\`\`
+
+> **Warning:** Always validate input.
+
+\`\`\`markdown
+## This looks like a heading
+- but it's inside a code block
+- so it should be treated as plain text
+
+**Not bold** either.
+\`\`\`
+
+---
+
+That's all folks.`;
+
+    const parser = createStreamingParser();
+    const chunks = Array.from(chunkify(md));
+
+    expect(chunks.length).toBeGreaterThan(30);
+
+    let stepCount = 0;
+    for (const chunk of chunks) {
+      stepCount++;
+      const result = parser.feed(chunk);
+
+      expect(result.tree.type).toBe("document");
+      expect(result.stableFrom).toBeGreaterThanOrEqual(0);
+
+      // Verify stable prefix blocks are truly unchanged
+      if (stepCount > 1) {
+        // Just spot-check: stableFrom should be reasonable
+        expect(result.stableFrom).toBeLessThanOrEqual(result.tree.children.length);
+      }
+    }
+
+    const final = parser.finalize();
+    const types = final.children.map((b) => b.type);
+
+    // Should have: heading, list, code_block, heading, list, code_block,
+    //              blockquote, code_block, horizontal_rule, paragraph
+    expect(types.filter((t) => t === "code_block")).toHaveLength(3);
+    expect(types.filter((t) => t === "heading")).toHaveLength(2);
+    expect(types.filter((t) => t === "list")).toHaveLength(2);
+    expect(types).toContain("blockquote");
+    expect(types).toContain("horizontal_rule");
+    expect(types).toContain("paragraph");
+
+    // HTML checks
+    const html = mdTreeToHtml(final);
+    expect(html).toContain("<strong>Bold</strong>");
+    expect(html).toContain('<code class="inline-code">inline code</code>');
+    expect(html).toContain("<em>Italic</em>");
+    expect(html).toContain('<a href="https://example.com"');
+    expect(html).toContain("<del>Strikethrough</del>");
+    expect(html).toContain('<pre class="code-block lang-typescript">');
+    expect(html).toContain('<pre class="code-block lang-yaml">');
+    expect(html).toContain('<pre class="code-block lang-markdown">');
+    expect(html).toContain("- one"); // inside yaml code block
+    expect(html).toContain("<hr />");
+
+    // The markdown codeblock should NOT produce headings/lists in HTML
+    const codeBlockMatch = html.match(/lang-markdown[^>]*>([\s\S]*?)<\/pre>/);
+    expect(codeBlockMatch).not.toBeNull();
+    const codeHtml = codeBlockMatch![1];
+    expect(codeHtml).not.toContain("<h2>");
+    expect(codeHtml).not.toContain("<li>");
+    expect(codeHtml).not.toContain("<strong>");
+  });
+
+  it("stableFrom advances correctly as document grows during streaming", () => {
+    // A simpler document to trace stableFrom progression
+    const md = `# Title
+
+First paragraph.
+
+Second paragraph.
+
+Third paragraph.`;
+
+    const parser = createStreamingParser();
+    const chunks = Array.from(chunkify(md));
+
+    const stableFromHistory: number[] = [];
+    const blockCountHistory: number[] = [];
+
+    for (const chunk of chunks) {
+      const result = parser.feed(chunk);
+      stableFromHistory.push(result.stableFrom);
+      blockCountHistory.push(result.tree.children.length);
+    }
+
+    // stableFrom should start at 0 (first feed)
+    expect(stableFromHistory[0]).toBe(0);
+
+    // At some point we should see stableFrom > 0 as earlier blocks stabilize
+    const maxStable = Math.max(...stableFromHistory);
+    expect(maxStable).toBeGreaterThan(0);
+
+    // Final document should have 4 blocks: heading + 3 paragraphs
+    const final = parser.finalize();
+    expect(final.children.length).toBe(4);
+    expect(final.children[0]?.type).toBe("heading");
+    expect(final.children[1]?.type).toBe("paragraph");
+    expect(final.children[2]?.type).toBe("paragraph");
+    expect(final.children[3]?.type).toBe("paragraph");
+  });
+
+  it("handles codeblock fence characters arriving one at a time", () => {
+    // Feed ``` one character at a time to ensure the parser handles
+    // the triple-backtick detection correctly during streaming
+    const md = "```python\nprint('hi')\n```";
+
+    const parser = createStreamingParser();
+
+    // Feed the opening fence character by character
+    let result = parser.feed("`");
+    expect(result.tree.type).toBe("document");
+
+    result = parser.feed("`");
+    expect(result.tree.type).toBe("document");
+
+    result = parser.feed("`");
+    // Now we have ``` — should start a code block
+    expect(result.tree.children[0]?.type).toBe("code_block");
+
+    result = parser.feed("py");
+    result = parser.feed("thon");
+    result = parser.feed("\n");
+    result = parser.feed("pri");
+    result = parser.feed("nt('");
+    result = parser.feed("hi')");
+    result = parser.feed("\n");
+    result = parser.feed("```");
+
+    // Final check
+    const final = parser.finalize();
+    expect(final.children.length).toBe(1);
+    expect(final.children[0]?.type).toBe("code_block");
+    const code = final.children[0] as { type: "code_block"; language?: string; content: string };
+    expect(code.language).toBe("python");
+    expect(code.content).toBe("print('hi')");
+  });
+
+  it("handles list markers arriving incrementally without false horizontal rules", () => {
+    const md = `- item one
+- item two
+- item three`;
+
+    const parser = createStreamingParser();
+    const chunks = Array.from(chunkify(md));
+
+    for (const chunk of chunks) {
+      const result = parser.feed(chunk);
+
+      // At no point should we get a horizontal_rule
+      const types = result.tree.children.map((b) => b.type);
+      expect(types).not.toContain("horizontal_rule");
+    }
+
+    const final = parser.finalize();
+    expect(final.children[0]?.type).toBe("list");
+    const list = final.children[0] as { type: "list"; items: MdListItem[] };
+    expect(list.items).toHaveLength(3);
+  });
+
+  it("streams a document with 4 codeblocks of different languages interleaved with various block types", () => {
+    const md = `# Multi-Language Guide
+
+Here we cover several languages.
+
+\`\`\`rust
+fn main() {
+    println!("Hello");
+}
+\`\`\`
+
+- Rust is fast
+- Rust is safe
+
+\`\`\`go
+func main() {
+    fmt.Println("Hello")
+}
+\`\`\`
+
+> Go is simple and effective.
+
+\`\`\`bash
+echo "Hello"
+ls -la
+\`\`\`
+
+1. First step
+2. Second step
+
+\`\`\`json
+{
+  "key": "value",
+  "items": [1, 2, 3]
+}
+\`\`\`
+
+Done!`;
+
+    const parser = createStreamingParser();
+    const chunks = Array.from(chunkify(md));
+
+    expect(chunks.length).toBeGreaterThan(40);
+
+    for (const chunk of chunks) {
+      const result = parser.feed(chunk);
+      expect(result.tree.type).toBe("document");
+      expect(result.stableFrom).toBeGreaterThanOrEqual(0);
+    }
+
+    const final = parser.finalize();
+    const codeBlocks = final.children.filter(
+      (b): b is typeof b & { type: "code_block"; language?: string } =>
+        b.type === "code_block",
+    );
+
+    expect(codeBlocks).toHaveLength(4);
+    expect(codeBlocks[0]?.language).toBe("rust");
+    expect(codeBlocks[1]?.language).toBe("go");
+    expect(codeBlocks[2]?.language).toBe("bash");
+    expect(codeBlocks[3]?.language).toBe("json");
+
+    // Verify content
+    expect(codeBlocks[0]?.content).toContain("fn main()");
+    expect(codeBlocks[1]?.content).toContain("func main()");
+    expect(codeBlocks[2]?.content).toContain('echo "Hello"');
+    expect(codeBlocks[3]?.content).toContain('"key": "value"');
+
+    // HTML verification
+    const html = mdTreeToHtml(final);
+    expect(html).toContain("lang-rust");
+    expect(html).toContain("lang-go");
+    expect(html).toContain("lang-bash");
+    expect(html).toContain("lang-json");
+    expect(html).toContain("<blockquote>");
+    expect(html).toContain("<ul>");
+    expect(html).toContain("<ol>");
+  });
+
+  it("correctly handles a codeblock containing backticks and markdown special chars", () => {
+    const md = `\`\`\`
+Here are some special characters:
+# heading marker
+**bold**
+*italic*
+- list item
+[link](url)
+> blockquote
+\`inline code\`
+---
+___
+***
+\`\`\``;
+
+    const parser = createStreamingParser();
+    const chunks = Array.from(chunkify(md));
+
+    for (const chunk of chunks) {
+      const result = parser.feed(chunk);
+      expect(result.tree.type).toBe("document");
+    }
+
+    const final = parser.finalize();
+    expect(final.children.length).toBe(1);
+    expect(final.children[0]?.type).toBe("code_block");
+
+    const code = final.children[0] as { type: "code_block"; content: string };
+    expect(code.content).toContain("# heading marker");
+    expect(code.content).toContain("**bold**");
+    expect(code.content).toContain("*italic*");
+    expect(code.content).toContain("- list item");
+    expect(code.content).toContain("[link](url)");
+    expect(code.content).toContain("> blockquote");
+    expect(code.content).toContain("---");
+
+    // HTML should contain raw text inside <pre><code>, not parsed markdown
+    const html = mdTreeToHtml(final);
+    expect(html).toContain("# heading marker");
+    expect(html).not.toContain("<h1>");
+    expect(html).not.toContain("<strong>");
+    expect(html).not.toContain("<hr />");
+  });
+
+  it("handles empty chunks gracefully during streaming", () => {
+    const md = "# Hello\n\nWorld";
+
+    const parser = createStreamingParser();
+
+    parser.feed("# ");
+    parser.feed(""); // empty chunk
+    parser.feed("He");
+    parser.feed(""); // another empty chunk
+    parser.feed("llo");
+    parser.feed("\n\n");
+    parser.feed("World");
+
+    const final = parser.finalize();
+    expect(final.children.length).toBe(2);
+    expect(final.children[0]?.type).toBe("heading");
+    expect(final.children[1]?.type).toBe("paragraph");
+  });
+
+  it("stableFrom is consistent across consecutive feeds of the same content", () => {
+    const md = "## Test\n\nSome text here";
+
+    const parser = createStreamingParser();
+    const chunks = Array.from(chunkify(md));
+
+    for (const chunk of chunks) {
+      parser.feed(chunk);
+    }
+
+    // Feed empty string — tree shouldn't change
+    const r1 = parser.feed("");
+    const r2 = parser.feed("");
+
+    expect(r1.stableFrom).toBe(r1.tree.children.length);
+    expect(r2.stableFrom).toBe(r2.tree.children.length);
+    expect(r1.stableFrom).toBe(r2.stableFrom);
+  });
+
+  it("streams a document with codeblocks containing markdown lists and nested formatting", () => {
+    // This is the key test: codeblocks that contain what looks like markdown
+    const md = `# Complex Code Examples
+
+\`\`\`markdown
+## Nested heading
+- Item 1 with **bold**
+- Item 2 with *italic*
+- Item 3 with \`code\`
+- Item 4 with [link](http://example.com)
+\`\`\`
+
+Real list below:
+- real item 1
+- real item 2
+
+\`\`\`
+# Another fake heading
+- fake list
+  - nested fake list
+    - deeply nested fake
+**fake bold**
+\`\`\`
+
+> A blockquote after code.
+
+\`\`\`html
+<ul>
+  <li>Item 1</li>
+  <li>Item 2</li>
+</ul>
+\`\`\`
+
+Final text.`;
+
+    const parser = createStreamingParser();
+    const chunks = Array.from(chunkify(md));
+
+    expect(chunks.length).toBeGreaterThan(50);
+
+    for (const chunk of chunks) {
+      const result = parser.feed(chunk);
+      expect(result.tree.type).toBe("document");
+      expect(result.stableFrom).toBeGreaterThanOrEqual(0);
+      expect(result.stableFrom).toBeLessThanOrEqual(result.tree.children.length);
+    }
+
+    const final = parser.finalize();
+    const codeBlocks = final.children.filter(
+      (b): b is typeof b & { type: "code_block" } => b.type === "code_block",
+    );
+
+    expect(codeBlocks).toHaveLength(3);
+
+    // First codeblock: markdown with nested formatting
+    expect(codeBlocks[0]?.content).toContain("## Nested heading");
+    expect(codeBlocks[0]?.content).toContain("- Item 1 with **bold**");
+    expect(codeBlocks[0]?.content).toContain("- Item 4 with [link](http://example.com)");
+
+    // Second codeblock: deeply nested fake lists
+    expect(codeBlocks[1]?.content).toContain("- nested fake list");
+    expect(codeBlocks[1]?.content).toContain("- deeply nested fake");
+
+    // Third codeblock: HTML
+    expect(codeBlocks[2]?.content).toContain("<ul>");
+    expect(codeBlocks[2]?.content).toContain("<li>Item 1</li>");
+
+    // HTML output should NOT parse the codeblock content as real HTML elements
+    const html = mdTreeToHtml(final);
+
+    // Should have exactly 3 <pre> blocks (one per codeblock)
+    const preCount = (html.match(/<pre class=/g) || []).length;
+    expect(preCount).toBe(3);
+
+    // Should have real <ul> for the actual list
+    const ulMatches = html.match(/<ul>/g);
+    // One real <ul> + one escaped in HTML codeblock
+    expect(ulMatches).not.toBeNull();
+
+    // The escaped content should appear with &lt; and &gt;
+    expect(html).toContain("&lt;ul&gt;"); // from HTML codeblock
+  });
+
+  // ── Regression: infinite loop on bare "#" ─────────────────────────
+
+  it("does not infinite-loop on bare '#' (regression)", () => {
+    // Bare "#" is not a valid heading (no space after #) but used to
+    // cause parseParagraph to break with _nextIndex === start,
+    // creating an infinite loop in the main parser.
+    const doc = parseMarkdown("#");
+    expect(doc.children.length).toBe(1);
+    expect(doc.children[0]?.type).toBe("paragraph");
+  });
+
+  it("does not infinite-loop on bare '#' streamed character by character", () => {
+    const parser = createStreamingParser();
+    parser.feed("#");
+    const r = parser.feed(" Hello");
+    expect(r.tree.children[0]?.type).toBe("heading");
+  });
+
+  it("handles '#' without space as paragraph text", () => {
+    const doc = parseMarkdown("#no-space");
+    expect(doc.children.length).toBe(1);
+    expect(doc.children[0]?.type).toBe("paragraph");
+    const html = mdTreeToHtml(doc);
+    expect(html).toContain("#no-space");
+    expect(html).not.toContain("<h1>");
+  });
+
+  it("handles mixed bare '#' and valid headings", () => {
+    const doc = parseMarkdown("#\n\n# Valid heading\n\n##\n\n## Another valid");
+    expect(doc.children.length).toBe(4);
+    expect(doc.children[0]?.type).toBe("paragraph");  // bare #
+    expect(doc.children[1]?.type).toBe("heading");    // # Valid heading
+    expect(doc.children[2]?.type).toBe("paragraph");  // bare ##
+    expect(doc.children[3]?.type).toBe("heading");    // ## Another valid
+  });
+});
+

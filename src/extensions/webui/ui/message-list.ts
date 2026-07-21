@@ -3,6 +3,46 @@
 // Manages a message list per session, with streaming, tool calls, and thinking.
 
 import { sanitize } from "./utils.ts";
+import {
+  parseMarkdown,
+  mdTreeToHtml,
+  renderBlocksToHtml,
+  createStreamingParser,
+  type StreamingMdParser,
+  type FeedResult,
+  type MdDocument,
+} from "../../../utils/md-parser.ts";
+
+// ── Debug instrumentation ───────────────────────────────────────────────────
+// Enable via: ?debug=1  in the URL
+const DEBUG = typeof window !== "undefined" && new URLSearchParams(window.location.search).has("debug");
+let _debugSeq = 0;
+
+function dbg(label: string, data: Record<string, unknown>): void {
+  if (!DEBUG) return;
+  console.log(`[streaming #${_debugSeq++}] ${label}`, data);
+}
+
+function dbgTree(label: string, tree: MdDocument): void {
+  if (!DEBUG) return;
+  const summary = tree.children.map((b, i) => {
+    if (b.type === "code_block") {
+      const cb = b as { type: "code_block"; content: string };
+      return `[${i}] ${b.type}(${cb.content.slice(0, 30).replace(/\n/g, "\\n")})`;
+    }
+    if (b.type === "paragraph") {
+      const p = b as { type: "paragraph"; children: { type: string; content?: string }[] };
+      const text = p.children
+        .filter((c) => c.type === "text")
+        .map((c) => (c as { content: string }).content)
+        .join(" ")
+        .slice(0, 40);
+      return `[${i}] ${b.type}(${text})`;
+    }
+    return `[${i}] ${b.type}`;
+  }).join(" | ");
+  console.log(`[streaming #${_debugSeq++}] ${label}  blocks=${tree.children.length}  ${summary}`);
+}
 
 // ── Message event types ─────────────────────────────────────────────────────
 
@@ -80,6 +120,13 @@ export function createMessageList(
   let hasToolCallsSinceLastAssistant = false;
   let hideThinkingValue = hideThinking;
 
+  // Streaming markdown parsers — one for assistant content, one for thinking
+  let streamingParser: StreamingMdParser | null = null;
+  let thinkingParser: StreamingMdParser | null = null;
+  // Track how many blocks have been rendered in each content div
+  let streamingBlockCount = 0;
+  let thinkingBlockCount = 0;
+
   function ensureAssistantEl(): HTMLDivElement {
     if (!currentAssistantEl) {
       currentAssistantEl = document.createElement("div");
@@ -95,7 +142,7 @@ export function createMessageList(
       const bubble = document.createElement("div");
       bubble.className = "bubble";
       const contentEl = document.createElement("div");
-      contentEl.className = "content";
+      contentEl.className = "content md-content";
       bubble.appendChild(contentEl);
       currentAssistantEl.appendChild(bubble);
 
@@ -107,7 +154,7 @@ export function createMessageList(
   function ensureThinkingEl(): HTMLDivElement {
     if (!currentThinkingEl) {
       currentThinkingEl = document.createElement("div");
-      currentThinkingEl.className = "thinking-block";
+      currentThinkingEl.className = "thinking-block md-content";
       if (hideThinkingValue) currentThinkingEl.classList.add("hidden");
       container.appendChild(currentThinkingEl);
     }
@@ -120,6 +167,73 @@ export function createMessageList(
     if (currentThinkingEl) {
       currentThinkingEl.classList.toggle("hidden", v);
     }
+  }
+
+  /**
+   * Incrementally update a content div's DOM from a streaming feed result.
+   * Only re-renders blocks from `stableFrom` onward, leaving the stable
+   * prefix untouched so the browser doesn't reflow the entire message.
+   *
+   * @param contentDiv — The target .content div
+   * @param result — The FeedResult from StreamingMdParser.feed()
+   * @param blockCountRef — Mutable ref tracking current rendered block count
+   */
+  function updateMdDom(
+    contentDiv: HTMLDivElement,
+    result: FeedResult,
+    blockCountRef: { count: number },
+  ): void {
+    const { tree, stableFrom } = result;
+    const totalBlocks = tree.children.length;
+
+    // Clamp stableFrom to what we've actually rendered
+    const effectiveStable = Math.min(stableFrom, blockCountRef.count);
+
+    dbg("updateMdDom", {
+      stableFrom,
+      prevBlockCount: blockCountRef.count,
+      totalBlocks,
+      effectiveStable,
+      willRemove: blockCountRef.count - effectiveStable,
+      willRender: Math.max(0, totalBlocks - effectiveStable),
+    });
+    dbgTree("updateMdDom tree", tree);
+
+    // Remove DOM nodes for blocks from effectiveStable onward
+    let removed = 0;
+    for (let i = effectiveStable; i < blockCountRef.count; i++) {
+      const el = contentDiv.querySelector(`[data-block-index="${i}"]`);
+      if (el) { el.remove(); removed++; }
+    }
+
+    // Render and append new/changed blocks
+    let rendered = 0;
+    if (effectiveStable < totalBlocks) {
+      const html = renderBlocksToHtml(tree, effectiveStable);
+      const fragment = document.createDocumentFragment();
+      const wrapper = document.createElement("div");
+      wrapper.innerHTML = html;
+      while (wrapper.firstChild) {
+        fragment.appendChild(wrapper.firstChild);
+      }
+
+      // Tag each child with its block index for future diffs
+      const newStart = effectiveStable;
+      const children = Array.from(fragment.children);
+      for (let i = 0; i < children.length; i++) {
+        (children[i] as HTMLElement).dataset.blockIndex = String(newStart + i);
+      }
+
+      contentDiv.appendChild(fragment);
+      rendered = children.length;
+      blockCountRef.count = newStart + children.length;
+    }
+    // Always sync the count to the actual tree size so that when the
+    // tree shrinks (e.g. paragraph + unclosed code block → single code
+    // block on closing fence), subsequent diffs use the correct baseline.
+    blockCountRef.count = totalBlocks;
+
+    dbg("updateMdDom done", { removed, rendered, finalBlockCount: totalBlocks });
   }
 
   // ── Message Handlers ──────────────────────────────────────────────────────
@@ -164,8 +278,9 @@ export function createMessageList(
     const bubble = document.createElement("div");
     bubble.className = "bubble";
     const contentEl = document.createElement("div");
-    contentEl.className = "content";
-    contentEl.textContent = content;
+    contentEl.className = "content md-content";
+    const tree = parseMarkdown(content);
+    contentEl.innerHTML = mdTreeToHtml(tree);
     bubble.appendChild(contentEl);
     el.appendChild(bubble);
 
@@ -182,20 +297,41 @@ export function createMessageList(
     }
     const el = ensureAssistantEl();
     const contentDiv = el.querySelector(".content") as HTMLDivElement;
-    contentDiv.textContent += content;
+
+    // Initialize streaming parser on first chunk
+    if (!streamingParser) {
+      streamingParser = createStreamingParser();
+    }
+
+    // Feed the chunk — get tree + stable prefix index
+    dbg("handleStreamingChunk", { chunkLen: content.length, chunkPreview: content.slice(0, 60).replace(/\n/g, "\\n"), prevBlockCount: streamingBlockCount });
+    const result = streamingParser.feed(content);
+    dbg("handleStreamingChunk after feed", { stableFrom: result.stableFrom, treeBlocks: result.tree.children.length });
+    updateMdDom(contentDiv, result, { count: streamingBlockCount });
+    streamingBlockCount = result.tree.children.length;
     scrollBottom();
   }
 
   function handleStreamingReasoningChunk({ content }: StreamingChunk): void {
     const el = ensureThinkingEl();
-    el.textContent += content;
+
+    if (!thinkingParser) {
+      thinkingParser = createStreamingParser();
+    }
+
+    dbg("handleStreamingReasoningChunk", { chunkLen: content.length, chunkPreview: content.slice(0, 60).replace(/\n/g, "\\n"), prevBlockCount: thinkingBlockCount });
+    const result = thinkingParser.feed(content);
+    dbg("handleStreamingReasoningChunk after feed", { stableFrom: result.stableFrom, treeBlocks: result.tree.children.length });
+    updateMdDom(el, result, { count: thinkingBlockCount });
+    thinkingBlockCount = result.tree.children.length;
     scrollBottom();
   }
 
   function handleThinking({ content }: ThinkingMessage): void {
     // Final thinking block (non-streaming)
     const el = ensureThinkingEl();
-    el.textContent = content;
+    const tree = parseMarkdown(content);
+    el.innerHTML = mdTreeToHtml(tree);
   }
 
   function handleToolCall({ name, args }: ToolCallMessage): void {
@@ -401,6 +537,7 @@ export function createMessageList(
 
   /** Finalize the current streaming assistant message. */
   function finalizeAssistant(): void {
+    dbg("finalizeAssistant", { hadAssistant: !!currentAssistantEl, streamingBlockCount, thinkingBlockCount });
     if (currentAssistantEl) {
       currentAssistantEl.classList.remove("streaming");
       currentAssistantEl = null;
@@ -408,6 +545,10 @@ export function createMessageList(
     currentThinkingEl = null;
     currentToolCalls = [];
     hasToolCallsSinceLastAssistant = false;
+    streamingParser = null;
+    thinkingParser = null;
+    streamingBlockCount = 0;
+    thinkingBlockCount = 0;
   }
 
   function scrollBottom(): void {
@@ -427,6 +568,10 @@ export function createMessageList(
     currentThinkingEl = null;
     currentToolCalls = [];
     hasToolCallsSinceLastAssistant = false;
+    streamingParser = null;
+    thinkingParser = null;
+    streamingBlockCount = 0;
+    thinkingBlockCount = 0;
   }
 
   return {

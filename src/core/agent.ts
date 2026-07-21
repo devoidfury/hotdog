@@ -123,6 +123,11 @@ export class Agent {
   #tokenTracker: TokenTracker;
   #systemPromptBuilder: SystemPromptBuilder;
   enqueueCallback: ((text: string) => void) | null;
+  // Accumulated partial content of the currently streaming response.
+  // Populated during _processStream so reconnecting clients can replay
+  // the portion streamed before they connected.
+  #currentStreamingContent: string;
+  #currentStreamingReasoning: string;
 
   /**
    * @param options
@@ -182,6 +187,9 @@ export class Agent {
     // AbortController for the current LLM request — created per iteration,
     // aborted on cancel() so the HTTP client properly terminates fetch().
     this.runAbortController = null;
+    // Partial streaming content for reconnect replay
+    this.#currentStreamingContent = "";
+    this.#currentStreamingReasoning = "";
     // Command registry — extensions register commands here
     this.commandRegistry = options.commandRegistry || createCommandRegistry();
     // Register core built-in commands with their handlers
@@ -257,6 +265,23 @@ export class Agent {
         isRestoring: v,
       });
     }
+  }
+
+  /**
+   * Get the accumulated partial content of the currently streaming response.
+   * Empty string if not currently streaming. Used by reconnecting clients
+   * to replay content that was streamed before they connected.
+   */
+  get currentStreamingContent(): string {
+    return this.#currentStreamingContent;
+  }
+
+  /**
+   * Get the accumulated partial reasoning content of the currently streaming response.
+   * Empty string if not currently streaming.
+   */
+  get currentStreamingReasoning(): string {
+    return this.#currentStreamingReasoning;
   }
 
   /**
@@ -566,18 +591,24 @@ export class Agent {
     let usage: Record<string, unknown> | null = null;
     let finishReason: string | null = null;
 
+    // Reset accumulated partial content for this streaming session
+    this.#currentStreamingContent = "";
+    this.#currentStreamingReasoning = "";
+
     for await (const event of stream) {
       if (this.cancelled) throw LlmError.Cancelled("Agent cancelled");
 
       switch (event.type) {
         case "content":
           textParts.push(event.content as string);
+          this.#currentStreamingContent += event.content as string;
           if (this.stream) {
             this.emitOutput("streaming_chunk", { content: event.content });
           }
           break;
         case "reasoning":
           reasoningParts.push(event.content as string);
+          this.#currentStreamingReasoning += event.content as string;
           if (this.stream) {
             this.emitOutput("streaming_reasoning_chunk", {
               content: event.content,
@@ -627,6 +658,10 @@ export class Agent {
         }),
       );
     }
+
+    // Clear partial streaming content — stream is complete
+    this.#currentStreamingContent = "";
+    this.#currentStreamingReasoning = "";
 
     return {
       fullText: textParts.join(""),

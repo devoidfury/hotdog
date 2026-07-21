@@ -419,6 +419,26 @@ function replaySessionHistory(sessionId: string, agent: unknown, ws: WebSocket):
         break;
     }
   }
+
+  // Replay partial streaming content that was emitted before this client
+  // connected but hasn't been added to the message log yet (stream still in
+  // progress).
+  const partialReasoning = agentInstance.currentStreamingReasoning;
+  const partialContent = agentInstance.currentStreamingContent;
+  if (partialReasoning) {
+    ws.send(JSON.stringify({
+      type: S2C.STREAMING_REASONING_CHUNK,
+      sessionId,
+      content: partialReasoning,
+    }));
+  }
+  if (partialContent) {
+    ws.send(JSON.stringify({
+      type: S2C.STREAMING_CHUNK,
+      sessionId,
+      content: partialContent,
+    }));
+  }
 }
 
 // ── WS Message Routing ──────────────────────────────────────────────────────

@@ -184,6 +184,31 @@ describe("htmlToMarkdown", () => {
     expect(result).toContain("Content");
   });
 
+  it("strips HTML comments", () => {
+    const result = htmlToMarkdown(
+      "<!-- this is a comment --><p>Content</p><!-- another comment -->",
+    );
+    expect(result).not.toContain("<!--");
+    expect(result).not.toContain("-->");
+    expect(result).not.toContain("comment");
+    expect(result).toContain("Content");
+  });
+
+  it("strips multiline HTML comments", () => {
+    const result = htmlToMarkdown(
+      `<!--
+      multiline
+      comment with
+      special chars: <script>alert('xss')</script>
+      -->
+      <p>Content</p>`,
+    );
+    expect(result).not.toContain("<!--");
+    expect(result).not.toContain("multiline");
+    expect(result).not.toContain("alert");
+    expect(result).toContain("Content");
+  });
+
   it("strips <script> tags", () => {
     const result = htmlToMarkdown(
       "<p>Before</p><script>alert('xss')</script><p>After</p>",

@@ -36,6 +36,11 @@ function decodeEntities(text: string): string {
 export function htmlToMarkdown(html: string | null | undefined): string {
   if (!html || typeof html !== "string") return "";
 
+  // Strip HTML comments before processing — HTMLRewriter.comment() API
+  // isn't available in Bun 1.3.x, so they would otherwise leak into output.
+  // TODO: switch to rewriter.on("*", { comments(c) { c.remove() } }) when available.
+  html = html.replace(/<!--[\s\S]*?-->/g, "");
+
   // Shared mutable state for tracking context across handlers.
   const ctx: { inPre: boolean; olCount: number[] } = {
     inPre: false, // inside a <pre> block

@@ -1,8 +1,9 @@
 {{ role }}
-
-{% if body -%}
+{%- if body %}
 {{ body }}
-{% endif -%}
-{%- for chunk in chunks -%}
+{%- endif %}
+Use parallel tool calls when appropriate.
+
+{% for chunk in chunks -%}
 {{ chunk.content }}
 {%- endfor -%}

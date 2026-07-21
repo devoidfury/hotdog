@@ -10,6 +10,7 @@ export interface ToolDef {
     description: string;
     parameters: Record<string, unknown>;
   };
+  [key: string]: unknown;
 }
 
 export interface Tool {

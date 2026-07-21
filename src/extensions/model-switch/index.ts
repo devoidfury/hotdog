@@ -29,7 +29,7 @@ export function create(core: CoreContext): ExtensionInstance {
   // Config defaults come from extension.json configSchema
   const config = getExtensionConfig<{ toolEnabled?: boolean; commandEnabled?: boolean }>(core, "modelSwitch");
 
-  const modelTool = new ModelTool(modelRegistry);
+  const modelTool = new ModelTool(modelRegistry as import("../../core/agent.ts").ModelRegistry);
 
   return {
     hooks: {

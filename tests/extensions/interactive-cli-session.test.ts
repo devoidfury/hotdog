@@ -126,7 +126,7 @@ describe("runInteractiveSession", () => {
       expect(createOpts!.taskConfig.taskProfile).toBe("task-default");
 
       // Clean up - resolve the bus
-      if (busResolve) busResolve();
+      if (busResolve) (busResolve as () => void)();
       try { await sessionPromise; } catch { /* ignore */ }
     } finally {
       (SessionManager as any).create = originalCreate;

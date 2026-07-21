@@ -257,15 +257,15 @@ describe("Channel - command routing", () => {
     await channel.send("/sessions");
 
     expect(channel.writeCalls.length).toBe(1);
-    expect(channel.writeCalls[0].type).toBe(OUTPUT_EVENT.COMMAND_RESULT);
-    expect(channel.writeCalls[0].content).toContain("Available sessions:");
+    expect(channel.writeCalls[0]!.type).toBe(OUTPUT_EVENT.COMMAND_RESULT);
+    expect(channel.writeCalls[0]!.content).toContain("Available sessions:");
   });
 
   it("handles /attach command", async () => {
     await channel.send("/attach session-2");
 
     expect(channel.attachedSessions.has("session-2")).toBe(true);
-    expect(channel.writeCalls[channel.writeCalls.length - 1].content).toContain("Attached to session session-2");
+    expect(channel.writeCalls[channel.writeCalls.length - 1]!.content).toContain("Attached to session session-2");
   });
 
   it("handles /attach with non-existent session", async () => {
@@ -277,7 +277,7 @@ describe("Channel - command routing", () => {
 
     await channel.send("/attach non-existent");
 
-    const lastWrite = channel.writeCalls[channel.writeCalls.length - 1];
+    const lastWrite = channel.writeCalls[channel.writeCalls.length - 1]!;
     expect(lastWrite.content).toContain("Session not found");
   });
 
@@ -290,7 +290,7 @@ describe("Channel - command routing", () => {
 
     await channel.send("/attach non-existent");
 
-    const lastWrite = channel.writeCalls[channel.writeCalls.length - 1];
+    const lastWrite = channel.writeCalls[channel.writeCalls.length - 1]!;
     expect(lastWrite.content).toContain("Session not found");
   });
 
@@ -299,7 +299,7 @@ describe("Channel - command routing", () => {
     await channel.send("/detach session-2");
 
     expect(channel.attachedSessions.has("session-2")).toBe(false);
-    expect(channel.writeCalls[channel.writeCalls.length - 1].content).toContain("Detached from session session-2");
+    expect(channel.writeCalls[channel.writeCalls.length - 1]!.content).toContain("Detached from session session-2");
   });
 
   it("handles /switch command", async () => {
@@ -307,13 +307,13 @@ describe("Channel - command routing", () => {
     await channel.send("/switch session-2");
 
     expect(channel.getCurrentSessionId()).toBe("session-2");
-    expect(channel.writeCalls[channel.writeCalls.length - 1].content).toContain("Switched to session session-2");
+    expect(channel.writeCalls[channel.writeCalls.length - 1]!.content).toContain("Switched to session session-2");
   });
 
   it("handles /switch to non-attached session", async () => {
     await channel.send("/switch non-existent");
 
-    expect(channel.writeCalls[channel.writeCalls.length - 1].content).toContain("not attached");
+    expect(channel.writeCalls[channel.writeCalls.length - 1]!.content).toContain("not attached");
   });
 
   it("handles unknown channel commands via executeCommand", async () => {
@@ -433,7 +433,7 @@ describe("Channel - handleSessions output format", () => {
   it("formats session list with model and profile info", async () => {
     await channel.handleSessions();
 
-    const content = channel.writeCalls[0].content as string;
+    const content = channel.writeCalls[0]!.content as string;
     expect(content).toContain("Available sessions:");
     expect(content).toContain("session-1");
     expect(content).toContain("session-2");
@@ -452,7 +452,7 @@ describe("Channel - handleAttach/handleDetach/handleSwitch usage messages", () =
     // Direct call with "attach " (space after prefix, no session ID)
     await channel.handleAttach("attach ");
 
-    const lastWrite = channel.writeCalls[channel.writeCalls.length - 1];
+    const lastWrite = channel.writeCalls[channel.writeCalls.length - 1]!;
     expect(lastWrite.content).toContain("Usage:");
   });
 
@@ -463,7 +463,7 @@ describe("Channel - handleAttach/handleDetach/handleSwitch usage messages", () =
 
     await channel.handleDetach("detach ");
 
-    const lastWrite = channel.writeCalls[channel.writeCalls.length - 1];
+    const lastWrite = channel.writeCalls[channel.writeCalls.length - 1]!;
     expect(lastWrite.content).toContain("Usage:");
   });
 
@@ -474,7 +474,7 @@ describe("Channel - handleAttach/handleDetach/handleSwitch usage messages", () =
 
     await channel.handleSwitch("switch ");
 
-    const lastWrite = channel.writeCalls[channel.writeCalls.length - 1];
+    const lastWrite = channel.writeCalls[channel.writeCalls.length - 1]!;
     expect(lastWrite.content).toContain("Usage:");
   });
 });
@@ -487,7 +487,7 @@ describe("Channel - handleUnknown", () => {
 
     await channel.handleUnknown("foo");
 
-    const lastWrite = channel.writeCalls[channel.writeCalls.length - 1];
+    const lastWrite = channel.writeCalls[channel.writeCalls.length - 1]!;
     expect(lastWrite.content).toContain("Unknown command: foo");
   });
 });

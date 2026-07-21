@@ -154,7 +154,7 @@ async function handlePromptSubcommand(
     const agent = new Agent({
       hooks: core.hooks,
       toolRegistry: core.toolRegistry,
-      llmClient: agentConfig.llmClient || llmClient,
+      llmClient: (agentConfig.llmClient as LlmClient) || llmClient,
       model: (agentConfig.model as string) || (resolved as ResolvedConfig).model,
       maxIterations:
         (agentConfig.maxIterations as number) || (resolved as ResolvedConfig).maxIterations || 100,

@@ -111,7 +111,7 @@ describe("subagents extension create()", () => {
       get(key: string) { return this._store[key]; },
     };
 
-    await result!.hooks![HOOKS.AGENT_TOOL_CONTEXT]!({ toolCtx });
+    await result!.hooks![HOOKS.AGENT_TOOL_CONTEXT]!({ toolCtx, toolName: "test", agent: {} as any });
     expect(toolCtx.get("taskManager")).toBe(mockTM);
     expect(toolCtx.get("sessionCore")).toBe(mockSessionCore);
   });
@@ -131,7 +131,7 @@ describe("subagents extension create()", () => {
       get(key: string) { return this._store[key]; },
     };
 
-    await result!.hooks![HOOKS.AGENT_TOOL_CONTEXT]!({ toolCtx });
+    await result!.hooks![HOOKS.AGENT_TOOL_CONTEXT]!({ toolCtx, toolName: "test", agent: {} as any });
     expect(toolCtx.get("sessionCore")).toBeNull();
   });
 

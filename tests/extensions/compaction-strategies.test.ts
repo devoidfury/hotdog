@@ -44,7 +44,7 @@ describe("DropStrategy", () => {
     const messages = [makeMessage("user"), makeMessage("assistant")];
     const settings = { ...defaultSettings, keepRecent: 3 };
 
-    const result = await new DropStrategy().execute(messages, settings, noopLlmChat, "model");
+    const result = await new DropStrategy().execute(messages, settings);
     expect(result).toBeNull();
   });
 
@@ -52,7 +52,7 @@ describe("DropStrategy", () => {
     const messages = Array.from({ length: 10 }, (_, i) => makeMessage(i % 2 === 0 ? "user" : "assistant"));
     const settings = { ...defaultSettings, keepRecent: 2 };
 
-    const result = await new DropStrategy().execute(messages, settings, noopLlmChat, "model");
+    const result = await new DropStrategy().execute(messages, settings);
 
     expect(result).not.toBeNull();
     expect(result!.summary).toBeNull();
@@ -65,7 +65,7 @@ describe("DropStrategy", () => {
     const keepRecent = 5;
     const settings = { ...defaultSettings, keepRecent };
 
-    const result = await new DropStrategy().execute(messages, settings, noopLlmChat, "model");
+    const result = await new DropStrategy().execute(messages, settings);
 
     expect(result).not.toBeNull();
     // findFirstKeptIndex counts keepRecent*2=10 non-system messages from the end,
@@ -78,11 +78,11 @@ describe("DropStrategy", () => {
     const messages = Array.from({ length: 10 }, (_, i) => makeMessage(i % 2 === 0 ? "user" : "assistant", content));
     const settings = { ...defaultSettings, keepRecent: 2 };
 
-    const result = await new DropStrategy().execute(messages, settings, noopLlmChat, "model");
+    const result = await new DropStrategy().execute(messages, settings);
 
-    expect(result!.metadata!.tokensBefore).toBeGreaterThan(0);
-    expect(result!.metadata!.tokensAfter).toBeGreaterThan(0);
-    expect(result!.metadata!.tokensAfter).toBeLessThan(result!.metadata!.tokensBefore);
+    expect(result!.metadata!.tokensBefore as number).toBeGreaterThan(0);
+    expect(result!.metadata!.tokensAfter as number).toBeGreaterThan(0);
+    expect(result!.metadata!.tokensAfter as number).toBeLessThan(result!.metadata!.tokensBefore as number);
   });
 
   it("canCompact returns false for few messages", () => {
@@ -111,7 +111,7 @@ describe("DropStrategy", () => {
     const messages = Array.from({ length: 20 }, (_, i) => makeMessage(i % 2 === 0 ? "user" : "assistant"));
     const settings = { ...defaultSettings, keepRecent: undefined };
 
-    const result = await new DropStrategy().execute(messages, settings, noopLlmChat, "model");
+    const result = await new DropStrategy().execute(messages, settings);
 
     expect(result).not.toBeNull();
     // keepRecent defaults to 8 in DropStrategy, target=16, counts 16 from end
@@ -126,7 +126,7 @@ describe("DropStrategy", () => {
     ];
     const settings = { ...defaultSettings, keepRecent: 1 };
 
-    const result = await new DropStrategy().execute(messages, settings, noopLlmChat, "model");
+    const result = await new DropStrategy().execute(messages, settings);
     expect(result).toBeNull();
   });
 
@@ -150,7 +150,7 @@ describe("DropStrategy", () => {
   });
 
   it("handles empty messages array", async () => {
-    const result = await new DropStrategy().execute([], defaultSettings, noopLlmChat, "model");
+    const result = await new DropStrategy().execute([], defaultSettings);
     expect(result).toBeNull();
   });
 });
@@ -192,7 +192,7 @@ describe("SummarizeStrategy", () => {
     expect(capturedMessages).not.toBeNull();
     expect(capturedMessages![0]!.role).toBe("system");
     expect(capturedMessages![1]!.role).toBe("user");
-    expect(capturedModel).toBe("test-model");
+    expect(capturedModel!).toEqual("test-model");
   });
 
   it("includes serialized conversation in user prompt", async () => {
@@ -411,9 +411,9 @@ describe("SummarizeShortStrategy", () => {
 
     const result = await new SummarizeShortStrategy().execute(messages, settings, noopLlmChat, "model");
 
-    expect(result!.metadata!.tokensBefore).toBeGreaterThan(0);
-    expect(result!.metadata!.tokensAfter).toBeGreaterThan(0);
-    expect(result!.metadata!.tokensAfter).toBeLessThan(result!.metadata!.tokensBefore);
+    expect(result!.metadata!.tokensBefore as number).toBeGreaterThan(0);
+    expect(result!.metadata!.tokensAfter as number).toBeGreaterThan(0);
+    expect(result!.metadata!.tokensAfter as number).toBeLessThan(result!.metadata!.tokensBefore as number);
   });
 
   it("canCompact uses base class implementation", () => {

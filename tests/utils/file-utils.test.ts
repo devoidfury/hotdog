@@ -13,12 +13,7 @@ const hasWarning = (warnings: string[], substring: string) =>
 
 let validateNameable: (name: string | null | undefined, label: string, dirName: string) => string[];
 let parseFrontMatter: (content: string) => { frontMatter?: Record<string, unknown>; body?: string } | null;
-let IOError: new (message: string) => Error & {
-  PathNotFound: (requested: string) => Error;
-  PathOutside: (requested: string, boundary: string) => Error;
-  NotWritable: (dir: string, msg: string) => Error;
-  NotReadable: (filePath: string) => Error;
-};
+let IOError: any;
 let correctCommonPathMistakes: (strPath: string, dirPath?: string) => [string, string | undefined];
 let resolvePath: (filePath: string, cwdBoundary?: string | null, workspaceRoot?: string | null) => string;
 let loadAspects: (aspectNames: string[] | null, aspectsDir?: string) => Promise<{ name: string; content: string }[]>;

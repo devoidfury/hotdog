@@ -118,7 +118,7 @@ describe("McpClient._handleLine", () => {
     expect(rejected).toBe(true);
     expect(rejectedError).toBeInstanceOf(McpError);
     expect(rejectedError!.message).toContain("Method not found");
-    expect(rejectedError!.code).toBe(-32601);
+    expect((rejectedError! as McpError).code).toBe(-32601);
     expect(pendingMap.has(testId)).toBe(false);
   });
 });
@@ -285,9 +285,9 @@ describe("McpClient.initialize", () => {
     try {
       const result = await client.initialize();
 
-      expect(result.protocolVersion).toBe("2025-11-25");
-      expect(result.capabilities).toHaveProperty("tools");
-      expect(result.serverInfo).toEqual({ name: "test-server", version: "1.0.0" });
+      expect((result as any).protocolVersion).toBe("2025-11-25");
+      expect((result as any).capabilities).toHaveProperty("tools");
+      expect((result as any).serverInfo).toEqual({ name: "test-server", version: "1.0.0" });
 
       // Check that server capabilities/info are stored
       expect(client.serverCapabilities).toHaveProperty("tools");
@@ -355,9 +355,9 @@ describe("McpClient.listTools", () => {
 
     try {
       const result = await client.listTools();
-      expect(result.tools).toHaveLength(2);
-      expect(result.tools[0]!.name).toBe("echo");
-      expect(result.tools[1]!.name).toBe("greet");
+      expect((result as any).tools).toHaveLength(2);
+      expect((result as any).tools[0]!.name).toBe("echo");
+      expect((result as any).tools[1]!.name).toBe("greet");
     } finally {
       globalThis.fetch = originalFetch;
     }
@@ -388,7 +388,7 @@ describe("McpClient.callTool", () => {
 
     try {
       const result = await client.callTool("echo", { text: "Hello, World!" });
-      expect(result.content).toEqual([{ type: "text", text: "Hello, World!" }]);
+      expect((result as any).content).toEqual([{ type: "text", text: "Hello, World!" }]);
     } finally {
       globalThis.fetch = originalFetch;
     }

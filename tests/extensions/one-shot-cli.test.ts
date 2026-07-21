@@ -306,7 +306,7 @@ describe("handlePromptSubcommand", () => {
     try {
       const cli = { prompt: "Hello", sessionId: "my-custom-session" };
       await (core.cliSubcommandRegistry.get("prompt")!.handler as Function)(cli, core);
-      expect(capturedSessionId).toBe("my-custom-session");
+      expect(capturedSessionId!).toBe("my-custom-session");
     } finally {
       (SessionManager as any).create = originalCreate;
     }

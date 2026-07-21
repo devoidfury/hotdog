@@ -221,7 +221,7 @@ export class SessionManager {
     // Create TaskManager internally if taskConfig is provided
     if (options.taskConfig && options.llmClient && options.modelRegistry) {
       this.#taskManager = new TaskManager({
-        buildAgent: this.#buildAgent as (config: Record<string, unknown>) => Promise<import("./task-manager.ts").TaskAgent>,
+        buildAgent: this.#buildAgent as unknown as (config: Record<string, unknown>) => Promise<import("./task-manager.ts").TaskAgent>,
         llmClient: options.llmClient,
         modelRegistry: options.modelRegistry,
         config: options.coreConfig || {},
@@ -231,7 +231,7 @@ export class SessionManager {
         taskRole: options.taskConfig.taskRole,
       });
       // Wire sessionManager reference
-      this.#taskManager.setSessionManager(this);
+      this.#taskManager.setSessionManager(this as unknown as { getAgent: () => import("./task-manager.ts").TaskAgent | undefined });
     }
   }
 

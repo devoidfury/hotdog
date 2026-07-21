@@ -2,7 +2,7 @@
 // SessionRegistry edge cases, and replaySessionHistory.
 // Covers lines 219-222, 283, 298-304, 338-407, 466, 583-622, 626-642, 673-702.
 
-import { describe, it, expect, beforeEach, afterEach, mock } from "bun:test";
+import { describe, it, expect, beforeEach, afterEach, mock, Mock } from "bun:test";
 import { SessionRegistry, createWsServer } from "../../src/extensions/websocket/server.ts";
 import { WebSocketChannel } from "../../src/extensions/websocket/websocket-channel.ts";
 import { C2S, S2C } from "../../src/extensions/websocket/protocol.ts";
@@ -55,10 +55,10 @@ describe("SessionRegistry Extended", () => {
 
       registry.broadcast({ type: "test", data: "hello" });
 
-      expect((ws1.send as mock.Mock).mock.calls.length).toBe(1);
-      expect((ws2.send as mock.Mock).mock.calls.length).toBe(1);
+      expect((ws1.send as Mock<() => void>).mock.calls.length).toBe(1);
+      expect((ws2.send as Mock<() => void>).mock.calls.length).toBe(1);
 
-      const payload = JSON.parse((ws1.send as mock.Mock).mock.calls[0][0] as string);
+      const payload = JSON.parse(((ws1.send as Mock<() => void>).mock.calls as unknown[][])[0]![0] as string);
       expect(payload.type).toBe("test");
       expect(payload.data).toBe("hello");
     });
@@ -72,8 +72,8 @@ describe("SessionRegistry Extended", () => {
 
       registry.broadcast({ type: "test" });
 
-      expect((ws1.send as mock.Mock).mock.calls.length).toBe(1);
-      expect((ws2.send as mock.Mock).mock.calls.length).toBe(0);
+      expect((ws1.send as Mock<() => void>).mock.calls.length).toBe(1);
+      expect((ws2.send as Mock<() => void>).mock.calls.length).toBe(0);
     });
 
     it("handles send errors gracefully", () => {

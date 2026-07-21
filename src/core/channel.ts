@@ -65,16 +65,17 @@ export interface ChannelOptions {
  *  - _cleanup() — release connection resources on close
  */
 export abstract class Channel {
-  protected sessionManager: ChannelSessionManager;
+  // Exposed as public for testing
+  public sessionManager: ChannelSessionManager;
 
   /** Sessions this channel is attached to. */
-  protected attachedSessions: Set<string>;
+  public attachedSessions: Set<string>;
 
   /** The "current" session that send() routes to. */
-  protected currentSessionId: string | null;
+  public currentSessionId: string | null;
 
   /** Whether this channel is closed. */
-  protected isClosed: boolean;
+  public isClosed: boolean;
 
   /**
    * @param options
@@ -211,7 +212,7 @@ export abstract class Channel {
    * Check if a command is a channel-level command.
    * @param cmdText — Command text without / prefix
    */
-  protected isChannelCommand(cmdText: string): boolean {
+  public isChannelCommand(cmdText: string): boolean {
     const channelCmds = Object.values(ChannelCommand);
     return channelCmds.includes(cmdText as ChannelCommandType) ||
       cmdText.startsWith("attach ") ||
@@ -256,7 +257,7 @@ export abstract class Channel {
   }
 
   /** Handle /sessions — list available sessions. */
-  protected async handleSessions(): Promise<void> {
+  public async handleSessions(): Promise<void> {
     const ids = this.sessionManager.sessionIds();
     const lines = ["Available sessions:"];
     for (const id of ids) {
@@ -270,7 +271,7 @@ export abstract class Channel {
   }
 
   /** Handle /attach <sessionId>. */
-  protected async handleAttach(cmdText: string): Promise<void> {
+  public async handleAttach(cmdText: string): Promise<void> {
     const sessionId = cmdText.replace("attach ", "").trim();
     if (!sessionId) {
       this.write({ type: 7, content: "Usage: /attach <sessionId>" });
@@ -286,7 +287,7 @@ export abstract class Channel {
   }
 
   /** Handle /detach <sessionId>. */
-  protected async handleDetach(cmdText: string): Promise<void> {
+  public async handleDetach(cmdText: string): Promise<void> {
     const sessionId = cmdText.replace("detach ", "").trim();
     if (!sessionId) {
       this.write({ type: 7, content: "Usage: /detach <sessionId>" });
@@ -297,7 +298,7 @@ export abstract class Channel {
   }
 
   /** Handle /switch <sessionId>. */
-  protected async handleSwitch(cmdText: string): Promise<void> {
+  public async handleSwitch(cmdText: string): Promise<void> {
     const sessionId = cmdText.replace("switch ", "").trim();
     if (!sessionId) {
       this.write({ type: 7, content: "Usage: /switch <sessionId>" });
@@ -311,7 +312,7 @@ export abstract class Channel {
   }
 
   /** Handle unknown channel command. */
-  protected async handleUnknown(cmdText: string): Promise<void> {
+  public async handleUnknown(cmdText: string): Promise<void> {
     this.write({ type: 7, content: `Unknown command: ${cmdText}` });
   }
 

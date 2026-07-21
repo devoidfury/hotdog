@@ -139,7 +139,7 @@ describe('Message.fromJSON', () => {
       images: [{ type: 'image_url', mimeType: 'image/png', data: 'abc123' }],
     });
     expect(msg.images).toHaveLength(1);
-    expect(msg.images![0].mimeType).toBe('image/png');
+    expect(msg.images![0]!.mimeType).toBe('image/png');
   });
 });
 

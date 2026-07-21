@@ -708,7 +708,7 @@ export function createWsServer(core: CoreContext, options: CreateWsServerOptions
     const agent = new Agent({
       hooks: core.hooks,
       toolRegistry: core.toolRegistry,
-      llmClient: (agentConfig as Record<string, unknown>).llmClient || sharedLlmClient,
+      llmClient: ((agentConfig as Record<string, unknown>).llmClient as LlmClient) || sharedLlmClient,
       model: (agentConfig as { model?: string }).model || (core.resolved?.model as string) || "",
       maxIterations: (core.resolved?.maxIterations as number) || 100,
       contextLimit: 128000,

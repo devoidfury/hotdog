@@ -16,6 +16,7 @@ export interface ModelConfig {
   contextLimit: number;
   reasoningEffort?: string;
   tags: string[];
+  [key: string]: unknown;
 }
 
 export interface ProviderModelEntry {

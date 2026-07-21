@@ -7,6 +7,8 @@ import {
   mdTreeToHtml,
   markdownToHtml,
   getStablePrefix,
+  type MdHeading,
+  type MdList,
 } from "../../src/utils/md-parser.ts";
 import type { MdBlock, MdInline, MdDocument } from "../../src/utils/md-parser.ts";
 
@@ -59,9 +61,9 @@ describe("parseMarkdown", () => {
   it("parses heading levels correctly", () => {
     const doc = parseMarkdown("# H1\n## H2\n### H3");
     expect((doc.children[0] as MdBlock).type).toBe("heading");
-    if ((doc.children[0] as MdBlock).type === "heading") expect((doc.children[0] as MdBlock).level).toBe(1);
-    if ((doc.children[1] as MdBlock).type === "heading") expect((doc.children[1] as MdBlock).level).toBe(2);
-    if ((doc.children[2] as MdBlock).type === "heading") expect((doc.children[2] as MdBlock).level).toBe(3);
+    if ((doc.children[0] as MdBlock).type === "heading") expect((doc.children[0] as MdHeading).level).toBe(1);
+    if ((doc.children[1] as MdBlock).type === "heading") expect((doc.children[1] as MdHeading).level).toBe(2);
+    if ((doc.children[2] as MdBlock).type === "heading") expect((doc.children[2] as MdHeading).level).toBe(3);
   });
 
   // ── Paragraphs ────────────────────────────────────────────────────
@@ -153,7 +155,7 @@ describe("parseMarkdown", () => {
   it("parses an ordered list with periods", () => {
     const doc = parseMarkdown("1. first\n2. second\n3. third");
     expect(doc.children[0]?.type).toBe("list");
-    const list = doc.children[0] as { type: "list"; ordered: boolean };
+    const list = doc.children[0] as MdList;
     expect(list.ordered).toBe(true);
     expect(list.items).toHaveLength(3);
   });
@@ -800,7 +802,7 @@ function* chunkify(text: string): Generator<string> {
   let si = 0;
   let i = 0;
   while (i < text.length) {
-    const size = Math.min(sizes[si % sizes.length], text.length - i);
+    const size = Math.min(sizes[si % sizes.length]!, text.length - i);
     yield text.slice(i, i + size);
     i += size;
     si++;
@@ -1146,7 +1148,7 @@ Third paragraph.`;
 
     const final = parser.finalize();
     expect(final.children[0]?.type).toBe("list");
-    const list = final.children[0] as { type: "list"; items: MdListItem[] };
+    const list = final.children[0] as MdList;
     expect(list.items).toHaveLength(3);
   });
 

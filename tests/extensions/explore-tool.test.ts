@@ -162,7 +162,7 @@ describe('ExploreTool > execute', () => {
   // ── Spawn flow tests (using mocked node:child_process) ──────────────
 
   it('returns success result when explorer exits with code 0', async () => {
-    const mockProc = {
+    const mockProc: any = {
       stdout: {
         on: function(event: string, cb: Function) {
           if (event === "data") cb(Buffer.from("Explorer output line 1\nExplorer output line 2"));
@@ -187,8 +187,9 @@ describe('ExploreTool > execute', () => {
 
     // Verify spawn was called with correct arguments
     expect(mockSpawn).toHaveBeenCalledTimes(1);
-    expect(mockSpawn.mock.calls[0][0]).toBe("bun");
-    const args = mockSpawn.mock.calls[0][1] as string[];
+    const calls = mockSpawn.mock.calls as unknown[][];
+    expect(calls[0]![0]).toBe("bun");
+    const args = calls[0]![1] as string[];
     expect(args).toContain('-c');
     expect(args).toContain('--profile');
     expect(args).toContain('explorer');
@@ -196,7 +197,7 @@ describe('ExploreTool > execute', () => {
     expect(args).toContain('--hide-thinking');
 
     // Verify cwd option
-    const options = mockSpawn.mock.calls[0][2] as Record<string, unknown>;
+    const options = calls[0]![2] as Record<string, unknown>;
     expect(options.cwd).toBe('/tmp/test');
 
     // Verify result
@@ -208,7 +209,7 @@ describe('ExploreTool > execute', () => {
   });
 
   it('returns error result when explorer exits with non-zero code', async () => {
-    const mockProc = {
+    const mockProc: any = {
       stdout: { on: function() {} },
       stderr: {
         on: function(event: string, cb: Function) {
@@ -238,7 +239,7 @@ describe('ExploreTool > execute', () => {
   });
 
   it('returns error with exit code message when stderr is empty', async () => {
-    const mockProc = {
+    const mockProc: any = {
       stdout: { on: function() {} },
       stderr: { on: function() {} },
       on: function(event: string, cb: Function) {
@@ -263,7 +264,7 @@ describe('ExploreTool > execute', () => {
 
   it('accumulates multiple stdout chunks', async () => {
     let stdoutCb: Function | null = null;
-    const mockProc = {
+    const mockProc: any = {
       stdout: {
         on: function(event: string, cb: Function) {
           if (event === "data") {
@@ -301,7 +302,7 @@ describe('ExploreTool > execute', () => {
   });
 
   it('includes content_length in success result entries', async () => {
-    const mockProc = {
+    const mockProc: any = {
       stdout: {
         on: function(event: string, cb: Function) {
           if (event === "data") cb(Buffer.from("12345"));
@@ -328,7 +329,7 @@ describe('ExploreTool > execute', () => {
   });
 
   it('includes command in result entries', async () => {
-    const mockProc = {
+    const mockProc: any = {
       stdout: { on: function(event: string, cb: Function) { if (event === "data") cb(Buffer.from("ok")); } },
       stderr: { on: function() {} },
       on: function(event: string, cb: Function) {
@@ -351,7 +352,7 @@ describe('ExploreTool > execute', () => {
   });
 
   it('trims output whitespace', async () => {
-    const mockProc = {
+    const mockProc: any = {
       stdout: {
         on: function(event: string, cb: Function) {
           if (event === "data") cb(Buffer.from("  output with spaces  \n"));
@@ -377,7 +378,7 @@ describe('ExploreTool > execute', () => {
   });
 
   it('accepts object input (not JSON string)', async () => {
-    const mockProc = {
+    const mockProc: any = {
       stdout: {
         on: function(event: string, cb: Function) {
           if (event === "data") cb(Buffer.from("ok"));

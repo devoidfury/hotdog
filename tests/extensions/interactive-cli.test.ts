@@ -36,7 +36,7 @@ describe("Interactive CLI - model change hook", () => {
     });
 
     hooks.notifyHooks(HOOKS.MODEL_CHANGE, { agent: {}, oldModel: "old-model", newModel: "new-model" });
-    expect(lastPrompt).toBe("(new-model)> ");
+    expect(lastPrompt!).toBe("(new-model)> ");
   });
 
   it("handles multiple model changes", () => {

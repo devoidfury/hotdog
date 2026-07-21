@@ -10,14 +10,14 @@ import {
 describe("getExtensionConfig", () => {
   it("returns config block from core.config", () => {
     const core = { config: { myExtension: { enabled: true, timeout: 30 } } } as any;
-    expect(getExtensionConfig(core, "myExtension")).toEqual({ enabled: true, timeout: 30 });
+    expect(getExtensionConfig<{ enabled: boolean; timeout: number }>(core, "myExtension")).toEqual({ enabled: true, timeout: 30 });
   });
 
   it("returns empty object for missing/null/non-object config", () => {
-    expect(getExtensionConfig({ config: {} } as any, "missing")).toEqual({});
-    expect(getExtensionConfig({ config: null } as any, "x")).toEqual({});
-    expect(getExtensionConfig({ config: { x: "string" } } as any, "x")).toEqual({});
-    expect(getExtensionConfig({ config: { x: ["arr"] } } as any, "x")).toEqual({});
+    expect(getExtensionConfig<{ }>({} as any, "missing")).toEqual({});
+    expect(getExtensionConfig<{ }>(({ config: null } as any), "x")).toEqual({});
+    expect(getExtensionConfig<{ }>(({ config: { x: "string" } } as any), "x")).toEqual({});
+    expect(getExtensionConfig<{ }>(({ config: { x: ["arr"] } } as any), "x")).toEqual({});
   });
 
   it("validates against configRegistry schema when present", () => {
@@ -96,7 +96,7 @@ describe("getConfigDefault", () => {
     expect(getConfigDefault<string>(props, "name")).toBe("");
     expect(getConfigDefault<boolean>(props, "flag")).toBe(false);
     expect(getConfigDefault<string[]>(props, "tags")).toEqual(["a", "b"]);
-    expect(getConfigDefault(props, "options")).toEqual({ nested: true });
+    expect(getConfigDefault<{ nested: boolean }>(props, "options")).toEqual({ nested: true });
   });
 
   it("returns undefined for non-object property", () => {

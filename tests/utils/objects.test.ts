@@ -7,7 +7,7 @@ describe("getNested", () => {
   it("returns top-level and nested properties", () => {
     expect(getNested<string>({ url: "http://test" }, "url")).toBe("http://test");
     expect(getNested<number>({ nested: { value: 42 } }, "nested.value")).toBe(42);
-    expect(getNested({ a: { b: { c: { d: 42 } } } }, "a.b.c.d")).toBe(42);
+    expect(getNested<number>({ a: { b: { c: { d: 42 } } } }, "a.b.c.d")).toBe(42);
   });
 
   it("returns undefined for missing, null, or empty paths", () => {

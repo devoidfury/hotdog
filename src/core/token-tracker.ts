@@ -30,6 +30,7 @@ export interface TokenUsage {
   lastCachedTokens: number;
   lastCompletionTokens: number;
   lastTotalTokens: number;
+  [key: string]: unknown;
 }
 
 /**

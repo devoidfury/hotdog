@@ -113,9 +113,9 @@ describe("OneShotChannel - write()", () => {
     });
 
     expect(channel.events.length).toBe(3);
-    expect(channel.events[0].type).toBe(OUTPUT_EVENT.USER_MESSAGE);
-    expect(channel.events[1].type).toBe(OUTPUT_EVENT.ASSISTANT_MESSAGE);
-    expect(channel.events[2].type).toBe(OUTPUT_EVENT.TOOL_CALL);
+    expect(channel.events[0]!.type).toBe(OUTPUT_EVENT.USER_MESSAGE);
+    expect(channel.events[1]!.type).toBe(OUTPUT_EVENT.ASSISTANT_MESSAGE);
+    expect(channel.events[2]!.type).toBe(OUTPUT_EVENT.TOOL_CALL);
   });
 
   it("calls sink.emit for each event", () => {
@@ -228,7 +228,7 @@ describe("OneShotChannel - getters", () => {
     });
 
     expect(channel.events.length).toBe(1);
-    expect(channel.events[0].content).toBe("Hello");
+    expect(channel.events[0]!.content).toBe("Hello");
   });
 
   it("exposes output sink", () => {
@@ -319,7 +319,7 @@ describe("OneShotChannel - event types", () => {
 
     expect(channel.events.length).toBe(eventsToFire.length);
     for (let i = 0; i < eventsToFire.length; i++) {
-      expect(channel.events[i].type).toBe(eventsToFire[i].type);
+      expect(channel.events[i]!.type).toBe(eventsToFire[i]!.type);
     }
   });
 });

@@ -4,7 +4,6 @@ import path from 'node:path';
 import os from 'node:os';
 import { ProjectInfoTool } from '../../src/extensions/core-tools/project-info.ts';
 import { resultStr } from '../helpers.ts';
-import { execFileAsync } from 'node:child_process';
 
 describe('ProjectInfoTool', () => {
   let tmpDir: string;

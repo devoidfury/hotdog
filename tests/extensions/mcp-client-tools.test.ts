@@ -139,11 +139,11 @@ describe("McpTool > toToolDef", () => {
 
     expect(def.function.parameters.properties).toHaveProperty("query");
     expect(def.function.parameters.properties).toHaveProperty("limit");
-    expect(def.function.parameters.properties.query.type).toBe("string");
-    expect(def.function.parameters.properties.query.description).toBe("Search query");
-    expect(def.function.parameters.properties.limit.type).toBe("number");
-    expect(def.function.parameters.properties.limit.minimum).toBe(1);
-    expect(def.function.parameters.properties.limit.maximum).toBe(100);
+    expect(def.function.parameters.properties!.query!.type).toBe("string");
+    expect(def.function.parameters.properties!.query!.description).toBe("Search query");
+    expect(def.function.parameters.properties!.limit!.type).toBe("number");
+    expect(def.function.parameters.properties!.limit!.minimum).toBe(1);
+    expect(def.function.parameters.properties!.limit!.maximum).toBe(100);
   });
 
   it("extracts required fields", () => {
@@ -190,7 +190,7 @@ describe("McpTool > toToolDef", () => {
 
     const def = tool.toToolDef();
 
-    expect(def.function.parameters.properties.status.enum).toEqual(["active", "inactive", "pending"]);
+    expect(def.function.parameters.properties!.status!.enum).toEqual(["active", "inactive", "pending"]);
   });
 
   it("handles string constraints in schema", () => {
@@ -209,9 +209,9 @@ describe("McpTool > toToolDef", () => {
 
     const def = tool.toToolDef();
 
-    expect(def.function.parameters.properties.name.minLength).toBe(1);
-    expect(def.function.parameters.properties.name.maxLength).toBe(100);
-    expect(def.function.parameters.properties.name.pattern).toBe("^[a-z]+$");
+    expect(def.function.parameters.properties!.name!.minLength).toBe(1);
+    expect(def.function.parameters.properties!.name!.maxLength).toBe(100);
+    expect(def.function.parameters.properties!.name!.pattern).toBe("^[a-z]+$");
   });
 
   it("handles exclusiveMinimum and exclusiveMaximum", () => {
@@ -230,8 +230,8 @@ describe("McpTool > toToolDef", () => {
 
     const def = tool.toToolDef();
 
-    expect(def.function.parameters.properties.value.exclusiveMinimum).toBe(0);
-    expect(def.function.parameters.properties.value.exclusiveMaximum).toBe(100);
+    expect(def.function.parameters.properties!.value!.exclusiveMinimum).toBe(0);
+    expect(def.function.parameters.properties!.value!.exclusiveMaximum).toBe(100);
   });
 
   it("handles schema with no properties", () => {
@@ -360,6 +360,6 @@ describe("McpTool > Schema Edge Cases", () => {
 
     const def = tool.toToolDef();
 
-    expect(def.function.parameters.properties.field.type).toBe("string");
+    expect(def.function.parameters.properties!.field!.type).toBe("string");
   });
 });

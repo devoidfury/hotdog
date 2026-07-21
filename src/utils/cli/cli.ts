@@ -129,6 +129,7 @@ export class CliOutputSink extends OutputSink {
   hideThinking?: boolean;
   hideUserMessage?: boolean;
   showTokenUse: boolean;
+  [key: string]: unknown;
 
   // ── Newline buffer for streaming output ────────────────────────────────
   #nlBuf: number;

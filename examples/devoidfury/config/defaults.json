@@ -111,11 +111,15 @@
           "context-limit": 128000
         },
         {
-          "name": "gemma-4-31b",
+          "name": "gemma-4-12b",
           "context-limit": 256000
         },
         {
-          "name": "gemma-4-12b",
+          "name": "gemma-4-26b-a4b",
+          "context-limit": 256000
+        },
+        {
+          "name": "gemma-4-31b",
           "context-limit": 256000
         },
         {

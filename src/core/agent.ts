@@ -1,6 +1,5 @@
 // Agent - the core AI agent with tool calling support.
 
-import crypto from "node:crypto";
 import { Message, type ImageAttachment as MessageImageAttachment } from "./context/message.ts";
 import { MessageLog } from "./context/message-log.ts";
 import { OUTPUT_EVENT, OutputEvent } from "./context/output.ts";
@@ -8,7 +7,6 @@ import { AgentError, LlmError } from "./error.ts";
 import { HOOKS, HookSystem, type ContextHookResult, type ProviderRequestHookResult } from "./hooks.ts";
 import { isPromise } from "../utils/promise.ts";
 import { ACTIONS, ParsedCommand, Command } from "./commands.ts";
-import { logger } from "./logger.ts";
 import { createCommandRegistry, AgentCommandRegistry } from "./extensions/registries.ts";
 import { CORE_COMMAND_HANDLERS } from "./command-handlers.ts";
 import { resolveModelConfig, type ModelConfig } from "./config/providers.ts";
@@ -19,6 +17,11 @@ import { TokenTracker, createTokenTracker, type TokenUsage } from "./token-track
 import { ToolExecutor, createToolExecutor } from "./tool-executor.ts";
 
 import type { LlmClient, StreamEvent } from "./llm-client/client.ts";
+import {
+  createStreamProcessor,
+  StreamProcessor,
+  type StreamResult,
+} from "./llm-client/stream-processor.ts";
 import type { ToolRegistry } from "./extensions/tool-registry.ts";
 import type { SystemPromptBuilder } from "./context/system-prompt.ts";
 
@@ -122,12 +125,8 @@ export class Agent {
   #toolExecutor: ToolExecutor;
   #tokenTracker: TokenTracker;
   #systemPromptBuilder: SystemPromptBuilder;
+  #streamProcessor: StreamProcessor;
   enqueueCallback: ((text: string) => void) | null;
-  // Accumulated partial content of the currently streaming response.
-  // Populated during _processStream so reconnecting clients can replay
-  // the portion streamed before they connected.
-  #currentStreamingContent: string;
-  #currentStreamingReasoning: string;
 
   /**
    * @param options
@@ -187,9 +186,8 @@ export class Agent {
     // AbortController for the current LLM request — created per iteration,
     // aborted on cancel() so the HTTP client properly terminates fetch().
     this.runAbortController = null;
-    // Partial streaming content for reconnect replay
-    this.#currentStreamingContent = "";
-    this.#currentStreamingReasoning = "";
+    // Stream processor — handles streaming LLM responses
+    this.#streamProcessor = createStreamProcessor({ stream: this.stream });
     // Command registry — extensions register commands here
     this.commandRegistry = options.commandRegistry || createCommandRegistry();
     // Register core built-in commands with their handlers
@@ -273,7 +271,7 @@ export class Agent {
    * to replay content that was streamed before they connected.
    */
   get currentStreamingContent(): string {
-    return this.#currentStreamingContent;
+    return this.#streamProcessor.streamingContent;
   }
 
   /**
@@ -281,7 +279,7 @@ export class Agent {
    * Empty string if not currently streaming.
    */
   get currentStreamingReasoning(): string {
-    return this.#currentStreamingReasoning;
+    return this.#streamProcessor.streamingReasoning;
   }
 
   /**
@@ -571,105 +569,27 @@ export class Agent {
 
   /**
    * Process a streaming LLM response.
-   * Normalizes tool calls to OpenAI format: { id, type, function: { name, arguments } }.
+   * Delegates to StreamProcessor.
    *
-   * @param stream
-   * @returns { fullText, fullReasoning, finalToolCalls, usage, finishReason }
+   * @param stream - The stream of events from the LLM client.
+   * @returns The complete stream result.
    */
   async _processStream(
     stream: AsyncIterable<StreamEvent>,
-  ): Promise<{
-    fullText: string;
-    fullReasoning: string | null;
-    finalToolCalls: Array<{ id: string; type: string; function: { name: string; arguments: string } }> | null;
-    usage: Record<string, unknown> | null;
-    finishReason: string | null;
-  }> {
-    const textParts: string[] = [];
-    const reasoningParts: string[] = [];
-    const toolCallsBuffer = new Map<number, { name: string; args: string[]; id: string }>();
-    let usage: Record<string, unknown> | null = null;
-    let finishReason: string | null = null;
-
-    // Reset accumulated partial content for this streaming session
-    this.#currentStreamingContent = "";
-    this.#currentStreamingReasoning = "";
-
-    for await (const event of stream) {
-      if (this.cancelled) throw LlmError.Cancelled("Agent cancelled");
-
-      switch (event.type) {
-        case "content":
-          textParts.push(event.content as string);
-          this.#currentStreamingContent += event.content as string;
-          if (this.stream) {
-            this.emitOutput("streaming_chunk", { content: event.content });
-          }
-          break;
-        case "reasoning":
-          reasoningParts.push(event.content as string);
-          this.#currentStreamingReasoning += event.content as string;
-          if (this.stream) {
-            this.emitOutput("streaming_reasoning_chunk", {
-              content: event.content,
-            });
-          }
-          break;
-        case "toolName":
-          toolCallsBuffer.set(event.index as number, {
-            name: event.name as string,
-            args: [],
-            id: event.toolCallId || "",
-          });
-          break;
-        case "toolArgument": {
-          const existing = toolCallsBuffer.get(event.index as number) || {
-            name: "",
-            args: [],
-            id: "",
-          };
-          existing.args.push(event.arguments as string);
-          toolCallsBuffer.set(event.index as number, existing);
-          break;
+  ): Promise<StreamResult> {
+    return this.#streamProcessor.process(stream, {
+      onChunk: (content) => {
+        if (this.stream) {
+          this.emitOutput("streaming_chunk", { content });
         }
-        case "usage":
-          usage = event.data as Record<string, unknown>;
-          break;
-        case "finish":
-          finishReason = event.reason as string;
-          // Emit truncation warning if the model hit its token limit
-          if (event.reason === "length") {
-            logger.warn(
-              `[agent] response truncated — hit max token limit (reason: ${event.reason})`,
-            );
-          }
-          break;
-      }
-    }
-
-    // Build final tool calls from buffer
-    let finalToolCalls: Array<{ id: string; type: string; function: { name: string; arguments: string } }> | null = null;
-    if (toolCallsBuffer.size > 0) {
-      finalToolCalls = Array.from(toolCallsBuffer.values()).map(
-        (tc) => ({
-          id: tc.id || crypto.randomUUID(),
-          type: "function",
-          function: { name: tc.name, arguments: tc.args.join("") },
-        }),
-      );
-    }
-
-    // Clear partial streaming content — stream is complete
-    this.#currentStreamingContent = "";
-    this.#currentStreamingReasoning = "";
-
-    return {
-      fullText: textParts.join(""),
-      fullReasoning: reasoningParts.length > 0 ? reasoningParts.join("") : null,
-      finalToolCalls,
-      usage,
-      finishReason,
-    };
+      },
+      onReasoning: (content) => {
+        if (this.stream) {
+          this.emitOutput("streaming_reasoning_chunk", { content });
+        }
+      },
+      shouldCancel: () => this.cancelled,
+    });
   }
 
   // ── Tool Execution ────────────────────────────────────────────────────────

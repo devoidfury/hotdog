@@ -441,8 +441,9 @@ describe('Agent — end-to-end loop', () => {
     toolRegistry.register('hook_test_tool', tool);
     const responseHookCalls: string[] = [];
 
-    hooks.on(HOOKS.PROVIDER_RESPONSE, (data: { response: { fullText: string } }) => {
-      responseHookCalls.push(data.response.fullText);
+    hooks.on(HOOKS.PROVIDER_RESPONSE, (data) => {
+      const response = data.response as { fullText: string };
+      responseHookCalls.push(response.fullText);
     });
 
     await agent.run('Hi');

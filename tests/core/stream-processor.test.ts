@@ -4,10 +4,10 @@ import { describe, it, expect } from "bun:test";
 import {
   createStreamProcessor,
   StreamProcessor,
-  type StreamEvent,
   type StreamCallbacks,
   type StreamResult,
 } from "../../src/core/llm-client/stream-processor.ts";
+import type { StreamEvent } from "../../src/core/llm-client/client.ts";
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -115,7 +115,7 @@ describe("StreamProcessor", () => {
           },
         },
       ]);
-      expect(result.finalToolCalls![0].id).toHaveLength(36); // UUID format
+      expect(result.finalToolCalls![0]!.id).toHaveLength(36); // UUID format
     });
 
     it("should handle multiple tool calls", async () => {
@@ -128,8 +128,8 @@ describe("StreamProcessor", () => {
       ]);
 
       expect(result.finalToolCalls).toHaveLength(2);
-      expect(result.finalToolCalls![0].function.name).toBe("read");
-      expect(result.finalToolCalls![1].function.name).toBe("write");
+      expect(result.finalToolCalls![0]!.function.name).toBe("read");
+      expect(result.finalToolCalls![1]!.function.name).toBe("write");
     });
 
     it("should return null tool calls when none present", async () => {
@@ -233,7 +233,7 @@ describe("StreamProcessor", () => {
         onFinish: (r) => { finishReason = r; },
       });
 
-      expect(finishReason).toBe("stop");
+      expect(finishReason as string).toBe("stop");
     });
 
     it("should call onToolCalls callback with final tool calls", async () => {

@@ -4,6 +4,10 @@
 
 import { describe, test, expect } from "bun:test";
 import { HookSystem, HOOKS } from "../../src/core/hooks.ts";
+import type { Agent } from "../../src/core/agent.ts";
+import { Message } from "../../src/core/context/message.ts";
+
+const mockAgent = {} as Agent;
 
 describe("tool:call hook", () => {
   test("hook can block tool execution", async () => {
@@ -20,7 +24,7 @@ describe("tool:call hook", () => {
       toolCallId: "1",
       toolName: "dangerous-tool",
       input: '{"cmd": "rm -rf /"}',
-      agent: null,
+      agent: mockAgent,
     });
     expect((blockResult as Record<string, unknown>).action).toBe("block");
 
@@ -28,7 +32,7 @@ describe("tool:call hook", () => {
       toolCallId: "2",
       toolName: "safe-tool",
       input: '{"path": "/tmp/test"}',
-      agent: null,
+      agent: mockAgent,
     });
     expect((allowResult as Record<string, unknown>).action).toBe("continue");
   });
@@ -49,7 +53,7 @@ describe("tool:call hook", () => {
       toolCallId: "1",
       toolName: "bash",
       input: '{"command": "ls"}',
-      agent: null,
+      agent: mockAgent,
     });
 
     expect((lastResult as Record<string, unknown>).action).toBe("modify");
@@ -81,7 +85,7 @@ describe("tool:call hook", () => {
       toolCallId: "1",
       toolName: "read",
       input: '{"path": "test.txt"}',
-      agent: null,
+      agent: mockAgent,
     };
     await hooks.runHookPipeline(HOOKS.TOOL_CALL, data);
 
@@ -106,7 +110,8 @@ describe("tool:result hook", () => {
       toolName: "bash",
       result: "API key is sk-abc123def456",
       input: '{"command": "cat .env"}',
-      agent: null,
+      success: true,
+      agent: mockAgent,
     });
 
     expect((lastResult as Record<string, unknown>).result).toBe("API key is [REDACTED]");
@@ -133,7 +138,8 @@ describe("tool:result hook", () => {
       toolName: "bash",
       result: bigResult,
       input: "{}",
-      agent: null,
+      success: true,
+      agent: mockAgent,
     });
 
     expect((lastResult as Record<string, unknown>).result).toContain("[100 more lines]");
@@ -151,11 +157,11 @@ describe("CONTEXT hook via runHookPipeline", () => {
 
     const { lastResult } = await hooks.runHookPipeline(HOOKS.CONTEXT, {
       messages: [
-        { role: "user", content: "hello" },
-        { role: "assistant", content: "" },
-        { role: "user", content: "world" },
+        new Message({ role: "user", content: "hello" }),
+        new Message({ role: "assistant", content: "" }),
+        new Message({ role: "user", content: "world" }),
       ],
-      agent: null,
+      agent: mockAgent,
     });
 
     expect((lastResult as Record<string, unknown>).messages).toHaveLength(2);
@@ -176,8 +182,8 @@ describe("CONTEXT hook via runHookPipeline", () => {
     }) as (data: unknown) => unknown);
 
     const { lastResult } = await hooks.runHookPipeline(HOOKS.CONTEXT, {
-      messages: [{ role: "user", content: "hi" }],
-      agent: null,
+      messages: [new Message({ role: "user", content: "hi" })],
+      agent: mockAgent,
     });
 
     expect((lastResult as Record<string, unknown>).messages).toHaveLength(2);

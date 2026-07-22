@@ -8,6 +8,9 @@ import { HOOKS } from "../../src/core/hooks.ts";
 import { HookSystem } from "../../src/core/hooks.ts";
 import { createMockCore } from "../helpers.ts";
 import type { CoreContext } from "../../src/core/extensions/types.ts";
+import type { Agent } from "../../src/core/agent.ts";
+
+const mockAgent = {} as Agent;
 
 describe("Interactive CLI - create function", () => {
   it("registers cli subcommand and hooks", async () => {
@@ -35,7 +38,7 @@ describe("Interactive CLI - model change hook", () => {
       lastPrompt = `(${(data as { newModel: string }).newModel})> `;
     });
 
-    hooks.notifyHooks(HOOKS.MODEL_CHANGE, { agent: {}, oldModel: "old-model", newModel: "new-model" });
+    hooks.notifyHooks(HOOKS.MODEL_CHANGE, { agent: mockAgent, oldModel: "old-model", newModel: "new-model" });
     expect(lastPrompt!).toBe("(new-model)> ");
   });
 
@@ -47,8 +50,8 @@ describe("Interactive CLI - model change hook", () => {
       prompts.push(`(${(data as { newModel: string }).newModel})> `);
     });
 
-    hooks.notifyHooks(HOOKS.MODEL_CHANGE, { agent: {}, oldModel: "model-1", newModel: "model-2" });
-    hooks.notifyHooks(HOOKS.MODEL_CHANGE, { agent: {}, oldModel: "model-2", newModel: "model-3" });
+    hooks.notifyHooks(HOOKS.MODEL_CHANGE, { agent: mockAgent, oldModel: "model-1", newModel: "model-2" });
+    hooks.notifyHooks(HOOKS.MODEL_CHANGE, { agent: mockAgent, oldModel: "model-2", newModel: "model-3" });
     expect(prompts).toEqual(["(model-2)> ", "(model-3)> "]);
   });
 });
@@ -64,7 +67,7 @@ describe("Interactive CLI - turn end hook", () => {
       }
     });
 
-    hooks.notifyHooks(HOOKS.TURN_END, { turnIndex: 1, message: "Hello", toolResults: [], stopped: true, agent: {} });
+    hooks.notifyHooks(HOOKS.TURN_END, { turnIndex: 1, message: "Hello", toolResults: [], stopped: true, agent: mockAgent });
     expect(promptCalled).toBe(false);
     await new Promise((resolve) => setImmediate(resolve));
     expect(promptCalled).toBe(true);
@@ -81,7 +84,7 @@ describe("Interactive CLI - turn end hook", () => {
     });
 
     hooks.notifyHooks(HOOKS.TURN_END, {
-      turnIndex: 1, message: "", toolResults: [{ toolName: "read" }], stopped: false, agent: {},
+      turnIndex: 1, message: "", toolResults: [{ toolName: "read", input: "{}", result: "ok" }], stopped: false, agent: mockAgent,
     });
     await new Promise((resolve) => setTimeout(resolve, 50));
     expect(promptCalled).toBe(false);

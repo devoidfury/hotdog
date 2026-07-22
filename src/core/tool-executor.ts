@@ -1,6 +1,4 @@
-// ToolExecutor — executes tool calls through the full pipeline:
-//   whitelist → gate hook → context build → resolve → validate → execute
-//   → after-execute hook → result hook → format → write to context.
+// ToolExecutor
 
 import { Message, type ImageAttachment } from "./context/message.ts";
 import { formatError } from "./error.ts";
@@ -11,28 +9,18 @@ import { formatToolResult } from "./extensions/tool-utils.ts";
 import type { ToolRegistry } from "./extensions/tool-registry.ts";
 import type { Agent } from "./agent.ts";
 
-/**
- * Minimal tool call shape from the LLM (normalized OpenAI format).
- */
 export interface ToolCall {
   id: string;
   type: string;
   function: { name: string; arguments: string };
 }
 
-/**
- * Result of executing a single tool call.
- */
 export interface ToolResult {
   toolName: string;
   input: string;
   result: string;
 }
 
-/**
- * Dependencies that ToolExecutor needs from its host (the Agent).
- * Using a minimal interface avoids a circular import of Agent.
- */
 export interface ToolExecutorDeps {
   toolRegistry: ToolRegistry;
   hooks: HookSystem;
@@ -47,22 +35,6 @@ export interface ToolExecutorDeps {
   agent: Agent;
 }
 
-/**
- * ToolExecutor - Executes tool calls through the full pipeline.
- *
- * The pipeline for each tool call:
- *   1. Validate tool name (reject empty/missing names)
- *   2. Check tool whitelist (if configured)
- *   3. TOOL_CALL gate hook — extensions can block or modify input
- *   4. Build and enrich ToolContext via AGENT_TOOL_CONTEXT hook
- *   5. Resolve tool from registry
- *   6. Validate arguments against tool's JSON Schema
- *   7. Execute the tool
- *   8. TOOL_AFTER_EXECUTE notification hook
- *   9. TOOL_RESULT pipeline hook — extensions can transform the result
- *   10. Format result and write to context
- *   11. TOOL_METRICS notification (fire-and-forget)
- */
 export class ToolExecutor {
   #deps: ToolExecutorDeps;
 
@@ -70,14 +42,6 @@ export class ToolExecutor {
     this.#deps = deps;
   }
 
-  /**
-   * Execute all tool calls from an LLM response.
-   *
-   * @param toolCalls — Tool calls from the LLM (normalized format).
-   * @returns { outcome: 'continue' | 'return', toolResults }
-   *   - 'continue' means the agent should proceed to the next iteration
-   *   - 'return' means the agent should yield control (e.g., wait tool)
-   */
   async execute(
     toolCalls: ToolCall[],
   ): Promise<{ outcome: string; toolResults: ToolResult[] }> {
@@ -88,8 +52,6 @@ export class ToolExecutor {
       try {
         result = await this.executeSingle(tc);
       } catch (e: unknown) {
-        // Log the error and produce a fallback result so the LLM sees a
-        // structured failure rather than losing the tool call entirely.
         const toolName = tc.function?.name || "(unknown)";
         const toolCallId = tc.id || "";
         const errorMsg = `Tool execution failed: ${(e as Error).message}`;
@@ -104,7 +66,6 @@ export class ToolExecutor {
       }
       toolResults.push(result);
 
-      // Check for wait tool — model is yielding control
       if (result.toolName === "wait") {
         return { outcome: "return", toolResults };
       }
@@ -113,14 +74,6 @@ export class ToolExecutor {
     return { outcome: "continue", toolResults };
   }
 
-  /**
-   * Execute a single tool call through the full pipeline:
-   *   whitelist → gate hook → context build → resolve → validate → execute
-   *   → after-execute hook → result hook → format → write to context.
-   *
-   * @param tc — Tool call from the LLM response (normalized format).
-   * @returns { toolName, input, result }
-   */
   async executeSingle(tc: ToolCall): Promise<ToolResult> {
     const toolName = tc.function?.name;
     const toolCallId = tc.id;
@@ -128,7 +81,6 @@ export class ToolExecutor {
     const t0 = Date.now();
     const { hooks, agent } = this.#deps;
 
-    // Guard: reject empty or missing tool names before any further processing.
     if (
       !toolName ||
       typeof toolName !== "string" ||
@@ -166,8 +118,6 @@ export class ToolExecutor {
       agent,
     });
 
-    // Tool call gate — sequential, modifiable. Handlers can block, modify input args, or allow execution to proceed.
-    // Returns GateAction: { action: "continue" } | { action: "modify", input } | { action: "block", result }
     const callResult = await hooks.runHookPipeline<GateAction>(HOOKS.TOOL_CALL, {
       toolCallId,
       toolName,
@@ -175,24 +125,15 @@ export class ToolExecutor {
       agent,
     });
     if (callResult.lastResult?.action === "block") {
-      // Extension blocked this tool call — use provided result
       const blockedResult = formatToolResult(callResult.lastResult.result, toolName, false);
       return this.#writeToolResult(toolName, input, blockedResult, toolCallId);
     }
     if (callResult.lastResult?.action === "modify" && callResult.lastResult.input !== undefined) {
-      // Extension modified the input args
       input = callResult.lastResult.input;
     }
 
-    // Build and enrich tool context via hook
     const toolCtx = this.#buildToolContext(toolName);
-    hooks.notifyHooks(HOOKS.AGENT_TOOL_CONTEXT, {
-      toolCtx,
-      toolName,
-      agent,
-    });
-
-    // Resolve tool from registry
+    hooks.notifyHooks(HOOKS.AGENT_TOOL_CONTEXT, { toolCtx, toolName, agent });
     const tool = this.#deps.toolRegistry.get(toolName);
     if (!tool) {
       return this.#writeToolResult(
@@ -203,7 +144,6 @@ export class ToolExecutor {
       );
     }
 
-    // Validate arguments against tool's JSON Schema
     const validationError = await this.#deps.toolRegistry.validateToolArgs(
       toolName,
       input,
@@ -217,7 +157,6 @@ export class ToolExecutor {
       );
     }
 
-    // Execute the tool
     let result: unknown;
     let success: boolean;
     try {
@@ -232,7 +171,6 @@ export class ToolExecutor {
       success = false;
     }
 
-    // After-execute hook + result modification hook
     hooks.notifyHooks(HOOKS.TOOL_AFTER_EXECUTE, {
       toolCallId,
       toolName,
@@ -242,9 +180,6 @@ export class ToolExecutor {
       success,
     });
 
-    // Tool result — sequential, modifiable. Handlers can transform the
-    // result before it reaches the LLM context.
-    // Returns ToolResultHookResult: { result } to replace the result
     const resultHook = await hooks.runHookPipeline<ToolResultHookResult>(HOOKS.TOOL_RESULT, {
       toolCallId,
       toolName,
@@ -258,12 +193,7 @@ export class ToolExecutor {
     }
     const images = (result as { images?: unknown })?.images ?? null;
 
-    // Format and write result to context
     const resultStr = formatToolResult(result, toolName, success);
-
-    // Fire metrics notification (fire-and-forget — non-blocking).
-    // Enables telemetry, profiling, and anomaly detection without
-    // adding latency to the tool execution path.
     const durationMs = Date.now() - t0;
     const resultSize = typeof resultStr === "string" ? resultStr.length : 0;
     hooks.notifyHooks(HOOKS.TOOL_METRICS, {
@@ -285,13 +215,6 @@ export class ToolExecutor {
     );
   }
 
-  /**
-   * Build a ToolContext with standard infrastructure fields.
-   * Extensions can further enrich it via the AGENT_TOOL_CONTEXT hook.
-   *
-   * @param toolName
-   * @returns ToolContext
-   */
   #buildToolContext(toolName: string): ToolContext {
     const toolCtx = new ToolContext();
     toolCtx.set("agent", this.#deps.agent);
@@ -301,17 +224,6 @@ export class ToolExecutor {
     return toolCtx;
   }
 
-  /**
-   * Write a tool result to output, context, and emit the context message hook.
-   * Shared helper used by both error paths and the happy path in executeSingle.
-   *
-   * @param toolName
-   * @param input
-   * @param result
-   * @param toolCallId
-   * @param images — Optional images
-   * @returns { toolName, input, result }
-   */
   async #writeToolResult(
     toolName: string,
     input: string,
@@ -331,9 +243,6 @@ export class ToolExecutor {
   }
 }
 
-/**
- * Create a new ToolExecutor instance.
- */
 export function createToolExecutor(deps: ToolExecutorDeps): ToolExecutor {
   return new ToolExecutor(deps);
 }

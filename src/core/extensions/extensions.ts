@@ -1,4 +1,4 @@
-// Extension loader — discovers, loads, and manages extensions.
+// Extension loader
 
 import fsPromises from "node:fs/promises";
 import path from "node:path";
@@ -15,8 +15,6 @@ import type { CoreConfig } from "../config/schema-loader.ts";
 
 export { HOOKS, EXTENSION_PROVIDES };
 
-// ── Schema Defaults Extraction ─────────────────────────────────────────────
-
 export interface SchemaDefaultEntry {
   key: string;
   description?: string;
@@ -25,9 +23,6 @@ export interface SchemaDefaultEntry {
   layers?: unknown;
 }
 
-/**
- * Extract default values from an extension's configSchema.
- */
 export function extractSchemaDefaults(
   schema: Record<string, unknown> | null | undefined,
 ): SchemaDefaultEntry[] {
@@ -43,7 +38,6 @@ export function extractSchemaDefaults(
         keySchema.properties as Record<string, unknown>,
       )) {
         const prop = propRaw as Record<string, unknown>;
-        // Treat null defaults as "no default" — they represent optional values
         if (prop.default !== undefined && prop.default !== null) {
           (defaults as Record<string, unknown>)[propName] = prop.default;
         }
@@ -66,9 +60,6 @@ export function extractSchemaDefaults(
   return result;
 }
 
-/**
- * Get extension config defaults from extension.json schemas.
- */
 export async function getExtensionConfigDefaults(
   extensionPaths?: string[],
 ): Promise<SchemaDefaultEntry[]> {
@@ -91,8 +82,6 @@ export async function getExtensionConfigDefaults(
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT_DIR = path.resolve(__dirname, "../../");
-
-// ── Extension Discovery ──────────────────────────────────────────────────────
 
 export interface ExtensionMetadata {
   name: string;
@@ -119,9 +108,6 @@ export interface ExtensionMetadata {
   requires: Record<string, unknown[]>;
 }
 
-/**
- * Resolve an extension path spec to an absolute directory path.
- */
 export function resolveExtensionPath(spec: string): string {
   if (spec === "builtins") {
     return path.join(ROOT_DIR, "extensions");
@@ -132,9 +118,6 @@ export function resolveExtensionPath(spec: string): string {
   return path.resolve(process.cwd(), spec);
 }
 
-/**
- * Check if a directory is a valid extension.
- */
 export async function isExtensionDirectory(dirPath: string): Promise<boolean> {
   const metaPath = path.join(dirPath, "extension.json");
   try {
@@ -142,7 +125,6 @@ export async function isExtensionDirectory(dirPath: string): Promise<boolean> {
   } catch {
     return false;
   }
-  // Support both .js and .ts entry points.
   for (const ext of [".js", ".ts"]) {
     const indexPath = path.join(dirPath, `index${ext}`);
     try {
@@ -155,11 +137,6 @@ export async function isExtensionDirectory(dirPath: string): Promise<boolean> {
   return false;
 }
 
-/**
- * Read extension metadata from extension.json file.
- *
- * @private
- */
 async function readExtensionMetadata(
   dirPath: string,
 ): Promise<ExtensionMetadata> {
@@ -280,9 +257,6 @@ export interface DiscoveredExtension extends ExtensionMetadata {
   dirPath: string;
 }
 
-/**
- * Discover extensions in a directory recursively.
- */
 export async function discoverExtensionsInDir(
   dirPath: string,
 ): Promise<DiscoveredExtension[]> {
@@ -331,9 +305,6 @@ export async function discoverExtensionsInDir(
   return extensions;
 }
 
-/**
- * Load order constants for extensions.
- */
 export const LOAD_ORDER = {
   REFRESH: 0,
   CORE_TOOLS: 1,
@@ -341,9 +312,6 @@ export const LOAD_ORDER = {
   DEFAULT: 10,
 } as const;
 
-/**
- * Resolve load order based on extension dependencies using topological sort.
- */
 export function resolveLoadOrder(
   extensions: ExtensionMetadata[],
   serviceOverrides: Record<string, string> = {},
@@ -450,11 +418,6 @@ export function resolveLoadOrder(
   return result;
 }
 
-/**
- * Build a map of abstract service name → provider extension name.
- *
- * @private
- */
 function buildServiceProviderMap(
   extensions: ExtensionMetadata[],
   serviceOverrides: Record<string, string>,
@@ -508,9 +471,6 @@ function buildServiceProviderMap(
   return serviceMap;
 }
 
-/**
- * Discover all extensions from configured extension paths.
- */
 export async function discoverExtensions(
   extensionPaths: string[],
   serviceOverrides: Record<string, string> = {},
@@ -553,9 +513,6 @@ export async function discoverExtensions(
   return resolveLoadOrder(allExtensions, serviceOverrides);
 }
 
-/**
- * Get all extension config schemas as an object keyed by extension name.
- */
 export async function getExtensionConfigSchemas(
   extensionPaths: string[],
 ): Promise<Record<string, Record<string, unknown>>> {
@@ -575,9 +532,6 @@ export async function getExtensionConfigSchemas(
   return schemas;
 }
 
-/**
- * Check if an extension is enabled based on its config.
- */
 export function isExtensionEnabled(
   extName: string,
   config: CoreConfig | null | undefined,
@@ -591,9 +545,6 @@ export function isExtensionEnabled(
   return true;
 }
 
-/**
- * Get the list of extensions to load based on config settings.
- */
 export async function getExtensionsToLoad(
   extensionPaths: string[],
   extensionAutoload: boolean,
@@ -634,9 +585,6 @@ export async function getExtensionsToLoad(
   return [];
 }
 
-/**
- * Resolve extension dependencies.
- */
 export function resolveExtensionDependencies(
   extensions: ExtensionMetadata[],
   allDiscovered: ExtensionMetadata[],
@@ -682,11 +630,6 @@ export function resolveExtensionDependencies(
   return Array.from(result.values());
 }
 
-// ── Metadata Registration ────────────────────────────────────────────────────
-
-/**
- * Discover extensions and register their CLI flags, subcommands, and config params.
- */
 export async function registerExtensionMetadata(
   config: CoreConfig,
   configRegistry: ConfigRegistry,
@@ -730,7 +673,6 @@ export async function registerExtensionMetadata(
           })),
         );
       }
-      // Register full schemas for runtime validation
       for (const [keyName, keySchema] of Object.entries(ext.configSchema)) {
         configRegistry.registerConfigSchema(keyName, keySchema as Record<string, unknown>);
       }
@@ -752,12 +694,6 @@ export async function registerExtensionMetadata(
   return extensionsToLoad;
 }
 
-// ── Extension Loader ─────────────────────────────────────────────────────────
-
-/**
- * Internal core interface that ExtensionLoader expects from the core object.
- * This is a private contract — not exported or used by extensions.
- */
 export interface LoaderCore {
   hooks: HookSystem;
   toolRegistry: ToolRegistry;
@@ -767,9 +703,6 @@ export interface LoaderCore {
   cliSubcommandRegistry: CliSubcommandRegistry;
 }
 
-/**
- * Extension loader — manages the lifecycle of extensions.
- */
 export class ExtensionLoader {
   #core: LoaderCore;
   #extensions: Map<string, unknown>;
@@ -780,9 +713,6 @@ export class ExtensionLoader {
   #configRegistry: ConfigRegistry | null;
   #cliSubcommandRegistry: CliSubcommandRegistry | null;
 
-  /**
-   * @param core - The core object with hooks and toolRegistry.
-   */
   constructor(core: LoaderCore) {
     this.#core = core;
     this.#extensions = new Map();
@@ -965,18 +895,10 @@ export class ExtensionLoader {
   }
 }
 
-/**
- * Create a new ExtensionLoader instance.
- */
 export function createExtensionLoader(core: LoaderCore): ExtensionLoader {
   return new ExtensionLoader(core);
 }
 
-// ── Service Contract Validation ─────────────────────────────────────────────
-
-/**
- * Validate that all required service contracts are satisfied by registered services.
- */
 export function validateServiceContracts(
   loadedExtensions: ExtensionMetadata[],
   serviceRegistry: {

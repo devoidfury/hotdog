@@ -1,14 +1,10 @@
-// Message Bus — owns the agent run loop.
-// Uses an async generator to yield messages, eliminating the manual
-// deferred lifecycle management. Event-driven: enqueue() wakes the
-// generator instead of polling.
+// Message Bus
 
 import { formatError, isExpectedError, LlmError } from "../error.ts";
 import { OUTPUT_EVENT, OutputEvent } from "../context/output.ts";
 import { HOOKS } from "../hooks.ts";
 import { parseCommand, ACTIONS, ParsedCommand, type CommandRegistryLike } from "../commands.ts";
 
-/** Minimal SessionManager interface for message bus usage. */
 export interface MessageBusSessionManager {
   getAgent(): MessageBusAgent | undefined;
 }

@@ -71,46 +71,6 @@
           "reasoning-effort": "max"
         },
         {
-          "name": "qwen3.5-122b-a10b",
-          "context-limit": 262144
-        },
-        {
-          "name": "qwen3.5-4b",
-          "context-limit": 262144
-        },
-        {
-          "name": "qwen3.5-4b:coder",
-          "context-limit": 262144
-        },
-        {
-          "name": "qwen3.5-0.8b",
-          "context-limit": 262144
-        },
-        {
-          "name": "qwen3.6-35b",
-          "context-limit": 160000
-        },
-        {
-          "name": "qwen3.6-35b:general",
-          "context-limit": 160000
-        },
-        {
-          "name": "qwen3.6-35b:instruct",
-          "context-limit": 160000
-        },
-        {
-          "name": "qwen3.6-27b",
-          "context-limit": 160000
-        },
-        {
-          "name": "qwen3.6-27b:instruct",
-          "context-limit": 160000
-        },
-        {
-          "name": "gemma-4-e2b",
-          "context-limit": 128000
-        },
-        {
           "name": "gemma-4-12b",
           "context-limit": 256000
         },
@@ -127,40 +87,16 @@
           "context-limit": 131072
         },
         {
-          "name": "granite-4.1-30b",
-          "context-limit": 131072
-        },
-        {
-          "name": "smollm3-3b",
-          "context-limit": 64000
-        },
-        {
-          "name": "qwen3.5-9b-dsv4f-d",
-          "context-limit": 262144
-        },
-        {
-          "name": "qwen3.5-9b-dsv4f-d:general",
-          "context-limit": 262144
-        },
-        {
-          "name": "qwen3.5-9b-npu",
-          "context-limit": 262144
-        },
-        {
-          "name": "qwopus3.6-27b",
-          "context-limit": 262144
-        },
-        {
-          "name": "step-3.7-flash",
-          "context-limit": 100000
-        },
-        {
-          "name": "mistral-medium-3.5",
-          "context-limit": 80000
+          "name": "lfm2.5-8b-a1b",
+          "context-limit": 128000
         },
         {
           "name": "minimax-m2.7",
           "context-limit": 196608
+        },
+        {
+          "name": "mistral-medium-3.5",
+          "context-limit": 80000
         },
         {
           "name": "north-mini-code-1.0-30b",
@@ -178,21 +114,42 @@
           "name": "ornith-1.0-9b",
           "context-limit": 262144
         },
+
+        {
+          "name": "qwen3.5-122b-a10b",
+          "context-limit": 262144
+        },
+        {
+          "name": "qwen3.5-4b",
+          "context-limit": 262144
+        },
+        {
+          "name": "qwen3.5-4b:coder",
+          "context-limit": 262144
+        },
+        {
+          "name": "qwen3.5-0.8b",
+          "context-limit": 262144
+        },
         {
           "name": "qwen3.6-35b-unc",
           "context-limit": 262144
         },
         {
-          "name": "qwen-coder-next",
+          "name": "qwen3.6-27b",
+          "context-limit": 160000
+        },
+        {
+          "name": "qwen3.6-27b:instruct",
+          "context-limit": 160000
+        },
+        {
+          "name": "qwen3.5-9b-npu",
           "context-limit": 262144
         },
         {
-          "name": "llama-3.1-70b",
-          "context-limit": 131072
-        },
-        {
-          "name": "lfm2.5-8b-a1b",
-          "context-limit": 128000
+          "name": "step-3.7-flash",
+          "context-limit": 100000
         },
         {
           "name": "thinkingcap-27b",

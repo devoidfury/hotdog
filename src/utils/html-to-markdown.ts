@@ -20,14 +20,29 @@ function replaceWith(el: HTMLRewriterTypes.Element, replacement: string): void {
   el.after(replacement);
 }
 
+const HTML_ENTITIES: Record<string, string> = {
+  "&amp;": "&",
+  "&lt;": "<",
+  "&gt;": ">",
+  "&quot;": '"',
+  "&#39;": "'",
+  "&apos;": "'",
+  "&nbsp;": " ",
+  "&#160;": " ",
+  "&hellip;": "…",
+  "&mdash;": "—",
+  "&ndash;": "–",
+  "&laquo;": "«",
+  "&raquo;": "»",
+  "&copy;": "©",
+  "&reg;": "®",
+  "&trade;": "™",
+};
+
 function decodeEntities(text: string): string {
   return text
-    .replace(/&gt;/g, ">")
-    .replace(/&lt;/g, "<")
-    .replace(/&amp;/g, "&")
-    .replace(/&quot;/g, '"')
-    .replace(/&#39;/g, "'")
-    .replace(/&#x27;/g, "'");
+    .replace(/&[a-z]+;|&#\d+;/gi, (m) => HTML_ENTITIES[m] ?? m)
+    .replace(/&#(\d+);/g, (_, n) => String.fromCharCode(parseInt(n, 10)));
 }
 
 /**

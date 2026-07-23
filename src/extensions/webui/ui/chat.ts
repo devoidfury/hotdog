@@ -283,6 +283,13 @@ export function createChat({
         if (data.models && data.models.length > 0) {
           modelsAtom(data.models);
         }
+        // Sync workingAtom with the session's working state from the map.
+        // This handles page reload: if the server already sent the working
+        // state before sessionCreated, the map has it and we restore it here.
+        const createdSid = data.sessionId;
+        if (sessionWorkingMap.has(createdSid)) {
+          workingAtom(sessionWorkingMap.get(createdSid) ?? false);
+        }
         onSessionCreated?.({ sessionId: data.sessionId });
         return;
       case "sessionDeleted":
@@ -305,6 +312,19 @@ export function createChat({
 
     // ── OUTPUT_EVENT mappings — require messageList ──
     if (!messageList) return;
+
+    // Filter: only process content events for the currently active session.
+    // This is a defense-in-depth guard — the server should only send events
+    // for the active session, but if orphaned channels leak events, this
+    // prevents them from corrupting the UI.
+    // Exception: sessionState messages (e.g., working indicators) are
+    // broadcast for all sessions so the sidebar can show them.
+    if (data.type !== "sessionState") {
+      const msgSessionId = (data as { sessionId?: string }).sessionId;
+      if (msgSessionId && msgSessionId !== sessionIdAtom()) {
+        return;
+      }
+    }
 
     switch (data.type) {
       case "userMessage":
@@ -353,11 +373,12 @@ export function createChat({
           const sid = (data as { sessionId?: string }).sessionId;
           if (sid) {
             sessionWorkingMap.set(sid, Boolean(data.value));
-          }
-          // Also update the global workingAtom based on the active session.
-          const activeSid = sessionIdAtom();
-          if (sid === activeSid) {
-            workingAtom(Boolean(data.value));
+            // Update workingAtom if this is the currently active session.
+            // This ensures the cancel button reflects the correct state even
+            // after page reload or session switching.
+            if (sid === sessionIdAtom()) {
+              workingAtom(Boolean(data.value));
+            }
           }
           // Notify so the sidebar can refresh its working indicators
           onWorkingMapChange?.();

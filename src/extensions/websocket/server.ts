@@ -253,8 +253,12 @@ export class SessionRegistry {
 
   /**
    * Remove a WebSocketChannel from a session.
+   * Detaches the channel first to clean up its event subscription.
    */
   removeChannel(sessionId: string, channel: WebSocketChannel): void {
+    // Detach from the session to unsubscribe event handlers
+    channel.detach(sessionId);
+
     const channels = this.#channels.get(sessionId);
     if (!channels) return;
     channels.delete(channel);

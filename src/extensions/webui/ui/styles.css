@@ -622,21 +622,6 @@ body {
     white-space: pre-wrap;
 }
 
-/* Streaming cursor */
-.message.assistant.streaming .content::after {
-    content: "▊";
-    display: inline-block;
-    animation: blink 1s step-end infinite;
-    color: var(--accent);
-    margin-left: 2px;
-}
-
-@keyframes blink {
-    50% {
-        opacity: 0;
-    }
-}
-
 /* ═══════════════════════════════════════════════════════════════════════════
    MARKDOWN RENDERED CONTENT (.md-content)
    ═══════════════════════════════════════════════════════════════════════════ */
@@ -659,12 +644,25 @@ body {
     color: var(--text-primary);
 }
 
-.md-content h1 { font-size: 1.4em; }
-.md-content h2 { font-size: 1.2em; }
-.md-content h3 { font-size: 1.1em; }
-.md-content h4 { font-size: 1em; }
-.md-content h5 { font-size: 0.95em; }
-.md-content h6 { font-size: 0.9em; color: var(--text-secondary); }
+.md-content h1 {
+    font-size: 1.4em;
+}
+.md-content h2 {
+    font-size: 1.2em;
+}
+.md-content h3 {
+    font-size: 1.1em;
+}
+.md-content h4 {
+    font-size: 1em;
+}
+.md-content h5 {
+    font-size: 0.95em;
+}
+.md-content h6 {
+    font-size: 0.9em;
+    color: var(--text-secondary);
+}
 
 /* First child heading shouldn't have top margin */
 .md-content > h1:first-child,

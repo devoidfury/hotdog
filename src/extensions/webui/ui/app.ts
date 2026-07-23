@@ -68,7 +68,6 @@ async function verifyToken(tokenToCheck: string): Promise<boolean> {
 
 /**
  * Clear the log view UI state and restore normal session view.
- * If there's an active session, reload its messages.
  */
 function clearLogView(): void {
   const previousLogId = activeLogId;
@@ -88,13 +87,6 @@ function clearLogView(): void {
   if (chatInput) chatInput.disabled = false;
   // Refresh logs list to remove highlight
   chat?.listLogs();
-  // Reload active session messages if we were viewing a log and have an active session
-  if (previousLogId && chat) {
-    const currentSessionId = chat.sessionIdAtom();
-    if (currentSessionId) {
-      chat.switchSession(currentSessionId);
-    }
-  }
 }
 
 // ── Initialization ───────────────────────────────────────────────────────────
@@ -164,11 +156,16 @@ async function init(): Promise<void> {
   updateSessions = sessionInit.updateSessions;
   updateLogs = sessionInit.updateLogs;
 
-  // Close log view button
+  // Close log view button — exit log view and reload current session's messages
   const closeLogViewBtn = document.getElementById("close-log-view-btn") as HTMLButtonElement | null;
   if (closeLogViewBtn) {
     closeLogViewBtn.addEventListener("click", () => {
       clearLogView();
+      // Reload current session's messages by switching to it (server replays history)
+      const currentSessionId = chat?.sessionIdAtom();
+      if (currentSessionId && chat) {
+        chat.switchSession(currentSessionId);
+      }
     });
   }
 
@@ -209,6 +206,8 @@ function startChat(): void {
       activeLogId = logId;
       // Refresh logs list to highlight the active log
       chat?.listLogs();
+      // Refresh session list so click handlers capture the current activeLogId
+      chat?.listSessions();
       // Show log view indicator
       const logViewLabel = document.getElementById("log-view-label");
       const currentLogId = document.getElementById("current-log-id");

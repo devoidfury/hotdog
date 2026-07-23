@@ -38,21 +38,41 @@ interface SessionsConfig {
   onDeleteLog?: (logId: string) => void;
 }
 
-export type UpdateSessionsFn = (sessions: SessionInfo[], activeSessionId: string | null, workingMap?: Map<string, boolean>, activeLogId?: string | null) => void;
-export type UpdateLogsFn = (logs: LogInfo[], activeLogId: string | null) => void;
+export type UpdateSessionsFn = (
+  sessions: SessionInfo[],
+  activeSessionId: string | null,
+  workingMap?: Map<string, boolean>,
+  activeLogId?: string | null,
+) => void;
+export type UpdateLogsFn = (
+  logs: LogInfo[],
+  activeLogId: string | null,
+) => void;
 
 /**
  * Initialize the session sidebar.
  * @param config - Configuration with create/switch/delete callbacks
  * @returns Object with functions to update the session and log list displays
  */
-export function initSessions({ onCreate, onSwitch, onDelete, onRename, onCancel, onListLogs, onContinueLog, onViewLog, onDeleteLog }: SessionsConfig): {
+export function initSessions({
+  onCreate,
+  onSwitch,
+  onDelete,
+  onRename,
+  onCancel,
+  onListLogs,
+  onContinueLog,
+  onViewLog,
+  onDeleteLog,
+}: SessionsConfig): {
   updateSessions: UpdateSessionsFn;
   updateLogs: UpdateLogsFn;
 } {
   const listEl = document.getElementById("session-list") as HTMLDivElement;
   const logListEl = document.getElementById("log-list") as HTMLDivElement;
-  const newBtn = document.getElementById("new-session-btn") as HTMLButtonElement;
+  const newBtn = document.getElementById(
+    "new-session-btn",
+  ) as HTMLButtonElement;
 
   newBtn.addEventListener("click", () => onCreate());
 
@@ -71,7 +91,11 @@ export function initSessions({ onCreate, onSwitch, onDelete, onRename, onCancel,
     contextSessionProfile = null;
   }
 
-  function showContextMenu(e: MouseEvent, sessionId: string, profile: string): void {
+  function showContextMenu(
+    e: MouseEvent,
+    sessionId: string,
+    profile: string,
+  ): void {
     hideContextMenu();
     contextSessionId = sessionId;
     contextSessionProfile = profile;
@@ -187,7 +211,12 @@ export function initSessions({ onCreate, onSwitch, onDelete, onRename, onCancel,
    * @param workingMap - Optional per-session working state map
    * @param activeLogId - Currently viewed log ID (if in log view mode)
    */
-  function updateSessions(sessions: SessionInfo[], activeSessionId: string | null, workingMap?: Map<string, boolean>, activeLogId?: string | null): void {
+  function updateSessions(
+    sessions: SessionInfo[],
+    activeSessionId: string | null,
+    workingMap?: Map<string, boolean>,
+    activeLogId?: string | null,
+  ): void {
     listEl.innerHTML = "";
 
     for (const s of sessions) {
@@ -200,9 +229,10 @@ export function initSessions({ onCreate, onSwitch, onDelete, onRename, onCancel,
       const profileDisplay = getProfileDisplay(s.profile);
       const modelDisplay = s.model ? sanitize(s.model) : "?";
       const timeDisplay = formatTime(s.createdAt);
-      const clientInfo = s.connectedClients > 0
-        ? ` · ${s.connectedClients} client${s.connectedClients > 1 ? "s" : ""}`
-        : "";
+      const clientInfo =
+        s.connectedClients > 0
+          ? ` · ${s.connectedClients} client${s.connectedClients > 1 ? "s" : ""}`
+          : "";
 
       // Check if this session's agent is currently working
       const isWorking = workingMap?.get(s.id) ?? false;
@@ -241,13 +271,15 @@ export function initSessions({ onCreate, onSwitch, onDelete, onRename, onCancel,
 
     // Wire up cancel buttons for working sessions
     if (onCancel) {
-      listEl.querySelectorAll<HTMLButtonElement>(".session-cancel-btn").forEach((btn) => {
-        btn.addEventListener("click", (e: Event) => {
-          e.stopPropagation();
-          const sid = (e.target as HTMLButtonElement).dataset.sessionId;
-          if (sid) onCancel(sid);
+      listEl
+        .querySelectorAll<HTMLButtonElement>(".session-cancel-btn")
+        .forEach((btn) => {
+          btn.addEventListener("click", (e: Event) => {
+            e.stopPropagation();
+            const sid = (e.target as HTMLButtonElement).dataset.sessionId;
+            if (sid) onCancel(sid);
+          });
         });
-      });
     }
   }
 
@@ -263,7 +295,8 @@ export function initSessions({ onCreate, onSwitch, onDelete, onRename, onCancel,
       const emptyEl = document.createElement("div");
       emptyEl.className = "log-empty";
       emptyEl.textContent = "No recent logs";
-      emptyEl.style.cssText = "padding: 10px; font-size: 0.75rem; color: var(--text-muted); text-align: center;";
+      emptyEl.style.cssText =
+        "padding: 10px; font-size: 0.75rem; color: var(--text-muted); text-align: center;";
       logListEl.appendChild(emptyEl);
       return;
     }
@@ -277,7 +310,10 @@ export function initSessions({ onCreate, onSwitch, onDelete, onRename, onCancel,
 
       const idDisplay = shortId(log.id);
       const timeDisplay = formatTime(log.lastActivityAt);
-      const msgCount = log.messageCount > 0 ? `${log.messageCount} msg${log.messageCount > 1 ? "s" : ""}` : "empty";
+      const msgCount =
+        log.messageCount > 0
+          ? `${log.messageCount} msg${log.messageCount > 1 ? "s" : ""}`
+          : "empty";
 
       item.innerHTML = `
         <div class="log-name">${idDisplay}</div>
@@ -306,7 +342,8 @@ export function initSessions({ onCreate, onSwitch, onDelete, onRename, onCancel,
 
       // Wire up the Continue button
       if (onContinueLog) {
-        const continueBtn = item.querySelector<HTMLButtonElement>(".log-continue-btn");
+        const continueBtn =
+          item.querySelector<HTMLButtonElement>(".log-continue-btn");
         if (continueBtn) {
           continueBtn.addEventListener("click", (e: Event) => {
             e.stopPropagation();

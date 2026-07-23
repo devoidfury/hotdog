@@ -1,6 +1,6 @@
 // Tool registry — holds all available tools.
 
-import { validateParams, formatValidationErrors } from "../../utils/json-schema.js";
+import { validateParams, formatValidationErrors } from "../../utils/json-schema.ts";
 import { logger } from "../logger.ts";
 
 export interface ToolDef {

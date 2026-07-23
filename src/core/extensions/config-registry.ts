@@ -1,7 +1,7 @@
 // Config Registry — manages extension-registered CLI flags and config params.
 
 import { ConfigError } from "../error.ts";
-import { validate } from "../../utils/json-schema.js";
+import { validate } from "../../utils/json-schema.ts";
 
 export interface CliFlagDef {
   short?: string;

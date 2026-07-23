@@ -21,7 +21,7 @@ export {
   validate,
   validateParams,
   formatValidationErrors,
-} from "../../utils/json-schema.js";
+} from "../../utils/json-schema.ts";
 
 // Import specific items we need locally
 import {

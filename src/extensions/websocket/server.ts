@@ -589,6 +589,14 @@ function routeMessage(ws: WebSocket, msg: C2SMessage, registry: SessionRegistry,
           }));
           // Replay session history
           replaySessionHistory(msg.sessionId as string, session.agent, ws);
+          // Send current working state
+          const isRunning = registry.getSessionManager().isSessionRunning(msg.sessionId as string);
+          ws.send(JSON.stringify({
+            type: S2C.SESSION_STATE,
+            sessionId: msg.sessionId,
+            key: "working",
+            value: isRunning,
+          }));
         }
       }
       break;
@@ -755,6 +763,15 @@ function attachToMostRecentSession(ws: WebSocket, registry: SessionRegistry): vo
 
   // Replay session history
   replaySessionHistory(sessionId, session.agent, ws);
+
+  // Send current working state so the UI restores the cancel button if agent is running
+  const isRunning = registry.getSessionManager().isSessionRunning(sessionId);
+  ws.send(JSON.stringify({
+    type: S2C.SESSION_STATE,
+    sessionId,
+    key: "working",
+    value: isRunning,
+  }));
 }
 
 function createAndAttachSession(ws: WebSocket, registry: SessionRegistry): void {

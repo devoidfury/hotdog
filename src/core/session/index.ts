@@ -490,6 +490,16 @@ export class SessionManager {
     };
   }
 
+  /**
+   * Check if a session's agent is currently running (processing a message).
+   * @param sessionId — Session ID
+   * @returns true if the session is actively processing, false otherwise
+   */
+  isSessionRunning(sessionId: string): boolean {
+    const entry = this.#sessions.get(sessionId);
+    return entry?.bus.isRunning ?? false;
+  }
+
   // ── Serialization ─────────────────────────────────────────────────────────
 
   /**

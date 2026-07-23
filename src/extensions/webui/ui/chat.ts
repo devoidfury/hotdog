@@ -37,6 +37,29 @@ interface SessionsMessage {
   sessions: unknown[];
 }
 
+interface LogsListedMessage {
+  type: "logsListed";
+  logs: Array<{ id: string; createdAt: number; lastActivityAt: number; messageCount: number }>;
+}
+
+interface LogViewedMessage {
+  type: "logViewed";
+  logId: string;
+  entries: Array<{
+    source: string;
+    content: string;
+    images?: unknown[];
+    reasoning_content?: string | null;
+    tool_calls?: unknown[] | null;
+    tool_call_id?: string | null;
+  }>;
+}
+
+interface LogDeletedMessage {
+  type: "logDeleted";
+  logId: string;
+}
+
 interface AuthRequiredMessage {
   type: "authRequired";
 }
@@ -135,6 +158,9 @@ type ServerMessage =
   | SessionCreatedMessage
   | SessionDeletedMessage
   | SessionsMessage
+  | LogsListedMessage
+  | LogViewedMessage
+  | LogDeletedMessage
   | AuthRequiredMessage
   | AuthErrorMessage
   | UserMessage
@@ -160,6 +186,9 @@ interface ChatConfig {
   host?: string;
   onSessionCreated?: (data: { sessionId: string }) => void;
   onSessionsUpdate?: (sessions: SessionInfo[], activeSessionId: string | null) => void;
+  onLogsUpdate?: (logs: Array<{ id: string; createdAt: number; lastActivityAt: number; messageCount: number }>) => void;
+  onLogViewed?: (logId: string, entries: Array<{ source: string; content: string; images?: unknown[]; reasoning_content?: string | null; tool_calls?: unknown[] | null; tool_call_id?: string | null }>) => void;
+  onLogDeleted?: (logId: string) => void;
   onConnectionChange?: (connected: boolean) => void;
   onAuthFailure?: () => void;
   onWorkingMapChange?: () => void;
@@ -176,6 +205,14 @@ export interface ChatController {
   deleteSession: (sessionId: string) => void;
   renameSession: (sessionId: string, newName: string) => void;
   listSessions: () => void;
+  /** List cold session logs from disk */
+  listLogs: () => void;
+  /** Load a cold session log into a new active session */
+  loadLog: (logId: string) => void;
+  /** View a cold session log without creating an active session */
+  viewLog: (logId: string) => void;
+  /** Delete a cold session log file */
+  deleteLog: (logId: string) => void;
   sendCommand: (command: string) => void;
   sendQuestionAnswer: (answers: unknown) => void;
   setSession: (sessionId: string) => void;
@@ -189,6 +226,8 @@ export interface ChatController {
   workingAtom: Atom<boolean>;
   /** Per-session working state map — sessionId → isWorking */
   sessionWorkingMap: Map<string, boolean>;
+  /** Accessor for the current message list manager */
+  messageListAtom: () => MessageListManager | null;
 }
 
 /**
@@ -201,6 +240,9 @@ export function createChat({
   host = window.location.host,
   onSessionCreated,
   onSessionsUpdate,
+  onLogsUpdate,
+  onLogViewed,
+  onLogDeleted,
   onConnectionChange,
   onAuthFailure,
   onWorkingMapChange,
@@ -301,6 +343,15 @@ export function createChat({
         return;
       case "sessions":
         onSessionsUpdate?.(data.sessions as SessionInfo[], sessionIdAtom());
+        return;
+      case "logsListed":
+        onLogsUpdate?.(data.logs);
+        return;
+      case "logViewed":
+        onLogViewed?.(data.logId, data.entries);
+        return;
+      case "logDeleted":
+        onLogDeleted?.(data.logId);
         return;
       case "authRequired":
         console.warn("[chat] Auth required but not provided");
@@ -422,6 +473,8 @@ export function createChat({
 
     ws.onopen = () => {
       connectedAtom(true);
+      // Request logs list on initial connect and after reconnects
+      listLogs();
     };
 
     ws.onmessage = (event: MessageEvent) => {
@@ -637,6 +690,24 @@ export function createChat({
   // Connect
   connect();
 
+  // ── Cold session log management ───────────────────────────────────────────
+
+  function listLogs(): void {
+    send({ type: "listLogs" });
+  }
+
+  function loadLog(logId: string): void {
+    send({ type: "loadLog", logId });
+  }
+
+  function viewLog(logId: string): void {
+    send({ type: "viewLog", logId });
+  }
+
+  function deleteLog(logId: string): void {
+    send({ type: "deleteLog", logId });
+  }
+
   return {
     connect,
     disconnect,
@@ -648,6 +719,10 @@ export function createChat({
     deleteSession,
     renameSession,
     listSessions,
+    listLogs,
+    loadLog,
+    viewLog,
+    deleteLog,
     sendCommand,
     sendQuestionAnswer,
     setSession,
@@ -660,5 +735,7 @@ export function createChat({
     connectedAtom,
     workingAtom,
     sessionWorkingMap,
+    // Expose messageList for external manipulation (e.g., rendering log entries)
+    messageListAtom: () => messageList,
   };
 }

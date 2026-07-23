@@ -32,6 +32,14 @@
         <div id="session-list">
           <!-- Populated by sessions.js -->
         </div>
+
+        <!-- Recent Logs section -->
+        <div class="sidebar-header sidebar-header-secondary">
+          <h2>Recent Logs</h2>
+        </div>
+        <div id="log-list">
+          <!-- Populated by sessions.js -->
+        </div>
       </aside>
 
       <!-- Chat area -->
@@ -39,6 +47,7 @@
         <!-- Session info bar -->
         <div id="session-info">
           <span id="session-label">Session: <span id="current-session-id"></span></span>
+          <span id="log-view-label" class="hidden">Viewing log: <span id="current-log-id"></span> <button id="close-log-view-btn" title="Close log view">✕</button></span>
           <label id="model-selector">
             Model: <select id="model-select"></select>
           </label>

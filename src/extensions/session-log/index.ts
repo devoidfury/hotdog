@@ -10,17 +10,20 @@ import { parseAs } from "../../utils/json-schema.ts";
 import { CoreContext, ExtensionInstance } from "../../core/extensions/types.ts";
 import type { Message as CoreMessage } from "../../core/context/message.ts";
 
-// ── Log Source Types ────────────────────────────────────────────────────────
+// Re-export core session log functions
+export {
+  LOG_SOURCE,
+  readSessionEntries,
+  readAllSessions,
+  sessionExists,
+  sessionPath,
+  sessionsDir,
+  listSessionLogs,
+  replayEntriesIntoContext,
+} from "./session-log.ts";
 
-export const LOG_SOURCE = {
-  SYSTEM_PROMPT: "system_prompt",
-  INPUT: "input",
-  LLM: "llm",
-  TOOL_RESULT: "tool_result",
-  RESET: "reset",
-  COMPACTION: "compaction",
-  PROMPT: "prompt",
-} as const;
+// Import LOG_SOURCE for internal use (re-exported above)
+import { LOG_SOURCE } from "./session-log.ts";
 
 interface SessionLogMessage {
   sessionId?: string;
@@ -216,28 +219,6 @@ export async function create(_core: CoreContext): Promise<ExtensionInstance> {
       return join(cacheDir, `${lastSessionId}.jsonl`);
     },
   };
-}
-
-/**
- * Read session entries from a specific session by ID.
- * Used by subcommands to review sessions.
- */
-export async function readSessionEntries(
-  sessionId: string,
-): Promise<Record<string, unknown>[]> {
-  const cacheDir = join(homedir(), ".cache", "hotdog", "sessions");
-  const filePath = join(cacheDir, `${sessionId}.jsonl`);
-  try {
-    await access(filePath);
-  } catch {
-    return [];
-  }
-
-  const content = await readFile(filePath, "utf-8");
-  return content
-    .split("\n")
-    .filter(Boolean)
-    .map((line: string) => JSON.parse(line));
 }
 
 /**

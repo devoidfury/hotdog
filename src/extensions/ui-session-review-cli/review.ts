@@ -7,8 +7,7 @@
 //
 // Disabled by default; enable via profile whitelist.
 
-import { readSessionEntries } from '../../core/session/session-log.ts';
-import { homedir } from 'node:os';
+import { readSessionEntries, sessionsDir } from '../../core/session/session-log.ts';
 import { join } from 'node:path';
 import { readdir, access, stat } from 'node:fs/promises';
 import { ToolResult, defaultCallDisplay } from '../../core/extensions/tool-utils.ts';
@@ -41,14 +40,6 @@ interface ParsedArgs {
 function truncateContent(content: string, maxLength: number): string {
   if (content.length <= maxLength) return content;
   return content.slice(0, maxLength) + '\u2026';
-}
-
-/**
- * Get the sessions directory path.
- */
-function sessionsDir(): string {
-  const home = homedir();
-  return join(home, '.cache', 'hotdog', 'sessions');
 }
 
 /**

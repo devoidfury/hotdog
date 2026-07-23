@@ -12,6 +12,9 @@ import {
   readSessionEntries,
   readAllSessions,
   sessionExists,
+  sessionPath,
+  sessionsDir,
+  listSessionLogs,
   replayEntriesIntoContext,
 } from "../../core/session/session-log.ts";
 import { stripNulls } from "../../utils/objects.ts";
@@ -22,6 +25,9 @@ export {
   readSessionEntries,
   readAllSessions,
   sessionExists,
+  sessionPath,
+  sessionsDir,
+  listSessionLogs,
   replayEntriesIntoContext,
 };
 
@@ -192,21 +198,6 @@ export function createPromptEntry(
 }
 
 // ── Session Log Writer ──────────────────────────────────────────────────────
-
-/**
- * Get the sessions directory path.
- */
-function sessionsDir(): string {
-  const home = homedir();
-  return join(home, ".cache", "hotdog", "sessions");
-}
-
-/**
- * Get the session file path for a given session ID.
- */
-function sessionPath(sessionId: string): string {
-  return join(sessionsDir(), `${sessionId}.jsonl`);
-}
 
 /**
  * Session log writer. Append-only, never truncates.

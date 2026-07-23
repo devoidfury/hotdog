@@ -2,17 +2,16 @@
 // Provides createWsServer() factory and SessionRegistry class.
 
 import crypto from "node:crypto";
-import { OUTPUT_EVENT } from "../../core/context/output.ts";
 import { HOOKS } from "../../core/hooks.ts";
 import { SessionManager } from "../../core/session/index.ts";
 import { WebSocketChannel } from "./websocket-channel.ts";
 import { C2S, S2C, C2SMessage } from "./protocol.ts";
-import { logger } from "../../core/logger.ts";
 import { LlmClient, type ProviderConfig } from "../../core/llm-client/client.ts";
 import { MarkerMangler } from "../../core/marker-mangler.ts";
 import type { CoreContext } from "../../core/extensions/types.ts";
 import type { AuthMiddleware } from "./auth.ts";
 import { Agent } from "../../core/agent.ts";
+import { readSessionEntries, replayEntriesIntoContext, listSessionLogs, deleteSessionLog } from "../../core/session/session-log.ts";
 
 // ── Types ───────────────────────────────────────────────────────────────────
 
@@ -336,6 +335,31 @@ export class SessionRegistry {
   _test_cleanupIdleSessions(): void { this.#cleanupIdleSessions(); }
 }
 
+// ── Cold Session Log Helpers ────────────────────────────────────────────────
+
+/**
+ * Load a session log into a new session.
+ * Creates a new session and replays the log entries into its context.
+ */
+async function loadLogIntoNewSession(
+  logId: string,
+  registry: SessionRegistry,
+): Promise<{ sessionId: string; agent: unknown }> {
+  const entries = await readSessionEntries(logId);
+  if (entries.length === 0) {
+    throw new Error(`No entries found for session ${logId}`);
+  }
+
+  // Create a new session
+  const newSession = await registry.create({});
+  const agent = newSession.agent as Agent;
+
+  // Replay the log entries into the new agent's context
+  replayEntriesIntoContext(agent, entries);
+
+  return { sessionId: newSession.sessionId, agent };
+}
+
 // ── Session History Replay ──────────────────────────────────────────────────
 
 interface Message {
@@ -604,6 +628,79 @@ function routeMessage(ws: WebSocket, msg: C2SMessage, registry: SessionRegistry,
           cmdText = cmdText.slice(1).trim().toLowerCase();
         }
         sessionManager.executeCommand(msg.sessionId as string, cmdText);
+      }
+      break;
+    }
+
+    case C2S.LIST_LOGS: {
+      listSessionLogs().then((logs) => {
+        // Filter out sessions that are currently active in the registry
+        const activeIds = new Set(registry.list().map((s) => s.id));
+        const coldLogs = logs.filter((log) => !activeIds.has(log.id));
+        ws.send(JSON.stringify({ type: S2C.LOGS_LISTED, logs: coldLogs }));
+      }).catch((err: unknown) => {
+        ws.send(JSON.stringify({ type: "error", message: (err as Error).message }));
+      });
+      break;
+    }
+
+    case C2S.LOAD_LOG: {
+      if (msg.logId) {
+        // Detach from old session first
+        const typedWs = ws as WebSocket & { activeSessionId?: string; activeChannel?: WebSocketChannel };
+        if (typedWs.activeSessionId && typedWs.activeChannel) {
+          registry.removeChannel(typedWs.activeSessionId, typedWs.activeChannel);
+        }
+
+        loadLogIntoNewSession(msg.logId as string, registry).then(({ sessionId, agent }) => {
+          // Create WebSocketChannel for the new session
+          const channel = registry.createChannel(sessionId, ws);
+          typedWs.activeSessionId = sessionId;
+          typedWs.activeChannel = channel;
+
+          const sessionCreatedMsg = {
+            type: "sessionCreated",
+            sessionId,
+            profile: (agent as Agent)?.profileName || "default",
+            currentModel: (agent as Agent)?.model,
+            models: Object.keys((agent as Agent)?.modelRegistry || {}),
+          };
+          ws.send(JSON.stringify(sessionCreatedMsg));
+          registry.broadcast(sessionCreatedMsg);
+
+          // Replay the session history to the client
+          replaySessionHistory(sessionId, agent, ws);
+        }).catch((err: unknown) => {
+          ws.send(JSON.stringify({ type: "error", message: (err as Error).message }));
+        });
+      }
+      break;
+    }
+
+    case C2S.VIEW_LOG: {
+      if (msg.logId) {
+        readSessionEntries(msg.logId as string).then((entries) => {
+          // Send entries for read-only viewing without creating a session
+          ws.send(JSON.stringify({ type: S2C.LOG_VIEWED, logId: msg.logId, entries }));
+        }).catch((err: unknown) => {
+          ws.send(JSON.stringify({ type: "error", message: (err as Error).message }));
+        });
+      }
+      break;
+    }
+
+    case C2S.DELETE_LOG: {
+      if (msg.logId) {
+        deleteSessionLog(msg.logId as string).then((deleted) => {
+          if (deleted) {
+            ws.send(JSON.stringify({ type: "logDeleted", logId: msg.logId }));
+            registry.broadcast({ type: "logDeleted", logId: msg.logId });
+          } else {
+            ws.send(JSON.stringify({ type: "error", message: `Log ${msg.logId} not found` }));
+          }
+        }).catch((err: unknown) => {
+          ws.send(JSON.stringify({ type: "error", message: (err as Error).message }));
+        });
       }
       break;
     }

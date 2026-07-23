@@ -15,6 +15,11 @@ export const C2S = {
   CANCEL: "cancel",
   QUESTION_ANSWER: "questionAnswer",
   COMMAND: "command",
+  // Cold session log management
+  LIST_LOGS: "listLogs",
+  LOAD_LOG: "loadLog",
+  VIEW_LOG: "viewLog",
+  DELETE_LOG: "deleteLog",
 } as const;
 
 // ── Server → Client ─────────────────────────────────────────────────────────
@@ -26,6 +31,10 @@ export const S2C = {
   SESSIONS: "sessions",
   AUTH_REQUIRED: "authRequired",
   AUTH_ERROR: "authError",
+
+  // Cold session log management
+  LOGS_LISTED: "logsListed",
+  LOG_VIEWED: "logViewed",
 
   // OUTPUT_EVENT mappings
   USER_MESSAGE: "userMessage",

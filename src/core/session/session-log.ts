@@ -4,7 +4,7 @@
 
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { readFile, access, readdir } from "node:fs/promises";
+import { readFile, access, readdir, stat, unlink } from "node:fs/promises";
 import { Message, type ImageAttachment as MessageImageAttachment } from "../context/message.ts";
 import { logger } from "../logger.ts";
 
@@ -36,7 +36,7 @@ export interface LogEntry {
 /**
  * Get the sessions directory path.
  */
-function sessionsDir(): string {
+export function sessionsDir(): string {
   const home = homedir();
   return join(home, ".cache", "hotdog", "sessions");
 }
@@ -44,7 +44,7 @@ function sessionsDir(): string {
 /**
  * Get the session file path for a given session ID.
  */
-function sessionPath(sessionId: string): string {
+export function sessionPath(sessionId: string): string {
   return join(sessionsDir(), `${sessionId}.jsonl`);
 }
 
@@ -135,6 +135,98 @@ export async function sessionExists(sessionId: string): Promise<boolean> {
     await access(sessionPath(sessionId));
     return true;
   } catch {
+    return false;
+  }
+}
+
+export interface SessionLogInfo {
+  id: string;
+  createdAt: number;
+  lastActivityAt: number;
+  messageCount: number;
+}
+
+/**
+ * List all session log files with metadata.
+ * Returns sessions sorted by last activity (most recent first).
+ * Only includes sessions with at least one non-system/non-reset entry.
+ */
+export async function listSessionLogs(): Promise<SessionLogInfo[]> {
+  const dir = sessionsDir();
+  try {
+    await access(dir);
+  } catch {
+    return [];
+  }
+
+  const files = (await readdir(dir)).filter((f) => f.endsWith(".jsonl"));
+  const results: Array<SessionLogInfo & { mtime: number }> = [];
+
+  for (const file of files) {
+    const sessionId = file.replace(".jsonl", "");
+    const filePath = join(dir, file);
+    try {
+      const metadata = await stat(filePath);
+      const content = await readFile(filePath, "utf-8");
+      const lines = content.split("\n").filter(Boolean);
+      if (lines.length === 0) continue;
+
+      let createdAt = 0;
+      let lastActivityAt = 0;
+      let messageCount = 0;
+
+      for (const line of lines) {
+        try {
+          const entry = JSON.parse(line) as Record<string, unknown> & LogEntry;
+          const ts = (entry.ts as string) ? new Date(entry.ts as string).getTime() : 0;
+          if (ts > 0) {
+            if (createdAt === 0 || ts < createdAt) createdAt = ts;
+            if (ts > lastActivityAt) lastActivityAt = ts;
+          }
+          // Count non-system, non-reset entries
+          if (entry.source && entry.source !== LOG_SOURCE.SYSTEM_PROMPT && entry.source !== LOG_SOURCE.RESET) {
+            messageCount++;
+          }
+        } catch {
+          // Skip malformed lines
+        }
+      }
+
+      if (messageCount > 0) {
+        results.push({
+          id: sessionId,
+          createdAt: createdAt || metadata.mtime.getTime(),
+          lastActivityAt: lastActivityAt || metadata.mtime.getTime(),
+          messageCount,
+          mtime: metadata.mtime.getTime(),
+        });
+      }
+    } catch {
+      // Skip unreadable files
+    }
+  }
+
+  // Sort by last activity, most recent first
+  results.sort((a, b) => b.lastActivityAt - a.lastActivityAt);
+  return results.map(({ mtime, ...rest }) => rest);
+}
+
+/**
+ * Delete a session log file from disk.
+ * @param sessionId - Session ID whose log file to delete
+ * @returns True if the file was deleted, false if it didn't exist
+ */
+export async function deleteSessionLog(sessionId: string): Promise<boolean> {
+  const path = sessionPath(sessionId);
+  try {
+    await unlink(path);
+    return true;
+  } catch (err: unknown) {
+    const error = err as NodeJS.ErrnoException;
+    if (error.code === "ENOENT") {
+      return false;
+    }
+    logger.warn(`[session-log] failed to delete session log ${sessionId}: ${error.message}`);
     return false;
   }
 }

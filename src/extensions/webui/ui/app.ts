@@ -4,13 +4,15 @@
 
 import { initLogin } from "./login.ts";
 import { createChat, ChatController } from "./chat.ts";
-import { initSessions, UpdateSessionsFn } from "./sessions.ts";
+import { initSessions, UpdateSessionsFn, UpdateLogsFn } from "./sessions.ts";
 
 // ── State ───────────────────────────────────────────────────────────────────
 
 let token: string | null = null;
 let chat: ChatController | null = null;
 let updateSessions: UpdateSessionsFn | null = null;
+let updateLogs: UpdateLogsFn | null = null;
+let activeLogId: string | null = null;
 
 // ── Screen Navigation ───────────────────────────────────────────────────────
 
@@ -62,6 +64,39 @@ async function verifyToken(tokenToCheck: string): Promise<boolean> {
   }
 }
 
+// ── Log View Helpers ─────────────────────────────────────────────────────────
+
+/**
+ * Clear the log view UI state and restore normal session view.
+ * If there's an active session, reload its messages.
+ */
+function clearLogView(): void {
+  const previousLogId = activeLogId;
+  activeLogId = null;
+  const logViewLabel = document.getElementById("log-view-label");
+  const sessionLabel = document.getElementById("session-label");
+  const modelSelector = document.getElementById("model-selector");
+  const inputArea = document.getElementById("input-area");
+  const chatInput = document.getElementById("chat-input") as HTMLInputElement | null;
+  // Hide log view indicator
+  if (logViewLabel) logViewLabel.classList.add("hidden");
+  // Restore session label and model selector
+  if (sessionLabel) sessionLabel.style.opacity = "";
+  if (modelSelector) modelSelector.style.opacity = "";
+  // Re-enable input area
+  if (inputArea) inputArea.classList.remove("read-only");
+  if (chatInput) chatInput.disabled = false;
+  // Refresh logs list to remove highlight
+  chat?.listLogs();
+  // Reload active session messages if we were viewing a log and have an active session
+  if (previousLogId && chat) {
+    const currentSessionId = chat.sessionIdAtom();
+    if (currentSessionId) {
+      chat.switchSession(currentSessionId);
+    }
+  }
+}
+
 // ── Initialization ───────────────────────────────────────────────────────────
 
 async function init(): Promise<void> {
@@ -90,8 +125,8 @@ async function init(): Promise<void> {
     },
   });
 
-  // Session sidebar — initSessions returns the update function
-  updateSessions = initSessions({
+  // Session sidebar — initSessions returns both update functions
+  const sessionInit = initSessions({
     onCreate: () => {
       chat!.createSession({});
     },
@@ -113,7 +148,29 @@ async function init(): Promise<void> {
         chat!.workingAtom(false);
       }
     },
+    onListLogs: () => {
+      chat?.listLogs();
+    },
+    onContinueLog: (logId: string) => {
+      chat!.loadLog(logId);
+    },
+    onViewLog: (logId: string) => {
+      chat!.viewLog(logId);
+    },
+    onDeleteLog: (logId: string) => {
+      chat!.deleteLog(logId);
+    },
   });
+  updateSessions = sessionInit.updateSessions;
+  updateLogs = sessionInit.updateLogs;
+
+  // Close log view button
+  const closeLogViewBtn = document.getElementById("close-log-view-btn") as HTMLButtonElement | null;
+  if (closeLogViewBtn) {
+    closeLogViewBtn.addEventListener("click", () => {
+      clearLogView();
+    });
+  }
 
   // Logout button (via keyboard shortcut)
   document.addEventListener("keydown", (e: KeyboardEvent) => {
@@ -131,11 +188,57 @@ function startChat(): void {
     onSessionCreated: ({ sessionId }) => {
       chat!.setSession(sessionId);
       chat!.listSessions(); // Refresh sidebar
+      // Clear any active log view when switching to a new session
+      clearLogView();
     },
     onSessionsUpdate: (sessions, activeSessionId) => {
       if (updateSessions) {
-        updateSessions(sessions, activeSessionId, chat!.sessionWorkingMap);
+        updateSessions(sessions, activeSessionId, chat!.sessionWorkingMap, activeLogId);
       }
+      // Clear active log view when switching sessions
+      if (activeSessionId && activeLogId) {
+        clearLogView();
+      }
+    },
+    onLogsUpdate: (logs) => {
+      if (updateLogs) {
+        updateLogs(logs, activeLogId);
+      }
+    },
+    onLogViewed: (logId, entries) => {
+      activeLogId = logId;
+      // Refresh logs list to highlight the active log
+      chat?.listLogs();
+      // Show log view indicator
+      const logViewLabel = document.getElementById("log-view-label");
+      const currentLogId = document.getElementById("current-log-id");
+      const sessionLabel = document.getElementById("session-label");
+      const modelSelector = document.getElementById("model-selector");
+      const inputArea = document.getElementById("input-area");
+      const chatInput = document.getElementById("chat-input") as HTMLInputElement | null;
+      if (logViewLabel && currentLogId) {
+        logViewLabel.classList.remove("hidden");
+        currentLogId.textContent = logId.slice(0, 8);
+      }
+      // Dim session label and model selector
+      if (sessionLabel) sessionLabel.style.opacity = "0.5";
+      if (modelSelector) modelSelector.style.opacity = "0.5";
+      // Disable input area
+      if (inputArea) inputArea.classList.add("read-only");
+      if (chatInput) chatInput.disabled = true;
+      // Render entries in the message area
+      const messageList = chat?.messageListAtom();
+      if (messageList) {
+        messageList.clear();
+        messageList.renderLogEntries(entries);
+      }
+    },
+    onLogDeleted: (logId) => {
+      if (activeLogId === logId) {
+        clearLogView();
+      }
+      // Refresh the logs list
+      chat?.listLogs();
     },
     onConnectionChange: (_connected) => {
       // Connection recovery is handled by chat.js internally

@@ -55,6 +55,18 @@ interface ToolResultMessage { name: string; output?: string; error?: string; }
 interface CompactingMessage { message: string; }
 interface CommandResultMessage { content: string; }
 
+/**
+ * Session log entry as returned by the server's logViewed message.
+ */
+interface LogEntry {
+  source: string;
+  content: string;
+  images?: unknown[];
+  reasoning_content?: string | null;
+  tool_calls?: unknown[] | null;
+  tool_call_id?: string | null;
+}
+
 interface QuestionOption {
   message?: string;
   prompt?: string;
@@ -101,6 +113,8 @@ export interface MessageListManager {
   handleError: (data: ErrorMessage) => void;
   finalizeAssistant: () => void;
   clear: () => void;
+  /** Render a batch of session log entries (for viewing cold session logs). */
+  renderLogEntries: (entries: LogEntry[]) => void;
 }
 
 /**
@@ -574,6 +588,73 @@ export function createMessageList(
     thinkingBlockCount = 0;
   }
 
+  /**
+   * Extract a tool name from a tool_result log entry's content.
+   * Best-effort: tries JSON "name" field, then text pattern "tool_name: ...".
+   */
+  function extractToolNameFromEntry(content: string): string {
+    // Try JSON
+    try {
+      const parsed = JSON.parse(content);
+      if (parsed && typeof parsed === "object" && "name" in parsed) {
+        return String(parsed.name);
+      }
+    } catch {
+      // Not JSON
+    }
+    // Try text pattern like "tool_name: ..."
+    const match = content.match(/^(\w+):\s/);
+    if (match) return match[1];
+    return "tool";
+  }
+
+  /**
+   * Render a batch of session log entries into the message list.
+   * Used for viewing cold session logs in read-only mode.
+   */
+  function renderLogEntries(entries: LogEntry[]): void {
+    for (const entry of entries) {
+      switch (entry.source) {
+        case "input":
+        case "prompt":
+          handleUserMessage({ content: entry.content });
+          break;
+        case "llm": {
+          // Render reasoning/thinking content first (if any)
+          if (entry.reasoning_content?.trim()) {
+            handleThinking({ content: entry.reasoning_content });
+          }
+          // Render tool calls next (if any), then the assistant message
+          if (entry.tool_calls && Array.isArray(entry.tool_calls) && entry.tool_calls.length > 0) {
+            for (const tc of entry.tool_calls) {
+              const toolCall = tc as { name?: string; arguments?: string | object; args?: string | object };
+              const name = toolCall.name || "unknown";
+              const args = typeof toolCall.arguments === "string"
+                ? toolCall.arguments
+                : typeof toolCall.args === "string"
+                  ? toolCall.args
+                  : JSON.stringify(toolCall.arguments ?? toolCall.args ?? {}, null, 2);
+              handleToolCall({ name, args });
+            }
+          }
+          // Only render assistant message if there's content
+          if (entry.content?.trim()) {
+            handleAssistantMessage({ content: entry.content });
+          }
+          break;
+        }
+        case "tool_result":
+          handleToolResult({ name: extractToolNameFromEntry(entry.content || ""), output: entry.content });
+          break;
+        case "compaction":
+          handleCompacting({ message: entry.content });
+          break;
+      }
+    }
+    // Scroll to bottom after rendering all entries
+    scrollBottom();
+  }
+
   return {
     handleUserMessage,
     handleAssistantMessage,
@@ -592,5 +673,6 @@ export function createMessageList(
     handleError,
     finalizeAssistant,
     clear,
+    renderLogEntries,
   };
 }

@@ -394,6 +394,94 @@ body {
     border-color: var(--error);
 }
 
+/* ── Sidebar Secondary Header (Recent Logs) ───────────────────────────────── */
+
+.sidebar-header-secondary {
+    margin-top: 4px;
+    padding-top: 4px;
+    border-top: 1px solid var(--border);
+}
+
+/* ── Log List ─────────────────────────────────────────────────────────────── */
+
+#log-list {
+    flex: 0 0 auto;
+    max-height: 240px;
+    overflow-y: auto;
+    padding: 8px;
+}
+
+.log-item {
+    padding: 10px 12px;
+    border-radius: var(--radius);
+    cursor: pointer;
+    transition: all 0.15s var(--ease-out);
+    margin-bottom: 2px;
+    border: 1px solid transparent;
+    background: var(--bg-tertiary);
+}
+
+.log-item:hover {
+    background: var(--bg-hover);
+}
+
+.log-item.active {
+    background: rgba(52, 211, 153, 0.1);
+    border-color: rgba(52, 211, 153, 0.3);
+}
+
+.log-item .log-name {
+    font-size: 0.85rem;
+    font-weight: 500;
+    color: var(--text-secondary);
+    margin-bottom: 3px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    font-family: var(--font-mono);
+}
+
+.log-item.active .log-name {
+    color: var(--success);
+}
+
+.log-item .log-meta {
+    font-size: 0.7rem;
+    color: var(--text-muted);
+    line-height: 1.4;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+}
+
+.log-item .log-actions {
+    display: flex;
+    gap: 4px;
+    flex-shrink: 0;
+}
+
+.log-continue-btn {
+    padding: 2px 8px;
+    border: 1px solid rgba(124, 92, 255, 0.3);
+    border-radius: var(--radius-sm);
+    background: var(--accent-soft);
+    color: var(--accent);
+    font-size: 0.65rem;
+    font-weight: 600;
+    font-family: var(--font-sans);
+    cursor: pointer;
+    transition: all 0.15s;
+    line-height: 1.3;
+    white-space: nowrap;
+}
+
+.log-continue-btn:hover {
+    background: var(--accent);
+    color: var(--text-inverse);
+    border-color: var(--accent);
+}
+
 /* ═══════════════════════════════════════════════════════════════════════════
    CHAT AREA
    ═══════════════════════════════════════════════════════════════════════════ */
@@ -434,6 +522,53 @@ body {
     background: var(--bg-tertiary);
     padding: 2px 8px;
     border-radius: var(--radius-sm);
+}
+
+/* Log view indicator */
+#log-view-label {
+    color: var(--warning);
+    font-weight: 500;
+    font-size: 0.75rem;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 2px 8px;
+    background: rgba(251, 191, 36, 0.1);
+    border-radius: var(--radius-sm);
+    border: 1px solid rgba(251, 191, 36, 0.3);
+}
+
+#current-log-id {
+    color: var(--warning);
+    font-family: var(--font-mono);
+    font-size: 0.7rem;
+}
+
+#close-log-view-btn {
+    background: none;
+    border: none;
+    color: var(--warning);
+    cursor: pointer;
+    font-size: 0.9rem;
+    padding: 0 2px;
+    line-height: 1;
+    opacity: 0.7;
+    transition: opacity 0.15s;
+}
+
+#close-log-view-btn:hover {
+    opacity: 1;
+}
+
+/* Disabled input area for read-only log view */
+#input-area.read-only #chat-input {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+#input-area.read-only #send-btn {
+    opacity: 0.5;
+    cursor: not-allowed;
 }
 
 /* ── Model Selector ────────────────────────────────────────────────────────── */

@@ -6,9 +6,8 @@
 import { HOOKS } from "../../core/hooks.ts";
 import { CliOutputSink } from "../../utils/cli/cli.ts";
 import { ColorPalette, type PaletteOptions } from "../../utils/cli/colors.ts";
-import { readSessionEntries } from "../session-log/index.ts";
+import { readSessionEntries, sessionsDir as getSessionsDir } from "../session-log/index.ts";
 import { readdir, access, stat, unlink } from "node:fs/promises";
-import { homedir } from "node:os";
 import { join } from "node:path";
 import { ReviewTool } from "./review.ts";
 import { CoreContext, ExtensionInstance, ToolsRegisterPayload } from "../../core/extensions/types.ts";
@@ -46,10 +45,6 @@ interface LogEntry {
 }
 
 // ── Helpers ────────────────────────────────────────────────────────────────
-
-function sessionsDirPath(): string {
-  return join(homedir(), ".cache", "hotdog", "sessions");
-}
 
 /**
  * Prompt user for confirmation. Resolves true if yes, false otherwise.
@@ -105,7 +100,7 @@ async function runShow(
   cli: CliArgs,
   config: Record<string, unknown>,
 ): Promise<number> {
-  const sessionsDir = sessionsDirPath();
+  const sessionsDir = getSessionsDir();
 
   const palette = await CliOutputSink.resolve(
     cli.colors ?? true,
@@ -159,7 +154,7 @@ async function runDelete(
     return 1;
   }
 
-  const filePath = join(sessionsDirPath(), `${sessionId}.jsonl`);
+  const filePath = join(getSessionsDir(), `${sessionId}.jsonl`);
 
   try {
     await access(filePath);
@@ -190,7 +185,7 @@ async function runCleanup(
 ): Promise<number> {
   const olderThanDays = cli.olderThan ?? 30;
   const cutoffMs = Date.now() - olderThanDays * 24 * 60 * 60 * 1000;
-  const sessionsDir = sessionsDirPath();
+  const sessionsDir = getSessionsDir();
 
   try {
     await access(sessionsDir);
@@ -251,10 +246,9 @@ async function runCleanup(
 
 async function listSessions(
   json: boolean,
-  sessionsDirPath: string,
+  dir: string,
   palette: ColorPalette,
 ): Promise<number> {
-  const dir = sessionsDirPath;
   try {
     await access(dir);
   } catch {

@@ -17,7 +17,7 @@ JS project `hotdog` — an AI agent harness with tool calling support.
   - `bun bin/hotdog sessions cleanup` — remove old sessions
   - `bun bin/hotdog prompt "text"` — one-shot mode
   - `bun bin/hotdog webui` — start the Web UI server
-- **Run Tests:** `bun test --only-failures`
+- **Run Tests:** `bun test --only-failures --preload ./tests/setup.ts`
 - **Run Tests with Coverage report:** `bun run coverage`
 
 ## Rules & Guidelines

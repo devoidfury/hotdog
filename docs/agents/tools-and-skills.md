@@ -48,7 +48,7 @@ Core tools are provided by the `core-tools` extension. Tools are registered via 
 | `question` | `question-tool` | Asks interactive questions to the user | `questions` array with `key`, `prompt`, `options`, `required`, `default` |
 | `model` | `model-switch` | Switches to a different model mid-conversation | `name` |
 | `web_search` | `web-search` | Searches the web for information | `query` |
-| `review` | `ui-session-review-cli` | Lists recent sessions, gets session entries, or gets tool call index | `operation`, `session_id`, `limit` |
+| `review` *(disabled by default)* | `ui-session-review-cli` | Lists recent sessions, gets session entries, or gets tool call index. Enable via profile whitelist. | `operation`, `session_id`, `limit` |
 
 ### Subagent Tools *(disabled by default, enabled in manager profile)*
 

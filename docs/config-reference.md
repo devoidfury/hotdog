@@ -351,14 +351,15 @@ Timeout in seconds for embeddings requests.
 { "embeddingsTimeoutSecs": 60 }
 ```
 
-### `skillsPath`
+### `skillsPath` (top-level, backward compatible)
 
 - **Type:** `string`
 - **CLI flag:** `--skills-path`
 - **Default:** `<configDir>/skills` (computed)
-- **Resolution:** CLI > config > computed (configDir + "skills")
+- **Resolution:** CLI > config (`skillsPath` or `skills.path`) > computed (configDir + "skills")
 
 Path to the skills directory. Falls back to `<configDir>/skills` if not set.
+**Note:** The canonical location is now `skills.path` (nested under `skills`), but `skillsPath` at the top level is still supported for backward compatibility.
 
 ### `profilesPath`
 
@@ -467,7 +468,7 @@ The default subcommand to run when no subcommand is specified.
 - **Default:** `false`
 - **Resolution:** CLI only (no config file layer)
 
-Show config resolution details (sources and layers). Extension-provided flag from `ui-info-cli` (used with the `info` subcommand).
+Show config resolution details (sources and layers). Provided by the `ui-info-cli` extension; used with the `info` subcommand.
 
 ### `coreTools`
 
@@ -703,7 +704,7 @@ Extensions register their own configuration namespaces. Each extension's config 
 | `readToolLimit` | `number` | `500` | Max lines for the `read` tool. |
 | `findMaxResults` | `number` | `200` | Max results for the `find` tool. |
 | `grepMaxResults` | `number` | `100` | Max results for the `grep` tool. |
-| `maxDiffSize` | `number` | `8000` | Max diff size in characters. |
+| `maxDiffSize` | `number` | `8000` | Max diff size in characters. _(defined but not currently used)_ |
 | `maxEditInputSize` | `number` | `16000` | Max edit input size (oldString + newString) in characters. |
 | `maxToolOutputLines` | `number` | `600` | Max output lines for tool results. |
 
@@ -793,9 +794,9 @@ An array of MCP server definitions. Each server can use either HTTP transport (`
 |-------|------|---------|-------------|
 | `enabled` | `boolean` | `true` | Enable/disable the extension. |
 | `preloadSkills` | `array` | `[]` | List of skill names to preload. |
-| `path` | `string` | `<configDir>/skills` | Directory path where skills are stored. |
+| `path` | `string` | `<configDir>/skills` | Directory path where skills are stored. Also accepts top-level `skillsPath` for backward compatibility. |
 
-CLI flag: `--preload-skills` (comma-separated skill names).
+CLI flags: `--preload-skills` (comma-separated skill names), `--skills-path`.
 
 ```json
 { "skills": { "preloadSkills": ["my-skill", "another-skill"] } }

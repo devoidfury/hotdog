@@ -110,7 +110,7 @@ Profile body content goes here.
 
 ## UI Modes
 - **One-shot CLI** -- Single prompt non-interactive session (`hotdog -p "your prompt"`). _(stable, ready for use)_
-- **Interactive CLI** -- Readline-based interactive session (`hotdog cli`). _(stable, ready for use)_
+- **Interactive CLI** -- Readline-based interactive session (`hotdog` or `hotdog cli`). _(stable, ready for use)_
 - **Web UI** -- Web interface with WebSocket support (`hotdog webui`). _(beta - ready for use)_
 
 ## Features

@@ -165,7 +165,7 @@ export class FindTool {
         properties: {
           pattern: param(
             "string",
-            'Glob pattern to match files against (e.g. "*.rs", "**/test*", "/etc/**/*.conf")',
+            'Glob pattern to match files against.',
           ),
           file_type: param(
             "string",

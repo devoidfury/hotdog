@@ -111,7 +111,7 @@ Profile body content goes here.
 ## UI Modes
 - **One-shot CLI** -- Single prompt non-interactive session (`hotdog -p "your prompt"`). _(stable, ready for use)_
 - **Interactive CLI** -- Readline-based interactive session (`hotdog cli`). _(stable, ready for use)_
-- **Web UI** -- Web interface with WebSocket support (`hotdog webui`). _(beta - missing old session replay)_
+- **Web UI** -- Web interface with WebSocket support (`hotdog webui`). _(beta - ready for use)_
 
 ## Features
 - **Tool calling** -- File operations, bash, HTTP requests, web search, and more
@@ -141,7 +141,7 @@ hotdog profiles                  # List all available profiles
 hotdog sessions show             # Show session logs
 hotdog sessions delete <id>      # Delete a session
 hotdog sessions cleanup          # Remove old sessions
-hotdog webui                     # Start the web UI server (alpha)
+hotdog webui                     # Start the web UI server
 ```
 
 ### CLI Options

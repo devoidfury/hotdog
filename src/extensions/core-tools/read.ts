@@ -65,7 +65,6 @@ export class ReadTool {
       ReadTool.TOOL_NAME,
       `Read a file's contents with optional pagination. Supports text files (line-based extraction with offset/limit) and image files (jpeg, png, webp, base64). Returns an error for directories with a depth-1 listing instead.`,
       {
-        schema: "https://json-schema.org/draft/2020-12/schema",
         properties: {
           path: param(
             "string",

@@ -1,6 +1,7 @@
 // Bridge MCP server tools to native agent tools.
 // Each MCP tool becomes an McpTool that forwards calls to the MCP server.
 
+import { toolDef } from "../../core/index.ts";
 import { McpConnectionHandle } from "./connection.ts";
 
 interface McpToolDefinition {
@@ -66,19 +67,10 @@ export class McpTool {
     const properties = convertSchemaProperties(mcpSchema);
     const required = extractRequired(mcpSchema);
 
-    return {
-      type: "function",
-      function: {
-        description: this.#toolDef.description || "",
-        name: this.#registeredName,
-        parameters: {
-          schema: "https://json-schema.org/draft/2020-12/schema",
-          type: "object",
-          properties,
-          required,
-        },
-      },
-    };
+    return toolDef(this.#registeredName, this.#toolDef.description || "", {
+      properties,
+      required,
+    });
   }
 
   /**

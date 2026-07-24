@@ -37,7 +37,7 @@ export function create(core: CoreContext): ExtensionInstance {
        * Register the model tool (if enabled).
        */
       [HOOKS.TOOLS_REGISTER]: async (registry: ToolsRegisterPayload) => {
-        if (config.toolEnabled) {
+        if (config.toolEnabled === true) {
           registry.register("model", modelTool);
         }
       },

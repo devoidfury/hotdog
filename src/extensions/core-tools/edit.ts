@@ -62,7 +62,6 @@ export class EditTool {
       EditTool.TOOL_NAME,
       "Single mode tool that replaces text in a file. Finds oldString, replaces with newString. Use this instead of the write tool for precise code edits.",
       {
-        schema: "https://json-schema.org/draft/2020-12/schema",
         properties: {
           path: param("string", "File path relative to workspace root"),
           oldString: param("string", "Exact text to find and replace"),

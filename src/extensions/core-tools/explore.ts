@@ -24,7 +24,6 @@ export class ExploreTool {
       ExploreTool.TOOL_NAME,
       "Run the agent in explorer mode against a project directory. Executes the agent with the explorer profile and a prompt describing what to explore.",
       {
-        schema: "https://json-schema.org/draft/2020-12/schema",
         properties: {
           path: param("string", "The root path of the project to explore"),
           outline: param(

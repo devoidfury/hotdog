@@ -1,6 +1,12 @@
 // Model tool — switch the AI model at runtime.
 
-import { toolDef, param, ToolResult, parseToolInput, defaultCallDisplay } from "../../core/extensions/tool-utils.ts";
+import {
+  toolDef,
+  param,
+  ToolResult,
+  parseToolInput,
+  defaultCallDisplay,
+} from "../../core/extensions/tool-utils.ts";
 import { ModelRegistry, ToolContext } from "../../core/index.ts";
 
 interface OnSwitchModel {
@@ -24,7 +30,6 @@ export class ModelTool {
         : 'Switch the AI model at runtime. Pass a model name to switch to, or "list" to show available models.';
 
     return toolDef(ModelTool.TOOL_NAME, description, {
-      schema: "https://json-schema.org/draft/2020-12/schema",
       properties: {
         name: param("string", "The name of the model to switch to", {
           enum: models,
@@ -35,10 +40,16 @@ export class ModelTool {
   }
 
   callDisplay(input: string | Record<string, unknown> | null): string {
-    return defaultCallDisplay(input, (args: Record<string, unknown>) => `-> ${args.name as string}`);
+    return defaultCallDisplay(
+      input,
+      (args: Record<string, unknown>) => `-> ${args.name as string}`,
+    );
   }
 
-  async execute(input: string | Record<string, unknown> | null, ctx?: ToolContext): Promise<ToolResult> {
+  async execute(
+    input: string | Record<string, unknown> | null,
+    ctx?: ToolContext,
+  ): Promise<ToolResult> {
     const args = parseArgs(input);
     if (!args) {
       return ToolResult.err("Error parsing arguments");
@@ -63,12 +74,14 @@ export class ModelTool {
       );
     }
 
-    const onSwitchModel = ctx?.get("onSwitchModel") as OnSwitchModel | undefined;
+    const onSwitchModel = ctx?.get("onSwitchModel") as
+      OnSwitchModel | undefined;
     if (onSwitchModel) {
       try {
         await onSwitchModel(name);
         return ToolResult.ok(`Switched to model: ${name}`).withEntry(
-          "model", name,
+          "model",
+          name,
         );
       } catch (e: unknown) {
         return ToolResult.err(`Error switching model: ${(e as Error).message}`);
@@ -84,7 +97,9 @@ export class ModelTool {
 /**
  * Parse model tool arguments.
  */
-function parseArgs(input: string | Record<string, unknown> | null): { name: string } | null {
+function parseArgs(
+  input: string | Record<string, unknown> | null,
+): { name: string } | null {
   const json = parseToolInput(input);
   if (!json) return null;
 

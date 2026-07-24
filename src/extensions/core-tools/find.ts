@@ -162,7 +162,6 @@ export class FindTool {
       FindTool.TOOL_NAME,
       "Find files and directories matching a glob pattern. Use this tool when you need to find files by name patterns.",
       {
-        schema: "https://json-schema.org/draft/2020-12/schema",
         properties: {
           pattern: param(
             "string",

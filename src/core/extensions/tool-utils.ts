@@ -183,7 +183,7 @@ export function toolDef(
   name: string,
   description: string,
   parameters?: {
-    schema?: string;
+    // schema?: string;
     properties?: Record<string, unknown>;
     required?: string[];
   },
@@ -194,7 +194,7 @@ export function toolDef(
       name,
       description,
       parameters: {
-        schema: parameters?.schema ?? "https://json-schema.org/draft/2020-12/schema",
+        // schema: parameters?.schema ?? "https://json-schema.org/draft/2020-12/schema",
         type: "object",
         properties: parameters?.properties || {},
         required: parameters?.required || [],

@@ -33,6 +33,13 @@ export function xmlEscape(s: string): string {
 /**
  * Tool result — structured result for tool execution.
  */
+/**
+ * Sentinel flag: when set on a ToolResult, signals the agent run loop
+ * to stop after this tool executes (similar to yielding control back
+ * to the user). Used by tools like "wait" and "handoff".
+ */
+export const TOOL_STOP_LOOP = Symbol("TOOL_STOP_LOOP");
+
 export class ToolResult {
   output: string;
   error: string | null;
@@ -40,6 +47,7 @@ export class ToolResult {
   success: boolean;
   outputTag: string | null;
   images: unknown[] | null;
+  [TOOL_STOP_LOOP]?: boolean;
 
   constructor({
     output = "",
@@ -74,6 +82,17 @@ export class ToolResult {
       error: String(message),
       success: false,
     });
+  }
+
+  /**
+   * Create a ToolResult that signals the agent run loop to stop after
+   * this tool executes. Used when a tool wants to yield control back
+   * to the user or trigger a phase transition.
+   */
+  static stop(output: string): ToolResult {
+    const result = new ToolResult({ output, success: true });
+    result[TOOL_STOP_LOOP] = true;
+    return result;
   }
 
   static from({
@@ -125,6 +144,14 @@ export class ToolResult {
 
   withImages(images: unknown[] | null): this {
     this.images = images;
+    return this;
+  }
+
+  /**
+   * Mark this result to stop the agent run loop after execution.
+   */
+  withStopLoop(): this {
+    this[TOOL_STOP_LOOP] = true;
     return this;
   }
 

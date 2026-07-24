@@ -271,7 +271,11 @@ describe('Agent — end-to-end loop', () => {
   // ── Wait tool (yield control) ─────────────────────────────────────────────
 
   it('should stop agent loop when wait tool is called', async () => {
-    const waitTool = simpleTool('wait', 'nothing to do');
+    const { ToolResult } = await import('../../src/core/extensions/tool-utils.ts');
+    const waitTool = new MockTool({
+      name: 'wait',
+      execute: async () => ToolResult.stop('nothing to do'),
+    });
 
     const mockLLM = new MockLLMClient({
       responseSequences: [

@@ -428,7 +428,7 @@ export class WaitTool extends SubagentTool {
     const args = parseToolArgs(input ?? {});
     const message = args.message as string | null;
     const note = message ? ` Note: ${message}` : "";
-    return ToolResult.ok(
+    return ToolResult.stop(
       `Manager has nothing more to do. Waiting for user input.${note}`,
     ).withEntries({
       ...(message ? { message } : {}),

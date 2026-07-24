@@ -1,0 +1,28 @@
+{
+  "name": "handoff-tool",
+  "provides": ["tools"],
+  "loadOrder": 10,
+  "description": "Plan-execute handoff tool — allows the agent to clear context and restart with a prepared plan",
+  "configSchema": {
+    "handoffTool": {
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Whether this extension is enabled. Set to false to disable the extension entirely."
+        },
+        "systemPrompt": {
+          "type": "boolean",
+          "default": true,
+          "description": "Whether to include handoff tool instructions in the system prompt."
+        }
+      },
+      "additionalProperties": false,
+      "layers": [
+        { "source": "config", "key": "handoffTool" },
+        { "default": {} }
+      ]
+    }
+  }
+}

@@ -5,7 +5,7 @@ import { formatError } from "./error.ts";
 import { HOOKS, type HookSystem, type GateAction, type ToolResultHookResult } from "./hooks.ts";
 import { logger } from "./logger.ts";
 import { ToolContext } from "./extensions/tool-context.ts";
-import { formatToolResult } from "./extensions/tool-utils.ts";
+import { formatToolResult, TOOL_STOP_LOOP } from "./extensions/tool-utils.ts";
 import type { ToolRegistry } from "./extensions/tool-registry.ts";
 import type { Agent } from "./agent.ts";
 
@@ -19,6 +19,8 @@ export interface ToolResult {
   toolName: string;
   input: string;
   result: string;
+  /** When true, signals the agent run loop to stop after this batch of tools. */
+  stopLoop?: boolean;
 }
 
 export interface ToolExecutorDeps {
@@ -66,7 +68,7 @@ export class ToolExecutor {
       }
       toolResults.push(result);
 
-      if (result.toolName === "wait") {
+      if (result.stopLoop) {
         return { outcome: "return", toolResults };
       }
     }
@@ -159,6 +161,7 @@ export class ToolExecutor {
 
     let result: unknown;
     let success: boolean;
+    let stopLoop = false;
     try {
       result = await (
         tool as {
@@ -166,6 +169,10 @@ export class ToolExecutor {
         }
       ).execute(input, toolCtx);
       success = true;
+      // Check for stop-loop sentinel on ToolResult
+      if (result && typeof result === "object" && (result as Record<symbol, unknown>)[TOOL_STOP_LOOP] === true) {
+        stopLoop = true;
+      }
     } catch (e: unknown) {
       result = `Error executing tool ${toolName}: ${(e as Error).message}`;
       success = false;
@@ -212,6 +219,7 @@ export class ToolExecutor {
       resultStr,
       toolCallId,
       images as ImageAttachment[] | null,
+      stopLoop,
     );
   }
 
@@ -230,6 +238,7 @@ export class ToolExecutor {
     result: string,
     toolCallId: string,
     images?: ImageAttachment[] | null,
+    stopLoop = false,
   ): Promise<ToolResult> {
     this.#deps.emitOutput("tool_result", { toolName, input, result });
     const msg = new Message({
@@ -239,7 +248,7 @@ export class ToolExecutor {
       images: images as ImageAttachment[] | null | undefined,
     });
     this.#deps.addMessage(msg);
-    return { toolName, input, result };
+    return { toolName, input, result, stopLoop };
   }
 }
 

@@ -223,6 +223,7 @@ describe('ToolExecutor', () => {
   describe('wait tool', () => {
     it('should return outcome "return" for wait tool', async () => {
       const deps = createMockDeps();
+      const { ToolResult } = await import('../../src/core/extensions/tool-utils.ts');
       deps.toolRegistry.register('wait', {
         toToolDef: () => ({
           type: 'function',
@@ -232,7 +233,7 @@ describe('ToolExecutor', () => {
             parameters: { type: 'object', properties: {}, required: [] },
           },
         }),
-        execute: async () => 'waiting',
+        execute: async () => ToolResult.stop('waiting'),
       });
 
       const executor = createToolExecutor(deps);
@@ -243,6 +244,58 @@ describe('ToolExecutor', () => {
       }]);
 
       expect(result.outcome).toBe('return');
+    });
+
+    it('should return outcome "return" for any tool that uses ToolResult.stop()', async () => {
+      const { ToolResult } = await import('../../src/core/extensions/tool-utils.ts');
+      const deps = createMockDeps();
+      deps.toolRegistry.register('my-stopping-tool', {
+        toToolDef: () => ({
+          type: 'function',
+          function: {
+            name: 'my-stopping-tool',
+            description: 'a tool that stops the loop',
+            parameters: { type: 'object', properties: {}, required: [] },
+          },
+        }),
+        execute: async () => ToolResult.stop('stopping now'),
+      });
+
+      const executor = createToolExecutor(deps);
+      const result = await executor.execute([{
+        id: 'call-1',
+        type: 'function',
+        function: { name: 'my-stopping-tool', arguments: '{}' },
+      }]);
+
+      expect(result.outcome).toBe('return');
+      expect(result.toolResults[0].stopLoop).toBe(true);
+    });
+
+    it('should continue when tool returns ToolResult.ok()', async () => {
+      const { ToolResult } = await import('../../src/core/extensions/tool-utils.ts');
+      const deps = createMockDeps();
+      deps.toolRegistry.register('normal-tool', {
+        toToolDef: () => ({
+          type: 'function',
+          function: {
+            name: 'normal-tool',
+            description: 'a normal tool',
+            parameters: { type: 'object', properties: {}, required: [] },
+          },
+        }),
+        execute: async () => ToolResult.ok('done'),
+      });
+
+      const executor = createToolExecutor(deps);
+      const result = await executor.execute([{
+        id: 'call-1',
+        type: 'function',
+        function: { name: 'normal-tool', arguments: '{}' },
+      }]);
+
+      expect(result.outcome).toBe('continue');
+      expect(result.toolResults[0].stopLoop).toBe(false);
     });
   });
 

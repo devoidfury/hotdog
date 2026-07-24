@@ -15,8 +15,7 @@
       "blacklist-tools": ["explore"]
     },
     "explorer": {
-      "model": "ai365/lfm2.5-8b-a1b",
-      "blacklist-tools": ["write", "model", "explore"]
+      "model": "ai365/lfm2.5-8b-a1b"
     },
     "generate": {
       "model": "ai365/qwen3.6-35b:general"
@@ -85,6 +84,14 @@
         {
           "name": "glm4.7-flash",
           "context-limit": 131072
+        },
+        {
+          "name": "kat-coder-2.5-dev",
+          "context-limit": 262144
+        },
+        {
+          "name": "laguna-s-2.1",
+          "context-limit": 262144
         },
         {
           "name": "lfm2.5-8b-a1b",

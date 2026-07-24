@@ -167,7 +167,7 @@ export class ReviewTool {
   static TOOL_NAME = "review";
 
   toToolDef() {
-    toolDef(
+    return toolDef(
       ReviewTool.TOOL_NAME,
       "List recent sessions, get all entries for a specific session, or get a lightweight tool call index. Returns JSON data. Disabled by default; enable via profile whitelist.",
       {

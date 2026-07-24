@@ -24,7 +24,6 @@ describe("toolDef", () => {
         name: "test",
         description: "A test tool",
         parameters: {
-          schema: "https://json-schema.org/draft/2020-12/schema",
           type: "object",
           properties: { x: { type: "string" } },
           required: [],

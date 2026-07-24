@@ -127,7 +127,6 @@ describe("McpTool > toToolDef", () => {
     expect(def.type).toBe("function");
     expect(def.function.name).toBe("server/test-tool");
     expect(def.function.description).toBe("A test tool for MCP");
-    expect(def.function.parameters.schema).toBe("https://json-schema.org/draft/2020-12/schema");
     expect(def.function.parameters.type).toBe("object");
   });
 

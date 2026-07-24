@@ -127,6 +127,9 @@ export class LlmClient {
     if (!this.#mangler) return messages;
     const mangler = this.#mangler;
     return messages.map((msg) => {
+      // Skip mangling system messages — they contain the authoritative tag names
+      // the agent should use. Mangling them breaks the contract.
+      if (msg.role === "system") return msg;
       const toJSON = (msg as { toJSON?: () => Record<string, unknown> }).toJSON;
       const json = typeof toJSON === "function"
         ? (toJSON as () => Record<string, unknown>).call(msg)

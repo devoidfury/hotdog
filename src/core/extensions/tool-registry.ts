@@ -1,6 +1,9 @@
 // Tool registry — holds all available tools.
 
-import { validateParams, formatValidationErrors } from "../../utils/json-schema.ts";
+import {
+  validateParams,
+  formatValidationErrors,
+} from "../../utils/json-schema.ts";
 import { logger } from "../logger.ts";
 
 export interface ToolDef {
@@ -15,7 +18,10 @@ export interface ToolDef {
 export interface Tool {
   toToolDef?: () => ToolDef | Promise<ToolDef> | null;
   callDisplay?: (input: string | Record<string, unknown> | null) => string;
-  execute?: (input: string | Record<string, unknown> | null, ctx?: unknown) => Promise<unknown>;
+  execute?: (
+    input: string | Record<string, unknown> | null,
+    ctx?: unknown,
+  ) => Promise<unknown>;
 }
 
 /**
@@ -65,7 +71,9 @@ export class ToolRegistry {
     }
 
     // Normalize: toToolDef() may return a sync ToolDef or a Promise<ToolDef>.
-    const defPromise = Promise.resolve(tool.toToolDef()) as Promise<ToolDef | null>;
+    const defPromise = Promise.resolve(
+      tool.toToolDef(),
+    ) as Promise<ToolDef | null>;
     this.#toolDefCache.set(name, defPromise);
     return defPromise;
   }
@@ -100,6 +108,7 @@ export class ToolRegistry {
     }
 
     if (!hadError) {
+      defs.sort((a, b) => a.function.name.localeCompare(b.function.name));
       this.#allToolDefsCache = Promise.resolve(defs);
     }
     return defs;
@@ -200,11 +209,7 @@ export class ToolRegistry {
       Array.isArray(args)
     ) {
       const typeName =
-        args === null
-          ? "null"
-          : Array.isArray(args)
-            ? "array"
-            : typeof args;
+        args === null ? "null" : Array.isArray(args) ? "array" : typeof args;
       return `Tool '${toolName}' expects an object with parameters, got ${typeName}`;
     }
 

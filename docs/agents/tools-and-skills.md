@@ -34,7 +34,8 @@ Core tools are provided by the `core-tools` extension. Tools are registered via 
 
 | Tool | Extension | Description | Key Params |
 |------|-----------|-------------|------------|
-| `write` | `core-tools` | Writes files with multi-mode support | `path`, `content` / `regex` + `content` / `files` + `atomic` |
+| `overwrite` | `core-tools` | Writes content to a file, replacing everything | `path`, `content` |
+| `append` | `core-tools` | Appends content to a file | `path`, `content` |
 | `read` | `core-tools` | Reads file contents with pagination | `path`, `limit`, `offset` |
 | `edit` | `core-tools` | Edits files using replace modes | `path`, `oldString`, `newString` / `search`, `replace` / `files` + `atomic` |
 | `grep` | `core-tools` | Searches file contents for regex patterns | `pattern`, `path`, `type`, `context` |

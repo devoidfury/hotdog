@@ -122,7 +122,7 @@ Extensions can declare abstract service dependencies via `requires` and `service
   "name": "my-extension",
   "services": {
     "session": ["list", "get", "create", "swap"],
-    "resourceLoader": ["read", "write", "exists"]
+    "resourceLoader": ["read", "overwrite", "append", "exists"]
   },
   "requires": {
     "config": ["get", "set"]

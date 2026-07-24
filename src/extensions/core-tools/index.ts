@@ -8,7 +8,8 @@ import {
 } from "../../core/extensions/types.ts";
 import { Tool } from "../../core/extensions/tool-registry.ts";
 
-export * from "./write.ts";
+export * from "./overwrite.ts";
+export * from "./append.ts";
 export * from "./read.ts";
 export * from "./edit.ts";
 export * from "./grep.ts";
@@ -18,7 +19,8 @@ export * from "./project-info.ts";
 export * from "./explore.ts";
 
 // Import classes for factory use
-import { WriteTool } from "./write.ts";
+import { OverwriteTool } from "./overwrite.ts";
+import { AppendTool } from "./append.ts";
 import { ReadTool } from "./read.ts";
 import { EditTool } from "./edit.ts";
 import { GrepTool } from "./grep.ts";
@@ -35,7 +37,8 @@ interface ToolDescriptor {
 
 // Tool descriptors — declarative table of all core tools.
 const TOOL_DESCRIPTORS: ToolDescriptor[] = [
-  { name: "write", disabled: false },
+  { name: "overwrite", disabled: false },
+  { name: "append", disabled: false },
   { name: "read", disabled: false },
   { name: "pager", disabled: false },
   // explore tool is disabled by default because it invokes another sub LLM session,
@@ -64,7 +67,8 @@ interface CoreToolConfig {
 }
 
 const TOOL_FACTORIES: Record<string, (config: CoreToolConfig) => Tool> = {
-  write: () => new WriteTool() as Tool,
+  overwrite: () => new OverwriteTool() as Tool,
+  append: () => new AppendTool() as Tool,
   read: (config) =>
     new ReadTool({
       readLimit: config.readToolLimit ?? 500,

@@ -3,7 +3,7 @@ name: profile-writer
 description: Crafts agent profile files (.profile.md) in the profiles/ directory from user requirements.
 role: You are an AI agent architect specializing in crafting high-performance agent profile configurations.
 aspects: ['commit-careful', 'concise']
-whitelist-tools: ["find", "grep", "read", "write", "load_skill", "bash"]
+whitelist-tools: ["find", "grep", "read", "overwrite", "append", "load_skill", "bash"]
 ---
 
 ## Operating Methodology

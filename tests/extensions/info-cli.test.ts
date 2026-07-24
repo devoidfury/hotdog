@@ -63,14 +63,14 @@ describe("Info CLI - printInfoText branches", () => {
     const run = await infoCliRunner({
       resolved: {
         profileName: "test",
-        profile: { whitelistTools: ["read", "write"] },
+        profile: { whitelistTools: ["read", "overwrite"] },
       },
     });
     const { exitCode, output } = await run("info");
     expect(exitCode).toBe(0);
     expect(output).toContain("Whitelist Tools:");
     expect(output).toContain("read");
-    expect(output).toContain("write");
+    expect(output).toContain("overwrite");
   });
 
   it("shows blacklist tools when profile has blacklistTools", async () => {
@@ -229,7 +229,7 @@ describe("Info CLI - printInfoJson branches", () => {
       resolved: {
         profileName: "test",
         profile: {
-          whitelistTools: ["read", "write"],
+          whitelistTools: ["read", "overwrite"],
           blacklistTools: ["bash"],
         },
       },
@@ -238,7 +238,7 @@ describe("Info CLI - printInfoJson branches", () => {
     expect(exitCode).toBe(0);
 
     const parsed = JSON.parse(output.trim());
-    expect(parsed.config.profile_whitelist).toEqual(["read", "write"]);
+    expect(parsed.config.profile_whitelist).toEqual(["read", "overwrite"]);
     expect(parsed.config.profile_blacklist).toEqual(["bash"]);
   });
 

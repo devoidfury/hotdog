@@ -19,7 +19,7 @@ describe("patternMatches", () => {
   });
 
   it("does not match different strings", () => {
-    expect(patternMatches("read", "write")).toBe(false);
+    expect(patternMatches("read", "overwrite")).toBe(false);
     expect(patternMatches("bash", "cat")).toBe(false);
   });
 
@@ -50,7 +50,7 @@ describe("patternMatches", () => {
   });
 
   it("returns false for no match with wildcard", () => {
-    expect(patternMatches("read*", "write")).toBe(false);
+    expect(patternMatches("read*", "overwrite")).toBe(false);
     expect(patternMatches("*bash", "cat")).toBe(false);
   });
 
@@ -194,7 +194,7 @@ Content without description.
       await createTempSkill("tool-skill", `---
 name: Tool Skill
 description: A skill with tool restrictions
-allowed-tools: ["read", "write"]
+allowed-tools: ["read", "overwrite"]
 ---
 
 Content.
@@ -205,7 +205,7 @@ Content.
 
       const skill = loader.getSkill("Tool Skill");
       expect(skill).not.toBeNull();
-      expect(skill!.allowedTools).toEqual(["read", "write"]);
+      expect(skill!.allowedTools).toEqual(["read", "overwrite"]);
     });
 
     it("parses include-tools from frontmatter", async () => {
@@ -249,7 +249,7 @@ Content.
       await createTempSkill("snake-skill", `---
 name: Snake Skill
 description: Snake case tools
-allowed_tools: read,write,bash
+allowed_tools: read,overwrite,bash
 ---
 
 Content.
@@ -260,7 +260,7 @@ Content.
 
       const skill = loader.getSkill("Snake Skill");
       expect(skill).not.toBeNull();
-      expect(skill!.allowedTools).toEqual(["read", "write", "bash"]);
+      expect(skill!.allowedTools).toEqual(["read", "overwrite", "bash"]);
     });
 
     it("collects additional files", async () => {
@@ -471,7 +471,7 @@ Content.
       expect(loader.getSkill("Dep Skill")!.visible).toBe(false);
 
       // Set available tools that match
-      loader.setAvailableTools(["bash", "write"]);
+      loader.setAvailableTools(["bash", "overwrite"]);
       expect(loader.getSkill("Dep Skill")!.visible).toBe(true);
     });
 
@@ -488,7 +488,7 @@ Content.
       const loader = new SkillsLoader(tempDir);
       await loader.loadSkills();
 
-      loader.setAvailableTools(["write", "grep"]);
+      loader.setAvailableTools(["overwrite", "grep"]);
       expect(loader.getSkill("Dep Skill")!.visible).toBe(false);
     });
 
@@ -729,7 +729,7 @@ Content.
     await createTempSkill("pattern-skill", `---
 name: Pattern Skill
 description: Pattern test
-include-tools: ["read", "write"]
+include-tools: ["read", "overwrite"]
 ---
 
 Content.
@@ -745,7 +745,7 @@ Content.
     ext.loader.activateSkill("Pattern Skill");
     const patterns = ext.getCombinedToolPatterns();
     expect(patterns.has("read")).toBe(true);
-    expect(patterns.has("write")).toBe(true);
+    expect(patterns.has("overwrite")).toBe(true);
   });
 
   it("isToolAllowed returns true when no patterns", async () => {
@@ -773,7 +773,7 @@ Content.
 
     expect(ext.isToolAllowed("read")).toBe(true);
     expect(ext.isToolAllowed("bash")).toBe(true);
-    expect(ext.isToolAllowed("write")).toBe(false);
+    expect(ext.isToolAllowed("overwrite")).toBe(false);
   });
 
   it("isToolAllowed is case insensitive", async () => {

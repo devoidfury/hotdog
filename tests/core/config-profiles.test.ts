@@ -62,7 +62,7 @@ blacklist-tools:
   - bash
 whitelist-tools:
   - read
-  - write
+  - overwrite
 manager: true
 visible-worker: true
 ---
@@ -77,7 +77,7 @@ Profile body content here`;
     expect(profile!.role).toBe("Test role");
     expect(profile!.model).toBe("test-model");
     expect(profile!.blacklistTools).toEqual(["bash"]);
-    expect(profile!.whitelistTools).toEqual(["read", "write"]);
+    expect(profile!.whitelistTools).toEqual(["read", "overwrite"]);
     expect(profile!.manager).toBe(true);
     expect(profile!.visibleWorker).toBe(true);
     expect(profile!.body).toBe("Profile body content here");
@@ -272,7 +272,7 @@ describe("mergeProfile", () => {
   });
 
   it("file profile wins for whitelistTools", () => {
-    const configProfile = { whitelistTools: ["read", "write"] };
+    const configProfile = { whitelistTools: ["read", "overwrite"] };
     const fileProfile = { whitelistTools: ["read"] };
     const result = mergeProfile(configProfile, fileProfile);
     expect(result.whitelistTools).toEqual(["read"]);
@@ -293,10 +293,10 @@ describe("mergeProfile", () => {
   });
 
   it("file profile null whitelist doesn't override config", () => {
-    const configProfile = { whitelistTools: ["read", "write"] };
+    const configProfile = { whitelistTools: ["read", "overwrite"] };
     const fileProfile = { role: "file role" }; // no whitelist
     const result = mergeProfile(configProfile, fileProfile);
-    expect(result.whitelistTools).toEqual(["read", "write"]);
+    expect(result.whitelistTools).toEqual(["read", "overwrite"]);
   });
 
   it("file profile empty blacklist doesn't override config", () => {

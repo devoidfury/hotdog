@@ -109,7 +109,7 @@ describe("Hook + Extension Integration", () => {
 
     // Core tools should be registered (bash is now in bash-tool extension, fetch is in fetch-tool extension)
     const toolNames = core.toolRegistry.getAll().map(([name]) => name);
-    expect(toolNames).toContain("write");
+    expect(toolNames).toContain("overwrite");
     expect(toolNames).toContain("read");
     expect(toolNames).toContain("edit");
     expect(toolNames).toContain("grep");

@@ -123,13 +123,13 @@ describe("StreamProcessor", () => {
       const result = await processEvents(processor, [
         { type: "toolName", index: 0, name: "read", toolCallId: "call-1" },
         { type: "toolArgument", index: 0, arguments: '{"path": "a.txt"}' },
-        { type: "toolName", index: 1, name: "write", toolCallId: "call-2" },
+        { type: "toolName", index: 1, name: "overwrite", toolCallId: "call-2" },
         { type: "toolArgument", index: 1, arguments: '{"path": "b.txt", "content": "hi"}' },
       ]);
 
       expect(result.finalToolCalls).toHaveLength(2);
       expect(result.finalToolCalls![0]!.function.name).toBe("read");
-      expect(result.finalToolCalls![1]!.function.name).toBe("write");
+      expect(result.finalToolCalls![1]!.function.name).toBe("overwrite");
     });
 
     it("should return null tool calls when none present", async () => {

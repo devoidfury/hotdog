@@ -15,7 +15,8 @@ describe("CORE_TOOL_NAMES", () => {
     // fetch is registered by the fetch-tool extension, not core-tools
     // question is registered by the question-tool extension, not core-tools
     const expected = [
-      "write",
+      "overwrite",
+      "append",
       "read",
       "pager",
       "explore",
@@ -51,7 +52,7 @@ describe("SUBAGENT_TOOL_NAMES", () => {
 describe("createToolFactory", () => {
   it("creates all expected core tools", () => {
     const factory = createToolFactory();
-    for (const name of ["write", "read", "edit", "grep", "find", "pager", "project_info"]) {
+    for (const name of ["overwrite", "append", "read", "edit", "grep", "find", "pager", "project_info"]) {
       const tool = factory.createTool(name);
       expect(tool, `${name} tool should be created`).not.toBeNull();
       expect(typeof tool!.execute, `${name}.execute should be a function`).toBe("function");
@@ -80,8 +81,8 @@ describe("createToolFactory", () => {
 
   it("respects whitelist", () => {
     const factory = createToolFactory();
-    expect(factory.createTool("write", ["write", "read"])).not.toBeNull();
-    expect(factory.createTool("edit", ["write", "read"])).toBeNull();
+    expect(factory.createTool("overwrite", ["overwrite", "read"])).not.toBeNull();
+    expect(factory.createTool("edit", ["overwrite", "read"])).toBeNull();
   });
 
   it("enables disabled tools when in whitelist", () => {
@@ -94,8 +95,8 @@ describe("createToolFactory - createAndRegister", () => {
   it("registers tool in registry", () => {
     const factory = createToolFactory();
     const registry = new ToolRegistry();
-    factory.createAndRegister("write", registry);
-    expect(registry.has("write")).toBe(true);
+    factory.createAndRegister("overwrite", registry);
+    expect(registry.has("overwrite")).toBe(true);
   });
 
   it("skips tool when creation fails", () => {
@@ -108,8 +109,8 @@ describe("createToolFactory - createAndRegister", () => {
   it("respects whitelist in createAndRegister", () => {
     const factory = createToolFactory();
     const registry = new ToolRegistry();
-    factory.createAndRegister("write", registry, ["write"]);
-    expect(registry.has("write")).toBe(true);
+    factory.createAndRegister("overwrite", registry, ["overwrite"]);
+    expect(registry.has("overwrite")).toBe(true);
     expect(registry.has("read")).toBe(false);
   });
 

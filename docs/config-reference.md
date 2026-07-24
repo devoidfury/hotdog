@@ -596,7 +596,7 @@ The `profiles` key allows you to define profile configurations directly in `defa
     },
     "explorer": {
       "model": "ai365/lfm2.5-8b-a1b",
-      "blacklistTools": ["write", "model", "explore"]
+      "blacklistTools": ["overwrite", "append", "model", "explore"]
     },
     "fixer": {
       "model": "ai365/qwen3.6-27b"
@@ -757,7 +757,7 @@ An array of MCP server definitions. Each server can use either HTTP transport (`
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
 | `enabled` | `boolean` | `true` | Enable/disable the extension. |
-| `toolEnabled` | `boolean` | `true` | Register the model-switch tool. |
+| `toolEnabled` | `boolean` | `false` | Register the model-switch tool. |
 | `commandEnabled` | `boolean` | `true` | Register `/model` and `/models` slash commands. |
 
 ```json
@@ -983,7 +983,7 @@ CLI flag: `--shell-mode`.
     },
     "explorer": {
       "model": "ai365/lfm2.5-8b-a1b",
-      "blacklistTools": ["write", "model", "explore"]
+      "blacklistTools": ["overwrite", "append", "model", "explore"]
     },
     "fixer": {
       "model": "ai365/qwen3.6-27b"

@@ -61,34 +61,34 @@ describe("ToolRegistry — basic operations", () => {
   it("filter with whitelist keeps only matching tools", () => {
     const registry = new ToolRegistry();
     registry.register("read", { execute: async () => "read" });
-    registry.register("write", { execute: async () => "write" });
+    registry.register("overwrite", { execute: async () => "overwrite" });
     registry.register("bash", { execute: async () => "bash" });
     const filtered = registry.filter(["read", "bash"]);
     expect(filtered.has("read")).toBe(true);
     expect(filtered.has("bash")).toBe(true);
-    expect(filtered.has("write")).toBe(false);
+    expect(filtered.has("overwrite")).toBe(false);
   });
 
   it("filter with blacklist excludes matching tools", () => {
     const registry = new ToolRegistry();
     registry.register("read", { execute: async () => "read" });
-    registry.register("write", { execute: async () => "write" });
+    registry.register("overwrite", { execute: async () => "overwrite" });
     registry.register("bash", { execute: async () => "bash" });
-    const filtered = registry.filter(undefined, ["write"]);
+    const filtered = registry.filter(undefined, ["overwrite"]);
     expect(filtered.has("read")).toBe(true);
     expect(filtered.has("bash")).toBe(true);
-    expect(filtered.has("write")).toBe(false);
+    expect(filtered.has("overwrite")).toBe(false);
   });
 
   it("filter with both whitelist and blacklist", () => {
     const registry = new ToolRegistry();
     registry.register("read", { execute: async () => "read" });
-    registry.register("write", { execute: async () => "write" });
+    registry.register("overwrite", { execute: async () => "overwrite" });
     registry.register("bash", { execute: async () => "bash" });
-    const filtered = registry.filter(["read", "write", "bash"], ["write"]);
+    const filtered = registry.filter(["read", "overwrite", "bash"], ["overwrite"]);
     expect(filtered.has("read")).toBe(true);
     expect(filtered.has("bash")).toBe(true);
-    expect(filtered.has("write")).toBe(false);
+    expect(filtered.has("overwrite")).toBe(false);
   });
 });
 

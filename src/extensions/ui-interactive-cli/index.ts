@@ -1,7 +1,4 @@
-// Interactive CLI Extension
-// Provides the interactive CLI session with readline loop.
-// Registers a default subcommand (empty name) that main.ts dispatches to
-// when no subcommand is provided.
+// Interactive CLI Extension - Provides the interactive CLI session with readline loop.
 //
 // This extension implements "slash commands" as the UI syntax for invoking
 // agent commands. The `/` prefix is a UI convention — commands themselves
@@ -9,7 +6,7 @@
 
 import readline from "node:readline";
 import { spawn } from "node:child_process";
-import { parseCommand, Command, ACTIONS, type ParsedCommand } from "../../core/commands.ts";
+import { parseCommand, Command, ACTIONS } from "../../core/commands.ts";
 import { HOOKS } from "../../core/hooks.ts";
 import { CliOutputSink } from "../../utils/cli/cli.ts";
 import { LlmClient, type ProviderConfig } from "../../core/llm-client/client.ts";
@@ -99,12 +96,23 @@ interface InteractiveSessionOptions {
  * Uses `which` on Unix-like systems.
  */
 export async function isSystemCommand(cmd: string): Promise<boolean> {
+  if (cmdLookupCache.has(cmd)) {
+    return cmdLookupCache.get(cmd)!;
+  }
   return new Promise((resolve) => {
     const proc = spawn("which", [cmd], { stdio: ["pipe", "pipe", "pipe"] });
-    proc.on("close", (code: number) => resolve(code === 0));
-    proc.on("error", () => resolve(false));
+    proc.on("close", (code: number) => {
+      cmdLookupCache.set(cmd, code === 0);
+      resolve(code === 0);
+    });
+    proc.on("error", () => {
+      cmdLookupCache.set(cmd, false);
+      resolve(false);
+    });
   });
 }
+// cache to avoid invoking `which` more than once for the same cmd
+const cmdLookupCache = new Map<string, boolean>();
 
 /**
  * Execute a shell command and return the output.
@@ -340,8 +348,6 @@ export async function runInteractiveSession(
       abortSignal: (agentConfig.abortSignal as AbortSignal) || null,
       toolWhitelist: (agentConfig.toolWhitelist as string[]) || null,
     });
-
-    await agent.ensureSystemPrompt();
 
     core.hooks.notifyHooks(HOOKS.COMMANDS_REGISTER, {
       registry: agent.commandRegistry,

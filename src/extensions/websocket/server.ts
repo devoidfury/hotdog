@@ -842,8 +842,6 @@ export function createWsServer(core: CoreContext, options: CreateWsServerOptions
       toolWhitelist: null,
     });
 
-    await agent.ensureSystemPrompt();
-
     if (core.hooks) {
       core.hooks.notifyHooks(HOOKS.COMMANDS_REGISTER, {
         registry: agent?.commandRegistry,

@@ -7,6 +7,7 @@ import { retryWithBackoff } from "./retry.ts";
 import { createMarkerMangler, MarkerMangler } from "../marker-mangler.ts";
 import { LlmError } from "../error.ts";
 import { logger } from "../logger.ts";
+import { ToolDef } from "../extensions/tool-registry.ts";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const PKG_PATH = join(__dirname, "../../../package.json");
@@ -167,7 +168,7 @@ export class LlmClient {
   buildChatRequest(
     messages: Array<Record<string, unknown>>,
     modelConfig: ModelConfig,
-    tools: Array<Record<string, unknown>> | null | undefined,
+    tools: Array<ToolDef> | null | undefined,
     stream: boolean = this.stream,
   ): Record<string, unknown> {
     const modelName = modelConfig.name.split("/").pop() || modelConfig.name;
@@ -200,7 +201,7 @@ export class LlmClient {
   async *chatStream(
     messages: Array<Record<string, unknown>>,
     model: string,
-    tools: Array<Record<string, unknown>> = [],
+    tools: Array<ToolDef> = [],
     sessionId?: string,
   ): AsyncGenerator<StreamEvent> {
     const modelConfig: ModelConfig = {
@@ -213,7 +214,7 @@ export class LlmClient {
   async *chatStreamCancellable(
     messages: Array<Record<string, unknown>>,
     modelConfig: ModelConfig,
-    tools: Array<Record<string, unknown>> = [],
+    tools: Array<ToolDef> = [],
     cancelToken: AbortSignal | null = null,
     sessionId?: string,
   ): AsyncGenerator<StreamEvent> {
@@ -270,7 +271,7 @@ export class LlmClient {
   async *chatStreamWithModelConfig(
     messages: Array<Record<string, unknown>>,
     modelConfig: ModelConfig,
-    tools: Array<Record<string, unknown>> = [],
+    tools: Array<ToolDef> = [],
     sessionId?: string,
   ): AsyncGenerator<StreamEvent> {
     const request = this.buildChatRequest(messages, modelConfig, tools, true);

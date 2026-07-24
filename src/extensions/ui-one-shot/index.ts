@@ -175,8 +175,6 @@ async function handlePromptSubcommand(
       toolWhitelist: (agentConfig.toolWhitelist as string[]) || null,
     });
 
-    await agent.ensureSystemPrompt();
-
     core.hooks.notifyHooks(HOOKS.COMMANDS_REGISTER, {
       registry: agent.commandRegistry,
       agent,

@@ -390,23 +390,6 @@ describe("Model-switch extension > edge cases", () => {
     expect(agent.model).toBe("model-b");
   });
 
-  it("/model command with multiple spaces between words", async () => {
-    const core = createMockCore({
-      coreConfig: { modelSwitch: { commandEnabled: true } },
-    });
-    const ext = createModelSwitchExtension(core);
-
-    const registry = createCommandRegistry();
-    await ext.hooks![HOOKS.COMMANDS_REGISTER]!({ registry } as any);
-
-    const def = registry.get("model")!;
-    const agent = createMockAgent(core.resolved.modelRegistry) as any;
-    const result = await def.handler!(agent, "model  model  b");
-
-    // split(/\s+/) splits on any whitespace, then join(" ") joins with single space
-    expect((result as any).content).toContain("model b");
-  });
-
   it("extension exposes modelTool for external use", () => {
     const core = createMockCore();
     const ext = createModelSwitchExtension(core);

@@ -15,6 +15,7 @@ import {
   CommandsRegisterPayload,
   getExtensionConfig,
 } from "../../core/extensions/types.ts";
+import { ExtensionError } from "../../core/error.ts";
 
 interface Skill {
   name: string;
@@ -42,7 +43,7 @@ export async function create(core: CoreContext): Promise<ExtensionInstance> {
   const config = getExtensionConfig<SkillsLoaderConfig>(core, "skills");
 
   if (!config.path) {
-    throw new Error("skills path not configured");
+    throw ExtensionError.ConfigFailed("skills", "skills path not configured");
   }
 
   const loader = new SkillsLoader(config.path);

@@ -12,6 +12,7 @@ import type { CoreContext } from "../../core/extensions/types.ts";
 import type { AuthMiddleware } from "./auth.ts";
 import { Agent } from "../../core/agent.ts";
 import { readSessionEntries, replayEntriesIntoContext, listSessionLogs, deleteSessionLog } from "../../core/session/session-log.ts";
+import { AgentError } from "../../core/error.ts";
 
 // ── Types ───────────────────────────────────────────────────────────────────
 
@@ -347,7 +348,7 @@ async function loadLogIntoNewSession(
 ): Promise<{ sessionId: string; agent: unknown }> {
   const entries = await readSessionEntries(logId);
   if (entries.length === 0) {
-    throw new Error(`No entries found for session ${logId}`);
+    throw new AgentError(`No entries found for session ${logId}`);
   }
 
   // Create a new session

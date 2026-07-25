@@ -169,6 +169,10 @@ export class ConfigError extends AppError {
       `Configuration validation failed: ${errors.join("; ")}`,
     );
   }
+
+  static MissingConfig(name: string): ConfigError {
+    return new ExtensionError(`Missing required configuration: '${name}'`);
+  }
 }
 
 /**

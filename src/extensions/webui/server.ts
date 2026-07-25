@@ -7,6 +7,7 @@ import { logger } from "../../core/logger.ts";
 import { CoreContext, getExtensionConfig } from "../../core/extensions/types.ts";
 
 import webuiFrontend from "./ui/index.html";
+import { ExtensionError } from "../../core/error.ts";
 
 // ── Types ───────────────────────────────────────────────────────────────────
 
@@ -35,15 +36,13 @@ export async function createWebuiServer(
   const { port, host, apiKey, sessionTokenTtlMin } = config;
 
   if (!apiKey) {
-    throw new Error(
-      "No API key configured. Set webui.apiKey in config or HOTDOG_WEBUI_API_KEY env var.",
-    );
+    throw ExtensionError.ConfigFailed('webui', "No API key configured. Set webui.apiKey in config or HOTDOG_WEBUI_API_KEY env var.")
   }
 
   const webuiConfig = getExtensionConfig<WebuiConfig>(core, "webui");
   const maxAgeSecs = webuiConfig.maxAgeSecs;
   if (!maxAgeSecs) {
-    throw new Error("missing required webui.maxAgeSecs configuration");
+    throw ExtensionError.ConfigFailed('webui', "missing required webui.maxAgeSecs configuration");
   }
 
   const authMiddleware = createAuthMiddleware({

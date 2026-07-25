@@ -595,6 +595,8 @@ export function resolveExtensionConfig(
   return result;
 }
 
+import type { ProviderDef } from "./providers.ts";
+
 /**
  * Resolve a model name to provider/model format.
  */
@@ -609,11 +611,6 @@ export function resolveModelWithProvider(
     if (match) return `${provider.name}/${name}`;
   }
   return name;
-}
-
-interface ProviderDef {
-  name: string;
-  models: Array<{ name: string }>;
 }
 
 /**

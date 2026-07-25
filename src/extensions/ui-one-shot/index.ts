@@ -12,7 +12,7 @@ import { MarkerMangler } from "../../core/marker-mangler.ts";
 import { SessionManager } from "../../core/session/index.ts";
 import { Agent } from "../../core/agent.ts";
 import { OneShotChannel } from "./oneshot-channel.ts";
-import { CoreContext, ExtensionInstance } from "../../core/extensions/types.ts";
+import { CoreContext, ExtensionInstance, ResolvedConfig } from "../../core/extensions/types.ts";
 
 // ── Types ──────────────────────────────────────────────────────────────────
 
@@ -22,30 +22,6 @@ interface CliArgs {
   theme?: string;
   sessionId?: string;
   args?: string[];
-  [key: string]: unknown;
-}
-
-interface ResolvedConfig {
-  baseUrl: string;
-  apiKey: string;
-  stream?: boolean;
-  chatTimeout: number;
-  maxRetries: number;
-  model: string;
-  maxIterations: number;
-  contextLimit?: number;
-  hideTools?: boolean;
-  hideThinking?: boolean;
-  showTokenUse?: boolean;
-  thinkerFormat?: string;
-  toolFormat?: string;
-  toolOutputFmt?: string;
-  profileName: string;
-  role?: string;
-  profileBody?: string;
-  modelRegistry: Record<string, unknown>;
-  taskProfile?: string;
-  taskDefaultRole?: string;
   [key: string]: unknown;
 }
 

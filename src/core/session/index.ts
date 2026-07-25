@@ -9,6 +9,7 @@ import { OUTPUT_EVENT, OutputEvent } from "../context/output.ts";
 import { formatError } from "../error.ts";
 import { logger } from "../logger.ts";
 import type { CommandRegistryLike } from "../commands.ts";
+import type { LlmClient } from "../llm-client/client.ts";
 
 export interface AgentLike {
   sessionId: string;
@@ -117,13 +118,12 @@ export interface SessionManagerOptions {
   hooks: {
     notifyHooks(hookName: string, data: unknown): void;
   };
-  extensions: unknown;
   buildAgent: (config: Record<string, unknown>) => Promise<AgentLike>;
   serializer?: Serializer | null;
   initialConfig?: Record<string, unknown>;
   /** LLM client — when provided, SessionManager owns it and passes it through
    *  buildAgent config. Prevents each entry point from creating its own instance. */
-  llmClient?: unknown;
+  llmClient?: LlmClient;
   /** Model registry — passed through buildAgent config and used by TaskManager. */
   modelRegistry?: Record<string, unknown>;
   /** Core config — used by TaskManager. */
@@ -151,7 +151,6 @@ export type SessionEventHandler = (event: OutputEvent) => void;
  */
 export class SessionManager {
   #hooks: SessionManagerOptions["hooks"];
-  #extensions: unknown;
   #buildAgent: (config: Record<string, unknown>) => Promise<AgentLike>;
   #serializer: Serializer | null;
   #store: SessionStore;
@@ -162,7 +161,7 @@ export class SessionManager {
   /** Internally owned TaskManager (created when taskConfig is provided). */
   #taskManager: TaskManager | null;
   /** LLM client — owned by SessionManager, passed through buildAgent config. */
-  #llmClient: unknown;
+  #llmClient: LlmClient | null;
   /** Per-session QUESTION event buffer — holds questions emitted while no channels
    *  are connected, so they can be replayed when a channel reconnects. */
   #questionBuffers: Map<string, unknown[][]>;
@@ -195,7 +194,6 @@ export class SessionManager {
 
   constructor(options: SessionManagerOptions) {
     this.#hooks = options.hooks;
-    this.#extensions = options.extensions;
     this.#serializer = options.serializer || null;
     this.#store = new SessionStore();
     this.#currentSessionId = null;
@@ -603,7 +601,7 @@ export class SessionManager {
     }
 
     // Start the bus run loop (non-blocking)
-    const runLoop = bus.run().catch((err: unknown) => {
+    const runLoop = bus.run().catch((err: Error) => {
       logger.error(`[session ${sessionId}] bus error: ${formatError(err)}`);
     });
 

@@ -19,7 +19,7 @@ import {
   SchemaLayer,
 } from "../../core/config/schema-loader.ts";
 import { Agent } from "../../core/agent.ts";
-import { CoreContext, ExtensionInstance } from "../../core/extensions/types.ts";
+import { CoreContext, ExtensionInstance, ResolvedConfig } from "../../core/extensions/types.ts";
 import path from "node:path";
 import fs from "node:fs/promises";
 
@@ -33,26 +33,6 @@ interface CliArgs {
   skillsPath?: string;
   profile?: string;
   provider?: string;
-  [key: string]: unknown;
-}
-
-interface ResolvedConfig {
-  baseUrl: string;
-  apiKey: string;
-  model: string;
-  chatTimeout: number;
-  maxRetries: number;
-  profileName: string;
-  profile: Record<string, unknown>;
-  activeProvider?: string;
-  configDir?: string;
-  modelRegistry: Record<string, unknown>;
-  maxIterations?: number;
-  contextLimit?: number;
-  profileBody?: string;
-  role?: string;
-  profilesPath?: string;
-  aspects?: string[];
   [key: string]: unknown;
 }
 

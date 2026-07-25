@@ -1,9 +1,9 @@
 // Agent - the core AI agent with tool calling support.
 
-import { Message, type ImageAttachment as MessageImageAttachment } from "./context/message.ts";
+import { Message, type ImageAttachment } from "./context/message.ts";
 import { MessageLog } from "./context/message-log.ts";
 import { OUTPUT_EVENT, OutputEvent } from "./context/output.ts";
-import { AgentError, LlmError } from "./error.ts";
+import { AgentError, ConfigError, LlmError } from "./error.ts";
 import { HOOKS, HookSystem, type ContextHookResult, type ProviderRequestHookResult } from "./hooks.ts";
 import { isPromise } from "../utils/promise.ts";
 import { ACTIONS, ParsedCommand, Command } from "./commands.ts";
@@ -43,12 +43,6 @@ export type TypedModelRegistry = Record<string, ModelConfig>;
 export interface OutputSink {
   emit(event: OutputEvent): void;
   onTaskComplete?: (result: string) => void;
-}
-
-export interface ImageAttachment {
-  type: string;
-  mimeType: string;
-  data: string;
 }
 
 /**
@@ -129,10 +123,10 @@ export class Agent {
 
   constructor(options: AgentOptions) {
     if (options.maxIterations == null) {
-      throw new Error("missing required maxIterations");
+      throw ConfigError.MissingConfig("maxIterations");
     }
     if (options.contextLimit == null) {
-      throw new Error("missing required contextLimit");
+      throw ConfigError.MissingConfig("contextLimit");
     }
     this.hooks = options.hooks;
     this.#toolRegistry = options.toolRegistry;
@@ -301,7 +295,7 @@ export class Agent {
       await this.ensureSystemPrompt();
 
       // Add user input to context
-      const userMsg = new Message({ role: "user", content: userInput, images: images as MessageImageAttachment[] | null });
+      const userMsg = new Message({ role: "user", content: userInput, images: images as ImageAttachment[] | null });
       this.addMessage(userMsg);
 
       // Emit user message to output sinks so connected clients see it

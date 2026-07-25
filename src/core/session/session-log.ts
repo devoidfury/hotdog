@@ -5,7 +5,7 @@
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { readFile, access, readdir, stat, unlink } from "node:fs/promises";
-import { Message, type ImageAttachment as MessageImageAttachment } from "../context/message.ts";
+import { Message, type ToolCall, type ImageAttachment as MessageImageAttachment } from "../context/message.ts";
 import { logger } from "../logger.ts";
 
 // ── Log Source Types ────────────────────────────────────────────────────────
@@ -27,7 +27,7 @@ export interface LogEntry {
   content: string;
   images?: Array<{ type: string; mimeType: string; data: string }>;
   reasoning_content?: string | null;
-  tool_calls?: unknown[] | null;
+  tool_calls?: ToolCall[] | null;
   tool_call_id?: string | null;
 }
 

@@ -21,6 +21,7 @@ import {
   replayEntriesIntoContext,
 } from "../../core/session/session-log.ts";
 import { CoreContext, ExtensionInstance } from "../../core/extensions/types.ts";
+import { ExtensionError } from "../../core/error.ts";
 
 const HELP_TEXT = `
 Commands:
@@ -292,7 +293,7 @@ export async function runInteractiveSession(
   const { resolved, config } = core;
 
   if (!resolved) {
-    throw new Error("configuration must be resolved first")
+    throw ExtensionError.ConfigFailed("ui-interactive-cli", "configuration must be resolved first")
   }
 
   // Create output sink

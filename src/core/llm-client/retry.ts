@@ -1,6 +1,6 @@
 // Retry with backoff utility.
 
-import { LlmError } from "../error.ts";
+import { ConfigError, LlmError } from "../error.ts";
 
 /**
  * Extract the HTTP status code from an LlmError message.
@@ -53,7 +53,7 @@ export async function retryWithBackoff<T>(
   const { signal } = options;
 
   if (maxRetries == null) {
-    throw new Error("missing required maxRetries");
+    throw ConfigError.MissingConfig("maxRetries");
   }
 
   if (signal?.aborted) {

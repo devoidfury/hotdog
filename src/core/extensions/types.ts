@@ -226,13 +226,41 @@ export interface CoreContext {
 /**
  * Resolved configuration attached to core after buildConfig().
  * Includes all resolved schema keys plus agent-specific extras.
+ * Used by extensions that need access to the fully resolved config.
  */
 export interface ResolvedConfig {
-  modelRegistry?: Record<string, ModelConfig>;
+  // Core schema keys (commonly accessed)
+  baseUrl: string;
+  apiKey: string;
+  model: string;
+  chatTimeout: number;
+  maxRetries: number;
+  maxIterations: number;
+  profileName: string;
+  profile: Record<string, unknown>;
+
+  // Optional schema keys
+  stream?: boolean;
+  contextLimit?: number;
+  hideTools?: boolean;
+  hideThinking?: boolean;
+  showTokenUse?: boolean;
+  thinkerFormat?: string;
+  toolFormat?: string;
+  toolOutputFmt?: string;
+  profileBody?: string;
+  role?: string;
+  aspects?: unknown[];
+  taskProfile?: string;
+  taskDefaultRole?: string;
+  profilesPath?: string;
+
+  // Agent-specific extras
+  modelRegistry: Record<string, ModelConfig>;
   activeProvider?: string;
-  profile?: Record<string, unknown>;
-  profileName?: string;
   configDir?: string;
+
+  // Allow access to any other resolved config keys
   [key: string]: unknown;
 }
 

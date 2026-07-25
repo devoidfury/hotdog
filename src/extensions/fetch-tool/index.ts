@@ -16,6 +16,10 @@ import {
   ToolExecutionContext,
 } from "../../core/extensions/types.ts";
 
+import pkg from "../../../package.json" with { type: "json" };
+
+const USER_AGENT = `hotdog/v${pkg.version} NOT Mozilla/5.0 (probably running linux; probably x64) AND NOT AppleWebKit/666.42 (NOT KHTML, unlike Gecko) NOR Chrome/127.0.0.1 ALSO NOT Safari/420.69`;
+
 const VALID_METHODS = ["GET", "POST", "PUT", "DELETE", "PATCH", "HEAD"] as const;
 const METHODS_WITH_BODY = ["POST", "PUT", "PATCH"] as const;
 
@@ -83,6 +87,7 @@ export class FetchTool {
         method,
         headers: {
           "Content-Type": "application/json",
+          "User-Agent": USER_AGENT,
           ...headers,
         },
         body: (METHODS_WITH_BODY.includes(method as typeof METHODS_WITH_BODY[number]) && body) || undefined,

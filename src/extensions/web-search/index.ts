@@ -13,9 +13,11 @@ import {
 import { HOOKS } from "../../core/hooks.ts";
 
 import extensionData from "./extension.json" with { type: "json" };
+import pkg from "../../../package.json" with { type: "json" };
 
-const USER_AGENT =
-  "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
+import type { CoreContext, ExtensionInstance } from "../../core/extensions/types.ts";
+
+const USER_AGENT = `hotdog/v${pkg.version} NOT Mozilla/5.0 (probably running linux; probably x64) AND NOT AppleWebKit/666.42 (NOT KHTML, unlike Gecko) NOR Chrome/127.0.0.1 ALSO NOT Safari/420.69`;
 
 // ── Types ───────────────────────────────────────────────────────────────────
 
@@ -361,9 +363,6 @@ export class WebSearchTool {
   }
 }
 
-// ── Extension Entry Point ───────────────────────────────────────────────────
-
-import type { CoreContext, ExtensionInstance } from "../../core/extensions/types.ts";
 
 /**
  * Create the web-search extension.
@@ -383,7 +382,7 @@ export function create(core: CoreContext): ExtensionInstance {
 
   return {
     hooks: {
-      [HOOKS.TOOLS_REGISTER]: async (registry: { register: (name: string, tool: unknown) => void }) => {
+      [HOOKS.TOOLS_REGISTER]: async (registry) => {
         const tool = new WebSearchTool({
           provider,
           maxResults: config.maxResults,

@@ -158,11 +158,7 @@ export class ToolExecutor {
     let success: boolean;
     let stopLoop = false;
     try {
-      result = await (
-        tool as {
-          execute: (input: string, ctx: ToolContext) => Promise<unknown>;
-        }
-      ).execute(input, toolCtx);
+      result = await tool.execute(input, toolCtx);
       success = true;
       // Check for stop-loop sentinel on ToolResult
       if (result && typeof result === "object" && (result as Record<symbol, unknown>)[TOOL_STOP_LOOP] === true) {

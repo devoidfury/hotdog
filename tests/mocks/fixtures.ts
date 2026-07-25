@@ -221,10 +221,10 @@ export function createMockCore(config: {
     } as unknown as NonNullable<CoreContext["extensions"]>,
     buildConfig:
       config.buildConfig ||
-      (async () => ({
+      (async (_cli: Record<string, unknown>) => ({
         resolved,
         modelRegistry: config.modelRegistry || {},
         providers: config.providers || [],
       })) as CoreContext["buildConfig"],
-  } as CoreContext;
+  } as unknown as CoreContext;
 }

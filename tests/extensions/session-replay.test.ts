@@ -10,6 +10,7 @@ import {
   SessionLog,
   disabledSessionLog,
 } from "../../src/extensions/session-log/session-log.ts";
+import type { LogEntry } from "../../src/core/session/session-log.ts";
 import { Message } from "../../src/core/context/message.ts";
 import { MessageLog } from "../../src/core/context/message-log.ts";
 import { mkdirSync, rmSync } from "node:fs";
@@ -54,11 +55,11 @@ function createMockAgent(sessionId?: string) {
 
 test("replayEntriesIntoContext replays user and assistant messages", () => {
   const agent = createMockAgent();
-  const entries = [
-    { role: "user", source: LOG_SOURCE.INPUT, content: "Hello" },
-    { role: "assistant", source: LOG_SOURCE.LLM, content: "Hi there" },
-    { role: "user", source: LOG_SOURCE.INPUT, content: "How are you?" },
-    { role: "assistant", source: LOG_SOURCE.LLM, content: "I'm fine" },
+  const entries: LogEntry[] = [
+    { ts: "2024-01-01T00:00:00Z", session_id: "test", source: LOG_SOURCE.INPUT, content: "Hello" },
+    { ts: "2024-01-01T00:00:01Z", session_id: "test", source: LOG_SOURCE.LLM, content: "Hi there" },
+    { ts: "2024-01-01T00:00:02Z", session_id: "test", source: LOG_SOURCE.INPUT, content: "How are you?" },
+    { ts: "2024-01-01T00:00:03Z", session_id: "test", source: LOG_SOURCE.LLM, content: "I'm fine" },
   ];
 
   const replayed = replayEntriesIntoContext(agent, entries);
@@ -72,10 +73,10 @@ test("replayEntriesIntoContext replays user and assistant messages", () => {
 
 test("replayEntriesIntoContext skips system prompt entries", () => {
   const agent = createMockAgent();
-  const entries = [
-    { role: "system", source: LOG_SOURCE.SYSTEM_PROMPT, content: "You are a helpful assistant" },
-    { role: "user", source: LOG_SOURCE.INPUT, content: "Hello" },
-    { role: "assistant", source: LOG_SOURCE.LLM, content: "Hi" },
+  const entries: LogEntry[] = [
+    { ts: "2024-01-01T00:00:00Z", session_id: "test", source: LOG_SOURCE.SYSTEM_PROMPT, content: "You are a helpful assistant" },
+    { ts: "2024-01-01T00:00:01Z", session_id: "test", source: LOG_SOURCE.INPUT, content: "Hello" },
+    { ts: "2024-01-01T00:00:02Z", session_id: "test", source: LOG_SOURCE.LLM, content: "Hi" },
   ];
 
   const replayed = replayEntriesIntoContext(agent, entries);
@@ -87,10 +88,10 @@ test("replayEntriesIntoContext skips system prompt entries", () => {
 
 test("replayEntriesIntoContext skips reset entries", () => {
   const agent = createMockAgent();
-  const entries = [
-    { role: "user", source: LOG_SOURCE.INPUT, content: "Before reset" },
-    { role: "user", source: LOG_SOURCE.RESET, content: "" },
-    { role: "assistant", source: LOG_SOURCE.LLM, content: "After reset" },
+  const entries: LogEntry[] = [
+    { ts: "2024-01-01T00:00:00Z", session_id: "test", source: LOG_SOURCE.INPUT, content: "Before reset" },
+    { ts: "2024-01-01T00:00:01Z", session_id: "test", source: LOG_SOURCE.RESET, content: "" },
+    { ts: "2024-01-01T00:00:02Z", session_id: "test", source: LOG_SOURCE.LLM, content: "After reset" },
   ];
 
   const replayed = replayEntriesIntoContext(agent, entries);
@@ -103,8 +104,9 @@ test("replayEntriesIntoContext skips reset entries", () => {
 test("replayEntriesIntoContext handles tool calls in assistant messages", () => {
   const agent = createMockAgent();
   const toolCalls = [{ id: "tc_1", type: "function", function: { name: "bash", arguments: "ls" } }];
-  const entries = [{
-    role: "assistant",
+  const entries: LogEntry[] = [{
+    ts: "2024-01-01T00:00:00Z",
+    session_id: "test",
     source: LOG_SOURCE.LLM,
     content: "Let me check",
     tool_calls: toolCalls,
@@ -119,8 +121,9 @@ test("replayEntriesIntoContext handles tool calls in assistant messages", () => 
 
 test("replayEntriesIntoContext handles tool result entries", () => {
   const agent = createMockAgent();
-  const entries = [{
-    role: "tool",
+  const entries: LogEntry[] = [{
+    ts: "2024-01-01T00:00:00Z",
+    session_id: "test",
     source: LOG_SOURCE.TOOL_RESULT,
     content: "<output>done</output>",
     tool_call_id: "tc_1",
@@ -136,8 +139,9 @@ test("replayEntriesIntoContext handles tool result entries", () => {
 
 test("replayEntriesIntoContext handles compaction entries as user messages", () => {
   const agent = createMockAgent();
-  const entries = [{
-    role: "user",
+  const entries: LogEntry[] = [{
+    ts: "2024-01-01T00:00:00Z",
+    session_id: "test",
     source: LOG_SOURCE.COMPACTION,
     content: "<system-notice>[Compacted 5 messages]\n\nUser asked about JS, assistant explained closures.</system-notice>",
   }];
@@ -150,7 +154,7 @@ test("replayEntriesIntoContext handles compaction entries as user messages", () 
 
 test("replayEntriesIntoContext handles PROMPT source as user messages", () => {
   const agent = createMockAgent();
-  const entries = [{ role: "user", source: LOG_SOURCE.PROMPT, content: "Prompt template rendered content" }];
+  const entries: LogEntry[] = [{ ts: "2024-01-01T00:00:00Z", session_id: "test", source: LOG_SOURCE.PROMPT, content: "Prompt template rendered content" }];
 
   const replayed = replayEntriesIntoContext(agent, entries);
   expect(replayed).toBe(1);
@@ -160,13 +164,16 @@ test("replayEntriesIntoContext handles PROMPT source as user messages", () => {
 
 test("replayEntriesIntoContext handles mixed entry types", () => {
   const agent = createMockAgent();
-  const entries = [
-    { role: "user", source: LOG_SOURCE.INPUT, content: "Hello" },
-    { role: "assistant", source: LOG_SOURCE.LLM, content: "Hi there" },
-    { role: "tool", source: LOG_SOURCE.TOOL_RESULT, content: "result", tool_call_id: "tc_1" },
-    { role: "user", source: LOG_SOURCE.INPUT, content: "Next" },
+  const entries: LogEntry[] = [
+    { ts: "2024-01-01T00:00:00Z", session_id: "test", source: LOG_SOURCE.INPUT, content: "Hello" },
+    { ts: "2024-01-01T00:00:01Z", session_id: "test", source: LOG_SOURCE.LLM, content: "Hi there" },
+    { ts: "2024-01-01T00:00:02Z", session_id: "test", source: LOG_SOURCE.TOOL_RESULT, content: "result", tool_call_id: "tc_1" },
+    { ts: "2024-01-01T00:00:03Z", session_id: "test", source: LOG_SOURCE.INPUT, content: "Next" },
     {
-      role: "assistant", source: LOG_SOURCE.LLM, content: "Done",
+      ts: "2024-01-01T00:00:04Z",
+      session_id: "test",
+      source: LOG_SOURCE.LLM,
+      content: "Done",
       tool_calls: [{ id: "tc_2", type: "function", function: { name: "read", arguments: "file.txt" } }],
     },
   ];
@@ -198,7 +205,7 @@ test("replayEntriesIntoContext handles null/undefined entries", () => {
 
 test("replayEntriesIntoContext handles assistant without reasoning or tool_calls", () => {
   const agent = createMockAgent();
-  const entries = [{ role: "assistant", source: LOG_SOURCE.LLM, content: "Simple response" }];
+  const entries: LogEntry[] = [{ ts: "2024-01-01T00:00:00Z", session_id: "test", source: LOG_SOURCE.LLM, content: "Simple response" }];
 
   const replayed = replayEntriesIntoContext(agent, entries);
   expect(replayed).toBe(1);
@@ -209,7 +216,7 @@ test("replayEntriesIntoContext handles assistant without reasoning or tool_calls
 
 test("replayEntriesIntoContext handles tool result without tool_call_id", () => {
   const agent = createMockAgent();
-  const entries = [{ role: "tool", source: LOG_SOURCE.TOOL_RESULT, content: "no id" }];
+  const entries: LogEntry[] = [{ ts: "2024-01-01T00:00:00Z", session_id: "test", source: LOG_SOURCE.TOOL_RESULT, content: "no id" }];
 
   const replayed = replayEntriesIntoContext(agent, entries);
   expect(replayed).toBe(1);
@@ -219,9 +226,9 @@ test("replayEntriesIntoContext handles tool result without tool_call_id", () => 
 test("replayEntriesIntoContext skips unknown source types", () => {
   const agent = createMockAgent();
   const entries = [
-    { role: "user", source: LOG_SOURCE.INPUT, content: "Hello" },
-    { role: "unknown", source: "unknown_source", content: "skip me" },
-    { role: "assistant", source: LOG_SOURCE.LLM, content: "World" },
+    { source: LOG_SOURCE.INPUT, content: "Hello" },
+    { source: "unknown_source", content: "skip me" },
+    { source: LOG_SOURCE.LLM, content: "World" },
   ];
 
   const replayed = replayEntriesIntoContext(agent, entries as any);
@@ -296,7 +303,7 @@ test("Session restoration: successive one-shot prompts resume correctly", async 
     expect(agent.log.at(3)!.content).toBe("I don't have access to weather data.");
 
     // Simulate third prompt being added
-    agent.addMessage(new Message({ role: "user", content: "Tell me a joke." }));
+    agent.addMessage(new Message({ content: "Tell me a joke." }));
     agent.addMessage(new Message({
       role: "assistant",
       content: "Why did the chicken cross the road? To get to the other side!",

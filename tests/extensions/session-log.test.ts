@@ -14,6 +14,7 @@ import {
   createPromptEntry,
   replayEntriesIntoContext,
 } from "../../src/extensions/session-log/session-log.ts";
+import type { LogEntry } from "../../src/core/session/session-log.ts";
 import { Message } from "../../src/core/context/message.ts";
 import { MessageLog } from "../../src/core/context/message-log.ts";
 import { mkdirSync, rmSync, readFileSync, writeFileSync } from "node:fs";
@@ -455,8 +456,8 @@ test("readAllSessions reads from multiple session files", async () => {
 
 test("replayEntriesIntoContext preserves images in user messages", () => {
   const agent = createMockAgent();
-  const entries = [
-    { role: "user", source: LOG_SOURCE.INPUT, content: "What is this?", images: [{ type: "image_url", mimeType: "image/png", data: "abc" }] },
+  const entries: LogEntry[] = [
+    { ts: "2024-01-01T00:00:00Z", session_id: "test", source: LOG_SOURCE.INPUT, content: "What is this?", images: [{ type: "image_url", mimeType: "image/png", data: "abc" }] },
   ];
 
   const replayed = replayEntriesIntoContext(agent, entries);
@@ -468,9 +469,10 @@ test("replayEntriesIntoContext preserves images in user messages", () => {
 
 test("replayEntriesIntoContext handles multiple images", () => {
   const agent = createMockAgent();
-  const entries = [
+  const entries: LogEntry[] = [
     {
-      role: "user",
+      ts: "2024-01-01T00:00:00Z",
+      session_id: "test",
       source: LOG_SOURCE.INPUT,
       content: "Compare these",
       images: [
@@ -489,8 +491,8 @@ test("replayEntriesIntoContext handles multiple images", () => {
 
 test("replayEntriesIntoContext handles PROMPT source with images", () => {
   const agent = createMockAgent();
-  const entries = [
-    { role: "user", source: LOG_SOURCE.PROMPT, content: "Template with image", images: [{ type: "image_url", mimeType: "image/webp", data: "webpimg" }] },
+  const entries: LogEntry[] = [
+    { ts: "2024-01-01T00:00:00Z", session_id: "test", source: LOG_SOURCE.PROMPT, content: "Template with image", images: [{ type: "image_url", mimeType: "image/webp", data: "webpimg" }] },
   ];
 
   const replayed = replayEntriesIntoContext(agent, entries);
@@ -503,8 +505,8 @@ test("replayEntriesIntoContext handles PROMPT source with images", () => {
 
 test("replayed message getTextContent returns text without images", () => {
   const agent = createMockAgent();
-  const entries = [
-    { role: "user", source: LOG_SOURCE.INPUT, content: "What is this?", images: [{ type: "image_url", mimeType: "image/png", data: "abc" }] },
+  const entries: LogEntry[] = [
+    { ts: "2024-01-01T00:00:00Z", session_id: "test", source: LOG_SOURCE.INPUT, content: "What is this?", images: [{ type: "image_url", mimeType: "image/png", data: "abc" }] },
   ];
 
   replayEntriesIntoContext(agent, entries);

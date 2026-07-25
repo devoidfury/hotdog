@@ -230,14 +230,14 @@ describe("resolveLayerValue", () => {
   it("resolves from provider source with dot path", () => {
     const layer = { source: "provider", path: "url" };
     expect(
-      resolveLayerValue(layer, { provider: { url: "http://provider" } })
+      resolveLayerValue(layer, { provider: { name: "test", models: [], url: "http://provider" } })
     ).toBe("http://provider");
   });
 
   it("resolves from provider source with nested dot path", () => {
     const layer = { source: "provider", path: "nested.value" };
     expect(
-      resolveLayerValue(layer, { provider: { nested: { value: "deep" } } })
+      resolveLayerValue(layer, { provider: { name: "test", models: [], nested: { value: "deep" } } as any })
     ).toBe("deep");
   });
 
@@ -252,13 +252,25 @@ describe("resolveLayerValue", () => {
 
   it("returns undefined for providerDefault with no models", () => {
     const layer = { source: "providerDefault" };
-    expect(resolveLayerValue(layer, { provider: { name: "test" } })).toBeUndefined();
+    expect(resolveLayerValue(layer, { provider: { name: "test", models: [] } })).toBeUndefined();
   });
 
   it("resolves from profile source", () => {
     const layer = { source: "profile", key: "role" };
     expect(
-      resolveLayerValue(layer, { profile: { role: "Profile role" } })
+      resolveLayerValue(layer, {
+        profile: {
+          name: "test",
+          description: "test",
+          role: "Profile role",
+          body: "",
+          model: null,
+          blacklistTools: [],
+          whitelistTools: null,
+          manager: false,
+          visibleWorker: false,
+        },
+      })
     ).toBe("Profile role");
   });
 

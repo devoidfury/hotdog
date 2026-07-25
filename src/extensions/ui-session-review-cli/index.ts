@@ -135,7 +135,7 @@ async function runShow(
     fileInfos.sort((a: { mtime: number }, b: { mtime: number }) => b.mtime - a.mtime);
     const mostRecent = fileInfos[0] as { name: string };
     const entries = await readSessionEntries(mostRecent.name);
-    return printToolIndex(entries as LogEntry[], cli.wantsJson ?? false);
+    return printToolIndex(entries as unknown as LogEntry[], cli.wantsJson ?? false);
   }
   return listSessions(cli.wantsJson ?? false, sessionsDir, palette);
 }
@@ -316,7 +316,7 @@ async function reviewSession(
   }
 
   if (toolIndex) {
-    return printToolIndex(entries as LogEntry[], json);
+    return printToolIndex(entries as unknown as LogEntry[], json);
   }
 
   if (json) {
@@ -327,7 +327,7 @@ async function reviewSession(
   console.log(`=== Session: ${sessionId} ===`);
   console.log(`Entries: ${(entries as unknown[]).length}\n`);
 
-  for (const entry of entries as LogEntry[]) {
+  for (const entry of entries as unknown as LogEntry[]) {
     const ts = entry.ts ? new Date(entry.ts).toLocaleTimeString() : "unknown";
     const role = entry.role || entry.source;
     const content = entry.content || entry.result || "";

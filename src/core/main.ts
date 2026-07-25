@@ -27,7 +27,10 @@ import {
   failOnInvalidConfig,
   type CliArgv,
   type AgentConfig,
+  type ProfileDef,
 } from "./config/index.ts";
+import type { ResolvedConfig } from "./extensions/types.ts";
+import type { ModelConfig, ProviderDef } from "./config/providers.ts";
 import { parseAs } from "../utils/json-schema.ts";
 import {
   cliFlagsFromSchema,
@@ -136,8 +139,13 @@ async function loadExtensions(
 export interface CoreInfrastructure extends LoaderCore {
   extensions: ExtensionLoader;
   service: (name: string) => unknown;
-  buildConfig?: typeof buildConfig;
-  resolved?: AgentConfig;
+  buildConfig?: (cli: Record<string, unknown>) => Promise<{
+    resolved: ResolvedConfig;
+    modelRegistry: Record<string, ModelConfig>;
+    providers: ProviderDef[];
+  }>;
+  resolved?: ResolvedConfig;
+  config: CoreConfig & Record<string, unknown>;
 }
 
 function createCore(
@@ -159,10 +167,10 @@ function createCore(
   // This must be done BEFORE creating the extension loader, because
   // extensions access core.config.profile during create() (e.g., subagents
   // checks core.config.profile.manager to decide whether to register tools).
-  const coreConfig: CoreConfig = {
+  const coreConfig: CoreConfig & Record<string, unknown> = {
     ...config,
     profileName: options.profileName || config.profileName || "default",
-    profile: options.profile || config.profile || {},
+    profile: (options.profile || config.profile || {}) as ProfileDef | undefined,
   };
 
   const extensions = createExtensionLoader({
@@ -284,9 +292,7 @@ export async function main(): Promise<number> {
     cli: cli as Record<string, unknown>,
     config: config as Record<string, unknown>,
     configDir: resolved.configDir,
-    provider: resolved.activeProvider
-      ? { name: resolved.activeProvider }
-      : null,
+    provider: null,
     profile: resolved.profile,
     profileName: resolved.profileName,
   };
@@ -310,7 +316,7 @@ export async function main(): Promise<number> {
   });
 
   // Attach resolved config to core so extensions can access it
-  core.resolved = resolved;
+  core.resolved = resolved as ResolvedConfig;
 
   // ── Load extensions ──────────────────────────────────────────────────────
   // Extensions register their handlers in create() via cliSubcommandRegistry.register().

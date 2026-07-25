@@ -198,6 +198,7 @@ describe("ToolRegistry.validateToolArgs", () => {
       toToolDef() {
         return { type: "function", function: { name, description: "test", parameters: params } };
       },
+      callDisplay() { return `${name}()`; },
       execute: async () => "ok",
     });
   }
@@ -205,7 +206,12 @@ describe("ToolRegistry.validateToolArgs", () => {
   it("returns null for unknown tool or tool without params", async () => {
     const registry = new ToolRegistry();
     expect(await registry.validateToolArgs("nonexistent", "{}")).toBeNull();
-    registry.register("no-def", { execute: async () => "ok" });
+    // Register a tool without a toToolDef — should return null gracefully
+    registry.register("no-def", {
+      toToolDef: () => null,
+      callDisplay: () => "no-def()",
+      execute: async () => "ok",
+    });
     expect(await registry.validateToolArgs("no-def", "{}")).toBeNull();
     registerTool(registry, "no-params", {});
     expect(await registry.validateToolArgs("no-params", '{"a": 1}')).toBeNull();

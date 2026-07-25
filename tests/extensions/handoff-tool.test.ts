@@ -423,8 +423,8 @@ describe("handoff-tool create() extension", () => {
 
     // Should emit error but not throw
     expect(emitCalls).toHaveLength(1);
-    expect(emitCalls[0].type).toBe("command_result");
-    expect(emitCalls[0].data).toHaveProperty("content");
-    expect((emitCalls[0].data as { content: string }).content).toContain("Handoff error");
+    expect(emitCalls[0]!.type).toBe("command_result");
+    expect(emitCalls[0]!.data).toHaveProperty("content");
+    expect((emitCalls[0]!.data as { content: string }).content).toContain("Handoff error");
   });
 });

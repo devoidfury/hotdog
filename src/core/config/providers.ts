@@ -30,7 +30,7 @@ export interface ProviderModelEntry {
 
 export interface ProviderDef {
   name: string;
-  url: string;
+  url?: string;
   apiKey?: string;
   models: ProviderModelEntry[];
   defaultModel?: string;

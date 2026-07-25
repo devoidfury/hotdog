@@ -3,7 +3,7 @@
 // Registers subcommands via the cli:subcommandsRegister hook.
 
 import { HOOKS } from "../../core/hooks.ts";
-import { LlmClient } from "../../core/llm-client/client.ts";
+import { LlmClient, ProviderConfig } from "../../core/llm-client/client.ts";
 import { SkillsLoader } from "../skills/loader.ts";
 import {
   DEFAULT_PROFILES_SUBPATH,
@@ -22,6 +22,7 @@ import {
   resolveLayerValue,
   SchemaProperty,
   SchemaLayer,
+  type ResolutionContext,
 } from "../../core/config/schema-loader.ts";
 import { Agent } from "../../core/agent.ts";
 import {
@@ -93,7 +94,7 @@ async function runInfo(cli: CliArgv, core: CoreContext): Promise<number> {
     stream: false,
     chatTimeoutSecs: resolved.chatTimeout,
     maxRetries: resolved.maxRetries,
-    providers: (rawConfig.providers as Provider[]) || [],
+    providers: (rawConfig.providers as ProviderConfig[]) || [],
   });
 
   let connectivity: ConnectivityResult;
@@ -161,7 +162,7 @@ function printInfoText(
   }
   if ((resolved.profile?.blacklistTools as string[])?.length > 0) {
     console.log(
-      `  Blacklist Tools: ${(resolved.profile.blacklistTools as string[]).join(", ")}`,
+      `  Blacklist Tools: ${(resolved.profile!.blacklistTools as string[]).join(", ")}`,
     );
   }
 
@@ -228,7 +229,7 @@ function printInfoText(
 function printInfoJson(
   resolved: ResolvedConfig,
   modelRegistry: Record<string, unknown>,
-  providers: Provider[],
+  providers: ProviderDef[],
   skillsLoader: SkillsLoader,
   connectivity: ConnectivityResult,
   config: Record<string, unknown>,
@@ -250,7 +251,7 @@ function printInfoJson(
       configured: providers.map((p) => ({
         name: p.name,
         url: p.url,
-        models: (p.models || []).map((m) => m.name),
+        models: (p.models || []).map((m: { name: string }) => m.name),
       })),
       active: resolved.activeProvider || null,
     },
@@ -304,7 +305,7 @@ function traceConfigResolution(
   };
 
   // Use the real resolver to get the final value
-  result.resolvedValue = resolveKey(keyName, schema, context);
+  result.resolvedValue = resolveKey(keyName, schema, context as unknown as ResolutionContext);
 
   // Walk layers to build trace display info (separate from resolution logic)
   for (const layer of layers || []) {
@@ -315,7 +316,7 @@ function traceConfigResolution(
     };
 
     if ("default" in layer) {
-      const defaultValue = resolveLayerValue(layer, context);
+      const defaultValue = resolveLayerValue(layer, context as unknown as ResolutionContext);
       layerInfo.matched = true;
       layerInfo.value = defaultValue;
       result.resolvedFrom = "default";
@@ -323,12 +324,12 @@ function traceConfigResolution(
       break;
     }
 
-    const value = resolveLayerValue(layer, context);
+    const value = resolveLayerValue(layer, context as unknown as ResolutionContext);
     layerInfo.value = value;
 
     if (value !== undefined && value !== null && value !== "") {
       if (layer.cast && typeof layer.cast === "function") {
-        const casted = layer.cast(value, context);
+        const casted = layer.cast(value, context as unknown as ResolutionContext);
         if (casted === undefined) {
           layerInfo.castSkipped = true;
           result.layers.push(layerInfo);
@@ -358,19 +359,19 @@ function traceConfigResolution(
  */
 async function printConfigDebug(
   cli: CliArgv,
-  config: Cor,
+  config: Record<string, unknown>,
   providers: ProviderDef[],
   resolved: ResolvedConfig,
 ): Promise<number> {
-  const profileName = cli.profile || (config.profile as string) || "default";
+  const profileName = (cli.profile as string) || (config.profileName as string) || "default";
   const configDir = resolved.configDir || resolveConfigDir(cli.configDir);
   const profilesPath =
     (config.profilesPath as string) ||
     path.join(configDir, DEFAULT_PROFILES_SUBPATH);
   const profileFiles = await loadProfileFiles(profilesPath);
-  const configProfile =
-    (config.profiles as Record<string, ProfileDef>)?.[profileName] ?? null;
-  const fileProfile = profileFiles[profileName] ?? null;
+  const configProfile: ProfileDef | null =
+    ((config.profiles as Record<string, ProfileDef> | undefined)?.[profileName]) ?? null;
+  const fileProfile: ProfileDef | null = profileFiles[profileName] ?? null;
 
   // Provider resolution
   const providerName =
@@ -380,27 +381,17 @@ async function printConfigDebug(
     : null;
 
   // Profile merge
-  let profile: Record<string, unknown>;
-  if (configProfile || fileProfile) {
-    profile = { ...configProfile };
-    if (fileProfile) {
-      if (fileProfile.role) profile.role = fileProfile.role;
-      if (fileProfile.whitelistTools != null)
-        profile.whitelistTools = fileProfile.whitelistTools;
-      if (fileProfile.blacklistTools?.length)
-        profile.blacklistTools = fileProfile.blacklistTools;
-      if (fileProfile.manager) profile.manager = true;
-    }
-  } else {
-    profile = {
-      whitelistTools: null,
-      blacklistTools: [],
-      skills: [],
-      role: null,
-      model: null,
-      manager: false,
-      cwdBoundary: null,
-    };
+  const profile: Record<string, unknown> = {};
+  if (configProfile) {
+    Object.assign(profile, configProfile);
+  }
+  if (fileProfile) {
+    if (fileProfile.role) profile.role = fileProfile.role;
+    if (fileProfile.whitelistTools != null)
+      profile.whitelistTools = fileProfile.whitelistTools;
+    if (fileProfile.blacklistTools?.length)
+      profile.blacklistTools = fileProfile.blacklistTools;
+    if (fileProfile.manager) profile.manager = true;
   }
 
   const context: TraceContext = {
@@ -463,7 +454,7 @@ async function printConfigDebug(
     `  ${"activeProvider".padEnd(25)} → ${resolved.activeProvider || "(none)"}`,
   );
   console.log(
-    `  ${"profile.whitelistTools".padEnd(25)} → ${(resolved.profile?.whitelistTools as string[]) ? JSON.stringify(resolved.profile.whitelistTools) : "(none)"}`,
+    `  ${"profile.whitelistTools".padEnd(25)} → ${(resolved.profile?.whitelistTools as string[]) ? JSON.stringify(resolved.profile!.whitelistTools) : "(none)"}`,
   );
   console.log(
     `  ${"profile.blacklistTools".padEnd(25)} → ${JSON.stringify((resolved.profile?.blacklistTools as string[]) || [])}`,
@@ -925,7 +916,7 @@ export function create(core: CoreContext): ExtensionInstance {
       ) => {
         registry.register("info", {
           description: "Show system info and diagnostics",
-          handler: async (cli, core) => {
+          handler: async (cli: CliArgv, core: CoreContext) => {
             return await runInfo(cli, core);
           },
         });
@@ -938,7 +929,7 @@ export function create(core: CoreContext): ExtensionInstance {
         registry.register("profiles", {
           description:
             "List all available profiles with their roles and tool restrictions",
-          handler: async (cli, core) => {
+          handler: async (cli: CliArgv, core: CoreContext) => {
             return await runProfileList(cli, core);
           },
         });

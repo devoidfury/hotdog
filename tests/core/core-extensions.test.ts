@@ -190,8 +190,16 @@ describe('ExtensionLoader', () => {
           name: 'tool-ext',
           hooks: {
             [HOOKS.TOOLS_REGISTER]: async (registry: any) => {
-              registry.register('my-tool', { execute: () => 'result' });
-              registry.register('another-tool', { execute: () => 'result2' });
+              registry.register('my-tool', {
+                toToolDef: () => ({ type: 'function', function: { name: 'my-tool', description: '', parameters: { type: 'object', properties: {}, required: [] } } }),
+                callDisplay: () => 'my-tool()',
+                execute: () => 'result',
+              });
+              registry.register('another-tool', {
+                toToolDef: () => ({ type: 'function', function: { name: 'another-tool', description: '', parameters: { type: 'object', properties: {}, required: [] } } }),
+                callDisplay: () => 'another-tool()',
+                execute: () => 'result2',
+              });
             },
           },
         }),
@@ -202,7 +210,11 @@ describe('ExtensionLoader', () => {
       expect(core.toolRegistry.has('another-tool')).toBe(true);
 
       // Pre-existing tool should survive unload
-      core.toolRegistry.register('shared-tool', { execute: async () => 'shared' });
+      core.toolRegistry.register('shared-tool', {
+        toToolDef: () => ({ type: 'function', function: { name: 'shared-tool', description: '', parameters: { type: 'object', properties: {}, required: [] } } }),
+        callDisplay: () => 'shared-tool()',
+        execute: async () => 'shared',
+      });
       expect(core.toolRegistry.has('shared-tool')).toBe(true);
 
       await loader.unload('tool-ext');

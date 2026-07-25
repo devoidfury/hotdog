@@ -5,24 +5,24 @@ import type { Tool, ToolDef } from '../../src/core/extensions/tool-registry.ts';
 
 export class MockTool implements Tool {
   name: string;
-  _executeFn: (input: unknown, ctx: unknown) => unknown | Promise<unknown>;
-  _toToolDefFn: () => Record<string, unknown>;
-  _callDisplayFn: ((input: unknown) => string) | null;
+  _executeFn: (input: string | Record<string, unknown> | null, ctx: unknown) => unknown | Promise<unknown>;
+  _toToolDefFn: () => ToolDef;
+  _callDisplayFn: ((input: string | Record<string, unknown> | null) => string) | null;
   executeCount: number;
-  lastInput: unknown;
+  lastInput: string | Record<string, unknown> | null;
   lastContext: unknown;
   [key: string]: unknown;
 
   constructor({ name, execute, toToolDef, callDisplay }: {
     name?: string;
-    execute?: (input: unknown, ctx: unknown) => unknown | Promise<unknown>;
-    toToolDef?: () => Record<string, unknown>;
-    callDisplay?: (input: unknown) => string;
+    execute?: (input: string | Record<string, unknown> | null, ctx: unknown) => unknown | Promise<unknown>;
+    toToolDef?: () => ToolDef;
+    callDisplay?: (input: string | Record<string, unknown> | null) => string;
   } = {}) {
     this.name = name || 'mock-tool';
     this._executeFn = execute || (async () => 'mock result');
     this._toToolDefFn = toToolDef || (() => ({
-      type: 'function' as const,
+      type: 'function',
       function: {
         name: this.name,
         description: 'Mock tool for testing',
@@ -36,17 +36,17 @@ export class MockTool implements Tool {
   }
 
   toToolDef(): ToolDef {
-    return this._toToolDefFn() as unknown as ToolDef;
+    return this._toToolDefFn();
   }
 
-  async execute(input: unknown, ctx: unknown): Promise<unknown> {
+  async execute(input: string | Record<string, unknown> | null, ctx: unknown): Promise<unknown> {
     this.executeCount++;
     this.lastInput = input;
     this.lastContext = ctx;
     return this._executeFn(input, ctx);
   }
 
-  callDisplay(input: unknown): string {
+  callDisplay(input: string | Record<string, unknown> | null): string {
     if (this._callDisplayFn) return this._callDisplayFn(input);
     return `mock-tool(${JSON.stringify(input)})`;
   }
@@ -76,7 +76,7 @@ export function simpleTool(name: string, result: unknown = 'done'): MockTool {
 export function validatedTool(
   name: string,
   schema: { properties?: Record<string, unknown>; required?: string[] },
-  execute: (input: unknown, ctx: unknown) => unknown | Promise<unknown>,
+  execute: (input: string | Record<string, unknown> | null, ctx: unknown) => unknown | Promise<unknown>,
 ): MockTool {
   return new MockTool({
     name,

@@ -80,8 +80,8 @@ export function createAssistantEntry(
 export function createToolResultEntry(
   sessionId: string,
   content: string,
-  toolCallId: string,
-  toolName: string,
+  toolCallId: string | undefined = undefined,
+  toolName: string | undefined = undefined,
 ): LogEntry {
   return {
     ts: now(),
@@ -167,7 +167,7 @@ export class SessionLog {
    */
   async append(entry: LogEntry): Promise<void> {
     await this._ensureDir();
-    const line = JSON.stringify(stripNulls(entry));
+    const line = JSON.stringify(stripNulls(entry as unknown as Record<string, unknown>));
     await appendFile(this.path, line + "\n");
   }
 
@@ -183,7 +183,7 @@ export class SessionLog {
    */
   async writeInput(
     content: string,
-    images: ImageAttachment[],
+    images?: ImageAttachment[],
   ): Promise<void> {
     await this.append(createInputEntry(this.sessionId, content, images));
   }
@@ -211,11 +211,11 @@ export class SessionLog {
    */
   async writeToolResult(
     content: string,
-    toolCallId: string | null = null,
-    toolName: string | null = null,
+    toolCallId: string | null | undefined = undefined,
+    toolName: string | null | undefined = undefined,
   ): Promise<void> {
     await this.append(
-      createToolResultEntry(this.sessionId, content, toolCallId, toolName),
+      createToolResultEntry(this.sessionId, content, toolCallId ?? undefined, toolName ?? undefined),
     );
   }
 

@@ -135,14 +135,15 @@ describe("McpTool > toToolDef", () => {
     const tool = new McpTool("server", createToolDef(), connection);
 
     const def = tool.toToolDef();
+    const properties = def.function.parameters.properties as Record<string, unknown>;
 
-    expect(def.function.parameters.properties).toHaveProperty("query");
-    expect(def.function.parameters.properties).toHaveProperty("limit");
-    expect(def.function.parameters.properties!.query!.type).toBe("string");
-    expect(def.function.parameters.properties!.query!.description).toBe("Search query");
-    expect(def.function.parameters.properties!.limit!.type).toBe("number");
-    expect(def.function.parameters.properties!.limit!.minimum).toBe(1);
-    expect(def.function.parameters.properties!.limit!.maximum).toBe(100);
+    expect(properties).toHaveProperty("query");
+    expect(properties).toHaveProperty("limit");
+    expect((properties.query as Record<string, unknown>)!.type).toBe("string");
+    expect((properties.query as Record<string, unknown>)!.description).toBe("Search query");
+    expect((properties.limit as Record<string, unknown>)!.type).toBe("number");
+    expect((properties.limit as Record<string, unknown>)!.minimum).toBe(1);
+    expect((properties.limit as Record<string, unknown>)!.maximum).toBe(100);
   });
 
   it("extracts required fields", () => {
@@ -188,8 +189,9 @@ describe("McpTool > toToolDef", () => {
     const tool = new McpTool("server", toolDef, connection);
 
     const def = tool.toToolDef();
+    const properties = def.function.parameters.properties as Record<string, unknown>;
 
-    expect(def.function.parameters.properties!.status!.enum).toEqual(["active", "inactive", "pending"]);
+    expect((properties.status as Record<string, unknown>)!.enum).toEqual(["active", "inactive", "pending"]);
   });
 
   it("handles string constraints in schema", () => {
@@ -207,10 +209,11 @@ describe("McpTool > toToolDef", () => {
     const tool = new McpTool("server", toolDef, connection);
 
     const def = tool.toToolDef();
+    const properties = def.function.parameters.properties as Record<string, unknown>;
 
-    expect(def.function.parameters.properties!.name!.minLength).toBe(1);
-    expect(def.function.parameters.properties!.name!.maxLength).toBe(100);
-    expect(def.function.parameters.properties!.name!.pattern).toBe("^[a-z]+$");
+    expect((properties.name as Record<string, unknown>)!.minLength).toBe(1);
+    expect((properties.name as Record<string, unknown>)!.maxLength).toBe(100);
+    expect((properties.name as Record<string, unknown>)!.pattern).toBe("^[a-z]+$");
   });
 
   it("handles exclusiveMinimum and exclusiveMaximum", () => {
@@ -228,9 +231,10 @@ describe("McpTool > toToolDef", () => {
     const tool = new McpTool("server", toolDef, connection);
 
     const def = tool.toToolDef();
+    const properties = def.function.parameters.properties as Record<string, unknown>;
 
-    expect(def.function.parameters.properties!.value!.exclusiveMinimum).toBe(0);
-    expect(def.function.parameters.properties!.value!.exclusiveMaximum).toBe(100);
+    expect((properties.value as Record<string, unknown>)!.exclusiveMinimum).toBe(0);
+    expect((properties.value as Record<string, unknown>)!.exclusiveMaximum).toBe(100);
   });
 
   it("handles schema with no properties", () => {
@@ -358,7 +362,8 @@ describe("McpTool > Schema Edge Cases", () => {
     const tool = new McpTool("server", toolDef, connection);
 
     const def = tool.toToolDef();
+    const properties = def.function.parameters.properties as Record<string, unknown>;
 
-    expect(def.function.parameters.properties!.field!.type).toBe("string");
+    expect((properties.field as Record<string, unknown>)!.type).toBe("string");
   });
 });

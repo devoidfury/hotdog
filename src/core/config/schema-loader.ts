@@ -307,8 +307,8 @@ export function cliFlagsFromSchema(schema: ConfigSchema): CliFlagDef[] {
 export interface ResolutionContext {
   cli?: Record<string, unknown>;
   config?: Record<string, unknown>;
-  provider?: Record<string, unknown> | null;
-  profile?: Record<string, unknown> | null;
+  provider?: ProviderDef | null;
+  profile?: ProfileDef | null;
   configDir?: string;
   [key: string]: unknown;
 }
@@ -335,15 +335,15 @@ export function resolveLayerValue(
       return process.env[layer.key as string];
     case "provider":
       return getNested(
-        context.provider as Record<string, unknown>,
+        context.provider,
         layer.path as string,
       );
     case "providerDefault":
       if (
         context.provider &&
-        Array.isArray((context.provider as Record<string, unknown>).models)
+        Array.isArray(context.provider.models)
       ) {
-        const models = (context.provider as Record<string, unknown>).models as Array<Record<string, unknown>>;
+        const models = context.provider.models;
         if (models.length > 0 && models[0]?.name) {
           return models[0].name;
         }
@@ -351,7 +351,7 @@ export function resolveLayerValue(
       return undefined;
     case "profile":
       return getNested(
-        context.profile as Record<string, unknown>,
+        context.profile,
         (layer.key || layer.path) as string,
       );
     default:

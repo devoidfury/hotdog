@@ -507,7 +507,7 @@ describe("resolveKey — edge cases", () => {
       ],
     };
     const result = resolveKey("test", schema, {
-      provider: { url: "http://custom" },
+      provider: { name: "test", models: [], url: "http://custom" },
     });
     expect(result).toBe("http://custom");
   });
@@ -520,7 +520,17 @@ describe("resolveKey — edge cases", () => {
       ],
     };
     const result = resolveKey("test", schema, {
-      profile: { role: "Profile role" },
+      profile: {
+        name: "test",
+        description: "test",
+        role: "Profile role",
+        body: "",
+        model: null,
+        blacklistTools: [],
+        whitelistTools: null,
+        manager: false,
+        visibleWorker: false,
+      },
     });
     expect(result).toBe("Profile role");
   });

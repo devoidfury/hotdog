@@ -15,8 +15,9 @@ describe('ReviewTool', () => {
   it('generates tool definition with operations', () => {
     const tool = new ReviewTool();
     const def = tool.toToolDef();
-    expect(def.function.parameters.properties).toHaveProperty('operation');
-    expect(def.function.parameters.properties.operation.enum).toEqual(['list', 'get', 'tool_index']);
+    const properties = def.function.parameters.properties as Record<string, unknown>;
+    expect(properties).toHaveProperty('operation');
+    expect((properties.operation as Record<string, unknown>).enum).toEqual(['list', 'get', 'tool_index']);
     expect(def.function.parameters.required).toEqual(['operation']);
   });
 

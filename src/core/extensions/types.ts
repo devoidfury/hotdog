@@ -10,7 +10,7 @@ import type {
   InputHookResult,
   SystemPromptChunk,
 } from "../hooks.ts";
-import type { ToolRegistry, ToolDef } from "./tool-registry.ts";
+import type { ToolRegistry, ToolDef, Tool } from "./tool-registry.ts";
 import type { ExtensionLoader } from "./extensions.ts";
 import type { ServiceRegistry } from "./service-registry.ts";
 import type { CliSubcommandRegistry } from "./registries.ts";
@@ -316,8 +316,8 @@ export type ExtensionInstance = {
  * Payload for the `tools:register` hook.
  */
 export interface ToolsRegisterPayload {
-  register(name: string, tool: unknown): void;
-  getAll(): [string, unknown][];
+  register(name: string, tool: Tool): void;
+  getAll(): [string, Tool][];
 }
 
 /**

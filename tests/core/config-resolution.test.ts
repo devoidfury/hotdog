@@ -9,11 +9,11 @@ import {
 // ── CONFIG_KEYS schema ───────────────────────────────────────────────────
 
 describe("CONFIG_KEYS schema", () => {
-  const baseContext = {
+  const baseContext: ResolutionContext = {
     cli: {},
     config: {},
     provider: null,
-    profile: {},
+    profile: null,
     profileName: "default",
     profilesPath: "./config/profiles",
   };
@@ -22,7 +22,7 @@ describe("CONFIG_KEYS schema", () => {
     // Provider wins
     let context: ResolutionContext = {
       ...baseContext,
-      provider: { url: "http://provider" },
+      provider: { name: "test", models: [], url: "http://provider" },
       cli: { aiUrl: "http://cli" },
       config: { aiUrl: "http://config" },
     };
@@ -43,7 +43,7 @@ describe("CONFIG_KEYS schema", () => {
       // Provider wins
       let context: ResolutionContext = {
         ...baseContext,
-        provider: { apiKey: "provider-key" },
+        provider: { name: "test", models: [], apiKey: "provider-key" },
         cli: { apiKey: "cli-key" },
         config: { apiKey: "config-key" },
       };
@@ -97,11 +97,11 @@ describe("CONFIG_KEYS schema", () => {
 });
 
 describe("Phase 2: Complex values", () => {
-  const baseContext = {
+  const baseContext: ResolutionContext = {
     cli: {},
     config: {},
     provider: null,
-    profile: {},
+    profile: null,
     profileName: "default",
     profilesPath: "./config/profiles",
   };
@@ -131,7 +131,17 @@ describe("Phase 2: Complex values", () => {
       expect(resolveKey("role", CONFIG_KEYS.role, {
         ...baseContext,
         config: {},
-        profile: { role: "Profile role." },
+        profile: {
+          name: "test",
+          description: "test",
+          role: "Profile role.",
+          body: "",
+          model: null,
+          blacklistTools: [],
+          whitelistTools: null,
+          manager: false,
+          visibleWorker: false,
+        },
       })).toBe("Profile role.");
     });
   });
@@ -184,7 +194,7 @@ describe("Phase 2: Complex values", () => {
     });
 
     it("passes color palette object through from config", () => {
-      const context = { ...baseContext, config: { colors: { thinking: "cyan" } } };
+      const context: ResolutionContext = { ...baseContext, config: { colors: { thinking: "cyan" } } };
       expect(resolveKey("useColors", CONFIG_KEYS.useColors, context)).toEqual({ thinking: "cyan" });
     });
   });
@@ -192,14 +202,28 @@ describe("Phase 2: Complex values", () => {
   describe("aspects", () => {
     it("defaults to empty array and respects profile", () => {
       expect(resolveKey("aspects", CONFIG_KEYS.aspects, baseContext)).toEqual([]);
-      expect(resolveKey("aspects", CONFIG_KEYS.aspects, { ...baseContext, profile: { aspects: ["coding"] } })).toEqual(["coding"]);
+      expect(resolveKey("aspects", CONFIG_KEYS.aspects, {
+        ...baseContext,
+        profile: {
+          name: "test",
+          description: "test",
+          role: null,
+          body: "",
+          model: null,
+          blacklistTools: [],
+          whitelistTools: null,
+          manager: false,
+          visibleWorker: false,
+          aspects: ["coding"],
+        },
+      })).toEqual(["coding"]);
     });
   });
 });
 
 describe("integration: resolveAll with CONFIG_KEYS", () => {
   it("produces complete resolved object with correct priorities", () => {
-    const context = {
+    const context: ResolutionContext = {
       cli: {
         url: "http://cli-url",
         apiKey: "cli-key",
@@ -234,8 +258,19 @@ describe("integration: resolveAll with CONFIG_KEYS", () => {
         hideThinking: true,
         colors: { thinking: "cyan" },
       },
-      provider: { url: "http://provider-url", apiKey: "provider-key" },
-      profile: { role: "Profile role", aspects: ["coding"] },
+      provider: { name: "test", models: [], url: "http://provider-url", apiKey: "provider-key" },
+      profile: {
+        name: "test",
+        description: "test",
+        role: "Profile role",
+        body: "",
+        model: null,
+        blacklistTools: [],
+        whitelistTools: null,
+        manager: false,
+        visibleWorker: false,
+        aspects: ["coding"],
+      },
       profileName: "default",
       profilesPath: "./config/profiles",
     };
@@ -266,11 +301,11 @@ describe("integration: resolveAll with CONFIG_KEYS", () => {
   });
 
   it("respects defaults when no values provided", () => {
-    const context = {
+    const context: ResolutionContext = {
       cli: {},
       config: {},
       provider: null,
-      profile: {},
+      profile: null,
       profileName: "default",
       profilesPath: "./config/profiles",
     };

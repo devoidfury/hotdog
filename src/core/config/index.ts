@@ -449,29 +449,10 @@ export async function buildAgentConfig(options: {
     : null;
 
   // Profile merge
-  let profile: Record<string, unknown>;
-  if (configProfile || fileProfile) {
-    profile = { ...parseAs<Record<string, unknown> | null>(configProfile) };
-    if (fileProfile) {
-      if (fileProfile.role) profile.role = fileProfile.role;
-      if (fileProfile.whitelistTools != null)
-        profile.whitelistTools = fileProfile.whitelistTools;
-      if (
-        Array.isArray(fileProfile.blacklistTools) &&
-        fileProfile.blacklistTools.length
-      )
-        profile.blacklistTools = fileProfile.blacklistTools;
-      if (fileProfile.manager) profile.manager = true;
-    }
-  } else {
-    profile = {
-      whitelistTools: null,
-      blacklistTools: [],
-      manager: false,
-      cwdBoundary: null,
-    };
-  }
-
+  let profile: ProfileDef = {
+    ...configProfile,
+    ...(normalizeConfigKeys(fileProfile || {}) as ProfileDef),
+  };
   const resolvedContext: ResolutionContext = {
     ...context,
     provider,
@@ -483,8 +464,8 @@ export async function buildAgentConfig(options: {
 
   const model = resolveModel(
     cli.model ?? undefined,
-    parseAs<{ model?: string } | null>(configProfile)?.model,
-    parseAs<string | null | undefined>(config.defaultModel),
+    configProfile?.model,
+    config.defaultModel,
     provider,
     defaultModel,
   );
@@ -502,18 +483,14 @@ export async function buildAgentConfig(options: {
     : "";
 
   const systemPromptTemplate = await initSystemPromptTemplate(
-    cli.systemPromptTemplate ||
-      parseAs<string | undefined>(config.systemPromptTemplate),
+    cli.systemPromptTemplate || config.systemPromptTemplate,
     cli.configDir ?? undefined,
     resolveConfigDir,
   );
 
   const profiles = allProfilesForSwitch({
     profileFiles,
-    configProfiles:
-      parseAs<Record<string, Partial<ProfileDef>> | undefined>(
-        config.profiles,
-      ) || {},
+    configProfiles: config.profiles || {},
     profilesPath,
   });
 
@@ -523,7 +500,7 @@ export async function buildAgentConfig(options: {
     configDir,
     profile,
     profileBody,
-    activeProvider: parseAs<{ name?: string } | null>(provider)?.name || null,
+    activeProvider: provider?.name || null,
     systemPromptTemplate,
     profiles,
     modelRegistry: {},

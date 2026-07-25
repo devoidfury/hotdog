@@ -66,30 +66,30 @@ interface CoreToolConfig {
 }
 
 const TOOL_FACTORIES: Record<string, (config: CoreToolConfig) => Tool> = {
-  overwrite: () => new OverwriteTool() as Tool,
-  append: () => new AppendTool() as Tool,
+  overwrite: () => new OverwriteTool(),
+  append: () => new AppendTool(),
   read: (config) =>
     new ReadTool({
       readLimit: config.readToolLimit ?? 500,
       maxImageSize: DEFAULT_MAX_IMAGE_SIZE,
-    }) as Tool,
+    }),
   edit: (config) =>
     new EditTool({
       maxEditInputSize: config.maxEditInputSize ?? 16000,
-    }) as Tool,
+    }),
   grep: (config) =>
     new GrepTool({
       maxResults: config.grepMaxResults ?? 100,
       maxOutputLines: config.maxToolOutputLines ?? 600,
-    }) as Tool,
+    }),
   find: (config) =>
     new FindTool({
       maxResults: config.findMaxResults ?? 200,
       maxOutputLines: config.maxToolOutputLines ?? 600,
-    }) as Tool,
-  pager: () => new PagerTool() as Tool,
-  explore: () => new ExploreTool() as Tool,
-  project_info: () => new ProjectInfoTool() as Tool,
+    }),
+  pager: () => new PagerTool(),
+  explore: () => new ExploreTool(),
+  project_info: () => new ProjectInfoTool(),
 };
 
 interface ToolFactory {

@@ -2,6 +2,7 @@ import { test, expect, describe } from "bun:test";
 import { createHooks, HOOKS } from "../../src/core/hooks.ts";
 import { Agent } from "../../src/core/agent.ts";
 import { ToolRegistry } from "../../src/core/extensions/tool-registry.ts";
+import { ToolContext } from "../../src/core/extensions/tool-context.ts";
 import { MockLLMClient } from "../helpers.ts";
 import type { LlmClient } from "../../src/core/llm-client/client.ts";
 import type { HookSystem } from "../../src/core/hooks.ts";
@@ -35,9 +36,9 @@ function createTestAgent(options: { hooks?: HookSystem; registry?: ToolRegistry 
 describe("HOOKS.AGENT_TOOL_CONTEXT", () => {
   test("hook is emitted with toolCtx containing agent and isSessionRestoring", async () => {
     const hooks = createHooks();
-    let capturedCtx: { agent: Agent; isSessionRestoring: boolean } | null = null;
+    let capturedCtx: ToolContext | null = null;
 
-    hooks.on(HOOKS.AGENT_TOOL_CONTEXT, (({ toolCtx, toolName }: { toolCtx: { agent: Agent; isSessionRestoring: boolean }; toolName: string }) => {
+    hooks.on(HOOKS.AGENT_TOOL_CONTEXT, (({ toolCtx, toolName }: { toolCtx: ToolContext; toolName: string }) => {
       capturedCtx = toolCtx;
       expect(toolName).toBe("test-tool");
     }) as (data: unknown) => void);
@@ -46,36 +47,36 @@ describe("HOOKS.AGENT_TOOL_CONTEXT", () => {
     agent.isRestoring = false;
 
     // Simulate what _executeTools does
+    const toolCtx = new ToolContext();
+    toolCtx.set("agent", agent);
+    toolCtx.set("isSessionRestoring", agent.isRestoring);
     hooks.notifyHooks(HOOKS.AGENT_TOOL_CONTEXT, {
-      toolCtx: {
-        agent,
-        isSessionRestoring: agent.isRestoring,
-      },
+      toolCtx,
       toolName: "test-tool",
       agent,
     });
 
     expect(capturedCtx).not.toBeNull();
-    expect(capturedCtx!.agent).toBe(agent);
-    expect(capturedCtx!.isSessionRestoring).toBe(false);
+    expect(capturedCtx!.get("agent")).toBe(agent);
+    expect(capturedCtx!.get("isSessionRestoring")).toBe(false);
   });
 
   test("hook is emitted with isSessionRestoring=true during restoration", async () => {
     const hooks = createHooks();
     let capturedRestoring: boolean | null = null;
 
-    hooks.on(HOOKS.AGENT_TOOL_CONTEXT, (({ toolCtx }: { toolCtx: { isSessionRestoring: boolean } }) => {
-      capturedRestoring = toolCtx.isSessionRestoring;
+    hooks.on(HOOKS.AGENT_TOOL_CONTEXT, (({ toolCtx }: { toolCtx: ToolContext }) => {
+      capturedRestoring = toolCtx.get("isSessionRestoring") as boolean;
     }) as (data: unknown) => void);
 
     const agent = createTestAgent({ hooks });
     agent.isRestoring = true;
 
+    const toolCtx = new ToolContext();
+    toolCtx.set("agent", agent);
+    toolCtx.set("isSessionRestoring", agent.isRestoring);
     hooks.notifyHooks(HOOKS.AGENT_TOOL_CONTEXT, {
-      toolCtx: {
-        agent,
-        isSessionRestoring: agent.isRestoring,
-      },
+      toolCtx,
       toolName: "test-tool",
       agent,
     });
@@ -131,27 +132,26 @@ describe("Integration: toolContext enrichment flow", () => {
     const enrichmentData: string[] = [];
 
     // Simulate skills extension enriching context
-    hooks.on(HOOKS.AGENT_TOOL_CONTEXT, (({ toolCtx }: { toolCtx: Record<string, unknown> }) => {
-      toolCtx.skillsLoader = {
+    hooks.on(HOOKS.AGENT_TOOL_CONTEXT, (({ toolCtx }: { toolCtx: ToolContext }) => {
+      toolCtx.set("skillsLoader", {
         allSkills: () => [{ name: "test-skill" }],
         activateSkill: () => {},
-      };
+      });
       enrichmentData.push("skills");
     }) as (data: unknown) => void);
 
     // Simulate another extension enriching context
-    hooks.on(HOOKS.AGENT_TOOL_CONTEXT, (({ toolCtx }: { toolCtx: Record<string, unknown> }) => {
-      toolCtx.customExtension = { key: "value" };
+    hooks.on(HOOKS.AGENT_TOOL_CONTEXT, (({ toolCtx }: { toolCtx: ToolContext }) => {
+      toolCtx.set("customExtension", { key: "value" });
       enrichmentData.push("custom");
     }) as (data: unknown) => void);
 
     const agent = createTestAgent({ hooks });
 
     // Build and emit tool context
-    const toolCtx: Record<string, unknown> = {
-      agent,
-      isSessionRestoring: false,
-    };
+    const toolCtx = new ToolContext();
+    toolCtx.set("agent", agent);
+    toolCtx.set("isSessionRestoring", false);
     hooks.notifyHooks(HOOKS.AGENT_TOOL_CONTEXT, {
       toolCtx,
       toolName: "any-tool",
@@ -159,7 +159,7 @@ describe("Integration: toolContext enrichment flow", () => {
     });
 
     expect(enrichmentData).toEqual(["skills", "custom"]);
-    expect(toolCtx.skillsLoader).toBeDefined();
-    expect(toolCtx.customExtension).toEqual({ key: "value" });
+    expect(toolCtx.get("skillsLoader")).toBeDefined();
+    expect(toolCtx.get("customExtension")).toEqual({ key: "value" });
   });
 });

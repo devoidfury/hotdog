@@ -15,13 +15,20 @@ export interface ToolDef {
   };
 }
 
+/**
+ * Base Tool interface — all tools must implement these methods.
+ *
+ * - `toToolDef()` returns the tool's OpenAI function-calling schema.
+ * - `callDisplay()` formats a human-readable description of a tool call.
+ * - `execute()` runs the tool and returns a result.
+ */
 export interface Tool {
-  toToolDef?: () => ToolDef | Promise<ToolDef> | null;
-  callDisplay?: (input: string | Record<string, unknown> | null) => string;
-  execute?: (
+  toToolDef(): ToolDef | Promise<ToolDef> | null;
+  callDisplay(input: string | Record<string, unknown> | null): string;
+  execute(
     input: string | Record<string, unknown> | null,
     ctx?: unknown,
-  ) => Promise<unknown>;
+  ): Promise<unknown>;
 }
 
 /**
@@ -64,16 +71,14 @@ export class ToolRegistry {
     if (cached) return cached;
 
     const tool = this.tools.get(name);
-    if (!tool || !tool.toToolDef) {
+    if (!tool) {
       const nullPromise = Promise.resolve(null);
       this.#toolDefCache.set(name, nullPromise);
       return nullPromise;
     }
 
     // Normalize: toToolDef() may return a sync ToolDef or a Promise<ToolDef>.
-    const defPromise = Promise.resolve(
-      tool.toToolDef(),
-    ) as Promise<ToolDef | null>;
+    const defPromise = Promise.resolve(tool.toToolDef()) as Promise<ToolDef | null>;
     this.#toolDefCache.set(name, defPromise);
     return defPromise;
   }
@@ -89,21 +94,19 @@ export class ToolRegistry {
     let hadError = false;
 
     for (const t of this.tools.values()) {
-      if (t.toToolDef) {
-        try {
-          const def = await t.toToolDef();
-          if (def) defs.push(def as ToolDef);
-        } catch (err) {
-          // Individual tool def failed — log and skip, don't invalidate the
-          // entire cache. The failed tool's individual cache entry will be
-          // stale (it may have a cached null from a prior attempt), but the
-          // next call to getToolDef(name) will retry because we clear it here.
-          const name = (t as { name?: string }).name || "unknown";
-          logger.warn(
-            `[tools] Failed to get tool def for "${name}": ${(err as Error).message}`,
-          );
-          hadError = true;
-        }
+      try {
+        const def = await t.toToolDef();
+        if (def) defs.push(def);
+      } catch (err) {
+        // Individual tool def failed — log and skip, don't invalidate the
+        // entire cache. The failed tool's individual cache entry will be
+        // stale (it may have a cached null from a prior attempt), but the
+        // next call to getToolDef(name) will retry because we clear it here.
+        const name = (t as { name?: string }).name || "unknown";
+        logger.warn(
+          `[tools] Failed to get tool def for "${name}": ${(err as Error).message}`,
+        );
+        hadError = true;
       }
     }
 
@@ -185,7 +188,7 @@ export class ToolRegistry {
     input: unknown,
   ): Promise<string | null> {
     const tool = this.get(toolName);
-    if (!tool || !tool.toToolDef) return null;
+    if (!tool) return null;
 
     const def = await this.getToolDef(toolName);
     const params = def?.function?.parameters as Record<string, unknown> | null;

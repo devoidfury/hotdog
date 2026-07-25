@@ -259,7 +259,8 @@ describe("McpTool", () => {
 
     expect(def.function.name).toBe("server/greet");
     expect(def.function.description).toBe("Greet someone");
-    expect(def.function.parameters.properties.name!.description).toBe("The name");
+    const properties = def.function.parameters.properties as Record<string, unknown>;
+    expect((properties.name as Record<string, unknown>)!.description).toBe("The name");
     expect(def.function.parameters.required).toEqual(["name"]);
   });
 
@@ -343,7 +344,8 @@ describe("McpTool", () => {
     };
     const tool = new McpTool("server", toolDef, mockHandle);
     const def = tool.toToolDef();
-    expect(def.function.parameters.properties.mode!.enum).toEqual(["debug", "release"]);
+    const properties = def.function.parameters.properties as Record<string, unknown>;
+    expect((properties.mode as Record<string, unknown>)!.enum).toEqual(["debug", "release"]);
   });
 
   it("handles tool with numeric constraints", () => {
@@ -360,9 +362,10 @@ describe("McpTool", () => {
     };
     const tool = new McpTool("server", toolDef, mockHandle);
     const def = tool.toToolDef();
-    expect(def.function.parameters.properties.count!.minimum).toBe(0);
-    expect(def.function.parameters.properties.count!.maximum).toBe(100);
-    expect(def.function.parameters.properties.rate!.exclusiveMaximum).toBe(1.0);
+    const properties = def.function.parameters.properties as Record<string, unknown>;
+    expect((properties.count as Record<string, unknown>)!.minimum).toBe(0);
+    expect((properties.count as Record<string, unknown>)!.maximum).toBe(100);
+    expect((properties.rate as Record<string, unknown>)!.exclusiveMaximum).toBe(1.0);
   });
 
   it("handles tool with string constraints", () => {
@@ -376,8 +379,9 @@ describe("McpTool", () => {
     };
     const tool = new McpTool("server", toolDef, mockHandle);
     const def = tool.toToolDef();
-    expect(def.function.parameters.properties.name!.minLength).toBe(1);
-    expect(def.function.parameters.properties.name!.maxLength).toBe(50);
-    expect(def.function.parameters.properties.name!.pattern).toBe("^[a-z]+$");
+    const properties = def.function.parameters.properties as Record<string, unknown>;
+    expect((properties.name as Record<string, unknown>)!.minLength).toBe(1);
+    expect((properties.name as Record<string, unknown>)!.maxLength).toBe(50);
+    expect((properties.name as Record<string, unknown>)!.pattern).toBe("^[a-z]+$");
   });
 });

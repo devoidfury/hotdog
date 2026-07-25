@@ -1,15 +1,24 @@
 // Tests for ToolRegistry caching.
 
 import { describe, it, expect, test } from "bun:test";
-import { ToolRegistry } from "../../src/core/extensions/tool-registry.ts";
+import { ToolRegistry, type Tool } from "../../src/core/extensions/tool-registry.ts";
 import { Agent } from "../../src/core/agent.ts";
 import { HookSystem, HOOKS } from "../../src/core/hooks.ts";
 import { createToolRegistry } from "../../src/core/extensions/tool-registry.ts";
 
+/** Create a minimal test tool */
+function mkTool(execute: () => unknown | Promise<unknown>): Tool {
+  return {
+    toToolDef: () => ({ type: "function", function: { name: "test", description: "test", parameters: { type: "object", properties: {} } } }),
+    callDisplay: () => "test()",
+    execute: async () => execute(),
+  };
+}
+
 describe("ToolRegistry — basic operations", () => {
   it("registers, gets, and checks tools", () => {
     const registry = new ToolRegistry();
-    const tool = { execute: async () => "ok" };
+    const tool = mkTool(async () => "ok");
     registry.register("my-tool", tool);
     expect(registry.has("my-tool")).toBe(true);
     expect(registry.get("my-tool")).toBe(tool);
@@ -19,8 +28,8 @@ describe("ToolRegistry — basic operations", () => {
 
   it("getAll returns all registered tools", () => {
     const registry = new ToolRegistry();
-    registry.register("a", { execute: async () => "a" });
-    registry.register("b", { execute: async () => "b" });
+    registry.register("a", mkTool(async () => "a"));
+    registry.register("b", mkTool(async () => "b"));
     const all = registry.getAll();
     expect(all).toHaveLength(2);
     const names = all.map(([name]) => name).sort();
@@ -29,7 +38,7 @@ describe("ToolRegistry — basic operations", () => {
 
   it("remove deletes a single tool and returns true", () => {
     const registry = new ToolRegistry();
-    registry.register("my-tool", { execute: async () => "ok" });
+    registry.register("my-tool", mkTool(async () => "ok"));
     expect(registry.remove("my-tool")).toBe(true);
     expect(registry.has("my-tool")).toBe(false);
   });
@@ -41,9 +50,9 @@ describe("ToolRegistry — basic operations", () => {
 
   it("removeAll deletes multiple tools", () => {
     const registry = new ToolRegistry();
-    registry.register("a", { execute: async () => "a" });
-    registry.register("b", { execute: async () => "b" });
-    registry.register("c", { execute: async () => "c" });
+    registry.register("a", mkTool(async () => "a"));
+    registry.register("b", mkTool(async () => "b"));
+    registry.register("c", mkTool(async () => "c"));
     expect(registry.removeAll(["a", "b", "nonexistent"])).toBe(2);
     expect(registry.has("a")).toBe(false);
     expect(registry.has("b")).toBe(false);
@@ -52,17 +61,17 @@ describe("ToolRegistry — basic operations", () => {
 
   it("clear removes all tools", () => {
     const registry = new ToolRegistry();
-    registry.register("a", { execute: async () => "a" });
-    registry.register("b", { execute: async () => "b" });
+    registry.register("a", mkTool(async () => "a"));
+    registry.register("b", mkTool(async () => "b"));
     registry.clear();
     expect(registry.getAll()).toHaveLength(0);
   });
 
   it("filter with whitelist keeps only matching tools", () => {
     const registry = new ToolRegistry();
-    registry.register("read", { execute: async () => "read" });
-    registry.register("overwrite", { execute: async () => "overwrite" });
-    registry.register("bash", { execute: async () => "bash" });
+    registry.register("read", mkTool(async () => "read"));
+    registry.register("overwrite", mkTool(async () => "overwrite"));
+    registry.register("bash", mkTool(async () => "bash"));
     const filtered = registry.filter(["read", "bash"]);
     expect(filtered.has("read")).toBe(true);
     expect(filtered.has("bash")).toBe(true);
@@ -71,9 +80,9 @@ describe("ToolRegistry — basic operations", () => {
 
   it("filter with blacklist excludes matching tools", () => {
     const registry = new ToolRegistry();
-    registry.register("read", { execute: async () => "read" });
-    registry.register("overwrite", { execute: async () => "overwrite" });
-    registry.register("bash", { execute: async () => "bash" });
+    registry.register("read", mkTool(async () => "read"));
+    registry.register("overwrite", mkTool(async () => "overwrite"));
+    registry.register("bash", mkTool(async () => "bash"));
     const filtered = registry.filter(undefined, ["overwrite"]);
     expect(filtered.has("read")).toBe(true);
     expect(filtered.has("bash")).toBe(true);
@@ -82,9 +91,9 @@ describe("ToolRegistry — basic operations", () => {
 
   it("filter with both whitelist and blacklist", () => {
     const registry = new ToolRegistry();
-    registry.register("read", { execute: async () => "read" });
-    registry.register("overwrite", { execute: async () => "overwrite" });
-    registry.register("bash", { execute: async () => "bash" });
+    registry.register("read", mkTool(async () => "read"));
+    registry.register("overwrite", mkTool(async () => "overwrite"));
+    registry.register("bash", mkTool(async () => "bash"));
     const filtered = registry.filter(["read", "overwrite", "bash"], ["overwrite"]);
     expect(filtered.has("read")).toBe(true);
     expect(filtered.has("bash")).toBe(true);
@@ -93,102 +102,56 @@ describe("ToolRegistry — basic operations", () => {
 });
 
 describe("ToolRegistry — validateToolArgs", () => {
+  const searchToolDef = () => ({
+    type: "function",
+    function: {
+      name: "search",
+      description: "Search",
+      parameters: {
+        type: "object",
+        properties: { query: { type: "string" } },
+        required: ["query"],
+      },
+    },
+  });
+
+  const searchTool = {
+    toToolDef: searchToolDef,
+    callDisplay: () => "search()",
+    execute: async () => "ok",
+  };
+
   it("validates valid JSON string args", async () => {
     const registry = new ToolRegistry();
-    registry.register("search", {
-      toToolDef: () => ({
-        type: "function",
-        function: {
-          name: "search",
-          description: "Search",
-          parameters: {
-            type: "object",
-            properties: { query: { type: "string" } },
-            required: ["query"],
-          },
-        },
-      }),
-    });
+    registry.register("search", searchTool);
     const err = await registry.validateToolArgs("search", '{"query": "hello"}');
     expect(err).toBeNull();
   });
 
   it("validates valid object args", async () => {
     const registry = new ToolRegistry();
-    registry.register("search", {
-      toToolDef: () => ({
-        type: "function",
-        function: {
-          name: "search",
-          description: "Search",
-          parameters: {
-            type: "object",
-            properties: { query: { type: "string" } },
-            required: ["query"],
-          },
-        },
-      }),
-    });
+    registry.register("search", searchTool);
     const err = await registry.validateToolArgs("search", { query: "hello" });
     expect(err).toBeNull();
   });
 
   it("returns error for missing required field", async () => {
     const registry = new ToolRegistry();
-    registry.register("search", {
-      toToolDef: () => ({
-        type: "function",
-        function: {
-          name: "search",
-          description: "Search",
-          parameters: {
-            type: "object",
-            properties: { query: { type: "string" } },
-            required: ["query"],
-          },
-        },
-      }),
-    });
+    registry.register("search", searchTool);
     const err = await registry.validateToolArgs("search", '{}');
     expect(err).toContain("query");
   });
 
   it("returns error for wrong type", async () => {
     const registry = new ToolRegistry();
-    registry.register("search", {
-      toToolDef: () => ({
-        type: "function",
-        function: {
-          name: "search",
-          description: "Search",
-          parameters: {
-            type: "object",
-            properties: { query: { type: "string" } },
-            required: ["query"],
-          },
-        },
-      }),
-    });
+    registry.register("search", searchTool);
     const err = await registry.validateToolArgs("search", '{"query": 42}');
     expect(err).toContain("string");
   });
 
   it("returns error for non-object input", async () => {
     const registry = new ToolRegistry();
-    registry.register("search", {
-      toToolDef: () => ({
-        type: "function",
-        function: {
-          name: "search",
-          description: "Search",
-          parameters: {
-            type: "object",
-            properties: { query: { type: "string" } },
-            required: ["query"],
-          },
-        },
-      }),
-    });
+    registry.register("search", searchTool);
     const err1 = await registry.validateToolArgs("search", null);
     expect(err1).toContain("null");
     const err2 = await registry.validateToolArgs("search", [1, 2]);
@@ -212,6 +175,8 @@ describe("ToolRegistry — validateToolArgs", () => {
           parameters: { type: "object", properties: {} },
         },
       }),
+      callDisplay: () => "simple()",
+      execute: async () => "ok",
     });
     const err = await registry.validateToolArgs("simple", '{"anything": "goes"}');
     expect(err).toBeNull();
@@ -223,11 +188,13 @@ describe("ToolRegistry — caching", () => {
     const registry = new ToolRegistry();
     let callCount = 0;
 
-    const tool = {
+    const tool: Tool = {
       toToolDef: () => {
         callCount++;
         return { type: "function", function: { name: "test", description: "test", parameters: { type: "object", properties: {} } } };
       },
+      callDisplay: () => "test()",
+      execute: async () => "ok",
     };
 
     registry.register("test", tool);
@@ -246,11 +213,13 @@ describe("ToolRegistry — caching", () => {
     const registry = new ToolRegistry();
     let callCount = 0;
 
-    const tool = {
+    const tool: Tool = {
       toToolDef: () => {
         callCount++;
         return { type: "function", function: { name: "test", description: "v1", parameters: { type: "object", properties: {} } } };
       },
+      callDisplay: () => "test()",
+      execute: async () => "ok",
     };
 
     registry.register("test", tool);
@@ -258,11 +227,13 @@ describe("ToolRegistry — caching", () => {
     expect(callCount).toBe(1);
 
     // Re-register with new toToolDef
-    const tool2 = {
+    const tool2: Tool = {
       toToolDef: () => {
         callCount++;
         return { type: "function", function: { name: "test", description: "v2", parameters: { type: "object", properties: {} } } };
       },
+      callDisplay: () => "test()",
+      execute: async () => "ok",
     };
     registry.register("test", tool2);
 
@@ -276,11 +247,13 @@ describe("ToolRegistry — caching", () => {
     const registry = new ToolRegistry();
     let callCount = 0;
 
-    const tool = {
+    const tool: Tool = {
       toToolDef: () => {
         callCount++;
         return { type: "function", function: { name: "test", description: "test", parameters: { type: "object", properties: {} } } };
       },
+      callDisplay: () => "test()",
+      execute: async () => "ok",
     };
 
     registry.register("test", tool);
@@ -298,11 +271,13 @@ describe("ToolRegistry — caching", () => {
     const registry = new ToolRegistry();
     let callCount = 0;
 
-    const tool = {
+    const tool: Tool = {
       toToolDef: () => {
         callCount++;
         return { type: "function", function: { name: "test", description: "test", parameters: { type: "object", properties: {} } } };
       },
+      callDisplay: () => "test()",
+      execute: async () => "ok",
     };
 
     registry.register("test", tool);
@@ -325,7 +300,7 @@ describe("ToolRegistry — caching", () => {
     const registry = new ToolRegistry();
     let callCount = 0;
 
-    const tool = {
+    const tool: Tool = {
       toToolDef: () => {
         callCount++;
         return {
@@ -343,6 +318,8 @@ describe("ToolRegistry — caching", () => {
           },
         };
       },
+      callDisplay: () => "test()",
+      execute: async () => "ok",
     };
 
     registry.register("test", tool);
@@ -367,7 +344,7 @@ describe("Agent model setter clears tool def cache", () => {
     const toolRegistry = createToolRegistry();
 
     let callCount = 0;
-    const tool = {
+    const tool: Tool = {
       toToolDef: () => {
         callCount++;
         return {
@@ -379,6 +356,7 @@ describe("Agent model setter clears tool def cache", () => {
           },
         };
       },
+      callDisplay: () => "test()",
       execute: async () => "ok",
     };
     toolRegistry.register("test", tool);

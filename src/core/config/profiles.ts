@@ -8,8 +8,10 @@ import path from "node:path";
 import { parseFrontMatter } from "../../utils/file-utils.ts";
 import { DEFAULT_PROFILES_SUBPATH } from "./defaults.ts";
 import { Dirent } from "node:fs";
+import { normalizeConfigKeys } from "./index.ts";
 
 export interface ProfileDef {
+  aspects?: string[];
   name: string;
   description: string;
   role: string | null;
@@ -64,7 +66,7 @@ export async function loadProfileFile(
     const content = await fsPromises.readFile(filePath, "utf-8");
     const parsed = parseFrontMatter(content);
     if (!parsed) return null;
-    const fm = parsed.frontMatter as Record<string, unknown>;
+    const fm = normalizeConfigKeys(parsed.frontMatter) as Partial<ProfileDef>;
     const body = parsed.body as string;
     return {
       name: (fm.name as string) || profileName,
@@ -72,17 +74,10 @@ export async function loadProfileFile(
       role: (fm.role as string) || null,
       body: body || "",
       model: (fm.model as string) || null,
-      blacklistTools:
-        (fm["blacklist-tools"] as string[]) ||
-        (fm.blacklist_tools as string[]) ||
-        [],
-      whitelistTools:
-        (fm["whitelist-tools"] as string[]) ||
-        (fm.whitelist_tools as string[]) ||
-        null,
+      blacklistTools: (fm.blacklistTools as string[]) || [],
+      whitelistTools: (fm.whitelistTools as string[]) || null,
       manager: !!fm.manager,
-      visibleWorker:
-        !!(fm["visible-worker"] as boolean) || !!(fm.visible_worker as boolean),
+      visibleWorker: !!fm.visibleWorker,
     };
   } catch {
     return null;
@@ -118,7 +113,10 @@ export async function loadProfileFiles(
     const parsed = parseFrontMatter(content);
     if (!parsed) continue;
 
-    const fm = parsed.frontMatter as Record<string, unknown>;
+    const fm = normalizeConfigKeys(parsed.frontMatter) as Record<
+      string,
+      unknown
+    >;
     const fileStem = entry.name.replace(/\.profile\.md$/, "");
 
     result[fileStem] = {
@@ -126,18 +124,11 @@ export async function loadProfileFiles(
       description: (fm.description as string) || "",
       role: (fm.role as string) || "",
       body: (parsed.body as string) || "",
-      blacklistTools:
-        (fm["blacklist-tools"] as string[]) ||
-        (fm.blacklist_tools as string[]) ||
-        [],
-      whitelistTools:
-        (fm["whitelist-tools"] as string[]) ||
-        (fm.whitelist_tools as string[]) ||
-        null,
+      blacklistTools: (fm.blacklistTools as string[]) || [],
+      whitelistTools: (fm.whitelistTools as string[]) || null,
       model: (fm.model as string) || null,
       manager: !!fm.manager,
-      visibleWorker:
-        !!(fm["visible-worker"] as boolean) || !!(fm.visible_worker as boolean),
+      visibleWorker: !!fm.visibleWorker,
     };
   }
 
@@ -175,20 +166,12 @@ export async function getVisibleWorkerProfiles(
  * @private
  */
 function resolveSwitchProfile(
-  profileName: string,
   fileProfile: ProfileDef | null,
   configProfile: ProfileDef | null,
 ): SwitchProfile {
-  const role =
-    fileProfile && fileProfile.role && fileProfile.role.trim()
-      ? fileProfile.role
-      : configProfile && configProfile.role
-        ? configProfile.role
-        : "";
-
+  const role = fileProfile?.role?.trim() || configProfile?.role || "";
   const body = fileProfile?.body || "";
   const model = configProfile?.model || null;
-
   return { role, body, model };
 }
 
@@ -216,45 +199,11 @@ export function allProfilesForSwitch(
   for (const name of allNames) {
     const fileProfile = (profileFiles?.[name] as ProfileDef) || null;
     const configProfile = (configProfiles?.[name] as ProfileDef) || null;
-    const sp = resolveSwitchProfile(name, fileProfile, configProfile);
+    const sp = resolveSwitchProfile(fileProfile, configProfile);
     result[name] = sp;
   }
 
   return result;
-}
-
-/**
- * Merge a config profile with a file profile.
- * File profile wins for role, whitelist, blacklist, manager.
- */
-export function mergeProfile(
-  configProfile?: Partial<ProfileDef> | null,
-  fileProfile?: Partial<ProfileDef> | null,
-): ProfileDef {
-  if (configProfile || fileProfile) {
-    const profile = { ...configProfile } as ProfileDef;
-    if (fileProfile) {
-      if (fileProfile.role) profile.role = fileProfile.role;
-      if (fileProfile.whitelistTools != null)
-        profile.whitelistTools = fileProfile.whitelistTools;
-      if (fileProfile.blacklistTools?.length)
-        profile.blacklistTools = fileProfile.blacklistTools;
-      if (fileProfile.manager) profile.manager = true;
-    }
-    return profile;
-  }
-
-  return {
-    name: "default",
-    description: "",
-    role: null,
-    body: "",
-    model: null,
-    blacklistTools: [],
-    whitelistTools: null,
-    manager: false,
-    visibleWorker: false,
-  };
 }
 
 export interface ResolveProfileResult {
@@ -268,45 +217,4 @@ export interface ResolveProfileResult {
 export interface ProfileCliArgs {
   profile?: string;
   profilesPath?: string;
-}
-
-/**
- * Main profile resolution function.
- */
-export async function resolveProfile(
-  cliArgs: ProfileCliArgs,
-  fileConfig: Record<string, unknown>,
-  configDir: string | null,
-): Promise<ResolveProfileResult> {
-  const profilesPath = resolveProfilesPath(
-    cliArgs.profilesPath,
-    configDir,
-    (fileConfig.profilesPath as string) ?? undefined,
-  );
-
-  const profileName =
-    cliArgs.profile || (fileConfig.profile as string) || "default";
-
-  const profileFiles = await loadProfileFiles(profilesPath);
-
-  const configProfile =
-    ((fileConfig.profiles as Record<string, ProfileDef>)?.[profileName] ??
-      null) as ProfileDef | null;
-  const fileProfile = profileFiles[profileName] || null;
-
-  const profile = mergeProfile(configProfile, fileProfile);
-
-  const profiles = allProfilesForSwitch({
-    profileFiles,
-    configProfiles: (fileConfig.profiles as Record<string, ProfileDef>) || {},
-    profilesPath,
-  });
-
-  return {
-    profileName,
-    profilesPath,
-    profile,
-    profileFiles,
-    profiles,
-  };
 }

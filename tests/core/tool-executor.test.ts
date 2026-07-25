@@ -6,8 +6,31 @@ import type { ToolCall } from '../../src/core/context/message.ts';
 import { createToolRegistry } from '../../src/core/extensions/tool-registry.ts';
 import { createHooks } from '../../src/core/hooks.ts';
 import { Message } from '../../src/core/context/message.ts';
+import type { Tool, ToolDef } from '../../src/core/extensions/tool-registry.ts';
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
+
+/**
+ * Create an inline test tool with the required Tool interface methods.
+ */
+function makeTestTool(
+  name: string,
+  execute: (input: string | Record<string, unknown> | null, ctx?: unknown) => Promise<unknown>,
+  toToolDefOverride?: () => ToolDef,
+): Tool {
+  return {
+    toToolDef: toToolDefOverride || (() => ({
+      type: 'function',
+      function: {
+        name,
+        description: 'test tool',
+        parameters: { type: 'object', properties: {}, required: [] },
+      },
+    })),
+    callDisplay: (_input: string | Record<string, unknown> | null) => `${name}()`,
+    execute,
+  };
+}
 
 function createMockDeps(overrides: Partial<ToolExecutorDeps> = {}): ToolExecutorDeps {
   const toolRegistry = createToolRegistry();
@@ -41,24 +64,14 @@ describe('ToolExecutor', () => {
       const executor = createToolExecutor(deps);
 
       const capturedCtx: Record<string, unknown> = {};
-      const testTool = {
-        toToolDef: () => ({
-          type: 'function',
-          function: {
-            name: 'ctx_test',
-            description: 'test tool',
-            parameters: { type: 'object', properties: {}, required: [] },
-          },
-        }),
-        execute: async (_input: unknown, ctx: unknown) => {
-          const getter = ctx as { get: (k: string) => unknown };
-          capturedCtx.agent = getter.get('agent');
-          capturedCtx.isSessionRestoring = getter.get('isSessionRestoring');
-          capturedCtx.cwdBoundary = getter.get('cwdBoundary');
-          capturedCtx.workspaceRoot = getter.get('workspaceRoot');
-          return 'ok';
-        },
-      };
+      const testTool = makeTestTool('ctx_test', async (_input, ctx) => {
+        const getter = ctx as { get: (k: string) => unknown };
+        capturedCtx.agent = getter.get('agent');
+        capturedCtx.isSessionRestoring = getter.get('isSessionRestoring');
+        capturedCtx.cwdBoundary = getter.get('cwdBoundary');
+        capturedCtx.workspaceRoot = getter.get('workspaceRoot');
+        return 'ok';
+      });
       deps.toolRegistry.register('ctx_test', testTool);
 
       await executor.execute([{
@@ -81,22 +94,12 @@ describe('ToolExecutor', () => {
       const executor = createToolExecutor(deps);
 
       const capturedCtx: Record<string, unknown> = {};
-      const testTool = {
-        toToolDef: () => ({
-          type: 'function',
-          function: {
-            name: 'ctx_test2',
-            description: 'test',
-            parameters: { type: 'object', properties: {}, required: [] },
-          },
-        }),
-        execute: async (_input: unknown, ctx: unknown) => {
-          const getter = ctx as { get: (k: string) => unknown };
-          capturedCtx.cwdBoundary = getter.get('cwdBoundary');
-          capturedCtx.workspaceRoot = getter.get('workspaceRoot');
-          return 'ok';
-        },
-      };
+      const testTool = makeTestTool('ctx_test2', async (_input, ctx) => {
+        const getter = ctx as { get: (k: string) => unknown };
+        capturedCtx.cwdBoundary = getter.get('cwdBoundary');
+        capturedCtx.workspaceRoot = getter.get('workspaceRoot');
+        return 'ok';
+      });
       deps.toolRegistry.register('ctx_test2', testTool);
 
       await executor.execute([{
@@ -117,20 +120,10 @@ describe('ToolExecutor', () => {
       const executor = createToolExecutor(deps);
 
       const capturedStates: boolean[] = [];
-      const testTool = {
-        toToolDef: () => ({
-          type: 'function',
-          function: {
-            name: 'ctx_test3',
-            description: 'test',
-            parameters: { type: 'object', properties: {}, required: [] },
-          },
-        }),
-        execute: async (_input: unknown, ctx: unknown) => {
-          capturedStates.push((ctx as { get: (k: string) => unknown }).get('isSessionRestoring') as boolean);
-          return 'ok';
-        },
-      };
+      const testTool = makeTestTool('ctx_test3', async (_input, ctx) => {
+        capturedStates.push((ctx as { get: (k: string) => unknown }).get('isSessionRestoring') as boolean);
+        return 'ok';
+      });
       deps.toolRegistry.register('ctx_test3', testTool);
 
       // Execute when not restoring
@@ -157,28 +150,8 @@ describe('ToolExecutor', () => {
       const deps = createMockDeps({
         toolWhitelist: ['allowed_tool'],
       });
-      deps.toolRegistry.register('allowed_tool', {
-        toToolDef: () => ({
-          type: 'function',
-          function: {
-            name: 'allowed_tool',
-            description: 'allowed',
-            parameters: { type: 'object', properties: {}, required: [] },
-          },
-        }),
-        execute: async () => 'ok',
-      });
-      deps.toolRegistry.register('blocked_tool', {
-        toToolDef: () => ({
-          type: 'function',
-          function: {
-            name: 'blocked_tool',
-            description: 'blocked',
-            parameters: { type: 'object', properties: {}, required: [] },
-          },
-        }),
-        execute: async () => 'should not reach',
-      });
+      deps.toolRegistry.register('allowed_tool', makeTestTool('allowed_tool', async () => 'ok'));
+      deps.toolRegistry.register('blocked_tool', makeTestTool('blocked_tool', async () => 'should not reach'));
 
       const executor = createToolExecutor(deps);
       const result = await executor.execute([{
@@ -225,17 +198,7 @@ describe('ToolExecutor', () => {
     it('should return outcome "return" for wait tool', async () => {
       const deps = createMockDeps();
       const { ToolResult } = await import('../../src/core/extensions/tool-utils.ts');
-      deps.toolRegistry.register('wait', {
-        toToolDef: () => ({
-          type: 'function',
-          function: {
-            name: 'wait',
-            description: 'wait',
-            parameters: { type: 'object', properties: {}, required: [] },
-          },
-        }),
-        execute: async () => ToolResult.stop('waiting'),
-      });
+      deps.toolRegistry.register('wait', makeTestTool('wait', async () => ToolResult.stop('waiting')));
 
       const executor = createToolExecutor(deps);
       const result = await executor.execute([{
@@ -250,17 +213,7 @@ describe('ToolExecutor', () => {
     it('should return outcome "return" for any tool that uses ToolResult.stop()', async () => {
       const { ToolResult } = await import('../../src/core/extensions/tool-utils.ts');
       const deps = createMockDeps();
-      deps.toolRegistry.register('my-stopping-tool', {
-        toToolDef: () => ({
-          type: 'function',
-          function: {
-            name: 'my-stopping-tool',
-            description: 'a tool that stops the loop',
-            parameters: { type: 'object', properties: {}, required: [] },
-          },
-        }),
-        execute: async () => ToolResult.stop('stopping now'),
-      });
+      deps.toolRegistry.register('my-stopping-tool', makeTestTool('my-stopping-tool', async () => ToolResult.stop('stopping now')));
 
       const executor = createToolExecutor(deps);
       const result = await executor.execute([{
@@ -276,17 +229,7 @@ describe('ToolExecutor', () => {
     it('should continue when tool returns ToolResult.ok()', async () => {
       const { ToolResult } = await import('../../src/core/extensions/tool-utils.ts');
       const deps = createMockDeps();
-      deps.toolRegistry.register('normal-tool', {
-        toToolDef: () => ({
-          type: 'function',
-          function: {
-            name: 'normal-tool',
-            description: 'a normal tool',
-            parameters: { type: 'object', properties: {}, required: [] },
-          },
-        }),
-        execute: async () => ToolResult.ok('done'),
-      });
+      deps.toolRegistry.register('normal-tool', makeTestTool('normal-tool', async () => ToolResult.ok('done')));
 
       const executor = createToolExecutor(deps);
       const result = await executor.execute([{
@@ -312,17 +255,7 @@ describe('ToolExecutor', () => {
         hookCalls.push('after');
       });
 
-      deps.toolRegistry.register('hook_test', {
-        toToolDef: () => ({
-          type: 'function',
-          function: {
-            name: 'hook_test',
-            description: 'test',
-            parameters: { type: 'object', properties: {}, required: [] },
-          },
-        }),
-        execute: async () => 'ok',
-      });
+      deps.toolRegistry.register('hook_test', makeTestTool('hook_test', async () => 'ok'));
 
       const executor = createToolExecutor(deps);
       await executor.execute([{
@@ -343,20 +276,10 @@ describe('ToolExecutor', () => {
         result: 'blocked by gate',
       }));
 
-      deps.toolRegistry.register('gate_test', {
-        toToolDef: () => ({
-          type: 'function',
-          function: {
-            name: 'gate_test',
-            description: 'test',
-            parameters: { type: 'object', properties: {}, required: [] },
-          },
-        }),
-        execute: async () => {
-          toolExecuted = true;
-          return 'should not reach';
-        },
-      });
+      deps.toolRegistry.register('gate_test', makeTestTool('gate_test', async () => {
+        toolExecuted = true;
+        return 'should not reach';
+      }));
 
       const executor = createToolExecutor(deps);
       const result = await executor.execute([{
@@ -378,20 +301,10 @@ describe('ToolExecutor', () => {
         input: '{"path":"/modified"}',
       }));
 
-      deps.toolRegistry.register('modify_test', {
-        toToolDef: () => ({
-          type: 'function',
-          function: {
-            name: 'modify_test',
-            description: 'test',
-            parameters: { type: 'object', properties: {}, required: [] },
-          },
-        }),
-        execute: async (input: unknown) => {
-          receivedInput = input as string;
-          return 'ok';
-        },
-      });
+      deps.toolRegistry.register('modify_test', makeTestTool('modify_test', async (input) => {
+        receivedInput = input as string;
+        return 'ok';
+      }));
 
       const executor = createToolExecutor(deps);
       await executor.execute([{
@@ -407,19 +320,9 @@ describe('ToolExecutor', () => {
   describe('error handling', () => {
     it('should catch tool execution errors and return fallback result', async () => {
       const deps = createMockDeps();
-      deps.toolRegistry.register('failing_tool', {
-        toToolDef: () => ({
-          type: 'function',
-          function: {
-            name: 'failing_tool',
-            description: 'test',
-            parameters: { type: 'object', properties: {}, required: [] },
-          },
-        }),
-        execute: async () => {
-          throw new Error('boom');
-        },
-      });
+      deps.toolRegistry.register('failing_tool', makeTestTool('failing_tool', async () => {
+        throw new Error('boom');
+      }));
 
       const executor = createToolExecutor(deps);
       const result = await executor.execute([{
@@ -440,20 +343,10 @@ describe('ToolExecutor', () => {
 
       for (const name of ['tool_a', 'tool_b', 'tool_c']) {
         const toolName = name;
-        deps.toolRegistry.register(name, {
-          toToolDef: () => ({
-            type: 'function',
-            function: {
-              name: toolName,
-              description: 'test',
-              parameters: { type: 'object', properties: {}, required: [] },
-            },
-          }),
-          execute: async () => {
-            executionOrder.push(toolName);
-            return `result of ${toolName}`;
-          },
-        });
+        deps.toolRegistry.register(name, makeTestTool(toolName, async () => {
+          executionOrder.push(toolName);
+          return `result of ${toolName}`;
+        }));
       }
 
       const executor = createToolExecutor(deps);

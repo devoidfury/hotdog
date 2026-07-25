@@ -13,7 +13,6 @@ import { McpTool } from "./tools.ts";
 import {
   CoreContext,
   ExtensionInstance,
-  ToolsRegisterPayload,
 } from "../../core/extensions/types.ts";
 
 // Re-exports for external use
@@ -72,7 +71,7 @@ export function create(core: CoreContext): ExtensionInstance | null {
       /**
        * Register MCP tools from all connected servers.
        */
-      [HOOKS.TOOLS_REGISTER]: async (registry: ToolsRegisterPayload & { register(name: string, tool: McpTool): void }) => {
+      [HOOKS.TOOLS_REGISTER]: async (registry) => {
         for (const server of enabledServers) {
           try {
             const conn = await _connectServer(server);

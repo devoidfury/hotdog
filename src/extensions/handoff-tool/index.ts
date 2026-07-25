@@ -23,7 +23,6 @@ import {
 import {
   CoreContext,
   ExtensionInstance,
-  ToolsRegisterPayload,
   ToolExecutionContext,
   getExtensionConfig,
 } from "../../core/extensions/types.ts";
@@ -201,12 +200,12 @@ export function create(core: CoreContext): ExtensionInstance {
   return {
     hooks: {
       /** Register the handoff tool. */
-      [HOOKS.TOOLS_REGISTER]: async (registry: ToolsRegisterPayload) => {
+      [HOOKS.TOOLS_REGISTER]: async (registry) => {
         registry.register("handoff", handoffTool);
       },
 
       /** Add handoff tool instructions to the system prompt. */
-      [HOOKS.SYSTEM_PROMPT_BUILD]: ({ agent }): SystemPromptChunk => {
+      [HOOKS.SYSTEM_PROMPT_BUILD]: ({ agent }) => {
         if (
           config.systemPrompt === false ||
           !agent ||

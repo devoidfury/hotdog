@@ -15,16 +15,12 @@ import {
   getExtensionConfig,
 } from "../../core/extensions/types.ts";
 
-// ── Types ──────────────────────────────────────────────────────────────────
-
 interface LoopState {
   prompt: string;
   count: number;
   startTime: number;
   active: boolean;
 }
-
-// ── Extension Entry Point ──────────────────────────────────────────────────
 
 /**
  * Create the loop extension.
@@ -159,11 +155,8 @@ export function create(core: CoreContext): ExtensionInstance {
       /**
        * Intercept /quit and /exit during an active loop.
        */
-      [HOOKS.INPUT]: (payload: Record<string, unknown>) => {
-        const text = payload.text as string | undefined;
-        const agent = payload.agent as CommandAgent | undefined;
-
-        if (!loop.active || !text || !agent) return undefined;
+      [HOOKS.INPUT]: ({text, agent}) => {
+        if (!loop.active || !text || !agent) return;
 
         const trimmed = text.trim().toLowerCase();
         if (trimmed === "/quit" || trimmed === "/exit") {
@@ -171,7 +164,7 @@ export function create(core: CoreContext): ExtensionInstance {
           return { action: "handled" };
         }
 
-        return undefined;
+        return;
       },
     },
   };

@@ -7,6 +7,7 @@ import path from "node:path";
 
 import { parseFrontMatter } from "../../utils/file-utils.ts";
 import { DEFAULT_PROFILES_SUBPATH } from "./defaults.ts";
+import { Dirent } from "node:fs";
 
 export interface ProfileDef {
   name: string;
@@ -96,7 +97,7 @@ export async function loadProfileFiles(
 ): Promise<Record<string, ProfileDef>> {
   const result: Record<string, ProfileDef> = {};
 
-  let entries: Array<{ name: string | NonSharedBuffer; isFile: () => boolean }>;
+  let entries: Dirent[];
   try {
     entries = await fsPromises.readdir(profilesPath, { withFileTypes: true });
   } catch {
@@ -104,10 +105,9 @@ export async function loadProfileFiles(
   }
 
   for (const entry of entries) {
-    const entryName = typeof entry.name === "string" ? entry.name : entry.name.toString();
-    if (!entry.isFile() || !entryName.endsWith(".profile.md")) continue;
+    if (!entry.isFile() || !entry.name.endsWith(".profile.md")) continue;
 
-    const filePath = path.join(profilesPath, entryName);
+    const filePath = path.join(profilesPath, entry.name);
     let content: string;
     try {
       content = await fsPromises.readFile(filePath, "utf-8");
@@ -119,7 +119,7 @@ export async function loadProfileFiles(
     if (!parsed) continue;
 
     const fm = parsed.frontMatter as Record<string, unknown>;
-    const fileStem = entryName.replace(/\.profile\.md$/, "");
+    const fileStem = entry.name.replace(/\.profile\.md$/, "");
 
     result[fileStem] = {
       name: (fm.name as string) || fileStem,

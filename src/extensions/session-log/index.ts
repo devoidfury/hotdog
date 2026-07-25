@@ -6,9 +6,7 @@ import { join } from "node:path";
 import { appendFile, readFile, access, mkdir } from "node:fs/promises";
 import { HOOKS } from "../../core/hooks.ts";
 import { stripNulls } from "../../utils/objects.ts";
-import { parseAs } from "../../utils/json-schema.ts";
 import { CoreContext, ExtensionInstance } from "../../core/extensions/types.ts";
-import type { Message as CoreMessage } from "../../core/context/message.ts";
 
 // Re-export core session log functions
 export {
@@ -24,6 +22,7 @@ export {
 
 // Import LOG_SOURCE for internal use (re-exported above)
 import { LOG_SOURCE } from "./session-log.ts";
+import { LogEntry } from "../../core/session/session-log.ts";
 
 interface SessionLogMessage {
   sessionId?: string;
@@ -34,21 +33,6 @@ interface SessionLogMessage {
   toolCallId?: string | null;
 }
 
-interface SessionLogAgent {
-  sessionId?: string;
-}
-
-interface LogEntry {
-  ts: string;
-  session_id: string;
-  role: string;
-  source: string;
-  content: string;
-  reasoning_content: string | null;
-  tool_calls: unknown;
-  tool_call_id: string | null;
-  tool_name: string | null;
-}
 
 /**
  * Get the cache directory for session logs.
@@ -114,14 +98,11 @@ export async function create(_core: CoreContext): Promise<ExtensionInstance> {
       [HOOKS.CONTEXT_MESSAGE]: async ({
         message,
         agent,
-      }: {
-        message: CoreMessage;
-        agent: SessionLogAgent & { sessionId?: string };
       }) => {
         // Skip logging during session restoration to avoid duplicate entries
         if (isRestoring) return;
 
-        const sessionId = (agent as { sessionId?: string })?.sessionId || "unknown";
+        const sessionId = agent.sessionId || "unknown";
         lastSessionId = sessionId;
         const logPath = join(cacheDir, `${sessionId}.jsonl`);
 
@@ -150,9 +131,9 @@ export async function create(_core: CoreContext): Promise<ExtensionInstance> {
         }
 
         const entry = messageToLogEntry({
-          sessionId: (agent as { sessionId?: string })?.sessionId,
+          sessionId: agent.sessionId,
           role: message.role,
-          content: typeof message.getTextContent === "function" ? message.getTextContent() : (message.content as string | undefined) || "",
+          content: typeof message.getTextContent === "function" ? message.getTextContent() : message.content || "",
           reasoningContent: message.reasoningContent,
           toolCalls: message.toolCalls,
           toolCallId: message.toolCallId,
@@ -163,15 +144,11 @@ export async function create(_core: CoreContext): Promise<ExtensionInstance> {
       /**
        * Log compaction results.
        */
-      [HOOKS.OUTPUT_EVENT]: async ({
-        type,
-        data,
-        agent,
-      }) => {
+      [HOOKS.OUTPUT_EVENT]: async ({ type, data, agent }) => {
         if (type === "compaction_result") {
           const compactionData = data as { summary?: string; messagesCompacted?: number };
           if (compactionData?.summary) {
-            const sessionId = (agent as { sessionId?: string })?.sessionId || "unknown";
+            const sessionId = agent.sessionId || "unknown";
             lastSessionId = sessionId;
             const logPath = join(cacheDir, `${sessionId}.jsonl`);
             const entry = stripNulls({
@@ -195,7 +172,7 @@ export async function create(_core: CoreContext): Promise<ExtensionInstance> {
      * Read all entries from the session log.
      * Uses the most recently observed session ID.
      */
-    async readEntries(): Promise<Record<string, unknown>[]> {
+    async readEntries(): Promise<Record<string, LogEntry>[]> {
       if (!lastSessionId) return [];
       const logPath = join(cacheDir, `${lastSessionId}.jsonl`);
       try {

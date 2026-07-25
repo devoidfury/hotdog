@@ -19,7 +19,6 @@ import { HOOKS } from "../../core/hooks.ts";
 import {
   CoreContext,
   ExtensionInstance,
-  ToolsRegisterPayload,
   ToolExecutionContext,
 } from "../../core/extensions/types.ts";
 
@@ -210,7 +209,7 @@ export function create(_core: CoreContext): ExtensionInstance {
       /**
        * Register the question tool.
        */
-      [HOOKS.TOOLS_REGISTER]: async (registry: ToolsRegisterPayload) => {
+      [HOOKS.TOOLS_REGISTER]: async (registry) => {
         registry.register("question", questionTool);
       },
     },

@@ -72,7 +72,6 @@ test("SessionLog serializes without null fields", async () => {
     expect(firstLine as any).toEqual({
       ts: expect.anything(),
       session_id: TEST_SESSION_ID,
-      role: "user",
       source: LOG_SOURCE.INPUT,
       content: "hello world",
     });
@@ -85,7 +84,6 @@ test("SessionLog serializes without null fields", async () => {
     expect(resetLine as any).toEqual({
       ts: expect.anything(),
       session_id: TEST_SESSION_ID,
-      role: "user",
       source: LOG_SOURCE.RESET,
       content: "",
     });
@@ -108,7 +106,7 @@ test("SessionLog.writeAssistant includes reasoning and tool_calls", async () => 
     const content = readFileSync(log.path, "utf-8");
     const line = JSON.parse(content.trim());
 
-    expect(line.role).toBe("assistant");
+    expect(line.source).toBe(LOG_SOURCE.LLM);
     expect(line.content).toBe("final output");
     expect(line.reasoning_content).toBe("reasoning content");
     expect(line.tool_calls).toEqual([
@@ -130,7 +128,7 @@ test("SessionLog.writeToolResult includes tool_call_id and tool_name", async () 
     const content = readFileSync(log.path, "utf-8");
     const line = JSON.parse(content.trim());
 
-    expect(line.role).toBe("tool");
+    expect(line.source).toBe(LOG_SOURCE.TOOL_RESULT);
     expect(line.content).toBe("<output>done</output>");
     expect(line.tool_call_id).toBe("tc_1");
     expect(line.tool_name).toBe("bash");
@@ -151,7 +149,6 @@ test("SessionLog.writeCompaction includes messagesCompacted count", async () => 
     const line = JSON.parse(content.trim());
 
     expect(line.source).toBe(LOG_SOURCE.COMPACTION);
-    expect(line.role).toBe("user");
     expect(line.content).toContain("<system-notice>");
     expect(line.content).toContain("[Compacted 15 messages]");
     expect(line.content).toContain("Summarized conversation");
@@ -170,7 +167,6 @@ test("SessionLog.writePrompt creates correct entry", async () => {
     const line = JSON.parse(content.trim());
 
     expect(line.source).toBe(LOG_SOURCE.PROMPT);
-    expect(line.role).toBe("user");
     expect(line.content).toBe("Prompt content rendered");
   } finally {
     teardown();
@@ -243,7 +239,7 @@ test("createInputEntry includes images when provided", () => {
 
 test("createInputEntry omits images when not provided", () => {
   const entry = createInputEntry("session-1", "Hello");
-  expect(entry.images).toBeNull();
+  expect(entry.images).toBeUndefined();
 });
 
 test("createPromptEntry includes images when provided", () => {

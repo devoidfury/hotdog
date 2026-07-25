@@ -32,7 +32,7 @@ export type ContextHookResult = { messages: unknown[] };
 export type ProviderRequestHookResult = {
   messages?: unknown[];
   modelConfig?: unknown;
-  toolDefs?: unknown[];
+  toolDefs?: ToolDef[];
 };
 
 /**
@@ -87,6 +87,7 @@ function _summarizeResult(value: unknown): string {
 }
 
 import type { HookPayloads } from "./extensions/types.ts";
+import { ToolDef } from "./extensions/tool-registry.ts";
 
 export interface HookHandlerEntry {
   id: number;

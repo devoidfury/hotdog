@@ -11,8 +11,6 @@ import { ModelTool } from "./model.ts";
 import {
   CoreContext,
   ExtensionInstance,
-  ToolsRegisterPayload,
-  CommandsRegisterPayload,
   getExtensionConfig,
 } from "../../core/extensions/types.ts";
 import { type Agent } from "../../core/agent.ts";
@@ -56,7 +54,7 @@ export function create(core: CoreContext): ExtensionInstance {
       /**
        * Register the model tool (if enabled).
        */
-      [HOOKS.TOOLS_REGISTER]: async (registry: ToolsRegisterPayload) => {
+      [HOOKS.TOOLS_REGISTER]: async (registry) => {
         if (config.toolEnabled === true) {
           registry.register(MODEL_TOOL_NAME, modelTool);
         }
@@ -65,8 +63,7 @@ export function create(core: CoreContext): ExtensionInstance {
       /**
        * Register /model and /models commands (if enabled).
        */
-      [HOOKS.COMMANDS_REGISTER]: async (payload: CommandsRegisterPayload) => {
-        const { registry } = payload;
+      [HOOKS.COMMANDS_REGISTER]: async ({ registry }) => {
         if (config.commandEnabled === false) return;
 
         // /models — list available models

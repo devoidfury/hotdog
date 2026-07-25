@@ -5,7 +5,7 @@
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { readFile, access, readdir, stat, unlink } from "node:fs/promises";
-import { Message, type ToolCall, type ImageAttachment as MessageImageAttachment } from "../context/message.ts";
+import { Message, type ToolCall, type ImageAttachment } from "../context/message.ts";
 import { logger } from "../logger.ts";
 
 // ── Log Source Types ────────────────────────────────────────────────────────
@@ -23,12 +23,15 @@ export const LOG_SOURCE = {
 export type LogSource = (typeof LOG_SOURCE)[keyof typeof LOG_SOURCE];
 
 export interface LogEntry {
+  ts: string;
+  session_id: string;
   source: LogSource;
   content: string;
   images?: Array<{ type: string; mimeType: string; data: string }>;
   reasoning_content?: string | null;
   tool_calls?: ToolCall[] | null;
   tool_call_id?: string | null;
+  tool_name?: string;
 }
 
 // ── Session File Paths ──────────────────────────────────────────────────────
@@ -276,7 +279,7 @@ export function replayEntriesIntoContext(agent: AgentForReplay, entries: LogEntr
           new Message({
             role: "user",
             content: entry.content,
-            images: entry.images as MessageImageAttachment[] | null | undefined,
+            images: entry.images as ImageAttachment[] | null | undefined,
           }),
         );
         replayed++;

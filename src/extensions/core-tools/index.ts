@@ -1,4 +1,3 @@
-import extensionData from "./extension.json" with { type: "json" };
 import { HOOKS } from "../../core/hooks.ts";
 import {
   CoreContext,
@@ -95,14 +94,21 @@ const TOOL_FACTORIES: Record<string, (config: CoreToolConfig) => Tool> = {
 
 interface ToolFactory {
   createTool(toolName: string, whitelist?: string[] | null): Tool | null;
-  createAndRegister(toolName: string, registry: ToolsRegisterPayload, whitelist?: string[] | null): void;
+  createAndRegister(
+    toolName: string,
+    registry: ToolsRegisterPayload,
+    whitelist?: string[] | null,
+  ): void;
 }
 
 /**
  * Create a tool factory that can create and register core tools.
  */
 export function createToolFactory(config: CoreToolConfig = {}): ToolFactory {
-  const createTool = (toolName: string, whitelist: string[] | null = null): Tool | null => {
+  const createTool = (
+    toolName: string,
+    whitelist: string[] | null = null,
+  ): Tool | null => {
     const descriptor = TOOL_DESCRIPTORS.find((d) => d.name === toolName);
     if (descriptor) {
       // Check disabled status
@@ -110,7 +116,11 @@ export function createToolFactory(config: CoreToolConfig = {}): ToolFactory {
         return null;
       }
       // Check whitelist
-      if (whitelist && Array.isArray(whitelist) && !whitelist.includes(toolName)) {
+      if (
+        whitelist &&
+        Array.isArray(whitelist) &&
+        !whitelist.includes(toolName)
+      ) {
         return null;
       }
     }
@@ -124,7 +134,11 @@ export function createToolFactory(config: CoreToolConfig = {}): ToolFactory {
     return null;
   };
 
-  const createAndRegister = (toolName: string, registry: ToolsRegisterPayload, whitelist: string[] | null = null) => {
+  const createAndRegister = (
+    toolName: string,
+    registry: ToolsRegisterPayload,
+    whitelist: string[] | null = null,
+  ) => {
     const tool = createTool(toolName, whitelist);
     if (tool) {
       registry.register(toolName, tool);

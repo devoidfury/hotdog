@@ -2,8 +2,6 @@
 // Each session gets a file at ~/.cache/hotdog/sessions/<uuid>.jsonl.
 // Messages are appended as JSON lines. The file is never truncated or modified.
 
-import { homedir } from "node:os";
-import { join } from "node:path";
 import { appendFile, access, mkdir } from "node:fs/promises";
 
 // Re-export core session log functions from src/ (session resume is a core feature)
@@ -16,8 +14,10 @@ import {
   sessionsDir,
   listSessionLogs,
   replayEntriesIntoContext,
+  type LogEntry,
 } from "../../core/session/session-log.ts";
 import { stripNulls } from "../../utils/objects.ts";
+import { ImageAttachment, ToolCall } from "../../core/context/message.ts";
 
 // Re-export core functions for convenience
 export {
@@ -31,24 +31,7 @@ export {
   replayEntriesIntoContext,
 };
 
-// ── Session Log Entry ───────────────────────────────────────────────────────
-
-interface LogEntry extends Record<string, unknown> {
-  ts: string;
-  session_id: string;
-  role: string;
-  source: string;
-  content: string | unknown[];
-  reasoning_content: string | null;
-  tool_calls: unknown;
-  tool_call_id: string | null;
-  tool_name: string | null;
-  images: unknown[] | null;
-}
-
-/**
- * Create a system prompt entry.
- */
+/** Create a system prompt entry. */
 export function createSystemPromptEntry(
   sessionId: string,
   content: string,
@@ -56,106 +39,71 @@ export function createSystemPromptEntry(
   return {
     ts: now(),
     session_id: sessionId,
-    role: "system",
     source: LOG_SOURCE.SYSTEM_PROMPT,
     content,
-    reasoning_content: null,
-    tool_calls: null,
-    tool_call_id: null,
-    tool_name: null,
-    images: null,
   };
 }
 
-/**
- * Create a user input entry.
- */
+/** Create a user input entry. */
 export function createInputEntry(
   sessionId: string,
-  content: string | unknown[],
-  images: unknown[] | null = null,
+  content: string,
+  images?: ImageAttachment[],
 ): LogEntry {
   return {
     ts: now(),
     session_id: sessionId,
-    role: "user",
     source: LOG_SOURCE.INPUT,
     content,
-    reasoning_content: null,
-    tool_calls: null,
-    tool_call_id: null,
-    tool_name: null,
     images,
   };
 }
 
-/**
- * Create an LLM assistant response entry.
- */
+/** Create an LLM assistant response entry. */
 export function createAssistantEntry(
   sessionId: string,
   content: string,
-  toolCalls: unknown = null,
+  toolCalls?: ToolCall[] | null,
   reasoningContent: string | null = null,
 ): LogEntry {
   return {
     ts: now(),
     session_id: sessionId,
-    role: "assistant",
     source: LOG_SOURCE.LLM,
     content,
     reasoning_content: reasoningContent,
     tool_calls: toolCalls,
-    tool_call_id: null,
-    tool_name: null,
-    images: null,
   };
 }
 
-/**
- * Create a tool result entry.
- */
+/** Create a tool result entry. */
 export function createToolResultEntry(
   sessionId: string,
   content: string,
-  toolCallId: string | null = null,
-  toolName: string | null = null,
+  toolCallId: string,
+  toolName: string,
 ): LogEntry {
   return {
     ts: now(),
     session_id: sessionId,
-    role: "tool",
     source: LOG_SOURCE.TOOL_RESULT,
     content,
-    reasoning_content: null,
-    tool_calls: null,
     tool_call_id: toolCallId,
     tool_name: toolName,
-    images: null,
   };
 }
 
-/**
- * Create a reset entry.
- */
+/** Create a reset entry. */
 export function createResetEntry(sessionId: string): LogEntry {
   return {
     ts: now(),
     session_id: sessionId,
-    role: "user",
     source: LOG_SOURCE.RESET,
     content: "",
-    reasoning_content: null,
-    tool_calls: null,
-    tool_call_id: null,
-    tool_name: null,
-    images: null,
   };
 }
 
-/**
- * Create a compaction entry.
- */
+/** Create a compaction entry. */
 export function createCompactionEntry(
   sessionId: string,
   messagesCompacted: number,
@@ -164,35 +112,22 @@ export function createCompactionEntry(
   return {
     ts: now(),
     session_id: sessionId,
-    role: "user",
     source: LOG_SOURCE.COMPACTION,
     content: `<system-notice>[Compacted ${messagesCompacted} messages]\n\n${summary}</system-notice>`,
-    reasoning_content: null,
-    tool_calls: null,
-    tool_call_id: null,
-    tool_name: null,
-    images: null,
   };
 }
 
-/**
- * Create a prompt expansion entry.
- */
+/** Create a prompt expansion entry. */
 export function createPromptEntry(
   sessionId: string,
-  content: string | unknown[],
-  images: unknown[] | null = null,
+  content: string,
+  images?: ImageAttachment[],
 ): LogEntry {
   return {
     ts: now(),
     session_id: sessionId,
-    role: "user",
     source: LOG_SOURCE.PROMPT,
     content,
-    reasoning_content: null,
-    tool_calls: null,
-    tool_call_id: null,
-    tool_name: null,
     images,
   };
 }
@@ -247,8 +182,8 @@ export class SessionLog {
    * Write a user input entry.
    */
   async writeInput(
-    content: string | unknown[],
-    images: unknown[] | null = null,
+    content: string,
+    images: ImageAttachment[],
   ): Promise<void> {
     await this.append(createInputEntry(this.sessionId, content, images));
   }
@@ -258,8 +193,8 @@ export class SessionLog {
    */
   async writeAssistant(
     content: string,
-    toolCalls: unknown = null,
-    reasoningContent: string | null = null,
+    toolCalls?: ToolCall[] | null,
+    reasoningContent?: string | null,
   ): Promise<void> {
     await this.append(
       createAssistantEntry(
@@ -307,8 +242,8 @@ export class SessionLog {
    * Write a prompt expansion entry.
    */
   async writePrompt(
-    content: string | unknown[],
-    images: unknown[] | null = null,
+    content: string,
+    images?: ImageAttachment[],
   ): Promise<void> {
     await this.append(createPromptEntry(this.sessionId, content, images));
   }

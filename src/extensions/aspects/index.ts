@@ -19,14 +19,14 @@ const TEMPLATE_PATH = path.join(import.meta.dirname, "aspects_chunk.md");
  * Priority: profile file front matter > config file aspects array.
  */
 async function resolveAspectNames(core: CoreContext): Promise<string[]> {
-  const resolved = core.resolved || {} as Record<string, unknown>;
+  const resolved = core.resolved;
   const rawConfig = core.config || {};
-  const configDir = (resolved.configDir as string) || resolveConfigDir();
+  const configDir = resolved?.configDir || resolveConfigDir();
 
-  const profileName = (resolved.profileName as string) || "default";
+  const profileName = resolved?.profileName || "default";
   const profilesPath =
-    (resolved.profilesPath as string) ||
-    (rawConfig.profilesPath as string) ||
+    resolved?.profilesPath ||
+    rawConfig.profilesPath ||
     path.join(configDir, DEFAULT_PROFILES_SUBPATH);
 
   // Try to read aspect names from profile file front matter
@@ -91,14 +91,12 @@ async function buildAspectsChunk(
 export function create(core: CoreContext): ExtensionInstance {
   return {
     hooks: {
-      [HOOKS.SYSTEM_PROMPT_BUILD]: async (_data: unknown) => {
+      [HOOKS.SYSTEM_PROMPT_BUILD]: async (_data) => {
         const aspectNames = await resolveAspectNames(core);
-        const resolved = core.resolved || {};
-        const rawConfig = core.config || {};
-        const configDir = (resolved.configDir as string) || resolveConfigDir();
+        const configDir = core.resolved?.configDir || resolveConfigDir();
         const profilesPath =
-          (resolved.profilesPath as string) ||
-          (rawConfig.profilesPath as string) ||
+          core.resolved?.profilesPath ||
+          core.config.profilesPath ||
           path.join(configDir, DEFAULT_PROFILES_SUBPATH);
         const content = await buildAspectsChunk(aspectNames, profilesPath);
         return { name: "guidelines", priority: 200, content };

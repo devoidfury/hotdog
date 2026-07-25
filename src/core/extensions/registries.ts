@@ -1,6 +1,7 @@
 // Registries for agent commands and CLI subcommands.
 
 import { logger } from "../logger.ts";
+import { CoreContext } from "./types.ts";
 
 // ── Type Definitions ─────────────────────────────────────────────────────────
 
@@ -30,44 +31,6 @@ export interface CommandAgent {
   reasoningEffort: string | undefined;
   ensureSystemPrompt(): Promise<void>;
   emitOutput(type: string, data: Record<string, unknown>): void;
-}
-
-/**
- * Minimal Core interface for CLI subcommand handlers.
- * Structurally compatible with CoreInfrastructure (from main.ts) and
- * CoreContext (from types.ts) so that real core instances can be
- * passed to subcommand handlers without casts.
- *
- * Avoids circular imports by defining only the shape needed.
- */
-export interface SubcommandCore {
-  hooks: {
-    notifyHooks(hookName: string, data: unknown): void;
-  };
-  toolRegistry: {
-    register(name: string, tool: unknown): void;
-    getAll(): [string, unknown][];
-  };
-  services: {
-    get(name: string): unknown;
-  };
-  config?: Record<string, unknown>;
-  configRegistry: {
-    registerCliFlags(flags: unknown[]): void;
-    registerConfigParams(params: unknown[]): void;
-  };
-  cliSubcommandRegistry: {
-    register(name: string, definition: SubcommandDefinition): void;
-    get(name: string): SubcommandDefinition | undefined;
-    names(): string[];
-  };
-  service(name: string): unknown;
-  resolved?: Record<string, unknown>;
-  buildConfig?: (cli: Record<string, unknown>) => Promise<{
-    resolved: Record<string, unknown>;
-    modelRegistry: Record<string, unknown>;
-    providers: unknown[];
-  }>;
 }
 
 // ── CLI Argument Type ────────────────────────────────────────────────────────
@@ -193,7 +156,7 @@ export function createCommandRegistry(): AgentCommandRegistry {
 // ── CLI Subcommand Registry ──────────────────────────────────────────────────
 
 export interface SubcommandDefinition {
-  handler?: (cliArgs: CliArgv, core: SubcommandCore) => number | Promise<number>;
+  handler?: (cliArgs: CliArgv, core: CoreContext) => number | Promise<number>;
   description?: string;
   options?: Record<string, unknown>;
 }

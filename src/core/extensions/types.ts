@@ -15,13 +15,14 @@ import type { ExtensionLoader } from "./extensions.ts";
 import type { ServiceRegistry } from "./service-registry.ts";
 import type { CliSubcommandRegistry } from "./registries.ts";
 import type { ConfigRegistry } from "./config-registry.ts";
-import type { ModelConfig } from "../config/providers.ts";
+import type { ModelConfig, ProviderDef } from "../config/providers.ts";
 import type { CoreConfig } from "../config/schema-loader.ts";
 import type { Agent } from "../agent.ts";
-import type { Message } from "../context/message.ts";
+import type { ImageAttachment, Message } from "../context/message.ts";
 import type { ParsedCommand } from "../commands.ts";
 import type { ToolContext } from "./tool-context.ts";
 import { logger } from "../logger.ts";
+import { ProfileDef } from "../config/profiles.ts";
 
 // ── Hook Payload Types ──────────────────────────────────────────────────────
 
@@ -39,10 +40,10 @@ import { logger } from "../logger.ts";
 export interface HookPayloads {
   // Session lifecycle
   "session:create": { session: unknown; config: Record<string, unknown> };
-  "session:swap": { oldAgent: unknown; newAgent: unknown };
-  "session:serialize": { agent: unknown };
+  "session:swap": { oldAgent?: Agent; newAgent: Agent };
+  "session:serialize": { agent: Agent };
   "session:deserialize": { data: Record<string, unknown> };
-  "session:restoreActive": { agent: unknown; isRestoring: boolean };
+  "session:restoreActive": { agent: Agent; isRestoring: boolean };
 
   // Tool context enrichment
   "agent:toolContext": { toolCtx: ToolContext; toolName: string; agent: Agent };
@@ -101,7 +102,7 @@ export interface HookPayloads {
   //   { action: "continue" }
   //   { action: "transform", text, images? }
   //   { action: "handled" }
-  "input": { text: string; images: unknown[] | null };
+  "input": { text: string; images?: ImageAttachment[] | null, agent: Agent };
 
   // Context modification pipeline — return ContextHookResult
   //   { messages } — replace the messages array
@@ -217,9 +218,9 @@ export interface CoreContext {
    * that need to rebuild config at runtime.
    */
   buildConfig?: (cli: Record<string, unknown>) => Promise<{
-    resolved: Record<string, unknown>;
+    resolved: ResolvedConfig;
     modelRegistry: Record<string, ModelConfig>;
-    providers: unknown[];
+    providers: ProviderDef[];
   }>;
 }
 
@@ -237,7 +238,7 @@ export interface ResolvedConfig {
   maxRetries: number;
   maxIterations: number;
   profileName: string;
-  profile: Record<string, unknown>;
+  profile?: ProfileDef;
 
   // Optional schema keys
   stream?: boolean;
@@ -327,7 +328,7 @@ export interface CommandsRegisterPayload {
   /** The agent's command registry for registering slash commands. */
   registry: { register(name: string, definition: Record<string, unknown>): void };
   /** The agent instance for accessing agent state. */
-  agent: unknown;
+  agent: Agent;
 }
 
 // ── Tool Execution Context ───────────────────────────────────────────────────

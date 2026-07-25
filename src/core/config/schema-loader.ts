@@ -495,11 +495,11 @@ export interface CoreConfig {
   hookTrace?: boolean;
   profileName?: string;
   /** Resolved profile object (includes manager flag, whitelistTools, etc.). Not from schema — set at runtime. */
-  profile?: Record<string, unknown>;
+  profile?: ProfileDef;
   profilesPath?: string;
   provider?: string;
   systemPromptTemplate?: string;
-  profiles?: Record<string, unknown>;
+  profiles?: Record<string, ProfileDef>;
   extensionPaths?: string[];
   extensionAutoload?: boolean;
   extensions?: string[];
@@ -566,6 +566,7 @@ export function resolveExtensionConfig(
 }
 
 import type { ProviderDef } from "./providers.ts";
+import { ProfileDef } from "./profiles.ts";
 
 /**
  * Resolve a model name to provider/model format.

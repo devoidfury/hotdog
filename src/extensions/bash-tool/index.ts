@@ -12,7 +12,6 @@ import { HOOKS } from "../../core/hooks.ts";
 import {
   CoreContext,
   ExtensionInstance,
-  ToolsRegisterPayload,
   ToolExecutionContext,
   getExtensionConfig,
 } from "../../core/extensions/types.ts";
@@ -176,7 +175,7 @@ export function create(core: CoreContext): ExtensionInstance {
       /**
        * Register the bash tool.
        */
-      [HOOKS.TOOLS_REGISTER]: async (registry: ToolsRegisterPayload) => {
+      [HOOKS.TOOLS_REGISTER]: async (registry) => {
         const tool = new BashTool({ timeoutMs, maxOutputLines });
         registry.register(BashTool.TOOL_NAME, tool);
       },

@@ -19,8 +19,8 @@ import {
 import {
   CoreContext,
   ExtensionInstance,
-  ToolsRegisterPayload,
 } from "../../core/extensions/types.ts";
+import { TaskManager } from "../../core/index.ts";
 
 // Re-export for tests and external use
 export {
@@ -37,14 +37,7 @@ export {
 };
 
 interface SubagentOptions {
-  taskManager?: {
-    _config?: Record<string, unknown>;
-    spawnTask(taskId: string, description: string, options: Record<string, unknown>): Promise<Record<string, string>>;
-    taskStatus(taskId: string): string | null;
-    sendFollowUp(taskId: string, message: string): boolean;
-    interruptTask(taskId: string): boolean;
-    activeTasks(): string[];
-  } | null;
+  taskManager?: TaskManager | null;
   sessionCore?: unknown;
 }
 
@@ -58,8 +51,8 @@ export function create(core: CoreContext, options: SubagentOptions = {}): Extens
   }
 
   // Check if the current profile is a manager profile
-  const profile = (core.config.profile as Record<string, unknown>) || {};
-  const isManager = profile.manager === true;
+  const profile = core.config.profile;
+  const isManager = profile?.manager === true;
   if (!isManager) {
     return null; // Subagent tools only for manager profiles
   }
@@ -71,24 +64,24 @@ export function create(core: CoreContext, options: SubagentOptions = {}): Extens
        * Tools access them via toolCtx.get('taskManager') and toolCtx.get('sessionCore').
        */
       [HOOKS.AGENT_TOOL_CONTEXT]: async ({ toolCtx }) => {
-        (toolCtx as { set: (key: string, value: unknown) => void }).set("taskManager", taskManager);
-        (toolCtx as { set: (key: string, value: unknown) => void }).set("sessionCore", sessionCore || null);
+        toolCtx.set("taskManager", taskManager);
+        toolCtx.set("sessionCore", sessionCore || null);
       },
 
       /**
        * Register subagent tools when requested.
        */
-      [HOOKS.TOOLS_REGISTER]: async (registry: ToolsRegisterPayload & { register(name: string, tool: SubagentTool): void }) => {
+      [HOOKS.TOOLS_REGISTER]: async ({ register }) => {
         for (const toolName of SUBAGENT_TOOL_NAMES) {
           try {
             const ctor = SUBAGENT_TOOL_CONSTRUCTORS[toolName];
             if (ctor) {
               const tool = ctor({ sessionCore, taskManager });
-              registry.register(toolName, tool);
+              register(toolName, tool);
             }
           } catch (e: unknown) {
             logger.error(
-              `[subagents] Failed to create tool '${toolName}': ${(e as Error).message}`,
+              `[subagents] Failed to create tool '${toolName}': ${(e as Error).message || e}`,
             );
           }
         }

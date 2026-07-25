@@ -15,21 +15,41 @@ import {
   CommandsRegisterPayload,
   getExtensionConfig,
 } from "../../core/extensions/types.ts";
+import { type Agent } from "../../core/agent.ts";
 
-interface Agent {
-  modelRegistry?: Record<string, unknown>;
-  model?: string;
+interface ModelSwitchExtConfig {
+  toolEnabled?: boolean;
+  commandEnabled?: boolean;
+}
+
+const MODEL_TOOL_NAME = "model";
+const MODEL_CMD_NAME = "model";
+const LIST_CMD_NAME = "models";
+
+function listModels(agent: Agent) {
+  // No model name — show available models
+  const models = Object.keys(agent.modelRegistry);
+  if (models.length === 0) {
+    return {
+      action: ACTIONS.DISPLAY,
+      content: "No models configured. Add providers to your config file.",
+    };
+  }
+
+  const lines = ["Available models:"];
+  for (const name of models) {
+    lines.push(`  ${name}`);
+  }
+  lines.push(`\nCurrently using: ${agent.model}`);
+  return { action: ACTIONS.DISPLAY, content: lines.join("\n") };
 }
 
 /**
  * Create the model-switch extension.
  */
 export function create(core: CoreContext): ExtensionInstance {
-  const modelRegistry = core.resolved?.modelRegistry ?? {};
-  // Config defaults come from extension.json configSchema
-  const config = getExtensionConfig<{ toolEnabled?: boolean; commandEnabled?: boolean }>(core, "modelSwitch");
-
-  const modelTool = new ModelTool(modelRegistry as import("../../core/agent.ts").ModelRegistry);
+  const config = getExtensionConfig<ModelSwitchExtConfig>(core, "modelSwitch");
+  const modelTool = new ModelTool(core.resolved?.modelRegistry);
 
   return {
     hooks: {
@@ -38,7 +58,7 @@ export function create(core: CoreContext): ExtensionInstance {
        */
       [HOOKS.TOOLS_REGISTER]: async (registry: ToolsRegisterPayload) => {
         if (config.toolEnabled === true) {
-          registry.register("model", modelTool);
+          registry.register(MODEL_TOOL_NAME, modelTool);
         }
       },
 
@@ -50,46 +70,33 @@ export function create(core: CoreContext): ExtensionInstance {
         if (config.commandEnabled === false) return;
 
         // /models — list available models
-        registry.register("models", {
+        registry.register(LIST_CMD_NAME, {
           description: "List available models",
-          matches: (cmd: string) => cmd === "models",
-          handler: async (agent: Agent) => {
-            const models = Object.keys(agent.modelRegistry || {});
-            if (models.length === 0) {
-              return {
-                action: ACTIONS.DISPLAY,
-                content:
-                  "No models configured. Add providers to your config file.",
-              };
-            }
-            const lines = ["Available models:"];
-            for (const name of models) {
-              lines.push(`  ${name}`);
-            }
-            lines.push(`\nCurrently using: ${agent.model}`);
-            return { action: ACTIONS.DISPLAY, content: lines.join("\n") };
-          },
+          matches: (cmd: string) => cmd.trim() === LIST_CMD_NAME,
+          handler: listModels,
         });
 
         // /model — switch model (with or without a name)
-        registry.register("model", {
+        registry.register(MODEL_CMD_NAME, {
           description: "Switch to a different model",
-          matches: (cmd: string) => cmd === "model" || cmd.startsWith("model "),
+          matches: (cmd: string) =>
+            cmd === MODEL_CMD_NAME ||
+            cmd.startsWith(`${MODEL_CMD_NAME} `) ||
+            cmd.startsWith(`${MODEL_CMD_NAME}:`),
           handler: async (agent: Agent, cmdValue: string) => {
-            const parts = cmdValue.split(/\s+/);
-            const modelName = parts.slice(1).join(" ").trim();
+            const modelName = cmdValue
+              .substring(MODEL_CMD_NAME.length + 1)
+              .trim();
 
             if (!modelName) {
-              // No model name — show available models
-              const models = Object.keys(agent.modelRegistry || {});
-              return {
-                action: ACTIONS.DISPLAY,
-                content: `Available models: ${models.join(", ")}`,
-              };
+              return listModels(agent);
             }
 
             agent.model = modelName;
-            return { action: ACTIONS.DISPLAY, content: `Switched to model: ${modelName}` };
+            return {
+              action: ACTIONS.DISPLAY,
+              content: `Switched to model: ${modelName}`,
+            };
           },
         });
       },

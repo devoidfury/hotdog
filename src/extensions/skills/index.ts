@@ -5,9 +5,8 @@
 
 import { HOOKS } from "../../core/hooks.ts";
 import { ACTIONS } from "../../core/commands.ts";
-import { patternMatches, SkillsLoader } from "./loader.ts";
+import { patternMatches, Skill, SkillsLoader } from "./loader.ts";
 import { LoadSkillTool } from "./load-skill.ts";
-export { LoadSkillTool };
 import {
   CoreContext,
   ExtensionInstance,
@@ -16,18 +15,6 @@ import {
   getExtensionConfig,
 } from "../../core/extensions/types.ts";
 import { ExtensionError } from "../../core/error.ts";
-
-interface Skill {
-  name: string;
-  description: string;
-  loaded: boolean;
-  includeTools?: string[];
-  allowedTools?: string[];
-}
-
-interface ToolCtx {
-  set(key: string, value: unknown): void;
-}
 
 interface SkillsLoaderConfig {
   path?: string;

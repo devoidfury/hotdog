@@ -36,10 +36,6 @@ export {
   WaitTool,
 };
 
-interface ToolCtx {
-  set(key: string, value: unknown): void;
-}
-
 interface SubagentOptions {
   taskManager?: {
     _config?: Record<string, unknown>;

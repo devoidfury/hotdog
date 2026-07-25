@@ -12,21 +12,13 @@ import {
 } from "../../core/extensions/tool-utils.ts";
 import type { ToolDef } from "../../core/extensions/tool-registry.ts";
 import { getVisibleWorkerProfiles } from "../../core/config/profiles.ts";
+import { TaskManager } from "../../core/index.ts";
 
 // ── Base class for subagent tools ──────────────────────────────────────────
 
 interface SubagentToolOptions {
   sessionCore?: unknown;
   taskManager?: TaskManager;
-}
-
-interface TaskManager {
-  _config?: Record<string, unknown>;
-  spawnTask(taskId: string, description: string, options: Record<string, unknown>): Promise<Record<string, string>>;
-  taskStatus(taskId: string): string | null;
-  sendFollowUp(taskId: string, message: string): boolean;
-  interruptTask(taskId: string): boolean;
-  activeTasks(): string[];
 }
 
 type Backend = { type: "sessionCore"; value: unknown } | { type: "taskManager"; value: TaskManager } | { type: "none"; value: null };
@@ -119,8 +111,8 @@ export class DelegateTaskTool extends SubagentTool {
       args.task_id as string,
       args.description as string,
       {
-        workerModel: args.worker_model || null,
-        profile: args.profile || null,
+        workerModel: args.worker_model as string || undefined,
+        profile: args.profile as string || undefined,
       },
     );
     return ToolResult.ok(

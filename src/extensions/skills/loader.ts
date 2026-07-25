@@ -8,6 +8,23 @@ import { render } from "../../utils/render.ts";
 import { logger } from "../../core/logger.ts";
 import { ParseError } from "../../core/error.ts";
 
+export interface Skill {
+  name: string;
+  description: string;
+  license: string;
+  compatibility: string;
+  metadata: Record<string, unknown>;
+  allowedTools: string[];
+  includeTools: string[];
+  toolDependencies: string[];
+  visible: boolean;
+  disableModelInvocation: boolean;
+  loaded: boolean;
+  content: string;
+  location: string;
+  additionalFiles: string[];
+}
+
 // ── Pattern Matching ───────────────────────────────────────────────────────
 
 /**
@@ -49,23 +66,6 @@ export function patternMatches(pattern: string, toolName: string): boolean {
 }
 
 // ── Skill Parsing ──────────────────────────────────────────────────────────
-
-interface Skill {
-  name: string;
-  description: string;
-  license: string;
-  compatibility: string;
-  metadata: Record<string, unknown>;
-  allowedTools: string[];
-  includeTools: string[];
-  toolDependencies: string[];
-  visible: boolean;
-  disableModelInvocation: boolean;
-  loaded: boolean;
-  content: string;
-  location: string;
-  additionalFiles: string[];
-}
 
 /**
  * Parse a SKILL.md file into a Skill object.

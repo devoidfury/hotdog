@@ -5,20 +5,9 @@ import {
   ToolResult,
   defaultCallDisplay,
 } from "../../core/extensions/tool-utils.ts";
+import { type ToolExecutionContext } from "../../core/extensions/types.ts";
+import { SkillsLoader } from "./loader.ts";
 
-interface Skill {
-  name: string;
-  content: string;
-  source?: string;
-}
-
-interface SkillsLoader {
-  getSkill(name: string): Skill | null;
-}
-
-interface ToolContext {
-  get(key: string): unknown;
-}
 
 export class LoadSkillTool {
   static readonly TOOL_NAME = "load_skill";
@@ -43,12 +32,12 @@ export class LoadSkillTool {
   }
 
   callDisplay(input: string | Record<string, unknown> | null): string {
-    return defaultCallDisplay(input, (args: Record<string, unknown>) => `load_skill: ${args.name as string}`);
+    return defaultCallDisplay(input, (args: Record<string, unknown>) => `load_skill: ${args?.name}`);
   }
 
-  async execute(input: string | Record<string, unknown> | null, ctx?: ToolContext): Promise<ToolResult> {
-    const args: Record<string, unknown> = typeof input === "string" ? JSON.parse(input) : (input as Record<string, unknown>);
-    const skillName = args.name as string;
+  async execute(input: string | Record<string, unknown> | null, ctx?: ToolExecutionContext): Promise<ToolResult> {
+    const args = typeof input === "string" ? JSON.parse(input) : input;
+    const skillName = args?.name as string;
 
     if (!this.loader) {
       return ToolResult.err("Skills loader not available");
@@ -71,7 +60,6 @@ export class LoadSkillTool {
     return ToolResult.ok(skill.content).withEntries({
       skill: skillName,
       content_length: String(contentLength),
-      source: skill.source || "unknown",
     });
   }
 }

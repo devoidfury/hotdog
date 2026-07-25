@@ -12,13 +12,12 @@ import {
   mcpInitializeRequest,
 } from "./types.ts";
 import { McpTransport, StdioTransport, HttpTransport } from "./transports.ts";
-import { logger } from "../../core/logger.ts";
-import { formatError } from "../../core/error.ts";
+import { ExtensionError } from "../../core/error.ts";
 
 /**
  * MCP error type.
  */
-export class McpError extends Error {
+export class McpError extends ExtensionError {
   readonly code: number | null;
 
   constructor(message: string, code: number | null = null) {

@@ -2,15 +2,24 @@
 
 import { ConfigError } from "../error.ts";
 import { validate } from "../../utils/json-schema.ts";
-import { SchemaLayer } from "../config/schema-loader.ts";
+import type { SchemaLayer } from "../config/schema-types.ts";
 
+/**
+ * Unified CLI flag definition used by both core schema and extension registration.
+ *
+ * - Core schema flags include `key` (maps back to config key) and `hasValue`.
+ * - Extension flags may include `default` and `parse` for custom handling.
+ * - `hasValue` is derived from `type !== "boolean"` if not explicitly provided.
+ */
 export interface CliFlagDef {
+  key?: string;                     // maps back to config key (schema-loader use)
   short?: string;
   long: string;
   description: string;
   type: string;
-  default?: unknown;
-  parse?: (value: string) => unknown;
+  hasValue?: boolean;               // derived from type if not provided
+  default?: unknown;                // extension defaults
+  parse?: (value: string) => unknown;  // custom parser
 }
 
 export interface ConfigParamDef {

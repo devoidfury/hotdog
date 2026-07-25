@@ -200,16 +200,7 @@ export async function main(): Promise<number> {
   const configRegistry = createConfigRegistry();
 
   // Register core CLI flags from schema (single source of truth)
-  const coreFlags = cliFlagsFromSchema(CONFIG_SCHEMA);
-  configRegistry.registerCliFlags(
-    coreFlags.map((f) => ({
-      short: f.short ?? undefined,
-      long: f.long,
-      description: f.description,
-      type: f.type,
-      default: undefined,
-    })),
-  );
+  configRegistry.registerCliFlags(cliFlagsFromSchema(CONFIG_SCHEMA));
 
   // Register inverse flags not in schema (schema has one cliFlag per key)
   configRegistry.registerCliFlags([

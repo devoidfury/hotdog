@@ -6,33 +6,8 @@ import { getNested } from "../../utils/objects.ts";
 import { parseAs } from "../../utils/json-schema.ts";
 import configSchema from "../core.config.json" with { type: "json" };
 
-export type CastFn = (v: unknown, ctx?: unknown) => unknown;
-export type ComputeFn = (ctx: unknown) => unknown;
-
-export interface SchemaLayer {
-  source?: string;
-  key?: string;
-  path?: string;
-  default?: unknown;
-  cast?: CastFn | string | null;
-  compute?: string;
-}
-
-export interface SchemaProperty {
-  type?: string;
-  description?: string;
-  default?: unknown;
-  layers?: SchemaLayer[];
-  properties?: Record<string, SchemaProperty>;
-  cliFlag?: {
-    short?: string;
-    long: string;
-    type?: string;
-    description?: string;
-  };
-}
-
-export type ConfigSchema = Record<string, SchemaProperty>;
+// Re-export shared schema types
+export * from "./schema-types.ts";
 
 /**
  * Map of named cast strings to their function implementations.
@@ -305,14 +280,8 @@ export function buildUnifiedSchema(
   return { ...coreSchema, ...extensionSchema };
 }
 
-export interface CliFlagDef {
-  key: string;
-  short: string | null;
-  long: string;
-  type: string;
-  hasValue: boolean;
-  description: string;
-}
+import type { CliFlagDef } from "../extensions/config-registry.ts";
+export type { CliFlagDef } from "../extensions/config-registry.ts";
 
 /**
  * Generate CLI flag definitions from the schema.
@@ -323,7 +292,7 @@ export function cliFlagsFromSchema(schema: ConfigSchema): CliFlagDef[] {
     if (def.cliFlag) {
       flags.push({
         key,
-        short: def.cliFlag.short || null,
+        short: def.cliFlag.short || undefined,
         long: def.cliFlag.long,
         type: def.cliFlag.type || def.type || "string",
         hasValue: def.cliFlag.type !== "boolean",

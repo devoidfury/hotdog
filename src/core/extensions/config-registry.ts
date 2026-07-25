@@ -2,6 +2,7 @@
 
 import { ConfigError } from "../error.ts";
 import { validate } from "../../utils/json-schema.ts";
+import { SchemaLayer } from "../config/schema-loader.ts";
 
 export interface CliFlagDef {
   short?: string;
@@ -17,7 +18,7 @@ export interface ConfigParamDef {
   description: string;
   defaults: Record<string, unknown>;
   schema?: Record<string, unknown>;
-  layers?: unknown[];
+  layers?: SchemaLayer[];
 }
 
 /**
@@ -125,10 +126,7 @@ export class ConfigRegistry {
   /**
    * Register a config schema for a given key.
    */
-  registerConfigSchema(
-    key: string,
-    schema: Record<string, unknown>,
-  ): void {
+  registerConfigSchema(key: string, schema: Record<string, unknown>): void {
     if (!key || typeof key !== "string") {
       throw new TypeError("key must be a non-empty string");
     }

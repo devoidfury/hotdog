@@ -28,7 +28,6 @@ import {
   DEFAULT_PROFILES_SUBPATH,
   DEFAULT_PROFILES_PATH,
   DEFAULT_CONFIG_FILENAME,
-  DEFAULT_PROMPTS_PATH,
 } from "./defaults.ts";
 import { CONFIG_SCHEMA, getLayerDefault, ResolutionContext, type CoreConfig } from "./schema-loader.ts";
 import {

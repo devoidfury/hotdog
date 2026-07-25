@@ -30,7 +30,6 @@ export {
   ToolExecutor,
   createToolExecutor,
   type ToolExecutorDeps,
-  type ToolCall,
   type ToolResult as ToolExecutorResult,
 } from "./tool-executor.ts";
 

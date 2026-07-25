@@ -6,6 +6,12 @@ export interface ImageAttachment {
   data: string;
 }
 
+export interface ToolCall {
+  id: string;
+  type: string;
+  function: { name: string; arguments: string };
+}
+
 /**
  * Canonical constructor parameters — camelCase only.
  * Use Message.fromJSON() to deserialize from snake_case persistence.
@@ -14,7 +20,7 @@ export interface MessageParams {
   role?: string;
   content?: string | Array<unknown> | null;
   reasoningContent?: string | null;
-  toolCalls?: unknown;
+  toolCalls?: ToolCall[] | null;
   toolCallId?: string | null;
   images?: ImageAttachment[] | null;
 }
@@ -23,7 +29,7 @@ export class Message {
   role: string | undefined;
   content: string | Array<unknown> | undefined;
   reasoningContent: string | null;
-  toolCalls: unknown;
+  toolCalls: ToolCall[] | null;
   toolCallId: string | null;
   images: ImageAttachment[] | null | undefined;
 
@@ -51,9 +57,9 @@ export class Message {
     return new Message({
       role: data.role as string | undefined,
       content: data.content as string | Array<unknown> | undefined,
-      reasoningContent: (data.reasoning_content ?? data.reasoningContent) as string | null,
-      toolCalls: data.tool_calls ?? data.toolCalls ?? null,
-      toolCallId: (data.tool_call_id ?? data.toolCallId) as string | null,
+      reasoningContent: (data.reasoning_content ?? data.reasoningContent) as string | undefined,
+      toolCalls: (data.tool_calls ?? data.toolCalls) as ToolCall[] | undefined ?? null,
+      toolCallId: (data.tool_call_id ?? data.toolCallId) as string | undefined,
       images: data.images as ImageAttachment[] | undefined,
     });
   }

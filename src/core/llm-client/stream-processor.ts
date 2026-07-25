@@ -8,20 +8,9 @@ import crypto from "node:crypto";
 import { LlmError } from "../error.ts";
 import { logger } from "../logger.ts";
 import type { StreamEvent } from "./client.ts";
+import { ToolCall } from "../context/message.ts";
 
 // ── Types ────────────────────────────────────────────────────────────────────
-
-/**
- * A normalized tool call in OpenAI format.
- */
-export interface ToolCall {
-  id: string;
-  type: string;
-  function: {
-    name: string;
-    arguments: string;
-  };
-}
 
 /**
  * The complete result of processing a stream.

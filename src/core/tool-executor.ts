@@ -1,6 +1,6 @@
 // ToolExecutor
 
-import { Message, type ImageAttachment } from "./context/message.ts";
+import { Message, type ToolCall, type ImageAttachment } from "./context/message.ts";
 import { formatError } from "./error.ts";
 import { HOOKS, type HookSystem, type GateAction, type ToolResultHookResult } from "./hooks.ts";
 import { logger } from "./logger.ts";
@@ -9,11 +9,6 @@ import { formatToolResult, TOOL_STOP_LOOP } from "./extensions/tool-utils.ts";
 import type { ToolRegistry } from "./extensions/tool-registry.ts";
 import type { Agent } from "./agent.ts";
 
-export interface ToolCall {
-  id: string;
-  type: string;
-  function: { name: string; arguments: string };
-}
 
 export interface ToolResult {
   toolName: string;

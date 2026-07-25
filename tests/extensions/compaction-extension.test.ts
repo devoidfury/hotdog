@@ -552,7 +552,7 @@ describe("Edge Cases", () => {
       new Message({ role: "user", content: "x".repeat(500) }),
       new Message({ role: "assistant", content: "y".repeat(500), reasoningContent: "z".repeat(500) }),
       new Message({ role: "user", content: "a".repeat(500) }),
-      new Message({ role: "assistant", content: "b".repeat(500), toolCalls: [{ function: { name: "bash", arguments: '{"cmd": "ls"}' } }] }),
+      new Message({ role: "assistant", content: "b".repeat(500), toolCalls: [{ id: "tc1", type: "function", function: { name: "bash", arguments: '{"cmd": "ls"}' } }] }),
       new Message({ role: "tool", content: "result".repeat(200) }),
     ];
     const agent = createMockAgent(context);

@@ -124,7 +124,7 @@ export class DelegateTaskTool extends SubagentTool {
   }
 
   override toToolDef() {
-    const config = this._taskManager?._config;
+    const config = this._taskManager?.config;
     const profilesPath = (config?.profilesPath as string) || null;
     const profileListPromise = profilesPath
       ? getVisibleWorkerProfiles(profilesPath).then((profiles) => {

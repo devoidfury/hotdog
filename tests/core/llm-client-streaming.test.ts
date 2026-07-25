@@ -67,7 +67,7 @@ describe("LlmClient._escapeMessages", () => {
       new Message({
         role: "assistant",
         content: "I will run a command",
-        toolCalls: [{ id: "tc1", function: { name: "bash", arguments: "{}" } }],
+        toolCalls: [{ id: "tc1", type: "function", function: { name: "bash", arguments: "{}" } }],
       }),
     ];
     const escaped = client._escapeMessages(messages as unknown as Record<string, unknown>[]);
@@ -91,6 +91,7 @@ describe("LlmClient._escapeMessages", () => {
         toolCalls: [
           {
             id: "tc1",
+            type: "function",
             function: { name: "read_file", arguments: '{"path":"test.txt"}' },
           },
         ],
@@ -918,7 +919,7 @@ describe("LlmClient.chatStream", () => {
       capturedTools = tools;
     };
 
-    const tools = [{ type: "function", function: { name: "bash" } }];
+    const tools = [{ type: "function", function: { name: "bash", description: "Run bash", parameters: { type: "object", properties: {}, required: [] } } }];
     const gen = client.chatStream(
       [{ role: "user", content: "Hi" }],
       "test-model",

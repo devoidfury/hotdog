@@ -604,7 +604,7 @@ export function createMessageList(
     }
     // Try text pattern like "tool_name: ..."
     const match = content.match(/^(\w+):\s/);
-    if (match) return match[1];
+    if (match) return match[1] ?? "tool";
     return "tool";
   }
 

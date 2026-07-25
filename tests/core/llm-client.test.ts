@@ -103,7 +103,7 @@ describe("LlmClient.buildChatRequest", () => {
     const request = client.buildChatRequest(
       messages,
       { name: "gpt-4", temperature: 0.7 },
-      [{ type: "function", function: { name: "bash" } }],
+      [{ type: "function", function: { name: "bash", description: "Run bash", parameters: { type: "object", properties: {}, required: [] } } }],
     );
     expect(request.model).toBe("gpt-4");
     expect(request.messages).toHaveLength(1);
@@ -143,7 +143,7 @@ describe("LlmClient.buildChatRequest", () => {
     const msg = new Message({
       role: "assistant",
       content: "I will run a command",
-      toolCalls: [{ id: "tc1", function: { name: "bash", arguments: "{}" } }],
+      toolCalls: [{ id: "tc1", type: "function", function: { name: "bash", arguments: "{}" } }],
     });
     const request = client.buildChatRequest(
       [msg] as unknown as Record<string, unknown>[],

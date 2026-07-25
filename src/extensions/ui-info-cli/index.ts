@@ -419,7 +419,7 @@ async function printConfigDebug(
 
   // Print each config key with resolution details
   for (const [keyName, keySchema] of Object.entries(CONFIG_KEYS)) {
-    const trace = traceConfigResolution(keyName, keySchema, context);
+    const trace = traceConfigResolution(keyName, keySchema as import("../../core/config/schema-types.ts").SchemaProperty, context);
     const valueStr =
       trace.resolvedValue === undefined
         ? "(undefined)"

@@ -233,7 +233,7 @@ describe("StreamProcessor", () => {
         onFinish: (r) => { finishReason = r; },
       });
 
-      expect(finishReason as string).toBe("stop");
+      expect(finishReason as string | null).toBe("stop");
     });
 
     it("should call onToolCalls callback with final tool calls", async () => {

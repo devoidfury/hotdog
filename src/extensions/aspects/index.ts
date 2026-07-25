@@ -19,7 +19,7 @@ const TEMPLATE_PATH = path.join(import.meta.dirname, "aspects_chunk.md");
  * Priority: profile file front matter > config file aspects array.
  */
 async function resolveAspectNames(core: CoreContext): Promise<string[]> {
-  const resolved = core.resolved || {};
+  const resolved = core.resolved || {} as Record<string, unknown>;
   const rawConfig = core.config || {};
   const configDir = (resolved.configDir as string) || resolveConfigDir();
 

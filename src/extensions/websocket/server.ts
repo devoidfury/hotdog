@@ -95,7 +95,7 @@ export class SessionRegistry {
       hooks: { notifyHooks: () => {} }, // No-op hooks for now
       extensions: null,
       buildAgent: buildAgent as (config: Record<string, unknown>) => Promise<import("../../core/session/index.ts").AgentLike>,
-      llmClient,
+      llmClient: llmClient as import("../../core/llm-client/client.ts").LlmClient | undefined,
     });
   }
 

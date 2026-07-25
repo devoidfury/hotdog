@@ -9,13 +9,13 @@ describe('Message', () => {
       role: 'assistant',
       content: 'Hello',
       reasoningContent: 'Thinking',
-      toolCalls: [{ id: '1' }],
+      toolCalls: [{ id: '1', type: 'function', function: { name: 'test', arguments: '{}' } }],
       toolCallId: '1',
     });
     expect(msg.role).toBe('assistant');
     expect(msg.content).toBe('Hello');
     expect(msg.reasoningContent).toBe('Thinking');
-    expect(msg.toolCalls).toEqual([{ id: '1' }]);
+    expect(msg.toolCalls).toEqual([{ id: '1', type: 'function', function: { name: 'test', arguments: '{}' } }]);
     expect(msg.toolCallId).toBe('1');
   });
 
@@ -41,7 +41,7 @@ describe('Message.toJSON', () => {
       role: 'assistant',
       content: 'Hi',
       reasoningContent: 'Thoughts',
-      toolCalls: [{ id: '1' }],
+      toolCalls: [{ id: '1', type: 'function', function: { name: 'test', arguments: '{}' } }],
       toolCallId: '1',
     });
     const json = msg.toJSON();
@@ -49,7 +49,7 @@ describe('Message.toJSON', () => {
       role: 'assistant',
       content: 'Hi',
       reasoning_content: 'Thoughts',
-      tool_calls: [{ id: '1' }],
+      tool_calls: [{ id: '1', type: 'function', function: { name: 'test', arguments: '{}' } }],
       tool_call_id: '1',
     });
   });
@@ -83,13 +83,13 @@ describe('Message.fromJSON', () => {
       role: 'assistant',
       content: 'Hello',
       reasoning_content: 'Thinking',
-      tool_calls: [{ id: '1' }],
+      tool_calls: [{ id: '1', type: 'function', function: { name: 'test', arguments: '{}' } }],
       tool_call_id: 'tc1',
     });
     expect(msg.role).toBe('assistant');
     expect(msg.content).toBe('Hello');
     expect(msg.reasoningContent).toBe('Thinking');
-    expect(msg.toolCalls).toEqual([{ id: '1' }]);
+    expect(msg.toolCalls).toEqual([{ id: '1', type: 'function', function: { name: 'test', arguments: '{}' } }]);
     expect(msg.toolCallId).toBe('tc1');
   });
 
@@ -98,12 +98,12 @@ describe('Message.fromJSON', () => {
       role: 'user',
       content: 'Hi',
       reasoningContent: 'Thoughts',
-      toolCalls: [{ id: '2' }],
+      toolCalls: [{ id: '2', type: 'function', function: { name: 'test', arguments: '{}' } }],
       toolCallId: 'tc2',
     });
     expect(msg.role).toBe('user');
     expect(msg.reasoningContent).toBe('Thoughts');
-    expect(msg.toolCalls).toEqual([{ id: '2' }]);
+    expect(msg.toolCalls).toEqual([{ id: '2', type: 'function', function: { name: 'test', arguments: '{}' } }]);
     expect(msg.toolCallId).toBe('tc2');
   });
 
@@ -113,13 +113,13 @@ describe('Message.fromJSON', () => {
       content: 'Hi',
       reasoning_content: 'snake',
       reasoningContent: 'camel',
-      tool_calls: [{ id: 'snake' }],
-      toolCalls: [{ id: 'camel' }],
+      tool_calls: [{ id: 'snake', type: 'function', function: { name: 'test', arguments: '{}' } }],
+      toolCalls: [{ id: 'camel', type: 'function', function: { name: 'test', arguments: '{}' } }],
       tool_call_id: 'snake_id',
       toolCallId: 'camel_id',
     });
     expect(msg.reasoningContent).toBe('snake');
-    expect(msg.toolCalls).toEqual([{ id: 'snake' }]);
+    expect(msg.toolCalls).toEqual([{ id: 'snake', type: 'function', function: { name: 'test', arguments: '{}' } }]);
     expect(msg.toolCallId).toBe('snake_id');
   });
 

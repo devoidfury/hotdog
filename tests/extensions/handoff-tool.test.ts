@@ -192,8 +192,8 @@ describe("handoff-tool create() extension", () => {
     };
     await (hooks[HOOKS.TOOLS_REGISTER] as Function)(registry);
     expect(registered).toHaveLength(1);
-    expect(registered[0][0]).toBe("handoff");
-    expect(registered[0][1]).toBeInstanceOf(HandoffTool);
+    expect(registered[0]![0]).toBe("handoff");
+    expect(registered[0]![1]).toBeInstanceOf(HandoffTool);
   });
 
   it("system prompt hook includes handoff instructions when tool is registered", async () => {
@@ -246,7 +246,7 @@ describe("handoff-tool create() extension", () => {
       getAll: () => [],
     };
     await (hooks[HOOKS.TOOLS_REGISTER] as Function)(registry);
-    const handoffTool = registered[0][1] as HandoffTool;
+    const handoffTool = registered[0]![1] as HandoffTool;
 
     // Execute the handoff tool to set pending state
     await handoffTool.execute(
@@ -308,7 +308,7 @@ describe("handoff-tool create() extension", () => {
       getAll: () => [],
     };
     await (hooks[HOOKS.TOOLS_REGISTER] as Function)(registry);
-    const handoffTool = registered[0][1] as HandoffTool;
+    const handoffTool = registered[0]![1] as HandoffTool;
     await handoffTool.execute(JSON.stringify({ content: "Plan" }), null!);
 
     const mockAgent = {
@@ -340,7 +340,7 @@ describe("handoff-tool create() extension", () => {
       getAll: () => [],
     };
     await (hooks[HOOKS.TOOLS_REGISTER] as Function)(registry);
-    const handoffTool = registered[0][1] as HandoffTool;
+    const handoffTool = registered[0]![1] as HandoffTool;
     await handoffTool.execute(JSON.stringify({ content: "Plan" }), null!);
 
     const mockAgent = {
@@ -371,7 +371,7 @@ describe("handoff-tool create() extension", () => {
       getAll: () => [],
     };
     await (hooks[HOOKS.TOOLS_REGISTER] as Function)(registry);
-    const handoffTool = registered[0][1] as HandoffTool;
+    const handoffTool = registered[0]![1] as HandoffTool;
     await handoffTool.execute(JSON.stringify({ content: "Plan" }), null!);
 
     const mockAgent = {
@@ -403,7 +403,7 @@ describe("handoff-tool create() extension", () => {
       getAll: () => [],
     };
     await (hooks[HOOKS.TOOLS_REGISTER] as Function)(registry);
-    const handoffTool = registered[0][1] as HandoffTool;
+    const handoffTool = registered[0]![1] as HandoffTool;
     await handoffTool.execute(JSON.stringify({ content: "Plan" }), null!);
 
     const emitCalls: Array<{ type: string; data: unknown }> = [];

@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { getNested } from "../../utils/objects.ts";
 import { parseAs } from "../../utils/json-schema.ts";
 import configSchema from "../core.config.json" with { type: "json" };
+import type { CastFn, ComputeFn, SchemaProperty, SchemaLayer, ConfigSchema } from "./schema-types.ts";
 
 // Re-export shared schema types
 export * from "./schema-types.ts";

@@ -1,7 +1,8 @@
 // ToolExecutor tests — tests the tool execution pipeline independently of Agent.
 
 import { describe, it, expect, beforeEach } from 'bun:test';
-import { ToolExecutor, createToolExecutor, type ToolExecutorDeps, type ToolCall } from '../../src/core/tool-executor.ts';
+import { ToolExecutor, createToolExecutor, type ToolExecutorDeps } from '../../src/core/tool-executor.ts';
+import type { ToolCall } from '../../src/core/context/message.ts';
 import { createToolRegistry } from '../../src/core/extensions/tool-registry.ts';
 import { createHooks } from '../../src/core/hooks.ts';
 import { Message } from '../../src/core/context/message.ts';
@@ -23,7 +24,7 @@ function createMockDeps(overrides: Partial<ToolExecutorDeps> = {}): ToolExecutor
     cwdBoundary: '/workspace',
     workspaceRoot: '/workspace',
     isRestoring: () => false,
-    agent: { sessionId: 'test' },
+    agent: { sessionId: 'test' } as unknown as import('../../src/core/agent.ts').Agent,
     ...overrides,
   };
 }
@@ -269,7 +270,7 @@ describe('ToolExecutor', () => {
       }]);
 
       expect(result.outcome).toBe('return');
-      expect(result.toolResults[0].stopLoop).toBe(true);
+      expect(result.toolResults[0]?.stopLoop).toBe(true);
     });
 
     it('should continue when tool returns ToolResult.ok()', async () => {
@@ -295,7 +296,7 @@ describe('ToolExecutor', () => {
       }]);
 
       expect(result.outcome).toBe('continue');
-      expect(result.toolResults[0].stopLoop).toBe(false);
+      expect(result.toolResults[0]?.stopLoop).toBe(false);
     });
   });
 

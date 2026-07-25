@@ -134,6 +134,8 @@ export interface SessionManagerOptions {
     taskProfile: string;
     taskRole: string;
   } | null;
+  /** Extension loader — passed through to channels for extension access. */
+  extensions?: unknown;
 }
 
 /**

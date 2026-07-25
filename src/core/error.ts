@@ -171,7 +171,7 @@ export class ConfigError extends AppError {
   }
 
   static MissingConfig(name: string): ConfigError {
-    return new ExtensionError(`Missing required configuration: '${name}'`);
+    return new ConfigError(`Missing required configuration: '${name}'`);
   }
 }
 

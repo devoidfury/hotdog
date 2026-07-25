@@ -46,7 +46,7 @@ async function runOneShot(
     extensions: core.extensions,
     buildAgent,
     initialConfig: { sessionId: cli.sessionId || null },
-    llmClient,
+    llmClient: llmClient as import("../../core/llm-client/client.ts").LlmClient | undefined,
     modelRegistry,
     coreConfig: config,
     taskConfig: {

@@ -42,23 +42,24 @@ export interface ParsedCliOptions {
 // Structural flags that are NOT config values (config file paths, model selection, etc.)
 // These are parsed directly and passed to the config resolver as CLI context.
 const STRUCTURAL_FLAGS: CliFlag[] = [
-  { short: "-f", long: "--config", type: "string" },
-  { short: "-d", long: "--config-dir", type: "string" },
-  { short: "-m", long: "--model", type: "string" },
-  { short: null, long: "--ai-url", type: "string" },
-  { short: "-k", long: "--api-key", type: "string" },
-  { short: null, long: "--profile", type: "string" },
-  { short: null, long: "--provider", type: "string" },
+  { short: "-f", long: "--config", type: "string", description: "Config file path" },
+  { short: "-d", long: "--config-dir", type: "string", description: "Config directory" },
+  { short: "-m", long: "--model", type: "string", description: "Model name" },
+  { short: undefined, long: "--ai-url", type: "string", description: "AI URL" },
+  { short: "-k", long: "--api-key", type: "string", description: "API key" },
+  { short: undefined, long: "--profile", type: "string", description: "Profile name" },
+  { short: undefined, long: "--provider", type: "string", description: "AI provider" },
   {
-    short: null,
+    short: undefined,
     long: "--system-prompt-template",
     type: "string",
+    description: "Custom system prompt template",
   },
   // Meta/structural booleans
-  { short: "-l", long: "--loud", type: "boolean" },
-  { short: null, long: "--json", type: "boolean" },
-  { short: "-v", long: "--version", type: "boolean" },
-  { short: "-h", long: "--help", type: "boolean" },
+  { short: "-l", long: "--loud", type: "boolean", description: "Print full JSON API responses" },
+  { short: undefined, long: "--json", type: "boolean", description: "Output as JSON" },
+  { short: "-v", long: "--version", type: "boolean", description: "Show version" },
+  { short: "-h", long: "--help", type: "boolean", description: "Show help" },
 ];
 
 export function parseArgs(

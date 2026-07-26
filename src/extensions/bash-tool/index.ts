@@ -8,6 +8,7 @@ import {
   parseToolInput,
   defaultCallDisplay,
 } from "../../core/extensions/tool-utils.ts";
+import type { ToolMetadata } from "../../core/extensions/tool-registry.ts";
 import { HOOKS } from "../../core/hooks.ts";
 import {
   CoreContext,
@@ -23,6 +24,7 @@ interface BashToolOptions {
 
 export class BashTool {
   static readonly TOOL_NAME = "bash";
+  metadata: ToolMetadata = { sideEffects: true, difficulty: 2 };
 
   readonly timeoutMs: number;
   readonly maxOutputLines: number;

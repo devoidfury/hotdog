@@ -8,6 +8,7 @@ import {
   ToolResult,
   parseToolInput,
 } from "../../core/extensions/tool-utils.ts";
+import type { ToolMetadata } from "../../core/extensions/tool-registry.ts";
 import { validateCwdBoundary, resolvePath } from "../../utils/file-utils.ts";
 import { ToolExecutionContext } from "../../core/extensions/types.ts";
 
@@ -18,6 +19,7 @@ interface AppendArgs {
 
 export class AppendTool {
   static readonly TOOL_NAME = "append";
+  metadata: ToolMetadata = { sideEffects: true, difficulty: 1 };
 
   toToolDef() {
     return toolDef(

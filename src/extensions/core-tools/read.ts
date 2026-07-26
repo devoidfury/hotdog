@@ -11,6 +11,7 @@ import {
   parseToolInput,
   defaultCallDisplay,
 } from "../../core/extensions/tool-utils.ts";
+import type { ToolMetadata } from "../../core/extensions/tool-registry.ts";
 import { validateCwdBoundary, resolvePath, correctCommonPathMistakes } from "../../utils/file-utils.ts";
 import { DEFAULT_MAX_IMAGE_SIZE } from "./defaults.ts";
 import { ToolExecutionContext } from "../../core/extensions/types.ts";
@@ -47,6 +48,7 @@ interface ReadArgs {
 
 export class ReadTool {
   static readonly TOOL_NAME = "read";
+  metadata: ToolMetadata = { sideEffects: false, difficulty: 1 };
 
   private readonly readLimit: number;
   private readonly maxImageSize: number;

@@ -6,6 +6,17 @@ import {
 } from "../../utils/json-schema.ts";
 import { logger } from "../logger.ts";
 
+/**
+ * Metadata describing a tool's behavior characteristics.
+ * Used for sandbox mode filtering and difficulty-based tool hiding.
+ */
+export interface ToolMetadata {
+  /** True if the tool can perform writes or network access. */
+  sideEffects: boolean;
+  /** Difficulty score 1-5: how hard this tool is to use correctly. */
+  difficulty: number; // 1-5
+}
+
 export interface ToolDef {
   type: string;
   function: {
@@ -21,6 +32,7 @@ export interface ToolDef {
  * - `toToolDef()` returns the tool's OpenAI function-calling schema.
  * - `callDisplay()` formats a human-readable description of a tool call.
  * - `execute()` runs the tool and returns a result.
+ * - `metadata` describes tool characteristics (sideEffects, difficulty).
  */
 export interface Tool {
   toToolDef(): ToolDef | Promise<ToolDef> | null;
@@ -29,6 +41,11 @@ export interface Tool {
     input: string | Record<string, unknown> | null,
     ctx?: unknown,
   ): Promise<unknown>;
+  /**
+   * Tool metadata for filtering and sandbox mode.
+   * Optional for backward compatibility, but all built-in tools should define it.
+   */
+  metadata?: ToolMetadata;
 }
 
 /**
@@ -46,6 +63,15 @@ export class ToolRegistry {
   }
 
   register(name: string, tool: Tool): void {
+    // Validate metadata if provided
+    if (tool.metadata) {
+      if (tool.metadata.sideEffects !== true && tool.metadata.sideEffects !== false) {
+        throw new Error(`Tool "${name}" metadata.sideEffects must be explicitly defined as true or false`);
+      }
+      if (tool.metadata.difficulty < 1 || tool.metadata.difficulty > 5) {
+        throw new Error(`Tool "${name}" metadata.difficulty must be between 1 and 5, got ${tool.metadata.difficulty}`);
+      }
+    }
     this.tools.set(name, tool);
     this.#toolDefCache.delete(name);
     this.#allToolDefsCache = null;
@@ -57,6 +83,24 @@ export class ToolRegistry {
 
   has(name: string): boolean {
     return this.tools.has(name);
+  }
+
+  /**
+   * Get metadata for a specific tool.
+   */
+  getMetadata(name: string): ToolMetadata | undefined {
+    return this.tools.get(name)?.metadata;
+  }
+
+  /**
+   * Get all tools with their metadata.
+   */
+  getAllWithMetadata(): Array<{ name: string; tool: Tool; metadata?: ToolMetadata }> {
+    return Array.from(this.tools.entries()).map(([name, tool]) => ({
+      name,
+      tool,
+      metadata: tool.metadata,
+    }));
   }
 
   getAll(): [string, Tool][] {
@@ -176,6 +220,74 @@ export class ToolRegistry {
       if (blacklist && blacklist.includes(name)) continue;
       if (whitelist && !whitelist.includes(name)) continue;
       result.register(name, tool);
+    }
+    return result;
+  }
+
+  /**
+   * Filter tools by maximum difficulty.
+   * Tools without metadata are excluded (conservative default).
+   * @param maxDifficulty - Maximum difficulty score (1-5)
+   * @returns New ToolRegistry with only tools at or below the difficulty
+   */
+  filterByDifficulty(maxDifficulty: number): ToolRegistry {
+    const result = new ToolRegistry();
+    for (const [name, tool] of this.tools) {
+      const metadata = tool.metadata;
+      // Exclude tools without metadata (conservative default)
+      if (!metadata) continue;
+      if (metadata.difficulty <= maxDifficulty) {
+        result.register(name, tool);
+      }
+    }
+    return result;
+  }
+
+  /**
+   * Filter tools by side effects.
+   * @param allowSideEffects - If false, only tools with sideEffects: false are included.
+   *   If true, returns a new registry with all tools (no filtering, but still a copy).
+   * @returns New ToolRegistry with filtered tools
+   */
+  filterBySideEffects(allowSideEffects: boolean): ToolRegistry {
+    const result = new ToolRegistry();
+    for (const [name, tool] of this.tools) {
+      if (allowSideEffects) {
+        result.register(name, tool);
+      } else {
+        const metadata = tool.metadata;
+        // Include tools explicitly marked as safe (sideEffects: false)
+        // Exclude tools without metadata (conservative default)
+        if (metadata && !metadata.sideEffects) {
+          result.register(name, tool);
+        }
+      }
+    }
+    return result;
+  }
+
+  /**
+   * Filter tools by both difficulty and side effects.
+   * Always returns a new registry (never `this`), even when no filtering is applied.
+   * @param options - Filtering options
+   * @returns New ToolRegistry with filtered tools
+   */
+  filterByMetadata(options?: {
+    maxDifficulty?: number;
+    allowSideEffects?: boolean;
+  }): ToolRegistry {
+    let result: ToolRegistry;
+    if (options?.maxDifficulty !== undefined) {
+      result = this.filterByDifficulty(options.maxDifficulty);
+    } else {
+      // Start with a copy of all tools
+      result = new ToolRegistry();
+      for (const [name, tool] of this.tools) {
+        result.register(name, tool);
+      }
+    }
+    if (options?.allowSideEffects === false) {
+      result = result.filterBySideEffects(false);
     }
     return result;
   }

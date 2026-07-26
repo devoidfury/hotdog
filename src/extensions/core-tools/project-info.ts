@@ -5,6 +5,7 @@ import path from "node:path";
 import { execFile } from "node:child_process";
 import util from "node:util";
 import { toolDef, param, ToolResult, defaultCallDisplay } from "../../core/extensions/tool-utils.ts";
+import type { ToolMetadata } from "../../core/extensions/tool-registry.ts";
 import { DEFAULT_GREP_MAX_RESULTS } from "./defaults.ts";
 import { correctCommonPathMistakes } from "../../utils/file-utils.ts";
 import { compileGitignore } from "../../utils/gitignore.ts";
@@ -16,6 +17,7 @@ const DEFAULT_DU_DEPTH = 1;
 
 export class ProjectInfoTool {
   static readonly TOOL_NAME = "project_info";
+  metadata: ToolMetadata = { sideEffects: false, difficulty: 1 };
 
   toToolDef() {
     return toolDef(

@@ -301,6 +301,38 @@
     "type": "number",
     "layers": [{ "default": 12 }]
   },
+  "sandboxMode": {
+    "type": "boolean",
+    "cliFlag": {
+      "long": "--sandbox",
+      "type": "boolean",
+      "description": "Sandbox mode: only allow tools without side effects"
+    },
+    "layers": [
+      { "source": "cli", "key": "sandbox", "cast": "truthy" },
+      { "source": "config", "key": "sandboxMode", "cast": "truthy" },
+      { "default": false }
+    ]
+  },
+  "maxToolDifficulty": {
+    "type": "number",
+    "cliFlag": {
+      "long": "--max-tool-difficulty",
+      "type": "number",
+      "description": "Maximum tool difficulty (1-5). Overrides model and config defaults."
+    },
+    "layers": [
+      { "source": "cli", "key": "maxToolDifficulty", "cast": "number" },
+      { "default": null }
+    ]
+  },
+  "defaultMaxToolDifficulty": {
+    "type": "number",
+    "layers": [
+      { "source": "config", "key": "defaultMaxToolDifficulty", "cast": "number" },
+      { "default": null }
+    ]
+  },
   "prompt": {
     "type": "string",
     "layers": [{ "default": "> " }]

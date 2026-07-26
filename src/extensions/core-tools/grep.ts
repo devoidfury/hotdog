@@ -14,6 +14,7 @@ import {
   parseToolInput,
   defaultCallDisplay,
 } from "../../core/extensions/tool-utils.ts";
+import type { ToolMetadata } from "../../core/extensions/tool-registry.ts";
 import { correctCommonPathMistakes } from "../../utils/file-utils.ts";
 import { ToolExecutionContext } from "../../core/extensions/types.ts";
 
@@ -378,6 +379,7 @@ function parseArgs(
 
 export class GrepTool {
   static readonly TOOL_NAME = "grep";
+  metadata: ToolMetadata = { sideEffects: false, difficulty: 1 };
 
   private readonly maxResults: number;
   private readonly maxOutputLines: number;
@@ -397,22 +399,22 @@ export class GrepTool {
       "Search file contents for a pattern. Supports regex, file type filtering, and context lines. Returns matching lines with file paths.",
       {
         properties: {
-          pattern: param("string", "Search pattern (regex)"),
+          pattern: param("string", "Search pattern regex."),
           path: param(
             "string",
-            "File or directory to search (default: current working directory)",
+            "File or directory to search. Defaults to current working directory.",
           ),
           type: param(
             "string",
-            "File type filter (e.g., rust, ts, py, js, all)",
+            "File type filter. Examples - rust, ts, py, js, all",
           ),
-          max_results: param("integer", `Maximum results to return`, {
+          max_results: param("integer", `Maximum results to return.`, {
             minimum: 1,
             default: this.maxResults,
           }),
           context: param(
             "integer",
-            "Number of context lines before/after match",
+            "Number of context lines before and after match.",
             {
               default: 0,
             },

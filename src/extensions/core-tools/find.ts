@@ -6,6 +6,7 @@ import { execFile } from "node:child_process";
 import util from "node:util";
 import extensionData from "./extension.json" with { type: "json" };
 import { toolDef, param, ToolResult, truncateOutput, parseToolInput, defaultCallDisplay } from "../../core/extensions/tool-utils.ts";
+import type { ToolMetadata } from "../../core/extensions/tool-registry.ts";
 import { correctCommonPathMistakes } from "../../utils/file-utils.ts";
 import { ToolExecutionContext } from "../../core/extensions/types.ts";
 
@@ -147,6 +148,7 @@ async function runFindFallback(pattern: string, fileType: string | null, cwd: st
 
 export class FindTool {
   static readonly TOOL_NAME = "find";
+  metadata: ToolMetadata = { sideEffects: false, difficulty: 1 };
 
   private readonly maxResults: number;
   private readonly maxOutputLines: number;

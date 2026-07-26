@@ -13,6 +13,7 @@ import {
   parseToolInput,
   defaultCallDisplay,
 } from "../../core/extensions/tool-utils.ts";
+import type { ToolMetadata } from "../../core/extensions/tool-registry.ts";
 import { NoopInput } from "../../core/context/input.ts";
 import { isPromise } from "../../utils/promise.ts";
 import { HOOKS } from "../../core/hooks.ts";
@@ -64,6 +65,7 @@ function ensureKey(question: Question, index: number): string {
 
 export class QuestionTool {
   static readonly TOOL_NAME = "question";
+  metadata: ToolMetadata = { sideEffects: false, difficulty: 2 };
 
   toToolDef() {
     return toolDef(

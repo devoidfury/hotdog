@@ -18,6 +18,7 @@ import {
   defaultCallDisplay,
   toolDef,
 } from "../../core/extensions/tool-utils.ts";
+import type { ToolMetadata } from "../../core/extensions/tool-registry.ts";
 
 // ── Types ──────────────────────────────────────────────────────────────────
 
@@ -165,6 +166,7 @@ function parseArgs(input: string | null): ParsedArgs {
 
 export class ReviewTool {
   static TOOL_NAME = "review";
+  metadata: ToolMetadata = { sideEffects: false, difficulty: 5 };
 
   toToolDef() {
     return toolDef(

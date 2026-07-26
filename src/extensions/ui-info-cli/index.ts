@@ -24,7 +24,7 @@ import {
   SchemaLayer,
   type ResolutionContext,
 } from "../../core/config/schema-loader.ts";
-import { Agent } from "../../core/agent.ts";
+import { Agent, type AgentConfig } from "../../core/agent.ts";
 import {
   CoreContext,
   ExtensionInstance,
@@ -565,7 +565,7 @@ async function checkFileExists(filePath: string): Promise<boolean> {
  * Creates an agent, outputs the generated system prompt and tool definitions.
  */
 async function runShowPrompt(cli: CliArgv, core: CoreContext): Promise<number> {
-  const { config, buildConfig } = core;
+  const { buildConfig } = core;
   const { resolved } = await buildConfig!(cli);
   const agent = new Agent({
     hooks: core.hooks,
@@ -583,15 +583,15 @@ async function runShowPrompt(cli: CliArgv, core: CoreContext): Promise<number> {
     profileName: resolved.profileName || "default",
     role: resolved.role as string | undefined,
     profileBody: resolved.profileBody as string | undefined,
-    config,
+    config: resolved as unknown as AgentConfig,
   });
   // Build the system prompt via the real hook mechanism
   await agent.ensureSystemPrompt();
   // Output the actual system prompt
   console.log(agent.systemPrompt);
 
-  // Output tool definitions
-  const toolDefs = await core.toolRegistry.getToolDefs();
+  // Output tool definitions (filtered by agent config for sandboxMode/maxToolDifficulty)
+  const toolDefs = await agent.getToolDefs();
   if (toolDefs.length > 0) {
     console.log();
     console.log("# Tools");

@@ -8,6 +8,8 @@ Zero dependencies, just bring the bun.
 
 This hotdog comes with minimal guardrails. A dedicated host or a vm or at least a container is recommended. See [examples/](examples/)
 
+There is optionally the `--sandbox` mode which disables all potentially risky/destructive tools, and severely limits the agent's blast radius for mistakes.
+
 ## Requirements
 
 - **Bun** >= 1.0

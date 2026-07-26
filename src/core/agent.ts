@@ -22,17 +22,13 @@ import {
   StreamProcessor,
   type StreamResult,
 } from "./llm-client/stream-processor.ts";
-import type { ToolRegistry } from "./extensions/tool-registry.ts";
+import type { ToolRegistry, ToolDef } from "./extensions/tool-registry.ts";
 import type { SystemPromptBuilder } from "./context/system-prompt.ts";
 
 export type { StreamEvent } from "./llm-client/client.ts";
 
 export interface ModelRegistry {
-  [key: string]: {
-    contextLimit?: number;
-    reasoningEffort?: string;
-    [key: string]: unknown;
-  };
+  [key: string]: ModelConfig;
 }
 
 /**
@@ -224,6 +220,11 @@ export class Agent {
   get isRestoring(): boolean {
     return this.#isRestoring;
   }
+
+  /** Get the tool registry. Used by hooks for tool metadata access. */
+  get toolRegistry(): ToolRegistry {
+    return this.#toolRegistry;
+  }
   set isRestoring(v: boolean) {
     const oldVal = this.#isRestoring;
     this.#isRestoring = v;
@@ -284,7 +285,7 @@ export class Agent {
    *   Each image: { type: "image_url", mimeType: "image/png", data: "<base64>" }
    * @returns Final text response, or undefined if tool calls
    */
-  async run(userInput: string, images: ImageAttachment[] | null = null): Promise<string | undefined> {
+  async run(userInput: string, images?: ImageAttachment[]): Promise<string | undefined> {
     // Track whether TURN_END(stopped: true) was already emitted during
     // normal processing. If not, the finally block emits it so extensions
     // (e.g., loop) always get a completion signal even on cancellation.
@@ -295,7 +296,7 @@ export class Agent {
       await this.ensureSystemPrompt();
 
       // Add user input to context
-      const userMsg = new Message({ role: "user", content: userInput, images: images as ImageAttachment[] | null });
+      const userMsg = new Message({ role: "user", content: userInput, images });
       this.addMessage(userMsg);
 
       // Emit user message to output sinks so connected clients see it
@@ -340,7 +341,7 @@ export class Agent {
           messages = contextResult.lastResult.messages as Message[];
         }
   
-        let toolDefs = await this.#toolRegistry.getToolDefs();
+        let toolDefs = await this.getToolDefs();
         let modelConfig = resolveModelConfig(
           this.#model,
           this.modelRegistry,
@@ -644,9 +645,39 @@ export class Agent {
     this.cancelled = false;
   }
 
-  /** Get tool definitions for the API. */
-  async getToolDefs(): Promise<unknown[]> {
-    return await this.#toolRegistry.getToolDefs();
+  /**
+   * Get tool definitions filtered by the agent's current config.
+   * Applies sandboxMode and maxToolDifficulty filtering.
+   * Priority for maxToolDifficulty: CLI > model config > config default.
+   */
+  async getToolDefs(): Promise<ToolDef[]> {
+    const config = this.config;
+    if (!config) {
+      return await this.#toolRegistry.getToolDefs();
+    }
+
+    const sandboxMode = config.sandboxMode ?? false;
+
+    // Resolve effective maxToolDifficulty with priority:
+    // 1. CLI override (maxToolDifficulty)
+    // 2. Model-specific config from modelRegistry
+    // 3. Config-file default (defaultMaxToolDifficulty)
+    const effectiveMaxDifficulty =
+      config.maxToolDifficulty ??
+      this.modelRegistry[this.#model]?.maxToolDifficulty ??
+      config.defaultMaxToolDifficulty ??
+      undefined;
+
+    // If no filtering needed, return all tool defs
+    if (!sandboxMode && effectiveMaxDifficulty == null) {
+      return await this.#toolRegistry.getToolDefs();
+    }
+
+    const filteredRegistry = this.#toolRegistry.filterByMetadata({
+      maxDifficulty: effectiveMaxDifficulty,
+      allowSideEffects: !sandboxMode,
+    });
+    return await filteredRegistry.getToolDefs();
   }
 
   /** Get all registered tool names. */

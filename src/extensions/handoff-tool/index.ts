@@ -20,6 +20,7 @@ import {
   parseToolInput,
   defaultCallDisplay,
 } from "../../core/extensions/tool-utils.ts";
+import type { ToolMetadata } from "../../core/extensions/tool-registry.ts";
 import {
   CoreContext,
   ExtensionInstance,
@@ -53,6 +54,7 @@ interface HandoffState {
 
 export class HandoffTool {
   static readonly TOOL_NAME = "handoff";
+  metadata: ToolMetadata = { sideEffects: true, difficulty: 3 };
 
   constructor(private state: HandoffState) {}
 

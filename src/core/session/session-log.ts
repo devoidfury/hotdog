@@ -279,7 +279,7 @@ export function replayEntriesIntoContext(agent: AgentForReplay, entries: LogEntr
           new Message({
             role: "user",
             content: entry.content,
-            images: entry.images as ImageAttachment[] | null | undefined,
+            images: entry.images as ImageAttachment[] | undefined,
           }),
         );
         replayed++;

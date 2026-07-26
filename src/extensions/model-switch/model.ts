@@ -7,6 +7,7 @@ import {
   parseToolInput,
   defaultCallDisplay,
 } from "../../core/extensions/tool-utils.ts";
+import type { ToolMetadata } from "../../core/extensions/tool-registry.ts";
 import { ModelRegistry, ToolContext } from "../../core/index.ts";
 
 interface OnSwitchModel {
@@ -15,6 +16,7 @@ interface OnSwitchModel {
 
 export class ModelTool {
   static readonly TOOL_NAME = "model";
+  metadata: ToolMetadata = { sideEffects: false, difficulty: 3 };
 
   private readonly modelRegistry: ModelRegistry;
 

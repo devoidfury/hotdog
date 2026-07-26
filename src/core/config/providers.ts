@@ -16,6 +16,12 @@ export interface ModelConfig {
   contextLimit: number;
   reasoningEffort?: string;
   tags: string[];
+  /**
+   * Maximum tool difficulty for this model.
+   * When set, only tools with difficulty <= this value are exposed.
+   * Useful for smaller models that may struggle with complex tools.
+   */
+  maxToolDifficulty?: number;
   [key: string]: unknown;
 }
 
@@ -26,6 +32,8 @@ export interface ProviderModelEntry {
   reasoning_effort?: string;
   reasoningEffort?: string;
   tags?: string[];
+  /** Maximum tool difficulty for this model (1-5). */
+  maxToolDifficulty?: number;
 }
 
 export interface ProviderDef {
@@ -62,6 +70,7 @@ export function buildModelRegistry(
           modelEntry.reasoningEffort ||
           undefined,
         tags: modelEntry.tags || [],
+        maxToolDifficulty: modelEntry.maxToolDifficulty,
       };
     }
     // Also add provider-level models (models defined at provider level)

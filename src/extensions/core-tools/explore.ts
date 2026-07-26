@@ -9,6 +9,7 @@ import {
   ToolResult,
   defaultCallDisplay,
 } from "../../core/extensions/tool-utils.ts";
+import type { ToolMetadata } from "../../core/extensions/tool-registry.ts";
 import { logger } from "../../core/logger.ts";
 import { ToolExecutionContext } from "../../core/extensions/types.ts";
 
@@ -18,6 +19,7 @@ const BIN_PATH = path.resolve(__dirname, "..", "..", "..", "bin", "hotdog");
 
 export class ExploreTool {
   static readonly TOOL_NAME = "explore";
+  metadata: ToolMetadata = { sideEffects: false, difficulty: 4 };
 
   toToolDef() {
     return toolDef(

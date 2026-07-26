@@ -9,6 +9,7 @@ import {
   parseToolInput,
   defaultCallDisplay,
 } from "../../core/extensions/tool-utils.ts";
+import type { ToolMetadata } from "../../core/extensions/tool-registry.ts";
 
 import { HOOKS } from "../../core/hooks.ts";
 
@@ -281,6 +282,7 @@ function formatResults(results: SearchResult[], query: string, provider: string)
 
 export class WebSearchTool {
   static readonly TOOL_NAME = "web_search";
+  metadata: ToolMetadata = { sideEffects: true, difficulty: 1 };
 
   #provider: string;
   #maxResults: number;

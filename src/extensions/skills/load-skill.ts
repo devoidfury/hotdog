@@ -5,12 +5,14 @@ import {
   ToolResult,
   defaultCallDisplay,
 } from "../../core/extensions/tool-utils.ts";
+import type { ToolMetadata } from "../../core/extensions/tool-registry.ts";
 import { type ToolExecutionContext } from "../../core/extensions/types.ts";
 import { SkillsLoader } from "./loader.ts";
 
 
 export class LoadSkillTool {
   static readonly TOOL_NAME = "load_skill";
+  metadata: ToolMetadata = { sideEffects: false, difficulty: 1 };
 
   private readonly loader: SkillsLoader | null;
 

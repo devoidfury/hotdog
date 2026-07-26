@@ -431,6 +431,7 @@ export const HOOKS = {
 
   // Tool execution
   TOOLS_REGISTER: "tools:register",
+  TOOL_METADATA: "tool:metadata",
   TOOL_BEFORE_EXECUTE: "tool:beforeExecute",
 
   // Service registration — extensions register abstract service implementations here.

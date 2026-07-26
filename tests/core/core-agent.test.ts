@@ -777,14 +777,14 @@ describe('Agent — end-to-end loop', () => {
     it('should return registered tools', async () => {
       const { agent, toolRegistry } = createFixture({});
       const tool = {
-        toToolDef: () => ({ type: 'function', function: { name: 'test-tool' } }),
+        toToolDef: () => ({ type: 'function', function: { name: 'test-tool', description: '', parameters: {} } }),
         execute: async () => 'result',
       } as any;
       toolRegistry.register('test-tool', tool);
 
       const defs = await agent.getToolDefs();
       expect(defs).toEqual([
-        { type: 'function', function: { name: 'test-tool' } },
+        { type: 'function', function: { name: 'test-tool', description: '', parameters: {} } },
       ]);
       expect(agent.getToolNames()).toEqual(['test-tool']);
     });

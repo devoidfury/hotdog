@@ -11,10 +11,19 @@ Core tools are provided by the `core-tools` extension. Tools are registered via 
 - `ctx` — `ToolContext` with agent, isSessionRestoring, cwdBoundary, workspaceRoot
 - Result can be: string, ToolResult instance, or object
 
-**ToolRegistry** — stores tools by name, provides lookup, serialization, and `getToolDefs()` accessor. Located in `src/core/extensions/tool-registry.ts`.
+**ToolRegistry** — stores tools by name, provides lookup, serialization, filtering, and `getToolDefs()` accessor. Located in `src/core/extensions/tool-registry.ts`.
 - Tool definitions are cached after first computation; cache is invalidated on `register()`, `remove()`, or `clearToolDefs()`.
 - `getToolDef(name)` — get a single tool's definition with caching.
 - `clearToolDefs()` — explicitly clear the definition cache (e.g., after MCP server reconnect).
+- `filterByDifficulty(maxDifficulty)` — returns a new registry with only tools at or below the given difficulty.
+- `filterBySideEffects(allowSideEffects)` — returns a new registry filtered by side-effect safety.
+- `filterByMetadata({ maxDifficulty, allowSideEffects })` — combines both filters.
+
+**ToolMetadata** — each tool declares metadata via a `metadata` property:
+- `sideEffects: boolean` — `true` if the tool performs writes, network access, or other external effects. Used by sandbox mode.
+- `difficulty: number` (1–5) — how often models of different sizes misuse or fail to comprehend the tool. Lower = simpler, more reliable.
+
+Tools without metadata are excluded when filtering is active (conservative default).
 
 **Tool definition helpers** (from `src/core/extensions/tool-utils.ts`):
 - `toolDef(name, description, parameters)` — creates OpenAI function-calling schema
@@ -49,6 +58,28 @@ Core tools are provided by the `core-tools` extension. Tools are registered via 
 | `model` | `model-switch` | Switches to a different model mid-conversation | `name` |
 | `web_search` | `web-search` | Searches the web for information | `query` |
 | `review` *(disabled by default)* | `ui-session-review-cli` | Lists recent sessions, gets session entries, or gets tool call index. Enable via profile whitelist. | `operation`, `session_id`, `limit` |
+
+### Tool Filtering
+
+Tools can be filtered before being sent to the LLM based on two dimensions:
+
+**Sandbox mode** (`sandboxMode` config / `--sandbox` CLI flag):
+- Only tools with `sideEffects: false` are exposed.
+- Tools without metadata are excluded (conservative default).
+- Blocks file writes, network access, shell commands, and other external effects.
+
+**Difficulty filtering** (`maxToolDifficulty`):
+- Only tools with `difficulty <= maxToolDifficulty` are exposed.
+- Useful for restricting smaller/less capable models to simpler tools.
+- Priority chain (unset and `null` are treated the same):
+  1. CLI `--max-tool-difficulty` (highest)
+  2. Model config `maxToolDifficulty`
+  3. Config file `defaultMaxToolDifficulty`
+  4. No filtering (lowest)
+
+Both filters can be combined — e.g., sandbox mode + difficulty 1 gives only the safest, simplest tools.
+
+Filtering runs via the `PROVIDER_REQUEST` hook before each LLM call, so it respects runtime config and model changes.
 
 ### Subagent Tools *(disabled by default, enabled in manager profile)*
 

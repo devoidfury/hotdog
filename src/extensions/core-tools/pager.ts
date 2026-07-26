@@ -1,10 +1,12 @@
 // Pager tool — paginate through large tool outputs.
 
 import { toolDef, param, ToolResult, parseToolInput, defaultCallDisplay } from "../../core/extensions/tool-utils.ts";
+import type { ToolMetadata } from "../../core/extensions/tool-registry.ts";
 import { ToolExecutionContext } from "../../core/extensions/types.ts";
 
 export class PagerTool {
   static readonly TOOL_NAME = "pager";
+  metadata: ToolMetadata = { sideEffects: false, difficulty: 1 };
 
   toToolDef() {
     return toolDef(

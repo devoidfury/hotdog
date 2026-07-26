@@ -19,6 +19,8 @@ import {
   type ExtensionLoader,
 } from "./extensions/index.ts";
 import { HOOKS, type HookSystem, type HookTraceOptions } from "./hooks.ts";
+import type { ToolMetadataPayload } from "./extensions/types.ts";
+import type { ToolMetadata } from "./extensions/tool-registry.ts";
 import { parseArgs, generateHelpText } from "./cli.ts";
 import {
   loadConfig,
@@ -99,6 +101,14 @@ async function loadExtensions(
     );
     if (extInstance) loaded.push(extInstance);
   }
+
+  // Notify TOOL_METADATA hook after all tools are registered.
+  // This allows extensions to react to the complete set of available tools.
+  const toolMetadataMap = new Map<string, ToolMetadata | undefined>();
+  for (const [name, tool] of core.toolRegistry.getAll()) {
+    toolMetadataMap.set(name, tool.metadata);
+  }
+  core.hooks.notifyHooks(HOOKS.TOOL_METADATA, { tools: toolMetadataMap } as ToolMetadataPayload);
 
   // Validate service contracts after all extensions are loaded.
   // Only validate extensions that were actually loaded (create() returned non-null).

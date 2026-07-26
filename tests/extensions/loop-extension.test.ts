@@ -63,7 +63,6 @@ function turnEndPayload(opts: { stopped?: boolean; cancelled?: boolean; agent?: 
 function inputPayload(text: string, agent?: any) {
   return {
     text,
-    images: null,
     agent,
   };
 }

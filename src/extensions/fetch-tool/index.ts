@@ -7,6 +7,7 @@ import {
   parseToolInput,
   defaultCallDisplay,
 } from "../../core/extensions/tool-utils.ts";
+import type { ToolMetadata } from "../../core/extensions/tool-registry.ts";
 import { htmlToMarkdown } from "../../utils/html-to-markdown.ts";
 import { HOOKS } from "../../core/hooks.ts";
 import {
@@ -38,6 +39,7 @@ interface ParseResult {
 
 export class FetchTool {
   static readonly TOOL_NAME = "fetch";
+  metadata: ToolMetadata = { sideEffects: true, difficulty: 1 };
 
   toToolDef() {
     return toolDef(

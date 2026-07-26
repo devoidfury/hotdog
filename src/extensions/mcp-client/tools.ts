@@ -2,6 +2,7 @@
 // Each MCP tool becomes an McpTool that forwards calls to the MCP server.
 
 import { toolDef } from "../../core/index.ts";
+import type { ToolMetadata } from "../../core/extensions/tool-registry.ts";
 import { McpConnectionHandle } from "./connection.ts";
 
 interface McpToolDefinition {
@@ -20,6 +21,8 @@ export class McpTool {
   readonly #toolDef: McpToolDefinition;
   readonly #connection: McpConnectionHandle;
   readonly #registeredName: string;
+  /** MCP tools default to sideEffects: true (conservative — unknown tools assumed somewhat risky). */
+  metadata: ToolMetadata = { sideEffects: true, difficulty: 3 };
 
   /**
    * Create a new McpTool from an MCP tool definition.

@@ -1,7 +1,13 @@
 // Tool utilities — shared helpers for tool definitions and execution.
 
 import { ToolError } from "../error.ts";
-import { ToolDef } from "./tool-registry.ts";
+import { ToolDef, ToolMetadata } from "./tool-registry.ts";
+
+/**
+ * Re-export ToolMetadata for convenience.
+ */
+export type { ToolMetadata };
+
 
 const SHORT_META_KEYS = new Set([
   "truncated",

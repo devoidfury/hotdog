@@ -247,6 +247,50 @@ Disable session logging. Can also be controlled via environment variables:
 { "noLog": true }
 ```
 
+### `sandboxMode`
+
+- **Type:** `boolean`
+- **CLI flag:** `--sandbox`
+- **Default:** `false`
+- **Resolution:** CLI > config > default
+
+When enabled, restricts the agent to tools that have no side effects (no file writes, no network access, no external commands). Tools are classified via their `sideEffects` metadata. Tools without metadata are excluded in sandbox mode. Useful for read-only exploration or when using untrusted models.
+
+```json
+{ "sandboxMode": true }
+```
+
+### `maxToolDifficulty` (CLI-only)
+
+- **Type:** `number` (1–5)
+- **CLI flag:** `--max-tool-difficulty`
+- **Default:** `null` (no filtering)
+- **Resolution:** CLI only
+
+Overrides tool difficulty filtering at the command line. When set, only tools with `difficulty` at or below this value are exposed to the model. Takes highest priority over model-level and config-file settings.
+
+```bash
+hotdog --max-tool-difficulty 2
+```
+
+### `defaultMaxToolDifficulty`
+
+- **Type:** `number` (1–5) or `null`
+- **Default:** `null` (no filtering)
+- **Resolution:** config > default
+
+Sets a default maximum tool difficulty for all models. Tools with a higher difficulty score are hidden from the model. This can be overridden per-model via `maxToolDifficulty` in the model config, or globally via the `--max-tool-difficulty` CLI flag.
+
+**Priority chain** (unset and `null` are treated the same):
+1. CLI `--max-tool-difficulty`
+2. Model config `maxToolDifficulty`
+3. Config file `defaultMaxToolDifficulty`
+4. No filtering
+
+```json
+{ "defaultMaxToolDifficulty": 2 }
+```
+
 ### `compactDebug`
 
 - **Type:** `boolean`
@@ -532,6 +576,7 @@ The `providers` array defines available AI providers and their models. Each prov
 | `temperature` | `number` | no | — | Override temperature for this model. |
 | `reasoning_effort` | `string` | no | — | Reasoning effort level (e.g. `"max"`, `"medium"`, `"low"`). Also accepts camelCase `reasoningEffort`. |
 | `tags` | `array` | no | `[]` | Arbitrary tags for model discovery and filtering. |
+| `maxToolDifficulty` | `number` | no | — | Max tool difficulty (1–5) for this model. Tools above this score are hidden. Overrides `defaultMaxToolDifficulty`. Takes lower priority than CLI `--max-tool-difficulty`. |
 
 ### Example Providers Configuration
 

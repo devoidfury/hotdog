@@ -4,8 +4,9 @@
 
 ### Core Types
 - **ModelRegistry** — stores models by name from provider configs. Built by `buildModelRegistry(config)`.
-- **ModelEntry** — `{ name, temperature, contextLimit, reasoningEffort }` per model in registry
+- **ModelEntry** — `{ name, temperature, contextLimit, reasoningEffort, tags, maxToolDifficulty }` per model in registry
 - Model names use `provider/model` format (e.g., `ai365/qwen3.5-4b`) when a provider is active
+- **`maxToolDifficulty`** on a model entry limits which tools are exposed to that model (1–5 scale). See [Tool Filtering](tools-and-skills.md#tool-filtering).
 
 ### Model Switching
 - **By name**: `agent.model = "provider/model-name"` (setter emits `MODEL_CHANGE` hook)
@@ -51,7 +52,8 @@ Models are declared inside providers. Each provider has `name`, `url`, optional 
           "name": "qwen3.5-4b",
           "tags": ["fast", "general"],
           "temperature": 0.3,
-          "contextLimit": 32000
+          "contextLimit": 32000,
+          "maxToolDifficulty": 1
         },
         {
           "name": "qwen3.6-35b",
@@ -62,6 +64,7 @@ Models are declared inside providers. Each provider has `name`, `url`, optional 
     }
   ],
   "default_provider": "ai365",
+  "defaultMaxToolDifficulty": 2,
   "thinker": "[Thinking: {}]",
   "toolfmt": "Tool [{}] {}",
   "tool_output_fmt": "  → {}",
@@ -69,6 +72,11 @@ Models are declared inside providers. Each provider has `name`, `url`, optional 
   "hide_tools": false
 }
 ```
+
+In this example:
+- The 4b model is restricted to difficulty-1 tools only.
+- The 35b model inherits the config default of 2 (unless overridden by CLI).
+- `--max-tool-difficulty 1` on the CLI would override both.
 
 ### Model Resolution
 Model names flow through `buildConfig()`:

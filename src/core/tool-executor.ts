@@ -209,7 +209,7 @@ export class ToolExecutor {
       input,
       resultStr,
       toolCallId,
-      images as ImageAttachment[] | null,
+      images as ImageAttachment[] | undefined,
       stopLoop,
     );
   }
@@ -228,7 +228,7 @@ export class ToolExecutor {
     input: string,
     result: string,
     toolCallId: string,
-    images?: ImageAttachment[] | null,
+    images?: ImageAttachment[],
     stopLoop = false,
   ): Promise<ToolResult> {
     this.#deps.emitOutput("tool_result", { toolName, input, result });
@@ -236,7 +236,7 @@ export class ToolExecutor {
       role: "tool",
       content: result,
       toolCallId,
-      images: images as ImageAttachment[] | null | undefined,
+      images: images as ImageAttachment[] | undefined,
     });
     this.#deps.addMessage(msg);
     return { toolName, input, result, stopLoop };

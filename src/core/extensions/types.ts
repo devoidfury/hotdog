@@ -10,7 +10,17 @@ import type {
   InputHookResult,
   SystemPromptChunk,
 } from "../hooks.ts";
-import type { ToolRegistry, ToolDef, Tool } from "./tool-registry.ts";
+
+// Re-export hook result types for convenience
+export type {
+  GateAction,
+  ContextHookResult,
+  ProviderRequestHookResult,
+  ToolResultHookResult,
+  InputHookResult,
+  SystemPromptChunk,
+} from "../hooks.ts";
+import type { ToolRegistry, ToolDef, Tool, ToolMetadata } from "./tool-registry.ts";
 import type { ExtensionLoader } from "./extensions.ts";
 import type { ServiceRegistry } from "./service-registry.ts";
 import type { CliSubcommandRegistry } from "./registries.ts";
@@ -56,6 +66,7 @@ export interface HookPayloads {
 
   // Tool execution lifecycle
   "tools:register": ToolsRegisterPayload;
+  "tool:metadata": ToolMetadataPayload;
   "tool:beforeExecute": { toolCallId: string; toolName: string; input: string; agent: Agent };
   "services:register": ServiceRegistry;
   "tool:afterExecute": {
@@ -102,7 +113,7 @@ export interface HookPayloads {
   //   { action: "continue" }
   //   { action: "transform", text, images? }
   //   { action: "handled" }
-  "input": { text: string; images?: ImageAttachment[] | null, agent: Agent };
+  "input": { text: string; images?: ImageAttachment[], agent: Agent };
 
   // Context modification pipeline — return ContextHookResult
   //   { messages } — replace the messages array
@@ -129,12 +140,7 @@ export interface HookPayloads {
   //   { messages } — replace the messages array
   //   { modelConfig } — replace the model config
   //   { toolDefs } — replace the tool definitions
-  "provider:request": {
-    messages: Message[];
-    modelConfig: ModelConfig;
-    toolDefs: ToolDef[];
-    agent: Agent;
-  };
+  "provider:request": ProviderRequestPayload,
 
   // Provider response — emitted AFTER the LLM response is fully received
   "provider:response": { response: unknown; modelConfig: ModelConfig; agent: Agent };
@@ -318,6 +324,31 @@ export type ExtensionInstance = {
 export interface ToolsRegisterPayload {
   register(name: string, tool: Tool): void;
   getAll(): [string, Tool][];
+}
+
+/**
+ * Payload for the `tool:metadata` notification hook.
+ * Fired after all tools are registered, with all tool names and their metadata.
+ * Enables extensions to react to tool availability.
+ */
+export interface ToolMetadataPayload {
+  /** Map of tool name → metadata for all registered tools. */
+  tools: Map<string, ToolMetadata | undefined>;
+}
+
+/**
+ * Payload for the `provider:request` hook.
+ * Fired before each LLM request, allowing handlers to modify messages, model config, or tool definitions.
+ */
+export interface ProviderRequestPayload {
+  /** Current messages array for the request. */
+  messages: Message[];
+  /** Model configuration for this request. */
+  modelConfig: ModelConfig;
+  /** Tool definitions to be sent with the request. */
+  toolDefs: ToolDef[];
+  /** The agent making the request. */
+  agent: Agent;
 }
 
 /**

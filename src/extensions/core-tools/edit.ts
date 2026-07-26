@@ -10,6 +10,7 @@ import {
   parseToolInput,
   defaultCallDisplay,
 } from "../../core/extensions/tool-utils.ts";
+import type { ToolMetadata } from "../../core/extensions/tool-registry.ts";
 import { validateCwdBoundary, resolvePath } from "../../utils/file-utils.ts";
 import { ToolExecutionContext } from "../../core/extensions/types.ts";
 
@@ -46,6 +47,7 @@ interface FindReplaceResult {
 
 export class EditTool {
   static readonly TOOL_NAME = "edit";
+  metadata: ToolMetadata = { sideEffects: true, difficulty: 2 };
 
   private readonly maxEditInputSize: number;
 
@@ -63,10 +65,10 @@ export class EditTool {
       "Single mode tool that replaces text in a file. Finds oldString, replaces with newString. Use this instead of the write tool for precise code edits.",
       {
         properties: {
-          path: param("string", "File path relative to workspace root"),
-          oldString: param("string", "Exact text to find and replace"),
-          newString: param("string", "Replacement text"),
-          replace_all: param("boolean", "Replace all occurrences", {
+          path: param("string", "File path, absolute or relative to workspace root."),
+          oldString: param("string", "Exact text to find and replace."),
+          newString: param("string", "Replacement text."),
+          replace_all: param("boolean", "Replace all occurrences. Defaults false.", {
             default: false,
           }),
         },

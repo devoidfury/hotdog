@@ -59,7 +59,8 @@ export function create(core: CoreContext): ExtensionInstance | null {
   const mcpServers = (core.config?.mcpServers as McpServerConfig[]) || [];
   const enabledServers = mcpServers.filter((s) => s.enabled !== false);
 
-  if (enabledServers.length === 0) {
+  // skip enabling anything in the extension when in sandbox mode or when no mcp configured
+  if (core.config.sandboxMode || enabledServers.length === 0) {
     return null;
   }
 

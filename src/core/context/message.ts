@@ -22,7 +22,7 @@ export interface MessageParams {
   reasoningContent?: string | null;
   toolCalls?: ToolCall[] | null;
   toolCallId?: string | null;
-  images?: ImageAttachment[] | null;
+  images?: ImageAttachment[];
 }
 
 export class Message {
@@ -31,7 +31,7 @@ export class Message {
   reasoningContent: string | null;
   toolCalls: ToolCall[] | null;
   toolCallId: string | null;
-  images: ImageAttachment[] | null | undefined;
+  images: ImageAttachment[] | undefined;
 
   /**
    * @param opts — camelCase parameters only.
@@ -44,7 +44,7 @@ export class Message {
     this.reasoningContent = opts.reasoningContent ?? null;
     this.toolCalls = opts.toolCalls ?? null;
     this.toolCallId = opts.toolCallId ?? null;
-    this.images = opts.images ?? null;
+    this.images = opts.images ?? undefined;
   }
 
   /**

@@ -1,7 +1,7 @@
 // ToolExecutor
 
 import { Message, type ToolCall, type ImageAttachment } from "./context/message.ts";
-import { formatError } from "./error.ts";
+import { formatError, RetryableError, TransientError } from "./error.ts";
 import { HOOKS, type HookSystem, type GateAction, type ToolResultHookResult } from "./hooks.ts";
 import { logger } from "./logger.ts";
 import { ToolContext } from "./extensions/tool-context.ts";
@@ -157,16 +157,34 @@ export class ToolExecutor {
     let result: unknown;
     let success: boolean;
     let stopLoop = false;
-    try {
-      result = await tool.execute(input, toolCtx);
-      success = true;
-      // Check for stop-loop sentinel on ToolResult
-      if (result && typeof result === "object" && (result as Record<symbol, unknown>)[TOOL_STOP_LOOP] === true) {
-        stopLoop = true;
+    const maxRetries = 3;
+    let attempts = 0;
+
+    while (attempts < maxRetries) {
+      attempts++;
+      try {
+        result = await tool.execute(input, toolCtx);
+        success = true;
+        // Check for stop-loop sentinel on ToolResult
+        if (result && typeof result === "object" && (result as Record<symbol, unknown>)[TOOL_STOP_LOOP] === true) {
+          stopLoop = true;
+        }
+        break;
+      } catch (e: unknown) {
+        if (e instanceof TransientError && attempts < maxRetries) {
+          logger.warn(`[tool:retry] ${toolName} failed (transient), retrying attempt ${attempts + 1}/${maxRetries}...`);
+          continue;
+        }
+
+        if (e instanceof RetryableError) {
+          const hint = e.hint ? `\n\nHINT: ${e.hint}` : "";
+          result = `Error executing tool ${toolName}: ${e.message}${hint}`;
+        } else {
+          result = `Error executing tool ${toolName}: ${(e as Error).message}`;
+        }
+        success = false;
+        break;
       }
-    } catch (e: unknown) {
-      result = `Error executing tool ${toolName}: ${(e as Error).message}`;
-      success = false;
     }
 
     hooks.notifyHooks(HOOKS.TOOL_AFTER_EXECUTE, {

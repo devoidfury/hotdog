@@ -132,6 +132,30 @@ export class ToolError extends AppError {
 }
 
 /**
+ * Error that signals the LLM should retry the tool call with modified input.
+ * Includes a hint to guide the correction.
+ */
+export class RetryableError extends ToolError {
+  constructor(message: string, public hint?: string) {
+    super(message);
+  }
+
+  static WithHint(message: string, hint: string): RetryableError {
+    return new RetryableError(message, hint);
+  }
+}
+
+/**
+ * Error that signals a transient failure (e.g., network timeout) that may
+ * resolve upon immediate retry.
+ */
+export class TransientError extends ToolError {
+  constructor(message: string) {
+    super(message);
+  }
+}
+
+/**
  * Agent runtime errors (max iterations, summarization failures).
  */
 export class AgentError extends AppError {

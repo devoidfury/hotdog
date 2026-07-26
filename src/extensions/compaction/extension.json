@@ -28,6 +28,11 @@
           "default": "summarize",
           "enum": ["summarize", "drop", "summarize-short", "token-aware", "trim"],
           "description": "Compaction strategy to use"
+        },
+        "userTurnGuardPrompt": {
+          "type": "string",
+          "default": "Continue from the compressed conversation context above.",
+          "description": "Prompt added when compaction ends in a non-user turn to ensure compatibility with some LLM templates"
         }
       },
       "additionalProperties": false,

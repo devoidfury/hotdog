@@ -32,6 +32,7 @@ interface CompactionSettings {
   keepRecentMessages: number;
   keepRecent: number;
   strategy: string;
+  userTurnGuardPrompt: string;
 }
 
 /**
@@ -67,6 +68,7 @@ export function create(core: CoreContext): ExtensionInstance | null {
     keepRecentMessages: config.keepRecentMessages ?? 8,
     keepRecent: config.keepRecent ?? config.keepRecentMessages ?? 8,
     strategy: config.strategy ?? "summarize",
+    userTurnGuardPrompt: config.userTurnGuardPrompt ?? "",
   };
 
   if (!settings.enabled) return null;
@@ -95,7 +97,7 @@ export function create(core: CoreContext): ExtensionInstance | null {
       ...messages,
       new Message({
         role: "user",
-        content: "Continue from the compressed conversation context above.",
+        content: settings.userTurnGuardPrompt,
       }),
     ];
   }

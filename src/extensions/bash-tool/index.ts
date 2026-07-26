@@ -37,7 +37,7 @@ export class BashTool {
   toToolDef() {
     return toolDef(
       BashTool.TOOL_NAME,
-      `Execute a bash command, from the working directory '${process.cwd()}'`,
+      `Execute a bash command from the current working directory.`,
       {
         properties: {
           command: param("string", "The shell command to execute."),

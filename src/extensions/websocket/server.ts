@@ -634,7 +634,7 @@ function routeMessage(ws: WebSocket, msg: C2SMessage, registry: SessionRegistry,
         registry.touch(msg.sessionId as string);
         let cmdText = msg.command as string;
         if (cmdText.startsWith("/")) {
-          cmdText = cmdText.slice(1).trim().toLowerCase();
+          cmdText = cmdText.slice(1).trim();
         }
         sessionManager.executeCommand(msg.sessionId as string, cmdText);
       }

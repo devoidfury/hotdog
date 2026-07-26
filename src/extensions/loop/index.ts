@@ -158,8 +158,9 @@ export function create(core: CoreContext): ExtensionInstance {
       [HOOKS.INPUT]: ({text, agent}) => {
         if (!loop.active || !text || !agent) return;
 
-        const trimmed = text.trim().toLowerCase();
-        if (trimmed === "/quit" || trimmed === "/exit") {
+        const trimmed = text.trim();
+        const trimmedLower = trimmed.toLowerCase();
+        if (trimmedLower === "/quit" || trimmedLower === "/exit") {
           stopLoop(agent, true);
           return { action: "handled" };
         }

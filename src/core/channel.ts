@@ -103,7 +103,7 @@ export abstract class Channel {
 
     // Check for command prefix
     if (trimmed.startsWith("/")) {
-      const cmdText = trimmed.slice(1).trim().toLowerCase();
+      const cmdText = trimmed.slice(1).trim();
       await this.handleCommand(cmdText);
       return;
     }

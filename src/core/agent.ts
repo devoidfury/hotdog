@@ -286,204 +286,144 @@ export class Agent {
    * @returns Final text response, or undefined if tool calls
    */
   async run(userInput: string, images?: ImageAttachment[]): Promise<string | undefined> {
-    // Track whether TURN_END(stopped: true) was already emitted during
-    // normal processing. If not, the finally block emits it so extensions
-    // (e.g., loop) always get a completion signal even on cancellation.
     let stoppedEmitted = false;
 
     try {
-      // Ensure system prompt is built (e.g. after /clear or /regenerate)
       await this.ensureSystemPrompt();
 
-      // Add user input to context
       const userMsg = new Message({ role: "user", content: userInput, images });
       this.addMessage(userMsg);
-
-      // Emit user message to output sinks so connected clients see it
       this.emitOutput("user_message", { content: userInput });
 
       let iteration = 0;
       while (iteration < this.maxIterations) {
         iteration++;
         this.iterationCount = iteration;
-  
-        // Turn start — emitted at the beginning of each agent loop iteration.
-        this.hooks.notifyHooks(HOOKS.TURN_START, {
-          turnIndex: iteration,
-          timestamp: Date.now(),
-          agent: this,
-        });
-  
-        // Check cancellation flags
-        if (this.cancelled) {
-          throw LlmError.Cancelled("Agent cancelled");
-        }
-        if (this.abortSignal?.aborted) {
-          throw LlmError.Cancelled("Agent aborted");
-        }
-  
-        // Drain follow-up queue (for task agents)
-        while (this.followQueue.length > 0) {
-          const followUp = this.followQueue.shift()!;
-          const followUpMsg = new Message({ role: "user", content: followUp });
-          this.addMessage(followUpMsg);
-        }
-  
-        // Build messages (extensions can modify via hook)
-        let messages = this.buildMessages();
-        // Context hook — sequential, modifiable. Each handler sees prior
-        // transformations and can return { messages } to replace the array.
-        const contextResult = await this.hooks.runHookPipeline<ContextHookResult>(HOOKS.CONTEXT, {
-          messages,
-          agent: this,
-        });
-        if (contextResult.lastResult?.messages) {
-          messages = contextResult.lastResult.messages as Message[];
-        }
-  
-        let toolDefs = await this.getToolDefs();
-        let modelConfig = resolveModelConfig(
-          this.#model,
-          this.modelRegistry,
-          this.contextLimit,
-          this.reasoningEffort,
-        );
-  
-        // Before provider request — sequential, modifiable. Extensions can
-        // log the request, modify messages, change model config, or alter tools.
-        const reqResult = await this.hooks.runHookPipeline<ProviderRequestHookResult>(
-          HOOKS.PROVIDER_REQUEST,
-          {
-            messages,
-            modelConfig,
-            toolDefs,
-            agent: this,
-          },
-        );
-        if (reqResult.lastResult?.messages)
-          messages = reqResult.lastResult.messages as Message[];
-        if (reqResult.lastResult?.modelConfig)
-          modelConfig = reqResult.lastResult.modelConfig as typeof modelConfig;
-        if (reqResult.lastResult?.toolDefs)
-          toolDefs = reqResult.lastResult.toolDefs as typeof toolDefs;
-  
-        // Create an AbortController for this LLM request.
-        // Pass its signal so the HTTP client can properly abort fetch()
-        // when cancel() is called (e.g., Ctrl+C).
-        this.runAbortController = new AbortController();
-        const cancelSignal = this.runAbortController.signal;
-  
-        // Also honor the external abortSignal (for task agents)
-        if (this.abortSignal?.aborted) {
-          this.runAbortController.abort();
-        } else if (this.abortSignal) {
-          this.abortSignal.addEventListener(
-            "abort",
-            () => this.runAbortController!.abort(),
-            { once: true },
-          );
-        }
-  
-        try {
-          const stream = this.llmClient.chatStreamCancellable(
-            messages.map((m) => m.toJSON()),
-            modelConfig,
-            toolDefs,
-            cancelSignal,
-            this.sessionId,
-          );
-  
-          const response = await this._processStream(stream);
-  
-          // After provider response — notification with full response data.
-          // Enables: response logging, metrics, cost tracking, telemetry.
-          this.hooks.notifyHooks(HOOKS.PROVIDER_RESPONSE, {
-            response,
-            modelConfig,
-            agent: this,
-          });
-  
-          this.hooks.notifyHooks(HOOKS.MESSAGES_AFTER_LLM, {
-            response,
-            messages: this.log.getAll(),
-            agent: this,
-          });
-  
-          const assistantMsg = new Message({
-            role: "assistant",
-            content: response.fullText,
-            reasoningContent: response.fullReasoning,
-            toolCalls: response.finalToolCalls,
-          });
-          this.addMessage(assistantMsg);
-  
-          // Tool execution
-          if (response.finalToolCalls) {
-            const { outcome, toolResults } = await this._executeTools(
-              response.finalToolCalls,
-            );
-            this._emitTokenUsage(response);
-            if (outcome !== "continue") {
-              // Turn end — agent has stopped (e.g., wait tool yielded control).
-              stoppedEmitted = true;
-              this.hooks.notifyHooks(HOOKS.TURN_END, {
-                turnIndex: iteration,
-                message: response.fullText,
-                toolResults,
-                stopped: true,
-                cancelled: false,
-                agent: this,
-              });
-              return outcome;
-            }
-            // Turn end (tool execution continues to next iteration).
-            this.hooks.notifyHooks(HOOKS.TURN_END, {
-              turnIndex: iteration,
-              message: response.fullText,
-              toolResults,
-              stopped: false,
-              cancelled: false,
-              agent: this,
-            });
-          } else {
-            this._emitTokenUsage(response);
-            this.hooks.notifyHooks(HOOKS.CONTEXT_MESSAGE, {
-              message: assistantMsg,
-              agent: this,
-            });
-            // Turn end (final response, no tools).
+
+        const { messages, modelConfig, toolDefs } = await this._prepareIteration(iteration);
+        const response = await this._performLlmCall(messages, modelConfig, toolDefs);
+        const result = await this._handleLlmResponse(iteration, response, modelConfig);
+
+        if (typeof result === "string") {
+          stoppedEmitted = true;
+          return result;
+        } else if (result && typeof result === "object" && "outcome" in result) {
+          const { outcome } = result as { outcome: string };
+          if (outcome !== "continue") {
             stoppedEmitted = true;
-            this.hooks.notifyHooks(HOOKS.TURN_END, {
-              turnIndex: iteration,
-              message: response.fullText,
-              toolResults: [],
-              stopped: true,
-              cancelled: false,
-              agent: this,
-            });
-            return response.fullText;
+            return outcome;
           }
-        } finally {
-          // Always clean up the AbortController so it doesn't leak
-          // and cancel() doesn't affect the next iteration.
-          this.runAbortController = null;
         }
       }
       throw AgentError.MaxIterations(this.maxIterations);
     } finally {
-      // Ensure TURN_END(stopped: true) always fires so extensions
-      // (e.g., loop) get a completion signal even on cancellation or error.
       if (!stoppedEmitted) {
-        this.hooks.notifyHooks(HOOKS.TURN_END, {
-          turnIndex: this.iterationCount,
-          message: "",
-          toolResults: [],
-          stopped: true,
-          cancelled: this.cancelled,
-          agent: this,
-        });
+        this._emitTurnEnd(this.iterationCount, "", [], true, this.cancelled);
       }
     }
+  }
+
+  private async _prepareIteration(iteration: number) {
+    this.hooks.notifyHooks(HOOKS.TURN_START, {
+      turnIndex: iteration,
+      timestamp: Date.now(),
+      agent: this,
+    });
+
+    if (this.cancelled) throw LlmError.Cancelled("Agent cancelled");
+    if (this.abortSignal?.aborted) throw LlmError.Cancelled("Agent aborted");
+
+    while (this.followQueue.length > 0) {
+      const followUp = this.followQueue.shift()!;
+      this.addMessage(new Message({ role: "user", content: followUp }));
+    }
+
+    let messages = this.buildMessages();
+    const contextResult = await this.hooks.runHookPipeline<ContextHookResult>(HOOKS.CONTEXT, {
+      messages,
+      agent: this,
+    });
+    if (contextResult.lastResult?.messages) {
+      messages = contextResult.lastResult.messages as Message[];
+    }
+
+    let toolDefs = await this.getToolDefs();
+    let modelConfig = resolveModelConfig(
+      this.#model,
+      this.modelRegistry,
+      this.contextLimit,
+      this.reasoningEffort,
+    );
+
+    const reqResult = await this.hooks.runHookPipeline<ProviderRequestHookResult>(
+      HOOKS.PROVIDER_REQUEST,
+      { messages, modelConfig, toolDefs, agent: this },
+    );
+    if (reqResult.lastResult?.messages) messages = reqResult.lastResult.messages as Message[];
+    if (reqResult.lastResult?.modelConfig) modelConfig = reqResult.lastResult.modelConfig as typeof modelConfig;
+    if (reqResult.lastResult?.toolDefs) toolDefs = reqResult.lastResult.toolDefs as typeof toolDefs;
+
+    return { messages, modelConfig, toolDefs };
+  }
+
+  private async _performLlmCall(messages: Message[], modelConfig: any, toolDefs: any) {
+    this.runAbortController = new AbortController();
+    const cancelSignal = this.runAbortController.signal;
+
+    if (this.abortSignal?.aborted) {
+      this.runAbortController.abort();
+    } else if (this.abortSignal) {
+      this.abortSignal.addEventListener("abort", () => this.runAbortController!.abort(), { once: true });
+    }
+
+    try {
+      const stream = this.llmClient.chatStreamCancellable(
+        messages.map((m) => m.toJSON()),
+        modelConfig,
+        toolDefs,
+        cancelSignal,
+        this.sessionId,
+      );
+      return await this._processStream(stream);
+    } finally {
+      this.runAbortController = null;
+    }
+  }
+
+  private async _handleLlmResponse(iteration: number, response: any, modelConfig: any) {
+    this.hooks.notifyHooks(HOOKS.PROVIDER_RESPONSE, { response, modelConfig, agent: this });
+    this.hooks.notifyHooks(HOOKS.MESSAGES_AFTER_LLM, { response, messages: this.log.getAll(), agent: this });
+
+    const assistantMsg = new Message({
+      role: "assistant",
+      content: response.fullText,
+      reasoningContent: response.fullReasoning,
+      toolCalls: response.finalToolCalls,
+    });
+    this.addMessage(assistantMsg);
+
+    if (response.finalToolCalls) {
+      const { outcome, toolResults } = await this._executeTools(response.finalToolCalls);
+      this._emitTokenUsage(response);
+      this._emitTurnEnd(iteration, response.fullText, toolResults, outcome === "return");
+      return { outcome, toolResults };
+    } else {
+      this._emitTokenUsage(response);
+      this.hooks.notifyHooks(HOOKS.CONTEXT_MESSAGE, { message: assistantMsg, agent: this });
+      this._emitTurnEnd(iteration, response.fullText, [], true);
+      return response.fullText;
+    }
+  }
+
+  private _emitTurnEnd(iteration: number, message: string, toolResults: any[], stopped: boolean, cancelled = false) {
+    this.hooks.notifyHooks(HOOKS.TURN_END, {
+      turnIndex: iteration,
+      message,
+      toolResults,
+      stopped,
+      cancelled,
+      agent: this,
+    });
   }
 
   /** Emit token usage — delegates to TokenTracker for accumulation and emits the event. */

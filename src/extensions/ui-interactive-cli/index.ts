@@ -460,7 +460,7 @@ export async function runInteractiveSession(
 
     // Handle slash commands
     if (trimmed.startsWith("/")) {
-      const cmdText = trimmed.slice(1).trim().toLowerCase();
+      const cmdText = trimmed.slice(1).trim();
       handleSlashCommand(cmdText, sessionManager, channel, rl);
       return;
     }

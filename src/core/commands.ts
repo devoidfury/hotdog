@@ -72,9 +72,11 @@ export function parseCommand(
 ): TypedParsedCommand {
   if (!cmd) return { type: Command.Unknown, value: null };
 
+  const cmdLower = cmd.toLowerCase();
+
   // Check custom commands first (via registry)
   if (registry) {
-    const customName = registry.match(cmd);
+    const customName = registry.match(cmdLower);
     if (customName) {
       const def = registry.get(customName);
       return {
@@ -86,7 +88,7 @@ export function parseCommand(
     }
   }
 
-  switch (cmd) {
+  switch (cmdLower) {
     case "help":
       return { type: Command.Help, value: null };
     case "quit":
@@ -97,7 +99,7 @@ export function parseCommand(
   }
 
   // clear <profile> — profile name stored in value, handler decides what to do
-  if (cmd.startsWith("clear ")) {
+  if (cmdLower.startsWith("clear ")) {
     const profileName = cmd.slice(6).trim();
     return {
       type: Command.Clear,
@@ -105,42 +107,42 @@ export function parseCommand(
     };
   }
 
-  switch (cmd) {
+  switch (cmdLower) {
     case "tools":
       return { type: Command.Tools, value: null };
     case "thinking":
       return { type: Command.Thinking, value: null };
   }
 
-  if (cmd === "tokens") {
+  if (cmdLower === "tokens") {
     return { type: Command.Tokens, value: null };
   }
 
-  if (cmd === "regenerate") {
+  if (cmdLower === "regenerate") {
     return { type: Command.Regenerate, value: null };
   }
 
   // reasoning — set reasoning effort level
-  if (cmd === "reasoning" || cmd.startsWith("reasoning ")) {
+  if (cmdLower === "reasoning" || cmdLower.startsWith("reasoning ")) {
     const parts = cmd.split(/\s+/);
     const effort = parts.slice(1).join(" ").trim();
     return { type: Command.Reasoning, value: effort || null };
   }
 
   // Channel-level commands
-  if (cmd === "sessions") {
+  if (cmdLower === "sessions") {
     return { type: Command.Sessions, value: null };
   }
-  if (cmd === "attach" || cmd.startsWith("attach ")) {
-    const sessionId = cmd.replace("attach ", "").trim();
+  if (cmdLower === "attach" || cmdLower.startsWith("attach ")) {
+    const sessionId = cmd.replace(new RegExp(`^attach\\s+`, "i")).trim();
     return { type: Command.Attach, value: sessionId || null };
   }
-  if (cmd === "detach" || cmd.startsWith("detach ")) {
-    const sessionId = cmd.replace("detach ", "").trim();
+  if (cmdLower === "detach" || cmdLower.startsWith("detach ")) {
+    const sessionId = cmd.replace(new RegExp(`^detach\\s+`, "i")).trim();
     return { type: Command.Detach, value: sessionId || null };
   }
-  if (cmd === "switch" || cmd.startsWith("switch ")) {
-    const sessionId = cmd.replace("switch ", "").trim();
+  if (cmdLower === "switch" || cmdLower.startsWith("switch ")) {
+    const sessionId = cmd.replace(new RegExp(`^switch\\s+`, "i")).trim();
     return { type: Command.Switch, value: sessionId || null };
   }
 

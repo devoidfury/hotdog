@@ -553,8 +553,19 @@ export function createMessageList(
   function finalizeAssistant(): void {
     dbg("finalizeAssistant", { hadAssistant: !!currentAssistantEl, streamingBlockCount, thinkingBlockCount });
     if (currentAssistantEl) {
-      currentAssistantEl.classList.remove("streaming");
+      // Remove the assistant element if it has no content (e.g., tool-only turns)
+      const contentDiv = currentAssistantEl.querySelector(".content") as HTMLDivElement;
+      const hasContent = contentDiv && contentDiv.textContent?.trim().length > 0;
+      if (!hasContent) {
+        currentAssistantEl.remove();
+      } else {
+        currentAssistantEl.classList.remove("streaming");
+      }
       currentAssistantEl = null;
+    }
+    // Remove thinking element if it has no content
+    if (currentThinkingEl && !currentThinkingEl.textContent?.trim()) {
+      currentThinkingEl.remove();
     }
     currentThinkingEl = null;
     currentToolCalls = [];

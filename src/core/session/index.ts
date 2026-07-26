@@ -221,7 +221,9 @@ export class SessionManager {
     // Create TaskManager internally if taskConfig is provided
     if (options.taskConfig && options.llmClient && options.modelRegistry) {
       this.#taskManager = new TaskManager({
-        buildAgent: this.#buildAgent as unknown as (config: Record<string, unknown>) => Promise<import("./task-manager.ts").TaskAgent>,
+        buildAgent: this.#buildAgent as unknown as (
+          config: Record<string, unknown>,
+        ) => Promise<import("./task-manager.ts").TaskAgent>,
         llmClient: options.llmClient,
         modelRegistry: options.modelRegistry,
         config: options.coreConfig || {},
@@ -231,7 +233,11 @@ export class SessionManager {
         taskRole: options.taskConfig.taskRole,
       });
       // Wire sessionManager reference
-      this.#taskManager.setSessionManager(this as unknown as { getAgent: () => import("./task-manager.ts").TaskAgent | undefined });
+      this.#taskManager.setSessionManager(
+        this as unknown as {
+          getAgent: () => import("./task-manager.ts").TaskAgent | undefined;
+        },
+      );
     }
   }
 
@@ -250,6 +256,7 @@ export class SessionManager {
     this.#createSessionEntry(sessionId, agent, config);
     this.#hooks.notifyHooks(HOOKS.SESSION_CREATE, {
       session: this,
+      sessionId: sessionId,
       config,
     });
     return sessionId;
@@ -398,7 +405,10 @@ export class SessionManager {
    * @param cmdText — Command text
    * @returns Command action bits or undefined
    */
-  async executeCommand(sessionId: string, cmdText: string): Promise<number | undefined> {
+  async executeCommand(
+    sessionId: string,
+    cmdText: string,
+  ): Promise<number | undefined> {
     const entry = this.#sessions.get(sessionId);
     if (entry) {
       return await entry.bus.executeCommand(cmdText);
@@ -478,7 +488,9 @@ export class SessionManager {
    * @param sessionId — Session ID
    * @returns Session info or null
    */
-  getSessionInfo(sessionId: string): { id: string; model?: string; profile?: string } | null {
+  getSessionInfo(
+    sessionId: string,
+  ): { id: string; model?: string; profile?: string } | null {
     const agent = this.#store.getAgent(sessionId);
     if (!agent) return null;
 
@@ -563,7 +575,11 @@ export class SessionManager {
    * @param agent — Agent instance
    * @param config — Session config
    */
-  #createSessionEntry(sessionId: string, agent: AgentLike, config: Record<string, unknown>): void {
+  #createSessionEntry(
+    sessionId: string,
+    agent: AgentLike,
+    config: Record<string, unknown>,
+  ): void {
     // Create an internal sink that routes events to subscribed channels
     const internalSink = {
       emit: (event: OutputEvent) => {
@@ -574,14 +590,23 @@ export class SessionManager {
     // Create the message bus with the internal sink
     const bus = new MessageBus({
       sessionManager: {
-        getAgent: () => agent as unknown as {
-          hooks: { runHookPipeline: (hookName: string, data: unknown, opts?: { shouldStop?: (result: unknown) => boolean }) => Promise<unknown> };
-          run: (text: string) => Promise<unknown>;
-          resetCancel: () => void;
-          cancel: () => void;
-          commandRegistry: CommandRegistryLike | undefined;
-          executeCommand: (cmd: unknown) => Promise<unknown>;
-        } | undefined,
+        getAgent: () =>
+          agent as unknown as
+            | {
+                hooks: {
+                  runHookPipeline: (
+                    hookName: string,
+                    data: unknown,
+                    opts?: { shouldStop?: (result: unknown) => boolean },
+                  ) => Promise<unknown>;
+                };
+                run: (text: string) => Promise<unknown>;
+                resetCancel: () => void;
+                cancel: () => void;
+                commandRegistry: CommandRegistryLike | undefined;
+                executeCommand: (cmd: unknown) => Promise<unknown>;
+              }
+            | undefined,
       },
       sink: internalSink,
     });

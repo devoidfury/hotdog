@@ -299,7 +299,7 @@ export async function main(): Promise<number> {
   // defined in their extension.json configSchema. This allows nested properties
   // to have their own layers (e.g., apiKey with config + env + default).
   const extContext: ResolutionContext = {
-    cli: cli as Record<string, unknown>,
+    cli: cli,
     config: config as Record<string, unknown>,
     configDir: resolved.configDir,
     provider: null,

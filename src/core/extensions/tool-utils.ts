@@ -309,9 +309,9 @@ function xmlWrap(
     for (const key of SHORT_META_KEYS) {
       if (key in remaining) {
         shortMeta.push(
-          `${xmlEscape(key)}="${xmlEscape(String((remaining as Record<string, unknown>)[key]))}"`,
+          `${xmlEscape(key)}="${xmlEscape(String(remaining[key]))}"`,
         );
-        delete (remaining as Record<string, unknown>)[key];
+        delete remaining[key];
       }
     }
     if (shortMeta.length > 0) {

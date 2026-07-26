@@ -303,7 +303,7 @@ export class ToolRegistry {
     if (!tool) return null;
 
     const def = await this.getToolDef(toolName);
-    const params = def?.function?.parameters as Record<string, unknown> | null;
+    const params = def?.function?.parameters;
     if (!params) return null;
 
     let args: unknown;

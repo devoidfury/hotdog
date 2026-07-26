@@ -33,6 +33,8 @@ import type { ParsedCommand } from "../commands.ts";
 import type { ToolContext } from "./tool-context.ts";
 import { logger } from "../logger.ts";
 import { ProfileDef } from "../config/profiles.ts";
+import { ParsedCliOptions } from "../cli.ts";
+import { SessionManager } from "../session/index.ts";
 
 // ── Hook Payload Types ──────────────────────────────────────────────────────
 
@@ -49,7 +51,7 @@ import { ProfileDef } from "../config/profiles.ts";
  */
 export interface HookPayloads {
   // Session lifecycle
-  "session:create": { session: unknown; config: Record<string, unknown> };
+  "session:create": { session: SessionManager; sessionId: string; config: Record<string, unknown> };
   "session:swap": { oldAgent?: Agent; newAgent: Agent };
   "session:serialize": { agent: Agent };
   "session:deserialize": { data: Record<string, unknown> };
@@ -107,7 +109,7 @@ export interface HookPayloads {
 
   // CLI
   "cli:subcommandsRegister": CliSubcommandRegistry;
-  "cli:argsParsed": { cli: Record<string, unknown> };
+  "cli:argsParsed": { cli: ParsedCliOptions };
 
   // Input preprocessing — return InputHookResult
   //   { action: "continue" }

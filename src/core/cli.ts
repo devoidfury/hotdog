@@ -5,7 +5,7 @@
 import { logger } from "./logger.ts";
 import { CliError } from "./error.ts";
 import { parseCliFlagKey } from "../utils/strings.ts";
-import type { CliFlagDef } from "./extensions/config-registry.ts";
+import type { CliFlagDef, ConfigRegistry } from "./extensions/config-registry.ts";
 
 export type CliFlag = CliFlagDef;
 
@@ -63,7 +63,7 @@ const STRUCTURAL_FLAGS: CliFlag[] = [
 ];
 
 export function parseArgs(
-  configRegistry: { buildDefaults: () => Record<string, unknown>; getCliFlags: () => CliFlagDef[] } | null = null,
+  configRegistry: ConfigRegistry | null = null,
   knownSubcommands: string[] | null = null,
 ): ParsedCliOptions {
   const args = process.argv.slice(2);

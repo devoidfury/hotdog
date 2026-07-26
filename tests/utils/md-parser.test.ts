@@ -878,6 +878,99 @@ describe("markdownToHtml", () => {
     expect(html).toContain("<em>italic</em>");
   });
 
+  describe("escape sequences", () => {
+    it("escapes backticks so they are not treated as inline code", () => {
+      const html = markdownToHtml("\\`foo\\`");
+      expect(html).toBe("<p>`foo`</p>");
+      expect(html).not.toContain("<code");
+    });
+
+    it("escapes asterisks so they are not treated as bold/italic", () => {
+      const html = markdownToHtml("\\*italic\\* and \\*\\*bold\\*\\*");
+      expect(html).toBe("<p>*italic* and **bold**</p>");
+      expect(html).not.toContain("<em>");
+      expect(html).not.toContain("<strong>");
+    });
+
+    it("escapes underscores so they are not treated as bold/italic", () => {
+      const html = markdownToHtml("\\_italic\\_ and \\_\\_bold\\_\\_");
+      expect(html).toBe("<p>_italic_ and __bold__</p>");
+      expect(html).not.toContain("<em>");
+      expect(html).not.toContain("<strong>");
+    });
+
+    it("escapes brackets so they are not treated as links", () => {
+      const html = markdownToHtml("\\[not a link\\](http://example.com)");
+      expect(html).toBe("<p>[not a link](http://example.com)</p>");
+      expect(html).not.toContain("<a href");
+    });
+
+    it("escapes exclamation (but [text](url) after it is still a link)", () => {
+      const html = markdownToHtml("\\![alt](http://example.com/img.png)");
+      expect(html).toContain("<a href");
+      expect(html).not.toContain("<img");
+    });
+
+    it("escapes bracket to prevent link/image syntax", () => {
+      const html = markdownToHtml("!\\[not an image](http://example.com/img.png)");
+      expect(html).toBe("<p>![not an image](http://example.com/img.png)</p>");
+      expect(html).not.toContain("<a href");
+      expect(html).not.toContain("<img");
+    });
+
+    it("escapes tildes so they are not treated as strikethrough", () => {
+      const html = markdownToHtml("\\~\\~not struck\\~\\~");
+      expect(html).toBe("<p>~~not struck~~</p>");
+      expect(html).not.toContain("<del>");
+    });
+
+    it("escapes backslash itself", () => {
+      const html = markdownToHtml("a\\\\b");
+      expect(html).toBe("<p>a\\b</p>");
+    });
+
+    it("handles mixed escaped and real formatting", () => {
+      const html = markdownToHtml("\\*escaped\\* and **real bold**");
+      expect(html).toContain("*escaped*");
+      expect(html).toContain("<strong>real bold</strong>");
+    });
+
+    it("handles escaped backtick mixed with real inline code", () => {
+      const html = markdownToHtml("\\`escaped\\` and `real code`");
+      expect(html).toContain("`escaped`");
+      expect(html).toContain('<code class="inline-code">real code</code>');
+    });
+
+    it("ignores backslash before non-special characters", () => {
+      const html = markdownToHtml("a\\b");
+      expect(html).toBe("<p>a\\b</p>");
+    });
+
+    it("handles escape sequence split across streaming chunks", () => {
+      const parser = createStreamingParser();
+      parser.feed("\\");
+      const { tree } = parser.feed("*");
+      const html = mdTreeToHtml(tree);
+      expect(html).toBe("<p>*</p>");
+      expect(html).not.toContain("\\");
+    });
+
+    it("handles escaped backtick inside inline code", () => {
+      const html = markdownToHtml("`\\``");
+      expect(html).toBe('<p><code class="inline-code">`</code></p>');
+    });
+
+    it("handles escaped backtick inside inline code with more content", () => {
+      const html = markdownToHtml("`\\`` `foo`");
+      expect(html).toBe('<p><code class="inline-code">`</code> <code class="inline-code">foo</code></p>');
+    });
+
+    it("skips escaped backticks when finding inline code closing", () => {
+      const html = markdownToHtml("`a\\`b`");
+      expect(html).toBe('<p><code class="inline-code">a`b</code></p>');
+    });
+  });
+
   it("renders a complex document", () => {
     const md = `## Analysis
 

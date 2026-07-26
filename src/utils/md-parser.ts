@@ -164,7 +164,8 @@ export function parseMarkdown(markdown: string): MdDocument {
     // Heading
     const headingMatch = trimmed.match(/^(#{1,6})\s+(.*)$/);
     if (headingMatch) {
-      const level = Math.min(headingMatch[1]!.length, 6) as 1 | 2 | 3 | 4 | 5 | 6;
+      const level = Math.min(headingMatch[1]!.length, 6) as
+        1 | 2 | 3 | 4 | 5 | 6;
       const children = parseInline(headingMatch[2]!);
       blocks.push({ type: "heading", level, children });
       i++;
@@ -195,7 +196,11 @@ export function parseMarkdown(markdown: string): MdDocument {
     }
 
     // Table (GFM-style) — check if this line and the next form a table header + delimiter
-    if (isTableHeaderLine(trimmed) && i + 1 < lines.length && isTableDelimiter(lines[i + 1]!.trim())) {
+    if (
+      isTableHeaderLine(trimmed) &&
+      i + 1 < lines.length &&
+      isTableDelimiter(lines[i + 1]!.trim())
+    ) {
       const table = parseTable(lines, i);
       blocks.push(table);
       i = table._nextIndex;
@@ -247,10 +252,7 @@ function inlinesEqual(a: MdInline, b: MdInline): boolean {
     case "link":
       return (
         (a as MdLink).url === (b as MdLink).url &&
-        inlineArraysEqual(
-          (a as MdLink).children,
-          (b as MdLink).children,
-        )
+        inlineArraysEqual((a as MdLink).children, (b as MdLink).children)
       );
     case "image":
       return (
@@ -278,10 +280,7 @@ function areBlocksEqual(a: MdBlock, b: MdBlock): boolean {
     case "heading":
       return (
         (a as MdHeading).level === (b as MdHeading).level &&
-        inlineArraysEqual(
-          (a as MdHeading).children,
-          (b as MdHeading).children,
-        )
+        inlineArraysEqual((a as MdHeading).children, (b as MdHeading).children)
       );
     case "paragraph":
       return inlineArraysEqual(
@@ -299,12 +298,7 @@ function areBlocksEqual(a: MdBlock, b: MdBlock): boolean {
       if (la.ordered !== lb.ordered || la.items.length !== lb.items.length)
         return false;
       for (let i = 0; i < la.items.length; i++) {
-        if (
-          !inlineArraysEqual(
-            la.items[i]!.children,
-            lb.items[i]!.children,
-          )
-        )
+        if (!inlineArraysEqual(la.items[i]!.children, lb.items[i]!.children))
           return false;
       }
       return true;
@@ -333,12 +327,7 @@ function areBlocksEqual(a: MdBlock, b: MdBlock): boolean {
         const rb = tb.rows[r]!;
         if (ra.cells.length !== rb.cells.length) return false;
         for (let c = 0; c < ra.cells.length; c++) {
-          if (
-            !inlineArraysEqual(
-              ra.cells[c]!.children,
-              rb.cells[c]!.children,
-            )
-          )
+          if (!inlineArraysEqual(ra.cells[c]!.children, rb.cells[c]!.children))
             return false;
         }
       }
@@ -469,7 +458,9 @@ export function mdTreeToPlainText(tree: MdDocument): string {
       case "blockquote":
         for (const child of block.children) {
           parts.push("> ");
-          parts.push(mdTreeToPlainText({ type: "document", children: [child] }));
+          parts.push(
+            mdTreeToPlainText({ type: "document", children: [child] }),
+          );
         }
         break;
       case "horizontal_rule":
@@ -491,7 +482,10 @@ export function mdTreeToPlainText(tree: MdDocument): string {
     }
   }
 
-  return parts.join("").replace(/\n{3,}/g, "\n\n").trim();
+  return parts
+    .join("")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
 }
 
 // ── HTML Renderer ────────────────────────────────────────────────────────────
@@ -541,7 +535,9 @@ function blockToHtml(block: MdBlock): string {
     case "paragraph":
       return `<p>${block.children.map(inlineToHtml).join("")}</p>`;
     case "code_block": {
-      const classes = block.language ? `code-block lang-${escapeHtml(block.language)}` : "code-block";
+      const classes = block.language
+        ? `code-block lang-${escapeHtml(block.language)}`
+        : "code-block";
       return `<pre class="${classes}"><code>${escapeHtml(block.content)}</code></pre>`;
     }
     case "list": {
@@ -565,7 +561,10 @@ function blockToHtml(block: MdBlock): string {
         .map(
           (row) =>
             `<tr>${row.cells
-              .map((cell) => `<td>${cell.children.map(inlineToHtml).join("")}</td>`)
+              .map(
+                (cell) =>
+                  `<td>${cell.children.map(inlineToHtml).join("")}</td>`,
+              )
               .join("")}</tr>`,
         )
         .join("");
@@ -618,7 +617,10 @@ export function markdownToHtml(markdown: string): string {
  */
 export function walkTree(
   tree: MdDocument,
-  callback: (node: MdBlock | MdInline, parent: MdBlock | MdInline | null) => void,
+  callback: (
+    node: MdBlock | MdInline,
+    parent: MdBlock | MdInline | null,
+  ) => void,
 ): void {
   for (const block of tree.children) {
     walkBlock(block, null, callback);
@@ -628,7 +630,10 @@ export function walkTree(
 function walkBlock(
   block: MdBlock,
   parent: MdBlock | MdInline | null,
-  callback: (node: MdBlock | MdInline, parent: MdBlock | MdInline | null) => void,
+  callback: (
+    node: MdBlock | MdInline,
+    parent: MdBlock | MdInline | null,
+  ) => void,
 ): void {
   callback(block, parent);
 
@@ -825,9 +830,7 @@ function isTableHeaderLine(line: string): boolean {
     .replace(/\|$/, "")
     .split("|")
     .map((c) => c.trim());
-  return cells.some(
-    (c) => c !== "" && !/^[-:*_]+$/.test(c),
-  );
+  return cells.some((c) => c !== "" && !/^[-:*_]+$/.test(c));
 }
 
 function isTableDelimiter(line: string): boolean {
@@ -882,16 +885,75 @@ function parseParagraph(
 
 // ── Inline Parser ────────────────────────────────────────────────────────────
 
+/** Characters that can be escaped with a backslash in markdown. */
+const ESCAPEABLE_CHARS = "\\`*_{}[]()#+-.!|~";
+
+/**
+ * Process escape sequences in a string (used inside inline code).
+ * Converts \X to X for escapeable characters.
+ */
+function processInlineEscapes(text: string): string {
+  let result = "";
+  let i = 0;
+  while (i < text.length) {
+    if (
+      text[i] === "\\" &&
+      i + 1 < text.length &&
+      ESCAPEABLE_CHARS.includes(text[i + 1]!)
+    ) {
+      result += text[i + 1]!;
+      i += 2;
+    } else {
+      result += text[i]!;
+      i++;
+    }
+  }
+  return result;
+}
+
 function parseInline(text: string): MdInline[] {
   const result: MdInline[] = [];
   let i = 0;
 
   while (i < text.length) {
+    // Escape sequences: \* \_ \` etc.
+    if (text[i] === "\\") {
+      const next = text[i + 1];
+      if (!next) {
+        // End of text — don't emit, wait for next chunk (streaming safety)
+        break;
+      }
+      if (ESCAPEABLE_CHARS.includes(next)) {
+        // Escaped special char — emit it literally
+        result.push({ type: "text", content: next });
+        i += 2;
+        continue;
+      }
+      // Backslash before non-special char — emit backslash literally
+      result.push({ type: "text", content: "\\" });
+      i++;
+      continue;
+    }
+
     // Inline code
     if (text[i] === "`" && !isTripleBacktick(text, i)) {
-      const end = text.indexOf("`", i + 1);
-      if (end !== -1) {
-        result.push({ type: "inline_code", content: text.slice(i + 1, end) });
+      // Find closing backtick, skipping escaped ones.
+      // Limit search distance to avoid overly-greedy matches on malformed input.
+      let end = -1;
+      for (let j = i + 1; j < text.length && j < i + 200; j++) {
+        if (text[j] === "`") {
+          end = j;
+          break;
+        }
+        if (text[j] === "\\" && j + 1 < text.length && text[j + 1] === "`") {
+          j++; // skip escaped backtick
+        }
+      }
+      if (end !== -1 && end > i + 1) {
+        // Extract content and process escape sequences inside it
+        const rawContent = text.slice(i + 1, end);
+        const content = processInlineEscapes(rawContent);
+        result.push({ type: "inline_code", content });
         i = end + 1;
         continue;
       }
@@ -959,7 +1021,7 @@ function parseInline(text: string): MdInline[] {
     }
 
     // Plain text — accumulate until next special char
-    const specialChars = "`![*~_";
+    const specialChars = "`![*~_\\";
     let nextSpecial = text.length;
     for (const ch of specialChars) {
       const idx = text.indexOf(ch, i);
@@ -971,6 +1033,10 @@ function parseInline(text: string): MdInline[] {
     if (nextSpecial > i) {
       result.push({ type: "text", content: text.slice(i, nextSpecial) });
       i = nextSpecial;
+    } else if (nextSpecial === i) {
+      // Special char here didn't match any formatting rule — emit it as text
+      result.push({ type: "text", content: text[i]! });
+      i++;
     } else {
       // No special char found ahead, take rest
       result.push({ type: "text", content: text.slice(i) });

@@ -297,9 +297,27 @@
       { "default": 1000 }
     ]
   },
+  "maxToolCallsPerIteration": {
+    "type": "number",
+    "cliFlag": {
+      "long": "--max-tool-calls",
+      "type": "number",
+      "description": "Maximum tool calls allowed per LLM turn"
+    },
+    "layers": [
+      { "source": "cli", "key": "maxToolCalls", "cast": "number" },
+      { "source": "config", "key": "maxToolCallsPerIteration", "cast": "number" },
+      { "default": 10 }
+    ]
+  },
   "maxRetries": {
+
     "type": "number",
     "layers": [{ "default": 12 }]
+  },
+  "toolRetryDelay": {
+    "type": "number",
+    "layers": [{ "default": 1 }]
   },
   "sandboxMode": {
     "type": "boolean",

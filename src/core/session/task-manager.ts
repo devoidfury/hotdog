@@ -5,6 +5,8 @@ import { LlmError } from "../error.ts";
 import { loadProfileFile } from "../config/profiles.ts";
 import { parseAs } from "../../utils/json-schema.ts";
 import { type CoreConfig } from "../config/schema-loader.ts";
+import { OUTPUT_EVENT } from "../context/output.ts";
+import type { AgentRunResult } from "../core/agent.ts";
 
 // ── Task Status ─────────────────────────────────────────────────────────────
 
@@ -49,7 +51,7 @@ export class TaskHandle {
 
 export interface TaskAgent {
   abortSignal: AbortSignal | null;
-  run(description: string): Promise<string | undefined>;
+  run(description: string): Promise<AgentRunResult | undefined>;
   notifyCompletion(result: string): void;
   addMessage(msg: Message): void;
   followQueue?: string[];
@@ -281,7 +283,15 @@ export class TaskManager {
       // Run with abort signal support
       agent.abortSignal = abortController.signal;
 
-      result = (await agent.run(description)) as string;
+      const runResult = await agent.run(description);
+
+      if (runResult?.type === 'completion') {
+        result = runResult.content;
+      } else if (runResult?.type === 'tool_return') {
+        result = `Task completed via tool return: ${runResult.outcome}`;
+      } else {
+        result = `Task provided no response`;
+      }
 
       if (statusRef.value === TASK_STATUS.RUNNING) {
         statusRef.value = TASK_STATUS.COMPLETED;

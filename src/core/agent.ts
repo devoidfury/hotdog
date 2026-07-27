@@ -32,6 +32,13 @@ export interface ModelRegistry {
 }
 
 /**
+ * Result of an agent run loop execution.
+ */
+export type AgentRunResult =
+  | { type: 'completion'; content: string }
+  | { type: 'tool_return'; outcome: string };
+
+/**
  * Typed model registry — maps model name to ModelConfig.
  */
 export type TypedModelRegistry = Record<string, ModelConfig>;
@@ -48,6 +55,7 @@ export interface OutputSink {
 export interface AgentConfig extends CoreConfig {
   cwdBoundary?: string | null;
   workspaceRoot?: string | null;
+  maxToolCallsPerIteration?: number;
   [key: string]: unknown;
 }
 
@@ -104,6 +112,7 @@ export class Agent {
   stream: boolean;
   cancelled: boolean;
   iterationCount: number;
+  maxToolCallsPerIteration: number;
   reasoningEffort: string | undefined;
   #isRestoring: boolean;
   abortSignal: AbortSignal | null;
@@ -143,6 +152,7 @@ export class Agent {
     this.stream = options.stream !== false;
     this.cancelled = false;
     this.iterationCount = 0;
+    this.maxToolCallsPerIteration = options.config?.maxToolCallsPerIteration ?? 10;
     this.reasoningEffort = undefined;
     this.#isRestoring = false;
     // Task agent support
@@ -170,6 +180,8 @@ export class Agent {
       toolWhitelist: options.toolWhitelist || null,
       cwdBoundary: options.config?.cwdBoundary || null,
       workspaceRoot: options.config?.workspaceRoot || null,
+      maxRetries: options.config?.maxRetries ?? 3,
+      toolRetryDelay: options.config?.toolRetryDelay ?? 1,
       isRestoring: () => this.#isRestoring,
       agent: this,
     });
@@ -283,9 +295,13 @@ export class Agent {
    * @param userInput — Text content of the user message
    * @param images — Optional images
    *   Each image: { type: "image_url", mimeType: "image/png", data: "<base64>" }
-   * @returns Final text response, or undefined if tool calls
+   * @returns Final run result, or undefined if input was empty.
    */
-  async run(userInput: string, images?: ImageAttachment[]): Promise<string | undefined> {
+  async run(userInput: string, images?: ImageAttachment[]): Promise<AgentRunResult | undefined> {
+    if (!userInput?.trim() && (!images || images.length === 0)) {
+      return undefined;
+    }
+
     let stoppedEmitted = false;
 
     try {
@@ -306,12 +322,12 @@ export class Agent {
 
         if (typeof result === "string") {
           stoppedEmitted = true;
-          return result;
+          return { type: 'completion', content: result };
         } else if (result && typeof result === "object" && "outcome" in result) {
           const { outcome } = result as { outcome: string };
           if (outcome !== "continue") {
             stoppedEmitted = true;
-            return outcome;
+            return { type: 'tool_return', outcome };
           }
         }
       }
@@ -403,10 +419,44 @@ export class Agent {
     this.addMessage(assistantMsg);
 
     if (response.finalToolCalls) {
-      const { outcome, toolResults } = await this._executeTools(response.finalToolCalls);
+      let toolCallsToExecute = response.finalToolCalls;
+      let skippedToolResults: any[] = [];
+
+      if (toolCallsToExecute.length > this.maxToolCallsPerIteration) {
+        const truncated = toolCallsToExecute.slice(0, this.maxToolCallsPerIteration);
+        const skipped = toolCallsToExecute.slice(this.maxToolCallsPerIteration);
+
+        toolCallsToExecute = truncated;
+        skippedToolResults = skipped.map((tc) => ({
+          toolName: tc.function?.name || "(unknown)",
+          input: tc.function?.arguments || "{}",
+          result: `Skipped due to maxToolCallsPerIteration limit (${this.maxToolCallsPerIteration})`,
+          toolCallId: tc.id,
+        }));
+      }
+
+      const { outcome, toolResults } = await this._executeTools(toolCallsToExecute);
+
+      // Add skipped tool results to the conversation log and emit them
+      for (const sr of skippedToolResults) {
+        this.addMessage(new Message({
+          role: "tool",
+          content: sr.result,
+          toolCallId: sr.toolCallId,
+        }));
+        this.emitOutput("tool_result", {
+          toolName: sr.toolName,
+          input: sr.input,
+          result: sr.result,
+          toolCallId: sr.toolCallId,
+        });
+      }
+
+      const finalResults = [...toolResults, ...skippedToolResults];
+
       this._emitTokenUsage(response);
-      this._emitTurnEnd(iteration, response.fullText, toolResults, outcome === "return");
-      return { outcome, toolResults };
+      this._emitTurnEnd(iteration, response.fullText, finalResults, outcome === "return");
+      return { outcome, toolResults: finalResults };
     } else {
       this._emitTokenUsage(response);
       this.hooks.notifyHooks(HOOKS.CONTEXT_MESSAGE, { message: assistantMsg, agent: this });

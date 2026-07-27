@@ -487,6 +487,7 @@ export interface CoreConfig {
   defaultModel?: string;
   maxIterations?: number;
   maxRetries?: number;
+  maxToolCallsPerIteration?: number;
   sandboxMode?: boolean;
   /** CLI override for max tool difficulty. Highest priority. */
   maxToolDifficulty?: number | null;

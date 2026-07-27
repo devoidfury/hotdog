@@ -14,6 +14,7 @@ export interface ToolResult {
   toolName: string;
   input: string;
   result: string;
+  toolCallId: string;
   /** When true, signals the agent run loop to stop after this batch of tools. */
   stopLoop?: boolean;
 }
@@ -26,6 +27,8 @@ export interface ToolExecutorDeps {
   toolWhitelist: string[] | null;
   cwdBoundary: string | null;
   workspaceRoot: string | null;
+  maxRetries: number;
+  toolRetryDelay: number;
   /** Dynamic getter — isRestoring can change at runtime. */
   isRestoring: () => boolean;
   /** Agent reference for hook payloads (not used for method calls). */
@@ -157,7 +160,7 @@ export class ToolExecutor {
     let result: unknown;
     let success: boolean;
     let stopLoop = false;
-    const maxRetries = 3;
+    const maxRetries = this.#deps.maxRetries;
     let attempts = 0;
 
     while (attempts < maxRetries) {
@@ -172,7 +175,9 @@ export class ToolExecutor {
         break;
       } catch (e: unknown) {
         if (e instanceof TransientError && attempts < maxRetries) {
-          logger.warn(`[tool:retry] ${toolName} failed (transient), retrying attempt ${attempts + 1}/${maxRetries}...`);
+          const delay = attempts * this.#deps.toolRetryDelay * 1000;
+          logger.warn(`[tool:retry] ${toolName} failed (transient), retrying attempt ${attempts + 1}/${maxRetries} after ${delay}ms...`);
+          await new Promise((resolve) => setTimeout(resolve, delay));
           continue;
         }
 
@@ -249,7 +254,7 @@ export class ToolExecutor {
     images?: ImageAttachment[],
     stopLoop = false,
   ): Promise<ToolResult> {
-    this.#deps.emitOutput("tool_result", { toolName, input, result });
+    this.#deps.emitOutput("tool_result", { toolName, input, result, toolCallId });
     const msg = new Message({
       role: "tool",
       content: result,
@@ -257,7 +262,7 @@ export class ToolExecutor {
       images: images as ImageAttachment[] | undefined,
     });
     this.#deps.addMessage(msg);
-    return { toolName, input, result, stopLoop };
+    return { toolName, input, result, toolCallId, stopLoop };
   }
 }
 

@@ -46,8 +46,10 @@ describe('Agent — end-to-end loop', () => {
 
     const result = await agent.run('Hi');
 
-    expect(result).toBe('Hello! I am an AI assistant.');
+    expect(result?.type).toBe('completion');
+    expect(result?.content).toBe('Hello! I am an AI assistant.');
     // Note: agent.log only contains user/assistant/tool messages,
+
     // NOT the system prompt. The system prompt is prepended at build time.
     expect(agent.log.length).toBe(2); // user + assistant
     expect(agent.log.at(0)!.role).toBe('user');
@@ -70,7 +72,8 @@ describe('Agent — end-to-end loop', () => {
 
     const result = await agent.run('Think step by step');
 
-    expect(result).toBe('Here is my answer.');
+    expect(result?.type).toBe('completion');
+    expect(result?.content).toBe('Here is my answer.');
     expect(agent.log.at(1)!.reasoningContent).toBe('I need to think about this carefully.');
   });
 
@@ -100,7 +103,8 @@ describe('Agent — end-to-end loop', () => {
 
     const result = await agent.run('What is 2+2?');
 
-    expect(result).toBe('The answer is 42.');
+    expect(result?.type).toBe('completion');
+    expect(result?.content).toBe('The answer is 42.');
     expect(tool.executeCount).toBe(1);
     expect(tool.lastInput).toBe('{"expr":"2+2"}');
     expect(mockLLM.callCount).toBe(2);
@@ -147,7 +151,8 @@ describe('Agent — end-to-end loop', () => {
 
     const result = await agent.run('Search and read');
 
-    expect(result).toBe('Both operations completed.');
+    expect(result?.type).toBe('completion');
+    expect(result?.content).toBe('Both operations completed.');
     expect(readTool.executeCount).toBe(1);
     expect(grepTool.executeCount).toBe(1);
     expect(mockLLM.callCount).toBe(2);
@@ -192,7 +197,8 @@ describe('Agent — end-to-end loop', () => {
 
     const result = await agent.run('Greet someone');
 
-    expect(result).toBe('The validation failed as expected.');
+    expect(result?.type).toBe('completion');
+    expect(result?.content).toBe('The validation failed as expected.');
     expect(tool.executeCount).toBe(0); // tool was NOT executed
     expect(mockLLM.callCount).toBe(2);
 
@@ -224,7 +230,8 @@ describe('Agent — end-to-end loop', () => {
 
     const result = await agent.run('Use a tool');
 
-    expect(result).toBe('The tool was not found.');
+    expect(result?.type).toBe('completion');
+    expect(result?.content).toBe('The tool was not found.');
     expect(mockLLM.callCount).toBe(2);
 
     // Context after full run:
@@ -258,7 +265,8 @@ describe('Agent — end-to-end loop', () => {
 
     const result = await agent.run('Use the tool');
 
-    expect(result).toBe('The tool reported an error.');
+    expect(result?.type).toBe('completion');
+    expect(result?.content).toBe('The tool reported an error.');
     expect(tool.executeCount).toBe(1);
 
     // Context after full run:
@@ -293,7 +301,8 @@ describe('Agent — end-to-end loop', () => {
     // Should return early without a second LLM call
     const result = await agent.run('Do work then wait');
 
-    expect(result).toBe('return'); // outcome from _executeTools
+    expect(result?.type).toBe('tool_return');
+    expect(result?.outcome).toBe('return');
     expect(mockLLM.callCount).toBe(1); // only one LLM call
     expect(waitTool.executeCount).toBe(1);
   });
@@ -330,7 +339,7 @@ describe('Agent — end-to-end loop', () => {
 
     const result = await agent.run('Use tools');
 
-    expect(result).toBe('One tool was blocked.');
+    expect(result?.content).toBe('One tool was blocked.');
     expect(allowedTool.executeCount).toBe(1);
     expect(blockedTool.executeCount).toBe(0);
 
@@ -540,7 +549,7 @@ describe('Agent — end-to-end loop', () => {
 
     const result = await agent.run('Access sensitive data');
 
-    expect(result).toBe('Tool blocked by gate.');
+    expect(result?.content).toBe('Tool blocked by gate.');
     expect(tool.executeCount).toBe(0); // tool was NOT executed
 
     // Context after full run:
@@ -577,7 +586,7 @@ describe('Agent — end-to-end loop', () => {
 
     const result = await agent.run('Modify result');
 
-    expect(result).toBe('Modified result received.');
+    expect(result?.content).toBe('Modified result received.');
     expect(tool.executeCount).toBe(1);
 
     // Context after full run:
@@ -657,7 +666,7 @@ describe('Agent — end-to-end loop', () => {
 
     const result = await agent.run('Do work');
 
-    expect(result).toBe('Follow-up processed.');
+    expect(result?.content).toBe('Follow-up processed.');
     expect(mockLLM.callCount).toBe(2);
 
     // Context should contain the follow-up user message
@@ -1015,25 +1024,9 @@ describe('Agent — end-to-end loop', () => {
       const { agent, toolRegistry } = createFixture({ mockLLM });
       toolRegistry.register('bad-tool', tool);
       const result = await agent.run('do something');
-      expect(typeof result).toBe('string');
+      expect(result?.type).toBe('completion');
     });
 
-    it('should return outcome "return" for wait tool', async () => {
-      const waitTool = simpleTool('wait', 'waiting');
-      const mockLLM = new MockLLMClient({
-        responseSequences: [
-          buildStreamResponse({
-            content: 'Waiting...',
-            toolCalls: [{ index: 0, name: 'wait', arguments: '{}', id: 'call_wait' }],
-            usage: { prompt_tokens: 10, completion_tokens: 20, total_tokens: 30 },
-          }),
-        ],
-      });
-      const { agent, toolRegistry } = createFixture({ mockLLM });
-      toolRegistry.register('wait', waitTool);
-      const result = await agent.run('wait');
-      expect(typeof result).toBe('string');
-    });
   });
 
   describe('_executeSingleToolCall empty tool name', () => {
@@ -1053,7 +1046,7 @@ describe('Agent — end-to-end loop', () => {
       });
       const { agent } = createFixture({ mockLLM });
       const result = await agent.run('test');
-      expect(result).toBe('Error handled');
+      expect(result?.content).toBe('Error handled');
       const msgs = agent.log.getAll();
       expect(msgs.some(m => m.role === 'tool' && (m.content as string).includes('missing a valid name'))).toBe(true);
     });
@@ -1074,7 +1067,7 @@ describe('Agent — end-to-end loop', () => {
       });
       const { agent } = createFixture({ mockLLM });
       const result = await agent.run('test');
-      expect(result).toBe('Error handled');
+      expect(result?.content).toBe('Error handled');
       const msgs = agent.log.getAll();
       expect(msgs.some(m => m.role === 'tool' && (m.content as string).includes('missing a valid name'))).toBe(true);
     });
@@ -1095,7 +1088,7 @@ describe('Agent — end-to-end loop', () => {
       });
       const { agent } = createFixture({ mockLLM });
       const result = await agent.run('test');
-      expect(result).toBe('Error handled');
+      expect(result?.content).toBe('Error handled');
       const msgs = agent.log.getAll();
       expect(msgs.some(m => m.role === 'tool' && (m.content as string).includes('missing a valid name'))).toBe(true);
     });
@@ -1150,7 +1143,7 @@ describe('Agent — end-to-end loop', () => {
       });
       const { agent } = createFixture({ mockLLM, stream: true });
       const result = await agent.run('test');
-      expect(result).toBe('Hello');
+      expect(result?.content).toBe('Hello');
     });
 
     it('should handle stop finish reason', async () => {
@@ -1163,7 +1156,7 @@ describe('Agent — end-to-end loop', () => {
       });
       const { agent } = createFixture({ mockLLM, stream: true });
       const result = await agent.run('test');
-      expect(result).toBe('Hi');
+      expect(result?.content).toBe('Hi');
     });
   });
 

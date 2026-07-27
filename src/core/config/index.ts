@@ -298,16 +298,8 @@ export function validateConfig(
     const value = configAny[keyName];
     if (value === undefined || value === null) continue;
 
-    const expectedType = schemaKey.type;
-    if (expectedType === "string" && typeof value !== "string") {
-      errors.push(`${keyName}: expected string, got ${typeof value}`);
-    } else if (expectedType === "number" && typeof value !== "number") {
-      errors.push(`${keyName}: expected number, got ${typeof value}`);
-    } else if (expectedType === "boolean" && typeof value !== "boolean") {
-      errors.push(`${keyName}: expected boolean, got ${typeof value}`);
-    } else if (expectedType === "array" && !Array.isArray(value)) {
-      errors.push(`${keyName}: expected array, got ${typeof value}`);
-    }
+    const schemaErrors = validateSchema(value, schemaKey, keyName);
+    errors.push(...schemaErrors);
   }
 
   if (extensionSchemas) {

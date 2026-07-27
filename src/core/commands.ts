@@ -72,7 +72,7 @@ export function parseCommand(
 ): TypedParsedCommand {
   if (!cmd) return { type: Command.Unknown, value: null };
 
-  const cmdLower = cmd.toLowerCase();
+  const cmdLower = cmd;
 
   // Check custom commands first (via registry)
   if (registry) {

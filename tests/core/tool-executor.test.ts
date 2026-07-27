@@ -46,6 +46,8 @@ function createMockDeps(overrides: Partial<ToolExecutorDeps> = {}): ToolExecutor
     toolWhitelist: null,
     cwdBoundary: '/workspace',
     workspaceRoot: '/workspace',
+    maxRetries: 3,
+    toolRetryDelay: 100,
     isRestoring: () => false,
     agent: { sessionId: 'test' } as unknown as import('../../src/core/agent.ts').Agent,
     ...overrides,

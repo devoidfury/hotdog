@@ -106,31 +106,3 @@ describe("logger", () => {
   });
 });
 
-describe("initializeLogger", () => {
-  // Note: initializeLogger is a singleton that persists across test runs.
-  // These tests verify behavior assuming the logger may or may not already
-  // be initialized by other tests.
-  it("does not throw when called", () => {
-    const hooks = new HookSystem();
-    expect(() =>
-      initializeLogger({ hooks, minLevel: "debug", target: "none" }),
-    ).not.toThrow();
-  });
-
-  it("does not reinitialize when called twice", () => {
-    const hooks1 = new HookSystem();
-    const hooks2 = new HookSystem();
-    initializeLogger({ hooks: hooks1, minLevel: "debug", target: "none" });
-    initializeLogger({ hooks: hooks2, minLevel: "debug", target: "none" });
-    // If the logger was not yet initialized, hooks1 gets the handler.
-    // If it was already initialized, neither gets a new handler.
-    // In either case, initializeLogger does not throw.
-  });
-
-  it("accepts target 'none' without throwing", () => {
-    const hooks = new HookSystem();
-    expect(() =>
-      initializeLogger({ hooks, minLevel: "debug", target: "none" }),
-    ).not.toThrow();
-  });
-});

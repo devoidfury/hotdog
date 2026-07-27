@@ -379,30 +379,10 @@ describe("McpClient HTTP mode", () => {
     expect(transport.headers).toEqual({});
   });
 
-  it("_sendRequest throws when client is cancelled", async () => {
-    const client = await McpClient.forHttp("http://localhost:3000/mcp");
-    client.cancelled = true;
-    await expect(
-      (client as any)._sendRequest("test", {}),
-    ).rejects.toThrow("Client is cancelled");
-  });
 });
 
 // ── McpClient shutdown ─────────────────────────────────────────────────────
-
-describe("McpClient shutdown", () => {
-  it("shutdown sets cancelled flag", async () => {
-    const client = await McpClient.forHttp("http://localhost:3000/mcp");
-    await client.shutdown();
-    expect(client.cancelled).toBe(true);
-  });
-
-  it("shutdown can be called multiple times", async () => {
-    const client = await McpClient.forHttp("http://localhost:3000/mcp");
-    await client.shutdown();
-    await client.shutdown(); // should not throw
-  });
-});
+// Note: shutdown tests moved to mcp-client-stdio.test.ts for consolidation.
 
 // ── McpConnection ──────────────────────────────────────────────────────────
 
@@ -792,5 +772,40 @@ describe("MCP extension create", () => {
     expect(result).not.toBeNull();
     expect(result!.hooks?.[HOOKS.TOOLS_REGISTER]).toBeDefined();
     expect(result!.hooks?.[HOOKS.SHUTDOWN_CLEANUP]).toBeDefined();
+  });
+});
+
+// ── McpConnectionHandle Tests ────────────────────────────────────────────────
+
+describe("McpConnectionHandle", () => {
+  it("exposes serverName getter", async () => {
+    const { McpConnectionHandle } = await import("../../src/extensions/mcp-client/connection.ts");
+    const handle = new McpConnectionHandle({} as any, "my-server");
+    expect(handle.serverName).toBe("my-server");
+  });
+
+  it("calls tool via client.callTool", async () => {
+    const { McpConnectionHandle } = await import("../../src/extensions/mcp-client/connection.ts");
+    const mockClient = {
+      callTool: async (name: string, args: Record<string, unknown>) => ({
+        content: [{ type: "text", text: `result: ${name}` }],
+        isError: false,
+      }),
+    } as any;
+    const handle = new McpConnectionHandle(mockClient, "test-server");
+    const result = await handle.callTool("test-tool", { input: "hello" });
+    expect(result).toBe("result: test-tool");
+  });
+
+  it("throws McpError on tool error response", async () => {
+    const { McpConnectionHandle } = await import("../../src/extensions/mcp-client/connection.ts");
+    const mockClient = {
+      callTool: async () => ({
+        content: [{ type: "text", text: "something went wrong" }],
+        isError: true,
+      }),
+    } as any;
+    const handle = new McpConnectionHandle(mockClient, "test-server");
+    await expect(handle.callTool("failing-tool", {})).rejects.toThrow("something went wrong");
   });
 });

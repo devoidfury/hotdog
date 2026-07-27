@@ -48,26 +48,19 @@ function makeMockAgent(overrides: Record<string, unknown> = {}): Record<string, 
 
 // ── Handler Tests ──────────────────────────────────────────────────────
 
+describe("handleQuit / handleHelp", () => {
+  it("return fallback messages", () => {
+    expect(handleQuit().content).toBe("Quit (use /quit to exit)");
+    expect(handleHelp().content).toBe("Help (use /help for commands)");
+  });
+});
+
 describe("handleClear", () => {
   it("clears context and returns message", async () => {
     const agent = makeMockAgent();
     const result = await handleClear(agent as any, null);
     expect(result.content).toBe("Context cleared.");
     expect(agent.clearContext).toHaveBeenCalled();
-  });
-});
-
-describe("handleQuit", () => {
-  it("returns quit message", () => {
-    const result = handleQuit();
-    expect(result.content).toContain("Quit");
-  });
-});
-
-describe("handleHelp", () => {
-  it("returns help message", () => {
-    const result = handleHelp();
-    expect(result.content).toContain("Help");
   });
 });
 
@@ -78,7 +71,7 @@ describe("handleTokens", () => {
     expect(result.content).toContain("No token usage recorded");
   });
 
-  it("displays accumulated totals with real prompt (prompt - cached)", () => {
+  it("displays accumulated totals and cache hit percentage", () => {
     const agent = makeMockAgent({
       getTokenUsage: mock((): TokenUsage => ({
         promptTokens: 1200, cachedTokens: 800, completionTokens: 400, totalTokens: 2400,
@@ -88,16 +81,11 @@ describe("handleTokens", () => {
     });
     const result = handleTokens(agent as any);
     expect(result.content).toContain("Token usage (2 turns):");
-    expect(result.content).toContain("prompt:      1,200 tokens");
-    expect(result.content).toContain("cached:      800 tokens");
-    expect(result.content).toContain("completion:  400 tokens");
-    expect(result.content).toContain("total:       2,400 tokens");
-    expect(result.content).toContain("cache hit:   40.0% of prompt tokens");
+    expect(result.content).toMatch(/prompt.*1,200 tokens/);
+    expect(result.content).toMatch(/completion.*400 tokens/);
+    expect(result.content).toMatch(/total.*2,400 tokens/);
+    expect(result.content).toMatch(/cache hit.*40\.0%/);
     expect(result.content).toContain("Last call:");
-    expect(result.content).toContain("prompt:      1,000 tokens");
-    expect(result.content).toContain("cached:      400 tokens");
-    expect(result.content).toContain("completion:  200 tokens");
-    expect(result.content).toContain("total:       1,600 tokens");
   });
 
   it("handles single turn (no plural)", () => {

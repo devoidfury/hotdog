@@ -44,16 +44,17 @@ function createMockAgent() {
 
 // ── disabledSessionLog ──────────────────────────────────────────────────────
 
-test("disabledSessionLog is a no-op", () => {
-  const log = disabledSessionLog() as Record<string, (...args: unknown[]) => void>;
-  expect(() => log.append!({})).not.toThrow();
-  expect(() => log.writeSystemPrompt!("x")).not.toThrow();
-  expect(() => log.writeInput!("x")).not.toThrow();
-  expect(() => log.writeAssistant!("x")).not.toThrow();
-  expect(() => log.writeToolResult!("x", "tc1", "bash")).not.toThrow();
-  expect(() => log.writeReset!()).not.toThrow();
-  expect(() => log.writeCompaction!(5, "summary")).not.toThrow();
-  expect(() => log.writePrompt!("x")).not.toThrow();
+test("disabledSessionLog returns no-op log with correct return values", async () => {
+  const log = disabledSessionLog() as Record<string, (...args: unknown[]) => Promise<unknown>>;
+  // All write methods are no-ops that resolve without error
+  await expect(log.append({})).resolves.toBeUndefined();
+  await expect(log.writeSystemPrompt("x")).resolves.toBeUndefined();
+  await expect(log.writeInput("x")).resolves.toBeUndefined();
+  await expect(log.writeAssistant("x")).resolves.toBeUndefined();
+  await expect(log.writeToolResult("x", "tc1", "bash")).resolves.toBeUndefined();
+  await expect(log.writeReset()).resolves.toBeUndefined();
+  await expect(log.writeCompaction(5, "summary")).resolves.toBeUndefined();
+  await expect(log.writePrompt("x")).resolves.toBeUndefined();
 });
 
 // ── SessionLog serialization ───────────────────────────────────────────────
@@ -511,4 +512,167 @@ test("replayed message getTextContent returns text without images", () => {
 
   replayEntriesIntoContext(agent, entries);
   expect(agent.log.at(0)!.getTextContent()).toBe("What is this?");
+});
+
+// ── listSessionLogs ─────────────────────────────────────────────────────────
+
+test("listSessionLogs returns sessions sorted by last activity", async () => {
+  const { listSessionLogs } = await import("../../src/core/session/session-log.ts");
+  const dir = join(homedir(), ".cache", "hotdog", "sessions");
+  mkdirSync(dir, { recursive: true });
+
+  const testId1 = "test-list-1";
+  const testId2 = "test-list-2";
+
+  try {
+    // Create session 1 with older timestamp
+    const file1 = join(dir, `${testId1}.jsonl`);
+    writeFileSync(
+      file1,
+      '{"ts":"2024-01-01T00:00:00Z","source":"input","content":"old session"}\n',
+    );
+
+    // Create session 2 with newer timestamp
+    const file2 = join(dir, `${testId2}.jsonl`);
+    writeFileSync(
+      file2,
+      '{"ts":"2024-01-02T00:00:00Z","source":"input","content":"new session"}\n',
+    );
+
+    const sessions = await listSessionLogs();
+    expect(sessions.length).toBeGreaterThanOrEqual(2);
+
+    // Find our test sessions
+    const s1 = sessions.find((s) => s.id === testId1);
+    const s2 = sessions.find((s) => s.id === testId2);
+    expect(s1).toBeDefined();
+    expect(s2).toBeDefined();
+    expect(s2!.lastActivityAt).toBeGreaterThan(s1!.lastActivityAt);
+
+    rmSync(file1);
+    rmSync(file2);
+  } finally {
+    try { rmSync(join(dir, `${testId1}.jsonl`)); } catch {}
+    try { rmSync(join(dir, `${testId2}.jsonl`)); } catch {}
+  }
+});
+
+test("listSessionLogs excludes sessions with only system/reset entries", async () => {
+  const { listSessionLogs } = await import("../../src/core/session/session-log.ts");
+  const dir = join(homedir(), ".cache", "hotdog", "sessions");
+  mkdirSync(dir, { recursive: true });
+
+  const testId = "test-list-system-only";
+  const file = join(dir, `${testId}.jsonl`);
+
+  try {
+    writeFileSync(
+      file,
+      [
+        '{"ts":"2024-01-01T00:00:00Z","source":"system_prompt","content":"system"}',
+        '{"ts":"2024-01-01T00:00:01Z","source":"reset","content":""}',
+      ].join("\n"),
+    );
+
+    const sessions = await listSessionLogs();
+    expect(sessions.find((s) => s.id === testId)).toBeUndefined();
+
+    rmSync(file);
+  } finally {
+    try { rmSync(file); } catch {}
+  }
+});
+
+test("listSessionLogs returns empty when no sessions directory", async () => {
+  const { listSessionLogs } = await import("../../src/core/session/session-log.ts");
+  // This test assumes no sessions directory exists or is empty
+  // The function should return empty array gracefully
+  const sessions = await listSessionLogs();
+  expect(Array.isArray(sessions)).toBe(true);
+});
+
+test("listSessionLogs includes message count", async () => {
+  const { listSessionLogs } = await import("../../src/core/session/session-log.ts");
+  const dir = join(homedir(), ".cache", "hotdog", "sessions");
+  mkdirSync(dir, { recursive: true });
+
+  const testId = "test-list-count";
+  const file = join(dir, `${testId}.jsonl`);
+
+  try {
+    writeFileSync(
+      file,
+      [
+        '{"ts":"2024-01-01T00:00:00Z","source":"input","content":"msg1"}',
+        '{"ts":"2024-01-01T00:00:01Z","source":"llm","content":"resp1"}',
+        '{"ts":"2024-01-01T00:00:02Z","source":"input","content":"msg2"}',
+      ].join("\n"),
+    );
+
+    const sessions = await listSessionLogs();
+    const session = sessions.find((s) => s.id === testId);
+    expect(session).toBeDefined();
+    expect(session!.messageCount).toBe(3);
+
+    rmSync(file);
+  } finally {
+    try { rmSync(file); } catch {}
+  }
+});
+
+// ── deleteSessionLog ───────────────────────────────────────────────────────
+
+test("deleteSessionLog deletes existing session", async () => {
+  const { deleteSessionLog, sessionExists } = await import("../../src/core/session/session-log.ts");
+  setupTestDir();
+
+  try {
+    const log = new SessionLog(TEST_SESSION_ID);
+    await log.writeInput("test");
+    expect(await sessionExists(TEST_SESSION_ID)).toBe(true);
+
+    const deleted = await deleteSessionLog(TEST_SESSION_ID);
+    expect(deleted).toBe(true);
+    expect(await sessionExists(TEST_SESSION_ID)).toBe(false);
+  } finally {
+    teardown();
+  }
+});
+
+test("deleteSessionLog returns false for non-existent session", async () => {
+  const { deleteSessionLog } = await import("../../src/core/session/session-log.ts");
+  const deleted = await deleteSessionLog("non-existent-session-xyz");
+  expect(deleted).toBe(false);
+});
+
+// ── readAllSessions malformed JSON handling ────────────────────────────────
+
+test("readAllSessions handles malformed JSON lines", async () => {
+  const dir = join(homedir(), ".cache", "hotdog", "sessions");
+  mkdirSync(dir, { recursive: true });
+
+  const testId = "test-readall-malformed";
+  const file = join(dir, `${testId}.jsonl`);
+
+  try {
+    writeFileSync(
+      file,
+      [
+        `{"ts":"2024-01-01T00:00:00Z","session_id":"${testId}","source":"input","content":"valid"}`,
+        "this is not json",
+        `{"ts":"2024-01-01T00:00:01Z","session_id":"${testId}","source":"input","content":"also valid"}`,
+      ].join("\n"),
+    );
+
+    const allEntries = await readAllSessions();
+    // Should have at least our 2 valid entries (malformed line is skipped)
+    const sessionEntries = allEntries.filter((e) => e.session_id === testId);
+    expect(sessionEntries.length).toBe(2);
+    expect(sessionEntries[0]!.content).toBe("valid");
+    expect(sessionEntries[1]!.content).toBe("also valid");
+
+    rmSync(file);
+  } finally {
+    try { rmSync(file); } catch {}
+  }
 });

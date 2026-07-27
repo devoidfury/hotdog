@@ -194,23 +194,6 @@ describe("OneShotChannel - subscribe/unsubscribe", () => {
   });
 });
 
-describe("OneShotChannel - cleanup", () => {
-  it("does nothing on cleanup (no resources to release)", () => {
-    const sm = createMockSessionManager();
-    const sink = createMockSink();
-
-    const channel = new OneShotChannel({
-      sessionManager: sm,
-      sessionId: "session-1",
-      sink,
-    });
-
-    // Should not throw
-    channel.close();
-    expect(true).toBe(true);
-  });
-});
-
 describe("OneShotChannel - getters", () => {
   it("exposes collected events", () => {
     const sm = createMockSessionManager({

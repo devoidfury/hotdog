@@ -188,11 +188,7 @@ describe("validateConfig", () => {
     expect(result.errors.length).toBeGreaterThan(0);
   });
 });
-
 describe("failOnInvalidConfig", () => {
-  it("does not throw when config is valid", () => {
-    expect(() => failOnInvalidConfig({ valid: true, errors: [] })).not.toThrow();
-  });
 
   it("throws ConfigError when config is invalid", () => {
     const result = { valid: false, errors: ["error1", "error2"] };

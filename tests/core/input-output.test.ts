@@ -39,9 +39,18 @@ describe("OutputSink", () => {
       expect(callCount).toBe(1);
     });
 
-    it("ignores unknown event types", () => {
-      const sink = new OutputSink();
-      expect(() => sink.emit({ type: 999 as any })).not.toThrow();
+    it("silently ignores unknown event types", () => {
+      let stdoutWritten = false;
+      const origWrite = process.stdout.write;
+      process.stdout.write = () => { stdoutWritten = true; return true; };
+
+      try {
+        const sink = new OutputSink();
+        sink.emit({ type: 999 as any });
+        expect(stdoutWritten).toBe(false);
+      } finally {
+        process.stdout.write = origWrite;
+      }
     });
   });
 
@@ -135,27 +144,49 @@ describe("OutputSink", () => {
   });
 
   describe("no-op handlers", () => {
-    it("user message, tool call, tool result, compacting, question, task progress, token usage, and reset are no-ops", () => {
-      const sink = new OutputSink();
-      // All these handlers should be no-ops that don't throw
-      expect(() => sink.emitUserMessage({ type: OUTPUT_EVENT.USER_MESSAGE, content: "test" })).not.toThrow();
-      expect(() => sink.emitToolCall({ type: OUTPUT_EVENT.TOOL_CALL, toolName: "bash", input: "", toolCallId: "1" })).not.toThrow();
-      expect(() => sink.emitToolResult({ type: OUTPUT_EVENT.TOOL_RESULT, toolName: "bash", input: "", result: "done", toolCallId: "1" })).not.toThrow();
-      expect(() => sink.emitCompacting({ type: OUTPUT_EVENT.COMPACTING } as any)).not.toThrow();
-      expect(() => sink.emitQuestion({ type: OUTPUT_EVENT.QUESTION, questions: [] })).not.toThrow();
-      expect(() => sink.emitTaskProgress({ type: OUTPUT_EVENT.TASK_PROGRESS } as any)).not.toThrow();
-      expect(() => sink.emitTokenUsage({ type: OUTPUT_EVENT.TOKEN_USAGE } as any)).not.toThrow();
-      expect(() => sink.reset()).not.toThrow();
+    it("does not write to stdout for user message, tool call, tool result, compacting, question, task progress, token usage", () => {
+      let stdoutWritten = false;
+      const origWrite = process.stdout.write;
+      process.stdout.write = () => { stdoutWritten = true; return true; };
+
+      try {
+        const sink = new OutputSink();
+        sink.emitUserMessage({ type: OUTPUT_EVENT.USER_MESSAGE, content: "test" });
+        sink.emitToolCall({ type: OUTPUT_EVENT.TOOL_CALL, toolName: "bash", input: "", toolCallId: "1" });
+        sink.emitToolResult({ type: OUTPUT_EVENT.TOOL_RESULT, toolName: "bash", input: "", result: "done", toolCallId: "1" });
+        sink.emitCompacting({ type: OUTPUT_EVENT.COMPACTING });
+        sink.emitQuestion({ type: OUTPUT_EVENT.QUESTION, questions: [] });
+        sink.emitTaskProgress({ type: OUTPUT_EVENT.TASK_PROGRESS, taskId: "1", status: "running" });
+        sink.emitTokenUsage({ type: OUTPUT_EVENT.TOKEN_USAGE, promptTokens: 0, cachedTokens: 0, completionTokens: 0, totalTokens: 0, turns: 0, lastPromptTokens: 0, lastCachedTokens: 0, lastCompletionTokens: 0, lastTotalTokens: 0 });
+        sink.reset();
+        expect(stdoutWritten).toBe(false);
+      } finally {
+        process.stdout.write = origWrite;
+      }
     });
   });
 });
 
 describe("NoopSink", () => {
-  it("emit is a no-op for any input", () => {
-    const sink = new NoopSink();
-    expect(() => sink.emit({ type: 1, content: "test" })).not.toThrow();
-    expect(() => sink.emit({ type: OUTPUT_EVENT.USER_MESSAGE, content: "" } as any)).not.toThrow();
-    expect(() => sink.emit(undefined as any)).not.toThrow();
+  it("emit never writes output", () => {
+    let stdoutWritten = false;
+    let stderrWritten = false;
+    const origStdout = process.stdout.write;
+    const origStderr = process.stderr.write;
+    process.stdout.write = () => { stdoutWritten = true; return true; };
+    process.stderr.write = () => { stderrWritten = true; return true; };
+
+    try {
+      const sink = new NoopSink();
+      sink.emit({ type: OUTPUT_EVENT.ASSISTANT_MESSAGE, content: "test" });
+      sink.emit({ type: OUTPUT_EVENT.THINKING, content: "thinking" });
+      sink.emit({ type: OUTPUT_EVENT.COMMAND_RESULT, content: "result" });
+      expect(stdoutWritten).toBe(false);
+      expect(stderrWritten).toBe(false);
+    } finally {
+      process.stdout.write = origStdout;
+      process.stderr.write = origStderr;
+    }
   });
 });
 

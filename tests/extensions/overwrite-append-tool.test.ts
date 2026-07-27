@@ -19,15 +19,11 @@ afterAll(() => {
 // ── OverwriteTool: Tool Definition ──────────────────────────────────────────
 
 describe('OverwriteTool.toToolDef', () => {
-  it('returns a simple tool definition', () => {
+  it('returns a tool definition with correct name and description', () => {
     const def = new OverwriteTool().toToolDef();
     expect(def.type).toBe('function');
     expect(def.function.name).toBe('overwrite');
     expect(def.function.description).toContain('replacing all existing content');
-  });
-
-  it('requires only path and content', () => {
-    const def = new OverwriteTool().toToolDef();
     expect(def.function.parameters.required).toEqual(['path', 'content']);
   });
 });
@@ -48,10 +44,6 @@ describe('OverwriteTool.callDisplay', () => {
     expect(tool.callDisplay('not json')).toBe('not json');
     expect(tool.callDisplay({})).toBe('');
     expect(tool.callDisplay(null)).toBe('');
-  });
-
-  it('handles empty content', () => {
-    expect(tool.callDisplay({ path: 'foo.txt', content: '' })).toContain('overwrite');
   });
 });
 
@@ -102,60 +94,17 @@ describe('OverwriteTool.execute', () => {
     expect(parsed.filesize_after).toBe(5);
   });
 
-  it('handles multi-line content', async () => {
+  it('handles multi-line and empty content', async () => {
     const tool = new OverwriteTool();
+
+    // Multi-line
     const content = 'line1\nline2\nline3';
-    await tool.execute(
-      { path: 'multi.txt', content },
-      toolCtx({ workspaceRoot: dir })
-    );
+    await tool.execute({ path: 'multi.txt', content }, toolCtx({ workspaceRoot: dir }));
     expect(fsSync.readFileSync(path.join(dir, 'multi.txt'), 'utf-8')).toBe(content);
-  });
 
-  it('handles empty content', async () => {
-    const tool = new OverwriteTool();
-    await tool.execute(
-      { path: 'empty.txt', content: '' },
-      toolCtx({ workspaceRoot: dir })
-    );
+    // Empty
+    await tool.execute({ path: 'empty.txt', content: '' }, toolCtx({ workspaceRoot: dir }));
     expect(fsSync.readFileSync(path.join(dir, 'empty.txt'), 'utf-8')).toBe('');
-  });
-});
-
-// ── OverwriteTool: error cases ──────────────────────────────────────────────
-
-describe('OverwriteTool.execute — error cases', () => {
-  it('returns error on invalid JSON input', async () => {
-    const tool = new OverwriteTool();
-    const result = await tool.execute('not json', toolCtx({ workspaceRoot: dir }));
-    expect(resultStr(result)).toContain('Error parsing arguments');
-  });
-
-  it('returns error on missing path', async () => {
-    const tool = new OverwriteTool();
-    const result = await tool.execute(
-      { content: 'hello' },
-      toolCtx({ workspaceRoot: dir })
-    );
-    expect(resultStr(result)).toContain('Error parsing arguments');
-  });
-
-  it('returns error on missing content', async () => {
-    const tool = new OverwriteTool();
-    const result = await tool.execute(
-      { path: 'file.txt' },
-      toolCtx({ workspaceRoot: dir })
-    );
-    expect(resultStr(result)).toContain('Error parsing arguments');
-  });
-
-  it('rejects path outside cwd boundary', async () => {
-    const tool = new OverwriteTool();
-    const result = await tool.execute(
-      { path: '/etc/evil.txt', content: 'hack' },
-      toolCtx({ cwdBoundary: dir })
-    );
-    expect(resultStr(result)).toContain('outside cwd boundary');
   });
 
   it('handles input as string JSON', async () => {
@@ -168,18 +117,41 @@ describe('OverwriteTool.execute — error cases', () => {
   });
 });
 
+// ── OverwriteTool: error cases ──────────────────────────────────────────────
+
+describe('OverwriteTool.execute — error cases', () => {
+  it('returns error on invalid JSON input', async () => {
+    const tool = new OverwriteTool();
+    const result = await tool.execute('not json', toolCtx({ workspaceRoot: dir }));
+    expect(resultStr(result)).toContain('Error parsing arguments');
+  });
+
+  it('returns error on missing required fields', async () => {
+    const tool = new OverwriteTool();
+    const result1 = await tool.execute({ content: 'hello' }, toolCtx({ workspaceRoot: dir }));
+    const result2 = await tool.execute({ path: 'file.txt' }, toolCtx({ workspaceRoot: dir }));
+    expect(resultStr(result1)).toContain('Error parsing arguments');
+    expect(resultStr(result2)).toContain('Error parsing arguments');
+  });
+
+  it('rejects path outside cwd boundary', async () => {
+    const tool = new OverwriteTool();
+    const result = await tool.execute(
+      { path: '/etc/evil.txt', content: 'hack' },
+      toolCtx({ cwdBoundary: dir })
+    );
+    expect(resultStr(result)).toContain('outside cwd boundary');
+  });
+});
+
 // ── AppendTool: Tool Definition ─────────────────────────────────────────────
 
 describe('AppendTool.toToolDef', () => {
-  it('returns a simple tool definition', () => {
+  it('returns a tool definition with correct name and description', () => {
     const def = new AppendTool().toToolDef();
     expect(def.type).toBe('function');
     expect(def.function.name).toBe('append');
     expect(def.function.description).toContain('Appends content');
-  });
-
-  it('requires only path and content', () => {
-    const def = new AppendTool().toToolDef();
     expect(def.function.parameters.required).toEqual(['path', 'content']);
   });
 });
@@ -261,7 +233,7 @@ describe('AppendTool.execute', () => {
     expect(parsed.bytes_appended).toBe(5);
   });
 
-  it('handles empty content', async () => {
+  it('handles empty content without modifying file', async () => {
     const filePath = path.join(dir, 'append-empty.txt');
     fsSync.writeFileSync(filePath, 'existing');
 
@@ -271,6 +243,15 @@ describe('AppendTool.execute', () => {
       toolCtx({ workspaceRoot: dir })
     );
     expect(fsSync.readFileSync(filePath, 'utf-8')).toBe('existing');
+  });
+
+  it('handles input as string JSON', async () => {
+    const tool = new AppendTool();
+    await tool.execute(
+      '{"path":"append-string.txt","content":"from json"}',
+      toolCtx({ workspaceRoot: dir })
+    );
+    expect(fsSync.readFileSync(path.join(dir, 'append-string.txt'), 'utf-8')).toBe('from json');
   });
 });
 
@@ -283,22 +264,12 @@ describe('AppendTool.execute — error cases', () => {
     expect(resultStr(result)).toContain('Error parsing arguments');
   });
 
-  it('returns error on missing path', async () => {
+  it('returns error on missing required fields', async () => {
     const tool = new AppendTool();
-    const result = await tool.execute(
-      { content: 'hello' },
-      toolCtx({ workspaceRoot: dir })
-    );
-    expect(resultStr(result)).toContain('Error parsing arguments');
-  });
-
-  it('returns error on missing content', async () => {
-    const tool = new AppendTool();
-    const result = await tool.execute(
-      { path: 'file.txt' },
-      toolCtx({ workspaceRoot: dir })
-    );
-    expect(resultStr(result)).toContain('Error parsing arguments');
+    const result1 = await tool.execute({ content: 'hello' }, toolCtx({ workspaceRoot: dir }));
+    const result2 = await tool.execute({ path: 'file.txt' }, toolCtx({ workspaceRoot: dir }));
+    expect(resultStr(result1)).toContain('Error parsing arguments');
+    expect(resultStr(result2)).toContain('Error parsing arguments');
   });
 
   it('rejects path outside cwd boundary', async () => {
@@ -308,14 +279,5 @@ describe('AppendTool.execute — error cases', () => {
       toolCtx({ cwdBoundary: dir })
     );
     expect(resultStr(result)).toContain('outside cwd boundary');
-  });
-
-  it('handles input as string JSON', async () => {
-    const tool = new AppendTool();
-    await tool.execute(
-      '{"path":"append-string.txt","content":"from json"}',
-      toolCtx({ workspaceRoot: dir })
-    );
-    expect(fsSync.readFileSync(path.join(dir, 'append-string.txt'), 'utf-8')).toBe('from json');
   });
 });

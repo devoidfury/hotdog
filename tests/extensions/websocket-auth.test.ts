@@ -184,18 +184,11 @@ describe("createAuthMiddleware", () => {
   });
 
   describe("startCleanup / stopCleanup", () => {
-    it("startCleanup starts periodic cleanup", () => {
+    it("startCleanup is idempotent and stopCleanup cleans up", () => {
       middleware.startCleanup();
-      // Should not throw
-      middleware.startCleanup(); // idempotent
+      middleware.startCleanup(); // idempotent, should not throw
       middleware.stopCleanup();
-    });
-
-    it("stopCleanup stops periodic cleanup", () => {
-      middleware.startCleanup();
-      middleware.stopCleanup();
-      // Should not throw
-      middleware.stopCleanup(); // idempotent
+      middleware.stopCleanup(); // idempotent, should not throw
     });
   });
 });

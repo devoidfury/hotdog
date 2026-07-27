@@ -77,20 +77,27 @@ describe("SessionRegistry Extended", () => {
     });
 
     it("handles send errors gracefully", () => {
-      const ws = {
+      const failingWs = {
         readyState: 1,
         send: mock(() => { throw new Error("Send failed"); }),
       } as unknown as WebSocket;
+      const workingWs = {
+        readyState: 1,
+        send: mock(() => {}),
+      } as unknown as WebSocket;
 
-      registry.registerConnection(ws);
+      registry.registerConnection(failingWs);
+      registry.registerConnection(workingWs);
 
-      // Should not throw
-      expect(() => registry.broadcast({ type: "test" })).not.toThrow();
+      // Broadcast should not throw and should still send to working connections
+      registry.broadcast({ type: "test" });
+      expect((failingWs.send as Mock<() => void>).mock.calls.length).toBe(1);
+      expect((workingWs.send as Mock<() => void>).mock.calls.length).toBe(1);
     });
 
     it("handles empty connection set", () => {
-      // Should not throw
-      expect(() => registry.broadcast({ type: "test" })).not.toThrow();
+      // Broadcast with no connections should be a no-op
+      registry.broadcast({ type: "test" });
     });
   });
 
@@ -411,24 +418,6 @@ describe("createWsServer Message Routing", () => {
     });
   });
 
-  describe("QUESTION_ANSWER message", () => {
-    it("handles question answer message", () => {
-      const core = createMockCore();
-      const wsServer = createWsServer(core, {
-        buildAgent: createMockAgentFactory(),
-      });
-
-      const ws = createMockWs();
-      wsServer.onMessage(ws, JSON.stringify({
-        type: C2S.QUESTION_ANSWER,
-        sessionId: "test-session",
-        answers: { key1: "value1" },
-      }));
-
-      // Should not throw (question tool integration is pending)
-      expect(true).toBe(true);
-    });
-  });
 
   describe("COMMAND message with slash prefix", () => {
     it("strips leading slash from command", async () => {

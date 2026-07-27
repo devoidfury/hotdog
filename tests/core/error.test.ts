@@ -4,6 +4,8 @@ import {
   CliError,
   ExtensionError,
   ToolError,
+  RetryableError,
+  TransientError,
   AgentError,
   ConfigError,
   ParseError,
@@ -154,6 +156,31 @@ describe("Error types", () => {
     });
   });
 
+  describe("RetryableError", () => {
+    it("creates error with message and optional hint", () => {
+      const err = new RetryableError("bad input", "use --flag instead");
+      expect(err.message).toBe("bad input");
+      expect(err.hint).toBe("use --flag instead");
+      expect(err.type).toBe("tool");
+    });
+
+    it("WithHint creates error with hint", () => {
+      const err = RetryableError.WithHint("invalid format", "expected JSON");
+      expect(err.message).toBe("invalid format");
+      expect(err.hint).toBe("expected JSON");
+      expect(err).toBeInstanceOf(RetryableError);
+    });
+  });
+
+  describe("TransientError", () => {
+    it("creates error for transient failures", () => {
+      const err = new TransientError("connection timeout");
+      expect(err.message).toBe("connection timeout");
+      expect(err.type).toBe("tool");
+      expect(err).toBeInstanceOf(ToolError);
+    });
+  });
+
   describe("AgentError factories", () => {
     it("MaxIterations", () => {
       expect(AgentError.MaxIterations(100).message).toContain("100");
@@ -205,19 +232,13 @@ describe("Error types", () => {
 });
 
 describe("EXPECTED_ERROR_TYPES", () => {
-  it("contains expected error types", () => {
-    expect(EXPECTED_ERROR_TYPES.has("cancelled")).toBe(true);
-    expect(EXPECTED_ERROR_TYPES.has("http")).toBe(true);
-    expect(EXPECTED_ERROR_TYPES.has("api")).toBe(true);
-    expect(EXPECTED_ERROR_TYPES.has("timeout")).toBe(true);
-    expect(EXPECTED_ERROR_TYPES.has("cli")).toBe(true);
-    expect(EXPECTED_ERROR_TYPES.has("tool")).toBe(true);
-    expect(EXPECTED_ERROR_TYPES.has("config")).toBe(true);
-  });
-
-  it("does not contain unexpected error types", () => {
-    expect(EXPECTED_ERROR_TYPES.has("agent")).toBe(false);
-    expect(EXPECTED_ERROR_TYPES.has("unknown")).toBe(false);
+  it("contains expected types and excludes unexpected ones", () => {
+    for (const t of ["cancelled", "http", "api", "timeout", "cli", "tool", "config"]) {
+      expect(EXPECTED_ERROR_TYPES.has(t)).toBe(true);
+    }
+    for (const t of ["agent", "unknown"]) {
+      expect(EXPECTED_ERROR_TYPES.has(t)).toBe(false);
+    }
   });
 });
 

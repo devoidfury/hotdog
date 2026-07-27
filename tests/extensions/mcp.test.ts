@@ -229,6 +229,8 @@ describe("contentBlocksToString", () => {
 });
 
 // ── McpTool ──────────────────────────────────────────────────────────────────
+// Note: Comprehensive McpTool tests are in mcp-client-tools.test.ts.
+// Tests below cover specific edge cases not covered there.
 
 describe("McpTool", () => {
   const mockHandle = {
@@ -241,111 +243,10 @@ describe("McpTool", () => {
     expect(tool.registeredName).toBe("my-server/echo");
   });
 
-  it("converts to tool definition with correct schema", () => {
-    const toolDef = {
-      name: "greet",
-      description: "Greet someone",
-      inputSchema: {
-        type: "object",
-        properties: {
-          name: { type: "string", description: "The name" },
-          age: { type: "integer" },
-        },
-        required: ["name"],
-      },
-    };
-    const tool = new McpTool("server", toolDef, mockHandle);
-    const def = tool.toToolDef();
-
-    expect(def.function.name).toBe("server/greet");
-    expect(def.function.description).toBe("Greet someone");
-    const properties = def.function.parameters.properties as Record<string, unknown>;
-    expect((properties.name as Record<string, unknown>)!.description).toBe("The name");
-    expect(def.function.parameters.required).toEqual(["name"]);
-  });
-
-  it("converts to tool definition with empty schema", () => {
-    const toolDef = { name: "noop", description: "Does nothing", inputSchema: {} };
-    const tool = new McpTool("server", toolDef, mockHandle);
-    const def = tool.toToolDef();
-    expect(def.function.parameters.properties).toEqual({});
-    expect(def.function.parameters.required).toEqual([]);
-  });
-
-  it("converts to tool definition with no inputSchema", () => {
-    const toolDef = { name: "noop", description: "Does nothing" };
-    const tool = new McpTool("server", toolDef, mockHandle);
-    const def = tool.toToolDef();
-    expect(def.function.parameters.properties).toEqual({});
-    expect(def.function.parameters.required).toEqual([]);
-  });
-
   it("creates call display string", () => {
     const toolDef = { name: "bash", description: "Run bash", inputSchema: {} };
     const tool = new McpTool("my-server", toolDef, mockHandle);
     expect(tool.callDisplay("echo hello")).toBe("MCP [my-server] echo hello");
-  });
-
-  it("executes tool with valid JSON input", async () => {
-    let receivedArgs: Record<string, unknown> | null = null;
-    const mockHandle2 = {
-      callTool: async (_name: string, args: Record<string, unknown>) => {
-        receivedArgs = args;
-        return { content: [{ type: "text", text: "ok" }] };
-      },
-    } as any;
-    const toolDef = { name: "test", description: "test", inputSchema: {} };
-    const tool = new McpTool("server", toolDef, mockHandle2);
-    await tool.execute(JSON.stringify({ key: "value" }));
-    expect(receivedArgs as unknown as Record<string, unknown>).toEqual({ key: "value" });
-  });
-
-  it("executes tool with object input", async () => {
-    let receivedArgs: Record<string, unknown> | null = null;
-    const mockHandle2 = {
-      callTool: async (_name: string, args: Record<string, unknown>) => {
-        receivedArgs = args;
-        return { content: [{ type: "text", text: "ok" }] };
-      },
-    } as any;
-    const toolDef = { name: "test", description: "test", inputSchema: {} };
-    const tool = new McpTool("server", toolDef, mockHandle2);
-    await tool.execute({ key: "value" });
-    expect(receivedArgs as unknown as Record<string, unknown>).toEqual({ key: "value" });
-  });
-
-  it("returns error on invalid JSON input", async () => {
-    const toolDef = { name: "test", description: "test", inputSchema: {} };
-    const tool = new McpTool("server", toolDef, mockHandle);
-    const result = await tool.execute("not valid json");
-    expect(result.success).toBe(false);
-    expect(result.error).toContain("Error parsing tool arguments");
-  });
-
-  it("returns error when MCP call fails", async () => {
-    const mockHandle2 = {
-      callTool: async () => { throw new Error("MCP server error"); },
-    } as any;
-    const toolDef = { name: "test", description: "test", inputSchema: {} };
-    const tool = new McpTool("server", toolDef, mockHandle2);
-    const result = await tool.execute("{}");
-    expect(result.success).toBe(false);
-    expect(result.error).toContain("MCP tool call failed");
-  });
-
-  it("handles tool with enum constraint", () => {
-    const toolDef = {
-      name: "set-mode",
-      description: "Set mode",
-      inputSchema: {
-        type: "object",
-        properties: { mode: { type: "string", enum: ["debug", "release"], description: "Build mode" } },
-      },
-    };
-    const tool = new McpTool("server", toolDef, mockHandle);
-    const def = tool.toToolDef();
-    const properties = def.function.parameters.properties as Record<string, unknown>;
-    expect((properties.mode as Record<string, unknown>)!.enum).toEqual(["debug", "release"]);
   });
 
   it("handles tool with numeric constraints", () => {
@@ -366,22 +267,5 @@ describe("McpTool", () => {
     expect((properties.count as Record<string, unknown>)!.minimum).toBe(0);
     expect((properties.count as Record<string, unknown>)!.maximum).toBe(100);
     expect((properties.rate as Record<string, unknown>)!.exclusiveMaximum).toBe(1.0);
-  });
-
-  it("handles tool with string constraints", () => {
-    const toolDef = {
-      name: "set-name",
-      description: "Set name",
-      inputSchema: {
-        type: "object",
-        properties: { name: { type: "string", minLength: 1, maxLength: 50, pattern: "^[a-z]+$" } },
-      },
-    };
-    const tool = new McpTool("server", toolDef, mockHandle);
-    const def = tool.toToolDef();
-    const properties = def.function.parameters.properties as Record<string, unknown>;
-    expect((properties.name as Record<string, unknown>)!.minLength).toBe(1);
-    expect((properties.name as Record<string, unknown>)!.maxLength).toBe(50);
-    expect((properties.name as Record<string, unknown>)!.pattern).toBe("^[a-z]+$");
   });
 });

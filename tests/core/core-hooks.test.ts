@@ -28,14 +28,9 @@ describe("HookSystem.on() / notifyHooks()", () => {
     expect(hooks.notifyHooks("test:hook", {})).toBeUndefined();
   });
 
-  it("should return undefined when no handlers match", () => {
+  it("returns undefined and does not throw for unregistered hook", () => {
     const hooks = createHooks();
     expect(hooks.notifyHooks("nonexistent:hook", {})).toBeUndefined();
-  });
-
-  it("should not throw for unregistered hook", () => {
-    const hooks = createHooks();
-    hooks.notifyHooks("nonexistent", {});
   });
 });
 
@@ -92,14 +87,10 @@ describe("HookSystem.off()", () => {
     expect(hooks.notifyHooks("test:hook", {})).toBeUndefined();
   });
 
-  it("returns false when handler not found", () => {
+  it("returns false when handler not found or hook does not exist", () => {
     const hooks = createHooks();
     const handler = () => {};
     expect(hooks.off("test", handler)).toBe(false);
-  });
-
-  it("returns false for non-existent hook", () => {
-    const hooks = createHooks();
     expect(hooks.off("nonexistent", () => {})).toBe(false);
   });
 
@@ -132,8 +123,9 @@ describe("HookSystem.off()", () => {
 // ── clear() ───────────────────────────────────────────────────────────────
 
 describe("HookSystem.clear()", () => {
-  it("should clear a specific hook", () => {
+  it("clears a specific hook (including all handlers for it)", () => {
     const hooks = createHooks();
+    hooks.on("test:hook", () => {});
     hooks.on("test:hook", () => {});
     hooks.on("other:hook", () => {});
     hooks.clear("test:hook");
@@ -141,7 +133,7 @@ describe("HookSystem.clear()", () => {
     expect(hooks.handlerCount("other:hook")).toBe(1);
   });
 
-  it("should clear all hooks when no name given", () => {
+  it("clears all hooks when no name given", () => {
     const hooks = createHooks();
     hooks.on("test:hook", () => {});
     hooks.on("other:hook", () => {});
@@ -149,28 +141,14 @@ describe("HookSystem.clear()", () => {
     expect(hooks.hookNames().length).toBe(0);
   });
 
-  it("clears all handlers for a specific hook", () => {
-    const hooks = createHooks();
-    hooks.on("hook-a", () => {});
-    hooks.on("hook-a", () => {});
-    hooks.on("hook-b", () => {});
-    hooks.clear("hook-a");
-    expect(hooks.handlerCount("hook-a")).toBe(0);
-    expect(hooks.handlerCount("hook-b")).toBe(1);
-  });
-
-  it("does nothing when clearing non-existent hook", () => {
+  it("is idempotent and safe on non-existent hooks", () => {
     const hooks = createHooks();
     hooks.clear("nonexistent");
-    expect(hooks.handlerCount("nonexistent")).toBe(0);
-  });
-
-  it("clear is idempotent", () => {
-    const hooks = createHooks();
     hooks.on("test", () => {});
     hooks.clear("test");
     hooks.clear("test");
     expect(hooks.handlerCount("test")).toBe(0);
+    expect(hooks.handlerCount("nonexistent")).toBe(0);
   });
 });
 
@@ -477,45 +455,10 @@ describe("handlerCount / hookNames", () => {
   });
 });
 
-// ── handler ID uniqueness ─────────────────────────────────────────────────
-
-describe("HookSystem — handler ID uniqueness", () => {
-  it("assigns unique IDs to handlers", () => {
-    const hooks = new HookSystem();
-    hooks.on("test", () => {});
-    hooks.on("test", () => {});
-    const handlers = hooks.hooksMap.get("test")!;
-    expect(handlers[0]!.id).not.toBe(handlers[1]!.id);
-  });
-
-  it("handler counter increments across different hooks", () => {
-    const hooks = new HookSystem();
-    hooks.on("hook-a", () => {});
-    hooks.on("hook-b", () => {});
-    const handlersA = hooks.hooksMap.get("hook-a")!;
-    const handlersB = hooks.hooksMap.get("hook-b")!;
-    expect(handlersB[0]!.id).toBeGreaterThan(handlersA[0]!.id);
-  });
-});
-
-// ── source tracking ───────────────────────────────────────────────────────
+// ── source tracking via pipeline results ──────────────────────────────────
 
 describe("HookSystem — source tracking", () => {
-  it("tracks source when provided", () => {
-    const hooks = new HookSystem();
-    hooks.on("test", () => {}, "my-extension");
-    const handlers = hooks.hooksMap.get("test")!;
-    expect(handlers[0]!.source).toBe("my-extension");
-  });
-
-  it("source is undefined when not provided", () => {
-    const hooks = new HookSystem();
-    hooks.on("test", () => {});
-    const handlers = hooks.hooksMap.get("test")!;
-    expect(handlers[0]!.source).toBeUndefined();
-  });
-
-  it("source is tracked in pipeline results", async () => {
+  it("source is tracked in pipeline results when provided", async () => {
     const hooks = new HookSystem();
     hooks.on("test", () => ({ from: "ext1" }), "extension-1");
     hooks.on("test", () => ({ from: "ext2" }), "extension-2");
@@ -546,62 +489,22 @@ describe("trace mode", () => {
     process.stderr.write = origStderr!;
   });
 
-  it("enables boolean trace", () => {
-    const hooks = createHooks();
-    hooks.trace = true;
-    expect(hooks.trace).toBe(true);
-    hooks.on("test:hook", () => {});
-    hooks.notifyHooks("test:hook", {});
-  });
-
-  it("disables boolean trace", () => {
-    const hooks = createHooks();
-    hooks.trace = false;
-    expect(hooks.trace).toBe(false);
-  });
-
-  it("accepts object trace config", () => {
-    const hooks = createHooks();
-    hooks.trace = { enabled: true };
-    expect(typeof hooks.trace).toBe("object");
-    expect(hooks.trace.enabled).toBe(true);
-  });
-
-  it("trace mode does not throw", () => {
-    const hooks = createHooks();
-    hooks.trace = true;
-    hooks.on("test", () => {});
-    hooks.notifyHooks("test", {});
-  });
-
-  it("trace mode skips 'log' hook", () => {
-    const hooks = createHooks();
-    hooks.trace = true;
-    hooks.on("log", () => {});
-    hooks.notifyHooks("log", { level: "info", message: "test" });
-  });
-
-  it("trace mode with pipeline does not throw", async () => {
-    const hooks = createHooks();
-    hooks.trace = true;
-    hooks.on("test", () => ({ action: "continue" }), "ext1");
-    await hooks.runHookPipeline("test", {});
-  });
-
-  it("trace mode with stopped pipeline does not throw", async () => {
+  it("trace mode with stopped pipeline captures results", async () => {
     const hooks = createHooks();
     hooks.trace = true;
     hooks.on("test", () => ({ action: "handled" }), "ext1");
-    await hooks.runHookPipeline(
+    const result = await hooks.runHookPipeline(
       "test",
       {},
       {
         shouldStop: (r: any) => r.action === "handled",
       },
     );
+    expect(result.stopped).toBe(true);
+    expect(result.results[0]!.source).toBe("ext1");
   });
 
-  it("trace mode with error handler does not throw", async () => {
+  it("trace mode handles errors in handlers gracefully", async () => {
     const hooks = createHooks();
     hooks.trace = true;
     hooks.on(
@@ -612,46 +515,10 @@ describe("trace mode", () => {
       "ext1",
     );
     hooks.on("test", () => "recovered", "ext2");
-    await hooks.runHookPipeline("test", {});
-  });
-
-  it("trace captures handler source when provided", async () => {
-    const hooks = new HookSystem();
-    hooks.trace = true;
-    hooks.on("test", () => ({ action: "handled" }), "my-extension");
-    await hooks.runHookPipeline("test", {});
-  });
-
-  it("trace works with array/null/empty return values", async () => {
-    const hooks = new HookSystem();
-    hooks.trace = true;
-    hooks.on("test", () => [1, 2, 3]);
-    hooks.on("test", () => null);
-    hooks.on("test", () => ({}));
     const { results } = await hooks.runHookPipeline("test", {});
-    expect(results).toHaveLength(3);
-  });
-
-  it("trace works with action-containing object", async () => {
-    const hooks = new HookSystem();
-    hooks.trace = true;
-    hooks.on("test", () => ({ action: "modify", input: {} }));
-    const { results } = await hooks.runHookPipeline("test", {});
-    expect((results[0]!.result as any).action).toBe("modify");
-  });
-
-  it("async notify with trace does not throw", async () => {
-    const hooks = createHooks();
-    hooks.trace = true;
-    hooks.on("test", async () => {}, "ext1");
-    hooks.notifyHooks("test", {});
-  });
-
-  it("async notify with trace skips 'log' hook", async () => {
-    const hooks = createHooks();
-    hooks.trace = true;
-    hooks.on("log", () => {});
-    hooks.notifyHooks("log", { level: "info", message: "test" });
+    // First handler threw, second recovered - only second result captured
+    expect(results).toHaveLength(1);
+    expect(results[0]!.result).toBe("recovered");
   });
 
   it("respects enabledHooks filter in trace", () => {
@@ -662,7 +529,20 @@ describe("trace mode", () => {
       disabledSources: [],
     };
     hooks.on("test:hook", () => {});
-    hooks.notifyHooks("test:hook", {});
+    hooks.on("filtered:hook", () => {});
+    hooks.notifyHooks("test:hook", {}); // should not trace (not in enabledHooks)
+    hooks.notifyHooks("filtered:hook", {}); // should trace (in enabledHooks)
+  });
+
+  it("respects disabledSources filter in trace", () => {
+    const hooks = createHooks();
+    hooks.trace = {
+      enabled: true,
+      disabledSources: ["blocked-ext"],
+    };
+    hooks.on("test", () => {}, "allowed-ext");
+    hooks.on("test", () => {}, "blocked-ext");
+    hooks.notifyHooks("test", {}); // allowed-ext traces, blocked-ext does not
   });
 });
 

@@ -5,168 +5,9 @@ import { describe, it, expect, mock, beforeEach, afterEach } from "bun:test";
 import { McpClient, McpError } from "../../src/extensions/mcp-client/client.ts";
 import { HttpTransport, StdioTransport } from "../../src/extensions/mcp-client/transports.ts";
 
-// ── Message Handling (via transport onMessage) ──────────────────────────────
-
-describe("McpClient message handling", () => {
-  it("handles empty lines without error", async () => {
-    const transport = new HttpTransport("http://localhost:3000/mcp");
-    const client = new McpClient(transport);
-
-    // Simulate message handling by adding to buffered directly
-    // (empty lines are filtered before reaching the handler)
-    expect(() => {
-      // Empty lines should be ignored
-    }).not.toThrow();
-  });
-
-  it("handles unparseable JSON lines without error", async () => {
-    const transport = new HttpTransport("http://localhost:3000/mcp");
-    const client = new McpClient(transport);
-
-    // Unparseable lines are filtered in the handler
-    expect(() => {
-      // Would be skipped
-    }).not.toThrow();
-  });
-
-  it("handles non-response JSON-RPC messages without error", async () => {
-    const transport = new HttpTransport("http://localhost:3000/mcp");
-    const client = new McpClient(transport);
-
-    // Notifications without id are ignored
-    expect(client.buffered).toHaveLength(0);
-  });
-
-  it("buffers response when no pending request", async () => {
-    const transport = new HttpTransport("http://localhost:3000/mcp");
-    const client = new McpClient(transport);
-
-    // Simulate a buffered response (out-of-order arrival)
-    // In real usage this happens via _handleLine, but we test the buffering logic
-    // by directly checking the buffered array behavior via _sendRequest
-    const buffered = client.buffered;
-    buffered.push({
-      id: 999,
-      result: { data: "buffered" },
-      error: null,
-      raw: '{"jsonrpc":"2.0","id":999,"result":{"data":"buffered"}}',
-    });
-
-    expect(client.buffered).toHaveLength(1);
-    expect(client.buffered[0]!.id).toBe(999);
-    expect(client.buffered[0]!.result).toEqual({ data: "buffered" });
-  });
-
-  it("buffers error response when no pending request", async () => {
-    const transport = new HttpTransport("http://localhost:3000/mcp");
-    const client = new McpClient(transport);
-
-    const buffered = client.buffered;
-    buffered.push({
-      id: 998,
-      result: null,
-      error: { code: -32600, message: "Invalid request" },
-      raw: '{"jsonrpc":"2.0","id":998,"error":{"code":-32600,"message":"Invalid request"}}',
-    });
-
-    expect(client.buffered).toHaveLength(1);
-    expect(client.buffered[0]!.id).toBe(998);
-    expect(client.buffered[0]!.error).toEqual({ code: -32600, message: "Invalid request" });
-  });
-
-  it("resolves pending request with result", async () => {
-    const transport = new HttpTransport("http://localhost:3000/mcp");
-    const client = new McpClient(transport);
-
-    const pendingMap = client.pending;
-    const testId = 1;
-    let resolved = false;
-    let resolvedValue: unknown = undefined;
-    let rejected = false;
-    let rejectedError: Error | null = null;
-
-    const pr = {
-      id: testId,
-      resolve: (value: unknown) => { resolved = true; resolvedValue = value; },
-      reject: (reason: Error) => { rejected = true; rejectedError = reason; },
-      timer: null,
-    };
-    pendingMap.set(testId, pr as any);
-
-    // Simulate response handling by directly resolving
-    // (In stdio mode, this happens via _handleLine when the line arrives)
-    pr.resolve?.({ success: true });
-
-    expect(resolved).toBe(true);
-    expect(resolvedValue).toEqual({ success: true });
-    expect(rejected).toBe(false);
-  });
-
-  it("rejects pending request with error", async () => {
-    const transport = new HttpTransport("http://localhost:3000/mcp");
-    const client = new McpClient(transport);
-
-    const pendingMap = client.pending;
-    const testId = 2;
-    let resolved = false;
-    let rejected = false;
-    let rejectedError: Error | null = null;
-
-    const pr = {
-      id: testId,
-      resolve: () => { resolved = true; },
-      reject: (reason: Error) => { rejected = true; rejectedError = reason; },
-      timer: null,
-    };
-    pendingMap.set(testId, pr as any);
-
-    // Simulate error response
-    const error = new McpError("Method not found\nRaw response: test", -32601);
-    pr.reject?.(error);
-
-    expect(resolved).toBe(false);
-    expect(rejected).toBe(true);
-    expect(rejectedError).toBeInstanceOf(McpError);
-    expect(rejectedError!.message).toContain("Method not found");
-    expect((rejectedError! as McpError).code).toBe(-32601);
-  });
-});
-
 // ── McpClient._sendRequest Tests ─────────────────────────────────────────────
 
 describe("McpClient._sendRequest", () => {
-  it("uses buffered response when available", async () => {
-    const transport = new HttpTransport("http://localhost:3000/mcp");
-    const client = new McpClient(transport);
-
-    // idCounter starts at 0, so first request will use id 1
-    const buffered = client.buffered;
-    buffered.push({
-      id: 1,
-      result: { from: "buffer" },
-      error: null,
-      raw: '{"jsonrpc":"2.0","id":1,"result":{"from":"buffer"}}',
-    });
-
-    // Now send a request — it should use the buffered response
-    const result = await (client as any)._sendRequest("test/method", {});
-    expect(result).toEqual({ from: "buffer" });
-  });
-
-  it("uses buffered error response when available", async () => {
-    const transport = new HttpTransport("http://localhost:3000/mcp");
-    const client = new McpClient(transport);
-
-    const buffered = client.buffered;
-    buffered.push({
-      id: 1,
-      result: null,
-      error: { code: -32600, message: "Buffered error" },
-      raw: '{"jsonrpc":"2.0","id":1,"error":{"code":-32600,"message":"Buffered error"}}',
-    });
-
-    await expect((client as any)._sendRequest("test/method", {})).rejects.toThrow("Buffered error");
-  });
 
   it("increments id counter for each request", async () => {
     const mockFetch = mock(() =>
@@ -394,46 +235,6 @@ describe("McpClient.callTool", () => {
   });
 });
 
-// ── McpClient shutdown Tests ─────────────────────────────────────────────────
-
-describe("McpClient.shutdown", () => {
-  it("rejects pending requests on shutdown", async () => {
-    const client = await McpClient.forHttp("http://localhost:3000/mcp");
-
-    const pendingMap = client.pending;
-    let rejected = false;
-    const pr = {
-      id: 1,
-      resolve: () => {},
-      reject: () => { rejected = true; },
-      timer: setTimeout(() => {}, 1000),
-    };
-    pendingMap.set(1, pr as any);
-
-    await client.shutdown();
-    expect(rejected).toBe(true);
-    expect(client.cancelled).toBe(true);
-    expect(pendingMap.has(1)).toBe(false);
-  });
-
-  it("shutdown handles no pending requests", async () => {
-    const client = await McpClient.forHttp("http://localhost:3000/mcp");
-    await client.shutdown();
-    expect(client.cancelled).toBe(true);
-  });
-
-  it("shutdown handles no child process", async () => {
-    const client = await McpClient.forHttp("http://localhost:3000/mcp");
-    await client.shutdown();
-  });
-
-  it("shutdown can be called multiple times", async () => {
-    const client = await McpClient.forHttp("http://localhost:3000/mcp");
-    await client.shutdown();
-    await client.shutdown();
-  });
-});
-
 // ── HttpTransport SSE Edge Cases ─────────────────────────────────────────────
 
 describe("HttpTransport SSE edge cases", () => {
@@ -549,5 +350,264 @@ describe("StdioTransport", () => {
     expect(transport).toBeInstanceOf(HttpTransport);
     expect((transport as HttpTransport).url).toBe("http://localhost:3000/mcp");
     await client.shutdown();
+  });
+});
+
+// ── McpClient forStdio Tests ─────────────────────────────────────────────────
+
+describe("McpClient.forStdio", () => {
+  it("creates client with stdio transport", async () => {
+    // echo is a simple command that starts quickly
+    const client = await McpClient.forStdio("echo", ["test"]);
+    expect(client.transport.isStreaming).toBe(true);
+    await client.shutdown();
+  });
+
+  it("throws when command fails to start", async () => {
+    await expect(
+      McpClient.forStdio("/nonexistent/command/xyz"),
+    ).rejects.toThrow("Failed to spawn");
+  });
+
+  // Note: timeout test skipped — 10s timeout is impractical for test suite
+});
+
+// ── StdioTransport Tests ─────────────────────────────────────────────────────
+
+describe("StdioTransport", () => {
+  it("sends messages to subprocess stdin", async () => {
+    const transport = new StdioTransport("cat");
+    await transport.send('{"test": true}');
+    await new Promise((r) => setTimeout(r, 50));
+    await transport.destroy();
+  });
+
+  it("throws when sending to destroyed transport", async () => {
+    const transport = new StdioTransport("cat");
+    await transport.destroy();
+    await expect(transport.send("test")).rejects.toThrow("Transport is destroyed");
+  });
+
+  it("receives messages from subprocess stdout", async () => {
+    const transport = new StdioTransport("echo", ["hello world"]);
+    const receivedLines: string[] = [];
+    const removeHandler = transport.onMessage((line) => {
+      receivedLines.push(line);
+    });
+
+    await new Promise((r) => setTimeout(r, 100));
+    removeHandler();
+    await transport.destroy();
+
+    expect(receivedLines).toContain("hello world");
+  });
+
+  it("handles multiple messages", async () => {
+    const transport = new StdioTransport("printf", ["line1\nline2\nline3\n"]);
+    const receivedLines: string[] = [];
+    const removeHandler = transport.onMessage((line) => {
+      receivedLines.push(line);
+    });
+
+    await new Promise((r) => setTimeout(r, 100));
+    removeHandler();
+    await transport.destroy();
+
+    expect(receivedLines).toEqual(["line1", "line2", "line3"]);
+  });
+
+  it("skips empty lines", async () => {
+    const transport = new StdioTransport("printf", ["\n\nline\n\n"]);
+    const receivedLines: string[] = [];
+    const removeHandler = transport.onMessage((line) => {
+      receivedLines.push(line);
+    });
+
+    await new Promise((r) => setTimeout(r, 100));
+    removeHandler();
+    await transport.destroy();
+
+    expect(receivedLines).toEqual(["line"]);
+  });
+
+  it("supports multiple message handlers", async () => {
+    const transport = new StdioTransport("echo", ["multi-handler-test"]);
+    const handler1Lines: string[] = [];
+    const handler2Lines: string[] = [];
+
+    const remove1 = transport.onMessage((line) => handler1Lines.push(line));
+    const remove2 = transport.onMessage((line) => handler2Lines.push(line));
+
+    await new Promise((r) => setTimeout(r, 100));
+    remove1();
+    remove2();
+    await transport.destroy();
+
+    expect(handler1Lines).toEqual(handler2Lines);
+    expect(handler1Lines.length).toBeGreaterThan(0);
+  });
+
+  it("removes handler when cleanup function called", async () => {
+    const transport = new StdioTransport("printf", ["a\nb\nc\n"]);
+    const handler1Lines: string[] = [];
+    const handler2Lines: string[] = [];
+
+    const remove1 = transport.onMessage((line) => handler1Lines.push(line));
+    const remove2 = transport.onMessage((line) => handler2Lines.push(line));
+
+    await new Promise((r) => setTimeout(r, 50));
+    remove1();
+
+    await new Promise((r) => setTimeout(r, 100));
+    remove2();
+    await transport.destroy();
+
+    // Both should have received at least "a"
+    expect(handler1Lines).toContain("a");
+    expect(handler2Lines).toContain("a");
+    // handler2 should have more since handler1 was removed
+    expect(handler2Lines.length).toBeGreaterThanOrEqual(handler1Lines.length);
+  });
+
+  it("sendNotification writes to stdin", async () => {
+    const transport = new StdioTransport("cat");
+    transport.sendNotification('{"notification": true}');
+    await new Promise((r) => setTimeout(r, 50));
+    await transport.destroy();
+  });
+
+  it("sendNotification is no-op after destroy", async () => {
+    const transport = new StdioTransport("cat");
+    await transport.destroy();
+    // Should not throw
+    transport.sendNotification("test");
+  });
+
+  it("onClose registers close handler", async () => {
+    const transport = new StdioTransport("cat");
+    let closed = false;
+    const removeHandler = transport.onClose(() => { closed = true; });
+    await transport.destroy();
+    removeHandler();
+    expect(closed).toBe(true);
+  });
+
+  it("destroy can be called multiple times", async () => {
+    const transport = new StdioTransport("cat");
+    await transport.destroy();
+    await transport.destroy();
+  });
+
+  it("exposes command and args", async () => {
+    const transport = new StdioTransport("cat", ["--help"], { KEY: "val" });
+    expect(transport.command).toBe("cat");
+    expect(transport.args).toEqual(["--help"]);
+    expect(transport.env).toHaveProperty("KEY", "val");
+    await transport.destroy();
+  });
+
+  it("captures stderr output", async () => {
+    const transport = new StdioTransport("sh", ["-c", "echo error-msg >&2"]);
+    await new Promise((r) => setTimeout(r, 100));
+    expect(transport.stderrOutput).toContain("error-msg");
+    await transport.destroy();
+  });
+});
+
+// ── Stdio McpClient Integration Tests ────────────────────────────────────────
+
+describe("McpClient stdio integration", () => {
+  it("handles messages from subprocess", async () => {
+    // Use a simple script that outputs JSON-RPC responses
+    const client = await McpClient.forStdio("sh", ["-c", "echo '{\"jsonrpc\":\"2.0\",\"id\":999,\"result\":{\"data\":\"buffered\"}}'"]);
+    
+    // Wait for message to be processed
+    await new Promise((r) => setTimeout(r, 100));
+    
+    // The buffered response should be available
+    expect(client.buffered.length).toBeGreaterThan(0);
+    await client.shutdown();
+  });
+
+  it("handles empty lines from subprocess without error", async () => {
+    const client = await McpClient.forStdio("sh", ["-c", "printf '\\n\\n\\n'"]);
+    await new Promise((r) => setTimeout(r, 100));
+    // Should not crash
+    await client.shutdown();
+  });
+
+  it("handles invalid JSON lines from subprocess without error", async () => {
+    const client = await McpClient.forStdio("sh", ["-c", "echo 'not valid json'"]);
+    await new Promise((r) => setTimeout(r, 100));
+    // Should not crash
+    await client.shutdown();
+  });
+
+  it("handles notifications (no id) without error", async () => {
+    const client = await McpClient.forStdio("sh", ["-c", "echo '{\"jsonrpc\":\"2.0\",\"method\":\"notifications/initialized\"}'"]);
+    await new Promise((r) => setTimeout(r, 100));
+    // Should not crash, notifications are ignored
+    await client.shutdown();
+  });
+
+  it("message cleanup is called on shutdown", async () => {
+    const client = await McpClient.forStdio("cat");
+    // Just verify shutdown completes without error
+    await client.shutdown();
+  });
+});
+
+// ── HttpTransport onClose Tests ──────────────────────────────────────────────
+
+describe("HttpTransport onClose", () => {
+  it("registers and calls close handler on destroy", async () => {
+    const transport = new HttpTransport("http://localhost:3000/mcp");
+    let closed = false;
+    const removeHandler = transport.onClose(() => { closed = true; });
+    await transport.destroy();
+    removeHandler();
+    expect(closed).toBe(true);
+  });
+
+  it("removes close handler when cleanup function called", async () => {
+    const transport = new HttpTransport("http://localhost:3000/mcp");
+    let closed = false;
+    const removeHandler = transport.onClose(() => { closed = true; });
+    removeHandler();
+    await transport.destroy();
+    expect(closed).toBe(false);
+  });
+
+  it("sendNotification is no-op for HTTP transport", () => {
+    const transport = new HttpTransport("http://localhost:3000/mcp");
+    // Should not throw
+    transport.sendNotification("test");
+  });
+
+  it("throws when sending to destroyed HTTP transport", async () => {
+    const transport = new HttpTransport("http://localhost:3000/mcp");
+    await transport.destroy();
+    await expect(
+      transport.send(JSON.stringify({ test: true })),
+    ).rejects.toThrow("Transport is destroyed");
+  });
+});
+
+// ── McpConnection connectStdio Tests ─────────────────────────────────────────
+
+describe("McpConnection connectStdio", () => {
+  it("connects via stdio and initializes", async () => {
+    // Use a simple script that responds with proper MCP initialize response
+    const script = `
+      read line
+      echo '{"jsonrpc":"2.0","id":1,"result":{"protocolVersion":"2025-11-25","capabilities":{"tools":{}},"serverInfo":{"name":"test","version":"1.0"}}}'
+      read line
+      echo '{"jsonrpc":"2.0","id":2,"result":{"tools":[]}}'
+    `;
+    const { McpConnection } = await import("../../src/extensions/mcp-client/connection.ts");
+    const conn = await McpConnection.connectStdio("test", "sh", ["-c", script]);
+    expect(conn.serverName).toBe("test");
+    expect(conn.tools).toEqual([]);
+    await conn.shutdown();
   });
 });

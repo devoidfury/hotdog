@@ -169,7 +169,7 @@ describe("Hook + Extension Integration", () => {
 // ── Skills Extension ─────────────────────────────────────────────────────────
 
 describe("Skills Extension", () => {
-  it("should create extension and expose loader", async () => {
+  it("should create skills extension and expose loader", async () => {
     const core = createMockCore();
     const ext = await createSkillsExtension(core);
     expect(ext).not.toBeNull();
@@ -189,7 +189,7 @@ describe("Skills Extension", () => {
 // ── Prompts Extension ────────────────────────────────────────────────────────
 
 describe("Prompts Extension", () => {
-  it("should create extension and expose loader", async () => {
+  it("should create prompts extension and expose loader", async () => {
     const core = createMockCore();
     const ext = await createPromptsExtension(core);
     expect(ext).not.toBeNull();

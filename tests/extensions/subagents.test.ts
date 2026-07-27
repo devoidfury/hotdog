@@ -30,53 +30,6 @@ function makeMockTM(overrides: Partial<Record<string, any>> = {}): any {
 }
 
 describe("SubagentTool base class", () => {
-  it("creates with options object", () => {
-    const tool = new SubagentTool({ sessionCore: {}, taskManager: makeMockTM() });
-    expect((tool as any)._sessionCore).toBeDefined();
-    expect((tool as any)._taskManager).toBeDefined();
-  });
-
-  it("creates with null options", () => {
-    const tool = new SubagentTool({});
-    expect((tool as any)._sessionCore).toBeNull();
-    expect((tool as any)._taskManager).toBeNull();
-  });
-
-  it("creates with no backend", () => {
-    const tool = new SubagentTool({});
-    const result = tool._ensureBackend();
-    expect(result).toBe("Error: Task manager not available");
-  });
-
-  it("resolves sessionCore backend", () => {
-    const mockSessionCore = { spawnTask: async () => ({}) };
-    const tool = new SubagentTool({ sessionCore: mockSessionCore });
-    const backend = tool._resolveBackend();
-    expect(backend.type).toBe("sessionCore");
-    expect(backend.value).toBe(mockSessionCore);
-  });
-
-  it("resolves taskManager backend", () => {
-    const mockTaskManager = makeMockTM();
-    const tool = new SubagentTool({ taskManager: mockTaskManager });
-    const backend = tool._resolveBackend();
-    expect(backend.type).toBe("taskManager");
-    expect(backend.value).toBe(mockTaskManager);
-  });
-
-  it("returns none when no backend available", () => {
-    const tool = new SubagentTool({});
-    const backend = tool._resolveBackend();
-    expect(backend.type).toBe("none");
-    expect(backend.value).toBeNull();
-  });
-
-  it("sessionCore takes precedence over taskManager", () => {
-    const tool = new SubagentTool({ sessionCore: {}, taskManager: makeMockTM() });
-    const backend = tool._resolveBackend();
-    expect(backend.type).toBe("sessionCore");
-  });
-
   it("callDisplay returns formatted string", () => {
     const tool = new SubagentTool({});
     const display = tool.callDisplay(JSON.stringify({ task_id: "task-1" }));

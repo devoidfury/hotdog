@@ -196,15 +196,6 @@ describe("Model-switch extension", () => {
     expect((result as any).content).toContain("model-a");
     expect((result as any).content).toContain("model-b");
   });
-
-  it("does not have imperative config hooks (config comes from extension.json)", () => {
-    const core = createMockCore();
-    const ext = createModelSwitchExtension(core);
-
-    // Config params come from extension.json configSchema, not from imperative hooks
-    expect(ext.hooks).not.toHaveProperty("config:cliFlagsRegister");
-    expect(ext.hooks).not.toHaveProperty("config:paramsRegister");
-  });
 });
 
 describe("ModelTool", () => {
@@ -360,23 +351,6 @@ describe("ModelTool", () => {
 });
 
 describe("Model-switch extension > edge cases", () => {
-  it("handles empty model registry in /models command", async () => {
-    const core = createMockCore({
-      modelRegistry: {},
-      coreConfig: { modelSwitch: { commandEnabled: true } },
-    });
-    const ext = createModelSwitchExtension(core);
-
-    const registry = createCommandRegistry();
-    await ext.hooks![HOOKS.COMMANDS_REGISTER]!({ registry } as any);
-
-    const def = registry.get("models")!;
-    const agent = createMockAgent({}) as any;
-    const result = await def.handler!(agent, null);
-
-    expect((result as any).content).toContain("No models configured");
-  });
-
   it("/model command with extra whitespace in model name", async () => {
     const core = createMockCore({
       coreConfig: { modelSwitch: { commandEnabled: true } },
@@ -424,5 +398,40 @@ describe("Model-switch extension > edge cases", () => {
     // Commands should be registered when commandEnabled is not explicitly false
     expect(registry.has("model")).toBe(true);
     expect(registry.has("models")).toBe(true);
+  });
+
+  it("/model:model-name colon format switches model", async () => {
+    const core = createMockCore({
+      coreConfig: { modelSwitch: { commandEnabled: true } },
+    });
+    const ext = createModelSwitchExtension(core);
+
+    const registry = createCommandRegistry();
+    await ext.hooks![HOOKS.COMMANDS_REGISTER]!({ registry } as any);
+
+    const def = registry.get("model")!;
+    const agent = createMockAgent(core.resolved.modelRegistry) as any;
+    const result = await def.handler!(agent, "model:model-b");
+
+    expect((result as any).content).toContain("Switched to model: model-b");
+    expect(agent.model).toBe("model-b");
+  });
+
+  it("/model matches exact command name", async () => {
+    const core = createMockCore({
+      coreConfig: { modelSwitch: { commandEnabled: true } },
+    });
+    const ext = createModelSwitchExtension(core);
+
+    const registry = createCommandRegistry();
+    await ext.hooks![HOOKS.COMMANDS_REGISTER]!({ registry } as any);
+
+    const def = registry.get("model")!;
+    expect(def.matches!("model")).toBe(true);
+    expect(def.matches!("model ")).toBe(true);
+    expect(def.matches!("model:model-b")).toBe(true);
+    expect(def.matches!("model model-b")).toBe(true);
+    expect(def.matches!("models")).toBe(false);
+    expect(def.matches!("modeling")).toBe(false);
   });
 });

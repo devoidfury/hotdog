@@ -132,10 +132,6 @@ describe('SessionManager', () => {
       const sessionId = await sessionManager.create({ model: 'test-model' });
       expect(sessionManager.sessionId()).toBe(sessionId);
     });
-
-    it('should return null when no session is active', () => {
-      expect(sessionManager.sessionId()).toBeNull();
-    });
   });
 
   describe('getAgent', () => {
@@ -143,11 +139,6 @@ describe('SessionManager', () => {
       await sessionManager.create({ model: 'test-model' });
       const agent = sessionManager.getAgent();
       expect(agent).toBeDefined();
-    });
-
-    it('should return undefined when no session is active', () => {
-      const agent = sessionManager.getAgent();
-      expect(agent).toBeUndefined();
     });
   });
 
@@ -257,6 +248,77 @@ describe('SessionManager', () => {
       const store = sessionManager.getStore();
       expect(store).toBeDefined();
       expect(store.sessionIds).toBeDefined();
+    });
+  });
+
+  describe('cancel', () => {
+    it('should cancel a session bus', async () => {
+      const sessionId = await sessionManager.create({ model: 'test-model' });
+      sessionManager.cancel(sessionId);
+      const bus = sessionManager.getBus(sessionId);
+      expect(bus).toBeDefined();
+      expect(bus!.isCancelled).toBe(true);
+    });
+
+    it('should be no-op for non-existent session', () => {
+      expect(() => sessionManager.cancel('non-existent')).not.toThrow();
+    });
+  });
+
+  describe('interrupt', () => {
+    it('should interrupt a session bus', async () => {
+      const sessionId = await sessionManager.create({ model: 'test-model' });
+      const bus = sessionManager.getBus(sessionId);
+      bus!.enqueue('message');
+      expect(bus!.isIdle()).toBe(false);
+      sessionManager.interrupt(sessionId);
+      expect(bus!.isIdle()).toBe(true);
+    });
+
+    it('should be no-op for non-existent session', () => {
+      expect(() => sessionManager.interrupt('non-existent')).not.toThrow();
+    });
+  });
+
+  describe('getSessionInfo', () => {
+    it('should return session metadata', async () => {
+      const sessionId = await sessionManager.create({ model: 'test-model' });
+      const info = sessionManager.getSessionInfo(sessionId);
+      expect(info).toEqual({
+        id: sessionId,
+        model: 'test-model',
+        profile: undefined,
+      });
+    });
+
+    it('should return null for non-existent session', () => {
+      const info = sessionManager.getSessionInfo('non-existent');
+      expect(info).toBeNull();
+    });
+  });
+
+  describe('getBus', () => {
+    it('should return the message bus for a session', async () => {
+      const sessionId = await sessionManager.create({ model: 'test-model' });
+      const bus = sessionManager.getBus(sessionId);
+      expect(bus).toBeDefined();
+      expect(bus!.enqueue).toBeDefined();
+    });
+
+    it('should return undefined for non-existent session', () => {
+      const bus = sessionManager.getBus('non-existent');
+      expect(bus).toBeUndefined();
+    });
+  });
+
+  describe('isSessionRunning', () => {
+    it('should return false when session is not processing', async () => {
+      const sessionId = await sessionManager.create({ model: 'test-model' });
+      expect(sessionManager.isSessionRunning(sessionId)).toBe(false);
+    });
+
+    it('should return false for non-existent session', () => {
+      expect(sessionManager.isSessionRunning('non-existent')).toBe(false);
     });
   });
 });

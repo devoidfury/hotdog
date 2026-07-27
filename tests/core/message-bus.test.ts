@@ -37,39 +37,10 @@ function createMockAgent(overrides: {
 }
 
 describe("MessageBus constructor", () => {
-
-  it("creates with required options", () => {
-    const bus = new MessageBus({ sessionManager: createMockSessionManager(), sink: createMockSink() });
-    expect(bus).toBeDefined();
-    expect(bus.queue).toEqual([]);
-    expect(bus.isRunning).toBe(false);
-  });
-
-  it("creates AbortController", () => {
-    const bus = new MessageBus({ sessionManager: createMockSessionManager(), sink: createMockSink() });
-    expect(bus.abortController).toBeDefined();
-  });
-
-  it("isCancelled returns false initially", () => {
-    const bus = new MessageBus({ sessionManager: createMockSessionManager(), sink: createMockSink() });
-    expect(bus.isCancelled).toBe(false);
-  });
-
-  it("isIdle returns true initially", () => {
+  it("creates with no pending messages", () => {
     const bus = new MessageBus({ sessionManager: createMockSessionManager(), sink: createMockSink() });
     expect(bus.isIdle()).toBe(true);
-  });
-
-  it("sessionManager getter returns the session manager", () => {
-    const sm = createMockSessionManager();
-    const bus = new MessageBus({ sessionManager: sm, sink: createMockSink() });
-    expect(bus.sessionManager).toBe(sm);
-  });
-
-  it("agent getter returns agent from session manager", () => {
-    const agent = createMockAgent();
-    const bus = new MessageBus({ sessionManager: createMockSessionManager(() => agent), sink: createMockSink() });
-    expect(bus.agent as unknown as Record<string, unknown>).toBe(agent);
+    expect(bus.isCancelled).toBe(false);
   });
 });
 
@@ -77,28 +48,39 @@ describe("MessageBus.enqueue()", () => {
   it("adds message to queue", () => {
     const bus = new MessageBus({ sessionManager: createMockSessionManager(), sink: createMockSink() });
     bus.enqueue("hello");
-    expect(bus.queue).toEqual(["hello"]);
+    expect(bus.isIdle()).toBe(false);
   });
 
   it("adds multiple messages to queue", () => {
     const bus = new MessageBus({ sessionManager: createMockSessionManager(), sink: createMockSink() });
     bus.enqueue("msg1");
     bus.enqueue("msg2");
-    expect(bus.queue).toEqual(["msg1", "msg2"]);
+    expect(bus.isIdle()).toBe(false);
   });
 
-  it("wakes waiter when present", () => {
-    const bus = new MessageBus({ sessionManager: createMockSessionManager(), sink: createMockSink() });
-    let resolved = false;
-    bus.waiter = { resolve: () => { resolved = true; } };
-    bus.enqueue("test");
-    expect(resolved).toBe(true);
-    expect(bus.waiter).toBeNull();
+  it("dequeues messages in FIFO order", async () => {
+    const received: string[] = [];
+    const agent = createMockAgent({
+      run: async (text?: string) => { received.push(text ?? ""); },
+    });
+    const sink = createMockSink();
+    const bus = new MessageBus({ sessionManager: createMockSessionManager(() => agent), sink });
+
+    bus.enqueue("first");
+    bus.enqueue("second");
+    bus.enqueue("third");
+
+    // Process messages via the internal loop
+    await bus._processMessage("first");
+    await bus._processMessage("second");
+    await bus._processMessage("third");
+
+    expect(received).toEqual(["first", "second", "third"]);
   });
 });
 
 describe("MessageBus.cancel()", () => {
-  it("aborts the controller", () => {
+  it("marks bus as cancelled", () => {
     const bus = new MessageBus({ sessionManager: createMockSessionManager(), sink: createMockSink() });
     bus.cancel();
     expect(bus.isCancelled).toBe(true);
@@ -110,14 +92,6 @@ describe("MessageBus.cancel()", () => {
     const bus = new MessageBus({ sessionManager: createMockSessionManager(() => agent), sink: createMockSink() });
     bus.cancel();
     expect(agentCancelled).toBe(true);
-  });
-
-  it("wakes waiter when present", () => {
-    const bus = new MessageBus({ sessionManager: createMockSessionManager(), sink: createMockSink() });
-    let resolved = false;
-    bus.waiter = { resolve: () => { resolved = true; } };
-    bus.cancel();
-    expect(resolved).toBe(true);
   });
 
   it("does not crash when no agent", () => {
@@ -140,21 +114,13 @@ describe("MessageBus.interrupt()", () => {
     bus.enqueue("msg1");
     bus.enqueue("msg2");
     bus.interrupt();
-    expect(bus.queue).toEqual([]);
+    expect(bus.isIdle()).toBe(true);
   });
 
   it("does NOT abort the controller (bus continues running)", () => {
     const bus = new MessageBus({ sessionManager: createMockSessionManager(), sink: createMockSink() });
     bus.interrupt();
     expect(bus.isCancelled).toBe(false);
-  });
-
-  it("wakes waiter when present", () => {
-    const bus = new MessageBus({ sessionManager: createMockSessionManager(), sink: createMockSink() });
-    let resolved = false;
-    bus.waiter = { resolve: () => { resolved = true; } };
-    bus.interrupt();
-    expect(resolved).toBe(true);
   });
 
   it("does not crash when no agent", () => {
@@ -164,7 +130,7 @@ describe("MessageBus.interrupt()", () => {
 });
 
 describe("MessageBus.reset()", () => {
-  it("creates a new AbortController", () => {
+  it("clears cancelled state", () => {
     const bus = new MessageBus({ sessionManager: createMockSessionManager(), sink: createMockSink() });
     bus.cancel();
     expect(bus.isCancelled).toBe(true);
@@ -177,7 +143,7 @@ describe("MessageBus.reset()", () => {
     bus.enqueue("msg1");
     bus.cancel();
     bus.reset();
-    expect(bus.queue).toEqual(["msg1"]);
+    expect(bus.isIdle()).toBe(false);
   });
 
   it("allows the bus to be used again after reset", () => {
@@ -185,8 +151,8 @@ describe("MessageBus.reset()", () => {
     bus.cancel();
     bus.reset();
     bus.enqueue("new-msg");
-    expect(bus.queue).toEqual(["new-msg"]);
     expect(bus.isCancelled).toBe(false);
+    expect(bus.isIdle()).toBe(false);
   });
 });
 
@@ -208,9 +174,10 @@ describe("MessageBus.isIdle()", () => {
     expect(bus.isIdle()).toBe(false);
   });
 
-  it("returns false when running", () => {
+  it("returns false after enqueue even if previously idle", () => {
     const bus = new MessageBus({ sessionManager: createMockSessionManager(), sink: createMockSink() });
-    bus.isRunning = true;
+    expect(bus.isIdle()).toBe(true);
+    bus.enqueue("msg");
     expect(bus.isIdle()).toBe(false);
   });
 });
@@ -252,14 +219,6 @@ describe("MessageBus.executeCommand()", () => {
 });
 
 describe("MessageBus._processMessage()", () => {
-  it("sets _isRunning to true during processing", async () => {
-    const agent = createMockAgent();
-    const sink = createMockSink();
-    const bus = new MessageBus({ sessionManager: createMockSessionManager(() => agent), sink });
-    await bus._processMessage("test");
-    expect(bus.isRunning).toBe(false);
-  });
-
   it("resets agent cancel flag before processing", async () => {
     let resetCalled = false;
     const agent = createMockAgent({ resetCancel: () => { resetCalled = true; } });
@@ -350,28 +309,5 @@ describe("MessageBus._processMessage()", () => {
     await bus._processMessage("test");
     expect((sink._emitted.at(-1) as Record<string, unknown>).type).toBe(OUTPUT_EVENT.SESSION_STATE);
     expect(bus.isRunning).toBe(false);
-  });
-});
-
-describe("MessageBus._wakeWaiter()", () => {
-  it("resolves waiter and clears _waiter", () => {
-    const bus = new MessageBus({ sessionManager: createMockSessionManager(), sink: createMockSink() });
-    let resolved = false;
-    bus.waiter = { resolve: () => { resolved = true; } };
-    bus._wakeWaiter();
-    expect(resolved).toBe(true);
-    expect(bus.waiter).toBeNull();
-  });
-
-  it("is idempotent — does nothing when no waiter", () => {
-    const bus = new MessageBus({ sessionManager: createMockSessionManager(), sink: createMockSink() });
-    bus._wakeWaiter();
-  });
-
-  it("calling _wakeWaiter twice does not crash", () => {
-    const bus = new MessageBus({ sessionManager: createMockSessionManager(), sink: createMockSink() });
-    bus.waiter = { resolve: () => {} };
-    bus._wakeWaiter();
-    bus._wakeWaiter();
   });
 });

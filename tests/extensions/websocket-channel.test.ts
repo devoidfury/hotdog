@@ -74,17 +74,6 @@ describe("WebSocketChannel - construction", () => {
     expect(sm.onSessionEvents).toHaveBeenCalledWith("session-1", expect.any(Function));
   });
 
-  it("accepts optional broadcastCallback", () => {
-    const broadcastCallback = mock(() => {});
-    new WebSocketChannel({
-      sessionManager: sm,
-      ws,
-      sessionId: "session-1",
-      broadcastCallback,
-    });
-
-    expect(true).toBe(true);
-  });
 
   it("replays pending questions on construction", () => {
     const pendingQuestions = [[{ key: "q1", prompt: "Question 1" }]];

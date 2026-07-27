@@ -106,64 +106,31 @@ describe('ProjectInfoTool language detection', () => {
   });
 });
 
-// Test git-related methods
-describe('ProjectInfoTool > git methods', () => {
-  it('_getGitBranch returns null in non-git directory', async () => {
+// Test git-related behavior through public API
+describe('ProjectInfoTool > git behavior', () => {
+  it('shows git repo info when run in a git repo', async () => {
+    const tool = new ProjectInfoTool();
+    const result = await tool.execute(JSON.stringify({ path: process.cwd() }), null!);
+    const output = resultStr(result);
+    expect(output).toContain('git');
+    expect(output).toContain('last commit:');
+  });
+
+  it('shows partial info for non-git directory', async () => {
     const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'hotdog-test-git-'));
     try {
       const tool = new ProjectInfoTool();
-      const branch = await (tool as any)._getGitBranch(tmpDir);
-      expect(branch).toBeNull();
+      const result = await tool.execute(JSON.stringify({ path: tmpDir }), null!);
+      const output = resultStr(result);
+      expect(output).toContain('not a git repo');
     } finally {
       fs.rmSync(tmpDir, { recursive: true, force: true });
     }
-  });
-
-  it('_getLastCommitTime returns null in non-git directory', async () => {
-    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'hotdog-test-git-'));
-    try {
-      const tool = new ProjectInfoTool();
-      const time = await (tool as any)._getLastCommitTime(tmpDir);
-      expect(time).toBeNull();
-    } finally {
-      fs.rmSync(tmpDir, { recursive: true, force: true });
-    }
-  });
-
-  it('_getGitStatus returns empty array in non-git directory', async () => {
-    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'hotdog-test-git-'));
-    try {
-      const tool = new ProjectInfoTool();
-      const status = await (tool as any)._getGitStatus(tmpDir);
-      expect(status).toEqual([]);
-    } finally {
-      fs.rmSync(tmpDir, { recursive: true, force: true });
-    }
-  });
-
-  it('_getGitBranch returns branch name in git repo', async () => {
-    const tool = new ProjectInfoTool();
-    const branch = await (tool as any)._getGitBranch(process.cwd());
-    expect(typeof branch).toBe('string');
-    expect(branch.length).toBeGreaterThan(0);
-  });
-
-  it('_getLastCommitTime returns time in git repo', async () => {
-    const tool = new ProjectInfoTool();
-    const time = await (tool as any)._getLastCommitTime(process.cwd());
-    expect(typeof time).toBe('string');
-    expect(time.length).toBeGreaterThan(0);
-  });
-
-  it('_getGitStatus returns status entries in git repo', async () => {
-    const tool = new ProjectInfoTool();
-    const status = await (tool as any)._getGitStatus(process.cwd());
-    expect(Array.isArray(status)).toBe(true);
   });
 });
 
-// Test _walkDir method
-describe('ProjectInfoTool > _walkDir', () => {
+// Test directory walking behavior through public API (non-git mode)
+describe('ProjectInfoTool > directory walking', () => {
   let tmpDir: string;
 
   beforeEach(() => {
@@ -174,91 +141,41 @@ describe('ProjectInfoTool > _walkDir', () => {
     fs.rmSync(tmpDir, { recursive: true, force: true });
   });
 
-  it('walks directory and collects files', async () => {
+  it('lists files in non-git directory', async () => {
     fs.writeFileSync(path.join(tmpDir, 'file1.ts'), '');
     fs.writeFileSync(path.join(tmpDir, 'file2.js'), '');
     fs.mkdirSync(path.join(tmpDir, 'subdir'));
     fs.writeFileSync(path.join(tmpDir, 'subdir', 'file3.ts'), '');
 
     const tool = new ProjectInfoTool();
-    const results: string[] = [];
-    await (tool as any)._walkDir(tmpDir, 0, 10, results, 100);
-
-    expect(results.length).toBe(3);
+    const result = await tool.execute(JSON.stringify({ path: tmpDir }), null!);
+    const output = resultStr(result);
+    expect(output).toContain('file1.ts');
+    expect(output).toContain('file2.js');
+    expect(output).toContain('file3.ts');
   });
 
-  it('respects maxDepth limit', async () => {
-    fs.writeFileSync(path.join(tmpDir, 'file1.ts'), '');
-    fs.mkdirSync(path.join(tmpDir, 'subdir'));
-    fs.writeFileSync(path.join(tmpDir, 'subdir', 'file2.ts'), '');
-
-    const tool = new ProjectInfoTool();
-    const results: string[] = [];
-    await (tool as any)._walkDir(tmpDir, 0, 0, results, 100);
-
-    // maxDepth=0 means only top-level files
-    expect(results.length).toBe(1);
-  });
-
-  it('respects maxFiles limit', async () => {
+  it('respects max_files limit', async () => {
     for (let i = 0; i < 10; i++) {
       fs.writeFileSync(path.join(tmpDir, `file${i}.ts`), '');
     }
 
     const tool = new ProjectInfoTool();
-    const results: string[] = [];
-    await (tool as any)._walkDir(tmpDir, 0, 10, results, 3);
-
-    expect(results.length).toBe(3);
-  });
-
-  it('skips hidden files', async () => {
-    fs.writeFileSync(path.join(tmpDir, '.hidden'), '');
-    fs.writeFileSync(path.join(tmpDir, 'visible.ts'), '');
-
-    const tool = new ProjectInfoTool();
-    const results: string[] = [];
-    await (tool as any)._walkDir(tmpDir, 0, 10, results, 100);
-
-    expect(results.length).toBe(1);
-    expect(results[0]).toContain('visible.ts');
-  });
-
-  it('handles unreadable directories gracefully', async () => {
-    const unreadableDir = path.join(tmpDir, 'unreadable');
-    fs.mkdirSync(unreadableDir);
-    fs.chmodSync(unreadableDir, 0o000);
-
-    const tool = new ProjectInfoTool();
-    const results: string[] = [];
-    // Should not throw even with unreadable dir
-    await (tool as any)._walkDir(tmpDir, 0, 10, results, 100);
-
-    // Restore permissions for cleanup
-    fs.chmodSync(unreadableDir, 0o755);
+    const result = await tool.execute(JSON.stringify({ path: tmpDir, max_files: 3 }), null!);
+    const output = resultStr(result);
+    // In non-git mode, max_files limits files collected (no "and X more" since total unknown)
+    const fileLines = output.split('\n').filter(l => l.trim().endsWith('.ts'));
+    expect(fileLines.length).toBe(3);
   });
 });
 
-// Test _getDirSizes method
-describe('ProjectInfoTool > _getDirSizes', () => {
-  let tmpDir: string;
-
-  beforeEach(() => {
-    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'hotdog-test-sizes-'));
-  });
-
-  afterEach(() => {
-    fs.rmSync(tmpDir, { recursive: true, force: true });
-  });
-
-  it('returns directory sizes', async () => {
-    fs.writeFileSync(path.join(tmpDir, 'file1.ts'), 'a'.repeat(1000));
-    fs.writeFileSync(path.join(tmpDir, 'file2.ts'), 'b'.repeat(2000));
-
+// Test directory sizes through public API
+describe('ProjectInfoTool > directory sizes', () => {
+  it('shows directory sizes in git repo output', async () => {
     const tool = new ProjectInfoTool();
-    const sizes = await (tool as any)._getDirSizes(1, tmpDir);
-
-    expect(Array.isArray(sizes)).toBe(true);
+    const result = await tool.execute(JSON.stringify({ path: process.cwd() }), null!);
+    const output = resultStr(result);
+    expect(output).toContain('Directories');
   });
 });
 

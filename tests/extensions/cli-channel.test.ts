@@ -98,20 +98,6 @@ describe("CliChannel - construction", () => {
 
     expect(sm.onSessionEvents).toHaveBeenCalledWith("session-1", expect.any(Function));
   });
-
-  it("accepts optional onQuit callback", () => {
-    const onQuit = mock(() => {});
-    new CliChannel({
-      sessionManager: sm,
-      sessionId: "session-1",
-      sink,
-      rl,
-      onQuit,
-    });
-
-    // No error should be thrown
-    expect(true).toBe(true);
-  });
 });
 
 describe("CliChannel - write()", () => {

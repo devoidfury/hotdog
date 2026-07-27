@@ -41,13 +41,6 @@ describe("TaskManager", () => {
     });
   }
 
-  it("creates with defaults", () => {
-    const manager = createManager();
-    expect(manager.activeTasks()).toEqual([]);
-    expect(manager.taskCounts()).toBeNull();
-    expect(manager.progressMessage()).toBeNull();
-  });
-
   describe("query methods with no tasks", () => {
     it("returns null for unknown task status", () => {
       expect(createManager().taskStatus("unknown")).toBeNull();
@@ -108,6 +101,64 @@ describe("TaskManager", () => {
 
       await manager.spawnTask("task-1", "Do something", { workerModel: "custom-model" });
       expect((agentConfig as any)?.model).toBe("custom-model");
+    });
+
+    it("tracks active tasks and provides task counts", async () => {
+      let resolveRun1: () => void;
+      let resolveRun2: () => void;
+      const buildAgent = async () => ({
+        context: [],
+        run: async () => new Promise<void>((resolve) => {
+          // Keep tasks running until explicitly resolved
+          if (!resolveRun1) resolveRun1 = resolve;
+          else resolveRun2 = resolve;
+        }),
+        notifyCompletion: () => {},
+      } as any);
+
+      const manager = new TaskManager({
+        buildAgent,
+        llmClient: {} as any,
+        modelRegistry: { default: "test-model" } as any,
+        config: { profilesPath: "./config/profiles", customKey: "customValue" } as any,
+        hooks: {} as any,
+        maxIterations: 100,
+        taskProfile: "default",
+        taskRole: "",
+      });
+
+      // Initially no tasks
+      expect(manager.activeTasks()).toEqual([]);
+      expect(manager.taskCounts()).toBeNull();
+      expect(manager.progressMessage()).toBeNull();
+
+      // Spawn two tasks
+      await manager.spawnTask("task-1", "First task");
+      await manager.spawnTask("task-2", "Second task");
+
+      // Verify active tasks tracking
+      expect(manager.activeTasks()).toEqual(["task-1", "task-2"]);
+      expect(manager.taskCounts()).toEqual([2, 2]);
+      expect(manager.progressMessage()).toBe("2 tasks running");
+
+      // Verify config is accessible
+      expect(manager.config).toHaveProperty("customKey", "customValue");
+
+      // Complete one task
+      resolveRun1!();
+      await new Promise(r => setTimeout(r, 10));
+
+      expect(manager.activeTasks()).toEqual(["task-2"]);
+      expect(manager.taskCounts()).toEqual([1, 2]);
+      expect(manager.progressMessage()).toBe("1 task running");
+
+      // Complete second task
+      resolveRun2!();
+      await new Promise(r => setTimeout(r, 10));
+
+      expect(manager.activeTasks()).toEqual([]);
+      expect(manager.taskCounts()).toBeNull();
+      expect(manager.progressMessage()).toBeNull();
     });
   });
 

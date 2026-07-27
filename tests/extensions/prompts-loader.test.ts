@@ -80,12 +80,12 @@ Body`;
 });
 
 describe("PromptsLoader", () => {
-  it("loadFromDirectory handles directory with valid prompts", async () => {
+  it("loads prompts from directory via loadPrompts", async () => {
     const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'hotdog-prompt-test-'));
     try {
       fs.writeFileSync(path.join(tmpDir, 'greet.prompt.md'), `---\ndescription: Greeting prompt\n---\nHello world`);
       const loader = new PromptsLoader(tmpDir);
-      await (loader as any).loadFromDirectory(tmpDir);
+      await loader.loadPrompts();
       const prompts = loader.allPrompts();
       expect(prompts.length).toBeGreaterThan(0);
     } finally {
@@ -93,20 +93,20 @@ describe("PromptsLoader", () => {
     }
   });
 
-  it("loadFromDirectory handles invalid frontmatter gracefully", async () => {
+  it("handles invalid frontmatter gracefully", async () => {
     const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'hotdog-prompt-test-'));
     try {
       fs.writeFileSync(path.join(tmpDir, 'bad.prompt.md'), 'No frontmatter here');
       const loader = new PromptsLoader(tmpDir);
-      await (loader as any).loadFromDirectory(tmpDir);
-      // Should not throw — just log warning
-      expect(true).toBe(true);
+      await loader.loadPrompts();
+      // Should not throw — just log warning and skip the file
+      expect(loader.allPrompts().length).toBe(0);
     } finally {
       fs.rmSync(tmpDir, { recursive: true, force: true });
     }
   });
 
-  it("loadFromDirectory handles duplicate prompt names with warning", async () => {
+  it("handles duplicate prompt names (last wins)", async () => {
     const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'hotdog-prompt-test-'));
     try {
       fs.writeFileSync(path.join(tmpDir, 'dup.prompt.md'), `---\ndescription: First\n---\nContent 1`);
@@ -121,15 +121,15 @@ describe("PromptsLoader", () => {
     }
   });
 
-  it("loadFromDirectory handles read errors gracefully", async () => {
+  it("handles read errors gracefully (directory with .prompt.md name)", async () => {
     const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'hotdog-prompt-test-'));
     try {
       // Create a directory that looks like a prompt file
       fs.mkdirSync(path.join(tmpDir, 'not-a-file.prompt.md'));
       const loader = new PromptsLoader(tmpDir);
-      await (loader as any).loadFromDirectory(tmpDir);
-      // Should not throw — just log warning
-      expect(true).toBe(true);
+      await loader.loadPrompts();
+      // Should not throw — just log warning and skip
+      expect(loader.allPrompts().length).toBe(0);
     } finally {
       fs.rmSync(tmpDir, { recursive: true, force: true });
     }

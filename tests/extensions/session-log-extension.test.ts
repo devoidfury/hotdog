@@ -71,6 +71,27 @@ describe("session-log extension create()", () => {
     }
   });
 
+  it("CONTEXT_MESSAGE hook logs tool messages with TOOL_RESULT source", async () => {
+    const sessionId = `test-tool-${Date.now()}`;
+    try {
+      const ext = await create(createMockCore() as any) as any;
+      const hook = ext.hooks[HOOKS.CONTEXT_MESSAGE] as (ctx: any) => Promise<void>;
+
+      await hook({
+        message: { sessionId, role: "tool", content: "Tool output", toolCallId: "call_1" },
+        agent: { sessionId },
+      });
+
+      const content = readFileSync(join(CACHE_DIR, `${sessionId}.jsonl`), "utf-8");
+      const entry = JSON.parse(content.trim());
+      expect(entry.source).toBe(LOG_SOURCE.TOOL_RESULT);
+      expect(entry.content).toBe("Tool output");
+      expect(entry.tool_call_id).toBe("call_1");
+    } finally {
+      cleanupTestFile(sessionId);
+    }
+  });
+
   it("CONTEXT_MESSAGE hook skips logging during restoration", async () => {
     const sessionId = `test-restoring-${Date.now()}`;
     try {

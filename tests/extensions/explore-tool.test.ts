@@ -60,62 +60,78 @@ describe('ExploreTool > callDisplay', () => {
   });
 });
 
-describe('ExploreTool > _parseArgs', () => {
-  const tool = new ExploreTool();
-
-  it('returns defaults for empty input', () => {
-    const args = (tool as any)._parseArgs('');
-    expect(args).toEqual({ path: '.', outline: '' });
+describe('ExploreTool > execute input parsing', () => {
+  beforeEach(() => {
+    mockSpawn.mockReset();
   });
 
-  it('parses path and outline from JSON string', () => {
-    const args = (tool as any)._parseArgs(JSON.stringify({ path: '/var', outline: 'check structure' }));
-    expect(args).toEqual({ path: '/var', outline: 'check structure' });
+  it('rejects empty input (defaults to path=., no outline)', async () => {
+    const mockProc: any = {
+      stdout: { on: function() {} },
+      stderr: { on: function() {} },
+      on: function(event: string, cb: Function) {
+        if (event === "close") { setImmediate(() => cb(0)); }
+        return mockProc;
+      },
+    };
+    mockSpawn.mockImplementation(() => mockProc);
+
+    const tool = new ExploreTool();
+    const result = await tool.execute('', new ToolContext());
+    const output = resultStr(result);
+    expect(output).toContain("The 'outline' argument is required");
   });
 
-  it('parses path and outline from object', () => {
-    const args = (tool as any)._parseArgs({ path: '/home', outline: 'test' });
-    expect(args).toEqual({ path: '/home', outline: 'test' });
+  it('accepts malformed JSON as outline (path defaults to .)', async () => {
+    const mockProc: any = {
+      stdout: { on: function() {} },
+      stderr: { on: function() {} },
+      on: function(event: string, cb: Function) {
+        if (event === "close") { setImmediate(() => cb(0)); }
+        return mockProc;
+      },
+    };
+    mockSpawn.mockImplementation(() => mockProc);
+
+    const tool = new ExploreTool();
+    const result = await tool.execute('not valid json', new ToolContext());
+    // Malformed JSON is treated as outline, path defaults to "."
+    expect((result as any).metadata.get('path')).toBe('.');
+    expect((result as any).metadata.get('outline')).toBe('not valid json');
   });
 
-  it('defaults unknown fields', () => {
-    const args = (tool as any)._parseArgs(JSON.stringify({ path: '/tmp', unknown: true }));
-    expect(args).toEqual({ path: '/tmp', outline: '' });
+  it('rejects null input', async () => {
+    const mockProc: any = {
+      stdout: { on: function() {} },
+      stderr: { on: function() {} },
+      on: function(event: string, cb: Function) {
+        if (event === "close") { setImmediate(() => cb(0)); }
+        return mockProc;
+      },
+    };
+    mockSpawn.mockImplementation(() => mockProc);
+
+    const tool = new ExploreTool();
+    const result = await tool.execute(null, new ToolContext());
+    const output = resultStr(result);
+    expect(output).toContain("The 'outline' argument is required");
   });
 
-  it('returns defaults for null input', () => {
-    const args = (tool as any)._parseArgs(null);
-    expect(args).toEqual({ path: '.', outline: '' });
-  });
+  it('rejects input with non-string path (falls back to path=.)', async () => {
+    const mockProc: any = {
+      stdout: { on: function() {} },
+      stderr: { on: function() {} },
+      on: function(event: string, cb: Function) {
+        if (event === "close") { setImmediate(() => cb(0)); }
+        return mockProc;
+      },
+    };
+    mockSpawn.mockImplementation(() => mockProc);
 
-  it('returns defaults for whitespace-only string', () => {
-    const args = (tool as any)._parseArgs('   ');
-    expect(args).toEqual({ path: '.', outline: '' });
-  });
-
-  it('handles malformed JSON string — treats as outline', () => {
-    const args = (tool as any)._parseArgs('not valid json');
-    expect(args).toEqual({ path: '.', outline: 'not valid json' });
-  });
-
-  it('handles object with only path', () => {
-    const args = (tool as any)._parseArgs({ path: '/some/path' });
-    expect(args).toEqual({ path: '/some/path', outline: '' });
-  });
-
-  it('handles object with non-string path', () => {
-    const args = (tool as any)._parseArgs({ path: 123, outline: 'test' });
-    expect(args).toEqual({ path: '.', outline: 'test' });
-  });
-
-  it('handles object with non-string outline', () => {
-    const args = (tool as any)._parseArgs({ path: '/tmp', outline: 456 });
-    expect(args).toEqual({ path: '/tmp', outline: '' });
-  });
-
-  it('handles undefined input', () => {
-    const args = (tool as any)._parseArgs(undefined);
-    expect(args).toEqual({ path: '.', outline: '' });
+    const tool = new ExploreTool();
+    const result = await tool.execute({ path: 123 }, new ToolContext());
+    const output = resultStr(result);
+    expect(output).toContain("The 'outline' argument is required");
   });
 });
 

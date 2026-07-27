@@ -682,3 +682,36 @@ describe("createHooks", () => {
     expect(hooks2.handlerCount("test")).toBe(0);
   });
 });
+
+describe("HookSystem — Priority", () => {
+  it("should call handlers based on priority (higher first)", () => {
+    const hooks = createHooks();
+    const order: string[] = [];
+    hooks.on("test:hook", () => order.push("low"), { priority: 0 });
+    hooks.on("test:hook", () => order.push("high"), { priority: 100 });
+    hooks.on("test:hook", () => order.push("mid"), { priority: 50 });
+    hooks.notifyHooks("test:hook", {});
+    expect(order).toEqual(["high", "mid", "low"]);
+  });
+
+  it("should preserve registration order for equal priority", () => {
+    const hooks = createHooks();
+    const order: string[] = [];
+    hooks.on("test:hook", () => order.push("first"), { priority: 10 });
+    hooks.on("test:hook", () => order.push("second"), { priority: 10 });
+    hooks.notifyHooks("test:hook", {});
+    expect(order).toEqual(["first", "second"]);
+  });
+
+  it("should maintain priority after removing a handler", () => {
+    const hooks = createHooks();
+    const order: string[] = [];
+    const remove = hooks.on("test:hook", () => order.push("mid"), { priority: 50 });
+    hooks.on("test:hook", () => order.push("low"), { priority: 0 });
+    hooks.on("test:hook", () => order.push("high"), { priority: 100 });
+    
+    remove();
+    hooks.notifyHooks("test:hook", {});
+    expect(order).toEqual(["high", "low"]);
+  });
+});

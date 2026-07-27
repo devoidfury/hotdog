@@ -93,6 +93,7 @@ export interface HookHandlerEntry {
   id: number;
   handler: HookHandlerAny;
   source: string | undefined;
+  priority: number;
 }
 
 /**
@@ -158,12 +159,26 @@ export class HookSystem {
   on<H extends string>(
     hookName: H,
     handler: HookHandler<H>,
-    source?: string,
+    sourceOrOptions?: string | { source?: string; priority?: number },
   ): () => void {
+    let source: string | undefined;
+    let priority = 0;
+
+    if (typeof sourceOrOptions === "string") {
+      source = sourceOrOptions;
+    } else if (sourceOrOptions && typeof sourceOrOptions === "object") {
+      source = sourceOrOptions.source;
+      priority = sourceOrOptions.priority ?? 0;
+    }
+
     if (!this.#hooks.has(hookName)) this.#hooks.set(hookName, []);
     const handlers = this.#hooks.get(hookName)!;
     const id = ++this.#handlerCounter;
-    handlers.push({ id, handler: handler as HookHandlerAny, source });
+    handlers.push({ id, handler: handler as HookHandlerAny, source, priority });
+
+    // Sort handlers by priority descending (highest priority first).
+    // Stable sort is used by default in modern JS engines.
+    handlers.sort((a, b) => b.priority - a.priority);
 
     // Return a removal function
     return () => {

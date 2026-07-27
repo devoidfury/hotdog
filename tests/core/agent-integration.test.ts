@@ -103,7 +103,8 @@ describe('Agent — parallel tool calling', () => {
 
     const result = await agent.run('Run tools in parallel');
 
-    expect(result).toBe('All three tools completed: result_a, result_b, result_c');
+    expect(result?.type).toBe('completion');
+    expect(result?.content).toBe('All three tools completed: result_a, result_b, result_c');
     expect(toolA.executeCount).toBe(1);
     expect(toolB.executeCount).toBe(1);
     expect(toolC.executeCount).toBe(1);
@@ -153,7 +154,8 @@ describe('Agent — parallel tool calling', () => {
 
     const result = await agent.run('Test mixed tools');
 
-    expect(result).toBe('One succeeded, one failed.');
+    expect(result?.type).toBe('completion');
+    expect(result?.content).toBe('One succeeded, one failed.');
     expect(goodTool.executeCount).toBe(1);
     expect(badTool.executeCount).toBe(1);
 
@@ -204,7 +206,8 @@ describe('Agent — parallel tool calling', () => {
 
     const result = await agent.run('Stress test');
 
-    expect(result).toBe('All done.');
+    expect(result?.type).toBe('completion');
+    expect(result?.content).toBe('All done.');
     for (const t of tools) {
       expect(t.executeCount).toBe(1);
     }
@@ -237,7 +240,8 @@ describe('Agent — multi-turn conversations', () => {
     expect(llm.callCount).toBe(1);
 
     const result = await agent.run('Hi again');
-    expect(result).toBe('Nice to meet you too, Alice!');
+    expect(result?.type).toBe('completion');
+    expect(result?.content).toBe('Nice to meet you too, Alice!');
     expect(llm.callCount).toBe(2);
 
     // The second request should include the full conversation history
@@ -286,7 +290,8 @@ describe('Agent — multi-turn conversations', () => {
 
     const result = await agent.run('Process data.txt');
 
-    expect(result).toBe('Done! Data processed and saved.');
+    expect(result?.type).toBe('completion');
+    expect(result?.content).toBe('Done! Data processed and saved.');
     expect(readTool.executeCount).toBe(1);
     expect(writeTool.executeCount).toBe(1);
     expect(mockLLM.callCount).toBe(3);
@@ -329,7 +334,8 @@ describe('Agent — hook pipeline integration', () => {
 
     const result = await fixture.agent.run('Run the dangerous tool');
 
-    expect(result).toBe('Operation was blocked.');
+    expect(result?.type).toBe('completion');
+    expect(result?.content).toBe('Operation was blocked.');
     expect(blockedTool.executeCount).toBe(0);
 
     // The tool result should contain the blocked message
@@ -555,7 +561,7 @@ describe('Agent — error handling', () => {
 
     const result = await agent.run('Use nonexistent tool');
 
-    expect(result).toBe('Tool not found.');
+    expect(result?.content).toBe('Tool not found.');
 
     // The tool result should indicate unknown tool
     const ctx = agent.log.getAll();
@@ -585,7 +591,7 @@ describe('Agent — error handling', () => {
 
     const result = await agent.run('Test bad JSON');
 
-    expect(result).toBe('Handled.');
+    expect(result?.content).toBe('Handled.');
     // Tool may not execute if validation fails, but agent should not crash
     const ctx = agent.log.getAll();
     const toolResult = ctx.find(m => m.role === 'tool');

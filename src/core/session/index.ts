@@ -10,6 +10,17 @@ import { formatError } from "../error.ts";
 import { logger } from "../logger.ts";
 import type { CommandRegistryLike } from "../commands.ts";
 import type { LlmClient } from "../llm-client/client.ts";
+import type { CommandResult } from "../extensions/registries.ts";
+
+/** Question option shape used by QUESTION events. */
+export interface QuestionOption {
+  key: string;
+  prompt: string;
+  options?: string[];
+  required?: boolean;
+  default?: string;
+  allow_other?: boolean;
+}
 
 export interface AgentLike {
   sessionId: string;
@@ -166,7 +177,7 @@ export class SessionManager {
   #llmClient: LlmClient | null;
   /** Per-session QUESTION event buffer — holds questions emitted while no channels
    *  are connected, so they can be replayed when a channel reconnects. */
-  #questionBuffers: Map<string, unknown[][]>;
+  #questionBuffers: Map<string, QuestionOption[][]>;
 
   /**
    * Create a new SessionManager with an initial agent.
@@ -463,7 +474,7 @@ export class SessionManager {
       if (!this.#questionBuffers.has(sessionId)) {
         this.#questionBuffers.set(sessionId, []);
       }
-      this.#questionBuffers.get(sessionId)!.push(event.questions as unknown[]);
+      this.#questionBuffers.get(sessionId)!.push(event.questions);
     }
   }
 
@@ -474,7 +485,7 @@ export class SessionManager {
    * @param sessionId — Session ID
    * @returns Buffered question arrays, or empty array if none
    */
-  drainPendingQuestions(sessionId: string): unknown[][] {
+  drainPendingQuestions(sessionId: string): QuestionOption[][] {
     const buffer = this.#questionBuffers.get(sessionId);
     if (!buffer || buffer.length === 0) return [];
     this.#questionBuffers.delete(sessionId);
@@ -604,7 +615,7 @@ export class SessionManager {
                 resetCancel: () => void;
                 cancel: () => void;
                 commandRegistry: CommandRegistryLike | undefined;
-                executeCommand: (cmd: unknown) => Promise<unknown>;
+                executeCommand: (cmd: unknown) => Promise<CommandResult | null>;
               }
             | undefined,
       },

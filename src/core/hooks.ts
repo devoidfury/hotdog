@@ -124,11 +124,11 @@ export interface HookPipelineOptions {
  * Result of running a hook pipeline.
  * @template R — The expected return type of handlers in this pipeline.
  */
-export interface HookPipelineResult<R = unknown> {
+export interface HookPipelineResult<R = unknown, D = unknown> {
   results: Array<{ result: R; source: string | null }>;
   lastResult: R | undefined;
   stopped: boolean;
-  data: unknown;
+  data: D;
 }
 
 export interface HookTraceOptions {
@@ -291,13 +291,13 @@ export class HookSystem {
    * @returns results — all non-undefined return values from handlers
    *   lastResult — the last handler's return value (or undefined)
    *   stopped — true if shouldStop caused early termination
-   *   data — the (possibly mutated) data object
+   *   data — the (possibly mutated) data object, same type as input
    */
   async runHookPipeline<R = unknown, H extends string = keyof HookPayloads>(
     hookName: H,
     data: H extends keyof HookPayloads ? HookPayloads[H] : unknown,
     opts: HookPipelineOptions = {},
-  ): Promise<HookPipelineResult<R>> {
+  ): Promise<HookPipelineResult<R, typeof data>> {
     const handlers = this.#hooks.get(hookName) || [];
     const results: Array<{ result: R; source: string | null }> = [];
     let lastResult: R | undefined;

@@ -1,6 +1,24 @@
 // CLI output sink — formats and displays agent output with color support.
 
-import { OutputSink, OUTPUT_EVENT, EVENT_HANDLERS, OutputEvent } from "../../core/context/output.ts";
+import {
+  OutputSink,
+  OUTPUT_EVENT,
+  EVENT_HANDLERS,
+  OutputEvent,
+  UserMessageEvent,
+  AssistantMessageEvent,
+  ThinkingEvent,
+  ToolCallEvent,
+  ToolResultEvent,
+  CompactingEvent,
+  CommandResultEvent,
+  QuestionEvent,
+  StreamingChunkEvent,
+  StreamingReasoningChunkEvent,
+  TaskProgressEvent,
+  TokenUsageEvent,
+  SessionStateEvent,
+} from "../../core/context/output.ts";
 import {
   ColorPalette,
   applyThinking,
@@ -253,69 +271,100 @@ export class CliOutputSink extends OutputSink {
   }
 
   override emit(event: OutputEvent): void {
-    const handler = EVENT_HANDLERS[event.type];
-    if (handler && typeof (this as Record<string, unknown>)[handler] === "function") {
-      ((this as Record<string, (event: OutputEvent) => void>)[handler] as (event: OutputEvent) => void)(event);
+    switch (event.type) {
+      case OUTPUT_EVENT.USER_MESSAGE:
+        this.emitUserMessage(event);
+        break;
+      case OUTPUT_EVENT.ASSISTANT_MESSAGE:
+        this.emitAssistantMessage(event);
+        break;
+      case OUTPUT_EVENT.THINKING:
+        this.emitThinking(event);
+        break;
+      case OUTPUT_EVENT.TOOL_CALL:
+        this.emitToolCall(event);
+        break;
+      case OUTPUT_EVENT.TOOL_RESULT:
+        this.emitToolResult(event);
+        break;
+      case OUTPUT_EVENT.COMPACTING:
+        this.emitCompacting(event);
+        break;
+      case OUTPUT_EVENT.COMMAND_RESULT:
+        this.emitCommandResult(event);
+        break;
+      case OUTPUT_EVENT.QUESTION:
+        this.emitQuestion(event);
+        break;
+      case OUTPUT_EVENT.STREAMING_CHUNK:
+        this.emitStreamingChunk(event);
+        break;
+      case OUTPUT_EVENT.STREAMING_REASONING_CHUNK:
+        this.emitStreamingReasoningChunk(event);
+        break;
+      case OUTPUT_EVENT.TASK_PROGRESS:
+        this.emitTaskProgress(event);
+        break;
+      case OUTPUT_EVENT.TOKEN_USAGE:
+        this.emitTokenUsage(event);
+        break;
+      case OUTPUT_EVENT.SESSION_STATE:
+        this.emitSessionState(event);
+        break;
     }
   }
 
-  override emitUserMessage(event: OutputEvent): void {
+  override emitUserMessage(event: UserMessageEvent): void {
     if (this.hideUserMessage) return;
     this._transitionTo(Modes.User);
-    this._processContent(event.content as string);
+    this._processContent(event.content);
   }
 
-  override emitAssistantMessage(event: OutputEvent): void {
+  override emitAssistantMessage(event: AssistantMessageEvent): void {
     this._transitionTo(Modes.Default);
-    this._processContent(event.content as string);
+    this._processContent(event.content);
   }
 
-  override emitThinking(event: OutputEvent): void {
+  override emitThinking(event: ThinkingEvent): void {
     if (this.hideThinking) return;
     this._transitionTo(Modes.Thinking);
-    this._processContent(formatThinking(event.content as string, this.thinkerFormat));
+    this._processContent(formatThinking(event.content, this.thinkerFormat));
   }
 
-  override emitToolCall(event: OutputEvent): void {
+  override emitToolCall(event: ToolCallEvent): void {
     this._transitionTo(Modes.ToolCall);
     this._processContent(
-      formatToolCall(event.toolName as string, event.input as string, this.toolFormat || "{}: {}"),
+      formatToolCall(event.toolName, event.input, this.toolFormat || "{}: {}"),
     );
   }
 
-  override emitToolResult(event: OutputEvent): void {
+  override emitToolResult(event: ToolResultEvent): void {
     if (this.hideTools) return;
     this._transitionTo(Modes.ToolResult);
-    this._processContent(formatToolResult(event.result as string, this.toolOutputFmt || "{}"));
+    this._processContent(formatToolResult(event.result, this.toolOutputFmt || "{}"));
   }
 
-  override emitCompacting(event: OutputEvent): void {
-    const display = formatCompacting(event.messageCount as number, event.keepRecent as number);
+  override emitCompacting(event: CompactingEvent): void {
+    const display = event.message || "Compacting context...";
     this._transitionTo(Modes.System);
     this._processContent(`${display}\n-----------`);
   }
 
-  override emitCommandResult(event: OutputEvent): void {
+  override emitCommandResult(event: CommandResultEvent): void {
     this._transitionTo(Modes.System);
-    this._processContent(event.content as string);
+    this._processContent(event.content);
   }
 
-  override emitQuestion(event: OutputEvent): void {
+  override emitQuestion(event: QuestionEvent): void {
     if (this.hideUserMessage) return;
     this._transitionTo(Modes.Question);
-    const questions = event.questions as Array<{
-      prompt: string;
-      options?: string[];
-      allowOther?: boolean;
-      default?: string;
-    }>;
-    for (const q of questions) {
+    for (const q of event.questions) {
       this._processContent(`\n${applyFinalResponse(q.prompt, this.palette)}\n`);
       if (q.options) {
         for (let i = 0; i < q.options.length; i++) {
           this._processContent(`    [${i + 1}] ${q.options[i]}\n`);
         }
-        if (q.allowOther) {
+        if (q.allow_other) {
           this._processContent("[Other] Type your own answer\n");
         } else {
           this._processContent(
@@ -329,17 +378,17 @@ export class CliOutputSink extends OutputSink {
     }
   }
 
-  override emitStreamingChunk(event: OutputEvent): void {
+  override emitStreamingChunk(event: StreamingChunkEvent): void {
     if (this.stream) {
       // Detect transition from reasoning → normal
       if (this.#outputMode !== Modes.Default) {
         this._transitionTo(Modes.Default);
       }
-      this._processContent(event.content as string);
+      this._processContent(event.content);
     }
   }
 
-  override emitStreamingReasoningChunk(event: OutputEvent): void {
+  override emitStreamingReasoningChunk(event: StreamingReasoningChunkEvent): void {
     if (this.hideThinking) return;
     // Thinking is streamed to stderr
     if (this.stream) {
@@ -347,32 +396,33 @@ export class CliOutputSink extends OutputSink {
       if (this.#outputMode !== Modes.Thinking) {
         this._transitionTo(Modes.Thinking);
       }
-      this._processContent(event.content as string);
+      this._processContent(event.content);
     }
   }
 
-  override emitTaskProgress(event: OutputEvent): void {
-    const display = formatTaskProgress(event.activeTasks as number, event.totalTasks as number);
+  override emitTaskProgress(event: TaskProgressEvent): void {
+    // TaskProgressEvent doesn't have activeTasks/totalTasks — use message if available
+    const display = event.message || "";
     if (!display) return;
     this._transitionTo(Modes.Progress);
     this._processContent(`[${applyProgress(display, this.palette)}]`);
   }
 
-  override emitTokenUsage(event: OutputEvent): void {
+  override emitTokenUsage(event: TokenUsageEvent): void {
     if (!this.showTokenUse) return;
     this._transitionTo(Modes.Progress);
     const display = formatTokenUsage(
-      event.lastPromptTokens as number,
-      event.lastCachedTokens as number,
-      event.lastCompletionTokens as number,
-      event.lastTotalTokens as number,
+      event.lastPromptTokens,
+      event.lastCachedTokens,
+      event.lastCompletionTokens,
+      event.lastTotalTokens,
     );
     this._processContent(display);
   }
 
-  override emitSessionState(event: OutputEvent): void {
+  override emitSessionState(event: SessionStateEvent): void {
     // React to agent state changes emitted by the agent
-    switch (event.key as string) {
+    switch (event.key) {
       case "hideTools":
         this.hideTools = event.value as boolean;
         break;

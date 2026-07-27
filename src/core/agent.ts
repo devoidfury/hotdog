@@ -2,8 +2,25 @@
 
 import { Message, type ImageAttachment } from "./context/message.ts";
 import { MessageLog } from "./context/message-log.ts";
-import { OUTPUT_EVENT, OutputEvent, OutputEventType } from "./context/output.ts";
-
+import {
+  OUTPUT_EVENT,
+  OutputEvent,
+  OutputEventType,
+  UserMessageEvent,
+  AssistantMessageEvent,
+  ThinkingEvent,
+  ToolCallEvent,
+  ToolResultEvent,
+  CompactingEvent,
+  CommandResultEvent,
+  QuestionEvent,
+  StreamingChunkEvent,
+  StreamingReasoningChunkEvent,
+  TaskProgressEvent,
+  TokenUsageEvent,
+  CompactionResultEvent,
+  SessionStateEvent,
+} from "./context/output.ts";
 /**
  * Map event type strings to OUTPUT_EVENT constants.
  */
@@ -26,17 +43,48 @@ const EVENT_TYPE_MAP: Record<string, OutputEventType> = {
 
 type EventTypeName = keyof typeof EVENT_TYPE_MAP;
 
+/**
+ * Typed data for each event type string.
+ * Maps event names to their data shape for type-safe emitOutput calls.
+ */
+interface OutputEventData {
+  user_message: { content: string };
+  assistant_message: { content: string };
+  thinking: { content: string };
+  tool_call: { toolName: string; input: string; toolCallId: string };
+  tool_result: { toolName: string; input: string; result: string; toolCallId: string; error?: string };
+  compacting: { message?: string };
+  command_result: { content: string };
+  question: {
+    questions: Array<{
+      key: string;
+      prompt: string;
+      options?: string[];
+      required?: boolean;
+      default?: string;
+      allow_other?: boolean;
+    }>;
+  };
+  streaming_chunk: { content: string };
+  streaming_reasoning_chunk: { content: string };
+  task_progress: { taskId: string; status: string; message?: string };
+  token_usage: TokenUsage;
+  compaction_result: { messagesCompacted: number; tokensBefore: number; tokensAfter: number; strategy: string; summary?: string };
+  session_state: { key: string; value: unknown; sessionId?: string };
+}
+
 import { AgentError, ConfigError, LlmError } from "./error.ts";
 import { HOOKS, HookSystem, type ContextHookResult, type ProviderRequestHookResult } from "./hooks.ts";
 import { isPromise } from "../utils/promise.ts";
 import { ACTIONS, ParsedCommand, Command } from "./commands.ts";
-import { createCommandRegistry, AgentCommandRegistry } from "./extensions/registries.ts";
+import { createCommandRegistry, AgentCommandRegistry, type CommandResult } from "./extensions/registries.ts";
 import { CORE_COMMAND_HANDLERS } from "./command-handlers.ts";
 import { resolveModelConfig, type ModelConfig } from "./config/providers.ts";
+export type { ModelConfig } from "./config/providers.ts";
 import { type CoreConfig } from "./config/schema-loader.ts";
 
 import { createSystemPromptBuilder } from "./context/system-prompt.ts";
-import { TokenTracker, createTokenTracker, type TokenUsage } from "./token-tracker.ts";
+import { TokenTracker, createTokenTracker, type TokenUsage, type RawUsage } from "./token-tracker.ts";
 import { ToolExecutor, createToolExecutor, type ToolResult as ToolExecutorResult } from "./tool-executor.ts";
 
 import type { LlmClient, StreamEvent } from "./llm-client/client.ts";
@@ -509,7 +557,7 @@ export class Agent {
     }
   }
 
-  private _emitTurnEnd(iteration: number, message: string, toolResults: any[], stopped: boolean, cancelled = false) {
+  private _emitTurnEnd(iteration: number, message: string, toolResults: Array<{ toolName: string; input: string; result: string }>, stopped: boolean, cancelled = false) {
     this.hooks.notifyHooks(HOOKS.TURN_END, {
       turnIndex: iteration,
       message,
@@ -521,9 +569,9 @@ export class Agent {
   }
 
   /** Emit token usage — delegates to TokenTracker for accumulation and emits the event. */
-  _emitTokenUsage(response: { usage?: Record<string, unknown> | null }): void {
+  _emitTokenUsage(response: { usage?: RawUsage | null }): void {
     this.#tokenTracker.record(response.usage, (usage) => {
-      this.emitOutput("token_usage", { ...(usage as Record<string, unknown>) });
+      this.emitOutput("token_usage", usage);
     });
   }
 
@@ -641,6 +689,11 @@ export class Agent {
 
   // ── Helpers ───────────────────────────────────────────────────────────────
 
+  /**
+   * Emit a typed output event.
+   * @param type - Event type name (e.g., "user_message", "tool_call").
+   * @param data - Typed data matching the event type.
+   */
   emitOutput(type: EventTypeName, data: Record<string, unknown>): void {
     const eventType = EVENT_TYPE_MAP[type];
     if (this.sink && eventType) {
@@ -723,24 +776,24 @@ export class Agent {
    * @param cmd - Command object { type, value }
    * @returns Command result
    */
-  async executeCommand(cmd: ParsedCommand): Promise<Record<string, unknown>> {
+  async executeCommand(cmd: ParsedCommand): Promise<CommandResult | null> {
     // Custom command with inline handler (from parseCommand registry match)
     if (cmd._customCommand && cmd._handler) {
       const result = await cmd._handler(this, cmd.value, cmd);
-      if (result) return result as Record<string, unknown>;
+      if (result) return result;
     }
 
     // COMMAND_DISPATCH hook — extensions can handle specific commands.
-    const pipelineResult = await this.hooks.runHookPipeline(
+    const pipelineResult = await this.hooks.runHookPipeline<CommandResult>(
       HOOKS.COMMAND_DISPATCH,
       { command: cmd, agent: this },
     );
     const lastResult = pipelineResult.lastResult;
     if (isPromise(lastResult)) {
       const awaited = await lastResult;
-      if (awaited) return awaited as Record<string, unknown>;
+      if (awaited) return awaited;
     } else if (lastResult) {
-      return lastResult as Record<string, unknown>;
+      return lastResult;
     }
 
     // Look up handler from command registry by command type.

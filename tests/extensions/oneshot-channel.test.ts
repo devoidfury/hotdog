@@ -228,7 +228,7 @@ describe("OneShotChannel - getters", () => {
     });
 
     expect(channel.events.length).toBe(1);
-    expect(channel.events[0]!.content).toBe("Hello");
+    expect((channel.events[0]! as any).content).toBe("Hello");
   });
 
   it("exposes output sink", () => {
@@ -288,16 +288,16 @@ describe("OneShotChannel - event types", () => {
       { type: OUTPUT_EVENT.USER_MESSAGE, content: "user" },
       { type: OUTPUT_EVENT.ASSISTANT_MESSAGE, content: "assistant" },
       { type: OUTPUT_EVENT.THINKING, content: "thinking" },
-      { type: OUTPUT_EVENT.TOOL_CALL, toolName: "test", input: {} },
-      { type: OUTPUT_EVENT.TOOL_RESULT, toolName: "test", result: "ok" },
+      { type: OUTPUT_EVENT.TOOL_CALL, toolName: "test", input: "{}", toolCallId: "1" },
+      { type: OUTPUT_EVENT.TOOL_RESULT, toolName: "test", input: "{}", result: "ok", toolCallId: "1" },
       { type: OUTPUT_EVENT.COMPACTING, message: "compacting" },
       { type: OUTPUT_EVENT.COMMAND_RESULT, content: "result" },
       { type: OUTPUT_EVENT.QUESTION, questions: [] },
       { type: OUTPUT_EVENT.STREAMING_CHUNK, content: "chunk" },
       { type: OUTPUT_EVENT.STREAMING_REASONING_CHUNK, content: "reasoning" },
       { type: OUTPUT_EVENT.TASK_PROGRESS, taskId: "1", status: "running" },
-      { type: OUTPUT_EVENT.TOKEN_USAGE, promptTokens: 10, completionTokens: 5, totalTokens: 15 },
-      { type: OUTPUT_EVENT.COMPACTION_RESULT, summary: "summary", messagesCompacted: 5 },
+      { type: OUTPUT_EVENT.TOKEN_USAGE, promptTokens: 10, cachedTokens: 0, completionTokens: 5, totalTokens: 15, turns: 1, lastPromptTokens: 10, lastCachedTokens: 0, lastCompletionTokens: 5, lastTotalTokens: 15 },
+      { type: OUTPUT_EVENT.COMPACTION_RESULT, messagesCompacted: 5, tokensBefore: 1000, tokensAfter: 500, strategy: "summarize", summary: "summary" },
       { type: OUTPUT_EVENT.SESSION_STATE, key: "state", value: "val" },
     ];
 

@@ -146,9 +146,9 @@ describe("StreamProcessor", () => {
     it("should capture usage data", async () => {
       const processor = createStreamProcessor();
       const usageData = {
-        promptTokens: 100,
-        completionTokens: 50,
-        totalTokens: 150,
+        prompt_tokens: 100,
+        completion_tokens: 50,
+        total_tokens: 150,
       };
       const result = await processEvents(processor, [
         { type: "content", content: "Hi" },
@@ -212,15 +212,15 @@ describe("StreamProcessor", () => {
 
     it("should call onUsage callback", async () => {
       const processor = createStreamProcessor();
-      const usages: Record<string, unknown>[] = [];
+      const usages: Array<{ prompt_tokens?: number; completion_tokens?: number; total_tokens?: number }> = [];
 
       await processEvents(processor, [
-        { type: "usage", data: { tokens: 100 } },
+        { type: "usage", data: { prompt_tokens: 100, completion_tokens: 50, total_tokens: 150 } },
       ], {
         onUsage: (u) => usages.push(u),
       });
 
-      expect(usages).toEqual([{ tokens: 100 }]);
+      expect(usages).toEqual([{ prompt_tokens: 100, completion_tokens: 50, total_tokens: 150 }]);
     });
 
     it("should call onFinish callback", async () => {

@@ -5,14 +5,18 @@ import { HookSystem, HOOKS } from "../../src/core/hooks.ts";
 import { ToolRegistry } from "../../src/core/extensions/tool-registry.ts";
 import { createCommandRegistry } from "../../src/core/extensions/registries.ts";
 
+function mkModel(name: string) {
+  return { name, temperature: 0.7, contextLimit: 128000, tags: [] };
+}
+
 function createMockCore(config: any = {}) {
   return {
     hooks: new HookSystem(),
     config: config.coreConfig || {},
     resolved: {
       modelRegistry: config.modelRegistry || {
-        "model-a": { name: "Model A" },
-        "model-b": { name: "Model B" },
+        "model-a": mkModel("model-a"),
+        "model-b": mkModel("model-b"),
       },
     },
     toolRegistry: new ToolRegistry(),
@@ -210,8 +214,8 @@ describe("ModelTool", () => {
 
   it("generates tool definition with available models", () => {
     const registry = {
-      "model-a": { name: "Model A" },
-      "model-b": { name: "Model B" },
+      "model-a": mkModel("model-a"),
+      "model-b": mkModel("model-b"),
     };
     const tool = new ModelTool(registry);
     const def = tool.toToolDef();
@@ -228,8 +232,8 @@ describe("ModelTool", () => {
 
   it("switches model successfully with onSwitchModel callback", async () => {
     const registry = {
-      "model-a": { name: "Model A" },
-      "model-b": { name: "Model B" },
+      "model-a": mkModel("model-a"),
+      "model-b": mkModel("model-b"),
     };
     const tool = new ModelTool(registry);
     let switchedModel = "";
@@ -248,8 +252,8 @@ describe("ModelTool", () => {
 
   it("returns message about callback when no onSwitchModel", async () => {
     const registry = {
-      "model-a": { name: "Model A" },
-      "model-b": { name: "Model B" },
+      "model-a": mkModel("model-a"),
+      "model-b": mkModel("model-b"),
     };
     const tool = new ModelTool(registry);
     const result = await tool.execute(JSON.stringify({ name: "model-b" }), undefined);
@@ -258,7 +262,7 @@ describe("ModelTool", () => {
 
   it("returns error for unknown model", async () => {
     const registry = {
-      "model-a": { name: "Model A" },
+      "model-a": mkModel("model-a"),
     };
     const tool = new ModelTool(registry);
     const result = await tool.execute(JSON.stringify({ name: "unknown-model" }), {} as any);
@@ -267,8 +271,8 @@ describe("ModelTool", () => {
 
   it("handles list command", async () => {
     const registry = {
-      "model-a": { name: "Model A" },
-      "model-b": { name: "Model B" },
+      "model-a": mkModel("model-a"),
+      "model-b": mkModel("model-b"),
     };
     const tool = new ModelTool(registry);
     const result = await tool.execute(JSON.stringify({ name: "list" }), {} as any);
@@ -286,7 +290,7 @@ describe("ModelTool", () => {
 
   it("handles empty model name", async () => {
     const registry = {
-      "model-a": { name: "Model A" },
+      "model-a": mkModel("model-a"),
     };
     const tool = new ModelTool(registry);
     const result = await tool.execute(JSON.stringify({ name: "" }), {} as any);
@@ -295,7 +299,7 @@ describe("ModelTool", () => {
 
   it("handles null input", async () => {
     const registry = {
-      "model-a": { name: "Model A" },
+      "model-a": mkModel("model-a"),
     };
     const tool = new ModelTool(registry);
     const result = await tool.execute(null, {} as any);
@@ -304,8 +308,8 @@ describe("ModelTool", () => {
 
   it("handles onSwitchModel callback error", async () => {
     const registry = {
-      "model-a": { name: "Model A" },
-      "model-b": { name: "Model B" },
+      "model-a": mkModel("model-a"),
+      "model-b": mkModel("model-b"),
     };
     const tool = new ModelTool(registry);
     const ctx = {
@@ -322,8 +326,8 @@ describe("ModelTool", () => {
 
   it("handles object input directly", async () => {
     const registry = {
-      "model-a": { name: "Model A" },
-      "model-b": { name: "Model B" },
+      "model-a": mkModel("model-a"),
+      "model-b": mkModel("model-b"),
     };
     const tool = new ModelTool(registry);
     const result = await tool.execute({ name: "model-b" }, undefined);

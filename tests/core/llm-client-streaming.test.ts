@@ -150,7 +150,7 @@ describe("LlmClient._parseStreamData", () => {
     });
     expect(events).toHaveLength(1);
     expect(events[0]!.type).toBe("content");
-    expect(events[0]!.content).toBe("Hello");
+    expect((events[0]! as any).content).toBe("Hello");
   });
 
   it("parses reasoning_content delta", () => {
@@ -160,7 +160,7 @@ describe("LlmClient._parseStreamData", () => {
     });
     expect(events).toHaveLength(1);
     expect(events[0]!.type).toBe("reasoning");
-    expect(events[0]!.content).toBe("Thinking...");
+    expect((events[0]! as any).content).toBe("Thinking...");
   });
 
   it("parses tool call name", () => {
@@ -176,9 +176,9 @@ describe("LlmClient._parseStreamData", () => {
     });
     expect(events).toHaveLength(1);
     expect(events[0]!.type).toBe("toolName");
-    expect(events[0]!.name).toBe("bash");
-    expect(events[0]!.index).toBe(0);
-    expect(events[0]!.toolCallId).toBe("tc1");
+    expect((events[0]! as any).name).toBe("bash");
+    expect((events[0]! as any).index).toBe(0);
+    expect((events[0]! as any).toolCallId).toBe("tc1");
   });
 
   it("parses tool call arguments", () => {
@@ -196,7 +196,7 @@ describe("LlmClient._parseStreamData", () => {
     });
     expect(events).toHaveLength(1);
     expect(events[0]!.type).toBe("toolArgument");
-    expect(events[0]!.arguments).toBe('{"path":"test"}');
+    expect((events[0]! as any).arguments).toBe('{"path":"test"}');
   });
 
   it("parses usage data", () => {
@@ -207,7 +207,7 @@ describe("LlmClient._parseStreamData", () => {
     });
     expect(events).toHaveLength(1);
     expect(events[0]!.type).toBe("usage");
-    expect((events[0]!.data as any).prompt_tokens).toBe(10);
+    expect(((events[0]! as any).data as any).prompt_tokens).toBe(10);
   });
 
   it("returns empty array for data with no choices", () => {
@@ -261,7 +261,7 @@ describe("LlmClient._parseStreamData", () => {
       choices: [{ delta: { content: rawContent } }],
     });
     expect(events[0]!.type).toBe("content");
-    expect(events[0]!.content).toBe("Hello World");
+    expect((events[0]! as any).content).toBe("Hello World");
   });
 
   it("unescape reasoning content with mangler", () => {
@@ -272,7 +272,7 @@ describe("LlmClient._parseStreamData", () => {
       choices: [{ delta: { reasoning_content: rawContent } }],
     });
     expect(events[0]!.type).toBe("reasoning");
-    expect(events[0]!.content).toBe("Thinking process");
+    expect((events[0]! as any).content).toBe("Thinking process");
   });
 
   it("handles tool call without id", () => {
@@ -287,7 +287,7 @@ describe("LlmClient._parseStreamData", () => {
       ],
     });
     expect(events[0]!.type).toBe("toolName");
-    expect(events[0]!.toolCallId).toBe("");
+    expect((events[0]! as any).toolCallId).toBe("");
   });
 
   it("handles tool call without index", () => {
@@ -301,7 +301,7 @@ describe("LlmClient._parseStreamData", () => {
         },
       ],
     });
-    expect(events[0]!.index).toBe(0);
+    expect((events[0]! as any).index).toBe(0);
   });
 
   it("handles tool call with only arguments (no name)", () => {
@@ -490,7 +490,7 @@ data: {"choices":[{"delta":{"content":"test"}}]}
       events.push(event);
     }
     expect(events).toHaveLength(1);
-    expect(events[0]!.content).toBe("test");
+    expect((events[0]! as any).content).toBe("test");
   });
 
   it("handles malformed JSON gracefully", async () => {
@@ -517,7 +517,7 @@ data: {"choices":[{"delta":{"content":"valid"}}]}
       events.push(event);
     }
     expect(events).toHaveLength(1);
-    expect(events[0]!.content).toBe("valid");
+    expect((events[0]! as any).content).toBe("valid");
   });
 
   it("handles multi-chunk streams", async () => {
@@ -554,7 +554,7 @@ data: {"choices":[{"delta":{"content":"valid"}}]}
       events.push(event);
     }
     expect(events).toHaveLength(1);
-    expect(events[0]!.content).toBe("Hello");
+    expect((events[0]! as any).content).toBe("Hello");
   });
 });
 
@@ -904,7 +904,7 @@ describe("LlmClient.chatStream", () => {
     }
 
     expect(events).toHaveLength(2);
-    expect(events[0]!.content).toBe("Hello");
+    expect((events[0]! as any).content).toBe("Hello");
   });
 
   it("passes tools to chatStreamWithModelConfig", async () => {
@@ -992,7 +992,7 @@ describe("LlmClient.chatStreamCancellable cancel token variations", () => {
     }
 
     expect(events).toHaveLength(1);
-    expect(events[0]!.content).toBe("Hello");
+    expect((events[0]! as any).content).toBe("Hello");
   });
 
   it("handles cancelToken with signal property", async () => {
@@ -1012,7 +1012,7 @@ describe("LlmClient.chatStreamCancellable cancel token variations", () => {
     }
 
     expect(events).toHaveLength(1);
-    expect(events[0]!.content).toBe("Hello");
+    expect((events[0]! as any).content).toBe("Hello");
   });
 
   it("handles already aborted cancelToken", async () => {
@@ -1057,7 +1057,7 @@ describe("LlmClient.chatStreamCancellable cancel token variations", () => {
     }
 
     expect(events).toHaveLength(1);
-    expect(events[0]!.content).toBe("Hello");
+    expect((events[0]! as any).content).toBe("Hello");
   });
 
   it("handles cancelToken with addEventListener", async () => {
@@ -1088,7 +1088,7 @@ describe("LlmClient.chatStreamCancellable cancel token variations", () => {
     }
 
     expect(events).toHaveLength(1);
-    expect(events[0]!.content).toBe("Hello");
+    expect((events[0]! as any).content).toBe("Hello");
   });
 });
 
@@ -1110,7 +1110,7 @@ describe("LlmClient._processSSE edge cases", () => {
     }
 
     expect(events).toHaveLength(1);
-    expect(events[0]!.content).toBe("Hello");
+    expect((events[0]! as any).content).toBe("Hello");
   });
 
   it("throws on non-JSON non-SSE response", async () => {
@@ -1194,7 +1194,7 @@ describe("LlmClient._processSSE edge cases", () => {
     }
 
     expect(events).toHaveLength(1);
-    expect(events[0]!.content).toBe("Hi");
+    expect((events[0]! as any).content).toBe("Hi");
   });
 
   it("handles SSE event type filtering", async () => {
@@ -1226,7 +1226,7 @@ describe("LlmClient._processSSE edge cases", () => {
     }
 
     expect(events).toHaveLength(1);
-    expect(events[0]!.content).toBe("Real");
+    expect((events[0]! as any).content).toBe("Real");
   });
 
   it("handles data: [DONE] signal with jsonBuffer flush", async () => {
@@ -1259,7 +1259,7 @@ describe("LlmClient._processSSE edge cases", () => {
     }
 
     expect(events).toHaveLength(1);
-    expect(events[0]!.content).toBe("Partial");
+    expect((events[0]! as any).content).toBe("Partial");
   });
 
   it("handles large malformed JSON buffer with reset", async () => {
@@ -1318,6 +1318,6 @@ describe("LlmClient._processSSE edge cases", () => {
     }
 
     expect(events).toHaveLength(1);
-    expect(events[0]!.content).toBe("Hello");
+    expect((events[0]! as any).content).toBe("Hello");
   });
 });

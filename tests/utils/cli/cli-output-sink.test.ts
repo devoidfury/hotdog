@@ -68,23 +68,23 @@ describe("CliOutputSink", () => {
   });
 
   it("emitToolCall writes to stdout", () => {
-    sink.emit({ type: OUTPUT_EVENT.TOOL_CALL, toolName: "bash", input: '{"cmd":"ls"}' });
+    sink.emit({ type: OUTPUT_EVENT.TOOL_CALL, toolName: "bash", input: '{"cmd":"ls"}', toolCallId: "1" });
     expect(stdoutWrites.some((w) => w.includes("bash"))).toBe(true);
   });
 
   it("emitToolResult writes to stdout", () => {
-    sink.emit({ type: OUTPUT_EVENT.TOOL_RESULT, result: "output" });
+    sink.emit({ type: OUTPUT_EVENT.TOOL_RESULT, toolName: "bash", input: "{}", result: "output", toolCallId: "1" });
     expect(stdoutWrites.some((w) => w.includes("output"))).toBe(true);
   });
 
   it("emitToolResult is suppressed when hideTools is true", () => {
     sink.hideTools = true;
-    sink.emit({ type: OUTPUT_EVENT.TOOL_RESULT, result: "output" });
+    sink.emit({ type: OUTPUT_EVENT.TOOL_RESULT, toolName: "bash", input: "{}", result: "output", toolCallId: "1" });
     expect(stdoutWrites).toHaveLength(0);
   });
 
   it("emitCompacting writes to stderr", () => {
-    sink.emit({ type: OUTPUT_EVENT.COMPACTING, messageCount: 10, keepRecent: 5 });
+    sink.emit({ type: OUTPUT_EVENT.COMPACTING, message: "Compacting messages" });
     expect(stderrWrites.some((w) => w.includes("Compacting"))).toBe(true);
   });
 
@@ -108,7 +108,7 @@ describe("CliOutputSink", () => {
         prompt: "Choose",
         key: "choice",
         options: ["a", "b"],
-        allowOther: true,
+        allow_other: true,
       }],
     });
     const allOutput = stdoutWrites.join("");
@@ -124,7 +124,7 @@ describe("CliOutputSink", () => {
         prompt: "Choose",
         key: "choice",
         options: ["a", "b"],
-        allowOther: false,
+        allow_other: false,
       }],
     });
     const allOutput = stdoutWrites.join("");
@@ -170,12 +170,12 @@ describe("CliOutputSink", () => {
   });
 
   it("emitTaskProgress writes progress to stderr", () => {
-    sink.emit({ type: OUTPUT_EVENT.TASK_PROGRESS, activeTasks: 2, totalTasks: 5 });
-    expect(stderrWrites.some((w) => w.includes("2/5"))).toBe(true);
+    sink.emit({ type: OUTPUT_EVENT.TASK_PROGRESS, taskId: "task-1", status: "running", message: "2/5 tasks" });
+    expect(stderrWrites.some((w) => w.includes("task"))).toBe(true);
   });
 
   it("emitTaskProgress suppressed when no active tasks", () => {
-    sink.emit({ type: OUTPUT_EVENT.TASK_PROGRESS, activeTasks: 0, totalTasks: 5 });
+    sink.emit({ type: OUTPUT_EVENT.TASK_PROGRESS, taskId: "task-1", status: "done", message: "completed" });
     expect(stdoutWrites).toHaveLength(0);
   });
 
@@ -186,6 +186,11 @@ describe("CliOutputSink", () => {
       cachedTokens: 50,
       completionTokens: 200,
       totalTokens: 350,
+      turns: 1,
+      lastPromptTokens: 100,
+      lastCachedTokens: 50,
+      lastCompletionTokens: 200,
+      lastTotalTokens: 350,
     });
     expect(stderrWrites.some((w) => w.includes("tokens"))).toBe(true);
   });

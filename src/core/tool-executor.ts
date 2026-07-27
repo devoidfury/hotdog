@@ -23,7 +23,7 @@ export interface ToolExecutorDeps {
   toolRegistry: ToolRegistry;
   hooks: HookSystem;
   addMessage(msg: Message): void;
-  emitOutput(type: string, data: Record<string, unknown>): void;
+  emitOutput<T extends string>(type: T, data: Record<string, unknown>): void;
   toolWhitelist: string[] | null;
   cwdBoundary: string | null;
   workspaceRoot: string | null;

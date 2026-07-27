@@ -5,6 +5,7 @@ import {
   formatValidationErrors,
 } from "../../utils/json-schema.ts";
 import { logger } from "../logger.ts";
+import type { ToolContext, DefaultToolContext } from "./tool-context.ts";
 
 /**
  * Metadata describing a tool's behavior characteristics.
@@ -33,13 +34,16 @@ export interface ToolDef {
  * - `callDisplay()` formats a human-readable description of a tool call.
  * - `execute()` runs the tool and returns a result.
  * - `metadata` describes tool characteristics (sideEffects, difficulty).
+ *
+ * Generic parameter T allows tools to declare the context keys they need.
+ * Default is DefaultToolContext for backward compatibility.
  */
-export interface Tool {
+export interface Tool<TCtx extends Record<string, unknown> = DefaultToolContext> {
   toToolDef(): ToolDef | Promise<ToolDef> | null;
   callDisplay(input: string | Record<string, unknown> | null): string;
   execute(
     input: string | Record<string, unknown> | null,
-    ctx?: unknown,
+    ctx?: ToolContext<TCtx>,
   ): Promise<unknown>;
   /**
    * Tool metadata for filtering and sandbox mode.

@@ -5,17 +5,30 @@ import { ExtensionError } from "../error.ts";
 
 /**
  * Registry for abstract service implementations.
+ *
+ * Typed via a "service contract map" — an interface mapping service names
+ * to their expected types. Example:
+ *
+ *   interface MyServices {
+ *     "ui.renderer": { render(text: string): void };
+ *     "storage": { get(key: string): unknown; set(key: string, value: unknown): void };
+ *   }
+ *
+ *   const registry = new ServiceRegistry<MyServices>();
+ *   const renderer = registry.get("ui.renderer"); // typed as { render(text: string): void }
  */
-export class ServiceRegistry {
-  #services: Map<string, unknown> = new Map();
+export class ServiceRegistry<T extends Record<string, unknown> = Record<string, unknown>> {
+  #services: Map<keyof T, T[keyof T]> = new Map();
 
   /**
    * Register an implementation for an abstract service.
+   * @param name - Service name (must be a key in T).
+   * @param implementation - Implementation satisfying the service contract.
    */
-  register(name: string, implementation: unknown): void {
+  register<K extends keyof T>(name: K, implementation: T[K]): void {
     if (this.#services.has(name)) {
       logger.warn(
-        `[services] "${name}" already registered — replacing with new implementation.`,
+        `[services] "${String(name)}" already registered — replacing with new implementation.`,
       );
     }
     this.#services.set(name, implementation);
@@ -23,24 +36,26 @@ export class ServiceRegistry {
 
   /**
    * Get a registered service implementation.
+   * @param name - Service name.
+   * @returns The implementation, typed according to T.
    */
-  get(name: string): unknown {
+  get<K extends keyof T>(name: K): T[K] {
     const impl = this.#services.get(name);
     if (impl === undefined) {
       throw new ExtensionError(
-        `Service "${name}" is not registered. ` +
+        `Service "${String(name)}" is not registered. ` +
           `Ensure a provider extension is loaded and its create() has registered this service.`,
       );
     }
-    return impl;
+    return impl as T[K];
   }
 
   has(name: string): boolean {
-    return this.#services.has(name);
+    return this.#services.has(name as keyof T);
   }
 
-  names(): string[] {
-    return Array.from(this.#services.keys());
+  names(): (keyof T & string)[] {
+    return Array.from(this.#services.keys()) as (keyof T & string)[];
   }
 
   /**
@@ -50,7 +65,7 @@ export class ServiceRegistry {
     name: string,
     expectedMethods: string[],
   ): { valid: boolean; missing: string[] } {
-    const impl = this.#services.get(name);
+    const impl = this.#services.get(name as keyof T);
     if (!impl) {
       return { valid: false, missing: expectedMethods };
     }

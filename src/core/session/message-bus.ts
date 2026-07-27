@@ -4,6 +4,7 @@ import { formatError, isExpectedError, LlmError } from "../error.ts";
 import { OUTPUT_EVENT, OutputEvent } from "../context/output.ts";
 import { HOOKS } from "../hooks.ts";
 import { parseCommand, ACTIONS, ParsedCommand, type CommandRegistryLike } from "../commands.ts";
+import type { CommandResult } from "../extensions/registries.ts";
 
 export interface MessageBusSessionManager {
   getAgent(): MessageBusAgent | undefined;
@@ -22,7 +23,7 @@ export interface MessageBusAgent {
   resetCancel(): void;
   cancel(): void;
   commandRegistry: CommandRegistryLike | undefined;
-  executeCommand(cmd: ParsedCommand): Promise<unknown>;
+  executeCommand(cmd: ParsedCommand): Promise<CommandResult | null>;
 }
 
 export interface Sink {
@@ -377,48 +378,51 @@ export class MessageBus {
     }
 
     const result = await agent.executeCommand(cmd);
-    const r = result as { action?: number; content?: string; error?: string } | undefined;
 
-    if (r) {
-      // Bitflags: multiple actions can fire simultaneously.
-      // PROMPT — enqueue the rendered content as a user message so the
-      // agent's normal run loop processes it and sends it to the LLM.
-      if (r.action && (r.action & ACTIONS.PROMPT) && r.content) {
-        this.enqueue(r.content);
-      }
-
-      // ERROR — display the error message to the user.
-      if (r.action && (r.action & ACTIONS.ERROR) && r.error) {
-        this.#sink.emit({
-          type: OUTPUT_EVENT.COMMAND_RESULT,
-          content: r.error,
-        });
-      }
-
-      // DISPLAY — show the result content as a command response.
-      if (r.action && (r.action & ACTIONS.DISPLAY) && r.content) {
-        this.#sink.emit({
-          type: OUTPUT_EVENT.COMMAND_RESULT,
-          content: r.content,
-        });
-      }
-
-      // Backward compat — handler returned error/content without action field.
-      // These only trigger when action is absent (null/undefined), not when
-      // it's explicitly set to 0 (which is a valid "no action" bitflag).
-      if (r.action == null && r.error) {
-        this.#sink.emit({
-          type: OUTPUT_EVENT.COMMAND_RESULT,
-          content: r.error,
-        });
-      }
-      if (r.action == null && r.content) {
-        this.#sink.emit({
-          type: OUTPUT_EVENT.COMMAND_RESULT,
-          content: r.content,
-        });
-      }
+    // Handle null/undefined results (backward compat)
+    if (!result) {
+      return;
     }
-    return r?.action;
+
+    // Bitflags: multiple actions can fire simultaneously.
+    // PROMPT — enqueue the rendered content as a user message so the
+    // agent's normal run loop processes it and sends it to the LLM.
+    if (result.action && (result.action & ACTIONS.PROMPT) && result.content) {
+      this.enqueue(result.content);
+    }
+
+    // ERROR — display the error message to the user.
+    if (result.action && (result.action & ACTIONS.ERROR) && result.error) {
+      this.#sink.emit({
+        type: OUTPUT_EVENT.COMMAND_RESULT,
+        content: result.error,
+      });
+    }
+
+    // DISPLAY — show the result content as a command response.
+    if (result.action && (result.action & ACTIONS.DISPLAY) && result.content) {
+      this.#sink.emit({
+        type: OUTPUT_EVENT.COMMAND_RESULT,
+        content: result.content,
+      });
+    }
+
+    // Backward compat — handler returned error/content without action field.
+    // These only trigger when action is absent (null/undefined), not when
+    // it's explicitly set to 0 (which is a valid "no action" bitflag).
+    if (result.action == null && result.error) {
+      this.#sink.emit({
+        type: OUTPUT_EVENT.COMMAND_RESULT,
+        content: result.error,
+      });
+    }
+    if (result.action == null && result.content) {
+      this.#sink.emit({
+        type: OUTPUT_EVENT.COMMAND_RESULT,
+        content: result.content,
+      });
+    }
+
+    return result.action;
   }
 }

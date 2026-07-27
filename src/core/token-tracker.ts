@@ -30,7 +30,7 @@ export interface TokenUsage {
   lastCachedTokens: number;
   lastCompletionTokens: number;
   lastTotalTokens: number;
-  [key: string]: unknown;
+  [key: string]: number | undefined;
 }
 
 /**
@@ -79,6 +79,11 @@ export class TokenTracker {
   }
 
   /**
+   * Internal marker symbol to prevent double-counting.
+   */
+  static readonly DID_EMIT = Symbol("hotdog.tokenTracker.didEmit");
+
+  /**
    * Record token usage from a provider response.
    *
    * Parses the raw usage object, accumulates session totals, and saves
@@ -89,20 +94,19 @@ export class TokenTracker {
    * @param rawUsage - Raw usage data from the provider, or null/undefined.
    * @param onRecorded - Optional callback invoked with the updated totals.
    */
-  record(rawUsage: Record<string, unknown> | null | undefined, onRecorded?: OnUsageCallback): void {
+  record(rawUsage: RawUsage | null | undefined, onRecorded?: OnUsageCallback): void {
     if (!rawUsage) return;
 
     // Guard against double-counting: the same response object may be
     // processed multiple times (e.g., hooks re-reading the object).
-    if ((rawUsage as Record<string, unknown>).__didEmitTokenUsage) return;
-    (rawUsage as Record<string, unknown>).__didEmitTokenUsage = true;
+    if ((rawUsage as Record<typeof TokenTracker.DID_EMIT, boolean>)[TokenTracker.DID_EMIT]) return;
+    (rawUsage as Record<typeof TokenTracker.DID_EMIT, boolean>)[TokenTracker.DID_EMIT] = true;
 
     // Parse per-call values from the provider.
-    const promptTokens = (rawUsage.prompt_tokens as number) || 0;
-    const cachedTokens =
-      ((rawUsage.prompt_tokens_details as Record<string, unknown>)?.cached_tokens as number) || 0;
-    const completionTokens = (rawUsage.completion_tokens as number) || 0;
-    const totalTokens = (rawUsage.total_tokens as number) || 0;
+    const promptTokens = rawUsage.prompt_tokens ?? 0;
+    const cachedTokens = rawUsage.prompt_tokens_details?.cached_tokens ?? 0;
+    const completionTokens = rawUsage.completion_tokens ?? 0;
+    const totalTokens = rawUsage.total_tokens ?? 0;
 
     // Accumulate session totals. Real prompt = prompt - cached (cached tokens are free).
     this.#usage.promptTokens += promptTokens - cachedTokens;

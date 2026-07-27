@@ -5,6 +5,7 @@
 
 import { parseCommand, Command, ACTIONS, type ParsedCommand, type CommandRegistryLike } from "./commands.ts";
 import { OutputEvent } from "./context/output.ts";
+import type { QuestionOption } from "./session/index.ts";
 
 // ── Channel Commands ──────────────────────────────────────────────────────
 
@@ -45,7 +46,7 @@ export interface ChannelSessionManager {
   /** Get session metadata. */
   getSessionInfo(sessionId: string): { id: string; model?: string; profile?: string } | null;
   /** Drain buffered QUESTION events for a session (replay on reconnect). */
-  drainPendingQuestions(sessionId: string): unknown[][];
+  drainPendingQuestions(sessionId: string): QuestionOption[][];
 }
 
 // ── Channel Base Class ────────────────────────────────────────────────────

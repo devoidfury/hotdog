@@ -40,19 +40,132 @@ export const EVENT_HANDLERS: Record<OutputEventType, string> = {
   [OUTPUT_EVENT.SESSION_STATE]: "emitSessionState",
 };
 
-export interface OutputEvent {
-  type: OutputEventType;
-  [key: string]: unknown;
+// ── Discriminated Union: Typed Output Events ────────────────────────────────
+
+export interface UserMessageEvent {
+  type: typeof OUTPUT_EVENT.USER_MESSAGE;
+  content: string;
 }
+
+export interface AssistantMessageEvent {
+  type: typeof OUTPUT_EVENT.ASSISTANT_MESSAGE;
+  content: string;
+}
+
+export interface ThinkingEvent {
+  type: typeof OUTPUT_EVENT.THINKING;
+  content: string;
+}
+
+export interface ToolCallEvent {
+  type: typeof OUTPUT_EVENT.TOOL_CALL;
+  toolName: string;
+  input: string;
+  toolCallId: string;
+}
+
+export interface ToolResultEvent {
+  type: typeof OUTPUT_EVENT.TOOL_RESULT;
+  toolName: string;
+  input: string;
+  result: string;
+  toolCallId: string;
+  error?: string;
+}
+
+export interface CompactingEvent {
+  type: typeof OUTPUT_EVENT.COMPACTING;
+  message?: string;
+}
+
+export interface CommandResultEvent {
+  type: typeof OUTPUT_EVENT.COMMAND_RESULT;
+  content: string;
+}
+
+export interface QuestionEvent {
+  type: typeof OUTPUT_EVENT.QUESTION;
+  questions: Array<{
+    key: string;
+    prompt: string;
+    options?: string[];
+    required?: boolean;
+    default?: string;
+    allow_other?: boolean;
+  }>;
+}
+
+export interface StreamingChunkEvent {
+  type: typeof OUTPUT_EVENT.STREAMING_CHUNK;
+  content: string;
+}
+
+export interface StreamingReasoningChunkEvent {
+  type: typeof OUTPUT_EVENT.STREAMING_REASONING_CHUNK;
+  content: string;
+}
+
+export interface TaskProgressEvent {
+  type: typeof OUTPUT_EVENT.TASK_PROGRESS;
+  taskId: string;
+  status: string;
+  message?: string;
+}
+
+export interface TokenUsageEvent {
+  type: typeof OUTPUT_EVENT.TOKEN_USAGE;
+  promptTokens: number;
+  cachedTokens: number;
+  completionTokens: number;
+  totalTokens: number;
+  turns: number;
+  lastPromptTokens: number;
+  lastCachedTokens: number;
+  lastCompletionTokens: number;
+  lastTotalTokens: number;
+}
+
+export interface CompactionResultEvent {
+  type: typeof OUTPUT_EVENT.COMPACTION_RESULT;
+  messagesCompacted: number;
+  tokensBefore: number;
+  tokensAfter: number;
+  strategy: string;
+  summary?: string;
+}
+
+export interface SessionStateEvent {
+  type: typeof OUTPUT_EVENT.SESSION_STATE;
+  key: string;
+  value: unknown;
+  sessionId?: string;
+}
+
+/**
+ * Discriminated union of all output event types.
+ * Enables type-safe event handling via type narrowing on `type`.
+ */
+export type OutputEvent =
+  | UserMessageEvent
+  | AssistantMessageEvent
+  | ThinkingEvent
+  | ToolCallEvent
+  | ToolResultEvent
+  | CompactingEvent
+  | CommandResultEvent
+  | QuestionEvent
+  | StreamingChunkEvent
+  | StreamingReasoningChunkEvent
+  | TaskProgressEvent
+  | TokenUsageEvent
+  | CompactionResultEvent
+  | SessionStateEvent;
 
 /**
  * Create an output event.
  */
-export function outputEvent(
-  type: OutputEventType,
-  data: Record<string, unknown> = {},
-): OutputEvent {
-  return { type, ...data };
+export function outputEvent<T extends OutputEvent>(event: T): T {
+  return event;
 }
 
 /**
@@ -72,56 +185,96 @@ export class OutputSink {
 
   /**
    * Emit an output event.
+   * Dispatches to the appropriate handler based on event type.
    */
   emit(event: OutputEvent): void {
-    const handler = EVENT_HANDLERS[event.type];
-    const handlerFn = ((this as unknown) as Record<string, (event: OutputEvent) => void>)[handler];
-    if (handlerFn) {
-      handlerFn(event);
+    switch (event.type) {
+      case OUTPUT_EVENT.USER_MESSAGE:
+        this.emitUserMessage(event);
+        break;
+      case OUTPUT_EVENT.ASSISTANT_MESSAGE:
+        this.emitAssistantMessage(event);
+        break;
+      case OUTPUT_EVENT.THINKING:
+        this.emitThinking(event);
+        break;
+      case OUTPUT_EVENT.TOOL_CALL:
+        this.emitToolCall(event);
+        break;
+      case OUTPUT_EVENT.TOOL_RESULT:
+        this.emitToolResult(event);
+        break;
+      case OUTPUT_EVENT.COMPACTING:
+        this.emitCompacting(event);
+        break;
+      case OUTPUT_EVENT.COMMAND_RESULT:
+        this.emitCommandResult(event);
+        break;
+      case OUTPUT_EVENT.QUESTION:
+        this.emitQuestion(event);
+        break;
+      case OUTPUT_EVENT.STREAMING_CHUNK:
+        this.emitStreamingChunk(event);
+        break;
+      case OUTPUT_EVENT.STREAMING_REASONING_CHUNK:
+        this.emitStreamingReasoningChunk(event);
+        break;
+      case OUTPUT_EVENT.TASK_PROGRESS:
+        this.emitTaskProgress(event);
+        break;
+      case OUTPUT_EVENT.TOKEN_USAGE:
+        this.emitTokenUsage(event);
+        break;
+      case OUTPUT_EVENT.COMPACTION_RESULT:
+        this.emitCompactionResult(event);
+        break;
+      case OUTPUT_EVENT.SESSION_STATE:
+        this.emitSessionState(event);
+        break;
     }
   }
 
-  emitUserMessage(_event: OutputEvent): void {}
+  emitUserMessage(_event: UserMessageEvent): void {}
 
-  emitAssistantMessage(event: OutputEvent): void {
-    process.stdout.write(event.content as string);
+  emitAssistantMessage(event: AssistantMessageEvent): void {
+    process.stdout.write(event.content);
   }
 
-  emitThinking(event: OutputEvent): void {
-    process.stderr.write(event.content as string);
+  emitThinking(event: ThinkingEvent): void {
+    process.stderr.write(event.content);
   }
 
-  emitToolCall(_event: OutputEvent): void {}
+  emitToolCall(_event: ToolCallEvent): void {}
 
-  emitToolResult(_event: OutputEvent): void {}
+  emitToolResult(_event: ToolResultEvent): void {}
 
-  emitCompacting(_event: OutputEvent): void {}
+  emitCompacting(_event: CompactingEvent): void {}
 
-  emitCompactionResult(_event: OutputEvent): void {}
+  emitCompactionResult(_event: CompactionResultEvent): void {}
 
-  emitSessionState(_event: OutputEvent): void {}
+  emitSessionState(_event: SessionStateEvent): void {}
 
-  emitCommandResult(event: OutputEvent): void {
-    process.stdout.write((event.content as string) + "\n");
+  emitCommandResult(event: CommandResultEvent): void {
+    process.stdout.write(event.content + "\n");
   }
 
-  emitQuestion(_event: OutputEvent): void {}
+  emitQuestion(_event: QuestionEvent): void {}
 
-  emitStreamingChunk(event: OutputEvent): void {
+  emitStreamingChunk(event: StreamingChunkEvent): void {
     if (this.stream) {
-      process.stdout.write(event.content as string);
+      process.stdout.write(event.content);
     }
   }
 
-  emitStreamingReasoningChunk(event: OutputEvent): void {
+  emitStreamingReasoningChunk(event: StreamingReasoningChunkEvent): void {
     if (this.stream) {
-      process.stderr.write(event.content as string);
+      process.stderr.write(event.content);
     }
   }
 
-  emitTaskProgress(_event: OutputEvent): void {}
+  emitTaskProgress(_event: TaskProgressEvent): void {}
 
-  emitTokenUsage(_event: OutputEvent): void {}
+  emitTokenUsage(_event: TokenUsageEvent): void {}
 
   reset(): void {}
 }

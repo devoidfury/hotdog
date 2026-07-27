@@ -3,6 +3,10 @@ import { ModelTool } from '../../src/extensions/model-switch/model.ts';
 import { ToolContext } from '../../src/core/extensions/tool-context.ts';
 import { resultStr } from '../helpers.ts';
 
+function mkModel(name: string) {
+  return { name, temperature: 0.7, contextLimit: 128000, tags: [] };
+}
+
 describe('ModelTool', () => {
   it('has correct tool name', () => {
     expect(ModelTool.TOOL_NAME).toBe('model');
@@ -10,8 +14,8 @@ describe('ModelTool', () => {
 
   it('generates tool definition with available models', () => {
     const registry = {
-      'model-1': { name: 'Model 1' },
-      'model-2': { name: 'Model 2' },
+      'model-1': mkModel('model-1'),
+      'model-2': mkModel('model-2'),
     };
     const tool = new ModelTool(registry);
     const def = tool.toToolDef();
@@ -30,8 +34,8 @@ describe('ModelTool', () => {
 
   it('lists models when name is "list"', async () => {
     const registry = {
-      'qwen3.5-0.8b': { name: 'Qwen 0.8B' },
-      'qwen3.5-4b': { name: 'Qwen 4B' },
+      'qwen3.5-0.8b': { name: 'Qwen 0.8B', temperature: 0.7, contextLimit: 128000, tags: [] },
+      'qwen3.5-4b': { name: 'Qwen 4B', temperature: 0.7, contextLimit: 128000, tags: [] },
     };
     const tool = new ModelTool(registry);
     const result = await tool.execute(JSON.stringify({ name: 'list' }));
@@ -41,7 +45,7 @@ describe('ModelTool', () => {
 
   it('returns error for unknown model', async () => {
     const registry = {
-      'model-1': { name: 'Model 1' },
+      'model-1': mkModel('model-1'),
     };
     const tool = new ModelTool(registry);
     const result = await tool.execute(JSON.stringify({ name: 'unknown-model' }));
@@ -68,7 +72,7 @@ describe('ModelTool', () => {
   });
 
   it('calls onSwitchModel callback on valid switch', async () => {
-    const registry = { 'model-1': { name: 'Model 1' } };
+    const registry = { 'model-1': mkModel('model-1') };
     let switched = false;
     const ctx = new ToolContext();
     ctx.set('onSwitchModel', async (name: string) => { switched = true; });
@@ -79,7 +83,7 @@ describe('ModelTool', () => {
   });
 
   it('returns error when onSwitchModel fails', async () => {
-    const registry = { 'model-1': { name: 'Model 1' } };
+    const registry = { 'model-1': mkModel('model-1') };
     const ctx = new ToolContext();
     ctx.set('onSwitchModel', async () => { throw new Error('switch failed'); });
     const tool = new ModelTool(registry);
@@ -88,7 +92,7 @@ describe('ModelTool', () => {
   });
 
   it('returns message when no switch callback', async () => {
-    const registry = { 'model-1': { name: 'Model 1' } };
+    const registry = { 'model-1': mkModel('model-1') };
     const tool = new ModelTool(registry);
     const result = await tool.execute(JSON.stringify({ name: 'model-1' }));
     expect(resultStr(result)).toContain('Model tool requires a model switch callback');
@@ -108,9 +112,9 @@ describe('ModelTool', () => {
 
   it('sorts models alphabetically in definition', () => {
     const registry = {
-      'zebra-model': { name: 'Zebra' },
-      'alpha-model': { name: 'Alpha' },
-      'beta-model': { name: 'Beta' },
+      'zebra-model': { name: 'Zebra', temperature: 0.7, contextLimit: 128000, tags: [] },
+      'alpha-model': { name: 'Alpha', temperature: 0.7, contextLimit: 128000, tags: [] },
+      'beta-model': { name: 'Beta', temperature: 0.7, contextLimit: 128000, tags: [] },
     };
     const tool = new ModelTool(registry);
     const def = tool.toToolDef();

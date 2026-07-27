@@ -65,13 +65,24 @@ export interface ParsedCommand {
 }
 
 /**
+ * Result returned by command handlers.
+ * The `action` field is optional for backward compatibility;
+ * when omitted, DISPLAY is assumed.
+ */
+export interface CommandResult {
+  content?: string;
+  error?: string;
+  action?: number; // bitflags from ACTIONS
+}
+
+/**
  * Command handler function type.
  */
 export type CommandHandler = (
   agent: CommandAgent,
   value: string | null,
   cmd?: ParsedCommand,
-) => { content?: string; error?: string } | Promise<{ content?: string; error?: string }>;
+) => CommandResult | Promise<CommandResult>;
 
 // ── Agent Command Registry ───────────────────────────────────────────────────
 

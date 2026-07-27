@@ -9,6 +9,7 @@ import { LlmError } from "../error.ts";
 import { logger } from "../logger.ts";
 import type { StreamEvent } from "./client.ts";
 import { ToolCall } from "../context/message.ts";
+import type { RawUsage } from "../token-tracker.ts";
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -19,7 +20,7 @@ export interface StreamResult {
   fullText: string;
   fullReasoning: string | null;
   finalToolCalls: ToolCall[] | null;
-  usage: Record<string, unknown> | null;
+  usage: RawUsage | null;
   finishReason: string | null;
 }
 
@@ -37,7 +38,7 @@ export interface StreamCallbacks {
   onToolCalls?: (toolCalls: ToolCall[] | null) => void;
 
   /** Called with usage data when available. */
-  onUsage?: (usage: Record<string, unknown>) => void;
+  onUsage?: (usage: RawUsage) => void;
 
   /** Called when the stream finishes. */
   onFinish?: (reason: string | null) => void;

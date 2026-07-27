@@ -31,6 +31,7 @@ import type { Agent } from "../agent.ts";
 import type { ImageAttachment, Message } from "../context/message.ts";
 import type { ParsedCommand } from "../commands.ts";
 import type { ToolContext } from "./tool-context.ts";
+import type { StreamResult } from "../llm-client/stream-processor.ts";
 import { logger } from "../logger.ts";
 import { ProfileDef } from "../config/profiles.ts";
 import { ParsedCliOptions } from "../cli.ts";
@@ -64,7 +65,7 @@ export interface HookPayloads {
   "model:change": { agent: Agent; oldModel: string; newModel: string };
 
   // Message flow after LLM
-  "messages:afterLLM": { response: unknown; messages: Message[]; agent: Agent };
+  "messages:afterLLM": { response: StreamResult; messages: Message[]; agent: Agent };
 
   // Tool execution lifecycle
   "tools:register": ToolsRegisterPayload;
@@ -145,7 +146,7 @@ export interface HookPayloads {
   "provider:request": ProviderRequestPayload,
 
   // Provider response — emitted AFTER the LLM response is fully received
-  "provider:response": { response: unknown; modelConfig: ModelConfig; agent: Agent };
+  "provider:response": { response: StreamResult; modelConfig: ModelConfig; agent: Agent };
 
   // Turn lifecycle
   "turn:start": { turnIndex: number; timestamp: number; agent: Agent };

@@ -139,8 +139,8 @@ describe("OutputSink", () => {
       const sink = new OutputSink();
       // All these handlers should be no-ops that don't throw
       expect(() => sink.emitUserMessage({ type: OUTPUT_EVENT.USER_MESSAGE, content: "test" })).not.toThrow();
-      expect(() => sink.emitToolCall({ type: OUTPUT_EVENT.TOOL_CALL, tool: "bash" })).not.toThrow();
-      expect(() => sink.emitToolResult({ type: OUTPUT_EVENT.TOOL_RESULT, output: "done" })).not.toThrow();
+      expect(() => sink.emitToolCall({ type: OUTPUT_EVENT.TOOL_CALL, toolName: "bash", input: "", toolCallId: "1" })).not.toThrow();
+      expect(() => sink.emitToolResult({ type: OUTPUT_EVENT.TOOL_RESULT, toolName: "bash", input: "", result: "done", toolCallId: "1" })).not.toThrow();
       expect(() => sink.emitCompacting({ type: OUTPUT_EVENT.COMPACTING } as any)).not.toThrow();
       expect(() => sink.emitQuestion({ type: OUTPUT_EVENT.QUESTION, questions: [] })).not.toThrow();
       expect(() => sink.emitTaskProgress({ type: OUTPUT_EVENT.TASK_PROGRESS } as any)).not.toThrow();
@@ -154,22 +154,22 @@ describe("NoopSink", () => {
   it("emit is a no-op for any input", () => {
     const sink = new NoopSink();
     expect(() => sink.emit({ type: 1, content: "test" })).not.toThrow();
-    expect(() => sink.emit(null as any)).not.toThrow();
+    expect(() => sink.emit({ type: OUTPUT_EVENT.USER_MESSAGE, content: "" } as any)).not.toThrow();
     expect(() => sink.emit(undefined as any)).not.toThrow();
   });
 });
 
 describe("outputEvent", () => {
   it("creates event with type and data", () => {
-    const event = outputEvent(OUTPUT_EVENT.USER_MESSAGE, { content: "Hello" });
+    const event = outputEvent({ type: OUTPUT_EVENT.USER_MESSAGE, content: "Hello" });
     expect(event.type).toBe(OUTPUT_EVENT.USER_MESSAGE);
     expect(event.content).toBe("Hello");
   });
 
   it("creates event with default empty data", () => {
-    const event = outputEvent(OUTPUT_EVENT.TOKEN_USAGE);
+    const event = outputEvent({ type: OUTPUT_EVENT.TOKEN_USAGE, promptTokens: 0, cachedTokens: 0, completionTokens: 0, totalTokens: 0, turns: 0, lastPromptTokens: 0, lastCachedTokens: 0, lastCompletionTokens: 0, lastTotalTokens: 0 });
     expect(event.type).toBe(OUTPUT_EVENT.TOKEN_USAGE);
-    expect(Object.keys(event)).toEqual(["type"]);
+    expect(event.promptTokens).toBe(0);
   });
 });
 

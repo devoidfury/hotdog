@@ -853,7 +853,7 @@ describe('Agent — end-to-end loop', () => {
       const cmd = { type: 'custom', value: 'test', _customCommand: true, _handler: async () => { called = true; return { content: 'handled' }; } } as any;
       const result = await agent.executeCommand(cmd);
       expect(called).toBe(true);
-      expect(result.content).toBe('handled');
+      expect((result as any).content).toBe('handled');
     });
 
     it('should fall through to hooks when custom handler returns null', async () => {
@@ -863,7 +863,7 @@ describe('Agent — end-to-end loop', () => {
       });
       const cmd = { type: 'fallback', value: 'test', _customCommand: true, _handler: async () => null } as any;
       const result = await agent.executeCommand(cmd);
-      expect(result.content).toBe('hook handled');
+      expect((result as any).content).toBe('hook handled');
     });
 
     it('should fall through to command registry', async () => {
@@ -871,7 +871,7 @@ describe('Agent — end-to-end loop', () => {
       const registry = agent.commandRegistry;
       registry.register('test-cmd', { handler: async () => ({ content: 'registered' }) });
       const result = await agent.executeCommand({ type: 'test-cmd', value: '' });
-      expect(result.content).toBe('registered');
+      expect((result as any).content).toBe('registered');
     });
   });
 
@@ -1063,7 +1063,7 @@ describe('Agent — end-to-end loop', () => {
       });
       const { agent } = createFixture({ mockLLM });
       const result = await agent.run('test');
-      expect(result?.content).toBe('Error handled');
+      expect((result as any)?.content).toBe('Error handled');
       const msgs = agent.log.getAll();
       expect(msgs.some(m => m.role === 'tool' && (m.content as string).includes('missing a valid name'))).toBe(true);
     });
@@ -1084,7 +1084,7 @@ describe('Agent — end-to-end loop', () => {
       });
       const { agent } = createFixture({ mockLLM });
       const result = await agent.run('test');
-      expect(result?.content).toBe('Error handled');
+      expect((result as any)?.content).toBe('Error handled');
       const msgs = agent.log.getAll();
       expect(msgs.some(m => m.role === 'tool' && (m.content as string).includes('missing a valid name'))).toBe(true);
     });
@@ -1105,7 +1105,7 @@ describe('Agent — end-to-end loop', () => {
       });
       const { agent } = createFixture({ mockLLM });
       const result = await agent.run('test');
-      expect(result?.content).toBe('Error handled');
+      expect((result as any)?.content).toBe('Error handled');
       const msgs = agent.log.getAll();
       expect(msgs.some(m => m.role === 'tool' && (m.content as string).includes('missing a valid name'))).toBe(true);
     });
@@ -1160,7 +1160,7 @@ describe('Agent — end-to-end loop', () => {
       });
       const { agent } = createFixture({ mockLLM, stream: true });
       const result = await agent.run('test');
-      expect(result?.content).toBe('Hello');
+      expect((result as any)?.content).toBe('Hello');
     });
 
     it('should handle stop finish reason', async () => {
@@ -1173,7 +1173,7 @@ describe('Agent — end-to-end loop', () => {
       });
       const { agent } = createFixture({ mockLLM, stream: true });
       const result = await agent.run('test');
-      expect(result?.content).toBe('Hi');
+      expect((result as any)?.content).toBe('Hi');
     });
   });
 

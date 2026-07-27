@@ -352,6 +352,7 @@ export class Agent {
     while (this.followQueue.length > 0) {
       const followUp = this.followQueue.shift()!;
       this.addMessage(new Message({ role: "user", content: followUp }));
+      this.emitOutput("user_message", { content: followUp });
     }
 
     let messages = this.buildMessages();

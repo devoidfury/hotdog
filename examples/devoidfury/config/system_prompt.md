@@ -2,7 +2,7 @@
 {%- if body %}
 {{ body }}
 {%- endif %}
-Use parallel tool calls when appropriate.
+Parallel tool calling enabled.
 
 {% for chunk in chunks -%}
 {{ chunk.content }}

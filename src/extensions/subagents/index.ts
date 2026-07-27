@@ -3,6 +3,7 @@
 // Only activates when taskManager is provided (manager mode).
 
 import { HOOKS } from "../../core/hooks.ts";
+import { formatError } from "../../core/error.ts";
 import { logger } from "../../core/logger.ts";
 import {
   SUBAGENT_TOOL_NAMES,
@@ -81,7 +82,7 @@ export function create(core: CoreContext, options: SubagentOptions = {}): Extens
             }
           } catch (e: unknown) {
             logger.error(
-              `[subagents] Failed to create tool '${toolName}': ${(e as Error).message || e}`,
+              `[subagents] Failed to create tool '${toolName}': ${formatError(e)}`,
             );
           }
         }

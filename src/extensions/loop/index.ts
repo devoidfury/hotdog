@@ -7,6 +7,7 @@
 
 import { HOOKS } from "../../core/hooks.ts";
 import { ACTIONS } from "../../core/commands.ts";
+import { formatError } from "../../core/error.ts";
 import { CommandAgent } from "../../core/extensions/registries.ts";
 import {
   CoreContext,
@@ -141,7 +142,7 @@ export function create(core: CoreContext): ExtensionInstance {
         try {
           await agent.clearContext();
         } catch (e: unknown) {
-          emit(agent, `Warning: failed to clear context — ${e instanceof Error ? e.message : String(e)}`);
+          emit(agent, `Warning: failed to clear context — ${formatError(e)}`);
           stopLoop(agent, false);
           return;
         }

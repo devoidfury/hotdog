@@ -5,7 +5,7 @@ import fs from "node:fs/promises";
 import { join } from "node:path";
 import { parseFrontMatter, validateNameable } from "../../utils/file-utils.ts";
 import { logger } from "../../core/logger.ts";
-import { ParseError } from "../../core/error.ts";
+import { ParseError, formatError } from "../../core/error.ts";
 import { render } from "../../utils/render.ts";
 import { ACTIONS } from "../../core/commands.ts";
 
@@ -130,8 +130,8 @@ export class PromptsLoader {
         this.prompts.set(prompt.name, prompt);
         count++;
       } catch (e: unknown) {
-        logger.warn(`Failed to load prompt '${entry.name}': ${(e as Error).message}`, {
-          error: (e as Error).message,
+        logger.warn(`Failed to load prompt '${entry.name}': ${formatError(e)}`, {
+          error: formatError(e),
         });
       }
     }

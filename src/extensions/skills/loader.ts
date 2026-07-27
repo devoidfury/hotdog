@@ -6,7 +6,7 @@ import { join } from "node:path";
 import { parseFrontMatter, validateNameable } from "../../utils/file-utils.ts";
 import { render } from "../../utils/render.ts";
 import { logger } from "../../core/logger.ts";
-import { ParseError } from "../../core/error.ts";
+import { ParseError, formatError } from "../../core/error.ts";
 
 export interface Skill {
   name: string;
@@ -269,8 +269,8 @@ export class SkillsLoader {
         count++;
       } catch (e: unknown) {
         logger.warn(
-          `Failed to load skill '${entry.name}': ${(e as Error).message}`,
-          { error: (e as Error).message },
+          `Failed to load skill '${entry.name}': ${formatError(e)}`,
+          { error: formatError(e) },
         );
       }
     }

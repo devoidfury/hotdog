@@ -208,6 +208,8 @@ bun run test
 
 *Was any AI used in the process of writing this code?* You betcha, yes, for sure. I also put my own hands on it, it's not just a slopdog. Go on, audit it.
 
+_[Never seen nobody be able to do this... I'm just sayin'](https://www.youtube.com/watch?v=BYkwtaJgW5g)_
+
 ## License
 
 [MIT](LICENSE) — Copyright (c) 2026 devoidfury / Thomas Hunkapiller

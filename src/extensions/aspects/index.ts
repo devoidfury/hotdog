@@ -87,7 +87,6 @@ export function create(core: CoreContext): ExtensionInstance {
         const configDir = core.resolved?.configDir || resolveConfigDir();
         const profilesPath =
           core.resolved?.profilesPath ||
-          core.config.profilesPath ||
           path.join(configDir, DEFAULT_PROFILES_SUBPATH);
         const content = await buildAspectsChunk(aspectNames, profilesPath);
         return { name: "guidelines", priority: 200, content };

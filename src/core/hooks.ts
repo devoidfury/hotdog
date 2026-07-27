@@ -6,6 +6,10 @@
 import { formatError } from "./error.ts";
 import { logger } from "./logger.ts";
 import { isPromise } from "../utils/promise.ts";
+import type { Message } from "./context/message.ts";
+import type { ImageAttachment } from "./context/message.ts";
+import type { ModelConfig } from "./config/providers.ts";
+import type { ToolDef } from "./extensions/tool-registry.ts";
 
 // ── Gate Action Discriminated Unions ─────────────────────────────────────────
 
@@ -23,15 +27,15 @@ export type GateAction =
  * Result returned by the CONTEXT hook pipeline.
  * Allows handlers to replace the messages array.
  */
-export type ContextHookResult = { messages: unknown[] };
+export type ContextHookResult = { messages: Message[] };
 
 /**
  * Result returned by the PROVIDER_REQUEST hook pipeline.
  * Allows handlers to replace messages, modelConfig, or toolDefs.
  */
 export type ProviderRequestHookResult = {
-  messages?: unknown[];
-  modelConfig?: unknown;
+  messages?: Message[];
+  modelConfig?: ModelConfig;
   toolDefs?: ToolDef[];
 };
 
@@ -47,7 +51,7 @@ export type ToolResultHookResult = { result: unknown };
  */
 export type InputHookResult =
   | { action: "continue" }
-  | { action: "transform"; text: string; images?: unknown[] }
+  | { action: "transform"; text: string; images?: ImageAttachment[] }
   | { action: "handled" };
 
 /**
@@ -87,7 +91,6 @@ function _summarizeResult(value: unknown): string {
 }
 
 import type { HookPayloads } from "./extensions/types.ts";
-import { ToolDef } from "./extensions/tool-registry.ts";
 
 export interface HookHandlerEntry {
   id: number;

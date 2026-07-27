@@ -2,7 +2,30 @@
 
 import { Message, type ImageAttachment } from "./context/message.ts";
 import { MessageLog } from "./context/message-log.ts";
-import { OUTPUT_EVENT, OutputEvent } from "./context/output.ts";
+import { OUTPUT_EVENT, OutputEvent, OutputEventType } from "./context/output.ts";
+
+/**
+ * Map event type strings to OUTPUT_EVENT constants.
+ */
+const EVENT_TYPE_MAP: Record<string, OutputEventType> = {
+  user_message: OUTPUT_EVENT.USER_MESSAGE,
+  assistant_message: OUTPUT_EVENT.ASSISTANT_MESSAGE,
+  thinking: OUTPUT_EVENT.THINKING,
+  tool_call: OUTPUT_EVENT.TOOL_CALL,
+  tool_result: OUTPUT_EVENT.TOOL_RESULT,
+  compacting: OUTPUT_EVENT.COMPACTING,
+  command_result: OUTPUT_EVENT.COMMAND_RESULT,
+  question: OUTPUT_EVENT.QUESTION,
+  streaming_chunk: OUTPUT_EVENT.STREAMING_CHUNK,
+  streaming_reasoning_chunk: OUTPUT_EVENT.STREAMING_REASONING_CHUNK,
+  task_progress: OUTPUT_EVENT.TASK_PROGRESS,
+  token_usage: OUTPUT_EVENT.TOKEN_USAGE,
+  compaction_result: OUTPUT_EVENT.COMPACTION_RESULT,
+  session_state: OUTPUT_EVENT.SESSION_STATE,
+};
+
+type EventTypeName = keyof typeof EVENT_TYPE_MAP;
+
 import { AgentError, ConfigError, LlmError } from "./error.ts";
 import { HOOKS, HookSystem, type ContextHookResult, type ProviderRequestHookResult } from "./hooks.ts";
 import { isPromise } from "../utils/promise.ts";
@@ -14,7 +37,7 @@ import { type CoreConfig } from "./config/schema-loader.ts";
 
 import { createSystemPromptBuilder } from "./context/system-prompt.ts";
 import { TokenTracker, createTokenTracker, type TokenUsage } from "./token-tracker.ts";
-import { ToolExecutor, createToolExecutor } from "./tool-executor.ts";
+import { ToolExecutor, createToolExecutor, type ToolResult as ToolExecutorResult } from "./tool-executor.ts";
 
 import type { LlmClient, StreamEvent } from "./llm-client/client.ts";
 import {
@@ -24,6 +47,7 @@ import {
 } from "./llm-client/stream-processor.ts";
 import type { ToolRegistry, ToolDef } from "./extensions/tool-registry.ts";
 import type { SystemPromptBuilder } from "./context/system-prompt.ts";
+import type { ToolCall } from "./context/message.ts";
 
 export type { StreamEvent } from "./llm-client/client.ts";
 
@@ -37,6 +61,15 @@ export interface ModelRegistry {
 export type AgentRunResult =
   | { type: 'completion'; content: string }
   | { type: 'tool_return'; outcome: string };
+
+/**
+ * Parameters for an LLM request.
+ */
+interface LlmRequestParams {
+  messages: Message[];
+  modelConfig: ModelConfig;
+  toolDefs: ToolDef[];
+}
 
 /**
  * Typed model registry — maps model name to ModelConfig.
@@ -56,6 +89,11 @@ export interface AgentConfig extends CoreConfig {
   cwdBoundary?: string | null;
   workspaceRoot?: string | null;
   maxToolCallsPerIteration?: number;
+  maxRetries?: number;
+  toolRetryDelay?: number;
+  maxToolDifficulty?: number;
+  defaultMaxToolDifficulty?: number;
+  sandboxMode?: boolean;
   [key: string]: unknown;
 }
 
@@ -316,9 +354,9 @@ export class Agent {
         iteration++;
         this.iterationCount = iteration;
 
-        const { messages, modelConfig, toolDefs } = await this._prepareIteration(iteration);
-        const response = await this._performLlmCall(messages, modelConfig, toolDefs);
-        const result = await this._handleLlmResponse(iteration, response, modelConfig);
+        const params = await this._prepareIteration(iteration);
+        const response = await this._performLlmCall(params);
+        const result = await this._handleLlmResponse(iteration, response, params.modelConfig);
 
         if (typeof result === "string") {
           stoppedEmitted = true;
@@ -339,7 +377,7 @@ export class Agent {
     }
   }
 
-  private async _prepareIteration(iteration: number) {
+  private async _prepareIteration(iteration: number): Promise<LlmRequestParams> {
     this.hooks.notifyHooks(HOOKS.TURN_START, {
       turnIndex: iteration,
       timestamp: Date.now(),
@@ -361,7 +399,7 @@ export class Agent {
       agent: this,
     });
     if (contextResult.lastResult?.messages) {
-      messages = contextResult.lastResult.messages as Message[];
+      messages = contextResult.lastResult.messages;
     }
 
     let toolDefs = await this.getToolDefs();
@@ -376,14 +414,15 @@ export class Agent {
       HOOKS.PROVIDER_REQUEST,
       { messages, modelConfig, toolDefs, agent: this },
     );
-    if (reqResult.lastResult?.messages) messages = reqResult.lastResult.messages as Message[];
-    if (reqResult.lastResult?.modelConfig) modelConfig = reqResult.lastResult.modelConfig as typeof modelConfig;
-    if (reqResult.lastResult?.toolDefs) toolDefs = reqResult.lastResult.toolDefs as typeof toolDefs;
+    if (reqResult.lastResult?.messages) messages = reqResult.lastResult.messages;
+    if (reqResult.lastResult?.modelConfig) modelConfig = reqResult.lastResult.modelConfig;
+    if (reqResult.lastResult?.toolDefs) toolDefs = reqResult.lastResult.toolDefs;
 
     return { messages, modelConfig, toolDefs };
   }
 
-  private async _performLlmCall(messages: Message[], modelConfig: any, toolDefs: any) {
+  private async _performLlmCall(params: LlmRequestParams): Promise<StreamResult> {
+    const { messages, modelConfig, toolDefs } = params;
     this.runAbortController = new AbortController();
     const cancelSignal = this.runAbortController.signal;
 
@@ -407,7 +446,11 @@ export class Agent {
     }
   }
 
-  private async _handleLlmResponse(iteration: number, response: any, modelConfig: any) {
+  private async _handleLlmResponse(
+    iteration: number,
+    response: StreamResult,
+    modelConfig: ModelConfig,
+  ): Promise<string | { outcome: string; toolResults: ToolExecutorResult[] }> {
     this.hooks.notifyHooks(HOOKS.PROVIDER_RESPONSE, { response, modelConfig, agent: this });
     this.hooks.notifyHooks(HOOKS.MESSAGES_AFTER_LLM, { response, messages: this.log.getAll(), agent: this });
 
@@ -421,7 +464,7 @@ export class Agent {
 
     if (response.finalToolCalls) {
       let toolCallsToExecute = response.finalToolCalls;
-      let skippedToolResults: any[] = [];
+      let skippedToolResults: ToolExecutorResult[] = [];
 
       if (toolCallsToExecute.length > this.maxToolCallsPerIteration) {
         const truncated = toolCallsToExecute.slice(0, this.maxToolCallsPerIteration);
@@ -453,7 +496,7 @@ export class Agent {
         });
       }
 
-      const finalResults = [...toolResults, ...skippedToolResults];
+      const finalResults: ToolExecutorResult[] = [...toolResults, ...skippedToolResults];
 
       this._emitTokenUsage(response);
       this._emitTurnEnd(iteration, response.fullText, finalResults, outcome === "return");
@@ -557,8 +600,8 @@ export class Agent {
    * @returns { outcome: 'continue' | 'return', toolResults }
    */
   async _executeTools(
-    toolCalls: Array<{ id: string; type: string; function: { name: string; arguments: string } }>,
-  ): Promise<{ outcome: string; toolResults: Array<{ toolName: string; input: string; result: string }> }> {
+    toolCalls: ToolCall[],
+  ): Promise<{ outcome: "continue" | "return"; toolResults: ToolExecutorResult[] }> {
     return this.#toolExecutor.execute(toolCalls);
   }
 
@@ -598,12 +641,10 @@ export class Agent {
 
   // ── Helpers ───────────────────────────────────────────────────────────────
 
-  emitOutput(type: string, data: Record<string, unknown>): void {
-    if (this.sink) {
-      const key = type.toUpperCase() as keyof typeof OUTPUT_EVENT;
-      if (key in OUTPUT_EVENT) {
-        this.sink.emit({ type: OUTPUT_EVENT[key], ...data });
-      }
+  emitOutput(type: EventTypeName, data: Record<string, unknown>): void {
+    const eventType = EVENT_TYPE_MAP[type];
+    if (this.sink && eventType) {
+      this.sink.emit({ type: eventType, ...data } as OutputEvent);
     }
     this.hooks.notifyHooks(HOOKS.OUTPUT_EVENT, { type, data, agent: this });
   }

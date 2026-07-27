@@ -18,6 +18,19 @@ import {
   metadataTool,
   createFixture,
 } from '../helpers.ts';
+import type { AgentRunResult } from '../../src/core/agent.ts';
+
+/** Assert result is a completion and return it narrowed. */
+function expectCompletion(result: AgentRunResult | undefined | null): { type: 'completion'; content: string } {
+  expect(result?.type).toBe('completion');
+  return result as { type: 'completion'; content: string };
+}
+
+/** Assert result is a tool_return and return it narrowed. */
+function expectToolReturn(result: AgentRunResult | undefined | null): { type: 'tool_return'; outcome: string } {
+  expect(result?.type).toBe('tool_return');
+  return result as { type: 'tool_return'; outcome: string };
+}
 
 // ── Tests ───────────────────────────────────────────────────────────────────
 
@@ -46,8 +59,8 @@ describe('Agent — end-to-end loop', () => {
 
     const result = await agent.run('Hi');
 
-    expect(result?.type).toBe('completion');
-    expect(result?.content).toBe('Hello! I am an AI assistant.');
+    const completion = expectCompletion(result);
+    expect(completion.content).toBe('Hello! I am an AI assistant.');
     // Note: agent.log only contains user/assistant/tool messages,
 
     // NOT the system prompt. The system prompt is prepended at build time.
@@ -72,8 +85,8 @@ describe('Agent — end-to-end loop', () => {
 
     const result = await agent.run('Think step by step');
 
-    expect(result?.type).toBe('completion');
-    expect(result?.content).toBe('Here is my answer.');
+    const completion = expectCompletion(result);
+    expect(completion.content).toBe('Here is my answer.');
     expect(agent.log.at(1)!.reasoningContent).toBe('I need to think about this carefully.');
   });
 
@@ -103,8 +116,8 @@ describe('Agent — end-to-end loop', () => {
 
     const result = await agent.run('What is 2+2?');
 
-    expect(result?.type).toBe('completion');
-    expect(result?.content).toBe('The answer is 42.');
+    const completion = expectCompletion(result);
+    expect(completion.content).toBe('The answer is 42.');
     expect(tool.executeCount).toBe(1);
     expect(tool.lastInput).toBe('{"expr":"2+2"}');
     expect(mockLLM.callCount).toBe(2);
@@ -151,8 +164,8 @@ describe('Agent — end-to-end loop', () => {
 
     const result = await agent.run('Search and read');
 
-    expect(result?.type).toBe('completion');
-    expect(result?.content).toBe('Both operations completed.');
+    const completion = expectCompletion(result);
+    expect(completion.content).toBe('Both operations completed.');
     expect(readTool.executeCount).toBe(1);
     expect(grepTool.executeCount).toBe(1);
     expect(mockLLM.callCount).toBe(2);
@@ -197,8 +210,8 @@ describe('Agent — end-to-end loop', () => {
 
     const result = await agent.run('Greet someone');
 
-    expect(result?.type).toBe('completion');
-    expect(result?.content).toBe('The validation failed as expected.');
+    const completion = expectCompletion(result);
+    expect(completion.content).toBe('The validation failed as expected.');
     expect(tool.executeCount).toBe(0); // tool was NOT executed
     expect(mockLLM.callCount).toBe(2);
 
@@ -230,8 +243,8 @@ describe('Agent — end-to-end loop', () => {
 
     const result = await agent.run('Use a tool');
 
-    expect(result?.type).toBe('completion');
-    expect(result?.content).toBe('The tool was not found.');
+    const completion = expectCompletion(result);
+    expect(completion.content).toBe('The tool was not found.');
     expect(mockLLM.callCount).toBe(2);
 
     // Context after full run:
@@ -265,8 +278,8 @@ describe('Agent — end-to-end loop', () => {
 
     const result = await agent.run('Use the tool');
 
-    expect(result?.type).toBe('completion');
-    expect(result?.content).toBe('The tool reported an error.');
+    const completion = expectCompletion(result);
+    expect(completion.content).toBe('The tool reported an error.');
     expect(tool.executeCount).toBe(1);
 
     // Context after full run:
@@ -301,8 +314,8 @@ describe('Agent — end-to-end loop', () => {
     // Should return early without a second LLM call
     const result = await agent.run('Do work then wait');
 
-    expect(result?.type).toBe('tool_return');
-    expect(result?.outcome).toBe('return');
+    const toolReturn = expectToolReturn(result);
+    expect(toolReturn.outcome).toBe('return');
     expect(mockLLM.callCount).toBe(1); // only one LLM call
     expect(waitTool.executeCount).toBe(1);
   });
@@ -339,7 +352,8 @@ describe('Agent — end-to-end loop', () => {
 
     const result = await agent.run('Use tools');
 
-    expect(result?.content).toBe('One tool was blocked.');
+    const completion = expectCompletion(result);
+    expect(completion.content).toBe('One tool was blocked.');
     expect(allowedTool.executeCount).toBe(1);
     expect(blockedTool.executeCount).toBe(0);
 
@@ -549,7 +563,8 @@ describe('Agent — end-to-end loop', () => {
 
     const result = await agent.run('Access sensitive data');
 
-    expect(result?.content).toBe('Tool blocked by gate.');
+    const completion = expectCompletion(result);
+    expect(completion.content).toBe('Tool blocked by gate.');
     expect(tool.executeCount).toBe(0); // tool was NOT executed
 
     // Context after full run:
@@ -586,7 +601,8 @@ describe('Agent — end-to-end loop', () => {
 
     const result = await agent.run('Modify result');
 
-    expect(result?.content).toBe('Modified result received.');
+    const completion = expectCompletion(result);
+    expect(completion.content).toBe('Modified result received.');
     expect(tool.executeCount).toBe(1);
 
     // Context after full run:
@@ -666,7 +682,8 @@ describe('Agent — end-to-end loop', () => {
 
     const result = await agent.run('Do work');
 
-    expect(result?.content).toBe('Follow-up processed.');
+    const completion = expectCompletion(result);
+    expect(completion.content).toBe('Follow-up processed.');
     expect(mockLLM.callCount).toBe(2);
 
     // Context should contain the follow-up user message
@@ -1024,7 +1041,7 @@ describe('Agent — end-to-end loop', () => {
       const { agent, toolRegistry } = createFixture({ mockLLM });
       toolRegistry.register('bad-tool', tool);
       const result = await agent.run('do something');
-      expect(result?.type).toBe('completion');
+      expectCompletion(result);
     });
 
   });

@@ -6,7 +6,7 @@ import { loadProfileFile } from "../config/profiles.ts";
 import { parseAs } from "../../utils/json-schema.ts";
 import { type CoreConfig } from "../config/schema-loader.ts";
 import { OUTPUT_EVENT } from "../context/output.ts";
-import type { AgentRunResult } from "../core/agent.ts";
+import type { AgentRunResult } from "../../core/agent.ts";
 
 // ── Task Status ─────────────────────────────────────────────────────────────
 

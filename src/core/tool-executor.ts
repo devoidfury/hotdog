@@ -44,7 +44,7 @@ export class ToolExecutor {
 
   async execute(
     toolCalls: ToolCall[],
-  ): Promise<{ outcome: string; toolResults: ToolResult[] }> {
+  ): Promise<{ outcome: "continue" | "return"; toolResults: ToolResult[] }> {
     const toolResults: ToolResult[] = [];
 
     for (const tc of toolCalls) {
@@ -99,7 +99,7 @@ export class ToolExecutor {
         toolCallId,
       });
       this.#deps.addMessage(msg);
-      return { toolName: "(invalid)", input, result };
+      return { toolName: "(invalid)", input, result, toolCallId: toolCallId || "" };
     }
 
     if (
@@ -158,7 +158,7 @@ export class ToolExecutor {
     }
 
     let result: unknown;
-    let success: boolean;
+    let success = false;
     let stopLoop = false;
     const maxRetries = this.#deps.maxRetries;
     let attempts = 0;

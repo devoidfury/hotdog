@@ -102,40 +102,10 @@ describe("aspects extension", () => {
     expect((result as any).priority).toBe(200);
   });
 
-  it("hook resolves aspects from config when profile has none", async () => {
-    await fsPromises.writeFile(
-      path.join(aspectsDir, "concise.aspect.md"),
-      "# Concise\n\nBe brief."
-    );
-
-    // Profile without aspects in front matter
-    await fsPromises.writeFile(
-      path.join(profilesDir, "default.profile.md"),
-      "---\n---\n\nDefault profile without aspects."
-    );
-
-    const core = {
-      config: { aspects: ["concise"] },
-      resolved: {
-        configDir: tmpDir,
-        profilesPath: profilesDir,
-        profileName: "default",
-      },
-    } as any;
-    const extension = create(core);
-    const hook = extension.hooks![HOOKS.SYSTEM_PROMPT_BUILD]!;
-    const result = await hook({} as any);
-    expect((result as any).content).toContain("Concise");
-  });
-
-  it("profile front matter aspects take priority over config aspects", async () => {
+  it("profile front matter aspects are loaded correctly", async () => {
     await fsPromises.writeFile(
       path.join(aspectsDir, "profile-aspect.aspect.md"),
       "# Profile Aspect"
-    );
-    await fsPromises.writeFile(
-      path.join(aspectsDir, "config-aspect.aspect.md"),
-      "# Config Aspect"
     );
 
     await fsPromises.writeFile(
@@ -144,7 +114,7 @@ describe("aspects extension", () => {
     );
 
     const core = {
-      config: { aspects: ["config-aspect"] },
+      config: {},
       resolved: {
         configDir: tmpDir,
         profilesPath: profilesDir,
@@ -155,7 +125,6 @@ describe("aspects extension", () => {
     const hook = extension.hooks![HOOKS.SYSTEM_PROMPT_BUILD]!;
     const result = await hook({} as any);
     expect((result as any).content).toContain("Profile Aspect");
-    expect((result as any).content).not.toContain("Config Aspect");
   });
 
   it("handles missing profile file gracefully", async () => {

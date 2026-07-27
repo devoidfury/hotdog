@@ -134,15 +134,15 @@ export function parseCommand(
     return { type: Command.Sessions, value: null };
   }
   if (cmdLower === "attach" || cmdLower.startsWith("attach ")) {
-    const sessionId = cmd.replace(new RegExp(`^attach\\s+`, "i")).trim();
+    const sessionId = cmd.replace(new RegExp(`^attach\\s+`, "i"), "").trim();
     return { type: Command.Attach, value: sessionId || null };
   }
   if (cmdLower === "detach" || cmdLower.startsWith("detach ")) {
-    const sessionId = cmd.replace(new RegExp(`^detach\\s+`, "i")).trim();
+    const sessionId = cmd.replace(new RegExp(`^detach\\s+`, "i"), "").trim();
     return { type: Command.Detach, value: sessionId || null };
   }
   if (cmdLower === "switch" || cmdLower.startsWith("switch ")) {
-    const sessionId = cmd.replace(new RegExp(`^switch\\s+`, "i")).trim();
+    const sessionId = cmd.replace(new RegExp(`^switch\\s+`, "i"), "").trim();
     return { type: Command.Switch, value: sessionId || null };
   }
 

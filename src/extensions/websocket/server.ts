@@ -10,7 +10,7 @@ import { LlmClient, type ProviderConfig } from "../../core/llm-client/client.ts"
 import { MarkerMangler } from "../../core/marker-mangler.ts";
 import type { CoreContext } from "../../core/extensions/types.ts";
 import type { AuthMiddleware } from "./auth.ts";
-import { Agent } from "../../core/agent.ts";
+import { Agent, type ModelConfig } from "../../core/agent.ts";
 import { readSessionEntries, replayEntriesIntoContext, listSessionLogs, deleteSessionLog } from "../../core/session/session-log.ts";
 import { AgentError } from "../../core/error.ts";
 
@@ -835,9 +835,15 @@ export function createWsServer(core: CoreContext, options: CreateWsServerOptions
       hideThinking: (agentConfig as { hideThinking?: boolean }).hideThinking ?? (core.resolved?.hideThinking as boolean) ?? true,
       showTokenUse: (agentConfig as { showTokenUse?: boolean }).showTokenUse ?? (core.resolved?.showTokenUse as boolean) ?? true,
       sink: null, // Sink is managed by WebSocketChannel
-      modelRegistry: core.resolved?.modelRegistry as { [key: string]: { contextLimit?: number; reasoningEffort?: string; [key: string]: unknown } } | undefined,
+      modelRegistry: core.resolved?.modelRegistry as Record<string, ModelConfig> | undefined,
       profileName: (agentConfig as { profileName?: string }).profileName || (core.resolved?.profileName as string) || "default",
-      config: core.config || {},
+      config: core.config
+        ? {
+            ...core.config,
+            maxToolDifficulty: core.config.maxToolDifficulty ?? undefined,
+            defaultMaxToolDifficulty: core.config.defaultMaxToolDifficulty ?? undefined,
+          }
+        : undefined,
       sessionId,
       abortSignal: null,
       toolWhitelist: null,

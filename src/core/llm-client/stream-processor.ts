@@ -142,28 +142,26 @@ export class StreamProcessor {
 
       switch (event.type) {
         case "content": {
-          const content = event.content as string;
-          textParts.push(content);
-          this.#currentStreamingContent += content;
+          textParts.push(event.content);
+          this.#currentStreamingContent += event.content;
           if (this.#stream && callbacks.onChunk) {
-            callbacks.onChunk(content);
+            callbacks.onChunk(event.content);
           }
           break;
         }
 
         case "reasoning": {
-          const content = event.content as string;
-          reasoningParts.push(content);
-          this.#currentStreamingReasoning += content;
+          reasoningParts.push(event.content);
+          this.#currentStreamingReasoning += event.content;
           if (this.#stream && callbacks.onReasoning) {
-            callbacks.onReasoning(content);
+            callbacks.onReasoning(event.content);
           }
           break;
         }
 
         case "toolName": {
-          toolCallsBuffer.set(event.index as number, {
-            name: event.name as string,
+          toolCallsBuffer.set(event.index, {
+            name: event.name,
             args: [],
             id: event.toolCallId || "",
           });
@@ -172,18 +170,18 @@ export class StreamProcessor {
 
         case "toolArgument": {
           const existing =
-            toolCallsBuffer.get(event.index as number) || {
+            toolCallsBuffer.get(event.index) || {
               name: "",
               args: [],
               id: "",
             };
-          existing.args.push(event.arguments as string);
-          toolCallsBuffer.set(event.index as number, existing);
+          existing.args.push(event.arguments);
+          toolCallsBuffer.set(event.index, existing);
           break;
         }
 
         case "usage": {
-          usage = event.data as Record<string, unknown>;
+          usage = event.data;
           if (callbacks.onUsage) {
             callbacks.onUsage(usage);
           }
@@ -191,7 +189,7 @@ export class StreamProcessor {
         }
 
         case "finish": {
-          finishReason = event.reason as string;
+          finishReason = event.reason;
           if (callbacks.onFinish) {
             callbacks.onFinish(finishReason);
           }

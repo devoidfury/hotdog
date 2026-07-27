@@ -10,7 +10,7 @@ import { CliOutputSink } from "../../utils/cli/cli.ts";
 import { LlmClient, ProviderConfig } from "../../core/llm-client/client.ts";
 import { MarkerMangler } from "../../core/marker-mangler.ts";
 import { SessionManager } from "../../core/session/index.ts";
-import { Agent } from "../../core/agent.ts";
+import { Agent, type ModelConfig } from "../../core/agent.ts";
 import { OneShotChannel } from "./oneshot-channel.ts";
 import { CoreContext, ExtensionInstance, ResolvedConfig } from "../../core/extensions/types.ts";
 
@@ -139,13 +139,17 @@ async function handlePromptSubcommand(
       hideThinking: typeof agentConfig.hideThinking === "boolean" ? agentConfig.hideThinking : (resolved as ResolvedConfig).hideThinking,
       showTokenUse: typeof agentConfig.showTokenUse === "boolean" ? agentConfig.showTokenUse : (resolved as ResolvedConfig).showTokenUse,
       sink: null, // Sink is managed by OneShotChannel via SessionManager
-      modelRegistry: (agentConfig.modelRegistry as { [key: string]: { contextLimit?: number; reasoningEffort?: string; [key: string]: unknown } }) ||
-        (modelRegistry as { [key: string]: { contextLimit?: number; reasoningEffort?: string; [key: string]: unknown } }),
+      modelRegistry: (agentConfig.modelRegistry as Record<string, ModelConfig>) ||
+        (modelRegistry as Record<string, ModelConfig>),
       profileName: (agentConfig.profileName as string) || (resolved as ResolvedConfig).profileName,
       role: (agentConfig.role as string) || (resolved as ResolvedConfig).role,
       profileBody: (agentConfig.profileBody as string) || (resolved as ResolvedConfig).profileBody,
       stream: typeof agentConfig.stream === "boolean" ? agentConfig.stream : (resolved as ResolvedConfig).stream,
-      config,
+      config: {
+        ...config,
+        maxToolDifficulty: config.maxToolDifficulty ?? undefined,
+        defaultMaxToolDifficulty: config.defaultMaxToolDifficulty ?? undefined,
+      },
       sessionId,
       abortSignal: (agentConfig.abortSignal as AbortSignal) || null,
       toolWhitelist: (agentConfig.toolWhitelist as string[]) || null,

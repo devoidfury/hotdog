@@ -483,7 +483,6 @@ export interface CoreConfig {
   useColors?: boolean;
   theme?: string;
   role?: string;
-  aspects?: unknown[];
   defaultModel?: string;
   maxIterations?: number;
   maxRetries?: number;

@@ -268,13 +268,6 @@
       }
     ]
   },
-  "aspects": {
-    "type": "array",
-    "layers": [
-      { "source": "profile", "key": "aspects", "cast": "array" },
-      { "default": [] }
-    ]
-  },
   "defaultModel": {
     "type": "string",
     "layers": [

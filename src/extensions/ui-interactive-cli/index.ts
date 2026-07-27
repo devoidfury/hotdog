@@ -12,7 +12,7 @@ import { CliOutputSink } from "../../utils/cli/cli.ts";
 import { LlmClient, type ProviderConfig } from "../../core/llm-client/client.ts";
 import { MarkerMangler } from "../../core/marker-mangler.ts";
 import { SessionManager } from "../../core/session/index.ts";
-import { Agent } from "../../core/agent.ts";
+import { Agent, type ModelConfig } from "../../core/agent.ts";
 import { CliChannel } from "./cli-channel.ts";
 import pkg from "../../../package.json" with { type: "json" };
 import {
@@ -338,13 +338,17 @@ export async function runInteractiveSession(
       hideThinking: typeof agentConfig.hideThinking === "boolean" ? agentConfig.hideThinking : (resolved.hideThinking as boolean | undefined),
       showTokenUse: typeof agentConfig.showTokenUse === "boolean" ? agentConfig.showTokenUse : (resolved.showTokenUse as boolean | undefined),
       sink: null, // Sink is managed by CliChannel via SessionManager
-      modelRegistry: (agentConfig.modelRegistry as { [key: string]: { contextLimit?: number; reasoningEffort?: string; [key: string]: unknown } }) ||
-        (resolved.modelRegistry as unknown as { [key: string]: { contextLimit?: number; reasoningEffort?: string; [key: string]: unknown } }) || {},
+      modelRegistry: (agentConfig.modelRegistry as Record<string, ModelConfig>) ||
+        (resolved.modelRegistry as Record<string, ModelConfig>) || {},
       profileName: (agentConfig.profileName as string) || (resolved.profileName as string),
       role: (agentConfig.role as string) || (resolved.role as string | undefined),
       profileBody: (agentConfig.profileBody as string) || (resolved.profileBody as string | undefined),
       stream: typeof agentConfig.stream === "boolean" ? agentConfig.stream : (resolved.stream as boolean | undefined),
-      config,
+      config: {
+        ...config,
+        maxToolDifficulty: config.maxToolDifficulty ?? undefined,
+        defaultMaxToolDifficulty: config.defaultMaxToolDifficulty ?? undefined,
+      },
       sessionId,
       abortSignal: (agentConfig.abortSignal as AbortSignal) || null,
       toolWhitelist: (agentConfig.toolWhitelist as string[]) || null,

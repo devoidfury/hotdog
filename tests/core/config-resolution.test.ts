@@ -199,26 +199,6 @@ describe("Phase 2: Complex values", () => {
     });
   });
 
-  describe("aspects", () => {
-    it("defaults to empty array and respects profile", () => {
-      expect(resolveKey("aspects", CONFIG_KEYS.aspects, baseContext)).toEqual([]);
-      expect(resolveKey("aspects", CONFIG_KEYS.aspects, {
-        ...baseContext,
-        profile: {
-          name: "test",
-          description: "test",
-          role: null,
-          body: "",
-          model: null,
-          blacklistTools: [],
-          whitelistTools: null,
-          manager: false,
-          visibleWorker: false,
-          aspects: ["coding"],
-        },
-      })).toEqual(["coding"]);
-    });
-  });
 });
 
 describe("integration: resolveAll with CONFIG_KEYS", () => {
@@ -269,7 +249,6 @@ describe("integration: resolveAll with CONFIG_KEYS", () => {
         whitelistTools: null,
         manager: false,
         visibleWorker: false,
-        aspects: ["coding"],
       },
       profileName: "default",
       profilesPath: "./config/profiles",
@@ -297,7 +276,6 @@ describe("integration: resolveAll with CONFIG_KEYS", () => {
     expect(result.noLog).toBe(true);
     expect(result.hideThinking).toBe(false);
     expect(result.useColors).toBe(false);
-    expect(result.aspects).toEqual(["coding"]);
   });
 
   it("respects defaults when no values provided", () => {
@@ -317,6 +295,5 @@ describe("integration: resolveAll with CONFIG_KEYS", () => {
     expect(result.noLog).toBe(false);
     expect(result.hideThinking).toBe(false);
     expect(result.useColors).toBe(true);
-    expect(result.aspects).toEqual([]);
   });
 });

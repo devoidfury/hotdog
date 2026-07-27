@@ -445,7 +445,7 @@ describe("Info CLI - profiles subcommand", () => {
     try {
       const run = await infoCliRunner({
         buildConfig: async () => ({
-          resolved: { configDir: tmpDir, profileName: "default", aspects: [] },
+          resolved: { configDir: tmpDir, profileName: "default" },
         }),
       });
       const { exitCode, output } = await run("profiles");
@@ -473,7 +473,7 @@ describe("Info CLI - profiles subcommand", () => {
     try {
       const run = await infoCliRunner({
         buildConfig: async () => ({
-          resolved: { configDir: tmpDir, profileName: "default", aspects: [] },
+          resolved: { configDir: tmpDir, profileName: "default" },
         }),
       });
       const { exitCode, output } = await run("profiles");
@@ -515,7 +515,7 @@ describe("Info CLI - profiles subcommand", () => {
           },
         },
         buildConfig: async () => ({
-          resolved: { configDir: tmpDir, profileName: "test", aspects: [] },
+          resolved: { configDir: tmpDir, profileName: "test" },
         }),
       });
       const { exitCode, output } = await run("profiles");
@@ -538,13 +538,13 @@ describe("Info CLI - profiles subcommand", () => {
 
     writeFileSync(
       join(profilesDir, "worker.profile.md"),
-      "---\nname: worker\ndescription: A worker profile\nrole: Do work.\nvisible-worker: true\n---\nWork body.",
+      "---\nname: worker\ndescription: A worker profile\nrole: Do work.\nvisible-worker: true\naspects:\n  - guidelines\n---\nWork body.",
     );
 
     try {
       const run = await infoCliRunner({
         buildConfig: async () => ({
-          resolved: { configDir: tmpDir, profileName: "worker", aspects: ["guidelines"] },
+          resolved: { configDir: tmpDir, profileName: "worker" },
         }),
       }, { wantsJson: true });
       const { exitCode, output } = await run("profiles");
@@ -569,7 +569,7 @@ describe("Info CLI - profiles subcommand", () => {
     try {
       const run = await infoCliRunner({
         buildConfig: async () => ({
-          resolved: { configDir: tmpDir, profileName: "default", aspects: [] },
+          resolved: { configDir: tmpDir, profileName: "default" },
         }),
       });
       const { exitCode, output } = await run("profiles");
@@ -597,7 +597,7 @@ describe("Info CLI - profiles subcommand", () => {
     try {
       const run = await infoCliRunner({
         buildConfig: async () => ({
-          resolved: { configDir: tmpDir, profileName: "default", aspects: [] },
+          resolved: { configDir: tmpDir, profileName: "default" },
         }),
       });
       const { exitCode, output } = await run("profiles");
@@ -632,7 +632,7 @@ describe("Info CLI - profiles subcommand", () => {
     try {
       const run = await infoCliRunner({
         buildConfig: async () => ({
-          resolved: { configDir: tmpDir, profileName: "default", aspects: [] },
+          resolved: { configDir: tmpDir, profileName: "default" },
         }),
       });
       const { exitCode, output } = await run("profiles");
@@ -658,7 +658,7 @@ describe("Info CLI - profiles subcommand", () => {
     try {
       const run = await infoCliRunner({
         buildConfig: async () => ({
-          resolved: { configDir: tmpDir, profileName: "default", aspects: [] },
+          resolved: { configDir: tmpDir, profileName: "default" },
         }),
       });
       const { exitCode, output } = await run("profiles");
@@ -682,7 +682,7 @@ describe("Info CLI - profiles subcommand", () => {
     try {
       const run = await infoCliRunner({
         buildConfig: async () => ({
-          resolved: { configDir: tmpDir, profileName: "default", aspects: [] },
+          resolved: { configDir: tmpDir, profileName: "default" },
         }),
       });
       const { exitCode, output } = await run("profiles");
@@ -711,7 +711,7 @@ describe("Info CLI - profiles subcommand", () => {
     try {
       const run = await infoCliRunner({
         buildConfig: async () => ({
-          resolved: { configDir: tmpDir, profileName: "default", aspects: [] },
+          resolved: { configDir: tmpDir, profileName: "default" },
         }),
       }, { wantsJson: true });
       const { exitCode, output } = await run("profiles");

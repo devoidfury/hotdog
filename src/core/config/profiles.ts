@@ -129,6 +129,7 @@ export async function loadProfileFiles(
       model: (fm.model as string) || null,
       manager: !!fm.manager,
       visibleWorker: !!fm.visibleWorker,
+      aspects: (fm.aspects as string[]) || undefined,
     };
   }
 

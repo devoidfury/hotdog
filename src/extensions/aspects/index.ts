@@ -1,5 +1,5 @@
 // Aspects Extension
-// Reads aspect names from profile file front matter or config file.
+// Reads aspect names from profile file front matter.
 // Loads .aspect.md files, composable system prompt chunks.
 
 import fsPromises from "node:fs/promises";
@@ -15,21 +15,18 @@ import { CoreContext, ExtensionInstance } from "../../core/extensions/types.ts";
 const TEMPLATE_PATH = path.join(import.meta.dirname, "aspects_chunk.md");
 
 /**
- * Resolve aspect names from profile file and/or config.
- * Priority: profile file front matter > config file aspects array.
+ * Resolve aspect names from profile file front matter.
  */
 async function resolveAspectNames(core: CoreContext): Promise<string[]> {
   const resolved = core.resolved;
-  const rawConfig = core.config || {};
   const configDir = resolved?.configDir || resolveConfigDir();
 
   const profileName = resolved?.profileName || "default";
   const profilesPath =
     resolved?.profilesPath ||
-    rawConfig.profilesPath ||
     path.join(configDir, DEFAULT_PROFILES_SUBPATH);
 
-  // Try to read aspect names from profile file front matter
+  // Read aspect names from profile file front matter
   const profileFilePath = path.join(profilesPath, `${profileName}.profile.md`);
   try {
     const content = await fsPromises.readFile(profileFilePath, "utf-8");
@@ -43,12 +40,6 @@ async function resolveAspectNames(core: CoreContext): Promise<string[]> {
     }
   } catch {
     // Profile file not found or not readable
-  }
-
-  // Fall back to config file aspects array
-  const configAspects = (rawConfig.aspects as string[]) || [];
-  if (configAspects.length > 0) {
-    return configAspects;
   }
 
   return [];

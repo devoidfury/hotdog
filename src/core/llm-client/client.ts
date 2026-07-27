@@ -47,16 +47,13 @@ export interface LlmClientRequiredOptions {
   maxRetries: number;
 }
 
-export interface StreamEvent {
-  type: string;
-  content?: string;
-  name?: string;
-  index?: number;
-  arguments?: string;
-  data?: Record<string, unknown>;
-  reason?: string;
-  toolCallId?: string;
-}
+export type StreamEvent =
+  | { type: "content"; content: string }
+  | { type: "reasoning"; content: string }
+  | { type: "toolName"; index: number; name: string; toolCallId: string }
+  | { type: "toolArgument"; index: number; arguments: string }
+  | { type: "usage"; data: Record<string, unknown> }
+  | { type: "finish"; reason: string };
 
 export class LlmClient {
   baseUrl: string | null;
@@ -423,21 +420,22 @@ export class LlmClient {
       if (reasoningContent) {
         let content = reasoningContent;
         if (this.#mangler) content = this.#mangler.unescape(content) ?? "";
-        events.push({ type: "reasoning", content: content as string });
+        if (content) events.push({ type: "reasoning", content });
       }
 
       const contentVal = delta.content as string | null | undefined;
       if (contentVal) {
         let content = contentVal;
         if (this.#mangler) content = this.#mangler.unescape(content) ?? "";
-        events.push({ type: "content", content: content as string });
+        if (content) events.push({ type: "content", content });
       }
 
       const toolCalls = (delta.tool_calls as Array<Record<string, unknown>>) || [];
       for (const tc of toolCalls) {
         if (tc.function) {
-          let name = (tc.function as Record<string, unknown>).name as string | null | undefined;
-          let arguments_ = (tc.function as Record<string, unknown>).arguments as string | null | undefined;
+          const fn = tc.function as Record<string, unknown>;
+          let name = fn.name as string | null | undefined;
+          let arguments_ = fn.arguments as string | null | undefined;
           if (this.#mangler) {
             if (name) name = this.#mangler.unescape(name);
             if (arguments_) arguments_ = this.#mangler.unescape(arguments_);
@@ -460,8 +458,9 @@ export class LlmClient {
         }
       }
 
-      if (choice.finish_reason) {
-        events.push({ type: "finish", reason: choice.finish_reason as string });
+      const finishReason = choice.finish_reason as string | undefined;
+      if (finishReason) {
+        events.push({ type: "finish", reason: finishReason });
       }
     }
 

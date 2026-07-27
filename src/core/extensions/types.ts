@@ -259,7 +259,6 @@ export interface ResolvedConfig {
   toolOutputFmt?: string;
   profileBody?: string;
   role?: string;
-  aspects?: unknown[];
   taskProfile?: string;
   taskDefaultRole?: string;
   profilesPath?: string;

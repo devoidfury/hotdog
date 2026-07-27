@@ -5,6 +5,7 @@
 import {
   CompactionStrategy,
   CompactionStrategyRegistry,
+  type CompactResult,
 } from "./strategies.ts";
 import { SummarizeStrategy } from "./strategies/summarize.ts";
 import { DropStrategy } from "./strategies/drop.ts";
@@ -148,7 +149,7 @@ export function create(core: CoreContext): ExtensionInstance | null {
           throw LlmError.Cancelled("Compaction cancelled");
         }
         if (event.type === "content") {
-          fullText += event.content as string;
+          fullText += event.content;
         }
       }
       return fullText;
@@ -158,15 +159,15 @@ export function create(core: CoreContext): ExtensionInstance | null {
       const result = await strategy.execute(messages, settings, llmChat, model);
       if (!result) return;
 
-      const compactedCount = (result as { messagesCompacted: number }).messagesCompacted;
+      const compactedCount = result.messagesCompacted;
 
       // Replace compacted messages with summary
-      if ((result as { summary?: string }).summary) {
+      if (result.summary) {
         // Create a summary message with marker wrapper
         const tag = "previous-context-summary";
         const summaryMsg = new Message({
           role: "user",
-          content: `<${tag}>${(result as { summary: string }).summary}</${tag}>`,
+          content: `<${tag}>${result.summary}</${tag}>`,
         });
 
         // Replace the compacted portion

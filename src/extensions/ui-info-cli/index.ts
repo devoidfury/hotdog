@@ -670,9 +670,6 @@ async function runProfileList(
   // Get config-defined profiles
   const configProfiles = (config.profiles as Record<string, ProfileDef>) || {};
 
-  // Aspects — from global resolved config (extension-resolved)
-  const aspects = resolved.aspects as string[] | undefined;
-
   // Collect all profile names from both sources
   const allNames = new Set([
     ...Object.keys(configProfiles),
@@ -689,7 +686,6 @@ async function runProfileList(
       profileFiles,
       configProfiles,
       allNames,
-      aspects,
       resolved.profileName,
       profilesPath,
       visibleWorkerNames,
@@ -701,7 +697,6 @@ async function runProfileList(
     configProfiles,
     allNames,
     resolved.profileName,
-    aspects,
     profilesPath,
     visibleWorkerNames,
     configDir,
@@ -716,7 +711,6 @@ function printProfileListText(
   configProfiles: Record<string, ProfileDef>,
   allNames: Set<string>,
   currentProfile: string,
-  globalAspects: string[] | undefined,
   profilesPath: string,
   visibleWorkerNames: string[],
   configDir: string,
@@ -761,9 +755,10 @@ function printProfileListText(
       console.log(`  Model: ${model}`);
     }
 
-    // Aspects — from global resolved config (extension-resolved)
-    if (globalAspects && globalAspects.length > 0) {
-      console.log(`  Aspects: ${globalAspects.join(", ")}`);
+    // Aspects — from profile definition
+    const profileAspects = fileProfile?.aspects || configProfile?.aspects || [];
+    if (profileAspects.length > 0) {
+      console.log(`  Aspects: ${profileAspects.join(", ")}`);
     }
 
     // Tool restrictions — file profile values take priority, but only if non-empty
@@ -835,7 +830,6 @@ function printProfileListJson(
   profileFiles: Record<string, ProfileDef>,
   configProfiles: Record<string, ProfileDef>,
   allNames: Set<string>,
-  globalAspects: string[] | undefined,
   currentProfile: string,
   profilesPath: string,
   visibleWorkerNames: string[],
@@ -863,6 +857,9 @@ function printProfileListJson(
     const whitelistTools =
       fileWhitelist && fileWhitelist.length > 0 ? fileWhitelist : cfgWhitelist;
 
+    // Aspects — from profile definition
+    const profileAspects = fileProfile?.aspects || configProfile?.aspects || [];
+
     // Compute path for file-sourced profiles
     let profileRelPath: string | null = null;
     if (fileProfile && profilesPath) {
@@ -881,7 +878,7 @@ function printProfileListJson(
         fileProfile?.description || configProfile?.description || null,
       role: fileProfile?.role || configProfile?.role || null,
       model: configProfile?.model || fileProfile?.model || null,
-      aspects: globalAspects && globalAspects.length > 0 ? globalAspects : null,
+      aspects: profileAspects.length > 0 ? profileAspects : null,
       blacklistTools: blacklistTools.length > 0 ? blacklistTools : null,
       whitelistTools,
       manager: fileProfile?.manager || false,

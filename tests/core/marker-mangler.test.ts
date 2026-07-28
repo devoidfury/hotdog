@@ -1,5 +1,5 @@
 import { describe, it, expect } from "bun:test";
-import { MarkerMangler, createMarkerMangler } from "../../src/core/marker-mangler.ts";
+import { MarkerMangler } from "../../src/core/marker-mangler.ts";
 
 function createMangler() {
   return new MarkerMangler();
@@ -126,16 +126,3 @@ describe("MarkerMangler - wrapper methods", () => {
   });
 });
 
-describe("createMarkerMangler", () => {
-  it("returns a new MarkerMangler instance", () => {
-    const mangler = createMarkerMangler();
-    expect(mangler).toBeInstanceOf(MarkerMangler);
-    expect(mangler.escape("test")).toBe("test");
-  });
-
-  it("returns independent instances", () => {
-    const m1 = createMarkerMangler();
-    const m2 = createMarkerMangler();
-    expect(m1).not.toBe(m2);
-  });
-});

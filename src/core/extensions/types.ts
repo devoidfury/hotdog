@@ -26,7 +26,7 @@ import type { ServiceRegistry } from "./service-registry.ts";
 import type { CliSubcommandRegistry } from "./registries.ts";
 import type { ConfigRegistry } from "./config-registry.ts";
 import type { ModelConfig, ProviderDef } from "../config/providers.ts";
-import type { CoreConfig, CoreConfigWithExtensions } from "../config/schema-loader.ts";
+import type { CoreConfigWithExtensions } from "../config/schema-loader.ts";
 import type { Agent } from "../agent.ts";
 import type { ImageAttachment, Message } from "../context/message.ts";
 import type { ParsedCommand } from "../commands.ts";

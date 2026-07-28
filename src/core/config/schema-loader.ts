@@ -3,7 +3,6 @@
  */
 import { join } from "node:path";
 import { getNested } from "../../utils/objects.ts";
-import { castAs } from "../../utils/json-schema.ts";
 import configSchema from "../core.config.json" with { type: "json" };
 import type { CastFn, ComputeFn, SchemaProperty, SchemaLayer, ConfigSchema } from "./schema-types.ts";
 

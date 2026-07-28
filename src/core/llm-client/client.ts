@@ -4,7 +4,7 @@ import { readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import { retryWithBackoff } from "./retry.ts";
-import { createMarkerMangler, MarkerMangler } from "../marker-mangler.ts";
+import { MarkerMangler } from "../marker-mangler.ts";
 import { LlmError } from "../error.ts";
 import { logger } from "../logger.ts";
 import { ToolDef } from "../extensions/tool-registry.ts";
@@ -80,7 +80,7 @@ export class LlmClient {
     this.#mangler =
       options.markerMangler !== undefined
         ? options.markerMangler
-        : createMarkerMangler();
+        : new MarkerMangler();
   }
 
   get markerMangler(): MarkerMangler | null {

@@ -3,11 +3,9 @@
 // attached to one or more sessions. It is the duplex: input flows in
 // via send(), output flows out via event subscriptions.
 
-import { parseCommand, Command, ACTIONS, type ParsedCommand, type CommandRegistryLike } from "./commands.ts";
+import { parseCommand, Command, type ParsedCommand } from "./commands.ts";
 import { OutputEvent } from "./context/output.ts";
 import type { QuestionOption } from "./session/index.ts";
-
-// ── Channel Commands ──────────────────────────────────────────────────────
 
 /**
  * Channel-level command types. These are handled locally by the Channel
@@ -22,9 +20,8 @@ export const ChannelCommand = {
   Switch: "switch",
 } as const;
 
-export type ChannelCommandType = (typeof ChannelCommand)[keyof typeof ChannelCommand];
-
-// ── Session Manager Interface ─────────────────────────────────────────────
+export type ChannelCommandType =
+  (typeof ChannelCommand)[keyof typeof ChannelCommand];
 
 /**
  * Minimal SessionManager interface that Channel depends on.
@@ -38,21 +35,23 @@ export interface ChannelSessionManager {
   /** Interrupt the current processing for the given session. */
   interrupt(sessionId: string): void;
   /** Execute a command on the given session. */
-  executeCommand(sessionId: string, cmdText: string): Promise<number | undefined>;
+  executeCommand(
+    sessionId: string,
+    cmdText: string,
+  ): Promise<number | undefined>;
   /** Subscribe to events from a specific session. Returns an unsubscribe function. */
-  onSessionEvents(sessionId: string, handler: (event: OutputEvent) => void): () => void;
+  onSessionEvents(
+    sessionId: string,
+    handler: (event: OutputEvent) => void,
+  ): () => void;
   /** List all session IDs. */
   sessionIds(): string[];
   /** Get session metadata. */
-  getSessionInfo(sessionId: string): { id: string; model?: string; profile?: string } | null;
+  getSessionInfo(
+    sessionId: string,
+  ): { id: string; model?: string; profile?: string } | null;
   /** Drain buffered QUESTION events for a session (replay on reconnect). */
   drainPendingQuestions(sessionId: string): QuestionOption[][];
-}
-
-// ── Channel Base Class ────────────────────────────────────────────────────
-
-export interface ChannelOptions {
-  sessionManager: ChannelSessionManager;
 }
 
 /**
@@ -82,7 +81,7 @@ export abstract class Channel {
    * @param options
    * @param options.sessionManager — SessionManager instance
    */
-  constructor(options: ChannelOptions) {
+  constructor(options: { sessionManager: ChannelSessionManager }) {
     this.sessionManager = options.sessionManager;
     this.attachedSessions = new Set();
     this.currentSessionId = null;
@@ -215,10 +214,12 @@ export abstract class Channel {
    */
   public isChannelCommand(cmdText: string): boolean {
     const channelCmds = Object.values(ChannelCommand);
-    return channelCmds.includes(cmdText as ChannelCommandType) ||
+    return (
+      channelCmds.includes(cmdText as ChannelCommandType) ||
       cmdText.startsWith("attach ") ||
       cmdText.startsWith("detach ") ||
-      cmdText.startsWith("switch ");
+      cmdText.startsWith("switch ")
+    );
   }
 
   /**
@@ -306,7 +307,10 @@ export abstract class Channel {
       return;
     }
     if (!this.switchSession(sessionId)) {
-      this.write({ type: 7, content: `Cannot switch to session ${sessionId} — not attached` });
+      this.write({
+        type: 7,
+        content: `Cannot switch to session ${sessionId} — not attached`,
+      });
       return;
     }
     this.write({ type: 7, content: `Switched to session ${sessionId}` });

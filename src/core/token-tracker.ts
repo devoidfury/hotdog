@@ -142,11 +142,3 @@ export class TokenTracker {
     this.#usage = { ...ZERO_USAGE };
   }
 }
-
-/**
- * Create a new TokenTracker instance.
- * @returns TokenTracker
- */
-export function createTokenTracker(): TokenTracker {
-  return new TokenTracker();
-}

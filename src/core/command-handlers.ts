@@ -2,8 +2,7 @@
 // These are extracted from agent.ts so that agent.ts only does generic dispatch.
 // Each handler is a function (agent, value, cmd) => { content?, error? }.
 
-import { Command, ACTIONS, type ParsedCommand } from "./commands.ts";
-import type { TokenUsage } from "./token-tracker.ts";
+import { Command, ACTIONS } from "./commands.ts";
 import type { CommandAgent, CommandHandler } from "./extensions/registries.ts";
 
 export interface CommandResult {

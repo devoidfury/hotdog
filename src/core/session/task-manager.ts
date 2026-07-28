@@ -3,9 +3,7 @@
 import { Message } from "../context/message.ts";
 import { LlmError } from "../error.ts";
 import { loadProfileFile } from "../config/profiles.ts";
-import { castAs } from "../../utils/json-schema.ts";
 import { type CoreConfigWithExtensions } from "../config/schema-loader.ts";
-import { OUTPUT_EVENT } from "../context/output.ts";
 import type { AgentRunResult } from "../../core/agent.ts";
 
 // ── Task Status ─────────────────────────────────────────────────────────────
@@ -157,8 +155,6 @@ export class TaskManager {
   /**
    * Internal: handle task completion — append result to manager context and wake up.
    * This is the single place where task completion logic lives.
-   * @param taskId
-   * @param result
    * @private
    */
   _onTaskComplete(taskId: string | null, result: string): void {
@@ -317,7 +313,6 @@ export class TaskManager {
 
   /**
    * Check the status of a task by ID.
-   * @param taskId
    * @returns Task status or null if not found.
    */
   taskStatus(taskId: string): TaskStatus | null {
@@ -328,8 +323,6 @@ export class TaskManager {
 
   /**
    * Send a follow-up message to a running task.
-   * @param taskId
-   * @param message
    * @returns Whether the follow-up was sent.
    */
   sendFollowUp(taskId: string, message: string): boolean {
@@ -352,7 +345,6 @@ export class TaskManager {
 
   /**
    * Interrupt (cancel) a running task.
-   * @param taskId
    * @returns Whether the task was interrupted.
    */
   interruptTask(taskId: string): boolean {

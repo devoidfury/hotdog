@@ -196,7 +196,6 @@ Runs the full tool call pipeline (TOOL_CALL gate → AGENT_TOOL_CONTEXT → vali
 ### Token Tracker (`src/core/token-tracker.ts`)
 Accumulates session token usage and tracks last-reported values. Key exports:
 - `TokenTracker` class — `record(rawUsage, onRecorded?)`, `getUsage()`, `clear()`
-- `createTokenTracker()` — factory function
 - `TokenUsage` — `{ turns, promptTokens, cachedTokens, completionTokens, totalTokens, lastPromptTokens?, lastCachedTokens?, lastCompletionTokens?, lastTotalTokens? }`
 
 ### Error Handling (`src/core/error.ts`)
@@ -236,7 +235,7 @@ Input parsing. Key exports:
 - `message-bus.ts` — `MessageBus` owns the agent run loop. Drains messages sequentially through `agent.run()`. Provides input preprocessing via `INPUT` hook. Key exports: `MessageBus` (enqueue, cancel, isIdle, run, runUntilCancelled, executeCommand)
 
 ### Marker Mangler (`src/core/marker-mangler.ts`)
-Escapes input that triggers special behavior (tool call actions, internal markers). Protects against prompt injection via crafted input. Key exports: `MarkerMangler` class with `escape()`, `unescape()`, `escapeInput()`, `escapeToolOutput()`, `unescapeOutput()`, `unescapeToolInput()`, `createMarkerMangler()`.
+Escapes input that triggers special behavior (tool call actions, internal markers). Protects against prompt injection via crafted input. Key exports: `MarkerMangler` class with `escape()`, `unescape()`, `escapeInput()`, `escapeToolOutput()`, `unescapeOutput()`, `unescapeToolInput()`.
 
 ### Utilities (`src/utils/`)
 - `file-utils.ts` — `parseFrontMatter(content)`, `validateNameable(name, label, dirName)`

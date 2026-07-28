@@ -180,11 +180,3 @@ export class MarkerMangler {
   }
 }
 
-/**
- * Create a new MarkerMangler instance.
- *
- * @returns New marker mangler.
- */
-export function createMarkerMangler(): MarkerMangler {
-  return new MarkerMangler();
-}

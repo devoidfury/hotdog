@@ -3,7 +3,6 @@
 import {
   OutputSink,
   OUTPUT_EVENT,
-  EVENT_HANDLERS,
   OutputEvent,
   UserMessageEvent,
   AssistantMessageEvent,

@@ -1,6 +1,6 @@
 // Tests for the TokenTracker class.
 
-import { TokenTracker, createTokenTracker } from "../../src/core/token-tracker.ts";
+import { TokenTracker } from "../../src/core/token-tracker.ts";
 import { describe, it, expect } from "bun:test";
 
 describe("TokenTracker — construction", () => {
@@ -16,12 +16,6 @@ describe("TokenTracker — construction", () => {
     expect(usage.lastCachedTokens).toBe(0);
     expect(usage.lastCompletionTokens).toBe(0);
     expect(usage.lastTotalTokens).toBe(0);
-  });
-
-  it("factory function creates instance", () => {
-    const tracker = createTokenTracker();
-    expect(tracker).toBeInstanceOf(TokenTracker);
-    expect(tracker.getUsage().turns).toBe(0);
   });
 });
 

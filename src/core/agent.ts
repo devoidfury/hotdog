@@ -6,21 +6,8 @@ import {
   OUTPUT_EVENT,
   OutputEvent,
   OutputEventType,
-  UserMessageEvent,
-  AssistantMessageEvent,
-  ThinkingEvent,
-  ToolCallEvent,
-  ToolResultEvent,
-  CompactingEvent,
-  CommandResultEvent,
-  QuestionEvent,
-  StreamingChunkEvent,
-  StreamingReasoningChunkEvent,
-  TaskProgressEvent,
-  TokenUsageEvent,
-  CompactionResultEvent,
-  SessionStateEvent,
 } from "./context/output.ts";
+
 /**
  * Map event type strings to OUTPUT_EVENT constants.
  */
@@ -43,36 +30,6 @@ const EVENT_TYPE_MAP: Record<string, OutputEventType> = {
 
 type EventTypeName = keyof typeof EVENT_TYPE_MAP;
 
-/**
- * Typed data for each event type string.
- * Maps event names to their data shape for type-safe emitOutput calls.
- */
-interface OutputEventData {
-  user_message: { content: string };
-  assistant_message: { content: string };
-  thinking: { content: string };
-  tool_call: { toolName: string; input: string; toolCallId: string };
-  tool_result: { toolName: string; input: string; result: string; toolCallId: string; error?: string };
-  compacting: { message?: string };
-  command_result: { content: string };
-  question: {
-    questions: Array<{
-      key: string;
-      prompt: string;
-      options?: string[];
-      required?: boolean;
-      default?: string;
-      allow_other?: boolean;
-    }>;
-  };
-  streaming_chunk: { content: string };
-  streaming_reasoning_chunk: { content: string };
-  task_progress: { taskId: string; status: string; message?: string };
-  token_usage: TokenUsage;
-  compaction_result: { messagesCompacted: number; tokensBefore: number; tokensAfter: number; strategy: string; summary?: string };
-  session_state: { key: string; value: unknown; sessionId?: string };
-}
-
 import { AgentError, ConfigError, LlmError } from "./error.ts";
 import { HOOKS, HookSystem, type ContextHookResult, type ProviderRequestHookResult } from "./hooks.ts";
 import { isPromise } from "../utils/promise.ts";
@@ -81,10 +38,9 @@ import { createCommandRegistry, AgentCommandRegistry, type CommandResult } from 
 import { CORE_COMMAND_HANDLERS } from "./command-handlers.ts";
 import { resolveModelConfig, type ModelConfig } from "./config/providers.ts";
 export type { ModelConfig } from "./config/providers.ts";
-import { type CoreConfig } from "./config/schema-loader.ts";
 
 import { createSystemPromptBuilder } from "./context/system-prompt.ts";
-import { TokenTracker, createTokenTracker, type TokenUsage, type RawUsage } from "./token-tracker.ts";
+import { TokenTracker, type TokenUsage, type RawUsage } from "./token-tracker.ts";
 import { ToolExecutor, createToolExecutor, type ToolResult as ToolExecutorResult } from "./tool-executor.ts";
 
 import type { LlmClient, StreamEvent } from "./llm-client/client.ts";
@@ -271,7 +227,7 @@ export class Agent {
       agent: this,
     });
     // Token usage tracking — accumulates session totals and saves last-reported values.
-    this.#tokenTracker = createTokenTracker();
+    this.#tokenTracker = new TokenTracker();
     // System prompt builder — manages system prompt lifecycle
     this.#systemPromptBuilder =
       options.systemPromptBuilder || createSystemPromptBuilder();

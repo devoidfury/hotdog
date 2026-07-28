@@ -32,7 +32,6 @@ import {
 import type { ProfileDef } from "./config/profiles.ts";
 import type { ResolvedConfig } from "./extensions/types.ts";
 import type { ModelConfig, ProviderDef } from "./config/providers.ts";
-import { castAs } from "../utils/json-schema.ts";
 import {
   cliFlagsFromSchema,
   CONFIG_SCHEMA,

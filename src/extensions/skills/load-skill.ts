@@ -12,7 +12,7 @@ import { SkillsLoader } from "./loader.ts";
 
 export class LoadSkillTool {
   static readonly TOOL_NAME = "load_skill";
-  metadata: ToolMetadata = { sideEffects: false, difficulty: 1 };
+  metadata: ToolMetadata = { sideEffects: false, difficulty: 2 };
 
   private readonly loader: SkillsLoader | null;
 

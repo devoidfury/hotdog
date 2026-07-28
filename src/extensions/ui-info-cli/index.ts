@@ -174,7 +174,8 @@ function printInfoText(
       const isDefault = (config?.defaultProvider as string) === p.name;
       const marker = isActive ? " (active)" : isDefault ? " (default)" : "";
       const modelNames = (p.models || []).map((m) => m.name).join(", ");
-      console.log(`  ${p.name}${marker} → ${p.url}  [${modelNames}]`);
+      const displayUrl = p.url || `${resolved.baseUrl} (inherited)`;
+      console.log(`  ${p.name}${marker} → ${displayUrl}  [${modelNames}]`);
     }
     if (resolved.activeProvider) {
       console.log();
@@ -250,7 +251,8 @@ function printInfoJson(
     providers: {
       configured: providers.map((p) => ({
         name: p.name,
-        url: p.url,
+        url: p.url || null,
+        resolvedUrl: p.url || resolved.baseUrl,
         models: (p.models || []).map((m: { name: string }) => m.name),
       })),
       active: resolved.activeProvider || null,

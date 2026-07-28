@@ -12,45 +12,47 @@ import { writeFileSync, unlinkSync } from "node:fs";
 // ── buildModelRegistry ──────────────────────────────────────────────────────
 
 describe("buildModelRegistry", () => {
-  it("registers models from providers with defaults", () => {
+  it("registers models from providers with defaults", async () => {
     const config = {
       providers: [
         { name: "openai", models: [{ name: "gpt-4", temperature: 0.7 }] },
       ],
     };
-    const registry = buildModelRegistry(config, 32000);
+    const registry = await buildModelRegistry(config, 32000);
     expect(registry["openai/gpt-4"]).toEqual({
       name: "openai/gpt-4",
       temperature: 0.7,
       contextLimit: 32000,
       reasoningEffort: undefined,
       tags: [],
+      capabilities: {},
+      maxToolDifficulty: undefined,
     });
   });
 
-  it("handles provider-level default model", () => {
+  it("handles provider-level default model", async () => {
     const config = {
       providers: [{ name: "test", defaultModel: "gpt-3.5", temperature: 0.5, models: [] }],
     };
-    const registry = buildModelRegistry(config, 32000);
+    const registry = await buildModelRegistry(config, 32000);
     expect(registry["test/gpt-3.5"]).toBeDefined();
     expect(registry["test/gpt-3.5"]!.temperature).toBe(0.5);
   });
 
-  it("handles empty or multiple providers", () => {
-    expect(buildModelRegistry({}, 32000)).toEqual({});
+  it("handles empty or multiple providers", async () => {
+    expect(await buildModelRegistry({}, 32000)).toEqual({});
     const config = {
       providers: [
         { name: "a", models: [{ name: "m1" }] },
         { name: "b", models: [{ name: "m2" }] },
       ],
     };
-    const registry = buildModelRegistry(config, 32000);
+    const registry = await buildModelRegistry(config, 32000);
     expect(registry["a/m1"]).toBeDefined();
     expect(registry["b/m2"]).toBeDefined();
   });
 
-  it("extracts reasoning_effort from model entries", () => {
+  it("extracts reasoning_effort from model entries", async () => {
     const config = {
       providers: [
         {
@@ -63,7 +65,7 @@ describe("buildModelRegistry", () => {
         },
       ],
     };
-    const registry = buildModelRegistry(config, 32000);
+    const registry = await buildModelRegistry(config, 32000);
     expect(registry["ai365/dsv4"]!.reasoningEffort).toBe("max");
     expect(registry["ai365/qwen"]!.reasoningEffort).toBe("high");
     expect(registry["ai365/basic"]!.reasoningEffort).toBeUndefined();
@@ -183,5 +185,172 @@ describe("initSystemPromptTemplate", () => {
     } finally {
       try { unlinkSync(tmpFile); } catch {}
     }
+  });
+});
+
+// ── fetchModels (dynamic model loading) ─────────────────────────────────────
+
+describe("buildModelRegistry with fetchModels", () => {
+  const originalFetch = globalThis.fetch;
+
+  afterEach(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  it("fetches models from provider URL when fetchModels is true", async () => {
+    globalThis.fetch = async () =>
+      ({
+        ok: true,
+        json: async () => ({
+          data: [
+            { id: "remote-model-1", context_length: 8192 },
+            { id: "remote-model-2", context_length: 16384, capabilities: { vision: true } },
+          ],
+        }),
+      } as Response);
+
+    const config = {
+      providers: [
+        { name: "remote", url: "http://test.com", fetchModels: true, models: [] },
+      ],
+      baseUrl: "http://test.com",
+    };
+    const registry = await buildModelRegistry(config, 32000);
+    expect(registry["remote/remote-model-1"]).toBeDefined();
+    expect(registry["remote/remote-model-1"]!.contextLimit).toBe(8192);
+    expect(registry["remote/remote-model-2"]).toBeDefined();
+    expect(registry["remote/remote-model-2"]!.capabilities?.vision).toBe(true);
+  });
+
+  it("uses global baseUrl when provider has no URL", async () => {
+    globalThis.fetch = async () =>
+      ({
+        ok: true,
+        json: async () => ({
+          data: [{ id: "inherited-url-model" }],
+        }),
+      } as Response);
+
+    const config = {
+      providers: [
+        { name: "ai365", fetchModels: true, models: [] },
+      ],
+      baseUrl: "http://global.com",
+    };
+    const registry = await buildModelRegistry(config, 32000);
+    expect(registry["ai365/inherited-url-model"]).toBeDefined();
+  });
+
+  it("uses global apiKey when provider has no apiKey", async () => {
+    let capturedAuth = "";
+    globalThis.fetch = async (url: string, init: RequestInit) => {
+      capturedAuth = (init?.headers as Record<string, string>)?.Authorization || "";
+      return {
+        ok: true,
+        json: async () => ({ data: [{ id: "key-test" }] }),
+      } as Response;
+    };
+
+    const config = {
+      providers: [
+        { name: "test", url: "http://test.com", fetchModels: true, models: [] },
+      ],
+      apiKey: "global-key-123",
+    };
+    await buildModelRegistry(config, 32000);
+    expect(capturedAuth).toBe("Bearer global-key-123");
+  });
+
+  it("provider apiKey overrides global apiKey", async () => {
+    let capturedAuth = "";
+    globalThis.fetch = async (url: string, init: RequestInit) => {
+      capturedAuth = (init?.headers as Record<string, string>)?.Authorization || "";
+      return {
+        ok: true,
+        json: async () => ({ data: [{ id: "key-test" }] }),
+      } as Response;
+    };
+
+    const config = {
+      providers: [
+        { name: "test", url: "http://test.com", apiKey: "provider-key-456", fetchModels: true, models: [] },
+      ],
+      apiKey: "global-key-123",
+    };
+    await buildModelRegistry(config, 32000);
+    expect(capturedAuth).toBe("Bearer provider-key-456");
+  });
+
+  it("deep merges remote models with local ones, local takes priority but remote fills gaps", async () => {
+    globalThis.fetch = async () =>
+      ({
+        ok: true,
+        json: async () => ({
+          data: [
+            { id: "shared-model", context_length: 1000, tags: ["remote-tag"], capabilities: { vision: true } },
+            { id: "remote-only", context_length: 2000 },
+          ],
+        }),
+      } as Response);
+
+    const config = {
+      providers: [
+        {
+          name: "test",
+          url: "http://test.com",
+          fetchModels: true,
+          models: [{ name: "shared-model", contextLimit: 5000, temperature: 0.5, tags: ["local-tag"] }],
+        },
+      ],
+    };
+    const registry = await buildModelRegistry(config, 32000);
+    // Local priority fields are kept
+    expect(registry["test/shared-model"]!.contextLimit).toBe(5000);
+    expect(registry["test/shared-model"]!.temperature).toBe(0.5);
+    // Local tags overwrite remote tags
+    expect(registry["test/shared-model"]!.tags).toEqual(["local-tag"]);
+    // Remote-only model is added
+    expect(registry["test/remote-only"]).toBeDefined();
+    expect(registry["test/remote-only"]!.contextLimit).toBe(2000);
+  });
+
+  it("handles fetch failure gracefully without crashing", async () => {
+    globalThis.fetch = async () => {
+      throw new Error("network error");
+    };
+
+    const config = {
+      providers: [
+        { name: "test", url: "http://test.com", fetchModels: true, models: [{ name: "fallback" }] },
+      ],
+    };
+    const registry = await buildModelRegistry(config, 32000);
+    // Should still have local models
+    expect(registry["test/fallback"]).toBeDefined();
+  });
+
+  it("expands aliases as separate model entries", async () => {
+    globalThis.fetch = async () =>
+      ({
+        ok: true,
+        json: async () => ({
+          data: [
+            {
+              id: "base-model",
+              meta: { llamaswap: { aliases: ["alias-1", "alias-2"] } },
+            },
+          ],
+        }),
+      } as Response);
+
+    const config = {
+      providers: [
+        { name: "test", url: "http://test.com", fetchModels: true, models: [] },
+      ],
+    };
+    const registry = await buildModelRegistry(config, 32000);
+    expect(registry["test/base-model"]).toBeDefined();
+    expect(registry["test/alias-1"]).toBeDefined();
+    expect(registry["test/alias-2"]).toBeDefined();
   });
 });

@@ -383,8 +383,8 @@ export async function buildConfig(cliArgv: CliArgv): Promise<{
       : path.join(configDir, DEFAULT_PROFILES_SUBPATH),
   });
 
-  const modelRegistry = buildModelRegistry(
-    { providers: castAs<ProviderDef[]>(config.providers || []) },
+  const modelRegistry = await buildModelRegistry(
+    { providers: castAs<ProviderDef[]>(config.providers || []), baseUrl: resolved.baseUrl, apiKey: resolved.apiKey },
     128000,
   );
   resolved.modelRegistry = modelRegistry;

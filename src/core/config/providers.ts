@@ -17,6 +17,13 @@ export interface ModelConfig {
   reasoningEffort?: string;
   tags: string[];
   /**
+   * Model capabilities (e.g., vision, tool use).
+   */
+  capabilities: {
+    vision?: boolean;
+    [key: string]: boolean | undefined;
+  };
+  /**
    * Maximum tool difficulty for this model.
    * When set, only tools with difficulty <= this value are exposed.
    * Useful for smaller models that may struggle with complex tools.
@@ -32,6 +39,11 @@ export interface ProviderModelEntry {
   reasoning_effort?: string;
   reasoningEffort?: string;
   tags?: string[];
+  /** Model capabilities (e.g., vision, tool use). */
+  capabilities?: {
+    vision?: boolean;
+    [key: string]: boolean | undefined;
+  };
   /** Maximum tool difficulty for this model (1-5). */
   maxToolDifficulty?: number;
 }
@@ -40,6 +52,7 @@ export interface ProviderDef {
   name: string;
   url?: string;
   apiKey?: string;
+  fetchModels?: boolean;
   models: ProviderModelEntry[];
   defaultModel?: string;
   temperature?: number;
@@ -48,17 +61,128 @@ export interface ProviderDef {
 }
 
 /**
+ * LlamaSwap /v1/models response format.
+ */
+interface LlamaSwapModel {
+  id: string;
+  context_length?: number;
+  architecture?: {
+    input_modalities?: string[];
+  };
+  capabilities?: {
+    vision?: boolean;
+  };
+  meta?: {
+    tags?: string[];
+    max_tool_difficulty?: number;
+    llamaswap?: {
+      aliases?: string[];
+      tags?: string[];
+      max_tool_difficulty?: number;
+    };
+  };
+}
+
+interface LlamaSwapModelsResponse {
+  data: LlamaSwapModel[];
+}
+
+/**
+ * Fetch models from a provider's /v1/models endpoint.
+ * Falls back to globalBaseUrl/globalApiKey when the provider has no explicit values.
+ */
+async function fetchRemoteModels(
+  provider: ProviderDef,
+  globalBaseUrl?: string,
+  globalApiKey?: string,
+): Promise<ProviderModelEntry[]> {
+  const baseUrl = provider.url || globalBaseUrl;
+  if (!baseUrl) return [];
+
+  try {
+    const url = new URL("v1/models", baseUrl).toString();
+
+    const headers: Record<string, string> = {};
+    const apiKey = provider.apiKey || globalApiKey;
+    if (apiKey) {
+      headers["Authorization"] = `Bearer ${apiKey}`;
+    }
+
+    const response = await fetch(url, { headers });
+    if (!response.ok) {
+      throw new Error(`HTTP error! status: ${response.status}`);
+    }
+
+    const json = (await response.json()) as LlamaSwapModelsResponse;
+
+    const entries: ProviderModelEntry[] = [];
+
+    for (const m of json.data || []) {
+      const hasVision =
+        m.capabilities?.vision === true ||
+        m.architecture?.input_modalities?.includes("image");
+
+      const baseEntry: ProviderModelEntry = {
+        name: m.id,
+        contextLimit: m.context_length,
+        tags: [...(m.meta?.tags ?? m.meta?.llamaswap?.tags ?? [])],
+        capabilities: hasVision ? { vision: true } : undefined,
+        maxToolDifficulty: m.meta?.max_tool_difficulty ?? m.meta?.llamaswap?.max_tool_difficulty,
+      };
+
+      entries.push(baseEntry);
+
+      // Add aliases as separate model entries
+      if (m.meta?.llamaswap?.aliases) {
+        for (const alias of m.meta.llamaswap.aliases) {
+          entries.push({
+            ...baseEntry,
+            name: alias,
+          });
+        }
+      }
+    }
+
+    return entries;
+  } catch (e) {
+    // Log error but don't crash the registry build
+    console.error(`[providers] Failed to fetch remote models for ${provider.name}:`, e);
+    return [];
+  }
+}
+
+/**
  * Build a model registry from config providers.
  */
-export function buildModelRegistry(
-  config: { providers?: ProviderDef[] },
+export async function buildModelRegistry(
+  config: { providers?: ProviderDef[]; baseUrl?: string; apiKey?: string },
   contextLimit: number,
-): Record<string, ModelConfig> {
+): Promise<Record<string, ModelConfig>> {
   const registry: Record<string, ModelConfig> = {};
   const providers = config.providers || [];
 
   for (const provider of providers) {
-    const models = provider.models || [];
+    let models = provider.models || [];
+
+    if (provider.fetchModels) {
+      const remoteModels = await fetchRemoteModels(provider, config.baseUrl, config.apiKey);
+      // Deep merge remote models with local ones: local takes priority, but remote fills in missing fields
+      const localByName = new Map(models.map((m) => [m.name, m]));
+      for (const rm of remoteModels) {
+        const local = localByName.get(rm.name);
+        if (local) {
+          // Merge provider properties: local values take priority, remote fills gaps
+          localByName.set(rm.name, {
+            ...rm,
+            ...local,
+          });
+        } else {
+          localByName.set(rm.name, rm);
+        }
+      }
+      models = [...localByName.values()];
+    }
+
     for (const modelEntry of models) {
       const modelName = `${provider.name}/${modelEntry.name}`;
       registry[modelName] = {
@@ -70,6 +194,7 @@ export function buildModelRegistry(
           modelEntry.reasoningEffort ||
           undefined,
         tags: modelEntry.tags || [],
+        capabilities: modelEntry.capabilities || {},
         maxToolDifficulty: modelEntry.maxToolDifficulty,
       };
     }
@@ -80,6 +205,7 @@ export function buildModelRegistry(
         temperature: provider.temperature ?? null,
         contextLimit: provider.contextLimit || contextLimit,
         tags: provider.tags || [],
+        capabilities: {},
       };
     }
   }

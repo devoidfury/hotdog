@@ -6,7 +6,7 @@ import {
   defaultCallDisplay,
 } from "../../core/extensions/tool-utils.ts";
 import type { ToolMetadata } from "../../core/extensions/tool-registry.ts";
-import { type ToolExecutionContext } from "../../core/extensions/types.ts";
+import { type ToolContext } from "../../core/extensions/types.ts";
 import { SkillsLoader } from "./loader.ts";
 
 
@@ -37,7 +37,7 @@ export class LoadSkillTool {
     return defaultCallDisplay(input, (args: Record<string, unknown>) => `load_skill: ${args?.name}`);
   }
 
-  async execute(input: string | Record<string, unknown> | null, ctx?: ToolExecutionContext): Promise<ToolResult> {
+  async execute(input: string | Record<string, unknown> | null, ctx?: ToolContext): Promise<ToolResult> {
     const args = typeof input === "string" ? JSON.parse(input) : input;
     const skillName = args?.name as string;
 

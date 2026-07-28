@@ -6,7 +6,7 @@ import { createToolRegistry } from '../../src/core/extensions/tool-registry.ts';
 import { Message } from '../../src/core/context/message.ts';
 import { resolveModelConfig } from '../../src/core/config/providers.ts';
 import type { LlmClient } from '../../src/core/llm-client/client.ts';
-import type { OutputEvent } from '../../src/core/context/output.ts';
+import type { OutputEvent, SessionStateEvent } from '../../src/core/context/output.ts';
 import { OUTPUT_EVENT } from '../../src/core/context/output.ts';
 import { describe, it, expect, beforeEach, afterEach } from 'bun:test';
 import {
@@ -919,7 +919,7 @@ describe('Agent — end-to-end loop', () => {
       agent.model = 'new-model';
       const modelEvent = events.find(e => e.type === OUTPUT_EVENT.SESSION_STATE && e.key === 'model');
       expect(modelEvent).toBeDefined();
-      expect(modelEvent!.value).toBe('new-model');
+      expect((modelEvent as SessionStateEvent).value).toBe('new-model');
     });
   });
 

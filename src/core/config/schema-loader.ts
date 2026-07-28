@@ -3,7 +3,7 @@
  */
 import { join } from "node:path";
 import { getNested } from "../../utils/objects.ts";
-import { parseAs } from "../../utils/json-schema.ts";
+import { castAs } from "../../utils/json-schema.ts";
 import configSchema from "../core.config.json" with { type: "json" };
 import type { CastFn, ComputeFn, SchemaProperty, SchemaLayer, ConfigSchema } from "./schema-types.ts";
 
@@ -310,7 +310,8 @@ export interface ResolutionContext {
   provider?: ProviderDef | null;
   profile?: ProfileDef | null;
   configDir?: string;
-  [key: string]: unknown;
+  profileName?: string;
+  profilesPath?: string;
 }
 
 /**
@@ -460,8 +461,8 @@ export function resolveKey(
 /**
  * The resolved shape of the core schema keys.
  * Provides compile-time type checking for commonly used config keys.
- * Extension-specific config keys are not included — access them via
- * Record<string, unknown> or a generic parameter.
+ * Extension-specific config keys are not included — use CoreConfigWithExtensions
+ * or Record<string, unknown> for those.
  *
  * This is a manually defined interface matching the core.config.json schema.
  */
@@ -498,9 +499,12 @@ export interface CoreConfig {
   coreTools?: Record<string, unknown>;
   compaction?: Record<string, unknown>;
   hookTrace?: boolean;
+  /** Profile name from config file (--profile flag, config.profile). Resolved to profileName. */
+  profile?: string;
+  /** Resolved profile name (from schema layers). */
   profileName?: string;
   /** Resolved profile object (includes manager flag, whitelistTools, etc.). Not from schema — set at runtime. */
-  profile?: ProfileDef;
+  profileDef?: ProfileDef;
   profilesPath?: string;
   provider?: string;
   systemPromptTemplate?: string;
@@ -514,26 +518,30 @@ export interface CoreConfig {
   defaultAiUrl?: string;
   taskDefaultRole?: string;
   systemPromptDefaultTemplate?: string;
-  // Allow access to extension-specific config keys
-  [key: string]: unknown;
 }
 
 /**
+ * CoreConfig with an index signature for extension-specific keys.
+ * Use this when you need to access arbitrary config keys (e.g., in extension code).
+ */
+export type CoreConfigWithExtensions = CoreConfig & Record<string, unknown>;
+
+/**
  * Resolve all config keys from a schema against a context.
- * Returns a typed CoreConfig — known keys have their declared types,
- * extension keys fall through to the index signature (unknown).
+ * Returns CoreConfigWithExtensions — known keys have their declared types,
+ * extension keys are accessible via the index signature.
  */
 export function resolveAll(
   schema: ConfigSchema,
   context: ResolutionContext,
-): CoreConfig {
+): CoreConfigWithExtensions {
   const result: Record<string, unknown> = {};
 
   for (const [keyName, keySchema] of Object.entries(schema)) {
     result[keyName] = resolveKey(keyName, keySchema, context);
   }
 
-  return parseAs<CoreConfig>(result);
+  return result as CoreConfigWithExtensions;
 }
 
 export interface ExtensionConfigParam {

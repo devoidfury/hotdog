@@ -2,17 +2,9 @@
 // Provides the strategy interface and registry for managing compaction strategies.
 
 import { AgentError } from "../../core/error.ts";
+import { Message } from "../../core/context/message.ts";
 
-export interface Message {
-  role: string | undefined;
-  content: string | Array<unknown> | undefined;
-  reasoningContent?: string | null;
-  reasoning_content?: string;
-  toolCalls?: unknown;
-  tool_calls?: Array<{ function?: { name?: string; arguments?: string } }>;
-  toolCallId?: string | null;
-  images?: unknown[] | null;
-}
+export { Message };
 
 export interface CompactionSettings {
   enabled?: boolean;

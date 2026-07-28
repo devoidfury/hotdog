@@ -8,7 +8,7 @@ import extensionData from "./extension.json" with { type: "json" };
 import { toolDef, param, ToolResult, truncateOutput, parseToolInput, defaultCallDisplay } from "../../core/extensions/tool-utils.ts";
 import type { ToolMetadata } from "../../core/extensions/tool-registry.ts";
 import { correctCommonPathMistakes } from "../../utils/file-utils.ts";
-import { ToolExecutionContext } from "../../core/extensions/types.ts";
+import { ToolContext } from "../../core/extensions/types.ts";
 
 const execFileAsync = util.promisify(execFile);
 
@@ -202,7 +202,7 @@ export class FindTool {
     }, { fallback: `* in . (max ${this.maxResults})` });
   }
 
-  async execute(input: string | Record<string, unknown> | null, _ctx: ToolExecutionContext): Promise<ToolResult> {
+  async execute(input: string | Record<string, unknown> | null, _ctx: ToolContext): Promise<ToolResult> {
     const args = parseArgs(input, this.maxResults);
     if (!args) {
       return ToolResult.err("Error parsing arguments");

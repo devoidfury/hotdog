@@ -63,7 +63,7 @@ describe("Info CLI - printInfoText branches", () => {
     const run = await infoCliRunner({
       resolved: {
         profileName: "test",
-        profile: { whitelistTools: ["read", "overwrite"] },
+        profileDef: { whitelistTools: ["read", "overwrite"] },
       },
     });
     const { exitCode, output } = await run("info");
@@ -77,7 +77,7 @@ describe("Info CLI - printInfoText branches", () => {
     const run = await infoCliRunner({
       resolved: {
         profileName: "test",
-        profile: { blacklistTools: ["bash", "fetch"] },
+        profileDef: { blacklistTools: ["bash", "fetch"] },
       },
     });
     const { exitCode, output } = await run("info");
@@ -152,7 +152,7 @@ describe("Info CLI - printInfoText branches", () => {
           chatTimeout: 1,
           maxRetries: 3,
           profileName: "default",
-          profile: {},
+          profileDef: {},
           activeProvider: null,
           configDir: join(homedir(), ".config", "hotdog"),
         },
@@ -208,7 +208,7 @@ describe("Info CLI - printInfoJson branches", () => {
           chatTimeout: 1,
           maxRetries: 3,
           profileName: "default",
-          profile: {},
+          profileDef: {},
           activeProvider: null,
           configDir: join(homedir(), ".config", "hotdog"),
         },
@@ -228,7 +228,7 @@ describe("Info CLI - printInfoJson branches", () => {
     const run = await infoCliRunner({
       resolved: {
         profileName: "test",
-        profile: {
+        profileDef: {
           whitelistTools: ["read", "overwrite"],
           blacklistTools: ["bash"],
         },

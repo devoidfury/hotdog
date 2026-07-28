@@ -11,7 +11,7 @@ import {
 } from "../../core/extensions/tool-utils.ts";
 import type { ToolMetadata } from "../../core/extensions/tool-registry.ts";
 import { logger } from "../../core/logger.ts";
-import { ToolExecutionContext } from "../../core/extensions/types.ts";
+import { ToolContext } from "../../core/extensions/types.ts";
 
 // Resolve the path to the current binary (main.ts)
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -50,7 +50,7 @@ export class ExploreTool {
     );
   }
 
-  async execute(input: string | Record<string, unknown> | null, _ctx: ToolExecutionContext): Promise<ToolResult> {
+  async execute(input: string | Record<string, unknown> | null, _ctx: ToolContext): Promise<ToolResult> {
     const args = this._parseArgs(input);
 
     // outline is required

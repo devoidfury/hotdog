@@ -14,11 +14,12 @@ import {
   SUMMARIZATION_USER_PROMPT_TEMPLATE,
   SUMMARIZATION_USER_PROMPT_SHORT,
 } from "../../src/extensions/compaction/prompts.ts";
+import { Message } from "../../src/core/context/message.ts";
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
 function makeMessage(role: string, content = "x".repeat(100)) {
-  return { role, content };
+  return new Message({ role, content });
 }
 
 const noopLlmChat = async (): Promise<string> => "";
@@ -123,8 +124,8 @@ describe("DropStrategy", () => {
 
   it("returns null when all messages are system messages", async () => {
     const messages = [
-      { role: "system", content: "System 1" },
-      { role: "system", content: "System 2" },
+      makeMessage("system", "System 1"),
+      makeMessage("system", "System 2"),
     ];
     const settings = { ...defaultSettings, keepRecent: 1 };
 
@@ -271,8 +272,8 @@ describe("SummarizeStrategy", () => {
 
   it("returns null when all messages are system messages", async () => {
     const messages = [
-      { role: "system", content: "System 1" },
-      { role: "system", content: "System 2" },
+      makeMessage("system", "System 1"),
+      makeMessage("system", "System 2"),
     ];
     const settings = { ...defaultSettings, keepRecent: 1 };
 
@@ -397,8 +398,8 @@ describe("SummarizeShortStrategy", () => {
 
   it("returns null when all messages are system messages", async () => {
     const messages = [
-      { role: "system", content: "System 1" },
-      { role: "system", content: "System 2" },
+      makeMessage("system", "System 1"),
+      makeMessage("system", "System 2"),
     ];
     const settings = { ...defaultSettings, keepRecent: 1 };
 

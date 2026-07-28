@@ -58,7 +58,6 @@ export type {
   ExtensionInstance,
   ToolsRegisterPayload,
   CommandsRegisterPayload,
-  ToolExecutionContext,
   HookPayloads,
   HookHandlerFor,
   HookReturnTypes,

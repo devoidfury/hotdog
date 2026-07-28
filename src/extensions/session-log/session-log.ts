@@ -252,7 +252,16 @@ export class SessionLog {
 /**
  * Create a disabled session log (no-op).
  */
-export function disabledSessionLog(): Record<string, () => Promise<void>> {
+export function disabledSessionLog(): {
+  append: (...args: unknown[]) => Promise<void>;
+  writeSystemPrompt: (...args: unknown[]) => Promise<void>;
+  writeInput: (...args: unknown[]) => Promise<void>;
+  writeAssistant: (...args: unknown[]) => Promise<void>;
+  writeToolResult: (...args: unknown[]) => Promise<void>;
+  writeReset: (...args: unknown[]) => Promise<void>;
+  writeCompaction: (...args: unknown[]) => Promise<void>;
+  writePrompt: (...args: unknown[]) => Promise<void>;
+} {
   const noop = () => Promise.resolve();
   return {
     append: noop,

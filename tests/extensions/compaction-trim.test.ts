@@ -1,11 +1,12 @@
 import { describe, it, expect } from "bun:test";
 import { TrimStrategy } from "../../src/extensions/compaction/strategies/trim.ts";
 import { estimateContextTokens, findFirstKeptIndex } from "../../src/extensions/compaction/utils.ts";
+import { Message } from "../../src/core/context/message.ts";
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
 function makeMessage(role: string, content = "x".repeat(100)) {
-  return { role, content };
+  return new Message({ role, content });
 }
 
 const noopLlmChat = async (): Promise<string> => "";
@@ -195,14 +196,14 @@ describe("TrimStrategy", () => {
   it("handles messages with reasoning_content", async () => {
     const content = "x".repeat(2000);
     const messages = [
-      { role: "user", content: content },
-      { role: "assistant", content: "response", reasoning_content: content },
-      { role: "user", content: content },
-      { role: "assistant", content: "response", reasoning_content: content },
-      { role: "user", content: content },
-      { role: "assistant", content: "response", reasoning_content: content },
-      { role: "user", content: content },
-      { role: "assistant", content: "response", reasoning_content: content },
+      new Message({ role: "user", content }),
+      new Message({ role: "assistant", content: "response", reasoningContent: content }),
+      new Message({ role: "user", content }),
+      new Message({ role: "assistant", content: "response", reasoningContent: content }),
+      new Message({ role: "user", content }),
+      new Message({ role: "assistant", content: "response", reasoningContent: content }),
+      new Message({ role: "user", content }),
+      new Message({ role: "assistant", content: "response", reasoningContent: content }),
     ];
 
     // Each message: ~500 (content) + ~500 (reasoning) = ~1000 tokens
@@ -219,14 +220,14 @@ describe("TrimStrategy", () => {
   it("handles messages with tool_calls", async () => {
     const content = "x".repeat(4000); // 1000 tokens each
     const messages = [
-      { role: "user", content: content },
-      { role: "assistant", content: "Running", tool_calls: [{ function: { name: "bash", arguments: '{"cmd": "ls -la"}' } }] },
-      { role: "user", content: content },
-      { role: "assistant", content: "Running", tool_calls: [{ function: { name: "read", arguments: '{"path": "file.txt"}' } }] },
-      { role: "user", content: content },
-      { role: "assistant", content: "Running", tool_calls: [{ function: { name: "bash", arguments: '{"cmd": "cat"}' } }] },
-      { role: "user", content: content },
-      { role: "assistant", content: "Running", tool_calls: [{ function: { name: "read", arguments: '{"path": "other.txt"}' } }] },
+      new Message({ role: "user", content }),
+      new Message({ role: "assistant", content: "Running", toolCalls: [{ id: "1", type: "function", function: { name: "bash", arguments: '{"cmd": "ls -la"}' } }] }),
+      new Message({ role: "user", content }),
+      new Message({ role: "assistant", content: "Running", toolCalls: [{ id: "2", type: "function", function: { name: "read", arguments: '{"path": "file.txt"}' } }] }),
+      new Message({ role: "user", content }),
+      new Message({ role: "assistant", content: "Running", toolCalls: [{ id: "3", type: "function", function: { name: "bash", arguments: '{"cmd": "cat"}' } }] }),
+      new Message({ role: "user", content }),
+      new Message({ role: "assistant", content: "Running", toolCalls: [{ id: "4", type: "function", function: { name: "read", arguments: '{"path": "other.txt"}' } }] }),
     ];
 
     // Each user message: ~1000 tokens, each assistant: ~1000 + ~30 = ~1030 tokens

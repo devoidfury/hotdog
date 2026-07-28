@@ -2,7 +2,7 @@
 
 import { toolDef, param, ToolResult, parseToolInput, defaultCallDisplay } from "../../core/extensions/tool-utils.ts";
 import type { ToolMetadata } from "../../core/extensions/tool-registry.ts";
-import { ToolExecutionContext } from "../../core/extensions/types.ts";
+import { ToolContext } from "../../core/extensions/types.ts";
 
 export class PagerTool {
   static readonly TOOL_NAME = "pager";
@@ -25,7 +25,7 @@ export class PagerTool {
     return defaultCallDisplay(input, (args: Record<string, unknown>) => `pager: ${args.tool_call_id as string}`);
   }
 
-  async execute(input: string | Record<string, unknown> | null, ctx: ToolExecutionContext): Promise<ToolResult> {
+  async execute(input: string | Record<string, unknown> | null, ctx: ToolContext): Promise<ToolResult> {
     const args = parseToolInput(input);
     if (!args) {
       return ToolResult.err("Error parsing arguments");

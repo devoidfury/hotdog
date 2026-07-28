@@ -14,7 +14,7 @@ import {
 import type { ToolMetadata } from "../../core/extensions/tool-registry.ts";
 import { validateCwdBoundary, resolvePath, correctCommonPathMistakes } from "../../utils/file-utils.ts";
 import { DEFAULT_MAX_IMAGE_SIZE } from "./defaults.ts";
-import { ToolExecutionContext } from "../../core/extensions/types.ts";
+import { ToolContext } from "../../core/extensions/types.ts";
 
 /**
  * Supported image extensions mapped to MIME types.
@@ -99,7 +99,7 @@ export class ReadTool {
     }, typeof input === "string" ? input : "(no path)");
   }
 
-  async execute(input: string | Record<string, unknown> | null, ctx: ToolExecutionContext): Promise<ToolResult> {
+  async execute(input: string | Record<string, unknown> | null, ctx: ToolContext): Promise<ToolResult> {
     const args = parseArgs(input, this.readLimit);
     if (!args) {
       return ToolResult.err("Error parsing arguments");

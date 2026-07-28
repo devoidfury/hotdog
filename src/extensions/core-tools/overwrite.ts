@@ -10,7 +10,7 @@ import {
 } from "../../core/extensions/tool-utils.ts";
 import type { ToolMetadata } from "../../core/extensions/tool-registry.ts";
 import { validateCwdBoundary, resolvePath } from "../../utils/file-utils.ts";
-import { ToolExecutionContext } from "../../core/extensions/types.ts";
+import { ToolContext } from "../../core/extensions/types.ts";
 
 interface OverwriteArgs {
   path: string;
@@ -53,7 +53,7 @@ export class OverwriteTool {
 
   async execute(
     input: string | Record<string, unknown> | null,
-    ctx: ToolExecutionContext,
+    ctx: ToolContext,
   ): Promise<ToolResult> {
     const rawArgs = parseToolInput(input);
     if (!rawArgs || !rawArgs.path || rawArgs.content === undefined) {

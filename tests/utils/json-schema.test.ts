@@ -2,7 +2,7 @@ import { describe, it, expect, mock } from "bun:test";
 import {
   validateParams,
   formatValidationErrors,
-  parseAs,
+  castAs,
   parseOrThrow,
 } from "../../src/utils/json-schema.ts";
 import { ToolRegistry } from "../../src/core/extensions/tool-registry.ts";
@@ -368,14 +368,14 @@ describe("validateWithSchema edge cases", () => {
   });
 });
 
-describe("parseAs", () => {
+describe("castAs", () => {
   it("returns value as-is when schema is undefined", () => {
-    const result = parseAs({ foo: "bar" } as unknown);
+    const result = castAs({ foo: "bar" } as unknown);
     expect(result).toEqual({ foo: "bar" });
   });
 
   it("returns value as-is when validation passes", () => {
-    const result = parseAs(
+    const result = castAs(
       { name: "test", count: 5 },
       schema({ name: { type: "string" }, count: { type: "integer" } }, ["name"]),
     );
@@ -387,7 +387,7 @@ describe("parseAs", () => {
     const originalWarn = console.warn;
     console.warn = warnSpy;
     try {
-      const result = parseAs(
+      const result = castAs(
         { name: 123 }, // Should be string
         schema({ name: { type: "string" } }, ["name"]),
       );
@@ -418,17 +418,19 @@ describe("parseOrThrow", () => {
   });
 
   it("includes validation errors in thrown message", () => {
+    let threw = false;
     try {
       parseOrThrow(
         { name: 123, count: "not-a-number" },
         schema({ name: { type: "string" }, count: { type: "integer" } }, ["name", "count"]),
       );
-      expect.fail("Should have thrown");
     } catch (e: unknown) {
+      threw = true;
       const msg = (e as Error).message;
       expect(msg).toContain("Validation failed");
       expect(msg).toContain("name");
       expect(msg).toContain("count");
     }
+    expect(threw).toBe(true);
   });
 });

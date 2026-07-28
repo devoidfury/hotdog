@@ -24,6 +24,34 @@ export type GateAction =
   | { action: "handled" };
 
 /**
+ * Type guard: checks if a GateAction is a "block" action.
+ */
+export function isGateActionBlock(action: GateAction | undefined | null): action is Extract<GateAction, { action: "block" }> {
+  return action?.action === "block";
+}
+
+/**
+ * Type guard: checks if a GateAction is a "modify" action.
+ */
+export function isGateActionModify(action: GateAction | undefined | null): action is Extract<GateAction, { action: "modify" }> {
+  return action?.action === "modify";
+}
+
+/**
+ * Type guard: checks if a GateAction is a "continue" action.
+ */
+export function isGateActionContinue(action: GateAction | undefined | null): action is Extract<GateAction, { action: "continue" }> {
+  return action?.action === "continue";
+}
+
+/**
+ * Type guard: checks if a GateAction is a "handled" action.
+ */
+export function isGateActionHandled(action: GateAction | undefined | null): action is Extract<GateAction, { action: "handled" }> {
+  return action?.action === "handled";
+}
+
+/**
  * Result returned by the CONTEXT hook pipeline.
  * Allows handlers to replace the messages array.
  */
@@ -53,6 +81,20 @@ export type InputHookResult =
   | { action: "continue" }
   | { action: "transform"; text: string; images?: ImageAttachment[] }
   | { action: "handled" };
+
+/**
+ * Type guard: checks if an InputHookResult is a "transform" action.
+ */
+export function isInputTransform(result: InputHookResult | undefined | null): result is Extract<InputHookResult, { action: "transform" }> {
+  return result?.action === "transform";
+}
+
+/**
+ * Type guard: checks if an InputHookResult is a "handled" action.
+ */
+export function isInputHandled(result: InputHookResult | undefined | null): result is Extract<InputHookResult, { action: "handled" }> {
+  return result?.action === "handled";
+}
 
 /**
  * Chunk returned by the SYSTEM_PROMPT_BUILD hook.

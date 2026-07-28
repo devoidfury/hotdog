@@ -515,7 +515,7 @@ describe("SUBAGENT_TOOL_CONSTRUCTORS", () => {
 describe("Extension create()", () => {
   it("returns null when taskManager is not provided", () => {
     const core = {
-      config: { profile: { manager: true } },
+      config: { profileDef: { manager: true } },
       hooks: { on: () => {}, notifyHooks: () => {}, notifyHooksAsync: () => {}, runHookPipeline: async () => ({ results: [], lastResult: undefined, stopped: false, data: {} }) },
       toolRegistry: {},
       extensions: { has: () => false, load: async () => null, cleanup: async () => {} },
@@ -530,7 +530,7 @@ describe("Extension create()", () => {
 
   it("returns null when profile is not a manager", () => {
     const core = {
-      config: { profile: {} },
+      config: { profileDef: {} },
       hooks: { on: () => {}, notifyHooks: () => {}, notifyHooksAsync: () => {}, runHookPipeline: async () => ({ results: [], lastResult: undefined, stopped: false, data: {} }) },
       toolRegistry: {},
       extensions: { has: () => false, load: async () => null, cleanup: async () => {} },
@@ -545,7 +545,7 @@ describe("Extension create()", () => {
 
   it("returns extension when manager is enabled with taskManager", () => {
     const core = {
-      config: { profile: { manager: true } },
+      config: { profileDef: { manager: true } },
       hooks: { on: () => {}, notifyHooks: () => {}, notifyHooksAsync: () => {}, runHookPipeline: async () => ({ results: [], lastResult: undefined, stopped: false, data: {} }) },
       toolRegistry: {},
       extensions: { has: () => false, load: async () => null, cleanup: async () => {} },
@@ -563,7 +563,7 @@ describe("Extension hooks registration", () => {
   it("registers tools on TOOLS_REGISTER hook", async () => {
     const registered: any[] = [];
     const core = {
-      config: { profile: { manager: true } },
+      config: { profileDef: { manager: true } },
       hooks: {
         on: () => {},
         notifyHooks: () => {},

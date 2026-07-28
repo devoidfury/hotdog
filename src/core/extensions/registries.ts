@@ -38,7 +38,6 @@ export interface CommandAgent {
 /**
  * CLI argument values parsed from the command line.
  * Keys match the config schema property names (camelCase).
- * Structurally identical to CliArgv in config/index.ts.
  * Note: nullable string properties accept both null and undefined
  * because the CLI parser produces null for missing values.
  */

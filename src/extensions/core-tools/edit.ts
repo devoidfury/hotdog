@@ -12,7 +12,7 @@ import {
 } from "../../core/extensions/tool-utils.ts";
 import type { ToolMetadata } from "../../core/extensions/tool-registry.ts";
 import { validateCwdBoundary, resolvePath } from "../../utils/file-utils.ts";
-import { ToolExecutionContext } from "../../core/extensions/types.ts";
+import { ToolContext } from "../../core/extensions/types.ts";
 
 interface EditToolOptions {
   maxEditInputSize?: number;
@@ -88,7 +88,7 @@ export class EditTool {
     });
   }
 
-  async execute(input: string | Record<string, unknown> | null, ctx: ToolExecutionContext): Promise<ToolResult> {
+  async execute(input: string | Record<string, unknown> | null, ctx: ToolContext): Promise<ToolResult> {
     const op = parseArgs(input);
     if (!op) {
       return ToolResult.err("Error parsing arguments");

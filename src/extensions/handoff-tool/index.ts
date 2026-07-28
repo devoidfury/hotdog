@@ -24,7 +24,7 @@ import type { ToolMetadata } from "../../core/extensions/tool-registry.ts";
 import {
   CoreContext,
   ExtensionInstance,
-  ToolExecutionContext,
+  ToolContext,
   getExtensionConfig,
 } from "../../core/extensions/types.ts";
 
@@ -102,7 +102,7 @@ export class HandoffTool {
 
   async execute(
     input: string | Record<string, unknown> | null,
-    _ctx: ToolExecutionContext,
+    _ctx: ToolContext,
   ): Promise<ToolResult> {
     const args = parseToolInput(input);
     if (!args || !args.content || typeof args.content !== "string") {

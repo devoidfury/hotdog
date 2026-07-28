@@ -133,16 +133,15 @@ export interface OutputSink {
  * The subset of config keys that the Agent class actually reads.
  * Extensions may read additional keys via core.config.
  */
-export interface AgentConfig extends CoreConfig {
+export interface AgentConfig {
   cwdBoundary?: string | null;
   workspaceRoot?: string | null;
   maxToolCallsPerIteration?: number;
   maxRetries?: number;
   toolRetryDelay?: number;
-  maxToolDifficulty?: number;
-  defaultMaxToolDifficulty?: number;
+  maxToolDifficulty?: number | null;
+  defaultMaxToolDifficulty?: number | null;
   sandboxMode?: boolean;
-  [key: string]: unknown;
 }
 
 export interface AgentOptions {

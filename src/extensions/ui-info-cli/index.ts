@@ -155,14 +155,14 @@ function printInfoText(
   );
   console.log(`  Chat Timeout:    ${resolved.chatTimeout}s`);
   console.log(`  Profile:         ${resolved.profileName}`);
-  if (resolved.profile?.whitelistTools) {
+  if (resolved.profileDef?.whitelistTools) {
     console.log(
-      `  Whitelist Tools: ${(resolved.profile.whitelistTools as string[]).join(", ")}`,
+      `  Whitelist Tools: ${(resolved.profileDef.whitelistTools as string[]).join(", ")}`,
     );
   }
-  if ((resolved.profile?.blacklistTools as string[])?.length > 0) {
+  if ((resolved.profileDef?.blacklistTools as string[])?.length > 0) {
     console.log(
-      `  Blacklist Tools: ${(resolved.profile!.blacklistTools as string[]).join(", ")}`,
+      `  Blacklist Tools: ${(resolved.profileDef!.blacklistTools as string[]).join(", ")}`,
     );
   }
 
@@ -244,8 +244,8 @@ function printInfoJson(
         (config?.skills as Record<string, unknown>)?.path ||
         "/skills",
       profile: resolved.profileName,
-      profile_whitelist: (resolved.profile?.whitelistTools as string[]) || null,
-      profile_blacklist: (resolved.profile?.blacklistTools as string[]) || [],
+      profile_whitelist: (resolved.profileDef?.whitelistTools as string[]) || null,
+      profile_blacklist: (resolved.profileDef?.blacklistTools as string[]) || [],
     },
     providers: {
       configured: providers.map((p) => ({
@@ -454,15 +454,15 @@ async function printConfigDebug(
     `  ${"activeProvider".padEnd(25)} → ${resolved.activeProvider || "(none)"}`,
   );
   console.log(
-    `  ${"profile.whitelistTools".padEnd(25)} → ${(resolved.profile?.whitelistTools as string[]) ? JSON.stringify(resolved.profile!.whitelistTools) : "(none)"}`,
+    `  ${"profile.whitelistTools".padEnd(25)} → ${(resolved.profileDef?.whitelistTools as string[]) ? JSON.stringify(resolved.profileDef!.whitelistTools) : "(none)"}`,
   );
   console.log(
-    `  ${"profile.blacklistTools".padEnd(25)} → ${JSON.stringify((resolved.profile?.blacklistTools as string[]) || [])}`,
+    `  ${"profile.blacklistTools".padEnd(25)} → ${JSON.stringify((resolved.profileDef?.blacklistTools as string[]) || [])}`,
   );
   console.log(
-    `  ${"profile.manager".padEnd(25)} → ${(resolved.profile?.manager as boolean) || false}`,
+    `  ${"profile.manager".padEnd(25)} → ${(resolved.profileDef?.manager as boolean) || false}`,
   );
-  console.log(`  ${"profile.role".padEnd(25)} → ${resolved.profile?.role}`);
+  console.log(`  ${"profile.role".padEnd(25)} → ${resolved.profileDef?.role}`);
   console.log(
     `  ${"profile.body".padEnd(25)} → ${resolved.profileBody ? `(${(resolved.profileBody as string).length} chars)` : "(none)"}`,
   );

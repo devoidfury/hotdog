@@ -26,11 +26,12 @@ import type { ServiceRegistry } from "./service-registry.ts";
 import type { CliSubcommandRegistry } from "./registries.ts";
 import type { ConfigRegistry } from "./config-registry.ts";
 import type { ModelConfig, ProviderDef } from "../config/providers.ts";
-import type { CoreConfig } from "../config/schema-loader.ts";
+import type { CoreConfig, CoreConfigWithExtensions } from "../config/schema-loader.ts";
 import type { Agent } from "../agent.ts";
 import type { ImageAttachment, Message } from "../context/message.ts";
 import type { ParsedCommand } from "../commands.ts";
 import type { ToolContext } from "./tool-context.ts";
+export type { ToolContext };
 import type { StreamResult } from "../llm-client/stream-processor.ts";
 import { logger } from "../logger.ts";
 import { ProfileDef } from "../config/profiles.ts";
@@ -203,7 +204,7 @@ export interface CoreContext {
   services: ServiceRegistry;
 
   /** Resolved configuration, including extension-specific config blocks. */
-  config: CoreConfig & Record<string, unknown>;
+  config: CoreConfigWithExtensions;
 
   /** CLI subcommand registry. */
   cliSubcommandRegistry: CliSubcommandRegistry;
@@ -235,39 +236,39 @@ export interface CoreContext {
 
 /**
  * Resolved configuration attached to core after buildConfig().
- * Includes all resolved schema keys plus agent-specific extras.
+ * Includes build-time resolved values plus agent-specific extras.
  * Used by extensions that need access to the fully resolved config.
  */
 export interface ResolvedConfig {
   // Core schema keys (commonly accessed)
   baseUrl: string;
   apiKey: string;
-  model: string;
   chatTimeout: number;
   maxRetries: number;
   maxIterations: number;
+
+  // Model/agent-specific resolved values
+  model: string;
+  modelRegistry: Record<string, ModelConfig>;
   profileName: string;
-  profile?: ProfileDef;
+  /** Resolved profile object (includes manager flag, whitelistTools, etc.). */
+  profileDef?: ProfileDef;
+  profileBody?: string;
+  role?: string;
+  activeProvider?: string;
+  configDir?: string;
 
   // Optional schema keys
   stream?: boolean;
-  contextLimit?: number;
   hideTools?: boolean;
   hideThinking?: boolean;
   showTokenUse?: boolean;
   thinkerFormat?: string;
   toolFormat?: string;
   toolOutputFmt?: string;
-  profileBody?: string;
-  role?: string;
   taskProfile?: string;
   taskDefaultRole?: string;
   profilesPath?: string;
-
-  // Agent-specific extras
-  modelRegistry: Record<string, ModelConfig>;
-  activeProvider?: string;
-  configDir?: string;
 
   // Allow access to any other resolved config keys
   [key: string]: unknown;
@@ -370,7 +371,8 @@ export interface CommandsRegisterPayload {
  * Context passed to tool `execute()` methods.
  * Provides access to shared state and configuration.
  */
-export type ToolExecutionContext = ToolContext;
+// ToolContext is the canonical name for tool execution context.
+// Previously exported as ToolExecutionContext (alias removed).
 
 // ── Extension Config Helpers ─────────────────────────────────────────────────
 

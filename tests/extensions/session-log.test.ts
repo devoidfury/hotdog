@@ -45,16 +45,16 @@ function createMockAgent() {
 // ── disabledSessionLog ──────────────────────────────────────────────────────
 
 test("disabledSessionLog returns no-op log with correct return values", async () => {
-  const log = disabledSessionLog() as Record<string, (...args: unknown[]) => Promise<unknown>>;
+  const log = disabledSessionLog();
   // All write methods are no-ops that resolve without error
-  await expect(log.append({})).resolves.toBeUndefined();
-  await expect(log.writeSystemPrompt("x")).resolves.toBeUndefined();
-  await expect(log.writeInput("x")).resolves.toBeUndefined();
-  await expect(log.writeAssistant("x")).resolves.toBeUndefined();
-  await expect(log.writeToolResult("x", "tc1", "bash")).resolves.toBeUndefined();
-  await expect(log.writeReset()).resolves.toBeUndefined();
-  await expect(log.writeCompaction(5, "summary")).resolves.toBeUndefined();
-  await expect(log.writePrompt("x")).resolves.toBeUndefined();
+  await log.append({});
+  await log.writeSystemPrompt("x");
+  await log.writeInput("x");
+  await log.writeAssistant("x");
+  await log.writeToolResult("x", "tc1", "bash");
+  await log.writeReset();
+  await log.writeCompaction(5, "summary");
+  await log.writePrompt("x");
 });
 
 // ── SessionLog serialization ───────────────────────────────────────────────

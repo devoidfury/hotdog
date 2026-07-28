@@ -52,7 +52,7 @@ export function create(core: CoreContext, options: SubagentOptions = {}): Extens
   }
 
   // Check if the current profile is a manager profile
-  const profile = core.config.profile;
+  const profile = core.config.profileDef;
   const isManager = profile?.manager === true;
   if (!isManager) {
     return null; // Subagent tools only for manager profiles

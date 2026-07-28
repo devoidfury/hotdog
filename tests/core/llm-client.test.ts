@@ -346,7 +346,7 @@ describe("LlmClient._doRequest", () => {
 
     await client._doRequest("http://test.com", "test-key", { model: "gpt-4" }, null);
 
-    expect(capturedUrl).toBe("http://test.com/v1/chat/completions");
+    expect(capturedUrl!).toBe("http://test.com/v1/chat/completions");
     expect(capturedOptions!.method).toBe("POST");
     expect((capturedOptions!.headers as Record<string, string>)["Content-Type"]).toBe("application/json");
     expect((capturedOptions!.headers as Record<string, string>)["Authorization"]).toBe("Bearer test-key");
@@ -399,7 +399,7 @@ describe("LlmClient._doRequest", () => {
   it("passes abort signal to fetch", async () => {
     const client = new LlmClient({ chatTimeoutSecs: 30, maxRetries: 3, baseUrl: "http://test.com" });
 
-    let capturedSignal: AbortSignal | undefined;
+    let capturedSignal: AbortSignal | null | undefined;
 
     globalThis.fetch = (async (_: string, options: RequestInit) => {
       capturedSignal = options.signal;

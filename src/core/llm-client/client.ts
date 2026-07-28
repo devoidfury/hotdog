@@ -28,7 +28,7 @@ export interface ProviderConfig {
 export interface ModelConfig {
   name: string;
   temperature: number | null;
-  reasoningEffort?: string;
+  reasoningEffort?: string | null;
 }
 
 export interface LlmClientOptions {
@@ -39,7 +39,7 @@ export interface LlmClientOptions {
   stream?: boolean;
   providers?: ProviderConfig[];
   cancelled?: boolean;
-  markerMangler?: MarkerMangler;
+  markerMangler?: MarkerMangler | null;
 }
 
 export interface LlmClientRequiredOptions {

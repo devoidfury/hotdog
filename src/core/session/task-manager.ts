@@ -3,8 +3,8 @@
 import { Message } from "../context/message.ts";
 import { LlmError } from "../error.ts";
 import { loadProfileFile } from "../config/profiles.ts";
-import { parseAs } from "../../utils/json-schema.ts";
-import { type CoreConfig } from "../config/schema-loader.ts";
+import { castAs } from "../../utils/json-schema.ts";
+import { type CoreConfigWithExtensions } from "../config/schema-loader.ts";
 import { OUTPUT_EVENT } from "../context/output.ts";
 import type { AgentRunResult } from "../../core/agent.ts";
 
@@ -65,7 +65,7 @@ export interface SpawnTaskOptions {
 export interface TaskManagerOptions {
   llmClient: unknown;
   modelRegistry: Record<string, unknown>;
-  config: CoreConfig;
+  config: CoreConfigWithExtensions;
   hooks: unknown;
   sessionManager?: { getAgent: () => TaskAgent | undefined } | null;
 }
@@ -89,7 +89,7 @@ export class TaskManager {
   #buildAgent: (config: Record<string, unknown>) => Promise<TaskAgent>;
   #llmClient: unknown;
   #modelRegistry: Record<string, unknown>;
-  #config: CoreConfig;
+  #config: CoreConfigWithExtensions;
   #hooks: unknown;
   #sessionManager: { getAgent: () => TaskAgent | undefined } | null;
   #maxIterations: number;

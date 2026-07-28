@@ -5,6 +5,11 @@ import {
   CompactionStrategyRegistry,
   CompactionSettings,
 } from "../../src/extensions/compaction/strategies.ts";
+import { Message } from "../../src/core/context/message.ts";
+
+function msg(role: string, content: string) {
+  return new Message({ role, content });
+}
 
 describe("CompactionStrategy", () => {
   it("has default name and description", () => {
@@ -25,8 +30,8 @@ describe("CompactionStrategy", () => {
     it("returns false for too few messages", () => {
       const strategy = new CompactionStrategy();
       const messages = [
-        { role: "user", content: "hello" },
-        { role: "assistant", content: "hi" },
+        msg("user", "hello"),
+        msg("assistant", "hi"),
       ];
       const settings: CompactionSettings = { enabled: true, reserveTokens: 0, keepRecent: 2 };
       expect(strategy.canCompact(messages, settings)).toBe(false);
@@ -34,9 +39,9 @@ describe("CompactionStrategy", () => {
 
     it("returns true when messages exceed threshold", () => {
       const strategy = new CompactionStrategy();
-      const messages = Array.from({ length: 6 }, (_, i) => ({
-        role: i % 2 === 0 ? "user" : "assistant", content: "x",
-      }));
+      const messages = Array.from({ length: 6 }, (_, i) =>
+        msg(i % 2 === 0 ? "user" : "assistant", "x"),
+      );
       const settings: CompactionSettings = { enabled: true, reserveTokens: 0, keepRecent: 1 };
       expect(strategy.canCompact(messages, settings)).toBe(true);
     });
@@ -52,7 +57,7 @@ describe("CompactionStrategy", () => {
       expect(strategy.canCompact([], emptySettings)).toBe(false);
       const settings: CompactionSettings = { enabled: true, reserveTokens: 0, keepRecent: 0 };
       expect(strategy.canCompact(
-        Array.from({ length: 10 }, (_, i) => ({ role: i % 2 === 0 ? "user" : "assistant", content: "x" })),
+        Array.from({ length: 10 }, (_, i) => msg(i % 2 === 0 ? "user" : "assistant", "x")),
         settings,
       )).toBe(true);
     });
@@ -61,15 +66,15 @@ describe("CompactionStrategy", () => {
       const strategy = new CompactionStrategy();
       const settings1: CompactionSettings = { enabled: true, reserveTokens: 0, keepRecent: 3 };
       expect(strategy.canCompact(
-        [{ role: "system", content: "p1" }, { role: "system", content: "p2" }],
+        [msg("system", "p1"), msg("system", "p2")],
         settings1,
       )).toBe(false);
 
       const settings2: CompactionSettings = { enabled: true, reserveTokens: 0, keepRecent: 1 };
       expect(strategy.canCompact(
         [
-          { role: "system", content: "prompt" },
-          ...Array.from({ length: 6 }, (_, i) => ({ role: i % 2 === 0 ? "user" : "assistant", content: "x" })),
+          msg("system", "prompt"),
+          ...Array.from({ length: 6 }, (_, i) => msg(i % 2 === 0 ? "user" : "assistant", "x")),
         ],
         settings2,
       )).toBe(true);
@@ -77,11 +82,11 @@ describe("CompactionStrategy", () => {
 
     it("boundary: exactly at threshold returns false, one above returns true", () => {
       const strategy = new CompactionStrategy();
-      const four = Array.from({ length: 4 }, (_, i) => ({ role: i % 2 === 0 ? "user" : "assistant", content: "x" }));
+      const four = Array.from({ length: 4 }, (_, i) => msg(i % 2 === 0 ? "user" : "assistant", "x"));
       const settings1: CompactionSettings = { enabled: true, reserveTokens: 0, keepRecent: 2 };
       expect(strategy.canCompact(four, settings1)).toBe(false); // 4 > 4 => false
       const settings2: CompactionSettings = { enabled: true, reserveTokens: 0, keepRecent: 2 };
-      expect(strategy.canCompact([...four, { role: "user", content: "x" }], settings2)).toBe(true); // 5 > 4 => true
+      expect(strategy.canCompact([...four, msg("user", "x")], settings2)).toBe(true); // 5 > 4 => true
     });
   });
 

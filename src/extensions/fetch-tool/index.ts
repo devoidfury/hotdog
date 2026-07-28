@@ -14,7 +14,7 @@ import {
   CoreContext,
   ExtensionInstance,
   ToolsRegisterPayload,
-  ToolExecutionContext,
+  ToolContext,
 } from "../../core/extensions/types.ts";
 
 import pkg from "../../../package.json" with { type: "json" };
@@ -76,7 +76,7 @@ export class FetchTool {
     });
   }
 
-  async execute(input: string | Record<string, unknown> | null, _ctx?: ToolExecutionContext): Promise<ToolResult> {
+  async execute(input: string | Record<string, unknown> | null, _ctx?: ToolContext): Promise<ToolResult> {
     const { args, error } = parseArgs(input);
     if (!args) {
       return ToolResult.err(error);

@@ -11,7 +11,7 @@ import type { ToolRegistry } from "./tool-registry.ts";
 import type { ServiceRegistry } from "./service-registry.ts";
 import type { ConfigRegistry } from "./config-registry.ts";
 import type { CliSubcommandRegistry } from "./registries.ts";
-import type { CoreConfig } from "../config/schema-loader.ts";
+import type { CoreConfigWithExtensions } from "../config/schema-loader.ts";
 
 export { HOOKS, EXTENSION_PROVIDES };
 
@@ -534,7 +534,7 @@ export async function getExtensionConfigSchemas(
 
 export function isExtensionEnabled(
   extName: string,
-  config: CoreConfig | null | undefined,
+  config: CoreConfigWithExtensions | null | undefined,
 ): boolean {
   if (!config) return true;
   const configKey = camelCase(extName);
@@ -549,7 +549,7 @@ export async function getExtensionsToLoad(
   extensionPaths: string[],
   extensionAutoload: boolean,
   extensions: string[],
-  config?: CoreConfig,
+  config?: CoreConfigWithExtensions,
 ): Promise<ExtensionMetadata[]> {
   const configAny = config as Record<string, unknown> | undefined;
   const serviceOverrides = (configAny?.services as Record<string, string>) || {};
@@ -631,7 +631,7 @@ export function resolveExtensionDependencies(
 }
 
 export async function registerExtensionMetadata(
-  config: CoreConfig,
+  config: CoreConfigWithExtensions,
   configRegistry: ConfigRegistry,
   cliSubcommandRegistry: CliSubcommandRegistry,
 ): Promise<ExtensionMetadata[]> {
@@ -698,7 +698,7 @@ export interface LoaderCore {
   hooks: HookSystem;
   toolRegistry: ToolRegistry;
   services: ServiceRegistry;
-  config?: CoreConfig;
+  config?: CoreConfigWithExtensions;
   configRegistry: ConfigRegistry;
   cliSubcommandRegistry: CliSubcommandRegistry;
 }

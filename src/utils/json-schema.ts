@@ -279,7 +279,7 @@ export function formatValidationErrors(errors: string[]): string {
 }
 
 /**
- * Validate a value against a JSON Schema and return it as the typed type T.
+ * Cast a value to type T with optional schema validation logging.
  *
  * This is the single cast point for config boundary validation.
  * Instead of scattering `as unknown as X` across the codebase, callers
@@ -288,8 +288,10 @@ export function formatValidationErrors(errors: string[]): string {
  * When validation fails, the errors are logged but the value is still
  * returned. This is a "best effort" approach — the runtime validation
  * serves as a warning, not a hard gate.
+ *
+ * Use `parseOrThrow` when you need a hard guarantee.
  */
-export function parseAs<T>(value: unknown, schema?: unknown): T {
+export function castAs<T>(value: unknown, schema?: unknown): T {
   if (schema !== undefined) {
     const errors = validate(value, schema, "");
     if (errors.length > 0) {

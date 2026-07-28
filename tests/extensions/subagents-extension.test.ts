@@ -28,7 +28,7 @@ describe("subagents extension create()", () => {
   it("returns null when taskManager is provided but profile is not a manager", () => {
     const core = createMockCore({
       coreConfig: {
-        profile: {},
+        profileDef: {},
       },
     });
     const result = create(core, { taskManager: makeMockTM() });
@@ -38,7 +38,7 @@ describe("subagents extension create()", () => {
   it("returns null when profile.manager is false", () => {
     const core = createMockCore({
       coreConfig: {
-        profile: { manager: false },
+        profileDef: { manager: false },
       },
     });
     const result = create(core, { taskManager: makeMockTM() });
@@ -47,7 +47,7 @@ describe("subagents extension create()", () => {
 
   it("returns null when profile is undefined", () => {
     const core = createMockCore();
-    // core.config.profile is undefined by default
+    // core.config.profileDef is undefined by default
     const result = create(core, { taskManager: makeMockTM() });
     expect(result).toBeNull();
   });
@@ -55,7 +55,7 @@ describe("subagents extension create()", () => {
   it("returns extension instance when taskManager and manager profile are provided", () => {
     const core = createMockCore({
       coreConfig: {
-        profile: { manager: true },
+        profileDef: { manager: true },
       },
     });
     const result = create(core, { taskManager: makeMockTM() });
@@ -66,7 +66,7 @@ describe("subagents extension create()", () => {
   it("registers AGENT_TOOL_CONTEXT hook when created", () => {
     const core = createMockCore({
       coreConfig: {
-        profile: { manager: true },
+        profileDef: { manager: true },
       },
     });
     const result = create(core, { taskManager: makeMockTM() });
@@ -76,7 +76,7 @@ describe("subagents extension create()", () => {
   it("registers TOOLS_REGISTER hook when created", () => {
     const core = createMockCore({
       coreConfig: {
-        profile: { manager: true },
+        profileDef: { manager: true },
       },
     });
     const result = create(core, { taskManager: makeMockTM() });
@@ -86,7 +86,7 @@ describe("subagents extension create()", () => {
   it("exposes SUBAGENT_TOOL_NAMES and SUBAGENT_TOOL_CONSTRUCTORS", () => {
     const core = createMockCore({
       coreConfig: {
-        profile: { manager: true },
+        profileDef: { manager: true },
       },
     });
     const result = create(core, { taskManager: makeMockTM() });
@@ -100,7 +100,7 @@ describe("subagents extension create()", () => {
     const mockSessionCore = { sessionId: "test-session" };
     const core = createMockCore({
       coreConfig: {
-        profile: { manager: true },
+        profileDef: { manager: true },
       },
     });
     const result = create(core, { taskManager: mockTM, sessionCore: mockSessionCore });
@@ -120,7 +120,7 @@ describe("subagents extension create()", () => {
     const mockTM = makeMockTM();
     const core = createMockCore({
       coreConfig: {
-        profile: { manager: true },
+        profileDef: { manager: true },
       },
     });
     const result = create(core, { taskManager: mockTM });
@@ -138,7 +138,7 @@ describe("subagents extension create()", () => {
   it("TOOLS_REGISTER hook registers all subagent tools", async () => {
     const core = createMockCore({
       coreConfig: {
-        profile: { manager: true },
+        profileDef: { manager: true },
       },
     });
     const result = create(core, { taskManager: makeMockTM() });
@@ -166,7 +166,7 @@ describe("subagents extension create()", () => {
   it("TOOLS_REGISTER hook handles tool creation errors gracefully", async () => {
     const core = createMockCore({
       coreConfig: {
-        profile: { manager: true },
+        profileDef: { manager: true },
       },
     });
 
@@ -187,7 +187,7 @@ describe("subagents extension create()", () => {
   it("handles empty options object", () => {
     const core = createMockCore({
       coreConfig: {
-        profile: { manager: true },
+        profileDef: { manager: true },
       },
     });
     const result = create(core, {});
@@ -197,7 +197,7 @@ describe("subagents extension create()", () => {
   it("handles undefined options", () => {
     const core = createMockCore({
       coreConfig: {
-        profile: { manager: true },
+        profileDef: { manager: true },
       },
     });
     const result = create(core, undefined as any);

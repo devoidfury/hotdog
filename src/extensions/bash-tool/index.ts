@@ -13,7 +13,7 @@ import { HOOKS } from "../../core/hooks.ts";
 import {
   CoreContext,
   ExtensionInstance,
-  ToolExecutionContext,
+  ToolContext,
   getExtensionConfig,
 } from "../../core/extensions/types.ts";
 
@@ -59,7 +59,7 @@ export class BashTool {
 
   async execute(
     input: string | Record<string, unknown> | null,
-    ctx: ToolExecutionContext,
+    ctx: ToolContext,
   ): Promise<ToolResult> {
     const args = parseToolInput(input);
     if (!args) {

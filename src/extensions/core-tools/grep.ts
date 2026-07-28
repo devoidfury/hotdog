@@ -16,7 +16,7 @@ import {
 } from "../../core/extensions/tool-utils.ts";
 import type { ToolMetadata } from "../../core/extensions/tool-registry.ts";
 import { correctCommonPathMistakes } from "../../utils/file-utils.ts";
-import { ToolExecutionContext } from "../../core/extensions/types.ts";
+import { ToolContext } from "../../core/extensions/types.ts";
 
 const execFileAsync = util.promisify(execFile);
 
@@ -439,7 +439,7 @@ export class GrepTool {
 
   async execute(
     input: string | Record<string, unknown> | null,
-    _ctx: ToolExecutionContext,
+    _ctx: ToolContext,
   ): Promise<ToolResult> {
     const args = parseArgs(input, this.maxResults);
     if (!args) {

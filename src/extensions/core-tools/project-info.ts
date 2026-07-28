@@ -9,7 +9,7 @@ import type { ToolMetadata } from "../../core/extensions/tool-registry.ts";
 import { DEFAULT_GREP_MAX_RESULTS } from "./defaults.ts";
 import { correctCommonPathMistakes } from "../../utils/file-utils.ts";
 import { compileGitignore } from "../../utils/gitignore.ts";
-import { ToolExecutionContext } from "../../core/extensions/types.ts";
+import { ToolContext } from "../../core/extensions/types.ts";
 
 const execFileAsync = util.promisify(execFile);
 
@@ -53,7 +53,7 @@ export class ProjectInfoTool {
     });
   }
 
-  async execute(input: string | Record<string, unknown> | null, _ctx: ToolExecutionContext): Promise<ToolResult> {
+  async execute(input: string | Record<string, unknown> | null, _ctx: ToolContext): Promise<ToolResult> {
     const args: Record<string, unknown> = typeof input === "string" ? JSON.parse(input) : (input as Record<string, unknown>);
     let cwd = args.path as string || ".";
     const maxDepth = args.max_depth as number || DEFAULT_DU_DEPTH;

@@ -189,7 +189,7 @@ describe("MCP extension", () => {
     // Register tools first to create connections
     await (ext!.hooks![HOOKS.TOOLS_REGISTER] as Function)(mockRegistry);
     // Then shutdown
-    await ext!.shutdown();
+    await ext!.shutdown?.();
 
     // shutdown was called (we can verify by checking the connection array)
     expect(ext!.connections).toHaveLength(1);

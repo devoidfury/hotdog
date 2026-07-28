@@ -233,10 +233,10 @@ describe("Error types", () => {
 
 describe("EXPECTED_ERROR_TYPES", () => {
   it("contains expected types and excludes unexpected ones", () => {
-    for (const t of ["cancelled", "http", "api", "timeout", "cli", "tool", "config"]) {
+    for (const t of ["cancelled", "http", "api", "timeout", "cli", "tool", "config"] as const) {
       expect(EXPECTED_ERROR_TYPES.has(t)).toBe(true);
     }
-    for (const t of ["agent", "unknown"]) {
+    for (const t of ["agent", "unknown"] as const) {
       expect(EXPECTED_ERROR_TYPES.has(t)).toBe(false);
     }
   });

@@ -10,7 +10,7 @@ import { deepMerge } from "../../utils/objects.ts";
 import { render } from "../../utils/render.ts";
 import {
   validate as validateSchema,
-  parseAs,
+  castAs,
 } from "../../utils/json-schema.ts";
 import { camelCase } from "../../utils/strings.ts";
 
@@ -36,7 +36,7 @@ import {
   CONFIG_SCHEMA,
   getLayerDefault,
   ResolutionContext,
-  type CoreConfig,
+  type CoreConfigWithExtensions,
 } from "./schema-loader.ts";
 import {
   resolveAll,
@@ -147,7 +147,11 @@ export interface DefaultConfig extends Record<string, unknown> {
   extensionPaths: string[];
   extensionAutoload: boolean;
   extensions: string[];
-  profile: ProfileDef | null;
+  /** Profile name from config file (--profile flag, config.profile). */
+  profile?: string | null;
+  /** Resolved profile object (includes manager flag, whitelistTools, etc.). */
+  profileDef?: ProfileDef | null;
+  profileName?: string;
   theme: string | null;
   colors: unknown;
   systemPromptTemplate: string | null;
@@ -189,6 +193,8 @@ export function getDefaultConfig(
     extensionAutoload: false,
     extensions: [],
     profile: null,
+    profileDef: null,
+    profileName: undefined,
     theme: null,
     colors: null,
     systemPromptTemplate: null,
@@ -221,7 +227,7 @@ export function getDefaultConfig(
     hookTrace: getLayerDefault(CONFIG_SCHEMA.hookTrace) as boolean,
   };
 
-  return parseAs<DefaultConfig>(
+  return castAs<DefaultConfig>(
     mergeExtensionConfigDefaults(baseConfig, extParams),
   );
 }
@@ -326,20 +332,14 @@ export function failOnInvalidConfig(result: ValidationResult): void {
 
 // ── Unified Config Builder ─────────────────────────────────────────────
 
-export interface CliArgv {
-  config?: string | null;
-  configDir?: string | null;
-  profilesPath?: string | null;
-  model?: string | null;
-  prompt?: string | null;
-  systemPromptTemplate?: string | null;
-  [key: string]: unknown;
-}
+import type { CliArgv } from "../extensions/registries.ts";
+// Re-export for backward compatibility — canonical definition is in registries.ts
+export type { CliArgv };
 
 /**
  * Extra properties added by buildAgentConfig beyond the schema-resolved keys.
  */
-export interface AgentConfigExtra {
+export interface BuildAgentConfigExtra {
   model: string;
   configDir: string;
   profile: Record<string, unknown>;
@@ -351,15 +351,17 @@ export interface AgentConfigExtra {
 }
 
 /**
- * Complete agent configuration = resolved schema keys + extra properties.
+ * Complete build-time agent configuration = resolved schema keys + extra properties.
+ * Returned by buildAgentConfig() and buildConfig().
+ * Distinct from Agent.AgentConfig which is the runtime config the Agent class uses.
  */
-export type AgentConfig = CoreConfig & AgentConfigExtra;
+export type BuildAgentConfig = CoreConfigWithExtensions & BuildAgentConfigExtra;
 
 /**
  * Build the complete resolved configuration from CLI args.
  */
 export async function buildConfig(cliArgv: CliArgv): Promise<{
-  resolved: AgentConfig;
+  resolved: BuildAgentConfig;
   modelRegistry: Record<string, ModelConfig>;
   providers: ProviderDef[];
 }> {
@@ -372,7 +374,7 @@ export async function buildConfig(cliArgv: CliArgv): Promise<{
 
   const resolved = await buildAgentConfig({
     cli: cliArgv,
-    config: parseAs<CoreConfig>(config),
+    config: config as CoreConfigWithExtensions,
     configDir,
     providers: config.providers || [],
     defaultModel: getLayerDefault(CONFIG_SCHEMA.defaultModel) as string,
@@ -382,7 +384,7 @@ export async function buildConfig(cliArgv: CliArgv): Promise<{
   });
 
   const modelRegistry = buildModelRegistry(
-    { providers: parseAs<ProviderDef[]>(config.providers || []) },
+    { providers: castAs<ProviderDef[]>(config.providers || []) },
     128000,
   );
   resolved.modelRegistry = modelRegistry;
@@ -399,12 +401,12 @@ export async function buildConfig(cliArgv: CliArgv): Promise<{
  */
 export async function buildAgentConfig(options: {
   cli: CliArgv;
-  config: CoreConfig;
+  config: CoreConfigWithExtensions;
   configDir: string;
   providers?: ProviderDef[];
   defaultModel?: string;
   profilesPath?: string;
-}): Promise<AgentConfig> {
+}): Promise<BuildAgentConfig> {
   const {
     cli,
     config,
@@ -420,12 +422,12 @@ export async function buildAgentConfig(options: {
     configDir,
   };
 
-  const profileName = parseAs<string>(
+  const profileName = castAs<string>(
     resolveKey("profileName", CONFIG_SCHEMA.profileName, context),
   );
   const profilesPath =
     givenProfilesPath ||
-    parseAs<string>(
+    castAs<string>(
       resolveKey("profilesPath", CONFIG_SCHEMA.profilesPath, context),
     );
 
@@ -433,7 +435,7 @@ export async function buildAgentConfig(options: {
   const configProfile = config.profiles?.[profileName] ?? null;
   const fileProfile = profileFiles[profileName] || null;
 
-  const providerName = parseAs<string | undefined>(
+  const providerName = castAs<string | undefined>(
     resolveKey("provider", CONFIG_SCHEMA.provider, context),
   );
   const provider = providerName
@@ -486,11 +488,11 @@ export async function buildAgentConfig(options: {
     profilesPath,
   });
 
-  return parseAs<AgentConfig>({
+  return castAs<BuildAgentConfig>({
     ...resolved,
     model,
     configDir,
-    profile,
+    profileDef: profile,
     profileBody,
     activeProvider: provider?.name || null,
     systemPromptTemplate,

@@ -201,7 +201,17 @@ export async function create(_core: CoreContext): Promise<ExtensionInstance> {
 /**
  * Create a disabled session log (no-op).
  */
-export function disabledSessionLog(): Record<string, unknown> {
+export function disabledSessionLog(): {
+  sessionId: null;
+  logPath: null;
+  writeInput: (...args: unknown[]) => void;
+  writeSystemPrompt: (...args: unknown[]) => void;
+  writeAssistant: (...args: unknown[]) => void;
+  writeToolResult: (...args: unknown[]) => void;
+  writeReset: (...args: unknown[]) => void;
+  readEntries: () => [];
+  getLogPath: () => null;
+} {
   return {
     sessionId: null,
     logPath: null,

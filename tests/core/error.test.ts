@@ -4,7 +4,7 @@ import {
   CliError,
   ExtensionError,
   ToolError,
-  RetryableError,
+  AssistantRetryableError,
   TransientError,
   AgentError,
   ConfigError,
@@ -156,19 +156,19 @@ describe("Error types", () => {
     });
   });
 
-  describe("RetryableError", () => {
+  describe("AssistantRetryableError", () => {
     it("creates error with message and optional hint", () => {
-      const err = new RetryableError("bad input", "use --flag instead");
+      const err = new AssistantRetryableError("bad input", "use --flag instead");
       expect(err.message).toBe("bad input");
       expect(err.hint).toBe("use --flag instead");
       expect(err.type).toBe("tool");
     });
 
     it("WithHint creates error with hint", () => {
-      const err = RetryableError.WithHint("invalid format", "expected JSON");
+      const err = AssistantRetryableError.WithHint("invalid format", "expected JSON");
       expect(err.message).toBe("invalid format");
       expect(err.hint).toBe("expected JSON");
-      expect(err).toBeInstanceOf(RetryableError);
+      expect(err).toBeInstanceOf(AssistantRetryableError);
     });
   });
 

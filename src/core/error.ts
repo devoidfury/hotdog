@@ -132,16 +132,16 @@ export class ToolError extends AppError {
 }
 
 /**
- * Error that signals the LLM should retry the tool call with modified input.
+ * Error that signals the LLM assistant should retry the tool call with modified input.
  * Includes a hint to guide the correction.
  */
-export class RetryableError extends ToolError {
+export class AssistantRetryableError extends ToolError {
   constructor(message: string, public hint?: string) {
     super(message);
   }
 
-  static WithHint(message: string, hint: string): RetryableError {
-    return new RetryableError(message, hint);
+  static WithHint(message: string, hint: string): AssistantRetryableError {
+    return new AssistantRetryableError(message, hint);
   }
 }
 

@@ -1,7 +1,7 @@
 // ToolExecutor
 
 import { Message, type ToolCall, type ImageAttachment } from "./context/message.ts";
-import { formatError, RetryableError, TransientError } from "./error.ts";
+import { formatError, AssistantRetryableError, TransientError } from "./error.ts";
 import { HOOKS, type HookSystem, type GateAction, type ToolResultHookResult } from "./hooks.ts";
 import { logger } from "./logger.ts";
 import { ToolContext } from "./extensions/tool-context.ts";
@@ -181,7 +181,7 @@ export class ToolExecutor {
           continue;
         }
 
-        if (e instanceof RetryableError) {
+        if (e instanceof AssistantRetryableError) {
           const hint = e.hint ? `\n\nHINT: ${e.hint}` : "";
           result = `Error executing tool ${toolName}: ${e.message}${hint}`;
         } else {

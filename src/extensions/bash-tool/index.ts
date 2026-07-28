@@ -9,6 +9,7 @@ import {
   defaultCallDisplay,
 } from "../../core/extensions/tool-utils.ts";
 import type { ToolMetadata } from "../../core/extensions/tool-registry.ts";
+import { AssistantRetryableError } from "../../core/error.ts";
 import { HOOKS } from "../../core/hooks.ts";
 import {
   CoreContext,
@@ -76,7 +77,7 @@ export class BashTool {
       return ToolResult.err("Error: command is required");
     }
 
-    return new Promise((resolve) => {
+    return new Promise((resolve, reject) => {
       const proc: ChildProcess = spawn(command, [], {
         shell: true,
         stdio: ["pipe", "pipe", "pipe"],
@@ -102,12 +103,16 @@ export class BashTool {
       let stderr = "";
       let done = false;
 
-      const finish = (result: ToolResult) => {
+      const finish = (result: ToolResult | Error) => {
         if (done) return;
         done = true;
         clearTimeout(termTimer);
         clearTimeout(killTimer);
-        resolve(result);
+        if (result instanceof Error) {
+          reject(result);
+        } else {
+          resolve(result);
+        }
       };
 
       proc.stdout?.on("data", (chunk: Buffer) => {
@@ -120,12 +125,22 @@ export class BashTool {
 
       const termTimer = setTimeout(() => {
         proc.kill("SIGTERM");
-        finish(ToolResult.err(`Command timed out after ${timeout}ms`));
+        finish(
+          AssistantRetryableError.WithHint(
+            `Command timed out after ${timeout}ms`,
+            "Use a faster command, or increase timeoutMs in the tool call.",
+          ),
+        );
       }, timeout);
 
       const killTimer = setTimeout(() => {
         proc.kill("SIGKILL");
-        finish(ToolResult.err(`Command timed out after ${timeout}ms`));
+        finish(
+          AssistantRetryableError.WithHint(
+            `Command timed out after ${timeout}ms`,
+            "Use a faster command, add a timeout flag (e.g., `timeout 10s ...`), or increase timeoutMs in the tool call.",
+          ),
+        );
       }, timeout + 2000); // give it a two second grace period before hard killing
 
       const cmdFirstLine = command.trim().split("\n")[0] ?? "";

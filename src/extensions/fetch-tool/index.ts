@@ -9,6 +9,7 @@ import {
 } from "../../core/extensions/tool-utils.ts";
 import type { ToolMetadata } from "../../core/extensions/tool-registry.ts";
 import { htmlToMarkdown } from "../../utils/html-to-markdown.ts";
+import { TransientError } from "../../core/error.ts";
 import { HOOKS } from "../../core/hooks.ts";
 import {
   CoreContext,
@@ -163,10 +164,10 @@ export class FetchTool {
     } catch (e: unknown) {
       const msg = (e as Error).message || String(e);
       if (msg.includes("timeout") || msg.includes("timed out")) {
-        return ToolResult.err(`Request to ${url} timed out`);
+        throw new TransientError(`Request to ${url} timed out`);
       }
       if (msg.includes("connect") || msg.includes("network")) {
-        return ToolResult.err(`Connection failed for ${url}: ${msg}`);
+        throw new TransientError(`Connection failed for ${url}: ${msg}`);
       }
       return ToolResult.err(`Error: ${msg}`);
     }

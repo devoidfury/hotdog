@@ -4,7 +4,7 @@ import fs from "node:fs/promises";
 import { execFile } from "node:child_process";
 import util from "node:util";
 import { join, extname, resolve } from "node:path";
-import { ToolError } from "../../core/error.ts";
+import { AssistantRetryableError, ToolError } from "../../core/error.ts";
 import extensionData from "./extension.json" with { type: "json" };
 import {
   toolDef,
@@ -464,7 +464,10 @@ export class GrepTool {
     try {
       new RegExp(pattern);
     } catch (e: unknown) {
-      return ToolResult.err(`Invalid regex pattern: ${(e as Error).message}`);
+      throw AssistantRetryableError.WithHint(
+        `Invalid regex pattern: ${(e as Error).message}`,
+        "Fix the regex syntax. Common issues: unescaped special characters, mismatched brackets, invalid escape sequences.",
+      );
     }
 
     // Try ripgrep first, fall back to native implementation

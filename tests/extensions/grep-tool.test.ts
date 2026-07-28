@@ -131,13 +131,11 @@ describe("GrepTool.execute", () => {
     expect(resultStr(result)).toContain("No matches found");
   });
 
-  it("rejects invalid regex", async () => {
+  it("throws AssistantRetryableError on invalid regex", async () => {
     const tool = new GrepTool();
-    const result = getDisplay(
-      await tool.execute({ pattern: "[invalid", path: dir }, toolCtx()),
-    );
-
-    expect(resultStr(result)).toContain("Invalid regex");
+    await expect(
+      tool.execute({ pattern: "[invalid", path: dir }, toolCtx())
+    ).rejects.toThrow(/Invalid regex/);
   });
 
   it("returns error on invalid JSON input", async () => {

@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeAll, afterAll } from "bun:test";
 import { FetchTool } from "../../src/extensions/fetch-tool/index.ts";
+import { TransientError } from "../../src/core/error.ts";
 import { resultStr, getDisplay } from "../helpers.ts";
 
 // ── Local Test Server ──────────────────────────────────────────────────────
@@ -188,28 +189,49 @@ describe("FetchTool input validation", () => {
 
   it("normalizes method to uppercase", async () => {
     const tool = new FetchTool();
-    const result = await tool.execute(
-      JSON.stringify({ url: `${BASE_URL}/html`, method: "get" }),
-    );
-    const str = getDisplay(result);
+    let result: unknown;
+    let threw = false;
+    try {
+      result = await tool.execute(
+        JSON.stringify({ url: `${BASE_URL}/html`, method: "get" }),
+      );
+    } catch (e) {
+      threw = true;
+      result = e;
+    }
+    const str = threw ? (result as Error).message : getDisplay(result as Record<string, unknown>);
     expect(str).not.toContain("Invalid HTTP method");
     expect(str).not.toContain("Error parsing arguments");
   });
 
   it("handles object input", async () => {
     const tool = new FetchTool();
-    const result = await tool.execute({ url: `${BASE_URL}/html` });
-    const str = getDisplay(result);
+    let result: unknown;
+    let threw = false;
+    try {
+      result = await tool.execute({ url: `${BASE_URL}/html` });
+    } catch (e) {
+      threw = true;
+      result = e;
+    }
+    const str = threw ? (result as Error).message : getDisplay(result as Record<string, unknown>);
     expect(str).not.toContain("Error parsing arguments");
   });
 
   for (const val of [true, false, "true"]) {
     it(`accepts showOriginal: ${JSON.stringify(val)} without parse error`, async () => {
       const tool = new FetchTool();
-      const result = await tool.execute(
-        JSON.stringify({ url: `${BASE_URL}/html`, showOriginal: val }),
-      );
-      const str = getDisplay(result);
+      let result: unknown;
+      let threw = false;
+      try {
+        result = await tool.execute(
+          JSON.stringify({ url: `${BASE_URL}/html`, showOriginal: val }),
+        );
+      } catch (e) {
+        threw = true;
+        result = e;
+      }
+      const str = threw ? (result as Error).message : getDisplay(result as Record<string, unknown>);
       expect(str).not.toContain("Error parsing arguments");
       expect(str).not.toContain("Invalid");
     });
@@ -445,12 +467,11 @@ describe("FetchTool integration", () => {
   });
 
   describe("connection errors", () => {
-    it("handles unreachable host", async () => {
+    it("throws TransientError on unreachable host", async () => {
       const tool = new FetchTool();
-      const result = await tool.execute(
-        JSON.stringify({ url: "http://localhost:19999/nonexistent" }),
-      );
-      expect(getDisplay(result)).not.toBe("");
+      await expect(
+        tool.execute(JSON.stringify({ url: "http://localhost:19999/nonexistent" }))
+      ).rejects.toThrow(/Connection failed/);
     });
   });
 });

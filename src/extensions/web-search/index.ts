@@ -1,6 +1,6 @@
 // Web search tool — search the internet via DuckDuckGo, Brave, Tavily, or SearXNG.
 
-import { ToolError } from "../../core/error.ts";
+import { ToolError, TransientError } from "../../core/error.ts";
 import {
   toolDef,
   param,
@@ -360,7 +360,11 @@ export class WebSearchTool {
         results: String(lines.length - 1 > 0 ? lines.length - 1 : 0),
       });
     } catch (err) {
-      return ToolResult.err(`Web search failed: ${(err as Error).message}`);
+      const msg = (err as Error).message;
+      if (msg.includes("timeout") || msg.includes("timed out") || msg.includes("AbortError")) {
+        throw new TransientError(`Web search timed out: ${msg}`);
+      }
+      return ToolResult.err(`Web search failed: ${msg}`);
     }
   }
 }

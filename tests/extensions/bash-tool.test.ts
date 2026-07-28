@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'bun:test';
 import { BashTool, create } from '../../src/extensions/bash-tool/index.ts';
+import { AssistantRetryableError } from '../../src/core/error.ts';
 import { resultStr } from '../helpers.ts';
 import { HOOKS } from '../../src/core/hooks.ts';
 
@@ -33,10 +34,11 @@ describe('BashTool', () => {
     expect(resultStr(result)).toContain('hello');
   });
 
-  it('respects custom timeout', async () => {
+  it('throws AssistantRetryableError on timeout', async () => {
     const tool = new BashTool({ timeoutMs: 100, maxOutputLines: 100 });
-    const result = await tool.execute(JSON.stringify({ command: 'sleep 5', timeout_ms: 100 }), {} as any);
-    expect(resultStr(result)).toContain('timed out');
+    await expect(
+      tool.execute(JSON.stringify({ command: 'sleep 5', timeout_ms: 100 }), {} as any)
+    ).rejects.toThrow(/timed out/);
   });
 
   it('uses default timeout when not specified', async () => {

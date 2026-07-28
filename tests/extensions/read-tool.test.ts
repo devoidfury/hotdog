@@ -163,14 +163,11 @@ describe('ReadTool.execute — directory listing', () => {
 // ── execute: error cases ────────────────────────────────────────────────────
 
 describe('ReadTool.execute — error cases', () => {
-  it('returns error on file not found', async () => {
+  it('throws AssistantRetryableError on file not found', async () => {
     const tool = new ReadTool();
-    const result = await tool.execute(
-      { path: 'nonexistent.txt' },
-      toolCtx({ workspaceRoot: dir })
-    );
-
-    expect(resultStr(result)).toContain('File not found');
+    await expect(
+      tool.execute({ path: 'nonexistent.txt' }, toolCtx({ workspaceRoot: dir }))
+    ).rejects.toThrow(/File not found/);
   });
 
   it('returns error on invalid JSON input', async () => {

@@ -12,6 +12,7 @@ import {
 } from "../../core/extensions/tool-utils.ts";
 import type { ToolMetadata } from "../../core/extensions/tool-registry.ts";
 import { validateCwdBoundary, resolvePath } from "../../utils/file-utils.ts";
+import { AssistantRetryableError } from "../../core/error.ts";
 import { ToolContext } from "../../core/extensions/types.ts";
 
 interface EditToolOptions {
@@ -115,8 +116,9 @@ export class EditTool {
     // Validate input size
     const inputSize = oldString.length + newString.length;
     if (inputSize > this.maxEditInputSize) {
-      return ToolResult.err(
-        `Edit input too large: ${inputSize} characters (max ${this.maxEditInputSize}). Please split into smaller edits.`,
+      throw AssistantRetryableError.WithHint(
+        `Edit input too large: ${inputSize} characters (max ${this.maxEditInputSize}).`,
+        "Split this edit into multiple smaller edits, each targeting a specific section of the file.",
       );
     }
 
@@ -257,9 +259,10 @@ function findAndReplace(content: string, old: string, newStr: string, all: boole
             ...contentLines.slice(Math.max(0, contentLines.length - 4)),
           ];
     const context = contextLines.join("\n");
-    return {
-      error: `text not found in file.\n\nSearched for: ${JSON.stringify(old)}\n\nFile content:\n${context}\n\nTip: check whitespace/indentation. The tool supports line-trimmed matching (leading/trailing whitespace on each line is ignored).`,
-    };
+    throw AssistantRetryableError.WithHint(
+      `text not found in file.\n\nSearched for: ${JSON.stringify(old)}\n\nFile content:\n${context}`,
+      "Use the exact text from the file, including correct indentation. You can use the read tool to get the current file contents if needed.",
+    );
   }
 
   // Calculate which lines the match spans

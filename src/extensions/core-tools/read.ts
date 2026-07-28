@@ -13,6 +13,7 @@ import {
 } from "../../core/extensions/tool-utils.ts";
 import type { ToolMetadata } from "../../core/extensions/tool-registry.ts";
 import { validateCwdBoundary, resolvePath, correctCommonPathMistakes } from "../../utils/file-utils.ts";
+import { AssistantRetryableError } from "../../core/error.ts";
 import { DEFAULT_MAX_IMAGE_SIZE } from "./defaults.ts";
 import { ToolContext } from "../../core/extensions/types.ts";
 
@@ -147,7 +148,10 @@ export class ReadTool {
     try {
       await fs.access(resolved);
     } catch {
-      return ToolResult.err(`File not found: ${filePath}`);
+      throw AssistantRetryableError.WithHint(
+        `File not found: ${filePath}`,
+        "Check the path is correct. Maybe try reading the containing directory to list contents.",
+      );
     }
 
     // Check if it's an image file

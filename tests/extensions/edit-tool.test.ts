@@ -3,6 +3,7 @@ import fsSync from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import { EditTool } from '../../src/extensions/core-tools/edit.ts';
+import { AssistantRetryableError } from '../../src/core/error.ts';
 import { ToolContext } from '../../src/core/extensions/tool-context.ts';
 import { resultStr, tmpDir, toolCtx, cleanupDir } from '../helpers.ts';
 
@@ -159,20 +160,17 @@ describe('EditTool.execute — line-trimmed fallback', () => {
     expect(fsSync.readFileSync(filePath, 'utf-8')).toBe('  universe  \n  foo bar  ');
   });
 
-  it('provides helpful error when text not found', async () => {
+  it('throws AssistantRetryableError with helpful message when text not found', async () => {
     const filePath = path.join(dir, 'file.txt');
     fsSync.writeFileSync(filePath, 'line1\nline2\nline3');
 
     const tool = new EditTool();
-    const result = await tool.execute(
-      { path: 'file.txt', oldString: 'notfound', newString: 'replacement' },
-      toolCtx({ workspaceRoot: dir })
-    );
-
-    expect(resultStr(result)).toContain('text not found in file');
-    expect(resultStr(result)).toContain('Searched for');
-    expect(resultStr(result)).toContain('File content');
-    expect(resultStr(result)).toContain('Tip');
+    await expect(
+      tool.execute(
+        { path: 'file.txt', oldString: 'notfound', newString: 'replacement' },
+        toolCtx({ workspaceRoot: dir })
+      )
+    ).rejects.toThrow(/text not found in file/);
   });
 });
 
@@ -247,17 +245,18 @@ describe('EditTool.execute — error cases', () => {
     expect(resultStr(result)).toContain('outside cwd boundary');
   });
 
-  it('rejects input that is too large', async () => {
+  it('throws AssistantRetryableError when input is too large', async () => {
     const filePath = path.join(dir, 'file.txt');
     fsSync.writeFileSync(filePath, 'hello');
 
     const tool = new EditTool();
     const bigString = 'x'.repeat(16001); // DEFAULT_MAX_EDIT_INPUT_SIZE (16000) + 1
-    const result = await tool.execute(
-      { path: 'file.txt', oldString: bigString, newString: 'y' },
-      toolCtx({ workspaceRoot: dir })
-    );
-    expect(resultStr(result)).toContain('Edit input too large');
+    await expect(
+      tool.execute(
+        { path: 'file.txt', oldString: bigString, newString: 'y' },
+        toolCtx({ workspaceRoot: dir })
+      )
+    ).rejects.toThrow(/Edit input too large/);
   });
 
   it('handles input as string JSON', async () => {

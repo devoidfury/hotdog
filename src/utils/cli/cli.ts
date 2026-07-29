@@ -17,6 +17,7 @@ import {
   TaskProgressEvent,
   TokenUsageEvent,
   SessionStateEvent,
+  SystemMessageEvent,
 } from "../../core/context/output.ts";
 import {
   ColorPalette,
@@ -310,6 +311,9 @@ export class CliOutputSink extends OutputSink {
       case OUTPUT_EVENT.SESSION_STATE:
         this.emitSessionState(event);
         break;
+      case OUTPUT_EVENT.SYSTEM_MESSAGE:
+        this.emitSystemMessage(event);
+        break;
     }
   }
 
@@ -428,6 +432,16 @@ export class CliOutputSink extends OutputSink {
       case "hideThinking":
         this.hideThinking = event.value as boolean;
         break;
+    }
+  }
+
+  override emitSystemMessage(event: SystemMessageEvent): void {
+    this._transitionTo(Modes.System);
+    this._processContent(`${applyCompacting(event.content, this.palette)}\n`);
+    if (event.detail) {
+      this._processContent(
+        `${applyCompacting("> " + event.detail.split("\n").join("\n> "), this.palette)}\n`,
+      );
     }
   }
 

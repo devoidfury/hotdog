@@ -25,6 +25,7 @@ const EVENT_TO_PROTOCOL: Record<OutputEventType, S2CType> = {
   [OUTPUT_EVENT.TOKEN_USAGE]: S2C.TOKEN_USAGE,
   [OUTPUT_EVENT.COMPACTION_RESULT]: S2C.COMPACTION_RESULT,
   [OUTPUT_EVENT.SESSION_STATE]: S2C.SESSION_STATE,
+  [OUTPUT_EVENT.SYSTEM_MESSAGE]: S2C.SYSTEM_MESSAGE,
 };
 
 // ── WebSocketChannel ────────────────────────────────────────────────────────

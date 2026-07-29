@@ -1,0 +1,33 @@
+{
+  "name": "file-attachment",
+  "provides": [],
+  "loadOrder": 5,
+  "description": "Expands @filepath references in user input to file contents in <file-include> format",
+  "configSchema": {
+    "fileAttachment": {
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Whether this extension is enabled. Set to false to disable the extension entirely."
+        },
+        "maxFileSize": {
+          "type": "integer",
+          "default": 102400,
+          "description": "Maximum file size in bytes to expand (default: 100KB)"
+        },
+        "maxFiles": {
+          "type": "integer",
+          "default": 10,
+          "description": "Maximum number of files to expand per input"
+        }
+      },
+      "additionalProperties": false,
+      "layers": [
+        { "source": "config", "key": "fileAttachment" },
+        { "default": {} }
+      ]
+    }
+  }
+}

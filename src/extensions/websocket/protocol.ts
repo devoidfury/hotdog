@@ -51,6 +51,7 @@ export const S2C = {
   TOKEN_USAGE: "tokenUsage",
   COMPACTION_RESULT: "compactionResult",
   SESSION_STATE: "sessionState",
+  SYSTEM_MESSAGE: "systemMessage",
 
   // Connection management
   ERROR: "error",

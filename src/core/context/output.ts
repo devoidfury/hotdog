@@ -16,6 +16,7 @@ export const OUTPUT_EVENT = {
   TOKEN_USAGE: 12,
   COMPACTION_RESULT: 13,
   SESSION_STATE: 14,
+  SYSTEM_MESSAGE: 15,
 } as const;
 
 export type OutputEventType = (typeof OUTPUT_EVENT)[keyof typeof OUTPUT_EVENT];
@@ -38,6 +39,7 @@ export const EVENT_HANDLERS: Record<OutputEventType, string> = {
   [OUTPUT_EVENT.TOKEN_USAGE]: "emitTokenUsage",
   [OUTPUT_EVENT.COMPACTION_RESULT]: "emitCompactionResult",
   [OUTPUT_EVENT.SESSION_STATE]: "emitSessionState",
+  [OUTPUT_EVENT.SYSTEM_MESSAGE]: "emitSystemMessage",
 };
 
 // ── Discriminated Union: Typed Output Events ────────────────────────────────
@@ -141,6 +143,13 @@ export interface SessionStateEvent {
   sessionId?: string;
 }
 
+export interface SystemMessageEvent {
+  type: typeof OUTPUT_EVENT.SYSTEM_MESSAGE;
+  content: string;
+  /** Optional expandable detail (e.g., full file contents for a file attachment notice). */
+  detail?: string;
+}
+
 /**
  * Discriminated union of all output event types.
  * Enables type-safe event handling via type narrowing on `type`.
@@ -159,7 +168,8 @@ export type OutputEvent =
   | TaskProgressEvent
   | TokenUsageEvent
   | CompactionResultEvent
-  | SessionStateEvent;
+  | SessionStateEvent
+  | SystemMessageEvent;
 
 /**
  * Create an output event.
@@ -231,6 +241,9 @@ export class OutputSink {
       case OUTPUT_EVENT.SESSION_STATE:
         this.emitSessionState(event);
         break;
+      case OUTPUT_EVENT.SYSTEM_MESSAGE:
+        this.emitSystemMessage(event);
+        break;
     }
   }
 
@@ -253,6 +266,10 @@ export class OutputSink {
   emitCompactionResult(_event: CompactionResultEvent): void {}
 
   emitSessionState(_event: SessionStateEvent): void {}
+
+  emitSystemMessage(event: SystemMessageEvent): void {
+    process.stderr.write(event.content + "\n");
+  }
 
   emitCommandResult(event: CommandResultEvent): void {
     process.stdout.write(event.content + "\n");

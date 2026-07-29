@@ -2,7 +2,7 @@
 
 import { formatError, isExpectedError, LlmError } from "../error.ts";
 import { OUTPUT_EVENT, OutputEvent } from "../context/output.ts";
-import { HOOKS } from "../hooks.ts";
+import { HOOKS, isInputTransform } from "../hooks.ts";
 import { parseCommand, ACTIONS, ParsedCommand, type CommandRegistryLike } from "../commands.ts";
 import type { CommandResult } from "../extensions/registries.ts";
 
@@ -327,7 +327,10 @@ export class MessageBus {
         { shouldStop: (result: unknown) => (result as { action?: string })?.action === "handled" },
       );
       if ((inputResult as { stopped?: boolean }).stopped) inputHandled = true;
-      text = (inputResult as { data?: { text: string } }).data?.text ?? text;
+      const lastResult = (inputResult as { lastResult?: unknown }).lastResult;
+      if (isInputTransform(lastResult)) {
+        text = lastResult.text;
+      }
     }
 
     // If input was handled by a hook, skip agent processing

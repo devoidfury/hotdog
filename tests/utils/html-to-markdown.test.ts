@@ -127,6 +127,21 @@ describe("htmlToMarkdown", () => {
     expect(result).toBe("![A photo](photo.jpg)");
   });
 
+  it("strips images with data:image/ URIs", () => {
+    const result = htmlToMarkdown(
+      '<img src="data:image/png;base64,iVBORw0KGgoAAAANSUhEUg==" alt="inline">',
+    );
+    expect(result).toBe("");
+  });
+
+  it("keeps regular images when mixed with data URI images", () => {
+    const result = htmlToMarkdown(
+      '<p><img src="data:image/gif;base64,R0lGODlh" alt="skip"> and <img src="photo.jpg" alt="keep"></p>',
+    );
+    expect(result).toContain("![keep](photo.jpg)");
+    expect(result).not.toContain("data:image");
+  });
+
   it("converts line breaks", () => {
     const result = htmlToMarkdown("<p>line1<br>line2</p>");
     expect(result).toContain("line1");

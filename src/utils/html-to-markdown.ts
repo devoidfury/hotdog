@@ -96,6 +96,11 @@ export function htmlToMarkdown(html: string | null | undefined): string {
     .on("img", {
       element: (el) => {
         const src = el.getAttribute("src") || "";
+        // Skip data URIs (e.g. data:image/png;base64,...) — they bloat output.
+        if (src.startsWith("data:image/")) {
+          el.remove();
+          return;
+        }
         const alt = (el.getAttribute("alt") || "").replace(/"/g, '\\"');
         el.remove();
         el.after(`![${alt}](${src})`, { html: true });

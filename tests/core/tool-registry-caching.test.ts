@@ -371,8 +371,8 @@ describe("Agent model setter clears tool def cache", () => {
       llmClient,
       model: "test-model-v1",
       modelRegistry: {
-        "test-model-v1": { name: "test-model-v1", temperature: 0.7, contextLimit: 128000, tags: [] },
-        "test-model-v2": { name: "test-model-v2", temperature: 0.7, contextLimit: 128000, tags: [] },
+        "test-model-v1": { name: "test-model-v1", temperature: 0.7, contextLimit: 128000, tags: [], capabilities: {} },
+        "test-model-v2": { name: "test-model-v2", temperature: 0.7, contextLimit: 128000, tags: [], capabilities: {} },
       },
       maxIterations: 100,
       contextLimit: 128000,

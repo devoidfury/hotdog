@@ -6,7 +6,7 @@ import { ToolRegistry } from "../../src/core/extensions/tool-registry.ts";
 import { createCommandRegistry } from "../../src/core/extensions/registries.ts";
 
 function mkModel(name: string) {
-  return { name, temperature: 0.7, contextLimit: 128000, tags: [] };
+  return { name, temperature: 0.7, contextLimit: 128000, tags: [], capabilities: {} };
 }
 
 function createMockCore(config: any = {}) {

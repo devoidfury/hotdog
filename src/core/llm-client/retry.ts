@@ -38,7 +38,7 @@ export interface RetryOptions {
 }
 
 /**
- * Retry an async operation with linear backoff and cancellation support.
+ * Retry an async operation with exponential backoff and cancellation support.
  *
  * @param fn - Async function to retry.
  * @param maxRetries - Maximum number of retry attempts.
@@ -115,7 +115,7 @@ export async function retryWithBackoff<T>(
           }
         });
 
-        delaySecs += 1;
+        delaySecs *= 2;
         continue;
       }
 

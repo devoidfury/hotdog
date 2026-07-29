@@ -175,7 +175,7 @@ export class ToolExecutor {
         break;
       } catch (e: unknown) {
         if (e instanceof TransientError && attempts < maxRetries) {
-          const delay = attempts * this.#deps.toolRetryDelay * 1000;
+          const delay = Math.pow(2, attempts - 1) * this.#deps.toolRetryDelay * 1000;
           logger.warn(`[tool:retry] ${toolName} failed (transient), retrying attempt ${attempts + 1}/${maxRetries} after ${delay}ms...`);
           await new Promise((resolve) => setTimeout(resolve, delay));
           continue;

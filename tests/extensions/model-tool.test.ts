@@ -4,7 +4,7 @@ import { ToolContext } from '../../src/core/extensions/tool-context.ts';
 import { resultStr } from '../helpers.ts';
 
 function mkModel(name: string) {
-  return { name, temperature: 0.7, contextLimit: 128000, tags: [] };
+  return { name, temperature: 0.7, contextLimit: 128000, tags: [], capabilities: {} };
 }
 
 describe('ModelTool', () => {

@@ -19,7 +19,7 @@ export interface ModelConfig {
   /**
    * Model capabilities (e.g., vision, tool use).
    */
-  capabilities: {
+  capabilities?: {
     vision?: boolean;
     [key: string]: boolean | undefined;
   };

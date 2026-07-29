@@ -1,7 +1,6 @@
 // Compaction utilities — token estimation, message serialization, helpers.
 
 import { AgentError } from "../../core/error.ts";
-import { Message } from "../../core/context/message.ts";
 
 const TOOL_RESULT_MAX_CHARS = 2000;
 

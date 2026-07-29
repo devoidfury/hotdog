@@ -304,9 +304,8 @@
     ]
   },
   "maxRetries": {
-
     "type": "number",
-    "layers": [{ "default": 12 }]
+    "layers": [{ "default": 5 }]
   },
   "toolRetryDelay": {
     "type": "number",

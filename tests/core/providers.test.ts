@@ -198,7 +198,7 @@ describe("buildModelRegistry with fetchModels", () => {
   });
 
   it("fetches models from provider URL when fetchModels is true", async () => {
-    globalThis.fetch = async () =>
+    globalThis.fetch = Object.assign(async () =>
       ({
         ok: true,
         json: async () => ({
@@ -207,7 +207,9 @@ describe("buildModelRegistry with fetchModels", () => {
             { id: "remote-model-2", context_length: 16384, capabilities: { vision: true } },
           ],
         }),
-      } as Response);
+      } as Response),
+      { preconnect: async () => {} },
+    );
 
     const config = {
       providers: [
@@ -223,13 +225,15 @@ describe("buildModelRegistry with fetchModels", () => {
   });
 
   it("uses global baseUrl when provider has no URL", async () => {
-    globalThis.fetch = async () =>
+    globalThis.fetch = Object.assign(async () =>
       ({
         ok: true,
         json: async () => ({
           data: [{ id: "inherited-url-model" }],
         }),
-      } as Response);
+      } as Response),
+      { preconnect: async () => {} },
+    );
 
     const config = {
       providers: [
@@ -243,13 +247,13 @@ describe("buildModelRegistry with fetchModels", () => {
 
   it("uses global apiKey when provider has no apiKey", async () => {
     let capturedAuth = "";
-    globalThis.fetch = async (url: string, init: RequestInit) => {
+    globalThis.fetch = Object.assign(async (url: string | URL | RequestInfo, init?: RequestInit) => {
       capturedAuth = (init?.headers as Record<string, string>)?.Authorization || "";
       return {
         ok: true,
         json: async () => ({ data: [{ id: "key-test" }] }),
       } as Response;
-    };
+    }, { preconnect: async () => {} }) as typeof fetch;
 
     const config = {
       providers: [
@@ -263,13 +267,13 @@ describe("buildModelRegistry with fetchModels", () => {
 
   it("provider apiKey overrides global apiKey", async () => {
     let capturedAuth = "";
-    globalThis.fetch = async (url: string, init: RequestInit) => {
+    globalThis.fetch = Object.assign(async (url: string | URL | RequestInfo, init?: RequestInit) => {
       capturedAuth = (init?.headers as Record<string, string>)?.Authorization || "";
       return {
         ok: true,
         json: async () => ({ data: [{ id: "key-test" }] }),
       } as Response;
-    };
+    }, { preconnect: async () => {} }) as typeof fetch;
 
     const config = {
       providers: [
@@ -282,7 +286,7 @@ describe("buildModelRegistry with fetchModels", () => {
   });
 
   it("deep merges remote models with local ones, local takes priority but remote fills gaps", async () => {
-    globalThis.fetch = async () =>
+    globalThis.fetch = Object.assign(async () =>
       ({
         ok: true,
         json: async () => ({
@@ -291,7 +295,9 @@ describe("buildModelRegistry with fetchModels", () => {
             { id: "remote-only", context_length: 2000 },
           ],
         }),
-      } as Response);
+      } as Response),
+      { preconnect: async () => {} },
+    );
 
     const config = {
       providers: [
@@ -315,9 +321,9 @@ describe("buildModelRegistry with fetchModels", () => {
   });
 
   it("handles fetch failure gracefully without crashing", async () => {
-    globalThis.fetch = async () => {
+    globalThis.fetch = Object.assign(async () => {
       throw new Error("network error");
-    };
+    }, { preconnect: async () => {} });
 
     const config = {
       providers: [
@@ -330,7 +336,7 @@ describe("buildModelRegistry with fetchModels", () => {
   });
 
   it("expands aliases as separate model entries", async () => {
-    globalThis.fetch = async () =>
+    globalThis.fetch = Object.assign(async () =>
       ({
         ok: true,
         json: async () => ({
@@ -341,7 +347,9 @@ describe("buildModelRegistry with fetchModels", () => {
             },
           ],
         }),
-      } as Response);
+      } as Response),
+      { preconnect: async () => {} },
+    );
 
     const config = {
       providers: [

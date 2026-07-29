@@ -2,7 +2,7 @@
 
 import { formatError, isExpectedError, LlmError } from "../error.ts";
 import { OUTPUT_EVENT, OutputEvent } from "../context/output.ts";
-import { HOOKS, isInputTransform } from "../hooks.ts";
+import { HOOKS, isInputTransform, type InputHookResult } from "../hooks.ts";
 import { parseCommand, ACTIONS, ParsedCommand, type CommandRegistryLike } from "../commands.ts";
 import type { CommandResult } from "../extensions/registries.ts";
 
@@ -328,8 +328,9 @@ export class MessageBus {
       );
       if ((inputResult as { stopped?: boolean }).stopped) inputHandled = true;
       const lastResult = (inputResult as { lastResult?: unknown }).lastResult;
-      if (isInputTransform(lastResult)) {
-        text = lastResult.text;
+      const transformed = lastResult as InputHookResult | undefined;
+      if (isInputTransform(transformed)) {
+        text = transformed.text;
       }
     }
 

@@ -288,6 +288,8 @@ Each extension has:
 | `agents-md` | Loads AGENTS.md and contributes Project Context section |
 | `aspects` | Loads aspect files and contributes Guidelines section |
 | `environment` | Contributes Environment section to system prompt |
+| `file-attachment` | Expands @filepath references in user input to file contents |
+| `handoff-tool` | Plan-execute handoff tool — clears context and restarts with a prepared plan |
 | `loop` | `/loop` slash command — repeatedly run a prompt until cancelled |
 | `web-search` | Web search tool — search the web for information |
 | `websocket` | WebSocket server for agent session management — core backend utility for UI extensions |

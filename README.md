@@ -124,6 +124,8 @@ Profile body content goes here.
 - **Compaction** -- Automatic context management when token budget is exceeded
 - **MCP client** -- Connect to Model Context Protocol servers (HTTP + stdio)
 - **Subagent tasks** -- Delegate work to background task agents
+- **Handoff tool** -- Clear context and restart with a prepared plan for multi-phase tasks
+- **File attachments** -- Reference files inline with @filepath syntax in user input
 - **Session logging** -- JSONL session logs for debugging and auditing
 - **Streaming** -- Real-time streaming of LLM responses
 - **Retry with backoff** -- Automatic retry for transient LLM errors
@@ -156,6 +158,9 @@ hotdog webui                     # Start the web UI server
 -k, --api-key <key>          API key
     --profile <name>         Profile name
     --provider <name>        AI provider name
+-p, --prompt <text>          One-shot prompt
+    --sandbox                Sandbox mode: only allow tools without side effects
+    --shell-mode             Execute shell commands directly in interactive mode
 -l, --loud                   Print full JSON API responses
 --json                       Output as JSON
 --show-tools                 Show tool calls in output
@@ -170,13 +175,22 @@ hotdog webui                     # Start the web UI server
 
 ```
 /help              Show available commands
-/quit              Exit
+/quit, /exit       Exit
 /clear             Clear conversation history
-/tools             List available tools
-/thinking          Toggle thinking display
+/loop <prompt>     Repeatedly run a prompt until cancelled
+/model <name>      Switch model
+/models            List available models
 /tokens            Toggle token usage display
-/regenerate        Regenerate last response
-/reasoning         Toggle reasoning effort
+/tools             Toggle tool call display
+/compact [n]       Compact context
+/cancel            Cancel current run
+/prompt:name       Execute saved prompt from prompts directory
+/skill             List available skills
+/skill:<name>      Activate a skill
+/thinking          Toggle thinking display
+/theme <name>      Set theme (dark, light, monochrome)
+/regenerate        Regenerate system prompt
+/reasoning <level> Set reasoning effort (none/minimal/low/high/xhigh/max/unset)
 ```
 
 ## Extension Anatomy

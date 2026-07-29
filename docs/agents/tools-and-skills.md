@@ -57,7 +57,8 @@ Tools without metadata are excluded when filtering is active (conservative defau
 | `question` | `question-tool` | Asks interactive questions to the user | `questions` array with `key`, `prompt`, `options`, `required`, `default` |
 | `model` | `model-switch` | Switches to a different model mid-conversation | `name` |
 | `web_search` | `web-search` | Searches the web for information | `query` |
-| `review` *(disabled by default)* | `ui-session-review-cli` | Lists recent sessions, gets session entries, or gets tool call index. Enable via profile whitelist. | `operation`, `session_id`, `limit` |
+| `review` | `ui-session-review-cli` | Lists recent sessions, gets session entries, or gets tool call index. | `operation`, `session_id`, `limit` |
+| `handoff` | `handoff-tool` | Clears context and restarts the agent with a prepared plan for a new phase | `content`, `title`, `instructions`, `files` |
 
 ### Tool Filtering
 

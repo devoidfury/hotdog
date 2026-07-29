@@ -47,6 +47,6 @@ description
 ## Related Subcommands
 
 - `info` — Shows system diagnostics, providers, models, connectivity
-- `review` — Reviews session logs from disk
+- `sessions` — Manages session logs (show, delete, cleanup)
 
 All subcommands are provided by extensions registered via `CliSubcommandRegistry`.

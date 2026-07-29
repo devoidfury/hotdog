@@ -1,11 +1,9 @@
 // Review tool — access session log data from within agent tool calls.
 //
 // Provides three operations:
-// - `list`: List recent sessions (same format as `review --json`)
+// - `list`: List recent sessions (same format as `hotdog sessions show --json`)
 // - `get`: Get all entries for a specific session
 // - `tool_index`: Get a lightweight index of tool calls (name, index, args only)
-//
-// Disabled by default; enable via profile whitelist.
 
 import {
   readSessionEntries,

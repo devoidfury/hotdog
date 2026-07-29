@@ -698,6 +698,33 @@ Extensions register their own configuration namespaces. Each extension's config 
 { "environment": { "enabled": true } }
 ```
 
+### `fileAttachment`
+
+[File Attachment](../src/extensions/file-attachment) — Expands @filepath references in user input to file contents.
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `enabled` | `boolean` | `true` | Enable/disable the extension. |
+| `maxFileSize` | `number` | `102400` | Maximum file size in bytes to expand (default: 100KB). |
+| `maxFiles` | `number` | `10` | Maximum number of files to expand per input. |
+
+```json
+{ "fileAttachment": { "maxFileSize": 204800, "maxFiles": 20 } }
+```
+
+### `handoffTool`
+
+[Handoff Tool](../src/extensions/handoff-tool) — Plan-execute handoff for multi-phase tasks.
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `enabled` | `boolean` | `true` | Enable/disable the extension. |
+| `systemPrompt` | `boolean` | `true` | Include handoff tool instructions in the system prompt. |
+
+```json
+{ "handoffTool": { "systemPrompt": true } }
+```
+
 ### `bashTool`
 
 [Bash Tool](../src/extensions/bash-tool) — Execute shell commands.
@@ -734,6 +761,7 @@ Extensions register their own configuration namespaces. Each extension's config 
 | `strategy` | `string` | `"summarize"` | Strategy: `summarize`, `drop`, `summarize-short`, `token-aware`, `trim`. |
 | `reserveTokens` | `number` | `8000` | Token budget to reserve for the response. |
 | `keepRecentMessages` | `number` | `3` | Recent messages to keep after compaction. |
+| `userTurnGuardPrompt` | `string` | `"Continue from the compressed conversation context above."` | Prompt added when compaction ends in a non-user turn to ensure compatibility with some LLM templates. |
 
 ```json
 { "compaction": { "strategy": "token-aware", "reserveTokens": 16000 } }

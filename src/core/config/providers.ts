@@ -88,8 +88,44 @@ interface LlamaSwapModelsResponse {
 }
 
 /**
+ * Parse a /v1/models response into ProviderModelEntry[].
+ */
+function parseModelsResponse(json: LlamaSwapModelsResponse): ProviderModelEntry[] {
+  const entries: ProviderModelEntry[] = [];
+
+  for (const m of json.data || []) {
+    const hasVision =
+      m.capabilities?.vision === true ||
+      m.architecture?.input_modalities?.includes("image");
+
+    const baseEntry: ProviderModelEntry = {
+      name: m.id,
+      contextLimit: m.context_length,
+      tags: [...(m.meta?.tags ?? m.meta?.llamaswap?.tags ?? [])],
+      capabilities: hasVision ? { vision: true } : undefined,
+      maxToolDifficulty: m.meta?.max_tool_difficulty ?? m.meta?.llamaswap?.max_tool_difficulty,
+    };
+
+    entries.push(baseEntry);
+
+    // Add aliases as separate model entries
+    if (m.meta?.llamaswap?.aliases) {
+      for (const alias of m.meta.llamaswap.aliases) {
+        entries.push({
+          ...baseEntry,
+          name: alias,
+        });
+      }
+    }
+  }
+
+  return entries;
+}
+
+/**
  * Fetch models from a provider's /v1/models endpoint.
  * Falls back to globalBaseUrl/globalApiKey when the provider has no explicit values.
+ * Times out after 5 seconds.
  */
 async function fetchRemoteModels(
   provider: ProviderDef,
@@ -108,42 +144,17 @@ async function fetchRemoteModels(
       headers["Authorization"] = `Bearer ${apiKey}`;
     }
 
-    const response = await fetch(url, { headers });
-    if (!response.ok) {
-      throw new Error(`HTTP error! status: ${response.status}`);
-    }
-
-    const json = (await response.json()) as LlamaSwapModelsResponse;
-
-    const entries: ProviderModelEntry[] = [];
-
-    for (const m of json.data || []) {
-      const hasVision =
-        m.capabilities?.vision === true ||
-        m.architecture?.input_modalities?.includes("image");
-
-      const baseEntry: ProviderModelEntry = {
-        name: m.id,
-        contextLimit: m.context_length,
-        tags: [...(m.meta?.tags ?? m.meta?.llamaswap?.tags ?? [])],
-        capabilities: hasVision ? { vision: true } : undefined,
-        maxToolDifficulty: m.meta?.max_tool_difficulty ?? m.meta?.llamaswap?.max_tool_difficulty,
-      };
-
-      entries.push(baseEntry);
-
-      // Add aliases as separate model entries
-      if (m.meta?.llamaswap?.aliases) {
-        for (const alias of m.meta.llamaswap.aliases) {
-          entries.push({
-            ...baseEntry,
-            name: alias,
-          });
-        }
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 5000);
+    try {
+      const response = await fetch(url, { headers, signal: controller.signal });
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
       }
+      return parseModelsResponse(await response.json() as LlamaSwapModelsResponse);
+    } finally {
+      clearTimeout(timeoutId);
     }
-
-    return entries;
   } catch (e) {
     // Log error but don't crash the registry build
     console.error(`[providers] Failed to fetch remote models for ${provider.name}:`, e);

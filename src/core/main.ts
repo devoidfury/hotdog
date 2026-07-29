@@ -25,13 +25,18 @@ import { parseArgs, generateHelpText } from "./cli.ts";
 import {
   loadConfig,
   buildConfig,
+  buildAgentConfig,
   validateConfig,
   failOnInvalidConfig,
+  resolveConfigDir,
   type CliArgv,
 } from "./config/index.ts";
 import type { ProfileDef } from "./config/profiles.ts";
 import type { ResolvedConfig } from "./extensions/types.ts";
 import type { ModelConfig, ProviderDef } from "./config/providers.ts";
+import { buildModelRegistry } from "./config/providers.ts";
+import { castAs } from "../utils/json-schema.ts";
+import { getLayerDefault } from "./config/schema-loader.ts";
 import {
   cliFlagsFromSchema,
   CONFIG_SCHEMA,
@@ -205,6 +210,67 @@ function createCore(
 
 // ── Main ─────────────────────────────────────────────────────────────────────
 
+/**
+ * Build the full config in a single pass: CLI + file + env + extension layers.
+ * This replaces the previous three-step process (minimal → buildConfig → loadConfig).
+ */
+async function buildFullConfig(
+  cli: CliArgv,
+  configRegistry: ConfigRegistry,
+): Promise<{
+  resolved: ResolvedConfig;
+  config: CoreConfigWithExtensions;
+  modelRegistry: Record<string, ModelConfig>;
+  providers: ProviderDef[];
+}> {
+  const extParams = configRegistry.getConfigParams();
+
+  // Single config load with extension params baked in
+  const configDir = resolveConfigDir(cli.configDir ?? undefined);
+  const config = await loadConfig(cli.config ?? undefined, cli.configDir ?? undefined, extParams);
+
+  // Build the full resolved config (CLI + file + env + profile layers) using the loaded config
+  const resolved = await buildAgentConfig({
+    cli,
+    config: config as CoreConfigWithExtensions,
+    configDir,
+    providers: config.providers || [],
+    defaultModel: getLayerDefault(CONFIG_SCHEMA.defaultModel) as string,
+  });
+
+  const modelRegistry = await buildModelRegistry(
+    { providers: castAs<ProviderDef[]>(config.providers || []), baseUrl: resolved.baseUrl, apiKey: resolved.apiKey },
+    128000,
+  );
+  resolved.modelRegistry = modelRegistry;
+
+  // Resolve extension-specific config keys through their declared layers
+  const extContext: ResolutionContext = {
+    cli,
+    config: config as Record<string, unknown>,
+    configDir: resolved.configDir,
+    provider: null,
+    profile: resolved.profileDef,
+    profileName: resolved.profileName,
+  };
+  const resolvedExtConfig = resolveExtensionConfig(extParams, extContext);
+  Object.assign(config as Record<string, unknown>, resolvedExtConfig);
+
+  // Validate against core + extension schemas
+  const extensionSchemas = extParams
+    .filter((p) => p.schema)
+    .map((p) => ({ key: p.key, schema: p.schema }));
+  const validationResult = validateConfig(config as CoreConfigWithExtensions, extensionSchemas);
+  failOnInvalidConfig(validationResult);
+
+  return {
+    resolved: resolved as ResolvedConfig,
+    config: config as CoreConfigWithExtensions,
+    modelRegistry,
+    providers: (config.providers || []) as ProviderDef[],
+  };
+}
+
 export async function main(): Promise<number> {
   // ── Create hooks + logger early (needed before any error output) ────────
   const hooks = createHooks();
@@ -275,8 +341,28 @@ export async function main(): Promise<number> {
     throw e;
   }
 
-  // ── Build complete config ───────────────────────────────────────────────
-  const { resolved, modelRegistry, providers } = await buildConfig(cli as CliArgv);
+  // ── Early exit: --version (no config needed) ────────────────────────────
+  if (cli.version) {
+    const pkg = JSON.parse(
+      await readFile(
+        join(dirname(fileURLToPath(import.meta.url)), "../../package.json"),
+        "utf-8",
+      ),
+    );
+    console.log(`hotdog ${pkg.version}`);
+    return 0;
+  }
+
+  // ── Early exit: --help (only needs extension metadata, already loaded) ───
+  if (cli.help) {
+    const subcommandHelp = cliSubcommandRegistry.generateHelpText();
+    const fullHelp = generateHelpText(configRegistry);
+    console.log(fullHelp.replace("<subcommands>", subcommandHelp));
+    return 0;
+  }
+
+  // ── Full config build: single merge pass (CLI + file + env + extension layers) ──
+  const { resolved, config, modelRegistry, providers } = await buildFullConfig(cli as CliArgv, configRegistry);
 
   // Warn if no AI URL is configured
   if (!resolved.baseUrl) {
@@ -289,34 +375,8 @@ export async function main(): Promise<number> {
   // Enable hook tracing if configured
   hooks.trace = resolved.hookTrace as boolean | HookTraceOptions;
 
-  const extParams = configRegistry.getConfigParams();
-  const config = await loadConfig(cli.config ?? undefined, cli.configDir ?? undefined, extParams);
-
-  // ── Resolve extension config keys through their declared layers ──────────
-  // Extension keys (e.g., webui, coreTools) are resolved using the layers
-  // defined in their extension.json configSchema. This allows nested properties
-  // to have their own layers (e.g., apiKey with config + env + default).
-  const extContext: ResolutionContext = {
-    cli: cli,
-    config: config as Record<string, unknown>,
-    configDir: resolved.configDir,
-    provider: null,
-    profile: resolved.profileDef,
-    profileName: resolved.profileName,
-  };
-  const resolvedExtConfig = resolveExtensionConfig(extParams, extContext);
-  // Merge resolved extension keys back into config so extensions see the resolved values
-  Object.assign(config as Record<string, unknown>, resolvedExtConfig);
-
-  // ── Validate config against core schema and extension schemas ────────────
-  const extensionSchemas = extParams
-    .filter((p) => p.schema)
-    .map((p) => ({ key: p.key, schema: p.schema }));
-  const validationResult = validateConfig(config as CoreConfigWithExtensions, extensionSchemas);
-  failOnInvalidConfig(validationResult);
-
   // ── Create core infrastructure ──────────────────────────────────────────
-  const core = createCore(config as CoreConfigWithExtensions, configRegistry, cliSubcommandRegistry, {
+  const core = createCore(config, configRegistry, cliSubcommandRegistry, {
     hooks,
     profileName: resolved.profileName,
     profile: resolved.profileDef,
@@ -328,8 +388,7 @@ export async function main(): Promise<number> {
 
   // ── Load extensions ──────────────────────────────────────────────────────
   // Extensions register their handlers in create() via cliSubcommandRegistry.register().
-  // Force autoload: true to ensure all extensions are loaded (not just explicitly listed ones).
-  await loadExtensions(core, { taskManager: null, config: config as CoreConfigWithExtensions });
+  await loadExtensions(core, { taskManager: null, config });
 
   // Emit CLI subcommand registration hook so extensions can register their handlers.
   // Subcommand metadata (description, options) was already registered from extension.json;
@@ -344,7 +403,6 @@ export async function main(): Promise<number> {
 
   // ── Subcommand dispatch ─────────────────────────────────────────────────
   if (cli.subcommand) {
-    // Re-get after loading to pick up updated handler (in case hook modified subcommand)
     const subcommandDef = core.cliSubcommandRegistry.get(cli.subcommand);
     if (subcommandDef && subcommandDef.handler) {
       return await subcommandDef.handler(cli, core);
@@ -353,25 +411,6 @@ export async function main(): Promise<number> {
       `Subcommand "${cli.subcommand}" handler not available after loading extensions.`,
     );
     return 1;
-  }
-
-  if (cli.version) {
-    const pkg = JSON.parse(
-      await readFile(
-        join(dirname(fileURLToPath(import.meta.url)), "../../package.json"),
-        "utf-8",
-      ),
-    );
-    const VERSION = pkg.version;
-    console.log(`hotdog ${VERSION}`);
-    return 0;
-  }
-
-  if (cli.help) {
-    const subcommandHelp = core.cliSubcommandRegistry.generateHelpText();
-    const fullHelp = generateHelpText(configRegistry);
-    console.log(fullHelp.replace("<subcommands>", subcommandHelp));
-    return 0;
   }
 
   // No explicit subcommand — use default_subcommand from config when stdin is a TTY

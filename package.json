@@ -1,7 +1,7 @@
 {
-  "name": "hotdog",
-  "version": "0.3.3",
-  "main": "src/core/index.ts",
+  "name": "@hotdog/agent",
+  "version": "0.3.4",
+  "main": "bin/hotdog",
   "dependencies": {},
   "devDependencies": {
     "@types/bun": "^1.3.14"

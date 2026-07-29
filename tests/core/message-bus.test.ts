@@ -260,7 +260,7 @@ describe("MessageBus._processMessage()", () => {
       hooks: {
         runHookPipeline: async (_hook: string, data: unknown) => ({
           stopped: false,
-          data: { text: "transformed: " + (data as { text: string }).text },
+          lastResult: { action: "transform" as const, text: "transformed: " + (data as { text: string }).text },
         }),
       },
     });

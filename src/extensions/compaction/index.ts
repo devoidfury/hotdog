@@ -44,7 +44,21 @@ function getModelConfig(core: CoreContext, modelName: string): { name: string; t
   // Check core.resolved?.modelRegistry first, then fall back to core.modelRegistry
   const registry = core.resolved?.modelRegistry || ((core as unknown) as Record<string, unknown>).modelRegistry;
   if (registry) {
-    const entry = (registry as Record<string, ModelConfig>)[modelName];
+    const typedRegistry = registry as Record<string, ModelConfig>;
+    // Direct lookup (e.g. "provider/modelName")
+    let entry = typedRegistry[modelName];
+    // Fallback: if modelName has no "/" and isn't found, try "provider/modelName"
+    // This handles the case where models are fetched remotely (fetchModels: true)
+    // with an empty local models array, so resolveModel returns just the model name
+    // but the registry key is provider/modelName.
+    if (!entry && !modelName.includes("/")) {
+      for (const key of Object.keys(typedRegistry)) {
+        if (key.endsWith(`/${modelName}`)) {
+          entry = typedRegistry[key];
+          break;
+        }
+      }
+    }
     if (!entry) return null;
     return {
       name: entry.name || modelName,

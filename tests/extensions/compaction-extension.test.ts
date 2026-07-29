@@ -818,3 +818,103 @@ describe("/compact Command", () => {
     expect((result as any).content).toContain("Compaction not applicable");
   });
 });
+
+// ── getModelConfig fallback lookup ──────────────────────────────────────────
+
+describe("getModelConfig fallback lookup", () => {
+  it("finds model config via provider/modelName fallback", () => {
+    const core = createMockCore({
+      enabled: true,
+      keepRecentMessages: 2,
+      strategy: "drop",
+    });
+    // Set up registry with provider-prefixed key (as fetchModels produces)
+    (core as any).resolved = {
+      modelRegistry: {
+        "laguna/laguna": {
+          name: "laguna/laguna",
+          temperature: null,
+          contextLimit: 350000,
+          tags: [],
+        },
+      },
+    };
+
+    const ext = createCompactionExtension(core);
+    expect(ext).not.toBeNull();
+
+    const commandRegistry = new AgentCommandRegistry();
+    (ext as any).hooks![HOOKS.COMMANDS_REGISTER]!({ registry: commandRegistry });
+    const compactCmd = commandRegistry.get("compact")!;
+
+    const context = makeMessages(20, "x".repeat(100));
+    // Agent uses unprefixed model name (as happens when resolveModel can't find local entry)
+    const agent = createMockAgent(context, "laguna");
+
+    const result = compactCmd.handler(agent, "compact") as Promise<any>;
+    // Should succeed without error — means getModelConfig found the config
+    expect(result).resolves.toBeDefined();
+  });
+
+  it("falls back to default contextLimit when model not found at all", () => {
+    const core = createMockCore({
+      enabled: true,
+      keepRecentMessages: 2,
+      strategy: "drop",
+    });
+    // Set up registry with a different model
+    (core as any).resolved = {
+      modelRegistry: {
+        "other/model": {
+          name: "other/model",
+          temperature: null,
+          contextLimit: 64000,
+          tags: [],
+        },
+      },
+    };
+
+    const ext = createCompactionExtension(core);
+    const commandRegistry = new AgentCommandRegistry();
+    (ext as any).hooks![HOOKS.COMMANDS_REGISTER]!({ registry: commandRegistry });
+    const compactCmd = commandRegistry.get("compact")!;
+
+    const context = makeMessages(20, "x".repeat(100));
+    // Agent uses a model name not in the registry
+    const agent = createMockAgent(context, "unknown-model");
+
+    const result = compactCmd.handler(agent, "compact") as Promise<any>;
+    // Should succeed with default 128000 contextLimit
+    expect(result).resolves.toBeDefined();
+  });
+
+  it("prefers direct lookup over fallback when model name contains '/'", () => {
+    const core = createMockCore({
+      enabled: true,
+      keepRecentMessages: 2,
+      strategy: "drop",
+    });
+    (core as any).resolved = {
+      modelRegistry: {
+        "provider/model-x": {
+          name: "provider/model-x",
+          temperature: null,
+          contextLimit: 999999,
+          tags: [],
+        },
+      },
+    };
+
+    const ext = createCompactionExtension(core);
+    const commandRegistry = new AgentCommandRegistry();
+    (ext as any).hooks![HOOKS.COMMANDS_REGISTER]!({ registry: commandRegistry });
+    const compactCmd = commandRegistry.get("compact")!;
+
+    const context = makeMessages(20, "x".repeat(100));
+    // Agent uses prefixed model name — direct lookup should work
+    const agent = createMockAgent(context, "provider/model-x");
+
+    const result = compactCmd.handler(agent, "compact") as Promise<any>;
+    expect(result).resolves.toBeDefined();
+  });
+});

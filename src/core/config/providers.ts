@@ -253,7 +253,20 @@ export function resolveModelConfig(
   contextLimit: number,
   reasoningEffort: string | undefined,
 ): ModelConfig {
-  const entry = modelRegistry[modelName];
+  // Direct lookup (e.g. "provider/modelName")
+  let entry = modelRegistry[modelName];
+  // Fallback: if modelName has no "/" and isn't found, try "provider/modelName"
+  // This handles the case where models are fetched remotely (fetchModels: true)
+  // with an empty local models array, so resolveModel returns just the model name
+  // but the registry key is provider/modelName.
+  if (!entry && !modelName.includes("/")) {
+    for (const key of Object.keys(modelRegistry)) {
+      if (key.endsWith(`/${modelName}`)) {
+        entry = modelRegistry[key];
+        break;
+      }
+    }
+  }
   const fromRegistry: ModelConfig = entry ? {
     name: entry.name || modelName,
     temperature: entry.temperature ?? null,

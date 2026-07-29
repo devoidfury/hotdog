@@ -362,3 +362,108 @@ describe("buildModelRegistry with fetchModels", () => {
     expect(registry["test/alias-2"]).toBeDefined();
   });
 });
+
+// ── resolveModelConfig fallback ──────────────────────────────────────────────
+
+import { resolveModelConfig } from "../../src/core/config/providers.ts";
+
+describe("resolveModelConfig fallback lookup", () => {
+  it("falls back to provider/modelName when direct lookup fails", () => {
+    const registry: Record<string, {
+      name: string;
+      temperature: number | null;
+      contextLimit: number;
+      tags: string[];
+    }> = {
+      "laguna/laguna": {
+        name: "laguna/laguna",
+        temperature: null,
+        contextLimit: 350000,
+        tags: [],
+      },
+    };
+    // Lookup with unprefixed name (as happens when fetchModels: true + models: [])
+    const config = resolveModelConfig("laguna", registry, 128000, undefined);
+    expect(config.contextLimit).toBe(350000);
+    expect(config.name).toBe("laguna/laguna");
+  });
+
+  it("uses direct lookup when model name contains '/'", () => {
+    const registry: Record<string, {
+      name: string;
+      temperature: number | null;
+      contextLimit: number;
+      tags: string[];
+    }> = {
+      "openai/gpt-4": {
+        name: "openai/gpt-4",
+        temperature: 0.5,
+        contextLimit: 128000,
+        tags: [],
+      },
+    };
+    const config = resolveModelConfig("openai/gpt-4", registry, 32000, undefined);
+    expect(config.contextLimit).toBe(128000);
+  });
+
+  it("falls back to default contextLimit when model not found at all", () => {
+    const registry: Record<string, {
+      name: string;
+      temperature: number | null;
+      contextLimit: number;
+      tags: string[];
+    }> = {
+      "other/model": {
+        name: "other/model",
+        temperature: null,
+        contextLimit: 64000,
+        tags: [],
+      },
+    };
+    const config = resolveModelConfig("unknown", registry, 128000, undefined);
+    expect(config.contextLimit).toBe(128000);
+    expect(config.name).toBe("unknown");
+  });
+
+  it("falls back correctly for models with multiple slashes in name", () => {
+    const registry: Record<string, {
+      name: string;
+      temperature: number | null;
+      contextLimit: number;
+      tags: string[];
+    }> = {
+      "provider/some/deep/model": {
+        name: "provider/some/deep/model",
+        temperature: null,
+        contextLimit: 200000,
+        tags: [],
+      },
+    };
+    // "some/deep/model" contains "/" so no fallback — direct lookup fails
+    const config = resolveModelConfig("some/deep/model", registry, 128000, undefined);
+    expect(config.contextLimit).toBe(128000);
+
+    // But "provider/some/deep/model" works directly
+    const config2 = resolveModelConfig("provider/some/deep/model", registry, 128000, undefined);
+    expect(config2.contextLimit).toBe(200000);
+  });
+
+  it("uses registry contextLimit over default when found via fallback", () => {
+    const registry: Record<string, {
+      name: string;
+      temperature: number | null;
+      contextLimit: number;
+      tags: string[];
+    }> = {
+      "provider/model-x": {
+        name: "provider/model-x",
+        temperature: 0.7,
+        contextLimit: 999999,
+        tags: [],
+      },
+    };
+    const config = resolveModelConfig("model-x", registry, 128000, undefined);
+    expect(config.contextLimit).toBe(999999);
+    expect(config.temperature).toBe(0.7);
+  });
+});

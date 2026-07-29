@@ -702,9 +702,22 @@ export class Agent {
     // 1. CLI override (maxToolDifficulty)
     // 2. Model-specific config from modelRegistry
     // 3. Config-file default (defaultMaxToolDifficulty)
+    // Fallback: if modelName has no "/" and isn't found, try "provider/modelName"
+    // This handles the case where models are fetched remotely (fetchModels: true)
+    // with an empty local models array, so resolveModel returns just the model name
+    // but the registry key is provider/modelName.
+    let modelEntry = this.modelRegistry[this.#model];
+    if (!modelEntry && !this.#model.includes("/")) {
+      for (const key of Object.keys(this.modelRegistry)) {
+        if (key.endsWith(`/${this.#model}`)) {
+          modelEntry = this.modelRegistry[key];
+          break;
+        }
+      }
+    }
     const effectiveMaxDifficulty =
       config.maxToolDifficulty ??
-      this.modelRegistry[this.#model]?.maxToolDifficulty ??
+      modelEntry?.maxToolDifficulty ??
       config.defaultMaxToolDifficulty ??
       undefined;
 

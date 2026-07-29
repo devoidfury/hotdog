@@ -199,9 +199,9 @@ models:
     cmd: |
       ${llama-server}
       -m /storage/models/laguna-s-2.1/laguna-s-2.1-Q4_K_M.gguf
-      --ctx-size 524288
+      --ctx-size 393216
       --rope-scaling yarn
-      --rope-scale 64
+      --rope-scale 48
       --yarn-orig-ctx 8192
       -np 1
       --jinja
@@ -211,7 +211,7 @@ models:
       out:
         - text
       tools: true
-      context: 524288
+      context: 393216
     filters:
       setParamsByID:
         "${MODEL_ID}":

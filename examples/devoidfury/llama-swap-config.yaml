@@ -84,35 +84,6 @@ models:
         - text
       tools: true
       context: 200000
-  laguna-s-2.1:
-    cmd: |
-      ${llama-server}
-      -m /storage/models/laguna-s-2.1/laguna-s-2.1-Q4_K_M.gguf
-      -b 1024
-      -ub 1024
-      -np 1
-      --spec-type ngram-mod
-      ${spec-ngram}
-      --ctx-size 262144
-      --checkpoint-min-step 512
-      --ctx-checkpoints 20
-      --jinja
-      --chat-template-file /storage/models/laguna-s-2.1/chat_template.jinja
-    capabilities:
-      in:
-        - text
-      out:
-        - text
-      tools: true
-      context: 262144
-    filters:
-      setParamsByID:
-        "${MODEL_ID}":
-          temperature: 0.7
-          top_p: 0.95
-          chat_template_kwargs:
-            enable_thinking: true
-            preserve_thinking: true
   glm4.7-flash:
     cmd: |
       ${llama-server}
@@ -224,6 +195,30 @@ models:
       context: 262144
     metadata:
       max_tool_difficulty: 4
+  laguna-s-2.1:
+    cmd: |
+      ${llama-server}
+      -m /storage/models/laguna-s-2.1/laguna-s-2.1-Q4_K_M.gguf
+      --ctx-size 524288
+      --rope-scaling yarn
+      --rope-scale 64
+      --yarn-orig-ctx 8192
+      -np 1
+      --jinja
+    capabilities:
+      in:
+        - text
+      out:
+        - text
+      tools: true
+      context: 524288
+    filters:
+      setParamsByID:
+        "${MODEL_ID}":
+          temperature: 0.7
+          top_p: 0.95
+          chat_template_kwargs:
+            enable_thinking: true
   lfm2.5-8b-a1b:
     cmd: |
       ${llama-server}
@@ -776,7 +771,6 @@ models:
           top_p: 0.85
           repitition_penalty: 1.35
 
-
 # Subset semantics: a set [a, b, c] means any subset is valid.
 # Only the requested model is started — others are not preloaded.
 #
@@ -787,24 +781,42 @@ matrix:
   # - each entry is a short name to a real model ID. Do not use an alias.
   # - sets and evict_costs only use identifiers defined in vars
   vars:
+    a: agent-a1-35b-moe
+    b: supratitle-350M-exp
     c: qwen3.6-27b
-    d: qwen3.6-35b
     e: qwen3.5-0.8b
-    f: qwen3.5-9b-dsv4f-d
     g: qwen3.5-4b
+    i: qwen3.6-35b-unc
     k: glm4.7-flash
     l: lfm2.5-8b-a1b
     m: mistral-medium-3.5
-    s: smollm3-3b
+    n: north-mini-code-1.0-30b
+    o: ornith-1.0-35b
+    s: gemma-4-12b
     t: gemma-4-31b
-    u: gemma-4-e2b
+    u: gemma-4-26b-a4b
     v: step-3.7-flash
     w: nemotron-3-nano-30b-a3b
 
+  # sets: named sets of concurrent model combinations
+  # Values are DSL strings with operators:
+  #   &     AND (models run together)
+  #   |     OR  (alternatives)
+  #   ()    grouping
+  #   +ref  inline another set's expression
+  #
+  # Expansion examples:
+  #   "L"                  → [L]
+  #   "a & b"              → [a, b]
+  #   "a | b"              → [a], [b]
+  #   "(a | b) & c"        → [a, c], [b, c]
+  #   "(a | b) & (c | d)"  → [a,c], [a,d], [b,c], [b,d]
+  #   "+llms & v"          → expands llms inline, then applies & v
   sets:
-    tiny: s | e | g | u | l
-    fast: f | (+tiny)
-    medium: c | d | t | k | w
+    tiny: e | g | l | b
+    fast: (+tiny) | u | s
+    medium: c | t | k | i | w | a | n | o
     large: (+medium)
     huge: v | m
-    standard: "(+large) & (+medium) & (+fast)"
+    standard: "(+large | +medium) & (+fast)"
+    max: "(+huge) & (+tiny)"

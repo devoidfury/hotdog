@@ -311,3 +311,59 @@ describe("MessageBus._processMessage()", () => {
     expect(bus.isRunning).toBe(false);
   });
 });
+
+describe("MessageBus getters", () => {
+  it("sessionManager returns the injected session manager", () => {
+    const mockManager = { getAgent: () => null } as any;
+    const bus = new MessageBus({ sessionManager: mockManager, sink: createMockSink() });
+    expect(bus.sessionManager).toBe(mockManager);
+  });
+
+  it("agent returns the agent from session manager", () => {
+    const mockAgent = { cancel: () => {}, run: async () => {} } as any;
+    const mockManager = { getAgent: () => mockAgent } as any;
+    const bus = new MessageBus({ sessionManager: mockManager, sink: createMockSink() });
+    expect(bus.agent).toBe(mockAgent);
+  });
+
+  it("agent returns undefined when no agent", () => {
+    const mockManager = { getAgent: () => undefined } as any;
+    const bus = new MessageBus({ sessionManager: mockManager, sink: createMockSink() });
+    expect(bus.agent).toBeUndefined();
+  });
+});
+
+describe("MessageBus test-only accessors", () => {
+  it("queue accessor allows reading and setting the queue", () => {
+    const bus = new MessageBus({ sessionManager: createMockSessionManager(), sink: createMockSink() });
+    bus.enqueue("msg1");
+    expect(bus.queue).toEqual(["msg1"]);
+
+    bus.queue = ["msg2", "msg3"];
+    expect(bus.queue).toEqual(["msg2", "msg3"]);
+  });
+
+  it("isRunning accessor allows reading and setting running state", () => {
+    const bus = new MessageBus({ sessionManager: createMockSessionManager(), sink: createMockSink() });
+    expect(bus.isRunning).toBe(false);
+
+    bus.isRunning = true;
+    expect(bus.isRunning).toBe(true);
+  });
+
+  it("abortController accessor returns the internal controller", () => {
+    const bus = new MessageBus({ sessionManager: createMockSessionManager(), sink: createMockSink() });
+    const ctrl = bus.abortController;
+    expect(ctrl).toBeInstanceOf(AbortController);
+    expect(ctrl.signal.aborted).toBe(false);
+  });
+
+  it("waiter accessor allows reading and setting the waiter", () => {
+    const bus = new MessageBus({ sessionManager: createMockSessionManager(), sink: createMockSink() });
+    expect(bus.waiter).toBeNull();
+
+    const waiter = { resolve: () => {} };
+    bus.waiter = waiter;
+    expect(bus.waiter).toBe(waiter);
+  });
+});

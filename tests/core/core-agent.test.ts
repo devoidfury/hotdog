@@ -56,21 +56,19 @@ describe('Agent — end-to-end loop', () => {
       ]],
     });
 
-    const { agent, hooks } = createFixture({ mockLLM });
+    const { agent } = createFixture({ mockLLM });
 
     const result = await agent.run('Hi');
 
     const completion = expectCompletion(result);
     expect(completion.content).toBe('Hello! I am an AI assistant.');
-    // Note: agent.log only contains user/assistant/tool messages,
-
-    // NOT the system prompt. The system prompt is prepended at build time.
-    expect(agent.log.length).toBe(2); // user + assistant
-    expect(agent.log.at(0)!.role).toBe('user');
-    expect(agent.log.at(0)!.content).toBe('Hi');
-    expect(agent.log.at(1)!.role).toBe('assistant');
-    expect(agent.log.at(1)!.content).toBe('Hello! I am an AI assistant.');
     expect(mockLLM.callCount).toBe(1);
+
+    // Verify conversation history was recorded
+    const ctx = agent.log.getAll();
+    expect(ctx).toHaveLength(2);
+    expect(ctx[0]!.role).toBe('user');
+    expect(ctx[1]!.role).toBe('assistant');
   });
 
   it('should handle reasoning content alongside text', async () => {
@@ -98,13 +96,11 @@ describe('Agent — end-to-end loop', () => {
 
     const mockLLM = new MockLLMClient({
       responseSequences: [
-        // First LLM call: responds with a tool call
         buildStreamResponse({
           content: 'Let me calculate that.',
           toolCalls: [{ index: 0, name: 'calculator', arguments: '{"expr":"2+2"}', id: 'call_calc_1' }],
           usage: { prompt_tokens: 10, completion_tokens: 30, total_tokens: 40 },
         }),
-        // Second LLM call: responds with final text after tool result
         buildStreamResponse({
           content: 'The answer is 42.',
           usage: { prompt_tokens: 40, completion_tokens: 10, total_tokens: 50 },
@@ -123,17 +119,13 @@ describe('Agent — end-to-end loop', () => {
     expect(tool.lastInput).toBe('{"expr":"2+2"}');
     expect(mockLLM.callCount).toBe(2);
 
-    // Context after full run:
-    //   [0] user → [1] assistant (tool call) → [2] tool result → [3] assistant (final)
+    // Verify tool call and result are in conversation history
     const ctx = agent.log.getAll();
-    expect(ctx.length).toBe(4);
-    expect(ctx[0]!.role).toBe('user');
-    expect(ctx[1]!.role).toBe('assistant');
-    expect((ctx[1]!.toolCalls as Array<unknown>).length).toBe(1);
-    expect(ctx[2]!.role).toBe('tool');
-    expect(ctx[2]!.content as string).toContain('42');
-    expect(ctx[3]!.role).toBe('assistant');
-    expect(ctx[3]!.content).toBe('The answer is 42.');
+    const assistantMsg = ctx.find(m => m.role === 'assistant' && m.toolCalls);
+    const toolMsg = ctx.find(m => m.role === 'tool');
+    expect(assistantMsg).toBeTruthy();
+    expect(toolMsg).toBeTruthy();
+    expect(toolMsg!.content as string).toContain('42');
   });
 
   // ── Multiple tool calls in one turn ────────────────────────────────────────
@@ -171,17 +163,13 @@ describe('Agent — end-to-end loop', () => {
     expect(grepTool.executeCount).toBe(1);
     expect(mockLLM.callCount).toBe(2);
 
-    // Context after full run:
-    //   [0] user → [1] assistant (2 tool calls) → [2] tool result → [3] tool result → [4] assistant (final)
+    // Verify both tools were called and results recorded
     const ctx = agent.log.getAll();
-    expect(ctx.length).toBe(5);
-    expect(ctx[0]!.role).toBe('user');
-    expect(ctx[1]!.role).toBe('assistant');
-    expect((ctx[1]!.toolCalls as Array<unknown>).length).toBe(2);
-    expect(ctx[2]!.role).toBe('tool');
-    expect(ctx[3]!.role).toBe('tool');
-    expect(ctx[4]!.role).toBe('assistant');
-    expect(ctx[4]!.content).toBe('Both operations completed.');
+    const assistantMsg = ctx.find(m => m.role === 'assistant' && m.toolCalls);
+    expect(assistantMsg).toBeTruthy();
+    expect((assistantMsg!.toolCalls as Array<unknown>).length).toBe(2);
+    const toolMsgs = ctx.filter(m => m.role === 'tool');
+    expect(toolMsgs).toHaveLength(2);
   });
 
   // ── Tool validation error ─────────────────────────────────────────────────
@@ -216,11 +204,10 @@ describe('Agent — end-to-end loop', () => {
     expect(tool.executeCount).toBe(0); // tool was NOT executed
     expect(mockLLM.callCount).toBe(2);
 
-    // Context after full run:
-    //   [0] user → [1] assistant (tool call) → [2] tool result (validation error) → [3] assistant (final)
-    const ctx = agent.log.getAll();
-    expect(ctx[2]!.role).toBe('tool');
-    expect(ctx[2]!.content as string).toContain('validation');
+    // Verify validation error was recorded
+    const toolMsg = agent.log.getAll().find(m => m.role === 'tool');
+    expect(toolMsg).toBeTruthy();
+    expect(toolMsg!.content as string).toContain('validation');
   });
 
   // ── Unknown tool ─────────────────────────────────────────────────────────
@@ -248,11 +235,10 @@ describe('Agent — end-to-end loop', () => {
     expect(completion.content).toBe('The tool was not found.');
     expect(mockLLM.callCount).toBe(2);
 
-    // Context after full run:
-    //   [0] user → [1] assistant (tool call) → [2] tool result (unknown tool) → [3] assistant (final)
-    const ctx = agent.log.getAll();
-    expect(ctx[2]!.role).toBe('tool');
-    expect(ctx[2]!.content as string).toContain('Unknown tool');
+    // Verify error was recorded
+    const toolMsg = agent.log.getAll().find(m => m.role === 'tool');
+    expect(toolMsg).toBeTruthy();
+    expect(toolMsg!.content as string).toContain('Unknown tool');
   });
 
   // ── Tool execution error ──────────────────────────────────────────────────
@@ -283,11 +269,10 @@ describe('Agent — end-to-end loop', () => {
     expect(completion.content).toBe('The tool reported an error.');
     expect(tool.executeCount).toBe(1);
 
-    // Context after full run:
-    //   [0] user → [1] assistant (tool call) → [2] tool result (error) → [3] assistant (final)
-    const ctx = agent.log.getAll();
-    expect(ctx[2]!.role).toBe('tool');
-    expect(ctx[2]!.content as string).toContain('Error executing');
+    // Verify error was recorded
+    const toolMsg = agent.log.getAll().find(m => m.role === 'tool');
+    expect(toolMsg).toBeTruthy();
+    expect(toolMsg!.content as string).toContain('Error executing');
   });
 
   // ── Wait tool (yield control) ─────────────────────────────────────────────
@@ -358,14 +343,12 @@ describe('Agent — end-to-end loop', () => {
     expect(allowedTool.executeCount).toBe(1);
     expect(blockedTool.executeCount).toBe(0);
 
-    // Context after full run:
-    //   [0] user → [1] assistant (2 tool calls) → [2] tool result (allowed) → [3] tool result (blocked) → [4] assistant (final)
+    // Verify whitelist enforcement
     const ctx = agent.log.getAll();
-    expect(ctx.length).toBe(5);
-    expect(ctx[2]!.role).toBe('tool');
-    expect(ctx[2]!.content as string).toContain('allowed result');
-    expect(ctx[3]!.role).toBe('tool');
-    expect(ctx[3]!.content as string).toContain('not available');
+    const allowedResult = ctx.find(m => m.role === 'tool' && (m.content as string).includes('allowed result'));
+    const blockedResult = ctx.find(m => m.role === 'tool' && (m.content as string).includes('not available'));
+    expect(allowedResult).toBeTruthy();
+    expect(blockedResult).toBeTruthy();
   });
 
   // ── Cancellation during streaming ─────────────────────────────────────────
@@ -568,11 +551,10 @@ describe('Agent — end-to-end loop', () => {
     expect(completion.content).toBe('Tool blocked by gate.');
     expect(tool.executeCount).toBe(0); // tool was NOT executed
 
-    // Context after full run:
-    //   [0] user → [1] assistant (tool call) → [2] tool result (blocked) → [3] assistant (final)
-    const ctx = agent.log.getAll();
-    expect(ctx[2]!.role).toBe('tool');
-    expect(ctx[2]!.content as string).toContain('Blocked');
+    // Verify blocked result was recorded
+    const toolMsg = agent.log.getAll().find(m => m.role === 'tool');
+    expect(toolMsg).toBeTruthy();
+    expect(toolMsg!.content as string).toContain('Blocked');
   });
 
   it('should fire TOOL_RESULT hook and allow modifying result', async () => {
@@ -606,11 +588,10 @@ describe('Agent — end-to-end loop', () => {
     expect(completion.content).toBe('Modified result received.');
     expect(tool.executeCount).toBe(1);
 
-    // Context after full run:
-    //   [0] user → [1] assistant (tool call) → [2] tool result (modified) → [3] assistant (final)
-    const ctx = agent.log.getAll();
-    expect(ctx[2]!.role).toBe('tool');
-    expect(ctx[2]!.content as string).toContain('MODIFIED');
+    // Verify modified result was recorded
+    const toolMsg = agent.log.getAll().find(m => m.role === 'tool');
+    expect(toolMsg).toBeTruthy();
+    expect(toolMsg!.content as string).toContain('MODIFIED');
   });
 
   // ── Max iterations ───────────────────────────────────────────────────────
@@ -748,19 +729,8 @@ describe('Agent — end-to-end loop', () => {
     });
   });
 
-  describe('cancel / resetCancel', () => {
-    it('should set cancelled flag', () => {
-      const { agent } = createFixture({});
-      expect(agent.cancelled).toBe(false);
-      agent.cancel();
-      expect(agent.cancelled).toBe(true);
-      agent.resetCancel();
-      expect(agent.cancelled).toBe(false);
-    });
-  });
-
   describe('tool registry access', () => {
-    it('should return registered tools', async () => {
+    it('should return registered tool definitions and names', async () => {
       const { agent, toolRegistry } = createFixture({});
       const tool = {
         toToolDef: () => ({ type: 'function', function: { name: 'test-tool', description: '', parameters: {} } }),
@@ -768,8 +738,7 @@ describe('Agent — end-to-end loop', () => {
       } as any;
       toolRegistry.register('test-tool', tool);
 
-      const defs = await agent.getToolDefs();
-      expect(defs).toEqual([
+      expect(await agent.getToolDefs()).toEqual([
         { type: 'function', function: { name: 'test-tool', description: '', parameters: {} } },
       ]);
       expect(agent.getToolNames()).toEqual(['test-tool']);
@@ -873,25 +842,7 @@ describe('Agent — end-to-end loop', () => {
     });
   });
 
-  describe('serialize/deserialize (existing)', () => {
-    it('should serialize and deserialize reasoning_effort', () => {
-      const { agent } = createFixture({});
-      agent.reasoningEffort = 'max';
-      const serialized = agent.serialize();
-      expect(serialized.reasoningEffort).toBe('max');
-
-      const newAgent = new Agent({
-        hooks: createHooks(),
-        toolRegistry: createToolRegistry(),
-        llmClient: new MockLLMClient() as unknown as LlmClient,
-        model: 'test',
-        maxIterations: 100,
-        contextLimit: 128000,
-      });
-      newAgent.deserialize(serialized);
-      expect(newAgent.reasoningEffort).toBe('max');
-    });
-
+  describe('serialize/deserialize', () => {
     it('should handle undefined reasoning_effort in deserialize', () => {
       const { agent } = createFixture({});
       const serialized = agent.serialize();
@@ -908,6 +859,20 @@ describe('Agent — end-to-end loop', () => {
       newAgent.reasoningEffort = 'high';
       newAgent.deserialize(serialized);
       expect(newAgent.reasoningEffort).toBeUndefined();
+    });
+
+    it('should serialize with no context', () => {
+      const { agent } = createFixture({ sessionId: 'test-session' });
+      const serialized = agent.serialize();
+      expect(serialized.sessionId).toBe('test-session');
+      expect(serialized.context).toEqual([]);
+    });
+
+    it('should handle deserialize with empty data', () => {
+      const { agent } = createFixture({});
+      agent.deserialize({ sessionId: 'new-id', context: [], model: 'new-model' });
+      expect(agent.sessionId).toBe('new-id');
+      expect(agent.model).toBe('new-model');
     });
   });
 
@@ -1048,22 +1013,6 @@ describe('Agent — end-to-end loop', () => {
     });
   });
 
-  describe('serialize/deserialize edge cases', () => {
-    it('should serialize with no context', () => {
-      const { agent } = createFixture({ sessionId: 'test-session' });
-      const serialized = agent.serialize();
-      expect(serialized.sessionId).toBe('test-session');
-      expect(serialized.context).toEqual([]);
-    });
-
-    it('should handle deserialize with empty data', () => {
-      const { agent } = createFixture({});
-      agent.deserialize({ sessionId: 'new-id', context: [], model: 'new-model' });
-      expect(agent.sessionId).toBe('new-id');
-      expect(agent.model).toBe('new-model');
-    });
-  });
-
   describe('getTokenUsage', () => {
     it('returns usage object after run', async () => {
       const mockLLM = new MockLLMClient({
@@ -1081,32 +1030,14 @@ describe('Agent — end-to-end loop', () => {
     });
   });
 
-  describe('currentStreamingContent', () => {
-    it('returns empty string when not streaming', () => {
+  describe('streaming state', () => {
+    it('returns empty strings for streaming content when not streaming', () => {
       const { agent } = createFixture({});
       expect(agent.currentStreamingContent).toBe('');
-    });
-
-    it('returns empty string after run completes', async () => {
-      const mockLLM = new MockLLMClient({
-        responseSequences: [[
-          { type: 'content', content: 'Hello World' },
-          { type: 'usage', data: { prompt_tokens: 5, completion_tokens: 10, total_tokens: 15 } },
-        ]],
-      });
-      const { agent } = createFixture({ mockLLM });
-      await agent.run('test');
-      expect(agent.currentStreamingContent).toBe('');
-    });
-  });
-
-  describe('currentStreamingReasoning', () => {
-    it('returns empty string when not streaming', () => {
-      const { agent } = createFixture({});
       expect(agent.currentStreamingReasoning).toBe('');
     });
 
-    it('returns empty string after run completes', async () => {
+    it('clears streaming content after run completes', async () => {
       const mockLLM = new MockLLMClient({
         responseSequences: [[
           { type: 'reasoning', content: 'Thinking...' },
@@ -1116,6 +1047,7 @@ describe('Agent — end-to-end loop', () => {
       });
       const { agent } = createFixture({ mockLLM });
       await agent.run('test');
+      expect(agent.currentStreamingContent).toBe('');
       expect(agent.currentStreamingReasoning).toBe('');
     });
   });

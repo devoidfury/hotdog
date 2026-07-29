@@ -1,6 +1,15 @@
 // Tests for the core hook system.
 
-import { HookSystem, createHooks } from "../../src/core/hooks.ts";
+import {
+  HookSystem,
+  createHooks,
+  isGateActionBlock,
+  isGateActionModify,
+  isGateActionContinue,
+  isGateActionHandled,
+  isInputTransform,
+  isInputHandled,
+} from "../../src/core/hooks.ts";
 import { describe, it, expect, beforeEach, afterEach } from "bun:test";
 
 describe("HookSystem.on() / notifyHooks()", () => {
@@ -593,5 +602,169 @@ describe("HookSystem — Priority", () => {
     remove();
     hooks.notifyHooks("test:hook", {});
     expect(order).toEqual(["high", "low"]);
+  });
+});
+
+// ── Type guard functions ─────────────────────────────────────────────────
+
+describe("GateAction type guards", () => {
+  describe("isGateActionBlock", () => {
+    it("returns true for block action", () => {
+      expect(isGateActionBlock({ action: "block", result: "denied" })).toBe(true);
+    });
+
+    it("returns false for other actions", () => {
+      expect(isGateActionBlock({ action: "continue" })).toBe(false);
+      expect(isGateActionBlock({ action: "modify" })).toBe(false);
+      expect(isGateActionBlock({ action: "handled" })).toBe(false);
+    });
+
+    it("returns false for null/undefined", () => {
+      expect(isGateActionBlock(null)).toBe(false);
+      expect(isGateActionBlock(undefined)).toBe(false);
+    });
+  });
+
+  describe("isGateActionModify", () => {
+    it("returns true for modify action", () => {
+      expect(isGateActionModify({ action: "modify" })).toBe(true);
+      expect(isGateActionModify({ action: "modify", input: "new" })).toBe(true);
+    });
+
+    it("returns false for other actions", () => {
+      expect(isGateActionModify({ action: "continue" })).toBe(false);
+      expect(isGateActionModify({ action: "block", result: "x" })).toBe(false);
+    });
+
+    it("returns false for null/undefined", () => {
+      expect(isGateActionModify(null)).toBe(false);
+    });
+  });
+
+  describe("isGateActionContinue", () => {
+    it("returns true for continue action", () => {
+      expect(isGateActionContinue({ action: "continue" })).toBe(true);
+    });
+
+    it("returns false for other actions", () => {
+      expect(isGateActionContinue({ action: "block", result: "x" })).toBe(false);
+      expect(isGateActionContinue({ action: "modify" })).toBe(false);
+    });
+
+    it("returns false for null/undefined", () => {
+      expect(isGateActionContinue(undefined)).toBe(false);
+    });
+  });
+
+  describe("isGateActionHandled", () => {
+    it("returns true for handled action", () => {
+      expect(isGateActionHandled({ action: "handled" })).toBe(true);
+    });
+
+    it("returns false for other actions", () => {
+      expect(isGateActionHandled({ action: "continue" })).toBe(false);
+    });
+
+    it("returns false for null/undefined", () => {
+      expect(isGateActionHandled(null)).toBe(false);
+    });
+  });
+});
+
+describe("InputHookResult type guards", () => {
+  describe("isInputTransform", () => {
+    it("returns true for transform action", () => {
+      expect(isInputTransform({ action: "transform", text: "modified" })).toBe(true);
+    });
+
+    it("returns false for other actions", () => {
+      expect(isInputTransform({ action: "continue" })).toBe(false);
+      expect(isInputTransform({ action: "handled" })).toBe(false);
+    });
+
+    it("returns false for null/undefined", () => {
+      expect(isInputTransform(null)).toBe(false);
+      expect(isInputTransform(undefined)).toBe(false);
+    });
+  });
+
+  describe("isInputHandled", () => {
+    it("returns true for handled action", () => {
+      expect(isInputHandled({ action: "handled" })).toBe(true);
+    });
+
+    it("returns false for other actions", () => {
+      expect(isInputHandled({ action: "continue" })).toBe(false);
+      expect(isInputHandled({ action: "transform", text: "x" })).toBe(false);
+    });
+
+    it("returns false for null/undefined", () => {
+      expect(isInputHandled(undefined)).toBe(false);
+    });
+  });
+});
+
+// ── Trace mode ────────────────────────────────────────────────────────────
+
+describe("trace mode helpers", () => {
+  it("shouldTrace returns false for 'log' hook", () => {
+    const hooks = new HookSystem();
+    hooks.trace = true;
+    // Access private method for testing
+    const result = (hooks as any)._shouldTrace("log");
+    expect(result).toBe(false);
+  });
+
+  it("shouldTrace respects boolean trace setting", () => {
+    const hooks = new HookSystem();
+    hooks.trace = true;
+    expect((hooks as any)._shouldTrace("test")).toBe(true);
+
+    hooks.trace = false;
+    expect((hooks as any)._shouldTrace("test")).toBe(false);
+  });
+
+  it("shouldTrace respects enabled option in trace config", () => {
+    const hooks = new HookSystem();
+    hooks.trace = { enabled: true };
+    expect((hooks as any)._shouldTrace("test")).toBe(true);
+
+    hooks.trace = { enabled: false };
+    expect((hooks as any)._shouldTrace("test")).toBe(false);
+  });
+
+  it("shouldTrace respects enabledHooks list", () => {
+    const hooks = new HookSystem();
+    hooks.trace = { enabled: true, enabledHooks: ["tool:call", "agent:run"] };
+    expect((hooks as any)._shouldTrace("tool:call")).toBe(true);
+    expect((hooks as any)._shouldTrace("other:hook")).toBe(false);
+  });
+});
+
+describe("HookSystem getters", () => {
+  it("hookNames returns registered hook names", () => {
+    const hooks = new HookSystem();
+    hooks.on("test:hook", () => {});
+    hooks.on("other:hook", () => {});
+    const names = hooks.hookNames();
+    expect(names).toContain("test:hook");
+    expect(names).toContain("other:hook");
+  });
+
+  it("trace getter/setter works", () => {
+    const hooks = new HookSystem();
+    hooks.trace = true;
+    expect(hooks.trace).toBe(true);
+
+    hooks.trace = { enabled: false };
+    expect(hooks.trace).toEqual({ enabled: false });
+  });
+
+  it("hooksMap returns internal handler map", () => {
+    const hooks = new HookSystem();
+    hooks.on("test", () => {});
+    const map = hooks.hooksMap;
+    expect(map.size).toBeGreaterThan(0);
+    expect(map.has("test")).toBe(true);
   });
 });

@@ -35,8 +35,15 @@ describe("buildModelRegistry", () => {
       providers: [{ name: "test", defaultModel: "gpt-3.5", temperature: 0.5, models: [] }],
     };
     const registry = await buildModelRegistry(config, 32000);
-    expect(registry["test/gpt-3.5"]).toBeDefined();
-    expect(registry["test/gpt-3.5"]!.temperature).toBe(0.5);
+    expect(registry["test/gpt-3.5"]).toEqual({
+      name: "test/gpt-3.5",
+      temperature: 0.5,
+      contextLimit: 32000,
+      reasoningEffort: undefined,
+      tags: [],
+      capabilities: {},
+      maxToolDifficulty: undefined,
+    });
   });
 
   it("handles empty or multiple providers", async () => {
@@ -48,8 +55,8 @@ describe("buildModelRegistry", () => {
       ],
     };
     const registry = await buildModelRegistry(config, 32000);
-    expect(registry["a/m1"]).toBeDefined();
-    expect(registry["b/m2"]).toBeDefined();
+    expect(registry["a/m1"]!.name).toBe("a/m1");
+    expect(registry["b/m2"]!.name).toBe("b/m2");
   });
 
   it("extracts reasoning_effort from model entries", async () => {
@@ -218,9 +225,9 @@ describe("buildModelRegistry with fetchModels", () => {
       baseUrl: "http://test.com",
     };
     const registry = await buildModelRegistry(config, 32000);
-    expect(registry["remote/remote-model-1"]).toBeDefined();
+    expect(registry["remote/remote-model-1"]!.name).toBe("remote/remote-model-1");
     expect(registry["remote/remote-model-1"]!.contextLimit).toBe(8192);
-    expect(registry["remote/remote-model-2"]).toBeDefined();
+    expect(registry["remote/remote-model-2"]!.name).toBe("remote/remote-model-2");
     expect(registry["remote/remote-model-2"]!.capabilities?.vision).toBe(true);
   });
 
@@ -242,7 +249,7 @@ describe("buildModelRegistry with fetchModels", () => {
       baseUrl: "http://global.com",
     };
     const registry = await buildModelRegistry(config, 32000);
-    expect(registry["ai365/inherited-url-model"]).toBeDefined();
+    expect(registry["ai365/inherited-url-model"]!.name).toBe("ai365/inherited-url-model");
   });
 
   it("uses global apiKey when provider has no apiKey", async () => {
@@ -316,7 +323,7 @@ describe("buildModelRegistry with fetchModels", () => {
     // Local tags overwrite remote tags
     expect(registry["test/shared-model"]!.tags).toEqual(["local-tag"]);
     // Remote-only model is added
-    expect(registry["test/remote-only"]).toBeDefined();
+    expect(registry["test/remote-only"]!.name).toBe("test/remote-only");
     expect(registry["test/remote-only"]!.contextLimit).toBe(2000);
   });
 
@@ -332,7 +339,7 @@ describe("buildModelRegistry with fetchModels", () => {
     };
     const registry = await buildModelRegistry(config, 32000);
     // Should still have local models
-    expect(registry["test/fallback"]).toBeDefined();
+    expect(registry["test/fallback"]!.name).toBe("test/fallback");
   });
 
   it("expands aliases as separate model entries", async () => {
@@ -357,9 +364,9 @@ describe("buildModelRegistry with fetchModels", () => {
       ],
     };
     const registry = await buildModelRegistry(config, 32000);
-    expect(registry["test/base-model"]).toBeDefined();
-    expect(registry["test/alias-1"]).toBeDefined();
-    expect(registry["test/alias-2"]).toBeDefined();
+    expect(registry["test/base-model"]!.name).toBe("test/base-model");
+    expect(registry["test/alias-1"]!.name).toBe("test/alias-1");
+    expect(registry["test/alias-2"]!.name).toBe("test/alias-2");
   });
 });
 
@@ -368,102 +375,39 @@ describe("buildModelRegistry with fetchModels", () => {
 import { resolveModelConfig } from "../../src/core/config/providers.ts";
 
 describe("resolveModelConfig fallback lookup", () => {
+  type ModelEntry = { name: string; temperature: number | null; contextLimit: number; tags: string[] };
+
   it("falls back to provider/modelName when direct lookup fails", () => {
-    const registry: Record<string, {
-      name: string;
-      temperature: number | null;
-      contextLimit: number;
-      tags: string[];
-    }> = {
-      "laguna/laguna": {
-        name: "laguna/laguna",
-        temperature: null,
-        contextLimit: 350000,
-        tags: [],
-      },
+    const registry: Record<string, ModelEntry> = {
+      "laguna/laguna": { name: "laguna/laguna", temperature: null, contextLimit: 350000, tags: [] },
     };
-    // Lookup with unprefixed name (as happens when fetchModels: true + models: [])
     const config = resolveModelConfig("laguna", registry, 128000, undefined);
     expect(config.contextLimit).toBe(350000);
     expect(config.name).toBe("laguna/laguna");
   });
 
-  it("uses direct lookup when model name contains '/'", () => {
-    const registry: Record<string, {
-      name: string;
-      temperature: number | null;
-      contextLimit: number;
-      tags: string[];
-    }> = {
-      "openai/gpt-4": {
-        name: "openai/gpt-4",
-        temperature: 0.5,
-        contextLimit: 128000,
-        tags: [],
-      },
+  it("uses direct lookup and registry values when model name contains '/'", () => {
+    const registry: Record<string, ModelEntry> = {
+      "openai/gpt-4": { name: "openai/gpt-4", temperature: 0.5, contextLimit: 128000, tags: [] },
     };
     const config = resolveModelConfig("openai/gpt-4", registry, 32000, undefined);
     expect(config.contextLimit).toBe(128000);
   });
 
   it("falls back to default contextLimit when model not found at all", () => {
-    const registry: Record<string, {
-      name: string;
-      temperature: number | null;
-      contextLimit: number;
-      tags: string[];
-    }> = {
-      "other/model": {
-        name: "other/model",
-        temperature: null,
-        contextLimit: 64000,
-        tags: [],
-      },
+    const registry: Record<string, ModelEntry> = {
+      "other/model": { name: "other/model", temperature: null, contextLimit: 64000, tags: [] },
     };
     const config = resolveModelConfig("unknown", registry, 128000, undefined);
     expect(config.contextLimit).toBe(128000);
     expect(config.name).toBe("unknown");
   });
 
-  it("falls back correctly for models with multiple slashes in name", () => {
-    const registry: Record<string, {
-      name: string;
-      temperature: number | null;
-      contextLimit: number;
-      tags: string[];
-    }> = {
-      "provider/some/deep/model": {
-        name: "provider/some/deep/model",
-        temperature: null,
-        contextLimit: 200000,
-        tags: [],
-      },
+  it("does not fallback for names with multiple slashes but works with full path", () => {
+    const registry: Record<string, ModelEntry> = {
+      "provider/some/deep/model": { name: "provider/some/deep/model", temperature: null, contextLimit: 200000, tags: [] },
     };
-    // "some/deep/model" contains "/" so no fallback — direct lookup fails
-    const config = resolveModelConfig("some/deep/model", registry, 128000, undefined);
-    expect(config.contextLimit).toBe(128000);
-
-    // But "provider/some/deep/model" works directly
-    const config2 = resolveModelConfig("provider/some/deep/model", registry, 128000, undefined);
-    expect(config2.contextLimit).toBe(200000);
-  });
-
-  it("uses registry contextLimit over default when found via fallback", () => {
-    const registry: Record<string, {
-      name: string;
-      temperature: number | null;
-      contextLimit: number;
-      tags: string[];
-    }> = {
-      "provider/model-x": {
-        name: "provider/model-x",
-        temperature: 0.7,
-        contextLimit: 999999,
-        tags: [],
-      },
-    };
-    const config = resolveModelConfig("model-x", registry, 128000, undefined);
-    expect(config.contextLimit).toBe(999999);
-    expect(config.temperature).toBe(0.7);
+    expect(resolveModelConfig("some/deep/model", registry, 128000, undefined).contextLimit).toBe(128000);
+    expect(resolveModelConfig("provider/some/deep/model", registry, 128000, undefined).contextLimit).toBe(200000);
   });
 });

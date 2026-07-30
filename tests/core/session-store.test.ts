@@ -28,6 +28,15 @@ describe('SessionStore', () => {
     expect(agents).toHaveLength(2);
   });
 
+  it('returns all session IDs', () => {
+    const store = new SessionStore();
+    store.addAgent(new MockAgent('done', 'a'));
+    store.addAgent(new MockAgent('done', 'b'));
+    const ids = store.sessionIds();
+    expect(ids).toContain('a');
+    expect(ids).toContain('b');
+  });
+
   it('replaces existing agent when addAgent is called with same session ID', () => {
     const store = new SessionStore();
     const agent1 = new MockAgent('done', 'session-1');
@@ -47,5 +56,18 @@ describe('SessionStore', () => {
 
     store.addAgent(new MockAgent('done', 'session-2'));
     expect(store.initialSessionId()).toBe('session-1'); // remains first
+  });
+
+  it('generates UUID when agent has no sessionId', () => {
+    const store = new SessionStore();
+    const agent = { serialize: () => ({}), deserialize: () => {} } as any;
+    const id = store.addAgent(agent);
+    expect(typeof id).toBe('string');
+    expect(id.length).toBeGreaterThan(0);
+  });
+
+  it('accepts initialSessionId in constructor', () => {
+    const store = new SessionStore({ initialSessionId: 'predefined' });
+    expect(store.initialSessionId()).toBe('predefined');
   });
 });

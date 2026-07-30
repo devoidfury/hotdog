@@ -807,12 +807,13 @@ Content.
     const core = createMockCore();
     const ext = (await create(core)) as any;
 
-    const registry: any = { register: mock(() => {}) };
+    const registry: any = {
+      register: mock((name: string, opts: any) => { registry.registeredCmd = opts; }),
+      registeredCmd: null,
+    };
     await ext.hooks![HOOKS.COMMANDS_REGISTER]({ registry, agent: {} });
 
-    // Get the registered command
-    const skillCmd = registry.register.mock.calls[0]?.[1];
-    const result = await skillCmd.handler({}, "skill");
+    const result = await registry.registeredCmd.handler({}, "skill");
     expect(result.action).toBe(ACTIONS.DISPLAY);
     expect(result.content).toContain("Available Skills");
   });
@@ -829,11 +830,13 @@ Content.
     const core = createMockCore();
     const ext = (await create(core)) as any;
 
-    const registry: any = { register: mock(() => {}) };
+    const registry: any = {
+      register: mock((name: string, opts: any) => { registry.registeredCmd = opts; }),
+      registeredCmd: null,
+    };
     await ext.hooks![HOOKS.COMMANDS_REGISTER]({ registry, agent: {} });
 
-    const skillCmd = registry.register.mock.calls[0]?.[1];
-    const result = await skillCmd.handler({}, "skill:Activate Cmd Skill");
+    const result = await registry.registeredCmd.handler({}, "skill:Activate Cmd Skill");
     expect(result.action).toBe(ACTIONS.DISPLAY);
     expect(result.content).toContain("activated");
 

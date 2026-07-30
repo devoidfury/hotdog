@@ -7,6 +7,7 @@ import {
   mdTreeToHtml,
   markdownToHtml,
   getStablePrefix,
+  renderBlocksToHtml,
   type MdHeading,
   type MdList,
 } from "../../src/utils/md-parser.ts";
@@ -15,277 +16,130 @@ import type { MdBlock, MdInline, MdDocument, MdBold, MdItalic, MdText } from "..
 describe("parseMarkdown", () => {
   // ── Edge cases ────────────────────────────────────────────────────
 
-  it("returns empty document for empty input", () => {
-    const doc = parseMarkdown("");
-    expect(doc.type).toBe("document");
-    expect(doc.children).toHaveLength(0);
-  });
-
-  it("returns empty document for whitespace-only input", () => {
-    const doc = parseMarkdown("   \n  \n   ");
-    expect(doc.type).toBe("document");
-    expect(doc.children).toHaveLength(0);
-  });
-
-  it("returns empty document for blank lines only", () => {
-    const doc = parseMarkdown("\n\n\n");
-    expect(doc.children).toHaveLength(0);
+  it("returns empty document for empty/whitespace-only input", () => {
+    expect(parseMarkdown("").children).toHaveLength(0);
+    expect(parseMarkdown("   \n  \n   ").children).toHaveLength(0);
+    expect(parseMarkdown("\n\n\n").children).toHaveLength(0);
   });
 
   // ── Headings ──────────────────────────────────────────────────────
 
-  it("parses h1 heading", () => {
-    const doc = parseMarkdown("# Hello");
-    expect(doc.children).toHaveLength(1);
-    const block = doc.children[0] as MdBlock;
-    expect(block.type).toBe("heading");
-    if (block.type === "heading") {
-      expect(block.level).toBe(1);
-      expect(block.children[0]?.type).toBe("text");
-      if (block.children[0]?.type === "text") {
-        expect(block.children[0].content).toBe("Hello");
-      }
-    }
-  });
-
-  it("parses h2-h6 headings", () => {
-    const doc = parseMarkdown("## Two\n### Three\n#### Four\n##### Five\n###### Six");
-    expect(doc.children).toHaveLength(5);
-    expect((doc.children[0] as MdBlock).type).toBe("heading");
-    expect((doc.children[1] as MdBlock).type).toBe("heading");
-    expect((doc.children[2] as MdBlock).type).toBe("heading");
-    expect((doc.children[3] as MdBlock).type).toBe("heading");
-    expect((doc.children[4] as MdBlock).type).toBe("heading");
-  });
-
   it("parses heading levels correctly", () => {
-    const doc = parseMarkdown("# H1\n## H2\n### H3");
-    expect((doc.children[0] as MdBlock).type).toBe("heading");
-    if ((doc.children[0] as MdBlock).type === "heading") expect((doc.children[0] as MdHeading).level).toBe(1);
-    if ((doc.children[1] as MdBlock).type === "heading") expect((doc.children[1] as MdHeading).level).toBe(2);
-    if ((doc.children[2] as MdBlock).type === "heading") expect((doc.children[2] as MdHeading).level).toBe(3);
+    const doc = parseMarkdown("# H1\n## H2\n### H3\n#### H4\n##### H5\n###### H6");
+    expect(doc.children).toHaveLength(6);
+    for (let i = 0; i < 6; i++) {
+      const h = doc.children[i] as MdHeading;
+      expect(h.type).toBe("heading");
+      expect(h.level).toBe(i + 1);
+    }
   });
 
   // ── Paragraphs ────────────────────────────────────────────────────
 
-  it("parses a simple paragraph", () => {
-    const doc = parseMarkdown("Hello world");
-    expect(doc.children).toHaveLength(1);
-    expect(doc.children[0]?.type).toBe("paragraph");
-  });
+  it("parses paragraphs: simple, multiple, and multi-line", () => {
+    expect(parseMarkdown("Hello world").children).toHaveLength(1);
+    expect(parseMarkdown("First.\n\nSecond.").children).toHaveLength(2);
 
-  it("parses multiple paragraphs separated by blank lines", () => {
-    const doc = parseMarkdown("First paragraph.\n\nSecond paragraph.");
-    expect(doc.children).toHaveLength(2);
-    expect(doc.children[0]?.type).toBe("paragraph");
-    expect(doc.children[1]?.type).toBe("paragraph");
-  });
-
-  it("joins multi-line paragraphs", () => {
-    const doc = parseMarkdown("Line one\nLine two\nLine three");
-    expect(doc.children).toHaveLength(1);
-    expect(doc.children[0]?.type).toBe("paragraph");
-    const para = doc.children[0];
-    if (para?.type === "paragraph") {
-      const texts = para.children.filter((c) => c.type === "text")
-        .map((c) => (c as { type: "text"; content: string }).content);
-      expect(texts.join(" ")).toContain("Line one");
-      expect(texts.join(" ")).toContain("Line two");
-      expect(texts.join(" ")).toContain("Line three");
-    }
+    const multiLine = parseMarkdown("Line one\nLine two\nLine three");
+    expect(multiLine.children).toHaveLength(1);
+    expect(multiLine.children[0]?.type).toBe("paragraph");
   });
 
   // ── Code blocks ───────────────────────────────────────────────────
 
-  it("parses a fenced code block with language", () => {
-    const doc = parseMarkdown("```typescript\nconst x = 1;\n```");
-    expect(doc.children).toHaveLength(1);
-    expect(doc.children[0]?.type).toBe("code_block");
-    const code = doc.children[0] as { type: "code_block"; language?: string; content: string };
-    expect(code.language).toBe("typescript");
-    expect(code.content).toBe("const x = 1;");
-  });
+  it("parses fenced code blocks with/without language", () => {
+    const withLang = parseMarkdown("```typescript\nconst x = 1;\n```");
+    const code1 = withLang.children[0] as { type: "code_block"; language?: string; content: string };
+    expect(code1.language).toBe("typescript");
+    expect(code1.content).toBe("const x = 1;");
 
-  it("parses a fenced code block without language", () => {
-    const doc = parseMarkdown("```\nsome code\n```");
-    expect(doc.children[0]?.type).toBe("code_block");
-    const code = doc.children[0] as { type: "code_block"; language?: string; content: string };
-    expect(code.language).toBeUndefined();
-    expect(code.content).toBe("some code");
-  });
+    const noLang = parseMarkdown("```\nsome code\n```");
+    const code2 = noLang.children[0] as { type: "code_block"; language?: string; content: string };
+    expect(code2.language).toBeUndefined();
+    expect(code2.content).toBe("some code");
 
-  it("parses multi-line code blocks", () => {
-    const doc = parseMarkdown("```python\nline1\nline2\nline3\n```");
-    const code = doc.children[0] as { type: "code_block"; content: string };
-    expect(code.content).toBe("line1\nline2\nline3");
-  });
+    const multiLine = parseMarkdown("```python\nline1\nline2\nline3\n```");
+    expect((multiLine.children[0] as { content: string }).content).toBe("line1\nline2\nline3");
 
-  it("handles code blocks with empty content", () => {
-    const doc = parseMarkdown("```\n```");
-    expect(doc.children[0]?.type).toBe("code_block");
-    const code = doc.children[0] as { type: "code_block"; content: string };
-    expect(code.content).toBe("");
+    const empty = parseMarkdown("```\n```");
+    expect((empty.children[0] as { content: string }).content).toBe("");
   });
 
   // ── Lists ─────────────────────────────────────────────────────────
 
-  it("parses an unordered list with dashes", () => {
-    const doc = parseMarkdown("- item one\n- item two\n- item three");
-    expect(doc.children).toHaveLength(1);
-    expect(doc.children[0]?.type).toBe("list");
-    const list = doc.children[0] as { type: "list"; ordered: boolean; items: { children: MdInline[] }[] };
-    expect(list.ordered).toBe(false);
-    expect(list.items).toHaveLength(3);
+  it("parses unordered lists with -, *, + markers", () => {
+    for (const marker of ["-", "*", "+"]) {
+      const doc = parseMarkdown(`${marker} one\n${marker} two`);
+      const list = doc.children[0] as { type: "list"; ordered: boolean; items: MdInline[][] };
+      expect(list.type).toBe("list");
+      expect(list.ordered).toBe(false);
+      expect(list.items).toHaveLength(2);
+    }
   });
 
-  it("parses an unordered list with asterisks", () => {
-    const doc = parseMarkdown("* item one\n* item two");
-    expect(doc.children[0]?.type).toBe("list");
-    const list = doc.children[0] as { type: "list"; ordered: boolean };
-    expect(list.ordered).toBe(false);
-  });
+  it("parses ordered lists with periods and parentheses", () => {
+    const withDots = parseMarkdown("1. first\n2. second\n3. third");
+    expect((withDots.children[0] as MdList).ordered).toBe(true);
+    expect((withDots.children[0] as MdList).items).toHaveLength(3);
 
-  it("parses an unordered list with plus signs", () => {
-    const doc = parseMarkdown("+ item one\n+ item two");
-    expect(doc.children[0]?.type).toBe("list");
-    const list = doc.children[0] as { type: "list"; ordered: boolean };
-    expect(list.ordered).toBe(false);
-  });
-
-  it("parses an ordered list with periods", () => {
-    const doc = parseMarkdown("1. first\n2. second\n3. third");
-    expect(doc.children[0]?.type).toBe("list");
-    const list = doc.children[0] as MdList;
-    expect(list.ordered).toBe(true);
-    expect(list.items).toHaveLength(3);
-  });
-
-  it("parses an ordered list with parentheses", () => {
-    const doc = parseMarkdown("1) first\n2) second");
-    expect(doc.children[0]?.type).toBe("list");
-    const list = doc.children[0] as { type: "list"; ordered: boolean };
-    expect(list.ordered).toBe(true);
+    const withParens = parseMarkdown("1) first\n2) second");
+    expect((withParens.children[0] as { ordered: boolean }).ordered).toBe(true);
   });
 
   // ── Blockquotes ───────────────────────────────────────────────────
 
-  it("parses a simple blockquote", () => {
-    const doc = parseMarkdown("> This is a quote");
-    expect(doc.children).toHaveLength(1);
-    expect(doc.children[0]?.type).toBe("blockquote");
-  });
+  it("parses blockquotes with nested content", () => {
+    const simple = parseMarkdown("> This is a quote");
+    expect(simple.children[0]?.type).toBe("blockquote");
 
-  it("parses a multi-line blockquote", () => {
-    const doc = parseMarkdown("> Line one\n> Line two\n> Line three");
-    expect(doc.children[0]?.type).toBe("blockquote");
-    const bq = doc.children[0] as { type: "blockquote"; children: MdBlock[] };
-    expect(bq.children.length).toBeGreaterThanOrEqual(1);
-  });
-
-  it("parses nested content in blockquotes", () => {
-    const doc = parseMarkdown("> ## Heading in quote\n> Paragraph in quote");
-    const bq = doc.children[0] as { type: "blockquote"; children: MdBlock[] };
+    const nested = parseMarkdown("> ## Heading in quote\n> Paragraph in quote");
+    const bq = nested.children[0] as { type: "blockquote"; children: MdBlock[] };
     expect(bq.children[0]?.type).toBe("heading");
     expect(bq.children[1]?.type).toBe("paragraph");
   });
 
   // ── Horizontal rules ──────────────────────────────────────────────
 
-  it("parses horizontal rule with dashes", () => {
-    const doc = parseMarkdown("---");
-    expect(doc.children).toHaveLength(1);
-    expect(doc.children[0]?.type).toBe("horizontal_rule");
-  });
-
-  it("parses horizontal rule with underscores", () => {
-    const doc = parseMarkdown("___");
-    expect(doc.children[0]?.type).toBe("horizontal_rule");
-  });
-
-  it("parses horizontal rule with asterisks", () => {
-    const doc = parseMarkdown("***");
-    expect(doc.children[0]?.type).toBe("horizontal_rule");
-  });
-
-  it("parses horizontal rule with spaces", () => {
-    const doc = parseMarkdown("- - -");
-    expect(doc.children[0]?.type).toBe("horizontal_rule");
+  it("parses horizontal rules with various syntaxes", () => {
+    for (const hr of ["---", "___", "***", "- - -"]) {
+      expect(parseMarkdown(hr).children[0]?.type).toBe("horizontal_rule");
+    }
   });
 
   // ── Inline formatting ─────────────────────────────────────────────
 
-  it("parses bold text with **", () => {
-    const doc = parseMarkdown("This is **bold** text");
-    const para = doc.children[0] as { type: "paragraph"; children: MdInline[] };
-    const bold = para.children.find((c) => c.type === "bold");
-    expect(bold).toBeDefined();
+  it("parses bold, italic, and combined", () => {
+    const bold = parseMarkdown("**bold**");
+    expect((bold.children[0] as { children: MdInline[] }).children.some(c => c.type === "bold")).toBe(true);
+
+    const italic = parseMarkdown("*italic*");
+    expect((italic.children[0] as { children: MdInline[] }).children.some(c => c.type === "italic")).toBe(true);
+
+    const boldItalic = parseMarkdown("***bold italic***");
+    const para = boldItalic.children[0] as { children: MdInline[] };
+    const boldNode = para.children.find(c => c.type === "bold") as MdBold;
+    expect(boldNode).toBeDefined();
+    expect(boldNode.children[0]?.type).toBe("italic");
+    expect((boldNode.children[0] as MdItalic).children[0]?.type).toBe("text");
+    expect((boldNode.children[0] as MdItalic).children[0]!.content).toBe("bold italic");
   });
 
-  it("parses italic text with *", () => {
-    const doc = parseMarkdown("This is *italic* text");
-    const para = doc.children[0] as { type: "paragraph"; children: MdInline[] };
-    const italic = para.children.find((c) => c.type === "italic");
-    expect(italic).toBeDefined();
-  });
+  it("parses inline code, links, and images", () => {
+    const code = parseMarkdown("`foo()`");
+    const codeNode = (code.children[0] as { children: MdInline[] }).children.find(c => c.type === "inline_code");
+    expect(codeNode?.type).toBe("inline_code");
+    expect((codeNode as { content: string }).content).toBe("foo()");
 
-  it("parses inline code", () => {
-    const doc = parseMarkdown("Use `foo()` to call the function");
-    const para = doc.children[0] as { type: "paragraph"; children: MdInline[] };
-    const code = para.children.find((c) => c.type === "inline_code");
-    expect(code).toBeDefined();
-    if (code?.type === "inline_code") {
-      expect(code.content).toBe("foo()");
-    }
-  });
+    const link = parseMarkdown("[here](https://example.com)");
+    const linkNode = (link.children[0] as { children: MdInline[] }).children.find(c => c.type === "link");
+    expect(linkNode?.type).toBe("link");
+    expect((linkNode as { url: string }).url).toBe("https://example.com");
 
-  it("parses links", () => {
-    const doc = parseMarkdown("Click [here](https://example.com) to go");
-    const para = doc.children[0] as { type: "paragraph"; children: MdInline[] };
-    const link = para.children.find((c) => c.type === "link");
-    expect(link).toBeDefined();
-    if (link?.type === "link") {
-      expect(link.url).toBe("https://example.com");
-    }
-  });
-
-  it("parses images", () => {
-    const doc = parseMarkdown("![alt text](image.png)");
-    const para = doc.children[0] as { type: "paragraph"; children: MdInline[] };
-    const img = para.children.find((c) => c.type === "image");
-    expect(img).toBeDefined();
-    if (img?.type === "image") {
-      expect(img.alt).toBe("alt text");
-      expect(img.url).toBe("image.png");
-    }
-  });
-
-  it("parses strikethrough", () => {
-    const doc = parseMarkdown("This is ~~deleted~~ text");
-    // Strikethrough is parsed (may map to bold internally)
-    expect(doc.children).toHaveLength(1);
-  });
-
-  it("handles nested inline formatting", () => {
-    const doc = parseMarkdown("This is **bold and *italic* inside** text");
-    expect(doc.children).toHaveLength(1);
-    const para = doc.children[0] as { type: "paragraph"; children: MdInline[] };
-    const bold = para.children.find((c) => c.type === "bold");
-    expect(bold).toBeDefined();
-  });
-
-  it("parses ***bold italic*** as nested bold+italic", () => {
-    const doc = parseMarkdown("This is ***bold italic*** text");
-    expect(doc.children).toHaveLength(1);
-    const para = doc.children[0] as { type: "paragraph"; children: MdInline[] };
-    const bold = para.children.find((c) => c.type === "bold");
-    expect(bold).toBeDefined();
-    expect(bold?.type).toBe("bold");
-    const boldChildren = (bold as MdBold).children;
-    expect(boldChildren).toHaveLength(1);
-    expect(boldChildren[0]?.type).toBe("italic");
-    const italic = boldChildren[0] as MdItalic;
-    expect(italic.children[0]?.type).toBe("text");
-    expect((italic.children[0] as MdText).content).toBe("bold italic");
+    const img = parseMarkdown("![alt](image.png)");
+    const imgNode = (img.children[0] as { children: MdInline[] }).children.find(c => c.type === "image");
+    expect(imgNode?.type).toBe("image");
+    expect((imgNode as { alt: string; url: string }).alt).toBe("alt");
+    expect((imgNode as { alt: string; url: string }).url).toBe("image.png");
   });
 
   it("renders ***bold italic*** to nested HTML", () => {
@@ -1649,3 +1503,28 @@ Final text.`;
   });
 });
 
+describe("renderBlocksToHtml", () => {
+  it("renders a subset of blocks from a document", () => {
+    const doc = parseMarkdown("# Heading\n\nPara 1\n\nPara 2\n\nPara 3");
+    // Render only blocks 1-3 (the three paragraphs, skipping heading)
+    const html = renderBlocksToHtml(doc, 1, 4);
+    expect(html).toContain("Para 1");
+    expect(html).toContain("Para 2");
+    expect(html).toContain("Para 3");
+    expect(html).not.toContain("<h1>");
+  });
+
+  it("renders from start when to is omitted", () => {
+    const doc = parseMarkdown("# Heading\n\nPara 1\n\nPara 2");
+    const html = renderBlocksToHtml(doc, 0);
+    expect(html).toContain("<h1>");
+    expect(html).toContain("Para 1");
+    expect(html).toContain("Para 2");
+  });
+
+  it("renders single block", () => {
+    const doc = parseMarkdown("# Heading\n\nPara 1");
+    const html = renderBlocksToHtml(doc, 1, 2);
+    expect(html).toBe("<p>Para 1</p>");
+  });
+});

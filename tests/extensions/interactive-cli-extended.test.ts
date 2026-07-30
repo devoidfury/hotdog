@@ -1,7 +1,7 @@
 // Extended tests for ui-interactive-cli/index.ts — handleSlashCommand,
 // parseCommand edge cases, isSystemCommand, executeShellCommand.
 
-import { describe, it, expect, beforeEach, afterEach } from "bun:test";
+import { describe, it, expect, beforeEach, afterEach, mock } from "bun:test";
 import { parseCommand, Command } from "../../src/core/commands.ts";
 import { SessionManager } from "../../src/core/session/index.ts";
 import {
@@ -10,11 +10,27 @@ import {
 import { createMockRl } from "../helpers.ts";
 
 describe("handleSlashCommand", () => {
+  let originalExit: typeof process.exit;
+  let exitCalledWith: number | null = null;
+  let capturedOutput = "";
+  let originalLog: typeof console.log;
+
+  beforeEach(() => {
+    originalExit = process.exit;
+    originalLog = console.log;
+    exitCalledWith = null;
+    capturedOutput = "";
+    process.exit = ((code: number) => { exitCalledWith = code; }) as never;
+    console.log = (...args) => { capturedOutput += args.join(" "); };
+  });
+
+  afterEach(() => {
+    process.exit = originalExit;
+    console.log = originalLog;
+  });
+
   it("handles /help command", () => {
     const { rl } = createMockRl();
-    let output = "";
-    const origLog = console.log;
-    console.log = (...args) => { output += args.join(" "); };
 
     const mockSessionManager = {
       sessionId: () => "test-session",
@@ -23,17 +39,12 @@ describe("handleSlashCommand", () => {
     const mockChannel = {} as any;
 
     handleSlashCommand("help", mockSessionManager, mockChannel, rl as any);
-    console.log = origLog;
-    expect(output).toContain("Commands:");
+    expect(capturedOutput).toContain("Commands:");
   });
 
   it("handles /quit and /exit commands", () => {
     const { rl } = createMockRl();
     let closed = false;
-    const origExit = process.exit;
-    process.exit = ((_code?: string | number | null | undefined) => {
-      throw new Error("exit");
-    }) as never;
     (rl as any).close = () => { closed = true; };
 
     const mockSessionManager = {
@@ -44,13 +55,13 @@ describe("handleSlashCommand", () => {
 
     for (const cmd of ["quit", "exit"]) {
       closed = false;
-      try {
-        handleSlashCommand(cmd, mockSessionManager, mockChannel, rl as any);
-      } catch (e) {
-        if ((e as Error).message === "exit") expect(closed).toBe(true);
-      }
+      exitCalledWith = null;
+      capturedOutput = "";
+      handleSlashCommand(cmd, mockSessionManager, mockChannel, rl as any);
+      expect(closed).toBe(true);
+      expect(exitCalledWith).toBe(0);
+      expect(capturedOutput).toContain("Goodbye!");
     }
-    process.exit = origExit;
   });
 
   it("delegates commands to sessionManager.executeCommand", async () => {

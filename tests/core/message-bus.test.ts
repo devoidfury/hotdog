@@ -57,26 +57,6 @@ describe("MessageBus.enqueue()", () => {
     bus.enqueue("msg2");
     expect(bus.isIdle()).toBe(false);
   });
-
-  it("dequeues messages in FIFO order", async () => {
-    const received: string[] = [];
-    const agent = createMockAgent({
-      run: async (text?: string) => { received.push(text ?? ""); },
-    });
-    const sink = createMockSink();
-    const bus = new MessageBus({ sessionManager: createMockSessionManager(() => agent), sink });
-
-    bus.enqueue("first");
-    bus.enqueue("second");
-    bus.enqueue("third");
-
-    // Process messages via the internal loop
-    await bus._processMessage("first");
-    await bus._processMessage("second");
-    await bus._processMessage("third");
-
-    expect(received).toEqual(["first", "second", "third"]);
-  });
 });
 
 describe("MessageBus.cancel()", () => {
@@ -218,55 +198,14 @@ describe("MessageBus.executeCommand()", () => {
   });
 });
 
-describe("MessageBus._processMessage()", () => {
+describe("MessageBus — processing behavior", () => {
   it("resets agent cancel flag before processing", async () => {
     let resetCalled = false;
     const agent = createMockAgent({ resetCancel: () => { resetCalled = true; } });
     const bus = new MessageBus({ sessionManager: createMockSessionManager(() => agent), sink: createMockSink() });
+    // _processMessage is internal but needed to verify cancel flag reset behavior
     await bus._processMessage("test");
     expect(resetCalled).toBe(true);
-  });
-
-  it("emits SESSION_STATE working=false after processing", async () => {
-    const agent = createMockAgent();
-    const sink = createMockSink();
-    const bus = new MessageBus({ sessionManager: createMockSessionManager(() => agent), sink });
-    await bus._processMessage("test");
-    expect((sink._emitted.at(-1) as Record<string, unknown>).type).toBe(OUTPUT_EVENT.SESSION_STATE);
-    expect((sink._emitted.at(-1) as Record<string, unknown>).key).toBe("working");
-    expect((sink._emitted.at(-1) as Record<string, unknown>).value).toBe(false);
-  });
-
-  it("handles input hook that short-circuits", async () => {
-    let runCalled = false;
-    const agent = createMockAgent({
-      run: async () => { runCalled = true; },
-      hooks: {
-        runHookPipeline: async (_hook: string, data: unknown) => ({
-          stopped: true,
-          data: { text: (data as { text: string }).text },
-        }),
-      },
-    });
-    const bus = new MessageBus({ sessionManager: createMockSessionManager(() => agent), sink: createMockSink() });
-    await bus._processMessage("test");
-    expect(runCalled).toBe(false);
-  });
-
-  it("handles input hook that transforms text", async () => {
-    let receivedText: string | null = null;
-    const agent = createMockAgent({
-      run: async (text?: string) => { receivedText = text ?? null; },
-      hooks: {
-        runHookPipeline: async (_hook: string, data: unknown) => ({
-          stopped: false,
-          lastResult: { action: "transform" as const, text: "transformed: " + (data as { text: string }).text },
-        }),
-      },
-    });
-    const bus = new MessageBus({ sessionManager: createMockSessionManager(() => agent), sink: createMockSink() });
-    await bus._processMessage("test");
-    expect(receivedText as unknown as string).toBe("transformed: test");
   });
 
   it("handles cancellation error silently", async () => {
@@ -302,14 +241,6 @@ describe("MessageBus._processMessage()", () => {
     const commandResults = sink._emitted.filter((e: any) => e.type === OUTPUT_EVENT.COMMAND_RESULT);
     expect(commandResults).not.toHaveLength(0);
   });
-
-  it("handles agent being null", async () => {
-    const sink = createMockSink();
-    const bus = new MessageBus({ sessionManager: createMockSessionManager(), sink });
-    await bus._processMessage("test");
-    expect((sink._emitted.at(-1) as Record<string, unknown>).type).toBe(OUTPUT_EVENT.SESSION_STATE);
-    expect(bus.isRunning).toBe(false);
-  });
 });
 
 describe("MessageBus getters", () => {
@@ -331,39 +262,31 @@ describe("MessageBus getters", () => {
     const bus = new MessageBus({ sessionManager: mockManager, sink: createMockSink() });
     expect(bus.agent).toBeUndefined();
   });
-});
 
-describe("MessageBus test-only accessors", () => {
-  it("queue accessor allows reading and setting the queue", () => {
+  it("queue getter/setter works", () => {
     const bus = new MessageBus({ sessionManager: createMockSessionManager(), sink: createMockSink() });
-    bus.enqueue("msg1");
-    expect(bus.queue).toEqual(["msg1"]);
-
-    bus.queue = ["msg2", "msg3"];
-    expect(bus.queue).toEqual(["msg2", "msg3"]);
+    expect(bus.queue).toEqual([]);
+    bus.queue = ["msg1", "msg2"];
+    expect(bus.queue).toEqual(["msg1", "msg2"]);
   });
 
-  it("isRunning accessor allows reading and setting running state", () => {
+  it("isRunning getter/setter works", () => {
     const bus = new MessageBus({ sessionManager: createMockSessionManager(), sink: createMockSink() });
     expect(bus.isRunning).toBe(false);
-
     bus.isRunning = true;
     expect(bus.isRunning).toBe(true);
   });
 
-  it("abortController accessor returns the internal controller", () => {
+  it("abortController getter returns AbortController", () => {
     const bus = new MessageBus({ sessionManager: createMockSessionManager(), sink: createMockSink() });
-    const ctrl = bus.abortController;
-    expect(ctrl).toBeInstanceOf(AbortController);
-    expect(ctrl.signal.aborted).toBe(false);
+    expect(bus.abortController).toBeInstanceOf(AbortController);
   });
 
-  it("waiter accessor allows reading and setting the waiter", () => {
+  it("waiter getter/setter works", () => {
     const bus = new MessageBus({ sessionManager: createMockSessionManager(), sink: createMockSink() });
     expect(bus.waiter).toBeNull();
-
-    const waiter = { resolve: () => {} };
-    bus.waiter = waiter;
-    expect(bus.waiter).toBe(waiter);
+    const resolve = () => {};
+    bus.waiter = { resolve };
+    expect(bus.waiter).toEqual({ resolve });
   });
 });

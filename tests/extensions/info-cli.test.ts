@@ -4,20 +4,11 @@ import { mkdirSync, rmSync, writeFileSync, mkdtempSync } from "node:fs";
 import { join } from "node:path";
 import { homedir, tmpdir } from "node:os";
 import { createMockCore } from "../helpers.ts";
+import { captureConsole } from "../test-helpers.ts";
 import type { CoreContext } from "../../src/core/extensions/types.ts";
 
 // ── Shared helper to reduce boilerplate ─────────────────────────────────────
 
-/**
- * Creates an info CLI extension, registers it, and returns a runner that
- * captures console.log output.
- *
- * Usage:
- *   const runner = await infoCliRunner(coreConfig, { wantsJson: true });
- *   const output = await runner("info", cliOverrides);
- *   // or
- *   const output = await runner("profiles", cliOverrides);
- */
 async function infoCliRunner(coreConfig = {}, defaultCli = {}) {
   const core = createMockCore(coreConfig) as unknown as CoreContext;
   const { create } = await import("../../src/extensions/ui-info-cli/index.ts");
@@ -40,19 +31,8 @@ async function infoCliRunner(coreConfig = {}, defaultCli = {}) {
   return async (subcommand: string, cliOverrides = {}) => {
     const def = core.cliSubcommandRegistry.get(subcommand)!;
     const cli = { ...baseCli, ...cliOverrides };
-
-    let capturedOutput = "";
-    const originalLog = console.log;
-    console.log = (...args: unknown[]) => {
-      capturedOutput += args.join(" ") + "\n";
-    };
-
-    try {
-      const exitCode = await def.handler!(cli, core);
-      return { exitCode, output: capturedOutput };
-    } finally {
-      console.log = originalLog;
-    }
+    const { output, result: exitCode } = await captureConsole(() => def.handler!(cli, core));
+    return { exitCode, output };
   };
 }
 

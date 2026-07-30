@@ -1,7 +1,8 @@
-// Tests for the core session manager.
+// Tests for the core session manager and session store.
 
-import { SessionManager } from '../../src/core/session/index.ts';
+import { SessionManager, SessionStore } from '../../src/core/session/index.ts';
 import { Agent } from '../../src/core/agent.ts';
+import type { AgentLike } from '../../src/core/session/index.ts';
 import { createHooks, HookSystem } from '../../src/core/hooks.ts';
 import { ExtensionLoader } from '../../src/core/extensions/extensions.ts';
 import { createToolRegistry } from '../../src/core/extensions/tool-registry.ts';
@@ -50,26 +51,9 @@ describe('SessionManager.create (static)', () => {
       initialConfig: { model: 'initial-model' },
     });
 
-    expect(sessionManager).toBeDefined();
     expect(sessionManager.sessionId()).toBeDefined();
-    const agent = sessionManager.getAgent();
-    expect(agent).toBeDefined();
-    expect((agent as any).model).toBe('initial-model');
-  });
-
-  it('should create without initial agent when buildAgent is not provided', async () => {
-    const hooks = createHooks();
-    const toolRegistry = createToolRegistry();
-    const extensions = new ExtensionLoader({ hooks, toolRegistry, services: createServiceRegistry(), configRegistry: createConfigRegistry(), cliSubcommandRegistry: createSubcommandRegistry() });
-
-    const sessionManager = await SessionManager.create({
-      hooks: hooks as any,
-      extensions,
-      buildAgent: async () => createMockAgent(),
-    });
-
-    expect(sessionManager).toBeDefined();
-    expect(sessionManager.getAgent()).toBeDefined();
+    expect(typeof sessionManager.sessionId()).toBe('string');
+    expect((sessionManager.getAgent() as any).model).toBe('initial-model');
   });
 });
 
@@ -101,63 +85,25 @@ describe('SessionManager', () => {
   });
 
   describe('create', () => {
-    it('should create a new agent and return session ID', async () => {
+    it('should create a new agent, set current session, and pass config to buildAgent', async () => {
       const sessionId = await sessionManager.create({ model: 'test-model' });
-      expect(sessionId).toBeDefined();
       expect(typeof sessionId).toBe('string');
-    });
-
-    it('should set the current session', async () => {
-      const sessionId = await sessionManager.create({ model: 'test-model' });
       expect(sessionManager.sessionId()).toBe(sessionId);
-    });
-
-    it('should call buildAgent with config', async () => {
-      const customBuildAgent = async (config: Record<string, unknown>) => {
-        return createMockAgent({
-          model: (config as any).model || 'default',
-          hooks,
-          toolRegistry,
-        });
-      };
-
-      const sm = new SessionManager({ hooks: hooks as any, extensions, buildAgent: customBuildAgent });
-      const sessionId = await sm.create({ model: 'custom-model' });
-      expect(sessionId).toBeDefined();
-    });
-  });
-
-  describe('sessionId', () => {
-    it('should return the current session ID', async () => {
-      const sessionId = await sessionManager.create({ model: 'test-model' });
-      expect(sessionManager.sessionId()).toBe(sessionId);
-    });
-  });
-
-  describe('getAgent', () => {
-    it('should return the agent for the current session', async () => {
-      await sessionManager.create({ model: 'test-model' });
-      const agent = sessionManager.getAgent();
-      expect(agent).toBeDefined();
+      expect((sessionManager.getAgent() as any).model).toBe('test-model');
     });
   });
 
   describe('swap', () => {
-    it('should swap to a new agent with new config', async () => {
+    it('should swap to a new agent with new config and emit hook', async () => {
       await sessionManager.create({ model: 'model-1' });
       const oldSessionId = sessionManager.sessionId();
 
-      const newAgent = await sessionManager.swap({ model: 'model-2' });
-      expect(newAgent).toBeDefined();
-      expect(sessionManager.sessionId()).not.toBe(oldSessionId);
-    });
-
-    it('should emit session:swap hook', async () => {
       let hookFired = false;
       hooks.on('session:swap', () => { hookFired = true; });
 
-      await sessionManager.create({ model: 'model-1' });
-      await sessionManager.swap({ model: 'model-2' });
+      const newAgent = await sessionManager.swap({ model: 'model-2' });
+      expect((newAgent as any).model).toBe('model-2');
+      expect(sessionManager.sessionId()).not.toBe(oldSessionId);
       expect(hookFired).toBe(true);
     });
   });
@@ -169,13 +115,12 @@ describe('SessionManager', () => {
       await sessionManager.swap({ model: 'model-2' });
 
       const agent = sessionManager.switchSession(session1);
-      expect(agent).toBeDefined();
+      expect((agent as any).model).toBe('model-1');
       expect(sessionManager.sessionId()).toBe(session1);
     });
 
-    it('should return undefined for non-existent session', async () => {
-      const agent = sessionManager.switchSession('non-existent');
-      expect(agent).toBeUndefined();
+    it('should return undefined for non-existent session', () => {
+      expect(sessionManager.switchSession('non-existent')).toBeUndefined();
     });
   });
 
@@ -184,36 +129,25 @@ describe('SessionManager', () => {
       await sessionManager.create({ model: 'test-model' });
       const sessionId = sessionManager.sessionId()!;
       const agent = sessionManager.getAgentBySessionId(sessionId);
-      expect(agent).toBeDefined();
+      expect((agent as any).model).toBe('test-model');
     });
 
-    it('should return undefined for non-existent session ID', async () => {
-      const agent = sessionManager.getAgentBySessionId('non-existent');
-      expect(agent).toBeUndefined();
-    });
-  });
-
-  describe('sessionIds', () => {
-    it('should return all session IDs', async () => {
-      await sessionManager.create({ model: 'model-1' });
-      await sessionManager.swap({ model: 'model-2' });
-
-      const ids = sessionManager.sessionIds();
-      expect(ids.length).toBe(2);
-    });
-
-    it('should return empty array when no sessions', () => {
-      const ids = sessionManager.sessionIds();
-      expect(ids).toEqual([]);
+    it('should return undefined for non-existent session ID', () => {
+      expect(sessionManager.getAgentBySessionId('non-existent')).toBeUndefined();
     });
   });
 
-  describe('sessionCount', () => {
-    it('should return the number of sessions', async () => {
+  describe('sessionIds / sessionCount', () => {
+    it('should track session IDs and count', async () => {
+      expect(sessionManager.sessionIds()).toEqual([]);
       expect(sessionManager.sessionCount()).toBe(0);
+
       await sessionManager.create({ model: 'model-1' });
+      expect(sessionManager.sessionIds()).toHaveLength(1);
       expect(sessionManager.sessionCount()).toBe(1);
+
       await sessionManager.swap({ model: 'model-2' });
+      expect(sessionManager.sessionIds()).toHaveLength(2);
       expect(sessionManager.sessionCount()).toBe(2);
     });
   });
@@ -224,7 +158,7 @@ describe('SessionManager', () => {
       const sessionId = sessionManager.sessionId()!;
 
       const serialized = sessionManager.serialize();
-      expect(serialized).toBeDefined();
+      expect(typeof serialized).toBe('object');
 
       const newSm = new SessionManager({
         hooks: hooks as any,
@@ -233,21 +167,12 @@ describe('SessionManager', () => {
       });
 
       const agent = await newSm.deserialize(serialized as Record<string, unknown>);
-      expect(agent).toBeDefined();
+      expect((agent as any).model).toBe('test-model');
       expect(newSm.sessionIds()).toContain(sessionId);
     });
 
-    it('should return null when serializing with no active agent', () => {
-      const serialized = sessionManager.serialize();
-      expect(serialized).toBeNull();
-    });
-  });
-
-  describe('getStore', () => {
-    it('should return the session store', () => {
-      const store = sessionManager.getStore();
-      expect(store).toBeDefined();
-      expect(store.sessionIds).toBeDefined();
+    it('should return null when no active agent', () => {
+      expect(sessionManager.serialize()).toBeNull();
     });
   });
 
@@ -255,9 +180,7 @@ describe('SessionManager', () => {
     it('should cancel a session bus', async () => {
       const sessionId = await sessionManager.create({ model: 'test-model' });
       sessionManager.cancel(sessionId);
-      const bus = sessionManager.getBus(sessionId);
-      expect(bus).toBeDefined();
-      expect(bus!.isCancelled).toBe(true);
+      expect(sessionManager.getBus(sessionId)!.isCancelled).toBe(true);
     });
 
     it('should be no-op for non-existent session', () => {
@@ -268,11 +191,11 @@ describe('SessionManager', () => {
   describe('interrupt', () => {
     it('should interrupt a session bus', async () => {
       const sessionId = await sessionManager.create({ model: 'test-model' });
-      const bus = sessionManager.getBus(sessionId);
-      bus!.enqueue('message');
-      expect(bus!.isIdle()).toBe(false);
+      const bus = sessionManager.getBus(sessionId)!;
+      bus.enqueue('message');
+      expect(bus.isIdle()).toBe(false);
       sessionManager.interrupt(sessionId);
-      expect(bus!.isIdle()).toBe(true);
+      expect(bus.isIdle()).toBe(true);
     });
 
     it('should be no-op for non-existent session', () => {
@@ -283,8 +206,7 @@ describe('SessionManager', () => {
   describe('getSessionInfo', () => {
     it('should return session metadata', async () => {
       const sessionId = await sessionManager.create({ model: 'test-model' });
-      const info = sessionManager.getSessionInfo(sessionId);
-      expect(info).toEqual({
+      expect(sessionManager.getSessionInfo(sessionId)).toEqual({
         id: sessionId,
         model: 'test-model',
         profile: undefined,
@@ -292,8 +214,55 @@ describe('SessionManager', () => {
     });
 
     it('should return null for non-existent session', () => {
-      const info = sessionManager.getSessionInfo('non-existent');
-      expect(info).toBeNull();
+      expect(sessionManager.getSessionInfo('non-existent')).toBeNull();
+    });
+  });
+
+  describe('isSessionRunning', () => {
+    it('should return false for idle and non-existent sessions', async () => {
+      const sessionId = await sessionManager.create({ model: 'test-model' });
+      expect(sessionManager.isSessionRunning(sessionId)).toBe(false);
+      expect(sessionManager.isSessionRunning('non-existent')).toBe(false);
+    });
+  });
+
+  describe('registerAgent', () => {
+    it('should register a pre-built agent without overriding current session', async () => {
+      await sessionManager.create({ model: 'cli-model' });
+      const cliSessionId = sessionManager.sessionId();
+
+      const preBuiltAgent = createMockAgent({ model: 'ws-model', sessionId: 'ws-session' });
+      const registeredId = sessionManager.registerAgent(preBuiltAgent, { profile: 'ws' });
+
+      expect(registeredId).toBe('ws-session');
+      expect(sessionManager.sessionId()).toBe(cliSessionId); // current session unchanged
+      expect(sessionManager.getAgentBySessionId('ws-session')).toBe(preBuiltAgent);
+    });
+  });
+
+  describe('deleteSession', () => {
+    it('should delete session and return true', async () => {
+      const sessionId = await sessionManager.create({ model: 'test-model' });
+      expect(sessionManager.sessionCount()).toBe(1);
+
+      const deleted = sessionManager.deleteSession(sessionId);
+      expect(deleted).toBe(true);
+      expect(sessionManager.sessionCount()).toBe(0);
+      expect(sessionManager.getAgentBySessionId(sessionId)).toBeUndefined();
+    });
+
+    it('should return false for non-existent session', () => {
+      const deleted = sessionManager.deleteSession('non-existent');
+      expect(deleted).toBe(false);
+    });
+  });
+
+  describe('getStore', () => {
+    it('should return the session store', async () => {
+      await sessionManager.create({ model: 'test-model' });
+      const store = sessionManager.getStore();
+      expect(store).toBeInstanceOf(SessionStore);
+      expect(store.size()).toBe(1);
     });
   });
 
@@ -301,24 +270,19 @@ describe('SessionManager', () => {
     it('should return the message bus for a session', async () => {
       const sessionId = await sessionManager.create({ model: 'test-model' });
       const bus = sessionManager.getBus(sessionId);
-      expect(bus).toBeDefined();
-      expect(bus!.enqueue).toBeDefined();
+      expect(typeof bus?.enqueue).toBe('function');
     });
 
     it('should return undefined for non-existent session', () => {
-      const bus = sessionManager.getBus('non-existent');
-      expect(bus).toBeUndefined();
+      expect(sessionManager.getBus('non-existent')).toBeUndefined();
     });
   });
 
-  describe('isSessionRunning', () => {
-    it('should return false when session is not processing', async () => {
-      const sessionId = await sessionManager.create({ model: 'test-model' });
-      expect(sessionManager.isSessionRunning(sessionId)).toBe(false);
-    });
-
-    it('should return false for non-existent session', () => {
-      expect(sessionManager.isSessionRunning('non-existent')).toBe(false);
+  describe('getTaskManager', () => {
+    it('should return null when no task manager is configured', () => {
+      expect(sessionManager.getTaskManager()).toBeNull();
     });
   });
 });
+
+// SessionStore tests moved to session-store.test.ts

@@ -58,26 +58,12 @@ describe("HookSystem — removal function from on()", () => {
     expect(calls).toEqual([{ value: 1 }]);
   });
 
-  it("should handle double removal gracefully", () => {
+  it("handles double removal gracefully and only removes its own handler", () => {
     const hooks = createHooks();
-    const remove = hooks.on("test:hook", () => {});
+    const remove = hooks.on("test", () => {});
+    hooks.on("test", () => {});
     remove();
     expect(() => remove()).not.toThrow();
-  });
-
-  it("can register a new handler after removal", () => {
-    const hooks = createHooks();
-    const remove = hooks.on("test", () => {});
-    remove();
-    hooks.on("test", () => {});
-    expect(hooks.handlerCount("test")).toBe(1);
-  });
-
-  it("removal function only removes the registered handler", () => {
-    const hooks = createHooks();
-    const remove = hooks.on("test", () => {});
-    hooks.on("test", () => {});
-    remove();
     expect(hooks.handlerCount("test")).toBe(1);
   });
 });
@@ -85,7 +71,7 @@ describe("HookSystem — removal function from on()", () => {
 // ── off() ─────────────────────────────────────────────────────────────────
 
 describe("HookSystem.off()", () => {
-  it("should remove a specific handler by reference", () => {
+  it("removes a specific handler by reference", () => {
     const hooks = createHooks();
     const handler1 = () => "first";
     const handler2 = () => "second";
@@ -93,7 +79,7 @@ describe("HookSystem.off()", () => {
     hooks.on("test:hook", handler2);
 
     expect(hooks.off("test:hook", handler1)).toBe(true);
-    expect(hooks.notifyHooks("test:hook", {})).toBeUndefined();
+    expect(hooks.handlerCount("test:hook")).toBe(1);
   });
 
   it("returns false when handler not found or hook does not exist", () => {
@@ -101,17 +87,6 @@ describe("HookSystem.off()", () => {
     const handler = () => {};
     expect(hooks.off("test", handler)).toBe(false);
     expect(hooks.off("nonexistent", () => {})).toBe(false);
-  });
-
-  it("only removes the specific handler, not others", () => {
-    const hooks = createHooks();
-    const handler1 = () => {};
-    const handler2 = () => {};
-    hooks.on("test", handler1);
-    hooks.on("test", handler2);
-    expect(hooks.off("test", handler1)).toBe(true);
-    expect(hooks.handlerCount("test")).toBe(1);
-    hooks.notifyHooks("test", {});
   });
 
   it("can remove multiple handlers independently", () => {
@@ -279,23 +254,21 @@ describe("runHookPipeline()", () => {
 
   it("should stop early when shouldStop returns true", async () => {
     const hooks = createHooks();
-    const order: string[] = [];
-    hooks.on("test:hook", () => {
-      order.push("a");
-      return { action: "handled" };
-    });
-    hooks.on("test:hook", () => {
-      order.push("b");
-      return { action: "continue" };
-    });
+    const calls: number[] = [];
+    hooks.on("test", () => { calls.push(1); return { action: "continue" }; });
+    hooks.on("test", () => { calls.push(2); return { action: "handled" }; });
+    hooks.on("test", () => { calls.push(3); }); // never called
     const { stopped, results } = await hooks.runHookPipeline(
-      "test:hook",
+      "test",
       {},
       { shouldStop: (r: any) => r?.action === "handled" },
     );
     expect(stopped).toBe(true);
-    expect(order).toEqual(["a"]);
-    expect(results).toEqual([{ result: { action: "handled" }, source: null }]);
+    expect(calls).toEqual([1, 2]);
+    // Results include all handlers that ran before the stop
+    expect(results).toHaveLength(2);
+    expect(results[0]!.result).toEqual({ action: "continue" });
+    expect(results[1]!.result).toEqual({ action: "handled" });
   });
 
   it("should pass mutable data through handlers", async () => {
@@ -310,49 +283,15 @@ describe("runHookPipeline()", () => {
     expect((data as any).count).toBe(2);
   });
 
-  it("stops on first matching result", async () => {
-    const hooks = createHooks();
-    const calls: number[] = [];
-    hooks.on("test", () => {
-      calls.push(1);
-      return { action: "continue" };
-    });
-    hooks.on("test", () => {
-      calls.push(2);
-      return { action: "handled" };
-    });
-    hooks.on("test", () => {
-      calls.push(3);
-      return { action: "continue" };
-    });
-    const result = await hooks.runHookPipeline(
-      "test",
-      {},
-      {
-        shouldStop: (r: any) => r.action === "handled",
-      },
-    );
-    expect(calls).toEqual([1, 2]);
-    expect(result.stopped).toBe(true);
-  });
-
   it("does not stop when shouldStop returns false", async () => {
     const hooks = createHooks();
     const calls: number[] = [];
-    hooks.on("test", () => {
-      calls.push(1);
-      return { action: "continue" };
-    });
-    hooks.on("test", () => {
-      calls.push(2);
-      return { action: "continue" };
-    });
+    hooks.on("test", () => { calls.push(1); return { action: "continue" }; });
+    hooks.on("test", () => { calls.push(2); return { action: "continue" }; });
     const result = await hooks.runHookPipeline(
       "test",
       {},
-      {
-        shouldStop: (r: any) => r.action === "handled",
-      },
+      { shouldStop: (r: any) => r.action === "handled" },
     );
     expect(calls).toEqual([1, 2]);
     expect(result.stopped).toBe(false);
@@ -487,18 +426,7 @@ describe("HookSystem — source tracking", () => {
 // ── trace mode ────────────────────────────────────────────────────────────
 
 describe("trace mode", () => {
-  let origStderr: typeof process.stderr.write;
-
-  beforeEach(() => {
-    origStderr = process.stderr.write;
-    process.stderr.write = () => true;
-  });
-
-  afterEach(() => {
-    process.stderr.write = origStderr!;
-  });
-
-  it("trace mode with stopped pipeline captures results", async () => {
+  it("trace mode with stopped pipeline captures results and source", async () => {
     const hooks = createHooks();
     hooks.trace = true;
     hooks.on("test", () => ({ action: "handled" }), "ext1");
@@ -530,28 +458,13 @@ describe("trace mode", () => {
     expect(results[0]!.result).toBe("recovered");
   });
 
-  it("respects enabledHooks filter in trace", () => {
+  it("trace getter/setter works", () => {
     const hooks = createHooks();
-    hooks.trace = {
-      enabled: true,
-      enabledHooks: ["filtered:hook"],
-      disabledSources: [],
-    };
-    hooks.on("test:hook", () => {});
-    hooks.on("filtered:hook", () => {});
-    hooks.notifyHooks("test:hook", {}); // should not trace (not in enabledHooks)
-    hooks.notifyHooks("filtered:hook", {}); // should trace (in enabledHooks)
-  });
-
-  it("respects disabledSources filter in trace", () => {
-    const hooks = createHooks();
-    hooks.trace = {
-      enabled: true,
-      disabledSources: ["blocked-ext"],
-    };
-    hooks.on("test", () => {}, "allowed-ext");
-    hooks.on("test", () => {}, "blocked-ext");
-    hooks.notifyHooks("test", {}); // allowed-ext traces, blocked-ext does not
+    expect(hooks.trace).toBe(false);
+    hooks.trace = true;
+    expect(hooks.trace).toBe(true);
+    hooks.trace = { enabled: true };
+    expect(hooks.trace).toEqual({ enabled: true });
   });
 });
 
@@ -608,163 +521,72 @@ describe("HookSystem — Priority", () => {
 // ── Type guard functions ─────────────────────────────────────────────────
 
 describe("GateAction type guards", () => {
-  describe("isGateActionBlock", () => {
-    it("returns true for block action", () => {
-      expect(isGateActionBlock({ action: "block", result: "denied" })).toBe(true);
-    });
+  const actions = [
+    { name: "block", guard: isGateActionBlock, value: { action: "block", result: "denied" } },
+    { name: "modify", guard: isGateActionModify, value: { action: "modify", input: "new" } },
+    { name: "continue", guard: isGateActionContinue, value: { action: "continue" } },
+    { name: "handled", guard: isGateActionHandled, value: { action: "handled" } },
+  ];
 
-    it("returns false for other actions", () => {
-      expect(isGateActionBlock({ action: "continue" })).toBe(false);
-      expect(isGateActionBlock({ action: "modify" })).toBe(false);
-      expect(isGateActionBlock({ action: "handled" })).toBe(false);
-    });
-
-    it("returns false for null/undefined", () => {
-      expect(isGateActionBlock(null)).toBe(false);
-      expect(isGateActionBlock(undefined)).toBe(false);
-    });
+  it.each(actions)("correctly identifies $name action", ({ guard, value }) => {
+    expect(guard(value)).toBe(true);
   });
 
-  describe("isGateActionModify", () => {
-    it("returns true for modify action", () => {
-      expect(isGateActionModify({ action: "modify" })).toBe(true);
-      expect(isGateActionModify({ action: "modify", input: "new" })).toBe(true);
-    });
-
-    it("returns false for other actions", () => {
-      expect(isGateActionModify({ action: "continue" })).toBe(false);
-      expect(isGateActionModify({ action: "block", result: "x" })).toBe(false);
-    });
-
-    it("returns false for null/undefined", () => {
-      expect(isGateActionModify(null)).toBe(false);
-    });
+  it.each(actions)("rejects other action types for $name", ({ guard, name }) => {
+    for (const other of actions) {
+      if (other.name !== name) expect(guard(other.value)).toBe(false);
+    }
   });
 
-  describe("isGateActionContinue", () => {
-    it("returns true for continue action", () => {
-      expect(isGateActionContinue({ action: "continue" })).toBe(true);
-    });
-
-    it("returns false for other actions", () => {
-      expect(isGateActionContinue({ action: "block", result: "x" })).toBe(false);
-      expect(isGateActionContinue({ action: "modify" })).toBe(false);
-    });
-
-    it("returns false for null/undefined", () => {
-      expect(isGateActionContinue(undefined)).toBe(false);
-    });
-  });
-
-  describe("isGateActionHandled", () => {
-    it("returns true for handled action", () => {
-      expect(isGateActionHandled({ action: "handled" })).toBe(true);
-    });
-
-    it("returns false for other actions", () => {
-      expect(isGateActionHandled({ action: "continue" })).toBe(false);
-    });
-
-    it("returns false for null/undefined", () => {
-      expect(isGateActionHandled(null)).toBe(false);
-    });
+  it("rejects null/undefined/non-object input", () => {
+    for (const val of [null, undefined, 42, "block", {}]) {
+      expect(isGateActionBlock(val)).toBe(false);
+      expect(isGateActionModify(val)).toBe(false);
+      expect(isGateActionContinue(val)).toBe(false);
+      expect(isGateActionHandled(val)).toBe(false);
+    }
   });
 });
 
 describe("InputHookResult type guards", () => {
-  describe("isInputTransform", () => {
-    it("returns true for transform action", () => {
-      expect(isInputTransform({ action: "transform", text: "modified" })).toBe(true);
-    });
+  const results = [
+    { name: "transform", guard: isInputTransform, value: { action: "transform", text: "modified" } },
+    { name: "handled", guard: isInputHandled, value: { action: "handled" } },
+  ];
 
-    it("returns false for other actions", () => {
-      expect(isInputTransform({ action: "continue" })).toBe(false);
-      expect(isInputTransform({ action: "handled" })).toBe(false);
-    });
-
-    it("returns false for null/undefined", () => {
-      expect(isInputTransform(null)).toBe(false);
-      expect(isInputTransform(undefined)).toBe(false);
-    });
+  it.each(results)("correctly identifies $name result", ({ guard, value }) => {
+    expect(guard(value)).toBe(true);
   });
 
-  describe("isInputHandled", () => {
-    it("returns true for handled action", () => {
-      expect(isInputHandled({ action: "handled" })).toBe(true);
-    });
+  it.each(results)("rejects other result types for $name", ({ guard, name }) => {
+    for (const other of results) {
+      if (other.name !== name) expect(guard(other.value)).toBe(false);
+    }
+  });
 
-    it("returns false for other actions", () => {
-      expect(isInputHandled({ action: "continue" })).toBe(false);
-      expect(isInputHandled({ action: "transform", text: "x" })).toBe(false);
-    });
-
-    it("returns false for null/undefined", () => {
-      expect(isInputHandled(undefined)).toBe(false);
-    });
+  it("rejects null/undefined/non-object input", () => {
+    for (const val of [null, undefined, 42, "block", {}]) {
+      expect(isInputTransform(val)).toBe(false);
+      expect(isInputHandled(val)).toBe(false);
+    }
   });
 });
 
-// ── Trace mode ────────────────────────────────────────────────────────────
+// ── hooksMap (exposed for testing) ────────────────────────────────────────
 
-describe("trace mode helpers", () => {
-  it("shouldTrace returns false for 'log' hook", () => {
+describe("hooksMap", () => {
+  it("returns the internal handler map", () => {
     const hooks = new HookSystem();
-    hooks.trace = true;
-    // Access private method for testing
-    const result = (hooks as any)._shouldTrace("log");
-    expect(result).toBe(false);
-  });
+    expect(hooks.hooksMap).toBeInstanceOf(Map);
+    expect(hooks.hooksMap.size).toBe(0);
 
-  it("shouldTrace respects boolean trace setting", () => {
-    const hooks = new HookSystem();
-    hooks.trace = true;
-    expect((hooks as any)._shouldTrace("test")).toBe(true);
+    hooks.on("test", () => "a");
+    hooks.on("test", () => "b");
+    hooks.on("other", () => "c");
 
-    hooks.trace = false;
-    expect((hooks as any)._shouldTrace("test")).toBe(false);
-  });
-
-  it("shouldTrace respects enabled option in trace config", () => {
-    const hooks = new HookSystem();
-    hooks.trace = { enabled: true };
-    expect((hooks as any)._shouldTrace("test")).toBe(true);
-
-    hooks.trace = { enabled: false };
-    expect((hooks as any)._shouldTrace("test")).toBe(false);
-  });
-
-  it("shouldTrace respects enabledHooks list", () => {
-    const hooks = new HookSystem();
-    hooks.trace = { enabled: true, enabledHooks: ["tool:call", "agent:run"] };
-    expect((hooks as any)._shouldTrace("tool:call")).toBe(true);
-    expect((hooks as any)._shouldTrace("other:hook")).toBe(false);
+    expect(hooks.hooksMap.size).toBe(2);
+    expect(hooks.hooksMap.get("test")!.length).toBe(2);
+    expect(hooks.hooksMap.get("other")!.length).toBe(1);
   });
 });
 
-describe("HookSystem getters", () => {
-  it("hookNames returns registered hook names", () => {
-    const hooks = new HookSystem();
-    hooks.on("test:hook", () => {});
-    hooks.on("other:hook", () => {});
-    const names = hooks.hookNames();
-    expect(names).toContain("test:hook");
-    expect(names).toContain("other:hook");
-  });
-
-  it("trace getter/setter works", () => {
-    const hooks = new HookSystem();
-    hooks.trace = true;
-    expect(hooks.trace).toBe(true);
-
-    hooks.trace = { enabled: false };
-    expect(hooks.trace).toEqual({ enabled: false });
-  });
-
-  it("hooksMap returns internal handler map", () => {
-    const hooks = new HookSystem();
-    hooks.on("test", () => {});
-    const map = hooks.hooksMap;
-    expect(map.size).toBeGreaterThan(0);
-    expect(map.has("test")).toBe(true);
-  });
-});

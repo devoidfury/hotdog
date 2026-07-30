@@ -524,3 +524,32 @@ describe("formatToolResult", () => {
     expect(result).toContain("&lt;");
   });
 });
+
+describe("ToolResult.stop()", () => {
+  it("creates a result that signals loop stop", () => {
+    const { TOOL_STOP_LOOP } = require("../../src/core/extensions/tool-utils.ts");
+    const r = ToolResult.stop("waiting for input");
+    expect(r.success).toBe(true);
+    expect(r.output).toBe("waiting for input");
+    expect(r[TOOL_STOP_LOOP]).toBe(true);
+  });
+});
+
+describe("ToolResult.withStopLoop()", () => {
+  it("marks an existing result to stop the loop", () => {
+    const { TOOL_STOP_LOOP } = require("../../src/core/extensions/tool-utils.ts");
+    const r = ToolResult.ok("done").withStopLoop();
+    expect(r.success).toBe(true);
+    expect(r.output).toBe("done");
+    expect(r[TOOL_STOP_LOOP]).toBe(true);
+  });
+
+  it("is chainable", () => {
+    const { TOOL_STOP_LOOP } = require("../../src/core/extensions/tool-utils.ts");
+    const r = ToolResult.ok("output")
+      .withEntry("key", "value")
+      .withStopLoop();
+    expect(r.metadata!.get("key")).toBe("value");
+    expect(r[TOOL_STOP_LOOP]).toBe(true);
+  });
+});

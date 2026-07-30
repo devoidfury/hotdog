@@ -1,6 +1,6 @@
 // Tests for webui/server.ts — WebUI server creation and configuration.
 
-import { describe, it, expect } from "bun:test";
+import { describe, it, expect, afterEach } from "bun:test";
 import { createWebuiServer } from "../../src/extensions/webui/server.ts";
 
 function createMockCore(config: Record<string, unknown> = {}) {
@@ -124,6 +124,123 @@ describe("createWebuiServer", () => {
         const message = (e as Error).message;
         expect(message).not.toContain("missing required webui.maxAgeSecs");
       }
+    });
+  });
+
+  describe("HTTP endpoints", () => {
+    let server: ReturnType<typeof Bun.serve> | null = null;
+    let wsServer: { stopCleanupLoop: () => void } | null = null;
+    let baseUrl = "";
+
+    afterEach(async () => {
+      if (server) {
+        server.stop(true);
+        server = null;
+      }
+      if (wsServer) {
+        wsServer.stopCleanupLoop();
+        wsServer = null;
+      }
+    });
+
+    async function startServer() {
+      const core = createMockCore();
+      const result = await createWebuiServer(core, {
+        port: 0,
+        host: "0.0.0.0",
+        apiKey: "test-secret",
+        sessionTokenTtlMin: 60,
+      }, "/tmp/ui");
+
+      server = result.server;
+      wsServer = result.wsServer;
+      baseUrl = `http://127.0.0.1:${server.port}`;
+      return result;
+    }
+
+    it("serves frontend at /", async () => {
+      await startServer();
+      const res = await fetch(`${baseUrl}/`);
+      expect(res.status).toBe(200);
+      const text = await res.text();
+      expect(text).toContain("html");
+    });
+
+    it("returns 404 for unknown paths", async () => {
+      await startServer();
+      const res = await fetch(`${baseUrl}/unknown-path`);
+      expect(res.status).toBe(404);
+    });
+
+    it("POST /login with valid API key returns token", async () => {
+      await startServer();
+      const res = await fetch(`${baseUrl}/login`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ apiKey: "test-secret" }),
+      });
+      expect(res.status).toBe(200);
+      const data = await res.json();
+      expect(data.token).toBeDefined();
+      expect(typeof data.token).toBe("string");
+    });
+
+    it("POST /login with invalid API key returns 401", async () => {
+      await startServer();
+      const res = await fetch(`${baseUrl}/login`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ apiKey: "wrong-key" }),
+      });
+      expect(res.status).toBe(401);
+    });
+
+    it("GET /verify with valid token returns { valid: true }", async () => {
+      const result = await startServer();
+
+      // First get a token
+      const loginRes = await fetch(`${baseUrl}/login`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ apiKey: "test-secret" }),
+      });
+      const { token } = await loginRes.json();
+
+      // Verify the token
+      const verifyRes = await fetch(`${baseUrl}/verify?token=${token}`);
+      expect(verifyRes.status).toBe(200);
+      const data = await verifyRes.json();
+      expect(data.valid).toBe(true);
+    });
+
+    it("GET /verify with invalid token returns 401", async () => {
+      await startServer();
+      const res = await fetch(`${baseUrl}/verify?token=invalid-token`);
+      expect(res.status).toBe(401);
+      const data = await res.json();
+      expect(data.valid).toBe(false);
+    });
+
+    it("GET /verify without token returns 401", async () => {
+      await startServer();
+      const res = await fetch(`${baseUrl}/verify`);
+      expect(res.status).toBe(401);
+    });
+
+    it("GET /ws without token returns 401", async () => {
+      await startServer();
+      const res = await fetch(`${baseUrl}/ws`);
+      expect(res.status).toBe(401);
+      const data = await res.json();
+      expect(data.error).toContain("Token required");
+    });
+
+    it("GET /ws with invalid token returns 401", async () => {
+      await startServer();
+      const res = await fetch(`${baseUrl}/ws?token=invalid-token`);
+      expect(res.status).toBe(401);
+      const data = await res.json();
+      expect(data.error).toContain("Invalid token");
     });
   });
 });

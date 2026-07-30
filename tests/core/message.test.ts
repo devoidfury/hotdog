@@ -54,19 +54,15 @@ describe('Message.toJSON', () => {
     });
   });
 
-  it('serializes minimal message', () => {
+  it('serializes minimal message and omits null fields', () => {
     const msg = new Message({ role: 'user', content: 'Hi' });
     const json = msg.toJSON();
     expect(json).toEqual({ role: 'user', content: 'Hi' });
-  });
-
-  it('omits null fields from JSON', () => {
-    const msg = new Message({ role: 'user', content: 'Hi' });
-    const json = msg.toJSON();
     expect(json).not.toHaveProperty('reasoning_content');
     expect(json).not.toHaveProperty('tool_calls');
     expect(json).not.toHaveProperty('tool_call_id');
   });
+
 
   it('handles null content in JSON serialization', () => {
     const msg = new Message({ role: 'user', content: null });

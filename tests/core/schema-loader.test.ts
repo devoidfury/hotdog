@@ -14,12 +14,14 @@ import {
 } from "../../src/core/config/schema-loader.ts";
 
 describe("buildConfigSchema", () => {
-  it("returns a schema object with all keys compiled", () => {
+  it("returns a schema object with same keys as CONFIG_SCHEMA", () => {
     const schema = buildConfigSchema();
-    expect(Object.keys(schema)).toHaveLength(Object.keys(CONFIG_SCHEMA).length);
+    const schemaKeys = Object.keys(schema).sort();
+    const configKeys = Object.keys(CONFIG_SCHEMA).sort();
+    expect(schemaKeys).toEqual(configKeys);
     for (const [key, value] of Object.entries(schema)) {
       expect(Array.isArray(value.layers)).toBe(true);
-      expect(typeof value.type).toBe("string");
+      expect(value.type).toBeDefined();
     }
   });
 });

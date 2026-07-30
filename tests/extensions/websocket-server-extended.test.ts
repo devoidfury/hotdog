@@ -7,6 +7,7 @@ import { SessionRegistry, createWsServer } from "../../src/extensions/websocket/
 import { WebSocketChannel } from "../../src/extensions/websocket/websocket-channel.ts";
 import { C2S, S2C } from "../../src/extensions/websocket/protocol.ts";
 import { Agent } from "../../src/core/agent.ts";
+import { createWsMockCore, createWsMockAgentFactory, createWsMockWs } from "../mocks/websocket.ts";
 
 // ── SessionRegistry Extended Tests ───────────────────────────────────────────
 
@@ -118,7 +119,7 @@ describe("SessionRegistry Extended", () => {
   });
 
   describe("createChannel edge cases", () => {
-    function createMockWs() {
+    function createWsMockWs() {
       const messages: string[] = [];
       return {
         readyState: 1,
@@ -129,8 +130,8 @@ describe("SessionRegistry Extended", () => {
 
     it("creates multiple channels for same session", async () => {
       const result = await registry.create();
-      const ws1 = createMockWs();
-      const ws2 = createMockWs();
+      const ws1 = createWsMockWs();
+      const ws2 = createWsMockWs();
 
       const channel1 = registry.createChannel(result.sessionId, ws1);
       const channel2 = registry.createChannel(result.sessionId, ws2);
@@ -144,14 +145,14 @@ describe("SessionRegistry Extended", () => {
     });
 
     it("returns undefined for non-existent session", () => {
-      const ws = createMockWs();
+      const ws = createWsMockWs();
       const channel = registry.createChannel("non-existent", ws);
       expect(channel).toBeUndefined();
     });
   });
 
   describe("delete with channels", () => {
-    function createMockWs() {
+    function createWsMockWs() {
       const messages: string[] = [];
       return {
         readyState: 1,
@@ -162,7 +163,7 @@ describe("SessionRegistry Extended", () => {
 
     it("closes channels when deleting session", async () => {
       const result = await registry.create();
-      const ws = createMockWs();
+      const ws = createWsMockWs();
       const channel = registry.createChannel(result.sessionId, ws)!;
 
       const closeMock = mock(() => {});
@@ -235,71 +236,10 @@ describe("SessionRegistry Extended", () => {
 // ── createWsServer Message Routing Tests ──────────────────────────────────────
 
 describe("createWsServer Message Routing", () => {
-  function createMockCore() {
-    return {
-      hooks: {
-        notifyHooks: () => {},
-        notifyHooksAsync: async () => {},
-      },
-      config: {},
-      resolved: {
-        baseUrl: "http://localhost:8000",
-        apiKey: "test-key",
-        model: "test-model",
-        stream: true,
-        chatTimeout: 30,
-        maxRetries: 3,
-        maxIterations: 100,
-        contextLimit: 128000,
-        hideTools: false,
-        hideThinking: true,
-        showTokenUse: true,
-        profileName: "default",
-        modelRegistry: { "test-model": {} },
-      },
-      toolRegistry: {
-        getAll: () => [],
-        get: () => null,
-        register: () => {},
-      },
-      extensions: {
-        cleanup: async () => {},
-      },
-    } as any;
-  }
-
-  function createMockAgentFactory(): (config: { model?: string; sessionId?: string }) => Promise<any> {
-    return async (config: { model?: string; sessionId?: string }) => {
-      return {
-        sessionId: config.sessionId || "test",
-        model: "test-model",
-        profileName: "default",
-        modelRegistry: { "test-model": {} },
-        log: [],
-        sink: null,
-        cancel: () => {},
-        resetCancel: () => {},
-        run: async () => {},
-        executeCommand: async () => ({}),
-        serialize: () => ({}),
-        deserialize: () => {},
-      };
-    };
-  }
-
-  function createMockWs() {
-    const messages: string[] = [];
-    return {
-      readyState: 1,
-      send: (data: string) => { messages.push(data); },
-      messages,
-      close: mock(() => {}),
-    } as unknown as WebSocket & { messages: string[] };
-  }
 
   describe("AUTH message", () => {
     it("accepts valid auth token", () => {
-      const core = createMockCore();
+      const core = createWsMockCore();
       const authMiddleware = {
         validateToken: () => true,
         startCleanup: () => {},
@@ -309,16 +249,16 @@ describe("createWsServer Message Routing", () => {
       };
 
       const wsServer = createWsServer(core, {
-        buildAgent: createMockAgentFactory(),
+        buildAgent: createWsMockAgentFactory(),
         auth: authMiddleware,
       });
 
       // First create a session so there's something to attach to
-      const ws = createMockWs();
+      const ws = createWsMockWs();
       wsServer.onUpgrade({ url: "http://localhost/ws?token=valid" }, ws);
 
       // Now send AUTH message
-      const ws2 = createMockWs();
+      const ws2 = createWsMockWs();
       wsServer.onMessage(ws2, JSON.stringify({
         type: C2S.AUTH,
         token: "valid",
@@ -329,7 +269,7 @@ describe("createWsServer Message Routing", () => {
     });
 
     it("rejects invalid auth token", () => {
-      const core = createMockCore();
+      const core = createWsMockCore();
       const authMiddleware = {
         validateToken: () => false,
         startCleanup: () => {},
@@ -339,11 +279,11 @@ describe("createWsServer Message Routing", () => {
       };
 
       const wsServer = createWsServer(core, {
-        buildAgent: createMockAgentFactory(),
+        buildAgent: createWsMockAgentFactory(),
         auth: authMiddleware,
       });
 
-      const ws = createMockWs();
+      const ws = createWsMockWs();
       wsServer.onMessage(ws, JSON.stringify({
         type: C2S.AUTH,
         token: "invalid",
@@ -355,12 +295,12 @@ describe("createWsServer Message Routing", () => {
     });
 
     it("ignores AUTH when no auth middleware", () => {
-      const core = createMockCore();
+      const core = createWsMockCore();
       const wsServer = createWsServer(core, {
-        buildAgent: createMockAgentFactory(),
+        buildAgent: createWsMockAgentFactory(),
       });
 
-      const ws = createMockWs();
+      const ws = createWsMockWs();
       wsServer.onMessage(ws, JSON.stringify({
         type: C2S.AUTH,
         token: "any-token",
@@ -377,9 +317,9 @@ describe("createWsServer Message Routing", () => {
     let sessionId2: string;
 
     beforeEach(async () => {
-      const core = createMockCore();
+      const core = createWsMockCore();
       wsServer = createWsServer(core, {
-        buildAgent: createMockAgentFactory(),
+        buildAgent: createWsMockAgentFactory(),
       });
 
       const result1 = await wsServer.sessionRegistry.create({});
@@ -389,7 +329,7 @@ describe("createWsServer Message Routing", () => {
     });
 
     it("switches to existing session", () => {
-      const ws = createMockWs();
+      const ws = createWsMockWs();
       const typedWs = ws as WebSocket & { activeSessionId?: string; activeChannel?: WebSocketChannel };
       typedWs.activeSessionId = sessionId1;
 
@@ -406,7 +346,7 @@ describe("createWsServer Message Routing", () => {
     });
 
     it("does nothing for non-existent session", () => {
-      const ws = createMockWs();
+      const ws = createWsMockWs();
 
       wsServer.onMessage(ws, JSON.stringify({
         type: C2S.SWITCH_SESSION,
@@ -421,9 +361,9 @@ describe("createWsServer Message Routing", () => {
 
   describe("COMMAND message with slash prefix", () => {
     it("strips leading slash from command", async () => {
-      const core = createMockCore();
+      const core = createWsMockCore();
       const wsServer = createWsServer(core, {
-        buildAgent: createMockAgentFactory(),
+        buildAgent: createWsMockAgentFactory(),
       });
 
       const result = await wsServer.sessionRegistry.create({});
@@ -437,7 +377,7 @@ describe("createWsServer Message Routing", () => {
       };
 
       try {
-        const ws = createMockWs();
+        const ws = createWsMockWs();
         wsServer.onMessage(ws, JSON.stringify({
           type: C2S.COMMAND,
           sessionId: result.sessionId,
@@ -454,9 +394,9 @@ describe("createWsServer Message Routing", () => {
 
   describe("SEND message validation", () => {
     it("does not enqueue when sessionId is missing", async () => {
-      const core = createMockCore();
+      const core = createWsMockCore();
       const wsServer = createWsServer(core, {
-        buildAgent: createMockAgentFactory(),
+        buildAgent: createWsMockAgentFactory(),
       });
 
       const sessionManager = wsServer.sessionRegistry.getSessionManager();
@@ -465,7 +405,7 @@ describe("createWsServer Message Routing", () => {
       sessionManager.enqueue = async () => { enqueueCalled = true; };
 
       try {
-        const ws = createMockWs();
+        const ws = createWsMockWs();
         wsServer.onMessage(ws, JSON.stringify({
           type: C2S.SEND,
           content: "Hello",
@@ -479,9 +419,9 @@ describe("createWsServer Message Routing", () => {
     });
 
     it("does not enqueue when content is missing", async () => {
-      const core = createMockCore();
+      const core = createWsMockCore();
       const wsServer = createWsServer(core, {
-        buildAgent: createMockAgentFactory(),
+        buildAgent: createWsMockAgentFactory(),
       });
 
       const result = await wsServer.sessionRegistry.create({});
@@ -491,7 +431,7 @@ describe("createWsServer Message Routing", () => {
       sessionManager.enqueue = async () => { enqueueCalled = true; };
 
       try {
-        const ws = createMockWs();
+        const ws = createWsMockWs();
         wsServer.onMessage(ws, JSON.stringify({
           type: C2S.SEND,
           sessionId: result.sessionId,
@@ -507,9 +447,9 @@ describe("createWsServer Message Routing", () => {
 
   describe("CANCEL message", () => {
     it("calls interrupt instead of cancel", async () => {
-      const core = createMockCore();
+      const core = createWsMockCore();
       const wsServer = createWsServer(core, {
-        buildAgent: createMockAgentFactory(),
+        buildAgent: createWsMockAgentFactory(),
       });
 
       const result = await wsServer.sessionRegistry.create({});
@@ -520,7 +460,7 @@ describe("createWsServer Message Routing", () => {
       sessionManager.interrupt = async (_sessionId: string) => { interruptCalled = true; };
 
       try {
-        const ws = createMockWs();
+        const ws = createWsMockWs();
         wsServer.onMessage(ws, JSON.stringify({
           type: C2S.CANCEL,
           sessionId: result.sessionId,
@@ -535,7 +475,7 @@ describe("createWsServer Message Routing", () => {
 
   describe("onUpgrade with auth", () => {
     it("accepts valid token on upgrade", () => {
-      const core = createMockCore();
+      const core = createWsMockCore();
       const authMiddleware = {
         validateToken: () => true,
         startCleanup: () => {},
@@ -545,11 +485,11 @@ describe("createWsServer Message Routing", () => {
       };
 
       const wsServer = createWsServer(core, {
-        buildAgent: createMockAgentFactory(),
+        buildAgent: createWsMockAgentFactory(),
         auth: authMiddleware,
       });
 
-      const ws = createMockWs();
+      const ws = createWsMockWs();
       wsServer.onUpgrade({ url: "http://localhost/ws?token=valid" }, ws);
 
       // Should not send authError or authRequired
@@ -561,7 +501,7 @@ describe("createWsServer Message Routing", () => {
     });
 
     it("closes connection on invalid token", () => {
-      const core = createMockCore();
+      const core = createWsMockCore();
       const authMiddleware = {
         validateToken: () => false,
         startCleanup: () => {},
@@ -571,11 +511,11 @@ describe("createWsServer Message Routing", () => {
       };
 
       const wsServer = createWsServer(core, {
-        buildAgent: createMockAgentFactory(),
+        buildAgent: createWsMockAgentFactory(),
         auth: authMiddleware,
       });
 
-      const ws = createMockWs();
+      const ws = createWsMockWs();
       wsServer.onUpgrade({ url: "http://localhost/ws?token=invalid" }, ws);
 
       const msgs = (ws as any).messages.map((m: string) => JSON.parse(m));
@@ -588,7 +528,7 @@ describe("createWsServer Message Routing", () => {
 // ── replaySessionHistory Tests ────────────────────────────────────────────────
 
 describe("replaySessionHistory", () => {
-  function createMockWs() {
+  function createWsMockWs() {
     const messages: string[] = [];
     return {
       readyState: 1,
@@ -645,7 +585,7 @@ describe("replaySessionHistory", () => {
     const result = await wsServer.sessionRegistry.create({});
 
     // Replay by switching to the session
-    const ws = createMockWs();
+    const ws = createWsMockWs();
     const typedWs = ws as WebSocket & { activeSessionId?: string; activeChannel?: WebSocketChannel };
     typedWs.activeSessionId = result.sessionId;
 
@@ -711,7 +651,7 @@ describe("replaySessionHistory", () => {
 
     const result = await wsServer.sessionRegistry.create({});
 
-    const ws = createMockWs();
+    const ws = createWsMockWs();
     const typedWs = ws as WebSocket & { activeSessionId?: string; activeChannel?: WebSocketChannel };
     typedWs.activeSessionId = result.sessionId;
 
@@ -787,7 +727,7 @@ describe("replaySessionHistory", () => {
 
     const result = await wsServer.sessionRegistry.create({});
 
-    const ws = createMockWs();
+    const ws = createWsMockWs();
     const typedWs = ws as WebSocket & { activeSessionId?: string; activeChannel?: WebSocketChannel };
     typedWs.activeSessionId = result.sessionId;
 
@@ -849,7 +789,7 @@ describe("replaySessionHistory", () => {
 
     const result = await wsServer.sessionRegistry.create({});
 
-    const ws = createMockWs();
+    const ws = createWsMockWs();
     const typedWs = ws as WebSocket & { activeSessionId?: string; activeChannel?: WebSocketChannel };
     typedWs.activeSessionId = result.sessionId;
 
@@ -905,7 +845,7 @@ describe("replaySessionHistory", () => {
 
     const result = await wsServer.sessionRegistry.create({});
 
-    const ws = createMockWs();
+    const ws = createWsMockWs();
     const typedWs = ws as WebSocket & { activeSessionId?: string; activeChannel?: WebSocketChannel };
     typedWs.activeSessionId = result.sessionId;
 
@@ -918,5 +858,231 @@ describe("replaySessionHistory", () => {
     const userMsg = msgs.find((m: any) => m.type === S2C.USER_MESSAGE);
     expect(userMsg).toBeDefined();
     expect(userMsg.content).toBe("Hello");
+  });
+});
+
+// ── Message Handler Tests for Log Operations ─────────────────────────────────
+
+describe("WebSocket message handlers - log operations", () => {
+  function createWsMockWs() {
+    const messages: string[] = [];
+    return {
+      readyState: 1,
+      send: (data: string) => { messages.push(data); },
+      messages,
+      close: mock(() => {}),
+    } as unknown as WebSocket;
+  }
+
+  function createWsMockCore() {
+    return {
+      hooks: { notifyHooks: mock(() => {}), notifyHooksAsync: mock(async () => {}) },
+      config: {},
+      resolved: {
+        baseUrl: "http://localhost:8000",
+        apiKey: "test-key",
+        model: "test-model",
+        stream: true,
+        chatTimeout: 30,
+        maxRetries: 3,
+        maxIterations: 100,
+        hideTools: false,
+        hideThinking: true,
+        showTokenUse: true,
+        profileName: "default",
+        modelRegistry: {},
+      },
+      toolRegistry: { getAll: () => [], get: () => null, register: mock(() => {}) },
+      extensions: { cleanup: mock(async () => {}) },
+    } as any;
+  }
+
+  describe("LIST_LOGS", () => {
+    it("does not crash when handling LIST_LOGS message", () => {
+      const mockAgent = {
+        sessionId: "test",
+        model: "test-model",
+        profileName: "default",
+        modelRegistry: {},
+        log: [],
+        sink: null,
+        cancel: mock(() => {}),
+        resetCancel: mock(() => {}),
+        run: mock(async () => {}),
+        executeCommand: mock(async () => ({})),
+        serialize: () => ({}),
+        deserialize: () => {},
+      };
+
+      const core = createWsMockCore();
+      const wsServer = createWsServer(core, {
+        buildAgent: async () => mockAgent,
+      });
+
+      const ws = createWsMockWs();
+      // Should not throw
+      expect(() => {
+        wsServer.onMessage(ws, JSON.stringify({ type: C2S.LIST_LOGS }));
+      }).not.toThrow();
+    });
+  });
+
+  describe("VIEW_LOG", () => {
+    it("sends error when logId is missing", () => {
+      const mockAgent = {
+        sessionId: "test",
+        model: "test-model",
+        profileName: "default",
+        modelRegistry: {},
+        log: [],
+        sink: null,
+        cancel: mock(() => {}),
+        resetCancel: mock(() => {}),
+        run: mock(async () => {}),
+        executeCommand: mock(async () => ({})),
+        serialize: () => ({}),
+        deserialize: () => {},
+      };
+
+      const core = createWsMockCore();
+      const wsServer = createWsServer(core, {
+        buildAgent: async () => mockAgent,
+      });
+
+      const ws = createWsMockWs();
+      wsServer.onMessage(ws, JSON.stringify({ type: C2S.VIEW_LOG }));
+
+      // No message sent when logId is missing
+      expect(ws.messages.length).toBe(0);
+    });
+  });
+
+  describe("DELETE_LOG", () => {
+    it("sends error when log not found", async () => {
+      const mockAgent = {
+        sessionId: "test",
+        model: "test-model",
+        profileName: "default",
+        modelRegistry: {},
+        log: [],
+        sink: null,
+        cancel: mock(() => {}),
+        resetCancel: mock(() => {}),
+        run: mock(async () => {}),
+        executeCommand: mock(async () => ({})),
+        serialize: () => ({}),
+        deserialize: () => {},
+      };
+
+      const core = createWsMockCore();
+      const wsServer = createWsServer(core, {
+        buildAgent: async () => mockAgent,
+      });
+
+      const ws = createWsMockWs();
+      wsServer.onMessage(ws, JSON.stringify({ type: C2S.DELETE_LOG, logId: "non-existent-log" }));
+
+      // Wait for async operation
+      await new Promise(r => setTimeout(r, 50));
+
+      const msgs = ws.messages.map(m => JSON.parse(m));
+      const errorMsg = msgs.find((m: any) => m.type === "error");
+      expect(errorMsg).toBeDefined();
+      expect(errorMsg.message).toContain("not found");
+    });
+  });
+
+  describe("Unknown message type", () => {
+    it("sends error for unknown message type", () => {
+      const mockAgent = {
+        sessionId: "test",
+        model: "test-model",
+        profileName: "default",
+        modelRegistry: {},
+        log: [],
+        sink: null,
+        cancel: mock(() => {}),
+        resetCancel: mock(() => {}),
+        run: mock(async () => {}),
+        executeCommand: mock(async () => ({})),
+        serialize: () => ({}),
+        deserialize: () => {},
+      };
+
+      const core = createWsMockCore();
+      const wsServer = createWsServer(core, {
+        buildAgent: async () => mockAgent,
+      });
+
+      const ws = createWsMockWs();
+      wsServer.onMessage(ws, JSON.stringify({ type: "unknown-message-type" }));
+
+      const msgs = ws.messages.map(m => JSON.parse(m));
+      const errorMsg = msgs.find((m: any) => m.type === "error");
+      expect(errorMsg).toBeDefined();
+      expect(errorMsg.message).toContain("Unknown message type");
+    });
+  });
+
+  describe("attachToMostRecentSession", () => {
+    it("creates new session when no existing sessions", () => {
+      const mockAgent = {
+        sessionId: "new-session",
+        model: "test-model",
+        profileName: "default",
+        modelRegistry: { "test-model": {} },
+        log: [],
+        sink: null,
+        cancel: mock(() => {}),
+        resetCancel: mock(() => {}),
+        run: mock(async () => {}),
+        executeCommand: mock(async () => ({})),
+        serialize: () => ({}),
+        deserialize: () => {},
+      };
+
+      const core = createWsMockCore();
+      const wsServer = createWsServer(core, {
+        buildAgent: async () => mockAgent,
+      });
+
+      const ws = createWsMockWs();
+      // CONNECTION_OPEN with no sessionId triggers attachToMostRecentSession
+      wsServer.onMessage(ws, JSON.stringify({ type: C2S.CONNECTION_OPEN }));
+
+      // Session should be created asynchronously
+      expect(wsServer.sessionRegistry.size).toBe(0); // Async, not created yet in sync test
+    });
+
+    it("does not crash when handling CONNECTION_OPEN with existing sessions", async () => {
+      const mockAgent = {
+        sessionId: "test",
+        model: "test-model",
+        profileName: "default",
+        modelRegistry: { "test-model": {} },
+        log: [],
+        sink: null,
+        cancel: mock(() => {}),
+        resetCancel: mock(() => {}),
+        run: mock(async () => {}),
+        executeCommand: mock(async () => ({})),
+        serialize: () => ({}),
+        deserialize: () => {},
+      };
+
+      const core = createWsMockCore();
+      const wsServer = createWsServer(core, {
+        buildAgent: async () => mockAgent,
+      });
+
+      // Create a session
+      await wsServer.sessionRegistry.create({});
+
+      const ws = createWsMockWs();
+      // Should not throw
+      expect(() => {
+        wsServer.onMessage(ws, JSON.stringify({ type: C2S.CONNECTION_OPEN }));
+      }).not.toThrow();
+    });
   });
 });

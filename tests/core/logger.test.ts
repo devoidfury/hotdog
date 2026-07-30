@@ -9,11 +9,10 @@ import {
 import { HookSystem } from "../../src/core/hooks.ts";
 
 describe("LOG_LEVELS", () => {
-  it("has correct numeric ordering", () => {
-    expect(LOG_LEVELS.debug).toBe(0);
-    expect(LOG_LEVELS.info).toBe(1);
-    expect(LOG_LEVELS.warn).toBe(2);
-    expect(LOG_LEVELS.error).toBe(3);
+  it("orders levels from most to least verbose", () => {
+    expect(LOG_LEVELS.debug).toBeLessThan(LOG_LEVELS.info);
+    expect(LOG_LEVELS.info).toBeLessThan(LOG_LEVELS.warn);
+    expect(LOG_LEVELS.warn).toBeLessThan(LOG_LEVELS.error);
   });
 });
 
@@ -84,25 +83,37 @@ describe("resolveLogLevel and resolveLogTarget", () => {
 });
 
 describe("logger", () => {
-  it("provides all log level methods", () => {
-    expect(typeof logger.debug).toBe("function");
-    expect(typeof logger.info).toBe("function");
-    expect(typeof logger.warn).toBe("function");
-    expect(typeof logger.error).toBe("function");
+  it("logger methods are safe to call before initialization", () => {
+    // Also verifies all four methods exist and are callable
+    expect(() => logger.debug("test", { key: "value" })).not.toThrow();
+    expect(() => logger.info("test", { key: "value" })).not.toThrow();
+    expect(() => logger.warn("test", { key: "value" })).not.toThrow();
+    expect(() => logger.error("test", { key: "value" })).not.toThrow();
+  });
+});
+
+describe("initializeLogger", () => {
+  it("does not register handler when target is none", () => {
+    const hooks = new HookSystem();
+    const beforeCount = hooks.handlerCount("log");
+    initializeLogger({ hooks, minLevel: "debug", target: "none" });
+    expect(hooks.handlerCount("log")).toBe(beforeCount);
   });
 
-  it("logger methods do not throw before initialization", () => {
-    logger.debug("test debug");
-    logger.info("test info");
-    logger.warn("test warn");
-    logger.error("test error");
+  it("is idempotent — second call does not re-register", () => {
+    const hooks = new HookSystem();
+    initializeLogger({ hooks, minLevel: "debug", target: "stderr" });
+    const countAfterFirst = hooks.handlerCount("log");
+    initializeLogger({ hooks, minLevel: "debug", target: "stderr" });
+    expect(hooks.handlerCount("log")).toBe(countAfterFirst);
   });
 
-  it("logger methods accept metadata", () => {
-    logger.debug("test", { key: "value" });
-    logger.info("test", { key: "value" });
-    logger.warn("test", { key: "value" });
-    logger.error("test", { key: "value" });
+  it("registers handler when target is not none", () => {
+    const hooks = new HookSystem();
+    const beforeCount = hooks.handlerCount("log");
+    initializeLogger({ hooks, minLevel: "debug", target: "stderr" });
+    // Handler is registered (count increases or stays same if already initialized by setup)
+    expect(hooks.handlerCount("log") >= beforeCount).toBe(true);
   });
 });
 

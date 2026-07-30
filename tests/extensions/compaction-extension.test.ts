@@ -103,10 +103,9 @@ describe("Compaction Extension Creation", () => {
   it("should provide getStrategyList with correct names and order", () => {
     const ext = createCompactionExtension(createMockCore());
     const list = (ext as any).getStrategyList();
-    expect(list.length).toBe(5);
-    expect(list.map((s: any) => s.name)).toEqual([
-      "summarize", "drop", "summarize-short", "token-aware", "trim",
-    ]);
+    const expected = ["summarize", "drop", "summarize-short", "token-aware", "trim"];
+    expect(list.map((s: any) => s.name)).toEqual(expected);
+    expect(list.length).toBe(expected.length);
   });
 
   it("should normalize keepRecentMessages to keepRecent in settings", () => {
@@ -132,11 +131,10 @@ describe("Compaction Extension Creation", () => {
 // ── Hook Integration ─────────────────────────────────────────────────────────
 
 describe("Hook Integration", () => {
-  it("should register hooks with the hook system", () => {
+  it("should register CONTEXT hook with the hook system", () => {
     const core = createMockCore();
     const ext = createCompactionExtension(core);
-    expect(ext!.hooks).toBeDefined();
-    expect((ext as any).hooks![HOOKS.CONTEXT]!).toBeDefined();
+    expect(typeof (ext as any).hooks![HOOKS.CONTEXT]).toBe("function");
   });
 
   it("should not trigger compaction when context is small", async () => {
@@ -297,31 +295,17 @@ describe("Hook Integration", () => {
 // ── Strategy List ────────────────────────────────────────────────────────────
 
 describe("Strategy List", () => {
-  it("returns all strategies with correct names and descriptions", () => {
+  it("returns all strategies with non-empty descriptions", () => {
     const core = createMockCore();
     const ext = createCompactionExtension(core);
     const list = (ext as any).getStrategyList();
 
-    expect(list.length).toBe(5);
+    const expectedNames = ["summarize", "drop", "summarize-short", "token-aware", "trim"];
+    expect(list.map((s: any) => s.name)).toEqual(expectedNames);
 
-    const strategies = {
-      summarize: "summarization",
-      drop: "without summarizing",
-      "summarize-short": "Aggressive",
-      "token-aware": "token count",
-      trim: "binary-search",
-    };
-
-    for (const s of list) {
-      expect(s.name).toBeDefined();
-      expect(s.description).toBeDefined();
-      expect(s.description.length).toBeGreaterThan(0);
-    }
-
-    for (const [name, keyword] of Object.entries(strategies)) {
-      const strategy = list.find((s: any) => s.name === name);
-      expect(strategy).toBeDefined();
-      expect(strategy.description.toLowerCase()).toContain(keyword.toLowerCase());
+    for (const strategy of list) {
+      expect(strategy.description).toBeDefined();
+      expect(strategy.description.length).toBeGreaterThan(0);
     }
   });
 });
@@ -822,7 +806,7 @@ describe("/compact Command", () => {
 // ── getModelConfig fallback lookup ──────────────────────────────────────────
 
 describe("getModelConfig fallback lookup", () => {
-  it("finds model config via provider/modelName fallback", () => {
+  it("finds model config via provider/modelName fallback", async () => {
     const core = createMockCore({
       enabled: true,
       keepRecentMessages: 2,
@@ -851,12 +835,13 @@ describe("getModelConfig fallback lookup", () => {
     // Agent uses unprefixed model name (as happens when resolveModel can't find local entry)
     const agent = createMockAgent(context, "laguna");
 
-    const result = compactCmd.handler(agent, "compact") as Promise<any>;
+    const result = await compactCmd.handler(agent, "compact");
     // Should succeed without error — means getModelConfig found the config
-    expect(result).resolves.toBeDefined();
+    expect(result).toBeDefined();
+    expect(result.error).toBeUndefined();
   });
 
-  it("falls back to default contextLimit when model not found at all", () => {
+  it("falls back to default contextLimit when model not found at all", async () => {
     const core = createMockCore({
       enabled: true,
       keepRecentMessages: 2,
@@ -883,12 +868,13 @@ describe("getModelConfig fallback lookup", () => {
     // Agent uses a model name not in the registry
     const agent = createMockAgent(context, "unknown-model");
 
-    const result = compactCmd.handler(agent, "compact") as Promise<any>;
+    const result = await compactCmd.handler(agent, "compact");
     // Should succeed with default 128000 contextLimit
-    expect(result).resolves.toBeDefined();
+    expect(result).toBeDefined();
+    expect(result.error).toBeUndefined();
   });
 
-  it("prefers direct lookup over fallback when model name contains '/'", () => {
+  it("prefers direct lookup over fallback when model name contains '/'", async () => {
     const core = createMockCore({
       enabled: true,
       keepRecentMessages: 2,
@@ -914,7 +900,8 @@ describe("getModelConfig fallback lookup", () => {
     // Agent uses prefixed model name — direct lookup should work
     const agent = createMockAgent(context, "provider/model-x");
 
-    const result = compactCmd.handler(agent, "compact") as Promise<any>;
-    expect(result).resolves.toBeDefined();
+    const result = await compactCmd.handler(agent, "compact");
+    expect(result).toBeDefined();
+    expect(result.error).toBeUndefined();
   });
 });

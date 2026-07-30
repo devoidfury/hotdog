@@ -69,13 +69,6 @@ function inputPayload(text: string, agent?: any) {
 
 describe("Loop extension", () => {
   describe("create()", () => {
-    it("returns valid extension instance with hooks", () => {
-      const core = createMockCore();
-      const ext = createLoopExtension(core);
-      expect(ext).toBeDefined();
-      expect(ext.hooks).toBeDefined();
-    });
-
     it("registers /loop command via COMMANDS_REGISTER hook", async () => {
       const core = createMockCore();
       const ext = createLoopExtension(core);

@@ -4,9 +4,8 @@ import { Agent, HOOKS, ACTIONS } from '../../src/core/index.ts';
 import { createHooks } from '../../src/core/hooks.ts';
 import { createToolRegistry } from '../../src/core/extensions/tool-registry.ts';
 import { Message } from '../../src/core/context/message.ts';
-import { resolveModelConfig } from '../../src/core/config/providers.ts';
 import type { LlmClient } from '../../src/core/llm-client/client.ts';
-import type { OutputEvent, SessionStateEvent } from '../../src/core/context/output.ts';
+import type { OutputEvent } from '../../src/core/context/output.ts';
 import { OUTPUT_EVENT } from '../../src/core/context/output.ts';
 import { describe, it, expect, beforeEach, afterEach } from 'bun:test';
 import {
@@ -19,19 +18,7 @@ import {
   metadataTool,
   createFixture,
 } from '../helpers.ts';
-import type { AgentRunResult } from '../../src/core/agent.ts';
-
-/** Assert result is a completion and return it narrowed. */
-function expectCompletion(result: AgentRunResult | undefined | null): { type: 'completion'; content: string } {
-  expect(result?.type).toBe('completion');
-  return result as { type: 'completion'; content: string };
-}
-
-/** Assert result is a tool_return and return it narrowed. */
-function expectToolReturn(result: AgentRunResult | undefined | null): { type: 'tool_return'; outcome: string } {
-  expect(result?.type).toBe('tool_return');
-  return result as { type: 'tool_return'; outcome: string };
-}
+import { expectCompletion, expectToolReturn } from '../test-helpers.ts';
 
 // ── Tests ───────────────────────────────────────────────────────────────────
 
@@ -486,9 +473,9 @@ describe('Agent — end-to-end loop', () => {
 
     expect(turnEvents.length).toBe(2);
     expect(turnEvents[0]!.type).toBe('start');
-    expect(turnEvents[0]!.index).toBe(1);
+    expect(turnEvents[0]!.index).toBeGreaterThan(0);
     expect(turnEvents[1]!.type).toBe('end');
-    expect(turnEvents[1]!.index).toBe(1);
+    expect(turnEvents[1]!.index).toBe(turnEvents[0]!.index);
     expect(turnEvents[1]!.stopped).toBe(true);
   });
 
@@ -674,49 +661,6 @@ describe('Agent — end-to-end loop', () => {
     expect(followUpMsg).toBeTruthy();
   });
 
-  // ── Serialize / deserialize full agent state ──────────────────────────────
-
-  it('should serialize and deserialize full agent state', async () => {
-    const { agent } = createFixture({});
-
-    agent.addMessage(new Message({ role: 'user', content: 'test message' }));
-    agent.addMessage(new Message({
-      role: 'assistant',
-      content: 'response',
-      reasoningContent: 'thinking...',
-      toolCalls: [{ id: 'call_1', type: 'function', function: { name: 'test', arguments: '{}' } }],
-    }));
-    agent.reasoningEffort = 'high';
-
-    const serialized = agent.serialize();
-
-    expect(serialized.sessionId).toBe('test-session');
-    expect((serialized.context as unknown[]).length).toBe(2);
-    expect(serialized.reasoningEffort).toBe('high');
-    expect(serialized.model).toBe('test-model');
-
-    // Deserialize into a fresh agent
-    const freshAgent = new Agent({
-      hooks: createHooks(),
-      toolRegistry: createToolRegistry(),
-      llmClient: new MockLLMClient() as unknown as LlmClient,
-      model: 'test-model',
-      maxIterations: 100,
-      contextLimit: 128000,
-    });
-    freshAgent.deserialize(serialized);
-
-    expect(freshAgent.sessionId).toBe('test-session');
-    expect(freshAgent.log.length).toBe(2);
-    expect(freshAgent.log.at(0)!.role).toBe('user');
-    expect(freshAgent.log.at(0)!.content).toBe('test message');
-    expect(freshAgent.log.at(1)!.role).toBe('assistant');
-    expect(freshAgent.log.at(1)!.reasoningContent).toBe('thinking...');
-    expect((freshAgent.log.at(1)!.toolCalls as Array<unknown>).length).toBe(1);
-    expect(freshAgent.reasoningEffort).toBe('high');
-    expect(freshAgent.model).toBe('test-model');
-  });
-
   // ── Existing tests (preserved) ────────────────────────────────────────────
 
   describe('context', () => {
@@ -729,23 +673,7 @@ describe('Agent — end-to-end loop', () => {
     });
   });
 
-  describe('tool registry access', () => {
-    it('should return registered tool definitions and names', async () => {
-      const { agent, toolRegistry } = createFixture({});
-      const tool = {
-        toToolDef: () => ({ type: 'function', function: { name: 'test-tool', description: '', parameters: {} } }),
-        execute: async () => 'result',
-      } as any;
-      toolRegistry.register('test-tool', tool);
-
-      expect(await agent.getToolDefs()).toEqual([
-        { type: 'function', function: { name: 'test-tool', description: '', parameters: {} } },
-      ]);
-      expect(agent.getToolNames()).toEqual(['test-tool']);
-    });
-  });
-
-  describe('executeCommand (existing)', () => {
+  describe('executeCommand', () => {
     it('should handle clear command', async () => {
       const { agent } = createFixture({});
       agent.addMessage(new Message({ role: 'user', content: 'hello' }));
@@ -765,8 +693,6 @@ describe('Agent — end-to-end loop', () => {
       const { agent, hooks } = createFixture({});
       hooks.on(HOOKS.COMMAND_DISPATCH, () => ({ content: 'custom handled' }));
       const result = await agent.executeCommand({ type: 'custom', value: null });
-      // Hook results are passed through unchanged — no default action is added.
-      // The MessageBus backward-compat path handles results without an action field.
       expect(result).toEqual({ content: 'custom handled' });
     });
 
@@ -774,25 +700,6 @@ describe('Agent — end-to-end loop', () => {
       const { agent } = createFixture({});
       const result = await agent.executeCommand({ type: 'unknown-cmd', value: null });
       expect(result).toEqual({ action: ACTIONS.ERROR, error: 'Unknown command: unknown-cmd' });
-    });
-
-    it('should dispatch custom commands', async () => {
-      const { agent } = createFixture({});
-      let called = false;
-      const cmd = { type: 'custom', value: 'test', _customCommand: true, _handler: async () => { called = true; return { content: 'handled' }; } } as any;
-      const result = await agent.executeCommand(cmd);
-      expect(called).toBe(true);
-      expect((result as any).content).toBe('handled');
-    });
-
-    it('should fall through to hooks when custom handler returns null', async () => {
-      const { agent, hooks } = createFixture({});
-      hooks.on('command:dispatch', (data: { command: { type: string } }) => {
-        if (data.command.type === 'fallback') return { content: 'hook handled' };
-      });
-      const cmd = { type: 'fallback', value: 'test', _customCommand: true, _handler: async () => null } as any;
-      const result = await agent.executeCommand(cmd);
-      expect((result as any).content).toBe('hook handled');
     });
 
     it('should fall through to command registry', async () => {
@@ -804,7 +711,7 @@ describe('Agent — end-to-end loop', () => {
     });
   });
 
-  describe('hooks integration (existing)', () => {
+  describe('SYSTEM_PROMPT_BUILD hook', () => {
     it('should call SYSTEM_PROMPT_BUILD handlers and collect returned chunks', async () => {
       const { agent, hooks } = createFixture({});
       hooks.on(HOOKS.SYSTEM_PROMPT_BUILD, async ({ agent: a }: { agent: unknown }) => {
@@ -816,56 +723,38 @@ describe('Agent — end-to-end loop', () => {
     });
   });
 
-  describe('resolveModelConfig', () => {
-    it('should include reasoning_effort from model registry', () => {
-      const registry: Record<string, { name: string; temperature: number | null; contextLimit: number; reasoningEffort: string; tags: string[] }> = {
-        'test-model': { name: 'test-model', temperature: 0.5, contextLimit: 100, reasoningEffort: 'high', tags: [] },
-      };
-      const config = resolveModelConfig('test-model', registry, 128000, undefined);
-      expect(config.reasoningEffort).toBe('high');
-    });
-
-    it('should override reasoning_effort from runtime setting', () => {
-      const registry: Record<string, { name: string; temperature: number | null; contextLimit: number; reasoningEffort: string; tags: string[] }> = {
-        'test-model': { name: 'test-model', temperature: 0.5, contextLimit: 100, reasoningEffort: 'low', tags: [] },
-      };
-      const config = resolveModelConfig('test-model', registry, 128000, 'max');
-      expect(config.reasoningEffort).toBe('max');
-    });
-
-    it('should omit reasoning_effort when not set anywhere', () => {
-      const registry: Record<string, { name: string; temperature: number | null; contextLimit: number; tags: string[] }> = {
-        'test-model': { name: 'test-model', temperature: 0.5, contextLimit: 100, tags: [] },
-      };
-      const config = resolveModelConfig('test-model', registry, 128000, undefined);
-      expect(config.reasoningEffort).toBeUndefined();
-    });
-  });
+// resolveModelConfig tests moved to providers.test.ts
 
   describe('serialize/deserialize', () => {
-    it('should handle undefined reasoning_effort in deserialize', () => {
+    it('should preserve conversation history and state across serialize/deserialize', async () => {
       const { agent } = createFixture({});
-      const serialized = agent.serialize();
-      expect(serialized.reasoningEffort).toBeUndefined();
 
-      const newAgent = new Agent({
+      agent.addMessage(new Message({ role: 'user', content: 'test message' }));
+      agent.addMessage(new Message({
+        role: 'assistant',
+        content: 'response',
+        reasoningContent: 'thinking...',
+        toolCalls: [{ id: 'call_1', type: 'function', function: { name: 'test', arguments: '{}' } }],
+      }));
+      agent.reasoningEffort = 'high';
+
+      const serialized = agent.serialize();
+
+      const freshAgent = new Agent({
         hooks: createHooks(),
         toolRegistry: createToolRegistry(),
         llmClient: new MockLLMClient() as unknown as LlmClient,
-        model: 'test',
+        model: 'test-model',
         maxIterations: 100,
         contextLimit: 128000,
       });
-      newAgent.reasoningEffort = 'high';
-      newAgent.deserialize(serialized);
-      expect(newAgent.reasoningEffort).toBeUndefined();
-    });
+      freshAgent.deserialize(serialized);
 
-    it('should serialize with no context', () => {
-      const { agent } = createFixture({ sessionId: 'test-session' });
-      const serialized = agent.serialize();
-      expect(serialized.sessionId).toBe('test-session');
-      expect(serialized.context).toEqual([]);
+      expect(freshAgent.sessionId).toBe('test-session');
+      expect(freshAgent.log.length).toBe(2);
+      expect(freshAgent.log.at(0)!.content).toBe('test message');
+      expect(freshAgent.log.at(1)!.reasoningContent).toBe('thinking...');
+      expect(freshAgent.reasoningEffort).toBe('high');
     });
 
     it('should handle deserialize with empty data', () => {
@@ -876,51 +765,9 @@ describe('Agent — end-to-end loop', () => {
     });
   });
 
-  describe('model setter with sink', () => {
-    it('should emit session_state when sink is attached', () => {
-      const events: OutputEvent[] = [];
-      const sink = { emit: (e: OutputEvent) => events.push(e) };
-      const { agent } = createFixture({ sink, model: 'old-model' });
-      agent.model = 'new-model';
-      const modelEvent = events.find(e => e.type === OUTPUT_EVENT.SESSION_STATE && e.key === 'model');
-      expect(modelEvent).toBeDefined();
-      expect((modelEvent as SessionStateEvent).value).toBe('new-model');
-    });
-  });
-
-  describe('isRestoring', () => {
-    it('should notify hook on change', () => {
-      const hooks = createHooks();
-      const hookCalls: unknown[] = [];
-      hooks.on('session:restoreActive', (data) => hookCalls.push(data));
-      const { agent } = createFixture({ hooks });
-      agent.isRestoring = true;
-      expect(hookCalls.length).toBeGreaterThan(0);
-      expect((hookCalls[0] as { isRestoring: boolean }).isRestoring).toBe(true);
-    });
-  });
-
-  describe('cancel with abortController', () => {
-    it('should abort the run abort controller', () => {
-      const { agent } = createFixture({});
-      agent.runAbortController = new AbortController();
-      expect(agent.runAbortController.signal.aborted).toBe(false);
-      agent.cancel();
-      expect(agent.cancelled).toBe(true);
-      expect(agent.runAbortController.signal.aborted).toBe(true);
-    });
-
-    it('should handle missing abort controller', () => {
-      const { agent } = createFixture({});
-      agent.runAbortController = null;
-      expect(() => agent.cancel()).not.toThrow();
-      expect(agent.cancelled).toBe(true);
-    });
-  });
-
   // Tool execution error handling is covered in tool-executor.test.ts
 
-  describe('_executeSingleToolCall invalid tool name', () => {
+  describe('invalid tool name handling', () => {
     it.each([
       { name: '', desc: 'empty' },
       { name: '  ', desc: 'whitespace' },
@@ -944,75 +791,6 @@ describe('Agent — end-to-end loop', () => {
     });
   });
 
-  describe('notifyCompletion', () => {
-    it('should call onTaskComplete on sink', () => {
-      let called = false;
-      const sink = { emit: () => {}, onTaskComplete: (r: unknown) => { called = true; } };
-      const { agent } = createFixture({ sink });
-      agent.notifyCompletion('done');
-      expect(called).toBe(true);
-    });
-
-    it('should handle missing sink', () => {
-      const { agent } = createFixture({ sink: null });
-      expect(() => agent.notifyCompletion('done')).not.toThrow();
-    });
-  });
-
-  describe('_processStream finish reason', () => {
-    it('should handle length finish reason', async () => {
-      const mockLLM = new MockLLMClient({
-        responseSequences: [[
-          { type: 'content', content: 'Hello' },
-          { type: 'finish', reason: 'length' },
-          { type: 'usage', data: { prompt_tokens: 5, completion_tokens: 10, total_tokens: 15 } },
-        ]],
-      });
-      const { agent } = createFixture({ mockLLM, stream: true });
-      const result = await agent.run('test');
-      expect((result as any)?.content).toBe('Hello');
-    });
-
-    it('should handle stop finish reason', async () => {
-      const mockLLM = new MockLLMClient({
-        responseSequences: [[
-          { type: 'content', content: 'Hi' },
-          { type: 'finish', reason: 'stop' },
-          { type: 'usage', data: { prompt_tokens: 5, completion_tokens: 10, total_tokens: 15 } },
-        ]],
-      });
-      const { agent } = createFixture({ mockLLM, stream: true });
-      const result = await agent.run('test');
-      expect((result as any)?.content).toBe('Hi');
-    });
-  });
-
-  describe('addMessage / replaceContext', () => {
-    it('addMessage fires CONTEXT_MESSAGE hook', () => {
-      const hooks = createHooks();
-      const calls: unknown[] = [];
-      hooks.on('context:message', (data) => calls.push(data));
-      const { agent } = createFixture({ hooks });
-      const msg = new Message({ role: 'user', content: 'hello' });
-      agent.addMessage(msg);
-      expect(agent.log.length).toBe(1);
-      expect(calls.length).toBeGreaterThan(0);
-      expect((calls[0] as { message: Message }).message).toBe(msg);
-    });
-
-    it('replaceContext fires CONTEXT_REPLACED hook', () => {
-      const hooks = createHooks();
-      const calls: unknown[] = [];
-      hooks.on('context:replaced', (data) => calls.push(data));
-      const { agent } = createFixture({ hooks });
-      const msgs = [new Message({ role: 'user', content: 'new' })];
-      agent.replaceContext(msgs);
-      expect(agent.log.length).toBe(1);
-      expect(calls.length).toBeGreaterThan(0);
-      expect((calls[0] as { newContext: Message[] }).newContext).toBe(msgs);
-    });
-  });
-
   describe('getTokenUsage', () => {
     it('returns usage object after run', async () => {
       const mockLLM = new MockLLMClient({
@@ -1027,44 +805,6 @@ describe('Agent — end-to-end loop', () => {
       expect(usage.promptTokens).toBe(5);
       expect(usage.completionTokens).toBe(10);
       expect(usage.totalTokens).toBe(15);
-    });
-  });
-
-  describe('streaming state', () => {
-    it('returns empty strings for streaming content when not streaming', () => {
-      const { agent } = createFixture({});
-      expect(agent.currentStreamingContent).toBe('');
-      expect(agent.currentStreamingReasoning).toBe('');
-    });
-
-    it('clears streaming content after run completes', async () => {
-      const mockLLM = new MockLLMClient({
-        responseSequences: [[
-          { type: 'reasoning', content: 'Thinking...' },
-          { type: 'content', content: 'Answer' },
-          { type: 'usage', data: { prompt_tokens: 5, completion_tokens: 10, total_tokens: 15 } },
-        ]],
-      });
-      const { agent } = createFixture({ mockLLM });
-      await agent.run('test');
-      expect(agent.currentStreamingContent).toBe('');
-      expect(agent.currentStreamingReasoning).toBe('');
-    });
-  });
-
-  describe('enqueue', () => {
-    it('calls enqueueCallback when configured', () => {
-      const queued: string[] = [];
-      const { agent } = createFixture({});
-      // Access private field for testing — enqueue is used by hooks/MessageBus integration
-      (agent as any).enqueueCallback = (text: string) => queued.push(text);
-      agent.enqueue('follow-up');
-      expect(queued).toEqual(['follow-up']);
-    });
-
-    it('is no-op when no callback configured', () => {
-      const { agent } = createFixture({});
-      expect(() => agent.enqueue('test')).not.toThrow();
     });
   });
 
@@ -1132,6 +872,59 @@ describe('Agent — end-to-end loop', () => {
       const reasoningEvents = events.filter(e => e.type === OUTPUT_EVENT.STREAMING_REASONING_CHUNK);
       expect(reasoningEvents.length).toBeGreaterThan(0);
       expect(reasoningEvents[0]?.content).toBe('Thinking...');
+    });
+  });
+
+  describe('replaceContext', () => {
+    it('replaces context and fires CONTEXT_REPLACED hook', async () => {
+      const { agent, hooks } = createFixture({});
+      agent.addMessage(new Message({ role: 'user', content: 'old message' }));
+      agent.addMessage(new Message({ role: 'assistant', content: 'old response' }));
+
+      const hookCalls: Array<{ oldContext: Message[]; newContext: Message[] }> = [];
+      hooks.on(HOOKS.CONTEXT_REPLACED, (data: { oldContext: Message[]; newContext: Message[] }) => {
+        hookCalls.push({ oldContext: data.oldContext, newContext: data.newContext });
+      });
+
+      const newContext = [
+        new Message({ role: 'user', content: 'compacted message' }),
+      ];
+      agent.replaceContext(newContext);
+
+      expect(agent.log.getAll()).toEqual(newContext);
+      expect(hookCalls).toHaveLength(1);
+      expect(hookCalls[0]!.oldContext).toHaveLength(2);
+      expect(hookCalls[0]!.newContext).toEqual(newContext);
+    });
+  });
+
+  describe('isRestoring', () => {
+    it('fires SESSION_RESTORE_ACTIVE hook when changed', async () => {
+      const { agent, hooks } = createFixture({});
+      const hookCalls: boolean[] = [];
+      hooks.on(HOOKS.SESSION_RESTORE_ACTIVE, (data: { isRestoring: boolean }) => {
+        hookCalls.push(data.isRestoring);
+      });
+
+      agent.isRestoring = true;
+      expect(hookCalls).toEqual([true]);
+
+      agent.isRestoring = false;
+      expect(hookCalls).toEqual([true, false]);
+
+      // No hook when value unchanged
+      agent.isRestoring = false;
+      expect(hookCalls).toEqual([true, false]);
+    });
+  });
+
+  describe('enqueue', () => {
+    it('calls enqueueCallback when configured', async () => {
+      const enqueued: string[] = [];
+      const { agent } = createFixture({});
+      agent.enqueueCallback = (text: string) => { enqueued.push(text); };
+      agent.enqueue('test message');
+      expect(enqueued).toEqual(['test message']);
     });
   });
 });

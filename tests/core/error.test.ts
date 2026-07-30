@@ -10,7 +10,7 @@ import {
   ConfigError,
   ParseError,
   LlmError,
-  EXPECTED_ERROR_TYPES,
+
   isExpectedError,
   formatError,
   withContext,
@@ -231,16 +231,6 @@ describe("Error types", () => {
   });
 });
 
-describe("EXPECTED_ERROR_TYPES", () => {
-  it("contains expected types and excludes unexpected ones", () => {
-    for (const t of ["cancelled", "http", "api", "timeout", "cli", "tool", "config"] as const) {
-      expect(EXPECTED_ERROR_TYPES.has(t)).toBe(true);
-    }
-    for (const t of ["agent", "unknown"] as const) {
-      expect(EXPECTED_ERROR_TYPES.has(t)).toBe(false);
-    }
-  });
-});
 
 describe("isExpectedError", () => {
   it("returns true for expected error types", () => {

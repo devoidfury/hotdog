@@ -52,9 +52,7 @@ describe('BashTool', () => {
     const tool = new BashTool({ timeoutMs: 30000, maxOutputLines: 100 });
     const result = await tool.execute(JSON.stringify({ command: 'nonexistent_command_xyz_123' }), {} as any);
     // Should return an error message from the shell
-    expect(resultStr(result)).toBeTruthy();
-    expect(typeof resultStr(result)).toBe('string');
-    expect(resultStr(result).length).toBeGreaterThan(0);
+    expect(resultStr(result)).toContain('not found');
   });
 
   it('handles object input', async () => {
@@ -116,9 +114,6 @@ describe('BashTool', () => {
     const registry = { register: (name: string, tool: any) => { registeredName = name; registeredTool = tool; }, getAll: () => [] };
     const mockCore = { config: { bashTool: { bashTimeoutMs: 5000, maxToolOutputLines: 100 } } } as any;
     const ext = create(mockCore);
-    expect(ext).toBeDefined();
-    expect(ext.hooks![HOOKS.TOOLS_REGISTER]).toBeDefined();
-    expect((ext as any).BashTool).toBe(BashTool);
     await ext.hooks![HOOKS.TOOLS_REGISTER]!(registry as any);
     expect(registeredName!).toBe('bash');
     expect(registeredTool).toBeInstanceOf(BashTool);
@@ -130,7 +125,6 @@ describe('BashTool', () => {
     const registry = { register: (name: string, tool: any) => { registeredName = name; registeredTool = tool; }, getAll: () => [] };
     const mockCore = { config: {} } as any;
     const ext = create(mockCore);
-    expect(ext.hooks![HOOKS.TOOLS_REGISTER]).toBeDefined();
     await ext.hooks![HOOKS.TOOLS_REGISTER]!(registry as any);
     expect(registeredName!).toBe('bash');
     expect(registeredTool).toBeInstanceOf(BashTool);

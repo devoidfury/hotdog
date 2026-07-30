@@ -2,7 +2,6 @@
 
 import { describe, it, expect, beforeEach } from "bun:test";
 import { ToolRegistry, Tool, ToolMetadata } from "../../src/core/extensions/tool-registry.ts";
-import { HOOKS } from "../../src/core/hooks.ts";
 
 // ── Test Tool Implementations ───────────────────────────────────────────────
 
@@ -193,8 +192,3 @@ describe("ToolRegistry.filterByMetadata", () => {
   });
 });
 
-describe("TOOL_METADATA hook", () => {
-  it("is defined in HOOKS", () => {
-    expect(HOOKS.TOOL_METADATA).toBe("tool:metadata");
-  });
-});

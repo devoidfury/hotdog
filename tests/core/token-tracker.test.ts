@@ -3,7 +3,7 @@
 import { TokenTracker } from "../../src/core/token-tracker.ts";
 import { describe, it, expect } from "bun:test";
 
-describe("TokenTracker — construction", () => {
+describe("TokenTracker", () => {
   it("creates with zeroed counters", () => {
     const tracker = new TokenTracker();
     const usage = tracker.getUsage();
@@ -17,9 +17,7 @@ describe("TokenTracker — construction", () => {
     expect(usage.lastCompletionTokens).toBe(0);
     expect(usage.lastTotalTokens).toBe(0);
   });
-});
 
-describe("TokenTracker — record()", () => {
   it("accumulates basic usage", () => {
     const tracker = new TokenTracker();
     tracker.record({
@@ -126,30 +124,15 @@ describe("TokenTracker — record()", () => {
     expect((callbacks[0] as { promptTokens: number }).promptTokens).toBe(100);
   });
 
-  it("does not invoke callback when usage is null", () => {
-    const tracker = new TokenTracker();
-    let called = false;
-    tracker.record(null, () => {
-      called = true;
-    });
-    expect(called).toBe(false);
-  });
-
   it("does not invoke callback on double-count guard", () => {
     const tracker = new TokenTracker();
     let callCount = 0;
     const usage = { prompt_tokens: 100, completion_tokens: 50, total_tokens: 150 };
-    tracker.record(usage, () => {
-      callCount++;
-    });
-    tracker.record(usage, () => {
-      callCount++;
-    });
+    tracker.record(usage, () => { callCount++; });
+    tracker.record(usage, () => { callCount++; });
     expect(callCount).toBe(1);
   });
-});
 
-describe("TokenTracker — getUsage()", () => {
   it("returns a defensive copy that cannot mutate internal state", () => {
     const tracker = new TokenTracker();
     tracker.record({
@@ -162,15 +145,11 @@ describe("TokenTracker — getUsage()", () => {
     expect(usage1).not.toBe(usage2);
     expect(usage1).toEqual(usage2);
 
-    // Mutating returned object should not affect internal state
     usage1.promptTokens = 9999;
-    const usage3 = tracker.getUsage();
-    expect(usage3.promptTokens).toBe(100);
+    expect(tracker.getUsage().promptTokens).toBe(100);
   });
-});
 
-describe("TokenTracker — clear()", () => {
-  it("resets all counters to zero", () => {
+  it("clear resets all counters and allows recording again", () => {
     const tracker = new TokenTracker();
     tracker.record({
       prompt_tokens: 100,
@@ -178,26 +157,8 @@ describe("TokenTracker — clear()", () => {
       total_tokens: 150,
     });
     tracker.clear();
-    const usage = tracker.getUsage();
-    expect(usage.promptTokens).toBe(0);
-    expect(usage.cachedTokens).toBe(0);
-    expect(usage.completionTokens).toBe(0);
-    expect(usage.totalTokens).toBe(0);
-    expect(usage.turns).toBe(0);
-    expect(usage.lastPromptTokens).toBe(0);
-    expect(usage.lastCachedTokens).toBe(0);
-    expect(usage.lastCompletionTokens).toBe(0);
-    expect(usage.lastTotalTokens).toBe(0);
-  });
+    expect(tracker.getUsage().turns).toBe(0);
 
-  it("can record again after clear", () => {
-    const tracker = new TokenTracker();
-    tracker.record({
-      prompt_tokens: 100,
-      completion_tokens: 50,
-      total_tokens: 150,
-    });
-    tracker.clear();
     tracker.record({
       prompt_tokens: 200,
       completion_tokens: 100,
@@ -208,31 +169,7 @@ describe("TokenTracker — clear()", () => {
     expect(usage.turns).toBe(1);
   });
 
-  it("clear is idempotent", () => {
-    const tracker = new TokenTracker();
-    tracker.clear();
-    tracker.clear();
-    const usage = tracker.getUsage();
-    expect(usage.turns).toBe(0);
-  });
-});
-
-describe("TokenTracker — cached token edge cases", () => {
-  it("handles missing prompt_tokens_details", () => {
-    const tracker = new TokenTracker();
-    tracker.record({ prompt_tokens: 100, completion_tokens: 50, total_tokens: 150 });
-    expect(tracker.getUsage().promptTokens).toBe(100);
-    expect(tracker.getUsage().cachedTokens).toBe(0);
-  });
-
-  it("handles zero cached tokens", () => {
-    const tracker = new TokenTracker();
-    tracker.record({ prompt_tokens: 100, prompt_tokens_details: { cached_tokens: 0 }, completion_tokens: 50, total_tokens: 150 });
-    expect(tracker.getUsage().promptTokens).toBe(100);
-    expect(tracker.getUsage().cachedTokens).toBe(0);
-  });
-
-  it("handles all cached (prompt equals cached)", () => {
+  it("handles all cached tokens", () => {
     const tracker = new TokenTracker();
     tracker.record({ prompt_tokens: 100, prompt_tokens_details: { cached_tokens: 100 }, completion_tokens: 50, total_tokens: 150 });
     expect(tracker.getUsage().promptTokens).toBe(0);

@@ -95,24 +95,24 @@ describe('PagerTool', () => {
   it('handles numeric tool_call_id', async () => {
     const tool = new PagerTool();
     const ctx = new ToolContext();
-    ctx.set('onGetCachedToolOutput', (toolCallId: string) => {
-      if (toolCallId === '12345') return 'numeric id data';
+    ctx.set('onGetCachedToolOutput', (toolCallId: unknown) => {
+      if (toolCallId === 12345) return 'numeric id data';
       return null;
     });
     const result = await tool.execute(JSON.stringify({ tool_call_id: 12345 }), ctx);
-    expect(resultStr(result)).toBeDefined();
+    expect(resultStr(result)).toContain('numeric id data');
   });
 
   it('callDisplay handles null input', () => {
     const tool = new PagerTool();
     const display = tool.callDisplay(null);
-    expect(display).toBeDefined();
+    expect(display).not.toBeNull();
   });
 
   it('callDisplay handles empty string', () => {
     const tool = new PagerTool();
     const display = tool.callDisplay('');
-    expect(display).toBeDefined();
+    expect(display).not.toBeNull();
   });
 
   it('callDisplay handles malformed JSON', () => {

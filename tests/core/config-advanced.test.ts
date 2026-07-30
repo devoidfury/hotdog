@@ -14,34 +14,30 @@ import type { CoreConfig, CoreConfigWithExtensions } from "../../src/core/config
 
 describe("normalizeConfigKeys", () => {
   it("converts snake_case keys to camelCase", () => {
-    const obj = {
+    const result = normalizeConfigKeys({
       default_model: "gpt-4",
       hide_tools: true,
       chat_timeout_secs: 30,
-    };
-    const result = normalizeConfigKeys(obj) as Record<string, unknown>;
+    }) as Record<string, unknown>;
     expect(result.defaultModel).toBe("gpt-4");
     expect(result.hideTools).toBe(true);
     expect(result.chatTimeoutSecs).toBe(30);
   });
 
-  it("recursively normalizes nested objects", () => {
-    const obj = {
-      custom_servers: [
-        {
-          server_name: "my-server",
-          command_path: "/usr/bin/server",
-        },
-      ],
-      profile_settings: {
-        hide_thinking: true,
-        max_iterations: 100,
-      },
-    };
-    const result = normalizeConfigKeys(obj) as Record<string, unknown>;
-    expect((result.customServers as Record<string, unknown>[])[0]!.serverName).toBe("my-server");
-    expect((result.customServers as Record<string, unknown>[])[0]!.commandPath).toBe("/usr/bin/server");
-    expect((result.profileSettings as Record<string, unknown>).hideThinking).toBe(true);
+  it("handles nested objects, arrays, and primitives", () => {
+    const result = normalizeConfigKeys({
+      simple_key: "value",
+      nested_key: { inner_key: "inner" },
+      array_key: [{ item_key: "item" }, "string", 42],
+      level_one: { level_two: { level_three_key: "deep" } },
+    }) as Record<string, unknown>;
+
+    expect(result.simpleKey).toBe("value");
+    expect((result.nestedKey as Record<string, unknown>).innerKey).toBe("inner");
+    expect((result.arrayKey as Record<string, unknown>[])[0]!.itemKey).toBe("item");
+    expect((result.arrayKey as unknown[])[1]).toBe("string");
+    expect((result.arrayKey as unknown[])[2]).toBe(42);
+    expect(((result.levelOne as Record<string, unknown>).levelTwo as Record<string, unknown>).levelThreeKey).toBe("deep");
   });
 
   it("returns primitives unchanged", () => {
@@ -52,54 +48,9 @@ describe("normalizeConfigKeys", () => {
     expect(normalizeConfigKeys(undefined)).toBeUndefined();
   });
 
-  it("returns arrays with normalized items", () => {
-    const arr = [{ snake_case: "value" }, { another_key: 123 }];
-    const result = normalizeConfigKeys(arr) as Record<string, unknown>[];
-    expect(result[0]!.snakeCase).toBe("value");
-    expect(result[0]!.anotherKey).toBeUndefined();
-    expect(result[1]!.anotherKey).toBe(123);
-  });
-
-  it("handles empty object", () => {
+  it("handles empty object and arrays", () => {
     expect(normalizeConfigKeys({})).toEqual({});
-  });
-
-  it("handles deeply nested objects (3+ levels)", () => {
-    const obj = {
-      level_one: {
-        level_two: {
-          level_three_key: "deep",
-        },
-      },
-    };
-    const result = normalizeConfigKeys(obj) as Record<string, unknown>;
-    expect(((result.levelOne as Record<string, unknown>).levelTwo as Record<string, unknown>).levelThreeKey).toBe("deep");
-  });
-
-  it("handles arrays of primitives", () => {
-    const arr = [1, "two", true];
-    const result = normalizeConfigKeys(arr) as unknown[];
-    expect(result).toEqual([1, "two", true]);
-  });
-
-  it("handles mixed nested structures", () => {
-    const obj = {
-      simple_key: "value",
-      nested_key: {
-        inner_key: "inner",
-      },
-      array_key: [
-        { item_key: "item" },
-        "plain_string",
-        42,
-      ],
-    };
-    const result = normalizeConfigKeys(obj) as Record<string, unknown>;
-    expect(result.simpleKey).toBe("value");
-    expect((result.nestedKey as Record<string, unknown>).innerKey).toBe("inner");
-    expect((result.arrayKey as Record<string, unknown>[])[0]!.itemKey).toBe("item");
-    expect((result.arrayKey as unknown[])[1]).toBe("plain_string");
-    expect((result.arrayKey as unknown[])[2]).toBe(42);
+    expect(normalizeConfigKeys([])).toEqual([]);
   });
 });
 
@@ -115,12 +66,15 @@ describe("buildAgentConfig", () => {
 
   it("resolves basic config with all expected fields", async () => {
     const result = await buildAgentConfig(baseOpts);
-    expect(result.model).toBeDefined();
+    expect(result.model).toBe("test-model");
     expect(result.configDir).toBe("/tmp/test-config");
-    expect(result.profileName).toBeDefined();
-    expect(result.systemPromptTemplate).toBeDefined();
-    expect(result.profiles).toBeDefined();
-    expect(result.modelRegistry).toBeDefined();
+    expect(result.profileName).toBe("default");
+    expect(typeof result.systemPromptTemplate).toBe("string");
+    expect(result.systemPromptTemplate.length).toBeGreaterThan(0);
+    expect(typeof result.profiles).toBe("object");
+    expect(result.profiles).not.toBeNull();
+    expect(typeof result.modelRegistry).toBe("object");
+    expect(result.modelRegistry).not.toBeNull();
   });
 
   it("resolves model from CLI override", async () => {
@@ -181,8 +135,9 @@ describe("buildConfig", () => {
 
   it("handles missing config dir gracefully", async () => {
     const result = await buildConfig({ configDir: '/nonexistent/path' });
-    expect(result.resolved).toBeDefined();
-    expect(result.modelRegistry).toBeDefined();
+    expect(result.resolved).not.toBeNull();
+    expect(result.modelRegistry).not.toBeNull();
+    expect(typeof result.resolved.model).toBe("string");
   });
 
   it("merges profile from file", async () => {

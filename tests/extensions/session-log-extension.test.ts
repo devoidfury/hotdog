@@ -2,7 +2,7 @@
 // This complements session-log.test.ts which tests the SessionLog class.
 
 import { describe, it, expect, beforeEach, afterEach } from "bun:test";
-import { create, readSessionEntries, LOG_SOURCE } from "../../src/extensions/session-log/index.ts";
+import { create, readSessionEntries, LOG_SOURCE, disabledSessionLog } from "../../src/extensions/session-log/index.ts";
 import { HOOKS } from "../../src/core/hooks.ts";
 import { createMockCore } from "../helpers.ts";
 import { mkdirSync, rmSync, writeFileSync, readFileSync } from "node:fs";
@@ -229,5 +229,32 @@ describe("session-log extension create()", () => {
     } finally {
       cleanupTestFile(sessionId);
     }
+  });
+});
+
+describe("disabledSessionLog", () => {
+  it("returns no-op log with null sessionId and logPath", () => {
+    const log = disabledSessionLog();
+    expect(log.sessionId).toBeNull();
+    expect(log.logPath).toBeNull();
+  });
+
+  it("all write methods are no-ops", () => {
+    const log = disabledSessionLog();
+    expect(() => log.writeInput("test")).not.toThrow();
+    expect(() => log.writeSystemPrompt("test")).not.toThrow();
+    expect(() => log.writeAssistant("test", null, [])).not.toThrow();
+    expect(() => log.writeToolResult("test", "tc1", "bash")).not.toThrow();
+    expect(() => log.writeReset()).not.toThrow();
+  });
+
+  it("readEntries returns empty array", () => {
+    const log = disabledSessionLog();
+    expect(log.readEntries()).toEqual([]);
+  });
+
+  it("getLogPath returns null", () => {
+    const log = disabledSessionLog();
+    expect(log.getLogPath()).toBeNull();
   });
 });

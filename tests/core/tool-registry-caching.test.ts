@@ -184,125 +184,81 @@ describe("ToolRegistry — validateToolArgs", () => {
 });
 
 describe("ToolRegistry — caching", () => {
-  it("caches tool definitions on first call", async () => {
-    const registry = new ToolRegistry();
-    let callCount = 0;
-
-    const tool: Tool = {
+  function mkCountedTool(name: string, desc: string, counter: { value: number }) {
+    return {
       toToolDef: () => {
-        callCount++;
-        return { type: "function", function: { name: "test", description: "test", parameters: { type: "object", properties: {} } } };
+        counter.value++;
+        return { type: "function", function: { name, description: desc, parameters: { type: "object", properties: {} } } };
       },
-      callDisplay: () => "test()",
+      callDisplay: () => `${name}()`,
       execute: async () => "ok",
-    };
+    } as Tool;
+  }
 
-    registry.register("test", tool);
+  it("caches tool definitions and serves from cache on repeated calls", async () => {
+    const registry = new ToolRegistry();
+    const counter = { value: 0 };
+    registry.register("test", mkCountedTool("test", "test", counter));
 
-    // First call computes and caches
     const defs1 = await registry.getToolDefs();
-    expect(callCount).toBe(1);
+    expect(counter.value).toBe(1);
 
-    // Second call uses cache
     const defs2 = await registry.getToolDefs();
-    expect(callCount).toBe(1); // Still 1, not 2
+    expect(counter.value).toBe(1); // cached
     expect(defs1).toEqual(defs2);
   });
 
   it("invalidates cache when tool is re-registered", async () => {
     const registry = new ToolRegistry();
-    let callCount = 0;
+    const counter = { value: 0 };
 
-    const tool: Tool = {
-      toToolDef: () => {
-        callCount++;
-        return { type: "function", function: { name: "test", description: "v1", parameters: { type: "object", properties: {} } } };
-      },
-      callDisplay: () => "test()",
-      execute: async () => "ok",
-    };
-
-    registry.register("test", tool);
+    registry.register("test", mkCountedTool("test", "v1", counter));
     await registry.getToolDefs();
-    expect(callCount).toBe(1);
+    expect(counter.value).toBe(1);
 
     // Re-register with new toToolDef
-    const tool2: Tool = {
-      toToolDef: () => {
-        callCount++;
-        return { type: "function", function: { name: "test", description: "v2", parameters: { type: "object", properties: {} } } };
-      },
-      callDisplay: () => "test()",
-      execute: async () => "ok",
-    };
-    registry.register("test", tool2);
+    registry.register("test", mkCountedTool("test", "v2", counter));
 
-    // Cache should be invalidated, so toToolDef is called again
     const defs = await registry.getToolDefs();
-    expect(callCount).toBe(2);
+    expect(counter.value).toBe(2);
     expect(defs[0]!.function.description).toBe("v2");
   });
 
   it("clearToolDefs clears the cache", async () => {
     const registry = new ToolRegistry();
-    let callCount = 0;
+    const counter = { value: 0 };
+    registry.register("test", mkCountedTool("test", "test", counter));
 
-    const tool: Tool = {
-      toToolDef: () => {
-        callCount++;
-        return { type: "function", function: { name: "test", description: "test", parameters: { type: "object", properties: {} } } };
-      },
-      callDisplay: () => "test()",
-      execute: async () => "ok",
-    };
-
-    registry.register("test", tool);
     await registry.getToolDefs();
-    expect(callCount).toBe(1);
+    expect(counter.value).toBe(1);
 
     registry.clearToolDefs();
-
-    // After clearing, toToolDef should be called again
     await registry.getToolDefs();
-    expect(callCount).toBe(2);
+    expect(counter.value).toBe(2);
   });
 
   it("getToolDef caches individual tool definitions", async () => {
     const registry = new ToolRegistry();
-    let callCount = 0;
+    const counter = { value: 0 };
+    registry.register("test", mkCountedTool("test", "test", counter));
 
-    const tool: Tool = {
-      toToolDef: () => {
-        callCount++;
-        return { type: "function", function: { name: "test", description: "test", parameters: { type: "object", properties: {} } } };
-      },
-      callDisplay: () => "test()",
-      execute: async () => "ok",
-    };
-
-    registry.register("test", tool);
-
-    const def1 = await registry.getToolDef("test");
-    expect(callCount).toBe(1);
-
-    const def2 = await registry.getToolDef("test");
-    expect(callCount).toBe(1); // Cached
-    expect(def1).toEqual(def2);
+    await registry.getToolDef("test");
+    await registry.getToolDef("test");
+    expect(counter.value).toBe(1); // cached
   });
 
   it("getToolDef returns null for unregistered tools", async () => {
     const registry = new ToolRegistry();
-    const def = await registry.getToolDef("nonexistent");
-    expect(def).toBeNull();
+    expect(await registry.getToolDef("nonexistent")).toBeNull();
   });
 
   it("validateToolArgs uses cached tool definition", async () => {
     const registry = new ToolRegistry();
-    let callCount = 0;
+    const counter = { value: 0 };
 
     const tool: Tool = {
       toToolDef: () => {
-        callCount++;
+        counter.value++;
         return {
           type: "function",
           function: {
@@ -310,9 +266,7 @@ describe("ToolRegistry — caching", () => {
             description: "test",
             parameters: {
               type: "object",
-              properties: {
-                query: { type: "string", description: "Search query" },
-              },
+              properties: { query: { type: "string", description: "Search query" } },
               required: ["query"],
             },
           },
@@ -324,15 +278,9 @@ describe("ToolRegistry — caching", () => {
 
     registry.register("test", tool);
 
-    // First validation triggers cache
-    const err1 = await registry.validateToolArgs("test", '{"query": "hello"}');
-    expect(callCount).toBe(1);
-    expect(err1).toBeNull();
-
-    // Second validation uses cache
-    const err2 = await registry.validateToolArgs("test", '{"query": "world"}');
-    expect(callCount).toBe(1); // Still 1
-    expect(err2).toBeNull();
+    await registry.validateToolArgs("test", '{"query": "hello"}');
+    await registry.validateToolArgs("test", '{"query": "world"}');
+    expect(counter.value).toBe(1); // cached
   });
 });
 

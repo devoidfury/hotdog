@@ -101,10 +101,63 @@ describe("WebSocketChannel - write()", () => {
     ws = createMockWs();
   });
 
-  it("maps USER_MESSAGE events to protocol", () => {
+  // Parameterized: each event type maps to the corresponding protocol message
+  it.each([
+    {
+      name: "USER_MESSAGE",
+      event: { type: OUTPUT_EVENT.USER_MESSAGE, content: "Hello" },
+      expected: (msg: any) => {
+        expect(msg.type).toBe(S2C.USER_MESSAGE);
+        expect(msg.content).toBe("Hello");
+        expect(msg.sessionId).toBe("session-1");
+      },
+    },
+    {
+      name: "ASSISTANT_MESSAGE",
+      event: { type: OUTPUT_EVENT.ASSISTANT_MESSAGE, content: "AI response" },
+      expected: (msg: any) => {
+        expect(msg.type).toBe(S2C.ASSISTANT_MESSAGE);
+        expect(msg.content).toBe("AI response");
+      },
+    },
+    {
+      name: "THINKING",
+      event: { type: OUTPUT_EVENT.THINKING, content: "Let me think..." },
+      expected: (msg: any) => {
+        expect(msg.type).toBe(S2C.THINKING);
+        expect(msg.content).toBe("Let me think...");
+      },
+    },
+    {
+      name: "TOOL_CALL",
+      event: { type: OUTPUT_EVENT.TOOL_CALL, toolName: "bash", input: { command: "ls" } },
+      expected: (msg: any) => {
+        expect(msg.type).toBe(S2C.TOOL_CALL);
+        expect(msg.name).toBe("bash");
+        expect(msg.args).toEqual({ command: "ls" });
+      },
+    },
+    {
+      name: "TOOL_RESULT",
+      event: { type: OUTPUT_EVENT.TOOL_RESULT, toolName: "bash", result: "file.txt" },
+      expected: (msg: any) => {
+        expect(msg.type).toBe(S2C.TOOL_RESULT);
+        expect(msg.name).toBe("bash");
+        expect(msg.output).toBe("file.txt");
+      },
+    },
+    {
+      name: "TOOL_RESULT with error",
+      event: { type: OUTPUT_EVENT.TOOL_RESULT, toolName: "bash", error: "Permission denied" },
+      expected: (msg: any) => {
+        expect(msg.type).toBe(S2C.TOOL_RESULT);
+        expect(msg.error).toBe("Permission denied");
+      },
+    },
+  ])("maps $name events to protocol", ({ event, expected }) => {
     const sm = createMockSessionManager({
       onSessionEvents: mock((_sessionId, handler) => {
-        handler({ type: OUTPUT_EVENT.USER_MESSAGE, content: "Hello" });
+        handler(event as any);
         return () => {};
       }),
     });
@@ -119,15 +172,97 @@ describe("WebSocketChannel - write()", () => {
     const sent = (ws as any)._sentMessages;
     expect(sent.length).toBe(1);
     const msg = JSON.parse(sent[0]);
-    expect(msg.type).toBe(S2C.USER_MESSAGE);
-    expect(msg.content).toBe("Hello");
-    expect(msg.sessionId).toBe("session-1");
+    expected(msg);
   });
 
-  it("maps ASSISTANT_MESSAGE events to protocol", () => {
+  // More event types in the same parameterized pattern
+  it.each([
+    {
+      name: "COMPACTING",
+      event: { type: OUTPUT_EVENT.COMPACTING, message: "Compacting context..." },
+      expected: (msg: any) => {
+        expect(msg.type).toBe(S2C.COMPACTING);
+        expect(msg.message).toBe("Compacting context...");
+      },
+    },
+    {
+      name: "COMMAND_RESULT",
+      event: { type: OUTPUT_EVENT.COMMAND_RESULT, content: "Command done" },
+      expected: (msg: any) => {
+        expect(msg.type).toBe(S2C.COMMAND_RESULT);
+        expect(msg.content).toBe("Command done");
+      },
+    },
+    {
+      name: "QUESTION",
+      event: { type: OUTPUT_EVENT.QUESTION, questions: [{ key: "q1", prompt: "What is your name?" }] },
+      expected: (msg: any) => {
+        expect(msg.type).toBe(S2C.QUESTION);
+        expect(msg.questions).toEqual([{ key: "q1", prompt: "What is your name?" }]);
+      },
+    },
+    {
+      name: "STREAMING_CHUNK",
+      event: { type: OUTPUT_EVENT.STREAMING_CHUNK, content: "partial" },
+      expected: (msg: any) => {
+        expect(msg.type).toBe(S2C.STREAMING_CHUNK);
+        expect(msg.content).toBe("partial");
+      },
+    },
+    {
+      name: "STREAMING_REASONING_CHUNK",
+      event: { type: OUTPUT_EVENT.STREAMING_REASONING_CHUNK, content: "reasoning" },
+      expected: (msg: any) => {
+        expect(msg.type).toBe(S2C.STREAMING_REASONING_CHUNK);
+        expect(msg.content).toBe("reasoning");
+      },
+    },
+    {
+      name: "TASK_PROGRESS",
+      event: { type: OUTPUT_EVENT.TASK_PROGRESS, taskId: "task-1", status: "running", message: "Processing..." },
+      expected: (msg: any) => {
+        expect(msg.type).toBe(S2C.TASK_PROGRESS);
+        expect(msg.taskId).toBe("task-1");
+        expect(msg.status).toBe("running");
+        expect(msg.message).toBe("Processing...");
+      },
+    },
+    {
+      name: "TOKEN_USAGE",
+      event: {
+        type: OUTPUT_EVENT.TOKEN_USAGE,
+        promptTokens: 100,
+        completionTokens: 50,
+        totalTokens: 150,
+        lastPromptTokens: 80,
+        lastCompletionTokens: 40,
+        lastTotalTokens: 120,
+        lastCachedTokens: 10,
+      },
+      expected: (msg: any) => {
+        expect(msg.type).toBe(S2C.TOKEN_USAGE);
+        expect(msg.promptTokens).toBe(100);
+        expect(msg.completionTokens).toBe(50);
+        expect(msg.totalTokens).toBe(150);
+        expect(msg.lastPromptTokens).toBe(80);
+        expect(msg.lastCompletionTokens).toBe(40);
+        expect(msg.lastTotalTokens).toBe(120);
+        expect(msg.lastCachedTokens).toBe(10);
+      },
+    },
+    {
+      name: "COMPACTION_RESULT",
+      event: { type: OUTPUT_EVENT.COMPACTION_RESULT, summary: "Summary of conversation", messagesCompacted: 10 },
+      expected: (msg: any) => {
+        expect(msg.type).toBe(S2C.COMPACTION_RESULT);
+        expect(msg.summary).toBe("Summary of conversation");
+        expect(msg.messagesCompacted).toBe(10);
+      },
+    },
+  ])("maps $name events to protocol", ({ event, expected }) => {
     const sm = createMockSessionManager({
       onSessionEvents: mock((_sessionId, handler) => {
-        handler({ type: OUTPUT_EVENT.ASSISTANT_MESSAGE, content: "AI response" });
+        handler(event as any);
         return () => {};
       }),
     });
@@ -140,265 +275,9 @@ describe("WebSocketChannel - write()", () => {
     });
 
     const sent = (ws as any)._sentMessages;
+    expect(sent.length).toBe(1);
     const msg = JSON.parse(sent[0]);
-    expect(msg.type).toBe(S2C.ASSISTANT_MESSAGE);
-    expect(msg.content).toBe("AI response");
-  });
-
-  it("maps THINKING events to protocol", () => {
-    const sm = createMockSessionManager({
-      onSessionEvents: mock((_sessionId, handler) => {
-        handler({ type: OUTPUT_EVENT.THINKING, content: "Let me think..." });
-        return () => {};
-      }),
-    });
-    const ws = createMockWs();
-
-    new WebSocketChannel({
-      sessionManager: sm,
-      ws,
-      sessionId: "session-1",
-    });
-
-    const sent = (ws as any)._sentMessages;
-    const msg = JSON.parse(sent[0]);
-    expect(msg.type).toBe(S2C.THINKING);
-    expect(msg.content).toBe("Let me think...");
-  });
-
-  it("maps TOOL_CALL events to protocol", () => {
-    const sm = createMockSessionManager({
-      onSessionEvents: mock((_sessionId, handler) => {
-        handler({ type: OUTPUT_EVENT.TOOL_CALL, toolName: "bash", input: { command: "ls" } });
-        return () => {};
-      }),
-    });
-    const ws = createMockWs();
-
-    new WebSocketChannel({
-      sessionManager: sm,
-      ws,
-      sessionId: "session-1",
-    });
-
-    const sent = (ws as any)._sentMessages;
-    const msg = JSON.parse(sent[0]);
-    expect(msg.type).toBe(S2C.TOOL_CALL);
-    expect(msg.name).toBe("bash");
-    expect(msg.args).toEqual({ command: "ls" });
-  });
-
-  it("maps TOOL_RESULT events to protocol", () => {
-    const sm = createMockSessionManager({
-      onSessionEvents: mock((_sessionId, handler) => {
-        handler({ type: OUTPUT_EVENT.TOOL_RESULT, toolName: "bash", result: "file.txt" });
-        return () => {};
-      }),
-    });
-    const ws = createMockWs();
-
-    new WebSocketChannel({
-      sessionManager: sm,
-      ws,
-      sessionId: "session-1",
-    });
-
-    const sent = (ws as any)._sentMessages;
-    const msg = JSON.parse(sent[0]);
-    expect(msg.type).toBe(S2C.TOOL_RESULT);
-    expect(msg.name).toBe("bash");
-    expect(msg.output).toBe("file.txt");
-  });
-
-  it("maps TOOL_RESULT with error to protocol", () => {
-    const sm = createMockSessionManager({
-      onSessionEvents: mock((_sessionId, handler) => {
-        handler({ type: OUTPUT_EVENT.TOOL_RESULT, toolName: "bash", error: "Permission denied" });
-        return () => {};
-      }),
-    });
-    const ws = createMockWs();
-
-    new WebSocketChannel({
-      sessionManager: sm,
-      ws,
-      sessionId: "session-1",
-    });
-
-    const sent = (ws as any)._sentMessages;
-    const msg = JSON.parse(sent[0]);
-    expect(msg.type).toBe(S2C.TOOL_RESULT);
-    expect(msg.error).toBe("Permission denied");
-  });
-
-  it("maps COMPACTING events to protocol", () => {
-    const sm = createMockSessionManager({
-      onSessionEvents: mock((_sessionId, handler) => {
-        handler({ type: OUTPUT_EVENT.COMPACTING, message: "Compacting context..." });
-        return () => {};
-      }),
-    });
-    const ws = createMockWs();
-
-    new WebSocketChannel({
-      sessionManager: sm,
-      ws,
-      sessionId: "session-1",
-    });
-
-    const sent = (ws as any)._sentMessages;
-    const msg = JSON.parse(sent[0]);
-    expect(msg.type).toBe(S2C.COMPACTING);
-    expect(msg.message).toBe("Compacting context...");
-  });
-
-  it("maps COMMAND_RESULT events to protocol", () => {
-    const sm = createMockSessionManager({
-      onSessionEvents: mock((_sessionId, handler) => {
-        handler({ type: OUTPUT_EVENT.COMMAND_RESULT, content: "Command done" });
-        return () => {};
-      }),
-    });
-    const ws = createMockWs();
-
-    new WebSocketChannel({
-      sessionManager: sm,
-      ws,
-      sessionId: "session-1",
-    });
-
-    const sent = (ws as any)._sentMessages;
-    const msg = JSON.parse(sent[0]);
-    expect(msg.type).toBe(S2C.COMMAND_RESULT);
-    expect(msg.content).toBe("Command done");
-  });
-
-  it("maps QUESTION events to protocol", () => {
-    const questions = [{ key: "q1", prompt: "What is your name?" }];
-    const sm = createMockSessionManager({
-      onSessionEvents: mock((_sessionId, handler) => {
-        handler({ type: OUTPUT_EVENT.QUESTION, questions });
-        return () => {};
-      }),
-    });
-    const ws = createMockWs();
-
-    new WebSocketChannel({
-      sessionManager: sm,
-      ws,
-      sessionId: "session-1",
-    });
-
-    const sent = (ws as any)._sentMessages;
-    const msg = JSON.parse(sent[0]);
-    expect(msg.type).toBe(S2C.QUESTION);
-    expect(msg.questions).toEqual(questions);
-  });
-
-  it("maps STREAMING_CHUNK events to protocol", () => {
-    const sm = createMockSessionManager({
-      onSessionEvents: mock((_sessionId, handler) => {
-        handler({ type: OUTPUT_EVENT.STREAMING_CHUNK, content: "partial" });
-        return () => {};
-      }),
-    });
-    const ws = createMockWs();
-
-    new WebSocketChannel({
-      sessionManager: sm,
-      ws,
-      sessionId: "session-1",
-    });
-
-    const sent = (ws as any)._sentMessages;
-    const msg = JSON.parse(sent[0]);
-    expect(msg.type).toBe(S2C.STREAMING_CHUNK);
-    expect(msg.content).toBe("partial");
-  });
-
-  it("maps STREAMING_REASONING_CHUNK events to protocol", () => {
-    const sm = createMockSessionManager({
-      onSessionEvents: mock((_sessionId, handler) => {
-        handler({ type: OUTPUT_EVENT.STREAMING_REASONING_CHUNK, content: "reasoning" });
-        return () => {};
-      }),
-    });
-    const ws = createMockWs();
-
-    new WebSocketChannel({
-      sessionManager: sm,
-      ws,
-      sessionId: "session-1",
-    });
-
-    const sent = (ws as any)._sentMessages;
-    const msg = JSON.parse(sent[0]);
-    expect(msg.type).toBe(S2C.STREAMING_REASONING_CHUNK);
-    expect(msg.content).toBe("reasoning");
-  });
-
-  it("maps TASK_PROGRESS events to protocol", () => {
-    const sm = createMockSessionManager({
-      onSessionEvents: mock((_sessionId, handler) => {
-        handler({
-          type: OUTPUT_EVENT.TASK_PROGRESS,
-          taskId: "task-1",
-          status: "running",
-          message: "Processing...",
-        });
-        return () => {};
-      }),
-    });
-    const ws = createMockWs();
-
-    new WebSocketChannel({
-      sessionManager: sm,
-      ws,
-      sessionId: "session-1",
-    });
-
-    const sent = (ws as any)._sentMessages;
-    const msg = JSON.parse(sent[0]);
-    expect(msg.type).toBe(S2C.TASK_PROGRESS);
-    expect(msg.taskId).toBe("task-1");
-    expect(msg.status).toBe("running");
-    expect(msg.message).toBe("Processing...");
-  });
-
-  it("maps TOKEN_USAGE events to protocol", () => {
-    const sm = createMockSessionManager({
-      onSessionEvents: mock((_sessionId, handler) => {
-        handler({
-          type: OUTPUT_EVENT.TOKEN_USAGE,
-          promptTokens: 100,
-          completionTokens: 50,
-          totalTokens: 150,
-          lastPromptTokens: 80,
-          lastCompletionTokens: 40,
-          lastTotalTokens: 120,
-          lastCachedTokens: 10,
-        });
-        return () => {};
-      }),
-    });
-    const ws = createMockWs();
-
-    new WebSocketChannel({
-      sessionManager: sm,
-      ws,
-      sessionId: "session-1",
-    });
-
-    const sent = (ws as any)._sentMessages;
-    const msg = JSON.parse(sent[0]);
-    expect(msg.type).toBe(S2C.TOKEN_USAGE);
-    expect(msg.promptTokens).toBe(100);
-    expect(msg.completionTokens).toBe(50);
-    expect(msg.totalTokens).toBe(150);
-    expect(msg.lastPromptTokens).toBe(80);
-    expect(msg.lastCompletionTokens).toBe(40);
-    expect(msg.lastTotalTokens).toBe(120);
-    expect(msg.lastCachedTokens).toBe(10);
+    expected(msg);
   });
 
   it("maps TOKEN_USAGE with defaults", () => {
@@ -421,32 +300,6 @@ describe("WebSocketChannel - write()", () => {
     expect(msg.promptTokens).toBe(0);
     expect(msg.completionTokens).toBe(0);
     expect(msg.totalTokens).toBe(0);
-  });
-
-  it("maps COMPACTION_RESULT events to protocol", () => {
-    const sm = createMockSessionManager({
-      onSessionEvents: mock((_sessionId, handler) => {
-        handler({
-          type: OUTPUT_EVENT.COMPACTION_RESULT,
-          summary: "Summary of conversation",
-          messagesCompacted: 10,
-        });
-        return () => {};
-      }),
-    });
-    const ws = createMockWs();
-
-    new WebSocketChannel({
-      sessionManager: sm,
-      ws,
-      sessionId: "session-1",
-    });
-
-    const sent = (ws as any)._sentMessages;
-    const msg = JSON.parse(sent[0]);
-    expect(msg.type).toBe(S2C.COMPACTION_RESULT);
-    expect(msg.summary).toBe("Summary of conversation");
-    expect(msg.messagesCompacted).toBe(10);
   });
 
   it("maps SESSION_STATE events to protocol with broadcast", () => {

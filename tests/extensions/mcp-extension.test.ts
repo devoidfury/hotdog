@@ -249,3 +249,98 @@ describe("MCP extension", () => {
     expect(ext!.connections).toHaveLength(1);
   });
 });
+
+// ── Additional Branch Coverage ──────────────────────────────────────────────
+
+describe("MCP extension — branch coverage", () => {
+  it("handles server with neither url nor command", async () => {
+    const MockConnection = createMockConnectionClass({});
+
+    const core = {
+      config: {
+        mcpServers: [{ name: "incomplete", args: ["--test"] }], // no url, no command
+      },
+      hooks: { on: () => {}, notifyHooks: () => {} },
+    } as any;
+
+    const ext = create(core, MockConnection);
+    const mockRegistry = { register: () => {} };
+
+    // Should not throw, just skip the incomplete server
+    await (ext!.hooks![HOOKS.TOOLS_REGISTER] as Function)(mockRegistry);
+  });
+
+  it("handles stdio transport", async () => {
+    const mockConnection = createMockConnection({
+      tools: [{ name: "stdio_tool", description: "Stdio tool", inputSchema: { type: "object" } }],
+    });
+
+    const MockConnection = createMockConnectionClass({
+      connectStdio: async () => mockConnection,
+    });
+
+    const core = {
+      config: {
+        mcpServers: [{ name: "stdio", command: "node", args: ["server.js"], env: { NODE_ENV: "test" } }],
+      },
+      hooks: { on: () => {}, notifyHooks: () => {} },
+    } as any;
+
+    const ext = create(core, MockConnection);
+    const registeredTools: string[] = [];
+    const mockRegistry = {
+      register: (name: string) => {
+        registeredTools.push(name);
+      },
+    };
+
+    await (ext!.hooks![HOOKS.TOOLS_REGISTER] as Function)(mockRegistry);
+    expect(registeredTools).toHaveLength(1);
+    expect(registeredTools[0]).toBe("stdio/stdio_tool");
+  });
+
+  it("handles connection error in _connectServer catch block", async () => {
+    const MockConnection = createMockConnectionClass({
+      connectStdio: async () => { throw new Error("stdio failed"); },
+    });
+
+    const core = {
+      config: {
+        mcpServers: [{ name: "stdio-fail", command: "node", args: ["server.js"] }],
+      },
+      hooks: { on: () => {}, notifyHooks: () => {} },
+    } as any;
+
+    const ext = create(core, MockConnection);
+    const mockRegistry = { register: () => {} };
+
+    // Should not throw
+    await (ext!.hooks![HOOKS.TOOLS_REGISTER] as Function)(mockRegistry);
+  });
+
+  it("handles shutdown error gracefully", async () => {
+    const mockConnection = createMockConnection({
+      tools: [],
+    });
+    // Override shutdown to throw
+    mockConnection.shutdown = async () => { throw new Error("shutdown failed"); };
+
+    const MockConnection = createMockConnectionClass({
+      connectHttp: async () => mockConnection,
+    });
+
+    const core = {
+      config: {
+        mcpServers: [{ name: "test", url: "http://localhost/mcp" }],
+      },
+      hooks: { on: () => {}, notifyHooks: () => {} },
+    } as any;
+
+    const ext = create(core, MockConnection);
+    const mockRegistry = { register: () => {} };
+
+    await (ext!.hooks![HOOKS.TOOLS_REGISTER] as Function)(mockRegistry);
+    // Should not throw even if shutdown fails
+    await expect(ext!.shutdown()).resolves.toBeUndefined();
+  });
+});

@@ -41,114 +41,55 @@ describe("resolveCast", () => {
 });
 
 describe("CAST_BUILTINS", () => {
-  describe("truthy", () => {
-    const truthy = resolveCast("truthy")!;
+  const truthy = resolveCast("truthy")!;
+  const falsy = resolveCast("falsy")!;
+  const num = resolveCast("number")!;
+  const str = resolveCast("string")!;
+  const any = resolveCast("any")!;
+  const arr = resolveCast("array")!;
 
-    it("casts booleans through", () => {
-      expect(truthy(true)).toBe(true);
-      expect(truthy(false)).toBe(false);
-    });
-
-    it("casts truthy strings/numbers to true", () => {
-      for (const v of [1, 42, "true", "on", "1", "TRUE", "On", "  true  "]) {
-        expect(truthy(v)).toBe(true);
-      }
-    });
-
-    it("casts falsy strings/numbers to false", () => {
-      for (const v of [0, "false", "off", "0", "FALSE", "OFF", "  false  "]) {
-        expect(truthy(v)).toBe(false);
-      }
-    });
-
-    it("returns undefined for unrecognized values", () => {
-      expect(truthy("yes")).toBeUndefined();
-      expect(truthy("no")).toBeUndefined();
-      expect(truthy({})).toBeUndefined();
-      expect(truthy([])).toBeUndefined();
-    });
+  it("truthy cast handles booleans, strings, and numbers", () => {
+    expect(truthy(true)).toBe(true);
+    expect(truthy(false)).toBe(false);
+    for (const v of [1, 42, "true", "on", "1", "TRUE", "On", "  true  "]) expect(truthy(v)).toBe(true);
+    for (const v of [0, "false", "off", "0", "FALSE", "OFF", "  false  "]) expect(truthy(v)).toBe(false);
+    for (const v of ["yes", "no", {}, []]) expect(truthy(v)).toBeUndefined();
   });
 
-  describe("falsy", () => {
-    const falsy = resolveCast("falsy")!;
-
-    it("negates boolean and string values", () => {
-      expect(falsy(true)).toBe(false);
-      expect(falsy(false)).toBe(true);
-      expect(falsy("true")).toBe(false);
-      expect(falsy("false")).toBe(true);
-    });
-
-    it("returns undefined for unrecognized input", () => {
-      expect(falsy("yes")).toBeUndefined();
-    });
+  it("falsy cast negates truthy values", () => {
+    expect(falsy(true)).toBe(false);
+    expect(falsy(false)).toBe(true);
+    expect(falsy("true")).toBe(false);
+    expect(falsy("false")).toBe(true);
+    expect(falsy("yes")).toBeUndefined();
   });
 
-  describe("number", () => {
-    const number = resolveCast("number")!;
-
-    it("passes numbers through", () => {
-      expect(number(42)).toBe(42);
-      expect(number(-10)).toBe(-10);
-      expect(number(3.14)).toBe(3.14);
-    });
-
-    it("parses numeric strings", () => {
-      expect(number("42")).toBe(42);
-      expect(number("  42  ")).toBe(42);
-      expect(number("-10")).toBe(-10);
-    });
-
-    it("returns undefined for non-numeric input", () => {
-      expect(number("abc")).toBeUndefined();
-      expect(number("")).toBeUndefined();
-      expect(number("   ")).toBeUndefined();
-      expect(number({})).toBeUndefined();
-      expect(number(null)).toBeUndefined();
-      expect(number(true)).toBeUndefined();
-    });
+  it("number cast passes numbers through and parses numeric strings", () => {
+    expect(num(42)).toBe(42);
+    expect(num(-10)).toBe(-10);
+    expect(num(3.14)).toBe(3.14);
+    expect(num("42")).toBe(42);
+    expect(num("  42  ")).toBe(42);
+    for (const v of ["abc", "", "   ", {}, null, true]) expect(num(v)).toBeUndefined();
   });
 
-  describe("string", () => {
-    const string = resolveCast("string")!;
-
-    it("trims and returns non-empty strings", () => {
-      expect(string("hello")).toBe("hello");
-      expect(string("  hello  ")).toBe("hello");
-    });
-
-    it("returns undefined for empty or non-strings", () => {
-      expect(string("")).toBeUndefined();
-      expect(string("   ")).toBeUndefined();
-      expect(string(42)).toBeUndefined();
-      expect(string(null)).toBeUndefined();
-    });
+  it("string cast trims and returns non-empty strings", () => {
+    expect(str("hello")).toBe("hello");
+    expect(str("  hello  ")).toBe("hello");
+    for (const v of ["", "   ", 42, null]) expect(str(v)).toBeUndefined();
   });
 
-  describe("any", () => {
-    const any = resolveCast("any")!;
-
-    it("accepts any value as-is", () => {
-      expect(any(42)).toBe(42);
-      expect(any("hello")).toBe("hello");
-      expect(any(null)).toBeNull();
-      expect(any(undefined)).toBeUndefined();
-      expect(any({})).toEqual({});
-    });
+  it("any cast accepts any value as-is", () => {
+    expect(any(42)).toBe(42);
+    expect(any("hello")).toBe("hello");
+    expect(any(null)).toBeNull();
+    expect(any(undefined)).toBeUndefined();
+    expect(any({})).toEqual({});
   });
 
-  describe("array", () => {
-    const array = resolveCast("array")!;
-
-    it("accepts arrays", () => {
-      expect(array([1, 2, 3])).toEqual([1, 2, 3]);
-    });
-
-    it("returns undefined for non-arrays", () => {
-      expect(array("not-array")).toBeUndefined();
-      expect(array({})).toBeUndefined();
-      expect(array(null)).toBeUndefined();
-    });
+  it("array cast accepts arrays, rejects non-arrays", () => {
+    expect(arr([1, 2, 3])).toEqual([1, 2, 3]);
+    for (const v of ["not-array", {}, null]) expect(arr(v)).toBeUndefined();
   });
 });
 
@@ -274,9 +215,9 @@ describe("resolveAll", () => {
 
     const result = resolveAll(schema, context);
     // Should resolve all keys in the schema
-    for (const key of Object.keys(schema)) {
-      expect(result).toHaveProperty(key);
-    }
+    const resultKeys = Object.keys(result).sort();
+    const schemaKeys = Object.keys(schema).sort();
+    expect(resultKeys).toEqual(schemaKeys);
   });
 
   it("resolves with CLI overrides", () => {

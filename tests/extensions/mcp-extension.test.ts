@@ -1,11 +1,70 @@
 // Tests for mcp-client/index.ts — extension create, tool registration, and cleanup.
 
-import { describe, it, expect, mock } from "bun:test";
+import { describe, it, expect } from "bun:test";
 import { HOOKS } from "../../src/core/hooks.ts";
+import { create } from "../../src/extensions/mcp-client/index.ts";
+import type { McpConnection } from "../../src/extensions/mcp-client/connection.ts";
+
+// ── Helpers ─────────────────────────────────────────────────────────────────
+
+/** Create a mock McpConnection class for testing. */
+function createMockConnectionClass(config: {
+  connectHttp?: (name: string, url: string, headers: Record<string, string>) => Promise<McpConnection> | never;
+  connectStdio?: (name: string, command: string, args: string[], env: Record<string, string>) => Promise<McpConnection> | never;
+}): typeof McpConnection {
+  return class MockMcpConnection implements McpConnection {
+    tools: Record<string, unknown>[] = [];
+    serverName = "mock";
+
+    static async connectHttp(
+      serverName: string,
+      url: string,
+      headers: Record<string, string> = {},
+    ): Promise<McpConnection> {
+      if (config.connectHttp) return config.connectHttp(serverName, url, headers);
+      throw new Error("connectHttp not mocked");
+    }
+
+    static async connectStdio(
+      serverName: string,
+      command: string,
+      args: string[] = [],
+      env: Record<string, string> = {},
+    ): Promise<McpConnection> {
+      if (config.connectStdio) return config.connectStdio(serverName, command, args, env);
+      throw new Error("connectStdio not mocked");
+    }
+
+    handle() {
+      return { callTool: async () => ({}) };
+    }
+
+    async shutdown() {}
+  } as unknown as typeof McpConnection;
+}
+
+/** Create a mock connection instance. */
+function createMockConnection(config: {
+  tools?: Record<string, unknown>[];
+  callToolResult?: Record<string, unknown>;
+  shouldFailConnectHttp?: boolean;
+  shouldFailConnectStdio?: boolean;
+}) {
+  const mockConnection: McpConnection = {
+    tools: config.tools || [],
+    serverName: "mock",
+    handle: () => ({
+      callTool: async () => config.callToolResult || { content: [{ type: "text", text: "ok" }] },
+    }),
+    shutdown: async () => {},
+  };
+  return mockConnection;
+}
+
+// ── Tests ───────────────────────────────────────────────────────────────────
 
 describe("MCP extension", () => {
   it("returns null when no servers configured", async () => {
-    const { create } = await import("../../src/extensions/mcp-client/index.ts");
     const core = {
       config: {},
       hooks: { on: () => {}, notifyHooks: () => {} },
@@ -14,7 +73,6 @@ describe("MCP extension", () => {
   });
 
   it("returns null when all servers disabled", async () => {
-    const { create } = await import("../../src/extensions/mcp-client/index.ts");
     const core = {
       config: {
         mcpServers: [{ name: "test", enabled: false, url: "http://localhost" }],
@@ -25,7 +83,6 @@ describe("MCP extension", () => {
   });
 
   it("returns null in sandbox mode", async () => {
-    const { create } = await import("../../src/extensions/mcp-client/index.ts");
     const core = {
       config: {
         sandboxMode: true,
@@ -37,7 +94,6 @@ describe("MCP extension", () => {
   });
 
   it("returns extension with hooks when servers configured", async () => {
-    const { create } = await import("../../src/extensions/mcp-client/index.ts");
     const core = {
       config: {
         mcpServers: [{ name: "test", url: "http://localhost/mcp" }],
@@ -52,33 +108,25 @@ describe("MCP extension", () => {
   });
 
   it("registers tools from connected servers", async () => {
-    // Mock McpConnection before importing create
-    const mockConnection = {
+    const mockConnection = createMockConnection({
       tools: [
         { name: "echo", description: "Echo", inputSchema: { type: "object" } },
         { name: "blacklisted", description: "Should not appear", inputSchema: {} },
       ],
-      handle: () => ({
-        callTool: async () => ({ content: [{ type: "text", text: "ok" }] }),
-      }),
-      shutdown: async () => {},
-    };
+    });
 
-    mock.module("../../src/extensions/mcp-client/connection.ts", () => ({
-      McpConnection: {
-        connectHttp: async () => mockConnection,
-        connectStdio: async () => { throw new Error("stdio not mocked"); },
-      },
-    }));
+    const MockConnection = createMockConnectionClass({
+      connectHttp: async () => mockConnection,
+    });
 
-    const { create } = await import("../../src/extensions/mcp-client/index.ts");
     const core = {
       config: {
         mcpServers: [{ name: "test", url: "http://localhost/mcp" }],
       },
       hooks: { on: () => {}, notifyHooks: () => {} },
     } as any;
-    const ext = create(core);
+
+    const ext = create(core, MockConnection);
     const registeredTools: Array<{ name: string }> = [];
     const mockRegistry = {
       register: (name: string, tool: unknown) => {
@@ -94,23 +142,17 @@ describe("MCP extension", () => {
   });
 
   it("respects blacklistTools configuration", async () => {
-    const mockConnection = {
+    const mockConnection = createMockConnection({
       tools: [
         { name: "echo", description: "Echo", inputSchema: { type: "object" } },
         { name: "blacklisted", description: "Should not appear", inputSchema: {} },
       ],
-      handle: () => ({ callTool: async () => ({}) }),
-      shutdown: async () => {},
-    };
+    });
 
-    mock.module("../../src/extensions/mcp-client/connection.ts", () => ({
-      McpConnection: {
-        connectHttp: async () => mockConnection,
-        connectStdio: async () => { throw new Error("stdio not mocked"); },
-      },
-    }));
+    const MockConnection = createMockConnectionClass({
+      connectHttp: async () => mockConnection,
+    });
 
-    const { create } = await import("../../src/extensions/mcp-client/index.ts");
     const core = {
       config: {
         mcpServers: [
@@ -123,7 +165,8 @@ describe("MCP extension", () => {
       },
       hooks: { on: () => {}, notifyHooks: () => {} },
     } as any;
-    const ext = create(core);
+
+    const ext = create(core, MockConnection);
     const registeredTools: string[] = [];
     const mockRegistry = {
       register: (name: string) => {
@@ -138,52 +181,40 @@ describe("MCP extension", () => {
   });
 
   it("handles connection errors gracefully", async () => {
-    mock.module("../../src/extensions/mcp-client/connection.ts", () => ({
-      McpConnection: {
-        connectHttp: async () => { throw new Error("connection failed"); },
-        connectStdio: async () => {},
-      },
-    }));
+    const MockConnection = createMockConnectionClass({
+      connectHttp: async () => { throw new Error("connection failed"); },
+    });
 
-    const { create } = await import("../../src/extensions/mcp-client/index.ts");
     const core = {
       config: {
         mcpServers: [{ name: "failing", url: "http://localhost/mcp" }],
       },
       hooks: { on: () => {}, notifyHooks: () => {} },
     } as any;
-    const ext = create(core);
+
+    const ext = create(core, MockConnection);
     const mockRegistry = { register: () => {} };
 
     // Should not throw even if connection fails
     const result = await (ext!.hooks![HOOKS.TOOLS_REGISTER] as Function)(mockRegistry);
-    // Returns undefined, no error thrown
     expect(result).toBeUndefined();
   });
 
   it("shutdown cleans up connections", async () => {
-    const shutdownSpy = async () => {};
-    const mockConnection = {
-      tools: [],
-      handle: () => ({}),
-      shutdown: shutdownSpy,
-    };
+    const mockConnection = createMockConnection({ tools: [] });
 
-    mock.module("../../src/extensions/mcp-client/connection.ts", () => ({
-      McpConnection: {
-        connectHttp: async () => mockConnection,
-        connectStdio: async () => {},
-      },
-    }));
+    const MockConnection = createMockConnectionClass({
+      connectHttp: async () => mockConnection,
+    });
 
-    const { create } = await import("../../src/extensions/mcp-client/index.ts");
     const core = {
       config: {
         mcpServers: [{ name: "test", url: "http://localhost/mcp" }],
       },
       hooks: { on: () => {}, notifyHooks: () => {} },
     } as any;
-    const ext = create(core);
+
+    const ext = create(core, MockConnection);
     const mockRegistry = { register: () => {} };
 
     // Register tools first to create connections
@@ -196,27 +227,20 @@ describe("MCP extension", () => {
   });
 
   it("SHUTDOWN_CLEANUP hook cleans up connections", async () => {
-    const mockConnection = {
-      tools: [],
-      handle: () => ({}),
-      shutdown: async () => {},
-    };
+    const mockConnection = createMockConnection({ tools: [] });
 
-    mock.module("../../src/extensions/mcp-client/connection.ts", () => ({
-      McpConnection: {
-        connectHttp: async () => mockConnection,
-        connectStdio: async () => {},
-      },
-    }));
+    const MockConnection = createMockConnectionClass({
+      connectHttp: async () => mockConnection,
+    });
 
-    const { create } = await import("../../src/extensions/mcp-client/index.ts");
     const core = {
       config: {
         mcpServers: [{ name: "test", url: "http://localhost/mcp" }],
       },
       hooks: { on: () => {}, notifyHooks: () => {} },
     } as any;
-    const ext = create(core);
+
+    const ext = create(core, MockConnection);
     const mockRegistry = { register: () => {} };
 
     await (ext!.hooks![HOOKS.TOOLS_REGISTER] as Function)(mockRegistry);

@@ -357,8 +357,11 @@ describe("StdioTransport", () => {
 
 describe("McpClient.forStdio", () => {
   it("creates client with stdio transport", async () => {
-    // echo is a simple command that starts quickly
-    const client = await McpClient.forStdio("echo", ["test"]);
+    const client = await McpClient.forStdio("bun", [
+      "--preload",
+      "./tests/setup.ts",
+      "./tests/fixtures/mcp-test-server.ts",
+    ]);
     expect(client.transport.isStreaming).toBe(true);
     await client.shutdown();
   });
@@ -376,26 +379,26 @@ describe("McpClient.forStdio", () => {
 
 describe("StdioTransport", () => {
   it("sends messages to subprocess stdin", async () => {
-    const transport = new StdioTransport("cat");
-    await transport.send('{"test": true}');
-    await new Promise((r) => setTimeout(r, 50));
+    const transport = new StdioTransport("bun", ["./tests/fixtures/mcp-test-server.ts"]);
+    await transport.send('{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}');
+    await new Promise((r) => setTimeout(r, 100));
     await transport.destroy();
   });
 
   it("throws when sending to destroyed transport", async () => {
-    const transport = new StdioTransport("cat");
+    const transport = new StdioTransport("bun", ["./tests/fixtures/mcp-test-server.ts"]);
     await transport.destroy();
     await expect(transport.send("test")).rejects.toThrow("Transport is destroyed");
   });
 
   it("receives messages from subprocess stdout", async () => {
-    const transport = new StdioTransport("echo", ["hello world"]);
+    const transport = new StdioTransport("bun", ["-e", "console.log('hello world')"]);
     const receivedLines: string[] = [];
     const removeHandler = transport.onMessage((line) => {
       receivedLines.push(line);
     });
 
-    await new Promise((r) => setTimeout(r, 100));
+    await new Promise((r) => setTimeout(r, 200));
     removeHandler();
     await transport.destroy();
 
@@ -403,13 +406,13 @@ describe("StdioTransport", () => {
   });
 
   it("handles multiple messages", async () => {
-    const transport = new StdioTransport("printf", ["line1\nline2\nline3\n"]);
+    const transport = new StdioTransport("bun", ["-e", "console.log('line1'); console.log('line2'); console.log('line3');"]);
     const receivedLines: string[] = [];
     const removeHandler = transport.onMessage((line) => {
       receivedLines.push(line);
     });
 
-    await new Promise((r) => setTimeout(r, 100));
+    await new Promise((r) => setTimeout(r, 200));
     removeHandler();
     await transport.destroy();
 
@@ -417,13 +420,13 @@ describe("StdioTransport", () => {
   });
 
   it("skips empty lines", async () => {
-    const transport = new StdioTransport("printf", ["\n\nline\n\n"]);
+    const transport = new StdioTransport("bun", ["-e", "console.log(''); console.log(''); console.log('line'); console.log('');"]);
     const receivedLines: string[] = [];
     const removeHandler = transport.onMessage((line) => {
       receivedLines.push(line);
     });
 
-    await new Promise((r) => setTimeout(r, 100));
+    await new Promise((r) => setTimeout(r, 200));
     removeHandler();
     await transport.destroy();
 
@@ -431,14 +434,14 @@ describe("StdioTransport", () => {
   });
 
   it("supports multiple message handlers", async () => {
-    const transport = new StdioTransport("echo", ["multi-handler-test"]);
+    const transport = new StdioTransport("bun", ["-e", "console.log('multi-handler-test')"]);
     const handler1Lines: string[] = [];
     const handler2Lines: string[] = [];
 
     const remove1 = transport.onMessage((line) => handler1Lines.push(line));
     const remove2 = transport.onMessage((line) => handler2Lines.push(line));
 
-    await new Promise((r) => setTimeout(r, 100));
+    await new Promise((r) => setTimeout(r, 200));
     remove1();
     remove2();
     await transport.destroy();
@@ -448,7 +451,7 @@ describe("StdioTransport", () => {
   });
 
   it("removes handler when cleanup function called", async () => {
-    const transport = new StdioTransport("printf", ["a\nb\nc\n"]);
+    const transport = new StdioTransport("bun", ["-e", "console.log('a'); setTimeout(() => { console.log('b'); console.log('c'); }, 30);"]);
     const handler1Lines: string[] = [];
     const handler2Lines: string[] = [];
 
@@ -470,21 +473,21 @@ describe("StdioTransport", () => {
   });
 
   it("sendNotification writes to stdin", async () => {
-    const transport = new StdioTransport("cat");
-    transport.sendNotification('{"notification": true}');
-    await new Promise((r) => setTimeout(r, 50));
+    const transport = new StdioTransport("bun", ["./tests/fixtures/mcp-test-server.ts"]);
+    transport.sendNotification('{"jsonrpc":"2.0","method":"notifications/initialized"}');
+    await new Promise((r) => setTimeout(r, 100));
     await transport.destroy();
   });
 
   it("sendNotification is no-op after destroy", async () => {
-    const transport = new StdioTransport("cat");
+    const transport = new StdioTransport("bun", ["./tests/fixtures/mcp-test-server.ts"]);
     await transport.destroy();
     // Should not throw
     transport.sendNotification("test");
   });
 
   it("onClose registers close handler", async () => {
-    const transport = new StdioTransport("cat");
+    const transport = new StdioTransport("bun", ["./tests/fixtures/mcp-test-server.ts"]);
     let closed = false;
     const removeHandler = transport.onClose(() => { closed = true; });
     await transport.destroy();
@@ -493,22 +496,22 @@ describe("StdioTransport", () => {
   });
 
   it("destroy can be called multiple times", async () => {
-    const transport = new StdioTransport("cat");
+    const transport = new StdioTransport("bun", ["./tests/fixtures/mcp-test-server.ts"]);
     await transport.destroy();
     await transport.destroy();
   });
 
   it("exposes command and args", async () => {
-    const transport = new StdioTransport("cat", ["--help"], { KEY: "val" });
-    expect(transport.command).toBe("cat");
-    expect(transport.args).toEqual(["--help"]);
+    const transport = new StdioTransport("bun", ["./tests/fixtures/mcp-test-server.ts"], { KEY: "val" });
+    expect(transport.command).toBe("bun");
+    expect(transport.args).toEqual(["./tests/fixtures/mcp-test-server.ts"]);
     expect(transport.env).toHaveProperty("KEY", "val");
     await transport.destroy();
   });
 
   it("captures stderr output", async () => {
-    const transport = new StdioTransport("sh", ["-c", "echo error-msg >&2"]);
-    await new Promise((r) => setTimeout(r, 100));
+    const transport = new StdioTransport("bun", ["-e", "console.error('error-msg')"]);
+    await new Promise((r) => setTimeout(r, 200));
     expect(transport.stderrOutput).toContain("error-msg");
     await transport.destroy();
   });
@@ -518,40 +521,40 @@ describe("StdioTransport", () => {
 
 describe("McpClient stdio integration", () => {
   it("handles messages from subprocess", async () => {
-    // Use a simple script that outputs JSON-RPC responses
-    const client = await McpClient.forStdio("sh", ["-c", "echo '{\"jsonrpc\":\"2.0\",\"id\":999,\"result\":{\"data\":\"buffered\"}}'"]);
-    
+    // Use a script that outputs a JSON-RPC response immediately
+    const client = await McpClient.forStdio("bun", ["-e", "console.log(JSON.stringify({jsonrpc:'2.0',id:999,result:{data:'buffered'}}))"]);
+
     // Wait for message to be processed
-    await new Promise((r) => setTimeout(r, 100));
-    
+    await new Promise((r) => setTimeout(r, 200));
+
     // The buffered response should be available
     expect(client.buffered.length).toBeGreaterThan(0);
     await client.shutdown();
   });
 
   it("handles empty lines from subprocess without error", async () => {
-    const client = await McpClient.forStdio("sh", ["-c", "printf '\\n\\n\\n'"]);
-    await new Promise((r) => setTimeout(r, 100));
+    const client = await McpClient.forStdio("bun", ["-e", "console.log(''); console.log(''); console.log('');"]);
+    await new Promise((r) => setTimeout(r, 200));
     // Should not crash
     await client.shutdown();
   });
 
   it("handles invalid JSON lines from subprocess without error", async () => {
-    const client = await McpClient.forStdio("sh", ["-c", "echo 'not valid json'"]);
-    await new Promise((r) => setTimeout(r, 100));
+    const client = await McpClient.forStdio("bun", ["-e", "console.log('not valid json')"]);
+    await new Promise((r) => setTimeout(r, 200));
     // Should not crash
     await client.shutdown();
   });
 
   it("handles notifications (no id) without error", async () => {
-    const client = await McpClient.forStdio("sh", ["-c", "echo '{\"jsonrpc\":\"2.0\",\"method\":\"notifications/initialized\"}'"]);
-    await new Promise((r) => setTimeout(r, 100));
+    const client = await McpClient.forStdio("bun", ["-e", "console.log(JSON.stringify({jsonrpc:'2.0',method:'notifications/initialized'}))"]);
+    await new Promise((r) => setTimeout(r, 200));
     // Should not crash, notifications are ignored
     await client.shutdown();
   });
 
   it("message cleanup is called on shutdown", async () => {
-    const client = await McpClient.forStdio("cat");
+    const client = await McpClient.forStdio("bun", ["./tests/fixtures/mcp-test-server.ts"]);
     // Just verify shutdown completes without error
     await client.shutdown();
   });
@@ -597,15 +600,8 @@ describe("HttpTransport onClose", () => {
 
 describe("McpConnection connectStdio", () => {
   it("connects via stdio and initializes", async () => {
-    // Use a simple script that responds with proper MCP initialize response
-    const script = `
-      read line
-      echo '{"jsonrpc":"2.0","id":1,"result":{"protocolVersion":"2025-11-25","capabilities":{"tools":{}},"serverInfo":{"name":"test","version":"1.0"}}}'
-      read line
-      echo '{"jsonrpc":"2.0","id":2,"result":{"tools":[]}}'
-    `;
     const { McpConnection } = await import("../../src/extensions/mcp-client/connection.ts");
-    const conn = await McpConnection.connectStdio("test", "sh", ["-c", script]);
+    const conn = await McpConnection.connectStdio("test", "bun", ["./tests/fixtures/mcp-test-server.ts"]);
     expect(conn.serverName).toBe("test");
     expect(conn.tools).toEqual([]);
     await conn.shutdown();

@@ -53,8 +53,11 @@ interface McpServerConfig {
 /**
  * Create the MCP client extension.
  * Connects to configured MCP servers and registers their tools.
+ * @param core - The core context.
+ * @param Connection - Optional McpConnection class override for testing.
+ *                     Defaults to the real McpConnection.
  */
-export function create(core: CoreContext): ExtensionInstance | null {
+export function create(core: CoreContext, Connection = McpConnection): ExtensionInstance | null {
   // mcpServers is an array, not an object — read it directly from core.config
   const mcpServers = (core.config?.mcpServers as McpServerConfig[]) || [];
   const enabledServers = mcpServers.filter((s) => s.enabled !== false);
@@ -75,7 +78,7 @@ export function create(core: CoreContext): ExtensionInstance | null {
       [HOOKS.TOOLS_REGISTER]: async (registry) => {
         for (const server of enabledServers) {
           try {
-            const conn = await _connectServer(server);
+            const conn = await _connectServer(server, Connection);
             if (!conn) continue;
             connections.push(conn);
 
@@ -116,14 +119,17 @@ export function create(core: CoreContext): ExtensionInstance | null {
 /**
  * Connect to an MCP server based on its configuration.
  */
-async function _connectServer(server: McpServerConfig): Promise<McpConnection | null> {
+async function _connectServer(
+  server: McpServerConfig,
+  Connection: typeof McpConnection,
+): Promise<McpConnection | null> {
   try {
     if (server.url) {
       // HTTP transport
-      return await McpConnection.connectHttp(server.name, server.url, server.headers || {});
+      return await Connection.connectHttp(server.name, server.url, server.headers || {});
     } else if (server.command) {
       // Stdio transport
-      return await McpConnection.connectStdio(
+      return await Connection.connectStdio(
         server.name,
         server.command,
         server.args || [],

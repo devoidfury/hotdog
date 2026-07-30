@@ -1,6 +1,6 @@
 // Explore tool — run the agent in explorer mode against a project directory.
 
-import { spawn, ChildProcess } from "node:child_process";
+import { spawn as _spawn, ChildProcess } from "node:child_process";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import {
@@ -17,9 +17,22 @@ import { ToolContext } from "../../core/extensions/types.ts";
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const BIN_PATH = path.resolve(__dirname, "..", "..", "..", "bin", "hotdog");
 
+/** Spawn function type — same signature as node:child_process.spawn */
+export type SpawnFn = typeof _spawn;
+
 export class ExploreTool {
   static readonly TOOL_NAME = "explore";
   metadata: ToolMetadata = { sideEffects: false, difficulty: 4 };
+
+  private readonly spawnFn: SpawnFn;
+
+  /**
+   * @param spawnFn - Optional spawn function override for testing.
+   *                  Defaults to node:child_process.spawn.
+   */
+  constructor(spawnFn: SpawnFn = _spawn) {
+    this.spawnFn = spawnFn;
+  }
 
   toToolDef() {
     return toolDef(
@@ -76,7 +89,7 @@ export class ExploreTool {
       "--hide-tools",
       "--hide-thinking",
     ];
-    const proc: ChildProcess = spawn("bun", command, {
+    const proc: ChildProcess = this.spawnFn("bun", command, {
       cwd: args.path,
       stdio: ["pipe", "pipe", "pipe"],
     });

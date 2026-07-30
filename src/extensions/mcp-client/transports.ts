@@ -191,40 +191,37 @@ export class StdioTransport implements McpTransport {
     if (!readStream) return;
     let buffer = "";
 
-    this.#readerTask = (async () => {
-      try {
-        for await (const chunk of readStream) {
-          if (this.#destroyed) break;
-          buffer += chunk.toString();
+    readStream.on("data", (chunk: Buffer) => {
+      if (this.#destroyed) return;
+      buffer += chunk.toString();
 
-          // Process complete lines
-          let newlineIdx: number;
-          while ((newlineIdx = buffer.indexOf("\n")) !== -1) {
-            const line = buffer.slice(0, newlineIdx);
-            buffer = buffer.slice(newlineIdx + 1);
-            this.#dispatchMessage(line);
-          }
-        }
-      } catch (e: unknown) {
-        if (!this.#destroyed) {
-          logger.error(`MCP stdio reader error: ${formatError(e)}`);
-        }
+      // Process complete lines
+      let newlineIdx: number;
+      while ((newlineIdx = buffer.indexOf("\n")) !== -1) {
+        const line = buffer.slice(0, newlineIdx);
+        buffer = buffer.slice(newlineIdx + 1);
+        this.#dispatchMessage(line);
       }
-    })();
+    });
+
+    readStream.on("error", (e: Error) => {
+      if (!this.#destroyed) {
+        logger.error(`MCP stdio reader error: ${formatError(e)}`);
+      }
+    });
+
+    this.#readerTask = Promise.resolve();
   }
 
   #startStderrReader(): void {
     const stderr = this.#stderr;
     if (!stderr) return;
-    this.#stderrTask = (async () => {
-      try {
-        for await (const chunk of stderr) {
-          this.#stderrOutput += chunk.toString();
-        }
-      } catch {
-        // Ignore
-      }
-    })();
+
+    stderr.on("data", (chunk: Buffer) => {
+      this.#stderrOutput += chunk.toString();
+    });
+
+    this.#stderrTask = Promise.resolve();
   }
 
   #dispatchMessage(line: string): void {

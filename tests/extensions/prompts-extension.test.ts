@@ -31,7 +31,7 @@ describe("Prompts Extension", () => {
     );
 
     const ext = await create({
-      config: { prompts: { promptsPath: tmpDir } },
+      config: { prompts: { promptsPath: tmpDir, displayPrompt: true } },
     } as any);
 
     expect(ext).toBeDefined();
@@ -43,7 +43,7 @@ describe("Prompts Extension", () => {
     writePromptFile("farewell", "---\ndescription: Farewell\n---\nGoodbye");
 
     const ext = await create({
-      config: { prompts: { promptsPath: tmpDir } },
+      config: { prompts: { promptsPath: tmpDir, displayPrompt: true } },
     } as any);
 
     const prompts = (ext as any).getAllPrompts();
@@ -57,7 +57,7 @@ describe("Prompts Extension", () => {
     );
 
     const ext = await create({
-      config: { prompts: { promptsPath: tmpDir } },
+      config: { prompts: { promptsPath: tmpDir, displayPrompt: true } },
     } as any);
 
     const prompt = (ext as any).getPrompt("greet");
@@ -70,7 +70,7 @@ describe("Prompts Extension", () => {
     writePromptFile("greet", "---\ndescription: Greet\n---\nHello");
 
     const ext = await create({
-      config: { prompts: { promptsPath: tmpDir } },
+      config: { prompts: { promptsPath: tmpDir, displayPrompt: true } },
     } as any);
 
     expect((ext as any).getPrompt("unknown")).toBeNull();
@@ -83,7 +83,7 @@ describe("Prompts Extension", () => {
     );
 
     const ext = await create({
-      config: { prompts: { promptsPath: tmpDir } },
+      config: { prompts: { promptsPath: tmpDir, displayPrompt: true } },
     } as any);
 
     expect(ext.hooks![HOOKS.COMMANDS_REGISTER]).toBeDefined();
@@ -107,7 +107,7 @@ describe("Prompts Extension", () => {
     );
 
     const ext = await create({
-      config: { prompts: { promptsPath: tmpDir } },
+      config: { prompts: { promptsPath: tmpDir, displayPrompt: true } },
     } as any);
 
     const agent = new MockAgent();
@@ -129,7 +129,7 @@ describe("Prompts Extension", () => {
     // By default displayPrompt is true, so the handler returns both DISPLAY
     // and PROMPT flags — the bus will show the rendered prompt AND
     // enqueue it for LLM processing.
-    expect(result.action).toBe(ACTIONS.PROMPT);
+    expect(result.action).toBe(ACTIONS.DISPLAY | ACTIONS.PROMPT);
     expect(result.content).toBe("Hello world");
     expect(messagesAdded.length).toBe(0);
   });
@@ -161,7 +161,7 @@ describe("Prompts Extension", () => {
 
   it("prompt command returns error for unknown prompt", async () => {
     const ext = await create({
-      config: { prompts: { promptsPath: tmpDir } },
+      config: { prompts: { promptsPath: tmpDir, displayPrompt: true } },
     } as any);
 
     const agent = new MockAgent();

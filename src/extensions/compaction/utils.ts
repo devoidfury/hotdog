@@ -170,7 +170,7 @@ import {
 interface CompactionSettings {
   enabled?: boolean;
   reserveTokens?: number;
-  keepRecent?: number;
+  keepRecentMessages?: number;
 }
 
 interface CompactResult {
@@ -189,7 +189,7 @@ export async function compactMessages(
 ): Promise<CompactResult | null> {
   if (!settings.enabled) return null;
 
-  const firstKept = findFirstKeptIndex(messages, settings.keepRecent ?? 8);
+  const firstKept = findFirstKeptIndex(messages, settings.keepRecentMessages);
   if (firstKept === 0) return null;
 
   const messagesToCompact = messages.slice(0, firstKept);

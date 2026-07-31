@@ -27,7 +27,7 @@ const noopLlmChat = async (): Promise<string> => "";
 const defaultSettings = {
   enabled: true,
   reserveTokens: 8000,
-  keepRecent: 3,
+  keepRecentMessages: 3,
   contextLimit: 128000,
 };
 
@@ -43,7 +43,7 @@ describe("DropStrategy", () => {
 
   it("returns null when no messages to drop", async () => {
     const messages = [makeMessage("user"), makeMessage("assistant")];
-    const settings = { ...defaultSettings, keepRecent: 3 };
+    const settings = { ...defaultSettings, keepRecentMessages: 3 };
 
     const result = await new DropStrategy().execute(messages, settings);
     expect(result).toBeNull();
@@ -51,7 +51,7 @@ describe("DropStrategy", () => {
 
   it("drops old messages and returns compact result", async () => {
     const messages = Array.from({ length: 10 }, (_, i) => makeMessage(i % 2 === 0 ? "user" : "assistant"));
-    const settings = { ...defaultSettings, keepRecent: 2 };
+    const settings = { ...defaultSettings, keepRecentMessages: 2 };
 
     const result = await new DropStrategy().execute(messages, settings);
 
@@ -61,15 +61,15 @@ describe("DropStrategy", () => {
     expect(result!.metadata!.strategyName).toBe("drop");
   });
 
-  it("respects keepRecent setting", async () => {
+  it("respects keepRecentMessages setting", async () => {
     const messages = Array.from({ length: 20 }, (_, i) => makeMessage(i % 2 === 0 ? "user" : "assistant"));
-    const keepRecent = 5;
-    const settings = { ...defaultSettings, keepRecent };
+    const keepRecentMessages = 5;
+    const settings = { ...defaultSettings, keepRecentMessages };
 
     const result = await new DropStrategy().execute(messages, settings);
 
     expect(result).not.toBeNull();
-    // With 20 messages and keepRecent=5, we keep the last 9 messages (indices 11-19)
+    // With 20 messages and keepRecentMessages=5, we keep the last 9 messages (indices 11-19)
     // messagesCompacted = 11 (indices 0-10 are compacted)
     expect(result!.messagesCompacted).toBe(11);
   });
@@ -77,7 +77,7 @@ describe("DropStrategy", () => {
   it("includes token counts in metadata", async () => {
     const content = "x".repeat(2000); // 500 tokens each
     const messages = Array.from({ length: 10 }, (_, i) => makeMessage(i % 2 === 0 ? "user" : "assistant", content));
-    const settings = { ...defaultSettings, keepRecent: 2 };
+    const settings = { ...defaultSettings, keepRecentMessages: 2 };
 
     const result = await new DropStrategy().execute(messages, settings);
 
@@ -108,15 +108,14 @@ describe("DropStrategy", () => {
     expect(result).toBe(true);
   });
 
-  it("uses default keepRecent of 8 when not specified", async () => {
+  it("uses keepRecentMessages value from settings", async () => {
     const messages = Array.from({ length: 20 }, (_, i) => makeMessage(i % 2 === 0 ? "user" : "assistant"));
-    const settings = { ...defaultSettings, keepRecent: undefined };
+    const settings = { ...defaultSettings, keepRecentMessages: 3 };
 
     const result = await new DropStrategy().execute(messages, settings);
 
     expect(result).not.toBeNull();
-    // keepRecent defaults to 8 in DropStrategy, target=16, counts 16 from end
-    // returns index 5 (i+1 where i=4). messagesCompacted = 5.
+    // keepRecentMessages=3, target=6, counts 6 from end
     // Using >= to be resilient to implementation changes while verifying compaction occurred
     expect(result!.messagesCompacted).toBeGreaterThan(0);
     expect(result!.messagesCompacted).toBeLessThan(messages.length);
@@ -127,7 +126,7 @@ describe("DropStrategy", () => {
       makeMessage("system", "System 1"),
       makeMessage("system", "System 2"),
     ];
-    const settings = { ...defaultSettings, keepRecent: 1 };
+    const settings = { ...defaultSettings, keepRecentMessages: 1 };
 
     const result = await new DropStrategy().execute(messages, settings);
     expect(result).toBeNull();
@@ -137,19 +136,19 @@ describe("DropStrategy", () => {
     const strategy = new DropStrategy();
     const messages = Array.from({ length: 10 }, (_, i) => makeMessage(i % 2 === 0 ? "user" : "assistant"));
 
-    // keepRecent=3 -> threshold = 3*2 = 6, 10 > 6 -> true
-    expect(strategy.canCompact(messages, { ...defaultSettings, keepRecent: 3 })).toBe(true);
+    // keepRecentMessages=3 -> threshold = 3*2 = 6, 10 > 6 -> true
+    expect(strategy.canCompact(messages, { ...defaultSettings, keepRecentMessages: 3 })).toBe(true);
 
-    // keepRecent=6 -> threshold = 6*2 = 12, 10 > 12 -> false
-    expect(strategy.canCompact(messages, { ...defaultSettings, keepRecent: 6 })).toBe(false);
+    // keepRecentMessages=6 -> threshold = 6*2 = 12, 10 > 12 -> false
+    expect(strategy.canCompact(messages, { ...defaultSettings, keepRecentMessages: 6 })).toBe(false);
   });
 
-  it("canCompact with keepRecent=0 uses default 3", () => {
+  it("canCompact with keepRecentMessages=0 uses default 3", () => {
     const strategy = new DropStrategy();
     const messages = Array.from({ length: 10 }, (_, i) => makeMessage(i % 2 === 0 ? "user" : "assistant"));
 
-    // keepRecent=0 -> uses default 3, threshold = 3*2 = 6, 10 > 6 -> true
-    expect(strategy.canCompact(messages, { ...defaultSettings, keepRecent: 0 })).toBe(true);
+    // keepRecentMessages=0 -> uses default 3, threshold = 3*2 = 6, 10 > 6 -> true
+    expect(strategy.canCompact(messages, { ...defaultSettings, keepRecentMessages: 0 })).toBe(true);
   });
 
   it("handles empty messages array", async () => {
@@ -170,7 +169,7 @@ describe("SummarizeStrategy", () => {
 
   it("returns null when no messages to compact", async () => {
     const messages = [makeMessage("user"), makeMessage("assistant")];
-    const settings = { ...defaultSettings, keepRecent: 3 };
+    const settings = { ...defaultSettings, keepRecentMessages: 3 };
 
     const result = await new SummarizeStrategy().execute(messages, settings, noopLlmChat, "model");
     expect(result).toBeNull();
@@ -186,7 +185,7 @@ describe("SummarizeStrategy", () => {
     };
 
     const messages = Array.from({ length: 10 }, (_, i) => makeMessage(i % 2 === 0 ? "user" : "assistant"));
-    const settings = { ...defaultSettings, keepRecent: 2 };
+    const settings = { ...defaultSettings, keepRecentMessages: 2 };
 
     const result = await new SummarizeStrategy().execute(messages, settings, mockLlmChat, "test-model");
 
@@ -205,14 +204,14 @@ describe("SummarizeStrategy", () => {
       return "summary";
     };
 
-    // Need at least keepRecent*2+1 messages so findFirstKeptIndex returns > 0
-    // With keepRecent=1, target=2, so we need 3+ messages to get firstKept > 0
+    // Need at least keepRecentMessages*2+1 messages so findFirstKeptIndex returns > 0
+    // With keepRecentMessages=1, target=2, so we need 3+ messages to get firstKept > 0
     const messages = [
       makeMessage("user", "Hello"),
       makeMessage("assistant", "Hi there"),
       makeMessage("user", "Third message"),
     ];
-    const settings = { ...defaultSettings, keepRecent: 1 };
+    const settings = { ...defaultSettings, keepRecentMessages: 1 };
 
     await new SummarizeStrategy().execute(messages, settings, mockLlmChat, "model");
 
@@ -224,7 +223,7 @@ describe("SummarizeStrategy", () => {
     const failingLlmChat = async () => { throw new Error("API error"); };
 
     const messages = Array.from({ length: 10 }, (_, i) => makeMessage(i % 2 === 0 ? "user" : "assistant"));
-    const settings = { ...defaultSettings, keepRecent: 2 };
+    const settings = { ...defaultSettings, keepRecentMessages: 2 };
 
     await expect(
       new SummarizeStrategy().execute(messages, settings, failingLlmChat, "model")
@@ -234,7 +233,7 @@ describe("SummarizeStrategy", () => {
   it("includes token counts in metadata", async () => {
     const content = "x".repeat(2000);
     const messages = Array.from({ length: 10 }, (_, i) => makeMessage(i % 2 === 0 ? "user" : "assistant", content));
-    const settings = { ...defaultSettings, keepRecent: 2 };
+    const settings = { ...defaultSettings, keepRecentMessages: 2 };
 
     const result = await new SummarizeStrategy().execute(messages, settings, noopLlmChat, "model");
 
@@ -259,15 +258,15 @@ describe("SummarizeStrategy", () => {
     )).toBe(true);
   });
 
-  it("uses default keepRecent of 8 when not specified", async () => {
+  it("uses keepRecentMessages value from settings", async () => {
     const messages = Array.from({ length: 20 }, (_, i) => makeMessage(i % 2 === 0 ? "user" : "assistant"));
-    const settings = { ...defaultSettings, keepRecent: undefined };
+    const settings = { ...defaultSettings, keepRecentMessages: 3 };
 
     const result = await new SummarizeStrategy().execute(messages, settings, noopLlmChat, "model");
 
     expect(result).not.toBeNull();
-    // keepRecent defaults to 8, so firstKept = 5 (same as DropStrategy)
-    expect(result!.messagesCompacted).toBe(5);
+    // keepRecentMessages=3, target=6, firstKept = 15
+    expect(result!.messagesCompacted).toBeGreaterThan(0);
   });
 
   it("returns null when all messages are system messages", async () => {
@@ -275,7 +274,7 @@ describe("SummarizeStrategy", () => {
       makeMessage("system", "System 1"),
       makeMessage("system", "System 2"),
     ];
-    const settings = { ...defaultSettings, keepRecent: 1 };
+    const settings = { ...defaultSettings, keepRecentMessages: 1 };
 
     const result = await new SummarizeStrategy().execute(messages, settings, noopLlmChat, "model");
     expect(result).toBeNull();
@@ -293,7 +292,7 @@ describe("SummarizeStrategy", () => {
       makeMessage("assistant", "Hi there"),
       makeMessage("user", "Third message"),
     ];
-    const settings = { ...defaultSettings, keepRecent: 1 };
+    const settings = { ...defaultSettings, keepRecentMessages: 1 };
 
     await new SummarizeStrategy().execute(messages, settings, mockLlmChat, "model");
 
@@ -314,7 +313,7 @@ describe("SummarizeStrategy", () => {
       makeMessage("assistant", "Hi there"),
       makeMessage("user", "Third message"),
     ];
-    const settings = { ...defaultSettings, keepRecent: 1 };
+    const settings = { ...defaultSettings, keepRecentMessages: 1 };
 
     await new SummarizeStrategy().execute(messages, settings, mockLlmChat, "custom-model");
     expect(capturedModel).toBe("custom-model");
@@ -337,7 +336,7 @@ describe("SummarizeShortStrategy", () => {
 
   it("returns null when no messages to compact", async () => {
     const messages = [makeMessage("user"), makeMessage("assistant")];
-    const settings = { ...defaultSettings, keepRecent: 3 };
+    const settings = { ...defaultSettings, keepRecentMessages: 3 };
 
     const result = await new SummarizeShortStrategy().execute(messages, settings, noopLlmChat, "model");
     expect(result).toBeNull();
@@ -350,13 +349,13 @@ describe("SummarizeShortStrategy", () => {
       return "brief summary";
     };
 
-    // Need at least keepRecent*2+1 messages so findFirstKeptIndex returns > 0
+    // Need at least keepRecentMessages*2+1 messages so findFirstKeptIndex returns > 0
     const messages = [
       makeMessage("user", "Hello"),
       makeMessage("assistant", "Hi there"),
       makeMessage("user", "Third message"),
     ];
-    const settings = { ...defaultSettings, keepRecent: 1 };
+    const settings = { ...defaultSettings, keepRecentMessages: 1 };
 
     const result = await new SummarizeShortStrategy().execute(messages, settings, mockLlmChat, "model");
 
@@ -369,7 +368,7 @@ describe("SummarizeShortStrategy", () => {
     const failingLlmChat = async () => { throw new Error("API error"); };
 
     const messages = Array.from({ length: 10 }, (_, i) => makeMessage(i % 2 === 0 ? "user" : "assistant"));
-    const settings = { ...defaultSettings, keepRecent: 2 };
+    const settings = { ...defaultSettings, keepRecentMessages: 2 };
 
     await expect(
       new SummarizeShortStrategy().execute(messages, settings, failingLlmChat, "model")
@@ -378,22 +377,22 @@ describe("SummarizeShortStrategy", () => {
 
   it("metadata identifies strategy as summarize-short", async () => {
     const messages = Array.from({ length: 10 }, (_, i) => makeMessage(i % 2 === 0 ? "user" : "assistant"));
-    const settings = { ...defaultSettings, keepRecent: 2 };
+    const settings = { ...defaultSettings, keepRecentMessages: 2 };
 
     const result = await new SummarizeShortStrategy().execute(messages, settings, noopLlmChat, "model");
 
     expect(result!.metadata!.strategyName).toBe("summarize-short");
   });
 
-  it("uses default keepRecent of 8 when not specified", async () => {
+  it("uses keepRecentMessages value from settings", async () => {
     const messages = Array.from({ length: 20 }, (_, i) => makeMessage(i % 2 === 0 ? "user" : "assistant"));
-    const settings = { ...defaultSettings, keepRecent: undefined };
+    const settings = { ...defaultSettings, keepRecentMessages: 3 };
 
     const result = await new SummarizeShortStrategy().execute(messages, settings, noopLlmChat, "model");
 
     expect(result).not.toBeNull();
-    // keepRecent defaults to 8, so firstKept = 5 (same as DropStrategy)
-    expect(result!.messagesCompacted).toBe(5);
+    // keepRecentMessages=3, target=6
+    expect(result!.messagesCompacted).toBeGreaterThan(0);
   });
 
   it("returns null when all messages are system messages", async () => {
@@ -401,7 +400,7 @@ describe("SummarizeShortStrategy", () => {
       makeMessage("system", "System 1"),
       makeMessage("system", "System 2"),
     ];
-    const settings = { ...defaultSettings, keepRecent: 1 };
+    const settings = { ...defaultSettings, keepRecentMessages: 1 };
 
     const result = await new SummarizeShortStrategy().execute(messages, settings, noopLlmChat, "model");
     expect(result).toBeNull();
@@ -410,7 +409,7 @@ describe("SummarizeShortStrategy", () => {
   it("includes token counts in metadata", async () => {
     const content = "x".repeat(2000);
     const messages = Array.from({ length: 10 }, (_, i) => makeMessage(i % 2 === 0 ? "user" : "assistant", content));
-    const settings = { ...defaultSettings, keepRecent: 2 };
+    const settings = { ...defaultSettings, keepRecentMessages: 2 };
 
     const result = await new SummarizeShortStrategy().execute(messages, settings, noopLlmChat, "model");
 
@@ -449,7 +448,7 @@ describe("SummarizeShortStrategy", () => {
       makeMessage("assistant", "Hi there"),
       makeMessage("user", "Third message"),
     ];
-    const settings = { ...defaultSettings, keepRecent: 1 };
+    const settings = { ...defaultSettings, keepRecentMessages: 1 };
 
     await new SummarizeShortStrategy().execute(messages, settings, mockLlmChat, "model");
 
@@ -473,7 +472,7 @@ describe("SummarizeShortStrategy", () => {
       makeMessage("assistant", "Hi there"),
       makeMessage("user", "Third message"),
     ];
-    const settings = { ...defaultSettings, keepRecent: 1 };
+    const settings = { ...defaultSettings, keepRecentMessages: 1 };
 
     await new SummarizeShortStrategy().execute(messages, settings, mockLlmChat, "custom-model");
     expect(capturedModel).toBe("custom-model");

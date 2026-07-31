@@ -22,9 +22,17 @@ function makeMessages(count: number, content = "x".repeat(100)) {
 function createMockCore(config: any = {}) {
   const hooks = new HookSystem();
   const toolRegistry = new ToolRegistry();
+  const compactionConfig = {
+    enabled: true,
+    reserveTokens: 8000,
+    keepRecentMessages: 3,
+    strategy: "summarize",
+    userTurnGuardPrompt: "Continue from the compressed conversation context above.",
+    ...config,
+  };
   return {
     hooks,
-    config: { compaction: config },
+    config: { compaction: compactionConfig },
     modelRegistry: {
       "test-model": { name: "test-model", temperature: null, contextLimit: 32000 },
     },
@@ -71,7 +79,7 @@ describe("Compaction Extension Creation", () => {
     const ext = createCompactionExtension(core);
     expect(ext).not.toBeNull();
     expect((ext as any).settings.enabled).toBe(true);
-    expect((ext as any).settings.keepRecentMessages).toBe(8);
+    expect((ext as any).settings.keepRecentMessages).toBe(3);
     expect((ext as any).settings.strategy).toBe("summarize");
   });
 
@@ -108,9 +116,8 @@ describe("Compaction Extension Creation", () => {
     expect(list.length).toBe(expected.length);
   });
 
-  it("should normalize keepRecentMessages to keepRecent in settings", () => {
+  it("should use keepRecentMessages from config", () => {
     const ext = createCompactionExtension(createMockCore({ enabled: true, keepRecentMessages: 4 }));
-    expect((ext as any).settings.keepRecent).toBe(4);
     expect((ext as any).settings.keepRecentMessages).toBe(4);
   });
  
@@ -227,7 +234,7 @@ describe("Hook Integration", () => {
     });
   }
 
-  it("should not trigger compaction when no modelRegistry", async () => {
+  it("should error when no modelRegistry", async () => {
     const core = createMockCore({
       enabled: true,
       keepRecentMessages: 2,
@@ -241,11 +248,10 @@ describe("Hook Integration", () => {
     const agent = createMockAgent(context);
     const messages = [{ role: "system", content: "" }, ...context];
 
-    // Should fall back to default 128000 context limit, so no compaction
-    await (ext as any).hooks![HOOKS.CONTEXT]!({ messages: messages as any, agent });
-
-    // With default 128000 limit, 100 * 125 = 12500 tokens, well under budget
-    expect(agent.log.length).toBe(100);
+    // Should error when model is not found in registry
+    await expect(
+      (ext as any).hooks![HOOKS.CONTEXT]!({ messages: messages as any, agent })
+    ).rejects.toThrow(/not found in registry/);
   });
 
   it("should not trigger compaction when non-system messages are few", async () => {

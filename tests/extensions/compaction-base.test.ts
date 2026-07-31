@@ -20,7 +20,7 @@ describe("CompactionStrategy", () => {
 
   it("execute throws NotImplementedException", async () => {
     const strategy = new CompactionStrategy();
-    const settings: CompactionSettings = { enabled: true, reserveTokens: 0, keepRecent: 0 };
+    const settings: CompactionSettings = { enabled: true, reserveTokens: 0, keepRecentMessages: 0 };
     await expect(
       strategy.execute([], settings, async () => "", "model"),
     ).rejects.toThrow("execute() not implemented");
@@ -33,7 +33,7 @@ describe("CompactionStrategy", () => {
         msg("user", "hello"),
         msg("assistant", "hi"),
       ];
-      const settings: CompactionSettings = { enabled: true, reserveTokens: 0, keepRecent: 2 };
+      const settings: CompactionSettings = { enabled: true, reserveTokens: 0, keepRecentMessages: 2 };
       expect(strategy.canCompact(messages, settings)).toBe(false);
     });
 
@@ -42,20 +42,20 @@ describe("CompactionStrategy", () => {
       const messages = Array.from({ length: 6 }, (_, i) =>
         msg(i % 2 === 0 ? "user" : "assistant", "x"),
       );
-      const settings: CompactionSettings = { enabled: true, reserveTokens: 0, keepRecent: 1 };
+      const settings: CompactionSettings = { enabled: true, reserveTokens: 0, keepRecentMessages: 1 };
       expect(strategy.canCompact(messages, settings)).toBe(true);
     });
 
     it("returns false for empty messages", () => {
-      const settings: CompactionSettings = { enabled: true, reserveTokens: 0, keepRecent: 1 };
+      const settings: CompactionSettings = { enabled: true, reserveTokens: 0, keepRecentMessages: 1 };
       expect(new CompactionStrategy().canCompact([], settings)).toBe(false);
     });
 
-    it("handles keepRecent=0 (uses default 3)", () => {
+    it("handles keepRecentMessages=0 (uses default 3)", () => {
       const strategy = new CompactionStrategy();
-      const emptySettings: CompactionSettings = { enabled: true, reserveTokens: 0, keepRecent: 0 };
+      const emptySettings: CompactionSettings = { enabled: true, reserveTokens: 0, keepRecentMessages: 0 };
       expect(strategy.canCompact([], emptySettings)).toBe(false);
-      const settings: CompactionSettings = { enabled: true, reserveTokens: 0, keepRecent: 0 };
+      const settings: CompactionSettings = { enabled: true, reserveTokens: 0, keepRecentMessages: 0 };
       expect(strategy.canCompact(
         Array.from({ length: 10 }, (_, i) => msg(i % 2 === 0 ? "user" : "assistant", "x")),
         settings,
@@ -64,13 +64,13 @@ describe("CompactionStrategy", () => {
 
     it("ignores system messages in count", () => {
       const strategy = new CompactionStrategy();
-      const settings1: CompactionSettings = { enabled: true, reserveTokens: 0, keepRecent: 3 };
+      const settings1: CompactionSettings = { enabled: true, reserveTokens: 0, keepRecentMessages: 3 };
       expect(strategy.canCompact(
         [msg("system", "p1"), msg("system", "p2")],
         settings1,
       )).toBe(false);
 
-      const settings2: CompactionSettings = { enabled: true, reserveTokens: 0, keepRecent: 1 };
+      const settings2: CompactionSettings = { enabled: true, reserveTokens: 0, keepRecentMessages: 1 };
       expect(strategy.canCompact(
         [
           msg("system", "prompt"),
@@ -83,9 +83,9 @@ describe("CompactionStrategy", () => {
     it("boundary: exactly at threshold returns false, one above returns true", () => {
       const strategy = new CompactionStrategy();
       const four = Array.from({ length: 4 }, (_, i) => msg(i % 2 === 0 ? "user" : "assistant", "x"));
-      const settings1: CompactionSettings = { enabled: true, reserveTokens: 0, keepRecent: 2 };
+      const settings1: CompactionSettings = { enabled: true, reserveTokens: 0, keepRecentMessages: 2 };
       expect(strategy.canCompact(four, settings1)).toBe(false); // 4 > 4 => false
-      const settings2: CompactionSettings = { enabled: true, reserveTokens: 0, keepRecent: 2 };
+      const settings2: CompactionSettings = { enabled: true, reserveTokens: 0, keepRecentMessages: 2 };
       expect(strategy.canCompact([...four, msg("user", "x")], settings2)).toBe(true); // 5 > 4 => true
     });
   });
@@ -112,7 +112,7 @@ describe("CompactionStrategy", () => {
         }
       }
       const strategy = new TestStrategy();
-      const settings: CompactionSettings = { enabled: true, reserveTokens: 0, keepRecent: 0 };
+      const settings: CompactionSettings = { enabled: true, reserveTokens: 0, keepRecentMessages: 0 };
       const result = await strategy.execute([], settings, async () => "", "model");
       expect(result!.summary).toBe("test result");
       expect(result!.messagesCompacted).toBe(5);
@@ -123,7 +123,7 @@ describe("CompactionStrategy", () => {
         override name = "test";
         override canCompact(_messages: any, _settings: any) { return true; }
       }
-      expect(new TestStrategy().canCompact([], { enabled: true, reserveTokens: 0, keepRecent: 0 })).toBe(true);
+      expect(new TestStrategy().canCompact([], { enabled: true, reserveTokens: 0, keepRecentMessages: 0 })).toBe(true);
     });
   });
 });

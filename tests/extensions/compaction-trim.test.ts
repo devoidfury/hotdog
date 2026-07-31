@@ -14,7 +14,7 @@ const noopLlmChat = async (): Promise<string> => "";
 const defaultSettings = {
   enabled: true,
   reserveTokens: 8000,
-  keepRecent: 3,
+  keepRecentMessages: 3,
   contextLimit: 128000,
 };
 
@@ -49,7 +49,7 @@ describe("TrimStrategy", () => {
     const messages = Array.from({ length: 20 }, (_, i) => makeMessage(i % 2 === 0 ? "user" : "assistant", content));
 
     // Budget: only room for ~10 messages (10 * 500 = 5000 tokens)
-    const settings = { ...defaultSettings, contextLimit: 6000, reserveTokens: 0, keepRecent: 2 };
+    const settings = { ...defaultSettings, contextLimit: 6000, reserveTokens: 0, keepRecentMessages: 2 };
 
     const result = await new TrimStrategy().execute(messages, settings, noopLlmChat, "test-model");
 
@@ -69,7 +69,7 @@ describe("TrimStrategy", () => {
     ];
 
     // Budget: 20000 tokens -> room for ~20 messages but we have 21 total (1 system + 20 non-system)
-    const settings = { ...defaultSettings, contextLimit: 18000, reserveTokens: 0, keepRecent: 2 };
+    const settings = { ...defaultSettings, contextLimit: 18000, reserveTokens: 0, keepRecentMessages: 2 };
 
     const result = await new TrimStrategy().execute(messages, settings, noopLlmChat, "test-model");
 
@@ -99,7 +99,7 @@ describe("TrimStrategy", () => {
     const messages = Array.from({ length: 10 }, (_, i) => makeMessage(i % 2 === 0 ? "user" : "assistant", content));
 
     // Budget: only room for 1 message
-    const settings = { ...defaultSettings, contextLimit: 3000, reserveTokens: 0, keepRecent: 1 };
+    const settings = { ...defaultSettings, contextLimit: 3000, reserveTokens: 0, keepRecentMessages: 1 };
 
     const result = await new TrimStrategy().execute(messages, settings, noopLlmChat, "test-model");
 
@@ -135,13 +135,13 @@ describe("TrimStrategy", () => {
     const messages = Array.from({ length: 10 }, (_, i) => makeMessage(i % 2 === 0 ? "user" : "assistant", content));
 
     // Total: 10000 tokens. Budget: 5000 -> need to drop at least 5 messages
-    const settings = { ...defaultSettings, contextLimit: 5000, reserveTokens: 0, keepRecent: 2 };
+    const settings = { ...defaultSettings, contextLimit: 5000, reserveTokens: 0, keepRecentMessages: 2 };
 
     const result = await new TrimStrategy().execute(messages, settings, noopLlmChat, "test-model");
 
     expect(result).not.toBeNull();
     // After dropping 5 messages, we have 5 * 1000 = 5000 tokens (fits exactly)
-    // But keepRecent=2 means last 4 messages are protected, so we can drop up to 6
+    // But keepRecentMessages=2 means last 4 messages are protected, so we can drop up to 6
     expect(result!.metadata!.messagesDropped).toBeGreaterThanOrEqual(5);
     expect(result!.metadata!.tokensAfter).toBeLessThanOrEqual(5000);
   });
@@ -180,7 +180,7 @@ describe("TrimStrategy", () => {
 
     // Total: 1 system + 6 non-system = 6 * 500 + 500 (system) = 3500 tokens
     // Budget: 2000 -> need to trim
-    const settings = { ...defaultSettings, contextLimit: 2000, reserveTokens: 0, keepRecent: 1 };
+    const settings = { ...defaultSettings, contextLimit: 2000, reserveTokens: 0, keepRecentMessages: 1 };
 
     const result = await new TrimStrategy().execute(messages, settings, noopLlmChat, "model");
 
@@ -208,7 +208,7 @@ describe("TrimStrategy", () => {
 
     // Each message: ~500 (content) + ~500 (reasoning) = ~1000 tokens
     // Total: 8000 tokens. Budget: 4000 -> need to drop
-    const settings = { ...defaultSettings, contextLimit: 4000, reserveTokens: 0, keepRecent: 2 };
+    const settings = { ...defaultSettings, contextLimit: 4000, reserveTokens: 0, keepRecentMessages: 2 };
 
     const result = await new TrimStrategy().execute(messages, settings, noopLlmChat, "model");
 
@@ -232,7 +232,7 @@ describe("TrimStrategy", () => {
 
     // Each user message: ~1000 tokens, each assistant: ~1000 + ~30 = ~1030 tokens
     // Total: ~8120 tokens. Budget: 4000 -> need to drop
-    const settings = { ...defaultSettings, contextLimit: 4000, reserveTokens: 0, keepRecent: 2 };
+    const settings = { ...defaultSettings, contextLimit: 4000, reserveTokens: 0, keepRecentMessages: 2 };
 
     const result = await new TrimStrategy().execute(messages, settings, noopLlmChat, "model");
 
@@ -240,10 +240,10 @@ describe("TrimStrategy", () => {
     expect(result!.metadata!.tokensAfter).toBeLessThanOrEqual(4000);
   });
 
-  it("returns null when keepRecent=0 and no messages can be dropped", async () => {
+  it("returns null when keepRecentMessages=0 and no messages can be dropped", async () => {
     const strategy = new TrimStrategy();
     const messages = [makeMessage("user"), makeMessage("assistant")];
-    const settings = { ...defaultSettings, contextLimit: 10, reserveTokens: 0, keepRecent: 0 };
+    const settings = { ...defaultSettings, contextLimit: 10, reserveTokens: 0, keepRecentMessages: 0 };
 
     const result = await strategy.execute(messages, settings, noopLlmChat, "model");
     expect(result).toBeNull();
@@ -290,7 +290,7 @@ describe("TrimStrategy", () => {
   it("metadata includes contextLimit", async () => {
     const content = "x".repeat(2000);
     const messages = Array.from({ length: 20 }, (_, i) => makeMessage(i % 2 === 0 ? "user" : "assistant", content));
-    const settings = { ...defaultSettings, contextLimit: 5000, reserveTokens: 0, keepRecent: 2 };
+    const settings = { ...defaultSettings, contextLimit: 5000, reserveTokens: 0, keepRecentMessages: 2 };
 
     const result = await new TrimStrategy().execute(messages, settings, noopLlmChat, "model");
 
@@ -301,7 +301,7 @@ describe("TrimStrategy", () => {
   it("metadata includes messagesDropped", async () => {
     const content = "x".repeat(4000);
     const messages = Array.from({ length: 10 }, (_, i) => makeMessage(i % 2 === 0 ? "user" : "assistant", content));
-    const settings = { ...defaultSettings, contextLimit: 3000, reserveTokens: 0, keepRecent: 2 };
+    const settings = { ...defaultSettings, contextLimit: 3000, reserveTokens: 0, keepRecentMessages: 2 };
 
     const result = await new TrimStrategy().execute(messages, settings, noopLlmChat, "model");
 
@@ -312,7 +312,7 @@ describe("TrimStrategy", () => {
   it("messagesCompacted is correct index into original messages", async () => {
     const content = "x".repeat(4000);
     const messages = Array.from({ length: 10 }, (_, i) => makeMessage(i % 2 === 0 ? "user" : "assistant", content));
-    const settings = { ...defaultSettings, contextLimit: 3000, reserveTokens: 0, keepRecent: 2 };
+    const settings = { ...defaultSettings, contextLimit: 3000, reserveTokens: 0, keepRecentMessages: 2 };
 
     const result = await new TrimStrategy().execute(messages, settings, noopLlmChat, "model");
 
@@ -343,7 +343,7 @@ describe("TrimStrategy", () => {
     ];
 
     // Total: 4500 tokens. Budget: 2000 -> need to drop
-    const settings = { ...defaultSettings, contextLimit: 2000, reserveTokens: 0, keepRecent: 1 };
+    const settings = { ...defaultSettings, contextLimit: 2000, reserveTokens: 0, keepRecentMessages: 1 };
 
     const result = await new TrimStrategy().execute(messages, settings, noopLlmChat, "model");
 

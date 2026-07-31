@@ -20,11 +20,11 @@ export async function create(core: CoreContext): Promise<ExtensionInstance> {
     displayPrompt?: boolean;
   }>(core, "prompts");
   // Backward compat: support old top-level promptsPath key alongside new path key.
-  const resolvedPath = config.path ?? config.promptsPath ?? "";
+  const resolvedPath = config.path ?? config.promptsPath;
   if (config.promptsPath != null && config.path == null) {
     logger.warn("prompts.promptsPath is deprecated; use prompts.path instead");
   }
-  const loader = new PromptsLoader(resolvedPath, config.displayPrompt ?? false);
+  const loader = new PromptsLoader(resolvedPath, config.displayPrompt);
   await loader.loadPrompts();
 
   return {

@@ -4,7 +4,6 @@
 
 import { execFile } from "node:child_process";
 import util from "node:util";
-import extensionData from "./extension.json" with { type: "json" };
 import { toolDef, param, ToolResult, truncateOutput, parseToolInput, defaultCallDisplay } from "../../core/extensions/tool-utils.ts";
 import type { ToolMetadata } from "../../core/extensions/tool-registry.ts";
 import { correctCommonPathMistakes } from "../../utils/file-utils.ts";
@@ -17,14 +16,6 @@ interface FindToolOptions {
   maxOutputLines?: number;
 }
 
-interface FindToolConfig {
-  coreTools?: {
-    properties: {
-      findMaxResults: { default: number };
-      maxToolOutputLines: { default: number };
-    };
-  };
-}
 
 interface FindArgs {
   pattern: string;
@@ -154,9 +145,9 @@ export class FindTool {
   private readonly maxOutputLines: number;
 
   constructor(options: FindToolOptions = {}) {
-    const config = extensionData.configSchema as FindToolConfig;
-    this.maxResults = options.maxResults ?? config.coreTools?.properties.findMaxResults.default ?? 200;
-    this.maxOutputLines = options.maxOutputLines ?? config.coreTools?.properties.maxToolOutputLines.default ?? 100;
+
+    this.maxResults = options.maxResults!;
+    this.maxOutputLines = options.maxOutputLines!;
   }
 
   toToolDef() {

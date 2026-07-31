@@ -22,7 +22,7 @@ describe("file-attachment extension", () => {
   });
 
   it("creates extension with INPUT hook", () => {
-    const core = { config: {} } as any;
+    const core = { config: { fileAttachment: { maxFileSize: 102400, maxFiles: 10 } } } as any;
     const extension = create(core);
     expect(extension).toBeDefined();
     expect(extension.hooks).toBeDefined();
@@ -30,7 +30,7 @@ describe("file-attachment extension", () => {
   });
 
   it("returns continue when no file references in input", async () => {
-    const core = { config: {} } as any;
+    const core = { config: { fileAttachment: { maxFileSize: 102400, maxFiles: 10 } } } as any;
     const extension = create(core);
     const hook = extension.hooks![HOOKS.INPUT]!;
     const result = await hook({ text: "Hello world", agent: null } as any);
@@ -41,7 +41,7 @@ describe("file-attachment extension", () => {
     const testFile = path.join(tmpDir, "test.txt");
     await fsPromises.writeFile(testFile, "Hello from file!");
 
-    const core = { config: {} } as any;
+    const core = { config: { fileAttachment: { maxFileSize: 102400, maxFiles: 10 } } } as any;
     const extension = create(core);
     const hook = extension.hooks![HOOKS.INPUT]!;
     const result = await hook({ text: "Read @test.txt please", agent: null } as any);
@@ -61,7 +61,7 @@ describe("file-attachment extension", () => {
     await fsPromises.writeFile(path.join(tmpDir, "a.txt"), "Content A");
     await fsPromises.writeFile(path.join(tmpDir, "b.txt"), "Content B");
 
-    const core = { config: {} } as any;
+    const core = { config: { fileAttachment: { maxFileSize: 102400, maxFiles: 10 } } } as any;
     const extension = create(core);
     const hook = extension.hooks![HOOKS.INPUT]!;
     const result = await hook(
@@ -82,7 +82,7 @@ describe("file-attachment extension", () => {
     await fsPromises.mkdir(subDir, { recursive: true });
     await fsPromises.writeFile(path.join(subDir, "main.ts"), "console.log('hi');");
 
-    const core = { config: {} } as any;
+    const core = { config: { fileAttachment: { maxFileSize: 102400, maxFiles: 10 } } } as any;
     const extension = create(core);
     const hook = extension.hooks![HOOKS.INPUT]!;
     const result = await hook(
@@ -97,7 +97,7 @@ describe("file-attachment extension", () => {
   });
 
   it("adds error note for missing files", async () => {
-    const core = { config: {} } as any;
+    const core = { config: { fileAttachment: { maxFileSize: 102400, maxFiles: 10 } } } as any;
     const extension = create(core);
     const hook = extension.hooks![HOOKS.INPUT]!;
     const result = await hook(
@@ -111,7 +111,7 @@ describe("file-attachment extension", () => {
   it("adds error note for missing files alongside successful ones", async () => {
     await fsPromises.writeFile(path.join(tmpDir, "exists.txt"), "I exist!");
 
-    const core = { config: {} } as any;
+    const core = { config: { fileAttachment: { maxFileSize: 102400, maxFiles: 10 } } } as any;
     const extension = create(core);
     const hook = extension.hooks![HOOKS.INPUT]!;
     const result = await hook(
@@ -132,7 +132,7 @@ describe("file-attachment extension", () => {
   it("skips directories", async () => {
     await fsPromises.mkdir(path.join(tmpDir, "mydir"), { recursive: true });
 
-    const core = { config: {} } as any;
+    const core = { config: { fileAttachment: { maxFileSize: 102400, maxFiles: 10 } } } as any;
     const extension = create(core);
     const hook = extension.hooks![HOOKS.INPUT]!;
     const result = await hook(
@@ -191,7 +191,7 @@ describe("file-attachment extension", () => {
     await fsPromises.mkdir(workspaceDir, { recursive: true });
     await fsPromises.writeFile(path.join(workspaceDir, "config.json"), '{"key": "value"}');
 
-    const core = { config: {} } as any;
+    const core = { config: { fileAttachment: { maxFileSize: 102400, maxFiles: 10 } } } as any;
     const extension = create(core);
     const hook = extension.hooks![HOOKS.INPUT]!;
 

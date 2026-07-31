@@ -6,13 +6,22 @@ import type { CoreContext } from "../../src/core/extensions/types.ts";
 /** Helper to cast a mock function to typeof fetch */
 const mockFetch = (fn: () => Promise<unknown>) => fn as unknown as typeof fetch;
 
+const defaultWebSearchOptions = {
+  provider: "duckduckgo" as const,
+  maxResults: 5,
+  timeout: 15,
+  braveApiKey: "",
+  tavilyApiKey: "",
+  searxngInstanceUrl: "",
+};
+
 describe("WebSearchTool", () => {
   it("has correct tool name", () => {
     expect(WebSearchTool.TOOL_NAME).toBe("web_search");
   });
 
   it("generates tool definition", () => {
-    const tool = new WebSearchTool();
+    const tool = new WebSearchTool({ ...defaultWebSearchOptions });
     const def = tool.toToolDef();
     expect(def.function.name).toBe("web_search");
     expect(def.function.parameters.required).toEqual(["query"]);
@@ -22,7 +31,7 @@ describe("WebSearchTool", () => {
   });
 
   it("generates call display", () => {
-    const tool = new WebSearchTool();
+    const tool = new WebSearchTool({ ...defaultWebSearchOptions });
     const display = tool.callDisplay(JSON.stringify({ query: "test query" }));
     expect(display).toContain("test query");
   });
@@ -30,43 +39,43 @@ describe("WebSearchTool", () => {
 
 describe("WebSearchTool input validation", () => {
   it("returns error for missing query", async () => {
-    const tool = new WebSearchTool();
+    const tool = new WebSearchTool({ ...defaultWebSearchOptions });
     const result = await tool.execute(JSON.stringify({}));
     expect(resultStr(result)).toContain("query is required");
   });
 
   it("returns error for empty query", async () => {
-    const tool = new WebSearchTool();
+    const tool = new WebSearchTool({ ...defaultWebSearchOptions });
     const result = await tool.execute(JSON.stringify({ query: "" }));
     expect(resultStr(result)).toContain("query is required");
   });
 
   it("returns error for whitespace-only query", async () => {
-    const tool = new WebSearchTool();
+    const tool = new WebSearchTool({ ...defaultWebSearchOptions });
     const result = await tool.execute(JSON.stringify({ query: "   " }));
     expect(resultStr(result)).toContain("query is required");
   });
 
   it("returns error for null query", async () => {
-    const tool = new WebSearchTool();
+    const tool = new WebSearchTool({ ...defaultWebSearchOptions });
     const result = await tool.execute(JSON.stringify({ query: null }));
     expect(resultStr(result)).toContain("query is required");
   });
 
   it("returns error for invalid JSON input", async () => {
-    const tool = new WebSearchTool();
+    const tool = new WebSearchTool({ ...defaultWebSearchOptions });
     const result = await tool.execute("not valid json");
     expect(resultStr(result)).toContain("Error parsing arguments");
   });
 
   it("returns error for empty input", async () => {
-    const tool = new WebSearchTool();
+    const tool = new WebSearchTool({ ...defaultWebSearchOptions });
     const result = await tool.execute("");
     expect(resultStr(result)).toContain("Error parsing arguments");
   });
 
   it("returns error for unknown provider", async () => {
-    const tool = new WebSearchTool({ provider: "unknown_provider" });
+    const tool = new WebSearchTool({ ...defaultWebSearchOptions, provider: "unknown_provider" });
     const result = await tool.execute(JSON.stringify({ query: "test" }));
     expect(resultStr(result)).toContain("Unknown search provider");
   });
@@ -74,47 +83,48 @@ describe("WebSearchTool input validation", () => {
 
 describe("WebSearchTool provider configuration", () => {
   it("defaults to duckduckgo provider", () => {
-    const tool = new WebSearchTool();
+    const tool = new WebSearchTool({ ...defaultWebSearchOptions });
     expect(tool.provider).toBe("duckduckgo");
   });
 
   for (const provider of ["duckduckgo", "brave", "tavily", "searxng"]) {
     it(`accepts ${provider} provider`, () => {
-      const tool = new WebSearchTool({ provider });
+      const tool = new WebSearchTool({ ...defaultWebSearchOptions, provider });
       expect(tool.provider).toBe(provider);
     });
   }
 
   it("normalizes provider to lowercase", () => {
-    const tool = new WebSearchTool({ provider: "DUCKDUCKGO" });
+    const tool = new WebSearchTool({ ...defaultWebSearchOptions, provider: "DUCKDUCKGO" });
     expect(tool.provider).toBe("DUCKDUCKGO");
   });
 
   it("clamps maxResults between 1 and 10", () => {
-    const tool1 = new WebSearchTool({ maxResults: 0 });
+    const tool1 = new WebSearchTool({ ...defaultWebSearchOptions, maxResults: 0 });
     expect(tool1.maxResults).toBe(1);
-    const tool2 = new WebSearchTool({ maxResults: 100 });
+    const tool2 = new WebSearchTool({ ...defaultWebSearchOptions, maxResults: 100 });
     expect(tool2.maxResults).toBe(10);
-    const tool3 = new WebSearchTool({ maxResults: 5 });
+    const tool3 = new WebSearchTool({ ...defaultWebSearchOptions, maxResults: 5 });
     expect(tool3.maxResults).toBe(5);
   });
 
   it("ensures minimum timeout of 1", () => {
-    const tool = new WebSearchTool({ timeout: 0 });
+    const tool = new WebSearchTool({ ...defaultWebSearchOptions, timeout: 0 });
     expect(tool.timeout).toBe(1);
   });
 });
 
 describe("WebSearchTool provider error handling", () => {
   it("brave returns error without API key", async () => {
-    const tool = new WebSearchTool({ provider: "brave", braveApiKey: "" });
+    const tool = new WebSearchTool({ ...defaultWebSearchOptions, ...defaultWebSearchOptions,
+        provider: "brave", braveApiKey: "" });
     const result = await tool.execute(JSON.stringify({ query: "test" }));
     expect(result.success).toBe(false);
     expect(resultStr(result)).toContain("Brave API key not configured");
   });
 
   it("tavily returns error without API key", async () => {
-    const tool = new WebSearchTool({ provider: "tavily", tavilyApiKey: "" });
+    const tool = new WebSearchTool({ ...defaultWebSearchOptions, provider: "tavily", tavilyApiKey: "" });
     const result = await tool.execute(JSON.stringify({ query: "test" }));
     expect(result.success).toBe(false);
     expect(resultStr(result)).toContain("Tavily API key not configured");
@@ -122,6 +132,7 @@ describe("WebSearchTool provider error handling", () => {
 
   it("searxng returns error without instance URL", async () => {
     const tool = new WebSearchTool({
+      ...defaultWebSearchOptions,
       provider: "searxng",
       searxngInstanceUrl: "",
     });
@@ -194,7 +205,7 @@ describe("WebSearchTool DuckDuckGo parser", () => {
       Promise.resolve(new Response(mockHtml, { status: 200 })));
 
     try {
-      const tool = new WebSearchTool({ provider: "duckduckgo", maxResults: 5 });
+      const tool = new WebSearchTool({ ...defaultWebSearchOptions });
       const result = await tool.execute(JSON.stringify({ query: "test" }));
       expect(result.success).toBe(true);
       const output = resultStr(result);
@@ -219,7 +230,7 @@ describe("WebSearchTool DuckDuckGo parser", () => {
       Promise.resolve(new Response(mockHtml, { status: 200 })));
 
     try {
-      const tool = new WebSearchTool({ provider: "duckduckgo" });
+      const tool = new WebSearchTool({ ...defaultWebSearchOptions });
       const result = await tool.execute(JSON.stringify({ query: "test" }));
       expect(result.success).toBe(true);
       const output = resultStr(result);
@@ -239,7 +250,7 @@ describe("WebSearchTool DuckDuckGo parser", () => {
       ));
 
     try {
-      const tool = new WebSearchTool({ provider: "duckduckgo" });
+      const tool = new WebSearchTool({ ...defaultWebSearchOptions });
       const result = await tool.execute(JSON.stringify({ query: "test" }));
       expect(result.success).toBe(true);
       expect(resultStr(result)).toContain("No results found");
@@ -254,7 +265,7 @@ describe("WebSearchTool DuckDuckGo parser", () => {
       Promise.resolve(new Response("error", { status: 500 })));
 
     try {
-      const tool = new WebSearchTool({ provider: "duckduckgo" });
+      const tool = new WebSearchTool({ ...defaultWebSearchOptions });
       const result = await tool.execute(JSON.stringify({ query: "test" }));
       expect(result.success).toBe(false);
       expect(resultStr(result)).toContain("Web search failed");
@@ -277,7 +288,7 @@ describe("WebSearchTool DuckDuckGo parser", () => {
       Promise.resolve(new Response(mockHtml, { status: 200 })));
 
     try {
-      const tool = new WebSearchTool({ provider: "duckduckgo" });
+      const tool = new WebSearchTool({ ...defaultWebSearchOptions });
       const result = await tool.execute(JSON.stringify({ query: "test" }));
       expect(result.success).toBe(true);
       const output = resultStr(result);
@@ -299,7 +310,7 @@ describe("WebSearchTool DuckDuckGo parser", () => {
       Promise.resolve(new Response(mockHtml, { status: 200 })));
 
     try {
-      const tool = new WebSearchTool({ provider: "duckduckgo" });
+      const tool = new WebSearchTool({ ...defaultWebSearchOptions });
       const result = await tool.execute(JSON.stringify({ query: "test" }));
       expect(result.success).toBe(true);
       const output = resultStr(result);
@@ -336,6 +347,7 @@ describe("WebSearchTool Brave parser", () => {
 
     try {
       const tool = new WebSearchTool({
+        ...defaultWebSearchOptions,
         provider: "brave",
         braveApiKey: "test-key",
       });
@@ -360,6 +372,7 @@ describe("WebSearchTool Brave parser", () => {
 
     try {
       const tool = new WebSearchTool({
+        ...defaultWebSearchOptions,
         provider: "brave",
         braveApiKey: "test-key",
       });
@@ -394,6 +407,7 @@ describe("WebSearchTool Tavily parser", () => {
 
     try {
       const tool = new WebSearchTool({
+        ...defaultWebSearchOptions,
         provider: "tavily",
         tavilyApiKey: "test-key",
       });
@@ -431,6 +445,7 @@ describe("WebSearchTool SearXNG parser", () => {
 
     try {
       const tool = new WebSearchTool({
+        ...defaultWebSearchOptions,
         provider: "searxng",
         searxngInstanceUrl: "https://searx.example.com",
       });

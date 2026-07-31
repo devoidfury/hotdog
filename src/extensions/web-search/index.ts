@@ -13,9 +13,9 @@ import type { ToolMetadata } from "../../core/extensions/tool-registry.ts";
 
 import { HOOKS } from "../../core/hooks.ts";
 
-import extensionData from "./extension.json" with { type: "json" };
 import pkg from "../../../package.json" with { type: "json" };
 
+import { getExtensionConfig } from "../../core/extensions/types.ts";
 import type { CoreContext, ExtensionInstance } from "../../core/extensions/types.ts";
 
 const USER_AGENT = `hotdog/v${pkg.version} NOT Mozilla/5.0 (probably running linux; probably x64) AND NOT AppleWebKit/666.42 (NOT KHTML, unlike Gecko) NOR Chrome/127.0.0.1 ALSO NOT Safari/420.69`;
@@ -295,13 +295,13 @@ export class WebSearchTool {
   get maxResults(): number { return this.#maxResults; }
   get timeout(): number { return this.#timeout; }
 
-  constructor(options: WebSearchToolOptions = {}) {
-    this.#provider = options.provider ?? "duckduckgo";
-    this.#maxResults = Math.min(10, Math.max(1, options.maxResults ?? 5));
-    this.#timeout = Math.max(1, options.timeout ?? 15);
-    this.braveApiKey = options.braveApiKey ?? "";
-    this.tavilyApiKey = options.tavilyApiKey ?? "";
-    this.searxngInstanceUrl = options.searxngInstanceUrl ?? "";
+  constructor(options: WebSearchToolOptions) {
+    this.#provider = options.provider;
+    this.#maxResults = Math.min(10, Math.max(1, options.maxResults));
+    this.#timeout = Math.max(1, options.timeout);
+    this.braveApiKey = options.braveApiKey;
+    this.tavilyApiKey = options.tavilyApiKey;
+    this.searxngInstanceUrl = options.searxngInstanceUrl;
   }
 
   toToolDef() {
@@ -374,28 +374,18 @@ export class WebSearchTool {
  * Create the web-search extension.
  */
 export function create(core: CoreContext): ExtensionInstance {
-  const config = (core.config?.webSearch as WebSearchConfig) || {};
-
-  const provider =
-    config.provider ||
-    (extensionData.configSchema?.webSearch?.properties?.provider?.default as string);
-
-  // API keys are resolved declaratively via extension.json config layers —
-  // no imperative env var fallback needed here.
-  const braveApiKey = config.braveApiKey || "";
-  const tavilyApiKey = config.tavilyApiKey || "";
-  const searxngInstanceUrl = config.searxngInstanceUrl || "";
+  const config = getExtensionConfig<WebSearchConfig>(core, "webSearch");
 
   return {
     hooks: {
       [HOOKS.TOOLS_REGISTER]: async (registry) => {
         const tool = new WebSearchTool({
-          provider,
+          provider: config.provider,
           maxResults: config.maxResults,
           timeout: config.timeout,
-          braveApiKey,
-          tavilyApiKey,
-          searxngInstanceUrl,
+          braveApiKey: config.braveApiKey,
+          tavilyApiKey: config.tavilyApiKey,
+          searxngInstanceUrl: config.searxngInstanceUrl,
         });
         registry.register(WebSearchTool.TOOL_NAME, tool);
       },

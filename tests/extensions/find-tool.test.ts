@@ -21,13 +21,13 @@ afterAll(() => {
 
 describe("FindTool.toToolDef", () => {
   it("returns a tool definition with correct name", () => {
-    const def = new FindTool().toToolDef();
+    const def = new FindTool({ maxResults: 200, maxOutputLines: 600 }).toToolDef();
     expect(def.type).toBe("function");
     expect(def.function.name).toBe("find");
   });
 
   it("requires only pattern", () => {
-    const def = new FindTool().toToolDef();
+    const def = new FindTool({ maxResults: 200, maxOutputLines: 600 }).toToolDef();
     expect(def.function.parameters.required).toEqual(["pattern"]);
   });
 });
@@ -36,7 +36,7 @@ describe("FindTool.toToolDef", () => {
 
 describe("FindTool.callDisplay", () => {
   it("shows pattern and path with default max", () => {
-    const display = new FindTool().callDisplay({
+    const display = new FindTool({ maxResults: 200, maxOutputLines: 600 }).callDisplay({
       pattern: "*.js",
       path: "src",
     });
@@ -46,7 +46,7 @@ describe("FindTool.callDisplay", () => {
   });
 
   it("shows file type filter", () => {
-    const display = new FindTool().callDisplay({
+    const display = new FindTool({ maxResults: 200, maxOutputLines: 600 }).callDisplay({
       pattern: "*.js",
       file_type: "f",
       max_results: 100,
@@ -58,9 +58,9 @@ describe("FindTool.callDisplay", () => {
 
   it("handles invalid input gracefully", () => {
     const fallback = `* in . (max ${DEFAULT_FIND_MAX_RESULTS})`;
-    expect(new FindTool().callDisplay("not json")).toContain(fallback);
-    expect(new FindTool().callDisplay({})).toContain(fallback);
-    expect(new FindTool().callDisplay(null)).toContain(fallback);
+    expect(new FindTool({ maxResults: 200, maxOutputLines: 600 }).callDisplay("not json")).toContain(fallback);
+    expect(new FindTool({ maxResults: 200, maxOutputLines: 600 }).callDisplay({})).toContain(fallback);
+    expect(new FindTool({ maxResults: 200, maxOutputLines: 600 }).callDisplay(null)).toContain(fallback);
   });
 });
 
@@ -72,7 +72,7 @@ describe("FindTool.execute — basic find", () => {
     fsSync.writeFileSync(path.join(dir, "world.txt"), "world");
     fsSync.writeFileSync(path.join(dir, "data.json"), '{"key": "value"}');
 
-    const tool = new FindTool();
+    const tool = new FindTool({ maxResults: 200, maxOutputLines: 600 });
     const result = await tool.execute(
       { pattern: "*.txt", path: dir },
       toolCtx(),
@@ -88,7 +88,7 @@ describe("FindTool.execute — basic find", () => {
     fsSync.writeFileSync(path.join(dir, "root.txt"), "root");
     fsSync.writeFileSync(path.join(dir, "sub", "nested.txt"), "nested");
 
-    const tool = new FindTool();
+    const tool = new FindTool({ maxResults: 200, maxOutputLines: 600 });
     const result = await tool.execute(
       { pattern: "**/*.txt", path: dir },
       toolCtx(),
@@ -101,7 +101,7 @@ describe("FindTool.execute — basic find", () => {
   it('returns "No files found" when nothing matches', async () => {
     fsSync.writeFileSync(path.join(dir, "hello.txt"), "hello");
 
-    const tool = new FindTool();
+    const tool = new FindTool({ maxResults: 200, maxOutputLines: 600 });
     const result = await tool.execute(
       { pattern: "*.xyz", path: dir },
       toolCtx(),
@@ -118,7 +118,7 @@ describe("FindTool.execute — file type filter", () => {
     fsSync.writeFileSync(path.join(dir, "type_file.txt"), "file");
     fsSync.mkdirSync(path.join(dir, "type_subdir"));
 
-    const tool = new FindTool();
+    const tool = new FindTool({ maxResults: 200, maxOutputLines: 600 });
     const result = await tool.execute(
       { pattern: "*", file_type: "f", path: dir },
       toolCtx(),
@@ -132,7 +132,7 @@ describe("FindTool.execute — file type filter", () => {
     fsSync.writeFileSync(path.join(dir, "type_dir_file.txt"), "file");
     fsSync.mkdirSync(path.join(dir, "type_dir_subdir"));
 
-    const tool = new FindTool();
+    const tool = new FindTool({ maxResults: 200, maxOutputLines: 600 });
     const result = await tool.execute(
       { pattern: "*", file_type: "d", path: dir },
       toolCtx(),
@@ -151,7 +151,7 @@ describe("FindTool.execute — max_results", () => {
       fsSync.writeFileSync(path.join(dir, `max_file${i}.txt`), `content ${i}`);
     }
 
-    const tool = new FindTool();
+    const tool = new FindTool({ maxResults: 200, maxOutputLines: 600 });
     const result = await tool.execute(
       { pattern: "max_file*.txt", path: dir, max_results: 3 },
       toolCtx(),
@@ -169,7 +169,7 @@ describe("FindTool.execute — max_results", () => {
       fsSync.writeFileSync(path.join(dir, `default_file${i}.txt`), `content ${i}`);
     }
 
-    const tool = new FindTool();
+    const tool = new FindTool({ maxResults: 200, maxOutputLines: 600 });
     const result = await tool.execute(
       { pattern: "default_file*.txt", path: dir },
       toolCtx(),
@@ -186,19 +186,19 @@ describe("FindTool.execute — max_results", () => {
 
 describe("FindTool.execute — error cases", () => {
   it("returns error on invalid JSON input", async () => {
-    const tool = new FindTool();
+    const tool = new FindTool({ maxResults: 200, maxOutputLines: 600 });
     const result = await tool.execute("not json", toolCtx());
     expect(getDisplay(result)).toContain("Error parsing arguments");
   });
 
   it("returns error on missing pattern", async () => {
-    const tool = new FindTool();
+    const tool = new FindTool({ maxResults: 200, maxOutputLines: 600 });
     const result = await tool.execute({ path: "." }, toolCtx());
     expect(getDisplay(result)).toContain("Error parsing arguments");
   });
 
   it("handles non-existent search path gracefully", async () => {
-    const tool = new FindTool();
+    const tool = new FindTool({ maxResults: 200, maxOutputLines: 600 });
     const result = await tool.execute(
       { pattern: "*", path: "/nonexistent/path/that/does/not/exist" },
       toolCtx(),

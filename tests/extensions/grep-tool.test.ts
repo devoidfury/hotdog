@@ -16,20 +16,20 @@ afterAll(() => {
 
 describe("GrepTool.toToolDef", () => {
   it("returns a tool definition with correct name", () => {
-    const def = new GrepTool().toToolDef();
+    const def = new GrepTool({ maxResults: 100, maxOutputLines: 600 }).toToolDef();
     expect(def.type).toBe("function");
     expect(def.function.name).toBe("grep");
   });
 
   it("requires only pattern", () => {
-    const def = new GrepTool().toToolDef();
+    const def = new GrepTool({ maxResults: 100, maxOutputLines: 600 }).toToolDef();
     expect(def.function.parameters.required).toEqual(["pattern"]);
   });
 });
 
 describe("GrepTool.callDisplay", () => {
   it("shows pattern and path", () => {
-    const display = new GrepTool().callDisplay({
+    const display = new GrepTool({ maxResults: 100, maxOutputLines: 600 }).callDisplay({
       pattern: "hello",
       path: "src",
     });
@@ -37,14 +37,14 @@ describe("GrepTool.callDisplay", () => {
   });
 
   it("shows dot for default path", () => {
-    const display = new GrepTool().callDisplay({ pattern: "foo" });
+    const display = new GrepTool({ maxResults: 100, maxOutputLines: 600 }).callDisplay({ pattern: "foo" });
     expect(display).toBe("'foo' in .");
   });
 
   it("handles invalid input gracefully", () => {
-    expect(new GrepTool().callDisplay("not json")).toBe("not json");
-    expect(new GrepTool().callDisplay({})).toBe("");
-    expect(new GrepTool().callDisplay(null)).toBe("");
+    expect(new GrepTool({ maxResults: 100, maxOutputLines: 600 }).callDisplay("not json")).toBe("not json");
+    expect(new GrepTool({ maxResults: 100, maxOutputLines: 600 }).callDisplay({})).toBe("");
+    expect(new GrepTool({ maxResults: 100, maxOutputLines: 600 }).callDisplay(null)).toBe("");
   });
 });
 
@@ -56,7 +56,7 @@ describe("GrepTool.execute", () => {
     );
     fsSync.writeFileSync(path.join(dir, "other.js"), 'console.log("goodbye")');
 
-    const tool = new GrepTool();
+    const tool = new GrepTool({ maxResults: 100, maxOutputLines: 600 });
     const result = getDisplay(
       await tool.execute({ pattern: "hello", path: dir }, toolCtx()),
     );
@@ -71,7 +71,7 @@ describe("GrepTool.execute", () => {
       "item1 = 1\nitem2 = 2\nfoo = 3",
     );
 
-    const tool = new GrepTool();
+    const tool = new GrepTool({ maxResults: 100, maxOutputLines: 600 });
     const result = getDisplay(
       await tool.execute({ pattern: "item\\d+", path: dir }, toolCtx()),
     );
@@ -86,7 +86,7 @@ describe("GrepTool.execute", () => {
     fsSync.writeFileSync(path.join(dir, "test.py"), "hello world");
     fsSync.writeFileSync(path.join(dir, "test.txt"), "hello world");
 
-    const tool = new GrepTool();
+    const tool = new GrepTool({ maxResults: 100, maxOutputLines: 600 });
     const result = getDisplay(
       await tool.execute(
         { pattern: "hello", path: dir, type: "py" },
@@ -107,7 +107,7 @@ describe("GrepTool.execute", () => {
       );
     }
 
-    const tool = new GrepTool();
+    const tool = new GrepTool({ maxResults: 100, maxOutputLines: 600 });
     const result = getDisplay(
       await tool.execute(
         { pattern: "hello", path: dir, max_results: 3 },
@@ -123,7 +123,7 @@ describe("GrepTool.execute", () => {
   it("returns no matches when nothing found", async () => {
     fsSync.writeFileSync(path.join(dir, "file.txt"), "hello world");
 
-    const tool = new GrepTool();
+    const tool = new GrepTool({ maxResults: 100, maxOutputLines: 600 });
     const result = getDisplay(
       await tool.execute({ pattern: "zzzznotfound", path: dir }, toolCtx()),
     );
@@ -132,20 +132,20 @@ describe("GrepTool.execute", () => {
   });
 
   it("throws AssistantRetryableError on invalid regex", async () => {
-    const tool = new GrepTool();
+    const tool = new GrepTool({ maxResults: 100, maxOutputLines: 600 });
     await expect(
       tool.execute({ pattern: "[invalid", path: dir }, toolCtx())
     ).rejects.toThrow(/Invalid regex/);
   });
 
   it("returns error on invalid JSON input", async () => {
-    const tool = new GrepTool();
+    const tool = new GrepTool({ maxResults: 100, maxOutputLines: 600 });
     const result = getDisplay(await tool.execute("not json", toolCtx()));
     expect(resultStr(result)).toContain("Error parsing arguments");
   });
 
   it("returns error on missing pattern", async () => {
-    const tool = new GrepTool();
+    const tool = new GrepTool({ maxResults: 100, maxOutputLines: 600 });
     const result = getDisplay(await tool.execute({ path: "." }, toolCtx()));
     expect(resultStr(result)).toContain("Error parsing arguments");
   });
@@ -153,7 +153,7 @@ describe("GrepTool.execute", () => {
   it("handles input as string JSON", async () => {
     fsSync.writeFileSync(path.join(dir, "file.js"), "hello world");
 
-    const tool = new GrepTool();
+    const tool = new GrepTool({ maxResults: 100, maxOutputLines: 600 });
     const result = getDisplay(
       await tool.execute(
         JSON.stringify({ pattern: "hello", path: dir }),
@@ -170,7 +170,7 @@ describe("GrepTool.execute", () => {
     fsSync.writeFileSync(path.join(dir, "root.js"), "hello");
     fsSync.writeFileSync(path.join(dir, "sub", "nested.js"), "hello");
 
-    const tool = new GrepTool();
+    const tool = new GrepTool({ maxResults: 100, maxOutputLines: 600 });
     const result = getDisplay(
       await tool.execute({ pattern: "hello", path: dir }, toolCtx()),
     );

@@ -157,8 +157,8 @@ export function create(core: CoreContext): ExtensionInstance {
     maxFileSize?: number;
     maxFiles?: number;
   }>(core, "fileAttachment");
-  const maxFileSize = config.maxFileSize ?? 102400; // 100KB default
-  const maxFiles = config.maxFiles ?? 10;
+  const maxFileSize = config.maxFileSize;
+  const maxFiles = config.maxFiles;
 
   return {
     hooks: {

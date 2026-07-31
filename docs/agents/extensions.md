@@ -85,6 +85,34 @@ Every extension directory must contain an `extension.json` metadata file. This i
 
 **`configSchema` is the single source of truth** for extension configuration. Defaults defined in `configSchema` are automatically extracted and registered as config params. CLI flags are declared in `cli:flags`. The loader handles all registration automatically -- no imperative hooks needed.
 
+#### Rule: No Backup Defaults in Code
+
+**Never duplicate config defaults in JavaScript.** The config system loads values from `configSchema` -- if a config value is missing or invalid, the code should fail, not silently fall back to a hardcoded value.
+
+**Wrong** (backup default masks config errors):
+```javascript
+// DON'T DO THIS
+const config = getExtensionConfig(core, "myExtension");
+const timeout = config.timeout ?? 30; // backup default -- WRONG
+const maxResults = config.maxResults ?? config.maxResults_from_schema ?? 100; // reading schema as backup -- WRONG
+```
+
+**Right** (trust the config system):
+```javascript
+// DO THIS
+const config = getExtensionConfig<MyConfig>(core, "myExtension");
+const timeout = config.timeout; // if missing, code fails -- CORRECT
+const maxResults = config.maxResults; // same
+```
+
+**Rationale:**
+- Backup defaults silently hide misconfiguration bugs
+- They create drift when schema defaults change but JS defaults don't
+- Reading `extension.json` at runtime as a fallback couples code to schema structure
+- If config is wrong, you want to know immediately
+
+**Exception:** Defensive null checks for optional values that are genuinely optional (e.g., `if (arr && arr.length > 0)`). This is not a backup default -- it's safe iteration.
+
 The config key is the property name defined in `configSchema` (typically camelCase of the extension name):
 - `core-tools` → configSchema key `coreTools` → `core.config.coreTools`
 - `model-switch` → configSchema key `modelSwitch` → `core.config.modelSwitch`

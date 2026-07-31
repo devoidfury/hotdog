@@ -20,18 +20,18 @@ afterAll(() => {
 
 describe('ReadTool.toToolDef', () => {
   it('returns a tool definition with correct name', () => {
-    const def = new ReadTool().toToolDef();
+    const def = new ReadTool({ readLimit: 500, maxImageSize: 102400 }).toToolDef();
     expect(def.type).toBe('function');
     expect(def.function.name).toBe('read');
   });
 
   it('requires only path', () => {
-    const def = new ReadTool().toToolDef();
+    const def = new ReadTool({ readLimit: 500, maxImageSize: 102400 }).toToolDef();
     expect(def.function.parameters.required).toEqual(['path']);
   });
 
   it('has optional limit and offset', () => {
-    const def = new ReadTool().toToolDef();
+    const def = new ReadTool({ readLimit: 500, maxImageSize: 102400 }).toToolDef();
     const props = def.function.parameters.properties as Record<string, { type?: string }>;
     expect(props.limit!.type).toBe('integer');
     expect(props.offset!.type).toBe('integer');
@@ -43,16 +43,16 @@ describe('ReadTool.toToolDef', () => {
 
 describe('ReadTool.callDisplay', () => {
   it('shows path and pagination range', () => {
-    const display = new ReadTool().callDisplay({ path: 'foo.txt', limit: 10, offset: 5 });
+    const display = new ReadTool({ readLimit: 500, maxImageSize: 102400 }).callDisplay({ path: 'foo.txt', limit: 10, offset: 5 });
     expect(display).toContain('foo.txt');
     expect(display).toContain('5');
     expect(display).toContain('15');
   });
 
   it('handles invalid input gracefully', () => {
-    expect(new ReadTool().callDisplay('not json')).toBe('not json');
-    expect(new ReadTool().callDisplay({})).toContain('no path');
-    expect(new ReadTool().callDisplay(null)).toContain('no path');
+    expect(new ReadTool({ readLimit: 500, maxImageSize: 102400 }).callDisplay('not json')).toBe('not json');
+    expect(new ReadTool({ readLimit: 500, maxImageSize: 102400 }).callDisplay({})).toContain('no path');
+    expect(new ReadTool({ readLimit: 500, maxImageSize: 102400 }).callDisplay(null)).toContain('no path');
   });
 });
 
@@ -63,7 +63,7 @@ describe('ReadTool.execute — read lines', () => {
     const filePath = path.join(dir, 'file.txt');
     fsSync.writeFileSync(filePath, 'line1\nline2\nline3');
 
-    const tool = new ReadTool();
+    const tool = new ReadTool({ readLimit: 500, maxImageSize: 102400 });
     const result = await tool.execute(
       { path: 'file.txt' },
       toolCtx({ workspaceRoot: dir })
@@ -76,7 +76,7 @@ describe('ReadTool.execute — read lines', () => {
     const filePath = path.join(dir, 'file.txt');
     fsSync.writeFileSync(filePath, 'line1\nline2\nline3\nline4\nline5');
 
-    const tool = new ReadTool();
+    const tool = new ReadTool({ readLimit: 500, maxImageSize: 102400 });
     const result = await tool.execute(
       { path: 'file.txt', limit: 2 },
       toolCtx({ workspaceRoot: dir })
@@ -89,7 +89,7 @@ describe('ReadTool.execute — read lines', () => {
     const filePath = path.join(dir, 'file.txt');
     fsSync.writeFileSync(filePath, 'line1\nline2\nline3\nline4');
 
-    const tool = new ReadTool();
+    const tool = new ReadTool({ readLimit: 500, maxImageSize: 102400 });
     const result = await tool.execute(
       { path: 'file.txt', offset: 2, limit: 2 },
       toolCtx({ workspaceRoot: dir })
@@ -102,7 +102,7 @@ describe('ReadTool.execute — read lines', () => {
     const filePath = path.join(dir, 'file.txt');
     fsSync.writeFileSync(filePath, 'line1\nline2');
 
-    const tool = new ReadTool();
+    const tool = new ReadTool({ readLimit: 500, maxImageSize: 102400 });
     const result = await tool.execute(
       { path: 'file.txt', offset: 10 },
       toolCtx({ workspaceRoot: dir })
@@ -116,7 +116,7 @@ describe('ReadTool.execute — read lines', () => {
     const filePath = path.join(dir, 'file.txt');
     fsSync.writeFileSync(filePath, '');
 
-    const tool = new ReadTool();
+    const tool = new ReadTool({ readLimit: 500, maxImageSize: 102400 });
     const result = await tool.execute(
       { path: 'file.txt' },
       toolCtx({ workspaceRoot: dir })
@@ -129,7 +129,7 @@ describe('ReadTool.execute — read lines', () => {
     const filePath = path.join(dir, 'file.txt');
     fsSync.writeFileSync(filePath, 'only line');
 
-    const tool = new ReadTool();
+    const tool = new ReadTool({ readLimit: 500, maxImageSize: 102400 });
     const result = await tool.execute(
       { path: 'file.txt' },
       toolCtx({ workspaceRoot: dir })
@@ -147,7 +147,7 @@ describe('ReadTool.execute — directory listing', () => {
     fsSync.writeFileSync(path.join(dir, 'b.txt'), 'b');
     fsSync.mkdirSync(path.join(dir, 'subdir'));
 
-    const tool = new ReadTool();
+    const tool = new ReadTool({ readLimit: 500, maxImageSize: 102400 });
     const result = await tool.execute(
       { path: '.' },
       toolCtx({ workspaceRoot: dir })
@@ -164,26 +164,26 @@ describe('ReadTool.execute — directory listing', () => {
 
 describe('ReadTool.execute — error cases', () => {
   it('throws AssistantRetryableError on file not found', async () => {
-    const tool = new ReadTool();
+    const tool = new ReadTool({ readLimit: 500, maxImageSize: 102400 });
     await expect(
       tool.execute({ path: 'nonexistent.txt' }, toolCtx({ workspaceRoot: dir }))
     ).rejects.toThrow(/File not found/);
   });
 
   it('returns error on invalid JSON input', async () => {
-    const tool = new ReadTool();
+    const tool = new ReadTool({ readLimit: 500, maxImageSize: 102400 });
     const result = await tool.execute('not json', toolCtx({ workspaceRoot: dir }));
     expect(resultStr(result)).toContain('Error parsing arguments');
   });
 
   it('returns error on missing path', async () => {
-    const tool = new ReadTool();
+    const tool = new ReadTool({ readLimit: 500, maxImageSize: 102400 });
     const result = await tool.execute({ limit: 10 }, toolCtx({ workspaceRoot: dir }));
     expect(resultStr(result)).toContain('Error parsing arguments');
   });
 
   it('rejects path outside cwd boundary', async () => {
-    const tool = new ReadTool();
+    const tool = new ReadTool({ readLimit: 500, maxImageSize: 102400 });
     const result = await tool.execute(
       { path: '/etc/passwd' },
       toolCtx({ cwdBoundary: dir })
@@ -195,7 +195,7 @@ describe('ReadTool.execute — error cases', () => {
     const filePath = path.join(dir, 'file.txt');
     fsSync.writeFileSync(filePath, 'hello world');
 
-    const tool = new ReadTool();
+    const tool = new ReadTool({ readLimit: 500, maxImageSize: 102400 });
     const result = await tool.execute(
       JSON.stringify({ path: 'file.txt' }),
       toolCtx({ workspaceRoot: dir })
@@ -228,7 +228,7 @@ describe('ReadTool.execute — image files', () => {
     const filePath = path.join(dir, 'test.png');
     fsSync.writeFileSync(filePath, MINIMAL_PNG);
 
-    const tool = new ReadTool();
+    const tool = new ReadTool({ readLimit: 500, maxImageSize: 102400 });
     const result = await tool.execute(
       { path: 'test.png' },
       toolCtx({ workspaceRoot: dir })
@@ -251,7 +251,7 @@ describe('ReadTool.execute — image files', () => {
       const filePath = path.join(dir, `test.${ext}`);
       fsSync.writeFileSync(filePath, MINIMAL_JPEG);
 
-      const tool = new ReadTool();
+      const tool = new ReadTool({ readLimit: 500, maxImageSize: 102400 });
       const result = await tool.execute(
         { path: `test.${ext}` },
         toolCtx({ workspaceRoot: dir })
@@ -279,7 +279,7 @@ describe('ReadTool.execute — image files', () => {
     const filePath = path.join(dir, 'test.webp');
     fsSync.writeFileSync(filePath, webp);
 
-    const tool = new ReadTool();
+    const tool = new ReadTool({ readLimit: 500, maxImageSize: 102400 });
     const result = await tool.execute(
       { path: 'test.webp' },
       toolCtx({ workspaceRoot: dir })
@@ -302,7 +302,7 @@ describe('ReadTool.execute — image files', () => {
     const filePath = path.join(dir, 'data.base64');
     fsSync.writeFileSync(filePath, base64Content);
 
-    const tool = new ReadTool();
+    const tool = new ReadTool({ readLimit: 500, maxImageSize: 102400 });
     const result = await tool.execute(
       { path: 'data.base64' },
       toolCtx({ workspaceRoot: dir })
@@ -322,7 +322,7 @@ describe('ReadTool.execute — image files', () => {
     const filePath = path.join(dir, 'test.PNG');
     fsSync.writeFileSync(filePath, MINIMAL_PNG);
 
-    const tool = new ReadTool();
+    const tool = new ReadTool({ readLimit: 500, maxImageSize: 102400 });
     const result = await tool.execute(
       { path: 'test.PNG' },
       toolCtx({ workspaceRoot: dir })
@@ -337,7 +337,7 @@ describe('ReadTool.execute — image files', () => {
     const filePath = path.join(dir, 'test.png');
     fsSync.writeFileSync(filePath, MINIMAL_PNG);
 
-    const tool = new ReadTool();
+    const tool = new ReadTool({ readLimit: 500, maxImageSize: 102400 });
     const result = await tool.execute(
       { path: 'test.png' },
       toolCtx({ workspaceRoot: dir })
@@ -351,7 +351,7 @@ describe('ReadTool.execute — image files', () => {
     const filePath = path.join(dir, 'test.png');
     fsSync.writeFileSync(filePath, MINIMAL_PNG);
 
-    const tool = new ReadTool();
+    const tool = new ReadTool({ readLimit: 500, maxImageSize: 102400 });
     const result = await tool.execute(
       { path: filePath },
       toolCtx({ workspaceRoot: dir })
@@ -366,7 +366,7 @@ describe('ReadTool.execute — image files', () => {
     const filePath = path.join(dir, 'test.png');
     fsSync.writeFileSync(filePath, MINIMAL_PNG);
 
-    const tool = new ReadTool();
+    const tool = new ReadTool({ readLimit: 500, maxImageSize: 102400 });
     const result = await tool.execute(
       { path: filePath },
       toolCtx({ cwdBoundary: '/tmp/restricted' })
@@ -380,7 +380,7 @@ describe('ReadTool.execute — image files', () => {
     const filePath = path.join(dir, 'file.txt');
     fsSync.writeFileSync(filePath, 'hello world');
 
-    const tool = new ReadTool();
+    const tool = new ReadTool({ readLimit: 500, maxImageSize: 102400 });
     const result = await tool.execute(
       { path: 'file.txt' },
       toolCtx({ workspaceRoot: dir })

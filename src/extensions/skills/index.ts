@@ -37,8 +37,8 @@ export async function create(core: CoreContext): Promise<ExtensionInstance> {
   await loader.loadSkills();
 
   // Preload skills from config
-  const preloadSkills = config.preloadSkills ?? [];
-  if (preloadSkills.length > 0) {
+  const preloadSkills = config.preloadSkills;
+  if (preloadSkills && preloadSkills.length > 0) {
     loader.preloadSkills(preloadSkills);
   }
 

@@ -31,7 +31,6 @@ interface CompactionSettings {
   enabled: boolean;
   reserveTokens: number;
   keepRecentMessages: number;
-  keepRecent: number;
   strategy: string;
   userTurnGuardPrompt: string;
 }
@@ -60,10 +59,13 @@ function getModelConfig(core: CoreContext, modelName: string): { name: string; t
       }
     }
     if (!entry) return null;
+    if (typeof entry.contextLimit !== "number" || entry.contextLimit <= 0) {
+      throw new Error(`Model "${modelName}" missing contextLimit in registry`);
+    }
     return {
       name: entry.name || modelName,
       temperature: entry.temperature ?? null,
-      contextLimit: entry.contextLimit ?? 128000,
+      contextLimit: entry.contextLimit,
       reasoningEffort: entry.reasoningEffort,
     };
   }
@@ -75,16 +77,7 @@ function getModelConfig(core: CoreContext, modelName: string): { name: string; t
  */
 export function create(core: CoreContext): ExtensionInstance | null {
   // Config defaults come from extension.json configSchema
-  const config = getExtensionConfig<CompactionSettings>(core, "compaction");
-
-  const settings: CompactionSettings = {
-    enabled: config.enabled ?? true,
-    reserveTokens: config.reserveTokens ?? 16384,
-    keepRecentMessages: config.keepRecentMessages ?? 8,
-    keepRecent: config.keepRecent ?? config.keepRecentMessages ?? 8,
-    strategy: config.strategy ?? "summarize",
-    userTurnGuardPrompt: config.userTurnGuardPrompt ?? "",
-  };
+  const settings = getExtensionConfig<CompactionSettings>(core, "compaction");
 
   if (!settings.enabled) return null;
 
@@ -262,7 +255,10 @@ export function create(core: CoreContext): ExtensionInstance | null {
         const estimatedTokens = estimateContextTokens(nonSystemMessages);
         const reserveTokens = settings.reserveTokens;
         const modelConfig = getModelConfig(core, agent.model);
-        const contextLimit = (modelConfig?.contextLimit as number) || 128000;
+        if (!modelConfig) {
+          throw new Error(`Model "${agent.model}" not found in registry`);
+        }
+        const contextLimit = modelConfig.contextLimit;
 
         if (estimatedTokens <= contextLimit - reserveTokens) return;
 

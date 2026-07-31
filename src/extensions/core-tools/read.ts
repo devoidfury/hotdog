@@ -3,7 +3,6 @@
 
 import fs from "node:fs/promises";
 import path from "node:path";
-import extensionData from "./extension.json" with { type: "json" };
 import {
   toolDef,
   param,
@@ -33,13 +32,6 @@ interface ReadToolOptions {
   maxImageSize?: number;
 }
 
-interface ReadToolConfig {
-  coreTools?: {
-    properties: {
-      readToolLimit: { default: number };
-    };
-  };
-}
 
 interface ReadArgs {
   path: string | null;
@@ -55,11 +47,8 @@ export class ReadTool {
   private readonly maxImageSize: number;
 
   constructor(options: ReadToolOptions = {}) {
-    const config = extensionData.configSchema as ReadToolConfig;
-    this.readLimit =
-      options.readLimit ??
-      config.coreTools?.properties.readToolLimit.default ??
-      500;
+
+    this.readLimit = options.readLimit!;
     this.maxImageSize = options.maxImageSize ?? DEFAULT_MAX_IMAGE_SIZE;
   }
 

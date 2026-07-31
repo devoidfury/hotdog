@@ -346,8 +346,6 @@ export async function runInteractiveSession(
       stream: typeof agentConfig.stream === "boolean" ? agentConfig.stream : (resolved.stream as boolean | undefined),
       config: {
         ...config,
-        maxToolDifficulty: config.maxToolDifficulty ?? undefined,
-        defaultMaxToolDifficulty: config.defaultMaxToolDifficulty ?? undefined,
       },
       sessionId,
       abortSignal: (agentConfig.abortSignal as AbortSignal) || null,
@@ -451,7 +449,7 @@ export async function runInteractiveSession(
     }
   });
 
-  const shellMode = (config.uiInteractiveCli as Record<string, unknown>)?.shellMode ?? false;
+  const shellMode = (config.uiInteractiveCli as Record<string, unknown>)?.shellMode;
 
   // Define and register the line handler
   lineHandler = async (line: string) => {

@@ -840,8 +840,6 @@ export function createWsServer(core: CoreContext, options: CreateWsServerOptions
       config: core.config
         ? {
             ...core.config,
-            maxToolDifficulty: core.config.maxToolDifficulty ?? undefined,
-            defaultMaxToolDifficulty: core.config.defaultMaxToolDifficulty ?? undefined,
           }
         : undefined,
       sessionId,

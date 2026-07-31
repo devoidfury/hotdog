@@ -38,7 +38,7 @@ export function create(core: CoreContext): ExtensionInstance {
     return {};
   }
 
-  const maxLoops = config.maxLoops ?? -1;
+  const maxLoops = config.maxLoops;
 
   // Mutable loop state shared between hooks
   const loop: LoopState = {

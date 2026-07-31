@@ -9,7 +9,7 @@ export { Message };
 export interface CompactionSettings {
   enabled?: boolean;
   reserveTokens?: number;
-  keepRecent?: number;
+  keepRecentMessages?: number;
   targetTokens?: number;
   contextLimit?: number;
 }
@@ -45,7 +45,7 @@ export class CompactionStrategy {
    * Override for strategies with special preconditions.
    */
   canCompact(messages: Message[], settings: CompactionSettings): boolean {
-    return messages.length > (settings.keepRecent || 3) * 2;
+    return messages.length > (settings.keepRecentMessages || 3) * 2;
   }
 }
 

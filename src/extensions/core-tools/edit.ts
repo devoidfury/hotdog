@@ -2,7 +2,6 @@
 
 import fs from "node:fs/promises";
 import path from "node:path";
-import extensionData from "./extension.json" with { type: "json" };
 import {
   toolDef,
   param,
@@ -19,13 +18,6 @@ interface EditToolOptions {
   maxEditInputSize?: number;
 }
 
-interface EditToolConfig {
-  coreTools?: {
-    properties: {
-      maxEditInputSize: { default: number };
-    };
-  };
-}
 
 interface EditArgs {
   path: string;
@@ -53,11 +45,8 @@ export class EditTool {
   private readonly maxEditInputSize: number;
 
   constructor(options: EditToolOptions = {}) {
-    const config = extensionData.configSchema as EditToolConfig;
-    this.maxEditInputSize =
-      options.maxEditInputSize ??
-      config.coreTools?.properties.maxEditInputSize.default ??
-      10000;
+
+    this.maxEditInputSize = options.maxEditInputSize!;
   }
 
   toToolDef() {

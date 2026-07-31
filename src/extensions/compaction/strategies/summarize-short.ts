@@ -22,7 +22,7 @@ export class SummarizeShortStrategy extends CompactionStrategy {
     llmChat: (messages: Array<{ role: string; content: string }>, model: string) => Promise<string>,
     model: string,
   ): Promise<CompactResult | null> {
-    const firstKept = findFirstKeptIndex(messages, settings.keepRecent ?? 8);
+    const firstKept = findFirstKeptIndex(messages, settings.keepRecentMessages);
     if (firstKept === 0) return null;
 
     const messagesToCompact = messages.slice(0, firstKept);

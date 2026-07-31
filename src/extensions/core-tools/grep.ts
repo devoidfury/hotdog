@@ -5,7 +5,6 @@ import { execFile } from "node:child_process";
 import util from "node:util";
 import { join, extname, resolve } from "node:path";
 import { AssistantRetryableError, ToolError } from "../../core/error.ts";
-import extensionData from "./extension.json" with { type: "json" };
 import {
   toolDef,
   param,
@@ -71,14 +70,6 @@ interface GrepToolOptions {
   maxOutputLines?: number;
 }
 
-interface GrepToolConfig {
-  coreTools?: {
-    properties: {
-      grepMaxResults: { default: number };
-      maxToolOutputLines: { default: number };
-    };
-  };
-}
 
 interface GrepArgs {
   pattern: string;
@@ -385,12 +376,9 @@ export class GrepTool {
   private readonly maxOutputLines: number;
 
   constructor(options: GrepToolOptions = {}) {
-    const config = extensionData.configSchema as GrepToolConfig;
-    this.maxResults =
-      options.maxResults ?? config.coreTools?.properties.grepMaxResults.default ?? 100;
-    this.maxOutputLines =
-      options.maxOutputLines ??
-      config.coreTools?.properties.maxToolOutputLines.default ?? 100;
+
+    this.maxResults = options.maxResults!;
+    this.maxOutputLines = options.maxOutputLines!;
   }
 
   toToolDef() {

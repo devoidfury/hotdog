@@ -70,22 +70,22 @@ const TOOL_FACTORIES: Record<string, (config: CoreToolConfig) => Tool> = {
   append: () => new AppendTool(),
   read: (config) =>
     new ReadTool({
-      readLimit: config.readToolLimit ?? 500,
+      readLimit: config.readToolLimit,
       maxImageSize: DEFAULT_MAX_IMAGE_SIZE,
     }),
   edit: (config) =>
     new EditTool({
-      maxEditInputSize: config.maxEditInputSize ?? 16000,
+      maxEditInputSize: config.maxEditInputSize,
     }),
   grep: (config) =>
     new GrepTool({
-      maxResults: config.grepMaxResults ?? 100,
-      maxOutputLines: config.maxToolOutputLines ?? 600,
+      maxResults: config.grepMaxResults,
+      maxOutputLines: config.maxToolOutputLines,
     }),
   find: (config) =>
     new FindTool({
-      maxResults: config.findMaxResults ?? 200,
-      maxOutputLines: config.maxToolOutputLines ?? 600,
+      maxResults: config.findMaxResults,
+      maxOutputLines: config.maxToolOutputLines,
     }),
   pager: () => new PagerTool(),
   explore: () => new ExploreTool(),

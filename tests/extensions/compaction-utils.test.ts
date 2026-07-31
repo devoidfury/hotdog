@@ -177,7 +177,7 @@ describe("estimateContextTokens", () => {
 // ── Compaction Decision ─────────────────────────────────────────────────────
 
 describe("findFirstKeptIndex", () => {
-  it("returns 0 when keepRecent is 0", () => {
+  it("returns 0 when keepRecentMessages is 0", () => {
     const messages = [
       { role: "user", content: "msg1" },
       { role: "assistant", content: "msg2" },
@@ -192,18 +192,18 @@ describe("findFirstKeptIndex", () => {
     expect(findFirstKeptIndex(messages, 2)).toBe(0);
   });
 
-  it("finds correct index for keepRecent=1", () => {
+  it("finds correct index for keepRecentMessages=1", () => {
     const messages = [
       { role: "user", content: "msg1" },
       { role: "assistant", content: "msg2" },
       { role: "user", content: "msg3" },
       { role: "assistant", content: "msg4" },
     ];
-    // keepRecent=1 means target=2, count from end: msg4(1), msg3(2>=2) -> return 3
+    // keepRecentMessages=1 means target=2, count from end: msg4(1), msg3(2>=2) -> return 3
     expect(findFirstKeptIndex(messages, 1)).toBe(3);
   });
 
-  it("finds correct index for keepRecent=2", () => {
+  it("finds correct index for keepRecentMessages=2", () => {
     const messages = [
       { role: "user", content: "msg1" },
       { role: "assistant", content: "msg2" },
@@ -212,7 +212,7 @@ describe("findFirstKeptIndex", () => {
       { role: "user", content: "msg5" },
       { role: "assistant", content: "msg6" },
     ];
-    // keepRecent=2 means target=4, count from end: msg6(1), msg5(2), msg4(3), msg3(4>=4) -> return 3
+    // keepRecentMessages=2 means target=4, count from end: msg6(1), msg5(2), msg4(3), msg3(4>=4) -> return 3
     expect(findFirstKeptIndex(messages, 2)).toBe(3);
   });
 
@@ -224,7 +224,7 @@ describe("findFirstKeptIndex", () => {
       { role: "user", content: "msg3" },
       { role: "assistant", content: "msg4" },
     ];
-    // keepRecent=1 -> target=2, skip system, count from end: msg4(1), msg3(2>=2) -> return 4
+    // keepRecentMessages=1 -> target=2, skip system, count from end: msg4(1), msg3(2>=2) -> return 4
     expect(findFirstKeptIndex(messages, 1)).toBe(4);
   });
 
@@ -245,7 +245,7 @@ describe("findFirstKeptIndex", () => {
       { role: "user", content: "msg3" },
       { role: "assistant", content: "msg4" },
     ];
-    // keepRecent=1 -> target=2, skip system, count from end: msg4(1), msg3(2>=2) -> return 5
+    // keepRecentMessages=1 -> target=2, skip system, count from end: msg4(1), msg3(2>=2) -> return 5
     expect(findFirstKeptIndex(messages, 1)).toBe(5);
   });
 
@@ -484,7 +484,7 @@ describe("compactMessages", () => {
       messages,
       mockLlmChat,
       "test-model",
-      { enabled: true, keepRecent: 8 },
+      { enabled: true, keepRecentMessages: 8 },
     );
     expect(result).toBeNull();
   });
@@ -499,7 +499,7 @@ describe("compactMessages", () => {
       messages,
       mockLlmChat,
       "test-model",
-      { enabled: true, keepRecent: 2 },
+      { enabled: true, keepRecentMessages: 2 },
     );
 
     expect(result).not.toBeNull();
@@ -518,11 +518,11 @@ describe("compactMessages", () => {
     }));
 
     await expect(
-      compactMessages(messages, failingLlmChat, "test-model", { enabled: true, keepRecent: 2 }),
+      compactMessages(messages, failingLlmChat, "test-model", { enabled: true, keepRecentMessages: 2 }),
     ).rejects.toThrow();
   });
 
-  it("uses keepRecent to determine messages to compact", async () => {
+  it("uses keepRecentMessages to determine messages to compact", async () => {
     const messages = Array.from({ length: 20 }, (_, i) => ({
       role: i % 2 === 0 ? "user" : "assistant",
       content: `Message ${i}`,
@@ -532,15 +532,15 @@ describe("compactMessages", () => {
       messages,
       mockLlmChat,
       "test-model",
-      { enabled: true, keepRecent: 1 },
+      { enabled: true, keepRecentMessages: 1 },
     );
 
     expect(result).not.toBeNull();
-    // keepRecent=1 means target=2, findFirstKeptIndex returns 19, so 19 messages compacted
+    // keepRecentMessages=1 means target=2, findFirstKeptIndex returns 19, so 19 messages compacted
     expect(result!.messagesCompacted).toBe(19);
   });
 
-  it("uses default keepRecent when not specified", async () => {
+  it("uses keepRecentMessages value from settings", async () => {
     const messages = Array.from({ length: 20 }, (_, i) => ({
       role: i % 2 === 0 ? "user" : "assistant",
       content: `Message ${i}`,
@@ -550,11 +550,11 @@ describe("compactMessages", () => {
       messages,
       mockLlmChat,
       "test-model",
-      { enabled: true },
+      { enabled: true, keepRecentMessages: 8 },
     );
 
     expect(result).not.toBeNull();
-    // Default keepRecent=8, target=16, findFirstKeptIndex returns 5, so 5 messages compacted
+    // keepRecentMessages=8, target=16, findFirstKeptIndex returns 5, so 5 messages compacted
     expect(result!.messagesCompacted).toBe(5);
   });
 });

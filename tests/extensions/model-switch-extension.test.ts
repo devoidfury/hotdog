@@ -351,6 +351,25 @@ describe("ModelTool", () => {
 });
 
 describe("Model-switch extension > edge cases", () => {
+  it("/model command rejects unknown model and keeps current model", async () => {
+    const core = createMockCore({
+      coreConfig: { modelSwitch: { commandEnabled: true } },
+    });
+    const ext = createModelSwitchExtension(core);
+
+    const registry = createCommandRegistry();
+    await ext.hooks![HOOKS.COMMANDS_REGISTER]!({ registry } as any);
+
+    const def = registry.get("model")!;
+    const agent = createMockAgent(core.resolved.modelRegistry) as any;
+    const originalModel = agent.model;
+    const result = await def.handler!(agent, "model nonexistent-model");
+
+    expect((result as any).content).toContain("not found in registry");
+    expect((result as any).content).toContain("/models");
+    expect(agent.model).toBe(originalModel);
+  });
+
   it("/model command with extra whitespace in model name", async () => {
     const core = createMockCore({
       coreConfig: { modelSwitch: { commandEnabled: true } },

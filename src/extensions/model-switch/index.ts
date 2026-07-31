@@ -89,6 +89,13 @@ export function create(core: CoreContext): ExtensionInstance {
               return listModels(agent);
             }
 
+            if (!agent.modelRegistry[modelName]) {
+              return {
+                action: ACTIONS.DISPLAY,
+                content: `Error: model "${modelName}" not found in registry. Use /models to see available models.`,
+              };
+            }
+
             agent.model = modelName;
             return {
               action: ACTIONS.DISPLAY,

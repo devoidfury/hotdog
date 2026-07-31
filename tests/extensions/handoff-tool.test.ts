@@ -206,8 +206,8 @@ describe("handoff-tool create() extension", () => {
     };
     const chunk = (hooks[HOOKS.SYSTEM_PROMPT_BUILD] as Function)({ agent: mockAgent });
     expect(chunk.name).toBe("handoff-tool-instructions");
-    expect(chunk.content).toContain("handoff tool");
-    expect(chunk.content).toContain("transitioning between distinct phases");
+    expect(chunk.content).toContain("tool: handoff");
+    expect(chunk.content).toContain("transitioning work phase");
   });
 
   it("system prompt hook returns empty when tool is not registered", async () => {

@@ -169,7 +169,7 @@ describe("main -- subcommand dispatch", () => {
     });
 
     expect(exitCode).toBe(0);
-    expect(stdout).toContain("hotdog");
+    expect(stdout).toContain("Agent Harness Info");
   });
 
   it("handles subcommand with --help flag", async () => {

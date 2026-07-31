@@ -30,7 +30,7 @@ describe("parseMarkdown", () => {
     for (let i = 0; i < 6; i++) {
       const h = doc.children[i] as MdHeading;
       expect(h.type).toBe("heading");
-      expect(h.level).toBe(i + 1);
+      expect(h.level).toBe((i + 1) as 1 | 2 | 3 | 4 | 5 | 6);
     }
   });
 
@@ -70,7 +70,7 @@ describe("parseMarkdown", () => {
   it("parses unordered lists with -, *, + markers", () => {
     for (const marker of ["-", "*", "+"]) {
       const doc = parseMarkdown(`${marker} one\n${marker} two`);
-      const list = doc.children[0] as { type: "list"; ordered: boolean; items: MdInline[][] };
+      const list = doc.children[0] as unknown as { type: "list"; ordered: boolean; items: MdInline[][] };
       expect(list.type).toBe("list");
       expect(list.ordered).toBe(false);
       expect(list.items).toHaveLength(2);
@@ -121,7 +121,8 @@ describe("parseMarkdown", () => {
     expect(boldNode).toBeDefined();
     expect(boldNode.children[0]?.type).toBe("italic");
     expect((boldNode.children[0] as MdItalic).children[0]?.type).toBe("text");
-    expect((boldNode.children[0] as MdItalic).children[0]!.content).toBe("bold italic");
+    const inner = (boldNode.children[0] as MdItalic).children[0] as { content: string };
+    expect(inner.content).toBe("bold italic");
   });
 
   it("parses inline code, links, and images", () => {

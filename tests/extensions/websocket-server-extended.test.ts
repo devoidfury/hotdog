@@ -953,7 +953,7 @@ describe("WebSocket message handlers - log operations", () => {
       wsServer.onMessage(ws, JSON.stringify({ type: C2S.VIEW_LOG }));
 
       // No message sent when logId is missing
-      expect((ws as { messages: string[] }).messages.length).toBe(0);
+      expect((ws as unknown as { messages: string[] }).messages.length).toBe(0);
     });
   });
 
@@ -985,7 +985,7 @@ describe("WebSocket message handlers - log operations", () => {
       // Wait for async operation
       await new Promise(r => setTimeout(r, 50));
 
-      const msgs = (ws as { messages: string[] }).messages.map((m) => JSON.parse(m));
+      const msgs = (ws as unknown as { messages: string[] }).messages.map((m) => JSON.parse(m));
       const errorMsg = msgs.find((m: any) => m.type === "error");
       expect(errorMsg).toBeDefined();
       expect(errorMsg.message).toContain("not found");
@@ -1017,7 +1017,7 @@ describe("WebSocket message handlers - log operations", () => {
       const ws = createWsMockWs();
       wsServer.onMessage(ws, JSON.stringify({ type: "unknown-message-type" }));
 
-      const msgs = (ws as { messages: string[] }).messages.map((m) => JSON.parse(m));
+      const msgs = (ws as unknown as { messages: string[] }).messages.map((m) => JSON.parse(m));
       const errorMsg = msgs.find((m: any) => m.type === "error");
       expect(errorMsg).toBeDefined();
       expect(errorMsg.message).toContain("Unknown message type");

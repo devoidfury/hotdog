@@ -12,7 +12,7 @@ function createMockConnectionClass(config: {
   connectHttp?: (name: string, url: string, headers: Record<string, string>) => Promise<McpConnection> | never;
   connectStdio?: (name: string, command: string, args: string[], env: Record<string, string>) => Promise<McpConnection> | never;
 }): typeof McpConnection {
-  return class MockMcpConnection implements McpConnection {
+  class MockMcpConnection {
     tools: Record<string, unknown>[] = [];
     serverName = "mock";
 
@@ -39,11 +39,12 @@ function createMockConnectionClass(config: {
       return {
         serverName: "mock",
         callTool: async () => "ok",
-      } as McpConnectionHandle;
+      } as unknown as McpConnectionHandle;
     }
 
     async shutdown() {}
-  } as unknown as typeof McpConnection;
+  }
+  return MockMcpConnection as unknown as typeof McpConnection;
 }
 
 /** Create a mock connection instance. */
@@ -53,16 +54,15 @@ function createMockConnection(config: {
   shouldFailConnectHttp?: boolean;
   shouldFailConnectStdio?: boolean;
 }) {
-  const mockConnection: McpConnection = {
+  return {
     tools: config.tools || [],
     serverName: "mock",
     handle: () => ({
       serverName: "mock",
       callTool: async () => config.callToolResult || "ok",
-    }) as McpConnectionHandle,
+    }) as unknown as McpConnectionHandle,
     shutdown: async () => {},
-  };
-  return mockConnection;
+  } as unknown as McpConnection;
 }
 
 // ── Tests ───────────────────────────────────────────────────────────────────
@@ -178,7 +178,8 @@ describe("MCP extension", () => {
       },
     };
 
-    await (ext!.hooks![HOOKS.TOOLS_REGISTER] as Function)(mockRegistry);
+    const handler = ext!.hooks![HOOKS.TOOLS_REGISTER] as Function | undefined;
+    if (handler) await handler(mockRegistry);
 
     expect(registeredTools).toHaveLength(1);
     expect(registeredTools[0]).toBe("test/echo");

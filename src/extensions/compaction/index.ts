@@ -36,40 +36,33 @@ interface CompactionSettings {
 }
 
 /**
- * Resolve the model config from core.
- * Checks core.resolved.modelRegistry first, falls back to a default config.
+ * Resolve the model config from the agent's model registry.
  */
-function getModelConfig(core: CoreContext, modelName: string): { name: string; temperature: number | null; contextLimit: number; reasoningEffort?: string } | null {
-  // Check core.resolved?.modelRegistry first, then fall back to core.modelRegistry
-  const registry = core.resolved?.modelRegistry || ((core as unknown) as Record<string, unknown>).modelRegistry;
-  if (registry) {
-    const typedRegistry = registry as Record<string, ModelConfig>;
-    // Direct lookup (e.g. "provider/modelName")
-    let entry = typedRegistry[modelName];
-    // Fallback: if modelName has no "/" and isn't found, try "provider/modelName"
-    // This handles the case where models are fetched remotely (fetchModels: true)
-    // with an empty local models array, so resolveModel returns just the model name
-    // but the registry key is provider/modelName.
-    if (!entry && !modelName.includes("/")) {
-      for (const key of Object.keys(typedRegistry)) {
-        if (key.endsWith(`/${modelName}`)) {
-          entry = typedRegistry[key];
-          break;
-        }
+function getModelConfig(modelRegistry: Record<string, ModelConfig>, modelName: string): { name: string; temperature: number | null; contextLimit: number; reasoningEffort?: string } | null {
+  // Direct lookup (e.g. "provider/modelName")
+  let entry = modelRegistry[modelName];
+  // Fallback: if modelName has no "/" and isn't found, try "provider/modelName"
+  // This handles the case where models are fetched remotely (fetchModels: true)
+  // with an empty local models array, so resolveModel returns just the model name
+  // but the registry key is provider/modelName.
+  if (!entry && !modelName.includes("/")) {
+    for (const key of Object.keys(modelRegistry)) {
+      if (key.endsWith(`/${modelName}`)) {
+        entry = modelRegistry[key];
+        break;
       }
     }
-    if (!entry) return null;
-    if (typeof entry.contextLimit !== "number" || entry.contextLimit <= 0) {
-      throw new Error(`Model "${modelName}" missing contextLimit in registry`);
-    }
-    return {
-      name: entry.name || modelName,
-      temperature: entry.temperature ?? null,
-      contextLimit: entry.contextLimit,
-      reasoningEffort: entry.reasoningEffort,
-    };
   }
-  return null;
+  if (!entry) return null;
+  if (typeof entry.contextLimit !== "number" || entry.contextLimit <= 0) {
+    throw new Error(`Model "${modelName}" missing contextLimit in registry`);
+  }
+  return {
+    name: entry.name || modelName,
+    temperature: entry.temperature ?? null,
+    contextLimit: entry.contextLimit,
+    reasoningEffort: entry.reasoningEffort,
+  };
 }
 
 /**
@@ -117,7 +110,7 @@ export function create(core: CoreContext): ExtensionInstance | null {
 
     const messages = agent.log.getAll(); // defensive copy — strategies expect Message[]
     const model = agent.model;
-    const modelConfig = getModelConfig(core, model);
+    const modelConfig = getModelConfig(agent.modelRegistry, model);
 
     // Build the LLM chat function from the agent's LLM client.
     const llmChat = async (chatMessages: Array<{ role: string; content: string }>, chatModel: string): Promise<string> => {
@@ -254,7 +247,7 @@ export function create(core: CoreContext): ExtensionInstance | null {
         // Check token budget
         const estimatedTokens = estimateContextTokens(nonSystemMessages);
         const reserveTokens = settings.reserveTokens;
-        const modelConfig = getModelConfig(core, agent.model);
+        const modelConfig = getModelConfig(agent.modelRegistry, agent.model);
         if (!modelConfig) {
           throw new Error(`Model "${agent.model}" not found in registry`);
         }

@@ -40,7 +40,7 @@ function createMockCore(config: any = {}) {
   } as any;
 }
 
-function createMockAgent(contextArray: any[], model = "test-model") {
+function createMockAgent(contextArray: any[], model = "test-model", modelRegistry?: Record<string, any>) {
   const mockLlmClient = {
     chatStreamCancellable: () =>
       (async function* () {
@@ -52,6 +52,7 @@ function createMockAgent(contextArray: any[], model = "test-model") {
   return {
     get log() { return log; },
     model,
+    modelRegistry: modelRegistry || {},
     sessionId: "test-session",
     _llmClient: mockLlmClient,
     get llmClient() { return mockLlmClient; },
@@ -167,7 +168,9 @@ describe("Hook Integration", () => {
     const ext = createCompactionExtension(core);
 
     const context = makeMessages(20, "x".repeat(50));
-    const agent = createMockAgent(context);
+    const agent = createMockAgent(context, "test-model", {
+      "test-model": { name: "test-model", temperature: null, contextLimit: 32000 },
+    });
     const messages = [{ role: "system", content: "" }, ...context];
 
     await (ext as any).hooks![HOOKS.CONTEXT]!({ messages: messages as any, agent });
@@ -187,7 +190,7 @@ describe("Hook Integration", () => {
     const largeContext = makeMessages(100, "x".repeat(500));
     const agent = createMockAgent(largeContext);
 
-    core.modelRegistry = {
+    agent.modelRegistry = {
             "test-model": { name: "test-model", temperature: null, contextLimit: 8000 },
     };
 
@@ -220,7 +223,7 @@ describe("Hook Integration", () => {
       const largeContext = makeMessages(msgCount, "x".repeat(500));
       const agent = createMockAgent(largeContext);
 
-      core.modelRegistry = {
+      agent.modelRegistry = {
         "test-model": { name: "test-model", temperature: null, contextLimit },
       };
 
@@ -234,18 +237,16 @@ describe("Hook Integration", () => {
     });
   }
 
-  it("should error when no modelRegistry", async () => {
+  it("should error when model not found in registry", async () => {
     const core = createMockCore({
       enabled: true,
       keepRecentMessages: 2,
       reserveTokens: 100,
     });
-    // Remove modelRegistry
-    delete core.modelRegistry;
     const ext = createCompactionExtension(core);
 
     const context = makeMessages(100, "x".repeat(500));
-    const agent = createMockAgent(context);
+    const agent = createMockAgent(context, "test-model", {}); // empty registry
     const messages = [{ role: "system", content: "" }, ...context];
 
     // Should error when model is not found in registry
@@ -287,7 +288,7 @@ describe("Hook Integration", () => {
       ...context,
     ];
 
-    core.modelRegistry = {
+    agent.modelRegistry = {
             "test-model": { name: "test-model", temperature: null, contextLimit: 5000 },
     };
 
@@ -443,7 +444,7 @@ describe("COMMANDS_REGISTER Hook", () => {
     const context = makeMessages(100, "x".repeat(500));
     const agent = createMockAgent(context);
 
-    core.modelRegistry = {
+    agent.modelRegistry = {
             "test-model": { name: "test-model", temperature: null, contextLimit: 5000 },
     };
 
@@ -466,7 +467,7 @@ describe("Edge Cases", () => {
     const context = makeMessages(100, "x".repeat(500));
     const agent = createMockAgent(context, "test-model");
 
-    core.modelRegistry = {
+    agent.modelRegistry = {
             "test-model": { name: "test-model", temperature: null, contextLimit: 5000 },
     };
 
@@ -518,7 +519,9 @@ describe("Edge Cases", () => {
     const ext = createCompactionExtension(core);
 
     const context = makeMessages(10, "x".repeat(100));
-    const agent = createMockAgent(context);
+    const agent = createMockAgent(context, "test-model", {
+      "test-model": { name: "test-model", temperature: null, contextLimit: 128000 },
+    });
     const messages = [{ role: "system", content: "" }, ...context];
 
     // With huge reserve, effectiveMax = 128000 - 999999999 = very negative
@@ -548,7 +551,7 @@ describe("Edge Cases", () => {
     const agent = createMockAgent(context);
     const messages = [{ role: "system", content: "" }, ...context];
 
-    core.modelRegistry = {
+    agent.modelRegistry = {
             "test-model": { name: "test-model", temperature: null, contextLimit: 2000 },
     };
 
@@ -573,7 +576,7 @@ describe("Edge Cases", () => {
     const agent = createMockAgent(context);
     (agent as any).abortSignal = abortController.signal;
 
-    core.modelRegistry = {
+    agent.modelRegistry = {
       "test-model": { name: "test-model", temperature: null, contextLimit: 5000 },
     };
 
@@ -599,7 +602,7 @@ describe("Edge Cases", () => {
     const agent = createMockAgent(context);
     (agent as any).abortSignal = abortController.signal;
 
-    core.modelRegistry = {
+    agent.modelRegistry = {
       "test-model": { name: "test-model", temperature: null, contextLimit: 5000 },
     };
 
@@ -643,7 +646,7 @@ describe("Edge Cases", () => {
       replaceContext(newContext: any) { log.replace(newContext); },
     } as any;
 
-    core.modelRegistry = {
+    agent.modelRegistry = {
       "test-model": { name: "test-model", temperature: null, contextLimit: 5000 },
     };
 
@@ -688,7 +691,7 @@ describe("Edge Cases", () => {
       replaceContext(newContext: any) { log.replace(newContext); },
     } as any;
 
-    core.modelRegistry = {
+    agent.modelRegistry = {
       "test-model": { name: "test-model", temperature: null, contextLimit: 5000 },
     };
 
@@ -818,15 +821,12 @@ describe("getModelConfig fallback lookup", () => {
       keepRecentMessages: 2,
       strategy: "drop",
     });
-    // Set up registry with provider-prefixed key (as fetchModels produces)
-    (core as any).resolved = {
-      modelRegistry: {
-        "laguna/laguna": {
-          name: "laguna/laguna",
-          temperature: null,
-          contextLimit: 350000,
-          tags: [],
-        },
+    const registry = {
+      "laguna/laguna": {
+        name: "laguna/laguna",
+        temperature: null,
+        contextLimit: 350000,
+        tags: [],
       },
     };
 
@@ -839,7 +839,7 @@ describe("getModelConfig fallback lookup", () => {
 
     const context = makeMessages(20, "x".repeat(100));
     // Agent uses unprefixed model name (as happens when resolveModel can't find local entry)
-    const agent = createMockAgent(context, "laguna");
+    const agent = createMockAgent(context, "laguna", registry);
 
     const result = await compactCmd.handler!(agent, "compact");
     // Should succeed without error — means getModelConfig found the config
@@ -853,15 +853,12 @@ describe("getModelConfig fallback lookup", () => {
       keepRecentMessages: 2,
       strategy: "drop",
     });
-    // Set up registry with a different model
-    (core as any).resolved = {
-      modelRegistry: {
-        "other/model": {
-          name: "other/model",
-          temperature: null,
-          contextLimit: 64000,
-          tags: [],
-        },
+    const registry = {
+      "other/model": {
+        name: "other/model",
+        temperature: null,
+        contextLimit: 64000,
+        tags: [],
       },
     };
 
@@ -872,7 +869,7 @@ describe("getModelConfig fallback lookup", () => {
 
     const context = makeMessages(20, "x".repeat(100));
     // Agent uses a model name not in the registry
-    const agent = createMockAgent(context, "unknown-model");
+    const agent = createMockAgent(context, "unknown-model", registry);
 
     const result = await compactCmd.handler!(agent, "compact");
     // Should succeed with default 128000 contextLimit
@@ -886,14 +883,12 @@ describe("getModelConfig fallback lookup", () => {
       keepRecentMessages: 2,
       strategy: "drop",
     });
-    (core as any).resolved = {
-      modelRegistry: {
-        "provider/model-x": {
-          name: "provider/model-x",
-          temperature: null,
-          contextLimit: 999999,
-          tags: [],
-        },
+    const registry = {
+      "provider/model-x": {
+        name: "provider/model-x",
+        temperature: null,
+        contextLimit: 999999,
+        tags: [],
       },
     };
 
@@ -904,7 +899,7 @@ describe("getModelConfig fallback lookup", () => {
 
     const context = makeMessages(20, "x".repeat(100));
     // Agent uses prefixed model name — direct lookup should work
-    const agent = createMockAgent(context, "provider/model-x");
+    const agent = createMockAgent(context, "provider/model-x", registry);
 
     const result = await compactCmd.handler!(agent, "compact");
     expect(result).toBeDefined();

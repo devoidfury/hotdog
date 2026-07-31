@@ -81,6 +81,16 @@ export interface InitializeLoggerOptions {
 }
 
 /**
+ * Reset the logger singleton state. Use only in tests to avoid cross-test pollution.
+ */
+export function resetLoggerForTesting(): void {
+  _hooks = null;
+  _minLevelNum = LOG_LEVELS.warn;
+  _initialized = false;
+  _preloadQueue = [];
+}
+
+/**
  * Initialize the singleton logger.
  * Must be called once during bootstrap.
  */

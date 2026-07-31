@@ -1,10 +1,11 @@
-import { describe, it, expect } from "bun:test";
+import { describe, it, expect, afterEach, afterAll } from "bun:test";
 import {
   LOG_LEVELS,
   resolveLogLevel,
   resolveLogTarget,
   initializeLogger,
   logger,
+  resetLoggerForTesting,
 } from "../../src/core/logger.ts";
 import { HookSystem } from "../../src/core/hooks.ts";
 
@@ -93,6 +94,15 @@ describe("logger", () => {
 });
 
 describe("initializeLogger", () => {
+  afterEach(() => {
+    resetLoggerForTesting();
+  });
+
+  afterAll(() => {
+    // Ensure logger is reset after this describe block so other tests aren't affected
+    resetLoggerForTesting();
+  });
+
   it("does not register handler when target is none", () => {
     const hooks = new HookSystem();
     const beforeCount = hooks.handlerCount("log");

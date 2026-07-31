@@ -117,7 +117,7 @@ describe("runInteractiveSession", () => {
       });
 
       // Wait for setup to complete
-      await new Promise((r) => setTimeout(r, 100));
+      await new Promise((r) => setTimeout(r, 20));
 
       expect(createOpts).not.toBeNull();
       expect(createOpts!.initialConfig).toBeDefined();
@@ -173,7 +173,7 @@ describe("runInteractiveSession", () => {
         setupInput: () => {},
       });
 
-      await new Promise((r) => setTimeout(r, 100));
+      await new Promise((r) => setTimeout(r, 20));
 
       // Clean up
       (mockBus as any)._resolve();
@@ -223,7 +223,7 @@ describe("runInteractiveSession", () => {
         setupInput: () => { inputCreated = true; },
       });
 
-      await new Promise((r) => setTimeout(r, 100));
+      await new Promise((r) => setTimeout(r, 20));
       expect(inputCreated).toBe(true);
 
       // Clean up
@@ -274,11 +274,11 @@ describe("runInteractiveSession", () => {
         setupInput: () => {},
       });
 
-      await new Promise((r) => setTimeout(r, 100));
+      await new Promise((r) => setTimeout(r, 20));
 
       // Trigger model change
       core.hooks.notifyHooks(HOOKS.MODEL_CHANGE, { newModel: "new-model" });
-      await new Promise((r) => setTimeout(r, 50));
+      await new Promise((r) => setTimeout(r, 10));
 
       expect(lastPrompt).toBe("(new-model)> ");
 
@@ -330,11 +330,11 @@ describe("runInteractiveSession", () => {
         setupInput: () => {},
       });
 
-      await new Promise((r) => setTimeout(r, 100));
+      await new Promise((r) => setTimeout(r, 20));
 
       // Trigger turn end with stopped=true
       core.hooks.notifyHooks(HOOKS.TURN_END, { stopped: true });
-      await new Promise((r) => setTimeout(r, 100));
+      await new Promise((r) => setTimeout(r, 20));
 
       expect(promptCalled).toBe(true);
 
@@ -389,7 +389,7 @@ describe("runInteractiveSession", () => {
         setupInput: () => {},
       });
 
-      await new Promise((r) => setTimeout(r, 100));
+      await new Promise((r) => setTimeout(r, 20));
       expect(customRlUsed).toBe(true);
 
       // Clean up
@@ -440,7 +440,7 @@ describe("runInteractiveSession", () => {
         setupInput: () => {},
       });
 
-      await new Promise((r) => setTimeout(r, 100));
+      await new Promise((r) => setTimeout(r, 20));
 
       // Session should be set up with shell mode enabled
       // We verify by checking the session is running
@@ -494,7 +494,7 @@ describe("runInteractiveSession", () => {
         setupInput: () => {},
       });
 
-      await new Promise((r) => setTimeout(r, 100));
+      await new Promise((r) => setTimeout(r, 20));
 
       // Clean up
       (mockBus as any)._resolve();
@@ -547,7 +547,7 @@ describe("runInteractiveSession", () => {
         setupInput: () => {},
       });
 
-      await new Promise((r) => setTimeout(r, 100));
+      await new Promise((r) => setTimeout(r, 20));
       expect(capturedBuildAgent).toBeDefined();
       expect(typeof capturedBuildAgent).toBe("function");
 

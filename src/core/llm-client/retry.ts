@@ -35,6 +35,8 @@ export function isRetryableHttpStatus(status: number): boolean {
 
 export interface RetryOptions {
   signal?: AbortSignal | null;
+  /** Base delay in ms before first retry (default: 1000). Useful for fast tests. */
+  baseDelayMs?: number;
 }
 
 /**
@@ -50,7 +52,7 @@ export async function retryWithBackoff<T>(
   maxRetries: number,
   options: RetryOptions = {},
 ): Promise<T> {
-  const { signal } = options;
+  const { signal, baseDelayMs = 1000 } = options;
 
   if (maxRetries == null) {
     throw ConfigError.MissingConfig("maxRetries");
@@ -60,7 +62,7 @@ export async function retryWithBackoff<T>(
     throw LlmError.Cancelled("request was cancelled");
   }
 
-  let delaySecs = 1;
+  let delayMs = baseDelayMs;
 
   for (let attempt = 1; attempt <= maxRetries; attempt++) {
     // Check cancellation before each attempt
@@ -102,7 +104,7 @@ export async function retryWithBackoff<T>(
         }
 
         await new Promise<void>((resolve) => {
-          const timeout = setTimeout(resolve, delaySecs * 1000);
+          const timeout = setTimeout(resolve, delayMs);
           if (signal) {
             signal.addEventListener(
               "abort",
@@ -115,7 +117,7 @@ export async function retryWithBackoff<T>(
           }
         });
 
-        delaySecs *= 2;
+        delayMs *= 2;
         continue;
       }
 

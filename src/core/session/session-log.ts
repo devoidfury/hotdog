@@ -38,8 +38,11 @@ export interface LogEntry {
 
 /**
  * Get the sessions directory path.
+ * Override with HOTDOG_SESSIONS_DIR env var (useful for tests).
  */
 export function sessionsDir(): string {
+  const override = process.env.HOTDOG_SESSIONS_DIR;
+  if (override) return override;
   const home = homedir();
   return join(home, ".cache", "hotdog", "sessions");
 }

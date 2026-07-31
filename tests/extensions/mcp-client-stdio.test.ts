@@ -381,7 +381,7 @@ describe("StdioTransport", () => {
   it("sends messages to subprocess stdin", async () => {
     const transport = new StdioTransport("bun", ["./tests/fixtures/mcp-test-server.ts"]);
     await transport.send('{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}');
-    await new Promise((r) => setTimeout(r, 100));
+    await new Promise((r) => setTimeout(r, 20));
     await transport.destroy();
   });
 
@@ -398,7 +398,7 @@ describe("StdioTransport", () => {
       receivedLines.push(line);
     });
 
-    await new Promise((r) => setTimeout(r, 200));
+    await new Promise((r) => setTimeout(r, 30));
     removeHandler();
     await transport.destroy();
 
@@ -412,7 +412,7 @@ describe("StdioTransport", () => {
       receivedLines.push(line);
     });
 
-    await new Promise((r) => setTimeout(r, 200));
+    await new Promise((r) => setTimeout(r, 30));
     removeHandler();
     await transport.destroy();
 
@@ -426,7 +426,7 @@ describe("StdioTransport", () => {
       receivedLines.push(line);
     });
 
-    await new Promise((r) => setTimeout(r, 200));
+    await new Promise((r) => setTimeout(r, 30));
     removeHandler();
     await transport.destroy();
 
@@ -441,7 +441,7 @@ describe("StdioTransport", () => {
     const remove1 = transport.onMessage((line) => handler1Lines.push(line));
     const remove2 = transport.onMessage((line) => handler2Lines.push(line));
 
-    await new Promise((r) => setTimeout(r, 200));
+    await new Promise((r) => setTimeout(r, 30));
     remove1();
     remove2();
     await transport.destroy();
@@ -461,7 +461,7 @@ describe("StdioTransport", () => {
     await new Promise((r) => setTimeout(r, 50));
     remove1();
 
-    await new Promise((r) => setTimeout(r, 100));
+    await new Promise((r) => setTimeout(r, 20));
     remove2();
     await transport.destroy();
 
@@ -475,7 +475,7 @@ describe("StdioTransport", () => {
   it("sendNotification writes to stdin", async () => {
     const transport = new StdioTransport("bun", ["./tests/fixtures/mcp-test-server.ts"]);
     transport.sendNotification('{"jsonrpc":"2.0","method":"notifications/initialized"}');
-    await new Promise((r) => setTimeout(r, 100));
+    await new Promise((r) => setTimeout(r, 20));
     await transport.destroy();
   });
 
@@ -511,7 +511,7 @@ describe("StdioTransport", () => {
 
   it("captures stderr output", async () => {
     const transport = new StdioTransport("bun", ["-e", "console.error('error-msg')"]);
-    await new Promise((r) => setTimeout(r, 200));
+    await new Promise((r) => setTimeout(r, 30));
     expect(transport.stderrOutput).toContain("error-msg");
     await transport.destroy();
   });
@@ -525,7 +525,7 @@ describe("McpClient stdio integration", () => {
     const client = await McpClient.forStdio("bun", ["-e", "console.log(JSON.stringify({jsonrpc:'2.0',id:999,result:{data:'buffered'}}))"]);
 
     // Wait for message to be processed
-    await new Promise((r) => setTimeout(r, 200));
+    await new Promise((r) => setTimeout(r, 30));
 
     // The buffered response should be available
     expect(client.buffered.length).toBeGreaterThan(0);
@@ -534,21 +534,21 @@ describe("McpClient stdio integration", () => {
 
   it("handles empty lines from subprocess without error", async () => {
     const client = await McpClient.forStdio("bun", ["-e", "console.log(''); console.log(''); console.log('');"]);
-    await new Promise((r) => setTimeout(r, 200));
+    await new Promise((r) => setTimeout(r, 30));
     // Should not crash
     await client.shutdown();
   });
 
   it("handles invalid JSON lines from subprocess without error", async () => {
     const client = await McpClient.forStdio("bun", ["-e", "console.log('not valid json')"]);
-    await new Promise((r) => setTimeout(r, 200));
+    await new Promise((r) => setTimeout(r, 30));
     // Should not crash
     await client.shutdown();
   });
 
   it("handles notifications (no id) without error", async () => {
     const client = await McpClient.forStdio("bun", ["-e", "console.log(JSON.stringify({jsonrpc:'2.0',method:'notifications/initialized'}))"]);
-    await new Promise((r) => setTimeout(r, 200));
+    await new Promise((r) => setTimeout(r, 30));
     // Should not crash, notifications are ignored
     await client.shutdown();
   });

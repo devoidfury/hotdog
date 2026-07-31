@@ -10,7 +10,7 @@ import {
   sessionsDir,
 } from "../../core/session/session-log.ts";
 import { join } from "node:path";
-import { readdir, access, stat } from "node:fs/promises";
+import { readdir, access, stat, readFile } from "node:fs/promises";
 import {
   ToolResult,
   defaultCallDisplay,
@@ -49,6 +49,18 @@ function truncateContent(content: string, maxLength: number): string {
 }
 
 /**
+ * Count non-empty lines in a file (fast entry count for .jsonl files).
+ */
+async function countEntries(filePath: string): Promise<number> {
+  const content = await readFile(filePath, "utf-8");
+  let count = 0;
+  for (const line of content.split("\n")) {
+    if (line.trim()) count++;
+  }
+  return count;
+}
+
+/**
  * List sessions, returning JSON array of summaries.
  */
 async function listSessions(limit: number): Promise<SessionSummary[]> {
@@ -75,16 +87,16 @@ async function listSessions(limit: number): Promise<SessionSummary[]> {
     const sessionId = file.replace(/\.jsonl$/, "");
     const filePath = join(dir, file);
     const metadata = await stat(filePath);
-    const entries = await readSessionEntries(sessionId);
+    const entryCount = await countEntries(filePath);
 
     // Filter out sessions with only 1 entry
-    if (entries.length <= 1) continue;
+    if (entryCount <= 1) continue;
 
     const lastTs = new Date(metadata.mtime).toISOString();
     sessions.push({
       id: sessionId,
       last_modified: lastTs,
-      entry_count: entries.length,
+      entry_count: entryCount,
       mtime: metadata.mtime.getTime(),
     });
   }

@@ -2,7 +2,7 @@
 // Merged from session-log.test.ts + session-log-extended.test.ts + session-log-images.test.ts
 // to reduce duplication and consolidate related tests.
 
-import { test, expect } from "bun:test";
+import { test, expect, beforeAll, afterAll } from "bun:test";
 import {
   SessionLog,
   LOG_SOURCE,
@@ -22,14 +22,28 @@ import { join } from "node:path";
 import { homedir } from "node:os";
 import { setupSessionTestDir, cleanupSessionTest } from "../helpers.ts";
 
+// Use isolated temp directory to avoid scanning 100+ real session files
+const TEST_SESSIONS_DIR = join(import.meta.dir, "..", ".test-sessions");
+
+beforeAll(() => {
+  process.env.HOTDOG_SESSIONS_DIR = TEST_SESSIONS_DIR;
+  mkdirSync(TEST_SESSIONS_DIR, { recursive: true });
+});
+
+afterAll(() => {
+  delete process.env.HOTDOG_SESSIONS_DIR;
+  try { rmSync(TEST_SESSIONS_DIR, { recursive: true, force: true }); } catch {}
+});
+
 const TEST_SESSION_ID = "test-session-log";
 
 function setupTestDir() {
-  setupSessionTestDir(TEST_SESSION_ID);
+  mkdirSync(TEST_SESSIONS_DIR, { recursive: true });
+  try { rmSync(join(TEST_SESSIONS_DIR, `${TEST_SESSION_ID}.jsonl`)); } catch {}
 }
 
 function teardown() {
-  cleanupSessionTest(TEST_SESSION_ID);
+  try { rmSync(join(TEST_SESSIONS_DIR, `${TEST_SESSION_ID}.jsonl`)); } catch {}
 }
 
 function createMockAgent() {
@@ -337,7 +351,7 @@ test("SessionLog round-trip with images preserves image data", async () => {
 // ── readSessionEntries ─────────────────────────────────────────────────────
 
 test("readSessionEntries handles malformed JSON lines", async () => {
-  const dir = join(homedir(), ".cache", "hotdog", "sessions");
+  const dir = TEST_SESSIONS_DIR;
   mkdirSync(dir, { recursive: true });
   const testFile = join(dir, `${TEST_SESSION_ID}.jsonl`);
 
@@ -365,7 +379,7 @@ test("readSessionEntries handles malformed JSON lines", async () => {
 
 test("readSessionEntries replays from last reset", async () => {
   const uniqueId = "test-reset-replay-" + Date.now();
-  const dir = join(homedir(), ".cache", "hotdog", "sessions");
+  const dir = TEST_SESSIONS_DIR;
   mkdirSync(dir, { recursive: true });
   const testFile = join(dir, `${uniqueId}.jsonl`);
 
@@ -424,7 +438,7 @@ test("sessionExists returns false for non-existent session", async () => {
 });
 
 test("readAllSessions reads from multiple session files", async () => {
-  const dir = join(homedir(), ".cache", "hotdog", "sessions");
+  const dir = TEST_SESSIONS_DIR;
   mkdirSync(dir, { recursive: true });
 
   const testId1 = "test-readall-1";
@@ -518,7 +532,7 @@ test("replayed message getTextContent returns text without images", () => {
 
 test("listSessionLogs returns sessions sorted by last activity", async () => {
   const { listSessionLogs } = await import("../../src/core/session/session-log.ts");
-  const dir = join(homedir(), ".cache", "hotdog", "sessions");
+  const dir = TEST_SESSIONS_DIR;
   mkdirSync(dir, { recursive: true });
 
   const testId1 = "test-list-1";
@@ -559,7 +573,7 @@ test("listSessionLogs returns sessions sorted by last activity", async () => {
 
 test("listSessionLogs excludes sessions with only system/reset entries", async () => {
   const { listSessionLogs } = await import("../../src/core/session/session-log.ts");
-  const dir = join(homedir(), ".cache", "hotdog", "sessions");
+  const dir = TEST_SESSIONS_DIR;
   mkdirSync(dir, { recursive: true });
 
   const testId = "test-list-system-only";
@@ -593,7 +607,7 @@ test("listSessionLogs returns empty when no sessions directory", async () => {
 
 test("listSessionLogs includes message count", async () => {
   const { listSessionLogs } = await import("../../src/core/session/session-log.ts");
-  const dir = join(homedir(), ".cache", "hotdog", "sessions");
+  const dir = TEST_SESSIONS_DIR;
   mkdirSync(dir, { recursive: true });
 
   const testId = "test-list-count";
@@ -648,7 +662,7 @@ test("deleteSessionLog returns false for non-existent session", async () => {
 // ── readAllSessions malformed JSON handling ────────────────────────────────
 
 test("readAllSessions handles malformed JSON lines", async () => {
-  const dir = join(homedir(), ".cache", "hotdog", "sessions");
+  const dir = TEST_SESSIONS_DIR;
   mkdirSync(dir, { recursive: true });
 
   const testId = "test-readall-malformed";

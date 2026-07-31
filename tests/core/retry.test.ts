@@ -7,6 +7,8 @@ import {
 import { LlmError } from "../../src/core/error.ts";
 
 describe("retryWithBackoff", () => {
+  const fastOpts = { baseDelayMs: 1 };
+
   it("succeeds on first try", async () => {
     let calls = 0;
     const result = await retryWithBackoff(
@@ -15,6 +17,7 @@ describe("retryWithBackoff", () => {
         return Promise.resolve("ok");
       },
       12,
+      fastOpts,
     );
     expect(result).toBe("ok");
     expect(calls).toBe(1);
@@ -29,7 +32,7 @@ describe("retryWithBackoff", () => {
         return Promise.resolve("ok");
       },
       5,
-      { signal: new AbortController().signal },
+      { ...fastOpts, signal: new AbortController().signal },
     );
     expect(result).toBe("ok");
     expect(calls).toBe(3);
@@ -44,7 +47,7 @@ describe("retryWithBackoff", () => {
           throw LlmError.Api("Bad input");
         },
         3,
-        { signal: new AbortController().signal },
+        { ...fastOpts, signal: new AbortController().signal },
       ),
     ).rejects.toThrow("Bad input");
     expect(calls).toBe(1);
@@ -59,7 +62,7 @@ describe("retryWithBackoff", () => {
           throw LlmError.Cancelled("cancelled");
         },
         3,
-        { signal: new AbortController().signal },
+        { ...fastOpts, signal: new AbortController().signal },
       ),
     ).rejects.toThrow();
     expect(calls).toBe(1);
@@ -68,6 +71,7 @@ describe("retryWithBackoff", () => {
   it("throws original error after exhausting retries", async () => {
     await expect(
       retryWithBackoff(() => Promise.reject(LlmError.Http("fail")), 3, {
+        ...fastOpts,
         signal: new AbortController().signal,
       }),
     ).rejects.toThrow("fail");
@@ -78,6 +82,7 @@ describe("retryWithBackoff", () => {
     controller.abort();
     await expect(
       retryWithBackoff(() => Promise.resolve("ok"), 3, {
+        ...fastOpts,
         signal: controller.signal,
       }),
     ).rejects.toThrow();
@@ -90,13 +95,13 @@ describe("retryWithBackoff", () => {
       () => {
         calls++;
         if (calls === 1) {
-          setTimeout(() => controller.abort(), 10);
+          queueMicrotask(() => controller.abort());
           throw LlmError.Http("fail");
         }
         return Promise.resolve("ok");
       },
       3,
-      { signal: controller.signal },
+      { ...fastOpts, signal: controller.signal },
     );
     await expect(promise).rejects.toThrow();
     expect(calls).toBeLessThanOrEqual(2);
@@ -111,7 +116,7 @@ describe("retryWithBackoff", () => {
           throw LlmError.Http("fail");
         },
         2,
-        { signal: new AbortController().signal },
+        { ...fastOpts, signal: new AbortController().signal },
       ),
     ).rejects.toThrow();
     expect(calls).toBe(2);
@@ -166,6 +171,8 @@ describe("isRetryableHttpStatus", () => {
 });
 
 describe("retryWithBackoff — HTTP status retry", () => {
+  const fastOpts = { baseDelayMs: 1 };
+
   it("retries on retryable HTTP status codes via LlmError.Api", async () => {
     let calls = 0;
     const result = await retryWithBackoff(
@@ -176,7 +183,7 @@ describe("retryWithBackoff — HTTP status retry", () => {
         return Promise.resolve("ok");
       },
       5,
-      { signal: new AbortController().signal },
+      { ...fastOpts, signal: new AbortController().signal },
     );
     expect(result).toBe("ok");
     expect(calls).toBe(3);
@@ -191,7 +198,7 @@ describe("retryWithBackoff — HTTP status retry", () => {
           throw LlmError.Api("HTTP 400 (body: Bad Request)");
         },
         3,
-        { signal: new AbortController().signal },
+        { ...fastOpts, signal: new AbortController().signal },
       ),
     ).rejects.toThrow("HTTP 400");
     expect(calls).toBe(1);

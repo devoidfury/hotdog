@@ -1,8 +1,7 @@
-import { describe, it, expect, beforeEach, afterEach } from "bun:test";
+import { describe, it, expect, beforeEach, afterEach, beforeAll, afterAll } from "bun:test";
 import { HOOKS } from "../../src/core/hooks.ts";
 import { mkdirSync, rmSync, readdirSync, utimesSync } from "node:fs";
 import { join } from "node:path";
-import { homedir } from "node:os";
 import { createMockCore } from "../helpers.ts";
 import { captureConsole, withSilentConsole } from "../test-helpers.ts";
 import type { CoreContext } from "../../src/core/extensions/types.ts";
@@ -10,10 +9,23 @@ import type { CoreContext } from "../../src/core/extensions/types.ts";
 const SessionLog = (await import("../../src/extensions/session-log/session-log.ts")).SessionLog;
 const { create: createSessionReview } = await import("../../src/extensions/ui-session-review-cli/index.ts");
 
+// Use isolated temp directory to avoid scanning 100+ real session files
+const TEST_SESSIONS_DIR = join(import.meta.dir, "..", ".test-sessions-review");
+
+beforeAll(() => {
+  process.env.HOTDOG_SESSIONS_DIR = TEST_SESSIONS_DIR;
+  mkdirSync(TEST_SESSIONS_DIR, { recursive: true });
+});
+
+afterAll(() => {
+  delete process.env.HOTDOG_SESSIONS_DIR;
+  try { rmSync(TEST_SESSIONS_DIR, { recursive: true, force: true }); } catch {}
+});
+
 // ── Helpers ─────────────────────────────────────────────────────────────────
 
 function sessionsDir() {
-  return join(homedir(), ".cache", "hotdog", "sessions");
+  return TEST_SESSIONS_DIR;
 }
 
 async function setupSession(id: string, entries: Array<{ type: "input" | "assistant" | "system", content: string }>) {

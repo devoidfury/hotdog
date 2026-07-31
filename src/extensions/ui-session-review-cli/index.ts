@@ -7,7 +7,7 @@ import { HOOKS } from "../../core/hooks.ts";
 import { CliOutputSink } from "../../utils/cli/cli.ts";
 import { ColorPalette, type PaletteOptions } from "../../utils/cli/colors.ts";
 import { readSessionEntries, sessionsDir as getSessionsDir } from "../session-log/index.ts";
-import { readdir, access, stat, unlink } from "node:fs/promises";
+import { readdir, access, stat, unlink, readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { ReviewTool } from "./review.ts";
 import { CoreContext, ExtensionInstance, ToolsRegisterPayload } from "../../core/extensions/types.ts";
@@ -244,6 +244,18 @@ async function runCleanup(
 
 // ── Shared Functions ───────────────────────────────────────────────────────
 
+/**
+ * Count non-empty lines in a file (fast entry count for .jsonl files).
+ */
+async function countEntries(filePath: string): Promise<number> {
+  const content = await readFile(filePath, "utf-8");
+  let count = 0;
+  for (const line of content.split("\n")) {
+    if (line.trim()) count++;
+  }
+  return count;
+}
+
 async function listSessions(
   json: boolean,
   dir: string,
@@ -269,15 +281,15 @@ async function listSessions(
     const sessionId = file.replace(/\.jsonl$/, "");
     const filePath = join(dir, file);
     const metadata = await stat(filePath);
-    const entries = await readSessionEntries(sessionId);
+    const entryCount = await countEntries(filePath);
 
-    if (entries.length <= 1) continue;
+    if (entryCount <= 1) continue;
 
     const lastTs = new Date(metadata.mtime).toISOString();
     sessions.push({
       id: sessionId,
       last_modified: lastTs,
-      entry_count: entries.length,
+      entry_count: entryCount,
       mtime: metadata.mtime.getTime(),
     });
   }

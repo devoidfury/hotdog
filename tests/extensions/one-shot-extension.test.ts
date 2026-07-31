@@ -7,10 +7,10 @@ import { createMockCore, createMockRegistry } from "../test-helpers.ts";
 
 describe("One-Shot Extension", () => {
   it("registers the 'prompt' subcommand", async () => {
-    const core = createMockCore();
+    const core = createMockCore() as any;
     const ext = create(core);
 
-    const registry = createMockRegistry();
+    const registry = createMockRegistry() as any;
     await ext.hooks![HOOKS.CLI_SUBCOMMANDS_REGISTER]!(registry);
 
     expect(registry.registeredName).toBe("prompt");
@@ -19,7 +19,7 @@ describe("One-Shot Extension", () => {
   });
 
   it("sets subcommand to 'prompt' when prompt flag is present", async () => {
-    const core = createMockCore();
+    const core = createMockCore() as any;
     const ext = create(core);
 
     const cli: any = { prompt: "Hello world" };
@@ -29,7 +29,7 @@ describe("One-Shot Extension", () => {
   });
 
   it("does not set subcommand when prompt is absent or empty", async () => {
-    const core = createMockCore();
+    const core = createMockCore() as any;
     const ext = create(core);
 
     const cli1: any = {};
@@ -42,7 +42,7 @@ describe("One-Shot Extension", () => {
   });
 
   it("CLI_ARGS_PARSED does not interfere with other subcommands", async () => {
-    const core = createMockCore();
+    const core = createMockCore() as any;
     const ext = create(core);
 
     const cli: any = { subcommand: "info" };
@@ -52,7 +52,7 @@ describe("One-Shot Extension", () => {
   });
 
   it("CLI_ARGS_PARSED overrides existing subcommand when prompt is set", async () => {
-    const core = createMockCore();
+    const core = createMockCore() as any;
     const ext = create(core);
 
     const cli: any = { subcommand: "info", prompt: "Hello" };

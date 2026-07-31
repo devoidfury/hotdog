@@ -203,10 +203,10 @@ describe("ExploreTool > execute", () => {
     };
 
     let capturedArgs: [string, string[], Record<string, unknown>] | null = null;
-    const spawnFn: SpawnFn = (cmd, args, opts) => {
-      capturedArgs = [cmd, args || [], opts || {}];
+    const spawnFn = ((cmd: string, args: readonly string[] | undefined, opts: unknown) => {
+      capturedArgs = [cmd, (args || []) as string[], (opts || {}) as Record<string, unknown>];
       return mockProc;
-    };
+    }) as SpawnFn;
 
     const tool = new ExploreTool(spawnFn);
     const result = await tool.execute(
@@ -330,10 +330,10 @@ describe("ExploreTool > execute", () => {
     };
 
     let capturedArgs: [string, string[], Record<string, unknown>] | null = null;
-    const spawnFn: SpawnFn = (cmd, args, opts) => {
-      capturedArgs = [cmd, args || [], opts || {}];
+    const spawnFn = ((cmd: string, args: readonly string[] | undefined, opts: unknown) => {
+      capturedArgs = [cmd, (args || []) as string[], (opts || {}) as Record<string, unknown>];
       return mockProc;
-    };
+    }) as SpawnFn;
 
     const tool = new ExploreTool(spawnFn);
     const result = await tool.execute(

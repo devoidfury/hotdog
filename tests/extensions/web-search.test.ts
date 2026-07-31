@@ -466,6 +466,9 @@ test.skip("WebSearchTool DuckDuckGo network integration", () => {
       provider: "duckduckgo",
       maxResults: 3,
       timeout: 15,
+      braveApiKey: "",
+      tavilyApiKey: "",
+      searxngInstanceUrl: "",
     });
     const result = await tool.execute(
       JSON.stringify({ query: "Bun JavaScript runtime" }),

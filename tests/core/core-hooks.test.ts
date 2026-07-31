@@ -522,10 +522,10 @@ describe("HookSystem — Priority", () => {
 
 describe("GateAction type guards", () => {
   const actions = [
-    { name: "block", guard: isGateActionBlock, value: { action: "block", result: "denied" } },
-    { name: "modify", guard: isGateActionModify, value: { action: "modify", input: "new" } },
-    { name: "continue", guard: isGateActionContinue, value: { action: "continue" } },
-    { name: "handled", guard: isGateActionHandled, value: { action: "handled" } },
+    { name: "block", guard: isGateActionBlock, value: { action: "block" as const, result: "denied" } },
+    { name: "modify", guard: isGateActionModify, value: { action: "modify" as const, input: "new" } },
+    { name: "continue", guard: isGateActionContinue, value: { action: "continue" as const } },
+    { name: "handled", guard: isGateActionHandled, value: { action: "handled" as const } },
   ];
 
   it.each(actions)("correctly identifies $name action", ({ guard, value }) => {
@@ -550,8 +550,8 @@ describe("GateAction type guards", () => {
 
 describe("InputHookResult type guards", () => {
   const results = [
-    { name: "transform", guard: isInputTransform, value: { action: "transform", text: "modified" } },
-    { name: "handled", guard: isInputHandled, value: { action: "handled" } },
+    { name: "transform", guard: isInputTransform, value: { action: "transform" as const, text: "modified" } },
+    { name: "handled", guard: isInputHandled, value: { action: "handled" as const } },
   ];
 
   it.each(results)("correctly identifies $name result", ({ guard, value }) => {

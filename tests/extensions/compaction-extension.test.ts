@@ -841,7 +841,7 @@ describe("getModelConfig fallback lookup", () => {
     // Agent uses unprefixed model name (as happens when resolveModel can't find local entry)
     const agent = createMockAgent(context, "laguna");
 
-    const result = await compactCmd.handler(agent, "compact");
+    const result = await compactCmd.handler!(agent, "compact");
     // Should succeed without error — means getModelConfig found the config
     expect(result).toBeDefined();
     expect(result.error).toBeUndefined();
@@ -874,7 +874,7 @@ describe("getModelConfig fallback lookup", () => {
     // Agent uses a model name not in the registry
     const agent = createMockAgent(context, "unknown-model");
 
-    const result = await compactCmd.handler(agent, "compact");
+    const result = await compactCmd.handler!(agent, "compact");
     // Should succeed with default 128000 contextLimit
     expect(result).toBeDefined();
     expect(result.error).toBeUndefined();
@@ -906,7 +906,7 @@ describe("getModelConfig fallback lookup", () => {
     // Agent uses prefixed model name — direct lookup should work
     const agent = createMockAgent(context, "provider/model-x");
 
-    const result = await compactCmd.handler(agent, "compact");
+    const result = await compactCmd.handler!(agent, "compact");
     expect(result).toBeDefined();
     expect(result.error).toBeUndefined();
   });

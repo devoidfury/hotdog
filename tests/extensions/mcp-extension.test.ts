@@ -3,7 +3,7 @@
 import { describe, it, expect } from "bun:test";
 import { HOOKS } from "../../src/core/hooks.ts";
 import { create } from "../../src/extensions/mcp-client/index.ts";
-import type { McpConnection } from "../../src/extensions/mcp-client/connection.ts";
+import type { McpConnection, McpConnectionHandle } from "../../src/extensions/mcp-client/connection.ts";
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -36,7 +36,10 @@ function createMockConnectionClass(config: {
     }
 
     handle() {
-      return { callTool: async () => ({}) };
+      return {
+        serverName: "mock",
+        callTool: async () => "ok",
+      } as McpConnectionHandle;
     }
 
     async shutdown() {}
@@ -46,7 +49,7 @@ function createMockConnectionClass(config: {
 /** Create a mock connection instance. */
 function createMockConnection(config: {
   tools?: Record<string, unknown>[];
-  callToolResult?: Record<string, unknown>;
+  callToolResult?: string;
   shouldFailConnectHttp?: boolean;
   shouldFailConnectStdio?: boolean;
 }) {
@@ -54,8 +57,9 @@ function createMockConnection(config: {
     tools: config.tools || [],
     serverName: "mock",
     handle: () => ({
-      callTool: async () => config.callToolResult || { content: [{ type: "text", text: "ok" }] },
-    }),
+      serverName: "mock",
+      callTool: async () => config.callToolResult || "ok",
+    }) as McpConnectionHandle,
     shutdown: async () => {},
   };
   return mockConnection;
@@ -134,7 +138,7 @@ describe("MCP extension", () => {
       },
     };
 
-    await (ext!.hooks![HOOKS.TOOLS_REGISTER] as Function)(mockRegistry);
+    await (ext!.hooks![HOOKS.TOOLS_REGISTER]! as Function)(mockRegistry);
 
     expect(registeredTools).toHaveLength(2);
     expect(registeredTools[0]!.name).toBe("test/echo");

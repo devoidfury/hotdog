@@ -95,7 +95,7 @@ export class TrimStrategy extends CompactionStrategy {
 
   override canCompact(messages: Message[], settings: CompactionSettings): boolean {
     const nonSystem = messages.filter((m) => m.role !== "system");
-    if (nonSystem.length <= (settings.keepRecentMessages || 3) * 2) return false;
+    if (nonSystem.length <= settings.keepRecentMessages * 2) return false;
 
     const contextLimit = settings.contextLimit || 128000;
     const effectiveMax = contextLimit - (settings.reserveTokens || 0);

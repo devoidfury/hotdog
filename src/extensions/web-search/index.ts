@@ -29,21 +29,21 @@ interface SearchResult {
 }
 
 interface WebSearchToolOptions {
-  provider?: string;
-  maxResults?: number;
-  timeout?: number;
-  braveApiKey?: string;
-  tavilyApiKey?: string;
-  searxngInstanceUrl?: string;
+  provider: string;
+  maxResults: number;
+  timeout: number;
+  braveApiKey: string;
+  tavilyApiKey: string;
+  searxngInstanceUrl: string;
 }
 
 interface WebSearchConfig {
-  provider?: string;
-  maxResults?: number;
-  timeout?: number;
-  braveApiKey?: string;
-  tavilyApiKey?: string;
-  searxngInstanceUrl?: string;
+  provider: string;
+  maxResults: number;
+  timeout: number;
+  braveApiKey: string;
+  tavilyApiKey: string;
+  searxngInstanceUrl: string;
 }
 
 interface ToolInput {

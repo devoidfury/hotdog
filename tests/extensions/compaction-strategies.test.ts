@@ -571,15 +571,15 @@ describe("TokenAwareStrategy", () => {
     }
   });
 
-  it("uses default targetTokens of 16384 when neither targetTokens nor reserveTokens set", async () => {
+  it("uses reserveTokens when targetTokens not set", async () => {
     const content = "x".repeat(100);
     const messages = Array.from({ length: 200 }, (_, i) => makeMessage(i % 2 === 0 ? "user" : "assistant", content));
-    const settings = { ...defaultSettings, targetTokens: undefined, reserveTokens: undefined, contextLimit: 128000 };
+    const settings = { ...defaultSettings, contextLimit: 128000 };
 
     const result = await new TokenAwareStrategy().execute(messages, settings, noopLlmChat, "model");
 
     if (result) {
-      expect(result.metadata!.targetTokens).toBe(16384);
+      expect(result.metadata!.targetTokens).toBe(defaultSettings.reserveTokens);
     }
   });
 

@@ -32,7 +32,7 @@ interface LoopState {
  * INPUT hook intercepts /quit during an active loop.
  */
 export function create(core: CoreContext): ExtensionInstance {
-  const config = getExtensionConfig<{ enabled?: boolean; maxLoops?: number }>(core, "loop");
+  const config = getExtensionConfig<{ enabled: boolean; maxLoops: number }>(core, "loop");
 
   if (config.enabled === false) {
     return {};

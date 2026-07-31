@@ -118,7 +118,7 @@ describe("Main entry point - exit code flow", () => {
         .then((code) => (process as any).exit(code));
     } catch (e: any) {
       if (e.message.startsWith("process.exit called with:")) {
-        expect(capturedCode).toBe(0);
+        expect(capturedCode as number).toBe(0);
       } else {
         throw e;
       }
@@ -144,7 +144,7 @@ describe("Main entry point - exit code flow", () => {
         .then((code) => (process as any).exit(code));
     } catch (e: any) {
       if (e.message.startsWith("process.exit called with:")) {
-        expect(capturedCode).toBe(1);
+        expect(capturedCode as number).toBe(1);
       } else {
         throw e;
       }

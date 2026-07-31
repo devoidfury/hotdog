@@ -288,7 +288,7 @@ describe("createWsServer", () => {
       const ws = createWsMockWs();
       wsServer.onMessage(ws, "not valid json");
 
-      const msg = JSON.parse(ws.messages[0]);
+      const msg = JSON.parse( (ws as { messages: string[] }).messages[0]);
       expect(msg.type).toBe("error");
       expect(msg.message).toBe("Invalid JSON");
     });
@@ -298,7 +298,7 @@ describe("createWsServer", () => {
       const ws = createWsMockWs();
       wsServer.onMessage(ws, JSON.stringify({ foo: "bar" }));
 
-      const msg = JSON.parse(ws.messages[0]);
+      const msg = JSON.parse( (ws as { messages: string[] }).messages[0]);
       expect(msg.type).toBe("error");
       expect(msg.message).toBe("Message type required");
     });
@@ -308,7 +308,7 @@ describe("createWsServer", () => {
       const ws = createWsMockWs();
       wsServer.onMessage(ws, JSON.stringify({ type: "unknown_type" }));
 
-      const msg = JSON.parse(ws.messages[0]);
+      const msg = JSON.parse( (ws as { messages: string[] }).messages[0]);
       expect(msg.type).toBe("error");
       expect(msg.message).toContain("Unknown message type");
     });
@@ -327,7 +327,7 @@ describe("createWsServer", () => {
       const ws = createWsMockWs();
       wsServer.onUpgrade({ url: "http://localhost/ws" }, ws);
 
-      const msg = JSON.parse(ws.messages[0]);
+      const msg = JSON.parse( (ws as { messages: string[] }).messages[0]);
       expect(msg.type).toBe("authRequired");
     });
 
@@ -343,7 +343,7 @@ describe("createWsServer", () => {
       const ws = createWsMockWs();
       wsServer.onUpgrade({ url: "http://localhost/ws?token=invalid" }, ws);
 
-      const msg = JSON.parse(ws.messages[0]);
+      const msg = JSON.parse( (ws as { messages: string[] }).messages[0]);
       expect(msg.type).toBe("authError");
     });
   });
@@ -389,7 +389,7 @@ describe("createWsServer", () => {
       const ws = createWsMockWs();
       wsServer.onMessage(ws, JSON.stringify({ type: C2S.LIST_SESSIONS }));
 
-      const msg = JSON.parse(ws.messages[0]);
+      const msg = JSON.parse( (ws as { messages: string[] }).messages[0]);
       expect(msg.type).toBe("sessions");
       expect(Array.isArray(msg.sessions)).toBe(true);
       expect(msg.sessions.length).toBe(1);
@@ -405,7 +405,7 @@ describe("createWsServer", () => {
 
       await new Promise((r) => setTimeout(r, 100));
 
-      const msg = JSON.parse(ws.messages[0]);
+      const msg = JSON.parse( (ws as { messages: string[] }).messages[0]);
       expect(msg.type).toBe("sessionCreated");
       expect(msg.sessionId).toBeDefined();
     });

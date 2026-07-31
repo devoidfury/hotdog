@@ -11,6 +11,7 @@ import {
   generateDiff,
   getRequiredStr,
   ToolResult,
+  TOOL_STOP_LOOP,
 } from "../../src/core/extensions/tool-utils.ts";
 
 describe("toolDef", () => {
@@ -527,7 +528,6 @@ describe("formatToolResult", () => {
 
 describe("ToolResult.stop()", () => {
   it("creates a result that signals loop stop", () => {
-    const { TOOL_STOP_LOOP } = require("../../src/core/extensions/tool-utils.ts");
     const r = ToolResult.stop("waiting for input");
     expect(r.success).toBe(true);
     expect(r.output).toBe("waiting for input");
@@ -537,7 +537,6 @@ describe("ToolResult.stop()", () => {
 
 describe("ToolResult.withStopLoop()", () => {
   it("marks an existing result to stop the loop", () => {
-    const { TOOL_STOP_LOOP } = require("../../src/core/extensions/tool-utils.ts");
     const r = ToolResult.ok("done").withStopLoop();
     expect(r.success).toBe(true);
     expect(r.output).toBe("done");
@@ -545,7 +544,6 @@ describe("ToolResult.withStopLoop()", () => {
   });
 
   it("is chainable", () => {
-    const { TOOL_STOP_LOOP } = require("../../src/core/extensions/tool-utils.ts");
     const r = ToolResult.ok("output")
       .withEntry("key", "value")
       .withStopLoop();

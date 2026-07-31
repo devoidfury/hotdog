@@ -168,9 +168,9 @@ import {
 } from "./prompts.ts";
 
 interface CompactionSettings {
-  enabled?: boolean;
-  reserveTokens?: number;
-  keepRecentMessages?: number;
+  enabled: boolean;
+  reserveTokens: number;
+  keepRecentMessages: number;
 }
 
 interface CompactResult {

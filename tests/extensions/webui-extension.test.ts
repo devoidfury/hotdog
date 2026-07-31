@@ -7,10 +7,10 @@ import { createMockCore, createMockRegistry } from "../test-helpers.ts";
 
 describe("WebUI Extension", () => {
   it("registers the 'webui' subcommand with correct metadata", async () => {
-    const core = createMockCore();
+    const core = createMockCore() as any;
     const ext = create(core);
 
-    const registry = createMockRegistry();
+    const registry = createMockRegistry() as any;
     await ext.hooks![HOOKS.CLI_SUBCOMMANDS_REGISTER]!(registry);
 
     expect(registry.registeredName).toBe("webui");
@@ -20,7 +20,7 @@ describe("WebUI Extension", () => {
   });
 
   it("returns extension without hooks when core has no hooks", () => {
-    const core = createMockCore({ hooks: null });
+    const core = createMockCore({ hooks: null }) as any;
     const ext = create(core);
     expect(ext.hooks).toBeUndefined();
   });

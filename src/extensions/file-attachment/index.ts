@@ -154,8 +154,8 @@ async function expandFileReferences(
  */
 export function create(core: CoreContext): ExtensionInstance {
   const config = getExtensionConfig<{
-    maxFileSize?: number;
-    maxFiles?: number;
+    maxFileSize: number;
+    maxFiles: number;
   }>(core, "fileAttachment");
   const maxFileSize = config.maxFileSize;
   const maxFiles = config.maxFiles;

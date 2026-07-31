@@ -471,7 +471,7 @@ describe("compactMessages", () => {
       { role: "user", content: "Hello" },
       { role: "assistant", content: "Hi" },
     ];
-    const result = await compactMessages(messages, mockLlmChat, "test-model", { enabled: false });
+    const result = await compactMessages(messages, mockLlmChat, "test-model", { enabled: false, reserveTokens: 8000, keepRecentMessages: 3 });
     expect(result).toBeNull();
   });
 
@@ -484,7 +484,7 @@ describe("compactMessages", () => {
       messages,
       mockLlmChat,
       "test-model",
-      { enabled: true, keepRecentMessages: 8 },
+      { enabled: true, keepRecentMessages: 8, reserveTokens: 8000 },
     );
     expect(result).toBeNull();
   });
@@ -499,7 +499,7 @@ describe("compactMessages", () => {
       messages,
       mockLlmChat,
       "test-model",
-      { enabled: true, keepRecentMessages: 2 },
+      { enabled: true, keepRecentMessages: 2, reserveTokens: 8000 },
     );
 
     expect(result).not.toBeNull();
@@ -518,7 +518,7 @@ describe("compactMessages", () => {
     }));
 
     await expect(
-      compactMessages(messages, failingLlmChat, "test-model", { enabled: true, keepRecentMessages: 2 }),
+      compactMessages(messages, failingLlmChat, "test-model", { enabled: true, keepRecentMessages: 2, reserveTokens: 8000 }),
     ).rejects.toThrow();
   });
 
@@ -532,7 +532,7 @@ describe("compactMessages", () => {
       messages,
       mockLlmChat,
       "test-model",
-      { enabled: true, keepRecentMessages: 1 },
+      { enabled: true, keepRecentMessages: 1, reserveTokens: 8000 },
     );
 
     expect(result).not.toBeNull();
@@ -550,7 +550,7 @@ describe("compactMessages", () => {
       messages,
       mockLlmChat,
       "test-model",
-      { enabled: true, keepRecentMessages: 8 },
+      { enabled: true, keepRecentMessages: 8, reserveTokens: 8000 },
     );
 
     expect(result).not.toBeNull();

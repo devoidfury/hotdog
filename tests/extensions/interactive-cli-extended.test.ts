@@ -59,7 +59,7 @@ describe("handleSlashCommand", () => {
       capturedOutput = "";
       handleSlashCommand(cmd, mockSessionManager, mockChannel, rl as any);
       expect(closed).toBe(true);
-      expect(exitCalledWith).toBe(0);
+      expect(exitCalledWith as number).toBe(0);
       expect(capturedOutput).toContain("Goodbye!");
     }
   });

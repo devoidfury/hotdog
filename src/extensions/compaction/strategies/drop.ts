@@ -28,6 +28,6 @@ export class DropStrategy extends CompactionStrategy {
 
   override canCompact(messages: Message[], settings: CompactionSettings): boolean {
     const nonSystem = messages.filter((m) => m.role !== "system");
-    return nonSystem.length > (settings.keepRecentMessages || 3) * 2;
+    return nonSystem.length > settings.keepRecentMessages * 2;
   }
 }

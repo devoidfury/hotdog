@@ -16,6 +16,14 @@ export class SummarizeStrategy extends CompactionStrategy {
   override name = "summarize";
   override description = "LLM-based summarization of older messages. Produces a structured summary preserving context.";
 
+  constructor() {
+    super();
+  }
+
+  override canCompact(messages: Message[], settings: CompactionSettings): boolean {
+    return messages.length > settings.keepRecentMessages * 2;
+  }
+
   override async execute(
     messages: Message[],
     settings: CompactionSettings,

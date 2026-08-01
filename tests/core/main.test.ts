@@ -287,3 +287,144 @@ describe("main -- subcommand dispatch", () => {
     }
   });
 });
+describe("main -- subcommand handler errors", () => {
+  it("handles subcommand registered but handler not available", async () => {
+    // This tests lines 414-419: when a subcommand exists in the registry
+    // (from extension.json metadata) but has no handler attached after
+    // extensions are loaded (via CLI_SUBCOMMANDS_REGISTER hook).
+    // We mock ui-info-cli to NOT register the "info" handler, while the
+    // subcommand is still known from extension.json.
+    const origArgv = process.argv;
+    const origEnv = { ...process.env };
+    const origStdoutWrite = process.stdout.write;
+    const origStderrWrite = process.stderr.write;
+    const origConsoleLog = console.log;
+    const origConsoleError = console.error;
+
+    process.env.HOTDOG_LOG_TARGET = "stderr";
+    process.env.HOTDOG_LOG_LEVEL = "error";
+    process.env.HOTDOG_AI_URL = "http://test:8000";
+    process.argv = ["bun", "hotdog", "info"];
+
+    let capturedStderr = "";
+    process.stdout.write = () => true;
+    process.stderr.write = (chunk: string | Buffer): boolean => {
+      if (typeof chunk === "string") capturedStderr += chunk;
+      else capturedStderr += chunk.toString();
+      return true;
+    };
+    console.log = () => {};
+    console.error = (...args: unknown[]) => process.stderr.write(args.join(" ") + "\n");
+
+    try {
+      const { mock } = await import("bun:test");
+      // Mock ui-info-cli to return an extension with no CLI_SUBCOMMANDS_REGISTER hook.
+      // The "info" subcommand is still registered from extension.json during metadata loading,
+      // but no handler will be attached.
+      const absPath = new URL("../../src/extensions/ui-info-cli/index.ts", import.meta.url).pathname;
+      mock.module(absPath, () => ({
+        create: mock(() => ({ hooks: {} })),
+      }));
+
+      const { main: mainFresh } = await import("../../src/core/main.ts");
+      const exitCode = await mainFresh();
+
+      expect(exitCode).toBe(1);
+      expect(capturedStderr).toContain('handler not available');
+    } finally {
+      process.argv = origArgv;
+      process.stdout.write = origStdoutWrite;
+      process.stderr.write = origStderrWrite;
+      console.log = origConsoleLog;
+      console.error = origConsoleError;
+      process.env = origEnv;
+    }
+  });
+});
+
+describe("main -- no subcommand fallback", () => {
+  it("prints 'No subcommand provided' when no subcommand given and stdin is not TTY", async () => {
+    // This tests lines 432-436: the final fallback error.
+    // Force stdin.isTTY to false so we skip the default_subcommand path.
+    const origIsTTY = process.stdin.isTTY;
+    Object.defineProperty(process.stdin, "isTTY", { value: false, configurable: true });
+
+    try {
+      const { exitCode, stderr, stdout } = await runMain([], {
+        AI_URL: "http://test:8000",
+        HOTDOG_AI_URL: "http://test:8000",
+      });
+
+      expect(exitCode).toBe(1);
+      expect(stderr).toContain("No subcommand provided");
+      expect(stdout).toContain("Available subcommands");
+    } finally {
+      Object.defineProperty(process.stdin, "isTTY", { value: origIsTTY, configurable: true });
+    }
+  });
+});
+
+describe("CoreInfrastructure service accessor", () => {
+  it("core.service() retrieves registered services", async () => {
+    // This tests line 128: the service() arrow function on CoreInfrastructure.
+    const { createHooks } = await import("../../src/core/hooks.ts");
+    const { createToolRegistry } = await import(
+      "../../src/core/extensions/tool-registry.ts"
+    );
+    const { createServiceRegistry } = await import(
+      "../../src/core/extensions/service-registry.ts"
+    );
+    const { createExtensionLoader } = await import(
+      "../../src/core/extensions/extensions.ts"
+    );
+    const { createCompletionService } = await import(
+      "../../src/core/completion.ts"
+    );
+    const { createConfigRegistry } = await import(
+      "../../src/core/extensions/config-registry.ts"
+    );
+    const { createSubcommandRegistry } = await import(
+      "../../src/core/extensions/registries.ts"
+    );
+
+    const hooks = createHooks();
+    const toolRegistry = createToolRegistry();
+    const services = createServiceRegistry();
+    const completion = createCompletionService();
+    const configRegistry = createConfigRegistry();
+    const cliSubcommandRegistry = createSubcommandRegistry();
+
+    const extensions = createExtensionLoader({
+      hooks,
+      toolRegistry,
+      services,
+      completion,
+      config: {},
+      cliSubcommandRegistry,
+      configRegistry,
+    });
+
+    // Manually construct a CoreInfrastructure-like object matching createCore output
+    const core = {
+      hooks,
+      toolRegistry,
+      extensions,
+      services,
+      completion,
+      config: {},
+      cliSubcommandRegistry,
+      configRegistry,
+      service: (name: string) => services.get(name),
+    };
+
+    // Register a service
+    services.register("test-service", { value: "hello" });
+
+    // Call core.service() - this exercises line 128
+    const result = core.service("test-service") as { value: string };
+    expect(result.value).toBe("hello");
+
+    // Verify it throws for missing services (same underlying get())
+    expect(() => core.service("nonexistent")).toThrow();
+  });
+});

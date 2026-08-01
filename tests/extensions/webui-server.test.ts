@@ -242,5 +242,128 @@ describe("createWebuiServer", () => {
       const data = await res.json();
       expect(data.error).toContain("Invalid token");
     });
+
+    it("WebSocket upgrade succeeds with valid token", async () => {
+      const result = await startServer();
+
+      // Get a valid token
+      const loginRes = await fetch(`${baseUrl}/login`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ apiKey: "test-secret" }),
+      });
+      const { token } = await loginRes.json();
+
+      // Connect via WebSocket
+      const wsUrl = `${baseUrl.replace("http", "ws")}/ws?token=${token}`;
+      const ws = new WebSocket(wsUrl);
+
+      await new Promise<void>((resolve) => {
+        ws.onopen = () => {
+          resolve();
+        };
+        ws.onerror = () => {
+          throw new Error("WebSocket connection failed");
+        };
+      });
+
+      expect(ws.readyState).toBe(WebSocket.OPEN);
+      ws.close();
+      await new Promise((r) => setTimeout(r, 50));
+    });
+
+    it("WebSocket message handler forwards messages to wsServer", async () => {
+      const result = await startServer();
+
+      // Get a valid token
+      const loginRes = await fetch(`${baseUrl}/login`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ apiKey: "test-secret" }),
+      });
+      const { token } = await loginRes.json();
+
+      // Connect via WebSocket
+      const wsUrl = `${baseUrl.replace("http", "ws")}/ws?token=${token}`;
+      const ws = new WebSocket(wsUrl);
+
+      await new Promise<void>((resolve, reject) => {
+        ws.onopen = () => resolve();
+        ws.onerror = () => reject(new Error("WebSocket connection failed"));
+      });
+
+      // Send a valid JSON message (LIST_SESSIONS)
+      const received: string[] = [];
+      ws.onmessage = (event) => {
+        received.push(event.data as string);
+      };
+
+      ws.send(JSON.stringify({ type: "listSessions" }));
+
+      // Wait for response
+      await new Promise((r) => setTimeout(r, 200));
+
+      // The message handler should have forwarded the message
+      // and we should get a response (sessions list or error)
+      expect(received.length).toBeGreaterThan(0);
+
+      ws.close();
+      await new Promise((r) => setTimeout(r, 50));
+    });
+
+    it("WebSocket close handler cleans up connection", async () => {
+      const result = await startServer();
+
+      // Get a valid token
+      const loginRes = await fetch(`${baseUrl}/login`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ apiKey: "test-secret" }),
+      });
+      const { token } = await loginRes.json();
+
+      // Connect via WebSocket
+      const wsUrl = `${baseUrl.replace("http", "ws")}/ws?token=${token}`;
+      const ws = new WebSocket(wsUrl);
+
+      await new Promise<void>((resolve, reject) => {
+        ws.onopen = () => resolve();
+        ws.onerror = () => reject(new Error("WebSocket connection failed"));
+      });
+
+      expect(ws.readyState).toBe(WebSocket.OPEN);
+
+      // Close the connection
+      ws.close();
+
+      // Wait for close to complete
+      await new Promise<void>((resolve) => {
+        ws.onclose = () => resolve();
+      });
+
+      expect(ws.readyState).toBe(WebSocket.CLOSED);
+    });
+
+    it("GET /ws upgrade failure returns 400", async () => {
+      await startServer();
+
+      // Get a valid token
+      const loginRes = await fetch(`${baseUrl}/login`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ apiKey: "test-secret" }),
+      });
+      const { token } = await loginRes.json();
+
+      // Send a non-WebSocket upgrade request (regular HTTP GET) to /ws with token
+      // This should fail to upgrade and return 400
+      const res = await fetch(`${baseUrl}/ws?token=${token}`, {
+        headers: { "Upgrade": "not-websocket" },
+      });
+
+      // Either upgrade fails (400) or Bun handles it differently
+      // The key is that the upgrade failure path is exercised
+      expect([400, 426]).toContain(res.status);
+    });
   });
 });

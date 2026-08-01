@@ -430,9 +430,17 @@ export class Agent {
     const cancelSignal = this.runAbortController.signal;
 
     if (this.abortSignal?.aborted) {
+      this.cancelled = true;
       this.runAbortController.abort();
     } else if (this.abortSignal) {
-      this.abortSignal.addEventListener("abort", () => this.runAbortController!.abort(), { once: true });
+      this.abortSignal.addEventListener(
+        "abort",
+        () => {
+          this.cancelled = true;
+          this.runAbortController!.abort();
+        },
+        { once: true },
+      );
     }
 
     try {

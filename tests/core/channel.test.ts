@@ -51,6 +51,27 @@ class TestChannel extends Channel {
   }
 }
 
+/**
+ * Minimal channel that uses base class handleQuit/handleHelp implementations.
+ */
+class MinimalChannel extends Channel {
+  writeCalls: OutputEvent[] = [];
+
+  protected write(event: OutputEvent): void {
+    this.writeCalls.push(event);
+  }
+
+  async *read(): AsyncIterable<string> {
+    yield "test";
+  }
+
+  protected _subscribe(_sessionId: string): void {}
+
+  protected _unsubscribe(_sessionId: string): void {}
+
+  protected _cleanup(): void {}
+}
+
 function createMockSessionManager(overrides: Partial<ChannelSessionManager> = {}): ChannelSessionManager {
   return {
     enqueue: mock(() => {}),
@@ -398,5 +419,23 @@ describe("Channel - read()", () => {
       results.push(text);
     }
     expect(results).toContain("test");
+  });
+});
+
+describe("Channel - base class default handlers", () => {
+  it("base handleQuit closes the channel", async () => {
+    const sm = createMockSessionManager();
+    const channel = new MinimalChannel({ sessionManager: sm });
+    expect(channel.isClosed).toBe(false);
+    await channel.handleQuit();
+    expect(channel.isClosed).toBe(true);
+  });
+
+  it("base handleHelp is a no-op", async () => {
+    const sm = createMockSessionManager();
+    const channel = new MinimalChannel({ sessionManager: sm });
+    await channel.handleHelp();
+    // Should not throw and produce no output
+    expect(channel.writeCalls.length).toBe(0);
   });
 });

@@ -48,6 +48,8 @@ export function parseInput(input: string): InputEvent {
  * Used in non-interactive modes (CI, pipes, one-shot).
  */
 export class NoopInput {
+  constructor() {}
+
   /**
    * Check if input is interactive.
    * @returns Always false.

@@ -165,6 +165,73 @@ describe("OutputSink", () => {
       }
     });
   });
+
+  describe("emitSystemMessage", () => {
+    it("writes content with newline to stderr", () => {
+      const origWrite = process.stderr.write;
+      process.stderr.write = (data) => { capturedStderr.push(data as string); return true; };
+
+      try {
+        const sink = new OutputSink({ stream: false });
+        sink.emitSystemMessage({ type: OUTPUT_EVENT.SYSTEM_MESSAGE, content: "System note" });
+        expect(capturedStderr).toContain("System note\n");
+      } finally {
+        process.stderr.write = origWrite;
+      }
+    });
+  });
+
+  describe("emitCompactionResult", () => {
+    it("is a no-op", () => {
+      let stdoutWritten = false;
+      let stderrWritten = false;
+      const origStdout = process.stdout.write;
+      const origStderr = process.stderr.write;
+      process.stdout.write = () => { stdoutWritten = true; return true; };
+      process.stderr.write = () => { stderrWritten = true; return true; };
+
+      try {
+        const sink = new OutputSink();
+        sink.emitCompactionResult({
+          type: OUTPUT_EVENT.COMPACTION_RESULT,
+          messagesCompacted: 5,
+          tokensBefore: 1000,
+          tokensAfter: 500,
+          strategy: "summarize",
+        });
+        expect(stdoutWritten).toBe(false);
+        expect(stderrWritten).toBe(false);
+      } finally {
+        process.stdout.write = origStdout;
+        process.stderr.write = origStderr;
+      }
+    });
+  });
+
+  describe("emitSessionState", () => {
+    it("is a no-op", () => {
+      let stdoutWritten = false;
+      let stderrWritten = false;
+      const origStdout = process.stdout.write;
+      const origStderr = process.stderr.write;
+      process.stdout.write = () => { stdoutWritten = true; return true; };
+      process.stderr.write = () => { stderrWritten = true; return true; };
+
+      try {
+        const sink = new OutputSink();
+        sink.emitSessionState({
+          type: OUTPUT_EVENT.SESSION_STATE,
+          key: "test-key",
+          value: "test-value",
+        });
+        expect(stdoutWritten).toBe(false);
+        expect(stderrWritten).toBe(false);
+      } finally {
+        process.stdout.write = origStdout;
+        process.stderr.write = origStderr;
+      }
+    });
+  });
 });
 
 describe("NoopSink", () => {

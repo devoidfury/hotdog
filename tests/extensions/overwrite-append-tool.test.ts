@@ -1,6 +1,7 @@
-import { describe, it, expect, beforeAll, afterAll } from 'bun:test';
+import { describe, it, expect, beforeAll, afterAll, spyOn } from 'bun:test';
 import fsSync from 'node:fs';
 import path from 'node:path';
+import fsPromises from 'node:fs/promises';
 import { OverwriteTool } from '../../src/extensions/core-tools/overwrite.ts';
 import { AppendTool } from '../../src/extensions/core-tools/append.ts';
 import { ToolContext } from '../../src/core/extensions/tool-context.ts';
@@ -142,6 +143,38 @@ describe('OverwriteTool.execute — error cases', () => {
     );
     expect(resultStr(result)).toContain('outside cwd boundary');
   });
+
+  it('returns error when directory creation fails', async () => {
+    const tool = new OverwriteTool();
+    const mkdirSpy = spyOn(fsPromises, 'mkdir').mockRejectedValue(new Error('permission denied'));
+
+    try {
+      const result = await tool.execute(
+        { path: 'readonly/dir/file.txt', content: 'test' },
+        toolCtx({ workspaceRoot: dir })
+      );
+      expect(resultStr(result)).toContain('Error creating directory');
+      expect(resultStr(result)).toContain('permission denied');
+    } finally {
+      mkdirSpy.mockRestore();
+    }
+  });
+
+  it('returns error when writing file fails', async () => {
+    const tool = new OverwriteTool();
+    const writeFileSpy = spyOn(fsPromises, 'writeFile').mockRejectedValue(new Error('disk full'));
+
+    try {
+      const result = await tool.execute(
+        { path: 'test.txt', content: 'write' },
+        toolCtx({ workspaceRoot: dir })
+      );
+      expect(resultStr(result)).toContain('Error writing file');
+      expect(resultStr(result)).toContain('disk full');
+    } finally {
+      writeFileSpy.mockRestore();
+    }
+  });
 });
 
 // ── AppendTool: Tool Definition ─────────────────────────────────────────────
@@ -279,5 +312,37 @@ describe('AppendTool.execute — error cases', () => {
       toolCtx({ cwdBoundary: dir })
     );
     expect(resultStr(result)).toContain('outside cwd boundary');
+  });
+
+  it('returns error when directory creation fails', async () => {
+    const tool = new AppendTool();
+    const mkdirSpy = spyOn(fsPromises, 'mkdir').mockRejectedValue(new Error('permission denied'));
+
+    try {
+      const result = await tool.execute(
+        { path: 'readonly/dir/file.txt', content: 'test' },
+        toolCtx({ workspaceRoot: dir })
+      );
+      expect(resultStr(result)).toContain('Error creating directory');
+      expect(resultStr(result)).toContain('permission denied');
+    } finally {
+      mkdirSpy.mockRestore();
+    }
+  });
+
+  it('returns error when appending to file fails', async () => {
+    const tool = new AppendTool();
+    const appendFileSpy = spyOn(fsPromises, 'appendFile').mockRejectedValue(new Error('disk full'));
+
+    try {
+      const result = await tool.execute(
+        { path: 'test.txt', content: 'append' },
+        toolCtx({ workspaceRoot: dir })
+      );
+      expect(resultStr(result)).toContain('Error appending to file');
+      expect(resultStr(result)).toContain('disk full');
+    } finally {
+      appendFileSpy.mockRestore();
+    }
   });
 });

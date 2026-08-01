@@ -16,6 +16,14 @@ export class SummarizeShortStrategy extends CompactionStrategy {
   override name = "summarize-short";
   override description = "Aggressive LLM summarization with shorter output. Less context preserved but more efficient.";
 
+  constructor() {
+    super();
+  }
+
+  override canCompact(messages: Message[], settings: CompactionSettings): boolean {
+    return messages.length > settings.keepRecentMessages * 2;
+  }
+
   override async execute(
     messages: Message[],
     settings: CompactionSettings,

@@ -9,6 +9,7 @@ import {
   DEFAULT_SYSTEM_PROMPT_FILENAME,
   DEFAULT_SYSTEM_PROMPT_TEMPLATE,
 } from "./defaults.ts";
+import { logger } from "../logger.ts";
 
 export interface ModelConfig {
   name: string;
@@ -157,7 +158,7 @@ async function fetchRemoteModels(
     }
   } catch (e) {
     // Log error but don't crash the registry build
-    console.error(`[providers] Failed to fetch remote models for ${provider.name}:`, e);
+    logger.error(`Failed to fetch remote models for ${provider.name}`, { error: e });
     return [];
   }
 }

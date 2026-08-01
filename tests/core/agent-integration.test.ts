@@ -12,6 +12,42 @@ import { MockLLMClient, buildStreamResponse, MockTool } from '../helpers.ts';
 import { createFixture } from '../mocks/fixtures.ts';
 import { expectCompletion } from '../test-helpers.ts';
 
+/**
+ * A MockLLMClient that uses a custom async generator for streaming.
+ * Used for tests that need fine-grained control over stream timing.
+ */
+class CustomStreamLLMClient extends MockLLMClient {
+  private customGenerator: () => AsyncGenerator<Record<string, unknown>>;
+
+  constructor(generator: () => AsyncGenerator<Record<string, unknown>>) {
+    super({});
+    this.customGenerator = generator;
+  }
+
+  chatStreamCancellable(
+    messages: unknown[],
+    modelConfig: Record<string, unknown>,
+    toolDefs: Record<string, unknown>[],
+    cancelSignal: AbortSignal | null | undefined,
+    sessionId?: string,
+  ): AsyncGenerator<Record<string, unknown>, void, unknown> {
+    this.callCount++;
+    this.lastMessages = messages;
+    this.lastModelConfig = modelConfig;
+    this.lastToolDefs = toolDefs;
+    this.lastCancelSignal = cancelSignal ?? null;
+
+    return (async function* (gen, signal) {
+      for await (const event of gen()) {
+        if (signal?.aborted) {
+          throw new Error('Aborted');
+        }
+        yield event;
+      }
+    })(this.customGenerator, cancelSignal);
+  }
+}
+
 /** Integration-test fixture with output event capture. */
 function createAgentFixture(options: {
   mockLLM?: MockLLMClient;
@@ -365,5 +401,215 @@ describe('Agent — output events', () => {
     expect(toolResults.length).toBe(1);
     // Events are { type, ...data } — toolName is a direct property, not nested under .data
     expect(toolCalls[0]!.toolName).toBe('echo');
+  });
+});
+
+// ── Agent Lifecycle & State ─────────────────────────────────────────────────
+
+describe('Agent — lifecycle and state', () => {
+  it('should expose isRestoring getter', () => {
+    const { agent } = createAgentFixture();
+    const val = agent.isRestoring;
+    expect(val).toBe(false);
+  });
+
+  it('should expose toolRegistry getter', () => {
+    const { agent } = createAgentFixture();
+    const registry = agent.toolRegistry;
+    expect(registry).toBeDefined();
+    expect(typeof registry.getToolDefs).toBe('function');
+  });
+
+  it('should notify hooks when isRestoring changes', () => {
+    const { agent, hooks } = createAgentFixture();
+    let notified = false;
+    hooks.on(HOOKS.SESSION_RESTORE_ACTIVE, () => { notified = true; });
+
+    agent.isRestoring = true;
+    expect(agent.isRestoring).toBe(true);
+    expect(notified).toBe(true);
+
+    notified = false;
+    agent.isRestoring = false;
+    expect(agent.isRestoring).toBe(false);
+    expect(notified).toBe(true);
+
+    // No notification when set to same value
+    notified = false;
+    agent.isRestoring = false;
+    expect(notified).toBe(false);
+  });
+
+  it('should expose currentStreamingContent getter', () => {
+    const { agent } = createAgentFixture({ stream: true });
+    expect(agent.currentStreamingContent).toBe('');
+  });
+
+  it('should expose currentStreamingReasoning getter', () => {
+    const { agent } = createAgentFixture({ stream: true });
+    expect(agent.currentStreamingReasoning).toBe('');
+  });
+
+  it('should accumulate streaming content while running', async () => {
+    const slowStream = async function* () {
+      yield { type: 'content', content: 'Hello ' };
+      await new Promise(r => setTimeout(r, 100));
+      yield { type: 'content', content: 'world' };
+      yield { type: 'usage', data: { prompt_tokens: 10, completion_tokens: 10, total_tokens: 20 } };
+    };
+
+    const mockLLM = new CustomStreamLLMClient(slowStream);
+
+    const { agent } = createAgentFixture({ mockLLM, stream: true });
+    const runPromise = agent.run('Test streaming');
+
+    // Give the stream a moment to accumulate partial content
+    await new Promise(r => setTimeout(r, 30));
+
+    // During streaming, content should be accumulating
+    const midContent = agent.currentStreamingContent;
+    expect(midContent.length).toBeGreaterThan(0);
+
+    await runPromise;
+
+    // After completion, streaming content is reset by stream processor
+    expect(agent.currentStreamingContent).toBe('');
+  });
+
+  it('should call notifyCompletion on sink with onTaskComplete', () => {
+    const { agent } = createAgentFixture();
+    let completed = false;
+    let resultValue = '';
+    const sinkWithCallback = {
+      emit: () => {},
+      onTaskComplete: (result: string) => {
+        completed = true;
+        resultValue = result;
+      },
+    };
+    agent.sink = sinkWithCallback;
+
+    agent.notifyCompletion('task done');
+    expect(completed).toBe(true);
+    expect(resultValue).toBe('task done');
+  });
+
+  it('should handle notifyCompletion when sink has no onTaskComplete', () => {
+    const { agent } = createAgentFixture();
+    const sinkWithoutCallback = {
+      emit: () => {},
+    };
+    agent.sink = sinkWithoutCallback;
+
+    // Should not throw
+    expect(() => agent.notifyCompletion('task done')).not.toThrow();
+  });
+
+  it('should handle notifyCompletion when sink is null', () => {
+    const { agent } = createAgentFixture();
+    agent.sink = null;
+
+    // Should not throw
+    expect(() => agent.notifyCompletion('task done')).not.toThrow();
+  });
+
+  it('should cancel and resetCancel properly', () => {
+    const { agent } = createAgentFixture();
+    expect(agent.cancelled).toBe(false);
+
+    agent.cancel();
+    expect(agent.cancelled).toBe(true);
+
+    agent.resetCancel();
+    expect(agent.cancelled).toBe(false);
+  });
+
+  it('should respect abortSignal that is already aborted', async () => {
+    const controller = new AbortController();
+    controller.abort();
+
+    const mockLLM = new MockLLMClient({
+      responseSequences: [
+        buildStreamResponse({
+          content: 'Should not reach here',
+          usage: { prompt_tokens: 10, completion_tokens: 10, total_tokens: 20 },
+        }),
+      ],
+    });
+
+    const { agent } = createAgentFixture({ mockLLM, abortSignal: controller.signal });
+
+    await expect(agent.run('Test aborted')).rejects.toThrow(/cancelled|abort/i);
+  });
+
+  it('should abort when external abortSignal fires during run', async () => {
+    const controller = new AbortController();
+
+    // Very slow stream that gives us time to abort
+    const slowStream = async function* () {
+      yield { type: 'content', content: 'Start ' };
+      // Wait long enough for abort
+      await new Promise(r => setTimeout(r, 500));
+      yield { type: 'content', content: 'End' };
+    };
+
+    const mockLLM = new CustomStreamLLMClient(slowStream);
+
+    const { agent } = createAgentFixture({ mockLLM, stream: true, abortSignal: controller.signal });
+
+    const runPromise = agent.run('Test abort mid-stream');
+
+    // Abort after a short delay
+    setTimeout(() => controller.abort(), 30);
+
+    await expect(runPromise).rejects.toThrow(/cancelled|abort/i);
+  });
+
+  it('should process followQueue messages before LLM call', async () => {
+    const mockLLM = new MockLLMClient({
+      responseSequences: [
+        buildStreamResponse({
+          content: 'Done.',
+          usage: { prompt_tokens: 10, completion_tokens: 10, total_tokens: 20 },
+        }),
+      ],
+    });
+
+    const { agent } = createAgentFixture({ mockLLM });
+
+    // Add follow-up messages to the queue (normally done by extensions)
+    agent.followQueue.push('Follow-up 1');
+    agent.followQueue.push('Follow-up 2');
+
+    await agent.run('Initial message');
+
+    // Verify follow-up messages were added to context
+    const messages = agent.log.getAll();
+    const userMessages = messages.filter(m => m.role === 'user');
+    expect(userMessages.length).toBe(3);
+    expect((userMessages[0]?.content as string)).toBe('Initial message');
+    expect((userMessages[1]?.content as string)).toBe('Follow-up 1');
+    expect((userMessages[2]?.content as string)).toBe('Follow-up 2');
+  });
+
+  it('should emit output events for followQueue messages', async () => {
+    const mockLLM = new MockLLMClient({
+      responseSequences: [
+        buildStreamResponse({
+          content: 'Done.',
+          usage: { prompt_tokens: 10, completion_tokens: 10, total_tokens: 20 },
+        }),
+      ],
+    });
+
+    const { agent, outputEvents } = createAgentFixture({ mockLLM });
+
+    agent.followQueue.push('Queued message');
+
+    await agent.run('Initial');
+
+    const userMessageEvents = outputEvents.filter(e => e.type === OUTPUT_EVENT.USER_MESSAGE);
+    expect(userMessageEvents.length).toBe(2);
+    expect((userMessageEvents[1]?.content as string)).toBe('Queued message');
   });
 });

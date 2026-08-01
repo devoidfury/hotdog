@@ -844,4 +844,169 @@ Content.
 
     expect(ext.loader.getSkill("Activate Cmd Skill")!.loaded).toBe(true);
   });
+
+  it("SYSTEM_PROMPT_BUILD hook returns preamble with visible skills", async () => {
+    await createTempSkill("preamble-skill", `---
+name: Preamble Skill
+description: For preamble
+---
+
+# Preamble Skill
+
+This is the skill content.
+`);
+
+    const core = createMockCore();
+    const ext = (await create(core)) as any;
+
+    const hook = ext.hooks![HOOKS.SYSTEM_PROMPT_BUILD];
+    const result = await hook({ agent: {} });
+
+    expect(result).toBeDefined();
+    expect(result.name).toBe("preamble");
+    expect(result.priority).toBe(400);
+    expect(result.content).toContain("Preamble Skill");
+  });
+
+  it("SYSTEM_PROMPT_BUILD hook returns undefined when no visible skills", async () => {
+    const core = createMockCore();
+    const ext = (await create(core)) as any;
+
+    const hook = ext.hooks![HOOKS.SYSTEM_PROMPT_BUILD];
+    const result = await hook({ agent: {} });
+
+    expect(result).toBeUndefined();
+  });
+
+  it("registers completion handler for /skill command", async () => {
+    await createTempSkill("complete-skill", `---
+name: Complete Skill
+description: For completion
+---
+
+Content.
+`);
+
+    const core = createMockCore();
+    await create(core);
+
+    // Check that completion handler was registered
+    expect(core.completion.handlerCount()).toBeGreaterThan(0);
+
+    // Test completion request
+    const mockAgent = {} as any;
+    const completions = await core.completion.request({
+      line: "/skill comp",
+      cursorPos: 10,
+      command: "skill",
+      commandArg: "comp",
+      agent: mockAgent,
+    });
+
+    expect(completions).toHaveLength(1);
+    expect(completions[0].value).toBe("Complete Skill");
+  });
+
+  it("completion handler filters by prefix case-insensitively", async () => {
+    await createTempSkill("case-skill", `---
+name: Case Skill
+description: For case test
+---
+
+Content.
+`);
+
+    const core = createMockCore();
+    await create(core);
+
+    const mockAgent = {} as any;
+    const completions = await core.completion.request({
+      line: "/skill CASE",
+      cursorPos: 10,
+      command: "skill",
+      commandArg: "CASE",
+      agent: mockAgent,
+    });
+
+    expect(completions).toHaveLength(1);
+    expect(completions[0].value).toBe("Case Skill");
+  });
+
+  it("completion handler returns empty when no matches", async () => {
+    await createTempSkill("test-skill", `---
+name: Test Skill
+description: Test
+---
+
+Content.
+`);
+
+    const core = createMockCore();
+    await create(core);
+
+    const mockAgent = {} as any;
+    const completions = await core.completion.request({
+      line: "/skill nonexistent",
+      cursorPos: 18,
+      command: "skill",
+      commandArg: "nonexistent",
+      agent: mockAgent,
+    });
+
+    expect(completions).toEqual([]);
+  });
+
+  it("completion handler returns all skills with empty prefix", async () => {
+    await createTempSkill("skill-a", `---
+name: Skill A
+description: First
+---
+
+Content.
+`);
+    await createTempSkill("skill-b", `---
+name: Skill B
+description: Second
+---
+
+Content.
+`);
+
+    const core = createMockCore();
+    await create(core);
+
+    const mockAgent = {} as any;
+    const completions = await core.completion.request({
+      line: "/skill ",
+      cursorPos: 7,
+      command: "skill",
+      commandArg: "",
+      agent: mockAgent,
+    });
+
+    expect(completions).toHaveLength(2);
+    const values = completions.map((c) => c.value).sort();
+    expect(values).toEqual(["Skill A", "Skill B"]);
+  });
+
+  it("isToolAllowed uses getCombinedToolPatterns internally", async () => {
+    await createTempSkill("pattern-test-skill", `---
+name: Pattern Test Skill
+description: Pattern test
+include-tools: ["read*"]
+---
+
+Content.
+`);
+
+    const core = createMockCore();
+    const ext = (await create(core)) as any;
+
+    ext.loader.activateSkill("Pattern Test Skill");
+
+    // This exercises line 53 (getCombinedToolPatterns call inside isToolAllowed)
+    expect(ext.isToolAllowed("read")).toBe(true);
+    expect(ext.isToolAllowed("read_file")).toBe(true);
+    expect(ext.isToolAllowed("write")).toBe(false);
+  });
 });

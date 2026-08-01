@@ -36,12 +36,7 @@ export class OverwriteTool {
   }
 
   callDisplay(input: string | Record<string, unknown> | null): string {
-    let args: Record<string, unknown> | null;
-    try {
-      args = typeof input === "string" ? JSON.parse(input) : input;
-    } catch {
-      return typeof input === "string" ? input : "";
-    }
+    const args = parseToolInput(input);
     if (!args || !args.path || args.content === undefined) {
       return typeof input === "string" ? input : "";
     }
@@ -78,17 +73,15 @@ export class OverwriteTool {
 
     // Create parent directories
     const dir = path.dirname(resolvedPath);
-    try {
-      await fs.mkdir(dir, { recursive: true });
-    } catch (e: unknown) {
-      return ToolResult.err(`Error creating directory: ${(e as Error).message}`);
+    const mkdirError = await safeMkdir(dir);
+    if (mkdirError) {
+      return mkdirError;
     }
 
     // Write the file
-    try {
-      await fs.writeFile(resolvedPath, content, "utf-8");
-    } catch (e: unknown) {
-      return ToolResult.err(`Error writing file: ${(e as Error).message}`);
+    const writeError = await safeWriteFile(resolvedPath, content);
+    if (writeError) {
+      return writeError;
     }
 
     return ToolResult.ok(
@@ -97,5 +90,23 @@ export class OverwriteTool {
         filesize_after: Buffer.byteLength(content, "utf-8"),
       }),
     );
+  }
+}
+
+async function safeMkdir(dir: string): Promise<ToolResult | null> {
+  try {
+    await fs.mkdir(dir, { recursive: true });
+    return null;
+  } catch (e: unknown) {
+    return ToolResult.err(`Error creating directory: ${(e as Error).message}`);
+  }
+}
+
+async function safeWriteFile(path: string, content: string): Promise<ToolResult | null> {
+  try {
+    await fs.writeFile(path, content, "utf-8");
+    return null;
+  } catch (e: unknown) {
+    return ToolResult.err(`Error writing file: ${(e as Error).message}`);
   }
 }

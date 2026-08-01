@@ -358,3 +358,222 @@ describe("Session Review CLI - registers review tool", () => {
     expect(core.toolRegistry.has("review")).toBe(true);
   });
 });
+
+// ── edge cases ──────────────────────────────────────────────────────────────
+
+describe("Session Review CLI - edge cases", () => {
+  const sessionsDirPath = sessionsDir();
+  const TEST_SESSION_ID = `test-review-edge-${Date.now()}`;
+
+  beforeEach(() => {
+    mkdirSync(sessionsDirPath, { recursive: true });
+  });
+
+  afterEach(() => {
+    try { rmSync(join(sessionsDirPath, `${TEST_SESSION_ID}.jsonl`)); } catch {}
+  });
+
+  it("returns exit code 1 for unknown sessions action", async () => {
+    const cli = { args: ["unknown-action"], colors: false, theme: "dark" };
+    let captured = "";
+    const origErr = console.error;
+    console.error = (msg: unknown) => { captured += String(msg) + "\n"; };
+    try {
+      const exitCode = await runHandler(cli);
+      expect(exitCode).toBe(1);
+      expect(captured).toContain("Unknown sessions action");
+    } finally {
+      console.error = origErr;
+    }
+  });
+
+  it("shows tool-index for most recent session without --session-id", async () => {
+    await setupSession(TEST_SESSION_ID, [
+      { type: "input", content: "hello" },
+      { type: "assistant", content: "world" },
+    ]);
+
+    const cli = { sessionId: null, wantsJson: false, toolIndex: true, colors: false, theme: "dark", args: ["show"] };
+    const { output, result: exitCode } = await captureConsole(() => runHandler(cli));
+    expect(exitCode).toBe(0);
+    expect(output).toContain("=== Tool Usage ===");
+    expect(output).toContain("No tools used");
+  });
+
+  it("shows tool-index JSON for most recent session without --session-id", async () => {
+    await setupSession(TEST_SESSION_ID, [
+      { type: "input", content: "hello" },
+      { type: "assistant", content: "world" },
+    ]);
+
+    const cli = { sessionId: null, wantsJson: true, toolIndex: true, colors: false, theme: "dark", args: ["show"] };
+    const { output, result: exitCode } = await captureConsole(() => runHandler(cli));
+    expect(exitCode).toBe(0);
+
+    const parsed = JSON.parse(output.trim());
+    expect(typeof parsed).toBe("object");
+  });
+
+  it("lists sessions as JSON when no sessions exist", async () => {
+    // Clear all test sessions
+    const files = readdirSync(sessionsDirPath).filter((f: string) => f.endsWith(".jsonl"));
+    for (const f of files) {
+      try { rmSync(join(sessionsDirPath, f)); } catch {}
+    }
+
+    const cli = { sessionId: null, wantsJson: true, toolIndex: false, colors: false, theme: "dark", args: ["show"] };
+    const { output, result: exitCode } = await captureConsole(() => runHandler(cli));
+    expect(exitCode).toBe(1);
+    expect(output.trim()).toBe("[]");
+  });
+
+  it("lists sessions as text when no sessions exist", async () => {
+    // Clear all test sessions
+    const files = readdirSync(sessionsDirPath).filter((f: string) => f.endsWith(".jsonl"));
+    for (const f of files) {
+      try { rmSync(join(sessionsDirPath, f)); } catch {}
+    }
+
+    const cli = { sessionId: null, wantsJson: false, toolIndex: false, colors: false, theme: "dark", args: ["show"] };
+    const { output, result: exitCode } = await captureConsole(() => runHandler(cli));
+    expect(exitCode).toBe(1);
+    expect(output).toContain("No log entries found");
+  });
+
+  it("cleanup handles missing sessions directory", async () => {
+    const originalDir = process.env.HOTDOG_SESSIONS_DIR;
+    try {
+      process.env.HOTDOG_SESSIONS_DIR = "/nonexistent/path/for/testing";
+      const cli = { args: ["cleanup"], olderThan: 30, yes: true, colors: false, theme: "dark" };
+      const { output, result: exitCode } = await captureConsole(() => runHandler(cli));
+      expect(exitCode).toBe(0);
+      expect(output).toContain("No sessions directory found");
+    } finally {
+      process.env.HOTDOG_SESSIONS_DIR = originalDir;
+    }
+  });
+
+  it("cleanup respects custom --older-than value", async () => {
+    const OLD_SESSION_ID = `test-cleanup-custom-${Date.now()}`;
+    try {
+      await setupSession(OLD_SESSION_ID, [
+        { type: "input", content: "old" },
+        { type: "assistant", content: "data" },
+      ]);
+
+      // Make the session file appear 5 days old
+      const oldPath = join(sessionsDirPath, `${OLD_SESSION_ID}.jsonl`);
+      const oldDate = new Date(Date.now() - 5 * 24 * 60 * 60 * 1000);
+      utimesSync(oldPath, oldDate, oldDate);
+
+      // With olderThan=3, it should be deleted (5 > 3)
+      const cli = { args: ["cleanup"], olderThan: 3, yes: true, colors: false, theme: "dark" };
+      const { output, result: exitCode } = await captureConsole(() => runHandler(cli));
+      expect(exitCode).toBe(0);
+      expect(output).toContain("Deleted 1 session");
+    } finally {
+      try { rmSync(join(sessionsDirPath, `${OLD_SESSION_ID}.jsonl`)); } catch {}
+    }
+  });
+
+  it("delete prompts for confirmation when not in --yes mode (non-TTY)", async () => {
+    const TEST_DELETE_ID = `test-review-delete-prompt-${Date.now()}`;
+    await setupSession(TEST_DELETE_ID, [
+      { type: "input", content: "hello" },
+      { type: "assistant", content: "world" },
+    ]);
+
+    const origIsTTY = process.stdin.isTTY;
+    Object.defineProperty(process.stdin, "isTTY", { value: false, configurable: true });
+
+    try {
+      // In non-TTY mode, confirm() returns false, so delete should be aborted
+      const cli = { args: ["delete", TEST_DELETE_ID], yes: false, colors: false, theme: "dark" };
+      const { output, result: exitCode } = await captureConsole(() => runHandler(cli));
+      expect(exitCode).toBe(0);
+      expect(output).toContain("Aborted");
+
+      // Session should still exist
+      const files = readdirSync(sessionsDirPath).filter((f: string) =>
+        f.startsWith(TEST_DELETE_ID)
+      );
+      expect(files.length).toBe(1);
+    } finally {
+      Object.defineProperty(process.stdin, "isTTY", { value: origIsTTY, configurable: true });
+      try { rmSync(join(sessionsDirPath, `${TEST_DELETE_ID}.jsonl`)); } catch {}
+    }
+  });
+
+  it("tool-index without --session-id shows 'No sessions found' when empty dir", async () => {
+    // Clear all sessions
+    const files = readdirSync(sessionsDirPath).filter((f: string) => f.endsWith(".jsonl"));
+    for (const f of files) {
+      try { rmSync(join(sessionsDirPath, f)); } catch {}
+    }
+
+    const cli = { sessionId: null, wantsJson: false, toolIndex: true, colors: false, theme: "dark", args: ["show"] };
+    const { output, result: exitCode } = await captureConsole(() => runHandler(cli));
+    expect(exitCode).toBe(1);
+    expect(output).toContain("No sessions found");
+  });
+
+  it("listSessions JSON output when sessions dir doesn't exist", async () => {
+    const originalDir = process.env.HOTDOG_SESSIONS_DIR;
+    try {
+      process.env.HOTDOG_SESSIONS_DIR = "/nonexistent/path/for/testing/list";
+      const cli = { sessionId: null, wantsJson: true, toolIndex: false, colors: false, theme: "dark", args: ["show"] };
+      const { output, result: exitCode } = await captureConsole(() => runHandler(cli));
+      expect(exitCode).toBe(1);
+      expect(output.trim()).toBe("[]");
+    } finally {
+      process.env.HOTDOG_SESSIONS_DIR = originalDir;
+    }
+  });
+
+  it("listSessions returns empty when all sessions have only 1 entry (JSON)", async () => {
+    const singleEntryId = `test-single-entry-only-${Date.now()}`;
+    await setupSession(singleEntryId, [{ type: "input", content: "hello" }]);
+
+    try {
+      const cli = { sessionId: null, wantsJson: true, toolIndex: false, colors: false, theme: "dark", args: ["show"] };
+      const { output, result: exitCode } = await captureConsole(() => runHandler(cli));
+      expect(exitCode).toBe(1);
+      expect(output.trim()).toBe("[]");
+    } finally {
+      try { rmSync(join(sessionsDirPath, `${singleEntryId}.jsonl`)); } catch {}
+    }
+  });
+
+  it("cleanup prompts for confirmation when not in --yes mode (non-TTY)", async () => {
+    const OLD_SESSION_ID = `test-cleanup-confirm-${Date.now()}`;
+    await setupSession(OLD_SESSION_ID, [
+      { type: "input", content: "old" },
+      { type: "assistant", content: "data" },
+    ]);
+
+    const origIsTTY = process.stdin.isTTY;
+    Object.defineProperty(process.stdin, "isTTY", { value: false, configurable: true });
+
+    try {
+      // Make the session file appear old
+      const oldPath = join(sessionsDirPath, `${OLD_SESSION_ID}.jsonl`);
+      const oldDate = new Date(Date.now() - 60 * 24 * 60 * 60 * 1000);
+      utimesSync(oldPath, oldDate, oldDate);
+
+      // In non-TTY mode, confirm() returns false, so cleanup should be aborted
+      const cli = { args: ["cleanup"], olderThan: 30, yes: false, colors: false, theme: "dark" };
+      const { output, result: exitCode } = await captureConsole(() => runHandler(cli));
+      expect(exitCode).toBe(0);
+      expect(output).toContain("Aborted");
+
+      // Session should still exist
+      const files = readdirSync(sessionsDirPath).filter((f: string) =>
+        f.startsWith(OLD_SESSION_ID)
+      );
+      expect(files.length).toBe(1);
+    } finally {
+      Object.defineProperty(process.stdin, "isTTY", { value: origIsTTY, configurable: true });
+      try { rmSync(join(sessionsDirPath, `${OLD_SESSION_ID}.jsonl`)); } catch {}
+    }
+  });
+});

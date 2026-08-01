@@ -11,6 +11,10 @@ export class DropStrategy extends CompactionStrategy {
   override description =
     "Keep the last N messages and remove older messages without summarizing. Fastest option, no LLM cost, but loses all context from compacted messages.";
 
+  constructor() {
+    super();
+  }
+
   override async execute(messages: Message[], settings: CompactionSettings): Promise<CompactResult | null> {
     const firstKept = findFirstKeptIndex(messages, settings.keepRecentMessages);
     if (firstKept === 0) return null;

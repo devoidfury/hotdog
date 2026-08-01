@@ -1,11 +1,291 @@
 import { describe, it, expect, beforeEach, afterEach } from "bun:test";
 import { create } from "../../src/extensions/file-attachment/index.ts";
+import { matcher, completion } from "../../src/extensions/file-attachment/completions.ts";
 import { HOOKS } from "../../src/core/hooks.ts";
 import { createCompletionService } from "../../src/core/completion.ts";
 import fs from "node:fs";
 import fsPromises from "node:fs/promises";
 import path from "node:path";
 import os from "node:os";
+
+// Mock agent for completion tests
+const mockAgent = {} as unknown as import("../../src/core/agent.ts").Agent;
+
+describe("file-attachment completion matcher", () => {
+  it("matches when typing @ at start of word", () => {
+    const ctx = { line: "Read @", cursorPos: 6, agent: mockAgent } as any;
+    expect(matcher(ctx)).toBe(true);
+  });
+
+  it("matches when typing @ with partial path", () => {
+    const ctx = { line: "Read @src", cursorPos: 9, agent: mockAgent } as any;
+    expect(matcher(ctx)).toBe(true);
+  });
+
+  it("matches when typing @ with subdirectory path", () => {
+    const ctx = { line: "Read @src/core/", cursorPos: 14, agent: mockAgent } as any;
+    expect(matcher(ctx)).toBe(true);
+  });
+
+  it("matches when @ is after a space", () => {
+    const ctx = { line: "foo bar @test", cursorPos: 13, agent: mockAgent } as any;
+    expect(matcher(ctx)).toBe(true);
+  });
+
+  it("does not match when @ is not at start of current word", () => {
+    const ctx = { line: "Read test@", cursorPos: 9, agent: mockAgent } as any;
+    expect(matcher(ctx)).toBe(false);
+  });
+
+  it("does not match when current word does not start with @", () => {
+    const ctx = { line: "Read test.txt", cursorPos: 13, agent: mockAgent } as any;
+    expect(matcher(ctx)).toBe(false);
+  });
+
+  it("does not match when line is empty", () => {
+    const ctx = { line: "", cursorPos: 0, agent: mockAgent } as any;
+    expect(matcher(ctx)).toBe(false);
+  });
+
+  it("does not match when cursor is before @", () => {
+    const ctx = { line: "Read @test", cursorPos: 5, agent: mockAgent } as any;
+    expect(matcher(ctx)).toBe(false);
+  });
+
+  it("matches when only @ is typed", () => {
+    const ctx = { line: "@", cursorPos: 1, agent: mockAgent } as any;
+    expect(matcher(ctx)).toBe(true);
+  });
+
+  it("matches with absolute path after @", () => {
+    const ctx = { line: "Read @/etc/passwd", cursorPos: 17, agent: mockAgent } as any;
+    expect(matcher(ctx)).toBe(true);
+  });
+});
+
+describe("file-attachment completion handler", () => {
+  let tmpDir: string;
+  let originalCwd: string;
+
+  beforeEach(() => {
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "file-attachment-completion-test-"));
+    originalCwd = process.cwd();
+    process.chdir(tmpDir);
+
+    // Create test files and directories
+    fs.writeFileSync(path.join(tmpDir, "test.txt"), "content");
+    fs.writeFileSync(path.join(tmpDir, "test2.txt"), "content");
+    fs.writeFileSync(path.join(tmpDir, "README.md"), "readme");
+    fs.mkdirSync(path.join(tmpDir, "src"), { recursive: true });
+    fs.writeFileSync(path.join(tmpDir, "src", "main.ts"), "code");
+    fs.mkdirSync(path.join(tmpDir, "src", "core"), { recursive: true });
+    fs.writeFileSync(path.join(tmpDir, "src", "core", "agent.ts"), "agent code");
+    // Hidden files and node_modules should be skipped
+    fs.writeFileSync(path.join(tmpDir, ".hidden"), "hidden");
+    fs.mkdirSync(path.join(tmpDir, "node_modules"), { recursive: true });
+    fs.writeFileSync(path.join(tmpDir, "node_modules", "package.js"), "dep");
+  });
+
+  afterEach(() => {
+    process.chdir(originalCwd);
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  it("returns completions for @ prefix", async () => {
+    const ctx = { line: "Read @", cursorPos: 6, agent: mockAgent } as any;
+    const results = await completion(ctx);
+
+    expect(results).toBeDefined();
+    expect(Array.isArray(results)).toBe(true);
+    expect(results.length).toBeGreaterThan(0);
+
+    // Should include visible files and dirs
+    const values = results.map((r) => r.value);
+    expect(values).toContain("@test.txt");
+    expect(values).toContain("@test2.txt");
+    expect(values).toContain("@README.md");
+    expect(values).toContain("@src/");
+
+    // Should NOT include hidden files or node_modules
+    expect(values).not.toContain("@.hidden");
+    expect(values).not.toContain("@node_modules/");
+  });
+
+  it("filters completions by prefix", async () => {
+    const ctx = { line: "Read @test", cursorPos: 10, agent: mockAgent } as any;
+    const results = await completion(ctx);
+
+    const values = results.map((r) => r.value);
+    expect(values).toContain("@test.txt");
+    expect(values).toContain("@test2.txt");
+    expect(values).not.toContain("@README.md");
+  });
+
+  it("completes subdirectory paths without trailing slash", async () => {
+    const ctx = { line: "Read @src", cursorPos: 9, agent: mockAgent } as any;
+    const results = await completion(ctx);
+
+    const values = results.map((r) => r.value);
+    expect(values).toContain("@src/");
+  });
+
+  it("completes entries within subdirectory when prefix provided", async () => {
+    const ctx = { line: "Read @src/main", cursorPos: 14, agent: mockAgent } as any;
+    const results = await completion(ctx);
+
+    const values = results.map((r) => r.value);
+    expect(values).toContain("@src/main.ts");
+    expect(values).not.toContain("@src/core/");
+  });
+
+  it("completes deeply nested paths", async () => {
+    const ctx = { line: "Read @src/core/agent", cursorPos: 20, agent: mockAgent } as any;
+    const results = await completion(ctx);
+
+    const values = results.map((r) => r.value);
+    expect(values).toContain("@src/core/agent.ts");
+  });
+
+  it("returns empty array when no matches", async () => {
+    const ctx = { line: "Read @zzzzz", cursorPos: 12, agent: mockAgent } as any;
+    const results = await completion(ctx);
+    expect(results).toEqual([]);
+  });
+
+  it("returns empty array when not starting with @", async () => {
+    const ctx = { line: "Read test.txt", cursorPos: 13, agent: mockAgent } as any;
+    const results = await completion(ctx);
+    expect(results).toEqual([]);
+  });
+
+  it("is case-insensitive for matching", async () => {
+    const ctx = { line: "Read @TEST", cursorPos: 10, agent: mockAgent } as any;
+    const results = await completion(ctx);
+
+    const values = results.map((r) => r.value);
+    // Should match test.txt even though we typed TEST
+    expect(values).toContain("@test.txt");
+  });
+
+  it("uses cwdBoundary from agent context", async () => {
+    const workspaceDir = path.join(tmpDir, "workspace");
+    fs.mkdirSync(workspaceDir, { recursive: true });
+    fs.writeFileSync(path.join(workspaceDir, "config.json"), "{}");
+
+    const mockContext = {
+      get: (key: string) => {
+        if (key === "cwdBoundary") return workspaceDir;
+        return null;
+      },
+    };
+
+    const ctx = {
+      line: "Read @",
+      cursorPos: 6,
+      agent: { context: mockContext },
+    } as any;
+
+    const results = await completion(ctx);
+    const values = results.map((r) => r.value);
+    expect(values).toContain("@config.json");
+    expect(values).not.toContain("@test.txt"); // not in workspaceDir
+  });
+
+  it("uses workspaceRoot from agent context when cwdBoundary is not set", async () => {
+    const workspaceDir = path.join(tmpDir, "workspace");
+    fs.mkdirSync(workspaceDir, { recursive: true });
+    fs.writeFileSync(path.join(workspaceDir, "config.json"), "{}");
+
+    const mockContext = {
+      get: (key: string) => {
+        if (key === "workspaceRoot") return workspaceDir;
+        return null;
+      },
+    };
+
+    const ctx = {
+      line: "Read @",
+      cursorPos: 6,
+      agent: { context: mockContext },
+    } as any;
+
+    const results = await completion(ctx);
+    const values = results.map((r) => r.value);
+    expect(values).toContain("@config.json");
+  });
+
+  it("falls back to cwd when no agent context", async () => {
+    const ctx = {
+      line: "Read @",
+      cursorPos: 6,
+      agent: {},
+    } as any;
+
+    const results = await completion(ctx);
+    const values = results.map((r) => r.value);
+    // Should see files in current tmpDir
+    expect(values).toContain("@test.txt");
+  });
+
+  it("handles absolute paths with prefix", async () => {
+    const absPath = path.join(tmpDir, "src");
+    const ctx = {
+      line: `Read @${absPath}/main`,
+      cursorPos: `Read @${absPath}/main`.length,
+      agent: mockAgent,
+    } as any;
+
+    const results = await completion(ctx);
+    const values = results.map((r) => r.value);
+    expect(values).toContain(`@${absPath}/main.ts`);
+  });
+
+  it("handles absolute paths listing directory", async () => {
+    const absPath = path.join(tmpDir, "src");
+    // Without trailing slash - matches directory itself
+    const ctx = {
+      line: `Read @${absPath}`,
+      cursorPos: `Read @${absPath}`.length,
+      agent: mockAgent,
+    } as any;
+
+    const results = await completion(ctx);
+    const values = results.map((r) => r.value);
+    expect(values).toContain(`@${absPath}/`);
+  });
+
+  it("handles directory read errors gracefully", async () => {
+    const ctx = {
+      line: "Read @/nonexistent/path/that/does/not/exist/",
+      cursorPos: 45,
+      agent: mockAgent,
+    } as any;
+
+    const results = await completion(ctx);
+    expect(results).toEqual([]);
+  });
+
+  it("returns completion options with value property", async () => {
+    const ctx = { line: "Read @", cursorPos: 6, agent: mockAgent } as any;
+    const results = await completion(ctx);
+
+    expect(results.length).toBeGreaterThan(0);
+    for (const result of results) {
+      expect(result).toHaveProperty("value");
+      expect(typeof result.value).toBe("string");
+      expect(result.value.startsWith("@")).toBe(true);
+    }
+  });
+
+  it("appends / to directory names", async () => {
+    const ctx = { line: "Read @", cursorPos: 6, agent: mockAgent } as any;
+    const results = await completion(ctx);
+
+    const srcResult = results.find((r) => r.value.includes("src"));
+    expect(srcResult).toBeDefined();
+    expect(srcResult!.value).toBe("@src/");
+  });
+});
 
 describe("file-attachment extension", () => {
   let tmpDir: string;

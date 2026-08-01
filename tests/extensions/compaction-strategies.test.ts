@@ -655,6 +655,105 @@ describe("TokenAwareStrategy", () => {
     // Should be under budget, so result should be null
     expect(result).toBeNull();
   });
+
+  it("handles null/undefined messages in backward scan", async () => {
+    const content = "x".repeat(4000);
+    const messages: Message[] = [
+      makeMessage("user", content),
+      makeMessage("assistant", content),
+      null as unknown as Message,
+      makeMessage("user", content),
+      makeMessage("assistant", content),
+      makeMessage("user", content),
+      makeMessage("assistant", content),
+    ];
+    const settings = { ...defaultSettings, targetTokens: 1000, contextLimit: 5000 };
+
+    const result = await new TokenAwareStrategy().execute(messages, settings, noopLlmChat, "model");
+
+    expect(result).not.toBeNull();
+    expect(result!.messagesCompacted).toBeGreaterThan(0);
+  });
+
+  it("handles null messages interspersed that get filtered during summarization", async () => {
+    const content = "x".repeat(4000);
+    // Place nulls in the range that will be summarized (before lastKeptIndex)
+    const messages: Message[] = [
+      makeMessage("user", content),
+      null as unknown as Message,
+      makeMessage("assistant", content),
+      null as unknown as Message,
+      makeMessage("user", content),
+      makeMessage("assistant", content),
+      makeMessage("user", content),
+      makeMessage("assistant", content),
+    ];
+    const settings = { ...defaultSettings, targetTokens: 1000, contextLimit: 5000 };
+
+    const result = await new TokenAwareStrategy().execute(messages, settings, noopLlmChat, "model");
+
+    expect(result).not.toBeNull();
+    expect(result!.messagesCompacted).toBeGreaterThan(0);
+    // Verify the nulls were properly filtered out and didn't crash
+    expect(result!.summary).toBe("");
+  });
+
+  it("canCompact returns false for empty messages", () => {
+    const settings = { ...defaultSettings, targetTokens: 1000, contextLimit: 10000 };
+
+    const result = new TokenAwareStrategy().canCompact([], settings);
+    expect(result).toBe(false);
+  });
+
+  it("canCompact returns false when only system messages present", () => {
+    const messages = [
+      makeMessage("system", "You are helpful"),
+      makeMessage("system", "Follow rules"),
+    ];
+    const settings = { ...defaultSettings, targetTokens: 1000, contextLimit: 10000 };
+
+    const result = new TokenAwareStrategy().canCompact(messages, settings);
+    expect(result).toBe(false);
+  });
+
+  it("execute compacts only non-system messages when system messages interspersed", async () => {
+    const messages = [
+      makeMessage("system", "You are helpful"),
+      makeMessage("user", "hello"),
+      makeMessage("system", "Follow rules"),
+    ];
+    const settings = { ...defaultSettings, targetTokens: 1000, contextLimit: 10000 };
+
+    const result = await new TokenAwareStrategy().execute(messages, settings, noopLlmChat, "model");
+
+    // Keeps the user message, compacts the system message before it
+    expect(result).not.toBeNull();
+    expect(result!.messagesCompacted).toBe(1);
+  });
+
+  it("execute returns null when all messages are system messages", async () => {
+    const messages = [
+      makeMessage("system", "You are helpful"),
+      makeMessage("system", "Follow rules"),
+    ];
+    const settings = { ...defaultSettings, targetTokens: 1000, contextLimit: 10000 };
+
+    const result = await new TokenAwareStrategy().execute(messages, settings, noopLlmChat, "model");
+
+    expect(result).toBeNull();
+  });
+
+  it("uses default context limit of 128000 when not specified and model unknown", async () => {
+    const content = "x".repeat(4000);
+    const messages = Array.from({ length: 10 }, (_, i) => makeMessage(i % 2 === 0 ? "user" : "assistant", content));
+    const settings = { ...defaultSettings, contextLimit: undefined, targetTokens: 1000 };
+
+    const result = await new TokenAwareStrategy().execute(messages, settings, noopLlmChat, "unknown-model");
+
+    // 10 * 1000 = 10000 tokens, maxKeepTokens = 128000 - 1000 = 127000
+    // Should be under budget, so result should be null
+    expect(result).toBeNull();
+  });
 });
 
 // ── Prompt Templates ─────────────────────────────────────────────────────────

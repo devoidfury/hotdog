@@ -15,6 +15,10 @@ export class TokenAwareStrategy extends CompactionStrategy {
   override name = "token-aware";
   override description = "Compact to a target token count. Dynamically determines how many messages to keep based on precise token estimation.";
 
+  constructor() {
+    super();
+  }
+
   override async execute(
     messages: Message[],
     settings: CompactionSettings,
@@ -43,7 +47,7 @@ export class TokenAwareStrategy extends CompactionStrategy {
     const messagesToCompact = lastKeptIndex;
     if (messagesToCompact === 0) return null;
 
-    const messagesToSummarize = messages.slice(0, messagesToCompact);
+    const messagesToSummarize = messages.slice(0, messagesToCompact).filter((m): m is Message => m != null);
     const conversation = serializeConversation(messagesToSummarize);
     const userPrompt = SUMMARIZATION_USER_PROMPT_TEMPLATE.replace("{conversation}", conversation);
 
@@ -59,7 +63,7 @@ export class TokenAwareStrategy extends CompactionStrategy {
       throw AgentError.SummarizationFailed((e as Error).message);
     }
 
-    const tokensBefore = estimateContextTokens(messages);
+    const tokensBefore = estimateContextTokens(messages.filter((m): m is Message => m != null));
     const summaryTokens = estimateMessageTokens({ role: "assistant", content: summary });
     const tokensAfter = cumulativeTokens + summaryTokens;
 
@@ -77,7 +81,7 @@ export class TokenAwareStrategy extends CompactionStrategy {
   }
 
   override canCompact(messages: Message[], settings: CompactionSettings): boolean {
-    const nonSystem = messages.filter((m) => m.role !== "system");
+    const nonSystem = messages.filter((m): m is Message => m != null && m.role !== "system");
     const targetTokens = settings.targetTokens || settings.reserveTokens || 16384;
     const contextLimit = settings.contextLimit || 128000;
     const maxKeepTokens = contextLimit - targetTokens;

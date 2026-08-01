@@ -100,7 +100,7 @@ interface InteractiveSessionOptions {
 /**
  * Parse the input line to extract command and argument for completion context.
  */
-function parseCompletionContext(
+export function parseCompletionContext(
   line: string,
   cursorPos: number,
   agent: Agent,
@@ -186,7 +186,7 @@ export const SEND_TO_ASSISTANT_SUFFIX_RE = /\|\s*@\s*$/;
 /**
  * Apply built-in command replacements to a command string.
  */
-function applyCommandReplacements(command: string): string {
+export function applyCommandReplacements(command: string): string {
   let result = command;
   for (const [pattern, transform] of COMMAND_REPLACEMENTS) {
     if (
@@ -389,7 +389,7 @@ let currentInput: InputInterface | null = null;
 /**
  * Register built-in completion providers for slash commands.
  */
-function registerSlashCommandCompletions(
+export function registerSlashCommandCompletions(
   completionService: CoreContext["completion"],
   sessionManager: SessionManager,
   extensions: CoreContext["extensions"],
@@ -513,7 +513,7 @@ function registerSlashCommandCompletions(
  * Register shell mode completion provider.
  * Bash-like completion: commands, flags (from --help), and files.
  */
-function registerShellCompletion(
+export function registerShellCompletion(
   completionService: CoreContext["completion"],
   shellModeEnabled: boolean,
 ): void {
@@ -609,6 +609,172 @@ fi
   );
 }
 
+// ── Interactive Session Helpers ────────────────────────────────────────────
+
+/**
+ * Build the readline completer callback for the interactive session.
+ */
+export function buildReadlineCompleter(
+  sessionManager: SessionManager,
+  core: CoreContext,
+  shellMode: boolean,
+): (
+  line: string,
+  callback: (err: Error | null, result: [string[], string]) => void,
+) => void {
+  return (
+    line: string,
+    callback: (err: Error | null, result: [string[], string]) => void,
+  ) => {
+    const currentAgent = sessionManager.getAgent();
+    if (!currentAgent) {
+      callback(null, [[], line]);
+      return;
+    }
+
+    const cursorPos = line.length;
+    const ctx = parseCompletionContext(line, cursorPos, currentAgent);
+
+    let prefix = "";
+    const text = line.slice(0, cursorPos).trimStart();
+    if (text.startsWith("/")) {
+      const afterSlash = text.slice(1);
+      const spaceIdx = afterSlash.indexOf(" ");
+      if (spaceIdx === -1) {
+        const colonIdx = afterSlash.indexOf(":");
+        if (colonIdx !== -1) {
+          prefix = afterSlash.slice(colonIdx + 1);
+        } else {
+          prefix = "/" + afterSlash;
+        }
+      } else {
+        prefix = afterSlash.slice(spaceIdx + 1).trimStart();
+      }
+    } else if (shellMode) {
+      const words = line.split(/\s+/);
+      prefix = words[words.length - 1] ?? "";
+    } else {
+      prefix = line;
+    }
+
+    core.completion
+      .request(ctx, 200)
+      .then((options) => {
+        const matches = options
+          .map((o) => o.value)
+          .filter((m) => m !== prefix);
+        logger.debug(
+          `[completion] "${line}" prefix="${prefix}" -> ${matches.length} matches`,
+        );
+        callback(null, [matches, prefix]);
+      })
+      .catch((e) => {
+        logger.error(`[completion] error: ${(e as Error).message}`);
+        callback(null, [[], prefix]);
+      });
+  };
+}
+
+/**
+ * Build the onQuit handler for CliChannel.
+ */
+export function buildOnQuitHandler(
+  sessionManager: SessionManager,
+  extensions: CoreContext["extensions"],
+): () => void {
+  return () => {
+    console.log("\nGoodbye!");
+    const interactiveSessionId = sessionManager.sessionId();
+    if (interactiveSessionId) {
+      console.log(`Session: ${interactiveSessionId}`);
+    }
+    extensions.cleanup();
+    process.exit(0);
+  };
+}
+
+/**
+ * Build an agent for the interactive CLI session.
+ */
+export async function buildInteractiveAgent(
+  agentConfig: Record<string, unknown>,
+  core: CoreContext,
+  resolved: Record<string, unknown>,
+  config: Record<string, unknown>,
+  llmClient: LlmClient,
+  cli: Record<string, unknown>,
+): Promise<Agent> {
+  const sessionId = (agentConfig.sessionId as string) || crypto.randomUUID();
+  const agent = new Agent({
+    hooks: core.hooks,
+    toolRegistry: core.toolRegistry,
+    llmClient: (agentConfig.llmClient as LlmClient | undefined) || llmClient,
+    model: (agentConfig.model as string) || (resolved.model as string),
+    maxIterations:
+      (agentConfig.maxIterations as number) ||
+      (resolved.maxIterations as number) ||
+      100,
+    contextLimit: 128000,
+    hideTools:
+      typeof agentConfig.hideTools === "boolean"
+        ? agentConfig.hideTools
+        : (resolved.hideTools as boolean | undefined),
+    hideThinking:
+      typeof agentConfig.hideThinking === "boolean"
+        ? agentConfig.hideThinking
+        : (resolved.hideThinking as boolean | undefined),
+    showTokenUse:
+      typeof agentConfig.showTokenUse === "boolean"
+        ? agentConfig.showTokenUse
+        : (resolved.showTokenUse as boolean | undefined),
+    sink: null,
+    modelRegistry:
+      (agentConfig.modelRegistry as Record<string, ModelConfig>) ||
+      (resolved.modelRegistry as Record<string, ModelConfig>) ||
+      {},
+    profileName:
+      (agentConfig.profileName as string) || (resolved.profileName as string),
+    role:
+      (agentConfig.role as string) || (resolved.role as string | undefined),
+    profileBody:
+      (agentConfig.profileBody as string) ||
+      (resolved.profileBody as string | undefined),
+    stream:
+      typeof agentConfig.stream === "boolean"
+        ? agentConfig.stream
+        : (resolved.stream as boolean | undefined),
+    config: { ...config },
+    sessionId,
+    abortSignal: (agentConfig.abortSignal as AbortSignal) || null,
+    toolWhitelist: (agentConfig.toolWhitelist as string[]) || null,
+  });
+
+  core.hooks.notifyHooks(HOOKS.COMMANDS_REGISTER, {
+    registry: agent.commandRegistry,
+    agent,
+  });
+
+  // Restore session from disk if a session ID was explicitly provided
+  const explicitSessionId = cli.sessionId as string | undefined;
+  if (explicitSessionId && sessionId === explicitSessionId) {
+    if (await sessionExists(explicitSessionId)) {
+      const entries = await readSessionEntries(explicitSessionId);
+      if (entries.length > 0) {
+        agent.isRestoring = true;
+        const replayed = replayEntriesIntoContext(agent, entries);
+        agent.isRestoring = false;
+        if (replayed > 0) {
+          console.log(
+            `Session restored: ${replayed} messages replayed from ${explicitSessionId}`,
+          );
+        }
+      }
+    }
+  }
+
+  return agent;
+}
+
 // ── Interactive Session ────────────────────────────────────────────────────
 
 /**
@@ -660,77 +826,7 @@ export async function runInteractiveSession(
 
   // Build agent function — uses llmClient from config (injected by SessionManager)
   const buildAgent = async (agentConfig: Record<string, unknown>) => {
-    const sessionId = (agentConfig.sessionId as string) || crypto.randomUUID();
-    const agent = new Agent({
-      hooks: core.hooks,
-      toolRegistry: core.toolRegistry,
-      llmClient: (agentConfig.llmClient as LlmClient | undefined) || llmClient,
-      model: (agentConfig.model as string) || (resolved.model as string),
-      maxIterations:
-        (agentConfig.maxIterations as number) ||
-        (resolved.maxIterations as number) ||
-        100,
-      contextLimit: 128000,
-      hideTools:
-        typeof agentConfig.hideTools === "boolean"
-          ? agentConfig.hideTools
-          : (resolved.hideTools as boolean | undefined),
-      hideThinking:
-        typeof agentConfig.hideThinking === "boolean"
-          ? agentConfig.hideThinking
-          : (resolved.hideThinking as boolean | undefined),
-      showTokenUse:
-        typeof agentConfig.showTokenUse === "boolean"
-          ? agentConfig.showTokenUse
-          : (resolved.showTokenUse as boolean | undefined),
-      sink: null, // Sink is managed by CliChannel via SessionManager
-      modelRegistry:
-        (agentConfig.modelRegistry as Record<string, ModelConfig>) ||
-        (resolved.modelRegistry as Record<string, ModelConfig>) ||
-        {},
-      profileName:
-        (agentConfig.profileName as string) || (resolved.profileName as string),
-      role:
-        (agentConfig.role as string) || (resolved.role as string | undefined),
-      profileBody:
-        (agentConfig.profileBody as string) ||
-        (resolved.profileBody as string | undefined),
-      stream:
-        typeof agentConfig.stream === "boolean"
-          ? agentConfig.stream
-          : (resolved.stream as boolean | undefined),
-      config: {
-        ...config,
-      },
-      sessionId,
-      abortSignal: (agentConfig.abortSignal as AbortSignal) || null,
-      toolWhitelist: (agentConfig.toolWhitelist as string[]) || null,
-    });
-
-    core.hooks.notifyHooks(HOOKS.COMMANDS_REGISTER, {
-      registry: agent.commandRegistry,
-      agent,
-    });
-
-    // Restore session from disk if a session ID was explicitly provided
-    const explicitSessionId = cli.sessionId as string | undefined;
-    if (explicitSessionId && sessionId === explicitSessionId) {
-      if (await sessionExists(explicitSessionId)) {
-        const entries = await readSessionEntries(explicitSessionId);
-        if (entries.length > 0) {
-          agent.isRestoring = true;
-          const replayed = replayEntriesIntoContext(agent, entries);
-          agent.isRestoring = false;
-          if (replayed > 0) {
-            console.log(
-              `Session restored: ${replayed} messages replayed from ${explicitSessionId}`,
-            );
-          }
-        }
-      }
-    }
-
-    return agent;
+    return buildInteractiveAgent(agentConfig, core, resolved, config, llmClient, cli);
   };
 
   // Create SessionManager — this owns the MessageBus and TaskManager internally
@@ -770,6 +866,10 @@ export async function runInteractiveSession(
   );
   console.log("Type /quit or /exit to exit.\n");
 
+  // Determine shell mode
+  const shellMode = (config.uiInteractiveCli as Record<string, unknown>)
+    ?.shellMode;
+
   // Create readline with tab completion
   const createReadline = options.createReadline || readline.createInterface;
 
@@ -777,67 +877,7 @@ export async function runInteractiveSession(
     input: process.stdin,
     output: process.stdout,
     prompt: `(${resolved.model})> `,
-    completer: (
-      line: string,
-      callback: (err: Error | null, result: [string[], string]) => void,
-    ) => {
-      // Get the current agent from sessionManager
-      const currentAgent = sessionManager.getAgent();
-      if (!currentAgent) {
-        callback(null, [[], line]);
-        return;
-      }
-
-      // readline completer receives text before cursor, so cursorPos = line.length
-      const cursorPos = line.length;
-
-      // Parse completion context
-      const ctx = parseCompletionContext(line, cursorPos, currentAgent);
-
-      // Determine the prefix being completed (what readline should replace)
-      let prefix = "";
-      const text = line.slice(0, cursorPos).trimStart();
-      if (text.startsWith("/")) {
-        const afterSlash = text.slice(1);
-        const spaceIdx = afterSlash.indexOf(" ");
-        if (spaceIdx === -1) {
-          // Check for colon syntax: "/prompt:name" -> prefix is "name"
-          const colonIdx = afterSlash.indexOf(":");
-          if (colonIdx !== -1) {
-            prefix = afterSlash.slice(colonIdx + 1);
-          } else {
-            // Completing command name: "/mo" -> prefix is "/mo"
-            prefix = "/" + afterSlash;
-          }
-        } else {
-          // Completing command arg: "/model qw" -> prefix is "qw"
-          prefix = afterSlash.slice(spaceIdx + 1).trimStart();
-        }
-      } else if (shellMode) {
-        // Completing shell command: "ls fil" -> prefix is "fil"
-        const words = line.split(/\s+/);
-        prefix = words[words.length - 1] ?? "";
-      } else {
-        prefix = line;
-      }
-
-      // Request completions from the completion service
-      core.completion
-        .request(ctx, 200)
-        .then((options) => {
-          const matches = options
-            .map((o) => o.value)
-            .filter((m) => m !== prefix);
-          logger.debug(
-            `[completion] "${line}" prefix="${prefix}" -> ${matches.length} matches`,
-          );
-          callback(null, [matches, prefix]);
-        })
-        .catch((e) => {
-          logger.error(`[completion] error: ${(e as Error).message}`);
-          callback(null, [[], prefix]);
-        });
-    },
+    completer: buildReadlineCompleter(sessionManager, core, !!shellMode),
   });
 
   // Create CliChannel — handles the duplex between readline and SessionManager
@@ -846,15 +886,7 @@ export async function runInteractiveSession(
     sessionId: sessionManager.sessionId()!,
     sink,
     rl,
-    onQuit: () => {
-      console.log("\nGoodbye!");
-      const interactiveSessionId = sessionManager.sessionId();
-      if (interactiveSessionId) {
-        console.log(`Session: ${interactiveSessionId}`);
-      }
-      core.extensions.cleanup();
-      process.exit(0);
-    },
+    onQuit: buildOnQuitHandler(sessionManager, core.extensions),
   });
 
   // Define the line handler
@@ -878,9 +910,6 @@ export async function runInteractiveSession(
       });
     }
   });
-
-  const shellMode = (config.uiInteractiveCli as Record<string, unknown>)
-    ?.shellMode;
 
   // Register shell mode completion if enabled
   registerShellCompletion(core.completion, !!shellMode);

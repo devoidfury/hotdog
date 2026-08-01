@@ -13,6 +13,7 @@ import type { AuthMiddleware } from "./auth.ts";
 import { Agent, type ModelConfig } from "../../core/agent.ts";
 import { readSessionEntries, replayEntriesIntoContext, listSessionLogs, deleteSessionLog } from "../../core/session/session-log.ts";
 import { AgentError } from "../../core/error.ts";
+import { logger } from "../../core/logger.ts";
 
 // ── Types ───────────────────────────────────────────────────────────────────
 
@@ -624,7 +625,7 @@ function routeMessage(ws: WebSocket, msg: C2SMessage, registry: SessionRegistry,
 
     case C2S.QUESTION_ANSWER: {
       if (msg.sessionId && msg.answers) {
-        console.warn("[ws] questionAnswer received — question tool integration pending");
+        logger.warn("questionAnswer received — question tool integration pending");
       }
       break;
     }

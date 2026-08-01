@@ -1,4 +1,4 @@
-import { describe, it, expect, afterEach, afterAll } from "bun:test";
+import { describe, it, expect, afterEach, afterAll, beforeAll } from "bun:test";
 import {
   LOG_LEVELS,
   resolveLogLevel,
@@ -94,6 +94,11 @@ describe("logger", () => {
 });
 
 describe("initializeLogger", () => {
+  beforeAll(() => {
+    // Clear any preloaded messages from previous tests so they don't flush on init
+    resetLoggerForTesting();
+  });
+
   afterEach(() => {
     resetLoggerForTesting();
   });

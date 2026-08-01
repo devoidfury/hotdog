@@ -15,6 +15,7 @@ import {
   getExtensionConfig,
 } from "../../core/extensions/types.ts";
 import { ExtensionError } from "../../core/error.ts";
+import type { CompletionContext } from "../../core/completion.ts";
 
 interface SkillsLoaderConfig {
   path?: string;
@@ -64,7 +65,13 @@ export async function create(core: CoreContext): Promise<ExtensionInstance> {
     );
   };
 
-  return {
+  const instance: ExtensionInstance & {
+    loader: SkillsLoader;
+    getAllSkills(): Skill[];
+    getActiveSkills(): Skill[];
+    getCombinedToolPatterns(): Set<string>;
+    isToolAllowed(toolName: string): boolean;
+  } = {
     hooks: {
       /**
        * Build skills preamble for system prompt.
@@ -81,7 +88,10 @@ export async function create(core: CoreContext): Promise<ExtensionInstance> {
        * Tools access it via toolCtx.get('skillsLoader').
        */
       [HOOKS.AGENT_TOOL_CONTEXT]: async ({ toolCtx }) => {
-        (toolCtx as { set: (key: string, value: unknown) => void }).set("skillsLoader", loader);
+        (toolCtx as { set: (key: string, value: unknown) => void }).set(
+          "skillsLoader",
+          loader,
+        );
       },
 
       /**
@@ -103,7 +113,7 @@ export async function create(core: CoreContext): Promise<ExtensionInstance> {
           handler: async (_agent: unknown, cmdValue: string) => {
             const name = cmdValue.slice(6).trim();
             if (!name) {
-              const skills = loader.agentViewableSkills();
+              const skills = loader.allSkills();
               const lines = skills
                 .map(
                   (s: Skill) =>
@@ -153,4 +163,22 @@ export async function create(core: CoreContext): Promise<ExtensionInstance> {
      */
     isToolAllowed,
   };
+
+  // Register completion handler for /skill command args
+  core.completion.register(
+    (ctx: CompletionContext) => {
+      return ctx.command === "skill";
+    },
+    (_ctx: CompletionContext) => {
+      const prefix = (_ctx.commandArg || "").toLowerCase();
+      const skills = loader.allSkills();
+      const matches = skills
+        .filter((s: Skill) => s.name.toLowerCase().startsWith(prefix))
+        .map((s: Skill) => ({ value: s.name }));
+      return matches;
+    },
+    "skills:command-args",
+  );
+
+  return instance;
 }

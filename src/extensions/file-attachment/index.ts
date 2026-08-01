@@ -2,7 +2,7 @@
 // Expands @filepath references in user input to file contents in <file-include> format.
 
 import fsPromises from "node:fs/promises";
-import { resolve as resolveAbs, isAbsolute } from "node:path";
+import { resolve as resolveAbs, isAbsolute, dirname } from "node:path";
 import { cwd } from "node:process";
 import { HOOKS } from "../../core/hooks.ts";
 import { OUTPUT_EVENT } from "../../core/context/output.ts";
@@ -12,6 +12,7 @@ import {
   ExtensionInstance,
   getExtensionConfig,
 } from "../../core/extensions/types.ts";
+import type { CompletionContext } from "../../core/completion.ts";
 
 // Pattern to match @filepath references
 // Matches @ followed by path characters (alphanumeric, dots, slashes, hyphens, underscores, plus)
@@ -159,6 +160,79 @@ export function create(core: CoreContext): ExtensionInstance {
   }>(core, "fileAttachment");
   const maxFileSize = config.maxFileSize;
   const maxFiles = config.maxFiles;
+
+  // Register completion handler for @filepath references
+  core.completion.register(
+    (ctx: CompletionContext) => {
+      // Match when there's an @ symbol before cursor and we're typing a path after it
+      const text = ctx.line.slice(0, ctx.cursorPos);
+      const lastSpace = text.lastIndexOf(" ");
+      const currentWord = text.slice(lastSpace + 1);
+      return currentWord.startsWith("@");
+    },
+    async (ctx: CompletionContext) => {
+      const text = ctx.line.slice(0, ctx.cursorPos);
+      const lastSpace = text.lastIndexOf(" ");
+      const currentWord = text.slice(lastSpace + 1);
+
+      if (!currentWord.startsWith("@")) {
+        return [];
+      }
+
+      // Get workspace boundaries from agent context
+      const agentCtx = (ctx.agent as { context?: { get: (k: string) => unknown } })?.context;
+      const cwdBoundary = (agentCtx?.get("cwdBoundary") as string | null) ?? null;
+      const workspaceRoot = (agentCtx?.get("workspaceRoot") as string | null) ?? null;
+      const baseDir = cwdBoundary || workspaceRoot || cwd();
+
+      // Extract the path prefix (without @)
+      const pathPrefix = currentWord.slice(1);
+
+      try {
+        // Determine the directory to search
+        let searchDir: string;
+        let prefixToMatch: string;
+
+        if (isAbsolute(pathPrefix)) {
+          searchDir = dirname(pathPrefix);
+          prefixToMatch = pathPrefix.slice(searchDir.length + 1);
+        } else if (pathPrefix.includes("/")) {
+          const lastSlash = pathPrefix.lastIndexOf("/");
+          const relDir = pathPrefix.slice(0, lastSlash);
+          searchDir = resolveAbs(baseDir, relDir);
+          prefixToMatch = pathPrefix.slice(lastSlash + 1);
+        } else {
+          searchDir = baseDir;
+          prefixToMatch = pathPrefix;
+        }
+
+        // List directory contents
+        const entries = await fsPromises.readdir(searchDir, { withFileTypes: true });
+        const matches = entries
+          .filter((entry) => {
+            // Skip hidden files/dirs and node_modules
+            if (entry.name.startsWith(".") || entry.name === "node_modules") {
+              return false;
+            }
+            return entry.name.toLowerCase().startsWith(prefixToMatch.toLowerCase());
+          })
+          .map((entry) => {
+            // Append / to directories
+            const name = entry.isDirectory() ? entry.name + "/" : entry.name;
+            const fullPath = pathPrefix.includes("/") || isAbsolute(pathPrefix)
+              ? (isAbsolute(pathPrefix) ? dirname(pathPrefix) : pathPrefix.slice(0, pathPrefix.lastIndexOf("/"))) + "/" + name
+              : name;
+            return { value: "@" + fullPath };
+          });
+
+        return matches;
+      } catch (e) {
+        logger.debug(`file-attachment: completion error: ${(e as Error).message}`);
+        return [];
+      }
+    },
+    "file-attachment:path-completion",
+  );
 
   return {
     hooks: {

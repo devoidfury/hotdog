@@ -7,6 +7,7 @@ import { HOOKS, EXTENSION_PROVIDES, type HookSystem, type HookHandlerAny } from 
 import { ExtensionError } from "../error.ts";
 import { logger } from "../logger.ts";
 import { camelCase } from "../../utils/strings.ts";
+import { CompletionService } from "../completion.ts";
 import type { ToolRegistry } from "./tool-registry.ts";
 import type { ServiceRegistry } from "./service-registry.ts";
 import type { ConfigRegistry } from "./config-registry.ts";
@@ -698,6 +699,7 @@ export interface LoaderCore {
   hooks: HookSystem;
   toolRegistry: ToolRegistry;
   services: ServiceRegistry;
+  completion: CompletionService;
   config?: CoreConfigWithExtensions;
   configRegistry: ConfigRegistry;
   cliSubcommandRegistry: CliSubcommandRegistry;

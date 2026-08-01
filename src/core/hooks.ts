@@ -590,6 +590,11 @@ export const HOOKS = {
   // Logging — emitted by the logger module, intercepted by handlers.
   // Payload: { level: "debug"|"info"|"warn"|"error", message: string, metadata?: object }
   LOG: "log",
+
+  // Completion request — fired when the UI requests tab completions.
+  // Payload: { ctx: CompletionContext, timeoutMs?: number }
+  // Handlers return CompletionOption[] or null.
+  COMPLETION_REQUEST: "completion:request",
 } as const;
 
 /**

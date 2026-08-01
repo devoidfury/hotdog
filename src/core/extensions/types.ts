@@ -37,6 +37,7 @@ import { logger } from "../logger.ts";
 import { ProfileDef } from "../config/profiles.ts";
 import { ParsedCliOptions } from "../cli.ts";
 import { SessionManager } from "../session/index.ts";
+import { CompletionService, CompletionContext, CompletionOption } from "../completion.ts";
 
 // ── Hook Payload Types ──────────────────────────────────────────────────────
 
@@ -162,6 +163,12 @@ export interface HookPayloads {
 
   // Logging
   "log": { level: string; message: string; metadata?: Record<string, unknown> };
+
+  // Completion request
+  "completion:request": {
+    ctx: CompletionContext;
+    timeoutMs?: number;
+  };
 }
 
 /**
@@ -202,6 +209,9 @@ export interface CoreContext {
 
   /** Service registry for abstract service implementations. */
   services: ServiceRegistry;
+
+  /** Completion service for tab completion providers. */
+  completion: CompletionService;
 
   /** Resolved configuration, including extension-specific config blocks. */
   config: CoreConfigWithExtensions;

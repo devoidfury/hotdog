@@ -4,6 +4,7 @@
 import { describe, it, expect, mock, beforeEach, afterEach } from "bun:test";
 import { HOOKS } from "../../src/core/hooks.ts";
 import { HookSystem } from "../../src/core/hooks.ts";
+import { createCompletionService } from "../../src/core/completion.ts";
 
 describe("runInteractiveSession", () => {
   let originalSessionManagerCreate: unknown = null;
@@ -62,6 +63,7 @@ describe("runInteractiveSession", () => {
         load: async () => null,
         cleanup: async () => {},
       },
+      completion: createCompletionService(),
     } as any;
   }
 

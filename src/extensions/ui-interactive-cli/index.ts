@@ -9,7 +9,10 @@ import { spawn } from "node:child_process";
 import { parseCommand, Command, ACTIONS } from "../../core/commands.ts";
 import { HOOKS } from "../../core/hooks.ts";
 import { CliOutputSink } from "../../utils/cli/cli.ts";
-import { LlmClient, type ProviderConfig } from "../../core/llm-client/client.ts";
+import {
+  LlmClient,
+  type ProviderConfig,
+} from "../../core/llm-client/client.ts";
 import { MarkerMangler } from "../../core/marker-mangler.ts";
 import { SessionManager } from "../../core/session/index.ts";
 import { Agent, type ModelConfig } from "../../core/agent.ts";
@@ -22,6 +25,8 @@ import {
 } from "../../core/session/session-log.ts";
 import { CoreContext, ExtensionInstance } from "../../core/extensions/types.ts";
 import { ExtensionError } from "../../core/error.ts";
+import type { CompletionContext } from "../../core/completion.ts";
+import { logger } from "../../core/logger.ts";
 
 const HELP_TEXT = `
 Commands:
@@ -90,6 +95,46 @@ interface InteractiveSessionOptions {
   setupInput?: () => void;
 }
 
+// ── Completion Helpers ─────────────────────────────────────────────────────
+
+/**
+ * Parse the input line to extract command and argument for completion context.
+ */
+function parseCompletionContext(
+  line: string,
+  cursorPos: number,
+  agent: Agent,
+): CompletionContext {
+  // Get the text up to the cursor
+  const text = line.slice(0, cursorPos).trimStart();
+
+  let command: string | undefined;
+  let commandArg: string | undefined;
+
+  // Handle slash commands: /command [args]
+  if (text.startsWith("/")) {
+    const afterSlash = text.slice(1);
+    const spaceIdx = afterSlash.indexOf(" ");
+    if (spaceIdx === -1) {
+      // No space -- completing the command name itself
+      command = afterSlash.trim();
+      commandArg = "";
+    } else {
+      // Has space -- command is done, completing the argument
+      command = afterSlash.slice(0, spaceIdx).trim();
+      commandArg = afterSlash.slice(spaceIdx + 1).trimStart();
+    }
+  }
+
+  return {
+    line,
+    cursorPos,
+    command,
+    commandArg,
+    agent,
+  };
+}
+
 // ── System Command Helpers ─────────────────────────────────────────────────
 
 /**
@@ -118,7 +163,9 @@ const cmdLookupCache = new Map<string, boolean>();
 /**
  * Execute a shell command and return the output.
  */
-export async function executeShellCommand(command: string): Promise<ShellCommandResult> {
+export async function executeShellCommand(
+  command: string,
+): Promise<ShellCommandResult> {
   return new Promise((resolve) => {
     const proc = spawn(command, [], {
       shell: true,
@@ -193,7 +240,9 @@ export class AsyncInteractiveCliInput implements InputInterface {
   /**
    * Collect answers to questions using the readline interface.
    */
-  async collectAnswers(questions: QuestionDef[]): Promise<Record<string, string>> {
+  async collectAnswers(
+    questions: QuestionDef[],
+  ): Promise<Record<string, string>> {
     const rl = this.#rl;
 
     // Temporarily take over readline
@@ -277,6 +326,131 @@ export class AsyncInteractiveCliInput implements InputInterface {
 // Store reference for tool context
 let currentInput: InputInterface | null = null;
 
+// ── Built-in Completion Providers ──────────────────────────────────────────
+
+/**
+ * Register built-in completion providers for slash commands.
+ */
+function registerSlashCommandCompletions(
+  completionService: CoreContext["completion"],
+  sessionManager: SessionManager,
+  extensions: CoreContext["extensions"],
+): void {
+  // Slash command name completion: /<tab> -> list all commands
+  completionService.register(
+    (ctx) => {
+      // Match when line starts with / and we're completing the command name (no space after /)
+      const text = ctx.line.slice(0, ctx.cursorPos).trimStart();
+      return text.startsWith("/") && !text.slice(1).includes(" ");
+    },
+    (ctx) => {
+      const agent = ctx.agent;
+      const afterSlash = ctx.line.slice(0, ctx.cursorPos).trimStart().slice(1);
+      const prefix = afterSlash.toLowerCase();
+
+      // Get all registered command names from the agent's command registry
+      const commandNames = agent.commandRegistry?.names() || [];
+      const matches = commandNames
+        .filter((name) => name.toLowerCase().startsWith(prefix))
+        .map((name) => ({ value: `/${name}` }));
+
+      return matches;
+    },
+    "ui-interactive-cli:slash-commands",
+  );
+
+  // /model completion: /model <tab> -> model names
+  completionService.register(
+    (ctx) => {
+      return ctx.command === "model";
+    },
+    (ctx) => {
+      const agent = ctx.agent;
+      const prefix = (ctx.commandArg || "").toLowerCase();
+
+      // Get model names from modelRegistry
+      const models = Object.keys(agent.modelRegistry || {});
+      const matches = models
+        .filter((m) => m.toLowerCase().startsWith(prefix))
+        .map((m) => ({ value: m }));
+
+      return matches;
+    },
+    "ui-interactive-cli:model",
+  );
+
+  // /theme completion: /theme <tab> -> theme names
+  completionService.register(
+    (ctx) => {
+      return ctx.command === "theme";
+    },
+    (_ctx) => {
+      const prefix = (_ctx.commandArg || "").toLowerCase();
+      const themes = ["dark", "light", "monochrome"];
+      return themes
+        .filter((t) => t.toLowerCase().startsWith(prefix))
+        .map((t) => ({ value: t }));
+    },
+    "ui-interactive-cli:theme",
+  );
+
+  // /reasoning completion: /reasoning <tab> -> effort levels
+  completionService.register(
+    (ctx) => {
+      return ctx.command === "reasoning";
+    },
+    (_ctx) => {
+      const prefix = (_ctx.commandArg || "").toLowerCase();
+      const levels = [
+        "none",
+        "minimal",
+        "low",
+        "high",
+        "xhigh",
+        "max",
+        "unset",
+      ];
+      return levels
+        .filter((l) => l.toLowerCase().startsWith(prefix))
+        .map((l) => ({ value: l }));
+    },
+    "ui-interactive-cli:reasoning",
+  );
+
+  // /prompt completion: /prompt <tab> or /prompt:<tab> -> prompt names
+  completionService.register(
+    (ctx) => {
+      // Match "/prompt " or "/prompt:"
+      return (
+        ctx.command === "prompt" ||
+        (ctx.command && ctx.command.startsWith("prompt:"))
+      );
+    },
+    (ctx) => {
+      const promptsExt = extensions?.get("prompts") as
+        { getAllPrompts?: () => Array<{ name: string }> } | undefined;
+      const allPrompts = promptsExt?.getAllPrompts?.() || [];
+      const promptNames = allPrompts.map((p) => p.name);
+
+      // Extract the prompt name prefix
+      let prefix = "";
+      if (ctx.command === "prompt") {
+        prefix = (ctx.commandArg || "").toLowerCase();
+      } else {
+        // "/prompt:name" -> extract "name"
+        prefix = (ctx.command || "").slice(7).toLowerCase();
+      }
+
+      const matches = promptNames
+        .filter((name) => name.toLowerCase().startsWith(prefix))
+        .map((name) => ({ value: name }));
+
+      return matches;
+    },
+    "ui-interactive-cli:prompt",
+  );
+}
+
 // ── Interactive Session ────────────────────────────────────────────────────
 
 /**
@@ -293,7 +467,10 @@ export async function runInteractiveSession(
   const { resolved, config } = core;
 
   if (!resolved) {
-    throw ExtensionError.ConfigFailed("ui-interactive-cli", "configuration must be resolved first")
+    throw ExtensionError.ConfigFailed(
+      "ui-interactive-cli",
+      "configuration must be resolved first",
+    );
   }
 
   // Create output sink
@@ -332,18 +509,38 @@ export async function runInteractiveSession(
       llmClient: (agentConfig.llmClient as LlmClient | undefined) || llmClient,
       model: (agentConfig.model as string) || (resolved.model as string),
       maxIterations:
-        (agentConfig.maxIterations as number) || (resolved.maxIterations as number) || 100,
+        (agentConfig.maxIterations as number) ||
+        (resolved.maxIterations as number) ||
+        100,
       contextLimit: 128000,
-      hideTools: typeof agentConfig.hideTools === "boolean" ? agentConfig.hideTools : (resolved.hideTools as boolean | undefined),
-      hideThinking: typeof agentConfig.hideThinking === "boolean" ? agentConfig.hideThinking : (resolved.hideThinking as boolean | undefined),
-      showTokenUse: typeof agentConfig.showTokenUse === "boolean" ? agentConfig.showTokenUse : (resolved.showTokenUse as boolean | undefined),
+      hideTools:
+        typeof agentConfig.hideTools === "boolean"
+          ? agentConfig.hideTools
+          : (resolved.hideTools as boolean | undefined),
+      hideThinking:
+        typeof agentConfig.hideThinking === "boolean"
+          ? agentConfig.hideThinking
+          : (resolved.hideThinking as boolean | undefined),
+      showTokenUse:
+        typeof agentConfig.showTokenUse === "boolean"
+          ? agentConfig.showTokenUse
+          : (resolved.showTokenUse as boolean | undefined),
       sink: null, // Sink is managed by CliChannel via SessionManager
-      modelRegistry: (agentConfig.modelRegistry as Record<string, ModelConfig>) ||
-        (resolved.modelRegistry as Record<string, ModelConfig>) || {},
-      profileName: (agentConfig.profileName as string) || (resolved.profileName as string),
-      role: (agentConfig.role as string) || (resolved.role as string | undefined),
-      profileBody: (agentConfig.profileBody as string) || (resolved.profileBody as string | undefined),
-      stream: typeof agentConfig.stream === "boolean" ? agentConfig.stream : (resolved.stream as boolean | undefined),
+      modelRegistry:
+        (agentConfig.modelRegistry as Record<string, ModelConfig>) ||
+        (resolved.modelRegistry as Record<string, ModelConfig>) ||
+        {},
+      profileName:
+        (agentConfig.profileName as string) || (resolved.profileName as string),
+      role:
+        (agentConfig.role as string) || (resolved.role as string | undefined),
+      profileBody:
+        (agentConfig.profileBody as string) ||
+        (resolved.profileBody as string | undefined),
+      stream:
+        typeof agentConfig.stream === "boolean"
+          ? agentConfig.stream
+          : (resolved.stream as boolean | undefined),
       config: {
         ...config,
       },
@@ -380,7 +577,9 @@ export async function runInteractiveSession(
 
   // Create SessionManager — this owns the MessageBus and TaskManager internally
   const sessionManager = await SessionManager.create({
-    hooks: core.hooks as unknown as { notifyHooks: (hookName: string, data: unknown) => void },
+    hooks: core.hooks as unknown as {
+      notifyHooks: (hookName: string, data: unknown) => void;
+    },
     extensions: core.extensions,
     buildAgent,
     initialConfig: { sessionId: cli.sessionId || null },
@@ -394,20 +593,93 @@ export async function runInteractiveSession(
     },
   });
 
+  // Register built-in completion providers
+  registerSlashCommandCompletions(
+    core.completion,
+    sessionManager,
+    core.extensions,
+  );
+
   // Print info
   const agent = sessionManager.getAgent();
-  console.log(`hotdog ${(pkg as { version: string }).version} (interactive mode)`);
+  console.log(
+    `hotdog ${(pkg as { version: string }).version} (interactive mode)`,
+  );
   console.log(`Model: ${resolved.model}`);
   console.log(`Profile: ${resolved.profileName}`);
-  console.log(`Session: ${(agent as { sessionId?: string })?.sessionId || "unknown"}`);
+  console.log(
+    `Session: ${(agent as { sessionId?: string })?.sessionId || "unknown"}`,
+  );
   console.log("Type /quit or /exit to exit.\n");
 
-  // Create readline
+  // Create readline with tab completion
   const createReadline = options.createReadline || readline.createInterface;
+
   const rl = createReadline({
     input: process.stdin,
     output: process.stdout,
     prompt: `(${resolved.model})> `,
+    completer: (
+      line: string,
+      callback: (err: Error | null, result: [string[], string]) => void,
+    ) => {
+      // Get the current agent from sessionManager
+      const currentAgent = sessionManager.getAgent();
+      if (!currentAgent) {
+        callback(null, [[], line]);
+        return;
+      }
+
+      // readline completer receives text before cursor, so cursorPos = line.length
+      const cursorPos = line.length;
+
+      // Parse completion context
+      const ctx = parseCompletionContext(line, cursorPos, currentAgent);
+
+      // Determine the prefix being completed (what readline should replace)
+      let prefix = "";
+      const text = line.slice(0, cursorPos).trimStart();
+      if (text.startsWith("/")) {
+        const afterSlash = text.slice(1);
+        const spaceIdx = afterSlash.indexOf(" ");
+        if (spaceIdx === -1) {
+          // Check for colon syntax: "/prompt:name" -> prefix is "name"
+          const colonIdx = afterSlash.indexOf(":");
+          if (colonIdx !== -1) {
+            prefix = afterSlash.slice(colonIdx + 1);
+          } else {
+            // Completing command name: "/mo" -> prefix is "/mo"
+            prefix = "/" + afterSlash;
+          }
+        } else {
+          // Completing command arg: "/model qw" -> prefix is "qw"
+          prefix = afterSlash.slice(spaceIdx + 1).trimStart();
+        }
+      } else if (shellMode) {
+        // Completing shell command: "ls fil" -> prefix is "fil"
+        const words = line.split(/\s+/);
+        prefix = words[words.length - 1] ?? "";
+      } else {
+        prefix = line;
+      }
+
+      // Request completions from the completion service
+      core.completion
+        .request(ctx, 200)
+        .then((options) => {
+          const matches = options
+            .map((o) => o.value)
+            .filter((m) => m !== prefix);
+          logger.debug(
+            `[completion] "${line}" prefix="${prefix}" -> ${matches.length} matches`,
+          );
+          callback(null, [matches, prefix]);
+        })
+        .catch((e) => {
+          logger.error(`[completion] error: ${(e as Error).message}`);
+          callback(null, [[], prefix]);
+        });
+    },
   });
 
   // Create CliChannel — handles the duplex between readline and SessionManager
@@ -449,7 +721,11 @@ export async function runInteractiveSession(
     }
   });
 
-  const shellMode = (config.uiInteractiveCli as Record<string, unknown>)?.shellMode;
+  const shellMode = (config.uiInteractiveCli as Record<string, unknown>)
+    ?.shellMode;
+
+  // Register shell mode completion if enabled
+  registerShellCompletion(core.completion, !!shellMode);
 
   // Define and register the line handler
   lineHandler = async (line: string) => {
@@ -583,17 +859,26 @@ export function create(core: CoreContext): ExtensionInstance {
     hooks: core.hooks
       ? {
           [HOOKS.CLI_SUBCOMMANDS_REGISTER]: async (payload: unknown) => {
-            const registry = (payload as { register: (name: string, opts: Record<string, unknown>) => void });
+            const registry = payload as {
+              register: (name: string, opts: Record<string, unknown>) => void;
+            };
             registry.register("cli", {
               description: "Interactive CLI session",
-              handler: async (cli: Record<string, unknown>, core: CoreContext) => {
+              handler: async (
+                cli: Record<string, unknown>,
+                core: CoreContext,
+              ) => {
                 await runInteractiveSession(cli, core);
               },
             });
           },
 
           [HOOKS.AGENT_TOOL_CONTEXT]: (payload: unknown) => {
-            const toolCtx = (payload as { toolCtx: { set: (key: string, value: unknown) => void } }).toolCtx;
+            const toolCtx = (
+              payload as {
+                toolCtx: { set: (key: string, value: unknown) => void };
+              }
+            ).toolCtx;
             if (currentInput) {
               toolCtx.set("input", currentInput);
             }

@@ -19,6 +19,7 @@ import {
   type ExtensionLoader,
 } from "./extensions/index.ts";
 import { HOOKS, type HookSystem, type HookTraceOptions } from "./hooks.ts";
+import { createCompletionService, type CompletionService } from "./completion.ts";
 import type { ToolMetadataPayload } from "./extensions/types.ts";
 import type { ToolMetadata } from "./extensions/tool-registry.ts";
 import { parseArgs, generateHelpText } from "./cli.ts";
@@ -151,6 +152,7 @@ async function loadExtensions(
  */
 export interface CoreInfrastructure extends LoaderCore {
   extensions: ExtensionLoader;
+  completion: CompletionService;
   service: (name: string) => unknown;
   buildConfig?: (cli: Record<string, unknown>) => Promise<{
     resolved: ResolvedConfig;
@@ -175,6 +177,7 @@ function createCore(
   const hooks = options.hooks || createHooks();
   const toolRegistry = createToolRegistry();
   const services = createServiceRegistry();
+  const completion = createCompletionService();
 
   // Merge profile info into config so extensions can access it
   // This must be done BEFORE creating the extension loader, because
@@ -190,6 +193,7 @@ function createCore(
     hooks,
     toolRegistry,
     services,
+    completion,
     config: coreConfig,
     cliSubcommandRegistry,
     configRegistry,
@@ -200,6 +204,7 @@ function createCore(
     toolRegistry,
     extensions,
     services,
+    completion,
     config: coreConfig,
     cliSubcommandRegistry,
     configRegistry,

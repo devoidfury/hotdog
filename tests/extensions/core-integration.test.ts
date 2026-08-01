@@ -6,6 +6,7 @@ import type { CoreContext } from "../../src/core/extensions/types.ts";
 import type { ServiceRegistry } from "../../src/core/extensions/service-registry.ts";
 import type { ConfigRegistry } from "../../src/core/extensions/config-registry.ts";
 import type { CliSubcommandRegistry } from "../../src/core/extensions/registries.ts";
+import { createCompletionService } from "../../src/core/completion.ts";
 import { create as createCompactionExtension } from "../../src/extensions/compaction/index.ts";
 import { create as createCoreToolsExtension } from "../../src/extensions/core-tools/index.ts";
 import { create as createSkillsExtension } from "../../src/extensions/skills/index.ts";
@@ -55,6 +56,7 @@ function createMockCore(config: Record<string, unknown> = {}): CoreContext {
     modelRegistry: {},
     toolRegistry,
     services: serviceRegistry as unknown as ServiceRegistry,
+    completion: createCompletionService(),
     configRegistry: {
       validateConfigByKey: (_key: string, _config: unknown) => ({ valid: true, errors: [] }),
     } as unknown as ConfigRegistry,

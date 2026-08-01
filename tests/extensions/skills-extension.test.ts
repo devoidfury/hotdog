@@ -6,6 +6,7 @@ import { SkillsLoader, patternMatches } from "../../src/extensions/skills/loader
 import { HOOKS } from "../../src/core/hooks.ts";
 import { ACTIONS } from "../../src/core/commands.ts";
 import { ExtensionInstance } from "../../src/core/extensions/types.ts";
+import { createCompletionService } from "../../src/core/completion.ts";
 import fs from "node:fs/promises";
 import { join } from "node:path";
 import os from "node:os";
@@ -597,6 +598,7 @@ describe("Skills Extension", () => {
           ...config,
         },
       },
+      completion: createCompletionService(),
     } as any;
   }
 

@@ -5,7 +5,7 @@
 // are defined in the core and registered by extensions via COMMANDS_REGISTER.
 
 import readline from "node:readline";
-import { spawn } from "node:child_process";
+import { spawn, execFile } from "node:child_process";
 import { parseCommand, Command, ACTIONS } from "../../core/commands.ts";
 import { HOOKS } from "../../core/hooks.ts";
 import { CliOutputSink } from "../../utils/cli/cli.ts";
@@ -451,6 +451,106 @@ function registerSlashCommandCompletions(
   );
 }
 
+/**
+ * Register shell mode completion provider.
+ * Bash-like completion: commands, flags (from --help), and files.
+ */
+function registerShellCompletion(
+  completionService: CoreContext["completion"],
+  shellModeEnabled: boolean,
+): void {
+  if (!shellModeEnabled) return;
+
+  // Bash script that performs completion based on the line context.
+  // Handles: command completion, flag completion (--help parsing), file completion.
+  const COMPLETION_SCRIPT = `
+line="$1"
+
+# Check if line ends with space (user typed command + space, wants file completion)
+if [[ "$line" =~ \\ $ ]]; then
+  set -- $line
+  cmd="$1"
+  compgen -f
+else
+  set -- $line
+  cmd="$1"
+  shift
+  args_count=$#
+
+  # Get the last word (the one being completed)
+  word="$1"
+  for w in "$@"; do word="$w"; done
+
+  if [[ $args_count -eq 0 && -n "$cmd" ]]; then
+    # Single word - command completion
+    compgen -c -- "$cmd"
+  elif [[ -z "$word" ]]; then
+    # Space after command/flags - complete files in current dir
+    compgen -f
+  elif [[ "$word" == -* ]]; then
+    # Flag completion - extract options from command's --help
+    if command -v "$cmd" >/dev/null 2>&1; then
+      opts=$("$cmd" --help 2>&1 | grep -oE "(^\\s+-[a-zA-Z]|(--[a-z][a-zA-Z0-9-]*|--help|--version))" | tr -d " " | sort -u | tr "\\n" " ")
+      compgen -W "$opts" -- "$word"
+    fi
+  else
+    # File/path completion
+    compgen -f -- "$word"
+  fi
+fi
+`;
+
+  const runCompletion = (line: string): Promise<string[]> => {
+    return new Promise((resolve) => {
+      const child = execFile(
+        "bash",
+        ["-c", COMPLETION_SCRIPT, "--", line],
+        { env: process.env, cwd: process.cwd() },
+        (error, stdout) => {
+          clearTimeout(timeout);
+          if (error || !stdout) {
+            resolve([]);
+            return;
+          }
+          resolve(stdout.trim().split("\n").filter(Boolean));
+        },
+      );
+
+      const timeout = setTimeout(() => {
+        child.kill("SIGTERM");
+        resolve([]);
+      }, 150);
+    });
+  };
+
+  completionService.register(
+    (ctx: CompletionContext) => {
+      // Only activate in shell mode when not typing a slash command
+      const text = ctx.line.slice(0, ctx.cursorPos).trimStart();
+      return shellModeEnabled && !text.startsWith("/");
+    },
+    async (ctx: CompletionContext) => {
+      const line = ctx.line.slice(0, ctx.cursorPos).trimStart();
+      if (!line) return [];
+
+      const words = line.split(/\s+/);
+      const firstWord = words[0];
+      if (!firstWord || firstWord.length < MIN_CMD_LEN) return [];
+
+      try {
+        const completions = await runCompletion(line);
+        return completions.map((c) => ({ value: c }));
+      } catch (e) {
+        logger.debug(
+          `ui-interactive-cli: shell completion error: ${(e as Error).message}`,
+        );
+        return [];
+      }
+    },
+    "ui-interactive-cli:shell",
+  );
+}
+
 // ── Interactive Session ────────────────────────────────────────────────────
 
 /**
@@ -752,14 +852,15 @@ export async function runInteractiveSession(
         !IGNORED_CMDS.has(firstWord) &&
         (await isSystemCommand(firstWord))
       ) {
-        console.log(`[exec: ${trimmed}]\n`);
         const result = await executeShellCommand(trimmed);
         if (result.content) {
           console.log(result.content);
         } else if (result.error) {
           console.log(`${result.error}`);
         }
-        console.log(`[exec: exit code ${result.exitCode}]`);
+        if (result.exitCode != 0) {
+          console.log(`[exec: exit code ${result.exitCode}]`);
+        }
         rl.prompt();
         return;
       }

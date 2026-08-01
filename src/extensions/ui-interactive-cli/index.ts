@@ -161,34 +161,92 @@ export async function isSystemCommand(cmd: string): Promise<boolean> {
 const cmdLookupCache = new Map<string, boolean>();
 
 /**
+ * Built-in command replacements (alias-like) applied before execution.
+ * Keeps things simple and deterministic without sourcing user bashrc.
+ */
+const COMMAND_REPLACEMENTS: [string, (cmd: string) => string][] = [
+  // ls -> ls --color=always (unless --color already specified)
+  [
+    "ls",
+    (cmd) => {
+      if (!cmd.includes("--color")) {
+        return cmd.replace(/^ls(\b|$)/, "ls --color=always$1");
+      }
+      return cmd;
+    },
+  ],
+];
+
+/**
+ * Regex that matches the send-to-assistant suffix: a pipe followed by optional
+ * whitespace and @ (e.g., "ls -la |@", "ls -la | @", "ls -la |    @").
+ */
+export const SEND_TO_ASSISTANT_SUFFIX_RE = /\|\s*@\s*$/;
+
+/**
+ * Apply built-in command replacements to a command string.
+ */
+function applyCommandReplacements(command: string): string {
+  let result = command;
+  for (const [pattern, transform] of COMMAND_REPLACEMENTS) {
+    if (
+      result.startsWith(pattern) &&
+      (result[pattern.length] === " " ||
+        result[pattern.length] === "\t" ||
+        result.length === pattern.length)
+    ) {
+      result = transform(result);
+    }
+  }
+  return result;
+}
+
+/**
  * Execute a shell command and return the output.
+ *
+ * @param command - The command to execute.
+ * @param options.captureOutput - If true, also capture output (still streams to terminal).
  */
 export async function executeShellCommand(
   command: string,
+  options: { captureOutput?: boolean } = {},
 ): Promise<ShellCommandResult> {
+  const { captureOutput = false } = options;
+  const finalCommand = applyCommandReplacements(command);
+
   return new Promise((resolve) => {
-    const proc = spawn(command, [], {
-      shell: true,
-      stdio: ["pipe", "pipe", "pipe"],
+    const proc = spawn("bash", ["-c", finalCommand], {
+      env: process.env,
+      stdio: captureOutput ? ["inherit", "pipe", "pipe"] : "inherit",
     });
 
-    let stdout = "";
-    let stderr = "";
+    if (!captureOutput) {
+      proc.on("close", (exitCode: number) => {
+        resolve({ content: "", exitCode: exitCode ?? 0 });
+      });
+      proc.on("error", (err: Error) => {
+        resolve({ error: `Error: ${err.message}` });
+      });
+      return;
+    }
+
+    // Capture mode: stream to terminal AND collect for the assistant
+    let captured = "";
 
     proc.stdout.on("data", (chunk: Buffer) => {
-      stdout += chunk.toString();
+      const text = chunk.toString();
+      process.stdout.write(text);
+      captured += text;
     });
 
     proc.stderr.on("data", (chunk: Buffer) => {
-      stderr += chunk.toString();
+      const text = chunk.toString();
+      process.stderr.write(text);
+      captured += text;
     });
 
     proc.on("close", (exitCode: number) => {
-      const output = [stdout, stderr].filter(Boolean).join("\n");
-      resolve({
-        content: output,
-        exitCode,
-      });
+      resolve({ content: captured, exitCode: exitCode ?? 0 });
     });
 
     proc.on("error", (err: Error) => {
@@ -845,21 +903,37 @@ export async function runInteractiveSession(
 
     // Shell mode gate
     if (shellMode) {
-      const firstWord = trimmed.split(/\s+/)[0];
+      const sendToAssistant = SEND_TO_ASSISTANT_SUFFIX_RE.test(trimmed);
+      const cmd = sendToAssistant
+        ? trimmed.replace(SEND_TO_ASSISTANT_SUFFIX_RE, "").trim()
+        : trimmed;
+
+      const firstWord = cmd.split(/\s+/)[0];
       if (
         firstWord &&
         firstWord.length >= MIN_CMD_LEN &&
         !IGNORED_CMDS.has(firstWord) &&
         (await isSystemCommand(firstWord))
       ) {
-        const result = await executeShellCommand(trimmed);
-        if (result.content) {
-          console.log(result.content);
-        } else if (result.error) {
-          console.log(`${result.error}`);
-        }
-        if (result.exitCode != 0) {
-          console.log(`[exec: exit code ${result.exitCode}]`);
+        rl.pause();
+        const result = await executeShellCommand(cmd, {
+          captureOutput: sendToAssistant,
+        });
+        rl.resume();
+
+        if (sendToAssistant) {
+          // Send command and output to the assistant
+          const msg = `I ran: ${cmd}\n\nOutput:\n${result.content || "(no output)"}`;
+          await channel.send(msg);
+        } else {
+          if (result.content) {
+            console.log(result.content);
+          } else if (result.error) {
+            console.log(`${result.error}`);
+          }
+          if (result.exitCode != 0) {
+            console.log(`[exec: exit code ${result.exitCode}]`);
+          }
         }
         rl.prompt();
         return;

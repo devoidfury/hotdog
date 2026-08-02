@@ -161,7 +161,7 @@ hotdog webui                     # Start the web UI server
 -p, --prompt <text>          One-shot prompt
     --sandbox                Sandbox mode: only allow tools without side effects
     --shell-mode             Execute shell commands directly in interactive mode
-                               Tip: append | @ to send command output to the agent (e.g., "ls -la | @")
+                               Tip: append | @ to send command output to the agent (e.g., "ls -la | @", "ls -la | @ show me the permissions")
 -l, --loud                   Print full JSON API responses
 --json                       Output as JSON
 --show-tools                 Show tool calls in output

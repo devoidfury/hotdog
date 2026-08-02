@@ -179,9 +179,10 @@ const COMMAND_REPLACEMENTS: [string, (cmd: string) => string][] = [
 
 /**
  * Regex that matches the send-to-assistant suffix: a pipe followed by optional
- * whitespace and @ (e.g., "ls -la |@", "ls -la | @", "ls -la |    @").
+ * whitespace, @, and an optional note (e.g., "ls -la |@", "ls -la | @",
+ * "ls -la | @ here's a note"). Note requires at least one space after @.
  */
-export const SEND_TO_ASSISTANT_SUFFIX_RE = /\|\s*@\s*$/;
+export const SEND_TO_ASSISTANT_SUFFIX_RE = /\|\s*@(?:\s+(.*))?$/;
 
 /**
  * Apply built-in command replacements to a command string.
@@ -932,7 +933,9 @@ export async function runInteractiveSession(
 
     // Shell mode gate
     if (shellMode) {
-      const sendToAssistant = SEND_TO_ASSISTANT_SUFFIX_RE.test(trimmed);
+      const match = trimmed.match(SEND_TO_ASSISTANT_SUFFIX_RE);
+      const sendToAssistant = !!match;
+      const note = sendToAssistant ? (match[1] || "").trim() : "";
       const cmd = sendToAssistant
         ? trimmed.replace(SEND_TO_ASSISTANT_SUFFIX_RE, "").trim()
         : trimmed;
@@ -952,7 +955,8 @@ export async function runInteractiveSession(
 
         if (sendToAssistant) {
           // Send command and output to the assistant
-          const msg = `I ran: ${cmd}\n\nOutput:\n${result.content || "(no output)"}`;
+          const notePart = note ? `Note: ${note}\n\n` : "";
+          const msg = `I ran: ${cmd}\n\n${notePart}Output:\n${result.content || "(no output)"}`;
           await channel.send(msg);
         } else {
           if (result.content) {

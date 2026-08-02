@@ -38,6 +38,11 @@ describe("SEND_TO_ASSISTANT_SUFFIX_RE", () => {
     "|@",
     "| @",
     "ls -la ||@",
+    // With notes (space required after @)
+    "ls -la | @ show me the permissions",
+    "ls -la |@ foo",
+    "git diff | @ what changed?",
+    "echo hello | @   multiple spaces",
   ];
 
   const shouldNotMatch = [
@@ -47,7 +52,7 @@ describe("SEND_TO_ASSISTANT_SUFFIX_RE", () => {
     "ls -la | foo",
     "ls -la | bar@",
     "ls -la | @@ ",
-    "ls -la |@ foo",
+    "ls -la | @note",
     "ls -la @",
     "ls -la ||",
     "",
@@ -67,6 +72,45 @@ describe("SEND_TO_ASSISTANT_SUFFIX_RE", () => {
       expect(SEND_TO_ASSISTANT_SUFFIX_RE.test(cmd)).toBe(false);
     });
   }
+
+  // Note extraction tests
+  describe("note extraction", () => {
+    it("extracts note when present", () => {
+      const match = "ls -la | @ show me the permissions".match(
+        SEND_TO_ASSISTANT_SUFFIX_RE,
+      );
+      expect(match).not.toBeNull();
+      expect((match![1] || "").trim()).toBe("show me the permissions");
+    });
+
+    it("returns empty note when no note provided", () => {
+      const match = "ls -la | @".match(SEND_TO_ASSISTANT_SUFFIX_RE);
+      expect(match).not.toBeNull();
+      expect((match![1] || "").trim()).toBe("");
+    });
+
+    it("returns empty note for trailing whitespace only", () => {
+      const match = "ls -la | @   ".match(SEND_TO_ASSISTANT_SUFFIX_RE);
+      expect(match).not.toBeNull();
+      expect((match![1] || "").trim()).toBe("");
+    });
+
+    it("extracts note with multiple spaces after @", () => {
+      const match = "echo hello | @   what is this".match(
+        SEND_TO_ASSISTANT_SUFFIX_RE,
+      );
+      expect(match).not.toBeNull();
+      expect((match![1] || "").trim()).toBe("what is this");
+    });
+
+    it("strips suffix to get command", () => {
+      const cmd = "ls -la | @ show me".replace(
+        SEND_TO_ASSISTANT_SUFFIX_RE,
+        "",
+      );
+      expect(cmd.trim()).toBe("ls -la");
+    });
+  });
 });
 
 // ── parseCompletionContext ─────────────────────────────────────────────────

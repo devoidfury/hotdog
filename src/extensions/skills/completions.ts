@@ -6,11 +6,12 @@ export function matcher(ctx: CompletionContext): boolean {
   return cmd === "skill" || cmd.startsWith("skill:");
 }
 
-export function completion(ctx: CompletionContext): CompletionOption[] {
-  const skills = (ctx.agent as { skillsLoader?: { allSkills: () => Array<{ name: string }> } })
-    .skillsLoader?.allSkills() ?? [];
-  const prefix = (ctx.commandArg || "").toLowerCase();
-  return skills
-    .filter((s) => s.name.toLowerCase().startsWith(prefix))
-    .map((s) => ({ value: s.name }));
+export function createCompletionHandler(getAllSkills: () => Array<{ name: string }>) {
+  return function completion(ctx: CompletionContext): CompletionOption[] {
+    const skills = getAllSkills();
+    const prefix = (ctx.commandArg || "").toLowerCase();
+    return skills
+      .filter((s) => s.name.toLowerCase().startsWith(prefix))
+      .map((s) => ({ value: s.name }));
+  };
 }

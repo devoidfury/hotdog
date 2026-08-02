@@ -15,7 +15,7 @@ import {
   getExtensionConfig,
 } from "../../core/extensions/types.ts";
 import { ExtensionError } from "../../core/error.ts";
-import { matcher, completion } from "./completions.ts";
+import { matcher, createCompletionHandler } from "./completions.ts";
 
 interface SkillsLoaderConfig {
   path?: string;
@@ -134,7 +134,7 @@ export async function create(core: CoreContext): Promise<ExtensionInstance> {
               content: `Skill '${name}' activated.`,
             };
           },
-          completion,
+          completion: createCompletionHandler(() => loader.allSkills()),
         });
       },
     },
@@ -169,7 +169,7 @@ export async function create(core: CoreContext): Promise<ExtensionInstance> {
 
   // Register completion with completion service (if available)
   if (core.completion) {
-    core.completion.register(matcher, completion, "skills:skill");
+    core.completion.register(matcher, createCompletionHandler(() => loader.allSkills()), "skills:skill");
   }
 
   return instance;

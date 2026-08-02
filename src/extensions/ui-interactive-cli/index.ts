@@ -26,11 +26,20 @@ import {
 import { CoreContext, ExtensionInstance } from "../../core/extensions/types.ts";
 import { ExtensionError } from "../../core/error.ts";
 import {
+  parseCompletionContext,
   registerSlashCommandNameCompletion,
   registerCommandCompletions,
   registerShellCompletion,
   buildReadlineCompleter,
 } from "./completions.ts";
+
+export {
+  parseCompletionContext,
+  registerSlashCommandNameCompletion,
+  registerCommandCompletions,
+  registerShellCompletion,
+  buildReadlineCompleter,
+};
 
 const HELP_TEXT = `
 Commands:

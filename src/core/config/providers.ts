@@ -158,7 +158,9 @@ async function fetchRemoteModels(
     }
   } catch (e) {
     // Log error but don't crash the registry build
-    logger.error(`Failed to fetch remote models for ${provider.name}`, { error: e });
+    logger.error(`Failed to fetch remote models for ${provider.name}`, {
+      error: e instanceof Error ? { message: e.message, stack: e.stack } : String(e),
+    });
     return [];
   }
 }

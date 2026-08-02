@@ -196,7 +196,7 @@ Runs the full tool call pipeline (TOOL_CALL gate → AGENT_TOOL_CONTEXT → vali
 ### Token Tracker (`src/core/token-tracker.ts`)
 Accumulates session token usage and tracks last-reported values. Key exports:
 - `TokenTracker` class — `record(rawUsage, onRecorded?)`, `getUsage()`, `clear()`
-- `TokenUsage` — `{ turns, promptTokens, cachedTokens, completionTokens, totalTokens, lastPromptTokens?, lastCachedTokens?, lastCompletionTokens?, lastTotalTokens? }`
+- `TokenUsage` — `{ turns, sessionPromptTokens, sessionCachedTokens, sessionCompletionTokens, sessionTotalTokens, promptTokens?, cachedTokens?, completionTokens?, totalTokens? }`
 
 ### Error Handling (`src/core/error.ts`)
 Centralized error formatting. Key exports:

@@ -61,37 +61,37 @@ export function handleTokens(agent: CommandAgent): CommandResult {
     return { action: ACTIONS.DISPLAY, content: "No token usage recorded yet." };
   }
 
-  const promptProcessed = u.promptTokens; // accumulated as (prompt - cached)
+  const promptProcessed = u.sessionPromptTokens; // accumulated as (prompt - cached)
   const lines = [
     `Token usage (${u.turns} turn${u.turns === 1 ? "" : "s"}):`,
     `  prompt:      ${promptProcessed.toLocaleString()} tokens`,
-    `  cached:      ${u.cachedTokens.toLocaleString()} tokens`,
-    `  completion:  ${u.completionTokens.toLocaleString()} tokens`,
-    `  total:       ${u.totalTokens.toLocaleString()} tokens`,
+    `  cached:      ${u.sessionCachedTokens.toLocaleString()} tokens`,
+    `  completion:  ${u.sessionCompletionTokens.toLocaleString()} tokens`,
+    `  total:       ${u.sessionTotalTokens.toLocaleString()} tokens`,
   ];
 
   if (promptProcessed > 0) {
     const cacheRate = (
-      (u.cachedTokens / (promptProcessed + u.cachedTokens)) *
+      (u.sessionCachedTokens / (promptProcessed + u.sessionCachedTokens)) *
       100
     ).toFixed(1);
     lines.push(`  cache hit:   ${cacheRate}% of prompt tokens`);
   }
 
-  // Last-reported values from the provider.
+  // Most recent call values from the provider.
   lines.push("");
   lines.push("Last call:");
   lines.push(
-    `  prompt:      ${(u.lastPromptTokens || 0).toLocaleString()} tokens`,
+    `  prompt:      ${(u.promptTokens || 0).toLocaleString()} tokens`,
   );
   lines.push(
-    `  cached:      ${(u.lastCachedTokens || 0).toLocaleString()} tokens`,
+    `  cached:      ${(u.cachedTokens || 0).toLocaleString()} tokens`,
   );
   lines.push(
-    `  completion:  ${(u.lastCompletionTokens || 0).toLocaleString()} tokens`,
+    `  completion:  ${(u.completionTokens || 0).toLocaleString()} tokens`,
   );
   lines.push(
-    `  total:       ${(u.lastTotalTokens || 0).toLocaleString()} tokens`,
+    `  total:       ${(u.totalTokens || 0).toLocaleString()} tokens`,
   );
 
   return { action: ACTIONS.DISPLAY, content: lines.join("\n") };

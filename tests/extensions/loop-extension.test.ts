@@ -31,9 +31,9 @@ function createMockAgent() {
     enqueue: (text: string) => enqueued.push(text),
     getEnqueued: () => [...enqueued],
     getTokenUsage: () => ({
-      promptTokens: 0, cachedTokens: 0, completionTokens: 0, totalTokens: 0,
-      turns: 0, lastPromptTokens: 0, lastCachedTokens: 0,
-      lastCompletionTokens: 0, lastTotalTokens: 0,
+      sessionPromptTokens: 0, sessionCachedTokens: 0, sessionCompletionTokens: 0, sessionTotalTokens: 0,
+      turns: 0, promptTokens: 0, cachedTokens: 0,
+      completionTokens: 0, totalTokens: 0,
     }),
     hideTools: false,
     hideThinking: false,

@@ -17,14 +17,14 @@ export interface CommandAgent {
   enqueue(text: string): void;
   getTokenUsage(): {
     turns: number;
-    promptTokens: number;
-    cachedTokens: number;
-    completionTokens: number;
-    totalTokens: number;
-    lastPromptTokens?: number;
-    lastCachedTokens?: number;
-    lastCompletionTokens?: number;
-    lastTotalTokens?: number;
+    sessionPromptTokens: number;
+    sessionCachedTokens: number;
+    sessionCompletionTokens: number;
+    sessionTotalTokens: number;
+    promptTokens?: number;
+    cachedTokens?: number;
+    completionTokens?: number;
+    totalTokens?: number;
   };
   hideTools: boolean;
   hideThinking: boolean;

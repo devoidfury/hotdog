@@ -14,14 +14,14 @@ import {
 
 type TokenUsage = {
   turns: number;
-  promptTokens: number;
-  cachedTokens: number;
-  completionTokens: number;
-  totalTokens: number;
-  lastPromptTokens?: number;
-  lastCachedTokens?: number;
-  lastCompletionTokens?: number;
-  lastTotalTokens?: number;
+  sessionPromptTokens: number;
+  sessionCachedTokens: number;
+  sessionCompletionTokens: number;
+  sessionTotalTokens: number;
+  promptTokens?: number;
+  cachedTokens?: number;
+  completionTokens?: number;
+  totalTokens?: number;
 };
 
 // ── Mock Agent Factory ────────────────────────────────────────────────
@@ -32,9 +32,9 @@ function makeMockAgent(overrides: Record<string, unknown> = {}): Record<string, 
     clearContext: mock(async () => {}),
     enqueue: mock((text: string) => {}),
     getTokenUsage: mock((): TokenUsage => ({
-      promptTokens: 0, cachedTokens: 0, completionTokens: 0, totalTokens: 0,
-      turns: 0, lastPromptTokens: 0, lastCachedTokens: 0,
-      lastCompletionTokens: 0, lastTotalTokens: 0,
+      sessionPromptTokens: 0, sessionCachedTokens: 0, sessionCompletionTokens: 0, sessionTotalTokens: 0,
+      turns: 0, promptTokens: 0, cachedTokens: 0,
+      completionTokens: 0, totalTokens: 0,
     })),
     hideTools: false,
     hideThinking: false,
@@ -74,9 +74,9 @@ describe("handleTokens", () => {
   it("displays accumulated totals and cache hit percentage", () => {
     const agent = makeMockAgent({
       getTokenUsage: mock((): TokenUsage => ({
-        promptTokens: 1200, cachedTokens: 800, completionTokens: 400, totalTokens: 2400,
-        turns: 2, lastPromptTokens: 1000, lastCachedTokens: 400,
-        lastCompletionTokens: 200, lastTotalTokens: 1600,
+        sessionPromptTokens: 1200, sessionCachedTokens: 800, sessionCompletionTokens: 400, sessionTotalTokens: 2400,
+        turns: 2, promptTokens: 1000, cachedTokens: 400,
+        completionTokens: 200, totalTokens: 1600,
       })),
     });
     const result = handleTokens(agent as any);
@@ -91,9 +91,9 @@ describe("handleTokens", () => {
   it("handles single turn (no plural)", () => {
     const agent = makeMockAgent({
       getTokenUsage: mock((): TokenUsage => ({
-        promptTokens: 100, cachedTokens: 0, completionTokens: 50, totalTokens: 150,
-        turns: 1, lastPromptTokens: 100, lastCachedTokens: 0,
-        lastCompletionTokens: 50, lastTotalTokens: 150,
+        sessionPromptTokens: 100, sessionCachedTokens: 0, sessionCompletionTokens: 50, sessionTotalTokens: 150,
+        turns: 1, promptTokens: 100, cachedTokens: 0,
+        completionTokens: 50, totalTokens: 150,
       })),
     });
     const result = handleTokens(agent as any);
@@ -103,9 +103,9 @@ describe("handleTokens", () => {
   it("omits cache hit line when real prompt tokens are zero", () => {
     const agent = makeMockAgent({
       getTokenUsage: mock((): TokenUsage => ({
-        promptTokens: 0, cachedTokens: 100, completionTokens: 50, totalTokens: 150,
-        turns: 1, lastPromptTokens: 100, lastCachedTokens: 100,
-        lastCompletionTokens: 50, lastTotalTokens: 150,
+        sessionPromptTokens: 0, sessionCachedTokens: 100, sessionCompletionTokens: 50, sessionTotalTokens: 150,
+        turns: 1, promptTokens: 100, cachedTokens: 100,
+        completionTokens: 50, totalTokens: 150,
       })),
     });
     const result = handleTokens(agent as any);

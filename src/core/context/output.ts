@@ -116,15 +116,15 @@ export interface TaskProgressEvent {
 
 export interface TokenUsageEvent {
   type: typeof OUTPUT_EVENT.TOKEN_USAGE;
+  sessionPromptTokens: number;
+  sessionCachedTokens: number;
+  sessionCompletionTokens: number;
+  sessionTotalTokens: number;
+  turns: number;
   promptTokens: number;
   cachedTokens: number;
   completionTokens: number;
   totalTokens: number;
-  turns: number;
-  lastPromptTokens: number;
-  lastCachedTokens: number;
-  lastCompletionTokens: number;
-  lastTotalTokens: number;
 }
 
 export interface CompactionResultEvent {

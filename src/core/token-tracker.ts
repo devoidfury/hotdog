@@ -1,35 +1,35 @@
 // TokenTracker — accumulates and reports LLM token usage per session.
 //
-// Tracks both accumulated session totals and the last-reported values
+// Tracks both accumulated session totals and the most recent call values
 // from the provider. Real prompt tokens are computed as (prompt - cached)
 // since cached tokens are free.
 
 /**
  * Token usage stats for a session.
  *
- * Accumulated totals:
- *   - promptTokens: real prompt tokens (prompt - cached), accumulated
- *   - cachedTokens: cached prompt tokens, accumulated
- *   - completionTokens: completion tokens, accumulated
- *   - totalTokens: total tokens, accumulated
+ * Accumulated totals (session-wide):
+ *   - sessionPromptTokens: net prompt tokens (raw - cached), accumulated
+ *   - sessionCachedTokens: cached prompt tokens, accumulated
+ *   - sessionCompletionTokens: completion tokens, accumulated
+ *   - sessionTotalTokens: total tokens, accumulated
  *   - turns: number of LLM calls
  *
- * Last-reported values (from the most recent provider response):
- *   - lastPromptTokens: real prompt tokens for last call
- *   - lastCachedTokens: cached tokens for last call
- *   - lastCompletionTokens: completion tokens for last call
- *   - lastTotalTokens: total tokens for last call
+ * Most recent call values (from the provider's last response):
+ *   - promptTokens: net prompt tokens for last call
+ *   - cachedTokens: cached tokens for last call
+ *   - completionTokens: completion tokens for last call
+ *   - totalTokens: total tokens for last call
  */
 export interface TokenUsage {
+  sessionPromptTokens: number;
+  sessionCachedTokens: number;
+  sessionCompletionTokens: number;
+  sessionTotalTokens: number;
+  turns: number;
   promptTokens: number;
   cachedTokens: number;
   completionTokens: number;
   totalTokens: number;
-  turns: number;
-  lastPromptTokens: number;
-  lastCachedTokens: number;
-  lastCompletionTokens: number;
-  lastTotalTokens: number;
   [key: string]: number | undefined;
 }
 
@@ -45,15 +45,15 @@ export interface RawUsage {
 }
 
 const ZERO_USAGE: TokenUsage = {
+  sessionPromptTokens: 0,
+  sessionCachedTokens: 0,
+  sessionCompletionTokens: 0,
+  sessionTotalTokens: 0,
+  turns: 0,
   promptTokens: 0,
   cachedTokens: 0,
   completionTokens: 0,
   totalTokens: 0,
-  turns: 0,
-  lastPromptTokens: 0,
-  lastCachedTokens: 0,
-  lastCompletionTokens: 0,
-  lastTotalTokens: 0,
 };
 
 /**
@@ -109,17 +109,17 @@ export class TokenTracker {
     const totalTokens = rawUsage.total_tokens ?? 0;
 
     // Accumulate session totals. Real prompt = prompt - cached (cached tokens are free).
-    this.#usage.promptTokens += promptTokens - cachedTokens;
-    this.#usage.cachedTokens += cachedTokens;
-    this.#usage.completionTokens += completionTokens;
-    this.#usage.totalTokens += totalTokens;
+    this.#usage.sessionPromptTokens += promptTokens - cachedTokens;
+    this.#usage.sessionCachedTokens += cachedTokens;
+    this.#usage.sessionCompletionTokens += completionTokens;
+    this.#usage.sessionTotalTokens += totalTokens;
     this.#usage.turns += 1;
 
-    // Save last-reported values for reference.
-    this.#usage.lastPromptTokens = promptTokens - cachedTokens;
-    this.#usage.lastCachedTokens = cachedTokens;
-    this.#usage.lastCompletionTokens = completionTokens;
-    this.#usage.lastTotalTokens = totalTokens;
+    // Save most recent call values for reference.
+    this.#usage.promptTokens = promptTokens - cachedTokens;
+    this.#usage.cachedTokens = cachedTokens;
+    this.#usage.completionTokens = completionTokens;
+    this.#usage.totalTokens = totalTokens;
 
     // Notify caller with updated totals.
     if (onRecorded) {

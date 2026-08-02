@@ -279,7 +279,7 @@ describe("OneShotChannel - event types", () => {
       { type: OUTPUT_EVENT.STREAMING_CHUNK, content: "chunk" },
       { type: OUTPUT_EVENT.STREAMING_REASONING_CHUNK, content: "reasoning" },
       { type: OUTPUT_EVENT.TASK_PROGRESS, taskId: "1", status: "running" },
-      { type: OUTPUT_EVENT.TOKEN_USAGE, promptTokens: 10, cachedTokens: 0, completionTokens: 5, totalTokens: 15, turns: 1, lastPromptTokens: 10, lastCachedTokens: 0, lastCompletionTokens: 5, lastTotalTokens: 15 },
+      { type: OUTPUT_EVENT.TOKEN_USAGE, sessionPromptTokens: 10, sessionCachedTokens: 0, sessionCompletionTokens: 5, sessionTotalTokens: 15, turns: 1, promptTokens: 10, cachedTokens: 0, completionTokens: 5, totalTokens: 15 },
       { type: OUTPUT_EVENT.COMPACTION_RESULT, messagesCompacted: 5, tokensBefore: 1000, tokensAfter: 500, strategy: "summarize", summary: "summary" },
       { type: OUTPUT_EVENT.SESSION_STATE, key: "state", value: "val" },
     ];

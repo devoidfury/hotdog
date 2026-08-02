@@ -802,9 +802,9 @@ describe('Agent — end-to-end loop', () => {
       const { agent } = createFixture({ mockLLM });
       await agent.run('test');
       const usage = agent.getTokenUsage();
-      expect(usage.promptTokens).toBe(5);
-      expect(usage.completionTokens).toBe(10);
-      expect(usage.totalTokens).toBe(15);
+      expect(usage.sessionPromptTokens).toBe(5);
+      expect(usage.sessionCompletionTokens).toBe(10);
+      expect(usage.sessionTotalTokens).toBe(15);
     });
   });
 

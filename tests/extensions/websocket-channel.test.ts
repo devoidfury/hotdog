@@ -231,23 +231,23 @@ describe("WebSocketChannel - write()", () => {
       name: "TOKEN_USAGE",
       event: {
         type: OUTPUT_EVENT.TOKEN_USAGE,
-        promptTokens: 100,
-        completionTokens: 50,
-        totalTokens: 150,
-        lastPromptTokens: 80,
-        lastCompletionTokens: 40,
-        lastTotalTokens: 120,
-        lastCachedTokens: 10,
+        sessionPromptTokens: 100,
+        sessionCompletionTokens: 50,
+        sessionTotalTokens: 150,
+        promptTokens: 80,
+        completionTokens: 40,
+        totalTokens: 120,
+        cachedTokens: 10,
       },
       expected: (msg: any) => {
         expect(msg.type).toBe(S2C.TOKEN_USAGE);
-        expect(msg.promptTokens).toBe(100);
-        expect(msg.completionTokens).toBe(50);
-        expect(msg.totalTokens).toBe(150);
-        expect(msg.lastPromptTokens).toBe(80);
-        expect(msg.lastCompletionTokens).toBe(40);
-        expect(msg.lastTotalTokens).toBe(120);
-        expect(msg.lastCachedTokens).toBe(10);
+        expect(msg.sessionPromptTokens).toBe(100);
+        expect(msg.sessionCompletionTokens).toBe(50);
+        expect(msg.sessionTotalTokens).toBe(150);
+        expect(msg.promptTokens).toBe(80);
+        expect(msg.completionTokens).toBe(40);
+        expect(msg.totalTokens).toBe(120);
+        expect(msg.cachedTokens).toBe(10);
       },
     },
     {
@@ -297,9 +297,13 @@ describe("WebSocketChannel - write()", () => {
 
     const sent = (ws as any)._sentMessages;
     const msg = JSON.parse(sent[0]);
+    expect(msg.sessionPromptTokens).toBe(0);
+    expect(msg.sessionCompletionTokens).toBe(0);
+    expect(msg.sessionTotalTokens).toBe(0);
     expect(msg.promptTokens).toBe(0);
     expect(msg.completionTokens).toBe(0);
     expect(msg.totalTokens).toBe(0);
+    expect(msg.cachedTokens).toBe(0);
   });
 
   it("maps SESSION_STATE events to protocol with broadcast", () => {

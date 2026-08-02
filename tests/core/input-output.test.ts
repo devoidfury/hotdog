@@ -157,7 +157,7 @@ describe("OutputSink", () => {
         sink.emitCompacting({ type: OUTPUT_EVENT.COMPACTING });
         sink.emitQuestion({ type: OUTPUT_EVENT.QUESTION, questions: [] });
         sink.emitTaskProgress({ type: OUTPUT_EVENT.TASK_PROGRESS, taskId: "1", status: "running" });
-        sink.emitTokenUsage({ type: OUTPUT_EVENT.TOKEN_USAGE, promptTokens: 0, cachedTokens: 0, completionTokens: 0, totalTokens: 0, turns: 0, lastPromptTokens: 0, lastCachedTokens: 0, lastCompletionTokens: 0, lastTotalTokens: 0 });
+        sink.emitTokenUsage({ type: OUTPUT_EVENT.TOKEN_USAGE, sessionPromptTokens: 0, sessionCachedTokens: 0, sessionCompletionTokens: 0, sessionTotalTokens: 0, turns: 0, promptTokens: 0, cachedTokens: 0, completionTokens: 0, totalTokens: 0 });
         sink.reset();
         expect(stdoutWritten).toBe(false);
       } finally {
@@ -265,7 +265,7 @@ describe("outputEvent", () => {
   });
 
   it("creates event with default empty data", () => {
-    const event = outputEvent({ type: OUTPUT_EVENT.TOKEN_USAGE, promptTokens: 0, cachedTokens: 0, completionTokens: 0, totalTokens: 0, turns: 0, lastPromptTokens: 0, lastCachedTokens: 0, lastCompletionTokens: 0, lastTotalTokens: 0 });
+    const event = outputEvent({ type: OUTPUT_EVENT.TOKEN_USAGE, sessionPromptTokens: 0, sessionCachedTokens: 0, sessionCompletionTokens: 0, sessionTotalTokens: 0, turns: 0, promptTokens: 0, cachedTokens: 0, completionTokens: 0, totalTokens: 0 });
     expect(event.type).toBe(OUTPUT_EVENT.TOKEN_USAGE);
     expect(event.promptTokens).toBe(0);
   });

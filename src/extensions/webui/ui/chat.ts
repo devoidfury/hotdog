@@ -131,10 +131,10 @@ interface TaskProgressMessage {
 
 interface TokenUsageMessage {
   type: "tokenUsage";
-  lastCachedTokens: number;
-  lastPromptTokens: number;
-  lastCompletionTokens: number;
-  lastTotalTokens: number;
+  promptTokens: number;
+  cachedTokens: number;
+  completionTokens: number;
+  totalTokens: number;
 }
 
 interface CompactionResultMessage {

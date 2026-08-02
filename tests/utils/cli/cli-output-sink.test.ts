@@ -182,15 +182,15 @@ describe("CliOutputSink", () => {
   it("emitTokenUsage writes to stderr", () => {
     sink.emit({
       type: OUTPUT_EVENT.TOKEN_USAGE,
+      sessionPromptTokens: 100,
+      sessionCachedTokens: 50,
+      sessionCompletionTokens: 200,
+      sessionTotalTokens: 350,
+      turns: 1,
       promptTokens: 100,
       cachedTokens: 50,
       completionTokens: 200,
       totalTokens: 350,
-      turns: 1,
-      lastPromptTokens: 100,
-      lastCachedTokens: 50,
-      lastCompletionTokens: 200,
-      lastTotalTokens: 350,
     });
     expect(stderrWrites.some((w) => w.includes("tokens"))).toBe(true);
   });

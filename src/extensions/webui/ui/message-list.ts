@@ -77,10 +77,10 @@ interface QuestionMessage { questions: QuestionOption[]; }
 interface TaskProgressMessage { taskId: string; status: string; message?: string; }
 
 interface TokenUsageMessage {
-  lastCachedTokens: number;
-  lastPromptTokens: number;
-  lastCompletionTokens: number;
-  lastTotalTokens: number;
+  promptTokens: number;
+  cachedTokens: number;
+  completionTokens: number;
+  totalTokens: number;
 }
 
 interface CompactionResultMessage { summary: string; messagesCompacted: number; }
@@ -493,16 +493,16 @@ export function createMessageList(
   }
 
   function handleTokenUsage({
-    lastCachedTokens,
-    lastPromptTokens,
-    lastCompletionTokens,
-    lastTotalTokens,
+    promptTokens,
+    cachedTokens,
+    completionTokens,
+    totalTokens,
   }: TokenUsageMessage): void {
     const el = document.createElement("div");
     el.className = "message token-usage";
     const bubble = document.createElement("div");
     bubble.className = "bubble";
-    bubble.textContent = `(tokens cached: ${lastCachedTokens} prompt:${lastPromptTokens} completion:${lastCompletionTokens} total:${lastTotalTokens})`;
+    bubble.textContent = `(tokens cached: ${cachedTokens} prompt:${promptTokens} completion:${completionTokens} total:${totalTokens})`;
     el.appendChild(bubble);
     container.appendChild(el);
     scrollBottom();

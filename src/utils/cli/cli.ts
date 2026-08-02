@@ -106,12 +106,12 @@ export function formatToolResult(result: string, toolOutputFmt: string): string 
  * Format token usage display.
  */
 export function formatTokenUsage(
-  promptTokens: number,
-  cachedTokens: number,
-  completionTokens: number,
-  totalTokens: number,
+  sessionPromptTokens: number,
+  sessionCachedTokens: number,
+  sessionCompletionTokens: number,
+  sessionTotalTokens: number,
 ): string {
-  return `(tokens cached:${cachedTokens} prompt:${promptTokens} completion:${completionTokens} total:${totalTokens})`;
+  return `(tokens cached:${sessionCachedTokens} prompt:${sessionPromptTokens} completion:${sessionCompletionTokens} total:${sessionTotalTokens})`;
 }
 
 /**
@@ -415,10 +415,10 @@ export class CliOutputSink extends OutputSink {
     if (!this.showTokenUse) return;
     this._transitionTo(Modes.Progress);
     const display = formatTokenUsage(
-      event.lastPromptTokens,
-      event.lastCachedTokens,
-      event.lastCompletionTokens,
-      event.lastTotalTokens,
+      event.promptTokens,
+      event.cachedTokens,
+      event.completionTokens,
+      event.totalTokens,
     );
     this._processContent(display);
   }

@@ -25,7 +25,6 @@ import {
 } from "../../core/session/session-log.ts";
 import { CoreContext, ExtensionInstance } from "../../core/extensions/types.ts";
 import { ExtensionError } from "../../core/error.ts";
-import { logger } from "../../core/logger.ts";
 import {
   registerSlashCommandNameCompletion,
   registerCommandCompletions,
@@ -199,13 +198,13 @@ export async function executeShellCommand(
     // Capture mode: stream to terminal AND collect for the assistant
     let captured = "";
 
-    proc.stdout.on("data", (chunk: Buffer) => {
+    proc.stdout!.on("data", (chunk: Buffer) => {
       const text = chunk.toString();
       process.stdout.write(text);
       captured += text;
     });
 
-    proc.stderr.on("data", (chunk: Buffer) => {
+    proc.stderr!.on("data", (chunk: Buffer) => {
       const text = chunk.toString();
       process.stderr.write(text);
       captured += text;

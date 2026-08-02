@@ -2,6 +2,7 @@
 
 import { logger } from "../logger.ts";
 import { CoreContext } from "./types.ts";
+import type { CompletionHandler } from "../completion.ts";
 
 // ── Type Definitions ─────────────────────────────────────────────────────────
 
@@ -89,6 +90,12 @@ export interface CommandDefinition {
   description?: string;
   handler?: CommandHandler;
   matches?: (cmd: string) => boolean;
+  /**
+   * Optional completion handler for tab completion of this command's arguments.
+   * Called when the user is typing arguments for this specific command.
+   * The CompletionContext.command will be set to this command's name.
+   */
+  completion?: CompletionHandler;
 }
 
 /**

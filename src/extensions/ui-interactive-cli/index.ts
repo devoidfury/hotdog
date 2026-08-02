@@ -25,7 +25,7 @@ import {
 } from "../../core/session/session-log.ts";
 import { CoreContext, ExtensionInstance } from "../../core/extensions/types.ts";
 import { ExtensionError } from "../../core/error.ts";
-import type { CompletionContext } from "../../core/completion.ts";
+import type { CompletionContext, CompletionHandler } from "../../core/completion.ts";
 import { logger } from "../../core/logger.ts";
 
 const HELP_TEXT = `
@@ -385,17 +385,16 @@ export class AsyncInteractiveCliInput implements InputInterface {
 // Store reference for tool context
 let currentInput: InputInterface | null = null;
 
-// ── Built-in Completion Providers ──────────────────────────────────────────
+// ── Completion Providers ───────────────────────────────────────────────────
 
 /**
- * Register built-in completion providers for slash commands.
+ * Register the generic slash command name completion: /<tab> -> list all commands.
+ * Command-specific argument completions are registered by each extension
+ * via the `completion` field on their CommandDefinition.
  */
-export function registerSlashCommandCompletions(
+export function registerSlashCommandNameCompletion(
   completionService: CoreContext["completion"],
-  sessionManager: SessionManager,
-  extensions: CoreContext["extensions"],
 ): void {
-  // Slash command name completion: /<tab> -> list all commands
   completionService.register(
     (ctx) => {
       // Match when line starts with / and we're completing the command name (no space after /)
@@ -417,97 +416,28 @@ export function registerSlashCommandCompletions(
     },
     "ui-interactive-cli:slash-commands",
   );
+}
 
-  // /model completion: /model <tab> -> model names
-  completionService.register(
-    (ctx) => {
-      return ctx.command === "model";
-    },
-    (ctx) => {
-      const agent = ctx.agent;
-      const prefix = (ctx.commandArg || "").toLowerCase();
+/**
+ * Register completion handlers from command definitions.
+ * Called during COMMANDS_REGISTER to wire up completions declared inline with commands.
+ */
+export function registerCommandCompletions(
+  completionService: CoreContext["completion"],
+  registry: { all: () => Map<string, { completion?: CompletionHandler }> },
+  source: string,
+): void {
+  for (const [name, def] of registry.all()) {
+    if (!def.completion) continue;
 
-      // Get model names from modelRegistry
-      const models = Object.keys(agent.modelRegistry || {});
-      const matches = models
-        .filter((m) => m.toLowerCase().startsWith(prefix))
-        .map((m) => ({ value: m }));
+    const matcher = (ctx: CompletionContext): boolean => {
+      const cmd = ctx.command;
+      if (!cmd) return false;
+      return cmd === name || cmd.startsWith(`${name}:`);
+    };
 
-      return matches;
-    },
-    "ui-interactive-cli:model",
-  );
-
-  // /theme completion: /theme <tab> -> theme names
-  completionService.register(
-    (ctx) => {
-      return ctx.command === "theme";
-    },
-    (_ctx) => {
-      const prefix = (_ctx.commandArg || "").toLowerCase();
-      const themes = ["dark", "light", "monochrome"];
-      return themes
-        .filter((t) => t.toLowerCase().startsWith(prefix))
-        .map((t) => ({ value: t }));
-    },
-    "ui-interactive-cli:theme",
-  );
-
-  // /reasoning completion: /reasoning <tab> -> effort levels
-  completionService.register(
-    (ctx) => {
-      return ctx.command === "reasoning";
-    },
-    (_ctx) => {
-      const prefix = (_ctx.commandArg || "").toLowerCase();
-      const levels = [
-        "none",
-        "minimal",
-        "low",
-        "high",
-        "xhigh",
-        "max",
-        "unset",
-      ];
-      return levels
-        .filter((l) => l.toLowerCase().startsWith(prefix))
-        .map((l) => ({ value: l }));
-    },
-    "ui-interactive-cli:reasoning",
-  );
-
-  // /prompt completion: /prompt <tab> or /prompt:<tab> -> prompt names
-  completionService.register(
-    (ctx) => {
-      // Match "/prompt " or "/prompt:"
-      return (
-        ctx.command === "prompt" ||
-        (ctx.command && ctx.command.startsWith("prompt:"))
-      );
-    },
-    (ctx) => {
-      const promptsExt = extensions?.get("prompts") as
-        { getAllPrompts?: () => Array<{ name: string }> } | undefined;
-      const allPrompts = promptsExt?.getAllPrompts?.() || [];
-      const promptNames = allPrompts.map((p) => p.name);
-
-      // Extract the prompt name prefix
-      let prefix = "";
-      if (ctx.command === "prompt") {
-        prefix = (ctx.commandArg || "").toLowerCase();
-      } else {
-        // "/prompt:name" -> extract "name"
-        prefix = (ctx.command || "").slice(7).toLowerCase();
-      }
-
-      const matches = promptNames
-        .filter((name) => name.toLowerCase().startsWith(prefix))
-        .map((name) => ({ value: name }));
-
-      return matches;
-    },
-    "ui-interactive-cli:prompt",
-  );
+    completionService.register(matcher, def.completion, `${source}:${name}`);
+  }
 }
 
 /**
@@ -848,12 +778,15 @@ export async function runInteractiveSession(
     },
   });
 
-  // Register built-in completion providers
-  registerSlashCommandCompletions(
-    core.completion,
-    sessionManager,
-    core.extensions,
-  );
+  // Register the generic slash command name completion
+  registerSlashCommandNameCompletion(core.completion);
+
+  // Register completions from command definitions (extensions declare completions inline)
+  // Hook into COMMANDS_REGISTER so completions are wired up as commands are registered
+  core.hooks.on(HOOKS.COMMANDS_REGISTER, (payload: unknown) => {
+    const { registry } = payload as { registry: { all: () => Map<string, unknown> } };
+    registerCommandCompletions(core.completion, registry as any, "ui-interactive-cli");
+  }, "ui-interactive-cli");
 
   // Print info
   const agent = sessionManager.getAgent();

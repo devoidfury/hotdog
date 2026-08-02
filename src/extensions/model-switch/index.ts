@@ -14,6 +14,7 @@ import {
   getExtensionConfig,
 } from "../../core/extensions/types.ts";
 import { type Agent } from "../../core/agent.ts";
+import type { CompletionContext, CompletionOption } from "../../core/completion.ts";
 
 interface ModelSwitchExtConfig {
   toolEnabled?: boolean;
@@ -49,7 +50,17 @@ export function create(core: CoreContext): ExtensionInstance {
   const config = getExtensionConfig<ModelSwitchExtConfig>(core, "modelSwitch");
   const modelTool = new ModelTool(core.resolved?.modelRegistry);
 
-  return {
+  // Completion handler for /model command
+  const modelCompletion = (ctx: CompletionContext): CompletionOption[] => {
+    const agent = ctx.agent;
+    const prefix = (ctx.commandArg || "").toLowerCase();
+    const models = Object.keys(agent.modelRegistry || {});
+    return models
+      .filter((m) => m.toLowerCase().startsWith(prefix))
+      .map((m) => ({ value: m }));
+  };
+
+  const instance: ExtensionInstance & { modelTool: ModelTool } = {
     hooks: {
       /**
        * Register the model tool (if enabled).
@@ -102,6 +113,7 @@ export function create(core: CoreContext): ExtensionInstance {
               content: `Switched to model: ${modelName}`,
             };
           },
+          completion: modelCompletion,
         });
       },
     },
@@ -109,6 +121,17 @@ export function create(core: CoreContext): ExtensionInstance {
     // Expose for external use
     modelTool,
   };
+
+  // Register completion with completion service (if available)
+  if (core.completion) {
+    core.completion.register(
+      (ctx: CompletionContext): boolean => ctx.command === MODEL_CMD_NAME,
+      modelCompletion,
+      "model-switch:model",
+    );
+  }
+
+  return instance;
 }
 
 export { ModelTool } from "./model.ts";

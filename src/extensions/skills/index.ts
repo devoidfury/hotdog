@@ -15,7 +15,7 @@ import {
   getExtensionConfig,
 } from "../../core/extensions/types.ts";
 import { ExtensionError } from "../../core/error.ts";
-import type { CompletionContext } from "../../core/completion.ts";
+import type { CompletionContext, CompletionOption } from "../../core/completion.ts";
 
 interface SkillsLoaderConfig {
   path?: string;
@@ -65,6 +65,15 @@ export async function create(core: CoreContext): Promise<ExtensionInstance> {
     );
   };
 
+  // Completion handler for /skill command
+  const skillCompletion = (ctx: CompletionContext): CompletionOption[] => {
+    const prefix = (ctx.commandArg || "").toLowerCase();
+    const skills = loader.allSkills();
+    return skills
+      .filter((s: Skill) => s.name.toLowerCase().startsWith(prefix))
+      .map((s: Skill) => ({ value: s.name }));
+  };
+
   const instance: ExtensionInstance & {
     loader: SkillsLoader;
     getAllSkills(): Skill[];
@@ -107,6 +116,7 @@ export async function create(core: CoreContext): Promise<ExtensionInstance> {
        */
       [HOOKS.COMMANDS_REGISTER]: async (payload: CommandsRegisterPayload) => {
         const { registry } = payload;
+
         registry.register("skill", {
           description: "List skills or activate a skill (skill:<name>)",
           matches: (cmd: string) => cmd.startsWith("skill"),
@@ -132,6 +142,7 @@ export async function create(core: CoreContext): Promise<ExtensionInstance> {
               content: `Skill '${name}' activated.`,
             };
           },
+          completion: skillCompletion,
         });
       },
     },
@@ -164,21 +175,15 @@ export async function create(core: CoreContext): Promise<ExtensionInstance> {
     isToolAllowed,
   };
 
-  // Register completion handler for /skill command args
-  core.completion.register(
-    (ctx: CompletionContext) => {
-      return ctx.command === "skill";
-    },
-    (_ctx: CompletionContext) => {
-      const prefix = (_ctx.commandArg || "").toLowerCase();
-      const skills = loader.allSkills();
-      const matches = skills
-        .filter((s: Skill) => s.name.toLowerCase().startsWith(prefix))
-        .map((s: Skill) => ({ value: s.name }));
-      return matches;
-    },
-    "skills:command-args",
-  );
+  // Register completion with completion service (if available)
+  if (core.completion) {
+    const skillMatcher = (ctx: CompletionContext): boolean => {
+      const cmd = ctx.command;
+      if (!cmd) return false;
+      return cmd === "skill" || cmd.startsWith("skill:");
+    };
+    core.completion.register(skillMatcher, skillCompletion, "skills:skill");
+  }
 
   return instance;
 }

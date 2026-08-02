@@ -9,6 +9,7 @@ import {
   type CoreContext,
   type ExtensionInstance,
 } from "../../core/extensions/types.ts";
+import type { CompletionContext, CompletionOption } from "../../core/completion.ts";
 
 /**
  * Create the prompts extension.
@@ -27,7 +28,30 @@ export async function create(core: CoreContext): Promise<ExtensionInstance> {
   const loader = new PromptsLoader(resolvedPath, config.displayPrompt);
   await loader.loadPrompts();
 
-  return {
+  // Completion handler for /prompt command
+  const promptCompletion = (ctx: CompletionContext): CompletionOption[] => {
+    const allPrompts = loader.allPrompts();
+    const promptNames = allPrompts.map((p) => p.name);
+
+    // Extract the prompt name prefix
+    let prefix = "";
+    if (ctx.command === "prompt") {
+      prefix = (ctx.commandArg || "").toLowerCase();
+    } else if (ctx.command && ctx.command.startsWith("prompt:")) {
+      // "/prompt:name" -> extract "name"
+      prefix = ctx.command.slice(7).toLowerCase();
+    }
+
+    return promptNames
+      .filter((name) => name.toLowerCase().startsWith(prefix))
+      .map((name) => ({ value: name }));
+  };
+
+  const instance: ExtensionInstance & {
+    loader: PromptsLoader;
+    getAllPrompts: () => Array<{ name: string }>;
+    getPrompt: (name: string) => unknown;
+  } = {
     hooks: {
       /** Register commands for prompts. */
       [HOOKS.COMMANDS_REGISTER]: async ({ registry }) => {
@@ -36,6 +60,7 @@ export async function create(core: CoreContext): Promise<ExtensionInstance> {
           matches: (cmd: string) =>
             cmd.startsWith("prompt:") || cmd.startsWith("prompt "),
           handler: loader.promptHandler.bind(loader),
+          completion: promptCompletion,
         });
       },
     },
@@ -53,4 +78,16 @@ export async function create(core: CoreContext): Promise<ExtensionInstance> {
       return loader.getPrompt(name);
     },
   };
+
+  // Register completion with completion service (if available)
+  if (core.completion) {
+    const promptMatcher = (ctx: CompletionContext): boolean => {
+      const cmd = ctx.command;
+      if (!cmd) return false;
+      return cmd === "prompt" || cmd.startsWith("prompt:");
+    };
+    core.completion.register(promptMatcher, promptCompletion, "prompts:prompt");
+  }
+
+  return instance;
 }

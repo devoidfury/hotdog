@@ -19,6 +19,7 @@ import { logger } from "../../core/logger.ts";
 import { LlmError, formatError } from "../../core/error.ts";
 import { Message } from "../../core/context/message.ts";
 import type { Agent } from "../../core/agent.ts";
+import type { CompletionContext, CompletionOption } from "../../core/completion.ts";
 import {
   CoreContext,
   ExtensionInstance,
@@ -231,7 +232,34 @@ export function create(core: CoreContext): ExtensionInstance | null {
     return { action: ACTIONS.DISPLAY, content: resultContent };
   }
 
-  return {
+  // Completion handler for /compact:strategy command
+  const compactStrategyCompletion = (ctx: CompletionContext): CompletionOption[] => {
+    const prefix = (ctx.commandArg || "").toLowerCase();
+    const strategies = strategyRegistry.getAll();
+
+    // First word: actions (list, set, help) or strategy names (for set)
+    const parts = (ctx.commandArg || "").split(/\s+/);
+    if (parts.length === 1) {
+      // Completing first argument: actions + strategy names
+      const actions = ["list", "set", "help"];
+      const strategyNames = strategies.map((s) => s.name);
+      const allOptions = [...actions, ...strategyNames];
+      return allOptions
+        .filter((o) => o.toLowerCase().startsWith(prefix))
+        .map((o) => ({ value: o }));
+    } else {
+      // Completing strategy name after "set"
+      return strategies
+        .filter((s) => s.name.toLowerCase().startsWith(prefix))
+        .map((s) => ({ value: s.name }));
+    }
+  };
+
+  const instance: ExtensionInstance & {
+    registry: CompactionStrategyRegistry;
+    settings: CompactionSettings;
+    getStrategyList(): Array<{ name: string; description: string }>;
+  } = {
     hooks: {
       /**
        * Handle context hook — check if compaction is needed before each LLM call.
@@ -323,6 +351,7 @@ export function create(core: CoreContext): ExtensionInstance | null {
               return { action: ACTIONS.DISPLAY, content: `Compaction strategy set to: ${action}` };
             }
           },
+          completion: compactStrategyCompletion,
         });
       },
     },
@@ -341,6 +370,18 @@ export function create(core: CoreContext): ExtensionInstance | null {
       }));
     },
   };
+
+  // Register completion with completion service (if available)
+  if (core.completion) {
+    const compactStrategyMatcher = (ctx: CompletionContext): boolean => {
+      const cmd = ctx.command;
+      if (!cmd) return false;
+      return cmd === "compact:strategy" || cmd.startsWith("compact:strategy:");
+    };
+    core.completion.register(compactStrategyMatcher, compactStrategyCompletion, "compaction:compact-strategy");
+  }
+
+  return instance;
 }
 
 // ── Re-exports for convenience ───────────────────────────────────────────────

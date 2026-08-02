@@ -8,7 +8,8 @@ import {
   handleSlashCommand,
   create,
   parseCompletionContext,
-  registerSlashCommandCompletions,
+  registerSlashCommandNameCompletion,
+  registerCommandCompletions,
   registerShellCompletion,
   applyCommandReplacements,
   buildReadlineCompleter,
@@ -175,10 +176,10 @@ describe("applyCommandReplacements", () => {
   });
 });
 
-// ── registerSlashCommandCompletions ────────────────────────────────────────
+// ── registerSlashCommandNameCompletion ─────────────────────────────────────
 
-describe("registerSlashCommandCompletions", () => {
-  it("registers expected completion providers", () => {
+describe("registerSlashCommandNameCompletion", () => {
+  it("registers slash command name completion provider", () => {
     const registeredProviders: string[] = [];
     const mockCompletionService = {
       register: (_matcher: unknown, _provider: unknown, name: string) => {
@@ -186,13 +187,77 @@ describe("registerSlashCommandCompletions", () => {
       },
     } as never;
 
-    registerSlashCommandCompletions(mockCompletionService, {} as never, {} as never);
+    registerSlashCommandNameCompletion(mockCompletionService);
 
     expect(registeredProviders).toContain("ui-interactive-cli:slash-commands");
-    expect(registeredProviders).toContain("ui-interactive-cli:model");
-    expect(registeredProviders).toContain("ui-interactive-cli:theme");
-    expect(registeredProviders).toContain("ui-interactive-cli:reasoning");
-    expect(registeredProviders).toContain("ui-interactive-cli:prompt");
+  });
+});
+
+// ── registerCommandCompletions ─────────────────────────────────────────────
+
+describe("registerCommandCompletions", () => {
+  it("registers completions from command definitions", () => {
+    const registeredProviders: Array<{ name: string; matcher: (ctx: unknown) => boolean }> = [];
+    const mockCompletionService = {
+      register: (matcher: (ctx: unknown) => boolean, _provider: unknown, name: string) => {
+        registeredProviders.push({ name, matcher });
+      },
+    } as never;
+
+    const mockRegistry = {
+      all: () => new Map([
+        ["model", { completion: () => [] }],
+        ["skill", { completion: () => [] }],
+        ["compact", {}], // no completion
+      ]),
+    };
+
+    registerCommandCompletions(mockCompletionService, mockRegistry as never, "test-ext");
+
+    expect(registeredProviders).toHaveLength(2);
+    expect(registeredProviders.map((p) => p.name)).toContain("test-ext:model");
+    expect(registeredProviders.map((p) => p.name)).toContain("test-ext:skill");
+    expect(registeredProviders.map((p) => p.name)).not.toContain("test-ext:compact");
+  });
+
+  it("matcher matches exact command name", () => {
+    const registeredProviders: Array<{ name: string; matcher: (ctx: unknown) => boolean }> = [];
+    const mockCompletionService = {
+      register: (matcher: (ctx: unknown) => boolean, _provider: unknown, name: string) => {
+        registeredProviders.push({ name, matcher });
+      },
+    } as never;
+
+    const mockRegistry = {
+      all: () => new Map([["model", { completion: () => [] }]]),
+    };
+
+    registerCommandCompletions(mockCompletionService, mockRegistry as never, "test-ext");
+    const matcher = registeredProviders[0].matcher;
+
+    expect(matcher({ command: "model", commandArg: "" })).toBe(true);
+    expect(matcher({ command: "other", commandArg: "" })).toBe(false);
+    expect(matcher({ command: undefined, commandArg: "" })).toBe(false);
+  });
+
+  it("matcher matches colon-prefixed command variants", () => {
+    const registeredProviders: Array<{ name: string; matcher: (ctx: unknown) => boolean }> = [];
+    const mockCompletionService = {
+      register: (matcher: (ctx: unknown) => boolean, _provider: unknown, name: string) => {
+        registeredProviders.push({ name, matcher });
+      },
+    } as never;
+
+    const mockRegistry = {
+      all: () => new Map([["compact:strategy", { completion: () => [] }]]),
+    };
+
+    registerCommandCompletions(mockCompletionService, mockRegistry as never, "test-ext");
+    const matcher = registeredProviders[0].matcher;
+
+    expect(matcher({ command: "compact:strategy", commandArg: "" })).toBe(true);
+    expect(matcher({ command: "compact:strategy:list", commandArg: "" })).toBe(true);
+    expect(matcher({ command: "compact", commandArg: "" })).toBe(false);
   });
 });
 
@@ -1096,225 +1161,6 @@ describe("executeShellCommand error handling", () => {
     } finally {
       process.env.PATH = originalPath;
     }
-  });
-});
-
-describe("registerSlashCommandCompletions providers", () => {
-  it("slash command provider filters by prefix", () => {
-    const registeredProviders: Array<{
-      matcher: (ctx: unknown) => boolean;
-      provider: (ctx: unknown) => Array<{ value: string }>;
-      name: string;
-    }> = [];
-
-    const mockCompletionService = {
-      register: (
-        matcher: (ctx: unknown) => boolean,
-        provider: (ctx: unknown) => Array<{ value: string }>,
-        name: string,
-      ) => {
-        registeredProviders.push({ matcher, provider, name });
-      },
-    } as never;
-
-    const mockAgent = {
-      commandRegistry: { names: () => ["help", "quit", "tokens", "model"] },
-      modelRegistry: { "gpt-4": {}, "claude": {} },
-    };
-
-    registerSlashCommandCompletions(mockCompletionService, mockAgent as never, {} as never);
-
-    // Test slash command provider
-    const slashProvider = registeredProviders.find(
-      (p) => p.name === "ui-interactive-cli:slash-commands",
-    );
-    expect(slashProvider).toBeDefined();
-
-    const matches = slashProvider!.provider({
-      line: "/hel",
-      cursorPos: 4,
-      agent: mockAgent,
-    });
-    expect(matches).toEqual([{ value: "/help" }]);
-  });
-
-  it("model completion provider filters by prefix", () => {
-    const registeredProviders: Array<{
-      matcher: (ctx: unknown) => boolean;
-      provider: (ctx: unknown) => Array<{ value: string }>;
-      name: string;
-    }> = [];
-
-    const mockCompletionService = {
-      register: (
-        matcher: (ctx: unknown) => boolean,
-        provider: (ctx: unknown) => Array<{ value: string }>,
-        name: string,
-      ) => {
-        registeredProviders.push({ matcher, provider, name });
-      },
-    } as never;
-
-    const mockAgent = {
-      commandRegistry: { names: () => ["help"] },
-      modelRegistry: { "gpt-4": {}, "gpt-3.5": {}, "claude": {} },
-    };
-
-    registerSlashCommandCompletions(mockCompletionService, mockAgent as never, {} as never);
-
-    const modelProvider = registeredProviders.find(
-      (p) => p.name === "ui-interactive-cli:model",
-    );
-    expect(modelProvider).toBeDefined();
-
-    const matches = modelProvider!.provider({
-      command: "model",
-      commandArg: "gpt",
-      agent: mockAgent,
-    });
-    expect(matches.map((m) => m.value)).toEqual(["gpt-4", "gpt-3.5"]);
-  });
-
-  it("theme completion provider returns themes", () => {
-    const registeredProviders: Array<{
-      matcher: (ctx: unknown) => boolean;
-      provider: (ctx: unknown) => Array<{ value: string }>;
-      name: string;
-    }> = [];
-
-    const mockCompletionService = {
-      register: (
-        matcher: (ctx: unknown) => boolean,
-        provider: (ctx: unknown) => Array<{ value: string }>,
-        name: string,
-      ) => {
-        registeredProviders.push({ matcher, provider, name });
-      },
-    } as never;
-
-    registerSlashCommandCompletions(mockCompletionService, {} as never, {} as never);
-
-    const themeProvider = registeredProviders.find(
-      (p) => p.name === "ui-interactive-cli:theme",
-    );
-    expect(themeProvider).toBeDefined();
-
-    const matches = themeProvider!.provider({ command: "theme", commandArg: "da" });
-    expect(matches).toEqual([{ value: "dark" }]);
-  });
-
-  it("reasoning completion provider returns levels", () => {
-    const registeredProviders: Array<{
-      matcher: (ctx: unknown) => boolean;
-      provider: (ctx: unknown) => Array<{ value: string }>;
-      name: string;
-    }> = [];
-
-    const mockCompletionService = {
-      register: (
-        matcher: (ctx: unknown) => boolean,
-        provider: (ctx: unknown) => Array<{ value: string }>,
-        name: string,
-      ) => {
-        registeredProviders.push({ matcher, provider, name });
-      },
-    } as never;
-
-    registerSlashCommandCompletions(mockCompletionService, {} as never, {} as never);
-
-    const reasoningProvider = registeredProviders.find(
-      (p) => p.name === "ui-interactive-cli:reasoning",
-    );
-    expect(reasoningProvider).toBeDefined();
-
-    const matches = reasoningProvider!.provider({ command: "reasoning", commandArg: "hi" });
-    expect(matches.map((m) => m.value)).toEqual(["high"]);
-  });
-
-  it("prompt completion provider returns prompts", () => {
-    const registeredProviders: Array<{
-      matcher: (ctx: unknown) => boolean;
-      provider: (ctx: unknown) => Array<{ value: string }>;
-      name: string;
-    }> = [];
-
-    const mockPromptsExtension = {
-      getAllPrompts: () => [
-        { name: "deploy" },
-        { name: "debug" },
-        { name: "review" },
-      ],
-    };
-
-    const mockCompletionService = {
-      register: (
-        matcher: (ctx: unknown) => boolean,
-        provider: (ctx: unknown) => Array<{ value: string }>,
-        name: string,
-      ) => {
-        registeredProviders.push({ matcher, provider, name });
-      },
-    } as never;
-
-    const mockExtensions = {
-      get: () => mockPromptsExtension,
-    };
-
-    registerSlashCommandCompletions(
-      mockCompletionService,
-      { commandRegistry: { names: () => [] } } as never,
-      mockExtensions as never,
-    );
-
-    const promptProvider = registeredProviders.find(
-      (p) => p.name === "ui-interactive-cli:prompt",
-    );
-    expect(promptProvider).toBeDefined();
-
-    const matches = promptProvider!.provider({
-      command: "prompt",
-      commandArg: "de",
-      agent: {},
-    });
-    expect(matches.map((m) => m.value)).toEqual(["deploy", "debug"]);
-  });
-
-  it("prompt completion provider handles colon syntax", () => {
-    const registeredProviders: Array<{
-      matcher: (ctx: unknown) => boolean;
-      provider: (ctx: unknown) => Array<{ value: string }>;
-      name: string;
-    }> = [];
-
-    const mockPromptsExtension = {
-      getAllPrompts: () => [{ name: "deploy" }],
-    };
-
-    const mockCompletionService = {
-      register: (
-        matcher: (ctx: unknown) => boolean,
-        provider: (ctx: unknown) => Array<{ value: string }>,
-        name: string,
-      ) => {
-        registeredProviders.push({ matcher, provider, name });
-      },
-    } as never;
-
-    const mockExtensions = { get: () => mockPromptsExtension };
-
-    registerSlashCommandCompletions(
-      mockCompletionService,
-      { commandRegistry: { names: () => [] } } as never,
-      mockExtensions as never,
-    );
-
-    const promptProvider = registeredProviders.find(
-      (p) => p.name === "ui-interactive-cli:prompt",
-    );
-
-    // Test colon syntax matcher
-    const colonCtx = { command: "prompt:dep", commandArg: "" };
-    expect(promptProvider!.matcher(colonCtx as never)).toBe(true);
   });
 });
 

@@ -4,6 +4,7 @@
 
 import { Command, ACTIONS } from "./commands.ts";
 import type { CommandAgent, CommandHandler } from "./extensions/registries.ts";
+import type { CompletionContext, CompletionOption } from "./completion.ts";
 
 export interface CommandResult {
   action?: number;
@@ -14,6 +15,7 @@ export interface CommandResult {
 export interface CommandHandlerDef {
   handler: CommandHandler;
   description: string;
+  completion?: (ctx: CompletionContext) => CompletionOption[];
 }
 
 // Re-export for external use
@@ -181,5 +183,15 @@ export const CORE_COMMAND_HANDLERS: Record<string, CommandHandlerDef> = {
   [Command.Tools]: { handler: handleTools, description: "Toggle tool call display" },
   [Command.Thinking]: { handler: handleThinking, description: "Toggle thinking display" },
   [Command.Regenerate]: { handler: handleRegenerate, description: "Regenerate system prompt" },
-  [Command.Reasoning]: { handler: handleReasoning, description: "Set reasoning effort level" },
+  [Command.Reasoning]: {
+    handler: handleReasoning,
+    description: "Set reasoning effort level",
+    completion: (ctx: CompletionContext): CompletionOption[] => {
+      const prefix = (ctx.commandArg || "").toLowerCase();
+      const levels = ["none", "minimal", "low", "high", "xhigh", "max", "unset"];
+      return levels
+        .filter((l) => l.toLowerCase().startsWith(prefix))
+        .map((l) => ({ value: l }));
+    },
+  },
 };

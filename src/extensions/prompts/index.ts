@@ -9,7 +9,7 @@ import {
   type CoreContext,
   type ExtensionInstance,
 } from "../../core/extensions/types.ts";
-import type { CompletionContext, CompletionOption } from "../../core/completion.ts";
+import { matcher, completion } from "./completions.ts";
 
 /**
  * Create the prompts extension.
@@ -28,31 +28,17 @@ export async function create(core: CoreContext): Promise<ExtensionInstance> {
   const loader = new PromptsLoader(resolvedPath, config.displayPrompt);
   await loader.loadPrompts();
 
-  // Completion handler for /prompt command
-  const promptCompletion = (ctx: CompletionContext): CompletionOption[] => {
-    const allPrompts = loader.allPrompts();
-    const promptNames = allPrompts.map((p) => p.name);
-
-    // Extract the prompt name prefix
-    let prefix = "";
-    if (ctx.command === "prompt") {
-      prefix = (ctx.commandArg || "").toLowerCase();
-    } else if (ctx.command && ctx.command.startsWith("prompt:")) {
-      // "/prompt:name" -> extract "name"
-      prefix = ctx.command.slice(7).toLowerCase();
-    }
-
-    return promptNames
-      .filter((name) => name.toLowerCase().startsWith(prefix))
-      .map((name) => ({ value: name }));
-  };
-
   const instance: ExtensionInstance & {
     loader: PromptsLoader;
     getAllPrompts: () => Array<{ name: string }>;
     getPrompt: (name: string) => unknown;
   } = {
     hooks: {
+      /** Mount loader on agent for completion access. */
+      [HOOKS.AGENT_TOOL_CONTEXT]: async ({ agent }) => {
+        (agent as { promptsLoader?: typeof loader }).promptsLoader = loader;
+      },
+
       /** Register commands for prompts. */
       [HOOKS.COMMANDS_REGISTER]: async ({ registry }) => {
         registry.register("prompt", {
@@ -60,7 +46,7 @@ export async function create(core: CoreContext): Promise<ExtensionInstance> {
           matches: (cmd: string) =>
             cmd.startsWith("prompt:") || cmd.startsWith("prompt "),
           handler: loader.promptHandler.bind(loader),
-          completion: promptCompletion,
+          completion,
         });
       },
     },
@@ -81,12 +67,7 @@ export async function create(core: CoreContext): Promise<ExtensionInstance> {
 
   // Register completion with completion service (if available)
   if (core.completion) {
-    const promptMatcher = (ctx: CompletionContext): boolean => {
-      const cmd = ctx.command;
-      if (!cmd) return false;
-      return cmd === "prompt" || cmd.startsWith("prompt:");
-    };
-    core.completion.register(promptMatcher, promptCompletion, "prompts:prompt");
+    core.completion.register(matcher, completion, "prompts:prompt");
   }
 
   return instance;

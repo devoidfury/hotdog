@@ -15,7 +15,7 @@ import {
   getExtensionConfig,
 } from "../../core/extensions/types.ts";
 import { ExtensionError } from "../../core/error.ts";
-import type { CompletionContext, CompletionOption } from "../../core/completion.ts";
+import { matcher, completion } from "./completions.ts";
 
 interface SkillsLoaderConfig {
   path?: string;
@@ -65,15 +65,6 @@ export async function create(core: CoreContext): Promise<ExtensionInstance> {
     );
   };
 
-  // Completion handler for /skill command
-  const skillCompletion = (ctx: CompletionContext): CompletionOption[] => {
-    const prefix = (ctx.commandArg || "").toLowerCase();
-    const skills = loader.allSkills();
-    return skills
-      .filter((s: Skill) => s.name.toLowerCase().startsWith(prefix))
-      .map((s: Skill) => ({ value: s.name }));
-  };
-
   const instance: ExtensionInstance & {
     loader: SkillsLoader;
     getAllSkills(): Skill[];
@@ -96,11 +87,12 @@ export async function create(core: CoreContext): Promise<ExtensionInstance> {
        * Mount the skills loader on the shared context container.
        * Tools access it via toolCtx.get('skillsLoader').
        */
-      [HOOKS.AGENT_TOOL_CONTEXT]: async ({ toolCtx }) => {
+      [HOOKS.AGENT_TOOL_CONTEXT]: async ({ toolCtx, agent }) => {
         (toolCtx as { set: (key: string, value: unknown) => void }).set(
           "skillsLoader",
           loader,
         );
+        (agent as { skillsLoader?: typeof loader }).skillsLoader = loader;
       },
 
       /**
@@ -142,7 +134,7 @@ export async function create(core: CoreContext): Promise<ExtensionInstance> {
               content: `Skill '${name}' activated.`,
             };
           },
-          completion: skillCompletion,
+          completion,
         });
       },
     },
@@ -177,12 +169,7 @@ export async function create(core: CoreContext): Promise<ExtensionInstance> {
 
   // Register completion with completion service (if available)
   if (core.completion) {
-    const skillMatcher = (ctx: CompletionContext): boolean => {
-      const cmd = ctx.command;
-      if (!cmd) return false;
-      return cmd === "skill" || cmd.startsWith("skill:");
-    };
-    core.completion.register(skillMatcher, skillCompletion, "skills:skill");
+    core.completion.register(matcher, completion, "skills:skill");
   }
 
   return instance;

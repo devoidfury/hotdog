@@ -27,15 +27,14 @@
       "model": "ai365/qwen3.5-4b:coder"
     }
   },
+  "ui-interactive-cli": {
+    "shell-mode": true
+  },
   "skills": {
     "path": "/skills"
   },
   "agents-md": {
-    "enabled": true,
     "autoload": false
-  },
-  "ui-interactive-cli": {
-    "shell-mode": true
   },
   "websocket": {
     "port": 3001,

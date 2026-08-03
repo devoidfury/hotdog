@@ -25,6 +25,7 @@ interface SessionMetadata {
   connectedClients: number;
   questionStrategy: string;
   questionTimeoutSecs: number;
+  userMessageCount: number; // Track user input messages for confirmation dialog
 }
 
 interface CreateSessionOptions {
@@ -34,20 +35,28 @@ interface CreateSessionOptions {
   questionTimeoutSecs?: number;
 }
 
+interface SwitchProfileOptions {
+  sessionId: string;
+  profileName: string;
+  force?: boolean; // Skip confirmation check
+}
+
 interface SessionRegistryOptions {
-  buildAgent: (config: { model?: string; sessionId?: string }) => Promise<unknown>;
+  buildAgent: (config: { model?: string; sessionId?: string; profileName?: string }) => Promise<unknown>;
   llmClient?: unknown;
   questionTimeoutSecs?: number;
   questionStrategy?: string;
   sessionTimeoutMin?: number;
+  profiles?: Record<string, { role: string; body: string; model: string | null; whitelistTools: string[] | null; blacklistTools: string[] }>;
 }
 
 interface CreateWsServerOptions {
-  buildAgent?: (config: { model?: string; sessionId?: string }) => Promise<unknown>;
+  buildAgent?: (config: { model?: string; sessionId?: string; profileName?: string }) => Promise<unknown>;
   sessionTimeoutMin?: number;
   questionTimeoutSecs?: number;
   questionStrategy?: string;
   auth?: AuthMiddleware;
+  profiles?: Record<string, { role: string; body: string; model: string | null; whitelistTools: string[] | null; blacklistTools: string[] }>;
 }
 
 export interface WsServer {
@@ -71,7 +80,7 @@ export interface WsServer {
  */
 export class SessionRegistry {
   #sessionManager: SessionManager;
-  #buildAgent: (config: { model?: string; sessionId?: string }) => Promise<unknown>;
+  #buildAgent: (config: { model?: string; sessionId?: string; profileName?: string }) => Promise<unknown>;
   #questionTimeoutSecs: number;
   #questionStrategy: string;
   #cleanupTimer: ReturnType<typeof setInterval> | null = null;
@@ -82,14 +91,17 @@ export class SessionRegistry {
   #metadata: Map<string, SessionMetadata>;
   // Per-session WebSocketChannel instances
   #channels: Map<string, Set<WebSocketChannel>>;
+  // Available profiles
+  #profiles: Record<string, { role: string; body: string; model: string | null; whitelistTools: string[] | null; blacklistTools: string[] }>;
 
-  constructor({ buildAgent, llmClient, questionTimeoutSecs = 300, questionStrategy = "wait", sessionTimeoutMin = 30 }: SessionRegistryOptions) {
+  constructor({ buildAgent, llmClient, questionTimeoutSecs = 300, questionStrategy = "wait", sessionTimeoutMin = 30, profiles = {} }: SessionRegistryOptions) {
     this.#buildAgent = buildAgent;
     this.#questionTimeoutSecs = questionTimeoutSecs;
     this.#questionStrategy = questionStrategy;
     this.#timeoutMin = sessionTimeoutMin;
     this.#metadata = new Map();
     this.#channels = new Map();
+    this.#profiles = profiles;
 
     // Create SessionManager — passes llmClient through buildAgent config
     this.#sessionManager = new SessionManager({
@@ -139,7 +151,7 @@ export class SessionRegistry {
     const proposedSessionId = crypto.randomUUID();
 
     // Build the agent — pass proposed sessionId but use the agent's actual sessionId
-    const agent = await this.#buildAgent({ model, sessionId: proposedSessionId });
+    const agent = await this.#buildAgent({ model, sessionId: proposedSessionId, profileName: profile });
     const actualSessionId = (agent as Agent)?.sessionId || proposedSessionId;
 
     // Store metadata under the agent's actual sessionId
@@ -151,6 +163,7 @@ export class SessionRegistry {
       connectedClients: 0,
       questionStrategy: questionStrategy || this.#questionStrategy,
       questionTimeoutSecs: questionTimeoutSecs || this.#questionTimeoutSecs,
+      userMessageCount: 0,
     });
 
     // Register with SessionManager — this creates the MessageBus and wires the sink
@@ -177,8 +190,8 @@ export class SessionRegistry {
   /**
    * List all sessions with metadata.
    */
-  list(): Array<{ id: string; profile: string; model: string; createdAt: number; lastActivityAt: number; connectedClients: number }> {
-    const result: Array<{ id: string; profile: string; model: string; createdAt: number; lastActivityAt: number; connectedClients: number }> = [];
+  list(): Array<{ id: string; profile: string; model: string; createdAt: number; lastActivityAt: number; connectedClients: number; userMessageCount: number }> {
+    const result: Array<{ id: string; profile: string; model: string; createdAt: number; lastActivityAt: number; connectedClients: number; userMessageCount: number }> = [];
     for (const [id, meta] of this.#metadata) {
       const agent = this.#sessionManager.getAgentBySessionId(id);
       result.push({
@@ -188,6 +201,7 @@ export class SessionRegistry {
         createdAt: meta.createdAt,
         lastActivityAt: meta.lastActivityAt,
         connectedClients: meta.connectedClients,
+        userMessageCount: meta.userMessageCount,
       });
     }
     return result;
@@ -223,6 +237,64 @@ export class SessionRegistry {
     if (!meta) return false;
     meta.profile = newName;
     return true;
+  }
+
+  /**
+   * List available profiles.
+   */
+  listProfiles(): Record<string, { role: string; body: string; model: string | null; whitelistTools: string[] | null; blacklistTools: string[] }> {
+    return { ...this.#profiles };
+  }
+
+  /**
+   * Switch profile for a session.
+   * Returns requiresConfirmation: true if session has user messages and force is not set.
+   */
+  async switchProfile({ sessionId, profileName, force = false }: SwitchProfileOptions): Promise<{ success: boolean; requiresConfirmation: boolean; error?: string }> {
+    const meta = this.#metadata.get(sessionId);
+    if (!meta) {
+      return { success: false, requiresConfirmation: false, error: "Session not found" };
+    }
+
+    // Check if profile exists
+    const profile = this.#profiles[profileName];
+    if (!profile) {
+      return { success: false, requiresConfirmation: false, error: `Profile "${profileName}" not found` };
+    }
+
+    // Check if confirmation is needed
+    if (!force && meta.userMessageCount >= 1) {
+      return { success: false, requiresConfirmation: true };
+    }
+
+    // Perform the switch
+    const agent = this.#sessionManager.getAgentBySessionId(sessionId);
+    if (agent) {
+      const a = agent as Agent;
+      a.profileName = profileName;
+      // Update tool whitelist from new profile
+      a.toolWhitelist = profile.whitelistTools;
+      // Update profile body and role for system prompt
+      a.profileBody = profile.body || undefined;
+      a.role = profile.role || undefined;
+      // Clear context (messages + system prompt) -- UI confirms this will happen
+      await a.clearContext();
+    }
+    meta.profile = profileName;
+    meta.userMessageCount = 0;
+    meta.lastActivityAt = Date.now();
+
+    return { success: true, requiresConfirmation: false };
+  }
+
+  /**
+   * Increment user message count for a session.
+   */
+  incrementUserMessageCount(sessionId: string): void {
+    const meta = this.#metadata.get(sessionId);
+    if (meta) {
+      meta.userMessageCount += 1;
+    }
   }
 
   /**
@@ -476,7 +548,7 @@ function replaySessionHistory(sessionId: string, agent: unknown, ws: WebSocket):
 /**
  * Route incoming WS messages to the right session handler.
  */
-function routeMessage(ws: WebSocket, msg: C2SMessage, registry: SessionRegistry, authMiddleware: AuthMiddleware | undefined): void {
+async function routeMessage(ws: WebSocket, msg: C2SMessage, registry: SessionRegistry, authMiddleware: AuthMiddleware | undefined): Promise<void> {
   const sessionManager = registry.getSessionManager();
 
   switch (msg.type) {
@@ -555,6 +627,42 @@ function routeMessage(ws: WebSocket, msg: C2SMessage, registry: SessionRegistry,
       break;
     }
 
+    case C2S.LIST_PROFILES: {
+      const profiles = registry.listProfiles();
+      ws.send(JSON.stringify({ type: S2C.PROFILES, profiles }));
+      break;
+    }
+
+    case C2S.SWITCH_PROFILE: {
+      if (msg.sessionId && msg.profileName) {
+        const result = await registry.switchProfile({
+          sessionId: msg.sessionId as string,
+          profileName: msg.profileName as string,
+          force: msg.force as boolean | undefined,
+        });
+        if (result.success) {
+          ws.send(JSON.stringify({
+            type: S2C.PROFILE_SWITCHED,
+            sessionId: msg.sessionId,
+            profile: msg.profileName,
+            success: true,
+          }));
+        } else if (result.requiresConfirmation) {
+          ws.send(JSON.stringify({
+            type: S2C.PROFILE_SWITCHED,
+            sessionId: msg.sessionId,
+            requiresConfirmation: true,
+          }));
+        } else {
+          ws.send(JSON.stringify({
+            type: "error",
+            message: result.error || "Profile switch failed",
+          }));
+        }
+      }
+      break;
+    }
+
     case C2S.SWITCH_SESSION: {
       if (msg.sessionId) {
         const session = registry.get(msg.sessionId as string);
@@ -607,6 +715,7 @@ function routeMessage(ws: WebSocket, msg: C2SMessage, registry: SessionRegistry,
     case C2S.SEND: {
       if (msg.sessionId && msg.content) {
         registry.touch(msg.sessionId as string);
+        registry.incrementUserMessageCount(msg.sessionId as string);
         sessionManager.enqueue(msg.sessionId as string, msg.content as string);
       }
       break;
@@ -809,6 +918,7 @@ export function createWsServer(core: CoreContext, options: CreateWsServerOptions
     questionTimeoutSecs = 300,
     questionStrategy = "wait",
     auth,
+    profiles,
   } = options;
 
   // Single LLM client shared across all sessions
@@ -823,8 +933,11 @@ export function createWsServer(core: CoreContext, options: CreateWsServerOptions
   });
 
   // Default agent builder — uses shared LlmClient from config (injected by SessionManager)
-  const buildAgent = customBuildAgent || (async (agentConfig: { model?: string; sessionId?: string }) => {
+  const buildAgent = customBuildAgent || (async (agentConfig: { model?: string; sessionId?: string; profileName?: string }) => {
     const sessionId = agentConfig.sessionId || crypto.randomUUID();
+    const profileName = agentConfig.profileName || (core.resolved?.profileName as string) || "default";
+    // Read profile config for tool restrictions, role, and body
+    const profile = profiles?.[profileName] || null;
     const agent = new Agent({
       hooks: core.hooks,
       toolRegistry: core.toolRegistry,
@@ -837,7 +950,9 @@ export function createWsServer(core: CoreContext, options: CreateWsServerOptions
       showTokenUse: (agentConfig as { showTokenUse?: boolean }).showTokenUse ?? (core.resolved?.showTokenUse as boolean) ?? true,
       sink: null, // Sink is managed by WebSocketChannel
       modelRegistry: core.resolved?.modelRegistry as Record<string, ModelConfig> | undefined,
-      profileName: (agentConfig as { profileName?: string }).profileName || (core.resolved?.profileName as string) || "default",
+      profileName,
+      profileBody: profile?.body || undefined,
+      role: profile?.role || undefined,
       config: core.config
         ? {
             ...core.config,
@@ -845,7 +960,7 @@ export function createWsServer(core: CoreContext, options: CreateWsServerOptions
         : undefined,
       sessionId,
       abortSignal: null,
-      toolWhitelist: null,
+      toolWhitelist: profile?.whitelistTools || null,
     });
 
     if (core.hooks) {
@@ -864,6 +979,7 @@ export function createWsServer(core: CoreContext, options: CreateWsServerOptions
     questionTimeoutSecs,
     questionStrategy,
     sessionTimeoutMin,
+    profiles,
   });
 
   /**
@@ -898,7 +1014,7 @@ export function createWsServer(core: CoreContext, options: CreateWsServerOptions
   /**
    * Handle incoming WS messages.
    */
-  function onMessage(ws: WebSocket, raw: string | Buffer): void {
+  async function onMessage(ws: WebSocket, raw: string | Buffer): Promise<void> {
     let msg: C2SMessage;
     try {
       msg = JSON.parse(typeof raw === "string" ? raw : raw.toString()) as C2SMessage;
@@ -912,7 +1028,7 @@ export function createWsServer(core: CoreContext, options: CreateWsServerOptions
       return;
     }
 
-    routeMessage(ws, msg, registry, auth);
+    await routeMessage(ws, msg, registry, auth);
   }
 
   /**

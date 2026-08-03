@@ -15,7 +15,7 @@ import {
   ProviderDef,
   resolveConfigDir,
 } from "../../core/config/index.ts";
-import { loadProfileFiles, ProfileDef } from "../../core/config/profiles.ts";
+import { ProfileDef, ProfileManager } from "../../core/config/profiles.ts";
 import {
   CONFIG_SCHEMA as CONFIG_KEYS,
   resolveKey,
@@ -367,13 +367,18 @@ async function printConfigDebug(
 ): Promise<number> {
   const profileName = (cli.profile as string) || (config.profileName as string) || "default";
   const configDir = resolved.configDir || resolveConfigDir(cli.configDir);
-  const profilesPath =
-    (config.profilesPath as string) ||
-    path.join(configDir, DEFAULT_PROFILES_SUBPATH);
-  const profileFiles = await loadProfileFiles(profilesPath);
+  const profilesPath = resolved.profilesPath as string || path.join(configDir, "profiles");
+  let profileManager = resolved.profileManager;
+  // Fallback: create ProfileManager if not available (for tests/backward compat)
+  if (!profileManager) {
+    profileManager = await ProfileManager.create(
+      profilesPath,
+      config.profiles as Record<string, ProfileDef> || {},
+    );
+  }
   const configProfile: ProfileDef | null =
     ((config.profiles as Record<string, ProfileDef> | undefined)?.[profileName]) ?? null;
-  const fileProfile: ProfileDef | null = profileFiles[profileName] ?? null;
+  const fileProfile: ProfileDef | null = profileManager.getFileProfiles()[profileName] ?? null;
 
   // Provider resolution
   const providerName =
@@ -651,37 +656,24 @@ async function runProfileList(
     }
   }
 
-  // Resolve profiles path. Prefer the schema-resolved value if absolute
-  // (the compute layer joined it to configDir correctly). If relative or
-  // missing, fall back to configDir/profiles. We avoid using the raw config
-  // profilesPath directly because defaults like "./config/profiles" are
-  // uncomputed and CWD-relative, not configDir-relative.
-  let profilesPath: string;
-  if (
-    resolved.profilesPath &&
-    path.isAbsolute(resolved.profilesPath as string)
-  ) {
-    profilesPath = resolved.profilesPath as string;
-  } else {
-    profilesPath = path.join(configDir, DEFAULT_PROFILES_SUBPATH);
+  const profilesPath = resolved.profilesPath as string;
+  if (!profilesPath) {
+    console.error("Error: profilesPath not resolved");
+    return 1;
+  }
+  let profileManager = resolved.profileManager;
+  // Fallback: create ProfileManager if not available (for tests/backward compat)
+  if (!profileManager) {
+    profileManager = await ProfileManager.create(
+      profilesPath,
+      config.profiles as Record<string, ProfileDef> || {},
+    );
   }
 
-  // Load all profile files from disk
-  const profileFiles = await loadProfileFiles(profilesPath);
-
-  // Get config-defined profiles
-  const configProfiles = (config.profiles as Record<string, ProfileDef>) || {};
-
-  // Collect all profile names from both sources
-  const allNames = new Set([
-    ...Object.keys(configProfiles),
-    ...Object.keys(profileFiles),
-  ]);
-
-  // Visible worker names (available as subagents)
-  const visibleWorkerNames = Object.entries(profileFiles)
-    .filter(([, p]) => p.visibleWorker)
-    .map(([name]) => name);
+  const profileFiles = profileManager.getFileProfiles();
+  const configProfiles = profileManager.getConfigProfiles();
+  const allNames = new Set(profileManager.getAllNames());
+  const visibleWorkerNames = profileManager.getVisibleWorkerProfiles();
 
   if (cli.wantsJson) {
     return printProfileListJson(
@@ -710,7 +702,7 @@ async function runProfileList(
  */
 function printProfileListText(
   profileFiles: Record<string, ProfileDef>,
-  configProfiles: Record<string, ProfileDef>,
+  configProfiles: Record<string, Partial<ProfileDef>>,
   allNames: Set<string>,
   currentProfile: string,
   profilesPath: string,
@@ -830,7 +822,7 @@ function printProfileListText(
  */
 function printProfileListJson(
   profileFiles: Record<string, ProfileDef>,
-  configProfiles: Record<string, ProfileDef>,
+  configProfiles: Record<string, Partial<ProfileDef>>,
   allNames: Set<string>,
   currentProfile: string,
   profilesPath: string,

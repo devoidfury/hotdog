@@ -20,6 +20,9 @@ export const C2S = {
   LOAD_LOG: "loadLog",
   VIEW_LOG: "viewLog",
   DELETE_LOG: "deleteLog",
+  // Profile management
+  LIST_PROFILES: "listProfiles",
+  SWITCH_PROFILE: "switchProfile",
 } as const;
 
 // ── Server → Client ─────────────────────────────────────────────────────────
@@ -35,6 +38,10 @@ export const S2C = {
   // Cold session log management
   LOGS_LISTED: "logsListed",
   LOG_VIEWED: "logViewed",
+
+  // Profile management
+  PROFILES: "profiles",
+  PROFILE_SWITCHED: "profileSwitched",
 
   // OUTPUT_EVENT mappings
   USER_MESSAGE: "userMessage",

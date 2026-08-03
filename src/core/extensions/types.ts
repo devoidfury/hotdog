@@ -34,7 +34,7 @@ import type { ToolContext } from "./tool-context.ts";
 export type { ToolContext };
 import type { StreamResult } from "../llm-client/stream-processor.ts";
 import { logger } from "../logger.ts";
-import { ProfileDef } from "../config/profiles.ts";
+import { ProfileDef, ProfileManager } from "../config/profiles.ts";
 import { ParsedCliOptions } from "../cli.ts";
 import { SessionManager } from "../session/index.ts";
 import { CompletionService, CompletionContext, CompletionOption } from "../completion.ts";
@@ -279,6 +279,9 @@ export interface ResolvedConfig {
   taskProfile?: string;
   taskDefaultRole?: string;
   profilesPath?: string;
+
+  /** Centralized profile manager - use this instead of manual path construction. */
+  profileManager?: ProfileManager;
 
   // Allow access to any other resolved config keys
   [key: string]: unknown;

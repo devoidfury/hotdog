@@ -33,6 +33,7 @@ function createMockCore(config: Record<string, unknown> = {}) {
       hideThinking: true,
       showTokenUse: true,
       profileName: "default",
+      profilesPath: "./config/profiles",
       modelRegistry: {},
     },
     toolRegistry: {

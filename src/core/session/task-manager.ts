@@ -60,12 +60,15 @@ export interface SpawnTaskOptions {
   profile?: string;
 }
 
+import { ProfileManager } from "../config/profiles.ts";
+
 export interface TaskManagerOptions {
   llmClient: unknown;
   modelRegistry: Record<string, unknown>;
   config: CoreConfigWithExtensions;
   hooks: unknown;
   sessionManager?: { getAgent: () => TaskAgent | undefined } | null;
+  profileManager?: ProfileManager;
 }
 
 export interface TaskManagerRequiredOptions {
@@ -100,6 +103,7 @@ export class TaskManager {
     runPromise: Promise<string>;
   }>;
   #bus: { enqueue: (text: string) => void } | null;
+  #profileManager: ProfileManager | undefined;
 
   /**
    * @param options
@@ -125,6 +129,7 @@ export class TaskManager {
     this.#taskRole = options.taskRole;
     this.#tasks = new Map();
     this.#bus = null;
+    this.#profileManager = options.profileManager;
   }
 
   /**
@@ -150,6 +155,13 @@ export class TaskManager {
    */
   get config(): Record<string, unknown> {
     return this.#config;
+  }
+
+  /**
+   * Get the profile manager (exposed for extensions).
+   */
+  get profileManager(): ProfileManager | undefined {
+    return this.#profileManager;
   }
 
   /**
@@ -194,10 +206,9 @@ export class TaskManager {
   ): Promise<TaskHandle> {
     // 1. Load task profile
     const profileName = options.profile || this.#taskProfile;
-    const taskProfile = await loadProfileFile(
-      this.#config.profilesPath ?? "",
-      profileName,
-    );
+    const taskProfile = this.#profileManager
+      ? this.#profileManager.getProfile(profileName)
+      : await loadProfileFile(this.#config.profilesPath ?? "", profileName);
 
     // 2. Resolve model
     const resolvedModel =

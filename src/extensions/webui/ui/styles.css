@@ -611,6 +611,46 @@ body {
     color: var(--text-primary);
 }
 
+/* ── Profile Selector ─────────────────────────────────────────────────────── */
+
+#profile-selector {
+    color: var(--text-secondary);
+    font-size: 0.85rem;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+#profile-select {
+    background: var(--bg-tertiary);
+    color: var(--text-primary);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    padding: 4px 10px;
+    font-size: 0.82rem;
+    font-family: var(--font-mono);
+    cursor: pointer;
+    outline: none;
+    max-width: 180px;
+    transition:
+        border-color 0.2s,
+        box-shadow 0.2s;
+}
+
+#profile-select:hover {
+    border-color: var(--border-light);
+}
+
+#profile-select:focus {
+    border-color: var(--accent);
+    box-shadow: 0 0 0 2px var(--accent-soft);
+}
+
+#profile-select option {
+    background: var(--bg-tertiary);
+    color: var(--text-primary);
+}
+
 /* ── Connection Status ────────────────────────────────────────────────────── */
 
 .status-disconnected {
@@ -1087,6 +1127,27 @@ body {
     padding: 6px 14px;
     border-radius: var(--radius-sm);
     display: inline-block;
+}
+
+/* System messages (profile switch, etc.) */
+.message.system-message {
+    align-self: center;
+    max-width: 100%;
+    animation: none;
+}
+
+.message.system-message .bubble {
+    background: rgba(124, 92, 255, 0.15);
+    border: 1px solid rgba(124, 92, 255, 0.4);
+    color: var(--accent);
+    font-size: 0.85rem;
+    padding: 8px 16px;
+    border-radius: var(--radius-full);
+    display: inline-block;
+}
+
+.message.system-message .message-role {
+    display: none;
 }
 
 .message.question {

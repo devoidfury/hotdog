@@ -4,7 +4,10 @@ import { serveStaticFile } from "../../utils/index.ts";
 import { createWsServer } from "../websocket/server.ts";
 import { createAuthMiddleware } from "../websocket/auth.ts";
 import { logger } from "../../core/logger.ts";
-import { CoreContext, getExtensionConfig } from "../../core/extensions/types.ts";
+import {
+  CoreContext,
+  getExtensionConfig,
+} from "../../core/extensions/types.ts";
 
 import webuiFrontend from "./ui/index.html";
 import { ExtensionError } from "../../core/error.ts";
@@ -36,13 +39,19 @@ export async function createWebuiServer(
   const { port, host, apiKey, sessionTokenTtlMin } = config;
 
   if (!apiKey) {
-    throw ExtensionError.ConfigFailed('webui', "No API key configured. Set webui.apiKey in config or HOTDOG_WEBUI_API_KEY env var.")
+    throw ExtensionError.ConfigFailed(
+      "webui",
+      "No API key configured. Set webui.apiKey in config or HOTDOG_WEBUI_API_KEY env var.",
+    );
   }
 
   const webuiConfig = getExtensionConfig<WebuiConfig>(core, "webui");
   const maxAgeSecs = webuiConfig.maxAgeSecs;
   if (!maxAgeSecs) {
-    throw ExtensionError.ConfigFailed('webui', "missing required webui.maxAgeSecs configuration");
+    throw ExtensionError.ConfigFailed(
+      "webui",
+      "missing required webui.maxAgeSecs configuration",
+    );
   }
 
   const authMiddleware = createAuthMiddleware({
@@ -51,12 +60,35 @@ export async function createWebuiServer(
   });
 
   // Create WebSocket server handler
-  const wsConfig = core.config?.websocket as Record<string, unknown> | undefined;
+  const wsConfig = core.config?.websocket as
+    Record<string, unknown> | undefined;
+  let profileManager = core.resolved?.profileManager;
+  // Fallback: create ProfileManager if not available (for tests/backward compat)
+  if (!profileManager && core.resolved?.profilesPath) {
+    const { ProfileManager } = await import("../../core/config/profiles.ts");
+    profileManager = await ProfileManager.create(
+      core.resolved.profilesPath as string,
+      core.resolved?.profiles as Record<string, unknown> || {},
+    );
+  }
+  if (!profileManager) {
+    throw ExtensionError.ConfigFailed(
+      "webui",
+      "profileManager not available. Check your configuration.",
+    );
+  }
+
+  const profiles = profileManager.getProfilesForSwitch();
+  logger.info(
+    `[webui] Profiles available: ${Object.keys(profiles).join(", ") || "none"}`,
+  );
+
   const wsServer = createWsServer(core, {
     auth: authMiddleware,
     sessionTimeoutMin: wsConfig?.sessionTimeoutMin as number | undefined,
     questionTimeoutSecs: wsConfig?.questionTimeoutSecs as number | undefined,
     questionStrategy: wsConfig?.questionStrategy as string | undefined,
+    profiles,
   });
 
   // Start cleanup loops
@@ -94,7 +126,9 @@ export async function createWebuiServer(
           return Response.json({ error: "Invalid token" }, { status: 401 });
         }
         // Try to upgrade — Bun.serve handles the rest
-        const upgraded = server.upgrade(req, { data: { token, url: req.url } as unknown as undefined });
+        const upgraded = server.upgrade(req, {
+          data: { token, url: req.url } as unknown as undefined,
+        });
         if (!upgraded) {
           return Response.json({ error: "Upgrade failed" }, { status: 400 });
         }

@@ -11,7 +11,6 @@ import {
   defaultCallDisplay,
 } from "../../core/extensions/tool-utils.ts";
 import type { ToolDef, ToolMetadata } from "../../core/extensions/tool-registry.ts";
-import { getVisibleWorkerProfiles } from "../../core/config/profiles.ts";
 import { TaskManager } from "../../core/index.ts";
 
 // ── Base class for subagent tools ──────────────────────────────────────────
@@ -125,16 +124,15 @@ export class DelegateTaskTool extends SubagentTool {
   }
 
   override toToolDef() {
-    const config = this._taskManager?.config;
-    const profilesPath = (config?.profilesPath as string) || null;
-    const profileListPromise = profilesPath
-      ? getVisibleWorkerProfiles(profilesPath).then((profiles) => {
-          if (profiles.length > 0) {
-            return `\n\nAvailable worker profiles (visible-worker: true): ${profiles.join(", ")}.`;
-          }
-          return "";
-        })
-      : Promise.resolve("");
+    const profileManager = this._taskManager?.profileManager;
+    let profileList = "";
+    if (profileManager) {
+      const profiles = profileManager.getVisibleWorkerProfiles();
+      if (profiles.length > 0) {
+        profileList = `\n\nAvailable worker profiles (visible-worker: true): ${profiles.join(", ")}.`;
+      }
+    }
+    const profileListPromise = Promise.resolve(profileList);
 
     return profileListPromise.then((profileList) =>
       toolDef(

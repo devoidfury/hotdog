@@ -147,6 +147,8 @@ export interface SessionManagerOptions {
   } | null;
   /** Extension loader — passed through to channels for extension access. */
   extensions?: unknown;
+  /** Profile manager — used by TaskManager for profile lookups. */
+  profileManager?: unknown;
 }
 
 /**
@@ -242,6 +244,9 @@ export class SessionManager {
         maxIterations: options.taskConfig.maxIterations,
         taskProfile: options.taskConfig.taskProfile,
         taskRole: options.taskConfig.taskRole,
+        profileManager: options.profileManager as
+          | import("./task-manager.ts").ProfileManager
+          | undefined,
       });
       // Wire sessionManager reference
       this.#taskManager.setSessionManager(

@@ -530,6 +530,7 @@ export async function runInteractiveSession(
       taskProfile: (resolved.taskProfile as string) || "task-default",
       taskRole: (resolved.taskDefaultRole as string) || "",
     },
+    profileManager: resolved.profileManager,
   });
 
   // Register the generic slash command name completion

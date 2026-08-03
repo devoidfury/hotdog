@@ -185,6 +185,7 @@ function startChat(): void {
     onSessionCreated: ({ sessionId }) => {
       chat!.setSession(sessionId);
       chat!.listSessions(); // Refresh sidebar
+      chat!.listProfiles(); // Load available profiles
       // Clear any active log view when switching to a new session
       clearLogView();
     },
@@ -239,8 +240,11 @@ function startChat(): void {
       // Refresh the logs list
       chat?.listLogs();
     },
-    onConnectionChange: (_connected) => {
+    onConnectionChange: (connected) => {
       // Connection recovery is handled by chat.js internally
+      if (connected) {
+        chat?.listProfiles();
+      }
     },
     onAuthFailure: handleAuthFailure,
     onWorkingMapChange: () => {

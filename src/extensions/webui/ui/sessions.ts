@@ -247,9 +247,12 @@ export function initSessions({
       }
 
       item.innerHTML = `
-        <div class="session-name">${profileDisplay}</div>
+        <div class="session-name">
+          <span class="session-profile-badge">${profileDisplay}</span>
+          ${modelDisplay}
+        </div>
         <div class="session-meta">
-          ${modelDisplay} · ${timeDisplay}${clientInfo}
+          ${timeDisplay}${clientInfo}
         </div>
         ${workingHtml}
       `;

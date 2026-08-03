@@ -10,9 +10,11 @@ describe("aspects extension", () => {
   let tmpDir: string;
   let aspectsDir: string;
   let profilesDir: string;
+  let configDir: string;
 
   beforeEach(() => {
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "aspects-test-"));
+    configDir = tmpDir;
     aspectsDir = path.join(tmpDir, "aspects");
     profilesDir = path.join(tmpDir, "profiles");
     fs.mkdirSync(aspectsDir);
@@ -47,8 +49,8 @@ describe("aspects extension", () => {
     const core = {
       config: {},
       resolved: {
-        configDir: tmpDir,
         profilesPath: profilesDir,
+        configDir: configDir,
         profileName: "default",
       },
     } as any;
@@ -74,7 +76,7 @@ describe("aspects extension", () => {
     const core = {
       config: {},
       resolved: {
-        configDir: tmpDir,
+        configDir,
         profilesPath: profilesDir,
         profileName: "default",
       },
@@ -90,7 +92,7 @@ describe("aspects extension", () => {
     const core = {
       config: {},
       resolved: {
-        configDir: tmpDir,
+        configDir,
         profilesPath: profilesDir,
         profileName: "default",
       },
@@ -116,7 +118,7 @@ describe("aspects extension", () => {
     const core = {
       config: {},
       resolved: {
-        configDir: tmpDir,
+        configDir,
         profilesPath: profilesDir,
         profileName: "default",
       },
@@ -131,7 +133,7 @@ describe("aspects extension", () => {
     const core = {
       config: {},
       resolved: {
-        configDir: tmpDir,
+        configDir,
         profilesPath: profilesDir,
         profileName: "nonexistent",
       },
@@ -161,7 +163,7 @@ describe("aspects extension", () => {
     const core = {
       config: {},
       resolved: {
-        configDir: tmpDir,
+        configDir,
         profilesPath: profilesDir,
         profileName: "default",
       },

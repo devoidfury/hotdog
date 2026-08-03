@@ -31,6 +31,8 @@ export interface SwitchProfile {
   role: string;
   body: string;
   model: string | null;
+  whitelistTools: string[] | null;
+  blacklistTools: string[];
 }
 
 /**
@@ -173,7 +175,9 @@ function resolveSwitchProfile(
   const role = fileProfile?.role?.trim() || configProfile?.role || "";
   const body = fileProfile?.body || "";
   const model = configProfile?.model || null;
-  return { role, body, model };
+  const whitelistTools = fileProfile?.whitelistTools ?? configProfile?.whitelistTools ?? null;
+  const blacklistTools = fileProfile?.blacklistTools || configProfile?.blacklistTools || [];
+  return { role, body, model, whitelistTools, blacklistTools };
 }
 
 export interface AllProfilesOptions {
@@ -218,4 +222,158 @@ export interface ResolveProfileResult {
 export interface ProfileCliArgs {
   profile?: string;
   profilesPath?: string;
+}
+
+/**
+ * Centralized profile management.
+ *
+ * Loads profile files from disk, merges with config-defined profiles,
+ * and provides filtered views for different consumers.
+ */
+export class ProfileManager {
+  readonly profilesPath: string;
+  #fileProfiles: Record<string, ProfileDef>;
+  #configProfiles: Record<string, Partial<ProfileDef>>;
+
+  constructor(
+    profilesPath: string,
+    configProfiles: Record<string, Partial<ProfileDef>> = {},
+  ) {
+    this.profilesPath = profilesPath;
+    this.#fileProfiles = {};
+    this.#configProfiles = configProfiles;
+  }
+
+  /**
+   * Create and initialize a ProfileManager by loading profile files.
+   */
+  static async create(
+    profilesPath: string,
+    configProfiles: Record<string, Partial<ProfileDef>> = {},
+  ): Promise<ProfileManager> {
+    const manager = new ProfileManager(profilesPath, configProfiles);
+    await manager.load();
+    return manager;
+  }
+
+  /**
+   * Load all .profile.md files from the profiles directory.
+   */
+  async load(): Promise<void> {
+    this.#fileProfiles = await loadProfileFiles(this.profilesPath);
+  }
+
+  /**
+   * Reload profile files from disk.
+   */
+  async reload(): Promise<void> {
+    await this.load();
+  }
+
+  /**
+   * Get a single profile by name (merged config + file).
+   */
+  getProfile(name: string): ProfileDef | null {
+    const fileP = this.#fileProfiles[name] ?? null;
+    const configP = this.#configProfiles[name] ?? null;
+    if (!fileP && !configP) return null;
+
+    return {
+      name,
+      description: fileP?.description || configP?.description || "",
+      role: fileP?.role || configP?.role || null,
+      body: fileP?.body || "",
+      model: fileP?.model || configP?.model || null,
+      blacklistTools: fileP?.blacklistTools || configP?.blacklistTools || [],
+      whitelistTools: fileP?.whitelistTools ?? configP?.whitelistTools ?? null,
+      manager: fileP?.manager || configP?.manager || false,
+      visibleWorker: fileP?.visibleWorker || configP?.visibleWorker || false,
+      aspects: fileP?.aspects || configP?.aspects || undefined,
+    };
+  }
+
+  /**
+   * Get all profile names from both config and files.
+   */
+  getAllNames(): string[] {
+    const names = new Set([
+      ...Object.keys(this.#configProfiles),
+      ...Object.keys(this.#fileProfiles),
+    ]);
+    return [...names].sort();
+  }
+
+  /**
+   * Get all profiles merged (config + files), as full ProfileDef objects.
+   */
+  getAllProfiles(): Record<string, ProfileDef> {
+    const result: Record<string, ProfileDef> = {};
+    for (const name of this.getAllNames()) {
+      const p = this.getProfile(name);
+      if (p) result[name] = p;
+    }
+    return result;
+  }
+
+  /**
+   * Get SwitchProfile records suitable for profile switching (UI, API).
+   * Merges config and file definitions.
+   */
+  getProfilesForSwitch(): Record<string, SwitchProfile> {
+    const result: Record<string, SwitchProfile> = {};
+    for (const name of this.getAllNames()) {
+      const fileP = this.#fileProfiles[name] ?? null;
+      const configP = (this.#configProfiles[name] as ProfileDef) ?? null;
+      result[name] = resolveSwitchProfile(fileP, configP);
+    }
+    return result;
+  }
+
+  /**
+   * Get profiles visible to workers/subagents (visibleWorker: true).
+   * Returns profile names.
+   */
+  getVisibleWorkerProfiles(): string[] {
+    return Object.entries(this.#fileProfiles)
+      .filter(([, p]) => p.visibleWorker)
+      .map(([name]) => name)
+      .sort();
+  }
+
+  /**
+   * Get profiles visible to the agent (worker profiles it can delegate to).
+   * Same as visibleWorker profiles, but returns full SwitchProfile data.
+   */
+  getProfilesForAgent(): Record<string, SwitchProfile> {
+    const workerNames = new Set(this.getVisibleWorkerProfiles());
+    const result: Record<string, SwitchProfile> = {};
+    for (const name of workerNames) {
+      const fileP = this.#fileProfiles[name] ?? null;
+      const configP = (this.#configProfiles[name] as ProfileDef) ?? null;
+      result[name] = resolveSwitchProfile(fileP, configP);
+    }
+    return result;
+  }
+
+  /**
+   * Get profiles visible to the user for switching.
+   * Includes all profiles that are either manager profiles or have no restrictions.
+   */
+  getProfilesForUser(): Record<string, SwitchProfile> {
+    return this.getProfilesForSwitch();
+  }
+
+  /**
+   * Get the raw file-loaded profiles (before config merge).
+   */
+  getFileProfiles(): Record<string, ProfileDef> {
+    return { ...this.#fileProfiles };
+  }
+
+  /**
+   * Get the raw config-defined profiles (before file merge).
+   */
+  getConfigProfiles(): Record<string, Partial<ProfileDef>> {
+    return { ...this.#configProfiles };
+  }
 }

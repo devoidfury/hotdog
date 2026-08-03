@@ -189,20 +189,13 @@ function createCore(
     profileDef: (options.profile || config.profileDef || {}) as ProfileDef | undefined,
   };
 
-  const extensions = createExtensionLoader({
+  // Build the core object first, then pass it to the ExtensionLoader.
+  // This ensures extensions receive the same core reference (including resolved)
+  // that main() uses, rather than a separate LoaderCore without resolved.
+  const core: CoreInfrastructure = {
     hooks,
     toolRegistry,
-    services,
-    completion,
-    config: coreConfig,
-    cliSubcommandRegistry,
-    configRegistry,
-  });
-
-  return {
-    hooks,
-    toolRegistry,
-    extensions,
+    extensions: null as unknown as ExtensionLoader, // set below
     services,
     completion,
     config: coreConfig,
@@ -210,7 +203,11 @@ function createCore(
     configRegistry,
     service: (name: string) => services.get(name),
     buildConfig: options.buildConfig,
-  } as CoreInfrastructure;
+  };
+
+  core.extensions = createExtensionLoader(core as LoaderCore);
+
+  return core;
 }
 
 // ── Main ─────────────────────────────────────────────────────────────────────

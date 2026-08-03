@@ -6,6 +6,7 @@
 import { reactiveState, effect, Atom } from "./utils.ts";
 import { createMessageList, MessageListManager } from "./message-list.ts";
 import type { SessionInfo } from "./sessions.ts";
+import { sanitize } from "./utils.ts";
 
 // Browser-compatible logger — avoids importing Node.js logger which uses
 // process.env and process.stdout that don't exist in browser environments.
@@ -17,6 +18,17 @@ const logger = {
     console.warn("[chat]", msg, data || "");
   },
 };
+
+// Profile state - matches SwitchProfile from backend
+type ProfileInfo = {
+  role: string;
+  body: string;
+  model: string | null;
+};
+const profilesAtom = reactiveState<Record<string, ProfileInfo>>({});
+let currentProfile = "default";
+// Track user message count for confirmation logic
+let userMessageCount = 0;
 
 // ── Server message types ────────────────────────────────────────────────────
 
@@ -149,6 +161,19 @@ interface SessionStateMessage {
   value: unknown;
 }
 
+interface ProfilesMessage {
+  type: "profiles";
+  profiles: Record<string, { role: string; body: string; model: string | null; whitelistTools?: string[] | null; blacklistTools?: string[] }>;
+}
+
+interface ProfileSwitchedMessage {
+  type: "profileSwitched";
+  sessionId: string;
+  profile?: string;
+  success?: boolean;
+  requiresConfirmation?: boolean;
+}
+
 interface ServerErrorMessage {
   type: "error";
   message: string;
@@ -177,6 +202,8 @@ type ServerMessage =
   | TokenUsageMessage
   | CompactionResultMessage
   | SessionStateMessage
+  | ProfilesMessage
+  | ProfileSwitchedMessage
   | ServerErrorMessage;
 
 // ── Config & return types ───────────────────────────────────────────────────
@@ -216,6 +243,10 @@ export interface ChatController {
   sendCommand: (command: string) => void;
   sendQuestionAnswer: (answers: unknown) => void;
   setSession: (sessionId: string) => void;
+  /** List available profiles */
+  listProfiles: () => void;
+  /** Switch to a different profile */
+  switchProfile: (profileName: string, force?: boolean) => void;
   /** Send a raw WS message (used for canceling non-active sessions from sidebar) */
   send: (obj: Record<string, unknown>) => void;
   ws: WebSocket | null;
@@ -228,6 +259,8 @@ export interface ChatController {
   sessionWorkingMap: Map<string, boolean>;
   /** Accessor for the current message list manager */
   messageListAtom: () => MessageListManager | null;
+  /** Get current profile */
+  getCurrentProfile: () => string;
 }
 
 /**
@@ -314,6 +347,47 @@ export function createChat({
     el.textContent = sid ? sid.slice(0, 8) : "";
   }, [sessionIdAtom]);
 
+  // Profile selector: rebuild whenever the list of available profiles changes.
+  effect(() => {
+    const select = document.getElementById("profile-select") as HTMLSelectElement | null;
+    if (!select) return;
+    const profiles = profilesAtom();
+    const current = currentProfile;
+    select.innerHTML = "";
+    for (const name of Object.keys(profiles)) {
+      const opt = document.createElement("option");
+      opt.value = name;
+      opt.textContent = name;
+      if (name === current) opt.selected = true;
+      select.appendChild(opt);
+    }
+  }, [profilesAtom]);
+
+  // Profile selector change handler - wire up after DOM is ready
+  effect(() => {
+    const profiles = profilesAtom(); // Trigger on profiles change
+    const select = document.getElementById("profile-select") as HTMLSelectElement | null;
+    if (!select) return;
+    
+    // Remove old listener if exists (by cloning)
+    const newSelect = select.cloneNode(true) as HTMLSelectElement;
+    select.parentNode?.replaceChild(newSelect, select);
+    
+    newSelect.addEventListener("change", (e) => {
+      const target = e.target as HTMLSelectElement;
+      const profileName = target.value;
+      
+      // Only ask for confirmation if session has user messages
+      if (userMessageCount > 0 && !confirm("Switching profile will clear session context and all messages. Continue?")) {
+        target.value = currentProfile;
+        return;
+      }
+      
+      // Send with force=true since UI already confirmed (or no confirmation needed)
+      switchProfile(profileName, true);
+    });
+  }, [profilesAtom]);
+
   // ── WS Message Routing ───────────────────────────────────────────────────
 
   function handleServerMessage(data: ServerMessage): void {
@@ -341,8 +415,40 @@ export function createChat({
           currentModelAtom("");
         }
         return;
-      case "sessions":
+      case "sessions": {
+        // Update profile selector when sessions change
+        const sessions = data.sessions as Array<{ id: string; profile?: string; userMessageCount?: number }>;
+        const activeSession = sessions.find(s => s.id === sessionIdAtom());
+        if (activeSession && activeSession.profile) {
+          currentProfile = activeSession.profile;
+          // Update profile selector
+          const select = document.getElementById("profile-select") as HTMLSelectElement | null;
+          if (select) select.value = currentProfile;
+        }
+        // Track user message count for confirmation logic
+        userMessageCount = activeSession?.userMessageCount || 0;
         onSessionsUpdate?.(data.sessions as SessionInfo[], sessionIdAtom());
+        return;
+      }
+      case "profiles":
+        profilesAtom(data.profiles as Record<string, ProfileInfo>);
+        return;
+      case "profileSwitched":
+        if (data.success) {
+          currentProfile = data.profile || "default";
+          // Update the selector to reflect the change
+          const select = document.getElementById("profile-select") as HTMLSelectElement | null;
+          if (select) select.value = currentProfile;
+          // Show success message as a system-style notification
+          if (messageList) {
+            const msgEl = document.createElement("div");
+            msgEl.className = "message system-message";
+            msgEl.innerHTML = `<span class="message-role system-label">System</span><div class="message-content"><p>Switched to profile: ${sanitize(data.profile || "default")}</p></div>`;
+            const msgList = document.getElementById("message-list");
+            if (msgList) msgList.appendChild(msgEl);
+          }
+        }
+        // Note: requiresConfirmation should never happen since UI always sends force=true
         return;
       case "logsListed":
         onLogsUpdate?.(data.logs);
@@ -440,6 +546,13 @@ export function createChat({
         }
         if (data.key === "models") {
           modelsAtom(data.value as string[]);
+        }
+        // Handle profile changes (e.g. after profile switch or session switch)
+        if (data.key === "profile") {
+          currentProfile = data.value as string;
+          // Update the selector to reflect the change
+          const select = document.getElementById("profile-select") as HTMLSelectElement | null;
+          if (select) select.value = currentProfile;
         }
         messageList.handleSessionState(data);
         break;
@@ -597,7 +710,9 @@ export function createChat({
 
   /** Create a new session. */
   function createSession(opts: Record<string, unknown> = {}): void {
-    send({ type: "createSession", ...opts });
+    // Use the currently selected profile if not explicitly set
+    const profile = (opts.profile as string | undefined) || currentProfile;
+    send({ type: "createSession", ...opts, profile });
   }
 
   /** Switch to a different session. */
@@ -647,6 +762,26 @@ export function createChat({
     messageList = createMessageList(sessionId, { hideThinking: false });
     sessionIdAtom(sessionId);
     messageList.clear();
+  }
+
+  /** List available profiles. */
+  function listProfiles(): void {
+    send({ type: "listProfiles" });
+  }
+
+  /** Switch to a different profile. */
+  function switchProfile(profileName: string, force: boolean = false): void {
+    const sessionId = sessionIdAtom();
+    if (!sessionId) {
+      console.warn("[chat] No active session for profile switch");
+      return;
+    }
+    send({ type: "switchProfile", sessionId, profileName, force });
+  }
+
+  /** Get current profile. */
+  function getCurrentProfile(): string {
+    return currentProfile;
   }
 
   // ── Init ───────────────────────────────────────────────────────────────────
@@ -726,6 +861,9 @@ export function createChat({
     sendCommand,
     sendQuestionAnswer,
     setSession,
+    listProfiles,
+    switchProfile,
+    getCurrentProfile,
     send,
     ws,
     // Expose atoms for external reactive coordination

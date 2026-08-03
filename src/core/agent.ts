@@ -675,6 +675,8 @@ export class Agent {
     this.#systemPromptBuilder.clear();
     this.iterationCount = 0;
     this.#tokenTracker.clear();
+    // Clear tool def cache -- different profiles/models may have different tools
+    this.#toolRegistry.clearToolDefs();
   }
 
   /**
@@ -695,7 +697,7 @@ export class Agent {
 
   /**
    * Get tool definitions filtered by the agent's current config.
-   * Applies sandboxMode and maxToolDifficulty filtering.
+   * Applies sandboxMode, maxToolDifficulty, and whitelist/blacklist filtering.
    * Priority for maxToolDifficulty: CLI > model config > config default.
    */
   async getToolDefs(): Promise<ToolDef[]> {
@@ -729,16 +731,33 @@ export class Agent {
       config.defaultMaxToolDifficulty ??
       undefined;
 
-    // If no filtering needed, return all tool defs
-    if (!sandboxMode && effectiveMaxDifficulty == null) {
-      return await this.#toolRegistry.getToolDefs();
+    let defs = sandboxMode || effectiveMaxDifficulty != null
+      ? await this.#toolRegistry.filterByMetadata({
+          maxDifficulty: effectiveMaxDifficulty,
+          allowSideEffects: !sandboxMode,
+        }).getToolDefs()
+      : await this.#toolRegistry.getToolDefs();
+
+    // Filter by whitelist (if set, only allow listed tools)
+    if (this.toolWhitelist && this.toolWhitelist.length > 0) {
+      const whitelistSet = new Set(this.toolWhitelist);
+      defs = defs.filter((d) => {
+        const name = (d.function as { name?: string })?.name;
+        return name && whitelistSet.has(name);
+      });
     }
 
-    const filteredRegistry = this.#toolRegistry.filterByMetadata({
-      maxDifficulty: effectiveMaxDifficulty,
-      allowSideEffects: !sandboxMode,
-    });
-    return await filteredRegistry.getToolDefs();
+    // Filter by blacklist (remove listed tools)
+    const blacklistTools = config.blacklistTools as string[] | undefined;
+    if (blacklistTools && blacklistTools.length > 0) {
+      const blacklistSet = new Set(blacklistTools);
+      defs = defs.filter((d) => {
+        const name = (d.function as { name?: string })?.name;
+        return !(name && blacklistSet.has(name));
+      });
+    }
+
+    return defs;
   }
 
   /** Get all registered tool names. */

@@ -29,7 +29,6 @@ export {
 // Import specific items we need locally
 import {
   DEFAULT_PROFILES_SUBPATH,
-  DEFAULT_PROFILES_PATH,
   DEFAULT_CONFIG_FILENAME,
 } from "./defaults.ts";
 import {
@@ -48,6 +47,7 @@ import {
   loadProfileFiles,
   allProfilesForSwitch,
   ProfileDef,
+  ProfileManager,
   type SwitchProfile,
 } from "./profiles.ts";
 import {
@@ -213,7 +213,7 @@ export function getDefaultConfig(
     hideTools: getLayerDefault(CONFIG_SCHEMA.hideTools) as boolean,
     hideThinking: getLayerDefault(CONFIG_SCHEMA.hideThinking) as boolean,
     showTokenUse: getLayerDefault(CONFIG_SCHEMA.showTokenUse) as boolean,
-    profilesPath: DEFAULT_PROFILES_PATH,
+    profilesPath: "",
     chatTimeoutSecs: getLayerDefault(CONFIG_SCHEMA.chatTimeout) as number,
     embeddingsTimeoutSecs: getLayerDefault(
       CONFIG_SCHEMA.embeddingsTimeout,
@@ -348,6 +348,8 @@ export interface BuildAgentConfigExtra {
   systemPromptTemplate: string;
   profiles: Record<string, SwitchProfile>;
   modelRegistry: Record<string, ModelConfig>;
+  /** Centralized profile manager - use this instead of manual path construction. */
+  profileManager: ProfileManager;
 }
 
 /**
@@ -378,9 +380,6 @@ export async function buildConfig(cliArgv: CliArgv): Promise<{
     configDir,
     providers: config.providers || [],
     defaultModel: getLayerDefault(CONFIG_SCHEMA.defaultModel) as string,
-    profilesPath: cliArgv.profilesPath
-      ? cliArgv.profilesPath
-      : path.join(configDir, DEFAULT_PROFILES_SUBPATH),
   });
 
   const modelRegistry = await buildModelRegistry(
@@ -405,7 +404,6 @@ export async function buildAgentConfig(options: {
   configDir: string;
   providers?: ProviderDef[];
   defaultModel?: string;
-  profilesPath?: string;
 }): Promise<BuildAgentConfig> {
   const {
     cli,
@@ -413,7 +411,6 @@ export async function buildAgentConfig(options: {
     configDir,
     providers = [],
     defaultModel = getLayerDefault(CONFIG_SCHEMA.defaultModel) as string,
-    profilesPath: givenProfilesPath,
   } = options;
 
   const context: ResolutionContext = {
@@ -425,15 +422,17 @@ export async function buildAgentConfig(options: {
   const profileName = castAs<string>(
     resolveKey("profileName", CONFIG_SCHEMA.profileName, context),
   );
-  const profilesPath =
-    givenProfilesPath ||
-    castAs<string>(
-      resolveKey("profilesPath", CONFIG_SCHEMA.profilesPath, context),
-    );
+  // Resolve profilesPath through schema layers (cli -> config -> compute joinConfigDir)
+  const profilesPath = castAs<string>(
+    resolveKey("profilesPath", CONFIG_SCHEMA.profilesPath, context),
+  );
 
-  const profileFiles = await loadProfileFiles(profilesPath);
+  const profileManager = await ProfileManager.create(
+    profilesPath,
+    config.profiles || {},
+  );
   const configProfile = config.profiles?.[profileName] ?? null;
-  const fileProfile = profileFiles[profileName] || null;
+  const fileProfile = profileManager.getFileProfiles()[profileName] || null;
 
   const providerName = castAs<string | undefined>(
     resolveKey("provider", CONFIG_SCHEMA.provider, context),
@@ -482,14 +481,11 @@ export async function buildAgentConfig(options: {
     resolveConfigDir,
   );
 
-  const profiles = allProfilesForSwitch({
-    profileFiles,
-    configProfiles: config.profiles || {},
-    profilesPath,
-  });
+  const profiles = profileManager.getProfilesForSwitch();
 
   return castAs<BuildAgentConfig>({
     ...resolved,
+    profilesPath,
     model,
     configDir,
     profileDef: profile,
@@ -498,5 +494,6 @@ export async function buildAgentConfig(options: {
     systemPromptTemplate,
     profiles,
     modelRegistry: {},
+    profileManager,
   });
 }

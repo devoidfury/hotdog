@@ -425,7 +425,7 @@ describe("Info CLI - profiles subcommand", () => {
     try {
       const run = await infoCliRunner({
         buildConfig: async () => ({
-          resolved: { configDir: tmpDir, profileName: "default" },
+          resolved: { configDir: tmpDir, profileName: "default", profilesPath: tmpDir + "/profiles" },
         }),
       });
       const { exitCode, output } = await run("profiles");
@@ -453,7 +453,7 @@ describe("Info CLI - profiles subcommand", () => {
     try {
       const run = await infoCliRunner({
         buildConfig: async () => ({
-          resolved: { configDir: tmpDir, profileName: "default" },
+          resolved: { configDir: tmpDir, profileName: "default", profilesPath: tmpDir + "/profiles" },
         }),
       });
       const { exitCode, output } = await run("profiles");
@@ -495,7 +495,7 @@ describe("Info CLI - profiles subcommand", () => {
           },
         },
         buildConfig: async () => ({
-          resolved: { configDir: tmpDir, profileName: "test" },
+          resolved: { configDir: tmpDir, profileName: "test", profilesPath: tmpDir + "/profiles" },
         }),
       });
       const { exitCode, output } = await run("profiles");
@@ -524,7 +524,7 @@ describe("Info CLI - profiles subcommand", () => {
     try {
       const run = await infoCliRunner({
         buildConfig: async () => ({
-          resolved: { configDir: tmpDir, profileName: "worker" },
+          resolved: { configDir: tmpDir, profileName: "worker", profilesPath: tmpDir + "/profiles" },
         }),
       }, { wantsJson: true });
       const { exitCode, output } = await run("profiles");
@@ -549,7 +549,7 @@ describe("Info CLI - profiles subcommand", () => {
     try {
       const run = await infoCliRunner({
         buildConfig: async () => ({
-          resolved: { configDir: tmpDir, profileName: "default" },
+          resolved: { configDir: tmpDir, profileName: "default", profilesPath: tmpDir + "/profiles" },
         }),
       });
       const { exitCode, output } = await run("profiles");
@@ -577,7 +577,7 @@ describe("Info CLI - profiles subcommand", () => {
     try {
       const run = await infoCliRunner({
         buildConfig: async () => ({
-          resolved: { configDir: tmpDir, profileName: "default" },
+          resolved: { configDir: tmpDir, profileName: "default", profilesPath: tmpDir + "/profiles" },
         }),
       });
       const { exitCode, output } = await run("profiles");
@@ -612,7 +612,7 @@ describe("Info CLI - profiles subcommand", () => {
     try {
       const run = await infoCliRunner({
         buildConfig: async () => ({
-          resolved: { configDir: tmpDir, profileName: "default" },
+          resolved: { configDir: tmpDir, profileName: "default", profilesPath: tmpDir + "/profiles" },
         }),
       });
       const { exitCode, output } = await run("profiles");
@@ -638,7 +638,7 @@ describe("Info CLI - profiles subcommand", () => {
     try {
       const run = await infoCliRunner({
         buildConfig: async () => ({
-          resolved: { configDir: tmpDir, profileName: "default" },
+          resolved: { configDir: tmpDir, profileName: "default", profilesPath: tmpDir + "/profiles" },
         }),
       });
       const { exitCode, output } = await run("profiles");
@@ -662,7 +662,7 @@ describe("Info CLI - profiles subcommand", () => {
     try {
       const run = await infoCliRunner({
         buildConfig: async () => ({
-          resolved: { configDir: tmpDir, profileName: "default" },
+          resolved: { configDir: tmpDir, profileName: "default", profilesPath: tmpDir + "/profiles" },
         }),
       });
       const { exitCode, output } = await run("profiles");
@@ -691,7 +691,7 @@ describe("Info CLI - profiles subcommand", () => {
     try {
       const run = await infoCliRunner({
         buildConfig: async () => ({
-          resolved: { configDir: tmpDir, profileName: "default" },
+          resolved: { configDir: tmpDir, profileName: "default", profilesPath: tmpDir + "/profiles" },
         }),
       }, { wantsJson: true });
       const { exitCode, output } = await run("profiles");

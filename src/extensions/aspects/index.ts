@@ -8,8 +8,6 @@ import { HOOKS } from "../../core/hooks.ts";
 import { logger } from "../../core/logger.ts";
 import { render } from "../../utils/render.ts";
 import { parseFrontMatter, loadAspects } from "../../utils/file-utils.ts";
-import { resolveConfigDir } from "../../core/config/index.ts";
-import { DEFAULT_PROFILES_SUBPATH } from "../../core/config/defaults.ts";
 import { CoreContext, ExtensionInstance } from "../../core/extensions/types.ts";
 
 const TEMPLATE_PATH = path.join(import.meta.dirname, "aspects_chunk.md");
@@ -18,15 +16,17 @@ const TEMPLATE_PATH = path.join(import.meta.dirname, "aspects_chunk.md");
  * Resolve aspect names from profile file front matter.
  */
 async function resolveAspectNames(core: CoreContext): Promise<string[]> {
-  const resolved = core.resolved;
-  const configDir = resolved?.configDir || resolveConfigDir();
+  const profileManager = core.resolved?.profileManager;
+  if (profileManager) {
+    const profileName = core.resolved?.profileName || "default";
+    const profile = profileManager.getProfile(profileName);
+    return profile?.aspects || [];
+  }
+  // Fallback: read profile file directly (for tests/backward compat)
+  const profileName = core.resolved?.profileName || "default";
+  const profilesPath = core.resolved?.profilesPath;
+  if (!profilesPath) return [];
 
-  const profileName = resolved?.profileName || "default";
-  const profilesPath =
-    resolved?.profilesPath ||
-    path.join(configDir, DEFAULT_PROFILES_SUBPATH);
-
-  // Read aspect names from profile file front matter
   const profileFilePath = path.join(profilesPath, `${profileName}.profile.md`);
   try {
     const content = await fsPromises.readFile(profileFilePath, "utf-8");
@@ -47,18 +47,18 @@ async function resolveAspectNames(core: CoreContext): Promise<string[]> {
 
 /**
  * Build the aspects chunk content.
+ * 
+ * Aspects are in config/aspects/
  */
 async function buildAspectsChunk(
   aspectNames: string[],
-  profilesPath: string,
+  configDir: string,
 ): Promise<string> {
   if (!aspectNames || aspectNames.length === 0) {
     return "";
   }
 
-  // Aspects are in a sibling directory to profiles: config/aspects/
-  // (not config/profiles/aspects/)
-  const aspectsDir = path.join(profilesPath, "..", "aspects");
+  const aspectsDir = path.join(configDir, "aspects");
   const aspects = await loadAspects(aspectNames, aspectsDir);
 
   if (aspects.length === 0) {
@@ -84,11 +84,9 @@ export function create(core: CoreContext): ExtensionInstance {
     hooks: {
       [HOOKS.SYSTEM_PROMPT_BUILD]: async (_data) => {
         const aspectNames = await resolveAspectNames(core);
-        const configDir = core.resolved?.configDir || resolveConfigDir();
-        const profilesPath =
-          core.resolved?.profilesPath ||
-          path.join(configDir, DEFAULT_PROFILES_SUBPATH);
-        const content = await buildAspectsChunk(aspectNames, profilesPath);
+        const configDir = core.resolved?.configDir;
+        if (!configDir) throw new Error("configDir not resolved");
+        const content = await buildAspectsChunk(aspectNames, configDir);
         return { name: "guidelines", priority: 200, content };
       },
     },

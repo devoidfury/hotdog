@@ -8,7 +8,7 @@ import { ToolRegistry, Tool, ToolMetadata } from "../../src/core/extensions/tool
 class TestTool implements Tool {
   constructor(
     public name: string,
-    public metadata?: ToolMetadata,
+    public metadata: ToolMetadata,
   ) {}
 
   toToolDef() {
@@ -42,17 +42,11 @@ describe("ToolRegistry metadata methods", () => {
     registry.register("safe-hard", new TestTool("safe-hard", { sideEffects: false, difficulty: 5 }));
     registry.register("write-simple", new TestTool("write-simple", { sideEffects: true, difficulty: 1 }));
     registry.register("write-hard", new TestTool("write-hard", { sideEffects: true, difficulty: 4 }));
-    registry.register("no-metadata", new TestTool("no-metadata"));
   });
 
   it("getMetadata returns metadata for a tool", () => {
     const meta = registry.getMetadata("safe-simple");
     expect(meta).toEqual({ sideEffects: false, difficulty: 1 });
-  });
-
-  it("getMetadata returns undefined for tool without metadata", () => {
-    const meta = registry.getMetadata("no-metadata");
-    expect(meta).toBeUndefined();
   });
 
   it("getMetadata returns undefined for unknown tool", () => {
@@ -62,13 +56,74 @@ describe("ToolRegistry metadata methods", () => {
 
   it("getAllWithMetadata returns all tools with their metadata", () => {
     const all = registry.getAllWithMetadata();
-    expect(all.length).toBe(6);
+    expect(all.length).toBe(5);
 
     const safeSimple = all.find((t) => t.name === "safe-simple");
     expect(safeSimple?.metadata).toEqual({ sideEffects: false, difficulty: 1 });
+  });
+});
 
-    const noMeta = all.find((t) => t.name === "no-metadata");
-    expect(noMeta?.metadata).toBeUndefined();
+describe("ToolRegistry.register metadata validation", () => {
+  it("rejects tools without metadata", () => {
+    const registry = new ToolRegistry();
+    expect(() => {
+      registry.register("no-meta", {
+        toToolDef() {
+          return {
+            type: "function",
+            function: {
+              name: "no-meta",
+              description: "test",
+              parameters: { type: "object", properties: {}, required: [] },
+            },
+          };
+        },
+        callDisplay() { return "no-meta()"; },
+        execute: async () => "ok",
+      } as any);
+    }).toThrow('Tool "no-meta" is missing required metadata');
+  });
+
+  it("rejects tools with invalid sideEffects", () => {
+    const registry = new ToolRegistry();
+    expect(() => {
+      registry.register("bad-side-effects", {
+        metadata: { sideEffects: undefined as any, difficulty: 1 },
+        toToolDef() {
+          return {
+            type: "function",
+            function: {
+              name: "bad-side-effects",
+              description: "test",
+              parameters: { type: "object", properties: {}, required: [] },
+            },
+          };
+        },
+        callDisplay() { return "bad-side-effects()"; },
+        execute: async () => "ok",
+      });
+    }).toThrow('Tool "bad-side-effects" metadata.sideEffects must be explicitly defined as true or false');
+  });
+
+  it("rejects tools with difficulty out of range", () => {
+    const registry = new ToolRegistry();
+    expect(() => {
+      registry.register("bad-difficulty", {
+        metadata: { sideEffects: false, difficulty: 6 },
+        toToolDef() {
+          return {
+            type: "function",
+            function: {
+              name: "bad-difficulty",
+              description: "test",
+              parameters: { type: "object", properties: {}, required: [] },
+            },
+          };
+        },
+        callDisplay() { return "bad-difficulty()"; },
+        execute: async () => "ok",
+      });
+    }).toThrow('Tool "bad-difficulty" metadata.difficulty must be between 1 and 5');
   });
 });
 
@@ -80,7 +135,6 @@ describe("ToolRegistry.filterByDifficulty", () => {
     registry.register("easy", new TestTool("easy", { sideEffects: false, difficulty: 1 }));
     registry.register("medium", new TestTool("medium", { sideEffects: false, difficulty: 3 }));
     registry.register("hard", new TestTool("hard", { sideEffects: true, difficulty: 5 }));
-    registry.register("no-metadata", new TestTool("no-metadata"));
   });
 
   it("filters tools by maximum difficulty", () => {
@@ -104,11 +158,6 @@ describe("ToolRegistry.filterByDifficulty", () => {
     expect(filtered.has("hard")).toBe(true);
   });
 
-  it("excludes tools without metadata (conservative default)", () => {
-    const filtered = registry.filterByDifficulty(5);
-    expect(filtered.has("no-metadata")).toBe(false);
-  });
-
   it("returns empty registry when maxDifficulty is 0", () => {
     const filtered = registry.filterByDifficulty(0);
     expect(filtered.getAll().length).toBe(0);
@@ -122,25 +171,18 @@ describe("ToolRegistry.filterBySideEffects", () => {
     registry = new ToolRegistry();
     registry.register("safe", new TestTool("safe", { sideEffects: false, difficulty: 1 }));
     registry.register("unsafe", new TestTool("unsafe", { sideEffects: true, difficulty: 1 }));
-    registry.register("no-metadata", new TestTool("no-metadata"));
   });
 
   it("returns all tools when allowSideEffects is true", () => {
     const filtered = registry.filterBySideEffects(true);
     expect(filtered.has("safe")).toBe(true);
     expect(filtered.has("unsafe")).toBe(true);
-    expect(filtered.has("no-metadata")).toBe(true);
   });
 
   it("returns only safe tools when allowSideEffects is false", () => {
     const filtered = registry.filterBySideEffects(false);
     expect(filtered.has("safe")).toBe(true);
     expect(filtered.has("unsafe")).toBe(false);
-  });
-
-  it("excludes tools without metadata when allowSideEffects is false", () => {
-    const filtered = registry.filterBySideEffects(false);
-    expect(filtered.has("no-metadata")).toBe(false);
   });
 });
 

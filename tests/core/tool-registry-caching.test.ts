@@ -9,6 +9,7 @@ import { createToolRegistry } from "../../src/core/extensions/tool-registry.ts";
 /** Create a minimal test tool */
 function mkTool(execute: () => unknown | Promise<unknown>): Tool {
   return {
+    metadata: { sideEffects: false, difficulty: 1 },
     toToolDef: () => ({ type: "function", function: { name: "test", description: "test", parameters: { type: "object", properties: {} } } }),
     callDisplay: () => "test()",
     execute: async () => execute(),
@@ -116,6 +117,7 @@ describe("ToolRegistry — validateToolArgs", () => {
   });
 
   const searchTool = {
+    metadata: { sideEffects: false, difficulty: 1 },
     toToolDef: searchToolDef,
     callDisplay: () => "search()",
     execute: async () => "ok",
@@ -167,6 +169,7 @@ describe("ToolRegistry — validateToolArgs", () => {
   it("returns null for tool without parameters schema", async () => {
     const registry = new ToolRegistry();
     registry.register("simple", {
+      metadata: { sideEffects: false, difficulty: 1 },
       toToolDef: () => ({
         type: "function",
         function: {
@@ -186,6 +189,7 @@ describe("ToolRegistry — validateToolArgs", () => {
 describe("ToolRegistry — caching", () => {
   function mkCountedTool(name: string, desc: string, counter: { value: number }) {
     return {
+      metadata: { sideEffects: false, difficulty: 1 },
       toToolDef: () => {
         counter.value++;
         return { type: "function", function: { name, description: desc, parameters: { type: "object", properties: {} } } };
@@ -257,6 +261,7 @@ describe("ToolRegistry — caching", () => {
     const counter = { value: 0 };
 
     const tool: Tool = {
+      metadata: { sideEffects: false, difficulty: 1 },
       toToolDef: () => {
         counter.value++;
         return {
@@ -293,6 +298,7 @@ describe("Agent model setter clears tool def cache", () => {
 
     let callCount = 0;
     const tool: Tool = {
+      metadata: { sideEffects: false, difficulty: 1 },
       toToolDef: () => {
         callCount++;
         return {

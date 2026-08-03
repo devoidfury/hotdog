@@ -20,6 +20,7 @@ function makeTestTool(
   toToolDefOverride?: () => ToolDef,
 ): Tool {
   return {
+    metadata: { sideEffects: false, difficulty: 1 },
     toToolDef: toToolDefOverride || (() => ({
       type: 'function',
       function: {

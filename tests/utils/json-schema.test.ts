@@ -197,6 +197,7 @@ describe("Integration — validation blocks invalid tool execution", () => {
 describe("ToolRegistry.validateToolArgs", () => {
   function registerTool(registry: ToolRegistry, name: string, params: Record<string, unknown>) {
     registry.register(name, {
+      metadata: { sideEffects: false, difficulty: 1 },
       toToolDef() {
         return { type: "function", function: { name, description: "test", parameters: params } };
       },
@@ -210,6 +211,7 @@ describe("ToolRegistry.validateToolArgs", () => {
     expect(await registry.validateToolArgs("nonexistent", "{}")).toBeNull();
     // Register a tool without a toToolDef — should return null gracefully
     registry.register("no-def", {
+      metadata: { sideEffects: false, difficulty: 1 },
       toToolDef: () => null,
       callDisplay: () => "no-def()",
       execute: async () => "ok",

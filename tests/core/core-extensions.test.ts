@@ -63,7 +63,12 @@ describe('ExtensionLoader', () => {
         create: (c: LoaderCore) => ({
           registerTools: (registry: any) => {
             registryRef = registry;
-            registry.register('my-tool', { execute: () => 'result' });
+            registry.register('my-tool', {
+              metadata: { sideEffects: false, difficulty: 1 },
+              toToolDef: () => ({ type: 'function', function: { name: 'my-tool', description: '', parameters: { type: 'object', properties: {}, required: [] } } }),
+              callDisplay: () => 'my-tool()',
+              execute: () => 'result',
+            });
           },
         }),
       };
@@ -193,11 +198,13 @@ describe('ExtensionLoader', () => {
           hooks: {
             [HOOKS.TOOLS_REGISTER]: async (registry: any) => {
               registry.register('my-tool', {
+                metadata: { sideEffects: false, difficulty: 1 },
                 toToolDef: () => ({ type: 'function', function: { name: 'my-tool', description: '', parameters: { type: 'object', properties: {}, required: [] } } }),
                 callDisplay: () => 'my-tool()',
                 execute: () => 'result',
               });
               registry.register('another-tool', {
+                metadata: { sideEffects: false, difficulty: 1 },
                 toToolDef: () => ({ type: 'function', function: { name: 'another-tool', description: '', parameters: { type: 'object', properties: {}, required: [] } } }),
                 callDisplay: () => 'another-tool()',
                 execute: () => 'result2',
@@ -213,6 +220,7 @@ describe('ExtensionLoader', () => {
 
       // Pre-existing tool should survive unload
       core.toolRegistry.register('shared-tool', {
+        metadata: { sideEffects: false, difficulty: 1 },
         toToolDef: () => ({ type: 'function', function: { name: 'shared-tool', description: '', parameters: { type: 'object', properties: {}, required: [] } } }),
         callDisplay: () => 'shared-tool()',
         execute: async () => 'shared',

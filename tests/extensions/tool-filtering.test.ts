@@ -148,10 +148,10 @@ describe("Tool Filtering (Agent.getToolDefs)", () => {
     expect(names).not.toContain("edit"); // has side effects AND difficulty 2
   });
 
-  it("excludes tools without metadata when filtering is active", async () => {
+  it("rejects tools without metadata at registration time", () => {
     const core = createMockCore({ sandboxMode: true });
 
-    // Register a tool without metadata
+    // Registering a tool without metadata should throw
     const toolNoMeta = {
       toToolDef: () => ({
         type: "function",
@@ -161,14 +161,9 @@ describe("Tool Filtering (Agent.getToolDefs)", () => {
       execute: async () => "ok",
       // no metadata
     };
-    core.toolRegistry.register("no_meta_tool", toolNoMeta as any);
 
-    const agent = createAgent(core);
-
-    const toolDefs = await agent.getToolDefs();
-    const names = toolDefs.map((d: any) => d.function.name);
-
-    // Tool without metadata should be excluded in sandbox mode
-    expect(names).not.toContain("no_meta_tool");
+    expect(() => {
+      core.toolRegistry.register("no_meta_tool", toolNoMeta as any);
+    }).toThrow('Tool "no_meta_tool" is missing required metadata');
   });
 });

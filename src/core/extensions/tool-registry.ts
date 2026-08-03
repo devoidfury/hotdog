@@ -46,10 +46,9 @@ export interface Tool<TCtx extends Record<string, unknown> = DefaultToolContext>
     ctx?: ToolContext<TCtx>,
   ): Promise<unknown>;
   /**
-   * Tool metadata for filtering and sandbox mode.
-   * Optional for backward compatibility, but all built-in tools should define it.
+   * Tool metadata for filtering and sandbox mode. Required on all tools.
    */
-  metadata?: ToolMetadata;
+  metadata: ToolMetadata;
 }
 
 /**
@@ -67,14 +66,14 @@ export class ToolRegistry {
   }
 
   register(name: string, tool: Tool): void {
-    // Validate metadata if provided
-    if (tool.metadata) {
-      if (tool.metadata.sideEffects !== true && tool.metadata.sideEffects !== false) {
-        throw new Error(`Tool "${name}" metadata.sideEffects must be explicitly defined as true or false`);
-      }
-      if (tool.metadata.difficulty < 1 || tool.metadata.difficulty > 5) {
-        throw new Error(`Tool "${name}" metadata.difficulty must be between 1 and 5, got ${tool.metadata.difficulty}`);
-      }
+    if (!tool.metadata) {
+      throw new Error(`Tool "${name}" is missing required metadata`);
+    }
+    if (tool.metadata.sideEffects !== true && tool.metadata.sideEffects !== false) {
+      throw new Error(`Tool "${name}" metadata.sideEffects must be explicitly defined as true or false`);
+    }
+    if (tool.metadata.difficulty < 1 || tool.metadata.difficulty > 5) {
+      throw new Error(`Tool "${name}" metadata.difficulty must be between 1 and 5, got ${tool.metadata.difficulty}`);
     }
     this.tools.set(name, tool);
     this.#toolDefCache.delete(name);
@@ -93,13 +92,14 @@ export class ToolRegistry {
    * Get metadata for a specific tool.
    */
   getMetadata(name: string): ToolMetadata | undefined {
-    return this.tools.get(name)?.metadata;
+    const tool = this.tools.get(name);
+    return tool?.metadata;
   }
 
   /**
    * Get all tools with their metadata.
    */
-  getAllWithMetadata(): Array<{ name: string; tool: Tool; metadata?: ToolMetadata }> {
+  getAllWithMetadata(): Array<{ name: string; tool: Tool; metadata: ToolMetadata }> {
     return Array.from(this.tools.entries()).map(([name, tool]) => ({
       name,
       tool,
@@ -230,17 +230,13 @@ export class ToolRegistry {
 
   /**
    * Filter tools by maximum difficulty.
-   * Tools without metadata are excluded (conservative default).
    * @param maxDifficulty - Maximum difficulty score (1-5)
    * @returns New ToolRegistry with only tools at or below the difficulty
    */
   filterByDifficulty(maxDifficulty: number): ToolRegistry {
     const result = new ToolRegistry();
     for (const [name, tool] of this.tools) {
-      const metadata = tool.metadata;
-      // Exclude tools without metadata (conservative default)
-      if (!metadata) continue;
-      if (metadata.difficulty <= maxDifficulty) {
+      if (tool.metadata.difficulty <= maxDifficulty) {
         result.register(name, tool);
       }
     }
@@ -258,13 +254,8 @@ export class ToolRegistry {
     for (const [name, tool] of this.tools) {
       if (allowSideEffects) {
         result.register(name, tool);
-      } else {
-        const metadata = tool.metadata;
-        // Include tools explicitly marked as safe (sideEffects: false)
-        // Exclude tools without metadata (conservative default)
-        if (metadata && !metadata.sideEffects) {
-          result.register(name, tool);
-        }
+      } else if (!tool.metadata.sideEffects) {
+        result.register(name, tool);
       }
     }
     return result;

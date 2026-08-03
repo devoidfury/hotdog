@@ -10,55 +10,24 @@ import { camelCase } from "../../utils/strings.ts";
 import { CompletionService } from "../completion.ts";
 import type { ToolRegistry } from "./tool-registry.ts";
 import type { ServiceRegistry } from "./service-registry.ts";
-import type { ConfigRegistry } from "./config-registry.ts";
+import { extractSchemaDefaults, type ConfigRegistry, type SchemaDefaultEntry } from "./config.ts";
 import type { CliSubcommandRegistry } from "./registries.ts";
 import type { CoreConfigWithExtensions } from "../config/schema-loader.ts";
+import type { ExtensionMetadata } from "./types.ts";
 
 export { HOOKS, EXTENSION_PROVIDES };
 
-export interface SchemaDefaultEntry {
-  key: string;
-  description?: string;
-  defaults: unknown;
-  schema?: Record<string, unknown>;
-  layers?: unknown;
-}
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const ROOT_DIR = path.resolve(__dirname, "../../");
 
-export function extractSchemaDefaults(
-  schema: Record<string, unknown> | null | undefined,
-): SchemaDefaultEntry[] {
-  if (!schema || typeof schema !== "object") return [];
-
-  const result: SchemaDefaultEntry[] = [];
-  for (const [keyName, keySchemaRaw] of Object.entries(schema)) {
-    const keySchema = keySchemaRaw as Record<string, unknown>;
-    let defaults: unknown;
-    if ((keySchema.type as string) === "object" && keySchema.properties) {
-      defaults = {};
-      for (const [propName, propRaw] of Object.entries(
-        keySchema.properties as Record<string, unknown>,
-      )) {
-        const prop = propRaw as Record<string, unknown>;
-        if (prop.default !== undefined && prop.default !== null) {
-          (defaults as Record<string, unknown>)[propName] = prop.default;
-        }
-      }
-    } else if (keySchema.default !== undefined) {
-      defaults = keySchema.default;
-    }
-
-    const entry: SchemaDefaultEntry = {
-      key: keyName,
-      description: (keySchema.description as string) || "",
-      defaults,
-      schema: keySchema,
-    };
-    if (keySchema.layers) {
-      entry.layers = keySchema.layers;
-    }
-    result.push(entry);
+export function resolveExtensionPath(spec: string): string {
+  if (spec === "builtins") {
+    return path.join(ROOT_DIR, "extensions");
   }
-  return result;
+  if (path.isAbsolute(spec)) {
+    return spec;
+  }
+  return path.resolve(process.cwd(), spec);
 }
 
 export async function getExtensionConfigDefaults(
@@ -81,43 +50,6 @@ export async function getExtensionConfigDefaults(
   return params;
 }
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const ROOT_DIR = path.resolve(__dirname, "../../");
-
-export interface ExtensionMetadata {
-  name: string;
-  path?: string;
-  provides: string[];
-  loadOrder: number;
-  description: string;
-  dependsOn: string[];
-  autoload: boolean;
-  configSchema: Record<string, unknown> | null;
-  cliSubcommands: Array<{
-    name: string;
-    description: string;
-    options: unknown[];
-  }>;
-  cliFlags: Array<{
-    short: string | null;
-    long: string;
-    description: string;
-    type: string;
-    default: unknown;
-  }>;
-  services: Record<string, unknown[]>;
-  requires: Record<string, unknown[]>;
-}
-
-export function resolveExtensionPath(spec: string): string {
-  if (spec === "builtins") {
-    return path.join(ROOT_DIR, "extensions");
-  }
-  if (path.isAbsolute(spec)) {
-    return spec;
-  }
-  return path.resolve(process.cwd(), spec);
-}
 
 export async function isExtensionDirectory(dirPath: string): Promise<boolean> {
   const metaPath = path.join(dirPath, "extension.json");
@@ -712,8 +644,6 @@ export class ExtensionLoader {
   #entryPoints: Map<string, string>;
   #metadata: Map<string, { provides?: string[]; dependsOn?: string[] }>;
   #toolOwners: Map<string, string[]>;
-  #configRegistry: ConfigRegistry | null;
-  #cliSubcommandRegistry: CliSubcommandRegistry | null;
 
   constructor(core: LoaderCore) {
     this.#core = core;
@@ -722,8 +652,6 @@ export class ExtensionLoader {
     this.#entryPoints = new Map();
     this.#metadata = new Map();
     this.#toolOwners = new Map();
-    this.#configRegistry = core.configRegistry;
-    this.#cliSubcommandRegistry = core.cliSubcommandRegistry;
   }
 
   async load(

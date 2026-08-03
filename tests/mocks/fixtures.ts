@@ -1,47 +1,57 @@
 // Test fixtures for agent, core, and session testing.
 
-import crypto from 'node:crypto';
-import os from 'node:os';
-import path from 'node:path';
-import readline from 'node:readline';
+import crypto from "node:crypto";
+import os from "node:os";
+import path from "node:path";
+import readline from "node:readline";
 
-import { Agent, ModelRegistry, AgentConfig } from '../../src/core/agent.ts';
-import type { LlmClient } from '../../src/core/llm-client/client.ts';
-import type { CoreContext } from '../../src/core/extensions/types.ts';
-import { MessageLog } from '../../src/core/context/message-log.ts';
-import type { Message } from '../../src/core/context/message.ts';
-import { HookSystem } from '../../src/core/hooks.ts';
-import { ToolRegistry, createToolRegistry } from '../../src/core/extensions/tool-registry.ts';
-import { createHooks } from '../../src/core/hooks.ts';
-import { createSubcommandRegistry } from '../../src/core/extensions/registries.ts';
-import { createServiceRegistry } from '../../src/core/extensions/service-registry.ts';
-import { createConfigRegistry } from '../../src/core/extensions/config-registry.ts';
-import { MockLLMClient } from './llm.ts';
-import type { OutputEvent } from '../../src/core/context/output.ts';
+import { Agent, ModelRegistry, AgentConfig } from "../../src/core/agent.ts";
+import type { LlmClient } from "../../src/core/llm-client/client.ts";
+import type { CoreContext } from "../../src/core/extensions/types.ts";
+import { MessageLog } from "../../src/core/context/message-log.ts";
+import type { Message } from "../../src/core/context/message.ts";
+import { HookSystem } from "../../src/core/hooks.ts";
+import {
+  ToolRegistry,
+  createToolRegistry,
+} from "../../src/core/extensions/tool-registry.ts";
+import { createHooks } from "../../src/core/hooks.ts";
+import { createSubcommandRegistry } from "../../src/core/extensions/registries.ts";
+import { createServiceRegistry } from "../../src/core/extensions/service-registry.ts";
+import { ConfigRegistry } from "../../src/core/extensions/config.ts";
+import { MockLLMClient } from "./llm.ts";
+import type { OutputEvent } from "../../src/core/context/output.ts";
 
 // ── Agent Test Fixture ──────────────────────────────────────────────────────
 
-export function createFixture(options: {
-  hooks?: HookSystem;
-  toolRegistry?: ToolRegistry;
-  mockLLM?: MockLLMClient;
-  model?: string;
-  maxIterations?: number;
-  contextLimit?: number;
-  hideTools?: boolean;
-  hideThinking?: boolean;
-  showTokenUse?: boolean;
-  stream?: boolean;
-  sink?: { emit: (event: OutputEvent) => void } | null;
-  modelRegistry?: Record<string, unknown>;
-  profileName?: string;
-  role?: string;
-  profileBody?: string;
-  config?: Record<string, unknown> | null;
-  sessionId?: string;
-  abortSignal?: AbortSignal | null;
-  toolWhitelist?: string[] | null;
-} = {}): { hooks: HookSystem; toolRegistry: ToolRegistry; mockLLM: MockLLMClient; agent: Agent } {
+export function createFixture(
+  options: {
+    hooks?: HookSystem;
+    toolRegistry?: ToolRegistry;
+    mockLLM?: MockLLMClient;
+    model?: string;
+    maxIterations?: number;
+    contextLimit?: number;
+    hideTools?: boolean;
+    hideThinking?: boolean;
+    showTokenUse?: boolean;
+    stream?: boolean;
+    sink?: { emit: (event: OutputEvent) => void } | null;
+    modelRegistry?: Record<string, unknown>;
+    profileName?: string;
+    role?: string;
+    profileBody?: string;
+    config?: Record<string, unknown> | null;
+    sessionId?: string;
+    abortSignal?: AbortSignal | null;
+    toolWhitelist?: string[] | null;
+  } = {},
+): {
+  hooks: HookSystem;
+  toolRegistry: ToolRegistry;
+  mockLLM: MockLLMClient;
+  agent: Agent;
+} {
   const hooks = options.hooks || createHooks();
   const toolRegistry = options.toolRegistry || createToolRegistry();
   const mockLLM = options.mockLLM || new MockLLMClient({ cancelable: false });
@@ -50,7 +60,7 @@ export function createFixture(options: {
     hooks,
     toolRegistry,
     llmClient: mockLLM as unknown as LlmClient,
-    model: options.model || 'test-model',
+    model: options.model || "test-model",
     maxIterations: options.maxIterations || 10,
     contextLimit: options.contextLimit || 128000,
     hideTools: options.hideTools ?? true,
@@ -59,11 +69,11 @@ export function createFixture(options: {
     stream: options.stream ?? false,
     sink: options.sink || null,
     modelRegistry: (options.modelRegistry || {}) as ModelRegistry,
-    profileName: options.profileName || 'test',
-    role: options.role || 'Test agent',
-    profileBody: options.profileBody || '',
+    profileName: options.profileName || "test",
+    role: options.role || "Test agent",
+    profileBody: options.profileBody || "",
     config: options.config as AgentConfig | undefined,
-    sessionId: options.sessionId || 'test-session',
+    sessionId: options.sessionId || "test-session",
     abortSignal: options.abortSignal || null,
     toolWhitelist: options.toolWhitelist || null,
   });
@@ -82,7 +92,7 @@ export class MockAgent {
   _log: MessageLog;
   _systemPrompt: string | null;
 
-  constructor(runResult = 'done', sessionId?: string) {
+  constructor(runResult = "done", sessionId?: string) {
     this._cancelled = false;
     this._runCalled = false;
     this._runResult = runResult;
@@ -92,12 +102,22 @@ export class MockAgent {
     this._systemPrompt = null;
   }
 
-  get cancelled() { return this._cancelled; }
-  get log() { return this._log; }
-  get sessionId() { return this._sessionId; }
-  get systemPrompt() { return this._systemPrompt; }
+  get cancelled() {
+    return this._cancelled;
+  }
+  get log() {
+    return this._log;
+  }
+  get sessionId() {
+    return this._sessionId;
+  }
+  get systemPrompt() {
+    return this._systemPrompt;
+  }
 
-  cancel(reset = true) { this._cancelled = reset; }
+  cancel(reset = true) {
+    this._cancelled = reset;
+  }
   async run(text: string): Promise<string> {
     this._runCalled = true;
     if (this._runError) throw this._runError;
@@ -140,7 +160,9 @@ export function createMockRl(responses: string[] = []): {
   const addedHandlers: unknown[] = [];
 
   const mockRl = {
-    removeListener: function () { return mockRl; },
+    removeListener: function () {
+      return mockRl;
+    },
     question: function (_prompt: string, cb: (response: string) => void) {
       if (responseIndex < responses.length) {
         const r = responses[responseIndex];
@@ -153,7 +175,9 @@ export function createMockRl(responses: string[] = []): {
       if (event === "line") addedHandlers.push(handler);
       return mockRl;
     },
-    prompt: function () { return mockRl as any; },
+    prompt: function () {
+      return mockRl as any;
+    },
     close: function () {},
   } as unknown as readline.Interface;
 
@@ -162,22 +186,24 @@ export function createMockRl(responses: string[] = []): {
 
 // ── Mock Core ──────────────────────────────────────────────────────────────
 
-export function createMockCore(config: {
-  resolved?: Record<string, unknown>;
-  coreConfig?: Record<string, unknown>;
-  modelRegistry?: Record<string, unknown>;
-  providers?: unknown[];
-  buildConfig?: (cli: Record<string, unknown>) => Promise<{
-    resolved: Record<string, unknown>;
-    modelRegistry: Record<string, unknown>;
-    providers: unknown[];
-  }>;
-} = {}): CoreContext {
+export function createMockCore(
+  config: {
+    resolved?: Record<string, unknown>;
+    coreConfig?: Record<string, unknown>;
+    modelRegistry?: Record<string, unknown>;
+    providers?: unknown[];
+    buildConfig?: (cli: Record<string, unknown>) => Promise<{
+      resolved: Record<string, unknown>;
+      modelRegistry: Record<string, unknown>;
+      providers: unknown[];
+    }>;
+  } = {},
+): CoreContext {
   const hooks = new HookSystem();
   const toolRegistry = new ToolRegistry();
   const cliSubcommandRegistry = createSubcommandRegistry();
   const services = createServiceRegistry();
-  const configRegistry = createConfigRegistry();
+  const configRegistry = new ConfigRegistry();
 
   const resolved: Record<string, unknown> = {
     baseUrl: "http://localhost:8080",
@@ -221,10 +247,10 @@ export function createMockCore(config: {
     } as unknown as NonNullable<CoreContext["extensions"]>,
     buildConfig:
       config.buildConfig ||
-      (async (_cli: Record<string, unknown>) => ({
+      ((async (_cli: Record<string, unknown>) => ({
         resolved,
         modelRegistry: config.modelRegistry || {},
         providers: config.providers || [],
-      })) as CoreContext["buildConfig"],
+      })) as CoreContext["buildConfig"]),
   } as unknown as CoreContext;
 }

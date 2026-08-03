@@ -4,7 +4,7 @@ import { ExtensionLoader, type LoaderCore } from "../../src/core/extensions/exte
 import { ToolRegistry } from "../../src/core/extensions/tool-registry.ts";
 import type { CoreContext } from "../../src/core/extensions/types.ts";
 import type { ServiceRegistry } from "../../src/core/extensions/service-registry.ts";
-import type { ConfigRegistry } from "../../src/core/extensions/config-registry.ts";
+import type { ConfigRegistry } from "../../src/core/extensions/config.ts";
 import type { CliSubcommandRegistry } from "../../src/core/extensions/registries.ts";
 import { createCompletionService } from "../../src/core/completion.ts";
 import { create as createCompactionExtension } from "../../src/extensions/compaction/index.ts";

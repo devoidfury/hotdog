@@ -1,5 +1,6 @@
 // Core module — the minimal foundation for the extension architecture.
 
+
 export * from "./hooks.ts";
 export { isPromise } from "../utils/promise.ts";
 export {
@@ -14,10 +15,10 @@ export {
 export {
   ExtensionLoader,
   createExtensionLoader,
-  extractSchemaDefaults,
   getExtensionConfigDefaults,
   registerExtensionMetadata,
 } from "./extensions/extensions.ts";
+export { extractSchemaDefaults } from "./extensions/config.ts";
 
 export {
   ToolRegistry,
@@ -54,10 +55,7 @@ export {
   createSubcommandRegistry,
 } from "./extensions/registries.ts";
 
-export {
-  ConfigRegistry,
-  createConfigRegistry,
-} from "./extensions/config-registry.ts";
+export { ConfigRegistry } from "./extensions/config.ts";
 
 export {
   ServiceRegistry,

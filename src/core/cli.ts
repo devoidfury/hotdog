@@ -5,9 +5,8 @@
 import { logger } from "./logger.ts";
 import { CliError } from "./error.ts";
 import { parseCliFlagKey } from "../utils/strings.ts";
-import type { CliFlagDef, ConfigRegistry } from "./extensions/config-registry.ts";
-
-export type CliFlag = CliFlagDef;
+import type { ConfigRegistry } from "./extensions/config.ts";
+import type { CliFlagDef } from "./config/schema-types.ts";
 
 export interface FlagEntry {
   short?: string | null;
@@ -41,7 +40,7 @@ export interface ParsedCliOptions {
 
 // Structural flags that are NOT config values (config file paths, model selection, etc.)
 // These are parsed directly and passed to the config resolver as CLI context.
-const STRUCTURAL_FLAGS: CliFlag[] = [
+const STRUCTURAL_FLAGS: CliFlagDef[] = [
   { short: "-f", long: "--config", type: "string", description: "Config file path" },
   { short: "-d", long: "--config-dir", type: "string", description: "Config directory" },
   { short: "-m", long: "--model", type: "string", description: "Model name" },

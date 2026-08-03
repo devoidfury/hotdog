@@ -4,7 +4,17 @@
 import { join } from "node:path";
 import { getNested } from "../../utils/objects.ts";
 import configSchema from "../core.config.json" with { type: "json" };
-import type { CastFn, ComputeFn, SchemaProperty, SchemaLayer, ConfigSchema } from "./schema-types.ts";
+import type {
+  CastFn,
+  ComputeFn,
+  SchemaProperty,
+  SchemaLayer,
+  ConfigSchema,
+} from "./schema-types.ts";
+
+import type { ProviderDef } from "./providers.ts";
+import { ProfileDef } from "./profiles.ts";
+import { CliFlagDef } from "./index.ts";
 
 // Re-export shared schema types
 export * from "./schema-types.ts";
@@ -230,7 +240,9 @@ export function buildConfigSchema(): ConfigSchema {
 /**
  * Extract the default value from a schema key's layers.
  */
-export function getLayerDefault(schemaKey: SchemaProperty | undefined | null): unknown {
+export function getLayerDefault(
+  schemaKey: SchemaProperty | undefined | null,
+): unknown {
   if (!schemaKey || !schemaKey.layers) return undefined;
 
   for (const layer of schemaKey.layers) {
@@ -279,9 +291,6 @@ export function buildUnifiedSchema(
 
   return { ...coreSchema, ...extensionSchema };
 }
-
-import type { CliFlagDef } from "../extensions/config-registry.ts";
-export type { CliFlagDef } from "../extensions/config-registry.ts";
 
 /**
  * Generate CLI flag definitions from the schema.
@@ -334,15 +343,9 @@ export function resolveLayerValue(
     case "env":
       return process.env[layer.key as string];
     case "provider":
-      return getNested(
-        context.provider,
-        layer.path as string,
-      );
+      return getNested(context.provider, layer.path as string);
     case "providerDefault":
-      if (
-        context.provider &&
-        Array.isArray(context.provider.models)
-      ) {
+      if (context.provider && Array.isArray(context.provider.models)) {
         const models = context.provider.models;
         if (models.length > 0 && models[0]?.name) {
           return models[0].name;
@@ -350,10 +353,7 @@ export function resolveLayerValue(
       }
       return undefined;
     case "profile":
-      return getNested(
-        context.profile,
-        (layer.key || layer.path) as string,
-      );
+      return getNested(context.profile, (layer.key || layer.path) as string);
     default:
       return undefined;
   }
@@ -416,7 +416,7 @@ export function resolveKey(
   if (!schema) return undefined;
   const { layers, properties } = schema;
 
-  for (const layer of (layers ?? [])) {
+  for (const layer of layers ?? []) {
     if ("default" in layer) {
       const value = resolveLayerValue(layer, context);
       if (properties && typeof value === "object" && value !== null) {
@@ -576,9 +576,6 @@ export function resolveExtensionConfig(
 
   return result;
 }
-
-import type { ProviderDef } from "./providers.ts";
-import { ProfileDef } from "./profiles.ts";
 
 /**
  * Resolve a model name to provider/model format.

@@ -8,6 +8,7 @@ import { main } from "../../src/core/main.ts";
 import { resetLoggerForTesting } from "../../src/core/logger.ts";
 
 import pkg from "../../package.json" with { type: "json" };
+import { ConfigRegistry } from "../../src/core/index.ts";
 
 /**
  * Run main() with given CLI args, capturing stdout and stderr output.
@@ -249,9 +250,6 @@ describe("CoreInfrastructure service accessor", () => {
     const { createCompletionService } = await import(
       "../../src/core/completion.ts"
     );
-    const { createConfigRegistry } = await import(
-      "../../src/core/extensions/config-registry.ts"
-    );
     const { createSubcommandRegistry } = await import(
       "../../src/core/extensions/registries.ts"
     );
@@ -260,7 +258,7 @@ describe("CoreInfrastructure service accessor", () => {
     const toolRegistry = createToolRegistry();
     const services = createServiceRegistry();
     const completion = createCompletionService();
-    const configRegistry = createConfigRegistry();
+    const configRegistry = new ConfigRegistry();
     const cliSubcommandRegistry = createSubcommandRegistry();
 
     const extensions = createExtensionLoader({

@@ -2,8 +2,11 @@
  * Provider and model registry.
  */
 
+import fs from "node:fs";
 import fsPromises from "node:fs/promises";
 import path from "node:path";
+
+import { cwd } from "node:process";
 
 import {
   DEFAULT_SYSTEM_PROMPT_FILENAME,
@@ -325,11 +328,9 @@ export async function initSystemPromptTemplate(
       if (cliConfigDir) {
         configDir = path.resolve(cliConfigDir);
       } else {
-        const { cwd } = await import("node:process");
         const cwdConfig = path.resolve(cwd(), "config");
         try {
-          const fs = await import("node:fs");
-          fs.accessSync(cwdConfig);
+          await fsPromises.access(cwdConfig);
           configDir = cwdConfig;
         } catch {
           const envConfigDir = process.env.HOTDOG_CONFIG_DIR;

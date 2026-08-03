@@ -2,25 +2,13 @@
 
 import { ConfigError } from "../error.ts";
 import { validate } from "../../utils/json-schema.ts";
-import type { SchemaLayer } from "../config/schema-types.ts";
+import type { SchemaLayer, CliFlagDef } from "../config/schema-types.ts";
 
-/**
- * Unified CLI flag definition used by both core schema and extension registration.
- *
- * - Core schema flags include `key` (maps back to config key) and `hasValue`.
- * - Extension flags may include `default` and `parse` for custom handling.
- * - `hasValue` is derived from `type !== "boolean"` if not explicitly provided.
- */
-export interface CliFlagDef {
-  key?: string;                     // maps back to config key (schema-loader use)
-  short?: string;
-  long: string;
-  description: string;
-  type: string;
-  hasValue?: boolean;               // derived from type if not provided
-  default?: unknown;                // extension defaults
-  parse?: (value: string) => unknown;  // custom parser
-}
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const ROOT_DIR = path.resolve(__dirname, "../../");
 
 export interface ConfigParamDef {
   key: string;
@@ -178,9 +166,48 @@ export class ConfigRegistry {
   }
 }
 
-/**
- * Create a new ConfigRegistry instance.
- */
-export function createConfigRegistry(): ConfigRegistry {
-  return new ConfigRegistry();
+
+export interface SchemaDefaultEntry {
+  key: string;
+  description?: string;
+  defaults: unknown;
+  schema?: Record<string, unknown>;
+  layers?: unknown;
+}
+
+export function extractSchemaDefaults(
+  schema: Record<string, unknown> | null | undefined,
+): SchemaDefaultEntry[] {
+  if (!schema || typeof schema !== "object") return [];
+
+  const result: SchemaDefaultEntry[] = [];
+  for (const [keyName, keySchemaRaw] of Object.entries(schema)) {
+    const keySchema = keySchemaRaw as Record<string, unknown>;
+    let defaults: unknown;
+    if ((keySchema.type as string) === "object" && keySchema.properties) {
+      defaults = {};
+      for (const [propName, propRaw] of Object.entries(
+        keySchema.properties as Record<string, unknown>,
+      )) {
+        const prop = propRaw as Record<string, unknown>;
+        if (prop.default !== undefined && prop.default !== null) {
+          (defaults as Record<string, unknown>)[propName] = prop.default;
+        }
+      }
+    } else if (keySchema.default !== undefined) {
+      defaults = keySchema.default;
+    }
+
+    const entry: SchemaDefaultEntry = {
+      key: keyName,
+      description: (keySchema.description as string) || "",
+      defaults,
+      schema: keySchema,
+    };
+    if (keySchema.layers) {
+      entry.layers = keySchema.layers;
+    }
+    result.push(entry);
+  }
+  return result;
 }

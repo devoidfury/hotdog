@@ -8,10 +8,7 @@ import { cwd } from "node:process";
 import { ConfigError } from "../error.ts";
 import { deepMerge } from "../../utils/objects.ts";
 import { render } from "../../utils/render.ts";
-import {
-  validate as validateSchema,
-  castAs,
-} from "../../utils/json-schema.ts";
+import { validate as validateSchema, castAs } from "../../utils/json-schema.ts";
 import { camelCase } from "../../utils/strings.ts";
 
 export * from "./defaults.ts";
@@ -27,27 +24,17 @@ export {
 } from "../../utils/json-schema.ts";
 
 // Import specific items we need locally
-import {
-  DEFAULT_PROFILES_SUBPATH,
-  DEFAULT_CONFIG_FILENAME,
-} from "./defaults.ts";
+import { DEFAULT_CONFIG_FILENAME } from "./defaults.ts";
 import {
   CONFIG_SCHEMA,
   getLayerDefault,
   ResolutionContext,
   type CoreConfigWithExtensions,
 } from "./schema-loader.ts";
+import { resolveAll, resolveKey, resolveModel } from "./schema-loader.ts";
 import {
-  resolveAll,
-  resolveKey,
-  resolveModel,
-  resolveModelWithProvider,
-} from "./schema-loader.ts";
-import {
-  loadProfileFiles,
-  allProfilesForSwitch,
-  ProfileDef,
   ProfileManager,
+  type ProfileDef,
   type SwitchProfile,
 } from "./profiles.ts";
 import {
@@ -88,6 +75,7 @@ export function resolveConfigDir(cliConfigDir?: string | null): string {
     // Not found
   }
 
+  // XDG-style directory fallback
   return path.join(os.homedir(), ".config", "hotdog");
 }
 
@@ -383,7 +371,11 @@ export async function buildConfig(cliArgv: CliArgv): Promise<{
   });
 
   const modelRegistry = await buildModelRegistry(
-    { providers: castAs<ProviderDef[]>(config.providers || []), baseUrl: resolved.baseUrl, apiKey: resolved.apiKey },
+    {
+      providers: castAs<ProviderDef[]>(config.providers || []),
+      baseUrl: resolved.baseUrl,
+      apiKey: resolved.apiKey,
+    },
     128000,
   );
   resolved.modelRegistry = modelRegistry;

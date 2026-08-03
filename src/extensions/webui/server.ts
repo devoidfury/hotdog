@@ -1,6 +1,5 @@
 // WebUI server — UI over HTTP with WebSockets.
 
-import { serveStaticFile } from "../../utils/index.ts";
 import { createWsServer } from "../websocket/server.ts";
 import { createAuthMiddleware } from "../websocket/auth.ts";
 import { logger } from "../../core/logger.ts";
@@ -11,6 +10,9 @@ import {
 
 import webuiFrontend from "./ui/index.html";
 import { ExtensionError } from "../../core/error.ts";
+import { ProfileManager, type ProfileDef } from "../../core/config/index.ts";
+
+
 
 // ── Types ───────────────────────────────────────────────────────────────────
 
@@ -65,10 +67,9 @@ export async function createWebuiServer(
   let profileManager = core.resolved?.profileManager;
   // Fallback: create ProfileManager if not available (for tests/backward compat)
   if (!profileManager && core.resolved?.profilesPath) {
-    const { ProfileManager } = await import("../../core/config/profiles.ts");
     profileManager = await ProfileManager.create(
       core.resolved.profilesPath as string,
-      core.resolved?.profiles as Record<string, unknown> || {},
+      core.resolved?.profiles as Record<string, ProfileDef> || {},
     );
   }
   if (!profileManager) {

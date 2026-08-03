@@ -1,5 +1,6 @@
 import { describe, it, expect } from "bun:test";
 import { ServiceRegistry, createServiceRegistry } from "../../src/core/extensions/service-registry.ts";
+import { ConfigRegistry } from "../../src/core/index.ts";
 
 describe("ServiceRegistry", () => {
   it("createServiceRegistry returns a new instance", () => {
@@ -114,9 +115,6 @@ describe("SERVICES_REGISTER hook integration", () => {
     const { createExtensionLoader } = await import(
       "../../src/core/extensions/extensions.ts"
     );
-    const { createConfigRegistry } = await import(
-      "../../src/core/extensions/config-registry.ts"
-    );
     const { createSubcommandRegistry } = await import(
       "../../src/core/extensions/registries.ts"
     );
@@ -125,7 +123,7 @@ describe("SERVICES_REGISTER hook integration", () => {
     const hooks = createHooks();
     const toolRegistry = createToolRegistry();
     const services = createServiceRegistry();
-    const configRegistry = createConfigRegistry();
+    const configRegistry = new ConfigRegistry();
     const cliSubcommandRegistry = createSubcommandRegistry();
 
     const core = { hooks, toolRegistry, services, configRegistry, cliSubcommandRegistry };
@@ -159,9 +157,6 @@ describe("SERVICES_REGISTER hook integration", () => {
     const { createExtensionLoader } = await import(
         "../../src/core/extensions/extensions.ts"
     );
-    const { createConfigRegistry } = await import(
-      "../../src/core/extensions/config-registry.ts"
-    );
     const { createSubcommandRegistry } = await import(
       "../../src/core/extensions/registries.ts"
     );
@@ -170,7 +165,7 @@ describe("SERVICES_REGISTER hook integration", () => {
     const hooks = createHooks();
     const toolRegistry = createToolRegistry();
     const services = createServiceRegistry();
-    const configRegistry = createConfigRegistry();
+    const configRegistry = new ConfigRegistry();
     const cliSubcommandRegistry = createSubcommandRegistry();
 
     const core = { hooks, toolRegistry, services, configRegistry, cliSubcommandRegistry };

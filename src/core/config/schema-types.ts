@@ -29,3 +29,22 @@ export interface SchemaProperty {
 }
 
 export type ConfigSchema = Record<string, SchemaProperty>;
+
+
+/**
+ * Unified CLI flag definition used by both core schema and extension registration.
+ *
+ * - Core schema flags include `key` (maps back to config key) and `hasValue`.
+ * - Extension flags may include `default` and `parse` for custom handling.
+ * - `hasValue` is derived from `type !== "boolean"` if not explicitly provided.
+ */
+export interface CliFlagDef {
+  key?: string;                     // maps back to config key (schema-loader use)
+  short?: string;
+  long: string;
+  description: string;
+  type: string;
+  hasValue?: boolean;               // derived from type if not provided
+  default?: unknown;                // extension defaults
+  parse?: (value: string) => unknown;  // custom parser
+}

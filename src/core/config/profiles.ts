@@ -181,8 +181,8 @@ function resolveSwitchProfile(
 }
 
 export interface AllProfilesOptions {
-  profileFiles?: Record<string, Partial<ProfileDef>> | null;
-  configProfiles?: Record<string, Partial<ProfileDef>> | null;
+  profileFiles?: Record<string, ProfileDef> | null;
+  configProfiles?: Record<string, ProfileDef> | null;
   profilesPath?: string;
 }
 
@@ -202,8 +202,8 @@ export function allProfilesForSwitch(
   ]);
 
   for (const name of allNames) {
-    const fileProfile = (profileFiles?.[name] as ProfileDef) || null;
-    const configProfile = (configProfiles?.[name] as ProfileDef) || null;
+    const fileProfile = profileFiles?.[name] || null;
+    const configProfile = configProfiles?.[name] || null;
     const sp = resolveSwitchProfile(fileProfile, configProfile);
     result[name] = sp;
   }
@@ -233,11 +233,11 @@ export interface ProfileCliArgs {
 export class ProfileManager {
   readonly profilesPath: string;
   #fileProfiles: Record<string, ProfileDef>;
-  #configProfiles: Record<string, Partial<ProfileDef>>;
+  #configProfiles: Record<string, ProfileDef>;
 
   constructor(
     profilesPath: string,
-    configProfiles: Record<string, Partial<ProfileDef>> = {},
+    configProfiles: Record<string, ProfileDef> = {},
   ) {
     this.profilesPath = profilesPath;
     this.#fileProfiles = {};
@@ -249,7 +249,7 @@ export class ProfileManager {
    */
   static async create(
     profilesPath: string,
-    configProfiles: Record<string, Partial<ProfileDef>> = {},
+    configProfiles: Record<string, ProfileDef> = {},
   ): Promise<ProfileManager> {
     const manager = new ProfileManager(profilesPath, configProfiles);
     await manager.load();
@@ -323,7 +323,7 @@ export class ProfileManager {
     const result: Record<string, SwitchProfile> = {};
     for (const name of this.getAllNames()) {
       const fileP = this.#fileProfiles[name] ?? null;
-      const configP = (this.#configProfiles[name] as ProfileDef) ?? null;
+      const configP = this.#configProfiles[name] ?? null;
       result[name] = resolveSwitchProfile(fileP, configP);
     }
     return result;
@@ -349,7 +349,7 @@ export class ProfileManager {
     const result: Record<string, SwitchProfile> = {};
     for (const name of workerNames) {
       const fileP = this.#fileProfiles[name] ?? null;
-      const configP = (this.#configProfiles[name] as ProfileDef) ?? null;
+      const configP = this.#configProfiles[name] ?? null;
       result[name] = resolveSwitchProfile(fileP, configP);
     }
     return result;

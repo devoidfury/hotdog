@@ -3,7 +3,6 @@
 export {
   ExtensionLoader,
   createExtensionLoader,
-  extractSchemaDefaults,
   getExtensionConfigDefaults,
   resolveExtensionPath,
   isExtensionDirectory,
@@ -45,7 +44,7 @@ export {
   createSubcommandRegistry,
 } from "./registries.ts";
 
-export { ConfigRegistry, createConfigRegistry } from "./config-registry.ts";
+export { ConfigRegistry, extractSchemaDefaults } from "./config.ts";
 
 export { ServiceRegistry, createServiceRegistry } from "./service-registry.ts";
 

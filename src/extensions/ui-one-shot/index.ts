@@ -7,12 +7,13 @@ import { formatError } from "../../core/error.ts";
 import { HOOKS } from "../../core/hooks.ts";
 import { logger } from "../../core/logger.ts";
 import { CliOutputSink } from "../../utils/cli/cli.ts";
-import { LlmClient, ProviderConfig } from "../../core/llm-client/client.ts";
+import { LlmClient, type ProviderConfig } from "../../core/llm-client/client.ts";
 import { MarkerMangler } from "../../core/marker-mangler.ts";
 import { SessionManager } from "../../core/session/index.ts";
 import { Agent, type ModelConfig } from "../../core/agent.ts";
 import { OneShotChannel } from "./oneshot-channel.ts";
-import { CoreContext, ExtensionInstance, ResolvedConfig } from "../../core/extensions/types.ts";
+import type { CoreContext, ExtensionInstance, ResolvedConfig } from "../../core/extensions/types.ts";
+import type { CoreConfigWithExtensions } from "../../core/config/index.ts";
 
 // ── Types ──────────────────────────────────────────────────────────────────
 
@@ -34,19 +35,19 @@ async function runOneShot(
   cli: CliArgs,
   core: CoreContext,
   resolved: ResolvedConfig,
-  config: Record<string, unknown>,
+  config: CoreConfigWithExtensions,
   modelRegistry: Record<string, unknown>,
   sink: CliOutputSink,
   buildAgent: (agentConfig: Record<string, unknown>) => Promise<Agent>,
-  llmClient: unknown,
+  llmClient: LlmClient,
 ): Promise<number> {
   // Create SessionManager — owns the MessageBus and TaskManager internally
   const sessionManager = await SessionManager.create({
-    hooks: core.hooks as unknown as { notifyHooks: (hookName: string, data: unknown) => void },
+    hooks: core.hooks,
     extensions: core.extensions,
     buildAgent,
     initialConfig: { sessionId: cli.sessionId || null },
-    llmClient: llmClient as import("../../core/llm-client/client.ts").LlmClient | undefined,
+    llmClient: llmClient,
     modelRegistry,
     coreConfig: config,
     taskConfig: {
@@ -96,31 +97,33 @@ async function handlePromptSubcommand(
   cli: CliArgs,
   core: CoreContext,
 ): Promise<number> {
-  const { config, buildConfig, resolved } = core;
-  const modelRegistry = (core.resolved?.modelRegistry as Record<string, unknown>) || {};
+  const { config, buildConfig } = core;
+  const resolved = core.resolved!;
+  
+  const modelRegistry = resolved.modelRegistry;
 
   // Build output sink
   const palette = await CliOutputSink.resolve(
     cli.colors !== false,
-    cli.theme || (config.theme as string) || "dark",
+    cli.theme || config.theme || "dark",
     (config.colors as Record<string, unknown>) || null,
   );
 
   const sink = new CliOutputSink({
-    ...(resolved as ResolvedConfig),
+    ...resolved,
     palette,
-    thinkerFormat: (resolved as ResolvedConfig).thinkerFormat,
-    toolFormat: (resolved as ResolvedConfig).toolFormat,
-    toolOutputFmt: (resolved as ResolvedConfig).toolOutputFmt,
+    thinkerFormat: resolved.thinkerFormat,
+    toolFormat: resolved.toolFormat,
+    toolOutputFmt: resolved.toolOutputFmt,
   });
 
   // Build agent function
   const llmClient = new LlmClient({
-    baseUrl: (resolved as ResolvedConfig).baseUrl,
-    apiKey: (resolved as ResolvedConfig).apiKey,
-    stream: (resolved as ResolvedConfig).stream,
-    chatTimeoutSecs: (resolved as ResolvedConfig).chatTimeout,
-    maxRetries: (resolved as ResolvedConfig).maxRetries,
+    baseUrl: resolved.baseUrl,
+    apiKey: resolved.apiKey,
+    stream: resolved.stream,
+    chatTimeoutSecs: resolved.chatTimeout,
+    maxRetries: resolved.maxRetries,
     providers: (config.providers as ProviderConfig[]) || [],
     markerMangler: new MarkerMangler(),
   });
@@ -131,20 +134,20 @@ async function handlePromptSubcommand(
       hooks: core.hooks,
       toolRegistry: core.toolRegistry,
       llmClient: (agentConfig.llmClient as LlmClient) || llmClient,
-      model: (agentConfig.model as string) || (resolved as ResolvedConfig).model,
+      model: (agentConfig.model as string) || resolved.model,
       maxIterations:
-        (agentConfig.maxIterations as number) || (resolved as ResolvedConfig).maxIterations || 100,
+        (agentConfig.maxIterations as number) || resolved.maxIterations || 100,
       contextLimit: 128000,
-      hideTools: typeof agentConfig.hideTools === "boolean" ? agentConfig.hideTools : (resolved as ResolvedConfig).hideTools,
-      hideThinking: typeof agentConfig.hideThinking === "boolean" ? agentConfig.hideThinking : (resolved as ResolvedConfig).hideThinking,
-      showTokenUse: typeof agentConfig.showTokenUse === "boolean" ? agentConfig.showTokenUse : (resolved as ResolvedConfig).showTokenUse,
+      hideTools: typeof agentConfig.hideTools === "boolean" ? agentConfig.hideTools : resolved.hideTools,
+      hideThinking: typeof agentConfig.hideThinking === "boolean" ? agentConfig.hideThinking : resolved.hideThinking,
+      showTokenUse: typeof agentConfig.showTokenUse === "boolean" ? agentConfig.showTokenUse : resolved.showTokenUse,
       sink: null, // Sink is managed by OneShotChannel via SessionManager
       modelRegistry: (agentConfig.modelRegistry as Record<string, ModelConfig>) ||
         (modelRegistry as Record<string, ModelConfig>),
-      profileName: (agentConfig.profileName as string) || (resolved as ResolvedConfig).profileName,
-      role: (agentConfig.role as string) || (resolved as ResolvedConfig).role,
-      profileBody: (agentConfig.profileBody as string) || (resolved as ResolvedConfig).profileBody,
-      stream: typeof agentConfig.stream === "boolean" ? agentConfig.stream : (resolved as ResolvedConfig).stream,
+      profileName: (agentConfig.profileName as string) || resolved.profileName,
+      role: (agentConfig.role as string) || resolved.role,
+      profileBody: (agentConfig.profileBody as string) || resolved.profileBody,
+      stream: typeof agentConfig.stream === "boolean" ? agentConfig.stream : resolved.stream,
       config: {
         ...config,
       },

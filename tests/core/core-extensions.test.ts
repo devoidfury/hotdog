@@ -4,7 +4,7 @@ import { ExtensionLoader, HOOKS } from '../../src/core/extensions/extensions.ts'
 import { createHooks } from '../../src/core/hooks.ts';
 import { createToolRegistry } from '../../src/core/extensions/tool-registry.ts';
 import { createServiceRegistry } from '../../src/core/extensions/service-registry.ts';
-import { createConfigRegistry } from '../../src/core/extensions/config-registry.ts';
+import { ConfigRegistry } from '../../src/core/extensions/config.ts';
 import { createSubcommandRegistry } from '../../src/core/extensions/registries.ts';
 import type { LoaderCore } from '../../src/core/extensions/extensions.ts';
 import { describe, it, expect, beforeEach } from 'bun:test';
@@ -17,7 +17,7 @@ describe('ExtensionLoader', () => {
     const hooks = createHooks();
     const toolRegistry = createToolRegistry();
     const services = createServiceRegistry();
-    const configRegistry = createConfigRegistry();
+    const configRegistry = new ConfigRegistry();
     const cliSubcommandRegistry = createSubcommandRegistry();
     core = { hooks, toolRegistry, services, configRegistry, cliSubcommandRegistry };
     loader = new ExtensionLoader(core);

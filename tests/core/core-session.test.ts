@@ -7,7 +7,7 @@ import { createHooks, HookSystem } from '../../src/core/hooks.ts';
 import { ExtensionLoader } from '../../src/core/extensions/extensions.ts';
 import { createToolRegistry } from '../../src/core/extensions/tool-registry.ts';
 import { createServiceRegistry } from '../../src/core/extensions/service-registry.ts';
-import { createConfigRegistry } from '../../src/core/extensions/config-registry.ts';
+import { ConfigRegistry } from '../../src/core/extensions/config.ts';
 import { createSubcommandRegistry } from '../../src/core/extensions/registries.ts';
 import { describe, it, expect, beforeEach } from 'bun:test';
 import { MockLLMClient } from '../helpers.ts';
@@ -34,7 +34,7 @@ describe('SessionManager.create (static)', () => {
   it('should create a SessionManager with an initial agent', async () => {
     const hooks = createHooks();
     const toolRegistry = createToolRegistry();
-    const extensions = new ExtensionLoader({ hooks, toolRegistry, services: createServiceRegistry(), configRegistry: createConfigRegistry(), cliSubcommandRegistry: createSubcommandRegistry() });
+    const extensions = new ExtensionLoader({ hooks, toolRegistry, services: createServiceRegistry(), configRegistry: new ConfigRegistry(), cliSubcommandRegistry: createSubcommandRegistry() });
 
     const buildAgent = async (config: Record<string, unknown>) => {
       return createMockAgent({
@@ -67,7 +67,7 @@ describe('SessionManager', () => {
   beforeEach(() => {
     hooks = createHooks();
     toolRegistry = createToolRegistry();
-    extensions = new ExtensionLoader({ hooks, toolRegistry, services: createServiceRegistry(), configRegistry: createConfigRegistry(), cliSubcommandRegistry: createSubcommandRegistry() });
+    extensions = new ExtensionLoader({ hooks, toolRegistry, services: createServiceRegistry(), configRegistry: new ConfigRegistry(), cliSubcommandRegistry: createSubcommandRegistry() });
 
     buildAgent = async (config: Record<string, unknown>) => {
       return createMockAgent({

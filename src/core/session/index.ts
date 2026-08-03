@@ -4,13 +4,14 @@
 import crypto from "node:crypto";
 import { HOOKS } from "../hooks.ts";
 import { MessageBus } from "./message-bus.ts";
-import { TaskManager } from "./task-manager.ts";
+import { TaskManager, type TaskAgent } from "./task-manager.ts";
 import { OUTPUT_EVENT, OutputEvent } from "../context/output.ts";
 import { formatError } from "../error.ts";
 import { logger } from "../logger.ts";
 import type { CommandRegistryLike } from "../commands.ts";
 import type { LlmClient } from "../llm-client/client.ts";
 import type { CommandResult } from "../extensions/registries.ts";
+import type { ProfileManager } from "../config/index.ts";
 
 /** Question option shape used by QUESTION events. */
 export interface QuestionOption {
@@ -236,7 +237,7 @@ export class SessionManager {
       this.#taskManager = new TaskManager({
         buildAgent: this.#buildAgent as unknown as (
           config: Record<string, unknown>,
-        ) => Promise<import("./task-manager.ts").TaskAgent>,
+        ) => Promise<TaskAgent>,
         llmClient: options.llmClient,
         modelRegistry: options.modelRegistry,
         config: options.coreConfig || {},
@@ -245,13 +246,14 @@ export class SessionManager {
         taskProfile: options.taskConfig.taskProfile,
         taskRole: options.taskConfig.taskRole,
         profileManager: options.profileManager as
-          | import("./task-manager.ts").ProfileManager
+          | ProfileManager
           | undefined,
       });
+      
       // Wire sessionManager reference
       this.#taskManager.setSessionManager(
         this as unknown as {
-          getAgent: () => import("./task-manager.ts").TaskAgent | undefined;
+          getAgent: () => TaskAgent | undefined;
         },
       );
     }

@@ -3,7 +3,7 @@
 
 import crypto from "node:crypto";
 import { HOOKS } from "../../core/hooks.ts";
-import { SessionManager } from "../../core/session/index.ts";
+import { SessionManager, type AgentLike } from "../../core/session/index.ts";
 import { WebSocketChannel } from "./websocket-channel.ts";
 import { C2S, S2C, C2SMessage } from "./protocol.ts";
 import { LlmClient, type ProviderConfig } from "../../core/llm-client/client.ts";
@@ -14,6 +14,7 @@ import { Agent, type ModelConfig } from "../../core/agent.ts";
 import { readSessionEntries, replayEntriesIntoContext, listSessionLogs, deleteSessionLog } from "../../core/session/session-log.ts";
 import { AgentError } from "../../core/error.ts";
 import { logger } from "../../core/logger.ts";
+import type { ProfileDef } from "../../core/config/index.ts";
 
 // ── Types ───────────────────────────────────────────────────────────────────
 
@@ -43,11 +44,11 @@ interface SwitchProfileOptions {
 
 interface SessionRegistryOptions {
   buildAgent: (config: { model?: string; sessionId?: string; profileName?: string }) => Promise<unknown>;
-  llmClient?: unknown;
+  llmClient?: LlmClient;
   questionTimeoutSecs?: number;
   questionStrategy?: string;
   sessionTimeoutMin?: number;
-  profiles?: Record<string, { role: string; body: string; model: string | null; whitelistTools: string[] | null; blacklistTools: string[] }>;
+  profiles?: Record<string, ProfileDef>;
 }
 
 interface CreateWsServerOptions {
@@ -56,7 +57,7 @@ interface CreateWsServerOptions {
   questionTimeoutSecs?: number;
   questionStrategy?: string;
   auth?: AuthMiddleware;
-  profiles?: Record<string, { role: string; body: string; model: string | null; whitelistTools: string[] | null; blacklistTools: string[] }>;
+  profiles?: Record<string, ProfileDef>;
 }
 
 export interface WsServer {
@@ -92,7 +93,7 @@ export class SessionRegistry {
   // Per-session WebSocketChannel instances
   #channels: Map<string, Set<WebSocketChannel>>;
   // Available profiles
-  #profiles: Record<string, { role: string; body: string; model: string | null; whitelistTools: string[] | null; blacklistTools: string[] }>;
+  #profiles: Record<string, ProfileDef>;
 
   constructor({ buildAgent, llmClient, questionTimeoutSecs = 300, questionStrategy = "wait", sessionTimeoutMin = 30, profiles = {} }: SessionRegistryOptions) {
     this.#buildAgent = buildAgent;
@@ -107,8 +108,8 @@ export class SessionRegistry {
     this.#sessionManager = new SessionManager({
       hooks: { notifyHooks: () => {} }, // No-op hooks for now
       extensions: null,
-      buildAgent: buildAgent as (config: Record<string, unknown>) => Promise<import("../../core/session/index.ts").AgentLike>,
-      llmClient: llmClient as import("../../core/llm-client/client.ts").LlmClient | undefined,
+      buildAgent: buildAgent as (config: Record<string, unknown>) => Promise<AgentLike>,
+      llmClient: llmClient,
     });
   }
 
@@ -167,7 +168,7 @@ export class SessionRegistry {
     });
 
     // Register with SessionManager — this creates the MessageBus and wires the sink
-    this.#sessionManager.registerAgent(agent as unknown as import("../../core/session/index.ts").AgentLike, {
+    this.#sessionManager.registerAgent(agent as unknown as AgentLike, {
       profile: profile || "default",
       model,
     });
@@ -242,7 +243,7 @@ export class SessionRegistry {
   /**
    * List available profiles.
    */
-  listProfiles(): Record<string, { role: string; body: string; model: string | null; whitelistTools: string[] | null; blacklistTools: string[] }> {
+  listProfiles(): Record<string, ProfileDef> {
     return { ...this.#profiles };
   }
 
@@ -435,15 +436,6 @@ async function loadLogIntoNewSession(
 }
 
 // ── Session History Replay ──────────────────────────────────────────────────
-
-interface Message {
-  role: string;
-  content?: string;
-  reasoningContent?: string;
-  toolCalls?: Array<{ id: string; function?: { name?: string; arguments?: string } }>;
-  toolCallId?: string;
-  getTextContent?(): string;
-}
 
 /**
  * Replay a session's message history to a WebSocket client.

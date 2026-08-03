@@ -3,14 +3,14 @@
 
 import { describe, it, expect } from "bun:test";
 import {
-  extractSchemaDefaults,
   resolveExtensionPath,
   isExtensionEnabled,
   resolveLoadOrder,
   resolveExtensionDependencies,
   validateServiceContracts,
 } from "../../src/core/extensions/extensions.ts";
-import { ExtensionError } from "../../src/core/error.ts";
+import { extractSchemaDefaults } from "../../src/core/index.ts";
+
 
 describe("extractSchemaDefaults", () => {
   it("returns empty array for null schema", () => {

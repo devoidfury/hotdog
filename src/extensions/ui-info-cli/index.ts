@@ -424,7 +424,7 @@ async function printConfigDebug(
   for (const [keyName, keySchema] of Object.entries(CONFIG_KEYS)) {
     const trace = traceConfigResolution(
       keyName,
-      keySchema as import("../../core/config/schema-types.ts").SchemaProperty,
+      keySchema as SchemaProperty,
       context,
     );
     const valueStr =

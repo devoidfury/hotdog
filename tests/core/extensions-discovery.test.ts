@@ -1,10 +1,5 @@
 // Tests for extensions.js discovery functions — discoverExtensionsInDir,
 // getExtensionConfigDefaults, registerExtensionMetadata, getExtensionsToLoad.
-//
-// Note: Utility functions (extractSchemaDefaults, resolveExtensionPath,
-// isExtensionEnabled, resolveLoadOrder, resolveExtensionDependencies,
-// validateServiceContracts) are tested in extensions-utility.test.ts.
-// ExtensionLoader lifecycle tests are in core-extensions.test.ts.
 
 import { describe, it, expect, beforeAll } from "bun:test";
 import {

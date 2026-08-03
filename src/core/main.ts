@@ -45,7 +45,7 @@ import {
   type ResolutionContext,
   type CoreConfigWithExtensions,
 } from "./config/schema-loader.ts";
-import { createConfigRegistry, type ConfigRegistry } from "./extensions/config-registry.ts";
+import { ConfigRegistry } from "./extensions/config.ts";
 import { CliError } from "./error.ts";
 import { createSubcommandRegistry, type CliSubcommandRegistry } from "./extensions/registries.ts";
 import { readFile } from "node:fs/promises";
@@ -281,7 +281,7 @@ export async function main(): Promise<number> {
   initializeLogger({ hooks, minLevel, target: logTarget });
 
   // ── Create config registry for extension CLI flags & config params ──────
-  const configRegistry = createConfigRegistry();
+  const configRegistry = new ConfigRegistry();
 
   // Register core CLI flags from schema (single source of truth)
   configRegistry.registerCliFlags(cliFlagsFromSchema(CONFIG_SCHEMA));

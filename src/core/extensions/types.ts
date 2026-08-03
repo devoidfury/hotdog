@@ -24,7 +24,7 @@ import type { ToolRegistry, ToolDef, Tool, ToolMetadata } from "./tool-registry.
 import type { ExtensionLoader } from "./extensions.ts";
 import type { ServiceRegistry } from "./service-registry.ts";
 import type { CliSubcommandRegistry } from "./registries.ts";
-import type { ConfigRegistry } from "./config-registry.ts";
+import type { ConfigRegistry } from "./config.ts";
 import type { ModelConfig, ProviderDef } from "../config/providers.ts";
 import type { CoreConfigWithExtensions } from "../config/schema-loader.ts";
 import type { Agent } from "../agent.ts";
@@ -37,7 +37,33 @@ import { logger } from "../logger.ts";
 import { ProfileDef, ProfileManager } from "../config/profiles.ts";
 import { ParsedCliOptions } from "../cli.ts";
 import { SessionManager } from "../session/index.ts";
-import { CompletionService, CompletionContext, CompletionOption } from "../completion.ts";
+import { CompletionService, CompletionContext } from "../completion.ts";
+
+
+export interface ExtensionMetadata {
+  name: string;
+  path?: string;
+  provides: string[];
+  loadOrder: number;
+  description: string;
+  dependsOn: string[];
+  autoload: boolean;
+  configSchema: Record<string, unknown> | null;
+  cliSubcommands: Array<{
+    name: string;
+    description: string;
+    options: unknown[];
+  }>;
+  cliFlags: Array<{
+    short: string | null;
+    long: string;
+    description: string;
+    type: string;
+    default: unknown;
+  }>;
+  services: Record<string, unknown[]>;
+  requires: Record<string, unknown[]>;
+}
 
 // ── Hook Payload Types ──────────────────────────────────────────────────────
 

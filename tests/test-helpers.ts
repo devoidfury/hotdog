@@ -118,3 +118,15 @@ export async function withSilentConsole<T>(fn: () => Promise<T> | T): Promise<T>
     console.log = orig;
   }
 }
+
+export async function runWithSuppressedStdout<T>(fn: () => Promise<T>): Promise<T> {
+  const origOutWrite = process.stdout.write;
+  const origErrWrite = process.stderr.write;
+  process.stdout.write = process.stderr.write = () => true;
+  try {
+    return await fn();
+  } finally {
+    process.stdout.write = origOutWrite;
+    process.stderr.write = origErrWrite;
+  }
+}

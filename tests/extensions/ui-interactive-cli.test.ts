@@ -19,6 +19,8 @@ import { Command, ACTIONS } from "../../src/core/commands.ts";
 import { HOOKS } from "../../src/core/hooks.ts";
 import { ExtensionError } from "../../src/core/error.ts";
 import { runInteractiveSession } from "../../src/extensions/ui-interactive-cli/index.ts";
+import { runWithSuppressedStdout } from "../test-helpers.ts";
+
 
 // ── SEND_TO_ASSISTANT_SUFFIX_RE ────────────────────────────────────────────
 
@@ -314,20 +316,23 @@ describe("isSystemCommand", () => {
 // ── executeShellCommand ────────────────────────────────────────────────────
 
 describe("executeShellCommand", () => {
+
   it("runs command without capture returns empty content", async () => {
-    const result = await executeShellCommand("echo hello");
+    const result = await runWithSuppressedStdout(() => executeShellCommand("true"));
     expect(result.content).toBe("");
     expect(result.exitCode).toBe(0);
   });
 
   it("runs command with capture returns output", async () => {
-    const result = await executeShellCommand("echo 'test output'", { captureOutput: true });
+    const result = await runWithSuppressedStdout(() =>
+      executeShellCommand("echo 'test output'", { captureOutput: true })
+    );
     expect(result.content).toContain("test output");
     expect(result.exitCode).toBe(0);
   });
 
   it("returns non-zero exit code for failing command", async () => {
-    const result = await executeShellCommand("exit 42");
+    const result = await runWithSuppressedStdout(() => executeShellCommand("exit 42"));
     expect(result.exitCode).toBe(42);
   });
 
@@ -335,7 +340,7 @@ describe("executeShellCommand", () => {
     const originalPath = process.env.PATH;
     process.env.PATH = "/nonexistent/path";
     try {
-      const result = await executeShellCommand("echo hello");
+      const result = await runWithSuppressedStdout(() => executeShellCommand("echo hello"));
       expect(result.error).toBeDefined();
     } finally {
       process.env.PATH = originalPath;
@@ -346,7 +351,9 @@ describe("executeShellCommand", () => {
     const originalPath = process.env.PATH;
     process.env.PATH = "/nonexistent/path";
     try {
-      const result = await executeShellCommand("echo hello", { captureOutput: true });
+      const result = await runWithSuppressedStdout(() =>
+        executeShellCommand("echo hello", { captureOutput: true })
+      );
       expect(result.error).toBeDefined();
     } finally {
       process.env.PATH = originalPath;
@@ -374,7 +381,9 @@ describe("AsyncInteractiveCliInput", () => {
     } as unknown as readline.Interface;
 
     const input = new AsyncInteractiveCliInput(mockRl, () => {}, () => {});
-    const answers = await input.collectAnswers([{ key: "name", prompt: "What is your name?" }]);
+    const answers = await runWithSuppressedStdout(() =>
+      input.collectAnswers([{ key: "name", prompt: "What is your name?" }])
+    );
     expect(answers).toEqual({ name: "my answer" });
   });
 
@@ -389,7 +398,9 @@ describe("AsyncInteractiveCliInput", () => {
     } as unknown as readline.Interface;
 
     const input = new AsyncInteractiveCliInput(mockRl, () => {}, () => {});
-    const answers = await input.collectAnswers([{ key: "color", prompt: "Pick a color", default: "blue" }]);
+    const answers = await runWithSuppressedStdout(() =>
+      input.collectAnswers([{ key: "color", prompt: "Pick a color", default: "blue" }])
+    );
     expect(answers).toEqual({ color: "blue" });
   });
 
@@ -404,9 +415,11 @@ describe("AsyncInteractiveCliInput", () => {
     } as unknown as readline.Interface;
 
     const input = new AsyncInteractiveCliInput(mockRl, () => {}, () => {});
-    const answers = await input.collectAnswers([
-      { key: "choice", prompt: "Pick one", options: ["alpha", "beta", "gamma"] },
-    ]);
+    const answers = await runWithSuppressedStdout(() =>
+      input.collectAnswers([
+        { key: "choice", prompt: "Pick one", options: ["alpha", "beta", "gamma"] },
+      ])
+    );
     expect(answers).toEqual({ choice: "beta" });
   });
 
@@ -423,7 +436,9 @@ describe("AsyncInteractiveCliInput", () => {
 
     const addLineHandler = () => { restored = true; };
     const input = new AsyncInteractiveCliInput(mockRl, () => {}, addLineHandler);
-    await input.collectAnswers([{ key: "q", prompt: "Q?" }]);
+    await runWithSuppressedStdout(() =>
+      input.collectAnswers([{ key: "q", prompt: "Q?" }])
+    );
     expect(restored).toBe(true);
   });
 });
@@ -947,7 +962,7 @@ describe("runInteractiveSession integration", () => {
     }
 
     expect(lineHandlers.length).toBeGreaterThan(0);
-    await lineHandlers[0]("echo test");
+    await runWithSuppressedStdout(() => lineHandlers[0]!("echo hello from shellmode"));
   });
 });
 
@@ -1156,7 +1171,7 @@ describe("executeShellCommand error handling", () => {
     const originalPath = process.env.PATH;
     process.env.PATH = "/nonexistent/path";
     try {
-      const result = await executeShellCommand("echo hello", { captureOutput: true });
+      const result = await runWithSuppressedStdout(() => executeShellCommand("echo hello", { captureOutput: true }));
       expect(result.error).toBeDefined();
     } finally {
       process.env.PATH = originalPath;

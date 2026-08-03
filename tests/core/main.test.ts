@@ -5,6 +5,7 @@
 
 import { describe, it, expect } from "bun:test";
 import { main } from "../../src/core/main.ts";
+import { resetLoggerForTesting } from "../../src/core/logger.ts";
 
 import pkg from "../../package.json" with { type: "json" };
 
@@ -71,6 +72,7 @@ async function runMain(
     console.log = origConsoleLog;
     console.error = origConsoleError;
     process.env = origEnv;
+    resetLoggerForTesting();
   }
 }
 

@@ -22,7 +22,7 @@ export interface MessageBusAgent {
   run(text: string): Promise<unknown>;
   resetCancel(): void;
   cancel(): void;
-  commandRegistry: CommandRegistryLike | undefined;
+  commandRegistry?: CommandRegistryLike | null;
   executeCommand(cmd: ParsedCommand): Promise<CommandResult | null>;
 }
 
@@ -348,7 +348,7 @@ export class MessageBus {
       // prints an "Interrupted" message, so the full error is noise.
       const isCancellation =
         (e instanceof LlmError && e.type === "cancelled") ||
-        (e as Error).name === "AbortError" ||
+        (e instanceof Error && e.name === "AbortError") ||
         LlmError.isCancelled(e);
 
       if (!isCancellation) {

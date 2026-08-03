@@ -235,7 +235,7 @@ describe("registerCommandCompletions", () => {
     };
 
     registerCommandCompletions(mockCompletionService, mockRegistry as never, "test-ext");
-    const matcher = registeredProviders[0].matcher;
+    const matcher = registeredProviders[0]!.matcher;
 
     expect(matcher({ command: "model", commandArg: "" })).toBe(true);
     expect(matcher({ command: "other", commandArg: "" })).toBe(false);
@@ -255,7 +255,7 @@ describe("registerCommandCompletions", () => {
     };
 
     registerCommandCompletions(mockCompletionService, mockRegistry as never, "test-ext");
-    const matcher = registeredProviders[0].matcher;
+    const matcher = registeredProviders[0]!.matcher;
 
     expect(matcher({ command: "compact:strategy", commandArg: "" })).toBe(true);
     expect(matcher({ command: "compact:strategy:list", commandArg: "" })).toBe(true);
@@ -448,10 +448,10 @@ describe("AsyncInteractiveCliInput", () => {
 describe("handleSlashCommand", () => {
   let mockSessionManager: {
     sessionId: () => string;
-    executeCommand: jest.MockedFunction<(sessionId: string, cmd: string) => Promise<number | undefined>>;
+    executeCommand: (sessionId: string, cmd: string) => Promise<number | undefined>;
   };
   let mockChannel: Record<string, never>;
-  let mockRl: { prompt: jest.MockedFunction<() => void>; close: jest.MockedFunction<() => void> };
+  let mockRl: { prompt: () => void; close: () => void };
   let consoleLogSpy: ReturnType<typeof spyOn>;
   let processExitSpy: ReturnType<typeof spyOn>;
 
@@ -522,11 +522,11 @@ describe("buildReadlineCompleter", () => {
     const completer = buildReadlineCompleter(mockSessionManager, mockCore, false);
 
     let callbackResult: [string[], string] | null = null;
-    completer("test-line", (err, result) => {
+    completer("test-line", (err: Error | null, result: [string[], string]) => {
       expect(err).toBeNull();
       callbackResult = result;
     });
-    expect(callbackResult).toEqual([[], "test-line"]);
+    expect(callbackResult as unknown as [string[], string]).toEqual([[], "test-line"]);
   });
 
   it("handles slash command name completion", async () => {
@@ -536,9 +536,9 @@ describe("buildReadlineCompleter", () => {
     const completer = buildReadlineCompleter(mockSessionManager, mockCore, false);
 
     let prefix: string | null = null;
-    completer("/hel", (_, result) => { prefix = result[1]; });
+    completer("/hel", (_: Error | null, result: [string[], string]) => { prefix = result[1] as string; });
     await new Promise((r) => setTimeout(r, 10));
-    expect(prefix).toBe("/hel");
+    expect(prefix!).toBe("/hel");
   });
 
   it("handles colon syntax prefix", async () => {
@@ -548,9 +548,9 @@ describe("buildReadlineCompleter", () => {
     const completer = buildReadlineCompleter(mockSessionManager, mockCore, false);
 
     let prefix: string | null = null;
-    completer("/prompt:dep", (_, result) => { prefix = result[1]; });
+    completer("/prompt:dep", (_: Error | null, result: [string[], string]) => { prefix = result[1] as string; });
     await new Promise((r) => setTimeout(r, 10));
-    expect(prefix).toBe("dep");
+    expect(prefix!).toBe("dep");
   });
 
   it("handles shell mode prefix", async () => {
@@ -560,9 +560,9 @@ describe("buildReadlineCompleter", () => {
     const completer = buildReadlineCompleter(mockSessionManager, mockCore, true);
 
     let prefix: string | null = null;
-    completer("ls fil", (_, result) => { prefix = result[1]; });
+    completer("ls fil", (_: Error | null, result: [string[], string]) => { prefix = result[1] as string; });
     await new Promise((r) => setTimeout(r, 10));
-    expect(prefix).toBe("fil");
+    expect(prefix!).toBe("fil");
   });
 
   it("handles completion request error gracefully", async () => {
@@ -572,12 +572,12 @@ describe("buildReadlineCompleter", () => {
     const completer = buildReadlineCompleter(mockSessionManager, mockCore, false);
 
     let callbackResult: [string[], string] | null = null;
-    completer("/test", (err, result) => {
+    completer("/test", (err: Error | null, result: [string[], string]) => {
       expect(err).toBeNull();
       callbackResult = result;
     });
     await new Promise((r) => setTimeout(r, 10));
-    expect(callbackResult).toEqual([[], "/test"]);
+    expect(callbackResult as unknown as [string[], string]).toEqual([[], "/test"]);
   });
 });
 
@@ -635,7 +635,7 @@ describe("buildOnQuitHandler", () => {
 
 describe("runInteractiveSession integration", () => {
   const createMockSessionManager = (
-    agent: Record<string, unknown>,
+    agent: Record<string, unknown> | null,
     shouldBusResolve = false,
   ) => ({
     getAgent: () => agent,
@@ -651,7 +651,7 @@ describe("runInteractiveSession integration", () => {
     interrupt: () => {},
   });
 
-  const createMockCore = (overrides: Record<string, unknown> = {}) =>
+  const createMockCore = (overrides: { resolved?: Record<string, unknown>; config?: Record<string, unknown> } = {}) =>
     ({
       resolved: {
         model: "test-model",
@@ -671,11 +671,11 @@ describe("runInteractiveSession integration", () => {
         taskProfile: "task-default",
         taskDefaultRole: "",
         modelRegistry: {},
-        ...overrides.resolved,
+        ...(overrides.resolved ?? {}),
       },
       config: {
         providers: [],
-        ...overrides.config,
+        ...(overrides.config ?? {}),
       },
       hooks: {
         on: () => {},
@@ -744,12 +744,12 @@ describe("runInteractiveSession integration", () => {
 
     expect(capturedCompleter.length).toBe(1);
     let callbackResult: [string[], string] | null = null;
-    capturedCompleter[0]("test-line", (err, result) => {
+    capturedCompleter[0]!("test-line", (err: Error | null, result: [string[], string]) => {
       expect(err).toBeNull();
       callbackResult = result;
     });
     await new Promise((r) => setTimeout(r, 10));
-    expect(callbackResult).toEqual([[], "test-line"]);
+    expect(callbackResult as unknown as [string[], string]).toEqual([[], "test-line"]);
   });
 
   it("completer handles slash command and colon syntax", async () => {
@@ -781,9 +781,9 @@ describe("runInteractiveSession integration", () => {
 
     // Test colon syntax
     let prefix: string | null = null;
-    capturedCompleter[0]("/prompt:dep", (_, result) => { prefix = result[1]; });
+    capturedCompleter[0]!("/prompt:dep", (_: Error | null, result: [string[], string]) => { prefix = result[1] as string; });
     await new Promise((r) => setTimeout(r, 10));
-    expect(prefix).toBe("dep");
+    expect(prefix!).toBe("dep");
   });
 
   it("completer handles shell mode prefix", async () => {
@@ -814,9 +814,9 @@ describe("runInteractiveSession integration", () => {
     }
 
     let prefix: string | null = null;
-    capturedCompleter[0]("ls fil", (_, result) => { prefix = result[1]; });
+    capturedCompleter[0]!("ls fil", (_: Error | null, result: [string[], string]) => { prefix = result[1] as string; });
     await new Promise((r) => setTimeout(r, 10));
-    expect(prefix).toBe("fil");
+    expect(prefix!).toBe("fil");
   });
 
   it("uses custom onSIGINT handler when provided", async () => {
@@ -854,7 +854,7 @@ describe("runInteractiveSession integration", () => {
     }
 
     expect(sigintHandlers.length).toBe(1);
-    sigintHandlers[0]();
+    sigintHandlers[0]!();
     expect(customSigintCalled).toBe(true);
   });
 
@@ -895,7 +895,7 @@ describe("runInteractiveSession integration", () => {
     }
 
     expect(sigintHandlers.length).toBe(1);
-    sigintHandlers[0]();
+    sigintHandlers[0]!();
     expect(consoleLogCalls.some((c) => c.includes("Interrupted"))).toBe(true);
   });
 
@@ -1154,7 +1154,7 @@ describe("buildInteractiveAgent", () => {
       {},
     );
 
-    expect(notifyHooksCalls.some((c) => c[0] === HOOKS.COMMANDS_REGISTER)).toBe(true);
+    expect((notifyHooksCalls as [string, unknown][]).some((c) => c[0] === HOOKS.COMMANDS_REGISTER)).toBe(true);
   });
 });
 
@@ -1213,7 +1213,7 @@ describe("create extension hooks", () => {
     expect(subcommandHandler).toBeDefined();
 
     const registeredCommands: Array<{ name: string }> = [];
-    await subcommandHandler({
+    await subcommandHandler!({
       register: (name: string, opts: Record<string, unknown>) => {
         registeredCommands.push({ name });
       },
@@ -1237,12 +1237,14 @@ describe("create extension hooks", () => {
     expect(toolContextHandler).toBeDefined();
 
     const setCalls: Array<[string, unknown]> = [];
-    toolContextHandler({
+    toolContextHandler!({
       toolCtx: {
-        set: (key: string, value: unknown) => {
-          setCalls.push([key, value]);
+        set: (_key: string, _value: unknown) => {
+          setCalls.push([_key, _value]);
         },
-      },
+      } as never,
+      toolName: "test-tool",
+      agent: {} as never,
     });
 
     // Hook is called and either sets input or does nothing depending on currentInput state
@@ -1259,7 +1261,7 @@ describe("create extension hooks", () => {
     } as never;
 
     const ext = create(mockCore);
-    await ext.cleanup?.();
+    await (ext as { cleanup?: () => Promise<void> }).cleanup?.();
   });
 });
 

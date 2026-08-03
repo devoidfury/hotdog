@@ -5,6 +5,10 @@ import { LlmError } from "../error.ts";
 import { loadProfileFile } from "../config/profiles.ts";
 import { type CoreConfigWithExtensions } from "../config/schema-loader.ts";
 import type { AgentRunResult } from "../../core/agent.ts";
+import type { LlmClient } from "../llm-client/client.ts";
+import type { HookSystem } from "../hooks.ts";
+import type { ModelConfig } from "../config/providers.ts";
+import type { AgentLike } from "./index.ts";
 
 // ── Task Status ─────────────────────────────────────────────────────────────
 
@@ -47,14 +51,6 @@ export class TaskHandle {
 
 // ── TaskManager ─────────────────────────────────────────────────────────────
 
-export interface TaskAgent {
-  abortSignal: AbortSignal | null;
-  run(description: string): Promise<AgentRunResult | undefined>;
-  notifyCompletion(result: string): void;
-  addMessage(msg: Message): void;
-  followQueue?: string[];
-}
-
 export interface SpawnTaskOptions {
   workerModel?: string;
   profile?: string;
@@ -63,16 +59,16 @@ export interface SpawnTaskOptions {
 import { ProfileManager } from "../config/profiles.ts";
 
 export interface TaskManagerOptions {
-  llmClient: unknown;
-  modelRegistry: Record<string, unknown>;
+  llmClient: LlmClient;
+  modelRegistry: Record<string, ModelConfig>;
   config: CoreConfigWithExtensions;
-  hooks: unknown;
-  sessionManager?: { getAgent: () => TaskAgent | undefined } | null;
+  hooks: HookSystem;
+  sessionManager?: { getAgent: () => AgentLike | undefined } | null;
   profileManager?: ProfileManager;
 }
 
 export interface TaskManagerRequiredOptions {
-  buildAgent: (config: Record<string, unknown>) => Promise<TaskAgent>;
+  buildAgent: (config: Record<string, unknown>) => Promise<AgentLike>;
   maxIterations: number;
   taskProfile: string;
   taskRole: string;
@@ -87,17 +83,17 @@ export interface TaskManagerRequiredOptions {
  * - Background execution with AbortController
  */
 export class TaskManager {
-  #buildAgent: (config: Record<string, unknown>) => Promise<TaskAgent>;
-  #llmClient: unknown;
-  #modelRegistry: Record<string, unknown>;
+  #buildAgent: (config: Record<string, unknown>) => Promise<AgentLike>;
+  #llmClient: LlmClient;
+  #modelRegistry: Record<string, ModelConfig>;
   #config: CoreConfigWithExtensions;
-  #hooks: unknown;
-  #sessionManager: { getAgent: () => TaskAgent | undefined } | null;
+  #hooks: HookSystem;
+  #sessionManager: { getAgent: () => AgentLike | undefined } | null;
   #maxIterations: number;
   #taskProfile: string;
   #taskRole: string;
   #tasks: Map<string, {
-    agent: TaskAgent;
+    agent: AgentLike;
     abortController: AbortController;
     statusRef: { value: TaskStatus };
     runPromise: Promise<string>;
@@ -137,7 +133,7 @@ export class TaskManager {
    * Called once after SessionManager is created.
    * @param sessionManager — SessionManager instance
    */
-  setSessionManager(sessionManager: { getAgent: () => TaskAgent | undefined }): void {
+  setSessionManager(sessionManager: { getAgent: () => AgentLike | undefined }): void {
     this.#sessionManager = sessionManager;
   }
 
@@ -279,7 +275,7 @@ export class TaskManager {
    * @returns Result string
    */
   async _runTask(
-    agent: TaskAgent,
+    agent: AgentLike,
     description: string,
     abortController: AbortController,
     statusRef: { value: TaskStatus },
@@ -305,7 +301,7 @@ export class TaskManager {
       }
 
       // Notify sink of completion (for task agents)
-      agent.notifyCompletion(result);
+      agent.notifyCompletion?.(result);
     } catch (err: unknown) {
       if (LlmError.isCancelled(err) || abortController.signal.aborted) {
         statusRef.value = TASK_STATUS.CANCELLED;
@@ -316,7 +312,7 @@ export class TaskManager {
       }
 
       // Still notify sink even on error
-      agent.notifyCompletion(result);
+      agent.notifyCompletion?.(result);
     }
 
     return result;

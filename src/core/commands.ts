@@ -55,6 +55,7 @@ export type ActionFlag = (typeof ACTIONS)[keyof typeof ACTIONS];
 export interface CommandRegistryLike {
   match(cmd: string): string | null;
   get(name: string): { handler?: CommandHandler } | undefined;
+  names(): string[];
 }
 
 // ── Parsing ──────────────────────────────────────────────────────────────────
@@ -68,7 +69,7 @@ export interface CommandRegistryLike {
  */
 export function parseCommand(
   cmd: string | null | undefined,
-  registry?: CommandRegistryLike,
+  registry?: CommandRegistryLike | null,
 ): TypedParsedCommand {
   if (!cmd) return { type: Command.Unknown, value: null };
 

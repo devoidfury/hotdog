@@ -2,7 +2,7 @@
 import { describe, it, expect, beforeEach, afterEach, mock } from "bun:test";
 import { SessionRegistry, createWsServer } from "../../src/extensions/websocket/server.ts";
 import { WebSocketChannel } from "../../src/extensions/websocket/websocket-channel.ts";
-import { createWsMockCore, createWsMockAgentFactory, createWsMockWs } from "../mocks/websocket.ts";
+import { createWsMockCore, createWsMockAgentFactory, createWsMockWs, makeWsMockAgent } from "../mocks/websocket.ts";
 
 type MockWs = ReturnType<typeof createWsMockWs>;
 
@@ -16,32 +16,15 @@ describe("SessionRegistry", () => {
   });
 
   it("creates session with agent-provided sessionId", async () => {
-    const buildAgent = async () => ({
-      sessionId: "agent-session-123",
-      model: "test-model",
-      cancel: () => {},
-      resetCancel: () => {},
-      run: async () => {},
-      executeCommand: async () => ({}),
-      serialize: () => ({}),
-      deserialize: () => {},
-    });
+    const buildAgent = async () => makeWsMockAgent({ sessionId: "agent-session-123" });
     registry = new SessionRegistry({ buildAgent });
     const result = await registry.create();
     expect(result.sessionId).toBe("agent-session-123");
   });
 
   it("creates session with fallback proposed sessionId when agent has no sessionId", async () => {
-    const buildAgent = async (config: { sessionId?: string }) => ({
-      model: "test",
-      sessionId: config.sessionId, // Returns proposed ID
-      cancel: () => {},
-      resetCancel: () => {},
-      run: async () => {},
-      executeCommand: async () => ({}),
-      serialize: () => ({}),
-      deserialize: () => {},
-    });
+    const buildAgent = async (config: { sessionId?: string }) =>
+      makeWsMockAgent({ sessionId: config.sessionId || "fallback-session" });
     registry = new SessionRegistry({ buildAgent });
     const result = await registry.create();
     expect(result.sessionId).toBeDefined();
@@ -188,7 +171,7 @@ describe("createWsServer", () => {
     await new Promise((r) => setTimeout(r, 10));
 
     // Check sessionCreated response
-    const lastMsg = JSON.parse((ws as MockWs).messages[(ws as MockWs).messages.length - 1]);
+    const lastMsg = JSON.parse((ws as MockWs).messages[(ws as MockWs).messages.length - 1]!);
     expect(lastMsg.type).toBe("sessionCreated");
     expect(typeof lastMsg.sessionId).toBe("string");
   });
@@ -202,11 +185,11 @@ describe("createWsServer", () => {
 
     // Wait for session to be created
     await new Promise((r) => setTimeout(r, 10));
-    const sessionId = (ws as WebSocket & { activeSessionId?: string }).activeSessionId;
+    const sessionId = (ws as WebSocket & { activeSessionId?: string }).activeSessionId!;
 
     wsServer.onMessage(ws, JSON.stringify({ type: "deleteSession", sessionId }));
 
-    const lastMsg = JSON.parse((ws as MockWs).messages[(ws as MockWs).messages.length - 1]);
+    const lastMsg = JSON.parse((ws as MockWs).messages[(ws as MockWs).messages.length - 1]!);
     expect(lastMsg.type).toBe("sessionDeleted");
     expect(lastMsg.sessionId).toBe(sessionId);
   });
@@ -220,7 +203,7 @@ describe("createWsServer", () => {
 
     wsServer.onMessage(ws, JSON.stringify({ type: "listSessions" }));
 
-    const lastMsg = JSON.parse((ws as MockWs).messages[(ws as MockWs).messages.length - 1]);
+    const lastMsg = JSON.parse((ws as MockWs).messages[(ws as MockWs).messages.length - 1]!);
     expect(lastMsg.type).toBe("sessions");
     expect(Array.isArray(lastMsg.sessions)).toBe(true);
   });
@@ -233,7 +216,7 @@ describe("createWsServer", () => {
     wsServer.onUpgrade({ url: "/ws", headers: { host: "localhost" } }, ws);
 
     await new Promise((r) => setTimeout(r, 10));
-    const sessionId = (ws as WebSocket & { activeSessionId?: string }).activeSessionId;
+    const sessionId = (ws as WebSocket & { activeSessionId?: string }).activeSessionId!;
 
     wsServer.onMessage(ws, JSON.stringify({ type: "send", sessionId, content: "Hello!" }));
 
@@ -251,7 +234,7 @@ describe("createWsServer", () => {
     wsServer.onUpgrade({ url: "/ws", headers: { host: "localhost" } }, ws);
 
     await new Promise((r) => setTimeout(r, 10));
-    const sessionId = (ws as WebSocket & { activeSessionId?: string }).activeSessionId;
+    const sessionId = (ws as WebSocket & { activeSessionId?: string }).activeSessionId!;
 
     wsServer.onMessage(ws, JSON.stringify({ type: "cancel", sessionId }));
 
@@ -267,7 +250,7 @@ describe("createWsServer", () => {
     wsServer.onUpgrade({ url: "/ws", headers: { host: "localhost" } }, ws);
 
     await new Promise((r) => setTimeout(r, 10));
-    const sessionId = (ws as WebSocket & { activeSessionId?: string }).activeSessionId;
+    const sessionId = (ws as WebSocket & { activeSessionId?: string }).activeSessionId!;
 
     // Test with leading slash
     wsServer.onMessage(ws, JSON.stringify({ type: "command", sessionId, command: "/help" }));
@@ -285,7 +268,7 @@ describe("createWsServer", () => {
     wsServer.onUpgrade({ url: "/ws", headers: { host: "localhost" } }, ws);
 
     await new Promise((r) => setTimeout(r, 10));
-    const sessionId = (ws as WebSocket & { activeSessionId?: string }).activeSessionId;
+    const sessionId = (ws as WebSocket & { activeSessionId?: string }).activeSessionId!;
 
     wsServer.onMessage(ws, JSON.stringify({
       type: "questionAnswer",
@@ -306,7 +289,7 @@ describe("createWsServer", () => {
 
     wsServer.onMessage(ws, JSON.stringify({ type: "unknownType" }));
 
-    const lastMsg = JSON.parse((ws as MockWs).messages[(ws as MockWs).messages.length - 1]);
+    const lastMsg = JSON.parse((ws as MockWs).messages[(ws as MockWs).messages.length - 1]!);
     expect(lastMsg.type).toBe("error");
     expect(lastMsg.message).toContain("Unknown message type");
   });
@@ -320,7 +303,7 @@ describe("createWsServer", () => {
 
     wsServer.onMessage(ws, "not valid json");
 
-    const lastMsg = JSON.parse((ws as MockWs).messages[(ws as MockWs).messages.length - 1]);
+    const lastMsg = JSON.parse((ws as MockWs).messages[(ws as MockWs).messages.length - 1]!);
     expect(lastMsg.type).toBe("error");
     expect(lastMsg.message).toBe("Invalid JSON");
   });
@@ -334,7 +317,7 @@ describe("createWsServer", () => {
 
     wsServer.onMessage(ws, JSON.stringify({ data: "hello" }));
 
-    const lastMsg = JSON.parse((ws as MockWs).messages[(ws as MockWs).messages.length - 1]);
+    const lastMsg = JSON.parse((ws as MockWs).messages[(ws as MockWs).messages.length - 1]!);
     expect(lastMsg.type).toBe("error");
     expect(lastMsg.message).toBe("Message type required");
   });
@@ -347,7 +330,7 @@ describe("createWsServer", () => {
     wsServer.onUpgrade({ url: "/ws", headers: { host: "localhost" } }, ws);
 
     await new Promise((r) => setTimeout(r, 10));
-    const sessionId = (ws as WebSocket & { activeSessionId?: string }).activeSessionId;
+    const sessionId = (ws as WebSocket & { activeSessionId?: string }).activeSessionId!;
 
     // Verify session exists with connected client
     const meta = wsServer.sessionRegistry._test_metadata.get(sessionId!);
@@ -369,7 +352,7 @@ describe("createWsServer", () => {
     wsServer.onUpgrade({ url: "/ws", headers: { host: "localhost" } }, ws);
 
     await new Promise((r) => setTimeout(r, 10));
-    const sessionId = (ws as WebSocket & { activeSessionId?: string }).activeSessionId;
+    const sessionId = (ws as WebSocket & { activeSessionId?: string }).activeSessionId!;
 
     wsServer.onMessage(ws, JSON.stringify({ type: "renameSession", sessionId, newName: "renamed" }));
 
@@ -385,7 +368,7 @@ describe("createWsServer", () => {
     wsServer.onUpgrade({ url: "/ws", headers: { host: "localhost" } }, ws);
 
     await new Promise((r) => setTimeout(r, 10));
-    const firstSessionId = (ws as WebSocket & { activeSessionId?: string }).activeSessionId;
+    const firstSessionId = (ws as WebSocket & { activeSessionId?: string }).activeSessionId!;
 
     // Create a second session
     wsServer.onMessage(ws, JSON.stringify({ type: "createSession" }));
@@ -397,7 +380,7 @@ describe("createWsServer", () => {
     if (secondSessionId) {
       wsServer.onMessage(ws, JSON.stringify({ type: "switchSession", sessionId: secondSessionId }));
 
-      const lastMsg = JSON.parse((ws as MockWs).messages[(ws as MockWs).messages.length - 1]);
+      const lastMsg = JSON.parse((ws as MockWs).messages[(ws as MockWs).messages.length - 1]!);
       expect(lastMsg.type).toBe("sessionState");
       expect(lastMsg.sessionId).toBe(secondSessionId);
     }
@@ -420,7 +403,7 @@ describe("createWsServer - additional coverage", () => {
     const ws1 = createWsMockWs() as unknown as WebSocket;
     wsServer.onUpgrade({ url: "/ws", headers: { host: "localhost" } }, ws1);
     await new Promise((r) => setTimeout(r, 10));
-    const firstSessionId = (ws1 as WebSocket & { activeSessionId?: string }).activeSessionId;
+    const firstSessionId = (ws1 as WebSocket & { activeSessionId?: string }).activeSessionId!;
 
     // Wait and create second session
     await new Promise((r) => setTimeout(r, 50));
@@ -437,7 +420,7 @@ describe("createWsServer - additional coverage", () => {
     wsServer.onUpgrade({ url: "/ws", headers: { host: "localhost" } }, ws2);
     await new Promise((r) => setTimeout(r, 10));
 
-    const newActiveSessionId = (ws2 as WebSocket & { activeSessionId?: string }).activeSessionId;
+    const newActiveSessionId = (ws2 as WebSocket & { activeSessionId?: string }).activeSessionId!;
     // Should be attached to the second (most recent) session
     expect(newActiveSessionId).not.toBe(firstSessionId);
   });
@@ -467,7 +450,7 @@ describe("createWsServer - additional coverage", () => {
     wsServer.onMessage(ws, JSON.stringify({ type: "viewLog", logId: "test-log-id" }));
     await new Promise((r) => setTimeout(r, 10));
 
-    const lastMsg = JSON.parse((ws as MockWs).messages[(ws as MockWs).messages.length - 1]);
+    const lastMsg = JSON.parse((ws as MockWs).messages[(ws as MockWs).messages.length - 1]!);
     // Either logViewed or error if log doesn't exist
     expect(["logViewed", "error"].includes(lastMsg.type)).toBe(true);
   });
@@ -483,7 +466,7 @@ describe("createWsServer - additional coverage", () => {
     wsServer.onMessage(ws, JSON.stringify({ type: "deleteLog", logId: "test-log-id" }));
     await new Promise((r) => setTimeout(r, 10));
 
-    const lastMsg = JSON.parse((ws as MockWs).messages[(ws as MockWs).messages.length - 1]);
+    const lastMsg = JSON.parse((ws as MockWs).messages[(ws as MockWs).messages.length - 1]!);
     // Either logDeleted or error if log doesn't exist
     expect(["logDeleted", "error"].includes(lastMsg.type)).toBe(true);
   });
@@ -502,7 +485,7 @@ describe("createWsServer - additional coverage", () => {
     wsServer.onUpgrade({ url: "/ws?token=valid-token", headers: { host: "localhost" } }, ws);
     await new Promise((r) => setTimeout(r, 10));
 
-    const lastMsg = JSON.parse((ws as MockWs).messages[(ws as MockWs).messages.length - 1]);
+    const lastMsg = JSON.parse((ws as MockWs).messages[(ws as MockWs).messages.length - 1]!);
     expect(lastMsg.type).toBe("sessionCreated");
   });
 
@@ -519,7 +502,7 @@ describe("createWsServer - additional coverage", () => {
     const ws = createWsMockWs() as unknown as WebSocket;
     wsServer.onUpgrade({ url: "/ws", headers: { host: "localhost" } }, ws);
 
-    const firstMsg = JSON.parse((ws as MockWs).messages[0]);
+    const firstMsg = JSON.parse((ws as MockWs).messages[0]!);
     expect(firstMsg.type).toBe("authRequired");
   });
 
@@ -536,7 +519,7 @@ describe("createWsServer - additional coverage", () => {
     const ws = createWsMockWs() as unknown as WebSocket;
     wsServer.onUpgrade({ url: "/ws?token=invalid-token", headers: { host: "localhost" } }, ws);
 
-    const firstMsg = JSON.parse((ws as MockWs).messages[0]);
+    const firstMsg = JSON.parse((ws as MockWs).messages[0]!);
     expect(firstMsg.type).toBe("authError");
   });
 
@@ -626,7 +609,7 @@ describe("createWsServer - additional coverage", () => {
     wsServer.onMessage(ws, JSON.stringify({ type: "loadLog", logId: "test-log-id" }));
     await new Promise((r) => setTimeout(r, 10));
 
-    const lastMsg = JSON.parse((ws as MockWs).messages[(ws as MockWs).messages.length - 1]);
+    const lastMsg = JSON.parse((ws as MockWs).messages[(ws as MockWs).messages.length - 1]!);
     // Either sessionCreated (if log loaded) or error if log doesn't exist
     expect(["sessionCreated", "error"].includes(lastMsg.type)).toBe(true);
   });

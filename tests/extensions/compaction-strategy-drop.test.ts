@@ -8,6 +8,8 @@ function msg(role: string, content: string) {
   return new Message({ role, content });
 }
 
+const noopLlmChat = async (_messages: Array<{ role: string; content: string }>, _model: string): Promise<string> => "";
+
 const defaultSettings: CompactionSettings = {
   enabled: true,
   reserveTokens: 16384,
@@ -87,14 +89,14 @@ describe("DropStrategy", () => {
   describe("execute", () => {
     it("returns null when nothing to compact", async () => {
       const messages = [msg("user", "hello"), msg("assistant", "hi")];
-      const result = await strategy.execute(messages, defaultSettings);
+      const result = await strategy.execute(messages, defaultSettings, noopLlmChat, "model");
       expect(result).toBeNull();
     });
 
     it("returns null when keepRecentMessages is 0", async () => {
       const messages = [msg("user", "hello"), msg("assistant", "hi")];
       const settings = { ...defaultSettings, keepRecentMessages: 0 };
-      const result = await strategy.execute(messages, settings);
+      const result = await strategy.execute(messages, settings, noopLlmChat, "model");
       expect(result).toBeNull();
     });
 
@@ -108,7 +110,7 @@ describe("DropStrategy", () => {
         msg("assistant", "recent response"),
       ];
 
-      const result = await strategy.execute(messages, defaultSettings);
+      const result = await strategy.execute(messages, defaultSettings, noopLlmChat, "model");
 
       expect(result).not.toBeNull();
       expect(result!.summary).toBeNull();
@@ -144,7 +146,7 @@ describe("DropStrategy", () => {
         msg("assistant", "recent"),
       ];
 
-      const result = await strategy.execute(messages, defaultSettings);
+      const result = await strategy.execute(messages, defaultSettings, noopLlmChat, "model");
 
       expect(result).not.toBeNull();
       expect(result!.messagesCompacted).toBeGreaterThan(0);

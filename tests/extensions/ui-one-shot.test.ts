@@ -4,6 +4,7 @@
 import { describe, it, expect, beforeEach, afterEach } from "bun:test";
 import { HOOKS } from "../../src/core/hooks.ts";
 import { HookSystem } from "../../src/core/hooks.ts";
+import { CliSubcommandRegistryLike, SubcommandDefinition } from "../../src/core/extensions/registries.ts";
 
 describe("ui-one-shot extension", () => {
   let originalSessionManagerCreate: unknown = null;
@@ -92,7 +93,7 @@ describe("ui-one-shot extension", () => {
       const ext = create(core);
 
       const cli = { prompt: "hello world" } as any;
-      await ext.hooks![HOOKS.CLI_ARGS_PARSED]({ cli });
+      await ext.hooks![HOOKS.CLI_ARGS_PARSED]!({ cli });
 
       expect(cli.subcommand).toBe("prompt");
     });
@@ -103,7 +104,7 @@ describe("ui-one-shot extension", () => {
       const ext = create(core);
 
       const cli = {} as any;
-      await ext.hooks![HOOKS.CLI_ARGS_PARSED]({ cli });
+      await ext.hooks![HOOKS.CLI_ARGS_PARSED]!({ cli });
 
       expect(cli.subcommand).toBeUndefined();
     });
@@ -114,7 +115,7 @@ describe("ui-one-shot extension", () => {
       const ext = create(core);
 
       const cli = { prompt: "" } as any;
-      await ext.hooks![HOOKS.CLI_ARGS_PARSED]({ cli });
+      await ext.hooks![HOOKS.CLI_ARGS_PARSED]!({ cli });
 
       expect(cli.subcommand).toBeUndefined();
     });
@@ -127,13 +128,13 @@ describe("ui-one-shot extension", () => {
       const ext = create(core);
 
       const registered: Record<string, unknown> = {};
-      const registry = {
-        register: (name: string, opts: Record<string, unknown>) => {
-          registered[name] = opts;
+      const registry: CliSubcommandRegistryLike = {
+        register: (name: string, def: SubcommandDefinition) => {
+          registered[name] = def;
         },
       };
 
-      await ext.hooks![HOOKS.CLI_SUBCOMMANDS_REGISTER](registry);
+      await ext.hooks![HOOKS.CLI_SUBCOMMANDS_REGISTER]!(registry);
 
       expect(registered).toHaveProperty("prompt");
       expect((registered.prompt as any).description).toContain("One-shot prompt mode");
@@ -148,8 +149,8 @@ describe("ui-one-shot extension", () => {
       core.resolved = undefined;
       const ext = create(core);
 
-      const registry: Record<string, unknown> = {};
-      await ext.hooks![HOOKS.CLI_SUBCOMMANDS_REGISTER]({ register: (name: string, opts: Record<string, unknown>) => { registry[name] = opts; } });
+      const registry: Record<string, SubcommandDefinition> = {};
+      await ext.hooks![HOOKS.CLI_SUBCOMMANDS_REGISTER]!({ register: (name: string, def: SubcommandDefinition) => { registry[name] = def; } } as CliSubcommandRegistryLike);
 
       await expect((registry.prompt as any).handler({}, core)).rejects.toThrow();
     });
@@ -178,8 +179,8 @@ describe("ui-one-shot extension", () => {
         };
       };
 
-      const registry: Record<string, unknown> = {};
-      await ext.hooks![HOOKS.CLI_SUBCOMMANDS_REGISTER]({ register: (name: string, opts: Record<string, unknown>) => { registry[name] = opts; } });
+      const registry: Record<string, SubcommandDefinition> = {};
+      await ext.hooks![HOOKS.CLI_SUBCOMMANDS_REGISTER]!({ register: (name: string, def: SubcommandDefinition) => { registry[name] = def; } } as CliSubcommandRegistryLike);
 
       const exitCode = await (registry.prompt as any).handler({ prompt: "test prompt" }, core);
 
@@ -212,8 +213,8 @@ describe("ui-one-shot extension", () => {
         onSessionEvents: () => () => {},
       });
 
-      const registry: Record<string, unknown> = {};
-      await ext.hooks![HOOKS.CLI_SUBCOMMANDS_REGISTER]({ register: (name: string, opts: Record<string, unknown>) => { registry[name] = opts; } });
+      const registry: Record<string, SubcommandDefinition> = {};
+      await ext.hooks![HOOKS.CLI_SUBCOMMANDS_REGISTER]!({ register: (name: string, def: SubcommandDefinition) => { registry[name] = def; } } as CliSubcommandRegistryLike);
 
       const exitCode = await (registry.prompt as any).handler({ args: ["hello", "world"] }, core);
 
@@ -244,8 +245,8 @@ describe("ui-one-shot extension", () => {
         };
       };
 
-      const registry: Record<string, unknown> = {};
-      await ext.hooks![HOOKS.CLI_SUBCOMMANDS_REGISTER]({ register: (name: string, opts: Record<string, unknown>) => { registry[name] = opts; } });
+      const registry: Record<string, SubcommandDefinition> = {};
+      await ext.hooks![HOOKS.CLI_SUBCOMMANDS_REGISTER]!({ register: (name: string, def: SubcommandDefinition) => { registry[name] = def; } } as CliSubcommandRegistryLike);
 
       await (registry.prompt as any).handler({ prompt: "test", sessionId: "custom-session-id" }, core);
 
@@ -271,8 +272,8 @@ describe("ui-one-shot extension", () => {
         onSessionEvents: () => () => {},
       });
 
-      const registry: Record<string, unknown> = {};
-      await ext.hooks![HOOKS.CLI_SUBCOMMANDS_REGISTER]({ register: (name: string, opts: Record<string, unknown>) => { registry[name] = opts; } });
+      const registry: Record<string, SubcommandDefinition> = {};
+      await ext.hooks![HOOKS.CLI_SUBCOMMANDS_REGISTER]!({ register: (name: string, def: SubcommandDefinition) => { registry[name] = def; } } as CliSubcommandRegistryLike);
 
       const exitCode = await (registry.prompt as any).handler({ prompt: "test" }, core);
 
@@ -302,8 +303,8 @@ describe("ui-one-shot extension", () => {
         onSessionEvents: () => () => {},
       });
 
-      const registry: Record<string, unknown> = {};
-      await ext.hooks![HOOKS.CLI_SUBCOMMANDS_REGISTER]({ register: (name: string, opts: Record<string, unknown>) => { registry[name] = opts; } });
+      const registry: Record<string, SubcommandDefinition> = {};
+      await ext.hooks![HOOKS.CLI_SUBCOMMANDS_REGISTER]!({ register: (name: string, def: SubcommandDefinition) => { registry[name] = def; } } as CliSubcommandRegistryLike);
 
       const exitCode = await (registry.prompt as any).handler({ prompt: "test" }, core);
 
@@ -332,8 +333,8 @@ describe("ui-one-shot extension", () => {
         onSessionEvents: () => () => {},
       });
 
-      const registry: Record<string, unknown> = {};
-      await ext.hooks![HOOKS.CLI_SUBCOMMANDS_REGISTER]({ register: (name: string, opts: Record<string, unknown>) => { registry[name] = opts; } });
+      const registry: Record<string, SubcommandDefinition> = {};
+      await ext.hooks![HOOKS.CLI_SUBCOMMANDS_REGISTER]!({ register: (name: string, def: SubcommandDefinition) => { registry[name] = def; } } as CliSubcommandRegistryLike);
 
       await (registry.prompt as any).handler({ prompt: "test" }, core);
 
@@ -363,8 +364,8 @@ describe("ui-one-shot extension", () => {
         };
       };
 
-      const registry: Record<string, unknown> = {};
-      await ext.hooks![HOOKS.CLI_SUBCOMMANDS_REGISTER]({ register: (name: string, opts: Record<string, unknown>) => { registry[name] = opts; } });
+      const registry: Record<string, SubcommandDefinition> = {};
+      await ext.hooks![HOOKS.CLI_SUBCOMMANDS_REGISTER]!({ register: (name: string, def: SubcommandDefinition) => { registry[name] = def; } } as CliSubcommandRegistryLike);
 
       await (registry.prompt as any).handler({ prompt: "test" }, core);
 
@@ -395,8 +396,8 @@ describe("ui-one-shot extension", () => {
         };
       };
 
-      const registry: Record<string, unknown> = {};
-      await ext.hooks![HOOKS.CLI_SUBCOMMANDS_REGISTER]({ register: (name: string, opts: Record<string, unknown>) => { registry[name] = opts; } });
+      const registry: Record<string, SubcommandDefinition> = {};
+      await ext.hooks![HOOKS.CLI_SUBCOMMANDS_REGISTER]!({ register: (name: string, def: SubcommandDefinition) => { registry[name] = def; } } as CliSubcommandRegistryLike);
 
       await (registry.prompt as any).handler({ prompt: "test" }, core);
 
@@ -433,8 +434,8 @@ describe("ui-one-shot extension", () => {
         };
       };
 
-      const registry: Record<string, unknown> = {};
-      await ext.hooks![HOOKS.CLI_SUBCOMMANDS_REGISTER]({ register: (name: string, opts: Record<string, unknown>) => { registry[name] = opts; } });
+      const registry: Record<string, SubcommandDefinition> = {};
+      await ext.hooks![HOOKS.CLI_SUBCOMMANDS_REGISTER]!({ register: (name: string, def: SubcommandDefinition) => { registry[name] = def; } } as CliSubcommandRegistryLike);
 
       await (registry.prompt as any).handler({ prompt: "test" }, core);
 
@@ -468,8 +469,8 @@ describe("ui-one-shot extension", () => {
         };
       };
 
-      const registry: Record<string, unknown> = {};
-      await ext.hooks![HOOKS.CLI_SUBCOMMANDS_REGISTER]({ register: (name: string, opts: Record<string, unknown>) => { registry[name] = opts; } });
+      const registry: Record<string, SubcommandDefinition> = {};
+      await ext.hooks![HOOKS.CLI_SUBCOMMANDS_REGISTER]!({ register: (name: string, def: SubcommandDefinition) => { registry[name] = def; } } as CliSubcommandRegistryLike);
 
       await (registry.prompt as any).handler({ prompt: "test" }, core);
 
@@ -512,8 +513,8 @@ describe("ui-one-shot extension", () => {
         };
       };
 
-      const registry: Record<string, unknown> = {};
-      await ext.hooks![HOOKS.CLI_SUBCOMMANDS_REGISTER]({ register: (name: string, opts: Record<string, unknown>) => { registry[name] = opts; } });
+      const registry: Record<string, SubcommandDefinition> = {};
+      await ext.hooks![HOOKS.CLI_SUBCOMMANDS_REGISTER]!({ register: (name: string, def: SubcommandDefinition) => { registry[name] = def; } } as CliSubcommandRegistryLike);
 
       await (registry.prompt as any).handler({ prompt: "test" }, core);
 
@@ -543,8 +544,8 @@ describe("ui-one-shot extension", () => {
         onSessionEvents: () => () => {},
       });
 
-      const registry: Record<string, unknown> = {};
-      await ext.hooks![HOOKS.CLI_SUBCOMMANDS_REGISTER]({ register: (name: string, opts: Record<string, unknown>) => { registry[name] = opts; } });
+      const registry: Record<string, SubcommandDefinition> = {};
+      await ext.hooks![HOOKS.CLI_SUBCOMMANDS_REGISTER]!({ register: (name: string, def: SubcommandDefinition) => { registry[name] = def; } } as CliSubcommandRegistryLike);
 
       // Should not throw with custom colors/theme
       const exitCode = await (registry.prompt as any).handler(

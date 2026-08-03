@@ -167,7 +167,7 @@ export class SessionLog {
    */
   async append(entry: LogEntry): Promise<void> {
     await this._ensureDir();
-    const line = JSON.stringify(stripNulls(entry as unknown as Record<string, unknown>));
+    const line = JSON.stringify(stripNulls(entry));
     await appendFile(this.path, line + "\n");
   }
 

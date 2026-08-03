@@ -1,6 +1,53 @@
 // Shared mock helpers for websocket server tests.
 
 import { mock } from "bun:test";
+import type { AgentLike } from "../../src/core/session/index.ts";
+import type { HookSystem } from "../../src/core/hooks.ts";
+import type { MessageLog } from "../../src/core/context/message-log.ts";
+
+const mockHooks = {
+  notifyHooks: () => {},
+  runHookPipeline: async () => undefined,
+  registerHook: () => {},
+  unregisterHook: () => {},
+} as unknown as HookSystem;
+
+const mockLog: MessageLog = {
+  push: () => 0,
+  replace: () => {},
+  get: () => undefined,
+  getAll: () => [],
+  toJSON: () => [],
+  length: 0,
+  clear: () => {},
+  pop: () => undefined,
+  slice: () => [],
+  *[Symbol.iterator]() {},
+} as unknown as MessageLog;
+
+function makeMockAgent(overrides: Partial<AgentLike> = {}): AgentLike {
+  return {
+    sessionId: "test",
+    model: "test-model",
+    profileName: "default",
+    hooks: mockHooks,
+    log: mockLog,
+    sink: null,
+    toolWhitelist: null,
+    role: undefined,
+    profileBody: undefined,
+    enqueueCallback: null,
+    serialize: () => ({}),
+    deserialize: () => {},
+    run: async () => undefined,
+    clearContext: async () => {},
+    cancel: () => {},
+    resetCancel: () => {},
+    executeCommand: async () => null,
+    addMessage: () => {},
+    ...overrides,
+  };
+}
 
 export function createWsMockCore(): any {
   return {
@@ -35,21 +82,16 @@ export function createWsMockCore(): any {
   };
 }
 
-export function createWsMockAgentFactory(): (config: { model?: string; sessionId?: string }) => Promise<any> {
-  return async (config: { model?: string; sessionId?: string }) => ({
-    sessionId: config.sessionId || "test",
-    model: "test-model",
-    profileName: "default",
-    modelRegistry: { "test-model": {} },
-    log: [],
-    sink: null,
-    cancel: () => {},
-    resetCancel: () => {},
-    run: async () => {},
-    executeCommand: async () => ({}),
-    serialize: () => ({}),
-    deserialize: () => {},
-  });
+export function createWsMockAgentFactory(): (config: { model?: string; sessionId?: string }) => Promise<AgentLike> {
+  return async (config: { model?: string; sessionId?: string }) =>
+    makeMockAgent({
+      sessionId: config.sessionId || "test",
+      model: config.model || "test-model",
+    });
+}
+
+export function makeWsMockAgent(overrides?: Partial<AgentLike>): AgentLike {
+  return makeMockAgent(overrides);
 }
 
 export function createWsMockWs(): WebSocket & { messages: string[] } {

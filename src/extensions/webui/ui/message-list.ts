@@ -61,9 +61,9 @@ interface CommandResultMessage { content: string; }
 interface LogEntry {
   source: string;
   content: string;
-  images?: unknown[];
+  images?: Array<{ url: string }>;
   reasoning_content?: string | null;
-  tool_calls?: unknown[] | null;
+  tool_calls?: Array<{ id: string; name: string; args: Record<string, unknown> }> | null;
   tool_call_id?: string | null;
 }
 
@@ -84,7 +84,7 @@ interface TokenUsageMessage {
 }
 
 interface CompactionResultMessage { summary: string; messagesCompacted: number; }
-interface SessionStateMessage { key: string; value: unknown; }
+interface SessionStateMessage { key: string; value: string | string[] | boolean | number; }
 interface ErrorMessage { message: string; }
 
 // ── Options ─────────────────────────────────────────────────────────────────

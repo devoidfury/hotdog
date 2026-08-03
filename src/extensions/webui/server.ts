@@ -11,10 +11,16 @@ import {
 import webuiFrontend from "./ui/index.html";
 import { ExtensionError } from "../../core/error.ts";
 import { ProfileManager, type ProfileDef } from "../../core/config/index.ts";
+import type { WebSocket as BunWebSocket } from "bun";
 
 
 
 // ── Types ───────────────────────────────────────────────────────────────────
+
+interface WebuiWsData {
+  token: string;
+  url: string;
+}
 
 interface WebuiConfig {
   port?: number;
@@ -128,7 +134,7 @@ export async function createWebuiServer(
         }
         // Try to upgrade — Bun.serve handles the rest
         const upgraded = server.upgrade(req, {
-          data: { token, url: req.url } as unknown as undefined,
+          data: { token, url: req.url } as WebuiWsData,
         });
         if (!upgraded) {
           return Response.json({ error: "Upgrade failed" }, { status: 400 });
@@ -157,18 +163,17 @@ export async function createWebuiServer(
 
     // WebSocket handlers
     websocket: {
-      open(ws) {
-        const wsData = ws.data as unknown as { url?: string };
-        const { url } = wsData;
+      open(ws: BunWebSocket<WebuiWsData>) {
+        const { url } = ws.data;
         wsServer.onUpgrade(
           { url: url || "", headers: { host: "localhost" } },
           ws as unknown as WebSocket,
         );
       },
-      message(ws, data) {
+      message(ws: BunWebSocket<WebuiWsData>, data: string | Buffer) {
         wsServer.onMessage(ws as unknown as WebSocket, data);
       },
-      close(ws) {
+      close(ws: BunWebSocket<WebuiWsData>) {
         wsServer.onClose(ws as unknown as WebSocket);
       },
     },

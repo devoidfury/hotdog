@@ -316,7 +316,7 @@ export interface ResolutionContext {
   cli?: Record<string, unknown>;
   config?: Record<string, unknown>;
   provider?: ProviderDef | null;
-  profile?: ProfileDef | null;
+  profile?: Partial<ProfileDef> | null;
   configDir?: string;
   profileName?: string;
   profilesPath?: string;

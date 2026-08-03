@@ -3,6 +3,7 @@
 // Registers subcommands via the cli:subcommandsRegister hook.
 
 import { HOOKS } from "../../core/hooks.ts";
+import { CliSubcommandRegistryLike } from "../../core/extensions/registries.ts";
 import { LlmClient, ProviderConfig } from "../../core/llm-client/client.ts";
 import { SkillsLoader } from "../skills/loader.ts";
 import {
@@ -30,6 +31,7 @@ import {
   ExtensionInstance,
   ResolvedConfig,
 } from "../../core/extensions/types.ts";
+import type { BuildAgentConfig } from "../../core/config/index.ts";
 import path from "node:path";
 import fs from "node:fs/promises";
 
@@ -65,7 +67,7 @@ interface TraceContext {
   cli: CliArgv;
   config: Record<string, unknown>;
   provider: ProviderDef | null;
-  profile: Record<string, unknown>;
+  profile: Partial<ProfileDef>;
   profileName: string;
   profilesPath: string;
   [key: string]: unknown;
@@ -136,7 +138,7 @@ async function runInfo(cli: CliArgv, core: CoreContext): Promise<number> {
 }
 
 function printInfoText(
-  resolved: ResolvedConfig,
+  resolved: BuildAgentConfig,
   modelRegistry: Record<string, unknown>,
   providers: ProviderDef[],
   skillsLoader: SkillsLoader,
@@ -228,7 +230,7 @@ function printInfoText(
 }
 
 function printInfoJson(
-  resolved: ResolvedConfig,
+  resolved: BuildAgentConfig,
   modelRegistry: Record<string, unknown>,
   providers: ProviderDef[],
   skillsLoader: SkillsLoader,
@@ -307,7 +309,7 @@ function traceConfigResolution(
   };
 
   // Use the real resolver to get the final value
-  result.resolvedValue = resolveKey(keyName, schema, context as unknown as ResolutionContext);
+  result.resolvedValue = resolveKey(keyName, schema, context);
 
   // Walk layers to build trace display info (separate from resolution logic)
   for (const layer of layers || []) {
@@ -318,7 +320,7 @@ function traceConfigResolution(
     };
 
     if ("default" in layer) {
-      const defaultValue = resolveLayerValue(layer, context as unknown as ResolutionContext);
+      const defaultValue = resolveLayerValue(layer, context);
       layerInfo.matched = true;
       layerInfo.value = defaultValue;
       result.resolvedFrom = "default";
@@ -326,12 +328,12 @@ function traceConfigResolution(
       break;
     }
 
-    const value = resolveLayerValue(layer, context as unknown as ResolutionContext);
+    const value = resolveLayerValue(layer, context);
     layerInfo.value = value;
 
     if (value !== undefined && value !== null && value !== "") {
       if (layer.cast && typeof layer.cast === "function") {
-        const casted = layer.cast(value, context as unknown as ResolutionContext);
+        const casted = layer.cast(value, context);
         if (casted === undefined) {
           layerInfo.castSkipped = true;
           result.layers.push(layerInfo);
@@ -363,7 +365,7 @@ async function printConfigDebug(
   cli: CliArgv,
   config: Record<string, unknown>,
   providers: ProviderDef[],
-  resolved: ResolvedConfig,
+  resolved: BuildAgentConfig,
 ): Promise<number> {
   const profileName = (cli.profile as string) || (config.profileName as string) || "default";
   const configDir = resolved.configDir || resolveConfigDir(cli.configDir);
@@ -388,7 +390,7 @@ async function printConfigDebug(
     : null;
 
   // Profile merge
-  const profile: Record<string, unknown> = {};
+  const profile: Partial<ProfileDef> = {};
   if (configProfile) {
     Object.assign(profile, configProfile);
   }
@@ -590,7 +592,7 @@ async function runShowPrompt(cli: CliArgv, core: CoreContext): Promise<number> {
     profileName: resolved.profileName || "default",
     role: resolved.role as string | undefined,
     profileBody: resolved.profileBody as string | undefined,
-    config: resolved as unknown as AgentConfig,
+    config: resolved as AgentConfig,
   });
   // Build the system prompt via the real hook mechanism
   await agent.ensureSystemPrompt();
@@ -680,7 +682,7 @@ async function runProfileList(
       profileFiles,
       configProfiles,
       allNames,
-      resolved.profileName,
+      resolved.profileName ?? "default",
       profilesPath,
       visibleWorkerNames,
     );
@@ -690,7 +692,7 @@ async function runProfileList(
     profileFiles,
     configProfiles,
     allNames,
-    resolved.profileName,
+    resolved.profileName ?? "default",
     profilesPath,
     visibleWorkerNames,
     configDir,
@@ -902,9 +904,7 @@ function printProfileListJson(
 export function create(core: CoreContext): ExtensionInstance {
   return {
     hooks: {
-      [HOOKS.CLI_SUBCOMMANDS_REGISTER]: async (
-        registry: { register: (name: string, opts: Record<string, unknown>) => void },
-      ) => {
+      [HOOKS.CLI_SUBCOMMANDS_REGISTER]: async (registry: CliSubcommandRegistryLike) => {
         registry.register("info", {
           description: "Show system info and diagnostics",
           handler: async (cli: CliArgv, core: CoreContext) => {

@@ -4,6 +4,7 @@ import { HookSystem, HOOKS } from "../../src/core/hooks.ts";
 import { createCommandRegistry } from "../../src/core/extensions/registries.ts";
 import { OUTPUT_EVENT } from "../../src/core/context/output.ts";
 import { ACTIONS } from "../../src/core/commands.ts";
+import type { Agent } from "../../src/core/agent.ts";
 
 // ── Helpers ────────────────────────────────────────────────────────────────
 
@@ -113,7 +114,7 @@ describe("Loop extension", () => {
       await ext.hooks![HOOKS.COMMANDS_REGISTER]!({ registry, agent } as any);
 
       const def = registry.get("loop")!;
-      const result = await def.handler!(agent, "loop write a poem");
+      const result = await def.handler!(agent as unknown as Agent, "loop write a poem");
 
       expect((result as any).action).toBe(ACTIONS.DISPLAY);
       expect(agent.getEnqueued()).toContain("write a poem");
@@ -136,7 +137,7 @@ describe("Loop extension", () => {
       await ext.hooks![HOOKS.COMMANDS_REGISTER]!({ registry, agent } as any);
 
       const def = registry.get("loop")!;
-      const result = await def.handler!(agent, "loop");
+      const result = await def.handler!(agent as unknown as Agent, "loop");
 
       expect((result as any).action).toBe(ACTIONS.DISPLAY);
       expect((result as any).content).toContain("Usage:");
@@ -155,7 +156,7 @@ describe("Loop extension", () => {
 
       // Start the loop
       const def = registry.get("loop")!;
-      await def.handler!(agent, "loop test prompt");
+      await def.handler!(agent as unknown as Agent, "loop test prompt");
 
       // Simulate TURN_END with stopped: true
       const turnEndHook = ext.hooks![HOOKS.TURN_END]!;
@@ -179,7 +180,7 @@ describe("Loop extension", () => {
       await ext.hooks![HOOKS.COMMANDS_REGISTER]!({ registry, agent } as any);
 
       const def = registry.get("loop")!;
-      await def.handler!(agent, "loop test");
+      await def.handler!(agent as unknown as Agent, "loop test");
 
       const enqueuedBefore = agent.getEnqueued().length;
 
@@ -199,7 +200,7 @@ describe("Loop extension", () => {
       await ext.hooks![HOOKS.COMMANDS_REGISTER]!({ registry, agent } as any);
 
       const def = registry.get("loop")!;
-      await def.handler!(agent, "loop test");
+      await def.handler!(agent as unknown as Agent, "loop test");
 
       const turnEndHook = ext.hooks![HOOKS.TURN_END]!;
       await turnEndHook(turnEndPayload({ stopped: true, agent: agent as any }));
@@ -218,7 +219,7 @@ describe("Loop extension", () => {
       await ext.hooks![HOOKS.COMMANDS_REGISTER]!({ registry, agent } as any);
 
       const def = registry.get("loop")!;
-      await def.handler!(agent, "loop test");
+      await def.handler!(agent as unknown as Agent, "loop test");
 
       // Simulate cancellation
       agent.cancelled = true;
@@ -246,7 +247,7 @@ describe("Loop extension", () => {
       await ext.hooks![HOOKS.COMMANDS_REGISTER]!({ registry, agent } as any);
 
       const def = registry.get("loop")!;
-      await def.handler!(agent, "loop test");
+      await def.handler!(agent as unknown as Agent, "loop test");
 
       // Simulate TURN_END from agent's finally block on Ctrl+C
       const turnEndHook = ext.hooks![HOOKS.TURN_END]!;
@@ -270,7 +271,7 @@ describe("Loop extension", () => {
       await ext.hooks![HOOKS.COMMANDS_REGISTER]!({ registry, agent } as any);
 
       const def = registry.get("loop")!;
-      await def.handler!(agent, "loop test");
+      await def.handler!(agent as unknown as Agent, "loop test");
 
       const turnEndHook = ext.hooks![HOOKS.TURN_END]!;
 
@@ -296,7 +297,7 @@ describe("Loop extension", () => {
       await ext.hooks![HOOKS.COMMANDS_REGISTER]!({ registry, agent } as any);
 
       const def = registry.get("loop")!;
-      await def.handler!(agent, "loop test");
+      await def.handler!(agent as unknown as Agent, "loop test");
 
       const turnEndHook = ext.hooks![HOOKS.TURN_END]!;
       await turnEndHook(turnEndPayload({ stopped: true, agent: agent as any }));
@@ -317,7 +318,7 @@ describe("Loop extension", () => {
 
       // Start the loop
       const def = registry.get("loop")!;
-      await def.handler!(agent, "loop test");
+      await def.handler!(agent as unknown as Agent, "loop test");
 
       // Simulate /quit input
       const inputHook = ext.hooks![HOOKS.INPUT]!;
@@ -342,7 +343,7 @@ describe("Loop extension", () => {
       await ext.hooks![HOOKS.COMMANDS_REGISTER]!({ registry, agent } as any);
 
       const def = registry.get("loop")!;
-      await def.handler!(agent, "loop test");
+      await def.handler!(agent as unknown as Agent, "loop test");
 
       const inputHook = ext.hooks![HOOKS.INPUT]!;
       const result = inputHook(inputPayload("/exit", agent));
@@ -359,7 +360,7 @@ describe("Loop extension", () => {
       await ext.hooks![HOOKS.COMMANDS_REGISTER]!({ registry, agent } as any);
 
       const def = registry.get("loop")!;
-      await def.handler!(agent, "loop test");
+      await def.handler!(agent as unknown as Agent, "loop test");
 
       const inputHook = ext.hooks![HOOKS.INPUT]!;
       const result = inputHook(inputPayload("hello world", agent));
@@ -390,7 +391,7 @@ describe("Loop extension", () => {
       await ext.hooks![HOOKS.COMMANDS_REGISTER]!({ registry, agent } as any);
 
       const def = registry.get("loop")!;
-      await def.handler!(agent, "loop test");
+      await def.handler!(agent as unknown as Agent, "loop test");
 
       // Simulate one iteration completing
       const turnEndHook = ext.hooks![HOOKS.TURN_END]!;

@@ -32,6 +32,10 @@ export interface LogEntry {
   tool_calls?: ToolCall[] | null;
   tool_call_id?: string | null;
   tool_name?: string;
+  // Legacy fields for backwards compatibility with older log formats
+  role?: string;
+  result?: string;
+  [key: string]: unknown;
 }
 
 // ── Session File Paths ──────────────────────────────────────────────────────

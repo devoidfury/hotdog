@@ -70,6 +70,15 @@ class MinimalChannel extends Channel {
   protected _unsubscribe(_sessionId: string): void {}
 
   protected _cleanup(): void {}
+
+  // Public wrappers for testing protected base methods
+  public async testHandleQuit(): Promise<void> {
+    await this.handleQuit();
+  }
+
+  public async testHandleHelp(): Promise<void> {
+    await this.handleHelp();
+  }
 }
 
 function createMockSessionManager(overrides: Partial<ChannelSessionManager> = {}): ChannelSessionManager {
@@ -427,14 +436,14 @@ describe("Channel - base class default handlers", () => {
     const sm = createMockSessionManager();
     const channel = new MinimalChannel({ sessionManager: sm });
     expect(channel.isClosed).toBe(false);
-    await channel.handleQuit();
+    await channel.testHandleQuit();
     expect(channel.isClosed).toBe(true);
   });
 
   it("base handleHelp is a no-op", async () => {
     const sm = createMockSessionManager();
     const channel = new MinimalChannel({ sessionManager: sm });
-    await channel.handleHelp();
+    await channel.testHandleHelp();
     // Should not throw and produce no output
     expect(channel.writeCalls.length).toBe(0);
   });

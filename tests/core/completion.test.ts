@@ -11,7 +11,41 @@ import {
 import { describe, it, expect, beforeEach } from "bun:test";
 
 // Mock agent for tests
-const mockAgent = {} as unknown as import("../../src/core/agent.ts").Agent;
+const mockAgent: import("../../src/core/session/index.ts").AgentLike = {
+  sessionId: "test",
+  model: "test-model",
+  profileName: undefined,
+  hooks: {
+    notifyHooks: () => {},
+    runHookPipeline: async () => undefined,
+    registerHook: () => {},
+    unregisterHook: () => {},
+  } as unknown as import("../../src/core/hooks.ts").HookSystem,
+  log: {
+    push: () => 0,
+    replace: () => {},
+    get: () => undefined,
+    getAll: () => [],
+    toJSON: () => [],
+    length: 0,
+    clear: () => {},
+    pop: () => undefined,
+    slice: () => [],
+  } as unknown as import("../../src/core/context/message-log.ts").MessageLog,
+  sink: null,
+  toolWhitelist: null,
+  role: undefined,
+  profileBody: undefined,
+  enqueueCallback: null,
+  serialize: () => ({}),
+  deserialize: () => {},
+  run: async () => undefined,
+  clearContext: async () => {},
+  cancel: () => {},
+  resetCancel: () => {},
+  executeCommand: async () => null,
+  addMessage: () => {},
+};
 
 function makeCtx(overrides: Partial<CompletionContext> = {}): CompletionContext {
   return {
@@ -240,7 +274,7 @@ describe("CompletionService — context access", () => {
   });
 
   it("should pass context to matchers", async () => {
-    let receivedCtx: CompletionContext | null = null;
+    let receivedCtx: any = null;
     svc.register(
       (ctx) => { receivedCtx = ctx; return true; },
       () => [{ value: "x" }],
@@ -251,7 +285,7 @@ describe("CompletionService — context access", () => {
   });
 
   it("should pass context to handlers", async () => {
-    let receivedCtx: CompletionContext | null = null;
+    let receivedCtx: any = null;
     svc.register(
       () => true,
       (ctx) => { receivedCtx = ctx; return [{ value: "x" }]; },

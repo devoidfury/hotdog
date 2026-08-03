@@ -20,7 +20,7 @@ import {
 } from "./extensions/index.ts";
 import { HOOKS, type HookSystem, type HookTraceOptions } from "./hooks.ts";
 import { createCompletionService, type CompletionService } from "./completion.ts";
-import type { ExtensionInstance, ToolMetadataPayload } from "./extensions/types.ts";
+import type { CoreContext, ExtensionInstance, ToolMetadataPayload } from "./extensions/types.ts";
 import type { ToolMetadata } from "./extensions/tool-registry.ts";
 import { parseArgs, generateHelpText } from "./cli.ts";
 import {
@@ -150,13 +150,8 @@ async function loadExtensions(
  * Core infrastructure type — the internal core object that powers both
  * the extension loader and the CoreContext passed to extensions.
  */
-export interface CoreInfrastructure extends LoaderCore {
-  extensions: ExtensionLoader;
-  completion: CompletionService;
-  service: (name: string) => unknown;
+export interface CoreInfrastructure extends CoreContext {
   buildConfig?: typeof buildConfig;
-  resolved?: ResolvedConfig;
-  config: CoreConfigWithExtensions;
 }
 
 function createCore(
@@ -188,10 +183,11 @@ function createCore(
   // Build the core object first, then pass it to the ExtensionLoader.
   // This ensures extensions receive the same core reference (including resolved)
   // that main() uses, rather than a separate LoaderCore without resolved.
-  const core: CoreInfrastructure = {
+  // Note: extensions is set below to break the circular dependency.
+  const core = {
     hooks,
     toolRegistry,
-    extensions: null as unknown as ExtensionLoader, // set below
+    extensions: null!,
     services,
     completion,
     config: coreConfig,
@@ -199,7 +195,7 @@ function createCore(
     configRegistry,
     service: (name: string) => services.get(name),
     buildConfig: options.buildConfig,
-  };
+  } as CoreInfrastructure;
 
   core.extensions = createExtensionLoader(core as LoaderCore);
 

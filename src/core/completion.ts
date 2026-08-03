@@ -6,7 +6,7 @@
 // Results are merged and returned to the UI layer.
 
 import { logger } from "./logger.ts";
-import type { Agent } from "./agent.ts";
+import type { AgentLike } from "./session/index.ts";
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -23,7 +23,7 @@ export interface CompletionContext {
   /** Current argument being typed after the command. */
   commandArg?: string;
   /** The current agent instance. */
-  agent: Agent;
+  agent: AgentLike;
 }
 
 /**

@@ -84,7 +84,7 @@ export function reactiveState<T>(initialValue: T): Atom<T> {
  */
 export function effect(
   fn: () => void,
-  dependencies: Atom<any>[],
+  dependencies: { effect(fn: () => void): () => void }[],
 ): () => void {
   // Wrap so the same function reference is used across all deps
   const wrapped = (): void => {

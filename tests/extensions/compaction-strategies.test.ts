@@ -22,7 +22,7 @@ function makeMessage(role: string, content = "x".repeat(100)) {
   return new Message({ role, content });
 }
 
-const noopLlmChat = async (): Promise<string> => "";
+const noopLlmChat = async (_messages: Array<{ role: string; content: string }>, _model: string): Promise<string> => "";
 
 const defaultSettings = {
   enabled: true,
@@ -45,7 +45,7 @@ describe("DropStrategy", () => {
     const messages = [makeMessage("user"), makeMessage("assistant")];
     const settings = { ...defaultSettings, keepRecentMessages: 3 };
 
-    const result = await new DropStrategy().execute(messages, settings);
+    const result = await new DropStrategy().execute(messages, settings, noopLlmChat, "model");
     expect(result).toBeNull();
   });
 
@@ -53,7 +53,7 @@ describe("DropStrategy", () => {
     const messages = Array.from({ length: 10 }, (_, i) => makeMessage(i % 2 === 0 ? "user" : "assistant"));
     const settings = { ...defaultSettings, keepRecentMessages: 2 };
 
-    const result = await new DropStrategy().execute(messages, settings);
+    const result = await new DropStrategy().execute(messages, settings, noopLlmChat, "model");
 
     expect(result).not.toBeNull();
     expect(result!.summary).toBeNull();
@@ -66,7 +66,7 @@ describe("DropStrategy", () => {
     const keepRecentMessages = 5;
     const settings = { ...defaultSettings, keepRecentMessages };
 
-    const result = await new DropStrategy().execute(messages, settings);
+    const result = await new DropStrategy().execute(messages, settings, noopLlmChat, "model");
 
     expect(result).not.toBeNull();
     // With 20 messages and keepRecentMessages=5, we keep the last 9 messages (indices 11-19)
@@ -79,7 +79,7 @@ describe("DropStrategy", () => {
     const messages = Array.from({ length: 10 }, (_, i) => makeMessage(i % 2 === 0 ? "user" : "assistant", content));
     const settings = { ...defaultSettings, keepRecentMessages: 2 };
 
-    const result = await new DropStrategy().execute(messages, settings);
+    const result = await new DropStrategy().execute(messages, settings, noopLlmChat, "model");
 
     expect(result!.metadata!.tokensBefore as number).toBeGreaterThan(0);
     expect(result!.metadata!.tokensAfter as number).toBeGreaterThan(0);
@@ -112,7 +112,7 @@ describe("DropStrategy", () => {
     const messages = Array.from({ length: 20 }, (_, i) => makeMessage(i % 2 === 0 ? "user" : "assistant"));
     const settings = { ...defaultSettings, keepRecentMessages: 3 };
 
-    const result = await new DropStrategy().execute(messages, settings);
+    const result = await new DropStrategy().execute(messages, settings, noopLlmChat, "model");
 
     expect(result).not.toBeNull();
     // keepRecentMessages=3, target=6, counts 6 from end
@@ -128,7 +128,7 @@ describe("DropStrategy", () => {
     ];
     const settings = { ...defaultSettings, keepRecentMessages: 1 };
 
-    const result = await new DropStrategy().execute(messages, settings);
+    const result = await new DropStrategy().execute(messages, settings, noopLlmChat, "model");
     expect(result).toBeNull();
   });
 
@@ -152,7 +152,7 @@ describe("DropStrategy", () => {
   });
 
   it("handles empty messages array", async () => {
-    const result = await new DropStrategy().execute([], defaultSettings);
+    const result = await new DropStrategy().execute([], defaultSettings, noopLlmChat, "model");
     expect(result).toBeNull();
   });
 });

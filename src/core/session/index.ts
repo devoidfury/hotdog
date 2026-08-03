@@ -2,16 +2,20 @@
 // Owns sessions, agents, message buses, and event distribution.
 
 import crypto from "node:crypto";
-import { HOOKS } from "../hooks.ts";
+import { HOOKS, HookSystem } from "../hooks.ts";
 import { MessageBus } from "./message-bus.ts";
-import { TaskManager, type TaskAgent } from "./task-manager.ts";
+import { TaskManager } from "./task-manager.ts";
 import { OUTPUT_EVENT, OutputEvent } from "../context/output.ts";
 import { formatError } from "../error.ts";
 import { logger } from "../logger.ts";
-import type { CommandRegistryLike } from "../commands.ts";
+import type { CommandRegistryLike, ParsedCommand } from "../commands.ts";
 import type { LlmClient } from "../llm-client/client.ts";
 import type { CommandResult } from "../extensions/registries.ts";
 import type { ProfileManager } from "../config/index.ts";
+import type { MessageLog } from "../context/message-log.ts";
+import type { ImageAttachment } from "../context/message.ts";
+import type { AgentRunResult, OutputSink } from "../agent.ts";
+import type { ModelConfig } from "../config/providers.ts";
 
 /** Question option shape used by QUESTION events. */
 export interface QuestionOption {
@@ -25,8 +29,31 @@ export interface QuestionOption {
 
 export interface AgentLike {
   sessionId: string;
+  model: string;
+  profileName: string | undefined;
+  hooks: HookSystem;
+  log: MessageLog;
+  sink: OutputSink | null;
+  toolWhitelist: string[] | null;
+  role: string | undefined;
+  profileBody: string | undefined;
+  enqueueCallback: ((text: string) => void) | null;
   serialize(): Record<string, unknown>;
   deserialize(data: Record<string, unknown>): void;
+  run(text: string, images?: ImageAttachment[]): Promise<AgentRunResult | undefined>;
+  clearContext(): Promise<void>;
+  cancel(): void;
+  resetCancel(): void;
+  executeCommand(cmd: ParsedCommand): Promise<CommandResult | null>;
+  addMessage(msg: import("../context/message.ts").Message): void;
+  // Task agent support
+  abortSignal?: AbortSignal | null;
+  notifyCompletion?(result: string): void;
+  followQueue?: string[];
+  // Optional properties for completion handlers and session info
+  commandRegistry?: CommandRegistryLike | null;
+  modelRegistry?: Record<string, ModelConfig> | null;
+  config?: Record<string, unknown> | null;
 }
 
 export interface Serializer {
@@ -127,9 +154,7 @@ export class SessionStore {
 }
 
 export interface SessionManagerOptions {
-  hooks: {
-    notifyHooks(hookName: string, data: unknown): void;
-  };
+  hooks: HookSystem;
   buildAgent: (config: Record<string, unknown>) => Promise<AgentLike>;
   serializer?: Serializer | null;
   initialConfig?: Record<string, unknown>;
@@ -137,7 +162,7 @@ export interface SessionManagerOptions {
    *  buildAgent config. Prevents each entry point from creating its own instance. */
   llmClient?: LlmClient;
   /** Model registry — passed through buildAgent config and used by TaskManager. */
-  modelRegistry?: Record<string, unknown>;
+  modelRegistry?: Record<string, ModelConfig>;
   /** Core config — used by TaskManager. */
   coreConfig?: Record<string, unknown>;
   /** Task configuration — when provided, SessionManager creates and owns a TaskManager internally. */
@@ -149,7 +174,7 @@ export interface SessionManagerOptions {
   /** Extension loader — passed through to channels for extension access. */
   extensions?: unknown;
   /** Profile manager — used by TaskManager for profile lookups. */
-  profileManager?: unknown;
+  profileManager?: ProfileManager;
 }
 
 /**
@@ -235,9 +260,7 @@ export class SessionManager {
     // Create TaskManager internally if taskConfig is provided
     if (options.taskConfig && options.llmClient && options.modelRegistry) {
       this.#taskManager = new TaskManager({
-        buildAgent: this.#buildAgent as unknown as (
-          config: Record<string, unknown>,
-        ) => Promise<TaskAgent>,
+        buildAgent: this.#buildAgent,
         llmClient: options.llmClient,
         modelRegistry: options.modelRegistry,
         config: options.coreConfig || {},
@@ -245,17 +268,11 @@ export class SessionManager {
         maxIterations: options.taskConfig.maxIterations,
         taskProfile: options.taskConfig.taskProfile,
         taskRole: options.taskConfig.taskRole,
-        profileManager: options.profileManager as
-          | ProfileManager
-          | undefined,
+        profileManager: options.profileManager,
       });
-      
+
       // Wire sessionManager reference
-      this.#taskManager.setSessionManager(
-        this as unknown as {
-          getAgent: () => TaskAgent | undefined;
-        },
-      );
+      this.#taskManager.setSessionManager(this);
     }
   }
 
@@ -512,11 +529,10 @@ export class SessionManager {
     const agent = this.#store.getAgent(sessionId);
     if (!agent) return null;
 
-    const agentAny = agent as unknown as Record<string, unknown>;
     return {
       id: sessionId,
-      model: agentAny.model as string | undefined,
-      profile: agentAny.profileName as string | undefined,
+      model: agent.model,
+      profile: agent.profileName,
     };
   }
 
@@ -608,37 +624,18 @@ export class SessionManager {
     // Create the message bus with the internal sink
     const bus = new MessageBus({
       sessionManager: {
-        getAgent: () =>
-          agent as unknown as
-            | {
-                hooks: {
-                  runHookPipeline: (
-                    hookName: string,
-                    data: unknown,
-                    opts?: { shouldStop?: (result: unknown) => boolean },
-                  ) => Promise<unknown>;
-                };
-                run: (text: string) => Promise<unknown>;
-                resetCancel: () => void;
-                cancel: () => void;
-                commandRegistry: CommandRegistryLike | undefined;
-                executeCommand: (cmd: unknown) => Promise<CommandResult | null>;
-              }
-            | undefined,
+        getAgent: () => agent,
       },
       sink: internalSink,
     });
 
     // Wire the agent's sink to the internal sink
-    const agentAny = agent as unknown as Record<string, unknown>;
-    if (agentAny.sink === null || agentAny.sink === undefined) {
-      agentAny.sink = internalSink;
+    if (agent.sink === null || agent.sink === undefined) {
+      agent.sink = internalSink;
     }
 
     // Wire the agent's enqueueCallback so extensions/hooks can queue messages
-    if ("enqueueCallback" in agentAny) {
-      agentAny.enqueueCallback = (text: string) => bus.enqueue(text);
-    }
+    agent.enqueueCallback = (text: string) => bus.enqueue(text);
 
     // Wire up the TaskManager for this session's bus
     if (this.#taskManager) {

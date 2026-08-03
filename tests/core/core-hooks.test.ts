@@ -9,6 +9,8 @@ import {
   isGateActionHandled,
   isInputTransform,
   isInputHandled,
+  type GateAction,
+  type InputHookResult,
 } from "../../src/core/hooks.ts";
 import { describe, it, expect, beforeEach, afterEach } from "bun:test";
 
@@ -539,11 +541,11 @@ describe("GateAction type guards", () => {
   });
 
   it("rejects null/undefined/non-object input", () => {
-    for (const val of [null, undefined, 42, "block", {}]) {
-      expect(isGateActionBlock(val)).toBe(false);
-      expect(isGateActionModify(val)).toBe(false);
-      expect(isGateActionContinue(val)).toBe(false);
-      expect(isGateActionHandled(val)).toBe(false);
+    for (const val of [null, undefined, 42, "block", {}] as unknown[]) {
+      expect(isGateActionBlock(val as GateAction | null | undefined)).toBe(false);
+      expect(isGateActionModify(val as GateAction | null | undefined)).toBe(false);
+      expect(isGateActionContinue(val as GateAction | null | undefined)).toBe(false);
+      expect(isGateActionHandled(val as GateAction | null | undefined)).toBe(false);
     }
   });
 });
@@ -565,9 +567,9 @@ describe("InputHookResult type guards", () => {
   });
 
   it("rejects null/undefined/non-object input", () => {
-    for (const val of [null, undefined, 42, "block", {}]) {
-      expect(isInputTransform(val)).toBe(false);
-      expect(isInputHandled(val)).toBe(false);
+    for (const val of [null, undefined, 42, "block", {}] as unknown[]) {
+      expect(isInputTransform(val as InputHookResult | null | undefined)).toBe(false);
+      expect(isInputHandled(val as InputHookResult | null | undefined)).toBe(false);
     }
   });
 });

@@ -81,8 +81,8 @@ export function create(core: CoreContext): ExtensionInstance {
             cmd === MODEL_CMD_NAME ||
             cmd.startsWith(`${MODEL_CMD_NAME} `) ||
             cmd.startsWith(`${MODEL_CMD_NAME}:`),
-          handler: async (agent: Agent, cmdValue: string) => {
-            const modelName = cmdValue
+          handler: async (agent: Agent, cmdValue: string | null) => {
+            const modelName = (cmdValue ?? "")
               .substring(MODEL_CMD_NAME.length + 1)
               .trim();
 

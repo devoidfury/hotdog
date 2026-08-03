@@ -14,6 +14,7 @@ import type { ToolRegistry, ToolDef } from "./extensions/tool-registry.ts";
 import { HOOKS, HookSystem, type ContextHookResult, type ProviderRequestHookResult } from "./hooks.ts";
 import { type RawUsage } from "./token-tracker.ts";
 import { ToolExecutor, createToolExecutor, type ToolResult as ToolExecutorResult } from "./tool-executor.ts";
+import type { AgentLike } from "./session/index.ts";
 
 export interface ModelRegistry {
   [key: string]: ModelConfig;
@@ -49,6 +50,8 @@ export interface AgentConfig {
   maxToolDifficulty?: number | null;
   defaultMaxToolDifficulty?: number | null;
   sandboxMode?: boolean;
+  blacklistTools?: string[];
+  [key: string]: unknown;
 }
 
 export interface AgentOptions {
@@ -83,7 +86,7 @@ export interface AgentOptions {
 /**
  * Agent that runs the LLM loop and delegates behavior to hooks.
  */
-export class Agent {
+export class Agent implements AgentLike {
   hooks: HookSystem;
   #toolRegistry: ToolRegistry;
   llmClient: LlmClient;

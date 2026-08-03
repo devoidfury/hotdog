@@ -985,7 +985,7 @@ Content.
     });
 
     expect(completions).toHaveLength(2);
-    const values = completions.map((c) => c.value).sort();
+    const values = completions.map((c: { value: string }) => c.value).sort();
     expect(values).toEqual(["Skill A", "Skill B"]);
   });
 

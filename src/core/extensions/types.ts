@@ -10,6 +10,7 @@ import type {
   InputHookResult,
   SystemPromptChunk,
 } from "../hooks.ts";
+import type { CliSubcommandRegistryLike } from "./registries.ts";
 
 // Re-export hook result types for convenience
 export type {
@@ -26,6 +27,7 @@ import type { ServiceRegistry } from "./service-registry.ts";
 import type { AgentCommandRegistry, CliSubcommandRegistry } from "./registries.ts";
 import type { ConfigRegistry } from "./config.ts";
 import type { ModelConfig, ProviderDef } from "../config/providers.ts";
+import type { BuildAgentConfig } from "../config/index.ts";
 import type { CoreConfigWithExtensions } from "../config/schema-loader.ts";
 import type { Agent } from "../agent.ts";
 import type { ImageAttachment, Message } from "../context/message.ts";
@@ -137,7 +139,7 @@ export interface HookPayloads {
   "shutdown:cleanup": unknown;
 
   // CLI
-  "cli:subcommandsRegister": CliSubcommandRegistry;
+  "cli:subcommandsRegister": CliSubcommandRegistryLike;
   "cli:argsParsed": { cli: ParsedCliOptions };
 
   // Input preprocessing — return InputHookResult
@@ -264,7 +266,7 @@ export interface CoreContext {
    * that need to rebuild config at runtime.
    */
   buildConfig?: (cli: Record<string, unknown>) => Promise<{
-    resolved: ResolvedConfig;
+    resolved: BuildAgentConfig;
     modelRegistry: Record<string, ModelConfig>;
     providers: ProviderDef[];
   }>;

@@ -310,12 +310,15 @@ export async function withContext<T>(
 ): Promise<T> {
   try {
     return await fn();
-  } catch (err) {
+  } catch (err: unknown) {
     if (isExpectedError(err)) {
       throw err; // Let callers handle expected errors
     }
-    const wrapped = new Error(`[${label}] ${(err as Error).message}`);
-    wrapped.stack = `${wrapped.message}\n${(err as Error).stack || "(no stack)"}`;
+    const wrapped = new Error(
+      `[${label}] ${err instanceof Error ? err.message : String(err)}`,
+    );
+    wrapped.stack =
+      `${wrapped.message}\n${err instanceof Error ? err.stack || "(no stack)" : "(no stack)"}`;
     throw wrapped;
   }
 }

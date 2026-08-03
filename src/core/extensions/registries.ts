@@ -4,7 +4,7 @@ import { ACTIONS } from "../commands.ts";
 import { HOOKS } from "../hooks.ts";
 import { isPromise } from "../../utils/promise.ts";
 import { logger } from "../logger.ts";
-import { CoreContext } from "./types.ts";
+import type { CoreContext } from "./types.ts";
 import type { CompletionHandler } from "../completion.ts";
 import type { Agent } from "../agent.ts";
 import type { HookSystem } from "../hooks.ts";
@@ -181,9 +181,17 @@ export interface SubcommandDefinition {
 }
 
 /**
+ * Minimal interface for CLI subcommand registration.
+ * Used by hook handlers so they don't depend on the concrete class.
+ */
+export interface CliSubcommandRegistryLike {
+  register(name: string, definition: SubcommandDefinition): void;
+}
+
+/**
  * Registry for CLI subcommands (e.g., `hotdog info`, `hotdog sessions`).
  */
-export class CliSubcommandRegistry {
+export class CliSubcommandRegistry implements CliSubcommandRegistryLike {
   #commands: Map<string, SubcommandDefinition>;
 
   constructor() {

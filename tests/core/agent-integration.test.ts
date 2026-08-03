@@ -24,7 +24,7 @@ class CustomStreamLLMClient extends MockLLMClient {
     this.customGenerator = generator;
   }
 
-  chatStreamCancellable(
+  override chatStreamCancellable(
     messages: unknown[],
     modelConfig: Record<string, unknown>,
     toolDefs: Record<string, unknown>[],
@@ -56,6 +56,7 @@ function createAgentFixture(options: {
   contextLimit?: number;
   stream?: boolean;
   toolWhitelist?: string[] | null;
+  abortSignal?: AbortSignal | null;
 } = {}) {
   const outputEvents: OutputEvent[] = [];
   const fixture = createFixture({

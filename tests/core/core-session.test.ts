@@ -9,11 +9,12 @@ import { createToolRegistry } from '../../src/core/extensions/tool-registry.ts';
 import { createServiceRegistry } from '../../src/core/extensions/service-registry.ts';
 import { ConfigRegistry } from '../../src/core/extensions/config.ts';
 import { createSubcommandRegistry } from '../../src/core/extensions/registries.ts';
+import { createCompletionService } from '../../src/core/completion.ts';
 import { describe, it, expect, beforeEach } from 'bun:test';
 import { MockLLMClient } from '../helpers.ts';
 
 // Helper to create a minimal agent
-function createMockAgent(options: Record<string, unknown> = {}) {
+function createMockAgent(options: Record<string, unknown> = {}): AgentLike {
   const hooks = (options.hooks as HookSystem) || createHooks();
   const toolRegistry = (options.toolRegistry as any) || createToolRegistry();
   const llmClient = (options.llmClient as MockLLMClient) || new MockLLMClient();
@@ -27,14 +28,14 @@ function createMockAgent(options: Record<string, unknown> = {}) {
     maxIterations: 100,
     contextLimit: 128000,
     ...options,
-  });
+  }) as unknown as AgentLike;
 }
 
 describe('SessionManager.create (static)', () => {
   it('should create a SessionManager with an initial agent', async () => {
     const hooks = createHooks();
     const toolRegistry = createToolRegistry();
-    const extensions = new ExtensionLoader({ hooks, toolRegistry, services: createServiceRegistry(), configRegistry: new ConfigRegistry(), cliSubcommandRegistry: createSubcommandRegistry() });
+    const extensions = new ExtensionLoader({ hooks, toolRegistry, services: createServiceRegistry(), configRegistry: new ConfigRegistry(), cliSubcommandRegistry: createSubcommandRegistry(), completion: createCompletionService() });
 
     const buildAgent = async (config: Record<string, unknown>) => {
       return createMockAgent({
@@ -67,7 +68,7 @@ describe('SessionManager', () => {
   beforeEach(() => {
     hooks = createHooks();
     toolRegistry = createToolRegistry();
-    extensions = new ExtensionLoader({ hooks, toolRegistry, services: createServiceRegistry(), configRegistry: new ConfigRegistry(), cliSubcommandRegistry: createSubcommandRegistry() });
+    extensions = new ExtensionLoader({ hooks, toolRegistry, services: createServiceRegistry(), configRegistry: new ConfigRegistry(), cliSubcommandRegistry: createSubcommandRegistry(), completion: createCompletionService() });
 
     buildAgent = async (config: Record<string, unknown>) => {
       return createMockAgent({

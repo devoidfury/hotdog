@@ -11,7 +11,7 @@ import {
   ExtensionInstance,
   getExtensionConfig,
 } from "../../core/extensions/types.ts";
-import type { CliSubcommandRegistry } from "../../core/extensions/registries.ts";
+import type { CliSubcommandRegistryLike } from "../../core/extensions/registries.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const UI_DIR = path.join(__dirname, "ui");
@@ -58,9 +58,7 @@ export function create(core: CoreContext): ExtensionInstance {
     hooks: core.hooks
       ? {
           // Register the "webui" subcommand
-          [HOOKS.CLI_SUBCOMMANDS_REGISTER]: async (
-            registry: CliSubcommandRegistry,
-          ) => {
+          [HOOKS.CLI_SUBCOMMANDS_REGISTER]: async (registry: CliSubcommandRegistryLike) => {
             registry.register("webui", {
               description:
                 "Start the WebUI server (HTTP + WebSocket + frontend)",

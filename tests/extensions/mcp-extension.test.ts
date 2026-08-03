@@ -223,7 +223,7 @@ describe("MCP extension", () => {
     const mockRegistry = { register: () => {} };
 
     // Register tools first to create connections
-    await (ext!.hooks![HOOKS.TOOLS_REGISTER] as Function)(mockRegistry);
+    await (ext?.hooks?.[HOOKS.TOOLS_REGISTER] as Function)(mockRegistry);
     // Then shutdown
     await ext!.shutdown?.();
 
@@ -342,10 +342,11 @@ describe("MCP extension — branch coverage", () => {
     } as any;
 
     const ext = create(core, MockConnection);
-    const mockRegistry = { register: () => {} };
+    const mockRegistry = { register: () => {}, getAll: () => [] } as never;
 
-    await (ext!.hooks![HOOKS.TOOLS_REGISTER] as Function)(mockRegistry);
+    const handler = ext?.hooks?.[HOOKS.TOOLS_REGISTER];
+    if (typeof handler === "function") await handler(mockRegistry);
     // Should not throw even if shutdown fails
-    await expect(ext!.shutdown()).resolves.toBeUndefined();
+    await expect(ext?.shutdown?.()).resolves.toBeUndefined();
   });
 });

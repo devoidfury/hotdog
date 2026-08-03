@@ -44,6 +44,8 @@ export {
   createSubcommandRegistry,
 } from "./registries.ts";
 
+export type { CliSubcommandRegistryLike, SubcommandDefinition } from "./registries.ts";
+
 export { ConfigRegistry, extractSchemaDefaults } from "./config.ts";
 
 export { ServiceRegistry, createServiceRegistry } from "./service-registry.ts";

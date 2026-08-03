@@ -37,9 +37,9 @@ export function stripNulls<T extends Record<string, unknown>>(obj: T): Partial<T
  * - Returns a new object — source objects are not mutated.
  */
 export function deepMerge(
-  ...sources: (Record<string, any> | null | undefined | unknown)[]
-): Record<string, any> {
-  const result: Record<string, any> = {};
+  ...sources: (Record<string, unknown> | null | undefined | unknown)[]
+): Record<string, unknown> {
+  const result: Record<string, unknown> = {};
 
   for (const source of sources) {
     if (source == null || typeof source !== "object") continue;

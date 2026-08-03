@@ -55,7 +55,7 @@ export class ToolExecutor {
       } catch (e: unknown) {
         const toolName = tc.function?.name || "(unknown)";
         const toolCallId = tc.id || "";
-        const errorMsg = `Tool execution failed: ${(e as Error).message}`;
+        const errorMsg = `Tool execution failed: ${e instanceof Error ? e.message : String(e)}`;
         logger.error(`[tool:error] ${toolName}: ${formatError(e)}`);
 
         result = await this.#writeToolResult(

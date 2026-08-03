@@ -7,26 +7,36 @@ import { SessionRegistry, createWsServer } from "../../src/extensions/websocket/
 import { WebSocketChannel } from "../../src/extensions/websocket/websocket-channel.ts";
 import { C2S, S2C } from "../../src/extensions/websocket/protocol.ts";
 import { Agent } from "../../src/core/agent.ts";
-import { createWsMockCore, createWsMockAgentFactory, createWsMockWs } from "../mocks/websocket.ts";
+import { createWsMockCore, createWsMockAgentFactory, createWsMockWs, makeWsMockAgent } from "../mocks/websocket.ts";
+import type { AgentLike } from "../../src/core/session/index.ts";
+
+/** Create a mock agent with a custom log for replay tests. */
+function createMockAgentWithLog(
+  log: Array<{ role: string; content: string; getTextContent?: () => string; toolCalls?: unknown[]; toolCallId?: string; reasoningContent?: string }>
+): AgentLike {
+  return makeWsMockAgent({
+    log: {
+      getAll: () => log as unknown as import("../../src/core/context/message.ts").Message[],
+      toJSON: () => log,
+      push: () => 0,
+      replace: () => {},
+      get: () => undefined,
+      length: log.length,
+      clear: () => {},
+      pop: () => undefined,
+      slice: () => [],
+      [Symbol.iterator]: () => log[Symbol.iterator](),
+    } as unknown as import("../../src/core/context/message-log.ts").MessageLog,
+  });
+}
 
 // ── SessionRegistry Extended Tests ───────────────────────────────────────────
 
 describe("SessionRegistry Extended", () => {
   function createMockAgent(sessionId?: string) {
-    return {
+    return makeWsMockAgent({
       sessionId: sessionId || "test-session",
-      model: "test-model",
-      profileName: "default",
-      modelRegistry: { "test-model": {} },
-      log: [],
-      sink: null,
-      cancel: mock(() => {}),
-      resetCancel: mock(() => {}),
-      run: mock(async () => {}),
-      executeCommand: mock(async () => ({})),
-      serialize: () => ({}),
-      deserialize: () => {},
-    };
+    });
   }
 
   let registry: SessionRegistry;
@@ -540,22 +550,9 @@ describe("replaySessionHistory", () => {
   it("replays user messages", async () => {
     const { createWsServer } = await import("../../src/extensions/websocket/server.ts");
 
-    const mockAgent = {
-      sessionId: "test",
-      model: "test-model",
-      profileName: "default",
-      modelRegistry: {},
-      log: [
-        { role: "user", content: "Hello", getTextContent: () => "Hello" },
-      ],
-      sink: null,
-      cancel: () => {},
-      resetCancel: () => {},
-      run: async () => {},
-      executeCommand: async () => ({}),
-      serialize: () => ({}),
-      deserialize: () => {},
-    };
+    const mockAgent = createMockAgentWithLog([
+      { role: "user", content: "Hello", getTextContent: () => "Hello" },
+    ]);
 
     const core = {
       hooks: { notifyHooks: () => {}, notifyHooksAsync: async () => {} },
@@ -602,27 +599,14 @@ describe("replaySessionHistory", () => {
   });
 
   it("replays assistant messages with reasoning", async () => {
-    const mockAgent = {
-      sessionId: "test",
-      model: "test-model",
-      profileName: "default",
-      modelRegistry: {},
-      log: [
-        {
-          role: "assistant",
-          content: "Here's my answer",
-          reasoningContent: "Let me think...",
-          getTextContent: () => "Here's my answer",
-        },
-      ],
-      sink: null,
-      cancel: () => {},
-      resetCancel: () => {},
-      run: async () => {},
-      executeCommand: async () => ({}),
-      serialize: () => ({}),
-      deserialize: () => {},
-    };
+    const mockAgent = createMockAgentWithLog([
+      {
+        role: "assistant",
+        content: "Here's my answer",
+        reasoningContent: "Let me think...",
+        getTextContent: () => "Here's my answer",
+      },
+    ]);
 
     const core = {
       hooks: { notifyHooks: () => {}, notifyHooksAsync: async () => {} },
@@ -671,34 +655,21 @@ describe("replaySessionHistory", () => {
   });
 
   it("replays tool calls and results", async () => {
-    const mockAgent = {
-      sessionId: "test",
-      model: "test-model",
-      profileName: "default",
-      modelRegistry: {},
-      log: [
-        {
-          role: "assistant",
-          content: "",
-          toolCalls: [
-            { id: "call_123", function: { name: "read_file", arguments: '{"path":"test.txt"}' } },
-          ],
-          getTextContent: () => "",
-        },
-        {
-          role: "tool",
-          content: "File content here",
-          toolCallId: "call_123",
-        },
-      ],
-      sink: null,
-      cancel: () => {},
-      resetCancel: () => {},
-      run: async () => {},
-      executeCommand: async () => ({}),
-      serialize: () => ({}),
-      deserialize: () => {},
-    };
+    const mockAgent = createMockAgentWithLog([
+      {
+        role: "assistant",
+        content: "",
+        toolCalls: [
+          { id: "call_123", function: { name: "read_file", arguments: '{"path":"test.txt"}' } },
+        ],
+        getTextContent: () => "",
+      },
+      {
+        role: "tool",
+        content: "File content here",
+        toolCallId: "call_123",
+      },
+    ]);
 
     const core = {
       hooks: { notifyHooks: () => {}, notifyHooksAsync: async () => {} },
@@ -747,20 +718,7 @@ describe("replaySessionHistory", () => {
   });
 
   it("handles agent with no log", async () => {
-    const mockAgent = {
-      sessionId: "test",
-      model: "test-model",
-      profileName: "default",
-      modelRegistry: {},
-      log: null, // No log
-      sink: null,
-      cancel: () => {},
-      resetCancel: () => {},
-      run: async () => {},
-      executeCommand: async () => ({}),
-      serialize: () => ({}),
-      deserialize: () => {},
-    };
+    const mockAgent = createMockAgentWithLog([]);
 
     const core = {
       hooks: { notifyHooks: () => {}, notifyHooksAsync: async () => {} },
@@ -801,22 +759,9 @@ describe("replaySessionHistory", () => {
   });
 
   it("handles messages without getTextContent", async () => {
-    const mockAgent = {
-      sessionId: "test",
-      model: "test-model",
-      profileName: "default",
-      modelRegistry: {},
-      log: [
-        { role: "user", content: "Hello" }, // No getTextContent
-      ],
-      sink: null,
-      cancel: () => {},
-      resetCancel: () => {},
-      run: async () => {},
-      executeCommand: async () => ({}),
-      serialize: () => ({}),
-      deserialize: () => {},
-    };
+    const mockAgent = createMockAgentWithLog([
+      { role: "user", content: "Hello" }, // No getTextContent
+    ]);
 
     const core = {
       hooks: { notifyHooks: () => {}, notifyHooksAsync: async () => {} },
@@ -899,20 +844,7 @@ describe("WebSocket message handlers - log operations", () => {
 
   describe("LIST_LOGS", () => {
     it("does not crash when handling LIST_LOGS message", () => {
-      const mockAgent = {
-        sessionId: "test",
-        model: "test-model",
-        profileName: "default",
-        modelRegistry: {},
-        log: [],
-        sink: null,
-        cancel: mock(() => {}),
-        resetCancel: mock(() => {}),
-        run: mock(async () => {}),
-        executeCommand: mock(async () => ({})),
-        serialize: () => ({}),
-        deserialize: () => {},
-      };
+      const mockAgent = makeWsMockAgent();
 
       const core = createWsMockCore();
       const wsServer = createWsServer(core, {
@@ -929,20 +861,7 @@ describe("WebSocket message handlers - log operations", () => {
 
   describe("VIEW_LOG", () => {
     it("sends error when logId is missing", () => {
-      const mockAgent = {
-        sessionId: "test",
-        model: "test-model",
-        profileName: "default",
-        modelRegistry: {},
-        log: [],
-        sink: null,
-        cancel: mock(() => {}),
-        resetCancel: mock(() => {}),
-        run: mock(async () => {}),
-        executeCommand: mock(async () => ({})),
-        serialize: () => ({}),
-        deserialize: () => {},
-      };
+      const mockAgent = makeWsMockAgent();
 
       const core = createWsMockCore();
       const wsServer = createWsServer(core, {
@@ -959,20 +878,7 @@ describe("WebSocket message handlers - log operations", () => {
 
   describe("DELETE_LOG", () => {
     it("sends error when log not found", async () => {
-      const mockAgent = {
-        sessionId: "test",
-        model: "test-model",
-        profileName: "default",
-        modelRegistry: {},
-        log: [],
-        sink: null,
-        cancel: mock(() => {}),
-        resetCancel: mock(() => {}),
-        run: mock(async () => {}),
-        executeCommand: mock(async () => ({})),
-        serialize: () => ({}),
-        deserialize: () => {},
-      };
+      const mockAgent = makeWsMockAgent();
 
       const core = createWsMockCore();
       const wsServer = createWsServer(core, {
@@ -994,20 +900,7 @@ describe("WebSocket message handlers - log operations", () => {
 
   describe("Unknown message type", () => {
     it("sends error for unknown message type", () => {
-      const mockAgent = {
-        sessionId: "test",
-        model: "test-model",
-        profileName: "default",
-        modelRegistry: {},
-        log: [],
-        sink: null,
-        cancel: mock(() => {}),
-        resetCancel: mock(() => {}),
-        run: mock(async () => {}),
-        executeCommand: mock(async () => ({})),
-        serialize: () => ({}),
-        deserialize: () => {},
-      };
+      const mockAgent = makeWsMockAgent();
 
       const core = createWsMockCore();
       const wsServer = createWsServer(core, {
@@ -1026,20 +919,7 @@ describe("WebSocket message handlers - log operations", () => {
 
   describe("attachToMostRecentSession", () => {
     it("creates new session when no existing sessions", () => {
-      const mockAgent = {
-        sessionId: "new-session",
-        model: "test-model",
-        profileName: "default",
-        modelRegistry: { "test-model": {} },
-        log: [],
-        sink: null,
-        cancel: mock(() => {}),
-        resetCancel: mock(() => {}),
-        run: mock(async () => {}),
-        executeCommand: mock(async () => ({})),
-        serialize: () => ({}),
-        deserialize: () => {},
-      };
+      const mockAgent = makeWsMockAgent({ sessionId: "new-session" });
 
       const core = createWsMockCore();
       const wsServer = createWsServer(core, {
@@ -1055,20 +935,7 @@ describe("WebSocket message handlers - log operations", () => {
     });
 
     it("does not crash when handling CONNECTION_OPEN with existing sessions", async () => {
-      const mockAgent = {
-        sessionId: "test",
-        model: "test-model",
-        profileName: "default",
-        modelRegistry: { "test-model": {} },
-        log: [],
-        sink: null,
-        cancel: mock(() => {}),
-        resetCancel: mock(() => {}),
-        run: mock(async () => {}),
-        executeCommand: mock(async () => ({})),
-        serialize: () => ({}),
-        deserialize: () => {},
-      };
+      const mockAgent = makeWsMockAgent();
 
       const core = createWsMockCore();
       const wsServer = createWsServer(core, {

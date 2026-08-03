@@ -14,7 +14,7 @@ import {
   type ProviderConfig,
 } from "../../core/llm-client/client.ts";
 import { MarkerMangler } from "../../core/marker-mangler.ts";
-import { SessionManager } from "../../core/session/index.ts";
+import { SessionManager, type AgentLike } from "../../core/session/index.ts";
 import { Agent } from "../../core/agent.ts";
 import { CliChannel } from "./cli-channel.ts";
 import pkg from "../../../package.json" with { type: "json" };
@@ -512,7 +512,7 @@ export async function runInteractiveSession(
   });
 
   // Build agent function — uses llmClient from config (injected by SessionManager)
-  const buildAgent = async (agentConfig: Record<string, unknown>) => {
+  const buildAgent = async (agentConfig: Record<string, unknown>): Promise<AgentLike> => {
     return buildInteractiveAgent(agentConfig, core, resolved, config, llmClient, cli);
   };
 

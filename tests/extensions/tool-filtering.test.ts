@@ -16,6 +16,7 @@ describe("Tool Filtering (Agent.getToolDefs)", () => {
       toolRegistry,
       extensions: {} as any,
       services: {} as any,
+      completion: { register: () => {}, request: async () => [] } as any,
       config: { ...config } as any,
       cliSubcommandRegistry: {} as any,
       configRegistry: { validateConfigByKey: () => ({ valid: true, errors: [] }) } as any,

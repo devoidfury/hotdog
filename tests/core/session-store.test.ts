@@ -1,12 +1,13 @@
 import { describe, it, expect } from 'bun:test';
 import { SessionStore } from '../../src/core/session/index.ts';
 import { MockAgent } from '../helpers.ts';
+import type { AgentLike } from '../../src/core/session/index.ts';
 
 describe('SessionStore', () => {
   it('stores, retrieves, and removes agents by session ID', () => {
     const store = new SessionStore();
-    const agent1 = new MockAgent('done', 'session-1');
-    const agent2 = new MockAgent('done', 'session-2');
+    const agent1 = new MockAgent('done', 'session-1') as unknown as AgentLike;
+    const agent2 = new MockAgent('done', 'session-2') as unknown as AgentLike;
 
     expect(store.addAgent(agent1)).toBe('session-1');
     expect(store.addAgent(agent2)).toBe('session-2');
@@ -22,16 +23,16 @@ describe('SessionStore', () => {
 
   it('returns all agents', () => {
     const store = new SessionStore();
-    store.addAgent(new MockAgent('done', 'session-1'));
-    store.addAgent(new MockAgent('done', 'session-2'));
+    store.addAgent(new MockAgent('done', 'session-1') as unknown as AgentLike);
+    store.addAgent(new MockAgent('done', 'session-2') as unknown as AgentLike);
     const agents = store.agents();
     expect(agents).toHaveLength(2);
   });
 
   it('returns all session IDs', () => {
     const store = new SessionStore();
-    store.addAgent(new MockAgent('done', 'a'));
-    store.addAgent(new MockAgent('done', 'b'));
+    store.addAgent(new MockAgent('done', 'a') as unknown as AgentLike);
+    store.addAgent(new MockAgent('done', 'b') as unknown as AgentLike);
     const ids = store.sessionIds();
     expect(ids).toContain('a');
     expect(ids).toContain('b');
@@ -39,8 +40,8 @@ describe('SessionStore', () => {
 
   it('replaces existing agent when addAgent is called with same session ID', () => {
     const store = new SessionStore();
-    const agent1 = new MockAgent('done', 'session-1');
-    const agent2 = new MockAgent('done', 'session-1');
+    const agent1 = new MockAgent('done', 'session-1') as unknown as AgentLike;
+    const agent2 = new MockAgent('done', 'session-1') as unknown as AgentLike;
     store.addAgent(agent1);
     store.addAgent(agent2);
     expect(store.size()).toBe(1);
@@ -51,10 +52,10 @@ describe('SessionStore', () => {
     const store = new SessionStore();
     expect(store.initialSessionId()).toBeNull();
 
-    store.addAgent(new MockAgent('done', 'session-1'));
+    store.addAgent(new MockAgent('done', 'session-1') as unknown as AgentLike);
     expect(store.initialSessionId()).toBe('session-1');
 
-    store.addAgent(new MockAgent('done', 'session-2'));
+    store.addAgent(new MockAgent('done', 'session-2') as unknown as AgentLike);
     expect(store.initialSessionId()).toBe('session-1'); // remains first
   });
 

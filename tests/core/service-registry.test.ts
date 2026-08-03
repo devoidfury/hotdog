@@ -1,6 +1,7 @@
 import { describe, it, expect } from "bun:test";
 import { ServiceRegistry, createServiceRegistry } from "../../src/core/extensions/service-registry.ts";
 import { ConfigRegistry } from "../../src/core/index.ts";
+import { createCompletionService } from "../../src/core/completion.ts";
 
 describe("ServiceRegistry", () => {
   it("createServiceRegistry returns a new instance", () => {
@@ -126,7 +127,8 @@ describe("SERVICES_REGISTER hook integration", () => {
     const configRegistry = new ConfigRegistry();
     const cliSubcommandRegistry = createSubcommandRegistry();
 
-    const core = { hooks, toolRegistry, services, configRegistry, cliSubcommandRegistry };
+    const completion = createCompletionService();
+    const core = { hooks, toolRegistry, services, configRegistry, cliSubcommandRegistry, completion };
     const loader = createExtensionLoader(core);
 
     // Create a mock extension that registers a service via the hook
@@ -168,7 +170,8 @@ describe("SERVICES_REGISTER hook integration", () => {
     const configRegistry = new ConfigRegistry();
     const cliSubcommandRegistry = createSubcommandRegistry();
 
-    const core = { hooks, toolRegistry, services, configRegistry, cliSubcommandRegistry };
+    const completion = createCompletionService();
+    const core = { hooks, toolRegistry, services, configRegistry, cliSubcommandRegistry, completion };
     const loader = createExtensionLoader(core);
 
     // Extension A provides a service

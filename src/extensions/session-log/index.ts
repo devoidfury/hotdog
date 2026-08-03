@@ -8,7 +8,7 @@ import { HOOKS } from "../../core/hooks.ts";
 import { stripNulls } from "../../utils/objects.ts";
 import { CoreContext, ExtensionInstance } from "../../core/extensions/types.ts";
 
-// Re-export core session log functions
+// Re-export core session log functions and types
 export {
   LOG_SOURCE,
   readSessionEntries,
@@ -18,11 +18,11 @@ export {
   sessionsDir,
   listSessionLogs,
   replayEntriesIntoContext,
-} from "./session-log.ts";
+  type LogEntry,
+} from "../../core/session/session-log.ts";
 
-// Import LOG_SOURCE for internal use (re-exported above)
-import { LOG_SOURCE } from "./session-log.ts";
-import { LogEntry } from "../../core/session/session-log.ts";
+// Import LOG_SOURCE and LogEntry for internal use
+import { LOG_SOURCE, type LogEntry } from "../../core/session/session-log.ts";
 
 interface SessionLogMessage {
   sessionId?: string;

@@ -4,7 +4,7 @@
 import { HOOKS } from "../../core/hooks.ts";
 import { CliOutputSink } from "../../utils/cli/cli.ts";
 import { ColorPalette, type PaletteOptions } from "../../utils/cli/colors.ts";
-import { readSessionEntries, sessionsDir as getSessionsDir } from "../session-log/index.ts";
+import { readSessionEntries, sessionsDir as getSessionsDir, type LogEntry } from "../session-log/index.ts";
 import { readdir, access, stat, unlink, readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { ReviewTool } from "./review.ts";
@@ -31,16 +31,6 @@ interface SessionInfo {
   last_modified: string;
   entry_count: number;
   mtime: number;
-}
-
-interface LogEntry {
-  ts?: string;
-  source?: string;
-  role?: string;
-  content?: string;
-  result?: string;
-  tool_name?: string;
-  [key: string]: unknown;
 }
 
 // ── Helpers ────────────────────────────────────────────────────────────────
@@ -134,7 +124,7 @@ async function runShow(
     fileInfos.sort((a: { mtime: number }, b: { mtime: number }) => b.mtime - a.mtime);
     const mostRecent = fileInfos[0] as { name: string };
     const entries = await readSessionEntries(mostRecent.name);
-    return printToolIndex(entries as unknown as LogEntry[], cli.wantsJson ?? false);
+    return printToolIndex(entries, cli.wantsJson ?? false);
   }
   return listSessions(cli.wantsJson ?? false, sessionsDir, palette);
 }
@@ -327,7 +317,7 @@ async function reviewSession(
   }
 
   if (toolIndex) {
-    return printToolIndex(entries as unknown as LogEntry[], json);
+    return printToolIndex(entries, json);
   }
 
   if (json) {
@@ -338,7 +328,7 @@ async function reviewSession(
   console.log(`=== Session: ${sessionId} ===`);
   console.log(`Entries: ${(entries as unknown[]).length}\n`);
 
-  for (const entry of entries as unknown as LogEntry[]) {
+  for (const entry of entries) {
     const ts = entry.ts ? new Date(entry.ts).toLocaleTimeString() : "unknown";
     const role = entry.role || entry.source;
     const content = entry.content || entry.result || "";

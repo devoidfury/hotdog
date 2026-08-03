@@ -5,15 +5,16 @@
 
 import { formatError } from "../../core/error.ts";
 import { HOOKS } from "../../core/hooks.ts";
+import { CliSubcommandRegistryLike } from "../../core/extensions/registries.ts";
 import { logger } from "../../core/logger.ts";
 import { CliOutputSink } from "../../utils/cli/cli.ts";
 import { LlmClient, type ProviderConfig } from "../../core/llm-client/client.ts";
 import { MarkerMangler } from "../../core/marker-mangler.ts";
-import { SessionManager } from "../../core/session/index.ts";
+import { SessionManager, type AgentLike } from "../../core/session/index.ts";
 import { Agent } from "../../core/agent.ts";
 import { OneShotChannel } from "./oneshot-channel.ts";
 import type { CoreContext, ExtensionInstance, ResolvedConfig } from "../../core/extensions/types.ts";
-import type { CoreConfigWithExtensions } from "../../core/config/index.ts";
+import type { CoreConfigWithExtensions, CliArgv } from "../../core/config/index.ts";
 import type { ModelConfig } from "../../core/config/providers.ts";
 
 // ── Types ──────────────────────────────────────────────────────────────────
@@ -33,13 +34,13 @@ interface CliArgs {
  * Run one-shot mode: execute a single prompt and exit.
  */
 async function runOneShot(
-  cli: CliArgs,
+  cli: CliArgv,
   core: CoreContext,
   resolved: ResolvedConfig,
   config: CoreConfigWithExtensions,
   modelRegistry: Record<string, unknown>,
   sink: CliOutputSink,
-  buildAgent: (agentConfig: Record<string, unknown>) => Promise<Agent>,
+  buildAgent: (agentConfig: Record<string, unknown>) => Promise<AgentLike>,
   llmClient: LlmClient,
 ): Promise<number> {
   // Create SessionManager — owns the MessageBus and TaskManager internally
@@ -47,7 +48,7 @@ async function runOneShot(
     hooks: core.hooks,
     extensions: core.extensions,
     buildAgent,
-    initialConfig: { sessionId: cli.sessionId || null },
+    initialConfig: { sessionId: (cli.sessionId as string | undefined) || null },
     llmClient: llmClient,
     modelRegistry,
     coreConfig: config,
@@ -95,7 +96,7 @@ async function runOneShot(
  * Handle the "prompt" subcommand: run a single prompt and exit.
  */
 async function handlePromptSubcommand(
-  cli: CliArgs,
+  cli: CliArgv,
   core: CoreContext,
 ): Promise<number> {
   const { config, buildConfig } = core;
@@ -129,7 +130,7 @@ async function handlePromptSubcommand(
     markerMangler: new MarkerMangler(),
   });
 
-  const buildAgent = async (agentConfig: Record<string, unknown>) => {
+  const buildAgent: (agentConfig: Record<string, unknown>) => Promise<AgentLike> = async (agentConfig) => {
     const sessionId = (agentConfig.sessionId as string) || crypto.randomUUID();
     const agent = new Agent({
       hooks: core.hooks,
@@ -190,9 +191,7 @@ export function create(core: CoreContext): ExtensionInstance {
             }
           },
 
-          [HOOKS.CLI_SUBCOMMANDS_REGISTER]: async (
-            registry: { register: (name: string, opts: Record<string, unknown>) => void },
-          ) => {
+          [HOOKS.CLI_SUBCOMMANDS_REGISTER]: async (registry: CliSubcommandRegistryLike) => {
             registry.register("prompt", {
               description:
                 "One-shot prompt mode — run a single prompt and exit",

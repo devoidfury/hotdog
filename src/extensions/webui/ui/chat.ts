@@ -47,7 +47,7 @@ interface SessionDeletedMessage {
 
 interface SessionsMessage {
   type: "sessions";
-  sessions: unknown[];
+  sessions: Array<{ id: string; profile?: string; userMessageCount?: number }>;
 }
 
 interface LogsListedMessage {
@@ -55,17 +55,19 @@ interface LogsListedMessage {
   logs: Array<{ id: string; createdAt: number; lastActivityAt: number; messageCount: number }>;
 }
 
+interface LogEntry {
+  source: string;
+  content: string;
+  images?: Array<{ url: string }>;
+  reasoning_content?: string | null;
+  tool_calls?: Array<{ id: string; name: string; args: Record<string, unknown> }> | null;
+  tool_call_id?: string | null;
+}
+
 interface LogViewedMessage {
   type: "logViewed";
   logId: string;
-  entries: Array<{
-    source: string;
-    content: string;
-    images?: unknown[];
-    reasoning_content?: string | null;
-    tool_calls?: unknown[] | null;
-    tool_call_id?: string | null;
-  }>;
+  entries: LogEntry[];
 }
 
 interface LogDeletedMessage {
@@ -159,7 +161,7 @@ interface CompactionResultMessage {
 interface SessionStateMessage {
   type: "sessionState";
   key: string;
-  value: unknown;
+  value: string | string[] | boolean | number;
 }
 
 interface ProfilesMessage {
@@ -215,7 +217,7 @@ interface ChatConfig {
   onSessionCreated?: (data: { sessionId: string }) => void;
   onSessionsUpdate?: (sessions: SessionInfo[], activeSessionId: string | null) => void;
   onLogsUpdate?: (logs: Array<{ id: string; createdAt: number; lastActivityAt: number; messageCount: number }>) => void;
-  onLogViewed?: (logId: string, entries: Array<{ source: string; content: string; images?: unknown[]; reasoning_content?: string | null; tool_calls?: unknown[] | null; tool_call_id?: string | null }>) => void;
+  onLogViewed?: (logId: string, entries: LogEntry[]) => void;
   onLogDeleted?: (logId: string) => void;
   onConnectionChange?: (connected: boolean) => void;
   onAuthFailure?: () => void;
@@ -242,7 +244,7 @@ export interface ChatController {
   /** Delete a cold session log file */
   deleteLog: (logId: string) => void;
   sendCommand: (command: string) => void;
-  sendQuestionAnswer: (answers: unknown) => void;
+  sendQuestionAnswer: (answers: Record<string, string>) => void;
   setSession: (sessionId: string) => void;
   /** List available profiles */
   listProfiles: () => void;
@@ -423,7 +425,7 @@ export function createChat({
         return;
       case "sessions": {
         // Update profile selector when sessions change
-        const sessions = data.sessions as Array<{ id: string; profile?: string; userMessageCount?: number }>;
+        const sessions = data.sessions;
         const activeSession = sessions.find(s => s.id === sessionIdAtom());
         if (activeSession && activeSession.profile) {
           currentProfile = activeSession.profile;
@@ -437,7 +439,7 @@ export function createChat({
         return;
       }
       case "profiles":
-        profilesAtom(data.profiles as Record<string, ProfileInfo>);
+        profilesAtom(data.profiles);
         return;
       case "profileSwitched":
         if (data.success) {
@@ -757,7 +759,7 @@ export function createChat({
   }
 
   /** Send a question answer. */
-  function sendQuestionAnswer(answers: unknown): void {
+  function sendQuestionAnswer(answers: Record<string, string>): void {
     if (!sessionIdAtom()) return;
     send({ type: "questionAnswer", sessionId: sessionIdAtom(), answers });
   }

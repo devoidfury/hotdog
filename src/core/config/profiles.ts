@@ -169,8 +169,8 @@ export async function getVisibleWorkerProfiles(
  * @private
  */
 function resolveSwitchProfile(
-  fileProfile: ProfileDef | null,
-  configProfile: ProfileDef | null,
+  fileProfile: Partial<ProfileDef> | null,
+  configProfile: Partial<ProfileDef> | null,
 ): SwitchProfile {
   const role = fileProfile?.role?.trim() || configProfile?.role || "";
   const body = fileProfile?.body || "";
@@ -181,8 +181,8 @@ function resolveSwitchProfile(
 }
 
 export interface AllProfilesOptions {
-  profileFiles?: Record<string, ProfileDef> | null;
-  configProfiles?: Record<string, ProfileDef> | null;
+  profileFiles?: Record<string, Partial<ProfileDef>> | null;
+  configProfiles?: Record<string, Partial<ProfileDef>> | null;
   profilesPath?: string;
 }
 

@@ -35,6 +35,7 @@ let userMessageCount = 0;
 interface SessionCreatedMessage {
   type: "sessionCreated";
   sessionId: string;
+  profile?: string;
   currentModel?: string;
   models?: string[];
 }
@@ -396,6 +397,11 @@ export function createChat({
       case "sessionCreated":
         sessionIdAtom(data.sessionId);
         currentModelAtom(data.currentModel || "");
+        // Set current profile from sessionCreated so the dropdown is correct
+        // before profiles are loaded
+        if (data.profile) {
+          currentProfile = data.profile;
+        }
         if (data.models && data.models.length > 0) {
           modelsAtom(data.models);
         }

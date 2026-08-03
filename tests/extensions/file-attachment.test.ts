@@ -167,22 +167,15 @@ describe("file-attachment completion handler", () => {
     expect(values).toContain("@test.txt");
   });
 
-  it("uses cwdBoundary from agent context", async () => {
+  it("uses cwdBoundary from agent config", async () => {
     const workspaceDir = path.join(tmpDir, "workspace");
     fs.mkdirSync(workspaceDir, { recursive: true });
     fs.writeFileSync(path.join(workspaceDir, "config.json"), "{}");
 
-    const mockContext = {
-      get: (key: string) => {
-        if (key === "cwdBoundary") return workspaceDir;
-        return null;
-      },
-    };
-
     const ctx = {
       line: "Read @",
       cursorPos: 6,
-      agent: { context: mockContext },
+      agent: { config: { cwdBoundary: workspaceDir } },
     } as any;
 
     const results = await completion(ctx);
@@ -191,22 +184,15 @@ describe("file-attachment completion handler", () => {
     expect(values).not.toContain("@test.txt"); // not in workspaceDir
   });
 
-  it("uses workspaceRoot from agent context when cwdBoundary is not set", async () => {
+  it("uses workspaceRoot from agent config when cwdBoundary is not set", async () => {
     const workspaceDir = path.join(tmpDir, "workspace");
     fs.mkdirSync(workspaceDir, { recursive: true });
     fs.writeFileSync(path.join(workspaceDir, "config.json"), "{}");
 
-    const mockContext = {
-      get: (key: string) => {
-        if (key === "workspaceRoot") return workspaceDir;
-        return null;
-      },
-    };
-
     const ctx = {
       line: "Read @",
       cursorPos: 6,
-      agent: { context: mockContext },
+      agent: { config: { workspaceRoot: workspaceDir } },
     } as any;
 
     const results = await completion(ctx);
@@ -478,18 +464,10 @@ describe("file-attachment extension", () => {
     const extension = create(core);
     const hook = extension.hooks![HOOKS.INPUT]!;
 
-    const mockContext = {
-      get: (key: string) => {
-        if (key === "cwdBoundary") return workspaceDir;
-        if (key === "workspaceRoot") return workspaceDir;
-        return null;
-      },
-    };
-
     const result = await hook(
       {
         text: "Read @config.json",
-        agent: { context: mockContext },
+        agent: { config: { cwdBoundary: workspaceDir, workspaceRoot: workspaceDir } },
       } as any,
     );
 

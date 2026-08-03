@@ -31,14 +31,17 @@ function makeMockAgent(overrides: Record<string, unknown> = {}): Record<string, 
     cancelled: false,
     clearContext: mock(async () => {}),
     enqueue: mock((text: string) => {}),
-    getTokenUsage: mock((): TokenUsage => ({
-      sessionPromptTokens: 0, sessionCachedTokens: 0, sessionCompletionTokens: 0, sessionTotalTokens: 0,
-      turns: 0, promptTokens: 0, cachedTokens: 0,
-      completionTokens: 0, totalTokens: 0,
-    })),
     hideTools: false,
     hideThinking: false,
-    systemPrompt: null,
+    context: {
+      clearSystemPrompt: mock(() => {}),
+      getSystemPrompt: mock(() => null),
+      getTokenUsage: mock((): TokenUsage => ({
+        sessionPromptTokens: 0, sessionCachedTokens: 0, sessionCompletionTokens: 0, sessionTotalTokens: 0,
+        turns: 0, promptTokens: 0, cachedTokens: 0,
+        completionTokens: 0, totalTokens: 0,
+      })),
+    },
     reasoningEffort: undefined,
     ensureSystemPrompt: mock(async () => {}),
     emitOutput: mock((type: string, data: Record<string, unknown>) => {}),
@@ -73,11 +76,13 @@ describe("handleTokens", () => {
 
   it("displays accumulated totals and cache hit percentage", () => {
     const agent = makeMockAgent({
-      getTokenUsage: mock((): TokenUsage => ({
-        sessionPromptTokens: 1200, sessionCachedTokens: 800, sessionCompletionTokens: 400, sessionTotalTokens: 2400,
-        turns: 2, promptTokens: 1000, cachedTokens: 400,
-        completionTokens: 200, totalTokens: 1600,
-      })),
+      context: {
+        getTokenUsage: mock((): TokenUsage => ({
+          sessionPromptTokens: 1200, sessionCachedTokens: 800, sessionCompletionTokens: 400, sessionTotalTokens: 2400,
+          turns: 2, promptTokens: 1000, cachedTokens: 400,
+          completionTokens: 200, totalTokens: 1600,
+        })),
+      },
     });
     const result = handleTokens(agent as any);
     expect(result.content).toContain("Token usage (2 turns):");
@@ -90,11 +95,13 @@ describe("handleTokens", () => {
 
   it("handles single turn (no plural)", () => {
     const agent = makeMockAgent({
-      getTokenUsage: mock((): TokenUsage => ({
-        sessionPromptTokens: 100, sessionCachedTokens: 0, sessionCompletionTokens: 50, sessionTotalTokens: 150,
-        turns: 1, promptTokens: 100, cachedTokens: 0,
-        completionTokens: 50, totalTokens: 150,
-      })),
+      context: {
+        getTokenUsage: mock((): TokenUsage => ({
+          sessionPromptTokens: 100, sessionCachedTokens: 0, sessionCompletionTokens: 50, sessionTotalTokens: 150,
+          turns: 1, promptTokens: 100, cachedTokens: 0,
+          completionTokens: 50, totalTokens: 150,
+        })),
+      },
     });
     const result = handleTokens(agent as any);
     expect(result.content).toContain("Token usage (1 turn):");
@@ -102,11 +109,13 @@ describe("handleTokens", () => {
 
   it("omits cache hit line when real prompt tokens are zero", () => {
     const agent = makeMockAgent({
-      getTokenUsage: mock((): TokenUsage => ({
-        sessionPromptTokens: 0, sessionCachedTokens: 100, sessionCompletionTokens: 50, sessionTotalTokens: 150,
-        turns: 1, promptTokens: 100, cachedTokens: 100,
-        completionTokens: 50, totalTokens: 150,
-      })),
+      context: {
+        getTokenUsage: mock((): TokenUsage => ({
+          sessionPromptTokens: 0, sessionCachedTokens: 100, sessionCompletionTokens: 50, sessionTotalTokens: 150,
+          turns: 1, promptTokens: 100, cachedTokens: 100,
+          completionTokens: 50, totalTokens: 150,
+        })),
+      },
     });
     const result = handleTokens(agent as any);
     expect(result.content).not.toContain("cache hit");
@@ -167,9 +176,14 @@ describe("handleThinking", () => {
 
 describe("handleRegenerate", () => {
   it("regenerates system prompt", async () => {
-    const agent = makeMockAgent({ systemPrompt: "old prompt" });
+    const agent = makeMockAgent({
+      context: {
+        clearSystemPrompt: mock(() => {}),
+        getSystemPrompt: mock(() => "old prompt"),
+      },
+    });
     const result = await handleRegenerate(agent as any);
-    expect(agent.systemPrompt).toBeNull();
+    expect((agent.context as any).clearSystemPrompt).toHaveBeenCalled();
     expect(agent.ensureSystemPrompt).toHaveBeenCalled();
     expect(result.content).toBe("System prompt regenerated.");
   });

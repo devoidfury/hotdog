@@ -10,7 +10,8 @@ import { LlmClient, type ProviderConfig } from "../../core/llm-client/client.ts"
 import { MarkerMangler } from "../../core/marker-mangler.ts";
 import type { CoreContext } from "../../core/extensions/types.ts";
 import type { AuthMiddleware } from "./auth.ts";
-import { Agent, type ModelConfig } from "../../core/agent.ts";
+import { Agent } from "../../core/agent.ts";
+import type { ModelConfig } from "../../core/config/providers.ts";
 import { readSessionEntries, replayEntriesIntoContext, listSessionLogs, deleteSessionLog } from "../../core/session/session-log.ts";
 import { AgentError } from "../../core/error.ts";
 import { logger } from "../../core/logger.ts";
@@ -43,7 +44,7 @@ interface SwitchProfileOptions {
 }
 
 interface SessionRegistryOptions {
-  buildAgent: (config: { model?: string; sessionId?: string; profileName?: string }) => Promise<unknown>;
+  buildAgent: (config: { model?: string; sessionId?: string; profileName?: string }) => Promise<Agent>;
   llmClient?: LlmClient;
   questionTimeoutSecs?: number;
   questionStrategy?: string;
@@ -52,7 +53,7 @@ interface SessionRegistryOptions {
 }
 
 interface CreateWsServerOptions {
-  buildAgent?: (config: { model?: string; sessionId?: string; profileName?: string }) => Promise<unknown>;
+  buildAgent?: (config: { model?: string; sessionId?: string; profileName?: string }) => Promise<Agent>;
   sessionTimeoutMin?: number;
   questionTimeoutSecs?: number;
   questionStrategy?: string;
@@ -81,7 +82,7 @@ export interface WsServer {
  */
 export class SessionRegistry {
   #sessionManager: SessionManager;
-  #buildAgent: (config: { model?: string; sessionId?: string; profileName?: string }) => Promise<unknown>;
+  #buildAgent: (config: { model?: string; sessionId?: string; profileName?: string }) => Promise<Agent>;
   #questionTimeoutSecs: number;
   #questionStrategy: string;
   #cleanupTimer: ReturnType<typeof setInterval> | null = null;

@@ -3,14 +3,11 @@
 // Each handler is a function (agent, value, cmd) => { content?, error? }.
 
 import { Command, ACTIONS } from "./commands.ts";
-import type { CommandAgent, CommandHandler } from "./extensions/registries.ts";
+import type { CommandHandler, CommandResult } from "./extensions/registries.ts";
 import type { CompletionContext, CompletionOption } from "./completion.ts";
+import type { Agent } from "./agent.ts";
 
-export interface CommandResult {
-  action?: number;
-  content?: string;
-  error?: string;
-}
+export { type CommandResult } from "./extensions/registries.ts";
 
 export interface CommandHandlerDef {
   handler: CommandHandler;
@@ -29,7 +26,10 @@ export type { CommandHandler } from "./extensions/registries.ts";
  * @param agent - Agent instance.
  * @param _value - Optional value (ignored).
  */
-export async function handleClear(agent: CommandAgent, _value?: string | null): Promise<CommandResult> {
+export async function handleClear(
+  agent: Agent,
+  _value?: string | null,
+): Promise<CommandResult> {
   await agent.clearContext();
   return { action: ACTIONS.DISPLAY, content: "Context cleared." };
 }
@@ -55,8 +55,8 @@ export function handleHelp(): CommandResult {
  *
  * @param agent - Agent instance.
  */
-export function handleTokens(agent: CommandAgent): CommandResult {
-  const u = agent.getTokenUsage();
+export function handleTokens(agent: Agent): CommandResult {
+  const u = agent.context.getTokenUsage();
   if (u.turns === 0) {
     return { action: ACTIONS.DISPLAY, content: "No token usage recorded yet." };
   }
@@ -81,18 +81,12 @@ export function handleTokens(agent: CommandAgent): CommandResult {
   // Most recent call values from the provider.
   lines.push("");
   lines.push("Last call:");
-  lines.push(
-    `  prompt:      ${(u.promptTokens || 0).toLocaleString()} tokens`,
-  );
-  lines.push(
-    `  cached:      ${(u.cachedTokens || 0).toLocaleString()} tokens`,
-  );
+  lines.push(`  prompt:      ${(u.promptTokens || 0).toLocaleString()} tokens`);
+  lines.push(`  cached:      ${(u.cachedTokens || 0).toLocaleString()} tokens`);
   lines.push(
     `  completion:  ${(u.completionTokens || 0).toLocaleString()} tokens`,
   );
-  lines.push(
-    `  total:       ${(u.totalTokens || 0).toLocaleString()} tokens`,
-  );
+  lines.push(`  total:       ${(u.totalTokens || 0).toLocaleString()} tokens`);
 
   return { action: ACTIONS.DISPLAY, content: lines.join("\n") };
 }
@@ -102,7 +96,7 @@ export function handleTokens(agent: CommandAgent): CommandResult {
  *
  * @param agent - Agent instance.
  */
-export function handleTools(agent: CommandAgent): CommandResult {
+export function handleTools(agent: Agent): CommandResult {
   agent.hideTools = !agent.hideTools;
   agent.emitOutput("session_state", {
     key: "hideTools",
@@ -119,7 +113,7 @@ export function handleTools(agent: CommandAgent): CommandResult {
  *
  * @param agent - Agent instance.
  */
-export function handleThinking(agent: CommandAgent): CommandResult {
+export function handleThinking(agent: Agent): CommandResult {
   agent.hideThinking = !agent.hideThinking;
   agent.emitOutput("session_state", {
     key: "hideThinking",
@@ -136,8 +130,10 @@ export function handleThinking(agent: CommandAgent): CommandResult {
  *
  * @param agent - Agent instance.
  */
-export async function handleRegenerate(agent: CommandAgent): Promise<CommandResult> {
-  agent.systemPrompt = null;
+export async function handleRegenerate(
+  agent: Agent,
+): Promise<CommandResult> {
+  agent.context.clearSystemPrompt();
   await agent.ensureSystemPrompt();
   return { action: ACTIONS.DISPLAY, content: "System prompt regenerated." };
 }
@@ -148,22 +144,34 @@ export async function handleRegenerate(agent: CommandAgent): Promise<CommandResu
  * @param agent - Agent instance.
  * @param value - Reasoning effort level ("none", "minimal", "low", "high", "xhigh", "max", "unset").
  */
-export function handleReasoning(agent: CommandAgent, value?: string | null): CommandResult {
+export function handleReasoning(
+  agent: Agent,
+  value?: string | null,
+): CommandResult {
   const valid = ["none", "minimal", "low", "high", "xhigh", "max", "unset"];
   if (!value) {
     const current =
       agent.reasoningEffort !== undefined
         ? agent.reasoningEffort
         : "(not set, omitted from requests)";
-    return { action: ACTIONS.DISPLAY, content: `Current reasoning effort: ${current}` };
+    return {
+      action: ACTIONS.DISPLAY,
+      content: `Current reasoning effort: ${current}`,
+    };
   }
   if (value === "unset") {
     agent.reasoningEffort = undefined;
-    return { action: ACTIONS.DISPLAY, content: "Reasoning effort unset (omitted from requests)." };
+    return {
+      action: ACTIONS.DISPLAY,
+      content: "Reasoning effort unset (omitted from requests).",
+    };
   }
   if (valid.includes(value)) {
     agent.reasoningEffort = value;
-    return { action: ACTIONS.DISPLAY, content: `Reasoning effort set to: ${value}` };
+    return {
+      action: ACTIONS.DISPLAY,
+      content: `Reasoning effort set to: ${value}`,
+    };
   }
   return {
     action: ACTIONS.ERROR,
@@ -180,15 +188,32 @@ export const CORE_COMMAND_HANDLERS: Record<string, CommandHandlerDef> = {
   [Command.Quit]: { handler: handleQuit, description: "Exit" },
   [Command.Help]: { handler: handleHelp, description: "Show help" },
   [Command.Tokens]: { handler: handleTokens, description: "Show token usage" },
-  [Command.Tools]: { handler: handleTools, description: "Toggle tool call display" },
-  [Command.Thinking]: { handler: handleThinking, description: "Toggle thinking display" },
-  [Command.Regenerate]: { handler: handleRegenerate, description: "Regenerate system prompt" },
+  [Command.Tools]: {
+    handler: handleTools,
+    description: "Toggle tool call display",
+  },
+  [Command.Thinking]: {
+    handler: handleThinking,
+    description: "Toggle thinking display",
+  },
+  [Command.Regenerate]: {
+    handler: handleRegenerate,
+    description: "Regenerate system prompt",
+  },
   [Command.Reasoning]: {
     handler: handleReasoning,
     description: "Set reasoning effort level",
     completion: (ctx: CompletionContext): CompletionOption[] => {
       const prefix = (ctx.commandArg || "").toLowerCase();
-      const levels = ["none", "minimal", "low", "high", "xhigh", "max", "unset"];
+      const levels = [
+        "none",
+        "minimal",
+        "low",
+        "high",
+        "xhigh",
+        "max",
+        "unset",
+      ];
       return levels
         .filter((l) => l.toLowerCase().startsWith(prefix))
         .map((l) => ({ value: l }));

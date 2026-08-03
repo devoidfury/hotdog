@@ -8,6 +8,7 @@ import { logger } from "../../core/logger.ts";
 import { ParseError, formatError } from "../../core/error.ts";
 import { render } from "../../utils/render.ts";
 import { ACTIONS } from "../../core/commands.ts";
+import type { Agent } from "../../core/agent.ts";
 
 interface Prompt {
   name: string;
@@ -166,10 +167,10 @@ export class PromptsLoader {
    * The handler for when a prompt should be loaded in response to a command
    */
   async promptHandler(
-    _agent: unknown,
-    cmdValue: string,
+    _agent: Agent,
+    cmdValue: string | null,
   ): Promise<Record<string, unknown>> {
-    const rest = cmdValue.slice(7);
+    const rest = cmdValue?.slice(7) || '';
     const spaceIdx = rest.indexOf(" ");
     const name = spaceIdx >= 0 ? rest.slice(0, spaceIdx).trim() : rest.trim();
     const args = spaceIdx >= 0 ? rest.slice(spaceIdx + 1).trim() : "";

@@ -76,7 +76,7 @@ export async function create(core: CoreContext): Promise<ExtensionInstance> {
       /**
        * Build skills preamble for system prompt.
        */
-      [HOOKS.SYSTEM_PROMPT_BUILD]: async (_data: unknown) => {
+      [HOOKS.SYSTEM_PROMPT_BUILD]: async (_data) => {
         const preamble = await loader.buildSkillsPreamble();
         if (preamble) {
           return { name: "preamble", priority: 400, content: preamble };
@@ -112,8 +112,8 @@ export async function create(core: CoreContext): Promise<ExtensionInstance> {
         registry.register("skill", {
           description: "List skills or activate a skill (skill:<name>)",
           matches: (cmd: string) => cmd.startsWith("skill"),
-          handler: async (_agent: unknown, cmdValue: string) => {
-            const name = cmdValue.slice(6).trim();
+          handler: async (_agent, cmdValue) => {
+            const name = cmdValue?.slice(6).trim();
             if (!name) {
               const skills = loader.allSkills();
               const lines = skills

@@ -21,12 +21,10 @@ export async function completion(ctx: CompletionContext) {
     return [];
   }
 
-  // Get workspace boundaries from agent context
-  const agentCtx = (ctx.agent as { context?: { get: (k: string) => unknown } })
-    ?.context;
-  const cwdBoundary = (agentCtx?.get("cwdBoundary") as string | null) ?? null;
-  const workspaceRoot =
-    (agentCtx?.get("workspaceRoot") as string | null) ?? null;
+  // Get workspace boundaries from agent config
+  const config = ctx.agent?.config;
+  const cwdBoundary = config?.cwdBoundary ?? null;
+  const workspaceRoot = config?.workspaceRoot ?? null;
   const baseDir = cwdBoundary || workspaceRoot || cwd();
 
   // Extract the path prefix (without @)

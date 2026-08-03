@@ -1,20 +1,15 @@
 // Loop extension — provides the /loop slash command for repeatedly
 // running a prompt until cancelled by the user.
-//
-// Config (loop) — defined in extension.json configSchema:
-//   - enabled:  bool  (default: true)  — whether /loop is available
-//   - maxLoops: number (default: -1)   — max iterations (-1 = unlimited)
 
 import { HOOKS } from "../../core/hooks.ts";
 import { ACTIONS } from "../../core/commands.ts";
 import { formatError } from "../../core/error.ts";
-import { CommandAgent } from "../../core/extensions/registries.ts";
 import {
   CoreContext,
   ExtensionInstance,
-  CommandsRegisterPayload,
   getExtensionConfig,
 } from "../../core/extensions/types.ts";
+import type { Agent } from "../../core/agent.ts";
 
 interface LoopState {
   prompt: string;
@@ -52,14 +47,14 @@ export function create(core: CoreContext): ExtensionInstance {
    * Emit output via the agent's sink (and hooks).
    * Uses emitOutput which routes to both the output sink and hook listeners.
    */
-  function emit(agent: CommandAgent, content: string): void {
+  function emit(agent: Agent, content: string): void {
     agent.emitOutput("command_result", { content });
   }
 
   /**
    * Stop the loop and emit a summary.
    */
-  function stopLoop(agent: CommandAgent, cancelled: boolean): void {
+  function stopLoop(agent: Agent, cancelled: boolean): void {
     loop.active = false;
     const elapsed = ((Date.now() - loop.startTime) / 1000).toFixed(1);
     const reason = cancelled ? " (cancelled by user)" : "";
@@ -72,12 +67,11 @@ export function create(core: CoreContext): ExtensionInstance {
       /**
        * Register the /loop command.
        */
-      [HOOKS.COMMANDS_REGISTER]: async (payload: CommandsRegisterPayload) => {
-        const { registry, agent } = payload;
+      [HOOKS.COMMANDS_REGISTER]: async ({ registry }) => {
         registry.register("loop", {
           description: "Loop a prompt until cancelled (loop <prompt>)",
           matches: (cmd: string) => cmd === "loop" || cmd.startsWith("loop "),
-          handler: async (agent: CommandAgent, cmdValue: string | null) => {
+          handler: async (agent: Agent, cmdValue: string | null) => {
             const prompt = (cmdValue ?? "").slice(5).trim();
 
             if (!prompt) {
@@ -113,11 +107,7 @@ export function create(core: CoreContext): ExtensionInstance {
        * Also fires on cancellation (via agent's finally block) — in that
        * case, print the summary and stop without re-enqueuing.
        */
-      [HOOKS.TURN_END]: async (payload: Record<string, unknown>) => {
-        const stopped = payload.stopped as boolean | undefined;
-        const cancelled = payload.cancelled as boolean | undefined;
-        const agent = payload.agent as CommandAgent | undefined;
-
+      [HOOKS.TURN_END]: async ({ stopped, cancelled, agent }) => {
         if (!stopped || !agent || !loop.active) return;
 
         // Cancellation — print summary and stop

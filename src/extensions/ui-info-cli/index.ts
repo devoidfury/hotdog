@@ -595,7 +595,7 @@ async function runShowPrompt(cli: CliArgv, core: CoreContext): Promise<number> {
   // Build the system prompt via the real hook mechanism
   await agent.ensureSystemPrompt();
   // Output the actual system prompt
-  console.log(agent.systemPrompt);
+  console.log(agent.context.getSystemPrompt());
 
   // Output tool definitions (filtered by agent config for sandboxMode/maxToolDifficulty)
   const toolDefs = await agent.getToolDefs();

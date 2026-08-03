@@ -1,12 +1,33 @@
 // Agent - the core AI agent with tool calling support.
 
 import { Message, type ImageAttachment } from "./context/message.ts";
-import { MessageLog } from "./context/message-log.ts";
 import {
   OUTPUT_EVENT,
   OutputEvent,
   OutputEventType,
 } from "./context/output.ts";
+import { createContextManager, type ContextManager } from "./context/context-manager.ts";
+
+import { AgentError, ConfigError, LlmError } from "./error.ts";
+import { HOOKS, HookSystem, type ContextHookResult, type ProviderRequestHookResult } from "./hooks.ts";
+import { isPromise } from "../utils/promise.ts";
+import { ACTIONS, ParsedCommand } from "./commands.ts";
+import { createCommandRegistry, AgentCommandRegistry, type CommandResult } from "./extensions/registries.ts";
+import { CORE_COMMAND_HANDLERS } from "./command-handlers.ts";
+import { resolveModelConfig, type ModelConfig } from "./config/providers.ts";
+
+import { type RawUsage } from "./token-tracker.ts";
+import { ToolExecutor, createToolExecutor, type ToolResult as ToolExecutorResult } from "./tool-executor.ts";
+
+import type { LlmClient, StreamEvent } from "./llm-client/client.ts";
+import {
+  createStreamProcessor,
+  StreamProcessor,
+  type StreamResult,
+} from "./llm-client/stream-processor.ts";
+import type { ToolRegistry, ToolDef } from "./extensions/tool-registry.ts";
+import type { ToolCall } from "./context/message.ts";
+export type { StreamEvent } from "./llm-client/client.ts";
 
 /**
  * Map event type strings to OUTPUT_EVENT constants.
@@ -29,31 +50,6 @@ const EVENT_TYPE_MAP: Record<string, OutputEventType> = {
 };
 
 type EventTypeName = keyof typeof EVENT_TYPE_MAP;
-
-import { AgentError, ConfigError, LlmError } from "./error.ts";
-import { HOOKS, HookSystem, type ContextHookResult, type ProviderRequestHookResult } from "./hooks.ts";
-import { isPromise } from "../utils/promise.ts";
-import { ACTIONS, ParsedCommand, Command } from "./commands.ts";
-import { createCommandRegistry, AgentCommandRegistry, type CommandResult } from "./extensions/registries.ts";
-import { CORE_COMMAND_HANDLERS } from "./command-handlers.ts";
-import { resolveModelConfig, type ModelConfig } from "./config/providers.ts";
-export type { ModelConfig } from "./config/providers.ts";
-
-import { createSystemPromptBuilder } from "./context/system-prompt.ts";
-import { TokenTracker, type TokenUsage, type RawUsage } from "./token-tracker.ts";
-import { ToolExecutor, createToolExecutor, type ToolResult as ToolExecutorResult } from "./tool-executor.ts";
-
-import type { LlmClient, StreamEvent } from "./llm-client/client.ts";
-import {
-  createStreamProcessor,
-  StreamProcessor,
-  type StreamResult,
-} from "./llm-client/stream-processor.ts";
-import type { ToolRegistry, ToolDef } from "./extensions/tool-registry.ts";
-import type { SystemPromptBuilder } from "./context/system-prompt.ts";
-import type { ToolCall } from "./context/message.ts";
-
-export type { StreamEvent } from "./llm-client/client.ts";
 
 export interface ModelRegistry {
   [key: string]: ModelConfig;
@@ -121,7 +117,6 @@ export interface AgentOptions {
   abortSignal?: AbortSignal | null;
   toolWhitelist?: string[] | null;
   commandRegistry?: AgentCommandRegistry;
-  systemPromptBuilder?: SystemPromptBuilder;
   /**
    * Optional callback to enqueue a message on the owning MessageBus.
    * Set by the MessageBus after agent construction so the agent (and
@@ -137,7 +132,7 @@ export class Agent {
   hooks: HookSystem;
   #toolRegistry: ToolRegistry;
   llmClient: LlmClient;
-  log: MessageLog;
+  context: ContextManager;
   #model: string;
   maxIterations: number;
   contextLimit: number;
@@ -162,8 +157,6 @@ export class Agent {
   runAbortController: AbortController | null;
   commandRegistry: AgentCommandRegistry;
   #toolExecutor: ToolExecutor;
-  #tokenTracker: TokenTracker;
-  #systemPromptBuilder: SystemPromptBuilder;
   #streamProcessor: StreamProcessor;
   enqueueCallback: ((text: string) => void) | null;
 
@@ -177,7 +170,8 @@ export class Agent {
     this.hooks = options.hooks;
     this.#toolRegistry = options.toolRegistry;
     this.llmClient = options.llmClient;
-    this.log = new MessageLog();
+    // Context manager — owns message storage, token tracking, and system prompt.
+    this.context = createContextManager();
     this.#model = options.model;
     this.maxIterations = options.maxIterations;
     this.contextLimit = options.contextLimit;
@@ -212,11 +206,10 @@ export class Agent {
       this.commandRegistry.register(type, def);
     }
     // Tool executor — runs the full tool call pipeline
-    // (initialized after this.emitOutput / this.addMessage are available as bound methods)
     this.#toolExecutor = createToolExecutor({
+      context: this.context,
       toolRegistry: options.toolRegistry,
       hooks: options.hooks,
-      addMessage: (msg) => this.addMessage(msg),
       emitOutput: (type, data) => this.emitOutput(type, data),
       toolWhitelist: options.toolWhitelist || null,
       cwdBoundary: options.config?.cwdBoundary || null,
@@ -226,11 +219,6 @@ export class Agent {
       isRestoring: () => this.#isRestoring,
       agent: this,
     });
-    // Token usage tracking — accumulates session totals and saves last-reported values.
-    this.#tokenTracker = new TokenTracker();
-    // System prompt builder — manages system prompt lifecycle
-    this.#systemPromptBuilder =
-      options.systemPromptBuilder || createSystemPromptBuilder();
     // Enqueue callback — set by the owning MessageBus so the agent
     // (and extensions via hooks) can queue messages for processing.
     this.enqueueCallback = options.enqueueCallback || null;
@@ -306,14 +294,9 @@ export class Agent {
     return this.#streamProcessor.streamingReasoning;
   }
 
-  /** Get the current system prompt (from the builder's cache). */
-  get systemPrompt(): string | null {
-    return this.#systemPromptBuilder.getPrompt();
-  }
-
-  /** Get token usage for this session — both accumulated totals and the last-reported values from the provider. */
-  getTokenUsage(): TokenUsage {
-    return this.#tokenTracker.getUsage();
+  /** Get the message log (backwards compatibility — prefer context.getMessages()). */
+  get log() {
+    return this.context.log;
   }
 
   /**
@@ -463,7 +446,7 @@ export class Agent {
     modelConfig: ModelConfig,
   ): Promise<string | { outcome: string; toolResults: ToolExecutorResult[] }> {
     this.hooks.notifyHooks(HOOKS.PROVIDER_RESPONSE, { response, modelConfig, agent: this });
-    this.hooks.notifyHooks(HOOKS.MESSAGES_AFTER_LLM, { response, messages: this.log.getAll(), agent: this });
+    this.hooks.notifyHooks(HOOKS.MESSAGES_AFTER_LLM, { response, messages: this.context.getMessages(), agent: this });
 
     const assistantMsg = new Message({
       role: "assistant",
@@ -530,9 +513,9 @@ export class Agent {
     });
   }
 
-  /** Emit token usage — delegates to TokenTracker for accumulation and emits the event. */
+  /** Emit token usage — delegates to ContextManager for accumulation and emits the event. */
   _emitTokenUsage(response: { usage?: RawUsage | null }): void {
-    this.#tokenTracker.record(response.usage, (usage) => {
+    this.context.recordUsage(response.usage, (usage) => {
       this.emitOutput("token_usage", usage);
     });
   }
@@ -555,7 +538,7 @@ export class Agent {
    * @returns Array of messages.
    */
   buildMessages(): Message[] {
-    return this.log.buildMessages(this.#systemPromptBuilder.getPrompt());
+    return this.context.buildForLlmCall();
   }
 
   /**
@@ -564,15 +547,13 @@ export class Agent {
    * Chunks are sorted by priority and rendered via the template.
    */
   async ensureSystemPrompt(): Promise<void> {
-    await this.#systemPromptBuilder.ensureBuilt(this.hooks, this, {
+    await this.context.ensureSystemPrompt(this.hooks, this, {
       role: this.role,
       profileBody: this.profileBody,
       model: this.#model,
       profileName: this.profileName,
     });
   }
-
-  // ── Stream Processing ─────────────────────────────────────────────────────
 
   /**
    * Process a streaming LLM response.
@@ -599,33 +580,20 @@ export class Agent {
     });
   }
 
-  // ── Tool Execution ────────────────────────────────────────────────────────
-  // Delegated to ToolExecutor for independent testability.
-
-  /**
-   * Execute tool calls from an LLM response.
-   * Delegates to ToolExecutor.
-   *
-   * @param toolCalls
-   * @returns { outcome: 'continue' | 'return', toolResults }
-   */
-  async _executeTools(
-    toolCalls: ToolCall[],
-  ): Promise<{ outcome: "continue" | "return"; toolResults: ToolExecutorResult[] }> {
+  /** Execute tool calls from an LLM response. */
+  async _executeTools(toolCalls: ToolCall[]) {
     return this.#toolExecutor.execute(toolCalls);
   }
-
-  // ── Public Context API ────────────────────────────────────────────────────
 
   /**
    * Add a single message to the agent's context.
    * Fires the CONTEXT_MESSAGE hook so extensions (session-log, etc.) are notified.
-   * Use this instead of directly pushing to _log.
+   * Use this instead of directly pushing to the message log.
    *
    * @param msg - The message to add.
    */
   addMessage(msg: Message): void {
-    this.log.push(msg);
+    this.context.addMessage(msg);
     this.hooks.notifyHooks(HOOKS.CONTEXT_MESSAGE, {
       message: msg,
       agent: this,
@@ -640,16 +608,14 @@ export class Agent {
    * @param newContext - The new context array (array of Message instances).
    */
   replaceContext(newContext: Message[]): void {
-    const oldContext = this.log.getAll();
-    this.log.replace(newContext);
+    const oldContext = this.context.getMessages();
+    this.context.replaceMessages(newContext);
     this.hooks.notifyHooks(HOOKS.CONTEXT_REPLACED, {
       agent: this,
       oldContext,
       newContext,
     });
   }
-
-  // ── Helpers ───────────────────────────────────────────────────────────────
 
   /**
    * Emit a typed output event.
@@ -664,23 +630,15 @@ export class Agent {
     this.hooks.notifyHooks(HOOKS.OUTPUT_EVENT, { type, data, agent: this });
   }
 
-  // ── Session Management ────────────────────────────────────────────────────
-
-  /**
-   * Clear the context and start fresh.
-   */
+  /** Clear the context and start fresh. */
   async clearContext(): Promise<void> {
-    this.log.clear();
-    this.#systemPromptBuilder.clear();
+    this.context.clear();
     this.iterationCount = 0;
-    this.#tokenTracker.clear();
     // Clear tool def cache -- different profiles/models may have different tools
     this.#toolRegistry.clearToolDefs();
   }
 
-  /**
-   * Cancel the current run.
-   */
+  /** Cancel the current run. */
   cancel(): void {
     this.cancelled = true;
     // Abort the active LLM request so the HTTP client terminates fetch().
@@ -808,20 +766,17 @@ export class Agent {
   serialize(): Record<string, unknown> {
     return {
       sessionId: this.sessionId,
-      context: this.log.toJSON(),
+      context: this.context.log.toJSON(),
       model: this.model,
       iterationCount: this.iterationCount,
       reasoningEffort: this.reasoningEffort,
     };
   }
 
-  /**
-   * Deserialize agent state from persisted data.
-   * @param data
-   */
+  /** Deserialize agent state from persisted data. */
   deserialize(data: Record<string, unknown>): void {
     this.sessionId = data.sessionId as string;
-    this.log.replace(
+    this.context.replaceMessages(
       (data.context as Array<Record<string, unknown>>).map(
         (m: Record<string, unknown>) => Message.fromJSON(m),
       ),

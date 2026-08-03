@@ -6,6 +6,7 @@ import type { ToolCall } from '../../src/core/context/message.ts';
 import { createToolRegistry } from '../../src/core/extensions/tool-registry.ts';
 import { createHooks } from '../../src/core/hooks.ts';
 import { Message } from '../../src/core/context/message.ts';
+import { createContextManager } from '../../src/core/context/context-manager.ts';
 import type { Tool, ToolDef } from '../../src/core/extensions/tool-registry.ts';
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
@@ -35,13 +36,13 @@ function makeTestTool(
 function createMockDeps(overrides: Partial<ToolExecutorDeps> = {}): ToolExecutorDeps {
   const toolRegistry = createToolRegistry();
   const hooks = createHooks();
-  const messages: Message[] = [];
+  const context = createContextManager();
   const outputs: Array<{ type: string; data: Record<string, unknown> }> = [];
 
   return {
+    context,
     toolRegistry,
     hooks,
-    addMessage: (msg: Message) => messages.push(msg),
     emitOutput: (type, data) => outputs.push({ type, data }),
     toolWhitelist: null,
     cwdBoundary: '/workspace',

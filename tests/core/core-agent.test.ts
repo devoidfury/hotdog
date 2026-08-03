@@ -719,7 +719,7 @@ describe('Agent — end-to-end loop', () => {
       });
 
       await agent.ensureSystemPrompt();
-      expect(agent.systemPrompt).toContain('Test Chunk');
+      expect(agent.context.getSystemPrompt()).toContain('Test Chunk');
     });
   });
 
@@ -801,7 +801,7 @@ describe('Agent — end-to-end loop', () => {
       });
       const { agent } = createFixture({ mockLLM });
       await agent.run('test');
-      const usage = agent.getTokenUsage();
+      const usage = agent.context.getTokenUsage();
       expect(usage.sessionPromptTokens).toBe(5);
       expect(usage.sessionCompletionTokens).toBe(10);
       expect(usage.sessionTotalTokens).toBe(15);

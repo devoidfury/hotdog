@@ -55,7 +55,7 @@ export function create(core: CoreContext): ExtensionInstance {
 
   return {
     hooks: {
-      [HOOKS.SYSTEM_PROMPT_BUILD]: async (_data: unknown) => {
+      [HOOKS.SYSTEM_PROMPT_BUILD]: async (_data) => {
         const content = await buildAgentsMdChunk(autoload);
         return { name: "project-context", priority: 300, content };
       },

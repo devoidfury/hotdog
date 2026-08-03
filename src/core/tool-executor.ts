@@ -8,6 +8,7 @@ import { ToolContext } from "./extensions/tool-context.ts";
 import { formatToolResult, TOOL_STOP_LOOP } from "./extensions/tool-utils.ts";
 import type { ToolRegistry } from "./extensions/tool-registry.ts";
 import type { Agent } from "./agent.ts";
+import type { ContextManager } from "./context/context-manager.ts";
 
 
 export interface ToolResult {
@@ -20,9 +21,9 @@ export interface ToolResult {
 }
 
 export interface ToolExecutorDeps {
+  context: ContextManager;
   toolRegistry: ToolRegistry;
   hooks: HookSystem;
-  addMessage(msg: Message): void;
   emitOutput<T extends string>(type: T, data: Record<string, unknown>): void;
   toolWhitelist: string[] | null;
   cwdBoundary: string | null;
@@ -98,7 +99,7 @@ export class ToolExecutor {
         content: result,
         toolCallId,
       });
-      this.#deps.addMessage(msg);
+      this.#deps.context.addMessage(msg);
       return { toolName: "(invalid)", input, result, toolCallId: toolCallId || "" };
     }
 
@@ -261,7 +262,7 @@ export class ToolExecutor {
       toolCallId,
       images: images as ImageAttachment[] | undefined,
     });
-    this.#deps.addMessage(msg);
+    this.#deps.context.addMessage(msg);
     return { toolName, input, result, toolCallId, stopLoop };
   }
 }

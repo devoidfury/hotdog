@@ -15,7 +15,7 @@ import {
 } from "../../core/llm-client/client.ts";
 import { MarkerMangler } from "../../core/marker-mangler.ts";
 import { SessionManager } from "../../core/session/index.ts";
-import { Agent, type ModelConfig } from "../../core/agent.ts";
+import { Agent } from "../../core/agent.ts";
 import { CliChannel } from "./cli-channel.ts";
 import pkg from "../../../package.json" with { type: "json" };
 import {
@@ -32,6 +32,8 @@ import {
   registerShellCompletion,
   buildReadlineCompleter,
 } from "./completions.ts";
+import { CliArgv } from "../../core/extensions/registries.ts";
+import type { ModelConfig } from "../../core/config/providers.ts";
 
 export {
   parseCompletionContext,
@@ -492,19 +494,19 @@ export async function runInteractiveSession(
   const sink = new CliOutputSink({
     ...resolved,
     palette,
-    thinkerFormat: resolved.thinkerFormat as string | undefined,
-    toolFormat: resolved.toolFormat as string | undefined,
-    toolOutputFmt: resolved.toolOutputFmt as string | undefined,
+    thinkerFormat: resolved.thinkerFormat,
+    toolFormat: resolved.toolFormat,
+    toolOutputFmt: resolved.toolOutputFmt,
     hideUserMessage: true,
   });
 
   // Build LLM client — single instance owned by SessionManager
   const llmClient = new LlmClient({
-    baseUrl: resolved.baseUrl as string,
-    apiKey: resolved.apiKey as string,
-    stream: resolved.stream as boolean | undefined,
-    chatTimeoutSecs: resolved.chatTimeout as number,
-    maxRetries: resolved.maxRetries as number,
+    baseUrl: resolved.baseUrl,
+    apiKey: resolved.apiKey,
+    stream: resolved.stream,
+    chatTimeoutSecs: resolved.chatTimeout,
+    maxRetries: resolved.maxRetries,
     providers: (config.providers as ProviderConfig[]) || [],
     markerMangler: new MarkerMangler(),
   });
@@ -516,19 +518,17 @@ export async function runInteractiveSession(
 
   // Create SessionManager — this owns the MessageBus and TaskManager internally
   const sessionManager = await SessionManager.create({
-    hooks: core.hooks as unknown as {
-      notifyHooks: (hookName: string, data: unknown) => void;
-    },
+    hooks: core.hooks,
     extensions: core.extensions,
     buildAgent,
     initialConfig: { sessionId: cli.sessionId || null },
     llmClient,
-    modelRegistry: resolved.modelRegistry as Record<string, unknown>,
+    modelRegistry: resolved.modelRegistry,
     coreConfig: config,
     taskConfig: {
-      maxIterations: (resolved.maxIterations as number) || 100,
-      taskProfile: (resolved.taskProfile as string) || "task-default",
-      taskRole: (resolved.taskDefaultRole as string) || "",
+      maxIterations: resolved.maxIterations || 100,
+      taskProfile: resolved.taskProfile || "task-default",
+      taskRole: resolved.taskDefaultRole || "",
     },
     profileManager: resolved.profileManager,
   });
@@ -538,21 +538,16 @@ export async function runInteractiveSession(
 
   // Register completions from command definitions (extensions declare completions inline)
   // Hook into COMMANDS_REGISTER so completions are wired up as commands are registered
-  core.hooks.on(HOOKS.COMMANDS_REGISTER, (payload: unknown) => {
-    const { registry } = payload as { registry: { all: () => Map<string, unknown> } };
-    registerCommandCompletions(core.completion, registry as any, "ui-interactive-cli");
+  core.hooks.on(HOOKS.COMMANDS_REGISTER, ({ registry }) => {
+    registerCommandCompletions(core.completion, registry, "ui-interactive-cli");
   }, "ui-interactive-cli");
 
   // Print info
   const agent = sessionManager.getAgent();
-  console.log(
-    `hotdog ${(pkg as { version: string }).version} (interactive mode)`,
-  );
+  console.log(`hotdog ${pkg.version} (interactive mode)`);
   console.log(`Model: ${resolved.model}`);
   console.log(`Profile: ${resolved.profileName}`);
-  console.log(
-    `Session: ${(agent as { sessionId?: string })?.sessionId || "unknown"}`,
-  );
+  console.log(`Session: ${agent?.sessionId || "unknown"}`);
   console.log("Type /quit or /exit to exit.\n");
 
   // Determine shell mode
@@ -586,13 +581,13 @@ export async function runInteractiveSession(
   };
 
   // Listen for model changes and update the prompt
-  core.hooks.on(HOOKS.MODEL_CHANGE, (data: { newModel: string }) => {
-    rl.setPrompt(`(${data.newModel})> `);
+  core.hooks.on(HOOKS.MODEL_CHANGE, ({ newModel }) => {
+    rl.setPrompt(`(${newModel})> `);
   });
 
   // Re-display prompt after agent finishes
-  core.hooks.on(HOOKS.TURN_END, (data: { stopped?: boolean }) => {
-    if (data.stopped) {
+  core.hooks.on(HOOKS.TURN_END, ({ stopped  }) => {
+    if (stopped) {
       setImmediate(() => {
         console.log("");
         rl.prompt();
@@ -752,35 +747,31 @@ export function handleSlashCommand(
  */
 export function create(core: CoreContext): ExtensionInstance {
   return {
-    hooks: core.hooks
-      ? {
-          [HOOKS.CLI_SUBCOMMANDS_REGISTER]: async (payload: unknown) => {
-            const registry = payload as {
-              register: (name: string, opts: Record<string, unknown>) => void;
-            };
-            registry.register("cli", {
-              description: "Interactive CLI session",
-              handler: async (
-                cli: Record<string, unknown>,
-                core: CoreContext,
-              ) => {
-                await runInteractiveSession(cli, core);
-              },
-            });
+    hooks: {
+      [HOOKS.CLI_SUBCOMMANDS_REGISTER]: async (registry) => {
+        registry.register("cli", {
+          description: "Interactive CLI session",
+          handler: async (
+            cli: CliArgv,
+            core: CoreContext,
+          ) => {
+            await runInteractiveSession(cli, core);
+            return 0;
           },
+        });
+      },
 
-          [HOOKS.AGENT_TOOL_CONTEXT]: (payload: unknown) => {
-            const toolCtx = (
-              payload as {
-                toolCtx: { set: (key: string, value: unknown) => void };
-              }
-            ).toolCtx;
-            if (currentInput) {
-              toolCtx.set("input", currentInput);
-            }
-          },
+      [HOOKS.AGENT_TOOL_CONTEXT]: (payload: unknown) => {
+        const toolCtx = (
+          payload as {
+            toolCtx: { set: (key: string, value: unknown) => void };
+          }
+        ).toolCtx;
+        if (currentInput) {
+          toolCtx.set("input", currentInput);
         }
-      : undefined,
+      },
+    },
 
     cleanup: async () => {
       currentInput = null;

@@ -3,36 +3,7 @@
 import { logger } from "../logger.ts";
 import { CoreContext } from "./types.ts";
 import type { CompletionHandler } from "../completion.ts";
-
-// ── Type Definitions ─────────────────────────────────────────────────────────
-
-/**
- * Minimal Agent interface for command handlers.
- * Defines the public API surface that command handlers need from Agent.
- * Avoids circular imports by describing only what's used.
- */
-export interface CommandAgent {
-  cancelled: boolean;
-  clearContext(): Promise<void>;
-  enqueue(text: string): void;
-  getTokenUsage(): {
-    turns: number;
-    sessionPromptTokens: number;
-    sessionCachedTokens: number;
-    sessionCompletionTokens: number;
-    sessionTotalTokens: number;
-    promptTokens?: number;
-    cachedTokens?: number;
-    completionTokens?: number;
-    totalTokens?: number;
-  };
-  hideTools: boolean;
-  hideThinking: boolean;
-  systemPrompt: string | null;
-  reasoningEffort: string | undefined;
-  ensureSystemPrompt(): Promise<void>;
-  emitOutput(type: string, data: Record<string, unknown>): void;
-}
+import type { Agent } from "../agent.ts";
 
 // ── CLI Argument Type ────────────────────────────────────────────────────────
 
@@ -79,7 +50,7 @@ export interface CommandResult {
  * Command handler function type.
  */
 export type CommandHandler = (
-  agent: CommandAgent,
+  agent: Agent,
   value: string | null,
   cmd?: ParsedCommand,
 ) => CommandResult | Promise<CommandResult>;

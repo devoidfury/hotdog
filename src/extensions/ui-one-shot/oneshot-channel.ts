@@ -1,8 +1,7 @@
 // OneShotChannel — Channel implementation for one-shot prompt mode.
-// Single prompt, collects events, then exits.
 
 import { Channel, ChannelSessionManager } from "../../core/channel.ts";
-import { OUTPUT_EVENT, OutputEvent } from "../../core/context/output.ts";
+import { OutputEvent } from "../../core/context/output.ts";
 import { CliOutputSink } from "../../utils/cli/cli.ts";
 
 // ── OneShotChannel ──────────────────────────────────────────────────────────

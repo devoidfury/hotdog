@@ -505,17 +505,11 @@ describe("handleSlashCommand", () => {
 // ── create (extension entry point) ─────────────────────────────────────────
 
 describe("create", () => {
-  it("returns extension with hooks when core.hooks exists", () => {
+  it("returns extension with hooks", () => {
     const mockCore = { hooks: { on: () => {}, notifyHooks: () => {} } } as never;
     const ext = create(mockCore);
     expect(ext.hooks).toBeDefined();
     expect(ext.hooks![HOOKS.CLI_SUBCOMMANDS_REGISTER]).toBeDefined();
-  });
-
-  it("returns extension without hooks when core.hooks is undefined", () => {
-    const mockCore = { hooks: undefined } as never;
-    const ext = create(mockCore);
-    expect(ext.hooks).toBeUndefined();
   });
 });
 

@@ -51,6 +51,16 @@ function createMockAgent(contextArray: any[], model = "test-model", modelRegistr
   const log = new MessageLog(contextArray);
   return {
     get log() { return log; },
+    // Context manager shim for compaction extension
+    get context() {
+      return {
+        getMessages: () => log.getAll(),
+        replaceMessages: (msgs: any[]) => log.replace(msgs),
+        getSystem: () => log.getSystem(),
+        getNonSystem: () => log.getNonSystem(),
+        getSystemPrompt: () => null,
+      };
+    },
     model,
     modelRegistry: modelRegistry || {},
     sessionId: "test-session",
@@ -634,6 +644,13 @@ describe("Edge Cases", () => {
     const log = new MessageLog(context);
     const agent = {
       get log() { return log; },
+      context: {
+        getMessages: () => log.getAll(),
+        replaceMessages: (msgs: any[]) => log.replace(msgs),
+        getSystem: () => log.getSystem(),
+        getNonSystem: () => log.getNonSystem(),
+        getSystemPrompt: () => null,
+      },
       model: "test-model",
       sessionId: "test-session",
       cancelled: true, // Agent is cancelled
@@ -679,6 +696,13 @@ describe("Edge Cases", () => {
     const log = new MessageLog(context);
     const agent = {
       get log() { return log; },
+      context: {
+        getMessages: () => log.getAll(),
+        replaceMessages: (msgs: any[]) => log.replace(msgs),
+        getSystem: () => log.getSystem(),
+        getNonSystem: () => log.getNonSystem(),
+        getSystemPrompt: () => null,
+      },
       model: "test-model",
       sessionId: "test-session",
       cancelled: false,

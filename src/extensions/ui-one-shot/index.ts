@@ -10,10 +10,11 @@ import { CliOutputSink } from "../../utils/cli/cli.ts";
 import { LlmClient, type ProviderConfig } from "../../core/llm-client/client.ts";
 import { MarkerMangler } from "../../core/marker-mangler.ts";
 import { SessionManager } from "../../core/session/index.ts";
-import { Agent, type ModelConfig } from "../../core/agent.ts";
+import { Agent } from "../../core/agent.ts";
 import { OneShotChannel } from "./oneshot-channel.ts";
 import type { CoreContext, ExtensionInstance, ResolvedConfig } from "../../core/extensions/types.ts";
 import type { CoreConfigWithExtensions } from "../../core/config/index.ts";
+import type { ModelConfig } from "../../core/config/providers.ts";
 
 // ── Types ──────────────────────────────────────────────────────────────────
 

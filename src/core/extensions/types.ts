@@ -23,7 +23,7 @@ export type {
 import type { ToolRegistry, ToolDef, Tool, ToolMetadata } from "./tool-registry.ts";
 import type { ExtensionLoader } from "./extensions.ts";
 import type { ServiceRegistry } from "./service-registry.ts";
-import type { CliSubcommandRegistry } from "./registries.ts";
+import type { AgentCommandRegistry, CliSubcommandRegistry } from "./registries.ts";
 import type { ConfigRegistry } from "./config.ts";
 import type { ModelConfig, ProviderDef } from "../config/providers.ts";
 import type { CoreConfigWithExtensions } from "../config/schema-loader.ts";
@@ -399,7 +399,7 @@ export interface ProviderRequestPayload {
  */
 export interface CommandsRegisterPayload {
   /** The agent's command registry for registering slash commands. */
-  registry: { register(name: string, definition: Record<string, unknown>): void };
+  registry: AgentCommandRegistry;
   /** The agent instance for accessing agent state. */
   agent: Agent;
 }

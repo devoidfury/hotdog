@@ -5,7 +5,6 @@
 import {
   CompactionStrategy,
   CompactionStrategyRegistry,
-  type CompactResult,
 } from "./strategies.ts";
 import { SummarizeStrategy } from "./strategies/summarize.ts";
 import { DropStrategy } from "./strategies/drop.ts";
@@ -109,7 +108,7 @@ export function create(core: CoreContext): ExtensionInstance | null {
    */
   async function _performCompaction(agent: Agent, strategy: CompactionStrategy): Promise<void> {
 
-    const messages = agent.log.getAll(); // defensive copy — strategies expect Message[]
+    const messages = agent.context.getMessages(); // defensive copy — strategies expect Message[]
     const model = agent.model;
     const modelConfig = getModelConfig(agent.modelRegistry, model);
 
@@ -198,7 +197,7 @@ export function create(core: CoreContext): ExtensionInstance | null {
    * Handle the /compact command.
    */
   async function _handleCompactCommand(agent: Agent, opts: { keep: number | null; debug: boolean }): Promise<Record<string, unknown>> {
-    const nonSystemMessages = agent.log.getNonSystem();
+    const nonSystemMessages = agent.context.getNonSystem();
 
     if (nonSystemMessages.length <= 2) {
       return { action: ACTIONS.DISPLAY, content: "Not enough messages to compact." };
@@ -206,7 +205,7 @@ export function create(core: CoreContext): ExtensionInstance | null {
 
     // If keep is specified, just trim to that many messages
     if (opts.keep !== null) {
-      const systemMessages = agent.log.getSystem();
+      const systemMessages = agent.context.getSystem();
       const keptMessages = nonSystemMessages.slice(-opts.keep);
       agent.replaceContext(ensureUserTurnGuard([...systemMessages, ...keptMessages]));
       return { action: ACTIONS.DISPLAY, content: `Context compacted to ${keptMessages.length} messages.` };
@@ -289,8 +288,8 @@ export function create(core: CoreContext): ExtensionInstance | null {
         registry.register("compact", {
           description: "Compact context (compact [n] [--compact-debug])",
           matches: (cmd: string) => cmd.startsWith("compact") && !cmd.startsWith("compact:"),
-          handler: async (agent: Agent, cmdValue: string) => {
-            const parts = cmdValue.split(/\s+/);
+          handler: async (agent, cmdValue) => {
+            const parts = cmdValue?.split(/\s+/) || [];
             let keep: number | null = null;
             let debug = false;
             for (const part of parts.slice(1)) {
@@ -308,8 +307,8 @@ export function create(core: CoreContext): ExtensionInstance | null {
         registry.register("compact:strategy", {
           description: "Manage compaction strategy (compact:strategy [list|set <name>|help])",
           matches: (cmd: string) => cmd.startsWith("compact:strategy"),
-          handler: async (_agent: unknown, cmdValue: string) => {
-            const rest = cmdValue.slice(16).trim();
+          handler: async (_agent, cmdValue) => {
+            const rest = cmdValue?.slice(16).trim();
             const parts = rest ? rest.split(/\s+/) : [];
             const action = parts[0] || "list";
             const name = parts[1] || null;

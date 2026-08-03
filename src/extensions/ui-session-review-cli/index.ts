@@ -1,7 +1,5 @@
 // Session Review Extension
 // Provides the `sessions` CLI subcommand for managing session logs.
-// Registers subcommands via the cli:subcommandsRegister hook.
-// Also registers the `review` tool via tools:register hook.
 
 import { HOOKS } from "../../core/hooks.ts";
 import { CliOutputSink } from "../../utils/cli/cli.ts";
@@ -12,6 +10,7 @@ import { join } from "node:path";
 import { ReviewTool } from "./review.ts";
 import { CoreContext, ExtensionInstance, ToolsRegisterPayload } from "../../core/extensions/types.ts";
 import readline from "node:readline";
+import { CoreConfigWithExtensions } from "../../core/config/index.ts";
 
 // ── Types ──────────────────────────────────────────────────────────────────
 
@@ -75,7 +74,7 @@ function confirm(prompt: string): Promise<boolean> {
  */
 async function runSessions(
   cli: CliArgs,
-  config: Record<string, unknown>,
+  config: CoreConfigWithExtensions,
 ): Promise<number> {
   const action = (cli.args as string[] | undefined)?.[0] || "show";
 
@@ -98,7 +97,7 @@ async function runSessions(
  */
 async function runShow(
   cli: CliArgs,
-  config: Record<string, unknown>,
+  config: CoreConfigWithExtensions,
 ): Promise<number> {
   const sessionsDir = getSessionsDir();
 
@@ -145,7 +144,7 @@ async function runShow(
  */
 async function runDelete(
   cli: CliArgs,
-  _config: Record<string, unknown>,
+  _config: CoreConfigWithExtensions,
 ): Promise<number> {
   const sessionId = (cli.args as string[] | undefined)?.[1];
 
@@ -181,7 +180,7 @@ async function runDelete(
  */
 async function runCleanup(
   cli: CliArgs,
-  _config: Record<string, unknown>,
+  _config: CoreConfigWithExtensions,
 ): Promise<number> {
   const olderThanDays = cli.olderThan ?? 30;
   const cutoffMs = Date.now() - olderThanDays * 24 * 60 * 60 * 1000;
@@ -403,27 +402,23 @@ function printToolIndex(entries: LogEntry[], json: boolean): number {
  */
 export function create(core: CoreContext): ExtensionInstance {
   return {
-    hooks: core.hooks
-      ? {
-          // Register CLI subcommand via hook
-          [HOOKS.CLI_SUBCOMMANDS_REGISTER]: async (
-            registry: { register: (name: string, opts: Record<string, unknown>) => void },
-          ) => {
-            registry.register("sessions", {
-              description: "Manage session logs (show, delete, cleanup)",
-              handler: async (cli: CliArgs, core: CoreContext) => {
-                const { config } = core;
-                return await runSessions(cli, config as Record<string, unknown>);
-              },
-            });
+    hooks: {
+      // Register CLI subcommand via hook
+      [HOOKS.CLI_SUBCOMMANDS_REGISTER]: async (registry) => {
+        registry.register("sessions", {
+          description: "Manage session logs (show, delete, cleanup)",
+          handler: async (cli, core) => {
+            const { config } = core;
+            return await runSessions(cli, config);
           },
+        });
+      },
 
-          // Register the review tool
-          [HOOKS.TOOLS_REGISTER]: async (registry: ToolsRegisterPayload) => {
-            const tool = new ReviewTool();
-            registry.register("review", tool);
-          },
-        }
-      : undefined,
+      // Register the review tool
+      [HOOKS.TOOLS_REGISTER]: async (registry: ToolsRegisterPayload) => {
+        const tool = new ReviewTool();
+        registry.register("review", tool);
+      },
+    },
   };
 }

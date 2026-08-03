@@ -175,12 +175,10 @@ export function create(core: CoreContext): ExtensionInstance {
   return {
     hooks: {
       [HOOKS.INPUT]: async ({ text, agent }) => {
-        // Get workspace boundaries from agent context, fall back to cwd
-        const ctx = (agent as { context?: { get: (k: string) => unknown } })
-          ?.context;
-        const cwdBoundary = (ctx?.get("cwdBoundary") as string | null) ?? null;
-        const workspaceRoot =
-          (ctx?.get("workspaceRoot") as string | null) ?? null;
+        // Get workspace boundaries from agent config
+        const config = agent?.config;
+        const cwdBoundary = config?.cwdBoundary ?? null;
+        const workspaceRoot = config?.workspaceRoot ?? null;
 
         const result = await expandFileReferences(
           text,
@@ -192,8 +190,7 @@ export function create(core: CoreContext): ExtensionInstance {
 
         if (result.expanded !== text) {
           // Emit system message for each attached file
-          const sink = (agent as { sink?: { emit: (e: unknown) => void } })
-            ?.sink;
+          const sink = agent?.sink;
           for (const file of result.attachedFiles) {
             sink?.emit({
               type: OUTPUT_EVENT.SYSTEM_MESSAGE,

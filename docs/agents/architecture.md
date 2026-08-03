@@ -43,7 +43,7 @@ The foundation for the extension architecture. `HookSystem` class with `on()`, `
 
 **Session:** `SESSION_CREATE`, `SESSION_SWAP`, `SESSION_SERIALIZE`, `SESSION_DESERIALIZE`, `SESSION_RESTORE_ACTIVE`
 
-**Tools:** `TOOLS_REGISTER`, `TOOL_BEFORE_EXECUTE`, `TOOL_AFTER_EXECUTE`, `AGENT_TOOL_CONTEXT`, `TOOL_CALL`, `TOOL_RESULT`
+**Tools:** `TOOLS_REGISTER`, `TOOL_METADATA`, `TOOL_BEFORE_EXECUTE`, `TOOL_AFTER_EXECUTE`, `AGENT_TOOL_CONTEXT`, `TOOL_CALL`, `TOOL_RESULT`
 
 **Services:** `SERVICES_REGISTER` — fired synchronously during extension load; handler receives the ServiceRegistry
 
@@ -57,7 +57,7 @@ The foundation for the extension architecture. `HookSystem` class with `on()`, `
 
 **Shutdown:** `SHUTDOWN_CLEANUP`
 
-**CLI:** `CLI_SUBCOMMANDS_REGISTER`, `CLI_ARGS_PARSED`
+**CLI:** `CLI_SUBCOMMANDS_REGISTER`, `CLI_ARGS_PARSED`, `COMPLETION_REQUEST`
 
 **Model:** `MODEL_CHANGE`
 
@@ -102,7 +102,7 @@ Minimal Agent class that runs the LLM loop and delegates behavior to hooks. Key 
 
 ### Commands (`src/core/commands.ts`)
 Command parsing — commands are the abstract concept, slash commands (/cmd) are one UI implementation. Key exports:
-- `Command` enum: `Command.Help`, `Command.Quit`, `Command.Clear`, `Command.Tools`, `Command.Thinking`, `Command.Tokens`, `Command.Regenerate`, `Command.Reasoning`, `Command.Unknown`
+- `Command` enum: `Command.Help`, `Command.Quit`, `Command.Clear`, `Command.Tools`, `Command.Thinking`, `Command.Tokens`, `Command.Regenerate`, `Command.Reasoning`, `Command.Sessions`, `Command.Attach`, `Command.Detach`, `Command.Switch`, `Command.Unknown`
 - `parseCommand(cmd, registry)` — parses raw command string into typed command object
 
 ### Session Management (`src/core/session/index.ts`)

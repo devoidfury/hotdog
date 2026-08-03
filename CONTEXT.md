@@ -94,7 +94,7 @@ Domain concepts for the hotdog AI agent harness. Implementation details are docu
 
 - **Commands** — User-triggered operations. Never LLM-triggered. Commands are the abstract concept; how they are invoked is a UI implementation detail.
 - **Slash Commands** — The interactive CLI implements commands using `/` prefix syntax (e.g., `/quit`, `/compact`). This is one UI implementation for invoking commands.
-- **Core commands** (`Command` enum): `help`, `quit`, `clear`, `tools`, `thinking`, `tokens`, `regenerate`, `reasoning`, `unknown`.
+- **Core commands** (`Command` enum): `help`, `quit`, `clear`, `tools`, `thinking`, `tokens`, `regenerate`, `reasoning`, `sessions`, `attach`, `detach`, `switch`, `unknown`.
 - **Custom commands** — Extensions register commands via `CommandRegistry` using the `COMMANDS_REGISTER` hook (e.g., `compact`, `model`, `skill`).
 - **UI commands** — `help`, `quit` handled directly by UI layer; all others dispatched through agent.
 

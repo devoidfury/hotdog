@@ -82,7 +82,7 @@ These are the top-level configuration keys available in `defaults.json`. Keys no
 - **Type:** `string`
 - **CLI flag:** `--model`
 - **Default:** `"qwen3.5-0.8b"`
-- **Resolution:** CLI `--model` > profile > config > default
+- **Resolution:** profile > CLI `--model` > config > default
 
 The default AI model used when no other model is specified. Format: `providerName/modelName`.
 

@@ -215,8 +215,8 @@ export class ToolRegistry {
    * Filter tools by whitelist/blacklist.
    */
   filter(
-    whitelist?: string[],
-    blacklist?: string[],
+    whitelist?: string[] | null,
+    blacklist?: string[] | null,
     _managerToolsEnabled = false,
   ): ToolRegistry {
     const result = new ToolRegistry();

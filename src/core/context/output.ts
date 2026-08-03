@@ -22,6 +22,28 @@ export const OUTPUT_EVENT = {
 export type OutputEventType = (typeof OUTPUT_EVENT)[keyof typeof OUTPUT_EVENT];
 
 /**
+ * Map string event type names (used internally by the agent) to OUTPUT_EVENT constants.
+ */
+export const EVENT_NAME_MAP: Record<string, OutputEventType> = {
+  user_message: OUTPUT_EVENT.USER_MESSAGE,
+  assistant_message: OUTPUT_EVENT.ASSISTANT_MESSAGE,
+  thinking: OUTPUT_EVENT.THINKING,
+  tool_call: OUTPUT_EVENT.TOOL_CALL,
+  tool_result: OUTPUT_EVENT.TOOL_RESULT,
+  compacting: OUTPUT_EVENT.COMPACTING,
+  command_result: OUTPUT_EVENT.COMMAND_RESULT,
+  question: OUTPUT_EVENT.QUESTION,
+  streaming_chunk: OUTPUT_EVENT.STREAMING_CHUNK,
+  streaming_reasoning_chunk: OUTPUT_EVENT.STREAMING_REASONING_CHUNK,
+  task_progress: OUTPUT_EVENT.TASK_PROGRESS,
+  token_usage: OUTPUT_EVENT.TOKEN_USAGE,
+  compaction_result: OUTPUT_EVENT.COMPACTION_RESULT,
+  session_state: OUTPUT_EVENT.SESSION_STATE,
+};
+
+export type EventName = keyof typeof EVENT_NAME_MAP;
+
+/**
  * Map output event types to handler method names.
  */
 export const EVENT_HANDLERS: Record<OutputEventType, string> = {

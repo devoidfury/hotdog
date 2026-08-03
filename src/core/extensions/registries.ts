@@ -1,27 +1,14 @@
 // Registries for agent commands and CLI subcommands.
 
+import { ACTIONS } from "../commands.ts";
+import { HOOKS } from "../hooks.ts";
+import { isPromise } from "../../utils/promise.ts";
 import { logger } from "../logger.ts";
 import { CoreContext } from "./types.ts";
 import type { CompletionHandler } from "../completion.ts";
 import type { Agent } from "../agent.ts";
-
-// ── CLI Argument Type ────────────────────────────────────────────────────────
-
-/**
- * CLI argument values parsed from the command line.
- * Keys match the config schema property names (camelCase).
- * Note: nullable string properties accept both null and undefined
- * because the CLI parser produces null for missing values.
- */
-export interface CliArgv {
-  config?: string | null;
-  configDir?: string | null;
-  profilesPath?: string | null;
-  model?: string | null;
-  prompt?: string | null;
-  systemPromptTemplate?: string | null;
-  [key: string]: unknown;
-}
+import type { HookSystem } from "../hooks.ts";
+import { CliArgv } from "../config/index.ts";
 
 // ── Parsed Command Type ──────────────────────────────────────────────────────
 
@@ -131,6 +118,50 @@ export class AgentCommandRegistry {
       lines.push(`  /${name.padEnd(20)} ${desc}`);
     }
     return lines.join("\n");
+  }
+
+  /**
+   * Dispatch a command through the full resolution chain:
+   * 1. Custom inline handler (from parseCommand registry match)
+   * 2. COMMAND_DISPATCH hook -- extensions can handle specific commands
+   * 3. Registered handler from this registry by command type
+   *
+   * @param cmd - Parsed command object
+   * @param agent - Agent instance passed to handlers
+   * @param hooks - Hook system for COMMAND_DISPATCH
+   * @returns Command result, or error result if no handler found
+   */
+  async dispatch(
+    cmd: ParsedCommand,
+    agent: Agent,
+    hooks: HookSystem,
+  ): Promise<CommandResult> {
+    // Custom command with inline handler (from parseCommand registry match)
+    if (cmd._customCommand && cmd._handler) {
+      const result = await cmd._handler(agent, cmd.value, cmd);
+      if (result) return result;
+    }
+
+    // COMMAND_DISPATCH hook -- extensions can handle specific commands
+    const pipelineResult = await hooks.runHookPipeline<CommandResult>(
+      HOOKS.COMMAND_DISPATCH,
+      { command: cmd, agent },
+    );
+    const lastResult = pipelineResult.lastResult;
+    if (isPromise(lastResult)) {
+      const awaited = await lastResult;
+      if (awaited) return awaited;
+    } else if (lastResult) {
+      return lastResult;
+    }
+
+    // Look up handler from registry by command type
+    const registered = this.get(cmd.type);
+    if (registered && registered.handler) {
+      return await registered.handler(agent, cmd.value, cmd);
+    }
+
+    return { action: ACTIONS.ERROR, error: `Unknown command: ${cmd.type}` };
   }
 }
 

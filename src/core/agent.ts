@@ -1,80 +1,35 @@
 // Agent - the core AI agent with tool calling support.
 
-import { Message, type ImageAttachment } from "./context/message.ts";
-import {
-  OUTPUT_EVENT,
-  OutputEvent,
-  OutputEventType,
-} from "./context/output.ts";
-import { createContextManager, type ContextManager } from "./context/context-manager.ts";
-
-import { AgentError, ConfigError, LlmError } from "./error.ts";
-import { HOOKS, HookSystem, type ContextHookResult, type ProviderRequestHookResult } from "./hooks.ts";
-import { isPromise } from "../utils/promise.ts";
-import { ACTIONS, ParsedCommand } from "./commands.ts";
-import { createCommandRegistry, AgentCommandRegistry, type CommandResult } from "./extensions/registries.ts";
+import { ParsedCommand } from "./commands.ts";
 import { CORE_COMMAND_HANDLERS } from "./command-handlers.ts";
 import { resolveModelConfig, type ModelConfig } from "./config/providers.ts";
-
+import { Message, type ImageAttachment, type ToolCall } from "./context/message.ts";
+import { OUTPUT_EVENT, OutputEvent, EVENT_NAME_MAP, type EventName } from "./context/output.ts";
+import { createContextManager, type ContextManager } from "./context/context-manager.ts";
+import { AgentError, ConfigError, LlmError } from "./error.ts";
+import type { LlmClient, StreamEvent } from "./llm-client/client.ts";
+import { createStreamProcessor, StreamProcessor, type StreamResult } from "./llm-client/stream-processor.ts";
+import { createCommandRegistry, AgentCommandRegistry, type CommandResult } from "./extensions/registries.ts";
+import type { ToolRegistry, ToolDef } from "./extensions/tool-registry.ts";
+import { HOOKS, HookSystem, type ContextHookResult, type ProviderRequestHookResult } from "./hooks.ts";
 import { type RawUsage } from "./token-tracker.ts";
 import { ToolExecutor, createToolExecutor, type ToolResult as ToolExecutorResult } from "./tool-executor.ts";
-
-import type { LlmClient, StreamEvent } from "./llm-client/client.ts";
-import {
-  createStreamProcessor,
-  StreamProcessor,
-  type StreamResult,
-} from "./llm-client/stream-processor.ts";
-import type { ToolRegistry, ToolDef } from "./extensions/tool-registry.ts";
-import type { ToolCall } from "./context/message.ts";
-export type { StreamEvent } from "./llm-client/client.ts";
-
-/**
- * Map event type strings to OUTPUT_EVENT constants.
- */
-const EVENT_TYPE_MAP: Record<string, OutputEventType> = {
-  user_message: OUTPUT_EVENT.USER_MESSAGE,
-  assistant_message: OUTPUT_EVENT.ASSISTANT_MESSAGE,
-  thinking: OUTPUT_EVENT.THINKING,
-  tool_call: OUTPUT_EVENT.TOOL_CALL,
-  tool_result: OUTPUT_EVENT.TOOL_RESULT,
-  compacting: OUTPUT_EVENT.COMPACTING,
-  command_result: OUTPUT_EVENT.COMMAND_RESULT,
-  question: OUTPUT_EVENT.QUESTION,
-  streaming_chunk: OUTPUT_EVENT.STREAMING_CHUNK,
-  streaming_reasoning_chunk: OUTPUT_EVENT.STREAMING_REASONING_CHUNK,
-  task_progress: OUTPUT_EVENT.TASK_PROGRESS,
-  token_usage: OUTPUT_EVENT.TOKEN_USAGE,
-  compaction_result: OUTPUT_EVENT.COMPACTION_RESULT,
-  session_state: OUTPUT_EVENT.SESSION_STATE,
-};
-
-type EventTypeName = keyof typeof EVENT_TYPE_MAP;
 
 export interface ModelRegistry {
   [key: string]: ModelConfig;
 }
 
-/**
- * Result of an agent run loop execution.
- */
+/** Result of an agent run loop execution. */
 export type AgentRunResult =
   | { type: 'completion'; content: string }
   | { type: 'tool_return'; outcome: string };
 
-/**
- * Parameters for an LLM request.
- */
+/**  Parameters for an LLM request. */
 interface LlmRequestParams {
   messages: Message[];
   modelConfig: ModelConfig;
   toolDefs: ToolDef[];
 }
-
-/**
- * Typed model registry — maps model name to ModelConfig.
- */
-export type TypedModelRegistry = Record<string, ModelConfig>;
 
 export interface OutputSink {
   emit(event: OutputEvent): void;
@@ -243,38 +198,27 @@ export class Agent {
     // Clear tool def cache — different models may have different tool
     // requirements or capabilities, so stale definitions would be incorrect.
     this.#toolRegistry.clearToolDefs();
-    this.hooks.notifyHooks(HOOKS.MODEL_CHANGE, {
-      agent: this,
-      oldModel,
-      newModel: v,
-    });
+    this.hooks.notifyHooks(HOOKS.MODEL_CHANGE, { agent: this, oldModel, newModel: v });
     // Emit through the output sink so connected WS clients get notified
     if (this.sink) {
-      this.sink.emit({
-        type: OUTPUT_EVENT.SESSION_STATE,
-        key: "model",
-        value: v,
-      });
+      this.sink.emit({ type: OUTPUT_EVENT.SESSION_STATE, key: "model", value: v });
     }
   }
 
   get isRestoring(): boolean {
     return this.#isRestoring;
   }
-
-  /** Get the tool registry. Used by hooks for tool metadata access. */
-  get toolRegistry(): ToolRegistry {
-    return this.#toolRegistry;
-  }
   set isRestoring(v: boolean) {
     const oldVal = this.#isRestoring;
     this.#isRestoring = v;
     if (oldVal !== v) {
-      this.hooks.notifyHooks(HOOKS.SESSION_RESTORE_ACTIVE, {
-        agent: this,
-        isRestoring: v,
-      });
+      this.hooks.notifyHooks(HOOKS.SESSION_RESTORE_ACTIVE, { agent: this, isRestoring: v });
     }
+  }
+
+  /** Get the tool registry. Used by hooks for tool metadata access. */
+  get toolRegistry(): ToolRegistry {
+    return this.#toolRegistry;
   }
 
   /**
@@ -303,13 +247,9 @@ export class Agent {
    * Enqueue a message on the owning MessageBus for later processing.
    * No-op if no enqueue callback is configured (e.g., standalone agent).
    * Used by extensions (via hooks) to queue follow-up messages.
-   *
-   * @param text — Message text to enqueue
    */
   enqueue(text: string): void {
-    if (this.enqueueCallback) {
-      this.enqueueCallback(text);
-    }
+    this.enqueueCallback?.(text);
   }
 
   // ── Run Loop ──────────────────────────────────────────────────────────────
@@ -317,17 +257,15 @@ export class Agent {
   /**
    * Run the agent loop with the given user input.
    * @param userInput — Text content of the user message
-   * @param images — Optional images
-   *   Each image: { type: "image_url", mimeType: "image/png", data: "<base64>" }
+   * @param images — Optional images, Array<{ type: "image_url", mimeType: "image/png", data: "<base64>" }>
    * @returns Final run result, or undefined if input was empty.
    */
   async run(userInput: string, images?: ImageAttachment[]): Promise<AgentRunResult | undefined> {
     if (!userInput?.trim() && (!images || images.length === 0)) {
-      return undefined;
+      return;
     }
 
     let stoppedEmitted = false;
-
     try {
       await this.ensureSystemPrompt();
 
@@ -515,9 +453,7 @@ export class Agent {
 
   /** Emit token usage — delegates to ContextManager for accumulation and emits the event. */
   _emitTokenUsage(response: { usage?: RawUsage | null }): void {
-    this.context.recordUsage(response.usage, (usage) => {
-      this.emitOutput("token_usage", usage);
-    });
+    this.context.recordUsage(response.usage, (usage) => { this.emitOutput("token_usage", usage) });
   }
 
   /**
@@ -525,27 +461,19 @@ export class Agent {
    * @param result - The final result text
    */
   notifyCompletion(result: string): void {
-    if (this.sink && typeof (this.sink as OutputSink & { onTaskComplete?: (result: string) => void }).onTaskComplete === "function") {
-      (this.sink as OutputSink & { onTaskComplete: (result: string) => void }).onTaskComplete!(result);
-    }
+    this.sink?.onTaskComplete?.(result);
   }
 
   /**
    * Build messages array: system prompt + context.
    * System prompt is built via hooks (extensions add to it).
-   * Public so extensions can rebuild messages after modifying context
-   * (e.g., compaction).
-   * @returns Array of messages.
+   * Public so extensions can rebuild messages after modifying context.
    */
   buildMessages(): Message[] {
     return this.context.buildForLlmCall();
   }
 
-  /**
-   * Ensure system prompt is built and cached.
-   * Extensions contribute chunks via the SYSTEM_PROMPT_BUILD hook.
-   * Chunks are sorted by priority and rendered via the template.
-   */
+  /** Ensure system prompt is built and cached. */
   async ensureSystemPrompt(): Promise<void> {
     await this.context.ensureSystemPrompt(this.hooks, this, {
       role: this.role,
@@ -556,15 +484,12 @@ export class Agent {
   }
 
   /**
-   * Process a streaming LLM response.
-   * Delegates to StreamProcessor.
+   * Process a streaming LLM response, delegates to StreamProcessor.
    *
    * @param stream - The stream of events from the LLM client.
    * @returns The complete stream result.
    */
-  async _processStream(
-    stream: AsyncIterable<StreamEvent>,
-  ): Promise<StreamResult> {
+  async _processStream(stream: AsyncIterable<StreamEvent>): Promise<StreamResult> {
     return this.#streamProcessor.process(stream, {
       onChunk: (content) => {
         if (this.stream) {
@@ -586,18 +511,12 @@ export class Agent {
   }
 
   /**
-   * Add a single message to the agent's context.
+   * Add a single message to the agent's context. Use this instead of directly pushing to the message log.
    * Fires the CONTEXT_MESSAGE hook so extensions (session-log, etc.) are notified.
-   * Use this instead of directly pushing to the message log.
-   *
-   * @param msg - The message to add.
    */
   addMessage(msg: Message): void {
     this.context.addMessage(msg);
-    this.hooks.notifyHooks(HOOKS.CONTEXT_MESSAGE, {
-      message: msg,
-      agent: this,
-    });
+    this.hooks.notifyHooks(HOOKS.CONTEXT_MESSAGE, { message: msg, agent: this });
   }
 
   /**
@@ -610,20 +529,17 @@ export class Agent {
   replaceContext(newContext: Message[]): void {
     const oldContext = this.context.getMessages();
     this.context.replaceMessages(newContext);
-    this.hooks.notifyHooks(HOOKS.CONTEXT_REPLACED, {
-      agent: this,
-      oldContext,
-      newContext,
-    });
+    this.hooks.notifyHooks(HOOKS.CONTEXT_REPLACED, { agent: this, oldContext, newContext });
   }
 
   /**
    * Emit a typed output event.
+   * 
    * @param type - Event type name (e.g., "user_message", "tool_call").
    * @param data - Typed data matching the event type.
    */
-  emitOutput(type: EventTypeName, data: Record<string, unknown>): void {
-    const eventType = EVENT_TYPE_MAP[type];
+  emitOutput(type: EventName, data: Record<string, unknown>): void {
+    const eventType = EVENT_NAME_MAP[type];
     if (this.sink && eventType) {
       this.sink.emit({ type: eventType, ...data } as OutputEvent);
     }
@@ -641,9 +557,8 @@ export class Agent {
   /** Cancel the current run. */
   cancel(): void {
     this.cancelled = true;
-    // Abort the active LLM request so the HTTP client terminates fetch().
     if (this.runAbortController && !this.runAbortController.signal.aborted) {
-      this.runAbortController.abort();
+      this.runAbortController.abort(); // Abort the active LLM request so the HTTP client terminates fetch().
     }
   }
 
@@ -659,62 +574,51 @@ export class Agent {
    */
   async getToolDefs(): Promise<ToolDef[]> {
     const config = this.config;
-    if (!config) {
-      return await this.#toolRegistry.getToolDefs();
-    }
-
-    const sandboxMode = config.sandboxMode ?? false;
 
     // Resolve effective maxToolDifficulty with priority:
     // 1. CLI override (maxToolDifficulty)
     // 2. Model-specific config from modelRegistry
     // 3. Config-file default (defaultMaxToolDifficulty)
-    // Fallback: if modelName has no "/" and isn't found, try "provider/modelName"
-    // This handles the case where models are fetched remotely (fetchModels: true)
-    // with an empty local models array, so resolveModel returns just the model name
-    // but the registry key is provider/modelName.
-    let modelEntry = this.modelRegistry[this.#model];
-    if (!modelEntry && !this.#model.includes("/")) {
+    const modelEntry = this.#resolveModelEntry();
+    const effectiveMaxDifficulty =
+      config?.maxToolDifficulty ??
+      modelEntry?.maxToolDifficulty ??
+      config?.defaultMaxToolDifficulty ??
+      undefined;
+
+    // Start with metadata-based filtering (sandbox, difficulty)
+    let registry = this.#toolRegistry;
+    if (config?.sandboxMode || effectiveMaxDifficulty != null) {
+      registry = registry.filterByMetadata({
+        maxDifficulty: effectiveMaxDifficulty,
+        allowSideEffects: !config?.sandboxMode,
+      });
+    }
+
+    // Apply whitelist/blacklist filtering at the tool level (before def generation)
+    if (this.toolWhitelist && this.toolWhitelist.length > 0) {
+      registry = registry.filter(this.toolWhitelist, null);
+    }
+    const blacklistTools = config?.blacklistTools as string[] | undefined;
+    if (blacklistTools && blacklistTools.length > 0) {
+      registry = registry.filter(null, blacklistTools);
+    }
+
+    return registry.getToolDefs();
+  }
+
+  /** Resolve model entry from the registry, handling both "provider/model" and "model" names. */
+  #resolveModelEntry(): ModelConfig | undefined {
+    let entry = this.modelRegistry[this.#model];
+    if (!entry && !this.#model.includes("/")) {
       for (const key of Object.keys(this.modelRegistry)) {
         if (key.endsWith(`/${this.#model}`)) {
-          modelEntry = this.modelRegistry[key];
+          entry = this.modelRegistry[key];
           break;
         }
       }
     }
-    const effectiveMaxDifficulty =
-      config.maxToolDifficulty ??
-      modelEntry?.maxToolDifficulty ??
-      config.defaultMaxToolDifficulty ??
-      undefined;
-
-    let defs = sandboxMode || effectiveMaxDifficulty != null
-      ? await this.#toolRegistry.filterByMetadata({
-          maxDifficulty: effectiveMaxDifficulty,
-          allowSideEffects: !sandboxMode,
-        }).getToolDefs()
-      : await this.#toolRegistry.getToolDefs();
-
-    // Filter by whitelist (if set, only allow listed tools)
-    if (this.toolWhitelist && this.toolWhitelist.length > 0) {
-      const whitelistSet = new Set(this.toolWhitelist);
-      defs = defs.filter((d) => {
-        const name = (d.function as { name?: string })?.name;
-        return name && whitelistSet.has(name);
-      });
-    }
-
-    // Filter by blacklist (remove listed tools)
-    const blacklistTools = config.blacklistTools as string[] | undefined;
-    if (blacklistTools && blacklistTools.length > 0) {
-      const blacklistSet = new Set(blacklistTools);
-      defs = defs.filter((d) => {
-        const name = (d.function as { name?: string })?.name;
-        return !(name && blacklistSet.has(name));
-      });
-    }
-
-    return defs;
+    return entry;
   }
 
   /** Get all registered tool names. */
@@ -729,34 +633,7 @@ export class Agent {
    * @returns Command result
    */
   async executeCommand(cmd: ParsedCommand): Promise<CommandResult | null> {
-    // Custom command with inline handler (from parseCommand registry match)
-    if (cmd._customCommand && cmd._handler) {
-      const result = await cmd._handler(this, cmd.value, cmd);
-      if (result) return result;
-    }
-
-    // COMMAND_DISPATCH hook — extensions can handle specific commands.
-    const pipelineResult = await this.hooks.runHookPipeline<CommandResult>(
-      HOOKS.COMMAND_DISPATCH,
-      { command: cmd, agent: this },
-    );
-    const lastResult = pipelineResult.lastResult;
-    if (isPromise(lastResult)) {
-      const awaited = await lastResult;
-      if (awaited) return awaited;
-    } else if (lastResult) {
-      return lastResult;
-    }
-
-    // Look up handler from command registry by command type.
-    // Built-in commands are registered during construction;
-    // extensions also register commands via COMMANDS_REGISTER hook.
-    const registered = this.commandRegistry.get(cmd.type);
-    if (registered && registered.handler) {
-      return await registered.handler(this, cmd.value, cmd);
-    }
-
-    return { action: ACTIONS.ERROR, error: `Unknown command: ${cmd.type}` };
+    return this.commandRegistry.dispatch(cmd, this, this.hooks);
   }
 
   /**
@@ -777,9 +654,7 @@ export class Agent {
   deserialize(data: Record<string, unknown>): void {
     this.sessionId = data.sessionId as string;
     this.context.replaceMessages(
-      (data.context as Array<Record<string, unknown>>).map(
-        (m: Record<string, unknown>) => Message.fromJSON(m),
-      ),
+      (data.context as Array<Record<string, unknown>>).map((m) => Message.fromJSON(m)),
     );
     this.model = data.model as string;
     this.iterationCount = (data.iterationCount as number) || 0;

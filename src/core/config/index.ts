@@ -318,11 +318,21 @@ export function failOnInvalidConfig(result: ValidationResult): void {
   }
 }
 
-// ── Unified Config Builder ─────────────────────────────────────────────
-
-import type { CliArgv } from "../extensions/registries.ts";
-// Re-export for backward compatibility — canonical definition is in registries.ts
-export type { CliArgv };
+/**
+ * CLI argument values parsed from the command line.
+ * Keys match the config schema property names (camelCase).
+ * Note: nullable string properties accept both null and undefined
+ * because the CLI parser produces null for missing values.
+ */
+export interface CliArgv {
+  config?: string | null;
+  configDir?: string | null;
+  profilesPath?: string | null;
+  model?: string | null;
+  prompt?: string | null;
+  systemPromptTemplate?: string | null;
+  [key: string]: unknown;
+}
 
 /**
  * Extra properties added by buildAgentConfig beyond the schema-resolved keys.

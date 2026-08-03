@@ -32,7 +32,7 @@ import {
   registerShellCompletion,
   buildReadlineCompleter,
 } from "./completions.ts";
-import { CliArgv } from "../../core/extensions/registries.ts";
+import type { CliArgv } from "../../core/config/index.ts";
 import type { ModelConfig } from "../../core/config/providers.ts";
 
 export {

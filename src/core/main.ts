@@ -20,7 +20,7 @@ import {
 } from "./extensions/index.ts";
 import { HOOKS, type HookSystem, type HookTraceOptions } from "./hooks.ts";
 import { createCompletionService, type CompletionService } from "./completion.ts";
-import type { ToolMetadataPayload } from "./extensions/types.ts";
+import type { ExtensionInstance, ToolMetadataPayload } from "./extensions/types.ts";
 import type { ToolMetadata } from "./extensions/tool-registry.ts";
 import { parseArgs, generateHelpText } from "./cli.ts";
 import {
@@ -74,8 +74,8 @@ async function loadExtensions(
     taskManager: null,
     config: {} as CoreConfigWithExtensions,
   },
-): Promise<unknown[]> {
-  const loaded: unknown[] = [];
+): Promise<ExtensionInstance[]> {
+  const loaded: ExtensionInstance[] = [];
 
   // Discover extensions from config (returns sorted by dependency order)
   const extensionPaths = (config?.extensionPaths as string[]) || ["builtins"];
@@ -154,11 +154,7 @@ export interface CoreInfrastructure extends LoaderCore {
   extensions: ExtensionLoader;
   completion: CompletionService;
   service: (name: string) => unknown;
-  buildConfig?: (cli: Record<string, unknown>) => Promise<{
-    resolved: ResolvedConfig;
-    modelRegistry: Record<string, ModelConfig>;
-    providers: ProviderDef[];
-  }>;
+  buildConfig?: typeof buildConfig;
   resolved?: ResolvedConfig;
   config: CoreConfigWithExtensions;
 }
@@ -186,7 +182,7 @@ function createCore(
   const coreConfig: CoreConfigWithExtensions = {
     ...config,
     profileName: options.profileName || config.profileName || "default",
-    profileDef: (options.profile || config.profileDef || {}) as ProfileDef | undefined,
+    profileDef: options.profile || config.profileDef,
   };
 
   // Build the core object first, then pass it to the ExtensionLoader.

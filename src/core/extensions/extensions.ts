@@ -13,7 +13,7 @@ import type { ServiceRegistry } from "./service-registry.ts";
 import { extractSchemaDefaults, type ConfigRegistry, type SchemaDefaultEntry } from "./config.ts";
 import type { CliSubcommandRegistry } from "./registries.ts";
 import type { CoreConfigWithExtensions } from "../config/schema-loader.ts";
-import type { ExtensionMetadata } from "./types.ts";
+import type { ExtensionInstance, ExtensionMetadata } from "./types.ts";
 
 export { HOOKS, EXTENSION_PROVIDES };
 
@@ -658,19 +658,16 @@ export class ExtensionLoader {
     name: string,
     entryPoint: string | Record<string, unknown>,
     createOptions: Record<string, unknown> = {},
-  ): Promise<unknown> {
-    let extModule: Record<string, unknown>;
+  ): Promise<ExtensionInstance | null> {
+    let extModule: ExtensionInstance;
     if (typeof entryPoint === "string") {
       extModule = (await import(entryPoint)) as Record<string, unknown>;
     } else {
       extModule = entryPoint;
     }
 
-    const createFn = extModule.create as ((core: LoaderCore, opts: Record<string, unknown>) => unknown) | undefined;
-    const instance = createFn
-      ? await createFn(this.#core, createOptions)
-      : extModule;
-
+    const createFn = extModule.create as ((core: LoaderCore, opts: Record<string, unknown>) => Promise<ExtensionInstance>) | undefined;
+    const instance = createFn ? await createFn(this.#core, createOptions) : extModule;
     if (!instance) {
       return null;
     }

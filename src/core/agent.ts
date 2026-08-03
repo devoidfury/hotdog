@@ -472,6 +472,7 @@ export class Agent {
       toolCalls: response.finalToolCalls,
     });
     this.addMessage(assistantMsg);
+    this._emitTokenUsage(response);
 
     if (response.finalToolCalls) {
       let toolCallsToExecute = response.finalToolCalls;
@@ -509,11 +510,9 @@ export class Agent {
 
       const finalResults: ToolExecutorResult[] = [...toolResults, ...skippedToolResults];
 
-      this._emitTokenUsage(response);
       this._emitTurnEnd(iteration, response.fullText, finalResults, outcome === "return");
       return { outcome, toolResults: finalResults };
     } else {
-      this._emitTokenUsage(response);
       this.hooks.notifyHooks(HOOKS.CONTEXT_MESSAGE, { message: assistantMsg, agent: this });
       this._emitTurnEnd(iteration, response.fullText, [], true);
       return response.fullText;

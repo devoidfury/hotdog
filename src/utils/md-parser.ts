@@ -911,6 +911,36 @@ function processInlineEscapes(text: string): string {
   return result;
 }
 
+/**
+ * Check if a character is a word character for emphasis boundary purposes.
+ * Underscores adjacent to these chars should not act as emphasis markers.
+ */
+function isWordChar(ch: string | undefined): boolean {
+  if (ch === undefined) return false;
+  return /[a-zA-Z0-9_]/.test(ch);
+}
+
+/**
+ * Find a closing underscore marker that respects word boundaries.
+ * The closing underscore must not be followed by a word character.
+ * Returns -1 if no valid closing marker is found.
+ */
+function findClosingUnderscore(
+  text: string,
+  marker: string,
+  start: number,
+): number {
+  let idx = text.indexOf(marker, start);
+  while (idx !== -1) {
+    const after = text[idx + marker.length];
+    if (!isWordChar(after)) {
+      return idx;
+    }
+    idx = text.indexOf(marker, idx + 1);
+  }
+  return -1;
+}
+
 function parseInline(text: string): MdInline[] {
   const result: MdInline[] = [];
   let i = 0;
@@ -1010,8 +1040,14 @@ function parseInline(text: string): MdInline[] {
     }
 
     // Italic: *text* or _text_
+    // For underscores, require word boundaries so "load_skill" doesn't become italic
     if (text[i] === "*" || text[i] === "_") {
-      const delim = text[i];
+      if (text[i] === "_" && isWordChar(text[i - 1])) {
+        // Underscore preceded by word char — not an emphasis opener
+        result.push({ type: "text", content: text[i]! });
+        i++;
+        continue;
+      }
       const italic = parseEmphasis(text, i, 1, "italic");
       if (italic) {
         result.push(italic.node);
@@ -1104,7 +1140,14 @@ function parseEmphasis(
   const closeMarker = openMarker;
 
   const openEnd = start + markerLen;
-  const closeIdx = text.indexOf(closeMarker, openEnd);
+
+  // For underscore emphasis, find a closing marker that respects word boundaries
+  let closeIdx: number;
+  if (openMarker === "_" || openMarker === "__") {
+    closeIdx = findClosingUnderscore(text, openMarker, openEnd);
+  } else {
+    closeIdx = text.indexOf(closeMarker, openEnd);
+  }
 
   if (closeIdx === -1) return null;
 

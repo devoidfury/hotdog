@@ -754,6 +754,34 @@ describe("markdownToHtml", () => {
       expect(html).not.toContain("<strong>");
     });
 
+    it("ignores underscores in the middle of words for italic markers", () => {
+      // Snake_case identifiers should not trigger italic formatting
+      const html = markdownToHtml("append load_skill project_info find");
+      expect(html).toBe("<p>append load_skill project_info find</p>");
+      expect(html).not.toContain("<em>");
+
+      // Multiple snake_case words
+      const html2 = markdownToHtml("get_user_id and set_user_name are functions");
+      expect(html2).toBe(
+        "<p>get_user_id and set_user_name are functions</p>",
+      );
+      expect(html2).not.toContain("<em>");
+    });
+
+    it("still allows underscore italics with proper word boundaries", () => {
+      // Underscores surrounded by spaces should still work as italics
+      const html = markdownToHtml("this is _italic_ text");
+      expect(html).toBe("<p>this is <em>italic</em> text</p>");
+
+      // Underscores at start/end of line
+      const html2 = markdownToHtml("_italic at start and end_");
+      expect(html2).toBe("<p><em>italic at start and end</em></p>");
+
+      // Underscore after punctuation
+      const html3 = markdownToHtml("list: _item1_, _item2_");
+      expect(html3).toBe("<p>list: <em>item1</em>, <em>item2</em></p>");
+    });
+
     it("escapes brackets so they are not treated as links", () => {
       const html = markdownToHtml("\\[not a link\\](http://example.com)");
       expect(html).toBe("<p>[not a link](http://example.com)</p>");

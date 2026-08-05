@@ -4,8 +4,9 @@ import { readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import { retryWithBackoff } from "./retry.ts";
+import { parseSse } from "./sse-parser.ts";
 import { MarkerMangler } from "../marker-mangler.ts";
-import { LlmError } from "../error.ts";
+import { formatError, LlmError } from "../error.ts";
 import { logger } from "../logger.ts";
 import { ToolDef } from "../extensions/tool-registry.ts";
 
@@ -15,8 +16,9 @@ let VERSION = "unknown";
 try {
   const pkg = JSON.parse(await readFile(PKG_PATH, "utf-8"));
   VERSION = pkg.version || VERSION;
-} catch {
+} catch(e: unknown) {
   // Fall back to "unknown"
+  logger.warn(`error reading package.json: ${formatError(e)}`)
 }
 
 export interface ProviderConfig {
@@ -333,78 +335,13 @@ export class LlmClient {
       }
     }
 
-    const reader = response.body!.getReader();
-    const decoder = new TextDecoder();
-    let buffer = "";
-    let jsonBuffer = "";
-    let currentEvent = "message";
-    const MAX_JSON_BUFFER = 500_000;
-
-    try {
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-
-        buffer += decoder.decode(value, { stream: true });
-        const lines = buffer.split("\n");
-        buffer = lines.pop() || "";
-
-        for (const line of lines) {
-          const trimmed = line.trim();
-          if (!trimmed) continue;
-          if (trimmed.startsWith(":")) continue;
-          if (trimmed.startsWith("event: ")) {
-            currentEvent = trimmed.slice(7);
-            continue;
-          }
-          if (!trimmed.startsWith("data: ")) continue;
-          if (currentEvent !== "message" && currentEvent !== "") continue;
-          if (trimmed === "data: [DONE]") {
-            if (jsonBuffer) {
-              try {
-                const data = JSON.parse(jsonBuffer);
-                yield* this._parseStreamData(data);
-              } catch {
-                logger.warn(
-                  `[sse] malformed JSON on [DONE] flush (${jsonBuffer.length} chars)`,
-                );
-              }
-              jsonBuffer = "";
-            }
-            continue;
-          }
-          const payload = trimmed.slice(6);
-          try {
-            const data = JSON.parse(payload);
-            yield* this._parseStreamData(data);
-          } catch {
-            jsonBuffer += payload;
-            try {
-              const data = JSON.parse(jsonBuffer);
-              yield* this._parseStreamData(data);
-              jsonBuffer = "";
-            } catch {
-              if (jsonBuffer.length > MAX_JSON_BUFFER) {
-                logger.warn(`[sse] malformed JSON (${jsonBuffer.length} chars): ${jsonBuffer.slice(0, 100)}...`);
-                jsonBuffer = "";
-              }
-            }
-          }
-        }
-      }
-
-      if (jsonBuffer) {
-        try {
-          const data = JSON.parse(jsonBuffer);
-          yield* this._parseStreamData(data);
-        } catch {
-          logger.warn(
-            `[sse] truncated JSON at EOF (${jsonBuffer.length} chars)`,
-          );
-        }
-      }
-    } finally {
-      reader.releaseLock();
+    // Delegate SSE parsing to SseParser — it handles framing, JSON reassembly,
+    // and buffer overflow. We only map raw JSON to StreamEvents here.
+    if (!response.body) {
+      throw LlmError.InvalidResponse("Response body is null");
+    }
+    for await (const data of parseSse(response.body)) {
+      yield* this._parseStreamData(data as Record<string, unknown>);
     }
   }
 

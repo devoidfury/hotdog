@@ -10,7 +10,8 @@ import {
   defaultCallDisplay,
 } from "../../core/extensions/tool-utils.ts";
 import type { ToolMetadata } from "../../core/extensions/tool-registry.ts";
-import { validateCwdBoundary, resolvePath } from "../../utils/file-utils.ts";
+import { PathEscapeError } from "../../utils/workspace.ts";
+import type { Workspace } from "../../utils/workspace.ts";
 import { AssistantRetryableError } from "../../core/error.ts";
 import { ToolContext } from "../../core/extensions/types.ts";
 
@@ -90,16 +91,21 @@ export class EditTool {
       newString,
       replace_all: replaceAll = false,
     } = op;
-    const cwdBoundary = ctx.get("cwdBoundary") as string | null || null;
+    const workspace = ctx.get("workspace") as Workspace | null || null;
     const workspaceRoot = ctx.get("workspaceRoot") as string | null || null;
 
-    // Resolve path: cwdBoundary takes precedence, falls back to workspaceRoot
-    const resolvedPath = resolvePath(filePath, cwdBoundary, workspaceRoot);
-
-    // Validate cwd boundary
-    const boundaryError = validateCwdBoundary(resolvedPath, cwdBoundary);
-    if (boundaryError) {
-      return ToolResult.err(boundaryError);
+    let resolvedPath: string;
+    try {
+      if (workspace) {
+        resolvedPath = workspace.resolveSafe(filePath);
+      } else {
+        resolvedPath = path.resolve(workspaceRoot || ".", filePath);
+      }
+    } catch (e: unknown) {
+      if (e instanceof PathEscapeError) {
+        return ToolResult.err(e.message);
+      }
+      return ToolResult.err(`Error resolving path: ${(e as Error).message}`);
     }
 
     // Validate input size

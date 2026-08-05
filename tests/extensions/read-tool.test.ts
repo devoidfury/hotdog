@@ -188,7 +188,7 @@ describe('ReadTool.execute — error cases', () => {
       { path: '/etc/passwd' },
       toolCtx({ cwdBoundary: dir })
     );
-    expect(resultStr(result)).toContain('outside cwd boundary');
+    expect(resultStr(result)).toContain('Path escape rejected');
   });
 
   it('handles input as string JSON', async () => {
@@ -373,7 +373,7 @@ describe('ReadTool.execute — image files', () => {
     );
 
     expect(result.success).toBe(false);
-    expect(result.error).toContain('outside cwd boundary');
+    expect(result.error).toContain('Path escape rejected');
   });
 
   it('text files are not treated as images', async () => {

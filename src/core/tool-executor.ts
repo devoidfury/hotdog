@@ -9,6 +9,7 @@ import { formatToolResult, TOOL_STOP_LOOP } from "./extensions/tool-utils.ts";
 import type { ToolRegistry } from "./extensions/tool-registry.ts";
 import type { Agent } from "./agent.ts";
 import type { ContextManager } from "./context/context-manager.ts";
+import { Workspace } from "./../utils/workspace.ts";
 
 
 export interface ToolResult {
@@ -244,6 +245,20 @@ export class ToolExecutor {
     toolCtx.set("isSessionRestoring", this.#deps.isRestoring());
     toolCtx.set("cwdBoundary", this.#deps.cwdBoundary || null);
     toolCtx.set("workspaceRoot", this.#deps.workspaceRoot || null);
+
+    // Build Workspace from cwdBoundary or workspaceRoot
+    const boundary = this.#deps.cwdBoundary || this.#deps.workspaceRoot;
+    if (boundary) {
+      try {
+        toolCtx.set("workspace", new Workspace(boundary));
+      } catch (e) {
+        logger.warn(`Failed to create Workspace from '${boundary}': ${(e as Error).message}`);
+        toolCtx.set("workspace", null);
+      }
+    } else {
+      toolCtx.set("workspace", null);
+    }
+
     return toolCtx;
   }
 

@@ -9,7 +9,8 @@ import {
   parseToolInput,
 } from "../../core/extensions/tool-utils.ts";
 import type { ToolMetadata } from "../../core/extensions/tool-registry.ts";
-import { validateCwdBoundary, resolvePath } from "../../utils/file-utils.ts";
+import { PathEscapeError } from "../../utils/workspace.ts";
+import type { Workspace } from "../../utils/workspace.ts";
 import { ToolContext } from "../../core/extensions/types.ts";
 
 interface AppendArgs {
@@ -61,14 +62,21 @@ export class AppendTool {
     };
 
     const { path: filePath, content } = args;
-    const cwdBoundary = ctx.get("cwdBoundary") as string | null || null;
+    const workspace = ctx.get("workspace") as Workspace | null || null;
     const workspaceRoot = ctx.get("workspaceRoot") as string | null || null;
 
-    const resolvedPath = resolvePath(filePath, cwdBoundary, workspaceRoot);
-
-    const boundaryError = validateCwdBoundary(resolvedPath, cwdBoundary);
-    if (boundaryError) {
-      return ToolResult.err(boundaryError);
+    let resolvedPath: string;
+    try {
+      if (workspace) {
+        resolvedPath = workspace.resolveSafe(filePath);
+      } else {
+        resolvedPath = path.resolve(workspaceRoot || ".", filePath);
+      }
+    } catch (e: unknown) {
+      if (e instanceof PathEscapeError) {
+        return ToolResult.err(e.message);
+      }
+      return ToolResult.err(`Error resolving path: ${(e as Error).message}`);
     }
 
     // Create parent directories

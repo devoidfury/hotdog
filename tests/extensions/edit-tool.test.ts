@@ -242,7 +242,7 @@ describe('EditTool.execute — error cases', () => {
       { path: '/etc/evil.txt', oldString: 'a', newString: 'b' },
       toolCtx({ cwdBoundary: dir })
     );
-    expect(resultStr(result)).toContain('outside cwd boundary');
+    expect(resultStr(result)).toContain('Path escape rejected');
   });
 
   it('throws AssistantRetryableError when input is too large', async () => {

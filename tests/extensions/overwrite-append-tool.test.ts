@@ -141,7 +141,7 @@ describe('OverwriteTool.execute — error cases', () => {
       { path: '/etc/evil.txt', content: 'hack' },
       toolCtx({ cwdBoundary: dir })
     );
-    expect(resultStr(result)).toContain('outside cwd boundary');
+    expect(resultStr(result)).toContain('Path escape rejected');
   });
 
   it('returns error when directory creation fails', async () => {
@@ -311,7 +311,7 @@ describe('AppendTool.execute — error cases', () => {
       { path: '/etc/evil.txt', content: 'hack' },
       toolCtx({ cwdBoundary: dir })
     );
-    expect(resultStr(result)).toContain('outside cwd boundary');
+    expect(resultStr(result)).toContain('Path escape rejected');
   });
 
   it('returns error when directory creation fails', async () => {

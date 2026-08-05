@@ -1,5 +1,7 @@
 // ToolContext — shared context container for tool execution.
 
+import { Workspace } from "../../utils/workspace.ts";
+
 /**
  * Default tool context keys and their types.
  * Extensions can extend this interface for their own keys.
@@ -9,6 +11,7 @@ export interface DefaultToolContext extends Record<string, unknown> {
   isSessionRestoring: boolean;
   cwdBoundary: string | null;
   workspaceRoot: string | null;
+  workspace: Workspace | null;
   taskManager?: unknown;
   sessionCore?: unknown;
 }

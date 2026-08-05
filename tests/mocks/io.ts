@@ -5,6 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { ToolResult } from '../../src/core/extensions/tool-utils.ts';
 import { ToolContext } from '../../src/core/extensions/tool-context.ts';
+import { Workspace } from '../../src/utils/workspace.ts';
 
 /**
  * Extract string output from a tool result (handles ToolResult or plain string).
@@ -51,9 +52,19 @@ export function cleanupDir(dir: string): void {
  * Create a ToolContext with optional overrides.
  */
 export function toolCtx(opts: Record<string, unknown> = {}) {
+  const boundary = opts.cwdBoundary ?? opts.workspaceRoot ?? null;
+  let workspace: Workspace | null = null;
+  if (boundary) {
+    try {
+      workspace = new Workspace(boundary as string);
+    } catch {
+      // ignore
+    }
+  }
   return new ToolContext({
     cwdBoundary: opts.cwdBoundary ?? null,
     workspaceRoot: opts.workspaceRoot ?? null,
+    workspace,
     ...opts,
   });
 }

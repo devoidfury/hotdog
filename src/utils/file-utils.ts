@@ -9,6 +9,7 @@ import {
 import { cwd } from "node:process";
 import { YAML } from "bun";
 import { logger } from "../core/logger.ts";
+import { Workspace, PathEscapeError } from "./workspace.ts";
 
 /**
  * IO error class for file system operations.
@@ -148,6 +149,7 @@ export async function writeFileWithParents(
 }
 
 /**
+ * @deprecated Use Workspace.resolveSafe() instead.
  * Validate that a path is within the cwd boundary.
  */
 export function validateCwdBoundary(
@@ -188,6 +190,7 @@ export function correctCommonPathMistakes(
 }
 
 /**
+ * @deprecated Use Workspace.resolveSafe() instead.
  * Resolve a path against cwdBoundary or workspaceRoot.
  */
 export function resolvePath(
@@ -216,6 +219,7 @@ export async function fileSize(filePath: string): Promise<number> {
 }
 
 /**
+ * @deprecated Use Workspace.resolveSafe() instead.
  * Resolve a path and verify it stays within the cwd boundary.
  */
 export async function resolvePathAndValidate(

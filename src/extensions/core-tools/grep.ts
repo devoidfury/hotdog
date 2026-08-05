@@ -15,6 +15,8 @@ import {
 } from "../../core/extensions/tool-utils.ts";
 import type { ToolMetadata } from "../../core/extensions/tool-registry.ts";
 import { correctCommonPathMistakes } from "../../utils/file-utils.ts";
+import { PathEscapeError } from "../../utils/workspace.ts";
+import type { Workspace } from "../../utils/workspace.ts";
 import { ToolContext } from "../../core/extensions/types.ts";
 
 const execFileAsync = util.promisify(execFile);
@@ -427,7 +429,7 @@ export class GrepTool {
 
   async execute(
     input: string | Record<string, unknown> | null,
-    _ctx: ToolContext,
+    ctx: ToolContext,
   ): Promise<ToolResult> {
     const args = parseArgs(input, this.maxResults);
     if (!args) {
@@ -444,9 +446,22 @@ export class GrepTool {
       searchPath?.startsWith("/") &&
       !(await fs.exists(searchPath)) &&
       await fs.exists(`.${searchPath}`);
-    const searchDir = modelForgotPathPrefix
+    let searchDir = modelForgotPathPrefix
       ? `.${searchPath}`
       : searchPath || ".";
+
+    // Validate search path stays within workspace
+    const workspace = ctx.get("workspace") as Workspace | null || null;
+    if (workspace) {
+      try {
+        searchDir = workspace.resolveSafe(searchDir);
+      } catch (e: unknown) {
+        if (e instanceof PathEscapeError) {
+          return ToolResult.err(e.message);
+        }
+        return ToolResult.err(`Error resolving path: ${(e as Error).message}`);
+      }
+    }
 
     // Validate regex
     try {

@@ -12,6 +12,7 @@ import {
   ExtensionInstance,
   getExtensionConfig,
 } from "../../core/extensions/types.ts";
+import { Workspace, PathEscapeError } from "../../utils/workspace.ts";
 
 import { matcher, completion } from "./completions.ts";
 
@@ -24,17 +25,20 @@ const FILE_REF_RE = /@([a-zA-Z0-9._\/\+-]+)\b/g;
  */
 function resolveFilePath(
   filePath: string,
-  cwdBoundary: string | null,
-  workspaceRoot: string | null,
+  workspace: Workspace | null,
 ): string {
+  if (workspace) {
+    try {
+      return workspace.resolveSafe(filePath);
+    } catch (e: unknown) {
+      if (e instanceof PathEscapeError) {
+        logger.debug(`file-attachment: path escape rejected for '${filePath}'`);
+      }
+      // Fall back to basic resolution if workspace check fails
+    }
+  }
   if (isAbsolute(filePath)) {
     return filePath;
-  }
-  if (cwdBoundary) {
-    return resolveAbs(cwdBoundary, filePath);
-  }
-  if (workspaceRoot) {
-    return resolveAbs(workspaceRoot, filePath);
   }
   return resolveAbs(cwd(), filePath);
 }
@@ -79,8 +83,7 @@ async function readFileContent(
  */
 async function expandFileReferences(
   text: string,
-  cwdBoundary: string | null,
-  workspaceRoot: string | null,
+  workspace: Workspace | null,
   maxFileSize: number,
   maxFiles: number,
 ): Promise<{
@@ -110,11 +113,7 @@ async function expandFileReferences(
   ) {
     const requestedPath = match[1];
     if (!requestedPath) continue;
-    const resolvedPath = resolveFilePath(
-      requestedPath,
-      cwdBoundary,
-      workspaceRoot,
-    );
+    const resolvedPath = resolveFilePath(requestedPath, workspace);
 
     const result = await readFileContent(
       resolvedPath,
@@ -175,15 +174,21 @@ export function create(core: CoreContext): ExtensionInstance {
   return {
     hooks: {
       [HOOKS.INPUT]: async ({ text, agent }) => {
-        // Get workspace boundaries from agent config
+        // Build Workspace from agent config boundaries
         const config = agent?.config;
-        const cwdBoundary = config?.cwdBoundary ?? null;
-        const workspaceRoot = config?.workspaceRoot ?? null;
+        const boundary = config?.cwdBoundary ?? config?.workspaceRoot ?? null;
+        let workspace: Workspace | null = null;
+        if (boundary) {
+          try {
+            workspace = new Workspace(boundary);
+          } catch (e) {
+            logger.debug(`file-attachment: failed to create Workspace: ${(e as Error).message}`);
+          }
+        }
 
         const result = await expandFileReferences(
           text,
-          cwdBoundary,
-          workspaceRoot,
+          workspace,
           maxFileSize,
           maxFiles,
         );

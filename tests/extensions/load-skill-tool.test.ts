@@ -50,21 +50,6 @@ describe('LoadSkillTool', () => {
     expect(getDisplay(result)).toContain('Skill not found');
   });
 
-  it('notifies context on skill activation', async () => {
-    const skillDir = path.join(tmpDir, 'activated-skill');
-    fs.mkdirSync(skillDir, { recursive: true });
-    fs.writeFileSync(path.join(skillDir, 'SKILL.md'), '---\ndescription: Activated\n---\n# Content');
-
-    await loader.loadSkills();
-    let activated = false;
-    const ctx = new ToolContext();
-    ctx.set('onActivateSkill', (name: string) => { activated = true; expect(name).toBe('activated-skill'); });
-
-    const tool = new LoadSkillTool({ loader });
-    await tool.execute(JSON.stringify({ name: 'activated-skill' }), ctx);
-    expect(activated).toBe(true);
-  });
-
   it('generates call display', () => {
     const tool = new LoadSkillTool({ loader });
     const display = tool.callDisplay(JSON.stringify({ name: 'my-skill' }));

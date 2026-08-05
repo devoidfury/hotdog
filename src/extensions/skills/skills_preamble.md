@@ -15,23 +15,7 @@ Use the `load_skill` tool to load the full instructions for a skill when you nee
 </available_skills>
 
 
-{% for skill in skills -%}{% if skill.loaded %}
-<skill_content name="{{ skill.name }}">
-{{ skill.content }}
-
-Skill directory: {{ skill.location }}
-Relative paths in this skill are relative to the skill directory.
-{% if skill.additional_files|length > 0 %}
-
-<skill_resources>
-{% for file in skill.additional_files -%}
-  <file>{{ file }}</file>
-{% endfor %}
-</skill_resources>
-{% endif %}
-</skill_content>
-{% endif -%}
-{% endfor %}
+{{ loaded_skills_content }}
 
 The following directories contain skill definitions:
 

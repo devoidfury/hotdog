@@ -202,6 +202,7 @@ async function collectAdditionalFiles(
 export class SkillsLoader {
   private readonly paths: string[];
   private readonly skills: Map<string, Skill>;
+  private skillContentTemplate: string | null = null;
 
   constructor(paths: string | string[]) {
     this.paths = Array.isArray(paths)
@@ -355,6 +356,36 @@ export class SkillsLoader {
   }
 
   /**
+   * Load the skill content template (for individual skill rendering).
+   */
+  private async loadSkillContentTemplate(): Promise<string> {
+    if (this.skillContentTemplate) return this.skillContentTemplate;
+
+    const templatePath = join(import.meta.dirname, "skill_content.md");
+    try {
+      this.skillContentTemplate = await fs.readFile(templatePath, "utf-8");
+      return this.skillContentTemplate;
+    } catch {
+      throw new Error(`Skill content template not found: ${templatePath}`);
+    }
+  }
+
+  /**
+   * Render a single skill's content using the skill_content template.
+   * Used both in the preamble and when loading skills mid-conversation.
+   */
+  async renderSkillContent(skill: Skill): Promise<string> {
+    const template = await this.loadSkillContentTemplate();
+    const context = {
+      skill: {
+        ...skill,
+        additional_files: skill.additionalFiles || [],
+      },
+    };
+    return render(template, context);
+  }
+
+  /**
    * Build skills preamble content for the system prompt.
    */
   async buildSkillsPreamble(): Promise<string> {
@@ -373,6 +404,14 @@ export class SkillsLoader {
       return "";
     }
 
+    // Render loaded skills content using the shared template
+    const loadedSkillsContent: string[] = [];
+    for (const skill of visibleSkills) {
+      if (skill.loaded) {
+        loadedSkillsContent.push(await this.renderSkillContent(skill));
+      }
+    }
+
     // Transform skills to match template expectations
     const renderedSkills = visibleSkills.map((s) => ({
       ...s,
@@ -382,6 +421,7 @@ export class SkillsLoader {
     const context = {
       skills: renderedSkills,
       skill_directories: this.directories(),
+      loaded_skills_content: loadedSkillsContent.join("\n\n"),
     };
 
     return render(template, context);

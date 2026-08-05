@@ -52,16 +52,11 @@ export class LoadSkillTool {
       return ToolResult.err(`Skill not found: ${skillName}`);
     }
 
-    // Notify context about skill activation
-    const onActivateSkill = ctx?.get("onActivateSkill") as ((name: string) => void) | undefined;
-    if (onActivateSkill) {
-      onActivateSkill(skillName);
-    }
-
-    const contentLength = skill.content?.length || 0;
-    return ToolResult.ok(skill.content).withEntries({
+    // Render the skill content using the shared template
+    const renderedContent = await this.loader.renderSkillContent(skill);
+    return ToolResult.ok(renderedContent).withEntries({
       skill: skillName,
-      content_length: String(contentLength),
+      content_length: String(renderedContent.length),
     });
   }
 }

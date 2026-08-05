@@ -7,6 +7,7 @@ import { HOOKS } from "../../core/hooks.ts";
 import { ACTIONS } from "../../core/commands.ts";
 import { patternMatches, Skill, SkillsLoader } from "./loader.ts";
 import { LoadSkillTool } from "./load-skill.ts";
+import { Message } from "../../core/context/message.ts";
 import {
   CoreContext,
   ExtensionInstance,
@@ -112,7 +113,7 @@ export async function create(core: CoreContext): Promise<ExtensionInstance> {
         registry.register("skill", {
           description: "List skills or activate a skill (skill:<name>)",
           matches: (cmd: string) => cmd.startsWith("skill"),
-          handler: async (_agent, cmdValue) => {
+          handler: async (agent, cmdValue) => {
             const name = cmdValue?.slice(6).trim();
             if (!name) {
               const skills = loader.allSkills();
@@ -129,6 +130,25 @@ export async function create(core: CoreContext): Promise<ExtensionInstance> {
             }
             // Activate skill
             loader.activateSkill(name);
+
+            // If the conversation already has messages, inject the skill content
+            // as a system message so the agent sees it immediately without
+            // reloading the system prompt (which would bust the cached prefix).
+            const messages = agent.context?.getMessages?.();
+            const hasUserMessages = messages?.some((m: any) => m.role === "user");
+            if (hasUserMessages && typeof agent.addMessage === "function") {
+              const skill = loader.getSkill(name);
+              if (skill) {
+                const renderedContent = await loader.renderSkillContent(skill);
+                agent.addMessage(
+                  new Message({
+                    role: "user",
+                    content: renderedContent,
+                  }),
+                );
+              }
+            }
+
             return {
               action: ACTIONS.DISPLAY,
               content: `Skill '${name}' activated.`,

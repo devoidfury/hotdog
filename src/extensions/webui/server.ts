@@ -11,9 +11,7 @@ import {
 import webuiFrontend from "./ui/index.html";
 import { ExtensionError } from "../../core/error.ts";
 import { ProfileManager, type ProfileDef } from "../../core/config/index.ts";
-import type { WebSocket as BunWebSocket } from "bun";
-
-
+import { BunRequest } from "bun";
 
 // ── Types ───────────────────────────────────────────────────────────────────
 
@@ -22,7 +20,7 @@ interface WebuiWsData {
   url: string;
 }
 
-interface WebuiConfig {
+export interface WebuiConfig {
   port?: number;
   host?: string;
   apiKey?: string | null;
@@ -75,7 +73,7 @@ export async function createWebuiServer(
   if (!profileManager && core.resolved?.profilesPath) {
     profileManager = await ProfileManager.create(
       core.resolved.profilesPath as string,
-      core.resolved?.profiles as Record<string, ProfileDef> || {},
+      (core.resolved?.profiles as Record<string, ProfileDef>) || {},
     );
   }
   if (!profileManager) {
@@ -103,14 +101,14 @@ export async function createWebuiServer(
   wsServer.startCleanupLoop();
 
   // Start the server
-  let server = Bun.serve({
+  let server = Bun.serve<WebuiWsData>({
     port,
     hostname: host,
     routes: {
       "/": webuiFrontend,
 
       // GET /verify — validate auth token
-      "/verify": async function (req) {
+      "/verify": async function (req: BunRequest) {
         const url = new URL(req.url);
         const token = url.searchParams.get("token");
         const valid = token ? authMiddleware.validateToken(token) : false;
@@ -120,7 +118,7 @@ export async function createWebuiServer(
       },
 
       // GET /ws — handle authenticated WebSocket upgrade
-      "/ws": async function (req) {
+      "/ws": async function (req: BunRequest) {
         const url = new URL(req.url);
         const token = url.searchParams.get("token");
         if (!token) {
@@ -163,18 +161,18 @@ export async function createWebuiServer(
 
     // WebSocket handlers
     websocket: {
-      open(ws: BunWebSocket<WebuiWsData>) {
+      open(ws) {
         const { url } = ws.data;
         wsServer.onUpgrade(
           { url: url || "", headers: { host: "localhost" } },
-          ws as unknown as WebSocket,
+          ws,
         );
       },
-      message(ws: BunWebSocket<WebuiWsData>, data: string | Buffer) {
-        wsServer.onMessage(ws as unknown as WebSocket, data);
+      message(ws, data) {
+        wsServer.onMessage(ws, data);
       },
-      close(ws: BunWebSocket<WebuiWsData>) {
-        wsServer.onClose(ws as unknown as WebSocket);
+      close(ws) {
+        wsServer.onClose(ws);
       },
     },
   });

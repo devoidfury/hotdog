@@ -2,7 +2,11 @@
 // Maps OutputEvent → S2CMessage protocol and sends JSON over WS.
 
 import { Channel, ChannelSessionManager } from "../../core/channel.ts";
-import { OUTPUT_EVENT, OutputEvent, OutputEventType } from "../../core/context/output.ts";
+import {
+  OUTPUT_EVENT,
+  OutputEvent,
+  OutputEventType,
+} from "../../core/context/output.ts";
 import { S2C, S2CType } from "./protocol.ts";
 
 // ── OUTPUT_EVENT → S2C mapping ──────────────────────────────────────────────
@@ -32,7 +36,7 @@ const EVENT_TO_PROTOCOL: Record<OutputEventType, S2CType> = {
 
 export interface WebSocketChannelOptions {
   sessionManager: ChannelSessionManager;
-  ws: WebSocket;
+  ws: Bun.ServerWebSocket;
   sessionId: string;
   broadcastCallback?: (msg: Record<string, unknown>) => void;
 }
@@ -42,7 +46,7 @@ export interface WebSocketChannelOptions {
  * Maps OutputEvent types to S2C protocol messages and sends JSON over WS.
  */
 export class WebSocketChannel extends Channel {
-  #ws: WebSocket;
+  #ws: Bun.ServerWebSocket;
   #sessionId: string;
   #ready: boolean;
   #broadcastCallback: ((msg: Record<string, unknown>) => void) | undefined;
@@ -83,7 +87,10 @@ export class WebSocketChannel extends Channel {
     if (!protoType) return;
 
     // Build the protocol message from the event data
-    const msg: Record<string, unknown> = { type: protoType, sessionId: this.#sessionId };
+    const msg: Record<string, unknown> = {
+      type: protoType,
+      sessionId: this.#sessionId,
+    };
 
     // Copy relevant event fields into the message
     switch (event.type) {
@@ -166,9 +173,12 @@ export class WebSocketChannel extends Channel {
    * Wire session events to this channel via SessionManager subscription.
    */
   protected _subscribe(sessionId: string): void {
-    const unsubscribe = this.sessionManager.onSessionEvents(sessionId, (event: OutputEvent) => {
-      this.write(event);
-    });
+    const unsubscribe = this.sessionManager.onSessionEvents(
+      sessionId,
+      (event: OutputEvent) => {
+        this.write(event);
+      },
+    );
     this.#unsubscribers.set(sessionId, unsubscribe);
   }
 
@@ -222,7 +232,7 @@ export class WebSocketChannel extends Channel {
   /**
    * Get the WebSocket connection.
    */
-  get ws(): WebSocket {
+  get ws() {
     return this.#ws;
   }
 

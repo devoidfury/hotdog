@@ -1,17 +1,16 @@
 // WebUI Extension
 // Provides a full web interface for agent interaction using the websocket extension.
-// Registers the "webui" subcommand which starts server.
 
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { HOOKS } from "../../core/hooks.ts";
-import { createWebuiServer } from "./server.ts";
+import { createWebuiServer, type WebuiConfig } from "./server.ts";
 import {
   CoreContext,
   ExtensionInstance,
   getExtensionConfig,
 } from "../../core/extensions/types.ts";
-import type { CliSubcommandRegistryLike } from "../../core/extensions/registries.ts";
+import { CliArgv } from "../../core/config/index.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const UI_DIR = path.join(__dirname, "ui");
@@ -21,12 +20,11 @@ const UI_DIR = path.join(__dirname, "ui");
  * Blocks until the server is shut down (SIGINT/SIGTERM).
  */
 async function handleWebuiSubcommand(
-  _cliArgs: unknown,
-  _core: unknown,
+  _cliArgs: CliArgv,
+  core: CoreContext,
 ): Promise<number> {
   try {
-    const core = _core as CoreContext;
-    const config = getExtensionConfig<{ port?: number; host?: string; apiKey?: string; sessionTokenTtlMin?: number; maxAgeSecs?: number }>(core, "webui");
+    const config = getExtensionConfig<WebuiConfig>(core, "webui");
     const { server, wsServer } = await createWebuiServer(core, config, UI_DIR);
 
     // Keep the process alive until the server is stopped
@@ -49,23 +47,17 @@ async function handleWebuiSubcommand(
   }
 }
 
-/**
- * Create the webui extension.
- * Depends on the websocket extension for createWsServer and createAuthMiddleware.
- */
+/** Create the webui extension. */
 export function create(core: CoreContext): ExtensionInstance {
   return {
-    hooks: core.hooks
-      ? {
-          // Register the "webui" subcommand
-          [HOOKS.CLI_SUBCOMMANDS_REGISTER]: async (registry: CliSubcommandRegistryLike) => {
-            registry.register("webui", {
-              description:
-                "Start the WebUI server (HTTP + WebSocket + frontend)",
-              handler: handleWebuiSubcommand,
-            });
-          },
-        }
-      : undefined,
+    hooks: {
+      // Register the "webui" subcommand
+      [HOOKS.CLI_SUBCOMMANDS_REGISTER]: async (registry) => {
+        registry.register("webui", {
+          description: "Start the WebUI server (HTTP + WebSocket + frontend)",
+          handler: handleWebuiSubcommand,
+        });
+      },
+    },
   };
 }

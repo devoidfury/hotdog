@@ -19,15 +19,4 @@ describe("WebUI Extension", () => {
     expect(typeof registry.registeredOpts!.handler).toBe("function");
   });
 
-  it("returns extension without hooks when core has no hooks", () => {
-    const core = createMockCore({ hooks: null }) as any;
-    const ext = create(core);
-    expect(ext.hooks).toBeUndefined();
-  });
-
-  it.each([null, undefined])("handles missing hooks (%s)", (hooks) => {
-    const core = { hooks } as any;
-    const ext = create(core);
-    expect(ext.hooks).toBeUndefined();
-  });
 });

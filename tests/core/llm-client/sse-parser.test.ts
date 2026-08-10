@@ -161,8 +161,8 @@ data: {"explicit":true}
       // The two data lines concatenate as: {"partial":true\n,"complete":true}
       // which is valid JSON with a newline in the middle of the object.
       expect(results.length).toBe(1);
-      expect(results[0].partial).toBe(true);
-      expect(results[0].complete).toBe(true);
+      expect(results[0]!.partial).toBe(true);
+      expect(results[0]!.complete).toBe(true);
     });
   });
 

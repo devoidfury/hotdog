@@ -2,7 +2,7 @@
 // Provides createWsServer() factory and SessionRegistry class.
 
 import crypto from "node:crypto";
-import { HOOKS } from "../../core/hooks.ts";
+import { HOOKS, createHooks } from "../../core/hooks.ts";
 import { SessionManager, type AgentLike } from "../../core/session/index.ts";
 import type { SwitchProfile } from "../../core/config/profiles.ts";
 import { WebSocketChannel } from "./websocket-channel.ts";
@@ -143,7 +143,7 @@ export class SessionRegistry {
 
     // Create SessionManager — passes llmClient through buildAgent config
     this.#sessionManager = new SessionManager({
-      hooks: { notifyHooks: () => {} }, // No-op hooks for now
+      hooks: createHooks(), // No-op hooks for now
       extensions: null,
       buildAgent: buildAgent as (
         config: Record<string, unknown>,

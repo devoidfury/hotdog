@@ -4,6 +4,7 @@ import { mock } from "bun:test";
 import type { AgentLike } from "../../src/core/session/index.ts";
 import type { HookSystem } from "../../src/core/hooks.ts";
 import type { MessageLog } from "../../src/core/context/message-log.ts";
+import type { HotdogServerSocket } from "../../src/extensions/websocket/server.ts";
 
 const mockHooks = {
   notifyHooks: () => {},
@@ -94,12 +95,25 @@ export function makeWsMockAgent(overrides?: Partial<AgentLike>): AgentLike {
   return makeMockAgent(overrides);
 }
 
-export function createWsMockWs(): WebSocket & { messages: string[] } {
+export function createWsMockWs(): HotdogServerSocket & { messages: string[] } {
   const messages: string[] = [];
   return {
     readyState: 1,
     send: (data: string) => { messages.push(data); },
-    messages,
+    sendText: (data: string) => { messages.push(data); },
+    sendBinary: () => {},
     close: mock(() => {}),
-  } as unknown as WebSocket & { messages: string[] };
+    terminate: mock(() => {}),
+    ping: mock(() => true),
+    onopen: null,
+    onclose: null,
+    onerror: null,
+    onmessage: null,
+    data: undefined,
+    url: "",
+    protocol: "",
+    extensions: "",
+    binaryType: "arraybuffer",
+    messages,
+  } as unknown as HotdogServerSocket & { messages: string[] };
 }

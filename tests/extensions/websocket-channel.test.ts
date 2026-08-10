@@ -10,7 +10,7 @@ import { S2C } from "../../src/extensions/websocket/protocol.ts";
 
 // ── Test Helpers ────────────────────────────────────────────────────────────
 
-function createMockWs(overrides: Partial<WebSocket> = {}): WebSocket {
+function createMockWs(overrides: Partial<Bun.ServerWebSocket> = {}): Bun.ServerWebSocket {
   const sentMessages: string[] = [];
 
   return {
@@ -18,14 +18,25 @@ function createMockWs(overrides: Partial<WebSocket> = {}): WebSocket {
     send: mock((data: string) => {
       sentMessages.push(data);
     }),
+    sendText: mock((data: string) => {
+      sentMessages.push(data);
+    }),
+    sendBinary: mock(() => {}),
     close: mock(() => {}),
+    terminate: mock(() => {}),
+    ping: mock(() => true),
     onopen: null,
     onclose: null,
     onerror: null,
     onmessage: null,
+    data: undefined,
+    url: "",
+    protocol: "",
+    extensions: "",
+    binaryType: "arraybuffer",
     _sentMessages: sentMessages,
     ...overrides,
-  } as unknown as WebSocket;
+  } as unknown as Bun.ServerWebSocket;
 }
 
 function createMockSessionManager(overrides: Partial<ChannelSessionManager> = {}): ChannelSessionManager {
@@ -46,7 +57,7 @@ function createMockSessionManager(overrides: Partial<ChannelSessionManager> = {}
 
 describe("WebSocketChannel - construction", () => {
   let sm: ChannelSessionManager;
-  let ws: WebSocket;
+  let ws: Bun.ServerWebSocket;
 
   beforeEach(() => {
     sm = createMockSessionManager();
@@ -94,7 +105,7 @@ describe("WebSocketChannel - construction", () => {
 
 describe("WebSocketChannel - write()", () => {
   let sm: ChannelSessionManager;
-  let ws: WebSocket;
+  let ws: Bun.ServerWebSocket;
 
   beforeEach(() => {
     sm = createMockSessionManager();
@@ -350,7 +361,7 @@ describe("WebSocketChannel - write error handling", () => {
       onclose: null,
       onerror: null,
       onmessage: null,
-    } as unknown as WebSocket;
+    } as unknown as Bun.ServerWebSocket;
 
     const channel = new WebSocketChannel({
       sessionManager: sm,
@@ -387,7 +398,7 @@ describe("WebSocketChannel - read()", () => {
 
 describe("WebSocketChannel - subscribe/unsubscribe", () => {
   let sm: ChannelSessionManager;
-  let ws: WebSocket;
+  let ws: Bun.ServerWebSocket;
   let unsubscribeFn: () => void;
 
   beforeEach(() => {
@@ -440,7 +451,7 @@ describe("WebSocketChannel - cleanup", () => {
 
 describe("WebSocketChannel - sendJson", () => {
   let sm: ChannelSessionManager;
-  let ws: WebSocket;
+  let ws: Bun.ServerWebSocket;
   let channel: WebSocketChannel;
 
   beforeEach(() => {

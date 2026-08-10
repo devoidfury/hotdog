@@ -311,7 +311,7 @@ export class SessionManager {
     this.#currentSessionId = newAgent.sessionId;
     this.#createSessionEntry(newAgent.sessionId, newAgent, config);
     this.#hooks.notifyHooks(HOOKS.SESSION_SWAP, {
-      oldAgent: oldAgent ?? null,
+      oldAgent: oldAgent ?? undefined,
       newAgent,
     });
     return newAgent;

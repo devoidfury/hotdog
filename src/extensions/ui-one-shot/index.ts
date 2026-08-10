@@ -38,7 +38,7 @@ async function runOneShot(
   core: CoreContext,
   resolved: ResolvedConfig,
   config: CoreConfigWithExtensions,
-  modelRegistry: Record<string, unknown>,
+  modelRegistry: Record<string, ModelConfig>,
   sink: CliOutputSink,
   buildAgent: (agentConfig: Record<string, unknown>) => Promise<AgentLike>,
   llmClient: LlmClient,
@@ -67,7 +67,8 @@ async function runOneShot(
   });
 
   // Enqueue the prompt via the SessionManager
-  sessionManager.enqueue(sessionManager.sessionId()!, cli.prompt || (cli.args || []).join(" "));
+  const promptText = cli.prompt || (Array.isArray(cli.args) ? cli.args.join(" ") : "");
+  sessionManager.enqueue(sessionManager.sessionId()!, promptText);
 
   let exitCode = 0;
   try {
@@ -171,7 +172,7 @@ async function handlePromptSubcommand(
     core,
     resolved as ResolvedConfig,
     config,
-    modelRegistry as Record<string, unknown>,
+    modelRegistry as Record<string, ModelConfig>,
     sink,
     buildAgent,
     llmClient,

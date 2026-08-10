@@ -15,7 +15,12 @@ export class DropStrategy extends CompactionStrategy {
     super();
   }
 
-  override async execute(messages: Message[], settings: CompactionSettings): Promise<CompactResult | null> {
+  override async execute(
+    messages: Message[],
+    settings: CompactionSettings,
+    _llmChat: (messages: Array<{ role: string; content: string }>, model: string) => Promise<string>,
+    _model: string,
+  ): Promise<CompactResult | null> {
     const firstKept = findFirstKeptIndex(messages, settings.keepRecentMessages);
     if (firstKept === 0) return null;
 

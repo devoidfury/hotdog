@@ -27,6 +27,7 @@ type Backend = { type: "sessionCore"; value: unknown } | { type: "taskManager"; 
  * Accepts an options object with sessionCore and/or taskManager.
  */
 export class SubagentTool {
+  metadata: ToolMetadata = { sideEffects: false, difficulty: 1 };
   protected _sessionCore: unknown;
   protected _taskManager: TaskManager | null;
 
@@ -96,7 +97,7 @@ export class SubagentTool {
 /** Spawn a background task agent to perform work. */
 export class DelegateTaskTool extends SubagentTool {
   static readonly TOOL_NAME = "delegate_task";
-  metadata: ToolMetadata = { sideEffects: true, difficulty: 3 };
+  override metadata: ToolMetadata = { sideEffects: true, difficulty: 3 };
 
   override async execute(input: string | Record<string, unknown> | null): Promise<ToolResult> {
     const args = parseToolArgs(input ?? {});
@@ -172,7 +173,7 @@ export class DelegateTaskTool extends SubagentTool {
 /** Check the status of a specific running task agent. */
 export class TaskStatusTool extends SubagentTool {
   static readonly TOOL_NAME = "task_status";
-  metadata: ToolMetadata = { sideEffects: false, difficulty: 4 };
+  override metadata: ToolMetadata = { sideEffects: false, difficulty: 4 };
 
   override async execute(input: string | Record<string, unknown> | null): Promise<ToolResult> {
     const args = parseToolArgs(input ?? {});
@@ -218,7 +219,7 @@ export class TaskStatusTool extends SubagentTool {
 /** Send a follow-up message to a running task agent. */
 export class TaskFollowupTool extends SubagentTool {
   static readonly TOOL_NAME = "task_followup";
-  metadata: ToolMetadata = { sideEffects: true, difficulty: 3 };
+  override metadata: ToolMetadata = { sideEffects: true, difficulty: 3 };
 
   override async execute(input: string | Record<string, unknown> | null): Promise<ToolResult> {
     const args = parseToolArgs(input ?? {});
@@ -269,7 +270,7 @@ export class TaskFollowupTool extends SubagentTool {
 /** Interrupt (cancel) a running task agent. */
 export class TaskInterruptTool extends SubagentTool {
   static readonly TOOL_NAME = "task_interrupt";
-  metadata: ToolMetadata = { sideEffects: true, difficulty: 4 };
+  override metadata: ToolMetadata = { sideEffects: true, difficulty: 4 };
 
   override async execute(input: string | Record<string, unknown> | null): Promise<ToolResult> {
     const args = parseToolArgs(input ?? {});
@@ -315,7 +316,7 @@ export class TaskInterruptTool extends SubagentTool {
 /** Check the status of task agents. Shows all active tasks or the status of a specific task. */
 export class PlanStatusTool extends SubagentTool {
   static readonly TOOL_NAME = "plan_status";
-  metadata: ToolMetadata = { sideEffects: false, difficulty: 4 };
+  override metadata: ToolMetadata = { sideEffects: false, difficulty: 4 };
 
   override async execute(input: string | Record<string, unknown> | null): Promise<ToolResult> {
     const args = parseToolArgs(input ?? {});
@@ -381,7 +382,7 @@ export class PlanStatusTool extends SubagentTool {
 /** Mark a task as complete. The task agent\'s result is already appended to the manager\'s context. */
 export class CompleteTaskTool extends SubagentTool {
   static readonly TOOL_NAME = "complete_task";
-  metadata: ToolMetadata = { sideEffects: false, difficulty: 1 };
+  override metadata: ToolMetadata = { sideEffects: false, difficulty: 1 };
 
   override async execute(input: string | Record<string, unknown> | null): Promise<ToolResult> {
     const args = parseToolArgs(input ?? {});
@@ -419,7 +420,7 @@ export class CompleteTaskTool extends SubagentTool {
 /** Wait for user input — signal that the manager has nothing more to do. */
 export class WaitTool extends SubagentTool {
   static readonly TOOL_NAME = "wait";
-  metadata: ToolMetadata = { sideEffects: false, difficulty: 1 };
+  override metadata: ToolMetadata = { sideEffects: false, difficulty: 1 };
 
   override async execute(input: string | Record<string, unknown> | null): Promise<ToolResult> {
     const args = parseToolArgs(input ?? {});

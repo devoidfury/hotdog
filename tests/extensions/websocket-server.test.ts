@@ -1,6 +1,6 @@
 // Tests for WebSocket server — session management and message routing.
 import { describe, it, expect, beforeEach, afterEach, mock } from "bun:test";
-import { SessionRegistry, createWsServer } from "../../src/extensions/websocket/server.ts";
+import { SessionRegistry, createWsServer, type HotdogServerSocket } from "../../src/extensions/websocket/server.ts";
 import { WebSocketChannel } from "../../src/extensions/websocket/websocket-channel.ts";
 import { createWsMockCore, createWsMockAgentFactory, createWsMockWs, makeWsMockAgent } from "../mocks/websocket.ts";
 
@@ -50,7 +50,7 @@ describe("SessionRegistry", () => {
     const { sessionId } = await registry.create();
 
     // Create a mock channel
-    const mockWs = createWsMockWs() as unknown as WebSocket;
+    const mockWs = createWsMockWs() as unknown as HotdogServerSocket;
     const channel = registry.createChannel(sessionId, mockWs);
 
     // Verify channel was created
@@ -135,8 +135,8 @@ describe("SessionRegistry", () => {
   it("broadcasts to all connections", () => {
     registry = new SessionRegistry({ buildAgent: createWsMockAgentFactory() });
 
-    const ws1 = createWsMockWs() as unknown as WebSocket;
-    const ws2 = createWsMockWs() as unknown as WebSocket;
+    const ws1 = createWsMockWs() as unknown as HotdogServerSocket;
+    const ws2 = createWsMockWs() as unknown as HotdogServerSocket;
     registry.registerConnection(ws1);
     registry.registerConnection(ws2);
 
@@ -160,7 +160,7 @@ describe("createWsServer", () => {
     const core = createWsMockCore();
     wsServer = createWsServer(core, { buildAgent: createWsMockAgentFactory() });
 
-    const ws = createWsMockWs() as unknown as WebSocket;
+    const ws = createWsMockWs() as unknown as HotdogServerSocket;
     wsServer.onUpgrade({ url: "/ws", headers: { host: "localhost" } }, ws);
 
     await new Promise((r) => setTimeout(r, 10));
@@ -180,12 +180,12 @@ describe("createWsServer", () => {
     const core = createWsMockCore();
     wsServer = createWsServer(core, { buildAgent: createWsMockAgentFactory() });
 
-    const ws = createWsMockWs() as unknown as WebSocket;
+    const ws = createWsMockWs() as unknown as HotdogServerSocket;
     wsServer.onUpgrade({ url: "/ws", headers: { host: "localhost" } }, ws);
 
     // Wait for session to be created
     await new Promise((r) => setTimeout(r, 10));
-    const sessionId = (ws as WebSocket & { activeSessionId?: string }).activeSessionId!;
+    const sessionId = (ws as HotdogServerSocket).activeSessionId!;
 
     wsServer.onMessage(ws, JSON.stringify({ type: "deleteSession", sessionId }));
 
@@ -198,7 +198,7 @@ describe("createWsServer", () => {
     const core = createWsMockCore();
     wsServer = createWsServer(core, { buildAgent: createWsMockAgentFactory() });
 
-    const ws = createWsMockWs() as unknown as WebSocket;
+    const ws = createWsMockWs() as unknown as HotdogServerSocket;
     wsServer.onUpgrade({ url: "/ws", headers: { host: "localhost" } }, ws);
 
     wsServer.onMessage(ws, JSON.stringify({ type: "listSessions" }));
@@ -212,11 +212,11 @@ describe("createWsServer", () => {
     const core = createWsMockCore();
     wsServer = createWsServer(core, { buildAgent: createWsMockAgentFactory() });
 
-    const ws = createWsMockWs() as unknown as WebSocket;
+    const ws = createWsMockWs() as unknown as HotdogServerSocket;
     wsServer.onUpgrade({ url: "/ws", headers: { host: "localhost" } }, ws);
 
     await new Promise((r) => setTimeout(r, 10));
-    const sessionId = (ws as WebSocket & { activeSessionId?: string }).activeSessionId!;
+    const sessionId = (ws as HotdogServerSocket).activeSessionId!;
 
     wsServer.onMessage(ws, JSON.stringify({ type: "send", sessionId, content: "Hello!" }));
 
@@ -230,11 +230,11 @@ describe("createWsServer", () => {
     const core = createWsMockCore();
     wsServer = createWsServer(core, { buildAgent: createWsMockAgentFactory() });
 
-    const ws = createWsMockWs() as unknown as WebSocket;
+    const ws = createWsMockWs() as unknown as HotdogServerSocket;
     wsServer.onUpgrade({ url: "/ws", headers: { host: "localhost" } }, ws);
 
     await new Promise((r) => setTimeout(r, 10));
-    const sessionId = (ws as WebSocket & { activeSessionId?: string }).activeSessionId!;
+    const sessionId = (ws as HotdogServerSocket).activeSessionId!;
 
     wsServer.onMessage(ws, JSON.stringify({ type: "cancel", sessionId }));
 
@@ -246,11 +246,11 @@ describe("createWsServer", () => {
     const core = createWsMockCore();
     wsServer = createWsServer(core, { buildAgent: createWsMockAgentFactory() });
 
-    const ws = createWsMockWs() as unknown as WebSocket;
+    const ws = createWsMockWs() as unknown as HotdogServerSocket;
     wsServer.onUpgrade({ url: "/ws", headers: { host: "localhost" } }, ws);
 
     await new Promise((r) => setTimeout(r, 10));
-    const sessionId = (ws as WebSocket & { activeSessionId?: string }).activeSessionId!;
+    const sessionId = (ws as HotdogServerSocket).activeSessionId!;
 
     // Test with leading slash
     wsServer.onMessage(ws, JSON.stringify({ type: "command", sessionId, command: "/help" }));
@@ -264,11 +264,11 @@ describe("createWsServer", () => {
     const core = createWsMockCore();
     wsServer = createWsServer(core, { buildAgent: createWsMockAgentFactory() });
 
-    const ws = createWsMockWs() as unknown as WebSocket;
+    const ws = createWsMockWs() as unknown as HotdogServerSocket;
     wsServer.onUpgrade({ url: "/ws", headers: { host: "localhost" } }, ws);
 
     await new Promise((r) => setTimeout(r, 10));
-    const sessionId = (ws as WebSocket & { activeSessionId?: string }).activeSessionId!;
+    const sessionId = (ws as HotdogServerSocket).activeSessionId!;
 
     wsServer.onMessage(ws, JSON.stringify({
       type: "questionAnswer",
@@ -284,7 +284,7 @@ describe("createWsServer", () => {
     const core = createWsMockCore();
     wsServer = createWsServer(core, { buildAgent: createWsMockAgentFactory() });
 
-    const ws = createWsMockWs() as unknown as WebSocket;
+    const ws = createWsMockWs() as unknown as HotdogServerSocket;
     wsServer.onUpgrade({ url: "/ws", headers: { host: "localhost" } }, ws);
 
     wsServer.onMessage(ws, JSON.stringify({ type: "unknownType" }));
@@ -298,7 +298,7 @@ describe("createWsServer", () => {
     const core = createWsMockCore();
     wsServer = createWsServer(core, { buildAgent: createWsMockAgentFactory() });
 
-    const ws = createWsMockWs() as unknown as WebSocket;
+    const ws = createWsMockWs() as unknown as HotdogServerSocket;
     wsServer.onUpgrade({ url: "/ws", headers: { host: "localhost" } }, ws);
 
     wsServer.onMessage(ws, "not valid json");
@@ -312,7 +312,7 @@ describe("createWsServer", () => {
     const core = createWsMockCore();
     wsServer = createWsServer(core, { buildAgent: createWsMockAgentFactory() });
 
-    const ws = createWsMockWs() as unknown as WebSocket;
+    const ws = createWsMockWs() as unknown as HotdogServerSocket;
     wsServer.onUpgrade({ url: "/ws", headers: { host: "localhost" } }, ws);
 
     wsServer.onMessage(ws, JSON.stringify({ data: "hello" }));
@@ -326,11 +326,11 @@ describe("createWsServer", () => {
     const core = createWsMockCore();
     wsServer = createWsServer(core, { buildAgent: createWsMockAgentFactory() });
 
-    const ws = createWsMockWs() as unknown as WebSocket;
+    const ws = createWsMockWs() as unknown as HotdogServerSocket;
     wsServer.onUpgrade({ url: "/ws", headers: { host: "localhost" } }, ws);
 
     await new Promise((r) => setTimeout(r, 10));
-    const sessionId = (ws as WebSocket & { activeSessionId?: string }).activeSessionId!;
+    const sessionId = (ws as HotdogServerSocket).activeSessionId!;
 
     // Verify session exists with connected client
     const meta = wsServer.sessionRegistry._test_metadata.get(sessionId!);
@@ -348,11 +348,11 @@ describe("createWsServer", () => {
     const core = createWsMockCore();
     wsServer = createWsServer(core, { buildAgent: createWsMockAgentFactory() });
 
-    const ws = createWsMockWs() as unknown as WebSocket;
+    const ws = createWsMockWs() as unknown as HotdogServerSocket;
     wsServer.onUpgrade({ url: "/ws", headers: { host: "localhost" } }, ws);
 
     await new Promise((r) => setTimeout(r, 10));
-    const sessionId = (ws as WebSocket & { activeSessionId?: string }).activeSessionId!;
+    const sessionId = (ws as HotdogServerSocket).activeSessionId!;
 
     wsServer.onMessage(ws, JSON.stringify({ type: "renameSession", sessionId, newName: "renamed" }));
 
@@ -364,11 +364,11 @@ describe("createWsServer", () => {
     const core = createWsMockCore();
     wsServer = createWsServer(core, { buildAgent: createWsMockAgentFactory() });
 
-    const ws = createWsMockWs() as unknown as WebSocket;
+    const ws = createWsMockWs() as unknown as HotdogServerSocket;
     wsServer.onUpgrade({ url: "/ws", headers: { host: "localhost" } }, ws);
 
     await new Promise((r) => setTimeout(r, 10));
-    const firstSessionId = (ws as WebSocket & { activeSessionId?: string }).activeSessionId!;
+    const firstSessionId = (ws as HotdogServerSocket).activeSessionId!;
 
     // Create a second session
     wsServer.onMessage(ws, JSON.stringify({ type: "createSession" }));
@@ -400,10 +400,10 @@ describe("createWsServer - additional coverage", () => {
     wsServer = createWsServer(core, { buildAgent: mockAgentFactory });
 
     // Create first session
-    const ws1 = createWsMockWs() as unknown as WebSocket;
+    const ws1 = createWsMockWs() as unknown as HotdogServerSocket;
     wsServer.onUpgrade({ url: "/ws", headers: { host: "localhost" } }, ws1);
     await new Promise((r) => setTimeout(r, 10));
-    const firstSessionId = (ws1 as WebSocket & { activeSessionId?: string }).activeSessionId!;
+    const firstSessionId = (ws1 as HotdogServerSocket).activeSessionId!;
 
     // Wait and create second session
     await new Promise((r) => setTimeout(r, 50));
@@ -416,11 +416,11 @@ describe("createWsServer - additional coverage", () => {
     // Close first connection and create new one - should attach to most recent
     wsServer.onClose(ws1);
 
-    const ws2 = createWsMockWs() as unknown as WebSocket;
+    const ws2 = createWsMockWs() as unknown as HotdogServerSocket;
     wsServer.onUpgrade({ url: "/ws", headers: { host: "localhost" } }, ws2);
     await new Promise((r) => setTimeout(r, 10));
 
-    const newActiveSessionId = (ws2 as WebSocket & { activeSessionId?: string }).activeSessionId!;
+    const newActiveSessionId = (ws2 as HotdogServerSocket).activeSessionId!;
     // Should be attached to the second (most recent) session
     expect(newActiveSessionId).not.toBe(firstSessionId);
   });
@@ -429,7 +429,7 @@ describe("createWsServer - additional coverage", () => {
     const core = createWsMockCore();
     wsServer = createWsServer(core, { buildAgent: createWsMockAgentFactory() });
 
-    const ws = createWsMockWs() as unknown as WebSocket;
+    const ws = createWsMockWs() as unknown as HotdogServerSocket;
     wsServer.onUpgrade({ url: "/ws", headers: { host: "localhost" } }, ws);
     await new Promise((r) => setTimeout(r, 20));
 
@@ -443,7 +443,7 @@ describe("createWsServer - additional coverage", () => {
     const core = createWsMockCore();
     wsServer = createWsServer(core, { buildAgent: createWsMockAgentFactory() });
 
-    const ws = createWsMockWs() as unknown as WebSocket;
+    const ws = createWsMockWs() as unknown as HotdogServerSocket;
     wsServer.onUpgrade({ url: "/ws", headers: { host: "localhost" } }, ws);
     await new Promise((r) => setTimeout(r, 10));
 
@@ -459,7 +459,7 @@ describe("createWsServer - additional coverage", () => {
     const core = createWsMockCore();
     wsServer = createWsServer(core, { buildAgent: createWsMockAgentFactory() });
 
-    const ws = createWsMockWs() as unknown as WebSocket;
+    const ws = createWsMockWs() as unknown as HotdogServerSocket;
     wsServer.onUpgrade({ url: "/ws", headers: { host: "localhost" } }, ws);
     await new Promise((r) => setTimeout(r, 10));
 
@@ -481,7 +481,7 @@ describe("createWsServer - additional coverage", () => {
       auth: mockAuth as never,
     });
 
-    const ws = createWsMockWs() as unknown as WebSocket;
+    const ws = createWsMockWs() as unknown as HotdogServerSocket;
     wsServer.onUpgrade({ url: "/ws?token=valid-token", headers: { host: "localhost" } }, ws);
     await new Promise((r) => setTimeout(r, 10));
 
@@ -499,7 +499,7 @@ describe("createWsServer - additional coverage", () => {
       auth: mockAuth as never,
     });
 
-    const ws = createWsMockWs() as unknown as WebSocket;
+    const ws = createWsMockWs() as unknown as HotdogServerSocket;
     wsServer.onUpgrade({ url: "/ws", headers: { host: "localhost" } }, ws);
 
     const firstMsg = JSON.parse((ws as MockWs).messages[0]!);
@@ -516,7 +516,7 @@ describe("createWsServer - additional coverage", () => {
       auth: mockAuth as never,
     });
 
-    const ws = createWsMockWs() as unknown as WebSocket;
+    const ws = createWsMockWs() as unknown as HotdogServerSocket;
     wsServer.onUpgrade({ url: "/ws?token=invalid-token", headers: { host: "localhost" } }, ws);
 
     const firstMsg = JSON.parse((ws as MockWs).messages[0]!);
@@ -533,7 +533,7 @@ describe("createWsServer - additional coverage", () => {
       auth: mockAuth as never,
     });
 
-    const ws = createWsMockWs() as unknown as WebSocket;
+    const ws = createWsMockWs() as unknown as HotdogServerSocket;
     // Connect without token - gets authRequired, no session created
     wsServer.onUpgrade({ url: "/ws", headers: { host: "localhost" } }, ws);
 
@@ -561,7 +561,7 @@ describe("createWsServer - additional coverage", () => {
       auth: mockAuth as never,
     });
 
-    const ws = createWsMockWs() as unknown as WebSocket;
+    const ws = createWsMockWs() as unknown as HotdogServerSocket;
     wsServer.onUpgrade({ url: "/ws", headers: { host: "localhost" } }, ws);
 
     wsServer.onMessage(ws, JSON.stringify({ type: "auth", token: "invalid-token" }));
@@ -583,7 +583,7 @@ describe("createWsServer - additional coverage", () => {
     };
     wsServer = createWsServer(core, { buildAgent: failingBuildAgent });
 
-    const ws = createWsMockWs() as unknown as WebSocket;
+    const ws = createWsMockWs() as unknown as HotdogServerSocket;
     wsServer.onUpgrade({ url: "/ws", headers: { host: "localhost" } }, ws);
     await new Promise((r) => setTimeout(r, 50));
 
@@ -602,7 +602,7 @@ describe("createWsServer - additional coverage", () => {
     const core = createWsMockCore();
     wsServer = createWsServer(core, { buildAgent: createWsMockAgentFactory() });
 
-    const ws = createWsMockWs() as unknown as WebSocket;
+    const ws = createWsMockWs() as unknown as HotdogServerSocket;
     wsServer.onUpgrade({ url: "/ws", headers: { host: "localhost" } }, ws);
     await new Promise((r) => setTimeout(r, 10));
 

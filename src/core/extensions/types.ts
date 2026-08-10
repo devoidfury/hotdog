@@ -30,6 +30,7 @@ import type { ModelConfig, ProviderDef } from "../config/providers.ts";
 import type { BuildAgentConfig } from "../config/index.ts";
 import type { CoreConfigWithExtensions } from "../config/schema-loader.ts";
 import type { Agent } from "../agent.ts";
+import type { AgentLike } from "../session/index.ts";
 import type { ImageAttachment, Message } from "../context/message.ts";
 import type { ParsedCommand } from "../commands.ts";
 import type { ToolContext } from "./tool-context.ts";
@@ -83,7 +84,7 @@ export interface ExtensionMetadata {
 export interface HookPayloads {
   // Session lifecycle
   "session:create": { session: SessionManager; sessionId: string; config: Record<string, unknown> };
-  "session:swap": { oldAgent?: Agent; newAgent: Agent };
+  "session:swap": { oldAgent?: AgentLike; newAgent: AgentLike };
   "session:serialize": { agent: Agent };
   "session:deserialize": { data: Record<string, unknown> };
   "session:restoreActive": { agent: Agent; isRestoring: boolean };

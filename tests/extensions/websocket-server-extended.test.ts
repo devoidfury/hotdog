@@ -3,7 +3,7 @@
 // Covers lines 219-222, 283, 298-304, 338-407, 466, 583-622, 626-642, 673-702.
 
 import { describe, it, expect, beforeEach, afterEach, mock, Mock } from "bun:test";
-import { SessionRegistry, createWsServer } from "../../src/extensions/websocket/server.ts";
+import { SessionRegistry, createWsServer, type HotdogServerSocket } from "../../src/extensions/websocket/server.ts";
 import { WebSocketChannel } from "../../src/extensions/websocket/websocket-channel.ts";
 import { C2S, S2C } from "../../src/extensions/websocket/protocol.ts";
 import { Agent } from "../../src/core/agent.ts";
@@ -58,52 +58,52 @@ describe("SessionRegistry Extended", () => {
 
   describe("broadcast", () => {
     it("sends to all connected clients", () => {
-      const ws1 = { readyState: 1, send: mock(() => {}) } as unknown as WebSocket;
-      const ws2 = { readyState: 1, send: mock(() => {}) } as unknown as WebSocket;
+      const ws1 = { readyState: 1, send: mock(() => {}) } as unknown as HotdogServerSocket;
+      const ws2 = { readyState: 1, send: mock(() => {}) } as unknown as HotdogServerSocket;
 
       registry.registerConnection(ws1);
       registry.registerConnection(ws2);
 
       registry.broadcast({ type: "test", data: "hello" });
 
-      expect((ws1.send as Mock<() => void>).mock.calls.length).toBe(1);
-      expect((ws2.send as Mock<() => void>).mock.calls.length).toBe(1);
+      expect((ws1.send as unknown as Mock<() => void>).mock.calls.length).toBe(1);
+      expect((ws2.send as unknown as Mock<() => void>).mock.calls.length).toBe(1);
 
-      const payload = JSON.parse(((ws1.send as Mock<() => void>).mock.calls as unknown[][])[0]![0] as string);
+      const payload = JSON.parse(((ws1.send as unknown as Mock<() => void>).mock.calls as unknown[][])[0]![0] as string);
       expect(payload.type).toBe("test");
       expect(payload.data).toBe("hello");
     });
 
     it("skips closed connections", () => {
-      const ws1 = { readyState: 1, send: mock(() => {}) } as unknown as WebSocket;
-      const ws2 = { readyState: 2, send: mock(() => {}) } as unknown as WebSocket; // CLOSING
+      const ws1 = { readyState: 1, send: mock(() => {}) } as unknown as HotdogServerSocket;
+      const ws2 = { readyState: 2, send: mock(() => {}) } as unknown as HotdogServerSocket; // CLOSING
 
       registry.registerConnection(ws1);
       registry.registerConnection(ws2);
 
       registry.broadcast({ type: "test" });
 
-      expect((ws1.send as Mock<() => void>).mock.calls.length).toBe(1);
-      expect((ws2.send as Mock<() => void>).mock.calls.length).toBe(0);
+      expect((ws1.send as unknown as Mock<() => void>).mock.calls.length).toBe(1);
+      expect((ws2.send as unknown as Mock<() => void>).mock.calls.length).toBe(0);
     });
 
     it("handles send errors gracefully", () => {
       const failingWs = {
         readyState: 1,
         send: mock(() => { throw new Error("Send failed"); }),
-      } as unknown as WebSocket;
+      } as unknown as HotdogServerSocket;
       const workingWs = {
         readyState: 1,
         send: mock(() => {}),
-      } as unknown as WebSocket;
+      } as unknown as HotdogServerSocket;
 
       registry.registerConnection(failingWs);
       registry.registerConnection(workingWs);
 
       // Broadcast should not throw and should still send to working connections
       registry.broadcast({ type: "test" });
-      expect((failingWs.send as Mock<() => void>).mock.calls.length).toBe(1);
-      expect((workingWs.send as Mock<() => void>).mock.calls.length).toBe(1);
+      expect((failingWs.send as unknown as Mock<() => void>).mock.calls.length).toBe(1);
+      expect((workingWs.send as unknown as Mock<() => void>).mock.calls.length).toBe(1);
     });
 
     it("handles empty connection set", () => {
@@ -135,7 +135,7 @@ describe("SessionRegistry Extended", () => {
         readyState: 1,
         send: (data: string) => { messages.push(data); },
         messages,
-      } as unknown as WebSocket;
+      } as unknown as HotdogServerSocket;
     }
 
     it("creates multiple channels for same session", async () => {
@@ -168,7 +168,7 @@ describe("SessionRegistry Extended", () => {
         readyState: 1,
         send: (data: string) => { messages.push(data); },
         messages,
-      } as unknown as WebSocket;
+      } as unknown as HotdogServerSocket;
     }
 
     it("closes channels when deleting session", async () => {
@@ -340,7 +340,7 @@ describe("createWsServer Message Routing", () => {
 
     it("switches to existing session", () => {
       const ws = createWsMockWs();
-      const typedWs = ws as WebSocket & { activeSessionId?: string; activeChannel?: WebSocketChannel };
+      const typedWs = ws as HotdogServerSocket;
       typedWs.activeSessionId = sessionId1;
 
       wsServer.onMessage(ws, JSON.stringify({
@@ -544,7 +544,7 @@ describe("replaySessionHistory", () => {
       readyState: 1,
       send: (data: string) => { messages.push(data); },
       messages,
-    } as unknown as WebSocket & { messages: string[] };
+    } as unknown as HotdogServerSocket & { messages: string[] };
   }
 
   it("replays user messages", async () => {
@@ -583,7 +583,7 @@ describe("replaySessionHistory", () => {
 
     // Replay by switching to the session
     const ws = createWsMockWs();
-    const typedWs = ws as WebSocket & { activeSessionId?: string; activeChannel?: WebSocketChannel };
+    const typedWs = ws as HotdogServerSocket;
     typedWs.activeSessionId = result.sessionId;
 
     wsServer.onMessage(ws, JSON.stringify({
@@ -636,7 +636,7 @@ describe("replaySessionHistory", () => {
     const result = await wsServer.sessionRegistry.create({});
 
     const ws = createWsMockWs();
-    const typedWs = ws as WebSocket & { activeSessionId?: string; activeChannel?: WebSocketChannel };
+    const typedWs = ws as HotdogServerSocket;
     typedWs.activeSessionId = result.sessionId;
 
     wsServer.onMessage(ws, JSON.stringify({
@@ -699,7 +699,7 @@ describe("replaySessionHistory", () => {
     const result = await wsServer.sessionRegistry.create({});
 
     const ws = createWsMockWs();
-    const typedWs = ws as WebSocket & { activeSessionId?: string; activeChannel?: WebSocketChannel };
+    const typedWs = ws as HotdogServerSocket;
     typedWs.activeSessionId = result.sessionId;
 
     wsServer.onMessage(ws, JSON.stringify({
@@ -748,7 +748,7 @@ describe("replaySessionHistory", () => {
     const result = await wsServer.sessionRegistry.create({});
 
     const ws = createWsMockWs();
-    const typedWs = ws as WebSocket & { activeSessionId?: string; activeChannel?: WebSocketChannel };
+    const typedWs = ws as HotdogServerSocket;
     typedWs.activeSessionId = result.sessionId;
 
     // Should not throw
@@ -791,7 +791,7 @@ describe("replaySessionHistory", () => {
     const result = await wsServer.sessionRegistry.create({});
 
     const ws = createWsMockWs();
-    const typedWs = ws as WebSocket & { activeSessionId?: string; activeChannel?: WebSocketChannel };
+    const typedWs = ws as HotdogServerSocket;
     typedWs.activeSessionId = result.sessionId;
 
     wsServer.onMessage(ws, JSON.stringify({
@@ -816,7 +816,7 @@ describe("WebSocket message handlers - log operations", () => {
       send: (data: string) => { messages.push(data); },
       messages,
       close: mock(() => {}),
-    } as unknown as WebSocket;
+    } as unknown as HotdogServerSocket;
   }
 
   function createWsMockCore() {

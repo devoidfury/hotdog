@@ -55,8 +55,9 @@ Copy [the minimal config example](./examples/minimal-config/config) directory to
 Or use environment variables instead of a config file:
 
 ```sh
-export AI_URL="http://localhost:8080"
-export AI_API_KEY="your-api-key"
+export HOTDOG_AI_URL="http://localhost:8080"
+export HOTDOG_API_KEY="your-api-key"
+export HOTDOG_MODEL="my-provider/my-model"
 ```
 
 ### 2. Run

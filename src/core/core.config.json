@@ -16,6 +16,7 @@
       { "source": "provider", "path": "apiKey" },
       { "source": "cli", "key": "apiKey" },
       { "source": "config", "key": "apiKey" },
+      { "source": "env", "key": "HOTDOG_API_KEY" },
       { "source": "env", "key": "AI_API_KEY" },
       { "default": null }
     ]
@@ -273,6 +274,8 @@
     "layers": [
       { "source": "cli", "key": "model", "cast": "string" },
       { "source": "profile", "key": "model", "cast": "string" },
+      { "source": "env", "key": "HOTDOG_MODEL" },
+      { "source": "env", "key": "AI_MODEL" },
       { "source": "config", "key": "defaultModel", "cast": "string" },
       { "default": "qwen3.5-0.8b" }
     ]

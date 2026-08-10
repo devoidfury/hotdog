@@ -8,6 +8,7 @@ import {
   OutputEventType,
 } from "../../core/context/output.ts";
 import { S2C, S2CType } from "./protocol.ts";
+import type { HotdogServerSocket } from "./server.ts";
 
 // ── OUTPUT_EVENT → S2C mapping ──────────────────────────────────────────────
 
@@ -36,7 +37,7 @@ const EVENT_TO_PROTOCOL: Record<OutputEventType, S2CType> = {
 
 export interface WebSocketChannelOptions {
   sessionManager: ChannelSessionManager;
-  ws: Bun.ServerWebSocket;
+  ws: HotdogServerSocket<unknown>;
   sessionId: string;
   broadcastCallback?: (msg: Record<string, unknown>) => void;
 }
@@ -46,7 +47,7 @@ export interface WebSocketChannelOptions {
  * Maps OutputEvent types to S2C protocol messages and sends JSON over WS.
  */
 export class WebSocketChannel extends Channel {
-  #ws: Bun.ServerWebSocket;
+  #ws: HotdogServerSocket<unknown>;
   #sessionId: string;
   #ready: boolean;
   #broadcastCallback: ((msg: Record<string, unknown>) => void) | undefined;

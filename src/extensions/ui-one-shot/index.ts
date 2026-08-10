@@ -14,6 +14,7 @@ import { SessionManager, type AgentLike } from "../../core/session/index.ts";
 import { Agent } from "../../core/agent.ts";
 import { OneShotChannel } from "./oneshot-channel.ts";
 import type { CoreContext, ExtensionInstance, ResolvedConfig } from "../../core/extensions/types.ts";
+import type { PaletteOptions } from "../../utils/cli/colors.ts";
 import type { CoreConfigWithExtensions, CliArgv } from "../../core/config/index.ts";
 import type { ModelConfig } from "../../core/config/providers.ts";
 
@@ -108,8 +109,8 @@ async function handlePromptSubcommand(
   // Build output sink
   const palette = await CliOutputSink.resolve(
     cli.colors !== false,
-    cli.theme || config.theme || "dark",
-    (config.colors as Record<string, unknown>) || null,
+    (cli.theme || config.theme || "dark") as string,
+    (config.colors as PaletteOptions) || null,
   );
 
   const sink = new CliOutputSink({

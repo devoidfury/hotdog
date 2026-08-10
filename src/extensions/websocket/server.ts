@@ -81,15 +81,15 @@ export interface WsServer {
   sessionRegistry: SessionRegistry;
   onUpgrade: (
     req: { url: string; headers?: Record<string, string> },
-    ws: HotdogServerSocket,
+    ws: HotdogServerSocket<unknown>,
   ) => void;
-  onMessage: (ws: HotdogServerSocket, raw: string | Buffer) => void;
-  onClose: (ws: HotdogServerSocket) => void;
+  onMessage: (ws: HotdogServerSocket<unknown>, raw: string | Buffer) => void;
+  onClose: (ws: HotdogServerSocket<unknown>) => void;
   startCleanupLoop: () => void;
   stopCleanupLoop: () => void;
 }
 
-export type HotdogServerSocket = Bun.ServerWebSocket & {
+export type HotdogServerSocket<T = undefined> = Bun.ServerWebSocket<T> & {
   activeSessionId?: string;
   activeChannel?: WebSocketChannel;
   authToken?: string;
@@ -117,7 +117,7 @@ export class SessionRegistry {
   #cleanupTimer: ReturnType<typeof setInterval> | null = null;
   #timeoutMin: number;
   // All active WebSocket connections — used for broadcasting events to all clients.
-  #allConnections = new Set<Bun.ServerWebSocket>();
+  #allConnections = new Set<HotdogServerSocket<unknown>>();
   // Per-session metadata
   #metadata: Map<string, SessionMetadata>;
   // Per-session WebSocketChannel instances
@@ -155,14 +155,14 @@ export class SessionRegistry {
   /**
    * Register a WebSocket connection for broadcast purposes.
    */
-  registerConnection(ws: HotdogServerSocket): void {
+  registerConnection(ws: HotdogServerSocket<unknown>): void {
     this.#allConnections.add(ws);
   }
 
   /**
    * Unregister a WebSocket connection.
    */
-  unregisterConnection(ws: HotdogServerSocket): void {
+  unregisterConnection(ws: HotdogServerSocket<unknown>): void {
     this.#allConnections.delete(ws);
   }
 
@@ -187,7 +187,7 @@ export class SessionRegistry {
   /**
    * Safely send a message to a WebSocket, ignoring errors if closed.
    */
-  static sendSafe(ws: HotdogServerSocket, msg: Record<string, unknown>): void {
+  static sendSafe(ws: HotdogServerSocket<unknown>, msg: Record<string, unknown>): void {
     try {
       if (ws.readyState === 1) {
         ws.send(JSON.stringify(msg));
@@ -401,7 +401,7 @@ export class SessionRegistry {
    */
   createChannel(
     sessionId: string,
-    ws: HotdogServerSocket,
+    ws: HotdogServerSocket<unknown>,
   ): WebSocketChannel | undefined {
     const session = this.get(sessionId);
     if (!session) return undefined;
@@ -556,7 +556,7 @@ async function loadLogIntoNewSession(
 function replaySessionHistory(
   sessionId: string,
   agent: AgentLike,
-  ws: HotdogServerSocket,
+  ws: HotdogServerSocket<unknown>,
 ): void {
   if (!agent.log) return;
 
@@ -689,7 +689,7 @@ function replaySessionHistory(
  * Route incoming WS messages to the right session handler.
  */
 async function routeMessage(
-  ws: HotdogServerSocket,
+  ws: HotdogServerSocket<unknown>,
   msg: C2SMessage,
   registry: SessionRegistry,
   authMiddleware: AuthMiddleware | undefined,
@@ -1044,7 +1044,7 @@ async function routeMessage(
 // ── Helper functions ────────────────────────────────────────────────────────
 
 function attachToMostRecentSession(
-  ws: HotdogServerSocket,
+  ws: HotdogServerSocket<unknown>,
   registry: SessionRegistry,
 ): void {
   const sessions = registry.list();
@@ -1103,7 +1103,7 @@ function attachToMostRecentSession(
 }
 
 function createAndAttachSession(
-  ws: HotdogServerSocket,
+  ws: HotdogServerSocket<unknown>,
   registry: SessionRegistry,
 ): void {
   registry
@@ -1242,7 +1242,7 @@ export function createWsServer(
    */
   function onUpgrade(
     req: { url: string; headers?: Record<string, string> },
-    ws: HotdogServerSocket,
+    ws: HotdogServerSocket<unknown>,
   ): void {
     registry.registerConnection(ws);
 
@@ -1278,7 +1278,7 @@ export function createWsServer(
    * Handle incoming WS messages.
    */
   async function onMessage(
-    ws: HotdogServerSocket,
+    ws: HotdogServerSocket<unknown>,
     raw: string | Buffer,
   ): Promise<void> {
     let msg: C2SMessage;
@@ -1323,7 +1323,7 @@ export function createWsServer(
   /**
    * Handle WS close — remove channel from session.
    */
-  function onClose(ws: HotdogServerSocket): void {
+  function onClose(ws: HotdogServerSocket<unknown>): void {
     if (ws.activeSessionId && ws.activeChannel) {
       registry.removeChannel(ws.activeSessionId, ws.activeChannel);
       ws.activeChannel.close();

@@ -348,6 +348,8 @@ export interface BuildAgentConfigExtra {
   modelRegistry: Record<string, ModelConfig>;
   /** Centralized profile manager - use this instead of manual path construction. */
   profileManager: ProfileManager;
+  chatTimeout: number;
+  maxRetries: number;
 }
 
 /**

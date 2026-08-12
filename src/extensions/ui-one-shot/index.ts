@@ -49,7 +49,7 @@ async function runOneShot(
     hooks: core.hooks,
     extensions: core.extensions,
     buildAgent,
-    initialConfig: { sessionId: (cli.sessionId as string | undefined) || null },
+    initialConfig: cli,
     llmClient: llmClient,
     modelRegistry,
     coreConfig: config,

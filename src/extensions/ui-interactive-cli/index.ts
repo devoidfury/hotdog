@@ -421,8 +421,7 @@ export async function buildInteractiveAgent(
       {},
     profileName:
       (agentConfig.profileName as string) || (resolved.profileName as string),
-    role:
-      (agentConfig.role as string) || (resolved.role as string | undefined),
+    role: (agentConfig.role as string) || (resolved.role as string | undefined),
     profileBody:
       (agentConfig.profileBody as string) ||
       (resolved.profileBody as string | undefined),
@@ -512,8 +511,17 @@ export async function runInteractiveSession(
   });
 
   // Build agent function — uses llmClient from config (injected by SessionManager)
-  const buildAgent = async (agentConfig: Record<string, unknown>): Promise<AgentLike> => {
-    return buildInteractiveAgent(agentConfig, core, resolved, config, llmClient, cli);
+  const buildAgent = async (
+    agentConfig: Record<string, unknown>,
+  ): Promise<AgentLike> => {
+    return buildInteractiveAgent(
+      agentConfig,
+      core,
+      resolved,
+      config,
+      llmClient,
+      cli,
+    );
   };
 
   // Create SessionManager — this owns the MessageBus and TaskManager internally
@@ -521,7 +529,7 @@ export async function runInteractiveSession(
     hooks: core.hooks,
     extensions: core.extensions,
     buildAgent,
-    initialConfig: { sessionId: cli.sessionId || null },
+    initialConfig: cli,
     llmClient,
     modelRegistry: resolved.modelRegistry,
     coreConfig: config,
@@ -538,9 +546,17 @@ export async function runInteractiveSession(
 
   // Register completions from command definitions (extensions declare completions inline)
   // Hook into COMMANDS_REGISTER so completions are wired up as commands are registered
-  core.hooks.on(HOOKS.COMMANDS_REGISTER, ({ registry }) => {
-    registerCommandCompletions(core.completion, registry, "ui-interactive-cli");
-  }, "ui-interactive-cli");
+  core.hooks.on(
+    HOOKS.COMMANDS_REGISTER,
+    ({ registry }) => {
+      registerCommandCompletions(
+        core.completion,
+        registry,
+        "ui-interactive-cli",
+      );
+    },
+    "ui-interactive-cli",
+  );
 
   // Print info
   const agent = sessionManager.getAgent();
@@ -586,7 +602,7 @@ export async function runInteractiveSession(
   });
 
   // Re-display prompt after agent finishes
-  core.hooks.on(HOOKS.TURN_END, ({ stopped  }) => {
+  core.hooks.on(HOOKS.TURN_END, ({ stopped }) => {
     if (stopped) {
       setImmediate(() => {
         console.log("");
@@ -751,10 +767,7 @@ export function create(core: CoreContext): ExtensionInstance {
       [HOOKS.CLI_SUBCOMMANDS_REGISTER]: async (registry) => {
         registry.register("cli", {
           description: "Interactive CLI session",
-          handler: async (
-            cli: CliArgv,
-            core: CoreContext,
-          ) => {
+          handler: async (cli: CliArgv, core: CoreContext) => {
             await runInteractiveSession(cli, core);
             return 0;
           },

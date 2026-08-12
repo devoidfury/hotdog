@@ -407,15 +407,6 @@ export interface CommandsRegisterPayload {
   agent: Agent;
 }
 
-// ── Tool Execution Context ───────────────────────────────────────────────────
-
-/**
- * Context passed to tool `execute()` methods.
- * Provides access to shared state and configuration.
- */
-// ToolContext is the canonical name for tool execution context.
-// Previously exported as ToolExecutionContext (alias removed).
-
 // ── Extension Config Helpers ─────────────────────────────────────────────────
 
 /**

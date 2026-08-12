@@ -1,0 +1,13 @@
+{
+  "name": "workflow-manager",
+  "description": "Orchestrates multi-agent workflows using directed graphs of nodes.",
+  "autoload": true,
+  "cliFlags": [
+    {
+      "long": "--workflow",
+      "type": "string",
+      "description": "Start the agent in a specific workflow by its ID."
+    }
+  ],
+  "provides": ["workflow-manager"]
+}

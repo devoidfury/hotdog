@@ -122,6 +122,20 @@ Body`;
     expect(profile!.visibleWorker).toBe(true);
   });
 
+  it("preserves arbitrary front matter keys", async () => {
+    const content = `---
+name: custom-profile
+custom_field: custom-value
+another_field: 123
+---
+Body`;
+    fs.writeFileSync(path.join(tmpDir, "custom-profile.profile.md"), content);
+
+    const profile = await loadProfileFile(tmpDir, "custom-profile");
+    expect(profile!.customField).toBe("custom-value");
+    expect(profile!.anotherField).toBe(123);
+  });
+
   it("handles empty profile directory", async () => {
     const profile = await loadProfileFile("/nonexistent-dir-12345", "test");
     expect(profile).toBeNull();

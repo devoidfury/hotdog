@@ -11,7 +11,6 @@ import { Dirent } from "node:fs";
 import { normalizeConfigKeys } from "./index.ts";
 
 export interface ProfileDef {
-  aspects?: string[];
   name: string;
   description: string;
   role: string | null;
@@ -25,6 +24,7 @@ export interface ProfileDef {
   whitelist_tools?: string[] | null;
   manager: boolean;
   visibleWorker: boolean;
+  [key: string]: any;
 }
 
 export interface SwitchProfile {
@@ -71,6 +71,7 @@ export async function loadProfileFile(
     const fm = normalizeConfigKeys(parsed.frontMatter) as Partial<ProfileDef>;
     const body = parsed.body as string;
     return {
+      ...fm,
       name: (fm.name as string) || profileName,
       description: (fm.description as string) || "",
       role: (fm.role as string) || null,
@@ -122,6 +123,7 @@ export async function loadProfileFiles(
     const fileStem = entry.name.replace(/\.profile\.md$/, "");
 
     result[fileStem] = {
+      ...fm,
       name: (fm.name as string) || fileStem,
       description: (fm.description as string) || "",
       role: (fm.role as string) || "",
@@ -131,7 +133,6 @@ export async function loadProfileFiles(
       model: (fm.model as string) || null,
       manager: !!fm.manager,
       visibleWorker: !!fm.visibleWorker,
-      aspects: (fm.aspects as string[]) || undefined,
     };
   }
 
@@ -279,6 +280,8 @@ export class ProfileManager {
     if (!fileP && !configP) return null;
 
     return {
+      ...configP,
+      ...fileP,
       name,
       description: fileP?.description || configP?.description || "",
       role: fileP?.role || configP?.role || null,
@@ -288,7 +291,6 @@ export class ProfileManager {
       whitelistTools: fileP?.whitelistTools ?? configP?.whitelistTools ?? null,
       manager: fileP?.manager || configP?.manager || false,
       visibleWorker: fileP?.visibleWorker || configP?.visibleWorker || false,
-      aspects: fileP?.aspects || configP?.aspects || undefined,
     };
   }
 

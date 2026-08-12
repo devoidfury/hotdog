@@ -188,7 +188,7 @@ export class StartWorkflowTool extends BaseWorkflowTool {
       await this.stateManager.save(state);
 
       return ToolResult.ok(
-        `Workflow '${wf.id}' started. Current node: ${state.cursor}. Context will be transitioned on next turn.`,
+        `Workflow '${wf.id}' started. Transitioning to node: ${state.cursor}.`,
       );
     } catch (e: any) {
       return ToolResult.err(`Failed to start workflow: ${e.message}`);

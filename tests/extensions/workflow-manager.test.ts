@@ -275,4 +275,58 @@ describe("WorkflowManager Integration Tests", () => {
     expect(loadedState?.cursor).toBe("node1");
     expect(loadedState?.blackboard.res).toBe("something");
   });
+
+  it("should transition to start_node when start_workflow is called", async () => {
+    // Setup workflow
+    const wf: WorkflowDefinition = {
+      id: "test-wf",
+      start_node: "node1",
+      nodes: {
+        node1: { profile: "p1", label: "L1" },
+        node2: { profile: "p2", label: "L2" },
+      },
+      edges: [],
+      fallback: "agentic",
+    };
+    const wfDir = path.join(tempDir, ".hotdog/workflows");
+    await fsPromises.mkdir(wfDir, { recursive: true });
+    await fsPromises.writeFile(path.join(wfDir, "test-wf.json"), JSON.stringify(wf));
+
+    // Call start_workflow tool (simulates agent invoking it)
+    const startTool = extension.hooks[HOOKS.TOOLS_REGISTER];
+    // We need to get the actual tool instance - access via extension services
+    // Instead, directly test TURN_END handling of start_workflow result
+    const state: WorkflowState = {
+      workflowId: "test-wf",
+      cursor: "node1",
+      blackboard: { initial: "data" },
+      history: [],
+    };
+    await extension.stateManager.save(state);
+
+    const toolResults = [
+      {
+        toolName: "start_workflow",
+        input: JSON.stringify({ id: "test-wf", initialData: { initial: "data" } }),
+        result: "Success",
+      },
+    ];
+
+    await extension.hooks[HOOKS.TURN_END]({
+      stopped: true,
+      cancelled: false,
+      agent: mockAgent,
+      toolResults,
+    });
+
+    expect(mockAgent.profileName).toBe("node1");
+    expect(mockAgent.clearContext).toHaveBeenCalled();
+    expect(mockAgent.ensureSystemPrompt).toHaveBeenCalled();
+    expect(mockAgent.enqueue).toHaveBeenCalledWith(
+      expect.stringContaining("transitioned to node: **node1**"),
+    );
+    expect(mockAgent.enqueue).toHaveBeenCalledWith(
+      expect.stringContaining("Workflow 'test-wf' started"),
+    );
+  });
 });

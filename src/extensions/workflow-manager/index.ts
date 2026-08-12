@@ -121,7 +121,25 @@ export function create(core: CoreContext): ExtensionInstance {
           }
         }
 
-        // 2. Check for result submission
+        // 2. Check for workflow start
+        const startTool = toolResults.find(tr => tr.toolName === StartWorkflowTool.TOOL_NAME);
+        if (startTool) {
+          const state = await stateManager.load();
+          if (!state) return;
+
+          const workflow = await engine.loadWorkflow(state.workflowId);
+          if (!workflow) return;
+
+          await transitionToNode(
+            agent,
+            workflow.start_node,
+            `Workflow '${workflow.id}' started`,
+            state.blackboard,
+          );
+          return;
+        }
+
+        // 3. Check for result submission
         const submitTool = toolResults.find(tr => tr.toolName === SubmitResultTool.TOOL_NAME);
         if (submitTool) {
           const args = parseToolInput(submitTool.input) as Record<string, any>;

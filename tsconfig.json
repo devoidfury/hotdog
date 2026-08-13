@@ -18,6 +18,13 @@
     "noImplicitOverride": true,
 
     "resolveJsonModule": true,
+
+    "paths": {
+      "@core/*": ["./src/core/*"],
+      "@extensions/*": ["./src/extensions/*"],
+      "@utils/*": ["./src/utils/*"],
+      "@package.json": ["./package.json"],
+    },
   },
   "include": ["src/**/*.ts", "src/**/*.js", "tests/**/*.ts", "bin/**/*"],
   "exclude": ["node_modules", "coverage", "tmp", "examples"],

@@ -1,6 +1,6 @@
 // Web search tool — search the internet via DuckDuckGo, Brave, Tavily, or SearXNG.
 
-import { ToolError, TransientError } from "../../core/error.ts";
+import { ToolError, TransientError } from "@core/error.ts";
 import {
   toolDef,
   param,
@@ -8,17 +8,14 @@ import {
   truncateOutput,
   parseToolInput,
   defaultCallDisplay,
-} from "../../core/extensions/tool-utils.ts";
-import type { ToolMetadata } from "../../core/extensions/tool-registry.ts";
+} from "@core/extensions/tool-utils.ts";
+import type { ToolMetadata } from "@core/extensions/tool-registry.ts";
 
-import { HOOKS } from "../../core/hooks.ts";
+import { HOOKS } from "@core/hooks.ts";
 
-import pkg from "../../../package.json" with { type: "json" };
-
-import { getExtensionConfig } from "../../core/extensions/types.ts";
-import type { CoreContext, ExtensionInstance } from "../../core/extensions/types.ts";
-
-const USER_AGENT = `hotdog/v${pkg.version} NOT Mozilla/5.0 (probably running linux; probably x64) AND NOT AppleWebKit/666.42 (NOT KHTML, unlike Gecko) NOR Chrome/127.0.0.1 ALSO NOT Safari/420.69`;
+import { getExtensionConfig } from "@core/extensions/types.ts";
+import type { CoreContext, ExtensionInstance } from "@core/extensions/types.ts";
+import { hotdogFetch } from "@utils/fetch.ts";
 
 // ── Types ───────────────────────────────────────────────────────────────────
 
@@ -57,17 +54,21 @@ interface ToolInput {
  * Search DuckDuckGo using HTMLRewriter for proper DOM parsing.
  * No API key required.
  */
-async function searchDuckDuckGo(query: string, maxResults: number, timeout: number): Promise<string> {
-  const encoded = encodeURIComponent(query);
-  const url = `https://html.duckduckgo.com/html/?q=${encoded}`;
-
-  const response = await fetch(url, {
-    headers: { "User-Agent": USER_AGENT },
+async function searchDuckDuckGo(
+  query: string,
+  maxResults: number,
+  timeout: number,
+): Promise<string> {
+  const url = `https://html.duckduckgo.com/html/?q=${encodeURIComponent(query)}`;
+  const response = await hotdogFetch(url, {
+    method: "GET",
     signal: AbortSignal.timeout(timeout * 1000),
   });
 
   if (!response.ok) {
-    throw new ToolError(`DuckDuckGo search failed with status ${response.status}`);
+    throw new ToolError(
+      `DuckDuckGo search failed with status ${response.status}`,
+    );
   }
 
   const results: SearchResult[] = [];
@@ -87,7 +88,8 @@ async function searchDuckDuckGo(query: string, maxResults: number, timeout: numb
       },
       text(text) {
         if (currentResult && text.text.trim()) {
-          currentResult.title += (currentResult.title ? " " : "") + text.text.trim();
+          currentResult.title +=
+            (currentResult.title ? " " : "") + text.text.trim();
         }
       },
     })
@@ -95,7 +97,8 @@ async function searchDuckDuckGo(query: string, maxResults: number, timeout: numb
     .on("a.result__snippet", {
       text(text) {
         if (currentResult && text.text.trim()) {
-          currentResult.description += (currentResult.description ? " " : "") + text.text.trim();
+          currentResult.description +=
+            (currentResult.description ? " " : "") + text.text.trim();
         }
       },
     });
@@ -132,17 +135,22 @@ function decodeDdgUrl(raw: string): string {
  * Search via Brave Search API.
  * Requires BRAVE_API_KEY.
  */
-async function searchBrave(query: string, maxResults: number, timeout: number, apiKey: string): Promise<string> {
+async function searchBrave(
+  query: string,
+  maxResults: number,
+  timeout: number,
+  apiKey: string,
+): Promise<string> {
   if (!apiKey) {
     throw new ToolError(
-      "Brave API key not configured. Set webSearch.braveApiKey in config or BRAVE_API_KEY env var."
+      "Brave API key not configured. Set webSearch.braveApiKey in config or BRAVE_API_KEY env var.",
     );
   }
 
   const encoded = encodeURIComponent(query);
   const url = `https://api.search.brave.com/res/v1/web/search?q=${encoded}&count=${maxResults}`;
 
-  const response = await fetch(url, {
+  const response = await hotdogFetch(url, {
     headers: {
       Accept: "application/json",
       "X-Subscription-Token": apiKey,
@@ -154,7 +162,11 @@ async function searchBrave(query: string, maxResults: number, timeout: number, a
     throw new ToolError(`Brave search failed with status ${response.status}`);
   }
 
-  const json = await response.json() as { web?: { results: Array<{ title?: string; url?: string; description?: string }> } };
+  const json = (await response.json()) as {
+    web?: {
+      results: Array<{ title?: string; url?: string; description?: string }>;
+    };
+  };
   const webResults = json?.web?.results || [];
 
   if (webResults.length === 0) {
@@ -174,10 +186,15 @@ async function searchBrave(query: string, maxResults: number, timeout: number, a
  * Search via Tavily API.
  * Requires TAVILY_API_KEY.
  */
-async function searchTavily(query: string, maxResults: number, timeout: number, apiKey: string): Promise<string> {
+async function searchTavily(
+  query: string,
+  maxResults: number,
+  timeout: number,
+  apiKey: string,
+): Promise<string> {
   if (!apiKey) {
     throw new ToolError(
-      "Tavily API key not configured. Set webSearch.tavilyApiKey in config or TAVILY_API_KEY env var."
+      "Tavily API key not configured. Set webSearch.tavilyApiKey in config or TAVILY_API_KEY env var.",
     );
   }
 
@@ -189,7 +206,7 @@ async function searchTavily(query: string, maxResults: number, timeout: number, 
     include_raw_content: false,
   });
 
-  const response = await fetch("https://api.tavily.com/search", {
+  const response = await hotdogFetch("https://api.tavily.com/search", {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -203,7 +220,9 @@ async function searchTavily(query: string, maxResults: number, timeout: number, 
     throw new ToolError(`Tavily search failed with status ${response.status}`);
   }
 
-  const json = await response.json() as { results?: Array<{ title?: string; url?: string; content?: string }> };
+  const json = (await response.json()) as {
+    results?: Array<{ title?: string; url?: string; content?: string }>;
+  };
   const items = json?.results || [];
 
   if (items.length === 0) {
@@ -223,10 +242,15 @@ async function searchTavily(query: string, maxResults: number, timeout: number, 
  * Search via a self-hosted SearXNG instance.
  * Requires SEARXNG_INSTANCE_URL.
  */
-async function searchSearXNG(query: string, maxResults: number, timeout: number, instanceUrl: string): Promise<string> {
+async function searchSearXNG(
+  query: string,
+  maxResults: number,
+  timeout: number,
+  instanceUrl: string,
+): Promise<string> {
   if (!instanceUrl) {
     throw new ToolError(
-      "SearXNG instance URL not configured. Set webSearch.searxngInstanceUrl in config."
+      "SearXNG instance URL not configured. Set webSearch.searxngInstanceUrl in config.",
     );
   }
 
@@ -234,7 +258,7 @@ async function searchSearXNG(query: string, maxResults: number, timeout: number,
   const encoded = encodeURIComponent(query);
   const url = `${base}/search?q=${encoded}&format=json&pageno=1`;
 
-  const response = await fetch(url, {
+  const response = await hotdogFetch(url, {
     headers: {
       Accept: "application/json",
     },
@@ -245,7 +269,9 @@ async function searchSearXNG(query: string, maxResults: number, timeout: number,
     throw new ToolError(`SearXNG search failed with status ${response.status}`);
   }
 
-  const json = await response.json() as { results?: Array<{ title?: string; url?: string; content?: string }> };
+  const json = (await response.json()) as {
+    results?: Array<{ title?: string; url?: string; content?: string }>;
+  };
   const items = json?.results || [];
 
   if (items.length === 0) {
@@ -263,7 +289,11 @@ async function searchSearXNG(query: string, maxResults: number, timeout: number,
 
 // ── Result Formatting ───────────────────────────────────────────────────────
 
-function formatResults(results: SearchResult[], query: string, provider: string): string {
+function formatResults(
+  results: SearchResult[],
+  query: string,
+  provider: string,
+): string {
   const lines: string[] = [`Search results for: ${query} (via ${provider})`];
 
   for (let i = 0; i < results.length; i++) {
@@ -291,9 +321,15 @@ export class WebSearchTool {
   private tavilyApiKey: string;
   private searxngInstanceUrl: string;
 
-  get provider(): string { return this.#provider; }
-  get maxResults(): number { return this.#maxResults; }
-  get timeout(): number { return this.#timeout; }
+  get provider(): string {
+    return this.#provider;
+  }
+  get maxResults(): number {
+    return this.#maxResults;
+  }
+  get timeout(): number {
+    return this.#timeout;
+  }
 
   constructor(options: WebSearchToolOptions) {
     this.#provider = options.provider;
@@ -310,7 +346,10 @@ export class WebSearchTool {
       "Search the web for information. Returns relevant results with titles, URLs, and descriptions. Use this to find current information, news, or research topics.",
       {
         properties: {
-          query: param("string", "The search query. Be specific for better results."),
+          query: param(
+            "string",
+            "The search query. Be specific for better results.",
+          ),
         },
         required: ["query"],
       },
@@ -318,17 +357,22 @@ export class WebSearchTool {
   }
 
   callDisplay(input: string | Record<string, unknown> | null): string {
-    return defaultCallDisplay(input, (args) => `web_search: ${(args as ToolInput).query}`);
+    return defaultCallDisplay(
+      input,
+      (args) => `web_search: ${(args as ToolInput).query}`,
+    );
   }
 
-  async execute(input: string | Record<string, unknown> | null): Promise<ToolResult> {
+  async execute(
+    input: string | Record<string, unknown> | null,
+  ): Promise<ToolResult> {
     const args = parseToolInput(input);
     if (!args) {
       return ToolResult.err("Error parsing arguments");
     }
 
     const query = args.query;
-    if (!query || (typeof query === "string" && query.trim().length === 0)) {
+    if (!query || typeof query !== "string" || query.trim().length === 0) {
       return ToolResult.err("Error: query is required and cannot be empty");
     }
 
@@ -338,16 +382,31 @@ export class WebSearchTool {
       let result: string;
       switch (provider) {
         case "duckduckgo":
-          result = await searchDuckDuckGo(query as string, this.maxResults, this.timeout);
+          result = await searchDuckDuckGo(query, this.maxResults, this.timeout);
           break;
         case "brave":
-          result = await searchBrave(query as string, this.maxResults, this.timeout, this.braveApiKey);
+          result = await searchBrave(
+            query,
+            this.maxResults,
+            this.timeout,
+            this.braveApiKey,
+          );
           break;
         case "tavily":
-          result = await searchTavily(query as string, this.maxResults, this.timeout, this.tavilyApiKey);
+          result = await searchTavily(
+            query,
+            this.maxResults,
+            this.timeout,
+            this.tavilyApiKey,
+          );
           break;
         case "searxng":
-          result = await searchSearXNG(query as string, this.maxResults, this.timeout, this.searxngInstanceUrl);
+          result = await searchSearXNG(
+            query,
+            this.maxResults,
+            this.timeout,
+            this.searxngInstanceUrl,
+          );
           break;
         default:
           return ToolResult.err(`Unknown search provider: ${provider}`);
@@ -361,14 +420,17 @@ export class WebSearchTool {
       });
     } catch (err) {
       const msg = (err as Error).message;
-      if (msg.includes("timeout") || msg.includes("timed out") || msg.includes("AbortError")) {
+      if (
+        msg.includes("timeout") ||
+        msg.includes("timed out") ||
+        msg.includes("AbortError")
+      ) {
         throw new TransientError(`Web search timed out: ${msg}`);
       }
       return ToolResult.err(`Web search failed: ${msg}`);
     }
   }
 }
-
 
 /**
  * Create the web-search extension.

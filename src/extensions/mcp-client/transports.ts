@@ -7,6 +7,7 @@ import { logger } from "../../core/logger.ts";
 import { formatError } from "../../core/error.ts";
 import { McpError } from "./client.ts";
 import { jsonRpcNotification } from "./types.ts";
+import { hotdogFetch } from "@utils/fetch.ts";
 
 /**
  * Callback invoked when a transport receives a message line.
@@ -274,7 +275,7 @@ export class HttpTransport implements McpTransport {
       ...this.#headers,
     };
 
-    const response = await fetch(this.#url, {
+    const response = await hotdogFetch(this.#url, {
       method: "POST",
       headers,
       body: serialized,

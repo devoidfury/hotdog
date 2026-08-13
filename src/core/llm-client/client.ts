@@ -9,6 +9,7 @@ import { MarkerMangler } from "../marker-mangler.ts";
 import { formatError, LlmError } from "../error.ts";
 import { logger } from "../logger.ts";
 import { ToolDef } from "../extensions/tool-registry.ts";
+import { hotdogFetch } from "@utils/fetch.ts";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const PKG_PATH = join(__dirname, "../../../package.json");
@@ -113,7 +114,7 @@ export class LlmClient {
   async ping(): Promise<void> {
     try {
       const url = this.baseUrl ?? "";
-      const resp = await fetch(url + "/health");
+      const resp = await hotdogFetch(url + "/health");
       if (resp.ok) return;
       throw LlmError.Api(`HTTP ${resp.status}`);
     } catch (e: unknown) {
@@ -299,7 +300,7 @@ export class LlmClient {
     if (effectiveSessionId) headers["x-session-affinity"] = effectiveSessionId;
     headers["Connection"] = "keep-alive";
 
-    const resp = await fetch(`${url}/v1/chat/completions`, {
+    const resp = await hotdogFetch(`${url}/v1/chat/completions`, {
       method: "POST",
       headers,
       body: JSON.stringify(request),

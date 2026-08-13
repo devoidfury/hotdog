@@ -335,9 +335,7 @@ export function truncateOutput(text: string, maxLines: number): string {
   return `${truncated}\n--- [truncated, ${lines.length - maxLines} more lines] ---`;
 }
 
-/**
- * Parse and validate tool input from the LLM.
- */
+/** Parse tool input from the LLM. */
 export function parseToolInput(
   input: string | Record<string, unknown> | null,
 ): Record<string, unknown> | null {

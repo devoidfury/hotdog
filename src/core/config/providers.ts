@@ -2,7 +2,6 @@
  * Provider and model registry.
  */
 
-import fs from "node:fs";
 import fsPromises from "node:fs/promises";
 import path from "node:path";
 
@@ -13,6 +12,7 @@ import {
   DEFAULT_SYSTEM_PROMPT_TEMPLATE,
 } from "./defaults.ts";
 import { logger } from "../logger.ts";
+import { hotdogFetch } from "@utils/fetch.ts";
 
 export interface ModelConfig {
   name: string;
@@ -151,7 +151,7 @@ async function fetchRemoteModels(
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 5000);
     try {
-      const response = await fetch(url, { headers, signal: controller.signal });
+      const response = await hotdogFetch(url, { headers, signal: controller.signal });
       if (!response.ok) {
         throw new Error(`HTTP error! status: ${response.status}`);
       }

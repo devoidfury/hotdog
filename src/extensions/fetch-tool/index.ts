@@ -18,12 +18,7 @@ import {
   ToolContext,
 } from "../../core/extensions/types.ts";
 
-import pkg from "../../../package.json" with { type: "json" };
-
-const USER_AGENT = `hotdog/v${pkg.version} NOT Mozilla/5.0 (probably running linux; probably x64) AND NOT AppleWebKit/666.42 (NOT KHTML, unlike Gecko) NOR Chrome/127.0.0.1 ALSO NOT Safari/420.69`;
-
-const VALID_METHODS = ["GET", "POST", "PUT", "DELETE", "PATCH", "HEAD"] as const;
-const METHODS_WITH_BODY = ["POST", "PUT", "PATCH"] as const;
+import { hotdogFetch, VALID_METHODS, METHODS_WITH_BODY } from "@utils/fetch.ts";
 
 interface FetchArgs {
   url: string;
@@ -73,93 +68,59 @@ export class FetchTool {
     return defaultCallDisplay(input, (args: Record<string, unknown>) => {
       const url = args.url as string;
       const urlDisplay = url.length > 60 ? url.slice(0, 60) + "..." : url;
-      return `[${args.method as string}] ${urlDisplay}`;
+      return `[${args.method}] ${urlDisplay}`;
     });
   }
 
-  async execute(input: string | Record<string, unknown> | null, _ctx?: ToolContext): Promise<ToolResult> {
+  async execute(
+    input: string | Record<string, unknown> | null,
+    _ctx?: ToolContext,
+  ): Promise<ToolResult> {
     const { args, error } = parseArgs(input);
     if (!args) {
       return ToolResult.err(error);
     }
 
-    const { url, method, headers, body, showOriginal } = args;
+    const { url, method, showOriginal } = args;
 
     try {
-      const resp = await fetch(url, {
-        method,
-        headers: {
-          "Content-Type": "application/json",
-          "User-Agent": USER_AGENT,
-          ...headers,
-        },
-        body: (METHODS_WITH_BODY.includes(method as typeof METHODS_WITH_BODY[number]) && body) || undefined,
-      });
-
-      const respHeaders: Record<string, string> = {};
-      resp.headers.forEach((value, key) => {
-        respHeaders[key] = value;
-      });
-
+      const resp = await hotdogFetch(url, args);
       const contentType = resp.headers.get("content-type") || "";
-      let respBody: unknown;
-      if (contentType.includes("application/json")) {
-        respBody = await resp.json();
+      const isJson = contentType.includes("application/json");
+
+      let respBody: string;
+      if (isJson) {
+        const rawBody = await resp.json();
+        respBody = JSON.stringify(rawBody);
       } else {
         respBody = await resp.text();
       }
 
-      const bodyLength =
-        typeof respBody === "string"
-          ? respBody.length
-          : JSON.stringify(respBody).length;
+      let bodyLength = respBody.length;
       const reason = resp.statusText || "Unknown";
-      const truncated = bodyLength > 8000;
 
-      // If showOriginal is true, return raw body without conversion
-      if (showOriginal) {
-        const bodyStr =
-          typeof respBody === "string" ? respBody : JSON.stringify(respBody);
-        return ToolResult.ok(bodyStr).withEntries({
-          url,
-          method,
-          status: String(resp.status),
-          status_text: reason,
-          content_type: contentType,
-          body_length: String(bodyLength),
-          ...(truncated ? { truncated: "true" } : {}),
-        });
-      }
+      // TODO: move this constant to setting
+      const MAX_BODY_LEN = 8000;
+      let truncate = bodyLength > MAX_BODY_LEN;
 
       // When showOriginal is not true, convert HTML to GFM using our
       // built-in HTMLRewriter-based converter.
-      let bodyToReturn = respBody;
-      if (
-        typeof respBody === "string" &&
-        (contentType.includes("text/html") ||
-          contentType.includes("application/xhtml+xml"))
-      ) {
-        bodyToReturn = htmlToMarkdown(respBody);
+      if (!showOriginal && !isJson && contentType.includes("html")) {
+        respBody = htmlToMarkdown(respBody);
+        truncate = respBody.length > MAX_BODY_LEN;
+        bodyLength = respBody.length;
       }
 
-      const finalBodyLength =
-        typeof bodyToReturn === "string"
-          ? bodyToReturn.length
-          : JSON.stringify(bodyToReturn).length;
-      const finalTruncated = finalBodyLength > 8000;
-
-      const bodyStr =
-        typeof bodyToReturn === "string"
-          ? bodyToReturn
-          : JSON.stringify(bodyToReturn);
-      return ToolResult.ok(bodyStr).withEntries({
+      return ToolResult.ok(
+        truncate ? respBody.slice(0, MAX_BODY_LEN) : respBody,
+      ).withEntries({
         url,
         method,
         status: String(resp.status),
         status_text: reason,
         content_type: contentType,
-        body_length: String(finalBodyLength),
-        ...(finalTruncated ? { truncated: "true" } : {}),
+        body_length: String(bodyLength),
+        ...(truncate ? { truncated: "true" } : {}),
       });
     } catch (e: unknown) {
       const msg = (e as Error).message || String(e);
@@ -174,10 +135,10 @@ export class FetchTool {
   }
 }
 
-/**
- * Parse and validate fetch tool arguments.
- */
-function parseArgs(input: string | Record<string, unknown> | null): ParseResult {
+/** Parse and validate fetch tool arguments. */
+function parseArgs(
+  input: string | Record<string, unknown> | null,
+): ParseResult {
   if (!input || (typeof input === "string" && input.trim().length === 0)) {
     return { args: null, error: "Missing required argument: url" };
   }
@@ -187,14 +148,14 @@ function parseArgs(input: string | Record<string, unknown> | null): ParseResult 
     return { args: null, error: "Error parsing arguments" };
   }
 
-  const url = json.url as string | undefined;
+  const url = json.url;
   if (!url || typeof url !== "string") {
     return { args: null, error: "Missing required argument: url" };
   }
 
   // Validate method
   const method = ((json.method as string) || "GET").toUpperCase();
-  if (!VALID_METHODS.includes(method as typeof VALID_METHODS[number])) {
+  if (!VALID_METHODS.includes(method)) {
     return {
       args: null,
       error: `Invalid HTTP method: '${method}'. Supported: ${VALID_METHODS.join(", ")}`,
@@ -202,18 +163,16 @@ function parseArgs(input: string | Record<string, unknown> | null): ParseResult 
   }
 
   const headers =
-    json.headers && typeof json.headers === "object" ? (json.headers as Record<string, string>) : {};
+    json.headers && typeof json.headers === "object"
+      ? (json.headers as Record<string, string>)
+      : {};
   const body = typeof json.body === "string" ? json.body : null;
   const showOriginal = json.showOriginal === true;
 
   return { args: { url, method, headers, body, showOriginal }, error: null };
 }
 
-// ── Extension Entry Point ───────────────────────────────────────────────────
-
-/**
- * Create the fetch-tool extension.
- */
+/** Extension Entry Point. Create the fetch-tool extension. */
 export function create(_core: CoreContext): ExtensionInstance {
   const fetchTool = new FetchTool();
 

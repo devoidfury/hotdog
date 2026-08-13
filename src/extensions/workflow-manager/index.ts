@@ -18,6 +18,7 @@ import {
   SubmitResultTool,
   TransitionToTool,
 } from "./tools.ts";
+import { WorkflowDefinition } from "./types.ts";
 
 export function create(core: CoreContext): ExtensionInstance {
   const configDir = core.resolved!.configDir!;
@@ -36,14 +37,41 @@ export function create(core: CoreContext): ExtensionInstance {
     loadWorkflow: new LoadWorkflowTool(configDir, stateManager, nodeRegistry),
     startWorkflow: new StartWorkflowTool(configDir, stateManager, nodeRegistry),
     submitResult: new SubmitResultTool(configDir, stateManager, nodeRegistry, engine),
-    transitionTo: new TransitionToTool(configDir, stateManager, nodeRegistry),
+    transitionTo: new TransitionToTool(configDir, stateManager, nodeRegistry, engine),
   };
 
   /**
    * Helper to perform the actual agent transition to a new node.
+   *
+   * Resolves the workflow node's declared profile (nodes[nodeId].profile),
+   * loads its profile body, and switches the agent to that profile so the
+   * system prompt actually reflects the new node's instructions.
    */
-  async function transitionToNode(agent: any, nodeId: string, reason: string, blackboard: any) {
-    agent.profileName = nodeId;
+  async function transitionToNode(
+    agent: any,
+    workflow: WorkflowDefinition | null,
+    nodeId: string,
+    reason: string,
+    blackboard: any,
+  ) {
+    // Resolve the node's profile. Falls back to using the node ID directly
+    // when no workflow/profile mapping is available (e.g., ad-hoc transitions).
+    let profileName = nodeId;
+    let profileBody: string | undefined;
+
+    const node = workflow?.nodes?.[nodeId];
+    if (node?.profile) {
+      const profile = core.resolved?.profileManager?.getProfile?.(node.profile);
+      if (profile) {
+        profileName = node.profile;
+        profileBody = profile.body;
+      }
+    }
+
+    agent.profileName = profileName;
+    if (profileBody !== undefined) {
+      agent.profileBody = profileBody;
+    }
     await agent.clearContext();
     await agent.ensureSystemPrompt();
 
@@ -53,7 +81,7 @@ export function create(core: CoreContext): ExtensionInstance {
       `### Current Blackboard State\n` +
       `\`\`\`json\n${JSON.stringify(blackboard, null, 2)}\n\`\`\`\n\n` +
       `Please proceed with your task based on the current state.`;
-    
+
     agent.enqueue(prompt);
   }
 
@@ -92,7 +120,7 @@ export function create(core: CoreContext): ExtensionInstance {
     const agent = session.getAgent();
     if (!agent) return;
 
-    await transitionToNode(agent, workflow.start_node, "Workflow started", state.blackboard);
+    await transitionToNode(agent, workflow, workflow.start_node, "Workflow started", state.blackboard);
     console.log(`Started workflow: ${workflowId} at node ${workflow.start_node}`);
   }
 
@@ -120,8 +148,17 @@ export function create(core: CoreContext): ExtensionInstance {
           const args = parseToolInput(transitionTool.input) as Record<string, any>;
           if (args?.nodeId) {
             const state = await stateManager.load();
-            const blackboard = state?.blackboard || {};
-            await transitionToNode(agent, args.nodeId, args.reason || "Manual transition", blackboard);
+            // The tool already validated and persisted the new cursor.
+            const workflow = state?.workflowId
+              ? await engine.loadWorkflow(state.workflowId)
+              : null;
+            await transitionToNode(
+              agent,
+              workflow,
+              state?.cursor ?? args.nodeId,
+              args.reason || "Manual transition",
+              state?.blackboard || {},
+            );
             return;
           }
         }
@@ -137,6 +174,7 @@ export function create(core: CoreContext): ExtensionInstance {
 
           await transitionToNode(
             agent,
+            workflow,
             workflow.start_node,
             `Workflow '${workflow.id}' started`,
             state.blackboard,
@@ -153,8 +191,10 @@ export function create(core: CoreContext): ExtensionInstance {
 
           const prevCursor = (state as any).__prevCursor;
           if (prevCursor !== undefined && state.cursor !== prevCursor) {
+            const workflow = await engine.loadWorkflow(state.workflowId);
             await transitionToNode(
               agent,
+              workflow,
               state.cursor,
               "Deterministic transition",
               state.blackboard,

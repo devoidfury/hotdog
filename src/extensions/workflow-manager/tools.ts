@@ -306,7 +306,44 @@ export class TransitionToTool extends BaseWorkflowTool {
       return ToolResult.err("transition_to requires a 'nodeId' string");
     }
 
-    return ToolResult.ok(`Transition to ${args.nodeId} requested. The agent will restart with the new node profile.`);
+    const state = await this.stateManager.load();
+    if (!state) {
+      return ToolResult.err("No active workflow state found. Start a workflow first.");
+    }
+
+    if (!this.engine) {
+      return ToolResult.err("Workflow engine not available");
+    }
+
+    const workflow = await this.engine.loadWorkflow(state.workflowId);
+    if (!workflow) {
+      return ToolResult.err(`Workflow '${state.workflowId}' not found.`);
+    }
+
+    if (!(args.nodeId in workflow.nodes)) {
+      return ToolResult.err(
+        `Invalid node '${args.nodeId}' for workflow '${state.workflowId}'.`,
+      );
+    }
+
+    const newState: WorkflowState = {
+      ...state,
+      cursor: args.nodeId,
+      history: [
+        ...state.history,
+        {
+          timestamp: new Date().toISOString(),
+          from: state.cursor,
+          to: args.nodeId,
+          reason: args.reason || "Manual transition",
+        },
+      ],
+    };
+    await this.stateManager.save(newState);
+
+    return ToolResult.ok(
+      `Transition to ${args.nodeId} requested. The agent will restart with the new node profile.`,
+    );
   }
 
   override callDisplay(input: string | Record<string, unknown> | null): string {

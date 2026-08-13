@@ -2,7 +2,7 @@
   "name": "workflow-manager",
   "description": "Orchestrates multi-agent workflows using directed graphs of nodes.",
   "autoload": true,
-  "cliFlags": [
+  "cli:flags": [
     {
       "long": "--workflow",
       "type": "string",

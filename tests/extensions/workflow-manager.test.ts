@@ -148,14 +148,18 @@ describe("WorkflowManager Integration Tests", () => {
       enqueue: mock(),
     };
 
+    const profileDefs = {
+      node1: { name: "node1", description: "N1", node: "type1", body: "profile body 1" },
+      node2: { name: "node2", description: "N2", node: "type2", body: "profile body 2" },
+      researcher: { name: "researcher", description: "Research node", node: "research", body: "researcher body" },
+    };
+
     mockCore = {
       resolved: {
         configDir: tempDir,
         profileManager: {
-          getAllProfiles: () => ({
-            node1: { name: "node1", description: "N1", node: "type1" },
-            node2: { name: "node2", description: "N2", node: "type2" },
-          }),
+          getAllProfiles: () => profileDefs,
+          getProfile: (name: string) => profileDefs[name] || null,
         },
       },
     };
@@ -183,6 +187,113 @@ describe("WorkflowManager Integration Tests", () => {
     expect(mockAgent.clearContext).toHaveBeenCalled();
     expect(mockAgent.ensureSystemPrompt).toHaveBeenCalled();
     expect(mockAgent.enqueue).toHaveBeenCalledWith(expect.stringContaining("transitioned to node: **node2**"));
+  });
+
+  it("should persist the cursor and reject invalid nodes via TransitionToTool", async () => {
+    // Setup workflow + state
+    const wf: WorkflowDefinition = {
+      id: "test-wf",
+      start_node: "node1",
+      nodes: {
+        node1: { profile: "p1", label: "L1" },
+        node2: { profile: "p2", label: "L2" },
+      },
+      edges: [],
+      fallback: "agentic",
+    };
+    const wfDir = path.join(tempDir, ".hotdog/workflows");
+    await fsPromises.mkdir(wfDir, { recursive: true });
+    await fsPromises.writeFile(path.join(wfDir, "test-wf.json"), JSON.stringify(wf));
+
+    const state: WorkflowState = {
+      workflowId: "test-wf",
+      cursor: "node1",
+      blackboard: {},
+      history: [],
+    };
+    await extension.stateManager.save(state);
+
+    // Invalid node is rejected before any state mutation
+    const invalidResult = await extension.tools.transitionTo.execute(
+      JSON.stringify({ nodeId: "nope" }),
+      { agent: mockAgent } as any,
+    );
+    expect(invalidResult.success).toBe(false);
+    const afterInvalid = await extension.stateManager.load();
+    expect(afterInvalid?.cursor).toBe("node1");
+
+    // Valid node persists the new cursor and records history
+    const result = await extension.tools.transitionTo.execute(
+      JSON.stringify({ nodeId: "node2", reason: "Moving on" }),
+      { agent: mockAgent } as any,
+    );
+    expect(result.success).toBe(true);
+    const loaded = await extension.stateManager.load();
+    expect(loaded?.cursor).toBe("node2");
+    expect(loaded?.history.at(-1)?.to).toBe("node2");
+    expect(loaded?.history.at(-1)?.from).toBe("node1");
+
+    // TURN_END then moves the agent using the persisted cursor
+    const toolResults = [
+      {
+        toolName: "transition_to",
+        input: JSON.stringify({ nodeId: "node2", reason: "Moving on" }),
+        result: "Success",
+      },
+    ];
+    await extension.hooks[HOOKS.TURN_END]({
+      stopped: true,
+      cancelled: false,
+      agent: mockAgent,
+      toolResults,
+    });
+    expect(mockAgent.profileName).toBe("node2");
+    const finalState = await extension.stateManager.load();
+    expect(finalState?.cursor).toBe("node2");
+  });
+
+  it("should load the node's declared profile name and body on transition", async () => {
+    // Setup workflow where node id differs from profile name
+    const wf: WorkflowDefinition = {
+      id: "research-wf",
+      start_node: "research-node",
+      nodes: {
+        "research-node": { profile: "researcher", label: "Research" },
+        "done-node": { profile: "node2", label: "Done" },
+      },
+      edges: [],
+      fallback: "agentic",
+    };
+    const wfDir = path.join(tempDir, ".hotdog/workflows");
+    await fsPromises.mkdir(wfDir, { recursive: true });
+    await fsPromises.writeFile(path.join(wfDir, "research-wf.json"), JSON.stringify(wf));
+
+    const state: WorkflowState = {
+      workflowId: "research-wf",
+      cursor: "research-node",
+      blackboard: {},
+      history: [],
+    };
+    await extension.stateManager.save(state);
+
+    const toolResults = [
+      {
+        toolName: "start_workflow",
+        input: JSON.stringify({ id: "research-wf" }),
+        result: "Success",
+      },
+    ];
+    await extension.hooks[HOOKS.TURN_END]({
+      stopped: true,
+      cancelled: false,
+      agent: mockAgent,
+      toolResults,
+    });
+
+    // Node id "research-node" maps to profile "researcher" with its body.
+    expect(mockAgent.profileName).toBe("researcher");
+    expect(mockAgent.profileBody).toBe("researcher body");
+    expect(mockAgent.enqueue).toHaveBeenCalledWith(expect.stringContaining("node: **research-node**"));
   });
 
   it("should transition deterministically via SubmitResultTool in TURN_END", async () => {
@@ -340,5 +451,23 @@ describe("WorkflowManager Integration Tests", () => {
     expect(mockAgent.enqueue).toHaveBeenCalledWith(
       expect.stringContaining("Workflow 'test-wf' started"),
     );
+  });
+});
+
+describe("WorkflowManager Extension Metadata", () => {
+  it("declares the --workflow CLI flag under 'cli:flags' (loader reads this key)", async () => {
+    const raw = JSON.parse(
+      await fsPromises.readFile(
+        path.join(import.meta.dirname, "../../src/extensions/workflow-manager/extension.json"),
+        "utf-8",
+      ),
+    );
+    expect(raw["cli:flags"]).toBeDefined();
+    expect(Array.isArray(raw["cli:flags"])).toBe(true);
+    expect(raw["cli:flags"]).toEqual(
+      expect.arrayContaining([expect.objectContaining({ long: "--workflow" })]),
+    );
+    // The loader only reads meta["cli:flags"], so a camelCase "cliFlags" key is inert.
+    expect(raw.cliFlags).toBeUndefined();
   });
 });

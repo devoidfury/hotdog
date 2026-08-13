@@ -84,4 +84,57 @@ export class WorkflowEngine {
   async updateState(state: WorkflowState): Promise<void> {
     await this.stateManager.save(state);
   }
+
+  /**
+   * Perform a submit_result transition: load state, determine next node,
+   * update state, and return the transition result.
+   */
+  async performSubmit(
+    state: WorkflowState,
+    submittedData: Record<string, any>,
+  ): Promise<{ nextNodeId: string | null; isAgentic: boolean }> {
+    const workflow = await this.loadWorkflow(state.workflowId);
+    if (!workflow) {
+      return { nextNodeId: null, isAgentic: false };
+    }
+
+    const { nextNodeId, isAgentic } = await this.determineNextNode(state, workflow, submittedData);
+
+    if (nextNodeId) {
+      const newState: WorkflowState = {
+        ...state,
+        cursor: nextNodeId,
+        blackboard: { ...state.blackboard, ...submittedData },
+        history: [...state.history, {
+          timestamp: new Date().toISOString(),
+          from: state.cursor,
+          to: nextNodeId,
+          reason: "Deterministic transition",
+          data: submittedData,
+        }],
+      };
+      await this.stateManager.save(newState);
+      return { nextNodeId, isAgentic: false };
+    }
+
+    if (isAgentic) {
+      const newState: WorkflowState = {
+        ...state,
+        blackboard: { ...state.blackboard, ...submittedData },
+      };
+      await this.stateManager.save(newState);
+      return { nextNodeId: null, isAgentic: true };
+    }
+
+    // No transition and no agentic fallback — still save blackboard merge
+    if (Object.keys(submittedData).length > 0) {
+      const newState: WorkflowState = {
+        ...state,
+        blackboard: { ...state.blackboard, ...submittedData },
+      };
+      await this.stateManager.save(newState);
+    }
+
+    return { nextNodeId: null, isAgentic: false };
+  }
 }

@@ -22,6 +22,7 @@ abstract class BaseWorkflowTool implements Tool {
     protected configDir: string,
     protected stateManager: WorkflowStateManager,
     protected nodeRegistry: WorkflowNodeRegistry,
+    protected engine?: import("./engine.ts").WorkflowEngine,
   ) {}
 
   abstract toToolDef(): any;
@@ -246,7 +247,34 @@ export class SubmitResultTool extends BaseWorkflowTool {
       return ToolResult.err("submit_result requires a 'data' object");
     }
 
-    return ToolResult.ok("Result submitted. The workflow manager will now determine the next step.");
+    const state = await this.stateManager.load();
+    if (!state) {
+      return ToolResult.err("No active workflow state found. Start a workflow first.");
+    }
+
+    if (!this.engine) {
+      return ToolResult.err("Workflow engine not available");
+    }
+
+    // Snapshot the current cursor so TURN_END can detect if a transition occurred.
+    const prevCursor = state.cursor;
+    const stateWithCursor = { ...state, __prevCursor: prevCursor } as any;
+
+    const result = await this.engine.performSubmit(stateWithCursor, args.data as Record<string, any>);
+
+    if (result.nextNodeId) {
+      return ToolResult.ok(
+        `Result submitted. Transitioned to node: ${result.nextNodeId}`,
+      );
+    }
+    if (result.isAgentic) {
+      return ToolResult.ok(
+        "Result submitted. Remaining in current node (agentic mode).",
+      );
+    }
+    return ToolResult.ok(
+      "Result submitted. No transition defined for this outcome.",
+    );
   }
 
   override callDisplay(input: string | Record<string, unknown> | null): string {

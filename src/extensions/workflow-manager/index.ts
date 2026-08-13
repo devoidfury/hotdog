@@ -35,7 +35,7 @@ export function create(core: CoreContext): ExtensionInstance {
     saveWorkflow: new SaveWorkflowTool(configDir, stateManager, nodeRegistry),
     loadWorkflow: new LoadWorkflowTool(configDir, stateManager, nodeRegistry),
     startWorkflow: new StartWorkflowTool(configDir, stateManager, nodeRegistry),
-    submitResult: new SubmitResultTool(configDir, stateManager, nodeRegistry),
+    submitResult: new SubmitResultTool(configDir, stateManager, nodeRegistry, engine),
     transitionTo: new TransitionToTool(configDir, stateManager, nodeRegistry),
   };
 
@@ -144,46 +144,26 @@ export function create(core: CoreContext): ExtensionInstance {
           return;
         }
 
-        // 3. Check for result submission
+        // 3. Check for result submission — the tool already performed state management,
+        //    so we just check if the cursor changed and trigger the agent transition.
         const submitTool = toolResults.find(tr => tr.toolName === SubmitResultTool.TOOL_NAME);
         if (submitTool) {
-          const args = parseToolInput(submitTool.input) as Record<string, any>;
-          const data = args?.data;
-          
           const state = await stateManager.load();
           if (!state) return;
 
-          const workflow = await engine.loadWorkflow(state.workflowId);
-          if (!workflow) return;
-
-          const { nextNodeId, isAgentic } = await engine.determineNextNode(state, workflow, data);
-
-          if (nextNodeId) {
-            const newState = {
-              ...state,
-              cursor: nextNodeId,
-              blackboard: { ...state.blackboard, ...data },
-              history: [...state.history, {
-                timestamp: new Date().toISOString(),
-                from: state.cursor,
-                to: nextNodeId,
-                reason: "Deterministic transition",
-                data,
-              }],
-            };
-            await stateManager.save(newState);
-            await transitionToNode(agent, nextNodeId, "Deterministic transition", newState.blackboard);
-          } else if (isAgentic) {
-            // Update blackboard even if no transition occurs
-            const newState = {
-              ...state,
-              blackboard: { ...state.blackboard, ...data },
-            };
-            await stateManager.save(newState);
+          const prevCursor = (state as any).__prevCursor;
+          if (prevCursor !== undefined && state.cursor !== prevCursor) {
+            await transitionToNode(
+              agent,
+              state.cursor,
+              "Deterministic transition",
+              state.blackboard,
+            );
           }
         }
       },
     },
+    tools,
     // Expose as a service so other extensions can trigger workflow starts
     services: {
       workflowManager: {

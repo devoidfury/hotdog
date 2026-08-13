@@ -212,11 +212,17 @@ describe("WorkflowManager Integration Tests", () => {
     };
     await extension.stateManager.save(state);
 
+    // Simulate agent calling submit_result tool (tool does state management)
+    await extension.tools.submitResult.execute(
+      JSON.stringify({ data: { res: "ok" } }),
+      { agent: mockAgent } as any,
+    );
+
     const toolResults = [
       {
         toolName: "submit_result",
         input: JSON.stringify({ data: { res: "ok" } }),
-        result: "Success",
+        result: "Result submitted. Transitioned to node: node2",
       },
     ];
 
@@ -255,11 +261,17 @@ describe("WorkflowManager Integration Tests", () => {
     };
     await extension.stateManager.save(state);
 
+    // Simulate agent calling submit_result tool (tool does state management)
+    await extension.tools.submitResult.execute(
+      JSON.stringify({ data: { res: "something" } }),
+      { agent: mockAgent } as any,
+    );
+
     const toolResults = [
       {
         toolName: "submit_result",
         input: JSON.stringify({ data: { res: "something" } }),
-        result: "Success",
+        result: "Result submitted. Remaining in current node (agentic mode).",
       },
     ];
 

@@ -3,10 +3,24 @@ import path from "node:path";
 import { WorkflowDefinition, WorkflowState } from "./types.ts";
 import { WorkflowStateManager } from "./state.ts";
 
+const SAFE_ID_RE = /^[a-zA-Z0-9_-]+$/;
+
+/**
+ * Validate that a workflow ID is safe to use in filesystem paths.
+ * Prevents path traversal via IDs like "../../../etc/passwd".
+ */
+export function validateWorkflowId(id: string): boolean {
+  return SAFE_ID_RE.test(id);
+}
+
 export class WorkflowEngine {
   constructor(private stateManager: WorkflowStateManager, private configDir: string) {}
 
   async loadWorkflow(workflowId: string): Promise<WorkflowDefinition | null> {
+    if (!validateWorkflowId(workflowId)) {
+      console.warn(`[workflow] rejected unsafe workflow ID: ${workflowId}`);
+      return null;
+    }
     try {
       const filePath = path.join(this.configDir, ".hotdog/workflows", `${workflowId}.json`);
       const content = await fsPromises.readFile(filePath, "utf-8");

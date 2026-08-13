@@ -20,7 +20,7 @@ import {
 } from "./tools.ts";
 
 export function create(core: CoreContext): ExtensionInstance {
-  const configDir = core.resolved?.configDir || process.cwd();
+  const configDir = core.resolved!.configDir!;
   const stateManager = new WorkflowStateManager(configDir);
   const nodeRegistry = new WorkflowNodeRegistry();
   const engine = new WorkflowEngine(stateManager, configDir);
@@ -73,6 +73,11 @@ export function create(core: CoreContext): ExtensionInstance {
     const workflow = await engine.loadWorkflow(workflowId);
     if (!workflow) {
       console.error(`Workflow '${workflowId}' not found.`);
+      return;
+    }
+
+    if (!(workflow.start_node in workflow.nodes)) {
+      console.error(`Workflow '${workflowId}' has invalid start_node '${workflow.start_node}'.`);
       return;
     }
 

@@ -12,6 +12,7 @@ import path from "node:path";
 import { WorkflowDefinition, WorkflowState } from "./types.ts";
 import { WorkflowStateManager } from "./state.ts";
 import { WorkflowNodeRegistry } from "./registry.ts";
+import { validateWorkflowId } from "./engine.ts";
 import type { Tool } from "../../core/extensions/tool-registry.ts";
 
 abstract class BaseWorkflowTool implements Tool {
@@ -90,6 +91,10 @@ export class SaveWorkflowTool extends BaseWorkflowTool {
       return ToolResult.err("Invalid workflow definition. Missing required fields (id, start_node, nodes, edges).");
     }
 
+    if (!validateWorkflowId(wf.id)) {
+      return ToolResult.err(`Invalid workflow ID '${wf.id}'. Only alphanumeric, hyphens, and underscores are allowed.`);
+    }
+
     try {
       const workflowsDir = path.join(this.configDir, ".hotdog/workflows");
       await fsPromises.mkdir(workflowsDir, { recursive: true });
@@ -128,6 +133,10 @@ export class LoadWorkflowTool extends BaseWorkflowTool {
     const args = parseToolInput(input);
     if (!args || !args.id || typeof args.id !== "string") {
       return ToolResult.err("load_workflow requires an 'id' string");
+    }
+
+    if (!validateWorkflowId(args.id)) {
+      return ToolResult.err(`Invalid workflow ID '${args.id}'. Only alphanumeric, hyphens, and underscores are allowed.`);
     }
 
     try {
@@ -173,10 +182,20 @@ export class StartWorkflowTool extends BaseWorkflowTool {
       return ToolResult.err("start_workflow requires an 'id' string");
     }
 
+    if (!validateWorkflowId(args.id)) {
+      return ToolResult.err(`Invalid workflow ID '${args.id}'. Only alphanumeric, hyphens, and underscores are allowed.`);
+    }
+
     try {
       const filePath = path.join(this.configDir, ".hotdog/workflows", `${args.id}.json`);
       const content = await fsPromises.readFile(filePath, "utf-8");
       const wf = JSON.parse(content) as WorkflowDefinition;
+
+      if (!(wf.start_node in wf.nodes)) {
+        return ToolResult.err(
+          `Workflow '${wf.id}' has invalid start_node '${wf.start_node}'.`,
+        );
+      }
 
       const state: WorkflowState = {
         workflowId: wf.id,

@@ -659,6 +659,66 @@ test("deleteSessionLog returns false for non-existent session", async () => {
   expect(deleted).toBe(false);
 });
 
+// ── session id validation (path traversal) ─────────────────────────────────
+
+test("sessionPath rejects traversal and malformed session ids", async () => {
+  const { sessionPath, sessionsDir } = await import("../../src/core/session/session-log.ts");
+
+  // Valid UUID stays inside the sessions dir
+  const uuid = crypto.randomUUID();
+  const path = sessionPath(uuid);
+  expect(path.startsWith(sessionsDir() + "/")).toBe(true);
+  expect(path.endsWith(`${uuid}.jsonl`)).toBe(true);
+
+  // Invalid ids throw
+  for (const badId of ["../../x", "..", "../a", "a/b", "a\\b", "a b", "", ".hidden", "-dash-first"]) {
+    expect(() => sessionPath(badId)).toThrow();
+  }
+});
+
+test("readSessionEntries returns [] for traversal ids", async () => {
+  const entries = await readSessionEntries("../../x");
+  expect(entries).toEqual([]);
+});
+
+test("deleteSessionLog rejects traversal ids and does not touch files outside sessions dir", async () => {
+  const { deleteSessionLog, sessionsDir } = await import("../../src/core/session/session-log.ts");
+
+  // Create a sentinel file outside the sessions dir that a traversal id would hit
+  const sentinelDir = join(import.meta.dir, "..", ".test-sessions-outside");
+  mkdirSync(sentinelDir, { recursive: true });
+  const sentinel = join(sentinelDir, "x.jsonl");
+  writeFileSync(sentinel, "do not delete");
+
+  try {
+    // "../<outside-dir-name>/x" would escape the sessions dir
+    const outsideDirName = sentinelDir.split("/").pop()!;
+    const deleted = await deleteSessionLog(`../${outsideDirName}/x`);
+    expect(deleted).toBe(false);
+    expect(readFileSync(sentinel, "utf-8")).toBe("do not delete");
+
+    // A direct traversal id must also fail
+    expect(await deleteSessionLog("../../x")).toBe(false);
+  } finally {
+    try { rmSync(sentinel, { force: true }); } catch {}
+    try { rmSync(sentinelDir, { recursive: true, force: true }); } catch {}
+  }
+});
+
+test("readSessionEntries round-trip works for a real UUID", async () => {
+  const uuid = crypto.randomUUID();
+  const log = new SessionLog(uuid);
+  try {
+    await log.writeInput("hello uuid");
+    const entries = await readSessionEntries(uuid);
+    expect(entries.length).toBe(1);
+    expect(entries[0]!.content).toBe("hello uuid");
+    expect(await sessionExists(uuid)).toBe(true);
+  } finally {
+    try { rmSync(join(TEST_SESSIONS_DIR, `${uuid}.jsonl`)); } catch {}
+  }
+});
+
 // ── readAllSessions malformed JSON handling ────────────────────────────────
 
 test("readAllSessions handles malformed JSON lines", async () => {

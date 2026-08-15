@@ -3,9 +3,10 @@
 // Writing (SessionLog class) remains in the extension for observability.
 
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { join, resolve as resolveAbs, sep } from "node:path";
 import { readFile, access, readdir, stat, unlink } from "node:fs/promises";
 import { Message, type ToolCall, type ImageAttachment } from "../context/message.ts";
+import { AgentError, formatError } from "../error.ts";
 import { logger } from "../logger.ts";
 
 // ── Log Source Types ────────────────────────────────────────────────────────
@@ -52,10 +53,30 @@ export function sessionsDir(): string {
 }
 
 /**
+ * Valid session IDs: start with an alphanumeric, then alphanumerics, dots,
+ * underscores, or hyphens. Session IDs are `crypto.randomUUID()` in practice;
+ * this allows for hand-supplied IDs (e.g. CLI --session) while rejecting
+ * path separators and `..` traversal.
+ */
+const SESSION_ID_RE = /^[a-zA-Z0-9][a-zA-Z0-9._-]*$/;
+
+/**
  * Get the session file path for a given session ID.
+ * @throws AgentError if the ID is invalid or resolves outside the sessions dir.
  */
 export function sessionPath(sessionId: string): string {
-  return join(sessionsDir(), `${sessionId}.jsonl`);
+  if (typeof sessionId !== "string" || !SESSION_ID_RE.test(sessionId)) {
+    throw new AgentError(
+      `Invalid session id: ${JSON.stringify(String(sessionId).slice(0, 80))}`,
+    );
+  }
+  const dir = resolveAbs(sessionsDir());
+  const path = resolveAbs(join(sessionsDir(), `${sessionId}.jsonl`));
+  // Defense in depth: the resolved path must stay inside the sessions dir.
+  if (!path.startsWith(dir + sep)) {
+    throw new AgentError(`Session id escapes sessions dir: ${sessionId}`);
+  }
+  return path;
 }
 
 // ── Session Log Readers ─────────────────────────────────────────────────────
@@ -64,7 +85,14 @@ export function sessionPath(sessionId: string): string {
  * Read all entries from a specific session file, replaying from the last reset.
  */
 export async function readSessionEntries(sessionId: string): Promise<LogEntry[]> {
-  const path = sessionPath(sessionId);
+  let path: string;
+  try {
+    path = sessionPath(sessionId);
+  } catch (err) {
+    // Invalid session id (e.g. traversal attempt) — treat as no entries.
+    logger.warn(`[session-log] rejected session id: ${formatError(err)}`);
+    return [];
+  }
   try {
     await access(path);
   } catch {
@@ -227,7 +255,14 @@ export async function listSessionLogs(): Promise<SessionLogInfo[]> {
  * @returns True if the file was deleted, false if it didn't exist
  */
 export async function deleteSessionLog(sessionId: string): Promise<boolean> {
-  const path = sessionPath(sessionId);
+  let path: string;
+  try {
+    path = sessionPath(sessionId);
+  } catch (err) {
+    // Invalid session id (e.g. traversal attempt) — nothing to delete.
+    logger.warn(`[session-log] rejected session id: ${formatError(err)}`);
+    return false;
+  }
   try {
     await unlink(path);
     return true;

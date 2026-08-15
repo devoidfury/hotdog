@@ -1,12 +1,8 @@
 // CliChannel — Channel implementation for the interactive CLI.
-// Renders events with colors to stdout/stderr and reads from readline.
-
 import readline from "node:readline";
 import { Channel, ChannelSessionManager } from "../../core/channel.ts";
-import { OUTPUT_EVENT, OutputEvent } from "../../core/context/output.ts";
-import { CliOutputSink } from "../../utils/cli/cli.ts";
-
-// ── CliChannel ──────────────────────────────────────────────────────────────
+import type { OutputEvent } from "../../core/context/output.ts";
+import type { CliOutputSink } from "../../utils/cli/cli.ts";
 
 export interface CliChannelOptions {
   sessionManager: ChannelSessionManager;
@@ -45,11 +41,7 @@ export class CliChannel extends Channel {
     this.attach(options.sessionId);
   }
 
-  // ── Abstract Protocol Methods ───────────────────────────────────────────
-
-  /**
-   * Format and deliver an event using CliOutputSink.
-   */
+  /** Format and deliver an event using CliOutputSink */
   protected write(event: OutputEvent): void {
     this.#sink.emit(event);
   }
@@ -62,9 +54,7 @@ export class CliChannel extends Channel {
     return this.#rl[Symbol.asyncIterator]();
   }
 
-  /**
-   * Wire session events to this channel via the sink.
-   */
+  /** Wire session events to this channel via the sink. */
   protected _subscribe(sessionId: string): void {
     const unsubscribe = this.sessionManager.onSessionEvents(sessionId, (event: OutputEvent) => {
       this.write(event);
@@ -72,9 +62,7 @@ export class CliChannel extends Channel {
     this.#unsubscribers.set(sessionId, unsubscribe);
   }
 
-  /**
-   * Remove the wire from a session.
-   */
+  /** Remove the wire from a session. */
   protected _unsubscribe(sessionId: string): void {
     const unsubscribe = this.#unsubscribers.get(sessionId);
     if (unsubscribe) {
@@ -83,15 +71,11 @@ export class CliChannel extends Channel {
     }
   }
 
-  /**
-   * Release readline resources on close.
-   */
+  /** Release readline resources on close. */
   protected _cleanup(): void {
     // readline.close() is idempotent — safe to call multiple times
     this.#rl.close();
   }
-
-  // ── Override command handlers ────────────────────────────────────────────
 
   /** Handle /quit — close readline and call onQuit callback. */
   protected override async handleQuit(): Promise<void> {
@@ -101,18 +85,12 @@ export class CliChannel extends Channel {
     }
   }
 
-  // ── Public API ────────────────────────────────────────────────────────────
-
-  /**
-   * Get the readline interface.
-   */
+  /** Get the readline interface. */
   get readline(): readline.Interface {
     return this.#rl;
   }
 
-  /**
-   * Get the output sink.
-   */
+  /** Get the output sink. */
   get sink(): CliOutputSink {
     return this.#sink;
   }

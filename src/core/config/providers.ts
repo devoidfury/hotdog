@@ -1,16 +1,8 @@
-/**
- * Provider and model registry.
- */
-
+/** Provider and model registry. */
 import fsPromises from "node:fs/promises";
 import path from "node:path";
-
 import { cwd } from "node:process";
-
-import {
-  DEFAULT_SYSTEM_PROMPT_FILENAME,
-  DEFAULT_SYSTEM_PROMPT_TEMPLATE,
-} from "./defaults.ts";
+import { DEFAULT_SYSTEM_PROMPT_FILENAME, DEFAULT_SYSTEM_PROMPT_TEMPLATE } from "./defaults.ts";
 import { logger } from "../logger.ts";
 import { hotdogFetch } from "@utils/fetch.ts";
 
@@ -98,9 +90,7 @@ function parseModelsResponse(json: LlamaSwapModelsResponse): ProviderModelEntry[
   const entries: ProviderModelEntry[] = [];
 
   for (const m of json.data || []) {
-    const hasVision =
-      m.capabilities?.vision === true ||
-      m.architecture?.input_modalities?.includes("image");
+    const hasVision = m.capabilities?.vision === true || m.architecture?.input_modalities?.includes("image");
 
     const baseEntry: ProviderModelEntry = {
       name: m.id,
@@ -155,7 +145,7 @@ async function fetchRemoteModels(
       if (!response.ok) {
         throw new Error(`HTTP error! status: ${response.status}`);
       }
-      return parseModelsResponse(await response.json() as LlamaSwapModelsResponse);
+      return parseModelsResponse((await response.json()) as LlamaSwapModelsResponse);
     } finally {
       clearTimeout(timeoutId);
     }
@@ -206,10 +196,7 @@ export async function buildModelRegistry(
         name: modelName,
         temperature: modelEntry.temperature ?? null,
         contextLimit: modelEntry.contextLimit || contextLimit,
-        reasoningEffort:
-          modelEntry.reasoning_effort ||
-          modelEntry.reasoningEffort ||
-          undefined,
+        reasoningEffort: modelEntry.reasoning_effort || modelEntry.reasoningEffort || undefined,
         tags: modelEntry.tags || [],
         capabilities: modelEntry.capabilities || {},
         maxToolDifficulty: modelEntry.maxToolDifficulty,
@@ -249,13 +236,16 @@ export function resolveProvider(
  */
 export function resolveModelConfig(
   modelName: string,
-  modelRegistry: Record<string, {
-    name?: string;
-    temperature?: number | null;
-    contextLimit?: number;
-    reasoningEffort?: string;
-    [key: string]: unknown;
-  }>,
+  modelRegistry: Record<
+    string,
+    {
+      name?: string;
+      temperature?: number | null;
+      contextLimit?: number;
+      reasoningEffort?: string;
+      [key: string]: unknown;
+    }
+  >,
   contextLimit: number,
   reasoningEffort: string | undefined,
 ): ModelConfig {
@@ -273,19 +263,21 @@ export function resolveModelConfig(
       }
     }
   }
-  const fromRegistry: ModelConfig = entry ? {
-    name: entry.name || modelName,
-    temperature: entry.temperature ?? null,
-    contextLimit: entry.contextLimit ?? contextLimit,
-    reasoningEffort: entry.reasoningEffort,
-    tags: (entry.tags as string[]) || [],
-  } : {
-    name: modelName,
-    temperature: null,
-    contextLimit,
-    reasoningEffort: undefined,
-    tags: [],
-  };
+  const fromRegistry: ModelConfig = entry
+    ? {
+        name: entry.name || modelName,
+        temperature: entry.temperature ?? null,
+        contextLimit: entry.contextLimit ?? contextLimit,
+        reasoningEffort: entry.reasoningEffort,
+        tags: (entry.tags as string[]) || [],
+      }
+    : {
+        name: modelName,
+        temperature: null,
+        contextLimit,
+        reasoningEffort: undefined,
+        tags: [],
+      };
 
   // Runtime override via /reasoning command takes priority
   if (reasoningEffort !== undefined) {
@@ -302,16 +294,12 @@ export function resolveModelConfig(
 
 let cachedSystemPromptTemplate: string | null = null;
 
-/**
- * Reset the cached system prompt template (useful for testing).
- */
+/** Reset the cached system prompt template */
 export function resetSystemPromptCache(): void {
   cachedSystemPromptTemplate = null;
 }
 
-/**
- * Initialize (load) the system prompt template from disk.
- */
+/** Initialize the system prompt template from disk. */
 export async function initSystemPromptTemplate(
   templatePath?: string,
   cliConfigDir?: string,
@@ -334,11 +322,7 @@ export async function initSystemPromptTemplate(
           configDir = cwdConfig;
         } catch {
           const envConfigDir = process.env.HOTDOG_CONFIG_DIR;
-          if (envConfigDir) {
-            configDir = path.resolve(envConfigDir);
-          } else {
-            configDir = "./config";
-          }
+          configDir = envConfigDir ? path.resolve(envConfigDir) : "./config";
         }
       }
     }
@@ -346,10 +330,7 @@ export async function initSystemPromptTemplate(
   }
 
   try {
-    cachedSystemPromptTemplate = await fsPromises.readFile(
-      templateFile,
-      "utf-8",
-    );
+    cachedSystemPromptTemplate = await fsPromises.readFile(templateFile, "utf-8");
   } catch {
     cachedSystemPromptTemplate = DEFAULT_SYSTEM_PROMPT_TEMPLATE;
   }

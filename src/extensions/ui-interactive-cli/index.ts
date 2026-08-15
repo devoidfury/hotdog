@@ -1,18 +1,11 @@
 // Interactive CLI Extension - Provides the interactive CLI session with readline loop.
-//
-// This extension implements "slash commands" as the UI syntax for invoking
-// agent commands. The `/` prefix is a UI convention — commands themselves
-// are defined in the core and registered by extensions via COMMANDS_REGISTER.
 
 import readline from "node:readline";
 import { spawn } from "node:child_process";
 import { parseCommand, Command, ACTIONS } from "../../core/commands.ts";
 import { HOOKS } from "../../core/hooks.ts";
 import { CliOutputSink } from "../../utils/cli/cli.ts";
-import {
-  LlmClient,
-  type ProviderConfig,
-} from "../../core/llm-client/client.ts";
+import { LlmClient, type ProviderConfig } from "../../core/llm-client/client.ts";
 import { MarkerMangler } from "../../core/marker-mangler.ts";
 import { SessionManager, type AgentLike } from "../../core/session/index.ts";
 import { Agent } from "../../core/agent.ts";
@@ -167,9 +160,7 @@ export function applyCommandReplacements(command: string): string {
   for (const [pattern, transform] of COMMAND_REPLACEMENTS) {
     if (
       result.startsWith(pattern) &&
-      (result[pattern.length] === " " ||
-        result[pattern.length] === "\t" ||
-        result.length === pattern.length)
+      (result[pattern.length] === " " || result[pattern.length] === "\t" || result.length === pattern.length)
     ) {
       result = transform(result);
     }
@@ -274,9 +265,7 @@ export class AsyncInteractiveCliInput implements InputInterface {
   /**
    * Collect answers to questions using the readline interface.
    */
-  async collectAnswers(
-    questions: QuestionDef[],
-  ): Promise<Record<string, string>> {
+  async collectAnswers(questions: QuestionDef[]): Promise<Record<string, string>> {
     const rl = this.#rl;
 
     // Temporarily take over readline
@@ -338,9 +327,7 @@ export class AsyncInteractiveCliInput implements InputInterface {
           }
 
           if (required && answer === "") {
-            process.stderr.write(
-              "  This question is required. Please enter a value.\n",
-            );
+            process.stderr.write("  This question is required. Please enter a value.\n");
             continue;
           }
 
@@ -397,10 +384,7 @@ export async function buildInteractiveAgent(
     toolRegistry: core.toolRegistry,
     llmClient: (agentConfig.llmClient as LlmClient | undefined) || llmClient,
     model: (agentConfig.model as string) || (resolved.model as string),
-    maxIterations:
-      (agentConfig.maxIterations as number) ||
-      (resolved.maxIterations as number) ||
-      100,
+    maxIterations: (agentConfig.maxIterations as number) || (resolved.maxIterations as number) || 100,
     contextLimit: 128000,
     hideTools:
       typeof agentConfig.hideTools === "boolean"
@@ -419,17 +403,11 @@ export async function buildInteractiveAgent(
       (agentConfig.modelRegistry as Record<string, ModelConfig>) ||
       (resolved.modelRegistry as Record<string, ModelConfig>) ||
       {},
-    profileName:
-      (agentConfig.profileName as string) || (resolved.profileName as string),
-    role:
-      (agentConfig.role as string) || (resolved.role as string | undefined),
-    profileBody:
-      (agentConfig.profileBody as string) ||
-      (resolved.profileBody as string | undefined),
+    profileName: (agentConfig.profileName as string) || (resolved.profileName as string),
+    role: (agentConfig.role as string) || (resolved.role as string | undefined),
+    profileBody: (agentConfig.profileBody as string) || (resolved.profileBody as string | undefined),
     stream:
-      typeof agentConfig.stream === "boolean"
-        ? agentConfig.stream
-        : (resolved.stream as boolean | undefined),
+      typeof agentConfig.stream === "boolean" ? agentConfig.stream : (resolved.stream as boolean | undefined),
     config: { ...config },
     sessionId,
     abortSignal: (agentConfig.abortSignal as AbortSignal) || null,
@@ -451,9 +429,7 @@ export async function buildInteractiveAgent(
         const replayed = replayEntriesIntoContext(agent, entries);
         agent.isRestoring = false;
         if (replayed > 0) {
-          console.log(
-            `Session restored: ${replayed} messages replayed from ${explicitSessionId}`,
-          );
+          console.log(`Session restored: ${replayed} messages replayed from ${explicitSessionId}`);
         }
       }
     }
@@ -478,10 +454,7 @@ export async function runInteractiveSession(
   const { resolved, config } = core;
 
   if (!resolved) {
-    throw ExtensionError.ConfigFailed(
-      "ui-interactive-cli",
-      "configuration must be resolved first",
-    );
+    throw ExtensionError.ConfigFailed("ui-interactive-cli", "configuration must be resolved first");
   }
 
   // Create output sink
@@ -521,7 +494,7 @@ export async function runInteractiveSession(
     hooks: core.hooks,
     extensions: core.extensions,
     buildAgent,
-    initialConfig: { sessionId: cli.sessionId || null },
+    initialConfig: cli,
     llmClient,
     modelRegistry: resolved.modelRegistry,
     coreConfig: config,
@@ -538,9 +511,13 @@ export async function runInteractiveSession(
 
   // Register completions from command definitions (extensions declare completions inline)
   // Hook into COMMANDS_REGISTER so completions are wired up as commands are registered
-  core.hooks.on(HOOKS.COMMANDS_REGISTER, ({ registry }) => {
-    registerCommandCompletions(core.completion, registry, "ui-interactive-cli");
-  }, "ui-interactive-cli");
+  core.hooks.on(
+    HOOKS.COMMANDS_REGISTER,
+    ({ registry }) => {
+      registerCommandCompletions(core.completion, registry, "ui-interactive-cli");
+    },
+    "ui-interactive-cli",
+  );
 
   // Print info
   const agent = sessionManager.getAgent();
@@ -551,8 +528,7 @@ export async function runInteractiveSession(
   console.log("Type /quit or /exit to exit.\n");
 
   // Determine shell mode
-  const shellMode = (config.uiInteractiveCli as Record<string, unknown>)
-    ?.shellMode;
+  const shellMode = (config.uiInteractiveCli as Record<string, unknown>)?.shellMode;
 
   // Create readline with tab completion
   const createReadline = options.createReadline || readline.createInterface;
@@ -586,7 +562,7 @@ export async function runInteractiveSession(
   });
 
   // Re-display prompt after agent finishes
-  core.hooks.on(HOOKS.TURN_END, ({ stopped  }) => {
+  core.hooks.on(HOOKS.TURN_END, ({ stopped }) => {
     if (stopped) {
       setImmediate(() => {
         console.log("");
@@ -619,9 +595,7 @@ export async function runInteractiveSession(
       const match = trimmed.match(SEND_TO_ASSISTANT_SUFFIX_RE);
       const sendToAssistant = !!match;
       const note = sendToAssistant ? (match[1] || "").trim() : "";
-      const cmd = sendToAssistant
-        ? trimmed.replace(SEND_TO_ASSISTANT_SUFFIX_RE, "").trim()
-        : trimmed;
+      const cmd = sendToAssistant ? trimmed.replace(SEND_TO_ASSISTANT_SUFFIX_RE, "").trim() : trimmed;
 
       const firstWord = cmd.split(/\s+/)[0];
       if (
@@ -666,11 +640,7 @@ export async function runInteractiveSession(
   const setupInput =
     options.setupInput ||
     (() => {
-      currentInput = new AsyncInteractiveCliInput(
-        rl,
-        lineHandler,
-        addLineHandler,
-      );
+      currentInput = new AsyncInteractiveCliInput(rl, lineHandler, addLineHandler);
     });
   setupInput();
 
@@ -751,10 +721,7 @@ export function create(core: CoreContext): ExtensionInstance {
       [HOOKS.CLI_SUBCOMMANDS_REGISTER]: async (registry) => {
         registry.register("cli", {
           description: "Interactive CLI session",
-          handler: async (
-            cli: CliArgv,
-            core: CoreContext,
-          ) => {
+          handler: async (cli: CliArgv, core: CoreContext) => {
             await runInteractiveSession(cli, core);
             return 0;
           },

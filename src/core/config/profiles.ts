@@ -1,17 +1,12 @@
-/**
- * Profile loading and resolution.
- */
-
+/** Profile loading and resolution. */
 import fsPromises from "node:fs/promises";
 import path from "node:path";
-
 import { parseFrontMatter } from "../../utils/file-utils.ts";
 import { DEFAULT_PROFILES_SUBPATH } from "./defaults.ts";
-import { Dirent } from "node:fs";
+import type { Dirent } from "node:fs";
 import { normalizeConfigKeys } from "./index.ts";
 
 export interface ProfileDef {
-  aspects?: string[];
   name: string;
   description: string;
   role: string | null;
@@ -25,6 +20,7 @@ export interface ProfileDef {
   whitelist_tools?: string[] | null;
   manager: boolean;
   visibleWorker: boolean;
+  [key: string]: any;
 }
 
 export interface SwitchProfile {
@@ -35,9 +31,7 @@ export interface SwitchProfile {
   blacklistTools: string[];
 }
 
-/**
- * Resolve the profiles directory path.
- */
+/** Resolve the profiles directory path. */
 export function resolveProfilesPath(
   cliProfilesPath?: string | null,
   configDir?: string | null,
@@ -55,13 +49,8 @@ export function resolveProfilesPath(
   return "./config/profiles";
 }
 
-/**
- * Load a profile from a .profile.md file.
- */
-export async function loadProfileFile(
-  profilesPath: string,
-  profileName: string,
-): Promise<ProfileDef | null> {
+/** Load a profile from a .profile.md file. */
+export async function loadProfileFile(profilesPath: string, profileName: string): Promise<ProfileDef | null> {
   let filePath: string;
   try {
     filePath = path.join(profilesPath, `${profileName}.profile.md`);
@@ -69,15 +58,15 @@ export async function loadProfileFile(
     const parsed = parseFrontMatter(content);
     if (!parsed) return null;
     const fm = normalizeConfigKeys(parsed.frontMatter) as Partial<ProfileDef>;
-    const body = parsed.body as string;
     return {
-      name: (fm.name as string) || profileName,
-      description: (fm.description as string) || "",
-      role: (fm.role as string) || null,
-      body: body || "",
-      model: (fm.model as string) || null,
-      blacklistTools: (fm.blacklistTools as string[]) || [],
-      whitelistTools: (fm.whitelistTools as string[]) || null,
+      ...fm,
+      name: fm.name || profileName,
+      description: fm.description || "",
+      role: fm.role || null,
+      body: parsed.body || "",
+      model: fm.model || null,
+      blacklistTools: fm.blacklistTools || [],
+      whitelistTools: fm.whitelistTools || null,
       manager: !!fm.manager,
       visibleWorker: !!fm.visibleWorker,
     };
@@ -86,12 +75,8 @@ export async function loadProfileFile(
   }
 }
 
-/**
- * Load all .profile.md files from a directory.
- */
-export async function loadProfileFiles(
-  profilesPath: string,
-): Promise<Record<string, ProfileDef>> {
+/** Load all .profile.md files from a directory. */
+export async function loadProfileFiles(profilesPath: string): Promise<Record<string, ProfileDef>> {
   const result: Record<string, ProfileDef> = {};
 
   let entries: Dirent[];
@@ -115,35 +100,28 @@ export async function loadProfileFiles(
     const parsed = parseFrontMatter(content);
     if (!parsed) continue;
 
-    const fm = normalizeConfigKeys(parsed.frontMatter) as Record<
-      string,
-      unknown
-    >;
+    const fm = normalizeConfigKeys(parsed.frontMatter) as Partial<ProfileDef>;
     const fileStem = entry.name.replace(/\.profile\.md$/, "");
 
     result[fileStem] = {
-      name: (fm.name as string) || fileStem,
-      description: (fm.description as string) || "",
-      role: (fm.role as string) || "",
-      body: (parsed.body as string) || "",
-      blacklistTools: (fm.blacklistTools as string[]) || [],
-      whitelistTools: (fm.whitelistTools as string[]) || null,
-      model: (fm.model as string) || null,
+      ...fm,
+      name: fm.name || fileStem,
+      description: fm.description || "",
+      role: fm.role || "",
+      body: parsed.body || "",
+      blacklistTools: fm.blacklistTools || [],
+      whitelistTools: fm.whitelistTools || null,
+      model: fm.model || null,
       manager: !!fm.manager,
       visibleWorker: !!fm.visibleWorker,
-      aspects: (fm.aspects as string[]) || undefined,
     };
   }
 
   return result;
 }
 
-/**
- * Get all profile names that have visibleWorker: true.
- */
-export async function getVisibleWorkerProfiles(
-  profilesPath: string,
-): Promise<string[]> {
+/** Get all profile names that have visibleWorker: true. */
+export async function getVisibleWorkerProfiles(profilesPath: string): Promise<string[]> {
   let dir: string[];
   try {
     dir = await fsPromises.readdir(profilesPath);
@@ -163,11 +141,7 @@ export async function getVisibleWorkerProfiles(
   return profiles;
 }
 
-/**
- * Resolve a single profile's SwitchProfile data.
- *
- * @private
- */
+/** Resolve a single profile's SwitchProfile data. */
 function resolveSwitchProfile(
   fileProfile: Partial<ProfileDef> | null,
   configProfile: Partial<ProfileDef> | null,
@@ -190,16 +164,11 @@ export interface AllProfilesOptions {
  * Get all profiles available for switching.
  * Merges config profiles with file profiles.
  */
-export function allProfilesForSwitch(
-  options: AllProfilesOptions,
-): Record<string, SwitchProfile> {
+export function allProfilesForSwitch(options: AllProfilesOptions): Record<string, SwitchProfile> {
   const { profileFiles, configProfiles } = options;
   const result: Record<string, SwitchProfile> = {};
 
-  const allNames = new Set([
-    ...Object.keys(configProfiles || {}),
-    ...Object.keys(profileFiles || {}),
-  ]);
+  const allNames = new Set([...Object.keys(configProfiles || {}), ...Object.keys(profileFiles || {})]);
 
   for (const name of allNames) {
     const fileProfile = profileFiles?.[name] || null;
@@ -209,19 +178,6 @@ export function allProfilesForSwitch(
   }
 
   return result;
-}
-
-export interface ResolveProfileResult {
-  profileName: string;
-  profilesPath: string;
-  profile: ProfileDef;
-  profileFiles: Record<string, ProfileDef>;
-  profiles: Record<string, SwitchProfile>;
-}
-
-export interface ProfileCliArgs {
-  profile?: string;
-  profilesPath?: string;
 }
 
 /**
@@ -235,10 +191,7 @@ export class ProfileManager {
   #fileProfiles: Record<string, ProfileDef>;
   #configProfiles: Record<string, ProfileDef>;
 
-  constructor(
-    profilesPath: string,
-    configProfiles: Record<string, ProfileDef> = {},
-  ) {
+  constructor(profilesPath: string, configProfiles: Record<string, ProfileDef> = {}) {
     this.profilesPath = profilesPath;
     this.#fileProfiles = {};
     this.#configProfiles = configProfiles;
@@ -279,6 +232,8 @@ export class ProfileManager {
     if (!fileP && !configP) return null;
 
     return {
+      ...configP,
+      ...fileP,
       name,
       description: fileP?.description || configP?.description || "",
       role: fileP?.role || configP?.role || null,
@@ -288,7 +243,6 @@ export class ProfileManager {
       whitelistTools: fileP?.whitelistTools ?? configP?.whitelistTools ?? null,
       manager: fileP?.manager || configP?.manager || false,
       visibleWorker: fileP?.visibleWorker || configP?.visibleWorker || false,
-      aspects: fileP?.aspects || configP?.aspects || undefined,
     };
   }
 
@@ -296,10 +250,7 @@ export class ProfileManager {
    * Get all profile names from both config and files.
    */
   getAllNames(): string[] {
-    const names = new Set([
-      ...Object.keys(this.#configProfiles),
-      ...Object.keys(this.#fileProfiles),
-    ]);
+    const names = new Set([...Object.keys(this.#configProfiles), ...Object.keys(this.#fileProfiles)]);
     return [...names].sort();
   }
 

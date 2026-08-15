@@ -7,16 +7,8 @@ import { logger } from "../../core/logger.ts";
 
 const MIN_CMD_LEN = 2;
 
-// ── Completion Context Parser ──────────────────────────────────────────────
-
-/**
- * Parse the input line to extract command and argument for completion context.
- */
-export function parseCompletionContext(
-  line: string,
-  cursorPos: number,
-  agent: AgentLike,
-): CompletionContext {
+/** Parse the input line to extract command and argument for completion context. */
+export function parseCompletionContext(line: string, cursorPos: number, agent: AgentLike): CompletionContext {
   const text = line.slice(0, cursorPos).trimStart();
 
   let command: string | undefined;
@@ -46,16 +38,12 @@ export function parseCompletionContext(
   };
 }
 
-// ── Completion Providers ───────────────────────────────────────────────────
-
 /**
  * Register the generic slash command name completion: /<tab> -> list all commands.
  * Command-specific argument completions are registered by each extension
  * via the `completion` field on their CommandDefinition.
  */
-export function registerSlashCommandNameCompletion(
-  completionService: CoreContext["completion"],
-): void {
+export function registerSlashCommandNameCompletion(completionService: CoreContext["completion"]): void {
   completionService.register(
     (ctx) => {
       // Match when line starts with / and we're completing the command name (no space after /)
@@ -191,9 +179,7 @@ fi
         const completions = await runCompletion(line);
         return completions.map((c) => ({ value: c }));
       } catch (e) {
-        logger.debug(
-          `ui-interactive-cli: shell completion error: ${(e as Error).message}`,
-        );
+        logger.debug(`ui-interactive-cli: shell completion error: ${(e as Error).message}`);
         return [];
       }
     },
@@ -210,14 +196,8 @@ export function buildReadlineCompleter(
   sessionManager: SessionManager,
   core: CoreContext,
   shellMode: boolean,
-): (
-  line: string,
-  callback: (err: Error | null, result: [string[], string]) => void,
-) => void {
-  return (
-    line: string,
-    callback: (err: Error | null, result: [string[], string]) => void,
-  ) => {
+): (line: string, callback: (err: Error | null, result: [string[], string]) => void) => void {
+  return (line: string, callback: (err: Error | null, result: [string[], string]) => void) => {
     const currentAgent = sessionManager.getAgent();
     if (!currentAgent) {
       callback(null, [[], line]);
@@ -252,12 +232,8 @@ export function buildReadlineCompleter(
     core.completion
       .request(ctx, 200)
       .then((options) => {
-        const matches = options
-          .map((o) => o.value)
-          .filter((m) => m !== prefix);
-        logger.debug(
-          `[completion] "${line}" prefix="${prefix}" -> ${matches.length} matches`,
-        );
+        const matches = options.map((o) => o.value).filter((m) => m !== prefix);
+        logger.debug(`[completion] "${line}" prefix="${prefix}" -> ${matches.length} matches`);
         callback(null, [matches, prefix]);
       })
       .catch((e) => {

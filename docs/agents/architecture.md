@@ -33,7 +33,7 @@ Split into sub-modules. The single source of truth is `src/core/core.config.json
 - `src/core/config/profiles.ts` — `loadProfileFile()`, `loadProfileFiles()`, `resolveProfile()`, `mergeProfile()`
 - `src/core/config/providers.ts` — `buildModelRegistry()`, `resolveProvider()`, `initSystemPromptTemplate()`, `resetSystemPromptCache()`
 
-### Config Registry (`src/core/extensions/config-registry.ts`)
+### Config Registry (`src/core/extensions/config.ts`)
 Manages extension-registered CLI flags and config parameters. Config params and CLI flags are defined in `extension.json` (configSchema and cli:flags), with defaults automatically extracted and registered by the extension loader.
 
 ### Hook System (`src/core/hooks.ts`)

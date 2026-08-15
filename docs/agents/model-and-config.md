@@ -118,7 +118,7 @@ Profiles can also be defined as `.profile.md` files in a `profiles/` directory (
 
 **Merge rules**: When both a config profile and a `.profile.md` file profile exist for the same name, the file profile wins for `role`, `whitelistTools`, `blacklistTools`, and `manager`. The config profile wins for `model` and all other fields.
 
-### Config Registry (`src/core/extensions/config-registry.ts`)
+### Config Registry (`src/core/extensions/config.ts`)
 
 Manages extension-registered CLI flags and config parameters. Config params and CLI flags are defined declaratively in `extension.json` (configSchema and cli:flags) and automatically registered by the extension loader.
 

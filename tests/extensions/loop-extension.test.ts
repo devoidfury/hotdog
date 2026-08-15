@@ -49,13 +49,19 @@ function createMockAgent() {
 }
 
 /** Build a minimal TURN_END hook payload for testing. */
-function turnEndPayload(opts: { stopped?: boolean; cancelled?: boolean; agent?: any } = {}) {
+function turnEndPayload(opts: {
+  stopped?: boolean;
+  cancelled?: boolean;
+  agent?: any;
+  reason?: "completion" | "tool_return" | "continue" | "cancelled" | "error" | "max_iterations";
+} = {}) {
   return {
     turnIndex: 0,
     message: "",
     toolResults: [] as Array<{ toolName: string; input: string; result: string }>,
     stopped: opts.stopped ?? true,
     cancelled: opts.cancelled,
+    reason: opts.reason,
     agent: opts.agent,
   };
 }
@@ -304,6 +310,30 @@ describe("Loop extension", () => {
 
       const emitted = agent.getEmitted();
       expect(emitted.find((e: any) => e.content?.includes("failed to clear context"))).toBeDefined();
+    });
+
+    it("does not re-enqueue on error or max_iterations turn-end", async () => {
+      const core = createMockCore();
+      const ext = createLoopExtension(core);
+
+      const registry = createCommandRegistry();
+      const agent = createMockAgent();
+      await ext.hooks![HOOKS.COMMANDS_REGISTER]!({ registry, agent } as any);
+
+      const def = registry.get("loop")!;
+      await def.handler!(agent as unknown as Agent, "loop test");
+
+      const turnEndHook = ext.hooks![HOOKS.TURN_END]!;
+
+      // An errored run (reason: 'error') is not a completed turn — stop without re-enqueue
+      await turnEndHook(turnEndPayload({ stopped: true, agent: agent as any, reason: "error" }));
+
+      const enqueued = agent.getEnqueued();
+      expect(enqueued.filter((t: string) => t === "test")).toHaveLength(1); // only initial
+
+      // Loop should emit a summary and stop
+      const emitted = agent.getEmitted();
+      expect(emitted.find((e: any) => e.content?.includes("Loop ended"))).toBeDefined();
     });
   });
 

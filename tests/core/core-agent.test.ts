@@ -927,4 +927,116 @@ describe('Agent — end-to-end loop', () => {
       expect(enqueued).toEqual(['test message']);
     });
   });
+
+  // ── Turn-end semantics ────────────────────────────────────────────────────
+
+  describe('turn-end semantics', () => {
+    it('emits a single TURN_END per iteration with accurate reason', async () => {
+      const tool = simpleTool('echo', 'echoed');
+      const mockLLM = new MockLLMClient({
+        responseSequences: [
+          buildStreamResponse({
+            content: 'Using tool.',
+            toolCalls: [{ index: 0, name: 'echo', arguments: '{}', id: 'call_1' }],
+            usage: { total_tokens: 10 },
+          }),
+          buildStreamResponse({ content: 'Done.', usage: { total_tokens: 20 } }),
+        ],
+      });
+
+      const { agent, toolRegistry, hooks } = createFixture({ mockLLM });
+      toolRegistry.register('echo', tool);
+
+      const turnEnds: Array<{ turnIndex: number; stopped: boolean; reason?: string }> = [];
+      hooks.on(HOOKS.TURN_END, (d: { turnIndex: number; stopped: boolean; reason?: string }) => {
+        turnEnds.push({ turnIndex: d.turnIndex, stopped: d.stopped, reason: d.reason });
+      });
+
+      await agent.run('Test');
+
+      expect(turnEnds).toHaveLength(2);
+      expect(turnEnds[0]!.stopped).toBe(false);
+      expect(turnEnds[0]!.reason).toBe('continue');
+      expect(turnEnds[1]!.stopped).toBe(true);
+      expect(turnEnds[1]!.reason).toBe('completion');
+      // Exactly one turn-end per iteration: continue (iter 1), completion (iter 2).
+      // No double-emit for the same iteration.
+      expect(turnEnds[1]!.turnIndex).toBe(turnEnds[0]!.turnIndex + 1);
+    });
+
+    it('emits honest max_iterations turn-end without double-emit', async () => {
+      const tool = simpleTool('looper', 'looped');
+      const mockLLM = new MockLLMClient({
+        responseSequences: [
+          buildStreamResponse({ content: '', toolCalls: [{ index: 0, name: 'looper', arguments: '{}', id: 'call_1' }], usage: { total_tokens: 10 } }),
+          buildStreamResponse({ content: '', toolCalls: [{ index: 0, name: 'looper', arguments: '{}', id: 'call_2' }], usage: { total_tokens: 20 } }),
+          buildStreamResponse({ content: '', toolCalls: [{ index: 0, name: 'looper', arguments: '{}', id: 'call_3' }], usage: { total_tokens: 30 } }),
+        ],
+      });
+
+      const { agent, toolRegistry, hooks } = createFixture({ mockLLM, maxIterations: 3 });
+      toolRegistry.register('looper', tool);
+
+      const turnEnds: Array<{ stopped: boolean; reason?: string }> = [];
+      hooks.on(HOOKS.TURN_END, (d: { stopped: boolean; reason?: string }) => {
+        turnEnds.push({ stopped: d.stopped, reason: d.reason });
+      });
+
+      await expect(agent.run('Loop')).rejects.toThrow('Max iterations');
+
+      // 3 continue + 1 honest max_iterations — no double-emit
+      expect(turnEnds).toHaveLength(4);
+      expect(turnEnds.filter((e) => e.reason === 'continue')).toHaveLength(3);
+      const last = turnEnds[3]!;
+      expect(last.reason).toBe('max_iterations');
+      expect(last.stopped).toBe(true);
+    });
+
+    it('emits cancelled turn-end when cancelled mid-stream', async () => {
+      const mockLLM = new MockLLMClient({
+        responseSequences: [
+          (async function* () {
+            yield { type: 'content', content: 'Starting...' };
+            await new Promise(() => {}); // hang until cancelled
+          })() as unknown as Record<string, unknown>[],
+        ],
+        cancelable: true,
+      });
+
+      const { agent, hooks } = createFixture({ mockLLM });
+      const turnEnds: Array<{ stopped: boolean; cancelled?: boolean; reason?: string }> = [];
+      hooks.on(HOOKS.TURN_END, (d: { stopped: boolean; cancelled?: boolean; reason?: string }) => {
+        turnEnds.push({ stopped: d.stopped, cancelled: d.cancelled, reason: d.reason });
+      });
+
+      const runPromise = agent.run('Cancel me');
+      await Promise.resolve();
+      agent.cancel();
+
+      await expect(runPromise).rejects.toThrow(/cancelled/i);
+      expect(turnEnds).toHaveLength(1);
+      expect(turnEnds[0]!.stopped).toBe(true);
+      expect(turnEnds[0]!.cancelled).toBe(true);
+      expect(turnEnds[0]!.reason).toBe('cancelled');
+    });
+
+    it('emits error turn-end (not completion) when system prompt build fails', async () => {
+      const mockLLM = new MockLLMClient({
+        responseSequences: [buildStreamResponse({ content: 'Done.', usage: { total_tokens: 10 } })],
+      });
+
+      const { agent, hooks } = createFixture({ mockLLM });
+      agent.ensureSystemPrompt = async () => { throw new Error('system prompt boom'); };
+
+      const turnEnds: Array<{ stopped: boolean; reason?: string }> = [];
+      hooks.on(HOOKS.TURN_END, (d: { stopped: boolean; reason?: string }) => {
+        turnEnds.push({ stopped: d.stopped, reason: d.reason });
+      });
+
+      await expect(agent.run('Hi')).rejects.toThrow('system prompt boom');
+      expect(turnEnds).toHaveLength(1);
+      expect(turnEnds[0]!.stopped).toBe(true);
+      expect(turnEnds[0]!.reason).toBe('error');
+    });
+  });
 });

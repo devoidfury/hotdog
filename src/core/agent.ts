@@ -13,12 +13,24 @@ import { createCommandRegistry, AgentCommandRegistry, type CommandResult } from 
 import type { ToolRegistry, ToolDef } from "./extensions/tool-registry.ts";
 import { HOOKS, HookSystem, type ContextHookResult, type ProviderRequestHookResult } from "./hooks.ts";
 import { type RawUsage } from "./token-tracker.ts";
-import { ToolExecutor, createToolExecutor, type ToolResult as ToolExecutorResult } from "./tool-executor.ts";
+import { ToolExecutor, createToolExecutor, type ToolResult } from "./tool-executor.ts";
 import type { AgentLike } from "./session/index.ts";
 
 export interface ModelRegistry {
   [key: string]: ModelConfig;
 }
+
+/**
+ * Reason a turn ended. Emitted on the TURN_END hook payload so consumers
+ * can distinguish real completions from abnormal terminations.
+ */
+export type TurnEndReason =
+  | "completion"      // model returned final text
+  | "tool_return"     // a tool signaled stopLoop
+  | "continue"        // tool calls ran; the loop advances to the next iteration
+  | "cancelled"       // run was cancelled
+  | "error"           // an unexpected exception aborted the turn
+  | "max_iterations"; // iteration cap reached
 
 /** Result of an agent run loop execution. */
 export type AgentRunResult =
@@ -268,7 +280,7 @@ export class Agent implements AgentLike {
       return;
     }
 
-    let stoppedEmitted = false;
+    let turnEnded = false;
     try {
       await this.ensureSystemPrompt();
 
@@ -280,26 +292,40 @@ export class Agent implements AgentLike {
       while (iteration < this.maxIterations) {
         iteration++;
         this.iterationCount = iteration;
+        turnEnded = false;
 
         const params = await this._prepareIteration(iteration);
         const response = await this._performLlmCall(params);
         const result = await this._handleLlmResponse(iteration, response, params.modelConfig);
 
         if (typeof result === "string") {
-          stoppedEmitted = true;
+          // Normal completion — the model returned final text.
+          this._emitTurnEnd(iteration, response.fullText, [], true, this.cancelled, "completion");
+          turnEnded = true;
           return { type: 'completion', content: result };
-        } else if (result && typeof result === "object" && "outcome" in result) {
-          const { outcome } = result as { outcome: string };
-          if (outcome !== "continue") {
-            stoppedEmitted = true;
-            return { type: 'tool_return', outcome };
-          }
         }
+
+        const { outcome, toolResults } = result;
+        if (outcome !== "continue") {
+          // Tool-return — a tool signaled stopLoop.
+          this._emitTurnEnd(iteration, response.fullText, toolResults, true, this.cancelled, "tool_return");
+          turnEnded = true;
+          return { type: 'tool_return', outcome };
+        }
+
+        // Continue — tool calls ran; the loop advances to the next iteration.
+        this._emitTurnEnd(iteration, response.fullText, toolResults, false, this.cancelled, "continue");
+        turnEnded = true;
       }
+
+      // Hit the iteration cap — emit turn-end so listeners unblock, then throw.
+      this._emitTurnEnd(this.iterationCount, "", [], true, this.cancelled, "max_iterations");
+      turnEnded = true;
       throw AgentError.MaxIterations(this.maxIterations);
     } finally {
-      if (!stoppedEmitted) {
-        this._emitTurnEnd(this.iterationCount, "", [], true, this.cancelled);
+      if (!turnEnded) {
+        const reason: TurnEndReason = this.cancelled ? "cancelled" : "error";
+        this._emitTurnEnd(this.iterationCount, "", [], true, this.cancelled, reason);
       }
     }
   }
@@ -385,7 +411,7 @@ export class Agent implements AgentLike {
     iteration: number,
     response: StreamResult,
     modelConfig: ModelConfig,
-  ): Promise<string | { outcome: string; toolResults: ToolExecutorResult[] }> {
+  ): Promise<string | { outcome: string; toolResults: ToolResult[] }> {
     this.hooks.notifyHooks(HOOKS.PROVIDER_RESPONSE, { response, modelConfig, agent: this });
     this.hooks.notifyHooks(HOOKS.MESSAGES_AFTER_LLM, { response, messages: this.context.getMessages(), agent: this });
 
@@ -400,7 +426,7 @@ export class Agent implements AgentLike {
 
     if (response.finalToolCalls) {
       let toolCallsToExecute = response.finalToolCalls;
-      let skippedToolResults: ToolExecutorResult[] = [];
+      let skippedToolResults: ToolResult[] = [];
 
       if (toolCallsToExecute.length > this.maxToolCallsPerIteration) {
         const truncated = toolCallsToExecute.slice(0, this.maxToolCallsPerIteration);
@@ -432,24 +458,30 @@ export class Agent implements AgentLike {
         });
       }
 
-      const finalResults: ToolExecutorResult[] = [...toolResults, ...skippedToolResults];
+      const finalResults = [...toolResults, ...skippedToolResults];
 
-      this._emitTurnEnd(iteration, response.fullText, finalResults, outcome === "return");
       return { outcome, toolResults: finalResults };
     } else {
       this.hooks.notifyHooks(HOOKS.CONTEXT_MESSAGE, { message: assistantMsg, agent: this });
-      this._emitTurnEnd(iteration, response.fullText, [], true);
       return response.fullText;
     }
   }
 
-  private _emitTurnEnd(iteration: number, message: string, toolResults: Array<{ toolName: string; input: string; result: string }>, stopped: boolean, cancelled = false) {
+  private _emitTurnEnd(
+    iteration: number,
+    message: string,
+    toolResults: Array<ToolResult>,
+    stopped: boolean,
+    cancelled = false,
+    reason: TurnEndReason,
+  ) {
     this.hooks.notifyHooks(HOOKS.TURN_END, {
       turnIndex: iteration,
       message,
       toolResults,
       stopped,
       cancelled,
+      reason,
       agent: this,
     });
   }

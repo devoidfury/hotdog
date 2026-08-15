@@ -96,12 +96,19 @@ export function create(core: CoreContext): ExtensionInstance {
       },
 
       /** Detect when the agent finishes processing a message to loop or print status. */
-      [HOOKS.TURN_END]: async ({ stopped, cancelled, agent }) => {
+      [HOOKS.TURN_END]: async ({ stopped, cancelled, agent, reason }) => {
         if (!stopped || !agent || !loop.active) return;
 
         // Cancellation — print summary and stop
         if (cancelled || agent.cancelled) {
           stopLoop(agent, true);
+          return;
+        }
+
+        // Errors and iteration-cap blowouts are not completed turns — stop
+        // without re-enqueuing so we don't loop on a broken run.
+        if (reason === "error" || reason === "max_iterations") {
+          stopLoop(agent, false);
           return;
         }
 

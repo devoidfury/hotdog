@@ -187,6 +187,7 @@ export interface HookPayloads {
     toolResults: Array<{ toolName: string; input: string; result: string }>;
     stopped: boolean;
     cancelled?: boolean;
+    reason?: "completion" | "tool_return" | "continue" | "cancelled" | "error" | "max_iterations";
     agent: Agent;
   };
 
@@ -220,8 +221,6 @@ export interface HookReturnTypes {
   "systemPrompt:build": SystemPromptChunk | SystemPromptChunk[];
 }
 
-// ── Core Context ─────────────────────────────────────────────────────────────
-
 /**
  * The `core` object passed to every extension's `create(core)` function.
  * This is the single source of truth for what extensions can access.
@@ -251,9 +250,7 @@ export interface CoreContext {
   /** Config registry for extension-registered CLI flags, config params, and schemas. */
   configRegistry: ConfigRegistry;
 
-  /**
-   * Look up a registered service by name.
-   */
+  /** Look up a registered service by name. */
   service(name: string): unknown;
 
   /**
@@ -316,14 +313,11 @@ export interface ResolvedConfig {
   [key: string]: unknown;
 }
 
-// ── Extension Return Type ────────────────────────────────────────────────────
-
 /**
  * Shape of the object an extension's `create()` function returns.
  *
  * Hook handlers are keyed by hook name (e.g., HOOKS.TOOLS_REGISTER).
- * The type system checks that the handler function matches the expected payload
- * for that hook name.
+ * The type system checks that the handler function matches the expected payload for that hook name.
  */
 export type ExtensionInstance = {
   /**
@@ -345,19 +339,13 @@ export type ExtensionInstance = {
     [K in keyof HookPayloads]?: (payload: HookPayloads[K]) => void | Promise<void> | unknown;
   };
 
-  /**
-   * Optional shutdown hook called during extension unload.
-   */
+  /** Optional shutdown hook called during extension unload. */
   shutdown?: () => Promise<void>;
 
-  /**
-   * Optional legacy tool registration method.
-   */
+  /** Optional legacy tool registration method. */
   registerTools?: (registry: ToolRegistry) => Promise<void>;
 
-  /**
-   * Arbitrary extension-specific properties exposed for external use.
-   */
+  /** Arbitrary extension-specific properties exposed for external use. */
   [key: string]: unknown;
 };
 
@@ -477,5 +465,4 @@ export function getConfigDefault<T = unknown>(
     if (defaultVal === null) return undefined;
     return defaultVal as T | undefined;
   }
-  return undefined;
 }

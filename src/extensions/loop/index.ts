@@ -1,14 +1,9 @@
-// Loop extension — provides the /loop slash command for repeatedly
-// running a prompt until cancelled by the user.
+// loop: provides the /loop slash command for repeatedly running a prompt until cancelled by the user.
 
 import { HOOKS } from "../../core/hooks.ts";
 import { ACTIONS } from "../../core/commands.ts";
 import { formatError } from "../../core/error.ts";
-import {
-  CoreContext,
-  ExtensionInstance,
-  getExtensionConfig,
-} from "../../core/extensions/types.ts";
+import { getExtensionConfig, type CoreContext, type ExtensionInstance } from "../../core/extensions/types.ts";
 import type { Agent } from "../../core/agent.ts";
 
 interface LoopState {
@@ -21,7 +16,6 @@ interface LoopState {
 /**
  * Create the loop extension.
  *
- * Uses a mutable state object so hooks can share loop state.
  * The /loop command handler initializes state and enqueues the first prompt.
  * TURN_END hook detects agent completion, clears context, and re-enqueues.
  * INPUT hook intercepts /quit during an active loop.
@@ -101,12 +95,7 @@ export function create(core: CoreContext): ExtensionInstance {
         });
       },
 
-      /**
-       * Detect when the agent finishes processing a message.
-       * If a loop is active, clear context and re-enqueue the prompt.
-       * Also fires on cancellation (via agent's finally block) — in that
-       * case, print the summary and stop without re-enqueuing.
-       */
+      /** Detect when the agent finishes processing a message to loop or print status. */
       [HOOKS.TURN_END]: async ({ stopped, cancelled, agent }) => {
         if (!stopped || !agent || !loop.active) return;
 
@@ -125,8 +114,7 @@ export function create(core: CoreContext): ExtensionInstance {
         }
 
         loop.count++;
-
-        emit(agent, `── Loop ${loop.count} ──`);
+        emit(agent, `==== Loop ${loop.count} ====`);
 
         // Clear context for the next iteration
         try {
@@ -143,20 +131,15 @@ export function create(core: CoreContext): ExtensionInstance {
         agent.enqueue(loop.prompt);
       },
 
-      /**
-       * Intercept /quit and /exit during an active loop.
-       */
-      [HOOKS.INPUT]: ({text, agent}) => {
+      /** Intercept /quit and /exit during an active loop. */
+      [HOOKS.INPUT]: ({ text, agent }) => {
         if (!loop.active || !text || !agent) return;
 
-        const trimmed = text.trim();
-        const trimmedLower = trimmed.toLowerCase();
-        if (trimmedLower === "/quit" || trimmedLower === "/exit") {
+        const cmd = text.trim().toLowerCase();
+        if (cmd === "/quit" || cmd === "/exit") {
           stopLoop(agent, true);
           return { action: "handled" };
         }
-
-        return;
       },
     },
   };

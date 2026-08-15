@@ -206,7 +206,7 @@ describe("Loop extension", () => {
       await turnEndHook(turnEndPayload({ stopped: true, agent: agent as any }));
 
       const emitted = agent.getEmitted();
-      expect(emitted.find((e: any) => e.content?.includes("── Loop 1 ──"))).toBeDefined();
+      expect(emitted.find((e: any) => e.content?.includes("==== Loop 1 ===="))).toBeDefined();
       expect(emitted.find((e: any) => e.content?.includes("Loop 1 complete"))).toBeDefined();
     });
 

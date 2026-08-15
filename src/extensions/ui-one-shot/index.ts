@@ -154,6 +154,9 @@ async function handlePromptSubcommand(
       stream: typeof agentConfig.stream === "boolean" ? agentConfig.stream : resolved.stream,
       config: {
         ...config,
+        maxToolCallsPerIteration: resolved.maxToolCallsPerIteration as number,
+        maxRetries: resolved.maxRetries as number,
+        toolRetryDelay: resolved.toolRetryDelay as number,
       },
       sessionId,
       abortSignal: (agentConfig.abortSignal as AbortSignal) || null,

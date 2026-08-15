@@ -4,6 +4,7 @@ import { Agent, HOOKS, ACTIONS } from '../../src/core/index.ts';
 import { createHooks } from '../../src/core/hooks.ts';
 import { createToolRegistry } from '../../src/core/extensions/tool-registry.ts';
 import { Message } from '../../src/core/context/message.ts';
+import { ConfigError } from '../../src/core/error.ts';
 import type { LlmClient } from '../../src/core/llm-client/client.ts';
 import type { OutputEvent } from '../../src/core/context/output.ts';
 import { OUTPUT_EVENT } from '../../src/core/context/output.ts';
@@ -765,6 +766,7 @@ describe('Agent — end-to-end loop', () => {
         model: 'test-model',
         maxIterations: 100,
         contextLimit: 128000,
+        config: { maxToolCallsPerIteration: 10, maxRetries: 5, toolRetryDelay: 1 },
       });
       freshAgent.deserialize(serialized);
 
@@ -823,6 +825,47 @@ describe('Agent — end-to-end loop', () => {
       expect(usage.sessionPromptTokens).toBe(5);
       expect(usage.sessionCompletionTokens).toBe(10);
       expect(usage.sessionTotalTokens).toBe(15);
+    });
+  });
+
+  describe('required config keys (no runtime fallbacks)', () => {
+    function buildAgent(config: Record<string, unknown> | undefined): Agent {
+      return new Agent({
+        hooks: createHooks(),
+        toolRegistry: createToolRegistry(),
+        llmClient: new MockLLMClient() as unknown as LlmClient,
+        model: 'test-model',
+        maxIterations: 10,
+        contextLimit: 128000,
+        config,
+      });
+    }
+
+    it('throws ConfigError when maxToolCallsPerIteration is missing', () => {
+      expect(() => buildAgent({ maxRetries: 5, toolRetryDelay: 1 })).toThrow(
+        "Missing required configuration: 'maxToolCallsPerIteration'",
+      );
+    });
+
+    it('throws ConfigError when maxRetries is missing', () => {
+      expect(() => buildAgent({ maxToolCallsPerIteration: 10, toolRetryDelay: 1 })).toThrow(
+        "Missing required configuration: 'maxRetries'",
+      );
+    });
+
+    it('throws ConfigError when toolRetryDelay is missing', () => {
+      expect(() => buildAgent({ maxToolCallsPerIteration: 10, maxRetries: 5 })).toThrow(
+        "Missing required configuration: 'toolRetryDelay'",
+      );
+    });
+
+    it('throws ConfigError when no config is provided', () => {
+      expect(() => buildAgent(undefined)).toThrow(ConfigError);
+    });
+
+    it('accepts an agent built with all keys present', () => {
+      const agent = buildAgent({ maxToolCallsPerIteration: 10, maxRetries: 5, toolRetryDelay: 1 });
+      expect(agent.maxToolCallsPerIteration).toBe(10);
     });
   });
 

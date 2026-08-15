@@ -157,7 +157,10 @@ export class Agent implements AgentLike {
     this.stream = options.stream !== false;
     this.cancelled = false;
     this.iterationCount = 0;
-    this.maxToolCallsPerIteration = options.config?.maxToolCallsPerIteration ?? 10;
+    if (options.config?.maxToolCallsPerIteration == null) {
+      throw ConfigError.MissingConfig("maxToolCallsPerIteration");
+    }
+    this.maxToolCallsPerIteration = options.config.maxToolCallsPerIteration;
     this.reasoningEffort = undefined;
     this.#isRestoring = false;
     // Task agent support
@@ -176,6 +179,12 @@ export class Agent implements AgentLike {
       this.commandRegistry.register(type, def);
     }
     // Tool executor — runs the full tool call pipeline
+    if (options.config?.maxRetries == null) {
+      throw ConfigError.MissingConfig("maxRetries");
+    }
+    if (options.config?.toolRetryDelay == null) {
+      throw ConfigError.MissingConfig("toolRetryDelay");
+    }
     this.#toolExecutor = createToolExecutor({
       context: this.context,
       toolRegistry: options.toolRegistry,
@@ -184,8 +193,8 @@ export class Agent implements AgentLike {
       toolWhitelist: options.toolWhitelist || null,
       cwdBoundary: options.config?.cwdBoundary || null,
       workspaceRoot: options.config?.workspaceRoot || null,
-      maxRetries: options.config?.maxRetries ?? 3,
-      toolRetryDelay: options.config?.toolRetryDelay ?? 1,
+      maxRetries: options.config.maxRetries,
+      toolRetryDelay: options.config.toolRetryDelay,
       isRestoring: () => this.#isRestoring,
       agent: this,
     });

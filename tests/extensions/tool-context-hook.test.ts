@@ -27,6 +27,7 @@ function createTestAgent(options: { hooks?: HookSystem; registry?: ToolRegistry 
     model: "test-model",
     maxIterations: 100,
     contextLimit: 128000,
+    config: { maxToolCallsPerIteration: 10, maxRetries: 5, toolRetryDelay: 1 },
     ...options,
   });
 }

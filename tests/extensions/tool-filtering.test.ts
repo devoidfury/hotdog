@@ -49,7 +49,13 @@ describe("Tool Filtering (Agent.getToolDefs)", () => {
       model: "test/model",
       maxIterations: 10,
       contextLimit: 4096,
-      config: { ...core.config, ...configOverrides } as any,
+      config: {
+        maxToolCallsPerIteration: 10,
+        maxRetries: 5,
+        toolRetryDelay: 1,
+        ...core.config,
+        ...configOverrides,
+      } as any,
       modelRegistry,
     });
   }

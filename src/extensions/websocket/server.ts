@@ -1159,7 +1159,9 @@ export function createWsServer(
     apiKey: core.resolved?.apiKey,
     stream: core.resolved?.stream !== false,
     chatTimeoutSecs: core.resolved?.chatTimeout || 30,
-    maxRetries: core.resolved?.maxRetries || 3,
+    // Resolved by buildConfig in the real app; retry.ts throws
+    // ConfigError.MissingConfig if it is missing at retry time.
+    maxRetries: core.resolved?.maxRetries as number,
     providers: core.config?.providers as ProviderConfig[] | undefined,
     markerMangler: new MarkerMangler(),
   });
@@ -1208,11 +1210,13 @@ export function createWsServer(
         profileName,
         profileBody: profile?.body || undefined,
         role: profile?.role || undefined,
-        config: core.config
-          ? {
-              ...core.config,
-            }
-          : undefined,
+        config: {
+          ...core.config,
+          // Agent requires these resolved values — no fallbacks in the Agent.
+          maxToolCallsPerIteration: core.resolved?.maxToolCallsPerIteration as number,
+          maxRetries: core.resolved?.maxRetries as number,
+          toolRetryDelay: core.resolved?.toolRetryDelay as number,
+        },
         sessionId,
         abortSignal: null,
         toolWhitelist: profile?.whitelistTools || null,

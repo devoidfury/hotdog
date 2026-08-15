@@ -72,7 +72,13 @@ export function createFixture(
     profileName: options.profileName || "test",
     role: options.role || "Test agent",
     profileBody: options.profileBody || "",
-    config: options.config as AgentConfig | undefined,
+    // Agent requires resolved values for these keys (no runtime fallbacks).
+    config: {
+      maxToolCallsPerIteration: 10,
+      maxRetries: 5,
+      toolRetryDelay: 1,
+      ...(options.config as Record<string, unknown> | undefined),
+    } as AgentConfig,
     sessionId: options.sessionId || "test-session",
     abortSignal: options.abortSignal || null,
     toolWhitelist: options.toolWhitelist || null,
@@ -213,6 +219,8 @@ export function createMockCore(
     chatTimeout: 30,
     maxRetries: 3,
     maxIterations: 100,
+    maxToolCallsPerIteration: 10,
+    toolRetryDelay: 1,
     contextLimit: 128000,
     profileName: "default",
     profile: {},

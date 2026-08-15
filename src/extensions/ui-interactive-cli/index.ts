@@ -401,7 +401,12 @@ export async function buildInteractiveAgent(
     profileBody: (agentConfig.profileBody as string) || (resolved.profileBody as string | undefined),
     stream:
       typeof agentConfig.stream === "boolean" ? agentConfig.stream : (resolved.stream as boolean | undefined),
-    config: { ...config },
+    config: {
+      ...config,
+      maxToolCallsPerIteration: resolved.maxToolCallsPerIteration as number,
+      maxRetries: resolved.maxRetries as number,
+      toolRetryDelay: resolved.toolRetryDelay as number,
+    },
     sessionId,
     abortSignal: (agentConfig.abortSignal as AbortSignal) || null,
     toolWhitelist: (agentConfig.toolWhitelist as string[]) || null,

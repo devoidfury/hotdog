@@ -31,6 +31,8 @@ describe("ui-one-shot extension", () => {
       chatTimeout: 30,
       maxRetries: 3,
       maxIterations: 100,
+      maxToolCallsPerIteration: 10,
+      toolRetryDelay: 1,
       contextLimit: 128000,
       hideTools: false,
       hideThinking: true,

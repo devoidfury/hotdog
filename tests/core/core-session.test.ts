@@ -27,6 +27,7 @@ function createMockAgent(options: Record<string, unknown> = {}): AgentLike {
     sessionId: (options.sessionId as string) || crypto.randomUUID(),
     maxIterations: 100,
     contextLimit: 128000,
+    config: { maxToolCallsPerIteration: 10, maxRetries: 5, toolRetryDelay: 1 },
     ...options,
   }) as unknown as AgentLike;
 }

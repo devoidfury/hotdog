@@ -7,6 +7,7 @@ import {
   ToolResult,
   parseToolInput,
   defaultCallDisplay,
+  truncateOutput,
 } from "../../core/extensions/tool-utils.ts";
 import type { ToolMetadata } from "../../core/extensions/tool-registry.ts";
 import { AssistantRetryableError } from "../../core/error.ts";
@@ -146,7 +147,7 @@ export class BashTool {
       const cmdFirstLine = command.trim().split("\n")[0] ?? "";
       proc.on("close", (code: number | null) => {
         const output = [stdout, stderr].filter(Boolean).join("\n");
-        const truncated = this.truncateOutput(output, this.maxOutputLines);
+        const truncated = truncateOutput(output, this.maxOutputLines);
         finish(
           ToolResult.ok(truncated).withEntries({
             command:
@@ -162,14 +163,6 @@ export class BashTool {
         finish(ToolResult.err(`Error: ${err.message}`));
       });
     });
-  }
-
-  private truncateOutput(text: string, maxLines: number): string {
-    if (!text) return "";
-    const lines = text.split("\n");
-    if (lines.length <= maxLines) return text;
-    const truncated = lines.slice(0, maxLines).join("\n");
-    return `${truncated}\n--- [truncated, ${lines.length - maxLines} more lines] ---`;
   }
 }
 

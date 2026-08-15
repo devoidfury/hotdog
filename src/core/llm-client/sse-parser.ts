@@ -66,7 +66,12 @@ export class SseParser {
 
         for (const line of lines) {
           const trimmed = line.trim();
-          if (!trimmed) continue;
+          if (!trimmed) {
+            // SSE spec: `event:` applies only to the next event; reset at the
+            // blank-line event boundary.
+            currentEvent = "message";
+            continue;
+          }
           if (trimmed.startsWith(":")) continue;
           if (trimmed.startsWith("event: ")) {
             currentEvent = trimmed.slice(7);

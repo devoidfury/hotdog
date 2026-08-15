@@ -90,6 +90,35 @@ data: {"choices":[{"delta":{"content":"ok"}}]}
       expect(results).toEqual([{ choices: [{ delta: { content: "ok" } }] }]);
     });
 
+    it("resets to message after a non-message event block (SSE event boundary)", async () => {
+      // `event:` only applies to the NEXT event. After the blank line, data:
+      // lines must be treated as message events again without an explicit
+      // `event: message` line.
+      const sse = `event: error
+data: {"error":{"code":"temporary"}}
+
+data: {"choices":[{"delta":{"content":"recovered"}}]}
+
+data: [DONE]
+`;
+      const results = await collect(parseSse(streamFromText(sse)));
+      expect(results).toEqual([{ choices: [{ delta: { content: "recovered" } }] }]);
+    });
+
+    it("keeps dropping data lines inside a non-message event block", async () => {
+      // Multiple data lines within one non-message event block are all dropped;
+      // the reset happens only at the blank-line boundary.
+      const sse = `event: ping
+data: {"type":"ping"}
+data: {"type":"ping2"}
+
+data: {"back":true}
+
+`;
+      const results = await collect(parseSse(streamFromText(sse)));
+      expect(results).toEqual([{ back: true }]);
+    });
+
     it("handles empty event name explicitly", async () => {
       const sse = `event:
 data: {"explicit":true}

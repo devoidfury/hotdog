@@ -501,6 +501,29 @@ function escapeHtml(text: string): string {
     .replace(/"/g, "&quot;");
 }
 
+// ── URL safety ──────────────────────────────────────────────────────────────
+
+const SAFE_LINK_SCHEMES = new Set(["http", "https", "mailto"]);
+const SAFE_IMAGE_SCHEMES = new Set(["http", "https"]);
+// data: URLs are only safe for script-less raster image types (svg can carry scripts)
+const SAFE_DATA_IMAGE_RE = /^data:image\/(png|jpe?g|gif|webp)(;|$)/i;
+
+/**
+ * Check whether a URL is safe to render in HTML (link href / img src).
+ * Blocks script-capable schemes (javascript:, vbscript:, data:text/html, ...).
+ * Browsers ignore C0 controls/whitespace (e.g. `java\tscript:`) when parsing a
+ * URL, so strip them all before checking the scheme. No legitimate URL contains
+ * raw C0 controls or spaces, so this cannot break a valid one.
+ * URLs without a scheme (relative, protocol-relative) are allowed.
+ */
+function isSafeUrl(url: string, allowedSchemes: Set<string>, allowImageData: boolean): boolean {
+  const normalized = url.replace(/[\x00-\x20]/g, "");
+  if (allowImageData && SAFE_DATA_IMAGE_RE.test(normalized)) return true;
+  const m = normalized.match(/^([a-z][a-z0-9+.-]*):/i);
+  if (!m) return true; // relative or protocol-relative URL
+  return allowedSchemes.has(m[1]!.toLowerCase());
+}
+
 /**
  * Render inline nodes to HTML.
  */
@@ -516,9 +539,16 @@ function inlineToHtml(node: MdInline): string {
       return `<del>${node.children.map(inlineToHtml).join("")}</del>`;
     case "inline_code":
       return `<code class="inline-code">${escapeHtml(node.content)}</code>`;
-    case "link":
+    case "link": {
+      // Unsafe scheme (javascript:, etc.) -- render the link text as plain text
+      if (!isSafeUrl(node.url, SAFE_LINK_SCHEMES, false)) {
+        return node.children.map(inlineToHtml).join("");
+      }
       return `<a href="${escapeHtml(node.url)}" target="_blank" rel="noopener noreferrer">${node.children.map(inlineToHtml).join("")}</a>`;
+    }
     case "image":
+      // Unsafe scheme -- drop the image entirely
+      if (!isSafeUrl(node.url, SAFE_IMAGE_SCHEMES, true)) return "";
       return `<img src="${escapeHtml(node.url)}" alt="${escapeHtml(node.alt)}" />`;
   }
 }

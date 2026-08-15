@@ -725,6 +725,69 @@ describe("mdTreeToHtml", () => {
   });
 });
 
+describe("mdTreeToHtml url scheme safety", () => {
+  it("allows http and https links", () => {
+    const html = markdownToHtml("[a](http://example.com) [b](https://example.com/x?q=1#f)");
+    expect(html).toContain('<a href="http://example.com"');
+    expect(html).toContain('<a href="https://example.com/x?q=1#f"');
+  });
+
+  it("allows mailto links", () => {
+    const html = markdownToHtml("[mail](mailto:foo@example.com)");
+    expect(html).toContain('<a href="mailto:foo@example.com"');
+  });
+
+  it("allows relative and protocol-relative links", () => {
+    const html = markdownToHtml("[a](docs/readme.md) [b](//example.com/page)");
+    expect(html).toContain('<a href="docs/readme.md"');
+    expect(html).toContain('<a href="//example.com/page"');
+  });
+
+  it("blocks javascript: links and renders the text as plain", () => {
+    const html = markdownToHtml("[click](javascript:alert(1))");
+    expect(html).not.toContain("<a ");
+    expect(html).toContain("click");
+  });
+
+  it("blocks mixed-case javascript: links", () => {
+    const html = markdownToHtml("[click](JaVaScRiPt:alert(1))");
+    expect(html).not.toContain("<a ");
+    expect(html).toContain("click");
+  });
+
+  it("blocks javascript: with tab or newline embedded in the scheme", () => {
+    const html = markdownToHtml("[a](java\tscript:alert(1)) [b](java\nscript:alert(1))");
+    expect(html).not.toContain("<a ");
+  });
+
+  it("blocks other non-allowlisted link schemes", () => {
+    const html = markdownToHtml(
+      "[a](data:text/html,evil) [b](vbscript:msgbox(1)) [c](file:///etc/passwd) [d](ssh://host)",
+    );
+    expect(html).not.toContain("<a ");
+  });
+
+  it("allows relative, http, https, and safe data: images", () => {
+    const html = markdownToHtml(
+      "![a](image.png) ![b](https://x.dev/i.png) " +
+        "![c](data:image/png;base64,iVBORw0KGgo=) ![d](data:image/jpg;base64,x)",
+    );
+    expect(html).toContain('<img src="image.png"');
+    expect(html).toContain('<img src="https://x.dev/i.png"');
+    expect(html).toContain('<img src="data:image/png;base64,iVBORw0KGgo="');
+    expect(html).toContain('<img src="data:image/jpg;base64,x"');
+  });
+
+  it("blocks unsafe image schemes", () => {
+    const html = markdownToHtml(
+      "![a](javascript:alert(1)) " +
+        "![b](data:image/svg+xml;base64,PHN2Zz4=) " +
+        "![c](data:text/html,evil) ![d](ftp://host/img.png)",
+    );
+    expect(html).not.toContain("<img");
+  });
+});
+
 describe("markdownToHtml", () => {
   it("parses and renders in one step", () => {
     const html = markdownToHtml("# Hello\n\n**bold** and *italic*");

@@ -758,7 +758,7 @@ Extensions register their own configuration namespaces. Each extension's config 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
 | `enabled` | `boolean` | `true` | Enable/disable compaction. |
-| `strategy` | `string` | `"summarize"` | Strategy: `summarize`, `drop`, `summarize-short`, `token-aware`, `trim`. |
+| `strategy` | `string` | `"summarize"` | Strategy: `summarize`, `drop`, `summarize-short`, `token-aware`, `trim`. Switch at runtime with `/compact <strategy>` or `/compact:<strategy>`. |
 | `reserveTokens` | `number` | `8000` | Token budget to reserve for the response. |
 | `keepRecentMessages` | `number` | `3` | Recent messages to keep after compaction. |
 | `userTurnGuardPrompt` | `string` | `"Continue from the compressed conversation context above."` | Prompt added when compaction ends in a non-user turn to ensure compatibility with some LLM templates. |

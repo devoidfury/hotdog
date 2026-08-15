@@ -4,6 +4,10 @@ import { AgentCommandRegistry } from "../../src/core/extensions/registries.ts";
 import { MessageLog } from "../../src/core/context/message-log.ts";
 import { Message } from "../../src/core/context/message.ts";
 import { create as createCompactionExtension } from "../../src/extensions/compaction/index.ts";
+import {
+  matcher as compactMatcher,
+  completion as compactCompletion,
+} from "../../src/extensions/compaction/completions.ts";
 import { ToolRegistry } from "../../src/core/index.ts";
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
@@ -343,63 +347,110 @@ describe("COMMANDS_REGISTER Hook", () => {
     expect(compactCmd.description).toContain("Compact context");
   });
 
-  it("should register compact:strategy command", async () => {
+  it("should not register compact:strategy command (removed historical syntax)", async () => {
     const core = createMockCore();
     const ext = createCompactionExtension(core);
 
     const commandRegistry = new AgentCommandRegistry();
     await (ext as any).hooks![HOOKS.COMMANDS_REGISTER]!({ registry: commandRegistry });
 
-    const strategyCmd = commandRegistry.get("compact:strategy");
-    expect(strategyCmd).toBeDefined();
-    expect(strategyCmd!.description).toContain("Manage compaction strategy");
+    expect(commandRegistry.get("compact:strategy")).toBeUndefined();
   });
 
-  it("compact:strategy list shows all strategies", async () => {
+  it("compact command matches colon-form invocations", async () => {
     const core = createMockCore();
     const ext = createCompactionExtension(core);
 
     const commandRegistry = new AgentCommandRegistry();
     await (ext as any).hooks![HOOKS.COMMANDS_REGISTER]!({ registry: commandRegistry });
 
-    const strategyCmd = commandRegistry.get("compact:strategy");
+    expect(commandRegistry.match("compact")).toBe("compact");
+    expect(commandRegistry.match("compact 5")).toBe("compact");
+    expect(commandRegistry.match("compact:drop")).toBe("compact");
+    expect(commandRegistry.match("compact drop")).toBe("compact");
+    expect(commandRegistry.match("compacter")).toBeNull();
+  });
+
+  it("compact <strategy> switches strategy (space form)", async () => {
+    const core = createMockCore();
+    const ext = createCompactionExtension(core);
+
+    const commandRegistry = new AgentCommandRegistry();
+    await (ext as any).hooks![HOOKS.COMMANDS_REGISTER]!({ registry: commandRegistry });
+
+    const compactCmd = commandRegistry.get("compact")!;
     // cmdValue is the full command string
-    const result = await (strategyCmd!.handler as any)({}, "compact:strategy list");
-    expect((result as any).content).toContain("Available compaction strategies:");
-    expect((result as any).content).toContain("summarize");
-    expect((result as any).content).toContain("drop");
-    expect((result as any).content).toContain("summarize-short");
-    expect((result as any).content).toContain("token-aware");
-    expect((result as any).content).toContain("trim");
-  });
-
-  it("compact:strategy help shows usage", async () => {
-    const core = createMockCore();
-    const ext = createCompactionExtension(core);
-
-    const commandRegistry = new AgentCommandRegistry();
-    await (ext as any).hooks![HOOKS.COMMANDS_REGISTER]!({ registry: commandRegistry });
-
-    const strategyCmd = commandRegistry.get("compact:strategy");
-    // cmdValue is the full command string, handler slices off "compact:strategy" (16 chars)
-    const result = await (strategyCmd!.handler as any)({}, "compact:strategy help");
-    expect((result as any).content).toContain("Usage:");
-    expect((result as any).content).toContain("list");
-    expect((result as any).content).toContain("set");
-  });
-
-  it("compact:strategy set changes strategy", async () => {
-    const core = createMockCore();
-    const ext = createCompactionExtension(core);
-
-    const commandRegistry = new AgentCommandRegistry();
-    await (ext as any).hooks![HOOKS.COMMANDS_REGISTER]!({ registry: commandRegistry });
-
-    const strategyCmd = commandRegistry.get("compact:strategy");
-    // cmdValue is the full command string
-    const result = await (strategyCmd!.handler as any)({}, "compact:strategy drop");
+    const result = await (compactCmd.handler as any)({}, "compact drop");
     expect((result as any).content).toContain("Compaction strategy set to: drop");
     expect((ext as any).settings.strategy).toBe("drop");
+  });
+
+  it("compact:<strategy> switches strategy (colon form)", async () => {
+    const core = createMockCore();
+    const ext = createCompactionExtension(core);
+
+    const commandRegistry = new AgentCommandRegistry();
+    await (ext as any).hooks![HOOKS.COMMANDS_REGISTER]!({ registry: commandRegistry });
+
+    const compactCmd = commandRegistry.get("compact")!;
+    const result = await (compactCmd.handler as any)({}, "compact:summarize-short");
+    expect((result as any).content).toContain("Compaction strategy set to: summarize-short");
+    expect((ext as any).settings.strategy).toBe("summarize-short");
+  });
+
+  it("compact:<unknown> returns error listing available strategies", async () => {
+    const core = createMockCore();
+    const ext = createCompactionExtension(core);
+
+    const commandRegistry = new AgentCommandRegistry();
+    await (ext as any).hooks![HOOKS.COMMANDS_REGISTER]!({ registry: commandRegistry });
+
+    const compactCmd = commandRegistry.get("compact")!;
+    const result = await (compactCmd.handler as any)({}, "compact:foo");
+    expect((result as any).error).toContain("Unknown compaction strategy: 'foo'");
+    expect((result as any).error).toContain("summarize");
+    expect((result as any).error).toContain("drop");
+    // Strategy unchanged
+    expect((ext as any).settings.strategy).toBe("summarize");
+  });
+
+  it("compact <unknown> returns error with usage", async () => {
+    const core = createMockCore();
+    const ext = createCompactionExtension(core);
+
+    const commandRegistry = new AgentCommandRegistry();
+    await (ext as any).hooks![HOOKS.COMMANDS_REGISTER]!({ registry: commandRegistry });
+
+    const compactCmd = commandRegistry.get("compact")!;
+    const result = await (compactCmd.handler as any)({}, "compact not-a-strategy");
+    expect((result as any).error).toContain("Unknown argument: 'not-a-strategy'");
+    expect((result as any).error).toContain("Available strategies:");
+  });
+
+  it("compact:<strategy> with extra args returns error", async () => {
+    const core = createMockCore();
+    const ext = createCompactionExtension(core);
+
+    const commandRegistry = new AgentCommandRegistry();
+    await (ext as any).hooks![HOOKS.COMMANDS_REGISTER]!({ registry: commandRegistry });
+
+    const compactCmd = commandRegistry.get("compact")!;
+    const result = await (compactCmd.handler as any)({}, "compact:drop extra");
+    expect((result as any).error).toContain("Unexpected arguments");
+    expect((ext as any).settings.strategy).toBe("summarize");
+  });
+
+  it("compact <strategy> with extra args returns error", async () => {
+    const core = createMockCore();
+    const ext = createCompactionExtension(core);
+
+    const commandRegistry = new AgentCommandRegistry();
+    await (ext as any).hooks![HOOKS.COMMANDS_REGISTER]!({ registry: commandRegistry });
+
+    const compactCmd = commandRegistry.get("compact")!;
+    const result = await (compactCmd.handler as any)({}, "compact drop extra");
+    expect((result as any).error).toContain("Unexpected arguments");
+    expect((ext as any).settings.strategy).toBe("summarize");
   });
 
   it("compact command with keep parameter trims context", async () => {
@@ -928,5 +979,53 @@ describe("getModelConfig fallback lookup", () => {
     const result = await compactCmd.handler!(agent, "compact");
     expect(result).toBeDefined();
     expect(result.error).toBeUndefined();
+  });
+});
+
+// ── Completions ──────────────────────────────────────────────────────────────
+
+describe("compaction completions", () => {
+  const fakeAgent: any = {
+    compactionRegistry: {
+      getAll: () =>
+        ["summarize", "drop", "summarize-short", "token-aware", "trim"].map(
+          (name) => ({ name, description: "" }),
+        ),
+    },
+  };
+
+  const makeCtx = (command: string | undefined, commandArg = "", agent: any = fakeAgent) =>
+    ({ line: "", cursorPos: 0, command, commandArg, agent }) as any;
+
+  it("matcher matches space-form and colon-form compact commands", () => {
+    expect(compactMatcher(makeCtx("compact"))).toBe(true);
+    expect(compactMatcher(makeCtx("compact:sum"))).toBe(true);
+    expect(compactMatcher(makeCtx("model"))).toBe(false);
+    expect(compactMatcher(makeCtx(undefined))).toBe(false);
+  });
+
+  it("completes strategy names for space form using commandArg prefix", () => {
+    const options = compactCompletion(makeCtx("compact", "su"));
+    expect(options.map((o) => o.value)).toEqual(["summarize", "summarize-short"]);
+  });
+
+  it("completes strategy names for colon form using the typed suffix as prefix", () => {
+    const options = compactCompletion(makeCtx("compact:sum"));
+    expect(options.map((o) => o.value)).toEqual(["summarize", "summarize-short"]);
+  });
+
+  it("returns all strategies when no prefix typed", () => {
+    const options = compactCompletion(makeCtx("compact:"));
+    expect(options.map((o) => o.value)).toEqual([
+      "summarize",
+      "drop",
+      "summarize-short",
+      "token-aware",
+      "trim",
+    ]);
+  });
+
+  it("returns no options when agent has no compaction registry", () => {
+    expect(compactCompletion(makeCtx("compact", "", {}))).toEqual([]);
   });
 });

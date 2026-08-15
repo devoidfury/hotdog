@@ -251,15 +251,15 @@ describe("registerCommandCompletions", () => {
     } as never;
 
     const mockRegistry = {
-      all: () => new Map([["compact:strategy", { completion: () => [] }]]),
+      all: () => new Map([["example", { completion: () => [] }]]),
     };
 
     registerCommandCompletions(mockCompletionService, mockRegistry as never, "test-ext");
     const matcher = registeredProviders[0]!.matcher;
 
-    expect(matcher({ command: "compact:strategy", commandArg: "" })).toBe(true);
-    expect(matcher({ command: "compact:strategy:list", commandArg: "" })).toBe(true);
-    expect(matcher({ command: "compact", commandArg: "" })).toBe(false);
+    expect(matcher({ command: "example", commandArg: "" })).toBe(true);
+    expect(matcher({ command: "example:sub", commandArg: "" })).toBe(true);
+    expect(matcher({ command: "other", commandArg: "" })).toBe(false);
   });
 });
 

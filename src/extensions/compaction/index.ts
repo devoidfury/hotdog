@@ -280,59 +280,84 @@ export function create(core: CoreContext): ExtensionInstance | null {
       },
 
       /**
-       * Register commands for compaction.
+       * Register the compaction command.
+       *
+       * Syntaxes:
+       *   /compact                         - Run compaction with the current strategy
+       *   /compact [n] [--compact-debug]   - Trim context to n messages (optional debug)
+       *   /compact <strategy>              - Switch the compaction strategy
+       *   /compact:<strategy>              - Switch the compaction strategy (colon form)
        */
       [HOOKS.COMMANDS_REGISTER]: async (payload: CommandsRegisterPayload) => {
         const { registry } = payload;
-        // /compact [n] [--compact-debug]
+
+        const strategyNames = (): string =>
+          strategyRegistry.getAll().map((s) => s.name).join(", ");
+
+        const setStrategy = (name: string) => {
+          if (!strategyRegistry.get(name)) {
+            return {
+              action: ACTIONS.ERROR,
+              error: `Unknown compaction strategy: '${name}'. Available: ${strategyNames()}`,
+            };
+          }
+          settings.strategy = name;
+          return { action: ACTIONS.DISPLAY, content: `Compaction strategy set to: ${name}` };
+        };
+
         registry.register("compact", {
-          description: "Compact context (compact [n] [--compact-debug])",
-          matches: (cmd: string) => cmd.startsWith("compact") && !cmd.startsWith("compact:"),
-          handler: async (agent, cmdValue) => {
-            const parts = cmdValue?.split(/\s+/) || [];
-            let keep: number | null = null;
-            let debug = false;
-            for (const part of parts.slice(1)) {
-              if (part === "--compact-debug") {
-                debug = true;
-              } else if (!Number.isNaN(Number(part))) {
-                keep = parseInt(part, 10);
-              }
-            }
-            return await _handleCompactCommand(agent, { keep, debug });
-          },
-        });
-
-        // /compact:strategy [action] [name]
-        registry.register("compact:strategy", {
-          description: "Manage compaction strategy (compact:strategy [list|set <name>|help])",
-          matches: (cmd: string) => cmd.startsWith("compact:strategy"),
-          handler: async (_agent, cmdValue) => {
-            const rest = cmdValue?.slice(16).trim();
-            const parts = rest ? rest.split(/\s+/) : [];
-            const action = parts[0] || "list";
-            const name = parts[1] || null;
-
-            if (action === "help") {
-              return { action: ACTIONS.DISPLAY, content: `Usage: /compact:strategy [list|set <name>|help]\n  list   - Show available strategies\n  set    - Set the current strategy\n  help   - Show this help` };
-            } else if (action === "list" || action === "") {
-              const strategies = strategyRegistry.getAll().map((s) => ({
-                name: s.name,
-                description: s.description,
-              }));
-              const lines = ["Available compaction strategies:"];
-              for (const s of strategies) {
-                const marker = s.name === settings.strategy ? " (current)" : "";
-                lines.push(`  ${s.name}${marker} - ${s.description}`);
-              }
-              return { action: ACTIONS.DISPLAY, content: lines.join("\n") };
-            } else {
-              // Set strategy
-              settings.strategy = action;
-              return { action: ACTIONS.DISPLAY, content: `Compaction strategy set to: ${action}` };
-            }
-          },
+          description: "Compact context ([n] [--compact-debug]) or switch strategy (<strategy>, compact:<strategy>)",
+          matches: (cmd: string) =>
+            cmd === "compact" || cmd.startsWith("compact ") || cmd.startsWith("compact:"),
           completion,
+          handler: async (agent, cmdValue) => {
+            const parts = (cmdValue || "").split(/\s+/).filter(Boolean);
+            const head = parts[0] || "compact";
+            const rest = parts.slice(1);
+            const debug = rest.includes("--compact-debug");
+            const args = rest.filter((p) => p !== "--compact-debug");
+
+            // Colon form: /compact:<strategy>
+            if (head.startsWith("compact:")) {
+              if (args.length > 0) {
+                return {
+                  action: ACTIONS.ERROR,
+                  error: `Unexpected arguments: ${args.join(" ")}\nUsage: /compact:<strategy> (available: ${strategyNames()})`,
+                };
+              }
+              return setStrategy(head.slice("compact:".length));
+            }
+
+            // No args: run compaction
+            if (args.length === 0) {
+              return await _handleCompactCommand(agent, { keep: null, debug });
+            }
+
+            // Strategy name: switch strategy
+            const first = args[0] ?? "";
+            if (strategyRegistry.get(first)) {
+              if (args.length > 1) {
+                return {
+                  action: ACTIONS.ERROR,
+                  error: `Unexpected arguments: ${args.slice(1).join(" ")}\nUsage: /compact <strategy> (available: ${strategyNames()})`,
+                };
+              }
+              return setStrategy(first);
+            }
+
+            // Numeric: trim context to n messages
+            if (args.length === 1 && /^\d+$/.test(first)) {
+              return await _handleCompactCommand(agent, {
+                keep: parseInt(first, 10),
+                debug,
+              });
+            }
+
+            return {
+              action: ACTIONS.ERROR,
+              error: `Unknown argument: '${first}'\nUsage: /compact [n] [--compact-debug] | /compact <strategy> | /compact:<strategy>\nAvailable strategies: ${strategyNames()}`,
+            };
+          },
         });
       },
     },

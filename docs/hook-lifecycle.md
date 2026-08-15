@@ -400,8 +400,8 @@ Extensions can register slash commands and CLI subcommands.
 // compaction extension
 [HOOKS.COMMANDS_REGISTER]: async ({ registry }) => {
   registry.register('compact', {
-    description: 'Compact context',
-    matches: (cmd) => cmd.startsWith('compact'),
+    description: 'Compact context ([n]) or switch strategy (<strategy>, compact:<strategy>)',
+    matches: (cmd) => cmd === 'compact' || cmd.startsWith('compact ') || cmd.startsWith('compact:'),
     handler: async (agent, cmdValue) => { /* ... */ },
   });
 }

@@ -47,7 +47,8 @@ Commands:
   /tokens       - Show token usage
   /tools        - Toggle tool call display
   /compact [n] [--compact-debug]  - Compact context
-  /compact:strategy [name]        - Manage compaction strategies
+  /compact <strategy>             - Switch compaction strategy
+  /compact:<strategy>             - Switch compaction strategy
   /cancel       - Cancel current run
   /prompt:name [args] - Execute saved prompt
   /skill        - List skills

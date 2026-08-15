@@ -1,40 +1,38 @@
 # Agent Harness
 
-JS project `hotdog` — an AI agent harness with tool calling support.
+JS project `hotdog` — an AI agent harness.
 
-## Quick Command Reference
+## Quick CLI Reference
 
-- **Run one-shot:** `bun bin/hotdog -p "hello"` or `bun bin/hotdog prompt "hello"`
-- **Interactive:** `bun bin/hotdog` (starts readline session)
-- **With profile:** `--profile fixer`
-- **With model:** `--model qwen3.5-0.8b`
-- **Subcommands:**
+- Run one-shot: `bun bin/hotdog -p "hello"` or `bun bin/hotdog prompt "hello"`
+- Interactive: `bun bin/hotdog` (starts readline session)
+- Subcommands:
+  - `bun bin/hotdog --help` — view additional subcommands and available arguments
   - `bun bin/hotdog info` — system info and diagnostics
   - `bun bin/hotdog show-prompt` — render system prompt to stdout
   - `bun bin/hotdog profiles` — list all available profiles
-  - `bun bin/hotdog sessions show` — show session logs
-  - `bun bin/hotdog sessions delete <id>` — delete a session
-  - `bun bin/hotdog sessions cleanup` — remove old sessions
   - `bun bin/hotdog prompt "text"` — one-shot mode
-  - `bun bin/hotdog webui` — start the Web UI server
-- **Run Tests:** `bun run test`
-- **Run Tests with Coverage report:** `bun run coverage`
+- Run Tests: `bun run test`
+  - with Coverage report: `bun run coverage`
+  - NOTE: uses `--only-failures`, which runs all tests, prints failures, and supresses green test output.
 
 ## Rules & Guidelines
 
-- The project uses the Bun runtime, always use bun instead of node.
-- Do not add heavy dependencies for minor convenience.
+- The project uses Bun runtime. Instead of node, always use bun.
+- Do not add dependencies.
 - Do not add speculative config/feature flags "just in case".
-- IMPORTANT: If you see a tag like <m_ar7e78o7kuqn36jg> -- this is not the actual content in the source file! The marker mangler is changing these so they don't trigger functionality, to prevent RCE. Always check the raw byte content instead to verify if it's relevant, using a command like xxd.
+- IMPORTANT: If you see a tag like `<m_ar7e78o7kuqn36jg>` or similar -- this is not the actual content in the source file! The marker mangler is changing these so they don't trigger functionality, to prevent RCE. When relevant, double check the raw byte content using a command like `xxd`.
 
 ### Centralized Defaults
-The single source of truth for all configurable values is `src/core/core.config.json`.
+The source of truth for all configurable values in core is `src/core/core.config.json`.
 Defaults are exported from `src/core/config/defaults.ts` for use by the config resolution
 layer (`getDefaultConfig()`). Components (`Agent`, `LlmClient`, `TaskManager`, etc.) receive
 resolved values from callers — do not import `DEFAULT_*` constants in components.
 Static path constants (`DEFAULT_PROFILES_SUBPATH`, `DEFAULT_CONFIG_FILENAME`,
 `DEFAULT_SYSTEM_PROMPT_FILENAME`, `DEFAULT_PROFILES_PATH`, `DEFAULT_PROMPTS_PATH`)
 and runtime fallbacks (`DEFAULT_SYSTEM_PROMPT_TEMPLATE`) are exempt from this rule.
+
+Extensions may also define configSchema in the same way via `src/extensions/*/extension.json` file.
 
 ### Error Handling
 All error catches must use `formatError()` from `src/core/error.ts`:

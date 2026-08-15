@@ -68,8 +68,8 @@ const TYPE_EXTENSIONS: Record<string, string[]> = {
 };
 
 interface GrepToolOptions {
-  maxResults?: number;
-  maxOutputLines?: number;
+  maxResults: number;
+  maxOutputLines: number;
 }
 
 
@@ -377,10 +377,10 @@ export class GrepTool {
   private readonly maxResults: number;
   private readonly maxOutputLines: number;
 
-  constructor(options: GrepToolOptions = {}) {
+  constructor(options: GrepToolOptions) {
 
-    this.maxResults = options.maxResults!;
-    this.maxOutputLines = options.maxOutputLines!;
+    this.maxResults = options.maxResults;
+    this.maxOutputLines = options.maxOutputLines;
   }
 
   toToolDef() {

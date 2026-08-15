@@ -30,7 +30,7 @@ const IMAGE_EXTENSIONS: Record<string, string> = {
 };
 
 interface ReadToolOptions {
-  readLimit?: number;
+  readLimit: number;
   maxImageSize?: number;
 }
 
@@ -48,9 +48,9 @@ export class ReadTool {
   private readonly readLimit: number;
   private readonly maxImageSize: number;
 
-  constructor(options: ReadToolOptions = {}) {
+  constructor(options: ReadToolOptions) {
 
-    this.readLimit = options.readLimit!;
+    this.readLimit = options.readLimit;
     this.maxImageSize = options.maxImageSize ?? DEFAULT_MAX_IMAGE_SIZE;
   }
 

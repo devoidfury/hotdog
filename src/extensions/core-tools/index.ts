@@ -58,11 +58,11 @@ export const CORE_TOOL_NAMES = TOOL_DESCRIPTORS.map((d) => d.name);
 // Config values are pre-resolved with defaults from extension.json configSchema.
 
 interface CoreToolConfig {
-  readToolLimit?: number;
-  maxEditInputSize?: number;
-  grepMaxResults?: number;
-  findMaxResults?: number;
-  maxToolOutputLines?: number;
+  readToolLimit: number;
+  maxEditInputSize: number;
+  grepMaxResults: number;
+  findMaxResults: number;
+  maxToolOutputLines: number;
 }
 
 const TOOL_FACTORIES: Record<string, (config: CoreToolConfig) => Tool> = {
@@ -104,7 +104,7 @@ interface ToolFactory {
 /**
  * Create a tool factory that can create and register core tools.
  */
-export function createToolFactory(config: CoreToolConfig = {}): ToolFactory {
+export function createToolFactory(config: CoreToolConfig): ToolFactory {
   const createTool = (
     toolName: string,
     whitelist: string[] | null = null,

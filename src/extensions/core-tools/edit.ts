@@ -16,7 +16,7 @@ import { AssistantRetryableError } from "../../core/error.ts";
 import { ToolContext } from "../../core/extensions/types.ts";
 
 interface EditToolOptions {
-  maxEditInputSize?: number;
+  maxEditInputSize: number;
 }
 
 
@@ -45,9 +45,9 @@ export class EditTool {
 
   private readonly maxEditInputSize: number;
 
-  constructor(options: EditToolOptions = {}) {
+  constructor(options: EditToolOptions) {
 
-    this.maxEditInputSize = options.maxEditInputSize!;
+    this.maxEditInputSize = options.maxEditInputSize;
   }
 
   toToolDef() {

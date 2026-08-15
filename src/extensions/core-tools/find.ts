@@ -14,8 +14,8 @@ import { ToolContext } from "../../core/extensions/types.ts";
 const execFileAsync = util.promisify(execFile);
 
 interface FindToolOptions {
-  maxResults?: number;
-  maxOutputLines?: number;
+  maxResults: number;
+  maxOutputLines: number;
 }
 
 
@@ -146,10 +146,10 @@ export class FindTool {
   private readonly maxResults: number;
   private readonly maxOutputLines: number;
 
-  constructor(options: FindToolOptions = {}) {
+  constructor(options: FindToolOptions) {
 
-    this.maxResults = options.maxResults!;
-    this.maxOutputLines = options.maxOutputLines!;
+    this.maxResults = options.maxResults;
+    this.maxOutputLines = options.maxOutputLines;
   }
 
   toToolDef() {

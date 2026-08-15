@@ -6,6 +6,15 @@ import {
 import { SUBAGENT_TOOL_NAMES } from "../../src/extensions/subagents/index.ts";
 import { ToolRegistry } from "../../src/core/extensions/tool-registry.ts";
 
+// Mirrors the configSchema defaults in core-tools/extension.json
+const config = {
+  readToolLimit: 500,
+  maxEditInputSize: 16000,
+  grepMaxResults: 100,
+  findMaxResults: 200,
+  maxToolOutputLines: 600,
+};
+
 describe("CORE_TOOL_NAMES", () => {
   it("contains all expected core tools", () => {
     // project_info is included but disabled by default
@@ -51,7 +60,7 @@ describe("SUBAGENT_TOOL_NAMES", () => {
 
 describe("createToolFactory", () => {
   it("creates all expected core tools", () => {
-    const factory = createToolFactory();
+    const factory = createToolFactory(config);
     for (const name of ["overwrite", "append", "read", "edit", "grep", "find", "pager", "project_info"]) {
       const tool = factory.createTool(name);
       expect(tool, `${name} tool should be created`).not.toBeNull();
@@ -60,7 +69,7 @@ describe("createToolFactory", () => {
   });
 
   it("returns null for tools registered by other extensions", () => {
-    const factory = createToolFactory();
+    const factory = createToolFactory(config);
     // question → question-tool extension
     expect(factory.createTool("question")).toBeNull();
     // model → model-switch extension
@@ -74,40 +83,40 @@ describe("createToolFactory", () => {
   });
 
   it("returns null for disabled-by-default tools", () => {
-    const factory = createToolFactory();
+    const factory = createToolFactory(config);
     // explore is disabled by default (descriptor.disabled = true)
     expect(factory.createTool("explore")).toBeNull();
   });
 
   it("respects whitelist", () => {
-    const factory = createToolFactory();
+    const factory = createToolFactory(config);
     expect(factory.createTool("overwrite", ["overwrite", "read"])).not.toBeNull();
     expect(factory.createTool("edit", ["overwrite", "read"])).toBeNull();
   });
 
   it("enables disabled tools when in whitelist", () => {
-    const factory = createToolFactory();
+    const factory = createToolFactory(config);
     expect(factory.createTool("explore", ["explore"])).not.toBeNull();
   });
 });
 
 describe("createToolFactory - createAndRegister", () => {
   it("registers tool in registry", () => {
-    const factory = createToolFactory();
+    const factory = createToolFactory(config);
     const registry = new ToolRegistry();
     factory.createAndRegister("overwrite", registry);
     expect(registry.has("overwrite")).toBe(true);
   });
 
   it("skips tool when creation fails", () => {
-    const factory = createToolFactory();
+    const factory = createToolFactory(config);
     const registry = new ToolRegistry();
     factory.createAndRegister("nonexistent-tool", registry);
     expect(registry.has("nonexistent-tool")).toBe(false);
   });
 
   it("respects whitelist in createAndRegister", () => {
-    const factory = createToolFactory();
+    const factory = createToolFactory(config);
     const registry = new ToolRegistry();
     factory.createAndRegister("overwrite", registry, ["overwrite"]);
     expect(registry.has("overwrite")).toBe(true);
@@ -115,7 +124,7 @@ describe("createToolFactory - createAndRegister", () => {
   });
 
   it("skips disabled tools when not in whitelist or manager", () => {
-    const factory = createToolFactory();
+    const factory = createToolFactory(config);
     const registry = new ToolRegistry();
     // explore is disabled by default
     factory.createAndRegister("explore", registry);

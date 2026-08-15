@@ -52,7 +52,7 @@ Domain concepts for the hotdog AI agent harness. Implementation details are docu
 
 - **Model Switch** — Continues with same MessageLog (append-only). Not a reset. Rarely used, usually user-initiated.
 - **Profile Switch** — System prompt changes, MessageLog stays (unless reset). Intentional: LLM sees new instructions with same context.
-- **System Prompt Rebuild** — Only on model change, resume, or when absolutely necessary. Stale/wrong is preferred over regenerating (cache preservation).
+- **System Prompt Rebuild** — The cached prompt is invalidated and rebuilt on model change, resume, or explicit request (`/regenerate`). Model change always triggers a rebuild: the prompt advertises the active model, so a stale prompt is wrong, not just suboptimal.
 - **Error Recovery** — Errors returned to LLM as tool results so it can self-correct.
 - **Retry** — Retry with exponential backoff for transient LLM errors. Important fault tolerance mechanism.
 - **LLM Unreachable** — Retries N times with backoff, then times out and returns error to user. Configurable.

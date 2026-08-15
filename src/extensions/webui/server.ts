@@ -1,7 +1,7 @@
 // WebUI server — UI over HTTP with WebSockets.
 
 import { createWsServer, type HotdogServerSocket } from "../websocket/server.ts";
-import { createAuthMiddleware } from "../websocket/auth.ts";
+import { createAuthMiddleware, apiKeyEquals } from "../websocket/auth.ts";
 import { logger } from "../../core/logger.ts";
 import {
   CoreContext,
@@ -61,7 +61,7 @@ export async function createWebuiServer(
   }
 
   const authMiddleware = createAuthMiddleware({
-    validateApiKey: async (key: string) => key === apiKey,
+    validateApiKey: async (key: string) => apiKeyEquals(key, apiKey),
     tokenTtlMin: sessionTokenTtlMin,
   });
 

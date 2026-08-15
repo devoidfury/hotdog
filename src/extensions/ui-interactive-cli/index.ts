@@ -58,6 +58,9 @@ Commands:
   /reasoning none|minimal|low|high|xhigh|max|unset - Set reasoning effort level
 `;
 
+// In shellMode, the first word is checked to see if it's a command. The following
+// words are commonly used to start user input in a normal causal chat conversation,
+// almost certainly not the intended action, and often entered in lowercase.
 const IGNORED_CMDS = new Set([
   "alert",
   "as",
@@ -88,8 +91,6 @@ const IGNORED_CMDS = new Set([
 ]);
 const MIN_CMD_LEN = 2;
 
-// ── Types ──────────────────────────────────────────────────────────────────
-
 interface ShellCommandResult {
   content?: string;
   error?: string;
@@ -102,8 +103,6 @@ interface InteractiveSessionOptions {
   onSIGINT?: () => void;
   setupInput?: () => void;
 }
-
-// ── System Command Helpers ─────────────────────────────────────────────────
 
 /**
  * Check if a command name resolves to an executable on the system.
@@ -221,8 +220,6 @@ export async function executeShellCommand(
     });
   });
 }
-
-// ── AsyncInteractiveCliInput ──────────────────────────────────────────────
 
 interface QuestionDef {
   key: string;
@@ -347,11 +344,7 @@ export class AsyncInteractiveCliInput implements InputInterface {
 // Store reference for tool context
 let currentInput: InputInterface | null = null;
 
-// ── Interactive Session Helpers ────────────────────────────────────────────
-
-/**
- * Build the onQuit handler for CliChannel.
- */
+/** Build the onQuit handler for CliChannel. */
 export function buildOnQuitHandler(
   sessionManager: SessionManager,
   extensions: CoreContext["extensions"],
@@ -437,8 +430,6 @@ export async function buildInteractiveAgent(
 
   return agent;
 }
-
-// ── Interactive Session ────────────────────────────────────────────────────
 
 /**
  * Run the interactive CLI session.
@@ -666,8 +657,6 @@ export async function runInteractiveSession(
   }
 }
 
-// ── Slash Command Handler ──────────────────────────────────────────────────
-
 /**
  * Handle a slash command.
  * UI-only commands (quit, help) are handled directly; everything else
@@ -710,11 +699,7 @@ export function handleSlashCommand(
   );
 }
 
-// ── Extension Entry Point ──────────────────────────────────────────────────
-
-/**
- * Create the interactive-cli extension.
- */
+/** Create the interactive-cli extension. */
 export function create(core: CoreContext): ExtensionInstance {
   return {
     hooks: {
@@ -728,12 +713,8 @@ export function create(core: CoreContext): ExtensionInstance {
         });
       },
 
-      [HOOKS.AGENT_TOOL_CONTEXT]: (payload: unknown) => {
-        const toolCtx = (
-          payload as {
-            toolCtx: { set: (key: string, value: unknown) => void };
-          }
-        ).toolCtx;
+      [HOOKS.AGENT_TOOL_CONTEXT]: (payload) => {
+        const toolCtx = payload.toolCtx;
         if (currentInput) {
           toolCtx.set("input", currentInput);
         }

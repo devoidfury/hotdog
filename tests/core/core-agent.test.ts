@@ -721,6 +721,24 @@ describe('Agent — end-to-end loop', () => {
       await agent.ensureSystemPrompt();
       expect(agent.context.getSystemPrompt()).toContain('Test Chunk');
     });
+
+    it('clears the cached system prompt on model change and rebuilds with the new model', async () => {
+      const { agent, hooks } = createFixture({});
+      // Simulate an environment chunk that bakes the model name into the prompt
+      hooks.on(HOOKS.SYSTEM_PROMPT_BUILD, async ({ agent: a }: { agent: unknown }) => {
+        return { name: 'env-chunk', priority: 100, content: `Harness model: ${(a as { model: string }).model}` };
+      });
+
+      await agent.ensureSystemPrompt();
+      expect(agent.context.getSystemPrompt()).toContain('Harness model: test-model');
+
+      agent.model = 'replaced-model';
+      // The cached prompt must be invalidated on model change
+      expect(agent.context.getSystemPrompt()).toBeNull();
+
+      await agent.ensureSystemPrompt();
+      expect(agent.context.getSystemPrompt()).toContain('Harness model: replaced-model');
+    });
   });
 
 // resolveModelConfig tests moved to providers.test.ts

@@ -213,6 +213,9 @@ export class Agent implements AgentLike {
     // Clear tool def cache — different models may have different tool
     // requirements or capabilities, so stale definitions would be incorrect.
     this.#toolRegistry.clearToolDefs();
+    // Clear the cached system prompt so it is rebuilt (with the new model
+    // name) on the next turn.
+    this.context.clearSystemPrompt();
     this.hooks.notifyHooks(HOOKS.MODEL_CHANGE, { agent: this, oldModel, newModel: v });
     // Emit through the output sink so connected WS clients get notified
     if (this.sink) {

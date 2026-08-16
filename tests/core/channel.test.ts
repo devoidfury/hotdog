@@ -124,9 +124,10 @@ describe("Channel - send()", () => {
   });
 
   it("does not send when no current session", async () => {
-    const channel = new TestChannel({ sessionManager: createMockSessionManager() });
+    const freshSm = createMockSessionManager();
+    const channel = new TestChannel({ sessionManager: freshSm });
     await channel.send("hello");
-    expect(sm.enqueue).not.toHaveBeenCalled();
+    expect(freshSm.enqueue).not.toHaveBeenCalled();
   });
 
   it("does not send when channel is closed", async () => {
@@ -331,9 +332,10 @@ describe("Channel - control methods", () => {
   });
 
   it("does not cancel when no current session", () => {
-    const channel = new TestChannel({ sessionManager: createMockSessionManager() });
+    const freshSm = createMockSessionManager();
+    const channel = new TestChannel({ sessionManager: freshSm });
     channel.cancel();
-    expect(sm.cancel).not.toHaveBeenCalled();
+    expect(freshSm.cancel).not.toHaveBeenCalled();
   });
 
   it("interrupts current session", () => {
@@ -342,9 +344,10 @@ describe("Channel - control methods", () => {
   });
 
   it("does not interrupt when no current session", () => {
-    const channel = new TestChannel({ sessionManager: createMockSessionManager() });
+    const freshSm = createMockSessionManager();
+    const channel = new TestChannel({ sessionManager: freshSm });
     channel.interrupt();
-    expect(sm.interrupt).not.toHaveBeenCalled();
+    expect(freshSm.interrupt).not.toHaveBeenCalled();
   });
 
   it("closes channel and detaches from all sessions", () => {

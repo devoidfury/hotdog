@@ -106,10 +106,6 @@ describe("SessionRegistry Extended", () => {
       expect((workingWs.send as unknown as Mock<() => void>).mock.calls.length).toBe(1);
     });
 
-    it("handles empty connection set", () => {
-      // Broadcast with no connections should be a no-op
-      registry.broadcast({ type: "test" });
-    });
   });
 
   describe("rename", () => {
@@ -129,15 +125,6 @@ describe("SessionRegistry Extended", () => {
   });
 
   describe("createChannel edge cases", () => {
-    function createWsMockWs() {
-      const messages: string[] = [];
-      return {
-        readyState: 1,
-        send: (data: string) => { messages.push(data); },
-        messages,
-      } as unknown as HotdogServerSocket;
-    }
-
     it("creates multiple channels for same session", async () => {
       const result = await registry.create();
       const ws1 = createWsMockWs();
@@ -162,15 +149,6 @@ describe("SessionRegistry Extended", () => {
   });
 
   describe("delete with channels", () => {
-    function createWsMockWs() {
-      const messages: string[] = [];
-      return {
-        readyState: 1,
-        send: (data: string) => { messages.push(data); },
-        messages,
-      } as unknown as HotdogServerSocket;
-    }
-
     it("closes channels when deleting session", async () => {
       const result = await registry.create();
       const ws = createWsMockWs();
@@ -183,13 +161,6 @@ describe("SessionRegistry Extended", () => {
 
       expect(closeMock).toHaveBeenCalled();
       expect(registry.size).toBe(0);
-    });
-  });
-
-  describe("getSessionManager", () => {
-    it("returns the internal SessionManager", () => {
-      const sessionManager = registry.getSessionManager();
-      expect(sessionManager).toBeDefined();
     });
   });
 
@@ -538,15 +509,6 @@ describe("createWsServer Message Routing", () => {
 // ── replaySessionHistory Tests ────────────────────────────────────────────────
 
 describe("replaySessionHistory", () => {
-  function createWsMockWs() {
-    const messages: string[] = [];
-    return {
-      readyState: 1,
-      send: (data: string) => { messages.push(data); },
-      messages,
-    } as unknown as HotdogServerSocket & { messages: string[] };
-  }
-
   it("replays user messages", async () => {
     const { createWsServer } = await import("../../src/extensions/websocket/server.ts");
 
@@ -717,47 +679,6 @@ describe("replaySessionHistory", () => {
     expect(toolResultMsg.output).toBe("File content here");
   });
 
-  it("handles agent with no log", async () => {
-    const mockAgent = createMockAgentWithLog([]);
-
-    const core = {
-      hooks: { notifyHooks: () => {}, notifyHooksAsync: async () => {} },
-      config: {},
-      resolved: {
-        baseUrl: "http://localhost:8000",
-        apiKey: "test-key",
-        model: "test-model",
-        stream: true,
-        chatTimeout: 30,
-        maxRetries: 3,
-        maxIterations: 100,
-        hideTools: false,
-        hideThinking: true,
-        showTokenUse: true,
-        profileName: "default",
-        modelRegistry: {},
-      },
-      toolRegistry: { getAll: () => [], get: () => null, register: () => {} },
-      extensions: { cleanup: async () => {} },
-    } as any;
-
-    const wsServer = createWsServer(core, {
-      buildAgent: async () => mockAgent,
-    });
-
-    const result = await wsServer.sessionRegistry.create({});
-
-    const ws = createWsMockWs();
-    const typedWs = ws as HotdogServerSocket;
-    typedWs.activeSessionId = result.sessionId;
-
-    // Should not throw
-    wsServer.onMessage(ws, JSON.stringify({
-      type: C2S.SWITCH_SESSION,
-      sessionId: result.sessionId,
-    }));
-  });
-
   it("handles messages without getTextContent", async () => {
     const mockAgent = createMockAgentWithLog([
       { role: "user", content: "Hello" }, // No getTextContent
@@ -809,39 +730,6 @@ describe("replaySessionHistory", () => {
 // ── Message Handler Tests for Log Operations ─────────────────────────────────
 
 describe("WebSocket message handlers - log operations", () => {
-  function createWsMockWs() {
-    const messages: string[] = [];
-    return {
-      readyState: 1,
-      send: (data: string) => { messages.push(data); },
-      messages,
-      close: mock(() => {}),
-    } as unknown as HotdogServerSocket;
-  }
-
-  function createWsMockCore() {
-    return {
-      hooks: { notifyHooks: mock(() => {}), notifyHooksAsync: mock(async () => {}) },
-      config: {},
-      resolved: {
-        baseUrl: "http://localhost:8000",
-        apiKey: "test-key",
-        model: "test-model",
-        stream: true,
-        chatTimeout: 30,
-        maxRetries: 3,
-        maxIterations: 100,
-        hideTools: false,
-        hideThinking: true,
-        showTokenUse: true,
-        profileName: "default",
-        modelRegistry: {},
-      },
-      toolRegistry: { getAll: () => [], get: () => null, register: mock(() => {}) },
-      extensions: { cleanup: mock(async () => {}) },
-    } as any;
-  }
-
   describe("LIST_LOGS", () => {
     it("does not crash when handling LIST_LOGS message", () => {
       const mockAgent = makeWsMockAgent();

@@ -464,8 +464,8 @@ describe('Agent — lifecycle and state', () => {
     const { agent } = createAgentFixture({ mockLLM, stream: true });
     const runPromise = agent.run('Test streaming');
 
-    // Give the stream a moment to accumulate partial content
-    await new Promise(r => setTimeout(r, 30));
+    // Let the first chunk flush before checking accumulated content.
+    await new Promise(r => setTimeout(r, 0));
 
     // During streaming, content should be accumulating
     const midContent = agent.currentStreamingContent;

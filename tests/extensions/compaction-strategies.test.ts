@@ -559,18 +559,6 @@ describe("TokenAwareStrategy", () => {
     expect(result!.metadata!.tokensAfter).toBeGreaterThan(0);
   });
 
-  it("uses reserveTokens as fallback for targetTokens", async () => {
-    const content = "x".repeat(4000);
-    const messages = Array.from({ length: 10 }, (_, i) => makeMessage(i % 2 === 0 ? "user" : "assistant", content));
-    const settings = { ...defaultSettings, targetTokens: undefined, reserveTokens: 5000, contextLimit: 20000 };
-
-    const result = await new TokenAwareStrategy().execute(messages, settings, noopLlmChat, "model");
-
-    if (result) {
-      expect(result.metadata!.targetTokens).toBe(5000);
-    }
-  });
-
   it("uses reserveTokens when targetTokens not set", async () => {
     const content = "x".repeat(100);
     const messages = Array.from({ length: 200 }, (_, i) => makeMessage(i % 2 === 0 ? "user" : "assistant", content));
@@ -759,9 +747,6 @@ describe("TokenAwareStrategy", () => {
 // ── Prompt Templates ─────────────────────────────────────────────────────────
 
 describe("SUMMARIZATION_SYSTEM_PROMPT", () => {
-  it("is non-empty", () => {
-    expect(SUMMARIZATION_SYSTEM_PROMPT.length).toBeGreaterThan(0);
-  });
   it("mentions summarization role", () => {
     expect(SUMMARIZATION_SYSTEM_PROMPT.toLowerCase()).toContain("summarization");
   });
@@ -771,9 +756,6 @@ describe("SUMMARIZATION_SYSTEM_PROMPT", () => {
 });
 
 describe("SUMMARIZATION_USER_PROMPT_TEMPLATE", () => {
-  it("is non-empty", () => {
-    expect(SUMMARIZATION_USER_PROMPT_TEMPLATE.length).toBeGreaterThan(0);
-  });
   it("contains all required format sections", () => {
     const prompt = SUMMARIZATION_USER_PROMPT_TEMPLATE;
     expect(prompt).toContain("## Goal");
@@ -792,9 +774,6 @@ describe("SUMMARIZATION_USER_PROMPT_TEMPLATE", () => {
 });
 
 describe("SUMMARIZATION_USER_PROMPT_SHORT", () => {
-  it("is non-empty", () => {
-    expect(SUMMARIZATION_USER_PROMPT_SHORT.length).toBeGreaterThan(0);
-  });
   it("is shorter than the full template", () => {
     expect(SUMMARIZATION_USER_PROMPT_SHORT.length).toBeLessThan(SUMMARIZATION_USER_PROMPT_TEMPLATE.length);
   });

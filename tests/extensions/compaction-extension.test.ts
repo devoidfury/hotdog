@@ -131,11 +131,6 @@ describe("Compaction Extension Creation", () => {
     expect(list.length).toBe(expected.length);
   });
 
-  it("should use keepRecentMessages from config", () => {
-    const ext = createCompactionExtension(createMockCore({ enabled: true, keepRecentMessages: 4 }));
-    expect((ext as any).settings.keepRecentMessages).toBe(4);
-  });
- 
   for (const { strategy, extra } of [
     { strategy: "token-aware", extra: { reserveTokens: 4096 } },
     { strategy: "trim", extra: {} },
@@ -534,8 +529,9 @@ describe("Edge Cases", () => {
 
     const messages = [{ role: "system", content: "" }, ...context];
 
-    // Should not crash even with null model
+    // Should not crash even with a valid model
     await (ext as any).hooks![HOOKS.CONTEXT]!({ messages: messages as any, agent });
+    expect(agent.log.length).toBeLessThan(100);
   });
 
   it("should handle empty messages array in hook", async () => {
@@ -618,8 +614,8 @@ describe("Edge Cases", () => {
 
     await (ext as any).hooks![HOOKS.CONTEXT]!({ messages: messages as any, agent });
 
-    // Should handle mixed messages without crashing
-    expect(agent.log.length).toBeDefined();
+    // Should handle mixed message types without crashing or corrupting context
+    expect(agent.log.length).toBe(5);
   });
 
   it("should handle abortSignal that is already aborted", async () => {
@@ -724,6 +720,8 @@ describe("Edge Cases", () => {
     await expect(
       (ext as any).hooks![HOOKS.CONTEXT]!({ messages: messages as any, agent })
     ).resolves.toBeDefined();
+    // Cancellation aborts the summarization, so context is left untouched
+    expect(agent.log.length).toBe(context.length);
   });
 
   it("should handle compaction error gracefully", async () => {
@@ -776,6 +774,8 @@ describe("Edge Cases", () => {
     await expect(
       (ext as any).hooks![HOOKS.CONTEXT]!({ messages: messages as any, agent })
     ).resolves.toBeDefined();
+    // Failed summarization must not corrupt the context
+    expect(agent.log.length).toBe(context.length);
   });
 });
 

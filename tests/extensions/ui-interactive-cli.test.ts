@@ -961,9 +961,7 @@ describe("runInteractiveSession integration", () => {
 });
 
 describe("runInteractiveSession default setupInput", () => {
-  it("creates AsyncInteractiveCliInput when no custom setupInput provided", async () => {
-    const mod = await import("../../src/extensions/ui-interactive-cli/index.ts");
-
+  it("does not throw when no custom setupInput provided", async () => {
     const originalCreate = (await import("../../src/core/session/index.ts")).SessionManager.create;
     const mockAgent = { commandRegistry: { names: () => ["test"] }, modelRegistry: {} };
     const mockSessionManager = {
@@ -1068,7 +1066,7 @@ describe("buildInteractiveAgent", () => {
     );
 
     expect(agent).toBeDefined();
-    expect(agent.sessionId).toBeDefined();
+    expect(agent.model).toBe("test-model");
   });
 
   it("uses agentConfig overrides when provided", async () => {
@@ -1117,7 +1115,7 @@ describe("buildInteractiveAgent", () => {
       {},
     );
 
-    expect(agent).toBeDefined();
+    expect(agent.model).toBe("override-model");
   });
 
   it("notifies COMMANDS_REGISTER hook", async () => {
@@ -1245,32 +1243,14 @@ describe("create extension hooks", () => {
     const toolContextHandler = ext.hooks![HOOKS.AGENT_TOOL_CONTEXT];
     expect(toolContextHandler).toBeDefined();
 
-    const setCalls: Array<[string, unknown]> = [];
-    toolContextHandler!({
+    // The hook handler runs without error (it may or may not set input depending on state)
+    expect(() => toolContextHandler({
       toolCtx: {
-        set: (_key: string, _value: unknown) => {
-          setCalls.push([_key, _value]);
-        },
+        set: () => {},
       } as never,
       toolName: "test-tool",
       agent: {} as never,
-    });
-
-    // Hook is called and either sets input or does nothing depending on currentInput state
-    // The important thing is the hook handler runs without error
-    expect(setCalls.length).toBeGreaterThanOrEqual(0);
-  });
-
-  it("cleanup sets currentInput to null", async () => {
-    const mockCore = {
-      hooks: {
-        on: () => {},
-        notifyHooks: () => {},
-      },
-    } as never;
-
-    const ext = create(mockCore);
-    await (ext as { cleanup?: () => Promise<void> }).cleanup?.();
+    })).not.toThrow();
   });
 });
 

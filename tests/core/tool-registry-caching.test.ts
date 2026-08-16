@@ -1,6 +1,6 @@
 // Tests for ToolRegistry caching.
 
-import { describe, it, expect, test } from "bun:test";
+import { describe, it, expect } from "bun:test";
 import { ToolRegistry, type Tool } from "../../src/core/extensions/tool-registry.ts";
 import { Agent } from "../../src/core/agent.ts";
 import { HookSystem, HOOKS } from "../../src/core/hooks.ts";

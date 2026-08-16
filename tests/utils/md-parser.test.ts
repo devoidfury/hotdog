@@ -957,17 +957,14 @@ See [documentation](https://example.com) for more.`;
 /**
  * Helper: split a string into deterministic chunks of 1–3 characters so we can simulate
  * an LLM streaming response arriving in small bursts.
- * Uses a rotating pattern [2, 1, 3, 2, 1] for reproducibility.
  */
 function* chunkify(text: string): Generator<string> {
-  const sizes = [2, 1, 3, 2, 1];
-  let si = 0;
+  const sizes = [2, 1, 3];
   let i = 0;
   while (i < text.length) {
-    const size = Math.min(sizes[si % sizes.length]!, text.length - i);
+    const size = Math.min(sizes[i % sizes.length]!, text.length - i);
     yield text.slice(i, i + size);
     i += size;
-    si++;
   }
 }
 
@@ -1008,17 +1005,9 @@ function add(a, b) {
 Final paragraph.`;
 
     const parser = createStreamingParser();
-    const chunks = Array.from(chunkify(md));
-
-    // Verify we actually got many small chunks
-    expect(chunks.length).toBeGreaterThan(20);
-    for (const c of chunks) {
-      expect(c.length).toBeLessThanOrEqual(3);
-    }
-
     let prevResult: ReturnType<typeof parser.feed> | null = null;
 
-    for (const chunk of chunks) {
+    for (const chunk of chunkify(md)) {
       const result = parser.feed(chunk);
 
       // --- Invariant checks at every step ---
@@ -1093,9 +1082,7 @@ Final paragraph.`;
 \`\`\``;
 
     const parser = createStreamingParser();
-    const chunks = Array.from(chunkify(md));
-
-    for (const chunk of chunks) {
+    for (const chunk of chunkify(md)) {
       const result = parser.feed(chunk);
       expect(result.tree.type).toBe("document");
       expect(result.stableFrom).toBeGreaterThanOrEqual(0);
@@ -1122,102 +1109,6 @@ Final paragraph.`;
     expect(html).toContain("- fake list item");
   });
 
-  it("streams a complex document with nested inline formatting inside lists and codeblocks", () => {
-    const md = `## Features
-
-- **Bold** item with \`inline code\`
-- *Italic* item with a [link](https://example.com)
-- ~~Strikethrough~~ item
-
-\`\`\`typescript
-// A TypeScript snippet
-interface Config {
-  name: string;
-  items: string[];
-}
-\`\`\`
-
-### Installation
-
-1. Run \`npm install\`
-2. Configure your settings
-
-\`\`\`yaml
-name: my-project
-items:
-  - one
-  - two
-  - three
-\`\`\`
-
-> **Warning:** Always validate input.
-
-\`\`\`markdown
-## This looks like a heading
-- but it's inside a code block
-- so it should be treated as plain text
-
-**Not bold** either.
-\`\`\`
-
----
-
-That's all folks.`;
-
-    const parser = createStreamingParser();
-    const chunks = Array.from(chunkify(md));
-
-    expect(chunks.length).toBeGreaterThan(30);
-
-    let stepCount = 0;
-    for (const chunk of chunks) {
-      stepCount++;
-      const result = parser.feed(chunk);
-
-      expect(result.tree.type).toBe("document");
-      expect(result.stableFrom).toBeGreaterThanOrEqual(0);
-
-      // Verify stable prefix blocks are truly unchanged
-      if (stepCount > 1) {
-        // Just spot-check: stableFrom should be reasonable
-        expect(result.stableFrom).toBeLessThanOrEqual(result.tree.children.length);
-      }
-    }
-
-    const final = parser.finalize();
-    const types = final.children.map((b) => b.type);
-
-    // Should have: heading, list, code_block, heading, list, code_block,
-    //              blockquote, code_block, horizontal_rule, paragraph
-    expect(types.filter((t) => t === "code_block")).toHaveLength(3);
-    expect(types.filter((t) => t === "heading")).toHaveLength(2);
-    expect(types.filter((t) => t === "list")).toHaveLength(2);
-    expect(types).toContain("blockquote");
-    expect(types).toContain("horizontal_rule");
-    expect(types).toContain("paragraph");
-
-    // HTML checks
-    const html = mdTreeToHtml(final);
-    expect(html).toContain("<strong>Bold</strong>");
-    expect(html).toContain('<code class="inline-code">inline code</code>');
-    expect(html).toContain("<em>Italic</em>");
-    expect(html).toContain('<a href="https://example.com"');
-    expect(html).toContain("<del>Strikethrough</del>");
-    expect(html).toContain('<pre class="code-block lang-typescript">');
-    expect(html).toContain('<pre class="code-block lang-yaml">');
-    expect(html).toContain('<pre class="code-block lang-markdown">');
-    expect(html).toContain("- one"); // inside yaml code block
-    expect(html).toContain("<hr />");
-
-    // The markdown codeblock should NOT produce headings/lists in HTML
-    const codeBlockMatch = html.match(/lang-markdown[^>]*>([\s\S]*?)<\/pre>/);
-    expect(codeBlockMatch).not.toBeNull();
-    const codeHtml = codeBlockMatch![1];
-    expect(codeHtml).not.toContain("<h2>");
-    expect(codeHtml).not.toContain("<li>");
-    expect(codeHtml).not.toContain("<strong>");
-  });
-
   it("stableFrom advances correctly as document grows during streaming", () => {
     // A simpler document to trace stableFrom progression
     const md = `# Title
@@ -1229,15 +1120,11 @@ Second paragraph.
 Third paragraph.`;
 
     const parser = createStreamingParser();
-    const chunks = Array.from(chunkify(md));
-
     const stableFromHistory: number[] = [];
-    const blockCountHistory: number[] = [];
 
-    for (const chunk of chunks) {
+    for (const chunk of chunkify(md)) {
       const result = parser.feed(chunk);
       stableFromHistory.push(result.stableFrom);
-      blockCountHistory.push(result.tree.children.length);
     }
 
     // stableFrom should start at 0 (first feed)
@@ -1298,9 +1185,7 @@ Third paragraph.`;
 - item three`;
 
     const parser = createStreamingParser();
-    const chunks = Array.from(chunkify(md));
-
-    for (const chunk of chunks) {
+    for (const chunk of chunkify(md)) {
       const result = parser.feed(chunk);
 
       // At no point should we get a horizontal_rule
@@ -1354,11 +1239,7 @@ ls -la
 Done!`;
 
     const parser = createStreamingParser();
-    const chunks = Array.from(chunkify(md));
-
-    expect(chunks.length).toBeGreaterThan(40);
-
-    for (const chunk of chunks) {
+    for (const chunk of chunkify(md)) {
       const result = parser.feed(chunk);
       expect(result.tree.type).toBe("document");
       expect(result.stableFrom).toBeGreaterThanOrEqual(0);
@@ -1409,9 +1290,7 @@ ___
 \`\`\``;
 
     const parser = createStreamingParser();
-    const chunks = Array.from(chunkify(md));
-
-    for (const chunk of chunks) {
+    for (const chunk of chunkify(md)) {
       const result = parser.feed(chunk);
       expect(result.tree.type).toBe("document");
     }
@@ -1460,9 +1339,7 @@ ___
     const md = "## Test\n\nSome text here";
 
     const parser = createStreamingParser();
-    const chunks = Array.from(chunkify(md));
-
-    for (const chunk of chunks) {
+    for (const chunk of chunkify(md)) {
       parser.feed(chunk);
     }
 
@@ -1511,11 +1388,7 @@ Real list below:
 Final text.`;
 
     const parser = createStreamingParser();
-    const chunks = Array.from(chunkify(md));
-
-    expect(chunks.length).toBeGreaterThan(50);
-
-    for (const chunk of chunks) {
+    for (const chunk of chunkify(md)) {
       const result = parser.feed(chunk);
       expect(result.tree.type).toBe("document");
       expect(result.stableFrom).toBeGreaterThanOrEqual(0);

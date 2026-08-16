@@ -391,12 +391,6 @@ Content.
       expect(loader.getSkill("Test Skill")!.loaded).toBe(true);
     });
 
-    it("does nothing for non-existent skill name", () => {
-      const loader = new SkillsLoader("/non-existent");
-      // Should not throw
-      loader.activateSkill("nonexistent");
-    });
-
     it("preloads multiple skills", async () => {
       await createTempSkill("skill1", `---
 name: Skill One

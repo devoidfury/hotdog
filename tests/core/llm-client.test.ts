@@ -199,22 +199,6 @@ describe("LlmClient.buildChatRequest", () => {
   });
 });
 
-describe("LlmClient.chatStream", () => {
-  it("returns an async generator", () => {
-    const client = new LlmClient({
-      baseUrl: "http://test.com",
-      chatTimeoutSecs: 600,
-      maxRetries: 12,
-    });
-    const gen = client.chatStream(
-      [{ role: "user", content: "Hi" }],
-      "test-model",
-      [],
-    );
-    expect(gen[Symbol.asyncIterator]).toBeDefined();
-  });
-});
-
 describe("LlmClient.buildChatRequest reasoning_effort", () => {
   it("includes reasoning_effort when present in modelConfig", () => {
     const client = new LlmClient({ chatTimeoutSecs: 600, maxRetries: 12 });
@@ -418,7 +402,6 @@ describe("LlmClient.chatStreamWithModelConfig", () => {
     const client = new LlmClient({ chatTimeoutSecs: 30, maxRetries: 3, baseUrl: "http://test.com" });
 
     let doRequestCalled = false;
-    let processSseCalled = false;
 
     client._doRequest = async () => {
       doRequestCalled = true;
@@ -434,7 +417,6 @@ describe("LlmClient.chatStreamWithModelConfig", () => {
     };
 
     client._processSSE = async function* (_: Response) {
-      processSseCalled = true;
       yield { type: "content", content: "ok" };
     };
 
@@ -447,7 +429,6 @@ describe("LlmClient.chatStreamWithModelConfig", () => {
     }
 
     expect(doRequestCalled).toBe(true);
-    expect(processSseCalled).toBe(true);
-    expect(events).toHaveLength(1);
+    expect(events).toEqual([{ type: "content", content: "ok" }]);
   });
 });

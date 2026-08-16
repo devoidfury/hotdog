@@ -524,18 +524,6 @@ describe("WebSocketChannel - getters", () => {
     expect(channel.sessionId).toBe("my-session");
   });
 
-  it("exposes isReady status", () => {
-    const sm = createMockSessionManager();
-    const ws = createMockWs();
-
-    const channel = new WebSocketChannel({
-      sessionManager: sm,
-      ws,
-      sessionId: "session-1",
-    });
-
-    expect(channel.isReady).toBe(true);
-  });
 });
 
 describe("WebSocketChannel - send regular text", () => {

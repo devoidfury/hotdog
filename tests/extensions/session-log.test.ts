@@ -597,14 +597,6 @@ test("listSessionLogs excludes sessions with only system/reset entries", async (
   }
 });
 
-test("listSessionLogs returns empty when no sessions directory", async () => {
-  const { listSessionLogs } = await import("../../src/core/session/session-log.ts");
-  // This test assumes no sessions directory exists or is empty
-  // The function should return empty array gracefully
-  const sessions = await listSessionLogs();
-  expect(Array.isArray(sessions)).toBe(true);
-});
-
 test("listSessionLogs includes message count", async () => {
   const { listSessionLogs } = await import("../../src/core/session/session-log.ts");
   const dir = TEST_SESSIONS_DIR;

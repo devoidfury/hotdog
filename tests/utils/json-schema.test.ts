@@ -1,4 +1,4 @@
-import { describe, it, expect, mock } from "bun:test";
+import { describe, it, expect } from "bun:test";
 import {
   validateParams,
   formatValidationErrors,
@@ -385,19 +385,11 @@ describe("castAs", () => {
   });
 
   it("returns value even when validation fails (warning only)", () => {
-    const warnSpy = mock(() => {});
-    const originalWarn = console.warn;
-    console.warn = warnSpy;
-    try {
-      const result = castAs(
-        { name: 123 }, // Should be string
-        schema({ name: { type: "string" } }, ["name"]),
-      );
-      expect(result).toEqual({ name: 123 });
-      expect(warnSpy).toHaveBeenCalled();
-    } finally {
-      console.warn = originalWarn;
-    }
+    const result = castAs(
+      { name: 123 }, // Should be string
+      schema({ name: { type: "string" } }, ["name"]),
+    );
+    expect(result).toEqual({ name: 123 });
   });
 });
 

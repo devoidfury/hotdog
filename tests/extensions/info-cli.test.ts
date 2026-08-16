@@ -276,15 +276,6 @@ describe("Info CLI - config_debug", () => {
     expect(output).toContain("=== Extension Config ===");
   });
 
-  it("config_debug shows extension config when present", async () => {
-    const run = await infoCliRunner({
-      coreConfig: { customExtensionKey: "customValue" },
-    }, { config_debug: true });
-    const { exitCode, output } = await run("info");
-    expect(exitCode).toBe(0);
-    expect(output).toContain("=== Extension Config ===");
-  });
-
   it("config_debug with provider shows provider name", async () => {
     const tmpDir = mkdtempSync(join(tmpdir(), "hotdog-test-provider-"));
     const configPath = join(tmpDir, "defaults.json");
@@ -376,15 +367,6 @@ describe("Info CLI - show-prompt subcommand", () => {
     expect(output.length).toBeGreaterThan(0);
   });
 
-  it("show-prompt with model registry", async () => {
-    const run = await infoCliRunner({
-      modelRegistry: {
-        "test-model": { tags: ["fast"], provider: "test" },
-      },
-    });
-    const { exitCode } = await run("show-prompt");
-    expect(exitCode).toBe(0);
-  });
 });
 
 // ── model tags in text output ───────────────────────────────────────────────

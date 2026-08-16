@@ -8,7 +8,7 @@ import { ConfigError } from '../../src/core/error.ts';
 import type { LlmClient } from '../../src/core/llm-client/client.ts';
 import type { OutputEvent } from '../../src/core/context/output.ts';
 import { OUTPUT_EVENT } from '../../src/core/context/output.ts';
-import { describe, it, expect, beforeEach, afterEach } from 'bun:test';
+import { describe, it, expect, afterEach } from 'bun:test';
 import {
   MockLLMClient,
   MockTool,
@@ -24,11 +24,7 @@ import { expectCompletion, expectToolReturn } from '../test-helpers.ts';
 // ── Tests ───────────────────────────────────────────────────────────────────
 
 describe('Agent — end-to-end loop', () => {
-  let fixture: ReturnType<typeof createFixture> | null;
-
-  beforeEach(() => {
-    fixture = null; // created per-test
-  });
+  let fixture: ReturnType<typeof createFixture> | null = null;
 
   afterEach(() => {
     fixture?.agent.resetCancel();

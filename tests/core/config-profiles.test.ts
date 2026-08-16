@@ -1,6 +1,6 @@
 // Tests for config/profiles.js — profile loading and resolution.
 
-import { describe, it, expect, beforeEach } from "bun:test";
+import { describe, it, expect, beforeEach, afterEach } from "bun:test";
 import {
   resolveProfilesPath,
   loadProfileFile,
@@ -49,6 +49,10 @@ describe("loadProfileFile", () => {
 
   beforeEach(() => {
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "profiles-test-"));
+  });
+
+  afterEach(() => {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
   });
 
   it("loads a profile from a .profile.md file", async () => {
@@ -149,6 +153,10 @@ describe("loadProfileFiles", () => {
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "profiles-test-"));
   });
 
+  afterEach(() => {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  });
+
   it("loads all .profile.md files from directory", async () => {
     fs.writeFileSync(
       path.join(tmpDir, "profile-a.profile.md"),
@@ -217,6 +225,10 @@ describe("getVisibleWorkerProfiles", () => {
 
   beforeEach(() => {
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "profiles-test-"));
+  });
+
+  afterEach(() => {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
   });
 
   it("returns profiles with visibleWorker: true", async () => {

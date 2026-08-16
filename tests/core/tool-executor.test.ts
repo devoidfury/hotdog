@@ -1,6 +1,6 @@
 // ToolExecutor tests — tests the tool execution pipeline independently of Agent.
 
-import { describe, it, expect, beforeEach } from 'bun:test';
+import { describe, it, expect } from 'bun:test';
 import { ToolExecutor, createToolExecutor, type ToolExecutorDeps } from '../../src/core/tool-executor.ts';
 import type { ToolCall } from '../../src/core/context/message.ts';
 import { createToolRegistry } from '../../src/core/extensions/tool-registry.ts';

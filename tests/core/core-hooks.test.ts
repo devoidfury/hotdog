@@ -12,7 +12,7 @@ import {
   type GateAction,
   type InputHookResult,
 } from "../../src/core/hooks.ts";
-import { describe, it, expect, beforeEach, afterEach } from "bun:test";
+import { describe, it, expect } from "bun:test";
 
 describe("HookSystem.on() / notifyHooks()", () => {
   it("should call registered handlers on notifyHooks", () => {
@@ -155,15 +155,6 @@ describe("notifyHooks()", () => {
     expect(results).toEqual([1]);
   });
 
-  it("catches and logs errors from async handlers", async () => {
-    const hooks = createHooks();
-    hooks.on("test", async () => {
-      throw new Error("async boom");
-    });
-    hooks.notifyHooks("test", {});
-    // Errors are caught and logged, not thrown
-  });
-
   it("continues running other handlers after one fails", async () => {
     const hooks = createHooks();
     const calls: string[] = [];
@@ -181,11 +172,16 @@ describe("notifyHooks()", () => {
 
   it("handles sync errors in notifyHooks by catching and logging", async () => {
     const hooks = createHooks();
+    const calls: string[] = [];
     hooks.on("test", () => {
       throw new Error("sync error in notifyHooks");
     });
-    // Errors are caught and logged, not thrown
+    hooks.on("test", () => {
+      calls.push("after");
+    });
+    // Errors are caught and logged, not thrown; later handlers still run
     hooks.notifyHooks("test", {});
+    expect(calls).toEqual(["after"]);
   });
 
   it("handles both sync and async handlers together", async () => {

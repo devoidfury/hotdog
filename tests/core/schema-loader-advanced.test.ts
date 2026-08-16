@@ -1,7 +1,7 @@
 // Advanced tests for schema-loader.ts — resolveCast, resolveCompute,
 // compileSchemaKey, resolveExtensionConfig, and edge cases.
 
-import { describe, it, expect, beforeEach } from "bun:test";
+import { describe, it, expect } from "bun:test";
 import {
   resolveCast,
   resolveCompute,
@@ -130,8 +130,8 @@ describe("resolveCompute", () => {
   });
 
   it("handles JSON-parsable arguments", () => {
-    const fn = resolveCompute("joinConfigDir('\"prompts\"')");
-    expect(typeof fn).toBe("function");
+    const fn = resolveCompute("joinConfigDir('\"prompts\"')")!;
+    expect(fn({ configDir: "/tmp/config" })).toBe("/tmp/config/prompts");
   });
 });
 

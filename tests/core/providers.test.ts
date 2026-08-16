@@ -7,7 +7,9 @@ import {
   initSystemPromptTemplate,
   resetSystemPromptCache,
 } from "../../src/core/config/providers.ts";
-import { writeFileSync, unlinkSync } from "node:fs";
+import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
+import os from "node:os";
+import path from "node:path";
 
 // ── buildModelRegistry ──────────────────────────────────────────────────────
 
@@ -133,36 +135,37 @@ describe("resolveProvider", () => {
 // ── initSystemPromptTemplate ────────────────────────────────────────────────
 
 describe("initSystemPromptTemplate", () => {
-  beforeEach(() => { resetSystemPromptCache(); });
-  afterEach(() => { resetSystemPromptCache(); });
+  let tmpDir: string;
+
+  beforeEach(() => {
+    resetSystemPromptCache();
+    tmpDir = mkdtempSync(path.join(os.tmpdir(), "hotdog-prompt-test-"));
+  });
+
+  afterEach(() => {
+    resetSystemPromptCache();
+    rmSync(tmpDir, { recursive: true, force: true });
+  });
 
   it("loads template from explicit path", async () => {
-    const tmpFile = "/tmp/test-system-prompt.md";
+    const tmpFile = path.join(tmpDir, "template.md");
     writeFileSync(tmpFile, "This is a test template {{ role }}");
 
-    try {
-      const template = await initSystemPromptTemplate(tmpFile, undefined, undefined);
-      expect(template).toContain("This is a test template");
-      expect(template).toContain("{{ role }}");
-    } finally {
-      try { unlinkSync(tmpFile); } catch {}
-    }
+    const template = await initSystemPromptTemplate(tmpFile, undefined, undefined);
+    expect(template).toContain("This is a test template");
+    expect(template).toContain("{{ role }}");
   });
 
   it("returns cached template on second call", async () => {
-    const tmpFile = "/tmp/test-system-prompt2.md";
+    const tmpFile = path.join(tmpDir, "template.md");
     writeFileSync(tmpFile, "Template v1");
 
-    try {
-      const template1 = await initSystemPromptTemplate(tmpFile, undefined, undefined);
-      expect(template1).toBe("Template v1");
+    const template1 = await initSystemPromptTemplate(tmpFile, undefined, undefined);
+    expect(template1).toBe("Template v1");
 
-      writeFileSync(tmpFile, "Template v2");
-      const template2 = await initSystemPromptTemplate(tmpFile, undefined, undefined);
-      expect(template2).toBe("Template v1"); // cached
-    } finally {
-      try { unlinkSync(tmpFile); } catch {}
-    }
+    writeFileSync(tmpFile, "Template v2");
+    const template2 = await initSystemPromptTemplate(tmpFile, undefined, undefined);
+    expect(template2).toBe("Template v1"); // cached
   });
 
   it("falls back to default template when file not found", async () => {
@@ -177,21 +180,17 @@ describe("initSystemPromptTemplate", () => {
   });
 
   it("resetSystemPromptCache clears the cache", async () => {
-    const tmpFile = "/tmp/test-system-prompt3.md";
+    const tmpFile = path.join(tmpDir, "template.md");
     writeFileSync(tmpFile, "Template before reset");
 
-    try {
-      const template1 = await initSystemPromptTemplate(tmpFile, undefined, undefined);
-      expect(template1).toBe("Template before reset");
+    const template1 = await initSystemPromptTemplate(tmpFile, undefined, undefined);
+    expect(template1).toBe("Template before reset");
 
-      resetSystemPromptCache();
-      writeFileSync(tmpFile, "Template after reset");
+    resetSystemPromptCache();
+    writeFileSync(tmpFile, "Template after reset");
 
-      const template2 = await initSystemPromptTemplate(tmpFile, undefined, undefined);
-      expect(template2).toBe("Template after reset");
-    } finally {
-      try { unlinkSync(tmpFile); } catch {}
-    }
+    const template2 = await initSystemPromptTemplate(tmpFile, undefined, undefined);
+    expect(template2).toBe("Template after reset");
   });
 });
 

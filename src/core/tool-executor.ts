@@ -160,7 +160,8 @@ export class ToolExecutor {
     let result: unknown;
     let success = false;
     let stopLoop = false;
-    const maxRetries = this.#deps.maxRetries;
+    // Clamp to at least 1 so the tool always gets one attempt.
+    const maxRetries = Math.max(1, this.#deps.maxRetries);
     let attempts = 0;
 
     while (attempts < maxRetries) {

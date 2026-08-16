@@ -6,6 +6,7 @@ import type { ToolCall } from '../../src/core/context/message.ts';
 import { createToolRegistry } from '../../src/core/extensions/tool-registry.ts';
 import { createHooks } from '../../src/core/hooks.ts';
 import { Message } from '../../src/core/context/message.ts';
+import { TransientError } from '../../src/core/error.ts';
 import type { Tool, ToolDef } from '../../src/core/extensions/tool-registry.ts';
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
@@ -369,6 +370,47 @@ describe('ToolExecutor', () => {
 
       expect(result.toolResults[0]!.result).toContain('Error executing tool');
       expect(result.toolResults[0]!.result).toContain('boom');
+    });
+  });
+
+  describe('retry behavior', () => {
+    it('should still execute the tool once when maxRetries is 0', async () => {
+      let calls = 0;
+      const deps = createMockDeps({ maxRetries: 0 });
+      deps.toolRegistry.register('once', makeTestTool('once', async () => {
+        calls++;
+        return 'ran';
+      }));
+
+      const executor = createToolExecutor(deps);
+      const result = await executor.execute([{
+        id: 'call-1',
+        type: 'function',
+        function: { name: 'once', arguments: '{}' },
+      }]);
+
+      expect(calls).toBe(1);
+      expect(result.toolResults[0]!.result).toContain('ran');
+    });
+
+    it('should return an error result without retrying when a transient error occurs and maxRetries is 0', async () => {
+      let calls = 0;
+      const deps = createMockDeps({ maxRetries: 0, toolRetryDelay: 1 });
+      deps.toolRegistry.register('transient', makeTestTool('transient', async () => {
+        calls++;
+        throw new TransientError('flaky');
+      }));
+
+      const executor = createToolExecutor(deps);
+      const result = await executor.execute([{
+        id: 'call-1',
+        type: 'function',
+        function: { name: 'transient', arguments: '{}' },
+      }]);
+
+      expect(calls).toBe(1);
+      expect(result.toolResults[0]!.result).toContain('Error executing tool');
+      expect(result.toolResults[0]!.result).toContain('flaky');
     });
   });
 

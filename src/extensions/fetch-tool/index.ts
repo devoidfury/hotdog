@@ -16,6 +16,7 @@ import {
   ExtensionInstance,
   ToolsRegisterPayload,
   ToolContext,
+  getExtensionConfig,
 } from "../../core/extensions/types.ts";
 
 import { hotdogFetch, VALID_METHODS, METHODS_WITH_BODY } from "@utils/fetch.ts";
@@ -33,9 +34,22 @@ interface ParseResult {
   error: string | null;
 }
 
+interface FetchToolOptions {
+  timeoutMs: number;
+  maxBodyLength: number;
+}
+
 export class FetchTool {
   static readonly TOOL_NAME = "fetch";
   metadata: ToolMetadata = { sideEffects: true, difficulty: 1 };
+
+  readonly timeoutMs: number;
+  readonly maxBodyLength: number;
+
+  constructor(options: FetchToolOptions) {
+    this.timeoutMs = options.timeoutMs;
+    this.maxBodyLength = options.maxBodyLength;
+  }
 
   toToolDef() {
     return toolDef(
@@ -84,35 +98,39 @@ export class FetchTool {
     const { url, method, showOriginal } = args;
 
     try {
-      const resp = await hotdogFetch(url, args);
+      const resp = await hotdogFetch(url, args, this.timeoutMs);
       const contentType = resp.headers.get("content-type") || "";
       const isJson = contentType.includes("application/json");
 
-      let respBody: string;
+      // Hard cap on what we read off the wire so a huge or never-ending
+      // response cannot exhaust memory before the display cap applies.
+      const { text: rawBody, truncated: readTruncated } =
+        await readCappedBody(resp, MAX_RESPONSE_CHARS);
+
+      let respBody = rawBody;
       if (isJson) {
-        const rawBody = await resp.json();
-        respBody = JSON.stringify(rawBody);
-      } else {
-        respBody = await resp.text();
+        try {
+          respBody = JSON.stringify(JSON.parse(rawBody));
+        } catch {
+          // Truncated or malformed JSON -- keep the raw text.
+        }
       }
 
       let bodyLength = respBody.length;
       const reason = resp.statusText || "Unknown";
 
-      // TODO: move this constant to setting
-      const MAX_BODY_LEN = 8000;
-      let truncate = bodyLength > MAX_BODY_LEN;
+      let truncated = readTruncated || bodyLength > this.maxBodyLength;
 
       // When showOriginal is not true, convert HTML to GFM using our
       // built-in HTMLRewriter-based converter.
       if (!showOriginal && !isJson && contentType.includes("html")) {
         respBody = htmlToMarkdown(respBody);
-        truncate = respBody.length > MAX_BODY_LEN;
         bodyLength = respBody.length;
+        truncated = readTruncated || bodyLength > this.maxBodyLength;
       }
 
       return ToolResult.ok(
-        truncate ? respBody.slice(0, MAX_BODY_LEN) : respBody,
+        truncated ? respBody.slice(0, this.maxBodyLength) : respBody,
       ).withEntries({
         url,
         method,
@@ -120,12 +138,22 @@ export class FetchTool {
         status_text: reason,
         content_type: contentType,
         body_length: String(bodyLength),
-        ...(truncate ? { truncated: "true" } : {}),
+        ...(truncated ? { truncated: "true" } : {}),
       });
     } catch (e: unknown) {
-      const msg = (e as Error).message || String(e);
-      if (msg.includes("timeout") || msg.includes("timed out")) {
-        throw new TransientError(`Request to ${url} timed out`);
+      const err = e as Error;
+      const msg = err.message || String(e);
+      if (
+        err.name === "TimeoutError" ||
+        msg.includes("timed out") ||
+        msg.includes("timeout")
+      ) {
+        throw new TransientError(
+          `Request to ${url} timed out after ${this.timeoutMs}ms`,
+        );
+      }
+      if (err.name === "AbortError" || msg.includes("aborted")) {
+        throw new TransientError(`Request to ${url} was aborted`);
       }
       if (msg.includes("connect") || msg.includes("network")) {
         throw new TransientError(`Connection failed for ${url}: ${msg}`);
@@ -172,9 +200,64 @@ function parseArgs(
   return { args: { url, method, headers, body, showOriginal }, error: null };
 }
 
+/**
+ * Hard cap on characters read from the response body (memory safety).
+ * The display cap (maxBodyLength) is much smaller; this only prevents
+ * huge responses from being fully materialized in memory.
+ */
+const MAX_RESPONSE_CHARS = 100_000;
+
+/**
+ * Read a response body up to a character cap. Stops reading (and releases
+ * the connection) once the cap is exceeded, so huge responses are bounded
+ * in memory. Abort/timeout errors from the fetch signal propagate.
+ *
+ * @param resp - The Response to read.
+ * @param maxChars - Maximum characters to accumulate.
+ * @returns The (possibly capped) text and whether the body was cut off.
+ */
+async function readCappedBody(
+  resp: Response,
+  maxChars: number,
+): Promise<{ text: string; truncated: boolean }> {
+  const body = resp.body;
+  if (!body) {
+    const text = await resp.text();
+    return { text: text.slice(0, maxChars), truncated: text.length > maxChars };
+  }
+  const reader = body.getReader();
+  const decoder = new TextDecoder();
+  let text = "";
+  let truncated = false;
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    text += decoder.decode(value, { stream: true });
+    if (text.length > maxChars) {
+      truncated = true;
+      break;
+    }
+  }
+  if (truncated) {
+    // Stop pulling from the connection once the cap is hit.
+    await reader.cancel().catch(() => {});
+  } else {
+    text += decoder.decode();
+  }
+  return { text: text.slice(0, maxChars), truncated };
+}
+
 /** Extension Entry Point. Create the fetch-tool extension. */
-export function create(_core: CoreContext): ExtensionInstance {
-  const fetchTool = new FetchTool();
+export function create(core: CoreContext): ExtensionInstance {
+  // Config defaults come from extension.json configSchema
+  const config = getExtensionConfig<{
+    maxBodyLength: number;
+    fetchTimeoutMs: number;
+  }>(core, "fetchTool");
+  const fetchTool = new FetchTool({
+    maxBodyLength: config.maxBodyLength,
+    timeoutMs: config.fetchTimeoutMs,
+  });
 
   return {
     hooks: {

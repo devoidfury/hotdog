@@ -1,0 +1,95 @@
+// Tests for the hotdogFetch wrapper -- method validation, optional
+// timeout, and composition of caller-provided abort signals.
+
+import { describe, it, expect, beforeAll, afterAll } from "bun:test";
+import { hotdogFetch, VALID_METHODS, METHODS_WITH_BODY } from "../../src/utils/fetch.ts";
+
+const TEST_PORT = 18933;
+const BASE_URL = `http://localhost:${TEST_PORT}`;
+
+let server: ReturnType<typeof Bun.serve> | null = null;
+
+beforeAll(() => {
+  server = Bun.serve({
+    port: TEST_PORT,
+    fetch(req) {
+      const url = new URL(req.url);
+      // /slow — responds after a 3s delay (timeout tests)
+      if (url.pathname === "/slow") {
+        return new Promise<Response>((resolve) =>
+          setTimeout(() => resolve(new Response("slow")), 3000),
+        );
+      }
+      return new Response("ok", { headers: { "Content-Type": "text/plain" } });
+    },
+  });
+});
+
+afterAll(() => {
+  server?.stop(true);
+  server = null;
+});
+
+describe("hotdogFetch", () => {
+  it("performs a plain GET without signals", async () => {
+    const resp = await hotdogFetch(`${BASE_URL}/`);
+    expect(resp.ok).toBe(true);
+    expect(await resp.text()).toBe("ok");
+  });
+
+  it("throws on unsupported HTTP methods", async () => {
+    await expect(
+      hotdogFetch(`${BASE_URL}/`, { method: "OPTIONS" }),
+    ).rejects.toThrow(/Invalid HTTP method/);
+  });
+
+  it("exposes the method allow-lists", () => {
+    expect(VALID_METHODS).toEqual(["GET", "POST", "PUT", "DELETE", "PATCH", "HEAD"]);
+    expect(METHODS_WITH_BODY).toEqual(["POST", "PUT", "PATCH"]);
+  });
+
+  it("aborts when the caller's signal fires (no timeout given)", async () => {
+    const controller = new AbortController();
+    setTimeout(() => controller.abort(), 100);
+    const t0 = Date.now();
+    await expect(
+      hotdogFetch(`${BASE_URL}/slow`, { signal: controller.signal }),
+    ).rejects.toThrow();
+    expect(Date.now() - t0).toBeLessThan(2000);
+  });
+
+  it("aborts with TimeoutError when only a timeout is given", async () => {
+    const t0 = Date.now();
+    await expect(
+      hotdogFetch(`${BASE_URL}/slow`, undefined, 300),
+    ).rejects.toThrow();
+    // Must fire near the timeout, not at the server's 3s delay.
+    expect(Date.now() - t0).toBeLessThan(2000);
+  });
+
+  it("honors a caller signal that aborts before the timeout", async () => {
+    const controller = new AbortController();
+    setTimeout(() => controller.abort(), 100);
+    const t0 = Date.now();
+    // Caller aborts at ~100ms, well before the 3s timeout.
+    await expect(
+      hotdogFetch(`${BASE_URL}/slow`, { signal: controller.signal }, 3000),
+    ).rejects.toThrow();
+    expect(Date.now() - t0).toBeLessThan(2000);
+  });
+
+  it("still times out when the caller signal never fires", async () => {
+    const controller = new AbortController(); // never aborted
+    const t0 = Date.now();
+    await expect(
+      hotdogFetch(`${BASE_URL}/slow`, { signal: controller.signal }, 300),
+    ).rejects.toThrow();
+    expect(Date.now() - t0).toBeLessThan(2000);
+  });
+
+  it("ignores non-positive timeouts", async () => {
+    // A 0/negative timeout must not abort a fast request.
+    const resp = await hotdogFetch(`${BASE_URL}/`, undefined, 0);
+    expect(await resp.text()).toBe("ok");
+  });
+});

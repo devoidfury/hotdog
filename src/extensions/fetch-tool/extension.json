@@ -16,6 +16,11 @@
           "type": "number",
           "default": 8000,
           "description": "Maximum number of characters to return before truncating responses."
+        },
+        "fetchTimeoutMs": {
+          "type": "number",
+          "default": 30000,
+          "description": "Timeout in milliseconds for requests (headers and body). Slow or dead hosts abort instead of hanging the agent."
         }
       },
       "additionalProperties": false,

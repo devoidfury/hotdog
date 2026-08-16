@@ -746,9 +746,11 @@ Extensions register their own configuration namespaces. Each extension's config 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
 | `enabled` | `boolean` | `true` | Enable/disable the extension. |
+| `maxBodyLength` | `number` | `8000` | Maximum number of characters to return before truncating responses. |
+| `fetchTimeoutMs` | `number` | `30000` | Timeout in milliseconds for requests (headers and body). Slow or dead hosts abort instead of hanging the agent. |
 
 ```json
-{ "fetchTool": { "enabled": true } }
+{ "fetchTool": { "enabled": true, "fetchTimeoutMs": 15000 } }
 ```
 
 ### `compaction`

@@ -91,6 +91,28 @@ function startTestServer(): void {
         });
       }
 
+      // /slow — responds after a 2s delay (timeout tests)
+      if (url.pathname === "/slow") {
+        return new Promise<Response>((resolve) =>
+          setTimeout(
+            () =>
+              resolve(
+                new Response("slow", {
+                  headers: { "Content-Type": "text/plain" },
+                }),
+              ),
+            2000,
+          ),
+        );
+      }
+
+      // /huge — large response body (memory cap + truncation tests)
+      if (url.pathname === "/huge") {
+        return new Response("x".repeat(500_000), {
+          headers: { "Content-Type": "text/plain" },
+        });
+      }
+
       // Default: 404
       return new Response("Not Found", {
         status: 404,
@@ -115,7 +137,7 @@ describe("FetchTool", () => {
   });
 
   it("generates tool definition with all HTTP methods", () => {
-    const tool = new FetchTool();
+    const tool = new FetchTool({ timeoutMs: 30000, maxBodyLength: 8000 });
     const def = tool.toToolDef();
     expect(def.function.name).toBe("fetch");
     expect(def.function.parameters.required).toEqual(["url"]);
@@ -128,7 +150,7 @@ describe("FetchTool", () => {
   });
 
   it("generates call display for GET request", () => {
-    const tool = new FetchTool();
+    const tool = new FetchTool({ timeoutMs: 30000, maxBodyLength: 8000 });
     const display = tool.callDisplay(
       JSON.stringify({ url: "https://example.com", method: "GET" }),
     );
@@ -137,7 +159,7 @@ describe("FetchTool", () => {
   });
 
   it("generates call display for POST request", () => {
-    const tool = new FetchTool();
+    const tool = new FetchTool({ timeoutMs: 30000, maxBodyLength: 8000 });
     const display = tool.callDisplay(
       JSON.stringify({ url: "https://api.example.com/data", method: "POST" }),
     );
@@ -145,7 +167,7 @@ describe("FetchTool", () => {
   });
 
   it("truncates long URLs in display", () => {
-    const tool = new FetchTool();
+    const tool = new FetchTool({ timeoutMs: 30000, maxBodyLength: 8000 });
     const longUrl = "https://example.com/" + "a".repeat(50);
     const display = tool.callDisplay(JSON.stringify({ url: longUrl }));
     expect(display).toContain("...");
@@ -156,31 +178,31 @@ describe("FetchTool", () => {
 
 describe("FetchTool input validation", () => {
   it("returns error for missing URL", async () => {
-    const tool = new FetchTool();
+    const tool = new FetchTool({ timeoutMs: 30000, maxBodyLength: 8000 });
     const result = await tool.execute(JSON.stringify({ method: "GET" }));
     expect(getDisplay(result)).toContain("Missing required argument: url");
   });
 
   it("returns error for empty input", async () => {
-    const tool = new FetchTool();
+    const tool = new FetchTool({ timeoutMs: 30000, maxBodyLength: 8000 });
     const result = await tool.execute("");
     expect(getDisplay(result)).toContain("Missing required argument: url");
   });
 
   it("returns error for null input", async () => {
-    const tool = new FetchTool();
+    const tool = new FetchTool({ timeoutMs: 30000, maxBodyLength: 8000 });
     const result = await tool.execute(null);
     expect(getDisplay(result)).toContain("Missing required argument: url");
   });
 
   it("returns error for invalid JSON", async () => {
-    const tool = new FetchTool();
+    const tool = new FetchTool({ timeoutMs: 30000, maxBodyLength: 8000 });
     const result = await tool.execute("not valid json");
     expect(getDisplay(result)).toContain("Error parsing arguments");
   });
 
   it("returns error for invalid HTTP method", async () => {
-    const tool = new FetchTool();
+    const tool = new FetchTool({ timeoutMs: 30000, maxBodyLength: 8000 });
     const result = await tool.execute(
       JSON.stringify({ url: `${BASE_URL}/html`, method: "INVALID" }),
     );
@@ -188,7 +210,7 @@ describe("FetchTool input validation", () => {
   });
 
   it("normalizes method to uppercase", async () => {
-    const tool = new FetchTool();
+    const tool = new FetchTool({ timeoutMs: 30000, maxBodyLength: 8000 });
     let result: unknown;
     let threw = false;
     try {
@@ -205,7 +227,7 @@ describe("FetchTool input validation", () => {
   });
 
   it("handles object input", async () => {
-    const tool = new FetchTool();
+    const tool = new FetchTool({ timeoutMs: 30000, maxBodyLength: 8000 });
     let result: unknown;
     let threw = false;
     try {
@@ -220,7 +242,7 @@ describe("FetchTool input validation", () => {
 
   for (const val of [true, false, "true"]) {
     it(`accepts showOriginal: ${JSON.stringify(val)} without parse error`, async () => {
-      const tool = new FetchTool();
+      const tool = new FetchTool({ timeoutMs: 30000, maxBodyLength: 8000 });
       let result: unknown;
       let threw = false;
       try {
@@ -251,7 +273,7 @@ describe("FetchTool integration", () => {
 
   describe("HTML handling", () => {
     it("converts HTML to GFM when showOriginal is not true", async () => {
-      const tool = new FetchTool();
+      const tool = new FetchTool({ timeoutMs: 30000, maxBodyLength: 8000 });
       const result = await tool.execute(
         JSON.stringify({ url: `${BASE_URL}/html` }),
       );
@@ -267,7 +289,7 @@ describe("FetchTool integration", () => {
     });
 
     it("returns original HTML when showOriginal is true", async () => {
-      const tool = new FetchTool();
+      const tool = new FetchTool({ timeoutMs: 30000, maxBodyLength: 8000 });
       const result = await tool.execute(
         JSON.stringify({ url: `${BASE_URL}/html`, showOriginal: true }),
       );
@@ -280,7 +302,7 @@ describe("FetchTool integration", () => {
 
   describe("JSON handling", () => {
     it("returns JSON content as-is regardless of showOriginal", async () => {
-      const tool = new FetchTool();
+      const tool = new FetchTool({ timeoutMs: 30000, maxBodyLength: 8000 });
       const result = await tool.execute(
         JSON.stringify({ url: `${BASE_URL}/json` }),
       );
@@ -293,7 +315,7 @@ describe("FetchTool integration", () => {
     });
 
     it("returns JSON content unchanged when showOriginal is true", async () => {
-      const tool = new FetchTool();
+      const tool = new FetchTool({ timeoutMs: 30000, maxBodyLength: 8000 });
       const result = await tool.execute(
         JSON.stringify({ url: `${BASE_URL}/json`, showOriginal: true }),
       );
@@ -307,7 +329,7 @@ describe("FetchTool integration", () => {
 
   describe("HTTP methods", () => {
     it("sends GET request", async () => {
-      const tool = new FetchTool();
+      const tool = new FetchTool({ timeoutMs: 30000, maxBodyLength: 8000 });
       const result = await tool.execute(
         JSON.stringify({ url: `${BASE_URL}/echo`, method: "GET" }),
       );
@@ -316,7 +338,7 @@ describe("FetchTool integration", () => {
     });
 
     it("sends POST request with body", async () => {
-      const tool = new FetchTool();
+      const tool = new FetchTool({ timeoutMs: 30000, maxBodyLength: 8000 });
       const result = await tool.execute(
         JSON.stringify({
           url: `${BASE_URL}/echo`,
@@ -330,7 +352,7 @@ describe("FetchTool integration", () => {
     });
 
     it("sends PUT request with body", async () => {
-      const tool = new FetchTool();
+      const tool = new FetchTool({ timeoutMs: 30000, maxBodyLength: 8000 });
       const result = await tool.execute(
         JSON.stringify({
           url: `${BASE_URL}/echo`,
@@ -344,7 +366,7 @@ describe("FetchTool integration", () => {
     });
 
     it("sends PATCH request with body", async () => {
-      const tool = new FetchTool();
+      const tool = new FetchTool({ timeoutMs: 30000, maxBodyLength: 8000 });
       const result = await tool.execute(
         JSON.stringify({
           url: `${BASE_URL}/echo`,
@@ -358,7 +380,7 @@ describe("FetchTool integration", () => {
     });
 
     it("sends DELETE request", async () => {
-      const tool = new FetchTool();
+      const tool = new FetchTool({ timeoutMs: 30000, maxBodyLength: 8000 });
       const result = await tool.execute(
         JSON.stringify({ url: `${BASE_URL}/echo`, method: "DELETE" }),
       );
@@ -367,7 +389,7 @@ describe("FetchTool integration", () => {
     });
 
     it("sends HEAD request", async () => {
-      const tool = new FetchTool();
+      const tool = new FetchTool({ timeoutMs: 30000, maxBodyLength: 8000 });
       const result = await tool.execute(
         JSON.stringify({ url: `${BASE_URL}/html`, method: "HEAD" }),
       );
@@ -378,7 +400,7 @@ describe("FetchTool integration", () => {
 
   describe("custom headers", () => {
     it("sends custom headers", async () => {
-      const tool = new FetchTool();
+      const tool = new FetchTool({ timeoutMs: 30000, maxBodyLength: 8000 });
       const result = await tool.execute(
         JSON.stringify({
           url: `${BASE_URL}/headers`,
@@ -392,7 +414,7 @@ describe("FetchTool integration", () => {
 
   describe("status codes", () => {
     it("handles 200 OK", async () => {
-      const tool = new FetchTool();
+      const tool = new FetchTool({ timeoutMs: 30000, maxBodyLength: 8000 });
       const result = await tool.execute(
         JSON.stringify({ url: `${BASE_URL}/status/200` }),
       );
@@ -401,7 +423,7 @@ describe("FetchTool integration", () => {
     });
 
     it("handles 404 Not Found", async () => {
-      const tool = new FetchTool();
+      const tool = new FetchTool({ timeoutMs: 30000, maxBodyLength: 8000 });
       const result = await tool.execute(
         JSON.stringify({ url: `${BASE_URL}/status/404` }),
       );
@@ -410,7 +432,7 @@ describe("FetchTool integration", () => {
     });
 
     it("handles 500 Internal Server Error", async () => {
-      const tool = new FetchTool();
+      const tool = new FetchTool({ timeoutMs: 30000, maxBodyLength: 8000 });
       const result = await tool.execute(
         JSON.stringify({ url: `${BASE_URL}/status/500` }),
       );
@@ -421,7 +443,7 @@ describe("FetchTool integration", () => {
 
   describe("metadata", () => {
     it("returns correct metadata fields", async () => {
-      const tool = new FetchTool();
+      const tool = new FetchTool({ timeoutMs: 30000, maxBodyLength: 8000 });
       const result = await tool.execute(
         JSON.stringify({ url: `${BASE_URL}/json` }),
       );
@@ -433,7 +455,7 @@ describe("FetchTool integration", () => {
     });
 
     it("reports body_length correctly", async () => {
-      const tool = new FetchTool();
+      const tool = new FetchTool({ timeoutMs: 30000, maxBodyLength: 8000 });
       const result = await tool.execute(
         JSON.stringify({ url: `${BASE_URL}/plaintext` }),
       );
@@ -444,7 +466,7 @@ describe("FetchTool integration", () => {
 
   describe("plain text", () => {
     it("returns plain text content unchanged", async () => {
-      const tool = new FetchTool();
+      const tool = new FetchTool({ timeoutMs: 30000, maxBodyLength: 8000 });
       const result = await tool.execute(
         JSON.stringify({ url: `${BASE_URL}/plaintext` }),
       );
@@ -456,7 +478,7 @@ describe("FetchTool integration", () => {
 
   describe("empty responses", () => {
     it("handles empty response body", async () => {
-      const tool = new FetchTool();
+      const tool = new FetchTool({ timeoutMs: 30000, maxBodyLength: 8000 });
       const result = await tool.execute(
         JSON.stringify({ url: `${BASE_URL}/empty` }),
       );
@@ -468,10 +490,34 @@ describe("FetchTool integration", () => {
 
   describe("connection errors", () => {
     it("throws TransientError on unreachable host", async () => {
-      const tool = new FetchTool();
+      const tool = new FetchTool({ timeoutMs: 30000, maxBodyLength: 8000 });
       await expect(
         tool.execute(JSON.stringify({ url: "http://localhost:19999/nonexistent" }))
       ).rejects.toThrow(/Connection failed/);
+    });
+  });
+
+  describe("timeouts and large bodies", () => {
+    it("aborts slow responses with TransientError when the timeout fires", async () => {
+      const tool = new FetchTool({ timeoutMs: 300, maxBodyLength: 8000 });
+      const t0 = Date.now();
+      await expect(
+        tool.execute(JSON.stringify({ url: `${BASE_URL}/slow` })),
+      ).rejects.toThrow(/timed out/);
+      // Must not wait for the server's full 2s delay.
+      expect(Date.now() - t0).toBeLessThan(1500);
+    });
+
+    it("caps large response reads and truncates the display", async () => {
+      const tool = new FetchTool({ timeoutMs: 30000, maxBodyLength: 8000 });
+      const result = await tool.execute(
+        JSON.stringify({ url: `${BASE_URL}/huge` }),
+      );
+      expect(result.output.length).toBeLessThanOrEqual(8000);
+      expect(result.metadata?.get("truncated")).toBe("true");
+      // body_length reports the body before display truncation.
+      const bodyLength = Number(result.metadata?.get("body_length"));
+      expect(bodyLength).toBeGreaterThan(8000);
     });
   });
 });

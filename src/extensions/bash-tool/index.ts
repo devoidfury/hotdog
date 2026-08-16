@@ -19,6 +19,14 @@ import {
   getExtensionConfig,
 } from "../../core/extensions/types.ts";
 
+/**
+ * Hard cap on in-memory output buffering per stream. truncateOutput()
+ * still applies the line-based display cap afterwards; this only prevents
+ * a chatty command (e.g. `yes`) from exhausting memory before the timeout
+ * fires. Known ceiling: a single line longer than the cap is kept whole.
+ */
+const MAX_OUTPUT_CHARS = 1_000_000;
+
 interface BashToolOptions {
   timeoutMs: number;
   maxOutputLines: number;
@@ -102,6 +110,8 @@ export class BashTool {
 
       let stdout = "";
       let stderr = "";
+      let stdoutTruncated = false;
+      let stderrTruncated = false;
       let done = false;
 
       const finish = (result: ToolResult | Error) => {
@@ -116,12 +126,31 @@ export class BashTool {
         }
       };
 
+      // Append a chunk, capping in-memory buffering at MAX_OUTPUT_CHARS so a
+      // chatty command cannot exhaust memory before the timeout fires.
+      const appendCapped = (
+        current: string,
+        chunk: string,
+        truncated: boolean,
+      ): { value: string; truncated: boolean } => {
+        if (truncated) return { value: current, truncated: true };
+        const value = current + chunk;
+        if (value.length > MAX_OUTPUT_CHARS) {
+          return { value: value.slice(0, MAX_OUTPUT_CHARS), truncated: true };
+        }
+        return { value, truncated: false };
+      };
+
       proc.stdout?.on("data", (chunk: Buffer) => {
-        stdout += chunk.toString();
+        const r = appendCapped(stdout, chunk.toString(), stdoutTruncated);
+        stdout = r.value;
+        stdoutTruncated = r.truncated;
       });
 
       proc.stderr?.on("data", (chunk: Buffer) => {
-        stderr += chunk.toString();
+        const r = appendCapped(stderr, chunk.toString(), stderrTruncated);
+        stderr = r.value;
+        stderrTruncated = r.truncated;
       });
 
       const termTimer = setTimeout(() => {
@@ -146,7 +175,10 @@ export class BashTool {
 
       const cmdFirstLine = command.trim().split("\n")[0] ?? "";
       proc.on("close", (code: number | null) => {
-        const output = [stdout, stderr].filter(Boolean).join("\n");
+        let output = [stdout, stderr].filter(Boolean).join("\n");
+        if (stdoutTruncated || stderrTruncated) {
+          output += "\n[output truncated]";
+        }
         const truncated = truncateOutput(output, this.maxOutputLines);
         finish(
           ToolResult.ok(truncated).withEntries({

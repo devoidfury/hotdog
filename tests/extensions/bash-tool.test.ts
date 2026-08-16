@@ -74,6 +74,20 @@ describe('BashTool', () => {
     expect(resultStr(result)).toContain('truncated');
   });
 
+  it('caps in-memory buffering for huge single-line output', async () => {
+    const tool = new BashTool({ timeoutMs: 30000, maxOutputLines: 100 });
+    // 3MB of output with no newlines: well past the 1M char buffer cap.
+    const result = await tool.execute(
+      JSON.stringify({ command: "head -c 3000000 /dev/zero | tr '\\0' 'a'" }),
+      {} as any,
+    );
+    const str = resultStr(result);
+    expect(str).toContain('[output truncated]');
+    // Buffer cap (1M chars) + marker, far below the 3MB actually produced.
+    expect(str.length).toBeLessThan(1_100_000);
+    expect(result.metadata?.get('exit_code')).toBe('0');
+  });
+
   it('handles multiline output', async () => {
     const tool = new BashTool({ timeoutMs: 30000, maxOutputLines: 100 });
     const result = await tool.execute(JSON.stringify({ command: 'printf "line1\\nline2\\nline3"' }), {} as any);

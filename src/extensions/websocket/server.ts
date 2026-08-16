@@ -399,8 +399,6 @@ export class SessionRegistry {
     return this.#sessionManager;
   }
 
-  // Test-only accessors
-
   /** @internal */
   get _test_metadata(): Map<string, SessionMetadata> {
     return this.#metadata;
@@ -532,7 +530,7 @@ function replaySessionHistory(
       }
     }
 
-    // In-flight chunks may not have been flushed to the message log yet.
+    // Flush in-flight chunks that haven't reached the message log yet.
     const agentImpl = agent as Agent;
     const partialReasoning = agentImpl.currentStreamingReasoning;
     const partialContent = agentImpl.currentStreamingContent;
@@ -555,7 +553,7 @@ function replaySessionHistory(
       );
     }
   } catch {
-    // Connection dropped during replay — ignore
+    // Connection dropped mid-replay -- nothing to do.
   }
 }
 

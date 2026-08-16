@@ -1,7 +1,6 @@
 // Authentication middleware for WebSocket connections.
-// Session token store with configurable TTL.
-// The auth middleware is parameterized by a validateApiKey function,
-// allowing the webui extension to supply its API key source.
+// Session tokens with TTL; validateApiKey is injected so the webui
+// extension can supply its own API key source.
 
 import crypto from "node:crypto";
 
@@ -82,17 +81,12 @@ export interface AuthMiddleware {
   stopCleanup: () => void;
 }
 
-/**
- * Create an authentication middleware instance.
- */
 export function createAuthMiddleware({
   validateApiKey,
   tokenTtlMin = 1440,
 }: AuthMiddlewareOptions): AuthMiddleware {
-  const sessions = new Map<string, SessionEntry>(); // token → { createdAt, expiresAt }
-  const rateLimits = new Map<string, RateLimitEntry>(); // ip → failure state
-
-  // Cleanup interval handle
+  const sessions = new Map<string, SessionEntry>();
+  const rateLimits = new Map<string, RateLimitEntry>();
   let cleanupInterval: ReturnType<typeof setInterval> | null = null;
 
   function recordFailure(ip: string, now: number): void {
@@ -138,7 +132,6 @@ export function createAuthMiddleware({
         if (!valid) {
           response = Response.json({ error: "Invalid API key" }, { status: 401 });
         } else {
-          // Generate session token
           const token = crypto.randomUUID();
           sessions.set(token, {
             createdAt: now,
@@ -159,9 +152,6 @@ export function createAuthMiddleware({
     return response;
   }
 
-  /**
-   * Validate a session token.
-   */
   function validateToken(token: string): boolean {
     if (!token || typeof token !== "string") return false;
     const session = sessions.get(token);
@@ -173,9 +163,6 @@ export function createAuthMiddleware({
     return true;
   }
 
-  /**
-   * Remove expired tokens and stale rate-limit entries.
-   */
   function cleanup(): void {
     const now = Date.now();
     for (const [token, session] of sessions) {
@@ -190,17 +177,11 @@ export function createAuthMiddleware({
     }
   }
 
-  /**
-   * Start periodic cleanup (runs every minute).
-   */
   function startCleanup(): void {
     if (cleanupInterval) return;
     cleanupInterval = setInterval(cleanup, 60_000);
   }
 
-  /**
-   * Stop periodic cleanup.
-   */
   function stopCleanup(): void {
     if (cleanupInterval) {
       clearInterval(cleanupInterval);

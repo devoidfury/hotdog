@@ -23,7 +23,7 @@ type ProfileInfo = {
 };
 const profilesAtom = reactiveState<Record<string, ProfileInfo>>({});
 let currentProfile = "default";
-// >0 triggers the profile-switch confirmation prompt.
+// >0 means switching profiles will clear context, so confirm first.
 let userMessageCount = 0;
 
 interface SessionCreatedMessage {
@@ -274,7 +274,7 @@ export function createChat({
   const connectedAtom = reactiveState<boolean>(false);
   const workingAtom = reactiveState<boolean>(false);
 
-  // Per-session working state; survives session switches for the sidebar.
+  // Per-session working state; kept across switches so the sidebar stays accurate.
   const sessionWorkingMap = new Map<string, boolean>();
 
   effect(() => {

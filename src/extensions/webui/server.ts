@@ -65,7 +65,6 @@ export async function createWebuiServer(
     tokenTtlMin: sessionTokenTtlMin,
   });
 
-  // Create WebSocket server handler
   const wsConfig = core.config?.websocket as
     Record<string, unknown> | undefined;
   let profileManager = core.resolved?.profileManager;
@@ -96,18 +95,15 @@ export async function createWebuiServer(
     profiles,
   });
 
-  // Start cleanup loops
   authMiddleware.startCleanup();
   wsServer.startCleanupLoop();
 
-  // Start the server
   let server = Bun.serve<WebuiWsData>({
     port,
     hostname: host,
     routes: {
       "/": webuiFrontend,
 
-      // GET /verify — validate auth token
       "/verify": async function (req: BunRequest) {
         const url = new URL(req.url);
         const token = url.searchParams.get("token");
@@ -117,7 +113,6 @@ export async function createWebuiServer(
           : Response.json({ valid }, { status: 401 });
       },
 
-      // GET /ws — handle authenticated WebSocket upgrade
       "/ws": async function (req: BunRequest) {
         const url = new URL(req.url);
         const token = url.searchParams.get("token");
@@ -130,7 +125,6 @@ export async function createWebuiServer(
         if (!authMiddleware.validateToken(token)) {
           return Response.json({ error: "Invalid token" }, { status: 401 });
         }
-        // Try to upgrade — Bun.serve handles the rest
         const upgraded = server.upgrade(req, {
           data: { token, url: req.url } as WebuiWsData,
         });
@@ -144,22 +138,15 @@ export async function createWebuiServer(
       const url = new URL(req.url);
       const pathname = url.pathname;
 
-      // POST /login — authenticate and return session token
       if (req.method === "POST" && pathname === "/login") {
         const loginResp = await authMiddleware.loginHandler(req);
         return loginResp;
       }
 
-      // Everything else — serve static files
-      // const staticResp = serveStaticFile(uiDir, maxAgeSecs, pathname);
-      // if (staticResp) {
-      //   return staticResp;
-      // }
-
+      // TODO: serve static files from uiDir (currently only "/" is routed).
       return new Response("Not found", { status: 404 });
     },
 
-    // WebSocket handlers
     websocket: {
       open(ws) {
         const { url } = ws.data;

@@ -1,6 +1,5 @@
 /// <reference lib="dom" />
-// Message rendering — displays all OUTPUT_EVENT types in the chat view.
-// Manages a message list per session, with streaming, tool calls, and thinking.
+// Per-session message list: renders OUTPUT_EVENTs, incl. streaming markdown.
 
 import { sanitize } from "./utils.ts";
 import {
@@ -13,8 +12,7 @@ import {
   type MdDocument,
 } from "../../../utils/md-parser.ts";
 
-// ── Debug instrumentation ───────────────────────────────────────────────────
-// Enable via: ?debug=1  in the URL
+// Debug instrumentation, enabled with ?debug=1 in the URL.
 const DEBUG = typeof window !== "undefined" && new URLSearchParams(window.location.search).has("debug");
 let _debugSeq = 0;
 
@@ -44,8 +42,6 @@ function dbgTree(label: string, tree: MdDocument): void {
   console.log(`[streaming #${_debugSeq++}] ${label}  blocks=${tree.children.length}  ${summary}`);
 }
 
-// ── Message event types ─────────────────────────────────────────────────────
-
 interface UserMessage { content: string; }
 interface AssistantMessage { content: string; }
 interface StreamingChunk { content: string; }
@@ -55,9 +51,7 @@ interface ToolResultMessage { name: string; output?: string; error?: string; }
 interface CompactingMessage { message: string; }
 interface CommandResultMessage { content: string; }
 
-/**
- * Session log entry as returned by the server's logViewed message.
- */
+// Log entry as returned by the server's logViewed message.
 interface LogEntry {
   source: string;
   content: string;
@@ -87,13 +81,9 @@ interface CompactionResultMessage { summary: string; messagesCompacted: number; 
 interface SessionStateMessage { key: string; value: string | string[] | boolean | number; }
 interface ErrorMessage { message: string; }
 
-// ── Options ─────────────────────────────────────────────────────────────────
-
 interface MessageListOptions {
   hideThinking?: boolean;
 }
-
-// ── Return type ─────────────────────────────────────────────────────────────
 
 export interface MessageListManager {
   handleUserMessage: (data: UserMessage) => void;
@@ -117,12 +107,6 @@ export interface MessageListManager {
   renderLogEntries: (entries: LogEntry[]) => void;
 }
 
-/**
- * Create a message list manager for a single session.
- * @param sessionId - The session identifier
- * @param options - Display options
- * @returns Message list manager with handlers for each message type
- */
 export function createMessageList(
   _sessionId: string,
   { hideThinking = false }: MessageListOptions = {},
@@ -134,10 +118,8 @@ export function createMessageList(
   let hasToolCallsSinceLastAssistant = false;
   let hideThinkingValue = hideThinking;
 
-  // Streaming markdown parsers — one for assistant content, one for thinking
   let streamingParser: StreamingMdParser | null = null;
   let thinkingParser: StreamingMdParser | null = null;
-  // Track how many blocks have been rendered in each content div
   let streamingBlockCount = 0;
   let thinkingBlockCount = 0;
 
@@ -146,13 +128,11 @@ export function createMessageList(
       currentAssistantEl = document.createElement("div");
       currentAssistantEl.className = "message assistant streaming";
 
-      // Avatar
       const avatar = document.createElement("div");
       avatar.className = "avatar";
       avatar.textContent = "🤖";
       currentAssistantEl.appendChild(avatar);
 
-      // Bubble
       const bubble = document.createElement("div");
       bubble.className = "bubble";
       const contentEl = document.createElement("div");
@@ -175,7 +155,6 @@ export function createMessageList(
     return currentThinkingEl;
   }
 
-  /** Show/hide thinking blocks. */
   function setHideThinking(v: boolean): void {
     hideThinkingValue = v;
     if (currentThinkingEl) {
@@ -200,7 +179,6 @@ export function createMessageList(
     const { tree, stableFrom } = result;
     const totalBlocks = tree.children.length;
 
-    // Clamp stableFrom to what we've actually rendered
     const effectiveStable = Math.min(stableFrom, blockCountRef.count);
 
     dbg("updateMdDom", {
@@ -213,14 +191,12 @@ export function createMessageList(
     });
     dbgTree("updateMdDom tree", tree);
 
-    // Remove DOM nodes for blocks from effectiveStable onward
     let removed = 0;
     for (let i = effectiveStable; i < blockCountRef.count; i++) {
       const el = contentDiv.querySelector(`[data-block-index="${i}"]`);
       if (el) { el.remove(); removed++; }
     }
 
-    // Render and append new/changed blocks
     let rendered = 0;
     if (effectiveStable < totalBlocks) {
       const html = renderBlocksToHtml(tree, effectiveStable);
@@ -231,7 +207,7 @@ export function createMessageList(
         fragment.appendChild(wrapper.firstChild);
       }
 
-      // Tag each child with its block index for future diffs
+      // Index each block so future diffs can target it.
       const newStart = effectiveStable;
       const children = Array.from(fragment.children);
       for (let i = 0; i < children.length; i++) {
@@ -251,19 +227,15 @@ export function createMessageList(
   }
 
   // ── Message Handlers ──────────────────────────────────────────────────────
-
   function handleUserMessage({ content }: UserMessage): void {
-    finalizeAssistant();
     const el = document.createElement("div");
     el.className = "message user";
 
-    // Avatar
     const avatar = document.createElement("div");
     avatar.className = "avatar";
     avatar.textContent = "👤";
     el.appendChild(avatar);
 
-    // Bubble
     const bubble = document.createElement("div");
     bubble.className = "bubble";
     const contentEl = document.createElement("div");
@@ -282,13 +254,11 @@ export function createMessageList(
     const el = document.createElement("div");
     el.className = "message assistant";
 
-    // Avatar
     const avatar = document.createElement("div");
     avatar.className = "avatar";
     avatar.textContent = "🤖";
     el.appendChild(avatar);
 
-    // Bubble
     const bubble = document.createElement("div");
     bubble.className = "bubble";
     const contentEl = document.createElement("div");
@@ -312,12 +282,10 @@ export function createMessageList(
     const el = ensureAssistantEl();
     const contentDiv = el.querySelector(".content") as HTMLDivElement;
 
-    // Initialize streaming parser on first chunk
     if (!streamingParser) {
       streamingParser = createStreamingParser();
     }
 
-    // Feed the chunk — get tree + stable prefix index
     dbg("handleStreamingChunk", { chunkLen: content.length, chunkPreview: content.slice(0, 60).replace(/\n/g, "\\n"), prevBlockCount: streamingBlockCount });
     const result = streamingParser.feed(content);
     dbg("handleStreamingChunk after feed", { stableFrom: result.stableFrom, treeBlocks: result.tree.children.length });
@@ -342,7 +310,6 @@ export function createMessageList(
   }
 
   function handleThinking({ content }: ThinkingMessage): void {
-    // Final thinking block (non-streaming)
     const el = ensureThinkingEl();
     const tree = parseMarkdown(content);
     el.innerHTML = mdTreeToHtml(tree);
@@ -365,7 +332,7 @@ export function createMessageList(
     body.textContent = args;
 
     header.addEventListener("click", () => {
-      // When expanding, show the full tool output (not truncated preview)
+      // Swap in the full output when expanding.
       const isHidden = body.classList.contains("hidden");
       if (isHidden && body.dataset.fullOutput) {
         body.textContent = body.dataset.fullOutput;
@@ -383,7 +350,7 @@ export function createMessageList(
   }
 
   function handleToolResult({ name, output, error }: ToolResultMessage): void {
-    // Find the last tool call block for this tool and add result
+    // Attach the result to the most recent matching tool call block.
     const blocks = container.querySelectorAll<HTMLDivElement>(".tool-call-block");
     let target: HTMLDivElement | null = null;
     for (let i = blocks.length - 1; i >= 0; i--) {
@@ -397,23 +364,20 @@ export function createMessageList(
 
     const body = target.querySelector<HTMLDivElement>(".tool-call-body");
     if (body) {
-      // Store the full output on the body element for toggling
+      // Keep the full output for expansion; show a truncated preview.
       const fullOutput = output || error || "";
       body.dataset.fullOutput = fullOutput;
       body.dataset.truncated = "true";
 
-      // Show truncated preview in the body, but keep it hidden until clicked
       if (output)
         body.textContent =
           output.slice(0, 2000) + "\n\n<click to show full response>";
       else if (error) body.textContent = `Error: ${error}`;
-      // Don't auto-show the body — let the user click to expand
     }
     scrollBottom();
   }
 
   function handleCompacting({ message }: CompactingMessage): void {
-    // Show compacting notice
     const el = document.createElement("div");
     el.className = "message compacting";
     const bubble = document.createElement("div");
@@ -443,13 +407,11 @@ export function createMessageList(
     const el = document.createElement("div");
     el.className = "message question";
 
-    // Avatar
     const avatar = document.createElement("div");
     avatar.className = "avatar";
     avatar.textContent = "🤖";
     el.appendChild(avatar);
 
-    // Bubble
     const bubble = document.createElement("div");
     bubble.className = "bubble";
     const contentEl = document.createElement("div");
@@ -470,7 +432,6 @@ export function createMessageList(
   }
 
   function handleTaskProgress({ taskId, status, message }: TaskProgressMessage): void {
-    // Task progress — subtle indicator
     let el = container.querySelector<HTMLDivElement>(
       `.task-progress[data-task-id="${sanitize(taskId)}"]`,
     );
@@ -530,13 +491,11 @@ export function createMessageList(
     const el = document.createElement("div");
     el.className = "message error";
 
-    // Avatar
     const avatar = document.createElement("div");
     avatar.className = "avatar";
     avatar.textContent = "⚠️";
     el.appendChild(avatar);
 
-    // Bubble
     const bubble = document.createElement("div");
     bubble.className = "bubble";
     const contentEl = document.createElement("div");
@@ -549,11 +508,10 @@ export function createMessageList(
     scrollBottom();
   }
 
-  /** Finalize the current streaming assistant message. */
   function finalizeAssistant(): void {
     dbg("finalizeAssistant", { hadAssistant: !!currentAssistantEl, streamingBlockCount, thinkingBlockCount });
     if (currentAssistantEl) {
-      // Remove the assistant element if it has no content (e.g., tool-only turns)
+      // Drop empty assistant elements (e.g. tool-only turns).
       const contentDiv = currentAssistantEl.querySelector(".content") as HTMLDivElement;
       const hasContent = contentDiv && contentDiv.textContent?.trim().length > 0;
       if (!hasContent) {
@@ -563,7 +521,6 @@ export function createMessageList(
       }
       currentAssistantEl = null;
     }
-    // Remove thinking element if it has no content
     if (currentThinkingEl && !currentThinkingEl.textContent?.trim()) {
       currentThinkingEl.remove();
     }
@@ -599,21 +556,16 @@ export function createMessageList(
     thinkingBlockCount = 0;
   }
 
-  /**
-   * Extract a tool name from a tool_result log entry's content.
-   * Best-effort: tries JSON "name" field, then text pattern "tool_name: ...".
-   */
+  /** Best-effort tool name from a tool_result entry: JSON "name", then "tool: ..." prefix. */
   function extractToolNameFromEntry(content: string): string {
-    // Try JSON
     try {
       const parsed = JSON.parse(content);
       if (parsed && typeof parsed === "object" && "name" in parsed) {
         return String(parsed.name);
       }
     } catch {
-      // Not JSON
+      // Not JSON.
     }
-    // Try text pattern like "tool_name: ..."
     const match = content.match(/^(\w+):\s/);
     if (match) return match[1] ?? "tool";
     return "tool";
@@ -631,11 +583,9 @@ export function createMessageList(
           handleUserMessage({ content: entry.content });
           break;
         case "llm": {
-          // Render reasoning/thinking content first (if any)
           if (entry.reasoning_content?.trim()) {
             handleThinking({ content: entry.reasoning_content });
           }
-          // Render tool calls next (if any), then the assistant message
           if (entry.tool_calls && Array.isArray(entry.tool_calls) && entry.tool_calls.length > 0) {
             for (const tc of entry.tool_calls) {
               const toolCall = tc as { name?: string; arguments?: string | object; args?: string | object };
@@ -648,7 +598,6 @@ export function createMessageList(
               handleToolCall({ name, args });
             }
           }
-          // Only render assistant message if there's content
           if (entry.content?.trim()) {
             handleAssistantMessage({ content: entry.content });
           }
@@ -662,7 +611,6 @@ export function createMessageList(
           break;
       }
     }
-    // Scroll to bottom after rendering all entries
     scrollBottom();
   }
 

@@ -42,10 +42,6 @@ export interface WebSocketChannelOptions {
   broadcastCallback?: (msg: Record<string, unknown>) => void;
 }
 
-/**
- * Channel implementation for WebSocket connections.
- * Maps OutputEvent types to S2C protocol messages and sends JSON over WS.
- */
 export class WebSocketChannel extends Channel {
   #ws: HotdogServerSocket<unknown>;
   #sessionId: string;
@@ -53,13 +49,6 @@ export class WebSocketChannel extends Channel {
   #broadcastCallback: ((msg: Record<string, unknown>) => void) | undefined;
   #unsubscribers: Map<string, () => void>;
 
-  /**
-   * @param options
-   * @param options.sessionManager — SessionManager instance
-   * @param options.ws — WebSocket connection
-   * @param options.sessionId — Session ID to attach to
-   * @param options.broadcastCallback — Optional callback to broadcast events to all clients
-   */
   constructor(options: WebSocketChannelOptions) {
     super({ sessionManager: options.sessionManager });
     this.#ws = options.ws;
@@ -68,7 +57,6 @@ export class WebSocketChannel extends Channel {
     this.#broadcastCallback = options.broadcastCallback;
     this.#unsubscribers = new Map();
 
-    // Attach to the given session
     this.attach(options.sessionId);
 
     // Drain and replay any questions that were emitted while no channels were connected
@@ -77,23 +65,17 @@ export class WebSocketChannel extends Channel {
 
   // ── Abstract Protocol Methods ───────────────────────────────────────────
 
-  /**
-   * Format and deliver an event to the WebSocket connection.
-   * Maps OutputEvent type to S2C protocol message.
-   */
   protected write(event: OutputEvent): void {
     if (!this.#ready) return;
 
     const protoType = EVENT_TO_PROTOCOL[event.type];
     if (!protoType) return;
 
-    // Build the protocol message from the event data
     const msg: Record<string, unknown> = {
       type: protoType,
       sessionId: this.#sessionId,
     };
 
-    // Copy relevant event fields into the message
     switch (event.type) {
       case OUTPUT_EVENT.USER_MESSAGE:
       case OUTPUT_EVENT.ASSISTANT_MESSAGE:
@@ -158,21 +140,11 @@ export class WebSocketChannel extends Channel {
     }
   }
 
-  /**
-   * Read raw input from the WebSocket connection.
-   * Yields parsed JSON message content strings.
-   */
   async *read(): AsyncIterable<string> {
-    // This is a placeholder — the WebSocket server handles messages
-    // via onMessage() directly rather than through the read() iterator.
-    // The read() method exists for API consistency but is not used
-    // in the WebSocket flow (messages are dispatched via routeMessage).
+    // Placeholder: messages are dispatched via routeMessage, not this iterator.
     yield "";
   }
 
-  /**
-   * Wire session events to this channel via SessionManager subscription.
-   */
   protected _subscribe(sessionId: string): void {
     const unsubscribe = this.sessionManager.onSessionEvents(
       sessionId,
@@ -183,9 +155,6 @@ export class WebSocketChannel extends Channel {
     this.#unsubscribers.set(sessionId, unsubscribe);
   }
 
-  /**
-   * Remove the wire from a session.
-   */
   protected _unsubscribe(sessionId: string): void {
     const unsubscribe = this.#unsubscribers.get(sessionId);
     if (unsubscribe) {
@@ -194,17 +163,11 @@ export class WebSocketChannel extends Channel {
     }
   }
 
-  /**
-   * Release connection resources on close.
-   */
   protected _cleanup(): void {
     this.#ready = false;
   }
 
-  /**
-   * Drain and replay any QUESTION events that were buffered while
-   * no channels were connected to this session.
-   */
+  /** Replay QUESTION events buffered while no channels were connected. */
   #replayPendingQuestions(): void {
     const pending = this.sessionManager.drainPendingQuestions(this.#sessionId);
     for (const questions of pending) {
@@ -215,12 +178,6 @@ export class WebSocketChannel extends Channel {
     }
   }
 
-  // ── Public API ────────────────────────────────────────────────────────────
-
-  /**
-   * Send a message directly to the WebSocket client.
-   * @param msg — Message object to send as JSON
-   */
   sendJson(msg: Record<string, unknown>): void {
     if (!this.#ready) return;
     try {
@@ -230,23 +187,14 @@ export class WebSocketChannel extends Channel {
     }
   }
 
-  /**
-   * Get the WebSocket connection.
-   */
   get ws() {
     return this.#ws;
   }
 
-  /**
-   * Check if the connection is ready.
-   */
   get isReady(): boolean {
     return this.#ready;
   }
 
-  /**
-   * Get the session ID.
-   */
   get sessionId(): string {
     return this.#sessionId;
   }

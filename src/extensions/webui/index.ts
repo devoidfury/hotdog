@@ -1,5 +1,4 @@
-// WebUI Extension
-// Provides a full web interface for agent interaction using the websocket extension.
+// WebUI extension: full web interface over the websocket extension.
 
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -27,7 +26,6 @@ async function handleWebuiSubcommand(
     const config = getExtensionConfig<WebuiConfig>(core, "webui");
     const { server, wsServer } = await createWebuiServer(core, config, UI_DIR);
 
-    // Keep the process alive until the server is stopped
     await new Promise<void>((resolve) => {
       const shutdown = () => {
         server.stop();
@@ -51,7 +49,6 @@ async function handleWebuiSubcommand(
 export function create(core: CoreContext): ExtensionInstance {
   return {
     hooks: {
-      // Register the "webui" subcommand
       [HOOKS.CLI_SUBCOMMANDS_REGISTER]: async (registry) => {
         registry.register("webui", {
           description: "Start the WebUI server (HTTP + WebSocket + frontend)",

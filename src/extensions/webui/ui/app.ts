@@ -1,20 +1,15 @@
 /// <reference lib="dom" />
-// Main application — wires login, chat, and session management together.
-// Uses reactiveState atoms for cross-component coordination.
+// Wires login, chat, and sessions together; atoms coordinate the components.
 
 import { initLogin } from "./login.ts";
 import { createChat, ChatController } from "./chat.ts";
 import { initSessions, UpdateSessionsFn, UpdateLogsFn } from "./sessions.ts";
-
-// ── State ───────────────────────────────────────────────────────────────────
 
 let token: string | null = null;
 let chat: ChatController | null = null;
 let updateSessions: UpdateSessionsFn | null = null;
 let updateLogs: UpdateLogsFn | null = null;
 let activeLogId: string | null = null;
-
-// ── Screen Navigation ───────────────────────────────────────────────────────
 
 function showLogin(): void {
   document.getElementById("login-screen")!.classList.remove("hidden");
@@ -26,12 +21,7 @@ function showMain(): void {
   document.getElementById("main-ui")!.classList.remove("hidden");
 }
 
-// ── Auth Failure Handler ────────────────────────────────────────────────────
-
-/**
- * Called when the session token is invalid or expired.
- * Clears localStorage and shows the login screen so the user can re-authenticate.
- */
+/** Token invalid/expired: clear storage, drop the chat, show login. */
 function handleAuthFailure(): void {
   localStorage.removeItem("hotdog-webui-token");
   token = null;
@@ -42,12 +32,6 @@ function handleAuthFailure(): void {
   showLogin();
 }
 
-// ── Token Verification (startup) ────────────────────────────────────────────
-
-/**
- * Verify the saved token before starting the chat connection.
- * If the token is invalid, clear it and show login immediately.
- */
 async function verifyToken(tokenToCheck: string): Promise<boolean> {
   try {
     const res = await fetch(
@@ -64,50 +48,35 @@ async function verifyToken(tokenToCheck: string): Promise<boolean> {
   }
 }
 
-// ── Log View Helpers ─────────────────────────────────────────────────────────
-
-/**
- * Clear the log view UI state and restore normal session view.
- */
 function clearLogView(): void {
-  const previousLogId = activeLogId;
   activeLogId = null;
   const logViewLabel = document.getElementById("log-view-label");
   const sessionLabel = document.getElementById("session-label");
   const modelSelector = document.getElementById("model-selector");
   const inputArea = document.getElementById("input-area");
   const chatInput = document.getElementById("chat-input") as HTMLInputElement | null;
-  // Hide log view indicator
   if (logViewLabel) logViewLabel.classList.add("hidden");
-  // Restore session label and model selector
   if (sessionLabel) sessionLabel.style.opacity = "";
   if (modelSelector) modelSelector.style.opacity = "";
-  // Re-enable input area
   if (inputArea) inputArea.classList.remove("read-only");
   if (chatInput) chatInput.disabled = false;
-  // Refresh logs list to remove highlight
+  // Remove the active-log highlight.
   chat?.listLogs();
 }
 
-// ── Initialization ───────────────────────────────────────────────────────────
-
 async function init(): Promise<void> {
-  // Check for existing token in localStorage
   const savedToken = localStorage.getItem("hotdog-webui-token");
   if (savedToken) {
     token = savedToken;
-    // Verify the token before starting the chat connection
     const valid = await verifyToken(token);
     if (valid) {
       startChat();
       showMain();
     }
-    // If invalid, verifyToken calls handleAuthFailure() which shows login
   } else {
     showLogin();
   }
 
-  // Login screen
   initLogin({
     onLogin: (newToken: string) => {
       token = newToken;
@@ -117,7 +86,6 @@ async function init(): Promise<void> {
     },
   });
 
-  // Session sidebar — initSessions returns both update functions
   const sessionInit = initSessions({
     onCreate: () => {
       chat!.createSession({});
@@ -132,10 +100,8 @@ async function init(): Promise<void> {
       chat!.renameSession(sessionId, newName);
     },
     onCancel: (sessionId: string) => {
-      // Cancel a session by ID — even if it's not the active one
       chat!.send({ type: "cancel", sessionId });
       chat!.sessionWorkingMap.set(sessionId, false);
-      // If the cancelled session is the active one, update workingAtom too
       if (chat!.sessionIdAtom() === sessionId) {
         chat!.workingAtom(false);
       }
@@ -156,12 +122,11 @@ async function init(): Promise<void> {
   updateSessions = sessionInit.updateSessions;
   updateLogs = sessionInit.updateLogs;
 
-  // Close log view button — exit log view and reload current session's messages
   const closeLogViewBtn = document.getElementById("close-log-view-btn") as HTMLButtonElement | null;
   if (closeLogViewBtn) {
     closeLogViewBtn.addEventListener("click", () => {
       clearLogView();
-      // Reload current session's messages by switching to it (server replays history)
+      // Re-switching to the same session makes the server replay history.
       const currentSessionId = chat?.sessionIdAtom();
       if (currentSessionId && chat) {
         chat.switchSession(currentSessionId);
@@ -169,9 +134,8 @@ async function init(): Promise<void> {
     });
   }
 
-  // Logout button (via keyboard shortcut)
   document.addEventListener("keydown", (e: KeyboardEvent) => {
-    // Ctrl+Shift+L → logout
+    // Ctrl+Shift+L logs out.
     if (e.ctrlKey && e.shiftKey && (e.key === "L" || e.key === "l")) {
       handleAuthFailure();
     }
@@ -184,16 +148,14 @@ function startChat(): void {
     host: window.location.host,
     onSessionCreated: ({ sessionId }) => {
       chat!.setSession(sessionId);
-      chat!.listSessions(); // Refresh sidebar
-      chat!.listProfiles(); // Load available profiles
-      // Clear any active log view when switching to a new session
+      chat!.listSessions();
+      chat!.listProfiles();
       clearLogView();
     },
     onSessionsUpdate: (sessions, activeSessionId) => {
       if (updateSessions) {
         updateSessions(sessions, activeSessionId, chat!.sessionWorkingMap, activeLogId);
       }
-      // Clear active log view when switching sessions
       if (activeSessionId && activeLogId) {
         clearLogView();
       }
@@ -205,11 +167,10 @@ function startChat(): void {
     },
     onLogViewed: (logId, entries) => {
       activeLogId = logId;
-      // Refresh logs list to highlight the active log
+      // Re-render both lists so the active log is highlighted and click
+      // handlers capture the new activeLogId.
       chat?.listLogs();
-      // Refresh session list so click handlers capture the current activeLogId
       chat?.listSessions();
-      // Show log view indicator
       const logViewLabel = document.getElementById("log-view-label");
       const currentLogId = document.getElementById("current-log-id");
       const sessionLabel = document.getElementById("session-label");
@@ -220,13 +181,10 @@ function startChat(): void {
         logViewLabel.classList.remove("hidden");
         currentLogId.textContent = logId.slice(0, 8);
       }
-      // Dim session label and model selector
       if (sessionLabel) sessionLabel.style.opacity = "0.5";
       if (modelSelector) modelSelector.style.opacity = "0.5";
-      // Disable input area
       if (inputArea) inputArea.classList.add("read-only");
       if (chatInput) chatInput.disabled = true;
-      // Render entries in the message area
       const messageList = chat?.messageListAtom();
       if (messageList) {
         messageList.clear();
@@ -237,33 +195,26 @@ function startChat(): void {
       if (activeLogId === logId) {
         clearLogView();
       }
-      // Refresh the logs list
       chat?.listLogs();
     },
     onConnectionChange: (connected) => {
-      // Connection recovery is handled by chat.js internally
       if (connected) {
         chat?.listProfiles();
       }
     },
     onAuthFailure: handleAuthFailure,
     onWorkingMapChange: () => {
-      // Refresh sidebar to show/hide per-session working indicators
+      // Re-render the sidebar's per-session working indicators.
       if (updateSessions && chat) {
         chat.listSessions();
       }
     },
   });
 
-  // After chat is created, wire up reactive model changes to the sidebar.
-  // The sidebar displays per-session model info; when the current model
-  // changes (e.g. via /model command), refresh the session list so the
-  // sidebar shows the updated model.
+  // The sidebar shows per-session model info; refresh it when the model changes.
   chat.currentModelAtom.effect(() => {
     chat!.listSessions();
   });
 }
-
-// ── Start ───────────────────────────────────────────────────────────────────
 
 init();

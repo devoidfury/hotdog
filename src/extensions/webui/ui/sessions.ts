@@ -49,11 +49,6 @@ export type UpdateLogsFn = (
   activeLogId: string | null,
 ) => void;
 
-/**
- * Initialize the session sidebar.
- * @param config - Configuration with create/switch/delete callbacks
- * @returns Object with functions to update the session and log list displays
- */
 export function initSessions({
   onCreate,
   onSwitch,
@@ -75,8 +70,6 @@ export function initSessions({
   ) as HTMLButtonElement;
 
   newBtn.addEventListener("click", () => onCreate());
-
-  // ── Custom Context Menu ───────────────────────────────────────────────────
 
   let contextMenu: HTMLDivElement | null = null;
   let contextSessionId: string | null = null;
@@ -103,7 +96,6 @@ export function initSessions({
     const menu = document.createElement("div");
     menu.className = "context-menu";
 
-    // Rename item
     const renameItem = document.createElement("div");
     renameItem.className = "context-menu-item";
     renameItem.textContent = "Rename";
@@ -117,7 +109,6 @@ export function initSessions({
     });
     menu.appendChild(renameItem);
 
-    // Delete item
     const deleteItem = document.createElement("div");
     deleteItem.className = "context-menu-item context-menu-item-danger";
     deleteItem.textContent = "Delete";
@@ -131,27 +122,22 @@ export function initSessions({
     menu.appendChild(deleteItem);
 
     document.body.appendChild(menu);
-
-    // Position the menu at the cursor
     menu.style.left = `${e.clientX}px`;
     menu.style.top = `${e.clientY}px`;
 
     contextMenu = menu;
 
-    // Close on click outside
-    const closeHandler = (ev: MouseEvent) => {
-      if (!menu.contains(ev.target as Node)) {
-        hideContextMenu();
-        document.removeEventListener("mousedown", closeHandler);
-      }
-    };
-    // Use a slight delay so the menu item click fires first
+    // Deferred so the menu item click fires before the outside-click handler.
     requestAnimationFrame(() => {
+      const closeHandler = (ev: MouseEvent) => {
+        if (!menu.contains(ev.target as Node)) {
+          hideContextMenu();
+          document.removeEventListener("mousedown", closeHandler);
+        }
+      };
       document.addEventListener("mousedown", closeHandler);
     });
   }
-
-  // ── Log Context Menu ──────────────────────────────────────────────────────
 
   let contextLogId: string | null = null;
 
@@ -162,7 +148,6 @@ export function initSessions({
     const menu = document.createElement("div");
     menu.className = "context-menu";
 
-    // Delete item
     const deleteItem = document.createElement("div");
     deleteItem.className = "context-menu-item context-menu-item-danger";
     deleteItem.textContent = "Delete";
@@ -176,41 +161,28 @@ export function initSessions({
     menu.appendChild(deleteItem);
 
     document.body.appendChild(menu);
-
-    // Position the menu at the cursor
     menu.style.left = `${e.clientX}px`;
     menu.style.top = `${e.clientY}px`;
 
     contextMenu = menu;
 
-    // Close on click outside
-    const closeHandler = (ev: MouseEvent) => {
-      if (!menu.contains(ev.target as Node)) {
-        hideContextMenu();
-        contextLogId = null;
-        document.removeEventListener("mousedown", closeHandler);
-      }
-    };
     requestAnimationFrame(() => {
+      const closeHandler = (ev: MouseEvent) => {
+        if (!menu.contains(ev.target as Node)) {
+          hideContextMenu();
+          contextLogId = null;
+          document.removeEventListener("mousedown", closeHandler);
+        }
+      };
       document.addEventListener("mousedown", closeHandler);
     });
   }
 
-  /**
-   * Get a friendly profile name for display.
-   */
   function getProfileDisplay(profile: string | undefined): string {
     if (!profile) return "default";
     return sanitize(profile);
   }
 
-  /**
-   * Update the session list display.
-   * @param sessions - Array of session info objects
-   * @param activeSessionId - Currently active session ID
-   * @param workingMap - Optional per-session working state map
-   * @param activeLogId - Currently viewed log ID (if in log view mode)
-   */
   function updateSessions(
     sessions: SessionInfo[],
     activeSessionId: string | null,
@@ -234,7 +206,6 @@ export function initSessions({
           ? ` · ${s.connectedClients} client${s.connectedClients > 1 ? "s" : ""}`
           : "";
 
-      // Check if this session's agent is currently working
       const isWorking = workingMap?.get(s.id) ?? false;
 
       let workingHtml = "";
@@ -258,12 +229,11 @@ export function initSessions({
       `;
 
       item.addEventListener("click", () => {
-        // Allow clicking on the active session when in log view mode to switch back
+        // Clicking the active session only matters in log view mode (switches back).
         if (s.id === activeSessionId && !activeLogId) return;
         onSwitch(s.id);
       });
 
-      // Right-click to show context menu
       item.addEventListener("contextmenu", (e: MouseEvent) => {
         e.preventDefault();
         showContextMenu(e, s.id, s.profile || "default");
@@ -272,7 +242,6 @@ export function initSessions({
       listEl.appendChild(item);
     }
 
-    // Wire up cancel buttons for working sessions
     if (onCancel) {
       listEl
         .querySelectorAll<HTMLButtonElement>(".session-cancel-btn")
@@ -286,11 +255,6 @@ export function initSessions({
     }
   }
 
-  /**
-   * Update the log list display.
-   * @param logs - Array of log info objects
-   * @param activeLogId - Currently viewed log ID (for highlighting)
-   */
   function updateLogs(logs: LogInfo[], activeLogId: string | null): void {
     logListEl.innerHTML = "";
 
@@ -326,16 +290,13 @@ export function initSessions({
         </div>
       `;
 
-      // Click on the item itself (not the button) views the log in read-only mode
       item.addEventListener("click", (e: Event) => {
-        // Don't trigger if clicking the Continue button
         if ((e.target as HTMLElement).closest(".log-continue-btn")) return;
         if (onViewLog) {
           onViewLog(log.id);
         }
       });
 
-      // Right-click to show context menu
       if (onDeleteLog) {
         item.addEventListener("contextmenu", (e: MouseEvent) => {
           e.preventDefault();
@@ -343,7 +304,6 @@ export function initSessions({
         });
       }
 
-      // Wire up the Continue button
       if (onContinueLog) {
         const continueBtn =
           item.querySelector<HTMLButtonElement>(".log-continue-btn");

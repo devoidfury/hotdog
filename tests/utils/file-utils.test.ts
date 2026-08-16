@@ -15,12 +15,9 @@ let validateNameable: (name: string | null | undefined, label: string, dirName: 
 let parseFrontMatter: (content: string) => { frontMatter?: Record<string, unknown>; body?: string } | null;
 let IOError: any;
 let correctCommonPathMistakes: (strPath: string, dirPath?: string) => [string, string | undefined];
-let resolvePath: (filePath: string, cwdBoundary?: string | null, workspaceRoot?: string | null) => string;
 let loadAspects: (aspectNames: string[] | null, aspectsDir?: string) => Promise<{ name: string; content: string }[]>;
-let validateCwdBoundary: (filePath: string, cwdBoundary: string | null | undefined) => string | null;
 let writeFileWithParents: (filePath: string, content: string | Uint8Array) => Promise<void>;
 let fileSize: (filePath: string) => Promise<number>;
-let resolvePathAndValidate: (requested: string, cwdBoundary?: string | null) => Promise<string>;
 let checkWritable: (filePath: string) => Promise<boolean>;
 let checkReadable: (filePath: string) => Promise<boolean>;
 
@@ -30,12 +27,9 @@ beforeAll(async () => {
   parseFrontMatter = mod.parseFrontMatter;
   IOError = mod.IOError;
   correctCommonPathMistakes = mod.correctCommonPathMistakes;
-  resolvePath = mod.resolvePath;
   loadAspects = mod.loadAspects;
-  validateCwdBoundary = mod.validateCwdBoundary;
   writeFileWithParents = mod.writeFileWithParents;
   fileSize = mod.fileSize;
-  resolvePathAndValidate = mod.resolvePathAndValidate;
   checkWritable = mod.checkWritable;
   checkReadable = mod.checkReadable;
 });
@@ -113,21 +107,6 @@ describe("correctCommonPathMistakes", () => {
   });
 });
 
-// ── resolvePath ──────────────────────────────────────────────────────────────
-
-describe("resolvePath", () => {
-  it("returns absolute paths as-is", () => {
-    expect(resolvePath("/absolute/path")).toBe("/absolute/path");
-  });
-
-  it("resolves relative paths with correct priority", () => {
-    expect(resolvePath("relative/path", "/project")).toBe(path.resolve("/project", "relative/path"));
-    expect(resolvePath("relative/path", null, "/workspace")).toBe(path.resolve("/workspace", "relative/path"));
-    expect(resolvePath("relative/path")).toBe(path.resolve(process.cwd(), "relative/path"));
-    // cwdBoundary takes priority over workspaceRoot
-    expect(resolvePath("relative/path", "/project", "/workspace")).toBe(path.resolve("/project", "relative/path"));
-  });
-});
 
 // ── loadAspects ──────────────────────────────────────────────────────────────
 
@@ -162,35 +141,6 @@ describe("loadAspects", () => {
   });
 });
 
-// ── validateCwdBoundary ──────────────────────────────────────────────────────
-
-describe("validateCwdBoundary", () => {
-  it("returns null when no boundary", () => {
-    expect(validateCwdBoundary("/any/path", undefined)).toBeNull();
-  });
-
-  it("returns null for path within boundary", () => {
-    expect(
-      validateCwdBoundary("/home/user/project/file.txt", "/home/user/project"),
-    ).toBeNull();
-  });
-
-  it("returns null for boundary itself", () => {
-    expect(
-      validateCwdBoundary("/home/user/project", "/home/user/project"),
-    ).toBeNull();
-  });
-
-  it("returns error string for path outside boundary", () => {
-    const result = validateCwdBoundary(
-      "/home/other/file.txt",
-      "/home/user/project",
-    );
-    expect(typeof result).toBe("string");
-    expect(result).toContain("outside cwd boundary");
-  });
-});
-
 // ── writeFileWithParents ─────────────────────────────────────────────────────
 
 describe("writeFileWithParents", () => {
@@ -219,52 +169,6 @@ describe("writeFileWithParents", () => {
   });
 });
 
-// ── resolvePathAndValidate ───────────────────────────────────────────────────
-
-describe("resolvePathAndValidate", () => {
-  let tmpDir: string;
-
-  beforeEach(() => {
-    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "hotdog-test-resolve-"));
-  });
-
-  afterEach(() => {
-    fs.rmSync(tmpDir, { recursive: true, force: true });
-  });
-
-  it("resolves existing path", async () => {
-    const existingFile = path.join(tmpDir, "exists.txt");
-    fs.writeFileSync(existingFile, "content");
-    const resolved = await resolvePathAndValidate(existingFile);
-    expect(resolved).toBe(existingFile);
-  });
-
-  it("throws for non-existent path", async () => {
-    await expect(resolvePathAndValidate(path.join(tmpDir, "nonexistent.txt"))).rejects.toThrow(
-      "Path not found",
-    );
-  });
-
-  it("throws when path escapes boundary", async () => {
-    await expect(resolvePathAndValidate("/etc/passwd", tmpDir)).rejects.toThrow(
-      "outside the allowed directory",
-    );
-  });
-
-  it("allows path within boundary", async () => {
-    const existingFile = path.join(tmpDir, "inside.txt");
-    fs.writeFileSync(existingFile, "content");
-    const resolved = await resolvePathAndValidate(existingFile, tmpDir);
-    expect(resolved).toBe(existingFile);
-  });
-
-  it("allows path outside cwd when no boundary is set", async () => {
-    const existingFile = path.join(tmpDir, "outside.txt");
-    fs.writeFileSync(existingFile, "content");
-    const resolved = await resolvePathAndValidate(existingFile);
-    expect(resolved).toBe(existingFile);
-  });
-});
 
 // ── fileSize ─────────────────────────────────────────────────────────────────
 

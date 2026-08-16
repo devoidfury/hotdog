@@ -1,15 +1,8 @@
 import fsPromises from "node:fs/promises";
-import {
-  join,
-  dirname,
-  isAbsolute,
-  resolve as resolveAbs,
-  sep,
-} from "node:path";
+import { join, dirname } from "node:path";
 import { cwd } from "node:process";
 import { YAML } from "bun";
 import { logger } from "../core/logger.ts";
-import { Workspace, PathEscapeError } from "./workspace.ts";
 
 /**
  * IO error class for file system operations.
@@ -41,10 +34,7 @@ export interface ParsedFrontMatter {
   body?: string;
 }
 
-/**
- * Parse YAML front matter from a markdown string.
- * Returns { frontMatter: object, body: string } or null if no front matter.
- */
+/** Parse YAML front matter from a markdown string. */
 export function parseFrontMatter(content: string): ParsedFrontMatter | null {
   const m = content.replaceAll("\r", "").match(FRONTMATTER_RE);
   if (!m || !m[1]) return null;
@@ -54,10 +44,7 @@ export function parseFrontMatter(content: string): ParsedFrontMatter | null {
 }
 const FRONTMATTER_RE = /^-{3,}\n([\s\S]*?)\n-{3,}\n?([\s\S]*)$/;
 
-/**
- * Load aspect files from a directory.
- * Files are named `<name>.aspect.md`.
- */
+/** Load aspect files from a directory. Files are named `<name>.aspect.md`. */
 export async function loadAspects(
   aspectNames: string[] | null,
   aspectsDir?: string,
@@ -84,20 +71,14 @@ export async function loadAspects(
   });
 
   const results = await Promise.all(promises);
-  return results.filter(
-    (r): r is { name: string; content: string } => r !== null,
-  );
+  return results.filter((r): r is { name: string; content: string } => r !== null);
 }
 
 /**
  * Validate a nameable entity (skill, prompt) per spec constraints.
  * Returns warnings — loading still proceeds with warnings.
  */
-export function validateNameable(
-  name: string | null | undefined,
-  label: string,
-  dirName: string,
-): string[] {
+export function validateNameable(name: string | null | undefined, label: string, dirName: string): string[] {
   const warnings: string[] = [];
 
   if (name && name !== dirName) {
@@ -108,19 +89,13 @@ export function validateNameable(
   if (!name || name.length === 0) {
     warnings.push(`${label} name is empty`);
   } else if (name.length > 64) {
-    warnings.push(
-      `${label} name '${name}' exceeds 64 characters (got ${name.length})`,
-    );
+    warnings.push(`${label} name '${name}' exceeds 64 characters (got ${name.length})`);
   }
   if (name && (name.startsWith("-") || name.endsWith("-"))) {
-    warnings.push(
-      `${label} name '${name}' must not start or end with a hyphen`,
-    );
+    warnings.push(`${label} name '${name}' must not start or end with a hyphen`);
   }
   if (name && name.includes("--")) {
-    warnings.push(
-      `${label} name '${name}' must not contain consecutive hyphens`,
-    );
+    warnings.push(`${label} name '${name}' must not contain consecutive hyphens`);
   }
   if (name) {
     for (const c of name) {
@@ -134,13 +109,8 @@ export function validateNameable(
   return warnings;
 }
 
-/**
- * Write a file, creating parent directories as needed.
- */
-export async function writeFileWithParents(
-  filePath: string,
-  content: string | Uint8Array,
-): Promise<void> {
+/** Write a file, creating parent directories as needed. */
+export async function writeFileWithParents(filePath: string, content: string | Uint8Array): Promise<void> {
   const parentDir = dirname(filePath);
   if (parentDir && parentDir !== ".") {
     await fsPromises.mkdir(parentDir, { recursive: true });
@@ -148,33 +118,8 @@ export async function writeFileWithParents(
   await fsPromises.writeFile(filePath, content);
 }
 
-/**
- * @deprecated Use Workspace.resolveSafe() instead.
- * Validate that a path is within the cwd boundary.
- */
-export function validateCwdBoundary(
-  filePath: string,
-  cwdBoundary: string | null | undefined,
-): string | null {
-  if (!cwdBoundary) return null;
-  const boundaryResolved = resolveAbs(cwdBoundary);
-  const fileResolved = resolveAbs(filePath);
-  if (
-    !fileResolved.startsWith(boundaryResolved + sep) &&
-    fileResolved !== boundaryResolved
-  ) {
-    return `Error: path ${filePath} is outside cwd boundary ${cwdBoundary}`;
-  }
-  return null;
-}
-
-/**
- * String transform on paths to fix common llm typos.
- */
-export function correctCommonPathMistakes(
-  strPath: string,
-  dirPath?: string,
-): [string, string | undefined] {
+/** String transform on paths to fix common llm typos. */
+export function correctCommonPathMistakes(strPath: string, dirPath?: string): [string, string | undefined] {
   if (strPath === "/.") strPath = "./";
   if (dirPath === "/.") dirPath = "./";
 
@@ -189,67 +134,13 @@ export function correctCommonPathMistakes(
   return [strPath, dirPath];
 }
 
-/**
- * @deprecated Use Workspace.resolveSafe() instead.
- * Resolve a path against cwdBoundary or workspaceRoot.
- */
-export function resolvePath(
-  filePath: string,
-  cwdBoundary?: string | null,
-  workspaceRoot?: string | null,
-): string {
-  if (isAbsolute(filePath)) {
-    return filePath;
-  }
-  if (cwdBoundary) {
-    return resolveAbs(cwdBoundary, filePath);
-  }
-  if (workspaceRoot) {
-    return resolveAbs(workspaceRoot, filePath);
-  }
-  return resolveAbs(filePath);
-}
-
-/**
- * Get file size in bytes.
- */
+/** Get file size in bytes. */
 export async function fileSize(filePath: string): Promise<number> {
   const stats = await fsPromises.stat(filePath);
   return stats.size;
 }
 
-/**
- * @deprecated Use Workspace.resolveSafe() instead.
- * Resolve a path and verify it stays within the cwd boundary.
- */
-export async function resolvePathAndValidate(
-  requested: string,
-  cwdBoundary: string | null = null,
-): Promise<string> {
-  const resolved = resolveAbs(requested);
-
-  try {
-    await fsPromises.access(resolved);
-  } catch {
-    throw IOError.PathNotFound(requested);
-  }
-
-  if (cwdBoundary) {
-    const boundaryResolved = resolveAbs(cwdBoundary);
-    if (
-      !resolved.startsWith(boundaryResolved + sep) &&
-      resolved !== boundaryResolved
-    ) {
-      throw IOError.PathOutside(requested, cwdBoundary);
-    }
-  }
-
-  return resolved;
-}
-
-/**
- * Check if a path is writable.
- */
+/** Check if a path is writable. */
 export async function checkWritable(filePath: string): Promise<boolean> {
   const parentDir = dirname(filePath);
 
@@ -272,9 +163,7 @@ export async function checkWritable(filePath: string): Promise<boolean> {
   return true;
 }
 
-/**
- * Check if a path is readable.
- */
+/** Check if a path is readable. */
 export async function checkReadable(filePath: string): Promise<boolean> {
   try {
     await fsPromises.access(filePath, fsPromises.constants.R_OK);

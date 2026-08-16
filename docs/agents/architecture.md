@@ -151,9 +151,6 @@ Tool definition helpers and utilities. Key exports:
 ### File Utilities (`src/utils/file-utils.ts`)
 File I/O and path resolution helpers. Key exports:
 - `writeFileWithParents(filePath, content)` — writes file with parent dirs
-- `validateCwdBoundary(filePath, cwdBoundary)` — path safety check
-- `resolvePath(filePath, cwdBoundary, workspaceRoot)` — path resolution with safety
-- `resolvePathAndValidate(requested, cwdBoundary)` — resolves and validates a path
 - `parseFrontMatter(content)` — extracts YAML front matter from markdown
 - `loadAspects(aspectNames, aspectsDir)` — loads aspect files from a directory
 - `validateNameable(name, label, dirName)` — validates nameable entity names

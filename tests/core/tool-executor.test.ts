@@ -116,6 +116,32 @@ describe('ToolExecutor', () => {
       expect(capturedCtx.workspaceRoot).toBeNull();
     });
 
+    it('should always build a Workspace, defaulting to process cwd when no boundary is set', async () => {
+      const deps = createMockDeps({
+        cwdBoundary: null,
+        workspaceRoot: null,
+      });
+      const executor = createToolExecutor(deps);
+
+      const capturedCtx: Record<string, unknown> = {};
+      const testTool = makeTestTool('ctx_test4', async (_input, ctx) => {
+        const getter = ctx as { get: (k: string) => unknown };
+        capturedCtx.workspace = getter.get('workspace');
+        return 'ok';
+      });
+      deps.toolRegistry.register('ctx_test4', testTool);
+
+      await executor.execute([{
+        id: 'call-4',
+        type: 'function',
+        function: { name: 'ctx_test4', arguments: '{}' },
+      }]);
+
+      const workspace = capturedCtx.workspace as { root: string } | null;
+      expect(workspace).not.toBeNull();
+      expect(workspace!.root).toBe(process.cwd());
+    });
+
     it('should reflect dynamic isRestoring state', async () => {
       let restoring = false;
       const deps = createMockDeps({

@@ -24,16 +24,13 @@ export async function completion(ctx: CompletionContext) {
 
   // Build Workspace from agent config boundaries
   const config = ctx.agent?.config;
-  const boundary = (config?.cwdBoundary ?? config?.workspaceRoot ?? null) as string | null;
+  const boundary = (config?.cwdBoundary ?? config?.workspaceRoot ?? cwd()) as string;
   let workspace: Workspace | null = null;
-  let baseDir = cwd();
-  if (boundary) {
-    try {
-      workspace = new Workspace(boundary);
-      baseDir = boundary;
-    } catch (e) {
-      logger.debug(`file-attachment: failed to create Workspace: ${(e as Error).message}`);
-    }
+  let baseDir = boundary;
+  try {
+    workspace = new Workspace(boundary);
+  } catch (e) {
+    logger.debug(`file-attachment: failed to create Workspace: ${(e as Error).message}`);
   }
 
   // Extract the path prefix (without @)

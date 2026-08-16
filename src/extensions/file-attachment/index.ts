@@ -176,14 +176,12 @@ export function create(core: CoreContext): ExtensionInstance {
       [HOOKS.INPUT]: async ({ text, agent }) => {
         // Build Workspace from agent config boundaries
         const config = agent?.config;
-        const boundary = config?.cwdBoundary ?? config?.workspaceRoot ?? null;
+        const boundary = config?.cwdBoundary ?? config?.workspaceRoot ?? cwd();
         let workspace: Workspace | null = null;
-        if (boundary) {
-          try {
-            workspace = new Workspace(boundary);
-          } catch (e) {
-            logger.debug(`file-attachment: failed to create Workspace: ${(e as Error).message}`);
-          }
+        try {
+          workspace = new Workspace(boundary);
+        } catch (e) {
+          logger.debug(`file-attachment: failed to create Workspace: ${(e as Error).message}`);
         }
 
         const result = await expandFileReferences(

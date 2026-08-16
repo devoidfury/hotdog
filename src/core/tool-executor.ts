@@ -246,16 +246,14 @@ export class ToolExecutor {
     toolCtx.set("cwdBoundary", this.#deps.cwdBoundary || null);
     toolCtx.set("workspaceRoot", this.#deps.workspaceRoot || null);
 
-    // Build Workspace from cwdBoundary or workspaceRoot
-    const boundary = this.#deps.cwdBoundary || this.#deps.workspaceRoot;
-    if (boundary) {
-      try {
-        toolCtx.set("workspace", new Workspace(boundary));
-      } catch (e) {
-        logger.warn(`Failed to create Workspace from '${boundary}': ${(e as Error).message}`);
-        toolCtx.set("workspace", null);
-      }
-    } else {
+    // Build Workspace from cwdBoundary, workspaceRoot, or the process CWD.
+    // Always constructing a Workspace means file tools go through resolveSafe()
+    // and absolute-path escapes are rejected even when no boundary is configured.
+    const boundary = this.#deps.cwdBoundary || this.#deps.workspaceRoot || process.cwd();
+    try {
+      toolCtx.set("workspace", new Workspace(boundary));
+    } catch (e) {
+      logger.warn(`Failed to create Workspace from '${boundary}': ${(e as Error).message}`);
       toolCtx.set("workspace", null);
     }
 

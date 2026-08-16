@@ -1244,7 +1244,7 @@ describe("create extension hooks", () => {
     expect(toolContextHandler).toBeDefined();
 
     // The hook handler runs without error (it may or may not set input depending on state)
-    expect(() => toolContextHandler({
+    expect(() => toolContextHandler!({
       toolCtx: {
         set: () => {},
       } as never,

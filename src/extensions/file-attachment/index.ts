@@ -17,8 +17,10 @@ import { Workspace, PathEscapeError } from "../../utils/workspace.ts";
 import { matcher, completion } from "./completions.ts";
 
 // Pattern to match @filepath references
-// Matches @ followed by path characters (alphanumeric, dots, slashes, hyphens, underscores, plus)
-const FILE_REF_RE = /@([a-zA-Z0-9._\/\+-]+)\b/g;
+// Matches @ preceded by start-of-string or a non-word character (so
+// "tom@furycodes.com" does NOT trigger, but "read @file.txt" does),
+// followed by path characters (alphanumeric, dots, slashes, hyphens, underscores, plus)
+const FILE_REF_RE = /(?<!\w)@([a-zA-Z0-9._\/\+-]+)\b/g;
 
 /**
  * Resolve a relative path against the workspace root or cwd.

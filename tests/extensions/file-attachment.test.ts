@@ -455,6 +455,47 @@ describe("file-attachment extension", () => {
     expect(expanded).not.toContain("Content 2");
   });
 
+  it("does not expand @ in email addresses (word char before @)", async () => {
+    await fsPromises.writeFile(path.join(tmpDir, "furycodes.com"), "domain content");
+
+    const core = { config: { fileAttachment: { maxFileSize: 102400, maxFiles: 10 } }, completion: createCompletionService() } as any;
+    const extension = create(core);
+    const hook = extension.hooks![HOOKS.INPUT]!;
+    const result = await hook(
+      { text: "Contact tom@furycodes.com about it", agent: null } as any,
+    );
+
+    expect((result as any).action).toBe("continue");
+  });
+
+  it("expands @ after non-word characters like parentheses", async () => {
+    await fsPromises.writeFile(path.join(tmpDir, "paren.txt"), "paren content");
+
+    const core = { config: { fileAttachment: { maxFileSize: 102400, maxFiles: 10 } }, completion: createCompletionService() } as any;
+    const extension = create(core);
+    const hook = extension.hooks![HOOKS.INPUT]!;
+    const result = await hook(
+      { text: "See (@paren.txt) for details", agent: null } as any,
+    );
+
+    expect((result as any).action).toBe("transform");
+    expect((result as any).text).toContain("paren content");
+  });
+
+  it("expands @ at the start of the string", async () => {
+    await fsPromises.writeFile(path.join(tmpDir, "first.txt"), "first content");
+
+    const core = { config: { fileAttachment: { maxFileSize: 102400, maxFiles: 10 } }, completion: createCompletionService() } as any;
+    const extension = create(core);
+    const hook = extension.hooks![HOOKS.INPUT]!;
+    const result = await hook(
+      { text: "@first.txt", agent: null } as any,
+    );
+
+    expect((result as any).action).toBe("transform");
+    expect((result as any).text).toContain("first content");
+  });
+
   it("uses agent context for cwdBoundary", async () => {
     const workspaceDir = path.join(tmpDir, "workspace");
     await fsPromises.mkdir(workspaceDir, { recursive: true });

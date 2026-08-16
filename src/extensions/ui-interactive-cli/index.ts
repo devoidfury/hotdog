@@ -10,7 +10,7 @@ import { MarkerMangler } from "../../core/marker-mangler.ts";
 import { SessionManager, type AgentLike } from "../../core/session/index.ts";
 import { Agent } from "../../core/agent.ts";
 import { CliChannel } from "./cli-channel.ts";
-import pkg from "../../../package.json" with { type: "json" };
+import pkg from "@package.json" with { type: "json" };
 import {
   readSessionEntries,
   sessionExists,

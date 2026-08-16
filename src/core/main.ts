@@ -1,13 +1,7 @@
 #!/usr/bin/env bun
 // CLI entry point.
 
-import {
-  createHooks,
-  initializeLogger,
-  logger,
-  resolveLogLevel,
-  resolveLogTarget,
-} from "./index.ts";
+import { createHooks, initializeLogger, logger, resolveLogLevel, resolveLogTarget } from "./index.ts";
 import {
   createToolRegistry,
   createExtensionLoader,
@@ -16,10 +10,9 @@ import {
   registerExtensionMetadata,
   validateServiceContracts,
   type LoaderCore,
-  type ExtensionLoader,
 } from "./extensions/index.ts";
 import { HOOKS, type HookSystem, type HookTraceOptions } from "./hooks.ts";
-import { createCompletionService, type CompletionService } from "./completion.ts";
+import { createCompletionService } from "./completion.ts";
 import type { CoreContext, ExtensionInstance, ToolMetadataPayload } from "./extensions/types.ts";
 import type { ToolMetadata } from "./extensions/tool-registry.ts";
 import { parseArgs, generateHelpText } from "./cli.ts";
@@ -48,17 +41,13 @@ import {
 import { ConfigRegistry } from "./extensions/config.ts";
 import { CliError } from "./error.ts";
 import { createSubcommandRegistry, type CliSubcommandRegistry } from "./extensions/registries.ts";
-import { readFile } from "node:fs/promises";
-import { fileURLToPath } from "node:url";
-import { dirname, join } from "node:path";
+
+import pkg from "@package.json" with { type: "json" };
 
 // Load extensions in dependency order, then fire TOOL_METADATA and validate service contracts.
 async function loadExtensions(
   core: CoreInfrastructure,
-  {
-    taskManager,
-    config,
-  }: { taskManager: unknown; config: CoreConfigWithExtensions } = {
+  { taskManager, config }: { taskManager: unknown; config: CoreConfigWithExtensions } = {
     taskManager: null,
     config: {} as CoreConfigWithExtensions,
   },
@@ -67,8 +56,7 @@ async function loadExtensions(
 
   const extensionPaths = (config?.extensionPaths as string[]) || ["builtins"];
   const extensionAutoload = (config?.extensionAutoload as boolean) ?? false;
-  const extensionsList =
-    (config?.extensions as string[]) || [];
+  const extensionsList = (config?.extensions as string[]) || [];
 
   const extensionsToLoad = await getExtensionsToLoad(
     extensionPaths,
@@ -79,15 +67,11 @@ async function loadExtensions(
 
   for (const ext of extensionsToLoad) {
     if (core.extensions.has(ext.name)) continue;
-    const extInstance = await core.extensions.load(
-      ext.name,
-      ext.path ?? "",
-      {
-        taskManager,
-        provides: ext.provides,
-        dependsOn: ext.dependsOn,
-      },
-    );
+    const extInstance = await core.extensions.load(ext.name, ext.path ?? "", {
+      taskManager,
+      provides: ext.provides,
+      dependsOn: ext.dependsOn,
+    });
     if (extInstance) loaded.push(extInstance);
   }
 
@@ -99,13 +83,8 @@ async function loadExtensions(
   core.hooks.notifyHooks(HOOKS.TOOL_METADATA, { tools: toolMetadataMap } as ToolMetadataPayload);
 
   // Only validate extensions that were actually loaded.
-  const loadedExtensions = extensionsToLoad.filter((ext) =>
-    core.extensions.has(ext.name),
-  );
-  const serviceErrors = validateServiceContracts(
-    loadedExtensions,
-    core.services,
-  );
+  const loadedExtensions = extensionsToLoad.filter((ext) => core.extensions.has(ext.name));
+  const serviceErrors = validateServiceContracts(loadedExtensions, core.services);
   for (const err of serviceErrors) {
     // Missing services crash at runtime, so surface them as errors.
     logger.error(`[services] ${err.message}`);
@@ -188,7 +167,11 @@ async function buildFullConfig(
   });
 
   const modelRegistry = await buildModelRegistry(
-    { providers: castAs<ProviderDef[]>(config.providers || []), baseUrl: resolved.baseUrl, apiKey: resolved.apiKey },
+    {
+      providers: castAs<ProviderDef[]>(config.providers || []),
+      baseUrl: resolved.baseUrl,
+      apiKey: resolved.apiKey,
+    },
     128000,
   );
   resolved.modelRegistry = modelRegistry;
@@ -204,9 +187,7 @@ async function buildFullConfig(
   const resolvedExtConfig = resolveExtensionConfig(extParams, extContext);
   Object.assign(config as Record<string, unknown>, resolvedExtConfig);
 
-  const extensionSchemas = extParams
-    .filter((p) => p.schema)
-    .map((p) => ({ key: p.key, schema: p.schema }));
+  const extensionSchemas = extParams.filter((p) => p.schema).map((p) => ({ key: p.key, schema: p.schema }));
   const validationResult = validateConfig(config as CoreConfigWithExtensions, extensionSchemas);
   failOnInvalidConfig(validationResult);
 
@@ -257,17 +238,12 @@ export async function main(): Promise<number> {
   } catch (e: unknown) {
     if (e instanceof CliError && e.message.startsWith("Unknown subcommand:")) {
       const knownSubcommands = cliSubcommandRegistry.names();
-      const posLower = e.message
-        .replace("Unknown subcommand: ", "")
-        .toLowerCase();
+      const posLower = e.message.replace("Unknown subcommand: ", "").toLowerCase();
       const similar = knownSubcommands.filter(
-        (sc) =>
-          sc.toLowerCase() !== posLower && sc.startsWith(posLower.slice(0, 2)),
+        (sc) => sc.toLowerCase() !== posLower && sc.startsWith(posLower.slice(0, 2)),
       );
       if (similar.length === 1) {
-        logger.error(
-          `Unknown subcommand: ${posLower}\n` + `Did you mean: ${similar[0]}?`,
-        );
+        logger.error(`Unknown subcommand: ${posLower}\n` + `Did you mean: ${similar[0]}?`);
       } else {
         logger.error(
           `Unknown subcommand: ${posLower}\n` +
@@ -281,12 +257,6 @@ export async function main(): Promise<number> {
   }
 
   if (cli.version) {
-    const pkg = JSON.parse(
-      await readFile(
-        join(dirname(fileURLToPath(import.meta.url)), "../../package.json"),
-        "utf-8",
-      ),
-    );
     console.log(`hotdog ${pkg.version}`);
     return 0;
   }
@@ -298,7 +268,10 @@ export async function main(): Promise<number> {
     return 0;
   }
 
-  const { resolved, config, modelRegistry, providers } = await buildFullConfig(cli as CliArgv, configRegistry);
+  const { resolved, config, modelRegistry, providers } = await buildFullConfig(
+    cli as CliArgv,
+    configRegistry,
+  );
 
   // Warn if no AI URL is configured
   if (!resolved.baseUrl) {
@@ -323,10 +296,7 @@ export async function main(): Promise<number> {
   await loadExtensions(core, { taskManager: null, config });
 
   // Metadata already came from extension.json; this hook lets extensions attach handler functions.
-  core.hooks.notifyHooks(
-    HOOKS.CLI_SUBCOMMANDS_REGISTER,
-    core.cliSubcommandRegistry,
-  );
+  core.hooks.notifyHooks(HOOKS.CLI_SUBCOMMANDS_REGISTER, core.cliSubcommandRegistry);
 
   core.hooks.notifyHooks(HOOKS.CLI_ARGS_PARSED, { cli });
 
@@ -335,26 +305,20 @@ export async function main(): Promise<number> {
     if (subcommandDef && subcommandDef.handler) {
       return await subcommandDef.handler(cli, core);
     }
-    logger.error(
-      `Subcommand "${cli.subcommand}" handler not available after loading extensions.`,
-    );
+    logger.error(`Subcommand "${cli.subcommand}" handler not available after loading extensions.`);
     return 1;
   }
 
   // No explicit subcommand — use default_subcommand from config when stdin is a TTY
   if (process.stdin.isTTY) {
     const defaultSubcommandName = config.defaultSubcommand || "cli";
-    const defaultSubcommand = core.cliSubcommandRegistry.get(
-      defaultSubcommandName,
-    );
+    const defaultSubcommand = core.cliSubcommandRegistry.get(defaultSubcommandName);
     if (defaultSubcommand && defaultSubcommand.handler) {
       return await defaultSubcommand.handler(cli, core);
     }
   }
 
   logger.error("No subcommand provided.");
-  console.log(
-    `Available subcommands: ${core.cliSubcommandRegistry.names().join(", ") || "(none)"}`,
-  );
+  console.log(`Available subcommands: ${core.cliSubcommandRegistry.names().join(", ") || "(none)"}`);
   return 1;
 }

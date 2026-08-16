@@ -1,23 +1,11 @@
-import { readFile } from "node:fs/promises";
-import { fileURLToPath } from "node:url";
-import { dirname, join } from "node:path";
 import { retryWithBackoff } from "./retry.ts";
 import { parseSse } from "./sse-parser.ts";
 import { MarkerMangler } from "../marker-mangler.ts";
-import { formatError, LlmError } from "../error.ts";
-import { logger } from "../logger.ts";
+import { LlmError } from "../error.ts";
 import { ToolDef } from "../extensions/tool-registry.ts";
 import { hotdogFetch } from "@utils/fetch.ts";
 
-const __dirname = dirname(fileURLToPath(import.meta.url));
-const PKG_PATH = join(__dirname, "../../../package.json");
-let VERSION = "unknown";
-try {
-  const pkg = JSON.parse(await readFile(PKG_PATH, "utf-8"));
-  VERSION = pkg.version || VERSION;
-} catch(e: unknown) {
-  logger.warn(`error reading package.json: ${formatError(e)}`)
-}
+import pkg from "@package.json" with { type: "json" };
 
 export interface ProviderConfig {
   name: string;
@@ -290,7 +278,7 @@ export class LlmClient {
   ): Promise<Response> {
     const headers: Record<string, string> = {
       "Content-Type": "application/json",
-      "User-Agent": `hotdog/${VERSION}`,
+      "User-Agent": `hotdog/${pkg.version}`,
     };
     if (apiKey) headers["Authorization"] = `Bearer ${apiKey}`;
     const effectiveSessionId = sessionId || this.sessionId;

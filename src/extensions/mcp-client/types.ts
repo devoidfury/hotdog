@@ -2,7 +2,7 @@
 // Implements only the JSON-RPC 2.0 and MCP message types needed for
 // connecting to MCP servers, listing tools, and calling tools.
 
-import pkg from "../../../package.json" with { type: "json" };
+import pkg from "@package.json" with { type: "json" };
 
 // ── JSON-RPC 2.0 ──────────────────────────────────────────────────────────
 
@@ -73,10 +73,10 @@ interface McpInitializeResponse {
 export function parseMcpInitializeResponse(data: Record<string, unknown>): McpInitializeResponse {
   return {
     protocolVersion: (data.protocolVersion as string) || null,
-    capabilities: parseMcpServerCapabilities(data.capabilities as Record<string, unknown> || {}),
+    capabilities: parseMcpServerCapabilities((data.capabilities as Record<string, unknown>) || {}),
     serverInfo: {
-      name: (data.serverInfo as Record<string, unknown>)?.name as string || "unknown",
-      version: (data.serverInfo as Record<string, unknown>)?.version as string || "unknown",
+      name: ((data.serverInfo as Record<string, unknown>)?.name as string) || "unknown",
+      version: ((data.serverInfo as Record<string, unknown>)?.version as string) || "unknown",
     },
     instructions: (data.instructions as string) || null,
   };
@@ -89,7 +89,7 @@ function parseMcpServerCapabilities(cap: Record<string, unknown>): McpServerCapa
     resources: cap.resources || null,
     tools: cap.tools
       ? {
-          listChanged: (cap.tools as Record<string, unknown>).listChanged as boolean || false,
+          listChanged: ((cap.tools as Record<string, unknown>).listChanged as boolean) || false,
         }
       : null,
   };
@@ -132,12 +132,13 @@ export function parseMcpToolDefinition(tool: Record<string, unknown>): McpToolDe
 /**
  * Create MCP tools/call request.
  */
-export function mcpToolCallRequest(name: string, arguments_?: Record<string, unknown> | null): Record<string, unknown> {
+export function mcpToolCallRequest(
+  name: string,
+  arguments_?: Record<string, unknown> | null,
+): Record<string, unknown> {
   return {
     name,
-    ...(arguments_ !== undefined && arguments_ !== null
-      ? { arguments: arguments_ }
-      : {}),
+    ...(arguments_ !== undefined && arguments_ !== null ? { arguments: arguments_ } : {}),
   };
 }
 
@@ -204,9 +205,7 @@ export function contentBlocksToString(blocks: McpContentBlock[]): string {
         if (block.text) parts.push(block.text);
         break;
       case "image":
-        parts.push(
-          `[Image: ${block.mimeType || "image"} (${(block.data || "").length} bytes)]`,
-        );
+        parts.push(`[Image: ${block.mimeType || "image"} (${(block.data || "").length} bytes)]`);
         break;
       case "resource":
         if (block.text) {

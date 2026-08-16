@@ -372,7 +372,33 @@ describe("buildModelRegistry with fetchModels", () => {
 
 // ── resolveModelConfig fallback ──────────────────────────────────────────────
 
-import { resolveModelConfig } from "../../src/core/config/providers.ts";
+import { findModelEntry, resolveModelConfig } from "../../src/core/config/providers.ts";
+
+// ── findModelEntry ────────────────────────────────────────────────────────────
+
+describe("findModelEntry", () => {
+  const registry = {
+    "laguna/laguna": { name: "laguna/laguna", temperature: null, contextLimit: 350000, tags: [] },
+    "openai/gpt-4": { name: "openai/gpt-4", temperature: 0.5, contextLimit: 128000, tags: [] },
+  };
+
+  it("returns the entry on direct key match", () => {
+    expect(findModelEntry("openai/gpt-4", registry)).toBe(registry["openai/gpt-4"]);
+  });
+
+  it("falls back to provider/modelName suffix match for bare names", () => {
+    expect(findModelEntry("laguna", registry)).toBe(registry["laguna/laguna"]);
+  });
+
+  it("returns undefined when no key matches", () => {
+    expect(findModelEntry("unknown", registry)).toBeUndefined();
+  });
+
+  it("does not suffix-match names that already contain a slash", () => {
+    const deep = { "p/a/b": { name: "p/a/b", temperature: null, contextLimit: 1, tags: [] } };
+    expect(findModelEntry("a/b", deep)).toBeUndefined();
+  });
+});
 
 describe("resolveModelConfig fallback lookup", () => {
   type ModelEntry = { name: string; temperature: number | null; contextLimit: number; tags: string[] };

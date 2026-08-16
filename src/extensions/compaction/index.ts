@@ -24,7 +24,7 @@ import {
   CommandsRegisterPayload,
   getExtensionConfig,
 } from "../../core/extensions/types.ts";
-import type { ModelConfig } from "../../core/config/providers.ts";
+import { findModelEntry, type ModelConfig } from "../../core/config/providers.ts";
 import { matcher, completion } from "./completions.ts";
 
 interface CompactionSettings {
@@ -39,20 +39,7 @@ interface CompactionSettings {
  * Resolve the model config from the agent's model registry.
  */
 function getModelConfig(modelRegistry: Record<string, ModelConfig>, modelName: string): { name: string; temperature: number | null; contextLimit: number; reasoningEffort?: string } | null {
-  // Direct lookup (e.g. "provider/modelName")
-  let entry = modelRegistry[modelName];
-  // Fallback: if modelName has no "/" and isn't found, try "provider/modelName"
-  // This handles the case where models are fetched remotely (fetchModels: true)
-  // with an empty local models array, so resolveModel returns just the model name
-  // but the registry key is provider/modelName.
-  if (!entry && !modelName.includes("/")) {
-    for (const key of Object.keys(modelRegistry)) {
-      if (key.endsWith(`/${modelName}`)) {
-        entry = modelRegistry[key];
-        break;
-      }
-    }
-  }
+  const entry = findModelEntry(modelName, modelRegistry);
   if (!entry) return null;
   if (typeof entry.contextLimit !== "number" || entry.contextLimit <= 0) {
     throw new Error(`Model "${modelName}" missing contextLimit in registry`);

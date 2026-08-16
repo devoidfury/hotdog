@@ -2,7 +2,7 @@
 
 import { ParsedCommand } from "./commands.ts";
 import { CORE_COMMAND_HANDLERS } from "./command-handlers.ts";
-import { resolveModelConfig, type ModelConfig } from "./config/providers.ts";
+import { findModelEntry, resolveModelConfig, type ModelConfig } from "./config/providers.ts";
 import { Message, type ImageAttachment, type ToolCall } from "./context/message.ts";
 import { OUTPUT_EVENT, OutputEvent, EVENT_NAME_MAP, type EventName } from "./context/output.ts";
 import { createContextManager, type ContextManager } from "./context/context-manager.ts";
@@ -656,16 +656,7 @@ export class Agent implements AgentLike {
 
   /** Resolve model entry from the registry, handling both "provider/model" and "model" names. */
   #resolveModelEntry(): ModelConfig | undefined {
-    let entry = this.modelRegistry[this.#model];
-    if (!entry && !this.#model.includes("/")) {
-      for (const key of Object.keys(this.modelRegistry)) {
-        if (key.endsWith(`/${this.#model}`)) {
-          entry = this.modelRegistry[key];
-          break;
-        }
-      }
-    }
-    return entry;
+    return findModelEntry(this.#model, this.modelRegistry);
   }
 
   /** Get all registered tool names. */

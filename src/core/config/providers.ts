@@ -232,6 +232,28 @@ export function resolveProvider(
 }
 
 /**
+ * Look up a model entry in the registry by exact key, falling back to a
+ * suffix match ("provider/modelName") when the name has no "/".
+ * Handles models fetched remotely (fetchModels: true) where the resolved
+ * name is bare but the registry key is provider/modelName.
+ */
+export function findModelEntry<T extends Partial<ModelConfig>>(
+  modelName: string,
+  modelRegistry: Record<string, T>,
+): T | undefined {
+  let entry = modelRegistry[modelName];
+  if (!entry && !modelName.includes("/")) {
+    for (const key of Object.keys(modelRegistry)) {
+      if (key.endsWith(`/${modelName}`)) {
+        entry = modelRegistry[key];
+        break;
+      }
+    }
+  }
+  return entry;
+}
+
+/**
  * Resolve model config from the registry with runtime overrides.
  */
 export function resolveModelConfig(
@@ -249,20 +271,7 @@ export function resolveModelConfig(
   contextLimit: number,
   reasoningEffort: string | undefined,
 ): ModelConfig {
-  // Direct lookup (e.g. "provider/modelName")
-  let entry = modelRegistry[modelName];
-  // Fallback: if modelName has no "/" and isn't found, try "provider/modelName"
-  // This handles the case where models are fetched remotely (fetchModels: true)
-  // with an empty local models array, so resolveModel returns just the model name
-  // but the registry key is provider/modelName.
-  if (!entry && !modelName.includes("/")) {
-    for (const key of Object.keys(modelRegistry)) {
-      if (key.endsWith(`/${modelName}`)) {
-        entry = modelRegistry[key];
-        break;
-      }
-    }
-  }
+  const entry = findModelEntry(modelName, modelRegistry);
   const fromRegistry: ModelConfig = entry
     ? {
         name: entry.name || modelName,

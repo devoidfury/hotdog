@@ -1,13 +1,7 @@
 /**
- * Markdown Parser — parses markdown text into a structured object tree.
- *
- * Designed for formatting LLM output in different UIs (web, CLI, etc.).
- * Supports streaming/incremental parsing where content arrives in chunks.
- *
- * Zero external dependencies.
+ * Markdown parser producing a structured tree, with incremental/streaming
+ * support for chunked LLM output rendered in different UIs (web, CLI).
  */
-
-// ── Block-level node types ───────────────────────────────────────────────────
 
 export interface MdDocument {
   type: "document";
@@ -54,8 +48,6 @@ export interface MdThematicBreak {
   type: "thematic_break";
 }
 
-// ── Table types ──────────────────────────────────────────────────────────────
-
 export interface MdTableCell {
   children: MdInline[];
 }
@@ -79,8 +71,6 @@ export type MdBlock =
   | MdHorizontalRule
   | MdThematicBreak
   | MdTable;
-
-// ── Inline-level node types ──────────────────────────────────────────────────
 
 export interface MdText {
   type: "text";
@@ -127,8 +117,6 @@ export type MdInline =
   | MdInlineCode
   | MdLink
   | MdImage;
-
-// ── Public API ───────────────────────────────────────────────────────────────
 
 export function parseMarkdown(markdown: string): MdDocument {
   const lines = markdown.split("\n");
@@ -203,9 +191,8 @@ export function parseMarkdown(markdown: string): MdDocument {
 // ── Streaming Parser (incremental with diff) ─────────────────────────────
 
 /**
- * Result of feeding a chunk into a streaming parser.
  * `stableFrom` is the index of the first block that changed since the previous feed;
- * blocks before this index are unchanged and their DOM can be left alone.
+ * blocks before it are unchanged and their DOM can be left alone.
  */
 export interface FeedResult {
   tree: MdDocument;
@@ -321,11 +308,7 @@ function areBlocksEqual(a: MdBlock, b: MdBlock): boolean {
   }
 }
 
-/**
- * Given two parse trees (previous and current), find the index of the
- * first block that differs.  Returns `prev.children.length` if the new
- * tree only appended blocks, or `0` if everything changed.
- */
+/** Index of the first block that differs between two parse trees. */
 export function getStablePrefix(prev: MdDocument, next: MdDocument): number {
   const len = Math.min(prev.children.length, next.children.length);
   for (let i = 0; i < len; i++) {
@@ -336,10 +319,8 @@ export function getStablePrefix(prev: MdDocument, next: MdDocument): number {
   return len;
 }
 
-/**
- * Incremental/streaming markdown parser. Feed chunks as they arrive; each `feed()`
- * returns the full tree plus a `stableFrom` index so renderers only re-render the changed tail.
- */
+// Feed chunks as they arrive; each feed() reports the stable prefix so
+// renderers only re-render the changed tail.
 export class StreamingMdParser {
   private buffer = "";
   private prevTree: MdDocument | null = null;
@@ -376,9 +357,6 @@ export function createStreamingParser(): StreamingMdParser {
   return new StreamingMdParser();
 }
 
-// ── Tree Utilities ───────────────────────────────────────────────────────────
-
-/** Flatten a markdown tree back into plain text. */
 export function mdTreeToPlainText(tree: MdDocument): string {
   const parts: string[] = [];
 
@@ -435,8 +413,6 @@ export function mdTreeToPlainText(tree: MdDocument): string {
     .trim();
 }
 
-// ── HTML Renderer ────────────────────────────────────────────────────────────
-
 function escapeHtml(text: string): string {
   return text
     .replace(/&/g, "&amp;")
@@ -445,26 +421,20 @@ function escapeHtml(text: string): string {
     .replace(/"/g, "&quot;");
 }
 
-// ── URL safety ──────────────────────────────────────────────────────────────
-
 const SAFE_LINK_SCHEMES = new Set(["http", "https", "mailto"]);
 const SAFE_IMAGE_SCHEMES = new Set(["http", "https"]);
 // data: URLs are only safe for script-less raster image types (svg can carry scripts)
 const SAFE_DATA_IMAGE_RE = /^data:image\/(png|jpe?g|gif|webp)(;|$)/i;
 
-/**
- * Check whether a URL is safe to render in HTML (link href / img src).
- * Blocks script-capable schemes (javascript:, vbscript:, data:text/html, ...).
- * Browsers ignore C0 controls/whitespace (e.g. `java\tscript:`) when parsing a
- * URL, so strip them all before checking the scheme. No legitimate URL contains
- * raw C0 controls or spaces, so this cannot break a valid one.
- * URLs without a scheme (relative, protocol-relative) are allowed.
- */
+// Blocks script-capable schemes (javascript:, vbscript:, data:text/html).
+// Browsers ignore C0 controls/whitespace when parsing URLs (e.g. `java\tscript:`),
+// so strip them before checking the scheme; no valid URL contains raw C0 controls.
+// Schemeless (relative, protocol-relative) URLs are allowed.
 function isSafeUrl(url: string, allowedSchemes: Set<string>, allowImageData: boolean): boolean {
   const normalized = url.replace(/[\x00-\x20]/g, "");
   if (allowImageData && SAFE_DATA_IMAGE_RE.test(normalized)) return true;
   const m = normalized.match(/^([a-z][a-z0-9+.-]*):/i);
-  if (!m) return true; // relative or protocol-relative URL
+  if (!m) return true;
   return allowedSchemes.has(m[1]!.toLowerCase());
 }
 
@@ -481,7 +451,7 @@ function inlineToHtml(node: MdInline): string {
     case "inline_code":
       return `<code class="inline-code">${escapeHtml(node.content)}</code>`;
     case "link": {
-      // Unsafe scheme (javascript:, etc.) -- render the link text as plain text
+      // Unsafe scheme (javascript:, etc.) -- render the link text as plain text.
       if (!isSafeUrl(node.url, SAFE_LINK_SCHEMES, false)) {
         return node.children.map(inlineToHtml).join("");
       }
@@ -545,7 +515,7 @@ export function mdTreeToHtml(tree: MdDocument): string {
   return tree.children.map(blockToHtml).join("\n");
 }
 
-/** Render a range of blocks to HTML; useful for incremental re-rendering during streaming. */
+// Render a block range to HTML, for incremental re-rendering during streaming.
 export function renderBlocksToHtml(
   tree: MdDocument,
   from: number,
@@ -555,13 +525,11 @@ export function renderBlocksToHtml(
   return tree.children.slice(from, end).map(blockToHtml).join("\n");
 }
 
-/** Parse markdown and render to HTML in one step. */
 export function markdownToHtml(markdown: string): string {
   const tree = parseMarkdown(markdown);
   return mdTreeToHtml(tree);
 }
 
-/** Walk the tree, calling `callback(node, parent)` for each node. */
 export function walkTree(
   tree: MdDocument,
   callback: (
@@ -619,8 +587,6 @@ function walkBlock(
       break;
   }
 }
-
-// ── Block-level Parsers ──────────────────────────────────────────────────────
 
 function parseCodeBlock(
   lines: string[],
@@ -751,14 +717,10 @@ function parseTableRowCells(line: string): MdTableCell[] {
   }));
 }
 
-// ── Table detection helpers ─────────────────────────────────────────────────
-
 function isTableHeaderLine(line: string): boolean {
-  // Must contain at least one pipe and look like a row (not a horizontal rule)
   if (!line.includes("|")) return false;
   const trimmed = line.trim();
-  // Reject lines that are pure horizontal rules (e.g., "|---|---|")
-  // A header should have actual content, not just dashes/underscores/asterisks
+  // Reject pure-dash rows like "|---|---|" -- a header needs real content.
   const cells = trimmed
     .replace(/^\|/, "")
     .replace(/\|$/, "")
@@ -772,7 +734,6 @@ function isTableDelimiter(line: string): boolean {
   if (!trimmed.startsWith("|") || !trimmed.endsWith("|")) return false;
   const inner = trimmed.slice(1, -1);
   const cells = inner.split("|");
-  // Every cell must match: optional spaces, colons, dashes, colons, optional spaces
   const cellPattern = /^\s*:?-+:?\s*$/;
   return cells.length > 0 && cells.every((c) => cellPattern.test(c));
 }
@@ -794,11 +755,9 @@ function parseParagraph(
     if (trimmed === "") {
       break;
     }
-    // Stop if we hit a block-level element.
-    // Use the heading regex (not just startsWith("#")) so that bare "#"
-    // or "#no-space" are treated as paragraph text, not as a heading.
-    // This prevents an infinite loop when parseParagraph breaks with
-    // _nextIndex === start.
+    // Stop at block-level elements. The heading regex (not startsWith("#"))
+    // keeps bare "#" / "#no-space" as paragraph text; without it, the loop
+    // would never advance and infinite-loop.
     if (
       /^#{1,6}\s+/.test(trimmed) ||
       trimmed.startsWith("```") ||
@@ -821,7 +780,6 @@ function parseParagraph(
 
 const ESCAPEABLE_CHARS = "\\`*_{}[]()#+-.!|~";
 
-/** Process escape sequences: converts \X to X for escapeable characters. */
 function processInlineEscapes(text: string): string {
   let result = "";
   let i = 0;
@@ -841,13 +799,12 @@ function processInlineEscapes(text: string): string {
   return result;
 }
 
-/** Word char for emphasis boundary purposes: underscores adjacent to these should not act as emphasis markers. */
+// Underscores adjacent to word chars must not act as emphasis markers.
 function isWordChar(ch: string | undefined): boolean {
   if (ch === undefined) return false;
   return /[a-zA-Z0-9_]/.test(ch);
 }
 
-/** Find a closing underscore marker that respects word boundaries; -1 if none found. */
 function findClosingUnderscore(
   text: string,
   marker: string,
@@ -883,7 +840,7 @@ function parseInline(text: string): MdInline[] {
     }
 
     if (text[i] === "`" && !isTripleBacktick(text, i)) {
-      // limit search distance to avoid greedy matches on malformed input
+      // Cap the search window so malformed input can't cause a long scan.
       let end = -1;
       for (let j = i + 1; j < text.length && j < i + 200; j++) {
         if (text[j] === "`") {
@@ -948,7 +905,7 @@ function parseInline(text: string): MdInline[] {
       }
     }
 
-    // underscores require word boundaries so "load_skill" doesn't become italic
+    // Word-boundary check keeps "load_skill" from becoming italic.
     if (text[i] === "*" || text[i] === "_") {
       if (text[i] === "_" && isWordChar(text[i - 1])) {
         result.push({ type: "text", content: text[i]! });
@@ -976,11 +933,9 @@ function parseInline(text: string): MdInline[] {
       result.push({ type: "text", content: text.slice(i, nextSpecial) });
       i = nextSpecial;
     } else if (nextSpecial === i) {
-      // Special char here didn't match any formatting rule — emit it as text
       result.push({ type: "text", content: text[i]! });
       i++;
     } else {
-      // No special char found ahead, take rest
       result.push({ type: "text", content: text.slice(i) });
       i = text.length;
     }
@@ -997,7 +952,6 @@ function parseImageOrLink(
   const prefixLen = isImage ? 2 : 1; // "![" vs "["
   const openBracket = start + prefixLen;
 
-  // Find matching "]"
   let bracketDepth = 1;
   let closeBracket = openBracket;
   while (closeBracket < text.length && bracketDepth > 0) {
@@ -1008,7 +962,6 @@ function parseImageOrLink(
 
   if (bracketDepth !== 0) return null;
 
-  // Expect "(url)" after "]"
   if (text[closeBracket + 1] !== "(") return null;
 
   const parenStart = closeBracket + 2;
@@ -1047,7 +1000,6 @@ function parseEmphasis(
 
   const openEnd = start + markerLen;
 
-  // For underscore emphasis, find a closing marker that respects word boundaries
   let closeIdx: number;
   if (openMarker === "_" || openMarker === "__") {
     closeIdx = findClosingUnderscore(text, openMarker, openEnd);
@@ -1079,9 +1031,7 @@ function parseEmphasis(
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
 function isListLine(trimmed: string): boolean {
-  // Match standard list items: "- text", "* text", "1. text", etc.
-  // Also match bare markers (e.g. "*") which can occur during streaming
-  // when the content hasn't arrived yet.
+  // Bare markers ("*", "-") can appear mid-stream before their text arrives.
   return (
     /^[-*+]\s+/.test(trimmed) ||
     /^[-*+]$/.test(trimmed) ||
@@ -1095,7 +1045,6 @@ function isOrderedListLine(trimmed: string): boolean {
 }
 
 function getListContent(trimmed: string): string {
-  // Remove list marker: "- ", "* ", "+ ", "1. ", "1) ", or bare marker "-" / "*" / "+"
   return trimmed
     .replace(/^[-*+]\s+/, "")
     .replace(/^[-*+]$/, "")
@@ -1104,12 +1053,7 @@ function getListContent(trimmed: string): string {
 }
 
 function isHorizontalRule(trimmed: string): boolean {
-  // Must be exclusively one character type (+ optional spaces), not mixed
-  // with other content.  This prevents "* **bold**" from matching as HR.
-  // Valid: "***", "* * *", "---", "- - -", "___", "_ _ _"
-  // Invalid: "*** extra", "* **", "---text"
-
-  // Reject if the line looks like a list item (marker followed by non-marker content)
+  // Must be one character type only, so "* **bold**" or "---text" don't match.
   if (/^[-*+][\s\S]/.test(trimmed) && !/^[-*+][\s*-]*$/.test(trimmed)) {
     return false;
   }

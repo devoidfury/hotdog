@@ -1,4 +1,4 @@
-// Interactive CLI Extension - Provides the interactive CLI session with readline loop.
+// Interactive CLI session (readline loop).
 
 import readline from "node:readline";
 import { spawn } from "node:child_process";
@@ -59,9 +59,8 @@ Commands:
   /reasoning none|minimal|low|high|xhigh|max|unset - Set reasoning effort level
 `;
 
-// In shellMode, the first word is checked to see if it's a command. The following
-// words are commonly used to start user input in a normal causal chat conversation,
-// almost certainly not the intended action, and often entered in lowercase.
+// In shellMode, first words that look like common conversational openers are
+// never treated as commands to execute.
 const IGNORED_CMDS = new Set([
   "alert",
   "as",
@@ -105,10 +104,7 @@ interface InteractiveSessionOptions {
   setupInput?: () => void;
 }
 
-/**
- * Check if a command name resolves to an executable on the system.
- * Uses `which` on Unix-like systems.
- */
+// Resolves via `which`; cached per command name.
 export async function isSystemCommand(cmd: string): Promise<boolean> {
   if (cmdLookupCache.has(cmd)) {
     return cmdLookupCache.get(cmd)!;
@@ -125,15 +121,10 @@ export async function isSystemCommand(cmd: string): Promise<boolean> {
     });
   });
 }
-// cache to avoid invoking `which` more than once for the same cmd
 const cmdLookupCache = new Map<string, boolean>();
 
-/**
- * Built-in command replacements (alias-like) applied before execution.
- * Keeps things simple and deterministic without sourcing user bashrc.
- */
+// Deterministic aliases applied before execution (no user bashrc sourcing).
 const COMMAND_REPLACEMENTS: [string, (cmd: string) => string][] = [
-  // ls -> ls --color=always (unless --color already specified)
   [
     "ls",
     (cmd) => {
@@ -145,16 +136,9 @@ const COMMAND_REPLACEMENTS: [string, (cmd: string) => string][] = [
   ],
 ];
 
-/**
- * Regex that matches the send-to-assistant suffix: a pipe followed by optional
- * whitespace, @, and an optional note (e.g., "ls -la |@", "ls -la | @",
- * "ls -la | @ here's a note"). Note requires at least one space after @.
- */
+// "cmd |@" pipes the output to the assistant; an optional note follows after a space.
 export const SEND_TO_ASSISTANT_SUFFIX_RE = /\|\s*@(?:\s+(.*))?$/;
 
-/**
- * Apply built-in command replacements to a command string.
- */
 export function applyCommandReplacements(command: string): string {
   let result = command;
   for (const [pattern, transform] of COMMAND_REPLACEMENTS) {
@@ -168,12 +152,7 @@ export function applyCommandReplacements(command: string): string {
   return result;
 }
 
-/**
- * Execute a shell command and return the output.
- *
- * @param command - The command to execute.
- * @param options.captureOutput - If true, also capture output (still streams to terminal).
- */
+// Runs via bash; with captureOutput, output is still streamed but also collected.
 export async function executeShellCommand(
   command: string,
   options: { captureOutput?: boolean } = {},
@@ -197,7 +176,6 @@ export async function executeShellCommand(
       return;
     }
 
-    // Capture mode: stream to terminal AND collect for the assistant
     let captured = "";
 
     proc.stdout!.on("data", (chunk: Buffer) => {
@@ -237,10 +215,7 @@ interface InputInterface {
   collectAnswers(questions: QuestionDef[]): Promise<Record<string, string>>;
 }
 
-/**
- * AsyncInteractiveCliInput — collects answers using the CLI's readline interface.
- * Implements the Input interface for question/answer collection.
- */
+// Question/answer collection over the CLI's readline interface.
 export class AsyncInteractiveCliInput implements InputInterface {
   readonly #rl: readline.Interface;
   readonly #onLine: (line: string) => void;
@@ -260,13 +235,10 @@ export class AsyncInteractiveCliInput implements InputInterface {
     return true;
   }
 
-  /**
-   * Collect answers to questions using the readline interface.
-   */
   async collectAnswers(questions: QuestionDef[]): Promise<Record<string, string>> {
     const rl = this.#rl;
 
-    // Temporarily take over readline
+    // Take over readline for the duration of the prompt.
     rl.removeListener("line", this.#onLine);
 
     const answers: Record<string, string> = {};
@@ -342,10 +314,9 @@ export class AsyncInteractiveCliInput implements InputInterface {
   }
 }
 
-// Store reference for tool context
+// Shared with the question tool via AGENT_TOOL_CONTEXT.
 let currentInput: InputInterface | null = null;
 
-/** Build the onQuit handler for CliChannel. */
 export function buildOnQuitHandler(
   sessionManager: SessionManager,
   extensions: CoreContext["extensions"],
@@ -361,9 +332,6 @@ export function buildOnQuitHandler(
   };
 }
 
-/**
- * Build an agent for the interactive CLI session.
- */
 export async function buildInteractiveAgent(
   agentConfig: Record<string, unknown>,
   core: CoreContext,
@@ -418,7 +386,6 @@ export async function buildInteractiveAgent(
     agent,
   });
 
-  // Restore session from disk if a session ID was explicitly provided
   const explicitSessionId = cli.sessionId as string | undefined;
   if (explicitSessionId && sessionId === explicitSessionId) {
     if (await sessionExists(explicitSessionId)) {
@@ -437,12 +404,7 @@ export async function buildInteractiveAgent(
   return agent;
 }
 
-/**
- * Run the interactive CLI session.
- *
- * Sets up the readline interface, SessionManager, CliChannel, and task manager,
- * then enters the interactive loop.
- */
+// Wires up readline + SessionManager + CliChannel and runs until quit.
 export async function runInteractiveSession(
   cli: Record<string, unknown>,
   core: CoreContext,

@@ -1,4 +1,4 @@
-// info / show-prompt / profiles subcommands -- run outside the agent loop.
+// info / show-prompt / profiles subcommands (run outside the agent loop).
 
 import { HOOKS } from "../../core/hooks.ts";
 import { CliSubcommandRegistryLike } from "../../core/extensions/registries.ts";
@@ -270,7 +270,7 @@ function printInfoJson(
   return 0;
 }
 
-// Resolve a key with the real resolver, then walk layers again just to build the trace display.
+// Resolves via the real resolver, then re-walks layers only for the trace display.
 function traceConfigResolution(
   keyName: string,
   schema: SchemaProperty,
@@ -531,7 +531,7 @@ async function checkFileExists(filePath: string): Promise<boolean> {
   }
 }
 
-// Build a throwaway agent just to render the real system prompt + tool defs.
+// Builds a throwaway agent so we can render the real system prompt + tool defs.
 async function runShowPrompt(cli: CliArgv, core: CoreContext): Promise<number> {
   const { buildConfig } = core;
   const { resolved } = await buildConfig!(cli);

@@ -32,7 +32,6 @@ interface SessionMetadata {
   connectedClients: number;
   questionStrategy: string;
   questionTimeoutSecs: number;
-  // Drives the profile-switch confirmation prompt.
   userMessageCount: number;
 }
 
@@ -46,7 +45,6 @@ interface CreateSessionOptions {
 interface SwitchProfileOptions {
   sessionId: string;
   profileName: string;
-  // Bypass the "has user messages" confirmation check.
   force?: boolean;
 }
 
@@ -94,10 +92,6 @@ export type HotdogServerSocket<T = undefined> = Bun.ServerWebSocket<T> & {
   authToken?: string;
 };
 
-// Registry of agent sessions backed by SessionManager. Each session has an
-// agent, a message bus (owned by SessionManager), and WebSocketChannel
-// instances for connected clients. Sessions persist with no clients; idle
-// ones are cleaned up after a timeout.
 export class SessionRegistry {
   #sessionManager: SessionManager;
   #buildAgent: (config: {
@@ -109,7 +103,6 @@ export class SessionRegistry {
   #questionStrategy: string;
   #cleanupTimer: ReturnType<typeof setInterval> | null = null;
   #timeoutMin: number;
-  // All active connections -- used for broadcasting.
   #allConnections = new Set<HotdogServerSocket<unknown>>();
   #metadata: Map<string, SessionMetadata>;
   #channels: Map<string, Set<WebSocketChannel>>;
@@ -149,17 +142,9 @@ export class SessionRegistry {
     this.#allConnections.delete(ws);
   }
 
-  // Broadcast to all connected clients; closed connections are skipped silently.
   broadcast(msg: Record<string, unknown>): void {
-    const payload = JSON.stringify(msg);
     for (const ws of this.#allConnections) {
-      try {
-        if (ws.readyState === 1) {
-          ws.send(payload);
-        }
-      } catch {
-        // Cleaned up on close.
-      }
+      SessionRegistry.sendSafe(ws, msg);
     }
   }
 
@@ -169,7 +154,7 @@ export class SessionRegistry {
         ws.send(JSON.stringify(msg));
       }
     } catch {
-      // Connection closed or erroring -- ignore.
+      // closed or erroring; cleaned up on close
     }
   }
 
@@ -184,7 +169,7 @@ export class SessionRegistry {
   }> {
     const proposedSessionId = crypto.randomUUID();
 
-    // The agent may assign its own sessionId; use whatever it ends up with.
+    // buildAgent may override the proposed id; trust what it returns.
     const agent = await this.#buildAgent({
       model,
       sessionId: proposedSessionId,
@@ -282,7 +267,6 @@ export class SessionRegistry {
     return { ...this.#profiles };
   }
 
-  // returns requiresConfirmation: true when the session has user messages and force is unset
   async switchProfile({
     sessionId,
     profileName,
@@ -320,7 +304,7 @@ export class SessionRegistry {
       agent.toolWhitelist = profile.whitelistTools;
       agent.profileBody = profile.body || undefined;
       agent.role = profile.role || undefined;
-      // Clears messages + system prompt -- the UI confirms this beforehand.
+      // Destructive: wipes messages + system prompt, so the UI confirms first.
       await agent.clearContext();
     }
     meta.profile = profileName;
@@ -363,7 +347,6 @@ export class SessionRegistry {
   }
 
   removeChannel(sessionId: string, channel: WebSocketChannel): void {
-    // Detach first to unsubscribe event handlers.
     channel.detach(sessionId);
 
     const channels = this.#channels.get(sessionId);
@@ -376,7 +359,7 @@ export class SessionRegistry {
     }
   }
 
-  // Bumps lastActivityAt to prevent idle cleanup.
+  // Prevents idle cleanup of the session.
   touch(sessionId: string): void {
     const meta = this.#metadata.get(sessionId);
     if (meta) {
@@ -555,7 +538,7 @@ function replaySessionHistory(
       }
     }
 
-    // Also replay in-progress stream chunks not yet in the message log.
+    // Chunks may be in flight but not yet flushed to the message log.
     const agentImpl = agent as Agent;
     const partialReasoning = agentImpl.currentStreamingReasoning;
     const partialContent = agentImpl.currentStreamingContent;
@@ -781,7 +764,7 @@ async function routeMessage(
 
     case C2S.CANCEL: {
       if (msg.sessionId) {
-        // interrupt() keeps the bus alive so new messages can still be sent;
+        // interrupt() keeps the bus alive for follow-up messages;
         // cancel() would abort it entirely.
         sessionManager.interrupt(msg.sessionId as string);
       }
@@ -812,7 +795,7 @@ async function routeMessage(
     case C2S.LIST_LOGS: {
       listSessionLogs()
         .then((logs) => {
-          // Only "cold" logs -- exclude sessions that are live in the registry.
+          // Exclude sessions that are still live; only return cold logs.
           const activeIds = new Set(registry.list().map((s) => s.id));
           const coldLogs = logs.filter((log) => !activeIds.has(log.id));
           SessionRegistry.sendSafe(ws, {
@@ -1175,7 +1158,7 @@ export function createWsServer(
     try {
       await routeMessage(ws, msg, registry, auth);
     } catch (err: unknown) {
-      // Don't crash on a dropped connection.
+      // Swallow errors from dropped connections to keep the server alive.
       const typedErr = err as Error;
       if (
         typedErr.message !== "WebSocket is not open: readyState 2 (CLOSING)" &&

@@ -1,5 +1,5 @@
 /// <reference lib="dom" />
-// Chat view: WS client + message routing. Atoms drive the DOM via effects.
+// Chat view: WS client + message routing; atoms drive the DOM via effects.
 
 import { reactiveState, effect, Atom } from "./utils.ts";
 import { createMessageList, MessageListManager } from "./message-list.ts";
@@ -23,7 +23,7 @@ type ProfileInfo = {
 };
 const profilesAtom = reactiveState<Record<string, ProfileInfo>>({});
 let currentProfile = "default";
-// Drives the profile-switch confirmation prompt.
+// >0 triggers the profile-switch confirmation prompt.
 let userMessageCount = 0;
 
 interface SessionCreatedMessage {
@@ -227,7 +227,6 @@ export interface ChatController {
   deleteSession: (sessionId: string) => void;
   renameSession: (sessionId: string, newName: string) => void;
   listSessions: () => void;
-  // Cold session logs (persisted on disk).
   listLogs: () => void;
   loadLog: (logId: string) => void;
   viewLog: (logId: string) => void;
@@ -237,7 +236,7 @@ export interface ChatController {
   setSession: (sessionId: string) => void;
   listProfiles: () => void;
   switchProfile: (profileName: string, force?: boolean) => void;
-  // Raw WS message -- needed to cancel non-active sessions from the sidebar.
+  // Raw WS message; the sidebar uses it to cancel non-active sessions.
   send: (obj: Record<string, unknown>) => void;
   ws: WebSocket | null;
   sessionIdAtom: Atom<string | null>;
@@ -245,7 +244,7 @@ export interface ChatController {
   modelsAtom: Atom<string[]>;
   connectedAtom: Atom<boolean>;
   workingAtom: Atom<boolean>;
-  // sessionId -> isWorking, so the sidebar can show per-session indicators.
+  // Per-session working state for the sidebar indicators.
   sessionWorkingMap: Map<string, boolean>;
   messageListAtom: () => MessageListManager | null;
   getCurrentProfile: () => string;
@@ -275,7 +274,7 @@ export function createChat({
   const connectedAtom = reactiveState<boolean>(false);
   const workingAtom = reactiveState<boolean>(false);
 
-  // Tracks which sessions have active agents, so indicators survive session switches.
+  // Per-session working state; survives session switches for the sidebar.
   const sessionWorkingMap = new Map<string, boolean>();
 
   effect(() => {
@@ -302,7 +301,7 @@ export function createChat({
     onConnectionChange?.(connected);
   }, [connectedAtom]);
 
-  // Cancel button lives inside the indicator, so hiding it hides the button too.
+  // The cancel button is nested in the indicator, so hiding the indicator hides both.
   effect(() => {
     const el = document.getElementById("working-indicator") as HTMLElement | null;
     if (!el) return;
@@ -332,7 +331,7 @@ export function createChat({
     }
   }, [profilesAtom]);
 
-  // Re-clone the select on every profiles change to drop stale listeners.
+  // Clone the select on each profiles change so stale listeners are dropped.
   effect(() => {
     const profiles = profilesAtom();
     const select = document.getElementById("profile-select") as HTMLSelectElement | null;
@@ -350,8 +349,7 @@ export function createChat({
         return;
       }
 
-      // force=true: the UI already confirmed (or no confirmation was needed).
-      switchProfile(profileName, true);
+      switchProfile(profileName, true); // force: confirm() above already asked
     });
   }, [profilesAtom]);
 
@@ -361,14 +359,13 @@ export function createChat({
       case "sessionCreated":
         sessionIdAtom(data.sessionId);
         currentModelAtom(data.currentModel || "");
-        // Set before profiles load so the dropdown is correct immediately.
         if (data.profile) {
           currentProfile = data.profile;
         }
         if (data.models && data.models.length > 0) {
           modelsAtom(data.models);
         }
-        // Page reload: the server may have sent working state before
+        // On page reload the server can send working state before
         // sessionCreated, so restore it from the map here.
         const createdSid = data.sessionId;
         if (sessionWorkingMap.has(createdSid)) {
@@ -431,10 +428,9 @@ export function createChat({
 
     if (!messageList) return;
 
-    // Defense in depth: the server should only send content events for the
-    // active session, but a leaked orphaned channel must not corrupt the UI.
-    // sessionState is an exception -- it's broadcast for all sessions so the
-    // sidebar can show per-session working indicators.
+    // Defense in depth: content events should only arrive for the active
+    // session, but a leaked orphaned channel must not corrupt the UI.
+    // sessionState is broadcast for all sessions (sidebar indicators).
     if (data.type !== "sessionState") {
       const msgSessionId = (data as { sessionId?: string }).sessionId;
       if (msgSessionId && msgSessionId !== sessionIdAtom()) {
@@ -487,7 +483,6 @@ export function createChat({
           const sid = (data as { sessionId?: string }).sessionId;
           if (sid) {
             sessionWorkingMap.set(sid, Boolean(data.value));
-            // Keep the cancel button in sync for the active session.
             if (sid === sessionIdAtom()) {
               workingAtom(Boolean(data.value));
             }
@@ -632,7 +627,7 @@ export function createChat({
   function cancel(): void {
     if (!sessionIdAtom()) return;
     send({ type: "cancel", sessionId: sessionIdAtom() });
-    // Clear working state optimistically so the UI doesn't spin.
+    // Clear working state optimistically so the spinner stops immediately.
     const sid = sessionIdAtom();
     if (sid) sessionWorkingMap.set(sid, false);
     workingAtom(false);

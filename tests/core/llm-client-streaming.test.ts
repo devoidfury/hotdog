@@ -214,3 +214,178 @@ describe("LlmClient.chatStreamCancellable", () => {
     expect((events[0]! as any).content).toBe("Hello");
   });
 });
+
+describe("LlmClient.chatStreamCancellable — network errors, timeouts, cancellation", () => {
+  let originalFetch: typeof globalThis.fetch;
+
+  beforeEach(() => {
+    originalFetch = globalThis.fetch;
+  });
+
+  afterEach(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  function makeMsg(role: string, content: string) {
+    return { role, content, toJSON: () => ({ role, content }) };
+  }
+
+  function sseResponse(content: string): Response {
+    return {
+      ok: true,
+      headers: new Map([["content-type", "text/event-stream"]]),
+      body: {
+        getReader: () => {
+          let done = false;
+          return {
+            read: async () => {
+              if (done) return { done: true, value: undefined as any };
+              done = true;
+              return {
+                done: false,
+                value: new TextEncoder().encode(
+                  `data: {"choices":[{"delta":{"content":"${content}"}}]}\n\n`,
+                ),
+              };
+            },
+            releaseLock: () => {},
+          } as any;
+        },
+      },
+    } as unknown as Response;
+  }
+
+  /** Fetch mock that hangs until the signal aborts, then rejects with the signal's reason (like real fetch). */
+  function hangingFetch(signalLog: Array<{ signal: AbortSignal | null | undefined; abortedAtEntry: boolean }>) {
+    return (async (_: string, options: RequestInit) => {
+      const s = options.signal;
+      signalLog.push({ signal: s, abortedAtEntry: s?.aborted ?? false });
+      return await new Promise<Response>((_resolve, reject) => {
+        if (!s) return; // hang forever
+        if (s.aborted) reject(s.reason);
+        else s.addEventListener("abort", () => reject(s.reason), { once: true });
+      });
+    }) as unknown as typeof fetch;
+  }
+
+  async function collect(gen: AsyncGenerator<any>) {
+    const events: any[] = [];
+    let error: unknown;
+    try {
+      for await (const event of gen) events.push(event);
+    } catch (e) {
+      error = e;
+    }
+    return { events, error };
+  }
+
+  it("retries raw network errors and resolves once the connection succeeds", async () => {
+    const client = new LlmClient({ chatTimeoutSecs: 30, maxRetries: 3, baseUrl: "http://test.com" });
+    let calls = 0;
+
+    globalThis.fetch = (async () => {
+      calls++;
+      if (calls === 1) throw new TypeError("fetch failed");
+      return sseResponse("recovered");
+    }) as unknown as typeof fetch;
+
+    const { events, error } = await collect(
+      client.chatStreamCancellable([makeMsg("user", "Hi")], { name: "test-model", temperature: null }),
+    );
+
+    expect(error).toBeUndefined();
+    expect(calls).toBe(2);
+    expect(events.some((e) => e.type === "content" && e.content === "recovered")).toBe(true);
+  });
+
+  it("exhausts retries on persistent network error and surfaces LlmError.Http", async () => {
+    const client = new LlmClient({ chatTimeoutSecs: 30, maxRetries: 2, baseUrl: "http://test.com" });
+    let calls = 0;
+
+    globalThis.fetch = (async () => {
+      calls++;
+      throw new TypeError("fetch failed");
+    }) as unknown as typeof fetch;
+
+    const { error } = await collect(
+      client.chatStreamCancellable([makeMsg("user", "Hi")], { name: "test-model", temperature: null }),
+    );
+
+    expect(calls).toBe(2);
+    expect(error).toBeInstanceOf(LlmError);
+    expect((error as LlmError).type).toBe("http");
+    expect((error as Error).message).toContain("fetch failed");
+  });
+
+  it("does not retry 4xx HTTP errors", async () => {
+    const client = new LlmClient({ chatTimeoutSecs: 30, maxRetries: 3, baseUrl: "http://test.com" });
+    let calls = 0;
+
+    globalThis.fetch = (async () => {
+      calls++;
+      return { ok: false, status: 400, text: async () => "Bad Request" } as unknown as Response;
+    }) as unknown as typeof fetch;
+
+    const { error } = await collect(
+      client.chatStreamCancellable([makeMsg("user", "Hi")], { name: "test-model", temperature: null }),
+    );
+
+    expect(calls).toBe(1);
+    expect(error).toBeInstanceOf(LlmError);
+    expect((error as LlmError).type).toBe("api");
+    expect((error as Error).message).toMatch(/^HTTP 400/);
+  });
+
+  it("retries on chat timeout and surfaces a visible timeout error with a fresh signal per attempt", async () => {
+    const client = new LlmClient({ chatTimeoutSecs: 0.02, maxRetries: 2, baseUrl: "http://test.com" });
+    const signalLog: Array<{ signal: AbortSignal | null | undefined; abortedAtEntry: boolean }> = [];
+
+    globalThis.fetch = hangingFetch(signalLog);
+
+    const { error } = await collect(
+      client.chatStreamCancellable([makeMsg("user", "Hi")], { name: "test-model", temperature: null }),
+    );
+
+    // Both attempts timed out
+    expect(signalLog).toHaveLength(2);
+    // Regression: attempt 2 must start with a signal that is NOT already
+    // aborted (previously the shared abortController was poisoned by the
+    // first timeout, aborting every subsequent attempt instantly).
+    expect(signalLog[0]!.abortedAtEntry).toBe(false);
+    expect(signalLog[1]!.abortedAtEntry).toBe(false);
+    // Each attempt gets its own timeout signal
+    expect(signalLog[0]!.signal).not.toBe(signalLog[1]!.signal);
+
+    // The surfaced error is a LlmError timeout, not a raw AbortError,
+    // so MessageBus will emit it instead of suppressing it as a cancel.
+    expect(error).toBeInstanceOf(LlmError);
+    expect((error as LlmError).type).toBe("timeout");
+    expect((error as Error).name).not.toBe("AbortError");
+    expect(LlmError.isCancelled(error)).toBe(false);
+    expect((error as Error).message).toMatch(/timed out/);
+  });
+
+  it("surfaces user cancellation as LlmError.Cancelled without retrying", async () => {
+    const client = new LlmClient({ chatTimeoutSecs: 30, maxRetries: 3, baseUrl: "http://test.com" });
+    const signalLog: Array<{ signal: AbortSignal | null | undefined; abortedAtEntry: boolean }> = [];
+
+    globalThis.fetch = hangingFetch(signalLog);
+
+    const cancelController = new AbortController();
+    setTimeout(() => cancelController.abort(), 30);
+
+    const { error } = await collect(
+      client.chatStreamCancellable(
+        [makeMsg("user", "Hi")],
+        { name: "test-model", temperature: null },
+        [],
+        cancelController.signal,
+      ),
+    );
+
+    // No retries after cancellation
+    expect(signalLog).toHaveLength(1);
+    expect(error).toBeInstanceOf(LlmError);
+    expect(LlmError.isCancelled(error)).toBe(true);
+  });
+});

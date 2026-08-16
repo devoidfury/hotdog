@@ -224,23 +224,20 @@ export class LlmClient {
 
     try {
       const effectiveSessionId = sessionId || this.sessionId;
-      const doRequestWithTimeout = async () => {
-        const timeoutId = setTimeout(
-          () => abortController.abort(),
+      // The chat timeout is enforced per-attempt via hotdogFetch's built-in
+      // timeoutMs (an independent AbortSignal.timeout), NOT by aborting the
+      // shared abortController. Aborting the shared controller would poison
+      // every subsequent retry attempt with an already-aborted signal.
+      // The shared abortController is exclusively for user cancellation.
+      const doRequestWithTimeout = () =>
+        this._doRequest(
+          url,
+          apiKey,
+          request,
+          abortController.signal,
+          effectiveSessionId,
           this.chatTimeoutSecs * 1000,
         );
-        try {
-          return await this._doRequest(
-            url,
-            apiKey,
-            request,
-            abortController.signal,
-            effectiveSessionId,
-          );
-        } finally {
-          clearTimeout(timeoutId);
-        }
-      };
 
       const response = await retryWithBackoff<Response>(
         doRequestWithTimeout,
@@ -269,12 +266,27 @@ export class LlmClient {
     yield* this._processSSE(resp);
   }
 
+  /**
+   * Classify a raw fetch rejection.
+   *
+   * Bun rejects an aborted fetch with the aborting signal's reason:
+   * `TimeoutError` (DOMException) for `AbortSignal.timeout()` and
+   * `AbortError` (DOMException) for a manual `controller.abort()`.
+   */
+  static isAbortError(e: unknown): boolean {
+    return (
+      e instanceof Error &&
+      (e.name === "AbortError" || e.name === "TimeoutError")
+    );
+  }
+
   async _doRequest(
     url: string,
     apiKey: string | null,
     request: Record<string, unknown>,
     signal: AbortSignal | null,
     sessionId?: string,
+    timeoutMs?: number | null,
   ): Promise<Response> {
     const headers: Record<string, string> = {
       "Content-Type": "application/json",
@@ -285,12 +297,39 @@ export class LlmClient {
     if (effectiveSessionId) headers["x-session-affinity"] = effectiveSessionId;
     headers["Connection"] = "keep-alive";
 
-    const resp = await hotdogFetch(`${url}/v1/chat/completions`, {
-      method: "POST",
-      headers,
-      body: JSON.stringify(request),
-      signal,
-    });
+    let resp: Response;
+    try {
+      resp = await hotdogFetch(
+        `${url}/v1/chat/completions`,
+        {
+          method: "POST",
+          headers,
+          body: JSON.stringify(request),
+          signal,
+        },
+        timeoutMs ?? undefined,
+      );
+    } catch (e: unknown) {
+      // Translate raw fetch failures into LlmError so retryWithBackoff
+      // classifies them: http/timeout are transient and retried, cancelled
+      // is rethrown immediately.
+      if (e instanceof LlmError) throw e;
+      if (LlmClient.isAbortError(e)) {
+        // User cancellation aborts the shared signal; the per-attempt
+        // timeout uses an independent signal inside hotdogFetch.
+        if (signal?.aborted) {
+          throw LlmError.Cancelled("request was cancelled");
+        }
+        if (timeoutMs != null) {
+          throw LlmError.Timeout(
+            `Chat request timed out after ${Math.round(timeoutMs / 1000)}s`,
+          );
+        }
+        throw LlmError.Cancelled("request was aborted");
+      }
+      // Network failures (ECONNREFUSED, DNS, TLS, etc.) are transient.
+      throw LlmError.Http(e instanceof Error ? e.message : String(e));
+    }
 
     if (!resp.ok) {
       const body = await resp.text();

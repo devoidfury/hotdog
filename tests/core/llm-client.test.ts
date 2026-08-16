@@ -395,6 +395,56 @@ describe("LlmClient._doRequest", () => {
 
     expect(capturedSignal).toBe(abortController.signal);
   });
+
+  it("translates raw network failures into LlmError.Http", async () => {
+    const client = new LlmClient({ chatTimeoutSecs: 30, maxRetries: 3, baseUrl: "http://test.com" });
+
+    globalThis.fetch = (async () => {
+      throw new TypeError("fetch failed");
+    }) as unknown as typeof fetch;
+
+    await expect(
+      client._doRequest("http://test.com", null, { model: "gpt-4" }, null),
+    ).rejects.toMatchObject({ type: "http", name: "Error" });
+  });
+
+  it("translates aborted shared signal into LlmError.Cancelled", async () => {
+    const client = new LlmClient({ chatTimeoutSecs: 30, maxRetries: 3, baseUrl: "http://test.com" });
+
+    globalThis.fetch = (async (_: string, options: RequestInit) => {
+      return await new Promise<Response>((_resolve, reject) => {
+        const s = options.signal;
+        if (!s) throw new Error("expected signal");
+        if (s.aborted) reject(s.reason);
+        else s.addEventListener("abort", () => reject(s.reason), { once: true });
+      });
+    }) as unknown as typeof fetch;
+
+    const abortController = new AbortController();
+    abortController.abort();
+
+    await expect(
+      client._doRequest("http://test.com", null, { model: "gpt-4" }, abortController.signal),
+    ).rejects.toMatchObject({ type: "cancelled" });
+  });
+
+  it("translates per-attempt timeout into LlmError.Timeout", async () => {
+    const client = new LlmClient({ chatTimeoutSecs: 30, maxRetries: 3, baseUrl: "http://test.com" });
+
+    globalThis.fetch = (async (_: string, options: RequestInit) => {
+      return await new Promise<Response>((_resolve, reject) => {
+        const s = options.signal;
+        if (!s) throw new Error("expected signal");
+        if (s.aborted) reject(s.reason);
+        else s.addEventListener("abort", () => reject(s.reason), { once: true });
+      });
+    }) as unknown as typeof fetch;
+
+    // No user signal: only the per-attempt timeout can fire.
+    await expect(
+      client._doRequest("http://test.com", null, { model: "gpt-4" }, null, undefined, 30),
+    ).rejects.toMatchObject({ type: "timeout" });
+  });
 });
 
 describe("LlmClient.chatStreamWithModelConfig", () => {

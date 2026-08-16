@@ -22,19 +22,26 @@ const FILE_REF_RE = /@([a-zA-Z0-9._\/\+-]+)\b/g;
 
 /**
  * Resolve a relative path against the workspace root or cwd.
+ *
+ * Returns null when the path is rejected by the workspace boundary (a
+ * PathEscapeError). A rejection must mean "skip this file", never "resolve
+ * it anyway" — falling back to raw resolution here would let `@../../etc/
+ * passwd` attach files outside the workspace, defeating the boundary that
+ * read/edit/overwrite already enforce.
  */
 function resolveFilePath(
   filePath: string,
   workspace: Workspace | null,
-): string {
+): string | null {
   if (workspace) {
     try {
       return workspace.resolveSafe(filePath);
     } catch (e: unknown) {
       if (e instanceof PathEscapeError) {
         logger.debug(`file-attachment: path escape rejected for '${filePath}'`);
+        return null;
       }
-      // Fall back to basic resolution if workspace check fails
+      // Fall back to basic resolution if workspace check fails for another reason
     }
   }
   if (isAbsolute(filePath)) {
@@ -104,6 +111,7 @@ async function expandFileReferences(
   FILE_REF_RE.lastIndex = 0;
 
   const errors: string[] = [];
+  let boundaryRejections = 0;
   let match: RegExpExecArray | null;
 
   // Collect all file references
@@ -114,6 +122,13 @@ async function expandFileReferences(
     const requestedPath = match[1];
     if (!requestedPath) continue;
     const resolvedPath = resolveFilePath(requestedPath, workspace);
+
+    if (resolvedPath === null) {
+      // Rejected by the workspace boundary: never attach, report in the note.
+      errors.push(requestedPath);
+      boundaryRejections++;
+      continue;
+    }
 
     const result = await readFileContent(
       resolvedPath,
@@ -127,8 +142,9 @@ async function expandFileReferences(
     }
   }
 
-  // If no files were found, return original text
-  if (attachedFiles.length === 0) {
+  // If no files were found, return original text. Boundary rejections are
+  // the exception: they always get a note, even when nothing attached.
+  if (attachedFiles.length === 0 && boundaryRejections === 0) {
     return { expanded: text, attachedFiles };
   }
 

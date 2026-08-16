@@ -478,3 +478,108 @@ describe("file-attachment extension", () => {
   });
 
 });
+
+describe("file-attachment workspace boundary (escape rejection)", () => {
+  let tmpDir: string;
+  let workspaceDir: string;
+  let secretFile: string;
+  let originalCwd: string;
+
+  beforeEach(() => {
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "file-attach-boundary-"));
+    workspaceDir = path.join(tmpDir, "workspace");
+    fs.mkdirSync(workspaceDir, { recursive: true });
+    // A file OUTSIDE the workspace, one level up from it
+    secretFile = path.join(tmpDir, "outside.txt");
+    fs.writeFileSync(secretFile, "OUTSIDE-SECRET-CONTENT");
+    // A legitimate file inside the workspace
+    fs.writeFileSync(path.join(workspaceDir, "inside.txt"), "INSIDE-OK-CONTENT");
+    originalCwd = process.cwd();
+    process.chdir(tmpDir);
+  });
+
+  afterEach(() => {
+    process.chdir(originalCwd);
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  function makeHook() {
+    const core = {
+      config: { fileAttachment: { maxFileSize: 102400, maxFiles: 10 } },
+      completion: createCompletionService(),
+    } as any;
+    return create(core).hooks![HOOKS.INPUT]!;
+  }
+
+  const boundaryAgent = () => ({ config: { cwdBoundary: workspaceDir } });
+
+  it("(a) @../outside.txt with workspace configured is NOT attached and is reported", async () => {
+    const hook = makeHook();
+    const result = await hook({
+      text: "Please read @../outside.txt",
+      agent: boundaryAgent(),
+    } as any);
+
+    const r = result as any;
+    // The file outside the workspace must never leak into the prompt
+    expect(r.text).not.toContain("OUTSIDE-SECRET-CONTENT");
+    // And it must be reported, not silently swallowed
+    expect(r.text).toContain("could not read");
+    expect(r.text).toContain("../outside.txt");
+  });
+
+  it("(b) absolute path outside the workspace is NOT attached and is reported", async () => {
+    const hook = makeHook();
+    const result = await hook({
+      text: `Please read @${secretFile}`,
+      agent: boundaryAgent(),
+    } as any);
+
+    const r = result as any;
+    expect(r.text).not.toContain("OUTSIDE-SECRET-CONTENT");
+    expect(r.text).toContain("could not read");
+    expect(r.text).toContain(secretFile);
+  });
+
+  it("(c) legitimate relative path inside the workspace still attaches", async () => {
+    const hook = makeHook();
+    const result = await hook({
+      text: "Please read @inside.txt",
+      agent: boundaryAgent(),
+    } as any);
+
+    const r = result as any;
+    expect(r.action).toBe("transform");
+    expect(r.text).toContain("INSIDE-OK-CONTENT");
+    expect(r.text).toContain("<path>inside.txt</path>");
+    expect(r.text).not.toContain("could not read");
+  });
+
+  it("attaches in-workspace files while reporting rejected escapes alongside", async () => {
+    const hook = makeHook();
+    const result = await hook({
+      text: "Compare @inside.txt with @../outside.txt",
+      agent: boundaryAgent(),
+    } as any);
+
+    const r = result as any;
+    expect(r.action).toBe("transform");
+    expect(r.text).toContain("INSIDE-OK-CONTENT");
+    expect(r.text).not.toContain("OUTSIDE-SECRET-CONTENT");
+    expect(r.text).toContain("could not read");
+    expect(r.text).toContain("../outside.txt");
+  });
+
+  it("still attaches when no boundary is configured (workspace === null)", async () => {
+    // No agent context: boundary unconfigured, resolves against cwd as before
+    const hook = makeHook();
+    const result = await hook({
+      text: "Please read @workspace/inside.txt",
+      agent: null,
+    } as any);
+
+    const r = result as any;
+    expect(r.action).toBe("transform");
+    expect(r.text).toContain("INSIDE-OK-CONTENT");
+  });
+});

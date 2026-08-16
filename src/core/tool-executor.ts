@@ -8,7 +8,6 @@ import { ToolContext } from "./extensions/tool-context.ts";
 import { formatToolResult, TOOL_STOP_LOOP } from "./extensions/tool-utils.ts";
 import type { ToolRegistry } from "./extensions/tool-registry.ts";
 import type { Agent } from "./agent.ts";
-import type { ContextManager } from "./context/context-manager.ts";
 import { Workspace } from "./../utils/workspace.ts";
 
 
@@ -22,7 +21,6 @@ export interface ToolResult {
 }
 
 export interface ToolExecutorDeps {
-  context: ContextManager;
   toolRegistry: ToolRegistry;
   hooks: HookSystem;
   emitOutput<T extends string>(type: T, data: Record<string, unknown>): void;
@@ -33,7 +31,7 @@ export interface ToolExecutorDeps {
   toolRetryDelay: number;
   /** Dynamic getter — isRestoring can change at runtime. */
   isRestoring: () => boolean;
-  /** Agent reference for hook payloads (not used for method calls). */
+  /** Agent reference — hook payloads and addMessage (fires CONTEXT_MESSAGE). */
   agent: Agent;
 }
 
@@ -100,7 +98,7 @@ export class ToolExecutor {
         content: result,
         toolCallId,
       });
-      this.#deps.context.addMessage(msg);
+      this.#deps.agent.addMessage(msg);
       return { toolName: "(invalid)", input, result, toolCallId: toolCallId || "" };
     }
 
@@ -275,7 +273,9 @@ export class ToolExecutor {
       toolCallId,
       images: images as ImageAttachment[] | undefined,
     });
-    this.#deps.context.addMessage(msg);
+    // Go through agent.addMessage() so the CONTEXT_MESSAGE hook fires and
+    // extensions (session log) record the tool result.
+    this.#deps.agent.addMessage(msg);
     return { toolName, input, result, toolCallId, stopLoop };
   }
 }

@@ -6,7 +6,6 @@ import type { ToolCall } from '../../src/core/context/message.ts';
 import { createToolRegistry } from '../../src/core/extensions/tool-registry.ts';
 import { createHooks } from '../../src/core/hooks.ts';
 import { Message } from '../../src/core/context/message.ts';
-import { createContextManager } from '../../src/core/context/context-manager.ts';
 import type { Tool, ToolDef } from '../../src/core/extensions/tool-registry.ts';
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
@@ -34,14 +33,15 @@ function makeTestTool(
   };
 }
 
-function createMockDeps(overrides: Partial<ToolExecutorDeps> = {}): ToolExecutorDeps {
+function createMockDeps(
+  overrides: Partial<ToolExecutorDeps> = {},
+): ToolExecutorDeps & { addedMessages: Message[]; outputs: Array<{ type: string; data: Record<string, unknown> }> } {
   const toolRegistry = createToolRegistry();
   const hooks = createHooks();
-  const context = createContextManager();
+  const addedMessages: Message[] = [];
   const outputs: Array<{ type: string; data: Record<string, unknown> }> = [];
 
   return {
-    context,
     toolRegistry,
     hooks,
     emitOutput: (type, data) => outputs.push({ type, data }),
@@ -51,7 +51,13 @@ function createMockDeps(overrides: Partial<ToolExecutorDeps> = {}): ToolExecutor
     maxRetries: 3,
     toolRetryDelay: 100,
     isRestoring: () => false,
-    agent: { sessionId: 'test' } as unknown as import('../../src/core/agent.ts').Agent,
+    // Mirrors Agent.addMessage: records the message (context) for assertions.
+    agent: {
+      sessionId: 'test',
+      addMessage: (msg: Message) => { addedMessages.push(msg); },
+    } as unknown as import('../../src/core/agent.ts').Agent,
+    addedMessages,
+    outputs,
     ...overrides,
   };
 }
@@ -364,6 +370,62 @@ describe('ToolExecutor', () => {
       expect(result.toolResults[0]!.result).toContain('Error executing tool');
       expect(result.toolResults[0]!.result).toContain('boom');
     });
+  });
+
+  describe('message logging', () => {
+    it('should add tool result to context via agent.addMessage', async () => {
+      const deps = createMockDeps();
+      deps.toolRegistry.register('echo', makeTestTool('echo', async () => 'hello from tool'));
+
+      const executor = createToolExecutor(deps);
+      await executor.execute([{
+        id: 'call-1',
+        type: 'function',
+        function: { name: 'echo', arguments: '{}' },
+      }]);
+
+      expect(deps.addedMessages).toHaveLength(1);
+      const msg = deps.addedMessages[0]!;
+      expect(msg.role).toBe('tool');
+      expect(msg.toolCallId).toBe('call-1');
+      expect(msg.content as string).toContain('hello from tool');
+    });
+
+    it('should add error results to context via agent.addMessage', async () => {
+      const deps = createMockDeps();
+      deps.toolRegistry.register('boom', makeTestTool('boom', async () => {
+        throw new Error('kaboom');
+      }));
+
+      const executor = createToolExecutor(deps);
+      await executor.execute([{
+        id: 'call-2',
+        type: 'function',
+        function: { name: 'boom', arguments: '{}' },
+      }]);
+
+      expect(deps.addedMessages).toHaveLength(1);
+      const msg = deps.addedMessages[0]!;
+      expect(msg.role).toBe('tool');
+      expect(msg.toolCallId).toBe('call-2');
+      expect(msg.content as string).toContain('kaboom');
+    });
+
+    it('should add a tool message for calls with an invalid name', async () => {
+      const deps = createMockDeps();
+
+      const executor = createToolExecutor(deps);
+      await executor.execute([{
+        id: 'call-3',
+        type: 'function',
+        function: { name: '', arguments: '{}' },
+      }]);
+
+      expect(deps.addedMessages).toHaveLength(1);
+      expect(deps.addedMessages[0]!.role).toBe('tool');
+      expect(deps.addedMessages[0]!.toolCallId).toBe('call-3');
+    });
+
   });
 
   describe('multiple tool calls', () => {

@@ -116,6 +116,44 @@ describe('Agent — end-to-end loop', () => {
     expect(toolMsg!.content as string).toContain('42');
   });
 
+  it('should fire CONTEXT_MESSAGE once per context message, including tool results', async () => {
+    const tool = simpleTool('calculator', '42');
+
+    const mockLLM = new MockLLMClient({
+      responseSequences: [
+        buildStreamResponse({
+          content: 'Let me calculate that.',
+          toolCalls: [{ index: 0, name: 'calculator', arguments: '{"expr":"2+2"}', id: 'call_calc_1' }],
+          usage: { prompt_tokens: 10, completion_tokens: 30, total_tokens: 40 },
+        }),
+        buildStreamResponse({
+          content: 'The answer is 42.',
+          usage: { prompt_tokens: 40, completion_tokens: 10, total_tokens: 50 },
+        }),
+      ],
+    });
+
+    const { hooks, toolRegistry, agent } = createFixture({ mockLLM });
+    toolRegistry.register('calculator', tool);
+
+    const logged: Array<{ role: string; content: string }> = [];
+    hooks.on(HOOKS.CONTEXT_MESSAGE, ({ message }) => {
+      logged.push({ role: message.role ?? "", content: typeof message.content === 'string' ? message.content : "" });
+    });
+
+    await agent.run('What is 2+2?');
+
+    const roles = logged.map(m => m.role);
+    // Tool results must reach the hook (session log writes them to jsonl)
+    expect(roles).toContain('tool');
+    const toolEntry = logged.find(m => m.role === 'tool')!;
+    expect(toolEntry.content).toContain('42');
+    // Each message is notified exactly once -- no duplicates
+    expect(roles.filter(r => r === 'user')).toHaveLength(1);
+    expect(roles.filter(r => r === 'assistant')).toHaveLength(2);
+    expect(roles.filter(r => r === 'tool')).toHaveLength(1);
+  });
+
   // ── Multiple tool calls in one turn ────────────────────────────────────────
 
   it('should execute multiple parallel tool calls from one LLM response', async () => {

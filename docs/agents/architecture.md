@@ -187,7 +187,7 @@ Built-in command handler implementations for core commands. Extracted from `agen
 Runs the full tool call pipeline (TOOL_CALL gate → AGENT_TOOL_CONTEXT → validate → execute → TOOL_RESULT). Extracted from Agent so tool execution is testable independently. Key exports:
 - `ToolExecutor` class — manages the tool execution pipeline
 - `createToolExecutor(deps)` — factory function
-- `ToolExecutorDeps` — dependency interface (toolRegistry, hooks, addMessage, emitOutput, toolWhitelist, cwdBoundary, workspaceRoot, isRestoring, agent)
+- `ToolExecutorDeps` — dependency interface (toolRegistry, hooks, emitOutput, toolWhitelist, cwdBoundary, workspaceRoot, maxRetries, toolRetryDelay, isRestoring, agent)
 - `ToolCall` — typed tool call object
 
 ### Token Tracker (`src/core/token-tracker.ts`)

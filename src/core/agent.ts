@@ -186,7 +186,6 @@ export class Agent implements AgentLike {
       throw ConfigError.MissingConfig("toolRetryDelay");
     }
     this.#toolExecutor = createToolExecutor({
-      context: this.context,
       toolRegistry: options.toolRegistry,
       hooks: options.hooks,
       emitOutput: (type, data) => this.emitOutput(type, data),
@@ -474,7 +473,7 @@ export class Agent implements AgentLike {
 
       return { outcome, toolResults: finalResults };
     } else {
-      this.hooks.notifyHooks(HOOKS.CONTEXT_MESSAGE, { message: assistantMsg, agent: this });
+      // CONTEXT_MESSAGE already fired via addMessage() above.
       return response.fullText;
     }
   }

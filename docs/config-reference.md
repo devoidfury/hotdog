@@ -771,7 +771,7 @@ Extensions register their own configuration namespaces. Each extension's config 
 
 ### `coreTools`
 
-[Core Tools](../src/extensions/core-tools) — Write, read, edit, grep, find, pager, explore.
+[Core Tools](../src/extensions/core-tools) — Write, read, edit, grep, find, explore.
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|

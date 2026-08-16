@@ -116,7 +116,6 @@ describe("Hook + Extension Integration", () => {
     expect(toolNames).toContain("edit");
     expect(toolNames).toContain("grep");
     expect(toolNames).toContain("find");
-    expect(toolNames).toContain("pager");
     // bash is now registered by bash-tool extension, not core-tools
     expect(toolNames).not.toContain("bash");
     // question is now registered by question-tool extension, not core-tools

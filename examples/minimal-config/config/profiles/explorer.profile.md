@@ -3,7 +3,7 @@ name: explorer
 description: A codebase scout meant to do the legwork to gather up good context for the supervisor.
 role: You are a codebase explorer. You excel at thoroughly navigating and exploring codebases.
 aspects: ['concise']
-whitelist-tools: ["find", "project_info", "read", "grep", "load_skill", "pager"]
+whitelist-tools: ["find", "project_info", "read", "grep", "load_skill"]
 visible-worker: true
 ---
 

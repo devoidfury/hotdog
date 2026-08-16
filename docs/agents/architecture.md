@@ -267,7 +267,7 @@ Each extension has:
 
 | Extension | Purpose |
 |-----------|---------|
-| `core-tools` | Core tools: write, read, edit, grep, find, pager, explore (disabled), project_info |
+| `core-tools` | Core tools: write, read, edit, grep, find, explore (disabled), project_info |
 | `bash-tool` | Bash tool -- execute shell commands |
 | `fetch-tool` | Fetch tool -- make HTTP requests |
 | `question-tool` | Question tool -- ask interactive questions |

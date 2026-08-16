@@ -13,7 +13,6 @@ export * from "./read.ts";
 export * from "./edit.ts";
 export * from "./grep.ts";
 export * from "./find.ts";
-export * from "./pager.ts";
 export * from "./project-info.ts";
 export * from "./explore.ts";
 
@@ -24,7 +23,6 @@ import { ReadTool } from "./read.ts";
 import { EditTool } from "./edit.ts";
 import { GrepTool } from "./grep.ts";
 import { FindTool } from "./find.ts";
-import { PagerTool } from "./pager.ts";
 import { ProjectInfoTool } from "./project-info.ts";
 import { ExploreTool } from "./explore.ts";
 import { DEFAULT_MAX_IMAGE_SIZE } from "./defaults.ts";
@@ -39,7 +37,6 @@ const TOOL_DESCRIPTORS: ToolDescriptor[] = [
   { name: "overwrite", disabled: false },
   { name: "append", disabled: false },
   { name: "read", disabled: false },
-  { name: "pager", disabled: false },
   // explore tool is disabled by default because it invokes another sub LLM session,
   // which is not desirable in lots of default workflows. Currently hardware in
   // local ai circles is more often than not limited.
@@ -87,7 +84,6 @@ const TOOL_FACTORIES: Record<string, (config: CoreToolConfig) => Tool> = {
       maxResults: config.findMaxResults,
       maxOutputLines: config.maxToolOutputLines,
     }),
-  pager: () => new PagerTool(),
   explore: () => new ExploreTool(),
   project_info: () => new ProjectInfoTool(),
 };

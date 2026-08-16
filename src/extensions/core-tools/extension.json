@@ -2,7 +2,7 @@
   "name": "core-tools",
   "provides": ["tools"],
   "loadOrder": 1,
-  "description": "Core agent tools (write, read, edit, grep, find, pager, explore)",
+  "description": "Core agent tools (write, read, edit, grep, find, explore)",
   "configSchema": {
     "coreTools": {
       "type": "object",

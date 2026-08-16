@@ -49,7 +49,6 @@ Tools without metadata are excluded when filtering is active (conservative defau
 | `edit` | `core-tools` | Edits files using replace modes | `path`, `oldString`, `newString` / `search`, `replace` / `files` + `atomic` |
 | `grep` | `core-tools` | Searches file contents for regex patterns | `pattern`, `path`, `type`, `context` |
 | `find` | `core-tools` | Glob-based file search | `pattern`, `path`, `file_type`, `max_results` |
-| `pager` | `core-tools` | Show a previously cached tool output for pagination | `tool_call_id` |
 | `project_info` | `core-tools` | Gathers project information | `path` |
 | `explore` *(disabled)* | `core-tools` | Runs the agent in explorer mode against a project directory | `path`, `outline` |
 | `bash` | `bash-tool` | Executes shell commands via system shell | `command`, `timeoutMs` |

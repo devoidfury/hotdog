@@ -27,7 +27,6 @@ describe("CORE_TOOL_NAMES", () => {
       "overwrite",
       "append",
       "read",
-      "pager",
       "explore",
       "find",
       "grep",
@@ -61,7 +60,7 @@ describe("SUBAGENT_TOOL_NAMES", () => {
 describe("createToolFactory", () => {
   it("creates all expected core tools", () => {
     const factory = createToolFactory(config);
-    for (const name of ["overwrite", "append", "read", "edit", "grep", "find", "pager", "project_info"]) {
+    for (const name of ["overwrite", "append", "read", "edit", "grep", "find", "project_info"]) {
       const tool = factory.createTool(name);
       expect(tool, `${name} tool should be created`).not.toBeNull();
       expect(typeof tool!.execute, `${name}.execute should be a function`).toBe("function");

@@ -1,7 +1,4 @@
-// Subagent tools — manager agent tools for task delegation.
-//
-// These tools are only enabled when the profile has `manager: true`.
-// They provide task delegation, status checking, follow-up, and interruption.
+// Manager-only task delegation tools; enabled when the profile has `manager: true`.
 
 import {
   toolDef,
@@ -13,8 +10,6 @@ import {
 import type { ToolDef, ToolMetadata } from "../../core/extensions/tool-registry.ts";
 import { TaskManager } from "../../core/index.ts";
 
-// ── Base class for subagent tools ──────────────────────────────────────────
-
 interface SubagentToolOptions {
   sessionCore?: unknown;
   taskManager?: TaskManager;
@@ -22,10 +17,6 @@ interface SubagentToolOptions {
 
 type Backend = { type: "sessionCore"; value: unknown } | { type: "taskManager"; value: TaskManager } | { type: "none"; value: null };
 
-/**
- * Base class for all subagent tools.
- * Accepts an options object with sessionCore and/or taskManager.
- */
 export class SubagentTool {
   metadata: ToolMetadata = { sideEffects: false, difficulty: 1 };
   protected _sessionCore: unknown;
@@ -41,9 +32,6 @@ export class SubagentTool {
     }
   }
 
-  /**
-   * Resolve the task management backend.
-   */
   _resolveBackend(): Backend {
     if (this._sessionCore) {
       return { type: "sessionCore", value: this._sessionCore };

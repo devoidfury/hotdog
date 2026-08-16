@@ -1,8 +1,3 @@
-/**
- * Markdown parser producing a structured tree, with incremental/streaming
- * support for chunked LLM output rendered in different UIs (web, CLI).
- */
-
 export interface MdDocument {
   type: "document";
   children: MdBlock[];
@@ -188,12 +183,7 @@ export function parseMarkdown(markdown: string): MdDocument {
   return { type: "document", children: blocks };
 }
 
-// ── Streaming Parser (incremental with diff) ─────────────────────────────
-
-/**
- * `stableFrom` is the index of the first block that changed since the previous feed;
- * blocks before it are unchanged and their DOM can be left alone.
- */
+// stableFrom: index of the first block that changed since the previous feed; earlier blocks' DOM can be left alone.
 export interface FeedResult {
   tree: MdDocument;
   stableFrom: number;
@@ -319,8 +309,6 @@ export function getStablePrefix(prev: MdDocument, next: MdDocument): number {
   return len;
 }
 
-// Feed chunks as they arrive; each feed() reports the stable prefix so
-// renderers only re-render the changed tail.
 export class StreamingMdParser {
   private buffer = "";
   private prevTree: MdDocument | null = null;
@@ -451,14 +439,13 @@ function inlineToHtml(node: MdInline): string {
     case "inline_code":
       return `<code class="inline-code">${escapeHtml(node.content)}</code>`;
     case "link": {
-      // Unsafe scheme (javascript:, etc.) -- render the link text as plain text.
       if (!isSafeUrl(node.url, SAFE_LINK_SCHEMES, false)) {
+        // Unsafe scheme (javascript:, etc.) -- render the link text as plain text.
         return node.children.map(inlineToHtml).join("");
       }
       return `<a href="${escapeHtml(node.url)}" target="_blank" rel="noopener noreferrer">${node.children.map(inlineToHtml).join("")}</a>`;
     }
     case "image":
-      // Unsafe scheme -- drop the image entirely
       if (!isSafeUrl(node.url, SAFE_IMAGE_SCHEMES, true)) return "";
       return `<img src="${escapeHtml(node.url)}" alt="${escapeHtml(node.alt)}" />`;
   }
@@ -515,7 +502,6 @@ export function mdTreeToHtml(tree: MdDocument): string {
   return tree.children.map(blockToHtml).join("\n");
 }
 
-// Render a block range to HTML, for incremental re-rendering during streaming.
 export function renderBlocksToHtml(
   tree: MdDocument,
   from: number,
@@ -776,8 +762,6 @@ function parseParagraph(
   return { type: "paragraph", children, _nextIndex: i };
 }
 
-// ── Inline Parser ────────────────────────────────────────────────────────────
-
 const ESCAPEABLE_CHARS = "\\`*_{}[]()#+-.!|~";
 
 function processInlineEscapes(text: string): string {
@@ -1027,8 +1011,6 @@ function parseEmphasis(
 
   return { node, endIndex: closeIdx + markerLen };
 }
-
-// ── Helpers ──────────────────────────────────────────────────────────────────
 
 function isListLine(trimmed: string): boolean {
   // Bare markers ("*", "-") can appear mid-stream before their text arrives.

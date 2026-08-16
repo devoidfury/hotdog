@@ -1,5 +1,3 @@
-// Message Bus
-
 import { formatError, isExpectedError, LlmError } from "../error.ts";
 import { OUTPUT_EVENT, OutputEvent } from "../context/output.ts";
 import { HOOKS, isInputTransform, type InputHookResult } from "../hooks.ts";
@@ -37,18 +35,7 @@ export interface MessageBusOptions {
   broadcastCallback?: (msg: Record<string, unknown>) => void;
 }
 
-/**
- * An event-driven message bus that owns the agent run loop.
- * Uses SessionManager for agent access.
- * No polling — enqueue() resolves a per-iteration deferred.
- *
- * Cancellation uses an AbortController instead of a boolean flag.
- * cancel() aborts the controller, signaling the generator to exit.
- * interrupt() does NOT abort the controller — the bus continues
- * waiting for new input. This eliminates the race condition where
- * the agent's _cancelled flag was cleared in the finally block of
- * _processMessage, allowing a cancelled request to be retried.
- */
+// Owns the agent run loop; no polling -- enqueue() resolves a per-iteration deferred.
 export class MessageBus {
   #sessionManager: MessageBusSessionManager;
   #sink: Sink;
@@ -58,40 +45,23 @@ export class MessageBus {
   #waiter: { resolve: () => void } | null;
   #broadcastCallback: ((msg: Record<string, unknown>) => void) | undefined;
 
-  /**
-   * @param options
-   * @param options.sessionManager
-   * @param options.sink
-   * @param options.broadcastCallback - Optional callback to broadcast events to all clients
-   */
   constructor({ sessionManager, sink, broadcastCallback }: MessageBusOptions) {
     this.#sessionManager = sessionManager;
     this.#sink = sink;
     this.#broadcastCallback = broadcastCallback;
     this.#queue = [];
     this.#isRunning = false;
-    // AbortController for the run loop. cancel() aborts it, signaling
-    // the generator to exit. interrupt() does NOT abort it.
+    // cancel() aborts it; interrupt() does NOT -- the bus keeps waiting for input.
     this.#abortController = new AbortController();
-    // Single waiter slot: { resolve } or null. Created per generator
-    // iteration, cleared synchronously after await.
     this.#waiter = null;
   }
 
-  /**
-   * Enqueue a message for processing.
-   * If the generator is waiting, this wakes it immediately.
-   */
   enqueue(text: string): void {
     this.#queue.push(text);
     this._wakeWaiter();
   }
 
-  /**
-   * Cancel the run loop. Aborts the controller so the generator exits,
-   * and cancels the agent's active request. The bus cannot process
-   * further messages after cancel() — create a new bus or call reset().
-   */
+  /** Ends the run loop; the bus is unusable afterwards unless reset(). */
   cancel(): void {
     this.#abortController.abort();
     const agent = this.#sessionManager.getAgent();
@@ -99,12 +69,7 @@ export class MessageBus {
     this._wakeWaiter();
   }
 
-  /**
-   * Interrupt the current agent processing and clear the queue.
-   * Unlike cancel(), this does NOT end the run loop — the bus
-   * continues waiting for new input after the interruption.
-   * Used by Ctrl-C in interactive mode.
-   */
+  /** Cancels the active request and clears the queue, but keeps the run loop alive (Ctrl-C). */
   interrupt(): void {
     const agent = this.#sessionManager.getAgent();
     if (agent) agent.cancel();
@@ -112,18 +77,11 @@ export class MessageBus {
     this._wakeWaiter();
   }
 
-  /**
-   * Reset the bus after cancellation. Creates a fresh AbortController
-   * so the bus can be used again. The queue is preserved.
-   */
+  /** Makes a cancelled bus usable again; the queue is preserved. */
   reset(): void {
     this.#abortController = new AbortController();
   }
 
-  /**
-   * Check if the bus has been cancelled.
-   * @returns Whether the bus has been cancelled.
-   */
   get isCancelled(): boolean {
     return this.#abortController.signal.aborted;
   }
@@ -144,9 +102,9 @@ export class MessageBus {
     return this.#sessionManager.getAgent();
   }
 
-  // ── Test-only accessors ─────────────────────────────────────────────────
+  // Test-only accessors
 
-  /** @internal Exposed for testing. */
+  /** @internal */
   get queue(): string[] {
     return this.#queue;
   }
@@ -154,7 +112,7 @@ export class MessageBus {
     this.#queue = v;
   }
 
-  /** @internal Exposed for testing. */
+  /** @internal */
   get isRunning(): boolean {
     return this.#isRunning;
   }
@@ -162,12 +120,12 @@ export class MessageBus {
     this.#isRunning = v;
   }
 
-  /** @internal Exposed for testing. */
+  /** @internal */
   get abortController(): AbortController {
     return this.#abortController;
   }
 
-  /** @internal Exposed for testing. */
+  /** @internal */
   get waiter(): { resolve: () => void } | null {
     return this.#waiter;
   }
@@ -175,30 +133,20 @@ export class MessageBus {
     this.#waiter = v;
   }
 
-  /**
-   * Run the dispatch loop. Drains messages sequentially.
-   * Blocks indefinitely until cancelled.
-   */
+  /** Blocks until cancelled. */
   async run(): Promise<void> {
     for await (const text of this._messages(false)) {
       await this._processMessage(text);
     }
   }
 
-  /**
-   * Run the dispatch loop, draining remaining messages after cancellation.
-   * Exits once cancelled and the queue is empty.
-   */
+  /** Like run(), but drains the queue after cancellation before exiting. */
   async runUntilCancelled(): Promise<void> {
     for await (const text of this._messages(true)) {
       await this._processMessage(text);
     }
   }
 
-  /**
-   * Wake a pending waiter, if any. Idempotent — safe to call
-   * even if no waiter is waiting.
-   */
   _wakeWaiter(): void {
     if (this.#waiter) {
       const resolve = this.#waiter.resolve;
@@ -207,46 +155,22 @@ export class MessageBus {
     }
   }
 
-  /**
-   * Async generator that yields messages until cancellation.
-   *
-   * Each iteration:
-   *   1. Drains all currently queued messages synchronously
-   *   2. If cancelled (and not drain mode), exits
-   *   3. Otherwise, waits for the next enqueue or cancel event
-   *
-   * In drain mode (runUntilCancelled), cancellation is also checked
-   * after draining so any messages queued after cancellation are
-   * still processed before exit.
-   *
-   * Uses the AbortController signal for cancellation instead of a
-   * boolean flag. The waiter promise is scoped to this iteration —
-   * _wakeWaiter nulls #waiter synchronously after await.
-   *
-   * @param drain — If true, process remaining queued
-   *   messages after cancellation before exiting.
-   */
+  /** Yields queued messages; drains remaining ones after cancellation when drain is set. */
   async *_messages(drain: boolean = false): AsyncGenerator<string> {
     const signal = this.#abortController.signal;
     while (true) {
-      // Drain all currently queued messages synchronously
       while (this.#queue.length > 0) {
         if (signal.aborted && !drain) break;
         yield this.#queue.shift()!;
       }
 
-      // Check exit conditions after draining
       if (signal.aborted) {
         if (!drain) break;
-        // Drain mode: if queue is empty after cancellation, exit.
-        // Otherwise loop back to drain remaining items.
+        // Drain mode: exit only once the queue is empty after cancellation.
         if (this.#queue.length === 0) break;
         continue;
       }
 
-      // Wait for the next message or cancellation.
-      // The promise is scoped to this iteration — _wakeWaiter nulls
-      // #waiter synchronously after await, so there's no lifecycle leak.
       const promise = new Promise<void>((resolve) => {
         this.#waiter = { resolve };
       });
@@ -255,11 +179,7 @@ export class MessageBus {
     }
   }
 
-  /**
-   * Emit a SESSION_STATE event and broadcast it to all clients.
-   * This ensures all connected clients receive working state changes,
-   * not just clients attached to this session.
-   */
+  /** Broadcasts to all clients, not just those attached to this session. */
   #emitSessionState(key: string, value: unknown, sessionId?: string): void {
     const event: OutputEvent = {
       type: OUTPUT_EVENT.SESSION_STATE,
@@ -269,7 +189,6 @@ export class MessageBus {
     };
     this.#sink.emit(event);
 
-    // Broadcast to all connected clients so sidebars update everywhere
     if (this.#broadcastCallback) {
       this.#broadcastCallback({
         type: "sessionState",
@@ -280,23 +199,7 @@ export class MessageBus {
     }
   }
 
-  /**
-   * Process a single message: run the input hook pipeline,
-   * then hand off to the agent.
-   *
-   * Resets the agent's cancel flag at the start (before processing)
-   * instead of at the end. This eliminates the race condition where
-   * the flag was cleared in the finally block, potentially allowing
-   * a user-initiated cancel to be silently swallowed between:
-   *   1. agent.run() throws Cancelled
-   *   2. finally block calls agent.cancel(false)
-   *   3. user hits Ctrl+C again
-   *   4. agent.cancel(false) from step 2 wins, flag is false
-   *
-   * The flag is now only reset when a new message is about to be
-   * processed, which is the correct point: the agent is ready for
-   * new work.
-   */
+  /** Runs the input hook pipeline, then hands off to the agent. */
   async _processMessage(text: string): Promise<void> {
     this.#isRunning = true;
     const agent = this.#sessionManager.getAgent();
@@ -306,18 +209,13 @@ export class MessageBus {
       return;
     }
 
-    // Signal that the agent is now working.
-    // Include sessionId so the frontend can track per-session working state.
+    // sessionId lets the frontend track per-session working state.
     const agentSid = (agent as { sessionId?: string }).sessionId;
     this.#emitSessionState("working", true, agentSid);
 
-    // Reset the agent's cancel flag before processing.
-    // This clears any leftover cancelled state from the previous
-    // message (e.g., interrupt) so the agent is ready for new work.
+    // Reset before processing so a leftover cancel from an interrupt can't swallow this run.
     agent.resetCancel();
 
-    // Input hook — sequential, handlers can transform or short-circuit.
-    // Actions: { action: "continue" } | { action: "transform", text } | { action: "handled" }
     const inputData = { text, source: "interactive", agent };
     let inputHandled = false;
     if (agent?.hooks) {
@@ -334,7 +232,6 @@ export class MessageBus {
       }
     }
 
-    // If input was handled by a hook, skip agent processing
     if (inputHandled) {
       this.#isRunning = false;
       this.#emitSessionState("working", false, agentSid);
@@ -360,15 +257,9 @@ export class MessageBus {
     }
 
     this.#isRunning = false;
-
-    // Signal that the agent is done working so the UI can hide the spinner
-    // Include sessionId so the frontend can track per-session working state.
     this.#emitSessionState("working", false, agentSid);
   }
 
-  /**
-   * Execute a command through the agent.
-   */
   async executeCommand(cmdText: string): Promise<number | undefined> {
     const agent = this.#sessionManager.getAgent();
     const cmd = parseCommand(cmdText, agent?.commandRegistry);
@@ -383,19 +274,16 @@ export class MessageBus {
 
     const result = await agent.executeCommand(cmd);
 
-    // Handle null/undefined results (backward compat)
     if (!result) {
       return;
     }
 
     // Bitflags: multiple actions can fire simultaneously.
-    // PROMPT — enqueue the rendered content as a user message so the
-    // agent's normal run loop processes it and sends it to the LLM.
+    // PROMPT enqueues the content as a user message so the normal run loop sends it to the LLM.
     if (result.action && (result.action & ACTIONS.PROMPT) && result.content) {
       this.enqueue(result.content);
     }
 
-    // ERROR — display the error message to the user.
     if (result.action && (result.action & ACTIONS.ERROR) && result.error) {
       this.#sink.emit({
         type: OUTPUT_EVENT.COMMAND_RESULT,
@@ -403,7 +291,6 @@ export class MessageBus {
       });
     }
 
-    // DISPLAY — show the result content as a command response.
     if (result.action && (result.action & ACTIONS.DISPLAY) && result.content) {
       this.#sink.emit({
         type: OUTPUT_EVENT.COMMAND_RESULT,
@@ -411,9 +298,8 @@ export class MessageBus {
       });
     }
 
-    // Backward compat — handler returned error/content without action field.
-    // These only trigger when action is absent (null/undefined), not when
-    // it's explicitly set to 0 (which is a valid "no action" bitflag).
+    // Backward compat: action absent means error/content are the payload.
+    // Only triggers when action is null/undefined, not 0 (a valid "no action" bitflag).
     if (result.action == null && result.error) {
       this.#sink.emit({
         type: OUTPUT_EVENT.COMMAND_RESULT,

@@ -1,5 +1,3 @@
-// LLM client
-
 import { readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
@@ -18,7 +16,6 @@ try {
   const pkg = JSON.parse(await readFile(PKG_PATH, "utf-8"));
   VERSION = pkg.version || VERSION;
 } catch(e: unknown) {
-  // Fall back to "unknown"
   logger.warn(`error reading package.json: ${formatError(e)}`)
 }
 
@@ -336,8 +333,6 @@ export class LlmClient {
       }
     }
 
-    // Delegate SSE parsing to SseParser — it handles framing, JSON reassembly,
-    // and buffer overflow. We only map raw JSON to StreamEvents here.
     if (!response.body) {
       throw LlmError.InvalidResponse("Response body is null");
     }

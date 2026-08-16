@@ -1,6 +1,3 @@
-/**
- * Schema loader — reads core.config.json and builds the unified config schema.
- */
 import { join } from "node:path";
 import { getNested } from "../../utils/objects.ts";
 import configSchema from "../core.config.json" with { type: "json" };
@@ -19,9 +16,6 @@ import { CliFlagDef } from "./index.ts";
 // Re-export shared schema types
 export * from "./schema-types.ts";
 
-/**
- * Map of named cast strings to their function implementations.
- */
 const CAST_BUILTINS: Record<string, CastFn> = {
   truthy: (v: unknown): boolean | undefined => {
     if (typeof v === "boolean") return v;
@@ -62,9 +56,6 @@ const CAST_BUILTINS: Record<string, CastFn> = {
     Array.isArray(v) ? v : undefined,
 };
 
-/**
- * Map of compute function names to their implementations.
- */
 const COMPUTE_BUILTINS: Record<
   string,
   (arg: unknown, ctx: unknown) => unknown
@@ -84,9 +75,6 @@ const COMPUTE_BUILTINS: Record<
   },
 };
 
-/**
- * Parse a cast string and return a function.
- */
 export function resolveCast(cast: unknown): CastFn | null {
   if (typeof cast === "function") return cast as CastFn;
   if (typeof cast !== "string") return null;
@@ -95,9 +83,6 @@ export function resolveCast(cast: unknown): CastFn | null {
   return builtin || null;
 }
 
-/**
- * Parse a compute string and return a function.
- */
 export function resolveCompute(compute: unknown): ComputeFn | null {
   if (typeof compute !== "string") return null;
 
@@ -131,18 +116,10 @@ export function resolveCompute(compute: unknown): ComputeFn | null {
   return null;
 }
 
-/**
- * Load the core config schema from core.config.json.
- */
 export function loadCoreSchema(): unknown {
   return configSchema;
 }
 
-/**
- * Compile layers within a property definition.
- *
- * @private
- */
 function compilePropertyLayers(rawProp: SchemaProperty): SchemaProperty {
   if (!rawProp.layers) return rawProp;
 
@@ -167,11 +144,6 @@ function compilePropertyLayers(rawProp: SchemaProperty): SchemaProperty {
   return { ...rawProp, layers: compiledLayers };
 }
 
-/**
- * Recursively compile layers within nested properties.
- *
- * @private
- */
 function compileNestedPropertyLayers(
   properties: Record<string, SchemaProperty>,
 ): Record<string, SchemaProperty> {
@@ -190,9 +162,6 @@ function compileNestedPropertyLayers(
   return compiled;
 }
 
-/**
- * Convert a raw JSON schema entry to a runtime-ready schema entry.
- */
 export function compileSchemaKey(rawKey: SchemaProperty): SchemaProperty {
   const { layers, properties, ...rest } = rawKey;
 
@@ -223,9 +192,6 @@ export function compileSchemaKey(rawKey: SchemaProperty): SchemaProperty {
   };
 }
 
-/**
- * Build the full CONFIG_SCHEMA from the JSON file.
- */
 export function buildConfigSchema(): ConfigSchema {
   const rawKeys = loadCoreSchema() as Record<string, SchemaProperty>;
   const schema: ConfigSchema = {};
@@ -237,9 +203,6 @@ export function buildConfigSchema(): ConfigSchema {
   return schema;
 }
 
-/**
- * Extract the default value from a schema key's layers.
- */
 export function getLayerDefault(
   schemaKey: SchemaProperty | undefined | null,
 ): unknown {
@@ -253,9 +216,6 @@ export function getLayerDefault(
   return undefined;
 }
 
-/**
- * Load extension schemas and merge them into the unified schema.
- */
 export function loadExtensionSchemas(
   extensions: Array<{ configSchema?: unknown }>,
 ): ConfigSchema {
@@ -280,9 +240,6 @@ export function loadExtensionSchemas(
   return extensionKeys;
 }
 
-/**
- * Build a unified schema combining core and extension schemas.
- */
 export function buildUnifiedSchema(
   extensions?: Array<{ configSchema?: unknown }>,
 ): ConfigSchema {
@@ -292,9 +249,6 @@ export function buildUnifiedSchema(
   return { ...coreSchema, ...extensionSchema };
 }
 
-/**
- * Generate CLI flag definitions from the schema.
- */
 export function cliFlagsFromSchema(schema: ConfigSchema): CliFlagDef[] {
   const flags: CliFlagDef[] = [];
   for (const [key, def] of Object.entries(schema)) {
@@ -322,9 +276,6 @@ export interface ResolutionContext {
   profilesPath?: string;
 }
 
-/**
- * Resolve the raw value for a single layer from the context.
- */
 export function resolveLayerValue(
   layer: SchemaLayer,
   context: ResolutionContext,
@@ -359,11 +310,6 @@ export function resolveLayerValue(
   }
 }
 
-/**
- * Resolve nested properties that have their own layers.
- *
- * @private
- */
 function resolveNestedProperties(
   parentKey: string,
   parentValue: Record<string, unknown>,
@@ -405,9 +351,6 @@ function resolveNestedProperties(
   return result;
 }
 
-/**
- * Resolve a single config key by walking its declared layers.
- */
 export function resolveKey(
   keyName: string,
   schema: SchemaProperty | undefined,
@@ -457,14 +400,7 @@ export function resolveKey(
   return undefined;
 }
 
-/**
- * The resolved shape of the core schema keys.
- * Provides compile-time type checking for commonly used config keys.
- * Extension-specific config keys are not included — use CoreConfigWithExtensions
- * or Record<string, unknown> for those.
- *
- * This is a manually defined interface matching the core.config.json schema.
- */
+// Manually mirrors core.config.json; extension keys are not included (use CoreConfigWithExtensions).
 export interface CoreConfig {
   baseUrl?: string;
   apiKey?: string;
@@ -519,17 +455,9 @@ export interface CoreConfig {
   systemPromptDefaultTemplate?: string;
 }
 
-/**
- * CoreConfig with an index signature for extension-specific keys.
- * Use this when you need to access arbitrary config keys (e.g., in extension code).
- */
+// Adds an index signature for extension-specific keys.
 export type CoreConfigWithExtensions = CoreConfig & Record<string, unknown>;
 
-/**
- * Resolve all config keys from a schema against a context.
- * Returns CoreConfigWithExtensions — known keys have their declared types,
- * extension keys are accessible via the index signature.
- */
 export function resolveAll(
   schema: ConfigSchema,
   context: ResolutionContext,
@@ -550,9 +478,6 @@ export interface ExtensionConfigParam {
   layers?: SchemaLayer[];
 }
 
-/**
- * Resolve extension config keys using their registered schemas.
- */
 export function resolveExtensionConfig(
   extParams: ExtensionConfigParam[],
   context: ResolutionContext,
@@ -577,9 +502,6 @@ export function resolveExtensionConfig(
   return result;
 }
 
-/**
- * Resolve a model name to provider/model format.
- */
 export function resolveModelWithProvider(
   name: string,
   provider?: ProviderDef | null,
@@ -593,9 +515,7 @@ export function resolveModelWithProvider(
   return name;
 }
 
-/**
- * Resolve model name with priority: profile → CLI → provider default → config → default.
- */
+// Priority: profile → CLI → provider default → config → default.
 export function resolveModel(
   cliModel: string | undefined,
   profileModel: string | null | undefined,
@@ -611,7 +531,4 @@ export function resolveModel(
   return defaultModel;
 }
 
-/**
- * The CONFIG_SCHEMA object — derived from core.config.json.
- */
 export const CONFIG_SCHEMA: ConfigSchema = buildConfigSchema();

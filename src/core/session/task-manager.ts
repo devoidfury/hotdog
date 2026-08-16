@@ -1,16 +1,12 @@
-// TaskManager — manages background task agents using the Agent class.
-
 import { Message } from "../context/message.ts";
 import { LlmError } from "../error.ts";
-import { loadProfileFile } from "../config/profiles.ts";
+import { loadProfileFile, ProfileManager } from "../config/profiles.ts";
 import { type CoreConfigWithExtensions } from "../config/schema-loader.ts";
 import type { AgentRunResult } from "../../core/agent.ts";
 import type { LlmClient } from "../llm-client/client.ts";
 import type { HookSystem } from "../hooks.ts";
 import type { ModelConfig } from "../config/providers.ts";
 import type { AgentLike } from "./index.ts";
-
-// ── Task Status ─────────────────────────────────────────────────────────────
 
 export const TASK_STATUS = {
   RUNNING: "running",
@@ -21,9 +17,6 @@ export const TASK_STATUS = {
 
 export type TaskStatus = (typeof TASK_STATUS)[keyof typeof TASK_STATUS];
 
-// ── Task Handle ─────────────────────────────────────────────────────────────
-
-/** Handle to a running task agent. Provides status checks, follow-up sending, and interruption. */
 export class TaskHandle {
   taskId: string;
   #statusRef: { value: TaskStatus };
@@ -39,7 +32,6 @@ export class TaskHandle {
     return this.#statusRef.value;
   }
 
-  /** Interrupt (cancel) a running task. */
   interrupt(): boolean {
     if (this.status === TASK_STATUS.RUNNING) {
       this.#abortController.abort();
@@ -49,14 +41,10 @@ export class TaskHandle {
   }
 }
 
-// ── TaskManager ─────────────────────────────────────────────────────────────
-
 export interface SpawnTaskOptions {
   workerModel?: string;
   profile?: string;
 }
-
-import { ProfileManager } from "../config/profiles.ts";
 
 export interface TaskManagerOptions {
   llmClient: LlmClient;
@@ -74,14 +62,7 @@ export interface TaskManagerRequiredOptions {
   taskRole: string;
 }
 
-/**
- * Manages concurrent task agents: spawn, status, interrupt, follow-up.
- *
- * Task agents are full Agent instances with:
- * - Restricted tool sets (whitelist from profile)
- * - Filtered output (silent to UI)
- * - Background execution with AbortController
- */
+// Task agents are full Agent instances, silent to the UI, run in the background.
 export class TaskManager {
   #buildAgent: (config: Record<string, unknown>) => Promise<AgentLike>;
   #llmClient: LlmClient;
@@ -101,18 +82,6 @@ export class TaskManager {
   #bus: { enqueue: (text: string) => void } | null;
   #profileManager: ProfileManager | undefined;
 
-  /**
-   * @param options
-   * @param options.buildAgent — Function to create Agent instances
-   * @param options.llmClient — LLM client instance
-   * @param options.modelRegistry — Model name → config map
-   * @param options.config — Config reference
-   * @param options.hooks — HookSystem instance
-   * @param options.sessionManager — SessionManager for context injection
-   * @param options.maxIterations — Max iterations per task (from resolved config)
-   * @param options.taskProfile — Default task profile name (from resolved config)
-   * @param options.taskRole — Default task role (from resolved config)
-   */
   constructor(options: TaskManagerOptions & TaskManagerRequiredOptions) {
     this.#buildAgent = options.buildAgent;
     this.#llmClient = options.llmClient;
@@ -128,53 +97,31 @@ export class TaskManager {
     this.#profileManager = options.profileManager;
   }
 
-  /**
-   * Set the session manager for context injection on task completion.
-   * Called once after SessionManager is created.
-   * @param sessionManager — SessionManager instance
-   */
   setSessionManager(sessionManager: { getAgent: () => AgentLike | undefined }): void {
     this.#sessionManager = sessionManager;
   }
 
-  /**
-   * Set the message bus for waking up the manager agent.
-   * Called once after the bus is created.
-   * @param bus — MessageBus instance with enqueue() method
-   */
   setBus(bus: { enqueue: (text: string) => void }): void {
     this.#bus = bus;
   }
 
-  /**
-   * Get the config reference (exposed for extensions).
-   */
+  /** Exposed for extensions. */
   get config(): Record<string, unknown> {
     return this.#config;
   }
 
-  /**
-   * Get the profile manager (exposed for extensions).
-   */
+  /** Exposed for extensions. */
   get profileManager(): ProfileManager | undefined {
     return this.#profileManager;
   }
 
-  /**
-   * Internal: handle task completion — append result to manager context and wake up.
-   * This is the single place where task completion logic lives.
-   * @private
-   */
   _onTaskComplete(taskId: string | null, result: string): void {
     const text = `[Task ${taskId} completed]\n${result}`;
 
-    // Hand the result to the manager through the bus: the bus run loop
-    // appends it to the manager's context via agent.run(). We must NOT
-    // also addMessage() here -- doing both would inject the result twice.
+    // Enqueue only: the bus run loop appends it via agent.run(). Also addMessage()-ing would inject it twice.
     if (this.#bus) {
       this.#bus.enqueue(text);
     } else if (this.#sessionManager) {
-      // No bus wired (standalone/test setup) -- add directly to context.
       const agent = this.#sessionManager.getAgent();
       if (agent) {
         agent.addMessage(new Message({ role: "user", content: text }));
@@ -182,48 +129,33 @@ export class TaskManager {
     }
   }
 
-  /**
-   * Spawn a new background task agent.
-   * @param taskId - Unique task identifier
-   * @param taskDescription - Description of what the task should do
-   * @param options
-   * @param options.workerModel - Optional model override for the worker
-   * @param options.profile - Optional profile name (default: 'task-default')
-   * @returns TaskHandle
-   */
   async spawnTask(
     taskId: string,
     taskDescription: string,
     options: SpawnTaskOptions = {} as SpawnTaskOptions,
   ): Promise<TaskHandle> {
-    // 1. Load task profile
     const profileName = options.profile || this.#taskProfile;
     const taskProfile = this.#profileManager
       ? this.#profileManager.getProfile(profileName)
       : await loadProfileFile(this.#config.profilesPath ?? "", profileName);
 
-    // 2. Resolve model
     const resolvedModel =
       options.workerModel ||
       (taskProfile?.model ?? undefined) ||
       (this.#modelRegistry as { default?: string }).default ||
       "";
 
-    // 3. Build system prompt from profile
     const resolvedRole = taskProfile?.role || this.#taskRole;
     const resolvedProfileBody = taskProfile?.body || "";
 
-    // 4. Resolve allowed tools: profile whitelist takes precedence
     const toolWhitelist = taskProfile?.whitelistTools || null;
 
-    // 5. Create task-specific sink — minimal object that captures task completion.
-    // Task agents are silent to the UI (emit is a no-op); only onTaskComplete matters.
+    // Task agents are silent to the UI; only onTaskComplete matters.
     const sink = {
-      emit: (_event: unknown) => { /* task agents are silent */ },
+      emit: (_event: unknown) => {},
       onTaskComplete: (result: string) => this._onTaskComplete(taskId, result),
     };
 
-    // 6. Build agent config
     const agentConfig: Record<string, unknown> = {
       model: resolvedModel,
       role: resolvedRole,
@@ -236,14 +168,11 @@ export class TaskManager {
       maxIterations: this.#maxIterations,
     };
 
-    // 7. Create the agent
     const agent = await this.#buildAgent(agentConfig);
 
-    // 8. Create abort controller and status ref
     const abortController = new AbortController();
     const statusRef: { value: TaskStatus } = { value: TASK_STATUS.RUNNING };
 
-    // 9. Run the agent in background
     const runPromise = this._runTask(
       agent,
       taskDescription,
@@ -251,7 +180,6 @@ export class TaskManager {
       statusRef,
     );
 
-    // 10. Store task info
     this.#tasks.set(taskId, {
       agent,
       abortController,
@@ -262,15 +190,7 @@ export class TaskManager {
     return new TaskHandle(taskId, statusRef, abortController);
   }
 
-  /**
-   * Run a task agent in the background.
-   * @param agent - The Agent instance
-   * @param description - Task description
-   * @param abortController
-   * @param statusRef
-   * @returns Result string
-   */
-  async _runTask(
+  private async _runTask(
     agent: AgentLike,
     description: string,
     abortController: AbortController,
@@ -279,7 +199,6 @@ export class TaskManager {
     let result: string;
 
     try {
-      // Run with abort signal support
       agent.abortSignal = abortController.signal;
 
       const runResult = await agent.run(description);
@@ -296,7 +215,6 @@ export class TaskManager {
         statusRef.value = TASK_STATUS.COMPLETED;
       }
 
-      // Notify sink of completion (for task agents)
       agent.notifyCompletion?.(result);
     } catch (err: unknown) {
       if (LlmError.isCancelled(err) || abortController.signal.aborted) {
@@ -307,49 +225,34 @@ export class TaskManager {
         result = `Task failed: ${(err as Error).message}`;
       }
 
-      // Still notify sink even on error
       agent.notifyCompletion?.(result);
     }
 
     return result;
   }
 
-  /**
-   * Check the status of a task by ID.
-   * @returns Task status or null if not found.
-   */
   taskStatus(taskId: string): TaskStatus | null {
     const task = this.#tasks.get(taskId);
     if (!task) return null;
     return task.statusRef.value;
   }
 
-  /**
-   * Send a follow-up message to a running task.
-   * @returns Whether the follow-up was sent.
-   */
   sendFollowUp(taskId: string, message: string): boolean {
     const task = this.#tasks.get(taskId);
     if (!task || task.statusRef.value !== TASK_STATUS.RUNNING) {
       return false;
     }
 
-    // Add follow-up to the agent's context
-    // Note: This works if the agent is between LLM calls (draining follow-ups)
+    // followQueue is drained between LLM calls.
     if (task.agent.followQueue) {
       task.agent.followQueue.push(message);
       return true;
     }
 
-    // If no follow-up queue, add directly to context
     task.agent.addMessage(new Message({ role: "user", content: message }));
     return true;
   }
 
-  /**
-   * Interrupt (cancel) a running task.
-   * @returns Whether the task was interrupted.
-   */
   interruptTask(taskId: string): boolean {
     const task = this.#tasks.get(taskId);
     if (!task) return false;
@@ -357,10 +260,6 @@ export class TaskManager {
     return true;
   }
 
-  /**
-   * Get all active (running) task IDs.
-   * @returns Array of active task IDs.
-   */
   activeTasks(): string[] {
     const active: string[] = [];
     for (const [id, task] of this.#tasks) {
@@ -371,20 +270,12 @@ export class TaskManager {
     return active;
   }
 
-  /**
-   * Get task counts: [active, total]. Returns null if no tasks.
-   * @returns [active, total] or null.
-   */
   taskCounts(): [number, number] | null {
     const active = this.activeTasks().length;
     if (active === 0) return null;
     return [active, this.#tasks.size];
   }
 
-  /**
-   * Format a progress string showing active tasks.
-   * @returns Progress string or null.
-   */
   progressMessage(): string | null {
     const active = this.activeTasks().length;
     if (active === 0) return null;

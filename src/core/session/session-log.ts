@@ -1,6 +1,5 @@
-// Session log — core functions for reading/replaying session logs.
-// Session resume is a core feature, so these functions live in src/.
-// Writing (SessionLog class) remains in the extension for observability.
+// Reading/replaying session logs lives in core because resume is a core feature;
+// writing (the SessionLog class) stays in the extension.
 
 import { homedir } from "node:os";
 import { join, resolve as resolveAbs, sep } from "node:path";
@@ -8,8 +7,6 @@ import { readFile, access, readdir, stat, unlink } from "node:fs/promises";
 import { Message, type ToolCall, type ImageAttachment } from "../context/message.ts";
 import { AgentError, formatError } from "../error.ts";
 import { logger } from "../logger.ts";
-
-// ── Log Source Types ────────────────────────────────────────────────────────
 
 export const LOG_SOURCE = {
   SYSTEM_PROMPT: "system_prompt",
@@ -39,12 +36,6 @@ export interface LogEntry {
   [key: string]: unknown;
 }
 
-// ── Session File Paths ──────────────────────────────────────────────────────
-
-/**
- * Get the sessions directory path.
- * Override with HOTDOG_SESSIONS_DIR env var (useful for tests).
- */
 export function sessionsDir(): string {
   const override = process.env.HOTDOG_SESSIONS_DIR;
   if (override) return override;
@@ -52,18 +43,9 @@ export function sessionsDir(): string {
   return join(home, ".cache", "hotdog", "sessions");
 }
 
-/**
- * Valid session IDs: start with an alphanumeric, then alphanumerics, dots,
- * underscores, or hyphens. Session IDs are `crypto.randomUUID()` in practice;
- * this allows for hand-supplied IDs (e.g. CLI --session) while rejecting
- * path separators and `..` traversal.
- */
+// Allows hand-supplied IDs (e.g. CLI --session) while rejecting path separators and `..` traversal.
 const SESSION_ID_RE = /^[a-zA-Z0-9][a-zA-Z0-9._-]*$/;
 
-/**
- * Get the session file path for a given session ID.
- * @throws AgentError if the ID is invalid or resolves outside the sessions dir.
- */
 export function sessionPath(sessionId: string): string {
   if (typeof sessionId !== "string" || !SESSION_ID_RE.test(sessionId)) {
     throw new AgentError(
@@ -79,11 +61,6 @@ export function sessionPath(sessionId: string): string {
   return path;
 }
 
-// ── Session Log Readers ─────────────────────────────────────────────────────
-
-/**
- * Read all entries from a specific session file, replaying from the last reset.
- */
 export async function readSessionEntries(sessionId: string): Promise<LogEntry[]> {
   let path: string;
   try {
@@ -114,7 +91,6 @@ export async function readSessionEntries(sessionId: string): Promise<LogEntry[]>
       const entry = JSON.parse(trimmed) as LogEntry;
       entries.push(entry);
       if (entry.source === LOG_SOURCE.RESET) {
-        // Track the index AFTER the reset entry (skip the reset itself)
         lastResetIdx = entries.length;
       }
     } catch {
@@ -129,9 +105,6 @@ export async function readSessionEntries(sessionId: string): Promise<LogEntry[]>
   return entries.slice(lastResetIdx ?? 0);
 }
 
-/**
- * Read all entries from all session files.
- */
 export async function readAllSessions(): Promise<LogEntry[]> {
   const dir = sessionsDir();
   try {
@@ -165,9 +138,6 @@ export async function readAllSessions(): Promise<LogEntry[]> {
   return allEntries;
 }
 
-/**
- * Check if a session file exists.
- */
 export async function sessionExists(sessionId: string): Promise<boolean> {
   try {
     await access(sessionPath(sessionId));
@@ -184,11 +154,7 @@ export interface SessionLogInfo {
   messageCount: number;
 }
 
-/**
- * List all session log files with metadata.
- * Returns sessions sorted by last activity (most recent first).
- * Only includes sessions with at least one non-system/non-reset entry.
- */
+/** Most recent activity first; only sessions with at least one real message. */
 export async function listSessionLogs(): Promise<SessionLogInfo[]> {
   const dir = sessionsDir();
   try {
@@ -221,12 +187,11 @@ export async function listSessionLogs(): Promise<SessionLogInfo[]> {
             if (createdAt === 0 || ts < createdAt) createdAt = ts;
             if (ts > lastActivityAt) lastActivityAt = ts;
           }
-          // Count non-system, non-reset entries
           if (entry.source && entry.source !== LOG_SOURCE.SYSTEM_PROMPT && entry.source !== LOG_SOURCE.RESET) {
             messageCount++;
           }
         } catch {
-          // Skip malformed lines
+          // skip malformed lines
         }
       }
 
@@ -240,20 +205,15 @@ export async function listSessionLogs(): Promise<SessionLogInfo[]> {
         });
       }
     } catch {
-      // Skip unreadable files
+      // skip unreadable files
     }
   }
 
-  // Sort by last activity, most recent first
   results.sort((a, b) => b.lastActivityAt - a.lastActivityAt);
   return results.map(({ mtime, ...rest }) => rest);
 }
 
-/**
- * Delete a session log file from disk.
- * @param sessionId - Session ID whose log file to delete
- * @returns True if the file was deleted, false if it didn't exist
- */
+/** Returns true if the file was deleted, false if it didn't exist. */
 export async function deleteSessionLog(sessionId: string): Promise<boolean> {
   let path: string;
   try {
@@ -280,20 +240,7 @@ export interface AgentForReplay {
   addMessage(msg: Message): void;
 }
 
-/**
- * Replay log entries into an agent's context.
- *
- * Takes an array of log entries (from readSessionEntries) and converts them
- * to Message objects, adding them to the agent's context. This allows the
- * agent to "continue" a previous conversation.
- *
- * System prompt entries are skipped — the agent regenerates it dynamically
- * via ensureSystemPrompt().
- *
- * @param agent - The agent whose context to populate
- * @param entries - Log entries from readSessionEntries()
- * @returns The number of entries actually replayed (excluding skipped ones)
- */
+/** Converts log entries to Messages in the agent's context; returns the count replayed. */
 export function replayEntriesIntoContext(agent: AgentForReplay, entries: LogEntry[]): number {
   if (!entries || entries.length === 0) return 0;
 
@@ -302,12 +249,11 @@ export function replayEntriesIntoContext(agent: AgentForReplay, entries: LogEntr
   for (const entry of entries) {
     const source = entry.source;
 
-    // Skip system prompt entries — they are regenerated dynamically
+    // System prompts are regenerated dynamically via ensureSystemPrompt().
     if (source === LOG_SOURCE.SYSTEM_PROMPT) {
       continue;
     }
 
-    // Skip reset entries — they mark the start of the replayed portion
     if (source === LOG_SOURCE.RESET) {
       continue;
     }
@@ -315,8 +261,6 @@ export function replayEntriesIntoContext(agent: AgentForReplay, entries: LogEntr
     switch (source) {
       case LOG_SOURCE.INPUT:
       case LOG_SOURCE.PROMPT: {
-        // Both INPUT and PROMPT are user messages in context
-        // Preserve images if present
         agent.addMessage(
           new Message({
             role: "user",
@@ -329,7 +273,6 @@ export function replayEntriesIntoContext(agent: AgentForReplay, entries: LogEntr
       }
 
       case LOG_SOURCE.LLM: {
-        // Assistant response — preserve reasoning content and tool calls
         agent.addMessage(
           new Message({
             role: "assistant",
@@ -343,7 +286,6 @@ export function replayEntriesIntoContext(agent: AgentForReplay, entries: LogEntr
       }
 
       case LOG_SOURCE.TOOL_RESULT: {
-        // Tool result
         agent.addMessage(
           new Message({
             role: "tool",
@@ -356,14 +298,12 @@ export function replayEntriesIntoContext(agent: AgentForReplay, entries: LogEntr
       }
 
       case LOG_SOURCE.COMPACTION: {
-        // Compaction summary — added as user message in context
         agent.addMessage(new Message({ role: "user", content: entry.content }));
         replayed++;
         break;
       }
 
       default:
-        // Unknown source — skip silently
         break;
     }
   }

@@ -1,5 +1,3 @@
-// Unified config module — single entry point for all configuration.
-
 import fs from "node:fs";
 import fsPromises from "node:fs/promises";
 import path from "node:path";
@@ -44,11 +42,6 @@ import {
   type ModelConfig,
 } from "./providers.ts";
 
-// ── Config Directory Resolution ────────────────────────────────────────
-
-/**
- * Resolve the config directory with the following priority.
- */
 export function resolveConfigDir(cliConfigDir?: string | null): string {
   if (cliConfigDir) {
     return path.resolve(cliConfigDir);
@@ -79,11 +72,6 @@ export function resolveConfigDir(cliConfigDir?: string | null): string {
   return path.join(os.homedir(), ".config", "hotdog");
 }
 
-// ── Extension Config Helpers ──────────────────────────────────────────────
-
-/**
- * Merge extension-registered config defaults into the base config.
- */
 export function mergeExtensionConfigDefaults(
   defaultConfig: Record<string, unknown>,
   extParams: Array<{ key: string; defaults: unknown }> | null | undefined,
@@ -113,11 +101,6 @@ export function mergeExtensionConfigDefaults(
   return merged;
 }
 
-// ── Config Loading ─────────────────────────────────────────────────────
-
-/**
- * Normalize config keys from snake_case to camelCase recursively.
- */
 export function normalizeConfigKeys(obj: unknown): unknown {
   if (typeof obj !== "object" || obj === null) return obj;
   if (Array.isArray(obj)) return obj.map((item) => normalizeConfigKeys(item));
@@ -168,9 +151,6 @@ export interface DefaultConfig extends Record<string, unknown> {
   hookTrace: boolean;
 }
 
-/**
- * Get the default configuration.
- */
 export function getDefaultConfig(
   extParams?: Array<{ key: string; defaults: unknown }>,
 ): DefaultConfig {
@@ -220,9 +200,6 @@ export function getDefaultConfig(
   );
 }
 
-/**
- * Load config from file, falling back to defaults if no path is given.
- */
 export async function loadConfig(
   configPath?: string | null,
   cliConfigDir?: string | null,
@@ -235,9 +212,7 @@ export async function loadConfig(
     try {
       await fsPromises.access(configFilePath);
       configPathToUse = configFilePath;
-    } catch {
-      // Not found, fall through to defaults
-    }
+    } catch {}
   }
 
   if (!configPathToUse) {
@@ -271,16 +246,11 @@ export async function loadConfig(
   }
 }
 
-// ── Config Validation ───────────────────────────────────────────────────
-
 export interface ValidationResult {
   valid: boolean;
   errors: string[];
 }
 
-/**
- * Validate a loaded config object against extension schemas.
- */
 export function validateConfig(
   config: unknown,
   extensionSchemas?: Array<{ key: string; schema: unknown }>,
@@ -309,21 +279,13 @@ export function validateConfig(
   return { valid: errors.length === 0, errors };
 }
 
-/**
- * Print validation errors and exit if config is invalid.
- */
 export function failOnInvalidConfig(result: ValidationResult): void {
   if (!result.valid) {
     throw ConfigError.ValidationError(result.errors);
   }
 }
 
-/**
- * CLI argument values parsed from the command line.
- * Keys match the config schema property names (camelCase).
- * Note: nullable string properties accept both null and undefined
- * because the CLI parser produces null for missing values.
- */
+// Keys match config schema property names; nullable strings also accept null since the CLI parser emits null for missing values.
 export interface CliArgv {
   config?: string | null;
   configDir?: string | null;
@@ -334,9 +296,7 @@ export interface CliArgv {
   [key: string]: unknown;
 }
 
-/**
- * Extra properties added by buildAgentConfig beyond the schema-resolved keys.
- */
+// Added by buildAgentConfig on top of the schema-resolved keys.
 export interface BuildAgentConfigExtra {
   model: string;
   configDir: string;
@@ -352,16 +312,10 @@ export interface BuildAgentConfigExtra {
   maxRetries: number;
 }
 
-/**
- * Complete build-time agent configuration = resolved schema keys + extra properties.
- * Returned by buildAgentConfig() and buildConfig().
- * Distinct from Agent.AgentConfig which is the runtime config the Agent class uses.
- */
+// Resolved schema keys + extra properties, as returned by buildAgentConfig()/buildConfig().
+// Not to be confused with Agent.AgentConfig, the runtime config the Agent class reads.
 export type BuildAgentConfig = CoreConfigWithExtensions & BuildAgentConfigExtra;
 
-/**
- * Build the complete resolved configuration from CLI args.
- */
 export async function buildConfig(cliArgv: CliArgv): Promise<{
   resolved: BuildAgentConfig;
   modelRegistry: Record<string, ModelConfig>;
@@ -399,9 +353,6 @@ export async function buildConfig(cliArgv: CliArgv): Promise<{
   };
 }
 
-/**
- * Build a complete resolved configuration for the agent.
- */
 export async function buildAgentConfig(options: {
   cli: CliArgv;
   config: CoreConfigWithExtensions;

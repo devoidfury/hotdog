@@ -32,12 +32,10 @@ export type TurnEndReason =
   | "error"           // an unexpected exception aborted the turn
   | "max_iterations"; // iteration cap reached
 
-/** Result of an agent run loop execution. */
 export type AgentRunResult =
   | { type: 'completion'; content: string }
   | { type: 'tool_return'; outcome: string };
 
-/**  Parameters for an LLM request. */
 interface LlmRequestParams {
   messages: Message[];
   modelConfig: ModelConfig;
@@ -49,10 +47,7 @@ export interface OutputSink {
   onTaskComplete?: (result: string) => void;
 }
 
-/**
- * The subset of config keys that the Agent class actually reads.
- * Extensions may read additional keys via core.config.
- */
+// Subset of config keys read by Agent; extensions read the rest via core.config.
 export interface AgentConfig {
   cwdBoundary?: string | null;
   workspaceRoot?: string | null;
@@ -87,17 +82,11 @@ export interface AgentOptions {
   abortSignal?: AbortSignal | null;
   toolWhitelist?: string[] | null;
   commandRegistry?: AgentCommandRegistry;
-  /**
-   * Optional callback to enqueue a message on the owning MessageBus.
-   * Set by the MessageBus after agent construction so the agent (and
-   * extensions via hooks) can queue messages for later processing.
-   */
+  // Set by the owning MessageBus after construction; lets the agent (and extensions via hooks) queue messages.
   enqueueCallback?: (text: string) => void;
 }
 
-/**
- * Agent that runs the LLM loop and delegates behavior to hooks.
- */
+/** Runs the LLM loop and delegates behavior to hooks. */
 export class Agent implements AgentLike {
   hooks: HookSystem;
   #toolRegistry: ToolRegistry;
@@ -140,7 +129,6 @@ export class Agent implements AgentLike {
     this.hooks = options.hooks;
     this.#toolRegistry = options.toolRegistry;
     this.llmClient = options.llmClient;
-    // Context manager — owns message storage, token tracking, and system prompt.
     this.context = createContextManager();
     this.#model = options.model;
     this.maxIterations = options.maxIterations;
@@ -163,22 +151,16 @@ export class Agent implements AgentLike {
     this.maxToolCallsPerIteration = options.config.maxToolCallsPerIteration;
     this.reasoningEffort = undefined;
     this.#isRestoring = false;
-    // Task agent support
     this.abortSignal = options.abortSignal || null;
     this.toolWhitelist = options.toolWhitelist || null;
     this.followQueue = [];
-    // AbortController for the current LLM request — created per iteration,
-    // aborted on cancel() so the HTTP client properly terminates fetch().
+    // Per-iteration AbortController, aborted on cancel() so the HTTP client terminates fetch().
     this.runAbortController = null;
-    // Stream processor — handles streaming LLM responses
     this.#streamProcessor = createStreamProcessor({ stream: this.stream });
-    // Command registry — extensions register commands here
     this.commandRegistry = options.commandRegistry || createCommandRegistry();
-    // Register core built-in commands with their handlers
     for (const [type, def] of Object.entries(CORE_COMMAND_HANDLERS)) {
       this.commandRegistry.register(type, def);
     }
-    // Tool executor — runs the full tool call pipeline
     if (options.config?.maxRetries == null) {
       throw ConfigError.MissingConfig("maxRetries");
     }
@@ -197,8 +179,6 @@ export class Agent implements AgentLike {
       isRestoring: () => this.#isRestoring,
       agent: this,
     });
-    // Enqueue callback — set by the owning MessageBus so the agent
-    // (and extensions via hooks) can queue messages for processing.
     this.enqueueCallback = options.enqueueCallback || null;
   }
 
@@ -210,22 +190,17 @@ export class Agent implements AgentLike {
   set model(v: string) {
     const oldModel = this.#model;
     this.#model = v;
-    // Pull in the new model's config from the registry
     const entry = this.modelRegistry[v];
     if (entry) {
       this.contextLimit = (entry.contextLimit as number) ?? this.contextLimit;
-      // Reset reasoning effort to the new model's default —
-      // the user can re-override via /reasoning if needed.
+      // Reset to the new model's default; user can re-override via /reasoning.
       this.reasoningEffort = entry.reasoningEffort as string | undefined;
     }
-    // Clear tool def cache — different models may have different tool
-    // requirements or capabilities, so stale definitions would be incorrect.
+    // Stale tool defs would be wrong for a different model.
     this.#toolRegistry.clearToolDefs();
-    // Clear the cached system prompt so it is rebuilt (with the new model
-    // name) on the next turn.
+    // Prompt advertises the active model, so it must be rebuilt on the next turn.
     this.context.clearSystemPrompt();
     this.hooks.notifyHooks(HOOKS.MODEL_CHANGE, { agent: this, oldModel, newModel: v });
-    // Emit through the output sink so connected WS clients get notified
     if (this.sink) {
       this.sink.emit({ type: OUTPUT_EVENT.SESSION_STATE, key: "model", value: v });
     }
@@ -242,50 +217,31 @@ export class Agent implements AgentLike {
     }
   }
 
-  /** Get the tool registry. Used by hooks for tool metadata access. */
   get toolRegistry(): ToolRegistry {
     return this.#toolRegistry;
   }
 
-  /**
-   * Get the accumulated partial content of the currently streaming response.
-   * Empty string if not currently streaming. Used by reconnecting clients
-   * to replay content that was streamed before they connected.
-   */
+  /** Partial content of the in-flight stream; lets reconnecting clients replay what was already streamed. */
   get currentStreamingContent(): string {
     return this.#streamProcessor.streamingContent;
   }
 
-  /**
-   * Get the accumulated partial reasoning content of the currently streaming response.
-   * Empty string if not currently streaming.
-   */
   get currentStreamingReasoning(): string {
     return this.#streamProcessor.streamingReasoning;
   }
 
-  /** Get the message log (backwards compatibility — prefer context.getMessages()). */
+  /** @deprecated Prefer context.getMessages(). */
   get log() {
     return this.context.log;
   }
 
-  /**
-   * Enqueue a message on the owning MessageBus for later processing.
-   * No-op if no enqueue callback is configured (e.g., standalone agent).
-   * Used by extensions (via hooks) to queue follow-up messages.
-   */
   enqueue(text: string): void {
     this.enqueueCallback?.(text);
   }
 
   // ── Run Loop ──────────────────────────────────────────────────────────────
 
-  /**
-   * Run the agent loop with the given user input.
-   * @param userInput — Text content of the user message
-   * @param images — Optional images, Array<{ type: "image_url", mimeType: "image/png", data: "<base64>" }>
-   * @returns Final run result, or undefined if input was empty.
-   */
+  /** Run the agent loop with the given user input; returns undefined if input was empty. */
   async run(userInput: string, images?: ImageAttachment[]): Promise<AgentRunResult | undefined> {
     if (!userInput?.trim() && (!images || images.length === 0)) {
       return;
@@ -310,7 +266,6 @@ export class Agent implements AgentLike {
         const result = await this._handleLlmResponse(iteration, response, params.modelConfig);
 
         if (typeof result === "string") {
-          // Normal completion — the model returned final text.
           this._emitTurnEnd(iteration, response.fullText, [], true, this.cancelled, "completion");
           turnEnded = true;
           return { type: 'completion', content: result };
@@ -318,18 +273,16 @@ export class Agent implements AgentLike {
 
         const { outcome, toolResults } = result;
         if (outcome !== "continue") {
-          // Tool-return — a tool signaled stopLoop.
           this._emitTurnEnd(iteration, response.fullText, toolResults, true, this.cancelled, "tool_return");
           turnEnded = true;
           return { type: 'tool_return', outcome };
         }
 
-        // Continue — tool calls ran; the loop advances to the next iteration.
         this._emitTurnEnd(iteration, response.fullText, toolResults, false, this.cancelled, "continue");
         turnEnded = true;
       }
 
-      // Hit the iteration cap — emit turn-end so listeners unblock, then throw.
+      // Emit turn-end so listeners unblock before the throw.
       this._emitTurnEnd(this.iterationCount, "", [], true, this.cancelled, "max_iterations");
       turnEnded = true;
       throw AgentError.MaxIterations(this.maxIterations);
@@ -454,7 +407,6 @@ export class Agent implements AgentLike {
 
       const { outcome, toolResults } = await this._executeTools(toolCallsToExecute);
 
-      // Add skipped tool results to the conversation log and emit them
       for (const sr of skippedToolResults) {
         this.addMessage(new Message({
           role: "tool",
@@ -473,7 +425,6 @@ export class Agent implements AgentLike {
 
       return { outcome, toolResults: finalResults };
     } else {
-      // CONTEXT_MESSAGE already fired via addMessage() above.
       return response.fullText;
     }
   }
@@ -497,24 +448,15 @@ export class Agent implements AgentLike {
     });
   }
 
-  /** Emit token usage — delegates to ContextManager for accumulation and emits the event. */
   _emitTokenUsage(response: { usage?: RawUsage | null }): void {
     this.context.recordUsage(response.usage, (usage) => { this.emitOutput("token_usage", usage) });
   }
 
-  /**
-   * Called when the agent completes (for task agents).
-   * @param result - The final result text
-   */
   notifyCompletion(result: string): void {
     this.sink?.onTaskComplete?.(result);
   }
 
-  /**
-   * Build messages array: system prompt + context.
-   * System prompt is built via hooks (extensions add to it).
-   * Public so extensions can rebuild messages after modifying context.
-   */
+  /** Public so extensions can rebuild messages after modifying context. */
   buildMessages(): Message[] {
     return this.context.buildForLlmCall();
   }
@@ -529,13 +471,7 @@ export class Agent implements AgentLike {
     });
   }
 
-  /**
-   * Process a streaming LLM response, delegates to StreamProcessor.
-   *
-   * @param stream - The stream of events from the LLM client.
-   * @returns The complete stream result.
-   */
-  async _processStream(stream: AsyncIterable<StreamEvent>): Promise<StreamResult> {
+  private _processStream(stream: AsyncIterable<StreamEvent>): Promise<StreamResult> {
     return this.#streamProcessor.process(stream, {
       onChunk: (content) => {
         if (this.stream) {
@@ -551,39 +487,23 @@ export class Agent implements AgentLike {
     });
   }
 
-  /** Execute tool calls from an LLM response. */
-  async _executeTools(toolCalls: ToolCall[]) {
+  private _executeTools(toolCalls: ToolCall[]) {
     return this.#toolExecutor.execute(toolCalls);
   }
 
-  /**
-   * Add a single message to the agent's context. Use this instead of directly pushing to the message log.
-   * Fires the CONTEXT_MESSAGE hook so extensions (session-log, etc.) are notified.
-   */
+  /** Use instead of pushing to the message log directly; fires CONTEXT_MESSAGE for extensions. */
   addMessage(msg: Message): void {
     this.context.addMessage(msg);
     this.hooks.notifyHooks(HOOKS.CONTEXT_MESSAGE, { message: msg, agent: this });
   }
 
-  /**
-   * Replace the entire context array.
-   * Fires the CONTEXT_REPLACED hook so extensions can react to the replacement.
-   * Used by compaction and other context-modifying operations.
-   *
-   * @param newContext - The new context array (array of Message instances).
-   */
+  /** Replace the entire context; fires CONTEXT_REPLACED so extensions can react. */
   replaceContext(newContext: Message[]): void {
     const oldContext = this.context.getMessages();
     this.context.replaceMessages(newContext);
     this.hooks.notifyHooks(HOOKS.CONTEXT_REPLACED, { agent: this, oldContext, newContext });
   }
 
-  /**
-   * Emit a typed output event.
-   * 
-   * @param type - Event type name (e.g., "user_message", "tool_call").
-   * @param data - Typed data matching the event type.
-   */
   emitOutput(type: EventName, data: Record<string, unknown>): void {
     const eventType = EVENT_NAME_MAP[type];
     if (this.sink && eventType) {
@@ -592,39 +512,28 @@ export class Agent implements AgentLike {
     this.hooks.notifyHooks(HOOKS.OUTPUT_EVENT, { type, data, agent: this });
   }
 
-  /** Clear the context and start fresh. */
   async clearContext(): Promise<void> {
     this.context.clear();
     this.iterationCount = 0;
-    // Clear tool def cache -- different profiles/models may have different tools
     this.#toolRegistry.clearToolDefs();
   }
 
-  /** Cancel the current run. */
   cancel(): void {
     this.cancelled = true;
     if (this.runAbortController && !this.runAbortController.signal.aborted) {
-      this.runAbortController.abort(); // Abort the active LLM request so the HTTP client terminates fetch().
+      this.runAbortController.abort();
     }
   }
 
-  /** Reset the cancelled flag so the agent can process new input. */
   resetCancel(): void {
     this.cancelled = false;
   }
 
-  /**
-   * Get tool definitions filtered by the agent's current config.
-   * Applies sandboxMode, maxToolDifficulty, and whitelist/blacklist filtering.
-   * Priority for maxToolDifficulty: CLI > model config > config default.
-   */
+  /** Tool defs filtered by sandboxMode, maxToolDifficulty, and whitelist/blacklist. */
   async getToolDefs(): Promise<ToolDef[]> {
     const config = this.config;
 
-    // Resolve effective maxToolDifficulty with priority:
-    // 1. CLI override (maxToolDifficulty)
-    // 2. Model-specific config from modelRegistry
-    // 3. Config-file default (defaultMaxToolDifficulty)
+    // maxToolDifficulty priority: CLI override > model registry > config default.
     const modelEntry = this.#resolveModelEntry();
     const effectiveMaxDifficulty =
       config?.maxToolDifficulty ??
@@ -632,7 +541,6 @@ export class Agent implements AgentLike {
       config?.defaultMaxToolDifficulty ??
       undefined;
 
-    // Start with metadata-based filtering (sandbox, difficulty)
     let registry = this.#toolRegistry;
     if (config?.sandboxMode || effectiveMaxDifficulty != null) {
       registry = registry.filterByMetadata({
@@ -641,7 +549,6 @@ export class Agent implements AgentLike {
       });
     }
 
-    // Apply whitelist/blacklist filtering at the tool level (before def generation)
     if (this.toolWhitelist && this.toolWhitelist.length > 0) {
       registry = registry.filter(this.toolWhitelist, null);
     }
@@ -653,30 +560,19 @@ export class Agent implements AgentLike {
     return registry.getToolDefs();
   }
 
-  /** Resolve model entry from the registry, handling both "provider/model" and "model" names. */
   #resolveModelEntry(): ModelConfig | undefined {
     return findModelEntry(this.#model, this.modelRegistry);
   }
 
-  /** Get all registered tool names. */
   getToolNames(): string[] {
     return Array.from(this.#toolRegistry.getAll().map(([name]) => name));
   }
 
-  /**
-   * Execute a command. Returns { action, content } or { action, error }.
-   * Dispatches via: custom handler → extension hooks → command registry.
-   * @param cmd - Command object { type, value }
-   * @returns Command result
-   */
+  /** Dispatches via: custom handler → extension hooks → command registry. */
   async executeCommand(cmd: ParsedCommand): Promise<CommandResult | null> {
     return this.commandRegistry.dispatch(cmd, this, this.hooks);
   }
 
-  /**
-   * Serialize the agent state for persistence.
-   * @returns Serialized state object.
-   */
   serialize(): Record<string, unknown> {
     return {
       sessionId: this.sessionId,
@@ -687,7 +583,6 @@ export class Agent implements AgentLike {
     };
   }
 
-  /** Deserialize agent state from persisted data. */
   deserialize(data: Record<string, unknown>): void {
     this.sessionId = data.sessionId as string;
     this.context.replaceMessages(

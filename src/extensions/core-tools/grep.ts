@@ -1,5 +1,3 @@
-// Grep tool — search files for patterns. Tries ripgrep first, falls back to native.
-
 import fs from "node:fs/promises";
 import { execFile } from "node:child_process";
 import util from "node:util";
@@ -21,7 +19,6 @@ import { ToolContext } from "../../core/extensions/types.ts";
 
 const execFileAsync = util.promisify(execFile);
 
-// Common directories to skip during recursive search
 const SKIP_DIRS = new Set([
   "node_modules",
   ".git",
@@ -32,7 +29,6 @@ const SKIP_DIRS = new Set([
   "__pycache__",
 ]);
 
-// File type → extensions mapping
 const TYPE_EXTENSIONS: Record<string, string[]> = {
   rust: ["rs"],
   rs: ["rs"],
@@ -81,26 +77,17 @@ interface GrepArgs {
   type: string | null;
 }
 
-/**
- * Map file type names to file extensions.
- */
 function typeToExtensions(typeName: string): string[] {
   const name = typeName.toLowerCase();
   return TYPE_EXTENSIONS[name] || [typeName];
 }
 
-/**
- * Check if a file extension matches the type filter.
- */
 function matchesType(fileExt: string, typeFilter: string | null): boolean {
   if (!typeFilter || typeFilter === "all") return true;
   const extensions = typeToExtensions(typeFilter);
   return extensions.length === 0 || extensions.includes(fileExt);
 }
 
-/**
- * Check if a file is binary by reading its first bytes.
- */
 async function isBinary(filePath: string): Promise<boolean> {
   try {
     const data = await fs.readFile(filePath);
@@ -111,9 +98,6 @@ async function isBinary(filePath: string): Promise<boolean> {
   }
 }
 
-/**
- * Search a single file for a pattern.
- */
 async function searchFile(
   filePath: string,
   re: RegExp,
@@ -125,11 +109,9 @@ async function searchFile(
 ): Promise<void> {
   if (outputLines.length >= maxResults) return;
 
-  // Check file type filter
   const ext = extname(filePath).slice(1);
   if (!matchesType(ext, typeFilter)) return;
 
-  // Skip binary files
   if (await isBinary(filePath)) return;
 
   let content: string;
@@ -150,11 +132,10 @@ async function searchFile(
     const line = lines[i];
     if (!line || !re.test(line)) continue;
 
-    re.lastIndex = 0; // Reset regex state
+    re.lastIndex = 0;
     totalMatches.count++;
     const lineNum = i + 1;
 
-    // Add context lines before
     const start = context > 0 ? Math.max(1, lineNum - context) : lineNum;
     for (let ctxLine = start; ctxLine < lineNum; ctxLine++) {
       const idx = ctxLine - 1;
@@ -163,10 +144,8 @@ async function searchFile(
       }
     }
 
-    // Add matching line
     outputLines.push(`${pathStr}:${lineNum}:${line}`);
 
-    // Add context lines after
     const end =
       context > 0 ? Math.min(lines.length, lineNum + context) : lineNum;
     for (let ctxLine = lineNum + 1; ctxLine <= end; ctxLine++) {
@@ -178,10 +157,6 @@ async function searchFile(
   }
 }
 
-/**
- * Recursively walk a directory and search files for a pattern.
- * If the path is a single file (not a directory), search that file directly.
- */
 async function walkAndSearch(
   path: string,
   re: RegExp,
@@ -220,7 +195,6 @@ async function walkAndSearch(
     const fullPath = join(path, entry.name);
 
     if (entry.isDirectory()) {
-      // Skip common non-source directories
       if (SKIP_DIRS.has(entry.name)) continue;
       await walkAndSearch(
         fullPath,
@@ -245,9 +219,6 @@ async function walkAndSearch(
   }
 }
 
-/**
- * Native grep implementation — walks directory tree and searches file contents.
- */
 async function grepNative(
   pattern: string,
   searchDir: string,
@@ -255,7 +226,6 @@ async function grepNative(
   context: number,
   typeFilter: string | null,
 ): Promise<{ display: string; totalMatches: number }> {
-  // Validate regex first
   const re = new RegExp(pattern);
 
   const outputLines: string[] = [];
@@ -275,9 +245,6 @@ async function grepNative(
   return { display, totalMatches: totalMatches.count };
 }
 
-/**
- * Try running ripgrep with JSON output.
- */
 async function grepWithRg(
   pattern: string,
   searchDir: string,
@@ -285,7 +252,6 @@ async function grepWithRg(
   context: number,
   typeFilter: string | null,
 ): Promise<{ display: string; totalMatches: number }> {
-  // Resolve to absolute path to avoid cwd-relative path issues
   const absSearchDir = resolve(searchDir);
   const args = ["--json", "--no-heading", "--color", "never"];
 
@@ -308,7 +274,6 @@ async function grepWithRg(
       cwd: absSearchDir,
     });
 
-    // Parse NDJSON output from ripgrep
     const lines = stdout.trim().split("\n").filter(Boolean);
     const outputLines: string[] = [];
     let totalMatches = 0;
@@ -329,21 +294,15 @@ async function grepWithRg(
             outputLines.push(`${path}:${lineNum}:${text}`);
           }
         }
-      } catch {
-        // Skip malformed JSON lines
-      }
+      } catch {}
     }
 
     return { display: outputLines.join("\n"), totalMatches };
   } catch (e: unknown) {
-    // ripgrep not found or failed — fall back to native
     throw ToolError.NotAvailable("ripgrep");
   }
 }
 
-/**
- * Parse and validate grep tool arguments.
- */
 function parseArgs(
   input: string | Record<string, unknown> | null,
   defaultMaxResults: number,
@@ -438,10 +397,7 @@ export class GrepTool {
 
     const { pattern, path: searchPath, maxResults, context, type } = args;
 
-    // sometimes models forget to prefix a path (eg $PWD/subpath or ./subpath -> /subpath)
-    // here we can detect it and fix it automatically:
-    // if the path starts with "/", the absolute path doesn't exist,
-    // but the relative path (./...) does exist → model forgot the "./" prefix.
+    // Models sometimes emit "/subpath" when they meant "./subpath"; detect and fix that here.
     const modelForgotPathPrefix =
       searchPath?.startsWith("/") &&
       !(await fs.exists(searchPath)) &&
@@ -450,7 +406,6 @@ export class GrepTool {
       ? `.${searchPath}`
       : searchPath || ".";
 
-    // Validate search path stays within workspace
     const workspace = ctx.get("workspace") as Workspace | null || null;
     if (workspace) {
       try {
@@ -463,7 +418,6 @@ export class GrepTool {
       }
     }
 
-    // Validate regex
     try {
       new RegExp(pattern);
     } catch (e: unknown) {
@@ -473,12 +427,10 @@ export class GrepTool {
       );
     }
 
-    // Try ripgrep first, fall back to native implementation
     let result: { display: string; totalMatches: number };
     try {
       result = await grepWithRg(pattern, searchDir, maxResults, context, type);
     } catch {
-      // ripgrep not available — use native implementation
       result = await grepNative(pattern, searchDir, maxResults, context, type);
     }
 

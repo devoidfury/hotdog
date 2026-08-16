@@ -1,5 +1,3 @@
-// WebSocket server: session registry + WS message routing.
-
 import crypto from "node:crypto";
 import { HOOKS, createHooks } from "../../core/hooks.ts";
 import { SessionManager, type AgentLike } from "../../core/session/index.ts";
@@ -153,9 +151,7 @@ export class SessionRegistry {
       if (ws.readyState === 1) {
         ws.send(JSON.stringify(msg));
       }
-    } catch {
-      // closed or erroring; cleaned up on close
-    }
+    } catch {}
   }
 
   async create({
@@ -169,7 +165,6 @@ export class SessionRegistry {
   }> {
     const proposedSessionId = crypto.randomUUID();
 
-    // buildAgent may override the proposed id; trust what it returns.
     const agent = await this.#buildAgent({
       model,
       sessionId: proposedSessionId,
@@ -304,7 +299,7 @@ export class SessionRegistry {
       agent.toolWhitelist = profile.whitelistTools;
       agent.profileBody = profile.body || undefined;
       agent.role = profile.role || undefined;
-      // Destructive: wipes messages + system prompt, so the UI confirms first.
+      // Wipes messages + system prompt, hence the UI confirmation above.
       await agent.clearContext();
     }
     meta.profile = profileName;
@@ -406,12 +401,12 @@ export class SessionRegistry {
 
   // Test-only accessors
 
-  /** @internal Exposed for testing. */
+  /** @internal */
   get _test_metadata(): Map<string, SessionMetadata> {
     return this.#metadata;
   }
 
-  /** @internal Exposed for testing. */
+  /** @internal */
   get _test_timeoutMin(): number {
     return this.#timeoutMin;
   }
@@ -419,7 +414,7 @@ export class SessionRegistry {
     this.#timeoutMin = v;
   }
 
-  /** @internal Exposed for testing. */
+  /** @internal */
   _test_cleanupIdleSessions(): void {
     this.#cleanupIdleSessions();
   }
@@ -450,7 +445,6 @@ function replaySessionHistory(
 
   try {
     const agentInstance = agent;
-    // Tool results are matched to their call by toolCallId.
     let pendingToolCalls: Array<{
       id: string;
       function?: { name?: string; arguments?: string };
@@ -538,7 +532,7 @@ function replaySessionHistory(
       }
     }
 
-    // Chunks may be in flight but not yet flushed to the message log.
+    // In-flight chunks may not have been flushed to the message log yet.
     const agentImpl = agent as Agent;
     const partialReasoning = agentImpl.currentStreamingReasoning;
     const partialContent = agentImpl.currentStreamingContent;
@@ -764,8 +758,7 @@ async function routeMessage(
 
     case C2S.CANCEL: {
       if (msg.sessionId) {
-        // interrupt() keeps the bus alive for follow-up messages;
-        // cancel() would abort it entirely.
+        // interrupt() keeps the bus alive for follow-ups; cancel() would abort it.
         sessionManager.interrupt(msg.sessionId as string);
       }
       break;
@@ -795,7 +788,7 @@ async function routeMessage(
     case C2S.LIST_LOGS: {
       listSessionLogs()
         .then((logs) => {
-          // Exclude sessions that are still live; only return cold logs.
+          // Only return cold logs, not sessions that are still live.
           const activeIds = new Set(registry.list().map((s) => s.id));
           const coldLogs = logs.filter((log) => !activeIds.has(log.id));
           SessionRegistry.sendSafe(ws, {
@@ -951,7 +944,6 @@ function attachToMostRecentSession(
 
   replaySessionHistory(sessionId, session.agent, ws);
 
-  // Restore the cancel button if the agent is still running.
   const isRunning = registry.getSessionManager().isSessionRunning(sessionId);
   SessionRegistry.sendSafe(ws, {
     type: S2C.SESSION_STATE,
@@ -987,9 +979,7 @@ function createAndAttachSession(
       });
       try {
         ws.close(4003, "Failed to create session");
-      } catch {
-        // Already closed
-      }
+      } catch {}
     });
 }
 
@@ -1006,14 +996,11 @@ export function createWsServer(
     profiles,
   } = options;
 
-  // One LLM client shared across all sessions.
   const sharedLlmClient = new LlmClient({
     baseUrl: core.resolved?.baseUrl,
     apiKey: core.resolved?.apiKey,
     stream: core.resolved?.stream !== false,
     chatTimeoutSecs: core.resolved?.chatTimeout || 30,
-    // Resolved by buildConfig in the real app; retry.ts throws
-    // ConfigError.MissingConfig if it is missing at retry time.
     maxRetries: core.resolved?.maxRetries as number,
     providers: core.config?.providers as ProviderConfig[] | undefined,
     markerMangler: new MarkerMangler(),
@@ -1056,14 +1043,13 @@ export function createWsServer(
           (agentConfig as { showTokenUse?: boolean }).showTokenUse ??
           (core.resolved?.showTokenUse as boolean) ??
           true,
-        sink: null, // Sink is managed by WebSocketChannel
+        sink: null,
         modelRegistry: core.resolved?.modelRegistry,
         profileName,
         profileBody: profile?.body || undefined,
         role: profile?.role || undefined,
         config: {
           ...core.config,
-          // Required by Agent -- no fallbacks there.
           maxToolCallsPerIteration: core.resolved?.maxToolCallsPerIteration as number,
           maxRetries: core.resolved?.maxRetries as number,
           toolRetryDelay: core.resolved?.toolRetryDelay as number,
@@ -1138,9 +1124,7 @@ export function createWsServer(
     } catch {
       try {
         ws.send(JSON.stringify({ type: "error", message: "Invalid JSON" }));
-      } catch {
-        // Connection already closed
-      }
+      } catch {}
       return;
     }
 
@@ -1149,16 +1133,14 @@ export function createWsServer(
         ws.send(
           JSON.stringify({ type: "error", message: "Message type required" }),
         );
-      } catch {
-        // Connection already closed
-      }
+      } catch {}
       return;
     }
 
     try {
       await routeMessage(ws, msg, registry, auth);
     } catch (err: unknown) {
-      // Swallow errors from dropped connections to keep the server alive.
+      // Don't let errors from dropped connections kill the server.
       const typedErr = err as Error;
       if (
         typedErr.message !== "WebSocket is not open: readyState 2 (CLOSING)" &&

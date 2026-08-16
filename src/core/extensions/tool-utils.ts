@@ -1,13 +1,7 @@
-// Tool utilities — shared helpers for tool definitions and execution.
-
 import { ToolError } from "../error.ts";
 import { ToolDef, ToolMetadata } from "./tool-registry.ts";
 
-/**
- * Re-export ToolMetadata for convenience.
- */
 export type { ToolMetadata };
-
 
 const SHORT_META_KEYS = new Set([
   "truncated",
@@ -24,9 +18,6 @@ const SHORT_META_KEYS = new Set([
   "limit",
 ]);
 
-/**
- * Minimal XML escaping for attribute/text content.
- */
 export function xmlEscape(s: string): string {
   return s
     .replace(/&/g, "&amp;")
@@ -36,14 +27,7 @@ export function xmlEscape(s: string): string {
     .replace(/'/g, "&apos;");
 }
 
-/**
- * Tool result — structured result for tool execution.
- */
-/**
- * Sentinel flag: when set on a ToolResult, signals the agent run loop
- * to stop after this tool executes (similar to yielding control back
- * to the user). Used by tools like "wait" and "handoff".
- */
+// When set on a ToolResult, tells the run loop to stop after this tool (e.g., "wait", "handoff").
 export const TOOL_STOP_LOOP = Symbol("TOOL_STOP_LOOP");
 
 export class ToolResult {
@@ -90,11 +74,6 @@ export class ToolResult {
     });
   }
 
-  /**
-   * Create a ToolResult that signals the agent run loop to stop after
-   * this tool executes. Used when a tool wants to yield control back
-   * to the user or trigger a phase transition.
-   */
   static stop(output: string): ToolResult {
     const result = new ToolResult({ output, success: true });
     result[TOOL_STOP_LOOP] = true;
@@ -153,9 +132,6 @@ export class ToolResult {
     return this;
   }
 
-  /**
-   * Mark this result to stop the agent run loop after execution.
-   */
   withStopLoop(): this {
     this[TOOL_STOP_LOOP] = true;
     return this;
@@ -209,14 +185,10 @@ export class ToolResult {
   }
 }
 
-/**
- * Tool definition (OpenAI function-calling schema).
- */
 export function toolDef(
   name: string,
   description: string,
   parameters?: {
-    // schema?: string;
     properties?: Record<string, unknown>;
     required?: string[];
   },
@@ -227,7 +199,6 @@ export function toolDef(
       name,
       description,
       parameters: {
-        // schema: parameters?.schema ?? "https://json-schema.org/draft/2020-12/schema",
         type: "object",
         properties: parameters?.properties || {},
         required: parameters?.required || [],
@@ -236,9 +207,6 @@ export function toolDef(
   };
 }
 
-/**
- * Create a parameter definition.
- */
 export function param(
   typeName: string,
   description: string,
@@ -247,9 +215,6 @@ export function param(
   return { type: typeName, description: description || "", ...extra };
 }
 
-/**
- * Parse tool arguments from JSON input string.
- */
 export function parseToolArgs(
   input: string | Record<string, unknown>,
 ): Record<string, unknown> {
@@ -263,9 +228,6 @@ export function parseToolArgs(
   return input;
 }
 
-/**
- * Resolve a tool result string.
- */
 export function toolResult(
   result: ToolResult | string | Record<string, unknown> | unknown,
   toolName?: string,
@@ -324,9 +286,6 @@ function xmlWrap(
   return `<tool ${attrsStr}>\n  <output>${outputContent}</output>\n</tool>`;
 }
 
-/**
- * Truncate output to max lines.
- */
 export function truncateOutput(text: string, maxLines: number): string {
   if (!text) return "";
   const lines = text.split("\n");
@@ -357,9 +316,6 @@ export function parseToolInput(
   return json as Record<string, unknown>;
 }
 
-/**
- * Default callDisplay implementation.
- */
 export function defaultCallDisplay(
   input: string | Record<string, unknown> | null,
   templateFn: (args: Record<string, unknown>) => string,
@@ -398,9 +354,6 @@ export function defaultCallDisplay(
   return templateFn(args);
 }
 
-/**
- * Generate a simple unified diff between old and new text.
- */
 export function generateDiff(
   oldText: string,
   newText: string,
@@ -437,9 +390,6 @@ export function generateDiff(
   return diff.join("\n");
 }
 
-/**
- * Extract a required string from a JSON value.
- */
 export function getRequiredStr(
   value: Record<string, unknown>,
   key: string,
@@ -451,9 +401,6 @@ export function getRequiredStr(
   return v;
 }
 
-/**
- * Format a tool result for the LLM API.
- */
 export function formatToolResult(
   result: unknown,
   toolName: string,

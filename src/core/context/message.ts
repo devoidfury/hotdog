@@ -1,5 +1,3 @@
-// Message types and message log for conversation management.
-
 export interface ImageAttachment {
   type: "image_url";
   mimeType: string;
@@ -12,10 +10,7 @@ export interface ToolCall {
   function: { name: string; arguments: string };
 }
 
-/**
- * Canonical constructor parameters — camelCase only.
- * Use Message.fromJSON() to deserialize from snake_case persistence.
- */
+// CamelCase only; use Message.fromJSON() for snake_case persistence data.
 export interface MessageParams {
   role?: string;
   content?: string | Array<unknown> | null;
@@ -33,11 +28,6 @@ export class Message {
   toolCallId: string | null;
   images: ImageAttachment[] | undefined;
 
-  /**
-   * @param opts — camelCase parameters only.
-   *   content: Plain text string or array of content parts.
-   *   images: Array of { type: "image_url", mimeType, data }.
-   */
   constructor(opts: MessageParams = {}) {
     this.role = opts.role;
     this.content = opts.content ?? undefined;
@@ -47,12 +37,7 @@ export class Message {
     this.images = opts.images ?? undefined;
   }
 
-  /**
-   * Deserialize from JSON/snake_case data (persistence/log format).
-   * Normalizes snake_case keys to camelCase.
-   *
-   * @param data — Raw deserialized object, possibly with snake_case keys.
-   */
+  /** Deserialize persistence/log JSON; normalizes snake_case keys to camelCase. */
   static fromJSON(data: Record<string, unknown>): Message {
     return new Message({
       role: data.role as string | undefined,
@@ -64,11 +49,7 @@ export class Message {
     });
   }
 
-  /**
-   * Build the OpenAI-compatible content field.
-   * - If no images, returns the content string as-is.
-   * - If images present, returns array of { type: "text", text } and { type: "image_url", image_url } parts.
-   */
+  /** OpenAI-compatible content field; wraps text + images as part arrays when images are present. */
   _buildContent(): string | Array<unknown> {
     if (!this.images || this.images.length === 0) {
       return this.content ?? "";
@@ -76,9 +57,7 @@ export class Message {
 
     const parts: Array<unknown> = [];
 
-    // Add text part if content exists
     if (this.content) {
-      // If content is already an array of parts, spread it
       if (Array.isArray(this.content)) {
         parts.push(...this.content);
       } else {
@@ -86,7 +65,6 @@ export class Message {
       }
     }
 
-    // Add image parts
     for (const img of this.images) {
       const mimeType = img.mimeType || "image/png";
       const data = img.data || "";
@@ -102,9 +80,7 @@ export class Message {
     return parts;
   }
 
-  /**
-   * Serialize to JSON (snake_case for persistence).
-   */
+  /** Serialize to snake_case JSON for persistence. */
   toJSON(): Record<string, unknown> {
     const obj: Record<string, unknown> = {
       role: this.role,
@@ -119,10 +95,7 @@ export class Message {
     return obj;
   }
 
-  /**
-   * Get the plain text content for logging/display purposes.
-   * Strips image parts from content arrays.
-   */
+  /** Plain text for logging/display; strips image parts from content arrays. */
   getTextContent(): string {
     if (!this.content) return "";
     if (typeof this.content === "string") return this.content;

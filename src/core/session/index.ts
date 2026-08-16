@@ -1,6 +1,3 @@
-// SessionManager — manages the session lifecycle.
-// Owns sessions, agents, message buses, and event distribution.
-
 import crypto from "node:crypto";
 import { HOOKS, HookSystem } from "../hooks.ts";
 import { MessageBus } from "./message-bus.ts";
@@ -116,30 +113,22 @@ export interface SessionManagerOptions {
   buildAgent: (config: Record<string, unknown>) => Promise<AgentLike>;
   serializer?: Serializer | null;
   initialConfig?: Record<string, unknown>;
-  /** LLM client — when provided, SessionManager owns it and passes it through
-   *  buildAgent config. Prevents each entry point from creating its own instance. */
+  // Owned by SessionManager and passed through buildAgent config, so entry points don't each create one.
   llmClient?: LlmClient;
-  /** Model registry — passed through buildAgent config and used by TaskManager. */
   modelRegistry?: Record<string, ModelConfig>;
-  /** Core config — used by TaskManager. */
   coreConfig?: Record<string, unknown>;
-  /** Task configuration — when provided, SessionManager creates and owns a TaskManager internally. */
+  // When provided, SessionManager creates and owns a TaskManager internally.
   taskConfig?: {
     maxIterations: number;
     taskProfile: string;
     taskRole: string;
   } | null;
-  /** Extension loader — passed through to channels for extension access. */
   extensions?: unknown;
-  /** Profile manager — used by TaskManager for profile lookups. */
   profileManager?: ProfileManager;
 }
 
 export type SessionEventHandler = (event: OutputEvent) => void;
 
-/**
- * Manages the session lifecycle: owns agents, message buses, and event distribution.
- */
 export class SessionManager {
   #hooks: SessionManagerOptions["hooks"];
   #buildAgent: (config: Record<string, unknown>) => Promise<AgentLike>;
@@ -147,14 +136,10 @@ export class SessionManager {
   #store: SessionStore;
   #currentSessionId: string | null;
   #sessions: Map<string, SessionEntry>;
-  /** Per-session event handlers. Keyed by sessionId. */
   #eventHandlers: Map<string, SessionEventHandler[]>;
-  /** Internally owned TaskManager (created when taskConfig is provided). */
   #taskManager: TaskManager | null;
-  /** LLM client — owned by SessionManager, passed through buildAgent config. */
   #llmClient: LlmClient | null;
-  /** Per-session QUESTION event buffer — holds questions emitted while no channels
-   *  are connected, so they can be replayed when a channel reconnects. */
+  // QUESTION events emitted while no channels are connected, replayed on reconnect.
   #questionBuffers: Map<string, QuestionOption[][]>;
 
   static async create(options: SessionManagerOptions): Promise<SessionManager> {
@@ -182,7 +167,6 @@ export class SessionManager {
     this.#llmClient = options.llmClient || null;
     this.#questionBuffers = new Map();
 
-    // Wrap buildAgent to inject llmClient and modelRegistry into config
     const rawBuildAgent = options.buildAgent;
     this.#buildAgent = async (config: Record<string, unknown>) => {
       const enrichedConfig = { ...config };
@@ -212,12 +196,6 @@ export class SessionManager {
     }
   }
 
-  // ── Session Lifecycle ─────────────────────────────────────────────────────
-
-  /**
-   * Create a new agent and add it to the store.
-   * Also creates the internal MessageBus for this session.
-   */
   async create(config: Record<string, unknown>): Promise<string> {
     const agent = await this.#buildAgent(config);
     const sessionId = this.#store.addAgent(agent);
@@ -231,9 +209,6 @@ export class SessionManager {
     return sessionId;
   }
 
-  /**
-   * Construct a new agent and swap it in, replacing the current one.
-   */
   async swap(config: Record<string, unknown>): Promise<AgentLike> {
     const oldAgent = this.#currentSessionId
       ? this.#store.getAgent(this.#currentSessionId)
@@ -257,15 +232,9 @@ export class SessionManager {
     return this.#store.getAgent(sessionId);
   }
 
-  /**
-   * Register a pre-built agent and create its session entry (bus, sink wiring).
-   * Used by extensions that build agents outside SessionManager's normal flow
-   * (e.g., websocket server with custom buildAgent).
-   */
   registerAgent(agent: AgentLike, config?: Record<string, unknown>): string {
     const sessionId = this.#store.addAgent(agent);
-    // Don't override #currentSessionId — the caller may have an active session
-    // (e.g., CLI session) that shouldn't be displaced by a websocket session.
+    // Don't displace the current session -- a CLI session shouldn't be bumped by a websocket one.
     this.#createSessionEntry(sessionId, agent, config || {});
     return sessionId;
   }
@@ -299,11 +268,6 @@ export class SessionManager {
     return this.#currentSessionId;
   }
 
-  // ── I/O Routing ──────────────────────────────────────────────────────────
-
-  /**
-   * Enqueue text for a specific session's message bus.
-   */
   enqueue(sessionId: string, text: string): void {
     const entry = this.#sessions.get(sessionId);
     if (entry) {
@@ -318,9 +282,6 @@ export class SessionManager {
     }
   }
 
-  /**
-   * Interrupt a session's current processing (clears queue, continues loop).
-   */
   interrupt(sessionId: string): void {
     const entry = this.#sessions.get(sessionId);
     if (entry) {
@@ -328,10 +289,6 @@ export class SessionManager {
     }
   }
 
-  /**
-   * Execute a command on a specific session.
-   * @returns Command action bits or undefined
-   */
   async executeCommand(
     sessionId: string,
     cmdText: string,
@@ -343,12 +300,7 @@ export class SessionManager {
     return undefined;
   }
 
-  // ── Event Distribution ───────────────────────────────────────────────────
-
-  /**
-   * Register a callback for events from a specific session.
-   * Returns an unsubscribe function.
-   */
+  /** Returns an unsubscribe function. */
   onSessionEvents(sessionId: string, handler: SessionEventHandler): () => void {
     if (!this.#eventHandlers.has(sessionId)) {
       this.#eventHandlers.set(sessionId, []);
@@ -364,10 +316,6 @@ export class SessionManager {
     };
   }
 
-  /**
-   * Emit an event to all handlers subscribed to a session.
-   * Called by the internal event sink when an agent emits output.
-   */
   emitToChannels(sessionId: string, event: OutputEvent): void {
     const handlers = this.#eventHandlers.get(sessionId);
 
@@ -375,9 +323,7 @@ export class SessionManager {
       for (const handler of handlers) {
         try {
           handler(event);
-        } catch {
-          // non-fatal
-        }
+        } catch {}
       }
     } else if (event.type === OUTPUT_EVENT.QUESTION && event.questions) {
       if (!this.#questionBuffers.has(sessionId)) {
@@ -387,19 +333,13 @@ export class SessionManager {
     }
   }
 
-  /**
-   * Drain buffered QUESTION events for a session (emitted while no channels were
-   * connected) and clear the buffer. Callers should replay these to newly
-   * connected channels.
-   */
+  /** Clears the buffer; callers replay the returned questions to newly connected channels. */
   drainPendingQuestions(sessionId: string): QuestionOption[][] {
     const buffer = this.#questionBuffers.get(sessionId);
     if (!buffer || buffer.length === 0) return [];
     this.#questionBuffers.delete(sessionId);
     return buffer;
   }
-
-  // ── Session Info ─────────────────────────────────────────────────────────
 
   getSessionInfo(
     sessionId: string,
@@ -414,15 +354,11 @@ export class SessionManager {
     };
   }
 
-  /** Check if a session's agent is currently running (processing a message). */
   isSessionRunning(sessionId: string): boolean {
     const entry = this.#sessions.get(sessionId);
     return entry?.bus.isRunning ?? false;
   }
 
-  // ── Serialization ─────────────────────────────────────────────────────────
-
-  /** Serialize the current agent state, or null if no agent is active. */
   serialize(): Record<string, unknown> | null {
     const agent = this.getAgent();
     if (!agent) return null;
@@ -442,8 +378,6 @@ export class SessionManager {
     return agent;
   }
 
-  // ── Store Access ──────────────────────────────────────────────────────────
-
   getStore(): SessionStore {
     return this.#store;
   }
@@ -455,8 +389,6 @@ export class SessionManager {
   sessionCount(): number {
     return this.#store.size();
   }
-
-  // ── Internal ──────────────────────────────────────────────────────────────
 
   #createSessionEntry(
     sessionId: string,
@@ -480,7 +412,6 @@ export class SessionManager {
       agent.sink = internalSink;
     }
 
-    // Wire the agent's enqueueCallback so extensions/hooks can queue messages
     agent.enqueueCallback = (text: string) => bus.enqueue(text);
 
     if (this.#taskManager) {
@@ -499,12 +430,10 @@ export class SessionManager {
     });
   }
 
-  /** Get the internal message bus. Exposed for extensions that need direct bus access. */
+  /** Exposed for extensions that need direct bus access. */
   getBus(sessionId: string): MessageBus | undefined {
     return this.#sessions.get(sessionId)?.bus;
   }
-
-  // ── TaskManager Access ───────────────────────────────────────────────────
 
   getTaskManager(): TaskManager | null {
     return this.#taskManager;

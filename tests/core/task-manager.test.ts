@@ -163,7 +163,29 @@ describe("TaskManager", () => {
   });
 
   describe("_onTaskComplete", () => {
-    it("appends result to manager context via session manager", () => {
+    it("enqueues result via bus without also adding to context", () => {
+      const enqueued: any[] = [];
+      const added: any[] = [];
+      const manager = createManager();
+      manager.setSessionManager({
+        getAgent: () => ({
+          addMessage(msg: any) { added.push(msg); },
+        }) as any,
+      });
+      manager.setBus({ enqueue: (msg: any) => enqueued.push(msg) } as any);
+
+      manager._onTaskComplete("task-1", "Result text");
+
+      // Exactly one injection: the bus path only. The bus run loop appends
+      // the enqueued text to the manager's context via agent.run(), so a
+      // direct addMessage() here as well would double it.
+      expect(enqueued).toHaveLength(1);
+      expect(enqueued[0]).toContain("Task task-1 completed");
+      expect(enqueued[0]).toContain("Result text");
+      expect(added).toHaveLength(0);
+    });
+
+    it("falls back to direct context add when no bus is wired", () => {
       const managerContext: any[] = [];
       const manager = createManager();
       manager.setSessionManager({
@@ -177,19 +199,7 @@ describe("TaskManager", () => {
 
       expect(managerContext).toHaveLength(1);
       expect(managerContext[0].role).toBe("user");
-      expect(managerContext[0].content).toContain("<system-notice>");
-      expect(managerContext[0].content).toContain("Task task-1 completed");
-    });
-
-    it("enqueues message via bus", () => {
-      const enqueued: any[] = [];
-      const manager = createManager();
-      manager.setBus({ enqueue: (msg: any) => enqueued.push(msg) } as any);
-
-      manager._onTaskComplete("task-2", "Result text");
-
-      expect(enqueued).toHaveLength(1);
-      expect(enqueued[0]).toContain("Task task-2 completed");
+      expect(managerContext[0].content).toBe("[Task task-1 completed]\nResult text");
     });
 
     it("handles missing session manager and bus gracefully", () => {

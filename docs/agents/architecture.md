@@ -321,7 +321,10 @@ Parent agent calls delegate_task()
     - toolWhitelist from profile
     - hideTools/hideThinking: true
   → Run agent.run(description) in background
-  → On completion: append result to manager's context + wake up via bus
+  → On completion: enqueue result on the manager's MessageBus (the bus run
+    loop appends it to the manager's context via agent.run(), so it is
+    injected exactly once). Falls back to a direct context add when no bus
+    is wired.
 ```
 
 ### Subcommand Dispatch

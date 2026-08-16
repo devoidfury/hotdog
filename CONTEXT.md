@@ -73,7 +73,7 @@ Domain concepts for the hotdog AI agent harness. Implementation details are docu
 ## Task System
 
 - **Task Lifecycle** — Spawned as background task → LLM loop with tool support → text response → result appended to manager's MessageLog → wake-up callback fires.
-- **Task Communication** — Result appended as system message. Wake-up callback notifies MessageBus. Follow-up via queue (`_followQueue`) drained on each iteration.
+- **Task Communication** — On completion, the task result is enqueued on the manager's MessageBus as its next message; the bus run loop appends it to the manager's context via `agent.run()`. It is enqueued, not also added directly, so the result is injected exactly once. If no bus is wired, the result is appended directly to the manager's context. Follow-up via queue (`_followQueue`) drained on each iteration.
 - **Task Cancellation** — CancellationToken on TaskHandle. Parent calls interrupt_task().
 - **Task Concurrency** — Multiple simultaneous task agents via TaskManager HashMap.
 - **TaskStatus** — Running, Completed, Failed, Cancelled.

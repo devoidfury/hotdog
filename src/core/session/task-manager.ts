@@ -166,23 +166,19 @@ export class TaskManager {
    * @private
    */
   _onTaskComplete(taskId: string | null, result: string): void {
-    // Append result to manager's context
-    if (this.#sessionManager) {
+    const text = `[Task ${taskId} completed]\n${result}`;
+
+    // Hand the result to the manager through the bus: the bus run loop
+    // appends it to the manager's context via agent.run(). We must NOT
+    // also addMessage() here -- doing both would inject the result twice.
+    if (this.#bus) {
+      this.#bus.enqueue(text);
+    } else if (this.#sessionManager) {
+      // No bus wired (standalone/test setup) -- add directly to context.
       const agent = this.#sessionManager.getAgent();
       if (agent) {
-        const tag = "system-notice"; // this keeps the marker mangler from interfering with the tag
-        agent.addMessage(
-          new Message({
-            role: "user",
-            content: `<${tag}>[Task ${taskId} completed]\n${result}</${tag}>`,
-          }),
-        );
+        agent.addMessage(new Message({ role: "user", content: text }));
       }
-    }
-
-    // Wake up the manager via bus
-    if (this.#bus) {
-      this.#bus.enqueue(`[Task ${taskId} completed]\n${result}`);
     }
   }
 

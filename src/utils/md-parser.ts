@@ -54,7 +54,7 @@ export interface MdThematicBreak {
   type: "thematic_break";
 }
 
-// ── Table types (GFM-style) ─────────────────────────────────────────────────
+// ── Table types ──────────────────────────────────────────────────────────────
 
 export interface MdTableCell {
   children: MdInline[];
@@ -70,7 +70,6 @@ export interface MdTable {
   rows: MdTableRow[];
 }
 
-/** Union of all block-level nodes. */
 export type MdBlock =
   | MdHeading
   | MdParagraph
@@ -120,7 +119,6 @@ export interface MdImage {
   alt: string;
 }
 
-/** Union of all inline-level nodes. */
 export type MdInline =
   | MdText
   | MdBold
@@ -132,12 +130,6 @@ export type MdInline =
 
 // ── Public API ───────────────────────────────────────────────────────────────
 
-/**
- * Parse a complete markdown string into an object tree.
- *
- * @param markdown — The full markdown source text.
- * @returns A structured MdDocument tree.
- */
 export function parseMarkdown(markdown: string): MdDocument {
   const lines = markdown.split("\n");
   const blocks: MdBlock[] = [];
@@ -147,13 +139,11 @@ export function parseMarkdown(markdown: string): MdDocument {
     const line = lines[i]!;
     const trimmed = line.trim();
 
-    // Empty line — skip
     if (trimmed === "") {
       i++;
       continue;
     }
 
-    // Code block (fenced)
     if (trimmed.startsWith("```")) {
       const codeBlock = parseCodeBlock(lines, i);
       blocks.push(codeBlock);
@@ -161,7 +151,6 @@ export function parseMarkdown(markdown: string): MdDocument {
       continue;
     }
 
-    // Heading
     const headingMatch = trimmed.match(/^(#{1,6})\s+(.*)$/);
     if (headingMatch) {
       const level = Math.min(headingMatch[1]!.length, 6) as
@@ -172,14 +161,12 @@ export function parseMarkdown(markdown: string): MdDocument {
       continue;
     }
 
-    // Horizontal rule / thematic break
     if (isHorizontalRule(trimmed)) {
       blocks.push({ type: "horizontal_rule" });
       i++;
       continue;
     }
 
-    // Blockquote
     if (trimmed.startsWith(">")) {
       const blockquote = parseBlockquote(lines, i);
       blocks.push(blockquote);
@@ -187,7 +174,6 @@ export function parseMarkdown(markdown: string): MdDocument {
       continue;
     }
 
-    // List (unordered or ordered)
     if (isListLine(trimmed)) {
       const list = parseList(lines, i);
       blocks.push(list);
@@ -195,7 +181,6 @@ export function parseMarkdown(markdown: string): MdDocument {
       continue;
     }
 
-    // Table (GFM-style) — check if this line and the next form a table header + delimiter
     if (
       isTableHeaderLine(trimmed) &&
       i + 1 < lines.length &&
@@ -207,7 +192,6 @@ export function parseMarkdown(markdown: string): MdDocument {
       continue;
     }
 
-    // Default: paragraph
     const paragraph = parseParagraph(lines, i);
     blocks.push(paragraph);
     i = paragraph._nextIndex;
@@ -216,24 +200,18 @@ export function parseMarkdown(markdown: string): MdDocument {
   return { type: "document", children: blocks };
 }
 
-// ── Streaming Parser ─────────────────────────────────────────────────────────
-
 // ── Streaming Parser (incremental with diff) ─────────────────────────────
 
 /**
  * Result of feeding a chunk into a streaming parser.
- * `stableFrom` is the index of the first block that changed since the
- * previous feed — blocks before this index are unchanged and their DOM
- * can be left alone.
+ * `stableFrom` is the index of the first block that changed since the previous feed;
+ * blocks before this index are unchanged and their DOM can be left alone.
  */
 export interface FeedResult {
   tree: MdDocument;
   stableFrom: number;
 }
 
-/**
- * Deep-compare two inline nodes for structural equality.
- */
 function inlinesEqual(a: MdInline, b: MdInline): boolean {
   if (a.type !== b.type) return false;
 
@@ -270,9 +248,6 @@ function inlineArraysEqual(a: MdInline[], b: MdInline[]): boolean {
   return true;
 }
 
-/**
- * Deep-compare two block nodes for structural equality.
- */
 function areBlocksEqual(a: MdBlock, b: MdBlock): boolean {
   if (a.type !== b.type) return false;
 
@@ -311,7 +286,6 @@ function areBlocksEqual(a: MdBlock, b: MdBlock): boolean {
         ta.rows.length !== tb.rows.length
       )
         return false;
-      // Compare header cells
       for (let i = 0; i < ta.header.cells.length; i++) {
         if (
           !inlineArraysEqual(
@@ -321,7 +295,6 @@ function areBlocksEqual(a: MdBlock, b: MdBlock): boolean {
         )
           return false;
       }
-      // Compare rows
       for (let r = 0; r < ta.rows.length; r++) {
         const ra = ta.rows[r]!;
         const rb = tb.rows[r]!;
@@ -364,22 +337,13 @@ export function getStablePrefix(prev: MdDocument, next: MdDocument): number {
 }
 
 /**
- * Incremental/streaming markdown parser.
- *
- * Feed chunks of markdown as they arrive (e.g., from an LLM streaming response).
- * Each call to `feed()` returns the full tree plus a `stableFrom` index so
- * the renderer only re-renders the changed tail of the document.
+ * Incremental/streaming markdown parser. Feed chunks as they arrive; each `feed()`
+ * returns the full tree plus a `stableFrom` index so renderers only re-render the changed tail.
  */
 export class StreamingMdParser {
   private buffer = "";
   private prevTree: MdDocument | null = null;
 
-  /**
-   * Feed a new chunk of markdown text into the parser.
-   *
-   * @param chunk — A new chunk of markdown text.
-   * @returns The current parse tree and the index of the first changed block.
-   */
   feed(chunk: string): FeedResult {
     this.buffer += chunk;
     const tree = parseMarkdown(this.buffer);
@@ -394,43 +358,27 @@ export class StreamingMdParser {
     return { tree, stableFrom };
   }
 
-  /**
-   * Finalize the stream and return the complete parse tree.
-   *
-   * @returns The final MdDocument tree.
-   */
   finalize(): MdDocument {
     return parseMarkdown(this.buffer);
   }
 
-  /**
-   * Reset the parser state for reuse.
-   */
   reset(): void {
     this.buffer = "";
     this.prevTree = null;
   }
 
-  /**
-   * Get the current raw buffer without parsing.
-   */
   getBuffer(): string {
     return this.buffer;
   }
 }
 
-/**
- * Create a new streaming markdown parser.
- */
 export function createStreamingParser(): StreamingMdParser {
   return new StreamingMdParser();
 }
 
 // ── Tree Utilities ───────────────────────────────────────────────────────────
 
-/**
- * Flatten a markdown tree back into plain text (no formatting).
- */
+/** Flatten a markdown tree back into plain text. */
 export function mdTreeToPlainText(tree: MdDocument): string {
   const parts: string[] = [];
 
@@ -470,7 +418,6 @@ export function mdTreeToPlainText(tree: MdDocument): string {
         parts.push("---\n");
         break;
       case "table":
-        // Flatten table to pipe-separated text
         const allRows: MdTableRow[] = [block.header, ...block.rows];
         for (const row of allRows) {
           const cellTexts = row.cells.map((cell) =>
@@ -490,9 +437,6 @@ export function mdTreeToPlainText(tree: MdDocument): string {
 
 // ── HTML Renderer ────────────────────────────────────────────────────────────
 
-/**
- * Escape HTML special characters in text content.
- */
 function escapeHtml(text: string): string {
   return text
     .replace(/&/g, "&amp;")
@@ -524,9 +468,6 @@ function isSafeUrl(url: string, allowedSchemes: Set<string>, allowImageData: boo
   return allowedSchemes.has(m[1]!.toLowerCase());
 }
 
-/**
- * Render inline nodes to HTML.
- */
 function inlineToHtml(node: MdInline): string {
   switch (node.type) {
     case "text":
@@ -553,9 +494,6 @@ function inlineToHtml(node: MdInline): string {
   }
 }
 
-/**
- * Render a single block node to HTML.
- */
 function blockToHtml(block: MdBlock): string {
   switch (block.type) {
     case "heading": {
@@ -603,25 +541,11 @@ function blockToHtml(block: MdBlock): string {
   }
 }
 
-/**
- * Render a parsed markdown tree to an HTML string.
- *
- * @param tree — The MdDocument tree from parseMarkdown().
- * @returns An HTML string suitable for innerHTML assignment.
- */
 export function mdTreeToHtml(tree: MdDocument): string {
   return tree.children.map(blockToHtml).join("\n");
 }
 
-/**
- * Render a range of blocks from a tree to an HTML string.
- * Useful for incremental re-rendering during streaming.
- *
- * @param tree — The MdDocument tree from parseMarkdown().
- * @param from — Start index (inclusive, 0-based).
- * @param to — End index (exclusive). Defaults to tree.children.length.
- * @returns An HTML string for the specified block range.
- */
+/** Render a range of blocks to HTML; useful for incremental re-rendering during streaming. */
 export function renderBlocksToHtml(
   tree: MdDocument,
   from: number,
@@ -631,20 +555,13 @@ export function renderBlocksToHtml(
   return tree.children.slice(from, end).map(blockToHtml).join("\n");
 }
 
-/**
- * Convenience function: parse markdown and render to HTML in one step.
- *
- * @param markdown — The markdown source text.
- * @returns An HTML string suitable for innerHTML assignment.
- */
+/** Parse markdown and render to HTML in one step. */
 export function markdownToHtml(markdown: string): string {
   const tree = parseMarkdown(markdown);
   return mdTreeToHtml(tree);
 }
 
-/**
- * Walk the tree and call a callback for each node.
- */
+/** Walk the tree, calling `callback(node, parent)` for each node. */
 export function walkTree(
   tree: MdDocument,
   callback: (
@@ -687,13 +604,11 @@ function walkBlock(
       }
       break;
     case "table":
-      // Walk header cells
       for (const cell of block.header.cells) {
         for (const child of cell.children) {
           callback(child, block);
         }
       }
-      // Walk row cells
       for (const row of block.rows) {
         for (const cell of row.cells) {
           for (const child of cell.children) {
@@ -743,11 +658,9 @@ function parseBlockquote(
   while (i < lines.length) {
     const trimmed = lines[i]!.trim();
     if (trimmed.startsWith(">")) {
-      // Remove the leading ">" and optional space
       contentLines.push(trimmed.slice(1).trimStart());
       i++;
     } else if (trimmed === "") {
-      // Allow blank lines inside blockquotes
       contentLines.push("");
       i++;
     } else {
@@ -780,17 +693,14 @@ function parseList(
       items.push({ children: parseInline(content) });
       i++;
     } else if (trimmed === "") {
-      // Blank line ends the list
       break;
+    } else if (items.length > 0) {
+      // continuation of previous list item
+      const continuation = parseInline(trimmed);
+      items[items.length - 1]!.children.push(...continuation);
+      i++;
     } else {
-      // Continuation of previous list item (indented text)
-      if (items.length > 0) {
-        const continuation = parseInline(trimmed);
-        items[items.length - 1]!.children.push(...continuation);
-        i++;
-      } else {
-        break;
-      }
+      break;
     }
   }
 
@@ -801,7 +711,6 @@ function parseTable(
   lines: string[],
   start: number,
 ): MdTable & { _nextIndex: number } {
-  // Line `start` is the header row, line `start+1` is the delimiter row
   const headerLine = lines[start]!.trim();
   const headerCells = parseTableRowCells(headerLine);
 
@@ -811,10 +720,7 @@ function parseTable(
   while (i < lines.length) {
     const trimmed = lines[i]!.trim();
 
-    if (trimmed === "") {
-      // Blank line ends the table
-      break;
-    }
+    if (trimmed === "") break;
     if (!isTableRowLine(trimmed)) {
       break;
     }
@@ -833,14 +739,12 @@ function parseTable(
 }
 
 function parseTableRowCells(line: string): MdTableCell[] {
-  // Strip leading/trailing pipes if present
   const stripped = line.trim();
   const inner =
     stripped.startsWith("|") && stripped.endsWith("|")
       ? stripped.slice(1, -1)
       : stripped;
 
-  // Split on pipes, but handle empty cells correctly
   const rawCells = inner.split("|");
   return rawCells.map((raw) => ({
     children: parseInline(raw.trim()),
@@ -915,13 +819,9 @@ function parseParagraph(
 
 // ── Inline Parser ────────────────────────────────────────────────────────────
 
-/** Characters that can be escaped with a backslash in markdown. */
 const ESCAPEABLE_CHARS = "\\`*_{}[]()#+-.!|~";
 
-/**
- * Process escape sequences in a string (used inside inline code).
- * Converts \X to X for escapeable characters.
- */
+/** Process escape sequences: converts \X to X for escapeable characters. */
 function processInlineEscapes(text: string): string {
   let result = "";
   let i = 0;
@@ -941,20 +841,13 @@ function processInlineEscapes(text: string): string {
   return result;
 }
 
-/**
- * Check if a character is a word character for emphasis boundary purposes.
- * Underscores adjacent to these chars should not act as emphasis markers.
- */
+/** Word char for emphasis boundary purposes: underscores adjacent to these should not act as emphasis markers. */
 function isWordChar(ch: string | undefined): boolean {
   if (ch === undefined) return false;
   return /[a-zA-Z0-9_]/.test(ch);
 }
 
-/**
- * Find a closing underscore marker that respects word boundaries.
- * The closing underscore must not be followed by a word character.
- * Returns -1 if no valid closing marker is found.
- */
+/** Find a closing underscore marker that respects word boundaries; -1 if none found. */
 function findClosingUnderscore(
   text: string,
   marker: string,
@@ -976,29 +869,21 @@ function parseInline(text: string): MdInline[] {
   let i = 0;
 
   while (i < text.length) {
-    // Escape sequences: \* \_ \` etc.
     if (text[i] === "\\") {
       const next = text[i + 1];
-      if (!next) {
-        // End of text — don't emit, wait for next chunk (streaming safety)
-        break;
-      }
+      if (!next) break; // streaming safety: wait for next chunk
       if (ESCAPEABLE_CHARS.includes(next)) {
-        // Escaped special char — emit it literally
         result.push({ type: "text", content: next });
         i += 2;
         continue;
       }
-      // Backslash before non-special char — emit backslash literally
       result.push({ type: "text", content: "\\" });
       i++;
       continue;
     }
 
-    // Inline code
     if (text[i] === "`" && !isTripleBacktick(text, i)) {
-      // Find closing backtick, skipping escaped ones.
-      // Limit search distance to avoid overly-greedy matches on malformed input.
+      // limit search distance to avoid greedy matches on malformed input
       let end = -1;
       for (let j = i + 1; j < text.length && j < i + 200; j++) {
         if (text[j] === "`") {
@@ -1010,7 +895,6 @@ function parseInline(text: string): MdInline[] {
         }
       }
       if (end !== -1 && end > i + 1) {
-        // Extract content and process escape sequences inside it
         const rawContent = text.slice(i + 1, end);
         const content = processInlineEscapes(rawContent);
         result.push({ type: "inline_code", content });
@@ -1019,7 +903,6 @@ function parseInline(text: string): MdInline[] {
       }
     }
 
-    // Image: ![alt](url)
     if (text[i] === "!" && text[i + 1] === "[") {
       const img = parseImageOrLink(text, i, true);
       if (img) {
@@ -1029,7 +912,6 @@ function parseInline(text: string): MdInline[] {
       }
     }
 
-    // Link: [text](url)
     if (text[i] === "[") {
       const link = parseImageOrLink(text, i, false);
       if (link) {
@@ -1039,7 +921,6 @@ function parseInline(text: string): MdInline[] {
       }
     }
 
-    // Bold+Italic: ***text*** or ___text___
     if (text.slice(i, i + 3) === "***") {
       const boldItalic = parseEmphasis(text, i, 3, "bold_italic");
       if (boldItalic) {
@@ -1049,7 +930,6 @@ function parseInline(text: string): MdInline[] {
       }
     }
 
-    // Strikethrough: ~~text~~
     if (text.slice(i, i + 2) === "~~") {
       const strike = parseEmphasis(text, i, 2, "strikethrough");
       if (strike) {
@@ -1059,7 +939,6 @@ function parseInline(text: string): MdInline[] {
       }
     }
 
-    // Bold: **text** or __text__
     if (text.slice(i, i + 2) === "**") {
       const bold = parseEmphasis(text, i, 2, "bold");
       if (bold) {
@@ -1069,11 +948,9 @@ function parseInline(text: string): MdInline[] {
       }
     }
 
-    // Italic: *text* or _text_
-    // For underscores, require word boundaries so "load_skill" doesn't become italic
+    // underscores require word boundaries so "load_skill" doesn't become italic
     if (text[i] === "*" || text[i] === "_") {
       if (text[i] === "_" && isWordChar(text[i - 1])) {
-        // Underscore preceded by word char — not an emphasis opener
         result.push({ type: "text", content: text[i]! });
         i++;
         continue;
@@ -1086,7 +963,6 @@ function parseInline(text: string): MdInline[] {
       }
     }
 
-    // Plain text — accumulate until next special char
     const specialChars = "`![*~_\\";
     let nextSpecial = text.length;
     for (const ch of specialChars) {

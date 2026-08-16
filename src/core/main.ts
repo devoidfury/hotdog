@@ -1,5 +1,5 @@
 #!/usr/bin/env bun
-// CLI entry point — wired to the extension architecture.
+// CLI entry point.
 
 import {
   createHooks,
@@ -52,19 +52,7 @@ import { readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 
-// ── Extension Loading ────────────────────────────────────────────────────────
-
-/**
- * Load all extensions into the core based on config settings.
- * Extensions are auto-discovered from configured paths and loaded in
- * dependency order.
- *
- * @param core - The core object with hooks, extensions, etc.
- * @param options - Loading options.
- * @param options.taskManager - TaskManager instance for subagent tools.
- * @param options.config - Resolved config with extension settings.
- * @returns Loaded extension instances.
- */
+// Load extensions in dependency order, then fire TOOL_METADATA and validate service contracts.
 async function loadExtensions(
   core: CoreInfrastructure,
   {
@@ -77,7 +65,6 @@ async function loadExtensions(
 ): Promise<ExtensionInstance[]> {
   const loaded: ExtensionInstance[] = [];
 
-  // Discover extensions from config (returns sorted by dependency order)
   const extensionPaths = (config?.extensionPaths as string[]) || ["builtins"];
   const extensionAutoload = (config?.extensionAutoload as boolean) ?? false;
   const extensionsList =
@@ -91,9 +78,7 @@ async function loadExtensions(
   );
 
   for (const ext of extensionsToLoad) {
-    if (core.extensions.has(ext.name)) {
-      continue; // already loaded, skip
-    }
+    if (core.extensions.has(ext.name)) continue;
     const extInstance = await core.extensions.load(
       ext.name,
       ext.path ?? "",
@@ -106,16 +91,14 @@ async function loadExtensions(
     if (extInstance) loaded.push(extInstance);
   }
 
-  // Notify TOOL_METADATA hook after all tools are registered.
-  // This allows extensions to react to the complete set of available tools.
+  // Fired once, after all tools are registered, so extensions see the complete set.
   const toolMetadataMap = new Map<string, ToolMetadata | undefined>();
   for (const [name, tool] of core.toolRegistry.getAll()) {
     toolMetadataMap.set(name, tool.metadata);
   }
   core.hooks.notifyHooks(HOOKS.TOOL_METADATA, { tools: toolMetadataMap } as ToolMetadataPayload);
 
-  // Validate service contracts after all extensions are loaded.
-  // Only validate extensions that were actually loaded (create() returned non-null).
+  // Only validate extensions that were actually loaded.
   const loadedExtensions = extensionsToLoad.filter((ext) =>
     core.extensions.has(ext.name),
   );
@@ -124,32 +107,14 @@ async function loadExtensions(
     core.services,
   );
   for (const err of serviceErrors) {
-    // Missing services will cause runtime crashes — surface them as errors
+    // Missing services crash at runtime, so surface them as errors.
     logger.error(`[services] ${err.message}`);
   }
 
   return loaded;
 }
 
-// ── Core Infrastructure ─────────────────────────────────────────────────────
-
-/**
- * Create the core infrastructure: hooks, tool registry, extension loader.
- *
- * @param config - Configuration object.
- * @param configRegistry - Optional config registry for extension CLI flags & config params.
- * @param cliSubcommandRegistry - Optional CLI subcommand registry.
- * @param options - Optional additional options.
- * @param options.hooks - Pre-created hook system.
- * @param options.profileName - Current profile name.
- * @param options.profile - Resolved profile object (includes manager flag, whitelistTools, etc.).
- * @param options.buildConfig - Optional buildConfig function for subcommand handlers.
- * @returns Core object with hooks, toolRegistry, extensions, config.
- */
-/**
- * Core infrastructure type — the internal core object that powers both
- * the extension loader and the CoreContext passed to extensions.
- */
+// The internal core object that powers the extension loader and is passed to extensions as CoreContext.
 export interface CoreInfrastructure extends CoreContext {
   buildConfig?: typeof buildConfig;
 }
@@ -170,20 +135,17 @@ function createCore(
   const services = createServiceRegistry();
   const completion = createCompletionService();
 
-  // Merge profile info into config so extensions can access it
-  // This must be done BEFORE creating the extension loader, because
-  // extensions access core.config.profileDef during create() (e.g., subagents
-  // checks core.config.profileDef.manager to decide whether to register tools).
+  // Must happen before the extension loader is created: extensions read
+  // core.config.profileDef during create() (e.g., subagents checks .manager
+  // to decide whether to register tools).
   const coreConfig: CoreConfigWithExtensions = {
     ...config,
     profileName: options.profileName || config.profileName || "default",
     profileDef: options.profile || config.profileDef,
   };
 
-  // Build the core object first, then pass it to the ExtensionLoader.
-  // This ensures extensions receive the same core reference (including resolved)
-  // that main() uses, rather than a separate LoaderCore without resolved.
-  // Note: extensions is set below to break the circular dependency.
+  // Extensions is set after construction to break the circular dependency;
+  // the loader must receive this same core reference main() uses.
   const core = {
     hooks,
     toolRegistry,
@@ -202,12 +164,7 @@ function createCore(
   return core;
 }
 
-// ── Main ─────────────────────────────────────────────────────────────────────
-
-/**
- * Build the full config in a single pass: CLI + file + env + extension layers.
- * This replaces the previous three-step process (minimal → buildConfig → loadConfig).
- */
+// Single-pass config build: CLI + file + env + profile + extension layers.
 async function buildFullConfig(
   cli: CliArgv,
   configRegistry: ConfigRegistry,
@@ -219,11 +176,9 @@ async function buildFullConfig(
 }> {
   const extParams = configRegistry.getConfigParams();
 
-  // Single config load with extension params baked in
   const configDir = resolveConfigDir(cli.configDir ?? undefined);
   const config = await loadConfig(cli.config ?? undefined, cli.configDir ?? undefined, extParams);
 
-  // Build the full resolved config (CLI + file + env + profile layers) using the loaded config
   const resolved = await buildAgentConfig({
     cli,
     config: config as CoreConfigWithExtensions,
@@ -238,7 +193,6 @@ async function buildFullConfig(
   );
   resolved.modelRegistry = modelRegistry;
 
-  // Resolve extension-specific config keys through their declared layers
   const extContext: ResolutionContext = {
     cli,
     config: config as Record<string, unknown>,
@@ -250,7 +204,6 @@ async function buildFullConfig(
   const resolvedExtConfig = resolveExtensionConfig(extParams, extContext);
   Object.assign(config as Record<string, unknown>, resolvedExtConfig);
 
-  // Validate against core + extension schemas
   const extensionSchemas = extParams
     .filter((p) => p.schema)
     .map((p) => ({ key: p.key, schema: p.schema }));
@@ -266,19 +219,16 @@ async function buildFullConfig(
 }
 
 export async function main(): Promise<number> {
-  // ── Create hooks + logger early (needed before any error output) ────────
+  // Hooks + logger must exist before any error output can happen.
   const hooks = createHooks();
   const minLevel = resolveLogLevel();
   const logTarget = resolveLogTarget();
   initializeLogger({ hooks, minLevel, target: logTarget });
 
-  // ── Create config registry for extension CLI flags & config params ──────
   const configRegistry = new ConfigRegistry();
 
-  // Register core CLI flags from schema (single source of truth)
+  // Core CLI flags come from the schema; these inverses don't map to a single key.
   configRegistry.registerCliFlags(cliFlagsFromSchema(CONFIG_SCHEMA));
-
-  // Register inverse flags not in schema (schema has one cliFlag per key)
   configRegistry.registerCliFlags([
     { long: "--hide-tools", type: "boolean", description: "Hide tool calls" },
     {
@@ -289,15 +239,11 @@ export async function main(): Promise<number> {
     { long: "--no-colors", type: "boolean", description: "Disable colors" },
   ]);
 
-  // ── Build minimal config (defaults only, for extension discovery) ───────
-  // We need this early to discover extensions and read their CLI flags /
-  // subcommand declarations from extension.json without loading code.
+  // Defaults-only config, needed early to read extension.json metadata
+  // (CLI flags, subcommands, config params) without loading extension code --
+  // this is what makes `--help` and subcommand discovery work pre-parse.
   const minimalConfig = await loadConfig(undefined);
 
-  // ── Discover extensions from metadata (no code loading) ─────────────────
-  // Reads extension.json files to extract CLI flags, subcommand declarations, and config params.
-  // Config params from schema are registered automatically, making extension.json the source of truth for extension configuration.
-  // This enables `--help` and subcommand discovery without loading any extension code.
   const cliSubcommandRegistry = createSubcommandRegistry();
   await registerExtensionMetadata(
     minimalConfig as CoreConfigWithExtensions,
@@ -305,7 +251,6 @@ export async function main(): Promise<number> {
     cliSubcommandRegistry,
   );
 
-  // ── Parse CLI args with extension flags ─────────────────────────────────
   let cli;
   try {
     cli = parseArgs(configRegistry, cliSubcommandRegistry.names());
@@ -335,7 +280,6 @@ export async function main(): Promise<number> {
     throw e;
   }
 
-  // ── Early exit: --version (no config needed) ────────────────────────────
   if (cli.version) {
     const pkg = JSON.parse(
       await readFile(
@@ -347,7 +291,6 @@ export async function main(): Promise<number> {
     return 0;
   }
 
-  // ── Early exit: --help (only needs extension metadata, already loaded) ───
   if (cli.help) {
     const subcommandHelp = cliSubcommandRegistry.generateHelpText();
     const fullHelp = generateHelpText(configRegistry);
@@ -355,7 +298,6 @@ export async function main(): Promise<number> {
     return 0;
   }
 
-  // ── Full config build: single merge pass (CLI + file + env + extension layers) ──
   const { resolved, config, modelRegistry, providers } = await buildFullConfig(cli as CliArgv, configRegistry);
 
   // Warn if no AI URL is configured
@@ -369,7 +311,6 @@ export async function main(): Promise<number> {
   // Enable hook tracing if configured
   hooks.trace = resolved.hookTrace as boolean | HookTraceOptions;
 
-  // ── Create core infrastructure ──────────────────────────────────────────
   const core = createCore(config, configRegistry, cliSubcommandRegistry, {
     hooks,
     profileName: resolved.profileName,
@@ -377,25 +318,18 @@ export async function main(): Promise<number> {
     buildConfig,
   });
 
-  // Attach resolved config to core so extensions can access it
   core.resolved = resolved as ResolvedConfig;
 
-  // ── Load extensions ──────────────────────────────────────────────────────
-  // Extensions register their handlers in create() via cliSubcommandRegistry.register().
   await loadExtensions(core, { taskManager: null, config });
 
-  // Emit CLI subcommand registration hook so extensions can register their handlers.
-  // Subcommand metadata (description, options) was already registered from extension.json;
-  // this hook allows extensions to attach the actual handler functions.
+  // Metadata already came from extension.json; this hook lets extensions attach handler functions.
   core.hooks.notifyHooks(
     HOOKS.CLI_SUBCOMMANDS_REGISTER,
     core.cliSubcommandRegistry,
   );
 
-  // Emit CLI_ARGS_PARSED hook after extensions are loaded, before performing any actions.
   core.hooks.notifyHooks(HOOKS.CLI_ARGS_PARSED, { cli });
 
-  // ── Subcommand dispatch ─────────────────────────────────────────────────
   if (cli.subcommand) {
     const subcommandDef = core.cliSubcommandRegistry.get(cli.subcommand);
     if (subcommandDef && subcommandDef.handler) {

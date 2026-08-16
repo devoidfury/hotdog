@@ -1,7 +1,5 @@
-// Hook system — the foundation for the extension architecture.
-// Extensions register handlers via `on()`. The core notifies hooks via:
-//   notifyHooks(hookName, data)         — fire-and-forget (handles both sync and async handlers)
-//   runHookPipeline(hookName, data, opts?) — async, sequential, returns results
+// Hook system. notifyHooks() is fire-and-forget; runHookPipeline() runs
+// handlers sequentially and accumulates their return values.
 
 import { formatError } from "./error.ts";
 import { logger } from "./logger.ts";
@@ -11,110 +9,59 @@ import type { ImageAttachment } from "./context/message.ts";
 import type { ModelConfig } from "./config/providers.ts";
 import type { ToolDef } from "./extensions/tool-registry.ts";
 
-// ── Gate Action Discriminated Unions ─────────────────────────────────────────
-
-/**
- * Result returned by gate hooks (TOOL_CALL, INPUT, etc.).
- * Controls whether processing continues, is modified, or is blocked.
- */
 export type GateAction =
   | { action: "continue" }
   | { action: "modify"; input?: string; result?: unknown }
   | { action: "block"; result: unknown }
   | { action: "handled" };
 
-/**
- * Type guard: checks if a GateAction is a "block" action.
- */
 export function isGateActionBlock(action: GateAction | undefined | null): action is Extract<GateAction, { action: "block" }> {
   return action?.action === "block";
 }
 
-/**
- * Type guard: checks if a GateAction is a "modify" action.
- */
 export function isGateActionModify(action: GateAction | undefined | null): action is Extract<GateAction, { action: "modify" }> {
   return action?.action === "modify";
 }
 
-/**
- * Type guard: checks if a GateAction is a "continue" action.
- */
 export function isGateActionContinue(action: GateAction | undefined | null): action is Extract<GateAction, { action: "continue" }> {
   return action?.action === "continue";
 }
 
-/**
- * Type guard: checks if a GateAction is a "handled" action.
- */
 export function isGateActionHandled(action: GateAction | undefined | null): action is Extract<GateAction, { action: "handled" }> {
   return action?.action === "handled";
 }
 
-/**
- * Result returned by the CONTEXT hook pipeline.
- * Allows handlers to replace the messages array.
- */
 export type ContextHookResult = { messages: Message[] };
 
-/**
- * Result returned by the PROVIDER_REQUEST hook pipeline.
- * Allows handlers to replace messages, modelConfig, or toolDefs.
- */
 export type ProviderRequestHookResult = {
   messages?: Message[];
   modelConfig?: ModelConfig;
   toolDefs?: ToolDef[];
 };
 
-/**
- * Result returned by the TOOL_RESULT hook pipeline.
- * Allows handlers to replace the tool result before it reaches the LLM.
- */
 export type ToolResultHookResult = { result: unknown };
 
-/**
- * Result returned by the INPUT hook pipeline.
- * Allows handlers to transform input text/images or short-circuit entirely.
- */
 export type InputHookResult =
   | { action: "continue" }
   | { action: "transform"; text: string; images?: ImageAttachment[] }
   | { action: "handled" };
 
-/**
- * Type guard: checks if an InputHookResult is a "transform" action.
- */
 export function isInputTransform(result: InputHookResult | undefined | null): result is Extract<InputHookResult, { action: "transform" }> {
   return result?.action === "transform";
 }
 
-/**
- * Type guard: checks if an InputHookResult is a "handled" action.
- */
 export function isInputHandled(result: InputHookResult | undefined | null): result is Extract<InputHookResult, { action: "handled" }> {
   return result?.action === "handled";
 }
 
-/**
- * Chunk returned by the SYSTEM_PROMPT_BUILD hook.
- * Chunks are sorted by priority and rendered into the system prompt template.
- */
 export type SystemPromptChunk = {
   name: string;
   priority: number;
   content: string;
 };
 
-// ── Trace Helpers ────────────────────────────────────────────────────────────
-
-/**
- * Summarize a hook handler return value for trace output.
- * Keeps output short and readable while showing the action taken.
- */
 function _summarizeResult(value: unknown): string {
   if (value == null) return "null";
-  // Error objects — show the message, not internal properties
   if (value instanceof Error) return `Error: ${value.message}`;
   if (typeof value !== "object") return JSON.stringify(value);
   if (Array.isArray(value)) return `Array(${value.length})`;
@@ -127,7 +74,6 @@ function _summarizeResult(value: unknown): string {
     if (extra.length === 0) return `{ action: ${action} }`;
     return `{ action: ${action}, ${extra.join(", ")} }`;
   }
-  // Generic object summary
   if (keys.length <= 3) return `{ ${keys.join(", ")} }`;
   return `{ ${keys.slice(0, 3).join(", ")}, +${keys.length - 3} }`;
 }
@@ -141,31 +87,17 @@ export interface HookHandlerEntry {
   priority: number;
 }
 
-/**
- * Hook handler function type, typed by hook name.
- * Uses HookPayloads to derive the correct payload type for each hook.
- * For known hook names, the data parameter is automatically typed.
- * For unknown hook names, data is `unknown`.
- * @template H — The hook name. If it's a key of HookPayloads, data is typed.
- */
+// Handler data is typed by hook name where known, `unknown` otherwise.
 export type HookHandler<H extends string> = (
   data: H extends keyof HookPayloads ? HookPayloads[H] : unknown,
 ) => void | Promise<void> | unknown;
 
-/**
- * Fallback handler type for hooks not in HookPayloads.
- * Used for backward compatibility and custom hooks.
- */
 export type HookHandlerAny = (data: unknown) => void | Promise<void> | unknown;
 
 export interface HookPipelineOptions {
   shouldStop?: (result: unknown) => boolean;
 }
 
-/**
- * Result of running a hook pipeline.
- * @template R — The expected return type of handlers in this pipeline.
- */
 export interface HookPipelineResult<R = unknown, D = unknown> {
   results: Array<{ result: R; source: string | null }>;
   lastResult: R | undefined;
@@ -190,17 +122,7 @@ export class HookSystem {
     this.#handlerCounter = 0;
   }
 
-  /**
-   * Register a handler for a hook.
-   * @param hookName - The hook name (e.g., "context:message").
-   *   When using a known hook name from HookPayloads, the handler's
-   *   data parameter is automatically typed.
-   * @param handler - Function(data) or async Function(data).
-   *   The data parameter is typed based on the hook name.
-   * @param source - Optional source identifier (e.g., extension name).
-   *   Used for tracking which extension registered a handler.
-   * @returns A removal function that unregisters this handler.
-   */
+  // Returns a removal function.
   on<H extends string>(
     hookName: H,
     handler: HookHandler<H>,
@@ -221,11 +143,9 @@ export class HookSystem {
     const id = ++this.#handlerCounter;
     handlers.push({ id, handler: handler as HookHandlerAny, source, priority });
 
-    // Sort handlers by priority descending (highest priority first).
-    // Stable sort is used by default in modern JS engines.
+    // Priority descending; Array.prototype.sort is stable, so ties keep insertion order.
     handlers.sort((a, b) => b.priority - a.priority);
 
-    // Return a removal function
     return () => {
       const idx = handlers.findIndex((h) => h.id === id);
       if (idx !== -1) {
@@ -234,12 +154,7 @@ export class HookSystem {
     };
   }
 
-  /**
-   * Remove a specific handler from a hook by its function reference.
-   * @param hookName
-   * @param handler - The exact handler function to remove.
-   * @returns true if handler was found and removed.
-   */
+  // Remove a handler by function reference. Returns true if found.
   off(hookName: string, handler: HookHandlerAny): boolean {
     const handlers = this.#hooks.get(hookName);
     if (!handlers) return false;
@@ -251,13 +166,8 @@ export class HookSystem {
     return false;
   }
 
-  /**
-   * Notify hooks (fire-and-forget).
-   * All handlers are invoked synchronously in order. Return values are ignored.
-   * Handlers may return Promises; these are not awaited but errors are caught and logged.
-   * @param hookName - The hook name. Data is type-checked against HookPayloads.
-   * @param data - The payload, typed based on the hook name.
-   */
+  // Fire-and-forget: handlers run in order, return values ignored. Async
+  // handlers are not awaited; their errors are caught and logged.
   notifyHooks<H extends string>(
     hookName: H,
     data: H extends keyof HookPayloads ? HookPayloads[H] : unknown,
@@ -273,9 +183,7 @@ export class HookSystem {
       try {
         const result = entry.handler(data);
 
-        // Check if the handler returned a Promise
         if (isPromise(result)) {
-          // Attach error handling to catch async errors without blocking
           (result as Promise<unknown>).then(
             () => {
               if (doTrace && !this._isTraceDisabled(entry.source)) {
@@ -298,7 +206,6 @@ export class HookSystem {
             },
           );
         } else {
-          // Synchronous handler completed
           if (doTrace && !this._isTraceDisabled(entry.source)) {
             const ms = Date.now() - t0;
             const label = entry.source ? ` (${entry.source})` : "";
@@ -308,7 +215,6 @@ export class HookSystem {
           }
         }
       } catch (e) {
-        // Synchronous error from the handler call itself
         if (doTrace && !this._isTraceDisabled(entry.source)) {
           const ms = Date.now() - t0;
           const label = entry.source ? ` (${entry.source})` : "";
@@ -321,20 +227,7 @@ export class HookSystem {
     }
   }
 
-  /**
-   * Run a hook pipeline sequentially.
-   * Handlers run one at a time, each seeing the accumulated state.
-   *
-   * @param hookName - The hook name. Data is type-checked against HookPayloads.
-   * @param data — Mutable data object passed to each handler, typed by hook name.
-   * @param opts
-   * @param opts.shouldStop — Called with each handler's return value.
-   *   Return true to stop processing further handlers.
-   * @returns results — all non-undefined return values from handlers
-   *   lastResult — the last handler's return value (or undefined)
-   *   stopped — true if shouldStop caused early termination
-   *   data — the (possibly mutated) data object, same type as input
-   */
+  // Sequential pipeline: each handler sees prior transformations; returns all results.
   async runHookPipeline<R = unknown, H extends string = keyof HookPayloads>(
     hookName: H,
     data: H extends keyof HookPayloads ? HookPayloads[H] : unknown,
@@ -391,10 +284,7 @@ export class HookSystem {
     return { results, lastResult, stopped, data };
   }
 
-  /**
-   * Remove all handlers for a hook (or all hooks if no name given).
-   * @param hookName - Optional hook name to clear.
-   */
+  // Clear one hook, or all hooks if no name given.
   clear(hookName?: string): void {
     if (hookName) {
       this.#hooks.delete(hookName);
@@ -403,27 +293,14 @@ export class HookSystem {
     }
   }
 
-  /**
-   * Get the number of registered handlers for a hook.
-   * @param hookName
-   * @returns number of handlers
-   */
   handlerCount(hookName: string): number {
     return (this.#hooks.get(hookName) || []).length;
   }
 
-  /**
-   * Get all registered hook names.
-   * @returns array of hook names
-   */
   hookNames(): string[] {
     return Array.from(this.#hooks.keys());
   }
 
-  /**
-   * Enable/disable trace logging for hooks.
-   * @param value — boolean or HookTraceOptions
-   */
   get trace(): boolean | HookTraceOptions {
     return this.#trace;
   }
@@ -431,15 +308,10 @@ export class HookSystem {
     this.#trace = value;
   }
 
-  /**
-   * Get the internal handler map (exposed for testing).
-   * @returns Map of hook name → handler entries
-   */
+  /** @internal Exposed for testing. */
   get hooksMap(): Map<string, HookHandlerEntry[]> {
     return this.#hooks;
   }
-
-  // ── Private helpers ──────────────────────────────────────────────────────
 
   private _shouldTrace(hookName: string): boolean {
     if (hookName === "log") return false;
@@ -466,150 +338,80 @@ export class HookSystem {
   }
 }
 
-// ── Standard Hook Names ──────────────────────────────────────────────────────
-
-/**
- * Standard hook names used by the core.
- * Each entry documents the hook name and the shape of its data payload.
- */
+// Standard hook names. Payload and return shapes live in HookPayloads (extensions/types.ts).
 export const HOOKS = {
-  // Session lifecycle
   SESSION_CREATE: "session:create",
   SESSION_SWAP: "session:swap",
   SESSION_SERIALIZE: "session:serialize",
   SESSION_DESERIALIZE: "session:deserialize",
   SESSION_RESTORE_ACTIVE: "session:restoreActive",
 
-  // Tool context enrichment — extensions add fields to tool context
   AGENT_TOOL_CONTEXT: "agent:toolContext",
 
-  // Model changes
   MODEL_CHANGE: "model:change",
 
-  // Message flow
   MESSAGES_AFTER_LLM: "messages:afterLLM",
 
-  // Tool execution
   TOOLS_REGISTER: "tools:register",
   TOOL_METADATA: "tool:metadata",
   TOOL_BEFORE_EXECUTE: "tool:beforeExecute",
-
-  // Service registration — extensions register abstract service implementations here.
-  // Fired synchronously during extension load so services are available to
-  // downstream extensions. Handler receives the ServiceRegistry instance.
+  // Fired synchronously during extension load so services are available to downstream extensions.
   SERVICES_REGISTER: "services:register",
   TOOL_AFTER_EXECUTE: "tool:afterExecute",
   LOOP_DETECTED: "loop:detected",
 
-  // Context management
   CONTEXT_MESSAGE: "context:message",
   CONTEXT_REPLACED: "context:replaced",
 
-  // System prompt — handlers return a chunk object { name, priority, content }
-  // or an array of chunk objects. The agent collects all chunks, sorts by priority,
-  // and renders them into the system prompt template.
   SYSTEM_PROMPT_BUILD: "systemPrompt:build",
 
-  // Commands — generic command system (not UI-specific)
   COMMAND_DISPATCH: "command:dispatch",
   COMMANDS_REGISTER: "commands:register",
 
-  // Output
   OUTPUT_EVENT: "output:event",
 
-  // Shutdown — extensions register cleanup handlers here
   SHUTDOWN_CLEANUP: "shutdown:cleanup",
 
-  // CLI subcommand registration — extensions register subcommand handlers here
   CLI_SUBCOMMANDS_REGISTER: "cli:subcommandsRegister",
 
-  // CLI — emitted after CLI args are parsed, before subcommand dispatch
+  // Emitted after CLI args are parsed, before subcommand dispatch.
   CLI_ARGS_PARSED: "cli:argsParsed",
 
-  // Input preprocessing — run before user input reaches the agent.
-  // Handlers can transform the text, attach images, or short-circuit entirely.
-  // Result: { action: "continue" } | { action: "transform", text, images? } | { action: "handled" }
-  // Uses runHookPipeline with shouldStop to stop on "handled".
+  // Pipeline; stops on "handled".
   INPUT: "input",
 
-  // Context modification — run sequentially before each LLM call.
-  // Handlers receive { messages, agent } and can return { messages } to replace.
-  // Runs via runHookPipeline so each handler sees prior transformations.
+  // Pipeline run before each LLM call; handlers can replace { messages }.
   CONTEXT: "context",
 
-  // Tool call gate — BLOCK or MUTATE tool input arguments before execution.
-  // Run sequentially via runHookPipeline. Handlers receive
-  // { toolCallId, toolName, input, agent } and can return:
-  //   { action: "continue" }       — proceed with original input
-  //   { action: "modify", input }  — proceed with modified input
-  //   { action: "block", result }  — skip execution, use provided result
+  // Gate pipeline: continue / modify input / block with a provided result.
   TOOL_CALL: "tool:call",
 
-  // Tool result — MODIFY tool output before it reaches the LLM context.
-  // Run sequentially via runHookPipeline. Handlers receive
-  // { toolCallId, toolName, result, input, agent } and can return:
-  //   { result } — replace the result (any value: string, ToolResult, object)
+  // Pipeline: handlers can replace the tool result before it reaches context.
   TOOL_RESULT: "tool:result",
 
-  // Provider request — run sequentially BEFORE the HTTP request to the LLM.
-  // Handlers receive { messages, modelConfig, toolDefs, agent } and can return:
-  //   { messages } — replace the messages array
-  //   { modelConfig } — replace the model config
-  //   { toolDefs } — replace the tool definitions
-  // Runs via runHookPipeline so each handler sees prior transformations.
-  // Enables: request logging, last-minute message injection, request modification.
+  // Pipeline run before each LLM HTTP request; can replace messages/modelConfig/toolDefs.
   PROVIDER_REQUEST: "provider:request",
 
-  // Provider response — emitted AFTER the LLM response is fully received.
-  // Handlers receive { response, modelConfig, agent } as notification.
-  // Enables: response logging, metrics, cost tracking, telemetry.
   PROVIDER_RESPONSE: "provider:response",
 
-  // Turn start — emitted at the beginning of each agent loop iteration.
-  // Handlers receive { turnIndex, timestamp, agent } as notification.
-  // Enables: per-turn metrics, timing, analytics.
   TURN_START: "turn:start",
 
-  // Turn end — emitted at the end of each agent loop iteration, and always
-  // emitted with stopped: true when the agent exits (even on cancellation).
-  // Handlers receive { turnIndex, message, toolResults, stopped, cancelled, agent } as notification.
-  // - message: the assistant's text response (may be empty if only tool calls or cancelled)
-  // - toolResults: array of { toolName, input, result } for tools executed this turn
-  // - stopped: boolean indicating if the agent has finished processing (true) or
-  //   will continue to the next iteration (false)
-  // - cancelled: boolean indicating if processing ended due to cancellation (default: false)
-  // Enables: per-turn analysis, cost tracking, audit logging, UI prompt control.
+  // Emitted at the end of every agent loop iteration, and always with stopped: true
+  // when the agent exits (even on cancellation).
   TURN_END: "turn:end",
 
-  // Tool metrics — notification hook fired after each individual tool execution.
-  // Handlers receive { toolName, toolCallId, durationMs, success, resultSize, input, agent }
-  // as notification (not modifiable — use runHookPipeline, not fire-and-forget).
-  // Enables: telemetry, performance profiling, cost tracking, anomaly detection.
   TOOL_METRICS: "tool:metrics",
 
-  // Logging — emitted by the logger module, intercepted by handlers.
-  // Payload: { level: "debug"|"info"|"warn"|"error", message: string, metadata?: object }
   LOG: "log",
 
-  // Completion request — fired when the UI requests tab completions.
-  // Payload: { ctx: CompletionContext, timeoutMs?: number }
-  // Handlers return CompletionOption[] or null.
   COMPLETION_REQUEST: "completion:request",
 } as const;
 
-/**
- * Extension capability constants.
- * Extensions can export a `provides` array declaring what they offer.
- */
 export const EXTENSION_PROVIDES = {
-  CLI_SUBCOMMANDS: "cli:subcommands", // Extension provides CLI subcommands
-  TOOLS: "tools", // Extension provides tools
+  CLI_SUBCOMMANDS: "cli:subcommands",
+  TOOLS: "tools",
 } as const;
 
-/**
- * Create a new HookSystem instance.
- * @returns HookSystem
- */
 export function createHooks(): HookSystem {
   return new HookSystem();
 }

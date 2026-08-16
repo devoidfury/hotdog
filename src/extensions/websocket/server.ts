@@ -1,5 +1,4 @@
-// WebSocket server — session management and WS message routing.
-// Provides createWsServer() factory and SessionRegistry class.
+// WebSocket server: session registry + WS message routing.
 
 import crypto from "node:crypto";
 import { HOOKS, createHooks } from "../../core/hooks.ts";
@@ -25,8 +24,6 @@ import {
 import { AgentError } from "../../core/error.ts";
 import { logger } from "../../core/logger.ts";
 
-// ── Types ───────────────────────────────────────────────────────────────────
-
 interface SessionMetadata {
   profile: string;
   model: string;
@@ -35,7 +32,8 @@ interface SessionMetadata {
   connectedClients: number;
   questionStrategy: string;
   questionTimeoutSecs: number;
-  userMessageCount: number; // Track user input messages for confirmation dialog
+  // Drives the profile-switch confirmation prompt.
+  userMessageCount: number;
 }
 
 interface CreateSessionOptions {
@@ -48,7 +46,8 @@ interface CreateSessionOptions {
 interface SwitchProfileOptions {
   sessionId: string;
   profileName: string;
-  force?: boolean; // Skip confirmation check
+  // Bypass the "has user messages" confirmation check.
+  force?: boolean;
 }
 
 interface SessionRegistryOptions {
@@ -95,16 +94,10 @@ export type HotdogServerSocket<T = undefined> = Bun.ServerWebSocket<T> & {
   authToken?: string;
 };
 
-// ── SessionRegistry ─────────────────────────────────────────────────────────
-
-/**
- * Registry of agent sessions backed by SessionManager.
- * Each session has an agent, a message bus (owned by SessionManager),
- * and WebSocketChannel instances for connected clients.
- *
- * Sessions persist even when no clients are connected. Idle sessions
- * are cleaned up after a configurable timeout.
- */
+// Registry of agent sessions backed by SessionManager. Each session has an
+// agent, a message bus (owned by SessionManager), and WebSocketChannel
+// instances for connected clients. Sessions persist with no clients; idle
+// ones are cleaned up after a timeout.
 export class SessionRegistry {
   #sessionManager: SessionManager;
   #buildAgent: (config: {
@@ -116,13 +109,10 @@ export class SessionRegistry {
   #questionStrategy: string;
   #cleanupTimer: ReturnType<typeof setInterval> | null = null;
   #timeoutMin: number;
-  // All active WebSocket connections — used for broadcasting events to all clients.
+  // All active connections -- used for broadcasting.
   #allConnections = new Set<HotdogServerSocket<unknown>>();
-  // Per-session metadata
   #metadata: Map<string, SessionMetadata>;
-  // Per-session WebSocketChannel instances
   #channels: Map<string, Set<WebSocketChannel>>;
-  // Available profiles
   #profiles: Record<string, SwitchProfile>;
 
   constructor({
@@ -141,9 +131,8 @@ export class SessionRegistry {
     this.#channels = new Map();
     this.#profiles = profiles;
 
-    // Create SessionManager — passes llmClient through buildAgent config
     this.#sessionManager = new SessionManager({
-      hooks: createHooks(), // No-op hooks for now
+      hooks: createHooks(),
       extensions: null,
       buildAgent: buildAgent as (
         config: Record<string, unknown>,
@@ -152,55 +141,38 @@ export class SessionRegistry {
     });
   }
 
-  /**
-   * Register a WebSocket connection for broadcast purposes.
-   */
   registerConnection(ws: HotdogServerSocket<unknown>): void {
     this.#allConnections.add(ws);
   }
 
-  /**
-   * Unregister a WebSocket connection.
-   */
   unregisterConnection(ws: HotdogServerSocket<unknown>): void {
     this.#allConnections.delete(ws);
   }
 
-  /**
-   * Broadcast a JSON message to all connected WebSocket clients.
-   * Silently skips connections that are closed or error.
-   */
+  // Broadcast to all connected clients; closed connections are skipped silently.
   broadcast(msg: Record<string, unknown>): void {
     const payload = JSON.stringify(msg);
     for (const ws of this.#allConnections) {
       try {
         if (ws.readyState === 1) {
-          // WebSocket.OPEN
           ws.send(payload);
         }
       } catch {
-        // Connection error — connection will be cleaned up on close
+        // Cleaned up on close.
       }
     }
   }
 
-  /**
-   * Safely send a message to a WebSocket, ignoring errors if closed.
-   */
   static sendSafe(ws: HotdogServerSocket<unknown>, msg: Record<string, unknown>): void {
     try {
       if (ws.readyState === 1) {
         ws.send(JSON.stringify(msg));
       }
     } catch {
-      // Connection closed or erroring — ignore
+      // Connection closed or erroring -- ignore.
     }
   }
 
-  /**
-   * Create a new session with its own agent.
-   * The SessionManager creates the internal MessageBus automatically.
-   */
   async create({
     profile,
     model,
@@ -212,7 +184,7 @@ export class SessionRegistry {
   }> {
     const proposedSessionId = crypto.randomUUID();
 
-    // Build the agent — pass proposed sessionId but use the agent's actual sessionId
+    // The agent may assign its own sessionId; use whatever it ends up with.
     const agent = await this.#buildAgent({
       model,
       sessionId: proposedSessionId,
@@ -220,7 +192,6 @@ export class SessionRegistry {
     });
     const actualSessionId = agent.sessionId || proposedSessionId;
 
-    // Store metadata under the agent's actual sessionId
     this.#metadata.set(actualSessionId, {
       profile: profile || "default",
       model: agent.model || "",
@@ -232,7 +203,6 @@ export class SessionRegistry {
       userMessageCount: 0,
     });
 
-    // Register with SessionManager — this creates the MessageBus and wires the sink
     this.#sessionManager.registerAgent(agent, {
       profile: profile || "default",
       model,
@@ -241,23 +211,16 @@ export class SessionRegistry {
     return { sessionId: actualSessionId, agent };
   }
 
-  /**
-   * Get a session by ID.
-   */
   get(
     sessionId: string,
   ): { agent: AgentLike; metadata: SessionMetadata } | null {
     const metadata = this.#metadata.get(sessionId);
     if (!metadata) return null;
-    // Look up agent from the store — try by sessionId first, then from SessionStore
     const agent = this.#sessionManager.getAgentBySessionId(sessionId);
     if (!agent) return null;
     return { agent, metadata };
   }
 
-  /**
-   * List all sessions with metadata.
-   */
   list(): Array<{
     id: string;
     profile: string;
@@ -291,14 +254,10 @@ export class SessionRegistry {
     return result;
   }
 
-  /**
-   * Delete a session — cancels the bus, cleans up metadata.
-   */
   delete(sessionId: string): boolean {
     const meta = this.#metadata.get(sessionId);
     if (!meta) return false;
 
-    // Clean up channels
     const channels = this.#channels.get(sessionId);
     if (channels) {
       for (const ch of channels) {
@@ -307,15 +266,11 @@ export class SessionRegistry {
       this.#channels.delete(sessionId);
     }
 
-    // Delete session — cancels bus, removes event handlers, removes from store
     this.#sessionManager.deleteSession(sessionId);
     this.#metadata.delete(sessionId);
     return true;
   }
 
-  /**
-   * Rename a session (update its profile label).
-   */
   rename(sessionId: string, newName: string): boolean {
     const meta = this.#metadata.get(sessionId);
     if (!meta) return false;
@@ -323,17 +278,11 @@ export class SessionRegistry {
     return true;
   }
 
-  /**
-   * List available profiles.
-   */
   listProfiles(): Record<string, SwitchProfile> {
     return { ...this.#profiles };
   }
 
-  /**
-   * Switch profile for a session.
-   * Returns requiresConfirmation: true if session has user messages and force is not set.
-   */
+  // returns requiresConfirmation: true when the session has user messages and force is unset
   async switchProfile({
     sessionId,
     profileName,
@@ -352,7 +301,6 @@ export class SessionRegistry {
       };
     }
 
-    // Check if profile exists
     const profile = this.#profiles[profileName];
     if (!profile) {
       return {
@@ -362,21 +310,17 @@ export class SessionRegistry {
       };
     }
 
-    // Check if confirmation is needed
     if (!force && meta.userMessageCount >= 1) {
       return { success: false, requiresConfirmation: true };
     }
 
-    // Perform the switch
     const agent = this.#sessionManager.getAgentBySessionId(sessionId);
     if (agent) {
       agent.profileName = profileName;
-      // Update tool whitelist from new profile
       agent.toolWhitelist = profile.whitelistTools;
-      // Update profile body and role for system prompt
       agent.profileBody = profile.body || undefined;
       agent.role = profile.role || undefined;
-      // Clear context (messages + system prompt) -- UI confirms this will happen
+      // Clears messages + system prompt -- the UI confirms this beforehand.
       await agent.clearContext();
     }
     meta.profile = profileName;
@@ -386,9 +330,6 @@ export class SessionRegistry {
     return { success: true, requiresConfirmation: false };
   }
 
-  /**
-   * Increment user message count for a session.
-   */
   incrementUserMessageCount(sessionId: string): void {
     const meta = this.#metadata.get(sessionId);
     if (meta) {
@@ -396,9 +337,6 @@ export class SessionRegistry {
     }
   }
 
-  /**
-   * Create a WebSocketChannel for a session and attach it.
-   */
   createChannel(
     sessionId: string,
     ws: HotdogServerSocket<unknown>,
@@ -413,25 +351,19 @@ export class SessionRegistry {
       broadcastCallback: (msg: Record<string, unknown>) => this.broadcast(msg),
     });
 
-    // Track the channel
     if (!this.#channels.has(sessionId)) {
       this.#channels.set(sessionId, new Set());
     }
     this.#channels.get(sessionId)!.add(channel);
 
-    // Update metadata
     session.metadata.connectedClients += 1;
     session.metadata.lastActivityAt = Date.now();
 
     return channel;
   }
 
-  /**
-   * Remove a WebSocketChannel from a session.
-   * Detaches the channel first to clean up its event subscription.
-   */
   removeChannel(sessionId: string, channel: WebSocketChannel): void {
-    // Detach from the session to unsubscribe event handlers
+    // Detach first to unsubscribe event handlers.
     channel.detach(sessionId);
 
     const channels = this.#channels.get(sessionId);
@@ -444,9 +376,7 @@ export class SessionRegistry {
     }
   }
 
-  /**
-   * Touch session (update lastActivityAt) to prevent idle cleanup.
-   */
+  // Bumps lastActivityAt to prevent idle cleanup.
   touch(sessionId: string): void {
     const meta = this.#metadata.get(sessionId);
     if (meta) {
@@ -454,9 +384,6 @@ export class SessionRegistry {
     }
   }
 
-  /**
-   * Start idle session cleanup loop.
-   */
   startCleanupLoop(timeoutMin: number): void {
     this.#timeoutMin = timeoutMin;
     if (this.#cleanupTimer) return;
@@ -465,9 +392,6 @@ export class SessionRegistry {
     }, 60_000);
   }
 
-  /**
-   * Stop idle session cleanup loop.
-   */
   stopCleanupLoop(): void {
     if (this.#cleanupTimer) {
       clearInterval(this.#cleanupTimer);
@@ -488,20 +412,16 @@ export class SessionRegistry {
     }
   }
 
-  /** Number of active sessions. */
   get size(): number {
     return this.#metadata.size;
   }
 
-  /**
-   * Get the SessionManager for direct access.
-   * @internal
-   */
+  /** @internal */
   getSessionManager(): SessionManager {
     return this.#sessionManager;
   }
 
-  // ── Test-only accessors ─────────────────────────────────────────────────
+  // Test-only accessors
 
   /** @internal Exposed for testing. */
   get _test_metadata(): Map<string, SessionMetadata> {
@@ -522,12 +442,6 @@ export class SessionRegistry {
   }
 }
 
-// ── Cold Session Log Helpers ────────────────────────────────────────────────
-
-/**
- * Load a session log into a new session.
- * Creates a new session and replays the log entries into its context.
- */
 async function loadLogIntoNewSession(
   logId: string,
   registry: SessionRegistry,
@@ -537,22 +451,13 @@ async function loadLogIntoNewSession(
     throw new AgentError(`No entries found for session ${logId}`);
   }
 
-  // Create a new session
   const newSession = await registry.create({});
-
-  // Replay the log entries into the new agent's context
   replayEntriesIntoContext(newSession.agent, entries);
 
   return { sessionId: newSession.sessionId, agent: newSession.agent };
 }
 
-// ── Session History Replay ──────────────────────────────────────────────────
-
-/**
- * Replay a session's message history to a WebSocket client.
- * Iterates through the agent's context and emits the appropriate
- * OUTPUT_EVENT-derived messages so the frontend can reconstruct the chat.
- */
+// Re-emit a session's history as S2C messages so the frontend can reconstruct the chat.
 function replaySessionHistory(
   sessionId: string,
   agent: AgentLike,
@@ -562,8 +467,7 @@ function replaySessionHistory(
 
   try {
     const agentInstance = agent;
-    // Collect tool calls from the most recent assistant message to match
-    // tool results by toolCallId.
+    // Tool results are matched to their call by toolCallId.
     let pendingToolCalls: Array<{
       id: string;
       function?: { name?: string; arguments?: string };
@@ -586,7 +490,6 @@ function replaySessionHistory(
         }
 
         case "assistant": {
-          // Emit reasoning/thinking content first (if any)
           if (msg.reasoningContent) {
             ws.send(
               JSON.stringify({
@@ -597,7 +500,6 @@ function replaySessionHistory(
             );
           }
 
-          // Emit tool calls next
           const toolCalls = msg.toolCalls as
             | Array<{
                 id: string;
@@ -617,7 +519,6 @@ function replaySessionHistory(
               );
             }
           }
-          // Then emit the assistant message text
           const textContent =
             typeof msg.getTextContent === "function"
               ? msg.getTextContent()
@@ -654,9 +555,7 @@ function replaySessionHistory(
       }
     }
 
-    // Replay partial streaming content that was emitted before this client
-    // connected but hasn't been added to the message log yet (stream still in
-    // progress).
+    // Also replay in-progress stream chunks not yet in the message log.
     const agentImpl = agent as Agent;
     const partialReasoning = agentImpl.currentStreamingReasoning;
     const partialContent = agentImpl.currentStreamingContent;
@@ -683,11 +582,6 @@ function replaySessionHistory(
   }
 }
 
-// ── WS Message Routing ──────────────────────────────────────────────────────
-
-/**
- * Route incoming WS messages to the right session handler.
- */
 async function routeMessage(
   ws: HotdogServerSocket<unknown>,
   msg: C2SMessage,
@@ -720,7 +614,6 @@ async function routeMessage(
     }
 
     case C2S.CREATE_SESSION: {
-      // Detach from old session first
       if (ws.activeSessionId && ws.activeChannel) {
         registry.removeChannel(ws.activeSessionId, ws.activeChannel);
       }
@@ -732,7 +625,6 @@ async function routeMessage(
           questionTimeoutSecs: msg.questionTimeoutSecs as number | undefined,
         })
         .then(({ sessionId, agent }) => {
-          // Create WebSocketChannel for this session
           const channel = registry.createChannel(sessionId, ws);
           ws.activeSessionId = sessionId;
           ws.activeChannel = channel;
@@ -828,16 +720,13 @@ async function routeMessage(
       if (msg.sessionId) {
         const session = registry.get(msg.sessionId as string);
         if (session) {
-          // Detach from old session
           if (ws.activeSessionId && ws.activeChannel) {
             registry.removeChannel(ws.activeSessionId, ws.activeChannel);
           }
-          // Attach to new session
           const channel = registry.createChannel(msg.sessionId as string, ws);
           ws.activeSessionId = msg.sessionId as string;
           ws.activeChannel = channel;
 
-          // Send session metadata
           const agent = session.agent as Agent;
           ws.send(
             JSON.stringify({
@@ -864,9 +753,7 @@ async function routeMessage(
                 agent?.profileName || session.metadata.profile || "default",
             }),
           );
-          // Replay session history
           replaySessionHistory(msg.sessionId as string, session.agent, ws);
-          // Send current working state
           const isRunning = registry
             .getSessionManager()
             .isSessionRunning(msg.sessionId as string);
@@ -894,10 +781,8 @@ async function routeMessage(
 
     case C2S.CANCEL: {
       if (msg.sessionId) {
-        // Use interrupt() instead of cancel() — interrupt stops the current
-        // agent processing but keeps the message bus alive so the user can
-        // send new messages afterward. cancel() aborts the bus entirely,
-        // making it impossible to trigger another LLM request.
+        // interrupt() keeps the bus alive so new messages can still be sent;
+        // cancel() would abort it entirely.
         sessionManager.interrupt(msg.sessionId as string);
       }
       break;
@@ -927,7 +812,7 @@ async function routeMessage(
     case C2S.LIST_LOGS: {
       listSessionLogs()
         .then((logs) => {
-          // Filter out sessions that are currently active in the registry
+          // Only "cold" logs -- exclude sessions that are live in the registry.
           const activeIds = new Set(registry.list().map((s) => s.id));
           const coldLogs = logs.filter((log) => !activeIds.has(log.id));
           SessionRegistry.sendSafe(ws, {
@@ -946,14 +831,12 @@ async function routeMessage(
 
     case C2S.LOAD_LOG: {
       if (msg.logId) {
-        // Detach from old session first
         if (ws.activeSessionId && ws.activeChannel) {
           registry.removeChannel(ws.activeSessionId, ws.activeChannel);
         }
 
         loadLogIntoNewSession(msg.logId as string, registry)
           .then(({ sessionId, agent }) => {
-            // Create WebSocketChannel for the new session
             const channel = registry.createChannel(sessionId, ws);
             ws.activeSessionId = sessionId;
             ws.activeChannel = channel;
@@ -968,7 +851,6 @@ async function routeMessage(
             SessionRegistry.sendSafe(ws, sessionCreatedMsg);
             registry.broadcast(sessionCreatedMsg);
 
-            // Replay the session history to the client
             replaySessionHistory(sessionId, agent, ws);
           })
           .catch((err: unknown) => {
@@ -985,7 +867,6 @@ async function routeMessage(
       if (msg.logId) {
         readSessionEntries(msg.logId as string)
           .then((entries) => {
-            // Send entries for read-only viewing without creating a session
             SessionRegistry.sendSafe(ws, {
               type: S2C.LOG_VIEWED,
               logId: msg.logId,
@@ -1041,8 +922,6 @@ async function routeMessage(
   }
 }
 
-// ── Helper functions ────────────────────────────────────────────────────────
-
 function attachToMostRecentSession(
   ws: HotdogServerSocket<unknown>,
   registry: SessionRegistry,
@@ -1074,12 +953,10 @@ function attachToMostRecentSession(
     return;
   }
 
-  // Create WebSocketChannel for the existing session
   const channel = registry.createChannel(sessionId, ws);
   ws.activeSessionId = sessionId;
   ws.activeChannel = channel;
 
-  // Send sessionCreated
   const agent = session.agent as Agent;
   SessionRegistry.sendSafe(ws, {
     type: "sessionCreated",
@@ -1089,10 +966,9 @@ function attachToMostRecentSession(
     models: Object.keys(agent?.modelRegistry || {}),
   });
 
-  // Replay session history
   replaySessionHistory(sessionId, session.agent, ws);
 
-  // Send current working state so the UI restores the cancel button if agent is running
+  // Restore the cancel button if the agent is still running.
   const isRunning = registry.getSessionManager().isSessionRunning(sessionId);
   SessionRegistry.sendSafe(ws, {
     type: S2C.SESSION_STATE,
@@ -1134,12 +1010,6 @@ function createAndAttachSession(
     });
 }
 
-// ── createWsServer Factory ───────────────────────────────────────────────────
-
-/**
- * Create a WebSocket server handler object.
- * Provides the onUpgrade handler for Bun.serve() and session registry.
- */
 export function createWsServer(
   core: CoreContext,
   options: CreateWsServerOptions = {},
@@ -1153,7 +1023,7 @@ export function createWsServer(
     profiles,
   } = options;
 
-  // Single LLM client shared across all sessions
+  // One LLM client shared across all sessions.
   const sharedLlmClient = new LlmClient({
     baseUrl: core.resolved?.baseUrl,
     apiKey: core.resolved?.apiKey,
@@ -1166,7 +1036,6 @@ export function createWsServer(
     markerMangler: new MarkerMangler(),
   });
 
-  // Default agent builder — uses shared LlmClient from config (injected by SessionManager)
   const buildAgent: (config: {
     model?: string;
     sessionId?: string;
@@ -1179,7 +1048,6 @@ export function createWsServer(
         agentConfig.profileName ||
         (core.resolved?.profileName as string) ||
         "default";
-      // Read profile config for tool restrictions, role, and body
       const profile = profiles?.[profileName] || null;
       const agent = new Agent({
         hooks: core.hooks,
@@ -1212,7 +1080,7 @@ export function createWsServer(
         role: profile?.role || undefined,
         config: {
           ...core.config,
-          // Agent requires these resolved values — no fallbacks in the Agent.
+          // Required by Agent -- no fallbacks there.
           maxToolCallsPerIteration: core.resolved?.maxToolCallsPerIteration as number,
           maxRetries: core.resolved?.maxRetries as number,
           toolRetryDelay: core.resolved?.toolRetryDelay as number,
@@ -1241,9 +1109,6 @@ export function createWsServer(
     profiles,
   });
 
-  /**
-   * WS upgrade handler — called when a WebSocket connection opens.
-   */
   function onUpgrade(
     req: { url: string; headers?: Record<string, string> },
     ws: HotdogServerSocket<unknown>,
@@ -1278,9 +1143,6 @@ export function createWsServer(
     }
   }
 
-  /**
-   * Handle incoming WS messages.
-   */
   async function onMessage(
     ws: HotdogServerSocket<unknown>,
     raw: string | Buffer,
@@ -1313,7 +1175,7 @@ export function createWsServer(
     try {
       await routeMessage(ws, msg, registry, auth);
     } catch (err: unknown) {
-      // Log but don't crash — connection may have dropped mid-processing
+      // Don't crash on a dropped connection.
       const typedErr = err as Error;
       if (
         typedErr.message !== "WebSocket is not open: readyState 2 (CLOSING)" &&
@@ -1324,9 +1186,6 @@ export function createWsServer(
     }
   }
 
-  /**
-   * Handle WS close — remove channel from session.
-   */
   function onClose(ws: HotdogServerSocket<unknown>): void {
     if (ws.activeSessionId && ws.activeChannel) {
       registry.removeChannel(ws.activeSessionId, ws.activeChannel);

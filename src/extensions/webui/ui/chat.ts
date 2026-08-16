@@ -1,15 +1,12 @@
 /// <reference lib="dom" />
-// Chat view component — WS client, message routing, input handling.
-// Connects to the WebSocket server and routes messages to the message list.
-// Uses reactiveState atoms so DOM updates happen automatically via effects.
+// Chat view: WS client + message routing. Atoms drive the DOM via effects.
 
 import { reactiveState, effect, Atom } from "./utils.ts";
 import { createMessageList, MessageListManager } from "./message-list.ts";
 import type { SessionInfo } from "./sessions.ts";
 import { sanitize } from "./utils.ts";
 
-// Browser-compatible logger — avoids importing Node.js logger which uses
-// process.env and process.stdout that don't exist in browser environments.
+// The core logger touches process.*, which doesn't exist in the browser.
 const logger = {
   error: (msg: string, data?: unknown) => {
     console.error("[chat]", msg, data || "");
@@ -19,7 +16,6 @@ const logger = {
   },
 };
 
-// Profile state - matches SwitchProfile from backend
 type ProfileInfo = {
   role: string;
   body: string;
@@ -27,10 +23,8 @@ type ProfileInfo = {
 };
 const profilesAtom = reactiveState<Record<string, ProfileInfo>>({});
 let currentProfile = "default";
-// Track user message count for confirmation logic
+// Drives the profile-switch confirmation prompt.
 let userMessageCount = 0;
-
-// ── Server message types ────────────────────────────────────────────────────
 
 interface SessionCreatedMessage {
   type: "sessionCreated";
@@ -209,8 +203,6 @@ type ServerMessage =
   | ProfileSwitchedMessage
   | ServerErrorMessage;
 
-// ── Config & return types ───────────────────────────────────────────────────
-
 interface ChatConfig {
   token: string | null;
   host?: string;
@@ -235,22 +227,17 @@ export interface ChatController {
   deleteSession: (sessionId: string) => void;
   renameSession: (sessionId: string, newName: string) => void;
   listSessions: () => void;
-  /** List cold session logs from disk */
+  // Cold session logs (persisted on disk).
   listLogs: () => void;
-  /** Load a cold session log into a new active session */
   loadLog: (logId: string) => void;
-  /** View a cold session log without creating an active session */
   viewLog: (logId: string) => void;
-  /** Delete a cold session log file */
   deleteLog: (logId: string) => void;
   sendCommand: (command: string) => void;
   sendQuestionAnswer: (answers: Record<string, string>) => void;
   setSession: (sessionId: string) => void;
-  /** List available profiles */
   listProfiles: () => void;
-  /** Switch to a different profile */
   switchProfile: (profileName: string, force?: boolean) => void;
-  /** Send a raw WS message (used for canceling non-active sessions from sidebar) */
+  // Raw WS message -- needed to cancel non-active sessions from the sidebar.
   send: (obj: Record<string, unknown>) => void;
   ws: WebSocket | null;
   sessionIdAtom: Atom<string | null>;
@@ -258,19 +245,12 @@ export interface ChatController {
   modelsAtom: Atom<string[]>;
   connectedAtom: Atom<boolean>;
   workingAtom: Atom<boolean>;
-  /** Per-session working state map — sessionId → isWorking */
+  // sessionId -> isWorking, so the sidebar can show per-session indicators.
   sessionWorkingMap: Map<string, boolean>;
-  /** Accessor for the current message list manager */
   messageListAtom: () => MessageListManager | null;
-  /** Get current profile */
   getCurrentProfile: () => string;
 }
 
-/**
- * Create a chat controller for a WebSocket connection.
- * @param config - Configuration object
- * @returns Chat controller with reactive state atoms and send helpers
- */
 export function createChat({
   token,
   host = window.location.host,
@@ -289,25 +269,15 @@ export function createChat({
   let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   let authFailed = false;
 
-  // ── Reactive state atoms ───────────────────────────────────────────────────
-  // Every UI element that needs to update when data changes is driven by one
-  // of these atoms.  Effects (registered below) handle the actual DOM writes.
-
   const sessionIdAtom = reactiveState<string | null>(null);
   const currentModelAtom = reactiveState<string>("");
   const modelsAtom = reactiveState<string[]>([]);
   const connectedAtom = reactiveState<boolean>(false);
   const workingAtom = reactiveState<boolean>(false);
 
-  // Per-session working state map — tracks which sessions have active agents.
-  // This allows the UI to show working indicators on individual sessions
-  // even when viewing a different session.
+  // Tracks which sessions have active agents, so indicators survive session switches.
   const sessionWorkingMap = new Map<string, boolean>();
 
-  // ── Effects — auto-wire DOM to atoms ─────────────────────────────────────
-
-  // Model dropdown: rebuild whenever the list of available models *or* the
-  // currently selected model changes.
   effect(() => {
     const select = document.getElementById("model-select") as HTMLSelectElement | null;
     if (!select) return;
@@ -323,7 +293,6 @@ export function createChat({
     }
   }, [modelsAtom, currentModelAtom]);
 
-  // Connection-status badge.
   effect(() => {
     const el = document.getElementById("connection-status") as HTMLElement | null;
     if (!el) return;
@@ -333,8 +302,7 @@ export function createChat({
     onConnectionChange?.(connected);
   }, [connectedAtom]);
 
-  // Working indicator (spinner + cancel button).  Cancel button is now
-  // inside the indicator, so hiding the indicator hides it automatically.
+  // Cancel button lives inside the indicator, so hiding it hides the button too.
   effect(() => {
     const el = document.getElementById("working-indicator") as HTMLElement | null;
     if (!el) return;
@@ -342,7 +310,6 @@ export function createChat({
     el.classList.toggle("hidden", !working);
   }, [workingAtom]);
 
-  // Session-id label in the info bar.
   effect(() => {
     const el = document.getElementById("current-session-id") as HTMLElement | null;
     if (!el) return;
@@ -350,7 +317,6 @@ export function createChat({
     el.textContent = sid ? sid.slice(0, 8) : "";
   }, [sessionIdAtom]);
 
-  // Profile selector: rebuild whenever the list of available profiles changes.
   effect(() => {
     const select = document.getElementById("profile-select") as HTMLSelectElement | null;
     if (!select) return;
@@ -366,50 +332,44 @@ export function createChat({
     }
   }, [profilesAtom]);
 
-  // Profile selector change handler - wire up after DOM is ready
+  // Re-clone the select on every profiles change to drop stale listeners.
   effect(() => {
-    const profiles = profilesAtom(); // Trigger on profiles change
+    const profiles = profilesAtom();
     const select = document.getElementById("profile-select") as HTMLSelectElement | null;
     if (!select) return;
-    
-    // Remove old listener if exists (by cloning)
+
     const newSelect = select.cloneNode(true) as HTMLSelectElement;
     select.parentNode?.replaceChild(newSelect, select);
-    
+
     newSelect.addEventListener("change", (e) => {
       const target = e.target as HTMLSelectElement;
       const profileName = target.value;
-      
-      // Only ask for confirmation if session has user messages
+
       if (userMessageCount > 0 && !confirm("Switching profile will clear session context and all messages. Continue?")) {
         target.value = currentProfile;
         return;
       }
-      
-      // Send with force=true since UI already confirmed (or no confirmation needed)
+
+      // force=true: the UI already confirmed (or no confirmation was needed).
       switchProfile(profileName, true);
     });
   }, [profilesAtom]);
 
-  // ── WS Message Routing ───────────────────────────────────────────────────
-
   function handleServerMessage(data: ServerMessage): void {
-    // ── Session management messages — handled even before messageList is ready ──
+    // Session-management messages are handled even before messageList is ready.
     switch (data.type) {
       case "sessionCreated":
         sessionIdAtom(data.sessionId);
         currentModelAtom(data.currentModel || "");
-        // Set current profile from sessionCreated so the dropdown is correct
-        // before profiles are loaded
+        // Set before profiles load so the dropdown is correct immediately.
         if (data.profile) {
           currentProfile = data.profile;
         }
         if (data.models && data.models.length > 0) {
           modelsAtom(data.models);
         }
-        // Sync workingAtom with the session's working state from the map.
-        // This handles page reload: if the server already sent the working
-        // state before sessionCreated, the map has it and we restore it here.
+        // Page reload: the server may have sent working state before
+        // sessionCreated, so restore it from the map here.
         const createdSid = data.sessionId;
         if (sessionWorkingMap.has(createdSid)) {
           workingAtom(sessionWorkingMap.get(createdSid) ?? false);
@@ -424,16 +384,13 @@ export function createChat({
         }
         return;
       case "sessions": {
-        // Update profile selector when sessions change
         const sessions = data.sessions;
         const activeSession = sessions.find(s => s.id === sessionIdAtom());
         if (activeSession && activeSession.profile) {
           currentProfile = activeSession.profile;
-          // Update profile selector
           const select = document.getElementById("profile-select") as HTMLSelectElement | null;
           if (select) select.value = currentProfile;
         }
-        // Track user message count for confirmation logic
         userMessageCount = activeSession?.userMessageCount || 0;
         onSessionsUpdate?.(data.sessions as SessionInfo[], sessionIdAtom());
         return;
@@ -444,10 +401,8 @@ export function createChat({
       case "profileSwitched":
         if (data.success) {
           currentProfile = data.profile || "default";
-          // Update the selector to reflect the change
           const select = document.getElementById("profile-select") as HTMLSelectElement | null;
           if (select) select.value = currentProfile;
-          // Show success message as a system-style notification
           if (messageList) {
             const msgEl = document.createElement("div");
             msgEl.className = "message system-message";
@@ -456,7 +411,6 @@ export function createChat({
             if (msgList) msgList.appendChild(msgEl);
           }
         }
-        // Note: requiresConfirmation should never happen since UI always sends force=true
         return;
       case "logsListed":
         onLogsUpdate?.(data.logs);
@@ -475,15 +429,12 @@ export function createChat({
         return;
     }
 
-    // ── OUTPUT_EVENT mappings — require messageList ──
     if (!messageList) return;
 
-    // Filter: only process content events for the currently active session.
-    // This is a defense-in-depth guard — the server should only send events
-    // for the active session, but if orphaned channels leak events, this
-    // prevents them from corrupting the UI.
-    // Exception: sessionState messages (e.g., working indicators) are
-    // broadcast for all sessions so the sidebar can show them.
+    // Defense in depth: the server should only send content events for the
+    // active session, but a leaked orphaned channel must not corrupt the UI.
+    // sessionState is an exception -- it's broadcast for all sessions so the
+    // sidebar can show per-session working indicators.
     if (data.type !== "sessionState") {
       const msgSessionId = (data as { sessionId?: string }).sessionId;
       if (msgSessionId && msgSessionId !== sessionIdAtom()) {
@@ -532,33 +483,25 @@ export function createChat({
         messageList.handleCompactionResult(data);
         break;
       case "sessionState":
-        // Handle working state signals from the server.
-        // Track per-session working state using the sessionId from the message.
         if (data.key === "working") {
           const sid = (data as { sessionId?: string }).sessionId;
           if (sid) {
             sessionWorkingMap.set(sid, Boolean(data.value));
-            // Update workingAtom if this is the currently active session.
-            // This ensures the cancel button reflects the correct state even
-            // after page reload or session switching.
+            // Keep the cancel button in sync for the active session.
             if (sid === sessionIdAtom()) {
               workingAtom(Boolean(data.value));
             }
           }
-          // Notify so the sidebar can refresh its working indicators
           onWorkingMapChange?.();
         }
-        // Handle model changes (e.g. after /model command or session switch)
         if (data.key === "model") {
           currentModelAtom(data.value as string);
         }
         if (data.key === "models") {
           modelsAtom(data.value as string[]);
         }
-        // Handle profile changes (e.g. after profile switch or session switch)
         if (data.key === "profile") {
           currentProfile = data.value as string;
-          // Update the selector to reflect the change
           const select = document.getElementById("profile-select") as HTMLSelectElement | null;
           if (select) select.value = currentProfile;
         }
@@ -573,8 +516,6 @@ export function createChat({
         console.warn("[chat] Unknown message type:", (data as { type: string }).type);
     }
   }
-
-  // ── WS Connection ─────────────────────────────────────────────────────────
 
   function connect(): void {
     if (ws) {
@@ -594,7 +535,6 @@ export function createChat({
 
     ws.onopen = () => {
       connectedAtom(true);
-      // Request logs list on initial connect and after reconnects
       listLogs();
     };
 
@@ -622,13 +562,9 @@ export function createChat({
     };
   }
 
-  /**
-   * Check token validity via HTTP GET /verify.
-   * If the token is invalid, call onAuthFailure and stop reconnecting.
-   * If the token is valid (or the server is unreachable), schedule a reconnect.
-   */
+  // Verify the token over HTTP; stop reconnecting on 401, otherwise (including
+  // network errors -- server may just be down) keep trying.
   function verifyTokenAndReconnect(): void {
-    // Auth already failed — don't attempt to reconnect
     if (authFailed) return;
 
     if (!token) {
@@ -643,14 +579,10 @@ export function createChat({
           authFailed = true;
           onAuthFailure?.();
         } else {
-          // Token is valid — schedule a reconnect
           scheduleReconnect();
         }
       })
-      .catch(() => {
-        // Network error — server might be down, retry later
-        scheduleReconnect();
-      });
+      .catch(() => scheduleReconnect());
   }
 
   function scheduleReconnect(): void {
@@ -675,8 +607,6 @@ export function createChat({
     workingAtom(false);
   }
 
-  // ── Send helpers ──────────────────────────────────────────────────────────
-
   function send(obj: Record<string, unknown>): void {
     if (ws && ws.readyState === WebSocket.OPEN) {
       ws.send(JSON.stringify(obj));
@@ -685,86 +615,66 @@ export function createChat({
     }
   }
 
-  /** Send user message to the current session. */
   function sendMessage(content: string): void {
     if (!sessionIdAtom()) {
       console.warn("[chat] No active session");
       return;
     }
-    // Optimistically render the user's message immediately
-    if (messageList) {
-      // messageList.handleUserMessage({ content });
-    }
-    // Show working indicator while waiting for a response
     workingAtom(true);
     send({ type: "send", sessionId: sessionIdAtom(), content });
   }
 
-  /** Send a slash command to the agent. */
   function sendSlashCommand(command: string): void {
     if (!sessionIdAtom()) return;
     send({ type: "command", sessionId: sessionIdAtom(), command });
   }
 
-  /** Cancel the current run. */
   function cancel(): void {
     if (!sessionIdAtom()) return;
     send({ type: "cancel", sessionId: sessionIdAtom() });
-    // Optimistically clear working state for this session
+    // Clear working state optimistically so the UI doesn't spin.
     const sid = sessionIdAtom();
     if (sid) sessionWorkingMap.set(sid, false);
     workingAtom(false);
   }
 
-  /** Create a new session. */
   function createSession(opts: Record<string, unknown> = {}): void {
-    // Use the currently selected profile if not explicitly set
     const profile = (opts.profile as string | undefined) || currentProfile;
     send({ type: "createSession", ...opts, profile });
   }
 
-  /** Switch to a different session. */
   function switchSession(sessionId: string): void {
     send({ type: "switchSession", sessionId });
     sessionIdAtom(sessionId);
     messageList?.clear();
-    // Restore working state from the per-session map
     workingAtom(sessionWorkingMap.get(sessionId) ?? false);
-    listSessions(); // Refresh sidebar so the active session is highlighted correctly
+    listSessions(); // Refresh sidebar highlight
   }
 
-  /** Delete a session. */
   function deleteSession(sessionId: string): void {
     send({ type: "deleteSession", sessionId });
-    // Clean up per-session working state
     sessionWorkingMap.delete(sessionId);
-    listSessions(); // Refresh sidebar so the deleted session is removed
+    listSessions();
   }
 
-  /** Rename a session (update its profile label). */
   function renameSession(sessionId: string, newName: string): void {
     send({ type: "renameSession", sessionId, newName });
-    listSessions(); // Refresh sidebar so the renamed session shows new name
+    listSessions();
   }
 
-  /** List sessions. */
   function listSessions(): void {
     send({ type: "listSessions" });
   }
 
-  /** Send a command to the agent. */
   function sendCommand(command: string): void {
     if (!sessionIdAtom()) return;
     send({ type: "command", sessionId: sessionIdAtom(), command });
   }
 
-  /** Send a question answer. */
   function sendQuestionAnswer(answers: Record<string, string>): void {
     if (!sessionIdAtom()) return;
     send({ type: "questionAnswer", sessionId: sessionIdAtom(), answers });
   }
-
-  // ── Session management ────────────────────────────────────────────────────
 
   function setSession(sessionId: string): void {
     messageList = createMessageList(sessionId, { hideThinking: false });
@@ -772,12 +682,10 @@ export function createChat({
     messageList.clear();
   }
 
-  /** List available profiles. */
   function listProfiles(): void {
     send({ type: "listProfiles" });
   }
 
-  /** Switch to a different profile. */
   function switchProfile(profileName: string, force: boolean = false): void {
     const sessionId = sessionIdAtom();
     if (!sessionId) {
@@ -787,14 +695,10 @@ export function createChat({
     send({ type: "switchProfile", sessionId, profileName, force });
   }
 
-  /** Get current profile. */
   function getCurrentProfile(): string {
     return currentProfile;
   }
 
-  // ── Init ───────────────────────────────────────────────────────────────────
-
-  // Wire up chat input form — detect slash commands and route accordingly
   const chatForm = document.getElementById("chat-form") as HTMLFormElement | null;
   if (chatForm) {
     chatForm.addEventListener("submit", (e: SubmitEvent) => {
@@ -805,7 +709,6 @@ export function createChat({
       input.value = "";
 
       if (text.startsWith("/")) {
-        // Slash command — send as command, not user message
         sendSlashCommand(text);
       } else {
         sendMessage(text);
@@ -820,7 +723,6 @@ export function createChat({
     });
   }
 
-  // Model dropdown change — send /model command to switch
   const modelSelect = document.getElementById("model-select") as HTMLSelectElement | null;
   if (modelSelect) {
     modelSelect.addEventListener("change", (e: Event) => {
@@ -830,10 +732,7 @@ export function createChat({
     });
   }
 
-  // Connect
   connect();
-
-  // ── Cold session log management ───────────────────────────────────────────
 
   function listLogs(): void {
     send({ type: "listLogs" });
@@ -874,14 +773,12 @@ export function createChat({
     getCurrentProfile,
     send,
     ws,
-    // Expose atoms for external reactive coordination
     sessionIdAtom,
     currentModelAtom,
     modelsAtom,
     connectedAtom,
     workingAtom,
     sessionWorkingMap,
-    // Expose messageList for external manipulation (e.g., rendering log entries)
     messageListAtom: () => messageList,
   };
 }

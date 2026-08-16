@@ -1,8 +1,20 @@
 import { describe, it, expect } from 'bun:test';
+import fs from 'node:fs';
 import { BashTool, create } from '../../src/extensions/bash-tool/index.ts';
 import { AssistantRetryableError } from '../../src/core/error.ts';
-import { resultStr } from '../helpers.ts';
+import { resultStr, tmpDir, cleanupDir } from '../helpers.ts';
 import { HOOKS } from '../../src/core/hooks.ts';
+
+/** True if a process with this pid still exists (signal 0 = existence check). */
+function processAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (e: unknown) {
+    // EPERM means it exists but isn't ours — count as alive
+    return (e as NodeJS.ErrnoException).code === 'EPERM';
+  }
+}
 
 describe('BashTool', () => {
   it('has correct tool name', () => {
@@ -40,6 +52,44 @@ describe('BashTool', () => {
       tool.execute(JSON.stringify({ command: 'sleep 5', timeout_ms: 100 }), {} as any)
     ).rejects.toThrow(/timed out/);
   });
+
+  it('kills a process that ignores SIGTERM after the grace period', async () => {
+    const dir = tmpDir('hotdog-bash-kill-');
+    const pidFile = `${dir}/pid`;
+    try {
+      const tool = new BashTool({ timeoutMs: 300, maxOutputLines: 100 });
+      // This shell ignores TERM, so it survives the initial SIGTERM at
+      // 300ms -- only the SIGKILL escalation at ~2300ms can end it.
+      const cmd = `sh -c 'echo $ > ${pidFile}; trap "" TERM; sleep 300'`;
+      await expect(tool.execute(JSON.stringify({ command: cmd }), {} as any))
+        .rejects.toThrow(/timed out/);
+
+      const pid = parseInt(fs.readFileSync(pidFile, 'utf-8').trim(), 10);
+      await new Promise((r) => setTimeout(r, 3500));
+      expect(processAlive(pid)).toBe(false);
+    } finally {
+      cleanupDir(dir);
+    }
+  }, 15000);
+
+  it('kills grandchild processes on timeout (process group)', async () => {
+    const dir = tmpDir('hotdog-bash-group-');
+    const pidFile = `${dir}/pid`;
+    try {
+      const tool = new BashTool({ timeoutMs: 300, maxOutputLines: 100 });
+      // Grandchild sleep outlives its parent shell by default; the group
+      // kill must take it down too.
+      const cmd = `sh -c 'sleep 300 & echo $! > ${pidFile}; wait'`;
+      await expect(tool.execute(JSON.stringify({ command: cmd }), {} as any))
+        .rejects.toThrow(/timed out/);
+
+      const pid = parseInt(fs.readFileSync(pidFile, 'utf-8').trim(), 10);
+      await new Promise((r) => setTimeout(r, 3500));
+      expect(processAlive(pid)).toBe(false);
+    } finally {
+      cleanupDir(dir);
+    }
+  }, 15000);
 
   it('uses default timeout when not specified', async () => {
     // Default timeout is 30000ms (30s), so a short sleep should complete

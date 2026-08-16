@@ -27,6 +27,16 @@ import {
  */
 const MAX_OUTPUT_CHARS = 1_000_000;
 
+/**
+ * Process groups only exist on POSIX. We spawn detached (so the shell is
+ * its own group leader) so a timeout can kill the whole tree -- shell AND
+ * grandchildren -- not just the shell process.
+ */
+const IS_POSIX = process.platform !== "win32";
+
+/** Grace period between SIGTERM and SIGKILL on timeout, in ms. */
+const KILL_GRACE_MS = 2000;
+
 interface BashToolOptions {
   timeoutMs: number;
   maxOutputLines: number;
@@ -89,6 +99,10 @@ export class BashTool {
     return new Promise((resolve, reject) => {
       const proc: ChildProcess = spawn(command, [], {
         shell: true,
+        // Own process group on POSIX so timeouts can kill the entire tree.
+        // Trade-off: if hotdog itself is killed, a running command keeps
+        // going (it no longer shares our terminal's session).
+        detached: IS_POSIX,
         stdio: ["pipe", "pipe", "pipe"],
         env: {
           ...process.env,
@@ -113,12 +127,36 @@ export class BashTool {
       let stdoutTruncated = false;
       let stderrTruncated = false;
       let done = false;
+      let timedOut = false;
+      let termTimer: ReturnType<typeof setTimeout>;
+      let killTimer: ReturnType<typeof setTimeout>;
 
+      /**
+       * Signal the whole process group on POSIX (shell + grandchildren),
+       * or just the shell on win32. Swallows errors for groups that are
+       * already gone.
+       */
+      const killGroup = (signal: NodeJS.Signals): void => {
+        if (!proc.pid) return;
+        try {
+          if (IS_POSIX) {
+            process.kill(-proc.pid, signal);
+          } else {
+            proc.kill(signal);
+          }
+        } catch {
+          // Group already exited — nothing to do.
+        }
+      };
+
+      /**
+       * Settle the promise exactly once. Deliberately does NOT clear the
+       * kill timer: after SIGTERM the group may still be alive, so the
+       * SIGKILL escalation must stay armed until the group actually exits.
+       */
       const finish = (result: ToolResult | Error) => {
         if (done) return;
         done = true;
-        clearTimeout(termTimer);
-        clearTimeout(killTimer);
         if (result instanceof Error) {
           reject(result);
         } else {
@@ -153,8 +191,9 @@ export class BashTool {
         stderrTruncated = r.truncated;
       });
 
-      const termTimer = setTimeout(() => {
-        proc.kill("SIGTERM");
+      termTimer = setTimeout(() => {
+        timedOut = true;
+        killGroup("SIGTERM");
         finish(
           AssistantRetryableError.WithHint(
             `Command timed out after ${timeout}ms`,
@@ -163,18 +202,26 @@ export class BashTool {
         );
       }, timeout);
 
-      const killTimer = setTimeout(() => {
-        proc.kill("SIGKILL");
+      // Give it a two second grace period before hard killing. This timer
+      // must outlive finish() -- see finish() for why.
+      killTimer = setTimeout(() => {
+        killGroup("SIGKILL");
         finish(
           AssistantRetryableError.WithHint(
             `Command timed out after ${timeout}ms`,
             "Use a faster command, add a timeout flag (e.g., `timeout 10s ...`), or increase timeoutMs in the tool call.",
           ),
         );
-      }, timeout + 2000); // give it a two second grace period before hard killing
+      }, timeout + KILL_GRACE_MS);
 
       const cmdFirstLine = command.trim().split("\n")[0] ?? "";
       proc.on("close", (code: number | null) => {
+        // "close" only means the SHELL exited -- group members can outlive
+        // it (e.g. they trap TERM). So after a timeout the SIGKILL
+        // escalation stays armed; a dead group just makes it a no-op.
+        clearTimeout(termTimer);
+        if (!timedOut) clearTimeout(killTimer);
+        if (done) return; // already settled by a timeout; output not needed
         let output = [stdout, stderr].filter(Boolean).join("\n");
         if (stdoutTruncated || stderrTruncated) {
           output += "\n[output truncated]";
@@ -192,6 +239,8 @@ export class BashTool {
       });
 
       proc.on("error", (err: Error) => {
+        clearTimeout(termTimer);
+        clearTimeout(killTimer);
         finish(ToolResult.err(`Error: ${err.message}`));
       });
     });

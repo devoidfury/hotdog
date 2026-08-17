@@ -4,7 +4,29 @@ import path from "node:path";
 import { parseFrontMatter } from "../../utils/file-utils.ts";
 import { DEFAULT_PROFILES_SUBPATH } from "./defaults.ts";
 import type { Dirent } from "node:fs";
+import { logger } from "../logger.ts";
 import { normalizeConfigKeys } from "./index.ts";
+
+/**
+ * Validate a profile name before it is used to build a file path.
+ *
+ * Profile names come from multiple sources — the CLI flag, the config file,
+ * and the LLM via the delegate_task `profile` argument — so a name must
+ * never be able to escape the profiles directory (e.g. `../../etc/passwd`).
+ * Allowlist mirrors SESSION_ID_RE in session-log.ts: starts alphanumeric,
+ * then alphanumerics, dots, underscores, and hyphens only.
+ */
+const PROFILE_NAME_RE = /^[a-zA-Z0-9][a-zA-Z0-9._-]*$/;
+const PROFILE_NAME_MAX_LEN = 64;
+
+export function isValidProfileName(name: string | null | undefined): boolean {
+  return (
+    typeof name === "string" &&
+    name.length > 0 &&
+    name.length <= PROFILE_NAME_MAX_LEN &&
+    PROFILE_NAME_RE.test(name)
+  );
+}
 
 export interface ProfileDef {
   name: string;
@@ -51,6 +73,15 @@ export function resolveProfilesPath(
 
 /** Load a profile from a .profile.md file. */
 export async function loadProfileFile(profilesPath: string, profileName: string): Promise<ProfileDef | null> {
+  if (!isValidProfileName(profileName)) {
+    // Reject before touching the filesystem: names like `../../etc/passwd`
+    // must mean "no profile", never "read that file".
+    logger.warn(
+      `[profiles] rejected invalid profile name: ${JSON.stringify(String(profileName).slice(0, 80))}`,
+    );
+    return null;
+  }
+
   let filePath: string;
   try {
     filePath = path.join(profilesPath, `${profileName}.profile.md`);

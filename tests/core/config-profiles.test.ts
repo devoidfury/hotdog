@@ -7,6 +7,7 @@ import {
   loadProfileFiles,
   getVisibleWorkerProfiles,
   allProfilesForSwitch,
+  isValidProfileName,
 } from "../../src/core/config/profiles.ts";
 import fs from "node:fs";
 import path from "node:path";
@@ -143,6 +144,76 @@ Body`;
   it("handles empty profile directory", async () => {
     const profile = await loadProfileFile("/nonexistent-dir-12345", "test");
     expect(profile).toBeNull();
+  });
+
+  it("rejects path traversal names without reading the file", async () => {
+    // Plant a file that a traversal name could reach, to prove it is never loaded.
+    const subDir = path.join(tmpDir, "sub");
+    fs.mkdirSync(subDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(subDir, "evil.profile.md"),
+      `---
+name: evil
+role: EVIL INJECTED ROLE
+---
+Injected body`,
+    );
+
+    const names = [
+      "../../etc/passwd",
+      "../sub/evil",
+      "sub/evil",
+      "..",
+      ".",
+      "/",
+      "\\",
+      "a\\b",
+      "",
+      " leading-space",
+      "trailing-space ",
+      "name with space",
+      "null\u0000byte",
+      "a".repeat(65),
+    ];
+    for (const name of names) {
+      expect(await loadProfileFile(tmpDir, name)).toBeNull();
+    }
+  });
+});
+
+describe("isValidProfileName", () => {
+  it("accepts ordinary profile names", () => {
+    for (const name of [
+      "default",
+      "task-default",
+      "my.profile",
+      "foo_bar",
+      "123",
+      "A",
+      "a".repeat(64),
+    ]) {
+      expect(isValidProfileName(name)).toBe(true);
+    }
+  });
+
+  it("rejects traversal and unsafe names", () => {
+    for (const name of [
+      "../../etc/passwd",
+      "../x",
+      "a/b",
+      "a\\b",
+      "..",
+      ".",
+      "/abs",
+      "",
+      "a b",
+      "a".repeat(63) + "/x",
+      "a".repeat(65),
+      null,
+      undefined,
+    ]) {
+      expect(isValidProfileName(name as string | null | undefined)).toBe(false);
+    }
   });
 });
 

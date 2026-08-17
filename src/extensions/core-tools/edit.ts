@@ -235,15 +235,29 @@ function findAndReplace(content: string, old: string, newStr: string, all: boole
     };
   }
 
-  // Strategy 2: line-trimmed fallback
+  // Strategy 2: line-trimmed fallback.
+  // Match at the LINE level: compare trimmed lines one-by-one so that
+  // differing indentation still matches, but the splice indices stay in
+  // the original line array's coordinate space (character offsets in a
+  // whitespace-normalized string do NOT map back to line boundaries).
   const oldLines = old.split("\n");
   const newLines = newStr.split("\n");
-  const oldFlat = oldLines.map((l: string) => l.trim()).join("\n");
+  const oldTrimmed = oldLines.map((l: string) => l.trim());
   const contentLines = content.split("\n");
-  const contentFlat = contentLines.map((l: string) => l.trim()).join("\n");
 
-  const matchStart = contentFlat.indexOf(oldFlat);
-  if (matchStart === -1) {
+  let startLineIdx = -1;
+  for (let i = 0; i + oldTrimmed.length <= contentLines.length && startLineIdx === -1; i++) {
+    let matches = true;
+    for (let j = 0; j < oldTrimmed.length; j++) {
+      if (contentLines[i + j]!.trim() !== oldTrimmed[j]) {
+        matches = false;
+        break;
+      }
+    }
+    if (matches) startLineIdx = i;
+  }
+
+  if (startLineIdx === -1) {
     // Provide helpful error with file context
     const contextLines =
       contentLines.length <= 10
@@ -260,20 +274,23 @@ function findAndReplace(content: string, old: string, newStr: string, all: boole
     );
   }
 
-  // Calculate which lines the match spans
-  const beforeMatch = contentFlat.slice(0, matchStart);
-  const startLineIdx = beforeMatch.split("\n").length;
-  const oldLineCount = oldFlat.split("\n").length;
+  // Fix only the first line's indentation to match the file; the rest is
+  // left as-is (if it's wrong, a code formatter will sort it out).
+  const origFirstIndent = contentLines[startLineIdx]!.match(/^\s*/)?.[0] ?? "";
+  const adjustedNewLines = [...newLines];
+  if (adjustedNewLines.length > 0 && adjustedNewLines[0]!.trim().length > 0) {
+    adjustedNewLines[0] = origFirstIndent + adjustedNewLines[0]!.trimStart();
+  }
 
   // Build result
   const resultLines = [
     ...contentLines.slice(0, startLineIdx),
-    ...newLines,
-    ...contentLines.slice(startLineIdx + oldLineCount),
+    ...adjustedNewLines,
+    ...contentLines.slice(startLineIdx + oldTrimmed.length),
   ];
   const newContent = resultLines.join("\n");
   const startLine = startLineIdx + 1; // 1-indexed
-  const endLine = startLineIdx + oldLineCount; // 1-indexed
+  const endLine = startLineIdx + adjustedNewLines.length; // 1-indexed
 
   return {
     newContent,

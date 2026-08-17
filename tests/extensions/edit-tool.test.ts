@@ -172,6 +172,127 @@ describe('EditTool.execute — line-trimmed fallback', () => {
       )
     ).rejects.toThrow(/text not found in file/);
   });
+
+  it('multi-line match with different indentation does not duplicate or drop lines', async () => {
+    const filePath = path.join(dir, 'file.txt');
+    fsSync.writeFileSync(
+      filePath,
+      'function outer() {\n' +
+        '    const a = 1;\n' +
+        '    const b = 2;\n' +
+        '    if (a > b) {\n' +
+        '        console.log("a wins");\n' +
+        '    } else {\n' +
+        '        console.log("b wins");\n' +
+        '    }\n' +
+        '}\n'
+    );
+
+    const tool = new EditTool({ maxEditInputSize: 16000 });
+    await tool.execute(
+      {
+        path: 'file.txt',
+        oldString:
+          'if (a > b) {\n' +
+          'console.log("a wins");\n' +
+          '} else {\n' +
+          'console.log("b wins");\n' +
+          '}',
+        newString:
+          'if (a > b) {\n' +
+          'console.log("A WINS");\n' +
+          '} else {\n' +
+          'console.log("B WINS");\n' +
+          '}',
+      },
+      toolCtx({ workspaceRoot: dir })
+    );
+
+    const result = fsSync.readFileSync(filePath, 'utf-8');
+    // No duplicated lines
+    expect(result.split('\n').filter((l) => l.trim() === 'if (a > b) {')).toHaveLength(1);
+    // Closing brace of the function is preserved
+    expect(result.endsWith('}\n')).toBe(true);
+    // Replacement applied
+    expect(result).toContain('console.log("A WINS")');
+    expect(result).toContain('console.log("B WINS")');
+  });
+
+  it('multi-line match with less indentation than file preserves the file\'s indent', async () => {
+    const filePath = path.join(dir, 'file.txt');
+    fsSync.writeFileSync(
+      filePath,
+      'function outer() {\n' +
+        '    const a = 1;\n' +
+        '    if (a > b) {\n' +
+        '        console.log("a wins");\n' +
+        '    } else {\n' +
+        '        console.log("b wins");\n' +
+        '    }\n' +
+        '}\n'
+    );
+
+    const tool = new EditTool({ maxEditInputSize: 16000 });
+    await tool.execute(
+      {
+        path: 'file.txt',
+        oldString:
+          'if (a > b) {\n' +
+          '  console.log("a wins");\n' +
+          '} else {\n' +
+          '  console.log("b wins");\n' +
+          '}',
+        newString:
+          'if (a > b) {\n' +
+          '  console.log("A WINS!");\n' +
+          '} else {\n' +
+          '  console.log("B WINS!");\n' +
+          '}',
+      },
+      toolCtx({ workspaceRoot: dir })
+    );
+
+    const result = fsSync.readFileSync(filePath, 'utf-8');
+    // First line of the replacement gets the file's original indentation
+    expect(result).toContain('    if (a > b) {\n');
+    // The rest is inserted as-is (no per-line re-indenting)
+    expect(result).toContain('  console.log("A WINS!");\n');
+    expect(result.split('\n').filter((l) => l.trim() === 'if (a > b) {')).toHaveLength(1);
+  });
+
+  it('multi-line match at file start works', async () => {
+    const filePath = path.join(dir, 'file.txt');
+    fsSync.writeFileSync(filePath, 'alpha\nbeta\ngamma\ndelta');
+
+    const tool = new EditTool({ maxEditInputSize: 16000 });
+    await tool.execute(
+      {
+        path: 'file.txt',
+        oldString: 'alpha\nbeta',
+        newString: 'one\ntwo',
+      },
+      toolCtx({ workspaceRoot: dir })
+    );
+
+    expect(fsSync.readFileSync(filePath, 'utf-8')).toBe('one\ntwo\ngamma\ndelta');
+  });
+
+  it('multi-line match at file end works', async () => {
+    const filePath = path.join(dir, 'file.txt');
+    fsSync.writeFileSync(filePath, 'alpha\nbeta\ngamma\ndelta');
+
+    const tool = new EditTool({ maxEditInputSize: 16000 });
+    await tool.execute(
+      {
+        path: 'file.txt',
+        oldString: 'gamma\ndelta',
+        newString: 'three\nfour',
+      },
+      toolCtx({ workspaceRoot: dir })
+    );
+
+    expect(fsSync.readFileSync(filePath, 'utf-8')).toBe('alpha\nbeta\nthree\nfour');
+  });
 });
 
 // ── execute: error cases ────────────────────────────────────────────────────

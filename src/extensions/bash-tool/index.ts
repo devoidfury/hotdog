@@ -236,7 +236,7 @@ export class BashTool {
 
 function filterEnvVar(key: string) {
   const KEY = key.toUpperCase();
-  return (
+  return !(
     KEY.includes("HOTDOG") ||
     KEY.includes("_ID") ||
     KEY.includes("LOGIN") ||

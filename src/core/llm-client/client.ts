@@ -6,18 +6,7 @@ import { ToolDef } from "../extensions/tool-registry.ts";
 import { hotdogFetch } from "@utils/fetch.ts";
 
 import pkg from "@package.json" with { type: "json" };
-
-export interface ProviderConfig {
-  name: string;
-  url: string;
-  apiKey?: string | null;
-}
-
-export interface ModelConfig {
-  name: string;
-  temperature: number | null;
-  reasoningEffort?: string | null;
-}
+import { ModelConfig, ProviderDef } from "@core/config/providers.ts";
 
 export interface LlmClientOptions {
   baseUrl?: string | null;
@@ -25,7 +14,7 @@ export interface LlmClientOptions {
   sessionId?: string;
   loud?: boolean;
   stream?: boolean;
-  providers?: ProviderConfig[];
+  providers?: ProviderDef[];
   cancelled?: boolean;
   markerMangler?: MarkerMangler | null;
 }
@@ -51,7 +40,7 @@ export class LlmClient {
   chatTimeoutSecs: number;
   maxRetries: number;
   stream: boolean;
-  providers: ProviderConfig[];
+  providers: ProviderDef[];
   cancelled: boolean;
   #mangler: MarkerMangler | null;
 
@@ -65,10 +54,7 @@ export class LlmClient {
     this.stream = options.stream !== false;
     this.providers = options.providers || [];
     this.cancelled = false;
-    this.#mangler =
-      options.markerMangler !== undefined
-        ? options.markerMangler
-        : new MarkerMangler();
+    this.#mangler = options.markerMangler !== undefined ? options.markerMangler : new MarkerMangler();
   }
 
   get markerMangler(): MarkerMangler | null {
@@ -116,9 +102,8 @@ export class LlmClient {
       // the agent should use. Mangling them breaks the contract.
       if (msg.role === "system") return msg;
       const toJSON = (msg as { toJSON?: () => Record<string, unknown> }).toJSON;
-      const json = typeof toJSON === "function"
-        ? (toJSON as () => Record<string, unknown>).call(msg)
-        : { ...msg };
+      const json =
+        typeof toJSON === "function" ? (toJSON as () => Record<string, unknown>).call(msg) : { ...msg };
       if (json.content != null) {
         if (Array.isArray(json.content)) {
           json.content = (json.content as Array<Record<string, unknown>>).map((part) => {
@@ -141,7 +126,10 @@ export class LlmClient {
               (clonedTc.function as Record<string, unknown>).name = mangler.escape(
                 (clonedTc.function as Record<string, unknown>).name as string,
               );
-            if (clonedTc.function && typeof (clonedTc.function as Record<string, unknown>).arguments === "string")
+            if (
+              clonedTc.function &&
+              typeof (clonedTc.function as Record<string, unknown>).arguments === "string"
+            )
               (clonedTc.function as Record<string, unknown>).arguments = mangler.escape(
                 (clonedTc.function as Record<string, unknown>).arguments as string,
               );
@@ -186,19 +174,6 @@ export class LlmClient {
     return request;
   }
 
-  async *chatStream(
-    messages: Array<Record<string, unknown>>,
-    model: string,
-    tools: Array<ToolDef> = [],
-    sessionId?: string,
-  ): AsyncGenerator<StreamEvent> {
-    const modelConfig: ModelConfig = {
-      name: model,
-      temperature: null,
-    };
-    yield* this.chatStreamWithModelConfig(messages, modelConfig, tools, sessionId);
-  }
-
   async *chatStreamCancellable(
     messages: Array<Record<string, unknown>>,
     modelConfig: ModelConfig,
@@ -239,13 +214,9 @@ export class LlmClient {
           this.chatTimeoutSecs * 1000,
         );
 
-      const response = await retryWithBackoff<Response>(
-        doRequestWithTimeout,
-        this.maxRetries,
-        {
-          signal: abortController.signal,
-        },
-      );
+      const response = await retryWithBackoff<Response>(doRequestWithTimeout, this.maxRetries, {
+        signal: abortController.signal,
+      });
 
       yield* this._processSSE(response);
     } finally {
@@ -274,10 +245,7 @@ export class LlmClient {
    * `AbortError` (DOMException) for a manual `controller.abort()`.
    */
   static isAbortError(e: unknown): boolean {
-    return (
-      e instanceof Error &&
-      (e.name === "AbortError" || e.name === "TimeoutError")
-    );
+    return e instanceof Error && (e.name === "AbortError" || e.name === "TimeoutError");
   }
 
   async _doRequest(
@@ -321,9 +289,7 @@ export class LlmClient {
           throw LlmError.Cancelled("request was cancelled");
         }
         if (timeoutMs != null) {
-          throw LlmError.Timeout(
-            `Chat request timed out after ${Math.round(timeoutMs / 1000)}s`,
-          );
+          throw LlmError.Timeout(`Chat request timed out after ${Math.round(timeoutMs / 1000)}s`);
         }
         throw LlmError.Cancelled("request was aborted");
       }
@@ -340,13 +306,9 @@ export class LlmClient {
 
   async *_processSSE(response: Response): AsyncGenerator<StreamEvent> {
     const contentType =
-      typeof response.headers?.get === "function"
-        ? response.headers.get("content-type") || ""
-        : "";
+      typeof response.headers?.get === "function" ? response.headers.get("content-type") || "" : "";
     const isSse =
-      contentType.includes("text/event-stream") ||
-      contentType.includes("text/plain") ||
-      contentType === "";
+      contentType.includes("text/event-stream") || contentType.includes("text/plain") || contentType === "";
 
     if (!isSse) {
       try {
@@ -354,9 +316,7 @@ export class LlmClient {
         yield* this._parseStreamData(data);
         return;
       } catch {
-        throw LlmError.InvalidResponse(
-          `Unexpected Content-Type: ${contentType}`,
-        );
+        throw LlmError.InvalidResponse(`Unexpected Content-Type: ${contentType}`);
       }
     }
 

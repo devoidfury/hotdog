@@ -1,7 +1,13 @@
 import { describe, it, expect, beforeEach, afterEach } from "bun:test";
-import { LlmClient, type ModelConfig } from "../../src/core/llm-client/client.ts";
+import { LlmClient } from "../../src/core/llm-client/client.ts";
+import type { ModelConfig } from "../../src/core/config/providers.ts";
 import { LlmError } from "../../src/core/error.ts";
 import { Message } from "../../src/core/context/message.ts";
+
+/** Build a valid ModelConfig (requires contextLimit + tags now). */
+function mc(overrides: Partial<ModelConfig> = {}): ModelConfig {
+  return { name: "gpt-4", temperature: null, contextLimit: 128000, tags: [], ...overrides };
+}
 
 describe("LlmClient constructor", () => {
   it("creates with defaults", () => {
@@ -53,7 +59,7 @@ describe("LlmClient.resolveProviderSettings", () => {
       chatTimeoutSecs: 600,
       maxRetries: 12,
       providers: [
-        { name: "openai", url: "http://openai.com", apiKey: "openai-key" },
+        { name: "openai", url: "http://openai.com", apiKey: "openai-key", models: [] },
       ],
     });
     const settings = client.resolveProviderSettings("openai/gpt-4");
@@ -67,7 +73,7 @@ describe("LlmClient.resolveProviderSettings", () => {
       apiKey: "default-key",
       chatTimeoutSecs: 600,
       maxRetries: 12,
-      providers: [{ name: "openai", url: "http://openai.com" }],
+      providers: [{ name: "openai", url: "http://openai.com", models: [] }],
     });
     const settings = client.resolveProviderSettings("openai/gpt-4");
     expect(settings.url).toBe("http://openai.com");
@@ -81,7 +87,7 @@ describe("LlmClient.buildChatRequest", () => {
     const messages = [new Message({ role: "user", content: "Hello" })] as unknown as Record<string, unknown>[];
     const request = client.buildChatRequest(
       messages,
-      { name: "gpt-4", temperature: 0.7 },
+      mc({ temperature: 0.7 }),
       [{ type: "function", function: { name: "bash", description: "Run bash", parameters: { type: "object", properties: {}, required: [] } } }],
     );
     expect(request.model).toBe("gpt-4");
@@ -96,10 +102,7 @@ describe("LlmClient.buildChatRequest", () => {
     const client = new LlmClient({ chatTimeoutSecs: 600, maxRetries: 12 });
     const request = client.buildChatRequest(
       [],
-      {
-        name: "anthropic/claude-sonnet-4-20250514",
-        temperature: null,
-      },
+      mc({ name: "anthropic/claude-sonnet-4-20250514" }),
       null,
     );
     expect(request.model).toBe("claude-sonnet-4-20250514");
@@ -109,7 +112,7 @@ describe("LlmClient.buildChatRequest", () => {
     const client = new LlmClient({ chatTimeoutSecs: 600, maxRetries: 12 });
     const request = client.buildChatRequest(
       [],
-      { name: "gpt-4", temperature: null },
+      mc(),
       null,
       false,
     );
@@ -126,7 +129,7 @@ describe("LlmClient.buildChatRequest", () => {
     });
     const request = client.buildChatRequest(
       [msg] as unknown as Record<string, unknown>[],
-      { name: "gpt-4", temperature: null },
+      mc(),
       null,
     );
     const msgs = request.messages as unknown as { tool_calls: unknown }[];
@@ -149,7 +152,7 @@ describe("LlmClient.buildChatRequest", () => {
     });
     const request = client.buildChatRequest(
       [msg] as unknown as Record<string, unknown>[],
-      { name: "gpt-4", temperature: null },
+      mc(),
       null,
     );
     const msgs = request.messages as unknown as { tool_calls: { function: { name: string; arguments: string } }[] }[];
@@ -169,7 +172,7 @@ describe("LlmClient.buildChatRequest", () => {
     });
     const request = client.buildChatRequest(
       [msg] as unknown as Record<string, unknown>[],
-      { name: "gpt-4", temperature: null },
+      mc(),
       null,
     );
     const msgs2 = request.messages as unknown as { tool_call_id: string }[];
@@ -178,7 +181,7 @@ describe("LlmClient.buildChatRequest", () => {
 
   it("does not include tools fields when no tools provided", () => {
     const client = new LlmClient({ chatTimeoutSecs: 600, maxRetries: 12 });
-    const request = client.buildChatRequest([], { name: "gpt-4", temperature: null } as ModelConfig, []);
+    const request = client.buildChatRequest([], mc(), []);
     expect(request.tools).toBeUndefined();
     expect(request.tool_choice).toBeUndefined();
     expect(request.parallel_tool_calls).toBeUndefined();
@@ -186,15 +189,15 @@ describe("LlmClient.buildChatRequest", () => {
 
   it("does not include temperature when null or undefined", () => {
     const client = new LlmClient({ chatTimeoutSecs: 600, maxRetries: 12 });
-    const req1 = client.buildChatRequest([], { name: "gpt-4", temperature: null } as ModelConfig, null);
-    const req2 = client.buildChatRequest([], { name: "gpt-4" } as ModelConfig, null);
+    const req1 = client.buildChatRequest([], mc(), null);
+    const req2 = client.buildChatRequest([], mc({ temperature: undefined }), null);
     expect(req1.temperature).toBeUndefined();
     expect(req2.temperature).toBeUndefined();
   });
 
   it("includes temperature 0", () => {
     const client = new LlmClient({ chatTimeoutSecs: 600, maxRetries: 12 });
-    const request = client.buildChatRequest([], { name: "gpt-4", temperature: 0 } as ModelConfig, null);
+    const request = client.buildChatRequest([], mc({ temperature: 0 }), null);
     expect(request.temperature).toBe(0);
   });
 });
@@ -202,34 +205,14 @@ describe("LlmClient.buildChatRequest", () => {
 describe("LlmClient.buildChatRequest reasoning_effort", () => {
   it("includes reasoning_effort when present in modelConfig", () => {
     const client = new LlmClient({ chatTimeoutSecs: 600, maxRetries: 12 });
-    const request = client.buildChatRequest(
-      [],
-      {
-        name: "gpt-4",
-        temperature: null,
-        reasoningEffort: "high",
-      },
-      null,
-    );
+    const request = client.buildChatRequest([], mc({ reasoningEffort: "high" }), null);
     expect(request.reasoning_effort).toBe("high");
   });
 
-  it("omits reasoning_effort when undefined or null", () => {
+  it("omits reasoning_effort when undefined", () => {
     const client = new LlmClient({ chatTimeoutSecs: 600, maxRetries: 12 });
-    const req1 = client.buildChatRequest(
-      [],
-      { name: "gpt-4", temperature: null },
-      null,
-    );
-    const req2 = client.buildChatRequest(
-      [],
-      {
-        name: "gpt-4",
-        temperature: null,
-        reasoningEffort: null,
-      },
-      null,
-    );
+    const req1 = client.buildChatRequest([], mc(), null);
+    const req2 = client.buildChatRequest([], mc({ reasoningEffort: undefined }), null);
     expect(req1.reasoning_effort).toBeUndefined();
     expect(req2.reasoning_effort).toBeUndefined();
   });
@@ -237,15 +220,7 @@ describe("LlmClient.buildChatRequest reasoning_effort", () => {
   it("supports all reasoning effort values", () => {
     const client = new LlmClient({ chatTimeoutSecs: 600, maxRetries: 12 });
     for (const v of ["none", "minimal", "low", "high", "xhigh", "max"]) {
-      const request = client.buildChatRequest(
-        [],
-        {
-          name: "gpt-4",
-          temperature: null,
-          reasoningEffort: v,
-        },
-        null,
-      );
+      const request = client.buildChatRequest([], mc({ reasoningEffort: v }), null);
       expect(request.reasoning_effort).toBe(v);
     }
   });
@@ -289,7 +264,7 @@ describe("LlmClient array content escaping", () => {
     };
     const request = client.buildChatRequest(
       [msg],
-      { name: "gpt-4", temperature: null },
+      mc(),
       null,
     );
     const msgs = request.messages as unknown as { content: Array<{ type: string; text?: string }> }[];
@@ -473,7 +448,7 @@ describe("LlmClient.chatStreamWithModelConfig", () => {
     const events = [];
     for await (const event of client.chatStreamWithModelConfig(
       [{ role: "user", content: "Hi" }],
-      { name: "gpt-4", temperature: 0.7 },
+      mc({ temperature: 0.7 }),
     )) {
       events.push(event);
     }

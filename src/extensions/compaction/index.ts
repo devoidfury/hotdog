@@ -38,18 +38,15 @@ interface CompactionSettings {
 /**
  * Resolve the model config from the agent's model registry.
  */
-function getModelConfig(modelRegistry: Record<string, ModelConfig>, modelName: string): { name: string; temperature: number | null; contextLimit: number; reasoningEffort?: string } | null {
+function getModelConfig(modelRegistry: Record<string, ModelConfig>, modelName: string): ModelConfig {
   const entry = findModelEntry(modelName, modelRegistry);
-  if (!entry) return null;
+  if (!entry) {
+    throw new Error(`Model "${modelName}" not found in registry`);
+  }
   if (typeof entry.contextLimit !== "number" || entry.contextLimit <= 0) {
     throw new Error(`Model "${modelName}" missing contextLimit in registry`);
   }
-  return {
-    name: entry.name || modelName,
-    temperature: entry.temperature ?? null,
-    contextLimit: entry.contextLimit,
-    reasoningEffort: entry.reasoningEffort,
-  };
+  return entry;
 }
 
 /**
@@ -122,7 +119,7 @@ export function create(core: CoreContext): ExtensionInstance | null {
       );
       const stream = agent.llmClient.chatStreamCancellable(
         wrapped.map((m) => m.toJSON()),
-        modelConfig ?? { name: chatModel, temperature: null },
+        modelConfig,
         [],
         abortController.signal,
         agent.sessionId,
@@ -244,9 +241,6 @@ export function create(core: CoreContext): ExtensionInstance | null {
         const estimatedTokens = estimateContextTokens(nonSystemMessages);
         const reserveTokens = settings.reserveTokens;
         const modelConfig = getModelConfig(agent.modelRegistry, agent.model);
-        if (!modelConfig) {
-          throw new Error(`Model "${agent.model}" not found in registry`);
-        }
         const contextLimit = modelConfig.contextLimit;
 
         if (estimatedTokens <= contextLimit - reserveTokens) return;

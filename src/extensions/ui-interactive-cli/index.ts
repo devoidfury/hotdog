@@ -2,22 +2,22 @@
 
 import readline from "node:readline";
 import { spawn } from "node:child_process";
-import { parseCommand, Command, ACTIONS } from "../../core/commands.ts";
-import { HOOKS } from "../../core/hooks.ts";
-import { CliOutputSink } from "../../utils/cli/cli.ts";
-import { LlmClient, type ProviderConfig } from "../../core/llm-client/client.ts";
-import { MarkerMangler } from "../../core/marker-mangler.ts";
-import { SessionManager, type AgentLike } from "../../core/session/index.ts";
-import { Agent } from "../../core/agent.ts";
+import { parseCommand, Command, ACTIONS } from "@core/commands.ts";
+import { HOOKS } from "@core/hooks.ts";
+import { CliOutputSink } from "@utils/cli/cli.ts";
+import { LlmClient } from "@core/llm-client/client.ts";
+import { MarkerMangler } from "@core/marker-mangler.ts";
+import { SessionManager, type AgentLike } from "@core/session/index.ts";
+import { Agent } from "@core/agent.ts";
 import { CliChannel } from "./cli-channel.ts";
 import pkg from "@package.json" with { type: "json" };
 import {
   readSessionEntries,
   sessionExists,
   replayEntriesIntoContext,
-} from "../../core/session/session-log.ts";
-import { CoreContext, ExtensionInstance } from "../../core/extensions/types.ts";
-import { ExtensionError } from "../../core/error.ts";
+} from "@core/session/session-log.ts";
+import { CoreContext, ExtensionInstance } from "@core/extensions/types.ts";
+import { ExtensionError } from "@core/error.ts";
 import {
   parseCompletionContext,
   registerSlashCommandNameCompletion,
@@ -25,8 +25,8 @@ import {
   registerShellCompletion,
   buildReadlineCompleter,
 } from "./completions.ts";
-import type { CliArgv } from "../../core/config/index.ts";
-import type { ModelConfig } from "../../core/config/providers.ts";
+import type { CliArgv } from "@core/config/index.ts";
+import type { ModelConfig, ProviderDef } from "@core/config/providers.ts";
 
 export {
   parseCompletionContext,
@@ -439,7 +439,7 @@ export async function runInteractiveSession(
     stream: resolved.stream,
     chatTimeoutSecs: resolved.chatTimeout,
     maxRetries: resolved.maxRetries,
-    providers: (config.providers as ProviderConfig[]) || [],
+    providers: (config.providers as ProviderDef[]) || [],
     markerMangler: new MarkerMangler(),
   });
 

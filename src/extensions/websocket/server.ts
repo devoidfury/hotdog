@@ -4,15 +4,12 @@ import { SessionManager, type AgentLike } from "../../core/session/index.ts";
 import type { SwitchProfile } from "../../core/config/profiles.ts";
 import { WebSocketChannel } from "./websocket-channel.ts";
 import { C2S, S2C, C2SMessage } from "./protocol.ts";
-import {
-  LlmClient,
-  type ProviderConfig,
-} from "../../core/llm-client/client.ts";
+import { LlmClient } from "../../core/llm-client/client.ts";
 import { MarkerMangler } from "../../core/marker-mangler.ts";
 import type { CoreContext } from "../../core/extensions/types.ts";
 import type { AuthMiddleware } from "./auth.ts";
 import { Agent } from "../../core/agent.ts";
-import type { ModelConfig } from "../../core/config/providers.ts";
+import type { ProviderDef } from "../../core/config/providers.ts";
 import {
   readSessionEntries,
   replayEntriesIntoContext,
@@ -1000,7 +997,7 @@ export function createWsServer(
     stream: core.resolved?.stream !== false,
     chatTimeoutSecs: core.resolved?.chatTimeout || 30,
     maxRetries: core.resolved?.maxRetries as number,
-    providers: core.config?.providers as ProviderConfig[] | undefined,
+    providers: core.config?.providers as ProviderDef[] | undefined,
     markerMangler: new MarkerMangler(),
   });
 

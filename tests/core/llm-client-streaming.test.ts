@@ -2,7 +2,12 @@
 
 import { describe, it, expect, beforeEach, afterEach } from "bun:test";
 import { LlmClient } from "../../src/core/llm-client/client.ts";
+import type { ModelConfig } from "../../src/core/config/providers.ts";
 import { LlmError } from "../../src/core/error.ts";
+
+function mc(overrides: Partial<ModelConfig> = {}): ModelConfig {
+  return { name: "test-model", temperature: null, contextLimit: 128000, tags: [], ...overrides };
+}
 
 describe("LlmClient.ping", () => {
   let originalFetch: typeof globalThis.fetch;

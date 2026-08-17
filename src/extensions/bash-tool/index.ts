@@ -55,42 +55,29 @@ export class BashTool {
   }
 
   toToolDef() {
-    return toolDef(
-      BashTool.TOOL_NAME,
-      `Execute a bash command from the current working directory.`,
-      {
-        properties: {
-          command: param("string", "The shell command to execute."),
-          timeoutMs: param("integer", "Optional timeout in milliseconds.", {
-            default: this.timeoutMs,
-          }),
-        },
-        required: ["command"],
+    return toolDef(BashTool.TOOL_NAME, `Execute a bash command from the current working directory.`, {
+      properties: {
+        command: param("string", "The shell command to execute."),
+        timeoutMs: param("integer", "Optional timeout in milliseconds.", {
+          default: this.timeoutMs,
+        }),
       },
-    );
+      required: ["command"],
+    });
   }
 
   callDisplay(input: string | Record<string, unknown> | null): string {
-    return defaultCallDisplay(
-      input,
-      (args: Record<string, unknown>) => `bash: ${args.command as string}`,
-    );
+    return defaultCallDisplay(input, (args: Record<string, unknown>) => `bash: ${args.command as string}`);
   }
 
-  async execute(
-    input: string | Record<string, unknown> | null,
-    ctx: ToolContext,
-  ): Promise<ToolResult> {
+  async execute(input: string | Record<string, unknown> | null, ctx: ToolContext): Promise<ToolResult> {
     const args = parseToolInput(input);
     if (!args) {
       return ToolResult.err("Error parsing arguments");
     }
     const command = args.command as string;
     // Support both camelCase (timeoutMs) and snake_case (timeout_ms)
-    const timeout =
-      (args.timeoutMs as number) ??
-      (args.timeout_ms as number) ??
-      this.timeoutMs;
+    const timeout = (args.timeoutMs as number) ?? (args.timeout_ms as number) ?? this.timeoutMs;
 
     if (!command) {
       return ToolResult.err("Error: command is required");
@@ -105,11 +92,10 @@ export class BashTool {
         detached: IS_POSIX,
         stdio: ["pipe", "pipe", "pipe"],
         env: {
-          ...process.env,
+          ...copyEnvForTool(),
           // enable agent-friendly test output in bun test, maybe others
-          // https://bun.com/docs/test#ai-agent-integration
-          AGENT: "1",
-          CLAUDECODE: "1",
+          AGENT: "hotdog",
+          HOTDOG: "1",
           // prior art -- used for automated builds, exporting this ensures
           // that compilers, interactive CLIs, and scripts suppress blocking
           // prompt traps (Press any key to continue...), escape sequences, colors
@@ -120,6 +106,9 @@ export class BashTool {
           GIT_TERMINAL_PROMPT: "0",
           GIT_EDITOR: "cat",
           GIT_PAGER: "cat",
+          // this is only here because it changes some behavior in programs like bun test to be more desirable.
+          // https://bun.com/docs/test#ai-agent-integration
+          CLAUDECODE: "1",
         },
       });
 
@@ -230,10 +219,7 @@ export class BashTool {
         const truncated = truncateOutput(output, this.maxOutputLines);
         finish(
           ToolResult.ok(truncated).withEntries({
-            command:
-              cmdFirstLine.length > 60
-                ? cmdFirstLine.slice(0, 60) + "…"
-                : cmdFirstLine,
+            command: cmdFirstLine.length > 60 ? cmdFirstLine.slice(0, 60) + "…" : cmdFirstLine,
             exit_code: String(code),
           }),
         );
@@ -246,6 +232,27 @@ export class BashTool {
       });
     });
   }
+}
+
+function filterEnvVar(key: string) {
+  const KEY = key.toUpperCase();
+  return (
+    KEY.includes("HOTDOG") ||
+    KEY.includes("_ID") ||
+    KEY.includes("LOGIN") ||
+    KEY.includes("URL") ||
+    KEY.includes("SECRET") ||
+    KEY.includes("TOKE") ||
+    KEY.includes("PASSW") ||
+    KEY.includes("KEY") ||
+    KEY.includes("SEED") ||
+    KEY.includes("HASH")
+  );
+}
+
+function copyEnvForTool(): NodeJS.ProcessEnv {
+  const envs = Object.entries(process.env);
+  return Object.fromEntries(envs.filter(([k, v]) => filterEnvVar(k)));
 }
 
 // ── Extension Entry Point ───────────────────────────────────────────────────

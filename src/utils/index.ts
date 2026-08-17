@@ -33,6 +33,9 @@ export { camelCase, parseCliFlagKey } from "./strings.ts";
 // ── Gitignore filtering ──────────────────────────────────────────────────────
 export { compileGitignore } from "./gitignore.ts";
 
+// ── Env scrubbing for spawned processes ─────────────────────────────────────
+export { isSensitiveEnvVar, copyScrubbedEnv } from "./env.ts";
+
 // ── Promise utilities ────────────────────────────────────────────────────────
 export { isPromise } from "./promise.ts";
 

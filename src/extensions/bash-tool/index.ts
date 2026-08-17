@@ -18,6 +18,7 @@ import {
   ToolContext,
   getExtensionConfig,
 } from "../../core/extensions/types.ts";
+import { copyScrubbedEnv } from "../../utils/env.ts";
 
 /**
  * Hard cap on in-memory output buffering per stream. truncateOutput()
@@ -92,7 +93,7 @@ export class BashTool {
         detached: IS_POSIX,
         stdio: ["pipe", "pipe", "pipe"],
         env: {
-          ...copyEnvForTool(),
+          ...copyScrubbedEnv(),
           // enable agent-friendly test output in bun test, maybe others
           AGENT: "hotdog",
           HOTDOG: "1",
@@ -232,27 +233,6 @@ export class BashTool {
       });
     });
   }
-}
-
-function filterEnvVar(key: string) {
-  const KEY = key.toUpperCase();
-  return !(
-    KEY.includes("HOTDOG") ||
-    KEY.includes("_ID") ||
-    KEY.includes("LOGIN") ||
-    KEY.includes("URL") ||
-    KEY.includes("SECRET") ||
-    KEY.includes("TOKE") ||
-    KEY.includes("PASSW") ||
-    KEY.includes("KEY") ||
-    KEY.includes("SEED") ||
-    KEY.includes("HASH")
-  );
-}
-
-function copyEnvForTool(): NodeJS.ProcessEnv {
-  const envs = Object.entries(process.env);
-  return Object.fromEntries(envs.filter(([k, v]) => filterEnvVar(k)));
 }
 
 // ── Extension Entry Point ───────────────────────────────────────────────────

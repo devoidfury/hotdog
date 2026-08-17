@@ -419,6 +419,32 @@ describe("StdioTransport", () => {
     expect(receivedLines).toEqual(["line1", "line2", "line3"]);
   });
 
+  it("scrubs sensitive process env vars from the subprocess environment", async () => {
+    process.env.HOTDOG_TEST_FAKE_TOKEN = "should-not-leak";
+    process.env.TEST_SCRUB_SAFE_VAR = "safe-value";
+    try {
+      const transport = new StdioTransport(
+        "bun",
+        ["-e", "console.log(JSON.stringify({secret: process.env.HOTDOG_TEST_FAKE_TOKEN ?? 'ABSENT', safe: process.env.TEST_SCRUB_SAFE_VAR ?? 'ABSENT', override: process.env.TEST_SCRUB_OVERRIDE ?? 'ABSENT'}))"],
+        { TEST_SCRUB_OVERRIDE: "explicit" },
+      );
+      const lines: string[] = [];
+      const removeHandler = transport.onMessage((line) => lines.push(line));
+      await new Promise((r) => setTimeout(r, 100));
+      removeHandler();
+      await transport.destroy();
+
+      const data = JSON.parse(lines[0]!);
+      expect(data.secret).toBe("ABSENT");
+      expect(data.safe).toBe("safe-value");
+      // Caller-supplied env (user config) is trusted and merged on top.
+      expect(data.override).toBe("explicit");
+    } finally {
+      delete process.env.HOTDOG_TEST_FAKE_TOKEN;
+      delete process.env.TEST_SCRUB_SAFE_VAR;
+    }
+  });
+
   it("skips empty lines", async () => {
     const transport = new StdioTransport("bun", ["-e", "console.log(''); console.log(''); console.log('line'); console.log('');"]);
     const receivedLines: string[] = [];

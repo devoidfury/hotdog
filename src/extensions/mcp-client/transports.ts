@@ -5,6 +5,7 @@
 import { spawn, ChildProcess } from "node:child_process";
 import { logger } from "../../core/logger.ts";
 import { formatError } from "../../core/error.ts";
+import { copyScrubbedEnv } from "../../utils/env.ts";
 import { McpError } from "./client.ts";
 import { jsonRpcNotification } from "./types.ts";
 import { hotdogFetch } from "@utils/fetch.ts";
@@ -100,9 +101,12 @@ export class StdioTransport implements McpTransport {
     this.#args = args;
     this.#env = env;
 
+    // Base env is scrubbed (no LLM API keys etc. in a third-party server's
+    // environment); caller-supplied env from config is user-trusted and
+    // merged on top.
     this.#child = spawn(command, args, {
       stdio: ["pipe", "pipe", "pipe"],
-      env: { ...process.env, ...env },
+      env: { ...copyScrubbedEnv(), ...env },
     });
 
     this.#writeStream = this.#child.stdin;

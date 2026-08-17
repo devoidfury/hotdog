@@ -576,6 +576,94 @@ describe("createWsServer - additional coverage", () => {
     expect(allTypes).toContain("authError");
   });
 
+  it("rejects non-AUTH messages when auth is enabled and no token is validated (auth gate)", async () => {
+    const core = createWsMockCore();
+    const mockAuth = {
+      validateToken: (token: string) => token === "valid-token",
+    };
+    wsServer = createWsServer(core, {
+      buildAgent: createWsMockAgentFactory(),
+      auth: mockAuth as never,
+    });
+
+    const ws = createWsMockWs() as unknown as HotdogServerSocket;
+    // Connect without token -- socket stays open awaiting protocol AUTH.
+    wsServer.onUpgrade({ url: "/ws", headers: { host: "localhost" } }, ws);
+
+    // Non-AUTH message before auth must be gated, not routed.
+    wsServer.onMessage(ws, JSON.stringify({ type: "listSessions" }));
+    await new Promise((r) => setTimeout(r, 20));
+
+    const types = (ws as MockWs).messages
+      .filter((m) => m && m !== "undefined")
+      .map((m) => {
+        try { return JSON.parse(m).type; } catch { return null; }
+      })
+      .filter(Boolean);
+    expect(types).toContain("authError");
+    expect(types).not.toContain("sessions");
+    expect(types).not.toContain("sessionCreated");
+  });
+
+  it("allows messages after successful protocol AUTH", async () => {
+    const core = createWsMockCore();
+    const mockAuth = {
+      validateToken: (token: string) => token === "valid-token",
+    };
+    wsServer = createWsServer(core, {
+      buildAgent: createWsMockAgentFactory(),
+      auth: mockAuth as never,
+    });
+
+    const ws = createWsMockWs() as unknown as HotdogServerSocket;
+    wsServer.onUpgrade({ url: "/ws", headers: { host: "localhost" } }, ws);
+
+    wsServer.onMessage(ws, JSON.stringify({ type: "auth", token: "valid-token" }));
+    await new Promise((r) => setTimeout(r, 50));
+
+    wsServer.onMessage(ws, JSON.stringify({ type: "listSessions" }));
+    await new Promise((r) => setTimeout(r, 20));
+
+    const types = (ws as MockWs).messages
+      .filter((m) => m && m !== "undefined")
+      .map((m) => {
+        try { return JSON.parse(m).type; } catch { return null; }
+      })
+      .filter(Boolean);
+    expect(types).toContain("authOk");
+    expect(types).toContain("sessions");
+  });
+
+  it("keeps gating non-AUTH messages after a failed protocol AUTH", async () => {
+    const core = createWsMockCore();
+    const mockAuth = {
+      validateToken: (token: string) => token === "valid-token",
+    };
+    wsServer = createWsServer(core, {
+      buildAgent: createWsMockAgentFactory(),
+      auth: mockAuth as never,
+    });
+
+    const ws = createWsMockWs() as unknown as HotdogServerSocket;
+    wsServer.onUpgrade({ url: "/ws", headers: { host: "localhost" } }, ws);
+
+    wsServer.onMessage(ws, JSON.stringify({ type: "auth", token: "bad-token" }));
+    await new Promise((r) => setTimeout(r, 20));
+
+    wsServer.onMessage(ws, JSON.stringify({ type: "createSession" }));
+    await new Promise((r) => setTimeout(r, 20));
+
+    const types = (ws as MockWs).messages
+      .filter((m) => m && m !== "undefined")
+      .map((m) => {
+        try { return JSON.parse(m).type; } catch { return null; }
+      })
+      .filter(Boolean);
+    // authError from the failed AUTH, then authError from the gate.
+    expect(types.filter((t) => t === "authError").length).toBeGreaterThanOrEqual(2);
+    expect(types).not.toContain("sessionCreated");
+  });
+
   it("createAndAttachSession handles error", async () => {
     const core = createWsMockCore();
     const failingBuildAgent = async () => {

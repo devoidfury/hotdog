@@ -560,6 +560,15 @@ async function routeMessage(
   registry: SessionRegistry,
   authMiddleware: AuthMiddleware | undefined,
 ): Promise<void> {
+  // Auth gate: when auth is enabled, only the AUTH handshake itself may
+  // pass without a validated token. The token is established either at
+  // upgrade (URL ?token=) or by a successful AUTH message. This makes the
+  // gate hold even for UIs that skip token checks on the HTTP upgrade.
+  if (authMiddleware && !ws.authToken && msg.type !== C2S.AUTH) {
+    ws.send(JSON.stringify({ type: "authError", message: "Authentication required" }));
+    return;
+  }
+
   const sessionManager = registry.getSessionManager();
 
   switch (msg.type) {
@@ -1095,6 +1104,8 @@ export function createWsServer(
       }
       ws.authToken = token;
     } else if (auth && !token) {
+      // Socket stays open so the client can still authenticate via a
+      // protocol AUTH message; routeMessage() gates everything else.
       ws.send(JSON.stringify({ type: "authRequired" }));
       return;
     }

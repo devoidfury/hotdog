@@ -58,57 +58,6 @@ describe("LlmClient.ping", () => {
   });
 });
 
-describe("LlmClient.chatStream", () => {
-  it("yields stream events from chatStreamWithModelConfig", async () => {
-    const client = new LlmClient({ chatTimeoutSecs: 30, maxRetries: 3, baseUrl: "http://test.com" });
-
-    // Override chatStreamWithModelConfig to return known events
-    client.chatStreamWithModelConfig = async function* () {
-      yield { type: "content", content: "Hello" };
-      yield { type: "content", content: " World" };
-    };
-
-    const events = [];
-    for await (const event of client.chatStream(
-      [{ role: "user", content: "Hi" }],
-      "test-model",
-    )) {
-      events.push(event);
-    }
-
-    expect(events).toHaveLength(2);
-    expect((events[0]! as any).content).toBe("Hello");
-  });
-
-  it("passes tools to chatStreamWithModelConfig", async () => {
-    const client = new LlmClient({ chatTimeoutSecs: 30, maxRetries: 3, baseUrl: "http://test.com" });
-    let capturedTools = null;
-
-    client.chatStreamWithModelConfig = async function* (
-      messages,
-      modelConfig,
-      tools,
-    ) {
-      capturedTools = tools;
-    };
-
-    const tools = [{ type: "function", function: { name: "bash", description: "Run bash", parameters: { type: "object", properties: {}, required: [] } } }];
-    const gen = client.chatStream(
-      [{ role: "user", content: "Hi" }],
-      "test-model",
-      tools,
-    );
-
-    // Consume the generator
-    try {
-      for await (const _ of gen) {
-      }
-    } catch {}
-
-    expect(capturedTools!).toBe(tools);
-  });
-});
-
 describe("LlmClient.chatStreamCancellable", () => {
   function makeMsg(role: string, content: string) {
     return { role, content, toJSON: () => ({ role, content }) };
@@ -152,7 +101,7 @@ describe("LlmClient.chatStreamCancellable", () => {
     const client = new LlmClient({ chatTimeoutSecs: 30, maxRetries: 3, baseUrl: "http://test.com" });
     const gen = client.chatStreamCancellable(
       [{ role: "user", content: "Hi" }],
-      { name: "test-model", temperature: null },
+      mc(),
     );
     expect(gen[Symbol.asyncIterator]).toBeDefined();
   });
@@ -163,7 +112,7 @@ describe("LlmClient.chatStreamCancellable", () => {
 
     const gen = client.chatStreamCancellable(
       [makeMsg("user", "Hi")],
-      { name: "test-model", temperature: null },
+      mc(),
       [],
       abortController.signal,
     );
@@ -184,7 +133,7 @@ describe("LlmClient.chatStreamCancellable", () => {
 
     const gen = client.chatStreamCancellable(
       [makeMsg("user", "Hi")],
-      { name: "test-model", temperature: null },
+      mc(),
       [],
       abortController.signal,
     );
@@ -205,7 +154,7 @@ describe("LlmClient.chatStreamCancellable", () => {
 
     const gen = client.chatStreamCancellable(
       [makeMsg("user", "Hi")],
-      { name: "test-model", temperature: null },
+      mc(),
       [],
       null,
     );
@@ -295,7 +244,7 @@ describe("LlmClient.chatStreamCancellable — network errors, timeouts, cancella
     }) as unknown as typeof fetch;
 
     const { events, error } = await collect(
-      client.chatStreamCancellable([makeMsg("user", "Hi")], { name: "test-model", temperature: null }),
+      client.chatStreamCancellable([makeMsg("user", "Hi")], mc()),
     );
 
     expect(error).toBeUndefined();
@@ -313,7 +262,7 @@ describe("LlmClient.chatStreamCancellable — network errors, timeouts, cancella
     }) as unknown as typeof fetch;
 
     const { error } = await collect(
-      client.chatStreamCancellable([makeMsg("user", "Hi")], { name: "test-model", temperature: null }),
+      client.chatStreamCancellable([makeMsg("user", "Hi")], mc()),
     );
 
     expect(calls).toBe(2);
@@ -332,7 +281,7 @@ describe("LlmClient.chatStreamCancellable — network errors, timeouts, cancella
     }) as unknown as typeof fetch;
 
     const { error } = await collect(
-      client.chatStreamCancellable([makeMsg("user", "Hi")], { name: "test-model", temperature: null }),
+      client.chatStreamCancellable([makeMsg("user", "Hi")], mc()),
     );
 
     expect(calls).toBe(1);
@@ -348,7 +297,7 @@ describe("LlmClient.chatStreamCancellable — network errors, timeouts, cancella
     globalThis.fetch = hangingFetch(signalLog);
 
     const { error } = await collect(
-      client.chatStreamCancellable([makeMsg("user", "Hi")], { name: "test-model", temperature: null }),
+      client.chatStreamCancellable([makeMsg("user", "Hi")], mc()),
     );
 
     // Both attempts timed out
@@ -382,7 +331,7 @@ describe("LlmClient.chatStreamCancellable — network errors, timeouts, cancella
     const { error } = await collect(
       client.chatStreamCancellable(
         [makeMsg("user", "Hi")],
-        { name: "test-model", temperature: null },
+        mc(),
         [],
         cancelController.signal,
       ),

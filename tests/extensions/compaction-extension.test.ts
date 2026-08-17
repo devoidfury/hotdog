@@ -858,7 +858,9 @@ describe("/compact Command", () => {
     const compactCmd = commandRegistry.get("compact")!;
 
     const context = makeMessages(20, "x".repeat(100));
-    const agent = createMockAgent(context);
+    const agent = createMockAgent(context, "test-model", {
+      "test-model": { name: "test-model", temperature: null, contextLimit: 32000, tags: [] },
+    });
 
     const result = await (compactCmd!.handler as any)(agent, "compact");
 
@@ -922,7 +924,7 @@ describe("getModelConfig fallback lookup", () => {
     expect(result.error).toBeUndefined();
   });
 
-  it("falls back to default contextLimit when model not found at all", async () => {
+  it("errors when model not found at all", async () => {
     const core = createMockCore({
       enabled: true,
       keepRecentMessages: 2,
@@ -946,10 +948,8 @@ describe("getModelConfig fallback lookup", () => {
     // Agent uses a model name not in the registry
     const agent = createMockAgent(context, "unknown-model", registry);
 
-    const result = await compactCmd.handler!(agent, "compact");
-    // Should succeed with default 128000 contextLimit
-    expect(result).toBeDefined();
-    expect(result.error).toBeUndefined();
+    // getModelConfig is strict: an unresolvable model name is an error, not a fallback.
+    await expect(compactCmd.handler!(agent, "compact")).rejects.toThrow("not found in registry");
   });
 
   it("prefers direct lookup over fallback when model name contains '/'", async () => {

@@ -34,29 +34,52 @@ function makeTestTool(
   };
 }
 
+interface MockDepsOverrides extends Partial<ToolExecutorDeps> {
+  /** Simulates the whitelist that Agent.getToolDefs() applies to tool defs. */
+  toolWhitelist?: string[] | null;
+}
+
 function createMockDeps(
-  overrides: Partial<ToolExecutorDeps> = {},
+  overrides: MockDepsOverrides = {},
 ): ToolExecutorDeps & { addedMessages: Message[]; outputs: Array<{ type: string; data: Record<string, unknown> }> } {
   const toolRegistry = createToolRegistry();
   const hooks = createHooks();
   const addedMessages: Message[] = [];
   const outputs: Array<{ type: string; data: Record<string, unknown> }> = [];
 
+  const state = {
+    // Whitelist applied to the mock's getToolDefs() so it mirrors what
+    // Agent.getToolDefs() returns (registry filtered by whitelist/blacklist).
+    whitelist: overrides.toolWhitelist ?? null,
+  };
+
+  const agent = {
+    sessionId: 'test',
+    addMessage: (msg: Message) => { addedMessages.push(msg); },
+    // ToolExecutor checks the filtered tool defs for availability.
+    getToolDefs: async (): Promise<ToolDef[]> =>
+      Array.from(toolRegistry.getAll())
+        .filter(([name]) => !state.whitelist || state.whitelist.includes(name))
+        .map(([name]) => ({
+          type: 'function',
+          function: {
+            name,
+            description: 'test tool',
+            parameters: { type: 'object', properties: {}, required: [] },
+          },
+        })),
+  } as unknown as import('../../src/core/agent.ts').Agent;
+
   return {
     toolRegistry,
     hooks,
     emitOutput: (type, data) => outputs.push({ type, data }),
-    toolWhitelist: null,
     cwdBoundary: '/workspace',
     workspaceRoot: '/workspace',
     maxRetries: 3,
     toolRetryDelay: 100,
     isRestoring: () => false,
-    // Mirrors Agent.addMessage: records the message (context) for assertions.
-    agent: {
-      sessionId: 'test',
-      addMessage: (msg: Message) => { addedMessages.push(msg); },
-    } as unknown as import('../../src/core/agent.ts').Agent,
+    agent,
     addedMessages,
     outputs,
     ...overrides,
@@ -204,6 +227,10 @@ describe('ToolExecutor', () => {
   describe('unknown tools', () => {
     it('should return error for unknown tool names', async () => {
       const deps = createMockDeps();
+      // The mock's getToolDefs() mirrors Agent.getToolDefs(): in reality the
+      // LLM can only name tools it was offered, so a truly unknown name is
+      // caught by the defs check before reaching the registry lookup.
+      (deps.agent as unknown as { getToolDefs: () => Promise<never[]> }).getToolDefs = async () => [];
       const executor = createToolExecutor(deps);
 
       const result = await executor.execute([{
@@ -212,7 +239,7 @@ describe('ToolExecutor', () => {
         function: { name: 'nonexistent_tool', arguments: '{}' },
       }]);
 
-      expect(result.toolResults[0]!.result).toContain('Unknown tool');
+      expect(result.toolResults[0]!.result).toContain('not available');
     });
   });
 

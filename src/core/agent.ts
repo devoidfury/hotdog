@@ -171,7 +171,6 @@ export class Agent implements AgentLike {
       toolRegistry: options.toolRegistry,
       hooks: options.hooks,
       emitOutput: (type, data) => this.emitOutput(type, data),
-      toolWhitelist: options.toolWhitelist || null,
       cwdBoundary: options.config?.cwdBoundary || null,
       workspaceRoot: options.config?.workspaceRoot || null,
       maxRetries: options.config.maxRetries,

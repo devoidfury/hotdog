@@ -251,10 +251,12 @@ describe('Agent — end-to-end loop', () => {
     expect(completion.content).toBe('The tool was not found.');
     expect(mockLLM.callCount).toBe(2);
 
-    // Verify error was recorded
+    // Verify error was recorded. The defs check (getToolDefs) catches names
+    // the agent was never offered, so the message is "not available" rather
+    // than the old registry-lookup "Unknown tool".
     const toolMsg = agent.log.getAll().find(m => m.role === 'tool');
     expect(toolMsg).toBeTruthy();
-    expect(toolMsg!.content as string).toContain('Unknown tool');
+    expect(toolMsg!.content as string).toContain('not available');
   });
 
   // ── Tool execution error ──────────────────────────────────────────────────

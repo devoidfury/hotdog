@@ -24,7 +24,6 @@ export interface ToolExecutorDeps {
   toolRegistry: ToolRegistry;
   hooks: HookSystem;
   emitOutput<T extends string>(type: T, data: Record<string, unknown>): void;
-  toolWhitelist: string[] | null;
   cwdBoundary: string | null;
   workspaceRoot: string | null;
   maxRetries: number;
@@ -102,10 +101,9 @@ export class ToolExecutor {
       return { toolName: "(invalid)", input, result, toolCallId: toolCallId || "" };
     }
 
-    if (
-      this.#deps.toolWhitelist &&
-      !this.#deps.toolWhitelist.includes(toolName)
-    ) {
+    // check against tool defs list filtered by sandboxMode, maxToolDifficulty, and whitelist/blacklist.
+    const toolDefs = await agent.getToolDefs();
+    if (!toolDefs.some((tool) => tool.function.name === toolName)) {
       const msg = `Tool '${toolName}' is not available for this agent`;
       return this.#writeToolResult(toolName, input, msg, toolCallId);
     }

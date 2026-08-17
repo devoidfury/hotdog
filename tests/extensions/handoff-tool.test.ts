@@ -168,7 +168,6 @@ describe("handoff-tool create() extension", () => {
     expect(ext).toBeDefined();
     expect(ext.hooks).toBeDefined();
     expect(ext.hooks!['tools:register']).toBeDefined();
-    expect(ext.hooks!['systemPrompt:build']).toBeDefined();
     expect(ext.hooks!['turn:end']).toBeDefined();
     expect(ext.HandoffTool).toBe(HandoffTool);
   });
@@ -194,43 +193,6 @@ describe("handoff-tool create() extension", () => {
     expect(registered).toHaveLength(1);
     expect(registered[0]![0]).toBe("handoff");
     expect(registered[0]![1]).toBeInstanceOf(HandoffTool);
-  });
-
-  it("system prompt hook includes handoff instructions when tool is registered", async () => {
-    const ext = create({
-      config: { handoffTool: { systemPrompt: true } },
-    } as unknown as CoreContext);
-    const hooks = ext.hooks! as Record<string, unknown>;
-    const mockAgent = {
-      getToolNames: () => ["handoff", "read", "write"],
-    };
-    const chunk = (hooks[HOOKS.SYSTEM_PROMPT_BUILD] as Function)({ agent: mockAgent });
-    expect(chunk.name).toBe("handoff-tool-instructions");
-    expect(chunk.content).toContain("tool: handoff");
-    expect(chunk.content).toContain("transitioning work phase");
-  });
-
-  it("system prompt hook returns empty when tool is not registered", async () => {
-    const ext = create({
-      config: { handoffTool: { systemPrompt: true } },
-    } as unknown as CoreContext);
-    const hooks = ext.hooks! as Record<string, unknown>;
-    const mockAgent = {
-      getToolNames: () => ["read", "write"], // no "handoff"
-    };
-    const chunk = (hooks[HOOKS.SYSTEM_PROMPT_BUILD] as Function)({ agent: mockAgent });
-    expect(chunk.name).toBe("handoff-tool-instructions");
-    expect(chunk.content).toBe("");
-  });
-
-  it("system prompt hook returns empty when disabled", async () => {
-    const ext = create({
-      config: { handoffTool: { systemPrompt: false } },
-    } as unknown as CoreContext);
-    const hooks = ext.hooks! as Record<string, unknown>;
-    const chunk = (hooks[HOOKS.SYSTEM_PROMPT_BUILD] as Function)({ agent: null });
-    expect(chunk.name).toBe("handoff-tool-instructions");
-    expect(chunk.content).toBe("");
   });
 
   it("TURN_END hook clears context and enqueues handoff content", async () => {

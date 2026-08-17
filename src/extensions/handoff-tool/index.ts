@@ -4,15 +4,10 @@
 // document, then the extension clears the conversation context, rebuilds the
 // system prompt fresh, and enqueues the handoff content as the first user
 // message to start the next phase.
-//
-// Use case: planning → execution, research → implementation, etc.
-// The planning phase collects all context and calls handoff; the execution
-// phase starts with a clean context window but with the full plan.
 
-import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { dirname, join } from "node:path";
-import { HOOKS, type SystemPromptChunk } from "../../core/hooks.ts";
+import { dirname } from "node:path";
+import { HOOKS } from "../../core/hooks.ts";
 import {
   toolDef,
   param,
@@ -28,17 +23,6 @@ import {
   getExtensionConfig,
 } from "../../core/extensions/types.ts";
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = dirname(__filename);
-
-const HANDOFF_SYSTEM_PROMPT = readFileSync(
-  join(__dirname, "handoff_chunk.md"),
-  "utf-8",
-);
-import { Agent } from "../../core/agent.ts";
-
-// ── Types ──────────────────────────────────────────────────────────────────
-
 interface HandoffPayload {
   content: string;
   title?: string;
@@ -50,8 +34,6 @@ interface HandoffState {
   pending: HandoffPayload | null;
 }
 
-// ── Handoff Tool ───────────────────────────────────────────────────────────
-
 export class HandoffTool {
   static readonly TOOL_NAME = "handoff";
   metadata: ToolMetadata = { sideEffects: true, difficulty: 3 };
@@ -61,20 +43,20 @@ export class HandoffTool {
   toToolDef() {
     return toolDef(
       HandoffTool.TOOL_NAME,
-      "Transition to a new phase by clearing context and restarting with a prepared plan. Call this after completing planning/research to hand off to execution. The tool clears the conversation context, rebuilds the system prompt, and restarts the agent loop with your handoff content as the first instruction.",
+      "Transition to a new phase by clearing context and restarting with a prepared plan. Use when transitioning work phase, examples: planning → execution, research → implementation, analysis → action, or need fresh focus on essential context, or when asked to prepare a plan and execute. Be thorough — this is your only bridge to the next phase.",
       {
         properties: {
           content: param(
             "string",
-            "The handoff content — a comprehensive summary of the plan, context, decisions, and instructions for the next phase. This becomes the starting point for the fresh conversation. Include: the plan/task, key decisions and rationale, relevant files with paths, constraints/requirements, and specific next steps. Be thorough — this is your only bridge to the next phase.",
+            "The handoff content — a comprehensive summary of the plan, context, decisions, and instructions for the next phase. This becomes the starting point for the fresh conversation. Include: the plan/task, key decisions and rationale, constraints/requirements, and specific next steps - avoid repeating anything already in the relevant files.",
           ),
           title: param(
             "string",
-            "Optional title for this handoff phase (e.g., 'Implementation Phase', 'Code Review Phase'). Used for clarity in the restarted conversation.",
+            "Optional title for this handoff phase. Used for clarity in the restarted conversation.",
           ),
           instructions: param(
             "string",
-            "Optional specific instructions for the next phase beyond what's in content. These are prefixed to the handoff message to guide the agent's behavior (e.g., 'Execute the plan step by step', 'Focus on correctness over speed').",
+            "Optional specific instructions for the next phase beyond what's in content. These are prefixed to the handoff message to guide the agent's behavior.",
           ),
           files: param(
             "array",
@@ -100,10 +82,7 @@ export class HandoffTool {
     );
   }
 
-  async execute(
-    input: string | Record<string, unknown> | null,
-    _ctx: ToolContext,
-  ): Promise<ToolResult> {
+  async execute(input: string | Record<string, unknown> | null, _ctx: ToolContext): Promise<ToolResult> {
     const args = parseToolInput(input);
     if (!args || !args.content || typeof args.content !== "string") {
       return ToolResult.err("Handoff requires a non-empty 'content' field");
@@ -141,8 +120,7 @@ export class HandoffTool {
  *
  * The extension:
  * 1. Registers the "handoff" tool via TOOLS_REGISTER hook
- * 2. Contributes instructions to the system prompt via SYSTEM_PROMPT_BUILD hook
- * 3. Watches TURN_END to detect handoff completion, then:
+ * 2. Watches TURN_END to detect handoff completion, then:
  *    - Clears the conversation context
  *    - Rebuilds the system prompt fresh
  *    - Enqueues the handoff content as the first user message
@@ -206,26 +184,6 @@ export function create(core: CoreContext): ExtensionInstance {
         registry.register("handoff", handoffTool);
       },
 
-      /** Add handoff tool instructions to the system prompt. */
-      [HOOKS.SYSTEM_PROMPT_BUILD]: ({ agent }) => {
-        if (
-          config.systemPrompt === false ||
-          !agent ||
-          !agent.getToolNames().includes(HandoffTool.TOOL_NAME)
-        ) {
-          return {
-            name: "handoff-tool-instructions",
-            priority: 50,
-            content: "",
-          };
-        }
-        return {
-          name: "handoff-tool-instructions",
-          priority: 50,
-          content: HANDOFF_SYSTEM_PROMPT.trim(),
-        };
-      },
-
       /**
        * Detect when the agent finishes a turn after a handoff tool call.
        * Clear context, rebuild system prompt, and enqueue the handoff content.
@@ -240,9 +198,7 @@ export function create(core: CoreContext): ExtensionInstance {
         }
 
         // Verify the handoff tool was called in this turn
-        const handoffCalled = toolResults?.some(
-          (tr) => tr.toolName === "handoff",
-        );
+        const handoffCalled = toolResults?.some((tr) => tr.toolName === "handoff");
         if (!handoffCalled) {
           return;
         }

@@ -13,7 +13,8 @@ whitelist-tools:
   - task_interrupt
   - bash
   - read
-  - write
+  - overwrite
+  - append
   - edit
   - grep
   - find

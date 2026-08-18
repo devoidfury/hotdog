@@ -18,7 +18,6 @@ There is optionally the `--sandbox` mode which disables all potentially risky/de
 
 ```sh
 git clone https://github.com/devoidfury/hotdog.git
-cd hotdog
 ```
 
 That's it. No `bun install` needed -- there are no dependencies. No build step, it runs right from the source.
@@ -41,12 +40,7 @@ Copy [the minimal config example](./examples/minimal-config/config) directory to
       "name": "my-provider",
       "url": "http://provider.hostname:8080",
       "api_key": "your-api-key",
-      "models": [
-        {
-          "name": "hopus-popus",
-          "contextLimit": 262144
-        }
-      ]
+      "fetchModels": true,
     }
   ]
 }
@@ -57,7 +51,6 @@ Or use environment variables instead of a config file:
 ```sh
 export HOTDOG_AI_URL="http://localhost:8080"
 export HOTDOG_API_KEY="your-api-key"
-export HOTDOG_MODEL="my-provider/my-model"
 ```
 
 ### 2. Run

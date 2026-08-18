@@ -1,6 +1,7 @@
 // Explore tool — run the agent in explorer mode against a project directory.
 
 import { spawn as _spawn, ChildProcess } from "node:child_process";
+import fs from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import {
@@ -12,6 +13,7 @@ import {
 import type { ToolMetadata } from "../../core/extensions/tool-registry.ts";
 import { logger } from "../../core/logger.ts";
 import { ToolContext } from "../../core/extensions/types.ts";
+import { PathEscapeError, Workspace } from "../../utils/workspace.ts";
 
 // Resolve the path to the current binary (main.ts)
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -40,7 +42,7 @@ export class ExploreTool {
       "Run the agent in explorer mode against a project directory. Executes the agent with the explorer profile and a prompt describing what to explore.",
       {
         properties: {
-          path: param("string", "The root path of the project to explore"),
+          path: param("string", "The root path of the project to explore. Resolved against the workspace boundary; escapes are rejected."),
           outline: param(
             "string",
             "An outline of what you are specifically interested in or any particular questions you have",
@@ -63,7 +65,7 @@ export class ExploreTool {
     );
   }
 
-  async execute(input: string | Record<string, unknown> | null, _ctx: ToolContext): Promise<ToolResult> {
+  async execute(input: string | Record<string, unknown> | null, ctx: ToolContext): Promise<ToolResult> {
     const args = this._parseArgs(input);
 
     // outline is required
@@ -76,7 +78,48 @@ export class ExploreTool {
       });
     }
 
-    const prompt = `Explore project at '${args.path}'. ${args.outline}`;
+    // The spawned sub-agent runs with this directory as its CWD (and thus its
+    // own workspace boundary), so the target must stay inside the parent
+    // boundary or an LLM-supplied path could relocate the whole sub-agent.
+    const workspace = ctx.get("workspace") as Workspace | null || null;
+    const workspaceRoot = ctx.get("workspaceRoot") as string | null || null;
+
+    let targetDir: string;
+    try {
+      targetDir = workspace
+        ? workspace.resolveSafe(args.path)
+        : path.resolve(workspaceRoot || ".", args.path);
+    } catch (e: unknown) {
+      if (e instanceof PathEscapeError) {
+        return ToolResult.err(e.message).withEntries({
+          path: args.path,
+          outline: args.outline,
+        });
+      }
+      return ToolResult.err(`Error resolving path: ${(e as Error).message}`).withEntries({
+        path: args.path,
+        outline: args.outline,
+      });
+    }
+
+    // Fail fast on bad targets instead of letting the sub-agent boot and die.
+    let targetStat;
+    try {
+      targetStat = await fs.stat(targetDir);
+    } catch {
+      return ToolResult.err(`Directory not found: '${args.path}'`).withEntries({
+        path: args.path,
+        outline: args.outline,
+      });
+    }
+    if (!targetStat.isDirectory()) {
+      return ToolResult.err(`Not a directory: '${args.path}'`).withEntries({
+        path: args.path,
+        outline: args.outline,
+      });
+    }
+
+    const prompt = `Explore project at '${targetDir}'. ${args.outline}`;
 
     logger.debug(`Explore: ${BIN_PATH}`);
     // Build command: bun main.ts -c "<prompt>" --profile explorer
@@ -90,7 +133,7 @@ export class ExploreTool {
       "--hide-thinking",
     ];
     const proc: ChildProcess = this.spawnFn("bun", command, {
-      cwd: args.path,
+      cwd: targetDir,
       stdio: ["pipe", "pipe", "pipe"],
     });
 

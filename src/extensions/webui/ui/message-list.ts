@@ -1,7 +1,7 @@
 /// <reference lib="dom" />
 // Per-session message list: renders OUTPUT_EVENTs, incl. streaming markdown.
 
-import { sanitize } from "./utils.ts";
+import { sanitize, resolveQuestionAnswer } from "./utils.ts";
 import {
   parseMarkdown,
   mdTreeToHtml,
@@ -62,11 +62,28 @@ interface LogEntry {
 }
 
 interface QuestionOption {
+  key?: string;
   message?: string;
   prompt?: string;
   options?: string[];
+  default?: string;
+  required?: boolean;
+  allowOther?: boolean;
 }
 interface QuestionMessage { questions: QuestionOption[]; }
+interface QuestionAnsweredMessage {
+  sessionId?: string;
+  answers: Record<string, string>;
+}
+/** Question fields after normalizing aliases and defaults. */
+interface NormalizedQuestion {
+  key: string;
+  prompt: string;
+  options: string[];
+  default?: string;
+  required?: boolean;
+  allowOther?: boolean;
+}
 
 interface TaskProgressMessage { taskId: string; status: string; message?: string; }
 
@@ -83,6 +100,8 @@ interface ErrorMessage { message: string; }
 
 interface MessageListOptions {
   hideThinking?: boolean;
+  /** When set, question messages render as an interactive form. */
+  onQuestionAnswer?: (answers: Record<string, string>) => void;
 }
 
 export interface MessageListManager {
@@ -96,6 +115,7 @@ export interface MessageListManager {
   handleCompacting: (data: CompactingMessage) => void;
   handleCommandResult: (data: CommandResultMessage) => void;
   handleQuestion: (data: QuestionMessage) => void;
+  handleQuestionAnswered: (data: QuestionAnsweredMessage) => void;
   handleTaskProgress: (data: TaskProgressMessage) => void;
   handleTokenUsage: (data: TokenUsageMessage) => void;
   handleCompactionResult: (data: CompactionResultMessage) => void;
@@ -109,7 +129,7 @@ export interface MessageListManager {
 
 export function createMessageList(
   _sessionId: string,
-  { hideThinking = false }: MessageListOptions = {},
+  { hideThinking = false, onQuestionAnswer }: MessageListOptions = {},
 ): MessageListManager {
   const container = document.getElementById("message-list") as HTMLDivElement;
   let currentAssistantEl: HTMLDivElement | null = null;
@@ -416,19 +436,184 @@ export function createMessageList(
     bubble.className = "bubble";
     const contentEl = document.createElement("div");
     contentEl.className = "content";
-    contentEl.innerHTML = `<strong>Question:</strong><br>`;
-    for (const q of questions) {
-      contentEl.innerHTML += `${sanitize(q.message || q.prompt)}<br>`;
-      if (q.options) {
+
+    const normalized = questions.map((q, i) => ({
+      key: q.key || `question_${i}`,
+      prompt: q.message || q.prompt || "",
+      options: q.options || [],
+      default: q.default,
+      required: q.required,
+      allowOther: q.allowOther,
+    }));
+
+    // Without an answer callback (e.g. cold log replay) render read-only.
+    if (!onQuestionAnswer) {
+      contentEl.innerHTML = `<strong>Question:</strong><br>`;
+      for (const q of normalized) {
+        contentEl.innerHTML += `${sanitize(q.prompt)}<br>`;
         for (const opt of q.options) {
           contentEl.innerHTML += `  • ${sanitize(opt)}<br>`;
         }
       }
+      bubble.appendChild(contentEl);
+      el.appendChild(bubble);
+      container.appendChild(el);
+      scrollBottom();
+      return;
     }
+
+    buildQuestionCard(contentEl, normalized);
     bubble.appendChild(contentEl);
     el.appendChild(bubble);
     container.appendChild(el);
     scrollBottom();
+  }
+
+  /**
+   * Build an interactive question form into contentEl; on submit calls
+   * onQuestionAnswer(answers) and marks the card answered.
+   */
+  function buildQuestionCard(
+    contentEl: HTMLElement,
+    normalized: NormalizedQuestion[],
+  ): void {
+    const card = document.createElement("div");
+    card.className = "question-card";
+
+    const selections = new Map<
+      string,
+      { text: string; selectedOption: string | null }
+    >();
+    const items: Array<{
+      q: NormalizedQuestion;
+      textEl: HTMLInputElement | null;
+      optEls: HTMLButtonElement[];
+      errEl: HTMLDivElement;
+    }> = [];
+
+    for (const q of normalized) {
+      const item = document.createElement("div");
+      item.className = "q-item";
+
+      const promptEl = document.createElement("div");
+      promptEl.className = "q-prompt";
+      promptEl.textContent = q.prompt + (q.required !== false ? " *" : " (optional)");
+      item.appendChild(promptEl);
+
+      const sel = {
+        text: "",
+        selectedOption:
+          q.default && q.options.includes(q.default) ? q.default : null,
+      };
+      selections.set(q.key, sel);
+
+      const optWrap = document.createElement("div");
+      optWrap.className = "q-options";
+
+      const optEls: HTMLButtonElement[] = [];
+      for (const opt of q.options) {
+        const btn = document.createElement("button");
+        btn.type = "button";
+        btn.className = "q-option";
+        if (sel.selectedOption === opt) btn.classList.add("selected");
+        btn.textContent = opt;
+        btn.addEventListener("click", () => {
+          sel.selectedOption = opt;
+          sel.text = "";
+          if (textEl) textEl.value = "";
+          for (const b of optEls) b.classList.toggle("selected", b === btn);
+        });
+        optWrap.appendChild(btn);
+        optEls.push(btn);
+      }
+
+      let textEl: HTMLInputElement | null = null;
+      if (q.allowOther !== false) {
+        textEl = document.createElement("input");
+        textEl.type = "text";
+        textEl.className = "q-text";
+        textEl.placeholder = q.default ? `default: ${q.default}` : "Your answer…";
+        textEl.addEventListener("input", () => {
+          sel.text = textEl!.value;
+          if (sel.text.trim()) {
+            sel.selectedOption = null;
+            for (const b of optEls) b.classList.remove("selected");
+          }
+        });
+        optWrap.appendChild(textEl);
+      }
+
+      item.appendChild(optWrap);
+
+      const errEl = document.createElement("div");
+      errEl.className = "q-error";
+      item.appendChild(errEl);
+
+      card.appendChild(item);
+      items.push({ q, textEl, optEls, errEl });
+    }
+
+    const submitBtn = document.createElement("button");
+    submitBtn.type = "button";
+    submitBtn.className = "q-submit";
+    submitBtn.textContent = "Submit answers";
+    submitBtn.addEventListener("click", () => {
+      const answers: Record<string, string> = {};
+      let ok = true;
+      for (const ref of items) {
+        const { value, error } = resolveQuestionAnswer(ref.q, {
+          text: ref.textEl?.value ?? "",
+          selectedOption: selections.get(ref.q.key)?.selectedOption ?? null,
+        });
+        ref.errEl.textContent = error || "";
+        if (error) {
+          ok = false;
+        } else {
+          answers[ref.q.key] = value;
+        }
+      }
+      if (!ok) return;
+      onQuestionAnswer!(answers);
+      markQuestionAnswered(card, answers);
+    });
+    card.appendChild(submitBtn);
+    contentEl.appendChild(card);
+  }
+
+  /** Disable all controls on a card and show the submitted answers. */
+  function markQuestionAnswered(
+    card: HTMLElement,
+    answers: Record<string, string>,
+  ): void {
+    if (card.classList.contains("answered")) return;
+    card.classList.add("answered");
+    Array.from(
+      card.querySelectorAll<HTMLButtonElement>("button"),
+    ).forEach((btn) => {
+      btn.disabled = true;
+    });
+    Array.from(card.querySelectorAll<HTMLInputElement>("input")).forEach(
+      (input) => {
+        input.disabled = true;
+      },
+    );
+    const summary = document.createElement("div");
+    summary.className = "q-answers";
+    // textContent is injection-safe; no HTML escaping needed (or wanted).
+    const parts = Object.entries(answers).map(
+      ([k, v]) => `${k}: ${v || "(empty)"}`,
+    );
+    summary.textContent = `Answered — ${parts.join("; ")}`;
+    card.appendChild(summary);
+  }
+
+  function handleQuestionAnswered({ answers }: QuestionAnsweredMessage): void {
+    // Resolve pending forms in this session's list (multi-tab case).
+    container
+      .querySelectorAll<HTMLElement>(".question-card:not(.answered)")
+      .forEach((card) => {
+        markQuestionAnswered(card, answers);
+      });
   }
 
   function handleTaskProgress({ taskId, status, message }: TaskProgressMessage): void {
@@ -625,6 +810,7 @@ export function createMessageList(
     handleCompacting,
     handleCommandResult,
     handleQuestion,
+    handleQuestionAnswered,
     handleTaskProgress,
     handleTokenUsage,
     handleCompactionResult,

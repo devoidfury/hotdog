@@ -4,6 +4,10 @@ import { SessionManager, type AgentLike } from "../../core/session/index.ts";
 import type { SwitchProfile } from "../../core/config/profiles.ts";
 import { WebSocketChannel } from "./websocket-channel.ts";
 import { C2S, S2C, C2SMessage } from "./protocol.ts";
+import {
+  WebSocketQuestionBridge,
+  type QuestionStrategy,
+} from "./question-input.ts";
 import { LlmClient } from "../../core/llm-client/client.ts";
 import { MarkerMangler } from "../../core/marker-mangler.ts";
 import type { CoreContext } from "../../core/extensions/types.ts";
@@ -17,7 +21,6 @@ import {
   deleteSessionLog,
 } from "../../core/session/session-log.ts";
 import { AgentError } from "../../core/error.ts";
-import { logger } from "../../core/logger.ts";
 
 interface SessionMetadata {
   profile: string;
@@ -54,6 +57,8 @@ interface SessionRegistryOptions {
   questionStrategy?: string;
   sessionTimeoutMin?: number;
   profiles?: Record<string, SwitchProfile>;
+  /** Invoked when a session is deleted (cancels its pending questions). */
+  onSessionDeleted?: (sessionId: string) => void;
 }
 
 interface CreateWsServerOptions {
@@ -102,6 +107,7 @@ export class SessionRegistry {
   #metadata: Map<string, SessionMetadata>;
   #channels: Map<string, Set<WebSocketChannel>>;
   #profiles: Record<string, SwitchProfile>;
+  #onSessionDeleted: ((sessionId: string) => void) | null;
 
   constructor({
     buildAgent,
@@ -110,6 +116,7 @@ export class SessionRegistry {
     questionStrategy = "wait",
     sessionTimeoutMin = 30,
     profiles = {},
+    onSessionDeleted,
   }: SessionRegistryOptions) {
     this.#buildAgent = buildAgent;
     this.#questionTimeoutSecs = questionTimeoutSecs;
@@ -118,6 +125,7 @@ export class SessionRegistry {
     this.#metadata = new Map();
     this.#channels = new Map();
     this.#profiles = profiles;
+    this.#onSessionDeleted = onSessionDeleted ?? null;
 
     this.#sessionManager = new SessionManager({
       hooks: createHooks(),
@@ -245,7 +253,13 @@ export class SessionRegistry {
 
     this.#sessionManager.deleteSession(sessionId);
     this.#metadata.delete(sessionId);
+    this.#onSessionDeleted?.(sessionId);
     return true;
+  }
+
+  /** True if the session has at least one connected channel. */
+  hasChannels(sessionId: string): boolean {
+    return (this.#channels.get(sessionId)?.size ?? 0) > 0;
   }
 
   rename(sessionId: string, newName: string): boolean {
@@ -559,6 +573,7 @@ async function routeMessage(
   msg: C2SMessage,
   registry: SessionRegistry,
   authMiddleware: AuthMiddleware | undefined,
+  bridge: WebSocketQuestionBridge,
 ): Promise<void> {
   // Auth gate: when auth is enabled, only the AUTH handshake itself may
   // pass without a validated token. The token is established either at
@@ -764,15 +779,31 @@ async function routeMessage(
       if (msg.sessionId) {
         // interrupt() keeps the bus alive for follow-ups; cancel() would abort it.
         sessionManager.interrupt(msg.sessionId as string);
+        // Unblock a pending question-tool call so it can't hang.
+        bridge.cancel(msg.sessionId as string);
       }
       break;
     }
 
     case C2S.QUESTION_ANSWER: {
-      if (msg.sessionId && msg.answers) {
-        logger.warn(
-          "questionAnswer received — question tool integration pending",
-        );
+      const sid = msg.sessionId as string | undefined;
+      const answers = msg.answers;
+      if (sid && answers && typeof answers === "object" && !Array.isArray(answers)) {
+        if (bridge.answer(sid, answers as Record<string, unknown>)) {
+          // Notify all clients (multiple tabs may be showing the prompt).
+          registry.broadcast({
+            type: S2C.QUESTION_ANSWERED,
+            sessionId: sid,
+            answers,
+          });
+        } else {
+          ws.send(
+            JSON.stringify({
+              type: "error",
+              message: `No pending question for session ${sid}`,
+            }),
+          );
+        }
       }
       break;
     }
@@ -1073,6 +1104,11 @@ export function createWsServer(
       return agent;
     });
 
+  // Question tool integration: the bridge resolves pending question-tool
+  // calls when a client answers. Declared before the registry so the
+  // onSessionDeleted callback can reference it (called lazily).
+  let bridge: WebSocketQuestionBridge | null = null;
+
   const registry = new SessionRegistry({
     buildAgent,
     llmClient: sharedLlmClient,
@@ -1080,7 +1116,35 @@ export function createWsServer(
     questionStrategy,
     sessionTimeoutMin,
     profiles,
+    onSessionDeleted: (sid) => bridge?.dropSession(sid),
   });
+
+  bridge = new WebSocketQuestionBridge({
+    getPolicy: (sid) => {
+      const meta = registry.get(sid)?.metadata;
+      return {
+        strategy: (meta?.questionStrategy ||
+          questionStrategy) as QuestionStrategy,
+        timeoutSecs: meta?.questionTimeoutSecs || questionTimeoutSecs,
+      };
+    },
+    hasChannels: (sid) => registry.hasChannels(sid),
+    interrupt: (sid) => registry.getSessionManager().interrupt(sid),
+  });
+
+  // Give question-tool calls for WS agents an Input implementation that
+  // resolves via the bridge (same pattern as ui-interactive-cli).
+  if (core.hooks && typeof core.hooks.on === "function") {
+    core.hooks.on(
+      HOOKS.AGENT_TOOL_CONTEXT,
+      ({ toolCtx, toolName, agent }) => {
+        if (toolName !== "question") return;
+        const sessionId = agent?.sessionId;
+        if (sessionId) toolCtx.set("input", bridge!.inputFor(sessionId));
+      },
+      { source: "websocket" },
+    );
+  }
 
   function onUpgrade(
     req: { url: string; headers?: Record<string, string> },
@@ -1144,7 +1208,7 @@ export function createWsServer(
     }
 
     try {
-      await routeMessage(ws, msg, registry, auth);
+      await routeMessage(ws, msg, registry, auth, bridge!);
     } catch (err: unknown) {
       // Don't let errors from dropped connections kill the server.
       const typedErr = err as Error;

@@ -51,11 +51,22 @@ function makeMockAgent(overrides: Partial<AgentLike> = {}): AgentLike {
 }
 
 export function createWsMockCore(): any {
+  // Hook handlers registered via hooks.on(), keyed by hook name.
+  const registeredHooks: Record<string, Array<(data: unknown) => unknown>> = {};
   return {
     hooks: {
       notifyHooks: () => {},
       notifyHooksAsync: async () => {},
+      on: (name: string, handler: (data: unknown) => unknown) => {
+        (registeredHooks[name] ||= []).push(handler);
+        return () => {
+          const arr = registeredHooks[name] || [];
+          const idx = arr.indexOf(handler);
+          if (idx !== -1) arr.splice(idx, 1);
+        };
+      },
     },
+    _registeredHooks: registeredHooks,
     config: {},
     resolved: {
       baseUrl: "http://localhost:8000",

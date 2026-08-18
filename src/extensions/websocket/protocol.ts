@@ -60,6 +60,9 @@ export const S2C = {
   SESSION_STATE: "sessionState",
   SYSTEM_MESSAGE: "systemMessage",
 
+  // Question answers (broadcast to all clients when a question is resolved)
+  QUESTION_ANSWERED: "questionAnswered",
+
   // Connection management
   ERROR: "error",
 } as const;

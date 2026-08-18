@@ -59,6 +59,14 @@ Tools without metadata are excluded when filtering is active (conservative defau
 | `review` | `ui-session-review-cli` | Lists recent sessions, gets session entries, or gets tool call index. | `operation`, `session_id`, `limit` |
 | `handoff` | `handoff-tool` | Clears context and restarts the agent with a prepared plan for a new phase | `content`, `title`, `instructions`, `files` |
 
+### Question Tool Answer Flow
+
+The `question` tool is UI-agnostic: it emits a `QUESTION` event and delegates answer collection to an `Input` implementation registered in the tool context (`agent:toolContext` hook). Each front end supplies its own:
+
+- **Interactive CLI** (`ui-interactive-cli`): takes over readline and prompts per question (number/text selection, required + default validation).
+- **WebUI / WebSocket** (`websocket` + `webui`): a per-session bridge (`question-input.ts`) blocks the tool call until a connected client sends `questionAnswer`; the WebUI renders an interactive form (option buttons + free text). Unanswered questions resolve per `websocket.questionStrategy` (`wait` / `default` / `cancel` + `questionTimeoutSecs`), and session interrupt/delete cancels pending questions with defaults. When a question resolves, the server broadcasts `questionAnswered` so all connected clients can finalize their forms.
+- **No input registered** (CI, one-shot): `NoopInput` silently fills each answer with its default.
+
 ### Tool Filtering
 
 Tools can be filtered before being sent to the LLM based on two dimensions:

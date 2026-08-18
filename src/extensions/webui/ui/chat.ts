@@ -118,7 +118,21 @@ interface CommandResultMessage {
 
 interface QuestionMessage {
   type: "question";
-  questions: { message?: string; prompt?: string; options?: string[] }[];
+  questions: {
+    key?: string;
+    message?: string;
+    prompt?: string;
+    options?: string[];
+    default?: string;
+    required?: boolean;
+    allowOther?: boolean;
+  }[];
+}
+
+interface QuestionAnsweredMessage {
+  type: "questionAnswered";
+  sessionId?: string;
+  answers: Record<string, string>;
 }
 
 interface StreamingChunkMessage {
@@ -193,6 +207,7 @@ type ServerMessage =
   | CompactingMessage
   | CommandResultMessage
   | QuestionMessage
+  | QuestionAnsweredMessage
   | StreamingChunkMessage
   | StreamingReasoningChunkMessage
   | TaskProgressMessage
@@ -463,6 +478,11 @@ export function createChat({
       case "question":
         messageList.handleQuestion(data);
         break;
+      case "questionAnswered":
+        if (!data.sessionId || data.sessionId === sessionIdAtom()) {
+          messageList.handleQuestionAnswered(data);
+        }
+        break;
       case "streamingChunk":
         messageList.handleStreamingChunk(data);
         break;
@@ -672,7 +692,10 @@ export function createChat({
   }
 
   function setSession(sessionId: string): void {
-    messageList = createMessageList(sessionId, { hideThinking: false });
+    messageList = createMessageList(sessionId, {
+      hideThinking: false,
+      onQuestionAnswer: (answers) => sendQuestionAnswer(answers),
+    });
     sessionIdAtom(sessionId);
     messageList.clear();
   }

@@ -1166,6 +1166,102 @@ body {
     font-size: 0.85rem;
 }
 
+.message.question .question-card {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    margin-top: 4px;
+}
+
+.message.question .q-item {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.message.question .q-prompt {
+    font-weight: 600;
+    font-size: 0.9rem;
+}
+
+.message.question .q-options {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px;
+}
+
+.message.question .q-option {
+    background: var(--bg-primary);
+    border: 1px solid var(--border);
+    color: var(--text);
+    border-radius: var(--radius-full);
+    padding: 3px 12px;
+    font-size: 0.82rem;
+    cursor: pointer;
+    transition: border-color 0.15s, background 0.15s;
+}
+
+.message.question .q-option:hover:not(:disabled) {
+    border-color: var(--accent);
+}
+
+.message.question .q-option.selected {
+    background: var(--accent);
+    border-color: var(--accent);
+    color: #fff;
+}
+
+.message.question .q-text {
+    background: var(--bg-primary);
+    border: 1px solid var(--border);
+    color: var(--text);
+    border-radius: var(--radius);
+    padding: 4px 10px;
+    font-size: 0.85rem;
+    min-width: 180px;
+}
+
+.message.question .q-text:focus {
+    outline: none;
+    border-color: var(--accent);
+}
+
+.message.question .q-error {
+    color: var(--danger, #e5484d);
+    font-size: 0.78rem;
+    min-height: 0.9em;
+}
+
+.message.question .q-submit {
+    align-self: flex-start;
+    background: var(--accent);
+    color: #fff;
+    border: none;
+    border-radius: var(--radius);
+    padding: 6px 16px;
+    font-size: 0.85rem;
+    cursor: pointer;
+}
+
+.message.question .q-submit:hover:not(:disabled) {
+    filter: brightness(1.1);
+}
+
+.message.question .q-option:disabled,
+.message.question .q-text:disabled,
+.message.question .q-submit:disabled {
+    opacity: 0.6;
+    cursor: default;
+}
+
+.message.question .q-answers {
+    font-size: 0.82rem;
+    color: var(--text-secondary);
+    border-top: 1px solid var(--border);
+    padding-top: 8px;
+}
+
 .message.task-progress {
     align-self: center;
     max-width: 100%;

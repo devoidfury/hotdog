@@ -260,7 +260,7 @@ describe("createWsServer", () => {
     expect(meta!.lastActivityAt).toBeGreaterThan(0);
   });
 
-  it("handles QUESTION_ANSWER message", async () => {
+  it("handles QUESTION_ANSWER message (no pending question → error)", async () => {
     const core = createWsMockCore();
     wsServer = createWsServer(core, { buildAgent: createWsMockAgentFactory() });
 
@@ -270,14 +270,15 @@ describe("createWsServer", () => {
     await new Promise((r) => setTimeout(r, 10));
     const sessionId = (ws as HotdogServerSocket).activeSessionId!;
 
-    wsServer.onMessage(ws, JSON.stringify({
+    await wsServer.onMessage(ws, JSON.stringify({
       type: "questionAnswer",
       sessionId,
       answers: { q1: "answer1" },
     }));
 
-    // Should not error
-    expect(true).toBe(true);
+    const lastMsg = JSON.parse((ws as MockWs).messages[(ws as MockWs).messages.length - 1]!);
+    expect(lastMsg.type).toBe("error");
+    expect(lastMsg.message).toContain("No pending question");
   });
 
   it("handles unknown message type", () => {
@@ -700,5 +701,172 @@ describe("createWsServer - additional coverage", () => {
     const lastMsg = JSON.parse((ws as MockWs).messages[(ws as MockWs).messages.length - 1]!);
     // Either sessionCreated (if log loaded) or error if log doesn't exist
     expect(["sessionCreated", "error"].includes(lastMsg.type)).toBe(true);
+  });
+});
+
+
+// ── Question tool integration ───────────────────────────────────────────────
+
+describe("question tool integration (bridge)", () => {
+  let core: any;
+  let wsServer: ReturnType<typeof createWsServer>;
+  let ws: HotdogServerSocket;
+  let sessionId: string;
+
+  beforeEach(async () => {
+    core = createWsMockCore();
+    wsServer = createWsServer(core, {
+      buildAgent: createWsMockAgentFactory(),
+      questionStrategy: "wait",
+      questionTimeoutSecs: 300,
+    });
+
+    ws = createWsMockWs() as unknown as HotdogServerSocket;
+    wsServer.onUpgrade({ url: "/ws", headers: { host: "localhost" } }, ws);
+    await new Promise((r) => setTimeout(r, 10));
+    sessionId = (ws as HotdogServerSocket).activeSessionId!;
+  });
+
+  afterEach(() => {
+    wsServer.stopCleanupLoop();
+  });
+
+  /**
+   * Simulate the tool executor firing AGENT_TOOL_CONTEXT for a question
+   * tool call and return the collectAnswers() promise it starts.
+   */
+  function startQuestion(): Promise<Record<string, unknown>> {
+    const handlers = core._registeredHooks["agent:toolContext"];
+    expect(handlers).toHaveLength(1);
+    const store: Record<string, unknown> = {};
+    const toolCtx = {
+      get: (k: string) => store[k],
+      set: (k: string, v: unknown) => {
+        store[k] = v;
+      },
+    };
+    const agent = wsServer.sessionRegistry.get(sessionId)!.agent;
+    handlers[0]!({ toolCtx, toolName: "question", agent });
+    const input = store["input"] as {
+      collectAnswers: (qs: Array<Record<string, unknown>>) => Promise<Record<string, unknown>>;
+      isInteractive: () => boolean;
+    };
+    expect(input).toBeDefined();
+    expect(input.isInteractive()).toBe(true);
+    return input.collectAnswers([{ key: "q1", prompt: "What?" }]);
+  }
+
+  it("does not set input for non-question tools", () => {
+    const handlers = core._registeredHooks["agent:toolContext"];
+    const store: Record<string, unknown> = {};
+    const toolCtx = {
+      get: (k: string) => store[k],
+      set: (k: string, v: unknown) => {
+        store[k] = v;
+      },
+    };
+    handlers[0]!({ toolCtx, toolName: "bash", agent: { sessionId: "s1" } });
+    expect(store["input"]).toBeUndefined();
+  });
+
+  it("resolves a pending question via questionAnswer and broadcasts questionAnswered", async () => {
+    const p = startQuestion();
+
+    await wsServer.onMessage(
+      ws,
+      JSON.stringify({
+        type: "questionAnswer",
+        sessionId,
+        answers: { q1: "Ada" },
+      }),
+    );
+
+    await expect(p).resolves.toEqual({ q1: "Ada" });
+
+    const msgs = (ws as MockWs).messages.map((m) => JSON.parse(m));
+    expect(
+      msgs.some(
+        (m) =>
+          m.type === "questionAnswered" &&
+          m.sessionId === sessionId &&
+          m.answers.q1 === "Ada",
+      ),
+    ).toBe(true);
+  });
+
+  it("ignores malformed answers (non-object) and keeps the question pending", async () => {
+    const p = startQuestion();
+
+    for (const bad of [[1, 2], "text", null]) {
+      await wsServer.onMessage(
+        ws,
+        JSON.stringify({ type: "questionAnswer", sessionId, answers: bad }),
+      );
+    }
+    // Still pending: only a real object may resolve it.
+    await wsServer.onMessage(
+      ws,
+      JSON.stringify({ type: "questionAnswer", sessionId, answers: { q1: "Ada" } }),
+    );
+    await expect(p).resolves.toEqual({ q1: "Ada" });
+  });
+
+  it("answers a question twice; the second answer errors", async () => {
+    const p = startQuestion();
+    await wsServer.onMessage(
+      ws,
+      JSON.stringify({ type: "questionAnswer", sessionId, answers: { q1: "a" } }),
+    );
+    await expect(p).resolves.toEqual({ q1: "a" });
+
+    await wsServer.onMessage(
+      ws,
+      JSON.stringify({ type: "questionAnswer", sessionId, answers: { q1: "b" } }),
+    );
+    const lastMsg = JSON.parse(
+      (ws as MockWs).messages[(ws as MockWs).messages.length - 1]!,
+    );
+    expect(lastMsg.type).toBe("error");
+  });
+
+  it("interrupt (cancel) resolves the pending question with defaults", async () => {
+    const p = startQuestion();
+
+    await wsServer.onMessage(ws, JSON.stringify({ type: "cancel", sessionId }));
+
+    await expect(p).resolves.toEqual({ q1: "" });
+  });
+
+  it("deleting the session cancels its pending question", async () => {
+    const p = startQuestion();
+
+    await wsServer.onMessage(
+      ws,
+      JSON.stringify({ type: "deleteSession", sessionId }),
+    );
+
+    await expect(p).resolves.toEqual({ q1: "" });
+  });
+
+  it("per-session strategy: default resolves with defaults after timeout", async () => {
+    // Override the session's policy BEFORE the question starts (policy is
+    // read at collect time).
+    const meta = wsServer.sessionRegistry._test_metadata.get(sessionId)!;
+    meta.questionStrategy = "default";
+    meta.questionTimeoutSecs = 0.05;
+
+    const p = startQuestion();
+    await expect(p).resolves.toEqual({ q1: "" });
+  });
+
+  it("per-session strategy: cancel interrupts the session after timeout", async () => {
+    const meta = wsServer.sessionRegistry._test_metadata.get(sessionId)!;
+    meta.questionStrategy = "cancel";
+    meta.questionTimeoutSecs = 0.05;
+
+    const p = startQuestion();
+    await expect(p).resolves.toEqual({ q1: "" });
+    // The session manager's interrupt was called; no crash, session intact.
+    expect(wsServer.sessionRegistry.get(sessionId)).not.toBeNull();
   });
 });

@@ -947,7 +947,7 @@ CLI flag: `--shell-mode`.
 | `host` | `string` | `"0.0.0.0"` | WebSocket server host. |
 | `sessionTimeoutMin` | `number` | `30` | Idle session cleanup timeout (minutes). |
 | `questionTimeoutSecs` | `number` | `300` | Default question timeout (seconds). |
-| `questionStrategy` | `string` | `"wait"` | Question strategy: `wait`, `default`, `cancel`. |
+| `questionStrategy` | `string` | `"wait"` | What happens when a question is unanswered. `wait` = hold until a client answers (no timeout); `default` = after `questionTimeoutSecs`, resolve with each question's default; `cancel` = after `questionTimeoutSecs`, interrupt the session. Both can be overridden per session at `createSession`. |
 
 ```json
 { "websocket": { "port": 8080, "sessionTimeoutMin": 60 } }

@@ -142,6 +142,26 @@ describe('EditTool.execute — exact match', () => {
 
     expect(fsSync.readFileSync(filePath, 'utf-8')).toBe('new content');
   });
+
+  it('does not expand $-replacement patterns in newString (single and replace_all)', async () => {
+    const filePath = path.join(dir, 'file.txt');
+    fsSync.writeFileSync(filePath, 'price: 100 price: 100');
+
+    const tool = new EditTool({ maxEditInputSize: 16000 });
+    // $& = matched text, $$ = literal $, $' = text after match — all must stay literal.
+    await tool.execute(
+      { path: 'file.txt', oldString: '100', newString: '$&$$100$\'$`' },
+      toolCtx({ workspaceRoot: dir })
+    );
+    expect(fsSync.readFileSync(filePath, 'utf-8')).toBe("price: $&$$100$'$` price: 100");
+
+    fsSync.writeFileSync(filePath, 'foo bar foo');
+    await tool.execute(
+      { path: 'file.txt', oldString: 'foo', newString: '$&', replace_all: true },
+      toolCtx({ workspaceRoot: dir })
+    );
+    expect(fsSync.readFileSync(filePath, 'utf-8')).toBe('$& bar $&');
+  });
 });
 
 // ── execute: line-trimmed fallback ──────────────────────────────────────────

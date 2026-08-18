@@ -220,7 +220,7 @@ function findAndReplace(content: string, old: string, newStr: string, all: boole
     const matchCount = all ? content.split(old).length - 1 : 1;
     // Empty oldString is rejected above, so split() always has a non-empty
     // pattern and replace_all deletion cannot degenerate into an empty match.
-    const newContent = all ? content.split(old).join(newStr) : content.replace(old, newStr);
+    const newContent = all ? content.split(old).join(newStr) : content.replace(old, () => newStr);
 
     return {
       newContent,

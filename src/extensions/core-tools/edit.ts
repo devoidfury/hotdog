@@ -19,7 +19,6 @@ interface EditToolOptions {
   maxEditInputSize: number;
 }
 
-
 interface EditArgs {
   path: string;
   oldString: string;
@@ -46,7 +45,6 @@ export class EditTool {
   private readonly maxEditInputSize: number;
 
   constructor(options: EditToolOptions) {
-
     this.maxEditInputSize = options.maxEditInputSize;
   }
 
@@ -85,14 +83,9 @@ export class EditTool {
       return ToolResult.err("Error parsing arguments");
     }
 
-    const {
-      path: filePath,
-      oldString,
-      newString,
-      replace_all: replaceAll = false,
-    } = op;
-    const workspace = ctx.get("workspace") as Workspace | null || null;
-    const workspaceRoot = ctx.get("workspaceRoot") as string | null || null;
+    const { path: filePath, oldString, newString, replace_all: replaceAll = false } = op;
+    const workspace = (ctx.get("workspace") as Workspace | null) || null;
+    const workspaceRoot = (ctx.get("workspaceRoot") as string | null) || null;
 
     let resolvedPath: string;
     try {
@@ -122,18 +115,11 @@ export class EditTool {
     try {
       sourceContent = await fs.readFile(resolvedPath, "utf-8");
     } catch (e: unknown) {
-      return ToolResult.err(
-        `File not found or unreadable '${filePath}': ${(e as Error).message}`,
-      );
+      return ToolResult.err(`File not found or unreadable '${filePath}': ${(e as Error).message}`);
     }
 
     // Find and replace
-    const result = findAndReplace(
-      sourceContent,
-      oldString,
-      newString,
-      replaceAll || false,
-    );
+    const result = findAndReplace(sourceContent, oldString, newString, replaceAll || false);
     if (result.error) {
       return ToolResult.err(`Edit failed: ${result.error}`);
     }
@@ -149,13 +135,19 @@ export class EditTool {
       return ToolResult.err(`Error writing file: ${(e as Error).message}`);
     }
 
-    const lineCount = oldString.split("\n").length;
+    const matchCount = matchInfo!.matchCount;
+    const isDelete = newString === "";
+    const deletedLines = oldString.split("\n").length;
+    const replacedLines = isDelete ? 0 : newString.split("\n").length;
+    const action = isDelete
+      ? `deleted ${deletedLines} line${deletedLines > 1 ? "s" : ""}`
+      : `replaced with ${replacedLines} line${replacedLines !== 1 ? "s" : ""}`;
     return ToolResult.ok(
-      `Successfully edited '${filePath}', found ${matchInfo!.matchCount} match${matchInfo!.matchCount > 1 ? "es" : ""}, replaced with ${lineCount} line${lineCount > 1 ? "s" : ""}`,
+      `Successfully edited '${filePath}', found ${matchCount} match${matchCount > 1 ? "es" : ""}, ${action}`,
     ).withEntries({
       path: filePath,
-      match_count: String(matchInfo!.matchCount),
-      lines_replaced: String(lineCount),
+      match_count: String(matchCount),
+      lines_replaced: String(replacedLines),
       start_line: String(matchInfo!.startLine),
       end_line: String(matchInfo!.endLine),
     });
@@ -171,16 +163,17 @@ function parseArgs(input: string | Record<string, unknown> | null): EditArgs | n
   if (!json) return null;
 
   // Support snake_case aliases
-  const path = json.path as string;
-  const oldString = (json.oldString as string) ?? (json.old_string as string);
-  const newString = (json.newString as string) ?? (json.new_string as string);
+  const path = json.path;
+  const oldString = json.oldString ?? json.old_string;
+  const newString = json.newString ?? json.new_string;
 
-  if (!path || !newString) {
+  if (typeof path !== "string" || !path) {
     return null;
   }
-  // oldString can be empty string (findAndReplace validates that)
-  // but must be present (not undefined/null)
-  if (oldString === undefined || oldString === null) {
+  // oldString and newString must be present (not undefined/null), "" allowed here.
+  // Empty oldString is rejected later with a specific message;
+  // empty newString is valid and signals text deletion.
+  if (typeof newString !== "string" || typeof oldString !== "string") {
     return null;
   }
 
@@ -188,7 +181,7 @@ function parseArgs(input: string | Record<string, unknown> | null): EditArgs | n
     path,
     oldString,
     newString,
-    replace_all: json.replace_all as boolean || false,
+    replace_all: Boolean(json.replace_all),
   };
 }
 
@@ -225,9 +218,9 @@ function findAndReplace(content: string, old: string, newStr: string, all: boole
     const startLine = content.slice(0, matchPos).split("\n").length;
     const endLine = startLine + old.split("\n").length - 1;
     const matchCount = all ? content.split(old).length - 1 : 1;
-    const newContent = all
-      ? content.split(old).join(newStr)
-      : content.replace(old, newStr);
+    // Empty oldString is rejected above, so split() always has a non-empty
+    // pattern and replace_all deletion cannot degenerate into an empty match.
+    const newContent = all ? content.split(old).join(newStr) : content.replace(old, newStr);
 
     return {
       newContent,
@@ -241,7 +234,9 @@ function findAndReplace(content: string, old: string, newStr: string, all: boole
   // the original line array's coordinate space (character offsets in a
   // whitespace-normalized string do NOT map back to line boundaries).
   const oldLines = old.split("\n");
-  const newLines = newStr.split("\n");
+  // Empty replacement signals deletion: drop the matched lines entirely
+  // instead of splicing in a blank line.
+  const newLines = newStr === "" ? [] : newStr.split("\n");
   const oldTrimmed = oldLines.map((l: string) => l.trim());
   const contentLines = content.split("\n");
 
@@ -262,11 +257,7 @@ function findAndReplace(content: string, old: string, newStr: string, all: boole
     const contextLines =
       contentLines.length <= 10
         ? contentLines
-        : [
-            ...contentLines.slice(0, 3),
-            "...",
-            ...contentLines.slice(Math.max(0, contentLines.length - 4)),
-          ];
+        : [...contentLines.slice(0, 3), "...", ...contentLines.slice(Math.max(0, contentLines.length - 4))];
     const context = contextLines.join("\n");
     throw AssistantRetryableError.WithHint(
       `text not found in file.\n\nSearched for: ${JSON.stringify(old)}\n\nFile content:\n${context}`,
@@ -290,7 +281,8 @@ function findAndReplace(content: string, old: string, newStr: string, all: boole
   ];
   const newContent = resultLines.join("\n");
   const startLine = startLineIdx + 1; // 1-indexed
-  const endLine = startLineIdx + adjustedNewLines.length; // 1-indexed
+  // Degenerate to startLine when deleting (zero-length replacement).
+  const endLine = Math.max(startLine, startLineIdx + adjustedNewLines.length); // 1-indexed
 
   return {
     newContent,

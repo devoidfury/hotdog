@@ -394,6 +394,116 @@ describe('EditTool.execute — error cases', () => {
   });
 });
 
+// ── execute: text deletion (empty newString) ────────────────────────────────
+
+describe('EditTool.execute — text deletion', () => {
+  it('deletes text with an empty newString', async () => {
+    const filePath = path.join(dir, 'file.txt');
+    fsSync.writeFileSync(filePath, 'hello world hello');
+
+    const tool = new EditTool({ maxEditInputSize: 16000 });
+    const result = await tool.execute(
+      { path: 'file.txt', oldString: ' world', newString: '' },
+      toolCtx({ workspaceRoot: dir })
+    );
+
+    expect(fsSync.readFileSync(filePath, 'utf-8')).toBe('hello hello');
+    expect(resultStr(result)).toContain('Successfully edited');
+    expect(resultStr(result)).toContain('deleted 1 line');
+    expect((result as any).metadata.get('lines_replaced')).toBe('0');
+  });
+
+  it('deletes a whole line including its newline', async () => {
+    const filePath = path.join(dir, 'file.txt');
+    fsSync.writeFileSync(filePath, 'line1\nbye\nline3');
+
+    const tool = new EditTool({ maxEditInputSize: 16000 });
+    await tool.execute(
+      { path: 'file.txt', oldString: 'bye\n', newString: '' },
+      toolCtx({ workspaceRoot: dir })
+    );
+
+    expect(fsSync.readFileSync(filePath, 'utf-8')).toBe('line1\nline3');
+  });
+
+  it('deletes multiple lines with replace_all', async () => {
+    const filePath = path.join(dir, 'file.txt');
+    fsSync.writeFileSync(filePath, 'keep\ndrop\nkeep\ndrop\nkeep');
+
+    const tool = new EditTool({ maxEditInputSize: 16000 });
+    const result = await tool.execute(
+      { path: 'file.txt', oldString: 'drop\n', newString: '', replace_all: true },
+      toolCtx({ workspaceRoot: dir })
+    );
+
+    expect(fsSync.readFileSync(filePath, 'utf-8')).toBe('keep\nkeep\nkeep');
+    expect(resultStr(result)).toContain('found 2 matches');
+  });
+
+  it('deletes multi-line text via line-trimmed fallback without leaving blank lines', async () => {
+    const filePath = path.join(dir, 'file.txt');
+    fsSync.writeFileSync(
+      filePath,
+      '  if (a > b) {\n' +
+        '      doIt();\n' +
+        '  }\n' +
+        '  keep\n'
+    );
+
+    const tool = new EditTool({ maxEditInputSize: 16000 });
+    const result = await tool.execute(
+      {
+        path: 'file.txt',
+        // Indentation differs from the file, so this only matches via the
+        // line-trimmed fallback.
+        oldString: 'if (a > b) {\n  doIt();\n}',
+        newString: '',
+      },
+      toolCtx({ workspaceRoot: dir })
+    );
+
+    expect(fsSync.readFileSync(filePath, 'utf-8')).toBe('  keep\n');
+    // start_line/end_line must not invert on a zero-length replacement
+    const meta = (result as any).metadata;
+    expect(Number(meta.get('start_line'))).toBeLessThanOrEqual(Number(meta.get('end_line')));
+  });
+
+  it('accepts empty new_string via snake_case alias', async () => {
+    const filePath = path.join(dir, 'file.txt');
+    fsSync.writeFileSync(filePath, 'a b a');
+
+    const tool = new EditTool({ maxEditInputSize: 16000 });
+    await tool.execute(
+      { path: 'file.txt', old_string: ' b', new_string: '' },
+      toolCtx({ workspaceRoot: dir })
+    );
+
+    expect(fsSync.readFileSync(filePath, 'utf-8')).toBe('a a');
+  });
+
+  it('accepts empty newString in string JSON input', async () => {
+    const filePath = path.join(dir, 'file.txt');
+    fsSync.writeFileSync(filePath, 'x foo bar');
+
+    const tool = new EditTool({ maxEditInputSize: 16000 });
+    await tool.execute(
+      JSON.stringify({ path: 'file.txt', oldString: ' foo', newString: '' }),
+      toolCtx({ workspaceRoot: dir })
+    );
+
+    expect(fsSync.readFileSync(filePath, 'utf-8')).toBe('x bar');
+  });
+
+  it('still rejects a missing (undefined) newString', async () => {
+    const tool = new EditTool({ maxEditInputSize: 16000 });
+    const result = await tool.execute(
+      { path: 'file.txt', oldString: 'a' },
+      toolCtx({ workspaceRoot: dir })
+    );
+    expect(resultStr(result)).toContain('Error parsing arguments');
+  });
+});
+
 // ── snake_case aliases ──────────────────────────────────────────────────────
 
 describe('EditTool.execute — snake_case aliases', () => {

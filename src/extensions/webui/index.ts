@@ -4,32 +4,23 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { HOOKS } from "../../core/hooks.ts";
 import { createWebuiServer, type WebuiConfig } from "./server.ts";
-import {
-  CoreContext,
-  ExtensionInstance,
-  getExtensionConfig,
-} from "../../core/extensions/types.ts";
+import { CoreContext, ExtensionInstance, getExtensionConfig } from "../../core/extensions/types.ts";
 import { CliArgv } from "../../core/config/index.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const UI_DIR = path.join(__dirname, "ui");
 
-/**
- * Handle the "webui" subcommand: start the WebUI server.
- * Blocks until the server is shut down (SIGINT/SIGTERM).
- */
-async function handleWebuiSubcommand(
-  _cliArgs: CliArgv,
-  core: CoreContext,
-): Promise<number> {
+/** Handle the "webui" subcommand: start the WebUI server. */
+async function handleWebuiSubcommand(_cliArgs: CliArgv, core: CoreContext): Promise<number> {
   try {
     const config = getExtensionConfig<WebuiConfig>(core, "webui");
-    const { server, wsServer } = await createWebuiServer(core, config, UI_DIR);
+    const { server, wsServer, authMiddleware } = await createWebuiServer(core, config, UI_DIR);
 
     await new Promise<void>((resolve) => {
       const shutdown = () => {
         server.stop();
         wsServer.stopCleanupLoop();
+        authMiddleware.stopCleanup();
         resolve();
       };
 

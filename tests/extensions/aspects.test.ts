@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from "bun:test";
-import { create } from "../../src/extensions/aspects/index.ts";
+import { create, isValidAspectName } from "../../src/extensions/aspects/index.ts";
 import { HOOKS } from "../../src/core/hooks.ts";
 import fs from "node:fs";
 import fsPromises from "node:fs/promises";
@@ -173,5 +173,121 @@ describe("aspects extension", () => {
     const result = await hook({} as any);
     expect((result as any).content).toContain("Coding");
     expect((result as any).content).toContain("Concise");
+  });
+
+  it("rejects path traversal aspect names without reading the file", async () => {
+    // Plant a file that a traversal name could reach, to prove it is never loaded.
+    const secretsDir = path.join(tmpDir, "secrets");
+    fs.mkdirSync(secretsDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(secretsDir, "leak.aspect.md"),
+      "TOP SECRET LEAKED CONTENT"
+    );
+
+    // Also a valid aspect to prove filtering keeps good names working.
+    fs.writeFileSync(path.join(aspectsDir, "good.aspect.md"), "# Good Aspect");
+
+    await fsPromises.writeFile(
+      path.join(profilesDir, "default.profile.md"),
+      [
+        "---",
+        "aspects:",
+        "  - good",
+        "  - ../../secrets/leak",
+        "  - ../secrets/leak",
+        "  - sub/evil",
+        "  - ..",
+        "  - .",
+        "  - /",
+        "  - a\\\\b",
+        "  - name with space",
+        `  - ${"a".repeat(65)}`,
+        "---",
+        "",
+        "Profile.",
+      ].join("\n")
+    );
+
+    const core = {
+      config: {},
+      resolved: {
+        configDir,
+        profilesPath: profilesDir,
+        profileName: "default",
+      },
+    } as any;
+    const extension = create(core);
+    const hook = extension.hooks![HOOKS.SYSTEM_PROMPT_BUILD]!;
+    const result = await hook({} as any);
+    expect((result as any).content).toContain("Good Aspect");
+    expect((result as any).content).not.toContain("TOP SECRET LEAKED CONTENT");
+  });
+
+  it("returns empty content when all aspect names are invalid", async () => {
+    const secretsDir = path.join(tmpDir, "secrets");
+    fs.mkdirSync(secretsDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(secretsDir, "leak.aspect.md"),
+      "TOP SECRET LEAKED CONTENT"
+    );
+
+    await fsPromises.writeFile(
+      path.join(profilesDir, "default.profile.md"),
+      "---\naspects:\n  - ../../secrets/leak\n---\n\nProfile."
+    );
+
+    const core = {
+      config: {},
+      resolved: {
+        configDir,
+        profilesPath: profilesDir,
+        profileName: "default",
+      },
+    } as any;
+    const extension = create(core);
+    const hook = extension.hooks![HOOKS.SYSTEM_PROMPT_BUILD]!;
+    const result = await hook({} as any);
+    expect((result as any).name).toBe("guidelines");
+    expect((result as any).content).not.toContain("TOP SECRET LEAKED CONTENT");
+  });
+});
+
+describe("isValidAspectName", () => {
+  it("accepts ordinary aspect names", () => {
+    for (const name of [
+      "default",
+      "coding",
+      "my-aspect",
+      "my.aspect",
+      "foo_bar",
+      "123",
+      "A",
+      "a".repeat(64),
+    ]) {
+      expect(isValidAspectName(name)).toBe(true);
+    }
+  });
+
+  it("rejects traversal and unsafe names", () => {
+    for (const name of [
+      "../../etc/passwd",
+      "../x",
+      "a/b",
+      "a\\b",
+      "..",
+      ".",
+      "/abs",
+      "",
+      "a b",
+      " leading-space",
+      "a".repeat(63) + "/x",
+      "a".repeat(65),
+      "null\u0000byte",
+      null,
+      undefined,
+      42,
+    ]) {
+      expect(isValidAspectName(name)).toBe(false);
+    }
   });
 });

@@ -13,6 +13,27 @@ import { CoreContext, ExtensionInstance } from "../../core/extensions/types.ts";
 const TEMPLATE_PATH = path.join(import.meta.dirname, "aspects_chunk.md");
 
 /**
+ * Validate an aspect name before it is used to build a file path.
+ *
+ * Aspect names come from profile front matter, which may be authored outside
+ * this machine (e.g. a profile pulled from a shared repo) -- a name must
+ * never be able to escape the aspects directory (e.g. `../../secrets/leak`).
+ * Allowlist mirrors PROFILE_NAME_RE in core/config/profiles.ts: starts
+ * alphanumeric, then alphanumerics, dots, underscores, and hyphens only.
+ */
+const ASPECT_NAME_RE = /^[a-zA-Z0-9][a-zA-Z0-9._-]*$/;
+const ASPECT_NAME_MAX_LEN = 64;
+
+export function isValidAspectName(name: unknown): boolean {
+  return (
+    typeof name === "string" &&
+    name.length > 0 &&
+    name.length <= ASPECT_NAME_MAX_LEN &&
+    ASPECT_NAME_RE.test(name)
+  );
+}
+
+/**
  * Resolve aspect names from profile file front matter.
  */
 async function resolveAspectNames(core: CoreContext): Promise<string[]> {
@@ -58,8 +79,24 @@ async function buildAspectsChunk(
     return "";
   }
 
+  // Aspect names come from profile front matter. Reject anything that is not
+  // a plain filename before it reaches loadAspects: names like `../../etc/passwd`
+  // must mean "no aspect", never "read that file".
+  const validNames = aspectNames.filter((name) => {
+    const ok = isValidAspectName(name);
+    if (!ok) {
+      logger.warn(
+        `[aspects] rejected invalid aspect name: ${JSON.stringify(String(name).slice(0, 80))}`,
+      );
+    }
+    return ok;
+  });
+  if (validNames.length === 0) {
+    return "";
+  }
+
   const aspectsDir = path.join(configDir, "aspects");
-  const aspects = await loadAspects(aspectNames, aspectsDir);
+  const aspects = await loadAspects(validNames, aspectsDir);
 
   if (aspects.length === 0) {
     return "";

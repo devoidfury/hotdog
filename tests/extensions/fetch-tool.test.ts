@@ -1,5 +1,9 @@
 import { describe, it, expect, beforeAll, afterAll } from "bun:test";
-import { FetchTool } from "../../src/extensions/fetch-tool/index.ts";
+import {
+  FetchTool,
+  isPrivateAddress,
+  assertPublicHost,
+} from "../../src/extensions/fetch-tool/index.ts";
 import { TransientError } from "../../src/core/error.ts";
 import { resultStr, getDisplay } from "../helpers.ts";
 
@@ -137,7 +141,7 @@ describe("FetchTool", () => {
   });
 
   it("generates tool definition with all HTTP methods", () => {
-    const tool = new FetchTool({ timeoutMs: 30000, maxBodyLength: 8000 });
+    const tool = new FetchTool({ timeoutMs: 30000, maxBodyLength: 8000, allowPrivateHosts: true });
     const def = tool.toToolDef();
     expect(def.function.name).toBe("fetch");
     expect(def.function.parameters.required).toEqual(["url"]);
@@ -150,7 +154,7 @@ describe("FetchTool", () => {
   });
 
   it("generates call display for GET request", () => {
-    const tool = new FetchTool({ timeoutMs: 30000, maxBodyLength: 8000 });
+    const tool = new FetchTool({ timeoutMs: 30000, maxBodyLength: 8000, allowPrivateHosts: true });
     const display = tool.callDisplay(
       JSON.stringify({ url: "https://example.com", method: "GET" }),
     );
@@ -159,7 +163,7 @@ describe("FetchTool", () => {
   });
 
   it("generates call display for POST request", () => {
-    const tool = new FetchTool({ timeoutMs: 30000, maxBodyLength: 8000 });
+    const tool = new FetchTool({ timeoutMs: 30000, maxBodyLength: 8000, allowPrivateHosts: true });
     const display = tool.callDisplay(
       JSON.stringify({ url: "https://api.example.com/data", method: "POST" }),
     );
@@ -167,7 +171,7 @@ describe("FetchTool", () => {
   });
 
   it("truncates long URLs in display", () => {
-    const tool = new FetchTool({ timeoutMs: 30000, maxBodyLength: 8000 });
+    const tool = new FetchTool({ timeoutMs: 30000, maxBodyLength: 8000, allowPrivateHosts: true });
     const longUrl = "https://example.com/" + "a".repeat(50);
     const display = tool.callDisplay(JSON.stringify({ url: longUrl }));
     expect(display).toContain("...");
@@ -178,31 +182,31 @@ describe("FetchTool", () => {
 
 describe("FetchTool input validation", () => {
   it("returns error for missing URL", async () => {
-    const tool = new FetchTool({ timeoutMs: 30000, maxBodyLength: 8000 });
+    const tool = new FetchTool({ timeoutMs: 30000, maxBodyLength: 8000, allowPrivateHosts: true });
     const result = await tool.execute(JSON.stringify({ method: "GET" }));
     expect(getDisplay(result)).toContain("Missing required argument: url");
   });
 
   it("returns error for empty input", async () => {
-    const tool = new FetchTool({ timeoutMs: 30000, maxBodyLength: 8000 });
+    const tool = new FetchTool({ timeoutMs: 30000, maxBodyLength: 8000, allowPrivateHosts: true });
     const result = await tool.execute("");
     expect(getDisplay(result)).toContain("Missing required argument: url");
   });
 
   it("returns error for null input", async () => {
-    const tool = new FetchTool({ timeoutMs: 30000, maxBodyLength: 8000 });
+    const tool = new FetchTool({ timeoutMs: 30000, maxBodyLength: 8000, allowPrivateHosts: true });
     const result = await tool.execute(null);
     expect(getDisplay(result)).toContain("Missing required argument: url");
   });
 
   it("returns error for invalid JSON", async () => {
-    const tool = new FetchTool({ timeoutMs: 30000, maxBodyLength: 8000 });
+    const tool = new FetchTool({ timeoutMs: 30000, maxBodyLength: 8000, allowPrivateHosts: true });
     const result = await tool.execute("not valid json");
     expect(getDisplay(result)).toContain("Error parsing arguments");
   });
 
   it("returns error for invalid HTTP method", async () => {
-    const tool = new FetchTool({ timeoutMs: 30000, maxBodyLength: 8000 });
+    const tool = new FetchTool({ timeoutMs: 30000, maxBodyLength: 8000, allowPrivateHosts: true });
     const result = await tool.execute(
       JSON.stringify({ url: `${BASE_URL}/html`, method: "INVALID" }),
     );
@@ -210,7 +214,7 @@ describe("FetchTool input validation", () => {
   });
 
   it("normalizes method to uppercase", async () => {
-    const tool = new FetchTool({ timeoutMs: 30000, maxBodyLength: 8000 });
+    const tool = new FetchTool({ timeoutMs: 30000, maxBodyLength: 8000, allowPrivateHosts: true });
     let result: unknown;
     let threw = false;
     try {
@@ -227,7 +231,7 @@ describe("FetchTool input validation", () => {
   });
 
   it("handles object input", async () => {
-    const tool = new FetchTool({ timeoutMs: 30000, maxBodyLength: 8000 });
+    const tool = new FetchTool({ timeoutMs: 30000, maxBodyLength: 8000, allowPrivateHosts: true });
     let result: unknown;
     let threw = false;
     try {
@@ -242,7 +246,7 @@ describe("FetchTool input validation", () => {
 
   for (const val of [true, false, "true"]) {
     it(`accepts showOriginal: ${JSON.stringify(val)} without parse error`, async () => {
-      const tool = new FetchTool({ timeoutMs: 30000, maxBodyLength: 8000 });
+      const tool = new FetchTool({ timeoutMs: 30000, maxBodyLength: 8000, allowPrivateHosts: true });
       let result: unknown;
       let threw = false;
       try {
@@ -260,6 +264,189 @@ describe("FetchTool input validation", () => {
   }
 });
 
+// ── URL restrictions (scheme gate + private host gate) ─────────────────────
+
+describe("FetchTool URL restrictions", () => {
+  const PRIVATE_V4 = [
+    "0.0.0.0",
+    "10.1.2.3",
+    "172.16.0.1",
+    "172.31.255.255",
+    "192.168.1.1",
+    "127.0.0.1",
+    "169.254.169.254",
+    "100.64.0.1",
+    "100.127.255.255",
+  ];
+  const PUBLIC_V4 = [
+    "8.8.8.8",
+    "93.184.216.34",
+    "11.0.0.1",
+    "172.15.255.255",
+    "172.32.0.1",
+    "100.63.255.255",
+    "100.128.0.1",
+  ];
+  const PRIVATE_V6 = [
+    "::",
+    "::1",
+    "fe80::1",
+    "fc00::1",
+    "fd12:3456::1",
+    "::ffff:127.0.0.1",
+    "::ffff:7f00:1",
+    "::ffff:10.0.0.1",
+  ];
+  const PUBLIC_V6 = [
+    "2606:2800:220:1:248:1893:25c8:1946",
+    "2001:4860:4860::8888",
+    "2001:db8::1",
+  ];
+
+  describe("isPrivateAddress (pure classifier)", () => {
+    for (const ip of PRIVATE_V4) {
+      it(`treats ${ip} as private`, () => {
+        expect(isPrivateAddress(ip)).toBe(true);
+      });
+    }
+    for (const ip of PUBLIC_V4) {
+      it(`treats ${ip} as public`, () => {
+        expect(isPrivateAddress(ip)).toBe(false);
+      });
+    }
+    for (const ip of PRIVATE_V6) {
+      it(`treats [${ip}] as private`, () => {
+        expect(isPrivateAddress(ip)).toBe(true);
+      });
+    }
+    for (const ip of PUBLIC_V6) {
+      it(`treats [${ip}] as public`, () => {
+        expect(isPrivateAddress(ip)).toBe(false);
+      });
+    }
+    for (const bad of ["", "garbage", "999.1.1.1", "1.2.3", "12345:::1", "1:2:3:4:5:6:7:8:9", "1:2:3:4:5:6:7:8::"]) {
+      it(`fails closed on malformed input ${JSON.stringify(bad)}`, () => {
+        expect(isPrivateAddress(bad)).toBe(true);
+      });
+    }
+    it("treats a full-form public IPv6 as public", () => {
+      expect(isPrivateAddress("2001:0db8:0000:0000:0000:0000:0000:0001")).toBe(false);
+    });
+  });
+
+  describe("scheme gate", () => {
+    it("rejects file:// URLs (local file read vector)", async () => {
+      const tool = new FetchTool({ timeoutMs: 30000, maxBodyLength: 8000 });
+      const result = await tool.execute(JSON.stringify({ url: "file:///etc/hostname" }));
+      const display = getDisplay(result);
+      expect(display).toContain("scheme 'file' is not allowed");
+      expect(display).toContain("http, https");
+    });
+
+    it("rejects ftp:// by default", async () => {
+      const tool = new FetchTool({ timeoutMs: 30000, maxBodyLength: 8000 });
+      const result = await tool.execute(JSON.stringify({ url: "ftp://example.com/file" }));
+      expect(getDisplay(result)).toContain("scheme 'ftp' is not allowed");
+    });
+
+    it("rejects data:// by default", async () => {
+      const tool = new FetchTool({ timeoutMs: 30000, maxBodyLength: 8000 });
+      const result = await tool.execute(
+        JSON.stringify({ url: "data:text/plain,hello" }),
+      );
+      expect(getDisplay(result)).toContain("scheme 'data' is not allowed");
+    });
+
+    it("accepts a configured additional scheme (no scheme error)", async () => {
+      const tool = new FetchTool({
+        timeoutMs: 30000,
+        maxBodyLength: 8000,
+        allowedSchemes: ["http", "https", "ftp"],
+      });
+      // localhost still trips the private-host gate (default) -- the point
+      // here is that the error is NOT a scheme rejection.
+      const result = await tool.execute(JSON.stringify({ url: "ftp://localhost/pub" }));
+      const display = getDisplay(result);
+      expect(display).not.toContain("is not allowed. Allowed schemes");
+      expect(display).toContain("private or reserved");
+    });
+
+    it("rejects an unparseable URL", async () => {
+      const tool = new FetchTool({ timeoutMs: 30000, maxBodyLength: 8000 });
+      const result = await tool.execute(JSON.stringify({ url: "not a url" }));
+      expect(getDisplay(result)).toContain("Invalid URL");
+    });
+  });
+
+  describe("private host gate", () => {
+    for (const ip of PRIVATE_V4) {
+      it(`rejects ${ip} (literal)`, async () => {
+        const tool = new FetchTool({ timeoutMs: 30000, maxBodyLength: 8000 });
+        const result = await tool.execute(JSON.stringify({ url: `http://${ip}/` }));
+        expect(getDisplay(result)).toContain("private or reserved");
+      });
+    }
+
+    for (const ip of PRIVATE_V6) {
+      it(`rejects [${ip}] (literal)`, async () => {
+        const tool = new FetchTool({ timeoutMs: 30000, maxBodyLength: 8000 });
+        const result = await tool.execute(JSON.stringify({ url: `http://[${ip}]/` }));
+        expect(getDisplay(result)).toContain("private or reserved");
+      });
+    }
+
+    it("passes public IP literals through the gate (no fetch, no DNS)", async () => {
+      // IP literals short-circuit before any network access, so this is safe
+      // offline.
+      for (const ip of [...PUBLIC_V4, ...PUBLIC_V6]) {
+        expect(await assertPublicHost(ip)).toBeNull();
+      }
+    });
+
+    it("blocks private IP literals at the gate level", async () => {
+      for (const ip of [...PRIVATE_V4, ...PRIVATE_V6]) {
+        const err = await assertPublicHost(ip);
+        expect(err).not.toBeNull();
+        expect(err).toContain("private or reserved");
+      }
+    });
+
+    it("rejects localhost by name (resolves to loopback)", async () => {
+      const tool = new FetchTool({ timeoutMs: 30000, maxBodyLength: 8000 });
+      const result = await tool.execute(
+        JSON.stringify({ url: "http://localhost:18932/html" }),
+      );
+      const display = getDisplay(result);
+      expect(display).toContain("private or reserved");
+      expect(display).toContain("resolves to");
+    });
+
+    it("fails closed on an unresolvable host", async () => {
+      const tool = new FetchTool({ timeoutMs: 30000, maxBodyLength: 8000 });
+      const result = await tool.execute(
+        JSON.stringify({ url: "http://nonexistent.invalid/" }),
+      );
+      expect(getDisplay(result)).toContain("Could not resolve host");
+    });
+
+    it("allows localhost when allowPrivateHosts is true", async () => {
+      // Closed port on localhost: the point is that the request is not
+      // stopped by the private-host gate (error is connection-level, not
+      // "private or reserved").
+      const tool = new FetchTool({
+        timeoutMs: 30000,
+        maxBodyLength: 8000,
+        allowPrivateHosts: true,
+      });
+      const result = await tool.execute(
+        JSON.stringify({ url: "http://localhost:19999/x" }),
+      ).catch((e: unknown) => e);
+      const display = result instanceof Error ? result.message : getDisplay(result);
+      expect(display).not.toContain("private or reserved");
+    });
+  });
+});
+
 // ── Integration tests (local server) ────────────────────────────────────────
 
 describe("FetchTool integration", () => {
@@ -273,7 +460,7 @@ describe("FetchTool integration", () => {
 
   describe("HTML handling", () => {
     it("converts HTML to GFM when showOriginal is not true", async () => {
-      const tool = new FetchTool({ timeoutMs: 30000, maxBodyLength: 8000 });
+      const tool = new FetchTool({ timeoutMs: 30000, maxBodyLength: 8000, allowPrivateHosts: true });
       const result = await tool.execute(
         JSON.stringify({ url: `${BASE_URL}/html` }),
       );
@@ -289,7 +476,7 @@ describe("FetchTool integration", () => {
     });
 
     it("returns original HTML when showOriginal is true", async () => {
-      const tool = new FetchTool({ timeoutMs: 30000, maxBodyLength: 8000 });
+      const tool = new FetchTool({ timeoutMs: 30000, maxBodyLength: 8000, allowPrivateHosts: true });
       const result = await tool.execute(
         JSON.stringify({ url: `${BASE_URL}/html`, showOriginal: true }),
       );
@@ -302,7 +489,7 @@ describe("FetchTool integration", () => {
 
   describe("JSON handling", () => {
     it("returns JSON content as-is regardless of showOriginal", async () => {
-      const tool = new FetchTool({ timeoutMs: 30000, maxBodyLength: 8000 });
+      const tool = new FetchTool({ timeoutMs: 30000, maxBodyLength: 8000, allowPrivateHosts: true });
       const result = await tool.execute(
         JSON.stringify({ url: `${BASE_URL}/json` }),
       );
@@ -315,7 +502,7 @@ describe("FetchTool integration", () => {
     });
 
     it("returns JSON content unchanged when showOriginal is true", async () => {
-      const tool = new FetchTool({ timeoutMs: 30000, maxBodyLength: 8000 });
+      const tool = new FetchTool({ timeoutMs: 30000, maxBodyLength: 8000, allowPrivateHosts: true });
       const result = await tool.execute(
         JSON.stringify({ url: `${BASE_URL}/json`, showOriginal: true }),
       );
@@ -329,7 +516,7 @@ describe("FetchTool integration", () => {
 
   describe("HTTP methods", () => {
     it("sends GET request", async () => {
-      const tool = new FetchTool({ timeoutMs: 30000, maxBodyLength: 8000 });
+      const tool = new FetchTool({ timeoutMs: 30000, maxBodyLength: 8000, allowPrivateHosts: true });
       const result = await tool.execute(
         JSON.stringify({ url: `${BASE_URL}/echo`, method: "GET" }),
       );
@@ -338,7 +525,7 @@ describe("FetchTool integration", () => {
     });
 
     it("sends POST request with body", async () => {
-      const tool = new FetchTool({ timeoutMs: 30000, maxBodyLength: 8000 });
+      const tool = new FetchTool({ timeoutMs: 30000, maxBodyLength: 8000, allowPrivateHosts: true });
       const result = await tool.execute(
         JSON.stringify({
           url: `${BASE_URL}/echo`,
@@ -352,7 +539,7 @@ describe("FetchTool integration", () => {
     });
 
     it("sends PUT request with body", async () => {
-      const tool = new FetchTool({ timeoutMs: 30000, maxBodyLength: 8000 });
+      const tool = new FetchTool({ timeoutMs: 30000, maxBodyLength: 8000, allowPrivateHosts: true });
       const result = await tool.execute(
         JSON.stringify({
           url: `${BASE_URL}/echo`,
@@ -366,7 +553,7 @@ describe("FetchTool integration", () => {
     });
 
     it("sends PATCH request with body", async () => {
-      const tool = new FetchTool({ timeoutMs: 30000, maxBodyLength: 8000 });
+      const tool = new FetchTool({ timeoutMs: 30000, maxBodyLength: 8000, allowPrivateHosts: true });
       const result = await tool.execute(
         JSON.stringify({
           url: `${BASE_URL}/echo`,
@@ -380,7 +567,7 @@ describe("FetchTool integration", () => {
     });
 
     it("sends DELETE request", async () => {
-      const tool = new FetchTool({ timeoutMs: 30000, maxBodyLength: 8000 });
+      const tool = new FetchTool({ timeoutMs: 30000, maxBodyLength: 8000, allowPrivateHosts: true });
       const result = await tool.execute(
         JSON.stringify({ url: `${BASE_URL}/echo`, method: "DELETE" }),
       );
@@ -389,7 +576,7 @@ describe("FetchTool integration", () => {
     });
 
     it("sends HEAD request", async () => {
-      const tool = new FetchTool({ timeoutMs: 30000, maxBodyLength: 8000 });
+      const tool = new FetchTool({ timeoutMs: 30000, maxBodyLength: 8000, allowPrivateHosts: true });
       const result = await tool.execute(
         JSON.stringify({ url: `${BASE_URL}/html`, method: "HEAD" }),
       );
@@ -400,7 +587,7 @@ describe("FetchTool integration", () => {
 
   describe("custom headers", () => {
     it("sends custom headers", async () => {
-      const tool = new FetchTool({ timeoutMs: 30000, maxBodyLength: 8000 });
+      const tool = new FetchTool({ timeoutMs: 30000, maxBodyLength: 8000, allowPrivateHosts: true });
       const result = await tool.execute(
         JSON.stringify({
           url: `${BASE_URL}/headers`,
@@ -414,7 +601,7 @@ describe("FetchTool integration", () => {
 
   describe("status codes", () => {
     it("handles 200 OK", async () => {
-      const tool = new FetchTool({ timeoutMs: 30000, maxBodyLength: 8000 });
+      const tool = new FetchTool({ timeoutMs: 30000, maxBodyLength: 8000, allowPrivateHosts: true });
       const result = await tool.execute(
         JSON.stringify({ url: `${BASE_URL}/status/200` }),
       );
@@ -423,7 +610,7 @@ describe("FetchTool integration", () => {
     });
 
     it("handles 404 Not Found", async () => {
-      const tool = new FetchTool({ timeoutMs: 30000, maxBodyLength: 8000 });
+      const tool = new FetchTool({ timeoutMs: 30000, maxBodyLength: 8000, allowPrivateHosts: true });
       const result = await tool.execute(
         JSON.stringify({ url: `${BASE_URL}/status/404` }),
       );
@@ -432,7 +619,7 @@ describe("FetchTool integration", () => {
     });
 
     it("handles 500 Internal Server Error", async () => {
-      const tool = new FetchTool({ timeoutMs: 30000, maxBodyLength: 8000 });
+      const tool = new FetchTool({ timeoutMs: 30000, maxBodyLength: 8000, allowPrivateHosts: true });
       const result = await tool.execute(
         JSON.stringify({ url: `${BASE_URL}/status/500` }),
       );
@@ -443,7 +630,7 @@ describe("FetchTool integration", () => {
 
   describe("metadata", () => {
     it("returns correct metadata fields", async () => {
-      const tool = new FetchTool({ timeoutMs: 30000, maxBodyLength: 8000 });
+      const tool = new FetchTool({ timeoutMs: 30000, maxBodyLength: 8000, allowPrivateHosts: true });
       const result = await tool.execute(
         JSON.stringify({ url: `${BASE_URL}/json` }),
       );
@@ -455,7 +642,7 @@ describe("FetchTool integration", () => {
     });
 
     it("reports body_length correctly", async () => {
-      const tool = new FetchTool({ timeoutMs: 30000, maxBodyLength: 8000 });
+      const tool = new FetchTool({ timeoutMs: 30000, maxBodyLength: 8000, allowPrivateHosts: true });
       const result = await tool.execute(
         JSON.stringify({ url: `${BASE_URL}/plaintext` }),
       );
@@ -466,7 +653,7 @@ describe("FetchTool integration", () => {
 
   describe("plain text", () => {
     it("returns plain text content unchanged", async () => {
-      const tool = new FetchTool({ timeoutMs: 30000, maxBodyLength: 8000 });
+      const tool = new FetchTool({ timeoutMs: 30000, maxBodyLength: 8000, allowPrivateHosts: true });
       const result = await tool.execute(
         JSON.stringify({ url: `${BASE_URL}/plaintext` }),
       );
@@ -478,7 +665,7 @@ describe("FetchTool integration", () => {
 
   describe("empty responses", () => {
     it("handles empty response body", async () => {
-      const tool = new FetchTool({ timeoutMs: 30000, maxBodyLength: 8000 });
+      const tool = new FetchTool({ timeoutMs: 30000, maxBodyLength: 8000, allowPrivateHosts: true });
       const result = await tool.execute(
         JSON.stringify({ url: `${BASE_URL}/empty` }),
       );
@@ -490,7 +677,7 @@ describe("FetchTool integration", () => {
 
   describe("connection errors", () => {
     it("throws TransientError on unreachable host", async () => {
-      const tool = new FetchTool({ timeoutMs: 30000, maxBodyLength: 8000 });
+      const tool = new FetchTool({ timeoutMs: 30000, maxBodyLength: 8000, allowPrivateHosts: true });
       await expect(
         tool.execute(JSON.stringify({ url: "http://localhost:19999/nonexistent" }))
       ).rejects.toThrow(/Connection failed/);
@@ -499,7 +686,7 @@ describe("FetchTool integration", () => {
 
   describe("timeouts and large bodies", () => {
     it("aborts slow responses with TransientError when the timeout fires", async () => {
-      const tool = new FetchTool({ timeoutMs: 300, maxBodyLength: 8000 });
+      const tool = new FetchTool({ timeoutMs: 300, maxBodyLength: 8000, allowPrivateHosts: true });
       const t0 = Date.now();
       await expect(
         tool.execute(JSON.stringify({ url: `${BASE_URL}/slow` })),
@@ -509,7 +696,7 @@ describe("FetchTool integration", () => {
     });
 
     it("caps large response reads and truncates the display", async () => {
-      const tool = new FetchTool({ timeoutMs: 30000, maxBodyLength: 8000 });
+      const tool = new FetchTool({ timeoutMs: 30000, maxBodyLength: 8000, allowPrivateHosts: true });
       const result = await tool.execute(
         JSON.stringify({ url: `${BASE_URL}/huge` }),
       );

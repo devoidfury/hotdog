@@ -748,9 +748,11 @@ Extensions register their own configuration namespaces. Each extension's config 
 | `enabled` | `boolean` | `true` | Enable/disable the extension. |
 | `maxBodyLength` | `number` | `8000` | Maximum number of characters to return before truncating responses. |
 | `fetchTimeoutMs` | `number` | `30000` | Timeout in milliseconds for requests (headers and body). Slow or dead hosts abort instead of hanging the agent. |
+| `allowedSchemes` | `string[]` | `["http", "https"]` | URL schemes the fetch tool may use. Blocks `file://` (local file reads) and other schemes by default. |
+| `allowPrivateHosts` | `boolean` | `false` | Allow hosts that are, or resolve to, private/reserved addresses (localhost, RFC1918, link-local/metadata, ULA, CGNAT). Default `false` blocks SSRF against local and cloud-internal services. |
 
 ```json
-{ "fetchTool": { "enabled": true, "fetchTimeoutMs": 15000 } }
+{ "fetchTool": { "enabled": true, "fetchTimeoutMs": 15000, "allowPrivateHosts": true } }
 ```
 
 ### `compaction`

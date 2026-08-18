@@ -21,6 +21,17 @@
           "type": "number",
           "default": 30000,
           "description": "Timeout in milliseconds for requests (headers and body). Slow or dead hosts abort instead of hanging the agent."
+        },
+        "allowedSchemes": {
+          "type": "array",
+          "items": { "type": "string" },
+          "default": ["http", "https"],
+          "description": "URL schemes the fetch tool may use. Defaults to http/https, which blocks file:// (local file reads) and other schemes."
+        },
+        "allowPrivateHosts": {
+          "type": "boolean",
+          "default": false,
+          "description": "Allow fetching hosts that are, or resolve to, private/reserved addresses (localhost, RFC1918, link-local/metadata, ULA, CGNAT). Default false blocks SSRF against local/cloud-internal services."
         }
       },
       "additionalProperties": false,

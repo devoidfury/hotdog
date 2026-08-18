@@ -20,6 +20,10 @@ import {
 } from "../../core/extensions/types.ts";
 
 import { hotdogFetch, VALID_METHODS, METHODS_WITH_BODY } from "@utils/fetch.ts";
+import { isIP } from "node:net";
+import { lookup } from "node:dns/promises";
+
+export const DEFAULT_ALLOWED_SCHEMES = ["http", "https"];
 
 interface FetchArgs {
   url: string;
@@ -27,6 +31,7 @@ interface FetchArgs {
   headers: Record<string, string>;
   body: string | null;
   showOriginal: boolean;
+  host: string | null;
 }
 
 interface ParseResult {
@@ -37,6 +42,14 @@ interface ParseResult {
 interface FetchToolOptions {
   timeoutMs: number;
   maxBodyLength: number;
+  /** URL schemes permitted by the fetch tool. Defaults to http/https. */
+  allowedSchemes?: string[];
+  /**
+   * When false (default), hosts that are -- or resolve to -- private or
+   * reserved addresses (loopback, RFC1918, link-local/metadata, ULA, CGNAT,
+   * IPv4-mapped) are refused.
+   */
+  allowPrivateHosts?: boolean;
 }
 
 export class FetchTool {
@@ -45,16 +58,30 @@ export class FetchTool {
 
   readonly timeoutMs: number;
   readonly maxBodyLength: number;
+  readonly allowedSchemes: string[];
+  readonly allowPrivateHosts: boolean;
 
   constructor(options: FetchToolOptions) {
     this.timeoutMs = options.timeoutMs;
     this.maxBodyLength = options.maxBodyLength;
+    this.allowedSchemes = (options.allowedSchemes ?? DEFAULT_ALLOWED_SCHEMES).map(
+      (s) => s.toLowerCase(),
+    );
+    this.allowPrivateHosts = options.allowPrivateHosts ?? false;
   }
 
   toToolDef() {
+    const restrictions = [
+      `Only these URL schemes are allowed: ${this.allowedSchemes.join(", ")}.`,
+      !this.allowPrivateHosts
+        ? "Private or reserved hosts (localhost, 10.x, 192.168.x, 169.254.x, etc.) are not allowed."
+        : null,
+    ]
+      .filter(Boolean)
+      .join(" ");
     return toolDef(
       FetchTool.TOOL_NAME,
-      `Perform a web request to a URL. Supports ${VALID_METHODS.join(", ")} methods with optional headers and body. Returns the response body, status code, and content type. When showOriginal is true, returns the raw response body without markdown conversion.`,
+      `Perform a web request to a URL. Supports ${VALID_METHODS.join(", ")} methods with optional headers and body. Returns the response body, status code, and content type. When showOriginal is true, returns the raw response body without markdown conversion. ${restrictions}`,
       {
         properties: {
           url: param("string", "The URL to fetch"),
@@ -90,12 +117,19 @@ export class FetchTool {
     input: string | Record<string, unknown> | null,
     _ctx?: ToolContext,
   ): Promise<ToolResult> {
-    const { args, error } = parseArgs(input);
+    const { args, error } = parseArgs(input, this.allowedSchemes);
     if (!args) {
       return ToolResult.err(error);
     }
 
-    const { url, method, showOriginal } = args;
+    const { url, method, showOriginal, host } = args;
+
+    if (!this.allowPrivateHosts && host) {
+      const hostError = await assertPublicHost(host);
+      if (hostError) {
+        return ToolResult.err(hostError);
+      }
+    }
 
     try {
       const resp = await hotdogFetch(url, args, this.timeoutMs);
@@ -166,6 +200,7 @@ export class FetchTool {
 /** Parse and validate fetch tool arguments. */
 function parseArgs(
   input: string | Record<string, unknown> | null,
+  allowedSchemes: string[],
 ): ParseResult {
   if (!input || (typeof input === "string" && input.trim().length === 0)) {
     return { args: null, error: "Missing required argument: url" };
@@ -179,6 +214,22 @@ function parseArgs(
   const url = json.url;
   if (!url || typeof url !== "string") {
     return { args: null, error: "Missing required argument: url" };
+  }
+
+  let parsedUrl: URL;
+  try {
+    parsedUrl = new URL(url);
+  } catch {
+    return { args: null, error: `Invalid URL: ${url}` };
+  }
+
+  // Scheme gate: blocks file:// (local file reads), data://, gopher://, etc.
+  const scheme = parsedUrl.protocol.replace(/:$/, "").toLowerCase();
+  if (!allowedSchemes.some((s) => s.toLowerCase() === scheme)) {
+    return {
+      args: null,
+      error: `URL scheme '${scheme}' is not allowed. Allowed schemes: ${allowedSchemes.join(", ")}`,
+    };
   }
 
   // Validate method
@@ -197,7 +248,147 @@ function parseArgs(
   const body = typeof json.body === "string" ? json.body : null;
   const showOriginal = json.showOriginal === true;
 
-  return { args: { url, method, headers, body, showOriginal }, error: null };
+  return {
+    // Bun (unlike Node) keeps the brackets in hostname for IPv6 literals.
+    args: {
+      url,
+      method,
+      headers,
+      body,
+      showOriginal,
+      host: parsedUrl.hostname.replace(/^\[|\]$/g, "") || null,
+    },
+    error: null,
+  };
+}
+
+/**
+ * Refuse hosts that are, or resolve to, private/reserved addresses.
+ * Returns an error message to hand to the model, or null when the host is
+ * public. Fails closed: unresolvable hosts are rejected.
+ *
+ * Known ceiling: DNS rebinding -- fetch() re-resolves the name when it
+ * connects, so a hostile resolver could return a public address here and a
+ * private one at connect time. Closing that gap would require pinning the
+ * connection to the resolved IP, which breaks SNI/virtual hosting.
+ */
+/** @internal Exported for testing. */
+export async function assertPublicHost(host: string): Promise<string | null> {
+  if (isIP(host) !== 0) {
+    return isPrivateAddress(host) ? privateHostError(host, host) : null;
+  }
+
+  let addresses: Array<{ address: string }>;
+  try {
+    addresses = await lookup(host, { all: true });
+  } catch (e) {
+    return `Could not resolve host '${host}': ${(e as Error).message}. Refusing to fetch unresolved hosts.`;
+  }
+  for (const { address } of addresses) {
+    if (isPrivateAddress(address)) {
+      return privateHostError(host, address);
+    }
+  }
+  return null;
+}
+
+function privateHostError(host: string, resolved: string): string {
+  const detail = resolved !== host ? ` (resolves to ${resolved})` : "";
+  return (
+    `Host '${host}' is a private or reserved address${detail}. ` +
+    "Private hosts are not allowed. Set fetchTool.allowPrivateHosts to true in config to change this."
+  );
+}
+
+/**
+ * Pure classifier for IP literal text (dotted v4 or v6).
+ * Fails closed: anything not a clean public IP counts as private.
+ */
+export function isPrivateAddress(ip: string): boolean {
+  const version = isIP(ip);
+
+  if (version === 4) {
+    const parts = ip.split(".").map(Number);
+    if (
+      parts.length !== 4 ||
+      parts.some((n) => !Number.isInteger(n) || n < 0 || n > 255)
+    ) {
+      return true;
+    }
+    const [a, b] = parts as [number, number, number, number];
+    return (
+      a === 0 || // 0.0.0.0/8 "this network"
+      a === 10 || // RFC1918
+      a === 127 || // loopback
+      (a === 100 && b >= 64 && b <= 127) || // CGNAT
+      (a === 172 && b >= 16 && b <= 31) || // RFC1918
+      (a === 169 && b === 254) || // link-local (cloud metadata lives here)
+      (a === 192 && b === 168) // RFC1918
+    );
+  }
+
+  if (version === 6) {
+    const groups = expandIpv6(ip);
+    if (!groups) return true; // malformed -- fail closed
+
+    // :: (unspecified) and ::1 (loopback)
+    if (groups.every((g) => g === 0)) return true;
+    if (
+      groups[6] === 0 &&
+      groups[7] === 1 &&
+      groups.slice(0, 7).every((g) => g === 0)
+    ) {
+      return true;
+    }
+
+    // IPv4-mapped ::ffff:a.b.c.d -- the last 32 bits carry a v4 address.
+    // WHATWG URL parsing normalizes embedded-IPv4 forms to this shape.
+    if (
+      groups[0] === 0 &&
+      groups[1] === 0 &&
+      groups[2] === 0 &&
+      groups[3] === 0 &&
+      groups[4] === 0 &&
+      groups[5] === 0xffff
+    ) {
+      const v4 = `${(groups[6] >> 8) & 0xff}.${groups[6] & 0xff}.${(groups[7] >> 8) & 0xff}.${groups[7] & 0xff}`;
+      return isPrivateAddress(v4);
+    }
+
+    // fe80::/10 link-local, fc00::/7 unique-local
+    return (groups[0] & 0xffc0) === 0xfe80 || (groups[0] & 0xfe00) === 0xfc00;
+  }
+
+  return true; // not an IP literal
+}
+
+/** Expand an IPv6 literal to 8 groups; null if malformed. */
+function expandIpv6(
+  ip: string,
+): [number, number, number, number, number, number, number, number] | null {
+  const bare = ip.split("%")[0] ?? ip; // strip zone id
+  const halves = bare.split("::");
+  if (halves.length > 2) return null;
+
+  const head = halves[0] ? halves[0].split(":") : [];
+  const tail = halves.length === 2 && halves[1] ? halves[1].split(":") : [];
+
+  // With "::" the omitted run stands for at least one group; without it all
+  // eight groups must be spelled out.
+  const omitted = 8 - head.length - tail.length;
+  if (halves.length === 2 && omitted < 1) return null; // "::" must omit at least one group
+  const parts: string[] =
+    halves.length === 2
+      ? [...head, ...Array.from({ length: omitted }, () => "0"), ...tail]
+      : [...head, ...tail];
+  if (parts.length !== 8 || parts.some((p) => p.length > 4)) return null;
+
+  const groups: number[] = [];
+  for (const part of parts) {
+    if (!/^[0-9a-f]{1,4}$/i.test(part)) return null;
+    groups.push(parseInt(part, 16));
+  }
+  return groups as [number, number, number, number, number, number, number, number];
 }
 
 /**
@@ -253,10 +444,14 @@ export function create(core: CoreContext): ExtensionInstance {
   const config = getExtensionConfig<{
     maxBodyLength: number;
     fetchTimeoutMs: number;
+    allowedSchemes?: string[];
+    allowPrivateHosts?: boolean;
   }>(core, "fetchTool");
   const fetchTool = new FetchTool({
     maxBodyLength: config.maxBodyLength,
     timeoutMs: config.fetchTimeoutMs,
+    allowedSchemes: config.allowedSchemes ?? DEFAULT_ALLOWED_SCHEMES,
+    allowPrivateHosts: config.allowPrivateHosts ?? false,
   });
 
   return {

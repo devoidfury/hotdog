@@ -315,15 +315,19 @@ export function isPrivateAddress(ip: string): boolean {
     ) {
       return true;
     }
-    const [a, b] = parts as [number, number, number, number];
+    const [a, b, c] = parts as [number, number, number, number];
     return (
       a === 0 || // 0.0.0.0/8 "this network"
       a === 10 || // RFC1918
       a === 127 || // loopback
+      a === 255 || // 255.255.255.255/8 broadcast
       (a === 100 && b >= 64 && b <= 127) || // CGNAT
       (a === 172 && b >= 16 && b <= 31) || // RFC1918
       (a === 169 && b === 254) || // link-local (cloud metadata lives here)
-      (a === 192 && b === 168) // RFC1918
+      (a === 192 && b === 0 && c === 2) || // TEST-NET-1 (documentation)
+      (a === 192 && b === 168) || // RFC1918
+      (a === 198 && b === 51 && c === 100) || // TEST-NET-2 (documentation)
+      (a === 203 && b === 0 && c === 113) // TEST-NET-3 (documentation)
     );
   }
 
@@ -354,6 +358,17 @@ export function isPrivateAddress(ip: string): boolean {
       const v4 = `${(groups[6] >> 8) & 0xff}.${groups[6] & 0xff}.${(groups[7] >> 8) & 0xff}.${groups[7] & 0xff}`;
       return isPrivateAddress(v4);
     }
+
+    // 2001:db8::/32 documentation
+    if (groups[0] === 0x2001 && groups[1] === 0x0db8) return true;
+
+    // 2002::/16 6to4 and 64:ff9b::/96 NAT64 embed a v4 address in the low
+    // bits, which may itself be private -- refuse the whole prefix.
+    if (groups[0] === 0x2002) return true;
+    if (groups[0] === 0x0064 && groups[1] === 0xff9b) return true;
+
+    // ff00::/8 multicast (LAN amplification, mDNS/SSDP targets)
+    if ((groups[0] & 0xff00) === 0xff00) return true;
 
     // fe80::/10 link-local, fc00::/7 unique-local
     return (groups[0] & 0xffc0) === 0xfe80 || (groups[0] & 0xfe00) === 0xfc00;

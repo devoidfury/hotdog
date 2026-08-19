@@ -277,6 +277,10 @@ describe("FetchTool URL restrictions", () => {
     "169.254.169.254",
     "100.64.0.1",
     "100.127.255.255",
+    "255.255.255.255",
+    "192.0.2.1",
+    "198.51.100.1",
+    "203.0.113.1",
   ];
   const PUBLIC_V4 = [
     "8.8.8.8",
@@ -286,6 +290,9 @@ describe("FetchTool URL restrictions", () => {
     "172.32.0.1",
     "100.63.255.255",
     "100.128.0.1",
+    "192.0.1.1",
+    "192.0.3.1",
+    "254.1.2.3",
   ];
   const PRIVATE_V6 = [
     "::",
@@ -296,11 +303,18 @@ describe("FetchTool URL restrictions", () => {
     "::ffff:127.0.0.1",
     "::ffff:7f00:1",
     "::ffff:10.0.0.1",
+    "ff02::1",
+    "ff0e::1",
+    "2001:db8::1",
+    "2002::1",
+    "64:ff9b::1",
   ];
   const PUBLIC_V6 = [
     "2606:2800:220:1:248:1893:25c8:1946",
     "2001:4860:4860::8888",
-    "2001:db8::1",
+    "2001:db9::1",
+    "2003::1",
+    "64:ff9c::1",
   ];
 
   describe("isPrivateAddress (pure classifier)", () => {
@@ -330,7 +344,12 @@ describe("FetchTool URL restrictions", () => {
       });
     }
     it("treats a full-form public IPv6 as public", () => {
-      expect(isPrivateAddress("2001:0db8:0000:0000:0000:0000:0000:0001")).toBe(false);
+      // Full (uncompressed) form of 2001:4860:4860::8888 -- exercises
+      // expandIpv6's no-:: path, outside every reserved prefix.
+      expect(isPrivateAddress("2001:0486:0486:0000:0000:0000:0000:0888")).toBe(false);
+    });
+    it("treats a full-form documentation IPv6 as private", () => {
+      expect(isPrivateAddress("2001:0db8:0000:0000:0000:0000:0000:0001")).toBe(true);
     });
   });
 

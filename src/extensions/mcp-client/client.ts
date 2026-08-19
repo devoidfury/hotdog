@@ -1,4 +1,4 @@
-// MCP client — JSON-RPC protocol layer for Model Context Protocol.
+// mcp-client - JSON-RPC protocol layer for Model Context Protocol.
 // Handles request/response tracking, buffering, initialization, and tool operations.
 // Uses a transport abstraction (stdio or HTTP) for low-level communication.
 
@@ -12,11 +12,9 @@ import {
   mcpInitializeRequest,
 } from "./types.ts";
 import { McpTransport, StdioTransport, HttpTransport } from "./transports.ts";
-import { ExtensionError } from "../../core/error.ts";
+import { ExtensionError } from "@core/error.ts";
 
-/**
- * MCP error type.
- */
+/** MCP error type. */
 export class McpError extends ExtensionError {
   readonly code: number | null;
 
@@ -27,9 +25,7 @@ export class McpError extends ExtensionError {
   }
 }
 
-/**
- * Pending request tracker for stdio transport.
- */
+/** Pending request tracker for stdio transport. */
 class PendingRequest {
   readonly id: number;
   resolve: ((value: unknown) => void) | null = null;
@@ -135,15 +131,10 @@ export class McpClient {
    * @param headers - Custom headers to include in requests
    * @returns Initialized McpClient
    */
-  static async forHttp(
-    url: string,
-    headers: Record<string, string> = {},
-  ): Promise<McpClient> {
+  static async forHttp(url: string, headers: Record<string, string> = {}): Promise<McpClient> {
     const transport = new HttpTransport(url, headers);
     return new McpClient(transport);
   }
-
-  // ── Test-only accessors ─────────────────────────────────────────────────
 
   /** @internal Exposed for testing. */
   get idCounter(): number {
@@ -175,8 +166,6 @@ export class McpClient {
     return this.#transport;
   }
 
-  // ── Message handling (stdio) ─────────────────────────────────────────────
-
   /**
    * Handle an incoming message line from the stdio transport.
    * Matches responses to pending requests or buffers them.
@@ -201,14 +190,11 @@ export class McpClient {
           this.#pending.delete(msg.id as number);
           if (msg.error) {
             const errMsg =
-              (msg.error as Record<string, unknown>).message as string ||
+              ((msg.error as Record<string, unknown>).message as string) ||
               `MCP error code ${(msg.error as Record<string, unknown>).code}`;
             const fullMsg = `${errMsg}\nRaw response: ${line}`;
             pending.reject?.(
-              new McpError(
-                fullMsg,
-                (msg.error as Record<string, unknown>).code as number || -1,
-              ),
+              new McpError(fullMsg, ((msg.error as Record<string, unknown>).code as number) || -1),
             );
           } else {
             pending.resolve?.(msg.result);
@@ -225,8 +211,6 @@ export class McpClient {
       }
     }
   }
-
-  // ── Request dispatch ─────────────────────────────────────────────────────
 
   /**
    * Send a JSON-RPC request and wait for the response.
@@ -251,9 +235,9 @@ export class McpClient {
         this.#buffered.splice(i, 1);
         if (buf.error) {
           throw new McpError(
-            (buf.error as Record<string, unknown>).message as string ||
+            ((buf.error as Record<string, unknown>).message as string) ||
               `MCP error code ${(buf.error as Record<string, unknown>).code}`,
-            (buf.error as Record<string, unknown>).code as number || -1,
+            ((buf.error as Record<string, unknown>).code as number) || -1,
           );
         }
         return buf.result;
@@ -325,53 +309,34 @@ export class McpClient {
   /**
    * Call a tool on the server.
    * @param name - Tool name
-   * @param arguments_ - Tool arguments
+   * @param args - Tool arguments
    * @returns Tool call response with content blocks
    */
-  async callTool(
-    name: string,
-    arguments_: Record<string, unknown>,
-  ): Promise<unknown> {
-    const result = await this._sendRequest(
-      "tools/call",
-      mcpToolCallRequest(name, arguments_),
-    );
+  async callTool(name: string, args: Record<string, unknown>): Promise<unknown> {
+    const result = await this._sendRequest("tools/call", mcpToolCallRequest(name, args));
     return parseMcpToolCallResponse(result as Record<string, unknown>);
   }
 
-  /**
-   * Get server capabilities (after initialize).
-   */
+  /** Get server capabilities (after initialize). */
   get serverCapabilities(): unknown {
     return this.#serverCapabilities;
   }
 
-  /**
-   * Get server info (after initialize).
-   */
+  /** Get server info (after initialize). */
   get serverInfo(): unknown {
     return this.#serverInfo;
   }
 
-  /**
-   * Shutdown the connection.
-   * Rejects all pending requests and cleans up the transport.
-   */
+  /** Shutdown the connection. Rejects all pending requests and cleans up the transport. */
   async shutdown(): Promise<void> {
     this.#cancelled = true;
-
-    // Reject all pending requests
     for (const [id, pending] of this.#pending) {
       this.#pending.delete(id);
       if (pending.timer) clearTimeout(pending.timer);
       if (pending.reject) pending.reject(new McpError("Cancelled"));
     }
-
-    // Clean up message handler
     this.#messageCleanup?.();
     this.#messageCleanup = null;
-
-    // Destroy the transport
     await this.#transport.destroy();
   }
 }

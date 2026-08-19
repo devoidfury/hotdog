@@ -95,7 +95,7 @@ function parseMcpServerCapabilities(cap: Record<string, unknown>): McpServerCapa
   };
 }
 
-interface McpToolDefinition {
+export interface McpToolDefinition {
   name: string;
   title: string | null;
   description: string | null;

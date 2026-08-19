@@ -7,17 +7,12 @@ import { logger } from "../../core/logger.ts";
 import { formatError } from "../../core/error.ts";
 import { copyScrubbedEnv } from "../../utils/env.ts";
 import { McpError } from "./client.ts";
-import { jsonRpcNotification } from "./types.ts";
 import { hotdogFetch } from "@utils/fetch.ts";
 
-/**
- * Callback invoked when a transport receives a message line.
- */
+/** Callback invoked when a transport receives a message line. */
 export type TransportMessageHandler = (line: string) => void;
 
-/**
- * Callback invoked when a transport closes unexpectedly.
- */
+/** Callback invoked when a transport closes unexpectedly. */
 export type TransportCloseHandler = () => void;
 
 /**
@@ -72,8 +67,6 @@ export interface McpTransport {
   readonly isStreaming: boolean;
 }
 
-// ── Stdio Transport ─────────────────────────────────────────────────────────
-
 /**
  * Stdio transport — communicates with an MCP server via subprocess stdin/stdout.
  * Uses newline-delimited JSON over pipes.
@@ -101,9 +94,8 @@ export class StdioTransport implements McpTransport {
     this.#args = args;
     this.#env = env;
 
-    // Base env is scrubbed (no LLM API keys etc. in a third-party server's
-    // environment); caller-supplied env from config is user-trusted and
-    // merged on top.
+    // Base env is scrubbed (no LLM API keys etc. in a third-party server's environment);
+    // caller - supplied env from config is user - trusted and merged on top.
     this.#child = spawn(command, args, {
       stdio: ["pipe", "pipe", "pipe"],
       env: { ...copyScrubbedEnv(), ...env },
@@ -189,8 +181,6 @@ export class StdioTransport implements McpTransport {
     }
   }
 
-  // ── Private helpers ──────────────────────────────────────────────────────
-
   #startReader(): void {
     const readStream = this.#readStream;
     if (!readStream) return;
@@ -242,8 +232,6 @@ export class StdioTransport implements McpTransport {
     }
   }
 }
-
-// ── HTTP Transport ──────────────────────────────────────────────────────────
 
 /**
  * HTTP transport — communicates with an MCP server via HTTP POST with SSE support.
@@ -319,8 +307,6 @@ export class HttpTransport implements McpTransport {
       try { handler(); } catch { /* ignore */ }
     }
   }
-
-  // ── Private helpers ──────────────────────────────────────────────────────
 
   #parseResponse(body: string): unknown {
     // Try direct JSON first (for servers that don't use SSE)

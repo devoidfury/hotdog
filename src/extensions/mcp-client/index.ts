@@ -1,27 +1,19 @@
 // MCP client module — Model Context Protocol support.
 // Provides a minimal MCP client connecting to servers via stdio or HTTP,
 // discovering tools, and exposing them as native agent tools.
-//
-// As an extension, it connects to configured MCP servers and registers
-// their discovered tools via the tools:register hook.
 
-import { HOOKS } from "../../core/hooks.ts";
-import { logger } from "../../core/logger.ts";
-import { formatError } from "../../core/error.ts";
+import { HOOKS } from "@core/hooks.ts";
+import { logger } from "@core/logger.ts";
+import { formatError } from "@core/error.ts";
 import { McpConnection } from "./connection.ts";
 import { McpTool } from "./tools.ts";
-import {
-  CoreContext,
-  ExtensionInstance,
-} from "../../core/extensions/types.ts";
+import { type CoreContext, type ExtensionInstance } from "@core/extensions/types.ts";
 
 // Re-exports for external use
 export { McpClient } from "./client.ts";
 export { McpConnection, McpConnectionHandle } from "./connection.ts";
 export { McpTool } from "./tools.ts";
-export {
-  McpError,
-} from "./client.ts";
+export { McpError } from "./client.ts";
 
 // Type helpers
 export {
@@ -48,14 +40,11 @@ interface McpServerConfig {
   blacklistTools?: string[];
 }
 
-// ── Extension Entry Point ───────────────────────────────────────────────────
-
 /**
  * Create the MCP client extension.
  * Connects to configured MCP servers and registers their tools.
  * @param core - The core context.
- * @param Connection - Optional McpConnection class override for testing.
- *                     Defaults to the real McpConnection.
+ * @param Connection - Optional McpConnection class override for testing. Defaults to the real McpConnection.
  */
 export function create(core: CoreContext, Connection = McpConnection): ExtensionInstance | null {
   // mcpServers is an array, not an object — read it directly from core.config
@@ -85,7 +74,12 @@ export function create(core: CoreContext, Connection = McpConnection): Extension
             // Register each discovered tool (skip blacklisted)
             const blacklist = server.blacklistTools || [];
             for (const toolDef of conn.tools) {
-              const def = toolDef as { name: string; title?: string | null; description?: string | null; inputSchema?: Record<string, unknown> };
+              const def = toolDef as {
+                name: string;
+                title: string | null;
+                description: string | null;
+                inputSchema: Record<string, unknown>;
+              };
               if (blacklist.includes(def.name as string)) continue;
               const tool = new McpTool(server.name, def, conn.handle());
               registry.register(tool.registeredName, tool);
@@ -116,9 +110,7 @@ export function create(core: CoreContext, Connection = McpConnection): Extension
   };
 }
 
-/**
- * Connect to an MCP server based on its configuration.
- */
+/** Connect to an MCP server based on its configuration. */
 async function _connectServer(
   server: McpServerConfig,
   Connection: typeof McpConnection,
@@ -129,12 +121,7 @@ async function _connectServer(
       return await Connection.connectHttp(server.name, server.url, server.headers || {});
     } else if (server.command) {
       // Stdio transport
-      return await Connection.connectStdio(
-        server.name,
-        server.command,
-        server.args || [],
-        server.env || {},
-      );
+      return await Connection.connectStdio(server.name, server.command, server.args || [], server.env || {});
     }
     return null;
   } catch (e: unknown) {
@@ -143,9 +130,7 @@ async function _connectServer(
   }
 }
 
-/**
- * Shutdown all MCP connections.
- */
+/** Shutdown all MCP connections. */
 async function _shutdownAll(connections: McpConnection[]): Promise<void> {
   for (const conn of connections) {
     try {

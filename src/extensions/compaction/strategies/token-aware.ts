@@ -44,6 +44,17 @@ export class TokenAwareStrategy extends CompactionStrategy {
 
     if (lastKeptIndex <= 0) return null;
 
+    // Back up the boundary so the kept window never starts with a tool
+    // result whose parent assistant tool_calls message would be compacted
+    // away (strict OpenAI-compatible backends 400 on orphaned tool
+    // messages). Keeping the parent may overshoot maxKeepTokens by one
+    // message; that is cheaper than a hard API error.
+    while (lastKeptIndex > 0 && messages[lastKeptIndex]!.role === "tool") {
+      lastKeptIndex--;
+      cumulativeTokens += estimateMessageTokens(messages[lastKeptIndex]!);
+    }
+    if (lastKeptIndex <= 0) return null;
+
     const messagesToCompact = lastKeptIndex;
     if (messagesToCompact === 0) return null;
 

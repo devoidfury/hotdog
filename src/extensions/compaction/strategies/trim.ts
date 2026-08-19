@@ -73,11 +73,21 @@ export class TrimStrategy extends CompactionStrategy {
 
     if (bestDrop < 0) return null;
 
-    // bestDrop is the number of non-system messages to drop from the front.
-    // The first message we keep is nonSystemIndices[bestDrop].
+    // Back up the boundary so the first kept message is never a tool result
+    // whose parent assistant tool_calls message was dropped (strict
+    // OpenAI-compatible backends 400 on orphaned tool messages). Keeping the
+    // parent may overshoot the token budget by one message; that is cheaper
+    // than a hard API error.
+    let dropCount = bestDrop;
+    while (dropCount > 0 && messages[nonSystemIndices[dropCount]!]!.role === "tool") {
+      dropCount--;
+    }
+
+    // dropCount is the number of non-system messages to drop from the front.
+    // The first message we keep is nonSystemIndices[dropCount].
     // messagesCompacted must be an index into the original messages array
     // such that messages.slice(compactedCount) gives us the kept portion.
-    const firstKeptIndex = nonSystemIndices[bestDrop];
+    const firstKeptIndex = nonSystemIndices[dropCount];
     if (firstKeptIndex === undefined) return null;
 
     return {
@@ -87,7 +97,7 @@ export class TrimStrategy extends CompactionStrategy {
         strategyName: "trim",
         tokensBefore,
         tokensAfter: estimateContextTokens(messages.slice(firstKeptIndex)),
-        messagesDropped: bestDrop,
+        messagesDropped: dropCount,
         contextLimit,
       },
     };

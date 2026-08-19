@@ -252,6 +252,36 @@ describe("findFirstKeptIndex", () => {
   it("returns 0 for empty array", () => {
     expect(findFirstKeptIndex([], 5)).toBe(0);
   });
+
+  it("backtracks the boundary when the first kept message is a tool result", () => {
+    const messages = [
+      { role: "user", content: "msg1" },
+      { role: "assistant", content: "msg2" },
+      { role: "user", content: "msg3" },
+      {
+        role: "assistant",
+        content: "calling tools",
+        toolCalls: [
+          { function: { name: "bash", arguments: "{}" } },
+          { function: { name: "read", arguments: "{}" } },
+        ],
+      },
+      { role: "tool", content: "result-a" },
+      { role: "tool", content: "result-b" },
+    ];
+    // target=2, count from end: result-b(1), result-a(2) -> naive boundary is 4.
+    // messages[4] is a tool result whose parent (index 3) would be compacted
+    // away, orphaning it; the boundary must back up so the parent is kept.
+    expect(findFirstKeptIndex(messages, 1)).toBe(3);
+  });
+
+  it("returns 0 when backtracking past orphaned tool results consumes the context", () => {
+    const messages = [
+      { role: "tool", content: "orphan-1" },
+      { role: "tool", content: "orphan-2" },
+    ];
+    expect(findFirstKeptIndex(messages, 1)).toBe(0);
+  });
 });
 
 describe("shouldCompact", () => {

@@ -514,6 +514,32 @@ describe("TokenAwareStrategy", () => {
     expect(result!.messagesCompacted).toBeGreaterThan(0);
   });
 
+  it("keeps the parent assistant tool_calls message with retained tool results", async () => {
+    const messages = [
+      makeMessage("user", "u".repeat(1000)), // 250 tokens
+      new Message({
+        role: "assistant",
+        content: "a".repeat(800), // 200 tokens + tool calls
+        toolCalls: [
+          { id: "call-1", type: "function", function: { name: "bash", arguments: "{}" } },
+          { id: "call-2", type: "function", function: { name: "read", arguments: "{}" } },
+        ],
+      }),
+      makeMessage("tool", "t".repeat(1000)), // 250 tokens
+      makeMessage("tool", "t".repeat(1000)), // 250 tokens
+    ];
+
+    // maxKeepTokens = 700 - 200 = 500: fits the two tool results (500)
+    // but not their parent assistant message. The kept window must back up
+    // to include the parent, never start with an orphaned tool result.
+    const settings = { ...defaultSettings, targetTokens: 200, contextLimit: 700 };
+
+    const result = await new TokenAwareStrategy().execute(messages, settings, noopLlmChat, "model");
+
+    expect(result).not.toBeNull();
+    expect(messages[result!.messagesCompacted]!.role).not.toBe("tool");
+  });
+
   it("calls llmChat with conversation to summarize", async () => {
     let capturedMessages: Array<{ role: string; content: string }> | null = null;
     const mockLlmChat = async (msgs: Array<{ role: string; content: string }>, _model: string) => {

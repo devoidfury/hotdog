@@ -94,6 +94,34 @@ describe("TrimStrategy", () => {
     }
   });
 
+  it("never leaves a tool result without its parent assistant tool_calls message", async () => {
+    const content = "x".repeat(2000); // 500 tokens each
+    const messages = [
+      ...Array.from({ length: 10 }, (_, i) => makeMessage(i % 2 === 0 ? "user" : "assistant", content)),
+      new Message({
+        role: "assistant",
+        content: "x".repeat(2000),
+        toolCalls: [
+          { id: "call-1", type: "function", function: { name: "bash", arguments: "{}" } },
+          { id: "call-2", type: "function", function: { name: "read", arguments: "{}" } },
+        ],
+      }),
+      makeMessage("tool", "y".repeat(2000)),
+      makeMessage("tool", "y".repeat(2000)),
+    ];
+
+    // Budget only fits the two tool results (1000 tokens) but not their
+    // parent assistant message (~1503). The strategy must either keep the
+    // parent with the results or decline to trim, never orphan the results.
+    const settings = { ...defaultSettings, contextLimit: 1200, reserveTokens: 0, keepRecentMessages: 1 };
+
+    const result = await new TrimStrategy().execute(messages, settings, noopLlmChat, "test-model");
+
+    if (result) {
+      expect(messages[result.messagesCompacted]!.role).not.toBe("tool");
+    }
+  });
+
   it("returns null when even dropping all droppable messages doesn't fit", async () => {
     const content = "x".repeat(10000); // 2500 tokens each
     const messages = Array.from({ length: 10 }, (_, i) => makeMessage(i % 2 === 0 ? "user" : "assistant", content));

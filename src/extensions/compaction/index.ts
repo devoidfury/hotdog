@@ -88,9 +88,11 @@ export function create(core: CoreContext): ExtensionInstance | null {
   }
 
   /**
-   * Perform the actual compaction.
+   * Perform the actual compaction. Returns false when compaction is
+   * declined or fails (including a strategy boundary that would orphan a
+   * tool message) so the caller leaves the context untouched.
    */
-  async function _performCompaction(agent: Agent, strategy: CompactionStrategy): Promise<void> {
+  async function _performCompaction(agent: Agent, strategy: CompactionStrategy): Promise<boolean> {
 
     const messages = agent.context.getMessages(); // defensive copy — strategies expect Message[]
     const model = agent.model;
@@ -141,9 +143,22 @@ export function create(core: CoreContext): ExtensionInstance | null {
 
     try {
       const result = await strategy.execute(messages, settings, llmChat, model);
-      if (!result) return;
+      if (!result) return false;
 
       const compactedCount = result.messagesCompacted;
+
+      const keptMessages = messages.slice(compactedCount);
+
+      // Safety net against custom strategies: a tool message must never be
+      // the first kept message without its parent assistant tool_calls
+      // message — strict OpenAI-compatible backends reject that.
+      const firstKept = keptMessages.find((m) => m.role !== "system");
+      if (firstKept?.role === "tool") {
+        logger.error(
+          `[compaction] aborted: '${strategy.name}' kept window starts with an orphaned tool message; context left unchanged`,
+        );
+        return false;
+      }
 
       // Replace compacted messages with summary
       if (result.summary) {
@@ -157,11 +172,11 @@ export function create(core: CoreContext): ExtensionInstance | null {
         // Replace the compacted portion
         agent.replaceContext(ensureUserTurnGuard([
           summaryMsg,
-          ...messages.slice(compactedCount),
+          ...keptMessages,
         ]));
       } else {
         // Drop strategy — just remove the old messages
-        agent.replaceContext(ensureUserTurnGuard(messages.slice(compactedCount)));
+        agent.replaceContext(ensureUserTurnGuard(keptMessages));
       }
 
       // Emit compaction result event
@@ -170,10 +185,12 @@ export function create(core: CoreContext): ExtensionInstance | null {
         data: result,
         agent,
       });
+      return true;
 
     } catch (e: unknown) {
       // Compaction failure is non-fatal — log and continue
       logger.error(`[compaction] error: ${formatError(e)}`);
+      return false;
     }
   }
 
@@ -253,7 +270,8 @@ export function create(core: CoreContext): ExtensionInstance | null {
         if (!strategy.canCompact(nonSystemMessages, settings)) return;
 
         // Execute compaction — modifies agent context in place
-        await _performCompaction(agent, strategy);
+        const compacted = await _performCompaction(agent, strategy);
+        if (!compacted) return;
 
         // Rebuild messages from the updated context and return them.
         const newMessages = agent.buildMessages();

@@ -74,6 +74,11 @@ export function estimateContextTokens(messages: MessageLike[]): number {
  * Counts from the end, skipping system messages, until we have
  * `keepRecent * 2` messages (roughly `keepRecent` user+assistant pairs).
  * Returns 0 if keepRecent=0 or not enough messages found.
+ *
+ * The boundary is backed up so it never splits an assistant tool_calls
+ * message from its tool results: strict OpenAI-compatible backends reject
+ * a tool message that is not preceded by the assistant message containing
+ * the matching tool_call_id.
  */
 export function findFirstKeptIndex(messages: MessageLike[], keepRecent: number): number {
   if (keepRecent === 0) return 0;
@@ -84,7 +89,15 @@ export function findFirstKeptIndex(messages: MessageLike[], keepRecent: number):
   for (let i = messages.length - 1; i >= 0; i--) {
     if (messages[i]!.role === "system") continue;
     count++;
-    if (count >= target) return i + 1;
+    if (count >= target) {
+      let firstKept = i + 1;
+      // Back up across tool results so their parent assistant message stays
+      // in the kept window. Stops at 0 if no parent exists in the context.
+      while (firstKept > 0 && messages[firstKept]!.role === "tool") {
+        firstKept--;
+      }
+      return firstKept;
+    }
   }
 
   return 0;

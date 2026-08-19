@@ -246,6 +246,52 @@ describe("Hook Integration", () => {
     });
   }
 
+  it("aborts compaction when a strategy returns a boundary that orphans a tool result", async () => {
+    const core = createMockCore({
+      enabled: true,
+      keepRecentMessages: 2,
+      reserveTokens: 100,
+      strategy: "orphaning",
+    });
+    const ext = createCompactionExtension(core);
+
+    // Custom strategy that cuts the context right before a tool result group,
+    // which would leave tool messages with no parent assistant tool_calls.
+    (ext as any).registry.register({
+      name: "orphaning",
+      description: "test strategy that returns an orphaning boundary",
+      canCompact: () => true,
+      execute: async (messages: any[]) => ({
+        summary: "orphaning summary",
+        messagesCompacted: messages.length - 2,
+      }),
+    } as any);
+
+    const content = "x".repeat(500); // 125 tokens each
+    const context = [
+      ...makeMessages(10, content),
+      new Message({
+        role: "assistant",
+        content,
+        toolCalls: [{ id: "call-1", type: "function", function: { name: "bash", arguments: "{}" } }],
+      }),
+      new Message({ role: "tool", content }),
+      new Message({ role: "tool", content }),
+    ];
+    const agent = createMockAgent(context as any);
+    agent.modelRegistry = {
+      "test-model": { name: "test-model", temperature: null, contextLimit: 1000 },
+    };
+
+    const messages = [{ role: "system", content: "" }, ...context];
+    const result = await (ext as any).hooks![HOOKS.CONTEXT]!({ messages: messages as any, agent });
+
+    // Compaction must be declined: the context stays intact (no summary
+    // message, no dropped messages).
+    expect(agent.log.length).toBe(context.length);
+    expect((result as any)?.messages).toBeUndefined();
+  });
+
   it("should error when model not found in registry", async () => {
     const core = createMockCore({
       enabled: true,
@@ -719,7 +765,7 @@ describe("Edge Cases", () => {
     // Should handle cancellation gracefully without throwing
     await expect(
       (ext as any).hooks![HOOKS.CONTEXT]!({ messages: messages as any, agent })
-    ).resolves.toBeDefined();
+    ).resolves.toBeUndefined();
     // Cancellation aborts the summarization, so context is left untouched
     expect(agent.log.length).toBe(context.length);
   });
@@ -773,7 +819,7 @@ describe("Edge Cases", () => {
     // Should handle error gracefully without throwing
     await expect(
       (ext as any).hooks![HOOKS.CONTEXT]!({ messages: messages as any, agent })
-    ).resolves.toBeDefined();
+    ).resolves.toBeUndefined();
     // Failed summarization must not corrupt the context
     expect(agent.log.length).toBe(context.length);
   });

@@ -2,6 +2,7 @@
 
 import { describe, it, expect, afterEach } from "bun:test";
 import { createWebuiServer } from "../../src/extensions/webui/server.ts";
+import { logger } from "../../src/core/logger.ts";
 
 function createMockCore(config: Record<string, unknown> = {}) {
   return {
@@ -127,6 +128,76 @@ describe("createWebuiServer", () => {
         const message = (e as Error).message;
         expect(message).not.toContain("missing required webui.maxAgeSecs");
       }
+    });
+  });
+
+  describe("host binding", () => {
+    let server: ReturnType<typeof Bun.serve> | null = null;
+    let wsServer: { stopCleanupLoop: () => void } | null = null;
+
+    afterEach(async () => {
+      if (server) {
+        server.stop(true);
+        server = null;
+      }
+      if (wsServer) {
+        wsServer.stopCleanupLoop();
+        wsServer = null;
+      }
+    });
+
+    /** Run fn with logger.warn captured; returns the captured messages. */
+    async function withWarnCapture(fn: () => Promise<void>): Promise<string[]> {
+      const warnings: string[] = [];
+      const loggerAny = logger as unknown as { warn: (msg: string) => void };
+      const origWarn = loggerAny.warn;
+      loggerAny.warn = (msg) => warnings.push(msg);
+      try {
+        await fn();
+        return warnings;
+      } finally {
+        loggerAny.warn = origWarn;
+      }
+    }
+
+    it("binds to loopback when no host is configured", async () => {
+      const core = createMockCore();
+      const result = await createWebuiServer(core, {
+        port: 0,
+        apiKey: "test-key",
+      }, "/tmp/ui");
+      server = result.server;
+      wsServer = result.wsServer;
+      expect(result.server.hostname).toBe("127.0.0.1");
+    });
+
+    it("warns when binding a non-loopback host", async () => {
+      const warnings = await withWarnCapture(async () => {
+        const core = createMockCore();
+        const result = await createWebuiServer(core, {
+          port: 0,
+          host: "0.0.0.0",
+          apiKey: "test-key",
+        }, "/tmp/ui");
+        server = result.server;
+        wsServer = result.wsServer;
+        expect(result.server.hostname).toBe("0.0.0.0");
+      });
+      expect(warnings.some((w) => w.includes("non-loopback"))).toBe(true);
+    });
+
+    it("does not warn for loopback hosts", async () => {
+      const warnings = await withWarnCapture(async () => {
+        const core = createMockCore();
+        const result = await createWebuiServer(core, {
+          port: 0,
+          host: "127.0.0.1",
+          apiKey: "test-key",
+        }, "/tmp/ui");
+        server = result.server;
+        wsServer = result.wsServer;
+      });
+      expect(warnings.some((w) => w.includes("non-loopback"))).toBe(false);
     });
   });
 

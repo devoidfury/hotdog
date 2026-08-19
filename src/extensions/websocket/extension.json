@@ -20,8 +20,8 @@
         },
         "host": {
           "type": "string",
-          "default": "0.0.0.0",
-          "description": "WebSocket server host"
+          "default": "127.0.0.1",
+          "description": "WebSocket server host. Loopback by default; set 0.0.0.0 explicitly to expose beyond localhost."
         },
         "sessionTimeoutMin": {
           "type": "number",

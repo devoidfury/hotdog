@@ -95,12 +95,26 @@ export async function createWebuiServer(
     profiles,
   });
 
+  // Default to loopback if no host is configured (Bun.serve would bind all
+  // interfaces otherwise), and warn on non-loopback binds: the API key and
+  // session tokens travel in cleartext over plain HTTP, so exposing the
+  // WebUI beyond localhost puts a live agent behind a shared-key check only.
+  const effectiveHost = host ?? "127.0.0.1";
+  const LOOPBACK_HOSTS = new Set(["127.0.0.1", "localhost", "::1"]);
+  if (!LOOPBACK_HOSTS.has(effectiveHost)) {
+    logger.warn(
+      `[webui] binding to non-loopback host '${effectiveHost}' -- ` +
+        "reachable from other machines over unencrypted HTTP. " +
+        "Use a tunnel or a TLS reverse proxy for remote access.",
+    );
+  }
+
   authMiddleware.startCleanup();
   wsServer.startCleanupLoop();
 
   let server = Bun.serve<WebuiWsData>({
     port,
-    hostname: host,
+    hostname: effectiveHost,
     routes: {
       "/": webuiFrontend,
 
@@ -164,7 +178,7 @@ export async function createWebuiServer(
     },
   });
 
-  logger.info(`WebUI server listening on http://${host}:${port}`);
+  logger.info(`WebUI server listening on http://${effectiveHost}:${port}`);
 
   return { server, wsServer, authMiddleware };
 }

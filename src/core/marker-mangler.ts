@@ -33,6 +33,22 @@ function generateAlias(): string {
 }
 
 /**
+ * Build a regex that matches a mangler alias literal
+ * (m_ + exactly one alias body, i.e. ALIAS_LENGTH alias chars).
+ *
+ * A fresh regex is returned per call so global-flag lastIndex state is
+ * never shared between callers. The match must not be embedded in a longer
+ * identifier (lookbehind) nor be a prefix of a longer alias-char run
+ * (lookahead), so only exact alias-length runs count.
+ */
+export function buildAliasPattern(): RegExp {
+  return new RegExp(
+    `(?<![A-Za-z0-9_])m_[${ALIAS_CHARS}]{${ALIAS_LENGTH}}(?![a-z0-9])`,
+    "g",
+  );
+}
+
+/**
  * Build the mapping from protected prefixes to random aliases.
  * @private
  * @returns Mapping from original names to aliases.

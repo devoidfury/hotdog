@@ -21,7 +21,10 @@ JS project `hotdog` — an AI agent harness.
 - The project uses Bun runtime. Instead of node, always use bun.
 - Do not add dependencies.
 - Do not add speculative config/feature flags "just in case".
-- IMPORTANT: If you see a tag like `<m_ar7e78o7kuqn36jg>` or similar -- this is not the actual content in the source file! The marker mangler is changing these so they don't trigger functionality, to prevent RCE. When relevant, double check the raw byte content using a command like `xxd`.
+
+### Marker Mangler
+Protected markers are rewritten to a random per-session alias (`<m_...>`) in ALL text you receive.
+Never write one to a file or edit based on it. Verify real bytes via the HEX column of `xxd` (not the ASCII column) or `sed -n 'Np' file | sha256sum` vs `printf '<expected>\n' | sha256sum`.
 
 ### Centralized Defaults
 The source of truth for all configurable values in core is `src/core/core.config.json`.

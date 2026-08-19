@@ -46,14 +46,14 @@ Tools without metadata are excluded when filtering is active (conservative defau
 | `overwrite` | `core-tools` | Writes content to a file, replacing everything | `path`, `content` |
 | `append` | `core-tools` | Appends content to a file | `path`, `content` |
 | `read` | `core-tools` | Reads file contents with pagination | `path`, `limit`, `offset` |
-| `edit` | `core-tools` | Edits files using replace modes | `path`, `oldString`, `newString` / `search`, `replace` / `files` + `atomic` |
+| `edit` | `core-tools` | Edits a file by finding and replacing exact text | `path`, `oldString`, `newString`, `replace_all` |
 | `grep` | `core-tools` | Searches file contents for regex patterns | `pattern`, `path`, `type`, `context` |
 | `find` | `core-tools` | Glob-based file search | `pattern`, `path`, `file_type`, `max_results` |
 | `project_info` | `core-tools` | Gathers project information | `path` |
 | `explore` *(disabled)* | `core-tools` | Runs the agent in explorer mode against a project directory | `path`, `outline` |
 | `bash` | `bash-tool` | Executes shell commands via system shell | `command`, `timeoutMs` |
 | `fetch` | `fetch-tool` | Fetches URLs via HTTP | `url`, `method`, `headers`, `body`, `showOriginal` |
-| `question` | `question-tool` | Asks interactive questions to the user | `questions` array with `key`, `prompt`, `options`, `required`, `default` |
+| `question` | `question-tool` | Asks interactive questions to the user | `questions` array with `key`, `prompt`, `options`, `required`, `default`, `allow_other` |
 | `model` | `model-switch` | Switches to a different model mid-conversation | `name` |
 | `web_search` | `web-search` | Searches the web for information | `query` |
 | `review` | `ui-session-review-cli` | Lists recent sessions, gets session entries, or gets tool call index. | `operation`, `session_id`, `limit` |
@@ -134,7 +134,7 @@ Skills are load-on-demand guides/workflows. They are discovered by name + descri
 - `loadSkills()` — loads all skills from all configured paths
 - `loadFromDirectory(path)` — loads from a single directory
 - `parseSkillFromMd(content, dirName)` — parses YAML frontmatter + markdown body
-- `setAvailableTools(coreToolNames)` — loads skills whose tool-dependencies are met
+- `setAvailableTools(coreToolNames)` — marks skills visible when their tool-dependencies are met (skills without dependencies stay visible; does not set `loaded`)
 - `allSkills()`, `getSkill(name)`, `directories()`, `activeSkills()`
 - Non-existent paths are silently skipped
 - Name validation: lowercase alphanumeric + hyphens only (1-64 chars, no leading/trailing hyphens, no consecutive hyphens)

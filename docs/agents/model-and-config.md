@@ -17,20 +17,20 @@
 ### Core Defaults
 All configurable defaults are defined in `src/core/core.config.json` as schema default layers.
 Each config key defines its own resolution layers. Common patterns:
-- **`defaultModel`**: CLI → profile → config → default
+- **`defaultModel`**: CLI → profile → env → config → default
 - **`role`**: CLI → config → profile → default
 - **`aiUrl`/`apiKey`**: provider → CLI → config → env → default (provider is the natural source)
 
 Components (`Agent`, `LlmClient`, `TaskManager`, etc.) receive resolved values from callers
 rather than importing constants directly. The `src/core/config/defaults.ts` module exports
-constants for use by the config resolution layer (`getDefaultConfig()`) and for static
-path defaults (`DEFAULT_PROFILES_SUBPATH`, `DEFAULT_PROFILES_PATH`, `DEFAULT_PROMPTS_PATH`, etc.) that are not
-schema-configurable. The skills path is computed dynamically via the config schema's `joinConfigDir:skills` compute function.
+only static path constants (`DEFAULT_PROFILES_SUBPATH`, `DEFAULT_PROFILES_PATH`, `DEFAULT_PROMPTS_PATH`, etc.)
+and runtime fallbacks (`DEFAULT_SYSTEM_PROMPT_TEMPLATE`) that are not schema-configurable.
+The skills path is computed dynamically via the config schema's `joinConfigDir:skills` compute function.
 
 Extension-specific defaults (e.g., `DEFAULT_READ_TOOL_LIMIT`, `DEFAULT_FIND_MAX_RESULTS`, compaction settings) are defined in each extension's `extension.json` configSchema.
 
 ### Config Resolution
-- **`loadConfig(configPath, cliConfigDir, extParams)`** — loads config from file, falls back to resolved config dir (CLI `--config-dir` > `./config` > env > `/etc/hotdog` > XDG). Merges extension defaults.
+- **`loadConfig(configPath, cliConfigDir, extParams)`** — loads config from file, falls back to resolved config dir (CLI `--config-dir` > `HOTDOG_CONFIG_DIR` env > `./config` > `/etc/hotdog` > XDG). Merges extension defaults.
 - **`buildConfig(cli)`** — single entry point for config resolution. Returns `{ resolved, modelRegistry, providers }`. Resolves each config key through its declared layers (CLI, config file, env, provider, profile, default).
 - **`mergeExtensionConfigDefaults(defaultConfig, extParams)`** — merges extension-registered config defaults into base config
 - **`normalizeConfigKeys(obj)`** — converts snake_case to camelCase
@@ -80,7 +80,7 @@ In this example:
 
 ### Model Resolution
 Model names flow through `buildConfig()`:
-1. Profile model → CLI model → provider's first model → config `defaultModel` → `DEFAULT_MODEL`
+1. CLI `--model` → profile model → env (`HOTDOG_MODEL`/`AI_MODEL`) → provider's first model → config `defaultModel` → schema default
 2. If the name contains `/`, it's used as-is (already qualified)
 3. If a provider is active and the name matches a provider model, it's prefixed with the provider name
 4. Otherwise, the bare name is passed through (will error at validation if not in registry)

@@ -111,7 +111,7 @@ Profile body content goes here.
 
 ## Features
 - **Tool calling** -- File operations, bash, HTTP requests, web search, and more
-- **Extension architecture** -- All features are extensions; add your own via `extension.json` + `index.js`
+- **Extension architecture** -- All features are extensions; add your own via `extension.json` + `index.ts`
 - **Hook system** -- Three hook patterns: notification, sequential pipeline, and gate/mutate
 - **Profiles** -- Composable agent configurations with roles, tools, and behavioral aspects
 - **Skills** -- Load-on-demand guides and workflows
@@ -175,7 +175,7 @@ hotdog webui                     # Start the web UI server
 /loop <prompt>     Repeatedly run a prompt until cancelled
 /model <name>      Switch model
 /models            List available models
-/tokens            Toggle token usage display
+/tokens            Show token usage stats
 /tools             Toggle tool call display
 /compact [n]       Compact context
 /compact <strategy>  Switch compaction strategy (also: /compact:<strategy>)
@@ -208,11 +208,14 @@ Extensions register tools, CLI subcommands, and system prompt chunks via hooks. 
 [Github Repo](https://github.com/devoidfury/hotdog)
 
 ```sh
-# Run tests, shows failures and coverage
+# Run tests (prints failures only, suppressed green output)
 bun run test
+
+# Same, plus a coverage report
+bun run coverage
 ```
 
-*Note*: test command can return non-zero when all tests pass if any files are under coverage threshold in bunfig.toml
+*Note*: `bun run coverage` can return non-zero when all tests pass if any files are under the coverage threshold in bunfig.toml
 
 ## AI Usage Disclosure
 

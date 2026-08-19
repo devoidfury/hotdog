@@ -1,6 +1,6 @@
 # CLI Subcommand Registration
 
-Extensions can register CLI subcommands that are automatically discovered and dispatched without needing to be explicitly wired up in `src/main.ts`.
+Extensions can register CLI subcommands that are automatically discovered and dispatched without needing to be explicitly wired up in `src/core/main.ts`.
 
 ## How It Works
 

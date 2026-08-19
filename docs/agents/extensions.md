@@ -14,7 +14,7 @@ When adding new subcommands, create a new extension in `src/extensions/` and reg
 
 ### Extension.json Schema
 
-Every extension directory must contain an `extension.json` metadata file. This is the **primary discovery signal** — the extension loader uses `extension.json` presence (plus `index.js`) to identify valid extensions.
+Every extension directory must contain an `extension.json` metadata file. This is the **primary discovery signal** — the extension loader uses `extension.json` presence to identify valid extensions; loading the extension requires an `index.ts` entry point.
 
 ```json
 {
@@ -77,7 +77,7 @@ Every extension directory must contain an `extension.json` metadata file. This i
 - `2` — CLI (loaded early for CLI subcommand registration)
 - `10` — DEFAULT (most extensions)
 
-**Discovery flow**: `extension.json` exists → `index.ts` exists → valid extension.
+**Discovery flow**: `extension.json` exists → valid extension (load additionally requires `index.ts`).
 
 **Static discovery**: CLI flags, subcommand declarations, and config params from `configSchema` are read at startup without loading extension code. This enables `--help`, subcommand discovery, and config defaults to work immediately.
 

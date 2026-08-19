@@ -61,8 +61,8 @@ Domain concepts for the hotdog AI agent harness. Implementation details are docu
 ## Output and Events
 
 - **Output** — Decoupling agent from UI layer. Agent emits raw data; UI layer formats display. Deliberate domain boundary.
-- **Sink** — UI implementation of OutputSink. `CliOutputSink` extends `OutputSink` with formatting and color support. One sink per agent. Task agents use `AgentSink` which filters output.
-- **OutputEvent** — Domain concept: events representing changes in the agent's state. Emitted to the sink for display. 14 types: `USER_MESSAGE`, `ASSISTANT_MESSAGE`, `THINKING`, `TOOL_CALL`, `TOOL_RESULT`, `COMPACTING`, `COMMAND_RESULT`, `QUESTION`, `STREAMING_CHUNK`, `STREAMING_REASONING_CHUNK`, `TASK_PROGRESS`, `TOKEN_USAGE`, `COMPACTION_RESULT`, `SESSION_STATE`.
+- **Sink** — UI implementation of OutputSink. `CliOutputSink` extends `OutputSink` with formatting and color support. One sink per agent. Task agents get a silent sink that emits nothing to the UI (only the task-complete callback matters).
+- **OutputEvent** — Domain concept: events representing changes in the agent's state. Emitted to the sink for display. 15 types: `USER_MESSAGE`, `ASSISTANT_MESSAGE`, `THINKING`, `TOOL_CALL`, `TOOL_RESULT`, `COMPACTING`, `COMMAND_RESULT`, `QUESTION`, `STREAMING_CHUNK`, `STREAMING_REASONING_CHUNK`, `TASK_PROGRESS`, `TOKEN_USAGE`, `COMPACTION_RESULT`, `SESSION_STATE`, `SYSTEM_MESSAGE`.
 - **Pager / TruncatedOutput** — Context manipulation (pagination of tool output into context), not UI formatting.
 
 ## Persistence
@@ -96,7 +96,7 @@ Domain concepts for the hotdog AI agent harness. Implementation details are docu
 - **Slash Commands** — The interactive CLI implements commands using `/` prefix syntax (e.g., `/quit`, `/compact`). This is one UI implementation for invoking commands.
 - **Core commands** (`Command` enum): `help`, `quit`, `clear`, `tools`, `thinking`, `tokens`, `regenerate`, `reasoning`, `sessions`, `attach`, `detach`, `switch`, `unknown`.
 - **Custom commands** — Extensions register commands via `CommandRegistry` using the `COMMANDS_REGISTER` hook (e.g., `compact`, `model`, `skill`).
-- **UI commands** — `help`, `quit` handled directly by UI layer; all others dispatched through agent.
+- **Channel-level commands** — `quit`, `help`, `sessions`, `attach`, `detach`, `switch` are handled locally by the `Channel` (UI connection abstraction) and never reach the agent. All other commands are routed to the current session's agent.
 
 ## Configuration
 
@@ -114,6 +114,7 @@ Domain concepts for the hotdog AI agent harness. Implementation details are docu
 - **Extensions** (`src/extensions/`) — All features (tools, compaction, MCP, skills, prompts, subcommands) live as extensions that plug into the core via hooks.
 - **Hook System** — The primary extension mechanism. `HookSystem` with `on()`, `off()`, `notifyHooks()`, `runHookPipeline()`, `clear()`. Extensions register handlers; core emits events.
 - **MessageBus** — Owns the agent run loop. Drains queued messages sequentially through `agent.run()`. Provides input preprocessing via `INPUT` hook.
+- **Channel** (`src/core/channel.ts`) — Abstract UI connection. Attaches to one or more sessions, routes text input and `/`-prefixed commands, and handles channel-level commands locally.
 - **OutputSink** — Decouples agent from UI. Agent emits events via `sink.emit()`; `CliOutputSink` formats and displays with color support.
 
 ## Analytics

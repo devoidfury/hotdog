@@ -28,7 +28,7 @@ Argument parsing with support for dynamic CLI flags registered by extensions via
 ### Config (`src/core/config/`)
 Split into sub-modules. The single source of truth is `src/core/core.config.json`. Key exports:
 - `src/core/config/index.ts` — re-exports all from sub-modules; plus `resolveConfigDir()`, `mergeExtensionConfigDefaults()`, `normalizeConfigKeys()`, `getDefaultConfig()`, `loadConfig()`, `validateConfig()`, `failOnInvalidConfig()`, `buildConfig()`, `buildAgentConfig()`
-- `src/core/config/defaults.ts` — exports constants for the config resolution layer (`getDefaultConfig()`) and static path defaults; components receive resolved values from callers instead of importing these directly
+- `src/core/config/defaults.ts` — exports only static path constants and runtime fallbacks (e.g., `DEFAULT_PROFILES_SUBPATH`, `DEFAULT_SYSTEM_PROMPT_TEMPLATE`); all configurable defaults are resolved from the schema; components receive resolved values from callers instead of importing these directly
 - `src/core/config/schema-loader.ts` — reads `core.config.json`, builds `CONFIG_SCHEMA`, cast functions, CLI flags, and resolvers (`resolveKey()`, `resolveAll()`, `resolveModel()`, `resolveModelWithProvider()`, `resolveExtensionConfig()`, `cliFlagsFromSchema()`)
 - `src/core/config/profiles.ts` — `loadProfileFile()`, `loadProfileFiles()`, `resolveProfile()`, `mergeProfile()`
 - `src/core/config/providers.ts` — `buildModelRegistry()`, `resolveProvider()`, `initSystemPromptTemplate()`, `resetSystemPromptCache()`
@@ -88,16 +88,15 @@ Discovers, loads, and manages extensions. Key exports:
 
 ### Agent (`src/core/agent.ts`)
 Minimal Agent class that runs the LLM loop and delegates behavior to hooks. Key features:
-- Constructor takes `options` object: `hooks`, `toolRegistry`, `llmClient`, `model`, `maxIterations`, `contextLimit`, `hideTools`, `hideThinking`, `showTokenUse`, `sink`, `modelRegistry`, `profileName`, `role`, `profileBody`, `stream`, `config`, `sessionId`, `abortSignal`, `toolWhitelist`, `commandRegistry`, `systemPromptBuilder`, `enqueueCallback`
+- Constructor takes `options` object: `hooks`, `toolRegistry`, `llmClient`, `model`, `maxIterations`, `contextLimit`, `hideTools`, `hideThinking`, `showTokenUse`, `sink`, `modelRegistry`, `profileName`, `role`, `profileBody`, `stream`, `config`, `sessionId`, `abortSignal`, `toolWhitelist`, `commandRegistry`, `enqueueCallback`
 - `run(userInput)` — main iteration loop: add user message → build messages → LLM call → process stream → execute tools → repeat
 - `ensureSystemPrompt()` — builds system prompt via hooks (extensions contribute)
 - `_processStream(stream)` — processes streaming LLM response (content, reasoning, tool calls, usage)
-- `_executeTools(toolCalls)` — executes tool calls with hook-based enrichment
+- `_executeTools(toolCalls)` — executes tool calls via the ToolExecutor
 - `executeCommand(cmd)` — executes commands
 - `cancel()` — cancels the running agent loop
-- Properties: `model`, `log`, `isRestoring`, `iterationCount`, `sessionId`, `cancelled`, `hideTools`, `hideThinking`, `systemPrompt`, `llmClient`, `reasoningEffort`, `followQueue`, `commandRegistry`, `enqueueCallback`
+- Properties: `model` (setter emits `MODEL_CHANGE`, clears tool defs and system prompt cache), `context` (`ContextManager`), `log` (deprecated, prefer `context.getMessages()`), `isRestoring`, `iterationCount`, `sessionId`, `cancelled`, `hideTools`, `hideThinking`, `llmClient`, `reasoningEffort`, `followQueue`, `commandRegistry`, `enqueueCallback`
 - Task agent support: `abortSignal`, `toolWhitelist`, `followQueue`
-- `getTokenUsage()` — returns accumulated token usage for the session
 - `enqueue(text)` — enqueue a message on the owning MessageBus
 
 ### Commands (`src/core/commands.ts`)
@@ -178,16 +177,19 @@ System prompt building. Key exports:
 
 **Note**: `loadAspects()` lives in `src/utils/file-utils.ts` and `loadAgentsMd()` lives in `src/extensions/agents-md/index.ts` — neither is in this file.
 
+### Context Manager (`src/core/context/context-manager.ts`)
+Composes `MessageLog`, `TokenTracker`, and `SystemPromptBuilder` behind a single interface held by the agent as `agent.context`. Key methods: `addMessage()`, `getMessages()`, `replaceMessages()`, `clear()`, `getSystem()`/`getNonSystem()`, `getSystemPrompt()`, `clearSystemPrompt()`, `ensureSystemPrompt()`, `recordUsage()`, `getTokenUsage()`, `estimateTokens()`, `buildForLlmCall()`. `createContextManager(templatePath?)` — factory.
+
 ### Command Handlers (`src/core/command-handlers.ts`)
 Built-in command handler implementations for core commands. Extracted from `agent.ts` so the agent only does generic dispatch. Key exports:
 - `CORE_COMMAND_HANDLERS` — Map of Command enum values to handler functions: `handleClear`, `handleQuit`, `handleHelp`, `handleTokens`, `handleTools`, `handleThinking`, `handleRegenerate`, `handleReasoning`
 - Each handler is `(agent, value, cmd) => { content?, error? }`
 
 ### Tool Executor (`src/core/tool-executor.ts`)
-Runs the full tool call pipeline (TOOL_CALL gate → AGENT_TOOL_CONTEXT → validate → execute → TOOL_RESULT). Extracted from Agent so tool execution is testable independently. Key exports:
+Runs the full tool call pipeline (TOOL_BEFORE_EXECUTE → TOOL_CALL gate → AGENT_TOOL_CONTEXT → validate → execute → TOOL_AFTER_EXECUTE → TOOL_RESULT → TOOL_METRICS). Extracted from Agent so tool execution is testable independently. Key exports:
 - `ToolExecutor` class — manages the tool execution pipeline
 - `createToolExecutor(deps)` — factory function
-- `ToolExecutorDeps` — dependency interface (toolRegistry, hooks, emitOutput, toolWhitelist, cwdBoundary, workspaceRoot, maxRetries, toolRetryDelay, isRestoring, agent)
+- `ToolExecutorDeps` — dependency interface (toolRegistry, hooks, emitOutput, cwdBoundary, workspaceRoot, maxRetries, toolRetryDelay, isRestoring, agent)
 - `ToolCall` — typed tool call object
 
 ### Token Tracker (`src/core/token-tracker.ts`)
@@ -204,7 +206,7 @@ Centralized error formatting. Key exports:
 
 ### Output Events (`src/core/context/output.ts`)
 Output event types and OutputSink base class. Key exports:
-- `OUTPUT_EVENT` — enum with 14 event types (USER_MESSAGE, ASSISTANT_MESSAGE, THINKING, TOOL_CALL, TOOL_RESULT, COMPACTING, COMMAND_RESULT, QUESTION, STREAMING_CHUNK, STREAMING_REASONING_CHUNK, TASK_PROGRESS, TOKEN_USAGE, COMPACTION_RESULT, SESSION_STATE)
+- `OUTPUT_EVENT` — enum with 15 event types (USER_MESSAGE, ASSISTANT_MESSAGE, THINKING, TOOL_CALL, TOOL_RESULT, COMPACTING, COMMAND_RESULT, QUESTION, STREAMING_CHUNK, STREAMING_REASONING_CHUNK, TASK_PROGRESS, TOKEN_USAGE, COMPACTION_RESULT, SESSION_STATE, SYSTEM_MESSAGE)
 - `EVENT_HANDLERS` — maps event types to handler method names on OutputSink
 - `OutputSink` — base class with `emit()` plus convenience methods
 - `NoopSink` — no-op implementation for testing
@@ -220,15 +222,22 @@ Input parsing. Key exports:
 - `parseInput(input)` — parses raw text into typed input event
 - `NoopInput` — no-op input implementation
 
+### Channel (`src/core/channel.ts`)
+Abstract UI connection. A `Channel` attaches to one or more sessions via a `SessionManager`, routes text input and `/`-prefixed commands, and handles channel-level commands locally (`quit`, `help`, `sessions`, `attach`, `detach`, `switch`) before forwarding the rest to the current session's agent. UI extensions implement the abstract `write()`, `read()`, and subscription methods.
+
+### Completion (`src/core/completion.ts`)
+Tab-completion service. Completion providers register matchers + handlers; when a completion is requested, matching handlers run (async, with timeout) and results are merged for the UI. Reusable across UIs (CLI, web).
+
 ### LLM Client (`src/core/llm-client/`)
 - `client.ts` — `LlmClient` with streaming, cancellation, retry support
 - `retry.ts` — `retryWithBackoff(fn, maxRetries, options)` with cancellation support
+- `sse-parser.ts` — incremental SSE stream parser
+- `stream-processor.ts` — `StreamProcessor` accumulates streamed content/reasoning/tool calls into a `StreamResult`
 - `LlmError` class (with `Http`, `Api`, `Timeout`, `Cancelled`, `InvalidResponse` static constructors) is defined in `src/core/error.ts`
 
 ### Session (`src/core/session/`)
-- `session-log.ts` — Session log reading/replaying (JSONL format). Key exports: `readSessionEntries()`, `readAllSessions()`, `sessionExists()`, `replayEntriesIntoContext()`, `LOG_SOURCE` constants
-- `task-manager.ts` — `TaskManager` manages background task agents. Key exports: `TASK_STATUS` (RUNNING, COMPLETED, FAILED, CANCELLED), `TaskHandle` (status, interrupt), `TaskManager` (spawnTask, taskStatus, sendFollowUp, interruptTask, activeTasks, taskCounts, progressMessage)
-- `agent-sink.ts` — `AgentSink` bridges Agent output to Session Core. Two modes: normal (all events forwarded) and task (filtered — only TASK_PROGRESS and TOKEN_USAGE pass through)
+- `session-log.ts` — Session log reading/replaying (JSONL format). Key exports: `readSessionEntries()`, `readAllSessions()`, `sessionExists()`, `replayEntriesIntoContext()`, `sessionsDir()`, `sessionPath()`, `LOG_SOURCE` constants (session dir overridable via `HOTDOG_SESSIONS_DIR`)
+- `task-manager.ts` — `TaskManager` manages background task agents. Key exports: `TASK_STATUS` (RUNNING, COMPLETED, FAILED, CANCELLED), `TaskHandle` (status, interrupt), `TaskManager` (spawnTask, taskStatus, sendFollowUp, interruptTask, activeTasks, taskCounts, progressMessage). Task agents get a silent inline sink (no UI output) and report results via `onTaskComplete`.
 - `message-bus.ts` — `MessageBus` owns the agent run loop. Drains messages sequentially through `agent.run()`. Provides input preprocessing via `INPUT` hook. Key exports: `MessageBus` (enqueue, cancel, isIdle, run, runUntilCancelled, executeCommand)
 
 ### Marker Mangler (`src/core/marker-mangler.ts`)
@@ -236,6 +245,7 @@ Escapes input that triggers special behavior (tool call actions, internal marker
 
 ### Utilities (`src/utils/`)
 - `file-utils.ts` — `parseFrontMatter(content)`, `validateNameable(name, label, dirName)`
+- `workspace.ts` — `Workspace` class: escape-safe path resolution (rejects traversal and symlink escapes) used by all file tools
 - `objects.ts` — `deepMerge(...sources)`
 - `render.ts` — Template engine with `{{ vars }}`, `{% if %}`, `{% for %}`, filters
 - `json-schema.ts` — `validate()`, `validateParams()`, `formatValidationErrors()`
@@ -246,7 +256,7 @@ Escapes input that triggers special behavior (tool call actions, internal marker
 - `colors.ts` — Color palettes, ANSI helpers, theme resolution. Key exports: `ColorPalette`, `resolvePalette()`, `applyThinking()`, `applyToolCall()`, `applyToolResult()`, `applyFinalResponse()`, `applyCompacting()`, `applyProgress()`
 
 ### Core Index (`src/core/index.ts`)
-Re-exports core modules for programmatic use: hooks, logger, extension utilities (ExtensionLoader, createExtensionLoader, extractSchemaDefaults, registerExtensionMetadata), tool-registry, tool-utils, registries, config-registry, service-registry, agent, session, agent-sink, task-manager, message-bus.
+Re-exports core modules for programmatic use: hooks, logger, extension utilities (ExtensionLoader, createExtensionLoader, extractSchemaDefaults, registerExtensionMetadata), tool-registry, tool-utils, tool-executor, registries, config-registry, service-registry, message-log, agent, commands, command-handlers, token-tracker, session, task-manager, message-bus, channel.
 
 ## Extensions (`src/extensions/`)
 
@@ -267,7 +277,7 @@ Each extension has:
 
 | Extension | Purpose |
 |-----------|---------|
-| `core-tools` | Core tools: write, read, edit, grep, find, explore (disabled), project_info |
+| `core-tools` | Core tools: overwrite, append, read, edit, grep, find, explore (disabled), project_info |
 | `bash-tool` | Bash tool -- execute shell commands |
 | `fetch-tool` | Fetch tool -- make HTTP requests |
 | `question-tool` | Question tool -- ask interactive questions |
@@ -277,7 +287,7 @@ Each extension has:
 | `skills` | Skills discovery and loading |
 | `prompts` | Prompt template loading |
 | `session-log` | JSONL session logging |
-| `ui-session-review-cli` | Review CLI subcommand + review tool |
+| `ui-session-review-cli` | `sessions` CLI subcommand (show, delete, cleanup) + `review` tool |
 | `ui-info-cli` | Info, show-prompt, and profiles CLI subcommands |
 | `ui-one-shot` | One-shot prompt mode (`-p`/`--prompt` flag, `prompt` subcommand) |
 | `ui-interactive-cli` | Interactive CLI session with readline loop |
@@ -314,7 +324,8 @@ Parent agent calls delegate_task()
   → TaskManager.spawnTask(taskId, description, options)
   → Load task profile
   → Create Agent instance with:
-    - sink = AgentSink (isTaskAgent: true, filters streaming/tool events)
+    - sink = silent no-op sink (task agents emit nothing to the UI;
+      onTaskComplete routes the final result)
     - toolWhitelist from profile
     - hideTools/hideThinking: true
   → Run agent.run(description) in background

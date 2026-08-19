@@ -50,26 +50,23 @@ All three forms above are equivalent.
 
 ## Resolution Layers
 
-Every config value is resolved through a priority chain. Values from higher-priority sources override lower ones:
+Each config value is resolved by walking a priority chain **defined per key** in `src/core/core.config.json` (and each extension's `configSchema`). There is no single global order. Common patterns:
 
-```
-CLI flags  >  defaults.json  >  environment variables  >  profile settings  >  extension defaults  >  schema defaults
-```
+- **Most keys:** CLI flag > `defaults.json` > schema default
+- **Profile-aware keys** (e.g., `defaultModel`, `role`): a profile layer sits in the chain, between CLI and config
+- **Env-aware keys:** an env layer is included where declared (see per-key entries)
+- **`aiUrl`/`apiKey`:** resolve from the active **provider first** (provider > CLI > config > env > default), since the provider's URL and API key are the natural source
 
-**Exception:** `aiUrl` and `apiKey` resolve from the active **provider first** (provider > CLI > config > default), since the provider's URL and API key are the natural defaults.
-
-### Layer Details
+### Available Layer Sources
 
 | Layer | Source | Description |
 |-------|--------|-------------|
-| **CLI** | `--flag` arguments | Highest priority for most keys. Set via the command line. |
+| **CLI** | `--flag` arguments | Set via the command line. |
 | **Config** | `defaults.json` | Your config file values. |
 | **Env** | Environment variables | Set via `export` or shell. |
 | **Profile** | Active profile | Values from the selected profile (role, model, tool restrictions). |
-| **Extension** | Extension defaults | Defaults registered by loaded extensions. |
-| **Default** | Schema defaults | Hardcoded fallbacks from `core.config.json`. |
-
-**Provider layer** (for `aiUrl`/`apiKey` only): The active provider's URL and API key are resolved before CLI/config, since the provider is the natural source for these values.
+| **Provider** | Active provider | `aiUrl`/`apiKey` only: the provider's URL and API key. |
+| **Default** | Schema defaults | Fallbacks declared in `core.config.json` / extension schemas. |
 
 ---
 
@@ -82,7 +79,7 @@ These are the top-level configuration keys available in `defaults.json`. Keys no
 - **Type:** `string`
 - **CLI flag:** `--model`
 - **Default:** `"qwen3.5-0.8b"`
-- **Resolution:** profile > CLI `--model` > config > default
+- **Resolution:** CLI `--model` > profile > env `HOTDOG_MODEL`/`AI_MODEL` > config > default
 
 The default AI model used when no other model is specified. Format: `providerName/modelName`.
 
@@ -108,9 +105,9 @@ The base URL for the AI API. If not set here, it is inherited from the active [p
 - **Type:** `string`
 - **CLI flag:** `-k, --api-key`
 - **Default:** `null`
-- **Resolution:** provider > CLI `--api-key` > config > env `AI_API_KEY` > default
+- **Resolution:** provider > CLI `--api-key` > config > env `HOTDOG_API_KEY`/`AI_API_KEY` > default
 
-API key for authentication. Can also be set via the `AI_API_KEY` environment variable.
+API key for authentication. Can also be set via the `HOTDOG_API_KEY` or `AI_API_KEY` environment variables.
 
 ```json
 { "apiKey": "sk-your-key-here" }
@@ -148,7 +145,7 @@ Sampling temperature for the LLM. `null` uses the provider/model default.
 - **Default:** `"You are an AI coding assistant. Use the instructions below and the tools available to you to assist the user."`
 - **Resolution:** CLI > config > profile > default
 
-The system prompt role. Note: profile file roles (`role` in `.profile.md` frontmatter) take precedence over config file roles.
+The system prompt role. This top-level key (config layer) overrides the role of the active profile. Within the profile layer, a `.profile.md` file's `role` wins over a same-named profile in the in-config `profiles` section.
 
 ```json
 { "role": "You are a senior software engineer." }
@@ -393,6 +390,44 @@ Timeout in seconds for embeddings requests.
 
 ```json
 { "embeddingsTimeoutSecs": 60 }
+```
+
+### `maxIterations`
+
+- **Type:** `number`
+- **CLI flag:** `--max-iterations`
+- **Default:** `1000`
+- **Resolution:** CLI > config > default
+
+Maximum agent loop iterations per run (safety mechanism; reset on a final response).
+
+```json
+{ "maxIterations": 200 }
+```
+
+### `maxToolCallsPerIteration`
+
+- **Type:** `number`
+- **CLI flag:** `--max-tool-calls`
+- **Default:** `10`
+- **Resolution:** CLI > config > default
+
+Maximum number of tool calls allowed per LLM turn.
+
+```json
+{ "maxToolCallsPerIteration": 5 }
+```
+
+### `taskProfile`
+
+- **Type:** `string`
+- **Default:** `"task-default"`
+- **Resolution:** config > default
+
+Profile used for spawned task agents (subagents).
+
+```json
+{ "taskProfile": "task-default" }
 ```
 
 ### `skillsPath` (top-level, backward compatible)
@@ -946,7 +981,7 @@ CLI flag: `--shell-mode`.
 |-------|------|---------|-------------|
 | `enabled` | `boolean` | `true` | Enable/disable the extension. |
 | `port` | `number` | `3000` | WebSocket server port. |
-| `host` | `string` | `"0.0.0.0"` | WebSocket server host. |
+| `host` | `string` | `"127.0.0.1"` | WebSocket server host. Loopback by default; set `0.0.0.0` explicitly to expose beyond localhost. |
 | `sessionTimeoutMin` | `number` | `30` | Idle session cleanup timeout (minutes). |
 | `questionTimeoutSecs` | `number` | `300` | Default question timeout (seconds). |
 | `questionStrategy` | `string` | `"wait"` | What happens when a question is unanswered. `wait` = hold until a client answers (no timeout); `default` = after `questionTimeoutSecs`, resolve with each question's default; `cancel` = after `questionTimeoutSecs`, interrupt the session. Both can be overridden per session at `createSession`. |
@@ -963,7 +998,7 @@ CLI flag: `--shell-mode`.
 |-------|------|---------|-------------|
 | `enabled` | `boolean` | `true` | Enable/disable the extension. |
 | `port` | `number` | `3000` | WebUI server port. |
-| `host` | `string` | `"0.0.0.0"` | WebUI server host. |
+| `host` | `string` | `"127.0.0.1"` | WebUI server host. Loopback by default; set `0.0.0.0` explicitly to expose beyond localhost. |
 | `apiKey` | `string` | `null` | API key for login authentication (also from env `HOTDOG_WEBUI_API_KEY`). |
 | `sessionTokenTtlMin` | `number` | `1440` | Session token TTL in minutes (default: 24 hours). |
 | `maxAgeSecs` | `number` | `3600` | Cache-Control max-age for static assets (seconds). |
@@ -978,13 +1013,18 @@ CLI flag: `--shell-mode`.
 
 | Variable | Related Config | Description |
 |----------|---------------|-------------|
-| `AI_API_KEY` | `apiKey` | API key for the AI provider. |
-| `AI_URL` | `aiUrl` | AI provider URL (also `HOTDOG_AI_URL`). |
+| `HOTDOG_API_KEY` | `apiKey` | API key for the AI provider. |
+| `AI_API_KEY` | `apiKey` | API key for the AI provider (alternate name). |
+| `HOTDOG_AI_URL` | `aiUrl` | AI provider URL. |
+| `AI_URL` | `aiUrl` | AI provider URL (alternate name). |
+| `HOTDOG_MODEL` / `AI_MODEL` | `defaultModel` | Default model name. |
 | `HOTDOG_CONFIG_DIR` | Config directory | Override the config directory path. |
 | `HOTDOG_LOG` | `noLog` | Set to `false` to disable logging (inverted). |
 | `HOTDOG_NO_LOG` | `noLog` | Set to `true` to disable logging. |
 | `HOTDOG_HOOK_TRACE` | `hookTrace` | Set to `true` to enable hook tracing. |
-| `HOTDOG_LOG_LEVEL` | General | Set to `debug` for debug-level logging (required for `hookTrace`). |
+| `HOTDOG_LOG_LEVEL` | Logging | Log level (`debug`, `info`, `warn`, `error`). `debug` required for `hookTrace`. |
+| `HOTDOG_LOG_TARGET` | Logging | Log target (`stderr`, `stdout`, `none`). |
+| `HOTDOG_SESSIONS_DIR` | Session logs | Override the directory where JSONL session logs are stored. |
 | `BRAVE_API_KEY` | `webSearch.braveApiKey` | Brave Search API key. |
 | `TAVILY_API_KEY` | `webSearch.tavilyApiKey` | Tavily API key. |
 | `SEARXNG_INSTANCE_URL` | `webSearch.searxngInstanceUrl` | SearXNG instance URL. |

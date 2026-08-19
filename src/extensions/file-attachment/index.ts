@@ -1,40 +1,27 @@
-// File Attachment Extension
-// Expands @filepath references in user input to file contents in <file-include> format.
+// file-attachment - Expands @filepath references in user input to file contents in <file-include> format.
 
 import fsPromises from "node:fs/promises";
-import { resolve as resolveAbs, isAbsolute, dirname } from "node:path";
+import { resolve as resolveAbs, isAbsolute } from "node:path";
 import { cwd } from "node:process";
-import { HOOKS } from "../../core/hooks.ts";
-import { OUTPUT_EVENT } from "../../core/context/output.ts";
-import { logger } from "../../core/logger.ts";
-import {
-  CoreContext,
-  ExtensionInstance,
-  getExtensionConfig,
-} from "../../core/extensions/types.ts";
-import { Workspace, PathEscapeError } from "../../utils/workspace.ts";
+import { HOOKS } from "@core/hooks.ts";
+import { OUTPUT_EVENT } from "@core/context/output.ts";
+import { logger } from "@core/logger.ts";
+import { type CoreContext, type ExtensionInstance, getExtensionConfig } from "@core/extensions/types.ts";
+import { Workspace, PathEscapeError } from "@utils/workspace.ts";
 
 import { matcher, completion } from "./completions.ts";
 
 // Pattern to match @filepath references
-// Matches @ preceded by start-of-string or a non-word character (so
-// "tom@furycodes.com" does NOT trigger, but "read @file.txt" does),
+// Matches @ preceded by start-of-string or a non-word character.
+// "tom@furycodes.com" does NOT trigger, but "read @file.txt" does,
 // followed by path characters (alphanumeric, dots, slashes, hyphens, underscores, plus)
 const FILE_REF_RE = /(?<!\w)@([a-zA-Z0-9._\/\+-]+)\b/g;
 
 /**
  * Resolve a relative path against the workspace root or cwd.
- *
- * Returns null when the path is rejected by the workspace boundary (a
- * PathEscapeError). A rejection must mean "skip this file", never "resolve
- * it anyway" — falling back to raw resolution here would let `@../../etc/
- * passwd` attach files outside the workspace, defeating the boundary that
- * read/edit/overwrite already enforce.
+ * Returns null when the path is rejected by the workspace boundary (a PathEscapeError).
  */
-function resolveFilePath(
-  filePath: string,
-  workspace: Workspace | null,
-): string | null {
+function resolveFilePath(filePath: string, workspace: Workspace | null): string | null {
   if (workspace) {
     try {
       return workspace.resolveSafe(filePath);
@@ -52,9 +39,7 @@ function resolveFilePath(
   return resolveAbs(cwd(), filePath);
 }
 
-/**
- * Read a file and return its content, or null if it cannot be read.
- */
+/** Read a file and return its content, or null if it cannot be read. */
 async function readFileContent(
   resolvedPath: string,
   requestedPath: string,
@@ -64,32 +49,24 @@ async function readFileContent(
     const stats = await fsPromises.stat(resolvedPath);
 
     if (stats.isDirectory()) {
-      logger.debug(
-        `file-attachment: '${requestedPath}' is a directory, skipping`,
-      );
+      logger.debug(`file-attachment: '${requestedPath}' is a directory, skipping`);
       return null;
     }
 
     if (stats.size > maxFileSize) {
-      logger.debug(
-        `file-attachment: '${requestedPath}' is too large (${stats.size} bytes), skipping`,
-      );
+      logger.debug(`file-attachment: '${requestedPath}' is too large (${stats.size} bytes), skipping`);
       return null;
     }
 
     const content = await fsPromises.readFile(resolvedPath, "utf-8");
     return { content, path: requestedPath };
   } catch (e) {
-    logger.debug(
-      `file-attachment: failed to read '${requestedPath}': ${(e as Error).message}`,
-    );
+    logger.debug(`file-attachment: failed to read '${requestedPath}': ${(e as Error).message}`);
     return null;
   }
 }
 
-/**
- * Expand @filepath references in text to file content blocks.
- */
+/** Expand @filepath references in text to file content blocks. */
 async function expandFileReferences(
   text: string,
   workspace: Workspace | null,
@@ -117,10 +94,7 @@ async function expandFileReferences(
   let match: RegExpExecArray | null;
 
   // Collect all file references
-  while (
-    (match = FILE_REF_RE.exec(text)) !== null &&
-    attachedFiles.length + errors.length < maxFiles
-  ) {
+  while ((match = FILE_REF_RE.exec(text)) !== null && attachedFiles.length + errors.length < maxFiles) {
     const requestedPath = match[1];
     if (!requestedPath) continue;
     const resolvedPath = resolveFilePath(requestedPath, workspace);
@@ -132,11 +106,7 @@ async function expandFileReferences(
       continue;
     }
 
-    const result = await readFileContent(
-      resolvedPath,
-      requestedPath,
-      maxFileSize,
-    );
+    const result = await readFileContent(resolvedPath, requestedPath, maxFileSize);
     if (result) {
       attachedFiles.push(result);
     } else {
@@ -171,9 +141,7 @@ async function expandFileReferences(
   return { expanded, attachedFiles };
 }
 
-/**
- * Create the file-attachment extension.
- */
+/** Create the file-attachment extension. */
 export function create(core: CoreContext): ExtensionInstance {
   const config = getExtensionConfig<{
     maxFileSize: number;
@@ -183,11 +151,7 @@ export function create(core: CoreContext): ExtensionInstance {
   const maxFiles = config.maxFiles;
 
   // Register completion handler for @filepath references
-  core.completion.register(
-    matcher,
-    completion,
-    "file-attachment:path-completion",
-  );
+  core.completion.register(matcher, completion, "file-attachment:path-completion");
 
   return {
     hooks: {
@@ -202,15 +166,9 @@ export function create(core: CoreContext): ExtensionInstance {
           logger.debug(`file-attachment: failed to create Workspace: ${(e as Error).message}`);
         }
 
-        const result = await expandFileReferences(
-          text,
-          workspace,
-          maxFileSize,
-          maxFiles,
-        );
+        const result = await expandFileReferences(text, workspace, maxFileSize, maxFiles);
 
         if (result.expanded !== text) {
-          // Emit system message for each attached file
           const sink = agent?.sink;
           for (const file of result.attachedFiles) {
             sink?.emit({

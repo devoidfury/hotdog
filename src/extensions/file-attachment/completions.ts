@@ -1,9 +1,9 @@
 import fsPromises from "node:fs/promises";
 import { resolve as resolveAbs, isAbsolute, dirname } from "node:path";
 import { cwd } from "node:process";
-import { logger } from "../../core/logger.ts";
-import { Workspace, PathEscapeError } from "../../utils/workspace.ts";
-import type { CompletionContext } from "../../core/completion.ts";
+import { logger } from "@core/logger.ts";
+import { Workspace, PathEscapeError } from "@utils/workspace.ts";
+import type { CompletionContext } from "@core/completion.ts";
 
 export function matcher(ctx: CompletionContext) {
   // Match when there's an @ symbol before cursor and we're typing a path after it
@@ -17,10 +17,7 @@ export async function completion(ctx: CompletionContext) {
   const text = ctx.line.slice(0, ctx.cursorPos);
   const lastSpace = text.lastIndexOf(" ");
   const currentWord = text.slice(lastSpace + 1);
-
-  if (!currentWord.startsWith("@")) {
-    return [];
-  }
+  if (!currentWord.startsWith("@")) return [];
 
   // Build Workspace from agent config boundaries
   const config = ctx.agent?.config;
@@ -47,9 +44,7 @@ export async function completion(ctx: CompletionContext) {
         try {
           searchDir = workspace.resolveSafe(pathPrefix);
         } catch (e: unknown) {
-          if (e instanceof PathEscapeError) {
-            return [];
-          }
+          if (e instanceof PathEscapeError) return [];
           throw e;
         }
       } else {

@@ -30,15 +30,12 @@ interface HandoffPayload {
   files?: string[];
 }
 
-interface HandoffState {
-  pending: HandoffPayload | null;
-}
-
 export class HandoffTool {
   static readonly TOOL_NAME = "handoff";
   metadata: ToolMetadata = { sideEffects: true, difficulty: 3 };
 
-  constructor(private state: HandoffState) {}
+  /** Pending handoffs keyed by agent session id. */
+  constructor(private pending: Map<string, HandoffPayload>) {}
 
   toToolDef() {
     return toolDef(
@@ -82,7 +79,7 @@ export class HandoffTool {
     );
   }
 
-  async execute(input: string | Record<string, unknown> | null, _ctx: ToolContext): Promise<ToolResult> {
+  async execute(input: string | Record<string, unknown> | null, ctx?: ToolContext): Promise<ToolResult> {
     const args = parseToolInput(input);
     if (!args || !args.content || typeof args.content !== "string") {
       return ToolResult.err("Handoff requires a non-empty 'content' field");
@@ -100,7 +97,11 @@ export class HandoffTool {
     // Store the handoff payload for the TURN_END hook to process.
     // The hook does the actual context clear + enqueue to ensure
     // proper lifecycle ordering (tool results are added before clearing).
-    this.state.pending = payload;
+    // Keyed by agent session id so concurrent sessions can't clobber each
+    // other's pending handoff (shared tool instance across sessions).
+    const agent = ctx?.get("agent") as { sessionId?: string } | undefined;
+    const sessionId = agent?.sessionId || "default";
+    this.pending.set(sessionId, payload);
 
     return ToolResult.stop(
       `Handoff prepared. Context will be cleared and the agent will restart with your plan.\n\n` +
@@ -135,10 +136,12 @@ export function create(core: CoreContext): ExtensionInstance {
     return {};
   }
 
-  // Shared state between the tool and the TURN_END hook.
-  const state: HandoffState = { pending: null };
+  // Shared between the tool and the TURN_END hook; keyed by agent session id
+  // so concurrent sessions (e.g. multiple webui clients) can't clobber
+  // each other's pending handoff.
+  const pending = new Map<string, HandoffPayload>();
 
-  const handoffTool = new HandoffTool(state);
+  const handoffTool = new HandoffTool(pending);
 
   /**
    * Build the enqueued message from the handoff payload.
@@ -189,11 +192,24 @@ export function create(core: CoreContext): ExtensionInstance {
        * Clear context, rebuild system prompt, and enqueue the handoff content.
        */
       [HOOKS.TURN_END]: async ({ stopped, cancelled, agent, toolResults }) => {
+        if (!agent) {
+          return;
+        }
+
+        // Keyed by agent session id to match the tool's pending map.
+        const sessionId = (agent as { sessionId?: string }).sessionId || "default";
+
+        // A cancelled turn leaves a stale pending handoff; drop it so a later
+        // turn in this session can't accidentally consume it.
+        if (cancelled) {
+          pending.delete(sessionId);
+          return;
+        }
+
         // Only process if:
         // - The turn stopped (agent completed, not continuing loop)
-        // - Not cancelled (user interrupted)
-        // - We have a pending handoff
-        if (!stopped || cancelled || !agent || !state.pending) {
+        // - We have a pending handoff for THIS session
+        if (!stopped || !pending.has(sessionId)) {
           return;
         }
 
@@ -203,8 +219,8 @@ export function create(core: CoreContext): ExtensionInstance {
           return;
         }
 
-        const handoff = state.pending;
-        state.pending = null; // Clear immediately to avoid re-processing
+        const handoff = pending.get(sessionId)!;
+        pending.delete(sessionId); // Clear immediately to avoid re-processing
 
         try {
           // Clear the conversation context (messages + system prompt cache)

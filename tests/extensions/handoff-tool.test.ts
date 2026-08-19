@@ -3,15 +3,23 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "bun:test";
 import { HandoffTool, create } from "../../src/extensions/handoff-tool/index.ts";
 import { HOOKS } from "../../src/core/hooks.ts";
+import { ToolContext } from "../../src/core/extensions/tool-context.ts";
 import type { CoreContext } from "../../src/core/extensions/types.ts";
 
+interface TestPayload {
+  content: string;
+  title?: string;
+  instructions?: string;
+  files?: string[];
+}
+
 describe("HandoffTool", () => {
-  let state: { pending: { content: string; title?: string; instructions?: string; files?: string[] } | null };
+  let pending: Map<string, TestPayload>;
   let tool: HandoffTool;
 
   beforeEach(() => {
-    state = { pending: null };
-    tool = new HandoffTool(state);
+    pending = new Map();
+    tool = new HandoffTool(pending);
   });
 
   describe("toToolDef", () => {
@@ -78,7 +86,7 @@ describe("HandoffTool", () => {
       });
       const result = await tool.execute(input, null!);
       expect(result.success).toBe(true);
-      expect(state.pending).toEqual({
+      expect(pending.get("default")).toEqual({
         content: "Implement the feature",
         title: "Execution Phase",
         instructions: "Go step by step",
@@ -92,7 +100,7 @@ describe("HandoffTool", () => {
       });
       const result = await tool.execute(input, null!);
       expect(result.success).toBe(true);
-      expect(state.pending).toEqual({
+      expect(pending.get("default")).toEqual({
         content: "Just the plan",
       });
     });
@@ -104,7 +112,29 @@ describe("HandoffTool", () => {
       });
       const result = await tool.execute(input, null!);
       expect(result.success).toBe(true);
-      expect(state.pending?.files).toEqual(["src/main.ts"]);
+      expect(pending.get("default")?.files).toEqual(["src/main.ts"]);
+    });
+
+    it("keys the payload by the agent's session id from the tool context", async () => {
+      const ctx = new ToolContext();
+      ctx.set("agent", { sessionId: "session-a" });
+      const result = await tool.execute(JSON.stringify({ content: "Plan A" }), ctx);
+      expect(result.success).toBe(true);
+      expect(pending.get("session-a")).toEqual({ content: "Plan A" });
+      expect(pending.has("default")).toBe(false);
+    });
+
+    it("keeps concurrent sessions' payloads independent", async () => {
+      const ctxA = new ToolContext();
+      ctxA.set("agent", { sessionId: "session-a" });
+      const ctxB = new ToolContext();
+      ctxB.set("agent", { sessionId: "session-b" });
+
+      await tool.execute(JSON.stringify({ content: "Plan A" }), ctxA);
+      await tool.execute(JSON.stringify({ content: "Plan B" }), ctxB);
+
+      expect(pending.get("session-a")).toEqual({ content: "Plan A" });
+      expect(pending.get("session-b")).toEqual({ content: "Plan B" });
     });
 
     it("returns error for missing content", async () => {
@@ -255,6 +285,76 @@ describe("handoff-tool create() extension", () => {
     expect(message).toContain("## Relevant Files");
     expect(message).toContain("src/main.ts");
     expect(message).toContain("started from a handoff");
+  });
+
+  it("TURN_END hook consumes only the matching session's pending handoff", async () => {
+    const ext = create({
+      config: { handoffTool: {} },
+    } as unknown as CoreContext);
+    const hooks = ext.hooks! as Record<string, unknown>;
+
+    const registered: Array<[string, unknown]> = [];
+    const registry = {
+      register: (name: string, tool: unknown) => registered.push([name, tool]),
+      getAll: () => [],
+    };
+    await (hooks[HOOKS.TOOLS_REGISTER] as Function)(registry);
+    const handoffTool = registered[0]![1] as HandoffTool;
+
+    // Two concurrent sessions each call handoff.
+    const ctxA = new ToolContext();
+    ctxA.set("agent", { sessionId: "session-a" });
+    const ctxB = new ToolContext();
+    ctxB.set("agent", { sessionId: "session-b" });
+    await handoffTool.execute(JSON.stringify({ content: "Plan A", title: "A" }), ctxA);
+    await handoffTool.execute(JSON.stringify({ content: "Plan B", title: "B" }), ctxB);
+
+    const enqueuedA: string[] = [];
+    const enqueuedB: string[] = [];
+    const makeAgent = (sessionId: string, enqueued: string[]) => ({
+      sessionId,
+      clearContext: vi.fn().mockResolvedValue(undefined),
+      ensureSystemPrompt: vi.fn().mockResolvedValue(undefined),
+      enqueue: (text: string) => enqueued.push(text),
+      emitOutput: vi.fn(),
+    });
+    const agentA = makeAgent("session-a", enqueuedA);
+    const agentB = makeAgent("session-b", enqueuedB);
+    const handoffResults = [{ toolName: "handoff", input: "{}", result: "ok" }];
+
+    // Session A's turn ends: only A is cleared, with A's content.
+    await (hooks[HOOKS.TURN_END] as Function)({
+      stopped: true,
+      cancelled: false,
+      agent: agentA,
+      toolResults: handoffResults,
+    });
+    expect(agentA.clearContext).toHaveBeenCalledTimes(1);
+    expect(enqueuedA).toHaveLength(1);
+    expect(enqueuedA[0]).toContain("Plan A");
+    expect(agentB.clearContext).not.toHaveBeenCalled();
+    expect(enqueuedB).toHaveLength(0);
+
+    // Session B's turn ends: its own payload was not clobbered by A's.
+    await (hooks[HOOKS.TURN_END] as Function)({
+      stopped: true,
+      cancelled: false,
+      agent: agentB,
+      toolResults: handoffResults,
+    });
+    expect(agentB.clearContext).toHaveBeenCalledTimes(1);
+    expect(enqueuedB).toHaveLength(1);
+    expect(enqueuedB[0]).toContain("Plan B");
+
+    // A consumed turn must not replay on a later turn end for A.
+    await (hooks[HOOKS.TURN_END] as Function)({
+      stopped: true,
+      cancelled: false,
+      agent: agentA,
+      toolResults: handoffResults,
+    });
+    expect(agentA.clearContext).toHaveBeenCalledTimes(1);
+    expect(enqueuedA).toHaveLength(1);
   });
 
   it("TURN_END hook does nothing when not stopped", async () => {

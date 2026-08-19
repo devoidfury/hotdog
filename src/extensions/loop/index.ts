@@ -1,10 +1,10 @@
 // loop: provides the /loop slash command for repeatedly running a prompt until cancelled by the user.
 
-import { HOOKS } from "../../core/hooks.ts";
-import { ACTIONS } from "../../core/commands.ts";
-import { formatError } from "../../core/error.ts";
-import { getExtensionConfig, type CoreContext, type ExtensionInstance } from "../../core/extensions/types.ts";
-import type { Agent } from "../../core/agent.ts";
+import { HOOKS } from "@core/hooks.ts";
+import { ACTIONS } from "@core/commands.ts";
+import { formatError } from "@core/error.ts";
+import { getExtensionConfig, type CoreContext, type ExtensionInstance } from "@core/extensions/types.ts";
+import type { Agent } from "@core/agent.ts";
 
 interface LoopState {
   prompt: string;

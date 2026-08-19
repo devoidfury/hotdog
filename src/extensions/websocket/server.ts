@@ -20,7 +20,8 @@ import {
   listSessionLogs,
   deleteSessionLog,
 } from "../../core/session/session-log.ts";
-import { AgentError } from "../../core/error.ts";
+import { AgentError, formatError } from "../../core/error.ts";
+import { logger } from "../../core/logger.ts";
 
 interface SessionMetadata {
   profile: string;
@@ -1216,7 +1217,7 @@ export function createWsServer(
         typedErr.message !== "WebSocket is not open: readyState 2 (CLOSING)" &&
         typedErr.message !== "WebSocket is not open: readyState 3 (CLOSED)"
       ) {
-        console.error(`[websocket] message handling error:`, typedErr);
+        logger.error(`[websocket] message handling error: ${formatError(typedErr)}`);
       }
     }
   }

@@ -23,6 +23,12 @@ import {
 
 export const DEFAULT_ALLOWED_SCHEMES = ["http", "https"];
 
+/** 3xx statuses with a Location header we may follow (after re-validation). */
+const REDIRECT_STATUSES = new Set([301, 302, 303, 307, 308]);
+
+/** Cap on manual redirect hops; deeper chains are almost never legitimate. */
+const MAX_REDIRECTS = 5;
+
 interface FetchArgs {
   url: string;
   method: string;
@@ -70,7 +76,7 @@ export class FetchTool {
     const restrictions = [
       `Only these URL schemes are allowed: ${this.allowedSchemes.join(", ")}.`,
       !this.allowPrivateHosts
-        ? "Private or reserved hosts (localhost, 10.x, 192.168.x, 169.254.x, etc.) are not allowed."
+        ? "Private or reserved hosts (localhost, 10.x, 192.168.x, 169.254.x, etc.) are not allowed, including as redirect targets."
         : null,
     ]
       .filter(Boolean)
@@ -122,7 +128,15 @@ export class FetchTool {
     }
 
     try {
-      const resp = await hotdogFetch(url, args, this.timeoutMs);
+      // Default fetch() follows redirects blindly, so a public host that 302s
+      // to a private one would bypass the private-host gate. With protection
+      // on, follow redirects manually and re-validate every hop.
+      const resp = this.allowPrivateHosts
+        ? await hotdogFetch(url, args, this.timeoutMs)
+        : await fetchWithSafeRedirects(url, args, this.timeoutMs, {
+            allowedSchemes: this.allowedSchemes,
+            checkHost: assertPublicHost,
+          });
       const contentType = resp.headers.get("content-type") || "";
       const isJson = contentType.includes("application/json");
 
@@ -175,6 +189,95 @@ export class FetchTool {
       }
       return ToolResult.err(`Error: ${msg}`);
     }
+  }
+}
+
+export interface SafeRedirectOptions {
+  allowedSchemes: string[];
+  /** Returns a refusal message for a host that must not be fetched, or null when allowed. */
+  checkHost: (host: string) => Promise<string | null>;
+  maxRedirects?: number;
+}
+
+/**
+ * Like hotdogFetch(), but follows redirects manually so every hop's target
+ * passes the same scheme + host gate as the original URL.
+ *
+ * fetch() follows redirects by default, so a public host that 302s to a
+ * private one (cloud metadata, localhost services) would bypass the
+ * private-host check. Each hop is re-validated before following.
+ * @internal Exported for testing.
+ */
+export async function fetchWithSafeRedirects(
+  url: string,
+  args: FetchArgs,
+  timeoutMs: number,
+  { allowedSchemes, checkHost, maxRedirects = MAX_REDIRECTS }: SafeRedirectOptions,
+): Promise<Response> {
+  let current = url;
+  let method = args.method;
+  let body = args.body;
+
+  for (let hop = 0; ; hop++) {
+    const resp = await hotdogFetch(
+      current,
+      { ...args, method, body, redirect: "manual" },
+      timeoutMs,
+    );
+
+    if (!REDIRECT_STATUSES.has(resp.status)) return resp;
+
+    if (hop >= maxRedirects) {
+      await discardBody(resp);
+      throw new Error(`Too many redirects (limit ${maxRedirects}) starting from ${url}`);
+    }
+
+    const location = resp.headers.get("location");
+    if (!location) return resp;
+    await discardBody(resp);
+
+    let next: URL;
+    try {
+      next = new URL(location, current);
+    } catch {
+      throw new Error(`Redirect from ${current} has an invalid Location header: ${location}`);
+    }
+
+    const scheme = next.protocol.replace(/:$/, "").toLowerCase();
+    if (!allowedSchemes.includes(scheme)) {
+      throw new Error(`Redirect to disallowed scheme '${scheme}' refused: ${next.href}`);
+    }
+
+    const nextHost = next.hostname.replace(/^\[|\]$/g, "");
+    if (nextHost) {
+      const hostError = await checkHost(nextHost);
+      if (hostError) {
+        throw new Error(`Redirect refused: ${hostError}`);
+      }
+    }
+
+    // Per the fetch spec, 303 always becomes a GET, and 301/302 downgrade
+    // non-GET/HEAD to GET (dropping the body). 307/308 preserve both.
+    if (
+      resp.status === 303 ||
+      ((resp.status === 301 || resp.status === 302) &&
+        method !== "GET" &&
+        method !== "HEAD")
+    ) {
+      method = "GET";
+      body = null;
+    }
+
+    current = next.href;
+  }
+}
+
+/** Release a redirect response's body so the connection can be recycled. */
+async function discardBody(resp: Response): Promise<void> {
+  try {
+    await resp.body?.cancel();
+  } catch {
+    // connection already gone
   }
 }
 
@@ -242,6 +345,10 @@ function parseArgs(input: string | Record<string, unknown> | null, allowedScheme
  * Refuse hosts that are, or resolve to, private/reserved addresses.
  * Returns an error message to hand to the model, or null when the host is
  * public. Fails closed: unresolvable hosts are rejected.
+ *
+ * Redirect targets are NOT checked here: callers must follow redirects
+ * manually and re-validate each hop (see fetchWithSafeRedirects), because
+ * fetch() follows redirects blindly by default.
  *
  * Known ceiling: DNS rebinding -- fetch() re-resolves the name when it
  * connects, so a hostile resolver could return a public address here and a

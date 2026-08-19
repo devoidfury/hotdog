@@ -3,6 +3,7 @@ import {
   FetchTool,
   isPrivateAddress,
   assertPublicHost,
+  fetchWithSafeRedirects,
 } from "../../src/extensions/fetch-tool/index.ts";
 import { TransientError } from "../../src/core/error.ts";
 import { resultStr, getDisplay } from "../helpers.ts";
@@ -115,6 +116,35 @@ function startTestServer(): void {
         return new Response("x".repeat(500_000), {
           headers: { "Content-Type": "text/plain" },
         });
+      }
+
+      // /redirect/* — redirect endpoints for SSRF redirect-protection tests
+      if (url.pathname === "/redirect/ok") {
+        return new Response(null, { status: 302, headers: { Location: "/json" } });
+      }
+      if (url.pathname === "/redirect/private") {
+        return new Response(null, {
+          status: 302,
+          headers: { Location: "http://127.0.0.1:1/none" },
+        });
+      }
+      if (url.pathname === "/redirect/scheme") {
+        return new Response(null, {
+          status: 302,
+          headers: { Location: "file:///etc/passwd" },
+        });
+      }
+      if (url.pathname === "/redirect/loop") {
+        return new Response(null, {
+          status: 302,
+          headers: { Location: "/redirect/loop" },
+        });
+      }
+      if (url.pathname === "/redirect/post303") {
+        return new Response(null, { status: 303, headers: { Location: "/echo" } });
+      }
+      if (url.pathname === "/redirect/keep307") {
+        return new Response(null, { status: 307, headers: { Location: "/echo" } });
       }
 
       // Default: 404
@@ -724,6 +754,118 @@ describe("FetchTool integration", () => {
       // body_length reports the body before display truncation.
       const bodyLength = Number(result.metadata?.get("body_length"));
       expect(bodyLength).toBeGreaterThan(8000);
+    });
+  });
+
+  describe("redirect SSRF protection", () => {
+    const allowAll = async () => null;
+
+    function args(overrides: { method?: string; body?: string | null } = {}) {
+      return {
+        url: "",
+        method: (overrides.method || "GET") as "GET",
+        headers: {},
+        body: overrides.body ?? null,
+        showOriginal: false,
+        host: null,
+      };
+    }
+
+    const opts = (checkHost: (host: string) => Promise<string | null>) => ({
+      allowedSchemes: ["http", "https"],
+      checkHost,
+    });
+
+    it("follows a relative redirect when the target passes the gates", async () => {
+      const resp = await fetchWithSafeRedirects(
+        `${BASE_URL}/redirect/ok`,
+        args(),
+        5000,
+        opts(allowAll),
+      );
+      expect(resp.status).toBe(200);
+      expect(await resp.text()).toContain("Lorem ipsum");
+    });
+
+    it("refuses a redirect to a private host", async () => {
+      await expect(
+        fetchWithSafeRedirects(
+          `${BASE_URL}/redirect/private`,
+          args(),
+          5000,
+          opts(assertPublicHost),
+        ),
+      ).rejects.toThrow(/private or reserved/);
+    });
+
+    it("refuses a redirect to a disallowed scheme", async () => {
+      await expect(
+        fetchWithSafeRedirects(
+          `${BASE_URL}/redirect/scheme`,
+          args(),
+          5000,
+          opts(allowAll),
+        ),
+      ).rejects.toThrow(/disallowed scheme 'file'/);
+    });
+
+    it("stops at the redirect hop limit", async () => {
+      await expect(
+        fetchWithSafeRedirects(
+          `${BASE_URL}/redirect/loop`,
+          args(),
+          5000,
+          { ...opts(allowAll), maxRedirects: 3 },
+        ),
+      ).rejects.toThrow(/Too many redirects \(limit 3\)/);
+    });
+
+    it("downgrades a 303 POST to a GET without body", async () => {
+      const resp = await fetchWithSafeRedirects(
+        `${BASE_URL}/redirect/post303`,
+        args({ method: "POST", body: "payload" }),
+        5000,
+        opts(allowAll),
+      );
+      const echoed = (await resp.json()) as { method: string; body: unknown };
+      expect(echoed.method).toBe("GET");
+      expect(echoed.body).toBeNull();
+    });
+
+    it("preserves method and body on a 307", async () => {
+      const resp = await fetchWithSafeRedirects(
+        `${BASE_URL}/redirect/keep307`,
+        args({ method: "POST", body: "payload" }),
+        5000,
+        opts(allowAll),
+      );
+      const echoed = (await resp.json()) as { method: string; body: unknown };
+      expect(echoed.method).toBe("POST");
+      expect(echoed.body).toBe("payload");
+    });
+
+    it("returns a redirect without a Location header as-is, body intact", async () => {
+      const resp = await fetchWithSafeRedirects(
+        `${BASE_URL}/status/302`,
+        args(),
+        5000,
+        opts(allowAll),
+      );
+      expect(resp.status).toBe(302);
+      expect(resp.headers.get("location")).toBeNull();
+      expect(await resp.text()).toBe("Status 302");
+    });
+
+    it("tool description advertises redirect checking when protection is on", () => {
+      const tool = new FetchTool({ timeoutMs: 30000, maxBodyLength: 8000 });
+      expect(tool.toToolDef().function.description).toContain("redirect targets");
+
+      const openTool = new FetchTool({
+        timeoutMs: 30000,
+        maxBodyLength: 8000,
+        allowPrivateHosts: true,
+      });
+      expect(openTool.toToolDef().function.description).not.toContain("redirect targets");
     });
   });
 });

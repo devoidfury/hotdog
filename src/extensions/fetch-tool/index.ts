@@ -1,27 +1,25 @@
 // Fetch-tool extension — provides the fetch tool for making HTTP requests.
 
+import { isIP } from "node:net";
+import { lookup } from "node:dns/promises";
+import { hotdogFetch, VALID_METHODS, METHODS_WITH_BODY } from "@utils/fetch.ts";
 import {
   toolDef,
   param,
   ToolResult,
   parseToolInput,
   defaultCallDisplay,
-} from "../../core/extensions/tool-utils.ts";
-import type { ToolMetadata } from "../../core/extensions/tool-registry.ts";
-import { htmlToMarkdown } from "../../utils/html-to-markdown.ts";
-import { TransientError } from "../../core/error.ts";
-import { HOOKS } from "../../core/hooks.ts";
+} from "@core/extensions/tool-utils.ts";
+import type { ToolMetadata } from "@core/extensions/tool-registry.ts";
+import { htmlToMarkdown } from "@utils/html-to-markdown.ts";
+import { TransientError } from "@core/error.ts";
+import { HOOKS } from "@core/hooks.ts";
 import {
-  CoreContext,
-  ExtensionInstance,
-  ToolsRegisterPayload,
-  ToolContext,
+  type CoreContext,
+  type ExtensionInstance,
+  type ToolContext,
   getExtensionConfig,
-} from "../../core/extensions/types.ts";
-
-import { hotdogFetch, VALID_METHODS, METHODS_WITH_BODY } from "@utils/fetch.ts";
-import { isIP } from "node:net";
-import { lookup } from "node:dns/promises";
+} from "@core/extensions/types.ts";
 
 export const DEFAULT_ALLOWED_SCHEMES = ["http", "https"];
 
@@ -64,9 +62,7 @@ export class FetchTool {
   constructor(options: FetchToolOptions) {
     this.timeoutMs = options.timeoutMs;
     this.maxBodyLength = options.maxBodyLength;
-    this.allowedSchemes = (options.allowedSchemes ?? DEFAULT_ALLOWED_SCHEMES).map(
-      (s) => s.toLowerCase(),
-    );
+    this.allowedSchemes = (options.allowedSchemes ?? DEFAULT_ALLOWED_SCHEMES).map((s) => s.toLowerCase());
     this.allowPrivateHosts = options.allowPrivateHosts ?? false;
   }
 
@@ -90,10 +86,7 @@ export class FetchTool {
             default: "GET",
           }),
           headers: param("object", "Optional HTTP headers as key-value pairs"),
-          body: param(
-            "string",
-            `Optional request body (for ${METHODS_WITH_BODY.join(", ")})`,
-          ),
+          body: param("string", `Optional request body (for ${METHODS_WITH_BODY.join(", ")})`),
           showOriginal: param(
             "boolean",
             "If true, return the original raw response body without markdown conversion.",
@@ -113,10 +106,7 @@ export class FetchTool {
     });
   }
 
-  async execute(
-    input: string | Record<string, unknown> | null,
-    _ctx?: ToolContext,
-  ): Promise<ToolResult> {
+  async execute(input: string | Record<string, unknown> | null, _ctx?: ToolContext): Promise<ToolResult> {
     const { args, error } = parseArgs(input, this.allowedSchemes);
     if (!args) {
       return ToolResult.err(error);
@@ -138,8 +128,7 @@ export class FetchTool {
 
       // Hard cap on what we read off the wire so a huge or never-ending
       // response cannot exhaust memory before the display cap applies.
-      const { text: rawBody, truncated: readTruncated } =
-        await readCappedBody(resp, MAX_RESPONSE_CHARS);
+      const { text: rawBody, truncated: readTruncated } = await readCappedBody(resp, MAX_RESPONSE_CHARS);
 
       let respBody = rawBody;
       if (isJson) {
@@ -163,9 +152,7 @@ export class FetchTool {
         truncated = readTruncated || bodyLength > this.maxBodyLength;
       }
 
-      return ToolResult.ok(
-        truncated ? respBody.slice(0, this.maxBodyLength) : respBody,
-      ).withEntries({
+      return ToolResult.ok(truncated ? respBody.slice(0, this.maxBodyLength) : respBody).withEntries({
         url,
         method,
         status: String(resp.status),
@@ -177,14 +164,8 @@ export class FetchTool {
     } catch (e: unknown) {
       const err = e as Error;
       const msg = err.message || String(e);
-      if (
-        err.name === "TimeoutError" ||
-        msg.includes("timed out") ||
-        msg.includes("timeout")
-      ) {
-        throw new TransientError(
-          `Request to ${url} timed out after ${this.timeoutMs}ms`,
-        );
+      if (err.name === "TimeoutError" || msg.includes("timed out") || msg.includes("timeout")) {
+        throw new TransientError(`Request to ${url} timed out after ${this.timeoutMs}ms`);
       }
       if (err.name === "AbortError" || msg.includes("aborted")) {
         throw new TransientError(`Request to ${url} was aborted`);
@@ -198,10 +179,7 @@ export class FetchTool {
 }
 
 /** Parse and validate fetch tool arguments. */
-function parseArgs(
-  input: string | Record<string, unknown> | null,
-  allowedSchemes: string[],
-): ParseResult {
+function parseArgs(input: string | Record<string, unknown> | null, allowedSchemes: string[]): ParseResult {
   if (!input || (typeof input === "string" && input.trim().length === 0)) {
     return { args: null, error: "Missing required argument: url" };
   }
@@ -242,9 +220,7 @@ function parseArgs(
   }
 
   const headers =
-    json.headers && typeof json.headers === "object"
-      ? (json.headers as Record<string, string>)
-      : {};
+    json.headers && typeof json.headers === "object" ? (json.headers as Record<string, string>) : {};
   const body = typeof json.body === "string" ? json.body : null;
   const showOriginal = json.showOriginal === true;
 
@@ -271,8 +247,8 @@ function parseArgs(
  * connects, so a hostile resolver could return a public address here and a
  * private one at connect time. Closing that gap would require pinning the
  * connection to the resolved IP, which breaks SNI/virtual hosting.
+ * @internal Exported for testing.
  */
-/** @internal Exported for testing. */
 export async function assertPublicHost(host: string): Promise<string | null> {
   if (isIP(host) !== 0) {
     return isPrivateAddress(host) ? privateHostError(host, host) : null;
@@ -300,19 +276,13 @@ function privateHostError(host: string, resolved: string): string {
   );
 }
 
-/**
- * Pure classifier for IP literal text (dotted v4 or v6).
- * Fails closed: anything not a clean public IP counts as private.
- */
+/**  Pure classifier for IP literal text (dotted v4 or v6). Anything not a clean public IP counts as private. */
 export function isPrivateAddress(ip: string): boolean {
   const version = isIP(ip);
 
   if (version === 4) {
     const parts = ip.split(".").map(Number);
-    if (
-      parts.length !== 4 ||
-      parts.some((n) => !Number.isInteger(n) || n < 0 || n > 255)
-    ) {
+    if (parts.length !== 4 || parts.some((n) => !Number.isInteger(n) || n < 0 || n > 255)) {
       return true;
     }
     const [a, b, c] = parts as [number, number, number, number];
@@ -337,11 +307,7 @@ export function isPrivateAddress(ip: string): boolean {
 
     // :: (unspecified) and ::1 (loopback)
     if (groups.every((g) => g === 0)) return true;
-    if (
-      groups[6] === 0 &&
-      groups[7] === 1 &&
-      groups.slice(0, 7).every((g) => g === 0)
-    ) {
+    if (groups[6] === 0 && groups[7] === 1 && groups.slice(0, 7).every((g) => g === 0)) {
       return true;
     }
 
@@ -378,9 +344,7 @@ export function isPrivateAddress(ip: string): boolean {
 }
 
 /** Expand an IPv6 literal to 8 groups; null if malformed. */
-function expandIpv6(
-  ip: string,
-): [number, number, number, number, number, number, number, number] | null {
+function expandIpv6(ip: string): [number, number, number, number, number, number, number, number] | null {
   const bare = ip.split("%")[0] ?? ip; // strip zone id
   const halves = bare.split("::");
   if (halves.length > 2) return null;
@@ -471,10 +435,8 @@ export function create(core: CoreContext): ExtensionInstance {
 
   return {
     hooks: {
-      /**
-       * Register the fetch tool.
-       */
-      [HOOKS.TOOLS_REGISTER]: async (registry: ToolsRegisterPayload) => {
+      /** Register the fetch tool. */
+      [HOOKS.TOOLS_REGISTER]: async (registry) => {
         registry.register("fetch", fetchTool);
       },
     },

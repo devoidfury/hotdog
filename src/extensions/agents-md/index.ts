@@ -3,31 +3,22 @@
 
 import fsPromises from "node:fs/promises";
 import { join } from "node:path";
-import { cwd } from "node:process";
-import { HOOKS } from "../../core/hooks.ts";
-import { logger } from "../../core/logger.ts";
-import { render } from "../../utils/render.ts";
-import {
-  CoreContext,
-  ExtensionInstance,
-  getExtensionConfig,
-} from "../../core/extensions/types.ts";
+import { HOOKS } from "@core/hooks.ts";
+import { logger } from "@core/logger.ts";
+import { render } from "@utils/render.ts";
+import { getExtensionConfig, type CoreContext, type ExtensionInstance } from "@core/extensions/types.ts";
 
-/**
- * Load AGENTS.md from CWD if it exists.
- */
+/** Load AGENTS.md from CWD if it exists. */
 async function loadAgentsMd(): Promise<string> {
   try {
-    const filePath = join(cwd(), "AGENTS.md");
+    const filePath = join(process.cwd(), "AGENTS.md");
     return await fsPromises.readFile(filePath, "utf-8");
   } catch {
     return "";
   }
 }
 
-/**
- * Build the agents-md chunk content.
- */
+/** Build the agents-md chunk content. */
 async function buildAgentsMdChunk(autoload: boolean): Promise<string> {
   // When autoload is false, skip reading the file entirely
   const agentsMd = autoload ? await loadAgentsMd() : "";
@@ -45,10 +36,7 @@ async function buildAgentsMdChunk(autoload: boolean): Promise<string> {
   return render(template, { agents_md: agentsMd });
 }
 
-/**
- * Create the agents-md extension.
- * Config defaults come from extension.json configSchema.
- */
+/** Create the agents-md extension. */
 export function create(core: CoreContext): ExtensionInstance {
   const config = getExtensionConfig<{ autoload?: boolean }>(core, "agentsMd");
   const autoload = config.autoload !== false;

@@ -35,7 +35,7 @@ export class SummarizeShortStrategy extends CompactionStrategy {
 
     const messagesToCompact = messages.slice(0, firstKept);
     const conversation = serializeConversation(messagesToCompact);
-    const userPrompt = SUMMARIZATION_USER_PROMPT_SHORT.replace("{conversation}", conversation);
+    const userPrompt = SUMMARIZATION_USER_PROMPT_SHORT.replace("{conversation}", () => conversation);
 
     const summaryMessages = [
       { role: "system", content: SUMMARIZATION_SYSTEM_PROMPT },

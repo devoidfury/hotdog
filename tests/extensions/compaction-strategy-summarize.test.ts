@@ -145,6 +145,30 @@ describe("SummarizeStrategy", () => {
       expect(capturedUserPrompt).not.toContain("recent message 2");
     });
 
+    it("does not interpret $-replacement patterns in conversation text", async () => {
+      // $&, $' and $` are special in String.prototype.replace() replacement
+      // strings; the conversation must land in the prompt verbatim.
+      const marker = "replace $& with $' and keep $` intact";
+      const messages = [
+        msg("user", marker),
+        msg("assistant", "done"),
+        msg("user", "recent message 1"),
+        msg("assistant", "recent response 1"),
+        msg("user", "recent message 2"),
+        msg("assistant", "recent response 2"),
+      ];
+
+      let capturedUserPrompt = "";
+      const mockLlmChat = async (msgs: Array<{ role: string; content: string }>, _model: string) => {
+        capturedUserPrompt = msgs.find((m) => m.role === "user")!.content;
+        return "summary";
+      };
+
+      await strategy.execute(messages, defaultSettings, mockLlmChat, "model");
+
+      expect(capturedUserPrompt).toContain(marker);
+    });
+
     it("passes the model to llmChat", async () => {
       const messages = Array.from({ length: 10 }, (_, i) =>
         msg(i % 2 === 0 ? "user" : "assistant", "x"),

@@ -60,7 +60,7 @@ export class TokenAwareStrategy extends CompactionStrategy {
 
     const messagesToSummarize = messages.slice(0, messagesToCompact).filter((m): m is Message => m != null);
     const conversation = serializeConversation(messagesToSummarize);
-    const userPrompt = SUMMARIZATION_USER_PROMPT_TEMPLATE.replace("{conversation}", conversation);
+    const userPrompt = SUMMARIZATION_USER_PROMPT_TEMPLATE.replace("{conversation}", () => conversation);
 
     const summaryMessages = [
       { role: "system", content: SUMMARIZATION_SYSTEM_PROMPT },

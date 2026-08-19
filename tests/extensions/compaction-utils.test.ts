@@ -537,6 +537,34 @@ describe("compactMessages", () => {
     expect(result!.messagesCompacted).toBeGreaterThan(0);
   });
 
+  it("does not interpret $-replacement patterns in conversation text", async () => {
+    // $&, $' and $` are special in String.prototype.replace() replacement
+    // strings; the conversation must land in the prompt verbatim.
+    const marker = "replace $& with $' and keep $` intact";
+    const messages = Array.from({ length: 20 }, (_, i) => ({
+      role: i % 2 === 0 ? "user" : "assistant",
+      content: i === 0 ? marker : `Message ${i}`,
+    }));
+
+    let capturedUserPrompt = "";
+    const capturingLlmChat = async (
+      msgs: Array<{ role: string; content: string }>,
+      _model: string,
+    ) => {
+      capturedUserPrompt = msgs.find((m) => m.role === "user")!.content;
+      return "Summary";
+    };
+
+    await compactMessages(
+      messages,
+      capturingLlmChat,
+      "test-model",
+      { enabled: true, keepRecentMessages: 2, reserveTokens: 8000 },
+    );
+
+    expect(capturedUserPrompt).toContain(marker);
+  });
+
   it("throws AgentError when LLM call fails", async () => {
     const failingLlmChat = async () => {
       throw new Error("LLM error");

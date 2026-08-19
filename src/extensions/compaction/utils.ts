@@ -1,6 +1,6 @@
 // Compaction utilities — token estimation, message serialization, helpers.
-
-import { AgentError } from "../../core/error.ts";
+import { SUMMARIZATION_SYSTEM_PROMPT, SUMMARIZATION_USER_PROMPT_TEMPLATE } from "./prompts.ts";
+import { AgentError } from "@core/error.ts";
 
 const TOOL_RESULT_MAX_CHARS = 2000;
 
@@ -103,12 +103,12 @@ export function findFirstKeptIndex(messages: MessageLike[], keepRecent: number):
   return 0;
 }
 
-// ── Compaction Decision ─────────────────────────────────────────────────────
-
-/**
- * Check if compaction should be triggered.
- */
-export function shouldCompact(messages: MessageLike[], contextLimit: number, reserveTokens: number = 16384): boolean {
+/** Check if compaction should be triggered. */
+export function shouldCompact(
+  messages: MessageLike[],
+  contextLimit: number,
+  reserveTokens: number = 16384,
+): boolean {
   const estimated = estimateContextTokens(messages);
   return estimated > contextLimit - reserveTokens;
 }
@@ -146,7 +146,8 @@ export function serializeConversation(messages: MessageLike[]): string {
         if (Array.isArray(toolCalls)) {
           const calls = toolCalls
             .map(
-              (tc) => `${(tc as { function?: { name?: string; arguments?: string } }).function?.name}(${(tc as { function?: { name?: string; arguments?: string } }).function?.arguments || ""})`,
+              (tc) =>
+                `${(tc as { function?: { name?: string; arguments?: string } }).function?.name}(${(tc as { function?: { name?: string; arguments?: string } }).function?.arguments || ""})`,
             )
             .join("; ");
           parts.push(`[Assistant tool calls]: ${calls}`);
@@ -173,13 +174,6 @@ export function serializeConversation(messages: MessageLike[]): string {
   return parts.join("\n\n");
 }
 
-// ── Public API ──────────────────────────────────────────────────────────────
-
-import {
-  SUMMARIZATION_SYSTEM_PROMPT,
-  SUMMARIZATION_USER_PROMPT_TEMPLATE,
-} from "./prompts.ts";
-
 interface CompactionSettings {
   enabled: boolean;
   reserveTokens: number;
@@ -191,9 +185,7 @@ interface CompactResult {
   messagesCompacted: number;
 }
 
-/**
- * Compact the context by summarizing older messages.
- */
+/** Compact the context by summarizing older messages. */
 export async function compactMessages(
   messages: MessageLike[],
   llmChat: (messages: Array<{ role: string; content: string }>, model: string) => Promise<string>,
@@ -207,10 +199,7 @@ export async function compactMessages(
 
   const messagesToCompact = messages.slice(0, firstKept);
   const conversation = serializeConversation(messagesToCompact);
-  const userPrompt = SUMMARIZATION_USER_PROMPT_TEMPLATE.replace(
-    "{conversation}",
-    conversation,
-  );
+  const userPrompt = SUMMARIZATION_USER_PROMPT_TEMPLATE.replace("{conversation}", () => conversation);
 
   const summaryMessages = [
     { role: "system", content: SUMMARIZATION_SYSTEM_PROMPT },

@@ -19,6 +19,9 @@ interface LoopState {
  * The /loop command handler initializes state and enqueues the first prompt.
  * TURN_END hook detects agent completion, clears context, and re-enqueues.
  * INPUT hook intercepts /quit during an active loop.
+ *
+ * Loop state is keyed by agent session id so concurrent sessions (e.g. multiple webui clients)
+ * each get their own independent loop instead of clobbering a single shared state object.
  */
 export function create(core: CoreContext): ExtensionInstance {
   const config = getExtensionConfig<{ enabled: boolean; maxLoops: number }>(core, "loop");
@@ -29,13 +32,9 @@ export function create(core: CoreContext): ExtensionInstance {
 
   const maxLoops = config.maxLoops;
 
-  // Mutable loop state shared between hooks
-  const loop: LoopState = {
-    prompt: "",
-    count: 0,
-    startTime: 0,
-    active: false,
-  };
+  // Loop state keyed by agent session id. A shared tool/hook instance is
+  // used across all sessions, so per-session state must be namespaced.
+  const loops = new Map<string, LoopState>();
 
   /**
    * Emit output via the agent's sink (and hooks).
@@ -46,14 +45,17 @@ export function create(core: CoreContext): ExtensionInstance {
   }
 
   /**
-   * Stop the loop and emit a summary.
+   * Stop the loop for this session and emit a summary.
    */
   function stopLoop(agent: Agent, cancelled: boolean): void {
+    const loop = loops.get(agent.sessionId);
+    if (!loop) return;
     loop.active = false;
     const elapsed = ((Date.now() - loop.startTime) / 1000).toFixed(1);
     const reason = cancelled ? " (cancelled by user)" : "";
     emit(agent, `Loop ended: ${loop.count} iteration(s) in ${elapsed}s${reason}`);
     loop.prompt = "";
+    loops.delete(agent.sessionId);
   }
 
   return {
@@ -75,11 +77,14 @@ export function create(core: CoreContext): ExtensionInstance {
               };
             }
 
-            // Initialize loop state
-            loop.prompt = prompt;
-            loop.count = 0;
-            loop.startTime = Date.now();
-            loop.active = true;
+            // Initialize this session's loop state.
+            // Re - running / loop on an active session restarts it(fresh count and timer).
+            loops.set(agent.sessionId, {
+              prompt,
+              count: 0,
+              startTime: Date.now(),
+              active: true,
+            });
 
             emit(agent, `Starting loop with prompt: "${prompt}"`);
 
@@ -97,7 +102,10 @@ export function create(core: CoreContext): ExtensionInstance {
 
       /** Detect when the agent finishes processing a message to loop or print status. */
       [HOOKS.TURN_END]: async ({ stopped, cancelled, agent, reason }) => {
-        if (!stopped || !agent || !loop.active) return;
+        if (!stopped || !agent) return;
+
+        const loop = loops.get(agent.sessionId);
+        if (!loop || !loop.active) return;
 
         // Cancellation — print summary and stop
         if (cancelled || agent.cancelled) {
@@ -117,6 +125,7 @@ export function create(core: CoreContext): ExtensionInstance {
           emit(agent, `Max loops (${maxLoops}) reached.`);
           loop.active = false;
           loop.prompt = "";
+          loops.delete(agent.sessionId);
           return;
         }
 
@@ -140,7 +149,10 @@ export function create(core: CoreContext): ExtensionInstance {
 
       /** Intercept /quit and /exit during an active loop. */
       [HOOKS.INPUT]: ({ text, agent }) => {
-        if (!loop.active || !text || !agent) return;
+        if (!text || !agent) return;
+
+        const loop = loops.get(agent.sessionId);
+        if (!loop || !loop.active) return;
 
         const cmd = text.trim().toLowerCase();
         if (cmd === "/quit" || cmd === "/exit") {

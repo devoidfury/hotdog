@@ -18,13 +18,14 @@ function createMockCore(config: Record<string, unknown> = {}) {
   } as any;
 }
 
-function createMockAgent() {
+function createMockAgent(sessionId?: string) {
   const enqueued: string[] = [];
   const emitted: Array<{ type: string; content?: string }> = [];
   let _cancelled = false;
   let contextCleared = false;
 
   return {
+    sessionId,
     get cancelled() { return _cancelled; },
     set cancelled(v: boolean) { _cancelled = v; },
     clearContext: async () => { contextCleared = true; },
@@ -436,6 +437,103 @@ describe("Loop extension", () => {
       expect(summary).toBeDefined();
       expect(summary!.content).toContain("cancelled by user");
       expect(summary!.content).toMatch(/\d+\.\d+s/);
+    });
+  });
+
+  describe("per-session loop state", () => {
+    it("keeps independent loops for different sessions", async () => {
+      const core = createMockCore();
+      const ext = createLoopExtension(core);
+
+      const registry = createCommandRegistry();
+      const agentA = createMockAgent("session-a");
+      const agentB = createMockAgent("session-b");
+      await ext.hooks![HOOKS.COMMANDS_REGISTER]!({ registry, agent: agentA } as any);
+
+      const def = registry.get("loop")!;
+      await def.handler!(agentA as unknown as Agent, "loop prompt-a");
+      await def.handler!(agentB as unknown as Agent, "loop prompt-b");
+
+      const turnEndHook = ext.hooks![HOOKS.TURN_END]!;
+
+      // Session A completes a turn: only A should re-enqueue its own prompt.
+      await turnEndHook(turnEndPayload({ stopped: true, agent: agentA as any }));
+
+      expect(agentA.getEnqueued().filter((t: string) => t === "prompt-a")).toHaveLength(2); // initial + re-enqueue
+      expect(agentB.getEnqueued()).toEqual(["prompt-b"]); // untouched
+
+      // Session B completes a turn: only B re-enqueues.
+      await turnEndHook(turnEndPayload({ stopped: true, agent: agentB as any }));
+
+      expect(agentA.getEnqueued().filter((t: string) => t === "prompt-a")).toHaveLength(2);
+      expect(agentB.getEnqueued().filter((t: string) => t === "prompt-b")).toHaveLength(2);
+    });
+
+    it("ignores TURN_END from a session with no active loop", async () => {
+      const core = createMockCore();
+      const ext = createLoopExtension(core);
+
+      const registry = createCommandRegistry();
+      const agentA = createMockAgent("session-a");
+      const agentB = createMockAgent("session-b");
+      await ext.hooks![HOOKS.COMMANDS_REGISTER]!({ registry, agent: agentA } as any);
+
+      const def = registry.get("loop")!;
+      await def.handler!(agentA as unknown as Agent, "loop prompt-a");
+
+      // Session B never started a loop — its turn end must not touch A's loop.
+      const turnEndHook = ext.hooks![HOOKS.TURN_END]!;
+      await turnEndHook(turnEndPayload({ stopped: true, agent: agentB as any }));
+
+      expect(agentA.getEnqueued().filter((t: string) => t === "prompt-a")).toHaveLength(1); // only initial
+      const emitted = agentA.getEmitted();
+      expect(emitted.find((e: any) => e.content?.includes("==== Loop 1 ===="))).toBeUndefined();
+    });
+
+    it("/quit in one session does not stop another session's loop", async () => {
+      const core = createMockCore();
+      const ext = createLoopExtension(core);
+
+      const registry = createCommandRegistry();
+      const agentA = createMockAgent("session-a");
+      const agentB = createMockAgent("session-b");
+      await ext.hooks![HOOKS.COMMANDS_REGISTER]!({ registry, agent: agentA } as any);
+
+      const def = registry.get("loop")!;
+      await def.handler!(agentA as unknown as Agent, "loop prompt-a");
+      await def.handler!(agentB as unknown as Agent, "loop prompt-b");
+
+      // /quit from session B only stops B.
+      const inputHook = ext.hooks![HOOKS.INPUT]!;
+      expect((inputHook(inputPayload("/quit", agentB)) as any)?.action).toBe("handled");
+
+      const turnEndHook = ext.hooks![HOOKS.TURN_END]!;
+      await turnEndHook(turnEndPayload({ stopped: true, agent: agentA as any }));
+
+      // A's loop is still alive and re-enqueued.
+      expect(agentA.getEnqueued().filter((t: string) => t === "prompt-a")).toHaveLength(2);
+      const emittedB = agentB.getEmitted();
+      expect(emittedB.find((e: any) => e.content?.includes("Loop ended"))).toBeDefined();
+    });
+
+    it("re-running /loop on the same session restarts its loop", async () => {
+      const core = createMockCore();
+      const ext = createLoopExtension(core);
+
+      const registry = createCommandRegistry();
+      const agent = createMockAgent("session-a");
+      await ext.hooks![HOOKS.COMMANDS_REGISTER]!({ registry, agent } as any);
+
+      const def = registry.get("loop")!;
+      await def.handler!(agent as unknown as Agent, "loop first");
+      await def.handler!(agent as unknown as Agent, "loop second");
+
+      const turnEndHook = ext.hooks![HOOKS.TURN_END]!;
+      await turnEndHook(turnEndPayload({ stopped: true, agent: agent as any }));
+
+      // Only the latest prompt is active.
+      expect(agent.getEnqueued().filter((t: string) => t === "second")).toHaveLength(2);
+      expect(agent.getEnqueued().filter((t: string) => t === "first")).toHaveLength(1);
     });
   });
 });

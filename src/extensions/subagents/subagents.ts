@@ -121,31 +121,27 @@ export class DelegateTaskTool extends SubagentTool {
         profileList = `\n\nAvailable worker profiles (visible-worker: true): ${profiles.join(", ")}.`;
       }
     }
-    const profileListPromise = Promise.resolve(profileList);
-
-    return profileListPromise.then((profileList) =>
-      toolDef(
-        "delegate_task",
-        `Spawn a background task agent to perform work. The task runs concurrently and its result is appended to the manager\'s context when complete. IMPORTANT: Task agents are expensive — only delegate substantial autonomous work (build features, fix bugs, implement plans, audit code). Do NOT delegate trivial operations like creating a single file, running a command, or reading a file — do those directly with your tools. Batch related changes into a single task.${profileList}`,
-        {
-          properties: {
-            task_id: param("string", "Unique identifier for this task"),
-            description: param(
-              "string",
-              "Description of what the task agent should do",
-            ),
-            worker_model: param(
-              "string",
-              "Optional model name for the worker agent (e.g. 'ai365/qwen3.5-4b'). If omitted, uses the manager's model.",
-            ),
-            profile: param(
-              "string",
-              `Optional profile name to customize the worker agent\'s behavior (role, tools, model). Defaults to 'task-default'.${profileList}`,
-            ),
-          },
-          required: ["task_id", "description"],
+    return toolDef(
+      "delegate_task",
+      `Spawn a background task agent to perform work. The task runs concurrently and its result is appended to the manager\'s context when complete. IMPORTANT: Task agents are expensive — only delegate substantial autonomous work (build features, fix bugs, implement plans, audit code). Do NOT delegate trivial operations like creating a single file, running a command, or reading a file — do those directly with your tools. Batch related changes into a single task.${profileList}`,
+      {
+        properties: {
+          task_id: param("string", "Unique identifier for this task"),
+          description: param(
+            "string",
+            "Description of what the task agent should do",
+          ),
+          worker_model: param(
+            "string",
+            "Optional model name for the worker agent (e.g. 'ai365/qwen3.5-4b'). If omitted, uses the manager's model.",
+          ),
+          profile: param(
+            "string",
+            `Optional profile name to customize the worker agent\'s behavior (role, tools, model). Defaults to 'task-default'.${profileList}`,
+          ),
         },
-      ),
+        required: ["task_id", "description"],
+      },
     );
   }
 

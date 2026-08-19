@@ -4,20 +4,32 @@
 import { toolDef } from "@core/index.ts";
 import type { ToolMetadata } from "@core/extensions/tool-registry.ts";
 import { McpConnectionHandle } from "./connection.ts";
-import { McpToolDefinition } from "./types.ts";
+
+/**
+ * Raw MCP tool definition at the McpTool boundary. `name` is required; the
+ * rest may be missing or malformed (servers are unreliable), and McpTool
+ * handles that defensively. McpToolDefinition (types.ts) is the normalized
+ * shape after parseMcpToolDefinition() and is assignable to this.
+ */
+interface McpToolDefinitionInput {
+  name: string;
+  title?: string | null;
+  description?: string | null;
+  inputSchema?: Record<string, unknown>;
+}
 
 /** A tool that wraps an MCP server tool. */
 export class McpTool {
   readonly #serverName: string;
   readonly #toolName: string;
-  readonly #toolDef: McpToolDefinition;
+  readonly #toolDef: McpToolDefinitionInput;
   readonly #connection: McpConnectionHandle;
   readonly #registeredName: string;
   /** MCP tools default to sideEffects: true (conservative — unknown tools assumed somewhat risky). */
   metadata: ToolMetadata = { sideEffects: true, difficulty: 3 };
 
   /** Create a new McpTool from an MCP tool definition. */
-  constructor(serverName: string, toolDef: McpToolDefinition, connectionHandle: McpConnectionHandle) {
+  constructor(serverName: string, toolDef: McpToolDefinitionInput, connectionHandle: McpConnectionHandle) {
     this.#serverName = serverName;
     this.#toolName = toolDef.name;
     this.#toolDef = toolDef;

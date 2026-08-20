@@ -74,6 +74,33 @@ export class Workspace {
       current = dirname(current);
     }
 
+    // A dangling symlink as the final component evades the existsSync-based
+    // ancestor check (existsSync follows the link and sees the missing
+    // target), yet a write would create the file at the target -- which may
+    // be outside the root. Follow the final link chain explicitly; each hop
+    // must stay inside the root. lstat does not follow links, so a missing
+    // final target is simply a non-existent path (allowed).
+    // (Bun implements realpathSync.native but not lstatSync.native/readlinkSync.native,
+    // so use the plain variants here.)
+    let probe = resolved;
+    for (let hop = 0; hop < 40; hop++) {
+      let st;
+      try {
+        st = fs.lstatSync(probe);
+      } catch {
+        break; // final component does not exist -- nothing to follow
+      }
+      if (!st.isSymbolicLink()) break;
+      probe = resolveAbs(dirname(probe), fs.readlinkSync(probe));
+      // The root itself may be a symlink; the ancestor walk accepts anything
+      // under the root's REAL path, so the probe must too.
+      const inLexicalRoot = probe === this.root || probe.startsWith(this.root + sep);
+      const inRealRoot = probe === realRoot || probe.startsWith(realRoot + sep);
+      if (!inLexicalRoot && !inRealRoot) {
+        throw PathEscapeError.symlinkEscape(relativePath);
+      }
+    }
+
     return resolved;
   }
 

@@ -165,7 +165,6 @@ describe("subagents extension create()", () => {
     expect(registered).toContain("task_followup");
     expect(registered).toContain("task_interrupt");
     expect(registered).toContain("plan_status");
-    expect(registered).toContain("complete_task");
     expect(registered).toContain("wait");
   });
 

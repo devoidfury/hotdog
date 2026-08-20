@@ -8,7 +8,6 @@ import {
   TaskFollowupTool,
   TaskInterruptTool,
   PlanStatusTool,
-  CompleteTaskTool,
   WaitTool,
   SUBAGENT_TOOL_NAMES,
   SUBAGENT_TOOL_CONSTRUCTORS,
@@ -407,42 +406,6 @@ describe("PlanStatusTool", () => {
   });
 });
 
-describe("CompleteTaskTool", () => {
-  it("has correct tool name", () => {
-    expect(CompleteTaskTool.TOOL_NAME).toBe("complete_task");
-  });
-
-  it("returns error when task_id is missing", async () => {
-    const tool = new CompleteTaskTool({});
-    const result = await tool.execute(JSON.stringify({}));
-    expect(result.error).toContain("task_id is required");
-  });
-
-  it("marks task as complete", async () => {
-    const tool = new CompleteTaskTool({});
-    const result = await tool.execute(
-      JSON.stringify({ task_id: "t1" }),
-    );
-    expect(result.output).toContain("Task t1 marked as complete");
-    expect(result.metadata!.get("task_id")).toBe("t1");
-  });
-
-  it("toToolDef returns correct definition", () => {
-    const tool = new CompleteTaskTool({});
-    const def = tool.toToolDef();
-    expect(def.function.name).toBe("complete_task");
-    expect(def.function.parameters.required).toContain("task_id");
-  });
-
-  it("callDisplay formats correctly", () => {
-    const tool = new CompleteTaskTool({});
-    const display = tool.callDisplay(
-      JSON.stringify({ task_id: "t1" }),
-    );
-    expect(display).toBe("complete_task(t1)");
-  });
-});
-
 describe("WaitTool", () => {
   it("has correct tool name", () => {
     expect(WaitTool.TOOL_NAME).toBe("wait");
@@ -485,7 +448,6 @@ describe("SUBAGENT_TOOL_NAMES", () => {
     expect(SUBAGENT_TOOL_NAMES).toContain("task_followup");
     expect(SUBAGENT_TOOL_NAMES).toContain("task_interrupt");
     expect(SUBAGENT_TOOL_NAMES).toContain("plan_status");
-    expect(SUBAGENT_TOOL_NAMES).toContain("complete_task");
     expect(SUBAGENT_TOOL_NAMES).toContain("wait");
   });
 });
@@ -497,7 +459,6 @@ describe("SUBAGENT_TOOL_CONSTRUCTORS", () => {
     expect(SUBAGENT_TOOL_CONSTRUCTORS.task_followup).toBeDefined();
     expect(SUBAGENT_TOOL_CONSTRUCTORS.task_interrupt).toBeDefined();
     expect(SUBAGENT_TOOL_CONSTRUCTORS.plan_status).toBeDefined();
-    expect(SUBAGENT_TOOL_CONSTRUCTORS.complete_task).toBeDefined();
     expect(SUBAGENT_TOOL_CONSTRUCTORS.wait).toBeDefined();
   });
 
@@ -508,7 +469,6 @@ describe("SUBAGENT_TOOL_CONSTRUCTORS", () => {
     expect(SUBAGENT_TOOL_CONSTRUCTORS.task_followup!(opts)).toBeInstanceOf(TaskFollowupTool);
     expect(SUBAGENT_TOOL_CONSTRUCTORS.task_interrupt!(opts)).toBeInstanceOf(TaskInterruptTool);
     expect(SUBAGENT_TOOL_CONSTRUCTORS.plan_status!(opts)).toBeInstanceOf(PlanStatusTool);
-    expect(SUBAGENT_TOOL_CONSTRUCTORS.complete_task!(opts)).toBeInstanceOf(CompleteTaskTool);
     expect(SUBAGENT_TOOL_CONSTRUCTORS.wait!(opts)).toBeInstanceOf(WaitTool);
   });
 });

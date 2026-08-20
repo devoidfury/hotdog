@@ -50,7 +50,6 @@ describe("SUBAGENT_TOOL_NAMES", () => {
       "task_followup",
       "task_interrupt",
       "plan_status",
-      "complete_task",
       "wait",
     ];
     expect(SUBAGENT_TOOL_NAMES).toEqual(expected);

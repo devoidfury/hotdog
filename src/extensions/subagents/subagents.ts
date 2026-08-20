@@ -373,44 +373,6 @@ export class PlanStatusTool extends SubagentTool {
   }
 }
 
-// ── complete_task ───────────────────────────────────────────────────────────
-
-/** Mark a task as complete. The task agent\'s result is already appended to the manager\'s context. */
-export class CompleteTaskTool extends SubagentTool {
-  static readonly TOOL_NAME = "complete_task";
-  override metadata: ToolMetadata = { sideEffects: false, difficulty: 1 };
-
-  override async execute(input: string | Record<string, unknown> | null): Promise<ToolResult> {
-    const args = parseToolArgs(input ?? {});
-    if (!args.task_id) {
-      return ToolResult.err("Error: task_id is required");
-    }
-
-    return ToolResult.ok(`Task ${args.task_id} marked as complete`).withEntry(
-      "task_id",
-      args.task_id,
-    );
-  }
-
-  override toToolDef() {
-    return toolDef(
-      "complete_task",
-      "Mark a task as complete. The task agent's result is already appended to the manager's context.",
-      {
-        properties: {
-          task_id: param("string", "The task ID to mark as complete"),
-        },
-        required: ["task_id"],
-      },
-    );
-  }
-
-  override callDisplay(input: string | Record<string, unknown> | null): string {
-    const args = parseToolArgs(input ?? {});
-    return `complete_task(${args.task_id || "?"})`;
-  }
-}
-
 // ── wait ────────────────────────────────────────────────────────────────────
 
 /** Wait for user input — signal that the manager has nothing more to do. */
@@ -461,7 +423,6 @@ export const SUBAGENT_TOOL_NAMES = [
   "task_followup",
   "task_interrupt",
   "plan_status",
-  "complete_task",
   "wait",
 ];
 
@@ -472,6 +433,5 @@ export const SUBAGENT_TOOL_CONSTRUCTORS: Record<string, (opts: SubagentToolOptio
   task_followup: (opts) => new TaskFollowupTool(opts),
   task_interrupt: (opts) => new TaskInterruptTool(opts),
   plan_status: (opts) => new PlanStatusTool(opts),
-  complete_task: (opts) => new CompleteTaskTool(opts),
   wait: (opts) => new WaitTool(opts),
 };

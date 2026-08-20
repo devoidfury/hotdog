@@ -24,7 +24,6 @@ import {
   TaskFollowupTool,
   TaskInterruptTool,
   PlanStatusTool,
-  CompleteTaskTool,
   WaitTool,
 } from "./subagents.ts";
 import {
@@ -43,7 +42,6 @@ export {
   TaskFollowupTool,
   TaskInterruptTool,
   PlanStatusTool,
-  CompleteTaskTool,
   WaitTool,
 };
 

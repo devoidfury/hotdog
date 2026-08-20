@@ -206,5 +206,101 @@ describe("TaskManager", () => {
       const manager = createManager();
       expect(() => manager._onTaskComplete("task-1", "result")).not.toThrow();
     });
+
+    it("routes result to the spawning agent's session bus, not the last-set bus", () => {
+      const enqueued: Record<string, string[]> = {
+        "sess-a": [],
+        "sess-b": [], // created after sess-a; its bus would have been setBus() last
+      };
+      const manager = createManager();
+      manager.setSessionManager({
+        getAgent: () => null,
+        getBus: (sessionId: string) =>
+          sessionId in enqueued
+            ? { enqueue: (m: string) => enqueued[sessionId]!.push(m) }
+            : undefined,
+      } as any);
+      // Simulates a later session entry overwriting the single-bus wiring.
+      manager.setBus({ enqueue: (m: string) => enqueued["sess-b"]!.push(m) } as any);
+
+      manager._onTaskComplete("task-1", "Result text", { sessionId: "sess-a" });
+
+      expect(enqueued["sess-a"]).toHaveLength(1);
+      expect(enqueued["sess-a"]![0]).toContain("Task task-1 completed");
+      expect(enqueued["sess-a"]![0]).toContain("Result text");
+      expect(enqueued["sess-b"]).toHaveLength(0);
+    });
+
+    it("drops the result when the delivery session has no bus (deleted session / non-session delegator)", () => {
+      const viaBus: string[] = [];
+      const manager = createManager();
+      manager.setSessionManager({
+        getAgent: () => null,
+        getBus: () => undefined, // e.g. a deleted session or a task agent with no session entry
+      } as any);
+      manager.setBus({ enqueue: (m: string) => viaBus.push(m) } as any);
+
+      manager._onTaskComplete("task-1", "Result text", { sessionId: "no-such-session" });
+
+      // Misdelivery to an unrelated session is worse than dropping the result.
+      expect(viaBus).toHaveLength(0);
+    });
+
+    it("falls back to the last-set bus when session manager has no getBus", () => {
+      const viaBus: string[] = [];
+      const manager = createManager();
+      manager.setSessionManager({
+        getAgent: () => null,
+      } as any);
+      manager.setBus({ enqueue: (m: string) => viaBus.push(m) } as any);
+
+      manager._onTaskComplete("task-1", "Result text", { sessionId: "sess-a" });
+
+      expect(viaBus).toHaveLength(1);
+    });
+
+    it("spawnTask delivers completion to the managerAgent's session bus", async () => {
+      const enqueued: Record<string, string[]> = {
+        "sess-a": [],
+        "sess-b": [],
+      };
+      // Mirrors the real Agent: notifyCompletion() delegates to sink.onTaskComplete.
+      let sink: any;
+      const buildAgent = async (config: any) => {
+        sink = config.sink;
+        return {
+          run: async () => ({ type: "completion", content: "task done" }),
+          notifyCompletion: (result: string) => sink?.onTaskComplete?.(result),
+        };
+      };
+
+      const manager = new TaskManager({
+        buildAgent: buildAgent as any,
+        llmClient: {} as any,
+        modelRegistry: { default: "test-model" } as any,
+        config: { profilesPath: "./config/profiles" } as any,
+        hooks: {} as any,
+        maxIterations: 100,
+        taskProfile: "default",
+        taskRole: "",
+      });
+      manager.setSessionManager({
+        getAgent: () => null,
+        getBus: (sessionId: string) =>
+          sessionId in enqueued
+            ? { enqueue: (m: string) => enqueued[sessionId]!.push(m) }
+            : undefined,
+      } as any);
+      manager.setBus({ enqueue: (m: string) => enqueued["sess-b"]!.push(m) } as any);
+
+      await manager.spawnTask("task-1", "Do it", { managerAgent: { sessionId: "sess-a" } });
+      // runTask is fire-and-forget; give it a tick to settle.
+      await new Promise((r) => setTimeout(r, 10));
+
+      expect(enqueued["sess-a"]).toHaveLength(1);
+      expect(enqueued["sess-a"]![0]).toContain("Task task-1 completed");
+      expect(enqueued["sess-a"]![0]).toContain("task done");
+      expect(enqueued["sess-b"]).toHaveLength(0);
+    });
   });
 });

@@ -329,10 +329,15 @@ Parent agent calls delegate_task()
     - toolWhitelist from profile
     - hideTools/hideThinking: true
   → Run agent.run(description) in background
-  → On completion: enqueue result on the manager's MessageBus (the bus run
+  → On completion: enqueue result on the MessageBus of the session that owns
+    the delegating agent (captured at spawn time as managerAgent, so results
+    never land in a different session that was created later). The bus run
     loop appends it to the manager's context via agent.run(), so it is
-    injected exactly once). Falls back to a direct context add when no bus
-    is wired.
+    injected exactly once. Falls back to the last-set bus, then a direct
+    context add, when no delegating session was captured. If the delegating
+    session no longer has a bus at completion time (deleted, or the delegator
+    owns no session entry), the result is dropped with a warning rather than
+    misdelivered to an unrelated session.
 ```
 
 ### Subcommand Dispatch

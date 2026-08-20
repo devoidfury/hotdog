@@ -14,6 +14,7 @@ import {
 } from "../../src/extensions/subagents/subagents.ts";
 import { create } from "../../src/extensions/subagents/index.ts";
 import { HOOKS } from "../../src/core/hooks.ts";
+import { ToolContext } from "../../src/core/extensions/tool-context.ts";
 
 // ── Helpers ────────────────────────────────────────────────────────────────
 
@@ -98,6 +99,39 @@ describe("DelegateTaskTool", () => {
       }),
     );
     expect(capturedOpts!.workerModel).toBe("custom-model");
+  });
+
+  it("passes the calling agent through for result delivery", async () => {
+    let capturedOpts: Record<string, unknown> | null = null;
+    const mockBackend = makeMockTM({
+      spawnTask: async (_taskId: string, _desc: string, opts: Record<string, unknown>) => {
+        capturedOpts = opts;
+        return {};
+      },
+    });
+    const tool = new DelegateTaskTool({ taskManager: mockBackend });
+    const ctx = new ToolContext();
+    ctx.set("agent", { sessionId: "sess-a" });
+    await tool.execute(
+      JSON.stringify({ task_id: "t1", description: "test" }),
+      ctx,
+    );
+    expect(capturedOpts!.managerAgent).toEqual({ sessionId: "sess-a" });
+  });
+
+  it("passes null managerAgent when the tool context has no agent", async () => {
+    let capturedOpts: Record<string, unknown> | null = null;
+    const mockBackend = makeMockTM({
+      spawnTask: async (_taskId: string, _desc: string, opts: Record<string, unknown>) => {
+        capturedOpts = opts;
+        return {};
+      },
+    });
+    const tool = new DelegateTaskTool({ taskManager: mockBackend });
+    await tool.execute(
+      JSON.stringify({ task_id: "t1", description: "test" }),
+    );
+    expect(capturedOpts!.managerAgent).toBeNull();
   });
 
   it("passes profile option", async () => {

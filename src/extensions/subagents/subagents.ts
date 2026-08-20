@@ -8,6 +8,7 @@ import {
   defaultCallDisplay,
 } from "../../core/extensions/tool-utils.ts";
 import type { ToolDef, ToolMetadata } from "../../core/extensions/tool-registry.ts";
+import type { ToolContext } from "../../core/extensions/types.ts";
 import { TaskManager } from "../../core/index.ts";
 
 interface SubagentToolOptions {
@@ -97,7 +98,7 @@ export class DelegateTaskTool extends SubagentTool {
   static readonly TOOL_NAME = "delegate_task";
   override metadata: ToolMetadata = { sideEffects: true, difficulty: 3 };
 
-  override async execute(input: string | Record<string, unknown> | null): Promise<ToolResult> {
+  override async execute(input: string | Record<string, unknown> | null, ctx?: ToolContext): Promise<ToolResult> {
     const args = parseToolArgs(input ?? {});
     if (!args.task_id || !args.description) {
       return ToolResult.err("Error: task_id and description are required");
@@ -106,12 +107,20 @@ export class DelegateTaskTool extends SubagentTool {
     const backend = this._ensureBackend();
     if (typeof backend === "string") return ToolResult.err(backend);
 
+    // The calling agent — completion results are delivered to this agent's
+    // session bus, not to whichever session was created last.
+    const callingAgent = ctx?.get("agent") as { sessionId?: string } | null | undefined;
+    const managerAgent = callingAgent?.sessionId != null
+      ? { sessionId: callingAgent.sessionId }
+      : null;
+
     const handle = await (backend.value as TaskManager).spawnTask(
       args.task_id as string,
       args.description as string,
       {
         workerModel: args.worker_model as string || undefined,
         profile: args.profile as string || undefined,
+        managerAgent,
       },
     );
     return ToolResult.ok(

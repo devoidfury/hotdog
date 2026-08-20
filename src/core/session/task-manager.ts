@@ -1,3 +1,4 @@
+import { logger } from "../logger.ts";
 import { Message } from "../context/message.ts";
 import { LlmError } from "../error.ts";
 import { loadProfileFile, ProfileManager } from "../config/profiles.ts";
@@ -41,9 +42,22 @@ export class TaskHandle {
   }
 }
 
+/** Minimal session-manager surface the TaskManager needs for result delivery. */
+export interface TaskManagerSessionManager {
+  getAgent: () => AgentLike | undefined;
+  /** Look up a session's bus by id; used to route task results to the right session. */
+  getBus?: (sessionId: string) => { enqueue(text: string): void } | undefined;
+}
+
 export interface SpawnTaskOptions {
   workerModel?: string;
   profile?: string;
+  /**
+   * The agent that delegated this task. Its session's bus is the delivery
+   * target for the completion result. Without this, results would go to
+   * whatever session happened to be created last (multi-session bug).
+   */
+  managerAgent?: { sessionId: string } | null;
 }
 
 export interface TaskManagerOptions {
@@ -51,7 +65,7 @@ export interface TaskManagerOptions {
   modelRegistry: Record<string, ModelConfig>;
   config: CoreConfigWithExtensions;
   hooks: HookSystem;
-  sessionManager?: { getAgent: () => AgentLike | undefined } | null;
+  sessionManager?: TaskManagerSessionManager | null;
   profileManager?: ProfileManager;
 }
 
@@ -69,7 +83,7 @@ export class TaskManager {
   #modelRegistry: Record<string, ModelConfig>;
   #config: CoreConfigWithExtensions;
   #hooks: HookSystem;
-  #sessionManager: { getAgent: () => AgentLike | undefined } | null;
+  #sessionManager: TaskManagerSessionManager | null;
   #maxIterations: number;
   #taskProfile: string;
   #taskRole: string;
@@ -97,7 +111,7 @@ export class TaskManager {
     this.#profileManager = options.profileManager;
   }
 
-  setSessionManager(sessionManager: { getAgent: () => AgentLike | undefined }): void {
+  setSessionManager(sessionManager: TaskManagerSessionManager): void {
     this.#sessionManager = sessionManager;
   }
 
@@ -115,8 +129,31 @@ export class TaskManager {
     return this.#profileManager;
   }
 
-  _onTaskComplete(taskId: string | null, result: string): void {
+  _onTaskComplete(
+    taskId: string | null,
+    result: string,
+    delivery: { sessionId: string } | null = null,
+  ): void {
     const text = `[Task ${taskId} completed]\n${result}`;
+
+    // Route to the bus of the session that owns the agent which spawned the
+    // task. The last-setBus() session is NOT a safe target: in multi-session
+    // setups it can be a different (even unrelated) session.
+    if (delivery && this.#sessionManager?.getBus) {
+      const bus = this.#sessionManager.getBus(delivery.sessionId);
+      if (bus) {
+        bus.enqueue(text);
+        return;
+      }
+      // The delegating session is gone (deleted, or the delegator owns no
+      // session entry, e.g. a nested task agent). Falling through to the
+      // last-set bus could inject the result into an unrelated session, so
+      // drop it instead.
+      logger.warn(
+        `[task ${taskId}] delegating session ${delivery.sessionId} has no bus; dropping task result`,
+      );
+      return;
+    }
 
     // Enqueue only: the bus run loop appends it via agent.run(). Also addMessage()-ing would inject it twice.
     if (this.#bus) {
@@ -150,10 +187,14 @@ export class TaskManager {
 
     const toolWhitelist = taskProfile?.whitelistTools || null;
 
+    // Capture the delegating agent up front so completion is delivered to
+    // ITS session's bus, even if other sessions are created in the meantime.
+    const delivery = options.managerAgent ?? null;
+
     // Task agents are silent to the UI; only onTaskComplete matters.
     const sink = {
       emit: (_event: unknown) => {},
-      onTaskComplete: (result: string) => this._onTaskComplete(taskId, result),
+      onTaskComplete: (result: string) => this._onTaskComplete(taskId, result, delivery),
     };
 
     const agentConfig: Record<string, unknown> = {

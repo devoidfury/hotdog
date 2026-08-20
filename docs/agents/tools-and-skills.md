@@ -37,7 +37,7 @@ Tools without metadata are excluded when filtering is active (conservative defau
 - `CORE_TOOL_NAMES` — all core tool names
 - `TOOL_FACTORIES` — declarative map of tool names to factory functions
 
-**Disabled by default** — `ExploreTool` has `disabled: true` in its descriptor; it requires explicit inclusion via profile `whitelist_tools`. Subagent tools require `manager: true` profile flag and a `taskManager`.
+**Disabled by default** — `ExploreTool` has `disabled: true` in its descriptor; it requires explicit inclusion via profile `whitelist_tools`. Subagent tools require the `manager: true` profile flag; the `taskManager` they use is resolved lazily from the `taskManager` service at tool-execution time (see Subagent Tools below).
 
 ### Core Tool Implementations
 
@@ -91,7 +91,9 @@ Filtering runs via the `PROVIDER_REQUEST` hook before each LLM call, so it respe
 
 ### Subagent Tools *(disabled by default, enabled in manager profile)*
 
-Provided by the `subagents` extension. Only registered when `profile.manager: true` and a `taskManager` is available.
+Provided by the `subagents` extension. Registered when `profile.manager: true`.
+
+The `TaskManager` is resolved **lazily**: extensions load in `main()` before any session exists, so the tools look the manager up at use time via the `taskManager` service (`TASK_MANAGER_SERVICE` in `src/extensions/subagents/index.ts`). The UI entry points call `registerTaskManagerService(core, sessionManager.getTaskManager())` right after `SessionManager.create()`. An eager `taskManager` option to `create()` takes precedence and is used by tests and custom hosts.
 
 | Tool | Description |
 |------|-------------|

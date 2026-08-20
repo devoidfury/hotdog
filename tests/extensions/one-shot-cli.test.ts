@@ -107,6 +107,7 @@ describe("handlePromptSubcommand", () => {
       sessionId: () => "test-session-123",
       enqueue: () => {},
       getBus: () => mockBus,
+      getTaskManager: () => null,
       onSessionEvents: () => () => {}, // Required by channel
     };
     (SessionManager as any).create = async () => {
@@ -144,6 +145,7 @@ describe("handlePromptSubcommand", () => {
       sessionId: () => "test-session-456",
       enqueue: (_sessionId: string, prompt: string) => { enqueuedPrompt = prompt; },
       getBus: () => mockBus,
+      getTaskManager: () => null,
       onSessionEvents: () => () => {},
     });
 
@@ -174,6 +176,7 @@ describe("handlePromptSubcommand", () => {
       sessionId: () => "test-session-789",
       enqueue: () => {},
       getBus: () => mockBus,
+      getTaskManager: () => null,
       onSessionEvents: () => () => {},
     });
 
@@ -207,6 +210,7 @@ describe("handlePromptSubcommand", () => {
       sessionId: () => "test-session-custom",
       enqueue: () => {},
       getBus: () => mockBus,
+      getTaskManager: () => null,
       onSessionEvents: () => () => {},
     });
 
@@ -239,6 +243,7 @@ describe("handlePromptSubcommand", () => {
       sessionId: () => "test-session-cleanup",
       enqueue: () => {},
       getBus: () => mockBus,
+      getTaskManager: () => null,
       onSessionEvents: () => () => {},
     });
 
@@ -270,6 +275,7 @@ describe("handlePromptSubcommand", () => {
       sessionId: () => "test-session-success-cleanup",
       enqueue: () => {},
       getBus: () => mockBus,
+      getTaskManager: () => null,
       onSessionEvents: () => () => {},
     });
 
@@ -299,6 +305,7 @@ describe("handlePromptSubcommand", () => {
         sessionId: () => capturedSessionId || "default",
         enqueue: () => {},
         getBus: () => mockBus,
+        getTaskManager: () => null,
         onSessionEvents: () => () => {},
       };
     };
@@ -325,6 +332,7 @@ describe("handlePromptSubcommand", () => {
       sessionId: () => "test-session-null-bus",
       enqueue: () => {},
       getBus: () => null,
+      getTaskManager: () => null,
       onSessionEvents: () => () => {},
     });
 
@@ -355,6 +363,7 @@ describe("handlePromptSubcommand", () => {
         sessionId: () => "test-session-model",
         enqueue: () => {},
         getBus: () => mockBus,
+        getTaskManager: () => null,
         onSessionEvents: () => () => {},
       };
     };
@@ -468,6 +477,7 @@ describe("runOneShot edge cases", () => {
       sessionId: () => "test-session-undefined",
       enqueue: (_sessionId: string, prompt: string) => { enqueuedPrompt = prompt; },
       getBus: () => ({ runUntilCancelled: async () => {} }),
+      getTaskManager: () => null,
       onSessionEvents: () => () => {},
     });
 

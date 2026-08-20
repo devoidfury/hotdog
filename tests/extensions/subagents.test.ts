@@ -14,6 +14,7 @@ import {
   SUBAGENT_TOOL_CONSTRUCTORS,
 } from "../../src/extensions/subagents/subagents.ts";
 import { create } from "../../src/extensions/subagents/index.ts";
+import { HOOKS } from "../../src/core/hooks.ts";
 
 // ── Helpers ────────────────────────────────────────────────────────────────
 
@@ -513,19 +514,20 @@ describe("SUBAGENT_TOOL_CONSTRUCTORS", () => {
 });
 
 describe("Extension create()", () => {
-  it("returns null when taskManager is not provided", () => {
+  it("returns extension when taskManager is not provided (lazy mode resolves it at use time)", () => {
     const core = {
       config: { profileDef: { manager: true } },
       hooks: { on: () => {}, notifyHooks: () => {}, notifyHooksAsync: () => {}, runHookPipeline: async () => ({ results: [], lastResult: undefined, stopped: false, data: {} }) },
       toolRegistry: {},
       extensions: { has: () => false, load: async () => null, cleanup: async () => {} },
-      services: { get: () => null },
+      services: { get: () => null, has: () => false },
       cliSubcommandRegistry: { register: () => {}, has: () => false },
       configRegistry: {},
       service: () => null,
     } as any;
     const ext = create(core);
-    expect(ext).toBeNull();
+    expect(ext).not.toBeNull();
+    expect(ext!.hooks![HOOKS.TOOLS_REGISTER]).toBeDefined();
   });
 
   it("returns null when profile is not a manager", () => {
@@ -534,7 +536,7 @@ describe("Extension create()", () => {
       hooks: { on: () => {}, notifyHooks: () => {}, notifyHooksAsync: () => {}, runHookPipeline: async () => ({ results: [], lastResult: undefined, stopped: false, data: {} }) },
       toolRegistry: {},
       extensions: { has: () => false, load: async () => null, cleanup: async () => {} },
-      services: { get: () => null },
+      services: { get: () => null, has: () => false },
       cliSubcommandRegistry: { register: () => {}, has: () => false },
       configRegistry: {},
       service: () => null,
@@ -549,7 +551,7 @@ describe("Extension create()", () => {
       hooks: { on: () => {}, notifyHooks: () => {}, notifyHooksAsync: () => {}, runHookPipeline: async () => ({ results: [], lastResult: undefined, stopped: false, data: {} }) },
       toolRegistry: {},
       extensions: { has: () => false, load: async () => null, cleanup: async () => {} },
-      services: { get: () => null },
+      services: { get: () => null, has: () => false },
       cliSubcommandRegistry: { register: () => {}, has: () => false },
       configRegistry: {},
       service: () => null,
@@ -578,7 +580,7 @@ describe("Extension hooks registration", () => {
         getAll: () => registered.map((r) => r.tool),
       },
       extensions: { has: () => false, load: async () => null, cleanup: async () => {} },
-      services: { get: () => null },
+      services: { get: () => null, has: () => false },
       cliSubcommandRegistry: { register: () => {}, has: () => false },
       configRegistry: {},
       service: () => null,

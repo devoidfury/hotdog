@@ -646,6 +646,7 @@ describe("runInteractiveSession integration", () => {
         return new Promise(() => {});
       },
     }),
+    getTaskManager: () => null,
     executeCommand: async () => undefined,
     onSessionEvents: (_sessionId: string, _handler: unknown) => () => {},
     interrupt: () => {},
@@ -968,6 +969,7 @@ describe("runInteractiveSession default setupInput", () => {
       getAgent: () => mockAgent,
       sessionId: () => "test-session",
       getBus: () => ({ run: async () => {} }),
+      getTaskManager: () => null,
       executeCommand: async () => undefined,
       onSessionEvents: () => () => {},
       interrupt: () => {},

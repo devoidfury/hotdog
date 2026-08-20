@@ -9,6 +9,7 @@ import { LlmClient } from "@core/llm-client/client.ts";
 import { MarkerMangler } from "@core/marker-mangler.ts";
 import { SessionManager, type AgentLike } from "@core/session/index.ts";
 import { Agent } from "@core/agent.ts";
+import { registerTaskManagerService } from "../subagents/index.ts";
 import { CliChannel } from "./cli-channel.ts";
 import pkg from "@package.json" with { type: "json" };
 import {
@@ -464,6 +465,10 @@ export async function runInteractiveSession(
     },
     profileManager: resolved.profileManager,
   });
+
+  // Publish the TaskManager for lazy lookup by subagent tools; extensions
+  // (and their tools) were loaded before this session existed.
+  registerTaskManagerService(core, sessionManager.getTaskManager());
 
   // Register the generic slash command name completion
   registerSlashCommandNameCompletion(core.completion);

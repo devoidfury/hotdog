@@ -12,7 +12,13 @@ import { TaskManager } from "../../core/index.ts";
 
 interface SubagentToolOptions {
   sessionCore?: unknown;
-  taskManager?: TaskManager;
+  taskManager?: TaskManager | null;
+  /**
+   * Lazy fallback for taskManager, resolved per call. The TaskManager is
+   * built by the SessionManager after extensions load, so tools created at
+   * load time may not have an eager instance yet.
+   */
+  taskManagerProvider?: () => TaskManager | null;
 }
 
 type Backend = { type: "sessionCore"; value: unknown } | { type: "taskManager"; value: TaskManager } | { type: "none"; value: null };
@@ -21,14 +27,17 @@ export class SubagentTool {
   metadata: ToolMetadata = { sideEffects: false, difficulty: 1 };
   protected _sessionCore: unknown;
   protected _taskManager: TaskManager | null;
+  #taskManagerProvider: (() => TaskManager | null) | null;
 
   constructor(options: SubagentToolOptions) {
     if (typeof options === "object" && options !== null) {
       this._sessionCore = options.sessionCore || null;
       this._taskManager = options.taskManager || null;
+      this.#taskManagerProvider = options.taskManagerProvider || null;
     } else {
       this._sessionCore = null;
       this._taskManager = null;
+      this.#taskManagerProvider = null;
     }
   }
 
@@ -36,8 +45,9 @@ export class SubagentTool {
     if (this._sessionCore) {
       return { type: "sessionCore", value: this._sessionCore };
     }
-    if (this._taskManager) {
-      return { type: "taskManager", value: this._taskManager };
+    const taskManager = this._taskManager || this.#taskManagerProvider?.() || null;
+    if (taskManager) {
+      return { type: "taskManager", value: taskManager };
     }
     return { type: "none", value: null };
   }
@@ -113,7 +123,9 @@ export class DelegateTaskTool extends SubagentTool {
   }
 
   override toToolDef() {
-    const profileManager = this._taskManager?.profileManager;
+    // Resolve lazily: the manager may register its service after the def cache is built.
+    const backend = this._resolveBackend();
+    const profileManager = backend.type === "taskManager" ? backend.value.profileManager : null;
     let profileList = "";
     if (profileManager) {
       const profiles = profileManager.getVisibleWorkerProfiles();

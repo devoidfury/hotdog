@@ -12,6 +12,7 @@ import { LlmClient } from "../../core/llm-client/client.ts";
 import { MarkerMangler } from "../../core/marker-mangler.ts";
 import { SessionManager, type AgentLike } from "../../core/session/index.ts";
 import { Agent } from "../../core/agent.ts";
+import { registerTaskManagerService } from "../subagents/index.ts";
 import { OneShotChannel } from "./oneshot-channel.ts";
 import type { CoreContext, ExtensionInstance, ResolvedConfig } from "../../core/extensions/types.ts";
 import type { PaletteOptions } from "../../utils/cli/colors.ts";
@@ -58,7 +59,14 @@ async function runOneShot(
       taskProfile: resolved.taskProfile || "task-default",
       taskRole: resolved.taskDefaultRole || "",
     },
+    // Mirrors the interactive CLI: without it the TaskManager cannot resolve
+    // worker profiles from the config directory.
+    profileManager: resolved.profileManager,
   });
+
+  // Publish the TaskManager for lazy lookup by subagent tools; extensions
+  // (and their tools) were loaded before this session existed.
+  registerTaskManagerService(core, sessionManager.getTaskManager());
 
   // Create OneShotChannel
   const channel = new OneShotChannel({

@@ -16,12 +16,16 @@ export function isSensitiveEnvVar(key: string): boolean {
   return (
     KEY.includes("HOTDOG") ||
     KEY.includes("_ID") ||
+    KEY.includes("_URL") ||
+    KEY.includes("_AUTH") ||
+    KEY.includes("_CRED") ||
+    KEY.includes("JWT") ||
+    KEY.includes("PRIVATE") ||
     KEY.includes("LOGIN") ||
-    KEY.includes("URL") ||
     KEY.includes("SECRET") ||
-    KEY.includes("TOKE") ||
-    KEY.includes("PASSW") ||
     KEY.includes("KEY") ||
+    KEY.includes("TOKE") ||
+    KEY.includes("PASS") ||
     KEY.includes("SEED") ||
     KEY.includes("HASH")
   );

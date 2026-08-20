@@ -142,13 +142,13 @@ export async function handleRegenerate(
  * Handler for /reasoning — sets the reasoning effort level.
  *
  * @param agent - Agent instance.
- * @param value - Reasoning effort level ("none", "minimal", "low", "high", "xhigh", "max", "unset").
+ * @param value - Reasoning effort level ("none", "minimal", "low", "medium", "high", "xhigh", "max", "unset").
  */
 export function handleReasoning(
   agent: Agent,
   value?: string | null,
 ): CommandResult {
-  const valid = ["none", "minimal", "low", "high", "xhigh", "max", "unset"];
+  const valid = ["none", "minimal", "low", "medium", "high", "xhigh", "max", "unset"];
   if (!value) {
     const current =
       agent.reasoningEffort !== undefined
@@ -175,7 +175,7 @@ export function handleReasoning(
   }
   return {
     action: ACTIONS.ERROR,
-    error: `Invalid reasoning effort '${value}'. Valid: none, minimal, low, high, xhigh, max, unset`,
+    error: `Invalid reasoning effort '${value}'. Valid: none, minimal, low, medium, high, xhigh, max, unset`,
   };
 }
 
@@ -209,6 +209,7 @@ export const CORE_COMMAND_HANDLERS: Record<string, CommandHandlerDef> = {
         "none",
         "minimal",
         "low",
+        "medium",
         "high",
         "xhigh",
         "max",

@@ -67,7 +67,6 @@ export async function hotdogFetch(
     body:
       (METHODS_WITH_BODY.includes(args?.method ?? "") && args?.body) || undefined,
     headers: {
-      "Content-Type": "application/json",
       "User-Agent": USER_AGENT,
       ...headers,
     },

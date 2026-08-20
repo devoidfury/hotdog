@@ -20,6 +20,14 @@ beforeAll(() => {
           setTimeout(() => resolve(new Response("slow")), 3000),
         );
       }
+      // /headers — echoes the received request headers
+      if (url.pathname === "/headers") {
+        const h: Record<string, string> = {};
+        req.headers.forEach((v, k) => (h[k] = v));
+        return new Response(JSON.stringify(h), {
+          headers: { "Content-Type": "application/json" },
+        });
+      }
       return new Response("ok", { headers: { "Content-Type": "text/plain" } });
     },
   });
@@ -85,6 +93,22 @@ describe("hotdogFetch", () => {
       hotdogFetch(`${BASE_URL}/slow`, { signal: controller.signal }, 300),
     ).rejects.toThrow();
     expect(Date.now() - t0).toBeLessThan(2000);
+  });
+
+  it("does not inject a default Content-Type when the caller sets none", async () => {
+    const resp = await hotdogFetch(`${BASE_URL}/headers`);
+    const headers = (await resp.json()) as Record<string, string>;
+    expect(headers["content-type"]).toBeUndefined();
+  });
+
+  it("sends the caller's Content-Type untouched", async () => {
+    const resp = await hotdogFetch(`${BASE_URL}/headers`, {
+      method: "POST",
+      headers: { "Content-Type": "text/plain" },
+      body: "hi",
+    });
+    const headers = (await resp.json()) as Record<string, string>;
+    expect(headers["content-type"]).toBe("text/plain");
   });
 
   it("ignores non-positive timeouts", async () => {

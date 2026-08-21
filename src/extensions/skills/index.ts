@@ -135,15 +135,20 @@ export async function create(core: CoreContext): Promise<ExtensionInstance> {
             // as a system message so the agent sees it immediately without
             // reloading the system prompt (which would bust the cached prefix).
             const messages = agent.context?.getMessages?.();
-            const hasUserMessages = messages?.some((m: any) => m.role === "user");
-            if (hasUserMessages && typeof agent.addMessage === "function") {
+            const hasConversationTurns = messages?.some(
+              (m: any) => m.role === "user" || m.role === "harness",
+            );
+            if (hasConversationTurns && typeof agent.addMessage === "function") {
               const skill = loader.getSkill(name);
               if (skill) {
                 const renderedContent = await loader.renderSkillContent(skill);
                 agent.addMessage(
                   new Message({
-                    role: "user",
+                    role: "harness",
                     content: renderedContent,
+                    // Skill body is local file content (trusted layer, same as
+                    // the system prompt it also feeds), so no inner escaping.
+                    source: "harness",
                   }),
                 );
               }

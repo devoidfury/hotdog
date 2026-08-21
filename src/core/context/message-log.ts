@@ -71,7 +71,7 @@ export class MessageLog {
   buildMessages(systemPrompt?: string | null): Message[] {
     if (systemPrompt) {
       return [
-        new Message({ role: "system", content: systemPrompt }),
+        new Message({ role: "system", content: systemPrompt, source: "system" }),
         ...this.#messages,
       ];
     }

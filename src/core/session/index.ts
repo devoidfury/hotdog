@@ -10,7 +10,7 @@ import type { LlmClient } from "../llm-client/client.ts";
 import type { CommandResult } from "../extensions/registries.ts";
 import type { ProfileManager } from "../config/index.ts";
 import type { MessageLog } from "../context/message-log.ts";
-import type { ImageAttachment } from "../context/message.ts";
+import type { ImageAttachment, MessageSource } from "../context/message.ts";
 import type { AgentRunResult, OutputSink } from "../agent.ts";
 import type { ModelConfig } from "../config/providers.ts";
 
@@ -33,10 +33,14 @@ export interface AgentLike {
   toolWhitelist: string[] | null;
   role: string | undefined;
   profileBody: string | undefined;
-  enqueueCallback: ((text: string) => void) | null;
+  enqueueCallback: ((content: string | Array<Record<string, unknown>>, opts?: { source?: MessageSource }) => void) | null;
   serialize(): Record<string, unknown>;
   deserialize(data: Record<string, unknown>): void;
-  run(text: string, images?: ImageAttachment[]): Promise<AgentRunResult | undefined>;
+  run(
+    content: string | Array<Record<string, unknown>>,
+    images?: ImageAttachment[],
+    opts?: { source?: MessageSource },
+  ): Promise<AgentRunResult | undefined>;
   clearContext(): Promise<void>;
   cancel(): void;
   resetCancel(): void;
@@ -412,7 +416,7 @@ export class SessionManager {
       agent.sink = internalSink;
     }
 
-    agent.enqueueCallback = (text: string) => bus.enqueue(text);
+    agent.enqueueCallback = (text, opts) => bus.enqueue(text, opts);
 
     if (this.#taskManager) {
       this.#taskManager.setBus(bus);

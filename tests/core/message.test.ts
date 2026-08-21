@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'bun:test';
-import { Message, ImageAttachment } from '../../src/core/context/message.ts';
+import { Message, contentToText, ImageAttachment } from '../../src/core/context/message.ts';
 
 type ContentPart = { type: string; text?: string; image_url?: { url: string } };
 
@@ -139,6 +139,44 @@ describe('Message.fromJSON', () => {
   });
 });
 
+describe('Message — source provenance', () => {
+  it('stores source when provided', () => {
+    for (const source of ['user', 'harness', 'model', 'system', 'tool'] as const) {
+      const msg = new Message({ role: 'user', content: 'hi', source });
+      expect(msg.source).toBe(source);
+    }
+  });
+
+  it('defaults source to undefined', () => {
+    expect(new Message({ role: 'user', content: 'hi' }).source).toBeUndefined();
+  });
+
+  it('toJSON omits source when undefined', () => {
+    const json = new Message({ role: 'user', content: 'hi' }).toJSON();
+    expect(json).not.toHaveProperty('source');
+  });
+
+  it('toJSON includes source when defined', () => {
+    const json = new Message({ role: 'user', content: 'hi', source: 'harness' }).toJSON();
+    expect(json).toEqual({ role: 'user', content: 'hi', source: 'harness' });
+  });
+
+  it('fromJSON round-trips source', () => {
+    for (const source of ['user', 'harness', 'model', 'system', 'tool'] as const) {
+      const msg = new Message({ role: 'user', content: 'hi', source });
+      const restored = Message.fromJSON(msg.toJSON());
+      expect(restored.source).toBe(source);
+      expect(restored.toJSON()).toEqual(msg.toJSON());
+    }
+  });
+
+  it('fromJSON drops unknown or invalid source values', () => {
+    expect(Message.fromJSON({ role: 'user', content: 'hi', source: 'admin' }).source).toBeUndefined();
+    expect(Message.fromJSON({ role: 'user', content: 'hi', source: 42 }).source).toBeUndefined();
+    expect(Message.fromJSON({ role: 'user', content: 'hi', source: null }).source).toBeUndefined();
+  });
+});
+
 describe('Message.getTextContent', () => {
   it('returns content string for plain text messages', () => {
     expect(new Message({ role: 'user', content: 'Hello world' }).getTextContent()).toBe('Hello world');
@@ -178,6 +216,38 @@ describe('Message.getTextContent', () => {
 
   it('handles empty array content', () => {
     expect(new Message({ role: 'user', content: [] }).getTextContent()).toBe('');
+  });
+
+  it('includes untrusted parts (raw) in the text form', () => {
+    const msg = new Message({
+      role: 'harness',
+      source: 'harness',
+      content: [
+        { type: 'text', text: '<previous-context-summary>' },
+        { type: 'untrusted', text: 'raw model output' },
+        { type: 'text', text: '</previous-context-summary>' },
+      ],
+    });
+    expect(msg.getTextContent()).toBe('<previous-context-summary>\nraw model output\n</previous-context-summary>');
+  });
+});
+
+describe('contentToText', () => {
+  it('passes strings through; null/undefined become empty', () => {
+    expect(contentToText('plain')).toBe('plain');
+    expect(contentToText('')).toBe('');
+    expect(contentToText(null)).toBe('');
+    expect(contentToText(undefined)).toBe('');
+  });
+
+  it('flattens text and untrusted parts, drops images', () => {
+    expect(
+      contentToText([
+        { type: 'text', text: 'a' },
+        { type: 'image_url', image_url: { url: 'data:image/png;base64,abc' } },
+        { type: 'untrusted', text: 'b' },
+      ]),
+    ).toBe('a\nb');
   });
 });
 

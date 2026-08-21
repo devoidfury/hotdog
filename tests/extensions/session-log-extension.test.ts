@@ -92,6 +92,100 @@ describe("session-log extension create()", () => {
     }
   });
 
+  it("CONTEXT_MESSAGE hook records harness provenance as origin", async () => {
+    const sessionId = `test-harness-${Date.now()}`;
+    try {
+      const ext = await create(createMockCore() as any) as any;
+      const hook = ext.hooks[HOOKS.CONTEXT_MESSAGE] as (ctx: any) => Promise<void>;
+
+      await hook({
+        message: { sessionId, role: "user", content: "[Task t1 completed]\ndone", source: "harness" },
+        agent: { sessionId },
+      });
+      await hook({
+        message: { sessionId, role: "user", content: "plain input" },
+        agent: { sessionId },
+      });
+      await hook({
+        message: { sessionId, role: "assistant", content: "assistant reply", source: "model" },
+        agent: { sessionId },
+      });
+      await hook({
+        message: { sessionId, role: "harness", content: "turn guard", source: "harness" },
+        agent: { sessionId },
+      });
+
+      const entries = await readSessionEntries(sessionId);
+      expect(entries).toHaveLength(4);
+      // Harness-sourced message carries origin; plain input does not;
+      // LLM output is tagged "model"; harness-role messages log as INPUT
+      // channel with their role recorded for replay.
+      expect(entries[0]!.origin).toBe("harness");
+      expect(entries[1]!).not.toHaveProperty("origin");
+      expect(entries[2]!.origin).toBe("model");
+      expect(entries[3]!.source).toBe("input");
+      expect(entries[3]!.role).toBe("harness");
+      expect(entries[3]!.origin).toBe("harness");
+    } finally {
+      cleanupTestFile(sessionId);
+    }
+  });
+
+  it("OUTPUT_EVENT compaction entry records harness origin", async () => {
+    const sessionId = `test-compaction-origin-${Date.now()}`;
+    try {
+      const ext = await create(createMockCore() as any) as any;
+      const hook = ext.hooks[HOOKS.OUTPUT_EVENT] as (ctx: any) => Promise<void>;
+
+      await hook({
+        type: "compaction_result",
+        data: { summary: "Summarized", messagesCompacted: 10 },
+        agent: { sessionId },
+      });
+
+      const entries = await readSessionEntries(sessionId);
+      expect(entries).toHaveLength(1);
+      expect(entries[0]!.origin).toBe("harness");
+      // Content is the harness structure exactly as it enters the context:
+      // real wrapper tag parts around the RAW model-generated summary.
+      // Never escaped on disk -- the wire serializer mangles the part.
+      const tag = "previous-context-summary";
+      expect(entries[0]!.content).toEqual([
+        { type: "text", text: `<${tag}>` },
+        { type: "untrusted", text: "Summarized" },
+        { type: "text", text: `</${tag}>` },
+      ]);
+      expect(entries[0]!.summary).toBe("Summarized");
+    } finally {
+      cleanupTestFile(sessionId);
+    }
+  });
+
+  it("CONTEXT_MESSAGE hook persists raw parts for harness messages with untrusted content", async () => {
+    const sessionId = `test-harness-parts-${Date.now()}`;
+    try {
+      const ext = await create(createMockCore() as any) as any;
+      const hook = ext.hooks[HOOKS.CONTEXT_MESSAGE] as (ctx: any) => Promise<void>;
+
+      const parts = [
+        { type: "text", text: "[Task t1 completed]\n" },
+        { type: "untrusted", text: "model output with <raw> markers" },
+      ];
+      await hook({
+        message: { sessionId, role: "harness", content: parts, source: "harness", getTextContent: () => "[Task t1 completed]\nmodel output with <raw> markers" },
+        agent: { sessionId },
+      });
+
+      const entries = await readSessionEntries(sessionId);
+      expect(entries).toHaveLength(1);
+      // Structure survives on disk raw, for replay to re-mangle at the wire.
+      expect(entries[0]!.content).toEqual(parts);
+      expect(entries[0]!.origin).toBe("harness");
+    } finally {
+      cleanupTestFile(sessionId);
+    }
+  });
+
   it("CONTEXT_MESSAGE hook skips logging during restoration", async () => {
     const sessionId = `test-restoring-${Date.now()}`;
     try {

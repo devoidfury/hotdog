@@ -5,6 +5,7 @@ import { HOOKS } from "../../core/hooks.ts";
 import { CliOutputSink } from "../../utils/cli/cli.ts";
 import { ColorPalette, type PaletteOptions } from "../../utils/cli/colors.ts";
 import { readSessionEntries, sessionsDir as getSessionsDir, type LogEntry } from "../session-log/index.ts";
+import { contentToText } from "../../core/context/message.ts";
 import { readdir, access, stat, unlink, readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { ReviewTool } from "./review.ts";
@@ -331,7 +332,13 @@ async function reviewSession(
   for (const entry of entries) {
     const ts = entry.ts ? new Date(entry.ts).toLocaleTimeString() : "unknown";
     const role = entry.role || entry.source;
-    const content = entry.content || entry.result || "";
+    // content may be raw parts (harness messages); flatten for display.
+    const content =
+      entry.content == null
+        ? entry.result || ""
+        : typeof entry.content === "string"
+          ? entry.content
+          : contentToText(entry.content);
 
     let max = 200;
     if (entry.source === "system_prompt") {

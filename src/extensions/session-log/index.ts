@@ -31,6 +31,10 @@ interface SessionLogMessage {
   reasoningContent?: string | null;
   toolCalls?: unknown;
   toolCallId?: string | null;
+  /** Message provenance (Message.source); recorded as `origin` on the entry. */
+  source?: string;
+  /** Present when the payload is a live Message (not raw log data). */
+  getTextContent?: () => string;
 }
 
 
@@ -48,19 +52,42 @@ async function getCacheDir(): Promise<string> {
 }
 
 /**
+ * Content to persist: structured content (harness messages with `untrusted`
+ * parts) is kept as raw parts so replay restores the exact trust structure;
+ * everything else stays plain text (images stripped) as before.
+ */
+function logContent(message: SessionLogMessage): string | Array<Record<string, unknown>> {
+  const raw = message.content;
+  if (
+    Array.isArray(raw) &&
+    raw.some((p) => p != null && typeof p === "object" && (p as Record<string, unknown>).type === "untrusted")
+  ) {
+    return raw as Array<Record<string, unknown>>;
+  }
+  if (typeof message.getTextContent === "function") return message.getTextContent();
+  return (raw as string | undefined) || "";
+}
+
+/**
  * Create a log entry from a message.
  */
-function messageToLogEntry(message: SessionLogMessage, source: string): LogEntry {
+function messageToLogEntry(
+  message: SessionLogMessage & { content: string | Array<Record<string, unknown>> },
+  source: string,
+): LogEntry {
   return stripNulls({
     ts: new Date().toISOString(),
     session_id: message.sessionId || "unknown",
     role: message.role,
     source,
-    content: message.content || "",
+    content: message.content,
     reasoning_content: message.reasoningContent || null,
     tool_calls: message.toolCalls || null,
     tool_call_id: message.toolCallId || null,
     tool_name: null,
+    // Provenance: recorded for every message so resume replay restores the
+    // exact source (and the mangle exemption for "harness").
+    origin: message.source ?? null,
   }) as LogEntry;
 }
 
@@ -126,6 +153,10 @@ export async function create(_core: CoreContext): Promise<ExtensionInstance> {
             // mislabeling it as the initial system prompt.
             source = LOG_SOURCE.INPUT;
             break;
+          case "harness":
+            // Harness-injected message; replayed via its "harness" origin.
+            source = LOG_SOURCE.INPUT;
+            break;
           default:
             source = LOG_SOURCE.INPUT;
         }
@@ -133,10 +164,11 @@ export async function create(_core: CoreContext): Promise<ExtensionInstance> {
         const entry = messageToLogEntry({
           sessionId: agent.sessionId,
           role: message.role,
-          content: typeof message.getTextContent === "function" ? message.getTextContent() : message.content || "",
+          content: logContent(message),
           reasoningContent: message.reasoningContent,
           toolCalls: message.toolCalls,
           toolCallId: message.toolCallId,
+          source: message.source,
         }, source);
         await appendFile(logPath, JSON.stringify(entry) + "\n");
       },
@@ -151,12 +183,25 @@ export async function create(_core: CoreContext): Promise<ExtensionInstance> {
             const sessionId = agent.sessionId || "unknown";
             lastSessionId = sessionId;
             const logPath = join(cacheDir, `${sessionId}.jsonl`);
+            // Log the message exactly as it enters the context: harness
+            // structure with the real wrapper tag parts around the RAW
+            // model-generated summary (`untrusted` part, mangled only at the
+            // wire). Never escape here: the log must stay re-serializable by
+            // any future session's mangler.
+            const tag = "previous-context-summary";
             const entry = stripNulls({
               ts: new Date().toISOString(),
               session_id: sessionId,
               source: LOG_SOURCE.COMPACTION,
+              content: [
+                { type: "text", text: `<${tag}>` },
+                { type: "untrusted", text: compactionData.summary },
+                { type: "text", text: `</${tag}>` },
+              ],
               summary: compactionData.summary,
               messages_compacted: compactionData.messagesCompacted,
+              // Compaction summaries are harness-generated content.
+              origin: "harness",
             });
             await appendFile(logPath, JSON.stringify(entry) + "\n");
           }

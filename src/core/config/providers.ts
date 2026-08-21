@@ -6,11 +6,18 @@ import { DEFAULT_SYSTEM_PROMPT_FILENAME, DEFAULT_SYSTEM_PROMPT_TEMPLATE } from "
 import { logger } from "../logger.ts";
 import { hotdogFetch } from "@utils/fetch.ts";
 
+/**
+ * Wire format for chat requests (per-model: chat templates are per-model,
+ * even on the same backend). Defaults to "system-first".
+ */
+export type WireFormatKind = "system-first" | "developer";
+
 export interface ModelConfig {
   name: string;
   temperature: number | null;
   contextLimit: number;
   reasoningEffort?: string;
+  wireFormat?: WireFormatKind;
   tags: string[];
   /**
    * Model capabilities (e.g., vision, tool use).
@@ -34,6 +41,7 @@ export interface ProviderModelEntry {
   contextLimit?: number;
   reasoning_effort?: string;
   reasoningEffort?: string;
+  wireFormat?: WireFormatKind;
   tags?: string[];
   /** Model capabilities (e.g., vision, tool use). */
   capabilities?: {
@@ -53,6 +61,7 @@ export interface ProviderDef {
   defaultModel?: string;
   temperature?: number;
   contextLimit?: number;
+  wireFormat?: WireFormatKind;
   tags?: string[];
 }
 
@@ -197,6 +206,7 @@ export async function buildModelRegistry(
         temperature: modelEntry.temperature ?? null,
         contextLimit: modelEntry.contextLimit || contextLimit,
         reasoningEffort: modelEntry.reasoning_effort || modelEntry.reasoningEffort || undefined,
+        wireFormat: modelEntry.wireFormat ?? provider.wireFormat,
         tags: modelEntry.tags || [],
         capabilities: modelEntry.capabilities || {},
         maxToolDifficulty: modelEntry.maxToolDifficulty,
@@ -208,6 +218,7 @@ export async function buildModelRegistry(
         name: `${provider.name}/${provider.defaultModel}`,
         temperature: provider.temperature ?? null,
         contextLimit: provider.contextLimit || contextLimit,
+        wireFormat: provider.wireFormat,
         tags: provider.tags || [],
         capabilities: {},
       };
@@ -272,12 +283,14 @@ export function resolveModelConfig(
   reasoningEffort: string | undefined,
 ): ModelConfig {
   const entry = findModelEntry(modelName, modelRegistry);
+  const wireFormat = (entry?.wireFormat as WireFormatKind | undefined) ?? undefined;
   const fromRegistry: ModelConfig = entry
     ? {
         name: entry.name || modelName,
         temperature: entry.temperature ?? null,
         contextLimit: entry.contextLimit ?? contextLimit,
         reasoningEffort: entry.reasoningEffort,
+        wireFormat,
         tags: (entry.tags as string[]) || [],
       }
     : {
@@ -285,6 +298,7 @@ export function resolveModelConfig(
         temperature: null,
         contextLimit,
         reasoningEffort: undefined,
+        wireFormat,
         tags: [],
       };
 

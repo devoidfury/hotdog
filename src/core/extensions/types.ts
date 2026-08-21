@@ -29,7 +29,7 @@ import type { BuildAgentConfig } from "../config/index.ts";
 import type { CoreConfigWithExtensions } from "../config/schema-loader.ts";
 import type { Agent } from "../agent.ts";
 import type { AgentLike } from "../session/index.ts";
-import type { ImageAttachment, Message } from "../context/message.ts";
+import type { ImageAttachment, Message, MessageSource } from "../context/message.ts";
 import type { ParsedCommand } from "../commands.ts";
 import type { ToolContext } from "./tool-context.ts";
 export type { ToolContext };
@@ -119,8 +119,9 @@ export interface HookPayloads {
   "cli:subcommandsRegister": CliSubcommandRegistryLike;
   "cli:argsParsed": { cli: ParsedCliOptions };
 
-  // Returns InputHookResult.
-  "input": { text: string; images?: ImageAttachment[], agent: Agent };
+  // Returns InputHookResult. `origin` carries harness provenance (undefined for
+  // normal user input); `source: "interactive"` marks the channel, not provenance.
+  "input": { text: string; images?: ImageAttachment[]; source?: string; origin?: MessageSource; agent: Agent };
 
   // Returns ContextHookResult ({ messages } replaces the array).
   "context": { messages: Message[]; agent: Agent };

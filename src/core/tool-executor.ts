@@ -96,6 +96,7 @@ export class ToolExecutor {
         role: "tool",
         content: result,
         toolCallId,
+        source: "tool",
       });
       this.#deps.agent.addMessage(msg);
       return { toolName: "(invalid)", input, result, toolCallId: toolCallId || "" };
@@ -271,6 +272,7 @@ export class ToolExecutor {
       content: result,
       toolCallId,
       images: images as ImageAttachment[] | undefined,
+      source: "tool",
     });
     // Go through agent.addMessage() so the CONTEXT_MESSAGE hook fires and
     // extensions (session log) record the tool result.

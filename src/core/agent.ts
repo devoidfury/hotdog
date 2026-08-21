@@ -3,7 +3,7 @@
 import { ParsedCommand } from "./commands.ts";
 import { CORE_COMMAND_HANDLERS } from "./command-handlers.ts";
 import { findModelEntry, resolveModelConfig, type ModelConfig } from "./config/providers.ts";
-import { Message, type ImageAttachment, type ToolCall } from "./context/message.ts";
+import { Message, contentToText, type ImageAttachment, type ToolCall, type MessageSource } from "./context/message.ts";
 import { OUTPUT_EVENT, OutputEvent, EVENT_NAME_MAP, type EventName } from "./context/output.ts";
 import { createContextManager, type ContextManager } from "./context/context-manager.ts";
 import { AgentError, ConfigError, LlmError } from "./error.ts";
@@ -83,7 +83,7 @@ export interface AgentOptions {
   toolWhitelist?: string[] | null;
   commandRegistry?: AgentCommandRegistry;
   // Set by the owning MessageBus after construction; lets the agent (and extensions via hooks) queue messages.
-  enqueueCallback?: (text: string) => void;
+  enqueueCallback?: (content: string | Array<Record<string, unknown>>, opts?: { source?: MessageSource }) => void;
 }
 
 /** Runs the LLM loop and delegates behavior to hooks. */
@@ -117,7 +117,7 @@ export class Agent implements AgentLike {
   commandRegistry: AgentCommandRegistry;
   #toolExecutor: ToolExecutor;
   #streamProcessor: StreamProcessor;
-  enqueueCallback: ((text: string) => void) | null;
+  enqueueCallback: ((content: string | Array<Record<string, unknown>>, opts?: { source?: MessageSource }) => void) | null;
 
   constructor(options: AgentOptions) {
     if (options.maxIterations == null) {
@@ -234,15 +234,25 @@ export class Agent implements AgentLike {
     return this.context.log;
   }
 
-  enqueue(text: string): void {
-    this.enqueueCallback?.(text);
+  enqueue(content: string | Array<Record<string, unknown>>, opts?: { source?: MessageSource }): void {
+    this.enqueueCallback?.(content, opts);
   }
 
   // ── Run Loop ──────────────────────────────────────────────────────────────
 
-  /** Run the agent loop with the given user input; returns undefined if input was empty. */
-  async run(userInput: string, images?: ImageAttachment[]): Promise<AgentRunResult | undefined> {
-    if (!userInput?.trim() && (!images || images.length === 0)) {
+  /**
+   * Run the agent loop with the given user input; returns undefined if input
+   * was empty. `userInput` is plain text or content parts (harness callers
+   * may embed `untrusted` parts, mangled only at the wire). `opts.source`
+   * sets the message's provenance; harness-injected runs become role
+   * "harness", all other input is tagged source "user".
+   */
+  async run(
+    userInput: string | Array<Record<string, unknown>>,
+    images?: ImageAttachment[],
+    opts?: { source?: MessageSource },
+  ): Promise<AgentRunResult | undefined> {
+    if (!contentToText(userInput).trim() && (!images || images.length === 0)) {
       return;
     }
 
@@ -250,9 +260,16 @@ export class Agent implements AgentLike {
     try {
       await this.ensureSystemPrompt();
 
-      const userMsg = new Message({ role: "user", content: userInput, images });
+      // Provenance drives the internal role: harness-injected runs ride
+      // role "harness"; everything else is user input.
+      const userMsg = new Message({
+        role: opts?.source === "harness" ? "harness" : "user",
+        content: userInput,
+        images,
+        source: opts?.source ?? "user",
+      });
       this.addMessage(userMsg);
-      this.emitOutput("user_message", { content: userInput });
+      this.emitOutput("user_message", { content: contentToText(userInput) });
 
       let iteration = 0;
       while (iteration < this.maxIterations) {
@@ -305,7 +322,7 @@ export class Agent implements AgentLike {
 
     while (this.followQueue.length > 0) {
       const followUp = this.followQueue.shift()!;
-      this.addMessage(new Message({ role: "user", content: followUp }));
+      this.addMessage(new Message({ role: "user", content: followUp, source: "user" }));
       this.emitOutput("user_message", { content: followUp });
     }
 
@@ -358,7 +375,7 @@ export class Agent implements AgentLike {
 
     try {
       const stream = this.llmClient.chatStreamCancellable(
-        messages.map((m) => m.toJSON()),
+        messages,
         modelConfig,
         toolDefs,
         cancelSignal,
@@ -383,6 +400,9 @@ export class Agent implements AgentLike {
       content: response.fullText,
       reasoningContent: response.fullReasoning,
       toolCalls: response.finalToolCalls,
+      // Model-generated content: untrusted on the wire (always mangled),
+      // but the tag survives persistence so provenance is explicit after replay.
+      source: "model",
     });
     this.addMessage(assistantMsg);
     this._emitTokenUsage(response);
@@ -411,6 +431,7 @@ export class Agent implements AgentLike {
           role: "tool",
           content: sr.result,
           toolCallId: sr.toolCallId,
+          source: "tool",
         }));
         this.emitOutput("tool_result", {
           toolName: sr.toolName,

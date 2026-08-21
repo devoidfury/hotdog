@@ -4,7 +4,7 @@
 import { homedir } from "node:os";
 import { join, resolve as resolveAbs, sep } from "node:path";
 import { readFile, access, readdir, stat, unlink } from "node:fs/promises";
-import { Message, type ToolCall, type ImageAttachment } from "../context/message.ts";
+import { MESSAGE_SOURCES, Message, type ToolCall, type ImageAttachment, type MessageSource } from "../context/message.ts";
 import { AgentError, formatError } from "../error.ts";
 import { logger } from "../logger.ts";
 
@@ -24,12 +24,20 @@ export interface LogEntry {
   ts: string;
   session_id: string;
   source: LogSource;
-  content: string;
+  /** Plain text, or raw content parts (harness messages with `untrusted` parts; never escaped on disk). */
+  content: string | Array<Record<string, unknown>>;
   images?: Array<{ type: string; mimeType: string; data: string }>;
   reasoning_content?: string | null;
   tool_calls?: ToolCall[] | null;
   tool_call_id?: string | null;
   tool_name?: string;
+  /**
+   * Provenance of the message content, distinct from `source` (the log
+   * channel); a MessageSource value. "harness" marks code-generated messages
+   * that must be replayed with Message.source="harness" (exempt from marker
+   * mangling); "model" marks LLM output (always mangled).
+   */
+  origin?: string;
   // Legacy fields for backwards compatibility with older log formats
   role?: string;
   result?: string;
@@ -258,14 +266,25 @@ export function replayEntriesIntoContext(agent: AgentForReplay, entries: LogEntr
       continue;
     }
 
+    // Provenance survives replay: harness-originated entries are re-tagged so
+    // they keep their mangle exemption and role "harness" after resume;
+    // "model"/"tool"/"user" re-tag untrusted content. Unknown values are
+    // dropped (untrusted).
+    const origin: MessageSource | undefined =
+      typeof entry.origin === "string" && (MESSAGE_SOURCES as readonly string[]).includes(entry.origin)
+        ? (entry.origin as MessageSource)
+        : undefined;
+    const role = origin === "harness" ? "harness" : undefined;
+
     switch (source) {
       case LOG_SOURCE.INPUT:
       case LOG_SOURCE.PROMPT: {
         agent.addMessage(
           new Message({
-            role: "user",
+            role: role ?? "user",
             content: entry.content,
             images: entry.images as ImageAttachment[] | undefined,
+            source: origin,
           }),
         );
         replayed++;
@@ -275,10 +294,11 @@ export function replayEntriesIntoContext(agent: AgentForReplay, entries: LogEntr
       case LOG_SOURCE.LLM: {
         agent.addMessage(
           new Message({
-            role: "assistant",
+            role: role ?? "assistant",
             content: entry.content,
             reasoningContent: entry.reasoning_content ?? null,
             toolCalls: entry.tool_calls ?? null,
+            source: origin,
           }),
         );
         replayed++;
@@ -291,6 +311,7 @@ export function replayEntriesIntoContext(agent: AgentForReplay, entries: LogEntr
             role: "tool",
             content: entry.content,
             toolCallId: entry.tool_call_id ?? null,
+            source: origin ?? "tool",
           }),
         );
         replayed++;
@@ -298,7 +319,7 @@ export function replayEntriesIntoContext(agent: AgentForReplay, entries: LogEntr
       }
 
       case LOG_SOURCE.COMPACTION: {
-        agent.addMessage(new Message({ role: "user", content: entry.content }));
+        agent.addMessage(new Message({ role: "harness", source: "harness", content: entry.content }));
         replayed++;
         break;
       }

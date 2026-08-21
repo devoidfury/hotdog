@@ -21,7 +21,11 @@ function createMockSink(): { emit: (event: unknown) => void; _emitted: unknown[]
 function createMockAgent(overrides: {
   cancel?: () => void;
   resetCancel?: () => void;
-  run?: (text?: string) => Promise<void>;
+  run?: (
+    content?: string | Array<Record<string, unknown>>,
+    images?: unknown,
+    opts?: { source?: string },
+  ) => Promise<void>;
   executeCommand?: (cmd: string) => Promise<{ content?: string; error?: string } | null>;
   getCommandRegistry?: () => unknown;
   hooks?: { runHookPipeline: (hook: string, data: unknown, opts: unknown) => Promise<unknown> };
@@ -56,6 +60,19 @@ describe("MessageBus.enqueue()", () => {
     bus.enqueue("msg1");
     bus.enqueue("msg2");
     expect(bus.isIdle()).toBe(false);
+  });
+});
+
+describe("MessageBus.enqueue() with content parts", () => {
+  it("stores parts items verbatim; the queue getter flattens to text", () => {
+    const bus = new MessageBus({ sessionManager: createMockSessionManager(), sink: createMockSink() });
+    bus.enqueue([
+      { type: "text", text: "[Task t1 completed]\n" },
+      { type: "untrusted", text: "raw result" },
+    ], { source: "harness" });
+    expect(bus.isIdle()).toBe(false);
+    // Flattened text form (parts joined with newlines), never the structure.
+    expect(bus.queue).toEqual(["[Task t1 completed]\n\nraw result"]);
   });
 });
 
@@ -206,6 +223,89 @@ describe("MessageBus — processing behavior", () => {
     // _processMessage is internal but needed to verify cancel flag reset behavior
     await bus._processMessage("test");
     expect(resetCalled).toBe(true);
+  });
+
+  it("passes harness provenance from queue items to agent.run", async () => {
+    const runArgs: Array<unknown> = [];
+    const agent = createMockAgent({
+      run: async (text, images, opts) => { runArgs.push(text, images, opts); },
+    });
+    const bus = new MessageBus({ sessionManager: createMockSessionManager(() => agent), sink: createMockSink() });
+    await bus._processMessage({ content: "[Task t1 completed]\ndone", source: "harness" });
+    expect(runArgs).toEqual(["[Task t1 completed]\ndone", undefined, { source: "harness" }]);
+  });
+
+  it("passes content parts through to agent.run verbatim", async () => {
+    const runArgs: Array<unknown> = [];
+    const parts = [
+      { type: "text", text: "[Task t1 completed]\n" },
+      { type: "untrusted", text: "raw result" },
+    ];
+    const agent = createMockAgent({
+      run: async (text, images, opts) => { runArgs.push(text, images, opts); },
+    });
+    const bus = new MessageBus({ sessionManager: createMockSessionManager(() => agent), sink: createMockSink() });
+    await bus._processMessage({ content: parts, source: "harness" });
+    expect(runArgs).toEqual([parts, undefined, { source: "harness" }]);
+  });
+
+  it("wraps hook transforms of parts content as an untrusted part", async () => {
+    const runArgs: Array<unknown> = [];
+    const agent = createMockAgent({
+      run: async (text, images, opts) => { runArgs.push(text, images, opts); },
+      hooks: {
+        runHookPipeline: async () => ({ stopped: false, lastResult: { action: "transform", text: "expanded" } }),
+      },
+    });
+    const bus = new MessageBus({ sessionManager: createMockSessionManager(() => agent), sink: createMockSink() });
+    await bus._processMessage({
+      content: [
+        { type: "text", text: "[Task t1 completed]\n" },
+        { type: "untrusted", text: "@note.md" },
+      ],
+      source: "harness",
+    });
+    // The flattened transform output must not inherit the harness exemption.
+    expect(runArgs).toEqual([[{ type: "untrusted", text: "expanded" }], undefined, { source: "harness" }]);
+
+    // Plain-string items keep the bare transformed text.
+    runArgs.length = 0;
+    await bus._processMessage({ content: "plain @note.md", source: undefined });
+    expect(runArgs).toEqual(["expanded", undefined, undefined]);
+  });
+
+  it("omits source opts for plain user input", async () => {
+    const runArgs: Array<unknown> = [];
+    const agent = createMockAgent({
+      run: async (text, images, opts) => { runArgs.push(text, images, opts); },
+    });
+    const bus = new MessageBus({ sessionManager: createMockSessionManager(() => agent), sink: createMockSink() });
+    await bus._processMessage("hello");
+    expect(runArgs).toEqual(["hello", undefined, undefined]);
+  });
+
+  it("exposes harness provenance on the INPUT hook payload as origin", async () => {
+    let inputPayload: Record<string, unknown> | null = null;
+    const agent = createMockAgent({
+      hooks: {
+        runHookPipeline: async (_hook: string, data: unknown) => {
+          inputPayload = data as Record<string, unknown>;
+          return { stopped: false, lastResult: null };
+        },
+      },
+    });
+    const bus = new MessageBus({ sessionManager: createMockSessionManager(() => agent), sink: createMockSink() });
+    await bus._processMessage({
+      content: [
+        { type: "text", text: "harness " },
+        { type: "untrusted", text: "text" },
+      ],
+      source: "harness",
+    });
+    expect(inputPayload).not.toBeNull();
+    expect(inputPayload!.origin).toBe("harness");
+    // Hooks see flattened text, not the parts structure.
+    expect(inputPayload!.text).toBe("harness \ntext");
   });
 
   it("handles cancellation error silently", async () => {

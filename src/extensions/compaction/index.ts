@@ -76,13 +76,17 @@ export function create(core: CoreContext): ExtensionInstance | null {
   function ensureUserTurnGuard(messages: Message[]): Message[] {
     if (messages.length === 0) return messages;
     const lastMsg = messages[messages.length - 1];
-    if (!lastMsg || lastMsg.role === "user") return messages;
+    // "harness" acts as a user turn on the wire in system-first format.
+    if (!lastMsg || lastMsg.role === "user" || lastMsg.role === "harness") return messages;
 
     return [
       ...messages,
+      // Code-generated guard: harness-provenance so it is never marker-mangled.
+      // The prompt is config text (trusted layer), so no inner escaping.
       new Message({
-        role: "user",
+        role: "harness",
         content: settings.userTurnGuardPrompt,
+        source: "harness",
       }),
     ];
   }
@@ -115,12 +119,18 @@ export function create(core: CoreContext): ExtensionInstance | null {
         }
       }
 
-      // Wrap plain objects as Message instances so _escapeMessages() can call .toJSON()
+      // Summarization call: the system prompt is trusted; the conversation
+      // dump in the user prompt is untrusted model/user content.
       const wrapped = chatMessages.map(
-        (m) => new Message({ role: m.role, content: m.content }),
+        (m) =>
+          new Message({
+            role: m.role,
+            content: m.content,
+            source: m.role === "system" ? "system" : "user",
+          }),
       );
       const stream = agent.llmClient.chatStreamCancellable(
-        wrapped.map((m) => m.toJSON()),
+        wrapped,
         modelConfig,
         [],
         abortController.signal,
@@ -162,11 +172,19 @@ export function create(core: CoreContext): ExtensionInstance | null {
 
       // Replace compacted messages with summary
       if (result.summary) {
-        // Create a summary message with marker wrapper
+        // Harness message: the wrapper tag parts are trusted and reach the
+        // model with their real names; the summary body is model-generated,
+        // so it rides an `untrusted` part that the wire serializer mangles.
+        // Context and session log keep the raw summary.
         const tag = "previous-context-summary";
         const summaryMsg = new Message({
-          role: "user",
-          content: `<${tag}>${result.summary}</${tag}>`,
+          role: "harness",
+          source: "harness",
+          content: [
+            { type: "text", text: `<${tag}>` },
+            { type: "untrusted", text: result.summary },
+            { type: "text", text: `</${tag}>` },
+          ],
         });
 
         // Replace the compacted portion

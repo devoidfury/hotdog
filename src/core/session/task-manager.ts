@@ -1,5 +1,5 @@
 import { logger } from "../logger.ts";
-import { Message } from "../context/message.ts";
+import { Message, type MessageSource } from "../context/message.ts";
 import { LlmError } from "../error.ts";
 import { loadProfileFile, ProfileManager } from "../config/profiles.ts";
 import { type CoreConfigWithExtensions } from "../config/schema-loader.ts";
@@ -42,11 +42,16 @@ export class TaskHandle {
   }
 }
 
+/** Bus surface needed for task-result delivery. */
+export interface TaskResultBus {
+  enqueue(content: string | Array<Record<string, unknown>>, opts?: { source?: MessageSource }): void;
+}
+
 /** Minimal session-manager surface the TaskManager needs for result delivery. */
 export interface TaskManagerSessionManager {
   getAgent: () => AgentLike | undefined;
   /** Look up a session's bus by id; used to route task results to the right session. */
-  getBus?: (sessionId: string) => { enqueue(text: string): void } | undefined;
+  getBus?: (sessionId: string) => TaskResultBus | undefined;
 }
 
 export interface SpawnTaskOptions {
@@ -93,7 +98,7 @@ export class TaskManager {
     statusRef: { value: TaskStatus };
     runPromise: Promise<string>;
   }>;
-  #bus: { enqueue: (text: string) => void } | null;
+  #bus: TaskResultBus | null;
   #profileManager: ProfileManager | undefined;
 
   constructor(options: TaskManagerOptions & TaskManagerRequiredOptions) {
@@ -115,7 +120,7 @@ export class TaskManager {
     this.#sessionManager = sessionManager;
   }
 
-  setBus(bus: { enqueue: (text: string) => void }): void {
+  setBus(bus: TaskResultBus): void {
     this.#bus = bus;
   }
 
@@ -134,7 +139,13 @@ export class TaskManager {
     result: string,
     delivery: { sessionId: string } | null = null,
   ): void {
-    const text = `[Task ${taskId} completed]\n${result}`;
+    // Harness structure: trusted framing around the model-generated result,
+    // which rides an `untrusted` part (raw in context and logs, mangled only
+    // at the wire serializer).
+    const content: Array<Record<string, unknown>> = [
+      { type: "text", text: `[Task ${taskId} completed]\n` },
+      { type: "untrusted", text: result },
+    ];
 
     // Route to the bus of the session that owns the agent which spawned the
     // task. The last-setBus() session is NOT a safe target: in multi-session
@@ -142,7 +153,7 @@ export class TaskManager {
     if (delivery && this.#sessionManager?.getBus) {
       const bus = this.#sessionManager.getBus(delivery.sessionId);
       if (bus) {
-        bus.enqueue(text);
+        bus.enqueue(content, { source: "harness" });
         return;
       }
       // The delegating session is gone (deleted, or the delegator owns no
@@ -156,12 +167,20 @@ export class TaskManager {
     }
 
     // Enqueue only: the bus run loop appends it via agent.run(). Also addMessage()-ing would inject it twice.
+    // The result is harness-generated: the framing stays trusted, the
+    // untrusted part is mangled at the wire.
     if (this.#bus) {
-      this.#bus.enqueue(text);
+      this.#bus.enqueue(content, { source: "harness" });
     } else if (this.#sessionManager) {
       const agent = this.#sessionManager.getAgent();
       if (agent) {
-        agent.addMessage(new Message({ role: "user", content: text }));
+        agent.addMessage(
+          new Message({
+            role: "harness",
+            content,
+            source: "harness",
+          }),
+        );
       }
     }
   }
@@ -242,7 +261,8 @@ export class TaskManager {
     try {
       agent.abortSignal = abortController.signal;
 
-      const runResult = await agent.run(description);
+      // Task descriptions are composed by the delegating model.
+      const runResult = await agent.run(description, undefined, { source: "model" });
 
       if (runResult?.type === 'completion') {
         result = runResult.content;
@@ -290,7 +310,7 @@ export class TaskManager {
       return true;
     }
 
-    task.agent.addMessage(new Message({ role: "user", content: message }));
+    task.agent.addMessage(new Message({ role: "user", content: message, source: "user" }));
     return true;
   }
 

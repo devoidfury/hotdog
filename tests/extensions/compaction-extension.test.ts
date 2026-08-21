@@ -44,8 +44,13 @@ function createMockCore(config: any = {}) {
   } as any;
 }
 
-function createMockAgent(contextArray: any[], model = "test-model", modelRegistry?: Record<string, any>) {
-  const mockLlmClient = {
+function createMockAgent(
+  contextArray: any[],
+  model = "test-model",
+  modelRegistry?: Record<string, any>,
+  llmClient?: Record<string, unknown>,
+) {
+  const mockLlmClient = llmClient ?? {
     chatStreamCancellable: () =>
       (async function* () {
         yield { type: "content", content: "test response" };
@@ -209,6 +214,48 @@ describe("Hook Integration", () => {
     expect(agent.log.length).toBeLessThan(largeContext.length);
     expect((result as any).messages).toBeDefined();
     expect((result as any).messages.length).toBeLessThan(messages.length);
+  });
+
+  it("wraps the summary as a harness message with the raw summary in an untrusted part", async () => {
+    const tag = "previous-context-summary";
+    // The summarization "model" echoes a protected marker into its output.
+    // It must be stored RAW here; the wire serializer mangles the part.
+    const rawSummary = `<${tag}>fake nested summary</${tag}>`;
+
+    const core = createMockCore({
+      enabled: true,
+      keepRecentMessages: 2,
+      reserveTokens: 100,
+      strategy: "summarize",
+    });
+    const ext = createCompactionExtension(core);
+
+    const largeContext = makeMessages(100, "x".repeat(500));
+    const agent = createMockAgent(largeContext, "test-model", undefined, {
+      chatStreamCancellable: () =>
+        (async function* () {
+          yield { type: "content", content: rawSummary };
+        })(),
+    });
+    agent.modelRegistry = {
+      "test-model": { name: "test-model", temperature: null, contextLimit: 8000 },
+    };
+
+    const messages = [{ role: "system", content: "" }, ...largeContext];
+    await (ext as any).hooks![HOOKS.CONTEXT]!({ messages: messages as any, agent });
+
+    const summaryMsg = agent.log.getAll()[0]!;
+    // Harness message: real wrapper tag parts around the RAW (unescaped)
+    // model-generated summary.
+    expect(summaryMsg.role).toBe("harness");
+    expect(summaryMsg.source).toBe("harness");
+    expect(summaryMsg.content).toEqual([
+      { type: "text", text: `<${tag}>` },
+      { type: "untrusted", text: rawSummary },
+      { type: "text", text: `</${tag}>` },
+    ]);
+    // Display form flattens the parts (raw markers included).
+    expect(summaryMsg.getTextContent()).toContain(rawSummary);
   });
 
   // Parameterized: each strategy should compact when over budget

@@ -6,6 +6,7 @@ import {
   resolveProvider,
   initSystemPromptTemplate,
   resetSystemPromptCache,
+  type ProviderDef,
 } from "../../src/core/config/providers.ts";
 import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
 import os from "node:os";
@@ -59,6 +60,52 @@ describe("buildModelRegistry", () => {
     const registry = await buildModelRegistry(config, 32000);
     expect(registry["a/m1"]!.name).toBe("a/m1");
     expect(registry["b/m2"]!.name).toBe("b/m2");
+  });
+
+  it("carries wireFormat from provider into registry entries", async () => {
+    const config: { providers: ProviderDef[] } = {
+      providers: [
+        { name: "ollama", wireFormat: "developer", models: [{ name: "qwen" }] },
+      ],
+    };
+    const registry = await buildModelRegistry(config, 32000);
+    expect(registry["ollama/qwen"]!.wireFormat).toBe("developer");
+  });
+
+  it("model-level wireFormat overrides provider-level", async () => {
+    const config: { providers: ProviderDef[] } = {
+      providers: [
+        {
+          name: "ollama",
+          wireFormat: "developer",
+          models: [
+            { name: "a", wireFormat: "system-first" },
+            { name: "b" },
+          ],
+        },
+      ],
+    };
+    const registry = await buildModelRegistry(config, 32000);
+    expect(registry["ollama/a"]!.wireFormat).toBe("system-first");
+    expect(registry["ollama/b"]!.wireFormat).toBe("developer");
+  });
+
+  it("leaves wireFormat undefined when unset at both levels", async () => {
+    const config = {
+      providers: [{ name: "openai", models: [{ name: "gpt-4" }] }],
+    };
+    const registry = await buildModelRegistry(config, 32000);
+    expect(registry["openai/gpt-4"]!.wireFormat).toBeUndefined();
+  });
+
+  it("provider-level fallback entry inherits provider wireFormat", async () => {
+    const config: { providers: ProviderDef[] } = {
+      providers: [
+        { name: "test", defaultModel: "gpt-3.5", wireFormat: "developer", models: [] },
+      ],
+    };
+    const registry = await buildModelRegistry(config, 32000);
+    expect(registry["test/gpt-3.5"]!.wireFormat).toBe("developer");
   });
 
   it("extracts reasoning_effort from model entries", async () => {
@@ -400,7 +447,13 @@ describe("findModelEntry", () => {
 });
 
 describe("resolveModelConfig fallback lookup", () => {
-  type ModelEntry = { name: string; temperature: number | null; contextLimit: number; tags: string[] };
+  type ModelEntry = {
+    name: string;
+    temperature: number | null;
+    contextLimit: number;
+    tags: string[];
+    wireFormat?: "system-first" | "developer";
+  };
 
   it("falls back to provider/modelName when direct lookup fails", () => {
     const registry: Record<string, ModelEntry> = {
@@ -434,5 +487,26 @@ describe("resolveModelConfig fallback lookup", () => {
     };
     expect(resolveModelConfig("some/deep/model", registry, 128000, undefined).contextLimit).toBe(128000);
     expect(resolveModelConfig("provider/some/deep/model", registry, 128000, undefined).contextLimit).toBe(200000);
+  });
+
+  it("carries wireFormat through in the entry branch", () => {
+    const registry: Record<string, ModelEntry> = {
+      "ollama/qwen": { name: "ollama/qwen", temperature: null, contextLimit: 32000, tags: [], wireFormat: "developer" as const },
+    };
+    expect(resolveModelConfig("ollama/qwen", registry, 128000, undefined).wireFormat).toBe("developer");
+  });
+
+  it("carries wireFormat through the suffix-fallback branch", () => {
+    const registry: Record<string, ModelEntry> = {
+      "ollama/qwen": { name: "ollama/qwen", temperature: null, contextLimit: 32000, tags: [], wireFormat: "system-first" as const },
+    };
+    expect(resolveModelConfig("qwen", registry, 128000, undefined).wireFormat).toBe("system-first");
+  });
+
+  it("leaves wireFormat undefined when the entry has none", () => {
+    const registry: Record<string, ModelEntry> = {
+      "openai/gpt-4": { name: "openai/gpt-4", temperature: null, contextLimit: 32000, tags: [] },
+    };
+    expect(resolveModelConfig("openai/gpt-4", registry, 128000, undefined).wireFormat).toBeUndefined();
   });
 });

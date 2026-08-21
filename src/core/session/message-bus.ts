@@ -1,5 +1,6 @@
 import { formatError, isExpectedError, LlmError } from "../error.ts";
 import { OUTPUT_EVENT, OutputEvent } from "../context/output.ts";
+import { contentToText, type MessageSource } from "../context/message.ts";
 import { HOOKS, isInputTransform, type InputHookResult } from "../hooks.ts";
 import { parseCommand, ACTIONS, ParsedCommand, type CommandRegistryLike } from "../commands.ts";
 import type { CommandResult } from "../extensions/registries.ts";
@@ -17,11 +18,25 @@ export interface MessageBusAgent {
       opts?: { shouldStop?: (result: unknown) => boolean },
     ): Promise<unknown>;
   };
-  run(text: string): Promise<unknown>;
+  run(
+    content: string | Array<Record<string, unknown>>,
+    images?: unknown,
+    opts?: { source?: MessageSource },
+  ): Promise<unknown>;
   resetCancel(): void;
   cancel(): void;
   commandRegistry?: CommandRegistryLike | null;
   executeCommand(cmd: ParsedCommand): Promise<CommandResult | null>;
+}
+
+/**
+ * A queued bus message. `content` is plain text or content parts (so harness
+ * messages can carry `untrusted` parts, mangled only at the wire); `source`
+ * carries provenance to the agent.
+ */
+export interface BusQueueItem {
+  content: string | Array<Record<string, unknown>>;
+  source?: MessageSource;
 }
 
 export interface Sink {
@@ -39,7 +54,7 @@ export interface MessageBusOptions {
 export class MessageBus {
   #sessionManager: MessageBusSessionManager;
   #sink: Sink;
-  #queue: string[];
+  #queue: BusQueueItem[];
   #isRunning: boolean;
   #abortController: AbortController;
   #waiter: { resolve: () => void } | null;
@@ -56,8 +71,8 @@ export class MessageBus {
     this.#waiter = null;
   }
 
-  enqueue(text: string): void {
-    this.#queue.push(text);
+  enqueue(content: string | Array<Record<string, unknown>>, opts?: { source?: MessageSource }): void {
+    this.#queue.push({ content, source: opts?.source });
     this._wakeWaiter();
   }
 
@@ -106,10 +121,10 @@ export class MessageBus {
 
   /** @internal */
   get queue(): string[] {
-    return this.#queue;
+    return this.#queue.map((item) => contentToText(item.content));
   }
-  set queue(v: string[]) {
-    this.#queue = v;
+  set queue(v: Array<string | BusQueueItem>) {
+    this.#queue = v.map((item) => (typeof item === "string" ? { content: item } : item));
   }
 
   /** @internal */
@@ -135,15 +150,15 @@ export class MessageBus {
 
   /** Blocks until cancelled. */
   async run(): Promise<void> {
-    for await (const text of this._messages(false)) {
-      await this._processMessage(text);
+    for await (const item of this._messages(false)) {
+      await this._processMessage(item);
     }
   }
 
   /** Like run(), but drains the queue after cancellation before exiting. */
   async runUntilCancelled(): Promise<void> {
-    for await (const text of this._messages(true)) {
-      await this._processMessage(text);
+    for await (const item of this._messages(true)) {
+      await this._processMessage(item);
     }
   }
 
@@ -156,7 +171,7 @@ export class MessageBus {
   }
 
   /** Yields queued messages; drains remaining ones after cancellation when drain is set. */
-  async *_messages(drain: boolean = false): AsyncGenerator<string> {
+  async *_messages(drain: boolean = false): AsyncGenerator<BusQueueItem> {
     const signal = this.#abortController.signal;
     while (true) {
       while (this.#queue.length > 0) {
@@ -200,7 +215,11 @@ export class MessageBus {
   }
 
   /** Runs the input hook pipeline, then hands off to the agent. */
-  async _processMessage(text: string): Promise<void> {
+  async _processMessage(item: string | BusQueueItem): Promise<void> {
+    // Accept a bare string (tests / simple callers) or a full queue item.
+    const source: MessageSource | undefined = typeof item === "string" ? undefined : item.source;
+    let content: string | Array<Record<string, unknown>> =
+      typeof item === "string" ? item : item.content;
     this.#isRunning = true;
     const agent = this.#sessionManager.getAgent();
     if (!agent) {
@@ -216,7 +235,9 @@ export class MessageBus {
     // Reset before processing so a leftover cancel from an interrupt can't swallow this run.
     agent.resetCancel();
 
-    const inputData = { text, source: "interactive", agent };
+    // Hooks see flattened text; the structured content (with its trust
+    // parts) is what reaches the agent.
+    const inputData = { text: contentToText(content), source: "interactive", origin: source, agent };
     let inputHandled = false;
     if (agent?.hooks) {
       const inputResult = await agent.hooks.runHookPipeline(
@@ -228,7 +249,12 @@ export class MessageBus {
       const lastResult = (inputResult as { lastResult?: unknown }).lastResult;
       const transformed = lastResult as InputHookResult | undefined;
       if (isInputTransform(transformed)) {
-        text = transformed.text;
+        // A transform flattens the content. If the item carried structured
+        // (harness) content, the result must not inherit the harness
+        // exemption: wrap it as an untrusted part so the wire mangles it.
+        content = Array.isArray(content)
+          ? [{ type: "untrusted", text: transformed.text }]
+          : transformed.text;
       }
     }
 
@@ -239,7 +265,7 @@ export class MessageBus {
     }
 
     try {
-      await agent.run(text);
+      await agent.run(content, undefined, source ? { source } : undefined);
     } catch (e: unknown) {
       // Suppress cancellation errors on interrupt — the UI already
       // prints an "Interrupted" message, so the full error is noise.

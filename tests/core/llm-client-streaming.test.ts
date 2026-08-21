@@ -4,6 +4,7 @@ import { describe, it, expect, beforeEach, afterEach } from "bun:test";
 import { LlmClient } from "../../src/core/llm-client/client.ts";
 import type { ModelConfig } from "../../src/core/config/providers.ts";
 import { LlmError } from "../../src/core/error.ts";
+import { Message } from "../../src/core/context/message.ts";
 
 function mc(overrides: Partial<ModelConfig> = {}): ModelConfig {
   return { name: "test-model", temperature: null, contextLimit: 128000, tags: [], ...overrides };
@@ -60,7 +61,7 @@ describe("LlmClient.ping", () => {
 
 describe("LlmClient.chatStreamCancellable", () => {
   function makeMsg(role: string, content: string) {
-    return { role, content, toJSON: () => ({ role, content }) };
+    return new Message({ role, content });
   }
 
   function setupClient() {
@@ -100,7 +101,7 @@ describe("LlmClient.chatStreamCancellable", () => {
   it("returns an async generator", () => {
     const client = new LlmClient({ chatTimeoutSecs: 30, maxRetries: 3, baseUrl: "http://test.com" });
     const gen = client.chatStreamCancellable(
-      [{ role: "user", content: "Hi" }],
+      [makeMsg("user", "Hi")],
       mc(),
     );
     expect(gen[Symbol.asyncIterator]).toBeDefined();
@@ -181,7 +182,7 @@ describe("LlmClient.chatStreamCancellable — network errors, timeouts, cancella
   });
 
   function makeMsg(role: string, content: string) {
-    return { role, content, toJSON: () => ({ role, content }) };
+    return new Message({ role, content });
   }
 
   function sseResponse(content: string): Response {

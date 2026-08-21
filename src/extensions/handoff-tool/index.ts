@@ -230,9 +230,10 @@ export function create(core: CoreContext): ExtensionInstance {
           await agent.ensureSystemPrompt();
 
           // Enqueue the handoff content as the first user message
-          // This triggers the agent loop to start the next phase
+          // This triggers the agent loop to start the next phase.
+          // The model composed the handoff, so tag it as model-sourced.
           const message = buildHandoffMessage(handoff);
-          agent.enqueue(message);
+          agent.enqueue(message, { source: "model" });
         } catch (e: unknown) {
           // If something goes wrong, emit an error but don't break the loop
           const errorMsg = e instanceof Error ? e.message : String(e);

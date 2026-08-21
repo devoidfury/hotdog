@@ -11,6 +11,7 @@ import {
   type FeedResult,
   type MdDocument,
 } from "../../../utils/md-parser.ts";
+import { contentToText } from "../../../core/context/message.ts";
 
 // Debug instrumentation, enabled with ?debug=1 in the URL.
 const DEBUG = typeof window !== "undefined" && new URLSearchParams(window.location.search).has("debug");
@@ -52,9 +53,10 @@ interface CompactingMessage { message: string; }
 interface CommandResultMessage { content: string; }
 
 // Log entry as returned by the server's logViewed message.
+// `content` may be raw content parts (harness messages); flatten via contentToText().
 interface LogEntry {
   source: string;
-  content: string;
+  content: string | Array<Record<string, unknown>>;
   images?: Array<{ url: string }>;
   reasoning_content?: string | null;
   tool_calls?: Array<{ id: string; name: string; args: Record<string, unknown> }> | null;
@@ -762,10 +764,17 @@ export function createMessageList(
    */
   function renderLogEntries(entries: LogEntry[]): void {
     for (const entry of entries) {
+      // content may be raw parts (harness messages); flatten once per entry.
+      const content =
+        entry.content == null
+          ? ""
+          : typeof entry.content === "string"
+            ? entry.content
+            : contentToText(entry.content);
       switch (entry.source) {
         case "input":
         case "prompt":
-          handleUserMessage({ content: entry.content });
+          handleUserMessage({ content });
           break;
         case "llm": {
           if (entry.reasoning_content?.trim()) {
@@ -783,16 +792,16 @@ export function createMessageList(
               handleToolCall({ name, args });
             }
           }
-          if (entry.content?.trim()) {
-            handleAssistantMessage({ content: entry.content });
+          if (content.trim()) {
+            handleAssistantMessage({ content });
           }
           break;
         }
         case "tool_result":
-          handleToolResult({ name: extractToolNameFromEntry(entry.content || ""), output: entry.content });
+          handleToolResult({ name: extractToolNameFromEntry(content), output: content });
           break;
         case "compaction":
-          handleCompacting({ message: entry.content });
+          handleCompacting({ message: content });
           break;
       }
     }

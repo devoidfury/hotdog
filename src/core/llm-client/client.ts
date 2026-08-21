@@ -1,6 +1,8 @@
 import { retryWithBackoff } from "./retry.ts";
 import { parseSse } from "./sse-parser.ts";
+import { wireFormatFor } from "./serialize.ts";
 import { MarkerMangler } from "../marker-mangler.ts";
+import type { Message } from "../context/message.ts";
 import { LlmError } from "../error.ts";
 import { ToolDef } from "../extensions/tool-registry.ts";
 import { hotdogFetch } from "@utils/fetch.ts";
@@ -94,64 +96,17 @@ export class LlmClient {
     }
   }
 
-  _escapeMessages(messages: Array<Record<string, unknown>>): Array<Record<string, unknown>> {
-    if (!this.#mangler) return messages;
-    const mangler = this.#mangler;
-    return messages.map((msg) => {
-      // Skip mangling system messages — they contain the authoritative tag names
-      // the agent should use. Mangling them breaks the contract.
-      if (msg.role === "system") return msg;
-      const toJSON = (msg as { toJSON?: () => Record<string, unknown> }).toJSON;
-      const json =
-        typeof toJSON === "function" ? (toJSON as () => Record<string, unknown>).call(msg) : { ...msg };
-      if (json.content != null) {
-        if (Array.isArray(json.content)) {
-          json.content = (json.content as Array<Record<string, unknown>>).map((part) => {
-            if (part.type === "text" && typeof part.text === "string") {
-              return { ...part, text: mangler.escape(part.text as string) };
-            }
-            return part;
-          });
-        } else if (typeof json.content === "string") {
-          json.content = mangler.escape(json.content);
-        }
-      }
-      if (json.tool_calls) {
-        json.tool_calls = (json.tool_calls as Array<Record<string, unknown>>).map((tc) => {
-          const clonedTc: Record<string, unknown> = { ...tc };
-          const fn = clonedTc.function as Record<string, unknown> | undefined;
-          if (fn) {
-            clonedTc.function = { ...fn };
-            if (clonedTc.function && typeof (clonedTc.function as Record<string, unknown>).name === "string")
-              (clonedTc.function as Record<string, unknown>).name = mangler.escape(
-                (clonedTc.function as Record<string, unknown>).name as string,
-              );
-            if (
-              clonedTc.function &&
-              typeof (clonedTc.function as Record<string, unknown>).arguments === "string"
-            )
-              (clonedTc.function as Record<string, unknown>).arguments = mangler.escape(
-                (clonedTc.function as Record<string, unknown>).arguments as string,
-              );
-          }
-          return clonedTc;
-        });
-      }
-      return json;
-    });
-  }
-
   buildChatRequest(
-    messages: Array<Record<string, unknown>>,
+    messages: Message[],
     modelConfig: ModelConfig,
     tools: Array<ToolDef> | null | undefined,
     stream: boolean = this.stream,
   ): Record<string, unknown> {
     const modelName = modelConfig.name.split("/").pop() || modelConfig.name;
-    const escapedMessages = this._escapeMessages(messages);
+    const wireMessages = wireFormatFor(modelConfig).serialize(messages, this.#mangler);
     const request: Record<string, unknown> = {
       model: modelName,
-      messages: escapedMessages,
+      messages: wireMessages,
       stream: stream,
     };
 
@@ -175,7 +130,7 @@ export class LlmClient {
   }
 
   async *chatStreamCancellable(
-    messages: Array<Record<string, unknown>>,
+    messages: Message[],
     modelConfig: ModelConfig,
     tools: Array<ToolDef> = [],
     cancelToken: AbortSignal | null = null,
@@ -225,7 +180,7 @@ export class LlmClient {
   }
 
   async *chatStreamWithModelConfig(
-    messages: Array<Record<string, unknown>>,
+    messages: Message[],
     modelConfig: ModelConfig,
     tools: Array<ToolDef> = [],
     sessionId?: string,

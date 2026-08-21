@@ -2,6 +2,15 @@
 
 import { describe, it, expect } from "bun:test";
 import { TaskManager, TaskHandle, TASK_STATUS } from "../../src/core/session/task-manager.ts";
+import { contentToText } from "../../src/core/context/message.ts";
+
+/** The harness structure a task result is delivered as. */
+function resultParts(taskId: string, result: string) {
+  return [
+    { type: "text", text: `[Task ${taskId} completed]\n` },
+    { type: "untrusted", text: result },
+  ];
+}
 
 describe("TaskHandle", () => {
   it("creates with taskId and status", () => {
@@ -177,11 +186,12 @@ describe("TaskManager", () => {
       manager._onTaskComplete("task-1", "Result text");
 
       // Exactly one injection: the bus path only. The bus run loop appends
-      // the enqueued text to the manager's context via agent.run(), so a
+      // the enqueued content to the manager's context via agent.run(), so a
       // direct addMessage() here as well would double it.
       expect(enqueued).toHaveLength(1);
-      expect(enqueued[0]).toContain("Task task-1 completed");
-      expect(enqueued[0]).toContain("Result text");
+      const enqueuedText = contentToText(enqueued[0]);
+      expect(enqueuedText).toContain("Task task-1 completed");
+      expect(enqueuedText).toContain("Result text");
       expect(added).toHaveLength(0);
     });
 
@@ -198,8 +208,41 @@ describe("TaskManager", () => {
       manager._onTaskComplete("task-1", "Result text");
 
       expect(managerContext).toHaveLength(1);
-      expect(managerContext[0].role).toBe("user");
-      expect(managerContext[0].content).toBe("[Task task-1 completed]\nResult text");
+      expect(managerContext[0].role).toBe("harness");
+      // Trusted framing around the raw (unescaped) model result.
+      expect(managerContext[0].content).toEqual(resultParts("task-1", "Result text"));
+    });
+
+    it("enqueues results with harness provenance (bus path)", () => {
+      const enqueued: Array<{ content: any; source?: string }> = [];
+      const manager = createManager();
+      manager.setBus({
+        enqueue: (content: any, opts?: { source?: string }) =>
+          enqueued.push({ content, source: opts?.source }),
+      });
+
+      manager._onTaskComplete("task-1", "Result text");
+
+      expect(enqueued).toHaveLength(1);
+      // Harness structure: trusted framing + raw result in an untrusted
+      // part (stored raw on disk, mangled only at the wire).
+      expect(enqueued[0]!.content).toEqual(resultParts("task-1", "Result text"));
+      expect(enqueued[0]!.source).toBe("harness");
+    });
+
+    it("tags the no-bus fallback message with harness provenance", () => {
+      const added: any[] = [];
+      const manager = createManager();
+      manager.setSessionManager({
+        getAgent: () => ({ addMessage(msg: any) { added.push(msg); } }) as any,
+      });
+
+      manager._onTaskComplete("task-1", "Result text");
+
+      expect(added).toHaveLength(1);
+      expect(added[0].role).toBe("harness");
+      expect(added[0].source).toBe("harness");
+      expect(added[0].content).toEqual(resultParts("task-1", "Result text"));
     });
 
     it("handles missing session manager and bus gracefully", () => {
@@ -208,7 +251,7 @@ describe("TaskManager", () => {
     });
 
     it("routes result to the spawning agent's session bus, not the last-set bus", () => {
-      const enqueued: Record<string, string[]> = {
+      const enqueued: Record<string, Array<Array<Record<string, unknown>>>> = {
         "sess-a": [],
         "sess-b": [], // created after sess-a; its bus would have been setBus() last
       };
@@ -217,28 +260,29 @@ describe("TaskManager", () => {
         getAgent: () => null,
         getBus: (sessionId: string) =>
           sessionId in enqueued
-            ? { enqueue: (m: string) => enqueued[sessionId]!.push(m) }
+            ? { enqueue: (m: any) => enqueued[sessionId]!.push(m) }
             : undefined,
       } as any);
       // Simulates a later session entry overwriting the single-bus wiring.
-      manager.setBus({ enqueue: (m: string) => enqueued["sess-b"]!.push(m) } as any);
+      manager.setBus({ enqueue: (m: any) => enqueued["sess-b"]!.push(m) } as any);
 
       manager._onTaskComplete("task-1", "Result text", { sessionId: "sess-a" });
 
       expect(enqueued["sess-a"]).toHaveLength(1);
-      expect(enqueued["sess-a"]![0]).toContain("Task task-1 completed");
-      expect(enqueued["sess-a"]![0]).toContain("Result text");
+      const routed = contentToText(enqueued["sess-a"]![0]);
+      expect(routed).toContain("Task task-1 completed");
+      expect(routed).toContain("Result text");
       expect(enqueued["sess-b"]).toHaveLength(0);
     });
 
     it("drops the result when the delivery session has no bus (deleted session / non-session delegator)", () => {
-      const viaBus: string[] = [];
+      const viaBus: unknown[] = [];
       const manager = createManager();
       manager.setSessionManager({
         getAgent: () => null,
         getBus: () => undefined, // e.g. a deleted session or a task agent with no session entry
       } as any);
-      manager.setBus({ enqueue: (m: string) => viaBus.push(m) } as any);
+      manager.setBus({ enqueue: (m: any) => viaBus.push(m) } as any);
 
       manager._onTaskComplete("task-1", "Result text", { sessionId: "no-such-session" });
 
@@ -247,12 +291,12 @@ describe("TaskManager", () => {
     });
 
     it("falls back to the last-set bus when session manager has no getBus", () => {
-      const viaBus: string[] = [];
+      const viaBus: unknown[] = [];
       const manager = createManager();
       manager.setSessionManager({
         getAgent: () => null,
       } as any);
-      manager.setBus({ enqueue: (m: string) => viaBus.push(m) } as any);
+      manager.setBus({ enqueue: (m: any) => viaBus.push(m) } as any);
 
       manager._onTaskComplete("task-1", "Result text", { sessionId: "sess-a" });
 
@@ -260,7 +304,7 @@ describe("TaskManager", () => {
     });
 
     it("spawnTask delivers completion to the managerAgent's session bus", async () => {
-      const enqueued: Record<string, string[]> = {
+      const enqueued: Record<string, Array<Array<Record<string, unknown>>>> = {
         "sess-a": [],
         "sess-b": [],
       };
@@ -288,18 +332,19 @@ describe("TaskManager", () => {
         getAgent: () => null,
         getBus: (sessionId: string) =>
           sessionId in enqueued
-            ? { enqueue: (m: string) => enqueued[sessionId]!.push(m) }
+            ? { enqueue: (m: any) => enqueued[sessionId]!.push(m) }
             : undefined,
       } as any);
-      manager.setBus({ enqueue: (m: string) => enqueued["sess-b"]!.push(m) } as any);
+      manager.setBus({ enqueue: (m: any) => enqueued["sess-b"]!.push(m) } as any);
 
       await manager.spawnTask("task-1", "Do it", { managerAgent: { sessionId: "sess-a" } });
       // runTask is fire-and-forget; give it a tick to settle.
       await new Promise((r) => setTimeout(r, 10));
 
       expect(enqueued["sess-a"]).toHaveLength(1);
-      expect(enqueued["sess-a"]![0]).toContain("Task task-1 completed");
-      expect(enqueued["sess-a"]![0]).toContain("task done");
+      const delivered = contentToText(enqueued["sess-a"]![0]);
+      expect(delivered).toContain("Task task-1 completed");
+      expect(delivered).toContain("task done");
       expect(enqueued["sess-b"]).toHaveLength(0);
     });
   });

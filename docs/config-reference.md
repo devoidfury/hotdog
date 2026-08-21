@@ -600,6 +600,7 @@ The `providers` array defines available AI providers and their models. Each prov
 | `defaultModel` | `string` | no | — | Default model name for this provider (used when no models array is present). |
 | `temperature` | `number` | no | — | Default temperature for all models in this provider. |
 | `contextLimit` | `number` | no | 128000 | Context window size limit for all models in this provider (triggers compaction when exceeded). |
+| `wireFormat` | `string` | no | `"system-first"` | Chat request wire format for this provider's models: `"system-first"` (llama.cpp/Ollama-style, harness messages ride `role:"user"`) or `"developer"` (OpenAI-style, harness messages sent as `role:"developer"`). Overridable per model. |
 | `models` | `array` | no | `[]` | Array of model definitions. |
 
 ### Model Object (inside `providers[].models[]`)
@@ -610,6 +611,7 @@ The `providers` array defines available AI providers and their models. Each prov
 | `contextLimit` | `number` | no | 128000 | Context window size limit for this model (triggers compaction when exceeded). |
 | `temperature` | `number` | no | — | Override temperature for this model. |
 | `reasoning_effort` | `string` | no | — | Reasoning effort level (e.g. `"max"`, `"medium"`, `"low"`). Also accepts camelCase `reasoningEffort`. |
+| `wireFormat` | `string` | no | — | Per-model wire format override (`"system-first"` or `"developer"`). Falls back to the provider-level `wireFormat`, then to `"system-first"`. |
 | `tags` | `array` | no | `[]` | Arbitrary tags for model discovery and filtering. |
 | `maxToolDifficulty` | `number` | no | — | Max tool difficulty (1–5) for this model. Tools above this score are hidden. Overrides `defaultMaxToolDifficulty`. Takes lower priority than CLI `--max-tool-difficulty`. |
 
@@ -649,6 +651,15 @@ The `providers` array defines available AI providers and their models. Each prov
 ```
 
 When a provider has no `models` array but defines `defaultModel`, that model is automatically registered with the provider's `temperature` and `contextLimit`.
+
+### Wire Format
+
+`wireFormat` controls how harness-injected messages (compaction summaries, task results, user-turn guards) are serialized into the chat request. Chat templates are per-model even on the same backend, so this is a per-model setting:
+
+- `"system-first"` (default) — llama.cpp/Ollama-style templates where only the first message(s) may be `system`. Harness messages are sent as `role:"user"` with their real (un-mangled) marker content.
+- `"developer"` — OpenAI-style templates. Harness messages are sent as `role:"developer"`; everything else is identical to `"system-first"`.
+
+Set it at the provider level to apply to all of the provider's models, or on individual model entries to override. When unset, `"system-first"` is used.
 
 ---
 

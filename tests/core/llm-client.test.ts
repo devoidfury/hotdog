@@ -84,7 +84,7 @@ describe("LlmClient.resolveProviderSettings", () => {
 describe("LlmClient.buildChatRequest", () => {
   it("builds request with all fields", () => {
     const client = new LlmClient({ chatTimeoutSecs: 600, maxRetries: 12 });
-    const messages = [new Message({ role: "user", content: "Hello" })] as unknown as Record<string, unknown>[];
+    const messages = [new Message({ role: "user", content: "Hello" })];
     const request = client.buildChatRequest(
       messages,
       mc({ temperature: 0.7 }),
@@ -128,7 +128,7 @@ describe("LlmClient.buildChatRequest", () => {
       toolCalls: [{ id: "tc1", type: "function", function: { name: "bash", arguments: "{}" } }],
     });
     const request = client.buildChatRequest(
-      [msg] as unknown as Record<string, unknown>[],
+      [msg],
       mc(),
       null,
     );
@@ -151,7 +151,7 @@ describe("LlmClient.buildChatRequest", () => {
       }],
     });
     const request = client.buildChatRequest(
-      [msg] as unknown as Record<string, unknown>[],
+      [msg],
       mc(),
       null,
     );
@@ -171,7 +171,7 @@ describe("LlmClient.buildChatRequest", () => {
       toolCallId: "tc1",
     });
     const request = client.buildChatRequest(
-      [msg] as unknown as Record<string, unknown>[],
+      [msg],
       mc(),
       null,
     );
@@ -255,13 +255,14 @@ describe("LlmClient markerMangler", () => {
 describe("LlmClient array content escaping", () => {
   it("escapes array content parts with type text", () => {
     const client = new LlmClient({ chatTimeoutSecs: 600, maxRetries: 12 });
-    const msg = {
+    const toolCallTag = "tool-call";
+    const msg = new Message({
       role: "user",
       content: [
-        { type: "text", text: "Use <tool-call name=\"read\"> to read files." },
+        { type: "text", text: `Use <${toolCallTag} name="read"> to read files.` },
         { type: "image_url", image_url: { url: "data:image/png;base64,abc" } },
       ],
-    };
+    });
     const request = client.buildChatRequest(
       [msg],
       mc(),
@@ -447,7 +448,7 @@ describe("LlmClient.chatStreamWithModelConfig", () => {
 
     const events = [];
     for await (const event of client.chatStreamWithModelConfig(
-      [{ role: "user", content: "Hi" }],
+      [new Message({ role: "user", content: "Hi" })],
       mc({ temperature: 0.7 }),
     )) {
       events.push(event);

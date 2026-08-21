@@ -47,6 +47,8 @@ describe('Agent — end-to-end loop', () => {
     expect(ctx).toHaveLength(2);
     expect(ctx[0]!.role).toBe('user');
     expect(ctx[1]!.role).toBe('assistant');
+    // Model output is tagged so provenance survives persistence/replay.
+    expect(ctx[1]!.source).toBe('model');
   });
 
   it('should handle reasoning content alongside text', async () => {
@@ -65,6 +67,28 @@ describe('Agent — end-to-end loop', () => {
     const completion = expectCompletion(result);
     expect(completion.content).toBe('Here is my answer.');
     expect(agent.log.at(1)!.reasoningContent).toBe('I need to think about this carefully.');
+  });
+
+  it('run() with harness source creates a harness-role message', async () => {
+    const mockLLM = new MockLLMClient({
+      responseSequences: [[
+        { type: 'content', content: 'ok' },
+        { type: 'usage', data: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 } },
+      ]],
+    });
+
+    const { agent } = createFixture({ mockLLM });
+
+    await agent.run('[Task t1 completed]\ndone', undefined, { source: 'harness' });
+
+    const harnessMsg = agent.log.getAll().find((m) => m.role === 'harness');
+    expect(harnessMsg).toBeTruthy();
+    expect(harnessMsg!.source).toBe('harness');
+
+    // Without opts the message is plain user input.
+    await agent.run('plain user input');
+    const plainMsg = agent.log.getAll().filter((m) => m.role === 'user').at(-1);
+    expect(plainMsg!.source).toBe('user');
   });
 
   // ── Single tool call ───────────────────────────────────────────────────────
@@ -1011,11 +1035,23 @@ describe('Agent — end-to-end loop', () => {
 
   describe('enqueue', () => {
     it('calls enqueueCallback when configured', async () => {
-      const enqueued: string[] = [];
+      const enqueued: Array<string | unknown[]> = [];
       const { agent } = createFixture({});
-      agent.enqueueCallback = (text: string) => { enqueued.push(text); };
+      agent.enqueueCallback = (content) => { enqueued.push(content); };
       agent.enqueue('test message');
       expect(enqueued).toEqual(['test message']);
+    });
+
+    it('passes content parts through verbatim', async () => {
+      const enqueued: Array<string | unknown[]> = [];
+      const { agent } = createFixture({});
+      agent.enqueueCallback = (content) => { enqueued.push(content); };
+      const parts = [
+        { type: 'text', text: '[Task t1 completed]\n' },
+        { type: 'untrusted', text: 'raw result' },
+      ];
+      agent.enqueue(parts, { source: 'harness' });
+      expect(enqueued).toEqual([parts]);
     });
   });
 

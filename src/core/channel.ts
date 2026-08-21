@@ -1,5 +1,5 @@
 import { parseCommand, Command, type ParsedCommand } from "./commands.ts";
-import { OutputEvent } from "./context/output.ts";
+import { OUTPUT_EVENT, OutputEvent } from "./context/output.ts";
 import type { QuestionOption } from "./session/index.ts";
 
 // Handled locally by the Channel; never passed through to the agent.
@@ -176,52 +176,52 @@ export abstract class Channel {
       const profile = info?.profile ? ` (${info.profile})` : "";
       lines.push(`  ${id}${model}${profile}${current}`);
     }
-    this.write({ type: 7, content: lines.join("\n") }); // 7 = COMMAND_RESULT
+    this.write({ type: OUTPUT_EVENT.COMMAND_RESULT, content: lines.join("\n") });
   }
 
   public async handleAttach(cmdText: string): Promise<void> {
     const sessionId = cmdText.replace("attach ", "").trim();
     if (!sessionId) {
-      this.write({ type: 7, content: "Usage: /attach <sessionId>" });
+      this.write({ type: OUTPUT_EVENT.COMMAND_RESULT, content: "Usage: /attach <sessionId>" });
       return;
     }
     const info = this.sessionManager.getSessionInfo(sessionId);
     if (!info) {
-      this.write({ type: 7, content: `Session not found: ${sessionId}` });
+      this.write({ type: OUTPUT_EVENT.COMMAND_RESULT, content: `Session not found: ${sessionId}` });
       return;
     }
     this.attach(sessionId);
-    this.write({ type: 7, content: `Attached to session ${sessionId}` });
+    this.write({ type: OUTPUT_EVENT.COMMAND_RESULT, content: `Attached to session ${sessionId}` });
   }
 
   public async handleDetach(cmdText: string): Promise<void> {
     const sessionId = cmdText.replace("detach ", "").trim();
     if (!sessionId) {
-      this.write({ type: 7, content: "Usage: /detach <sessionId>" });
+      this.write({ type: OUTPUT_EVENT.COMMAND_RESULT, content: "Usage: /detach <sessionId>" });
       return;
     }
     this.detach(sessionId);
-    this.write({ type: 7, content: `Detached from session ${sessionId}` });
+    this.write({ type: OUTPUT_EVENT.COMMAND_RESULT, content: `Detached from session ${sessionId}` });
   }
 
   public async handleSwitch(cmdText: string): Promise<void> {
     const sessionId = cmdText.replace("switch ", "").trim();
     if (!sessionId) {
-      this.write({ type: 7, content: "Usage: /switch <sessionId>" });
+      this.write({ type: OUTPUT_EVENT.COMMAND_RESULT, content: "Usage: /switch <sessionId>" });
       return;
     }
     if (!this.switchSession(sessionId)) {
       this.write({
-        type: 7,
+        type: OUTPUT_EVENT.COMMAND_RESULT,
         content: `Cannot switch to session ${sessionId} — not attached`,
       });
       return;
     }
-    this.write({ type: 7, content: `Switched to session ${sessionId}` });
+    this.write({ type: OUTPUT_EVENT.COMMAND_RESULT, content: `Switched to session ${sessionId}` });
   }
 
   public async handleUnknown(cmdText: string): Promise<void> {
-    this.write({ type: 7, content: `Unknown command: ${cmdText}` });
+    this.write({ type: OUTPUT_EVENT.COMMAND_RESULT, content: `Unknown command: ${cmdText}` });
   }
 
   cancel(): void {

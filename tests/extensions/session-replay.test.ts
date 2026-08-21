@@ -137,7 +137,7 @@ test("replayEntriesIntoContext handles tool result entries", () => {
   expect(agent.log.at(0)!.toolCallId).toBe("tc_1");
 });
 
-test("replayEntriesIntoContext handles compaction entries as user messages", () => {
+test("replayEntriesIntoContext handles compaction entries as harness messages", () => {
   const agent = createMockAgent();
   const entries: LogEntry[] = [{
     ts: "2024-01-01T00:00:00Z",
@@ -148,8 +148,107 @@ test("replayEntriesIntoContext handles compaction entries as user messages", () 
 
   const replayed = replayEntriesIntoContext(agent, entries);
   expect(replayed).toBe(1);
-  expect(agent.log.at(0)!.role).toBe("user");
+  expect(agent.log.at(0)!.role).toBe("harness");
+  expect(agent.log.at(0)!.source).toBe("harness");
   expect(agent.log.at(0)!.content).toContain("[Compacted 5 messages]");
+});
+
+test("replayEntriesIntoContext restores harness provenance from origin", () => {
+  const agent = createMockAgent();
+  const entries: LogEntry[] = [
+    { ts: "2024-01-01T00:00:00Z", session_id: "test", source: LOG_SOURCE.INPUT, content: "Task result", origin: "harness" },
+    { ts: "2024-01-01T00:00:01Z", session_id: "test", source: LOG_SOURCE.LLM, content: "Reply to task result", origin: "harness" },
+    { ts: "2024-01-01T00:00:02Z", session_id: "test", source: LOG_SOURCE.INPUT, content: "Normal user input" },
+  ];
+
+  const replayed = replayEntriesIntoContext(agent, entries);
+  expect(replayed).toBe(3);
+  // Harness origin survives the round-trip: role "harness" plus the mangle
+  // exemption the wire serializer applies to it.
+  expect(agent.log.at(0)!.role).toBe("harness");
+  expect(agent.log.at(0)!.source).toBe("harness");
+  expect(agent.log.at(1)!.role).toBe("harness");
+  expect(agent.log.at(1)!.source).toBe("harness");
+  // Entries without origin stay untagged (and keep their channel role).
+  expect(agent.log.at(2)!.role).toBe("user");
+  expect(agent.log.at(2)!.source).toBeUndefined();
+});
+
+test("replayEntriesIntoContext restores model provenance on LLM entries", () => {
+  const agent = createMockAgent();
+  const entries: LogEntry[] = [
+    { ts: "2024-01-01T00:00:00Z", session_id: "test", source: LOG_SOURCE.LLM, content: "Model reply", origin: "model" },
+    { ts: "2024-01-01T00:00:01Z", session_id: "test", source: LOG_SOURCE.LLM, content: "Untagged legacy reply" },
+    { ts: "2024-01-01T00:00:02Z", session_id: "test", source: LOG_SOURCE.LLM, content: "Bad origin", origin: "admin" },
+  ];
+
+  const replayed = replayEntriesIntoContext(agent, entries);
+  expect(replayed).toBe(3);
+  expect(agent.log.at(0)!.source).toBe("model");
+  // Legacy entries without origin stay untagged.
+  expect(agent.log.at(1)!.source).toBeUndefined();
+  // Unknown origins are dropped (never trusted).
+  expect(agent.log.at(2)!.source).toBeUndefined();
+});
+
+test("replayEntriesIntoContext replays compaction entries with harness provenance", () => {
+  const agent = createMockAgent();
+  const entries: LogEntry[] = [{
+    ts: "2024-01-01T00:00:00Z",
+    session_id: "test",
+    source: LOG_SOURCE.COMPACTION,
+    content: "[Compacted 5 messages]\nSummary here.",
+  }];
+
+  const replayed = replayEntriesIntoContext(agent, entries);
+  expect(replayed).toBe(1);
+  expect(agent.log.at(0)!.role).toBe("harness");
+  expect(agent.log.at(0)!.source).toBe("harness");
+});
+
+test("replayEntriesIntoContext restores untrusted parts raw (mangling is a wire concern)", () => {
+  const agent = createMockAgent();
+  const summaryTag = "previous-context-summary";
+  const entries: LogEntry[] = [
+    {
+      ts: "2024-01-01T00:00:00Z",
+      session_id: "test",
+      source: LOG_SOURCE.COMPACTION,
+      content: [
+        { type: "text", text: `<${summaryTag}>` },
+        { type: "untrusted", text: `raw summary with <${summaryTag}> inside` },
+        { type: "text", text: `</${summaryTag}>` },
+      ],
+      origin: "harness",
+    },
+    {
+      ts: "2024-01-01T00:00:01Z",
+      session_id: "test",
+      source: LOG_SOURCE.INPUT,
+      content: [
+        { type: "text", text: "[Task t1 completed]\n" },
+        { type: "untrusted", text: "raw task result" },
+      ],
+      origin: "harness",
+    },
+  ];
+
+  const replayed = replayEntriesIntoContext(agent, entries);
+  expect(replayed).toBe(2);
+
+  // The parts structure survives the round-trip untouched: no escaping on
+  // disk or in the restored context. The wire serializer mangles the
+  // `untrusted` parts (with the current session's mangler) at request time.
+  const [compaction, taskResult] = [agent.log.at(0)!, agent.log.at(1)!];
+  expect(compaction.role).toBe("harness");
+  expect(compaction.source).toBe("harness");
+  expect(compaction.content).toEqual(entries[0]!.content);
+
+  expect(taskResult.role).toBe("harness");
+  expect(taskResult.source).toBe("harness");
+  expect(taskResult.content).toEqual(entries[1]!.content);
+  // Display form flattens the raw parts.
+  expect(taskResult.getTextContent()).toContain("raw task result");
 });
 
 test("replayEntriesIntoContext handles PROMPT source as user messages", () => {
@@ -384,7 +483,7 @@ test("Session restoration: handles session with compaction entries", async () =>
     expect(replayed).toBe(5);
     expect(agent.log.at(0)!.content).toBe("Question 1");
     expect(agent.log.at(1)!.content).toBe("Answer 1");
-    expect(agent.log.at(2)!.role).toBe("user");
+    expect(agent.log.at(2)!.role).toBe("harness");
     expect(agent.log.at(2)!.content).toContain("Summary of conversation");
     expect(agent.log.at(3)!.content).toBe("Question 2");
     expect(agent.log.at(4)!.content).toBe("Answer 2");

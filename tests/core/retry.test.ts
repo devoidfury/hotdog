@@ -151,10 +151,10 @@ describe("isRetryableHttpStatus", () => {
     expect(isRetryableHttpStatus(429)).toBe(true);
   });
 
-  it("retries on 3xx redirects", () => {
-    expect(isRetryableHttpStatus(301)).toBe(true);
-    expect(isRetryableHttpStatus(302)).toBe(true);
-    expect(isRetryableHttpStatus(399)).toBe(true);
+  it("does not retry on 3xx redirects", () => {
+    expect(isRetryableHttpStatus(301)).toBe(false);
+    expect(isRetryableHttpStatus(302)).toBe(false);
+    expect(isRetryableHttpStatus(399)).toBe(false);
   });
 
   it("does not retry on 4xx client errors", () => {
@@ -187,6 +187,21 @@ describe("retryWithBackoff — HTTP status retry", () => {
     );
     expect(result).toBe("ok");
     expect(calls).toBe(3);
+  });
+
+  it("does not retry on 3xx redirects", async () => {
+    let calls = 0;
+    await expect(
+      retryWithBackoff(
+        () => {
+          calls++;
+          throw LlmError.Api("HTTP 301 (body: Moved Permanently)");
+        },
+        3,
+        { ...fastOpts, signal: new AbortController().signal },
+      ),
+    ).rejects.toThrow("HTTP 301");
+    expect(calls).toBe(1);
   });
 
   it("does not retry on non-retryable HTTP status codes", async () => {

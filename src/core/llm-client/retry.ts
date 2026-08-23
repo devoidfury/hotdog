@@ -16,8 +16,10 @@ export function extractHttpStatus(message: string): number | null {
 
 /**
  * Determine whether an HTTP status code is retryable.
- * Retry on 5xx (server errors), 429 (rate limiting), and 3xx (redirects).
- * Do NOT retry on 4xx (client errors) except 429.
+ * Retry on 5xx (server errors) and 429 (rate limiting).
+ * Do NOT retry on 4xx (client errors) except 429, or on 3xx (redirects):
+ * a redirect of the same request will repeat identically on every attempt,
+ * so retrying only wastes attempts and hides a misconfigured endpoint.
  *
  * @param status - HTTP status code.
  * @returns Whether the status code is retryable.
@@ -27,9 +29,7 @@ export function isRetryableHttpStatus(status: number): boolean {
   if (status >= 500 && status < 600) return true;
   // 429 is rate limiting — retry (client error but transient)
   if (status === 429) return true;
-  // 3xx are redirects — retry if we get them (unlikely but safe)
-  if (status >= 300 && status < 400) return true;
-  // 4xx (other than 429) are client errors — do NOT retry
+  // 3xx redirects and 4xx client errors — do NOT retry
   return false;
 }
 
@@ -92,7 +92,8 @@ export async function retryWithBackoff<T>(
           if (status !== null && isRetryableHttpStatus(status)) {
             shouldRetry = true;
           }
-          // Non-retryable status codes (4xx, etc.) fall through to throw
+          // Non-retryable status codes (3xx redirects, 4xx, etc.) fall
+          // through to throw
         }
         // Other Api errors (e.g., "Bad input") are non-transient — don't retry
       }

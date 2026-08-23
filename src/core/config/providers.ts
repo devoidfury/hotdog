@@ -18,6 +18,12 @@ export interface ModelConfig {
   contextLimit: number;
   reasoningEffort?: string;
   wireFormat?: WireFormatKind;
+  /** LlmProtocol registry name (e.g. "openai"). */
+  protocol?: string;
+  /** ToolFormat registry name (e.g. "xml"); falls back to provider, then global default. */
+  toolFormat?: string;
+  /** Server chat-template control tokens to mangle in message content. */
+  controlTokens?: string[];
   tags: string[];
   /**
    * Model capabilities (e.g., vision, tool use).
@@ -42,6 +48,9 @@ export interface ProviderModelEntry {
   reasoning_effort?: string;
   reasoningEffort?: string;
   wireFormat?: WireFormatKind;
+  protocol?: string;
+  toolFormat?: string;
+  controlTokens?: string[];
   tags?: string[];
   /** Model capabilities (e.g., vision, tool use). */
   capabilities?: {
@@ -62,6 +71,9 @@ export interface ProviderDef {
   temperature?: number;
   contextLimit?: number;
   wireFormat?: WireFormatKind;
+  protocol?: string;
+  toolFormat?: string;
+  controlTokens?: string[];
   tags?: string[];
 }
 
@@ -207,6 +219,9 @@ export async function buildModelRegistry(
         contextLimit: modelEntry.contextLimit || contextLimit,
         reasoningEffort: modelEntry.reasoning_effort || modelEntry.reasoningEffort || undefined,
         wireFormat: modelEntry.wireFormat ?? provider.wireFormat,
+        protocol: modelEntry.protocol ?? provider.protocol,
+        toolFormat: modelEntry.toolFormat ?? provider.toolFormat,
+        controlTokens: modelEntry.controlTokens ?? provider.controlTokens,
         tags: modelEntry.tags || [],
         capabilities: modelEntry.capabilities || {},
         maxToolDifficulty: modelEntry.maxToolDifficulty,
@@ -219,6 +234,9 @@ export async function buildModelRegistry(
         temperature: provider.temperature ?? null,
         contextLimit: provider.contextLimit || contextLimit,
         wireFormat: provider.wireFormat,
+        protocol: provider.protocol,
+        toolFormat: provider.toolFormat,
+        controlTokens: provider.controlTokens,
         tags: provider.tags || [],
         capabilities: {},
       };
@@ -291,6 +309,9 @@ export function resolveModelConfig(
         contextLimit: entry.contextLimit ?? contextLimit,
         reasoningEffort: entry.reasoningEffort,
         wireFormat,
+        protocol: entry.protocol as string | undefined,
+        toolFormat: entry.toolFormat as string | undefined,
+        controlTokens: entry.controlTokens as string[] | undefined,
         tags: (entry.tags as string[]) || [],
       }
     : {

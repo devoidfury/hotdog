@@ -23,6 +23,8 @@ import type { ToolRegistry, ToolDef, Tool, ToolMetadata } from "./tool-registry.
 import type { ExtensionLoader } from "./extensions.ts";
 import type { ServiceRegistry } from "./service-registry.ts";
 import type { AgentCommandRegistry, CliSubcommandRegistry } from "./registries.ts";
+import type { ToolFormatRegistry } from "./tool-format.ts";
+import type { LlmProtocolRegistry } from "../llm-client/protocol.ts";
 import type { ConfigRegistry } from "./config.ts";
 import type { ModelConfig, ProviderDef } from "../config/providers.ts";
 import type { BuildAgentConfig } from "../config/index.ts";
@@ -34,6 +36,7 @@ import type { ParsedCommand } from "../commands.ts";
 import type { ToolContext } from "./tool-context.ts";
 export type { ToolContext };
 import type { StreamResult } from "../llm-client/stream-processor.ts";
+import type { LlmClient, LlmClientOptions } from "../llm-client/client.ts";
 import { logger } from "../logger.ts";
 import { ProfileDef, ProfileManager } from "../config/profiles.ts";
 import { ParsedCliOptions } from "../cli.ts";
@@ -186,8 +189,13 @@ export interface CoreContext {
   config: CoreConfigWithExtensions;
   cliSubcommandRegistry: CliSubcommandRegistry;
   configRegistry: ConfigRegistry;
+  toolFormatRegistry: ToolFormatRegistry;
+  llmProtocolRegistry: LlmProtocolRegistry;
 
   service(name: string): unknown;
+
+  /** Build an LlmClient from the core config + registries, with per-caller overrides applied last. */
+  createLlmClient(overrides?: Partial<LlmClientOptions>): LlmClient;
 
   // Attached after buildConfig() resolves.
   resolved?: ResolvedConfig;
@@ -222,7 +230,10 @@ export interface ResolvedConfig {
   hideThinking?: boolean;
   showTokenUse?: boolean;
   thinkerFormat?: string;
-  toolFormat?: string;
+  /** CLI display format for tool calls. */
+  toolCallDisplayFormat?: string;
+  /** Global default ToolFormat registry name (CLI > config > "xml"). */
+  modelToolFormat?: string;
   toolOutputFmt?: string;
   taskProfile?: string;
   taskDefaultRole?: string;

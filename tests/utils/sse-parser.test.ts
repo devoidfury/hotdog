@@ -1,5 +1,5 @@
 import { describe, it, expect } from "bun:test";
-import { SseParser, parseSse, type SseParserOptions } from "../../../src/core/llm-client/sse-parser.ts";
+import { SseParser, parseSse, type SseParserOptions } from "../../src/utils/sse-parser.ts";
 
 /**
  * Create a ReadableStream<Uint8Array> from a string.

@@ -83,7 +83,7 @@ describe("LlmClient.resolveProviderSettings", () => {
 
 describe("LlmClient.buildChatRequest", () => {
   it("builds request with all fields", () => {
-    const client = new LlmClient({ chatTimeoutSecs: 600, maxRetries: 12 });
+    const client = new LlmClient({ chatTimeoutSecs: 600, maxRetries: 12, markerMangler: null });
     const messages = [new Message({ role: "user", content: "Hello" })];
     const request = client.buildChatRequest(
       messages,
@@ -99,7 +99,7 @@ describe("LlmClient.buildChatRequest", () => {
   });
 
   it("strips provider prefix from model name", () => {
-    const client = new LlmClient({ chatTimeoutSecs: 600, maxRetries: 12 });
+    const client = new LlmClient({ chatTimeoutSecs: 600, maxRetries: 12, markerMangler: null });
     const request = client.buildChatRequest(
       [],
       mc({ name: "anthropic/claude-sonnet-4-20250514" }),
@@ -109,7 +109,7 @@ describe("LlmClient.buildChatRequest", () => {
   });
 
   it("disables stream when requested", () => {
-    const client = new LlmClient({ chatTimeoutSecs: 600, maxRetries: 12 });
+    const client = new LlmClient({ chatTimeoutSecs: 600, maxRetries: 12, markerMangler: null });
     const request = client.buildChatRequest(
       [],
       mc(),
@@ -121,7 +121,7 @@ describe("LlmClient.buildChatRequest", () => {
   });
 
   it("handles Message objects with tool_calls", () => {
-    const client = new LlmClient({ chatTimeoutSecs: 600, maxRetries: 12 });
+    const client = new LlmClient({ chatTimeoutSecs: 600, maxRetries: 12, markerMangler: null });
     const msg = new Message({
       role: "assistant",
       content: "I will run a command",
@@ -137,7 +137,10 @@ describe("LlmClient.buildChatRequest", () => {
   });
 
   it("escapes tool_calls function name and arguments", () => {
-    const client = new LlmClient({ chatTimeoutSecs: 600, maxRetries: 12 });
+    const MARKER = "m_pbc8misbbcxouboa";
+    const mangler = { escape: (s: string) => s.replace(new RegExp(MARKER, "g"), "m_aliased"), unescape: (s: string) => s, addPrefixes: () => {} } as any;
+    const client = new LlmClient({ chatTimeoutSecs: 600, maxRetries: 12, markerMangler: mangler });
+    const argsJson = JSON.stringify({ path: `<${MARKER}>test</${MARKER}>` });
     const msg = new Message({
       role: "assistant",
       content: "test",
@@ -146,7 +149,7 @@ describe("LlmClient.buildChatRequest", () => {
         type: "function",
         function: {
           name: "read",
-          arguments: '{"path": "<system-notice>test</system-notice>"}',
+          arguments: argsJson,
         },
       }],
     });
@@ -158,13 +161,13 @@ describe("LlmClient.buildChatRequest", () => {
     const msgs = request.messages as unknown as { tool_calls: { function: { name: string; arguments: string } }[] }[];
     const tc = msgs[0]!.tool_calls[0]!;
     // Function name and arguments should be escaped by markerMangler
-    expect(tc.function.name).not.toContain("<system-notice>");
-    expect(tc.function.arguments).not.toContain("<system-notice>");
+    expect(tc.function.name).not.toContain(`<${MARKER}>`);
+    expect(tc.function.arguments).not.toContain(`<${MARKER}>`);
   });
 
 
   it("handles Message objects with toolCallId", () => {
-    const client = new LlmClient({ chatTimeoutSecs: 600, maxRetries: 12 });
+    const client = new LlmClient({ chatTimeoutSecs: 600, maxRetries: 12, markerMangler: null });
     const msg = new Message({
       role: "tool",
       content: "output",
@@ -180,7 +183,7 @@ describe("LlmClient.buildChatRequest", () => {
   });
 
   it("does not include tools fields when no tools provided", () => {
-    const client = new LlmClient({ chatTimeoutSecs: 600, maxRetries: 12 });
+    const client = new LlmClient({ chatTimeoutSecs: 600, maxRetries: 12, markerMangler: null });
     const request = client.buildChatRequest([], mc(), []);
     expect(request.tools).toBeUndefined();
     expect(request.tool_choice).toBeUndefined();
@@ -188,7 +191,7 @@ describe("LlmClient.buildChatRequest", () => {
   });
 
   it("does not include temperature when null or undefined", () => {
-    const client = new LlmClient({ chatTimeoutSecs: 600, maxRetries: 12 });
+    const client = new LlmClient({ chatTimeoutSecs: 600, maxRetries: 12, markerMangler: null });
     const req1 = client.buildChatRequest([], mc(), null);
     const req2 = client.buildChatRequest([], mc({ temperature: undefined }), null);
     expect(req1.temperature).toBeUndefined();
@@ -196,7 +199,7 @@ describe("LlmClient.buildChatRequest", () => {
   });
 
   it("includes temperature 0", () => {
-    const client = new LlmClient({ chatTimeoutSecs: 600, maxRetries: 12 });
+    const client = new LlmClient({ chatTimeoutSecs: 600, maxRetries: 12, markerMangler: null });
     const request = client.buildChatRequest([], mc({ temperature: 0 }), null);
     expect(request.temperature).toBe(0);
   });
@@ -204,13 +207,13 @@ describe("LlmClient.buildChatRequest", () => {
 
 describe("LlmClient.buildChatRequest reasoning_effort", () => {
   it("includes reasoning_effort when present in modelConfig", () => {
-    const client = new LlmClient({ chatTimeoutSecs: 600, maxRetries: 12 });
+    const client = new LlmClient({ chatTimeoutSecs: 600, maxRetries: 12, markerMangler: null });
     const request = client.buildChatRequest([], mc({ reasoningEffort: "high" }), null);
     expect(request.reasoning_effort).toBe("high");
   });
 
   it("omits reasoning_effort when undefined", () => {
-    const client = new LlmClient({ chatTimeoutSecs: 600, maxRetries: 12 });
+    const client = new LlmClient({ chatTimeoutSecs: 600, maxRetries: 12, markerMangler: null });
     const req1 = client.buildChatRequest([], mc(), null);
     const req2 = client.buildChatRequest([], mc({ reasoningEffort: undefined }), null);
     expect(req1.reasoning_effort).toBeUndefined();
@@ -218,7 +221,7 @@ describe("LlmClient.buildChatRequest reasoning_effort", () => {
   });
 
   it("supports all reasoning effort values", () => {
-    const client = new LlmClient({ chatTimeoutSecs: 600, maxRetries: 12 });
+    const client = new LlmClient({ chatTimeoutSecs: 600, maxRetries: 12, markerMangler: null });
     for (const v of ["none", "minimal", "low", "high", "xhigh", "max"]) {
       const request = client.buildChatRequest([], mc({ reasoningEffort: v }), null);
       expect(request.reasoning_effort).toBe(v);
@@ -254,8 +257,10 @@ describe("LlmClient markerMangler", () => {
 
 describe("LlmClient array content escaping", () => {
   it("escapes array content parts with type text", () => {
-    const client = new LlmClient({ chatTimeoutSecs: 600, maxRetries: 12 });
-    const toolCallTag = "tool-call";
+    const MARKER = "m_7mqcm4tufjt4sujb-call";
+    const mangler = { escape: (s: string) => s.replace(new RegExp(MARKER, "g"), "m_aliased"), unescape: (s: string) => s, addPrefixes: () => {} } as any;
+    const client = new LlmClient({ chatTimeoutSecs: 600, maxRetries: 12, markerMangler: mangler });
+    const toolCallTag = MARKER.slice(2);
     const msg = new Message({
       role: "user",
       content: [
@@ -273,8 +278,8 @@ describe("LlmClient array content escaping", () => {
     expect(content).toHaveLength(2);
     // Text part should be escaped (tool-call prefix mangled to random alias)
     expect(content[0]!.type).toBe("text");
-    expect(content[0]!.text).not.toContain("<tool-call");
-    expect(content[0]!.text).not.toContain("</tool-call");
+    expect(content[0]!.text).not.toContain(`<${MARKER}>`);
+    expect(content[0]!.text).not.toContain(`</${MARKER}>`);
     // Non-text part should be unchanged
     expect(content[1]!.type).toBe("image_url");
   });
@@ -293,7 +298,7 @@ describe("LlmClient._doRequest", () => {
   });
 
   it("sends request with correct headers and body", async () => {
-    const client = new LlmClient({ chatTimeoutSecs: 30, maxRetries: 3, baseUrl: "http://test.com" });
+    const client = new LlmClient({ chatTimeoutSecs: 30, maxRetries: 3, baseUrl: "http://test.com", markerMangler: null });
 
     let capturedUrl: string | null = null;
     let capturedOptions: RequestInit | null = null;
@@ -304,7 +309,7 @@ describe("LlmClient._doRequest", () => {
       return { ok: true } as unknown as Response;
     }) as unknown as typeof fetch;
 
-    await client._doRequest("http://test.com", "test-key", { model: "gpt-4" }, null);
+    await client._doRequest("http://test.com", "test-key", { model: "gpt-4" }, null, mc(), "/v1/chat/completions");
 
     expect(capturedUrl!).toBe("http://test.com/v1/chat/completions");
     expect(capturedOptions!.method).toBe("POST");
@@ -315,7 +320,7 @@ describe("LlmClient._doRequest", () => {
   });
 
   it("includes session affinity header when sessionId provided", async () => {
-    const client = new LlmClient({ chatTimeoutSecs: 30, maxRetries: 3, baseUrl: "http://test.com" });
+    const client = new LlmClient({ chatTimeoutSecs: 30, maxRetries: 3, baseUrl: "http://test.com", markerMangler: null });
 
     let capturedOptions: RequestInit | null = null;
 
@@ -324,7 +329,7 @@ describe("LlmClient._doRequest", () => {
       return { ok: true } as unknown as Response;
     }) as unknown as typeof fetch;
 
-    await client._doRequest("http://test.com", null, { model: "gpt-4" }, null, "session-123");
+    await client._doRequest("http://test.com", null, { model: "gpt-4" }, null, mc(), "/v1/chat/completions", "session-123");
 
     expect((capturedOptions!.headers as Record<string, string>)["x-session-affinity"]).toBe("session-123");
   });
@@ -339,13 +344,13 @@ describe("LlmClient._doRequest", () => {
       return { ok: true } as unknown as Response;
     }) as unknown as typeof fetch;
 
-    await client._doRequest("http://test.com", null, { model: "gpt-4" }, null);
+    await client._doRequest("http://test.com", null, { model: "gpt-4" }, null, mc(), "/v1/chat/completions");
 
     expect((capturedOptions!.headers as Record<string, string>)["x-session-affinity"]).toBe("client-session");
   });
 
   it("throws LlmError.Api on non-OK response", async () => {
-    const client = new LlmClient({ chatTimeoutSecs: 30, maxRetries: 3, baseUrl: "http://test.com" });
+    const client = new LlmClient({ chatTimeoutSecs: 30, maxRetries: 3, baseUrl: "http://test.com", markerMangler: null });
 
     globalThis.fetch = (async () => ({
       ok: false,
@@ -353,11 +358,11 @@ describe("LlmClient._doRequest", () => {
       text: async () => "Internal Server Error",
     }) as unknown as Response) as unknown as typeof fetch;
 
-    await expect(client._doRequest("http://test.com", "key", { model: "gpt-4" }, null)).rejects.toThrow(/HTTP 500/);
+    await expect(client._doRequest("http://test.com", "key", { model: "gpt-4" }, null, mc(), "/v1/chat/completions")).rejects.toThrow(/HTTP 500/);
   });
 
   it("passes abort signal to fetch", async () => {
-    const client = new LlmClient({ chatTimeoutSecs: 30, maxRetries: 3, baseUrl: "http://test.com" });
+    const client = new LlmClient({ chatTimeoutSecs: 30, maxRetries: 3, baseUrl: "http://test.com", markerMangler: null });
 
     let capturedSignal: AbortSignal | null | undefined;
 
@@ -367,25 +372,25 @@ describe("LlmClient._doRequest", () => {
     }) as unknown as typeof fetch;
 
     const abortController = new AbortController();
-    await client._doRequest("http://test.com", null, { model: "gpt-4" }, abortController.signal);
+    await client._doRequest("http://test.com", null, { model: "gpt-4" }, abortController.signal, mc(), "/v1/chat/completions");
 
     expect(capturedSignal).toBe(abortController.signal);
   });
 
   it("translates raw network failures into LlmError.Http", async () => {
-    const client = new LlmClient({ chatTimeoutSecs: 30, maxRetries: 3, baseUrl: "http://test.com" });
+    const client = new LlmClient({ chatTimeoutSecs: 30, maxRetries: 3, baseUrl: "http://test.com", markerMangler: null });
 
     globalThis.fetch = (async () => {
       throw new TypeError("fetch failed");
     }) as unknown as typeof fetch;
 
     await expect(
-      client._doRequest("http://test.com", null, { model: "gpt-4" }, null),
+      client._doRequest("http://test.com", null, { model: "gpt-4" }, null, mc(), "/v1/chat/completions"),
     ).rejects.toMatchObject({ type: "http", name: "Error" });
   });
 
   it("translates aborted shared signal into LlmError.Cancelled", async () => {
-    const client = new LlmClient({ chatTimeoutSecs: 30, maxRetries: 3, baseUrl: "http://test.com" });
+    const client = new LlmClient({ chatTimeoutSecs: 30, maxRetries: 3, baseUrl: "http://test.com", markerMangler: null });
 
     globalThis.fetch = (async (_: string, options: RequestInit) => {
       return await new Promise<Response>((_resolve, reject) => {
@@ -400,12 +405,12 @@ describe("LlmClient._doRequest", () => {
     abortController.abort();
 
     await expect(
-      client._doRequest("http://test.com", null, { model: "gpt-4" }, abortController.signal),
+      client._doRequest("http://test.com", null, { model: "gpt-4" }, abortController.signal, mc(), "/v1/chat/completions"),
     ).rejects.toMatchObject({ type: "cancelled" });
   });
 
   it("translates per-attempt timeout into LlmError.Timeout", async () => {
-    const client = new LlmClient({ chatTimeoutSecs: 30, maxRetries: 3, baseUrl: "http://test.com" });
+    const client = new LlmClient({ chatTimeoutSecs: 30, maxRetries: 3, baseUrl: "http://test.com", markerMangler: null });
 
     globalThis.fetch = (async (_: string, options: RequestInit) => {
       return await new Promise<Response>((_resolve, reject) => {
@@ -418,14 +423,14 @@ describe("LlmClient._doRequest", () => {
 
     // No user signal: only the per-attempt timeout can fire.
     await expect(
-      client._doRequest("http://test.com", null, { model: "gpt-4" }, null, undefined, 30),
+      client._doRequest("http://test.com", null, { model: "gpt-4" }, null, mc(), "/v1/chat/completions", undefined, 30),
     ).rejects.toMatchObject({ type: "timeout" });
   });
 });
 
 describe("LlmClient.chatStreamWithModelConfig", () => {
   it("builds request and delegates to _doRequest and _processSSE", async () => {
-    const client = new LlmClient({ chatTimeoutSecs: 30, maxRetries: 3, baseUrl: "http://test.com" });
+    const client = new LlmClient({ chatTimeoutSecs: 30, maxRetries: 3, baseUrl: "http://test.com", markerMangler: null });
 
     let doRequestCalled = false;
 

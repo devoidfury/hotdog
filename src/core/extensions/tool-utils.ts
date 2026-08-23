@@ -1,7 +1,21 @@
 import { ToolError } from "../error.ts";
 import { ToolDef, ToolMetadata } from "./tool-registry.ts";
+import { toolFormatForName, TOOL_FORMAT_DEFAULT_NAME, type ToolFormatRegistry } from "./tool-format.ts";
 
 export type { ToolMetadata };
+
+/**
+ * Resolve the ToolFormat for a seam render. The caller (agent loop / session)
+ * passes its own registry and resolved name; there is no process-global
+ * state here because the active format depends on per-session model/provider
+ * config.
+ */
+function seamToolFormat(
+  toolFormatName: string | undefined,
+  registry: ToolFormatRegistry | null | undefined,
+): ReturnType<typeof toolFormatForName> {
+  return toolFormatForName(toolFormatName ?? TOOL_FORMAT_DEFAULT_NAME, registry);
+}
 
 const SHORT_META_KEYS = new Set([
   "truncated",
@@ -17,15 +31,6 @@ const SHORT_META_KEYS = new Set([
   "offset",
   "limit",
 ]);
-
-export function xmlEscape(s: string): string {
-  return s
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;")
-    .replace(/'/g, "&apos;");
-}
 
 // When set on a ToolResult, tells the run loop to stop after this tool (e.g., "wait", "handoff").
 export const TOOL_STOP_LOOP = Symbol("TOOL_STOP_LOOP");
@@ -153,35 +158,30 @@ export class ToolResult {
     return parts.join("\n");
   }
 
-  toApiContent(toolName: string): string {
+  toApiContent(toolName: string, toolFormatName?: string, registry?: ToolFormatRegistry | null): string {
     const status = this.success ? "success" : "failure";
     const tag = this.outputTag || "output";
 
-    const attrs: string[] = [`name="${xmlEscape(toolName)}"`, `status="${status}"`];
-    const longMeta: string[] = [];
-
+    const meta: Record<string, unknown> = {};
     if (this.metadata) {
       for (const [key, value] of this.metadata) {
-        if (SHORT_META_KEYS.has(key)) {
-          attrs.push(`${xmlEscape(key)}="${xmlEscape(value)}"`);
-        } else {
-          longMeta.push(`  <${xmlEscape(key)}>${value}</${xmlEscape(key)}>`);
-        }
+        meta[key] = value;
       }
     }
-
     if (!this.success && this.error) {
-      longMeta.unshift(`  <error>${this.error}</error>`);
+      meta["error"] = this.error;
     }
 
-    const outputNode = `  <${tag}>${this.output}</${tag}>`;
-
-    const parts: string[] = [`<tool ${attrs.join(" ")}>`];
-    parts.push(...longMeta);
-    parts.push(outputNode);
-    parts.push("</tool>");
-
-    return parts.join("\n");
+    // The resolved ToolFormat owns model-facing rendering (the agent loop
+    // resolves it per model and passes the name + registry explicitly). The
+    // wire serializer is still the only mangle point (tool results are
+    // source:"tool").
+    const content = seamToolFormat(toolFormatName, registry).formatResult(
+      { output: this.output, outputTag: tag, ...meta },
+      toolName,
+      { status },
+    );
+    return typeof content === "string" ? content : JSON.stringify(content);
   }
 }
 
@@ -231,59 +231,42 @@ export function parseToolArgs(
 export function toolResult(
   result: ToolResult | string | Record<string, unknown> | unknown,
   toolName?: string,
+  toolFormatName?: string,
+  registry?: ToolFormatRegistry | null,
 ): string {
   if (result instanceof ToolResult) {
     if (toolName) {
-      return result.toApiContent(toolName);
+      return result.toApiContent(toolName, toolFormatName, registry);
     }
     return result.toDisplay();
   }
+
+  // Non-ToolResult results: delegate to the active ToolFormat. Short metadata
+  // keys ride in `meta`; everything else becomes the payload (JSON for objects,
+  // matching pre-seam behavior).
+  let payload: string;
+  const meta: Record<string, string> = {};
   if (typeof result === "string") {
-    if (toolName) {
-      return xmlWrap(toolName, "success", result);
-    }
-    return result;
-  }
-  if (typeof result === "object" && result !== null) {
-    if (toolName) {
-      return xmlWrap(toolName, "success", result as Record<string, unknown>);
-    }
-    return JSON.stringify(result);
-  }
-  const str = String(result);
-  if (toolName) {
-    return xmlWrap(toolName, "success", str);
-  }
-  return str;
-}
-
-function xmlWrap(
-  toolName: string,
-  status: string,
-  content: string | Record<string, unknown>,
-): string {
-  const attrs: string[] = [`name="${xmlEscape(toolName)}"`, `status="${status}"`];
-
-  let outputContent: string = content as string;
-  if (typeof content === "object" && content !== null) {
-    const shortMeta: string[] = [];
-    const remaining = { ...content };
+    payload = result;
+  } else if (typeof result === "object" && result !== null) {
+    const remaining = { ...(result as Record<string, unknown>) };
     for (const key of SHORT_META_KEYS) {
       if (key in remaining) {
-        shortMeta.push(
-          `${xmlEscape(key)}="${xmlEscape(String(remaining[key]))}"`,
-        );
+        meta[key] = String(remaining[key]);
         delete remaining[key];
       }
     }
-    if (shortMeta.length > 0) {
-      attrs.push(...shortMeta);
-    }
-    outputContent = JSON.stringify(remaining);
+    payload = JSON.stringify(remaining);
+  } else {
+    payload = String(result);
   }
 
-  const attrsStr = attrs.join(" ");
-  return `<tool ${attrsStr}>\n  <output>${outputContent}</output>\n</tool>`;
+  if (!toolName) {
+    return payload;
+  }
+
+  const content = seamToolFormat(toolFormatName, registry).formatResult(payload, toolName, { status: "success", ...meta });
+  return typeof content === "string" ? content : JSON.stringify(content);
 }
 
 export function truncateOutput(text: string, maxLines: number): string {
@@ -405,22 +388,15 @@ export function formatToolResult(
   result: unknown,
   toolName: string,
   success: boolean,
+  toolFormatName?: string,
+  registry?: ToolFormatRegistry | null,
 ): string {
-  if (result && typeof (result as { toApiContent?: (name: string) => string }).toApiContent === "function") {
-    return (result as { toApiContent: (name: string) => string }).toApiContent(toolName);
+  if (result && typeof (result as { toApiContent?: (name: string, fmt?: string, reg?: unknown) => string }).toApiContent === "function") {
+    return (result as { toApiContent: (name: string, fmt?: string, reg?: unknown) => string }).toApiContent(toolName, toolFormatName, registry);
   }
 
   const status = success ? "success" : "error";
-
-  if (typeof result === "string") {
-    return `<tool name="${toolName}" status="${status}">\n  <output>${xmlEscape(result)}</output>\n</tool>`;
-  }
-
-  if (typeof result === "object" && result !== null) {
-    const json = JSON.stringify(result);
-    return `<tool name="${toolName}" status="${status}">\n  <output>${xmlEscape(json)}</output>\n</tool>`;
-  }
-
-  const str = String(result);
-  return `<tool name="${toolName}" status="${status}">\n  <output>${xmlEscape(str)}</output>\n</tool>`;
+  const payload = typeof result === "object" && result !== null ? JSON.stringify(result) : String(result);
+  const content = seamToolFormat(toolFormatName, registry).formatResult(payload, toolName, { status });
+  return typeof content === "string" ? content : JSON.stringify(content);
 }

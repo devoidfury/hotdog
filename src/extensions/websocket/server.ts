@@ -8,12 +8,10 @@ import {
   WebSocketQuestionBridge,
   type QuestionStrategy,
 } from "./question-input.ts";
-import { LlmClient } from "../../core/llm-client/client.ts";
-import { MarkerMangler } from "../../core/marker-mangler.ts";
+import type { LlmClient } from "../../core/llm-client/client.ts";
 import type { CoreContext } from "../../core/extensions/types.ts";
 import type { AuthMiddleware } from "./auth.ts";
 import { Agent } from "../../core/agent.ts";
-import type { ProviderDef } from "../../core/config/providers.ts";
 import {
   readSessionEntries,
   replayEntriesIntoContext,
@@ -1032,15 +1030,7 @@ export function createWsServer(
     profiles,
   } = options;
 
-  const sharedLlmClient = new LlmClient({
-    baseUrl: core.resolved?.baseUrl,
-    apiKey: core.resolved?.apiKey,
-    stream: core.resolved?.stream !== false,
-    chatTimeoutSecs: core.resolved?.chatTimeout || 30,
-    maxRetries: core.resolved?.maxRetries as number,
-    providers: core.config?.providers as ProviderDef[] | undefined,
-    markerMangler: new MarkerMangler(),
-  });
+  const sharedLlmClient = core.createLlmClient();
 
   const buildAgent: (config: {
     model?: string;

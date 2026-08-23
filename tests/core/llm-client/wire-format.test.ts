@@ -109,7 +109,7 @@ describe("wire-format characterization (phase 0)", () => {
 
   describe("identity mangler: passthrough", () => {
     it("produces the same wire shape as the null mangler", () => {
-      const identity = { escape: (s: string) => s, unescape: (s: string) => s } as unknown as MarkerMangler;
+      const identity = { escape: (s: string) => s, unescape: (s: string) => s, addPrefixes: () => {} } as unknown as MarkerMangler;
       const client = new LlmClient({ chatTimeoutSecs: 600, maxRetries: 12, markerMangler: identity });
       const request = buildRequest(client, sampleMessages());
       expect(JSON.stringify(request.messages)).toBe(JSON.stringify(WIRE_SHAPE));

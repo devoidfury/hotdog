@@ -5,6 +5,7 @@ import { describe, it, expect, beforeEach, afterEach } from "bun:test";
 import { HOOKS } from "../../src/core/hooks.ts";
 import { HookSystem } from "../../src/core/hooks.ts";
 import { CliSubcommandRegistryLike, SubcommandDefinition } from "../../src/core/extensions/registries.ts";
+import { LlmClient } from "../../src/core/llm-client/client.ts";
 
 describe("ui-one-shot extension", () => {
   let originalSessionManagerCreate: unknown = null;
@@ -65,6 +66,9 @@ describe("ui-one-shot extension", () => {
         load: async () => null,
         cleanup: async () => {},
       },
+      createLlmClient: ((overrides?: Record<string, unknown>) =>
+        new LlmClient({ baseUrl: "http://localhost:8000", apiKey: "test-key", stream: true,
+          chatTimeoutSecs: 30, maxRetries: 3, ...overrides })) as any,
     } as any;
   }
 

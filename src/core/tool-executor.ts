@@ -9,7 +9,7 @@ import { formatToolResult, TOOL_STOP_LOOP } from "./extensions/tool-utils.ts";
 import type { ToolRegistry } from "./extensions/tool-registry.ts";
 import type { Agent } from "./agent.ts";
 import { Workspace } from "./../utils/workspace.ts";
-
+import type { ToolFormatRegistry } from "./extensions/tool-format.ts";
 
 export interface ToolResult {
   toolName: string;
@@ -41,27 +41,31 @@ export class ToolExecutor {
     this.#deps = deps;
   }
 
+  /**
+   * @param toolFormatName - ToolFormat registry name resolved by the caller
+   *   (the agent loop resolves it per model); falls back to the seam default
+   *   when omitted.
+   * @param toolFormatRegistry - The session's ToolFormat registry; passed
+   *   through so format resolution never depends on process-global state.
+   */
   async execute(
     toolCalls: ToolCall[],
+    toolFormatName?: string,
+    toolFormatRegistry?: ToolFormatRegistry | null,
   ): Promise<{ outcome: "continue" | "return"; toolResults: ToolResult[] }> {
     const toolResults: ToolResult[] = [];
 
     for (const tc of toolCalls) {
       let result: ToolResult;
       try {
-        result = await this.executeSingle(tc);
+        result = await this.executeSingle(tc, toolFormatName, toolFormatRegistry);
       } catch (e: unknown) {
         const toolName = tc.function?.name || "(unknown)";
         const toolCallId = tc.id || "";
         const errorMsg = `Tool execution failed: ${e instanceof Error ? e.message : String(e)}`;
         logger.error(`[tool:error] ${toolName}: ${formatError(e)}`);
 
-        result = await this.#writeToolResult(
-          toolName,
-          tc.function?.arguments || "{}",
-          errorMsg,
-          toolCallId,
-        );
+        result = await this.#writeToolResult(toolName, tc.function?.arguments || "{}", errorMsg, toolCallId);
       }
       toolResults.push(result);
 
@@ -73,18 +77,18 @@ export class ToolExecutor {
     return { outcome: "continue", toolResults };
   }
 
-  async executeSingle(tc: ToolCall): Promise<ToolResult> {
+  async executeSingle(
+    tc: ToolCall,
+    toolFormatName?: string,
+    toolFormatRegistry?: ToolFormatRegistry | null,
+  ): Promise<ToolResult> {
     const toolName = tc.function?.name;
     const toolCallId = tc.id;
     let input = tc.function?.arguments || "{}";
     const t0 = Date.now();
     const { hooks, agent } = this.#deps;
 
-    if (
-      !toolName ||
-      typeof toolName !== "string" ||
-      toolName.trim().length === 0
-    ) {
+    if (!toolName || typeof toolName !== "string" || toolName.trim().length === 0) {
       const result = `Tool call missing a valid name (got: ${JSON.stringify(toolName)})`;
       this.#deps.emitOutput("tool_result", {
         toolName: "(invalid)",
@@ -124,7 +128,13 @@ export class ToolExecutor {
       agent,
     });
     if (callResult.lastResult?.action === "block") {
-      const blockedResult = formatToolResult(callResult.lastResult.result, toolName, false);
+      const blockedResult = formatToolResult(
+        callResult.lastResult.result,
+        toolName,
+        false,
+        toolFormatName,
+        toolFormatRegistry,
+      );
       return this.#writeToolResult(toolName, input, blockedResult, toolCallId);
     }
     if (callResult.lastResult?.action === "modify" && callResult.lastResult.input !== undefined) {
@@ -135,18 +145,10 @@ export class ToolExecutor {
     hooks.notifyHooks(HOOKS.AGENT_TOOL_CONTEXT, { toolCtx, toolName, agent });
     const tool = this.#deps.toolRegistry.get(toolName);
     if (!tool) {
-      return this.#writeToolResult(
-        toolName,
-        input,
-        `Unknown tool: ${toolName}`,
-        toolCallId,
-      );
+      return this.#writeToolResult(toolName, input, `Unknown tool: ${toolName}`, toolCallId);
     }
 
-    const validationError = await this.#deps.toolRegistry.validateToolArgs(
-      toolName,
-      input,
-    );
+    const validationError = await this.#deps.toolRegistry.validateToolArgs(toolName, input);
     if (validationError) {
       return this.#writeToolResult(
         toolName,
@@ -159,7 +161,7 @@ export class ToolExecutor {
     let result: unknown;
     let success = false;
     let stopLoop = false;
-    // Clamp to at least 1 so the tool always gets one attempt.
+
     const maxRetries = Math.max(1, this.#deps.maxRetries);
     let attempts = 0;
 
@@ -169,14 +171,20 @@ export class ToolExecutor {
         result = await tool.execute(input, toolCtx);
         success = true;
         // Check for stop-loop sentinel on ToolResult
-        if (result && typeof result === "object" && (result as Record<symbol, unknown>)[TOOL_STOP_LOOP] === true) {
+        if (
+          result &&
+          typeof result === "object" &&
+          (result as Record<symbol, unknown>)[TOOL_STOP_LOOP] === true
+        ) {
           stopLoop = true;
         }
         break;
       } catch (e: unknown) {
         if (e instanceof TransientError && attempts < maxRetries) {
           const delay = Math.pow(2, attempts - 1) * this.#deps.toolRetryDelay * 1000;
-          logger.warn(`[tool:retry] ${toolName} failed (transient), retrying attempt ${attempts + 1}/${maxRetries} after ${delay}ms...`);
+          logger.warn(
+            `[tool:retry] ${toolName} failed (transient), retrying attempt ${attempts + 1}/${maxRetries} after ${delay}ms...`,
+          );
           await new Promise((resolve) => setTimeout(resolve, delay));
           continue;
         }
@@ -214,7 +222,7 @@ export class ToolExecutor {
     }
     const images = (result as { images?: unknown })?.images ?? null;
 
-    const resultStr = formatToolResult(result, toolName, success);
+    const resultStr = formatToolResult(result, toolName, success, toolFormatName, toolFormatRegistry);
     const durationMs = Date.now() - t0;
     const resultSize = typeof resultStr === "string" ? resultStr.length : 0;
     hooks.notifyHooks(HOOKS.TOOL_METRICS, {

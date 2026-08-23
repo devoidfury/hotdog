@@ -1,13 +1,20 @@
 import { retryWithBackoff } from "./retry.ts";
-import { parseSse } from "./sse-parser.ts";
-import { wireFormatFor } from "./serialize.ts";
 import { MarkerMangler } from "../marker-mangler.ts";
 import type { Message } from "../context/message.ts";
 import { LlmError } from "../error.ts";
 import { ToolDef } from "../extensions/tool-registry.ts";
+import {
+  createToolFormatRegistry,
+  resolveToolFormatId,
+  ToolFormat,
+  type ToolFormatRegistry,
+} from "../extensions/tool-format.ts";
+import { xmlToolFormat } from "../extensions/tool-format-xml.ts";
+import type { LlmProtocol, ProtocolContext } from "./protocol.ts";
+import { createLlmProtocolRegistry, resolveProtocolId, type LlmProtocolRegistry } from "./protocol.ts";
+import { openaiProtocol } from "./openai-protocol.ts";
 import { hotdogFetch } from "@utils/fetch.ts";
 
-import pkg from "@package.json" with { type: "json" };
 import { ModelConfig, ProviderDef } from "@core/config/providers.ts";
 
 export interface LlmClientOptions {
@@ -19,6 +26,12 @@ export interface LlmClientOptions {
   providers?: ProviderDef[];
   cancelled?: boolean;
   markerMangler?: MarkerMangler | null;
+  /** Global toolFormat default (core config); provider/model entries override. */
+  toolFormat?: string | null;
+  /** ToolFormat registry (defaults to a registry with the xml format). */
+  toolFormatRegistry?: ToolFormatRegistry | null;
+  /** LlmProtocol registry (defaults to a registry with the openai protocol). */
+  llmProtocolRegistry?: LlmProtocolRegistry | null;
 }
 
 export interface LlmClientRequiredOptions {
@@ -34,6 +47,19 @@ export type StreamEvent =
   | { type: "usage"; data: Record<string, unknown> }
   | { type: "finish"; reason: string };
 
+
+function createDefaultProtocolRegistry(): LlmProtocolRegistry {
+  const reg = createLlmProtocolRegistry();
+  reg.register(openaiProtocol);
+  return reg;
+}
+
+function createDefaultToolFormatRegistry(): ToolFormatRegistry {
+  const reg = createToolFormatRegistry();
+  reg.register(xmlToolFormat);
+  return reg;
+}
+
 export class LlmClient {
   baseUrl: string | null;
   apiKey: string | null;
@@ -44,6 +70,9 @@ export class LlmClient {
   stream: boolean;
   providers: ProviderDef[];
   cancelled: boolean;
+  defaultToolFormat?: string;
+  #toolFormatRegistry: ToolFormatRegistry;
+  #protocolRegistry: LlmProtocolRegistry;
   #mangler: MarkerMangler | null;
 
   constructor(options: LlmClientOptions & LlmClientRequiredOptions) {
@@ -55,12 +84,78 @@ export class LlmClient {
     this.maxRetries = options.maxRetries;
     this.stream = options.stream !== false;
     this.providers = options.providers || [];
+    this.defaultToolFormat = options.toolFormat || undefined;
+    this.#toolFormatRegistry = options.toolFormatRegistry ?? createDefaultToolFormatRegistry();
+    this.#protocolRegistry = options.llmProtocolRegistry ?? createDefaultProtocolRegistry();
     this.cancelled = false;
     this.#mangler = options.markerMangler !== undefined ? options.markerMangler : new MarkerMangler();
   }
 
   get markerMangler(): MarkerMangler | null {
     return this.#mangler;
+  }
+
+  /** The ToolFormat active for a model (model -> provider -> global chain). */
+  toolFormatFor(modelConfig: ModelConfig): ToolFormat {
+    const id = resolveToolFormatId(modelConfig, this.providers, this.defaultToolFormat);
+    const format = this.#toolFormatRegistry.get(id);
+    if (!format) {
+      throw new LlmError(`Unknown tool format "${id}"`, "config");
+    }
+    return format;
+  }
+
+  /** The session's ToolFormat registry (used by the agent loop to resolve seam renders). */
+  get toolFormatRegistry(): ToolFormatRegistry {
+    return this.#toolFormatRegistry;
+  }
+
+  /** The ToolFormat's marker names for the resolved model (mangler union). */
+  toolFormatMarkers(modelConfig: ModelConfig): string[] {
+    return this.toolFormatFor(modelConfig).markers;
+  }
+
+  /** Resolve the LlmProtocol for a model (model -> provider -> default chain). */
+  protocolFor(modelConfig: ModelConfig): LlmProtocol {
+    const id = resolveProtocolId(modelConfig, this.providers);
+    const protocol = this.#protocolRegistry.get(id);
+    if (!protocol) {
+      throw new LlmError(`Unknown LLM protocol "${id}"`, "config");
+    }
+    return protocol;
+  }
+
+  /** Build the ProtocolContext for a model. */
+  #buildProtocolContext(modelConfig: ModelConfig): ProtocolContext {
+    let url = this.baseUrl || "";
+    let apiKey = this.apiKey;
+    try {
+      const settings = this.resolveProviderSettings(modelConfig.name);
+      url = settings.url;
+      apiKey = settings.apiKey;
+    } catch {
+      // No URL configured yet; the protocol can still build the body.
+    }
+    return {
+      mangler: this.#mangler,
+      baseUrl: url,
+      apiKey,
+      sessionId: this.sessionId,
+    };
+  }
+
+  /**
+   * Grow the mangler's protected set for a model: active ToolFormat markers +
+   * controlTokens. Existing aliases stay stable (addPrefixes only adds new
+   * prefixes), so context stored raw stays valid across model switches.
+   */
+  ensureManglerCovers(modelConfig: ModelConfig): void {
+    if (!this.#mangler) return;
+    const tokens = [
+      ...this.toolFormatMarkers(modelConfig),
+      ...(modelConfig.controlTokens || []),
+    ];
+    this.#mangler.addPrefixes(tokens);
   }
 
   resolveProviderSettings(modelName: string): { url: string; apiKey: string | null } {
@@ -102,31 +197,21 @@ export class LlmClient {
     tools: Array<ToolDef> | null | undefined,
     stream: boolean = this.stream,
   ): Record<string, unknown> {
-    const modelName = modelConfig.name.split("/").pop() || modelConfig.name;
-    const wireMessages = wireFormatFor(modelConfig).serialize(messages, this.#mangler);
-    const request: Record<string, unknown> = {
-      model: modelName,
-      messages: wireMessages,
-      stream: stream,
-    };
+    return this.#buildRequest(messages, modelConfig, tools || null, stream).body;
+  }
 
-    if (modelConfig.temperature != null) {
-      request.temperature = modelConfig.temperature;
-    }
-
-    if (tools && tools.length > 0) {
-      request.tools = tools;
-      request.tool_choice = "auto";
-      request.parallel_tool_calls = true;
-    }
-
-    if (modelConfig.reasoningEffort != null) {
-      request.reasoning_effort = modelConfig.reasoningEffort;
-    }
-    if (stream) {
-      request.stream_options = { include_usage: true };
-    }
-    return request;
+  /** Build the protocol request (path + body) for a model. */
+  #buildRequest(
+    messages: Message[],
+    modelConfig: ModelConfig,
+    tools: Array<ToolDef> | null,
+    stream: boolean,
+  ): { path: string; body: Record<string, unknown> } {
+    this.ensureManglerCovers(modelConfig);
+    const protocol = this.protocolFor(modelConfig);
+    const ctx = this.#buildProtocolContext(modelConfig);
+    const { path, body } = protocol.buildRequest(messages, modelConfig, tools, stream, ctx);
+    return { path, body: body as Record<string, unknown> };
   }
 
   async *chatStreamCancellable(
@@ -136,7 +221,7 @@ export class LlmClient {
     cancelToken: AbortSignal | null = null,
     sessionId?: string,
   ): AsyncGenerator<StreamEvent> {
-    const request = this.buildChatRequest(messages, modelConfig, tools, true);
+    const { path, body: request } = this.#buildRequest(messages, modelConfig, tools, true);
     const { url, apiKey } = this.resolveProviderSettings(modelConfig.name);
 
     const abortController = new AbortController();
@@ -165,6 +250,8 @@ export class LlmClient {
           apiKey,
           request,
           abortController.signal,
+          modelConfig,
+          path,
           effectiveSessionId,
           this.chatTimeoutSecs * 1000,
         );
@@ -173,7 +260,7 @@ export class LlmClient {
         signal: abortController.signal,
       });
 
-      yield* this._processSSE(response);
+      yield* this._processSSE(response, modelConfig);
     } finally {
       removeCancelListener?.();
     }
@@ -185,11 +272,11 @@ export class LlmClient {
     tools: Array<ToolDef> = [],
     sessionId?: string,
   ): AsyncGenerator<StreamEvent> {
-    const request = this.buildChatRequest(messages, modelConfig, tools, true);
+    const { path, body: request } = this.#buildRequest(messages, modelConfig, tools, true);
     const { url, apiKey } = this.resolveProviderSettings(modelConfig.name);
 
-    const resp = await this._doRequest(url, apiKey, request, null, sessionId || this.sessionId);
-    yield* this._processSSE(resp);
+    const resp = await this._doRequest(url, apiKey, request, null, modelConfig, path, sessionId || this.sessionId);
+    yield* this._processSSE(resp, modelConfig);
   }
 
   /**
@@ -208,22 +295,29 @@ export class LlmClient {
     apiKey: string | null,
     request: Record<string, unknown>,
     signal: AbortSignal | null,
+    modelConfig: ModelConfig,
+    path: string,
     sessionId?: string,
     timeoutMs?: number | null,
   ): Promise<Response> {
-    const headers: Record<string, string> = {
-      "Content-Type": "application/json",
-      "User-Agent": `hotdog/${pkg.version}`,
-    };
-    if (apiKey) headers["Authorization"] = `Bearer ${apiKey}`;
+    // The protocol owns both the path (from buildRequest) and the headers;
+    // the ctx carries the *resolved* url/apiKey (provider-level overrides
+    // applied) so buildHeaders authenticates with the right key.
+    // Per-call override first, falling back to the client's session id.
     const effectiveSessionId = sessionId || this.sessionId;
-    if (effectiveSessionId) headers["x-session-affinity"] = effectiveSessionId;
-    headers["Connection"] = "keep-alive";
+    const protocol = this.protocolFor(modelConfig);
+    const ctx: ProtocolContext = {
+      mangler: this.#mangler,
+      baseUrl: url,
+      apiKey,
+      sessionId: effectiveSessionId || "",
+    };
+    const headers = protocol.buildHeaders(ctx);
 
     let resp: Response;
     try {
       resp = await hotdogFetch(
-        `${url}/v1/chat/completions`,
+        `${url}${path}`,
         {
           method: "POST",
           headers,
@@ -259,90 +353,15 @@ export class LlmClient {
     return resp;
   }
 
-  async *_processSSE(response: Response): AsyncGenerator<StreamEvent> {
-    const contentType =
-      typeof response.headers?.get === "function" ? response.headers.get("content-type") || "" : "";
-    const isSse =
-      contentType.includes("text/event-stream") || contentType.includes("text/plain") || contentType === "";
-
-    if (!isSse) {
-      try {
-        const data = (await response.json()) as Record<string, unknown>;
-        yield* this._parseStreamData(data);
-        return;
-      } catch {
-        throw LlmError.InvalidResponse(`Unexpected Content-Type: ${contentType}`);
-      }
-    }
-
-    if (!response.body) {
-      throw LlmError.InvalidResponse("Response body is null");
-    }
-    for await (const data of parseSse(response.body)) {
-      yield* this._parseStreamData(data as Record<string, unknown>);
-    }
+  async *_processSSE(response: Response, modelConfig: ModelConfig): AsyncGenerator<StreamEvent> {
+    const protocol = this.protocolFor(modelConfig);
+    const ctx: ProtocolContext = {
+      mangler: this.#mangler,
+      baseUrl: this.baseUrl || "",
+      apiKey: this.apiKey,
+      sessionId: this.sessionId,
+    };
+    yield* protocol.parseStream(response, ctx);
   }
 
-  _parseStreamData(data: Record<string, unknown>): StreamEvent[] {
-    const events: StreamEvent[] = [];
-    const choices = (data.choices as Array<Record<string, unknown>>) || [];
-    const usage = data.usage as Record<string, unknown> | undefined;
-
-    for (const choice of choices) {
-      const delta = (choice.delta as Record<string, unknown>) || {};
-
-      const reasoningContent = delta.reasoning_content as string | null | undefined;
-      if (reasoningContent) {
-        let content = reasoningContent;
-        if (this.#mangler) content = this.#mangler.unescape(content) ?? "";
-        if (content) events.push({ type: "reasoning", content });
-      }
-
-      const contentVal = delta.content as string | null | undefined;
-      if (contentVal) {
-        let content = contentVal;
-        if (this.#mangler) content = this.#mangler.unescape(content) ?? "";
-        if (content) events.push({ type: "content", content });
-      }
-
-      const toolCalls = (delta.tool_calls as Array<Record<string, unknown>>) || [];
-      for (const tc of toolCalls) {
-        if (tc.function) {
-          const fn = tc.function as Record<string, unknown>;
-          let name = fn.name as string | null | undefined;
-          let arguments_ = fn.arguments as string | null | undefined;
-          if (this.#mangler) {
-            if (name) name = this.#mangler.unescape(name);
-            if (arguments_) arguments_ = this.#mangler.unescape(arguments_);
-          }
-          if (name) {
-            events.push({
-              type: "toolName",
-              index: (tc.index as number) || 0,
-              name,
-              toolCallId: (tc.id as string) || "",
-            });
-          }
-          if (arguments_) {
-            events.push({
-              type: "toolArgument",
-              index: (tc.index as number) || 0,
-              arguments: arguments_,
-            });
-          }
-        }
-      }
-
-      const finishReason = choice.finish_reason as string | undefined;
-      if (finishReason) {
-        events.push({ type: "finish", reason: finishReason });
-      }
-    }
-
-    if (usage) {
-      events.push({ type: "usage", data: usage });
-    }
-
-    return events;
-  }
 }

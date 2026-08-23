@@ -5,6 +5,7 @@ import type { AgentLike } from "../../src/core/session/index.ts";
 import type { HookSystem } from "../../src/core/hooks.ts";
 import type { MessageLog } from "../../src/core/context/message-log.ts";
 import type { HotdogServerSocket } from "../../src/extensions/websocket/server.ts";
+import { LlmClient } from "../../src/core/llm-client/client.ts";
 
 const mockHooks = {
   notifyHooks: () => {},
@@ -91,6 +92,15 @@ export function createWsMockCore(): any {
     extensions: {
       cleanup: async () => {},
     },
+    createLlmClient: (overrides?: Record<string, unknown>) =>
+      new LlmClient({
+        baseUrl: "http://localhost:8000",
+        apiKey: "test-key",
+        stream: true,
+        chatTimeoutSecs: 30,
+        maxRetries: 3,
+        ...overrides,
+      }),
   };
 }
 

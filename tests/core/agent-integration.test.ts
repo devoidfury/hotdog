@@ -566,6 +566,86 @@ describe('Agent — lifecycle and state', () => {
     await expect(runPromise).rejects.toThrow(/cancelled|abort/i);
   });
 
+  it('should detach the abort listener after a run so aborting while idle is a no-op', async () => {
+    const controller = new AbortController();
+
+    const mockLLM = new MockLLMClient({
+      responseSequences: [
+        buildStreamResponse({
+          content: 'Done.',
+          usage: { prompt_tokens: 10, completion_tokens: 10, total_tokens: 20 },
+        }),
+      ],
+    });
+
+    const { agent } = createAgentFixture({ mockLLM, abortSignal: controller.signal });
+
+    await agent.run('hello');
+    expect(agent.cancelled).toBe(false);
+
+    // Aborting the external signal after the run completes must NOT mark the
+    // agent cancelled (no stale listener) and must not throw on the cleared
+    // runAbortController.
+    controller.abort();
+    expect(agent.cancelled).toBe(false);
+    expect(agent.runAbortController).toBeNull();
+  });
+
+  it('should not accumulate abort listeners across consecutive runs', async () => {
+    const controller = new AbortController();
+
+    const mockLLM = new MockLLMClient({
+      responseSequences: [
+        buildStreamResponse({
+          content: 'One.',
+          usage: { prompt_tokens: 10, completion_tokens: 10, total_tokens: 20 },
+        }),
+        buildStreamResponse({
+          content: 'Two.',
+          usage: { prompt_tokens: 10, completion_tokens: 10, total_tokens: 20 },
+        }),
+      ],
+    });
+
+    const { agent } = createAgentFixture({ mockLLM, abortSignal: controller.signal });
+
+    await agent.run('first');
+    agent.resetCancel();
+    await agent.run('second');
+
+    // With a stale listener per run, this abort would re-set `cancelled`
+    // (and historically throw on the nulled run controller).
+    controller.abort();
+    expect(agent.cancelled).toBe(false);
+  });
+
+  it('should still cancel the next run when abortSignal fires while idle', async () => {
+    const controller = new AbortController();
+
+    const mockLLM = new MockLLMClient({
+      responseSequences: [
+        buildStreamResponse({
+          content: 'Done.',
+          usage: { prompt_tokens: 10, completion_tokens: 10, total_tokens: 20 },
+        }),
+        buildStreamResponse({
+          content: 'Should not be produced',
+          usage: { prompt_tokens: 10, completion_tokens: 10, total_tokens: 20 },
+        }),
+      ],
+    });
+
+    const { agent } = createAgentFixture({ mockLLM, abortSignal: controller.signal });
+
+    await agent.run('first');
+    agent.resetCancel();
+
+    // Aborted between runs: the next run must still be rejected (the
+    // iteration start checks abortSignal.aborted directly).
+    controller.abort();
+    await expect(agent.run('second')).rejects.toThrow(/cancelled|abort/i);
+  });
+
   it('should process followQueue messages before LLM call', async () => {
     const mockLLM = new MockLLMClient({
       responseSequences: [

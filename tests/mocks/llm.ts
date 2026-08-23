@@ -2,6 +2,8 @@
 // Produces programmable streams of events.
 
 import type { LlmClient } from '../../src/core/llm-client/client.ts';
+import { createToolFormatRegistry, type ToolFormatRegistry } from '../../src/core/extensions/tool-format.ts';
+import { xmlToolFormat } from '../../src/core/extensions/tool-format-xml.ts';
 
 /**
  * Build a tool-call event sequence for a single tool call.
@@ -129,5 +131,22 @@ export class MockLLMClient {
       await Promise.resolve();
       yield event;
     }
+  }
+
+  /** Mirrors LlmClient.toolFormatFor (mock providers carry no toolFormat). */
+  toolFormatFor(modelConfig: Record<string, unknown>): { id: string } {
+    return { id: (modelConfig.toolFormat as string | undefined) ?? 'xml' };
+  }
+
+  #toolFormatRegistry?: ToolFormatRegistry;
+
+  /** Mirrors LlmClient's registry: the built-in default (xml) is resolvable. */
+  get toolFormatRegistry(): ToolFormatRegistry {
+    if (!this.#toolFormatRegistry) {
+      const reg = createToolFormatRegistry();
+      reg.register(xmlToolFormat);
+      this.#toolFormatRegistry = reg;
+    }
+    return this.#toolFormatRegistry;
   }
 }

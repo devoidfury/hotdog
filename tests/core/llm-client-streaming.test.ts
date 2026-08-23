@@ -22,7 +22,7 @@ describe("LlmClient.ping", () => {
   });
 
   it("returns undefined on successful health check", async () => {
-    const client = new LlmClient({ chatTimeoutSecs: 30, maxRetries: 3, baseUrl: "http://test.com" });
+    const client = new LlmClient({ chatTimeoutSecs: 30, maxRetries: 3, baseUrl: "http://test.com", markerMangler: null });
 
     globalThis.fetch = (async () => ({ ok: true })) as unknown as typeof fetch;
 
@@ -31,7 +31,7 @@ describe("LlmClient.ping", () => {
   });
 
   it("throws LlmError.Api on non-OK health check", async () => {
-    const client = new LlmClient({ chatTimeoutSecs: 30, maxRetries: 3, baseUrl: "http://test.com" });
+    const client = new LlmClient({ chatTimeoutSecs: 30, maxRetries: 3, baseUrl: "http://test.com", markerMangler: null });
 
     globalThis.fetch = (async () => ({ ok: false, status: 503 })) as unknown as typeof fetch;
 
@@ -39,7 +39,7 @@ describe("LlmClient.ping", () => {
   });
 
   it("throws LlmError.Http on network error", async () => {
-    const client = new LlmClient({ chatTimeoutSecs: 30, maxRetries: 3, baseUrl: "http://test.com" });
+    const client = new LlmClient({ chatTimeoutSecs: 30, maxRetries: 3, baseUrl: "http://test.com", markerMangler: null });
 
     globalThis.fetch = (async () => {
       throw new Error("ECONNREFUSED");
@@ -49,7 +49,7 @@ describe("LlmClient.ping", () => {
   });
 
   it("re-throws LlmError without wrapping", async () => {
-    const client = new LlmClient({ chatTimeoutSecs: 30, maxRetries: 3, baseUrl: "http://test.com" });
+    const client = new LlmClient({ chatTimeoutSecs: 30, maxRetries: 3, baseUrl: "http://test.com", markerMangler: null });
 
     globalThis.fetch = (async () => {
       throw LlmError.Api("already typed");
@@ -65,9 +65,9 @@ describe("LlmClient.chatStreamCancellable", () => {
   }
 
   function setupClient() {
-    const client = new LlmClient({ chatTimeoutSecs: 30, maxRetries: 3, baseUrl: "http://test.com" });
+    const client = new LlmClient({ chatTimeoutSecs: 30, maxRetries: 3, baseUrl: "http://test.com", markerMangler: null });
     // Override _doRequest to return a mock SSE response instead of making real HTTP calls
-    client._doRequest = async (url: string, apiKey: string | null, request: Record<string, unknown>, signal: AbortSignal | null): Promise<Response> => {
+    client._doRequest = async (_url: string, _apiKey: string | null, _request: Record<string, unknown>, signal: AbortSignal | null): Promise<Response> => {
       // If signal is already aborted, simulate a cancelled request
       if (signal?.aborted) {
         throw new Error("request was cancelled");
@@ -99,7 +99,7 @@ describe("LlmClient.chatStreamCancellable", () => {
   }
 
   it("returns an async generator", () => {
-    const client = new LlmClient({ chatTimeoutSecs: 30, maxRetries: 3, baseUrl: "http://test.com" });
+    const client = new LlmClient({ chatTimeoutSecs: 30, maxRetries: 3, baseUrl: "http://test.com", markerMangler: null });
     const gen = client.chatStreamCancellable(
       [makeMsg("user", "Hi")],
       mc(),
@@ -235,7 +235,7 @@ describe("LlmClient.chatStreamCancellable — network errors, timeouts, cancella
   }
 
   it("retries raw network errors and resolves once the connection succeeds", async () => {
-    const client = new LlmClient({ chatTimeoutSecs: 30, maxRetries: 3, baseUrl: "http://test.com" });
+    const client = new LlmClient({ chatTimeoutSecs: 30, maxRetries: 3, baseUrl: "http://test.com", markerMangler: null });
     let calls = 0;
 
     globalThis.fetch = (async () => {
@@ -254,7 +254,7 @@ describe("LlmClient.chatStreamCancellable — network errors, timeouts, cancella
   });
 
   it("exhausts retries on persistent network error and surfaces LlmError.Http", async () => {
-    const client = new LlmClient({ chatTimeoutSecs: 30, maxRetries: 2, baseUrl: "http://test.com" });
+    const client = new LlmClient({ chatTimeoutSecs: 30, maxRetries: 2, baseUrl: "http://test.com", markerMangler: null });
     let calls = 0;
 
     globalThis.fetch = (async () => {
@@ -273,7 +273,7 @@ describe("LlmClient.chatStreamCancellable — network errors, timeouts, cancella
   });
 
   it("does not retry 4xx HTTP errors", async () => {
-    const client = new LlmClient({ chatTimeoutSecs: 30, maxRetries: 3, baseUrl: "http://test.com" });
+    const client = new LlmClient({ chatTimeoutSecs: 30, maxRetries: 3, baseUrl: "http://test.com", markerMangler: null });
     let calls = 0;
 
     globalThis.fetch = (async () => {
@@ -292,7 +292,7 @@ describe("LlmClient.chatStreamCancellable — network errors, timeouts, cancella
   });
 
   it("retries on chat timeout and surfaces a visible timeout error with a fresh signal per attempt", async () => {
-    const client = new LlmClient({ chatTimeoutSecs: 0.02, maxRetries: 2, baseUrl: "http://test.com" });
+    const client = new LlmClient({ chatTimeoutSecs: 0.02, maxRetries: 2, baseUrl: "http://test.com", markerMangler: null });
     const signalLog: Array<{ signal: AbortSignal | null | undefined; abortedAtEntry: boolean }> = [];
 
     globalThis.fetch = hangingFetch(signalLog);
@@ -321,7 +321,7 @@ describe("LlmClient.chatStreamCancellable — network errors, timeouts, cancella
   });
 
   it("surfaces user cancellation as LlmError.Cancelled without retrying", async () => {
-    const client = new LlmClient({ chatTimeoutSecs: 30, maxRetries: 3, baseUrl: "http://test.com" });
+    const client = new LlmClient({ chatTimeoutSecs: 30, maxRetries: 3, baseUrl: "http://test.com", markerMangler: null });
     const signalLog: Array<{ signal: AbortSignal | null | undefined; abortedAtEntry: boolean }> = [];
 
     globalThis.fetch = hangingFetch(signalLog);

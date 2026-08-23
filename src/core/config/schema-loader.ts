@@ -405,7 +405,10 @@ export interface CoreConfig {
   baseUrl?: string;
   apiKey?: string;
   thinkerFormat?: string;
-  toolFormat?: string;
+  /** CLI display format for tool calls. */
+  toolCallDisplayFormat?: string;
+  /** Global default ToolFormat registry name for model-facing tool results (default "xml"). */
+  modelToolFormat?: string;
   toolOutputFmt?: string;
   chatTimeout?: number;
   embeddingsTimeout?: number;

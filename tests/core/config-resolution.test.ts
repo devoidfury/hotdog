@@ -88,6 +88,27 @@ describe("CONFIG_KEYS schema", () => {
     expect(resolveKey("thinkerFormat", CONFIG_KEYS.thinkerFormat, baseContext)).toBe("[Thinking: {}]");
   });
 
+  it("toolCallDisplayFormat falls back to the legacy toolfmt config key", () => {
+    // New config key wins when both are present
+    expect(resolveKey("toolCallDisplayFormat", CONFIG_KEYS.toolCallDisplayFormat, {
+      ...baseContext,
+      config: { toolCallDisplayFormat: "new", toolfmt: "legacy" },
+    })).toBe("new");
+    // Legacy key applies when the new key is absent (pre-rename config files)
+    expect(resolveKey("toolCallDisplayFormat", CONFIG_KEYS.toolCallDisplayFormat, {
+      ...baseContext,
+      config: { toolfmt: "legacy" },
+    })).toBe("legacy");
+    // CLI flag wins over both config spellings
+    expect(resolveKey("toolCallDisplayFormat", CONFIG_KEYS.toolCallDisplayFormat, {
+      ...baseContext,
+      cli: { toolfmt: "cli" },
+      config: { toolCallDisplayFormat: "new", toolfmt: "legacy" },
+    })).toBe("cli");
+    // Default when nothing is set
+    expect(resolveKey("toolCallDisplayFormat", CONFIG_KEYS.toolCallDisplayFormat, baseContext)).toBe("  \u2192 {} {}");
+  });
+
   it("timeouts resolve with correct fallback", () => {
     expect(resolveKey("chatTimeout", CONFIG_KEYS.chatTimeout, { ...baseContext, cli: { chatTimeout: 300 } })).toBe(300);
     expect(resolveKey("chatTimeout", CONFIG_KEYS.chatTimeout, { ...baseContext, config: { chatTimeoutSecs: 900 } })).toBe(900);
@@ -224,7 +245,7 @@ describe("integration: resolveAll with CONFIG_KEYS", () => {
         aiUrl: "http://config-url",
         apiKey: "config-key",
         thinker: "config-thinker",
-        toolfmt: "config-tool",
+        toolCallDisplayFormat: "config-tool",
         toolOutputFmt: "config-output",
         chatTimeoutSecs: 900,
         embeddingsTimeoutSecs: 60,
@@ -269,6 +290,9 @@ describe("integration: resolveAll with CONFIG_KEYS", () => {
     // CLI wins for timeouts and paths
     expect(result.chatTimeout).toBe(300);
     expect(result.sessionId).toBe("test-session");
+
+    // Display-format config key (UI sinks read `resolved.toolCallDisplayFormat`)
+    expect(result.toolCallDisplayFormat).toBe("config-tool");
 
     // Phase 2: Complex values
     expect(result.theme).toBe("light");

@@ -39,6 +39,10 @@ export { isSensitiveEnvVar, copyScrubbedEnv } from "./env.ts";
 // ── Promise utilities ────────────────────────────────────────────────────────
 export { isPromise } from "./promise.ts";
 
+// ── SSE stream parsing ───────────────────────────────────────────────────────
+export { parseSse, SseParser } from "./sse-parser.ts";
+export type { SseParserOptions } from "./sse-parser.ts";
+
 // ── Markdown Parser ──────────────────────────────────────────────────────────
 export {
   parseMarkdown,

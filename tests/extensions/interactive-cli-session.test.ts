@@ -5,6 +5,7 @@ import { describe, it, expect, mock, beforeEach, afterEach } from "bun:test";
 import { HOOKS } from "../../src/core/hooks.ts";
 import { HookSystem } from "../../src/core/hooks.ts";
 import { createCompletionService } from "../../src/core/completion.ts";
+import { LlmClient } from "../../src/core/llm-client/client.ts";
 
 describe("runInteractiveSession", () => {
   let originalSessionManagerCreate: unknown = null;
@@ -63,6 +64,9 @@ describe("runInteractiveSession", () => {
         load: async () => null,
         cleanup: async () => {},
       },
+      createLlmClient: ((overrides?: Record<string, unknown>) =>
+        new LlmClient({ baseUrl: "http://localhost:8000", apiKey: "test-key", stream: true,
+          chatTimeoutSecs: 30, maxRetries: 3, ...overrides })) as any,
       completion: createCompletionService(),
     } as any;
   }

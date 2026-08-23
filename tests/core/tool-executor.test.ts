@@ -8,6 +8,8 @@ import { createHooks } from '../../src/core/hooks.ts';
 import { Message } from '../../src/core/context/message.ts';
 import { TransientError } from '../../src/core/error.ts';
 import type { Tool, ToolDef } from '../../src/core/extensions/tool-registry.ts';
+import { createToolFormatRegistry } from '../../src/core/extensions/tool-format.ts';
+import { xmlToolFormat } from '../../src/core/extensions/tool-format-xml.ts';
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -520,6 +522,79 @@ describe('ToolExecutor', () => {
       expect(result.outcome).toBe('continue');
       expect(result.toolResults).toHaveLength(3);
       expect(executionOrder).toEqual(['tool_a', 'tool_b', 'tool_c']);
+    });
+  });
+
+  describe('tool format name (agent-loop per-model resolution)', () => {
+    const mdTable = {
+      id: 'md-table',
+      markers: ['tool-result'],
+      formatResult(
+        result: string | Record<string, unknown>,
+        toolName: string,
+        meta?: { status: string; [key: string]: string },
+      ): string {
+        const payload = typeof result === 'string' ? result : JSON.stringify(result);
+        return `| ${toolName} | ${meta?.status || 'success'} |\n\n${payload}`;
+      },
+    };
+
+    function makeEchoExecutor(deps: ReturnType<typeof createMockDeps>) {
+      deps.toolRegistry.register('echo', makeTestTool('echo', async () => 'hi'));
+      return createToolExecutor(deps);
+    }
+
+    it('renders results with the explicitly resolved format', async () => {
+      const reg = createToolFormatRegistry();
+      reg.register(xmlToolFormat);
+      reg.register(mdTable);
+
+      const deps = createMockDeps();
+      const executor = makeEchoExecutor(deps);
+      const result = await executor.execute(
+        [{ id: 'call-1', type: 'function', function: { name: 'echo', arguments: '{}' } }],
+        'md-table',
+        reg,
+      );
+      expect(result.toolResults[0]!.result).toContain('| echo | success |');
+    });
+
+    it('falls back to the built-in xml default when no name is passed', async () => {
+      const deps = createMockDeps();
+      const executor = makeEchoExecutor(deps);
+      const result = await executor.execute([
+        { id: 'call-1', type: 'function', function: { name: 'echo', arguments: '{}' } },
+      ]);
+      expect(result.toolResults[0]!.result).toContain('<tool name="echo"');
+    });
+
+    it('resolves the format from the session registry, not another session\'s', async () => {
+      // md-table exists only in this executor's session registry.
+      const reg = createToolFormatRegistry();
+      reg.register(xmlToolFormat);
+      reg.register(mdTable);
+
+      const deps = createMockDeps();
+      const executor = makeEchoExecutor(deps);
+      const result = await executor.execute(
+        [{ id: 'call-1', type: 'function', function: { name: 'echo', arguments: '{}' } }],
+        'md-table',
+        reg,
+      );
+      expect(result.toolResults[0]!.result).toContain('| echo | success |');
+
+      // Same name against a registry without md-table is a config error at
+      // the seam; execute() converts it to a tool error result (never a
+      // silent fallback to another session's format).
+      const emptyReg = createToolFormatRegistry();
+      const result2 = await executor.execute(
+        [{ id: 'call-2', type: 'function', function: { name: 'echo', arguments: '{}' } }],
+        'md-table',
+        emptyReg,
+      );
+      expect(result2.toolResults[0]!.result).toContain(
+        'Tool execution failed: Unknown tool format "md-table"',
+      );
     });
   });
 });

@@ -18,3 +18,19 @@ export function camelCase(str: string): string {
 export function parseCliFlagKey(str: string): string {
   return camelCase(str.replace(FLAG_PREFIX_REGEX, ""));
 }
+
+/**
+ * simple XML escaping
+ * (Used for tool result formatting).
+ */
+export function xmlEscape(s: string): string {
+  return s.replace(/[&<>"']/g, (match) => XML_ENTITIES[match] ?? match);
+}
+
+const XML_ENTITIES: Record<string, string> = {
+  "&": "&amp;",
+  "<": "&lt;",
+  ">": "&gt;",
+  '"': "&quot;",
+  "'": "&apos;",
+};

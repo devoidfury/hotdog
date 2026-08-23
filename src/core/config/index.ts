@@ -133,7 +133,7 @@ export interface DefaultConfig extends Record<string, unknown> {
   defaultSubcommand: string | null;
   temperature: number | null;
   thinker: string | null;
-  toolfmt: string | null;
+  toolCallDisplayFormat: string | null;
   toolOutputFmt: string | null;
   role: string | null;
   hideTools: boolean;
@@ -174,7 +174,9 @@ export function getDefaultConfig(
       string | null,
     temperature: null,
     thinker: getLayerDefault(CONFIG_SCHEMA.thinkerFormat) as string | null,
-    toolfmt: getLayerDefault(CONFIG_SCHEMA.toolFormat) as string | null,
+    toolCallDisplayFormat: getLayerDefault(
+      CONFIG_SCHEMA.toolCallDisplayFormat,
+    ) as string | null,
     toolOutputFmt: getLayerDefault(CONFIG_SCHEMA.toolOutputFmt) as
       string | null,
     role: null,

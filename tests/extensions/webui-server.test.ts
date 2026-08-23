@@ -3,6 +3,7 @@
 import { describe, it, expect, afterEach } from "bun:test";
 import { createWebuiServer } from "../../src/extensions/webui/server.ts";
 import { logger } from "../../src/core/logger.ts";
+import { LlmClient } from "../../src/core/llm-client/client.ts";
 
 function createMockCore(config: Record<string, unknown> = {}) {
   return {
@@ -47,6 +48,9 @@ function createMockCore(config: Record<string, unknown> = {}) {
     extensions: {
       cleanup: async () => {},
     },
+    createLlmClient: ((overrides?: Record<string, unknown>) =>
+        new LlmClient({ baseUrl: "http://localhost:8000", apiKey: "test-key", stream: true,
+          chatTimeoutSecs: 30, maxRetries: 3, ...overrides })) as any,
   } as any;
 }
 

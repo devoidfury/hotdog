@@ -253,9 +253,25 @@ describe("CoreInfrastructure service accessor", () => {
     const { createSubcommandRegistry } = await import(
       "../../src/core/extensions/registries.ts"
     );
+    const { createToolFormatRegistry } = await import(
+      "../../src/core/extensions/tool-format.ts"
+    );
+    const { xmlToolFormat } = await import(
+      "../../src/core/extensions/tool-format-xml.ts"
+    );
+    const { createLlmProtocolRegistry } = await import(
+      "../../src/core/llm-client/protocol.ts"
+    );
+    const { openaiProtocol } = await import(
+      "../../src/core/llm-client/openai-protocol.ts"
+    );
 
     const hooks = createHooks();
     const toolRegistry = createToolRegistry();
+    const toolFormatRegistry = createToolFormatRegistry();
+    toolFormatRegistry.register(xmlToolFormat);
+    const llmProtocolRegistry = createLlmProtocolRegistry();
+    llmProtocolRegistry.register(openaiProtocol);
     const services = createServiceRegistry();
     const completion = createCompletionService();
     const configRegistry = new ConfigRegistry();
@@ -281,6 +297,8 @@ describe("CoreInfrastructure service accessor", () => {
       config: {},
       cliSubcommandRegistry,
       configRegistry,
+      toolFormatRegistry,
+      llmProtocolRegistry,
       service: (name: string) => services.get(name),
     };
 
@@ -293,5 +311,68 @@ describe("CoreInfrastructure service accessor", () => {
 
     // Verify it throws for missing services (same underlying get())
     expect(() => core.service("nonexistent")).toThrow();
+  });
+});
+
+describe("createCore.createLlmClient (modelToolFormat layering)", () => {
+  // Second format so the resolved choice is observable.
+  const toyFormat = {
+    id: "toy",
+    markers: ["toy-marker"],
+    formatResult(result: string | Record<string, unknown>) {
+      return String(result);
+    },
+  };
+
+  function mc(): import("../../src/core/config/providers.ts").ModelConfig {
+    return { name: "prov/model", temperature: null, contextLimit: 128000, tags: [] };
+  }
+
+  async function buildCore(
+    fileConfig: Record<string, unknown>,
+    cli: Record<string, unknown>,
+  ) {
+    const { createCore } = await import("../../src/core/main.ts");
+    const { ConfigRegistry } = await import("../../src/core/index.ts");
+    const { createSubcommandRegistry } = await import("../../src/core/extensions/registries.ts");
+    const { buildAgentConfig, resolveConfigDir } = await import(
+      "../../src/core/config/index.ts"
+    );
+
+    const core = createCore(
+      fileConfig as import("../../src/core/config/schema-loader.ts").CoreConfigWithExtensions,
+      new ConfigRegistry(),
+      createSubcommandRegistry(),
+    );
+    core.toolFormatRegistry.register(toyFormat);
+
+    const resolved = await buildAgentConfig({
+      cli: cli as never,
+      config: fileConfig as never,
+      configDir: resolveConfigDir(),
+      providers: [],
+    });
+    core.resolved = resolved as never;
+    return core;
+  }
+
+  it("CLI --model-tool-format wins over the raw config file value", async () => {
+    const core = await buildCore({ modelToolFormat: "xml" }, { modelToolFormat: "toy" });
+    expect(core.createLlmClient().toolFormatFor(mc()).id).toBe("toy");
+  });
+
+  it("config file value applies when no CLI flag is given", async () => {
+    const core = await buildCore({ modelToolFormat: "toy" }, {});
+    expect(core.createLlmClient().toolFormatFor(mc()).id).toBe("toy");
+  });
+
+  it("defaults to xml when nothing is set", async () => {
+    const core = await buildCore({}, {});
+    expect(core.createLlmClient().toolFormatFor(mc()).id).toBe("xml");
+  });
+
+  it("throws a config error for an unknown global modelToolFormat (no silent xml fallback)", async () => {
+    const core = await buildCore({ modelToolFormat: "nope" }, {});
+    expect(() => core.createLlmClient()).toThrow(/Unknown tool format "nope"/);
   });
 });

@@ -7,6 +7,7 @@ import { SessionRegistry, createWsServer, type HotdogServerSocket } from "../../
 import { WebSocketChannel } from "../../src/extensions/websocket/websocket-channel.ts";
 import { C2S, S2C } from "../../src/extensions/websocket/protocol.ts";
 import { Agent } from "../../src/core/agent.ts";
+import { LlmClient } from "../../src/core/llm-client/client.ts";
 import { createWsMockCore, createWsMockAgentFactory, createWsMockWs, makeWsMockAgent } from "../mocks/websocket.ts";
 import type { AgentLike } from "../../src/core/session/index.ts";
 
@@ -535,6 +536,9 @@ describe("replaySessionHistory", () => {
       },
       toolRegistry: { getAll: () => [], get: () => null, register: () => {} },
       extensions: { cleanup: async () => {} },
+      createLlmClient: (overrides?: Record<string, unknown>) =>
+        new LlmClient({ baseUrl: "http://localhost:8000", apiKey: "test-key", stream: true,
+          chatTimeoutSecs: 30, maxRetries: 3, ...overrides }),
     } as any;
 
     const wsServer = createWsServer(core, {
@@ -589,6 +593,9 @@ describe("replaySessionHistory", () => {
       },
       toolRegistry: { getAll: () => [], get: () => null, register: () => {} },
       extensions: { cleanup: async () => {} },
+      createLlmClient: (overrides?: Record<string, unknown>) =>
+        new LlmClient({ baseUrl: "http://localhost:8000", apiKey: "test-key", stream: true,
+          chatTimeoutSecs: 30, maxRetries: 3, ...overrides }),
     } as any;
 
     const wsServer = createWsServer(core, {
@@ -652,6 +659,9 @@ describe("replaySessionHistory", () => {
       },
       toolRegistry: { getAll: () => [], get: () => null, register: () => {} },
       extensions: { cleanup: async () => {} },
+      createLlmClient: (overrides?: Record<string, unknown>) =>
+        new LlmClient({ baseUrl: "http://localhost:8000", apiKey: "test-key", stream: true,
+          chatTimeoutSecs: 30, maxRetries: 3, ...overrides }),
     } as any;
 
     const wsServer = createWsServer(core, {
@@ -703,6 +713,9 @@ describe("replaySessionHistory", () => {
       },
       toolRegistry: { getAll: () => [], get: () => null, register: () => {} },
       extensions: { cleanup: async () => {} },
+      createLlmClient: (overrides?: Record<string, unknown>) =>
+        new LlmClient({ baseUrl: "http://localhost:8000", apiKey: "test-key", stream: true,
+          chatTimeoutSecs: 30, maxRetries: 3, ...overrides }),
     } as any;
 
     const wsServer = createWsServer(core, {

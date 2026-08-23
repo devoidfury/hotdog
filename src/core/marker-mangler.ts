@@ -3,7 +3,11 @@
 // Randomly aliases protected marker names before sending to the model,
 // and reverses the transformation on output.
 
-const PROTECTED_PREFIXES = [
+// Core-owned protected prefixes: markers no ToolFormat owns. Format-specific
+// element names (e.g. the XML format's tool/output/error) enter the union via
+// ToolFormat.markers, assembled at session entry points and passed to the
+// constructor or addPrefixes().
+export const CORE_PROTECTED_PREFIXES = [
   "tool-call",
   "tool_call",
   "function",
@@ -15,6 +19,8 @@ const PROTECTED_PREFIXES = [
   "reasoning",
   "task-result",
 ];
+
+
 
 const ALIAS_LENGTH = 16;
 const ALIAS_CHARS = "abcdefghijkmnopqrstuvwxyz23456789";
@@ -53,10 +59,10 @@ export function buildAliasPattern(): RegExp {
  * @private
  * @returns Mapping from original names to aliases.
  */
-function buildMappings(): Map<string, string> {
+function buildMappings(prefixes: readonly string[]): Map<string, string> {
   const seen = new Set<string>();
   const mappings = new Map<string, string>();
-  for (const prefix of PROTECTED_PREFIXES) {
+  for (const prefix of prefixes) {
     if (seen.has(prefix)) continue;
     seen.add(prefix);
     mappings.set(prefix, `m_${generateAlias()}`);
@@ -79,15 +85,35 @@ export class MarkerMangler {
   #reverse: Map<string, string>;
 
   /**
-   * @param options
-   * @param options.preserveCase - Preserve case when mangling
+   * @param prefixes - Protected marker prefixes to alias. Defaults to the
+   *   core list (CORE_PROTECTED_PREFIXES) so existing call sites keep working;
+   *   session entry points pass the derived union (core + active ToolFormat
+   *   markers + model/provider controlTokens).
    */
-  constructor(options: { preserveCase?: boolean } = {}) {
-    this.#mappings = buildMappings();
+  constructor(prefixes: readonly string[] = CORE_PROTECTED_PREFIXES) {
+    this.#mappings = buildMappings(prefixes);
     this.#reverse = new Map<string, string>();
     for (const [k, v] of this.#mappings) {
       this.#reverse.set(v, k);
     }
+  }
+
+  /**
+   * Add prefixes mid-session (e.g. on model switch when the token set grows).
+   * Existing aliases are untouched; only new prefixes get fresh aliases.
+   */
+  addPrefixes(newOnes: readonly string[]): void {
+    for (const prefix of newOnes) {
+      if (!prefix || this.#mappings.has(prefix)) continue;
+      const alias = `m_${generateAlias()}`;
+      this.#mappings.set(prefix, alias);
+      this.#reverse.set(alias, prefix);
+    }
+  }
+
+  /** The prefixes currently mapped to aliases. */
+  protectedPrefixes(): string[] {
+    return Array.from(this.#mappings.keys());
   }
 
   /**

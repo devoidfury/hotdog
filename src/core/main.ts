@@ -41,6 +41,16 @@ import {
 import { ConfigRegistry } from "./extensions/config.ts";
 import { CliError } from "./error.ts";
 import { createSubcommandRegistry, type CliSubcommandRegistry } from "./extensions/registries.ts";
+import {
+  createToolFormatRegistry,
+  toolFormatForName,
+  TOOL_FORMAT_DEFAULT_NAME,
+} from "./extensions/tool-format.ts";
+import { xmlToolFormat } from "./extensions/tool-format-xml.ts";
+import { createLlmProtocolRegistry } from "./llm-client/protocol.ts";
+import { openaiProtocol } from "./llm-client/openai-protocol.ts";
+import { LlmClient, type LlmClientOptions } from "./llm-client/client.ts";
+import { MarkerMangler, CORE_PROTECTED_PREFIXES } from "./marker-mangler.ts";
 
 import pkg from "@package.json" with { type: "json" };
 
@@ -98,7 +108,7 @@ export interface CoreInfrastructure extends CoreContext {
   buildConfig?: typeof buildConfig;
 }
 
-function createCore(
+export function createCore(
   config: CoreConfigWithExtensions,
   configRegistry: ConfigRegistry,
   cliSubcommandRegistry: CliSubcommandRegistry,
@@ -111,6 +121,10 @@ function createCore(
 ): CoreInfrastructure {
   const hooks = options.hooks || createHooks();
   const toolRegistry = createToolRegistry();
+  const toolFormatRegistry = createToolFormatRegistry();
+  toolFormatRegistry.register(xmlToolFormat);
+  const llmProtocolRegistry = createLlmProtocolRegistry();
+  llmProtocolRegistry.register(openaiProtocol);
   const services = createServiceRegistry();
   const completion = createCompletionService();
 
@@ -134,8 +148,39 @@ function createCore(
     config: coreConfig,
     cliSubcommandRegistry,
     configRegistry,
+    toolFormatRegistry,
+    llmProtocolRegistry,
     service: (name: string) => services.get(name),
     buildConfig: options.buildConfig,
+    createLlmClient(overrides?: Partial<LlmClientOptions>): LlmClient {
+      const resolved = this.resolved;
+      // The global ToolFormat default comes from the *resolved* config (CLI >
+      // config > schema default) -- the raw file in this.config never carries
+      // CLI values. Seed the session mangler with that format's markers
+      // (per-model formats/controlTokens still grow the union via
+      // ensureManglerCovers on first use).
+      const modelToolFormat =
+        (resolved?.modelToolFormat as string | undefined) ?? TOOL_FORMAT_DEFAULT_NAME;
+      // Unknown names throw LlmError("config") at the request boundary,
+      // mirroring unknown protocol/format ids (no silent fallback to xml).
+      const defaultToolFormat = toolFormatForName(modelToolFormat, this.toolFormatRegistry);
+      return new LlmClient({
+        baseUrl: resolved?.baseUrl ?? null,
+        apiKey: resolved?.apiKey ?? null,
+        stream: resolved ? resolved.stream !== false : true,
+        chatTimeoutSecs: resolved?.chatTimeout || 30,
+        maxRetries: (resolved?.maxRetries as number) || 3,
+        providers: (this.config.providers as ProviderDef[]) || [],
+        toolFormat: modelToolFormat,
+        toolFormatRegistry: this.toolFormatRegistry,
+        llmProtocolRegistry: this.llmProtocolRegistry,
+        markerMangler: new MarkerMangler([
+          ...CORE_PROTECTED_PREFIXES,
+          ...defaultToolFormat.markers,
+        ]),
+        ...overrides,
+      });
+    },
   } as CoreInfrastructure;
 
   core.extensions = createExtensionLoader(core as LoaderCore);

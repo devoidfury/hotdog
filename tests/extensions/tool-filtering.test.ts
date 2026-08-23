@@ -20,6 +20,9 @@ describe("Tool Filtering (Agent.getToolDefs)", () => {
       config: { ...config } as any,
       cliSubcommandRegistry: {} as any,
       configRegistry: { validateConfigByKey: () => ({ valid: true, errors: [] }) } as any,
+      toolFormatRegistry: {} as any,
+      llmProtocolRegistry: {} as any,
+      createLlmClient: (() => { throw new Error("not implemented in test"); }) as any,
       service: () => null,
     };
 

@@ -2,7 +2,6 @@
 
 import { HOOKS } from "../../core/hooks.ts";
 import { CliSubcommandRegistryLike } from "../../core/extensions/registries.ts";
-import { LlmClient } from "../../core/llm-client/client.ts";
 import { SkillsLoader } from "../skills/loader.ts";
 import { DEFAULT_PROFILES_SUBPATH, DEFAULT_CONFIG_FILENAME } from "../../core/config/defaults.ts";
 import { CliArgv, loadConfig, ProviderDef, resolveConfigDir } from "../../core/config/index.ts";
@@ -61,14 +60,7 @@ async function runInfo(cli: CliArgv, core: CoreContext): Promise<number> {
     return await printConfigDebug(cli, rawConfig, providers, resolved);
   }
 
-  const client = new LlmClient({
-    baseUrl: resolved.baseUrl,
-    apiKey: resolved.apiKey,
-    stream: false,
-    chatTimeoutSecs: resolved.chatTimeout,
-    maxRetries: resolved.maxRetries,
-    providers: rawConfig.providers || [],
-  });
+  const client = core.createLlmClient({ stream: false });
 
   let connectivity: ConnectivityResult;
   try {
@@ -421,7 +413,8 @@ async function printConfigDebug(
     "defaultModel",
     "temperature",
     "thinker",
-    "toolfmt",
+    "toolfmt", // legacy spelling of toolCallDisplayFormat
+    "toolCallDisplayFormat",
     "toolOutputFmt",
     "role",
     "hideTools",
@@ -475,13 +468,8 @@ async function runShowPrompt(cli: CliArgv, core: CoreContext): Promise<number> {
   const agent = new Agent({
     hooks: core.hooks,
     toolRegistry: core.toolRegistry,
-    llmClient: new LlmClient({
-      baseUrl: "",
-      apiKey: "",
-      stream: false,
-      chatTimeoutSecs: 30,
-      maxRetries: 3,
-    }),
+    // Throwaway for prompt rendering; empty url/key so it can never send a request.
+    llmClient: core.createLlmClient({ baseUrl: "", apiKey: "" }),
     model: resolved.model || "",
     maxIterations: (resolved.maxIterations as number) || 100,
     contextLimit: 128000,

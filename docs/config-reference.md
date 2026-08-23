@@ -164,17 +164,30 @@ Format string for thinking/reasoning output. `{}` is replaced with the thinking 
 { "thinker": "🧠 ... {}" }
 ```
 
-### `toolfmt`
+### `toolCallDisplayFormat`
 
 - **Type:** `string`
 - **CLI flag:** `--toolfmt`
 - **Default:** `"  → {} {}"`
 - **Resolution:** CLI > config > default
 
-Format string for tool call display. First `{}` is the tool name, second `{}` is the arguments.
+Format string for tool call display. First `{}` is the tool name, second `{}` is the arguments. The legacy `toolfmt` config key is still honored as a fallback for pre-rename config files.
 
 ```json
-{ "toolfmt": "🔧 {} {}" }
+{ "toolCallDisplayFormat": "🔧 {} {}" }
+```
+
+### `modelToolFormat`
+
+- **Type:** `string`
+- **CLI flag:** `--model-tool-format`
+- **Default:** `"xml"`
+- **Resolution:** CLI > config > default
+
+Global default for the ToolFormat registry name used when rendering tool results for the model. Provider and model entries can override this with their own `toolFormat` field (see [Providers & Models](#providers--models)). The built-in `"xml"` format emits `<tool name=... status=...>` wrappers; extensions can register additional formats under `EXTENSION_PROVIDES.TOOL_FORMATS`.
+
+```json
+{ "modelToolFormat": "md-table" }
 ```
 
 ### `toolOutputFmt`
@@ -601,6 +614,9 @@ The `providers` array defines available AI providers and their models. Each prov
 | `temperature` | `number` | no | — | Default temperature for all models in this provider. |
 | `contextLimit` | `number` | no | 128000 | Context window size limit for all models in this provider (triggers compaction when exceeded). |
 | `wireFormat` | `string` | no | `"system-first"` | Chat request wire format for this provider's models: `"system-first"` (llama.cpp/Ollama-style, harness messages ride `role:"user"`) or `"developer"` (OpenAI-style, harness messages sent as `role:"developer"`). Overridable per model. |
+| `protocol` | `string` | no | `"openai"` | LlmProtocol registry name for this provider's models. The built-in `"openai"` protocol speaks the OpenAI chat-completions wire (Bearer auth, `data:` SSE). Extensions can register additional protocols under `EXTENSION_PROVIDES.LLM_PROTOCOLS`. Overridable per model. |
+| `toolFormat` | `string` | no | global `modelToolFormat` (default `"xml"`) | ToolFormat registry name for this provider's models. Falls back to the global `modelToolFormat` setting, then to `"xml"`. Overridable per model. |
+| `controlTokens` | `array` | no | `[]` | Server chat-template control tokens (e.g. reasoning-block delimiters, end-of-turn literals) to mangle in message content at the wire. Prevents untrusted tool output from forging template tokens. Overridable per model. |
 | `models` | `array` | no | `[]` | Array of model definitions. |
 
 ### Model Object (inside `providers[].models[]`)
@@ -612,6 +628,9 @@ The `providers` array defines available AI providers and their models. Each prov
 | `temperature` | `number` | no | — | Override temperature for this model. |
 | `reasoning_effort` | `string` | no | — | Reasoning effort level (e.g. `"max"`, `"medium"`, `"low"`). Also accepts camelCase `reasoningEffort`. |
 | `wireFormat` | `string` | no | — | Per-model wire format override (`"system-first"` or `"developer"`). Falls back to the provider-level `wireFormat`, then to `"system-first"`. |
+| `protocol` | `string` | no | — | Per-model LlmProtocol registry name override. Falls back to the provider-level `protocol`, then to `"openai"`. |
+| `toolFormat` | `string` | no | — | Per-model ToolFormat registry name override. Falls back to the provider-level `toolFormat`, then to the global `modelToolFormat` setting (default `"xml"`). |
+| `controlTokens` | `array` | no | — | Per-model list of server chat-template control tokens to mangle in message content at the wire. Falls back to the provider-level `controlTokens`, then to `[]`. |
 | `tags` | `array` | no | `[]` | Arbitrary tags for model discovery and filtering. |
 | `maxToolDifficulty` | `number` | no | — | Max tool difficulty (1–5) for this model. Tools above this score are hidden. Overrides `defaultMaxToolDifficulty`. Takes lower priority than CLI `--max-tool-difficulty`. |
 
@@ -660,6 +679,14 @@ When a provider has no `models` array but defines `defaultModel`, that model is 
 - `"developer"` — OpenAI-style templates. Harness messages are sent as `role:"developer"`; everything else is identical to `"system-first"`.
 
 Set it at the provider level to apply to all of the provider's models, or on individual model entries to override. When unset, `"system-first"` is used.
+
+### Protocol & Tool Format
+
+`protocol` selects the LlmProtocol that builds requests and parses responses for a model (default `"openai"`, the OpenAI chat-completions wire). `toolFormat` selects the ToolFormat that renders tool results for the model (default: global `modelToolFormat`, which defaults to `"xml"`). Both follow the same provider-level → model-level fallback chain as `wireFormat`.
+
+`controlTokens` declares server chat-template control tokens (reasoning-block delimiters, end-of-turn literals, template tool-call delimiters) that should be mangled in message content at the wire. This prevents untrusted tool output from forging template tokens that would otherwise become live control signals after the server applies its chat template. The mangler grows its protected set on model switch when the token set grows; existing aliases stay stable so context stored raw remains valid.
+
+Extensions can register additional protocols (`EXTENSION_PROVIDES.LLM_PROTOCOLS`) and tool formats (`EXTENSION_PROVIDES.TOOL_FORMATS`) from outside core.
 
 ---
 
@@ -1076,7 +1103,7 @@ CLI flag: `--shell-mode`.
   "defaultModel": "ai365/dsv4",
   "defaultProvider": "ai365",
   "thinker": " 🧠 ... {}",
-  "toolfmt": " 🔧 {} {}",
+  "toolCallDisplayFormat": " 🔧 {} {}",
   "hideTools": true,
   "showTokenUse": true,
   "skillsPath": "/skills",

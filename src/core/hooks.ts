@@ -410,6 +410,8 @@ export const HOOKS = {
 export const EXTENSION_PROVIDES = {
   CLI_SUBCOMMANDS: "cli:subcommands",
   TOOLS: "tools",
+  LLM_PROTOCOLS: "llm:protocols",
+  TOOL_FORMATS: "tool:formats",
 } as const;
 
 export function createHooks(): HookSystem {

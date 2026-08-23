@@ -3,7 +3,7 @@
 // Reads from a ReadableStream<Uint8Array>, handles SSE framing (event:, data:, [DONE]),
 // reassembles multi-chunk JSON payloads, and yields raw JSON objects.
 
-import { logger } from "../logger.ts";
+import { logger } from "../core/logger.ts";
 
 export interface SseParserOptions {
   /** Maximum accumulated JSON buffer size before warning and discarding. */

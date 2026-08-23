@@ -3,9 +3,9 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { ToolResult } from '../../src/core/extensions/tool-utils.ts';
-import { ToolContext } from '../../src/core/extensions/tool-context.ts';
-import { Workspace } from '../../src/utils/workspace.ts';
+import { ToolResult } from '@core/extensions/tool-utils.ts';
+import { ToolContext } from '@core/extensions/tool-context.ts';
+import { Workspace } from '@utils/workspace.ts';
 
 /**
  * Extract string output from a tool result (handles ToolResult or plain string).

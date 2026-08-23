@@ -356,21 +356,24 @@ export class Agent implements AgentLike {
 
   private async _performLlmCall(params: LlmRequestParams): Promise<StreamResult> {
     const { messages, modelConfig, toolDefs } = params;
-    this.runAbortController = new AbortController();
-    const cancelSignal = this.runAbortController.signal;
+    const runController = new AbortController();
+    this.runAbortController = runController;
 
-    if (this.abortSignal?.aborted) {
+    // Forward an external abort to this run's controller. The listener is per-run:
+    // it closes over runController(not this.runAbortController, which is nulled between runs)
+    // and is removed in finally, so it can't accumulate across runs or fire on a cleared controller while idle.
+    const signal = this.abortSignal;
+    let removeAbortForwarder: (() => void) | null = null;
+    if (signal?.aborted) {
       this.cancelled = true;
-      this.runAbortController.abort();
-    } else if (this.abortSignal) {
-      this.abortSignal.addEventListener(
-        "abort",
-        () => {
-          this.cancelled = true;
-          this.runAbortController!.abort();
-        },
-        { once: true },
-      );
+      runController.abort();
+    } else if (signal) {
+      const onAbort = () => {
+        this.cancelled = true;
+        runController.abort();
+      };
+      signal.addEventListener("abort", onAbort, { once: true });
+      removeAbortForwarder = () => signal.removeEventListener("abort", onAbort);
     }
 
     try {
@@ -378,11 +381,12 @@ export class Agent implements AgentLike {
         messages,
         modelConfig,
         toolDefs,
-        cancelSignal,
+        runController.signal,
         this.sessionId,
       );
       return await this._processStream(stream);
     } finally {
+      removeAbortForwarder?.();
       this.runAbortController = null;
     }
   }
@@ -424,7 +428,12 @@ export class Agent implements AgentLike {
         }));
       }
 
-      const { outcome, toolResults } = await this._executeTools(toolCallsToExecute);
+      // Resolve the ToolFormat for this iteration's model (model -> provider -> global chain)
+      // so tool results render in the active format.
+      const { outcome, toolResults } = await this._executeTools(
+        toolCallsToExecute,
+        this.llmClient.toolFormatFor(modelConfig).id,
+      );
 
       for (const sr of skippedToolResults) {
         this.addMessage(new Message({
@@ -507,8 +516,14 @@ export class Agent implements AgentLike {
     });
   }
 
-  private _executeTools(toolCalls: ToolCall[]) {
-    return this.#toolExecutor.execute(toolCalls);
+  private _executeTools(toolCalls: ToolCall[], toolFormatName?: string) {
+    // The session's registry is passed explicitly so format resolution never depends on
+    // process-global state (the active format depends on this session's model/provider config).
+    return this.#toolExecutor.execute(
+      toolCalls,
+      toolFormatName,
+      this.llmClient.toolFormatRegistry,
+    );
   }
 
   /** Use instead of pushing to the message log directly; fires CONTEXT_MESSAGE for extensions. */

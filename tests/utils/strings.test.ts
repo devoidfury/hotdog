@@ -1,7 +1,7 @@
 // Tests for utils/strings.ts — camelCase, parseCliFlagKey.
 
 import { describe, it, expect } from "bun:test";
-import { camelCase, parseCliFlagKey } from "../../src/utils/strings.ts";
+import { camelCase, parseCliFlagKey, xmlEscape } from "@utils/strings.ts";
 
 describe("camelCase", () => {
   it("converts snake_case and kebab-case to camelCase", () => {
@@ -36,5 +36,18 @@ describe("parseCliFlagKey", () => {
     expect(parseCliFlagKey("model")).toBe("model");
     expect(parseCliFlagKey("showTokenUse")).toBe("showTokenUse");
     expect(parseCliFlagKey("show-token-use")).toBe("showTokenUse");
+  });
+});
+
+
+describe("xmlEscape", () => {
+  it("escapes & < > \" '", () => {
+    expect(xmlEscape("a & b < c > d \"e\" 'f'")).toBe("a &amp; b &lt; c &gt; d &quot;e&quot; &apos;f&apos;");
+  });
+  it("returns unchanged string with no special chars", () => {
+    expect(xmlEscape("hello world")).toBe("hello world");
+  });
+  it("handles empty string", () => {
+    expect(xmlEscape("")).toBe("");
   });
 });

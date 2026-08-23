@@ -6,7 +6,7 @@ import path from "node:path";
 import readline from "node:readline";
 
 import { Agent, ModelRegistry, AgentConfig } from "../../src/core/agent.ts";
-import type { LlmClient } from "../../src/core/llm-client/client.ts";
+import { LlmClient } from "../../src/core/llm-client/client.ts";
 import type { CoreContext } from "../../src/core/extensions/types.ts";
 import { MessageLog } from "../../src/core/context/message-log.ts";
 import type { Message } from "../../src/core/context/message.ts";
@@ -260,5 +260,14 @@ export function createMockCore(
         modelRegistry: config.modelRegistry || {},
         providers: config.providers || [],
       })) as CoreContext["buildConfig"]),
+    createLlmClient: ((overrides?: Record<string, unknown>) =>
+      new LlmClient({
+        baseUrl: "http://localhost:8080",
+        apiKey: "test-key",
+        stream: false,
+        chatTimeoutSecs: 30,
+        maxRetries: 3,
+        ...overrides,
+      })) as CoreContext["createLlmClient"],
   } as unknown as CoreContext;
 }

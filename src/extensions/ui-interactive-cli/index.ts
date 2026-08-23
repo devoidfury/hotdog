@@ -5,8 +5,7 @@ import { spawn } from "node:child_process";
 import { parseCommand, Command, ACTIONS } from "@core/commands.ts";
 import { HOOKS } from "@core/hooks.ts";
 import { CliOutputSink } from "@utils/cli/cli.ts";
-import { LlmClient } from "@core/llm-client/client.ts";
-import { MarkerMangler } from "@core/marker-mangler.ts";
+import type { LlmClient } from "@core/llm-client/client.ts";
 import { SessionManager, type AgentLike } from "@core/session/index.ts";
 import { Agent } from "@core/agent.ts";
 import { registerTaskManagerService } from "../subagents/index.ts";
@@ -27,7 +26,7 @@ import {
   buildReadlineCompleter,
 } from "./completions.ts";
 import type { CliArgv } from "@core/config/index.ts";
-import type { ModelConfig, ProviderDef } from "@core/config/providers.ts";
+import type { ModelConfig } from "@core/config/providers.ts";
 
 export {
   parseCompletionContext,
@@ -428,21 +427,13 @@ export async function runInteractiveSession(
     ...resolved,
     palette,
     thinkerFormat: resolved.thinkerFormat,
-    toolFormat: resolved.toolFormat,
+    toolFormat: resolved.toolCallDisplayFormat,
     toolOutputFmt: resolved.toolOutputFmt,
     hideUserMessage: true,
   });
 
   // Build LLM client — single instance owned by SessionManager
-  const llmClient = new LlmClient({
-    baseUrl: resolved.baseUrl,
-    apiKey: resolved.apiKey,
-    stream: resolved.stream,
-    chatTimeoutSecs: resolved.chatTimeout,
-    maxRetries: resolved.maxRetries,
-    providers: (config.providers as ProviderDef[]) || [],
-    markerMangler: new MarkerMangler(),
-  });
+  const llmClient = core.createLlmClient();
 
   // Build agent function — uses llmClient from config (injected by SessionManager)
   const buildAgent = async (agentConfig: Record<string, unknown>): Promise<AgentLike> => {

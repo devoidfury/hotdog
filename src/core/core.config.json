@@ -35,7 +35,7 @@
       { "default": "[Thinking: {}]" }
     ]
   },
-  "toolFormat": {
+  "toolCallDisplayFormat": {
     "type": "string",
     "cliFlag": {
       "long": "--toolfmt",
@@ -44,6 +44,7 @@
     },
     "layers": [
       { "source": "cli", "key": "toolfmt" },
+      { "source": "config", "key": "toolCallDisplayFormat" },
       { "source": "config", "key": "toolfmt" },
       { "default": "  \u2192 {} {}" }
     ]
@@ -59,6 +60,19 @@
       { "source": "cli", "key": "toolOutputFmt" },
       { "source": "config", "key": "toolOutputFmt" },
       { "default": "----\n{}\n----" }
+    ]
+  },
+  "modelToolFormat": {
+    "type": "string",
+    "cliFlag": {
+      "long": "--model-tool-format",
+      "type": "string",
+      "description": "Global default ToolFormat registry name for model-facing tool results (e.g. xml)"
+    },
+    "layers": [
+      { "source": "cli", "key": "modelToolFormat" },
+      { "source": "config", "key": "modelToolFormat" },
+      { "default": "xml" }
     ]
   },
   "chatTimeout": {

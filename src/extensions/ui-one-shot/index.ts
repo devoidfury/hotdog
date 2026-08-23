@@ -8,8 +8,7 @@ import { HOOKS } from "../../core/hooks.ts";
 import { CliSubcommandRegistryLike } from "../../core/extensions/registries.ts";
 import { logger } from "../../core/logger.ts";
 import { CliOutputSink } from "../../utils/cli/cli.ts";
-import { LlmClient } from "../../core/llm-client/client.ts";
-import { MarkerMangler } from "../../core/marker-mangler.ts";
+import type { LlmClient } from "../../core/llm-client/client.ts";
 import { SessionManager, type AgentLike } from "../../core/session/index.ts";
 import { Agent } from "../../core/agent.ts";
 import { registerTaskManagerService } from "../subagents/index.ts";
@@ -17,7 +16,7 @@ import { OneShotChannel } from "./oneshot-channel.ts";
 import type { CoreContext, ExtensionInstance, ResolvedConfig } from "../../core/extensions/types.ts";
 import type { PaletteOptions } from "../../utils/cli/colors.ts";
 import type { CoreConfigWithExtensions, CliArgv } from "../../core/config/index.ts";
-import type { ModelConfig, ProviderDef } from "../../core/config/providers.ts";
+import type { ModelConfig } from "../../core/config/providers.ts";
 
 // ── Types ──────────────────────────────────────────────────────────────────
 
@@ -125,20 +124,12 @@ async function handlePromptSubcommand(
     ...resolved,
     palette,
     thinkerFormat: resolved.thinkerFormat,
-    toolFormat: resolved.toolFormat,
+    toolFormat: resolved.toolCallDisplayFormat,
     toolOutputFmt: resolved.toolOutputFmt,
   });
 
   // Build agent function
-  const llmClient = new LlmClient({
-    baseUrl: resolved.baseUrl,
-    apiKey: resolved.apiKey,
-    stream: resolved.stream,
-    chatTimeoutSecs: resolved.chatTimeout,
-    maxRetries: resolved.maxRetries,
-    providers: (config.providers as ProviderDef[]) || [],
-    markerMangler: new MarkerMangler(),
-  });
+  const llmClient = core.createLlmClient();
 
   const buildAgent: (agentConfig: Record<string, unknown>) => Promise<AgentLike> = async (agentConfig) => {
     const sessionId = (agentConfig.sessionId as string) || crypto.randomUUID();

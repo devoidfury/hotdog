@@ -269,6 +269,8 @@ Each tool call goes through a dedicated sub-pipeline:
 | `PROVIDER_REQUEST` | `provider:request` | pipeline | Before LLM HTTP request — modify messages/model/tools |
 | `PROVIDER_RESPONSE` | `provider:response` | async notify | After LLM response fully received |
 
+The `LlmProtocol` (selected via the `protocol` config field) owns the wire format itself: request building, stream parsing, auth headers. The hooks above are the override hatch -- a hook can still replace the fully-built request or the parsed response without writing a new protocol. In short: **protocol = format, hooks = override**.
+
 ### Turn Lifecycle
 
 | Hook Constant | Name | Pattern | When |

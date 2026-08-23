@@ -4,6 +4,7 @@
 import { describe, it, expect, mock, beforeEach, afterEach } from "bun:test";
 import { HOOKS } from "../../src/core/hooks.ts";
 import { HookSystem } from "../../src/core/hooks.ts";
+import { LlmClient } from "../../src/core/llm-client/client.ts";
 
 // ── handlePromptSubcommand Tests ─────────────────────────────────────────────
 
@@ -68,6 +69,9 @@ describe("handlePromptSubcommand", () => {
         load: async () => null,
         cleanup: async () => {},
       },
+      createLlmClient: ((overrides?: Record<string, unknown>) =>
+        new LlmClient({ baseUrl: "http://localhost:8000", apiKey: "test-key", stream: true,
+          chatTimeoutSecs: 30, maxRetries: 3, ...overrides })) as any,
       cliSubcommandRegistry: registry,
     } as any;
   }
@@ -421,6 +425,9 @@ describe("runOneShot edge cases", () => {
         },
         toolRegistry: { getAll: () => [], get: () => null, register: () => {} },
         extensions: { cleanup: async () => {} },
+        createLlmClient: ((overrides?: Record<string, unknown>) =>
+        new LlmClient({ baseUrl: "http://localhost:8000", apiKey: "test-key", stream: true,
+          chatTimeoutSecs: 30, maxRetries: 3, ...overrides })) as any,
         cliSubcommandRegistry: registry,
       } as any;
 
@@ -467,6 +474,9 @@ describe("runOneShot edge cases", () => {
       },
       toolRegistry: { getAll: () => [], get: () => null, register: () => {} },
       extensions: { cleanup: async () => {} },
+      createLlmClient: ((overrides?: Record<string, unknown>) =>
+        new LlmClient({ baseUrl: "http://localhost:8000", apiKey: "test-key", stream: true,
+          chatTimeoutSecs: 30, maxRetries: 3, ...overrides })) as any,
       cliSubcommandRegistry: registry,
     } as any;
 

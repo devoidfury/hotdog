@@ -18,6 +18,7 @@ import {
 import { Command, ACTIONS } from "../../src/core/commands.ts";
 import { HOOKS } from "../../src/core/hooks.ts";
 import { ExtensionError } from "../../src/core/error.ts";
+import { LlmClient } from "../../src/core/llm-client/client.ts";
 import { runInteractiveSession } from "../../src/extensions/ui-interactive-cli/index.ts";
 import { runWithSuppressedStdout } from "../test-helpers.ts";
 
@@ -697,6 +698,9 @@ describe("runInteractiveSession integration", () => {
         register: () => {},
         request: async () => [],
       },
+      createLlmClient: (overrides?: Record<string, unknown>) =>
+        new LlmClient({ baseUrl: "http://test", apiKey: "test-key", stream: true,
+          chatTimeoutSecs: 60, maxRetries: 3, ...overrides }),
       ...overrides,
     }) as never;
 
@@ -1003,6 +1007,9 @@ describe("runInteractiveSession default setupInput", () => {
         toolRegistry: { names: () => [], get: () => undefined, getAll: () => [], isEmpty: () => true },
         extensions: { get: () => undefined, getAll: () => [], cleanup: () => {} },
         completion: { register: () => {}, request: async () => [] },
+        createLlmClient: (overrides?: Record<string, unknown>) =>
+          new LlmClient({ baseUrl: "http://test", apiKey: "test-key", stream: true,
+            chatTimeoutSecs: 60, maxRetries: 3, ...overrides }),
       } as never, {
         createReadline: () => ({
           on: () => {},

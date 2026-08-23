@@ -1,0 +1,7 @@
+{
+  "name": "tool-format-xml",
+  "provides": ["tool:formats"],
+  "loadOrder": 1,
+  "description": "XML tool result format (built-in default)",
+  "autoload": true
+}

@@ -29,7 +29,6 @@ export {
   param,
   parseToolArgs,
   toolResult,
-  xmlEscape,
   truncateOutput,
   parseToolInput,
   defaultCallDisplay,

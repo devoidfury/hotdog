@@ -307,7 +307,8 @@ describe("ToolResult", () => {
     const result = toolResult({ key: "val" }, "fetch");
     expect(result).toContain('<tool name="fetch"');
     expect(result).toContain("<output>");
-    expect(result).toContain('{"key":"val"}');
+    // Objects are JSON-stringified then XML-escaped by the xml format.
+    expect(result).toContain('{&quot;key&quot;:&quot;val&quot;}');
   });
 
   it("toolResult with toolName wraps number in XML", () => {
@@ -382,28 +383,6 @@ describe("getRequiredStr", () => {
   });
 });
 
-// ── Additional tool-utils.ts coverage ────────────────────────────────────────
-
-describe("xmlEscape", () => {
-  let xmlEscape: (s: string) => string;
-
-  beforeAll(async () => {
-    const mod = await import("../../src/core/extensions/tool-utils.ts");
-    xmlEscape = mod.xmlEscape;
-  });
-
-  it("escapes & < > \" '", () => {
-    expect(xmlEscape("a & b < c > d \"e\" 'f'")).toBe("a &amp; b &lt; c &gt; d &quot;e&quot; &apos;f&apos;");
-  });
-
-  it("returns unchanged string with no special chars", () => {
-    expect(xmlEscape("hello world")).toBe("hello world");
-  });
-
-  it("handles empty string", () => {
-    expect(xmlEscape("")).toBe("");
-  });
-});
 
 describe("parseToolInput", () => {
   let parseToolInput: (input: string | Record<string, unknown> | null) => Record<string, unknown> | null;

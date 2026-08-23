@@ -66,7 +66,7 @@ Models are declared inside providers. Each provider has `name`, `url`, optional 
   "default_provider": "ai365",
   "defaultMaxToolDifficulty": 2,
   "thinker": "[Thinking: {}]",
-  "toolfmt": "Tool [{}] {}",
+  "toolCallDisplayFormat": "Tool [{}] {}",
   "tool_output_fmt": "  → {}",
   "role": "You are an AI coding assistant.",
   "hide_tools": false

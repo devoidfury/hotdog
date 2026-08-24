@@ -15,6 +15,7 @@ JS project `hotdog` — an AI agent harness.
 - Run Tests: `bun run test`
   - with Coverage report: `bun run coverage`
   - NOTE: uses `--only-failures`, which runs all tests, prints failures, and supresses green test output.
+  - NOTE: `test` runs files in parallel (`--parallel`); `coverage` stays sequential because isolated workers report skewed branch coverage.
 
 ## Rules & Guidelines
 

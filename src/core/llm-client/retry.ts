@@ -29,7 +29,7 @@ export async function retryWithBackoff<T>(
   maxRetries: number,
   options: RetryOptions = {},
 ): Promise<T> {
-  const { signal, baseDelayMs = 1000 } = options;
+  const { signal, baseDelayMs } = options;
 
   if (maxRetries == null) {
     throw ConfigError.MissingConfig("maxRetries");
@@ -39,7 +39,7 @@ export async function retryWithBackoff<T>(
     throw LlmError.Cancelled("request was cancelled");
   }
 
-  let delayMs = baseDelayMs;
+  let delayMs = baseDelayMs ?? 1000;
 
   for (let attempt = 1; attempt <= maxRetries; attempt++) {
     if (signal?.aborted) {

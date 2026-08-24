@@ -32,6 +32,8 @@ export interface LlmClientOptions {
   toolFormatRegistry?: ToolFormatRegistry | null;
   /** LlmProtocol registry (defaults to a registry with the openai protocol). */
   llmProtocolRegistry?: LlmProtocolRegistry | null;
+  /** Base delay in ms before first retry (default: 1000). Useful for fast tests. */
+  retryBaseDelayMs?: number;
 }
 
 export interface LlmClientRequiredOptions {
@@ -71,6 +73,7 @@ export class LlmClient {
   providers: ProviderDef[];
   cancelled: boolean;
   defaultToolFormat?: string;
+  retryBaseDelayMs?: number;
   #toolFormatRegistry: ToolFormatRegistry;
   #protocolRegistry: LlmProtocolRegistry;
   #mangler: MarkerMangler | null;
@@ -83,6 +86,7 @@ export class LlmClient {
     this.chatTimeoutSecs = options.chatTimeoutSecs;
     this.maxRetries = options.maxRetries;
     this.stream = options.stream !== false;
+    this.retryBaseDelayMs = options.retryBaseDelayMs;
     this.providers = options.providers || [];
     this.defaultToolFormat = options.toolFormat || undefined;
     this.#toolFormatRegistry = options.toolFormatRegistry ?? createDefaultToolFormatRegistry();
@@ -260,6 +264,7 @@ export class LlmClient {
 
       const response = await retryWithBackoff<Response>(doRequestWithTimeout, this.maxRetries, {
         signal: abortController.signal,
+        baseDelayMs: this.retryBaseDelayMs,
       });
 
       yield* this._processSSE(response, modelConfig);

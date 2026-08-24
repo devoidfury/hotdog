@@ -264,7 +264,7 @@ describe("LlmClient.chatStreamCancellable — network errors, timeouts, cancella
   }
 
   it("retries raw network errors and resolves once the connection succeeds", async () => {
-    const client = new LlmClient({ chatTimeoutSecs: 30, maxRetries: 3, baseUrl: "http://test.com", markerMangler: null });
+    const client = new LlmClient({ chatTimeoutSecs: 30, maxRetries: 3, baseUrl: "http://test.com", markerMangler: null, retryBaseDelayMs: 1 });
     let calls = 0;
 
     globalThis.fetch = (async () => {
@@ -283,7 +283,7 @@ describe("LlmClient.chatStreamCancellable — network errors, timeouts, cancella
   });
 
   it("exhausts retries on persistent network error and surfaces LlmError.Http", async () => {
-    const client = new LlmClient({ chatTimeoutSecs: 30, maxRetries: 2, baseUrl: "http://test.com", markerMangler: null });
+    const client = new LlmClient({ chatTimeoutSecs: 30, maxRetries: 2, baseUrl: "http://test.com", markerMangler: null, retryBaseDelayMs: 1 });
     let calls = 0;
 
     globalThis.fetch = (async () => {
@@ -321,7 +321,7 @@ describe("LlmClient.chatStreamCancellable — network errors, timeouts, cancella
   });
 
   it("retries on chat timeout and surfaces a visible timeout error with a fresh signal per attempt", async () => {
-    const client = new LlmClient({ chatTimeoutSecs: 0.02, maxRetries: 2, baseUrl: "http://test.com", markerMangler: null });
+    const client = new LlmClient({ chatTimeoutSecs: 0.02, maxRetries: 2, baseUrl: "http://test.com", markerMangler: null, retryBaseDelayMs: 1 });
     const signalLog: Array<{ signal: AbortSignal | null | undefined; abortedAtEntry: boolean }> = [];
 
     globalThis.fetch = hangingFetch(signalLog);

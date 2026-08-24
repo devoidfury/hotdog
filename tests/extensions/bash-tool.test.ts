@@ -16,6 +16,16 @@ function processAlive(pid: number): boolean {
   }
 }
 
+/** Poll until the pid is gone (SIGKILL lands at ~timeout+grace), instead of a
+ * fixed multi-second sleep that always waits the full margin. */
+async function waitForExit(pid: number, deadlineMs = 10000): Promise<void> {
+  const start = Date.now();
+  while (processAlive(pid)) {
+    if (Date.now() - start > deadlineMs) return;
+    await new Promise((r) => setTimeout(r, 50));
+  }
+}
+
 describe('BashTool', () => {
   it('has correct tool name', () => {
     expect(BashTool.TOOL_NAME).toBe('bash');
@@ -65,7 +75,7 @@ describe('BashTool', () => {
         .rejects.toThrow(/timed out/);
 
       const pid = parseInt(fs.readFileSync(pidFile, 'utf-8').trim(), 10);
-      await new Promise((r) => setTimeout(r, 3500));
+      await waitForExit(pid);
       expect(processAlive(pid)).toBe(false);
     } finally {
       cleanupDir(dir);
@@ -84,7 +94,7 @@ describe('BashTool', () => {
         .rejects.toThrow(/timed out/);
 
       const pid = parseInt(fs.readFileSync(pidFile, 'utf-8').trim(), 10);
-      await new Promise((r) => setTimeout(r, 3500));
+      await waitForExit(pid);
       expect(processAlive(pid)).toBe(false);
     } finally {
       cleanupDir(dir);

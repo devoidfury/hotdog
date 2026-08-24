@@ -57,6 +57,35 @@ describe("LlmClient.ping", () => {
 
     await expect(client.ping()).rejects.toThrow(/already typed/);
   });
+
+  it("resolves the provider URL when a model name is given (provider-only setup)", async () => {
+    const client = new LlmClient({
+      chatTimeoutSecs: 30,
+      maxRetries: 3,
+      markerMangler: null,
+      providers: [{ name: "myprov", url: "http://prov.example", apiKey: "k", models: [] }],
+    });
+
+    let seen = "";
+    globalThis.fetch = (async (input: RequestInfo | URL) => {
+      seen = String(input);
+      return { ok: true };
+    }) as unknown as typeof fetch;
+
+    await client.ping("myprov/model-x");
+    expect(seen).toBe("http://prov.example/health");
+  });
+
+  it("throws a config LlmError when the resolved provider has no URL", async () => {
+    const client = new LlmClient({
+      chatTimeoutSecs: 30,
+      maxRetries: 3,
+      markerMangler: null,
+      providers: [{ name: "myprov", models: [] }],
+    });
+
+    await expect(client.ping("myprov/model-x")).rejects.toThrow(/No AI URL configured/);
+  });
 });
 
 describe("LlmClient.chatStreamCancellable", () => {

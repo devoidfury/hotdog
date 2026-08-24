@@ -178,9 +178,12 @@ export class LlmClient {
     return { url, apiKey };
   }
 
-  async ping(): Promise<void> {
+  /** Health-check the LLM provider for the model (or the default). */
+  async ping(modelName?: string): Promise<void> {
     try {
-      const url = this.baseUrl ?? "";
+      const url = modelName
+        ? this.resolveProviderSettings(modelName).url
+        : this.baseUrl ?? "";
       const resp = await hotdogFetch(url + "/health");
       if (resp.ok) return;
       throw LlmError.Api(`HTTP ${resp.status}`);

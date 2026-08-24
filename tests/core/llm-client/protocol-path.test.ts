@@ -40,13 +40,13 @@ describe("LlmClient uses the protocol's request path", () => {
   it("openai protocol keeps /v1/chat/completions", async () => {
     const client = new LlmClient({
       chatTimeoutSecs: 60,
-      maxRetries: 0,
+      maxRetries: 1,
       markerMangler: null,
       baseUrl: "http://p.example",
       apiKey: "k",
     });
     await drain(
-      client.chatStreamWithModelConfig([new Message({ role: "user", content: "hi" })], mc(), []),
+      client.chatStreamCancellable([new Message({ role: "user", content: "hi" })], mc(), [], null),
     );
     expect(capturedUrls[0]).toBe("http://p.example/v1/chat/completions");
   });
@@ -66,7 +66,7 @@ describe("LlmClient uses the protocol's request path", () => {
     reg.register(customProtocol);
     const client = new LlmClient({
       chatTimeoutSecs: 60,
-      maxRetries: 0,
+      maxRetries: 1,
       markerMangler: null,
       baseUrl: "http://p.example",
       apiKey: "k",
@@ -75,7 +75,7 @@ describe("LlmClient uses the protocol's request path", () => {
     });
     // Model entry carries no `protocol`; the provider-level one must apply.
     await drain(
-      client.chatStreamWithModelConfig([new Message({ role: "user", content: "hi" })], mc(), []),
+      client.chatStreamCancellable([new Message({ role: "user", content: "hi" })], mc(), [], null),
     );
     expect(capturedUrls[0]).toBe("http://p.example/v1/provider-path");
   });
@@ -100,7 +100,7 @@ describe("LlmClient uses the protocol's request path", () => {
     reg.register(modelProto);
     const client = new LlmClient({
       chatTimeoutSecs: 60,
-      maxRetries: 0,
+      maxRetries: 1,
       markerMangler: null,
       baseUrl: "http://p.example",
       apiKey: "k",
@@ -108,10 +108,11 @@ describe("LlmClient uses the protocol's request path", () => {
       llmProtocolRegistry: reg,
     });
     await drain(
-      client.chatStreamWithModelConfig(
+      client.chatStreamCancellable(
         [new Message({ role: "user", content: "hi" })],
         mc({ protocol: "model-protocol" }),
         [],
+        null,
       ),
     );
     expect(capturedUrls[0]).toBe("http://p.example/v1/model-path");
@@ -120,7 +121,7 @@ describe("LlmClient uses the protocol's request path", () => {
   it("auth header uses the provider-level API key, not the global one", async () => {
     const client = new LlmClient({
       chatTimeoutSecs: 60,
-      maxRetries: 0,
+      maxRetries: 1,
       markerMangler: null,
       baseUrl: "http://global.example",
       apiKey: "global-key",
@@ -129,7 +130,7 @@ describe("LlmClient uses the protocol's request path", () => {
       ],
     });
     await drain(
-      client.chatStreamWithModelConfig([new Message({ role: "user", content: "hi" })], mc(), []),
+      client.chatStreamCancellable([new Message({ role: "user", content: "hi" })], mc(), [], null),
     );
     expect(capturedUrls[0]).toBe("http://prov.example/v1/chat/completions");
     expect(capturedHeaders[0]?.["Authorization"]).toBe("Bearer provider-key");
@@ -138,7 +139,7 @@ describe("LlmClient uses the protocol's request path", () => {
   it("x-session-affinity uses the per-call sessionId, falling back to the client's", async () => {
     const client = new LlmClient({
       chatTimeoutSecs: 60,
-      maxRetries: 0,
+      maxRetries: 1,
       markerMangler: null,
       baseUrl: "http://p.example",
       apiKey: "k",
@@ -146,10 +147,11 @@ describe("LlmClient uses the protocol's request path", () => {
     });
     // Per-call override wins.
     await drain(
-      client.chatStreamWithModelConfig(
+      client.chatStreamCancellable(
         [new Message({ role: "user", content: "hi" })],
         mc(),
         [],
+        null,
         "call-session",
       ),
     );
@@ -157,7 +159,7 @@ describe("LlmClient uses the protocol's request path", () => {
 
     // Without an override, the client's session id applies.
     await drain(
-      client.chatStreamWithModelConfig([new Message({ role: "user", content: "hi" })], mc(), []),
+      client.chatStreamCancellable([new Message({ role: "user", content: "hi" })], mc(), [], null),
     );
     expect(capturedHeaders[1]?.["x-session-affinity"]).toBe("client-session");
   });
@@ -165,14 +167,14 @@ describe("LlmClient uses the protocol's request path", () => {
   it("auth header falls back to the global API key when the provider has none", async () => {
     const client = new LlmClient({
       chatTimeoutSecs: 60,
-      maxRetries: 0,
+      maxRetries: 1,
       markerMangler: null,
       baseUrl: "http://global.example",
       apiKey: "global-key",
       providers: [{ name: "prov", models: [] }],
     });
     await drain(
-      client.chatStreamWithModelConfig([new Message({ role: "user", content: "hi" })], mc(), []),
+      client.chatStreamCancellable([new Message({ role: "user", content: "hi" })], mc(), [], null),
     );
     expect(capturedUrls[0]).toBe("http://global.example/v1/chat/completions");
     expect(capturedHeaders[0]?.["Authorization"]).toBe("Bearer global-key");
@@ -193,17 +195,18 @@ describe("LlmClient uses the protocol's request path", () => {
     reg.register(customProtocol);
     const client = new LlmClient({
       chatTimeoutSecs: 60,
-      maxRetries: 0,
+      maxRetries: 1,
       markerMangler: null,
       baseUrl: "http://p.example",
       apiKey: "k",
       llmProtocolRegistry: reg,
     });
     await drain(
-      client.chatStreamWithModelConfig(
+      client.chatStreamCancellable(
         [new Message({ role: "user", content: "hi" })],
         mc({ protocol: "custom-path" }),
         [],
+        null,
       ),
     );
     expect(capturedUrls[0]).toBe("http://p.example/v1/messages");

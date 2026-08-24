@@ -15,7 +15,7 @@ import { createLlmProtocolRegistry, resolveProtocolId, type LlmProtocolRegistry 
 import { openaiProtocol } from "./openai-protocol.ts";
 import { hotdogFetch } from "@utils/fetch.ts";
 
-import { ModelConfig, ProviderDef } from "@core/config/providers.ts";
+import { ModelConfig, ProviderDef } from "../config/providers.ts";
 
 export interface LlmClientOptions {
   baseUrl?: string | null;
@@ -271,19 +271,6 @@ export class LlmClient {
     } finally {
       removeCancelListener?.();
     }
-  }
-
-  async *chatStreamWithModelConfig(
-    messages: Message[],
-    modelConfig: ModelConfig,
-    tools: Array<ToolDef> = [],
-    sessionId?: string,
-  ): AsyncGenerator<StreamEvent> {
-    const { path, body: request } = this.#buildRequest(messages, modelConfig, tools, true);
-    const { url, apiKey } = this.resolveProviderSettings(modelConfig.name);
-
-    const resp = await this._doRequest(url, apiKey, request, null, modelConfig, path, sessionId || this.sessionId);
-    yield* this._processSSE(resp, modelConfig);
   }
 
   /**

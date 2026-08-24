@@ -35,13 +35,17 @@ export async function retryWithBackoff<T>(
     throw ConfigError.MissingConfig("maxRetries");
   }
 
+  // 0 (or negative) would mean zero attempts; treat it as "one attempt, no
+  // retries" — same convention as ToolExecutor's Math.max(1, maxRetries).
+  const totalAttempts = Math.max(1, maxRetries);
+
   if (signal?.aborted) {
     throw LlmError.Cancelled("request was cancelled");
   }
 
   let delayMs = baseDelayMs ?? 1000;
 
-  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+  for (let attempt = 1; attempt <= totalAttempts; attempt++) {
     if (signal?.aborted) {
       throw LlmError.Cancelled("request was cancelled");
     }
@@ -70,7 +74,7 @@ export async function retryWithBackoff<T>(
         // Other API errors (e.g., "Bad input") are non-transient — don't retry
       }
 
-      if (shouldRetry && attempt < maxRetries) {
+      if (shouldRetry && attempt < totalAttempts) {
         if (signal?.aborted) {
           throw LlmError.Cancelled("request was cancelled");
         }
@@ -97,5 +101,5 @@ export async function retryWithBackoff<T>(
     }
   }
 
-  throw LlmError.Timeout(`Exhausted ${maxRetries} retries`);
+  throw LlmError.Timeout(`Exhausted ${totalAttempts} ${totalAttempts === 1 ? "attempt" : "attempts"}`);
 }

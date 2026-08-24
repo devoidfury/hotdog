@@ -23,6 +23,35 @@ describe("retryWithBackoff", () => {
     expect(calls).toBe(1);
   });
 
+  it("maxRetries: 0 makes exactly one attempt instead of zero", async () => {
+    let calls = 0;
+    const result = await retryWithBackoff(
+      () => {
+        calls++;
+        return Promise.resolve("ok");
+      },
+      0,
+      fastOpts,
+    );
+    expect(result).toBe("ok");
+    expect(calls).toBe(1);
+  });
+
+  it("maxRetries: 0 propagates a transient failure after the single attempt", async () => {
+    let calls = 0;
+    await expect(
+      retryWithBackoff(
+        () => {
+          calls++;
+          throw LlmError.Http("Service unavailable");
+        },
+        0,
+        fastOpts,
+      ),
+    ).rejects.toMatchObject({ type: "http" });
+    expect(calls).toBe(1);
+  });
+
   it("retries on transient http errors", async () => {
     let calls = 0;
     const result = await retryWithBackoff(

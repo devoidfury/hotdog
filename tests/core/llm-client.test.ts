@@ -427,39 +427,3 @@ describe("LlmClient._doRequest", () => {
     ).rejects.toMatchObject({ type: "timeout" });
   });
 });
-
-describe("LlmClient.chatStreamWithModelConfig", () => {
-  it("builds request and delegates to _doRequest and _processSSE", async () => {
-    const client = new LlmClient({ chatTimeoutSecs: 30, maxRetries: 3, baseUrl: "http://test.com", markerMangler: null });
-
-    let doRequestCalled = false;
-
-    client._doRequest = async () => {
-      doRequestCalled = true;
-      return {
-        headers: new Map([["content-type", "text/event-stream"]]),
-        body: {
-          getReader: () => ({
-            read: async () => ({ done: true, value: undefined as any }),
-            releaseLock: () => {},
-          }),
-        },
-      } as unknown as Response;
-    };
-
-    client._processSSE = async function* (_: Response) {
-      yield { type: "content", content: "ok" };
-    };
-
-    const events = [];
-    for await (const event of client.chatStreamWithModelConfig(
-      [new Message({ role: "user", content: "Hi" })],
-      mc({ temperature: 0.7 }),
-    )) {
-      events.push(event);
-    }
-
-    expect(doRequestCalled).toBe(true);
-    expect(events).toEqual([{ type: "content", content: "ok" }]);
-  });
-});

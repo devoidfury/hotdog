@@ -1,10 +1,11 @@
 // Tests for ToolRegistry caching.
 
-import { describe, it, expect } from "bun:test";
+import { describe, it, expect, beforeAll, afterAll, afterEach } from "bun:test";
 import { ToolRegistry, type Tool } from "../../src/core/extensions/tool-registry.ts";
 import { Agent } from "../../src/core/agent.ts";
 import { HookSystem, HOOKS } from "../../src/core/hooks.ts";
 import { createToolRegistry } from "../../src/core/extensions/tool-registry.ts";
+import { initializeLogger, resetLoggerForTesting } from "../../src/core/logger.ts";
 
 /** Create a minimal test tool */
 function mkTool(execute: () => unknown | Promise<unknown>): Tool {
@@ -286,6 +287,53 @@ describe("ToolRegistry — caching", () => {
     await registry.validateToolArgs("test", '{"query": "hello"}');
     await registry.validateToolArgs("test", '{"query": "world"}');
     expect(counter.value).toBe(1); // cached
+  });
+});
+
+describe("ToolRegistry — getToolDefs error handling", () => {
+  const hooks = new HookSystem();
+  const warnings: string[] = [];
+
+  beforeAll(() => {
+    hooks.on("log", (data: { level: string; message: string }) => {
+      if (data.level === "warn") warnings.push(data.message);
+    });
+    resetLoggerForTesting();
+    initializeLogger({ hooks, minLevel: "debug", target: "none" });
+  });
+
+  afterAll(() => {
+    resetLoggerForTesting();
+  });
+
+  afterEach(() => {
+    warnings.length = 0;
+  });
+
+  it("skips a tool whose toToolDef throws and logs the tool's actual name", async () => {
+    const registry = new ToolRegistry();
+    registry.register("good", mkTool(async () => "ok"));
+    registry.register("broken", {
+      metadata: { sideEffects: false, difficulty: 1 },
+      toToolDef: () => {
+        throw new Error("boom");
+      },
+      callDisplay: () => "broken()",
+      execute: async () => "ok",
+    });
+
+    const defs = await registry.getToolDefs();
+    expect(defs.map((d) => d.function.name)).toEqual(["test"]);
+
+    // The failed tool must be named in the warning, not "unknown".
+    expect(warnings.length).toBe(1);
+    expect(warnings[0]).toContain('for "broken"');
+    expect(warnings[0]).not.toContain('"unknown"');
+
+    // The cache is not poisoned by a failure: the next call retries.
+    const defs2 = await registry.getToolDefs();
+    expect(defs2.map((d) => d.function.name)).toEqual(["test"]);
+    expect(warnings.length).toBe(2);
   });
 });
 

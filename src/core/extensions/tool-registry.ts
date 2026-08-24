@@ -130,16 +130,16 @@ export class ToolRegistry {
     const defs: ToolDef[] = [];
     let hadError = false;
 
-    for (const t of this.tools.values()) {
+    for (const [name, t] of this.tools.entries()) {
       try {
         const def = await t.toToolDef();
         if (def) defs.push(def);
       } catch (err) {
-        // Individual tool def failed — log and skip, don't invalidate the
-        // entire cache. The failed tool's individual cache entry will be
-        // stale (it may have a cached null from a prior attempt), but the
-        // next call to getToolDef(name) will retry because we clear it here.
-        const name = (t as { name?: string }).name || "unknown";
+        // Individual tool def failed — log and skip. The all-defs cache is
+        // left unset below so the next call retries every tool; per-tool
+        // cache entries are untouched here (we called toToolDef() directly),
+        // so a failed tool's stale getToolDef() entry stays until register()/
+        // remove() clears it.
         logger.warn(
           `[tools] Failed to get tool def for "${name}": ${(err as Error).message}`,
         );

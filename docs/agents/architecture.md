@@ -120,9 +120,10 @@ Separate registries for agent commands and CLI subcommands. Key exports:
 
 ### Tool Registry (`src/core/extensions/tool-registry.ts`)
 Tool registry and common utilities. Key exports:
-- `ToolRegistry` — stores tools by name, provides lookup, serialization, and `getToolDefs()` accessor
+- `ToolRegistry` — stores tools by name, provides lookup, serialization, and `getToolDefs()` accessor (both `getToolDef()` and `getToolDefs()` are cached; `register()`/`remove()`/`removeAll()`/`clear()`/`clearToolDefs()` invalidate)
 - `createToolRegistry()` — factory function
-- Methods: `register()`, `get()`, `has()`, `getAll()`, `getToolDefs()`, `getToolDef(name)`, `clearToolDefs()`, `remove(name)`, `removeAll(names)`, `clear()`, `filter()`, `validateToolArgs()`
+- Methods: `register()`, `get()`, `has()`, `getMetadata()`, `getAll()`, `getAllWithMetadata()`, `getToolDefs()`, `getToolDef(name)`, `clearToolDefs()`, `remove(name)`, `removeAll(names)`, `clear()`, `filter()`, `filterByDifficulty()`, `filterBySideEffects()`, `filterByMetadata()`, `validateToolArgs()`
+- `ToolMetadata` — per-tool characteristics `{ sideEffects, difficulty }`; required on every tool and used by `filterByMetadata()` (sandbox mode / difficulty-based hiding)
 
 ### Tool Context (`src/core/extensions/tool-context.ts`)
 Shared context container for tool execution. Backed by a Map. Extensions mount objects via `AGENT_TOOL_CONTEXT` hook so tools can access them during execution. Key exports:
@@ -245,6 +246,7 @@ Escapes input that triggers special behavior (tool call actions, internal marker
 
 ### Utilities (`src/utils/`)
 - `file-utils.ts` — `parseFrontMatter(content)`, `validateNameable(name, label, dirName)`
+- `token-estimate.ts` — `estimateMessageTokens(msg)`, `estimateContextTokens(messages)`: chars/4 token heuristic shared by core (`ContextManager.estimateTokens()`) and the compaction extension (which re-exports them)
 - `workspace.ts` — `Workspace` class: escape-safe path resolution (rejects traversal and symlink escapes) used by all file tools
 - `objects.ts` — `deepMerge(...sources)`
 - `render.ts` — Template engine with `{{ vars }}`, `{% if %}`, `{% for %}`, filters

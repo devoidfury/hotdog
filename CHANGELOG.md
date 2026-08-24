@@ -9,6 +9,11 @@
   - split internal message format from wire formats
   - split the tool->model wire format (ToolFormat) and the LLM provider protocol (LlmProtocol) out of the llm-client
   - fetch util bugfix - remove default content-type json header
+  - move token estimation (chars/4 heuristic) out of the compaction extension into `utils/token-estimate.ts`
+  - hook system - dedupe trace logging into a single helper (notifyHooks + runHookPipeline)
+  - fix - `retryWithBackoff` with `maxRetries: 0` made zero attempts
+  - fix - tool registry logged "unknown" instead of the tool name when a tool's `toToolDef()` threw
+  - fix - `switchSession` emitted `session:swap` with the switch target as both old and new agent; oldAgent is now the previously active agent
 
 - llm-client
   - health check (`ping`) now accepts a model name to check a specific provider, instead of only the default base url

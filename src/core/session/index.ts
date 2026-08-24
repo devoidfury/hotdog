@@ -257,9 +257,14 @@ export class SessionManager {
   switchSession(sessionId: string): AgentLike | undefined {
     const agent = this.#store.getAgent(sessionId);
     if (agent) {
+      // oldAgent is the previously active session's agent (the contract is
+      // "who was current before this switch"), not the switch target.
+      const oldAgent = this.#currentSessionId
+        ? this.#store.getAgent(this.#currentSessionId)
+        : undefined;
       this.#currentSessionId = sessionId;
       this.#hooks.notifyHooks(HOOKS.SESSION_SWAP, {
-        oldAgent: agent,
+        oldAgent,
         newAgent: agent,
       });
     }

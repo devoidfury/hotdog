@@ -124,6 +124,41 @@ describe('SessionManager', () => {
     it('should return undefined for non-existent session', () => {
       expect(sessionManager.switchSession('non-existent')).toBeUndefined();
     });
+
+    it('should emit SESSION_SWAP with the previously active agent as oldAgent', async () => {
+      const session1 = await sessionManager.create({ model: 'model-1' });
+      await sessionManager.swap({ model: 'model-2' });
+
+      let payload: { oldAgent?: { model: string }; newAgent: { model: string } } | null = null;
+      hooks.on('session:swap', (data: unknown) => {
+        payload = data as typeof payload;
+      });
+
+      const agent = sessionManager.switchSession(session1);
+      expect((agent as any).model).toBe('model-1');
+      expect(payload).not.toBeNull();
+      expect((payload!.newAgent as any).model).toBe('model-1');
+      // oldAgent is the session that was current before the switch,
+      // NOT the switch target (which was previously misreported).
+      expect((payload!.oldAgent as any).model).toBe('model-2');
+      expect(payload!.oldAgent).not.toBe(agent);
+    });
+
+    it('should emit SESSION_SWAP with no oldAgent when switching from an empty manager', async () => {
+      // Register an agent without making any session current first.
+      const agent = createMockAgent({ model: 'standalone', hooks });
+      sessionManager.registerAgent(agent as any);
+      const sessionId = (agent as any).sessionId;
+
+      let payload: { oldAgent?: unknown; newAgent: unknown } | null = null;
+      hooks.on('session:swap', (data: unknown) => {
+        payload = data as typeof payload;
+      });
+
+      sessionManager.switchSession(sessionId);
+      expect(payload).not.toBeNull();
+      expect(payload!.oldAgent).toBeUndefined();
+    });
   });
 
   describe('getAgentBySessionId', () => {

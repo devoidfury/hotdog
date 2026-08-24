@@ -21,16 +21,25 @@ export const CORE_PROTECTED_PREFIXES = [
 ];
 
 
-
 const ALIAS_LENGTH = 16;
 const ALIAS_CHARS = "abcdefghijkmnopqrstuvwxyz23456789";
+// Rejection bound: largest byte value keeping `byte % ALIAS_CHARS.length`
+// unbiased (256 is not a multiple of 34, so a raw modulo would skew low values).
+const ALIAS_BYTE_MAX = 256 - (256 % ALIAS_CHARS.length);
 
 function generateAlias(): string {
-  let result = "";
-  for (let i = 0; i < ALIAS_LENGTH; i++) {
-    result += ALIAS_CHARS[Math.floor(Math.random() * ALIAS_CHARS.length)];
+  const buf = new Uint8Array(ALIAS_LENGTH);
+  const chars: string[] = [];
+  while (chars.length < ALIAS_LENGTH) {
+    crypto.getRandomValues(buf);
+    for (const b of buf) {
+      if (b < ALIAS_BYTE_MAX) {
+        chars.push(ALIAS_CHARS[b % ALIAS_CHARS.length]!);
+      }
+      if (chars.length === ALIAS_LENGTH) break;
+    }
   }
-  return result;
+  return chars.join("");
 }
 
 /**
@@ -151,26 +160,6 @@ export class MarkerMangler {
     }
 
     return result;
-  }
-
-  /** Escape user input before adding to conversation context. */
-  escapeInput(text: string) {
-    return this.escape(text);
-  }
-
-  /** Escape tool output before adding to conversation context. */
-  escapeToolOutput(text: string) {
-    return this.escape(text);
-  }
-
-  /** Unescape model output before displaying to user or writing to files. */
-  unescapeOutput(text: string | null | undefined) {
-    return this.unescape(text);
-  }
-
-  /** Unescape tool call arguments before executing the tool. */
-  unescapeToolInput(text: string | null | undefined) {
-    return this.unescape(text);
   }
 }
 

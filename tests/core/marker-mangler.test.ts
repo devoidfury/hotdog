@@ -1,5 +1,5 @@
 import { describe, it, expect } from "bun:test";
-import { MarkerMangler } from "../../src/core/marker-mangler.ts";
+import { MarkerMangler, buildAliasPattern } from "../../src/core/marker-mangler.ts";
 
 function createMangler() {
   return new MarkerMangler();
@@ -7,7 +7,6 @@ function createMangler() {
 
 const TOOL_CALL_TAG = "tool_call";
 const THINK_TAG = "thinking";
-const FN_TAG = "function";
 
 describe("MarkerMangler", () => {
   it("escapes protected tags while preserving content", () => {
@@ -106,32 +105,21 @@ describe("MarkerMangler", () => {
   });
 });
 
-describe("MarkerMangler - wrapper methods", () => {
-  it("escapeInput delegates to escape", () => {
-    const mangler = createMangler();
-    const input = `<${TOOL_CALL_TAG}>test</${TOOL_CALL_TAG}>`;
-    expect(mangler.escapeInput(input)).toBe(mangler.escape(input));
-    expect(mangler.escapeInput("plain text")).toBe("plain text");
-  });
-
-  it("escapeToolOutput delegates to escape", () => {
-    const mangler = createMangler();
-    const input = `<${FN_TAG}>test</${FN_TAG}>`;
-    expect(mangler.escapeToolOutput(input)).toBe(mangler.escape(input));
-    expect(mangler.escapeToolOutput("plain output")).toBe("plain output");
-  });
-
-  it("unescapeOutput delegates to unescape", () => {
-    const mangler = createMangler();
-    const escaped = mangler.escape(`<${TOOL_CALL_TAG}>test</${TOOL_CALL_TAG}>`);
-    expect(mangler.unescapeOutput(escaped)).toBe(mangler.unescape(escaped));
-    expect(mangler.unescapeOutput("plain text")).toBe("plain text");
-  });
-
-  it("unescapeToolInput delegates to unescape", () => {
-    const mangler = createMangler();
-    const escaped = mangler.escape(`<${FN_TAG}>test</${FN_TAG}>`);
-    expect(mangler.unescapeToolInput(escaped)).toBe(mangler.unescape(escaped));
-    expect(mangler.unescapeToolInput("plain input")).toBe("plain input");
+describe("MarkerMangler - alias generation", () => {
+  it("every alias matches the alias pattern and varies across generations", () => {
+    const pattern = buildAliasPattern();
+    const seen = new Set<string>();
+    // Fresh mangler per draw: aliases are generated once per session, so
+    // randomness lives at construction, not in escape().
+    for (let i = 0; i < 200; i++) {
+      const mangler = new MarkerMangler([THINK_TAG]);
+      const escaped = mangler.escape(`<${THINK_TAG}>`) as string;
+      const m = escaped.match(pattern);
+      expect(m).not.toBeNull();
+      seen.add(m![0]);
+    }
+    // 200 draws over a 34^16 space must not all collide -- a degenerate
+    // RNG (stuck bit, constant fill) would fail here.
+    expect(seen.size).toBeGreaterThan(100);
   });
 });

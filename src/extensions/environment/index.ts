@@ -5,13 +5,9 @@ import { HOOKS } from "../../core/hooks.ts";
 import { logger } from "../../core/logger.ts";
 import { render } from "../../utils/render.ts";
 import { ExtensionInstance } from "../../core/extensions/types.ts";
+import type { Agent } from "@core/agent.ts";
 
 const TEMPLATE_PATH = join(import.meta.dirname, "environment_chunk.md");
-
-interface Agent {
-  model?: string;
-  _profileName?: string;
-}
 
 async function buildEnvironmentChunk(agent: Agent): Promise<string> {
   let template: string;
@@ -24,7 +20,7 @@ async function buildEnvironmentChunk(agent: Agent): Promise<string> {
 
   const context = {
     model: agent.model || "",
-    profile_name: agent._profileName || "default",
+    profile_name: agent.profileName || "default",
     cwd: cwd(),
     platform: platform,
     session_start: new Date().toISOString().slice(0, 10),
@@ -36,7 +32,7 @@ async function buildEnvironmentChunk(agent: Agent): Promise<string> {
 export function create(): ExtensionInstance {
   return {
     hooks: {
-      [HOOKS.SYSTEM_PROMPT_BUILD]: async ({ agent }: { agent: Agent }) => {
+      [HOOKS.SYSTEM_PROMPT_BUILD]: async ({ agent }) => {
         const content = await buildEnvironmentChunk(agent);
         return { name: "info", priority: 100, content };
       },

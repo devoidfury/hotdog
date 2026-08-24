@@ -25,7 +25,7 @@ describe("environment extension", () => {
     const extension = create();
     const hook = extension.hooks![HOOKS.SYSTEM_PROMPT_BUILD]!;
     const result = await hook({
-      agent: { model: "gpt-4", _profileName: "default" } as any,
+      agent: { model: "gpt-4", profileName: "default" } as any,
     });
     expect((result as any).content).toContain("gpt-4");
   });
@@ -34,7 +34,7 @@ describe("environment extension", () => {
     const extension = create();
     const hook = extension.hooks![HOOKS.SYSTEM_PROMPT_BUILD]!;
     const result = await hook({
-      agent: { model: "test", _profileName: "custom-profile" } as any,
+      agent: { model: "test", profileName: "custom-profile" } as any,
     });
     expect((result as any).content).toContain("custom-profile");
   });

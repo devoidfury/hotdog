@@ -1,4 +1,3 @@
-// Compaction utilities — token estimation, message serialization, helpers.
 import { SUMMARIZATION_SYSTEM_PROMPT, SUMMARIZATION_USER_PROMPT_TEMPLATE } from "./prompts.ts";
 import { AgentError } from "@core/error.ts";
 
@@ -18,17 +17,12 @@ interface MessageLike {
 
 // ── Token Estimation ────────────────────────────────────────────────────────
 
-/**
- * Estimate token count for a message using chars/4 heuristic (conservative overestimate).
- */
+// chars/4 heuristic; deliberately overestimates.
 export function estimateMessageTokens(msg: MessageLike): number {
   const chars = _messageCharCount(msg);
   return Math.ceil(chars / 4);
 }
 
-/**
- * Count characters in a message for token estimation.
- */
 function _messageCharCount(msg: MessageLike): number {
   const getContentLength = (content: string | Array<unknown> | undefined): number => {
     if (typeof content === "string") return content.length;
@@ -60,9 +54,6 @@ function _messageCharCount(msg: MessageLike): number {
   }
 }
 
-/**
- * Estimate total token count for all messages in context.
- */
 export function estimateContextTokens(messages: MessageLike[]): number {
   return messages.reduce((sum, msg) => sum + estimateMessageTokens(msg), 0);
 }
@@ -103,7 +94,6 @@ export function findFirstKeptIndex(messages: MessageLike[], keepRecent: number):
   return 0;
 }
 
-/** Check if compaction should be triggered. */
 export function shouldCompact(
   messages: MessageLike[],
   contextLimit: number,
@@ -115,10 +105,7 @@ export function shouldCompact(
 
 // ── Serialization ───────────────────────────────────────────────────────────
 
-/**
- * Serialize messages to text for summarization.
- * Wraps in role tags to prevent the model from treating it as a conversation.
- */
+// Role tags on each line stop the model from treating the dump as a live conversation.
 export function serializeConversation(messages: MessageLike[]): string {
   const parts: string[] = [];
 
@@ -185,7 +172,6 @@ interface CompactResult {
   messagesCompacted: number;
 }
 
-/** Compact the context by summarizing older messages. */
 export async function compactMessages(
   messages: MessageLike[],
   llmChat: (messages: Array<{ role: string; content: string }>, model: string) => Promise<string>,

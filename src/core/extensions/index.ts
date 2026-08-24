@@ -1,5 +1,3 @@
-// Extension system — re-exports all extension-related modules.
-
 export {
   ExtensionLoader,
   createExtensionLoader,
@@ -65,7 +63,6 @@ export type {
 
 export type { LoaderCore } from "./extensions.ts";
 
-// Value exports
 export {
   getExtensionConfig,
   getConfigSchemaProperties,

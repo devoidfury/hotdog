@@ -1,7 +1,3 @@
-// Compaction Extension
-// Handles context compaction when the conversation grows too long.
-// Hooks into `context:full` to trigger compaction.
-
 import {
   CompactionStrategy,
   CompactionStrategyRegistry,
@@ -35,9 +31,6 @@ interface CompactionSettings {
   userTurnGuardPrompt: string;
 }
 
-/**
- * Resolve the model config from the agent's model registry.
- */
 function getModelConfig(modelRegistry: Record<string, ModelConfig>, modelName: string): ModelConfig {
   const entry = findModelEntry(modelName, modelRegistry);
   if (!entry) {
@@ -49,16 +42,12 @@ function getModelConfig(modelRegistry: Record<string, ModelConfig>, modelName: s
   return entry;
 }
 
-/**
- * Create the compaction extension.
- */
 export function create(core: CoreContext): ExtensionInstance | null {
   // Config defaults come from extension.json configSchema
   const settings = getExtensionConfig<CompactionSettings>(core, "compaction");
 
   if (!settings.enabled) return null;
 
-  // Register built-in strategies
   const strategyRegistry = new CompactionStrategyRegistry();
   strategyRegistry.register(new SummarizeStrategy());
   strategyRegistry.register(new DropStrategy());
@@ -66,7 +55,7 @@ export function create(core: CoreContext): ExtensionInstance | null {
   strategyRegistry.register(new TokenAwareStrategy());
   strategyRegistry.register(new TrimStrategy());
 
-  // ── Helper functions (inside create() to close over core, settings, registry) ──
+  // Helpers are nested in create() so they close over core, settings, and the registry.
 
   /**
    * Ensure the conversation ends with a user turn.
@@ -102,7 +91,6 @@ export function create(core: CoreContext): ExtensionInstance | null {
     const model = agent.model;
     const modelConfig = getModelConfig(agent.modelRegistry, model);
 
-    // Build the LLM chat function from the agent's LLM client.
     const llmChat = async (chatMessages: Array<{ role: string; content: string }>, chatModel: string): Promise<string> => {
       const abortController = new AbortController();
 
@@ -170,7 +158,6 @@ export function create(core: CoreContext): ExtensionInstance | null {
         return false;
       }
 
-      // Replace compacted messages with summary
       if (result.summary) {
         // Harness message: the wrapper tag parts are trusted and reach the
         // model with their real names; the summary body is model-generated,
@@ -187,17 +174,14 @@ export function create(core: CoreContext): ExtensionInstance | null {
           ],
         });
 
-        // Replace the compacted portion
         agent.replaceContext(ensureUserTurnGuard([
           summaryMsg,
           ...keptMessages,
         ]));
       } else {
-        // Drop strategy — just remove the old messages
         agent.replaceContext(ensureUserTurnGuard(keptMessages));
       }
 
-      // Emit compaction result event
       core.hooks.notifyHooks(HOOKS.OUTPUT_EVENT, {
         type: "compaction_result",
         data: result,
@@ -212,9 +196,6 @@ export function create(core: CoreContext): ExtensionInstance | null {
     }
   }
 
-  /**
-   * Handle the /compact command.
-   */
   async function _handleCompactCommand(agent: Agent, opts: { keep: number | null; debug: boolean }): Promise<Record<string, unknown>> {
     const nonSystemMessages = agent.context.getNonSystem();
 
@@ -222,7 +203,6 @@ export function create(core: CoreContext): ExtensionInstance | null {
       return { action: ACTIONS.DISPLAY, content: "Not enough messages to compact." };
     }
 
-    // If keep is specified, just trim to that many messages
     if (opts.keep !== null) {
       const systemMessages = agent.context.getSystem();
       const keptMessages = nonSystemMessages.slice(-opts.keep);
@@ -230,7 +210,6 @@ export function create(core: CoreContext): ExtensionInstance | null {
       return { action: ACTIONS.DISPLAY, content: `Context compacted to ${keptMessages.length} messages.` };
     }
 
-    // Get the strategy
     const strategy = strategyRegistry.get(settings.strategy) || strategyRegistry.getDefault();
     if (!strategy) {
       return { action: ACTIONS.ERROR, error: "No compaction strategy available." };
@@ -240,7 +219,6 @@ export function create(core: CoreContext): ExtensionInstance | null {
       return { action: ACTIONS.DISPLAY, content: "Compaction not applicable with current settings." };
     }
 
-    // Perform compaction
     await _performCompaction(agent, strategy);
 
     const resultContent = `Context compacted using '${settings.strategy}' strategy.`;
@@ -261,18 +239,14 @@ export function create(core: CoreContext): ExtensionInstance | null {
         (agent as { compactionRegistry?: typeof strategyRegistry }).compactionRegistry = strategyRegistry;
       },
 
-      /**
-       * Handle context hook — check if compaction is needed before each LLM call.
-       */
+      // Runs before each LLM call; compacts in place when the token budget is exceeded.
       [HOOKS.CONTEXT]: async ({ messages, agent }) => {
         if (!settings.enabled) return;
 
         const nonSystemMessages = messages.filter((m) => m.role !== "system");
 
-        // Quick check: do we have enough messages?
         if (nonSystemMessages.length <= settings.keepRecentMessages * 2) return;
 
-        // Check token budget
         const estimatedTokens = estimateContextTokens(nonSystemMessages);
         const reserveTokens = settings.reserveTokens;
         const modelConfig = getModelConfig(agent.modelRegistry, agent.model);
@@ -280,31 +254,20 @@ export function create(core: CoreContext): ExtensionInstance | null {
 
         if (estimatedTokens <= contextLimit - reserveTokens) return;
 
-        // Get the strategy
         const strategy = strategyRegistry.get(settings.strategy) || strategyRegistry.getDefault();
         if (!strategy) return;
 
-        // Check if compaction is applicable
         if (!strategy.canCompact(nonSystemMessages, settings)) return;
 
-        // Execute compaction — modifies agent context in place
+        // _performCompaction rewrites agent.context in place.
         const compacted = await _performCompaction(agent, strategy);
         if (!compacted) return;
 
-        // Rebuild messages from the updated context and return them.
+        // The hook's `messages` input is stale after compaction.
         const newMessages = agent.buildMessages();
         return { messages: newMessages };
       },
 
-      /**
-       * Register the compaction command.
-       *
-       * Syntaxes:
-       *   /compact                         - Run compaction with the current strategy
-       *   /compact [n] [--compact-debug]   - Trim context to n messages (optional debug)
-       *   /compact <strategy>              - Switch the compaction strategy
-       *   /compact:<strategy>              - Switch the compaction strategy (colon form)
-       */
       [HOOKS.COMMANDS_REGISTER]: async (payload: CommandsRegisterPayload) => {
         const { registry } = payload;
 
@@ -334,7 +297,6 @@ export function create(core: CoreContext): ExtensionInstance | null {
             const debug = rest.includes("--compact-debug");
             const args = rest.filter((p) => p !== "--compact-debug");
 
-            // Colon form: /compact:<strategy>
             if (head.startsWith("compact:")) {
               if (args.length > 0) {
                 return {
@@ -345,12 +307,10 @@ export function create(core: CoreContext): ExtensionInstance | null {
               return setStrategy(head.slice("compact:".length));
             }
 
-            // No args: run compaction
             if (args.length === 0) {
               return await _handleCompactCommand(agent, { keep: null, debug });
             }
 
-            // Strategy name: switch strategy
             const first = args[0] ?? "";
             if (strategyRegistry.get(first)) {
               if (args.length > 1) {
@@ -362,7 +322,6 @@ export function create(core: CoreContext): ExtensionInstance | null {
               return setStrategy(first);
             }
 
-            // Numeric: trim context to n messages
             if (args.length === 1 && /^\d+$/.test(first)) {
               return await _handleCompactCommand(agent, {
                 keep: parseInt(first, 10),
@@ -383,9 +342,6 @@ export function create(core: CoreContext): ExtensionInstance | null {
     registry: strategyRegistry,
     settings,
 
-    /**
-     * Get all available strategies with descriptions.
-     */
     getStrategyList() {
       return strategyRegistry.getAll().map((s) => ({
         name: s.name,
@@ -394,7 +350,6 @@ export function create(core: CoreContext): ExtensionInstance | null {
     },
   };
 
-  // Register completion with completion service (if available)
   if (core.completion) {
     core.completion.register(matcher, completion, "compaction:compact-strategy");
   }

@@ -125,7 +125,6 @@ export class LlmClient {
     return protocol;
   }
 
-  /** Build the ProtocolContext for a model. */
   #buildProtocolContext(modelConfig: ModelConfig): ProtocolContext {
     let url = this.baseUrl || "";
     let apiKey = this.apiKey;
@@ -303,7 +302,6 @@ export class LlmClient {
     // The protocol owns both the path (from buildRequest) and the headers;
     // the ctx carries the *resolved* url/apiKey (provider-level overrides
     // applied) so buildHeaders authenticates with the right key.
-    // Per-call override first, falling back to the client's session id.
     const effectiveSessionId = sessionId || this.sessionId;
     const protocol = this.protocolFor(modelConfig);
     const ctx: ProtocolContext = {

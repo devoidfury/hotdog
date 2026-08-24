@@ -1,7 +1,3 @@
-// mcp-client - JSON-RPC protocol layer for Model Context Protocol.
-// Handles request/response tracking, buffering, initialization, and tool operations.
-// Uses a transport abstraction (stdio or HTTP) for low-level communication.
-
 import {
   parseMcpInitializeResponse,
   parseMcpToolsListResponse,
@@ -14,7 +10,6 @@ import {
 import { McpTransport, StdioTransport, HttpTransport } from "./transports.ts";
 import { ExtensionError } from "@core/error.ts";
 
-/** MCP error type. */
 export class McpError extends ExtensionError {
   readonly code: number | null;
 
@@ -25,7 +20,6 @@ export class McpError extends ExtensionError {
   }
 }
 
-/** Pending request tracker for stdio transport. */
 class PendingRequest {
   readonly id: number;
   resolve: ((value: unknown) => void) | null = null;
@@ -37,47 +31,28 @@ class PendingRequest {
   }
 }
 
-/**
- * MCP client that manages JSON-RPC communication with an MCP server.
- *
- * Uses a transport abstraction for low-level I/O:
- * - StdioTransport: subprocess stdin/stdout (newline-delimited JSON)
- * - HttpTransport: HTTP POST with SSE response support
- *
- * The client handles:
- * - Request ID generation and tracking
- * - Response buffering (for out-of-order delivery)
- * - Server initialization
- * - Tool listing and calling
- */
 export class McpClient {
   readonly #transport: McpTransport;
 
-  // Request ID counter
   #idCounter: number = 0;
 
-  // Pending requests: id -> PendingRequest (stdio only)
+  // Pending requests: id -> PendingRequest. Stdio only; HTTP responses come from send().
   #pending: Map<number, PendingRequest> = new Map();
 
-  // Buffered responses not yet matched (stdio only)
+  // Responses that arrived before their request. Stdio only.
   #buffered: { id: number; result: unknown; error: unknown; raw: string }[] = [];
 
-  // Server capabilities (filled after initialize)
   #serverCapabilities: unknown = null;
 
-  // Server info (filled after initialize)
   #serverInfo: unknown = null;
 
-  // Cancellation flag
   #cancelled: boolean = false;
 
-  // Message handler cleanup
   #messageCleanup: (() => void) | null = null;
 
   constructor(transport: McpTransport) {
     this.#transport = transport;
 
-    // Set up message handler for streaming transports (stdio)
     if (transport.isStreaming) {
       this.#messageCleanup = transport.onMessage((line) => {
         void this.#handleLine(line);
@@ -85,14 +60,6 @@ export class McpClient {
     }
   }
 
-  /**
-   * Create a new client with a stdio transport.
-   * Spawns a subprocess and communicates via stdin/stdout.
-   * @param command - Command to execute
-   * @param args - Command arguments
-   * @param env - Environment variables (merged with current env)
-   * @returns Initialized McpClient
-   */
   static async forStdio(
     command: string,
     args: string[] = [],
@@ -100,7 +67,6 @@ export class McpClient {
   ): Promise<McpClient> {
     const transport = new StdioTransport(command, args, env);
 
-    // Wait for child to be ready (it needs to start up)
     await new Promise<void>((resolve, reject) => {
       const timeout = setTimeout(
         () => reject(new McpError(`MCP server '${command}' failed to start within 10s`)),
@@ -124,13 +90,6 @@ export class McpClient {
     return new McpClient(transport);
   }
 
-  /**
-   * Create a new client with an HTTP transport.
-   * Communicates via HTTP POST with SSE response support.
-   * @param url - MCP server endpoint URL
-   * @param headers - Custom headers to include in requests
-   * @returns Initialized McpClient
-   */
   static async forHttp(url: string, headers: Record<string, string> = {}): Promise<McpClient> {
     const transport = new HttpTransport(url, headers);
     return new McpClient(transport);
@@ -166,11 +125,6 @@ export class McpClient {
     return this.#transport;
   }
 
-  /**
-   * Handle an incoming message line from the stdio transport.
-   * Matches responses to pending requests or buffers them.
-   * @private
-   */
   async #handleLine(line: string): Promise<void> {
     line = line.trim();
     if (!line) return;
@@ -179,10 +133,9 @@ export class McpClient {
     try {
       msg = JSON.parse(line);
     } catch {
-      return; // Skip unparseable lines
+      return;
     }
 
-    // Check if this is a response
     if (msg.jsonrpc === "2.0" && msg.id !== undefined) {
       if (msg.result !== undefined || msg.error !== undefined) {
         const pending = this.#pending.get(msg.id as number);
@@ -200,7 +153,6 @@ export class McpClient {
             pending.resolve?.(msg.result);
           }
         } else {
-          // Buffer it in case it arrives before the request
           this.#buffered.push({
             id: msg.id as number,
             result: msg.result,
@@ -212,12 +164,6 @@ export class McpClient {
     }
   }
 
-  /**
-   * Send a JSON-RPC request and wait for the response.
-   * For stdio: uses pending request tracking.
-   * For HTTP: returns the result directly from the transport.
-   * @private
-   */
   private async _sendRequest(method: string, params: unknown): Promise<unknown> {
     if (this.#cancelled) {
       throw new McpError("Client is cancelled");
@@ -227,7 +173,6 @@ export class McpClient {
     const request = jsonRpcRequest(id, method, params);
     const serialized = JSON.stringify(request);
 
-    // Check buffered responses first (stdio)
     for (let i = 0; i < this.#buffered.length; i++) {
       const buf = this.#buffered[i];
       if (!buf) continue;
@@ -244,20 +189,15 @@ export class McpClient {
       }
     }
 
-    // HTTP mode: transport returns result directly
     if (!this.#transport.isStreaming) {
       const result = await this.#transport.send(serialized);
       return result ?? undefined;
     }
 
-    // Stdio mode: use pending request mechanism
     const pending = new PendingRequest(id);
     this.#pending.set(id, pending);
-
-    // Send the request (stdio transport writes to stdin, returns undefined)
     await this.#transport.send(serialized);
 
-    // Wait for response or timeout
     const result = await new Promise<unknown>((resolve, reject) => {
       pending.resolve = resolve;
       pending.reject = reject;
@@ -267,20 +207,12 @@ export class McpClient {
       }, 30000);
     });
 
-    // Clean up
     this.#pending.delete(id);
     if (pending.timer) clearTimeout(pending.timer);
 
     return result;
   }
 
-  // ── Public API ──────────────────────────────────────────────────────────
-
-  /**
-   * Initialize the connection with the server.
-   * Sends the initialize request and the initialized notification.
-   * @returns Server capabilities and info
-   */
   async initialize(): Promise<unknown> {
     const result = await this._sendRequest("initialize", mcpInitializeRequest());
     const response = parseMcpInitializeResponse(result as Record<string, unknown>);
@@ -288,7 +220,7 @@ export class McpClient {
     this.#serverCapabilities = response.capabilities;
     this.#serverInfo = response.serverInfo;
 
-    // Send initialized notification (stdio only)
+    // The initialized notification is only needed for streaming transports
     if (this.#transport.isStreaming) {
       const notification = jsonRpcNotification("notifications/initialized");
       this.#transport.sendNotification(JSON.stringify(notification));
@@ -297,21 +229,11 @@ export class McpClient {
     return response;
   }
 
-  /**
-   * List available tools from the server.
-   * @returns Tools list response with tools array and optional nextCursor
-   */
   async listTools(): Promise<unknown> {
     const result = await this._sendRequest("tools/list", {});
     return parseMcpToolsListResponse(result as Record<string, unknown>);
   }
 
-  /**
-   * Call a tool on the server.
-   * @param name - Tool name
-   * @param args - Tool arguments
-   * @returns Tool call response with content blocks
-   */
   async callTool(name: string, args: Record<string, unknown>): Promise<unknown> {
     const result = await this._sendRequest("tools/call", mcpToolCallRequest(name, args));
     return parseMcpToolCallResponse(result as Record<string, unknown>);

@@ -1,5 +1,3 @@
-// Overwrite tool — write content to a file, replacing everything.
-
 import fs from "node:fs/promises";
 import path from "node:path";
 import {
@@ -79,14 +77,12 @@ export class OverwriteTool {
       return ToolResult.err(`Error resolving path: ${(e as Error).message}`);
     }
 
-    // Create parent directories
     const dir = path.dirname(resolvedPath);
     const mkdirError = await safeMkdir(dir);
     if (mkdirError) {
       return mkdirError;
     }
 
-    // Write the file
     const writeError = await safeWriteFile(resolvedPath, content);
     if (writeError) {
       return writeError;

@@ -1,5 +1,3 @@
-// Aggressive summarization with shorter output.
-
 import {
   SUMMARIZATION_SYSTEM_PROMPT,
   SUMMARIZATION_USER_PROMPT_SHORT,
@@ -8,10 +6,6 @@ import { serializeConversation, findFirstKeptIndex, estimateContextTokens } from
 import { CompactionStrategy, Message, CompactionSettings, CompactResult } from "../strategies.ts";
 import { AgentError } from "../../../core/error.ts";
 
-/**
- * Aggressive LLM summarization with shorter output.
- * Less context preserved but more efficient.
- */
 export class SummarizeShortStrategy extends CompactionStrategy {
   override name = "summarize-short";
   override description = "Aggressive LLM summarization with shorter output. Less context preserved but more efficient.";

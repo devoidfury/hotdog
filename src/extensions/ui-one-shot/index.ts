@@ -1,8 +1,3 @@
-// One-Shot Extension
-// Provides one-shot prompt mode as a CLI subcommand.
-// Runs a single prompt and exits — no interactive session.
-// Registers CLI flag (-p/--prompt), subcommand, and CLI args hook handler.
-
 import { formatError } from "../../core/error.ts";
 import { HOOKS } from "../../core/hooks.ts";
 import { CliSubcommandRegistryLike } from "../../core/extensions/registries.ts";
@@ -18,8 +13,6 @@ import type { PaletteOptions } from "../../utils/cli/colors.ts";
 import type { CoreConfigWithExtensions, CliArgv } from "../../core/config/index.ts";
 import type { ModelConfig } from "../../core/config/providers.ts";
 
-// ── Types ──────────────────────────────────────────────────────────────────
-
 interface CliArgs {
   prompt?: string;
   colors?: boolean;
@@ -29,11 +22,6 @@ interface CliArgs {
   [key: string]: unknown;
 }
 
-// ── One-Shot Runner ────────────────────────────────────────────────────────
-
-/**
- * Run one-shot mode: execute a single prompt and exit.
- */
 async function runOneShot(
   cli: CliArgv,
   core: CoreContext,
@@ -44,7 +32,6 @@ async function runOneShot(
   buildAgent: (agentConfig: Record<string, unknown>) => Promise<AgentLike>,
   llmClient: LlmClient,
 ): Promise<number> {
-  // Create SessionManager — owns the MessageBus and TaskManager internally
   const sessionManager = await SessionManager.create({
     hooks: core.hooks,
     extensions: core.extensions,
@@ -67,14 +54,12 @@ async function runOneShot(
   // (and their tools) were loaded before this session existed.
   registerTaskManagerService(core, sessionManager.getTaskManager());
 
-  // Create OneShotChannel
   const channel = new OneShotChannel({
     sessionManager,
     sessionId: sessionManager.sessionId()!,
     sink,
   });
 
-  // Enqueue the prompt via the SessionManager
   const promptText = cli.prompt || (Array.isArray(cli.args) ? cli.args.join(" ") : "");
   sessionManager.enqueue(sessionManager.sessionId()!, promptText);
 
@@ -99,21 +84,15 @@ async function runOneShot(
   return exitCode;
 }
 
-// ── Extension Entry Point ──────────────────────────────────────────────────
-
-/**
- * Handle the "prompt" subcommand: run a single prompt and exit.
- */
 async function handlePromptSubcommand(
   cli: CliArgv,
   core: CoreContext,
 ): Promise<number> {
-  const { config, buildConfig } = core;
+  const { config } = core;
   const resolved = core.resolved!;
-  
+
   const modelRegistry = resolved.modelRegistry;
 
-  // Build output sink
   const palette = await CliOutputSink.resolve(
     cli.colors !== false,
     (cli.theme || config.theme || "dark") as string,
@@ -128,7 +107,6 @@ async function handlePromptSubcommand(
     toolOutputFmt: resolved.toolOutputFmt,
   });
 
-  // Build agent function
   const llmClient = core.createLlmClient();
 
   const buildAgent: (agentConfig: Record<string, unknown>) => Promise<AgentLike> = async (agentConfig) => {
@@ -182,9 +160,6 @@ async function handlePromptSubcommand(
   );
 }
 
-/**
- * Create the one-shot extension.
- */
 export function create(core: CoreContext): ExtensionInstance {
   return {
     hooks: core.hooks

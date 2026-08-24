@@ -1,5 +1,3 @@
-// Explore tool — run the agent in explorer mode against a project directory.
-
 import { spawn as _spawn, ChildProcess } from "node:child_process";
 import fs from "node:fs/promises";
 import path from "node:path";
@@ -15,11 +13,9 @@ import { logger } from "../../core/logger.ts";
 import { ToolContext } from "../../core/extensions/types.ts";
 import { PathEscapeError, Workspace } from "../../utils/workspace.ts";
 
-// Resolve the path to the current binary (main.ts)
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const BIN_PATH = path.resolve(__dirname, "..", "..", "..", "bin", "hotdog");
 
-/** Spawn function type — same signature as node:child_process.spawn */
 export type SpawnFn = typeof _spawn;
 
 export class ExploreTool {
@@ -28,10 +24,7 @@ export class ExploreTool {
 
   private readonly spawnFn: SpawnFn;
 
-  /**
-   * @param spawnFn - Optional spawn function override for testing.
-   *                  Defaults to node:child_process.spawn.
-   */
+  // spawnFn is injectable for testing.
   constructor(spawnFn: SpawnFn = _spawn) {
     this.spawnFn = spawnFn;
   }
@@ -68,7 +61,6 @@ export class ExploreTool {
   async execute(input: string | Record<string, unknown> | null, ctx: ToolContext): Promise<ToolResult> {
     const args = this._parseArgs(input);
 
-    // outline is required
     if (!args.outline || args.outline.trim().length === 0) {
       const error =
         "The 'outline' argument is required. Provide an outline of what you're specifically interested in or any particular questions you have.";
@@ -122,7 +114,6 @@ export class ExploreTool {
     const prompt = `Explore project at '${targetDir}'. ${args.outline}`;
 
     logger.debug(`Explore: ${BIN_PATH}`);
-    // Build command: bun main.ts -c "<prompt>" --profile explorer
     const command = [
       BIN_PATH,
       "-c",

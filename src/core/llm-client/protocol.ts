@@ -31,14 +31,6 @@ export interface ProtocolContext {
 export interface LlmProtocol {
   id: string;
 
-  /**
-   * Build the HTTP request body and path for a chat completion.
-   * @param messages - Raw internal messages.
-   * @param modelConfig - Resolved model configuration.
-   * @param toolDefs - Tool definitions to include, or null/empty for none.
-   * @param stream - Whether to request streaming.
-   * @param ctx - Call-time context (mangler, credentials, session).
-   */
   buildRequest(
     messages: Message[],
     modelConfig: ModelConfig,
@@ -47,21 +39,13 @@ export interface LlmProtocol {
     ctx: ProtocolContext,
   ): { path: string; body: unknown };
 
-  /**
-   * Build the HTTP headers for a request.
-   */
   buildHeaders(ctx: ProtocolContext): Record<string, string>;
 
-  /**
-   * Parse a response into StreamEvents. Normalizes INTO the existing
-   * StreamEvent shape so everything downstream stays untouched.
-   */
+  /** Normalizes into the existing StreamEvent shape so everything downstream stays untouched. */
   parseStream(response: Response, ctx: ProtocolContext): AsyncIterable<StreamEvent>;
 
-  /** Optional health check. */
   health?(ctx: ProtocolContext): Promise<boolean>;
 
-  /** Optional model listing. */
   listModels?(ctx: ProtocolContext): Promise<Array<{ id: string; [key: string]: unknown }>>;
 }
 

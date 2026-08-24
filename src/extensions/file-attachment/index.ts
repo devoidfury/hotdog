@@ -1,5 +1,3 @@
-// file-attachment - Expands @filepath references in user input to file contents in <file-include> format.
-
 import fsPromises from "node:fs/promises";
 import { resolve as resolveAbs, isAbsolute } from "node:path";
 import { cwd } from "node:process";
@@ -11,16 +9,10 @@ import { Workspace, PathEscapeError } from "@utils/workspace.ts";
 
 import { matcher, completion } from "./completions.ts";
 
-// Pattern to match @filepath references
-// Matches @ preceded by start-of-string or a non-word character.
-// "tom@furycodes.com" does NOT trigger, but "read @file.txt" does,
-// followed by path characters (alphanumeric, dots, slashes, hyphens, underscores, plus)
+// Lookbehind so "tom@furycodes.com" doesn't match; only bare @path refs do.
 const FILE_REF_RE = /(?<!\w)@([a-zA-Z0-9._\/\+-]+)\b/g;
 
-/**
- * Resolve a relative path against the workspace root or cwd.
- * Returns null when the path is rejected by the workspace boundary (a PathEscapeError).
- */
+// Returns null when the path is rejected by the workspace boundary (PathEscapeError).
 function resolveFilePath(filePath: string, workspace: Workspace | null): string | null {
   if (workspace) {
     try {
@@ -39,7 +31,6 @@ function resolveFilePath(filePath: string, workspace: Workspace | null): string 
   return resolveAbs(cwd(), filePath);
 }
 
-/** Read a file and return its content, or null if it cannot be read. */
 async function readFileContent(
   resolvedPath: string,
   requestedPath: string,
@@ -66,7 +57,6 @@ async function readFileContent(
   }
 }
 
-/** Expand @filepath references in text to file content blocks. */
 async function expandFileReferences(
   text: string,
   workspace: Workspace | null,
@@ -81,7 +71,6 @@ async function expandFileReferences(
   // Reset regex lastIndex before using it (global regex maintains state)
   FILE_REF_RE.lastIndex = 0;
 
-  // Check if there are any file references
   if (!FILE_REF_RE.test(text)) {
     return { expanded: text, attachedFiles };
   }
@@ -93,14 +82,12 @@ async function expandFileReferences(
   let boundaryRejections = 0;
   let match: RegExpExecArray | null;
 
-  // Collect all file references
   while ((match = FILE_REF_RE.exec(text)) !== null && attachedFiles.length + errors.length < maxFiles) {
     const requestedPath = match[1];
     if (!requestedPath) continue;
     const resolvedPath = resolveFilePath(requestedPath, workspace);
 
     if (resolvedPath === null) {
-      // Rejected by the workspace boundary: never attach, report in the note.
       errors.push(requestedPath);
       boundaryRejections++;
       continue;
@@ -120,7 +107,6 @@ async function expandFileReferences(
     return { expanded: text, attachedFiles };
   }
 
-  // Build content blocks appended at the bottom
   const blocks: string[] = [];
   for (const file of attachedFiles) {
     const tag = "file-include";
@@ -133,7 +119,6 @@ async function expandFileReferences(
     expanded += `\n\n${blocks.join("\n\n")}`;
   }
 
-  // Add error notes for files that couldn't be read
   if (errors.length > 0) {
     expanded += `\n\n[File attachment note: could not read the following files: ${errors.join(", ")}]`;
   }
@@ -141,7 +126,6 @@ async function expandFileReferences(
   return { expanded, attachedFiles };
 }
 
-/** Create the file-attachment extension. */
 export function create(core: CoreContext): ExtensionInstance {
   const config = getExtensionConfig<{
     maxFileSize: number;
@@ -150,13 +134,11 @@ export function create(core: CoreContext): ExtensionInstance {
   const maxFileSize = config.maxFileSize;
   const maxFiles = config.maxFiles;
 
-  // Register completion handler for @filepath references
   core.completion.register(matcher, completion, "file-attachment:path-completion");
 
   return {
     hooks: {
       [HOOKS.INPUT]: async ({ text, agent }) => {
-        // Build Workspace from agent config boundaries
         const config = agent?.config;
         const boundary = config?.cwdBoundary ?? config?.workspaceRoot ?? cwd();
         let workspace: Workspace | null = null;

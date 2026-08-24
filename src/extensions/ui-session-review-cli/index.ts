@@ -1,6 +1,3 @@
-// Session Review Extension
-// Provides the `sessions` CLI subcommand for managing session logs.
-
 import { HOOKS } from "../../core/hooks.ts";
 import { CliOutputSink } from "../../utils/cli/cli.ts";
 import { ColorPalette, type PaletteOptions } from "../../utils/cli/colors.ts";
@@ -12,8 +9,6 @@ import { ReviewTool } from "./review.ts";
 import { CoreContext, ExtensionInstance, ToolsRegisterPayload } from "../../core/extensions/types.ts";
 import readline from "node:readline";
 import { CoreConfigWithExtensions } from "../../core/config/index.ts";
-
-// ── Types ──────────────────────────────────────────────────────────────────
 
 interface CliArgs {
   theme?: string;
@@ -34,11 +29,6 @@ interface SessionInfo {
   mtime: number;
 }
 
-// ── Helpers ────────────────────────────────────────────────────────────────
-
-/**
- * Prompt user for confirmation. Resolves true if yes, false otherwise.
- */
 function confirm(prompt: string): Promise<boolean> {
   return new Promise((resolve) => {
     if (!process.stdin.isTTY || !process.stdout.isTTY) {
@@ -57,12 +47,6 @@ function confirm(prompt: string): Promise<boolean> {
   });
 }
 
-// ── Sessions Subcommand ────────────────────────────────────────────────────
-
-/**
- * Run the sessions subcommand dispatcher.
- * Routes to show, delete, or cleanup based on the first positional arg.
- */
 async function runSessions(
   cli: CliArgs,
   config: CoreConfigWithExtensions,
@@ -83,9 +67,6 @@ async function runSessions(
   }
 }
 
-/**
- * `sessions show` — display session entries (replaces old `review` subcommand).
- */
 async function runShow(
   cli: CliArgs,
   config: CoreConfigWithExtensions,
@@ -130,9 +111,6 @@ async function runShow(
   return listSessions(cli.wantsJson ?? false, sessionsDir, palette);
 }
 
-/**
- * `sessions delete <id>` — delete a specific session.
- */
 async function runDelete(
   cli: CliArgs,
   _config: CoreConfigWithExtensions,
@@ -166,9 +144,6 @@ async function runDelete(
   return 0;
 }
 
-/**
- * `sessions cleanup [--older-than <days>]` — remove sessions older than N days.
- */
 async function runCleanup(
   cli: CliArgs,
   _config: CoreConfigWithExtensions,
@@ -224,7 +199,7 @@ async function runCleanup(
       await unlink(join(sessionsDir, `${s.id}.jsonl`));
       deleted++;
     } catch {
-      // Skip files that can't be deleted
+      // Ignore failures; keep cleaning up the rest
     }
   }
 
@@ -232,11 +207,6 @@ async function runCleanup(
   return 0;
 }
 
-// ── Shared Functions ───────────────────────────────────────────────────────
-
-/**
- * Count non-empty lines in a file (fast entry count for .jsonl files).
- */
 async function countEntries(filePath: string): Promise<number> {
   const content = await readFile(filePath, "utf-8");
   let count = 0;
@@ -391,16 +361,9 @@ function printToolIndex(entries: LogEntry[], json: boolean): number {
   return 0;
 }
 
-// ── Extension Entry Point ──────────────────────────────────────────────────
-
-/**
- * Create the session-review extension.
- * Registers CLI subcommands and the review tool.
- */
 export function create(core: CoreContext): ExtensionInstance {
   return {
     hooks: {
-      // Register CLI subcommand via hook
       [HOOKS.CLI_SUBCOMMANDS_REGISTER]: async (registry) => {
         registry.register("sessions", {
           description: "Manage session logs (show, delete, cleanup)",
@@ -411,7 +374,6 @@ export function create(core: CoreContext): ExtensionInstance {
         });
       },
 
-      // Register the review tool
       [HOOKS.TOOLS_REGISTER]: async (registry: ToolsRegisterPayload) => {
         const tool = new ReviewTool();
         registry.register("review", tool);

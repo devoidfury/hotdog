@@ -14,14 +14,12 @@ export * from "./schema-loader.ts";
 export * from "./profiles.ts";
 export * from "./providers.ts";
 
-// Validation re-export
 export {
   validate,
   validateParams,
   formatValidationErrors,
 } from "../../utils/json-schema.ts";
 
-// Import specific items we need locally
 import { DEFAULT_CONFIG_FILENAME } from "./defaults.ts";
 import {
   CONFIG_SCHEMA,
@@ -398,7 +396,6 @@ export async function buildAgentConfig(options: {
     ? providers.find((p) => p.name === providerName)
     : null;
 
-  // Profile merge
   let profile: ProfileDef = {
     ...configProfile,
     ...(normalizeConfigKeys(fileProfile || {}) as ProfileDef),

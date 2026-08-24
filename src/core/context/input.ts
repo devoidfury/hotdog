@@ -1,8 +1,6 @@
-// Input events, parsing, and the Input interface for collecting user responses.
-// The Input interface decouples question/answer collection from the tool itself.
-// The UI (CLI, TUI, etc.) provides its own implementation.
+// The Input interface decouples question/answer collection from the tool itself;
+// the UI (CLI, TUI, etc.) provides its own implementation.
 
-// Input event types
 export const INPUT_EVENT = {
   TEXT: "text",
   COMMAND: "command",
@@ -25,12 +23,6 @@ export interface QuestionDef {
   allow_other?: boolean;
 }
 
-/**
- * Parse raw input text into a typed InputEvent.
- *
- * Returns { type: 'command', value } if the input starts with '/',
- * otherwise { type: 'text', value }.
- */
 export function parseInput(input: string): InputEvent {
   const trimmed = input.trim();
   if (trimmed.startsWith("/")) {
@@ -48,19 +40,10 @@ export function parseInput(input: string): InputEvent {
  * Used in non-interactive modes (CI, pipes, one-shot).
  */
 export class NoopInput {
-  constructor() {}
-
-  /**
-   * Check if input is interactive.
-   * @returns Always false.
-   */
   isInteractive(): boolean {
     return false;
   }
 
-  /**
-   * Collect answers for a set of questions, returning defaults.
-   */
   collectAnswers(questions: QuestionDef[]): Record<string, unknown> {
     const answers: Record<string, unknown> = {};
     for (const q of questions) {

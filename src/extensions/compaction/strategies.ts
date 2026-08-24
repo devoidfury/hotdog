@@ -1,6 +1,3 @@
-// Compaction Strategy Registry and Base Class
-// Provides the strategy interface and registry for managing compaction strategies.
-
 import { AgentError } from "../../core/error.ts";
 import { Message } from "../../core/context/message.ts";
 
@@ -20,17 +17,10 @@ export interface CompactResult {
   metadata?: Record<string, unknown>;
 }
 
-/**
- * Base class for all compaction strategies.
- * All strategies must extend this and implement `execute()`.
- */
 export class CompactionStrategy {
   name: string = "base";
   description: string = "Base compaction strategy.";
 
-  /**
-   * Execute the compaction strategy.
-   */
   async execute(
     _messages: Message[],
     _settings: CompactionSettings,
@@ -40,25 +30,16 @@ export class CompactionStrategy {
     throw AgentError.NotImplemented();
   }
 
-  /**
-   * Check if compaction is applicable for the given message set.
-   * Override for strategies with special preconditions.
-   */
+  // Default precondition: enough messages beyond the keep-recent window.
   canCompact(messages: Message[], settings: CompactionSettings): boolean {
     return messages.length > settings.keepRecentMessages * 2;
   }
 }
 
-/**
- * CompactionStrategyRegistry — holds and manages compaction strategies.
- * Follows the ToolRegistry pattern for consistency.
- */
+// Mirrors the ToolRegistry pattern for consistency.
 export class CompactionStrategyRegistry {
   #strategies: Map<string, CompactionStrategy> = new Map();
 
-  /**
-   * Register a strategy.
-   */
   register(strategy: CompactionStrategy): void {
     if (!strategy.name) {
       throw new AgentError("Strategy must have a name property");
@@ -66,30 +47,18 @@ export class CompactionStrategyRegistry {
     this.#strategies.set(strategy.name, strategy);
   }
 
-  /**
-   * Get a strategy by name.
-   */
   get(name: string): CompactionStrategy | undefined {
     return this.#strategies.get(name);
   }
 
-  /**
-   * Check if a strategy exists.
-   */
   has(name: string): boolean {
     return this.#strategies.has(name);
   }
 
-  /**
-   * Get all registered strategies.
-   */
   getAll(): CompactionStrategy[] {
     return Array.from(this.#strategies.values());
   }
 
-  /**
-   * Get the default strategy.
-   */
   getDefault(): CompactionStrategy | undefined {
     return this.#strategies.get("summarize");
   }

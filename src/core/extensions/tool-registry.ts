@@ -1,5 +1,3 @@
-// Tool registry — holds all available tools.
-
 import {
   validateParams,
   formatValidationErrors,
@@ -15,7 +13,7 @@ export interface ToolMetadata {
   /** True if the tool can perform writes or network access. */
   sideEffects: boolean;
   /** Difficulty score 1-5: how hard this tool is to use correctly. */
-  difficulty: number; // 1-5
+  difficulty: number;
 }
 
 export interface ToolDef {
@@ -51,9 +49,6 @@ export interface Tool<TCtx extends Record<string, unknown> = DefaultToolContext>
   metadata: ToolMetadata;
 }
 
-/**
- * Tool registry — holds all available tools.
- */
 export class ToolRegistry {
   tools: Map<string, Tool>;
   #toolDefCache: Map<string, Promise<ToolDef | null>>;
@@ -88,17 +83,11 @@ export class ToolRegistry {
     return this.tools.has(name);
   }
 
-  /**
-   * Get metadata for a specific tool.
-   */
   getMetadata(name: string): ToolMetadata | undefined {
     const tool = this.tools.get(name);
     return tool?.metadata;
   }
 
-  /**
-   * Get all tools with their metadata.
-   */
   getAllWithMetadata(): Array<{ name: string; tool: Tool; metadata: ToolMetadata }> {
     return Array.from(this.tools.entries()).map(([name, tool]) => ({
       name,
@@ -165,17 +154,11 @@ export class ToolRegistry {
     return defs;
   }
 
-  /**
-   * Clear the tool definition cache.
-   */
   clearToolDefs(): void {
     this.#allToolDefsCache = null;
     this.#toolDefCache.clear();
   }
 
-  /**
-   * Remove a single tool from the registry by name.
-   */
   remove(name: string): boolean {
     const existed = this.tools.delete(name);
     if (existed) {
@@ -185,9 +168,6 @@ export class ToolRegistry {
     return existed;
   }
 
-  /**
-   * Remove multiple tools from the registry by name.
-   */
   removeAll(names: string[]): number {
     let count = 0;
     for (const name of names) {
@@ -202,18 +182,12 @@ export class ToolRegistry {
     return count;
   }
 
-  /**
-   * Clear all tools from the registry.
-   */
   clear(): void {
     this.tools.clear();
     this.#toolDefCache.clear();
     this.#allToolDefsCache = null;
   }
 
-  /**
-   * Filter tools by whitelist/blacklist.
-   */
   filter(
     whitelist?: string[] | null,
     blacklist?: string[] | null,
@@ -228,11 +202,6 @@ export class ToolRegistry {
     return result;
   }
 
-  /**
-   * Filter tools by maximum difficulty.
-   * @param maxDifficulty - Maximum difficulty score (1-5)
-   * @returns New ToolRegistry with only tools at or below the difficulty
-   */
   filterByDifficulty(maxDifficulty: number): ToolRegistry {
     const result = new ToolRegistry();
     for (const [name, tool] of this.tools) {
@@ -243,12 +212,7 @@ export class ToolRegistry {
     return result;
   }
 
-  /**
-   * Filter tools by side effects.
-   * @param allowSideEffects - If false, only tools with sideEffects: false are included.
-   *   If true, returns a new registry with all tools (no filtering, but still a copy).
-   * @returns New ToolRegistry with filtered tools
-   */
+  /** Even with allowSideEffects: true the result is a copy, never `this`. */
   filterBySideEffects(allowSideEffects: boolean): ToolRegistry {
     const result = new ToolRegistry();
     for (const [name, tool] of this.tools) {
@@ -261,12 +225,7 @@ export class ToolRegistry {
     return result;
   }
 
-  /**
-   * Filter tools by both difficulty and side effects.
-   * Always returns a new registry (never `this`), even when no filtering is applied.
-   * @param options - Filtering options
-   * @returns New ToolRegistry with filtered tools
-   */
+  /** Always returns a new registry (never `this`), even when no filtering is applied. */
   filterByMetadata(options?: {
     maxDifficulty?: number;
     allowSideEffects?: boolean;
@@ -275,7 +234,6 @@ export class ToolRegistry {
     if (options?.maxDifficulty !== undefined) {
       result = this.filterByDifficulty(options.maxDifficulty);
     } else {
-      // Start with a copy of all tools
       result = new ToolRegistry();
       for (const [name, tool] of this.tools) {
         result.register(name, tool);
@@ -287,9 +245,6 @@ export class ToolRegistry {
     return result;
   }
 
-  /**
-   * Validate tool arguments against the tool's JSON Schema.
-   */
   async validateToolArgs(
     toolName: string,
     input: unknown,
@@ -331,9 +286,6 @@ export class ToolRegistry {
   }
 }
 
-/**
- * Create a new ToolRegistry instance.
- */
 export function createToolRegistry(): ToolRegistry {
   return new ToolRegistry();
 }

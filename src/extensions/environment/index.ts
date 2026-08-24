@@ -1,6 +1,3 @@
-// Environment - Contributes the Environment section chunk to the system prompt.
-// Hooks: systemPrompt:build
-
 import { join } from "node:path";
 import { cwd, platform } from "node:process";
 import { readFile } from "node:fs/promises";
@@ -16,9 +13,6 @@ interface Agent {
   _profileName?: string;
 }
 
-/**
- * Build the environment chunk content.
- */
 async function buildEnvironmentChunk(agent: Agent): Promise<string> {
   let template: string;
   try {
@@ -39,9 +33,6 @@ async function buildEnvironmentChunk(agent: Agent): Promise<string> {
   return render(template, context);
 }
 
-/**
- * Create the environment extension.
- */
 export function create(): ExtensionInstance {
   return {
     hooks: {

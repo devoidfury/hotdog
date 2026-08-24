@@ -1,5 +1,3 @@
-// info / show-prompt / profiles subcommands (run outside the agent loop).
-
 import { HOOKS } from "../../core/hooks.ts";
 import { CliSubcommandRegistryLike } from "../../core/extensions/registries.ts";
 import { SkillsLoader } from "../skills/loader.ts";
@@ -383,7 +381,6 @@ async function printConfigDebug(
   );
   console.log();
 
-  // Config file sources
   console.log("=== Config File Sources ===");
   console.log();
   const resolvedConfigDir = resolved.configDir || resolveConfigDir(cli.configDir);
@@ -403,7 +400,6 @@ async function printConfigDebug(
   }
   console.log();
 
-  // Extension config
   console.log("=== Extension Config ===");
   console.log();
   const coreConfigKeys = new Set([

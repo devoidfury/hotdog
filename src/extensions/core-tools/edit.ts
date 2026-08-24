@@ -1,5 +1,3 @@
-// Edit tool — replace text in a file.
-
 import fs from "node:fs/promises";
 import path from "node:path";
 import {
@@ -101,7 +99,6 @@ export class EditTool {
       return ToolResult.err(`Error resolving path: ${(e as Error).message}`);
     }
 
-    // Validate input size
     const inputSize = oldString.length + newString.length;
     if (inputSize > this.maxEditInputSize) {
       throw AssistantRetryableError.WithHint(
@@ -110,7 +107,6 @@ export class EditTool {
       );
     }
 
-    // Read file
     let sourceContent: string;
     try {
       sourceContent = await fs.readFile(resolvedPath, "utf-8");
@@ -118,7 +114,6 @@ export class EditTool {
       return ToolResult.err(`File not found or unreadable '${filePath}': ${(e as Error).message}`);
     }
 
-    // Find and replace
     const result = findAndReplace(sourceContent, oldString, newString, replaceAll || false);
     if (result.error) {
       return ToolResult.err(`Edit failed: ${result.error}`);
@@ -126,7 +121,6 @@ export class EditTool {
 
     const { newContent, matchInfo } = result;
 
-    // Write file
     try {
       const dir = path.dirname(resolvedPath);
       await fs.mkdir(dir, { recursive: true });
@@ -154,15 +148,10 @@ export class EditTool {
   }
 }
 
-/**
- * Parse and validate edit tool arguments.
- * Supports both camelCase and snake_case field names.
- */
 function parseArgs(input: string | Record<string, unknown> | null): EditArgs | null {
   const json = parseToolInput(input);
   if (!json) return null;
 
-  // Support snake_case aliases
   const path = json.path;
   const oldString = json.oldString ?? json.old_string;
   const newString = json.newString ?? json.new_string;
@@ -170,9 +159,8 @@ function parseArgs(input: string | Record<string, unknown> | null): EditArgs | n
   if (typeof path !== "string" || !path) {
     return null;
   }
-  // oldString and newString must be present (not undefined/null), "" allowed here.
-  // Empty oldString is rejected later with a specific message;
-  // empty newString is valid and signals text deletion.
+  // Presence check, not non-empty: "" oldString is rejected later with a
+  // specific message, while "" newString is a valid deletion signal.
   if (typeof newString !== "string" || typeof oldString !== "string") {
     return null;
   }
@@ -185,27 +173,16 @@ function parseArgs(input: string | Record<string, unknown> | null): EditArgs | n
   };
 }
 
-/**
- * Truncate a string to max length, adding '...' if truncated.
- * UTF-8 safe: uses character iteration.
- */
 function truncateString(str: string, maxLen: number): string {
   if (str.length <= maxLen) return str;
   return str.slice(0, maxLen) + "...";
 }
 
-/**
- * Find `old` in `content` and replace with `new`.
- * Strategy 1: exact match.
- * Strategy 2: line-trimmed fallback — match each line with leading whitespace trimmed.
- */
 function findAndReplace(content: string, old: string, newStr: string, all: boolean): FindReplaceResult {
-  // Reject empty oldString
   if (old.length === 0) {
     return { error: "oldString must not be empty" };
   }
 
-  // Strategy 1: exact match
   if (content.includes(old)) {
     if (old === newStr) {
       return {
@@ -213,7 +190,6 @@ function findAndReplace(content: string, old: string, newStr: string, all: boole
       };
     }
 
-    // Calculate line numbers for exact match
     const matchPos = content.indexOf(old);
     const startLine = content.slice(0, matchPos).split("\n").length;
     const endLine = startLine + old.split("\n").length - 1;
@@ -253,7 +229,6 @@ function findAndReplace(content: string, old: string, newStr: string, all: boole
   }
 
   if (startLineIdx === -1) {
-    // Provide helpful error with file context
     const contextLines =
       contentLines.length <= 10
         ? contentLines
@@ -273,16 +248,15 @@ function findAndReplace(content: string, old: string, newStr: string, all: boole
     adjustedNewLines[0] = origFirstIndent + adjustedNewLines[0]!.trimStart();
   }
 
-  // Build result
   const resultLines = [
     ...contentLines.slice(0, startLineIdx),
     ...adjustedNewLines,
     ...contentLines.slice(startLineIdx + oldTrimmed.length),
   ];
   const newContent = resultLines.join("\n");
-  const startLine = startLineIdx + 1; // 1-indexed
+  const startLine = startLineIdx + 1;
   // Degenerate to startLine when deleting (zero-length replacement).
-  const endLine = Math.max(startLine, startLineIdx + adjustedNewLines.length); // 1-indexed
+  const endLine = Math.max(startLine, startLineIdx + adjustedNewLines.length);
 
   return {
     newContent,

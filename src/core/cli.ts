@@ -1,4 +1,3 @@
-// CLI argument parsing.
 // Core config flags come from core.config.json via ConfigRegistry.
 // Only structural/meta flags are hardcoded here (--config, --model, --help, etc.).
 
@@ -54,7 +53,6 @@ const STRUCTURAL_FLAGS: CliFlagDef[] = [
     type: "string",
     description: "Custom system prompt template",
   },
-  // Meta/structural booleans
   { short: "-l", long: "--loud", type: "boolean", description: "Print full JSON API responses" },
   { short: undefined, long: "--json", type: "boolean", description: "Output as JSON" },
   { short: "-v", long: "--version", type: "boolean", description: "Show version" },
@@ -67,7 +65,6 @@ export function parseArgs(
 ): ParsedCliOptions {
   const args = process.argv.slice(2);
   const options: ParsedCliOptions = {
-    // Structural flags (parsed directly)
     config: null,
     configDir: null,
     model: null,
@@ -80,12 +77,10 @@ export function parseArgs(
     wantsJson: false,
     version: false,
     help: false,
-    // Meta
     subcommand: null,
     args: [],
   };
 
-  // Initialize extension-registered options from defaults
   if (configRegistry) {
     const extDefaults = configRegistry.buildDefaults();
     for (const [key] of Object.entries(extDefaults)) {
@@ -93,7 +88,6 @@ export function parseArgs(
     }
   }
 
-  // Build a lookup map of all known flags (structural + registered)
   const flagMap = new Map<string, FlagEntry>();
 
   // Structural flags (always available, no config needed)
@@ -131,7 +125,6 @@ export function parseArgs(
     const flagDef = flagMap.get(arg);
 
     if (flagDef) {
-      // Handle subcommand aliases
       if (flagDef.isSubcommand) {
         options.subcommand = "prompt";
         if (flagDef.hasValue && i + 1 < args.length) {
@@ -141,7 +134,6 @@ export function parseArgs(
         continue;
       }
 
-      // Handle boolean flags — all handled generically now
       if (!flagDef.hasValue) {
         const key = parseCliFlagKey(flagDef.long || arg);
         // Special mapping for --json flag
@@ -151,14 +143,12 @@ export function parseArgs(
         continue;
       }
 
-      // Handle flags with values
       if (i + 1 >= args.length) {
         throw CliError.MissingValue(arg);
       }
 
       const value = args[++i]!;
 
-      // Parse the value based on type
       let parsedValue: unknown = value;
       if (flagDef.type === "number" || flagDef.type === "int") {
         parsedValue = parseInt(value, 10);
@@ -171,21 +161,18 @@ export function parseArgs(
         parsedValue = flagDef.parse(value);
       }
 
-      // Store in options using the extracted key
       const key = parseCliFlagKey(flagDef.long);
       options[key] = parsedValue;
       i++;
       continue;
     }
 
-    // Unknown flag
     if (arg.startsWith("-")) {
       logger.warn(`Warning: unknown flag '${arg}'`);
       i++;
       continue;
     }
 
-    // Positional arguments
     if (!options.subcommand) {
       const isKnownSubcommand = knownSubcommands
         ? knownSubcommands.includes(arg)
@@ -233,12 +220,6 @@ Options:
   -h, --help                Show help
   <config_flags>`;
 
-/**
- * Generate combined help text including config flags from schema.
- *
- * @param configRegistry
- * @returns Formatted help text string.
- */
 export function generateHelpText(
   configRegistry: { getCliHelpText: () => string | null } | null | undefined,
 ): string {

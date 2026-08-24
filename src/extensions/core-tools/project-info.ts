@@ -1,5 +1,3 @@
-// Project Info tool — compact project structure overview.
-
 import fs from "node:fs/promises";
 import path from "node:path";
 import { execFile } from "node:child_process";
@@ -61,7 +59,6 @@ export class ProjectInfoTool {
 
     [cwd] = correctCommonPathMistakes(cwd);
 
-    // Resolve working directory
     let workdir: string;
     try {
       workdir = path.resolve(cwd);
@@ -69,7 +66,6 @@ export class ProjectInfoTool {
       return ToolResult.err(`Error: invalid path ${cwd}`);
     }
 
-    // Check if directory exists
     let dirExists: boolean;
     try {
       const stats = await fs.stat(cwd);
@@ -82,7 +78,6 @@ export class ProjectInfoTool {
       return ToolResult.err(`=== Project Info ===\nDirectory not found: ${cwd}`);
     }
 
-    // Try git ls-files
     let gitFiles: string[];
     try {
       const { stdout } = await execFileAsync(
@@ -113,7 +108,6 @@ export class ProjectInfoTool {
       });
     }
 
-    // Gather metadata
     const branch = await this._getGitBranch(workdir);
     const lastCommit = await this._getLastCommitTime(workdir);
     const gitStatus = await this._getGitStatus(workdir);
@@ -121,7 +115,6 @@ export class ProjectInfoTool {
     const gitignoreFilter = await this._loadGitignoreFilter(workdir);
     const dirSizes = await this._getDirSizes(maxDepth, workdir, gitignoreFilter);
 
-    // Build output
     const lines: string[] = [];
     lines.push("=== Project Info ===");
 
@@ -132,7 +125,6 @@ export class ProjectInfoTool {
     );
     lines.push("");
 
-    // File list
     lines.push("── Files ──────────────────────────────");
     const displayFiles = gitFiles.slice(0, maxFiles);
     for (const f of displayFiles) {
@@ -145,7 +137,7 @@ export class ProjectInfoTool {
     }
     lines.push("");
 
-    // Directory sizes
+
     if (dirSizes.length > 0) {
       lines.push("── Directories ────────────────────────");
       for (const [size, dirPath] of dirSizes) {
@@ -156,7 +148,6 @@ export class ProjectInfoTool {
       lines.push("");
     }
 
-    // Git status
     if (gitStatus.length > 0) {
       lines.push("── Git Status ─────────────────────────");
       for (const [status, file] of gitStatus) {
@@ -165,7 +156,7 @@ export class ProjectInfoTool {
       lines.push("");
     }
 
-    // Language breakdown
+
     if (langs.length > 0) {
       lines.push("── Languages ──────────────────────────");
       for (const [lang, count] of langs) {
@@ -189,7 +180,6 @@ export class ProjectInfoTool {
     lines.push(`Dir: ${workdir} (not a git repo)`);
     lines.push("");
 
-    // List files manually
     const files = await this._listFilesRecursively(cwd, maxDepth, maxFiles);
     if (files.length > 0) {
       lines.push("── Files ──────────────────────────────");
@@ -199,7 +189,7 @@ export class ProjectInfoTool {
       lines.push("");
     }
 
-    // Directory sizes
+
     const gitignoreFilter = await this._loadGitignoreFilter(cwd, []);
     const dirSizes = await this._getDirSizes(maxDepth, cwd, gitignoreFilter);
     if (dirSizes.length > 0) {
@@ -212,7 +202,7 @@ export class ProjectInfoTool {
       lines.push("");
     }
 
-    // Language breakdown
+
     if (files.length > 0) {
       const langs = this._countByLanguage(files);
       if (langs.length > 0) {

@@ -1,6 +1,3 @@
-// Core module — the minimal foundation for the extension architecture.
-
-
 export * from "./hooks.ts";
 export { isPromise } from "../utils/promise.ts";
 export {
@@ -11,7 +8,6 @@ export {
   resolveLogTarget,
 } from "./logger.ts";
 
-// Extension system
 export {
   ExtensionLoader,
   createExtensionLoader,
@@ -68,9 +64,6 @@ export * from "./command-handlers.ts";
 export * from "./token-tracker.ts";
 export * from "./session/index.ts";
 
-// Session components
 export * from "./session/task-manager.ts";
 export * from "./session/message-bus.ts";
-
-// Channel
 export * from "./channel.ts";

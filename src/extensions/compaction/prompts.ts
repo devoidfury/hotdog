@@ -1,5 +1,3 @@
-// Compaction prompts — summarization system and user prompts.
-
 export const SUMMARIZATION_SYSTEM_PROMPT =
   'You are a context summarization assistant. Your task is to read a conversation between a user and an AI coding assistant, then produce a structured summary following the exact format specified.\n\nDo NOT continue the conversation. Do NOT respond to any questions in the conversation. ONLY output the structured summary.';
 
@@ -37,7 +35,6 @@ Keep each section concise. Preserve exact file paths, function names, and error 
 {conversation}
 </conversation>`;
 
-// Aggressive summarization prompt — shorter output, less context preserved
 export const SUMMARIZATION_USER_PROMPT_SHORT = `The messages above are a conversation to summarize. Produce a CONCISE structured summary.
 
 Use this EXACT format (keep each section very brief):

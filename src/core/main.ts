@@ -1,5 +1,4 @@
 #!/usr/bin/env bun
-// CLI entry point.
 
 import { createHooks, initializeLogger, logger, resolveLogLevel, resolveLogTarget } from "./index.ts";
 import {
@@ -54,7 +53,6 @@ import { MarkerMangler, CORE_PROTECTED_PREFIXES } from "./marker-mangler.ts";
 
 import pkg from "@package.json" with { type: "json" };
 
-// Load extensions in dependency order, then fire TOOL_METADATA and validate service contracts.
 async function loadExtensions(
   core: CoreInfrastructure,
   { taskManager, config }: { taskManager: unknown; config: CoreConfigWithExtensions } = {
@@ -188,7 +186,6 @@ export function createCore(
   return core;
 }
 
-// Single-pass config build: CLI + file + env + profile + extension layers.
 async function buildFullConfig(
   cli: CliArgv,
   configRegistry: ConfigRegistry,
@@ -318,7 +315,6 @@ export async function main(): Promise<number> {
     configRegistry,
   );
 
-  // Warn if no AI URL is configured
   if (!resolved.baseUrl) {
     logger.warn(
       "No AI URL configured. Set a URL via --ai-url, aiUrl in config, provider.url, or HOTDOG_AI_URL environment variable. " +
@@ -326,7 +322,6 @@ export async function main(): Promise<number> {
     );
   }
 
-  // Enable hook tracing if configured
   hooks.trace = resolved.hookTrace as boolean | HookTraceOptions;
 
   const core = createCore(config, configRegistry, cliSubcommandRegistry, {
@@ -354,7 +349,6 @@ export async function main(): Promise<number> {
     return 1;
   }
 
-  // No explicit subcommand — use default_subcommand from config when stdin is a TTY
   if (process.stdin.isTTY) {
     const defaultSubcommandName = config.defaultSubcommand || "cli";
     const defaultSubcommand = core.cliSubcommandRegistry.get(defaultSubcommandName);

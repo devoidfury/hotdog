@@ -1,14 +1,6 @@
-// Binary-search trim strategy.
-// Drops the minimum number of oldest messages to fit under budget.
-// No LLM cost -- O(log n) token counts using local estimation.
-
 import { estimateContextTokens, findFirstKeptIndex } from "../utils.ts";
 import { CompactionStrategy, Message, CompactionSettings, CompactResult } from "../strategies.ts";
 
-/**
- * Binary-search trim: drop the minimum number of oldest messages to fit under budget.
- * No LLM call required. More precise than 'drop' which uses a fixed message count.
- */
 export class TrimStrategy extends CompactionStrategy {
   override name = "trim";
   override description = "Binary-search trim: drop the minimum number of oldest messages to fit under budget. No LLM cost.";
@@ -38,14 +30,12 @@ export class TrimStrategy extends CompactionStrategy {
 
     const nonSystemCount = nonSystemIndices.length;
 
-    // Nothing to trim
     if (nonSystemCount === 0) return null;
 
-    // Already under budget -- nothing to do
     const tokensBefore = estimateContextTokens(messages);
     if (tokensBefore <= effectiveMax) return null;
 
-    // Protect the keepRecent zone
+    // Messages inside the keep-recent zone are never dropped.
     const firstKept = findFirstKeptIndex(messages, settings.keepRecentMessages);
     const droppableCount = nonSystemIndices.filter((i) => i < firstKept).length;
     if (droppableCount === 0) return null;
@@ -110,7 +100,6 @@ export class TrimStrategy extends CompactionStrategy {
     const contextLimit = settings.contextLimit || 128000;
     const effectiveMax = contextLimit - (settings.reserveTokens || 0);
 
-    // Only applicable if we're actually over budget
     return estimateContextTokens(nonSystem) > effectiveMax;
   }
 }

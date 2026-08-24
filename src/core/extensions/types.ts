@@ -306,7 +306,6 @@ export function getExtensionConfig<T = Record<string, unknown>>(
   return {} as T;
 }
 
-// Extract a property block from an extension's configSchema.
 export function getConfigSchemaProperties<
   T extends Record<string, unknown> = Record<string, unknown>,
 >(

@@ -1,11 +1,6 @@
-// Drop old messages without summarizing.
-
 import { findFirstKeptIndex, estimateContextTokens } from "../utils.ts";
 import { CompactionStrategy, Message, CompactionSettings, CompactResult } from "../strategies.ts";
 
-/**
- * Keep the last N messages and remove older messages without summarizing.
- */
 export class DropStrategy extends CompactionStrategy {
   override name = "drop";
   override description =

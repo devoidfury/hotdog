@@ -1,6 +1,3 @@
-// Question tool — ask the user questions and collect answers.
-// Port of hotdog/src/tools/question/mod.rs
-//
 // The tool emits a QUESTION event via the agent's sink so the UI can display
 // the questions, then delegates answer collection to the Input interface
 // carried in the tool context. This keeps the tool independent of any
@@ -48,13 +45,9 @@ interface Agent {
   emitOutput(type: string, data: unknown): void;
 }
 
-/**
- * Generate a key from the prompt if one is not provided.
- */
 function ensureKey(question: Question, index: number): string {
-  // If key was explicitly provided (even as empty string), use it as-is.
+  // Treat an explicit empty string as a provided key, hence the "in" check.
   if ("key" in question && question.key !== undefined) return question.key;
-  // Derive a key from the prompt text
   const prompt = question.prompt || question.question || "";
   const slug = prompt
     .toLowerCase()
@@ -139,49 +132,42 @@ export class QuestionTool {
       return ToolResult.err("At least one question is required");
     }
 
-    // Normalize questions: ensure keys, handle field aliases
+    // Accept legacy field aliases (question/prompt, choices/options) and
+    // snake_case keys from callers that predate the current schema.
     for (let i = 0; i < questions.length; i++) {
       const q = questions[i];
       if (!q) continue;
 
-      // Ensure key
       q.key = ensureKey(q, i);
 
       if (q.key === "") {
         return ToolResult.err("Question key cannot be empty");
       }
 
-      // Handle field alias: 'question' -> 'prompt'
       if (!q.prompt && q.question) {
         q.prompt = q.question;
       }
 
-      // Handle field alias: 'choices' -> 'options'
       if (!q.options && q.choices) {
         q.options = q.choices;
       }
 
-      // Handle snake_case -> camelCase for allow_other
       if ("allow_other" in q && !("allowOther" in q)) {
         q.allowOther = q.allow_other;
       }
 
-      // Ensure prompt exists
       if (!q.prompt) {
         return ToolResult.err(`Question "${q.key}" is missing a prompt`);
       }
     }
 
-    // Get the agent from context to emit the QUESTION event
     const agent = ctx?.get("agent") as Agent | undefined;
     if (agent) {
       agent.emitOutput("question", { questions });
     }
 
-    // Get the input interface from context, fall back to NoopInput
     const inputInterface: InputInterface = (ctx?.get("input") as InputInterface) || new NoopInput();
 
-    // Collect answers via the input interface (may be async)
     let answers: QuestionAnswers = inputInterface.collectAnswers(questions) as QuestionAnswers;
     if (isPromise(answers)) {
       answers = (await answers) as QuestionAnswers;
@@ -200,23 +186,17 @@ export class QuestionTool {
 
 // ── Extension Entry Point ───────────────────────────────────────────────────
 
-/**
- * Create the question-tool extension.
- */
 export function create(_core: CoreContext): ExtensionInstance {
   const questionTool = new QuestionTool();
 
   return {
     hooks: {
-      /**
-       * Register the question tool.
-       */
       [HOOKS.TOOLS_REGISTER]: async (registry) => {
         registry.register("question", questionTool);
       },
     },
 
-    // Expose for external use
+    // Exposed for external use.
     QuestionTool,
   };
 }

@@ -25,9 +25,6 @@ interface SessionEntry {
   expiresAt: number;
 }
 
-/**
- * Remaining lockout time for a rate-limit entry, in ms (0 if not locked).
- */
 export function lockoutRemainingMs(
   entry: RateLimitEntry,
   now: number,
@@ -96,12 +93,7 @@ export function createAuthMiddleware({
     rateLimits.set(ip, entry);
   }
 
-  /**
-   * POST /login handler.
-   * Expects JSON body: { apiKey: "..." }
-   * Returns { token } on success, 401 on failure, 429 when the client
-   * IP is rate-limited after repeated failures.
-   */
+  /** POST /login — expects JSON { apiKey }; returns { token } (401 on bad key, 429 when rate-limited). */
   async function loginHandler(req: Request): Promise<Response> {
     const ip = clientIp(req);
     const now = Date.now();

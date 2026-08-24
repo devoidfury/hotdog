@@ -1,10 +1,3 @@
-// Handoff tool — plan-execute handoff for multi-phase tasks.
-//
-// The agent calls this tool to package all relevant context into a handoff
-// document, then the extension clears the conversation context, rebuilds the
-// system prompt fresh, and enqueues the handoff content as the first user
-// message to start the next phase.
-
 import { fileURLToPath } from "node:url";
 import { dirname } from "node:path";
 import { HOOKS } from "../../core/hooks.ts";
@@ -34,7 +27,6 @@ export class HandoffTool {
   static readonly TOOL_NAME = "handoff";
   metadata: ToolMetadata = { sideEffects: true, difficulty: 3 };
 
-  /** Pending handoffs keyed by agent session id. */
   constructor(private pending: Map<string, HandoffPayload>) {}
 
   toToolDef() {
@@ -94,11 +86,8 @@ export class HandoffTool {
         : undefined,
     };
 
-    // Store the handoff payload for the TURN_END hook to process.
-    // The hook does the actual context clear + enqueue to ensure
-    // proper lifecycle ordering (tool results are added before clearing).
-    // Keyed by agent session id so concurrent sessions can't clobber each
-    // other's pending handoff (shared tool instance across sessions).
+    // Defer the actual context clear + enqueue to the TURN_END hook so tool
+    // results are added to the conversation before it gets cleared.
     const agent = ctx?.get("agent") as { sessionId?: string } | undefined;
     const sessionId = agent?.sessionId || "default";
     this.pending.set(sessionId, payload);
@@ -116,16 +105,6 @@ export class HandoffTool {
 
 // ── Extension Entry Point ──────────────────────────────────────────────────
 
-/**
- * Create the handoff-tool extension.
- *
- * The extension:
- * 1. Registers the "handoff" tool via TOOLS_REGISTER hook
- * 2. Watches TURN_END to detect handoff completion, then:
- *    - Clears the conversation context
- *    - Rebuilds the system prompt fresh
- *    - Enqueues the handoff content as the first user message
- */
 export function create(core: CoreContext): ExtensionInstance {
   const config = getExtensionConfig<{
     enabled?: boolean;
@@ -136,17 +115,13 @@ export function create(core: CoreContext): ExtensionInstance {
     return {};
   }
 
-  // Shared between the tool and the TURN_END hook; keyed by agent session id
-  // so concurrent sessions (e.g. multiple webui clients) can't clobber
-  // each other's pending handoff.
+  // Keyed by session id: the tool instance is shared across all sessions
+  // (e.g. multiple webui clients), so pending handoffs must be namespaced.
   const pending = new Map<string, HandoffPayload>();
 
   const handoffTool = new HandoffTool(pending);
 
-  /**
-   * Build the enqueued message from the handoff payload.
-   * This becomes the first user message in the fresh conversation.
-   */
+  // Formats the handoff payload as the first user message of the fresh conversation.
   function buildHandoffMessage(payload: HandoffPayload): string {
     const parts: string[] = [];
 
@@ -182,15 +157,10 @@ export function create(core: CoreContext): ExtensionInstance {
 
   return {
     hooks: {
-      /** Register the handoff tool. */
       [HOOKS.TOOLS_REGISTER]: async (registry) => {
         registry.register("handoff", handoffTool);
       },
 
-      /**
-       * Detect when the agent finishes a turn after a handoff tool call.
-       * Clear context, rebuild system prompt, and enqueue the handoff content.
-       */
       [HOOKS.TURN_END]: async ({ stopped, cancelled, agent, toolResults }) => {
         if (!agent) {
           return;
@@ -206,14 +176,10 @@ export function create(core: CoreContext): ExtensionInstance {
           return;
         }
 
-        // Only process if:
-        // - The turn stopped (agent completed, not continuing loop)
-        // - We have a pending handoff for THIS session
         if (!stopped || !pending.has(sessionId)) {
           return;
         }
 
-        // Verify the handoff tool was called in this turn
         const handoffCalled = toolResults?.some((tr) => tr.toolName === "handoff");
         if (!handoffCalled) {
           return;
@@ -223,19 +189,15 @@ export function create(core: CoreContext): ExtensionInstance {
         pending.delete(sessionId); // Clear immediately to avoid re-processing
 
         try {
-          // Clear the conversation context (messages + system prompt cache)
           await agent.clearContext();
-
-          // Rebuild the system prompt fresh
           await agent.ensureSystemPrompt();
 
-          // Enqueue the handoff content as the first user message
-          // This triggers the agent loop to start the next phase.
-          // The model composed the handoff, so tag it as model-sourced.
+          // The model composed the handoff content, so tag it as model-sourced.
           const message = buildHandoffMessage(handoff);
           agent.enqueue(message, { source: "model" });
         } catch (e: unknown) {
-          // If something goes wrong, emit an error but don't break the loop
+          // Emit instead of rethrowing so a failure mid-transition doesn't
+          // break the agent loop.
           const errorMsg = e instanceof Error ? e.message : String(e);
           agent.emitOutput("command_result", {
             content: `Handoff error: ${errorMsg}`,

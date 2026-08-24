@@ -1,5 +1,3 @@
-// WebSocket server extension: core backend for agent session management.
-
 import type { CoreContext, ExtensionInstance } from "../../core/extensions/types.ts";
 
 // Re-exported so the webui extension can import these directly.

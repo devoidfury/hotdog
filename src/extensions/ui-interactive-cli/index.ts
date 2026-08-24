@@ -1,5 +1,3 @@
-// Interactive CLI session (readline loop).
-
 import readline from "node:readline";
 import { spawn } from "node:child_process";
 import { parseCommand, Command, ACTIONS } from "@core/commands.ts";
@@ -104,7 +102,6 @@ interface InteractiveSessionOptions {
   setupInput?: () => void;
 }
 
-// Resolves via `which`; cached per command name.
 export async function isSystemCommand(cmd: string): Promise<boolean> {
   if (cmdLookupCache.has(cmd)) {
     return cmdLookupCache.get(cmd)!;
@@ -215,7 +212,6 @@ interface InputInterface {
   collectAnswers(questions: QuestionDef[]): Promise<Record<string, string>>;
 }
 
-// Question/answer collection over the CLI's readline interface.
 export class AsyncInteractiveCliInput implements InputInterface {
   readonly #rl: readline.Interface;
   readonly #onLine: (line: string) => void;
@@ -404,7 +400,6 @@ export async function buildInteractiveAgent(
   return agent;
 }
 
-// Wires up readline + SessionManager + CliChannel and runs until quit.
 export async function runInteractiveSession(
   cli: Record<string, unknown>,
   core: CoreContext,
@@ -416,7 +411,6 @@ export async function runInteractiveSession(
     throw ExtensionError.ConfigFailed("ui-interactive-cli", "configuration must be resolved first");
   }
 
-  // Create output sink
   const palette = await CliOutputSink.resolve(
     cli.colors !== false,
     (resolved.theme as string) || "dark",
@@ -432,15 +426,12 @@ export async function runInteractiveSession(
     hideUserMessage: true,
   });
 
-  // Build LLM client — single instance owned by SessionManager
   const llmClient = core.createLlmClient();
 
-  // Build agent function — uses llmClient from config (injected by SessionManager)
   const buildAgent = async (agentConfig: Record<string, unknown>): Promise<AgentLike> => {
     return buildInteractiveAgent(agentConfig, core, resolved, config, llmClient, cli);
   };
 
-  // Create SessionManager — this owns the MessageBus and TaskManager internally
   const sessionManager = await SessionManager.create({
     hooks: core.hooks,
     extensions: core.extensions,
@@ -461,10 +452,8 @@ export async function runInteractiveSession(
   // (and their tools) were loaded before this session existed.
   registerTaskManagerService(core, sessionManager.getTaskManager());
 
-  // Register the generic slash command name completion
   registerSlashCommandNameCompletion(core.completion);
 
-  // Register completions from command definitions (extensions declare completions inline)
   // Hook into COMMANDS_REGISTER so completions are wired up as commands are registered
   core.hooks.on(
     HOOKS.COMMANDS_REGISTER,
@@ -474,7 +463,6 @@ export async function runInteractiveSession(
     "ui-interactive-cli",
   );
 
-  // Print info
   const agent = sessionManager.getAgent();
   console.log(`hotdog ${pkg.version} (interactive mode)`);
   console.log(`Model: ${resolved.model}`);
@@ -482,10 +470,8 @@ export async function runInteractiveSession(
   console.log(`Session: ${agent?.sessionId || "unknown"}`);
   console.log("Type /quit or /exit to exit.\n");
 
-  // Determine shell mode
   const shellMode = (config.uiInteractiveCli as Record<string, unknown>)?.shellMode;
 
-  // Create readline with tab completion
   const createReadline = options.createReadline || readline.createInterface;
 
   const rl = createReadline({
@@ -495,7 +481,6 @@ export async function runInteractiveSession(
     completer: buildReadlineCompleter(sessionManager, core, !!shellMode),
   });
 
-  // Create CliChannel — handles the duplex between readline and SessionManager
   const channel = new CliChannel({
     sessionManager,
     sessionId: sessionManager.sessionId()!,
@@ -526,10 +511,8 @@ export async function runInteractiveSession(
     }
   });
 
-  // Register shell mode completion if enabled
   registerShellCompletion(core.completion, !!shellMode);
 
-  // Define and register the line handler
   lineHandler = async (line: string) => {
     const trimmed = line.trim();
 
@@ -538,14 +521,12 @@ export async function runInteractiveSession(
       return;
     }
 
-    // Handle slash commands
     if (trimmed.startsWith("/")) {
       const cmdText = trimmed.slice(1).trim();
       handleSlashCommand(cmdText, sessionManager, channel, rl);
       return;
     }
 
-    // Shell mode gate
     if (shellMode) {
       const match = trimmed.match(SEND_TO_ASSISTANT_SUFFIX_RE);
       const sendToAssistant = !!match;
@@ -566,7 +547,6 @@ export async function runInteractiveSession(
         rl.resume();
 
         if (sendToAssistant) {
-          // Send command and output to the assistant
           const notePart = note ? `Note: ${note}\n\n` : "";
           const msg = `I ran: ${cmd}\n\n${notePart}Output:\n${result.content || "(no output)"}`;
           await channel.send(msg);
@@ -585,7 +565,6 @@ export async function runInteractiveSession(
       }
     }
 
-    // Regular text input — enqueue via channel
     await channel.send(trimmed);
   };
 
@@ -599,7 +578,6 @@ export async function runInteractiveSession(
     });
   setupInput();
 
-  // SIGINT handler
   const handleSigint =
     options.onSIGINT ||
     (() => {
@@ -621,11 +599,6 @@ export async function runInteractiveSession(
   }
 }
 
-/**
- * Handle a slash command.
- * UI-only commands (quit, help) are handled directly; everything else
- * goes through the SessionManager.
- */
 export function handleSlashCommand(
   cmdText: string,
   sessionManager: SessionManager,
@@ -648,7 +621,6 @@ export function handleSlashCommand(
       return;
   }
 
-  // All other commands go through the SessionManager
   sessionManager.executeCommand(sessionManager.sessionId()!, cmdText).then(
     (action: number | undefined) => {
       if (!action || !(action & ACTIONS.PROMPT)) {

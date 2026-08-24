@@ -1,14 +1,8 @@
-// Minimal MCP protocol types.
-// Implements only the JSON-RPC 2.0 and MCP message types needed for
-// connecting to MCP servers, listing tools, and calling tools.
+// Minimal MCP protocol types: only the JSON-RPC 2.0 and MCP message types
+// needed for connecting to MCP servers, listing tools, and calling tools.
 
 import pkg from "@package.json" with { type: "json" };
 
-// ── JSON-RPC 2.0 ──────────────────────────────────────────────────────────
-
-/**
- * Create a JSON-RPC 2.0 request.
- */
 export function jsonRpcRequest(id: number, method: string, params?: unknown): Record<string, unknown> {
   return {
     jsonrpc: "2.0",
@@ -18,9 +12,6 @@ export function jsonRpcRequest(id: number, method: string, params?: unknown): Re
   };
 }
 
-/**
- * Create a JSON-RPC 2.0 notification (no ID).
- */
 export function jsonRpcNotification(method: string, params?: unknown): Record<string, unknown> {
   return {
     jsonrpc: "2.0",
@@ -29,11 +20,6 @@ export function jsonRpcNotification(method: string, params?: unknown): Record<st
   };
 }
 
-// ── MCP Protocol Types ────────────────────────────────────────────────────
-
-/**
- * MCP initialize request sent by client.
- */
 export function mcpInitializeRequest(): Record<string, unknown> {
   return {
     protocolVersion: "2025-11-25",
@@ -67,9 +53,6 @@ interface McpInitializeResponse {
   instructions: string | null;
 }
 
-/**
- * Parse MCP initialize response from server.
- */
 export function parseMcpInitializeResponse(data: Record<string, unknown>): McpInitializeResponse {
   return {
     protocolVersion: (data.protocolVersion as string) || null,
@@ -107,9 +90,6 @@ interface McpToolsListResponse {
   nextCursor: string | null;
 }
 
-/**
- * Parse MCP tools/list response.
- */
 export function parseMcpToolsListResponse(data: Record<string, unknown>): McpToolsListResponse {
   return {
     tools: ((data.tools as Record<string, unknown>[]) || []).map(parseMcpToolDefinition),
@@ -117,9 +97,6 @@ export function parseMcpToolsListResponse(data: Record<string, unknown>): McpToo
   };
 }
 
-/**
- * Parse a tool definition from an MCP server.
- */
 export function parseMcpToolDefinition(tool: Record<string, unknown>): McpToolDefinition {
   return {
     name: (tool.name as string) || "",
@@ -129,9 +106,6 @@ export function parseMcpToolDefinition(tool: Record<string, unknown>): McpToolDe
   };
 }
 
-/**
- * Create MCP tools/call request.
- */
 export function mcpToolCallRequest(
   name: string,
   arguments_?: Record<string, unknown> | null,
@@ -156,9 +130,6 @@ interface McpToolCallResponse {
   isError: boolean;
 }
 
-/**
- * Parse MCP tools/call response.
- */
 export function parseMcpToolCallResponse(data: Record<string, unknown>): McpToolCallResponse {
   return {
     content: ((data.content as Record<string, unknown>[]) || []).map(parseMcpContentBlock),
@@ -166,9 +137,6 @@ export function parseMcpToolCallResponse(data: Record<string, unknown>): McpTool
   };
 }
 
-/**
- * Parse a content block in a tool call response.
- */
 export function parseMcpContentBlock(block: Record<string, unknown> | null): McpContentBlock {
   if (!block || !block.type) return { type: "unknown" };
 
@@ -194,9 +162,6 @@ export function parseMcpContentBlock(block: Record<string, unknown> | null): Mcp
   }
 }
 
-/**
- * Convert MCP content blocks to a single string.
- */
 export function contentBlocksToString(blocks: McpContentBlock[]): string {
   const parts: string[] = [];
   for (const block of blocks) {

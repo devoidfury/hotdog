@@ -1,6 +1,3 @@
-// Output events and the Output trait for emitting agent output.
-
-// Output event types
 export const OUTPUT_EVENT = {
   USER_MESSAGE: 1,
   ASSISTANT_MESSAGE: 2,
@@ -21,9 +18,6 @@ export const OUTPUT_EVENT = {
 
 export type OutputEventType = (typeof OUTPUT_EVENT)[keyof typeof OUTPUT_EVENT];
 
-/**
- * Map string event type names (used internally by the agent) to OUTPUT_EVENT constants.
- */
 export const EVENT_NAME_MAP: Record<string, OutputEventType> = {
   user_message: OUTPUT_EVENT.USER_MESSAGE,
   assistant_message: OUTPUT_EVENT.ASSISTANT_MESSAGE,
@@ -43,9 +37,6 @@ export const EVENT_NAME_MAP: Record<string, OutputEventType> = {
 
 export type EventName = keyof typeof EVENT_NAME_MAP;
 
-/**
- * Map output event types to handler method names.
- */
 export const EVENT_HANDLERS: Record<OutputEventType, string> = {
   [OUTPUT_EVENT.USER_MESSAGE]: "emitUserMessage",
   [OUTPUT_EVENT.ASSISTANT_MESSAGE]: "emitAssistantMessage",
@@ -172,10 +163,6 @@ export interface SystemMessageEvent {
   detail?: string;
 }
 
-/**
- * Discriminated union of all output event types.
- * Enables type-safe event handling via type narrowing on `type`.
- */
 export type OutputEvent =
   | UserMessageEvent
   | AssistantMessageEvent
@@ -193,32 +180,18 @@ export type OutputEvent =
   | SessionStateEvent
   | SystemMessageEvent;
 
-/**
- * Create an output event.
- */
 export function outputEvent<T extends OutputEvent>(event: T): T {
   return event;
 }
 
-/**
- * Output trait implementation for CLI.
- * The Agent only depends on this interface, never on a specific UI.
- */
+/** Base sink; the Agent only depends on this interface, never on a specific UI. */
 export class OutputSink {
   stream: boolean;
 
-  /**
-   * @param options
-   * @param options.stream - Enable streaming output
-   */
   constructor(options: { stream?: boolean } = {}) {
     this.stream = options.stream !== false;
   }
 
-  /**
-   * Emit an output event.
-   * Dispatches to the appropriate handler based on event type.
-   */
   emit(event: OutputEvent): void {
     switch (event.type) {
       case OUTPUT_EVENT.USER_MESSAGE:
@@ -318,9 +291,6 @@ export class OutputSink {
   reset(): void {}
 }
 
-/**
- * No-op output sink that silently discards all events.
- */
 export class NoopSink {
   emit(_event: OutputEvent): void {}
 }

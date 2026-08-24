@@ -1,5 +1,3 @@
-// WebSocket protocol — message type constants for client↔server communication.
-// All messages are JSON objects with a `type` field.
 // Server→client messages always include `sessionId`.
 
 // ── Client → Server ─────────────────────────────────────────────────────────
@@ -38,6 +36,7 @@ export const S2C = {
   // Cold session log management
   LOGS_LISTED: "logsListed",
   LOG_VIEWED: "logViewed",
+  LOG_DELETED: "logDeleted",
 
   // Profile management
   PROFILES: "profiles",
@@ -66,8 +65,6 @@ export const S2C = {
   // Connection management
   ERROR: "error",
 } as const;
-
-// ── Type helpers ────────────────────────────────────────────────────────────
 
 export type C2SType = (typeof C2S)[keyof typeof C2S];
 export type S2CType = (typeof S2C)[keyof typeof S2C];

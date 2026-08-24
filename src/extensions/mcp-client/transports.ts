@@ -1,7 +1,3 @@
-// MCP transport layer — abstracts stdio and HTTP communication.
-// Transports handle low-level message sending/receiving; McpClient handles
-// JSON-RPC protocol logic on top.
-
 import { spawn, ChildProcess } from "node:child_process";
 import { logger } from "../../core/logger.ts";
 import { formatError } from "../../core/error.ts";
@@ -9,68 +5,33 @@ import { copyScrubbedEnv } from "../../utils/env.ts";
 import { McpError } from "./client.ts";
 import { hotdogFetch } from "@utils/fetch.ts";
 
-/** Callback invoked when a transport receives a message line. */
 export type TransportMessageHandler = (line: string) => void;
 
-/** Callback invoked when a transport closes unexpectedly. */
+/** Callback invoked when a transport closes (expected or unexpected). */
 export type TransportCloseHandler = () => void;
 
-/**
- * Abstract transport interface for MCP communication.
- * Implementations handle the low-level I/O (stdio or HTTP);
- * McpClient uses this to send requests and receive responses.
- */
 export interface McpTransport {
   /**
-   * Send a serialized JSON-RPC message to the server.
-   * For stdio: writes to stdin.
-   * For HTTP: performs a POST request and returns the response result.
-   * @param serialized - JSON-stringified JSON-RPC message
-   * @returns For HTTP transport: the parsed result. For stdio: undefined (responses come via onMessage).
+   * Send a serialized JSON-RPC message.
+   * @returns HTTP transports return the parsed result; stdio returns undefined (responses come via onMessage).
    */
   send(serialized: string): Promise<unknown | undefined>;
 
-  /**
-   * Register a handler for incoming message lines.
-   * For stdio: called for each newline-delimited JSON line from stdout.
-   * For HTTP: not used (responses come synchronously via send()).
-   * @param handler - Callback invoked with each message line
-   * @returns Cleanup function to remove the handler
-   */
+  /** Register a handler for incoming message lines (stdio only; no-op for HTTP). Returns a cleanup function. */
   onMessage(handler: TransportMessageHandler): () => void;
 
-  /**
-   * Register a handler for unexpected close events.
-   * @param handler - Callback invoked when transport closes
-   * @returns Cleanup function to remove the handler
-   */
+  /** Register a handler for close events. Returns a cleanup function. */
   onClose(handler: TransportCloseHandler): () => void;
 
-  /**
-   * Send a notification (fire-and-forget, no response expected).
-   * For stdio: writes to stdin.
-   * For HTTP: not typically used.
-   * @param serialized - JSON-stringified JSON-RPC notification
-   */
+  /** Send a notification (fire-and-forget). */
   sendNotification(serialized: string): void;
 
-  /**
-   * Gracefully shutdown the transport.
-   */
   destroy(): Promise<void>;
 
-  /**
-   * Whether this is a streaming transport (stdio) vs request/response (HTTP).
-   * Streaming transports deliver responses via onMessage callbacks.
-   * Request/response transports return results directly from send().
-   */
+  /** True for streaming transports (stdio): responses arrive via onMessage. HTTP returns results from send() instead. */
   readonly isStreaming: boolean;
 }
 
-/**
- * Stdio transport — communicates with an MCP server via subprocess stdin/stdout.
- * Uses newline-delimited JSON over pipes.
- */
 export class StdioTransport implements McpTransport {
   readonly isStreaming = true;
 
@@ -94,8 +55,8 @@ export class StdioTransport implements McpTransport {
     this.#args = args;
     this.#env = env;
 
-    // Base env is scrubbed (no LLM API keys etc. in a third-party server's environment);
-    // caller - supplied env from config is user - trusted and merged on top.
+    // Base env is scrubbed (no LLM API keys in a third-party server's environment);
+    // caller-supplied env from config is user-trusted and merged on top.
     this.#child = spawn(command, args, {
       stdio: ["pipe", "pipe", "pipe"],
       env: { ...copyScrubbedEnv(), ...env },
@@ -161,12 +122,10 @@ export class StdioTransport implements McpTransport {
     if (this.#destroyed) return;
     this.#destroyed = true;
 
-    // Notify close handlers
     for (const handler of this.#closeHandlers) {
       try { handler(); } catch { /* ignore */ }
     }
 
-    // Kill the subprocess
     if (this.#child.pid) {
       try {
         this.#child.kill();
@@ -175,7 +134,6 @@ export class StdioTransport implements McpTransport {
       }
     }
 
-    // Print stderr if any
     if (this.#stderrOutput && this.#stderrOutput.trim()) {
       logger.error(`MCP server stderr: ${this.#stderrOutput.trim()}`);
     }
@@ -190,7 +148,6 @@ export class StdioTransport implements McpTransport {
       if (this.#destroyed) return;
       buffer += chunk.toString();
 
-      // Process complete lines
       let newlineIdx: number;
       while ((newlineIdx = buffer.indexOf("\n")) !== -1) {
         const line = buffer.slice(0, newlineIdx);
@@ -233,10 +190,6 @@ export class StdioTransport implements McpTransport {
   }
 }
 
-/**
- * HTTP transport — communicates with an MCP server via HTTP POST with SSE support.
- * Each request is independent; responses come directly from send().
- */
 export class HttpTransport implements McpTransport {
   readonly isStreaming = false;
 
@@ -283,7 +236,6 @@ export class HttpTransport implements McpTransport {
   }
 
   onMessage(_handler: TransportMessageHandler): () => void {
-    // Not used for HTTP transport — responses come via send()
     return () => {};
   }
 
@@ -296,7 +248,7 @@ export class HttpTransport implements McpTransport {
   }
 
   sendNotification(_serialized: string): void {
-    // Notifications not typically used over HTTP MCP
+    // HTTP MCP servers don't take notifications
   }
 
   async destroy(): Promise<void> {
@@ -309,7 +261,7 @@ export class HttpTransport implements McpTransport {
   }
 
   #parseResponse(body: string): unknown {
-    // Try direct JSON first (for servers that don't use SSE)
+    // Try direct JSON first (some servers don't use SSE)
     try {
       const data = JSON.parse(body) as Record<string, unknown>;
       if (data.error) {
@@ -322,9 +274,7 @@ export class HttpTransport implements McpTransport {
       }
       return data.result;
     } catch (e) {
-      // If it's our McpError, rethrow
       if (e instanceof McpError) throw e;
-      // Not direct JSON — try SSE parsing
     }
 
     // Parse SSE stream: "event: message\ndata: {json}\n\n"
@@ -333,7 +283,7 @@ export class HttpTransport implements McpTransport {
       throw new McpError(`No SSE messages found in response: ${body.slice(0, 200)}`);
     }
 
-    // For MCP requests, we expect exactly one response message
+    // MCP responses may be interleaved with keep-alives; take the last message
     const lastMsg = messages[messages.length - 1];
     if (!lastMsg || (lastMsg.result === undefined && lastMsg.error === undefined)) {
       throw new McpError(`No response message found in SSE: ${body.slice(0, 200)}`);
@@ -353,30 +303,26 @@ export class HttpTransport implements McpTransport {
   #parseSse(text: string): Record<string, unknown>[] {
     const messages: Record<string, unknown>[] = [];
     const lines = text.split(/\r?\n/);
-    let currentEvent = "message";
     let currentData = "";
 
     for (const line of lines) {
-      // Empty line signals end of an event
+      // Empty line signals end of an SSE event
       if (line === "") {
         if (currentData.trim()) {
           try {
             messages.push(JSON.parse(currentData.trim()) as Record<string, unknown>);
           } catch {
-            // Skip unparseable SSE data
+            // Malformed data field; skip
           }
         }
-        currentEvent = "message";
         currentData = "";
         continue;
       }
 
-      if (line.startsWith("event:")) {
-        currentEvent = line.slice(6).trim();
-      } else if (line.startsWith("data:")) {
+      if (line.startsWith("data:")) {
         currentData = line.slice(5).trim();
       }
-      // Other lines (like "id:", etc.) are ignored
+      // Other SSE fields (event:, id:, retry:) are ignored
     }
 
     // Handle trailing data without final empty line
@@ -384,7 +330,7 @@ export class HttpTransport implements McpTransport {
       try {
         messages.push(JSON.parse(currentData.trim()) as Record<string, unknown>);
       } catch {
-        // Skip unparseable SSE data
+        // Malformed data field; skip
       }
     }
 

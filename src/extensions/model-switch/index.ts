@@ -1,10 +1,3 @@
-// Model-switch extension — provides the model tool and /model commands
-// for switching AI models at runtime.
-//
-// Config (modelSwitch) — defined in extension.json configSchema:
-//   - toolEnabled:    bool  (default: true)  — register the model tool
-//   - commandEnabled: bool  (default: true)  — register /model and /models commands
-
 import { HOOKS } from "../../core/hooks.ts";
 import { ACTIONS } from "../../core/commands.ts";
 import { ModelTool } from "./model.ts";
@@ -26,7 +19,6 @@ const MODEL_CMD_NAME = "model";
 const LIST_CMD_NAME = "models";
 
 function listModels(agent: Agent) {
-  // No model name — show available models
   const models = Object.keys(agent.modelRegistry);
   if (models.length === 0) {
     return {
@@ -43,38 +35,27 @@ function listModels(agent: Agent) {
   return { action: ACTIONS.DISPLAY, content: lines.join("\n") };
 }
 
-/**
- * Create the model-switch extension.
- */
 export function create(core: CoreContext): ExtensionInstance {
   const config = getExtensionConfig<ModelSwitchExtConfig>(core, "modelSwitch");
   const modelTool = new ModelTool(core.resolved?.modelRegistry);
 
   const instance: ExtensionInstance & { modelTool: ModelTool } = {
     hooks: {
-      /**
-       * Register the model tool (if enabled).
-       */
       [HOOKS.TOOLS_REGISTER]: async (registry) => {
         if (config.toolEnabled === true) {
           registry.register(MODEL_TOOL_NAME, modelTool);
         }
       },
 
-      /**
-       * Register /model and /models commands (if enabled).
-       */
       [HOOKS.COMMANDS_REGISTER]: async ({ registry }) => {
         if (config.commandEnabled === false) return;
 
-        // /models — list available models
         registry.register(LIST_CMD_NAME, {
           description: "List available models",
           matches: (cmd: string) => cmd.trim() === LIST_CMD_NAME,
           handler: listModels,
         });
 
-        // /model — switch model (with or without a name)
         registry.register(MODEL_CMD_NAME, {
           description: "Switch to a different model",
           matches: (cmd: string) =>
@@ -112,7 +93,6 @@ export function create(core: CoreContext): ExtensionInstance {
     modelTool,
   };
 
-  // Register completion with completion service (if available)
   if (core.completion) {
     core.completion.register(matcher, completion, "model-switch:model");
   }

@@ -6,7 +6,6 @@ import { Workspace, PathEscapeError } from "@utils/workspace.ts";
 import type { CompletionContext } from "@core/completion.ts";
 
 export function matcher(ctx: CompletionContext) {
-  // Match when there's an @ symbol before cursor and we're typing a path after it
   const text = ctx.line.slice(0, ctx.cursorPos);
   const lastSpace = text.lastIndexOf(" ");
   const currentWord = text.slice(lastSpace + 1);
@@ -19,7 +18,6 @@ export async function completion(ctx: CompletionContext) {
   const currentWord = text.slice(lastSpace + 1);
   if (!currentWord.startsWith("@")) return [];
 
-  // Build Workspace from agent config boundaries
   const config = ctx.agent?.config;
   const boundary = (config?.cwdBoundary ?? config?.workspaceRoot ?? cwd()) as string;
   let workspace: Workspace | null = null;
@@ -30,16 +28,13 @@ export async function completion(ctx: CompletionContext) {
     logger.debug(`file-attachment: failed to create Workspace: ${(e as Error).message}`);
   }
 
-  // Extract the path prefix (without @)
   const pathPrefix = currentWord.slice(1);
 
   try {
-    // Determine the directory to search
     let searchDir: string;
     let prefixToMatch: string;
 
     if (isAbsolute(pathPrefix)) {
-      // Validate absolute path stays in workspace
       if (workspace) {
         try {
           searchDir = workspace.resolveSafe(pathPrefix);
@@ -73,7 +68,6 @@ export async function completion(ctx: CompletionContext) {
       prefixToMatch = pathPrefix;
     }
 
-    // List directory contents
     const entries = await fsPromises.readdir(searchDir, {
       withFileTypes: true,
     });
@@ -86,7 +80,6 @@ export async function completion(ctx: CompletionContext) {
         return entry.name.toLowerCase().startsWith(prefixToMatch.toLowerCase());
       })
       .map((entry) => {
-        // Append / to directories
         const name = entry.isDirectory() ? entry.name + "/" : entry.name;
         const fullPath =
           pathPrefix.includes("/") || isAbsolute(pathPrefix)

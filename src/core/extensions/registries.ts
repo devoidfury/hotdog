@@ -1,5 +1,3 @@
-// Registries for agent commands and CLI subcommands.
-
 import { ACTIONS } from "../commands.ts";
 import { HOOKS } from "../hooks.ts";
 import { isPromise } from "../../utils/promise.ts";
@@ -12,9 +10,6 @@ import { CliArgv } from "../config/index.ts";
 
 // ── Parsed Command Type ──────────────────────────────────────────────────────
 
-/**
- * Parsed command object from command text.
- */
 export interface ParsedCommand {
   type: string;
   value: string | null;
@@ -23,7 +18,6 @@ export interface ParsedCommand {
 }
 
 /**
- * Result returned by command handlers.
  * The `action` field is optional for backward compatibility;
  * when omitted, DISPLAY is assumed.
  */
@@ -33,9 +27,6 @@ export interface CommandResult {
   action?: number; // bitflags from ACTIONS
 }
 
-/**
- * Command handler function type.
- */
 export type CommandHandler = (
   agent: Agent,
   value: string | null,
@@ -48,17 +39,10 @@ export interface CommandDefinition {
   description?: string;
   handler?: CommandHandler;
   matches?: (cmd: string) => boolean;
-  /**
-   * Optional completion handler for tab completion of this command's arguments.
-   * Called when the user is typing arguments for this specific command.
-   * The CompletionContext.command will be set to this command's name.
-   */
+  /** The CompletionContext.command will be set to this command's name. */
   completion?: CompletionHandler;
 }
 
-/**
- * Registry for agent-level commands (e.g., /compact, /model, /clear).
- */
 export class AgentCommandRegistry {
   #commands: Map<string, CommandDefinition>;
 
@@ -66,9 +50,6 @@ export class AgentCommandRegistry {
     this.#commands = new Map();
   }
 
-  /**
-   * Register an agent command.
-   */
   register(name: string, definition: CommandDefinition): void {
     if (this.#commands.has(name)) {
       logger.warn(
@@ -95,9 +76,6 @@ export class AgentCommandRegistry {
     return this.#commands;
   }
 
-  /**
-   * Check if a raw command string matches any registered custom command.
-   */
   match(cmd: string | null | undefined): string | null {
     if (!cmd) return null;
     for (const [name, def] of this.#commands) {
@@ -108,9 +86,6 @@ export class AgentCommandRegistry {
     return null;
   }
 
-  /**
-   * Generate help text for all registered commands.
-   */
   generateHelpText(): string {
     const lines: string[] = [];
     for (const [name, def] of this.#commands) {
@@ -121,28 +96,21 @@ export class AgentCommandRegistry {
   }
 
   /**
-   * Dispatch a command through the full resolution chain:
+   * Resolution chain:
    * 1. Custom inline handler (from parseCommand registry match)
    * 2. COMMAND_DISPATCH hook -- extensions can handle specific commands
    * 3. Registered handler from this registry by command type
-   *
-   * @param cmd - Parsed command object
-   * @param agent - Agent instance passed to handlers
-   * @param hooks - Hook system for COMMAND_DISPATCH
-   * @returns Command result, or error result if no handler found
    */
   async dispatch(
     cmd: ParsedCommand,
     agent: Agent,
     hooks: HookSystem,
   ): Promise<CommandResult> {
-    // Custom command with inline handler (from parseCommand registry match)
     if (cmd._customCommand && cmd._handler) {
       const result = await cmd._handler(agent, cmd.value, cmd);
       if (result) return result;
     }
 
-    // COMMAND_DISPATCH hook -- extensions can handle specific commands
     const pipelineResult = await hooks.runHookPipeline<CommandResult>(
       HOOKS.COMMAND_DISPATCH,
       { command: cmd, agent },
@@ -155,7 +123,6 @@ export class AgentCommandRegistry {
       return lastResult;
     }
 
-    // Look up handler from registry by command type
     const registered = this.get(cmd.type);
     if (registered && registered.handler) {
       return await registered.handler(agent, cmd.value, cmd);
@@ -165,9 +132,6 @@ export class AgentCommandRegistry {
   }
 }
 
-/**
- * Create a new agent command registry.
- */
 export function createCommandRegistry(): AgentCommandRegistry {
   return new AgentCommandRegistry();
 }
@@ -188,9 +152,6 @@ export interface CliSubcommandRegistryLike {
   register(name: string, definition: SubcommandDefinition): void;
 }
 
-/**
- * Registry for CLI subcommands (e.g., `hotdog info`, `hotdog sessions`).
- */
 export class CliSubcommandRegistry implements CliSubcommandRegistryLike {
   #commands: Map<string, SubcommandDefinition>;
 
@@ -198,9 +159,6 @@ export class CliSubcommandRegistry implements CliSubcommandRegistryLike {
     this.#commands = new Map();
   }
 
-  /**
-   * Register a CLI subcommand.
-   */
   register(name: string, definition: SubcommandDefinition): void {
     if (this.#commands.has(name)) {
       const existing = this.#commands.get(name)!;
@@ -235,9 +193,6 @@ export class CliSubcommandRegistry implements CliSubcommandRegistryLike {
     return this.#commands;
   }
 
-  /**
-   * Generate help text for all registered subcommands.
-   */
   generateHelpText(): string {
     const lines: string[] = [];
     for (const [name, def] of this.#commands) {
@@ -248,9 +203,6 @@ export class CliSubcommandRegistry implements CliSubcommandRegistryLike {
   }
 }
 
-/**
- * Create a new CLI subcommand registry.
- */
 export function createSubcommandRegistry(): CliSubcommandRegistry {
   return new CliSubcommandRegistry();
 }

@@ -1,9 +1,6 @@
-// Question bridge — resolves question-tool calls for WebSocket-hosted agents.
-//
-// The question tool delegates answer collection to an Input interface.
-// For WS sessions this bridge registers a pending question per session;
-// it resolves when a client answers (C2S.questionAnswer), when the
-// timeout elapses (per questionStrategy), or when the session is
+// Resolves question-tool calls for WebSocket-hosted agents: a pending
+// question per session, resolved when a client answers (C2S.questionAnswer),
+// when the timeout elapses (per questionStrategy), or when the session is
 // cancelled/deleted.
 //
 // Strategy semantics:
@@ -48,7 +45,6 @@ export class WebSocketQuestionBridge {
     this.#hooks = hooks;
   }
 
-  /** Input implementation bound to a session, cached per session. */
   inputFor(sessionId: string): QuestionInput {
     let input = this.#inputs.get(sessionId);
     if (!input) {
@@ -89,7 +85,6 @@ export class WebSocketQuestionBridge {
     });
   }
 
-  /** Resolve the pending question with client-provided answers. */
   answer(sessionId: string, answers: Record<string, unknown>): boolean {
     const entry = this.#pending.get(sessionId);
     if (!entry) return false;
@@ -109,7 +104,6 @@ export class WebSocketQuestionBridge {
     return true;
   }
 
-  /** Cancel any pending question and forget the session's cached input. */
   dropSession(sessionId: string): void {
     this.cancel(sessionId);
     this.#inputs.delete(sessionId);

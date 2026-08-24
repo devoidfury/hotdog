@@ -1,4 +1,3 @@
-// WebSocketChannel — Channel implementation for WebSocket connections.
 // Maps OutputEvent → S2CMessage protocol and sends JSON over WS.
 
 import { Channel, ChannelSessionManager } from "../../core/channel.ts";
@@ -12,9 +11,6 @@ import type { HotdogServerSocket } from "./server.ts";
 
 // ── OUTPUT_EVENT → S2C mapping ──────────────────────────────────────────────
 
-/**
- * Map OUTPUT_EVENT numeric types to S2C string message types.
- */
 const EVENT_TO_PROTOCOL: Record<OutputEventType, S2CType> = {
   [OUTPUT_EVENT.USER_MESSAGE]: S2C.USER_MESSAGE,
   [OUTPUT_EVENT.ASSISTANT_MESSAGE]: S2C.ASSISTANT_MESSAGE,
@@ -32,8 +28,6 @@ const EVENT_TO_PROTOCOL: Record<OutputEventType, S2CType> = {
   [OUTPUT_EVENT.SESSION_STATE]: S2C.SESSION_STATE,
   [OUTPUT_EVENT.SYSTEM_MESSAGE]: S2C.SYSTEM_MESSAGE,
 };
-
-// ── WebSocketChannel ────────────────────────────────────────────────────────
 
 export interface WebSocketChannelOptions {
   sessionManager: ChannelSessionManager;
@@ -62,8 +56,6 @@ export class WebSocketChannel extends Channel {
     // Drain and replay any questions that were emitted while no channels were connected
     this.#replayPendingQuestions();
   }
-
-  // ── Abstract Protocol Methods ───────────────────────────────────────────
 
   protected write(event: OutputEvent): void {
     if (!this.#ready) return;
@@ -135,7 +127,7 @@ export class WebSocketChannel extends Channel {
     try {
       this.#ws.send(JSON.stringify(msg));
     } catch {
-      // WS connection closed — mark as disconnected
+      // Socket closed or send failed — stop writing to it
       this.#ready = false;
     }
   }

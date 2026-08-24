@@ -1,5 +1,3 @@
-// Default LLM-based summarization strategy.
-
 import {
   SUMMARIZATION_SYSTEM_PROMPT,
   SUMMARIZATION_USER_PROMPT_TEMPLATE,
@@ -8,10 +6,6 @@ import { serializeConversation, findFirstKeptIndex, estimateContextTokens } from
 import { CompactionStrategy, Message, CompactionSettings, CompactResult } from "../strategies.ts";
 import { AgentError } from "../../../core/error.ts";
 
-/**
- * Default compaction strategy: LLM-based summarization of older messages.
- * Preserves recent messages verbatim.
- */
 export class SummarizeStrategy extends CompactionStrategy {
   override name = "summarize";
   override description = "LLM-based summarization of older messages. Produces a structured summary preserving context.";

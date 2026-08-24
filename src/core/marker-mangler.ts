@@ -25,11 +25,6 @@ export const CORE_PROTECTED_PREFIXES = [
 const ALIAS_LENGTH = 16;
 const ALIAS_CHARS = "abcdefghijkmnopqrstuvwxyz23456789";
 
-/**
- * Generate a random alias suffix.
- * @private
- * @returns Random alias string.
- */
 function generateAlias(): string {
   let result = "";
   for (let i = 0; i < ALIAS_LENGTH; i++) {
@@ -54,11 +49,6 @@ export function buildAliasPattern(): RegExp {
   );
 }
 
-/**
- * Build the mapping from protected prefixes to random aliases.
- * @private
- * @returns Mapping from original names to aliases.
- */
 function buildMappings(prefixes: readonly string[]): Map<string, string> {
   const seen = new Set<string>();
   const mappings = new Map<string, string>();
@@ -70,12 +60,6 @@ function buildMappings(prefixes: readonly string[]): Map<string, string> {
   return mappings;
 }
 
-/**
- * Escape regex special characters.
- * @private
- * @param str - String to escape.
- * @returns Escaped string.
- */
 function escapeRegex(str: string): string {
   return str.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
@@ -111,38 +95,22 @@ export class MarkerMangler {
     }
   }
 
-  /** The prefixes currently mapped to aliases. */
   protectedPrefixes(): string[] {
     return Array.from(this.#mappings.keys());
   }
 
-  /**
-   * Escape protected marker names in text before sending to the model.
-   * @param text - Text to escape.
-   * @returns Escaped text.
-   */
+  /** Escape protected marker names in text before sending to the model. */
   escape(text: string | null | undefined) {
     if (!text) return text;
     return this.#transform(text, this.#mappings);
   }
 
-  /**
-   * Unescape escaped marker names in text received from the model.
-   * @param text - Text to unescape.
-   * @returns Unescaped text.
-   */
+  /** Unescape escaped marker names in text received from the model. */
   unescape(text: string | null | undefined) {
     if (!text) return text;
     return this.#transform(text, this.#reverse);
   }
 
-  /**
-   * Core transformation logic.
-   * @private
-   * @param text - Text to transform.
-   * @param nameMap - Mapping from original names to aliases.
-   * @returns Transformed text.
-   */
   #transform(text: string, nameMap: Map<string, string>): string {
     let result = text;
 
@@ -185,38 +153,22 @@ export class MarkerMangler {
     return result;
   }
 
-  /**
-   * Escape user input before adding to conversation context.
-   * @param text - User input text.
-   * @returns Escaped text.
-   */
+  /** Escape user input before adding to conversation context. */
   escapeInput(text: string) {
     return this.escape(text);
   }
 
-  /**
-   * Escape tool output before adding to conversation context.
-   * @param text - Tool output text.
-   * @returns Escaped text.
-   */
+  /** Escape tool output before adding to conversation context. */
   escapeToolOutput(text: string) {
     return this.escape(text);
   }
 
-  /**
-   * Unescape model output before displaying to user or writing to files.
-   * @param text - Model output text.
-   * @returns Unescaped text.
-   */
+  /** Unescape model output before displaying to user or writing to files. */
   unescapeOutput(text: string | null | undefined) {
     return this.unescape(text);
   }
 
-  /**
-   * Unescape tool call arguments before executing the tool.
-   * @param text - Tool call arguments.
-   * @returns Unescaped arguments.
-   */
+  /** Unescape tool call arguments before executing the tool. */
   unescapeToolInput(text: string | null | undefined) {
     return this.unescape(text);
   }

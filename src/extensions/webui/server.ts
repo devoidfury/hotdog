@@ -1,5 +1,3 @@
-// WebUI server — UI over HTTP with WebSockets.
-
 import { createWsServer, type HotdogServerSocket } from "../websocket/server.ts";
 import { createAuthMiddleware, apiKeyEquals } from "../websocket/auth.ts";
 import { logger } from "../../core/logger.ts";
@@ -12,8 +10,6 @@ import webuiFrontend from "./ui/index.html";
 import { ExtensionError } from "../../core/error.ts";
 import { ProfileManager, type ProfileDef } from "../../core/config/index.ts";
 import { BunRequest } from "bun";
-
-// ── Types ───────────────────────────────────────────────────────────────────
 
 interface WebuiWsData {
   token: string;
@@ -34,9 +30,6 @@ interface WebuiServerResult {
   authMiddleware: ReturnType<typeof createAuthMiddleware>;
 }
 
-/**
- * Create and start the webui server.
- */
 export async function createWebuiServer(
   core: CoreContext,
   config: WebuiConfig,

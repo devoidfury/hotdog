@@ -1,7 +1,3 @@
-// MCP client module — Model Context Protocol support.
-// Provides a minimal MCP client connecting to servers via stdio or HTTP,
-// discovering tools, and exposing them as native agent tools.
-
 import { HOOKS } from "@core/hooks.ts";
 import { logger } from "@core/logger.ts";
 import { formatError } from "@core/error.ts";
@@ -9,13 +5,10 @@ import { McpConnection } from "./connection.ts";
 import { McpTool } from "./tools.ts";
 import { type CoreContext, type ExtensionInstance } from "@core/extensions/types.ts";
 
-// Re-exports for external use
-export { McpClient } from "./client.ts";
+export { McpClient, McpError } from "./client.ts";
 export { McpConnection, McpConnectionHandle } from "./connection.ts";
 export { McpTool } from "./tools.ts";
-export { McpError } from "./client.ts";
 
-// Type helpers
 export {
   jsonRpcRequest,
   jsonRpcNotification,
@@ -40,30 +33,20 @@ interface McpServerConfig {
   blacklistTools?: string[];
 }
 
-/**
- * Create the MCP client extension.
- * Connects to configured MCP servers and registers their tools.
- * @param core - The core context.
- * @param Connection - Optional McpConnection class override for testing. Defaults to the real McpConnection.
- */
+/** @param Connection - Optional McpConnection class override for testing. */
 export function create(core: CoreContext, Connection = McpConnection): ExtensionInstance | null {
   // mcpServers is an array, not an object — read it directly from core.config
   const mcpServers = (core.config?.mcpServers as McpServerConfig[]) || [];
   const enabledServers = mcpServers.filter((s) => s.enabled !== false);
 
-  // skip enabling anything in the extension when in sandbox mode or when no mcp configured
   if (core.config.sandboxMode || enabledServers.length === 0) {
     return null;
   }
 
-  // Track connections for cleanup
   const connections: McpConnection[] = [];
 
   return {
     hooks: {
-      /**
-       * Register MCP tools from all connected servers.
-       */
       [HOOKS.TOOLS_REGISTER]: async (registry) => {
         for (const server of enabledServers) {
           try {
@@ -71,7 +54,6 @@ export function create(core: CoreContext, Connection = McpConnection): Extension
             if (!conn) continue;
             connections.push(conn);
 
-            // Register each discovered tool (skip blacklisted)
             const blacklist = server.blacklistTools || [];
             for (const toolDef of conn.tools) {
               const def = toolDef as {
@@ -90,37 +72,27 @@ export function create(core: CoreContext, Connection = McpConnection): Extension
         }
       },
 
-      /**
-       * Shutdown all MCP connections on cleanup.
-       */
       [HOOKS.SHUTDOWN_CLEANUP]: async () => {
         await _shutdownAll(connections);
       },
     },
 
-    // Expose for external use
     connections,
 
-    /**
-     * Shutdown all MCP connections.
-     */
     async shutdown(): Promise<void> {
       await _shutdownAll(connections);
     },
   };
 }
 
-/** Connect to an MCP server based on its configuration. */
 async function _connectServer(
   server: McpServerConfig,
   Connection: typeof McpConnection,
 ): Promise<McpConnection | null> {
   try {
     if (server.url) {
-      // HTTP transport
       return await Connection.connectHttp(server.name, server.url, server.headers || {});
     } else if (server.command) {
-      // Stdio transport
       return await Connection.connectStdio(server.name, server.command, server.args || [], server.env || {});
     }
     return null;
@@ -130,7 +102,6 @@ async function _connectServer(
   }
 }
 
-/** Shutdown all MCP connections. */
 async function _shutdownAll(connections: McpConnection[]): Promise<void> {
   for (const conn of connections) {
     try {

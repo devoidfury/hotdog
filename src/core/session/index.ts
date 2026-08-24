@@ -46,11 +46,9 @@ export interface AgentLike {
   resetCancel(): void;
   executeCommand(cmd: ParsedCommand): Promise<CommandResult | null>;
   addMessage(msg: import("../context/message.ts").Message): void;
-  // Task agent support
   abortSignal?: AbortSignal | null;
   notifyCompletion?(result: string): void;
   followQueue?: string[];
-  // Optional properties for completion handlers and session info
   commandRegistry?: CommandRegistryLike | null;
   modelRegistry?: Record<string, ModelConfig> | null;
   config?: Record<string, unknown> | null;

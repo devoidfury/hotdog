@@ -1,6 +1,4 @@
-// Built-in command handlers for the agent.
-// These are extracted from agent.ts so that agent.ts only does generic dispatch.
-// Each handler is a function (agent, value, cmd) => { content?, error? }.
+// Extracted from agent.ts so that agent.ts only does generic dispatch.
 
 import { Command, ACTIONS } from "./commands.ts";
 import type { CommandHandler, CommandResult } from "./extensions/registries.ts";
@@ -20,12 +18,6 @@ export type { CommandHandler } from "./extensions/registries.ts";
 
 // ── Command Handlers ─────────────────────────────────────────────────────────
 
-/**
- * Handler for /clear — clears context and resets system prompt.
- *
- * @param agent - Agent instance.
- * @param _value - Optional value (ignored).
- */
 export async function handleClear(
   agent: Agent,
   _value?: string | null,
@@ -50,11 +42,6 @@ export function handleHelp(): CommandResult {
   return { action: ACTIONS.DISPLAY, content: "Help (use /help for commands)" };
 }
 
-/**
- * Handler for /tokens — shows accumulated token usage stats and last-reported values.
- *
- * @param agent - Agent instance.
- */
 export function handleTokens(agent: Agent): CommandResult {
   const u = agent.context.getTokenUsage();
   if (u.turns === 0) {
@@ -91,11 +78,6 @@ export function handleTokens(agent: Agent): CommandResult {
   return { action: ACTIONS.DISPLAY, content: lines.join("\n") };
 }
 
-/**
- * Handler for /tools — toggles tool call display.
- *
- * @param agent - Agent instance.
- */
 export function handleTools(agent: Agent): CommandResult {
   agent.hideTools = !agent.hideTools;
   agent.emitOutput("session_state", {
@@ -108,11 +90,6 @@ export function handleTools(agent: Agent): CommandResult {
   };
 }
 
-/**
- * Handler for /thinking — toggles thinking display.
- *
- * @param agent - Agent instance.
- */
 export function handleThinking(agent: Agent): CommandResult {
   agent.hideThinking = !agent.hideThinking;
   agent.emitOutput("session_state", {
@@ -125,11 +102,6 @@ export function handleThinking(agent: Agent): CommandResult {
   };
 }
 
-/**
- * Handler for /regenerate — regenerates the system prompt.
- *
- * @param agent - Agent instance.
- */
 export async function handleRegenerate(
   agent: Agent,
 ): Promise<CommandResult> {
@@ -138,12 +110,6 @@ export async function handleRegenerate(
   return { action: ACTIONS.DISPLAY, content: "System prompt regenerated." };
 }
 
-/**
- * Handler for /reasoning — sets the reasoning effort level.
- *
- * @param agent - Agent instance.
- * @param value - Reasoning effort level ("none", "minimal", "low", "medium", "high", "xhigh", "max", "unset").
- */
 export function handleReasoning(
   agent: Agent,
   value?: string | null,
@@ -179,10 +145,6 @@ export function handleReasoning(
   };
 }
 
-/**
- * Map of Command enum values to their handler functions.
- * Used to register built-in commands with the agent's CommandRegistry.
- */
 export const CORE_COMMAND_HANDLERS: Record<string, CommandHandlerDef> = {
   [Command.Clear]: { handler: handleClear, description: "Clear context" },
   [Command.Quit]: { handler: handleQuit, description: "Exit" },

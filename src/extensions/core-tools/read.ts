@@ -1,6 +1,3 @@
-// Read tool — read content from a file.
-// Supports text files (line-based) and image files (jpeg, png, webp, base64).
-
 import fs from "node:fs/promises";
 import path from "node:path";
 import {
@@ -18,9 +15,6 @@ import { AssistantRetryableError } from "../../core/error.ts";
 import { DEFAULT_MAX_IMAGE_SIZE } from "./defaults.ts";
 import { ToolContext } from "../../core/extensions/types.ts";
 
-/**
- * Supported image extensions mapped to MIME types.
- */
 const IMAGE_EXTENSIONS: Record<string, string> = {
   ".jpg": "image/jpeg",
   ".jpeg": "image/jpeg",
@@ -113,7 +107,6 @@ export class ReadTool {
       if (workspace) {
         resolved = workspace.resolveSafe(filePath);
       } else {
-        // Fallback: resolve against workspaceRoot or current dir
         resolved = path.resolve(workspaceRoot || ".", filePath);
       }
     } catch (e: unknown) {
@@ -123,7 +116,6 @@ export class ReadTool {
       return ToolResult.err(`Error resolving path: ${(e as Error).message}`);
     }
 
-    // Check if it's a directory
     try {
       const stat = await fs.stat(resolved);
       if (stat.isDirectory()) {
@@ -136,10 +128,9 @@ export class ReadTool {
         });
       }
     } catch {
-      // stat failed — continue to file-not-found handling below
+      // stat failed — fall through to file-not-found handling below
     }
 
-    // Check if file exists
     try {
       await fs.access(resolved);
     } catch {
@@ -149,7 +140,6 @@ export class ReadTool {
       );
     }
 
-    // Check if it's an image file
     const mimeType = getImageMimeType(resolved);
     if (mimeType) {
       return await readImage(resolved, mimeType, filePath, this.maxImageSize);
@@ -159,11 +149,7 @@ export class ReadTool {
   }
 }
 
-/**
- * Parse and validate read tool arguments.
- */
 function parseArgs(input: string | Record<string, unknown> | null, defaultLimit: number): ReadArgs | null {
-  // Empty input → defaults
   if (!input || (typeof input === "string" && input.trim().length === 0)) {
     return {
       path: null,
@@ -174,7 +160,7 @@ function parseArgs(input: string | Record<string, unknown> | null, defaultLimit:
 
   const json = parseToolInput(input);
   if (!json) {
-    return null; // Invalid JSON — error
+    return null; // null signals a parse failure
   }
 
   let filePath = json.path as string | undefined;
@@ -194,9 +180,6 @@ function parseArgs(input: string | Record<string, unknown> | null, defaultLimit:
   return { path: filePath, limit, offset };
 }
 
-/**
- * Read file by lines with offset/limit pagination.
- */
 async function readLines(filePath: string, offset: number, limit: number): Promise<ToolResult> {
   try {
     const content = await fs.readFile(filePath, "utf-8");
@@ -230,9 +213,6 @@ async function readLines(filePath: string, offset: number, limit: number): Promi
   }
 }
 
-/**
- * List directory contents at depth 1, sorted.
- */
 async function listDirectoryDepth1(dirPath: string): Promise<string> {
   try {
     const entries = await fs.readdir(dirPath, { withFileTypes: true });
@@ -248,21 +228,13 @@ async function listDirectoryDepth1(dirPath: string): Promise<string> {
   }
 }
 
-/**
- * Get MIME type for image files based on extension.
- * Returns null if not a recognized image extension.
- */
 function getImageMimeType(filePath: string): string | null {
   const ext = path.extname(filePath).toLowerCase();
   return IMAGE_EXTENSIONS[ext] ?? null;
 }
 
-/**
- * Read an image file and return it as a ToolResult with images.
- */
 async function readImage(filePath: string, mimeType: string, originalPath: string, maxImageSize: number): Promise<ToolResult> {
   try {
-    // Check file size
     const stats = await fs.stat(filePath);
     if (stats.size > maxImageSize) {
       return ToolResult.err(
@@ -270,11 +242,10 @@ async function readImage(filePath: string, mimeType: string, originalPath: strin
       );
     }
 
-    // Read file as binary and convert to base64
     const buffer = await fs.readFile(filePath);
     const base64 = buffer.toString("base64");
 
-    // For .base64 files, the content is already base64 text — read as text
+    // .base64 files are already base64 text, so read them as text
     let data: string;
     if (mimeType === "application/octet-stream") {
       const text = (await fs.readFile(filePath, "utf-8")).trim();

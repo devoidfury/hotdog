@@ -117,8 +117,6 @@ export class MessageBus {
     return this.#sessionManager.getAgent();
   }
 
-  // Test-only accessors
-
   /** @internal */
   get queue(): string[] {
     return this.#queue.map((item) => contentToText(item.content));

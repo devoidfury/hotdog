@@ -4,13 +4,6 @@
 // Calls made before `initializeLogger()` are buffered and emitted once initialized.
 // Once initialized, emits to the "log" hook. A default handler writes to stderr.
 // Alternate implementations register their own "log" hook handler.
-//
-// Usage:
-//   import { logger } from "./core/logger.ts";
-//   logger.debug("Starting session", { sessionId: "abc123" });
-//   logger.info("Connected to provider");
-//   logger.warn("Skill description exceeds 1024 chars");
-//   logger.error("Failed to connect to server", { server: "my-server" });
 
 // ── Log Level Constants ─────────────────────────────────────────────────────
 
@@ -23,9 +16,6 @@ export interface LogEvent {
   metadata?: Record<string, unknown>;
 }
 
-/**
- * Log levels with numeric ordering for comparison.
- */
 export const LOG_LEVELS: Record<LogLevel, number> = {
   debug: 0,
   info: 1,
@@ -33,10 +23,6 @@ export const LOG_LEVELS: Record<LogLevel, number> = {
   error: 3,
 };
 
-/**
- * Resolve a log level from env var or default.
- * Env var HOTDOG_LOG_LEVEL takes precedence.
- */
 export function resolveLogLevel(configLevel?: string): LogLevel {
   const envLevel = process.env.HOTDOG_LOG_LEVEL?.toLowerCase();
   if (envLevel && envLevel in LOG_LEVELS) return envLevel as LogLevel;
@@ -44,10 +30,6 @@ export function resolveLogLevel(configLevel?: string): LogLevel {
   return "info";
 }
 
-/**
- * Resolve log output target from env var or default.
- * Env var HOTDOG_LOG_TARGET takes precedence.
- */
 export function resolveLogTarget(configTarget?: string): LogTarget {
   const envTarget = process.env.HOTDOG_LOG_TARGET?.toLowerCase();
   if (envTarget && ["stderr", "stdout", "none"].includes(envTarget))
@@ -99,12 +81,11 @@ export function initializeLogger({
   minLevel = "warn",
   target = "stderr",
 }: InitializeLoggerOptions): void {
-  if (_initialized) return; // Already initialized
+  if (_initialized) return;
   _hooks = hooks;
   _minLevelNum = LOG_LEVELS[minLevel] ?? LOG_LEVELS.warn;
   _initialized = true;
 
-  // Register default handler if target is not "none"
   if (target !== "none") {
     const stream = target === "stdout" ? process.stdout : process.stderr;
     hooks.on("log", (data) => {
@@ -125,9 +106,6 @@ export function initializeLogger({
   _preloadQueue = [];
 }
 
-/**
- * Internal emit — checks initialization and level before emitting to hooks.
- */
 function _emit(
   level: LogLevel,
   message: string,
@@ -153,10 +131,6 @@ export interface Logger {
   error(message: string, metadata?: Record<string, unknown>): void;
 }
 
-/**
- * Singleton logger instance.
- * Safe to import and use from any module. Calls before initialization are buffered and emitted once initialized.
- */
 export const logger: Logger = {
   debug: (message, metadata) => _emit("debug", message, metadata),
   info: (message, metadata) => _emit("info", message, metadata),

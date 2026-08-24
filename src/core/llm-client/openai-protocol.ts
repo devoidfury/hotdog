@@ -22,7 +22,6 @@ export const openaiProtocol: LlmProtocol = {
 
   buildRequest(messages, modelConfig, toolDefs, stream, ctx) {
     const modelName = modelConfig.name.split("/").pop() || modelConfig.name;
-    // Serialize via the WireFormat layer with the session mangler.
     const wireMessages = wireFormatFor(modelConfig).serialize(messages, ctx.mangler);
 
     const body: Record<string, unknown> = {
@@ -87,9 +86,6 @@ export const openaiProtocol: LlmProtocol = {
   },
 };
 
-/**
- * Parse a single SSE data chunk into StreamEvents.
- */
 function* parseStreamData(
   data: Record<string, unknown>,
   mangler: ProtocolContext["mangler"],

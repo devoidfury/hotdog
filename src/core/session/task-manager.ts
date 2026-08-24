@@ -81,7 +81,6 @@ export interface TaskManagerRequiredOptions {
   taskRole: string;
 }
 
-// Task agents are full Agent instances, silent to the UI, run in the background.
 export class TaskManager {
   #buildAgent: (config: Record<string, unknown>) => Promise<AgentLike>;
   #llmClient: LlmClient;

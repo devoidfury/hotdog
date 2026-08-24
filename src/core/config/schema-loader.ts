@@ -13,7 +13,6 @@ import type { ProviderDef } from "./providers.ts";
 import { ProfileDef } from "./profiles.ts";
 import { CliFlagDef } from "./index.ts";
 
-// Re-export shared schema types
 export * from "./schema-types.ts";
 
 const CAST_BUILTINS: Record<string, CastFn> = {
@@ -89,12 +88,10 @@ export function resolveCompute(compute: unknown): ComputeFn | null {
   let name: string | undefined;
   let arg: string | undefined;
 
-  // Try name('arg') form first
   const parenMatch = compute.match(/^(\w+)\('(.*)'\)$/);
   if (parenMatch) {
     [, name, arg] = parenMatch;
   } else {
-    // Try name:arg form
     const colonMatch = compute.match(/^(\w+):(.+)$/);
     if (colonMatch) {
       [, name, arg] = colonMatch;

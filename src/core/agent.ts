@@ -1,5 +1,3 @@
-// Agent - the core AI agent with tool calling support.
-
 import { ParsedCommand } from "./commands.ts";
 import { CORE_COMMAND_HANDLERS } from "./command-handlers.ts";
 import { findModelEntry, resolveModelConfig, type ModelConfig } from "./config/providers.ts";
@@ -86,7 +84,6 @@ export interface AgentOptions {
   enqueueCallback?: (content: string | Array<Record<string, unknown>>, opts?: { source?: MessageSource }) => void;
 }
 
-/** Runs the LLM loop and delegates behavior to hooks. */
 export class Agent implements AgentLike {
   hooks: HookSystem;
   #toolRegistry: ToolRegistry;
@@ -490,7 +487,6 @@ export class Agent implements AgentLike {
     return this.context.buildForLlmCall();
   }
 
-  /** Ensure system prompt is built and cached. */
   async ensureSystemPrompt(): Promise<void> {
     await this.context.ensureSystemPrompt(this.hooks, this, {
       role: this.role,

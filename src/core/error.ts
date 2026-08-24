@@ -1,4 +1,3 @@
-// Centralized error handling utilities.
 //
 // Provides proper error classes across the codebase so that call sites
 // can identify error types by instanceof / .type instead of parsing
@@ -22,10 +21,6 @@ export type ErrorType =
   | "extension"
   | "parse";
 
-/**
- * Base application error with a type tag.
- * All domain error classes extend this.
- */
 export class AppError extends Error {
   type: ErrorType;
 
@@ -37,9 +32,6 @@ export class AppError extends Error {
 
 // ── Domain-specific error classes ───────────────────────────────────────
 
-/**
- * CLI argument parsing errors.
- */
 export class CliError extends AppError {
   constructor(message: string) {
     super(message, "cli");
@@ -58,9 +50,6 @@ export class CliError extends AppError {
   }
 }
 
-/**
- * Extension lifecycle errors (circular dependencies, registration, shutdown).
- */
 export class ExtensionError extends AppError {
   constructor(message: string) {
     super(message, "extension");
@@ -83,9 +72,6 @@ export class ExtensionError extends AppError {
   }
 }
 
-/**
- * Tool execution errors (file operations, missing arguments, etc.).
- */
 export class ToolError extends AppError {
   constructor(message: string) {
     super(message, "tool");
@@ -155,9 +141,6 @@ export class TransientError extends ToolError {
   }
 }
 
-/**
- * Agent runtime errors (max iterations, summarization failures).
- */
 export class AgentError extends AppError {
   constructor(message: string) {
     super(message, "agent");
@@ -176,9 +159,6 @@ export class AgentError extends AppError {
   }
 }
 
-/**
- * Configuration loading errors.
- */
 export class ConfigError extends AppError {
   constructor(message: string) {
     super(message, "config");
@@ -199,9 +179,6 @@ export class ConfigError extends AppError {
   }
 }
 
-/**
- * Parsing errors (frontmatter, JSON, etc.).
- */
 export class ParseError extends AppError {
   constructor(message: string) {
     super(message, "parse");
@@ -218,9 +195,6 @@ export class ParseError extends AppError {
   }
 }
 
-/**
- * LLM client errors (HTTP, API, timeout, cancellation, invalid response).
- */
 export class LlmError extends AppError {
   constructor(message: string, type: ErrorType = "unknown") {
     super(message, type);
@@ -266,9 +240,6 @@ export const EXPECTED_ERROR_TYPES: ReadonlySet<ErrorType> = new Set([
   "config",
 ]);
 
-/**
- * Check if an error is expected (operational) vs unexpected (bug).
- */
 export function isExpectedError(err: unknown): boolean {
   if (!(err instanceof Error)) return false;
   const type = (err as AppError).type || "";
@@ -277,11 +248,6 @@ export function isExpectedError(err: unknown): boolean {
   return false;
 }
 
-/**
- * Format an error for user display.
- * Expected errors: message only.
- * Unexpected errors: message + stack for debugging.
- */
 export function formatError(err: unknown): string {
   if (err == null) {
     return String(err);
@@ -296,8 +262,8 @@ export function formatError(err: unknown): string {
 }
 
 /**
- * Wrap an operation with context and centralized error handling.
- * Logs unexpected errors with full stack; expected errors get message only.
+ * Wrap an operation, tagging unexpected errors with the context label.
+ * Expected errors pass through unwrapped so callers can classify them.
  *
  * Usage:
  *   await withContext("building agent", async () => {

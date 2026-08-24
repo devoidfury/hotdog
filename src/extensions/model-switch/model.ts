@@ -1,5 +1,3 @@
-// Model tool — switch the AI model at runtime.
-
 import {
   toolDef,
   param,

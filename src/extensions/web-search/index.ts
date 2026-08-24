@@ -1,5 +1,3 @@
-// Web search tool — search the internet via DuckDuckGo, Brave, Tavily, or SearXNG.
-
 import { ToolError, TransientError } from "@core/error.ts";
 import {
   toolDef,
@@ -50,10 +48,7 @@ interface ToolInput {
 
 // ── Provider Implementations ────────────────────────────────────────────────
 
-/**
- * Search DuckDuckGo using HTMLRewriter for proper DOM parsing.
- * No API key required.
- */
+// No API key required; results are parsed from DDG's HTML endpoint.
 async function searchDuckDuckGo(
   query: string,
   maxResults: number,
@@ -75,7 +70,6 @@ async function searchDuckDuckGo(
   let currentResult: SearchResult | null = null;
 
   const rewriter = new HTMLRewriter()
-    // Extract result links: <a class="result__a" href="...">Title</a>
     .on("a.result__a", {
       element(el) {
         const href = el.getAttribute("href");
@@ -93,7 +87,6 @@ async function searchDuckDuckGo(
         }
       },
     })
-    // Extract result snippets: <a class="result__snippet">...</a>
     .on("a.result__snippet", {
       text(text) {
         if (currentResult && text.text.trim()) {
@@ -103,10 +96,9 @@ async function searchDuckDuckGo(
       },
     });
 
-  // Process the streaming response — discard the blob, we collected results in handlers
+  // .blob() consumes the stream; the handlers above already collected the results
   await rewriter.transform(response).blob();
 
-  // Trim to maxResults
   const trimmed = results.slice(0, maxResults);
 
   if (trimmed.length === 0) {
@@ -131,10 +123,6 @@ function decodeDdgUrl(raw: string): string {
   }
 }
 
-/**
- * Search via Brave Search API.
- * Requires BRAVE_API_KEY.
- */
 async function searchBrave(
   query: string,
   maxResults: number,
@@ -182,10 +170,6 @@ async function searchBrave(
   return formatResults(results, query, "Brave");
 }
 
-/**
- * Search via Tavily API.
- * Requires TAVILY_API_KEY.
- */
 async function searchTavily(
   query: string,
   maxResults: number,
@@ -238,10 +222,6 @@ async function searchTavily(
   return formatResults(results, query, "Tavily");
 }
 
-/**
- * Search via a self-hosted SearXNG instance.
- * Requires SEARXNG_INSTANCE_URL.
- */
 async function searchSearXNG(
   query: string,
   maxResults: number,
@@ -432,9 +412,6 @@ export class WebSearchTool {
   }
 }
 
-/**
- * Create the web-search extension.
- */
 export function create(core: CoreContext): ExtensionInstance {
   const config = getExtensionConfig<WebSearchConfig>(core, "webSearch");
 

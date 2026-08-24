@@ -1,4 +1,3 @@
-/** Provider and model registry. */
 import fsPromises from "node:fs/promises";
 import path from "node:path";
 import { cwd } from "node:process";
@@ -25,9 +24,6 @@ export interface ModelConfig {
   /** Server chat-template control tokens to mangle in message content. */
   controlTokens?: string[];
   tags: string[];
-  /**
-   * Model capabilities (e.g., vision, tool use).
-   */
   capabilities?: {
     vision?: boolean;
     [key: string]: boolean | undefined;
@@ -52,7 +48,6 @@ export interface ProviderModelEntry {
   toolFormat?: string;
   controlTokens?: string[];
   tags?: string[];
-  /** Model capabilities (e.g., vision, tool use). */
   capabilities?: {
     vision?: boolean;
     [key: string]: boolean | undefined;
@@ -104,9 +99,6 @@ interface LlamaSwapModelsResponse {
   data: LlamaSwapModel[];
 }
 
-/**
- * Parse a /v1/models response into ProviderModelEntry[].
- */
 function parseModelsResponse(json: LlamaSwapModelsResponse): ProviderModelEntry[] {
   const entries: ProviderModelEntry[] = [];
 
@@ -137,11 +129,6 @@ function parseModelsResponse(json: LlamaSwapModelsResponse): ProviderModelEntry[
   return entries;
 }
 
-/**
- * Fetch models from a provider's /v1/models endpoint.
- * Falls back to globalBaseUrl/globalApiKey when the provider has no explicit values.
- * Times out after 5 seconds.
- */
 async function fetchRemoteModels(
   provider: ProviderDef,
   globalBaseUrl?: string,
@@ -179,9 +166,6 @@ async function fetchRemoteModels(
   }
 }
 
-/**
- * Build a model registry from config providers.
- */
 export async function buildModelRegistry(
   config: { providers?: ProviderDef[]; baseUrl?: string; apiKey?: string },
   contextLimit: number,
@@ -199,7 +183,6 @@ export async function buildModelRegistry(
       for (const rm of remoteModels) {
         const local = localByName.get(rm.name);
         if (local) {
-          // Merge provider properties: local values take priority, remote fills gaps
           localByName.set(rm.name, {
             ...rm,
             ...local,
@@ -227,7 +210,6 @@ export async function buildModelRegistry(
         maxToolDifficulty: modelEntry.maxToolDifficulty,
       };
     }
-    // Also add provider-level models (models defined at provider level)
     if (models.length === 0 && provider.defaultModel) {
       registry[`${provider.name}/${provider.defaultModel}`] = {
         name: `${provider.name}/${provider.defaultModel}`,
@@ -246,9 +228,6 @@ export async function buildModelRegistry(
   return registry;
 }
 
-/**
- * Resolve the active provider from CLI args and config.
- */
 export function resolveProvider(
   cli: { provider?: string },
   config: { defaultProvider?: string; providers?: ProviderDef[] },
@@ -282,9 +261,6 @@ export function findModelEntry<T extends Partial<ModelConfig>>(
   return entry;
 }
 
-/**
- * Resolve model config from the registry with runtime overrides.
- */
 export function resolveModelConfig(
   modelName: string,
   modelRegistry: Record<
@@ -338,12 +314,10 @@ export function resolveModelConfig(
 
 let cachedSystemPromptTemplate: string | null = null;
 
-/** Reset the cached system prompt template */
 export function resetSystemPromptCache(): void {
   cachedSystemPromptTemplate = null;
 }
 
-/** Initialize the system prompt template from disk. */
 export async function initSystemPromptTemplate(
   templatePath?: string,
   cliConfigDir?: string,

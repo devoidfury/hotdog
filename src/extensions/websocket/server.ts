@@ -579,7 +579,7 @@ async function routeMessage(
   // upgrade (URL ?token=) or by a successful AUTH message. This makes the
   // gate hold even for UIs that skip token checks on the HTTP upgrade.
   if (authMiddleware && !ws.authToken && msg.type !== C2S.AUTH) {
-    ws.send(JSON.stringify({ type: "authError", message: "Authentication required" }));
+    ws.send(JSON.stringify({ type: S2C.AUTH_ERROR, message: "Authentication required" }));
     return;
   }
 
@@ -601,7 +601,7 @@ async function routeMessage(
           }
         } else {
           ws.send(
-            JSON.stringify({ type: "authError", message: "Invalid token" }),
+            JSON.stringify({ type: S2C.AUTH_ERROR, message: "Invalid token" }),
           );
         }
       }
@@ -625,7 +625,7 @@ async function routeMessage(
           ws.activeChannel = channel;
 
           const sessionCreatedMsg = {
-            type: "sessionCreated",
+            type: S2C.SESSION_CREATED,
             sessionId,
             profile: agent.profileName || "default",
             currentModel: agent.model,
@@ -636,7 +636,7 @@ async function routeMessage(
         })
         .catch((err: unknown) => {
           SessionRegistry.sendSafe(ws, {
-            type: "error",
+            type: S2C.ERROR,
             message: err instanceof Error ? err.message : String(err),
           });
         });
@@ -647,7 +647,7 @@ async function routeMessage(
       if (msg.sessionId) {
         registry.delete(msg.sessionId as string);
         const sessionDeletedMsg = {
-          type: "sessionDeleted",
+          type: S2C.SESSION_DELETED,
           sessionId: msg.sessionId,
         };
         ws.send(JSON.stringify(sessionDeletedMsg));
@@ -702,7 +702,7 @@ async function routeMessage(
         } else {
           ws.send(
             JSON.stringify({
-              type: "error",
+              type: S2C.ERROR,
               message: result.error || "Profile switch failed",
             }),
           );
@@ -798,7 +798,7 @@ async function routeMessage(
         } else {
           ws.send(
             JSON.stringify({
-              type: "error",
+              type: S2C.ERROR,
               message: `No pending question for session ${sid}`,
             }),
           );
@@ -832,7 +832,7 @@ async function routeMessage(
         })
         .catch((err: unknown) => {
           SessionRegistry.sendSafe(ws, {
-            type: "error",
+            type: S2C.ERROR,
             message: err instanceof Error ? err.message : String(err),
           });
         });
@@ -852,7 +852,7 @@ async function routeMessage(
             ws.activeChannel = channel;
 
             const sessionCreatedMsg = {
-              type: "sessionCreated",
+              type: S2C.SESSION_CREATED,
               sessionId,
               profile: agent.profileName || "default",
               currentModel: agent.model,
@@ -865,7 +865,7 @@ async function routeMessage(
           })
           .catch((err: unknown) => {
             SessionRegistry.sendSafe(ws, {
-              type: "error",
+              type: S2C.ERROR,
               message: err instanceof Error ? err.message : String(err),
             });
           });
@@ -885,7 +885,7 @@ async function routeMessage(
           })
           .catch((err: unknown) => {
             SessionRegistry.sendSafe(ws, {
-              type: "error",
+              type: S2C.ERROR,
               message: err instanceof Error ? err.message : String(err),
             });
           });
@@ -899,20 +899,20 @@ async function routeMessage(
           .then((deleted) => {
             if (deleted) {
               SessionRegistry.sendSafe(ws, {
-                type: "logDeleted",
+                type: S2C.LOG_DELETED,
                 logId: msg.logId,
               });
-              registry.broadcast({ type: "logDeleted", logId: msg.logId });
+              registry.broadcast({ type: S2C.LOG_DELETED, logId: msg.logId });
             } else {
               SessionRegistry.sendSafe(ws, {
-                type: "error",
+                type: S2C.ERROR,
                 message: `Log ${msg.logId} not found`,
               });
             }
           })
           .catch((err: unknown) => {
             SessionRegistry.sendSafe(ws, {
-              type: "error",
+              type: S2C.ERROR,
               message: err instanceof Error ? err.message : String(err),
             });
           });
@@ -923,7 +923,7 @@ async function routeMessage(
     default: {
       ws.send(
         JSON.stringify({
-          type: "error",
+          type: S2C.ERROR,
           message: `Unknown message type: ${(msg as Record<string, unknown>).type}`,
         }),
       );
@@ -969,7 +969,7 @@ function attachToMostRecentSession(
 
   const agent = session.agent as Agent;
   SessionRegistry.sendSafe(ws, {
-    type: "sessionCreated",
+    type: S2C.SESSION_CREATED,
     sessionId,
     profile: agent?.profileName || mostRecent.profile || "default",
     currentModel: agent?.model || mostRecent.model || "?",
@@ -999,7 +999,7 @@ function createAndAttachSession(
       ws.activeChannel = channel;
 
       SessionRegistry.sendSafe(ws, {
-        type: "sessionCreated",
+        type: S2C.SESSION_CREATED,
         sessionId,
         profile: agent.profileName || "default",
         currentModel: agent.model,
@@ -1008,7 +1008,7 @@ function createAndAttachSession(
     })
     .catch((err: unknown) => {
       SessionRegistry.sendSafe(ws, {
-        type: "error",
+        type: S2C.ERROR,
         message: err instanceof Error ? err.message : String(err),
       });
       try {
@@ -1150,7 +1150,7 @@ export function createWsServer(
       if (!auth.validateToken(token)) {
         ws.send(
           JSON.stringify({
-            type: "authError",
+            type: S2C.AUTH_ERROR,
             message: "Invalid or expired token",
           }),
         );
@@ -1161,7 +1161,7 @@ export function createWsServer(
     } else if (auth && !token) {
       // Socket stays open so the client can still authenticate via a
       // protocol AUTH message; routeMessage() gates everything else.
-      ws.send(JSON.stringify({ type: "authRequired" }));
+      ws.send(JSON.stringify({ type: S2C.AUTH_REQUIRED }));
       return;
     }
 
@@ -1184,7 +1184,7 @@ export function createWsServer(
       ) as C2SMessage;
     } catch {
       try {
-        ws.send(JSON.stringify({ type: "error", message: "Invalid JSON" }));
+        ws.send(JSON.stringify({ type: S2C.ERROR, message: "Invalid JSON" }));
       } catch {}
       return;
     }
@@ -1192,7 +1192,7 @@ export function createWsServer(
     if (!msg.type) {
       try {
         ws.send(
-          JSON.stringify({ type: "error", message: "Message type required" }),
+          JSON.stringify({ type: S2C.ERROR, message: "Message type required" }),
         );
       } catch {}
       return;

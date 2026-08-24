@@ -1,14 +1,7 @@
-// Config Registry — manages extension-registered CLI flags and config params.
-
 import { ConfigError } from "../error.ts";
 import { validate } from "../../utils/json-schema.ts";
 import type { SchemaLayer, CliFlagDef } from "../config/schema-types.ts";
 
-import path from "node:path";
-import { fileURLToPath } from "node:url";
-
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const ROOT_DIR = path.resolve(__dirname, "../../");
 
 export interface ConfigParamDef {
   key: string;
@@ -18,17 +11,11 @@ export interface ConfigParamDef {
   layers?: SchemaLayer[];
 }
 
-/**
- * Registry for extension-registered CLI flags and config parameters.
- */
 export class ConfigRegistry {
   #cliFlags: CliFlagDef[] = [];
   #configParams: ConfigParamDef[] = [];
   #configSchemas: Map<string, Record<string, unknown>> | null = null;
 
-  /**
-   * Register CLI flags for this extension.
-   */
   registerCliFlags(flags: CliFlagDef[]): void {
     if (!Array.isArray(flags)) {
       throw new TypeError("flags must be an array");
@@ -44,9 +31,6 @@ export class ConfigRegistry {
     }
   }
 
-  /**
-   * Register config parameters for this extension.
-   */
   registerConfigParams(params: ConfigParamDef[]): void {
     if (!Array.isArray(params)) {
       throw new TypeError("params must be an array");
@@ -72,9 +56,6 @@ export class ConfigRegistry {
     return [...this.#configParams];
   }
 
-  /**
-   * Get help text for all registered CLI flags.
-   */
   getCliHelpText(): string {
     const lines: string[] = [];
     for (const flag of this.#cliFlags) {
@@ -98,9 +79,6 @@ export class ConfigRegistry {
     return lines.join("\n");
   }
 
-  /**
-   * Build a default config object from all registered config params.
-   */
   buildDefaults(): Record<string, Record<string, unknown>> {
     const defaults: Record<string, Record<string, unknown>> = {};
     for (const param of this.#configParams) {
@@ -109,9 +87,6 @@ export class ConfigRegistry {
     return defaults;
   }
 
-  /**
-   * Validate a config object against a JSON Schema.
-   */
   validateConfig(
     config: unknown,
     schema: Record<string, unknown>,
@@ -120,9 +95,6 @@ export class ConfigRegistry {
     return { valid: errors.length === 0, errors };
   }
 
-  /**
-   * Register a config schema for a given key.
-   */
   registerConfigSchema(key: string, schema: Record<string, unknown>): void {
     if (!key || typeof key !== "string") {
       throw new TypeError("key must be a non-empty string");
@@ -136,17 +108,11 @@ export class ConfigRegistry {
     this.#configSchemas.set(key, schema);
   }
 
-  /**
-   * Get the registered schema for a config key.
-   */
   getConfigSchema(key: string): Record<string, unknown> | null {
     if (!this.#configSchemas) return null;
     return this.#configSchemas.get(key) || null;
   }
 
-  /**
-   * Validate a config value using its registered schema (if any).
-   */
   validateConfigByKey(
     key: string,
     config: unknown,

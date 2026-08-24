@@ -40,7 +40,6 @@ export abstract class Channel {
   // Public for testing
   public sessionManager: ChannelSessionManager;
   public attachedSessions: Set<string>;
-  /** Session that send() routes to. */
   public currentSessionId: string | null;
   public isClosed: boolean;
 

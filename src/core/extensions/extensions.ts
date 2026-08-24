@@ -61,9 +61,7 @@ export async function isExtensionDirectory(dirPath: string): Promise<boolean> {
     try {
       await fsPromises.access(indexPath);
       return true;
-    } catch {
-      // Try next extension
-    }
+    } catch {}
   }
   return false;
 }

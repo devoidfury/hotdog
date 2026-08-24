@@ -1,17 +1,11 @@
-// Command parsing for the agent.
 // Commands are the abstract concept — how they are invoked (slash commands,
 // menu items, API calls) is a UI implementation detail.
-// This module handles parsing raw command text into typed command objects.
 
 import type { CommandHandler, ParsedCommand as TypedParsedCommand } from "./extensions/registries.ts";
 
 // Re-export the typed ParsedCommand so consumers use the canonical definition
 export type { ParsedCommand } from "./extensions/registries.ts";
 
-/**
- * Built-in command type constants.
- * These are core commands that the agent always understands.
- */
 export const Command = {
   Help: "help",
   Quit: "quit",
@@ -39,19 +33,15 @@ export type CommandType = (typeof Command)[keyof typeof Command];
  *   ERROR   — show the error as a command response
  */
 export const ACTIONS = {
-  DISPLAY: 1 << 0, // 1
-  PROMPT: 1 << 1,  // 2
-  ERROR: 1 << 2,   // 4
+  DISPLAY: 1 << 0,
+  PROMPT: 1 << 1,
+  ERROR: 1 << 2,
 } as const;
 
 export type ActionFlag = (typeof ACTIONS)[keyof typeof ACTIONS];
 
 // ── Command Registry Interface ───────────────────────────────────────────────
 
-/**
- * Minimal command registry interface for parseCommand.
- * Allows passing any registry that has match() and get() methods.
- */
 export interface CommandRegistryLike {
   match(cmd: string): string | null;
   get(name: string): { handler?: CommandHandler } | undefined;
@@ -60,24 +50,14 @@ export interface CommandRegistryLike {
 
 // ── Parsing ──────────────────────────────────────────────────────────────────
 
-/**
- * Parse a raw command string into a typed command object.
- *
- * @param cmd - Raw command string.
- * @param registry - Optional CommandRegistry for custom commands.
- * @returns Parsed command object { type, value }.
- */
 export function parseCommand(
   cmd: string | null | undefined,
   registry?: CommandRegistryLike | null,
 ): TypedParsedCommand {
   if (!cmd) return { type: Command.Unknown, value: null };
 
-  const cmdLower = cmd;
-
-  // Check custom commands first (via registry)
   if (registry) {
-    const customName = registry.match(cmdLower);
+    const customName = registry.match(cmd);
     if (customName) {
       const def = registry.get(customName);
       return {
@@ -89,7 +69,7 @@ export function parseCommand(
     }
   }
 
-  switch (cmdLower) {
+  switch (cmd) {
     case "help":
       return { type: Command.Help, value: null };
     case "quit":
@@ -100,7 +80,7 @@ export function parseCommand(
   }
 
   // clear <profile> — profile name stored in value, handler decides what to do
-  if (cmdLower.startsWith("clear ")) {
+  if (cmd.startsWith("clear ")) {
     const profileName = cmd.slice(6).trim();
     return {
       type: Command.Clear,
@@ -108,41 +88,39 @@ export function parseCommand(
     };
   }
 
-  switch (cmdLower) {
+  switch (cmd) {
     case "tools":
       return { type: Command.Tools, value: null };
     case "thinking":
       return { type: Command.Thinking, value: null };
   }
 
-  if (cmdLower === "tokens") {
+  if (cmd === "tokens") {
     return { type: Command.Tokens, value: null };
   }
 
-  if (cmdLower === "regenerate") {
+  if (cmd === "regenerate") {
     return { type: Command.Regenerate, value: null };
   }
 
-  // reasoning — set reasoning effort level
-  if (cmdLower === "reasoning" || cmdLower.startsWith("reasoning ")) {
+  if (cmd === "reasoning" || cmd.startsWith("reasoning ")) {
     const parts = cmd.split(/\s+/);
     const effort = parts.slice(1).join(" ").trim();
     return { type: Command.Reasoning, value: effort || null };
   }
 
-  // Channel-level commands
-  if (cmdLower === "sessions") {
+  if (cmd === "sessions") {
     return { type: Command.Sessions, value: null };
   }
-  if (cmdLower === "attach" || cmdLower.startsWith("attach ")) {
+  if (cmd === "attach" || cmd.startsWith("attach ")) {
     const sessionId = cmd.replace(new RegExp(`^attach\\s+`, "i"), "").trim();
     return { type: Command.Attach, value: sessionId || null };
   }
-  if (cmdLower === "detach" || cmdLower.startsWith("detach ")) {
+  if (cmd === "detach" || cmd.startsWith("detach ")) {
     const sessionId = cmd.replace(new RegExp(`^detach\\s+`, "i"), "").trim();
     return { type: Command.Detach, value: sessionId || null };
   }
-  if (cmdLower === "switch" || cmdLower.startsWith("switch ")) {
+  if (cmd === "switch" || cmd.startsWith("switch ")) {
     const sessionId = cmd.replace(new RegExp(`^switch\\s+`, "i"), "").trim();
     return { type: Command.Switch, value: sessionId || null };
   }

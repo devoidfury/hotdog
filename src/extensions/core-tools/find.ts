@@ -1,7 +1,3 @@
-// Find tool — find files matching a glob pattern.
-// Helper functions are defined before the class to ensure they are
-// available in all scope contexts (including catch blocks).
-
 import { execFile } from "node:child_process";
 import util from "node:util";
 import { toolDef, param, ToolResult, truncateOutput, parseToolInput, defaultCallDisplay } from "../../core/extensions/tool-utils.ts";
@@ -26,11 +22,7 @@ interface FindArgs {
   path: string | undefined;
 }
 
-/**
- * Parse and validate find tool arguments.
- */
 function parseArgs(input: string | Record<string, unknown> | null, defaultMaxResults: number): FindArgs | null {
-  // Empty input → defaults
   if (!input || (typeof input === "string" && input.trim().length === 0)) {
     return { pattern: "*", file_type: null, max_results: defaultMaxResults, path: undefined };
   }
@@ -38,11 +30,9 @@ function parseArgs(input: string | Record<string, unknown> | null, defaultMaxRes
   const json = parseToolInput(input);
   if (!json) return null;
 
-  // pattern is required
   let pattern = json.pattern as string | undefined;
   if (!pattern || typeof pattern !== "string") return null;
 
-  // optional params
   const file_type = typeof json.file_type === "string" ? json.file_type : null;
   const max_results = typeof json.max_results === "number" && json.max_results >= 0 ? json.max_results : defaultMaxResults;
   let path = typeof json.path === "string" ? json.path : undefined;
@@ -50,13 +40,9 @@ function parseArgs(input: string | Record<string, unknown> | null, defaultMaxRes
   return { pattern, file_type, max_results, path };
 }
 
-/**
- * Build fd arguments based on file_type and pattern.
- */
 function buildFdArgs(args: FindArgs): string[] {
   const fdArgs: string[] = [];
 
-  // File type filter
   switch (args.file_type) {
     case "f":
     case "file":
@@ -78,12 +64,10 @@ function buildFdArgs(args: FindArgs): string[] {
   fdArgs.push("--hidden");
   fdArgs.push("--no-require-git");
 
-  // Pattern handling
   let pattern = args.pattern;
   if (pattern.includes("*")) {
     if (pattern.includes("/")) {
       fdArgs.push("--full-path");
-      // Auto-prepend **/ for patterns that don't start with / or *
       if (!pattern.startsWith("/") && !pattern.startsWith("*")) {
         pattern = `**/${pattern}`;
       }
@@ -95,9 +79,6 @@ function buildFdArgs(args: FindArgs): string[] {
   return fdArgs;
 }
 
-/**
- * Fallback to the `find` command when `fd` is not available.
- */
 async function runFindFallback(pattern: string, fileType: string | null, cwd: string): Promise<string> {
   // glob change ** -> * for find compatibility
   let namePattern = pattern;
@@ -204,7 +185,6 @@ export class FindTool {
     const { pattern, file_type, max_results, path: searchPath } = args;
     let cwd = searchPath || ".";
 
-    // Validate search path stays within workspace
     const workspace = ctx.get("workspace") as Workspace | null || null;
     if (workspace) {
       try {
@@ -217,11 +197,9 @@ export class FindTool {
       }
     }
 
-    // Build fd arguments
     const fdArgs = buildFdArgs(args);
     const fdArgsStrs = fdArgs.map((s: string) => s);
 
-    // Try fd first, fall back to find command
     let output: string;
     try {
       const { stdout } = await execFileAsync("fd", fdArgsStrs, {
@@ -230,13 +208,12 @@ export class FindTool {
       });
       output = stdout;
     } catch {
-      // Fallback: use `find` command
       output = await runFindFallback(pattern, file_type, cwd);
     }
 
     let files = output.trim().split("\n").filter(Boolean);
 
-    // Sort by path for deterministic output
+    // Sort for deterministic output
     files.sort();
 
     const total_count = files.length;

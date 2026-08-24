@@ -1,5 +1,3 @@
-// Bash tool — execute shell commands.
-
 import { spawn, ChildProcess } from "node:child_process";
 import {
   toolDef,
@@ -77,7 +75,6 @@ export class BashTool {
       return ToolResult.err("Error parsing arguments");
     }
     const command = args.command as string;
-    // Support both camelCase (timeoutMs) and snake_case (timeout_ms)
     const timeout = (args.timeoutMs as number) ?? (args.timeout_ms as number) ?? this.timeoutMs;
 
     if (!command) {
@@ -122,11 +119,6 @@ export class BashTool {
       let termTimer: ReturnType<typeof setTimeout>;
       let killTimer: ReturnType<typeof setTimeout>;
 
-      /**
-       * Signal the whole process group on POSIX (shell + grandchildren),
-       * or just the shell on win32. Swallows errors for groups that are
-       * already gone.
-       */
       const killGroup = (signal: NodeJS.Signals): void => {
         if (!proc.pid) return;
         try {
@@ -136,7 +128,7 @@ export class BashTool {
             proc.kill(signal);
           }
         } catch {
-          // Group already exited — nothing to do.
+          // group already exited; kill raced it
         }
       };
 
@@ -155,8 +147,6 @@ export class BashTool {
         }
       };
 
-      // Append a chunk, capping in-memory buffering at MAX_OUTPUT_CHARS so a
-      // chatty command cannot exhaust memory before the timeout fires.
       const appendCapped = (
         current: string,
         chunk: string,
@@ -237,9 +227,6 @@ export class BashTool {
 
 // ── Extension Entry Point ───────────────────────────────────────────────────
 
-/**
- * Create the bash-tool extension.
- */
 export function create(core: CoreContext): ExtensionInstance {
   // Config defaults come from extension.json configSchema
   const config = getExtensionConfig<{
@@ -251,9 +238,6 @@ export function create(core: CoreContext): ExtensionInstance {
 
   return {
     hooks: {
-      /**
-       * Register the bash tool.
-       */
       [HOOKS.TOOLS_REGISTER]: async (registry) => {
         const tool = new BashTool({ timeoutMs, maxOutputLines });
         registry.register(BashTool.TOOL_NAME, tool);

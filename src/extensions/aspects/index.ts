@@ -1,5 +1,3 @@
-// Aspects Extension - Reads aspects from profiles, loads .aspect.md files, composable system prompt chunks.
-
 import fsPromises from "node:fs/promises";
 import path from "node:path";
 import { HOOKS } from "@core/hooks.ts";
@@ -10,7 +8,7 @@ import { CoreContext, ExtensionInstance } from "@core/extensions/types.ts";
 
 const TEMPLATE_PATH = path.join(import.meta.dirname, "aspects_chunk.md");
 
-/** Validate an aspect name before it is used to build a file path. */
+// Name must be safe to interpolate into a file path.
 const ASPECT_NAME_RE = /^[a-zA-Z0-9][a-zA-Z0-9._-]*$/;
 const ASPECT_NAME_MAX_LEN = 64;
 
@@ -23,7 +21,6 @@ export function isValidAspectName(name: unknown): boolean {
   );
 }
 
-/** Resolve aspect names from profile file front matter. */
 async function resolveAspectNames(core: CoreContext): Promise<string[]> {
   const profileManager = core.resolved?.profileManager;
   if (profileManager) {
@@ -54,7 +51,6 @@ async function resolveAspectNames(core: CoreContext): Promise<string[]> {
   return [];
 }
 
-/** Build the aspects chunk content. Aspects are in config/aspects/ */
 async function buildAspectsChunk(aspectNames: string[], configDir: string): Promise<string> {
   if (!aspectNames || aspectNames.length === 0) {
     return "";
@@ -89,7 +85,6 @@ async function buildAspectsChunk(aspectNames: string[], configDir: string): Prom
   return render(template, { aspects });
 }
 
-/** Create the aspects extension. */
 export function create(core: CoreContext): ExtensionInstance {
   return {
     hooks: {

@@ -1,5 +1,3 @@
-// ToolExecutor
-
 import { Message, type ToolCall, type ImageAttachment } from "./context/message.ts";
 import { formatError, AssistantRetryableError, TransientError } from "./error.ts";
 import { HOOKS, type HookSystem, type GateAction, type ToolResultHookResult } from "./hooks.ts";
@@ -106,7 +104,6 @@ export class ToolExecutor {
       return { toolName: "(invalid)", input, result, toolCallId: toolCallId || "" };
     }
 
-    // check against tool defs list filtered by sandboxMode, maxToolDifficulty, and whitelist/blacklist.
     const toolDefs = await agent.getToolDefs();
     if (!toolDefs.some((tool) => tool.function.name === toolName)) {
       const msg = `Tool '${toolName}' is not available for this agent`;

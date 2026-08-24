@@ -1,5 +1,3 @@
-// Token-aware compaction strategy.
-
 import {
   SUMMARIZATION_SYSTEM_PROMPT,
   SUMMARIZATION_USER_PROMPT_TEMPLATE,
@@ -8,9 +6,6 @@ import { serializeConversation, estimateContextTokens, estimateMessageTokens } f
 import { CompactionStrategy, Message, CompactionSettings, CompactResult } from "../strategies.ts";
 import { AgentError } from "../../../core/error.ts";
 
-/**
- * Compact to a target token count.
- */
 export class TokenAwareStrategy extends CompactionStrategy {
   override name = "token-aware";
   override description = "Compact to a target token count. Dynamically determines how many messages to keep based on precise token estimation.";

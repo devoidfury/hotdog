@@ -1,9 +1,4 @@
 // Review tool — access session log data from within agent tool calls.
-//
-// Provides three operations:
-// - `list`: List recent sessions (same format as `hotdog sessions show --json`)
-// - `get`: Get all entries for a specific session
-// - `tool_index`: Get a lightweight index of tool calls (name, index, args only)
 
 import {
   readSessionEntries,
@@ -17,8 +12,6 @@ import {
   toolDef,
 } from "../../core/extensions/tool-utils.ts";
 import type { ToolMetadata } from "../../core/extensions/tool-registry.ts";
-
-// ── Types ──────────────────────────────────────────────────────────────────
 
 interface SessionSummary {
   id: string;
@@ -38,19 +31,11 @@ interface ParsedArgs {
   limit: number;
 }
 
-// ── Helpers ────────────────────────────────────────────────────────────────
-
-/**
- * Truncate content to max_len bytes, appending '…' if truncated.
- */
 function truncateContent(content: string, maxLength: number): string {
   if (content.length <= maxLength) return content;
   return content.slice(0, maxLength) + "\u2026";
 }
 
-/**
- * Count non-empty lines in a file (fast entry count for .jsonl files).
- */
 async function countEntries(filePath: string): Promise<number> {
   const content = await readFile(filePath, "utf-8");
   let count = 0;
@@ -60,9 +45,6 @@ async function countEntries(filePath: string): Promise<number> {
   return count;
 }
 
-/**
- * List sessions, returning JSON array of summaries.
- */
 async function listSessions(limit: number): Promise<SessionSummary[]> {
   const dir = sessionsDir();
 
@@ -112,9 +94,6 @@ async function listSessions(limit: number): Promise<SessionSummary[]> {
   }));
 }
 
-/**
- * Get a specific session's entries as a JSON array.
- */
 async function getSession(
   sessionId: string,
 ): ReturnType<typeof readSessionEntries> {
@@ -122,9 +101,6 @@ async function getSession(
   return entries;
 }
 
-/**
- * Get a lightweight index of tool calls in a session.
- */
 async function getToolIndex(sessionId: string): Promise<ToolIndexEntry[]> {
   const entries = await readSessionEntries(sessionId);
   const indexEntries: ToolIndexEntry[] = [];
@@ -153,9 +129,6 @@ async function getToolIndex(sessionId: string): Promise<ToolIndexEntry[]> {
   return indexEntries;
 }
 
-/**
- * Parse tool arguments from JSON string.
- */
 function parseArgs(input: string | null): ParsedArgs {
   if (!input || input.trim().length === 0) {
     return { operation: "list", session_id: null, limit: 10 };
@@ -171,8 +144,6 @@ function parseArgs(input: string | null): ParsedArgs {
     return { operation: "list", session_id: null, limit: 10 };
   }
 }
-
-// ── ReviewTool Class ──────────────────────────────────────────────────────
 
 export class ReviewTool {
   static TOOL_NAME = "review";

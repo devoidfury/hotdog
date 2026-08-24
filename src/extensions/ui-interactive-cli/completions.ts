@@ -7,23 +7,21 @@ import { logger } from "../../core/logger.ts";
 
 const MIN_CMD_LEN = 2;
 
-/** Parse the input line to extract command and argument for completion context. */
 export function parseCompletionContext(line: string, cursorPos: number, agent: AgentLike): CompletionContext {
   const text = line.slice(0, cursorPos).trimStart();
 
   let command: string | undefined;
   let commandArg: string | undefined;
 
-  // Handle slash commands: /command [args]
   if (text.startsWith("/")) {
     const afterSlash = text.slice(1);
     const spaceIdx = afterSlash.indexOf(" ");
     if (spaceIdx === -1) {
-      // No space -- completing the command name itself
+      // No space yet -- completing the command name itself
       command = afterSlash.trim();
       commandArg = "";
     } else {
-      // Has space -- command is done, completing the argument
+      // Command done -- completing its argument
       command = afterSlash.slice(0, spaceIdx).trim();
       commandArg = afterSlash.slice(spaceIdx + 1).trimStart();
     }
@@ -46,7 +44,6 @@ export function parseCompletionContext(line: string, cursorPos: number, agent: A
 export function registerSlashCommandNameCompletion(completionService: CoreContext["completion"]): void {
   completionService.register(
     (ctx) => {
-      // Match when line starts with / and we're completing the command name (no space after /)
       const text = ctx.line.slice(0, ctx.cursorPos).trimStart();
       return text.startsWith("/") && !text.slice(1).includes(" ");
     },
@@ -55,7 +52,6 @@ export function registerSlashCommandNameCompletion(completionService: CoreContex
       const afterSlash = ctx.line.slice(0, ctx.cursorPos).trimStart().slice(1);
       const prefix = afterSlash.toLowerCase();
 
-      // Get all registered command names from the agent's command registry
       const commandNames = agent.commandRegistry?.names() || [];
       const matches = commandNames
         .filter((name) => name.toLowerCase().startsWith(prefix))
@@ -187,11 +183,6 @@ fi
   );
 }
 
-// ── Readline Completer ─────────────────────────────────────────────────────
-
-/**
- * Build the readline completer callback for the interactive session.
- */
 export function buildReadlineCompleter(
   sessionManager: SessionManager,
   core: CoreContext,

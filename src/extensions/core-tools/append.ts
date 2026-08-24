@@ -1,5 +1,3 @@
-// Append tool — append content to a file.
-
 import fs from "node:fs/promises";
 import path from "node:path";
 import {
@@ -79,14 +77,12 @@ export class AppendTool {
       return ToolResult.err(`Error resolving path: ${(e as Error).message}`);
     }
 
-    // Create parent directories
     const dir = path.dirname(resolvedPath);
     const mkdirError = await safeMkdir(dir);
     if (mkdirError) {
       return mkdirError;
     }
 
-    // Append to the file
     const appendError = await safeAppendFile(resolvedPath, content);
     if (appendError) {
       return appendError;

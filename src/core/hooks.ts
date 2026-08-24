@@ -173,55 +173,28 @@ export class HookSystem {
     data: H extends keyof HookPayloads ? HookPayloads[H] : unknown,
   ): void {
     const handlers = this.#hooks.get(hookName) || [];
-    let doTrace = this._shouldTrace(hookName);
 
     for (let i = 0; i < handlers.length; i++) {
       const entry = handlers[i];
       if (!entry) continue;
 
-      const t0 = doTrace ? Date.now() : 0;
+      const t0 = this._shouldTrace(hookName) ? Date.now() : 0;
       try {
         const result = entry.handler(data);
 
         if (isPromise(result)) {
           (result as Promise<unknown>).then(
-            () => {
-              if (doTrace && !this._isTraceDisabled(entry.source)) {
-                const ms = Date.now() - t0;
-                const label = entry.source ? ` (${entry.source})` : "";
-                logger.debug(
-                  `[hook:trace] ${hookName} — ${i + 1}/${handlers.length}${label} — ${ms}ms`,
-                );
-              }
-            },
+            () => this._logTrace(hookName, i, handlers.length, entry, t0),
             (e: unknown) => {
-              if (doTrace && !this._isTraceDisabled(entry.source)) {
-                const ms = Date.now() - t0;
-                const label = entry.source ? ` (${entry.source})` : "";
-                logger.debug(
-                  `[hook:trace] ${hookName} — ${i + 1}/${handlers.length}${label} — ${ms}ms — error`,
-                );
-              }
+              this._logTrace(hookName, i, handlers.length, entry, t0, " — error");
               logger.error(`[hook:${hookName}] ${formatError(e)}`);
             },
           );
         } else {
-          if (doTrace && !this._isTraceDisabled(entry.source)) {
-            const ms = Date.now() - t0;
-            const label = entry.source ? ` (${entry.source})` : "";
-            logger.debug(
-              `[hook:trace] ${hookName} — ${i + 1}/${handlers.length}${label} — ${ms}ms`,
-            );
-          }
+          this._logTrace(hookName, i, handlers.length, entry, t0);
         }
       } catch (e) {
-        if (doTrace && !this._isTraceDisabled(entry.source)) {
-          const ms = Date.now() - t0;
-          const label = entry.source ? ` (${entry.source})` : "";
-          logger.debug(
-            `[hook:trace] ${hookName} — ${i + 1}/${handlers.length}${label} — ${ms}ms — error`,
-          );
-        }
+        this._logTrace(hookName, i, handlers.length, entry, t0, " — error");
         logger.error(`[hook:${hookName}] ${formatError(e)}`);
       }
     }
@@ -237,11 +210,11 @@ export class HookSystem {
     const results: Array<{ result: R; source: string | null }> = [];
     let lastResult: R | undefined;
     let stopped = false;
-    let doTrace = this._shouldTrace(hookName);
 
     for (let i = 0; i < handlers.length; i++) {
       const entry = handlers[i];
       if (!entry) continue;
+      const doTrace = this._shouldTrace(hookName);
       const t0 = doTrace ? Date.now() : 0;
       try {
         const result = entry.handler(data);
@@ -250,17 +223,14 @@ export class HookSystem {
           results.push({ result: resolved, source: entry.source || null });
           lastResult = resolved;
         }
-        if (doTrace && !this._isTraceDisabled(entry.source)) {
-          const ms = Date.now() - t0;
-          const label = entry.source ? ` (${entry.source})` : "";
-          const action =
-            resolved !== undefined
-              ? ` returned ${_summarizeResult(resolved)}`
-              : " no return";
-          logger.debug(
-            `[hook:trace] ${hookName} — ${i + 1}/${handlers.length}${label} — ${ms}ms${action}`,
-          );
-        }
+        // action (which summarizes the result) is only built when tracing is
+        // on — pipelines run on every tool call and the hot path stays lean.
+        const action = doTrace
+          ? resolved !== undefined
+            ? ` returned ${_summarizeResult(resolved)}`
+            : " no return"
+          : "";
+        this._logTrace(hookName, i, handlers.length, entry, t0, action);
         if (opts.shouldStop && resolved && opts.shouldStop(resolved)) {
           stopped = true;
           if (doTrace && !this._isTraceDisabled(entry.source)) {
@@ -271,13 +241,7 @@ export class HookSystem {
           break;
         }
       } catch (e) {
-        if (doTrace && !this._isTraceDisabled(entry.source)) {
-          const ms = Date.now() - t0;
-          const label = entry.source ? ` (${entry.source})` : "";
-          logger.debug(
-            `[hook:trace] ${hookName} — ${i + 1}/${handlers.length}${label} — ${ms}ms — error`,
-          );
-        }
+        this._logTrace(hookName, i, handlers.length, entry, t0, " — error");
         logger.error(`[hook:${hookName}] ${formatError(e)}`);
       }
     }
@@ -311,6 +275,24 @@ export class HookSystem {
   /** @internal Exposed for testing. */
   get hooksMap(): Map<string, HookHandlerEntry[]> {
     return this.#hooks;
+  }
+
+  // Shared trace-line emitter for notifyHooks() and runHookPipeline().
+  // `startedAt` is 0 when tracing was off for this hook (nothing is logged).
+  private _logTrace(
+    hookName: string,
+    handlerIndex: number,
+    handlerCount: number,
+    entry: HookHandlerEntry,
+    startedAt: number,
+    suffix = "",
+  ): void {
+    if (!this._shouldTrace(hookName) || this._isTraceDisabled(entry.source)) return;
+    const ms = Date.now() - startedAt;
+    const label = entry.source ? ` (${entry.source})` : "";
+    logger.debug(
+      `[hook:trace] ${hookName} — ${handlerIndex + 1}/${handlerCount}${label} — ${ms}ms${suffix}`,
+    );
   }
 
   private _shouldTrace(hookName: string): boolean {

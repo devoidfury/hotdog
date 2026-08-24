@@ -4,20 +4,11 @@
 import pkg from "@package.json" with { type: "json" };
 
 export function jsonRpcRequest(id: number, method: string, params?: unknown): Record<string, unknown> {
-  return {
-    jsonrpc: "2.0",
-    id,
-    method,
-    ...(params !== undefined && params !== null ? { params } : {}),
-  };
+  return { jsonrpc: "2.0", id, method, ...(params != null ? { params } : {}) };
 }
 
 export function jsonRpcNotification(method: string, params?: unknown): Record<string, unknown> {
-  return {
-    jsonrpc: "2.0",
-    method,
-    ...(params !== undefined && params !== null ? { params } : {}),
-  };
+  return { jsonrpc: "2.0", method, ...(params != null ? { params } : {}) };
 }
 
 export function mcpInitializeRequest(): Record<string, unknown> {
@@ -108,12 +99,9 @@ export function parseMcpToolDefinition(tool: Record<string, unknown>): McpToolDe
 
 export function mcpToolCallRequest(
   name: string,
-  arguments_?: Record<string, unknown> | null,
+  args?: Record<string, unknown> | null,
 ): Record<string, unknown> {
-  return {
-    name,
-    ...(arguments_ !== undefined && arguments_ !== null ? { arguments: arguments_ } : {}),
-  };
+  return { name, ...(args != null ? { arguments: args } : {}) };
 }
 
 interface McpContentBlock {
@@ -131,10 +119,8 @@ interface McpToolCallResponse {
 }
 
 export function parseMcpToolCallResponse(data: Record<string, unknown>): McpToolCallResponse {
-  return {
-    content: ((data.content as Record<string, unknown>[]) || []).map(parseMcpContentBlock),
-    isError: (data.isError as boolean) || false,
-  };
+  const content = ((data.content as Record<string, unknown>[]) || []).map(parseMcpContentBlock);
+  return { content, isError: (data.isError as boolean) || false };
 }
 
 export function parseMcpContentBlock(block: Record<string, unknown> | null): McpContentBlock {

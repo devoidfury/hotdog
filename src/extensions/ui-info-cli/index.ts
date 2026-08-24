@@ -62,7 +62,7 @@ async function runInfo(cli: CliArgv, core: CoreContext): Promise<number> {
 
   let connectivity: ConnectivityResult;
   try {
-    if (client.ping) await client.ping();
+    await client.ping(resolved.model);
     connectivity = { reachable: true, error: null };
   } catch (e: unknown) {
     connectivity = { reachable: false, error: (e as Error).message };

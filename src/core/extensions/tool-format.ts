@@ -30,8 +30,7 @@ export interface ToolFormat {
   ): string | Array<Record<string, unknown>>;
 
   /**
-   * System-prompt chunk rendering tool definitions; unused by the default
-   * path (native `tools` transport is in use).
+   * System-prompt chunk rendering tool definitions; unused by the default path (native `tools` transport is in use).
    */
   renderToolDefs?(toolDefs: ToolDef[]): string;
 }
@@ -69,36 +68,20 @@ export function createToolFormatRegistry(): ToolFormatRegistry {
   return new ToolFormatRegistry();
 }
 
-
-
 // ── Format resolution ───────────────────────────────────────────────────────
 
 export const TOOL_FORMAT_DEFAULT_NAME = "xml";
 
-/**
- * Resolve a ToolFormat by explicit name from the given registry; unknown
- * names throw an LlmError("config") (config errors fail at the request
- * boundary, mirroring unknown LlmProtocol ids). The built-in "xml" is always
- * resolvable, even from a registry that no longer contains it.
- */
-export function toolFormatForName(
-  name: string,
-  registry?: ToolFormatRegistry | null,
-): ToolFormat {
-  const format =
-    (registry?.get(name) ?? undefined) ??
-    (name === TOOL_FORMAT_DEFAULT_NAME ? xmlToolFormat : undefined);
+/** Resolve ToolFormat by name from the given registry. */
+export function toolFormatForName(name: string, registry?: ToolFormatRegistry | null): ToolFormat {
+  const format = registry?.get(name) ?? (name === TOOL_FORMAT_DEFAULT_NAME ? xmlToolFormat : undefined);
   if (!format) {
     throw new LlmError(`Unknown tool format "${name}"`, "config");
   }
   return format;
 }
 
-/**
- * Resolve the ToolFormat id for a model, mirroring the wireFormat chain:
- * model-level -> provider-level -> global core-config default. The model
- * entry is the resolved ModelConfig (registry lookup already applied).
- */
+/** Resolve the ToolFormat id for a model. */
 export function resolveToolFormatId(
   modelConfig: { name: string; toolFormat?: string },
   providers: ProviderDef[] | undefined,
@@ -106,10 +89,5 @@ export function resolveToolFormatId(
 ): string {
   const providerName = modelConfig.name.split("/")[0];
   const provider = providers?.find((p) => p.name === providerName);
-  return (
-    modelConfig.toolFormat ??
-    provider?.toolFormat ??
-    globalDefault ??
-    TOOL_FORMAT_DEFAULT_NAME
-  );
+  return modelConfig.toolFormat ?? provider?.toolFormat ?? globalDefault ?? TOOL_FORMAT_DEFAULT_NAME;
 }

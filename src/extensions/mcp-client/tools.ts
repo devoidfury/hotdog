@@ -48,11 +48,7 @@ export class McpTool {
       const result = await this.#connection.callTool(this.#toolName, args);
       return { success: true, output: result };
     } catch (e: unknown) {
-      return {
-        success: false,
-        output: ``,
-        error: `MCP tool call failed: ${(e as Error).message}`,
-      };
+      return { success: false, output: ``, error: `MCP tool call failed: ${(e as Error).message}` };
     }
   }
 
@@ -86,25 +82,26 @@ function convertSchemaProperties(schema: Record<string, unknown>): Record<string
 
   for (const [key, value] of Object.entries(props)) {
     if (!value || typeof value !== "object") continue;
+    const record = value as Record<string, unknown>;
 
     const param: Record<string, unknown> = {
-      type: (value as Record<string, unknown>).type || "string",
-      description: (value as Record<string, unknown>).description || "",
+      type: record.type || "string",
+      description: record.description || "",
     };
 
-    if (Array.isArray((value as Record<string, unknown>).enum)) {
-      param.enum = (value as Record<string, unknown>).enum;
+    if (Array.isArray(record.enum)) {
+      param.enum = record.enum;
     }
 
-    if ((value as Record<string, unknown>).minimum !== undefined) param.minimum = (value as Record<string, unknown>).minimum;
-    if ((value as Record<string, unknown>).maximum !== undefined) param.maximum = (value as Record<string, unknown>).maximum;
-    if ((value as Record<string, unknown>).exclusiveMinimum !== undefined) param.exclusiveMinimum = (value as Record<string, unknown>).exclusiveMinimum;
-    if ((value as Record<string, unknown>).exclusiveMaximum !== undefined) param.exclusiveMaximum = (value as Record<string, unknown>).exclusiveMaximum;
+    if (record.minimum !== undefined) param.minimum = record.minimum;
+    if (record.maximum !== undefined) param.maximum = record.maximum;
+    if (record.exclusiveMinimum !== undefined) param.exclusiveMinimum = record.exclusiveMinimum;
+    if (record.exclusiveMaximum !== undefined) param.exclusiveMaximum = record.exclusiveMaximum;
 
-    if ((value as Record<string, unknown>).minLength !== undefined) param.minLength = (value as Record<string, unknown>).minLength;
-    if ((value as Record<string, unknown>).maxLength !== undefined) param.maxLength = (value as Record<string, unknown>).maxLength;
+    if (record.minLength !== undefined) param.minLength = record.minLength;
+    if (record.maxLength !== undefined) param.maxLength = record.maxLength;
 
-    if ((value as Record<string, unknown>).pattern) param.pattern = (value as Record<string, unknown>).pattern;
+    if (record.pattern) param.pattern = record.pattern;
 
     properties[key] = param;
   }
@@ -114,7 +111,7 @@ function convertSchemaProperties(schema: Record<string, unknown>): Record<string
 
 function extractRequired(schema: Record<string, unknown>): string[] {
   if (!schema || typeof schema !== "object") return [];
-  const req = (schema.required as unknown[]);
+  const req = schema.required as unknown[];
   if (!Array.isArray(req)) return [];
-  return req.filter((v: unknown) => typeof v === "string") as string[];
+  return req.filter((v) => typeof v === "string");
 }

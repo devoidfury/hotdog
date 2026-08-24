@@ -1,9 +1,9 @@
 import { spawn, ChildProcess } from "node:child_process";
-import { logger } from "../../core/logger.ts";
-import { formatError } from "../../core/error.ts";
-import { copyScrubbedEnv } from "../../utils/env.ts";
-import { McpError } from "./client.ts";
+import { logger } from "@core/logger.ts";
+import { formatError } from "@core/error.ts";
+import { copyScrubbedEnv } from "@utils/env.ts";
 import { hotdogFetch } from "@utils/fetch.ts";
+import { McpError } from "./client.ts";
 
 export type TransportMessageHandler = (line: string) => void;
 
@@ -45,8 +45,6 @@ export class StdioTransport implements McpTransport {
 
   #messageHandlers: TransportMessageHandler[] = [];
   #closeHandlers: TransportCloseHandler[] = [];
-  #readerTask: Promise<void> | null = null;
-  #stderrTask: Promise<void> | null = null;
   #stderrOutput: string = "";
   #destroyed: boolean = false;
 
@@ -161,8 +159,6 @@ export class StdioTransport implements McpTransport {
         logger.error(`MCP stdio reader error: ${formatError(e)}`);
       }
     });
-
-    this.#readerTask = Promise.resolve();
   }
 
   #startStderrReader(): void {
@@ -172,8 +168,6 @@ export class StdioTransport implements McpTransport {
     stderr.on("data", (chunk: Buffer) => {
       this.#stderrOutput += chunk.toString();
     });
-
-    this.#stderrTask = Promise.resolve();
   }
 
   #dispatchMessage(line: string): void {

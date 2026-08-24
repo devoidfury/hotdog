@@ -1,61 +1,21 @@
 import { SUMMARIZATION_SYSTEM_PROMPT, SUMMARIZATION_USER_PROMPT_TEMPLATE } from "./prompts.ts";
 import { AgentError } from "@core/error.ts";
+// Token estimation is general-purpose (core's ContextManager uses it too), so
+// it lives in src/utils and is re-exported here to keep the extension API stable.
+import {
+  estimateMessageTokens,
+  estimateContextTokens,
+  type MessageLike as EstimatableMessageLike,
+} from "@utils/token-estimate.ts";
+
+export { estimateMessageTokens, estimateContextTokens };
 
 const TOOL_RESULT_MAX_CHARS = 2000;
 
 // Use a local interface for flexibility (accepts both core Message and plain objects)
-interface MessageLike {
-  role: string | undefined;
-  content?: string | Array<unknown> | undefined;
-  reasoningContent?: string | null;
-  reasoning_content?: string;
-  toolCalls?: unknown;
-  tool_calls?: Array<{ function?: { name?: string; arguments?: string } }>;
+interface MessageLike extends EstimatableMessageLike {
   toolCallId?: string | null;
   images?: unknown[] | null;
-}
-
-// ── Token Estimation ────────────────────────────────────────────────────────
-
-// chars/4 heuristic; deliberately overestimates.
-export function estimateMessageTokens(msg: MessageLike): number {
-  const chars = _messageCharCount(msg);
-  return Math.ceil(chars / 4);
-}
-
-function _messageCharCount(msg: MessageLike): number {
-  const getContentLength = (content: string | Array<unknown> | undefined): number => {
-    if (typeof content === "string") return content.length;
-    if (Array.isArray(content)) return content.map((p) => String(p).length).reduce((a, b) => a + b, 0);
-    return 0;
-  };
-
-  switch (msg.role) {
-    case "user":
-    case "system":
-      return getContentLength(msg.content);
-    case "assistant": {
-      let chars = getContentLength(msg.content);
-      const reasoning = msg.reasoningContent ?? msg.reasoning_content;
-      if (reasoning) chars += reasoning.length;
-      const toolCalls = msg.toolCalls ?? msg.tool_calls;
-      if (Array.isArray(toolCalls)) {
-        for (const tc of toolCalls) {
-          const fn = (tc as { function?: { name?: string; arguments?: string } }).function;
-          chars += (fn?.name || "").length + (fn?.arguments || "").length;
-        }
-      }
-      return chars;
-    }
-    case "tool":
-      return getContentLength(msg.content);
-    default:
-      return getContentLength(msg.content);
-  }
-}
-
-export function estimateContextTokens(messages: MessageLike[]): number {
-  return messages.reduce((sum, msg) => sum + estimateMessageTokens(msg), 0);
 }
 
 // ── Compaction Decision ─────────────────────────────────────────────────────

@@ -2,7 +2,7 @@ import { MessageLog } from "./message-log.ts";
 import { Message } from "./message.ts";
 import { TokenTracker, type TokenUsage, type RawUsage } from "../token-tracker.ts";
 import { SystemPromptBuilder, type AgentConfigForPrompt } from "./system-prompt.ts";
-import { estimateContextTokens } from "../../extensions/compaction/utils.ts";
+import { estimateContextTokens } from "../../utils/token-estimate.ts";
 
 // Minimal hook surface for system prompt building; avoids coupling to the full HookSystem type.
 export interface HookPipelineRunner {

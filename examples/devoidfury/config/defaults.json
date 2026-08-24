@@ -1,7 +1,7 @@
 {
   "log_level": "warn",
   "log_target": "stderr",
-  "default_model": "ai365/qwen3.6-27b",
+  "default_model": "ai365/qwen3.8-27b",
   "thinker": " 🧠 ... {}",
   "toolfmt": " 🔧 {} {}",
   "hide_tools": true,
@@ -21,7 +21,7 @@
       "model": "ai365/qwen3.6-35b:general"
     },
     "fixer": {
-      "model": "ai365/qwen3.6-27b"
+      "model": "ai365/qwen3.8-27b:instruct"
     },
     "test": {
       "model": "ai365/qwen3.5-4b:coder"

@@ -1,19 +1,13 @@
-// Load skill tool — load a skill's full instructions into context.
-import {
-  toolDef,
-  param,
-  ToolResult,
-  defaultCallDisplay,
-} from "../../core/extensions/tool-utils.ts";
-import type { ToolMetadata } from "../../core/extensions/tool-registry.ts";
-import { type ToolContext } from "../../core/extensions/types.ts";
-import { SkillsLoader } from "./loader.ts";
+// Load skill tool. Load a skill's full instructions into context.
 
+import { toolDef, param, ToolResult, defaultCallDisplay } from "@core/extensions/tool-utils.ts";
+import type { ToolMetadata } from "@core/extensions/tool-registry.ts";
+import { type ToolContext } from "@core/extensions/types.ts";
+import { SkillsLoader } from "./loader.ts";
 
 export class LoadSkillTool {
   static readonly TOOL_NAME = "load_skill";
   metadata: ToolMetadata = { sideEffects: false, difficulty: 2 };
-
   private readonly loader: SkillsLoader | null;
 
   constructor(options: { loader?: SkillsLoader } = {}) {
@@ -25,9 +19,7 @@ export class LoadSkillTool {
       LoadSkillTool.TOOL_NAME,
       "Load a skill. Skills are Markdown files that provide specialized workflows.",
       {
-        properties: {
-          name: param("string", "The name of the skill to load."),
-        },
+        properties: { name: param("string", "The name of the skill to load.") },
         required: ["name"],
       },
     );
@@ -45,9 +37,7 @@ export class LoadSkillTool {
       return ToolResult.err("Skills loader not available");
     }
 
-    // Use the loader to get the skill
     const skill = this.loader.getSkill(skillName);
-
     if (!skill) {
       return ToolResult.err(`Skill not found: ${skillName}`);
     }

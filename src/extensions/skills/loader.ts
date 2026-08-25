@@ -3,10 +3,10 @@
 
 import fs from "node:fs/promises";
 import { join } from "node:path";
-import { parseFrontMatter, validateNameable } from "../../utils/file-utils.ts";
-import { render } from "../../utils/render.ts";
-import { logger } from "../../core/logger.ts";
-import { ParseError, formatError } from "../../core/error.ts";
+import { parseFrontMatter, validateNameable } from "@utils/file-utils.ts";
+import { render } from "@utils/render.ts";
+import { logger } from "@core/logger.ts";
+import { ParseError, formatError } from "@core/error.ts";
 
 export interface Skill {
   name: string;
@@ -389,18 +389,13 @@ export class SkillsLoader {
     return render(template, context);
   }
 
-  /**
-   * Build skills preamble content for the system prompt.
-   */
+  /** Build skills preamble content for the system prompt. */
   async buildSkillsPreamble(): Promise<string> {
     const visibleSkills = this.agentViewableSkills();
-
     if (visibleSkills.length === 0) return "";
 
-    // Load the skills preamble template
-    const templatePath = join(import.meta.dirname, "skills_preamble.md");
-
     let template: string;
+    const templatePath = join(import.meta.dirname, "skills_preamble.md");
     try {
       template = await fs.readFile(templatePath, "utf-8");
     } catch {

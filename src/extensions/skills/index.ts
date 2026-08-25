@@ -3,19 +3,13 @@
 // Hooks: systemPrompt:build, agent:toolContext, tools:register, commands:register
 // Config defaults and CLI flags are defined in extension.json.
 
-import { HOOKS } from "../../core/hooks.ts";
-import { ACTIONS } from "../../core/commands.ts";
+import { HOOKS } from "@core/hooks.ts";
+import { ACTIONS } from "@core/commands.ts";
 import { patternMatches, Skill, SkillsLoader } from "./loader.ts";
 import { LoadSkillTool } from "./load-skill.ts";
-import { Message } from "../../core/context/message.ts";
-import {
-  CoreContext,
-  ExtensionInstance,
-  ToolsRegisterPayload,
-  CommandsRegisterPayload,
-  getExtensionConfig,
-} from "../../core/extensions/types.ts";
-import { ExtensionError } from "../../core/error.ts";
+import { Message } from "@core/context/message.ts";
+import { type CoreContext, type ExtensionInstance, getExtensionConfig } from "@core/extensions/types.ts";
+import { ExtensionError } from "@core/error.ts";
 import { matcher, createCompletionHandler } from "./completions.ts";
 
 interface SkillsLoaderConfig {
@@ -23,10 +17,7 @@ interface SkillsLoaderConfig {
   preloadSkills?: string[];
 }
 
-/**
- * Create the skills extension.
- * Config defaults come from extension.json configSchema.
- */
+/** Create the skills extension. Config defaults come from extension.json configSchema. */
 export async function create(core: CoreContext): Promise<ExtensionInstance> {
   // Config defaults come from extension.json configSchema
   const config = getExtensionConfig<SkillsLoaderConfig>(core, "skills");
@@ -61,9 +52,7 @@ export async function create(core: CoreContext): Promise<ExtensionInstance> {
     const patterns = getCombinedToolPatterns();
     if (patterns.size === 0) return true;
     const nameLower = toolName.toLowerCase();
-    return Array.from(patterns).some((pattern) =>
-      patternMatches(pattern, nameLower),
-    );
+    return Array.from(patterns).some((pattern) => patternMatches(pattern, nameLower));
   };
 
   const instance: ExtensionInstance & {
@@ -74,9 +63,7 @@ export async function create(core: CoreContext): Promise<ExtensionInstance> {
     isToolAllowed(toolName: string): boolean;
   } = {
     hooks: {
-      /**
-       * Build skills preamble for system prompt.
-       */
+      /** Build skills preamble for system prompt. */
       [HOOKS.SYSTEM_PROMPT_BUILD]: async (_data) => {
         const preamble = await loader.buildSkillsPreamble();
         if (preamble) {
@@ -89,25 +76,17 @@ export async function create(core: CoreContext): Promise<ExtensionInstance> {
        * Tools access it via toolCtx.get('skillsLoader').
        */
       [HOOKS.AGENT_TOOL_CONTEXT]: async ({ toolCtx, agent }) => {
-        (toolCtx as { set: (key: string, value: unknown) => void }).set(
-          "skillsLoader",
-          loader,
-        );
-        (agent as { skillsLoader?: typeof loader }).skillsLoader = loader;
+        toolCtx.set("skillsLoader", loader);
       },
 
-      /**
-       * Register the load_skill tool.
-       */
-      [HOOKS.TOOLS_REGISTER]: async (registry: ToolsRegisterPayload) => {
+      /** Register tool: load_skill */
+      [HOOKS.TOOLS_REGISTER]: async (registry) => {
         const tool = new LoadSkillTool({ loader });
         registry.register("load_skill", tool);
       },
 
-      /**
-       * Register commands for skills.
-       */
-      [HOOKS.COMMANDS_REGISTER]: async (payload: CommandsRegisterPayload) => {
+      /** Register command: /skills */
+      [HOOKS.COMMANDS_REGISTER]: async (payload) => {
         const { registry } = payload;
 
         registry.register("skill", {
@@ -118,10 +97,7 @@ export async function create(core: CoreContext): Promise<ExtensionInstance> {
             if (!name) {
               const skills = loader.allSkills();
               const lines = skills
-                .map(
-                  (s: Skill) =>
-                    `${s.loaded ? "[x]" : "[ ]"} ${s.name}: ${s.description}`,
-                )
+                .map((s: Skill) => `${s.loaded ? "[x]" : "[ ]"} ${s.name}: ${s.description}`)
                 .join("\n\n");
               return {
                 action: ACTIONS.DISPLAY,
@@ -167,34 +143,30 @@ export async function create(core: CoreContext): Promise<ExtensionInstance> {
     // Expose for external use
     loader,
 
-    /**
-     * Get all skills.
-     */
+    /** Get all skills. */
     getAllSkills() {
       return loader.allSkills();
     },
 
-    /**
-     * Get active skills.
-     */
+    /** Get active skills. */
     getActiveSkills() {
       return loader.activeSkills();
     },
 
-    /**
-     * Get combined tool patterns from active skills.
-     */
+    /** Get combined tool patterns from active skills. */
     getCombinedToolPatterns,
 
-    /**
-     * Check if a tool is allowed by active skills.
-     */
+    /** Check if a tool is allowed by active skills. */
     isToolAllowed,
   };
 
   // Register completion with completion service (if available)
   if (core.completion) {
-    core.completion.register(matcher, createCompletionHandler(() => loader.allSkills()), "skills:skill");
+    core.completion.register(
+      matcher,
+      createCompletionHandler(() => loader.allSkills()),
+      "skills:skill",
+    );
   }
 
   return instance;

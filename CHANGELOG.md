@@ -2,8 +2,12 @@
 
 ## Unreleased
 
+- add string-length tool
 - add medium reasoning level support
 - `/loop` - now keyed by session id, supports multi-agent sessions
+- fix - tab completion for the `/reasoning` level argument
+- fix - environment system prompt chunk referenced the wrong profile name
+- bash tool - set `EDITOR=cat` in child process env to prevent hangs in some programs
 
 - internals
   - split internal message format from wire formats
@@ -17,7 +21,15 @@
 
 - llm-client
   - health check (`ping`) now accepts a model name to check a specific provider, instead of only the default base url
-  - no auto-retry on 3xx status
+  - fix - health check (`ping`) now times out; configurable via `healthCheckTimeoutSecs`
+  - LLM HTTP error bodies are now capped at 200k chars before being embedded into error messages
+  - retry classification reads a structured `LlmError.status` instead of parsing the error message
+
+- fetch tool
+  - response read cap raised 100k -> 2mb; display truncation now runs after cleanup / md conversion, so verbose HTML isn't cut before it can shrink
+
+- mcp-client
+  - stdio servers now run detached; process group is killed on destroy (no orphaned processes)
 
 - subagents
   - fix tool registration issue

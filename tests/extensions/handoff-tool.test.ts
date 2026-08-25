@@ -37,11 +37,11 @@ describe("HandoffTool", () => {
 
     it("defines all expected parameters", () => {
       const def = tool.toToolDef();
-      const props = def.function.parameters.properties as Record<string, unknown>;
-      expect(props.content).toBeDefined();
-      expect(props.title).toBeDefined();
-      expect(props.instructions).toBeDefined();
-      expect(props.files).toBeDefined();
+      const props = def.function.parameters.properties as Record<string, { type: string }>;
+      expect(props.content).toEqual(expect.objectContaining({ type: "string" }));
+      expect(props.title).toEqual(expect.objectContaining({ type: "string" }));
+      expect(props.instructions).toEqual(expect.objectContaining({ type: "string" }));
+      expect(props.files).toEqual(expect.objectContaining({ type: "array" }));
     });
 
     it("defines files as string array", () => {

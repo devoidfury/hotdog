@@ -600,7 +600,16 @@ describe("Edge Cases", () => {
     const abortController = new AbortController();
     abortController.abort(); // Already aborted
 
-    const agent = createMockAgent(context);
+    // Like the real LlmClient, reject when the signal is already aborted
+    // (the default mock stream ignores it, which would let compaction succeed).
+    const failingLlmClient = {
+      chatStreamCancellable: (_msgs: unknown, _cfg: unknown, _t: unknown, signal: AbortSignal) => {
+        if (signal.aborted) throw new Error("aborted");
+        return (async function* () {})();
+      },
+    };
+
+    const agent = createMockAgent(context, "test-model", undefined, failingLlmClient);
     (agent as any).abortSignal = abortController.signal;
 
     agent.modelRegistry = {
@@ -609,10 +618,11 @@ describe("Edge Cases", () => {
 
     const messages = [{ role: "system", content: "" }, ...context];
 
-    // Should not throw, should handle abort gracefully
+    // Should not throw: compaction failure is non-fatal and context stays intact
     await expect(
       (ext as any).hooks![HOOKS.CONTEXT]!({ messages: messages as any, agent })
-    ).resolves.toBeDefined();
+    ).resolves.toBeUndefined();
+    expect(agent.log.length).toBe(50);
   });
 
   it("should handle cancellation during streaming (agent.cancelled)", async () => {

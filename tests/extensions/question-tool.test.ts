@@ -25,13 +25,15 @@ describe("QuestionTool", () => {
 
     it("defines question item schema with key and prompt", () => {
       const def = tool.toToolDef();
-      const questionsParam = (def.function.parameters.properties as Record<string, unknown>).questions as { items: { properties: Record<string, unknown> } };
-      expect(questionsParam.items.properties.key).toBeDefined();
-      expect(questionsParam.items.properties.prompt).toBeDefined();
-      expect(questionsParam.items.properties.options).toBeDefined();
-      expect(questionsParam.items.properties.required).toBeDefined();
-      expect(questionsParam.items.properties.default).toBeDefined();
-      expect(questionsParam.items.properties.allow_other).toBeDefined();
+      const questionsParam = (def.function.parameters.properties as Record<string, unknown>).questions as { items: { properties: Record<string, { type: string }>; required: string[] } };
+      const props = questionsParam.items.properties;
+      expect(props.key).toEqual(expect.objectContaining({ type: "string" }));
+      expect(props.prompt).toEqual(expect.objectContaining({ type: "string" }));
+      expect(props.options).toEqual(expect.objectContaining({ type: "array" }));
+      expect(props.required).toEqual(expect.objectContaining({ type: "boolean" }));
+      expect(props.default).toEqual(expect.objectContaining({ type: "string" }));
+      expect(props.allow_other).toEqual(expect.objectContaining({ type: "boolean" }));
+      expect(questionsParam.items.required).toEqual(["key", "prompt"]);
     });
   });
 

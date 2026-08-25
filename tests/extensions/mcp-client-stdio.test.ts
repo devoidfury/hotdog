@@ -110,7 +110,12 @@ describe("McpClient.initialize", () => {
         serverInfo: { name: "test" },
       },
     }), async () => {
-      await expect(client.initialize()).resolves.toBeDefined();
+      const result = await client.initialize();
+      expect(result).not.toBeNull();
+      // Missing version falls back to the "unknown" default.
+      expect(client.serverInfo).toEqual({ name: "test", version: "unknown" });
+      // No tools capability advertised, so it stays null.
+      expect((client.serverCapabilities as Record<string, unknown>).tools).toBeNull();
     });
     await client.shutdown();
   });

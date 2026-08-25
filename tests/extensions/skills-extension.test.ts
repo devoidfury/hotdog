@@ -601,21 +601,6 @@ describe("Skills Extension", () => {
     await expect(create(core)).rejects.toThrow("skills path not configured");
   });
 
-  it("creates extension with valid config", async () => {
-    await createTempSkill("test-skill", `---
-name: Test Skill
-description: A test skill
----
-
-Content.
-`);
-
-    const core = createMockCore();
-    const ext = (await create(core)) as any;
-    expect(ext).toBeDefined();
-    expect(ext.loader).toBeDefined();
-  });
-
   it("preloads skills from config", async () => {
     await createTempSkill("preload-skill", `---
 name: Preload Skill
@@ -631,21 +616,6 @@ Content.
     const skill = ext.loader.getSkill("Preload Skill");
     expect(skill).not.toBeNull();
     expect(skill!.loaded).toBe(true);
-  });
-
-  it("registers SYSTEM_PROMPT_BUILD hook", async () => {
-    await createTempSkill("prompt-skill", `---
-name: Prompt Skill
-description: For system prompt
----
-
-Content.
-`);
-
-    const core = createMockCore();
-    const ext = (await create(core)) as any;
-
-    expect(ext.hooks![HOOKS.SYSTEM_PROMPT_BUILD]).toBeDefined();
   });
 
   it("registers AGENT_TOOL_CONTEXT hook", async () => {

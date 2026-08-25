@@ -338,7 +338,7 @@ describe("executeShellCommand", () => {
     process.env.PATH = "/nonexistent/path";
     try {
       const result = await runWithSuppressedStdout(() => executeShellCommand("echo hello"));
-      expect(result.error).toBeDefined();
+      expect(result.error).toContain("Error:");
     } finally {
       process.env.PATH = originalPath;
     }
@@ -351,7 +351,7 @@ describe("executeShellCommand", () => {
       const result = await runWithSuppressedStdout(() =>
         executeShellCommand("echo hello", { captureOutput: true })
       );
-      expect(result.error).toBeDefined();
+      expect(result.error).toContain("Error:");
     } finally {
       process.env.PATH = originalPath;
     }

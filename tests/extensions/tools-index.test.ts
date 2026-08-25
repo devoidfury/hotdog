@@ -3,7 +3,6 @@ import {
   CORE_TOOL_NAMES,
   createToolFactory,
 } from "../../src/extensions/core-tools/index.ts";
-import { SUBAGENT_TOOL_NAMES } from "../../src/extensions/subagents/index.ts";
 import { ToolRegistry } from "../../src/core/extensions/tool-registry.ts";
 
 // Mirrors the configSchema defaults in core-tools/extension.json
@@ -39,20 +38,6 @@ describe("CORE_TOOL_NAMES", () => {
   it("does not include subagent tools", () => {
     expect(CORE_TOOL_NAMES).not.toContain("delegate_task");
     expect(CORE_TOOL_NAMES).not.toContain("task_status");
-  });
-});
-
-describe("SUBAGENT_TOOL_NAMES", () => {
-  it("contains all expected subagent tools", () => {
-    const expected = [
-      "delegate_task",
-      "task_status",
-      "task_followup",
-      "task_interrupt",
-      "plan_status",
-      "wait",
-    ];
-    expect(SUBAGENT_TOOL_NAMES).toEqual(expected);
   });
 });
 

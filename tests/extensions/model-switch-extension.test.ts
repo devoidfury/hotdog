@@ -333,8 +333,7 @@ describe("ModelTool", () => {
 
   it("callDisplay handles null input", () => {
     const tool = new ModelTool({});
-    const display = tool.callDisplay(null);
-    expect(display).toBeDefined();
+    expect(tool.callDisplay(null)).toBe("");
   });
 
   it("handles empty registry", () => {
@@ -390,8 +389,7 @@ describe("Model-switch extension > edge cases", () => {
   it("extension exposes modelTool for external use", () => {
     const core = createMockCore();
     const ext = createModelSwitchExtension(core);
-    expect((ext as any).modelTool).toBeDefined();
-    expect((ext as any).modelTool.constructor.TOOL_NAME).toBe("model");
+    expect((ext as any).modelTool).toBeInstanceOf(ModelTool);
   });
 
   it("uses empty modelRegistry when core.resolved is undefined", () => {

@@ -47,21 +47,7 @@ describe("Info Show-Prompt Extension", () => {
   });
 });
 
-// ── One-Shot Extension ──────────────────────────────────────────────────────
-// CLI_ARGS_PARSED hook tests are in one-shot-cli.test.ts
-
-describe("One-Shot Extension", () => {
-  it("registers prompt subcommand via CLI_SUBCOMMANDS_REGISTER hook", async () => {
-    const core = createMockCore() as unknown as CoreContext;
-    const { create } = await import("../../src/extensions/ui-one-shot/index.ts");
-    const ext = create(core);
-
-    await ext.hooks![HOOKS.CLI_SUBCOMMANDS_REGISTER]!(core.cliSubcommandRegistry);
-
-    expect(core.cliSubcommandRegistry.has("prompt")).toBe(true);
-    expect(typeof core.cliSubcommandRegistry.get("prompt")!.handler).toBe("function");
-  });
-});
+// The prompt subcommand registration is covered in ui-one-shot.test.ts.
 
 // ── Subcommand Handler Return Type Tests ─────────────────────────────────────
 

@@ -415,14 +415,6 @@ export class SessionRegistry {
   }
 
   /** @internal */
-  get _test_timeoutMin(): number {
-    return this.#timeoutMin;
-  }
-  set _test_timeoutMin(v: number) {
-    this.#timeoutMin = v;
-  }
-
-  /** @internal */
   _test_cleanupIdleSessions(): void {
     this.#cleanupIdleSessions();
   }

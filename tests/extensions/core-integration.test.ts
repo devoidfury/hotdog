@@ -1,61 +1,33 @@
-import { describe, it, expect, beforeEach } from "bun:test";
+import { describe, it, expect } from "bun:test";
 import { HookSystem, HOOKS } from "../../src/core/hooks.ts";
 import { ExtensionLoader, type LoaderCore } from "../../src/core/extensions/extensions.ts";
 import { ToolRegistry } from "../../src/core/extensions/tool-registry.ts";
 import type { CoreContext } from "../../src/core/extensions/types.ts";
-import type { ServiceRegistry } from "../../src/core/extensions/service-registry.ts";
+import { ServiceRegistry } from "../../src/core/extensions/service-registry.ts";
 import type { ConfigRegistry } from "../../src/core/extensions/config.ts";
 import type { CliSubcommandRegistry } from "../../src/core/extensions/registries.ts";
 import { createCompletionService } from "../../src/core/completion.ts";
 import { create as createCompactionExtension } from "../../src/extensions/compaction/index.ts";
 import { create as createCoreToolsExtension } from "../../src/extensions/core-tools/index.ts";
 import { create as createSkillsExtension } from "../../src/extensions/skills/index.ts";
-import { create as createPromptsExtension } from "../../src/extensions/prompts/index.ts";
 import { create as createSessionLogExtension } from "../../src/extensions/session-log/index.ts";
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
-function createMockCore(config: Record<string, unknown> = {}): CoreContext {
+function createMockCore(): CoreContext {
   const hooks = new HookSystem();
   const toolRegistry = new ToolRegistry();
-  const serviceRegistry = {
-    _services: new Map<string, unknown>(),
-    register(name: string, impl: unknown) {
-      this._services.set(name, impl);
-    },
-    get(name: string): unknown {
-      const impl = this._services.get(name);
-      if (impl === undefined) throw new Error(`Service "${name}" is not registered.`);
-      return impl;
-    },
-    has(name: string): boolean {
-      return this._services.has(name);
-    },
-    names(): string[] {
-      return Array.from(this._services.keys());
-    },
-    checkContract(name: string, expectedMethods: string[]) {
-      const impl = this._services.get(name);
-      if (!impl) return { valid: false, missing: expectedMethods };
-      const missing = expectedMethods.filter((m: string) => typeof (impl as Record<string, unknown>)[m] !== "function");
-      return { valid: missing.length === 0, missing };
-    },
-  };
+  const serviceRegistry = new ServiceRegistry();
   return {
     hooks,
     config: {
-      compaction: config.compaction || {
-        enabled: true,
-        keepRecentMessages: 3,
-        strategy: "summarize",
-      },
-      skills: config.skills || { path: "/tmp/skills-test" },
-      promptsPath: config.promptsPath || "/tmp/prompts-test",
-      ...config,
+      compaction: { enabled: true, keepRecentMessages: 3, strategy: "summarize" },
+      skills: { path: "/tmp/skills-test" },
+      promptsPath: "/tmp/prompts-test",
     } as Record<string, unknown>,
     modelRegistry: {},
     toolRegistry,
-    services: serviceRegistry as unknown as ServiceRegistry,
+    services: serviceRegistry,
     completion: createCompletionService(),
     configRegistry: {
       validateConfigByKey: (_key: string, _config: unknown) => ({ valid: true, errors: [] }),
@@ -71,45 +43,22 @@ function wrapFactory(factory: (core: CoreContext) => unknown) {
   return { create: factory };
 }
 
-// ── Hook + Extension Integration ─────────────────────────────────────────────
+// ExtensionLoader mechanics (load/unload/hook registration) are covered
+// generically in tests/core/core-extensions.test.ts. These tests exercise the
+// loader with REAL extensions, which is the integration seam the generic
+// tests cannot reach.
 
-describe("Hook + Extension Integration", () => {
-  it("should wire up an extension to the hook system", async () => {
-    const core = createMockCore();
-    const loader = new ExtensionLoader(core as unknown as LoaderCore);
+// ── Loader + real extensions ────────────────────────────────────────────────
 
-    const ext = await loader.load(
-      "compaction",
-      wrapFactory(createCompactionExtension),
-    );
-    expect(ext).not.toBeNull();
-    expect(core.hooks.hookNames()).toContain(HOOKS.COMMANDS_REGISTER);
-  });
-
-  it("should support multiple extensions on the same hook", async () => {
-    const core = createMockCore();
-    const loader = new ExtensionLoader(core as unknown as LoaderCore);
-
-    await loader.load("compaction", wrapFactory(createCompactionExtension));
-    await loader.load("session-log", wrapFactory(createSessionLogExtension));
-
-    // Both should have registered their hooks
-    const hookNames = core.hooks.hookNames();
-    expect(hookNames).toContain(HOOKS.COMMANDS_REGISTER);
-    // session-log returns hooks object but doesn't register via hooks.on()
-    // The hooks are handled internally by the extension
-  });
-
-  it("should register tools from an extension", async () => {
+describe("Loader with real extensions", () => {
+  it("registers core tools from the core-tools extension during load", async () => {
     const core = createMockCore();
     const loader = new ExtensionLoader(core as unknown as LoaderCore);
 
     await loader.load("core-tools", wrapFactory(createCoreToolsExtension));
 
-    // Trigger the tools:register hook
-    core.hooks.notifyHooks(HOOKS.TOOLS_REGISTER, core.toolRegistry);
-
-    // Core tools should be registered (bash is now in bash-tool extension, fetch is in fetch-tool extension)
+    // The loader invokes the extension's TOOLS_REGISTER handler directly
+    // during load() (it is never registered on the HookSystem).
     const toolNames = core.toolRegistry.getAll().map(([name]) => name);
     expect(toolNames).toContain("overwrite");
     expect(toolNames).toContain("read");
@@ -131,96 +80,12 @@ describe("Hook + Extension Integration", () => {
     // project_info is registered (enabled by default)
     expect(toolNames).toContain("project_info");
   });
-
-  it("should handle extension lifecycle: load -> use -> unload", async () => {
-    const core = createMockCore();
-    const loader = new ExtensionLoader(core as unknown as LoaderCore);
-
-    // Load
-    const ext = await loader.load(
-      "compaction",
-      wrapFactory(createCompactionExtension),
-    );
-    expect(ext).not.toBeNull();
-    expect(loader.has("compaction")).toBe(true);
-    expect(loader.size()).toBe(1);
-
-    // Use (hooks are registered)
-    expect(core.hooks.hookNames()).toContain(HOOKS.COMMANDS_REGISTER);
-
-    // Unload
-    await loader.unload("compaction");
-    expect(loader.has("compaction")).toBe(false);
-    expect(loader.size()).toBe(0);
-  });
-
-  it("should support disabled extensions (create returns null)", async () => {
-    const core = createMockCore({ compaction: { enabled: false } });
-    const loader = new ExtensionLoader(core as unknown as LoaderCore);
-
-    const ext = await loader.load(
-      "compaction",
-      wrapFactory(createCompactionExtension),
-    );
-    expect(ext).toBeNull();
-    expect(loader.has("compaction")).toBe(false);
-  });
-});
-
-// ── Skills Extension ─────────────────────────────────────────────────────────
-
-describe("Skills Extension", () => {
-  it("should create skills extension and expose loader", async () => {
-    const core = createMockCore();
-    const ext = await createSkillsExtension(core);
-    expect(ext).not.toBeNull();
-    expect(ext.loader).toBeDefined();
-  });
-
-  it("should register load_skill tool", async () => {
-    const core = createMockCore();
-    const loader = new ExtensionLoader(core as unknown as LoaderCore);
-    await loader.load("skills", wrapFactory(createSkillsExtension));
-
-    // Tools are registered during load() - no need to emit hook again
-    expect(core.toolRegistry.has("load_skill")).toBe(true);
-  });
-});
-
-// ── Prompts Extension ────────────────────────────────────────────────────────
-
-describe("Prompts Extension", () => {
-  it("should create prompts extension and expose loader", async () => {
-    const core = createMockCore();
-    const ext = await createPromptsExtension(core);
-    expect(ext).not.toBeNull();
-    expect(ext.loader).toBeDefined();
-  });
-});
-
-// ── Session Log Extension ────────────────────────────────────────────────────
-
-describe("Session Log Extension", () => {
-  it("should create extension with hooks", async () => {
-    const core = createMockCore();
-    const ext = await createSessionLogExtension(core);
-    expect(ext).not.toBeNull();
-    // Session log extension has hooks but sessionId/logPath are dynamic
-    expect(ext.hooks).toBeDefined();
-  });
-
-  it("should register hooks for message logging", async () => {
-    const core = createMockCore();
-    const ext = await createSessionLogExtension(core);
-    expect(ext.hooks![HOOKS.CONTEXT_MESSAGE]).toBeDefined();
-    // Tool results are logged via CONTEXT_MESSAGE (for tool role messages)
-  });
 });
 
 // ── Full Extension Chain ─────────────────────────────────────────────────────
 
 describe("Full Extension Chain", () => {
-  it("should load all extensions and have them all registered", async () => {
+  it("loads multiple real extensions together without conflicts", async () => {
     const core = createMockCore();
     const loader = new ExtensionLoader(core as unknown as LoaderCore);
 
@@ -231,11 +96,14 @@ describe("Full Extension Chain", () => {
 
     expect(loader.size()).toBe(4);
 
-    // Check that all expected hooks are registered
+    // HookSystem wiring: skills registers SYSTEM_PROMPT_BUILD, TOOLS_REGISTER
+    // is invoked directly by the loader during load() and never lands here.
     const hookNames = core.hooks.hookNames();
-    expect(hookNames).toContain(HOOKS.COMMANDS_REGISTER);
-    expect(hookNames).not.toContain(HOOKS.TOOLS_REGISTER); // called directly in load()
-    expect(hookNames).toContain(HOOKS.SYSTEM_PROMPT_BUILD); // skills
-    expect(hookNames).toContain(HOOKS.COMMANDS_REGISTER); // commands
+    expect(hookNames).toContain(HOOKS.SYSTEM_PROMPT_BUILD);
+    expect(hookNames).not.toContain(HOOKS.TOOLS_REGISTER);
+
+    // Tools from both tool-registering extensions landed in the registry.
+    expect(core.toolRegistry.has("load_skill")).toBe(true);
+    expect(core.toolRegistry.has("overwrite")).toBe(true);
   });
 });

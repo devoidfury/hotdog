@@ -69,38 +69,6 @@ describe("subagents extension create()", () => {
     expect(result!.hooks).toBeDefined();
   });
 
-  it("registers AGENT_TOOL_CONTEXT hook when created", () => {
-    const core = createMockCore({
-      coreConfig: {
-        profileDef: { manager: true },
-      },
-    });
-    const result = create(core, { taskManager: makeMockTM() });
-    expect(result!.hooks![HOOKS.AGENT_TOOL_CONTEXT]).toBeDefined();
-  });
-
-  it("registers TOOLS_REGISTER hook when created", () => {
-    const core = createMockCore({
-      coreConfig: {
-        profileDef: { manager: true },
-      },
-    });
-    const result = create(core, { taskManager: makeMockTM() });
-    expect(result!.hooks![HOOKS.TOOLS_REGISTER]).toBeDefined();
-  });
-
-  it("exposes SUBAGENT_TOOL_NAMES and SUBAGENT_TOOL_CONSTRUCTORS", () => {
-    const core = createMockCore({
-      coreConfig: {
-        profileDef: { manager: true },
-      },
-    });
-    const result = create(core, { taskManager: makeMockTM() });
-    expect(result!.SUBAGENT_TOOL_NAMES).toBeDefined();
-    expect(result!.SUBAGENT_TOOL_CONSTRUCTORS).toBeDefined();
-    expect(Array.isArray(result!.SUBAGENT_TOOL_NAMES)).toBe(true);
-  });
-
   it("AGENT_TOOL_CONTEXT hook sets taskManager on toolCtx", async () => {
     const mockTM = makeMockTM();
     const mockSessionCore = { sessionId: "test-session" };

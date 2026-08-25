@@ -30,14 +30,6 @@ function cleanupTestFile(sessionId: string) {
 }
 
 describe("session-log extension create()", () => {
-  it("returns extension with hooks", async () => {
-    const ext = await create(createMockCore() as any) as any;
-    expect(ext.hooks).toBeDefined();
-    expect(ext.hooks[HOOKS.CONTEXT_MESSAGE]).toBeDefined();
-    expect(ext.hooks[HOOKS.OUTPUT_EVENT]).toBeDefined();
-    expect(ext.hooks[HOOKS.SESSION_RESTORE_ACTIVE]).toBeDefined();
-  });
-
   it("CONTEXT_MESSAGE hook logs messages with the correct source per role", async () => {
     const sessionId = `test-roles-${Date.now()}`;
     try {

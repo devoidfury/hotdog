@@ -73,16 +73,6 @@ describe("ui-one-shot extension", () => {
   }
 
   describe("create", () => {
-    it("returns extension with hooks when core.hooks exists", async () => {
-      const { create } = await import("../../src/extensions/ui-one-shot/index.ts");
-      const core = createMockCore();
-
-      const ext = create(core);
-      expect(ext.hooks).toBeDefined();
-      expect(ext.hooks![HOOKS.CLI_ARGS_PARSED]).toBeDefined();
-      expect(ext.hooks![HOOKS.CLI_SUBCOMMANDS_REGISTER]).toBeDefined();
-    });
-
     it("returns extension without hooks when core.hooks is undefined", async () => {
       const { create } = await import("../../src/extensions/ui-one-shot/index.ts");
       const core = { ...createMockCore(), hooks: undefined };
@@ -124,6 +114,28 @@ describe("ui-one-shot extension", () => {
       await ext.hooks![HOOKS.CLI_ARGS_PARSED]!({ cli });
 
       expect(cli.subcommand).toBeUndefined();
+    });
+
+    it("does not interfere with other subcommands", async () => {
+      const { create } = await import("../../src/extensions/ui-one-shot/index.ts");
+      const core = createMockCore();
+      const ext = create(core);
+
+      const cli = { subcommand: "info" } as any;
+      await ext.hooks![HOOKS.CLI_ARGS_PARSED]!({ cli });
+
+      expect(cli.subcommand).toBe("info");
+    });
+
+    it("overrides existing subcommand when prompt is set", async () => {
+      const { create } = await import("../../src/extensions/ui-one-shot/index.ts");
+      const core = createMockCore();
+      const ext = create(core);
+
+      const cli = { subcommand: "info", prompt: "hello" } as any;
+      await ext.hooks![HOOKS.CLI_ARGS_PARSED]!({ cli });
+
+      expect(cli.subcommand).toBe("prompt");
     });
   });
 
@@ -189,6 +201,9 @@ describe("ui-one-shot extension", () => {
       const registry: Record<string, SubcommandDefinition> = {};
       await ext.hooks![HOOKS.CLI_SUBCOMMANDS_REGISTER]!({ register: (name: string, def: SubcommandDefinition) => { registry[name] = def; } } as CliSubcommandRegistryLike);
 
+      let cleanupCalled = false;
+      core.extensions.cleanup = async () => { cleanupCalled = true; };
+
       const exitCode = await (registry.prompt as any).handler({ prompt: "test prompt" }, core);
 
       expect(exitCode).toBe(0);
@@ -198,6 +213,74 @@ describe("ui-one-shot extension", () => {
       expect(createOpts!.taskConfig.maxIterations).toBe(100);
       expect(createOpts!.taskConfig.taskProfile).toBe("task-default");
       expect(enqueuedPrompt).toBe("test prompt");
+      expect(cleanupCalled).toBe(true);
+    });
+
+    it("handles null bus gracefully", async () => {
+      const { create } = await import("../../src/extensions/ui-one-shot/index.ts");
+      const { SessionManager } = await import("../../src/core/session/index.ts");
+      const core = createMockCore();
+      const ext = create(core);
+
+      (SessionManager as any).create = async () => ({
+        sessionId: () => "null-bus-session",
+        getAgent: () => ({ sessionId: "null-bus-session" }),
+        getBus: () => null,
+        getTaskManager: () => null,
+        enqueue: () => {},
+        executeCommand: async () => 0,
+        onSessionEvents: () => () => {},
+      });
+
+      const registry: Record<string, SubcommandDefinition> = {};
+      await ext.hooks![HOOKS.CLI_SUBCOMMANDS_REGISTER]!({ register: (name: string, def: SubcommandDefinition) => { registry[name] = def; } } as CliSubcommandRegistryLike);
+
+      const exitCode = await (registry.prompt as any).handler({ prompt: "test" }, core);
+
+      expect(exitCode).toBe(0);
+    });
+
+    it("propagates SessionManager.create failures", async () => {
+      const { create } = await import("../../src/extensions/ui-one-shot/index.ts");
+      const { SessionManager } = await import("../../src/core/session/index.ts");
+      const core = createMockCore();
+      const ext = create(core);
+
+      (SessionManager as any).create = async () => {
+        throw new Error("SessionManager creation failed");
+      };
+
+      const registry: Record<string, SubcommandDefinition> = {};
+      await ext.hooks![HOOKS.CLI_SUBCOMMANDS_REGISTER]!({ register: (name: string, def: SubcommandDefinition) => { registry[name] = def; } } as CliSubcommandRegistryLike);
+
+      await expect(
+        (registry.prompt as any).handler({ prompt: "test" }, core),
+      ).rejects.toThrow("SessionManager creation failed");
+    });
+
+    it("enqueues an empty prompt when neither prompt nor args are given", async () => {
+      const { create } = await import("../../src/extensions/ui-one-shot/index.ts");
+      const { SessionManager } = await import("../../src/core/session/index.ts");
+      const core = createMockCore();
+      const ext = create(core);
+
+      let enqueuedPrompt = "";
+      (SessionManager as any).create = async () => ({
+        sessionId: () => "empty-prompt-session",
+        getAgent: () => ({ sessionId: "empty-prompt-session" }),
+        getBus: () => ({ runUntilCancelled: async () => {} }),
+        getTaskManager: () => null,
+        enqueue: (_sessionId: string, prompt: string) => { enqueuedPrompt = prompt; },
+        executeCommand: async () => 0,
+        onSessionEvents: () => () => {},
+      });
+
+      const registry: Record<string, SubcommandDefinition> = {};
+      await ext.hooks![HOOKS.CLI_SUBCOMMANDS_REGISTER]!({ register: (name: string, def: SubcommandDefinition) => { registry[name] = def; } } as CliSubcommandRegistryLike);
+
+      await (registry.prompt as any).handler({ prompt: undefined, args: undefined }, core);
+
+      expect(enqueuedPrompt).toBe("");
     });
 
     it("uses args joined as prompt when prompt is not provided", async () => {
@@ -351,39 +434,6 @@ describe("ui-one-shot extension", () => {
       await (registry.prompt as any).handler({ prompt: "test" }, core);
 
       expect(cleanupCalled).toBe(true);
-    });
-
-    it("builds agent with correct configuration", async () => {
-      const { create } = await import("../../src/extensions/ui-one-shot/index.ts");
-      const { SessionManager } = await import("../../src/core/session/index.ts");
-      const core = createMockCore();
-      const ext = create(core);
-
-      let buildAgentFn: any = null;
-      const mockBus = {
-        runUntilCancelled: async () => {},
-      };
-
-      (SessionManager as any).create = async (opts: any) => {
-        buildAgentFn = opts.buildAgent;
-        return {
-          sessionId: () => "agent-config-session",
-          getAgent: () => ({ sessionId: "agent-config-session" }),
-          getBus: () => mockBus,
-          getTaskManager: () => null,
-          enqueue: () => {},
-          executeCommand: async () => 0,
-          onSessionEvents: () => () => {},
-        };
-      };
-
-      const registry: Record<string, SubcommandDefinition> = {};
-      await ext.hooks![HOOKS.CLI_SUBCOMMANDS_REGISTER]!({ register: (name: string, def: SubcommandDefinition) => { registry[name] = def; } } as CliSubcommandRegistryLike);
-
-      await (registry.prompt as any).handler({ prompt: "test" }, core);
-
-      expect(buildAgentFn).toBeDefined();
-      expect(typeof buildAgentFn).toBe("function");
     });
 
     it("executes buildAgent callback with agent configuration", async () => {

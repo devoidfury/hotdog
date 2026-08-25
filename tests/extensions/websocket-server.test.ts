@@ -185,7 +185,6 @@ describe("SessionRegistry", () => {
     const result = await registry.create();
     const meta = registry._test_metadata.get(result.sessionId);
     if (meta) meta.lastActivityAt = Date.now() - 100 * 60 * 1000; // 100 minutes ago
-    registry._test_timeoutMin = 30;
     registry._test_cleanupIdleSessions();
 
     expect(registry.get(result.sessionId)).toBeNull();
@@ -198,7 +197,6 @@ describe("SessionRegistry", () => {
       meta.lastActivityAt = Date.now() - 100 * 60 * 1000;
       meta.connectedClients = 1;
     }
-    registry._test_timeoutMin = 30;
     registry._test_cleanupIdleSessions();
 
     expect(registry.get(result.sessionId)).not.toBeNull();
@@ -206,7 +204,6 @@ describe("SessionRegistry", () => {
 
   it("does not clean up recently active sessions", async () => {
     const result = await registry.create();
-    registry._test_timeoutMin = 30;
     registry._test_cleanupIdleSessions();
 
     expect(registry.get(result.sessionId)).not.toBeNull();
@@ -664,7 +661,10 @@ describe("createWsServer - auth", () => {
     wsServer.onUpgrade({ url: "/ws", headers: { host: "localhost" } }, ws);
 
     wsServer.onMessage(ws, JSON.stringify({ type: C2S.AUTH, token: "valid-token" }));
-    expect(await waitForMessage(ws, "authOk")).toBeDefined();
+
+    // waitForMessage rejects on timeout, so both awaits are the assertion:
+    // the AUTH reply arrives and a session gets opened.
+    await waitForMessage(ws, "authOk");
     await waitForMessage(ws, S2C.SESSION_CREATED);
   });
 

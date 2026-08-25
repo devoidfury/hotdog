@@ -144,48 +144,57 @@ describe("WebSearchTool provider error handling", () => {
 });
 
 describe("WebSearchTool extension create", () => {
-  it("creates extension with default config", async () => {
+  it("creates extension with default config and registers the tool", async () => {
     const { create } = await import("../../src/extensions/web-search/index.ts");
-    const core = { config: {} } as unknown as CoreContext;
-    const ext = create(core);
-    expect(ext).toBeDefined();
-    expect(ext.WebSearchTool).toBeDefined();
-    expect(ext.hooks).toBeDefined();
-  });
-
-  it("creates extension with custom config", async () => {
-    const { create } = await import("../../src/extensions/web-search/index.ts");
-    const core = {
-      config: {
-        webSearch: {
-          provider: "duckduckgo",
-          maxResults: 3,
-          timeout: 10,
-        },
-      },
-    } as unknown as CoreContext;
-    const ext = create(core);
     const { HOOKS } = await import("../../src/core/hooks.ts");
     const { createToolRegistry } =
       await import("../../src/core/extensions/tool-registry.ts");
 
+    const ext = create({ config: {} } as unknown as CoreContext);
     const registry = createToolRegistry();
     await ext.hooks![HOOKS.TOOLS_REGISTER]!(registry);
     expect(registry.has("web_search")).toBe(true);
   });
 
+  it("reads provider settings from config", async () => {
+    const { create } = await import("../../src/extensions/web-search/index.ts");
+    const { HOOKS } = await import("../../src/core/hooks.ts");
+    const { createToolRegistry } =
+      await import("../../src/core/extensions/tool-registry.ts");
+
+    const ext = create({
+      config: { webSearch: { provider: "duckduckgo", maxResults: 3, timeout: 10 } },
+    } as unknown as CoreContext);
+    const registry = createToolRegistry();
+    await ext.hooks![HOOKS.TOOLS_REGISTER]!(registry);
+
+    const tool = registry.get("web_search") as WebSearchTool;
+    expect(tool).toBeInstanceOf(WebSearchTool);
+    expect(tool.maxResults).toBe(3);
+  });
+
   it("reads API keys from config", async () => {
     const { create } = await import("../../src/extensions/web-search/index.ts");
-    const core = {
+    const { HOOKS } = await import("../../src/core/hooks.ts");
+    const { createToolRegistry } =
+      await import("../../src/core/extensions/tool-registry.ts");
+
+    // A tavily key from config must reach the registered tool: with it the
+    // search proceeds; without it the tool reports "not configured".
+    const ext = create({
       config: {
-        webSearch: {
-          provider: "tavily",
-          tavilyApiKey: "test-api-key",
-        },
+        webSearch: { provider: "tavily", maxResults: 5, timeout: 15, tavilyApiKey: "test-api-key" },
       },
-    } as unknown as CoreContext;
-    const ext = create(core);
-    expect(ext).toBeDefined();
+    } as unknown as CoreContext);
+    const registry = createToolRegistry();
+    await ext.hooks![HOOKS.TOOLS_REGISTER]!(registry);
+
+    const tool = registry.get("web_search") as WebSearchTool;
+    await withMockFetch(async () => jsonResponse({ results: [] }), async () => {
+      const result = await tool.execute(JSON.stringify({ query: "test" }));
+      expect(result.success).toBe(true);
+      expect(resultStr(result)).not.toContain("not configured");
+    });
   });
 });
 

@@ -628,10 +628,11 @@ describe("FetchTool integration", () => {
     it("sends HEAD request", async () => {
       const tool = new FetchTool({ timeoutMs: 30000, maxBodyLength: 8000, allowPrivateHosts: true });
       const result = await tool.execute(
-        JSON.stringify({ url: `${BASE_URL}/html`, method: "HEAD" }),
+        JSON.stringify({ url: `${BASE_URL}/status/200`, method: "HEAD" }),
       );
-      // HEAD request should succeed
+      // HEAD succeeds with a 200 status and no body content
       expect(result.error).toBeFalsy();
+      expect(result.metadata?.get("status")).toBe("200");
     });
   });
 

@@ -12,8 +12,6 @@ import {
   SUBAGENT_TOOL_NAMES,
   SUBAGENT_TOOL_CONSTRUCTORS,
 } from "../../src/extensions/subagents/subagents.ts";
-import { create } from "../../src/extensions/subagents/index.ts";
-import { HOOKS } from "../../src/core/hooks.ts";
 import { ToolContext } from "../../src/core/extensions/tool-context.ts";
 
 // ── Helpers ────────────────────────────────────────────────────────────────
@@ -476,26 +474,19 @@ describe("WaitTool", () => {
 });
 
 describe("SUBAGENT_TOOL_NAMES", () => {
-  it("contains all tool names", () => {
-    expect(SUBAGENT_TOOL_NAMES).toContain("delegate_task");
-    expect(SUBAGENT_TOOL_NAMES).toContain("task_status");
-    expect(SUBAGENT_TOOL_NAMES).toContain("task_followup");
-    expect(SUBAGENT_TOOL_NAMES).toContain("task_interrupt");
-    expect(SUBAGENT_TOOL_NAMES).toContain("plan_status");
-    expect(SUBAGENT_TOOL_NAMES).toContain("wait");
+  it("contains exactly the subagent tool names", () => {
+    expect(SUBAGENT_TOOL_NAMES).toEqual([
+      "delegate_task",
+      "task_status",
+      "task_followup",
+      "task_interrupt",
+      "plan_status",
+      "wait",
+    ]);
   });
 });
 
 describe("SUBAGENT_TOOL_CONSTRUCTORS", () => {
-  it("contains constructors for all tools", () => {
-    expect(SUBAGENT_TOOL_CONSTRUCTORS.delegate_task).toBeDefined();
-    expect(SUBAGENT_TOOL_CONSTRUCTORS.task_status).toBeDefined();
-    expect(SUBAGENT_TOOL_CONSTRUCTORS.task_followup).toBeDefined();
-    expect(SUBAGENT_TOOL_CONSTRUCTORS.task_interrupt).toBeDefined();
-    expect(SUBAGENT_TOOL_CONSTRUCTORS.plan_status).toBeDefined();
-    expect(SUBAGENT_TOOL_CONSTRUCTORS.wait).toBeDefined();
-  });
-
   it("constructors return correct tool instances", () => {
     const opts = { taskManager: makeMockTM() };
     expect(SUBAGENT_TOOL_CONSTRUCTORS.delegate_task!(opts)).toBeInstanceOf(DelegateTaskTool);
@@ -504,85 +495,5 @@ describe("SUBAGENT_TOOL_CONSTRUCTORS", () => {
     expect(SUBAGENT_TOOL_CONSTRUCTORS.task_interrupt!(opts)).toBeInstanceOf(TaskInterruptTool);
     expect(SUBAGENT_TOOL_CONSTRUCTORS.plan_status!(opts)).toBeInstanceOf(PlanStatusTool);
     expect(SUBAGENT_TOOL_CONSTRUCTORS.wait!(opts)).toBeInstanceOf(WaitTool);
-  });
-});
-
-describe("Extension create()", () => {
-  it("returns extension when taskManager is not provided (lazy mode resolves it at use time)", () => {
-    const core = {
-      config: { profileDef: { manager: true } },
-      hooks: { on: () => {}, notifyHooks: () => {}, notifyHooksAsync: () => {}, runHookPipeline: async () => ({ results: [], lastResult: undefined, stopped: false, data: {} }) },
-      toolRegistry: {},
-      extensions: { has: () => false, load: async () => null, cleanup: async () => {} },
-      services: { get: () => null, has: () => false },
-      cliSubcommandRegistry: { register: () => {}, has: () => false },
-      configRegistry: {},
-      service: () => null,
-    } as any;
-    const ext = create(core);
-    expect(ext).not.toBeNull();
-    expect(ext!.hooks![HOOKS.TOOLS_REGISTER]).toBeDefined();
-  });
-
-  it("returns null when profile is not a manager", () => {
-    const core = {
-      config: { profileDef: {} },
-      hooks: { on: () => {}, notifyHooks: () => {}, notifyHooksAsync: () => {}, runHookPipeline: async () => ({ results: [], lastResult: undefined, stopped: false, data: {} }) },
-      toolRegistry: {},
-      extensions: { has: () => false, load: async () => null, cleanup: async () => {} },
-      services: { get: () => null, has: () => false },
-      cliSubcommandRegistry: { register: () => {}, has: () => false },
-      configRegistry: {},
-      service: () => null,
-    } as any;
-    const ext = create(core, { taskManager: makeMockTM() });
-    expect(ext).toBeNull();
-  });
-
-  it("returns extension when manager is enabled with taskManager", () => {
-    const core = {
-      config: { profileDef: { manager: true } },
-      hooks: { on: () => {}, notifyHooks: () => {}, notifyHooksAsync: () => {}, runHookPipeline: async () => ({ results: [], lastResult: undefined, stopped: false, data: {} }) },
-      toolRegistry: {},
-      extensions: { has: () => false, load: async () => null, cleanup: async () => {} },
-      services: { get: () => null, has: () => false },
-      cliSubcommandRegistry: { register: () => {}, has: () => false },
-      configRegistry: {},
-      service: () => null,
-    } as any;
-    const ext = create(core, { taskManager: makeMockTM() });
-    expect(ext).not.toBeNull();
-  });
-});
-
-describe("Extension hooks registration", () => {
-  it("registers tools on TOOLS_REGISTER hook", async () => {
-    const registered: any[] = [];
-    const core = {
-      config: { profileDef: { manager: true } },
-      hooks: {
-        on: () => {},
-        notifyHooks: () => {},
-        notifyHooksAsync: () => {},
-        runHookPipeline: async () => ({ results: [], lastResult: undefined, stopped: false, data: {} }),
-      },
-      toolRegistry: {
-        register: (name: string, tool: any) => {
-          registered.push({ name, tool });
-          return registered.length;
-        },
-        getAll: () => registered.map((r) => r.tool),
-      },
-      extensions: { has: () => false, load: async () => null, cleanup: async () => {} },
-      services: { get: () => null, has: () => false },
-      cliSubcommandRegistry: { register: () => {}, has: () => false },
-      configRegistry: {},
-      service: () => null,
-    } as any;
-    const ext = create(core, { taskManager: makeMockTM() });
-    expect(ext).not.toBeNull();
-    expect(ext!.hooks!["tools:register"]).toBeDefined();
-    await ext!.hooks!["tools:register"]!({ register: core.toolRegistry.register } as any);
-    expect(registered.length).toBeGreaterThan(0);
   });
 });

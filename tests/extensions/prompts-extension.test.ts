@@ -24,20 +24,6 @@ describe("Prompts Extension", () => {
     return filePath;
   }
 
-  it("creates extension with loader", async () => {
-    writePromptFile(
-      "greet",
-      "---\ndescription: Greet someone\n---\nHello {ARGS}",
-    );
-
-    const ext = await create({
-      config: { prompts: { promptsPath: tmpDir, displayPrompt: true } },
-    } as any);
-
-    expect(ext).toBeDefined();
-    expect((ext as any).loader).toBeDefined();
-  });
-
   it("getAllPrompts returns all loaded prompts", async () => {
     writePromptFile("greet", "---\ndescription: Greet\n---\nHello");
     writePromptFile("farewell", "---\ndescription: Farewell\n---\nGoodbye");
@@ -179,6 +165,7 @@ describe("Prompts Extension", () => {
 
   it("handles default promptsPath when not configured", async () => {
     const ext = await create({ config: {} } as any);
-    expect((ext as any).loader).toBeDefined();
+    // Default path resolves and loads without error; returns a list (possibly empty).
+    expect(Array.isArray((ext as any).getAllPrompts())).toBe(true);
   });
 });

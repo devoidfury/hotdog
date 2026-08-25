@@ -157,6 +157,13 @@ describe("CompletionService — matching", () => {
     const results = await svc.request(makeCtx());
     expect(results).toEqual([{ value: "x" }]);
   });
+
+  it("should dedupe options with the same value across handlers", async () => {
+    svc.register(() => true, () => [{ value: "x" }, { value: "y" }], "a");
+    svc.register(() => true, () => [{ value: "x" }, { value: "z" }], "b");
+    const results = await svc.request(makeCtx());
+    expect(results).toEqual([{ value: "x" }, { value: "y" }, { value: "z" }]);
+  });
 });
 
 describe("CompletionService — async handlers", () => {

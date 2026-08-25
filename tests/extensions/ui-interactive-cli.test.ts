@@ -1029,6 +1029,120 @@ describe("runInteractiveSession default setupInput", () => {
       (await import("../../src/core/session/index.ts")).SessionManager.create = originalCreate;
     }
   });
+
+  it("wires command argument completions fired during initial SessionManager.create", async () => {
+    // Regression: buildInteractiveAgent fires COMMANDS_REGISTER inside
+    // SessionManager.create, so the completion listener must be registered
+    // before create. Otherwise initial-agent argument completions
+    // (e.g. /reasoning <levels>) are never wired up.
+    const { createCompletionService } = await import("../../src/core/completion.ts");
+    const { HookSystem } = await import("../../src/core/hooks.ts");
+
+    const completion = createCompletionService();
+    const hooks = new HookSystem();
+
+    const levels = ["none", "minimal", "low", "medium", "high", "xhigh", "max", "unset"];
+    const commandRegistry = {
+      all: () =>
+        new Map([
+          [
+            "reasoning",
+            {
+              completion: (ctx: { commandArg?: string }) =>
+                levels
+                  .filter((l) => l.startsWith((ctx.commandArg ?? "").toLowerCase()))
+                  .map((l) => ({ value: l })),
+            },
+          ],
+        ]),
+      names: () => ["reasoning"],
+    };
+    const mockAgent = { commandRegistry, modelRegistry: {} };
+    const mockSessionManager = {
+      getAgent: () => mockAgent,
+      sessionId: () => "test-session",
+      getBus: () => ({ run: async () => {} }),
+      getTaskManager: () => null,
+      executeCommand: async () => undefined,
+      onSessionEvents: () => () => {},
+      interrupt: () => {},
+    };
+
+    const originalCreate = (await import("../../src/core/session/index.ts")).SessionManager.create;
+    try {
+      // Mimics buildInteractiveAgent: the hook fires during create.
+      (await import("../../src/core/session/index.ts")).SessionManager.create = async () => {
+        hooks.notifyHooks(HOOKS.COMMANDS_REGISTER, {
+          registry: commandRegistry as never,
+          agent: mockAgent as never,
+        });
+        return mockSessionManager as never;
+      };
+
+      await runInteractiveSession(
+        {},
+        {
+          resolved: {
+            model: "test-model",
+            theme: "dark",
+            apiKey: "test-key",
+            baseUrl: "http://test",
+            stream: true,
+            chatTimeout: 60,
+            maxRetries: 3,
+            maxIterations: 100,
+            profileName: "test",
+            hideTools: false,
+            hideThinking: false,
+            showTokenUse: false,
+            role: undefined,
+            profileBody: undefined,
+            taskProfile: "task-default",
+            taskDefaultRole: "",
+            modelRegistry: {},
+          },
+          config: { providers: [] },
+          hooks,
+          toolRegistry: { names: () => [], get: () => undefined, getAll: () => [], isEmpty: () => true },
+          extensions: { get: () => undefined, getAll: () => [], cleanup: () => {} },
+          completion,
+          createLlmClient: (overrides?: Record<string, unknown>) =>
+            new LlmClient({ baseUrl: "http://test", apiKey: "test-key", stream: true,
+              chatTimeoutSecs: 60, maxRetries: 3, ...overrides }),
+        } as never,
+        {
+          createReadline: () =>
+            ({
+              on: () => {},
+              removeListener: () => {},
+              question: () => {},
+              prompt: () => {},
+              pause: () => {},
+              resume: () => {},
+              setPrompt: () => {},
+              close: () => {},
+            }) as unknown as readline.Interface,
+          onClose: () => {},
+          onSIGINT: () => {},
+          setupInput: () => {},
+        },
+      );
+    } finally {
+      (await import("../../src/core/session/index.ts")).SessionManager.create = originalCreate;
+    }
+
+    // Tab after "/reasoning " should offer all levels.
+    const line = "/reasoning ";
+    const ctx = parseCompletionContext(line, line.length, mockAgent as never);
+    const options = await completion.request(ctx, 200);
+    expect(options.map((o) => o.value).sort()).toEqual([...levels].sort());
+
+    // Tab after a partial level should filter.
+    const partial = "/reasoning med";
+    const ctx2 = parseCompletionContext(partial, partial.length, mockAgent as never);
+    const options2 = await completion.request(ctx2, 200);
+    expect(options2.map((o) => o.value)).toEqual(["medium"]);
+  });
 });
 
 // ── buildInteractiveAgent ──────────────────────────────────────────────────

@@ -110,9 +110,14 @@ export class CompletionService {
     });
 
     const results = await Promise.all(handlerPromises);
+    const seen = new Set<string>();
     for (const options of results) {
-      if (options && options.length > 0) {
-        allResults.push(...options);
+      if (!options) continue;
+      for (const option of options) {
+        if (!seen.has(option.value)) {
+          seen.add(option.value);
+          allResults.push(option);
+        }
       }
     }
 

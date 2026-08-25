@@ -432,6 +432,19 @@ export async function runInteractiveSession(
     return buildInteractiveAgent(agentConfig, core, resolved, config, llmClient, cli);
   };
 
+  // Wire up completion handlers BEFORE the session (and its agent) is created:
+  // the initial agent fires COMMANDS_REGISTER during SessionManager.create, so a
+  // listener registered afterwards would miss it and command-argument completions
+  // (e.g. /reasoning <levels>) would never be registered.
+  registerSlashCommandNameCompletion(core.completion);
+  core.hooks.on(
+    HOOKS.COMMANDS_REGISTER,
+    ({ registry }) => {
+      registerCommandCompletions(core.completion, registry, "ui-interactive-cli");
+    },
+    "ui-interactive-cli",
+  );
+
   const sessionManager = await SessionManager.create({
     hooks: core.hooks,
     extensions: core.extensions,
@@ -451,17 +464,6 @@ export async function runInteractiveSession(
   // Publish the TaskManager for lazy lookup by subagent tools; extensions
   // (and their tools) were loaded before this session existed.
   registerTaskManagerService(core, sessionManager.getTaskManager());
-
-  registerSlashCommandNameCompletion(core.completion);
-
-  // Hook into COMMANDS_REGISTER so completions are wired up as commands are registered
-  core.hooks.on(
-    HOOKS.COMMANDS_REGISTER,
-    ({ registry }) => {
-      registerCommandCompletions(core.completion, registry, "ui-interactive-cli");
-    },
-    "ui-interactive-cli",
-  );
 
   const agent = sessionManager.getAgent();
   console.log(`hotdog ${pkg.version} (interactive mode)`);

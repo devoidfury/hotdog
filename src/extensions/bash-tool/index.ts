@@ -100,6 +100,7 @@ export class BashTool {
           CI: "true",
           TERM: "dumb",
           NO_COLOR: "1",
+          EDITOR: "cat",
           // prevent git from opening a blocking nano/vim/etc prompt during a commit
           GIT_TERMINAL_PROMPT: "0",
           GIT_EDITOR: "cat",

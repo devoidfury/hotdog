@@ -2,8 +2,10 @@
 // and other paths.
 
 import { describe, it, expect, mock, beforeEach, afterEach } from "bun:test";
+import fs from "node:fs";
 import { McpClient, McpError } from "../../src/extensions/mcp-client/client.ts";
 import { HttpTransport, StdioTransport } from "../../src/extensions/mcp-client/transports.ts";
+import { tmpDir, cleanupDir, processAlive, waitForExit } from "../helpers.ts";
 
 // ── McpClient._sendRequest Tests ─────────────────────────────────────────────
 
@@ -444,6 +446,35 @@ describe("StdioTransport", () => {
       delete process.env.TEST_SCRUB_SAFE_VAR;
     }
   });
+
+  it("kills grandchild processes on destroy (process group)", async () => {
+    const dir = tmpDir("hotdog-mcp-group-");
+    const pidFile = `${dir}/pid`;
+    try {
+      // sh plays the MCP server; the backgrounded sleep is a worker it
+      // spawned. destroy() must take down the whole group, not just sh --
+      // otherwise the worker leaks when the server goes away.
+      const transport = new StdioTransport(
+        "sh",
+        ["-c", `sleep 300 & echo $! > ${pidFile}; cat`],
+      );
+
+      const start = Date.now();
+      while (!fs.existsSync(pidFile)) {
+        if (Date.now() - start > 5000) throw new Error("worker pid never written");
+        await new Promise((r) => setTimeout(r, 20));
+      }
+      const workerPid = parseInt(fs.readFileSync(pidFile, "utf-8").trim(), 10);
+      expect(processAlive(workerPid)).toBe(true);
+
+      await transport.destroy();
+
+      await waitForExit(workerPid);
+      expect(processAlive(workerPid)).toBe(false);
+    } finally {
+      cleanupDir(dir);
+    }
+  }, 15000);
 
   it("skips empty lines", async () => {
     const transport = new StdioTransport("bun", ["-e", "console.log(''); console.log(''); console.log('line'); console.log('');"]);

@@ -2,6 +2,7 @@ import { spawn, ChildProcess } from "node:child_process";
 import { logger } from "@core/logger.ts";
 import { formatError } from "@core/error.ts";
 import { copyScrubbedEnv } from "@utils/env.ts";
+import { OWN_PROCESS_GROUP, killProcessGroup } from "@utils/process-group.ts";
 import { hotdogFetch } from "@utils/fetch.ts";
 import { McpError } from "./client.ts";
 
@@ -53,9 +54,10 @@ export class StdioTransport implements McpTransport {
     this.#args = args;
     this.#env = env;
 
-    // Base env is scrubbed (no LLM API keys in a third-party server's environment);
-    // caller-supplied env from config is user-trusted and merged on top.
+    // Own process group on POSIX so destroy() can kill the whole tree.
+    // An MCP server that spawns workers could otherwise leak them.
     this.#child = spawn(command, args, {
+      ...OWN_PROCESS_GROUP,
       stdio: ["pipe", "pipe", "pipe"],
       env: { ...copyScrubbedEnv(), ...env },
     });
@@ -124,13 +126,9 @@ export class StdioTransport implements McpTransport {
       try { handler(); } catch { /* ignore */ }
     }
 
-    if (this.#child.pid) {
-      try {
-        this.#child.kill();
-      } catch {
-        // Ignore
-      }
-    }
+    // Group kill on POSIX: workers spawned by the MCP server die with it.
+    // Falls back to the direct child on Windows (no process groups).
+    killProcessGroup(this.#child, "SIGTERM");
 
     if (this.#stderrOutput && this.#stderrOutput.trim()) {
       logger.error(`MCP server stderr: ${this.#stderrOutput.trim()}`);

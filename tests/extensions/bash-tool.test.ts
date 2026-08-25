@@ -2,29 +2,8 @@ import { describe, it, expect } from 'bun:test';
 import fs from 'node:fs';
 import { BashTool, create } from '../../src/extensions/bash-tool/index.ts';
 import { AssistantRetryableError } from '../../src/core/error.ts';
-import { resultStr, tmpDir, cleanupDir } from '../helpers.ts';
+import { resultStr, tmpDir, cleanupDir, processAlive, waitForExit } from '../helpers.ts';
 import { HOOKS } from '../../src/core/hooks.ts';
-
-/** True if a process with this pid still exists (signal 0 = existence check). */
-function processAlive(pid: number): boolean {
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch (e: unknown) {
-    // EPERM means it exists but isn't ours — count as alive
-    return (e as NodeJS.ErrnoException).code === 'EPERM';
-  }
-}
-
-/** Poll until the pid is gone (SIGKILL lands at ~timeout+grace), instead of a
- * fixed multi-second sleep that always waits the full margin. */
-async function waitForExit(pid: number, deadlineMs = 10000): Promise<void> {
-  const start = Date.now();
-  while (processAlive(pid)) {
-    if (Date.now() - start > deadlineMs) return;
-    await new Promise((r) => setTimeout(r, 50));
-  }
-}
 
 describe('BashTool', () => {
   it('has correct tool name', () => {

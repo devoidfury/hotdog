@@ -36,6 +36,9 @@ export { compileGitignore } from "./gitignore.ts";
 // ── Env scrubbing for spawned processes ─────────────────────────────────────
 export { isSensitiveEnvVar, copyScrubbedEnv } from "./env.ts";
 
+// ── Process-group control for spawned processes ─────────────────────────────
+export { IS_POSIX, OWN_PROCESS_GROUP, killProcessGroup } from "./process-group.ts";
+
 // ── Promise utilities ────────────────────────────────────────────────────────
 export { isPromise } from "./promise.ts";
 

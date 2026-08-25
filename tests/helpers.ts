@@ -12,3 +12,4 @@ export { MockTool, simpleTool, validatedTool, failingTool, metadataTool } from '
 export { createFixture, MockAgent, MockSink, createMockRl, createMockCore } from './mocks/fixtures.ts';
 export { resultStr, getDisplay, tmpDir, cleanupDir, toolCtx, setupSessionTestDir, cleanupSessionTest } from './mocks/io.ts';
 export { processAlive, waitForExit } from './mocks/process.ts';
+export { withMockFetch, jsonResponse, textResponse } from './mocks/fetch.ts';

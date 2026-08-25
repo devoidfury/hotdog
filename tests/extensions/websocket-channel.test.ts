@@ -1,6 +1,8 @@
 // Tests for src/extensions/websocket/websocket-channel.ts — WebSocketChannel.
-// Covers: construction, write/read, subscribe/unsubscribe, cleanup,
-// event-to-protocol mapping, sendJson, getters, pending questions replay.
+// Base Channel behavior (send/enqueue, attach/detach, close, command routing)
+// is covered in tests/core/channel.test.ts. Only the behavior specific to this
+// subclass (event-to-protocol mapping, readiness, sendJson, pending question
+// replay) is tested here.
 
 import { describe, it, expect, beforeEach, mock } from "bun:test";
 import { WebSocketChannel } from "../../src/extensions/websocket/websocket-channel.ts";
@@ -64,27 +66,16 @@ describe("WebSocketChannel - construction", () => {
     ws = createMockWs();
   });
 
-  it("creates a WebSocketChannel with required options", () => {
+  it("attaches to the given session on construction", () => {
     const channel = new WebSocketChannel({
       sessionManager: sm,
       ws,
       sessionId: "session-1",
     });
 
-    expect(channel).toBeInstanceOf(WebSocketChannel);
     expect(channel.getCurrentSessionId()).toBe("session-1");
-  });
-
-  it("attaches to the given session on construction", () => {
-    new WebSocketChannel({
-      sessionManager: sm,
-      ws,
-      sessionId: "session-1",
-    });
-
     expect(sm.onSessionEvents).toHaveBeenCalledWith("session-1", expect.any(Function));
   });
-
 
   it("replays pending questions on construction", () => {
     const pendingQuestions = [[{ key: "q1", prompt: "Question 1" }]];
@@ -396,42 +387,6 @@ describe("WebSocketChannel - read()", () => {
   });
 });
 
-describe("WebSocketChannel - subscribe/unsubscribe", () => {
-  let sm: ChannelSessionManager;
-  let ws: Bun.ServerWebSocket;
-  let unsubscribeFn: () => void;
-
-  beforeEach(() => {
-    unsubscribeFn = mock(() => {});
-    sm = createMockSessionManager({
-      onSessionEvents: mock((_sessionId, _handler) => unsubscribeFn),
-    });
-    ws = createMockWs();
-  });
-
-  it("subscribes when attaching", () => {
-    new WebSocketChannel({
-      sessionManager: sm,
-      ws,
-      sessionId: "session-1",
-    });
-
-    expect(sm.onSessionEvents).toHaveBeenCalledWith("session-1", expect.any(Function));
-  });
-
-  it("unsubscribes when detaching", () => {
-    const channel = new WebSocketChannel({
-      sessionManager: sm,
-      ws,
-      sessionId: "session-1",
-    });
-
-    channel.detach("session-1");
-
-    expect(unsubscribeFn).toHaveBeenCalled();
-  });
-});
-
 describe("WebSocketChannel - cleanup", () => {
   it("marks as not ready on close", () => {
     const sm = createMockSessionManager();
@@ -526,23 +481,6 @@ describe("WebSocketChannel - getters", () => {
 
 });
 
-describe("WebSocketChannel - send regular text", () => {
-  it("enqueues text to current session", async () => {
-    const sm = createMockSessionManager();
-    const ws = createMockWs();
-
-    const channel = new WebSocketChannel({
-      sessionManager: sm,
-      ws,
-      sessionId: "session-1",
-    });
-
-    await channel.send("hello world");
-
-    expect(sm.enqueue).toHaveBeenCalledWith("session-1", "hello world");
-  });
-});
-
 describe("WebSocketChannel - pending questions replay", () => {
   it("replays multiple pending question sets", () => {
     const pendingQuestions = [
@@ -592,26 +530,6 @@ describe("WebSocketChannel - broadcast without callback", () => {
     // Should not throw — broadcast is skipped when no callback
     const sent = (ws as any)._sentMessages;
     expect(sent.length).toBe(1);
-  });
-});
-
-describe("WebSocketChannel - multiple session management", () => {
-  it("can attach to multiple sessions", () => {
-    const sm = createMockSessionManager({
-      onSessionEvents: mock(() => () => {}),
-    });
-    const ws = createMockWs();
-
-    const channel = new WebSocketChannel({
-      sessionManager: sm,
-      ws,
-      sessionId: "session-1",
-    });
-
-    channel.attach("session-2");
-
-    expect(channel.attachedSessions.has("session-1")).toBe(true);
-    expect(channel.attachedSessions.has("session-2")).toBe(true);
   });
 });
 

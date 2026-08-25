@@ -6,6 +6,22 @@ import {
   apiKeyEquals,
 } from "../../src/extensions/websocket/auth.ts";
 
+/**
+ * A zero-TTL token expires as soon as Date.now() advances past its issue
+ * time. Poll until it actually does rather than relying on a fixed sleep.
+ */
+async function waitForExpiry(
+  middleware: ReturnType<typeof createAuthMiddleware>,
+  token: string,
+  timeoutMs = 200,
+): Promise<void> {
+  const start = Date.now();
+  while (middleware.validateToken(token)) {
+    if (Date.now() - start > timeoutMs) throw new Error("token did not expire in time");
+    await new Promise((r) => setTimeout(r, 1));
+  }
+}
+
 describe("createAuthMiddleware", () => {
   let middleware: ReturnType<typeof createAuthMiddleware>;
 
@@ -143,8 +159,8 @@ describe("createAuthMiddleware", () => {
         const response = await shortLived.loginHandler(req);
         const data = (await response.json()) as { token: string };
 
-        // Wait a moment for token to expire
-        await new Promise((r) => setTimeout(r, 10));
+        // Wait for the zero-TTL token to actually expire
+        await waitForExpiry(shortLived, data.token);
 
         expect(shortLived.validateToken(data.token)).toBe(false);
       } finally {
@@ -171,13 +187,8 @@ describe("createAuthMiddleware", () => {
         const response = await shortLived.loginHandler(req);
         const data = (await response.json()) as { token: string };
 
-        // Wait for expiration
-        await new Promise((r) => setTimeout(r, 10));
-
-        // Token should be invalid
-        expect(shortLived.validateToken(data.token)).toBe(false);
-
-        // Cleanup should remove it
+        // Wait for expiration, then let cleanup() remove the stale entry
+        await waitForExpiry(shortLived, data.token);
         shortLived.cleanup();
         expect(shortLived.validateToken(data.token)).toBe(false);
       } finally {

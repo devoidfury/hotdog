@@ -1,18 +1,89 @@
-// Tests for WebSocket server — session management and message routing.
-import { describe, it, expect, beforeEach, afterEach, mock } from "bun:test";
+// Tests for WebSocket server — SessionRegistry, message routing, auth gate,
+// cold log operations, history replay, and question tool integration.
+// (Merged from websocket-server.test.ts + websocket-server-extended.test.ts.)
+
+import { describe, it, expect, beforeEach, afterEach, beforeAll, afterAll, mock, Mock } from "bun:test";
 import { SessionRegistry, createWsServer, type HotdogServerSocket } from "../../src/extensions/websocket/server.ts";
-import { WebSocketChannel } from "../../src/extensions/websocket/websocket-channel.ts";
+import { C2S, S2C } from "../../src/extensions/websocket/protocol.ts";
+import { LlmClient } from "../../src/core/llm-client/client.ts";
+import { MessageLog } from "../../src/core/context/message-log.ts";
+import type { AgentLike } from "../../src/core/session/index.ts";
 import { createWsMockCore, createWsMockAgentFactory, createWsMockWs, makeWsMockAgent } from "../mocks/websocket.ts";
+import { mkdirSync, rmSync, writeFileSync, existsSync } from "node:fs";
+import { join } from "node:path";
 
 type MockWs = ReturnType<typeof createWsMockWs>;
+
+// Isolated sessions dir for cold-log tests (listLogs/viewLog/loadLog/deleteLog).
+const SESSIONS_DIR = join(import.meta.dir, "..", ".test-sessions-ws");
+const FIXTURE_LOG_ID = "ws-fixture-log";
+
+beforeAll(() => {
+  process.env.HOTDOG_SESSIONS_DIR = SESSIONS_DIR;
+  mkdirSync(SESSIONS_DIR, { recursive: true });
+});
+
+afterAll(() => {
+  delete process.env.HOTDOG_SESSIONS_DIR;
+  try { rmSync(SESSIONS_DIR, { recursive: true, force: true }); } catch {}
+});
+
+/** Write a fixture session log (one user input, one assistant reply). */
+function writeFixtureLog(logId: string) {
+  const lines = [
+    JSON.stringify({ ts: "2024-01-01T00:00:00Z", session_id: logId, source: "input", content: "loaded input" }),
+    JSON.stringify({ ts: "2024-01-01T00:00:01Z", session_id: logId, source: "llm", content: "loaded reply" }),
+  ];
+  writeFileSync(join(SESSIONS_DIR, `${logId}.jsonl`), lines.join("\n") + "\n");
+}
+
+/**
+ * Poll the mock socket until a message of the given type arrives.
+ * Replaces fixed sleeps: deterministic on completion, fails loudly on timeout.
+ * `after` limits the scan to messages sent after a given index.
+ */
+async function waitForMessage(ws: MockWs, type: string, opts: { timeoutMs?: number; after?: number } = {}): Promise<any> {
+  const { timeoutMs = 2000, after = 0 } = opts;
+  const start = Date.now();
+  for (;;) {
+    const found = ws.messages.slice(after)
+      .map((m) => { try { return JSON.parse(m); } catch { return null; } })
+      .find((m) => m && m.type === type);
+    if (found) return found;
+    if (Date.now() - start > timeoutMs) throw new Error(`Timed out waiting for ${type} message`);
+    await new Promise((r) => setTimeout(r, 5));
+  }
+}
+
+function lastMessage(ws: MockWs): any {
+  return JSON.parse(ws.messages[ws.messages.length - 1]!);
+}
+
+function messageTypes(ws: MockWs): string[] {
+  return ws.messages
+    .filter((m) => m && m !== "undefined")
+    .map((m) => {
+      try { return JSON.parse(m).type; } catch { return null; }
+    })
+    .filter(Boolean);
+}
 
 // ── SessionRegistry Tests ───────────────────────────────────────────────────
 
 describe("SessionRegistry", () => {
   let registry: SessionRegistry;
 
+  beforeEach(() => {
+    registry = new SessionRegistry({
+      buildAgent: createWsMockAgentFactory(),
+      questionTimeoutSecs: 300,
+      questionStrategy: "wait",
+      sessionTimeoutMin: 30,
+    });
+  });
+
   afterEach(() => {
-    registry?.stopCleanupLoop();
+    registry.stopCleanupLoop();
   });
 
   it("creates session with agent-provided sessionId", async () => {
@@ -22,22 +93,25 @@ describe("SessionRegistry", () => {
     expect(result.sessionId).toBe("agent-session-123");
   });
 
-  it("creates session with fallback proposed sessionId when agent has no sessionId", async () => {
-    const buildAgent = async (config: { sessionId?: string }) =>
-      makeWsMockAgent({ sessionId: config.sessionId || "fallback-session" });
+  it("uses the proposed sessionId when the agent has none of its own", async () => {
+    let proposed: string | undefined;
+    const buildAgent = async (config: { sessionId?: string }) => {
+      proposed = config.sessionId;
+      const agent = makeWsMockAgent();
+      (agent as any).sessionId = undefined; // agent declines to pick its own id
+      return agent;
+    };
     registry = new SessionRegistry({ buildAgent });
     const result = await registry.create();
-    expect(result.sessionId).toBeDefined();
-    expect(typeof result.sessionId).toBe("string");
+    expect(result.sessionId).toBe(proposed!);
+    expect(registry.get(result.sessionId)).toBeDefined();
   });
 
   it("returns null for non-existent session", () => {
-    registry = new SessionRegistry({ buildAgent: createWsMockAgentFactory() });
     expect(registry.get("non-existent")).toBeNull();
   });
 
   it("lists all sessions", async () => {
-    registry = new SessionRegistry({ buildAgent: createWsMockAgentFactory() });
     const { sessionId } = await registry.create();
 
     const sessions = registry.list();
@@ -45,105 +119,132 @@ describe("SessionRegistry", () => {
     expect(sessions[0]!.id).toBe(sessionId);
   });
 
-  it("deletes session and cleans up channels", async () => {
-    registry = new SessionRegistry({ buildAgent: createWsMockAgentFactory() });
+  it("deletes session and removes it from the registry", async () => {
     const { sessionId } = await registry.create();
 
-    // Create a mock channel
-    const mockWs = createWsMockWs() as unknown as HotdogServerSocket;
-    const channel = registry.createChannel(sessionId, mockWs);
-
-    // Verify channel was created
-    expect(channel).toBeDefined();
-
-    // Delete the session
     const result = registry.delete(sessionId);
     expect(result).toBe(true);
-
-    // Verify session is gone
     expect(registry.get(sessionId)).toBeNull();
     expect(registry.list()).toHaveLength(0);
   });
 
   it("returns false when deleting non-existent session", () => {
-    registry = new SessionRegistry({ buildAgent: createWsMockAgentFactory() });
     expect(registry.delete("non-existent")).toBe(false);
   });
 
-  it("renames session profile", async () => {
-    registry = new SessionRegistry({ buildAgent: createWsMockAgentFactory() });
-    const { sessionId } = await registry.create();
+  it("closes channels when deleting session", async () => {
+    const result = await registry.create();
+    const ws = createWsMockWs();
+    const channel = registry.createChannel(result.sessionId, ws)!;
 
-    expect(registry.rename(sessionId, "new-profile")).toBe(true);
-    expect(registry._test_metadata.get(sessionId)!.profile).toBe("new-profile");
+    const closeMock = mock(() => {});
+    (channel as any).close = closeMock;
+
+    registry.delete(result.sessionId);
+
+    expect(closeMock).toHaveBeenCalled();
+    expect(registry.size).toBe(0);
+  });
+
+  it("renames session profile", async () => {
+    const result = await registry.create({ profile: "old-name" });
+    expect(registry.rename(result.sessionId, "new-name")).toBe(true);
+    expect(registry.get(result.sessionId)!.metadata.profile).toBe("new-name");
   });
 
   it("returns false when renaming non-existent session", () => {
-    registry = new SessionRegistry({ buildAgent: createWsMockAgentFactory() });
     expect(registry.rename("non-existent", "new-profile")).toBe(false);
   });
 
   it("touches session to update lastActivityAt", async () => {
-    registry = new SessionRegistry({ buildAgent: createWsMockAgentFactory() });
     const { sessionId } = await registry.create();
 
     const meta = registry._test_metadata.get(sessionId)!;
+    meta.lastActivityAt = Date.now() - 10000;
     const before = meta.lastActivityAt;
-    await new Promise((r) => setTimeout(r, 10));
     registry.touch(sessionId);
     expect(registry._test_metadata.get(sessionId)!.lastActivityAt).toBeGreaterThan(before);
   });
 
-  it("starts and stops cleanup loop", () => {
-    registry = new SessionRegistry({ buildAgent: createWsMockAgentFactory() });
-    registry.startCleanupLoop(10);
-    expect(registry._test_timeoutMin).toBe(10);
-    registry.stopCleanupLoop();
+  it("creates multiple channels for the same session", async () => {
+    const result = await registry.create();
+    const channel1 = registry.createChannel(result.sessionId, createWsMockWs());
+    const channel2 = registry.createChannel(result.sessionId, createWsMockWs());
+
+    expect(channel1).toBeDefined();
+    expect(channel2).toBeDefined();
+    expect(channel1).not.toBe(channel2);
+    expect(registry.get(result.sessionId)!.metadata.connectedClients).toBe(2);
   });
 
-  it("cleans up idle sessions", async () => {
-    registry = new SessionRegistry({ buildAgent: createWsMockAgentFactory() });
-    const { sessionId } = await registry.create();
+  it("createChannel returns undefined for non-existent session", () => {
+    expect(registry.createChannel("non-existent", createWsMockWs())).toBeUndefined();
+  });
 
-    // Set metadata to be very old
-    const meta = registry._test_metadata.get(sessionId)!;
-    meta.lastActivityAt = Date.now() - 1000 * 60 * 60; // 1 hour ago
-    meta.connectedClients = 0;
-
-    // Set timeout to 1 minute
-    registry._test_timeoutMin = 1;
+  it("cleans up idle sessions with 0 connected clients", async () => {
+    const result = await registry.create();
+    const meta = registry._test_metadata.get(result.sessionId);
+    if (meta) meta.lastActivityAt = Date.now() - 100 * 60 * 1000; // 100 minutes ago
+    registry._test_timeoutMin = 30;
     registry._test_cleanupIdleSessions();
 
-    expect(registry.get(sessionId)).toBeNull();
+    expect(registry.get(result.sessionId)).toBeNull();
   });
 
   it("does not clean up sessions with connected clients", async () => {
-    registry = new SessionRegistry({ buildAgent: createWsMockAgentFactory() });
-    const { sessionId } = await registry.create();
-
-    // Set metadata to be very old but with connected clients
-    const meta = registry._test_metadata.get(sessionId)!;
-    meta.lastActivityAt = Date.now() - 1000 * 60 * 60;
-    meta.connectedClients = 1;
-
-    registry._test_timeoutMin = 1;
+    const result = await registry.create();
+    const meta = registry._test_metadata.get(result.sessionId);
+    if (meta) {
+      meta.lastActivityAt = Date.now() - 100 * 60 * 1000;
+      meta.connectedClients = 1;
+    }
+    registry._test_timeoutMin = 30;
     registry._test_cleanupIdleSessions();
 
-    expect(registry.get(sessionId)).not.toBeNull();
+    expect(registry.get(result.sessionId)).not.toBeNull();
   });
 
-  it("broadcasts to all connections", () => {
-    registry = new SessionRegistry({ buildAgent: createWsMockAgentFactory() });
+  it("does not clean up recently active sessions", async () => {
+    const result = await registry.create();
+    registry._test_timeoutMin = 30;
+    registry._test_cleanupIdleSessions();
 
-    const ws1 = createWsMockWs() as unknown as HotdogServerSocket;
-    const ws2 = createWsMockWs() as unknown as HotdogServerSocket;
+    expect(registry.get(result.sessionId)).not.toBeNull();
+  });
+
+  it("broadcasts to all open connections and skips closed ones", () => {
+    const ws1 = { readyState: 1, send: mock(() => {}) } as unknown as HotdogServerSocket;
+    const ws2 = { readyState: 1, send: mock(() => {}) } as unknown as HotdogServerSocket;
+    const closed = { readyState: 2, send: mock(() => {}) } as unknown as HotdogServerSocket;
+
     registry.registerConnection(ws1);
     registry.registerConnection(ws2);
+    registry.registerConnection(closed);
 
     registry.broadcast({ type: "test", data: "hello" });
 
-    expect((ws1 as MockWs).messages).toContain(JSON.stringify({ type: "test", data: "hello" }));
-    expect((ws2 as MockWs).messages).toContain(JSON.stringify({ type: "test", data: "hello" }));
+    expect((ws1.send as unknown as Mock<() => void>).mock.calls.length).toBe(1);
+    expect((ws2.send as unknown as Mock<() => void>).mock.calls.length).toBe(1);
+    expect((closed.send as unknown as Mock<() => void>).mock.calls.length).toBe(0);
+
+    const payload = JSON.parse(((ws1.send as unknown as Mock<() => void>).mock.calls as unknown[][])[0]![0] as string);
+    expect(payload.type).toBe("test");
+    expect(payload.data).toBe("hello");
+  });
+
+  it("handles broadcast send errors gracefully", () => {
+    const failingWs = {
+      readyState: 1,
+      send: mock(() => { throw new Error("Send failed"); }),
+    } as unknown as HotdogServerSocket;
+    const workingWs = { readyState: 1, send: mock(() => {}) } as unknown as HotdogServerSocket;
+
+    registry.registerConnection(failingWs);
+    registry.registerConnection(workingWs);
+
+    // Broadcast should not throw and should still send to working connections
+    expect(() => registry.broadcast({ type: "test" })).not.toThrow();
+    expect((workingWs.send as unknown as Mock<() => void>).mock.calls.length).toBe(1);
   });
 });
 
@@ -153,564 +254,638 @@ describe("createWsServer", () => {
   let wsServer: ReturnType<typeof createWsServer>;
 
   afterEach(() => {
-    wsServer.stopCleanupLoop();
+    wsServer?.stopCleanupLoop();
   });
 
-  it("handles CREATE_SESSION message", async () => {
+  /** Create a server, open a connection, and wait for the auto-created session. */
+  async function connectWithSession(opts: Parameters<typeof createWsServer>[1] = { buildAgent: createWsMockAgentFactory() }): Promise<MockWs> {
     const core = createWsMockCore();
-    wsServer = createWsServer(core, { buildAgent: createWsMockAgentFactory() });
+    wsServer = createWsServer(core, opts);
 
-    const ws = createWsMockWs() as unknown as HotdogServerSocket;
+    const ws = createWsMockWs();
     wsServer.onUpgrade({ url: "/ws", headers: { host: "localhost" } }, ws);
+    await waitForMessage(ws, S2C.SESSION_CREATED);
+    return ws;
+  }
 
-    await new Promise((r) => setTimeout(r, 10));
+  it("handles CREATE_SESSION message", async () => {
+    const ws = await connectWithSession();
+    const firstSessionId = (ws as unknown as HotdogServerSocket).activeSessionId!;
+    const before = ws.messages.length;
 
-    // Send create session message
-    wsServer.onMessage(ws, JSON.stringify({ type: "createSession", profile: "test-profile", model: "custom-model" }));
+    wsServer.onMessage(ws, JSON.stringify({ type: C2S.CREATE_SESSION, profile: "test-profile", model: "custom-model" }));
 
-    await new Promise((r) => setTimeout(r, 10));
-
-    // Check sessionCreated response
-    const lastMsg = JSON.parse((ws as MockWs).messages[(ws as MockWs).messages.length - 1]!);
-    expect(lastMsg.type).toBe("sessionCreated");
-    expect(typeof lastMsg.sessionId).toBe("string");
+    // A second sessionCreated (the first was the auto-attached one); the
+    // switch to it is reflected on the socket and it is a new session.
+    const created = await waitForMessage(ws, S2C.SESSION_CREATED, { after: before });
+    expect(created.sessionId).not.toBe(firstSessionId);
+    expect((ws as unknown as HotdogServerSocket).activeSessionId).toBe(created.sessionId);
+    expect(created.profile).toBeDefined();
+    expect(created.currentModel).toBeDefined();
   });
 
   it("handles DELETE_SESSION message", async () => {
-    const core = createWsMockCore();
-    wsServer = createWsServer(core, { buildAgent: createWsMockAgentFactory() });
+    const ws = await connectWithSession();
+    const sessionId = (ws as unknown as HotdogServerSocket).activeSessionId!;
 
-    const ws = createWsMockWs() as unknown as HotdogServerSocket;
-    wsServer.onUpgrade({ url: "/ws", headers: { host: "localhost" } }, ws);
+    wsServer.onMessage(ws, JSON.stringify({ type: C2S.DELETE_SESSION, sessionId }));
 
-    // Wait for session to be created
-    await new Promise((r) => setTimeout(r, 10));
-    const sessionId = (ws as HotdogServerSocket).activeSessionId!;
-
-    wsServer.onMessage(ws, JSON.stringify({ type: "deleteSession", sessionId }));
-
-    const lastMsg = JSON.parse((ws as MockWs).messages[(ws as MockWs).messages.length - 1]!);
-    expect(lastMsg.type).toBe("sessionDeleted");
-    expect(lastMsg.sessionId).toBe(sessionId);
+    const deleted = lastMessage(ws);
+    expect(deleted.type).toBe(S2C.SESSION_DELETED);
+    expect(deleted.sessionId).toBe(sessionId);
   });
 
-  it("handles LIST_SESSIONS message", () => {
-    const core = createWsMockCore();
-    wsServer = createWsServer(core, { buildAgent: createWsMockAgentFactory() });
+  it("handles LIST_SESSIONS message", async () => {
+    const ws = await connectWithSession();
 
-    const ws = createWsMockWs() as unknown as HotdogServerSocket;
-    wsServer.onUpgrade({ url: "/ws", headers: { host: "localhost" } }, ws);
+    wsServer.onMessage(ws, JSON.stringify({ type: C2S.LIST_SESSIONS }));
 
-    wsServer.onMessage(ws, JSON.stringify({ type: "listSessions" }));
-
-    const lastMsg = JSON.parse((ws as MockWs).messages[(ws as MockWs).messages.length - 1]!);
-    expect(lastMsg.type).toBe("sessions");
-    expect(Array.isArray(lastMsg.sessions)).toBe(true);
+    const msg = lastMessage(ws);
+    expect(msg.type).toBe(S2C.SESSIONS);
+    expect(Array.isArray(msg.sessions)).toBe(true);
+    expect(msg.sessions.map((s: { id: string }) => s.id)).toContain((ws as unknown as HotdogServerSocket).activeSessionId);
   });
 
-  it("handles SEND message", async () => {
-    const core = createWsMockCore();
-    wsServer = createWsServer(core, { buildAgent: createWsMockAgentFactory() });
+  it("handles SEND message by enqueuing content on the session", async () => {
+    const ws = await connectWithSession();
+    const sessionId = (ws as unknown as HotdogServerSocket).activeSessionId!;
 
-    const ws = createWsMockWs() as unknown as HotdogServerSocket;
-    wsServer.onUpgrade({ url: "/ws", headers: { host: "localhost" } }, ws);
+    const enqueued: Array<[string, string]> = [];
+    const sessionManager = wsServer.sessionRegistry.getSessionManager();
+    const originalEnqueue = sessionManager.enqueue;
+    sessionManager.enqueue = async (sid: string, content: string) => { enqueued.push([sid, content]); };
 
-    await new Promise((r) => setTimeout(r, 10));
-    const sessionId = (ws as HotdogServerSocket).activeSessionId!;
-
-    wsServer.onMessage(ws, JSON.stringify({ type: "send", sessionId, content: "Hello!" }));
-
-    // Should not error and should touch the session
-    const meta = wsServer.sessionRegistry._test_metadata.get(sessionId!);
-    expect(meta).toBeDefined();
-    expect(meta!.lastActivityAt).toBeGreaterThan(0);
+    try {
+      wsServer.onMessage(ws, JSON.stringify({ type: C2S.SEND, sessionId, content: "Hello!" }));
+      await new Promise((r) => setTimeout(r, 10));
+      expect(enqueued).toEqual([[sessionId, "Hello!"]]);
+    } finally {
+      sessionManager.enqueue = originalEnqueue;
+    }
   });
 
-  it("handles CANCEL message", async () => {
-    const core = createWsMockCore();
-    wsServer = createWsServer(core, { buildAgent: createWsMockAgentFactory() });
+  it("does not enqueue SEND when sessionId or content is missing", async () => {
+    const ws = await connectWithSession();
+    const sessionId = (ws as unknown as HotdogServerSocket).activeSessionId!;
 
-    const ws = createWsMockWs() as unknown as HotdogServerSocket;
-    wsServer.onUpgrade({ url: "/ws", headers: { host: "localhost" } }, ws);
+    const sessionManager = wsServer.sessionRegistry.getSessionManager();
+    let enqueueCalled = false;
+    const originalEnqueue = sessionManager.enqueue;
+    sessionManager.enqueue = async () => { enqueueCalled = true; };
 
-    await new Promise((r) => setTimeout(r, 10));
-    const sessionId = (ws as HotdogServerSocket).activeSessionId!;
-
-    wsServer.onMessage(ws, JSON.stringify({ type: "cancel", sessionId }));
-
-    // Should not error
-    expect(true).toBe(true);
+    try {
+      wsServer.onMessage(ws, JSON.stringify({ type: C2S.SEND, content: "Hello" }));
+      wsServer.onMessage(ws, JSON.stringify({ type: C2S.SEND, sessionId }));
+      await new Promise((r) => setTimeout(r, 10));
+      expect(enqueueCalled).toBe(false);
+    } finally {
+      sessionManager.enqueue = originalEnqueue;
+    }
   });
 
-  it("handles COMMAND message", async () => {
-    const core = createWsMockCore();
-    wsServer = createWsServer(core, { buildAgent: createWsMockAgentFactory() });
+  it("handles CANCEL message by interrupting the session", async () => {
+    const ws = await connectWithSession();
+    const sessionId = (ws as unknown as HotdogServerSocket).activeSessionId!;
 
-    const ws = createWsMockWs() as unknown as HotdogServerSocket;
-    wsServer.onUpgrade({ url: "/ws", headers: { host: "localhost" } }, ws);
+    const sessionManager = wsServer.sessionRegistry.getSessionManager();
+    const originalInterrupt = sessionManager.interrupt;
+    const interrupted: string[] = [];
+    sessionManager.interrupt = ((sid: string) => { interrupted.push(sid); });
 
-    await new Promise((r) => setTimeout(r, 10));
-    const sessionId = (ws as HotdogServerSocket).activeSessionId!;
+    try {
+      wsServer.onMessage(ws, JSON.stringify({ type: C2S.CANCEL, sessionId }));
+      expect(interrupted).toEqual([sessionId]);
+    } finally {
+      sessionManager.interrupt = originalInterrupt;
+    }
+  });
 
-    // Test with leading slash
-    wsServer.onMessage(ws, JSON.stringify({ type: "command", sessionId, command: "/help" }));
+  it("handles COMMAND message, stripping the leading slash", async () => {
+    const ws = await connectWithSession();
+    const sessionId = (ws as unknown as HotdogServerSocket).activeSessionId!;
 
-    const meta = wsServer.sessionRegistry._test_metadata.get(sessionId!);
-    expect(meta).toBeDefined();
-    expect(meta!.lastActivityAt).toBeGreaterThan(0);
+    const sessionManager = wsServer.sessionRegistry.getSessionManager();
+    let executedCommand = "";
+    const originalExecuteCommand = sessionManager.executeCommand;
+    sessionManager.executeCommand = async (_sessionId: string, cmd: string) => {
+      executedCommand = cmd;
+      return 0;
+    };
+
+    try {
+      wsServer.onMessage(ws, JSON.stringify({ type: C2S.COMMAND, sessionId, command: "/model gpt-4" }));
+      await new Promise((r) => setTimeout(r, 10));
+      expect(executedCommand).toBe("model gpt-4");
+    } finally {
+      sessionManager.executeCommand = originalExecuteCommand;
+    }
   });
 
   it("handles QUESTION_ANSWER message (no pending question → error)", async () => {
-    const core = createWsMockCore();
-    wsServer = createWsServer(core, { buildAgent: createWsMockAgentFactory() });
-
-    const ws = createWsMockWs() as unknown as HotdogServerSocket;
-    wsServer.onUpgrade({ url: "/ws", headers: { host: "localhost" } }, ws);
-
-    await new Promise((r) => setTimeout(r, 10));
-    const sessionId = (ws as HotdogServerSocket).activeSessionId!;
+    const ws = await connectWithSession();
+    const sessionId = (ws as unknown as HotdogServerSocket).activeSessionId!;
 
     await wsServer.onMessage(ws, JSON.stringify({
-      type: "questionAnswer",
+      type: C2S.QUESTION_ANSWER,
       sessionId,
       answers: { q1: "answer1" },
     }));
 
-    const lastMsg = JSON.parse((ws as MockWs).messages[(ws as MockWs).messages.length - 1]!);
-    expect(lastMsg.type).toBe("error");
-    expect(lastMsg.message).toContain("No pending question");
+    const msg = lastMessage(ws);
+    expect(msg.type).toBe(S2C.ERROR);
+    expect(msg.message).toContain("No pending question");
   });
 
-  it("handles unknown message type", () => {
-    const core = createWsMockCore();
-    wsServer = createWsServer(core, { buildAgent: createWsMockAgentFactory() });
-
-    const ws = createWsMockWs() as unknown as HotdogServerSocket;
-    wsServer.onUpgrade({ url: "/ws", headers: { host: "localhost" } }, ws);
+  it("handles unknown message type", async () => {
+    const ws = await connectWithSession();
 
     wsServer.onMessage(ws, JSON.stringify({ type: "unknownType" }));
 
-    const lastMsg = JSON.parse((ws as MockWs).messages[(ws as MockWs).messages.length - 1]!);
-    expect(lastMsg.type).toBe("error");
-    expect(lastMsg.message).toContain("Unknown message type");
+    const msg = lastMessage(ws);
+    expect(msg.type).toBe(S2C.ERROR);
+    expect(msg.message).toContain("Unknown message type");
   });
 
-  it("handles invalid JSON", () => {
-    const core = createWsMockCore();
-    wsServer = createWsServer(core, { buildAgent: createWsMockAgentFactory() });
-
-    const ws = createWsMockWs() as unknown as HotdogServerSocket;
-    wsServer.onUpgrade({ url: "/ws", headers: { host: "localhost" } }, ws);
+  it("handles invalid JSON", async () => {
+    const ws = await connectWithSession();
 
     wsServer.onMessage(ws, "not valid json");
 
-    const lastMsg = JSON.parse((ws as MockWs).messages[(ws as MockWs).messages.length - 1]!);
-    expect(lastMsg.type).toBe("error");
-    expect(lastMsg.message).toBe("Invalid JSON");
+    const msg = lastMessage(ws);
+    expect(msg.type).toBe(S2C.ERROR);
+    expect(msg.message).toBe("Invalid JSON");
   });
 
-  it("handles message without type", () => {
-    const core = createWsMockCore();
-    wsServer = createWsServer(core, { buildAgent: createWsMockAgentFactory() });
-
-    const ws = createWsMockWs() as unknown as HotdogServerSocket;
-    wsServer.onUpgrade({ url: "/ws", headers: { host: "localhost" } }, ws);
+  it("handles message without type", async () => {
+    const ws = await connectWithSession();
 
     wsServer.onMessage(ws, JSON.stringify({ data: "hello" }));
 
-    const lastMsg = JSON.parse((ws as MockWs).messages[(ws as MockWs).messages.length - 1]!);
-    expect(lastMsg.type).toBe("error");
-    expect(lastMsg.message).toBe("Message type required");
+    const msg = lastMessage(ws);
+    expect(msg.type).toBe(S2C.ERROR);
+    expect(msg.message).toBe("Message type required");
   });
 
   it("closes connection on close handler and removes channel", async () => {
-    const core = createWsMockCore();
-    wsServer = createWsServer(core, { buildAgent: createWsMockAgentFactory() });
+    const ws = await connectWithSession();
+    const sessionId = (ws as unknown as HotdogServerSocket).activeSessionId!;
 
-    const ws = createWsMockWs() as unknown as HotdogServerSocket;
-    wsServer.onUpgrade({ url: "/ws", headers: { host: "localhost" } }, ws);
-
-    await new Promise((r) => setTimeout(r, 10));
-    const sessionId = (ws as HotdogServerSocket).activeSessionId!;
-
-    // Verify session exists with connected client
     const meta = wsServer.sessionRegistry._test_metadata.get(sessionId!);
     expect(meta!.connectedClients).toBeGreaterThan(0);
 
-    // Close the connection
     wsServer.onClose(ws);
 
-    // Verify client count decreased
     const metaAfter = wsServer.sessionRegistry._test_metadata.get(sessionId!);
     expect(metaAfter!.connectedClients).toBe(0);
   });
 
   it("handles RENAME_SESSION message", async () => {
-    const core = createWsMockCore();
-    wsServer = createWsServer(core, { buildAgent: createWsMockAgentFactory() });
+    const ws = await connectWithSession();
+    const sessionId = (ws as unknown as HotdogServerSocket).activeSessionId!;
 
-    const ws = createWsMockWs() as unknown as HotdogServerSocket;
-    wsServer.onUpgrade({ url: "/ws", headers: { host: "localhost" } }, ws);
-
-    await new Promise((r) => setTimeout(r, 10));
-    const sessionId = (ws as HotdogServerSocket).activeSessionId!;
-
-    wsServer.onMessage(ws, JSON.stringify({ type: "renameSession", sessionId, newName: "renamed" }));
+    wsServer.onMessage(ws, JSON.stringify({ type: C2S.RENAME_SESSION, sessionId, newName: "renamed" }));
 
     const meta = wsServer.sessionRegistry._test_metadata.get(sessionId!);
     expect(meta!.profile).toBe("renamed");
   });
 
   it("handles SWITCH_SESSION message", async () => {
-    const core = createWsMockCore();
-    wsServer = createWsServer(core, { buildAgent: createWsMockAgentFactory() });
+    const ws = await connectWithSession();
 
-    const ws = createWsMockWs() as unknown as HotdogServerSocket;
-    wsServer.onUpgrade({ url: "/ws", headers: { host: "localhost" } }, ws);
+    const second = await wsServer.sessionRegistry.create({});
 
-    await new Promise((r) => setTimeout(r, 10));
-    const firstSessionId = (ws as HotdogServerSocket).activeSessionId!;
+    await wsServer.onMessage(ws, JSON.stringify({ type: C2S.SWITCH_SESSION, sessionId: second.sessionId }));
 
-    // Create a second session
-    wsServer.onMessage(ws, JSON.stringify({ type: "createSession" }));
-    await new Promise((r) => setTimeout(r, 10));
-
-    const sessions = wsServer.sessionRegistry.list();
-    const secondSessionId = sessions.find((s) => s.id !== firstSessionId)?.id;
-
-    if (secondSessionId) {
-      wsServer.onMessage(ws, JSON.stringify({ type: "switchSession", sessionId: secondSessionId }));
-
-      const lastMsg = JSON.parse((ws as MockWs).messages[(ws as MockWs).messages.length - 1]!);
-      expect(lastMsg.type).toBe("sessionState");
-      expect(lastMsg.sessionId).toBe(secondSessionId);
-    }
+    const msg = lastMessage(ws);
+    expect(msg.type).toBe(S2C.SESSION_STATE);
+    expect(msg.sessionId).toBe(second.sessionId);
+    expect((ws as unknown as HotdogServerSocket).activeSessionId).toBe(second.sessionId);
   });
-});
 
-describe("createWsServer - additional coverage", () => {
-  let wsServer: ReturnType<typeof createWsServer>;
+  it("does nothing for SWITCH_SESSION to a non-existent session", async () => {
+    const ws = await connectWithSession();
+    const countBefore = ws.messages.length;
 
-  afterEach(() => {
-    wsServer.stopCleanupLoop();
+    await wsServer.onMessage(ws, JSON.stringify({ type: C2S.SWITCH_SESSION, sessionId: "non-existent" }));
+
+    expect(ws.messages.length).toBe(countBefore);
   });
 
   it("attaches to most recent session when multiple exist", async () => {
-    const core = createWsMockCore();
-    const mockAgentFactory = createWsMockAgentFactory();
-    wsServer = createWsServer(core, { buildAgent: mockAgentFactory });
+    const ws1 = await connectWithSession();
+    const firstSessionId = (ws1 as unknown as HotdogServerSocket).activeSessionId!;
 
-    // Create first session
-    const ws1 = createWsMockWs() as unknown as HotdogServerSocket;
-    wsServer.onUpgrade({ url: "/ws", headers: { host: "localhost" } }, ws1);
-    await new Promise((r) => setTimeout(r, 10));
-    const firstSessionId = (ws1 as HotdogServerSocket).activeSessionId!;
-
-    // Wait and create second session
-    await new Promise((r) => setTimeout(r, 50));
-    wsServer.onMessage(ws1, JSON.stringify({ type: "createSession" }));
-    await new Promise((r) => setTimeout(r, 10));
-
-    const sessions = wsServer.sessionRegistry.list();
-    expect(sessions).toHaveLength(2);
-
-    // Close first connection and create new one - should attach to most recent
+    // Create a second session and make it strictly more recent than the
+    // first (most-recent selection is by lastActivityAt).
+    const second = await wsServer.sessionRegistry.create({});
+    wsServer.sessionRegistry._test_metadata.get(second.sessionId)!.lastActivityAt =
+      wsServer.sessionRegistry._test_metadata.get(firstSessionId)!.lastActivityAt + 1000;
+    expect(wsServer.sessionRegistry.list()).toHaveLength(2);
     wsServer.onClose(ws1);
 
-    const ws2 = createWsMockWs() as unknown as HotdogServerSocket;
+    const ws2 = createWsMockWs();
     wsServer.onUpgrade({ url: "/ws", headers: { host: "localhost" } }, ws2);
-    await new Promise((r) => setTimeout(r, 10));
 
-    const newActiveSessionId = (ws2 as HotdogServerSocket).activeSessionId!;
-    // Should be attached to the second (most recent) session
-    expect(newActiveSessionId).not.toBe(firstSessionId);
+    // Should attach to the second (most recent) session, not the first.
+    const attached = await waitForMessage(ws2, S2C.SESSION_CREATED);
+    expect(attached.sessionId).toBe(second.sessionId);
+    expect((ws2 as unknown as HotdogServerSocket).activeSessionId).toBe(second.sessionId);
   });
 
-  it("handles LIST_LOGS message without error", async () => {
-    const core = createWsMockCore();
-    wsServer = createWsServer(core, { buildAgent: createWsMockAgentFactory() });
-
-    const ws = createWsMockWs() as unknown as HotdogServerSocket;
-    wsServer.onUpgrade({ url: "/ws", headers: { host: "localhost" } }, ws);
-    await new Promise((r) => setTimeout(r, 20));
-
-    // Should not throw
-    wsServer.onMessage(ws, JSON.stringify({ type: "listLogs" }));
-    await new Promise((r) => setTimeout(r, 50));
-    expect(true).toBe(true);
-  });
-
-  it("handles VIEW_LOG message", async () => {
-    const core = createWsMockCore();
-    wsServer = createWsServer(core, { buildAgent: createWsMockAgentFactory() });
-
-    const ws = createWsMockWs() as unknown as HotdogServerSocket;
-    wsServer.onUpgrade({ url: "/ws", headers: { host: "localhost" } }, ws);
-    await new Promise((r) => setTimeout(r, 10));
-
-    wsServer.onMessage(ws, JSON.stringify({ type: "viewLog", logId: "test-log-id" }));
-    await new Promise((r) => setTimeout(r, 10));
-
-    const lastMsg = JSON.parse((ws as MockWs).messages[(ws as MockWs).messages.length - 1]!);
-    // Either logViewed or error if log doesn't exist
-    expect(["logViewed", "error"].includes(lastMsg.type)).toBe(true);
-  });
-
-  it("handles DELETE_LOG message", async () => {
-    const core = createWsMockCore();
-    wsServer = createWsServer(core, { buildAgent: createWsMockAgentFactory() });
-
-    const ws = createWsMockWs() as unknown as HotdogServerSocket;
-    wsServer.onUpgrade({ url: "/ws", headers: { host: "localhost" } }, ws);
-    await new Promise((r) => setTimeout(r, 10));
-
-    wsServer.onMessage(ws, JSON.stringify({ type: "deleteLog", logId: "test-log-id" }));
-    await new Promise((r) => setTimeout(r, 10));
-
-    const lastMsg = JSON.parse((ws as MockWs).messages[(ws as MockWs).messages.length - 1]!);
-    // Either logDeleted or error if log doesn't exist
-    expect(["logDeleted", "error"].includes(lastMsg.type)).toBe(true);
-  });
-
-  it("handles AUTH message with valid token", async () => {
-    const core = createWsMockCore();
-    const mockAuth = {
-      validateToken: (token: string) => token === "valid-token",
-    };
-    wsServer = createWsServer(core, {
-      buildAgent: createWsMockAgentFactory(),
-      auth: mockAuth as never,
-    });
-
-    const ws = createWsMockWs() as unknown as HotdogServerSocket;
-    wsServer.onUpgrade({ url: "/ws?token=valid-token", headers: { host: "localhost" } }, ws);
-    await new Promise((r) => setTimeout(r, 10));
-
-    const lastMsg = JSON.parse((ws as MockWs).messages[(ws as MockWs).messages.length - 1]!);
-    expect(lastMsg.type).toBe("sessionCreated");
-  });
-
-  it("sends authRequired when auth is configured but no token", () => {
-    const core = createWsMockCore();
-    const mockAuth = {
-      validateToken: (token: string) => token === "valid-token",
-    };
-    wsServer = createWsServer(core, {
-      buildAgent: createWsMockAgentFactory(),
-      auth: mockAuth as never,
-    });
-
-    const ws = createWsMockWs() as unknown as HotdogServerSocket;
-    wsServer.onUpgrade({ url: "/ws", headers: { host: "localhost" } }, ws);
-
-    const firstMsg = JSON.parse((ws as MockWs).messages[0]!);
-    expect(firstMsg.type).toBe("authRequired");
-  });
-
-  it("closes connection on invalid token at upgrade", () => {
-    const core = createWsMockCore();
-    const mockAuth = {
-      validateToken: (token: string) => token === "valid-token",
-    };
-    wsServer = createWsServer(core, {
-      buildAgent: createWsMockAgentFactory(),
-      auth: mockAuth as never,
-    });
-
-    const ws = createWsMockWs() as unknown as HotdogServerSocket;
-    wsServer.onUpgrade({ url: "/ws?token=invalid-token", headers: { host: "localhost" } }, ws);
-
-    const firstMsg = JSON.parse((ws as MockWs).messages[0]!);
-    expect(firstMsg.type).toBe("authError");
-  });
-
-  it("handles AUTH message in routeMessage with valid token", async () => {
-    const core = createWsMockCore();
-    const mockAuth = {
-      validateToken: (token: string) => token === "valid-token",
-    };
-    wsServer = createWsServer(core, {
-      buildAgent: createWsMockAgentFactory(),
-      auth: mockAuth as never,
-    });
-
-    const ws = createWsMockWs() as unknown as HotdogServerSocket;
-    // Connect without token - gets authRequired, no session created
-    wsServer.onUpgrade({ url: "/ws", headers: { host: "localhost" } }, ws);
-
-    // Send auth message - should authenticate and create session
-    wsServer.onMessage(ws, JSON.stringify({ type: "auth", token: "valid-token" }));
-    await new Promise((r) => setTimeout(r, 50));
-
-    // Check that authOk was sent
-    const allTypes = (ws as MockWs).messages
-      .filter((m) => m && m !== "undefined")
-      .map((m) => {
-        try { return JSON.parse(m).type; } catch { return null; }
-      })
-      .filter(Boolean);
-    expect(allTypes).toContain("authOk");
-  });
-
-  it("handles AUTH message with invalid token", async () => {
-    const core = createWsMockCore();
-    const mockAuth = {
-      validateToken: (token: string) => token === "valid-token",
-    };
-    wsServer = createWsServer(core, {
-      buildAgent: createWsMockAgentFactory(),
-      auth: mockAuth as never,
-    });
-
-    const ws = createWsMockWs() as unknown as HotdogServerSocket;
-    wsServer.onUpgrade({ url: "/ws", headers: { host: "localhost" } }, ws);
-
-    wsServer.onMessage(ws, JSON.stringify({ type: "auth", token: "invalid-token" }));
-    await new Promise((r) => setTimeout(r, 20));
-
-    const allTypes = (ws as MockWs).messages
-      .filter((m) => m && m !== "undefined")
-      .map((m) => {
-        try { return JSON.parse(m).type; } catch { return null; }
-      })
-      .filter(Boolean);
-    expect(allTypes).toContain("authError");
-  });
-
-  it("rejects non-AUTH messages when auth is enabled and no token is validated (auth gate)", async () => {
-    const core = createWsMockCore();
-    const mockAuth = {
-      validateToken: (token: string) => token === "valid-token",
-    };
-    wsServer = createWsServer(core, {
-      buildAgent: createWsMockAgentFactory(),
-      auth: mockAuth as never,
-    });
-
-    const ws = createWsMockWs() as unknown as HotdogServerSocket;
-    // Connect without token -- socket stays open awaiting protocol AUTH.
-    wsServer.onUpgrade({ url: "/ws", headers: { host: "localhost" } }, ws);
-
-    // Non-AUTH message before auth must be gated, not routed.
-    wsServer.onMessage(ws, JSON.stringify({ type: "listSessions" }));
-    await new Promise((r) => setTimeout(r, 20));
-
-    const types = (ws as MockWs).messages
-      .filter((m) => m && m !== "undefined")
-      .map((m) => {
-        try { return JSON.parse(m).type; } catch { return null; }
-      })
-      .filter(Boolean);
-    expect(types).toContain("authError");
-    expect(types).not.toContain("sessions");
-    expect(types).not.toContain("sessionCreated");
-  });
-
-  it("allows messages after successful protocol AUTH", async () => {
-    const core = createWsMockCore();
-    const mockAuth = {
-      validateToken: (token: string) => token === "valid-token",
-    };
-    wsServer = createWsServer(core, {
-      buildAgent: createWsMockAgentFactory(),
-      auth: mockAuth as never,
-    });
-
-    const ws = createWsMockWs() as unknown as HotdogServerSocket;
-    wsServer.onUpgrade({ url: "/ws", headers: { host: "localhost" } }, ws);
-
-    wsServer.onMessage(ws, JSON.stringify({ type: "auth", token: "valid-token" }));
-    await new Promise((r) => setTimeout(r, 50));
-
-    wsServer.onMessage(ws, JSON.stringify({ type: "listSessions" }));
-    await new Promise((r) => setTimeout(r, 20));
-
-    const types = (ws as MockWs).messages
-      .filter((m) => m && m !== "undefined")
-      .map((m) => {
-        try { return JSON.parse(m).type; } catch { return null; }
-      })
-      .filter(Boolean);
-    expect(types).toContain("authOk");
-    expect(types).toContain("sessions");
-  });
-
-  it("keeps gating non-AUTH messages after a failed protocol AUTH", async () => {
-    const core = createWsMockCore();
-    const mockAuth = {
-      validateToken: (token: string) => token === "valid-token",
-    };
-    wsServer = createWsServer(core, {
-      buildAgent: createWsMockAgentFactory(),
-      auth: mockAuth as never,
-    });
-
-    const ws = createWsMockWs() as unknown as HotdogServerSocket;
-    wsServer.onUpgrade({ url: "/ws", headers: { host: "localhost" } }, ws);
-
-    wsServer.onMessage(ws, JSON.stringify({ type: "auth", token: "bad-token" }));
-    await new Promise((r) => setTimeout(r, 20));
-
-    wsServer.onMessage(ws, JSON.stringify({ type: "createSession" }));
-    await new Promise((r) => setTimeout(r, 20));
-
-    const types = (ws as MockWs).messages
-      .filter((m) => m && m !== "undefined")
-      .map((m) => {
-        try { return JSON.parse(m).type; } catch { return null; }
-      })
-      .filter(Boolean);
-    // authError from the failed AUTH, then authError from the gate.
-    expect(types.filter((t) => t === "authError").length).toBeGreaterThanOrEqual(2);
-    expect(types).not.toContain("sessionCreated");
-  });
-
-  it("createAndAttachSession handles error", async () => {
-    const core = createWsMockCore();
+  it("createAndAttachSession reports buildAgent errors", async () => {
     const failingBuildAgent = async () => {
       throw new Error("Build agent failed");
     };
-    wsServer = createWsServer(core, { buildAgent: failingBuildAgent });
+    wsServer = createWsServer(createWsMockCore(), { buildAgent: failingBuildAgent });
 
-    const ws = createWsMockWs() as unknown as HotdogServerSocket;
+    const ws = createWsMockWs();
     wsServer.onUpgrade({ url: "/ws", headers: { host: "localhost" } }, ws);
-    await new Promise((r) => setTimeout(r, 50));
-
-    const errorMsg = (ws as MockWs).messages.find((m) => {
-      try {
-        const parsed = JSON.parse(m);
-        return parsed.type === "error" && parsed.message?.includes("Build agent failed");
-      } catch {
-        return false;
-      }
-    });
-    expect(errorMsg).toBeDefined();
-  });
-
-  it("handles LOAD_LOG message", async () => {
-    const core = createWsMockCore();
-    wsServer = createWsServer(core, { buildAgent: createWsMockAgentFactory() });
-
-    const ws = createWsMockWs() as unknown as HotdogServerSocket;
-    wsServer.onUpgrade({ url: "/ws", headers: { host: "localhost" } }, ws);
-    await new Promise((r) => setTimeout(r, 10));
-
-    wsServer.onMessage(ws, JSON.stringify({ type: "loadLog", logId: "test-log-id" }));
-    await new Promise((r) => setTimeout(r, 10));
-
-    const lastMsg = JSON.parse((ws as MockWs).messages[(ws as MockWs).messages.length - 1]!);
-    // Either sessionCreated (if log loaded) or error if log doesn't exist
-    expect(["sessionCreated", "error"].includes(lastMsg.type)).toBe(true);
+    const err = await waitForMessage(ws, S2C.ERROR);
+    expect(err.message).toContain("Build agent failed");
   });
 });
 
+// ── Cold log operations ─────────────────────────────────────────────────────
+
+describe("createWsServer - cold log operations", () => {
+  let wsServer: ReturnType<typeof createWsServer>;
+  let ws: MockWs;
+
+  afterEach(() => {
+    wsServer?.stopCleanupLoop();
+    try { rmSync(join(SESSIONS_DIR, `${FIXTURE_LOG_ID}.jsonl`), { force: true }); } catch {}
+  });
+
+  it("responds to LIST_LOGS with cold (non-live) session logs only", async () => {
+    writeFixtureLog(FIXTURE_LOG_ID);
+    const core = createWsMockCore();
+    wsServer = createWsServer(core, { buildAgent: createWsMockAgentFactory() });
+    ws = createWsMockWs();
+    wsServer.onUpgrade({ url: "/ws", headers: { host: "localhost" } }, ws);
+    const liveSessionId = (await waitForMessage(ws, S2C.SESSION_CREATED)).sessionId;
+
+    wsServer.onMessage(ws, JSON.stringify({ type: C2S.LIST_LOGS }));
+    const listed = await waitForMessage(ws, S2C.LOGS_LISTED);
+    const logIds = listed.logs.map((l: { id: string }) => l.id);
+    expect(logIds).toContain(FIXTURE_LOG_ID);
+    // The live session must not appear in the cold log listing.
+    expect(logIds).not.toContain(liveSessionId);
+  });
+
+  it("responds to VIEW_LOG with the log entries", async () => {
+    writeFixtureLog(FIXTURE_LOG_ID);
+    const core = createWsMockCore();
+    wsServer = createWsServer(core, { buildAgent: createWsMockAgentFactory() });
+    ws = createWsMockWs();
+
+    wsServer.onMessage(ws, JSON.stringify({ type: C2S.VIEW_LOG, logId: FIXTURE_LOG_ID }));
+    const viewed = await waitForMessage(ws, S2C.LOG_VIEWED);
+    expect(viewed.logId).toBe(FIXTURE_LOG_ID);
+    expect(viewed.entries.map((e: { content: string }) => e.content)).toEqual(["loaded input", "loaded reply"]);
+  });
+
+  it("VIEW_LOG with missing logId is ignored", async () => {
+    const core = createWsMockCore();
+    wsServer = createWsServer(core, { buildAgent: createWsMockAgentFactory() });
+    ws = createWsMockWs();
+
+    wsServer.onMessage(ws, JSON.stringify({ type: C2S.VIEW_LOG }));
+    await new Promise((r) => setTimeout(r, 10));
+    expect(ws.messages.length).toBe(0);
+  });
+
+  it("responds to DELETE_LOG for an existing log", async () => {
+    writeFixtureLog(FIXTURE_LOG_ID);
+    const core = createWsMockCore();
+    wsServer = createWsServer(core, { buildAgent: createWsMockAgentFactory() });
+    ws = createWsMockWs();
+
+    wsServer.onMessage(ws, JSON.stringify({ type: C2S.DELETE_LOG, logId: FIXTURE_LOG_ID }));
+    const deleted = await waitForMessage(ws, S2C.LOG_DELETED);
+    expect(deleted.logId).toBe(FIXTURE_LOG_ID);
+    expect(existsSync(join(SESSIONS_DIR, `${FIXTURE_LOG_ID}.jsonl`))).toBe(false);
+  });
+
+  it("responds to DELETE_LOG with an error for a missing log", async () => {
+    const core = createWsMockCore();
+    wsServer = createWsServer(core, { buildAgent: createWsMockAgentFactory() });
+    ws = createWsMockWs();
+
+    wsServer.onMessage(ws, JSON.stringify({ type: C2S.DELETE_LOG, logId: "non-existent-log" }));
+    const err = await waitForMessage(ws, S2C.ERROR);
+    expect(err.message).toContain("not found");
+  });
+
+  it("responds to LOAD_LOG by creating a session and replaying the log", async () => {
+    writeFixtureLog(FIXTURE_LOG_ID);
+    // The loaded history is replayed into the new session's log, so the agent
+    // needs a real MessageLog and a working addMessage to replay from.
+    const log = new MessageLog();
+    wsServer = createWsServer(createWsMockCore(), {
+      buildAgent: async () =>
+        makeWsMockAgent({
+          log: log as any,
+          addMessage: (msg: any) => { log.push(msg as any); },
+        }),
+    });
+    ws = createWsMockWs();
+
+    wsServer.onMessage(ws, JSON.stringify({ type: C2S.LOAD_LOG, logId: FIXTURE_LOG_ID }));
+    const created = await waitForMessage(ws, S2C.SESSION_CREATED);
+    expect(typeof created.sessionId).toBe("string");
+
+    // The loaded history is replayed as user/assistant messages.
+    const userMsg = await waitForMessage(ws, S2C.USER_MESSAGE);
+    expect(userMsg.content).toBe("loaded input");
+    const assistantMsg = await waitForMessage(ws, S2C.ASSISTANT_MESSAGE);
+    expect(assistantMsg.content).toBe("loaded reply");
+    // And it landed in the session's context, not just on the wire.
+    expect(log.length).toBe(2);
+  });
+
+  it("responds to LOAD_LOG with an error for a missing log", async () => {
+    const core = createWsMockCore();
+    wsServer = createWsServer(core, { buildAgent: createWsMockAgentFactory() });
+    ws = createWsMockWs();
+
+    wsServer.onMessage(ws, JSON.stringify({ type: C2S.LOAD_LOG, logId: "non-existent-log" }));
+    const err = await waitForMessage(ws, S2C.ERROR);
+    expect(err.message).toContain("No entries found");
+  });
+});
+
+// ── Auth ────────────────────────────────────────────────────────────────────
+
+describe("createWsServer - auth", () => {
+  let wsServer: ReturnType<typeof createWsServer>;
+
+  function authCore() {
+    return {
+      validateToken: (token: string) => token === "valid-token",
+    } as never;
+  }
+
+  afterEach(() => {
+    wsServer?.stopCleanupLoop();
+  });
+
+  it("attaches a session when the upgrade URL carries a valid token", async () => {
+    wsServer = createWsServer(createWsMockCore(), { buildAgent: createWsMockAgentFactory(), auth: authCore() });
+
+    const ws = createWsMockWs();
+    wsServer.onUpgrade({ url: "/ws?token=valid-token", headers: { host: "localhost" } }, ws);
+    const created = await waitForMessage(ws, S2C.SESSION_CREATED);
+    expect(typeof created.sessionId).toBe("string");
+  });
+
+  it("sends authRequired when auth is configured but no token is provided", async () => {
+    wsServer = createWsServer(createWsMockCore(), { buildAgent: createWsMockAgentFactory(), auth: authCore() });
+
+    const ws = createWsMockWs();
+    wsServer.onUpgrade({ url: "/ws", headers: { host: "localhost" } }, ws);
+
+    expect(lastMessage(ws).type).toBe(S2C.AUTH_REQUIRED);
+  });
+
+  it("sends authError and closes the connection on an invalid upgrade token", async () => {
+    wsServer = createWsServer(createWsMockCore(), { buildAgent: createWsMockAgentFactory(), auth: authCore() });
+
+    const ws = createWsMockWs();
+    wsServer.onUpgrade({ url: "/ws?token=invalid-token", headers: { host: "localhost" } }, ws);
+
+    expect(lastMessage(ws).type).toBe(S2C.AUTH_ERROR);
+    expect((ws.close as Mock<() => void>).mock.calls.length).toBeGreaterThan(0);
+  });
+
+  it("authenticates via protocol AUTH and opens a session", async () => {
+    wsServer = createWsServer(createWsMockCore(), { buildAgent: createWsMockAgentFactory(), auth: authCore() });
+
+    const ws = createWsMockWs();
+    wsServer.onUpgrade({ url: "/ws", headers: { host: "localhost" } }, ws);
+
+    wsServer.onMessage(ws, JSON.stringify({ type: C2S.AUTH, token: "valid-token" }));
+    expect(await waitForMessage(ws, "authOk")).toBeDefined();
+    await waitForMessage(ws, S2C.SESSION_CREATED);
+  });
+
+  it("rejects protocol AUTH with an invalid token", async () => {
+    wsServer = createWsServer(createWsMockCore(), { buildAgent: createWsMockAgentFactory(), auth: authCore() });
+
+    const ws = createWsMockWs();
+    wsServer.onUpgrade({ url: "/ws", headers: { host: "localhost" } }, ws);
+
+    wsServer.onMessage(ws, JSON.stringify({ type: C2S.AUTH, token: "invalid-token" }));
+    const err = await waitForMessage(ws, S2C.AUTH_ERROR);
+    expect(err.message).toBe("Invalid token");
+  });
+
+  it("ignores AUTH when no auth middleware is configured", async () => {
+    wsServer = createWsServer(createWsMockCore(), { buildAgent: createWsMockAgentFactory() });
+
+    const ws = createWsMockWs();
+    wsServer.onMessage(ws, JSON.stringify({ type: C2S.AUTH, token: "any-token" }));
+    await new Promise((r) => setTimeout(r, 10));
+    expect(ws.messages.length).toBe(0);
+  });
+
+  it("gates non-AUTH messages until a token is validated", async () => {
+    wsServer = createWsServer(createWsMockCore(), { buildAgent: createWsMockAgentFactory(), auth: authCore() });
+
+    const ws = createWsMockWs();
+    wsServer.onUpgrade({ url: "/ws", headers: { host: "localhost" } }, ws);
+
+    // Non-AUTH message before auth must be gated, not routed.
+    wsServer.onMessage(ws, JSON.stringify({ type: C2S.LIST_SESSIONS }));
+    await new Promise((r) => setTimeout(r, 10));
+
+    const types = messageTypes(ws);
+    expect(types).toContain(S2C.AUTH_ERROR);
+    expect(types).not.toContain(S2C.SESSIONS);
+    expect(types).not.toContain(S2C.SESSION_CREATED);
+  });
+
+  it("allows messages after successful protocol AUTH", async () => {
+    wsServer = createWsServer(createWsMockCore(), { buildAgent: createWsMockAgentFactory(), auth: authCore() });
+
+    const ws = createWsMockWs();
+    wsServer.onUpgrade({ url: "/ws", headers: { host: "localhost" } }, ws);
+
+    wsServer.onMessage(ws, JSON.stringify({ type: C2S.AUTH, token: "valid-token" }));
+    await waitForMessage(ws, "authOk");
+
+    wsServer.onMessage(ws, JSON.stringify({ type: C2S.LIST_SESSIONS }));
+    await waitForMessage(ws, S2C.SESSIONS);
+  });
+
+  it("keeps gating non-AUTH messages after a failed protocol AUTH", async () => {
+    wsServer = createWsServer(createWsMockCore(), { buildAgent: createWsMockAgentFactory(), auth: authCore() });
+
+    const ws = createWsMockWs();
+    wsServer.onUpgrade({ url: "/ws", headers: { host: "localhost" } }, ws);
+
+    wsServer.onMessage(ws, JSON.stringify({ type: C2S.AUTH, token: "bad-token" }));
+    await waitForMessage(ws, S2C.AUTH_ERROR);
+
+    wsServer.onMessage(ws, JSON.stringify({ type: C2S.CREATE_SESSION }));
+    await new Promise((r) => setTimeout(r, 10));
+
+    const types = messageTypes(ws);
+    // authError from the failed AUTH, then authError from the gate.
+    expect(types.filter((t) => t === S2C.AUTH_ERROR).length).toBeGreaterThanOrEqual(2);
+    expect(types).not.toContain(S2C.SESSION_CREATED);
+  });
+});
+
+// ── replaySessionHistory Tests ───────────────────────────────────────────────
+
+describe("replaySessionHistory", () => {
+  /** Create a server core whose agent has a custom message log. */
+  function createReplayServer(mockAgent: AgentLike) {
+    const core = {
+      hooks: { notifyHooks: () => {}, notifyHooksAsync: async () => {} },
+      config: {},
+      resolved: {
+        baseUrl: "http://localhost:8000",
+        apiKey: "test-key",
+        model: "test-model",
+        stream: true,
+        chatTimeout: 30,
+        maxRetries: 3,
+        maxIterations: 100,
+        hideTools: false,
+        hideThinking: true,
+        showTokenUse: true,
+        profileName: "default",
+        modelRegistry: {},
+      },
+      toolRegistry: { getAll: () => [], get: () => null, register: () => {} },
+      extensions: { cleanup: async () => {} },
+      createLlmClient: (overrides?: Record<string, unknown>) =>
+        new LlmClient({ baseUrl: "http://localhost:8000", apiKey: "test-key", stream: true,
+          chatTimeoutSecs: 30, maxRetries: 3, ...overrides }),
+    } as any;
+
+    const wsServer = createWsServer(core, { buildAgent: async () => mockAgent });
+    const ws = createWsMockWs();
+    return { wsServer, ws };
+  }
+
+  function agentWithLog(log: any[]): AgentLike {
+    return makeWsMockAgent({
+      log: {
+        getAll: () => log,
+        toJSON: () => log,
+        push: () => 0,
+        replace: () => {},
+        get: () => undefined,
+        length: log.length,
+        clear: () => {},
+        pop: () => undefined,
+        slice: () => [],
+        [Symbol.iterator]: () => log[Symbol.iterator](),
+      } as unknown as import("../../src/core/context/message-log.ts").MessageLog,
+    });
+  }
+
+  /** Switch the mock socket to the freshly created session, triggering replay. */
+  async function switchToCreatedSession(wsServer: ReturnType<typeof createWsServer>, ws: MockWs) {
+    const result = await wsServer.sessionRegistry.create({});
+    (ws as unknown as HotdogServerSocket).activeSessionId = result.sessionId;
+    await wsServer.onMessage(ws, JSON.stringify({
+      type: C2S.SWITCH_SESSION,
+      sessionId: result.sessionId,
+    }));
+    return result;
+  }
+
+  it("replays user messages", async () => {
+    const mockAgent = agentWithLog([
+      { role: "user", content: "Hello", getTextContent: () => "Hello" },
+    ]);
+    const { wsServer, ws } = createReplayServer(mockAgent);
+
+    await switchToCreatedSession(wsServer, ws);
+
+    const msgs = ws.messages.map((m) => JSON.parse(m));
+    const userMsg = msgs.find((m: any) => m.type === S2C.USER_MESSAGE);
+    expect(userMsg).toBeDefined();
+    expect(userMsg.content).toBe("Hello");
+  });
+
+  it("replays assistant messages with reasoning", async () => {
+    const mockAgent = agentWithLog([
+      {
+        role: "assistant",
+        content: "Here's my answer",
+        reasoningContent: "Let me think...",
+        getTextContent: () => "Here's my answer",
+      },
+    ]);
+    const { wsServer, ws } = createReplayServer(mockAgent);
+
+    await switchToCreatedSession(wsServer, ws);
+
+    const msgs = ws.messages.map((m) => JSON.parse(m));
+    const thinkingMsg = msgs.find((m: any) => m.type === S2C.THINKING);
+    const assistantMsg = msgs.find((m: any) => m.type === S2C.ASSISTANT_MESSAGE);
+
+    expect(thinkingMsg).toBeDefined();
+    expect(thinkingMsg.content).toBe("Let me think...");
+    expect(assistantMsg).toBeDefined();
+    expect(assistantMsg.content).toBe("Here's my answer");
+  });
+
+  it("replays tool calls and results", async () => {
+    const mockAgent = agentWithLog([
+      {
+        role: "assistant",
+        content: "",
+        toolCalls: [
+          { id: "call_123", function: { name: "read_file", arguments: '{"path":"test.txt"}' } },
+        ],
+        getTextContent: () => "",
+      },
+      {
+        role: "tool",
+        content: "File content here",
+        toolCallId: "call_123",
+      },
+    ]);
+    const { wsServer, ws } = createReplayServer(mockAgent);
+
+    await switchToCreatedSession(wsServer, ws);
+
+    const msgs = ws.messages.map((m) => JSON.parse(m));
+    const toolCallMsg = msgs.find((m: any) => m.type === S2C.TOOL_CALL);
+    const toolResultMsg = msgs.find((m: any) => m.type === S2C.TOOL_RESULT);
+
+    expect(toolCallMsg).toBeDefined();
+    expect(toolCallMsg.name).toBe("read_file");
+    expect(toolResultMsg).toBeDefined();
+    expect(toolResultMsg.output).toBe("File content here");
+  });
+
+  it("replays messages without getTextContent via the content field", async () => {
+    const mockAgent = agentWithLog([
+      { role: "user", content: "Hello" }, // No getTextContent
+    ]);
+    const { wsServer, ws } = createReplayServer(mockAgent);
+
+    await switchToCreatedSession(wsServer, ws);
+
+    const msgs = ws.messages.map((m) => JSON.parse(m));
+    const userMsg = msgs.find((m: any) => m.type === S2C.USER_MESSAGE);
+    expect(userMsg).toBeDefined();
+    expect(userMsg.content).toBe("Hello");
+  });
+});
 
 // ── Question tool integration ───────────────────────────────────────────────
 
 describe("question tool integration (bridge)", () => {
   let core: any;
   let wsServer: ReturnType<typeof createWsServer>;
-  let ws: HotdogServerSocket;
+  let ws: MockWs;
   let sessionId: string;
 
   beforeEach(async () => {
@@ -721,10 +896,10 @@ describe("question tool integration (bridge)", () => {
       questionTimeoutSecs: 300,
     });
 
-    ws = createWsMockWs() as unknown as HotdogServerSocket;
+    ws = createWsMockWs();
     wsServer.onUpgrade({ url: "/ws", headers: { host: "localhost" } }, ws);
-    await new Promise((r) => setTimeout(r, 10));
-    sessionId = (ws as HotdogServerSocket).activeSessionId!;
+    await waitForMessage(ws, S2C.SESSION_CREATED);
+    sessionId = (ws as unknown as HotdogServerSocket).activeSessionId!;
   });
 
   afterEach(() => {
@@ -775,7 +950,7 @@ describe("question tool integration (bridge)", () => {
     await wsServer.onMessage(
       ws,
       JSON.stringify({
-        type: "questionAnswer",
+        type: C2S.QUESTION_ANSWER,
         sessionId,
         answers: { q1: "Ada" },
       }),
@@ -783,7 +958,7 @@ describe("question tool integration (bridge)", () => {
 
     await expect(p).resolves.toEqual({ q1: "Ada" });
 
-    const msgs = (ws as MockWs).messages.map((m) => JSON.parse(m));
+    const msgs = ws.messages.map((m) => JSON.parse(m));
     expect(
       msgs.some(
         (m) =>
@@ -800,13 +975,13 @@ describe("question tool integration (bridge)", () => {
     for (const bad of [[1, 2], "text", null]) {
       await wsServer.onMessage(
         ws,
-        JSON.stringify({ type: "questionAnswer", sessionId, answers: bad }),
+        JSON.stringify({ type: C2S.QUESTION_ANSWER, sessionId, answers: bad }),
       );
     }
     // Still pending: only a real object may resolve it.
     await wsServer.onMessage(
       ws,
-      JSON.stringify({ type: "questionAnswer", sessionId, answers: { q1: "Ada" } }),
+      JSON.stringify({ type: C2S.QUESTION_ANSWER, sessionId, answers: { q1: "Ada" } }),
     );
     await expect(p).resolves.toEqual({ q1: "Ada" });
   });
@@ -815,24 +990,22 @@ describe("question tool integration (bridge)", () => {
     const p = startQuestion();
     await wsServer.onMessage(
       ws,
-      JSON.stringify({ type: "questionAnswer", sessionId, answers: { q1: "a" } }),
+      JSON.stringify({ type: C2S.QUESTION_ANSWER, sessionId, answers: { q1: "a" } }),
     );
     await expect(p).resolves.toEqual({ q1: "a" });
 
     await wsServer.onMessage(
       ws,
-      JSON.stringify({ type: "questionAnswer", sessionId, answers: { q1: "b" } }),
+      JSON.stringify({ type: C2S.QUESTION_ANSWER, sessionId, answers: { q1: "b" } }),
     );
-    const lastMsg = JSON.parse(
-      (ws as MockWs).messages[(ws as MockWs).messages.length - 1]!,
-    );
-    expect(lastMsg.type).toBe("error");
+    const msg = lastMessage(ws);
+    expect(msg.type).toBe(S2C.ERROR);
   });
 
   it("interrupt (cancel) resolves the pending question with defaults", async () => {
     const p = startQuestion();
 
-    await wsServer.onMessage(ws, JSON.stringify({ type: "cancel", sessionId }));
+    await wsServer.onMessage(ws, JSON.stringify({ type: C2S.CANCEL, sessionId }));
 
     await expect(p).resolves.toEqual({ q1: "" });
   });
@@ -842,7 +1015,7 @@ describe("question tool integration (bridge)", () => {
 
     await wsServer.onMessage(
       ws,
-      JSON.stringify({ type: "deleteSession", sessionId }),
+      JSON.stringify({ type: C2S.DELETE_SESSION, sessionId }),
     );
 
     await expect(p).resolves.toEqual({ q1: "" });

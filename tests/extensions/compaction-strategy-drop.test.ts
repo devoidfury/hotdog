@@ -84,6 +84,21 @@ describe("DropStrategy", () => {
       const settings = { ...defaultSettings, keepRecentMessages: 2 };
       expect(strategy.canCompact(messages, settings)).toBe(true);
     });
+
+    it("scales the threshold with keepRecentMessages", () => {
+      const messages = Array.from({ length: 10 }, (_, i) =>
+        msg(i % 2 === 0 ? "user" : "assistant", "x"),
+      );
+      // threshold = keepRecent * 2: 10 > 6, but 10 < 12
+      expect(strategy.canCompact(messages, { ...defaultSettings, keepRecentMessages: 3 })).toBe(true);
+      expect(strategy.canCompact(messages, { ...defaultSettings, keepRecentMessages: 6 })).toBe(false);
+    });
+
+    it("treats keepRecentMessages=0 as a zero threshold", () => {
+      const messages = [msg("user", "hello")];
+      expect(strategy.canCompact(messages, { ...defaultSettings, keepRecentMessages: 0 })).toBe(true);
+      expect(strategy.canCompact([], { ...defaultSettings, keepRecentMessages: 0 })).toBe(false);
+    });
   });
 
   describe("execute", () => {
@@ -150,6 +165,44 @@ describe("DropStrategy", () => {
 
       expect(result).not.toBeNull();
       expect(result!.messagesCompacted).toBeGreaterThan(0);
+    });
+
+    it("keeps exactly the last keepRecentMessages*2 non-system messages", async () => {
+      const messages = Array.from({ length: 20 }, (_, i) =>
+        msg(i % 2 === 0 ? "user" : "assistant", "x"),
+      );
+
+      const result = await strategy.execute(messages, { ...defaultSettings, keepRecentMessages: 5 }, noopLlmChat, "model");
+
+      // keep 5*2 = 10 messages (indices 10-19), compact the first 11
+      expect(result).not.toBeNull();
+      expect(result!.messagesCompacted).toBe(11);
+    });
+
+    it("reports token savings in metadata", async () => {
+      const content = "x".repeat(2000);
+      const messages = Array.from({ length: 10 }, (_, i) =>
+        msg(i % 2 === 0 ? "user" : "assistant", content),
+      );
+
+      const result = await strategy.execute(messages, defaultSettings, noopLlmChat, "model");
+
+      const before = result!.metadata!.tokensBefore as number;
+      const after = result!.metadata!.tokensAfter as number;
+      expect(before).toBeGreaterThan(0);
+      expect(after).toBeGreaterThan(0);
+      expect(after).toBeLessThan(before);
+    });
+
+    it("returns null when all messages are system messages", async () => {
+      const messages = [msg("system", "prompt 1"), msg("system", "prompt 2")];
+      const result = await strategy.execute(messages, defaultSettings, noopLlmChat, "model");
+      expect(result).toBeNull();
+    });
+
+    it("returns null for an empty message list", async () => {
+      const result = await strategy.execute([], defaultSettings, noopLlmChat, "model");
+      expect(result).toBeNull();
     });
   });
 });

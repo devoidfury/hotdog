@@ -61,9 +61,8 @@ describe("One-Shot Extension", () => {
     expect(cli.subcommand).toBe("prompt");
   });
 
-  it.each([null, undefined])("handles missing hooks (%s)", (hooks) => {
-    const core = { hooks } as any;
-    const ext = create(core);
+  it("exposes no hooks when the core context has no hooks object", () => {
+    const ext = create({ hooks: null } as any);
     expect(ext.hooks).toBeUndefined();
   });
 });

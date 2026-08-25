@@ -38,8 +38,22 @@ describe('parseCommand', () => {
     expect(parseCommand('models')).toEqual({ type: Command.Unknown, value: 'models' });
     expect(parseCommand('model qwen3.5')).toEqual({ type: Command.Unknown, value: 'model qwen3.5' });
     expect(parseCommand('compact')).toEqual({ type: Command.Unknown, value: 'compact' });
+    expect(parseCommand('cancel')).toEqual({ type: Command.Unknown, value: 'cancel' });
     expect(parseCommand('foobar')).toEqual({ type: Command.Unknown, value: 'foobar' });
     expect(parseCommand('')).toEqual({ type: Command.Unknown, value: null });
+  });
+
+  it('parses channel commands', () => {
+    expect(parseCommand('sessions')).toEqual({ type: Command.Sessions, value: null });
+    expect(parseCommand('attach abc')).toEqual({ type: Command.Attach, value: 'abc' });
+    expect(parseCommand('detach abc')).toEqual({ type: Command.Detach, value: 'abc' });
+    expect(parseCommand('switch abc')).toEqual({ type: Command.Switch, value: 'abc' });
+  });
+
+  it('is case-sensitive and does not trim whitespace-only input', () => {
+    expect(parseCommand('HELP').type).toBe(Command.Unknown);
+    expect(parseCommand('help   ')).toEqual({ type: Command.Unknown, value: 'help   ' });
+    expect(parseCommand('   ')).toEqual({ type: Command.Unknown, value: '   ' });
   });
 });
 

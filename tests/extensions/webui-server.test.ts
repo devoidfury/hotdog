@@ -378,8 +378,12 @@ describe("createWebuiServer", () => {
 
       ws.send(JSON.stringify({ type: "listSessions" }));
 
-      // Wait for response
-      await new Promise((r) => setTimeout(r, 200));
+      // Poll for a response (deterministic on arrival, fails loudly on
+      // timeout) instead of a fixed sleep.
+      const deadline = Date.now() + 2000;
+      while (received.length === 0 && Date.now() < deadline) {
+        await new Promise((r) => setTimeout(r, 5));
+      }
 
       // The message handler should have forwarded the message
       // and we should get a response (sessions list or error)

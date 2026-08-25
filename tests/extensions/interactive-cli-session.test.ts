@@ -7,6 +7,15 @@ import { HookSystem } from "../../src/core/hooks.ts";
 import { createCompletionService } from "../../src/core/completion.ts";
 import { LlmClient } from "../../src/core/llm-client/client.ts";
 
+/** Poll a condition until true (deterministic replacement for fixed sleeps). */
+async function waitFor(cond: () => boolean, timeoutMs = 2000): Promise<void> {
+  const start = Date.now();
+  while (!cond()) {
+    if (Date.now() - start > timeoutMs) throw new Error("Timed out waiting for condition");
+    await new Promise((r) => setTimeout(r, 5));
+  }
+}
+
 describe("runInteractiveSession", () => {
   let originalSessionManagerCreate: unknown = null;
   let SessionManagerModule: typeof import("../../src/core/session/index.ts") | null = null;
@@ -124,7 +133,7 @@ describe("runInteractiveSession", () => {
       });
 
       // Wait for setup to complete
-      await new Promise((r) => setTimeout(r, 20));
+      await waitFor(() => createOpts !== null);
 
       expect(createOpts).not.toBeNull();
       expect(createOpts!.initialConfig).toBeDefined();
@@ -137,57 +146,6 @@ describe("runInteractiveSession", () => {
       try { await sessionPromise; } catch { /* ignore */ }
     } finally {
       (SessionManager as any).create = originalCreate;
-    }
-  });
-
-  it("handles empty input by re-prompting", async () => {
-    const { runInteractiveSession } = await import("../../src/extensions/ui-interactive-cli/index.ts");
-    const { SessionManager } = await import("../../src/core/session/index.ts");
-    const core = createMockCore();
-
-    let promptCallCount = 0;
-    const mockBus = {
-      run: async () => new Promise<void>((resolve) => { (mockBus as any)._resolve = resolve; }),
-      runUntilCancelled: async () => {},
-      cancel: () => {},
-    };
-
-    (SessionManager as any).create = async () => ({
-      sessionId: () => "test-session-empty",
-      getAgent: () => ({ sessionId: "test-session-empty" }),
-      getBus: () => mockBus,
-      getTaskManager: () => null,
-      enqueue: () => {},
-      executeCommand: async () => 0,
-      onSessionEvents: () => () => {},
-    });
-
-    const mockRl = {
-      on: () => mockRl,
-      prompt: function () { promptCallCount++; return mockRl; },
-      setPrompt: () => mockRl,
-      close: () => {},
-      removeListener: () => mockRl,
-      question: () => mockRl,
-      _line: "",
-      _cursor: 0,
-    } as any;
-
-    try {
-      const sessionPromise = runInteractiveSession({}, core, {
-        createReadline: () => mockRl,
-        onClose: () => {},
-        onSIGINT: () => {},
-        setupInput: () => {},
-      });
-
-      await new Promise((r) => setTimeout(r, 20));
-
-      // Clean up
-      (mockBus as any)._resolve();
-      try { await sessionPromise; } catch { /* ignore */ }
-    } finally {
-      // Restore
     }
   });
 
@@ -232,7 +190,7 @@ describe("runInteractiveSession", () => {
         setupInput: () => { inputCreated = true; },
       });
 
-      await new Promise((r) => setTimeout(r, 20));
+      await waitFor(() => inputCreated);
       expect(inputCreated).toBe(true);
 
       // Clean up
@@ -249,6 +207,7 @@ describe("runInteractiveSession", () => {
     const core = createMockCore();
 
     let lastPrompt = "";
+    let rlCreated = false;
     const mockBus = {
       run: async () => new Promise<void>((resolve) => { (mockBus as any)._resolve = resolve; }),
       runUntilCancelled: async () => {},
@@ -278,17 +237,18 @@ describe("runInteractiveSession", () => {
 
     try {
       const sessionPromise = runInteractiveSession({}, core, {
-        createReadline: () => mockRl,
+        createReadline: () => { rlCreated = true; return mockRl; },
         onClose: () => {},
         onSIGINT: () => {},
         setupInput: () => {},
       });
 
-      await new Promise((r) => setTimeout(r, 20));
+      // Wait until readline exists, so the MODEL_CHANGE hook is registered.
+      await waitFor(() => rlCreated);
 
       // Trigger model change
       core.hooks.notifyHooks(HOOKS.MODEL_CHANGE, { newModel: "new-model" });
-      await new Promise((r) => setTimeout(r, 10));
+      await waitFor(() => lastPrompt === "(new-model)> ");
 
       expect(lastPrompt).toBe("(new-model)> ");
 
@@ -305,7 +265,9 @@ describe("runInteractiveSession", () => {
     const { SessionManager } = await import("../../src/core/session/index.ts");
     const core = createMockCore();
 
-    let promptCalled = false;
+    // The initial prompt fires during setup, so count calls: TURN_END must
+    // produce a second prompt.
+    let promptCount = 0;
     const mockBus = {
       run: async () => new Promise<void>((resolve) => { (mockBus as any)._resolve = resolve; }),
       runUntilCancelled: async () => {},
@@ -324,7 +286,7 @@ describe("runInteractiveSession", () => {
 
     const mockRl = {
       on: () => mockRl,
-      prompt: function () { promptCalled = true; return mockRl; },
+      prompt: function () { promptCount++; return mockRl; },
       setPrompt: () => mockRl,
       close: () => {},
       removeListener: () => mockRl,
@@ -341,13 +303,12 @@ describe("runInteractiveSession", () => {
         setupInput: () => {},
       });
 
-      await new Promise((r) => setTimeout(r, 20));
-
-      // Trigger turn end with stopped=true
+      // Wait for the initial prompt from setup, then turn end.
+      await waitFor(() => promptCount >= 1);
       core.hooks.notifyHooks(HOOKS.TURN_END, { stopped: true });
-      await new Promise((r) => setTimeout(r, 20));
+      await waitFor(() => promptCount >= 2);
 
-      expect(promptCalled).toBe(true);
+      expect(promptCount).toBeGreaterThanOrEqual(2);
 
       // Clean up
       (mockBus as any)._resolve();
@@ -401,7 +362,7 @@ describe("runInteractiveSession", () => {
         setupInput: () => {},
       });
 
-      await new Promise((r) => setTimeout(r, 20));
+      await waitFor(() => customRlUsed);
       expect(customRlUsed).toBe(true);
 
       // Clean up
@@ -434,6 +395,7 @@ describe("runInteractiveSession", () => {
       onSessionEvents: () => () => {},
     });
 
+    let rlOptions: any = null;
     const mockRl = {
       on: () => mockRl,
       prompt: () => mockRl,
@@ -447,68 +409,18 @@ describe("runInteractiveSession", () => {
 
     try {
       const sessionPromise = runInteractiveSession({}, core, {
-        createReadline: () => mockRl,
+        createReadline: (opts: any) => { rlOptions = opts; return mockRl; },
         onClose: () => {},
         onSIGINT: () => {},
         setupInput: () => {},
       });
 
-      await new Promise((r) => setTimeout(r, 20));
+      await waitFor(() => rlOptions !== null);
 
-      // Session should be set up with shell mode enabled
-      // We verify by checking the session is running
-      expect(mockBus).toBeDefined();
-
-      // Clean up
-      (mockBus as any)._resolve();
-      try { await sessionPromise; } catch { /* ignore */ }
-    } finally {
-      // Restore
-    }
-  });
-
-  it("handles SIGINT via onSIGINT handler", async () => {
-    const { runInteractiveSession } = await import("../../src/extensions/ui-interactive-cli/index.ts");
-    const { SessionManager } = await import("../../src/core/session/index.ts");
-    const core = createMockCore();
-
-    let sigintCalled = false;
-    const mockBus = {
-      run: async () => new Promise<void>((resolve) => { (mockBus as any)._resolve = resolve; }),
-      runUntilCancelled: async () => {},
-      cancel: () => {},
-    };
-
-    (SessionManager as any).create = async () => ({
-      sessionId: () => "test-session-sigint",
-      getAgent: () => ({ sessionId: "test-session-sigint" }),
-      getBus: () => mockBus,
-      getTaskManager: () => null,
-      enqueue: () => {},
-      executeCommand: async () => 0,
-      onSessionEvents: () => () => {},
-    });
-
-    const mockRl = {
-      on: () => mockRl,
-      prompt: () => mockRl,
-      setPrompt: () => mockRl,
-      close: () => {},
-      removeListener: () => mockRl,
-      question: () => mockRl,
-      _line: "",
-      _cursor: 0,
-    } as any;
-
-    try {
-      const sessionPromise = runInteractiveSession({}, core, {
-        createReadline: () => mockRl,
-        onClose: () => {},
-        onSIGINT: () => { sigintCalled = true; },
-        setupInput: () => {},
-      });
-
-      await new Promise((r) => setTimeout(r, 20));
+      // Shell mode wires a shell completer into readline and registers a
+      // shell completion handler on the completion service.
+      expect(typeof rlOptions.completer).toBe("function");
+      expect(core.completion.handlerCount()).toBeGreaterThan(0);
 
       // Clean up
       (mockBus as any)._resolve();
@@ -562,7 +474,7 @@ describe("runInteractiveSession", () => {
         setupInput: () => {},
       });
 
-      await new Promise((r) => setTimeout(r, 20));
+      await waitFor(() => capturedBuildAgent !== null);
       expect(capturedBuildAgent).toBeDefined();
       expect(typeof capturedBuildAgent).toBe("function");
 

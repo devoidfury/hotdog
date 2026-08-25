@@ -98,74 +98,7 @@ describe("Subcommand handler return types", () => {
   });
 });
 
-// ── Main Entry Point Integration Tests ───────────────────────────────────────
-
-describe("Main entry point - exit code flow", () => {
-  it("process.exit is called with return value from main()", async () => {
-    const mockMain = async () => 0;
-
-    let capturedCode: number | null = null;
-    const mockExit = (code: number | undefined | null) => {
-      capturedCode = code ?? 0;
-      throw new Error("process.exit called with: " + code);
-    };
-    const originalExit = process.exit;
-    (process as any).exit = mockExit;
-
-    try {
-      await mockMain()
-        .catch(() => 1)
-        .then((code) => (process as any).exit(code));
-    } catch (e: any) {
-      if (e.message.startsWith("process.exit called with:")) {
-        expect(capturedCode as unknown as number).toBe(0);
-      } else {
-        throw e;
-      }
-    } finally {
-      process.exit = originalExit;
-    }
-  });
-
-  it("error in main() returns exit code 1", async () => {
-    const mockMain = async () => { throw new Error("Test error"); };
-
-    let capturedCode: number | null = null;
-    const mockExit = (code: number | undefined | null) => {
-      capturedCode = code ?? 0;
-      throw new Error("process.exit called with: " + code);
-    };
-    const originalExit = process.exit;
-    (process as any).exit = mockExit;
-
-    try {
-      await mockMain()
-        .catch(() => 1)
-        .then((code) => (process as any).exit(code));
-    } catch (e: any) {
-      if (e.message.startsWith("process.exit called with:")) {
-        expect(capturedCode as unknown as number).toBe(1);
-      } else {
-        throw e;
-      }
-    } finally {
-      process.exit = originalExit;
-    }
-  });
-
-  it("error with custom exitCode preserves the code", async () => {
-    const mockMain = async () => {
-      const err = new Error("Custom error") as Error & { exitCode: number };
-      err.exitCode = 42;
-      throw err;
-    };
-
-    let exitCode = 0;
-    try {
-      await mockMain();
-    } catch (e: any) {
-      exitCode = e.exitCode ?? 1;
-    }
-    expect(exitCode).toBe(42);
-  });
-});
+// NOTE: the promise chain in bin/hotdog (main() -> process.exit(code)) is not
+// unit-testable without spawning the CLI; it is exercised end-to-end by CI via
+// `bun bin/hotdog --help`. Previously there was a describe block here that
+// re-implemented that chain against inline mocks, testing the test itself.

@@ -1,9 +1,12 @@
-// Extended tests for ui-interactive-cli/index.ts — handleSlashCommand,
-// parseCommand edge cases, isSystemCommand, executeShellCommand.
+// Tests for ui-interactive-cli/index.ts — handleSlashCommand and
+// command delegation. Other areas:
+//   - parseCommand (core): tests/core/commands.test.ts
+//   - AsyncInteractiveCliInput: interactive-cli-input.test.ts
+//   - executeShellCommand, completions, session wiring: ui-interactive-cli.test.ts
 
-import { describe, it, expect, beforeEach, afterEach, mock } from "bun:test";
-import { parseCommand, Command } from "../../src/core/commands.ts";
+import { describe, it, expect, beforeEach, afterEach } from "bun:test";
 import { SessionManager } from "../../src/core/session/index.ts";
+import { ACTIONS } from "../../src/core/commands.ts";
 import {
   handleSlashCommand,
 } from "../../src/extensions/ui-interactive-cli/index.ts";
@@ -78,36 +81,27 @@ describe("handleSlashCommand", () => {
       handleSlashCommand(cmd, mockSessionManager, mockChannel, rl as any);
     }
 
-    await new Promise((r) => setTimeout(r, 50));
+    // executeCommand is called synchronously by handleSlashCommand, and the
+    // mock records the command before any await, so no wait is needed.
     expect(executedCommands).toEqual([
       "clear", "tokens", "tools", "thinking", "regenerate",
       "reasoning high", "compact", "prompt:explainer",
     ]);
   });
-});
 
-describe("parseCommand edge cases", () => {
-  it("does not trim whitespace-only input", () => {
-    const cmd = parseCommand("   ");
-    expect(cmd.type).toBe(Command.Unknown);
-    expect(cmd.value).toBe("   ");
-  });
+  it("does not redraw the prompt after a command that enqueues LLM work", async () => {
+    const { rl } = createMockRl();
+    let prompted = false;
+    (rl as any).prompt = () => { prompted = true; };
+    const mockSessionManager = {
+      sessionId: () => "test-session",
+      executeCommand: async () => ACTIONS.PROMPT,
+    } as unknown as SessionManager;
+    const mockChannel = {} as any;
 
-  it("is case-sensitive", () => {
-    expect(parseCommand("HELP").type).toBe(Command.Unknown);
-    expect(parseCommand("help   ").type).toBe(Command.Unknown);
-  });
-
-  it("handles bus-managed commands as unknown", () => {
-    expect(parseCommand("compact").type).toBe(Command.Unknown);
-    expect(parseCommand("model gpt-4").type).toBe(Command.Unknown);
-    expect(parseCommand("cancel").type).toBe(Command.Unknown);
-  });
-
-  it("handles channel commands", () => {
-    expect(parseCommand("sessions").type).toBe(Command.Sessions);
-    expect(parseCommand("attach abc").type).toBe(Command.Attach);
-    expect(parseCommand("detach abc").type).toBe(Command.Detach);
-    expect(parseCommand("switch abc").type).toBe(Command.Switch);
+    handleSlashCommand("prompt:explainer", mockSessionManager, mockChannel, rl as any);
+    // The PROMPT action is resolved through the .then handler (one microtask).
+    await Promise.resolve();
+    expect(prompted).toBe(false);
   });
 });

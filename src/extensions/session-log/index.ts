@@ -1,7 +1,6 @@
 // Session Log Extension
 // Append-only JSONL audit trail for observability.
 
-import { homedir } from "node:os";
 import { join } from "node:path";
 import { appendFile, readFile, access, mkdir } from "node:fs/promises";
 import { HOOKS } from "../../core/hooks.ts";
@@ -22,7 +21,7 @@ export {
 } from "../../core/session/session-log.ts";
 
 // Import LOG_SOURCE and LogEntry for internal use
-import { LOG_SOURCE, type LogEntry } from "../../core/session/session-log.ts";
+import { LOG_SOURCE, sessionsDir, type LogEntry } from "../../core/session/session-log.ts";
 
 interface SessionLogMessage {
   sessionId?: string;
@@ -37,19 +36,6 @@ interface SessionLogMessage {
   getTextContent?: () => string;
 }
 
-
-/**
- * Get the cache directory for session logs.
- */
-async function getCacheDir(): Promise<string> {
-  const cacheDir = join(homedir(), ".cache", "hotdog", "sessions");
-  try {
-    await access(cacheDir);
-  } catch {
-    await mkdir(cacheDir, { recursive: true });
-  }
-  return cacheDir;
-}
 
 /**
  * Content to persist: structured content (harness messages with `untrusted`
@@ -96,7 +82,9 @@ function messageToLogEntry(
  * Uses the current agent's session ID (from the hook context) for the log file.
  */
 export async function create(_core: CoreContext): Promise<ExtensionInstance> {
-  const cacheDir = await getCacheDir();
+  // Canonical sessions dir (respects HOTDOG_SESSIONS_DIR for tests).
+  const cacheDir = sessionsDir();
+  await mkdir(cacheDir, { recursive: true });
 
   // Track session state
   let systemPromptWritten = false;

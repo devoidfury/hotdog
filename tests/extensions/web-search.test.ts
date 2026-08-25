@@ -1,10 +1,7 @@
-import { test, describe, it, expect } from "bun:test";
+import { describe, it, expect } from "bun:test";
 import { WebSearchTool } from "../../src/extensions/web-search/index.ts";
-import { resultStr } from "../helpers.ts";
+import { resultStr, withMockFetch, jsonResponse } from "../helpers.ts";
 import type { CoreContext } from "../../src/core/extensions/types.ts";
-
-/** Helper to cast a mock function to typeof fetch */
-const mockFetch = (fn: () => Promise<unknown>) => fn as unknown as typeof fetch;
 
 const defaultWebSearchOptions = {
   provider: "duckduckgo" as const,
@@ -87,16 +84,20 @@ describe("WebSearchTool provider configuration", () => {
     expect(tool.provider).toBe("duckduckgo");
   });
 
-  for (const provider of ["duckduckgo", "brave", "tavily", "searxng"]) {
-    it(`accepts ${provider} provider`, () => {
-      const tool = new WebSearchTool({ ...defaultWebSearchOptions, provider });
-      expect(tool.provider).toBe(provider);
-    });
-  }
+  it("treats the provider name case-insensitively at execution time", async () => {
+    const mockHtml = `<html><body>
+      <a class="result__a" href="https://duckduckgo.com/l/?uddg=https%3A%2F%2Fexample.com">Example</a>
+      <a class="result__snippet">Snippet</a>
+    </body></html>`;
 
-  it("normalizes provider to lowercase", () => {
-    const tool = new WebSearchTool({ ...defaultWebSearchOptions, provider: "DUCKDUCKGO" });
-    expect(tool.provider).toBe("DUCKDUCKGO");
+    await withMockFetch(async () => new Response(mockHtml, { status: 200 }), async () => {
+      const tool = new WebSearchTool({ ...defaultWebSearchOptions, provider: "DUCKDUCKGO" });
+      const result = await tool.execute(JSON.stringify({ query: "test" }));
+      // "DUCKDUCKGO" must be recognized, not rejected as unknown.
+      expect(result.success).toBe(true);
+      expect(resultStr(result)).not.toContain("Unknown search provider");
+      expect(resultStr(result)).toContain("Example");
+    });
   });
 
   it("clamps maxResults between 1 and 10", () => {
@@ -200,11 +201,7 @@ describe("WebSearchTool DuckDuckGo parser", () => {
       <a class="result__snippet">Another description</a>
     </body></html>`;
 
-    const originalFetch = globalThis.fetch;
-    globalThis.fetch = mockFetch(() =>
-      Promise.resolve(new Response(mockHtml, { status: 200 })));
-
-    try {
+    await withMockFetch(async () => new Response(mockHtml, { status: 200 }), async () => {
       const tool = new WebSearchTool({ ...defaultWebSearchOptions });
       const result = await tool.execute(JSON.stringify({ query: "test" }));
       expect(result.success).toBe(true);
@@ -214,9 +211,7 @@ describe("WebSearchTool DuckDuckGo parser", () => {
       expect(output).toContain("Example description text");
       expect(output).toContain("Another Title");
       expect(output).toContain("via DuckDuckGo");
-    } finally {
-      globalThis.fetch = originalFetch;
-    }
+    });
   });
 
   it("handles duckduckgo results with HTML in titles", async () => {
@@ -225,11 +220,7 @@ describe("WebSearchTool DuckDuckGo parser", () => {
       <a class="result__snippet">Snippet with <i>italic</i></a>
     </body></html>`;
 
-    const originalFetch = globalThis.fetch;
-    globalThis.fetch = mockFetch(() =>
-      Promise.resolve(new Response(mockHtml, { status: 200 })));
-
-    try {
+    await withMockFetch(async () => new Response(mockHtml, { status: 200 }), async () => {
       const tool = new WebSearchTool({ ...defaultWebSearchOptions });
       const result = await tool.execute(JSON.stringify({ query: "test" }));
       expect(result.success).toBe(true);
@@ -237,41 +228,25 @@ describe("WebSearchTool DuckDuckGo parser", () => {
       // HTMLRewriter extracts text content, so <b> tags are stripped naturally
       expect(output).toContain("Title with bold text");
       expect(output).not.toContain("<b>");
-    } finally {
-      globalThis.fetch = originalFetch;
-    }
+    });
   });
 
   it("handles empty duckduckgo results", async () => {
-    const originalFetch = globalThis.fetch;
-    globalThis.fetch = mockFetch(() =>
-      Promise.resolve(
-        new Response("<html><body>No results</body></html>", { status: 200 }),
-      ));
-
-    try {
+    await withMockFetch(async () => new Response("<html><body>No results</body></html>", { status: 200 }), async () => {
       const tool = new WebSearchTool({ ...defaultWebSearchOptions });
       const result = await tool.execute(JSON.stringify({ query: "test" }));
       expect(result.success).toBe(true);
       expect(resultStr(result)).toContain("No results found");
-    } finally {
-      globalThis.fetch = originalFetch;
-    }
+    });
   });
 
   it("handles duckduckgo network error", async () => {
-    const originalFetch = globalThis.fetch;
-    globalThis.fetch = mockFetch(() =>
-      Promise.resolve(new Response("error", { status: 500 })));
-
-    try {
+    await withMockFetch(async () => new Response("error", { status: 500 }), async () => {
       const tool = new WebSearchTool({ ...defaultWebSearchOptions });
       const result = await tool.execute(JSON.stringify({ query: "test" }));
       expect(result.success).toBe(false);
       expect(resultStr(result)).toContain("Web search failed");
-    } finally {
-      globalThis.fetch = originalFetch;
-    }
+    });
   });
 
   it("handles malformed HTML gracefully", async () => {
@@ -283,19 +258,13 @@ describe("WebSearchTool DuckDuckGo parser", () => {
       <a class="result__snippet">Normal snippet</a>
     </body></html>`;
 
-    const originalFetch = globalThis.fetch;
-    globalThis.fetch = mockFetch(() =>
-      Promise.resolve(new Response(mockHtml, { status: 200 })));
-
-    try {
+    await withMockFetch(async () => new Response(mockHtml, { status: 200 }), async () => {
       const tool = new WebSearchTool({ ...defaultWebSearchOptions });
       const result = await tool.execute(JSON.stringify({ query: "test" }));
       expect(result.success).toBe(true);
       const output = resultStr(result);
       expect(output).toContain("via DuckDuckGo");
-    } finally {
-      globalThis.fetch = originalFetch;
-    }
+    });
   });
 
   it("handles results with missing snippets", async () => {
@@ -305,11 +274,7 @@ describe("WebSearchTool DuckDuckGo parser", () => {
       <a class="result__snippet">Only this one has a snippet</a>
     </body></html>`;
 
-    const originalFetch = globalThis.fetch;
-    globalThis.fetch = mockFetch(() =>
-      Promise.resolve(new Response(mockHtml, { status: 200 })));
-
-    try {
+    await withMockFetch(async () => new Response(mockHtml, { status: 200 }), async () => {
       const tool = new WebSearchTool({ ...defaultWebSearchOptions });
       const result = await tool.execute(JSON.stringify({ query: "test" }));
       expect(result.success).toBe(true);
@@ -317,9 +282,7 @@ describe("WebSearchTool DuckDuckGo parser", () => {
       expect(output).toContain("Title Without Snippet");
       expect(output).toContain("Title With Snippet");
       expect(output).toContain("Only this one has a snippet");
-    } finally {
-      globalThis.fetch = originalFetch;
-    }
+    });
   });
 });
 
@@ -337,51 +300,31 @@ describe("WebSearchTool Brave parser", () => {
       },
     };
 
-    const originalFetch = globalThis.fetch;
-    globalThis.fetch = mockFetch(() =>
-      Promise.resolve({
-        ok: true,
-        status: 200,
-        json: () => Promise.resolve(mockResponse),
-      }));
-
-    try {
+    await withMockFetch(async () => jsonResponse(mockResponse), async () => {
       const tool = new WebSearchTool({
-        ...defaultWebSearchOptions,
-        provider: "brave",
-        braveApiKey: "test-key",
-      });
-      const result = await tool.execute(JSON.stringify({ query: "test" }));
-      expect(result.success).toBe(true);
-      expect(resultStr(result)).toContain("Brave Result");
-      expect(resultStr(result)).toContain("https://example.com");
-      expect(resultStr(result)).toContain("via Brave");
-    } finally {
-      globalThis.fetch = originalFetch;
-    }
+      ...defaultWebSearchOptions,
+      provider: "brave",
+      braveApiKey: "test-key",
+    });
+    const result = await tool.execute(JSON.stringify({ query: "test" }));
+    expect(result.success).toBe(true);
+    expect(resultStr(result)).toContain("Brave Result");
+    expect(resultStr(result)).toContain("https://example.com");
+    expect(resultStr(result)).toContain("via Brave");
+    });
   });
 
   it("handles brave empty results", async () => {
-    const originalFetch = globalThis.fetch;
-    globalThis.fetch = mockFetch(() =>
-      Promise.resolve({
-        ok: true,
-        status: 200,
-        json: () => Promise.resolve({ web: { results: [] } }),
-      }));
-
-    try {
+    await withMockFetch(async () => jsonResponse({ web: { results: [] } }), async () => {
       const tool = new WebSearchTool({
-        ...defaultWebSearchOptions,
-        provider: "brave",
-        braveApiKey: "test-key",
-      });
-      const result = await tool.execute(JSON.stringify({ query: "test" }));
-      expect(result.success).toBe(true);
-      expect(resultStr(result)).toContain("No results found");
-    } finally {
-      globalThis.fetch = originalFetch;
-    }
+      ...defaultWebSearchOptions,
+      provider: "brave",
+      braveApiKey: "test-key",
+    });
+    const result = await tool.execute(JSON.stringify({ query: "test" }));
+    expect(result.success).toBe(true);
+    expect(resultStr(result)).toContain("No results found");
+    });
   });
 });
 
@@ -397,29 +340,19 @@ describe("WebSearchTool Tavily parser", () => {
       ],
     };
 
-    const originalFetch = globalThis.fetch;
-    globalThis.fetch = mockFetch(() =>
-      Promise.resolve({
-        ok: true,
-        status: 200,
-        json: () => Promise.resolve(mockResponse),
-      }));
-
-    try {
+    await withMockFetch(async () => jsonResponse(mockResponse), async () => {
       const tool = new WebSearchTool({
-        ...defaultWebSearchOptions,
-        provider: "tavily",
-        tavilyApiKey: "test-key",
-      });
-      const result = await tool.execute(JSON.stringify({ query: "test" }));
-      expect(result.success).toBe(true);
-      expect(resultStr(result)).toContain("Tavily Result");
-      expect(resultStr(result)).toContain("https://example.com");
-      expect(resultStr(result)).toContain("Content from Tavily");
-      expect(resultStr(result)).toContain("via Tavily");
-    } finally {
-      globalThis.fetch = originalFetch;
-    }
+      ...defaultWebSearchOptions,
+      provider: "tavily",
+      tavilyApiKey: "test-key",
+    });
+    const result = await tool.execute(JSON.stringify({ query: "test" }));
+    expect(result.success).toBe(true);
+    expect(resultStr(result)).toContain("Tavily Result");
+    expect(resultStr(result)).toContain("https://example.com");
+    expect(resultStr(result)).toContain("Content from Tavily");
+    expect(resultStr(result)).toContain("via Tavily");
+    });
   });
 });
 
@@ -435,52 +368,16 @@ describe("WebSearchTool SearXNG parser", () => {
       ],
     };
 
-    const originalFetch = globalThis.fetch;
-    globalThis.fetch = mockFetch(() =>
-      Promise.resolve({
-        ok: true,
-        status: 200,
-        json: () => Promise.resolve(mockResponse),
-      }));
-
-    try {
+    await withMockFetch(async () => jsonResponse(mockResponse), async () => {
       const tool = new WebSearchTool({
-        ...defaultWebSearchOptions,
-        provider: "searxng",
-        searxngInstanceUrl: "https://searx.example.com",
-      });
-      const result = await tool.execute(JSON.stringify({ query: "test" }));
-      expect(result.success).toBe(true);
-      expect(resultStr(result)).toContain("SearXNG Result");
-      expect(resultStr(result)).toContain("via SearXNG");
-    } finally {
-      globalThis.fetch = originalFetch;
-    }
-  });
-});
-
-// avoid hitting the real endpoint in automated tests for now
-test.skip("WebSearchTool DuckDuckGo network integration", () => {
-  it("performs a real DuckDuckGo search", async () => {
-    const tool = new WebSearchTool({
-      provider: "duckduckgo",
-      maxResults: 3,
-      timeout: 15,
-      braveApiKey: "",
-      tavilyApiKey: "",
-      searxngInstanceUrl: "",
+      ...defaultWebSearchOptions,
+      provider: "searxng",
+      searxngInstanceUrl: "https://searx.example.com",
     });
-    const result = await tool.execute(
-      JSON.stringify({ query: "Bun JavaScript runtime" }),
-    );
-    // If network is unavailable, the test will error gracefully
+    const result = await tool.execute(JSON.stringify({ query: "test" }));
     expect(result.success).toBe(true);
-    const output = resultStr(result);
-    expect(output).toContain("via DuckDuckGo");
-    // Results should contain at least one URL
-    expect(output).toContain("http");
-    const lines = output.split("\n");
-    // Header + at least one result (title + url = 2+ lines)
-    expect(lines.length).toBeGreaterThan(2);
-  }, 30000);
+    expect(resultStr(result)).toContain("SearXNG Result");
+    expect(resultStr(result)).toContain("via SearXNG");
+    });
+  });
 });

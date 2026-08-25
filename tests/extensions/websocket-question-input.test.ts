@@ -112,14 +112,16 @@ describe("WebSocketQuestionBridge", () => {
     expect(hooks.state.interrupts).toEqual(["s1"]);
   });
 
-  it("wait strategy never times out; answer still resolves", async () => {
+  it("wait strategy keeps the question pending until answered", async () => {
     const input = bridge.inputFor("s1");
     const p = input.collectAnswers([{ key: "q", prompt: "Go?" }]);
-    await new Promise((r) => setTimeout(r, 30));
-    expect(bridge.hasPending("s1")).toBe(true);
 
+    // The wait policy (timeoutSecs=300) does not auto-resolve, so the
+    // question is still pending and only settles when an answer arrives.
+    expect(bridge.hasPending("s1")).toBe(true);
     bridge.answer("s1", { q: "yes" });
     await expect(p).resolves.toEqual({ q: "yes" });
+    expect(bridge.hasPending("s1")).toBe(false);
   });
 
   it("re-collecting on the same session resolves the stale question with defaults", async () => {

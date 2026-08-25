@@ -1,12 +1,13 @@
 // Tests for src/extensions/ui-interactive-cli/cli-channel.ts — CliChannel.
-// Covers: construction, write/read, subscribe/unsubscribe, cleanup,
-// quit handling, getters.
+// Base Channel behavior (send/enqueue, attach/detach, switchSession, close,
+// command routing) is covered in tests/core/channel.test.ts. Only the
+// readline/sink wiring specific to this subclass is tested here.
 
-import { describe, it, expect, beforeEach, mock } from "bun:test";
+import { describe, it, expect, mock } from "bun:test";
 import readline from "node:readline";
-import { CliChannel, CliChannelOptions } from "../../src/extensions/ui-interactive-cli/cli-channel.ts";
+import { CliChannel } from "../../src/extensions/ui-interactive-cli/cli-channel.ts";
 import { ChannelSessionManager } from "../../src/core/channel.ts";
-import { OUTPUT_EVENT, OutputEvent } from "../../src/core/context/output.ts";
+import { OUTPUT_EVENT } from "../../src/core/context/output.ts";
 import { CliOutputSink } from "../../src/utils/cli/cli.ts";
 
 // ── Test Helpers ────────────────────────────────────────────────────────────
@@ -32,12 +33,9 @@ function createMockSink(): CliOutputSink {
   return sink;
 }
 
-function createMockRl(responses: string[] = []): {
-  rl: readline.Interface;
-  lines: string[];
-} {
-  const lines: string[] = responses;
+function createMockRl(responses: string[] = []): { rl: readline.Interface; close: ReturnType<typeof mock> } {
   let index = 0;
+  const close = mock(() => {});
 
   const mockRl = {
     removeListener: function () { return mockRl; },
@@ -45,369 +43,109 @@ function createMockRl(responses: string[] = []): {
       return mockRl;
     },
     prompt: function () { return mockRl; },
-    close: function () {},
+    close,
     [Symbol.asyncIterator]: function () {
-      return {
+      const iterator = {
         next: async () => {
-          if (index < lines.length) {
-            return { value: lines[index++], done: false };
+          if (index < responses.length) {
+            return { value: responses[index++], done: false };
           }
           return { value: undefined, done: true };
         },
         return: async () => ({ value: undefined, done: true }),
-        [Symbol.asyncIterator]: function () { return this; },
+        [Symbol.asyncIterator]() {
+          return this;
+        },
       };
+      return iterator;
     },
   } as unknown as readline.Interface;
 
-  return { rl: mockRl, lines };
+  return { rl: mockRl, close };
 }
 
 // ── Tests ───────────────────────────────────────────────────────────────────
 
 describe("CliChannel - construction", () => {
-  let sm: ChannelSessionManager;
-  let sink: CliOutputSink;
-  let rl: readline.Interface;
-
-  beforeEach(() => {
-    sm = createMockSessionManager();
-    sink = createMockSink();
-    rl = createMockRl().rl;
-  });
-
-  it("creates a CliChannel with required options", () => {
-    const channel = new CliChannel({
-      sessionManager: sm,
-      sessionId: "session-1",
-      sink,
-      rl,
-    });
-
-    expect(channel).toBeInstanceOf(CliChannel);
-    expect(channel.getCurrentSessionId()).toBe("session-1");
-  });
-
-  it("attaches to the given session on construction", () => {
-    new CliChannel({
-      sessionManager: sm,
-      sessionId: "session-1",
-      sink,
-      rl,
-    });
-
-    expect(sm.onSessionEvents).toHaveBeenCalledWith("session-1", expect.any(Function));
-  });
-});
-
-describe("CliChannel - write()", () => {
-  let sm: ChannelSessionManager;
-  let sink: CliOutputSink;
-  let rl: readline.Interface;
-  let channel: CliChannel;
-
-  beforeEach(() => {
-    sm = createMockSessionManager();
-    sink = createMockSink();
-    rl = createMockRl().rl;
-    channel = new CliChannel({
-      sessionManager: sm,
-      sessionId: "session-1",
-      sink,
-      rl,
-    });
-  });
-
-  it("delegates to sink.emit()", () => {
-    const event: OutputEvent = { type: OUTPUT_EVENT.ASSISTANT_MESSAGE, content: "Hello" };
-    channel.send("test").catch(() => {});
-    // We need to call write directly but it's protected; use a public method instead
-    // Actually, let's test via the parent class's send which routes to enqueue
-    // For write, we test the integration via the subscribe flow
-  });
-
-  it("sends events through the sink when subscribed", () => {
+  it("attaches to the given session and routes its events through the sink", () => {
+    const { rl } = createMockRl();
     const sm = createMockSessionManager({
       onSessionEvents: mock((_sessionId, handler) => {
-        // Immediately fire an event through the handler
+        // Fire an event through the handler to verify the wiring
         handler({ type: OUTPUT_EVENT.ASSISTANT_MESSAGE, content: "Hello" });
         return () => {};
       }),
     });
     const sink = createMockSink();
-    const rl = createMockRl().rl;
-    new CliChannel({
-      sessionManager: sm,
-      sessionId: "session-1",
-      sink,
-      rl,
-    });
 
+    new CliChannel({ sessionManager: sm, sessionId: "session-1", sink, rl });
+
+    expect(sm.onSessionEvents).toHaveBeenCalledWith("session-1", expect.any(Function));
     expect(sink.emit).toHaveBeenCalledWith({ type: OUTPUT_EVENT.ASSISTANT_MESSAGE, content: "Hello" });
   });
 });
 
 describe("CliChannel - read()", () => {
-  let sm: ChannelSessionManager;
-  let sink: CliOutputSink;
-
-  it("returns an async iterable", async () => {
+  it("yields lines from readline", async () => {
+    const lines: string[] = [];
     const { rl } = createMockRl(["line1", "line2"]);
-    sm = createMockSessionManager();
-    sink = createMockSink();
-
     const channel = new CliChannel({
-      sessionManager: sm,
+      sessionManager: createMockSessionManager(),
       sessionId: "session-1",
-      sink,
+      sink: createMockSink(),
       rl,
     });
 
-    const iterable = channel.read();
-    expect(iterable[Symbol.asyncIterator]).toBeDefined();
-    expect(typeof iterable[Symbol.asyncIterator]).toBe("function");
-  });
-
-  it("read is callable without error", async () => {
-    const { rl } = createMockRl([]);
-    sm = createMockSessionManager();
-    sink = createMockSink();
-
-    const channel = new CliChannel({
-      sessionManager: sm,
-      sessionId: "session-1",
-      sink,
-      rl,
-    });
-
-    // Should not throw
-    const iterable = channel.read();
-    expect(iterable).toBeDefined();
-  });
-});
-
-describe("CliChannel - subscribe/unsubscribe", () => {
-  let sm: ChannelSessionManager;
-  let sink: CliOutputSink;
-  let rl: readline.Interface;
-  let unsubscribeFn: () => void;
-
-  beforeEach(() => {
-    unsubscribeFn = mock(() => {});
-    sm = createMockSessionManager({
-      onSessionEvents: mock((_sessionId, _handler) => unsubscribeFn),
-    });
-    sink = createMockSink();
-    rl = createMockRl().rl;
-  });
-
-  it("subscribes when attaching", () => {
-    new CliChannel({
-      sessionManager: sm,
-      sessionId: "session-1",
-      sink,
-      rl,
-    });
-
-    expect(sm.onSessionEvents).toHaveBeenCalledWith("session-1", expect.any(Function));
-  });
-
-  it("unsubscribes when detaching", () => {
-    const channel = new CliChannel({
-      sessionManager: sm,
-      sessionId: "session-1",
-      sink,
-      rl,
-    });
-
-    channel.detach("session-1");
-
-    expect(unsubscribeFn).toHaveBeenCalled();
+    for await (const line of channel.read()) {
+      lines.push(line);
+    }
+    expect(lines).toEqual(["line1", "line2"]);
   });
 });
 
 describe("CliChannel - cleanup", () => {
   it("closes readline on close", () => {
-    const closeFn = mock(() => {});
-    const mockRl = {
-      removeListener: () => mockRl,
-      on: () => mockRl,
-      prompt: () => mockRl,
-      close: closeFn,
-      [Symbol.asyncIterator]: () => ({
-        next: async () => ({ value: undefined, done: true }),
-        return: async () => ({ value: undefined, done: true }),
-        [Symbol.asyncIterator]: () => {},
-      }),
-    } as unknown as readline.Interface;
-
-    const sm = createMockSessionManager();
-    const sink = createMockSink();
-
+    const { rl, close } = createMockRl();
     const channel = new CliChannel({
-      sessionManager: sm,
+      sessionManager: createMockSessionManager(),
       sessionId: "session-1",
-      sink,
-      rl: mockRl,
+      sink: createMockSink(),
+      rl,
     });
 
     channel.close();
-
-    expect(closeFn).toHaveBeenCalled();
+    expect(close).toHaveBeenCalled();
   });
 });
 
 describe("CliChannel - handleQuit", () => {
   it("closes readline and calls onQuit callback", async () => {
-    const closeFn = mock(() => {});
     const onQuitFn = mock(() => {});
-    const mockRl = {
-      removeListener: () => mockRl,
-      on: () => mockRl,
-      prompt: () => mockRl,
-      close: closeFn,
-      [Symbol.asyncIterator]: () => ({
-        next: async () => ({ value: undefined, done: true }),
-        return: async () => ({ value: undefined, done: true }),
-        [Symbol.asyncIterator]: () => {},
-      }),
-    } as unknown as readline.Interface;
-
-    const sm = createMockSessionManager();
-    const sink = createMockSink();
-
+    const { rl, close } = createMockRl();
     const channel = new CliChannel({
-      sessionManager: sm,
+      sessionManager: createMockSessionManager(),
       sessionId: "session-1",
-      sink,
-      rl: mockRl,
+      sink: createMockSink(),
+      rl,
       onQuit: onQuitFn,
     });
 
     await channel.send("/quit");
 
-    expect(closeFn).toHaveBeenCalled();
+    expect(close).toHaveBeenCalled();
     expect(onQuitFn).toHaveBeenCalled();
   });
 
   it("handles quit without onQuit callback", async () => {
-    const closeFn = mock(() => {});
-    const mockRl = {
-      removeListener: () => mockRl,
-      on: () => mockRl,
-      prompt: () => mockRl,
-      close: closeFn,
-      [Symbol.asyncIterator]: () => ({
-        next: async () => ({ value: undefined, done: true }),
-        return: async () => ({ value: undefined, done: true }),
-        [Symbol.asyncIterator]: () => {},
-      }),
-    } as unknown as readline.Interface;
-
-    const sm = createMockSessionManager();
-    const sink = createMockSink();
-
+    const { rl, close } = createMockRl();
     const channel = new CliChannel({
-      sessionManager: sm,
+      sessionManager: createMockSessionManager(),
       sessionId: "session-1",
-      sink,
-      rl: mockRl,
-    });
-
-    await channel.send("/quit");
-
-    expect(closeFn).toHaveBeenCalled();
-  });
-});
-
-describe("CliChannel - getters", () => {
-  it("exposes readline interface", () => {
-    const { rl } = createMockRl();
-    const sm = createMockSessionManager();
-    const sink = createMockSink();
-
-    const channel = new CliChannel({
-      sessionManager: sm,
-      sessionId: "session-1",
-      sink,
+      sink: createMockSink(),
       rl,
     });
 
-    expect(channel.readline).toBe(rl);
-  });
-
-  it("exposes output sink", () => {
-    const sm = createMockSessionManager();
-    const sink = createMockSink();
-    const rl = createMockRl().rl;
-
-    const channel = new CliChannel({
-      sessionManager: sm,
-      sessionId: "session-1",
-      sink,
-      rl,
-    });
-
-    expect(channel.sink).toBe(sink);
-  });
-});
-
-describe("CliChannel - send regular text", () => {
-  it("enqueues text to current session", async () => {
-    const sm = createMockSessionManager();
-    const sink = createMockSink();
-    const rl = createMockRl().rl;
-
-    const channel = new CliChannel({
-      sessionManager: sm,
-      sessionId: "session-1",
-      sink,
-      rl,
-    });
-
-    await channel.send("hello world");
-
-    expect(sm.enqueue).toHaveBeenCalledWith("session-1", "hello world");
-  });
-});
-
-describe("CliChannel - multiple session management", () => {
-  it("can attach to multiple sessions", () => {
-    const sm = createMockSessionManager({
-      onSessionEvents: mock(() => () => {}),
-    });
-    const sink = createMockSink();
-    const rl = createMockRl().rl;
-
-    const channel = new CliChannel({
-      sessionManager: sm,
-      sessionId: "session-1",
-      sink,
-      rl,
-    });
-
-    channel.attach("session-2");
-
-    expect(channel.attachedSessions.has("session-1")).toBe(true);
-    expect(channel.attachedSessions.has("session-2")).toBe(true);
-  });
-
-  it("switches sessions correctly", () => {
-    const sm = createMockSessionManager({
-      onSessionEvents: mock(() => () => {}),
-    });
-    const sink = createMockSink();
-    const rl = createMockRl().rl;
-
-    const channel = new CliChannel({
-      sessionManager: sm,
-      sessionId: "session-1",
-      sink,
-      rl,
-    });
-
-    channel.attach("session-2");
-    expect(channel.switchSession("session-2")).toBe(true);
-    expect(channel.getCurrentSessionId()).toBe("session-2");
+    await expect(channel.send("/quit")).resolves.toBeUndefined();
+    expect(close).toHaveBeenCalled();
   });
 });

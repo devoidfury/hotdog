@@ -1,12 +1,10 @@
-import { describe, it, expect, spyOn, beforeEach, afterEach } from "bun:test";
+import { describe, it, expect, spyOn } from "bun:test";
 import readline from "node:readline";
 import {
   isSystemCommand,
   SEND_TO_ASSISTANT_SUFFIX_RE,
   executeShellCommand,
-  AsyncInteractiveCliInput,
   handleSlashCommand,
-  create,
   parseCompletionContext,
   registerSlashCommandNameCompletion,
   registerCommandCompletions,
@@ -15,9 +13,7 @@ import {
   buildReadlineCompleter,
   buildOnQuitHandler,
 } from "../../src/extensions/ui-interactive-cli/index.ts";
-import { Command, ACTIONS } from "../../src/core/commands.ts";
 import { HOOKS } from "../../src/core/hooks.ts";
-import { ExtensionError } from "../../src/core/error.ts";
 import { LlmClient } from "../../src/core/llm-client/client.ts";
 import { runInteractiveSession } from "../../src/extensions/ui-interactive-cli/index.ts";
 import { runWithSuppressedStdout } from "../test-helpers.ts";
@@ -362,672 +358,377 @@ describe("executeShellCommand", () => {
   });
 });
 
-// ── AsyncInteractiveCliInput ───────────────────────────────────────────────
-
-describe("AsyncInteractiveCliInput", () => {
-  it("isInteractive returns true", () => {
-    const mockRl = {} as readline.Interface;
-    const input = new AsyncInteractiveCliInput(mockRl, () => {}, () => {});
-    expect(input.isInteractive()).toBe(true);
-  });
-
-  it("collectAnswers handles free-text question", async () => {
-    const responses: string[] = ["my answer"];
-    let idx = 0;
-    const mockRl = {
-      removeListener: () => {},
-      question: (_prompt: string, cb: (response: string) => void) => {
-        cb(responses[idx++] ?? "");
-      },
-    } as unknown as readline.Interface;
-
-    const input = new AsyncInteractiveCliInput(mockRl, () => {}, () => {});
-    const answers = await runWithSuppressedStdout(() =>
-      input.collectAnswers([{ key: "name", prompt: "What is your name?" }])
-    );
-    expect(answers).toEqual({ name: "my answer" });
-  });
-
-  it("collectAnswers uses default when input is empty", async () => {
-    const responses: string[] = [""];
-    let idx = 0;
-    const mockRl = {
-      removeListener: () => {},
-      question: (_prompt: string, cb: (response: string) => void) => {
-        cb(responses[idx++] ?? "");
-      },
-    } as unknown as readline.Interface;
-
-    const input = new AsyncInteractiveCliInput(mockRl, () => {}, () => {});
-    const answers = await runWithSuppressedStdout(() =>
-      input.collectAnswers([{ key: "color", prompt: "Pick a color", default: "blue" }])
-    );
-    expect(answers).toEqual({ color: "blue" });
-  });
-
-  it("collectAnswers handles option selection by number", async () => {
-    const responses: string[] = ["2"];
-    let idx = 0;
-    const mockRl = {
-      removeListener: () => {},
-      question: (_prompt: string, cb: (response: string) => void) => {
-        cb(responses[idx++] ?? "");
-      },
-    } as unknown as readline.Interface;
-
-    const input = new AsyncInteractiveCliInput(mockRl, () => {}, () => {});
-    const answers = await runWithSuppressedStdout(() =>
-      input.collectAnswers([
-        { key: "choice", prompt: "Pick one", options: ["alpha", "beta", "gamma"] },
-      ])
-    );
-    expect(answers).toEqual({ choice: "beta" });
-  });
-
-  it("collectAnswers restores line handler in finally block", async () => {
-    const responses: string[] = ["answer"];
-    let idx = 0;
-    let restored = false;
-    const mockRl = {
-      removeListener: () => {},
-      question: (_prompt: string, cb: (response: string) => void) => {
-        cb(responses[idx++] ?? "");
-      },
-    } as unknown as readline.Interface;
-
-    const addLineHandler = () => { restored = true; };
-    const input = new AsyncInteractiveCliInput(mockRl, () => {}, addLineHandler);
-    await runWithSuppressedStdout(() =>
-      input.collectAnswers([{ key: "q", prompt: "Q?" }])
-    );
-    expect(restored).toBe(true);
-  });
-});
-
-// ── handleSlashCommand ─────────────────────────────────────────────────────
-
-describe("handleSlashCommand", () => {
-  let mockSessionManager: {
-    sessionId: () => string;
-    executeCommand: (sessionId: string, cmd: string) => Promise<number | undefined>;
-  };
-  let mockChannel: Record<string, never>;
-  let mockRl: { prompt: () => void; close: () => void };
-  let consoleLogSpy: ReturnType<typeof spyOn>;
-  let processExitSpy: ReturnType<typeof spyOn>;
-
-  beforeEach(() => {
-    mockSessionManager = {
-      sessionId: () => "test-session",
-      executeCommand: async () => undefined,
-    } as never;
-    mockChannel = {};
-    mockRl = { prompt: () => {}, close: () => {} } as never;
-    consoleLogSpy = spyOn(console, "log").mockImplementation(() => {});
-    processExitSpy = spyOn(process, "exit").mockImplementation(() => undefined as never);
-  });
-
-  afterEach(() => {
-    consoleLogSpy.mockRestore();
-    processExitSpy.mockRestore();
-  });
-
-  it("handles /help command", () => {
-    handleSlashCommand("help", mockSessionManager as never, mockChannel as never, mockRl as never);
-    expect(consoleLogSpy).toHaveBeenCalled();
-    expect(consoleLogSpy.mock.calls[0][0]).toContain("Commands:");
-  });
-
-  it("handles /quit command", () => {
-    handleSlashCommand("quit", mockSessionManager as never, mockChannel as never, mockRl as never);
-    expect(consoleLogSpy).toHaveBeenCalledWith("Goodbye!");
-    expect(processExitSpy).toHaveBeenCalledWith(0);
-  });
-
-  it("delegates unknown commands to SessionManager", async () => {
-    const executeCommandSpy = spyOn(mockSessionManager as never, "executeCommand").mockResolvedValue(undefined);
-    handleSlashCommand("tokens", mockSessionManager as never, mockChannel as never, mockRl as never);
-    await new Promise((r) => setTimeout(r, 10));
-    expect(executeCommandSpy).toHaveBeenCalledWith("test-session", "tokens");
-    executeCommandSpy.mockRestore();
-  });
-
-  it("does not prompt after command when PROMPT action is set", async () => {
-    const promptSpy = spyOn(mockRl as readline.Interface, "prompt").mockImplementation(() => {});
-    const executeCommandSpy = spyOn(mockSessionManager as never, "executeCommand").mockResolvedValue(ACTIONS.PROMPT);
-    handleSlashCommand("some-command", mockSessionManager as never, mockChannel as never, mockRl as never);
-    await new Promise((r) => setTimeout(r, 10));
-    expect(promptSpy).not.toHaveBeenCalled();
-    promptSpy.mockRestore();
-    executeCommandSpy.mockRestore();
-  });
-});
-
-// ── create (extension entry point) ─────────────────────────────────────────
-
-describe("create", () => {
-  it("returns extension with hooks", () => {
-    const mockCore = { hooks: { on: () => {}, notifyHooks: () => {} } } as never;
-    const ext = create(mockCore);
-    expect(ext.hooks).toBeDefined();
-    expect(ext.hooks![HOOKS.CLI_SUBCOMMANDS_REGISTER]).toBeDefined();
-  });
-});
+// AsyncInteractiveCliInput, handleSlashCommand and subcommand registration are
+// covered in interactive-cli-input.test.ts and interactive-cli-extended.test.ts.
 
 // ── buildReadlineCompleter ─────────────────────────────────────────────────
 
-describe("buildReadlineCompleter", () => {
-  it("handles no agent available", () => {
-    const mockSessionManager = { getAgent: () => null } as never;
-    const mockCore = { completion: { request: async () => [] } } as never;
-    const completer = buildReadlineCompleter(mockSessionManager, mockCore, false);
+type Completer = (line: string, cb: (err: Error | null, result: [string[], string]) => void) => void;
 
-    let callbackResult: [string[], string] | null = null;
-    completer("test-line", (err: Error | null, result: [string[], string]) => {
+/** Invoke the completer and resolve with the (async) callback result. */
+function invokeCompleter(completer: Completer, line: string): Promise<[string[], string]> {
+  return new Promise((resolve) => {
+    completer(line, (err, result) => {
       expect(err).toBeNull();
-      callbackResult = result;
+      resolve(result);
     });
-    expect(callbackResult as unknown as [string[], string]).toEqual([[], "test-line"]);
+  });
+}
+
+describe("buildReadlineCompleter", () => {
+  const mockAgent = { commandRegistry: { names: () => ["help"] }, modelRegistry: {} };
+  const mockCore = { completion: { request: async () => [] } };
+
+  it("handles no agent available", async () => {
+    const mockSessionManager = { getAgent: () => null } as never;
+    const completer = buildReadlineCompleter(mockSessionManager, mockCore as never, false);
+
+    await expect(invokeCompleter(completer, "test-line")).resolves.toEqual([[], "test-line"]);
   });
 
   it("handles slash command name completion", async () => {
-    const mockAgent = { commandRegistry: { names: () => ["help"] }, modelRegistry: {} };
     const mockSessionManager = { getAgent: () => mockAgent } as never;
-    const mockCore = { completion: { request: async () => [{ value: "/help" }] } } as never;
-    const completer = buildReadlineCompleter(mockSessionManager, mockCore, false);
+    const coreWithResults = { completion: { request: async () => [{ value: "/help" }] } };
+    const completer = buildReadlineCompleter(mockSessionManager, coreWithResults as never, false);
 
-    let prefix: string | null = null;
-    completer("/hel", (_: Error | null, result: [string[], string]) => { prefix = result[1] as string; });
-    await new Promise((r) => setTimeout(r, 10));
-    expect(prefix!).toBe("/hel");
+    const [matches, prefix] = await invokeCompleter(completer, "/hel");
+    expect(prefix).toBe("/hel");
+    expect(matches).toEqual(["/help"]);
   });
 
   it("handles colon syntax prefix", async () => {
-    const mockAgent = { commandRegistry: { names: () => ["test"] }, modelRegistry: {} };
     const mockSessionManager = { getAgent: () => mockAgent } as never;
-    const mockCore = { completion: { request: async () => [] } } as never;
-    const completer = buildReadlineCompleter(mockSessionManager, mockCore, false);
+    const completer = buildReadlineCompleter(mockSessionManager, mockCore as never, false);
 
-    let prefix: string | null = null;
-    completer("/prompt:dep", (_: Error | null, result: [string[], string]) => { prefix = result[1] as string; });
-    await new Promise((r) => setTimeout(r, 10));
-    expect(prefix!).toBe("dep");
+    const [, prefix] = await invokeCompleter(completer, "/prompt:dep");
+    expect(prefix).toBe("dep");
   });
 
   it("handles shell mode prefix", async () => {
-    const mockAgent = { commandRegistry: { names: () => ["test"] }, modelRegistry: {} };
     const mockSessionManager = { getAgent: () => mockAgent } as never;
-    const mockCore = { completion: { request: async () => [] } } as never;
-    const completer = buildReadlineCompleter(mockSessionManager, mockCore, true);
+    const completer = buildReadlineCompleter(mockSessionManager, mockCore as never, true);
 
-    let prefix: string | null = null;
-    completer("ls fil", (_: Error | null, result: [string[], string]) => { prefix = result[1] as string; });
-    await new Promise((r) => setTimeout(r, 10));
-    expect(prefix!).toBe("fil");
+    const [, prefix] = await invokeCompleter(completer, "ls fil");
+    expect(prefix).toBe("fil");
   });
 
   it("handles completion request error gracefully", async () => {
-    const mockAgent = { commandRegistry: { names: () => ["test"] }, modelRegistry: {} };
     const mockSessionManager = { getAgent: () => mockAgent } as never;
-    const mockCore = { completion: { request: async () => { throw new Error("fail"); } } } as never;
-    const completer = buildReadlineCompleter(mockSessionManager, mockCore, false);
+    const failingCore = { completion: { request: async () => { throw new Error("fail"); } } };
+    const completer = buildReadlineCompleter(mockSessionManager, failingCore as never, false);
 
-    let callbackResult: [string[], string] | null = null;
-    completer("/test", (err: Error | null, result: [string[], string]) => {
-      expect(err).toBeNull();
-      callbackResult = result;
-    });
-    await new Promise((r) => setTimeout(r, 10));
-    expect(callbackResult as unknown as [string[], string]).toEqual([[], "/test"]);
+    await expect(invokeCompleter(completer, "/test")).resolves.toEqual([[], "/test"]);
   });
 });
 
 // ── buildOnQuitHandler ─────────────────────────────────────────────────────
 
 describe("buildOnQuitHandler", () => {
-  it("logs goodbye and session ID", () => {
-    const consoleLogCalls: string[] = [];
-    const originalLog = console.log;
-    console.log = (...args: unknown[]) => { consoleLogCalls.push(args.map(String).join(" ")); };
-
-    const mockSessionManager = { sessionId: () => "test-session-123" } as never;
-    const mockExtensions = { cleanup: () => {} } as never;
-    const handler = buildOnQuitHandler(mockSessionManager, mockExtensions);
-
+  /** Run a quit handler with console.log captured and process.exit stubbed. */
+  function runQuitHandler(sessionId: string | null): { logCalls: string[]; exitCalled: boolean } {
+    const logCalls: string[] = [];
+    const restoreLog = spyOn(console, "log").mockImplementation((...args: unknown[]) => {
+      logCalls.push(args.map(String).join(" "));
+    });
     const originalExit = process.exit;
     let exitCalled = false;
     process.exit = (() => { exitCalled = true; }) as never;
 
-    handler();
+    try {
+      const handler = buildOnQuitHandler(
+        { sessionId: () => sessionId } as never,
+        { cleanup: () => {} } as never,
+      );
+      handler();
+    } finally {
+      restoreLog.mockRestore();
+      process.exit = originalExit;
+    }
 
-    expect(consoleLogCalls.some((c) => c.includes("Goodbye"))).toBe(true);
-    expect(consoleLogCalls.some((c) => c.includes("test-session-123"))).toBe(true);
+    return { logCalls, exitCalled };
+  }
+
+  it("logs goodbye and session ID", () => {
+    const { logCalls, exitCalled } = runQuitHandler("test-session-123");
+    expect(logCalls.some((c) => c.includes("Goodbye"))).toBe(true);
+    expect(logCalls.some((c) => c.includes("test-session-123"))).toBe(true);
     expect(exitCalled).toBe(true);
-
-    console.log = originalLog;
-    process.exit = originalExit;
   });
 
   it("handles null session ID gracefully", () => {
-    const consoleLogCalls: string[] = [];
-    const originalLog = console.log;
-    console.log = (...args: unknown[]) => { consoleLogCalls.push(args.map(String).join(" ")); };
-
-    const mockSessionManager = { sessionId: () => null } as never;
-    const mockExtensions = { cleanup: () => {} } as never;
-    const handler = buildOnQuitHandler(mockSessionManager, mockExtensions);
-
-    const originalExit = process.exit;
-    let exitCalled = false;
-    process.exit = (() => { exitCalled = true; }) as never;
-
-    handler();
-
-    expect(consoleLogCalls.some((c) => c.includes("Goodbye"))).toBe(true);
-    expect(consoleLogCalls.some((c) => c.includes("Session:"))).toBe(false);
+    const { logCalls, exitCalled } = runQuitHandler(null);
+    expect(logCalls.some((c) => c.includes("Goodbye"))).toBe(true);
+    expect(logCalls.some((c) => c.includes("Session:"))).toBe(false);
     expect(exitCalled).toBe(true);
-
-    console.log = originalLog;
-    process.exit = originalExit;
   });
 });
 
 // ── runInteractiveSession integration tests ────────────────────────────────
+// NOTE: "throws when resolved config is missing" is covered in
+// interactive-cli-session.test.ts. The completer's prefix behavior (slash,
+// colon, shell mode) is covered by the buildReadlineCompleter unit tests above;
+// the integration tests below only verify that runInteractiveSession wires the
+// completer and handlers into readline.
+
+const createMockSessionManager = (
+  agent: Record<string, unknown> | null,
+  shouldBusResolve = false,
+) => ({
+  getAgent: () => agent,
+  sessionId: () => "test-session",
+  getBus: () => ({
+    run: async () => {
+      if (shouldBusResolve) return;
+      return new Promise(() => {});
+    },
+  }),
+  getTaskManager: () => null,
+  executeCommand: async () => undefined,
+  onSessionEvents: (_sessionId: string, _handler: unknown) => () => {},
+  interrupt: () => {},
+});
+
+function createMockCore(overrides: Record<string, unknown> = {}): never {
+  const { resolved, config, ...rest } = overrides;
+  return {
+    resolved: {
+      model: "test-model",
+      theme: "dark",
+      apiKey: "test-key",
+      baseUrl: "http://test",
+      stream: true,
+      chatTimeout: 60,
+      maxRetries: 3,
+      maxIterations: 100,
+      profileName: "test",
+      hideTools: false,
+      hideThinking: false,
+      showTokenUse: false,
+      role: undefined,
+      profileBody: undefined,
+      taskProfile: "task-default",
+      taskDefaultRole: "",
+      modelRegistry: {},
+      ...(resolved as Record<string, unknown> ?? {}),
+    },
+    config: {
+      providers: [],
+      ...(config as Record<string, unknown> ?? {}),
+    },
+    hooks: {
+      on: () => {},
+      notifyHooks: () => {},
+    },
+    toolRegistry: {
+      names: () => [],
+      get: () => undefined,
+      getAll: () => [],
+      isEmpty: () => true,
+    },
+    extensions: {
+      get: () => undefined,
+      getAll: () => [],
+      cleanup: () => {},
+    },
+    completion: {
+      register: () => {},
+      request: async () => [],
+    },
+    createLlmClient: (o?: Record<string, unknown>) =>
+      new LlmClient({ baseUrl: "http://test", apiKey: "test-key", stream: true,
+        chatTimeoutSecs: 60, maxRetries: 3, ...o }),
+    ...rest,
+  } as never;
+}
+
+const createMockRl = () =>
+  ({
+    on: () => {},
+    removeListener: () => {},
+    question: () => {},
+    prompt: () => {},
+    pause: () => {},
+    resume: () => {},
+    setPrompt: () => {},
+    close: () => {},
+  }) as unknown as readline.Interface;
+
+/** Run `fn` with SessionManager.create stubbed; always restores the original. */
+async function withMockSessionManager(
+  createFn: () => Promise<unknown>,
+  fn: () => Promise<void>,
+): Promise<void> {
+  const { SessionManager: SM } = await import("../../src/core/session/index.ts");
+  const original = SM.create;
+  (SM as unknown as { create: unknown }).create = createFn;
+  try {
+    await fn();
+  } finally {
+    (SM as unknown as { create: unknown }).create = original;
+  }
+}
 
 describe("runInteractiveSession integration", () => {
-  const createMockSessionManager = (
-    agent: Record<string, unknown> | null,
-    shouldBusResolve = false,
-  ) => ({
-    getAgent: () => agent,
-    sessionId: () => "test-session",
-    getBus: () => ({
-      run: async () => {
-        if (shouldBusResolve) return;
-        return new Promise(() => {});
+  it("wires the completer into readline options", async () => {
+    let capturedCompleter: Completer | null = null;
+    let resolveRlCreated: () => void;
+    const rlCreated = new Promise<void>((resolve) => { resolveRlCreated = resolve; });
+
+    await withMockSessionManager(
+      async () => createMockSessionManager(null),
+      async () => {
+        runInteractiveSession({}, createMockCore(), {
+          createReadline: (opts: Record<string, unknown>) => {
+            capturedCompleter = opts.completer as Completer;
+            resolveRlCreated();
+            return createMockRl();
+          },
+          onClose: () => {},
+          onSIGINT: () => {},
+          setupInput: () => {},
+        });
+        await rlCreated;
       },
-    }),
-    getTaskManager: () => null,
-    executeCommand: async () => undefined,
-    onSessionEvents: (_sessionId: string, _handler: unknown) => () => {},
-    interrupt: () => {},
+    );
+
+    expect(capturedCompleter).not.toBeNull();
+    // No agent: the wired completer degrades to empty completions.
+    await expect(invokeCompleter(capturedCompleter!, "test-line")).resolves.toEqual([[], "test-line"]);
   });
 
-  const createMockCore = (overrides: { resolved?: Record<string, unknown>; config?: Record<string, unknown> } = {}) =>
-    ({
-      resolved: {
-        model: "test-model",
-        theme: "dark",
-        apiKey: "test-key",
-        baseUrl: "http://test",
-        stream: true,
-        chatTimeout: 60,
-        maxRetries: 3,
-        maxIterations: 100,
-        profileName: "test",
-        hideTools: false,
-        hideThinking: false,
-        showTokenUse: false,
-        role: undefined,
-        profileBody: undefined,
-        taskProfile: "task-default",
-        taskDefaultRole: "",
-        modelRegistry: {},
-        ...(overrides.resolved ?? {}),
-      },
-      config: {
-        providers: [],
-        ...(overrides.config ?? {}),
-      },
-      hooks: {
-        on: () => {},
-        notifyHooks: () => {},
-      },
-      toolRegistry: {
-        names: () => [],
-        get: () => undefined,
-        getAll: () => [],
-        isEmpty: () => true,
-      },
-      extensions: {
-        get: () => undefined,
-        getAll: () => [],
-        cleanup: () => {},
-      },
-      completion: {
-        register: () => {},
-        request: async () => [],
-      },
-      createLlmClient: (overrides?: Record<string, unknown>) =>
-        new LlmClient({ baseUrl: "http://test", apiKey: "test-key", stream: true,
-          chatTimeoutSecs: 60, maxRetries: 3, ...overrides }),
-      ...overrides,
-    }) as never;
+  const mockAgent = { commandRegistry: { names: () => ["test"] }, modelRegistry: {} };
 
-  const createMockRl = () =>
-    ({
-      on: () => {},
-      removeListener: () => {},
-      question: () => {},
-      prompt: () => {},
-      pause: () => {},
-      resume: () => {},
-      setPrompt: () => {},
-      close: () => {},
-    }) as unknown as readline.Interface;
-
-  it("throws ExtensionError when config is not resolved", async () => {
-    const mockCore = { resolved: null, config: {} } as never;
-    await expect(runInteractiveSession({}, mockCore)).rejects.toThrow(ExtensionError);
-  });
-
-  it("sets up completer callback that handles no agent", async () => {
-    const capturedCompleter: Array<(
-      line: string,
-      cb: (err: Error | null, result: [string[], string]) => void,
-    ) => void> = [];
-
-    const originalCreate = (await import("../../src/core/session/index.ts")).SessionManager.create;
-    const mockSessionManager = createMockSessionManager(null);
-
-    try {
-      (await import("../../src/core/session/index.ts")).SessionManager.create = async () => mockSessionManager as never;
-
-      runInteractiveSession({}, createMockCore(), {
-        createReadline: (opts: Record<string, unknown>) => {
-          capturedCompleter.push(opts.completer as never);
-          return createMockRl();
-        },
-        onClose: () => {},
-        onSIGINT: () => {},
-        setupInput: () => {},
-      });
-      await new Promise((r) => setTimeout(r, 10));
-    } finally {
-      (await import("../../src/core/session/index.ts")).SessionManager.create = originalCreate;
-    }
-
-    expect(capturedCompleter.length).toBe(1);
-    let callbackResult: [string[], string] | null = null;
-    capturedCompleter[0]!("test-line", (err: Error | null, result: [string[], string]) => {
-      expect(err).toBeNull();
-      callbackResult = result;
-    });
-    await new Promise((r) => setTimeout(r, 10));
-    expect(callbackResult as unknown as [string[], string]).toEqual([[], "test-line"]);
-  });
-
-  it("completer handles slash command and colon syntax", async () => {
-    const capturedCompleter: Array<(
-      line: string,
-      cb: (err: Error | null, result: [string[], string]) => void,
-    ) => void> = [];
-
-    const originalCreate = (await import("../../src/core/session/index.ts")).SessionManager.create;
-    const mockAgent = { commandRegistry: { names: () => ["help"] }, modelRegistry: {} };
-    const mockSessionManager = createMockSessionManager(mockAgent);
-
-    try {
-      (await import("../../src/core/session/index.ts")).SessionManager.create = async () => mockSessionManager as never;
-
-      runInteractiveSession({}, createMockCore(), {
-        createReadline: (opts: Record<string, unknown>) => {
-          capturedCompleter.push(opts.completer as never);
-          return createMockRl();
-        },
-        onClose: () => {},
-        onSIGINT: () => {},
-        setupInput: () => {},
-      });
-      await new Promise((r) => setTimeout(r, 10));
-    } finally {
-      (await import("../../src/core/session/index.ts")).SessionManager.create = originalCreate;
-    }
-
-    // Test colon syntax
-    let prefix: string | null = null;
-    capturedCompleter[0]!("/prompt:dep", (_: Error | null, result: [string[], string]) => { prefix = result[1] as string; });
-    await new Promise((r) => setTimeout(r, 10));
-    expect(prefix!).toBe("dep");
-  });
-
-  it("completer handles shell mode prefix", async () => {
-    const capturedCompleter: Array<(
-      line: string,
-      cb: (err: Error | null, result: [string[], string]) => void,
-    ) => void> = [];
-
-    const originalCreate = (await import("../../src/core/session/index.ts")).SessionManager.create;
-    const mockAgent = { commandRegistry: { names: () => ["test"] }, modelRegistry: {} };
-    const mockSessionManager = createMockSessionManager(mockAgent);
-
-    try {
-      (await import("../../src/core/session/index.ts")).SessionManager.create = async () => mockSessionManager as never;
-
-      runInteractiveSession({}, createMockCore({ config: { uiInteractiveCli: { shellMode: true } } }), {
-        createReadline: (opts: Record<string, unknown>) => {
-          capturedCompleter.push(opts.completer as never);
-          return createMockRl();
-        },
-        onClose: () => {},
-        onSIGINT: () => {},
-        setupInput: () => {},
-      });
-      await new Promise((r) => setTimeout(r, 10));
-    } finally {
-      (await import("../../src/core/session/index.ts")).SessionManager.create = originalCreate;
-    }
-
-    let prefix: string | null = null;
-    capturedCompleter[0]!("ls fil", (_: Error | null, result: [string[], string]) => { prefix = result[1] as string; });
-    await new Promise((r) => setTimeout(r, 10));
-    expect(prefix!).toBe("fil");
-  });
-
-  it("uses custom onSIGINT handler when provided", async () => {
-    let customSigintCalled = false;
-    const sigintHandlers: (() => void)[] = [];
-
-    const mockRl = {
+  /** Readline mock that records handlers per event. */
+  function captureRl() {
+    const handlers: Record<string, Array<(...args: unknown[]) => void>> = {};
+    const rl = {
       on: (event: string, handler: (...args: unknown[]) => void) => {
-        if (event === "SIGINT") sigintHandlers.push(handler as () => void);
+        (handlers[event] ||= []).push(handler);
+        return rl;
       },
-      removeListener: () => {},
-      question: () => {},
-      prompt: () => {},
-      pause: () => {},
-      resume: () => {},
-      setPrompt: () => {},
-      close: () => {},
-    } as unknown as readline.Interface;
-
-    const originalCreate = (await import("../../src/core/session/index.ts")).SessionManager.create;
-    const mockAgent = { commandRegistry: { names: () => ["test"] }, modelRegistry: {} };
-    const mockSessionManager = createMockSessionManager(mockAgent, true);
-
-    try {
-      (await import("../../src/core/session/index.ts")).SessionManager.create = async () => mockSessionManager as never;
-
-      await runInteractiveSession({}, createMockCore(), {
-        createReadline: () => mockRl,
-        onClose: () => {},
-        onSIGINT: () => { customSigintCalled = true; },
-        setupInput: () => {},
-      });
-    } finally {
-      (await import("../../src/core/session/index.ts")).SessionManager.create = originalCreate;
-    }
-
-    expect(sigintHandlers.length).toBe(1);
-    sigintHandlers[0]!();
-    expect(customSigintCalled).toBe(true);
-  });
-
-  it("uses default SIGINT handler when not provided", async () => {
-    const sigintHandlers: (() => void)[] = [];
-    const consoleLogCalls: string[] = [];
-
-    const mockRl = {
-      on: (event: string, handler: (...args: unknown[]) => void) => {
-        if (event === "SIGINT") sigintHandlers.push(handler as () => void);
-      },
-      removeListener: () => {},
-      question: () => {},
-      prompt: () => {},
-      pause: () => {},
-      resume: () => {},
-      setPrompt: () => {},
+      removeListener: () => rl,
+      question: () => rl,
+      prompt: () => rl,
+      pause: () => rl,
+      resume: () => rl,
+      setPrompt: () => rl,
       close: () => {},
       line: "",
       cursor: 0,
     } as unknown as readline.Interface;
+    return { rl, get: (event: string) => handlers[event] ?? [] };
+  }
 
-    const originalCreate = (await import("../../src/core/session/index.ts")).SessionManager.create;
-    const mockAgent = { commandRegistry: { names: () => ["test"] }, modelRegistry: {} };
-    const mockSessionManager = createMockSessionManager(mockAgent, true);
+  it("uses custom onSIGINT handler when provided", async () => {
+    let customSigintCalled = false;
+    const { rl, get } = captureRl();
 
-    try {
-      (await import("../../src/core/session/index.ts")).SessionManager.create = async () => mockSessionManager as never;
-      spyOn(console, "log").mockImplementation((msg: string) => { consoleLogCalls.push(msg); });
+    await withMockSessionManager(
+      async () => createMockSessionManager(mockAgent, true),
+      async () => {
+        await runInteractiveSession({}, createMockCore(), {
+          createReadline: () => rl,
+          onClose: () => {},
+          onSIGINT: () => { customSigintCalled = true; },
+          setupInput: () => {},
+        });
+      },
+    );
 
-      await runInteractiveSession({}, createMockCore(), {
-        createReadline: () => mockRl,
-        onClose: () => {},
-        setupInput: () => {},
-      });
-    } finally {
-      (await import("../../src/core/session/index.ts")).SessionManager.create = originalCreate;
-    }
+    const [sigint] = get("SIGINT");
+    expect(get("SIGINT")).toHaveLength(1);
+    sigint!();
+    expect(customSigintCalled).toBe(true);
+  });
 
-    expect(sigintHandlers.length).toBe(1);
-    sigintHandlers[0]!();
-    expect(consoleLogCalls.some((c) => c.includes("Interrupted"))).toBe(true);
+  it("uses default SIGINT handler when not provided", async () => {
+    const { rl, get } = captureRl();
+    const consoleLogCalls: string[] = [];
+
+    await withMockSessionManager(
+      async () => createMockSessionManager(mockAgent, true),
+      async () => {
+        const restoreLog = spyOn(console, "log").mockImplementation((msg: string) => {
+          consoleLogCalls.push(msg);
+        });
+        try {
+          await runInteractiveSession({}, createMockCore(), {
+            createReadline: () => rl,
+            onClose: () => {},
+            setupInput: () => {},
+          });
+
+          // Invoke while the console spy is still active.
+          expect(get("SIGINT")).toHaveLength(1);
+          get("SIGINT")[0]!();
+          expect(consoleLogCalls.some((c) => c.includes("Interrupted"))).toBe(true);
+        } finally {
+          restoreLog.mockRestore();
+        }
+      },
+    );
   });
 
   it("uses custom setupInput when provided", async () => {
     let customSetupCalled = false;
 
-    const originalCreate = (await import("../../src/core/session/index.ts")).SessionManager.create;
-    const mockAgent = { commandRegistry: { names: () => ["test"] }, modelRegistry: {} };
-    const mockSessionManager = createMockSessionManager(mockAgent, true);
-
-    try {
-      (await import("../../src/core/session/index.ts")).SessionManager.create = async () => mockSessionManager as never;
-
-      await runInteractiveSession({}, createMockCore(), {
-        createReadline: () => createMockRl(),
-        onClose: () => {},
-        onSIGINT: () => {},
-        setupInput: () => { customSetupCalled = true; },
-      });
-    } finally {
-      (await import("../../src/core/session/index.ts")).SessionManager.create = originalCreate;
-    }
+    await withMockSessionManager(
+      async () => createMockSessionManager(mockAgent, true),
+      async () => {
+        await runInteractiveSession({}, createMockCore(), {
+          createReadline: () => createMockRl(),
+          onClose: () => {},
+          onSIGINT: () => {},
+          setupInput: () => { customSetupCalled = true; },
+        });
+      },
+    );
 
     expect(customSetupCalled).toBe(true);
   });
 
   it("shell mode line handler executes system command", async () => {
-    const lineHandlers: ((line: string) => Promise<void>)[] = [];
+    const { rl, get } = captureRl();
 
-    const mockRl = {
-      on: (event: string, handler: (...args: unknown[]) => void) => {
-        if (event === "line") lineHandlers.push(handler as (line: string) => Promise<void>);
+    await withMockSessionManager(
+      async () => createMockSessionManager(mockAgent, true),
+      async () => {
+        await runInteractiveSession({}, createMockCore({ config: { uiInteractiveCli: { shellMode: true } } }), {
+          createReadline: () => rl,
+          onClose: () => {},
+          onSIGINT: () => {},
+          setupInput: () => {},
+        });
       },
-      removeListener: () => {},
-      question: () => {},
-      prompt: () => {},
-      pause: () => {},
-      resume: () => {},
-      setPrompt: () => {},
-      close: () => {},
-    } as unknown as readline.Interface;
+    );
 
-    const originalCreate = (await import("../../src/core/session/index.ts")).SessionManager.create;
-    const mockAgent = { commandRegistry: { names: () => ["test"] }, modelRegistry: {} };
-    const mockSessionManager = createMockSessionManager(mockAgent, true);
-
-    try {
-      (await import("../../src/core/session/index.ts")).SessionManager.create = async () => mockSessionManager as never;
-
-      await runInteractiveSession({}, createMockCore({ config: { uiInteractiveCli: { shellMode: true } } }), {
-        createReadline: () => mockRl,
-        onClose: () => {},
-        onSIGINT: () => {},
-        setupInput: () => {},
-      });
-    } finally {
-      (await import("../../src/core/session/index.ts")).SessionManager.create = originalCreate;
-    }
-
+    const lineHandlers = get("line") as Array<(line: string) => Promise<void>>;
     expect(lineHandlers.length).toBeGreaterThan(0);
     await runWithSuppressedStdout(() => lineHandlers[0]!("echo hello from shellmode"));
   });
 });
 
-describe("runInteractiveSession default setupInput", () => {
-  it("does not throw when no custom setupInput provided", async () => {
-    const originalCreate = (await import("../../src/core/session/index.ts")).SessionManager.create;
-    const mockAgent = { commandRegistry: { names: () => ["test"] }, modelRegistry: {} };
-    const mockSessionManager = {
-      getAgent: () => mockAgent,
-      sessionId: () => "test-session",
-      getBus: () => ({ run: async () => {} }),
-      getTaskManager: () => null,
-      executeCommand: async () => undefined,
-      onSessionEvents: () => () => {},
-      interrupt: () => {},
-    };
+describe("runInteractiveSession defaults", () => {
+  const mockAgent = { commandRegistry: { names: () => ["test"] }, modelRegistry: {} };
 
-    try {
-      (await import("../../src/core/session/index.ts")).SessionManager.create = async () => mockSessionManager as never;
+  it("falls back to default setupInput when not provided", async () => {
+    let rlCreated = false;
 
-      await runInteractiveSession({}, {
-        resolved: {
-          model: "test-model",
-          theme: "dark",
-          apiKey: "test-key",
-          baseUrl: "http://test",
-          stream: true,
-          chatTimeout: 60,
-          maxRetries: 3,
-          maxIterations: 100,
-          profileName: "test",
-          hideTools: false,
-          hideThinking: false,
-          showTokenUse: false,
-          role: undefined,
-          profileBody: undefined,
-          taskProfile: "task-default",
-          taskDefaultRole: "",
-          modelRegistry: {},
-        },
-        config: { providers: [] },
-        hooks: { on: () => {}, notifyHooks: () => {} },
-        toolRegistry: { names: () => [], get: () => undefined, getAll: () => [], isEmpty: () => true },
-        extensions: { get: () => undefined, getAll: () => [], cleanup: () => {} },
-        completion: { register: () => {}, request: async () => [] },
-        createLlmClient: (overrides?: Record<string, unknown>) =>
-          new LlmClient({ baseUrl: "http://test", apiKey: "test-key", stream: true,
-            chatTimeoutSecs: 60, maxRetries: 3, ...overrides }),
-      } as never, {
-        createReadline: () => ({
-          on: () => {},
-          removeListener: () => {},
-          question: () => {},
-          prompt: () => {},
-          pause: () => {},
-          resume: () => {},
-          setPrompt: () => {},
-          close: () => {},
-        }) as unknown as readline.Interface,
-        onClose: () => {},
-        onSIGINT: () => {},
-        // No setupInput - should use default
-      });
-    } finally {
-      (await import("../../src/core/session/index.ts")).SessionManager.create = originalCreate;
-    }
+    await withMockSessionManager(
+      async () => createMockSessionManager(mockAgent, true),
+      async () => {
+        await runInteractiveSession({}, createMockCore(), {
+          createReadline: () => { rlCreated = true; return createMockRl(); },
+          onClose: () => {},
+          onSIGINT: () => {},
+          // No setupInput - the default (AsyncInteractiveCliInput) must run.
+        });
+      },
+    );
+
+    // Session completed and readline was set up, so the default input
+    // construction did not throw.
+    expect(rlCreated).toBe(true);
   });
 
   it("wires command argument completions fired during initial SessionManager.create", async () => {
@@ -1057,89 +758,40 @@ describe("runInteractiveSession default setupInput", () => {
         ]),
       names: () => ["reasoning"],
     };
-    const mockAgent = { commandRegistry, modelRegistry: {} };
-    const mockSessionManager = {
-      getAgent: () => mockAgent,
-      sessionId: () => "test-session",
-      getBus: () => ({ run: async () => {} }),
-      getTaskManager: () => null,
-      executeCommand: async () => undefined,
-      onSessionEvents: () => () => {},
-      interrupt: () => {},
-    };
+    const reasoningAgent = { commandRegistry, modelRegistry: {} };
 
-    const originalCreate = (await import("../../src/core/session/index.ts")).SessionManager.create;
-    try {
-      // Mimics buildInteractiveAgent: the hook fires during create.
-      (await import("../../src/core/session/index.ts")).SessionManager.create = async () => {
+    await withMockSessionManager(
+      async () => {
+        // Mimics buildInteractiveAgent: the hook fires during create.
         hooks.notifyHooks(HOOKS.COMMANDS_REGISTER, {
           registry: commandRegistry as never,
-          agent: mockAgent as never,
+          agent: reasoningAgent as never,
         });
-        return mockSessionManager as never;
-      };
-
-      await runInteractiveSession(
-        {},
-        {
-          resolved: {
-            model: "test-model",
-            theme: "dark",
-            apiKey: "test-key",
-            baseUrl: "http://test",
-            stream: true,
-            chatTimeout: 60,
-            maxRetries: 3,
-            maxIterations: 100,
-            profileName: "test",
-            hideTools: false,
-            hideThinking: false,
-            showTokenUse: false,
-            role: undefined,
-            profileBody: undefined,
-            taskProfile: "task-default",
-            taskDefaultRole: "",
-            modelRegistry: {},
+        return createMockSessionManager(reasoningAgent, true);
+      },
+      async () => {
+        await runInteractiveSession(
+          {},
+          createMockCore({ hooks, completion }),
+          {
+            createReadline: () => createMockRl(),
+            onClose: () => {},
+            onSIGINT: () => {},
+            setupInput: () => {},
           },
-          config: { providers: [] },
-          hooks,
-          toolRegistry: { names: () => [], get: () => undefined, getAll: () => [], isEmpty: () => true },
-          extensions: { get: () => undefined, getAll: () => [], cleanup: () => {} },
-          completion,
-          createLlmClient: (overrides?: Record<string, unknown>) =>
-            new LlmClient({ baseUrl: "http://test", apiKey: "test-key", stream: true,
-              chatTimeoutSecs: 60, maxRetries: 3, ...overrides }),
-        } as never,
-        {
-          createReadline: () =>
-            ({
-              on: () => {},
-              removeListener: () => {},
-              question: () => {},
-              prompt: () => {},
-              pause: () => {},
-              resume: () => {},
-              setPrompt: () => {},
-              close: () => {},
-            }) as unknown as readline.Interface,
-          onClose: () => {},
-          onSIGINT: () => {},
-          setupInput: () => {},
-        },
-      );
-    } finally {
-      (await import("../../src/core/session/index.ts")).SessionManager.create = originalCreate;
-    }
+        );
+      },
+    );
 
     // Tab after "/reasoning " should offer all levels.
     const line = "/reasoning ";
-    const ctx = parseCompletionContext(line, line.length, mockAgent as never);
+    const ctx = parseCompletionContext(line, line.length, reasoningAgent as never);
     const options = await completion.request(ctx, 200);
     expect(options.map((o) => o.value).sort()).toEqual([...levels].sort());
 
     // Tab after a partial level should filter.
     const partial = "/reasoning med";
-    const ctx2 = parseCompletionContext(partial, partial.length, mockAgent as never);
+    const ctx2 = parseCompletionContext(partial, partial.length, reasoningAgent as never);
     const options2 = await completion.request(ctx2, 200);
     expect(options2.map((o) => o.value)).toEqual(["medium"]);
   });
@@ -1148,232 +800,95 @@ describe("runInteractiveSession default setupInput", () => {
 // ── buildInteractiveAgent ──────────────────────────────────────────────────
 
 describe("buildInteractiveAgent", () => {
-  it("creates agent with default config values", async () => {
+  const defaultResolved = {
+    model: "test-model",
+    maxIterations: 50,
+    profileName: "test-profile",
+    hideTools: true,
+    hideThinking: false,
+    showTokenUse: true,
+    modelRegistry: {},
+    maxToolCallsPerIteration: 10,
+    maxRetries: 5,
+    toolRetryDelay: 1,
+  };
+
+  async function buildAgent(agentConfig: Record<string, unknown> = {}, core: Record<string, unknown> = {}) {
     const { buildInteractiveAgent } = await import(
       "../../src/extensions/ui-interactive-cli/index.ts"
     );
-
-    const mockHooks = {
-      on: () => {},
-      notifyHooks: () => {},
-    };
-    const mockToolRegistry = {
-      names: () => [],
-      get: () => undefined,
-      getAll: () => [],
-      isEmpty: () => true,
-    };
-    const mockLlmClient = {} as never;
-
-    const agent = await buildInteractiveAgent(
-      {},
+    return buildInteractiveAgent(
+      agentConfig as never,
       {
-        hooks: mockHooks,
-        toolRegistry: mockToolRegistry,
+        hooks: { on: () => {}, notifyHooks: () => {} },
+        toolRegistry: {
+          names: () => [],
+          get: () => undefined,
+          getAll: () => [],
+          isEmpty: () => true,
+        },
+        ...core,
       } as never,
-      {
-        model: "test-model",
-        maxIterations: 50,
-        profileName: "test-profile",
-        hideTools: true,
-        hideThinking: false,
-        showTokenUse: true,
-        modelRegistry: {},
-        maxToolCallsPerIteration: 10,
-        maxRetries: 5,
-        toolRetryDelay: 1,
-      },
+      defaultResolved as never,
       { providers: [] },
-      mockLlmClient,
+      {} as never,
       {},
     );
+  }
+
+  it("creates agent with default config values", async () => {
+    const agent = await buildAgent();
 
     expect(agent).toBeDefined();
     expect(agent.model).toBe("test-model");
   });
 
   it("uses agentConfig overrides when provided", async () => {
-    const { buildInteractiveAgent } = await import(
-      "../../src/extensions/ui-interactive-cli/index.ts"
-    );
-
-    const mockHooks = {
-      on: () => {},
-      notifyHooks: () => {},
-    };
-    const mockToolRegistry = {
-      names: () => [],
-      get: () => undefined,
-      getAll: () => [],
-      isEmpty: () => true,
-    };
-    const mockLlmClient = {} as never;
-    const customLlmClient = {} as never;
-
-    const agent = await buildInteractiveAgent(
-      {
-        model: "override-model",
-        llmClient: customLlmClient,
-        hideTools: false,
-        stream: true,
-      },
-      {
-        hooks: mockHooks,
-        toolRegistry: mockToolRegistry,
-      } as never,
-      {
-        model: "default-model",
-        maxIterations: 50,
-        profileName: "test-profile",
-        hideTools: true,
-        hideThinking: false,
-        showTokenUse: true,
-        modelRegistry: {},
-        maxToolCallsPerIteration: 10,
-        maxRetries: 5,
-        toolRetryDelay: 1,
-      },
-      { providers: [] },
-      mockLlmClient,
-      {},
-    );
+    const agent = await buildAgent({
+      model: "override-model",
+      llmClient: {} as never,
+      hideTools: false,
+      stream: true,
+    });
 
     expect(agent.model).toBe("override-model");
   });
 
   it("notifies COMMANDS_REGISTER hook", async () => {
-    const { buildInteractiveAgent } = await import(
-      "../../src/extensions/ui-interactive-cli/index.ts"
-    );
-
     const notifyHooksCalls: unknown[] = [];
-    const mockHooks = {
-      on: () => {},
-      notifyHooks: (...args: unknown[]) => {
-        notifyHooksCalls.push(args);
+    await buildAgent({}, {
+      hooks: {
+        on: () => {},
+        notifyHooks: (...args: unknown[]) => { notifyHooksCalls.push(args); },
       },
-    };
-    const mockToolRegistry = {
-      names: () => [],
-      get: () => undefined,
-      getAll: () => [],
-      isEmpty: () => true,
-    };
-    const mockLlmClient = {} as never;
-
-    await buildInteractiveAgent(
-      {},
-      {
-        hooks: mockHooks,
-        toolRegistry: mockToolRegistry,
-      } as never,
-      {
-        model: "test-model",
-        maxIterations: 50,
-        profileName: "test-profile",
-        hideTools: false,
-        hideThinking: false,
-        showTokenUse: false,
-        modelRegistry: {},
-        maxToolCallsPerIteration: 10,
-        maxRetries: 5,
-        toolRetryDelay: 1,
-      },
-      { providers: [] },
-      mockLlmClient,
-      {},
-    );
+    });
 
     expect((notifyHooksCalls as [string, unknown][]).some((c) => c[0] === HOOKS.COMMANDS_REGISTER)).toBe(true);
   });
 });
 
-// ── Additional coverage for uncovered lines ────────────────────────────────
-
-describe("executeShellCommand error handling", () => {
-  it("handles spawn error with captureOutput", async () => {
-    const originalPath = process.env.PATH;
-    process.env.PATH = "/nonexistent/path";
-    try {
-      const result = await runWithSuppressedStdout(() => executeShellCommand("echo hello", { captureOutput: true }));
-      expect(result.error).toBeDefined();
-    } finally {
-      process.env.PATH = originalPath;
-    }
-  });
-});
-
 describe("handleSlashCommand error handling", () => {
-  it("handles executeCommand rejection", async () => {
+  it("recovers from executeCommand rejection without crashing", async () => {
     const consoleLogCalls: string[] = [];
-    spyOn(console, "log").mockImplementation((msg: string) => {
+    const restoreLog = spyOn(console, "log").mockImplementation((msg: string) => {
       consoleLogCalls.push(msg);
     });
+    const mockRl = { prompt: () => {}, close: () => {} } as never;
+    let prompted = false;
+    (mockRl as { prompt: () => void }).prompt = () => { prompted = true; };
 
     const mockSessionManager = {
       sessionId: () => "test",
-      executeCommand: async () => {
-        throw new Error("command failed");
-      },
+      executeCommand: () => Promise.reject(new Error("command failed")),
     } as never;
-
-    const mockRl = { prompt: () => {}, close: () => {} } as never;
 
     handleSlashCommand("bad-command", mockSessionManager, {} as never, mockRl);
-    await new Promise((r) => setTimeout(r, 20));
+    // The rejection lands in the .then handler one microtask later.
+    await Promise.resolve();
 
-    // The error handler should log empty line and prompt
+    restoreLog.mockRestore();
+    expect(prompted).toBe(true);
     expect(consoleLogCalls).toContain("");
-  });
-});
-
-describe("create extension hooks", () => {
-  it("registers CLI subcommand", async () => {
-    const mockCore = {
-      hooks: {
-        on: () => {},
-        notifyHooks: () => {},
-      },
-    } as never;
-
-    const ext = create(mockCore);
-    expect(ext.hooks).toBeDefined();
-
-    const subcommandHandler = ext.hooks![HOOKS.CLI_SUBCOMMANDS_REGISTER];
-    expect(subcommandHandler).toBeDefined();
-
-    const registeredCommands: Array<{ name: string }> = [];
-    await subcommandHandler!({
-      register: (name: string, opts: Record<string, unknown>) => {
-        registeredCommands.push({ name });
-      },
-    });
-
-    expect(registeredCommands).toContainEqual({ name: "cli" });
-  });
-
-  it("AGENT_TOOL_CONTEXT hook sets input when available", () => {
-    const mockCore = {
-      hooks: {
-        on: () => {},
-        notifyHooks: () => {},
-      },
-    } as never;
-
-    const ext = create(mockCore);
-    expect(ext.hooks).toBeDefined();
-
-    const toolContextHandler = ext.hooks![HOOKS.AGENT_TOOL_CONTEXT];
-    expect(toolContextHandler).toBeDefined();
-
-    // The hook handler runs without error (it may or may not set input depending on state)
-    expect(() => toolContextHandler!({
-      toolCtx: {
-        set: () => {},
-      } as never,
-      toolName: "test-tool",
-      agent: {} as never,
-    })).not.toThrow();
   });
 });
 

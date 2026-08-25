@@ -121,33 +121,16 @@ describe("Compaction Extension Creation", () => {
     expect((ext as any).settings.reserveTokens).toBe(8192);
   });
 
-  it("should register all built-in strategies", () => {
-    const ext = createCompactionExtension(createMockCore());
-    for (const name of ["summarize", "drop", "summarize-short", "token-aware", "trim"]) {
-      expect((ext as any).registry.has(name)).toBe(true);
-    }
-  });
-
-  it("should provide getStrategyList with correct names and order", () => {
+  it("should provide getStrategyList with all built-in strategies, correct names and order", () => {
     const ext = createCompactionExtension(createMockCore());
     const list = (ext as any).getStrategyList();
     const expected = ["summarize", "drop", "summarize-short", "token-aware", "trim"];
     expect(list.map((s: any) => s.name)).toEqual(expected);
-    expect(list.length).toBe(expected.length);
+    for (const strategy of list) {
+      expect((ext as any).registry.has(strategy.name)).toBe(true);
+      expect(strategy.description.length).toBeGreaterThan(0);
+    }
   });
-
-  for (const { strategy, extra } of [
-    { strategy: "token-aware", extra: { reserveTokens: 4096 } },
-    { strategy: "trim", extra: {} },
-  ]) {
-    it(`should create extension with ${strategy} strategy`, () => {
-      const ext = createCompactionExtension(createMockCore({ enabled: true, strategy, ...extra }));
-      expect((ext as any).settings.strategy).toBe(strategy);
-      if (extra.reserveTokens) {
-        expect((ext as any).settings.reserveTokens).toBe(extra.reserveTokens);
-      }
-    });
-  }
 });
 
 // ── Hook Integration ─────────────────────────────────────────────────────────
@@ -401,57 +384,26 @@ describe("Hook Integration", () => {
   });
 });
 
-// ── Strategy List ────────────────────────────────────────────────────────────
-
-describe("Strategy List", () => {
-  it("returns all strategies with non-empty descriptions", () => {
-    const core = createMockCore();
-    const ext = createCompactionExtension(core);
-    const list = (ext as any).getStrategyList();
-
-    const expectedNames = ["summarize", "drop", "summarize-short", "token-aware", "trim"];
-    expect(list.map((s: any) => s.name)).toEqual(expectedNames);
-
-    for (const strategy of list) {
-      expect(strategy.description).toBeDefined();
-      expect(strategy.description.length).toBeGreaterThan(0);
-    }
-  });
-});
-
 // ── COMMANDS_REGISTER Hook ──────────────────────────────────────────────────
 
 describe("COMMANDS_REGISTER Hook", () => {
-  it("should register compact command", async () => {
-    const core = createMockCore();
-    const ext = createCompactionExtension(core);
-
+  /** Register the extension's commands and return the compact command def. */
+  async function registerCompactCmd(ext: any) {
     const commandRegistry = new AgentCommandRegistry();
-    await (ext as any).hooks![HOOKS.COMMANDS_REGISTER]!({ registry: commandRegistry });
+    await ext.hooks![HOOKS.COMMANDS_REGISTER]!({ registry: commandRegistry });
+    return commandRegistry;
+  }
 
-    // The compact command should be registered
+  it("should register compact command", async () => {
+    const ext = createCompactionExtension(createMockCore())!;
+    const commandRegistry = await registerCompactCmd(ext);
+
     const compactCmd = commandRegistry.get("compact")!;
     expect(compactCmd).toBeDefined();
     expect(compactCmd.description).toContain("Compact context");
-  });
-
-  it("should not register compact:strategy command (removed historical syntax)", async () => {
-    const core = createMockCore();
-    const ext = createCompactionExtension(core);
-
-    const commandRegistry = new AgentCommandRegistry();
-    await (ext as any).hooks![HOOKS.COMMANDS_REGISTER]!({ registry: commandRegistry });
-
+    // The historical `compact:strategy` command was removed in favor of args.
     expect(commandRegistry.get("compact:strategy")).toBeUndefined();
-  });
-
-  it("compact command matches colon-form invocations", async () => {
-    const core = createMockCore();
-    const ext = createCompactionExtension(core);
-
-    const commandRegistry = new AgentCommandRegistry();
-    await (ext as any).hooks![HOOKS.COMMANDS_REGISTER]!({ registry: commandRegistry });
-
+    // Command matching covers space form and colon form, not prefix matches.
     expect(commandRegistry.match("compact")).toBe("compact");
     expect(commandRegistry.match("compact 5")).toBe("compact");
     expect(commandRegistry.match("compact:drop")).toBe("compact");
@@ -459,42 +411,21 @@ describe("COMMANDS_REGISTER Hook", () => {
     expect(commandRegistry.match("compacter")).toBeNull();
   });
 
-  it("compact <strategy> switches strategy (space form)", async () => {
-    const core = createMockCore();
-    const ext = createCompactionExtension(core);
-
-    const commandRegistry = new AgentCommandRegistry();
-    await (ext as any).hooks![HOOKS.COMMANDS_REGISTER]!({ registry: commandRegistry });
-
-    const compactCmd = commandRegistry.get("compact")!;
-    // cmdValue is the full command string
-    const result = await (compactCmd.handler as any)({}, "compact drop");
-    expect((result as any).content).toContain("Compaction strategy set to: drop");
-    expect((ext as any).settings.strategy).toBe("drop");
+  it.each([
+    ["compact drop", "drop"],
+    ["compact:summarize-short", "summarize-short"],
+  ])("switches strategy from %s", async (cmdValue, strategy) => {
+    const ext = createCompactionExtension(createMockCore())!;
+    const commandRegistry = await registerCompactCmd(ext);
+    const result = await (commandRegistry.get("compact")!.handler as any)({}, cmdValue);
+    expect((result as any).content).toContain(`Compaction strategy set to: ${strategy}`);
+    expect((ext as any).settings.strategy).toBe(strategy);
   });
 
-  it("compact:<strategy> switches strategy (colon form)", async () => {
-    const core = createMockCore();
-    const ext = createCompactionExtension(core);
-
-    const commandRegistry = new AgentCommandRegistry();
-    await (ext as any).hooks![HOOKS.COMMANDS_REGISTER]!({ registry: commandRegistry });
-
-    const compactCmd = commandRegistry.get("compact")!;
-    const result = await (compactCmd.handler as any)({}, "compact:summarize-short");
-    expect((result as any).content).toContain("Compaction strategy set to: summarize-short");
-    expect((ext as any).settings.strategy).toBe("summarize-short");
-  });
-
-  it("compact:<unknown> returns error listing available strategies", async () => {
-    const core = createMockCore();
-    const ext = createCompactionExtension(core);
-
-    const commandRegistry = new AgentCommandRegistry();
-    await (ext as any).hooks![HOOKS.COMMANDS_REGISTER]!({ registry: commandRegistry });
-
-    const compactCmd = commandRegistry.get("compact")!;
-    const result = await (compactCmd.handler as any)({}, "compact:foo");
+  it("rejects compact:<unknown> listing available strategies", async () => {
+    const ext = createCompactionExtension(createMockCore())!;
+    const commandRegistry = await registerCompactCmd(ext);
+    const result = await (commandRegistry.get("compact")!.handler as any)({}, "compact:foo");
     expect((result as any).error).toContain("Unknown compaction strategy: 'foo'");
     expect((result as any).error).toContain("summarize");
     expect((result as any).error).toContain("drop");
@@ -502,77 +433,48 @@ describe("COMMANDS_REGISTER Hook", () => {
     expect((ext as any).settings.strategy).toBe("summarize");
   });
 
-  it("compact <unknown> returns error with usage", async () => {
-    const core = createMockCore();
-    const ext = createCompactionExtension(core);
-
-    const commandRegistry = new AgentCommandRegistry();
-    await (ext as any).hooks![HOOKS.COMMANDS_REGISTER]!({ registry: commandRegistry });
-
-    const compactCmd = commandRegistry.get("compact")!;
-    const result = await (compactCmd.handler as any)({}, "compact not-a-strategy");
+  it("rejects compact <unknown> with usage", async () => {
+    const ext = createCompactionExtension(createMockCore())!;
+    const commandRegistry = await registerCompactCmd(ext);
+    const result = await (commandRegistry.get("compact")!.handler as any)({}, "compact not-a-strategy");
     expect((result as any).error).toContain("Unknown argument: 'not-a-strategy'");
     expect((result as any).error).toContain("Available strategies:");
+    // Strategy unchanged
+    expect((ext as any).settings.strategy).toBe("summarize");
   });
 
-  it("compact:<strategy> with extra args returns error", async () => {
-    const core = createMockCore();
-    const ext = createCompactionExtension(core);
-
-    const commandRegistry = new AgentCommandRegistry();
-    await (ext as any).hooks![HOOKS.COMMANDS_REGISTER]!({ registry: commandRegistry });
-
-    const compactCmd = commandRegistry.get("compact")!;
-    const result = await (compactCmd.handler as any)({}, "compact:drop extra");
+  it.each([
+    ["compact:drop extra"],
+    ["compact drop extra"],
+  ])("rejects extra args in %s", async (cmdValue) => {
+    const ext = createCompactionExtension(createMockCore())!;
+    const commandRegistry = await registerCompactCmd(ext);
+    const result = await (commandRegistry.get("compact")!.handler as any)({}, cmdValue);
     expect((result as any).error).toContain("Unexpected arguments");
     expect((ext as any).settings.strategy).toBe("summarize");
   });
 
-  it("compact <strategy> with extra args returns error", async () => {
-    const core = createMockCore();
-    const ext = createCompactionExtension(core);
-
-    const commandRegistry = new AgentCommandRegistry();
-    await (ext as any).hooks![HOOKS.COMMANDS_REGISTER]!({ registry: commandRegistry });
-
-    const compactCmd = commandRegistry.get("compact")!;
-    const result = await (compactCmd.handler as any)({}, "compact drop extra");
-    expect((result as any).error).toContain("Unexpected arguments");
-    expect((ext as any).settings.strategy).toBe("summarize");
-  });
-
-  it("compact command with keep parameter trims context", async () => {
-    const core = createMockCore();
-    const ext = createCompactionExtension(core);
-
-    const commandRegistry = new AgentCommandRegistry();
-    await (ext as any).hooks![HOOKS.COMMANDS_REGISTER]!({ registry: commandRegistry });
-
+  it("compact <keep> trims context to the requested number of messages", async () => {
+    const ext = createCompactionExtension(createMockCore())!;
+    const commandRegistry = await registerCompactCmd(ext);
     const compactCmd = commandRegistry.get("compact")!;
 
-    // Create agent with 20 messages
     const context = makeMessages(20, "x".repeat(100));
     const agent = createMockAgent(context);
 
-    const result = await (compactCmd!.handler as any)(agent, "compact 5");
+    const result = await (compactCmd.handler as any)(agent, "compact 5");
     expect((result as any).content).toContain("Context compacted to 5 messages");
-    expect(agent.log.length).toBe(6);
+    expect(agent.log.length).toBe(6); // 5 kept + user turn guard
   });
 
-  it("compact command with too few messages returns message", async () => {
-    const core = createMockCore();
-    const ext = createCompactionExtension(core);
-
-    const commandRegistry = new AgentCommandRegistry();
-    await (ext as any).hooks![HOOKS.COMMANDS_REGISTER]!({ registry: commandRegistry });
-
+  it("compact returns a message when there are too few messages", async () => {
+    const ext = createCompactionExtension(createMockCore())!;
+    const commandRegistry = await registerCompactCmd(ext);
     const compactCmd = commandRegistry.get("compact")!;
 
-    // Create agent with only 1 message
-    const context = makeMessages(1, "x".repeat(100));
-    const agent = createMockAgent(context);
+    const agent = createMockAgent(makeMessages(1, "x".repeat(100)));
 
-    const result = await (compactCmd!.handler as any)(agent, "compact");
+    const result = await (compactCmd.handler as any)(agent, "compact");
     expect((result as any).content).toContain("Not enough messages");
   });
 
@@ -582,11 +484,8 @@ describe("COMMANDS_REGISTER Hook", () => {
       keepRecentMessages: 2,
       reserveTokens: 100,
     });
-    const ext = createCompactionExtension(core);
-
-    const commandRegistry = new AgentCommandRegistry();
-    await (ext as any).hooks![HOOKS.COMMANDS_REGISTER]!({ registry: commandRegistry });
-
+    const ext = createCompactionExtension(core)!;
+    const commandRegistry = await registerCompactCmd(ext);
     const compactCmd = commandRegistry.get("compact")!;
 
     // Create agent with large context
@@ -605,28 +504,6 @@ describe("COMMANDS_REGISTER Hook", () => {
 // ── Edge Cases ───────────────────────────────────────────────────────────────
 
 describe("Edge Cases", () => {
-  it("should handle agent with no model", async () => {
-    const core = createMockCore({
-      enabled: true,
-      keepRecentMessages: 2,
-      reserveTokens: 100,
-    });
-    const ext = createCompactionExtension(core);
-
-    const context = makeMessages(100, "x".repeat(500));
-    const agent = createMockAgent(context, "test-model");
-
-    agent.modelRegistry = {
-            "test-model": { name: "test-model", temperature: null, contextLimit: 5000 },
-    };
-
-    const messages = [{ role: "system", content: "" }, ...context];
-
-    // Should not crash even with a valid model
-    await (ext as any).hooks![HOOKS.CONTEXT]!({ messages: messages as any, agent });
-    expect(agent.log.length).toBeLessThan(100);
-  });
-
   it("should handle empty messages array in hook", async () => {
     const core = createMockCore();
     const ext = createCompactionExtension(core);
@@ -736,31 +613,6 @@ describe("Edge Cases", () => {
     await expect(
       (ext as any).hooks![HOOKS.CONTEXT]!({ messages: messages as any, agent })
     ).resolves.toBeDefined();
-  });
-
-  it("should handle abortSignal that is not yet aborted", async () => {
-    const core = createMockCore({
-      enabled: true,
-      keepRecentMessages: 2,
-      reserveTokens: 100,
-    });
-    const ext = createCompactionExtension(core);
-
-    const context = makeMessages(50, "x".repeat(500));
-    const abortController = new AbortController(); // Not aborted
-
-    const agent = createMockAgent(context);
-    (agent as any).abortSignal = abortController.signal;
-
-    agent.modelRegistry = {
-      "test-model": { name: "test-model", temperature: null, contextLimit: 5000 },
-    };
-
-    const messages = [{ role: "system", content: "" }, ...context];
-
-    // Should work normally
-    const result = await (ext as any).hooks![HOOKS.CONTEXT]!({ messages: messages as any, agent });
-    expect(result).toBeDefined();
   });
 
   it("should handle cancellation during streaming (agent.cancelled)", async () => {
@@ -875,48 +727,6 @@ describe("Edge Cases", () => {
 // ── /compact Command Tests ───────────────────────────────────────────────────
 
 describe("/compact Command", () => {
-  it("returns error when not enough messages to compact", async () => {
-    const core = createMockCore({
-      enabled: true,
-      keepRecentMessages: 2,
-    });
-    const ext = createCompactionExtension(core);
-
-    const commandRegistry = new AgentCommandRegistry();
-    await (ext as any).hooks![HOOKS.COMMANDS_REGISTER]!({ registry: commandRegistry });
-    const compactCmd = commandRegistry.get("compact")!;
-
-    // Only 1 non-system message
-    const context = [new Message({ role: "user", content: "hello" })];
-    const agent = createMockAgent(context);
-
-    const result = await (compactCmd!.handler as any)(agent, "compact");
-
-    expect((result as any).content).toContain("Not enough messages");
-  });
-
-  it("handles /compact with keep option", async () => {
-    const core = createMockCore({
-      enabled: true,
-      keepRecentMessages: 2,
-    });
-    const ext = createCompactionExtension(core);
-
-    const commandRegistry = new AgentCommandRegistry();
-    await (ext as any).hooks![HOOKS.COMMANDS_REGISTER]!({ registry: commandRegistry });
-    const compactCmd = commandRegistry.get("compact")!;
-
-    // 10 non-system messages
-    const context = makeMessages(10, "x".repeat(100));
-    const agent = createMockAgent(context);
-
-    const result = await (compactCmd!.handler as any)(agent, "compact 4");
-
-    expect((result as any).content).toContain("Context compacted to 4 messages");
-    // The user turn guard adds an extra message
-    expect(agent.log.getNonSystem().length).toBeGreaterThanOrEqual(4);
-  });
-
   it("handles /compact with keep=0 (slice(-0) keeps all)", async () => {
     const core = createMockCore({
       enabled: true,

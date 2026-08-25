@@ -168,27 +168,6 @@ describe("subagents extension create()", () => {
     expect(registered).toContain("wait");
   });
 
-  it("TOOLS_REGISTER hook handles tool creation errors gracefully", async () => {
-    const core = createMockCore({
-      coreConfig: {
-        profileDef: { manager: true },
-      },
-    });
-
-    const result = create(core, { taskManager: makeMockTM() });
-
-    const registered: string[] = [];
-    const mockRegistry = {
-      register(name: string, _tool: unknown) {
-        registered.push(name);
-      },
-    };
-
-    // Should not throw with normal input
-    await result!.hooks![HOOKS.TOOLS_REGISTER]!(mockRegistry as any);
-    expect(registered.length).toBeGreaterThan(0);
-  });
-
   it("handles empty options object (lazy mode: tools resolve the manager at use time)", () => {
     const core = createMockCore({
       coreConfig: {

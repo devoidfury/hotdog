@@ -15,12 +15,9 @@ import {
   replayEntriesIntoContext,
 } from "../../src/extensions/session-log/session-log.ts";
 import type { LogEntry } from "../../src/core/session/session-log.ts";
-import { Message } from "../../src/core/context/message.ts";
 import { MessageLog } from "../../src/core/context/message-log.ts";
 import { mkdirSync, rmSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { homedir } from "node:os";
-import { setupSessionTestDir, cleanupSessionTest } from "../helpers.ts";
 
 // Use isolated temp directory to avoid scanning 100+ real session files
 const TEST_SESSIONS_DIR = join(import.meta.dir, "..", ".test-sessions");
@@ -58,7 +55,7 @@ function createMockAgent() {
 
 // ── disabledSessionLog ──────────────────────────────────────────────────────
 
-test("disabledSessionLog returns no-op log with correct return values", async () => {
+test("disabledSessionLog write methods all resolve without error", async () => {
   const log = disabledSessionLog();
   // All write methods are no-ops that resolve without error
   await log.append({});

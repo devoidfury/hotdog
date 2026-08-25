@@ -32,7 +32,9 @@ export class CliChannel extends Channel {
   }
 
   async *read(): AsyncIterable<string> {
-    return this.#rl[Symbol.asyncIterator]();
+    // `return` in an async generator only sets the completion value; delegate
+    // so callers actually receive the readline lines.
+    yield* this.#rl[Symbol.asyncIterator]();
   }
 
   protected _subscribe(sessionId: string): void {

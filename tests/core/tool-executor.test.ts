@@ -333,6 +333,33 @@ describe('ToolExecutor', () => {
       expect(hookCalls).toEqual(['before', 'after']);
     });
 
+    it('should fire AGENT_TOOL_CONTEXT with toolCtx, toolName and agent', async () => {
+      const deps = createMockDeps({
+        isRestoring: () => true,
+      });
+      const captured: { toolCtx?: { get: (k: string) => unknown }; toolName?: string; agent?: unknown } = {};
+
+      deps.hooks.on('agent:toolContext', (data: { toolCtx: { get: (k: string) => unknown }; toolName: string; agent: unknown }) => {
+        captured.toolCtx = data.toolCtx;
+        captured.toolName = data.toolName;
+        captured.agent = data.agent;
+      });
+
+      deps.toolRegistry.register('ctx_hook', makeTestTool('ctx_hook', async () => 'ok'));
+
+      const executor = createToolExecutor(deps);
+      await executor.execute([{
+        id: 'call-1',
+        type: 'function',
+        function: { name: 'ctx_hook', arguments: '{}' },
+      }]);
+
+      expect(captured.toolName).toBe('ctx_hook');
+      expect(captured.agent).toBe(deps.agent);
+      expect(captured.toolCtx!.get('agent')).toBe(deps.agent);
+      expect(captured.toolCtx!.get('isSessionRestoring')).toBe(true);
+    });
+
     it('should allow TOOL_CALL gate to block execution', async () => {
       const deps = createMockDeps();
       let toolExecuted = false;

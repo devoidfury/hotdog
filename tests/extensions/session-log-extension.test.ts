@@ -1,29 +1,35 @@
 // Tests for the session-log extension create() function — hooks and readEntries.
 // This complements session-log.test.ts which tests the SessionLog class.
+//
+// Session files are written to an isolated temp dir (HOTDOG_SESSIONS_DIR),
+// so tests never touch the real ~/.cache/hotdog/sessions directory.
 
-import { describe, it, expect, beforeEach, afterEach } from "bun:test";
-import { create, readSessionEntries, LOG_SOURCE, disabledSessionLog } from "../../src/extensions/session-log/index.ts";
+import { describe, it, expect, beforeAll, afterAll } from "bun:test";
+import { create, readSessionEntries, disabledSessionLog } from "../../src/extensions/session-log/index.ts";
+import { LOG_SOURCE } from "../../src/extensions/session-log/session-log.ts";
 import { HOOKS } from "../../src/core/hooks.ts";
 import { createMockCore } from "../helpers.ts";
-import { mkdirSync, rmSync, writeFileSync, readFileSync } from "node:fs";
+import { mkdirSync, rmSync } from "node:fs";
 import { join } from "node:path";
-import { homedir } from "node:os";
 
-const CACHE_DIR = join(homedir(), ".cache", "hotdog", "sessions");
+const SESSIONS_DIR = join(import.meta.dir, "..", ".test-sessions-ext");
 
-function setupTestDir(sessionId: string) {
-  mkdirSync(CACHE_DIR, { recursive: true });
-}
+beforeAll(() => {
+  process.env.HOTDOG_SESSIONS_DIR = SESSIONS_DIR;
+  mkdirSync(SESSIONS_DIR, { recursive: true });
+});
 
+afterAll(() => {
+  delete process.env.HOTDOG_SESSIONS_DIR;
+  try { rmSync(SESSIONS_DIR, { recursive: true, force: true }); } catch {}
+});
+
+/** Each test gets a unique session id; the file is removed afterwards. */
 function cleanupTestFile(sessionId: string) {
-  try { rmSync(join(CACHE_DIR, `${sessionId}.jsonl`)); } catch {}
+  try { rmSync(join(SESSIONS_DIR, `${sessionId}.jsonl`)); } catch {}
 }
 
 describe("session-log extension create()", () => {
-  beforeEach(() => {
-    setupTestDir("test-session");
-  });
-
   it("returns extension with hooks", async () => {
     const ext = await create(createMockCore() as any) as any;
     expect(ext.hooks).toBeDefined();
@@ -32,8 +38,8 @@ describe("session-log extension create()", () => {
     expect(ext.hooks[HOOKS.SESSION_RESTORE_ACTIVE]).toBeDefined();
   });
 
-  it("CONTEXT_MESSAGE hook logs assistant messages with LLM source", async () => {
-    const sessionId = `test-assistant-${Date.now()}`;
+  it("CONTEXT_MESSAGE hook logs messages with the correct source per role", async () => {
+    const sessionId = `test-roles-${Date.now()}`;
     try {
       const ext = await create(createMockCore() as any) as any;
       const hook = ext.hooks[HOOKS.CONTEXT_MESSAGE] as (ctx: any) => Promise<void>;
@@ -42,51 +48,22 @@ describe("session-log extension create()", () => {
         message: { sessionId, role: "assistant", content: "Hello!" },
         agent: { sessionId },
       });
-
-      const content = readFileSync(join(CACHE_DIR, `${sessionId}.jsonl`), "utf-8");
-      const entry = JSON.parse(content.trim());
-      expect(entry.source).toBe(LOG_SOURCE.LLM);
-      expect(entry.content).toBe("Hello!");
-    } finally {
-      cleanupTestFile(sessionId);
-    }
-  });
-
-  it("CONTEXT_MESSAGE hook logs system messages as INPUT source", async () => {
-    const sessionId = `test-system-${Date.now()}`;
-    try {
-      const ext = await create(createMockCore() as any) as any;
-      const hook = ext.hooks[HOOKS.CONTEXT_MESSAGE] as (ctx: any) => Promise<void>;
-
       await hook({
         message: { sessionId, role: "system", content: "System message" },
         agent: { sessionId },
       });
-
-      const content = readFileSync(join(CACHE_DIR, `${sessionId}.jsonl`), "utf-8");
-      const entry = JSON.parse(content.trim());
-      expect(entry.source).toBe(LOG_SOURCE.INPUT);
-    } finally {
-      cleanupTestFile(sessionId);
-    }
-  });
-
-  it("CONTEXT_MESSAGE hook logs tool messages with TOOL_RESULT source", async () => {
-    const sessionId = `test-tool-${Date.now()}`;
-    try {
-      const ext = await create(createMockCore() as any) as any;
-      const hook = ext.hooks[HOOKS.CONTEXT_MESSAGE] as (ctx: any) => Promise<void>;
-
       await hook({
         message: { sessionId, role: "tool", content: "Tool output", toolCallId: "call_1" },
         agent: { sessionId },
       });
 
-      const content = readFileSync(join(CACHE_DIR, `${sessionId}.jsonl`), "utf-8");
-      const entry = JSON.parse(content.trim());
-      expect(entry.source).toBe(LOG_SOURCE.TOOL_RESULT);
-      expect(entry.content).toBe("Tool output");
-      expect(entry.tool_call_id).toBe("call_1");
+      const entries = await readSessionEntries(sessionId);
+      expect(entries).toHaveLength(3);
+      expect(entries[0]!.source).toBe(LOG_SOURCE.LLM);
+      expect(entries[0]!.content).toBe("Hello!");
+      expect(entries[1]!.source).toBe(LOG_SOURCE.INPUT);
+      expect(entries[2]!.source).toBe(LOG_SOURCE.TOOL_RESULT);
+      expect(entries[2]!.tool_call_id).toBe("call_1");
     } finally {
       cleanupTestFile(sessionId);
     }
@@ -126,36 +103,6 @@ describe("session-log extension create()", () => {
       expect(entries[3]!.source).toBe("input");
       expect(entries[3]!.role).toBe("harness");
       expect(entries[3]!.origin).toBe("harness");
-    } finally {
-      cleanupTestFile(sessionId);
-    }
-  });
-
-  it("OUTPUT_EVENT compaction entry records harness origin", async () => {
-    const sessionId = `test-compaction-origin-${Date.now()}`;
-    try {
-      const ext = await create(createMockCore() as any) as any;
-      const hook = ext.hooks[HOOKS.OUTPUT_EVENT] as (ctx: any) => Promise<void>;
-
-      await hook({
-        type: "compaction_result",
-        data: { summary: "Summarized", messagesCompacted: 10 },
-        agent: { sessionId },
-      });
-
-      const entries = await readSessionEntries(sessionId);
-      expect(entries).toHaveLength(1);
-      expect(entries[0]!.origin).toBe("harness");
-      // Content is the harness structure exactly as it enters the context:
-      // real wrapper tag parts around the RAW model-generated summary.
-      // Never escaped on disk -- the wire serializer mangles the part.
-      const tag = "previous-context-summary";
-      expect(entries[0]!.content).toEqual([
-        { type: "text", text: `<${tag}>` },
-        { type: "untrusted", text: "Summarized" },
-        { type: "text", text: `</${tag}>` },
-      ]);
-      expect(entries[0]!.summary).toBe("Summarized");
     } finally {
       cleanupTestFile(sessionId);
     }
@@ -209,6 +156,57 @@ describe("session-log extension create()", () => {
     }
   });
 
+  it("OUTPUT_EVENT compaction entry records summary, count, and harness origin", async () => {
+    const sessionId = `test-compaction-origin-${Date.now()}`;
+    try {
+      const ext = await create(createMockCore() as any) as any;
+      const hook = ext.hooks[HOOKS.OUTPUT_EVENT] as (ctx: any) => Promise<void>;
+
+      await hook({
+        type: "compaction_result",
+        data: { summary: "Summarized", messagesCompacted: 10 },
+        agent: { sessionId },
+      });
+
+      const entries = await readSessionEntries(sessionId);
+      expect(entries).toHaveLength(1);
+      expect(entries[0]!.source).toBe(LOG_SOURCE.COMPACTION);
+      expect(entries[0]!.origin).toBe("harness");
+      // Content is the harness structure exactly as it enters the context:
+      // real wrapper tag parts around the RAW model-generated summary.
+      // Never escaped on disk -- the wire serializer mangles the part.
+      const tag = "previous-context-summary";
+      expect(entries[0]!.content).toEqual([
+        { type: "text", text: `<${tag}>` },
+        { type: "untrusted", text: "Summarized" },
+        { type: "text", text: `</${tag}>` },
+      ]);
+      expect(entries[0]!.summary).toBe("Summarized");
+      expect(entries[0]!.messages_compacted).toBe(10);
+    } finally {
+      cleanupTestFile(sessionId);
+    }
+  });
+
+  it("OUTPUT_EVENT hook ignores non-compaction events", async () => {
+    const sessionId = `test-noncompaction-${Date.now()}`;
+    try {
+      const ext = await create(createMockCore() as any) as any;
+      const hook = ext.hooks[HOOKS.OUTPUT_EVENT] as (ctx: any) => Promise<void>;
+
+      await hook({
+        type: "some_other_event",
+        data: {},
+        agent: { sessionId },
+      });
+
+      const entries = await readSessionEntries(sessionId);
+      expect(entries).toEqual([]);
+    } finally {
+      cleanupTestFile(sessionId);
+    }
+  });
+
   it("readEntries() returns entries for the last session", async () => {
     const sessionId = `test-readentries-${Date.now()}`;
     try {
@@ -233,39 +231,29 @@ describe("session-log extension create()", () => {
     }
   });
 
-  it("readEntries() returns empty array when no session ID tracked", async () => {
+  it("readEntries() returns empty array when no session ID tracked or log file is missing", async () => {
     const ext = await create(createMockCore() as any) as any;
-    const entries = await ext.readEntries();
-    expect(entries).toEqual([]);
-  });
+    expect(await ext.readEntries()).toEqual([]);
 
-  it("readEntries() returns empty array when log file does not exist", async () => {
-    const ext = await create(createMockCore() as any) as any;
+    // Trigger the hook to track a session, then delete its log file.
     const hook = ext.hooks[HOOKS.CONTEXT_MESSAGE] as (ctx: any) => Promise<void>;
-
-    // Trigger hook to set lastSessionId but don't write any entries
     const sessionId = `test-no-file-${Date.now()}`;
-    cleanupTestFile(sessionId);
-
-    // We need to set lastSessionId indirectly - use a unique session that doesn't have a file
     await hook({
       message: { sessionId, role: "user", content: "test" },
       agent: { sessionId },
     });
-
-    // Now delete the file
     cleanupTestFile(sessionId);
 
-    const entries = await ext.readEntries();
-    expect(entries).toEqual([]);
+    expect(await ext.readEntries()).toEqual([]);
   });
 
-  it("getLogPath() returns path for last session", async () => {
+  it("getLogPath() tracks the last session or returns null", async () => {
+    const ext = await create(createMockCore() as any) as any;
+    expect(ext.getLogPath()).toBeNull();
+
+    const hook = ext.hooks[HOOKS.CONTEXT_MESSAGE] as (ctx: any) => Promise<void>;
     const sessionId = `test-logpath-${Date.now()}`;
     try {
-      const ext = await create(createMockCore() as any) as any;
-      const hook = ext.hooks[HOOKS.CONTEXT_MESSAGE] as (ctx: any) => Promise<void>;
-
       await hook({
         message: { sessionId, role: "user", content: "test" },
         agent: { sessionId },
@@ -278,77 +266,25 @@ describe("session-log extension create()", () => {
       cleanupTestFile(sessionId);
     }
   });
-
-  it("getLogPath() returns null when no session ID tracked", async () => {
-    const ext = await create(createMockCore() as any) as any;
-    expect(ext.getLogPath()).toBeNull();
-  });
-
-  it("OUTPUT_EVENT hook logs compaction results", async () => {
-    const sessionId = `test-compaction-${Date.now()}`;
-    try {
-      const ext = await create(createMockCore() as any) as any;
-      const hook = ext.hooks[HOOKS.OUTPUT_EVENT] as (ctx: any) => Promise<void>;
-
-      await hook({
-        type: "compaction_result",
-        data: { summary: "Summarized", messagesCompacted: 10 },
-        agent: { sessionId },
-      });
-
-      const content = readFileSync(join(CACHE_DIR, `${sessionId}.jsonl`), "utf-8");
-      const entry = JSON.parse(content.trim());
-      expect(entry.source).toBe(LOG_SOURCE.COMPACTION);
-      expect(entry.summary).toBe("Summarized");
-      expect(entry.messages_compacted).toBe(10);
-    } finally {
-      cleanupTestFile(sessionId);
-    }
-  });
-
-  it("OUTPUT_EVENT hook ignores non-compaction events", async () => {
-    const sessionId = `test-noncompaction-${Date.now()}`;
-    try {
-      const ext = await create(createMockCore() as any) as any;
-      const hook = ext.hooks[HOOKS.OUTPUT_EVENT] as (ctx: any) => Promise<void>;
-
-      await hook({
-        type: "some_other_event",
-        data: {},
-        agent: { sessionId },
-      });
-
-      const entries = await readSessionEntries(sessionId);
-      expect(entries).toEqual([]);
-    } finally {
-      cleanupTestFile(sessionId);
-    }
-  });
 });
 
 describe("disabledSessionLog", () => {
-  it("returns no-op log with null sessionId and logPath", () => {
+  it("exposes null identifiers and empty reads", () => {
     const log = disabledSessionLog();
     expect(log.sessionId).toBeNull();
     expect(log.logPath).toBeNull();
-  });
-
-  it("all write methods are no-ops", () => {
-    const log = disabledSessionLog();
-    expect(() => log.writeInput("test")).not.toThrow();
-    expect(() => log.writeSystemPrompt("test")).not.toThrow();
-    expect(() => log.writeAssistant("test", null, [])).not.toThrow();
-    expect(() => log.writeToolResult("test", "tc1", "bash")).not.toThrow();
-    expect(() => log.writeReset()).not.toThrow();
-  });
-
-  it("readEntries returns empty array", () => {
-    const log = disabledSessionLog();
     expect(log.readEntries()).toEqual([]);
+    expect(log.getLogPath()).toBeNull();
   });
 
-  it("getLogPath returns null", () => {
+  it("write methods are no-ops that do not throw", () => {
     const log = disabledSessionLog();
-    expect(log.getLogPath()).toBeNull();
+    expect(() => {
+      log.writeSystemPrompt("x");
+      log.writeInput("x");
+      log.writeAssistant("x");
+      log.writeToolResult("x", "tc1", "bash");
+      log.writeReset();
+    }).not.toThrow();
   });
 });

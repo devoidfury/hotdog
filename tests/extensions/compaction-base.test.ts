@@ -51,33 +51,19 @@ describe("CompactionStrategy", () => {
       expect(new CompactionStrategy().canCompact([], settings)).toBe(false);
     });
 
-    it("handles keepRecentMessages=0 (uses default 3)", () => {
+    it("treats keepRecentMessages=0 as a zero threshold", () => {
       const strategy = new CompactionStrategy();
-      const emptySettings: CompactionSettings = { enabled: true, reserveTokens: 0, keepRecentMessages: 0 };
-      expect(strategy.canCompact([], emptySettings)).toBe(false);
       const settings: CompactionSettings = { enabled: true, reserveTokens: 0, keepRecentMessages: 0 };
-      expect(strategy.canCompact(
-        Array.from({ length: 10 }, (_, i) => msg(i % 2 === 0 ? "user" : "assistant", "x")),
-        settings,
-      )).toBe(true);
+      expect(strategy.canCompact([], settings)).toBe(false);
+      expect(strategy.canCompact([msg("user", "x")], settings)).toBe(true);
     });
 
-    it("ignores system messages in count", () => {
+    it("counts all messages, including system (no filtering in the base class)", () => {
       const strategy = new CompactionStrategy();
-      const settings1: CompactionSettings = { enabled: true, reserveTokens: 0, keepRecentMessages: 3 };
-      expect(strategy.canCompact(
-        [msg("system", "p1"), msg("system", "p2")],
-        settings1,
-      )).toBe(false);
-
-      const settings2: CompactionSettings = { enabled: true, reserveTokens: 0, keepRecentMessages: 1 };
-      expect(strategy.canCompact(
-        [
-          msg("system", "prompt"),
-          ...Array.from({ length: 6 }, (_, i) => msg(i % 2 === 0 ? "user" : "assistant", "x")),
-        ],
-        settings2,
-      )).toBe(true);
+      // With a zero threshold, system-only messages still count -- DropStrategy
+      // overrides canCompact to exclude them, so this pins the base behavior.
+      const settings: CompactionSettings = { enabled: true, reserveTokens: 0, keepRecentMessages: 0 };
+      expect(strategy.canCompact([msg("system", "p1"), msg("system", "p2")], settings)).toBe(true);
     });
 
     it("boundary: exactly at threshold returns false, one above returns true", () => {
@@ -90,42 +76,6 @@ describe("CompactionStrategy", () => {
     });
   });
 
-  describe("subclassing", () => {
-    it("can be subclassed with custom properties", () => {
-      class CustomStrategy extends CompactionStrategy {
-        override name = "custom";
-        override description = "A custom strategy";
-        override async execute() {
-          return { summary: "custom", messagesCompacted: 0, metadata: {} };
-        }
-      }
-      const strategy = new CustomStrategy();
-      expect(strategy.name).toBe("custom");
-      expect(strategy.description).toBe("A custom strategy");
-    });
-
-    it("execute can be overridden", async () => {
-      class TestStrategy extends CompactionStrategy {
-        override name = "test";
-        override async execute(_messages: any, _settings: any, _llmChat: any, _model: any) {
-          return { summary: "test result", messagesCompacted: 5, metadata: { test: true } };
-        }
-      }
-      const strategy = new TestStrategy();
-      const settings: CompactionSettings = { enabled: true, reserveTokens: 0, keepRecentMessages: 0 };
-      const result = await strategy.execute([], settings, async () => "", "model");
-      expect(result!.summary).toBe("test result");
-      expect(result!.messagesCompacted).toBe(5);
-    });
-
-    it("canCompact can be overridden", () => {
-      class TestStrategy extends CompactionStrategy {
-        override name = "test";
-        override canCompact(_messages: any, _settings: any) { return true; }
-      }
-      expect(new TestStrategy().canCompact([], { enabled: true, reserveTokens: 0, keepRecentMessages: 0 })).toBe(true);
-    });
-  });
 });
 
 describe("CompactionStrategyRegistry", () => {

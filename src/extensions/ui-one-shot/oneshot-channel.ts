@@ -10,13 +10,11 @@ export interface OneShotChannelOptions {
 
 export class OneShotChannel extends Channel {
   #sink: CliOutputSink;
-  #events: OutputEvent[];
   #unsubscribers: Map<string, () => void>;
 
   constructor(options: OneShotChannelOptions) {
     super({ sessionManager: options.sessionManager });
     this.#sink = options.sink;
-    this.#events = [];
     this.#unsubscribers = new Map();
 
     this.attach(options.sessionId);
@@ -24,7 +22,6 @@ export class OneShotChannel extends Channel {
 
   protected write(event: OutputEvent): void {
     this.#sink.emit(event);
-    this.#events.push(event);
   }
 
   // No further input in one-shot mode — the single prompt is enqueued up front
@@ -49,10 +46,6 @@ export class OneShotChannel extends Channel {
 
   protected _cleanup(): void {
     // No resources to release
-  }
-
-  get events(): OutputEvent[] {
-    return this.#events;
   }
 
   get sink(): CliOutputSink {

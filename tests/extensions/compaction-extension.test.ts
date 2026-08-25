@@ -625,6 +625,98 @@ describe("Edge Cases", () => {
     expect(agent.log.length).toBe(50);
   });
 
+  it("should not leak abort listeners on the agent's long-lived signal", async () => {
+    const core = createMockCore({
+      enabled: true,
+      keepRecentMessages: 2,
+      reserveTokens: 100,
+    });
+    const ext = createCompactionExtension(core);
+
+    const context = makeMessages(50, "x".repeat(500));
+    const abortController = new AbortController();
+    const signal = abortController.signal;
+
+    // Track every listener the compaction forwarder wires onto the signal.
+    // The mock chatStreamCancellable is a plain async generator, so the only
+    // add/remove on this signal comes from compaction's llmChat.
+    let added = 0;
+    let removed = 0;
+    const origAdd = signal.addEventListener.bind(signal);
+    const origRemove = signal.removeEventListener.bind(signal);
+    signal.addEventListener = ((type: string, fn: EventListenerOrEventListenerObject, opts?: AddEventListenerOptions | boolean) => {
+      if (type === "abort") added++;
+      return origAdd(type, fn, opts);
+    }) as typeof signal.addEventListener;
+    signal.removeEventListener = ((type: string, fn: EventListenerOrEventListenerObject, opts?: EventListenerOptions | boolean) => {
+      if (type === "abort") removed++;
+      return origRemove(type, fn, opts);
+    }) as typeof signal.removeEventListener;
+
+    const agent = createMockAgent(context);
+    (agent as any).abortSignal = signal;
+    agent.modelRegistry = {
+      "test-model": { name: "test-model", temperature: null, contextLimit: 5000 },
+    };
+
+    const messages = [{ role: "system", content: "" }, ...context];
+
+    // First run triggers compaction; second may or may not, either way
+    // every listener attached must be detached (no accumulation).
+    await (ext as any).hooks![HOOKS.CONTEXT]!({ messages: messages as any, agent });
+    expect(added).toBeGreaterThan(0); // forwarder was actually attached
+    expect(removed).toBe(added);
+
+    await (ext as any).hooks![HOOKS.CONTEXT]!({ messages: agent.buildMessages() as any, agent });
+    expect(removed).toBe(added);
+  });
+
+  it("should remove the abort listener when the summarization call throws", async () => {
+    const core = createMockCore({
+      enabled: true,
+      keepRecentMessages: 2,
+      reserveTokens: 100,
+    });
+    const ext = createCompactionExtension(core);
+
+    const context = makeMessages(50, "x".repeat(500));
+    const abortController = new AbortController();
+    const signal = abortController.signal;
+    let added = 0;
+    let removed = 0;
+    const origAdd = signal.addEventListener.bind(signal);
+    const origRemove = signal.removeEventListener.bind(signal);
+    signal.addEventListener = ((type: string, fn: EventListenerOrEventListenerObject, opts?: AddEventListenerOptions | boolean) => {
+      if (type === "abort") added++;
+      return origAdd(type, fn, opts);
+    }) as typeof signal.addEventListener;
+    signal.removeEventListener = ((type: string, fn: EventListenerOrEventListenerObject, opts?: EventListenerOptions | boolean) => {
+      if (type === "abort") removed++;
+      return origRemove(type, fn, opts);
+    }) as typeof signal.removeEventListener;
+
+    const mockLlmClient = {
+      chatStreamCancellable: () =>
+        (async function* () {
+          throw new Error("LLM error during compaction");
+        })(),
+    };
+
+    const agent = createMockAgent(context, "test-model", undefined, mockLlmClient);
+    (agent as any).abortSignal = signal;
+    agent.modelRegistry = {
+      "test-model": { name: "test-model", temperature: null, contextLimit: 5000 },
+    };
+
+    const messages = [{ role: "system", content: "" }, ...context];
+
+    await expect(
+      (ext as any).hooks![HOOKS.CONTEXT]!({ messages: messages as any, agent })
+    ).resolves.toBeUndefined();
+    expect(added).toBeGreaterThan(0);
+    expect(removed).toBe(added);
+  });
+
   it("should handle cancellation during streaming (agent.cancelled)", async () => {
     const core = createMockCore({
       enabled: true,

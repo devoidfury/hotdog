@@ -94,17 +94,17 @@ export function create(core: CoreContext): ExtensionInstance | null {
     const llmChat = async (chatMessages: Array<{ role: string; content: string }>, chatModel: string): Promise<string> => {
       const abortController = new AbortController();
 
-      // Wire to task-agent abort signal if present
-      if (agent.abortSignal) {
-        if (agent.abortSignal.aborted) {
-          abortController.abort();
-        } else {
-          agent.abortSignal.addEventListener(
-            "abort",
-            () => abortController.abort(),
-            { once: true },
-          );
-        }
+      // Wire to task-agent abort signal if present. The listener is removed
+      // in finally (not left on the agent's long-lived signal), mirroring
+      // Agent._performLlmCall so listeners don't accumulate across compactions.
+      const signal = agent.abortSignal;
+      let removeAbortForwarder: (() => void) | null = null;
+      if (signal?.aborted) {
+        abortController.abort();
+      } else if (signal) {
+        const onAbort = () => abortController.abort();
+        signal.addEventListener("abort", onAbort, { once: true });
+        removeAbortForwarder = () => signal.removeEventListener("abort", onAbort);
       }
 
       // Summarization call: the system prompt is trusted; the conversation
@@ -126,15 +126,19 @@ export function create(core: CoreContext): ExtensionInstance | null {
       );
 
       let fullText = "";
-      for await (const event of stream) {
-        // Check main-agent cancellation flag each iteration (Ctrl+C, etc.)
-        if (agent.cancelled) {
-          abortController.abort();
-          throw LlmError.Cancelled("Compaction cancelled");
+      try {
+        for await (const event of stream) {
+          // Check main-agent cancellation flag each iteration (Ctrl+C, etc.)
+          if (agent.cancelled) {
+            abortController.abort();
+            throw LlmError.Cancelled("Compaction cancelled");
+          }
+          if (event.type === "content") {
+            fullText += event.content;
+          }
         }
-        if (event.type === "content") {
-          fullText += event.content;
-        }
+      } finally {
+        removeAbortForwarder?.();
       }
       return fullText;
     };

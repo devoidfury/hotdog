@@ -18,6 +18,7 @@
   - fix - `retryWithBackoff` with `maxRetries: 0` made zero attempts
   - fix - tool registry logged "unknown" instead of the tool name when a tool's `toToolDef()` threw
   - fix - `switchSession` emitted `session:swap` with the switch target as both old and new agent; oldAgent is now the previously active agent
+  - compaction - fix - abort listener leaked on the agent's long-lived signal; now removed after each summarization call
 
 - llm-client
   - health check (`ping`) now accepts a model name to check a specific provider, instead of only the default base url

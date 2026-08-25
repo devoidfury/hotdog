@@ -73,3 +73,43 @@ export async function hotdogFetch(
     signal,
   });
 }
+
+/**
+ * Read a response body up to a character cap. Stops reading (and releases
+ * the connection) once the cap is exceeded, so huge responses are bounded
+ * in memory. Abort/timeout errors from the fetch signal propagate.
+ *
+ * @param resp - The Response to read.
+ * @param maxChars - Maximum characters to accumulate.
+ * @returns The (possibly capped) text and whether the body was cut off.
+ */
+export async function readCappedBody(
+  resp: Response,
+  maxChars: number,
+): Promise<{ text: string; truncated: boolean }> {
+  const body = resp.body;
+  if (!body) {
+    const text = await resp.text();
+    return { text: text.slice(0, maxChars), truncated: text.length > maxChars };
+  }
+  const reader = body.getReader();
+  const decoder = new TextDecoder();
+  let text = "";
+  let truncated = false;
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    text += decoder.decode(value, { stream: true });
+    if (text.length > maxChars) {
+      truncated = true;
+      break;
+    }
+  }
+  if (truncated) {
+    // Stop pulling from the connection once the cap is hit.
+    await reader.cancel().catch(() => {});
+  } else {
+    text += decoder.decode();
+  }
+  return { text: text.slice(0, maxChars), truncated };
+}

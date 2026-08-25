@@ -2,7 +2,7 @@
 // timeout, and composition of caller-provided abort signals.
 
 import { describe, it, expect, beforeAll, afterAll } from "bun:test";
-import { hotdogFetch, VALID_METHODS, METHODS_WITH_BODY } from "../../src/utils/fetch.ts";
+import { hotdogFetch, readCappedBody, VALID_METHODS, METHODS_WITH_BODY } from "../../src/utils/fetch.ts";
 
 const TEST_PORT = 18933;
 const BASE_URL = `http://localhost:${TEST_PORT}`;
@@ -115,5 +115,35 @@ describe("hotdogFetch", () => {
     // A 0/negative timeout must not abort a fast request.
     const resp = await hotdogFetch(`${BASE_URL}/`, undefined, 0);
     expect(await resp.text()).toBe("ok");
+  });
+});
+
+describe("readCappedBody", () => {
+  it("returns the full body when under the cap", async () => {
+    const resp = new Response("hello world");
+    const { text, truncated } = await readCappedBody(resp, 100);
+    expect(text).toBe("hello world");
+    expect(truncated).toBe(false);
+  });
+
+  it("caps at maxChars and flags truncation", async () => {
+    const resp = new Response("x".repeat(10_000));
+    const { text, truncated } = await readCappedBody(resp, 100);
+    expect(text.length).toBe(100);
+    expect(truncated).toBe(true);
+  });
+
+  it("handles empty bodies", async () => {
+    const resp = new Response("");
+    const { text, truncated } = await readCappedBody(resp, 100);
+    expect(text).toBe("");
+    expect(truncated).toBe(false);
+  });
+
+  it("falls back to resp.text() when no body stream is present", async () => {
+    const resp = { text: async () => "abcdef" } as unknown as Response;
+    const { text, truncated } = await readCappedBody(resp, 3);
+    expect(text).toBe("abc");
+    expect(truncated).toBe(true);
   });
 });

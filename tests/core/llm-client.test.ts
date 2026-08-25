@@ -358,7 +358,35 @@ describe("LlmClient._doRequest", () => {
       text: async () => "Internal Server Error",
     }) as unknown as Response) as unknown as typeof fetch;
 
-    await expect(client._doRequest("http://test.com", "key", { model: "gpt-4" }, null, mc(), "/v1/chat/completions")).rejects.toThrow(/HTTP 500/);
+    await expect(client._doRequest("http://test.com", "key", { model: "gpt-4" }, null, mc(), "/v1/chat/completions")).rejects.toMatchObject({
+      type: "api",
+      status: 500,
+    });
+  });
+
+  it("caps oversized error bodies and keeps the status prefix", async () => {
+    const client = new LlmClient({ chatTimeoutSecs: 30, maxRetries: 3, baseUrl: "http://test.com", markerMangler: null });
+
+    globalThis.fetch = (async () => ({
+      ok: false,
+      status: 500,
+      text: async () => "x".repeat(200_001),
+    }) as unknown as Response) as unknown as typeof fetch;
+
+    let caught: unknown;
+    try {
+      await client._doRequest("http://test.com", "key", { model: "gpt-4" }, null, mc(), "/v1/chat/completions");
+    } catch (e) {
+      caught = e;
+    }
+    expect(caught).toBeInstanceOf(LlmError);
+    const err = caught as LlmError;
+    expect(err.status).toBe(500);
+    expect(err.message).toContain("[truncated]");
+    // 200K cap plus "HTTP 500 (body: " and " [truncated])" framing.
+    expect(err.message.length).toBeLessThan(200_100);
+    // The prefix must stay parseable by the retry fallback.
+    expect(err.message.startsWith("HTTP 500 ")).toBe(true);
   });
 
   it("passes abort signal to fetch", async () => {

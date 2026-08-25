@@ -248,3 +248,83 @@ describe("retryWithBackoff — HTTP status retry", () => {
     expect(calls).toBe(1);
   });
 });
+
+describe("retryWithBackoff — LlmError.status field", () => {
+  const fastOpts = { baseDelayMs: 1 };
+
+  it("retries on retryable status from the field, independent of the message", async () => {
+    let calls = 0;
+    const result = await retryWithBackoff(
+      () => {
+        calls++;
+        if (calls < 3) throw LlmError.Api("upstream error", 503);
+        return Promise.resolve("ok");
+      },
+      5,
+      { ...fastOpts, signal: new AbortController().signal },
+    );
+    expect(result).toBe("ok");
+    expect(calls).toBe(3);
+  });
+
+  it("retries on 429 from the field", async () => {
+    let calls = 0;
+    const result = await retryWithBackoff(
+      () => {
+        calls++;
+        if (calls < 3) throw LlmError.Api("rate limited", 429);
+        return Promise.resolve("ok");
+      },
+      5,
+      { ...fastOpts, signal: new AbortController().signal },
+    );
+    expect(result).toBe("ok");
+    expect(calls).toBe(3);
+  });
+
+  it("does not retry on non-retryable status from the field", async () => {
+    let calls = 0;
+    await expect(
+      retryWithBackoff(
+        () => {
+          calls++;
+          throw LlmError.Api("bad input", 400);
+        },
+        3,
+        { ...fastOpts, signal: new AbortController().signal },
+      ),
+    ).rejects.toThrow("bad input");
+    expect(calls).toBe(1);
+  });
+
+  it("field takes precedence over a contradictory message", async () => {
+    let calls = 0;
+    await expect(
+      retryWithBackoff(
+        () => {
+          calls++;
+          // Message parses as retryable (500), field says 400: field wins.
+          throw LlmError.Api("HTTP 500 (body: Internal Server Error)", 400);
+        },
+        3,
+        { ...fastOpts, signal: new AbortController().signal },
+      ),
+    ).rejects.toThrow("HTTP 500");
+    expect(calls).toBe(1);
+  });
+
+  it("falls back to the message when the field is absent", async () => {
+    let calls = 0;
+    const result = await retryWithBackoff(
+      () => {
+        calls++;
+        if (calls < 3) throw LlmError.Api("HTTP 500 (body: Internal Server Error)");
+        return Promise.resolve("ok");
+      },
+      5,
+      { ...fastOpts, signal: new AbortController().signal },
+    );
+    expect(result).toBe("ok");
+    expect(calls).toBe(3);
+  });
+});

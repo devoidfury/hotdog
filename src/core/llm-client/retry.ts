@@ -1,6 +1,10 @@
 import { ConfigError, LlmError } from "../error.ts";
 
-/** Parses the status out of LlmError messages formatted "HTTP <status> (body: ...)". */
+/**
+ * Fallback: parses the status out of LlmError messages formatted
+ * "HTTP <status> (body: ...)" for errors constructed without the
+ * structured `status` field (extensions, older callers).
+ */
 export function extractHttpStatus(message: string): number | null {
   const match = message.match(/^HTTP (\d+)/);
   return match ? parseInt(match[1] ?? "", 10) : null;
@@ -65,8 +69,10 @@ export async function retryWithBackoff<T>(
         if (e.type === "http" || e.type === "timeout") {
           // Network errors and timeouts are always transient
           shouldRetry = true;
-        } else if (e.type === "api" && e.message.startsWith("HTTP ")) {
-          const status = extractHttpStatus(e.message);
+        } else if (e.type === "api") {
+          // Prefer the structured status; fall back to the message for
+          // errors constructed without it.
+          const status = e.status ?? extractHttpStatus(e.message);
           if (status !== null && isRetryableHttpStatus(status)) {
             shouldRetry = true;
           }

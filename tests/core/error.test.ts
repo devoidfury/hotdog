@@ -351,4 +351,9 @@ describe("LlmError", () => {
     expect(LlmError.isCancelled(LlmError.Http("x"))).toBe(false);
     expect(LlmError.isCancelled(new Error("x"))).toBe(false);
   });
+
+  it("Api carries the HTTP status when provided", () => {
+    expect(LlmError.Api("HTTP 500", 500).status).toBe(500);
+    expect(LlmError.Api("bad input").status).toBeUndefined();
+  });
 });

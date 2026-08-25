@@ -111,9 +111,10 @@ function startTestServer(): void {
         );
       }
 
-      // /huge — large response body (memory cap + truncation tests)
+      // /huge — large response body (read-cap + truncation tests).
+      // Must exceed MAX_RESPONSE_CHARS (2_000_000) to exercise the read cap.
       if (url.pathname === "/huge") {
-        return new Response("x".repeat(500_000), {
+        return new Response("x".repeat(2_500_000), {
           headers: { "Content-Type": "text/plain" },
         });
       }

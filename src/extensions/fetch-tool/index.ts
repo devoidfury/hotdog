@@ -2,7 +2,7 @@
 
 import { isIP } from "node:net";
 import { lookup } from "node:dns/promises";
-import { hotdogFetch, VALID_METHODS, METHODS_WITH_BODY } from "@utils/fetch.ts";
+import { hotdogFetch, readCappedBody, VALID_METHODS, METHODS_WITH_BODY } from "@utils/fetch.ts";
 import {
   toolDef,
   param,
@@ -478,51 +478,12 @@ function expandIpv6(ip: string): [number, number, number, number, number, number
 }
 
 /**
- * Hard cap on characters read from the response body (memory safety).
- * The display cap (maxBodyLength) is much smaller; this only prevents
- * huge responses from being fully materialized in memory.
+ * Max body cap: hard limit on characters read from the wire (memory safety).
+ * Read cap only -- cleanup and HTML-to-markdown conversion run on the full
+ * (capped) body, and the display cap (maxBodyLength) truncates after them,
+ * so verbose HTML is not cut before it can shrink into markdown.
  */
-const MAX_RESPONSE_CHARS = 100_000;
-
-/**
- * Read a response body up to a character cap. Stops reading (and releases
- * the connection) once the cap is exceeded, so huge responses are bounded
- * in memory. Abort/timeout errors from the fetch signal propagate.
- *
- * @param resp - The Response to read.
- * @param maxChars - Maximum characters to accumulate.
- * @returns The (possibly capped) text and whether the body was cut off.
- */
-async function readCappedBody(
-  resp: Response,
-  maxChars: number,
-): Promise<{ text: string; truncated: boolean }> {
-  const body = resp.body;
-  if (!body) {
-    const text = await resp.text();
-    return { text: text.slice(0, maxChars), truncated: text.length > maxChars };
-  }
-  const reader = body.getReader();
-  const decoder = new TextDecoder();
-  let text = "";
-  let truncated = false;
-  while (true) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    text += decoder.decode(value, { stream: true });
-    if (text.length > maxChars) {
-      truncated = true;
-      break;
-    }
-  }
-  if (truncated) {
-    // Stop pulling from the connection once the cap is hit.
-    await reader.cancel().catch(() => {});
-  } else {
-    text += decoder.decode();
-  }
-  return { text: text.slice(0, maxChars), truncated };
-}
+const MAX_RESPONSE_CHARS = 2_000_000;
 
 /** Extension Entry Point. Create the fetch-tool extension. */
 export function create(core: CoreContext): ExtensionInstance {

@@ -196,6 +196,9 @@ export class ParseError extends AppError {
 }
 
 export class LlmError extends AppError {
+  /** HTTP status when the error originated from an HTTP response (type "api"). */
+  status?: number;
+
   constructor(message: string, type: ErrorType = "unknown") {
     super(message, type);
   }
@@ -204,8 +207,12 @@ export class LlmError extends AppError {
     return new LlmError(msg, "http");
   }
 
-  static Api(msg: string): LlmError {
-    return new LlmError(msg, "api");
+  static Api(msg: string, status?: number): LlmError {
+    const e = new LlmError(msg, "api");
+    if (status !== undefined) {
+      e.status = status;
+    }
+    return e;
   }
 
   static Timeout(msg: string): LlmError {

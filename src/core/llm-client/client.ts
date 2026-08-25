@@ -13,7 +13,15 @@ import { xmlToolFormat } from "../extensions/tool-format-xml.ts";
 import type { LlmProtocol, ProtocolContext } from "./protocol.ts";
 import { createLlmProtocolRegistry, resolveProtocolId, type LlmProtocolRegistry } from "./protocol.ts";
 import { openaiProtocol } from "./openai-protocol.ts";
-import { hotdogFetch } from "@utils/fetch.ts";
+import { hotdogFetch, readCappedBody } from "@utils/fetch.ts";
+
+/**
+ * Cap on how much of an error response body is read into the LlmError
+ * message. Normal provider errors are a few KB (pass through untouched);
+ * this only stops hostile or broken endpoints from materializing
+ * multi-gigabyte error pages into the message (and logs/retries).
+ */
+const MAX_ERROR_BODY_CHARS = 200_000;
 
 import { ModelConfig, ProviderDef } from "../config/providers.ts";
 
@@ -196,7 +204,7 @@ export class LlmClient {
       ).replace(/\/+$/, "");
       const resp = await hotdogFetch(base + "/health", undefined, this.healthCheckTimeoutSecs * 1000);
       if (resp.ok) return;
-      throw LlmError.Api(`HTTP ${resp.status}`);
+      throw LlmError.Api(`HTTP ${resp.status}`, resp.status);
     } catch (e: unknown) {
       if (e instanceof LlmError) throw e;
       if (LlmClient.isAbortError(e))
@@ -348,8 +356,9 @@ export class LlmClient {
     }
 
     if (!resp.ok) {
-      const body = await resp.text();
-      throw LlmError.Api(`HTTP ${resp.status} (body: ${body})`);
+      const { text: body, truncated } = await readCappedBody(resp, MAX_ERROR_BODY_CHARS);
+      const truncNote = truncated ? " [truncated]" : "";
+      throw LlmError.Api(`HTTP ${resp.status} (body: ${body}${truncNote})`, resp.status);
     }
     return resp;
   }

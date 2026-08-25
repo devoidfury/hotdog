@@ -167,6 +167,7 @@ export function createCore(
         apiKey: resolved?.apiKey ?? null,
         stream: resolved ? resolved.stream !== false : true,
         chatTimeoutSecs: resolved?.chatTimeout || 30,
+        healthCheckTimeoutSecs: resolved?.healthCheckTimeout || 5,
         maxRetries: (resolved?.maxRetries as number) || 3,
         providers: (this.config.providers as ProviderDef[]) || [],
         toolFormat: modelToolFormat,

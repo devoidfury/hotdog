@@ -140,6 +140,7 @@ export interface DefaultConfig extends Record<string, unknown> {
   profilesPath: string;
   chatTimeoutSecs: number;
   embeddingsTimeoutSecs: number;
+  healthCheckTimeoutSecs: number;
   maxIterations: number;
   maxRetries: number;
   taskProfile: string | null;
@@ -185,6 +186,9 @@ export function getDefaultConfig(
     chatTimeoutSecs: getLayerDefault(CONFIG_SCHEMA.chatTimeout) as number,
     embeddingsTimeoutSecs: getLayerDefault(
       CONFIG_SCHEMA.embeddingsTimeout,
+    ) as number,
+    healthCheckTimeoutSecs: getLayerDefault(
+      CONFIG_SCHEMA.healthCheckTimeout,
     ) as number,
     maxIterations: getLayerDefault(CONFIG_SCHEMA.maxIterations) as number,
     maxRetries: getLayerDefault(CONFIG_SCHEMA.maxRetries) as number,

@@ -101,6 +101,13 @@
       { "default": 120 }
     ]
   },
+  "healthCheckTimeout": {
+    "type": "number",
+    "layers": [
+      { "source": "config", "key": "healthCheckTimeoutSecs" },
+      { "default": 5 }
+    ]
+  },
   "sessionId": {
     "type": "string",
     "cliFlag": {

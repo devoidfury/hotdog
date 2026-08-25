@@ -213,6 +213,8 @@ export interface ResolvedConfig {
   baseUrl: string;
   apiKey: string;
   chatTimeout: number;
+  /** Health-check (ping) timeout in seconds. */
+  healthCheckTimeout?: number;
   maxRetries: number;
   maxIterations: number;
 

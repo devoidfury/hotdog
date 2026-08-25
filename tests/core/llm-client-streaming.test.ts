@@ -76,6 +76,37 @@ describe("LlmClient.ping", () => {
     expect(seen).toBe("http://prov.example/health");
   });
 
+  it("defaults healthCheckTimeoutSecs to 5", () => {
+    const client = new LlmClient({ chatTimeoutSecs: 30, maxRetries: 3, baseUrl: "http://test.com", markerMangler: null });
+    expect(client.healthCheckTimeoutSecs).toBe(5);
+  });
+
+  it("aborts the health check after healthCheckTimeoutSecs and reports it as a timeout", async () => {
+    const client = new LlmClient({
+      chatTimeoutSecs: 30,
+      maxRetries: 3,
+      baseUrl: "http://test.com",
+      healthCheckTimeoutSecs: 0.05,
+      markerMangler: null,
+    });
+
+    // Simulate a hung /health endpoint: reject when the fetch signal aborts,
+    // the way Bun rejects a fetch aborted by AbortSignal.timeout().
+    globalThis.fetch = ((async (_input: RequestInfo | URL, init?: RequestInit) => {
+      return new Promise((_resolve, reject) => {
+        init?.signal?.addEventListener("abort", () => {
+          reject(new DOMException("The operation was aborted due to timeout", "TimeoutError"));
+        });
+      });
+    }) as unknown as typeof fetch);
+
+    const start = Date.now();
+    const err = await client.ping().catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(LlmError);
+    expect(String((err as Error).message)).toMatch(/health check timed out after 0\.05s/);
+    expect(Date.now() - start).toBeLessThan(2000);
+  });
+
   it("throws a config LlmError when the resolved provider has no URL", async () => {
     const client = new LlmClient({
       chatTimeoutSecs: 30,

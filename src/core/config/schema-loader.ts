@@ -409,6 +409,7 @@ export interface CoreConfig {
   toolOutputFmt?: string;
   chatTimeout?: number;
   embeddingsTimeout?: number;
+  healthCheckTimeout?: number;
   sessionId?: string;
   compactDebug?: boolean;
   noLog?: boolean;

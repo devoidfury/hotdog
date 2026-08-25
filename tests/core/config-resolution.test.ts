@@ -113,6 +113,11 @@ describe("CONFIG_KEYS schema", () => {
     expect(resolveKey("chatTimeout", CONFIG_KEYS.chatTimeout, { ...baseContext, cli: { chatTimeout: 300 } })).toBe(300);
     expect(resolveKey("chatTimeout", CONFIG_KEYS.chatTimeout, { ...baseContext, config: { chatTimeoutSecs: 900 } })).toBe(900);
     expect(resolveKey("chatTimeout", CONFIG_KEYS.chatTimeout, baseContext)).toBe(600);
+
+    // Health-check timeout: config key (loadConfig normalizes snake_case to
+    // camelCase before resolution), default 5
+    expect(resolveKey("healthCheckTimeout", CONFIG_KEYS.healthCheckTimeout, { ...baseContext, config: { healthCheckTimeoutSecs: 7 } })).toBe(7);
+    expect(resolveKey("healthCheckTimeout", CONFIG_KEYS.healthCheckTimeout, baseContext)).toBe(5);
   });
 
 });

@@ -34,6 +34,8 @@ export interface LlmClientOptions {
   llmProtocolRegistry?: LlmProtocolRegistry | null;
   /** Base delay in ms before first retry (default: 1000). Useful for fast tests. */
   retryBaseDelayMs?: number;
+  /** Health-check (ping) timeout in seconds (default: 5). */
+  healthCheckTimeoutSecs?: number;
 }
 
 export interface LlmClientRequiredOptions {
@@ -68,6 +70,7 @@ export class LlmClient {
   sessionId: string;
   loud: boolean;
   chatTimeoutSecs: number;
+  healthCheckTimeoutSecs: number;
   maxRetries: number;
   stream: boolean;
   providers: ProviderDef[];
@@ -84,6 +87,7 @@ export class LlmClient {
     this.sessionId = options.sessionId || "";
     this.loud = options.loud || false;
     this.chatTimeoutSecs = options.chatTimeoutSecs;
+    this.healthCheckTimeoutSecs = options.healthCheckTimeoutSecs ?? 5;
     this.maxRetries = options.maxRetries;
     this.stream = options.stream !== false;
     this.retryBaseDelayMs = options.retryBaseDelayMs;
@@ -185,14 +189,18 @@ export class LlmClient {
   /** Health-check the LLM provider for the model (or the default). */
   async ping(modelName?: string): Promise<void> {
     try {
-      const url = modelName
-        ? this.resolveProviderSettings(modelName).url
-        : this.baseUrl ?? "";
-      const resp = await hotdogFetch(url + "/health");
+      const base = (
+        modelName
+          ? this.resolveProviderSettings(modelName).url
+          : this.baseUrl ?? ""
+      ).replace(/\/+$/, "");
+      const resp = await hotdogFetch(base + "/health", undefined, this.healthCheckTimeoutSecs * 1000);
       if (resp.ok) return;
       throw LlmError.Api(`HTTP ${resp.status}`);
     } catch (e: unknown) {
       if (e instanceof LlmError) throw e;
+      if (LlmClient.isAbortError(e))
+        throw LlmError.Timeout(`health check timed out after ${this.healthCheckTimeoutSecs}s`);
       throw LlmError.Http((e as Error).message);
     }
   }

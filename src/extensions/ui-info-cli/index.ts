@@ -420,6 +420,7 @@ async function printConfigDebug(
     "systemPromptTemplate",
     "chatTimeoutSecs",
     "embeddingsTimeoutSecs",
+    "healthCheckTimeoutSecs",
     "extensionPaths",
     "extensionAutoload",
     "extensions",

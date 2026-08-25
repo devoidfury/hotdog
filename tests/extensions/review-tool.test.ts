@@ -1,9 +1,21 @@
-import { describe, it, expect, beforeEach, afterEach } from 'bun:test';
+import { describe, it, expect, beforeEach, afterEach, beforeAll, afterAll } from 'bun:test';
 import { ReviewTool } from '../../src/extensions/ui-session-review-cli/review.ts';
 import { resultStr, tmpDir, cleanupDir } from '../helpers.ts';
-import { mkdirSync, writeFileSync, rmSync } from 'node:fs';
+import { mkdirSync, writeFileSync, rmSync, symlinkSync, unlinkSync } from 'node:fs';
 import { join } from 'node:path';
-import { homedir } from 'node:os';
+
+// Isolated temp dir so tests never touch the user's real session files.
+const TEST_SESSIONS_DIR = join(import.meta.dir, "..", ".test-review-sessions");
+
+beforeAll(() => {
+  process.env.HOTDOG_SESSIONS_DIR = TEST_SESSIONS_DIR;
+  mkdirSync(TEST_SESSIONS_DIR, { recursive: true });
+});
+
+afterAll(() => {
+  delete process.env.HOTDOG_SESSIONS_DIR;
+  try { rmSync(TEST_SESSIONS_DIR, { recursive: true, force: true }); } catch {}
+});
 
 describe('ReviewTool', () => {
   it('has correct tool name', () => {
@@ -81,6 +93,31 @@ describe('ReviewTool', () => {
     expect(Array.isArray(parsed)).toBe(true);
   });
 
+  it('list tolerates files that vanish during the readdir/stat window', async () => {
+    const REAL_ID = 'test-review-vanish-real';
+    const ghostLink = join(TEST_SESSIONS_DIR, 'test-review-vanish-ghost.jsonl');
+    const realFile = join(TEST_SESSIONS_DIR, `${REAL_ID}.jsonl`);
+    writeFileSync(realFile,
+      JSON.stringify({ ts: Date.now(), source: 'input', content: 'hello' }) + '\n' +
+      JSON.stringify({ ts: Date.now(), source: 'llm', content: 'world' }) + '\n',
+    );
+    // Broken symlink: readdir() lists it but stat() throws ENOENT -- the
+    // same state a session hit by concurrent cleanup would be in.
+    symlinkSync('/nonexistent/hotdog-ghost-target', ghostLink);
+
+    try {
+      const tool = new ReviewTool();
+      const result = await tool.execute(JSON.stringify({ operation: 'list', limit: 10 }));
+      const parsed = JSON.parse(resultStr(result));
+      expect(Array.isArray(parsed)).toBe(true);
+      expect(parsed.find((s: Record<string, unknown>) => s.id === REAL_ID)).toBeDefined();
+      expect(parsed.find((s: Record<string, unknown>) => s.id === 'test-review-vanish-ghost')).toBeUndefined();
+    } finally {
+      try { unlinkSync(ghostLink); } catch {}
+      try { rmSync(realFile); } catch {}
+    }
+  });
+
   it('handles empty string input', async () => {
     const tool = new ReviewTool();
     const result = await tool.execute('');
@@ -91,7 +128,7 @@ describe('ReviewTool', () => {
   it('handles truncated content in tool_index', async () => {
     // Create a test session with tool calls that have long arguments
     const TEST_SESSION_ID = `test-review-truncate-${Date.now()}`;
-    const sessionsDir = join(homedir(), '.cache', 'hotdog', 'sessions');
+    const sessionsDir = TEST_SESSIONS_DIR;
     mkdirSync(sessionsDir, { recursive: true });
 
     // Create a session file with tool_calls
@@ -131,7 +168,7 @@ describe('ReviewTool', () => {
   it('get operation returns session entries', async () => {
     // Create a test session
     const TEST_SESSION_ID = `test-review-get-${Date.now()}`;
-    const sessionsDir = join(homedir(), '.cache', 'hotdog', 'sessions');
+    const sessionsDir = TEST_SESSIONS_DIR;
     mkdirSync(sessionsDir, { recursive: true });
 
     const sessionFile = join(sessionsDir, `${TEST_SESSION_ID}.jsonl`);
@@ -170,7 +207,7 @@ describe('ReviewTool', () => {
 
   it('tool_index returns empty array for session with no tool calls', async () => {
     const TEST_SESSION_ID = `test-review-no-tools-${Date.now()}`;
-    const sessionsDir = join(homedir(), '.cache', 'hotdog', 'sessions');
+    const sessionsDir = TEST_SESSIONS_DIR;
     mkdirSync(sessionsDir, { recursive: true });
 
     const sessionFile = join(sessionsDir, `${TEST_SESSION_ID}.jsonl`);
@@ -197,7 +234,7 @@ describe('ReviewTool', () => {
 
   it('list operation returns session summaries', async () => {
     const TEST_SESSION_ID = `test-review-list-${Date.now()}`;
-    const sessionsDir = join(homedir(), '.cache', 'hotdog', 'sessions');
+    const sessionsDir = TEST_SESSIONS_DIR;
     mkdirSync(sessionsDir, { recursive: true });
 
     // Create a session with 2+ entries (sessions with 1 entry are filtered)
@@ -236,7 +273,7 @@ describe('ReviewTool', () => {
 
   it('tool_index handles entries without tool_calls', async () => {
     const TEST_SESSION_ID = `test-review-no-tc-${Date.now()}`;
-    const sessionsDir = join(homedir(), '.cache', 'hotdog', 'sessions');
+    const sessionsDir = TEST_SESSIONS_DIR;
     mkdirSync(sessionsDir, { recursive: true });
 
     const sessionFile = join(sessionsDir, `${TEST_SESSION_ID}.jsonl`);

@@ -68,8 +68,16 @@ async function listSessions(limit: number): Promise<SessionSummary[]> {
   for (const file of files) {
     const sessionId = file.replace(/\.jsonl$/, "");
     const filePath = join(dir, file);
-    const metadata = await stat(filePath);
-    const entryCount = await countEntries(filePath);
+    let metadata;
+    let entryCount;
+    try {
+      metadata = await stat(filePath);
+      entryCount = await countEntries(filePath);
+    } catch {
+      // File vanished between readdir() and here (e.g. concurrent
+      // `sessions cleanup`); skip it rather than failing the whole list.
+      continue;
+    }
 
     // Filter out sessions with only 1 entry
     if (entryCount <= 1) continue;

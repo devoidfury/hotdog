@@ -30,6 +30,9 @@ compaction.out.json
 .cache
 *.tsbuildinfo
 
+# temp dirs used by tests
+tests/.test-*
+
 # IntelliJ based IDEs
 .idea
 

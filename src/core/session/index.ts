@@ -10,7 +10,7 @@ import type { LlmClient } from "../llm-client/client.ts";
 import type { CommandResult } from "../extensions/registries.ts";
 import type { ProfileManager } from "../config/index.ts";
 import type { MessageLog } from "../context/message-log.ts";
-import type { ImageAttachment, MessageSource } from "../context/message.ts";
+import type { Message, ImageAttachment, MessageSource } from "../context/message.ts";
 import type { AgentRunResult, OutputSink } from "../agent.ts";
 import type { ModelConfig } from "../config/providers.ts";
 
@@ -45,7 +45,7 @@ export interface AgentLike {
   cancel(): void;
   resetCancel(): void;
   executeCommand(cmd: ParsedCommand): Promise<CommandResult | null>;
-  addMessage(msg: import("../context/message.ts").Message): void;
+  addMessage(msg: Message): void;
   abortSignal?: AbortSignal | null;
   notifyCompletion?(result: string): void;
   followQueue?: string[];

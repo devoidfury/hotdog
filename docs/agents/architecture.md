@@ -242,7 +242,7 @@ Tab-completion service. Completion providers register matchers + handlers; when 
 - `message-bus.ts` — `MessageBus` owns the agent run loop. Drains messages sequentially through `agent.run()`. Provides input preprocessing via `INPUT` hook. Key exports: `MessageBus` (enqueue, cancel, isIdle, run, runUntilCancelled, executeCommand)
 
 ### Marker Mangler (`src/core/marker-mangler.ts`)
-Escapes input that triggers special behavior (tool call actions, internal markers). Protects against prompt injection via crafted input. Key exports: `MarkerMangler` class with `escape()`, `unescape()`, `escapeInput()`, `escapeToolOutput()`, `unescapeOutput()`, `unescapeToolInput()`.
+Randomly aliases protected marker names (tool call actions, internal markers) to per-session aliases so crafted input cannot trigger special behavior (prompt injection defense). Mangling is applied at the wire: `escape()` before serialization in `src/core/llm-client/serialize.ts`, `unescape()` after receiving in `openai-protocol.ts`. Key exports: `CORE_PROTECTED_PREFIXES` constant and `MarkerMangler` class with `escape()`, `unescape()`, `addPrefixes()`, `protectedPrefixes()`.
 
 ### Utilities (`src/utils/`)
 - `file-utils.ts` — `parseFrontMatter(content)`, `validateNameable(name, label, dirName)`

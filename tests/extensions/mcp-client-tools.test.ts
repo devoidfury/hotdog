@@ -282,26 +282,30 @@ describe("McpTool > toToolDef", () => {
 });
 
 describe("McpTool > callDisplay", () => {
-  it("returns formatted display string with server name", () => {
+  it("stringifies object input instead of rendering [object Object]", () => {
     const connection = createMockConnection();
     const tool = new McpTool("my-server", createToolDef(), connection);
 
-    expect(tool.callDisplay({ query: "test" })).toContain("MCP [my-server]");
-    // Object input is stringified as [object Object]
-    expect(tool.callDisplay({ query: "test" })).toBe("MCP [my-server] [object Object]");
+    const display = tool.callDisplay({ query: "test" });
+    expect(display).toContain("MCP [my-server]");
+    expect(display).not.toContain("[object Object]");
+    expect(display).toContain('"query":"test"');
   });
 
-  it("handles null input", () => {
+  it("truncates very large arguments", () => {
+    const connection = createMockConnection();
+    const tool = new McpTool("server", createToolDef(), connection);
+
+    const display = tool.callDisplay({ query: "x".repeat(500) });
+    expect(display).not.toContain("x".repeat(100));
+    expect(display.endsWith("...")).toBe(true);
+  });
+
+  it("handles null and string input", () => {
     const connection = createMockConnection();
     const tool = new McpTool("server", createToolDef(), connection);
 
     expect(tool.callDisplay(null)).toBe("MCP [server] null");
-  });
-
-  it("handles string input", () => {
-    const connection = createMockConnection();
-    const tool = new McpTool("server", createToolDef(), connection);
-
     expect(tool.callDisplay("raw input")).toBe("MCP [server] raw input");
   });
 });

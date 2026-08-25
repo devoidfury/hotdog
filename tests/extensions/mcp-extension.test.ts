@@ -47,21 +47,23 @@ function createMockConnectionClass(config: {
   return MockMcpConnection as unknown as typeof McpConnection;
 }
 
-/** Create a mock connection instance. */
+/** Create a mock connection instance. `shutdown` records its calls. */
 function createMockConnection(config: {
   tools?: Record<string, unknown>[];
   callToolResult?: string;
   shouldFailConnectHttp?: boolean;
   shouldFailConnectStdio?: boolean;
-}) {
+} = {}) {
+  const shutdownCalls: number[] = [];
   return {
     tools: config.tools || [],
     serverName: "mock",
+    shutdownCalls,
     handle: () => ({
       serverName: "mock",
       callTool: async () => config.callToolResult || "ok",
     }) as unknown as McpConnectionHandle,
-    shutdown: async () => {},
+    shutdown: async () => { shutdownCalls.push(1); },
   } as unknown as McpConnection;
 }
 
@@ -178,34 +180,13 @@ describe("MCP extension", () => {
       },
     };
 
-    const handler = ext!.hooks![HOOKS.TOOLS_REGISTER] as Function | undefined;
-    if (handler) await handler(mockRegistry);
+    await (ext!.hooks![HOOKS.TOOLS_REGISTER] as Function)(mockRegistry);
 
     expect(registeredTools).toHaveLength(1);
     expect(registeredTools[0]).toBe("test/echo");
   });
 
-  it("handles connection errors gracefully", async () => {
-    const MockConnection = createMockConnectionClass({
-      connectHttp: async () => { throw new Error("connection failed"); },
-    });
-
-    const core = {
-      config: {
-        mcpServers: [{ name: "failing", url: "http://localhost/mcp" }],
-      },
-      hooks: { on: () => {}, notifyHooks: () => {} },
-    } as any;
-
-    const ext = create(core, MockConnection);
-    const mockRegistry = { register: () => {} };
-
-    // Should not throw even if connection fails
-    const result = await (ext!.hooks![HOOKS.TOOLS_REGISTER] as Function)(mockRegistry);
-    expect(result).toBeUndefined();
-  });
-
-  it("shutdown cleans up connections", async () => {
+  it("shutdown calls shutdown on every connected server", async () => {
     const mockConnection = createMockConnection({ tools: [] });
 
     const MockConnection = createMockConnectionClass({
@@ -219,19 +200,15 @@ describe("MCP extension", () => {
       hooks: { on: () => {}, notifyHooks: () => {} },
     } as any;
 
-    const ext = create(core, MockConnection);
-    const mockRegistry = { register: () => {} };
+    const ext = create(core, MockConnection)!;
+    await ext.hooks![HOOKS.TOOLS_REGISTER]!({ register: () => {}, getAll: () => [] });
+    expect(ext.connections).toHaveLength(1);
 
-    // Register tools first to create connections
-    await (ext?.hooks?.[HOOKS.TOOLS_REGISTER] as Function)(mockRegistry);
-    // Then shutdown
-    await ext!.shutdown?.();
-
-    // shutdown was called (we can verify by checking the connection array)
-    expect(ext!.connections).toHaveLength(1);
+    await ext.shutdown!();
+    expect((mockConnection as any).shutdownCalls).toHaveLength(1);
   });
 
-  it("SHUTDOWN_CLEANUP hook cleans up connections", async () => {
+  it("SHUTDOWN_CLEANUP hook calls shutdown on every connected server", async () => {
     const mockConnection = createMockConnection({ tools: [] });
 
     const MockConnection = createMockConnectionClass({
@@ -245,21 +222,23 @@ describe("MCP extension", () => {
       hooks: { on: () => {}, notifyHooks: () => {} },
     } as any;
 
-    const ext = create(core, MockConnection);
-    const mockRegistry = { register: () => {} };
+    const ext = create(core, MockConnection)!;
+    await ext.hooks![HOOKS.TOOLS_REGISTER]!({ register: () => {}, getAll: () => [] });
+    await ext.hooks![HOOKS.SHUTDOWN_CLEANUP]!({});
 
-    await (ext!.hooks![HOOKS.TOOLS_REGISTER] as Function)(mockRegistry);
-    await (ext!.hooks![HOOKS.SHUTDOWN_CLEANUP] as Function)();
-
-    expect(ext!.connections).toHaveLength(1);
+    expect((mockConnection as any).shutdownCalls).toHaveLength(1);
   });
 });
 
 // ── Additional Branch Coverage ──────────────────────────────────────────────
 
 describe("MCP extension — branch coverage", () => {
-  it("handles server with neither url nor command", async () => {
-    const MockConnection = createMockConnectionClass({});
+  it("skips server with neither url nor command", async () => {
+    let connectAttempts = 0;
+    const MockConnection = createMockConnectionClass({
+      connectHttp: async () => { connectAttempts++; throw new Error("should not connect"); },
+      connectStdio: async () => { connectAttempts++; throw new Error("should not connect"); },
+    });
 
     const core = {
       config: {
@@ -269,10 +248,16 @@ describe("MCP extension — branch coverage", () => {
     } as any;
 
     const ext = create(core, MockConnection);
-    const mockRegistry = { register: () => {} };
+    const registeredTools: string[] = [];
 
-    // Should not throw, just skip the incomplete server
-    await (ext!.hooks![HOOKS.TOOLS_REGISTER] as Function)(mockRegistry);
+    // Incomplete servers are skipped: no connection, no tools.
+    await (ext!.hooks![HOOKS.TOOLS_REGISTER] as Function)({
+      register: (name: string) => { registeredTools.push(name); },
+    });
+
+    expect(connectAttempts).toBe(0);
+    expect(registeredTools).toEqual([]);
+    expect(ext!.connections).toHaveLength(0);
   });
 
   it("handles stdio transport", async () => {
@@ -304,7 +289,7 @@ describe("MCP extension — branch coverage", () => {
     expect(registeredTools[0]).toBe("stdio/stdio_tool");
   });
 
-  it("handles connection error in _connectServer catch block", async () => {
+  it("skips server when connectStdio throws", async () => {
     const MockConnection = createMockConnectionClass({
       connectStdio: async () => { throw new Error("stdio failed"); },
     });
@@ -317,10 +302,15 @@ describe("MCP extension — branch coverage", () => {
     } as any;
 
     const ext = create(core, MockConnection);
-    const mockRegistry = { register: () => {} };
+    const registeredTools: string[] = [];
 
-    // Should not throw
-    await (ext!.hooks![HOOKS.TOOLS_REGISTER] as Function)(mockRegistry);
+    // A failed connection is swallowed: no crash, no tools, no connection.
+    await (ext!.hooks![HOOKS.TOOLS_REGISTER] as Function)({
+      register: (name: string) => { registeredTools.push(name); },
+    });
+
+    expect(registeredTools).toEqual([]);
+    expect(ext!.connections).toHaveLength(0);
   });
 
   it("handles shutdown error gracefully", async () => {
@@ -341,12 +331,9 @@ describe("MCP extension — branch coverage", () => {
       hooks: { on: () => {}, notifyHooks: () => {} },
     } as any;
 
-    const ext = create(core, MockConnection);
-    const mockRegistry = { register: () => {}, getAll: () => [] } as never;
-
-    const handler = ext?.hooks?.[HOOKS.TOOLS_REGISTER];
-    if (typeof handler === "function") await handler(mockRegistry);
-    // Should not throw even if shutdown fails
-    await expect(ext?.shutdown?.()).resolves.toBeUndefined();
+    const ext = create(core, MockConnection)!;
+    await ext.hooks![HOOKS.TOOLS_REGISTER]!({ register: () => {}, getAll: () => [] } as never);
+    // A failing connection shutdown must not break ext.shutdown()
+    await expect(ext.shutdown!()).resolves.toBeUndefined();
   });
 });

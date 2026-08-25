@@ -64,7 +64,11 @@ export class McpTool {
   }
 
   callDisplay(input: string | Record<string, unknown> | null): string {
-    return `MCP [${this.#serverName}] ${input}`;
+    // Object input (the common case) must be stringified, not interpolated,
+    // or it renders as "[object Object]" in the CLI.
+    const raw = typeof input === "string" ? input : input === null ? "null" : JSON.stringify(input);
+    const text = raw.length > 80 ? raw.slice(0, 77) + "..." : raw;
+    return `MCP [${this.#serverName}] ${text}`;
   }
 
   get registeredName(): string {

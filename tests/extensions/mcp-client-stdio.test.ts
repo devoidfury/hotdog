@@ -1,38 +1,27 @@
 // Tests for mcp-client — stdio mode, message handling, _sendRequest,
 // and other paths.
 
-import { describe, it, expect, mock, beforeEach, afterEach } from "bun:test";
+import { describe, it, expect } from "bun:test";
 import fs from "node:fs";
-import { McpClient, McpError } from "../../src/extensions/mcp-client/client.ts";
+import { McpClient } from "../../src/extensions/mcp-client/client.ts";
+import { McpConnection } from "../../src/extensions/mcp-client/connection.ts";
 import { HttpTransport, StdioTransport } from "../../src/extensions/mcp-client/transports.ts";
-import { tmpDir, cleanupDir, processAlive, waitForExit } from "../helpers.ts";
+import { tmpDir, cleanupDir, processAlive, waitForExit, withMockFetch, jsonResponse, textResponse } from "../helpers.ts";
 
 // ── McpClient._sendRequest Tests ─────────────────────────────────────────────
 
 describe("McpClient._sendRequest", () => {
 
   it("increments id counter for each request", async () => {
-    const mockFetch = mock(() =>
-      Promise.resolve({
-        ok: true,
-        text: () => Promise.resolve(JSON.stringify({ result: "ok" })),
-      }),
-    );
-
     const client = await McpClient.forHttp("http://localhost:3000/mcp");
-    const originalFetch = globalThis.fetch;
-    globalThis.fetch = mockFetch as unknown as typeof fetch;
-
-    try {
+    await withMockFetch(async () => jsonResponse({ result: "ok" }), async () => {
       const initialId = client.idCounter;
       await (client as any)._sendRequest("method1", {});
       await (client as any)._sendRequest("method2", {});
       await (client as any)._sendRequest("method3", {});
-
       expect(client.idCounter).toBe(initialId + 3);
-    } finally {
-      globalThis.fetch = originalFetch;
-    }
+    });
+    await client.shutdown();
   });
 
   it("throws McpError when cancelled", async () => {
@@ -45,130 +34,85 @@ describe("McpClient._sendRequest", () => {
 
   it("HTTP mode sends correct headers", async () => {
     let capturedHeaders: Record<string, string> | null = null;
-
-    const mockFetch = mock((url: string, opts: any) => {
-      capturedHeaders = opts.headers;
-      return Promise.resolve({
-        ok: true,
-        text: () => Promise.resolve(JSON.stringify({ result: "ok" })),
-      });
-    });
-
     const client = await McpClient.forHttp("http://localhost:3000/mcp", {
       "X-Custom-Header": "custom-value",
       "Authorization": "Bearer token",
     });
 
-    const originalFetch = globalThis.fetch;
-    globalThis.fetch = mockFetch as unknown as typeof fetch;
-
-    try {
+    await withMockFetch(async (_url, opts) => {
+      capturedHeaders = opts?.headers as Record<string, string>;
+      return jsonResponse({ result: "ok" });
+    }, async () => {
       await (client as any)._sendRequest("test/method", { param: "value" });
+    });
+    await client.shutdown();
 
-      expect(capturedHeaders).not.toBeNull();
-      expect(capturedHeaders!["Content-Type"]).toBe("application/json");
-      expect(capturedHeaders!["Accept"]).toBe("application/json, text/event-stream");
-      expect(capturedHeaders!["X-Custom-Header"]).toBe("custom-value");
-      expect(capturedHeaders!["Authorization"]).toBe("Bearer token");
-    } finally {
-      globalThis.fetch = originalFetch;
-    }
+    expect(capturedHeaders).not.toBeNull();
+    expect(capturedHeaders!["Content-Type"]).toBe("application/json");
+    expect(capturedHeaders!["Accept"]).toBe("application/json, text/event-stream");
+    expect(capturedHeaders!["X-Custom-Header"]).toBe("custom-value");
+    expect(capturedHeaders!["Authorization"]).toBe("Bearer token");
   });
 
   it("HTTP mode sends correct request body", async () => {
     let capturedBody: string | null = null;
-
-    const mockFetch = mock((url: string, opts: any) => {
-      capturedBody = opts.body;
-      return Promise.resolve({
-        ok: true,
-        text: () => Promise.resolve(JSON.stringify({ result: "ok" })),
-      });
-    });
-
     const client = await McpClient.forHttp("http://localhost:3000/mcp");
-    const originalFetch = globalThis.fetch;
-    globalThis.fetch = mockFetch as unknown as typeof fetch;
 
-    try {
+    await withMockFetch(async (_url, opts) => {
+      capturedBody = opts?.body as string;
+      return jsonResponse({ result: "ok" });
+    }, async () => {
       await (client as any)._sendRequest("tools/call", { name: "echo", arguments: { text: "hello" } });
+    });
+    await client.shutdown();
 
-      const parsed = JSON.parse(capturedBody!);
-      expect(parsed.jsonrpc).toBe("2.0");
-      expect(parsed.method).toBe("tools/call");
-      expect(parsed.params).toHaveProperty("name", "echo");
-      expect(parsed.params).toHaveProperty("arguments", { text: "hello" });
-    } finally {
-      globalThis.fetch = originalFetch;
-    }
+    const parsed = JSON.parse(capturedBody!);
+    expect(parsed.jsonrpc).toBe("2.0");
+    expect(parsed.method).toBe("tools/call");
+    expect(parsed.params).toHaveProperty("name", "echo");
+    expect(parsed.params).toHaveProperty("arguments", { text: "hello" });
   });
 });
 
 // ── McpClient.initialize Tests ───────────────────────────────────────────────
 
 describe("McpClient.initialize", () => {
-  it("sends initialize request and returns server info", async () => {
-    const mockFetch = mock(() =>
-      Promise.resolve({
-        ok: true,
-        text: () => Promise.resolve(JSON.stringify({
-          jsonrpc: "2.0",
-          id: 1,
-          result: {
-            protocolVersion: "2025-11-25",
-            capabilities: { tools: {} },
-            serverInfo: { name: "test-server", version: "1.0.0" },
-          },
-        })),
-      }),
-    );
-
+  it("sends initialize request and stores server info", async () => {
     const client = await McpClient.forHttp("http://localhost:3000/mcp");
-    const originalFetch = globalThis.fetch;
-    globalThis.fetch = mockFetch as unknown as typeof fetch;
-
-    try {
+    await withMockFetch(async () => jsonResponse({
+      jsonrpc: "2.0",
+      id: 1,
+      result: {
+        protocolVersion: "2025-11-25",
+        capabilities: { tools: {} },
+        serverInfo: { name: "test-server", version: "1.0.0" },
+      },
+    }), async () => {
       const result = await client.initialize();
-
       expect((result as any).protocolVersion).toBe("2025-11-25");
       expect((result as any).capabilities).toHaveProperty("tools");
       expect((result as any).serverInfo).toEqual({ name: "test-server", version: "1.0.0" });
-
-      // Check that server capabilities/info are stored
+      // Server capabilities/info are stored on the client for later use.
       expect(client.serverCapabilities).toHaveProperty("tools");
       expect(client.serverInfo).toEqual({ name: "test-server", version: "1.0.0" });
-    } finally {
-      globalThis.fetch = originalFetch;
-    }
+    });
+    await client.shutdown();
   });
 
-  it("initialize without streaming transport does not send notification", async () => {
-    // HTTP mode has no writeStream, so the initialized notification should be skipped
-    const mockFetch = mock(() =>
-      Promise.resolve({
-        ok: true,
-        text: () => Promise.resolve(JSON.stringify({
-          jsonrpc: "2.0",
-          id: 1,
-          result: {
-            protocolVersion: "2025-11-25",
-            capabilities: {},
-            serverInfo: { name: "test" },
-          },
-        })),
-      }),
-    );
-
+  it("initialize works without a streaming transport (no initialized notification)", async () => {
     const client = await McpClient.forHttp("http://localhost:3000/mcp");
-    const originalFetch = globalThis.fetch;
-    globalThis.fetch = mockFetch as unknown as typeof fetch;
-
-    try {
-      await client.initialize();
-      // Should not throw even without writeStream
-    } finally {
-      globalThis.fetch = originalFetch;
-    }
+    await withMockFetch(async () => jsonResponse({
+      jsonrpc: "2.0",
+      id: 1,
+      result: {
+        protocolVersion: "2025-11-25",
+        capabilities: {},
+        serverInfo: { name: "test" },
+      },
+    }), async () => {
+      await expect(client.initialize()).resolves.toBeDefined();
+    });
+    await client.shutdown();
   });
 });
 
@@ -176,34 +120,21 @@ describe("McpClient.initialize", () => {
 
 describe("McpClient.listTools", () => {
   it("returns parsed tools list", async () => {
-    const mockFetch = mock(() =>
-      Promise.resolve({
-        ok: true,
-        text: () => Promise.resolve(JSON.stringify({
-          jsonrpc: "2.0",
-          id: 1,
-          result: {
-            tools: [
-              { name: "echo", description: "Echo tool", inputSchema: { type: "object" } },
-              { name: "greet", description: "Greet tool", inputSchema: { type: "object" } },
-            ],
-          },
-        })),
-      }),
-    );
-
     const client = await McpClient.forHttp("http://localhost:3000/mcp");
-    const originalFetch = globalThis.fetch;
-    globalThis.fetch = mockFetch as unknown as typeof fetch;
-
-    try {
+    await withMockFetch(async () => jsonResponse({
+      jsonrpc: "2.0",
+      id: 1,
+      result: {
+        tools: [
+          { name: "echo", description: "Echo tool", inputSchema: { type: "object" } },
+          { name: "greet", description: "Greet tool", inputSchema: { type: "object" } },
+        ],
+      },
+    }), async () => {
       const result = await client.listTools();
-      expect((result as any).tools).toHaveLength(2);
-      expect((result as any).tools[0]!.name).toBe("echo");
-      expect((result as any).tools[1]!.name).toBe("greet");
-    } finally {
-      globalThis.fetch = originalFetch;
-    }
+      expect((result as any).tools.map((t: any) => t.name)).toEqual(["echo", "greet"]);
+    });
+    await client.shutdown();
   });
 });
 
@@ -211,146 +142,56 @@ describe("McpClient.listTools", () => {
 
 describe("McpClient.callTool", () => {
   it("returns tool call result", async () => {
-    const mockFetch = mock(() =>
-      Promise.resolve({
-        ok: true,
-        text: () => Promise.resolve(JSON.stringify({
-          jsonrpc: "2.0",
-          id: 1,
-          result: {
-            content: [{ type: "text", text: "Hello, World!" }],
-          },
-        })),
-      }),
-    );
-
     const client = await McpClient.forHttp("http://localhost:3000/mcp");
-    const originalFetch = globalThis.fetch;
-    globalThis.fetch = mockFetch as unknown as typeof fetch;
-
-    try {
+    await withMockFetch(async () => jsonResponse({
+      jsonrpc: "2.0",
+      id: 1,
+      result: { content: [{ type: "text", text: "Hello, World!" }] },
+    }), async () => {
       const result = await client.callTool("echo", { text: "Hello, World!" });
       expect((result as any).content).toEqual([{ type: "text", text: "Hello, World!" }]);
-    } finally {
-      globalThis.fetch = originalFetch;
-    }
+    });
+    await client.shutdown();
   });
 });
 
 // ── HttpTransport SSE Edge Cases ─────────────────────────────────────────────
 
 describe("HttpTransport SSE edge cases", () => {
-  it("handles mixed valid and invalid SSE data", async () => {
-    const mockFetch = mock(() =>
-      Promise.resolve({
-        ok: true,
-        text: () =>
-          Promise.resolve(
-            'data: {"jsonrpc":"2.0","id":1,"result":{"valid":1}}\n\ndata: invalid json\n\ndata: {"jsonrpc":"2.0","id":1,"result":{"valid":2}}\n\n',
-          ),
-      }),
-    );
+  async function sendSse(body: string): Promise<unknown> {
+    return withMockFetch(async () => textResponse(body, 200, "text/event-stream"), async () => {
+      const transport = new HttpTransport("http://localhost:3000/mcp");
+      return transport.send(JSON.stringify({ jsonrpc: "2.0", id: 1, method: "test" }));
+    });
+  }
 
-    const transport = new HttpTransport("http://localhost:3000/mcp");
-    const originalFetch = globalThis.fetch;
-    globalThis.fetch = mockFetch as unknown as typeof fetch;
-
-    try {
-      const result = await transport.send(
-        JSON.stringify({ jsonrpc: "2.0", id: 1, method: "test" }),
-      );
-      // Returns last valid JSON-RPC response
-      expect(result).toEqual({ valid: 2 });
-    } finally {
-      globalThis.fetch = originalFetch;
-    }
+  it("returns the last valid message from mixed valid and invalid SSE data", async () => {
+    expect(await sendSse('data: {"jsonrpc":"2.0","id":1,"result":{"valid":1}}\n\ndata: invalid json\n\ndata: {"jsonrpc":"2.0","id":1,"result":{"valid":2}}\n\n')).toEqual({ valid: 2 });
   });
 
-  it("handles SSE with only event lines", async () => {
-    const mockFetch = mock(() =>
-      Promise.resolve({
-        ok: true,
-        text: () => Promise.resolve("event: message\n\nevent: custom\n\n"),
-      }),
-    );
-
-    const transport = new HttpTransport("http://localhost:3000/mcp");
-    const originalFetch = globalThis.fetch;
-    globalThis.fetch = mockFetch as unknown as typeof fetch;
-
-    try {
-      await expect(
-        transport.send(JSON.stringify({ jsonrpc: "2.0", id: 1, method: "test" })),
-      ).rejects.toThrow("No SSE messages found");
-    } finally {
-      globalThis.fetch = originalFetch;
-    }
+  it("throws when SSE has no parseable data", async () => {
+    await expect(sendSse("event: message\n\nevent: custom\n\n")).rejects.toThrow("No SSE messages found");
+    await expect(sendSse("data: \n\n")).rejects.toThrow("No SSE messages found");
   });
 
-  it("handles SSE with empty data", async () => {
-    const mockFetch = mock(() =>
-      Promise.resolve({
-        ok: true,
-        text: () => Promise.resolve("data: \n\n"),
-      }),
-    );
-
-    const transport = new HttpTransport("http://localhost:3000/mcp");
-    const originalFetch = globalThis.fetch;
-    globalThis.fetch = mockFetch as unknown as typeof fetch;
-
-    try {
-      await expect(
-        transport.send(JSON.stringify({ jsonrpc: "2.0", id: 1, method: "test" })),
-      ).rejects.toThrow("No SSE messages found");
-    } finally {
-      globalThis.fetch = originalFetch;
-    }
-  });
-
-  it("handles SSE comment lines", async () => {
-    const mockFetch = mock(() =>
-      Promise.resolve({
-        ok: true,
-        text: () =>
-          Promise.resolve(': this is a comment\ndata: {"jsonrpc":"2.0","id":1,"result":{"ok":true}}\n\n'),
-      }),
-    );
-
-    const transport = new HttpTransport("http://localhost:3000/mcp");
-    const originalFetch = globalThis.fetch;
-    globalThis.fetch = mockFetch as unknown as typeof fetch;
-
-    try {
-      const result = await transport.send(
-        JSON.stringify({ jsonrpc: "2.0", id: 1, method: "test" }),
-      );
-      expect(result).toEqual({ ok: true });
-    } finally {
-      globalThis.fetch = originalFetch;
-    }
+  it("ignores SSE comment lines", async () => {
+    expect(await sendSse(': this is a comment\ndata: {"jsonrpc":"2.0","id":1,"result":{"ok":true}}\n\n')).toEqual({ ok: true });
   });
 });
 
-// ── StdioTransport Tests ─────────────────────────────────────────────────────
+// ── Transport basics ─────────────────────────────────────────────────────────
 
-describe("StdioTransport", () => {
-  it("has isStreaming = true", () => {
-    const transport = new StdioTransport("echo");
-    expect(transport.isStreaming).toBe(true);
-    transport.destroy();
+describe("Transport basics", () => {
+  it("exposes isStreaming per transport type", async () => {
+    const stdio = new StdioTransport("echo");
+    expect(stdio.isStreaming).toBe(true);
+    await stdio.destroy();
+    expect(new HttpTransport("http://localhost:3000/mcp").isStreaming).toBe(false);
   });
 
-  it("HttpTransport has isStreaming = false", () => {
-    const transport = new HttpTransport("http://localhost:3000/mcp");
-    expect(transport.isStreaming).toBe(false);
-  });
-
-  it("transport accessor returns the transport", async () => {
+  it("client.transport accessor returns the underlying transport", async () => {
     const client = await McpClient.forHttp("http://localhost:3000/mcp");
-    const transport = client.transport;
-    expect(transport).toBeInstanceOf(HttpTransport);
-    expect((transport as HttpTransport).url).toBe("http://localhost:3000/mcp");
+    expect(client.transport).toBeInstanceOf(HttpTransport);
     await client.shutdown();
   });
 });
@@ -380,11 +221,24 @@ describe("McpClient.forStdio", () => {
 // ── StdioTransport Tests ─────────────────────────────────────────────────────
 
 describe("StdioTransport", () => {
-  it("sends messages to subprocess stdin", async () => {
+  it("sends messages to subprocess stdin and receives the response", async () => {
     const transport = new StdioTransport("bun", ["./tests/fixtures/mcp-test-server.ts"]);
-    await transport.send('{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}');
-    await new Promise((r) => setTimeout(r, 20));
-    await transport.destroy();
+    const lines: string[] = [];
+    const removeHandler = transport.onMessage((line) => lines.push(line));
+    try {
+      await transport.send('{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}');
+      // Wait for the server's initialize response instead of a fixed sleep.
+      const start = Date.now();
+      while (lines.length === 0 && Date.now() - start < 5000) {
+        await new Promise((r) => setTimeout(r, 20));
+      }
+      const reply = JSON.parse(lines[0]!);
+      expect(reply.id).toBe(1);
+      expect(reply.result.serverInfo.name).toBe("test-server");
+    } finally {
+      removeHandler();
+      await transport.destroy();
+    }
   });
 
   it("throws when sending to destroyed transport", async () => {
@@ -507,33 +361,32 @@ describe("StdioTransport", () => {
     expect(handler1Lines.length).toBeGreaterThan(0);
   });
 
-  it("removes handler when cleanup function called", async () => {
-    const transport = new StdioTransport("bun", ["-e", "console.log('a'); setTimeout(() => { console.log('b'); console.log('c'); }, 30);"]);
+  it("stops delivering lines to a removed handler but not others", async () => {
+    const transport = new StdioTransport("bun", ["-e", "console.log('a'); setTimeout(() => { console.log('b'); console.log('c'); }, 100);"]);
     const handler1Lines: string[] = [];
     const handler2Lines: string[] = [];
 
     const remove1 = transport.onMessage((line) => handler1Lines.push(line));
     const remove2 = transport.onMessage((line) => handler2Lines.push(line));
 
-    await new Promise((r) => setTimeout(r, 50));
+    // Wait for "a" to be delivered to both handlers, then remove handler1.
+    const start = Date.now();
+    while (handler1Lines.length === 0 && Date.now() - start < 2000) {
+      await new Promise((r) => setTimeout(r, 10));
+    }
     remove1();
 
-    await new Promise((r) => setTimeout(r, 20));
+    // Wait for the delayed lines to arrive.
+    const start2 = Date.now();
+    while (handler2Lines.length < 3 && Date.now() - start2 < 2000) {
+      await new Promise((r) => setTimeout(r, 10));
+    }
     remove2();
     await transport.destroy();
 
-    // Both should have received at least "a"
-    expect(handler1Lines).toContain("a");
-    expect(handler2Lines).toContain("a");
-    // handler2 should have more since handler1 was removed
-    expect(handler2Lines.length).toBeGreaterThanOrEqual(handler1Lines.length);
-  });
-
-  it("sendNotification writes to stdin", async () => {
-    const transport = new StdioTransport("bun", ["./tests/fixtures/mcp-test-server.ts"]);
-    transport.sendNotification('{"jsonrpc":"2.0","method":"notifications/initialized"}');
-    await new Promise((r) => setTimeout(r, 20));
-    await transport.destroy();
+    // Handler1 got only "a"; handler2 got everything.
+    expect(handler1Lines).toEqual(["a"]);
+    expect(handler2Lines).toEqual(["a", "b", "c"]);
   });
 
   it("sendNotification is no-op after destroy", async () => {
@@ -577,43 +430,31 @@ describe("StdioTransport", () => {
 // ── Stdio McpClient Integration Tests ────────────────────────────────────────
 
 describe("McpClient stdio integration", () => {
-  it("handles messages from subprocess", async () => {
-    // Use a script that outputs a JSON-RPC response immediately
+  it("buffers unsolicited responses (no matching pending request)", async () => {
+    // A response whose id matches no pending request is buffered for later.
     const client = await McpClient.forStdio("bun", ["-e", "console.log(JSON.stringify({jsonrpc:'2.0',id:999,result:{data:'buffered'}}))"]);
 
-    // Wait for message to be processed
-    await new Promise((r) => setTimeout(r, 30));
+    const start = Date.now();
+    while (client.buffered.length === 0 && Date.now() - start < 5000) {
+      await new Promise((r) => setTimeout(r, 10));
+    }
 
-    // The buffered response should be available
-    expect(client.buffered.length).toBeGreaterThan(0);
-    await client.shutdown();
+    try {
+      expect(client.buffered.map((b) => b.id)).toEqual([999]);
+    } finally {
+      await client.shutdown();
+    }
   });
 
-  it("handles empty lines from subprocess without error", async () => {
-    const client = await McpClient.forStdio("bun", ["-e", "console.log(''); console.log(''); console.log('');"]);
-    await new Promise((r) => setTimeout(r, 30));
-    // Should not crash
-    await client.shutdown();
-  });
-
-  it("handles invalid JSON lines from subprocess without error", async () => {
-    const client = await McpClient.forStdio("bun", ["-e", "console.log('not valid json')"]);
-    await new Promise((r) => setTimeout(r, 30));
-    // Should not crash
-    await client.shutdown();
-  });
-
-  it("handles notifications (no id) without error", async () => {
-    const client = await McpClient.forStdio("bun", ["-e", "console.log(JSON.stringify({jsonrpc:'2.0',method:'notifications/initialized'}))"]);
-    await new Promise((r) => setTimeout(r, 30));
-    // Should not crash, notifications are ignored
-    await client.shutdown();
-  });
-
-  it("message cleanup is called on shutdown", async () => {
-    const client = await McpClient.forStdio("bun", ["./tests/fixtures/mcp-test-server.ts"]);
-    // Just verify shutdown completes without error
-    await client.shutdown();
+  it("tolerates empty, non-JSON, and notification lines from the subprocess", async () => {
+    // A misbehaving server must not crash the client: empty lines,
+    // non-JSON lines, and id-less notifications are all ignored.
+    const client = await McpClient.forStdio("bun", [
+      "-e",
+      "console.log(''); console.log('not valid json'); console.log(JSON.stringify({jsonrpc:'2.0',method:'notifications/initialized'}));",
+    ]);
+    await new Promise((r) => setTimeout(r, 50));
+    await expect(client.shutdown()).resolves.toBeUndefined();
   });
 });
 
@@ -657,7 +498,6 @@ describe("HttpTransport onClose", () => {
 
 describe("McpConnection connectStdio", () => {
   it("connects via stdio and initializes", async () => {
-    const { McpConnection } = await import("../../src/extensions/mcp-client/connection.ts");
     const conn = await McpConnection.connectStdio("test", "bun", ["./tests/fixtures/mcp-test-server.ts"]);
     expect(conn.serverName).toBe("test");
     expect(conn.tools).toEqual([]);

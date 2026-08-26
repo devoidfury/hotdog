@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+**Full Changelog**: https://github.com/devoidfury/hotdog/compare/v0.5.0...main
+
+## [v0.5.0] - 2026-08-26
+
 - add string-length tool
 - add medium reasoning level support
 - `/loop` - now keyed by session id, supports multi-agent sessions
@@ -41,7 +45,7 @@
   - expand env var filter for child process secret scrubbing (bash/mcp-client)
   - fetch tool - fix redirect SSRF bypass (redirect targets are now re-validated)
 
-**Full Changelog**: https://github.com/devoidfury/hotdog/compare/v0.4.1...main
+**Full Changelog**: https://github.com/devoidfury/hotdog/compare/v0.4.1...v0.5.0
 
 ## [v0.4.1] - 2026-08-19
 

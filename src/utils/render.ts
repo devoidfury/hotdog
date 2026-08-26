@@ -44,11 +44,8 @@ function tokenize(template: string): Token[] {
     if (template[i] === "{" && template[i + 1] === "{") {
       pushText(tokens, template, plainStart, i, prevStripRight);
       const end = findClose(template, i, "}}");
-      const inner = template.slice(i + 2, end);
-      const stripRight = inner.trimEnd().endsWith("-");
-      const expr = stripRight
-        ? inner.slice(0, inner.lastIndexOf("-")).trim()
-        : inner.trim();
+      const { stripLeft, stripRight, expr } = parseDelimited(template.slice(i + 2, end));
+      if (stripLeft) stripPrevTrailingWhitespace(tokens);
       tokens.push({ type: "print", value: expr, stripRight });
       i = end + 2;
       plainStart = i;
@@ -56,17 +53,12 @@ function tokenize(template: string): Token[] {
     } else if (template[i] === "{" && template[i + 1] === "%") {
       pushText(tokens, template, plainStart, i, prevStripRight);
       const end = findClose(template, i, "%}");
-      const inner = template.slice(i + 2, end);
-      const stripLeft = inner.startsWith("-");
-      const tag = stripLeft ? inner.slice(1).trim() : inner.trim();
-      const stripRight = tag.endsWith("-");
-      const cleanTag = stripRight
-        ? tag.slice(0, tag.lastIndexOf("-")).trim()
-        : tag;
+      const { stripLeft, stripRight, expr } = parseDelimited(template.slice(i + 2, end));
+      if (stripLeft) stripPrevTrailingWhitespace(tokens);
       tokens.push({
         type: "tag",
-        value: cleanTag,
-        stripLeft: stripLeft || prevStripRight,
+        value: expr,
+        stripLeft,
         stripRight,
       });
       i = end + 2;
@@ -103,6 +95,33 @@ function findClose(str: string, from: number, delim: string): number {
   const idx = str.indexOf(delim, from + 2);
   if (idx === -1) throw new ParseError(`Unclosed ${delim}`);
   return idx;
+}
+
+/**
+ * Parse the inside of a `{{ ... }}` or `{% ... %}` token, handling the
+ * Tera-style whitespace-control dashes:
+ *   - leading `-` (stripLeft):  strip trailing whitespace of the text before the token
+ *   - trailing `-` (stripRight): strip leading whitespace of the text after the token
+ * `expr` is the dash-free, trimmed expression (print) or tag (block).
+ */
+function parseDelimited(inner: string): {
+  stripLeft: boolean;
+  stripRight: boolean;
+  expr: string;
+} {
+  const stripLeft = inner.startsWith("-");
+  const body = stripLeft ? inner.slice(1) : inner;
+  const stripRight = body.trimEnd().endsWith("-");
+  const expr = (stripRight ? body.slice(0, body.lastIndexOf("-")) : body).trim();
+  return { stripLeft, stripRight, expr };
+}
+
+/** Left-dash tokens strip trailing whitespace from the preceding text token. */
+function stripPrevTrailingWhitespace(tokens: Token[]): void {
+  const last = tokens[tokens.length - 1];
+  if (last && last.type === "text") {
+    last.value = last.value.replace(/\s+$/, "");
+  }
 }
 
 // ── Main render loop ───────────────────────────────────────────────
@@ -184,9 +203,9 @@ function walkIf(
       ? elseIdx + 1
       : bodyEnd;
   const end = condValue ? (elseIdx > 0 ? elseIdx : bodyEnd) : bodyEnd;
-  let output = walkTokens(tokens.slice(start, end), context);
-  if (tok.stripRight) output = output.replace(/^\s+/, "");
-  return output;
+  // Whitespace control is applied at tokenize time (adjacent text tokens are
+  // pre-stripped), so no runtime stripping is needed here.
+  return walkTokens(tokens.slice(start, end), context);
 }
 
 function walkFor(
@@ -207,7 +226,8 @@ function walkFor(
       });
     }
   }
-  if (tok.stripRight) output = output.replace(/^\s+/, "");
+  // Whitespace control is applied at tokenize time (adjacent text tokens are
+  // pre-stripped), so no runtime stripping is needed here.
   return output;
 }
 

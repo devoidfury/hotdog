@@ -6,4 +6,4 @@ Parallel tool calling enabled.
 
 {% for chunk in chunks -%}
 {{ chunk.content }}
-{%- endfor -%}
+{% endfor -%}

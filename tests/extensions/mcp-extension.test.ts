@@ -143,8 +143,8 @@ describe("MCP extension", () => {
     await (ext!.hooks![HOOKS.TOOLS_REGISTER]! as Function)(mockRegistry);
 
     expect(registeredTools).toHaveLength(2);
-    expect(registeredTools[0]!.name).toBe("test/echo");
-    expect(registeredTools[1]!.name).toBe("test/blacklisted");
+    expect(registeredTools[0]!.name).toBe("test__echo");
+    expect(registeredTools[1]!.name).toBe("test__blacklisted");
   });
 
   it("respects blacklistTools configuration", async () => {
@@ -183,7 +183,7 @@ describe("MCP extension", () => {
     await (ext!.hooks![HOOKS.TOOLS_REGISTER] as Function)(mockRegistry);
 
     expect(registeredTools).toHaveLength(1);
-    expect(registeredTools[0]).toBe("test/echo");
+    expect(registeredTools[0]).toBe("test__echo");
   });
 
   it("shutdown calls shutdown on every connected server", async () => {
@@ -286,7 +286,7 @@ describe("MCP extension — branch coverage", () => {
 
     await (ext!.hooks![HOOKS.TOOLS_REGISTER] as Function)(mockRegistry);
     expect(registeredTools).toHaveLength(1);
-    expect(registeredTools[0]).toBe("stdio/stdio_tool");
+    expect(registeredTools[0]).toBe("stdio__stdio_tool");
   });
 
   it("skips server when connectStdio throws", async () => {

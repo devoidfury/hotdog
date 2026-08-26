@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- mcp-client
+  - tool names no longer use `server/tool` (the `/` is rejected by strict OpenAI-compatible APIs); tools register as `server__tool` with characters outside `[a-zA-Z0-9_-]` sanitized
+  - tool registry now rejects names outside `[a-zA-Z0-9_-]` at registration, so a bad name fails fast instead of failing every LLM request
+
 **Full Changelog**: https://github.com/devoidfury/hotdog/compare/v0.5.0...main
 
 ## [v0.5.0] - 2026-08-26

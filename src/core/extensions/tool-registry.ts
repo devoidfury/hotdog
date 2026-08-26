@@ -49,6 +49,13 @@ export interface Tool<TCtx extends Record<string, unknown> = DefaultToolContext>
   metadata: ToolMetadata;
 }
 
+/**
+ * Character set allowed in tool names. Tool names are sent to the model as
+ * OpenAI function names, which strict APIs (OpenAI itself) validate against
+ * `^[a-zA-Z0-9_-]+$`; a name with other characters fails the whole request.
+ */
+export const TOOL_NAME_RE = /^[a-zA-Z0-9_-]+$/;
+
 export class ToolRegistry {
   tools: Map<string, Tool>;
   #toolDefCache: Map<string, Promise<ToolDef | null>>;
@@ -61,6 +68,12 @@ export class ToolRegistry {
   }
 
   register(name: string, tool: Tool): void {
+    if (!TOOL_NAME_RE.test(name)) {
+      throw new Error(
+        `Tool name "${name}" is invalid: only letters, digits, "-" and "_" are allowed ` +
+          "(tool names are sent to the model API as OpenAI function names, which reject other characters)",
+      );
+    }
     if (!tool.metadata) {
       throw new Error(`Tool "${name}" is missing required metadata`);
     }

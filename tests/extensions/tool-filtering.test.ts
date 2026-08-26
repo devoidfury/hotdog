@@ -175,4 +175,32 @@ describe("Tool Filtering (Agent.getToolDefs)", () => {
       core.toolRegistry.register("no_meta_tool", toolNoMeta as any);
     }).toThrow('Tool "no_meta_tool" is missing required metadata');
   });
+
+  it("rejects tool names outside the OpenAI function-name charset at registration", () => {
+    const core = createMockCore({ sandboxMode: true });
+    const tool = {
+      toToolDef: () => ({
+        type: "function",
+        function: { name: "x", description: "x", parameters: {} },
+      }),
+      callDisplay: () => "x",
+      execute: async () => "ok",
+      metadata: { sideEffects: false, difficulty: 1 },
+    };
+
+    // A "/" (e.g. "server/tool" from MCP or a hand-rolled extension) would be
+    // rejected by strict OpenAI-compatible APIs for the whole request.
+    expect(() => core.toolRegistry.register("server/tool", tool as any)).toThrow(
+      'Tool name "server/tool" is invalid',
+    );
+    expect(() => core.toolRegistry.register("bad name", tool as any)).toThrow(
+      'Tool name "bad name" is invalid',
+    );
+    expect(() => core.toolRegistry.register("", tool as any)).toThrow(
+      'Tool name "" is invalid',
+    );
+
+    // Valid names still register fine.
+    expect(() => core.toolRegistry.register("good-name_1", tool as any)).not.toThrow();
+  });
 });

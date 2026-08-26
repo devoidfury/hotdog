@@ -41,14 +41,32 @@ describe("McpTool", () => {
     const connection = createMockConnection();
     const tool = new McpTool("my-server", createToolDef(), connection);
 
-    expect(tool.registeredName).toBe("my-server/test-tool");
+    expect(tool.registeredName).toBe("my-server__test-tool");
   });
 
   it("creates a tool with special characters in server name", () => {
     const connection = createMockConnection();
     const tool = new McpTool("server-with-dashes", createToolDef({ name: "tool_name" }), connection);
 
-    expect(tool.registeredName).toBe("server-with-dashes/tool_name");
+    expect(tool.registeredName).toBe("server-with-dashes__tool_name");
+  });
+
+  it("sanitizes characters outside the tool-name charset (OpenAI function names)", () => {
+    const connection = createMockConnection();
+    // Server and tool names are third-party; "/", ".", "!" etc. are not
+    // valid OpenAI function-name characters and must be replaced.
+    const tool = new McpTool("my.server!", createToolDef({ name: "get/web info" }), connection);
+
+    expect(tool.registeredName).toBe("my_server___get_web_info");
+    expect(tool.registeredName).toMatch(/^[a-zA-Z0-9_-]+$/);
+  });
+
+  it("keeps the raw tool name for MCP calls (sanitization is display/registration only)", async () => {
+    const connection = createMockConnection();
+    const tool = new McpTool("my.server!", createToolDef({ name: "get/web" }), connection);
+
+    await tool.execute({ query: "x" });
+    expect(connection.callTool).toHaveBeenCalledWith("get/web", { query: "x" });
   });
 });
 
@@ -125,7 +143,7 @@ describe("McpTool > toToolDef", () => {
     const def = tool.toToolDef();
 
     expect(def.type).toBe("function");
-    expect(def.function.name).toBe("server/test-tool");
+    expect(def.function.name).toBe("server__test-tool");
     expect(def.function.description).toBe("A test tool for MCP");
     expect(def.function.parameters.type).toBe("object");
   });

@@ -15,6 +15,17 @@ interface McpToolDefinitionInput {
   inputSchema?: Record<string, unknown>;
 }
 
+/**
+ * Replace characters outside the tool-name character set ([a-zA-Z0-9_-])
+ * with "_". MCP server and tool names are third-party (and thus untrusted)
+ * and can contain anything; strict OpenAI-compatible APIs reject function
+ * names with other characters (a raw "/" would fail the whole request).
+ * See TOOL_NAME_RE in core/extensions/tool-registry.ts.
+ */
+export function sanitizeToolNamePart(part: string): string {
+  return part.replace(/[^a-zA-Z0-9_-]/g, "_");
+}
+
 export class McpTool {
   readonly #serverName: string;
   readonly #toolName: string;
@@ -29,7 +40,9 @@ export class McpTool {
     this.#toolName = toolDef.name;
     this.#toolDef = toolDef;
     this.#connection = connectionHandle;
-    this.#registeredName = `${serverName}/${toolDef.name}`;
+    // "__" separator: a raw "/" is not a valid function-name character, and
+    // the double underscore is a less collision-prone join than a single "_".
+    this.#registeredName = `${sanitizeToolNamePart(serverName)}__${sanitizeToolNamePart(toolDef.name)}`;
   }
 
   async execute(input: string | Record<string, unknown> | null): Promise<Record<string, unknown>> {

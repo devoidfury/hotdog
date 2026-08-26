@@ -1,6 +1,6 @@
 // Load skill tool. Load a skill's full instructions into context.
 
-import { toolDef, param, ToolResult, defaultCallDisplay } from "@core/extensions/tool-utils.ts";
+import { toolDef, param, ToolResult, parseToolInput, defaultCallDisplay } from "@core/extensions/tool-utils.ts";
 import type { ToolMetadata } from "@core/extensions/tool-registry.ts";
 import { type ToolContext } from "@core/extensions/types.ts";
 import { SkillsLoader } from "./loader.ts";
@@ -30,8 +30,15 @@ export class LoadSkillTool {
   }
 
   async execute(input: string | Record<string, unknown> | null, ctx?: ToolContext): Promise<ToolResult> {
-    const args = typeof input === "string" ? JSON.parse(input) : input;
-    const skillName = args?.name as string;
+    const args = parseToolInput(input);
+    if (!args) {
+      return ToolResult.err("Error parsing arguments");
+    }
+
+    const skillName = args.name as string;
+    if (!skillName || typeof skillName !== "string") {
+      return ToolResult.err("Error: name is required");
+    }
 
     if (!this.loader) {
       return ToolResult.err("Skills loader not available");

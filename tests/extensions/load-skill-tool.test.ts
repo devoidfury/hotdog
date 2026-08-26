@@ -72,4 +72,34 @@ describe('LoadSkillTool', () => {
     const result = await tool.execute(JSON.stringify({ name: 'any' }));
     expect(getDisplay(result)).toContain('Skills loader not available');
   });
+
+  it('returns error for malformed JSON string input', async () => {
+    const tool = new LoadSkillTool({ loader });
+    const result = await tool.execute('{ name: "not-json" }');
+    expect(getDisplay(result)).toContain('Error parsing arguments');
+  });
+
+  it('returns error for null input', async () => {
+    const tool = new LoadSkillTool({ loader });
+    const result = await tool.execute(null);
+    expect(getDisplay(result)).toContain('Error parsing arguments');
+  });
+
+  it('returns error for empty string input', async () => {
+    const tool = new LoadSkillTool({ loader });
+    const result = await tool.execute('   ');
+    expect(getDisplay(result)).toContain('Error parsing arguments');
+  });
+
+  it('returns error when name is missing', async () => {
+    const tool = new LoadSkillTool({ loader });
+    const result = await tool.execute(JSON.stringify({}));
+    expect(getDisplay(result)).toContain('name is required');
+  });
+
+  it('returns error when name is empty string', async () => {
+    const tool = new LoadSkillTool({ loader });
+    const result = await tool.execute(JSON.stringify({ name: '' }));
+    expect(getDisplay(result)).toContain('name is required');
+  });
 });

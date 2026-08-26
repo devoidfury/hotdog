@@ -73,13 +73,29 @@ export class Message {
       typeof data.source === "string" && (MESSAGE_SOURCES as readonly string[]).includes(data.source)
         ? (data.source as MessageSource)
         : undefined;
+    const images = Array.isArray(data.images) ? (data.images as ImageAttachment[]) : undefined;
+    let content = data.content as string | Array<unknown> | undefined;
+    // Legacy heal: pre-fix toJSON() inlined image parts into content AND kept
+    // the images array, so restoring such data would re-inline them on the
+    // wire. `images` is canonical -- drop inlined image_url parts whose URL
+    // matches a derived images URL; anything else is preserved.
+    if (images?.length && Array.isArray(content)) {
+      const expectedUrls = new Set(images.map((img) => Message.imagePartUrl(img)));
+      content = content.filter((part) => {
+        if (!part || typeof part !== "object" || (part as Record<string, unknown>).type !== "image_url") {
+          return true;
+        }
+        const url = (part as { image_url?: { url?: unknown } }).image_url?.url;
+        return typeof url !== "string" || !expectedUrls.has(url);
+      });
+    }
     return new Message({
       role: data.role as string | undefined,
-      content: data.content as string | Array<unknown> | undefined,
+      content,
       reasoningContent: (data.reasoning_content ?? data.reasoningContent) as string | undefined,
       toolCalls: (data.tool_calls ?? data.toolCalls) as ToolCall[] | undefined ?? null,
       toolCallId: (data.tool_call_id ?? data.toolCallId) as string | undefined,
-      images: data.images as ImageAttachment[] | undefined,
+      images,
       source,
     });
   }
@@ -101,25 +117,30 @@ export class Message {
     }
 
     for (const img of this.images) {
-      const mimeType = img.mimeType || "image/png";
-      const data = img.data || "";
-      const url = data.startsWith("data:")
-        ? data
-        : `data:${mimeType};base64,${data}`;
-      parts.push({
-        type: "image_url",
-        image_url: { url },
-      });
+      parts.push({ type: "image_url", image_url: { url: Message.imagePartUrl(img) } });
     }
-
     return parts;
   }
 
-  /** Serialize to snake_case JSON for persistence. */
+  /** Derive the wire data-URL for an attachment (same rule as legacy inlined parts). */
+  private static imagePartUrl(img: ImageAttachment): string {
+    const mimeType = img.mimeType || "image/png";
+    const data = img.data || "";
+    return data.startsWith("data:") ? data : `data:${mimeType};base64,${data}`;
+  }
+
+  /**
+   * Serialize to snake_case JSON for persistence.
+   *
+   * Content is stored RAW (as set), never via _buildContent(): images ride
+   * the separate `images` field, and _buildContent() is the only place they
+   * get merged into content parts. Inlining them here too would duplicate
+   * every image on each serialize/deserialize round-trip.
+   */
   toJSON(): Record<string, unknown> {
     const obj: Record<string, unknown> = {
       role: this.role,
-      content: this._buildContent(),
+      content: this.content ?? "",
     };
     if (this.reasoningContent) obj.reasoning_content = this.reasoningContent;
     if (this.toolCalls) obj.tool_calls = this.toolCalls;

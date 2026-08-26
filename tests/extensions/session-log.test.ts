@@ -333,10 +333,12 @@ test("SessionLog round-trip with images preserves image data", async () => {
       { type: "image_url", mimeType: "image/jpeg", data: "anotherimage" },
     ]);
 
-    const json0 = agent.log.at(0)!.toJSON() as Record<string, unknown>;
-    expect(Array.isArray(json0.content)).toBe(true);
-    expect((json0.content as any[])[0]).toEqual({ type: "text", text: "Analyze this image" });
-    expect((json0.content as any[])[1]).toEqual({
+    // toJSON() stores content raw; _buildContent() merges images exactly once.
+    const msg0 = agent.log.at(0)!;
+    expect((msg0.toJSON() as Record<string, unknown>).content).toBe("Analyze this image");
+    const content0 = msg0._buildContent() as any[];
+    expect(content0[0]).toEqual({ type: "text", text: "Analyze this image" });
+    expect(content0[1]).toEqual({
       type: "image_url",
       image_url: { url: "data:image/png;base64,testbase64data" },
     });

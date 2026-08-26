@@ -252,21 +252,24 @@ describe('contentToText', () => {
 });
 
 describe('Message — images', () => {
-  it('returns array content with text + image parts', () => {
+  // Contract: toJSON() stores content RAW; images ride the separate `images`
+  // field; _buildContent() is the only place images merge into content parts.
+
+  it('keeps raw content in toJSON and merges images in _buildContent', () => {
     const msg = new Message({
       role: 'user',
       content: 'What is in this image?',
       images: [{ type: 'image_url', mimeType: 'image/png', data: 'abc123' }],
     });
     const json = msg.toJSON();
-    const content = json.content as ContentPart[];
+    expect(json.content).toBe('What is in this image?');
+    expect(json.images).toEqual([{ type: 'image_url', mimeType: 'image/png', data: 'abc123' }]);
 
-    expect(Array.isArray(content)).toBe(true);
+    const content = msg._buildContent() as ContentPart[];
     expect(content).toEqual([
       { type: 'text', text: 'What is in this image?' },
       { type: 'image_url', image_url: { url: 'data:image/png;base64,abc123' } },
     ]);
-    expect(json.images).toEqual([{ type: 'image_url', mimeType: 'image/png', data: 'abc123' }]);
   });
 
   it('handles multiple images', () => {
@@ -279,7 +282,8 @@ describe('Message — images', () => {
         { type: 'image_url', mimeType: 'image/webp', data: 'img3' },
       ],
     });
-    const content = msg.toJSON().content as ContentPart[];
+    expect(msg.toJSON().content).toBe('Compare these images');
+    const content = msg._buildContent() as ContentPart[];
     expect(content.length).toBe(4); // 1 text + 3 images
     expect(content[0]).toEqual({ type: 'text', text: 'Compare these images' });
     expect(content[1]).toEqual({ type: 'image_url', image_url: { url: 'data:image/png;base64,img1' } });
@@ -293,7 +297,7 @@ describe('Message — images', () => {
       content: 'Look at this',
       images: [{ type: 'image_url', mimeType: 'image/png', data: 'data:image/png;base64,alreadyencoded' }],
     });
-    const content = msg.toJSON().content as ContentPart[];
+    const content = msg._buildContent() as ContentPart[];
     expect(content[1]).toEqual({
       type: 'image_url',
       image_url: { url: 'data:image/png;base64,alreadyencoded' },
@@ -306,7 +310,8 @@ describe('Message — images', () => {
       content: null,
       images: [{ type: 'image_url', mimeType: 'image/png', data: 'img' }],
     });
-    const content = msg.toJSON().content as ContentPart[];
+    expect(msg.toJSON().content).toBe('');
+    const content = msg._buildContent() as ContentPart[];
     expect(content.length).toBe(1);
     expect(content[0]).toEqual({ type: 'image_url', image_url: { url: 'data:image/png;base64,img' } });
   });
@@ -320,7 +325,11 @@ describe('Message — images', () => {
       ],
       images: [{ type: 'image_url', mimeType: 'image/png', data: 'img' }],
     });
-    const content = msg.toJSON().content as ContentPart[];
+    expect(msg.toJSON().content).toEqual([
+      { type: 'text', text: 'Part 1' },
+      { type: 'text', text: 'Part 2' },
+    ]);
+    const content = msg._buildContent() as ContentPart[];
     expect(content.length).toBe(3);
     expect(content[2]).toEqual({ type: 'image_url', image_url: { url: 'data:image/png;base64,img' } });
   });
@@ -336,7 +345,7 @@ describe('Message — images', () => {
       content: 'Look',
       images: [{ type: 'image_url', mimeType: '', data: 'data' }],
     });
-    const content = msg.toJSON().content as ContentPart[];
+    const content = msg._buildContent() as ContentPart[];
     expect(content[1]!.image_url!.url).toContain('image/png');
   });
 
@@ -353,5 +362,81 @@ describe('Message — images', () => {
     expect(json.reasoning_content).toBe('Thinking...');
     expect(json.tool_calls).toBeDefined();
     expect(json.images).toEqual([{ type: 'image_url', mimeType: 'image/png', data: 'img' }]);
+  });
+});
+
+describe('Message — image round-trip (regression)', () => {
+  const image: ImageAttachment = { type: 'image_url', mimeType: 'image/png', data: 'abc123' };
+
+  it('toJSON -> fromJSON -> toJSON is idempotent for messages with images', () => {
+    const m1 = new Message({ role: 'user', content: 'Look at this', images: [image] });
+    const m2 = Message.fromJSON(m1.toJSON());
+    const m3 = Message.fromJSON(m2.toJSON());
+    expect(m2.toJSON()).toEqual(m1.toJSON());
+    expect(m3.toJSON()).toEqual(m1.toJSON());
+  });
+
+  it('restored message emits exactly one image part per image on the wire', () => {
+    const m1 = new Message({ role: 'user', content: 'Look at this', images: [image] });
+    const restored = Message.fromJSON(m1.toJSON());
+    const parts = restored._buildContent() as ContentPart[];
+    expect(parts.filter((p) => p.type === 'image_url')).toHaveLength(1);
+  });
+
+  it('fromJSON heals legacy JSON that inlined image parts into content', () => {
+    // Pre-fix toJSON() stored image parts in content AND in the images
+    // array; restoring such persisted data must not re-inline them.
+    const legacy = {
+      role: 'user',
+      content: [
+        { type: 'text', text: 'Look at this' },
+        { type: 'image_url', image_url: { url: 'data:image/png;base64,abc123' } },
+        { type: 'image_url', image_url: { url: 'data:image/png;base64,abc123' } },
+      ],
+      images: [image],
+    };
+    const m = Message.fromJSON(legacy);
+    expect(m.images).toHaveLength(1);
+    const parts = m._buildContent() as ContentPart[];
+    expect(parts.filter((p) => p.type === 'image_url')).toHaveLength(1);
+    expect(parts.filter((p) => p.type === 'text')).toHaveLength(1);
+  });
+
+  it('heal keeps content image parts whose URL does not match any image', () => {
+    const m = Message.fromJSON({
+      role: 'user',
+      content: [
+        { type: 'text', text: 'Look' },
+        { type: 'image_url', image_url: { url: 'data:image/png;base64,abc123' } }, // matches images -> dropped
+        { type: 'image_url', image_url: { url: 'data:image/jpeg;base64,other' } }, // not in images -> kept
+      ],
+      images: [image],
+    });
+    const parts = m._buildContent() as ContentPart[];
+    const urls = parts.filter((p) => p.type === 'image_url').map((p) => p.image_url!.url);
+    expect(urls).toEqual(['data:image/jpeg;base64,other', 'data:image/png;base64,abc123']);
+  });
+
+  it('fromJSON ignores a malformed (non-array) images field', () => {
+    const m = Message.fromJSON({
+      role: 'user',
+      content: 'hi',
+      images: { not: 'an array' },
+    });
+    expect(m.images).toBeUndefined();
+    expect(m.toJSON().content).toBe('hi');
+    expect(m._buildContent()).toBe('hi');
+  });
+
+  it('fromJSON keeps content image parts when no images field is present', () => {
+    const m = Message.fromJSON({
+      role: 'user',
+      content: [
+        { type: 'text', text: 'hi' },
+        { type: 'image_url', image_url: { url: 'data:image/png;base64,abc' } },
+      ],
+    });
+    const parts = m._buildContent() as ContentPart[];
+    expect(parts.filter((p) => p.type === 'image_url')).toHaveLength(1);
   });
 });

@@ -180,6 +180,13 @@ describe("LlmClient uses the protocol's request path", () => {
     expect(capturedHeaders[0]?.["Authorization"]).toBe("Bearer global-key");
   });
 
+  it("registry rejects protocols without a non-empty id", () => {
+    const reg = createLlmProtocolRegistry();
+    expect(() => reg.register(null as never)).toThrow("non-empty id");
+    expect(() => reg.register({ ...openaiProtocol, id: "" })).toThrow("non-empty id");
+    expect(reg.has("")).toBe(false);
+  });
+
   it("a custom protocol's buildRequest path is used verbatim", async () => {
     const customProtocol: LlmProtocol = {
       ...openaiProtocol,

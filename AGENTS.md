@@ -22,6 +22,7 @@ JS project `hotdog` — an AI agent harness.
 - The project uses Bun runtime. Instead of node, always use bun.
 - Do not add dependencies.
 - Do not add speculative config/feature flags "just in case".
+- Never use mock.module in tests; footgun.
 
 ### Marker Mangler
 Protected markers are rewritten to a random per-session alias (`<m_...>`) in ALL text you receive.

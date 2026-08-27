@@ -116,6 +116,39 @@ describe("hotdogFetch", () => {
     const resp = await hotdogFetch(`${BASE_URL}/`, undefined, 0);
     expect(await resp.text()).toBe("ok");
   });
+
+  // The manual signal-combination fallback only runs on runtimes without
+  // AbortSignal.any. Simulate that by shadowing the static, then restore it.
+  function withoutAbortAny<T>(fn: () => Promise<T>): Promise<T> {
+    const realAny = (AbortSignal as { any?: unknown }).any;
+    (AbortSignal as { any?: unknown }).any = undefined;
+    return fn().finally(() => {
+      (AbortSignal as { any?: unknown }).any = realAny;
+    });
+  }
+
+  it("combines caller signal + timeout via the manual fallback when AbortSignal.any is absent", async () => {
+    await withoutAbortAny(async () => {
+      const controller = new AbortController();
+      setTimeout(() => controller.abort(), 100);
+      const t0 = Date.now();
+      // Two signals (caller + 3000ms timeout) force the fallback path.
+      await expect(
+        hotdogFetch(`${BASE_URL}/slow`, { signal: controller.signal }, 3000),
+      ).rejects.toThrow();
+      expect(Date.now() - t0).toBeLessThan(2000);
+    });
+  });
+
+  it("aborts immediately in the fallback when a signal is already aborted", async () => {
+    await withoutAbortAny(async () => {
+      const controller = new AbortController();
+      controller.abort();
+      await expect(
+        hotdogFetch(`${BASE_URL}/`, { signal: controller.signal }, 3000),
+      ).rejects.toThrow();
+    });
+  });
 });
 
 describe("readCappedBody", () => {

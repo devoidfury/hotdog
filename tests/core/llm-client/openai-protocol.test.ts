@@ -16,7 +16,7 @@ function ctx(mangler: MarkerMangler | null = null): ProtocolContext {
 function sseResponse(body: string): Response {
   return new Response(body, {
     status: 200,
-    headers: new Map([["content-type", "text/event-stream"]]),
+    headers: {"content-type": "text/event-stream"},
   });
 }
 
@@ -30,7 +30,7 @@ describe("openaiProtocol.parseStream", () => {
   it("parses non-SSE JSON responses", async () => {
     const resp = new Response(
       JSON.stringify({ choices: [{ delta: { content: "hello" }, finish_reason: "stop" }] }),
-      { status: 200, headers: new Map([["content-type", "application/json"]]) },
+      { status: 200, headers: {"content-type": "application/json"} },
     );
     expect(await collect(openaiProtocol.parseStream(resp, ctx()))).toEqual([
       { type: "content", content: "hello" },
@@ -41,7 +41,7 @@ describe("openaiProtocol.parseStream", () => {
   it("throws InvalidResponse for non-SSE bodies that are not JSON", async () => {
     const resp = new Response("<html>oops</html>", {
       status: 200,
-      headers: new Map([["content-type", "text/html"]]),
+      headers: {"content-type": "text/html"},
     });
     await expect(collect(openaiProtocol.parseStream(resp, ctx()))).rejects.toThrow(
       "Unexpected Content-Type",
@@ -51,7 +51,7 @@ describe("openaiProtocol.parseStream", () => {
   it("throws InvalidResponse when an SSE response has a null body", async () => {
     const resp = new Response(null, {
       status: 200,
-      headers: new Map([["content-type", "text/event-stream"]]),
+      headers: {"content-type": "text/event-stream"},
     });
     await expect(collect(openaiProtocol.parseStream(resp, ctx()))).rejects.toThrow(
       "Response body is null",

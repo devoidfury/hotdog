@@ -14,7 +14,7 @@
         },
         "maxBodyLength": {
           "type": "number",
-          "default": 8000,
+          "default": 20000,
           "description": "Maximum number of characters to return before truncating responses."
         },
         "fetchTimeoutMs": {

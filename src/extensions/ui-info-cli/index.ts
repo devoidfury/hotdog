@@ -1,20 +1,18 @@
-import { HOOKS } from "../../core/hooks.ts";
-import { CliSubcommandRegistryLike } from "../../core/extensions/registries.ts";
+import { HOOKS } from "@core/hooks.ts";
 import { SkillsLoader } from "../skills/loader.ts";
-import { DEFAULT_PROFILES_SUBPATH, DEFAULT_CONFIG_FILENAME } from "../../core/config/defaults.ts";
-import { CliArgv, loadConfig, ProviderDef, resolveConfigDir } from "../../core/config/index.ts";
-import { ProfileDef, ProfileManager } from "../../core/config/profiles.ts";
+import { DEFAULT_CONFIG_FILENAME } from "@core/config/defaults.ts";
+import { CliArgv, loadConfig, ProviderDef, resolveConfigDir } from "@core/config/index.ts";
+import { ProfileDef, ProfileManager } from "@core/config/profiles.ts";
 import {
   CONFIG_SCHEMA as CONFIG_KEYS,
   resolveKey,
   resolveLayerValue,
   SchemaProperty,
   SchemaLayer,
-  type ResolutionContext,
-} from "../../core/config/schema-loader.ts";
-import { Agent, type AgentConfig } from "../../core/agent.ts";
-import { CoreContext, ExtensionInstance, ResolvedConfig } from "../../core/extensions/types.ts";
-import type { BuildAgentConfig } from "../../core/config/index.ts";
+} from "@core/config/schema-loader.ts";
+import { Agent, type AgentConfig } from "@core/agent.ts";
+import { CoreContext, ExtensionInstance } from "@core/extensions/types.ts";
+import type { BuildAgentConfig, DefaultConfig } from "@core/config/index.ts";
 import path from "node:path";
 import fs from "node:fs/promises";
 
@@ -284,26 +282,22 @@ function traceConfigResolution(keyName: string, schema: SchemaProperty, context:
 
 async function printConfigDebug(
   cli: CliArgv,
-  config: Record<string, unknown>,
+  config: DefaultConfig,
   providers: ProviderDef[],
   resolved: BuildAgentConfig,
 ): Promise<number> {
-  const profileName = (cli.profile as string) || (config.profileName as string) || "default";
+  const profileName = (cli.profile as string) || config.profileName || "default";
   const configDir = resolved.configDir || resolveConfigDir(cli.configDir);
-  const profilesPath = (resolved.profilesPath as string) || path.join(configDir, "profiles");
+  const profilesPath = resolved.profilesPath || path.join(configDir, "profiles");
   let profileManager = resolved.profileManager;
   // Fallback for tests/backward compat
   if (!profileManager) {
-    profileManager = await ProfileManager.create(
-      profilesPath,
-      (config.profiles as Record<string, ProfileDef>) || {},
-    );
+    profileManager = await ProfileManager.create(profilesPath, config.profiles || {});
   }
-  const configProfile: ProfileDef | null =
-    (config.profiles as Record<string, ProfileDef> | undefined)?.[profileName] ?? null;
+  const configProfile: ProfileDef | null = config.profiles?.[profileName] ?? null;
   const fileProfile: ProfileDef | null = profileManager.getFileProfiles()[profileName] ?? null;
 
-  const providerName = (cli.provider as string) || (config.defaultProvider as string);
+  const providerName = (cli.provider as string) || config.defaultProvider;
   const provider = providerName ? (providers.find((p) => p.name === providerName) ?? null) : null;
 
   // File profile wins on conflict, but only for fields it actually sets.
@@ -333,12 +327,12 @@ async function printConfigDebug(
   console.log(`Provider: ${provider?.name || "(none)"}`);
   console.log(`CLI config path: ${cli.config || "(none)"}`);
   console.log(
-    `Config file: ${cli.config || ((config.profilesPath as string) ? path.join(config.profilesPath as string, "..", "defaults.json") : "(defaults only)")}`,
+    `Config file: ${cli.config || (config.profilesPath ? path.join(config.profilesPath, "..", "defaults.json") : "(defaults only)")}`,
   );
   console.log();
 
   for (const [keyName, keySchema] of Object.entries(CONFIG_KEYS)) {
-    const trace = traceConfigResolution(keyName, keySchema as SchemaProperty, context);
+    const trace = traceConfigResolution(keyName, keySchema, context);
     const valueStr =
       trace.resolvedValue === undefined
         ? "(undefined)"
@@ -468,12 +462,12 @@ async function runShowPrompt(cli: CliArgv, core: CoreContext): Promise<number> {
     // Throwaway for prompt rendering; empty url/key so it can never send a request.
     llmClient: core.createLlmClient({ baseUrl: "", apiKey: "" }),
     model: resolved.model || "",
-    maxIterations: (resolved.maxIterations as number) || 100,
+    maxIterations: resolved.maxIterations || 100,
     contextLimit: 128000,
     profileName: resolved.profileName || "default",
-    role: resolved.role as string | undefined,
-    profileBody: resolved.profileBody as string | undefined,
-    config: resolved as AgentConfig,
+    role: resolved.role,
+    profileBody: resolved.profileBody,
+    config: resolved,
   });
   await agent.ensureSystemPrompt();
   console.log(agent.context.getSystemPrompt());
@@ -488,9 +482,9 @@ async function runShowPrompt(cli: CliArgv, core: CoreContext): Promise<number> {
     );
     console.log();
     for (const def of toolDefs) {
-      const name = (def.function as { name?: string })?.name || "(unknown)";
-      const description = (def.function as { description?: string })?.description || "";
-      const params = (def.function as { parameters?: Record<string, unknown> })?.parameters || {};
+      const name = def.function?.name || "(unknown)";
+      const description = def.function?.description || "";
+      const params = def.function?.parameters || {};
       console.log(`## ${name}`);
       console.log(description);
       console.log();
@@ -527,7 +521,7 @@ async function runProfileList(cli: CliArgv, core: CoreContext): Promise<number> 
   if (!profileManager) {
     profileManager = await ProfileManager.create(
       profilesPath,
-      (config.profiles as Record<string, ProfileDef>) || {},
+      config.profiles || {},
     );
   }
 
@@ -609,11 +603,11 @@ function printProfileListText(
 
     // File profile wins, but only for non-empty values.
     const fileBlacklist = fileProfile?.blacklistTools || [];
-    const cfgBlacklist = (configProfile?.blacklist_tools as string[]) || configProfile?.blacklistTools || [];
+    const cfgBlacklist = configProfile?.blacklist_tools || configProfile?.blacklistTools || [];
     const blacklistTools = fileBlacklist.length > 0 ? fileBlacklist : cfgBlacklist;
 
     const fileWhitelist = fileProfile?.whitelistTools;
-    const cfgWhitelist = (configProfile?.whitelist_tools as string[]) || configProfile?.whitelistTools;
+    const cfgWhitelist = configProfile?.whitelist_tools || configProfile?.whitelistTools;
     const whitelistTools = fileWhitelist && fileWhitelist.length > 0 ? fileWhitelist : cfgWhitelist;
 
     if (blacklistTools.length > 0) {
@@ -676,11 +670,11 @@ function printProfileListJson(
 
     // File profile wins, but only for non-empty values.
     const fileBlacklist = fileProfile?.blacklistTools || [];
-    const cfgBlacklist = (configProfile?.blacklist_tools as string[]) || configProfile?.blacklistTools || [];
+    const cfgBlacklist = configProfile?.blacklist_tools || configProfile?.blacklistTools || [];
     const blacklistTools = fileBlacklist.length > 0 ? fileBlacklist : cfgBlacklist;
 
     const fileWhitelist = fileProfile?.whitelistTools;
-    const cfgWhitelist = (configProfile?.whitelist_tools as string[]) || configProfile?.whitelistTools;
+    const cfgWhitelist = configProfile?.whitelist_tools || configProfile?.whitelistTools;
     const whitelistTools = fileWhitelist && fileWhitelist.length > 0 ? fileWhitelist : cfgWhitelist;
 
     const profileAspects = fileProfile?.aspects || configProfile?.aspects || [];
@@ -720,7 +714,7 @@ function printProfileListJson(
 export function create(core: CoreContext): ExtensionInstance {
   return {
     hooks: {
-      [HOOKS.CLI_SUBCOMMANDS_REGISTER]: async (registry: CliSubcommandRegistryLike) => {
+      [HOOKS.CLI_SUBCOMMANDS_REGISTER]: async (registry) => {
         registry.register("info", {
           description: "Show system info and diagnostics",
           handler: async (cli: CliArgv, core: CoreContext) => {

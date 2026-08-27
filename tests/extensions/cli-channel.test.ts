@@ -118,6 +118,22 @@ describe("CliChannel - cleanup", () => {
   });
 });
 
+describe("CliChannel - getters", () => {
+  it("exposes the readline interface and sink", () => {
+    const { rl } = createMockRl();
+    const sink = createMockSink();
+    const channel = new CliChannel({
+      sessionManager: createMockSessionManager(),
+      sessionId: "session-1",
+      sink,
+      rl,
+    });
+
+    expect(channel.readline).toBe(rl);
+    expect(channel.sink).toBe(sink);
+  });
+});
+
 describe("CliChannel - handleQuit", () => {
   it("closes readline and calls onQuit callback", async () => {
     const onQuitFn = mock(() => {});

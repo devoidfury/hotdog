@@ -232,7 +232,7 @@ describe("ExploreTool > execute", () => {
     expect(capturedArgs).not.toBeNull();
     expect(capturedArgs![0]).toBe("bun");
     const args = capturedArgs![1] as string[];
-    expect(args).toContain("-c");
+    expect(args).toContain("-p");
     expect(args).toContain("--profile");
     expect(args).toContain("explorer");
     expect(args).toContain("--hide-tools");
@@ -356,7 +356,7 @@ describe("ExploreTool > execute", () => {
     );
 
     const command = (result as any).metadata.get("command");
-    expect(command).toContain("-c");
+    expect(command).toContain("-p");
     expect(command).toContain("explorer");
     expect(command).toContain("--hide-tools");
   });

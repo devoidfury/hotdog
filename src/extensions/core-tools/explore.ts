@@ -20,7 +20,7 @@ export type SpawnFn = typeof _spawn;
 
 export class ExploreTool {
   static readonly TOOL_NAME = "explore";
-  metadata: ToolMetadata = { sideEffects: false, difficulty: 4 };
+  metadata: ToolMetadata = { sideEffects: true, difficulty: 4 };
 
   private readonly spawnFn: SpawnFn;
 
@@ -116,7 +116,7 @@ export class ExploreTool {
     logger.debug(`Explore: ${BIN_PATH}`);
     const command = [
       BIN_PATH,
-      "-c",
+      "-p",
       prompt,
       "--profile",
       "explorer",

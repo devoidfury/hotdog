@@ -54,6 +54,42 @@ describe("OneShotChannel - construction", () => {
   });
 });
 
+describe("OneShotChannel - detach", () => {
+  it("unsubscribes the session event handler on detach", () => {
+    let unsubscribe: (() => void) | null = null;
+    const sm = createMockSessionManager({
+      onSessionEvents: mock((_sessionId, _handler) => {
+        unsubscribe = () => {};
+        return unsubscribe!;
+      }),
+    });
+
+    const channel = new OneShotChannel({
+      sessionManager: sm,
+      sessionId: "session-1",
+      sink: createMockSink(),
+    });
+
+    channel.detach("session-1");
+    expect(unsubscribe).not.toBeNull();
+    unsubscribe!();
+    // Detaching an already-detached session is a no-op.
+    expect(() => channel.detach("session-1")).not.toThrow();
+  });
+});
+
+describe("OneShotChannel - sink getter", () => {
+  it("returns the sink passed at construction", () => {
+    const sink = createMockSink();
+    const channel = new OneShotChannel({
+      sessionManager: createMockSessionManager(),
+      sessionId: "session-1",
+      sink,
+    });
+    expect(channel.sink).toBe(sink);
+  });
+});
+
 describe("OneShotChannel - read()", () => {
   it("yields nothing (no input in one-shot mode)", async () => {
     const channel = new OneShotChannel({

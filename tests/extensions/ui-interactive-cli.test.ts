@@ -190,6 +190,39 @@ describe("registerSlashCommandNameCompletion", () => {
 
     expect(registeredProviders).toContain("ui-interactive-cli:slash-commands");
   });
+
+  it("matcher and handler complete command names only before the first space", () => {
+    let matcher: ((ctx: { line: string; cursorPos: number; agent: unknown }) => boolean) | null = null;
+    let handler: ((ctx: { line: string; cursorPos: number; agent: unknown }) => { value: string }[]) | null = null;
+    const mockCompletionService = {
+      register: (m: unknown, h: unknown, _name: string) => {
+        matcher = m as never;
+        handler = h as never;
+      },
+    } as never;
+
+    registerSlashCommandNameCompletion(mockCompletionService);
+    expect(matcher).not.toBeNull();
+    expect(handler).not.toBeNull();
+
+    const agent = { commandRegistry: { names: () => ["help", "model", "tokens"] } };
+
+    // Matcher: only while typing the command name itself.
+    expect(matcher!({ line: "/he", cursorPos: 3, agent })).toBe(true);
+    expect(matcher!({ line: "/", cursorPos: 1, agent })).toBe(true);
+    expect(matcher!({ line: "/model ", cursorPos: 7, agent })).toBe(false);
+    expect(matcher!({ line: "help", cursorPos: 4, agent })).toBe(false);
+
+    // Handler: filters registered command names by prefix.
+    expect(handler!({ line: "/he", cursorPos: 3, agent })).toEqual([{ value: "/help" }]);
+    expect(handler!({ line: "/m", cursorPos: 2, agent })).toEqual([{ value: "/model" }]);
+    expect(handler!({ line: "/", cursorPos: 1, agent })).toEqual([
+      { value: "/help" },
+      { value: "/model" },
+      { value: "/tokens" },
+    ]);
+    expect(handler!({ line: "/zz", cursorPos: 3, agent })).toEqual([]);
+  });
 });
 
 // ── registerCommandCompletions ─────────────────────────────────────────────
@@ -285,6 +318,50 @@ describe("registerShellCompletion", () => {
 
     registerShellCompletion(mockCompletionService, true);
     expect(registeredProviders).toContain("ui-interactive-cli:shell");
+  });
+
+  function captureShellProvider() {
+    let matcher: ((ctx: { line: string; cursorPos: number; agent: unknown }) => boolean) | null = null;
+    let handler: ((ctx: { line: string; cursorPos: number; agent: unknown }) => Promise<{ value: string }[]>) | null = null;
+    const mockCompletionService = {
+      register: (m: unknown, h: unknown, _name: string) => {
+        matcher = m as never;
+        handler = h as never;
+      },
+    } as never;
+    registerShellCompletion(mockCompletionService, true);
+    return { matcher: matcher!, handler: handler! };
+  }
+
+  it("shell completion handler runs bash and returns file matches", async () => {
+    const { matcher, handler } = captureShellProvider();
+    const agent = {};
+
+    // Matcher: active for plain text, inactive for slash commands.
+    expect(matcher({ line: "ls ", cursorPos: 3, agent })).toBe(true);
+    expect(matcher({ line: "/model", cursorPos: 6, agent })).toBe(false);
+
+    // "ls " (trailing space) completes files in the current directory.
+    const results = await handler({ line: "ls ", cursorPos: 3, agent });
+    expect(Array.isArray(results)).toBe(true);
+    expect(results.length).toBeGreaterThan(0);
+    expect(results.every((r) => typeof r.value === "string")).toBe(true);
+  });
+
+  it("shell completion handler returns [] when nothing matches", async () => {
+    const { handler } = captureShellProvider();
+    const results = await handler({
+      line: "no_such_hotdog_command_xyz",
+      cursorPos: "no_such_hotdog_command_xyz".length,
+      agent: {},
+    });
+    expect(results).toEqual([]);
+  });
+
+  it("shell completion handler returns [] for empty or too-short lines", async () => {
+    const { handler } = captureShellProvider();
+    expect(await handler({ line: "", cursorPos: 0, agent: {} })).toEqual([]);
+    expect(await handler({ line: "l", cursorPos: 1, agent: {} })).toEqual([]);
   });
 });
 
@@ -394,6 +471,14 @@ describe("buildReadlineCompleter", () => {
     const [matches, prefix] = await invokeCompleter(completer, "/hel");
     expect(prefix).toBe("/hel");
     expect(matches).toEqual(["/help"]);
+  });
+
+  it("handles command argument prefix after a space", async () => {
+    const mockSessionManager = { getAgent: () => mockAgent } as never;
+    const completer = buildReadlineCompleter(mockSessionManager, mockCore as never, false);
+
+    const [, prefix] = await invokeCompleter(completer, "/model prov/a");
+    expect(prefix).toBe("prov/a");
   });
 
   it("handles colon syntax prefix", async () => {

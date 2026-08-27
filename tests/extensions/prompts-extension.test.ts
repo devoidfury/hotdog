@@ -169,3 +169,49 @@ describe("Prompts Extension", () => {
     expect(Array.isArray((ext as any).getAllPrompts())).toBe(true);
   });
 });
+
+// ── completions.ts ─────────────────────────────────────────────────────────
+
+import {
+  matcher as promptMatcher,
+  completion as promptCompletion,
+} from "../../src/extensions/prompts/completions.ts";
+
+describe("prompts completions", () => {
+  const agent = {
+    promptsLoader: {
+      allPrompts: () => [{ name: "greet" }, { name: "farewell" }],
+    },
+  };
+
+  it("matcher matches /prompt and /prompt:name, nothing else", () => {
+    expect(promptMatcher({ command: "prompt", agent } as never)).toBe(true);
+    expect(promptMatcher({ command: "prompt:deploy", agent } as never)).toBe(true);
+    expect(promptMatcher({ command: "other", agent } as never)).toBe(false);
+    expect(promptMatcher({ command: undefined, agent } as never)).toBe(false);
+  });
+
+  it("completion filters prompt names for /prompt <prefix>", () => {
+    expect(
+      promptCompletion({ command: "prompt", commandArg: "", agent } as never),
+    ).toEqual([{ value: "greet" }, { value: "farewell" }]);
+    expect(
+      promptCompletion({ command: "prompt", commandArg: "gr", agent } as never),
+    ).toEqual([{ value: "greet" }]);
+    expect(
+      promptCompletion({ command: "prompt", commandArg: "zzz", agent } as never),
+    ).toEqual([]);
+  });
+
+  it("completion extracts the prefix from /prompt:name", () => {
+    expect(
+      promptCompletion({ command: "prompt:gr", commandArg: "", agent } as never),
+    ).toEqual([{ value: "greet" }]);
+  });
+
+  it("completion handles a missing promptsLoader", () => {
+    expect(
+      promptCompletion({ command: "prompt", commandArg: "", agent: {} } as never),
+    ).toEqual([]);
+  });
+});

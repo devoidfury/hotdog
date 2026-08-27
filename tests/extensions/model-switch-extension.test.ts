@@ -452,3 +452,40 @@ describe("Model-switch extension > edge cases", () => {
     expect(def.matches!("modeling")).toBe(false);
   });
 });
+
+// ── completions.ts ─────────────────────────────────────────────────────────
+
+import {
+  matcher as modelMatcher,
+  completion as modelCompletion,
+} from "../../src/extensions/model-switch/completions.ts";
+
+describe("model-switch completions", () => {
+  const agent = {
+    modelRegistry: { "prov/alpha": {}, "prov/beta": {} },
+  };
+
+  it("matcher matches only the /model command", () => {
+    expect(modelMatcher({ command: "model", agent } as never)).toBe(true);
+    expect(modelMatcher({ command: "models", agent } as never)).toBe(false);
+    expect(modelMatcher({ command: undefined, agent } as never)).toBe(false);
+  });
+
+  it("completion lists model names matching the prefix", () => {
+    expect(
+      modelCompletion({ command: "model", commandArg: "", agent } as never),
+    ).toEqual([{ value: "prov/alpha" }, { value: "prov/beta" }]);
+    expect(
+      modelCompletion({ command: "model", commandArg: "prov/b", agent } as never),
+    ).toEqual([{ value: "prov/beta" }]);
+    expect(
+      modelCompletion({ command: "model", commandArg: "zzz", agent } as never),
+    ).toEqual([]);
+  });
+
+  it("completion handles a missing modelRegistry", () => {
+    expect(
+      modelCompletion({ command: "model", commandArg: "", agent: {} } as never),
+    ).toEqual([]);
+  });
+});

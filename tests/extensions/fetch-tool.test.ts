@@ -759,6 +759,38 @@ describe("FetchTool integration", () => {
     });
   });
 
+  describe("retry safety (non-idempotent methods)", () => {
+    // TransientError makes the tool executor retry; that must stay
+    // available for idempotent GET/HEAD only.
+    it("keeps throwing TransientError on GET timeout (safe to retry)", async () => {
+      const tool = new FetchTool({ timeoutMs: 300, maxBodyLength: 8000, allowPrivateHosts: true });
+      await expect(
+        tool.execute(JSON.stringify({ url: `${BASE_URL}/slow`, method: "GET" })),
+      ).rejects.toBeInstanceOf(TransientError);
+    });
+
+    it("resolves with an error (no retry) when a POST times out", async () => {
+      const tool = new FetchTool({ timeoutMs: 300, maxBodyLength: 8000, allowPrivateHosts: true });
+      const t0 = Date.now();
+      const result = await tool.execute(
+        JSON.stringify({ url: `${BASE_URL}/slow`, method: "POST", body: "payload" }),
+      );
+      // Must abort on the tool timeout, not wait out the server's 2s delay.
+      expect(Date.now() - t0).toBeLessThan(1500);
+      expect(result.success).toBe(false);
+      expect(result.error).toContain("timed out");
+    });
+
+    it("resolves with an error (no retry) when a PUT cannot connect", async () => {
+      const tool = new FetchTool({ timeoutMs: 30000, maxBodyLength: 8000, allowPrivateHosts: true });
+      const result = await tool.execute(
+        JSON.stringify({ url: "http://localhost:19999/nonexistent", method: "PUT", body: "payload" }),
+      );
+      expect(result.success).toBe(false);
+      expect(result.error).toContain("Connection failed");
+    });
+  });
+
   describe("redirect SSRF protection", () => {
     const allowAll = async () => null;
 

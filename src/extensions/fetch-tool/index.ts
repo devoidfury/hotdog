@@ -178,14 +178,23 @@ export class FetchTool {
     } catch (e: unknown) {
       const err = e as Error;
       const msg = err.message || String(e);
+      // TransientError makes the tool executor retry the call. Retrying is
+      // only safe for idempotent methods: a timed-out or dropped POST/PUT/
+      // PATCH to an arbitrary third-party endpoint may already have been
+      // executed once, so non-GET/HEAD failures resolve as plain errors.
+      const retryable = method === "GET" || method === "HEAD";
+      const fail = (message: string) => {
+        if (retryable) throw new TransientError(message);
+        return ToolResult.err(message);
+      };
       if (err.name === "TimeoutError" || msg.includes("timed out") || msg.includes("timeout")) {
-        throw new TransientError(`Request to ${url} timed out after ${this.timeoutMs}ms`);
+        return fail(`Request to ${url} timed out after ${this.timeoutMs}ms`);
       }
       if (err.name === "AbortError" || msg.includes("aborted")) {
-        throw new TransientError(`Request to ${url} was aborted`);
+        return fail(`Request to ${url} was aborted`);
       }
       if (msg.includes("connect") || msg.includes("network")) {
-        throw new TransientError(`Connection failed for ${url}: ${msg}`);
+        return fail(`Connection failed for ${url}: ${msg}`);
       }
       return ToolResult.err(`Error: ${msg}`);
     }

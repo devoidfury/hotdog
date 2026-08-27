@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach } from "bun:test";
-import { create } from "../../src/extensions/file-attachment/index.ts";
+import { create, resolveFilePath } from "../../src/extensions/file-attachment/index.ts";
 import { matcher, completion } from "../../src/extensions/file-attachment/completions.ts";
+import { PathEscapeError, Workspace } from "../../src/utils/workspace.ts";
 import { HOOKS } from "../../src/core/hooks.ts";
 import { createCompletionService } from "../../src/core/completion.ts";
 import fs from "node:fs";
@@ -640,5 +641,46 @@ describe("file-attachment workspace boundary (escape rejection)", () => {
     const r = result as any;
     expect(r.action).toBe("transform");
     expect(r.text).toContain("INSIDE-OK-CONTENT");
+  });
+});
+
+describe("file-attachment resolveFilePath (fail closed)", () => {
+  it("returns the resolved path when resolveSafe succeeds", () => {
+    const stub = { resolveSafe: (p: string) => `/ws/${p}` } as unknown as Workspace;
+    expect(resolveFilePath("a.txt", stub)).toBe("/ws/a.txt");
+  });
+
+  it("returns null on PathEscapeError", () => {
+    const stub = {
+      resolveSafe: () => {
+        throw PathEscapeError.directEscape("/etc/passwd");
+      },
+    } as unknown as Workspace;
+    expect(resolveFilePath("../../etc/passwd", stub)).toBeNull();
+  });
+
+  it("returns null on an unexpected boundary-check error (fails closed, no fall-through)", () => {
+    const stub = {
+      resolveSafe: () => {
+        throw new Error("fs ENOENT during realpath walk");
+      },
+    } as unknown as Workspace;
+    // Previously this fell through to unbounded resolution and returned the
+    // raw path. It must now be refused.
+    expect(resolveFilePath("/etc/passwd", stub)).toBeNull();
+  });
+
+  it("still resolves unbounded when no workspace is supplied", () => {
+    expect(resolveFilePath("/abs/path.txt", null)).toBe("/abs/path.txt");
+    const originalCwd = process.cwd();
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "file-attach-nowrap-"));
+    try {
+      process.chdir(tmp);
+      const resolved = resolveFilePath("rel.txt", null);
+      expect(resolved).toBe(path.resolve(tmp, "rel.txt"));
+    } finally {
+      process.chdir(originalCwd);
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
   });
 });

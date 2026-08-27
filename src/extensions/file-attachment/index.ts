@@ -4,6 +4,7 @@ import { cwd } from "node:process";
 import { HOOKS } from "@core/hooks.ts";
 import { OUTPUT_EVENT } from "@core/context/output.ts";
 import { logger } from "@core/logger.ts";
+import { formatError } from "@core/error.ts";
 import { type CoreContext, type ExtensionInstance, getExtensionConfig } from "@core/extensions/types.ts";
 import { Workspace, PathEscapeError } from "@utils/workspace.ts";
 
@@ -12,17 +13,24 @@ import { matcher, completion } from "./completions.ts";
 // Lookbehind so "tom@furycodes.com" doesn't match; only bare @path refs do.
 const FILE_REF_RE = /(?<!\w)@([a-zA-Z0-9._\/\+-]+)\b/g;
 
-// Returns null when the path is rejected by the workspace boundary (PathEscapeError).
-function resolveFilePath(filePath: string, workspace: Workspace | null): string | null {
+/**
+ * Returns null when the path is rejected by the workspace boundary, or when
+ * the boundary check itself fails for any other reason -- a broken check
+ * must fail closed, never silently widen the boundary. The unbounded
+ * resolution below only runs when no workspace was supplied at all.
+ * @internal Exported for testing.
+ */
+export function resolveFilePath(filePath: string, workspace: Workspace | null): string | null {
   if (workspace) {
     try {
       return workspace.resolveSafe(filePath);
     } catch (e: unknown) {
       if (e instanceof PathEscapeError) {
         logger.debug(`file-attachment: path escape rejected for '${filePath}'`);
-        return null;
+      } else {
+        logger.warn(`file-attachment: boundary check failed for '${filePath}': ${formatError(e)}; refusing path`);
       }
-      // Fall back to basic resolution if workspace check fails for another reason
+      return null;
     }
   }
   if (isAbsolute(filePath)) {

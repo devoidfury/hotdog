@@ -392,19 +392,6 @@ Timeout in seconds for chat/API requests.
 { "chatTimeoutSecs": 300 }
 ```
 
-### `embeddingsTimeoutSecs`
-
-- **Type:** `number`
-- **CLI flag:** `--embeddings-timeout`
-- **Default:** `120`
-- **Resolution:** CLI > config > default
-
-Timeout in seconds for embeddings requests.
-
-```json
-{ "embeddingsTimeoutSecs": 60 }
-```
-
 ### `maxIterations`
 
 - **Type:** `number`

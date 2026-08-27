@@ -408,7 +408,6 @@ export interface CoreConfig {
   modelToolFormat?: string;
   toolOutputFmt?: string;
   chatTimeout?: number;
-  embeddingsTimeout?: number;
   healthCheckTimeout?: number;
   sessionId?: string;
   compactDebug?: boolean;

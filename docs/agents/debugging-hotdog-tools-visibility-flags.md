@@ -37,7 +37,6 @@ bun bin/hotdog prompt "hello"
 - **`--max-iterations <n>`** — maximum agent loop iterations
 - **`--role <text>`** — override the system prompt role
 - **`--provider <name>`** — override the AI provider
-- **`--embeddings-timeout <secs>`** — timeout for embeddings requests
 - **`--chat-timeout <secs>`** — timeout for chat/API requests
 - **`--system-prompt-template <path>`** — custom system prompt template file
 - **`--skills-path <path>`** — skills directory path

@@ -253,7 +253,6 @@ describe("integration: resolveAll with CONFIG_KEYS", () => {
         toolCallDisplayFormat: "config-tool",
         toolOutputFmt: "config-output",
         chatTimeoutSecs: 900,
-        embeddingsTimeoutSecs: 60,
         promptsPath: "/config/prompts",
         compactDebug: false,
         hideTools: false,

@@ -1,20 +1,13 @@
-import { fileURLToPath } from "node:url";
-import { dirname } from "node:path";
-import { HOOKS } from "../../core/hooks.ts";
+import { HOOKS } from "@core/hooks.ts";
 import {
   toolDef,
   param,
   ToolResult,
   parseToolInput,
   defaultCallDisplay,
-} from "../../core/extensions/tool-utils.ts";
-import type { ToolMetadata } from "../../core/extensions/tool-registry.ts";
-import {
-  CoreContext,
-  ExtensionInstance,
-  ToolContext,
-  getExtensionConfig,
-} from "../../core/extensions/types.ts";
+} from "@core/extensions/tool-utils.ts";
+import type { ToolMetadata } from "@core/extensions/tool-registry.ts";
+import { CoreContext, ExtensionInstance, ToolContext, getExtensionConfig } from "@core/extensions/types.ts";
 
 interface HandoffPayload {
   content: string;
@@ -32,12 +25,12 @@ export class HandoffTool {
   toToolDef() {
     return toolDef(
       HandoffTool.TOOL_NAME,
-      "Transition to a new phase by clearing context and restarting with a prepared plan. Use when transitioning work phase, examples: planning → execution, research → implementation, analysis → action, or need fresh focus on essential context, or when asked to prepare a plan and execute. Be thorough — this is your only bridge to the next phase.",
+      "Transition to a new phase by clearing context and restarting with a prepared plan. Use when transitioning work phase, examples: planning → execution, research → implementation, analysis → action, or need fresh focus on essential context, or when asked to prepare a plan and execute. Be thorough — this is your only bridge to the next phase, but don't paste file contents, and don't over-describe what's inside the files.",
       {
         properties: {
           content: param(
             "string",
-            "The handoff content — a comprehensive summary of the plan, context, decisions, and instructions for the next phase. This becomes the starting point for the fresh conversation. Include: the plan/task, key decisions and rationale, constraints/requirements, and specific next steps - avoid repeating anything already in the relevant files.",
+            "The handoff content - a clear and concise summary of the task and key decision items for the next phase. This becomes the starting point for the fresh conversation.",
           ),
           title: param(
             "string",
@@ -49,7 +42,7 @@ export class HandoffTool {
           ),
           files: param(
             "array",
-            "Optional list of file paths relevant to the next phase. Helps the agent know which files to focus on.",
+            "Optional list of file paths relevant to the next phase. This instructs which files are important context and will be read.",
             {
               items: { type: "string" },
             },
@@ -78,7 +71,7 @@ export class HandoffTool {
     }
 
     const payload: HandoffPayload = {
-      content: args.content as string,
+      content: args.content,
       title: (args.title as string) || undefined,
       instructions: (args.instructions as string) || undefined,
       files: Array.isArray(args.files)
@@ -167,7 +160,7 @@ export function create(core: CoreContext): ExtensionInstance {
         }
 
         // Keyed by agent session id to match the tool's pending map.
-        const sessionId = (agent as { sessionId?: string }).sessionId || "default";
+        const sessionId = agent.sessionId || "default";
 
         // A cancelled turn leaves a stale pending handoff; drop it so a later
         // turn in this session can't accidentally consume it.

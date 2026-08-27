@@ -734,6 +734,38 @@ describe("createWsServer - auth", () => {
     expect(types.filter((t) => t === S2C.AUTH_ERROR).length).toBeGreaterThanOrEqual(2);
     expect(types).not.toContain(S2C.SESSION_CREATED);
   });
+
+  it("excludes unauthenticated sockets from broadcasts until AUTH succeeds", async () => {
+    wsServer = createWsServer(createWsMockCore(), { buildAgent: createWsMockAgentFactory(), auth: authCore() });
+
+    // ws1 authenticates at upgrade; ws2 stays unauthenticated (AUTH_REQUIRED).
+    const ws1 = createWsMockWs();
+    wsServer.onUpgrade({ url: "/ws?token=valid-token", headers: { host: "localhost" } }, ws1);
+    await waitForMessage(ws1, S2C.SESSION_CREATED); // upgrade attach (direct send, index 0)
+
+    const ws2 = createWsMockWs();
+    wsServer.onUpgrade({ url: "/ws", headers: { host: "localhost" } }, ws2);
+    expect(lastMessage(ws2).type).toBe(S2C.AUTH_REQUIRED);
+
+    // ws1's CREATE_SESSION fans out to registered sockets via broadcast.
+    // ws1 receives direct send (index 1) + its own broadcast copy (index 2);
+    // waiting for the copy at index 2 proves the broadcast was dispatched.
+    wsServer.onMessage(ws1, JSON.stringify({ type: C2S.CREATE_SESSION }));
+    await waitForMessage(ws1, S2C.SESSION_CREATED, { after: 2 });
+    // The broadcast must NOT have reached the unauthenticated ws2.
+    expect(messageTypes(ws2)).toEqual([S2C.AUTH_REQUIRED]);
+
+    // After protocol AUTH, ws2 joins the broadcast group.
+    wsServer.onMessage(ws2, JSON.stringify({ type: C2S.AUTH, token: "valid-token" }));
+    await waitForMessage(ws2, "authOk");
+    // AUTH success attaches ws2 to the most recent session (direct send).
+    await waitForMessage(ws2, S2C.SESSION_CREATED);
+    const afterIdx = ws2.messages.length;
+
+    // A broadcast from another client must now reach ws2.
+    wsServer.onMessage(ws1, JSON.stringify({ type: C2S.CREATE_SESSION }));
+    await waitForMessage(ws2, S2C.SESSION_CREATED, { after: afterIdx });
+  });
 });
 
 // ── replaySessionHistory Tests ───────────────────────────────────────────────

@@ -583,6 +583,9 @@ async function routeMessage(
         const valid = authMiddleware.validateToken(msg.token as string);
         if (valid) {
           ws.authToken = msg.token as string;
+          // Authed sockets join the broadcast group (no-op if already
+          // registered via a token upgrade).
+          registry.registerConnection(ws);
           ws.send(JSON.stringify({ type: "authOk" }));
           if (!ws.activeSessionId) {
             if (registry.size > 0) {
@@ -1133,11 +1136,12 @@ export function createWsServer(
     req: { url: string; headers?: Record<string, string> },
     ws: HotdogServerSocket<unknown>,
   ): void {
-    registry.registerConnection(ws);
-
     const url = new URL(req.url, `http://${req.headers?.host || "localhost"}`);
     const token = url.searchParams.get("token");
 
+    // Only register a socket for broadcasts once it is authenticated (or
+    // auth is disabled): an unauthenticated socket must not receive
+    // broadcast events (e.g. question answers) while it waits to auth.
     if (auth && token) {
       if (!auth.validateToken(token)) {
         ws.send(
@@ -1150,11 +1154,15 @@ export function createWsServer(
         return;
       }
       ws.authToken = token;
+      registry.registerConnection(ws);
     } else if (auth && !token) {
       // Socket stays open so the client can still authenticate via a
       // protocol AUTH message; routeMessage() gates everything else.
+      // Registration for broadcasts happens on AUTH success.
       ws.send(JSON.stringify({ type: S2C.AUTH_REQUIRED }));
       return;
+    } else {
+      registry.registerConnection(ws);
     }
 
     const existingCount = registry.size;

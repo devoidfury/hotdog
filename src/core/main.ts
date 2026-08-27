@@ -217,7 +217,7 @@ async function buildFullConfig(
       baseUrl: resolved.baseUrl,
       apiKey: resolved.apiKey,
     },
-    128000,
+    castAs<number>(resolved.contextLimit),
   );
   resolved.modelRegistry = modelRegistry;
 

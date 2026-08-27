@@ -18,6 +18,10 @@
           "default": 8000,
           "description": "Token budget to reserve for the conversation"
         },
+        "contextLimit": {
+          "type": "number",
+          "description": "Context window size limit in tokens; defaults to the core contextLimit config"
+        },
         "keepRecentMessages": {
           "type": "number",
           "default": 3,

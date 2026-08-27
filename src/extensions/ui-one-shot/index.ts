@@ -118,7 +118,7 @@ async function handlePromptSubcommand(
       model: (agentConfig.model as string) || resolved.model,
       maxIterations:
         (agentConfig.maxIterations as number) || resolved.maxIterations || 100,
-      contextLimit: 128000,
+      contextLimit: resolved.contextLimit,
       hideTools: typeof agentConfig.hideTools === "boolean" ? agentConfig.hideTools : resolved.hideTools,
       hideThinking: typeof agentConfig.hideThinking === "boolean" ? agentConfig.hideThinking : resolved.hideThinking,
       showTokenUse: typeof agentConfig.showTokenUse === "boolean" ? agentConfig.showTokenUse : resolved.showTokenUse,

@@ -585,6 +585,7 @@ function createMockCore(overrides: Record<string, unknown> = {}): never {
       chatTimeout: 60,
       maxRetries: 3,
       maxIterations: 100,
+      contextLimit: 128000,
       profileName: "test",
       hideTools: false,
       hideThinking: false,
@@ -888,6 +889,7 @@ describe("buildInteractiveAgent", () => {
   const defaultResolved = {
     model: "test-model",
     maxIterations: 50,
+    contextLimit: 128000,
     profileName: "test-profile",
     hideTools: true,
     hideThinking: false,

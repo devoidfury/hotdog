@@ -1049,7 +1049,7 @@ export function createWsServer(
           (core.resolved?.model as string) ||
           "",
         maxIterations: (core.resolved?.maxIterations as number) || 100,
-        contextLimit: 128000,
+        contextLimit: core.resolved?.contextLimit as number,
         hideTools:
           (agentConfig as { hideTools?: boolean }).hideTools ??
           (core.resolved?.hideTools as boolean) ??

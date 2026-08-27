@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- config
+  - the previously hardcoded fallback context window is now the `contextLimit` core config key (default `128000`) -- it feeds the model registry fallback, the agent, and compaction, so small-context local models can lower the base limit from `defaults.json`; compaction can override it per-extension via `compaction.contextLimit`
+
 **Full Changelog**: https://github.com/devoidfury/hotdog/compare/v0.6.0...main
 
 ## [v0.6.0] - 2026-08-27

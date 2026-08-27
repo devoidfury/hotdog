@@ -423,6 +423,8 @@ export interface CoreConfig {
   maxIterations?: number;
   maxRetries?: number;
   maxToolCallsPerIteration?: number;
+  /** Base context window size in tokens; fallback for models without a per-model override. */
+  contextLimit?: number;
   sandboxMode?: boolean;
   /** CLI override for max tool difficulty. Highest priority. */
   maxToolDifficulty?: number | null;

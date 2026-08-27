@@ -29,6 +29,8 @@ interface CompactionSettings {
   keepRecentMessages: number;
   strategy: string;
   userTurnGuardPrompt: string;
+  /** Context window size in tokens; threaded from the core contextLimit unless overridden here. */
+  contextLimit?: number;
 }
 
 function getModelConfig(modelRegistry: Record<string, ModelConfig>, modelName: string): ModelConfig {
@@ -47,6 +49,9 @@ export function create(core: CoreContext): ExtensionInstance | null {
   const settings = getExtensionConfig<CompactionSettings>(core, "compaction");
 
   if (!settings.enabled) return null;
+
+  // Honor the core contextLimit unless compaction.contextLimit overrides it.
+  settings.contextLimit ??= core.resolved?.contextLimit;
 
   const strategyRegistry = new CompactionStrategyRegistry();
   strategyRegistry.register(new SummarizeStrategy());

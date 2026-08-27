@@ -418,6 +418,18 @@ Maximum number of tool calls allowed per LLM turn.
 { "maxToolCallsPerIteration": 5 }
 ```
 
+### `contextLimit`
+
+- **Type:** `number`
+- **Default:** `128000`
+- **Resolution:** config > default
+
+Base context window size in tokens. Used as the fallback for models that have no per-provider or per-model `contextLimit` override, for the agent, and for the compaction budget (unless `compaction.contextLimit` overrides it). Lower this for small-context local models.
+
+```json
+{ "contextLimit": 32000 }
+```
+
 ### `taskProfile`
 
 - **Type:** `string`
@@ -853,6 +865,7 @@ Extensions register their own configuration namespaces. Each extension's config 
 | `enabled` | `boolean` | `true` | Enable/disable compaction. |
 | `strategy` | `string` | `"summarize"` | Strategy: `summarize`, `drop`, `summarize-short`, `token-aware`, `trim`. Switch at runtime with `/compact <strategy>` or `/compact:<strategy>`. |
 | `reserveTokens` | `number` | `8000` | Token budget to reserve for the response. |
+| `contextLimit` | `number` | core `contextLimit` | Context window size in tokens used by the strategies; defaults to the core [`contextLimit`](#contextlimit). |
 | `keepRecentMessages` | `number` | `3` | Recent messages to keep after compaction. |
 | `userTurnGuardPrompt` | `string` | `"Continue from the compressed conversation context above."` | Prompt added when compaction ends in a non-user turn to ensure compatibility with some LLM templates. |
 

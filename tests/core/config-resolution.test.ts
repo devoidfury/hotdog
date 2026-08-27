@@ -120,6 +120,13 @@ describe("CONFIG_KEYS schema", () => {
     expect(resolveKey("healthCheckTimeout", CONFIG_KEYS.healthCheckTimeout, baseContext)).toBe(5);
   });
 
+  it("contextLimit resolves from config, defaulting to 128000", () => {
+    expect(resolveKey("contextLimit", CONFIG_KEYS.contextLimit, baseContext)).toBe(128000);
+    expect(resolveKey("contextLimit", CONFIG_KEYS.contextLimit, { ...baseContext, config: { contextLimit: 32000 } })).toBe(32000);
+    // Non-numeric config values fall through to the default
+    expect(resolveKey("contextLimit", CONFIG_KEYS.contextLimit, { ...baseContext, config: { contextLimit: "not-a-number" } })).toBe(128000);
+  });
+
 });
 
 describe("Phase 2: Complex values", () => {
@@ -323,5 +330,6 @@ describe("integration: resolveAll with CONFIG_KEYS", () => {
     expect(result.noLog).toBe(false);
     expect(result.hideThinking).toBe(false);
     expect(result.useColors).toBe(true);
+    expect(result.contextLimit).toBe(128000);
   });
 });

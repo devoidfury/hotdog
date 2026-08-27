@@ -121,6 +121,18 @@ describe("Compaction Extension Creation", () => {
     expect((ext as any).settings.reserveTokens).toBe(8192);
   });
 
+  it("threads the core contextLimit into settings when compaction.contextLimit is unset", () => {
+    const core = { ...createMockCore(), resolved: { contextLimit: 32000 } };
+    const ext = createCompactionExtension(core);
+    expect((ext as any).settings.contextLimit).toBe(32000);
+  });
+
+  it("prefers compaction.contextLimit over the core contextLimit", () => {
+    const core = { ...createMockCore({ contextLimit: 16000 }), resolved: { contextLimit: 32000 } };
+    const ext = createCompactionExtension(core);
+    expect((ext as any).settings.contextLimit).toBe(16000);
+  });
+
   it("should provide getStrategyList with all built-in strategies, correct names and order", () => {
     const ext = createCompactionExtension(createMockCore());
     const list = (ext as any).getStrategyList();

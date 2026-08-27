@@ -217,6 +217,7 @@ export interface ResolvedConfig {
   healthCheckTimeout?: number;
   maxRetries: number;
   maxIterations: number;
+  contextLimit: number;
 
   model: string;
   modelRegistry: Record<string, ModelConfig>;

@@ -435,7 +435,7 @@ async function runShowPrompt(cli: CliArgv, core: CoreContext): Promise<number> {
     llmClient: core.createLlmClient({ baseUrl: "", apiKey: "" }),
     model: resolved.model || "",
     maxIterations: resolved.maxIterations || 100,
-    contextLimit: 128000,
+    contextLimit: resolved.contextLimit as number,
     profileName: resolved.profileName || "default",
     role: resolved.role,
     profileBody: resolved.profileBody,

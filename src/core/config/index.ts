@@ -345,7 +345,7 @@ export async function buildConfig(cliArgv: CliArgv): Promise<{
       baseUrl: resolved.baseUrl,
       apiKey: resolved.apiKey,
     },
-    128000,
+    castAs<number>(resolved.contextLimit),
   );
   resolved.modelRegistry = modelRegistry;
 

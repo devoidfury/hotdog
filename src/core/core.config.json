@@ -314,6 +314,13 @@
       { "default": 10 }
     ]
   },
+  "contextLimit": {
+    "type": "number",
+    "layers": [
+      { "source": "config", "key": "contextLimit", "cast": "number" },
+      { "default": 128000 }
+    ]
+  },
   "maxRetries": {
     "type": "number",
     "layers": [{ "default": 5 }]

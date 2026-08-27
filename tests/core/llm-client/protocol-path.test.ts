@@ -1,34 +1,61 @@
 // Protocol path plumbing: LlmClient must use the path returned by
 // protocol.buildRequest() instead of hardcoding /v1/chat/completions.
+//
+// Requests are captured on a real local HTTP server (no module mocks),
+// which also keeps the interception scoped to this file's server.
 
-import { describe, it, expect, mock, beforeEach } from "bun:test";
+import { describe, it, expect, beforeAll, afterAll, beforeEach } from "bun:test";
 import { LlmClient } from "../../../src/core/llm-client/client.ts";
 import { Message } from "../../../src/core/context/message.ts";
 import type { ModelConfig } from "../../../src/core/config/providers.ts";
 import { createLlmProtocolRegistry, type LlmProtocol } from "../../../src/core/llm-client/protocol.ts";
 import { openaiProtocol } from "../../../src/core/llm-client/openai-protocol.ts";
 
+const TEST_PORT = 18941;
+const PROVIDER_PORT = 18942;
+const BASE_URL = `http://127.0.0.1:${TEST_PORT}`;
+const PROVIDER_URL = `http://127.0.0.1:${PROVIDER_PORT}`;
+
 function mc(overrides: Partial<ModelConfig> = {}): ModelConfig {
   return { name: "prov/m1", temperature: null, contextLimit: 128000, tags: [], ...overrides };
 }
 
 describe("LlmClient uses the protocol's request path", () => {
+  const servers: ReturnType<typeof Bun.serve>[] = [];
   let capturedUrls: string[] = [];
   let capturedHeaders: Record<string, string>[] = [];
+
+  function startServer(port: number): void {
+    servers.push(
+      Bun.serve({
+        port,
+        fetch(req) {
+          const h: Record<string, string> = {};
+          req.headers.forEach((v, k) => (h[k] = v));
+          capturedUrls.push(req.url);
+          capturedHeaders.push(h);
+          return new Response(JSON.stringify({ choices: [] }), {
+            status: 200,
+            headers: { "content-type": "application/json" },
+          });
+        },
+      }),
+    );
+  }
+
+  beforeAll(() => {
+    startServer(TEST_PORT);
+    startServer(PROVIDER_PORT);
+  });
+
+  afterAll(() => {
+    for (const s of servers) s.stop(true);
+    servers.length = 0;
+  });
 
   beforeEach(() => {
     capturedUrls = [];
     capturedHeaders = [];
-    mock.module("@utils/fetch.ts", () => ({
-      hotdogFetch: async (url: string, init?: RequestInit) => {
-        capturedUrls.push(url);
-        capturedHeaders.push((init?.headers || {}) as Record<string, string>);
-        return new Response(JSON.stringify({ choices: [] }), {
-          status: 200,
-          headers: { "content-type": "application/json" },
-        });
-      },
-    }));
   });
 
   async function drain(stream: AsyncGenerator<unknown>): Promise<void> {
@@ -42,13 +69,13 @@ describe("LlmClient uses the protocol's request path", () => {
       chatTimeoutSecs: 60,
       maxRetries: 1,
       markerMangler: null,
-      baseUrl: "http://p.example",
+      baseUrl: BASE_URL,
       apiKey: "k",
     });
     await drain(
       client.chatStreamCancellable([new Message({ role: "user", content: "hi" })], mc(), [], null),
     );
-    expect(capturedUrls[0]).toBe("http://p.example/v1/chat/completions");
+    expect(capturedUrls[0]).toBe(`${BASE_URL}/v1/chat/completions`);
   });
 
   it("resolves the protocol from the provider level when the model has none", async () => {
@@ -68,7 +95,7 @@ describe("LlmClient uses the protocol's request path", () => {
       chatTimeoutSecs: 60,
       maxRetries: 1,
       markerMangler: null,
-      baseUrl: "http://p.example",
+      baseUrl: BASE_URL,
       apiKey: "k",
       providers: [{ name: "prov", models: [], protocol: "provider-protocol" }],
       llmProtocolRegistry: reg,
@@ -77,7 +104,7 @@ describe("LlmClient uses the protocol's request path", () => {
     await drain(
       client.chatStreamCancellable([new Message({ role: "user", content: "hi" })], mc(), [], null),
     );
-    expect(capturedUrls[0]).toBe("http://p.example/v1/provider-path");
+    expect(capturedUrls[0]).toBe(`${BASE_URL}/v1/provider-path`);
   });
 
   it("model-level protocol wins over provider-level", async () => {
@@ -102,7 +129,7 @@ describe("LlmClient uses the protocol's request path", () => {
       chatTimeoutSecs: 60,
       maxRetries: 1,
       markerMangler: null,
-      baseUrl: "http://p.example",
+      baseUrl: BASE_URL,
       apiKey: "k",
       providers: [{ name: "prov", models: [], protocol: "provider-protocol" }],
       llmProtocolRegistry: reg,
@@ -115,25 +142,26 @@ describe("LlmClient uses the protocol's request path", () => {
         null,
       ),
     );
-    expect(capturedUrls[0]).toBe("http://p.example/v1/model-path");
+    expect(capturedUrls[0]).toBe(`${BASE_URL}/v1/model-path`);
   });
 
-  it("auth header uses the provider-level API key, not the global one", async () => {
+  it("auth header uses the provider-level API key and URL, not the global ones", async () => {
     const client = new LlmClient({
       chatTimeoutSecs: 60,
       maxRetries: 1,
       markerMangler: null,
-      baseUrl: "http://global.example",
+      baseUrl: BASE_URL,
       apiKey: "global-key",
       providers: [
-        { name: "prov", models: [], url: "http://prov.example", apiKey: "provider-key" },
+        { name: "prov", models: [], url: PROVIDER_URL, apiKey: "provider-key" },
       ],
     });
     await drain(
       client.chatStreamCancellable([new Message({ role: "user", content: "hi" })], mc(), [], null),
     );
-    expect(capturedUrls[0]).toBe("http://prov.example/v1/chat/completions");
-    expect(capturedHeaders[0]?.["Authorization"]).toBe("Bearer provider-key");
+    // The provider's own URL wins over the global base URL.
+    expect(capturedUrls[0]).toBe(`${PROVIDER_URL}/v1/chat/completions`);
+    expect(capturedHeaders[0]?.["authorization"]).toBe("Bearer provider-key");
   });
 
   it("x-session-affinity uses the per-call sessionId, falling back to the client's", async () => {
@@ -141,7 +169,7 @@ describe("LlmClient uses the protocol's request path", () => {
       chatTimeoutSecs: 60,
       maxRetries: 1,
       markerMangler: null,
-      baseUrl: "http://p.example",
+      baseUrl: BASE_URL,
       apiKey: "k",
       sessionId: "client-session",
     });
@@ -169,15 +197,15 @@ describe("LlmClient uses the protocol's request path", () => {
       chatTimeoutSecs: 60,
       maxRetries: 1,
       markerMangler: null,
-      baseUrl: "http://global.example",
+      baseUrl: BASE_URL,
       apiKey: "global-key",
       providers: [{ name: "prov", models: [] }],
     });
     await drain(
       client.chatStreamCancellable([new Message({ role: "user", content: "hi" })], mc(), [], null),
     );
-    expect(capturedUrls[0]).toBe("http://global.example/v1/chat/completions");
-    expect(capturedHeaders[0]?.["Authorization"]).toBe("Bearer global-key");
+    expect(capturedUrls[0]).toBe(`${BASE_URL}/v1/chat/completions`);
+    expect(capturedHeaders[0]?.["authorization"]).toBe("Bearer global-key");
   });
 
   it("registry rejects protocols without a non-empty id", () => {
@@ -204,7 +232,7 @@ describe("LlmClient uses the protocol's request path", () => {
       chatTimeoutSecs: 60,
       maxRetries: 1,
       markerMangler: null,
-      baseUrl: "http://p.example",
+      baseUrl: BASE_URL,
       apiKey: "k",
       llmProtocolRegistry: reg,
     });
@@ -216,6 +244,6 @@ describe("LlmClient uses the protocol's request path", () => {
         null,
       ),
     );
-    expect(capturedUrls[0]).toBe("http://p.example/v1/messages");
+    expect(capturedUrls[0]).toBe(`${BASE_URL}/v1/messages`);
   });
 });

@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'bun:test';
 import fs from 'node:fs';
-import { BashTool, create } from '../../src/extensions/bash-tool/index.ts';
+import { BashTool, create, resolveBashTimeout } from '../../src/extensions/bash-tool/index.ts';
 import { AssistantRetryableError } from '../../src/core/error.ts';
 import { resultStr, tmpDir, cleanupDir, processAlive, waitForExit } from '../helpers.ts';
 import { HOOKS } from '../../src/core/hooks.ts';
@@ -181,5 +181,77 @@ describe('BashTool', () => {
     await ext.hooks![HOOKS.TOOLS_REGISTER]!(registry as any);
     expect(registeredName!).toBe('bash');
     expect(registeredTool).toBeInstanceOf(BashTool);
+  });
+
+  it('create() passes maxTimeoutMs from config to the tool', async () => {
+    let registeredTool: any = null;
+    const registry = { register: (name: string, tool: any) => { registeredTool = tool; }, getAll: () => [] };
+    const mockCore = { config: { bashTool: { bashTimeoutMs: 5000, maxToolOutputLines: 100, maxTimeoutMs: 120000 } } } as any;
+    const ext = create(mockCore);
+    await ext.hooks![HOOKS.TOOLS_REGISTER]!(registry as any);
+    expect(registeredTool.maxTimeoutMs).toBe(120000);
+  });
+});
+
+describe('resolveBashTimeout', () => {
+  it('passes through valid timeouts at or under the cap', () => {
+    expect(resolveBashTimeout(5000, 60000, 600000)).toBe(5000);
+    expect(resolveBashTimeout(600000, 60000, 600000)).toBe(600000);
+  });
+
+  it('clamps timeouts above the cap', () => {
+    expect(resolveBashTimeout(1e15, 60000, 600000)).toBe(600000);
+  });
+
+  it('falls back to the default for invalid values', () => {
+    expect(resolveBashTimeout(0, 60000, 600000)).toBe(60000);
+    expect(resolveBashTimeout(-5, 60000, 600000)).toBe(60000);
+    expect(resolveBashTimeout(NaN, 60000, 600000)).toBe(60000);
+    expect(resolveBashTimeout('5000', 60000, 600000)).toBe(60000);
+    expect(resolveBashTimeout(undefined, 60000, 600000)).toBe(60000);
+  });
+
+  it('enforces a 1ms floor', () => {
+    expect(resolveBashTimeout(0.4, 60000, 600000)).toBe(1);
+    expect(resolveBashTimeout(undefined, 0, undefined)).toBe(1);
+  });
+
+  it('ignores an invalid cap', () => {
+    expect(resolveBashTimeout(5000, 60000, NaN)).toBe(5000);
+    expect(resolveBashTimeout(5000, 60000, -1)).toBe(5000);
+  });
+});
+
+describe('BashTool model-supplied timeout', () => {
+  it('clamps a huge model timeoutMs to maxTimeoutMs', async () => {
+    const tool = new BashTool({ timeoutMs: 1000, maxOutputLines: 100, maxTimeoutMs: 300 });
+    await expect(
+      tool.execute(JSON.stringify({ command: 'sleep 5', timeoutMs: 999999999 }), {} as any)
+    ).rejects.toThrow(/timed out after 300ms/);
+  }, 15000);
+
+  it('honors a model timeoutMs under the cap', async () => {
+    const tool = new BashTool({ timeoutMs: 10000, maxOutputLines: 100, maxTimeoutMs: 600000 });
+    await expect(
+      tool.execute(JSON.stringify({ command: 'sleep 5', timeoutMs: 200 }), {} as any)
+    ).rejects.toThrow(/timed out after 200ms/);
+  }, 15000);
+
+  it('falls back to the default for invalid model timeoutMs values', async () => {
+    const tool = new BashTool({ timeoutMs: 100, maxOutputLines: 100, maxTimeoutMs: 600000 });
+    for (const bad of [0, -1, NaN, '5000']) {
+      await expect(
+        tool.execute(JSON.stringify({ command: 'sleep 5', timeoutMs: bad }), {} as any)
+      ).rejects.toThrow(/timed out after 100ms/);
+    }
+  }, 15000);
+
+  it('advertising: tool def mentions the cap when configured', () => {
+    const capped = new BashTool({ timeoutMs: 1000, maxOutputLines: 100, maxTimeoutMs: 300000 });
+    const desc = (capped.toToolDef().function.parameters as any).properties.timeoutMs.description;
+    expect(desc).toContain('Capped at 300000ms');
+    const uncapped = new BashTool({ timeoutMs: 1000, maxOutputLines: 100 });
+    const desc2 = (uncapped.toToolDef().function.parameters as any).properties.timeoutMs.description;
+    expect(desc2).not.toContain('Capped');
   });
 });

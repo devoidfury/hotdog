@@ -806,6 +806,7 @@ Extensions register their own configuration namespaces. Each extension's config 
 |-------|------|---------|-------------|
 | `enabled` | `boolean` | `true` | Enable/disable the extension. |
 | `bashTimeoutMs` | `number` | `60000` | Timeout for bash commands (ms). |
+| `maxTimeoutMs` | `number` | `600000` | Hard cap on a model-requested `timeoutMs` (ms). Model-supplied timeouts above this are clamped; invalid values fall back to `bashTimeoutMs`. |
 | `maxToolOutputLines` | `number` | `600` | Max output lines for tool results. |
 
 ```json

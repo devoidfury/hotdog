@@ -28,6 +28,27 @@ const KILL_GRACE_MS = 2000;
 interface BashToolOptions {
   timeoutMs: number;
   maxOutputLines: number;
+  /** Hard cap on a model-requested timeoutMs (config: bashTool.maxTimeoutMs). */
+  maxTimeoutMs?: number;
+}
+
+/**
+ * Sanitize and clamp the model-provided timeout. The value comes from the
+ * model, so it is untrusted input: 0/negative/NaN/strings would misfire the
+ * kill timers, and unbounded values would disable the timeout. Invalid
+ * values fall back to the configured default; valid ones are clamped to
+ * [1, maxTimeoutMs] when a cap is configured.
+ */
+export function resolveBashTimeout(
+  requested: unknown,
+  defaultMs: number,
+  maxMs?: number,
+): number {
+  const validMs = (v: unknown): v is number =>
+    typeof v === "number" && Number.isFinite(v) && v > 0;
+  let timeout = validMs(requested) ? requested : defaultMs;
+  if (validMs(maxMs) && timeout > maxMs) timeout = maxMs;
+  return Math.max(1, timeout);
 }
 
 export class BashTool {
@@ -36,17 +57,20 @@ export class BashTool {
 
   readonly timeoutMs: number;
   readonly maxOutputLines: number;
+  readonly maxTimeoutMs?: number;
 
   constructor(options: BashToolOptions) {
     this.timeoutMs = options.timeoutMs;
     this.maxOutputLines = options.maxOutputLines;
+    this.maxTimeoutMs = options.maxTimeoutMs;
   }
 
   toToolDef() {
+    const capNote = this.maxTimeoutMs ? ` Capped at ${this.maxTimeoutMs}ms.` : "";
     return toolDef(BashTool.TOOL_NAME, `Execute a bash command from the current working directory.`, {
       properties: {
         command: param("string", "The shell command to execute."),
-        timeoutMs: param("integer", "Optional timeout in milliseconds.", {
+        timeoutMs: param("integer", `Optional timeout in milliseconds.${capNote}`, {
           default: this.timeoutMs,
         }),
       },
@@ -64,7 +88,11 @@ export class BashTool {
       return ToolResult.err("Error parsing arguments");
     }
     const command = args.command as string;
-    const timeout = (args.timeoutMs as number) ?? (args.timeout_ms as number) ?? this.timeoutMs;
+    const timeout = resolveBashTimeout(
+      args.timeoutMs ?? args.timeout_ms ?? this.timeoutMs,
+      this.timeoutMs,
+      this.maxTimeoutMs,
+    );
 
     if (!command) {
       return ToolResult.err("Error: command is required");
@@ -208,14 +236,16 @@ export function create(core: CoreContext): ExtensionInstance {
   const config = getExtensionConfig<{
     bashTimeoutMs: number;
     maxToolOutputLines: number;
+    maxTimeoutMs?: number;
   }>(core, "bashTool");
   const timeoutMs = config.bashTimeoutMs;
   const maxOutputLines = config.maxToolOutputLines;
+  const maxTimeoutMs = config.maxTimeoutMs;
 
   return {
     hooks: {
       [HOOKS.TOOLS_REGISTER]: async (registry) => {
-        const tool = new BashTool({ timeoutMs, maxOutputLines });
+        const tool = new BashTool({ timeoutMs, maxOutputLines, maxTimeoutMs });
         registry.register(BashTool.TOOL_NAME, tool);
       },
     },

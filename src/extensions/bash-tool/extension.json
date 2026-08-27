@@ -17,6 +17,11 @@
           "default": 60000,
           "description": "Default timeout for bash commands in milliseconds"
         },
+        "maxTimeoutMs": {
+          "type": "number",
+          "default": 600000,
+          "description": "Hard cap on a model-requested timeoutMs in milliseconds"
+        },
         "maxToolOutputLines": {
           "type": "number",
           "default": 600,

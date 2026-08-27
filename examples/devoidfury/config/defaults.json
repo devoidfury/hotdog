@@ -10,6 +10,9 @@
   "extension_autoload": true,
   "default_subcommand": "cli",
   "chat_timeout_secs": 900,
+  "workspace": {
+    "paths": [".", "/skills", "/tmp", "/etc/hotdog"]
+  },
   "profiles": {
     "default": {
       "blacklist-tools": ["explore"]

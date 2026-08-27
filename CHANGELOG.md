@@ -2,21 +2,51 @@
 
 ## Unreleased
 
+**Full Changelog**: https://github.com/devoidfury/hotdog/compare/v0.6.0...main
+
+## [v0.6.0] - 2026-08-27
+
+- [BRK] the `"builtins"` magic string for extension paths is no longer accepted and now fails startup with a config error -- use the `@extensions` path alias instead
+
 - workspace
   - multi-root workspace support: new `workspace.paths` config (array of directories; entries may be relative, `~`-expanded, or globs). Relative tool paths resolve against the first root; absolute paths must fall inside one of the configured roots. The roots are surfaced in the system prompt environment chunk when more than one is configured
   - **Notice for existing configs** -- legacy `cwdBoundary` / `workspaceRoot` keys are still honored (as a single root) when `workspace.paths` is absent, but their handling changed: they are now validated at startup, so a value pointing at a nonexistent path fails startup with a config error instead of degrading at runtime, and `~` / glob expansion is now applied to their values as well
   - fix - `project_info` path was not bounded by the workspace boundary; it now is, and escaping paths are rejected
-  - fix - symlinks that resolve into another configured workspace root are no longer rejected as symlink escapes
 
 - llm-client / tool-executor
   - `maxRetries` now means retries *after* the initial attempt (total attempts = `1 + maxRetries`); previously the value was the total number of attempts, so `maxRetries: 3` gave 1 + 2 rather than 1 + 3
-  - fix - removed an unreachable `LlmError.Timeout` throw at the end of `retryWithBackoff`
 
 - mcp-client
-  - tool names no longer use `server/tool` (the `/` is rejected by strict OpenAI-compatible APIs); tools register as `server__tool` with characters outside `[a-zA-Z0-9_-]` sanitized
+  - tool names no longer use `server/tool` as the `/` may be rejected by some APIs. Tools now register as `server__tool` with characters outside `[a-zA-Z0-9_-]` sanitized
   - tool registry now rejects names outside `[a-zA-Z0-9_-]` at registration, so a bad name fails fast instead of failing every LLM request
 
-**Full Changelog**: https://github.com/devoidfury/hotdog/compare/v0.5.0...main
+- bash tool
+  - model-requested `timeoutMs` is now sanitized and clamped: invalid values (zero, negative, non-numeric) fall back to the configured default, and valid values are capped by the new `bashTool.maxTimeoutMs` config (default `600000`)
+
+- fetch tool
+  - transient failures (timeout, abort, network) are now only auto-retried for GET/HEAD; other methods resolve as a plain error so a dropped POST/PUT/PATCH is not re-executed against a third-party endpoint
+
+- websocket
+  - unauthenticated sockets can no longer join the broadcast group until authenticated (defense in depth for extensions that upgrade without a token)
+  - profile switch now also switches the model when the profile specifies one, and rebuilds the cached system prompt and tool defs; session metadata reports the active model
+
+- static file server
+  - fix - sibling directories sharing a prefix with the root (e.g. `/srv/app2` under root `/srv/app`) no longer pass the path containment check
+
+- render templates
+  - fix - left-dash whitespace control (`{%-`) now actually strips the whitespace before the token
+
+- explore tool
+  - fix - the spawned sub-agent used outdated `-c` instead of `-p` flag
+  - marked `sideEffects: true` (it spawns an agent process)
+
+- sessions
+  - fix - images duplicated on every save/load round-trip; content is now persisted raw and legacy sessions with inlined image parts are healed on load
+
+- info CLI
+  - fix - `info --config-debug`
+
+**Full Changelog**: https://github.com/devoidfury/hotdog/compare/v0.5.0...v0.6.0
 
 ## [v0.5.0] - 2026-08-26
 

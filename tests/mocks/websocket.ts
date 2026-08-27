@@ -41,6 +41,7 @@ function makeMockAgent(overrides: Partial<AgentLike> = {}): AgentLike {
     enqueueCallback: null,
     serialize: () => ({}),
     deserialize: () => {},
+    applyProfile: () => {},
     run: async () => undefined,
     clearContext: async () => {},
     cancel: () => {},

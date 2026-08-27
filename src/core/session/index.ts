@@ -8,7 +8,7 @@ import { logger } from "../logger.ts";
 import type { CommandRegistryLike, ParsedCommand } from "../commands.ts";
 import type { LlmClient } from "../llm-client/client.ts";
 import type { CommandResult } from "../extensions/registries.ts";
-import type { ProfileManager } from "../config/index.ts";
+import type { ProfileManager, SwitchProfile } from "../config/index.ts";
 import type { MessageLog } from "../context/message-log.ts";
 import type { Message, ImageAttachment, MessageSource } from "../context/message.ts";
 import type { AgentRunResult, OutputSink } from "../agent.ts";
@@ -36,6 +36,7 @@ export interface AgentLike {
   enqueueCallback: ((content: string | Array<Record<string, unknown>>, opts?: { source?: MessageSource }) => void) | null;
   serialize(): Record<string, unknown>;
   deserialize(data: Record<string, unknown>): void;
+  applyProfile(name: string, profile: SwitchProfile): void;
   run(
     content: string | Array<Record<string, unknown>>,
     images?: ImageAttachment[],

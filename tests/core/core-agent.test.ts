@@ -1166,4 +1166,110 @@ describe('Agent — end-to-end loop', () => {
       expect(turnEnds[0]!.reason).toBe('error');
     });
   });
+
+  describe('applyProfile', () => {
+    // SwitchProfile shape (see config/profiles.ts).
+    const makeProfile = (overrides: Record<string, unknown> = {}) => ({
+      role: 'New role',
+      body: 'New body',
+      model: null as string | null,
+      whitelistTools: null as string[] | null,
+      blacklistTools: [] as string[],
+      ...overrides,
+    });
+
+    it('applies name, role, body, and whitelist', () => {
+      const { agent } = createFixture({});
+      agent.applyProfile('fresh', makeProfile({ whitelistTools: ['alpha'] }));
+      expect(agent.profileName).toBe('fresh');
+      expect(agent.role).toBe('New role');
+      expect(agent.profileBody).toBe('New body');
+      expect(agent.toolWhitelist).toEqual(['alpha']);
+    });
+
+    it('treats empty role/body as unset', () => {
+      const { agent } = createFixture({});
+      agent.applyProfile('empty', makeProfile({ role: '', body: '' }));
+      expect(agent.role).toBeUndefined();
+      expect(agent.profileBody).toBeUndefined();
+    });
+
+    it('filters tool defs by the new whitelist and blacklist', async () => {
+      const { agent, toolRegistry } = createFixture({});
+      toolRegistry.register('alpha', simpleTool('alpha'));
+      toolRegistry.register('beta', simpleTool('beta'));
+
+      agent.applyProfile('restricted', makeProfile({ whitelistTools: ['alpha'] }));
+      let names = (await agent.getToolDefs()).map((d) => d.function.name);
+      expect(names).toEqual(['alpha']);
+
+      // A profile with no whitelist lifts the previous one.
+      agent.applyProfile('open', makeProfile({ blacklistTools: ['alpha'] }));
+      names = (await agent.getToolDefs()).map((d) => d.function.name);
+      expect(names).toEqual(['beta']);
+    });
+
+    it('a profile without a blacklist clears a top-level config blacklist', async () => {
+      const { agent, toolRegistry } = createFixture({
+        config: { blacklistTools: ['beta'] } as Record<string, unknown>,
+      });
+      toolRegistry.register('alpha', simpleTool('alpha'));
+      toolRegistry.register('beta', simpleTool('beta'));
+
+      let names = (await agent.getToolDefs()).map((d) => d.function.name);
+      expect(names).toEqual(['alpha']);
+
+      agent.applyProfile('open', makeProfile());
+      names = (await agent.getToolDefs()).map((d) => d.function.name);
+      expect(names).toEqual(['alpha', 'beta']);
+    });
+
+    it('invalidates the cached system prompt and rebuilds with the new profile', async () => {
+      const { agent } = createFixture({});
+      await agent.ensureSystemPrompt();
+      expect(agent.context.getSystemPrompt()).toContain('Test agent');
+
+      agent.applyProfile('other', makeProfile({ role: 'Audit mode' }));
+      expect(agent.context.getSystemPrompt()).toBeNull();
+
+      await agent.ensureSystemPrompt();
+      expect(agent.context.getSystemPrompt()).toContain('Audit mode');
+    });
+
+    it('switches the model via the model setter when the profile specifies one', () => {
+      const { agent, hooks } = createFixture({
+        model: 'prov/old-model',
+        modelRegistry: {
+          'prov/old-model': { name: 'old-model', contextLimit: 128000 },
+          'prov/new-model': { name: 'new-model', contextLimit: 64000 },
+        },
+      });
+      const changes: Array<{ oldModel: string; newModel: string }> = [];
+      hooks.on(HOOKS.MODEL_CHANGE, (d: { oldModel: string; newModel: string }) => {
+        changes.push({ oldModel: d.oldModel, newModel: d.newModel });
+      });
+
+      agent.applyProfile('big-brain', makeProfile({ model: 'prov/new-model' }));
+      expect(agent.model).toBe('prov/new-model');
+      expect(agent.contextLimit).toBe(64000);
+      expect(changes).toEqual([{ oldModel: 'prov/old-model', newModel: 'prov/new-model' }]);
+    });
+
+    it('keeps the current model when the profile has none (and does not fire MODEL_CHANGE)', () => {
+      const { agent, hooks } = createFixture({ model: 'prov/only-model' });
+      const changes: unknown[] = [];
+      hooks.on(HOOKS.MODEL_CHANGE, (d: unknown) => { changes.push(d); });
+
+      agent.applyProfile('no-model', makeProfile());
+      expect(agent.model).toBe('prov/only-model');
+      expect(changes).toHaveLength(0);
+    });
+
+    it('does not clear the message log', () => {
+      const { agent } = createFixture({});
+      agent.addMessage(new Message({ role: 'user', content: 'hello' }));
+      agent.applyProfile('fresh', makeProfile());
+      expect(agent.log.getAll()).toHaveLength(1);
+    });
+  });
 });

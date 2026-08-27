@@ -39,6 +39,7 @@ const mockAgent: import("../../src/core/session/index.ts").AgentLike = {
   enqueueCallback: null,
   serialize: () => ({}),
   deserialize: () => {},
+  applyProfile: () => {},
   run: async () => undefined,
   clearContext: async () => {},
   cancel: () => {},

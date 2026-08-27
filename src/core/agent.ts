@@ -1,6 +1,7 @@
 import { ParsedCommand } from "./commands.ts";
 import { CORE_COMMAND_HANDLERS } from "./command-handlers.ts";
 import { findModelEntry, resolveModelConfig, type ModelConfig } from "./config/providers.ts";
+import type { SwitchProfile } from "./config/profiles.ts";
 import { Message, contentToText, type ImageAttachment, type ToolCall, type MessageSource } from "./context/message.ts";
 import { OUTPUT_EVENT, OutputEvent, EVENT_NAME_MAP, type EventName } from "./context/output.ts";
 import { createContextManager, type ContextManager } from "./context/context-manager.ts";
@@ -541,6 +542,36 @@ export class Agent implements AgentLike {
       this.sink.emit({ type: eventType, ...data } as OutputEvent);
     }
     this.hooks.notifyHooks(HOOKS.OUTPUT_EVENT, { type, data, agent: this });
+  }
+
+  /**
+   * Switch this agent to a different profile at runtime.
+   *
+   * Applies the profile's role, body, and tool whitelist, resets the tool
+   * blacklist to the profile's (an empty profile blacklist clears whatever
+   * a top-level config carried), and switches the model via the model setter
+   * when the profile specifies one (so per-model limits, reasoning effort,
+   * and MODEL_CHANGE all update). Invalidates the cached system prompt and
+   * tool defs so the next turn rebuilds them from the new profile.
+   *
+   * Does NOT clear the message log -- callers that want a wipe (e.g. the
+   * webui, which asks the user first) call clearContext() separately.
+   */
+  applyProfile(name: string, profile: SwitchProfile): void {
+    this.profileName = name;
+    this.role = profile.role || undefined;
+    this.profileBody = profile.body || undefined;
+    this.toolWhitelist = profile.whitelistTools;
+    this.config = this.config || {};
+    this.config.blacklistTools = profile.blacklistTools;
+    if (profile.model && profile.model !== this.#model) {
+      this.model = profile.model;
+    }
+    // The model setter already invalidates both caches when it ran; repeat
+    // unconditionally so a same-model switch still rebuilds with the new
+    // role/body (both operations are idempotent).
+    this.#toolRegistry.clearToolDefs();
+    this.context.clearSystemPrompt();
   }
 
   async clearContext(): Promise<void> {

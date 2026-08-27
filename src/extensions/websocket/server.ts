@@ -305,12 +305,10 @@ export class SessionRegistry {
 
     const agent = this.#sessionManager.getAgentBySessionId(sessionId);
     if (agent) {
-      agent.profileName = profileName;
-      agent.toolWhitelist = profile.whitelistTools;
-      agent.profileBody = profile.body || undefined;
-      agent.role = profile.role || undefined;
+      agent.applyProfile(profileName, profile);
       // Wipes messages + system prompt, hence the UI confirmation above.
       await agent.clearContext();
+      meta.model = agent.model;
     }
     meta.profile = profileName;
     meta.userMessageCount = 0;

@@ -9,6 +9,8 @@ import { LlmClient } from "../../src/core/llm-client/client.ts";
 import { MessageLog } from "../../src/core/context/message-log.ts";
 import type { AgentLike } from "../../src/core/session/index.ts";
 import { createWsMockCore, createWsMockAgentFactory, createWsMockWs, makeWsMockAgent } from "../mocks/websocket.ts";
+import { createFixture, simpleTool } from "../helpers.ts";
+import { Message } from "../../src/core/context/message.ts";
 import { mkdirSync, rmSync, writeFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
 
@@ -126,6 +128,76 @@ describe("SessionRegistry", () => {
     expect(result).toBe(true);
     expect(registry.get(sessionId)).toBeNull();
     expect(registry.list()).toHaveLength(0);
+  });
+
+  describe("switchProfile", () => {
+    it("applies the full profile (role, model, whitelist, blacklist) and clears context", async () => {
+      const { agent, toolRegistry } = createFixture({
+        model: "prov/old-model",
+        modelRegistry: {
+          "prov/old-model": { name: "old-model", contextLimit: 128000 },
+          "prov/new-model": { name: "new-model", contextLimit: 64000 },
+        },
+      });
+      toolRegistry.register("alpha", simpleTool("alpha"));
+      toolRegistry.register("beta", simpleTool("beta"));
+      agent.addMessage(new Message({ role: "user", content: "hello" }));
+
+      const wsRegistry = new SessionRegistry({
+        buildAgent: async () => agent,
+        profiles: {
+          coder: {
+            role: "Coder role",
+            body: "",
+            model: "prov/new-model",
+            whitelistTools: ["alpha"],
+            blacklistTools: [],
+          },
+        },
+      });
+      const { sessionId } = await wsRegistry.create({});
+
+      const result = await wsRegistry.switchProfile({ sessionId, profileName: "coder" });
+      expect(result.success).toBe(true);
+
+      expect(agent.profileName).toBe("coder");
+      expect(agent.role).toBe("Coder role");
+      expect(agent.model).toBe("prov/new-model");
+      expect(wsRegistry.get(sessionId)!.metadata.model).toBe("prov/new-model");
+      expect(agent.contextLimit).toBe(64000);
+      expect(agent.toolWhitelist).toEqual(["alpha"]);
+      // The UI confirmation exists for this wipe.
+      expect(agent.log.getAll()).toHaveLength(0);
+      // The whitelist restricts the tools advertised from the next turn on.
+      const names = (await agent.getToolDefs()).map((d) => d.function.name);
+      expect(names).toEqual(["alpha"]);
+    });
+
+    it("requires confirmation after a user message, and force overrides it", async () => {
+      const { agent } = createFixture({});
+      const wsRegistry = new SessionRegistry({
+        buildAgent: async () => agent,
+        profiles: { coder: { role: "R", body: "", model: null, whitelistTools: null, blacklistTools: [] } },
+      });
+      const { sessionId } = await wsRegistry.create({});
+      wsRegistry.incrementUserMessageCount(sessionId);
+
+      const guarded = await wsRegistry.switchProfile({ sessionId, profileName: "coder" });
+      expect(guarded).toEqual({ success: false, requiresConfirmation: true });
+      expect(agent.profileName).toBe("test"); // untouched
+
+      const forced = await wsRegistry.switchProfile({ sessionId, profileName: "coder", force: true });
+      expect(forced).toEqual({ success: true, requiresConfirmation: false });
+      expect(agent.profileName).toBe("coder");
+    });
+
+    it("errors on unknown profiles and unknown sessions", async () => {
+      const { sessionId } = await registry.create();
+      const unknownProfile = await registry.switchProfile({ sessionId, profileName: "ghost" });
+      expect(unknownProfile.error).toBe('Profile "ghost" not found');
+      const unknownSession = await registry.switchProfile({ sessionId: "nope", profileName: "default" });
+      expect(unknownSession.error).toBe("Session not found");
+    });
   });
 
   it("returns false when deleting non-existent session", () => {

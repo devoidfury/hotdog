@@ -8,6 +8,7 @@ import { deepMerge } from "../../utils/objects.ts";
 import { render } from "../../utils/render.ts";
 import { validate as validateSchema, castAs } from "../../utils/json-schema.ts";
 import { camelCase } from "../../utils/strings.ts";
+import { expandWorkspacePaths } from "../../utils/workspace.ts";
 
 export * from "./defaults.ts";
 export * from "./schema-loader.ts";
@@ -312,6 +313,8 @@ export interface BuildAgentConfigExtra {
   modelRegistry: Record<string, ModelConfig>;
   /** Centralized profile manager - use this instead of manual path construction. */
   profileManager: ProfileManager;
+  /** Concrete absolute workspace roots (expanded from workspace.paths). */
+  workspaceRoots: string[];
   chatTimeout: number;
   maxRetries: number;
 }
@@ -441,6 +444,21 @@ export async function buildAgentConfig(options: {
 
   const profiles = profileManager.getProfilesForSwitch();
 
+  // Workspace roots: workspace.paths when present, else the legacy raw
+  // cwdBoundary/workspaceRoot keys (undocumented defaults.json passthroughs),
+  // else the process CWD. expandWorkspacePaths validates and expands tilde,
+  // globs, and existence, throwing ConfigError on bad input.
+  const legacyRoot =
+    typeof config.cwdBoundary === "string" && config.cwdBoundary
+      ? config.cwdBoundary
+      : typeof config.workspaceRoot === "string" && config.workspaceRoot
+        ? config.workspaceRoot
+        : null;
+  const workspaceRoots = expandWorkspacePaths(
+    ((resolved.workspace?.paths as readonly string[] | undefined) ??
+      (legacyRoot ? [legacyRoot] : ["."])) as readonly string[],
+  );
+
   return castAs<BuildAgentConfig>({
     ...resolved,
     profilesPath,
@@ -451,6 +469,7 @@ export async function buildAgentConfig(options: {
     activeProvider: provider?.name || null,
     systemPromptTemplate,
     profiles,
+    workspaceRoots,
     modelRegistry: {},
     profileManager,
   });

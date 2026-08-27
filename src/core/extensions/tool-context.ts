@@ -7,9 +7,8 @@ import { Workspace } from "../../utils/workspace.ts";
 export interface DefaultToolContext extends Record<string, unknown> {
   agent: unknown; // Agent — avoid circular import
   isSessionRestoring: boolean;
-  cwdBoundary: string | null;
-  workspaceRoot: string | null;
-  workspace: Workspace | null;
+  /** Multi-root workspace boundary; relative paths resolve against roots[0]. */
+  workspace: Workspace;
   taskManager?: unknown;
   sessionCore?: unknown;
 }

@@ -1072,6 +1072,8 @@ export function createWsServer(
           maxToolCallsPerIteration: core.resolved?.maxToolCallsPerIteration as number,
           maxRetries: core.resolved?.maxRetries as number,
           toolRetryDelay: core.resolved?.toolRetryDelay as number,
+          workspaceRoots:
+            (core.resolved?.workspaceRoots as string[] | undefined) || [process.cwd()],
         },
         sessionId,
         abortSignal: null,

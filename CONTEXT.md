@@ -29,7 +29,7 @@ Domain concepts for the hotdog AI agent harness. Implementation details are docu
 - **Tool** — Single concept: either exposed to context or not. No distinction between "core", "manager", or "MCP" at the domain level.
 - **Tool Group** — A set of tools managed together (like manager tools). Should be extensible, not hardcoded.
 - **MCP Tool** — A third-party tool loaded via the Model Context Protocol spec. Same domain concept as any other tool.
-- **CWD Boundary** — Path boundary for file tools. Resolves from `cwdBoundary`/`workspaceRoot` config, defaulting to the process CWD; all file paths go through `Workspace.resolveSafe()` which rejects escapes (including symlink escapes).
+- **Workspace Roots** — The set of directories bounding file tools, configured via `workspace.paths` (default `["."]`, i.e. the process CWD; legacy `cwdBoundary`/`workspaceRoot` keys still honored as a single root). Relative paths resolve against the primary root (`paths[0]`); absolute paths must fall inside some root. All file paths go through `Workspace.resolveSafe()` which rejects escapes (including symlink escapes).
 - **Tool Guideline** — Per-tool context snippet (implementation detail, under consideration for change).
 
 ## Messages

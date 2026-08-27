@@ -66,7 +66,7 @@ describe('ReadTool.execute — read lines', () => {
     const tool = new ReadTool({ readLimit: 500, maxImageSize: 102400 });
     const result = await tool.execute(
       { path: 'file.txt' },
-      toolCtx({ workspaceRoot: dir })
+      toolCtx({ workspaceRoots: [dir] })
     );
 
     expect(resultStr(result)).toBe('line1\nline2\nline3');
@@ -79,7 +79,7 @@ describe('ReadTool.execute — read lines', () => {
     const tool = new ReadTool({ readLimit: 500, maxImageSize: 102400 });
     const result = await tool.execute(
       { path: 'file.txt', limit: 2 },
-      toolCtx({ workspaceRoot: dir })
+      toolCtx({ workspaceRoots: [dir] })
     );
 
     expect(resultStr(result)).toBe('line1\nline2');
@@ -92,7 +92,7 @@ describe('ReadTool.execute — read lines', () => {
     const tool = new ReadTool({ readLimit: 500, maxImageSize: 102400 });
     const result = await tool.execute(
       { path: 'file.txt', offset: 2, limit: 2 },
-      toolCtx({ workspaceRoot: dir })
+      toolCtx({ workspaceRoots: [dir] })
     );
 
     expect(resultStr(result)).toBe('line3\nline4');
@@ -105,7 +105,7 @@ describe('ReadTool.execute — read lines', () => {
     const tool = new ReadTool({ readLimit: 500, maxImageSize: 102400 });
     const result = await tool.execute(
       { path: 'file.txt', offset: 10 },
-      toolCtx({ workspaceRoot: dir })
+      toolCtx({ workspaceRoots: [dir] })
     );
 
     expect(resultStr(result)).toContain('offset 10 is beyond end');
@@ -119,7 +119,7 @@ describe('ReadTool.execute — read lines', () => {
     const tool = new ReadTool({ readLimit: 500, maxImageSize: 102400 });
     const result = await tool.execute(
       { path: 'file.txt' },
-      toolCtx({ workspaceRoot: dir })
+      toolCtx({ workspaceRoots: [dir] })
     );
 
     expect(resultStr(result)).toBe('');
@@ -132,7 +132,7 @@ describe('ReadTool.execute — read lines', () => {
     const tool = new ReadTool({ readLimit: 500, maxImageSize: 102400 });
     const result = await tool.execute(
       { path: 'file.txt' },
-      toolCtx({ workspaceRoot: dir })
+      toolCtx({ workspaceRoots: [dir] })
     );
 
     expect(resultStr(result)).toBe('only line');
@@ -150,7 +150,7 @@ describe('ReadTool.execute — directory listing', () => {
     const tool = new ReadTool({ readLimit: 500, maxImageSize: 102400 });
     const result = await tool.execute(
       { path: '.' },
-      toolCtx({ workspaceRoot: dir })
+      toolCtx({ workspaceRoots: [dir] })
     );
 
     expect(resultStr(result)).toContain('is a directory');
@@ -166,19 +166,19 @@ describe('ReadTool.execute — error cases', () => {
   it('throws AssistantRetryableError on file not found', async () => {
     const tool = new ReadTool({ readLimit: 500, maxImageSize: 102400 });
     await expect(
-      tool.execute({ path: 'nonexistent.txt' }, toolCtx({ workspaceRoot: dir }))
+      tool.execute({ path: 'nonexistent.txt' }, toolCtx({ workspaceRoots: [dir] }))
     ).rejects.toThrow(/File not found/);
   });
 
   it('returns error on invalid JSON input', async () => {
     const tool = new ReadTool({ readLimit: 500, maxImageSize: 102400 });
-    const result = await tool.execute('not json', toolCtx({ workspaceRoot: dir }));
+    const result = await tool.execute('not json', toolCtx({ workspaceRoots: [dir] }));
     expect(resultStr(result)).toContain('Error parsing arguments');
   });
 
   it('returns error on missing path', async () => {
     const tool = new ReadTool({ readLimit: 500, maxImageSize: 102400 });
-    const result = await tool.execute({ limit: 10 }, toolCtx({ workspaceRoot: dir }));
+    const result = await tool.execute({ limit: 10 }, toolCtx({ workspaceRoots: [dir] }));
     expect(resultStr(result)).toContain('Error parsing arguments');
   });
 
@@ -186,7 +186,7 @@ describe('ReadTool.execute — error cases', () => {
     const tool = new ReadTool({ readLimit: 500, maxImageSize: 102400 });
     const result = await tool.execute(
       { path: '/etc/passwd' },
-      toolCtx({ cwdBoundary: dir })
+      toolCtx({ workspaceRoots: [dir] })
     );
     expect(resultStr(result)).toContain('Path escape rejected');
   });
@@ -198,7 +198,7 @@ describe('ReadTool.execute — error cases', () => {
     const tool = new ReadTool({ readLimit: 500, maxImageSize: 102400 });
     const result = await tool.execute(
       JSON.stringify({ path: 'file.txt' }),
-      toolCtx({ workspaceRoot: dir })
+      toolCtx({ workspaceRoots: [dir] })
     );
 
     expect(resultStr(result)).toBe('hello world');
@@ -231,7 +231,7 @@ describe('ReadTool.execute — image files', () => {
     const tool = new ReadTool({ readLimit: 500, maxImageSize: 102400 });
     const result = await tool.execute(
       { path: 'test.png' },
-      toolCtx({ workspaceRoot: dir })
+      toolCtx({ workspaceRoots: [dir] })
     );
 
     expect(result.success).toBe(true);
@@ -254,7 +254,7 @@ describe('ReadTool.execute — image files', () => {
       const tool = new ReadTool({ readLimit: 500, maxImageSize: 102400 });
       const result = await tool.execute(
         { path: `test.${ext}` },
-        toolCtx({ workspaceRoot: dir })
+        toolCtx({ workspaceRoots: [dir] })
       );
 
       expect(result.success).toBe(true);
@@ -282,7 +282,7 @@ describe('ReadTool.execute — image files', () => {
     const tool = new ReadTool({ readLimit: 500, maxImageSize: 102400 });
     const result = await tool.execute(
       { path: 'test.webp' },
-      toolCtx({ workspaceRoot: dir })
+      toolCtx({ workspaceRoots: [dir] })
     );
 
     expect(result.success).toBe(true);
@@ -305,7 +305,7 @@ describe('ReadTool.execute — image files', () => {
     const tool = new ReadTool({ readLimit: 500, maxImageSize: 102400 });
     const result = await tool.execute(
       { path: 'data.base64' },
-      toolCtx({ workspaceRoot: dir })
+      toolCtx({ workspaceRoots: [dir] })
     );
 
     expect(result.success).toBe(true);
@@ -325,7 +325,7 @@ describe('ReadTool.execute — image files', () => {
     const tool = new ReadTool({ readLimit: 500, maxImageSize: 102400 });
     const result = await tool.execute(
       { path: 'test.PNG' },
-      toolCtx({ workspaceRoot: dir })
+      toolCtx({ workspaceRoots: [dir] })
     );
 
     expect(result.success).toBe(true);
@@ -340,7 +340,7 @@ describe('ReadTool.execute — image files', () => {
     const tool = new ReadTool({ readLimit: 500, maxImageSize: 102400 });
     const result = await tool.execute(
       { path: 'test.png' },
-      toolCtx({ workspaceRoot: dir })
+      toolCtx({ workspaceRoots: [dir] })
     );
 
     expect(result.metadata!.get('size')).toBe(String(MINIMAL_PNG.length));
@@ -354,7 +354,7 @@ describe('ReadTool.execute — image files', () => {
     const tool = new ReadTool({ readLimit: 500, maxImageSize: 102400 });
     const result = await tool.execute(
       { path: filePath },
-      toolCtx({ workspaceRoot: dir })
+      toolCtx({ workspaceRoots: [dir] })
     );
 
     expect(result.success).toBe(true);
@@ -369,7 +369,7 @@ describe('ReadTool.execute — image files', () => {
     const tool = new ReadTool({ readLimit: 500, maxImageSize: 102400 });
     const result = await tool.execute(
       { path: filePath },
-      toolCtx({ cwdBoundary: '/tmp/restricted' })
+      toolCtx({ workspaceRoots: ['/tmp/restricted'] })
     );
 
     expect(result.success).toBe(false);
@@ -383,7 +383,7 @@ describe('ReadTool.execute — image files', () => {
     const tool = new ReadTool({ readLimit: 500, maxImageSize: 102400 });
     const result = await tool.execute(
       { path: 'file.txt' },
-      toolCtx({ workspaceRoot: dir })
+      toolCtx({ workspaceRoots: [dir] })
     );
 
     expect(result.success).toBe(true);

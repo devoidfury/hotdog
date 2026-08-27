@@ -11,6 +11,7 @@ import {
 } from "../../src/core/config/index.ts";
 import type { DefaultConfig } from "../../src/core/config/index.ts";
 import type { CoreConfig, CoreConfigWithExtensions } from "../../src/core/config/schema-loader.ts";
+import { ConfigError } from "../../src/core/error.ts";
 
 describe("normalizeConfigKeys", () => {
   it("converts snake_case keys to camelCase", () => {
@@ -151,5 +152,99 @@ describe("buildConfig", () => {
     } finally {
       fs.rmSync(tmpDir, { recursive: true, force: true });
     }
+  });
+});
+
+describe("buildAgentConfig — workspaceRoots", () => {
+  const baseOpts = {
+    cli: {},
+    config: { providers: [], defaultModel: "test-model", hideTools: true, profilesPath: "./config/profiles" } as CoreConfigWithExtensions,
+    configDir: "/tmp/test-config",
+    providers: [],
+    defaultModel: "qwen3.5-0.8b",
+    profilesPath: "/tmp/test-config/profiles",
+  };
+
+  it("defaults to the process CWD", async () => {
+    const result = await buildAgentConfig(baseOpts);
+    expect(result.workspaceRoots).toEqual([process.cwd()]);
+  });
+
+  it("honors workspace.paths from the config file", async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "hotdog-ws-roots-"));
+    try {
+      const result = await buildAgentConfig({
+        ...baseOpts,
+        config: { ...baseOpts.config, workspace: { paths: [".", dir] } },
+      });
+      expect(result.workspaceRoots).toEqual([process.cwd(), dir]);
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("falls back to legacy cwdBoundary when workspace.paths is absent", async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "hotdog-legacy-boundary-"));
+    try {
+      const result = await buildAgentConfig({
+        ...baseOpts,
+        config: { ...baseOpts.config, cwdBoundary: dir },
+      });
+      expect(result.workspaceRoots).toEqual([dir]);
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("falls back to legacy workspaceRoot when cwdBoundary is absent", async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "hotdog-legacy-root-"));
+    try {
+      const result = await buildAgentConfig({
+        ...baseOpts,
+        config: { ...baseOpts.config, workspaceRoot: dir },
+      });
+      expect(result.workspaceRoots).toEqual([dir]);
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("workspace.paths takes precedence over legacy keys", async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "hotdog-paths-wins-"));
+    try {
+      const result = await buildAgentConfig({
+        ...baseOpts,
+        config: {
+          ...baseOpts.config,
+          cwdBoundary: dir,
+          workspaceRoot: dir,
+          workspace: { paths: ["."] },
+        },
+      });
+      expect(result.workspaceRoots).toEqual([process.cwd()]);
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("rejects a non-array workspace.paths", async () => {
+    await expect(
+      buildAgentConfig({
+        ...baseOpts,
+        config: { ...baseOpts.config, workspace: { paths: "/somewhere" } },
+      }),
+    ).rejects.toThrow(ConfigError);
+  });
+
+  it("rejects an explicit workspace path that does not exist", async () => {
+    await expect(
+      buildAgentConfig({
+        ...baseOpts,
+        config: {
+          ...baseOpts.config,
+          workspace: { paths: ["/definitely/not/a/real/path"] },
+        },
+      }),
+    ).rejects.toThrow(ConfigError);
   });
 });

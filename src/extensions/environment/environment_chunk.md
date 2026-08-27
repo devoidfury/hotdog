@@ -6,4 +6,7 @@ You may see a <system-notice></system-notice> tag. These contain system informat
   Platform: {{ platform }}
   Session Date: {{ session_start }}
   Current working directory: {{ cwd }}
+{%- if workspace_roots %}
+  Workspace roots: {{ workspace_roots }}
+{%- endif %}
 </system-notice>

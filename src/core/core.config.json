@@ -393,6 +393,13 @@
       { "default": {} }
     ]
   },
+  "workspace": {
+    "type": "object",
+    "layers": [
+      { "source": "config", "key": "workspace" },
+      { "default": {} }
+    ]
+  },
   "hookTrace": {
     "type": "boolean",
     "cliFlag": {

@@ -26,7 +26,7 @@ export class AppendTool {
       "Appends content to a file. Creates the file and parent directories if they don't exist. Content is added after any existing content.",
       {
         properties: {
-          path: param("string", "File path relative to workspace root"),
+          path: param("string", "File path. Path relative to the workspace root, or an absolute path inside a configured workspace root."),
           content: param("string", "Content to append to the file"),
         },
         required: ["path", "content"],
@@ -60,16 +60,11 @@ export class AppendTool {
     };
 
     const { path: filePath, content } = args;
-    const workspace = ctx.get("workspace") as Workspace | null || null;
-    const workspaceRoot = ctx.get("workspaceRoot") as string | null || null;
+    const workspace = ctx.get("workspace") as Workspace;
 
     let resolvedPath: string;
     try {
-      if (workspace) {
-        resolvedPath = workspace.resolveSafe(filePath);
-      } else {
-        resolvedPath = path.resolve(workspaceRoot || ".", filePath);
-      }
+      resolvedPath = workspace.resolveSafe(filePath);
     } catch (e: unknown) {
       if (e instanceof PathEscapeError) {
         return ToolResult.err(e.message);

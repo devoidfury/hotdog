@@ -6,6 +6,8 @@ import { toolDef, param, ToolResult, defaultCallDisplay } from "../../core/exten
 import type { ToolMetadata } from "../../core/extensions/tool-registry.ts";
 import { DEFAULT_GREP_MAX_RESULTS } from "./defaults.ts";
 import { correctCommonPathMistakes } from "../../utils/file-utils.ts";
+import { PathEscapeError } from "../../utils/workspace.ts";
+import type { Workspace } from "../../utils/workspace.ts";
 import { compileGitignore } from "../../utils/gitignore.ts";
 import { ToolContext } from "../../core/extensions/types.ts";
 
@@ -25,7 +27,7 @@ export class ProjectInfoTool {
         properties: {
           path: param(
             "string",
-            "Path to the directory to analyze. Defaults to current directory.",
+            "Path to the directory to analyze. Defaults to current directory. Path relative to the workspace root, or an absolute path inside a configured workspace root.",
           ),
           max_depth: param("integer", "Max directory depth for du.", {
             default: DEFAULT_DU_DEPTH,
@@ -51,7 +53,7 @@ export class ProjectInfoTool {
     });
   }
 
-  async execute(input: string | Record<string, unknown> | null, _ctx: ToolContext): Promise<ToolResult> {
+  async execute(input: string | Record<string, unknown> | null, ctx: ToolContext): Promise<ToolResult> {
     const args: Record<string, unknown> = typeof input === "string" ? JSON.parse(input) : (input as Record<string, unknown>);
     let cwd = args.path as string || ".";
     const maxDepth = args.max_depth as number || DEFAULT_DU_DEPTH;
@@ -59,16 +61,21 @@ export class ProjectInfoTool {
 
     [cwd] = correctCommonPathMistakes(cwd);
 
+    const workspace = ctx.get("workspace") as Workspace;
+
     let workdir: string;
     try {
-      workdir = path.resolve(cwd);
-    } catch {
+      workdir = workspace.resolveSafe(cwd);
+    } catch (e: unknown) {
+      if (e instanceof PathEscapeError) {
+        return ToolResult.err(e.message);
+      }
       return ToolResult.err(`Error: invalid path ${cwd}`);
     }
 
     let dirExists: boolean;
     try {
-      const stats = await fs.stat(cwd);
+      const stats = await fs.stat(workdir);
       dirExists = stats.isDirectory();
     } catch {
       dirExists = false;
@@ -98,7 +105,7 @@ export class ProjectInfoTool {
         .sort();
     } catch {
       // Not a git repo or git unavailable — partial info
-      return this._partialInfo(workdir, cwd, maxDepth, maxFiles);
+      return this._partialInfo(workdir, workdir, maxDepth, maxFiles);
     }
 
     if (gitFiles.length === 0) {

@@ -35,7 +35,7 @@ export class ExploreTool {
       "Run the agent in explorer mode against a project directory. Executes the agent with the explorer profile and a prompt describing what to explore.",
       {
         properties: {
-          path: param("string", "The root path of the project to explore. Resolved against the workspace boundary; escapes are rejected."),
+          path: param("string", "The root path of the project to explore. Resolved against the workspace boundary; escapes are rejected. Path relative to the workspace root, or an absolute path inside a configured workspace root."),
           outline: param(
             "string",
             "An outline of what you are specifically interested in or any particular questions you have",
@@ -73,14 +73,11 @@ export class ExploreTool {
     // The spawned sub-agent runs with this directory as its CWD (and thus its
     // own workspace boundary), so the target must stay inside the parent
     // boundary or an LLM-supplied path could relocate the whole sub-agent.
-    const workspace = ctx.get("workspace") as Workspace | null || null;
-    const workspaceRoot = ctx.get("workspaceRoot") as string | null || null;
+    const workspace = ctx.get("workspace") as Workspace;
 
     let targetDir: string;
     try {
-      targetDir = workspace
-        ? workspace.resolveSafe(args.path)
-        : path.resolve(workspaceRoot || ".", args.path);
+      targetDir = workspace.resolveSafe(args.path);
     } catch (e: unknown) {
       if (e instanceof PathEscapeError) {
         return ToolResult.err(e.message).withEntries({

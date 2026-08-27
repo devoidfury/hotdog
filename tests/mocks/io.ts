@@ -52,18 +52,9 @@ export function cleanupDir(dir: string): void {
  * Create a ToolContext with optional overrides.
  */
 export function toolCtx(opts: Record<string, unknown> = {}) {
-  const boundary = opts.cwdBoundary ?? opts.workspaceRoot ?? null;
-  let workspace: Workspace | null = null;
-  if (boundary) {
-    try {
-      workspace = new Workspace(boundary as string);
-    } catch {
-      // ignore
-    }
-  }
+  const roots = opts.workspaceRoots as string[] | string | undefined;
+  const workspace = roots ? new Workspace(roots) : null;
   return new ToolContext({
-    cwdBoundary: opts.cwdBoundary ?? null,
-    workspaceRoot: opts.workspaceRoot ?? null,
     workspace,
     ...opts,
   });

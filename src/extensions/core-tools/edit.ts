@@ -52,7 +52,7 @@ export class EditTool {
       "Single mode tool that replaces text in a file. Finds oldString, replaces with newString. Use this instead of the write tool for precise code edits.",
       {
         properties: {
-          path: param("string", "File path, absolute or relative to workspace root."),
+          path: param("string", "File path. Path relative to the workspace root, or an absolute path inside a configured workspace root."),
           oldString: param("string", "Exact text to find and replace."),
           newString: param("string", "Replacement text."),
           replace_all: param("boolean", "Replace all occurrences. Defaults false.", {
@@ -82,16 +82,11 @@ export class EditTool {
     }
 
     const { path: filePath, oldString, newString, replace_all: replaceAll = false } = op;
-    const workspace = (ctx.get("workspace") as Workspace | null) || null;
-    const workspaceRoot = (ctx.get("workspaceRoot") as string | null) || null;
+    const workspace = ctx.get("workspace") as Workspace;
 
     let resolvedPath: string;
     try {
-      if (workspace) {
-        resolvedPath = workspace.resolveSafe(filePath);
-      } else {
-        resolvedPath = path.resolve(workspaceRoot || ".", filePath);
-      }
+      resolvedPath = workspace.resolveSafe(filePath);
     } catch (e: unknown) {
       if (e instanceof PathEscapeError) {
         return ToolResult.err(e.message);

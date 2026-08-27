@@ -18,15 +18,10 @@ export async function completion(ctx: CompletionContext) {
   const currentWord = text.slice(lastSpace + 1);
   if (!currentWord.startsWith("@")) return [];
 
-  const config = ctx.agent?.config;
-  const boundary = (config?.cwdBoundary ?? config?.workspaceRoot ?? cwd()) as string;
-  let workspace: Workspace | null = null;
-  let baseDir = boundary;
-  try {
-    workspace = new Workspace(boundary);
-  } catch (e) {
-    logger.debug(`file-attachment: failed to create Workspace: ${(e as Error).message}`);
-  }
+  const roots =
+    (ctx.agent?.config?.workspaceRoots as string[] | undefined) ?? [cwd()];
+  const workspace = new Workspace(roots);
+  let baseDir = workspace.root;
 
   const pathPrefix = currentWord.slice(1);
 

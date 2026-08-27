@@ -434,6 +434,8 @@ export interface CoreConfig {
   taskProfile?: string;
   coreTools?: Record<string, unknown>;
   compaction?: Record<string, unknown>;
+  /** Workspace roots config: { paths: string[] } -- see expandWorkspacePaths. */
+  workspace?: Record<string, unknown>;
   hookTrace?: boolean;
   /** Profile name from config file (--profile flag, config.profile). Resolved to profileName. */
   profile?: string;

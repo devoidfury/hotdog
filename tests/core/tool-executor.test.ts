@@ -1,7 +1,10 @@
 // ToolExecutor tests — tests the tool execution pipeline independently of Agent.
 
 import { describe, it, expect } from 'bun:test';
+import path from 'node:path';
 import { ToolExecutor, createToolExecutor, type ToolExecutorDeps } from '../../src/core/tool-executor.ts';
+import type { Workspace } from '../../src/utils/workspace.ts';
+import { tmpDir, cleanupDir } from '../mocks/io.ts';
 import type { ToolCall } from '../../src/core/context/message.ts';
 import { createToolRegistry } from '../../src/core/extensions/tool-registry.ts';
 import { createHooks } from '../../src/core/hooks.ts';
@@ -76,8 +79,7 @@ function createMockDeps(
     toolRegistry,
     hooks,
     emitOutput: (type, data) => outputs.push({ type, data }),
-    cwdBoundary: '/workspace',
-    workspaceRoot: '/workspace',
+    workspaceRoots: [process.cwd()],
     maxRetries: 3,
     toolRetryDelay: 100,
     isRestoring: () => false,
@@ -94,8 +96,7 @@ describe('ToolExecutor', () => {
   describe('buildToolContext', () => {
     it('should include agent and config info in tool context', async () => {
       const deps = createMockDeps({
-        cwdBoundary: '/b',
-        workspaceRoot: '/r',
+        workspaceRoots: ['/b'],
       });
       const executor = createToolExecutor(deps);
 
@@ -104,8 +105,6 @@ describe('ToolExecutor', () => {
         const getter = ctx as { get: (k: string) => unknown };
         capturedCtx.agent = getter.get('agent');
         capturedCtx.isSessionRestoring = getter.get('isSessionRestoring');
-        capturedCtx.cwdBoundary = getter.get('cwdBoundary');
-        capturedCtx.workspaceRoot = getter.get('workspaceRoot');
         return 'ok';
       });
       deps.toolRegistry.register('ctx_test', testTool);
@@ -118,22 +117,18 @@ describe('ToolExecutor', () => {
 
       expect(capturedCtx.agent).toBe(deps.agent);
       expect(capturedCtx.isSessionRestoring).toBe(false);
-      expect(capturedCtx.cwdBoundary).toBe('/b');
-      expect(capturedCtx.workspaceRoot).toBe('/r');
     });
 
-    it('should handle null config values', async () => {
+    it('should fall back to the process cwd when workspaceRoots is empty', async () => {
       const deps = createMockDeps({
-        cwdBoundary: null,
-        workspaceRoot: null,
+        workspaceRoots: [],
       });
       const executor = createToolExecutor(deps);
 
       const capturedCtx: Record<string, unknown> = {};
       const testTool = makeTestTool('ctx_test2', async (_input, ctx) => {
         const getter = ctx as { get: (k: string) => unknown };
-        capturedCtx.cwdBoundary = getter.get('cwdBoundary');
-        capturedCtx.workspaceRoot = getter.get('workspaceRoot');
+        capturedCtx.workspace = getter.get('workspace');
         return 'ok';
       });
       deps.toolRegistry.register('ctx_test2', testTool);
@@ -144,14 +139,14 @@ describe('ToolExecutor', () => {
         function: { name: 'ctx_test2', arguments: '{}' },
       }]);
 
-      expect(capturedCtx.cwdBoundary).toBeNull();
-      expect(capturedCtx.workspaceRoot).toBeNull();
+      const workspace = capturedCtx.workspace as { roots: string[] } | null;
+      expect(workspace).not.toBeNull();
+      expect(workspace!.roots).toEqual([process.cwd()]);
     });
 
-    it('should always build a Workspace, defaulting to process cwd when no boundary is set', async () => {
+    it('should always build a Workspace, defaulting to process cwd when no roots are set', async () => {
       const deps = createMockDeps({
-        cwdBoundary: null,
-        workspaceRoot: null,
+        workspaceRoots: null,
       });
       const executor = createToolExecutor(deps);
 
@@ -172,6 +167,43 @@ describe('ToolExecutor', () => {
       const workspace = capturedCtx.workspace as { root: string } | null;
       expect(workspace).not.toBeNull();
       expect(workspace!.root).toBe(process.cwd());
+    });
+
+    it('should build a multi-root Workspace from workspaceRoots', async () => {
+      const dirA = tmpDir();
+      const dirB = tmpDir();
+      try {
+        const deps = createMockDeps({
+          workspaceRoots: [dirA, dirB],
+        });
+        const executor = createToolExecutor(deps);
+
+        const capturedCtx: Record<string, unknown> = {};
+        const testTool = makeTestTool('ctx_multi', async (_input, ctx) => {
+          const getter = ctx as { get: (k: string) => unknown };
+          capturedCtx.workspace = getter.get('workspace');
+          return 'ok';
+        });
+        deps.toolRegistry.register('ctx_multi', testTool);
+
+        await executor.execute([{
+          id: 'call-multi',
+          type: 'function',
+          function: { name: 'ctx_multi', arguments: '{}' },
+        }]);
+
+        const workspace = capturedCtx.workspace as Workspace | null;
+        expect(workspace).not.toBeNull();
+        expect(workspace!.roots).toEqual([dirA, dirB]);
+        expect(workspace!.root).toBe(dirA);
+        // Absolute path inside the secondary root is accepted.
+        expect(workspace!.resolveSafe(path.join(dirB, 'x.md'))).toBe(path.join(dirB, 'x.md'));
+        // Relative paths resolve under the primary root.
+        expect(workspace!.resolveSafe('x.md')).toBe(path.join(dirA, 'x.md'));
+      } finally {
+        cleanupDir(dirA);
+        cleanupDir(dirB);
+      }
     });
 
     it('should reflect dynamic isRestoring state', async () => {

@@ -351,7 +351,7 @@ export class GrepTool {
           pattern: param("string", "Search pattern regex."),
           path: param(
             "string",
-            "File or directory to search. Defaults to current working directory.",
+            "File or directory to search. Defaults to current working directory. Path relative to the workspace root, or an absolute path inside a configured workspace root.",
           ),
           type: param(
             "string",

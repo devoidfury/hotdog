@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import { ProjectInfoTool } from '../../src/extensions/core-tools/project-info.ts';
-import { resultStr } from '../helpers.ts';
+import { resultStr, toolCtx } from '../helpers.ts';
 
 describe('ProjectInfoTool', () => {
   let tmpDir: string;
@@ -28,15 +28,21 @@ describe('ProjectInfoTool', () => {
     expect(def.function.parameters.required).toEqual([]);
   });
 
-  it('returns directory not found for non-existent path', async () => {
+  it('returns directory not found for non-existent path inside the workspace', async () => {
     const tool = new ProjectInfoTool();
-    const result = await tool.execute(JSON.stringify({ path: '/nonexistent/path/xyz' }), null!);
+    const result = await tool.execute(JSON.stringify({ path: path.join(tmpDir, 'no-such-dir') }), toolCtx({ workspaceRoots: [tmpDir] }));
     expect(resultStr(result)).toContain('Directory not found');
+  });
+
+  it('rejects paths that escape the workspace', async () => {
+    const tool = new ProjectInfoTool();
+    const result = await tool.execute(JSON.stringify({ path: '/etc' }), toolCtx({ workspaceRoots: [tmpDir] }));
+    expect(resultStr(result)).toContain('Path escape rejected');
   });
 
   it('returns info for current directory', async () => {
     const tool = new ProjectInfoTool();
-    const result = await tool.execute(JSON.stringify({ path: tmpDir }), null!);
+    const result = await tool.execute(JSON.stringify({ path: tmpDir }), toolCtx({ workspaceRoots: [tmpDir] }));
     expect(resultStr(result)).toContain('=== Project Info ===');
   });
 
@@ -60,13 +66,13 @@ describe('ProjectInfoTool', () => {
 
   it('handles object input', async () => {
     const tool = new ProjectInfoTool();
-    const result = await tool.execute({ path: tmpDir }, null!);
+    const result = await tool.execute({ path: tmpDir }, toolCtx({ workspaceRoots: [tmpDir] }));
     expect(resultStr(result)).toContain('=== Project Info ===');
   });
 
   it('handles non-git directory (falls back to partial info)', async () => {
     const tool = new ProjectInfoTool();
-    const result = await tool.execute(JSON.stringify({ path: tmpDir }), null!);
+    const result = await tool.execute(JSON.stringify({ path: tmpDir }), toolCtx({ workspaceRoots: [tmpDir] }));
     // Should return partial info since tmpDir is not a git repo
     expect(resultStr(result)).toContain('=== Project Info ===');
   });
@@ -87,21 +93,21 @@ describe('ProjectInfoTool language detection', () => {
   it('detects JavaScript files', async () => {
     fs.writeFileSync(path.join(tmpDir, 'test.js'), '');
     const tool = new ProjectInfoTool();
-    const result = await tool.execute(JSON.stringify({ path: tmpDir }), null!);
+    const result = await tool.execute(JSON.stringify({ path: tmpDir }), toolCtx({ workspaceRoots: [tmpDir] }));
     expect(resultStr(result)).toContain('JavaScript');
   });
 
   it('detects TypeScript files', async () => {
     fs.writeFileSync(path.join(tmpDir, 'test.ts'), '');
     const tool = new ProjectInfoTool();
-    const result = await tool.execute(JSON.stringify({ path: tmpDir }), null!);
+    const result = await tool.execute(JSON.stringify({ path: tmpDir }), toolCtx({ workspaceRoots: [tmpDir] }));
     expect(resultStr(result)).toContain('TypeScript');
   });
 
   it('detects Markdown files', async () => {
     fs.writeFileSync(path.join(tmpDir, 'readme.md'), '');
     const tool = new ProjectInfoTool();
-    const result = await tool.execute(JSON.stringify({ path: tmpDir }), null!);
+    const result = await tool.execute(JSON.stringify({ path: tmpDir }), toolCtx({ workspaceRoots: [tmpDir] }));
     expect(resultStr(result)).toContain('Markdown');
   });
 });
@@ -110,7 +116,7 @@ describe('ProjectInfoTool language detection', () => {
 describe('ProjectInfoTool > git behavior', () => {
   it('shows git repo info when run in a git repo', async () => {
     const tool = new ProjectInfoTool();
-    const result = await tool.execute(JSON.stringify({ path: process.cwd() }), null!);
+    const result = await tool.execute(JSON.stringify({ path: process.cwd() }), toolCtx({ workspaceRoots: [process.cwd()] }));
     const output = resultStr(result);
     expect(output).toContain('git');
     expect(output).toContain('last commit:');
@@ -120,7 +126,7 @@ describe('ProjectInfoTool > git behavior', () => {
     const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'hotdog-test-git-'));
     try {
       const tool = new ProjectInfoTool();
-      const result = await tool.execute(JSON.stringify({ path: tmpDir }), null!);
+      const result = await tool.execute(JSON.stringify({ path: tmpDir }), toolCtx({ workspaceRoots: [tmpDir] }));
       const output = resultStr(result);
       expect(output).toContain('not a git repo');
     } finally {
@@ -148,7 +154,7 @@ describe('ProjectInfoTool > directory walking', () => {
     fs.writeFileSync(path.join(tmpDir, 'subdir', 'file3.ts'), '');
 
     const tool = new ProjectInfoTool();
-    const result = await tool.execute(JSON.stringify({ path: tmpDir }), null!);
+    const result = await tool.execute(JSON.stringify({ path: tmpDir }), toolCtx({ workspaceRoots: [tmpDir] }));
     const output = resultStr(result);
     expect(output).toContain('file1.ts');
     expect(output).toContain('file2.js');
@@ -161,7 +167,7 @@ describe('ProjectInfoTool > directory walking', () => {
     }
 
     const tool = new ProjectInfoTool();
-    const result = await tool.execute(JSON.stringify({ path: tmpDir, max_files: 3 }), null!);
+    const result = await tool.execute(JSON.stringify({ path: tmpDir, max_files: 3 }), toolCtx({ workspaceRoots: [tmpDir] }));
     const output = resultStr(result);
     // In non-git mode, max_files limits files collected (no "and X more" since total unknown)
     const fileLines = output.split('\n').filter(l => l.trim().endsWith('.ts'));
@@ -173,7 +179,7 @@ describe('ProjectInfoTool > directory walking', () => {
 describe('ProjectInfoTool > directory sizes', () => {
   it('shows directory sizes in git repo output', async () => {
     const tool = new ProjectInfoTool();
-    const result = await tool.execute(JSON.stringify({ path: process.cwd() }), null!);
+    const result = await tool.execute(JSON.stringify({ path: process.cwd() }), toolCtx({ workspaceRoots: [process.cwd()] }));
     const output = resultStr(result);
     expect(output).toContain('Directories');
   });
@@ -181,27 +187,37 @@ describe('ProjectInfoTool > directory sizes', () => {
 
 // Test execute with various inputs
 describe('ProjectInfoTool > execute edge cases', () => {
+  let tmpDir: string;
+
+  beforeEach(() => {
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'hotdog-test-pinfo-edge-'));
+  });
+
+  afterEach(() => {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  });
+
   it('handles object input with path', async () => {
     const tool = new ProjectInfoTool();
-    const result = await tool.execute({ path: '/workspace' }, null!);
+    const result = await tool.execute({ path: tmpDir }, toolCtx({ workspaceRoots: [tmpDir] }));
     expect(resultStr(result)).toContain('=== Project Info ===');
   });
 
   it('handles empty object input', async () => {
     const tool = new ProjectInfoTool();
-    const result = await tool.execute({}, null!);
+    const result = await tool.execute({}, toolCtx({ workspaceRoots: [tmpDir] }));
     expect(resultStr(result)).toContain('=== Project Info ===');
   });
 
   it('handles max_depth parameter', async () => {
     const tool = new ProjectInfoTool();
-    const result = await tool.execute(JSON.stringify({ path: '/workspace', max_depth: 2 }), null!);
+    const result = await tool.execute(JSON.stringify({ path: tmpDir, max_depth: 2 }), toolCtx({ workspaceRoots: [tmpDir] }));
     expect(resultStr(result)).toContain('=== Project Info ===');
   });
 
   it('handles max_files parameter', async () => {
     const tool = new ProjectInfoTool();
-    const result = await tool.execute(JSON.stringify({ path: '/workspace', max_files: 10 }), null!);
+    const result = await tool.execute(JSON.stringify({ path: tmpDir, max_files: 10 }), toolCtx({ workspaceRoots: [tmpDir] }));
     expect(resultStr(result)).toContain('=== Project Info ===');
   });
 });

@@ -22,8 +22,7 @@ export interface ToolExecutorDeps {
   toolRegistry: ToolRegistry;
   hooks: HookSystem;
   emitOutput<T extends string>(type: T, data: Record<string, unknown>): void;
-  cwdBoundary: string | null;
-  workspaceRoot: string | null;
+  workspaceRoots: string[] | null;
   maxRetries: number;
   toolRetryDelay: number;
   /** Dynamic getter — isRestoring can change at runtime. */
@@ -247,19 +246,15 @@ export class ToolExecutor {
     const toolCtx = new ToolContext();
     toolCtx.set("agent", this.#deps.agent);
     toolCtx.set("isSessionRestoring", this.#deps.isRestoring());
-    toolCtx.set("cwdBoundary", this.#deps.cwdBoundary || null);
-    toolCtx.set("workspaceRoot", this.#deps.workspaceRoot || null);
-
-    // Build Workspace from cwdBoundary, workspaceRoot, or the process CWD.
-    // Always constructing a Workspace means file tools go through resolveSafe()
-    // and absolute-path escapes are rejected even when no boundary is configured.
-    const boundary = this.#deps.cwdBoundary || this.#deps.workspaceRoot || process.cwd();
-    try {
-      toolCtx.set("workspace", new Workspace(boundary));
-    } catch (e) {
-      logger.warn(`Failed to create Workspace from '${boundary}': ${(e as Error).message}`);
-      toolCtx.set("workspace", null);
-    }
+    // Build Workspace from the configured roots, or the process CWD. Roots
+    // are pre-validated at config resolution (expandWorkspacePaths); if
+    // construction still throws, let it surface as an unexpected error rather
+    // than silently degrading to an unbounded workspace.
+    const roots =
+      this.#deps.workspaceRoots && this.#deps.workspaceRoots.length > 0
+        ? this.#deps.workspaceRoots
+        : [process.cwd()];
+    toolCtx.set("workspace", new Workspace(roots));
 
     return toolCtx;
   }

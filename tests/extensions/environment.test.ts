@@ -89,3 +89,35 @@ describe("environment extension", () => {
     expect((result as any).content).toContain(process.cwd());
   });
 });
+
+describe("environment extension — workspace roots", () => {
+  const extension = create();
+  const hook = extension.hooks![HOOKS.SYSTEM_PROMPT_BUILD]!;
+
+  it("lists the roots when more than one is configured", async () => {
+    const result = await hook({
+      agent: {
+        model: "test",
+        config: { workspaceRoots: ["/a/root", "/b/root", "/c/root"] },
+      } as any,
+    });
+    expect((result as any).content).toContain("Workspace roots: /a/root, /b/root, /c/root");
+  });
+
+  it("does not mention roots when only the default single root is configured", async () => {
+    const result = await hook({
+      agent: {
+        model: "test",
+        config: { workspaceRoots: [process.cwd()] },
+      } as any,
+    });
+    expect((result as any).content).not.toContain("Workspace roots");
+  });
+
+  it("does not mention roots when config is absent", async () => {
+    const result = await hook({
+      agent: { model: "test" } as any,
+    });
+    expect((result as any).content).not.toContain("Workspace roots");
+  });
+});

@@ -155,7 +155,7 @@ export class FindTool {
           }),
           path: param(
             "string",
-            "Path to search in. Defaults to current directory.",
+            "Path to search in. Defaults to current directory. Path relative to the workspace root, or an absolute path inside a configured workspace root.",
           ),
         },
         required: ["pattern"],

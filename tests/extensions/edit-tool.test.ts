@@ -80,7 +80,7 @@ describe('EditTool.execute — exact match', () => {
     const tool = new EditTool({ maxEditInputSize: 16000 });
     const result = await tool.execute(
       { path: 'file.txt', oldString: 'world', newString: 'universe' },
-      toolCtx({ workspaceRoot: dir })
+      toolCtx({ workspaceRoots: [dir] })
     );
 
     expect(fsSync.readFileSync(filePath, 'utf-8')).toBe('hello universe hello');
@@ -95,7 +95,7 @@ describe('EditTool.execute — exact match', () => {
     const tool = new EditTool({ maxEditInputSize: 16000 });
     await tool.execute(
       { path: 'file.txt', oldString: 'foo', newString: 'qux', replace_all: true },
-      toolCtx({ workspaceRoot: dir })
+      toolCtx({ workspaceRoots: [dir] })
     );
 
     expect(fsSync.readFileSync(filePath, 'utf-8')).toBe('qux bar qux baz qux');
@@ -108,7 +108,7 @@ describe('EditTool.execute — exact match', () => {
     const tool = new EditTool({ maxEditInputSize: 16000 });
     await tool.execute(
       { path: 'file.txt', oldString: 'foo', newString: 'qux' },
-      toolCtx({ workspaceRoot: dir })
+      toolCtx({ workspaceRoots: [dir] })
     );
 
     expect(fsSync.readFileSync(filePath, 'utf-8')).toBe('qux bar foo baz foo');
@@ -121,7 +121,7 @@ describe('EditTool.execute — exact match', () => {
     const tool = new EditTool({ maxEditInputSize: 16000 });
     await tool.execute(
       { path: 'file.txt', oldString: 'hello', newString: 'world' },
-      toolCtx({ workspaceRoot: dir })
+      toolCtx({ workspaceRoots: [dir] })
     );
 
     expect(fsSync.readFileSync(filePath, 'utf-8')).toBe('line1\nworld\nline3');
@@ -137,7 +137,7 @@ describe('EditTool.execute — exact match', () => {
 
     await tool.execute(
       { path: 'a/b/new.txt', oldString: 'old', newString: 'new' },
-      toolCtx({ workspaceRoot: dir })
+      toolCtx({ workspaceRoots: [dir] })
     );
 
     expect(fsSync.readFileSync(filePath, 'utf-8')).toBe('new content');
@@ -151,14 +151,14 @@ describe('EditTool.execute — exact match', () => {
     // $& = matched text, $$ = literal $, $' = text after match — all must stay literal.
     await tool.execute(
       { path: 'file.txt', oldString: '100', newString: '$&$$100$\'$`' },
-      toolCtx({ workspaceRoot: dir })
+      toolCtx({ workspaceRoots: [dir] })
     );
     expect(fsSync.readFileSync(filePath, 'utf-8')).toBe("price: $&$$100$'$` price: 100");
 
     fsSync.writeFileSync(filePath, 'foo bar foo');
     await tool.execute(
       { path: 'file.txt', oldString: 'foo', newString: '$&', replace_all: true },
-      toolCtx({ workspaceRoot: dir })
+      toolCtx({ workspaceRoots: [dir] })
     );
     expect(fsSync.readFileSync(filePath, 'utf-8')).toBe('$& bar $&');
   });
@@ -174,7 +174,7 @@ describe('EditTool.execute — line-trimmed fallback', () => {
     const tool = new EditTool({ maxEditInputSize: 16000 });
     await tool.execute(
       { path: 'file.txt', oldString: 'hello world', newString: 'universe' },
-      toolCtx({ workspaceRoot: dir })
+      toolCtx({ workspaceRoots: [dir] })
     );
 
     expect(fsSync.readFileSync(filePath, 'utf-8')).toBe('  universe  \n  foo bar  ');
@@ -188,7 +188,7 @@ describe('EditTool.execute — line-trimmed fallback', () => {
     await expect(
       tool.execute(
         { path: 'file.txt', oldString: 'notfound', newString: 'replacement' },
-        toolCtx({ workspaceRoot: dir })
+        toolCtx({ workspaceRoots: [dir] })
       )
     ).rejects.toThrow(/text not found in file/);
   });
@@ -225,7 +225,7 @@ describe('EditTool.execute — line-trimmed fallback', () => {
           'console.log("B WINS");\n' +
           '}',
       },
-      toolCtx({ workspaceRoot: dir })
+      toolCtx({ workspaceRoots: [dir] })
     );
 
     const result = fsSync.readFileSync(filePath, 'utf-8');
@@ -269,7 +269,7 @@ describe('EditTool.execute — line-trimmed fallback', () => {
           '  console.log("B WINS!");\n' +
           '}',
       },
-      toolCtx({ workspaceRoot: dir })
+      toolCtx({ workspaceRoots: [dir] })
     );
 
     const result = fsSync.readFileSync(filePath, 'utf-8');
@@ -291,7 +291,7 @@ describe('EditTool.execute — line-trimmed fallback', () => {
         oldString: 'alpha\nbeta',
         newString: 'one\ntwo',
       },
-      toolCtx({ workspaceRoot: dir })
+      toolCtx({ workspaceRoots: [dir] })
     );
 
     expect(fsSync.readFileSync(filePath, 'utf-8')).toBe('one\ntwo\ngamma\ndelta');
@@ -308,7 +308,7 @@ describe('EditTool.execute — line-trimmed fallback', () => {
         oldString: 'gamma\ndelta',
         newString: 'three\nfour',
       },
-      toolCtx({ workspaceRoot: dir })
+      toolCtx({ workspaceRoots: [dir] })
     );
 
     expect(fsSync.readFileSync(filePath, 'utf-8')).toBe('alpha\nbeta\nthree\nfour');
@@ -325,7 +325,7 @@ describe('EditTool.execute — error cases', () => {
     const tool = new EditTool({ maxEditInputSize: 16000 });
     const result = await tool.execute(
       { path: 'file.txt', oldString: '', newString: 'world' },
-      toolCtx({ workspaceRoot: dir })
+      toolCtx({ workspaceRoots: [dir] })
     );
 
     expect(resultStr(result)).toContain('oldString must not be empty');
@@ -338,7 +338,7 @@ describe('EditTool.execute — error cases', () => {
     const tool = new EditTool({ maxEditInputSize: 16000 });
     const result = await tool.execute(
       { path: 'file.txt', oldString: 'hello', newString: 'hello' },
-      toolCtx({ workspaceRoot: dir })
+      toolCtx({ workspaceRoots: [dir] })
     );
 
     expect(resultStr(result)).toContain('no changes to apply');
@@ -346,7 +346,7 @@ describe('EditTool.execute — error cases', () => {
 
   it('returns error on invalid JSON input', async () => {
     const tool = new EditTool({ maxEditInputSize: 16000 });
-    const result = await tool.execute('not json', toolCtx({ workspaceRoot: dir }));
+    const result = await tool.execute('not json', toolCtx({ workspaceRoots: [dir] }));
     expect(resultStr(result)).toContain('Error parsing arguments');
   });
 
@@ -354,7 +354,7 @@ describe('EditTool.execute — error cases', () => {
     const tool = new EditTool({ maxEditInputSize: 16000 });
     const result = await tool.execute(
       { oldString: 'a', newString: 'b' },
-      toolCtx({ workspaceRoot: dir })
+      toolCtx({ workspaceRoots: [dir] })
     );
     expect(resultStr(result)).toContain('Error parsing arguments');
   });
@@ -363,7 +363,7 @@ describe('EditTool.execute — error cases', () => {
     const tool = new EditTool({ maxEditInputSize: 16000 });
     const result = await tool.execute(
       { path: 'file.txt', newString: 'b' },
-      toolCtx({ workspaceRoot: dir })
+      toolCtx({ workspaceRoots: [dir] })
     );
     expect(resultStr(result)).toContain('Error parsing arguments');
   });
@@ -372,7 +372,7 @@ describe('EditTool.execute — error cases', () => {
     const tool = new EditTool({ maxEditInputSize: 16000 });
     const result = await tool.execute(
       { path: 'file.txt', oldString: 'a' },
-      toolCtx({ workspaceRoot: dir })
+      toolCtx({ workspaceRoots: [dir] })
     );
     expect(resultStr(result)).toContain('Error parsing arguments');
   });
@@ -381,7 +381,7 @@ describe('EditTool.execute — error cases', () => {
     const tool = new EditTool({ maxEditInputSize: 16000 });
     const result = await tool.execute(
       { path: '/etc/evil.txt', oldString: 'a', newString: 'b' },
-      toolCtx({ cwdBoundary: dir })
+      toolCtx({ workspaceRoots: [dir] })
     );
     expect(resultStr(result)).toContain('Path escape rejected');
   });
@@ -395,7 +395,7 @@ describe('EditTool.execute — error cases', () => {
     await expect(
       tool.execute(
         { path: 'file.txt', oldString: bigString, newString: 'y' },
-        toolCtx({ workspaceRoot: dir })
+        toolCtx({ workspaceRoots: [dir] })
       )
     ).rejects.toThrow(/Edit input too large/);
   });
@@ -407,7 +407,7 @@ describe('EditTool.execute — error cases', () => {
     const tool = new EditTool({ maxEditInputSize: 16000 });
     await tool.execute(
       JSON.stringify({ path: 'file.txt', oldString: 'hello', newString: 'goodbye' }),
-      toolCtx({ workspaceRoot: dir })
+      toolCtx({ workspaceRoots: [dir] })
     );
 
     expect(fsSync.readFileSync(filePath, 'utf-8')).toBe('goodbye world');
@@ -424,7 +424,7 @@ describe('EditTool.execute — text deletion', () => {
     const tool = new EditTool({ maxEditInputSize: 16000 });
     const result = await tool.execute(
       { path: 'file.txt', oldString: ' world', newString: '' },
-      toolCtx({ workspaceRoot: dir })
+      toolCtx({ workspaceRoots: [dir] })
     );
 
     expect(fsSync.readFileSync(filePath, 'utf-8')).toBe('hello hello');
@@ -440,7 +440,7 @@ describe('EditTool.execute — text deletion', () => {
     const tool = new EditTool({ maxEditInputSize: 16000 });
     await tool.execute(
       { path: 'file.txt', oldString: 'bye\n', newString: '' },
-      toolCtx({ workspaceRoot: dir })
+      toolCtx({ workspaceRoots: [dir] })
     );
 
     expect(fsSync.readFileSync(filePath, 'utf-8')).toBe('line1\nline3');
@@ -453,7 +453,7 @@ describe('EditTool.execute — text deletion', () => {
     const tool = new EditTool({ maxEditInputSize: 16000 });
     const result = await tool.execute(
       { path: 'file.txt', oldString: 'drop\n', newString: '', replace_all: true },
-      toolCtx({ workspaceRoot: dir })
+      toolCtx({ workspaceRoots: [dir] })
     );
 
     expect(fsSync.readFileSync(filePath, 'utf-8')).toBe('keep\nkeep\nkeep');
@@ -479,7 +479,7 @@ describe('EditTool.execute — text deletion', () => {
         oldString: 'if (a > b) {\n  doIt();\n}',
         newString: '',
       },
-      toolCtx({ workspaceRoot: dir })
+      toolCtx({ workspaceRoots: [dir] })
     );
 
     expect(fsSync.readFileSync(filePath, 'utf-8')).toBe('  keep\n');
@@ -495,7 +495,7 @@ describe('EditTool.execute — text deletion', () => {
     const tool = new EditTool({ maxEditInputSize: 16000 });
     await tool.execute(
       { path: 'file.txt', old_string: ' b', new_string: '' },
-      toolCtx({ workspaceRoot: dir })
+      toolCtx({ workspaceRoots: [dir] })
     );
 
     expect(fsSync.readFileSync(filePath, 'utf-8')).toBe('a a');
@@ -508,7 +508,7 @@ describe('EditTool.execute — text deletion', () => {
     const tool = new EditTool({ maxEditInputSize: 16000 });
     await tool.execute(
       JSON.stringify({ path: 'file.txt', oldString: ' foo', newString: '' }),
-      toolCtx({ workspaceRoot: dir })
+      toolCtx({ workspaceRoots: [dir] })
     );
 
     expect(fsSync.readFileSync(filePath, 'utf-8')).toBe('x bar');
@@ -518,7 +518,7 @@ describe('EditTool.execute — text deletion', () => {
     const tool = new EditTool({ maxEditInputSize: 16000 });
     const result = await tool.execute(
       { path: 'file.txt', oldString: 'a' },
-      toolCtx({ workspaceRoot: dir })
+      toolCtx({ workspaceRoots: [dir] })
     );
     expect(resultStr(result)).toContain('Error parsing arguments');
   });
@@ -534,7 +534,7 @@ describe('EditTool.execute — snake_case aliases', () => {
     const tool = new EditTool({ maxEditInputSize: 16000 });
     await tool.execute(
       { path: 'file.txt', old_string: 'hello', new_string: 'goodbye' },
-      toolCtx({ workspaceRoot: dir })
+      toolCtx({ workspaceRoots: [dir] })
     );
 
     expect(fsSync.readFileSync(filePath, 'utf-8')).toBe('goodbye world');

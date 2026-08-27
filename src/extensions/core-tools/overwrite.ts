@@ -26,7 +26,7 @@ export class OverwriteTool {
       "Writes content to a file, replacing all existing content. Creates parent directories if needed. Use this to create new files or completely replace an existing file.",
       {
         properties: {
-          path: param("string", "File path relative to workspace root"),
+          path: param("string", "File path. Path relative to the workspace root, or an absolute path inside a configured workspace root."),
           content: param("string", "Content to write to the file"),
         },
         required: ["path", "content"],
@@ -60,16 +60,11 @@ export class OverwriteTool {
     };
 
     const { path: filePath, content } = args;
-    const workspace = ctx.get("workspace") as Workspace | null || null;
-    const workspaceRoot = ctx.get("workspaceRoot") as string | null || null;
+    const workspace = ctx.get("workspace") as Workspace;
 
     let resolvedPath: string;
     try {
-      if (workspace) {
-        resolvedPath = workspace.resolveSafe(filePath);
-      } else {
-        resolvedPath = path.resolve(workspaceRoot || ".", filePath);
-      }
+      resolvedPath = workspace.resolveSafe(filePath);
     } catch (e: unknown) {
       if (e instanceof PathEscapeError) {
         return ToolResult.err(e.message);

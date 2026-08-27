@@ -443,6 +443,34 @@ Profile used for spawned task agents (subagents).
 { "taskProfile": "task-default" }
 ```
 
+### `workspace`
+
+- **Type:** `object`
+- **Default:** `{}` (equivalent to a single root of the process CWD)
+- **Resolution:** config > default
+
+Configures the workspace roots that bound file tools (`read`, `edit`, `append`, `overwrite`, `find`, `grep`, `explore`, `project_info`) and `@file` attachment expansion.
+
+#### `workspace.paths`
+
+- **Type:** `string[]`
+- **Default:** `["."]` (the process CWD)
+
+Array of directory paths forming the workspace. Per entry:
+
+- Relative paths resolve against the process CWD.
+- A leading `~` or `~/...` expands to the home directory; `~user` and other tildes stay literal and are treated as ordinary relative paths, so they must exist on disk or startup fails with a config error.
+- Entries containing glob magic (`*`, `?`, `[`, `{`) are expanded at config resolution time (via `Bun.Glob`); a glob that matches nothing logs a warning and is dropped.
+- An explicit (non-glob) path that does not exist is a config error.
+
+The first entry is the **primary root**: relative tool paths resolve against it only. Absolute paths are accepted if they fall inside any configured root; anything outside all roots is rejected (including symlink escapes, except symlinks whose real location is inside another configured root).
+
+When `workspace.paths` is absent, the legacy raw keys `cwdBoundary` / `workspaceRoot` (if present in the config file) are honored as a single root, otherwise the process CWD is used.
+
+```json
+{ "workspace": { "paths": [".", "/skills", "/etc/cron*", "~/.tmp"] } }
+```
+
 ### `skillsPath` (top-level, backward compatible)
 
 - **Type:** `string`

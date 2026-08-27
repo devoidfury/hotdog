@@ -18,12 +18,17 @@ async function buildEnvironmentChunk(agent: Agent): Promise<string> {
     return "";
   }
 
+  // Only surface extra roots in the prompt when there is more than one;
+  // a single/default root adds no information.
+  const roots = (agent.config?.workspaceRoots as string[] | undefined) ?? [];
+
   const context = {
     model: agent.model || "",
     profile_name: agent.profileName || "default",
     cwd: cwd(),
     platform: platform,
     session_start: new Date().toISOString().slice(0, 10),
+    workspace_roots: roots.length > 1 ? roots.join(", ") : "",
   };
 
   return render(template, context);

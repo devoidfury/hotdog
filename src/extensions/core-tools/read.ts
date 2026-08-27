@@ -56,7 +56,7 @@ export class ReadTool {
         properties: {
           path: param(
             "string",
-            "Path to the file to read (relative to workspace root)",
+            "Path to the file to read. Path relative to the workspace root, or an absolute path inside a configured workspace root.",
           ),
           limit: param("integer", `Maximum number of lines to return`, {
             minimum: 1,
@@ -99,16 +99,11 @@ export class ReadTool {
       return ToolResult.err("path is required");
     }
 
-    const workspace = ctx.get("workspace") as Workspace | null || null;
-    const workspaceRoot = ctx.get("workspaceRoot") as string | null || null;
+    const workspace = ctx.get("workspace") as Workspace;
 
     let resolved: string;
     try {
-      if (workspace) {
-        resolved = workspace.resolveSafe(filePath);
-      } else {
-        resolved = path.resolve(workspaceRoot || ".", filePath);
-      }
+      resolved = workspace.resolveSafe(filePath);
     } catch (e: unknown) {
       if (e instanceof PathEscapeError) {
         return ToolResult.err(e.message);

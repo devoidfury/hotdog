@@ -1,10 +1,12 @@
 // Tests for workspace.ts — path boundary resolution and escape rejection.
 
-import { describe, it, expect, beforeAll, afterAll } from "bun:test";
+import { describe, it, expect, beforeAll, afterAll, spyOn } from "bun:test";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { Workspace, PathEscapeError } from "../../src/utils/workspace.ts";
+import { Workspace, PathEscapeError, expandWorkspacePaths } from "../../src/utils/workspace.ts";
+import { ConfigError } from "../../src/core/error.ts";
+import { logger } from "../../src/core/logger.ts";
 
 let workDir: string; // scratch root for the "workspace"
 let outsideDir: string; // sibling dir acting as "outside the workspace"
@@ -269,5 +271,237 @@ describe("relative", () => {
 
   it("returns null for a sibling with a shared name prefix", () => {
     expect(ws.relative(workDir + "-evil")).toBeNull();
+  });
+});
+
+describe("Workspace — multi-root", () => {
+  let rootA: string; // primary
+  let rootB: string; // secondary
+  let sibling: string; // shares a prefix with rootB but is outside all roots
+  let multi: Workspace;
+
+  beforeAll(() => {
+    const base = fs.mkdtempSync(path.join(os.tmpdir(), "hotdog-test-multi-"));
+    rootA = path.join(base, "a");
+    rootB = path.join(base, "b");
+    sibling = path.join(base, "b-evil");
+    fs.mkdirSync(path.join(rootA, "sub"), { recursive: true });
+    fs.mkdirSync(path.join(rootB, "sub"), { recursive: true });
+    fs.writeFileSync(path.join(rootA, "same.txt"), "A");
+    fs.writeFileSync(path.join(rootB, "same.txt"), "B");
+    multi = new Workspace([rootA, rootB]);
+  });
+
+  afterAll(() => {
+    fs.rmSync(path.dirname(rootA), { recursive: true, force: true });
+  });
+
+  it("stores roots in config order", () => {
+    expect(multi.roots).toEqual([rootA, rootB]);
+  });
+
+  it("root getter returns the primary root", () => {
+    expect(multi.root).toBe(rootA);
+  });
+
+  it("throws on an empty roots array", () => {
+    expect(() => new Workspace([])).toThrow(ConfigError);
+  });
+
+  it("resolves relative paths under the primary root only", () => {
+    expect(multi.resolveSafe("same.txt")).toBe(path.join(rootA, "same.txt"));
+  });
+
+  it("resolves relative paths under the primary even when the same relative exists under the secondary", () => {
+    expect(multi.resolveSafe("sub/..")).toBe(rootA);
+    expect(multi.resolveSafe("same.txt")).not.toBe(path.join(rootB, "same.txt"));
+  });
+
+  it("accepts an absolute path inside the secondary root", () => {
+    expect(multi.resolveSafe(path.join(rootB, "same.txt"))).toBe(path.join(rootB, "same.txt"));
+    expect(multi.resolveSafe(path.join(rootB, "brand/new.txt"))).toBe(path.join(rootB, "brand", "new.txt"));
+  });
+
+  it("rejects an absolute path outside all roots", () => {
+    expect(() => multi.resolveSafe("/etc/passwd")).toThrow(PathEscapeError);
+    expect(() => multi.resolveSafe("/etc/passwd")).toThrow("Path escape rejected");
+  });
+
+  it("accepts .. that leaves the primary root but lands inside the secondary root", () => {
+    // Design: relative paths resolve against the primary, and the result is
+    // accepted if it falls inside ANY root.
+    expect(multi.resolveSafe("../b/same.txt")).toBe(path.join(rootB, "same.txt"));
+  });
+
+  it("rejects .. escapes that leave all roots", () => {
+    expect(() => multi.resolveSafe("../../../../etc/passwd")).toThrow(PathEscapeError);
+    expect(() => multi.resolveSafe("../a-evil/x")).toThrow(PathEscapeError);
+  });
+
+  it("rejects a sibling root that shares a name prefix with a configured root", () => {
+    expect(() => multi.resolveSafe(path.join(sibling, "x"))).toThrow(PathEscapeError);
+    fs.mkdirSync(sibling, { recursive: true });
+    expect(() => multi.resolveSafe(path.join(sibling, "x"))).toThrow(PathEscapeError);
+  });
+
+  it("rejects a symlink inside the secondary root that points outside", () => {
+    const target = path.join(os.tmpdir(), "hotdog-multi-outside.txt");
+    fs.writeFileSync(target, "secret");
+    const link = path.join(rootB, "out-link");
+    fs.symlinkSync(target, link);
+    expect(() => multi.resolveSafe(path.join(rootB, "out-link"))).toThrow(PathEscapeError);
+    expect(() => multi.resolveSafe(path.join(rootB, "out-link"))).toThrow("Symlink escape rejected");
+    fs.unlinkSync(link);
+    fs.unlinkSync(target);
+  });
+
+  it("accepts a symlink that points into another configured root", () => {
+    // Directory symlink in the primary root pointing at the secondary root.
+    const dirLink = path.join(rootA, "to-b");
+    fs.symlinkSync(rootB, dirLink);
+    expect(multi.resolveSafe(path.join(dirLink, "same.txt"))).toBe(path.join(dirLink, "same.txt"));
+    fs.unlinkSync(dirLink);
+
+    // Final-component symlink pointing at a file in the secondary root
+    // (exercises the dangling-link probe loop, not the ancestor walk).
+    const fileLink = path.join(rootA, "to-b-file");
+    fs.symlinkSync(path.join(rootB, "same.txt"), fileLink);
+    expect(multi.resolveSafe(fileLink)).toBe(fileLink);
+    fs.unlinkSync(fileLink);
+  });
+
+  it("rejects a dangling symlink final component under the secondary root", () => {
+    const link = path.join(rootB, "dangle");
+    fs.symlinkSync(path.join(os.tmpdir(), "hotdog-multi-never-created.txt"), link);
+    expect(() => multi.resolveSafe(path.join(rootB, "dangle"))).toThrow(PathEscapeError);
+    expect(() => multi.resolveSafe(path.join(rootB, "dangle"))).toThrow("Symlink escape rejected");
+    fs.unlinkSync(link);
+  });
+
+  it("contains() is true for any configured root", () => {
+    expect(multi.contains(path.join(rootA, "sub", "x"))).toBe(true);
+    expect(multi.contains(path.join(rootB, "sub", "x"))).toBe(true);
+    expect(multi.contains(rootB)).toBe(true);
+    expect(multi.contains(path.join(sibling, "x"))).toBe(false);
+    expect(multi.contains("/etc/passwd")).toBe(false);
+  });
+
+  it("relative() uses the first containing root in config order", () => {
+    expect(multi.relative(path.join(rootA, "same.txt"))).toBe("same.txt");
+    expect(multi.relative(path.join(rootB, "same.txt"))).toBe("same.txt");
+    expect(multi.relative(rootB)).toBe("");
+    expect(multi.relative(path.join(sibling, "x"))).toBeNull();
+  });
+
+  it("nested roots: inner root wins for its own paths", () => {
+    const inner = path.join(rootA, "sub");
+    const w = new Workspace([inner, rootA]);
+    expect(w.root).toBe(inner);
+    expect(w.resolveSafe("x.txt")).toBe(path.join(inner, "x.txt"));
+    expect(w.relative(path.join(rootA, "same.txt"))).toBe("same.txt");
+  });
+});
+
+describe("expandWorkspacePaths", () => {
+  let base: string;
+  let cwdBefore: string;
+
+  beforeAll(() => {
+    base = fs.mkdtempSync(path.join(os.tmpdir(), "hotdog-test-expand-"));
+    fs.mkdirSync(path.join(base, "proj"), { recursive: true });
+    fs.mkdirSync(path.join(base, "glob", "one"), { recursive: true });
+    fs.mkdirSync(path.join(base, "glob", "two"), { recursive: true });
+    fs.writeFileSync(path.join(base, "glob", "f1.txt"), "1");
+    fs.writeFileSync(path.join(base, "glob", "f2.txt"), "2");
+    fs.mkdirSync(path.join(base, "brace-a"), { recursive: true });
+    fs.mkdirSync(path.join(base, "brace-b"), { recursive: true });
+    cwdBefore = process.cwd();
+    process.chdir(cwdBefore); // ensure deterministic relative resolution
+  });
+
+  afterAll(() => {
+    process.chdir(cwdBefore);
+    fs.rmSync(base, { recursive: true, force: true });
+  });
+
+  it("returns absolute paths for absolute entries", () => {
+    expect(expandWorkspacePaths([path.join(base, "proj")])).toEqual([path.join(base, "proj")]);
+  });
+
+  it("resolves relative entries against the process CWD", () => {
+    process.chdir(base);
+    expect(expandWorkspacePaths(["proj"])).toEqual([path.join(base, "proj")]);
+  });
+
+  it("expands a leading ~ to the home directory", () => {
+    // We can't change os.homedir(); verify ~ entries resolve under homedir().
+    const expanded = expandWorkspacePaths(["~"]);
+    expect(expanded[0]).toBe(os.homedir());
+  });
+
+  it("expands a glob into all its matches (files and dirs)", () => {
+    const expected = [
+      path.join(base, "glob", "f1.txt"),
+      path.join(base, "glob", "f2.txt"),
+      path.join(base, "glob", "one"),
+      path.join(base, "glob", "two"),
+    ].sort();
+    expect(expandWorkspacePaths([path.join(base, "glob", "*")]).sort()).toEqual(expected);
+  });
+
+  it("expands brace patterns", () => {
+    const expected = [path.join(base, "brace-a"), path.join(base, "brace-b")].sort();
+    expect(
+      expandWorkspacePaths([`${base}/brace-{a,b}`]).sort(),
+    ).toEqual(expected);
+  });
+
+  it("warns and drops a glob that matches nothing", () => {
+    const warnSpy = spyOn(logger, "warn");
+    try {
+      expect(expandWorkspacePaths([path.join(base, "no-such-pattern-*.txt")])).toEqual([]);
+      expect(warnSpy).toHaveBeenCalledTimes(1);
+    } finally {
+      warnSpy.mockRestore();
+    }
+  });
+
+  it("falls back to a literal path when a glob matches nothing but the path exists", () => {
+    // Directory whose name contains glob magic; the glob form matches
+    // nothing, but the literal path exists and must be kept.
+    const bracketed = path.join(base, "my[1]dir");
+    fs.mkdirSync(bracketed, { recursive: true });
+    expect(expandWorkspacePaths([bracketed])).toEqual([bracketed]);
+  });
+
+  it("throws for an explicit path that does not exist", () => {
+    expect(() =>
+      expandWorkspacePaths([path.join(base, "never-created")]),
+    ).toThrow(ConfigError);
+  });
+
+  it("throws for a non-array input", () => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    expect(() => expandWorkspacePaths("/somewhere" as any)).toThrow(ConfigError);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    expect(() => expandWorkspacePaths(null as any)).toThrow(ConfigError);
+  });
+
+  it("throws for an empty array", () => {
+    expect(() => expandWorkspacePaths([])).toThrow(ConfigError);
+  });
+
+  it("throws for empty-string and non-string entries", () => {
+    expect(() => expandWorkspacePaths([""])).toThrow(ConfigError);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    expect(() => expandWorkspacePaths([42 as any])).toThrow(ConfigError);
+  });
+
+  it("dedupes while preserving order", () => {
+    const p = path.join(base, "proj");
+    expect(expandWorkspacePaths([p, p, path.join(base, "glob", "f1.txt"), p])).toEqual([
+      p,
+      path.join(base, "glob", "f1.txt"),
+    ]);
   });
 });

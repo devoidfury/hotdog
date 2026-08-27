@@ -8,7 +8,7 @@ Core tools are provided by the `core-tools` extension. Tools are registered via 
 
 **Tool interface** — all tools implement: `execute(input, ctx) → result`
 - `input` — JSON string or parsed object from LLM
-- `ctx` — `ToolContext` with agent, isSessionRestoring, cwdBoundary, workspaceRoot, and a `workspace` (`Workspace`) always built from the boundary (defaulting to process CWD) that file tools use for escape-safe path resolution
+- `ctx` — `ToolContext` with agent, isSessionRestoring, and a `workspace` (multi-root `Workspace`) always built from the configured workspace roots (defaulting to process CWD) that file tools use for escape-safe path resolution
 - Result can be: string, ToolResult instance, or object
 
 **ToolRegistry** — stores tools by name, provides lookup, serialization, filtering, and `getToolDefs()` accessor. Located in `src/core/extensions/tool-registry.ts`.

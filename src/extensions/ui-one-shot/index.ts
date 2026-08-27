@@ -134,6 +134,7 @@ async function handlePromptSubcommand(
         maxToolCallsPerIteration: resolved.maxToolCallsPerIteration as number,
         maxRetries: resolved.maxRetries as number,
         toolRetryDelay: resolved.toolRetryDelay as number,
+        workspaceRoots: (resolved.workspaceRoots as string[]) || [process.cwd()],
       },
       sessionId,
       abortSignal: (agentConfig.abortSignal as AbortSignal) || null,

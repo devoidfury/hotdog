@@ -167,7 +167,7 @@ describe("file-attachment completion handler", () => {
     expect(values).toContain("@test.txt");
   });
 
-  it("uses cwdBoundary from agent config", async () => {
+  it("uses workspaceRoots from agent config", async () => {
     const workspaceDir = path.join(tmpDir, "workspace");
     fs.mkdirSync(workspaceDir, { recursive: true });
     fs.writeFileSync(path.join(workspaceDir, "config.json"), "{}");
@@ -175,7 +175,7 @@ describe("file-attachment completion handler", () => {
     const ctx = {
       line: "Read @",
       cursorPos: 6,
-      agent: { config: { cwdBoundary: workspaceDir } },
+      agent: { config: { workspaceRoots: [workspaceDir] } },
     } as any;
 
     const results = await completion(ctx);
@@ -184,21 +184,6 @@ describe("file-attachment completion handler", () => {
     expect(values).not.toContain("@test.txt"); // not in workspaceDir
   });
 
-  it("uses workspaceRoot from agent config when cwdBoundary is not set", async () => {
-    const workspaceDir = path.join(tmpDir, "workspace");
-    fs.mkdirSync(workspaceDir, { recursive: true });
-    fs.writeFileSync(path.join(workspaceDir, "config.json"), "{}");
-
-    const ctx = {
-      line: "Read @",
-      cursorPos: 6,
-      agent: { config: { workspaceRoot: workspaceDir } },
-    } as any;
-
-    const results = await completion(ctx);
-    const values = results.map((r) => r.value);
-    expect(values).toContain("@config.json");
-  });
 
   it("falls back to cwd when no agent context", async () => {
     const ctx = {
@@ -496,7 +481,7 @@ describe("file-attachment extension", () => {
     expect((result as any).text).toContain("first content");
   });
 
-  it("uses agent context for cwdBoundary", async () => {
+  it("uses agent context for workspaceRoots", async () => {
     const workspaceDir = path.join(tmpDir, "workspace");
     await fsPromises.mkdir(workspaceDir, { recursive: true });
     await fsPromises.writeFile(path.join(workspaceDir, "config.json"), '{"key": "value"}');
@@ -508,7 +493,7 @@ describe("file-attachment extension", () => {
     const result = await hook(
       {
         text: "Read @config.json",
-        agent: { config: { cwdBoundary: workspaceDir, workspaceRoot: workspaceDir } },
+        agent: { config: { workspaceRoots: [workspaceDir] } },
       } as any,
     );
 
@@ -552,7 +537,7 @@ describe("file-attachment workspace boundary (escape rejection)", () => {
     return create(core).hooks![HOOKS.INPUT]!;
   }
 
-  const boundaryAgent = () => ({ config: { cwdBoundary: workspaceDir } });
+  const boundaryAgent = () => ({ config: { workspaceRoots: [workspaceDir] } });
 
   it("(a) @../outside.txt with workspace configured is NOT attached and is reported", async () => {
     const hook = makeHook();
@@ -611,12 +596,45 @@ describe("file-attachment workspace boundary (escape rejection)", () => {
     expect(r.text).toContain("../outside.txt");
   });
 
-  it("still attaches when no boundary is configured (workspace === null)", async () => {
-    // No agent context: boundary unconfigured, resolves against cwd as before
+  it("still attaches when no workspaceRoots are configured (falls back to cwd)", async () => {
+    // No agent context: roots unconfigured, relative paths resolve against cwd as before
     const hook = makeHook();
     const result = await hook({
       text: "Please read @workspace/inside.txt",
       agent: null,
+    } as any);
+
+    const r = result as any;
+    expect(r.action).toBe("transform");
+    expect(r.text).toContain("INSIDE-OK-CONTENT");
+  });
+
+  it("(multi-root) absolute path under a secondary root is attached", async () => {
+    const hook = makeHook();
+    const secondaryDir = path.join(tmpDir, "secondary");
+    fs.mkdirSync(secondaryDir, { recursive: true });
+    fs.writeFileSync(path.join(secondaryDir, "root.md"), "SECONDARY-CONTENT");
+
+    const result = await hook({
+      text: `Please read @${path.join(secondaryDir, "root.md")}`,
+      agent: { config: { workspaceRoots: [workspaceDir, secondaryDir] } },
+    } as any);
+
+    const r = result as any;
+    expect(r.action).toBe("transform");
+    expect(r.text).toContain("SECONDARY-CONTENT");
+    expect(r.text).not.toContain("could not read");
+  });
+
+  it("(multi-root) relative paths still resolve against the primary root", async () => {
+    const hook = makeHook();
+    const secondaryDir = path.join(tmpDir, "secondary");
+    fs.mkdirSync(secondaryDir, { recursive: true });
+    fs.writeFileSync(path.join(secondaryDir, "root.md"), "SECONDARY-CONTENT");
+
+    const result = await hook({
+      text: "Please read @inside.txt",
+      agent: { config: { workspaceRoots: [workspaceDir, secondaryDir] } },
     } as any);
 
     const r = result as any;

@@ -139,14 +139,9 @@ export function create(core: CoreContext): ExtensionInstance {
   return {
     hooks: {
       [HOOKS.INPUT]: async ({ text, agent }) => {
-        const config = agent?.config;
-        const boundary = config?.cwdBoundary ?? config?.workspaceRoot ?? cwd();
-        let workspace: Workspace | null = null;
-        try {
-          workspace = new Workspace(boundary);
-        } catch (e) {
-          logger.debug(`file-attachment: failed to create Workspace: ${(e as Error).message}`);
-        }
+        const roots =
+          (agent?.config?.workspaceRoots as string[] | undefined) ?? [cwd()];
+        const workspace = new Workspace(roots);
 
         const result = await expandFileReferences(text, workspace, maxFileSize, maxFiles);
 

@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- workspace
+  - multi-root workspace support: new `workspace.paths` config (array of directories; entries may be relative, `~`-expanded, or globs). Relative tool paths resolve against the first root; absolute paths must fall inside one of the configured roots. The roots are surfaced in the system prompt environment chunk when more than one is configured
+  - **Notice for existing configs** -- legacy `cwdBoundary` / `workspaceRoot` keys are still honored (as a single root) when `workspace.paths` is absent, but their handling changed: they are now validated at startup, so a value pointing at a nonexistent path fails startup with a config error instead of degrading at runtime, and `~` / glob expansion is now applied to their values as well
+  - fix - `project_info` path was not bounded by the workspace boundary; it now is, and escaping paths are rejected
+  - fix - symlinks that resolve into another configured workspace root are no longer rejected as symlink escapes
+
 - llm-client / tool-executor
   - `maxRetries` now means retries *after* the initial attempt (total attempts = `1 + maxRetries`); previously the value was the total number of attempts, so `maxRetries: 3` gave 1 + 2 rather than 1 + 3
   - fix - removed an unreachable `LlmError.Timeout` throw at the end of `retryWithBackoff`

@@ -2,7 +2,6 @@ import { describe, it, expect, beforeEach, beforeAll, afterAll } from "bun:test"
 import fsSync from "node:fs";
 import path from "node:path";
 import { ExploreTool, SpawnFn } from "../../src/extensions/core-tools/explore.ts";
-import { ToolContext } from "../../src/core/extensions/tool-context.ts";
 import { resultStr, tmpDir, cleanupDir, toolCtx } from "../helpers.ts";
 
 // The tool validates that the target is an existing directory, so tests
@@ -124,28 +123,28 @@ describe("ExploreTool > execute input parsing", () => {
 
   it("rejects empty input (defaults to path=., no outline)", async () => {
     const tool = new ExploreTool(mockSpawn);
-    const result = await tool.execute("", new ToolContext());
+    const result = await tool.execute("", toolCtx({ workspaceRoots: [dir] }));
     const output = resultStr(result);
     expect(output).toContain("The 'outline' argument is required");
   });
 
   it("accepts malformed JSON as outline (path defaults to .)", async () => {
     const tool = new ExploreTool(mockSpawn);
-    const result = await tool.execute("not valid json", new ToolContext());
+    const result = await tool.execute("not valid json", toolCtx({ workspaceRoots: [dir] }));
     expect((result as any).metadata.get("path")).toBe(".");
     expect((result as any).metadata.get("outline")).toBe("not valid json");
   });
 
   it("rejects null input", async () => {
     const tool = new ExploreTool(mockSpawn);
-    const result = await tool.execute(null, new ToolContext());
+    const result = await tool.execute(null, toolCtx({ workspaceRoots: [dir] }));
     const output = resultStr(result);
     expect(output).toContain("The 'outline' argument is required");
   });
 
   it("rejects input with non-string path (falls back to path=.)", async () => {
     const tool = new ExploreTool(mockSpawn);
-    const result = await tool.execute({ path: 123 }, new ToolContext());
+    const result = await tool.execute({ path: 123 }, toolCtx({ workspaceRoots: [dir] }));
     const output = resultStr(result);
     expect(output).toContain("The 'outline' argument is required");
   });
@@ -162,7 +161,7 @@ describe("ExploreTool > execute", () => {
     const tool = new ExploreTool(createMockSpawn({ exitCode: 0 }));
     const result = await tool.execute(
       JSON.stringify({ path: "/tmp" }),
-      new ToolContext(),
+      toolCtx({ workspaceRoots: [dir] }),
     );
     const output = resultStr(result);
     expect(output).toContain("The 'outline' argument is required");
@@ -170,14 +169,14 @@ describe("ExploreTool > execute", () => {
 
   it("rejects empty input", async () => {
     const tool = new ExploreTool(createMockSpawn({ exitCode: 0 }));
-    const result = await tool.execute("", new ToolContext());
+    const result = await tool.execute("", toolCtx({ workspaceRoots: [dir] }));
     const output = resultStr(result);
     expect(output).toContain("The 'outline' argument is required");
   });
 
   it("handles null input", async () => {
     const tool = new ExploreTool(createMockSpawn({ exitCode: 0 }));
-    const result = await tool.execute(null, new ToolContext());
+    const result = await tool.execute(null, toolCtx({ workspaceRoots: [dir] }));
     const output = resultStr(result);
     expect(output).toContain("The 'outline' argument is required");
   });
@@ -186,7 +185,7 @@ describe("ExploreTool > execute", () => {
     const tool = new ExploreTool(createMockSpawn({ exitCode: 0 }));
     const result = await tool.execute(
       JSON.stringify({ path: "/tmp", outline: "   " }),
-      new ToolContext(),
+      toolCtx({ workspaceRoots: [dir] }),
     );
     const output = resultStr(result);
     expect(output).toContain("The 'outline' argument is required");
@@ -194,7 +193,7 @@ describe("ExploreTool > execute", () => {
 
   it("handles object input with missing outline", async () => {
     const tool = new ExploreTool(createMockSpawn({ exitCode: 0 }));
-    const result = await tool.execute({ path: "/tmp" }, new ToolContext());
+    const result = await tool.execute({ path: "/tmp" }, toolCtx({ workspaceRoots: [dir] }));
     const output = resultStr(result);
     expect(output).toContain("The 'outline' argument is required");
   });
@@ -225,7 +224,7 @@ describe("ExploreTool > execute", () => {
     const tool = new ExploreTool(spawnFn);
     const result = await tool.execute(
       JSON.stringify({ path: dir, outline: "check structure" }),
-      new ToolContext(),
+      toolCtx({ workspaceRoots: [dir] }),
     );
 
     // Verify spawn was called with correct arguments
@@ -259,7 +258,7 @@ describe("ExploreTool > execute", () => {
     );
     const result = await tool.execute(
       JSON.stringify({ path: dir, outline: "check structure" }),
-      new ToolContext(),
+      toolCtx({ workspaceRoots: [dir] }),
     );
 
     const output = resultStr(result);
@@ -272,7 +271,7 @@ describe("ExploreTool > execute", () => {
     const tool = new ExploreTool(createMockSpawn({ exitCode: 2 }));
     const result = await tool.execute(
       JSON.stringify({ path: dir, outline: "check" }),
-      new ToolContext(),
+      toolCtx({ workspaceRoots: [dir] }),
     );
 
     const output = resultStr(result);
@@ -308,7 +307,7 @@ describe("ExploreTool > execute", () => {
     const tool = new ExploreTool(() => mockProc);
     const result = await tool.execute(
       JSON.stringify({ path: dir, outline: "test" }),
-      new ToolContext(),
+      toolCtx({ workspaceRoots: [dir] }),
     );
 
     const output = resultStr(result);
@@ -321,7 +320,7 @@ describe("ExploreTool > execute", () => {
     );
     const result = await tool.execute(
       JSON.stringify({ path: dir, outline: "test" }),
-      new ToolContext(),
+      toolCtx({ workspaceRoots: [dir] }),
     );
 
     expect((result as any).metadata.get("content_length")).toBe("5");
@@ -352,7 +351,7 @@ describe("ExploreTool > execute", () => {
     const tool = new ExploreTool(spawnFn);
     const result = await tool.execute(
       JSON.stringify({ path: dir, outline: "test" }),
-      new ToolContext(),
+      toolCtx({ workspaceRoots: [dir] }),
     );
 
     const command = (result as any).metadata.get("command");
@@ -370,7 +369,7 @@ describe("ExploreTool > execute", () => {
     );
     const result = await tool.execute(
       JSON.stringify({ path: dir, outline: "test" }),
-      new ToolContext(),
+      toolCtx({ workspaceRoots: [dir] }),
     );
 
     const output = resultStr(result);
@@ -383,7 +382,7 @@ describe("ExploreTool > execute", () => {
     );
     const result = await tool.execute(
       { path: dir, outline: "find tests" },
-      new ToolContext(),
+      toolCtx({ workspaceRoots: [dir] }),
     );
 
     const output = resultStr(result);
@@ -416,7 +415,7 @@ describe("ExploreTool > execute — workspace boundary", () => {
     );
     const result = await tool.execute(
       { path: "proj", outline: "check" },
-      toolCtx({ workspaceRoot: dir }),
+      toolCtx({ workspaceRoots: [dir] }),
     );
 
     expect(resultStr(result)).toBe("ok");
@@ -442,7 +441,7 @@ describe("ExploreTool > execute — workspace boundary", () => {
     }) as SpawnFn;
     const result = await new ExploreTool(spawn).execute(
       { path: "proj", outline: "check" },
-      toolCtx({ workspaceRoot: dir }),
+      toolCtx({ workspaceRoots: [dir] }),
     );
 
     expect(lastCwd as string | null).toBe(path.join(dir, "proj"));
@@ -455,7 +454,7 @@ describe("ExploreTool > execute — workspace boundary", () => {
     );
     const result = await tool.execute(
       { path: dir, outline: "check" },
-      toolCtx({ workspaceRoot: dir }),
+      toolCtx({ workspaceRoots: [dir] }),
     );
     expect(resultStr(result)).toBe("ok");
   });
@@ -464,7 +463,7 @@ describe("ExploreTool > execute — workspace boundary", () => {
     const tool = new ExploreTool(failSpawn());
     const result = await tool.execute(
       JSON.stringify({ path: "../../etc", outline: "check" }),
-      toolCtx({ workspaceRoot: dir }),
+      toolCtx({ workspaceRoots: [dir] }),
     );
     expect(resultStr(result)).toContain("Path escape rejected");
   });
@@ -473,7 +472,7 @@ describe("ExploreTool > execute — workspace boundary", () => {
     const tool = new ExploreTool(failSpawn());
     const result = await tool.execute(
       JSON.stringify({ path: "/etc", outline: "check" }),
-      toolCtx({ workspaceRoot: dir }),
+      toolCtx({ workspaceRoots: [dir] }),
     );
     expect(resultStr(result)).toContain("Path escape rejected");
   });
@@ -482,7 +481,7 @@ describe("ExploreTool > execute — workspace boundary", () => {
     const tool = new ExploreTool(failSpawn());
     const result = await tool.execute(
       { path: "does-not-exist", outline: "check" },
-      toolCtx({ workspaceRoot: dir }),
+      toolCtx({ workspaceRoots: [dir] }),
     );
     expect(resultStr(result)).toContain("Directory not found");
   });
@@ -494,7 +493,7 @@ describe("ExploreTool > execute — workspace boundary", () => {
     const tool = new ExploreTool(failSpawn());
     const result = await tool.execute(
       { path: "file.txt", outline: "check" },
-      toolCtx({ workspaceRoot: dir }),
+      toolCtx({ workspaceRoots: [dir] }),
     );
     expect(resultStr(result)).toContain("Not a directory");
   });

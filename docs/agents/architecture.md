@@ -190,7 +190,7 @@ Built-in command handler implementations for core commands. Extracted from `agen
 Runs the full tool call pipeline (TOOL_BEFORE_EXECUTE → TOOL_CALL gate → AGENT_TOOL_CONTEXT → validate → execute → TOOL_AFTER_EXECUTE → TOOL_RESULT → TOOL_METRICS). Extracted from Agent so tool execution is testable independently. Key exports:
 - `ToolExecutor` class — manages the tool execution pipeline
 - `createToolExecutor(deps)` — factory function
-- `ToolExecutorDeps` — dependency interface (toolRegistry, hooks, emitOutput, cwdBoundary, workspaceRoot, maxRetries, toolRetryDelay, isRestoring, agent)
+- `ToolExecutorDeps` — dependency interface (toolRegistry, hooks, emitOutput, workspaceRoots, maxRetries, toolRetryDelay, isRestoring, agent)
 - `ToolCall` — typed tool call object
 
 ### Token Tracker (`src/core/token-tracker.ts`)
@@ -247,7 +247,7 @@ Randomly aliases protected marker names (tool call actions, internal markers) to
 ### Utilities (`src/utils/`)
 - `file-utils.ts` — `parseFrontMatter(content)`, `validateNameable(name, label, dirName)`
 - `token-estimate.ts` — `estimateMessageTokens(msg)`, `estimateContextTokens(messages)`: chars/4 token heuristic shared by core (`ContextManager.estimateTokens()`) and the compaction extension (which re-exports them)
-- `workspace.ts` — `Workspace` class: escape-safe path resolution (rejects traversal and symlink escapes) used by all file tools
+- `workspace.ts` — multi-root `Workspace` class: escape-safe path resolution against `workspace.paths` roots (rejects traversal and symlink escapes), used by all file tools. `expandWorkspacePaths()` resolves raw config entries (tilde, globs via `Bun.Glob`, existence checks) into concrete absolute roots at config time
 - `objects.ts` — `deepMerge(...sources)`
 - `render.ts` — Template engine with `{{ vars }}`, `{% if %}`, `{% for %}`, filters
 - `json-schema.ts` — `validate()`, `validateParams()`, `formatValidationErrors()`

@@ -39,9 +39,9 @@ export async function retryWithBackoff<T>(
     throw ConfigError.MissingConfig("maxRetries");
   }
 
-  // 0 (or negative) would mean zero attempts; treat it as "one attempt, no
-  // retries" — same convention as ToolExecutor's Math.max(1, maxRetries).
-  const totalAttempts = Math.max(1, maxRetries);
+  // maxRetries counts retries AFTER the initial attempt: total attempts =
+  // 1 + maxRetries. 0 (or negative) clamps to a single attempt, no retries.
+  const totalAttempts = 1 + Math.max(0, maxRetries);
 
   if (signal?.aborted) {
     throw LlmError.Cancelled("request was cancelled");
@@ -49,7 +49,9 @@ export async function retryWithBackoff<T>(
 
   let delayMs = baseDelayMs ?? 1000;
 
-  for (let attempt = 1; attempt <= totalAttempts; attempt++) {
+  // Unbounded loop: every exit path is an explicit return/throw (a retry
+  // falls through to the next iteration), so there is no code after it.
+  for (let attempt = 1; ; attempt++) {
     if (signal?.aborted) {
       throw LlmError.Cancelled("request was cancelled");
     }
@@ -80,32 +82,30 @@ export async function retryWithBackoff<T>(
         // Other API errors (e.g., "Bad input") are non-transient — don't retry
       }
 
-      if (shouldRetry && attempt < totalAttempts) {
-        if (signal?.aborted) {
-          throw LlmError.Cancelled("request was cancelled");
-        }
-
-        await new Promise<void>((resolve) => {
-          const timeout = setTimeout(resolve, delayMs);
-          if (signal) {
-            signal.addEventListener(
-              "abort",
-              () => {
-                clearTimeout(timeout);
-                resolve();
-              },
-              { once: true },
-            );
-          }
-        });
-
-        delayMs *= 2;
-        continue;
+      // Non-transient, or the final attempt was just used: propagate.
+      if (!shouldRetry || attempt === totalAttempts) {
+        throw e;
       }
 
-      throw e;
+      if (signal?.aborted) {
+        throw LlmError.Cancelled("request was cancelled");
+      }
+
+      await new Promise<void>((resolve) => {
+        const timeout = setTimeout(resolve, delayMs);
+        if (signal) {
+          signal.addEventListener(
+            "abort",
+            () => {
+              clearTimeout(timeout);
+              resolve();
+            },
+            { once: true },
+          );
+        }
+      });
+
+      delayMs *= 2;
     }
   }
-
-  throw LlmError.Timeout(`Exhausted ${totalAttempts} ${totalAttempts === 1 ? "attempt" : "attempts"}`);
 }

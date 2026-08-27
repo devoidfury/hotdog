@@ -159,10 +159,11 @@ export class ToolExecutor {
     let success = false;
     let stopLoop = false;
 
-    const maxRetries = Math.max(1, this.#deps.maxRetries);
+    // maxRetries counts retries AFTER the initial attempt (same convention as retryWithBackoff).
+    const maxAttempts = 1 + Math.max(0, this.#deps.maxRetries);
     let attempts = 0;
 
-    while (attempts < maxRetries) {
+    while (attempts < maxAttempts) {
       attempts++;
       try {
         result = await tool.execute(input, toolCtx);
@@ -177,10 +178,10 @@ export class ToolExecutor {
         }
         break;
       } catch (e: unknown) {
-        if (e instanceof TransientError && attempts < maxRetries) {
+        if (e instanceof TransientError && attempts < maxAttempts) {
           const delay = Math.pow(2, attempts - 1) * this.#deps.toolRetryDelay * 1000;
           logger.warn(
-            `[tool:retry] ${toolName} failed (transient), retrying attempt ${attempts + 1}/${maxRetries} after ${delay}ms...`,
+            `[tool:retry] ${toolName} failed (transient), retrying attempt ${attempts + 1}/${maxAttempts} after ${delay}ms...`,
           );
           await new Promise((resolve) => setTimeout(resolve, delay));
           continue;

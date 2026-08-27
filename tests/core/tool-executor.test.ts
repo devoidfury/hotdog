@@ -468,6 +468,25 @@ describe('ToolExecutor', () => {
       expect(result.toolResults[0]!.result).toContain('Error executing tool');
       expect(result.toolResults[0]!.result).toContain('flaky');
     });
+
+    it('maxRetries: 2 makes one initial attempt plus two retries on transient errors', async () => {
+      let calls = 0;
+      const deps = createMockDeps({ maxRetries: 2, toolRetryDelay: 1 });
+      deps.toolRegistry.register('flaky2', makeTestTool('flaky2', async () => {
+        calls++;
+        throw new TransientError('still flaky');
+      }));
+
+      const executor = createToolExecutor(deps);
+      const result = await executor.execute([{
+        id: 'call-1',
+        type: 'function',
+        function: { name: 'flaky2', arguments: '{}' },
+      }]);
+
+      expect(calls).toBe(3);
+      expect(result.toolResults[0]!.result).toContain('still flaky');
+    });
   });
 
   describe('message logging', () => {

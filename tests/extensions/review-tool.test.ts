@@ -18,6 +18,18 @@ afterAll(() => {
 });
 
 describe('ReviewTool', () => {
+  function writeReviewSession(id: string, entries: Record<string, unknown>[]): string {
+    const sessionFile = join(TEST_SESSIONS_DIR, `${id}.jsonl`);
+    writeFileSync(sessionFile, entries.map((e) => JSON.stringify(e)).join('\n') + '\n');
+    return sessionFile;
+  }
+
+  const rctxEntries = [0, 1, 2, 3, 4].map((i) => ({
+    ts: Date.now(),
+    source: i === 0 ? 'input' : 'llm',
+    content: `msg ${i}`,
+  }));
+
   it('has correct tool name', () => {
     const tool = new ReviewTool();
     const def = tool.toToolDef();
@@ -29,7 +41,9 @@ describe('ReviewTool', () => {
     const def = tool.toToolDef();
     const properties = def.function.parameters.properties as Record<string, unknown>;
     expect(properties).toHaveProperty('operation');
-    expect((properties.operation as Record<string, unknown>).enum).toEqual(['list', 'get', 'tool_index']);
+    expect((properties.operation as Record<string, unknown>).enum).toEqual(['list', 'get', 'read_context', 'tool_index']);
+    expect(properties).toHaveProperty('message_start');
+    expect(properties).toHaveProperty('message_end');
     expect(def.function.parameters.required).toEqual(['operation']);
   });
 
@@ -165,19 +179,19 @@ describe('ReviewTool', () => {
     }
   });
 
-  it('get operation returns session entries', async () => {
-    // Create a test session
+  it('get operation returns user input and stop responses with indexes', async () => {
     const TEST_SESSION_ID = `test-review-get-${Date.now()}`;
-    const sessionsDir = TEST_SESSIONS_DIR;
-    mkdirSync(sessionsDir, { recursive: true });
-
-    const sessionFile = join(sessionsDir, `${TEST_SESSION_ID}.jsonl`);
-    writeFileSync(sessionFile, JSON.stringify({
-      ts: Date.now(),
-      source: 'input',
-      role: 'user',
-      content: 'hello',
-    }) + '\n');
+    const sessionFile = join(TEST_SESSIONS_DIR, `${TEST_SESSION_ID}.jsonl`);
+    const entries = [
+      { ts: Date.now(), source: 'input', role: 'user', content: 'hello' },
+      {
+        ts: Date.now(), source: 'llm', content: 'calling a tool',
+        tool_calls: [{ id: 'tc_1', type: 'function', function: { name: 'bash', arguments: '{}' } }],
+      },
+      { ts: Date.now(), source: 'tool_result', content: 'tool output', tool_call_id: 'tc_1', tool_name: 'bash' },
+      { ts: Date.now(), source: 'llm', content: 'final answer', reasoning_content: 'thought about it' },
+    ];
+    writeFileSync(sessionFile, entries.map((e) => JSON.stringify(e)).join('\n') + '\n');
 
     try {
       const tool = new ReviewTool();
@@ -187,8 +201,17 @@ describe('ReviewTool', () => {
       }));
       const parsed = JSON.parse(resultStr(result));
       expect(Array.isArray(parsed)).toBe(true);
-      expect(parsed.length).toBe(1);
+      // Only user input (idx 0) and the stop response (idx 3) survive.
+      expect(parsed.length).toBe(2);
+      expect(parsed[0].index).toBe(0);
       expect(parsed[0].content).toBe('hello');
+      expect(parsed[1].index).toBe(3);
+      expect(parsed[1].content).toBe('final answer');
+      // Full internal fields are preserved, not a curated subset.
+      expect(parsed[0].source).toBe('input');
+      expect(parsed[0].ts).toBeDefined();
+      expect(parsed[1].source).toBe('llm');
+      expect(parsed[1].reasoning_content).toBe('thought about it');
     } finally {
       try { rmSync(sessionFile); } catch {}
     }
@@ -203,6 +226,120 @@ describe('ReviewTool', () => {
     const parsed = JSON.parse(resultStr(result));
     expect(Array.isArray(parsed)).toBe(true);
     expect(parsed.length).toBe(0);
+  });
+
+  it('read_context returns the exact entry range with indexes', async () => {
+    const TEST_SESSION_ID = `test-review-rctx-${Date.now()}`;
+    const sessionFile = writeReviewSession(TEST_SESSION_ID, rctxEntries);
+    try {
+      const tool = new ReviewTool();
+      const result = await tool.execute(JSON.stringify({
+        operation: 'read_context',
+        session_id: TEST_SESSION_ID,
+        message_start: 1,
+        message_end: 3,
+      }));
+      const parsed = JSON.parse(resultStr(result));
+      expect(Array.isArray(parsed)).toBe(true);
+      expect(parsed.length).toBe(2);
+      expect(parsed[0].index).toBe(1);
+      expect(parsed[1].index).toBe(2);
+      expect(parsed[0].content).toBe('msg 1');
+      expect(parsed[1].content).toBe('msg 2');
+      // Full internal fields preserved.
+      expect(parsed[0].ts).toBeDefined();
+      expect(parsed[0].source).toBe('llm');
+    } finally {
+      try { rmSync(sessionFile); } catch {}
+    }
+  });
+
+  it('read_context allows end equal to total entry count (half-open)', async () => {
+    const TEST_SESSION_ID = `test-review-rctx-bound-${Date.now()}`;
+    const sessionFile = writeReviewSession(TEST_SESSION_ID, rctxEntries);
+    try {
+      const tool = new ReviewTool();
+      const result = await tool.execute(JSON.stringify({
+        operation: 'read_context',
+        session_id: TEST_SESSION_ID,
+        message_start: 3,
+        message_end: 5,
+      }));
+      const parsed = JSON.parse(resultStr(result));
+      expect(parsed.length).toBe(2);
+      expect(parsed[0].index).toBe(3);
+      expect(parsed[1].index).toBe(4);
+    } finally {
+      try { rmSync(sessionFile); } catch {}
+    }
+  });
+
+  it('returns error for read_context without session_id', async () => {
+    const tool = new ReviewTool();
+    const result = await tool.execute(JSON.stringify({
+      operation: 'read_context',
+      message_start: 0,
+      message_end: 1,
+    }));
+    expect(resultStr(result)).toContain('session_id is required');
+  });
+
+  it('returns error for read_context with missing or non-integer range', async () => {
+    const TEST_SESSION_ID = 'test-review-rctx-badargs';
+    const tool = new ReviewTool();
+    for (const args of [
+      { operation: 'read_context', session_id: TEST_SESSION_ID },
+      { operation: 'read_context', session_id: TEST_SESSION_ID, message_start: 0 },
+      { operation: 'read_context', session_id: TEST_SESSION_ID, message_start: 0, message_end: '1' },
+      { operation: 'read_context', session_id: TEST_SESSION_ID, message_start: 1.5, message_end: 3 },
+    ]) {
+      const result = await tool.execute(JSON.stringify(args));
+      expect(resultStr(result)).toContain('requires integer');
+    }
+  });
+
+  it('returns error for read_context with inverted or negative range', async () => {
+    const TEST_SESSION_ID = 'test-review-rctx-inverted';
+    const tool = new ReviewTool();
+    for (const [start, end] of [[3, 1], [-1, 2]]) {
+      const result = await tool.execute(JSON.stringify({
+        operation: 'read_context',
+        session_id: TEST_SESSION_ID,
+        message_start: start,
+        message_end: end,
+      }));
+      expect(resultStr(result)).toContain('invalid range');
+    }
+  });
+
+  it('returns error for read_context beyond session length', async () => {
+    const TEST_SESSION_ID = `test-review-rctx-oob-${Date.now()}`;
+    const sessionFile = writeReviewSession(TEST_SESSION_ID, rctxEntries);
+    try {
+      const tool = new ReviewTool();
+      const result = await tool.execute(JSON.stringify({
+        operation: 'read_context',
+        session_id: TEST_SESSION_ID,
+        message_start: 0,
+        message_end: 999,
+      }));
+      expect(resultStr(result)).toContain('out of bounds');
+      expect(resultStr(result)).toContain('5 entries');
+    } finally {
+      try { rmSync(sessionFile); } catch {}
+    }
+  });
+
+  it('generates call display for read_context', () => {
+    const tool = new ReviewTool();
+    const display = tool.callDisplay(JSON.stringify({
+      operation: 'read_context',
+      session_id: 'xyz',
+      message_start: 1,
+      message_end: 4,
+    }));
+    expect(display).toContain('xyz');
+    expect(display).toContain('1-4');
   });
 
   it('tool_index returns empty array for session with no tool calls', async () => {

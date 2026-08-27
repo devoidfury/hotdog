@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- llm-client / tool-executor
+  - `maxRetries` now means retries *after* the initial attempt (total attempts = `1 + maxRetries`); previously the value was the total number of attempts, so `maxRetries: 3` gave 1 + 2 rather than 1 + 3
+  - fix - removed an unreachable `LlmError.Timeout` throw at the end of `retryWithBackoff`
+
 - mcp-client
   - tool names no longer use `server/tool` (the `/` is rejected by strict OpenAI-compatible APIs); tools register as `server__tool` with characters outside `[a-zA-Z0-9_-]` sanitized
   - tool registry now rejects names outside `[a-zA-Z0-9_-]` at registration, so a bad name fails fast instead of failing every LLM request

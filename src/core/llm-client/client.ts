@@ -48,6 +48,7 @@ export interface LlmClientOptions {
 
 export interface LlmClientRequiredOptions {
   chatTimeoutSecs: number;
+  /** Retries after the initial attempt (total attempts = 1 + maxRetries). */
   maxRetries: number;
 }
 

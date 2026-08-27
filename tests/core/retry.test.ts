@@ -136,7 +136,7 @@ describe("retryWithBackoff", () => {
     expect(calls).toBeLessThanOrEqual(2);
   });
 
-  it("limits retries when count specified", async () => {
+  it("maxRetries: 2 makes one initial attempt plus two retries (3 total)", async () => {
     let calls = 0;
     await expect(
       retryWithBackoff(
@@ -147,8 +147,23 @@ describe("retryWithBackoff", () => {
         2,
         { ...fastOpts, signal: new AbortController().signal },
       ),
-    ).rejects.toThrow();
-    expect(calls).toBe(2);
+    ).rejects.toThrow("fail");
+    expect(calls).toBe(3);
+  });
+
+  it("negative maxRetries clamps to a single attempt", async () => {
+    let calls = 0;
+    await expect(
+      retryWithBackoff(
+        () => {
+          calls++;
+          throw LlmError.Http("fail");
+        },
+        -1,
+        { ...fastOpts, signal: new AbortController().signal },
+      ),
+    ).rejects.toThrow("fail");
+    expect(calls).toBe(1);
   });
 });
 

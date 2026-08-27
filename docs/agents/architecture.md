@@ -231,7 +231,7 @@ Tab-completion service. Completion providers register matchers + handlers; when 
 
 ### LLM Client (`src/core/llm-client/`)
 - `client.ts` — `LlmClient` with streaming, cancellation, retry support
-- `retry.ts` — `retryWithBackoff(fn, maxRetries, options)` with cancellation support
+- `retry.ts` — `retryWithBackoff(fn, maxRetries, options)` with cancellation support. `maxRetries` counts retries *after* the initial attempt (total attempts = `1 + maxRetries`); `0`/negative means one attempt, no retries. `ToolExecutor` uses the same convention.
 - `sse-parser.ts` — incremental SSE stream parser
 - `stream-processor.ts` — `StreamProcessor` accumulates streamed content/reasoning/tool calls into a `StreamResult`
 - `LlmError` class (with `Http`, `Api`, `Timeout`, `Cancelled`, `InvalidResponse` static constructors) is defined in `src/core/error.ts`

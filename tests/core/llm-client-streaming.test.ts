@@ -326,7 +326,8 @@ describe("LlmClient.chatStreamCancellable — network errors, timeouts, cancella
       client.chatStreamCancellable([makeMsg("user", "Hi")], mc()),
     );
 
-    expect(calls).toBe(2);
+    // maxRetries: 2 = one initial attempt plus two retries
+    expect(calls).toBe(3);
     expect(error).toBeInstanceOf(LlmError);
     expect((error as LlmError).type).toBe("http");
     expect((error as Error).message).toContain("fetch failed");
@@ -361,15 +362,17 @@ describe("LlmClient.chatStreamCancellable — network errors, timeouts, cancella
       client.chatStreamCancellable([makeMsg("user", "Hi")], mc()),
     );
 
-    // Both attempts timed out
-    expect(signalLog).toHaveLength(2);
-    // Regression: attempt 2 must start with a signal that is NOT already
+    // All three attempts timed out (maxRetries: 2 = one initial + two retries)
+    expect(signalLog).toHaveLength(3);
+    // Regression: every attempt must start with a signal that is NOT already
     // aborted (previously the shared abortController was poisoned by the
     // first timeout, aborting every subsequent attempt instantly).
-    expect(signalLog[0]!.abortedAtEntry).toBe(false);
-    expect(signalLog[1]!.abortedAtEntry).toBe(false);
+    for (const entry of signalLog) {
+      expect(entry.abortedAtEntry).toBe(false);
+    }
     // Each attempt gets its own timeout signal
     expect(signalLog[0]!.signal).not.toBe(signalLog[1]!.signal);
+    expect(signalLog[1]!.signal).not.toBe(signalLog[2]!.signal);
 
     // The surfaced error is a LlmError timeout, not a raw AbortError,
     // so MessageBus will emit it instead of suppressing it as a cancel.

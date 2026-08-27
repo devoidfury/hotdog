@@ -1,6 +1,7 @@
 // Review tool — access session log data from within agent tool calls.
 
 import {
+  LOG_SOURCE,
   readSessionEntries,
   sessionsDir,
 } from "../../core/session/session-log.ts";
@@ -29,6 +30,8 @@ interface ParsedArgs {
   operation: string;
   session_id: string | null;
   limit: number;
+  message_start: number | null;
+  message_end: number | null;
 }
 
 function truncateContent(content: string, maxLength: number): string {
@@ -102,11 +105,25 @@ async function listSessions(limit: number): Promise<SessionSummary[]> {
   }));
 }
 
-async function getSession(
+// "get" is a summary view: user input messages plus the model's final stop
+// responses (llm entries with no tool calls). Each entry keeps the full
+// on-disk format with an `index` added, for use with "read_context".
+async function getSessionSummary(
   sessionId: string,
-): ReturnType<typeof readSessionEntries> {
+): Promise<Record<string, unknown>[]> {
   const entries = await readSessionEntries(sessionId);
-  return entries;
+  const summary: Record<string, unknown>[] = [];
+  for (let i = 0; i < entries.length; i++) {
+    const entry = entries[i]!;
+    const isUserInput =
+      entry.source === LOG_SOURCE.INPUT || entry.source === LOG_SOURCE.PROMPT;
+    const isStopResponse =
+      entry.source === LOG_SOURCE.LLM &&
+      (!entry.tool_calls || entry.tool_calls.length === 0);
+    if (!isUserInput && !isStopResponse) continue;
+    summary.push({ ...entry, index: i });
+  }
+  return summary;
 }
 
 async function getToolIndex(sessionId: string): Promise<ToolIndexEntry[]> {
@@ -139,7 +156,13 @@ async function getToolIndex(sessionId: string): Promise<ToolIndexEntry[]> {
 
 function parseArgs(input: string | null): ParsedArgs {
   if (!input || input.trim().length === 0) {
-    return { operation: "list", session_id: null, limit: 10 };
+    return {
+      operation: "list",
+      session_id: null,
+      limit: 10,
+      message_start: null,
+      message_end: null,
+    };
   }
   try {
     const parsed = JSON.parse(input) as Record<string, unknown>;
@@ -147,9 +170,19 @@ function parseArgs(input: string | null): ParsedArgs {
       operation: (parsed.operation as string) || "list",
       session_id: (parsed.session_id as string) || null,
       limit: (parsed.limit as number) || 10,
+      message_start:
+        typeof parsed.message_start === "number" ? parsed.message_start : null,
+      message_end:
+        typeof parsed.message_end === "number" ? parsed.message_end : null,
     };
   } catch {
-    return { operation: "list", session_id: null, limit: 10 };
+    return {
+      operation: "list",
+      session_id: null,
+      limit: 10,
+      message_start: null,
+      message_end: null,
+    };
   }
 }
 
@@ -160,19 +193,29 @@ export class ReviewTool {
   toToolDef() {
     return toolDef(
       ReviewTool.TOOL_NAME,
-      "List recent sessions, get all entries for a specific session, or get a lightweight tool call index. Returns JSON data. Disabled by default; enable via profile whitelist.",
+      "List recent sessions, get a session summary (user input + final model responses, with entry indexes), read a specific index range of session entries, or get a lightweight tool call index. Indexes position entries in the session; read_context uses the half-open range [message_start, message_end). Returns JSON data. Disabled by default; enable via profile whitelist.",
       {
         properties: {
           operation: {
             type: "string",
             description:
-              'Operation: "list" (list recent sessions), "get" (get session entries), or "tool_index" (get lightweight tool call index)',
-            enum: ["list", "get", "tool_index"],
+              'Operation: "list" (list recent sessions), "get" (session summary: user input + final model responses with indexes), "read_context" (entries in a specific index range), or "tool_index" (lightweight tool call index)',
+            enum: ["list", "get", "read_context", "tool_index"],
           },
           session_id: {
             type: "string",
             description:
-              'Session ID (required for "get" and "tool_index" operations, optional for "list" to filter)',
+              'Session ID (required for "get", "read_context" and "tool_index" operations, optional for "list" to filter)',
+          },
+          message_start: {
+            type: "integer",
+            description:
+              "First entry index, inclusive (0-based). Required for 'read_context'.",
+          },
+          message_end: {
+            type: "integer",
+            description:
+              "Last entry index, exclusive. Required for 'read_context'. Must be greater than message_start.",
           },
           limit: {
             type: "integer",
@@ -194,6 +237,8 @@ export class ReviewTool {
           return `(list, limit=${args.limit})`;
         case "get":
           return `(get, session_id=${args.session_id || "?"})`;
+        case "read_context":
+          return `(read_context, session_id=${args.session_id || "?"}, ${args.message_start}-${args.message_end})`;
         case "tool_index":
           return `(tool_index, session_id=${args.session_id || "?"})`;
         default:
@@ -220,11 +265,49 @@ export class ReviewTool {
             "Error: session_id is required for 'get' operation",
           );
         }
-        const entries = await getSession(args.session_id);
-        return ToolResult.ok(JSON.stringify(entries)).withEntries({
+        const summary = await getSessionSummary(args.session_id);
+        return ToolResult.ok(JSON.stringify(summary)).withEntries({
           operation: "get",
           session_id: args.session_id,
-          entry_count: String(entries.length),
+          entry_count: String(summary.length),
+        });
+      }
+      case "read_context": {
+        if (!args.session_id) {
+          return ToolResult.err(
+            "Error: session_id is required for 'read_context' operation",
+          );
+        }
+        const start = args.message_start;
+        const end = args.message_end;
+        if (
+          typeof start !== "number" ||
+          typeof end !== "number" ||
+          !Number.isInteger(start) ||
+          !Number.isInteger(end)
+        ) {
+          return ToolResult.err(
+            "Error: 'read_context' requires integer 'message_start' and 'message_end' (half-open range: message_start <= index < message_end)",
+          );
+        }
+        if (start < 0 || end < start) {
+          return ToolResult.err(
+            `Error: invalid range [${start}, ${end}) -- require 0 <= message_start <= message_end`,
+          );
+        }
+        const entries = await readSessionEntries(args.session_id);
+        if (start > entries.length || end > entries.length) {
+          return ToolResult.err(
+            `Error: range [${start}, ${end}) out of bounds -- session has ${entries.length} entries (valid range 0..${entries.length})`,
+          );
+        }
+        const slice = entries
+          .slice(start, end)
+          .map((entry, i) => ({ ...entry, index: start + i }));
+        return ToolResult.ok(JSON.stringify(slice)).withEntries({
+          operation: "read_context",
+          session_id: args.session_id,
+          entry_count: String(slice.length),
         });
       }
       case "tool_index": {
@@ -242,7 +325,7 @@ export class ReviewTool {
       }
       default:
         return ToolResult.err(
-          `Error: Unknown operation: '${args.operation}'. Use 'list', 'get', or 'tool_index'.`,
+          `Error: Unknown operation: '${args.operation}'. Use 'list', 'get', 'read_context', or 'tool_index'.`,
         );
     }
   }

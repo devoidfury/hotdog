@@ -22,7 +22,7 @@ async function infoCliRunner(coreConfig = {}, defaultCli = {}) {
     config: null,
     skillsPath: null,
     configDir: null,
-    config_debug: false,
+    configDebug: false,
     profile: null,
     provider: null,
     ...defaultCli,
@@ -261,11 +261,11 @@ describe("Info CLI - printInfoJson branches", () => {
   });
 });
 
-// ── config_debug ────────────────────────────────────────────────────────────
+// ── configDebug ────────────────────────────────────────────────────────────
 
-describe("Info CLI - config_debug", () => {
-  it("runs config_debug when cli.config_debug is true", async () => {
-    const run = await infoCliRunner({}, { config_debug: true });
+describe("Info CLI - configDebug", () => {
+  it("runs configDebug when cli.configDebug is true", async () => {
+    const run = await infoCliRunner({}, { configDebug: true });
     const { exitCode, output } = await run("info");
     expect(exitCode).toBe(0);
     expect(output).toContain("=== Config Resolution Debug ===");
@@ -276,7 +276,7 @@ describe("Info CLI - config_debug", () => {
     expect(output).toContain("=== Extension Config ===");
   });
 
-  it("config_debug with provider shows provider name", async () => {
+  it("configDebug with provider shows provider name", async () => {
     const tmpDir = mkdtempSync(join(tmpdir(), "hotdog-test-provider-"));
     const configPath = join(tmpDir, "defaults.json");
     writeFileSync(
@@ -302,7 +302,7 @@ describe("Info CLI - config_debug", () => {
             models: [{ name: "m1", provider: "test-provider" }],
           },
         ],
-      }, { config: configPath, config_debug: true });
+      }, { config: configPath, configDebug: true });
       const { exitCode, output } = await run("info");
       expect(exitCode).toBe(0);
       expect(output).toContain("test-provider");
@@ -311,7 +311,7 @@ describe("Info CLI - config_debug", () => {
     }
   });
 
-  it("config_debug shows config file content when exists", async () => {
+  it("configDebug shows config file content when exists", async () => {
     const tmpDir = join(homedir(), ".config", "hotdog-test-debug");
     mkdirSync(tmpDir, { recursive: true });
     const configPath = join(tmpDir, "defaults.json");
@@ -320,7 +320,7 @@ describe("Info CLI - config_debug", () => {
     try {
       const run = await infoCliRunner({
         resolved: { configDir: tmpDir },
-      }, { configDir: tmpDir, config_debug: true });
+      }, { configDir: tmpDir, configDebug: true });
       const { exitCode, output } = await run("info");
       expect(exitCode).toBe(0);
       expect(output).toContain("EXISTS");
@@ -329,13 +329,13 @@ describe("Info CLI - config_debug", () => {
     }
   });
 
-  it("config_debug shows config file not found when absent", async () => {
+  it("configDebug shows config file not found when absent", async () => {
     const tmpDir = join(homedir(), ".config", "hotdog-test-debug-absent");
 
     try {
       const run = await infoCliRunner({
         resolved: { configDir: tmpDir },
-      }, { configDir: tmpDir, config_debug: true });
+      }, { configDir: tmpDir, configDebug: true });
       const { exitCode, output } = await run("info");
       expect(exitCode).toBe(0);
       expect(output).toContain("not found");
@@ -349,7 +349,7 @@ describe("Info CLI - config_debug", () => {
 
 describe("Info CLI - traceConfigResolution", () => {
   it("traces config resolution with default values", async () => {
-    const run = await infoCliRunner({}, { config_debug: true });
+    const run = await infoCliRunner({}, { configDebug: true });
     const { exitCode, output } = await run("info");
     expect(exitCode).toBe(0);
     expect(output).toContain("Source:");

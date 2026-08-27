@@ -230,9 +230,11 @@ Abstract UI connection. A `Channel` attaches to one or more sessions via a `Sess
 Tab-completion service. Completion providers register matchers + handlers; when a completion is requested, matching handlers run (async, with timeout) and results are merged for the UI. Reusable across UIs (CLI, web).
 
 ### LLM Client (`src/core/llm-client/`)
-- `client.ts` — `LlmClient` with streaming, cancellation, retry support
+- `client.ts` — `LlmClient` with streaming, cancellation, retry support. Keeps only transport concerns (retry, timeout, cancellation) and delegates backend-specific work to the resolved LlmProtocol
+- `protocol.ts` — `LlmProtocol` interface + `LlmProtocolRegistry`. A protocol owns everything backend-specific: request building, auth headers, response stream parsing, health checks, model listing. `LlmClient` resolves a protocol per model via the model → provider → default chain
+- `openai-protocol.ts` — the built-in default protocol (OpenAI chat completions: Bearer auth, `data:` SSE). Lives in core because it is the zero-config default
+- `serialize.ts` — wire serialization of internal `Message`s to the OpenAI-compatible wire shape, per-model chat-template format (system-first vs developer), including provenance-based marker mangling at the wire boundary
 - `retry.ts` — `retryWithBackoff(fn, maxRetries, options)` with cancellation support. `maxRetries` counts retries *after* the initial attempt (total attempts = `1 + maxRetries`); `0`/negative means one attempt, no retries. `ToolExecutor` uses the same convention.
-- `sse-parser.ts` — incremental SSE stream parser
 - `stream-processor.ts` — `StreamProcessor` accumulates streamed content/reasoning/tool calls into a `StreamResult`
 - `LlmError` class (with `Http`, `Api`, `Timeout`, `Cancelled`, `InvalidResponse` static constructors) is defined in `src/core/error.ts`
 
@@ -251,6 +253,7 @@ Randomly aliases protected marker names (tool call actions, internal markers) to
 - `objects.ts` — `deepMerge(...sources)`
 - `render.ts` — Template engine with `{{ vars }}`, `{% if %}`, `{% for %}`, filters
 - `json-schema.ts` — `validate()`, `validateParams()`, `formatValidationErrors()`
+- `sse-parser.ts` — incremental SSE stream parser (used by `openai-protocol.ts`)
 - `md-parser.ts` — Markdown parser for LLM output formatting. Key exports: `parseMarkdown(markdown)` — parse complete markdown to `MdDocument` tree; `StreamingMdParser` — incremental/streaming parser with `feed()`, `finalize()`, `reset()`; `createStreamingParser()` — factory; `mdTreeToPlainText(tree)` — flatten tree to plain text; `walkTree(tree, callback)` — tree walker; Block types: `MdHeading`, `MdParagraph`, `MdCodeBlock`, `MdList`, `MdBlockquote`, `MdHorizontalRule`, `MdThematicBreak`; Inline types: `MdText`, `MdBold`, `MdItalic`, `MdStrikethrough`, `MdInlineCode`, `MdLink`, `MdImage`
 
 ### CLI Utilities (`src/utils/cli/`)

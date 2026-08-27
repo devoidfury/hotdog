@@ -331,6 +331,47 @@ describe("runHookPipeline()", () => {
     expect(lastResult).toEqual({ action: "continue" });
   });
 
+  it("failOnError: true rethrows the handler error", async () => {
+    const hooks = createHooks();
+    hooks.on("gate:hook", () => {
+      throw new Error("gate failed");
+    });
+    hooks.on("gate:hook", () => ({ action: "continue" }));
+    await expect(
+      hooks.runHookPipeline("gate:hook", {}, { failOnError: true }),
+    ).rejects.toThrow("gate failed");
+  });
+
+  it("failOnError: true stops the pipeline — later handlers do not run", async () => {
+    const hooks = createHooks();
+    const ran: string[] = [];
+    hooks.on("gate:hook", () => {
+      ran.push("first");
+      throw new Error("gate failed");
+    });
+    hooks.on("gate:hook", () => {
+      ran.push("second");
+      return { action: "block", result: "denied" };
+    });
+    await hooks
+      .runHookPipeline("gate:hook", {}, { failOnError: true })
+      .catch(() => {});
+    expect(ran).toEqual(["first"]);
+  });
+
+  it("failOnError: true does not affect handlers that do not throw", async () => {
+    const hooks = createHooks();
+    hooks.on("gate:hook", () => ({ action: "continue" }));
+    hooks.on("gate:hook", () => ({ action: "block", result: "denied" }));
+    const { stopped, lastResult } = await hooks.runHookPipeline(
+      "gate:hook",
+      {},
+      { failOnError: true },
+    );
+    expect(stopped).toBe(false);
+    expect(lastResult).toEqual({ action: "block", result: "denied" });
+  });
+
   it("handles async handlers in pipeline", async () => {
     const hooks = createHooks();
     hooks.on("test", async () => {

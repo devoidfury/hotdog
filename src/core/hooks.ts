@@ -96,6 +96,13 @@ export type HookHandlerAny = (data: unknown) => void | Promise<void> | unknown;
 
 export interface HookPipelineOptions {
   shouldStop?: (result: unknown) => boolean;
+  /**
+   * Default (false): a throwing handler is logged and the pipeline
+   * continues with the next handler. Set true for gate pipelines
+   * (e.g., TOOL_CALL): the error is rethrown after logging, so a failed
+   * veto is never silently treated as a pass (fail closed).
+   */
+  failOnError?: boolean;
 }
 
 export interface HookPipelineResult<R = unknown, D = unknown> {
@@ -243,6 +250,7 @@ export class HookSystem {
       } catch (e) {
         this._logTrace(hookName, i, handlers.length, entry, t0, " — error");
         logger.error(`[hook:${hookName}] ${formatError(e)}`);
+        if (opts.failOnError) throw e;
       }
     }
     return { results, lastResult, stopped, data };

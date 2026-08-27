@@ -129,12 +129,15 @@ export class ToolExecutor {
       agent,
     });
 
+    // failOnError: a gate handler that throws must not be treated as a
+    // pass — the error propagates to execute()'s catch and becomes the tool
+    // result, so the tool never runs (fail closed).
     const callResult = await hooks.runHookPipeline<GateAction>(HOOKS.TOOL_CALL, {
       toolCallId,
       toolName,
       input,
       agent,
-    });
+    }, { failOnError: true });
     if (callResult.lastResult?.action === "block") {
       const blockedResult = formatToolResult(
         callResult.lastResult.result,

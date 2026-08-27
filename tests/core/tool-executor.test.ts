@@ -440,6 +440,81 @@ describe('ToolExecutor', () => {
 
       expect(receivedInput).toBe('{"path":"/modified"}');
     });
+
+    it('a throwing TOOL_CALL gate handler fails closed — the tool is not executed', async () => {
+      const deps = createMockDeps();
+      let toolExecuted = false;
+
+      deps.hooks.on('tool:call', () => {
+        throw new Error('gate bug');
+      });
+
+      deps.toolRegistry.register('guarded_tool', makeTestTool('guarded_tool', async () => {
+        toolExecuted = true;
+        return 'should not reach';
+      }));
+
+      const executor = createToolExecutor(deps);
+      const result = await executor.execute([{
+        id: 'call-1',
+        type: 'function',
+        function: { name: 'guarded_tool', arguments: '{}' },
+      }]);
+
+      expect(toolExecuted).toBe(false);
+      const toolMsg = deps.addedMessages.find((m: Message) => m.role === 'tool');
+      expect(toolMsg).toBeTruthy();
+      // The gate error becomes the tool result so the LLM can self-correct.
+      expect(toolMsg!.content as string).toContain('Tool execution failed');
+      expect(toolMsg!.content as string).toContain('gate bug');
+      // The batch itself keeps going: no exception escapes execute().
+      expect(result.outcome).toBe('continue');
+      expect(result.toolResults).toHaveLength(1);
+    });
+  });
+
+  describe('availability resolution', () => {
+    it('resolves tool availability once per batch, not per tool call', async () => {
+      const deps = createMockDeps();
+      let defsCalls = 0;
+      const original = (deps.agent as unknown as { getToolDefs: () => Promise<ToolDef[]> }).getToolDefs;
+      (deps.agent as unknown as { getToolDefs: () => Promise<ToolDef[]> }).getToolDefs = async () => {
+        defsCalls++;
+        return original();
+      };
+      deps.toolRegistry.register('t1', makeTestTool('t1', async () => '1'));
+      deps.toolRegistry.register('t2', makeTestTool('t2', async () => '2'));
+
+      const executor = createToolExecutor(deps);
+      await executor.execute([
+        { id: 'c1', type: 'function', function: { name: 't1', arguments: '{}' } },
+        { id: 'c2', type: 'function', function: { name: 't2', arguments: '{}' } },
+        { id: 'c3', type: 'function', function: { name: 't1', arguments: '{}' } },
+      ]);
+
+      expect(defsCalls).toBe(1);
+    });
+
+    it('uses caller-provided available names instead of the agent defs', async () => {
+      const deps = createMockDeps();
+      let defsCalls = 0;
+      (deps.agent as unknown as { getToolDefs: () => Promise<ToolDef[]> }).getToolDefs = async () => {
+        defsCalls++;
+        return [];
+      };
+      deps.toolRegistry.register('hidden_tool', makeTestTool('hidden_tool', async () => 'nope'));
+
+      const executor = createToolExecutor(deps);
+      const result = await executor.execute(
+        [{ id: 'c1', type: 'function', function: { name: 'hidden_tool', arguments: '{}' } }],
+        undefined,
+        null,
+        ['other_tool'], // what the model actually saw, not the agent's full defs
+      );
+
+      expect(defsCalls).toBe(0);
+      expect(result.toolResults[0]!.result).toContain('not available');
+    });
   });
 
   describe('error handling', () => {

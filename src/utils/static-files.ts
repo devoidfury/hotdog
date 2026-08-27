@@ -87,9 +87,13 @@ export function serveStaticFile(
   // Normalize path
   const normalized = filePath.replace(/^\/+/, "").replace(/\/\.\//g, "/");
 
-  // Security: ensure the resolved path is within the root directory
-  const resolvedPath = new URL(normalized, `file://${rootDir}/`).pathname;
-  if (!resolvedPath.startsWith(rootDir)) {
+  // Security: ensure the resolved path is within the root directory.
+  // Boundary check, not string prefix: startsWith(rootDir) alone would let
+  // a sibling dir with a shared prefix (root "/srv/app" vs "/srv/app2")
+  // pass the containment check.
+  const root = rootDir.endsWith("/") ? rootDir.slice(0, -1) : rootDir;
+  const resolvedPath = new URL(normalized, `file://${root}/`).pathname;
+  if (resolvedPath !== root && !resolvedPath.startsWith(root + "/")) {
     return new Response("Forbidden", { status: 403 });
   }
 
@@ -106,7 +110,7 @@ export function serveStaticFile(
   }
 
   // SPA fallback: serve index.html for unmatched paths
-  const indexPath = new URL("index.html", `file://${rootDir}/`).pathname;
+  const indexPath = new URL("index.html", `file://${root}/`).pathname;
   if (fs.existsSync(indexPath)) {
     const indexFile = Bun.file(indexPath);
     return new Response(indexFile, {

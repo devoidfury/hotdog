@@ -107,6 +107,21 @@ describe("serveStaticFile", () => {
     expect(serveStaticFile(tmpDir, 3600, "/subdir/../../etc/passwd")!.status).toBe(403);
   });
 
+  it("returns 403 for sibling dirs sharing a name prefix", () => {
+    // tmpDir + "2" is a sibling whose full path starts with tmpDir as a
+    // string. A plain startsWith(rootDir) containment check would serve it;
+    // the encoded %2e%2e bypasses the pre-decode ".." segment check.
+    const sibling = tmpDir + "2";
+    fs.mkdirSync(sibling, { recursive: true });
+    fs.writeFileSync(path.join(sibling, "secret.txt"), "sibling secret");
+    try {
+      const response = serveStaticFile(tmpDir, 3600, "/%2e%2e/" + path.basename(sibling) + "/secret.txt");
+      expect(response!.status).toBe(403);
+    } finally {
+      fs.rmSync(sibling, { recursive: true, force: true });
+    }
+  });
+
   it("includes Cache-Control header", () => {
     expect(serveStaticFile(tmpDir, 3600, "/index.html")!.headers.get("Cache-Control")).toContain("max-age=3600");
   });

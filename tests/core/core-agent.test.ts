@@ -283,6 +283,42 @@ describe('Agent — end-to-end loop', () => {
     expect(toolMsg!.content as string).toContain('not available');
   });
 
+  it('should use the model-visible tool defs for availability (PROVIDER_REQUEST can narrow them)', async () => {
+    const tool = simpleTool('secret_tool', 'secret result');
+
+    const mockLLM = new MockLLMClient({
+      responseSequences: [
+        buildStreamResponse({
+          content: 'Using a tool.',
+          toolCalls: [{ index: 0, name: 'secret_tool', arguments: '{}', id: 'call_secret_1' }],
+          usage: { prompt_tokens: 10, completion_tokens: 20, total_tokens: 30 },
+        }),
+        buildStreamResponse({
+          content: 'Tool not available.',
+          usage: { prompt_tokens: 40, completion_tokens: 10, total_tokens: 50 },
+        }),
+      ],
+    });
+
+    const { agent, toolRegistry, hooks } = createFixture({ mockLLM });
+    toolRegistry.register('secret_tool', tool);
+
+    // A provider-layer hook hides the tool from the request the model sees.
+    // Availability must track what the model was offered, not the registry.
+    hooks.on(HOOKS.PROVIDER_REQUEST, ({ toolDefs }) => ({
+      toolDefs: toolDefs.filter(d => d.function.name !== 'secret_tool'),
+    }));
+
+    const result = await agent.run('Use the tool');
+
+    const completion = expectCompletion(result);
+    expect(completion.content).toBe('Tool not available.');
+    expect(tool.executeCount).toBe(0);
+    const toolMsg = agent.log.getAll().find(m => m.role === 'tool');
+    expect(toolMsg).toBeTruthy();
+    expect(toolMsg!.content as string).toContain('not available');
+  });
+
   // ── Tool execution error ──────────────────────────────────────────────────
 
   it('should handle tool execution errors gracefully', async () => {

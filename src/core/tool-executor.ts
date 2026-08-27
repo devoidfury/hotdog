@@ -45,17 +45,29 @@ export class ToolExecutor {
    * @param toolFormatRegistry - The session's ToolFormat registry; passed
    *   through so format resolution never depends on process-global state.
    */
+  /**
+   * @param availableToolNames - Names of the tools the model was actually
+   *   offered this iteration (the agent passes its request's tool defs).
+   *   Omitted only by standalone callers: availability is then resolved
+   *   once from the agent's defs. Either way it is resolved ONCE per batch,
+   *   not per tool call.
+   */
   async execute(
     toolCalls: ToolCall[],
     toolFormatName?: string,
     toolFormatRegistry?: ToolFormatRegistry | null,
+    availableToolNames?: string[],
   ): Promise<{ outcome: "continue" | "return"; toolResults: ToolResult[] }> {
     const toolResults: ToolResult[] = [];
+
+    const available = new Set(
+      availableToolNames ?? (await this.#deps.agent.getToolDefs()).map((d) => d.function.name),
+    );
 
     for (const tc of toolCalls) {
       let result: ToolResult;
       try {
-        result = await this.executeSingle(tc, toolFormatName, toolFormatRegistry);
+        result = await this.executeSingle(tc, available, toolFormatName, toolFormatRegistry);
       } catch (e: unknown) {
         const toolName = tc.function?.name || "(unknown)";
         const toolCallId = tc.id || "";
@@ -76,6 +88,7 @@ export class ToolExecutor {
 
   async executeSingle(
     tc: ToolCall,
+    available: Set<string>,
     toolFormatName?: string,
     toolFormatRegistry?: ToolFormatRegistry | null,
   ): Promise<ToolResult> {
@@ -103,8 +116,7 @@ export class ToolExecutor {
       return { toolName: "(invalid)", input, result, toolCallId: toolCallId || "" };
     }
 
-    const toolDefs = await agent.getToolDefs();
-    if (!toolDefs.some((tool) => tool.function.name === toolName)) {
+    if (!available.has(toolName)) {
       const msg = `Tool '${toolName}' is not available for this agent`;
       return this.#writeToolResult(toolName, input, msg, toolCallId);
     }

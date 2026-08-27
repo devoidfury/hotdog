@@ -275,7 +275,7 @@ export class Agent implements AgentLike {
 
         const params = await this._prepareIteration(iteration);
         const response = await this._performLlmCall(params);
-        const result = await this._handleLlmResponse(iteration, response, params.modelConfig);
+        const result = await this._handleLlmResponse(iteration, response, params);
 
         if (typeof result === "string") {
           this._emitTurnEnd(iteration, response.fullText, [], true, this.cancelled, "completion");
@@ -390,8 +390,9 @@ export class Agent implements AgentLike {
   private async _handleLlmResponse(
     iteration: number,
     response: StreamResult,
-    modelConfig: ModelConfig,
+    params: LlmRequestParams,
   ): Promise<string | { outcome: string; toolResults: ToolResult[] }> {
+    const { modelConfig } = params;
     this.hooks.notifyHooks(HOOKS.PROVIDER_RESPONSE, { response, modelConfig, agent: this });
     this.hooks.notifyHooks(HOOKS.MESSAGES_AFTER_LLM, { response, messages: this.context.getMessages(), agent: this });
 
@@ -429,6 +430,7 @@ export class Agent implements AgentLike {
       const { outcome, toolResults } = await this._executeTools(
         toolCallsToExecute,
         this.llmClient.toolFormatFor(modelConfig).id,
+        params.toolDefs.map((d) => d.function.name),
       );
 
       for (const sr of skippedToolResults) {
@@ -511,13 +513,16 @@ export class Agent implements AgentLike {
     });
   }
 
-  private _executeTools(toolCalls: ToolCall[], toolFormatName?: string) {
+  private _executeTools(toolCalls: ToolCall[], toolFormatName?: string, availableToolNames?: string[]) {
     // The session's registry is passed explicitly so format resolution never depends on
     // process-global state (the active format depends on this session's model/provider config).
+    // availableToolNames is the model-visible set from this iteration's request
+    // (post PROVIDER_REQUEST), so availability never re-filters the registry.
     return this.#toolExecutor.execute(
       toolCalls,
       toolFormatName,
       this.llmClient.toolFormatRegistry,
+      availableToolNames,
     );
   }
 

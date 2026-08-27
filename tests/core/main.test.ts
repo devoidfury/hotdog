@@ -375,4 +375,25 @@ describe("createCore.createLlmClient (modelToolFormat layering)", () => {
     const core = await buildCore({ modelToolFormat: "nope" }, {});
     expect(() => core.createLlmClient()).toThrow(/Unknown tool format "nope"/);
   });
+
+  it("a falsy resolved maxRetries (0) survives instead of falling back", async () => {
+    const core = await buildCore({}, {});
+    // The schema has no config/cli layer for maxRetries, so exercise the
+    // resolved value directly: 0 must not be clobbered by the fallback.
+    (core.resolved as Record<string, unknown>).maxRetries = 0;
+    expect(core.createLlmClient().maxRetries).toBe(0);
+  });
+
+  it("uses the schema default (5) when nothing is set", async () => {
+    const core = await buildCore({}, {});
+    expect(core.createLlmClient().maxRetries).toBe(5);
+  });
+
+  it("uses the schema default when core.resolved is not yet set", async () => {
+    const { createCore } = await import("../../src/core/main.ts");
+    const { ConfigRegistry } = await import("../../src/core/index.ts");
+    const { createSubcommandRegistry } = await import("../../src/core/extensions/registries.ts");
+    const core = createCore({} as never, new ConfigRegistry(), createSubcommandRegistry());
+    expect(core.createLlmClient().maxRetries).toBe(5);
+  });
 });

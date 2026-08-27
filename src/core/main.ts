@@ -62,7 +62,7 @@ async function loadExtensions(
 ): Promise<ExtensionInstance[]> {
   const loaded: ExtensionInstance[] = [];
 
-  const extensionPaths = (config?.extensionPaths as string[]) || ["builtins"];
+  const extensionPaths = (config?.extensionPaths as string[]) || ["@extensions"];
   const extensionAutoload = (config?.extensionAutoload as boolean) ?? false;
   const extensionsList = (config?.extensions as string[]) || [];
 

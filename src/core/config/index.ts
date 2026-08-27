@@ -156,7 +156,7 @@ export function getDefaultConfig(
   const baseConfig: DefaultConfig = {
     providers: [],
     profiles: {},
-    extensionPaths: ["builtins"],
+    extensionPaths: ["@extensions"],
     extensionAutoload: false,
     extensions: [],
     profile: null,

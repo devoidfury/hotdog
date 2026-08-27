@@ -85,8 +85,8 @@ describe("extractSchemaDefaults", () => {
 });
 
 describe("resolveExtensionPath", () => {
-  it("resolves 'builtins' to the extensions directory", () => {
-    const resolved = resolveExtensionPath("builtins");
+  it("resolves '@extensions' to the extensions directory", () => {
+    const resolved = resolveExtensionPath("@extensions");
     expect(resolved).toContain("extensions");
     expect(resolved.endsWith("extensions")).toBe(true);
   });

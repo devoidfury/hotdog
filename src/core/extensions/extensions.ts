@@ -2,7 +2,7 @@ import fsPromises from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { HOOKS, EXTENSION_PROVIDES, type HookSystem, type HookHandlerAny } from "../hooks.ts";
-import { ExtensionError } from "../error.ts";
+import { ConfigError, ExtensionError } from "../error.ts";
 import { logger } from "../logger.ts";
 import { camelCase } from "../../utils/strings.ts";
 import { CompletionService } from "../completion.ts";
@@ -19,8 +19,11 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT_DIR = path.resolve(__dirname, "../../");
 
 export function resolveExtensionPath(spec: string): string {
-  if (spec === "builtins") {
+  if (spec === "@extensions") {
     return path.join(ROOT_DIR, "extensions");
+  }
+  if (spec === "builtins") {
+    throw new ConfigError("'builtins' is deprecated, use '@extensions' instead.")
   }
   if (path.isAbsolute(spec)) {
     return spec;
@@ -33,7 +36,7 @@ export async function getExtensionConfigDefaults(
 ): Promise<SchemaDefaultEntry[]> {
   const params: SchemaDefaultEntry[] = [];
 
-  for (const spec of extensionPaths || ["builtins"]) {
+  for (const spec of extensionPaths || ["@extensions"]) {
     const resolved = resolveExtensionPath(spec);
     const discovered = await discoverExtensionsInDir(resolved);
 
@@ -412,8 +415,8 @@ export async function discoverExtensions(
 
     for (const ext of discovered) {
       let basePath: string;
-      if (spec === "builtins") {
-        basePath = `../../extensions/${ext.name}/index.ts`;
+      if (spec === "@extensions") {
+        basePath = `@extensions/${ext.name}/index.ts`;
       } else {
         const relPath = path.relative(
           ROOT_DIR,
@@ -564,7 +567,7 @@ export async function registerExtensionMetadata(
   configRegistry: ConfigRegistry,
   cliSubcommandRegistry: CliSubcommandRegistry,
 ): Promise<ExtensionMetadata[]> {
-  const extensionPaths = (config?.extensionPaths as string[]) || ["builtins"];
+  const extensionPaths = (config?.extensionPaths as string[]) || ["@extensions"];
   const extensionAutoload = (config?.extensionAutoload as boolean) ?? false;
   const extensionsList = (config?.extensions as string[]) || [];
 

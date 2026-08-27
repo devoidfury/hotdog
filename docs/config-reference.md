@@ -508,13 +508,13 @@ Name of the active profile. Can reference either a profile defined in the `profi
 ### `extensionPaths`
 
 - **Type:** `array` of `string`
-- **Default:** `["builtins"]`
+- **Default:** `["@extensions"]`
 - **Resolution:** config > default
 
-Paths to extension directories. `"builtins"` loads built-in extensions. Add paths to load custom extensions.
+Paths to extension directories. `"@extensions"` loads built-in extensions. Add paths to load custom extensions.
 
 ```json
-{ "extensionPaths": ["builtins", "./my-extensions"] }
+{ "extensionPaths": ["@extensions", "./my-extensions"] }
 ```
 
 ### `extensionAutoload`
@@ -1110,7 +1110,7 @@ CLI flag: `--shell-mode`.
   "chatTimeoutSecs": 900,
   "temperature": 0.7,
   "profile": "default",
-  "extensionPaths": ["builtins"],
+  "extensionPaths": ["@extensions"],
   "extensionAutoload": true,
   "agentsMd": { "enabled": true, "autoload": false },
   "coreTools": {

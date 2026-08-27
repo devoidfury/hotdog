@@ -81,7 +81,7 @@ Discovers, loads, and manages extensions. Key exports:
 - `discoverExtensions(extensionPaths)` — discovers extensions from configured paths
 - `discoverExtensionsInDir(dirPath)` — discovers extensions in a single directory
 - `getExtensionsToLoad(extensionPaths, extensionAutoload, extensions)` — filters extensions based on config
-- `resolveExtensionPath(spec)` — resolves "builtins" or path specs to absolute directories
+- `resolveExtensionPath(spec)` — resolves "@extensions" (builtin extensions) or path specs to absolute directories
 - `LOAD_ORDER` — constants for extension load ordering (REFRESH: 0, CORE_TOOLS: 1, CLI: 2, DEFAULT: 10)
 - `registerExtensionMetadata(configRegistry, cliSubcommandRegistry)` — reads extension.json metadata, auto-registers configSchema defaults
 - `extractSchemaDefaults(schema)` — extracts defaults from JSON Schema as config params

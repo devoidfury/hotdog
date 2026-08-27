@@ -467,7 +467,7 @@
     "type": "array",
     "layers": [
       { "source": "config", "key": "extensionPaths" },
-      { "default": ["builtins"] }
+      { "default": ["@extensions"] }
     ]
   },
   "extensionAutoload": {

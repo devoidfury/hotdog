@@ -21,14 +21,14 @@ describe("discoverExtensionsInDir", async () => {
 
   it("returns extensions from builtins directory", async () => {
     const { resolveExtensionPath } = await import("../../src/core/extensions/extensions.ts");
-    const result = await discoverExtensionsInDir(resolveExtensionPath("builtins"));
+    const result = await discoverExtensionsInDir(resolveExtensionPath("@extensions"));
     expect(Array.isArray(result)).toBe(true);
     expect(result.length).toBeGreaterThan(0);
   });
 
   it("each discovered extension has required fields", async () => {
     const { resolveExtensionPath } = await import("../../src/core/extensions/extensions.ts");
-    const result = await discoverExtensionsInDir(resolveExtensionPath("builtins"));
+    const result = await discoverExtensionsInDir(resolveExtensionPath("@extensions"));
     for (const ext of result) {
       expect(ext.name).toBeDefined();
       expect(ext.path).toBeDefined();
@@ -61,7 +61,7 @@ describe("getExtensionConfigDefaults", async () => {
   });
 
   it("returns params from builtins", async () => {
-    const result = await getExtensionConfigDefaults(["builtins"]);
+    const result = await getExtensionConfigDefaults(["@extensions"]);
     expect(Array.isArray(result)).toBe(true);
     for (const param of result) {
       expect(param.key).toBeDefined();
@@ -84,7 +84,7 @@ describe("getExtensionConfigSchemas", async () => {
   });
 
   it("returns schemas from builtins", async () => {
-    const result = await getExtensionConfigSchemas(["builtins"]);
+    const result = await getExtensionConfigSchemas(["@extensions"]);
     expect(typeof result).toBe("object");
   });
 
@@ -104,7 +104,7 @@ describe("getExtensionsToLoad", async () => {
 
   it("returns extensions when autoload is true", async () => {
     const result = await getExtensionsToLoad(
-      ["builtins"],
+      ["@extensions"],
       true,
       [],
       undefined,
@@ -115,7 +115,7 @@ describe("getExtensionsToLoad", async () => {
 
   it("returns empty array when autoload is false and no extensions specified", async () => {
     const result = await getExtensionsToLoad(
-      ["builtins"],
+      ["@extensions"],
       false,
       [],
       undefined,
@@ -125,7 +125,7 @@ describe("getExtensionsToLoad", async () => {
 
   it("filters extensions by name when autoload is false", async () => {
     const result = await getExtensionsToLoad(
-      ["builtins"],
+      ["@extensions"],
       false,
       ["core-tools"],
       undefined,
@@ -140,7 +140,7 @@ describe("getExtensionsToLoad", async () => {
       bashTool: { enabled: false },
     };
     const result = await getExtensionsToLoad(
-      ["builtins"],
+      ["@extensions"],
       true,
       [],
       config,
@@ -151,7 +151,7 @@ describe("getExtensionsToLoad", async () => {
 
   it("returns extensions with service overrides", async () => {
     const result = await getExtensionsToLoad(
-      ["builtins"],
+      ["@extensions"],
       true,
       [],
       { services: {} },
@@ -207,7 +207,7 @@ describe("registerExtensionMetadata", async () => {
 
   it("registers CLI flags, config params, and subcommands from extensions", async () => {
     const config = {
-      extensionPaths: ["builtins"],
+      extensionPaths: ["@extensions"],
       extensionAutoload: true,
       extensions: [],
     };

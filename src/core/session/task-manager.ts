@@ -3,7 +3,6 @@ import { Message, type MessageSource } from "../context/message.ts";
 import { LlmError } from "../error.ts";
 import { loadProfileFile, ProfileManager } from "../config/profiles.ts";
 import { type CoreConfigWithExtensions } from "../config/schema-loader.ts";
-import type { AgentRunResult } from "../../core/agent.ts";
 import type { LlmClient } from "../llm-client/client.ts";
 import type { HookSystem } from "../hooks.ts";
 import type { ModelConfig } from "../config/providers.ts";

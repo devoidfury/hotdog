@@ -32,7 +32,6 @@ export interface LlmClientOptions {
   loud?: boolean;
   stream?: boolean;
   providers?: ProviderDef[];
-  cancelled?: boolean;
   markerMangler?: MarkerMangler | null;
   /** Global toolFormat default (core config); provider/model entries override. */
   toolFormat?: string | null;
@@ -83,7 +82,6 @@ export class LlmClient {
   maxRetries: number;
   stream: boolean;
   providers: ProviderDef[];
-  cancelled: boolean;
   defaultToolFormat?: string;
   retryBaseDelayMs?: number;
   #toolFormatRegistry: ToolFormatRegistry;
@@ -104,7 +102,6 @@ export class LlmClient {
     this.defaultToolFormat = options.toolFormat || undefined;
     this.#toolFormatRegistry = options.toolFormatRegistry ?? createDefaultToolFormatRegistry();
     this.#protocolRegistry = options.llmProtocolRegistry ?? createDefaultProtocolRegistry();
-    this.cancelled = false;
     this.#mangler = options.markerMangler !== undefined ? options.markerMangler : new MarkerMangler();
   }
 

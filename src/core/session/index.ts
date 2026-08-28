@@ -68,28 +68,19 @@ interface SessionEntry {
 
 export class SessionStore {
   #agents: Map<string, AgentLike>;
-  #initialSessionId: string | null;
 
-  constructor(options: { initialSessionId?: string } = {}) {
+  constructor() {
     this.#agents = new Map();
-    this.#initialSessionId = options.initialSessionId || null;
   }
 
   addAgent(agent: AgentLike): string {
     const sessionId = agent.sessionId || crypto.randomUUID();
     this.#agents.set(sessionId, agent);
-    if (!this.#initialSessionId) {
-      this.#initialSessionId = sessionId;
-    }
     return sessionId;
   }
 
   getAgent(sessionId: string): AgentLike | undefined {
     return this.#agents.get(sessionId);
-  }
-
-  initialSessionId(): string | null {
-    return this.#initialSessionId;
   }
 
   size(): number {

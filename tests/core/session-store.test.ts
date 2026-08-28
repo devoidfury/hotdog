@@ -48,27 +48,11 @@ describe('SessionStore', () => {
     expect(store.getAgent('session-1')).toBe(agent2);
   });
 
-  it('tracks the initial session ID', () => {
-    const store = new SessionStore();
-    expect(store.initialSessionId()).toBeNull();
-
-    store.addAgent(new MockAgent('done', 'session-1') as unknown as AgentLike);
-    expect(store.initialSessionId()).toBe('session-1');
-
-    store.addAgent(new MockAgent('done', 'session-2') as unknown as AgentLike);
-    expect(store.initialSessionId()).toBe('session-1'); // remains first
-  });
-
   it('generates UUID when agent has no sessionId', () => {
     const store = new SessionStore();
     const agent = { serialize: () => ({}), deserialize: () => {} } as any;
     const id = store.addAgent(agent);
     expect(typeof id).toBe('string');
     expect(id.length).toBeGreaterThan(0);
-  });
-
-  it('accepts initialSessionId in constructor', () => {
-    const store = new SessionStore({ initialSessionId: 'predefined' });
-    expect(store.initialSessionId()).toBe('predefined');
   });
 });

@@ -203,7 +203,6 @@ Centralized error formatting. Key exports:
 - `EXPECTED_ERROR_TYPES` — Set of expected error types (cancelled, http, api, timeout, invalid_response, cli, tool, config)
 - `isExpectedError(err)` — checks if error is expected vs unexpected
 - `formatError(err)` — formats error (expected: message only; unexpected: message + stack)
-- `withContext(label, fn)` — wraps operation with context and centralized error handling
 
 ### Output Events (`src/core/context/output.ts`)
 Output event types and OutputSink base class. Key exports:

@@ -13,7 +13,6 @@ import {
 
   isExpectedError,
   formatError,
-  withContext,
 } from "../../src/core/error.ts";
 
 describe("Error types", () => {
@@ -284,56 +283,6 @@ describe("formatError", () => {
     err.type = "http";
     // formatError uses err.message || String(err) — empty string falls through
     expect(formatError(err)).toBe("Error");
-  });
-});
-
-describe("withContext", () => {
-  it("returns the result of a successful async function", async () => {
-    const result = await withContext("test label", async () => "success");
-    expect(result).toBe("success");
-  });
-
-  it("re-throws expected errors as-is", async () => {
-    const err = new Error("api failure") as Error & { type: string };
-    err.type = "api";
-    await expect(
-      withContext("test label", async () => {
-        throw err;
-      }),
-    ).rejects.toBe(err);
-  });
-
-  it("wraps unexpected errors with context label", async () => {
-    try {
-      await withContext("building agent", async () => {
-        throw new Error("null reference");
-      });
-      throw new Error("should have thrown");
-    } catch (e) {
-      const err = e as Error;
-      expect(err.message).toContain("[building agent]");
-      expect(err.message).toContain("null reference");
-      expect(err.stack).toContain("null reference");
-    }
-  });
-
-  it("wraps unexpected errors preserving stack trace", async () => {
-    try {
-      await withContext("processing", async () => {
-        const obj: unknown = null;
-        (obj as any).foo; // TypeError
-      });
-      throw new Error("should have thrown");
-    } catch (e) {
-      const err = e as Error;
-      expect(err.message).toContain("[processing]");
-      expect(err.stack).toContain("at "); // stack preserved
-    }
-  });
-
-  it("handles sync functions", async () => {
-    const result = await withContext("sync test", async () => "sync result");
-    expect(result).toBe("sync result");
   });
 });
 

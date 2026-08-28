@@ -267,31 +267,3 @@ export function formatError(err: unknown): string {
   }
   return err.message || String(err);
 }
-
-/**
- * Wrap an operation, tagging unexpected errors with the context label.
- * Expected errors pass through unwrapped so callers can classify them.
- *
- * Usage:
- *   await withContext("building agent", async () => {
- *     return await builder.buildAgent(sink);
- *   });
- */
-export async function withContext<T>(
-  label: string,
-  fn: () => Promise<T>,
-): Promise<T> {
-  try {
-    return await fn();
-  } catch (err: unknown) {
-    if (isExpectedError(err)) {
-      throw err; // Let callers handle expected errors
-    }
-    const wrapped = new Error(
-      `[${label}] ${err instanceof Error ? err.message : String(err)}`,
-    );
-    wrapped.stack =
-      `${wrapped.message}\n${err instanceof Error ? err.stack || "(no stack)" : "(no stack)"}`;
-    throw wrapped;
-  }
-}

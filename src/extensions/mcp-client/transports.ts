@@ -9,6 +9,13 @@ import { McpError } from "./client.ts";
 export type TransportMessageHandler = (line: string) => void;
 
 /** Callback invoked when a transport closes (expected or unexpected). */
+/**
+ * Hard cap on in-memory accumulation per stream. A misbehaving or hostile
+ * MCP server (chatty stderr, or a single never-newlined stdio line) must
+ * not be able to exhaust memory. Matches the fetch tool's response cap.
+ */
+const MAX_TRANSPORT_BUFFER_CHARS = 2_000_000;
+
 export type TransportCloseHandler = () => void;
 
 export interface McpTransport {
@@ -47,6 +54,7 @@ export class StdioTransport implements McpTransport {
   #messageHandlers: TransportMessageHandler[] = [];
   #closeHandlers: TransportCloseHandler[] = [];
   #stderrOutput: string = "";
+  #stderrTruncated: boolean = false;
   #destroyed: boolean = false;
 
   constructor(command: string, args: string[] = [], env: Record<string, string> = {}) {
@@ -81,6 +89,9 @@ export class StdioTransport implements McpTransport {
 
   /** @internal Exposed for testing. */
   get stderrOutput(): string { return this.#stderrOutput; }
+
+  /** True when stderr hit the accumulation cap and further output was dropped. @internal Exposed for testing. */
+  get stderrTruncated(): boolean { return this.#stderrTruncated; }
 
   /** @internal Exposed for testing. */
   get child(): ChildProcess { return this.#child; }
@@ -131,7 +142,8 @@ export class StdioTransport implements McpTransport {
     killProcessGroup(this.#child, "SIGTERM");
 
     if (this.#stderrOutput && this.#stderrOutput.trim()) {
-      logger.error(`MCP server stderr: ${this.#stderrOutput.trim()}`);
+      const truncNote = this.#stderrTruncated ? ` [truncated at ${MAX_TRANSPORT_BUFFER_CHARS} chars]` : "";
+      logger.error(`MCP server stderr: ${this.#stderrOutput.trim()}${truncNote}`);
     }
   }
 
@@ -139,16 +151,42 @@ export class StdioTransport implements McpTransport {
     const readStream = this.#readStream;
     if (!readStream) return;
     let buffer = "";
+    // While set, incoming bytes are drained (not buffered) until the next
+    // line boundary: the previous line exceeded MAX_TRANSPORT_BUFFER_CHARS.
+    // Draining instead of destroying keeps framing aligned for the
+    // subsequent messages, and a truncated line is never dispatched (a
+    // cut-off JSON prefix could still parse as a different, valid value).
+    let discarding = false;
 
     readStream.on("data", (chunk: Buffer) => {
       if (this.#destroyed) return;
-      buffer += chunk.toString();
+      let data = chunk.toString();
+
+      if (discarding) {
+        const newlineIdx = data.indexOf("\n");
+        if (newlineIdx === -1) return; // still draining the oversized line
+        data = data.slice(newlineIdx + 1);
+        discarding = false;
+      }
+
+      buffer += data;
 
       let newlineIdx: number;
       while ((newlineIdx = buffer.indexOf("\n")) !== -1) {
         const line = buffer.slice(0, newlineIdx);
         buffer = buffer.slice(newlineIdx + 1);
         this.#dispatchMessage(line);
+      }
+
+      // Only the unflushed partial line can grow unbounded (pipe reads are
+      // chunked, so a complete line is always dispatched as it is flushed).
+      // If it alone exceeds the cap, drop it and drain to the next boundary.
+      if (buffer.length > MAX_TRANSPORT_BUFFER_CHARS) {
+        logger.error(
+          `MCP stdio line exceeds ${MAX_TRANSPORT_BUFFER_CHARS} chars; discarding until the next line boundary`,
+        );
+        discarding = true;
+        buffer = "";
       }
     });
 
@@ -164,7 +202,12 @@ export class StdioTransport implements McpTransport {
     if (!stderr) return;
 
     stderr.on("data", (chunk: Buffer) => {
+      if (this.#stderrTruncated) return;
       this.#stderrOutput += chunk.toString();
+      if (this.#stderrOutput.length > MAX_TRANSPORT_BUFFER_CHARS) {
+        this.#stderrOutput = this.#stderrOutput.slice(0, MAX_TRANSPORT_BUFFER_CHARS);
+        this.#stderrTruncated = true;
+      }
     });
   }
 

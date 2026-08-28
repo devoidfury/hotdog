@@ -430,6 +430,48 @@ describe("StdioTransport", () => {
     expect(transport.stderrOutput).toContain("error-msg");
     await transport.destroy();
   });
+
+  it("discards an oversized stdout line and keeps framing for later lines", async () => {
+    // A 5MB line (2.5x MAX_TRANSPORT_BUFFER_CHARS of 2_000_000) must be
+    // drained, not buffered, and the messages after it must still arrive
+    // correctly framed.
+    const transport = new StdioTransport("bun", [
+      "-e",
+      "console.log('before'); console.log('x'.repeat(5000000)); console.log('after');",
+    ]);
+    const receivedLines: string[] = [];
+    const removeHandler = transport.onMessage((line) => {
+      receivedLines.push(line);
+    });
+
+    const start = Date.now();
+    while (receivedLines.length < 2 && Date.now() - start < 5000) {
+      await new Promise((r) => setTimeout(r, 20));
+    }
+    removeHandler();
+    await transport.destroy();
+
+    expect(receivedLines).toEqual(["before", "after"]);
+  });
+
+  it("caps stderr accumulation at the transport buffer limit", async () => {
+    // 2.5MB of stderr (cap is MAX_TRANSPORT_BUFFER_CHARS of 2_000_000) must
+    // stop accumulating once the cap is hit.
+    const transport = new StdioTransport("bun", [
+      "-e",
+      "process.stderr.write('e'.repeat(2500000));",
+    ]);
+
+    const start = Date.now();
+    while (!transport.stderrTruncated && Date.now() - start < 5000) {
+      await new Promise((r) => setTimeout(r, 20));
+    }
+    await transport.destroy();
+
+    expect(transport.stderrTruncated).toBe(true);
+    expect(transport.stderrOutput.length).toBe(2000000);
+    expect(transport.stderrOutput).toBe("e".repeat(2000000));
+  });
 });
 
 // ── Stdio McpClient Integration Tests ────────────────────────────────────────

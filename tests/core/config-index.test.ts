@@ -107,7 +107,7 @@ describe("getDefaultConfig", () => {
     expect(config.aiUrl).toBeNull();
     expect(config.defaultModel).toBe("qwen3.5-0.8b");
     expect(config.extensionPaths).toEqual(["@extensions"]);
-    expect(config.extensionAutoload).toBe(false);
+    expect(config.extensionAutoload).toBe(true);
     expect(config.extensions).toEqual([]);
     expect(config.showTokenUse).toBe(true);
   });

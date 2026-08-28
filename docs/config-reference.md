@@ -564,7 +564,7 @@ Paths to extension directories. `"@extensions"` loads built-in extensions. Add p
 ### `extensionAutoload`
 
 - **Type:** `boolean`
-- **Default:** `false`
+- **Default:** `true`
 - **Resolution:** config > default
 
 When `true`, extensions are automatically loaded from `extensionPaths` without explicit registration.

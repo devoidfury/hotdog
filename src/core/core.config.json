@@ -494,7 +494,7 @@
     "type": "boolean",
     "layers": [
       { "source": "config", "key": "extensionAutoload" },
-      { "default": false }
+      { "default": true }
     ]
   },
   "extensions": {

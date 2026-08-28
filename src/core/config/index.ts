@@ -157,7 +157,7 @@ export function getDefaultConfig(
     providers: [],
     profiles: {},
     extensionPaths: ["@extensions"],
-    extensionAutoload: false,
+    extensionAutoload: getLayerDefault(CONFIG_SCHEMA.extensionAutoload) as boolean,
     extensions: [],
     profile: null,
     profileDef: null,

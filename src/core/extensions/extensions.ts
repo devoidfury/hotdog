@@ -566,7 +566,7 @@ export async function registerExtensionMetadata(
   cliSubcommandRegistry: CliSubcommandRegistry,
 ): Promise<ExtensionMetadata[]> {
   const extensionPaths = (config?.extensionPaths as string[]) || ["@extensions"];
-  const extensionAutoload = (config?.extensionAutoload as boolean) ?? false;
+  const extensionAutoload = (config?.extensionAutoload as boolean) ?? true;
   const extensionsList = (config?.extensions as string[]) || [];
 
   const extensionsToLoad = await getExtensionsToLoad(

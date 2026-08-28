@@ -2,8 +2,6 @@
 
 import {
   OutputSink,
-  OUTPUT_EVENT,
-  OutputEvent,
   UserMessageEvent,
   AssistantMessageEvent,
   ThinkingEvent,
@@ -270,52 +268,8 @@ export class CliOutputSink extends OutputSink {
     return resolvePalette(theme, configPalette, null, useColors);
   }
 
-  override emit(event: OutputEvent): void {
-    switch (event.type) {
-      case OUTPUT_EVENT.USER_MESSAGE:
-        this.emitUserMessage(event);
-        break;
-      case OUTPUT_EVENT.ASSISTANT_MESSAGE:
-        this.emitAssistantMessage(event);
-        break;
-      case OUTPUT_EVENT.THINKING:
-        this.emitThinking(event);
-        break;
-      case OUTPUT_EVENT.TOOL_CALL:
-        this.emitToolCall(event);
-        break;
-      case OUTPUT_EVENT.TOOL_RESULT:
-        this.emitToolResult(event);
-        break;
-      case OUTPUT_EVENT.COMPACTING:
-        this.emitCompacting(event);
-        break;
-      case OUTPUT_EVENT.COMMAND_RESULT:
-        this.emitCommandResult(event);
-        break;
-      case OUTPUT_EVENT.QUESTION:
-        this.emitQuestion(event);
-        break;
-      case OUTPUT_EVENT.STREAMING_CHUNK:
-        this.emitStreamingChunk(event);
-        break;
-      case OUTPUT_EVENT.STREAMING_REASONING_CHUNK:
-        this.emitStreamingReasoningChunk(event);
-        break;
-      case OUTPUT_EVENT.TASK_PROGRESS:
-        this.emitTaskProgress(event);
-        break;
-      case OUTPUT_EVENT.TOKEN_USAGE:
-        this.emitTokenUsage(event);
-        break;
-      case OUTPUT_EVENT.SESSION_STATE:
-        this.emitSessionState(event);
-        break;
-      case OUTPUT_EVENT.SYSTEM_MESSAGE:
-        this.emitSystemMessage(event);
-        break;
-    }
-  }
+  // Event dispatch is inherited from OutputSink.emit(); each event type is
+  // routed to the emitXxx() overrides below.
 
   override emitUserMessage(event: UserMessageEvent): void {
     if (this.hideUserMessage) return;

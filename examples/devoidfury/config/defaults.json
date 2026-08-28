@@ -11,7 +11,7 @@
   "default_subcommand": "cli",
   "chat_timeout_secs": 900,
   "workspace": {
-    "paths": [".", "/skills", "/tmp", "/etc/hotdog"]
+    "paths": [".", "/skills", "/data", "/tmp", "/etc/hotdog"]
   },
   "profiles": {
     "default": {

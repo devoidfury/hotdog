@@ -522,16 +522,8 @@
       { "default": null }
     ]
   },
-  "defaultAiUrl": {
-    "type": "string",
-    "layers": [{ "default": "http://localhost:8080" }]
-  },
   "taskDefaultRole": {
     "type": "string",
     "layers": [{ "default": "A focused worker that executes tasks autonomously" }]
-  },
-  "systemPromptDefaultTemplate": {
-    "type": "string",
-    "layers": [{ "default": "{{ role }}\n\n{{ body }}\n{% for chunk in chunks %}{{ chunk.content }}{% endfor %}" }]
   }
 }

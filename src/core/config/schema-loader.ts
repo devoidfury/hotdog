@@ -454,9 +454,7 @@ export interface CoreConfig {
   defaultSubcommand?: string;
   temperature?: number;
   defaultProvider?: string;
-  defaultAiUrl?: string;
   taskDefaultRole?: string;
-  systemPromptDefaultTemplate?: string;
 }
 
 // Adds an index signature for extension-specific keys.

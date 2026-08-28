@@ -392,7 +392,26 @@
     "layers": [
       { "source": "config", "key": "workspace" },
       { "default": {} }
-    ]
+    ],
+    "properties": {
+      "deny": {
+        "type": "array",
+        "layers": [
+          { "source": "config", "key": "workspace.deny", "cast": "array" },
+          {
+            "default": [
+              ".ssh",
+              ".config",
+              ".*profile",
+              ".*rc",
+              "*.local*",
+              ".env*",
+              "!.env.example"
+            ]
+          }
+        ]
+      }
+    }
   },
   "hookTrace": {
     "type": "boolean",

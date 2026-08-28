@@ -8,7 +8,7 @@ import { deepMerge } from "../../utils/objects.ts";
 import { render } from "../../utils/render.ts";
 import { validate as validateSchema, castAs } from "../../utils/json-schema.ts";
 import { camelCase } from "../../utils/strings.ts";
-import { expandWorkspacePaths } from "../../utils/workspace.ts";
+import { expandWorkspacePaths, DEFAULT_DENY_PATTERNS } from "../../utils/workspace.ts";
 
 export * from "./defaults.ts";
 export * from "./schema-loader.ts";
@@ -311,6 +311,8 @@ export interface BuildAgentConfigExtra {
   profileManager: ProfileManager;
   /** Concrete absolute workspace roots (expanded from workspace.paths). */
   workspaceRoots: string[];
+  /** Workspace path denylist rules (resolved workspace.deny). */
+  workspaceDeny: readonly string[];
   chatTimeout: number;
   maxRetries: number;
 }
@@ -454,6 +456,10 @@ export async function buildAgentConfig(options: {
     ((resolved.workspace?.paths as readonly string[] | undefined) ??
       (legacyRoot ? [legacyRoot] : ["."])) as readonly string[],
   );
+  // workspace.deny resolves through the schema (default in
+  // core.config.json); the ?? only guards non-schema resolution paths.
+  const workspaceDeny =
+    (resolved.workspace?.deny as string[] | undefined) ?? DEFAULT_DENY_PATTERNS;
 
   return castAs<BuildAgentConfig>({
     ...resolved,
@@ -466,6 +472,7 @@ export async function buildAgentConfig(options: {
     systemPromptTemplate,
     profiles,
     workspaceRoots,
+    workspaceDeny,
     modelRegistry: {},
     profileManager,
   });

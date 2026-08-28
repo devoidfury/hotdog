@@ -23,6 +23,7 @@ export interface ToolExecutorDeps {
   hooks: HookSystem;
   emitOutput<T extends string>(type: T, data: Record<string, unknown>): void;
   workspaceRoots: string[] | null;
+  workspaceDeny: readonly string[] | null;
   maxRetries: number;
   toolRetryDelay: number;
   /** Dynamic getter — isRestoring can change at runtime. */
@@ -269,7 +270,13 @@ export class ToolExecutor {
       this.#deps.workspaceRoots && this.#deps.workspaceRoots.length > 0
         ? this.#deps.workspaceRoots
         : [process.cwd()];
-    toolCtx.set("workspace", new Workspace(roots));
+    // A configured deny list (even an explicit []) wins; null means
+    // unconfigured and falls back to the built-in DEFAULT_DENY_PATTERNS.
+    const deny = this.#deps.workspaceDeny;
+    toolCtx.set(
+      "workspace",
+      deny !== null ? new Workspace(roots, deny) : new Workspace(roots),
+    );
 
     return toolCtx;
   }

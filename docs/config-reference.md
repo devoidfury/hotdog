@@ -470,6 +470,23 @@ When `workspace.paths` is absent, the legacy raw keys `cwdBoundary` / `workspace
 { "workspace": { "paths": [".", "/skills", "/etc/cron*", "~/.tmp"] } }
 ```
 
+#### `workspace.deny`
+
+- **Type:** `string[]`
+- **Default:** `[".ssh", ".config", ".*profile", ".*rc", "*.local*", ".env*", "!.env.example"]`
+
+Denylist of sensitive paths rejected by `resolveSafe` (and therefore by all file tools), evaluated inside every configured root.
+
+- Rules are slash-separated globs matched against the path's components; a rule may start at any depth, so `.ssh` denies the `.ssh` directory itself and everything below it, wherever it sits.
+- `*` and `?` glob within a single component and never cross `/`.
+- Rules are evaluated in order and the **last match wins** (gitignore-style); a `!` prefix negates, e.g. `!.env.example` carves an exception out of `.env*`.
+- A positive rule never applies to a root that itself sits at or below the denied level -- a configured root of `~/.config/tool` is trusted (the `.config` rule is skipped for it; other rules still fire).
+- An explicit empty array `[]` disables the denylist entirely.
+
+```json
+{ "workspace": { "paths": ["."], "deny": [".ssh", ".env*", "!.env.example"] } }
+```
+
 ### `skillsPath` (top-level, backward compatible)
 
 - **Type:** `string`

@@ -248,7 +248,7 @@ Randomly aliases protected marker names (tool call actions, internal markers) to
 ### Utilities (`src/utils/`)
 - `file-utils.ts` — `parseFrontMatter(content)`, `validateNameable(name, label, dirName)`
 - `token-estimate.ts` — `estimateMessageTokens(msg)`, `estimateContextTokens(messages)`: chars/4 token heuristic shared by core (`ContextManager.estimateTokens()`) and the compaction extension (which re-exports them)
-- `workspace.ts` — multi-root `Workspace` class: escape-safe path resolution against `workspace.paths` roots (rejects traversal and symlink escapes), used by all file tools. `expandWorkspacePaths()` resolves raw config entries (tilde, globs via `Bun.Glob`, existence checks) into concrete absolute roots at config time
+- `workspace.ts` — multi-root `Workspace` class: escape-safe path resolution against `workspace.paths` roots (rejects traversal and symlink escapes), plus a path-component denylist driven by the `workspace.deny` config key (default in core.config.json: `.ssh`, `.config`, `.*profile`, `.*rc`, `*.local*`, `.env*` with gitignore-style `!` negations; a root sitting at/below a denied level is exempt from that rule; `DEFAULT_DENY_PATTERNS` is the standalone-construction fallback), used by all file tools. `expandWorkspacePaths()` resolves raw config entries (tilde, globs via `Bun.Glob`, existence checks) into concrete absolute roots at config time
 - `objects.ts` — `deepMerge(...sources)`
 - `render.ts` — Template engine with `{{ vars }}`, `{% if %}`, `{% for %}`, filters
 - `json-schema.ts` — `validate()`, `validateParams()`, `formatValidationErrors()`

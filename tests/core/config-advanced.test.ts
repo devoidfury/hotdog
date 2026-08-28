@@ -248,3 +248,53 @@ describe("buildAgentConfig — workspaceRoots", () => {
     ).rejects.toThrow(ConfigError);
   });
 });
+
+describe("buildAgentConfig — workspaceDeny", () => {
+  const baseOpts = {
+    cli: {},
+    config: { providers: [], defaultModel: "test-model", hideTools: true, profilesPath: "./config/profiles" } as CoreConfigWithExtensions,
+    configDir: "/tmp/test-config",
+    providers: [],
+    defaultModel: "qwen3.5-0.8b",
+    profilesPath: "/tmp/test-config/profiles",
+  };
+
+  it("defaults to the built-in deny list", async () => {
+    const result = await buildAgentConfig(baseOpts);
+    expect(result.workspaceDeny).toEqual([
+      ".ssh",
+      ".config",
+      ".*profile",
+      ".*rc",
+      "*.local*",
+      ".env*",
+      "!.env.example",
+    ]);
+  });
+
+  it("honors workspace.deny from the config file", async () => {
+    const result = await buildAgentConfig({
+      ...baseOpts,
+      config: { ...baseOpts.config, workspace: { deny: [".ssh"] } },
+    });
+    expect(result.workspaceDeny).toEqual([".ssh"]);
+  });
+
+  it("resolves workspace.deny alongside workspace.paths", async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "hotdog-ws-deny-"));
+    try {
+      const result = await buildAgentConfig({
+        ...baseOpts,
+        config: {
+          ...baseOpts.config,
+          workspace: { paths: [dir], deny: [] },
+        },
+      });
+      expect(result.workspaceRoots).toEqual([dir]);
+      // Explicit empty array is an opt-out, not a fall-back to the default.
+      expect(result.workspaceDeny).toEqual([]);
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});

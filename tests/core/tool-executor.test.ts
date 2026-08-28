@@ -80,6 +80,7 @@ function createMockDeps(
     hooks,
     emitOutput: (type, data) => outputs.push({ type, data }),
     workspaceRoots: [process.cwd()],
+    workspaceDeny: null,
     maxRetries: 3,
     toolRetryDelay: 100,
     isRestoring: () => false,

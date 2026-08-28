@@ -4,7 +4,8 @@ import { describe, it, expect, beforeAll, afterAll, spyOn } from "bun:test";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { Workspace, PathEscapeError, expandWorkspacePaths } from "../../src/utils/workspace.ts";
+import { Workspace, PathEscapeError, expandWorkspacePaths, DEFAULT_DENY_PATTERNS } from "../../src/utils/workspace.ts";
+import configSchema from "../../src/core/core.config.json" with { type: "json" };
 import { ConfigError } from "../../src/core/error.ts";
 import { logger } from "../../src/core/logger.ts";
 
@@ -138,6 +139,160 @@ describe("resolveSafe — direct escapes", () => {
     fs.mkdirSync(evil, { recursive: true });
     expect(() => ws.resolveSafe("../ws-evil/file.txt")).toThrow(PathEscapeError);
     fs.rmSync(evil, { recursive: true, force: true });
+  });
+});
+
+describe("resolveSafe — denylist", () => {
+  it("rejects a .ssh directory and everything below it, at any depth", () => {
+    expect(() => ws.resolveSafe(".ssh")).toThrow(PathEscapeError);
+    expect(() => ws.resolveSafe(".ssh")).toThrow("Denylisted path rejected (.ssh)");
+    expect(() => ws.resolveSafe(".ssh/id_rsa")).toThrow(PathEscapeError);
+    expect(() => ws.resolveSafe("sub/deep/.ssh/known_hosts")).toThrow(PathEscapeError);
+  });
+
+  it("rejects .config and its children", () => {
+    expect(() => ws.resolveSafe(".config")).toThrow(PathEscapeError);
+    expect(() => ws.resolveSafe(".config/tool/settings.json")).toThrow(PathEscapeError);
+  });
+
+  it("rejects dotfile profile/rc rules, at any depth", () => {
+    expect(() => ws.resolveSafe(".profile")).toThrow(PathEscapeError);
+    expect(() => ws.resolveSafe(".bash_profile")).toThrow(PathEscapeError);
+    expect(() => ws.resolveSafe(".bashrc")).toThrow(PathEscapeError);
+    expect(() => ws.resolveSafe("sub/.zshrc")).toThrow(PathEscapeError);
+  });
+
+  it("rejects .env* and *.local* components", () => {
+    expect(() => ws.resolveSafe(".env")).toThrow(PathEscapeError);
+    expect(() => ws.resolveSafe(".env.local")).toThrow(PathEscapeError);
+    expect(() => ws.resolveSafe("sub/.env.production")).toThrow(PathEscapeError);
+    expect(() => ws.resolveSafe("config.local")).toThrow(PathEscapeError);
+    expect(() => ws.resolveSafe("notes.md.local.bak")).toThrow(PathEscapeError);
+  });
+
+  it("allows the .env.example negation", () => {
+    expect(ws.resolveSafe(".env.example")).toBe(path.join(workDir, ".env.example"));
+    expect(ws.resolveSafe("sub/.env.example")).toBe(path.join(workDir, "sub", ".env.example"));
+  });
+
+  it("accepts lookalikes that do not match any rule", () => {
+    expect(ws.resolveSafe("ssh")).toBe(path.join(workDir, "ssh"));
+    expect(ws.resolveSafe("sshd_config")).toBe(path.join(workDir, "sshd_config"));
+    expect(ws.resolveSafe("config")).toBe(path.join(workDir, "config"));
+    expect(ws.resolveSafe("env.txt")).toBe(path.join(workDir, "env.txt"));
+    expect(ws.resolveSafe(".profile.txt")).toBe(path.join(workDir, ".profile.txt"));
+    expect(ws.resolveSafe("myrc")).toBe(path.join(workDir, "myrc"));
+  });
+
+  it("applies to absolute paths too", () => {
+    expect(() => ws.resolveSafe(path.join(workDir, ".ssh", "id_rsa"))).toThrow(PathEscapeError);
+    expect(() => ws.resolveSafe(path.join(workDir, ".env"))).toThrow(PathEscapeError);
+  });
+
+  it("exempts a rule when the root itself sits at/below the denied level", () => {
+    const cfgRoot = path.join(outsideDir, ".config", "tool");
+    fs.mkdirSync(cfgRoot, { recursive: true });
+    const w = new Workspace(cfgRoot);
+    // The root is explicitly under .config -- only the .config rule is
+    // exempt for this root; every other rule still fires.
+    expect(w.resolveSafe("secrets.json")).toBe(path.join(cfgRoot, "secrets.json"));
+    expect(() => w.resolveSafe(".ssh/key")).toThrow(PathEscapeError);
+    expect(() => w.resolveSafe(".bashrc")).toThrow(PathEscapeError);
+    expect(() => w.resolveSafe(".env.local")).toThrow(PathEscapeError);
+  });
+
+  it("rejects a symlink inside the root that points at a denied target", () => {
+    const target = path.join(workDir, ".ssh", "id_rsa");
+    fs.mkdirSync(path.dirname(target), { recursive: true });
+    fs.writeFileSync(target, "key");
+    const link = path.join(workDir, "notes.md");
+    fs.symlinkSync(target, link);
+    try {
+      expect(() => ws.resolveSafe("notes.md")).toThrow(PathEscapeError);
+      expect(() => ws.resolveSafe("notes.md")).toThrow("Denylisted path rejected");
+    } finally {
+      fs.unlinkSync(link);
+    }
+  });
+
+  it("rejects a dangling symlink whose target name is denied", () => {
+    const link = path.join(workDir, "dangling-env");
+    fs.symlinkSync(path.join(workDir, ".env.does-not-exist"), link);
+    try {
+      expect(() => ws.resolveSafe("dangling-env")).toThrow(PathEscapeError);
+    } finally {
+      fs.unlinkSync(link);
+    }
+  });
+
+  it("still allows a symlink to a non-denied target inside the root", () => {
+    const link = path.join(workDir, "link-to-file");
+    fs.symlinkSync(path.join(workDir, "file.txt"), link);
+    try {
+      expect(ws.resolveSafe("link-to-file")).toBe(path.join(workDir, "link-to-file"));
+    } finally {
+      fs.unlinkSync(link);
+    }
+  });
+
+  it("honors negations through symlinks too", () => {
+    fs.writeFileSync(path.join(workDir, ".env.example"), "");
+    const link = path.join(workDir, "example.txt");
+    fs.symlinkSync(path.join(workDir, ".env.example"), link);
+    try {
+      expect(ws.resolveSafe("example.txt")).toBe(path.join(workDir, "example.txt"));
+    } finally {
+      fs.unlinkSync(link);
+    }
+  });
+
+  it("keeps a symlinked root exempt when its real location is at/below a denied level", () => {
+    const real = path.join(outsideDir, ".config", "tool2");
+    fs.mkdirSync(real, { recursive: true });
+    const linkRoot = path.join(outsideDir, "trusted-root");
+    fs.symlinkSync(real, linkRoot);
+    try {
+      const w = new Workspace(linkRoot);
+      expect(w.resolveSafe("secrets.json")).toBe(path.join(linkRoot, "secrets.json"));
+    } finally {
+      fs.unlinkSync(linkRoot);
+    }
+  });
+});
+
+describe("denylist — configuration", () => {
+  it("core.config.json default matches DEFAULT_DENY_PATTERNS (drift guard)", () => {
+    const schema = configSchema as {
+      workspace: {
+        properties: { deny: { layers: Array<Record<string, unknown>> } };
+      };
+    };
+    const defaultLayer = schema.workspace.properties.deny.layers.find(
+      (l) => "default" in l,
+    );
+    expect(defaultLayer?.default).toEqual([...DEFAULT_DENY_PATTERNS]);
+  });
+
+  it("honors a custom deny list passed to the constructor", () => {
+    const w = new Workspace(workDir, ["*.local*"]);
+    // Default rules no longer apply...
+    expect(w.resolveSafe(".ssh/id_rsa")).toBe(path.join(workDir, ".ssh", "id_rsa"));
+    expect(w.resolveSafe(".env")).toBe(path.join(workDir, ".env"));
+    // ...but the configured one does.
+    expect(() => w.resolveSafe("config.local")).toThrow(PathEscapeError);
+  });
+
+  it("an explicit empty list disables the denylist", () => {
+    const w = new Workspace(workDir, []);
+    expect(w.resolveSafe(".ssh/id_rsa")).toBe(path.join(workDir, ".ssh", "id_rsa"));
+    expect(w.resolveSafe(".bashrc")).toBe(path.join(workDir, ".bashrc"));
+    expect(w.resolveSafe(".env")).toBe(path.join(workDir, ".env"));
+  });
+
+  it("rejects non-string deny entries at construction", () => {
+    expect(() => new Workspace(workDir, [".ssh", 42 as unknown as string])).toThrow(
+      ConfigError,
+    );
   });
 });
 

@@ -49,6 +49,7 @@ export interface OutputSink {
 // Subset of config keys read by Agent; extensions read the rest via core.config.
 export interface AgentConfig {
   workspaceRoots?: string[] | null;
+  workspaceDeny?: readonly string[] | null;
   maxToolCallsPerIteration?: number;
   maxRetries?: number;
   toolRetryDelay?: number;
@@ -169,6 +170,7 @@ export class Agent implements AgentLike {
       hooks: options.hooks,
       emitOutput: (type, data) => this.emitOutput(type, data),
       workspaceRoots: options.config?.workspaceRoots || null,
+      workspaceDeny: options.config?.workspaceDeny ?? null,
       maxRetries: options.config.maxRetries,
       toolRetryDelay: options.config.toolRetryDelay,
       isRestoring: () => this.#isRestoring,

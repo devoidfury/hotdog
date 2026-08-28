@@ -149,7 +149,9 @@ export function create(core: CoreContext): ExtensionInstance {
       [HOOKS.INPUT]: async ({ text, agent }) => {
         const roots =
           (agent?.config?.workspaceRoots as string[] | undefined) ?? [cwd()];
-        const workspace = new Workspace(roots);
+        // null/undefined both mean "unconfigured" -- fall back to the defaults.
+        const deny = agent?.config?.workspaceDeny as readonly string[] | null | undefined;
+        const workspace = deny != null ? new Workspace(roots, deny) : new Workspace(roots);
 
         const result = await expandFileReferences(text, workspace, maxFileSize, maxFiles);
 

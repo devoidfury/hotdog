@@ -18,7 +18,7 @@ export class PathEscapeError extends ToolError {
     super(message);
     this.name = "PathEscapeError";
   }
-  
+
   static invalidInput(input: unknown): PathEscapeError {
     return new PathEscapeError(`Invalid path: ${input}`);
   }
@@ -29,6 +29,10 @@ export class PathEscapeError extends ToolError {
 
   static symlinkEscape(path: string): PathEscapeError {
     return new PathEscapeError(`Symlink escape rejected: ${path}`);
+  }
+
+  static denied(path: string, rule: string): PathEscapeError {
+    return new PathEscapeError(`Denylisted path rejected (${rule}): ${path}`);
   }
 }
 
@@ -79,9 +83,7 @@ export function expandWorkspacePaths(entries: readonly string[]): string[] {
   const roots: string[] = [];
   for (const entry of entries) {
     if (typeof entry !== "string" || entry.trim() === "") {
-      throw new ConfigError(
-        `workspace.paths entries must be non-empty strings, got: ${entry}`,
-      );
+      throw new ConfigError(`workspace.paths entries must be non-empty strings, got: ${entry}`);
     }
 
     const expanded = expandTilde(entry);
@@ -105,9 +107,7 @@ export function expandWorkspacePaths(entries: readonly string[]): string[] {
     for (const match of matches) {
       const abs = resolveAbs(process.cwd(), match);
       if (!fs.existsSync(abs)) {
-        throw new ConfigError(
-          `workspace path does not exist: ${abs} (from '${entry}')`,
-        );
+        throw new ConfigError(`workspace path does not exist: ${abs} (from '${entry}')`);
       }
       roots.push(abs);
     }
@@ -117,22 +117,101 @@ export function expandWorkspacePaths(entries: readonly string[]): string[] {
 }
 
 /**
+ * Built-in denylist for sensitive paths inside any workspace root.
+ *
+ * This is the runtime fallback used when a `Workspace` is constructed
+ * without an explicit list. The effective default for agent sessions is
+ * the `workspace.deny` config key (default declared in
+ * core.config.json); a test pins the two lists in sync.
+ *
+ * Rule format: slash-separated globs matched against the components of the
+ * resolved absolute path. A rule may start at any depth -- `.ssh` denies
+ * the `.ssh` directory itself and everything below it, wherever it sits.
+ * `*` and `?` glob within a single component and never cross `/`
+ * (no `[...]` classes). A rule prefixed with `!` is a negation: rules are
+ * evaluated in order and the LAST match wins, gitignore-style, so
+ * `!.env.example` after `.env*` carves an exception out.
+ *
+ * Root exception: a positive rule never applies to a root that itself sits
+ * at or below the denied level (e.g. a configured root of `~/.config/tool`
+ * is trusted; `.env*` and the rest do not fire inside it for that rule).
+ */
+export const DEFAULT_DENY_PATTERNS: readonly string[] = [
+  ".ssh",
+  ".config",
+  ".*profile",
+  ".*rc",
+  "*.local*",
+  ".env*",
+  "!.env.example",
+];
+
+/**
+ * Compile one path component to a segment-glob regex: `*` = any run of
+ * non-separator chars, `?` = one char, everything else literal.
+ */
+function componentToRegex(component: string): RegExp {
+  let rx = "";
+  for (const ch of component) {
+    if (ch === "*") rx += "[^/]*";
+    else if (ch === "?") rx += "[^/]";
+    else rx += ch.replace(/[.*+^${}()|[\]\\]/g, "\\$&");
+  }
+  return new RegExp(`^${rx}$`);
+}
+
+/**
+ * True if a rule's component sequence appears at any position in the
+ * path's component list.
+ */
+function pathMatchesRule(components: string[], rule: string): boolean {
+  const rx = rule.split("/").filter(Boolean).map(componentToRegex);
+  if (rx.length === 0) return false;
+  for (let i = 0; i + rx.length <= components.length; i++) {
+    let ok = true;
+    for (let j = 0; j < rx.length; j++) {
+      if (!rx[j]!.test(components[i + j]!)) {
+        ok = false;
+        break;
+      }
+    }
+    if (ok) return true;
+  }
+  return false;
+}
+
+/**
  * Multi-root workspace boundary.
  *
  * Relative paths resolve against the primary root (`roots[0]`); absolute
  * paths are accepted if they fall inside any configured root. Anything that
  * escapes -- directly or through symlinks -- is rejected, except symlinks
  * whose real location is inside another configured root (still trusted).
+ * Paths matching the configured denylist (`deniedPatterns`, from the
+ * `workspace.deny` config key) are rejected as well (see
+ * `Workspace#resolveSafe`).
  */
 export class Workspace {
   readonly roots: string[];
+  readonly deniedPatterns: readonly string[];
 
-  constructor(roots: string | string[]) {
+  /**
+   * @param deniedPatterns - Denylist rules for `resolveSafe`; defaults to
+   *   `DEFAULT_DENY_PATTERNS`. Agent sessions pass the resolved
+   *   `workspace.deny` config value; an explicit empty array disables
+   *   the denylist. Entries must be strings (a `ConfigError` is thrown
+   *   otherwise, so a bad config fails at construction, not per resolve).
+   */
+  constructor(roots: string | string[], deniedPatterns: readonly string[] = DEFAULT_DENY_PATTERNS) {
     const normalized = (Array.isArray(roots) ? roots : [roots]).map((r) => resolveAbs(r));
     if (normalized.length === 0) {
       throw new ConfigError("Workspace roots must not be empty");
     }
+    if (deniedPatterns.some((r) => typeof r !== "string")) {
+      throw new ConfigError("deniedPatterns entries must be strings");
+    }
     this.roots = normalized;
+    this.deniedPatterns = deniedPatterns;
   }
 
   /**
@@ -155,14 +234,46 @@ export class Workspace {
   }
 
   /**
+   * Evaluate `this.deniedPatterns` against a resolved absolute path.
+   *
+   * Rules are evaluated in order; the last rule that matches the path's
+   * components decides (gitignore-style, so `!` negations can override an
+   * earlier positive rule). A positive rule is skipped when the owning
+   * root itself sits at/below the denied level -- a root configured
+   * directly inside (e.g. under) a denylisted directory is explicitly
+   * trusted.
+   *
+   * @returns The matched rule (for the error message), or null if allowed.
+   */
+  #deniedRule(resolved: string, owner: string): string | null {
+    const comps = resolved.split(sep).filter(Boolean);
+    const ownerComps = owner.split(sep).filter(Boolean);
+    let matched: string | null = null;
+    let denied = false;
+    for (const candidate of this.deniedPatterns) {
+      const negated = candidate.startsWith("!");
+      const rule = negated ? candidate.slice(1) : candidate;
+      // Root exception: the root is explicitly at/below this level.
+      if (!negated && pathMatchesRule(ownerComps, rule)) continue;
+      if (pathMatchesRule(comps, rule)) {
+        matched = candidate;
+        denied = !negated;
+      }
+    }
+    return denied ? matched : null;
+  }
+
+  /**
    * Resolve a workspace path, rejecting escapes.
    *
    * Relative paths resolve against the primary root; absolute paths are
-   * accepted if they fall inside any configured root.
+   * accepted if they fall inside any configured root. The denylist is
+   * enforced on the lexical path AND on the real path, so symlinks
+   * cannot name their way around it.
    *
    * @param path - Path relative to the primary root, or absolute.
    * @returns The resolved absolute path.
-   * @throws PathEscapeError if the path escapes the workspace.
+   * @throws PathEscapeError if the path escapes the workspace or is denylisted.
    */
   resolveSafe(path: string): string {
     if (!path || typeof path !== "string") {
@@ -175,6 +286,12 @@ export class Workspace {
     const owner = this.#ownerRoot(resolved);
     if (!owner) {
       throw PathEscapeError.directEscape(path);
+    }
+
+    // Reject denylisted paths (ssh dirs, dotfiles, env files, ...).
+    const denied = this.#deniedRule(resolved, owner);
+    if (denied !== null) {
+      throw PathEscapeError.denied(path, denied);
     }
 
     // Reject symlink escapes: walk ancestors that exist and check their real
@@ -216,6 +333,32 @@ export class Workspace {
       if (!inLexicalRoot && !this.#insideRealRoots(probe, realRoots)) {
         throw PathEscapeError.symlinkEscape(path);
       }
+    }
+
+    // Re-check the denylist against the REAL path: a symlink inside the
+    // root (or a symlinked ancestor) may name a denied target that the
+    // lexical path alone does not reveal (e.g. `notes.md` -> `.ssh/id_rsa`).
+    let real = probe;
+    try {
+      real = fs.realpathSync.native(probe);
+    } catch {
+      // Path does not exist yet; the lexical form is all we have.
+    }
+    // The root exemption applies to the REAL location of the owning root,
+    // so a symlinked root sitting below a denied level stays trusted; when
+    // the real path lands in a different configured root, that root's
+    // exemptions apply instead.
+    let ownerReal = owner;
+    try {
+      ownerReal = fs.realpathSync.native(owner);
+    } catch {
+      // owner vanished; the lexical form is fine
+    }
+    const realOwner =
+      realRoots.find((rr) => real === rr || real.startsWith(rr + sep)) ?? ownerReal;
+    const deniedReal = this.#deniedRule(real, realOwner);
+    if (deniedReal !== null) {
+      throw PathEscapeError.denied(path, deniedReal);
     }
 
     return resolved;

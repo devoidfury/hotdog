@@ -20,7 +20,9 @@ export async function completion(ctx: CompletionContext) {
 
   const roots =
     (ctx.agent?.config?.workspaceRoots as string[] | undefined) ?? [cwd()];
-  const workspace = new Workspace(roots);
+  // null/undefined both mean "unconfigured" -- fall back to the defaults.
+  const deny = ctx.agent?.config?.workspaceDeny as readonly string[] | null | undefined;
+  const workspace = deny != null ? new Workspace(roots, deny) : new Workspace(roots);
   let baseDir = workspace.root;
 
   const pathPrefix = currentWord.slice(1);

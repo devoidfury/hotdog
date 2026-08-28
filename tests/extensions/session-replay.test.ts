@@ -7,10 +7,9 @@ import {
   readSessionEntries,
   sessionExists,
   LOG_SOURCE,
-  SessionLog,
-  disabledSessionLog,
-} from "../../src/extensions/session-log/session-log.ts";
+} from "../../src/core/session/session-log.ts";
 import type { LogEntry } from "../../src/core/session/session-log.ts";
+import { TestSessionLog } from "../mocks/io.ts";
 import { Message } from "../../src/core/context/message.ts";
 import { MessageLog } from "../../src/core/context/message-log.ts";
 import { mkdirSync, rmSync } from "node:fs";
@@ -342,7 +341,7 @@ test("Session restoration: full round-trip with INPUT, LLM, and TOOL_RESULT entr
   setupSessionDir();
 
   try {
-    const log = new SessionLog(sessionId);
+    const log = new TestSessionLog(sessionId);
     await log.writeInput("What is 2+2?");
     await log.writeAssistant(
       "Let me calculate that.",
@@ -381,11 +380,11 @@ test("Session restoration: successive one-shot prompts resume correctly", async 
   setupSessionDir();
 
   try {
-    const log1 = new SessionLog(sessionId);
+    const log1 = new TestSessionLog(sessionId);
     await log1.writeInput("Hello, world!");
     await log1.writeAssistant("Hello! How can I help you today?");
 
-    const log2 = new SessionLog(sessionId);
+    const log2 = new TestSessionLog(sessionId);
     await log2.writeInput("What's the weather?");
     await log2.writeAssistant("I don't have access to weather data.");
 
@@ -418,7 +417,7 @@ test("Session restoration: _isRestoring flag prevents duplicate log writes", asy
   setupSessionDir();
 
   try {
-    const log = new SessionLog(sessionId);
+    const log = new TestSessionLog(sessionId);
     await log.writeInput("First message");
     await log.writeAssistant("First response");
 
@@ -442,7 +441,7 @@ test("Session restoration: handles session with reset marker", async () => {
   setupSessionDir();
 
   try {
-    const log = new SessionLog(sessionId);
+    const log = new TestSessionLog(sessionId);
     await log.writeInput("Before reset");
     await log.writeReset();
     await log.writeInput("After reset");
@@ -468,7 +467,7 @@ test("Session restoration: handles session with compaction entries", async () =>
   setupSessionDir();
 
   try {
-    const log = new SessionLog(sessionId);
+    const log = new TestSessionLog(sessionId);
     await log.writeInput("Question 1");
     await log.writeAssistant("Answer 1");
     await log.writeCompaction(5, "Summary of conversation about JavaScript");
@@ -516,7 +515,7 @@ test("Session restoration: preserves reasoning content in assistant messages", a
   setupSessionDir();
 
   try {
-    const log = new SessionLog(sessionId);
+    const log = new TestSessionLog(sessionId);
     await log.writeAssistant(
       "I think the answer is 42.",
       null,
@@ -547,7 +546,7 @@ test("Session restoration: preserves tool calls in assistant messages", async ()
       { id: "tc_2", type: "function", function: { name: "grep", arguments: "pattern file.txt" } },
     ];
 
-    const log = new SessionLog(sessionId);
+    const log = new TestSessionLog(sessionId);
     await log.writeAssistant("Let me check the files.", toolCalls);
 
     const entries = await readSessionEntries(sessionId);
@@ -568,7 +567,7 @@ test("Session restoration: tool result entries preserve tool_call_id", async () 
   setupSessionDir();
 
   try {
-    const log = new SessionLog(sessionId);
+    const log = new TestSessionLog(sessionId);
     await log.writeToolResult("<output>file contents</output>", "tc_1", "read");
 
     const entries = await readSessionEntries(sessionId);
@@ -590,7 +589,7 @@ test("Session restoration: handles mixed entry types in correct order", async ()
   setupSessionDir();
 
   try {
-    const log = new SessionLog(sessionId);
+    const log = new TestSessionLog(sessionId);
     await log.writeInput("Hello");
     await log.writeAssistant("Hi there!");
     await log.writeInput("Can you read file.txt?");
@@ -623,7 +622,7 @@ test("Session restoration: skip system prompt entries, regenerate dynamically", 
   setupSessionDir();
 
   try {
-    const log = new SessionLog(sessionId);
+    const log = new TestSessionLog(sessionId);
     await log.writeInput("Hello");
     await log.writeAssistant("Hi!");
 
@@ -644,15 +643,15 @@ test("Session restoration: multiple successive runs maintain consistent context"
   setupSessionDir();
 
   try {
-    const log1 = new SessionLog(sessionId);
+    const log1 = new TestSessionLog(sessionId);
     await log1.writeInput("Run 1: Hello");
     await log1.writeAssistant("Run 1: Hi there!");
 
-    const log2 = new SessionLog(sessionId);
+    const log2 = new TestSessionLog(sessionId);
     await log2.writeInput("Run 2: How are you?");
     await log2.writeAssistant("Run 2: I'm doing well!");
 
-    const log3 = new SessionLog(sessionId);
+    const log3 = new TestSessionLog(sessionId);
     await log3.writeInput("Run 3: Goodbye");
     await log3.writeAssistant("Run 3: See you later!");
 
@@ -679,7 +678,7 @@ test("replayEntriesIntoContext round-trip with readSessionEntries", async () => 
   setupSessionDir();
 
   try {
-    const log = new SessionLog(sessionId);
+    const log = new TestSessionLog(sessionId);
     await log.writeInput("Hello");
     await log.writeAssistant("Hi there");
     await log.writeToolResult("<output>done</output>", "tc_1", "bash");
@@ -712,7 +711,7 @@ test("replayEntriesIntoContext round-trip with reset", async () => {
   setupSessionDir();
 
   try {
-    const log = new SessionLog(sessionId);
+    const log = new TestSessionLog(sessionId);
     await log.writeInput("before reset");
     await log.writeReset();
     await log.writeInput("after reset");
@@ -736,7 +735,7 @@ test("replayEntriesIntoContext with only reset entries returns 0", async () => {
   setupSessionDir();
 
   try {
-    const log = new SessionLog(sessionId);
+    const log = new TestSessionLog(sessionId);
     await log.writeInput("before");
     await log.writeReset();
 

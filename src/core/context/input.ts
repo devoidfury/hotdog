@@ -1,12 +1,12 @@
 // The Input interface decouples question/answer collection from the tool itself;
 // the UI (CLI, TUI, etc.) provides its own implementation.
 
-export const INPUT_EVENT = {
+const INPUT_EVENT = {
   TEXT: "text",
   COMMAND: "command",
 } as const;
 
-export type InputEventType = (typeof INPUT_EVENT)[keyof typeof INPUT_EVENT];
+type InputEventType = (typeof INPUT_EVENT)[keyof typeof INPUT_EVENT];
 
 export interface InputEvent {
   type: InputEventType;

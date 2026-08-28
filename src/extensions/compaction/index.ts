@@ -366,12 +366,3 @@ export function create(core: CoreContext): ExtensionInstance | null {
   return instance;
 }
 
-// ── Re-exports for convenience ───────────────────────────────────────────────
-
-export { estimateContextTokens, findFirstKeptIndex, serializeConversation, estimateMessageTokens, shouldCompact, compactMessages } from "./utils.ts";
-export { CompactionStrategy, CompactionStrategyRegistry } from "./strategies.ts";
-export { SummarizeStrategy } from "./strategies/summarize.ts";
-export { DropStrategy } from "./strategies/drop.ts";
-export { SummarizeShortStrategy } from "./strategies/summarize-short.ts";
-export { TokenAwareStrategy } from "./strategies/token-aware.ts";
-export { TrimStrategy } from "./strategies/trim.ts";

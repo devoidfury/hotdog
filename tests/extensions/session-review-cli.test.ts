@@ -6,7 +6,7 @@ import { createMockCore } from "../helpers.ts";
 import { captureConsole, withSilentConsole } from "../test-helpers.ts";
 import type { CoreContext } from "../../src/core/extensions/types.ts";
 
-const SessionLog = (await import("../../src/extensions/session-log/session-log.ts")).SessionLog;
+import { TestSessionLog } from "../mocks/io.ts";
 const { create: createSessionReview } = await import("../../src/extensions/ui-session-review-cli/index.ts");
 
 // Use isolated temp directory to avoid scanning 100+ real session files
@@ -29,7 +29,7 @@ function sessionsDir() {
 }
 
 async function setupSession(id: string, entries: Array<{ type: "input" | "assistant" | "system", content: string }>) {
-  const log = new SessionLog(id);
+  const log = new TestSessionLog(id);
   for (const e of entries) {
     if (e.type === "system") await log.writeSystemPrompt(e.content);
     else if (e.type === "input") await log.writeInput(e.content);
@@ -156,7 +156,7 @@ describe("Session Review CLI - reviewSession", () => {
   });
 
   it("reviews session with text output showing different source types", async () => {
-    const log = new SessionLog(TEST_SESSION_ID);
+    const log = new TestSessionLog(TEST_SESSION_ID);
     await log.writeSystemPrompt("You are a test agent");
     await log.writeInput("hello");
     await log.writeAssistant("thinking...");
@@ -174,7 +174,7 @@ describe("Session Review CLI - reviewSession", () => {
   });
 
   it("reviews session with --tool-index flag (JSON)", async () => {
-    const log = new SessionLog(TEST_SESSION_ID);
+    const log = new TestSessionLog(TEST_SESSION_ID);
     await log.writeInput("run bash");
     await log.writeAssistant("running", [{ id: "tc_1", type: "function", function: { name: "bash", arguments: "ls" } }]);
     await log.writeToolResult("<output>done</output>", "tc_1", "bash");
@@ -192,7 +192,7 @@ describe("Session Review CLI - reviewSession", () => {
   });
 
   it("reviews session with --tool-index flag (text)", async () => {
-    const log = new SessionLog(TEST_SESSION_ID);
+    const log = new TestSessionLog(TEST_SESSION_ID);
     await log.writeInput("run bash");
     await log.writeAssistant("running", [{ id: "tc_1", type: "function", function: { name: "bash", arguments: "ls" } }]);
     await log.writeToolResult("<output>done</output>", "tc_1", "bash");

@@ -70,7 +70,7 @@ export function patternMatches(pattern: string, toolName: string): boolean {
 /**
  * Parse a SKILL.md file into a Skill object.
  */
-export function parseSkillFromMd(
+function parseSkillFromMd(
   content: string,
   dirName: string,
   location: string,

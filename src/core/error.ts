@@ -236,7 +236,7 @@ export class LlmError extends AppError {
  * Expected error types that should NOT include a stack trace.
  * These are user-facing or operational errors where the message is sufficient.
  */
-export const EXPECTED_ERROR_TYPES: ReadonlySet<ErrorType> = new Set([
+const EXPECTED_ERROR_TYPES: ReadonlySet<ErrorType> = new Set([
   "cancelled",
   "http",
   "api",

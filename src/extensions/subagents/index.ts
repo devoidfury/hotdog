@@ -30,20 +30,7 @@ import {
   CoreContext,
   ExtensionInstance,
 } from "../../core/extensions/types.ts";
-import { TaskManager } from "../../core/index.ts";
-
-// Re-export for tests and external use
-export {
-  SUBAGENT_TOOL_NAMES,
-  SUBAGENT_TOOL_CONSTRUCTORS,
-  SubagentTool,
-  DelegateTaskTool,
-  TaskStatusTool,
-  TaskFollowupTool,
-  TaskInterruptTool,
-  PlanStatusTool,
-  WaitTool,
-};
+import { TaskManager } from "../../core/session/task-manager.ts";
 
 interface SubagentOptions {
   taskManager?: TaskManager | null;

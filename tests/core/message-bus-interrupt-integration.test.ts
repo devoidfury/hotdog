@@ -5,7 +5,7 @@
 //   - the bus continues running (does not exit)
 
 import { describe, it, expect } from 'bun:test';
-import { MessageBus } from '../../src/core/index.ts';
+import { MessageBus } from '../../src/core/session/message-bus.ts';
 import { LlmError } from '../../src/core/error.ts';
 import { OUTPUT_EVENT } from '../../src/core/context/output.ts';
 

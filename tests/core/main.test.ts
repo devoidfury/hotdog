@@ -8,7 +8,7 @@ import { main } from "../../src/core/main.ts";
 import { resetLoggerForTesting } from "../../src/core/logger.ts";
 
 import pkg from "../../package.json" with { type: "json" };
-import { ConfigRegistry } from "../../src/core/index.ts";
+import { ConfigRegistry } from "../../src/core/extensions/config.ts";
 
 /**
  * Run main() with given CLI args, capturing stdout and stderr output.
@@ -333,7 +333,7 @@ describe("createCore.createLlmClient (modelToolFormat layering)", () => {
     cli: Record<string, unknown>,
   ) {
     const { createCore } = await import("../../src/core/main.ts");
-    const { ConfigRegistry } = await import("../../src/core/index.ts");
+    const { ConfigRegistry } = await import("../../src/core/extensions/config.ts");
     const { createSubcommandRegistry } = await import("../../src/core/extensions/registries.ts");
     const { buildAgentConfig, resolveConfigDir } = await import(
       "../../src/core/config/index.ts"
@@ -391,7 +391,7 @@ describe("createCore.createLlmClient (modelToolFormat layering)", () => {
 
   it("uses the schema default when core.resolved is not yet set", async () => {
     const { createCore } = await import("../../src/core/main.ts");
-    const { ConfigRegistry } = await import("../../src/core/index.ts");
+    const { ConfigRegistry } = await import("../../src/core/extensions/config.ts");
     const { createSubcommandRegistry } = await import("../../src/core/extensions/registries.ts");
     const core = createCore({} as never, new ConfigRegistry(), createSubcommandRegistry());
     expect(core.createLlmClient().maxRetries).toBe(5);

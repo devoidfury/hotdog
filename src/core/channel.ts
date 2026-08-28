@@ -3,7 +3,7 @@ import { OUTPUT_EVENT, OutputEvent } from "./context/output.ts";
 import type { QuestionOption } from "./session/index.ts";
 
 // Handled locally by the Channel; never passed through to the agent.
-export const ChannelCommand = {
+const ChannelCommand = {
   Quit: "quit",
   Help: "help",
   Sessions: "sessions",

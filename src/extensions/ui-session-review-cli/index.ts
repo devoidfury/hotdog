@@ -1,7 +1,7 @@
 import { HOOKS } from "../../core/hooks.ts";
 import { CliOutputSink } from "../../utils/cli/cli.ts";
 import { ColorPalette, type PaletteOptions } from "../../utils/cli/colors.ts";
-import { readSessionEntries, sessionsDir as getSessionsDir, type LogEntry } from "../session-log/index.ts";
+import { readSessionEntries, sessionsDir as getSessionsDir, type LogEntry } from "../../core/session/session-log.ts";
 import { contentToText } from "../../core/context/message.ts";
 import { readdir, access, stat, unlink, readFile } from "node:fs/promises";
 import { join } from "node:path";

@@ -100,4 +100,3 @@ export function create(core: CoreContext): ExtensionInstance {
   return instance;
 }
 
-export { ModelTool } from "./model.ts";

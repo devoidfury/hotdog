@@ -8,7 +8,7 @@ import {
   matcher as compactMatcher,
   completion as compactCompletion,
 } from "../../src/extensions/compaction/completions.ts";
-import { ToolRegistry } from "../../src/core/index.ts";
+import { ToolRegistry } from "../../src/core/extensions/tool-registry.ts";
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 

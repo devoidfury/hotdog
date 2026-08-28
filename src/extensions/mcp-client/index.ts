@@ -5,23 +5,6 @@ import { McpConnection } from "./connection.ts";
 import { McpTool } from "./tools.ts";
 import { type CoreContext, type ExtensionInstance } from "@core/extensions/types.ts";
 
-export { McpClient, McpError } from "./client.ts";
-export { McpConnection, McpConnectionHandle } from "./connection.ts";
-export { McpTool } from "./tools.ts";
-
-export {
-  jsonRpcRequest,
-  jsonRpcNotification,
-  mcpInitializeRequest,
-  parseMcpInitializeResponse,
-  parseMcpToolsListResponse,
-  parseMcpToolDefinition,
-  mcpToolCallRequest,
-  parseMcpToolCallResponse,
-  parseMcpContentBlock,
-  contentBlocksToString,
-} from "./types.ts";
-
 interface McpServerConfig {
   name: string;
   enabled?: boolean;

@@ -9,7 +9,7 @@ import {
   resolveExtensionDependencies,
   validateServiceContracts,
 } from "../../src/core/extensions/extensions.ts";
-import { extractSchemaDefaults } from "../../src/core/index.ts";
+import { extractSchemaDefaults } from "../../src/core/extensions/config.ts";
 
 
 describe("extractSchemaDefaults", () => {

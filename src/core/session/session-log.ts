@@ -1,5 +1,5 @@
 // Reading/replaying session logs lives in core because resume is a core feature;
-// writing (the SessionLog class) stays in the extension.
+// writing happens in the session-log extension's hook handlers.
 
 import { homedir } from "node:os";
 import { join, resolve as resolveAbs, sep } from "node:path";

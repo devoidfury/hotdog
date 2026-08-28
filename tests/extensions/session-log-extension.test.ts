@@ -1,12 +1,12 @@
 // Tests for the session-log extension create() function — hooks and readEntries.
-// This complements session-log.test.ts which tests the SessionLog class.
+// This complements session-log.test.ts which tests the core session log read/replay functions.
 //
 // Session files are written to an isolated temp dir (HOTDOG_SESSIONS_DIR),
 // so tests never touch the real ~/.cache/hotdog/sessions directory.
 
 import { describe, it, expect, beforeAll, afterAll } from "bun:test";
-import { create, readSessionEntries, disabledSessionLog } from "../../src/extensions/session-log/index.ts";
-import { LOG_SOURCE } from "../../src/extensions/session-log/session-log.ts";
+import { create } from "../../src/extensions/session-log/index.ts";
+import { readSessionEntries, LOG_SOURCE } from "../../src/core/session/session-log.ts";
 import { HOOKS } from "../../src/core/hooks.ts";
 import { createMockCore } from "../helpers.ts";
 import { mkdirSync, rmSync } from "node:fs";
@@ -260,23 +260,3 @@ describe("session-log extension create()", () => {
   });
 });
 
-describe("disabledSessionLog", () => {
-  it("exposes null identifiers and empty reads", () => {
-    const log = disabledSessionLog();
-    expect(log.sessionId).toBeNull();
-    expect(log.logPath).toBeNull();
-    expect(log.readEntries()).toEqual([]);
-    expect(log.getLogPath()).toBeNull();
-  });
-
-  it("write methods are no-ops that do not throw", () => {
-    const log = disabledSessionLog();
-    expect(() => {
-      log.writeSystemPrompt("x");
-      log.writeInput("x");
-      log.writeAssistant("x");
-      log.writeToolResult("x", "tc1", "bash");
-      log.writeReset();
-    }).not.toThrow();
-  });
-});

@@ -13,8 +13,6 @@ import type { CliSubcommandRegistry } from "./registries.ts";
 import type { CoreConfigWithExtensions } from "../config/schema-loader.ts";
 import type { ExtensionInstance, ExtensionMetadata } from "./types.ts";
 
-export { HOOKS, EXTENSION_PROVIDES };
-
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT_DIR = path.resolve(__dirname, "../../");
 

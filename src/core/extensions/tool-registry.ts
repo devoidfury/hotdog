@@ -54,7 +54,7 @@ export interface Tool<TCtx extends Record<string, unknown> = DefaultToolContext>
  * OpenAI function names, which strict APIs (OpenAI itself) validate against
  * `^[a-zA-Z0-9_-]+$`; a name with other characters fails the whole request.
  */
-export const TOOL_NAME_RE = /^[a-zA-Z0-9_-]+$/;
+const TOOL_NAME_RE = /^[a-zA-Z0-9_-]+$/;
 
 export class ToolRegistry {
   tools: Map<string, Tool>;

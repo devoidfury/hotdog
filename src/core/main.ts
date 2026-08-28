@@ -1,16 +1,16 @@
 #!/usr/bin/env bun
 
-import { createHooks, initializeLogger, logger, resolveLogLevel, resolveLogTarget } from "./index.ts";
+import { initializeLogger, logger, resolveLogLevel, resolveLogTarget } from "./logger.ts";
+import { createToolRegistry } from "./extensions/tool-registry.ts";
 import {
-  createToolRegistry,
   createExtensionLoader,
-  createServiceRegistry,
   getExtensionsToLoad,
   registerExtensionMetadata,
   validateServiceContracts,
   type LoaderCore,
-} from "./extensions/index.ts";
-import { HOOKS, type HookSystem, type HookTraceOptions } from "./hooks.ts";
+} from "./extensions/extensions.ts";
+import { createServiceRegistry } from "./extensions/service-registry.ts";
+import { createHooks, HOOKS, type HookSystem, type HookTraceOptions } from "./hooks.ts";
 import { createCompletionService } from "./completion.ts";
 import type { CoreContext, ExtensionInstance, ToolMetadataPayload } from "./extensions/types.ts";
 import type { ToolMetadata } from "./extensions/tool-registry.ts";

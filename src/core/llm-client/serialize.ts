@@ -108,13 +108,13 @@ function serializeMessage(msg: Message, mangler: MarkerMangler | null, developer
   return wire;
 }
 
-export const systemFirstFormat: WireFormat = {
+const systemFirstFormat: WireFormat = {
   serialize(messages, mangler) {
     return messages.map((m) => serializeMessage(m, mangler, false));
   },
 };
 
-export const developerFormat: WireFormat = {
+const developerFormat: WireFormat = {
   serialize(messages, mangler) {
     return messages.map((m) => serializeMessage(m, mangler, true));
   },

@@ -1,6 +1,6 @@
 import { describe, it, expect } from "bun:test";
 import { ServiceRegistry, createServiceRegistry } from "../../src/core/extensions/service-registry.ts";
-import { ConfigRegistry } from "../../src/core/index.ts";
+import { ConfigRegistry } from "../../src/core/extensions/config.ts";
 import { createCompletionService } from "../../src/core/completion.ts";
 
 describe("ServiceRegistry", () => {

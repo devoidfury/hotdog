@@ -1,4 +1,4 @@
-import { toolDef } from "@core/index.ts";
+import { toolDef } from "@core/extensions/tool-utils.ts";
 import type { ToolMetadata } from "@core/extensions/tool-registry.ts";
 import { McpConnectionHandle } from "./connection.ts";
 
@@ -22,7 +22,7 @@ interface McpToolDefinitionInput {
  * names with other characters (a raw "/" would fail the whole request).
  * See TOOL_NAME_RE in core/extensions/tool-registry.ts.
  */
-export function sanitizeToolNamePart(part: string): string {
+function sanitizeToolNamePart(part: string): string {
   return part.replace(/[^a-zA-Z0-9_-]/g, "_");
 }
 

@@ -26,7 +26,7 @@ const TYPE_CHECKS: Record<string, TypeCheckFn> = {
 /**
  * Get a human-readable type name for a JavaScript value.
  */
-export function typeName(value: unknown): string {
+function typeName(value: unknown): string {
   if (value === null) return "null";
   if (Array.isArray(value)) return "array";
   return typeof value;

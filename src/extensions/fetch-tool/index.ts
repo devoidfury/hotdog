@@ -21,7 +21,7 @@ import {
   getExtensionConfig,
 } from "@core/extensions/types.ts";
 
-export const DEFAULT_ALLOWED_SCHEMES = ["http", "https"];
+const DEFAULT_ALLOWED_SCHEMES = ["http", "https"];
 
 /** 3xx statuses with a Location header we may follow (after re-validation). */
 const REDIRECT_STATUSES = new Set([301, 302, 303, 307, 308]);

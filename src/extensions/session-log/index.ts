@@ -7,20 +7,6 @@ import { HOOKS } from "../../core/hooks.ts";
 import { stripNulls } from "../../utils/objects.ts";
 import { CoreContext, ExtensionInstance } from "../../core/extensions/types.ts";
 
-// Re-export core session log functions and types
-export {
-  LOG_SOURCE,
-  readSessionEntries,
-  readAllSessions,
-  sessionExists,
-  sessionPath,
-  sessionsDir,
-  listSessionLogs,
-  replayEntriesIntoContext,
-  type LogEntry,
-} from "../../core/session/session-log.ts";
-
-// Import LOG_SOURCE and LogEntry for internal use
 import { LOG_SOURCE, sessionsDir, type LogEntry } from "../../core/session/session-log.ts";
 
 interface SessionLogMessage {
@@ -231,33 +217,3 @@ export async function create(_core: CoreContext): Promise<ExtensionInstance> {
   };
 }
 
-/**
- * Create a disabled session log (no-op).
- */
-export function disabledSessionLog(): {
-  sessionId: null;
-  logPath: null;
-  writeInput: (...args: unknown[]) => void;
-  writeSystemPrompt: (...args: unknown[]) => void;
-  writeAssistant: (...args: unknown[]) => void;
-  writeToolResult: (...args: unknown[]) => void;
-  writeReset: (...args: unknown[]) => void;
-  readEntries: () => [];
-  getLogPath: () => null;
-} {
-  return {
-    sessionId: null,
-    logPath: null,
-    writeInput() {},
-    writeSystemPrompt() {},
-    writeAssistant() {},
-    writeToolResult() {},
-    writeReset() {},
-    readEntries() {
-      return [];
-    },
-    getLogPath() {
-      return null;
-    },
-  };
-}

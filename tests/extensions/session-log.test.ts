@@ -1,21 +1,18 @@
-// Tests for SessionLog — serialization, null stripping, images, and replay.
+// Tests for the core session log — read, listing, deletion, and replay.
 // Merged from session-log.test.ts + session-log-extended.test.ts + session-log-images.test.ts
 // to reduce duplication and consolidate related tests.
 
 import { test, expect, beforeAll, afterAll } from "bun:test";
 import {
-  SessionLog,
   LOG_SOURCE,
   readSessionEntries,
   readAllSessions,
   sessionExists,
-  disabledSessionLog,
-  createInputEntry,
-  createPromptEntry,
   replayEntriesIntoContext,
-} from "../../src/extensions/session-log/session-log.ts";
+} from "../../src/core/session/session-log.ts";
 import type { LogEntry } from "../../src/core/session/session-log.ts";
 import { MessageLog } from "../../src/core/context/message-log.ts";
+import { TestSessionLog } from "../mocks/io.ts";
 import { mkdirSync, rmSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
@@ -47,305 +44,10 @@ function createMockAgent() {
   const log = new MessageLog();
   return {
     get log() { return log; },
-    sessionLog: disabledSessionLog(),
     ensureSystemPrompt: () => {},
     addMessage(msg: unknown) { log.push(msg as any); },
   };
 }
-
-// ── disabledSessionLog ──────────────────────────────────────────────────────
-
-test("disabledSessionLog write methods all resolve without error", async () => {
-  const log = disabledSessionLog();
-  // All write methods are no-ops that resolve to undefined
-  expect(await log.append({})).toBeUndefined();
-  expect(await log.writeSystemPrompt("x")).toBeUndefined();
-  expect(await log.writeInput("x")).toBeUndefined();
-  expect(await log.writeAssistant("x")).toBeUndefined();
-  expect(await log.writeToolResult("x", "tc1", "bash")).toBeUndefined();
-  expect(await log.writeReset()).toBeUndefined();
-  expect(await log.writeCompaction(5, "summary")).toBeUndefined();
-  expect(await log.writePrompt("x")).toBeUndefined();
-});
-
-// ── SessionLog serialization ───────────────────────────────────────────────
-
-test("SessionLog serializes without null fields", async () => {
-  setupTestDir();
-  try {
-    const log = new SessionLog(TEST_SESSION_ID);
-    await log.writeInput("hello world");
-    await log.writeReset();
-
-    const content = readFileSync(log.path, "utf-8");
-    const lines = content.trim().split("\n");
-    expect(lines.length).toBe(2);
-
-    const firstLine = JSON.parse(lines[0]!) as Record<string, unknown>;
-    expect(firstLine as any).toEqual({
-      ts: expect.anything(),
-      session_id: TEST_SESSION_ID,
-      source: LOG_SOURCE.INPUT,
-      content: "hello world",
-    });
-    expect(firstLine).not.toHaveProperty("reasoning_content");
-    expect(firstLine).not.toHaveProperty("tool_calls");
-    expect(firstLine).not.toHaveProperty("tool_call_id");
-    expect(firstLine).not.toHaveProperty("tool_name");
-
-    const resetLine = JSON.parse(lines[1]!) as Record<string, unknown>;
-    expect(resetLine as any).toEqual({
-      ts: expect.anything(),
-      session_id: TEST_SESSION_ID,
-      source: LOG_SOURCE.RESET,
-      content: "",
-    });
-    expect(resetLine).not.toHaveProperty("reasoning_content");
-  } finally {
-    teardown();
-  }
-});
-
-test("SessionLog.writeAssistant includes reasoning and tool_calls", async () => {
-  setupTestDir();
-  try {
-    const log = new SessionLog(TEST_SESSION_ID);
-    await log.writeAssistant(
-      "final output",
-      [{ id: "tc1", type: "function", function: { name: "bash", arguments: "ls" } }],
-      "reasoning content",
-    );
-
-    const content = readFileSync(log.path, "utf-8");
-    const line = JSON.parse(content.trim());
-
-    expect(line.source).toBe(LOG_SOURCE.LLM);
-    expect(line.content).toBe("final output");
-    expect(line.reasoning_content).toBe("reasoning content");
-    expect(line.tool_calls).toEqual([
-      { id: "tc1", type: "function", function: { name: "bash", arguments: "ls" } },
-    ]);
-    expect(line).not.toHaveProperty("tool_call_id");
-    expect(line).not.toHaveProperty("tool_name");
-  } finally {
-    teardown();
-  }
-});
-
-test("SessionLog.writeToolResult includes tool_call_id and tool_name", async () => {
-  setupTestDir();
-  try {
-    const log = new SessionLog(TEST_SESSION_ID);
-    await log.writeToolResult("<output>done</output>", "tc_1", "bash");
-
-    const content = readFileSync(log.path, "utf-8");
-    const line = JSON.parse(content.trim());
-
-    expect(line.source).toBe(LOG_SOURCE.TOOL_RESULT);
-    expect(line.content).toBe("<output>done</output>");
-    expect(line.tool_call_id).toBe("tc_1");
-    expect(line.tool_name).toBe("bash");
-    expect(line).not.toHaveProperty("reasoning_content");
-    expect(line).not.toHaveProperty("tool_calls");
-  } finally {
-    teardown();
-  }
-});
-
-test("SessionLog.writeCompaction includes messagesCompacted count", async () => {
-  setupTestDir();
-  try {
-    const log = new SessionLog(TEST_SESSION_ID);
-    await log.writeCompaction(15, "Summarized conversation");
-
-    const content = readFileSync(log.path, "utf-8");
-    const line = JSON.parse(content.trim());
-
-    expect(line.source).toBe(LOG_SOURCE.COMPACTION);
-    expect(line.content).toContain("<system-notice>");
-    expect(line.content).toContain("[Compacted 15 messages]");
-    expect(line.content).toContain("Summarized conversation");
-  } finally {
-    teardown();
-  }
-});
-
-test("SessionLog.writePrompt creates correct entry", async () => {
-  setupTestDir();
-  try {
-    const log = new SessionLog(TEST_SESSION_ID);
-    await log.writePrompt("Prompt content rendered");
-
-    const content = readFileSync(log.path, "utf-8");
-    const line = JSON.parse(content.trim());
-
-    expect(line.source).toBe(LOG_SOURCE.PROMPT);
-    expect(line.content).toBe("Prompt content rendered");
-  } finally {
-    teardown();
-  }
-});
-
-test("SessionLog writes entries in order", async () => {
-  setupTestDir();
-  try {
-    const log = new SessionLog(TEST_SESSION_ID);
-    await log.writeSystemPrompt("system");
-    await log.writeInput("input");
-    await log.writeAssistant("assistant");
-    await log.writeToolResult("tool result", "tc1", "bash");
-    await log.writeReset();
-    await log.writeCompaction(5, "summary");
-    await log.writePrompt("prompt");
-
-    const content = readFileSync(log.path, "utf-8");
-    const lines = content.trim().split("\n");
-    expect(lines.length).toBe(7);
-
-    const sources = lines.map((l) => JSON.parse(l).source);
-    expect(sources).toEqual([
-      LOG_SOURCE.SYSTEM_PROMPT,
-      LOG_SOURCE.INPUT,
-      LOG_SOURCE.LLM,
-      LOG_SOURCE.TOOL_RESULT,
-      LOG_SOURCE.RESET,
-      LOG_SOURCE.COMPACTION,
-      LOG_SOURCE.PROMPT,
-    ]);
-  } finally {
-    teardown();
-  }
-});
-
-test("SessionLog handles empty content", async () => {
-  setupTestDir();
-  try {
-    const log = new SessionLog(TEST_SESSION_ID);
-    await log.writeInput("");
-    await log.writeAssistant("");
-    await log.writeToolResult("");
-    await log.writeReset();
-
-    const content = readFileSync(log.path, "utf-8");
-    const lines = content.trim().split("\n");
-    expect(lines.length).toBe(4);
-
-    const firstLine = JSON.parse(lines[0]!) as Record<string, unknown>;
-    expect(firstLine.content).toBe("");
-  } finally {
-    teardown();
-  }
-});
-
-// ── SessionLog images ──────────────────────────────────────────────────────
-
-test("createInputEntry includes images when provided", () => {
-  const entry = createInputEntry("session-1", "What is this?", [
-    { type: "image_url", mimeType: "image/png", data: "abc123" },
-  ]);
-  expect(entry.source).toBe(LOG_SOURCE.INPUT);
-  expect(entry.content).toBe("What is this?");
-  expect(entry.images).toEqual([
-    { type: "image_url", mimeType: "image/png", data: "abc123" },
-  ]);
-});
-
-test("createInputEntry omits images when not provided", () => {
-  const entry = createInputEntry("session-1", "Hello");
-  expect(entry.images).toBeUndefined();
-});
-
-test("createPromptEntry includes images when provided", () => {
-  const entry = createPromptEntry("session-1", "Analyze this", [
-    { type: "image_url", mimeType: "image/jpeg", data: "imgdata" },
-  ]);
-  expect(entry.source).toBe(LOG_SOURCE.PROMPT);
-  expect(entry.images).toEqual([
-    { type: "image_url", mimeType: "image/jpeg", data: "imgdata" },
-  ]);
-});
-
-test("SessionLog.writeInput stores images in log file", async () => {
-  setupTestDir();
-  try {
-    const log = new SessionLog(TEST_SESSION_ID);
-    await log.writeInput("What is in this image?", [
-      { type: "image_url", mimeType: "image/png", data: "base64data" },
-    ]);
-
-    const entries = await readSessionEntries(TEST_SESSION_ID);
-    expect(entries.length).toBe(1);
-    expect(entries[0]!.content).toBe("What is in this image?");
-    expect(entries[0]!.images).toEqual([
-      { type: "image_url", mimeType: "image/png", data: "base64data" },
-    ]);
-  } finally {
-    teardown();
-  }
-});
-
-test("SessionLog.writeInput without images stores null", async () => {
-  setupTestDir();
-  try {
-    const log = new SessionLog(TEST_SESSION_ID);
-    await log.writeInput("Hello");
-
-    const entries = await readSessionEntries(TEST_SESSION_ID);
-    expect(entries.length).toBe(1);
-    // stripNulls removes null images from the log
-    expect(entries[0]!.images).toBeUndefined();
-  } finally {
-    teardown();
-  }
-});
-
-test("SessionLog round-trip with images preserves image data", async () => {
-  setupTestDir();
-  try {
-    const log = new SessionLog(TEST_SESSION_ID);
-    await log.writeInput("Analyze this image", [
-      { type: "image_url", mimeType: "image/png", data: "testbase64data" },
-    ]);
-    await log.writeAssistant("I see a cat");
-    await log.writeInput("What color is it?", [
-      { type: "image_url", mimeType: "image/jpeg", data: "anotherimage" },
-    ]);
-    await log.writeAssistant("It is orange");
-
-    const entries = await readSessionEntries(TEST_SESSION_ID);
-    expect(entries.length).toBe(4);
-
-    expect(entries[0]!.images).toEqual([
-      { type: "image_url", mimeType: "image/png", data: "testbase64data" },
-    ]);
-    expect(entries[2]!.images).toEqual([
-      { type: "image_url", mimeType: "image/jpeg", data: "anotherimage" },
-    ]);
-
-    const agent = createMockAgent();
-    const replayed = replayEntriesIntoContext(agent, entries);
-    expect(replayed).toBe(4);
-
-    expect(agent.log.at(0)!.images).toEqual([
-      { type: "image_url", mimeType: "image/png", data: "testbase64data" },
-    ]);
-    expect(agent.log.at(2)!.images).toEqual([
-      { type: "image_url", mimeType: "image/jpeg", data: "anotherimage" },
-    ]);
-
-    // toJSON() stores content raw; _buildContent() merges images exactly once.
-    const msg0 = agent.log.at(0)!;
-    expect((msg0.toJSON() as Record<string, unknown>).content).toBe("Analyze this image");
-    const content0 = msg0._buildContent() as any[];
-    expect(content0[0]).toEqual({ type: "text", text: "Analyze this image" });
-    expect(content0[1]).toEqual({
-      type: "image_url",
-      image_url: { url: "data:image/png;base64,testbase64data" },
-    });
-  } finally {
-    teardown();
-  }
-});
 
 // ── readSessionEntries ─────────────────────────────────────────────────────
 
@@ -383,7 +85,7 @@ test("readSessionEntries replays from last reset", async () => {
   const testFile = join(dir, `${uniqueId}.jsonl`);
 
   try {
-    const log = new SessionLog(uniqueId);
+    const log = new TestSessionLog(uniqueId);
     await log.writeInput("before reset");
     await log.writeReset();
     await log.writeInput("after reset");
@@ -401,7 +103,7 @@ test("readSessionEntries replays from last reset", async () => {
 test("readSessionEntries returns all entries when no reset", async () => {
   setupTestDir();
   try {
-    const log = new SessionLog(TEST_SESSION_ID);
+    const log = new TestSessionLog(TEST_SESSION_ID);
     await log.writeInput("msg1");
     await log.writeAssistant("resp1");
     await log.writeInput("msg2");
@@ -424,7 +126,7 @@ test("readSessionEntries returns empty for non-existent session", async () => {
 test("sessionExists returns true for existing session", async () => {
   setupTestDir();
   try {
-    const log = new SessionLog(TEST_SESSION_ID);
+    const log = new TestSessionLog(TEST_SESSION_ID);
     await log.writeInput("test");
     expect(await sessionExists(TEST_SESSION_ID)).toBe(true);
   } finally {
@@ -632,7 +334,7 @@ test("deleteSessionLog deletes existing session", async () => {
   setupTestDir();
 
   try {
-    const log = new SessionLog(TEST_SESSION_ID);
+    const log = new TestSessionLog(TEST_SESSION_ID);
     await log.writeInput("test");
     expect(await sessionExists(TEST_SESSION_ID)).toBe(true);
 
@@ -698,7 +400,7 @@ test("deleteSessionLog rejects traversal ids and does not touch files outside se
 
 test("readSessionEntries round-trip works for a real UUID", async () => {
   const uuid = crypto.randomUUID();
-  const log = new SessionLog(uuid);
+  const log = new TestSessionLog(uuid);
   try {
     await log.writeInput("hello uuid");
     const entries = await readSessionEntries(uuid);

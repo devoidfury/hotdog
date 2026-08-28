@@ -1,7 +1,8 @@
 // Tests for the core Agent class — full end-to-end agent loop.
 
-import { Agent, HOOKS, ACTIONS } from '../../src/core/index.ts';
-import { createHooks } from '../../src/core/hooks.ts';
+import { Agent } from '../../src/core/agent.ts';
+import { HOOKS, createHooks } from '../../src/core/hooks.ts';
+import { ACTIONS } from '../../src/core/commands.ts';
 import { createToolRegistry } from '../../src/core/extensions/tool-registry.ts';
 import { Message } from '../../src/core/context/message.ts';
 import { ConfigError } from '../../src/core/error.ts';

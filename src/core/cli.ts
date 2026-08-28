@@ -192,7 +192,7 @@ export function parseArgs(
   return options;
 }
 
-export const HELP_TEXT = `hotdog - AI agent harness with tool calling support
+const HELP_TEXT = `hotdog - AI agent harness with tool calling support
 
 Usage: hotdog [options] [prompt]
        hotdog info

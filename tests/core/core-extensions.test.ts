@@ -1,7 +1,7 @@
 // Tests for the core extension loader.
 
-import { ExtensionLoader, HOOKS } from '../../src/core/extensions/extensions.ts';
-import { createHooks } from '../../src/core/hooks.ts';
+import { ExtensionLoader } from '../../src/core/extensions/extensions.ts';
+import { HOOKS, createHooks } from '../../src/core/hooks.ts';
 import { createToolRegistry } from '../../src/core/extensions/tool-registry.ts';
 import { createServiceRegistry } from '../../src/core/extensions/service-registry.ts';
 import { ConfigRegistry } from '../../src/core/extensions/config.ts';

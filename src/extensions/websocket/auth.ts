@@ -25,7 +25,7 @@ interface SessionEntry {
   expiresAt: number;
 }
 
-export function lockoutRemainingMs(
+function lockoutRemainingMs(
   entry: RateLimitEntry,
   now: number,
 ): number {

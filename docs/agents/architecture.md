@@ -259,9 +259,6 @@ Randomly aliases protected marker names (tool call actions, internal markers) to
 - `cli.ts` — `CliOutputSink` class: formatting + color emission, extends `OutputSink`. Key exports: `formatCompacting()`, `formatToolCall()`, `formatToolResult()`, `formatTokenUsage()`, `formatThinking()`, `formatTaskProgress()`, `CliOutputSink`
 - `colors.ts` — Color palettes, ANSI helpers, theme resolution. Key exports: `ColorPalette`, `resolvePalette()`, `applyThinking()`, `applyToolCall()`, `applyToolResult()`, `applyFinalResponse()`, `applyCompacting()`, `applyProgress()`
 
-### Core Index (`src/core/index.ts`)
-Re-exports core modules for programmatic use: hooks, logger, extension utilities (ExtensionLoader, createExtensionLoader, extractSchemaDefaults, registerExtensionMetadata), tool-registry, tool-utils, tool-executor, registries, config-registry, service-registry, message-log, agent, commands, command-handlers, token-tracker, session, task-manager, message-bus, channel.
-
 ## Extensions (`src/extensions/`)
 
 All features live as extensions that plug into the core via hooks. Extensions are auto-discovered from configured paths.

@@ -37,24 +37,6 @@ export const EVENT_NAME_MAP: Record<string, OutputEventType> = {
 
 export type EventName = keyof typeof EVENT_NAME_MAP;
 
-export const EVENT_HANDLERS: Record<OutputEventType, string> = {
-  [OUTPUT_EVENT.USER_MESSAGE]: "emitUserMessage",
-  [OUTPUT_EVENT.ASSISTANT_MESSAGE]: "emitAssistantMessage",
-  [OUTPUT_EVENT.THINKING]: "emitThinking",
-  [OUTPUT_EVENT.TOOL_CALL]: "emitToolCall",
-  [OUTPUT_EVENT.TOOL_RESULT]: "emitToolResult",
-  [OUTPUT_EVENT.COMPACTING]: "emitCompacting",
-  [OUTPUT_EVENT.COMMAND_RESULT]: "emitCommandResult",
-  [OUTPUT_EVENT.QUESTION]: "emitQuestion",
-  [OUTPUT_EVENT.STREAMING_CHUNK]: "emitStreamingChunk",
-  [OUTPUT_EVENT.STREAMING_REASONING_CHUNK]: "emitStreamingReasoningChunk",
-  [OUTPUT_EVENT.TASK_PROGRESS]: "emitTaskProgress",
-  [OUTPUT_EVENT.TOKEN_USAGE]: "emitTokenUsage",
-  [OUTPUT_EVENT.COMPACTION_RESULT]: "emitCompactionResult",
-  [OUTPUT_EVENT.SESSION_STATE]: "emitSessionState",
-  [OUTPUT_EVENT.SYSTEM_MESSAGE]: "emitSystemMessage",
-};
-
 // ── Discriminated Union: Typed Output Events ────────────────────────────────
 
 export interface UserMessageEvent {
@@ -179,10 +161,6 @@ export type OutputEvent =
   | CompactionResultEvent
   | SessionStateEvent
   | SystemMessageEvent;
-
-export function outputEvent<T extends OutputEvent>(event: T): T {
-  return event;
-}
 
 /** Base sink; the Agent only depends on this interface, never on a specific UI. */
 export class OutputSink {

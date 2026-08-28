@@ -28,10 +28,6 @@ export interface StreamCallbacks {
   shouldCancel?(): boolean;
 }
 
-export interface StreamProcessorOptions {
-  stream?: boolean;
-}
-
 // ── StreamProcessor ──────────────────────────────────────────────────────────
 
 /**
@@ -39,16 +35,13 @@ export interface StreamProcessorOptions {
  * content tracking, which is reset at the start of each process() call.
  */
 export class StreamProcessor {
-  #stream: boolean;
-
   // Accumulated partial content of the currently streaming response.
   // Populated during process() so reconnecting clients can replay
   // the portion streamed before they connected.
   #currentStreamingContent: string;
   #currentStreamingReasoning: string;
 
-  constructor(options: StreamProcessorOptions = {}) {
-    this.#stream = options.stream !== false;
+  constructor() {
     this.#currentStreamingContent = "";
     this.#currentStreamingReasoning = "";
   }
@@ -97,7 +90,7 @@ export class StreamProcessor {
         case "content": {
           textParts.push(event.content);
           this.#currentStreamingContent += event.content;
-          if (this.#stream && callbacks.onChunk) {
+          if (callbacks.onChunk) {
             callbacks.onChunk(event.content);
           }
           break;
@@ -106,7 +99,7 @@ export class StreamProcessor {
         case "reasoning": {
           reasoningParts.push(event.content);
           this.#currentStreamingReasoning += event.content;
-          if (this.#stream && callbacks.onReasoning) {
+          if (callbacks.onReasoning) {
             callbacks.onReasoning(event.content);
           }
           break;
@@ -185,8 +178,6 @@ export class StreamProcessor {
   }
 }
 
-export function createStreamProcessor(
-  options: StreamProcessorOptions = {},
-): StreamProcessor {
-  return new StreamProcessor(options);
+export function createStreamProcessor(): StreamProcessor {
+  return new StreamProcessor();
 }

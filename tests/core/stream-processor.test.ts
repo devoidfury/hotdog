@@ -170,8 +170,8 @@ describe("StreamProcessor", () => {
   });
 
   describe("streaming callbacks", () => {
-    it("should call onChunk for content events when streaming enabled", async () => {
-      const processor = createStreamProcessor({ stream: true });
+    it("should call onChunk for content events", async () => {
+      const processor = createStreamProcessor();
       const chunks: string[] = [];
 
       await processEvents(processor, [
@@ -184,21 +184,8 @@ describe("StreamProcessor", () => {
       expect(chunks).toEqual(["A", "B"]);
     });
 
-    it("should not call onChunk when streaming disabled", async () => {
-      const processor = createStreamProcessor({ stream: false });
-      const chunks: string[] = [];
-
-      await processEvents(processor, [
-        { type: "content", content: "A" },
-      ], {
-        onChunk: (c) => chunks.push(c),
-      });
-
-      expect(chunks).toEqual([]);
-    });
-
-    it("should call onReasoning for reasoning events when streaming enabled", async () => {
-      const processor = createStreamProcessor({ stream: true });
+    it("should call onReasoning for reasoning events", async () => {
+      const processor = createStreamProcessor();
       const reasoningChunks: string[] = [];
 
       await processEvents(processor, [
@@ -315,49 +302,15 @@ describe("StreamProcessor", () => {
   });
 
   describe("partial streaming content tracking", () => {
-    it("should track partial content during streaming", async () => {
-      const processor = createStreamProcessor({ stream: true });
-
-      // Simulate streaming by processing events one at a time
-      // In real usage, the stream is async iterable, so we can't easily
-      // peek mid-stream here. Instead, verify the getter returns empty
-      // after processing completes.
+    it("should clear partial content after processing completes", async () => {
+      const processor = createStreamProcessor();
       const result = await processEvents(processor, [
         { type: "content", content: "Hello" },
       ]);
 
-      // After stream completes, partial content should be cleared
       expect(processor.streamingContent).toBe("");
       expect(processor.streamingReasoning).toBe("");
       expect(result.fullText).toBe("Hello");
-    });
-  });
-
-  describe("constructor options", () => {
-    it("should default stream to true", async () => {
-      const processor = createStreamProcessor();
-      const chunks: string[] = [];
-
-      await processEvents(processor, [
-        { type: "content", content: "test" },
-      ], {
-        onChunk: (c) => chunks.push(c),
-      });
-
-      expect(chunks).toEqual(["test"]);
-    });
-
-    it("should respect stream: false", async () => {
-      const processor = createStreamProcessor({ stream: false });
-      const chunks: string[] = [];
-
-      await processEvents(processor, [
-        { type: "content", content: "test" },
-      ], {
-        onChunk: (c) => chunks.push(c),
-      });
-
-      expect(chunks).toEqual([]);
     });
   });
 });

@@ -1,4 +1,4 @@
-// Tests for context/output.ts — OutputSink, NoopSink, outputEvent, EVENT_HANDLERS.
+// Tests for context/output.ts — OutputSink, NoopSink.
 // parseInput and NoopInput are tested in input.test.ts.
 
 import { describe, it, expect, beforeEach } from "bun:test";
@@ -6,8 +6,6 @@ import {
   OutputSink,
   NoopSink,
   OUTPUT_EVENT,
-  outputEvent,
-  EVENT_HANDLERS,
 } from "../../src/core/context/output.ts";
 
 describe("OutputSink", () => {
@@ -257,34 +255,3 @@ describe("NoopSink", () => {
   });
 });
 
-describe("outputEvent", () => {
-  it("creates event with type and data", () => {
-    const event = outputEvent({ type: OUTPUT_EVENT.USER_MESSAGE, content: "Hello" });
-    expect(event.type).toBe(OUTPUT_EVENT.USER_MESSAGE);
-    expect(event.content).toBe("Hello");
-  });
-
-  it("creates event with default empty data", () => {
-    const event = outputEvent({ type: OUTPUT_EVENT.TOKEN_USAGE, sessionPromptTokens: 0, sessionCachedTokens: 0, sessionCompletionTokens: 0, sessionTotalTokens: 0, turns: 0, promptTokens: 0, cachedTokens: 0, completionTokens: 0, totalTokens: 0 });
-    expect(event.type).toBe(OUTPUT_EVENT.TOKEN_USAGE);
-    expect(event.promptTokens).toBe(0);
-  });
-});
-
-describe("EVENT_HANDLERS", () => {
-  it("maps all output event types to handler names", () => {
-    expect(EVENT_HANDLERS[OUTPUT_EVENT.USER_MESSAGE]).toBe("emitUserMessage");
-    expect(EVENT_HANDLERS[OUTPUT_EVENT.ASSISTANT_MESSAGE]).toBe("emitAssistantMessage");
-    expect(EVENT_HANDLERS[OUTPUT_EVENT.THINKING]).toBe("emitThinking");
-    expect(EVENT_HANDLERS[OUTPUT_EVENT.TOOL_CALL]).toBe("emitToolCall");
-    expect(EVENT_HANDLERS[OUTPUT_EVENT.STREAMING_CHUNK]).toBe("emitStreamingChunk");
-    expect(EVENT_HANDLERS[OUTPUT_EVENT.COMPACTION_RESULT]).toBe("emitCompactionResult");
-    expect(EVENT_HANDLERS[OUTPUT_EVENT.SESSION_STATE]).toBe("emitSessionState");
-  });
-
-  it("has a handler for every OUTPUT_EVENT type", () => {
-    for (const [, value] of Object.entries(OUTPUT_EVENT)) {
-      expect(EVENT_HANDLERS[value]).toBeDefined();
-    }
-  });
-});

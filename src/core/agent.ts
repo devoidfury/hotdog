@@ -153,7 +153,7 @@ export class Agent implements AgentLike {
     this.followQueue = [];
     // Per-iteration AbortController, aborted on cancel() so the HTTP client terminates fetch().
     this.runAbortController = null;
-    this.#streamProcessor = createStreamProcessor({ stream: this.stream });
+    this.#streamProcessor = createStreamProcessor();
     this.commandRegistry = options.commandRegistry || createCommandRegistry();
     for (const [type, def] of Object.entries(CORE_COMMAND_HANDLERS)) {
       this.commandRegistry.register(type, def);

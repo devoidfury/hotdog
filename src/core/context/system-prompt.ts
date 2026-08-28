@@ -1,6 +1,6 @@
 import { initSystemPromptTemplate as _initTemplate } from "../config/providers.ts";
 import { render } from "../../utils/render.ts";
-import { HOOKS } from "../hooks.ts";
+import { HOOKS, type SystemPromptChunk } from "../hooks.ts";
 
 let cachedTemplate: string | null = null;
 
@@ -11,12 +11,6 @@ export async function loadSystemPromptTemplate(
 
   cachedTemplate = await _initTemplate(templatePath);
   return cachedTemplate;
-}
-
-export interface SystemPromptChunk {
-  name: string;
-  priority: number;
-  content: string;
 }
 
 /** Chunks from hook results, prefixed with the handler's registration source, sorted by priority. */

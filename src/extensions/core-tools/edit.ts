@@ -1,5 +1,4 @@
 import fs from "node:fs/promises";
-import path from "node:path";
 import {
   toolDef,
   param,
@@ -117,8 +116,6 @@ export class EditTool {
     const { newContent, matchInfo } = result;
 
     try {
-      const dir = path.dirname(resolvedPath);
-      await fs.mkdir(dir, { recursive: true });
       await fs.writeFile(resolvedPath, newContent!, "utf-8");
     } catch (e: unknown) {
       return ToolResult.err(`Error writing file: ${(e as Error).message}`);

@@ -39,10 +39,8 @@ describe("TaskManager", () => {
   function createManager(options = {}) {
     return new TaskManager({
       buildAgent: async () => ({} as any),
-      llmClient: {} as any,
       modelRegistry: {} as any,
       config: {} as any,
-      hooks: {} as any,
       maxIterations: 100,
       taskProfile: "default",
       taskRole: "",
@@ -72,10 +70,8 @@ describe("TaskManager", () => {
 
       const manager = new TaskManager({
         buildAgent,
-        llmClient: {} as any,
         modelRegistry: { default: "test-model" } as any,
         config: { profilesPath: "./config/profiles" } as any,
-        hooks: {} as any,
         maxIterations: 100,
         taskProfile: "default",
         taskRole: "",
@@ -99,10 +95,8 @@ describe("TaskManager", () => {
 
       const manager = new TaskManager({
         buildAgent,
-        llmClient: {} as any,
         modelRegistry: { default: "default-model" } as any,
         config: { profilesPath: "./config/profiles" } as any,
-        hooks: {} as any,
         maxIterations: 100,
         taskProfile: "default",
         taskRole: "",
@@ -127,10 +121,8 @@ describe("TaskManager", () => {
 
       const manager = new TaskManager({
         buildAgent,
-        llmClient: {} as any,
         modelRegistry: { default: "test-model" } as any,
         config: { profilesPath: "./config/profiles", customKey: "customValue" } as any,
-        hooks: {} as any,
         maxIterations: 100,
         taskProfile: "default",
         taskRole: "",
@@ -320,10 +312,8 @@ describe("TaskManager", () => {
 
       const manager = new TaskManager({
         buildAgent: buildAgent as any,
-        llmClient: {} as any,
         modelRegistry: { default: "test-model" } as any,
         config: { profilesPath: "./config/profiles" } as any,
-        hooks: {} as any,
         maxIterations: 100,
         taskProfile: "default",
         taskRole: "",

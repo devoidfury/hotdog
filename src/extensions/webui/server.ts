@@ -1,4 +1,4 @@
-import { createWsServer, type HotdogServerSocket } from "../websocket/server.ts";
+import { createWsServer } from "../websocket/server.ts";
 import { createAuthMiddleware, apiKeyEquals } from "../websocket/auth.ts";
 import { logger } from "../../core/logger.ts";
 import {

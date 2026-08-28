@@ -73,7 +73,6 @@ export async function create(_core: CoreContext): Promise<ExtensionInstance> {
   await mkdir(cacheDir, { recursive: true });
 
   // Track session state
-  let systemPromptWritten = false;
   let isRestoring = false;
   // Track the most recent session ID so readEntries/getLogPath work correctly.
   let lastSessionId: string | null = null;

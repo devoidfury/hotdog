@@ -153,7 +153,7 @@ export class ToolExecutor {
       input = callResult.lastResult.input;
     }
 
-    const toolCtx = this.#buildToolContext(toolName);
+    const toolCtx = this.#buildToolContext();
     hooks.notifyHooks(HOOKS.AGENT_TOOL_CONTEXT, { toolCtx, toolName, agent });
     const tool = this.#deps.toolRegistry.get(toolName);
     if (!tool) {
@@ -258,7 +258,7 @@ export class ToolExecutor {
     );
   }
 
-  #buildToolContext(toolName: string): ToolContext {
+  #buildToolContext(): ToolContext {
     const toolCtx = new ToolContext();
     toolCtx.set("agent", this.#deps.agent);
     toolCtx.set("isSessionRestoring", this.#deps.isRestoring());

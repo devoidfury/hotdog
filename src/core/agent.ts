@@ -276,7 +276,7 @@ export class Agent implements AgentLike {
 
         const params = await this._prepareIteration(iteration);
         const response = await this._performLlmCall(params);
-        const result = await this._handleLlmResponse(iteration, response, params);
+        const result = await this._handleLlmResponse(response, params);
 
         if (typeof result === "string") {
           this._emitTurnEnd(iteration, response.fullText, [], true, this.cancelled, "completion");
@@ -389,7 +389,6 @@ export class Agent implements AgentLike {
   }
 
   private async _handleLlmResponse(
-    iteration: number,
     response: StreamResult,
     params: LlmRequestParams,
   ): Promise<string | { outcome: string; toolResults: ToolResult[] }> {

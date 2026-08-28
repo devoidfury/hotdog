@@ -175,10 +175,8 @@ export class SessionManager {
     if (options.taskConfig && options.llmClient && options.modelRegistry) {
       this.#taskManager = new TaskManager({
         buildAgent: this.#buildAgent,
-        llmClient: options.llmClient,
         modelRegistry: options.modelRegistry,
         config: options.coreConfig || {},
-        hooks: options.hooks,
         maxIterations: options.taskConfig.maxIterations,
         taskProfile: options.taskConfig.taskProfile,
         taskRole: options.taskConfig.taskRole,

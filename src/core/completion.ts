@@ -154,7 +154,7 @@ export class CompletionService {
               resolve(value ?? []);
             }
           })
-          .catch((e) => {
+          .catch(() => {
             if (!settled) {
               settled = true;
               clearTimeout(timeoutId);

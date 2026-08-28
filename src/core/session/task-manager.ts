@@ -3,8 +3,6 @@ import { Message, type MessageSource } from "../context/message.ts";
 import { LlmError } from "../error.ts";
 import { loadProfileFile, ProfileManager } from "../config/profiles.ts";
 import { type CoreConfigWithExtensions } from "../config/schema-loader.ts";
-import type { LlmClient } from "../llm-client/client.ts";
-import type { HookSystem } from "../hooks.ts";
 import type { ModelConfig } from "../config/providers.ts";
 import type { AgentLike } from "./index.ts";
 
@@ -65,10 +63,8 @@ export interface SpawnTaskOptions {
 }
 
 export interface TaskManagerOptions {
-  llmClient: LlmClient;
   modelRegistry: Record<string, ModelConfig>;
   config: CoreConfigWithExtensions;
-  hooks: HookSystem;
   sessionManager?: TaskManagerSessionManager | null;
   profileManager?: ProfileManager;
 }
@@ -82,10 +78,8 @@ export interface TaskManagerRequiredOptions {
 
 export class TaskManager {
   #buildAgent: (config: Record<string, unknown>) => Promise<AgentLike>;
-  #llmClient: LlmClient;
   #modelRegistry: Record<string, ModelConfig>;
   #config: CoreConfigWithExtensions;
-  #hooks: HookSystem;
   #sessionManager: TaskManagerSessionManager | null;
   #maxIterations: number;
   #taskProfile: string;
@@ -101,10 +95,8 @@ export class TaskManager {
 
   constructor(options: TaskManagerOptions & TaskManagerRequiredOptions) {
     this.#buildAgent = options.buildAgent;
-    this.#llmClient = options.llmClient;
     this.#modelRegistry = options.modelRegistry || {};
     this.#config = options.config || {};
-    this.#hooks = options.hooks || null;
     this.#sessionManager = options.sessionManager || null;
     this.#maxIterations = options.maxIterations;
     this.#taskProfile = options.taskProfile;

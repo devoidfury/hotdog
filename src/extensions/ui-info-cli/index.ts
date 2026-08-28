@@ -667,7 +667,7 @@ function printProfileListJson(
   return 0;
 }
 
-export function create(core: CoreContext): ExtensionInstance {
+export function create(_core: CoreContext): ExtensionInstance {
   return {
     hooks: {
       [HOOKS.CLI_SUBCOMMANDS_REGISTER]: async (registry) => {

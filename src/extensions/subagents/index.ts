@@ -15,17 +15,7 @@
 import { HOOKS } from "../../core/hooks.ts";
 import { formatError } from "../../core/error.ts";
 import { logger } from "../../core/logger.ts";
-import {
-  SUBAGENT_TOOL_NAMES,
-  SUBAGENT_TOOL_CONSTRUCTORS,
-  SubagentTool,
-  DelegateTaskTool,
-  TaskStatusTool,
-  TaskFollowupTool,
-  TaskInterruptTool,
-  PlanStatusTool,
-  WaitTool,
-} from "./subagents.ts";
+import { SUBAGENT_TOOL_NAMES, SUBAGENT_TOOL_CONSTRUCTORS } from "./subagents.ts";
 import {
   CoreContext,
   ExtensionInstance,

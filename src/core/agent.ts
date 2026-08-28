@@ -227,9 +227,8 @@ export class Agent implements AgentLike {
     return this.#streamProcessor.streamingReasoning;
   }
 
-  /** @deprecated Prefer context.getMessages(). */
-  get log() {
-    return this.context.log;
+  getMessages(): Message[] {
+    return this.context.getMessages();
   }
 
   enqueue(content: string | Array<Record<string, unknown>>, opts?: { source?: MessageSource }): void {

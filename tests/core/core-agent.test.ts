@@ -43,7 +43,7 @@ describe('Agent — end-to-end loop', () => {
     expect(mockLLM.callCount).toBe(1);
 
     // Verify conversation history was recorded
-    const ctx = agent.log.getAll();
+    const ctx = agent.context.log.getAll();
     expect(ctx).toHaveLength(2);
     expect(ctx[0]!.role).toBe('user');
     expect(ctx[1]!.role).toBe('assistant');
@@ -66,7 +66,7 @@ describe('Agent — end-to-end loop', () => {
 
     const completion = expectCompletion(result);
     expect(completion.content).toBe('Here is my answer.');
-    expect(agent.log.at(1)!.reasoningContent).toBe('I need to think about this carefully.');
+    expect(agent.context.log.at(1)!.reasoningContent).toBe('I need to think about this carefully.');
   });
 
   it('run() with harness source creates a harness-role message', async () => {
@@ -81,13 +81,13 @@ describe('Agent — end-to-end loop', () => {
 
     await agent.run('[Task t1 completed]\ndone', undefined, { source: 'harness' });
 
-    const harnessMsg = agent.log.getAll().find((m) => m.role === 'harness');
+    const harnessMsg = agent.context.log.getAll().find((m) => m.role === 'harness');
     expect(harnessMsg).toBeTruthy();
     expect(harnessMsg!.source).toBe('harness');
 
     // Without opts the message is plain user input.
     await agent.run('plain user input');
-    const plainMsg = agent.log.getAll().filter((m) => m.role === 'user').at(-1);
+    const plainMsg = agent.context.log.getAll().filter((m) => m.role === 'user').at(-1);
     expect(plainMsg!.source).toBe('user');
   });
 
@@ -122,7 +122,7 @@ describe('Agent — end-to-end loop', () => {
     expect(mockLLM.callCount).toBe(2);
 
     // Verify tool call and result are in conversation history
-    const ctx = agent.log.getAll();
+    const ctx = agent.context.log.getAll();
     const assistantMsg = ctx.find(m => m.role === 'assistant' && m.toolCalls);
     const toolMsg = ctx.find(m => m.role === 'tool');
     expect(assistantMsg).toBeTruthy();
@@ -204,7 +204,7 @@ describe('Agent — end-to-end loop', () => {
     expect(mockLLM.callCount).toBe(2);
 
     // Verify both tools were called and results recorded
-    const ctx = agent.log.getAll();
+    const ctx = agent.context.log.getAll();
     const assistantMsg = ctx.find(m => m.role === 'assistant' && m.toolCalls);
     expect(assistantMsg).toBeTruthy();
     expect((assistantMsg!.toolCalls as Array<unknown>).length).toBe(2);
@@ -245,7 +245,7 @@ describe('Agent — end-to-end loop', () => {
     expect(mockLLM.callCount).toBe(2);
 
     // Verify validation error was recorded
-    const toolMsg = agent.log.getAll().find(m => m.role === 'tool');
+    const toolMsg = agent.context.log.getAll().find(m => m.role === 'tool');
     expect(toolMsg).toBeTruthy();
     expect(toolMsg!.content as string).toContain('validation');
   });
@@ -278,7 +278,7 @@ describe('Agent — end-to-end loop', () => {
     // Verify error was recorded. The defs check (getToolDefs) catches names
     // the agent was never offered, so the message is "not available" rather
     // than the old registry-lookup "Unknown tool".
-    const toolMsg = agent.log.getAll().find(m => m.role === 'tool');
+    const toolMsg = agent.context.log.getAll().find(m => m.role === 'tool');
     expect(toolMsg).toBeTruthy();
     expect(toolMsg!.content as string).toContain('not available');
   });
@@ -314,7 +314,7 @@ describe('Agent — end-to-end loop', () => {
     const completion = expectCompletion(result);
     expect(completion.content).toBe('Tool not available.');
     expect(tool.executeCount).toBe(0);
-    const toolMsg = agent.log.getAll().find(m => m.role === 'tool');
+    const toolMsg = agent.context.log.getAll().find(m => m.role === 'tool');
     expect(toolMsg).toBeTruthy();
     expect(toolMsg!.content as string).toContain('not available');
   });
@@ -348,7 +348,7 @@ describe('Agent — end-to-end loop', () => {
     expect(tool.executeCount).toBe(1);
 
     // Verify error was recorded
-    const toolMsg = agent.log.getAll().find(m => m.role === 'tool');
+    const toolMsg = agent.context.log.getAll().find(m => m.role === 'tool');
     expect(toolMsg).toBeTruthy();
     expect(toolMsg!.content as string).toContain('Error executing');
   });
@@ -422,7 +422,7 @@ describe('Agent — end-to-end loop', () => {
     expect(blockedTool.executeCount).toBe(0);
 
     // Verify whitelist enforcement
-    const ctx = agent.log.getAll();
+    const ctx = agent.context.log.getAll();
     const allowedResult = ctx.find(m => m.role === 'tool' && (m.content as string).includes('allowed result'));
     const blockedResult = ctx.find(m => m.role === 'tool' && (m.content as string).includes('not available'));
     expect(allowedResult).toBeTruthy();
@@ -630,7 +630,7 @@ describe('Agent — end-to-end loop', () => {
     expect(tool.executeCount).toBe(0); // tool was NOT executed
 
     // Verify blocked result was recorded
-    const toolMsg = agent.log.getAll().find(m => m.role === 'tool');
+    const toolMsg = agent.context.log.getAll().find(m => m.role === 'tool');
     expect(toolMsg).toBeTruthy();
     expect(toolMsg!.content as string).toContain('Blocked');
   });
@@ -667,7 +667,7 @@ describe('Agent — end-to-end loop', () => {
     expect(tool.executeCount).toBe(1);
 
     // Verify modified result was recorded
-    const toolMsg = agent.log.getAll().find(m => m.role === 'tool');
+    const toolMsg = agent.context.log.getAll().find(m => m.role === 'tool');
     expect(toolMsg).toBeTruthy();
     expect(toolMsg!.content as string).toContain('MODIFIED');
   });
@@ -747,7 +747,7 @@ describe('Agent — end-to-end loop', () => {
     expect(mockLLM.callCount).toBe(2);
 
     // Context should contain the follow-up user message
-    const ctx = agent.log.getAll();
+    const ctx = agent.context.log.getAll();
     const followUpMsg = ctx.find(m => m.role === 'user' && m.content === 'Follow-up message');
     expect(followUpMsg).toBeTruthy();
   });
@@ -759,7 +759,7 @@ describe('Agent — end-to-end loop', () => {
       const { agent } = createFixture({});
       agent.addMessage(new Message({ role: 'user', content: 'hello' }));
       await agent.clearContext();
-      expect(agent.log.getAll()).toEqual([]);
+      expect(agent.context.log.getAll()).toEqual([]);
       expect(agent.iterationCount).toBe(0);
     });
   });
@@ -770,7 +770,7 @@ describe('Agent — end-to-end loop', () => {
       agent.addMessage(new Message({ role: 'user', content: 'hello' }));
       const result = await agent.executeCommand({ type: 'clear', value: null });
       expect(result).toEqual({ action: ACTIONS.DISPLAY, content: 'Context cleared.' });
-      expect(agent.log.getAll()).toEqual([]);
+      expect(agent.context.log.getAll()).toEqual([]);
     });
 
     it('should handle reasoning command to set effort', async () => {
@@ -861,9 +861,9 @@ describe('Agent — end-to-end loop', () => {
       freshAgent.deserialize(serialized);
 
       expect(freshAgent.sessionId).toBe('test-session');
-      expect(freshAgent.log.length).toBe(2);
-      expect(freshAgent.log.at(0)!.content).toBe('test message');
-      expect(freshAgent.log.at(1)!.reasoningContent).toBe('thinking...');
+      expect(freshAgent.context.log.length).toBe(2);
+      expect(freshAgent.context.log.at(0)!.content).toBe('test message');
+      expect(freshAgent.context.log.at(1)!.reasoningContent).toBe('thinking...');
       expect(freshAgent.reasoningEffort).toBe('high');
     });
 
@@ -896,7 +896,7 @@ describe('Agent — end-to-end loop', () => {
       const { agent } = createFixture({ mockLLM });
       const result = await agent.run('test');
       expect((result as any)?.content).toBe('Error handled');
-      const msgs = agent.log.getAll();
+      const msgs = agent.context.log.getAll();
       expect(msgs.some(m => m.role === 'tool' && (m.content as string).includes('missing a valid name'))).toBe(true);
     });
   });
@@ -995,7 +995,7 @@ describe('Agent — end-to-end loop', () => {
       expect(tool3.executeCount).toBe(0); // skipped
 
       // Context should contain skipped tool result
-      const ctx = agent.log.getAll();
+      const ctx = agent.context.log.getAll();
       const skippedResult = ctx.find(m =>
         m.role === 'tool' &&
         (m.content as string).includes('Skipped due to maxToolCallsPerIteration')
@@ -1042,7 +1042,7 @@ describe('Agent — end-to-end loop', () => {
       ];
       agent.replaceContext(newContext);
 
-      expect(agent.log.getAll()).toEqual(newContext);
+      expect(agent.context.log.getAll()).toEqual(newContext);
       expect(hookCalls).toHaveLength(1);
       expect(hookCalls[0]!.oldContext).toHaveLength(2);
       expect(hookCalls[0]!.newContext).toEqual(newContext);
@@ -1305,7 +1305,7 @@ describe('Agent — end-to-end loop', () => {
       const { agent } = createFixture({});
       agent.addMessage(new Message({ role: 'user', content: 'hello' }));
       agent.applyProfile('fresh', makeProfile());
-      expect(agent.log.getAll()).toHaveLength(1);
+      expect(agent.context.log.getAll()).toHaveLength(1);
     });
   });
 });

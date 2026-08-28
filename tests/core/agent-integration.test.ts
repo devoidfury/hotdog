@@ -111,7 +111,7 @@ describe('Agent — parallel tool calling', () => {
     expect(badTool.executeCount).toBe(1);
 
     // Both tools should have results in context (one success, one error)
-    const ctx = agent.log.getAll();
+    const ctx = agent.context.log.getAll();
     const toolResults = ctx.filter(m => m.role === 'tool');
     expect(toolResults).toHaveLength(2);
     const badResult = toolResults.find(m => (m.content as string).includes('Error'));
@@ -163,7 +163,7 @@ describe('Agent — parallel tool calling', () => {
       expect(t.executeCount).toBe(1);
     }
 
-    const ctx = agent.log.getAll();
+    const ctx = agent.context.log.getAll();
     expect(ctx.length).toBe(3 + toolCount); // user + assistant + toolCount results + final
   });
 });
@@ -358,7 +358,7 @@ describe('Agent — error handling', () => {
     const completion = expectCompletion(result);
     expect(completion.content).toBe('Handled.');
     // Tool may not execute if validation fails, but agent should not crash
-    const ctx = agent.log.getAll();
+    const ctx = agent.context.log.getAll();
     const toolResult = ctx.find(m => m.role === 'tool');
     expect(toolResult).toBeDefined();
     const content = toolResult!.content ?? '';
@@ -665,7 +665,7 @@ describe('Agent — lifecycle and state', () => {
     await agent.run('Initial message');
 
     // Verify follow-up messages were added to context
-    const messages = agent.log.getAll();
+    const messages = agent.context.log.getAll();
     const userMessages = messages.filter(m => m.role === 'user');
     expect(userMessages.length).toBe(3);
     expect((userMessages[0]?.content as string)).toBe('Initial message');

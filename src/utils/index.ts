@@ -50,8 +50,6 @@ export type { SseParserOptions } from "./sse-parser.ts";
 export {
   parseMarkdown,
   createStreamingParser,
-  mdTreeToPlainText,
-  walkTree,
 } from "./md-parser.ts";
 export type {
   MdDocument,
@@ -64,7 +62,6 @@ export type {
   MdListItem,
   MdBlockquote,
   MdHorizontalRule,
-  MdThematicBreak,
   MdText,
   MdBold,
   MdItalic,

@@ -439,16 +439,15 @@ function replaySessionHistory(
   agent: AgentLike,
   ws: HotdogServerSocket<unknown>,
 ): void {
-  if (!agent.log) return;
+  const messages = agent.getMessages();
 
   try {
-    const agentInstance = agent;
     let pendingToolCalls: Array<{
       id: string;
       function?: { name?: string; arguments?: string };
     }> = [];
 
-    for (const msg of agentInstance.log) {
+    for (const msg of messages) {
       switch (msg.role) {
         case "user": {
           ws.send(

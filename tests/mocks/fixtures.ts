@@ -133,6 +133,9 @@ export class MockAgent {
   addMessage(msg: Message): void {
     this._log.push(msg);
   }
+  getMessages(): Message[] {
+    return this._log.getAll();
+  }
   serialize(): Record<string, unknown> {
     return { sessionId: this._sessionId };
   }

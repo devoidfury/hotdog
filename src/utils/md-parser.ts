@@ -39,10 +39,6 @@ export interface MdHorizontalRule {
   type: "horizontal_rule";
 }
 
-export interface MdThematicBreak {
-  type: "thematic_break";
-}
-
 export interface MdTableCell {
   children: MdInline[];
 }
@@ -64,7 +60,6 @@ export type MdBlock =
   | MdList
   | MdBlockquote
   | MdHorizontalRule
-  | MdThematicBreak
   | MdTable;
 
 export interface MdText {
@@ -293,7 +288,6 @@ function areBlocksEqual(a: MdBlock, b: MdBlock): boolean {
       return true;
     }
     case "horizontal_rule":
-    case "thematic_break":
       return true;
   }
 }
@@ -343,62 +337,6 @@ export class StreamingMdParser {
 
 export function createStreamingParser(): StreamingMdParser {
   return new StreamingMdParser();
-}
-
-export function mdTreeToPlainText(tree: MdDocument): string {
-  const parts: string[] = [];
-
-  for (const block of tree.children) {
-    switch (block.type) {
-      case "heading":
-        parts.push(block.children.map(flatInline).join(""));
-        parts.push("\n");
-        break;
-      case "paragraph":
-        parts.push(block.children.map(flatInline).join(""));
-        parts.push("\n");
-        break;
-      case "code_block":
-        parts.push(block.content);
-        parts.push("\n");
-        break;
-      case "list":
-        for (const item of block.items) {
-          const prefix = block.ordered ? "- " : "- ";
-          parts.push(prefix + item.children.map(flatInline).join(""));
-          parts.push("\n");
-        }
-        break;
-      case "blockquote":
-        for (const child of block.children) {
-          parts.push("> ");
-          parts.push(
-            mdTreeToPlainText({ type: "document", children: [child] }),
-          );
-        }
-        break;
-      case "horizontal_rule":
-        parts.push("---\n");
-        break;
-      case "thematic_break":
-        parts.push("---\n");
-        break;
-      case "table":
-        const allRows: MdTableRow[] = [block.header, ...block.rows];
-        for (const row of allRows) {
-          const cellTexts = row.cells.map((cell) =>
-            cell.children.map(flatInline).join(""),
-          );
-          parts.push("| " + cellTexts.join(" | ") + " |\n");
-        }
-        break;
-    }
-  }
-
-  return parts
-    .join("")
-    .replace(/\n{3,}/g, "\n\n")
-    .trim();
 }
 
 function escapeHtml(text: string): string {
@@ -476,8 +414,6 @@ function blockToHtml(block: MdBlock): string {
       return `<blockquote>${block.children.map(blockToHtml).join("")}</blockquote>`;
     case "horizontal_rule":
       return `<hr />`;
-    case "thematic_break":
-      return `<hr />`;
     case "table": {
       const headerCells = block.header.cells
         .map((cell) => `<th>${cell.children.map(inlineToHtml).join("")}</th>`)
@@ -514,64 +450,6 @@ export function renderBlocksToHtml(
 export function markdownToHtml(markdown: string): string {
   const tree = parseMarkdown(markdown);
   return mdTreeToHtml(tree);
-}
-
-export function walkTree(
-  tree: MdDocument,
-  callback: (
-    node: MdBlock | MdInline,
-    parent: MdBlock | MdInline | null,
-  ) => void,
-): void {
-  for (const block of tree.children) {
-    walkBlock(block, null, callback);
-  }
-}
-
-function walkBlock(
-  block: MdBlock,
-  parent: MdBlock | MdInline | null,
-  callback: (
-    node: MdBlock | MdInline,
-    parent: MdBlock | MdInline | null,
-  ) => void,
-): void {
-  callback(block, parent);
-
-  switch (block.type) {
-    case "heading":
-    case "paragraph":
-      for (const child of block.children) {
-        callback(child, block);
-      }
-      break;
-    case "list":
-      for (const item of block.items) {
-        for (const child of item.children) {
-          callback(child, block);
-        }
-      }
-      break;
-    case "blockquote":
-      for (const child of block.children) {
-        walkBlock(child, block, callback);
-      }
-      break;
-    case "table":
-      for (const cell of block.header.cells) {
-        for (const child of cell.children) {
-          callback(child, block);
-        }
-      }
-      for (const row of block.rows) {
-        for (const cell of row.cells) {
-          for (const child of cell.children) {
-            callback(child, block);
-          }
-        }
-      }
-      break;
-  }
 }
 
 function parseCodeBlock(
@@ -1053,21 +931,4 @@ function isHorizontalRule(trimmed: string): boolean {
 
 function isTripleBacktick(text: string, pos: number): boolean {
   return text.slice(pos, pos + 3) === "```";
-}
-
-function flatInline(node: MdInline): string {
-  switch (node.type) {
-    case "text":
-      return node.content;
-    case "bold":
-    case "italic":
-    case "strikethrough":
-      return node.children.map(flatInline).join("");
-    case "inline_code":
-      return node.content;
-    case "link":
-      return node.children.map(flatInline).join("");
-    case "image":
-      return node.alt;
-  }
 }

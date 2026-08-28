@@ -2,8 +2,6 @@ import { describe, it, expect } from "bun:test";
 import {
   parseMarkdown,
   createStreamingParser,
-  mdTreeToPlainText,
-  walkTree,
   mdTreeToHtml,
   markdownToHtml,
   getStablePrefix,
@@ -490,123 +488,6 @@ describe("getStablePrefix", () => {
 
     // Both blocks are structurally identical (same content "code")
     expect(getStablePrefix(a, b)).toBe(2);
-  });
-});
-
-// ── Tree Utilities ───────────────────────────────────────────────────────────
-
-describe("mdTreeToPlainText", () => {
-  it("converts a simple document to plain text", () => {
-    const doc = parseMarkdown("# Hello\n\nWorld");
-    const plain = mdTreeToPlainText(doc);
-    expect(plain).toContain("Hello");
-    expect(plain).toContain("World");
-  });
-
-  it("removes formatting from bold and italic", () => {
-    const doc = parseMarkdown("**bold** and *italic*");
-    const plain = mdTreeToPlainText(doc);
-    expect(plain).toContain("bold");
-    expect(plain).toContain("italic");
-    expect(plain).not.toContain("**");
-    expect(plain).not.toContain("*italic*");
-  });
-
-  it("preserves code block content", () => {
-    const doc = parseMarkdown("```python\nprint('hello')\n```");
-    const plain = mdTreeToPlainText(doc);
-    expect(plain).toContain("print('hello')");
-  });
-
-  it("converts list items with prefix", () => {
-    const doc = parseMarkdown("- one\n- two");
-    const plain = mdTreeToPlainText(doc);
-    expect(plain).toContain("- one");
-    expect(plain).toContain("- two");
-  });
-
-  it("converts tables to pipe-separated text", () => {
-    const doc = parseMarkdown("| A | B |\n| --- | --- |\n| 1 | 2 |");
-    const plain = mdTreeToPlainText(doc);
-    expect(plain).toContain("| A | B |");
-    expect(plain).toContain("| 1 | 2 |");
-  });
-});
-
-describe("walkTree", () => {
-  it("visits all nodes in the tree", () => {
-    const doc = parseMarkdown("# Hello\n\nSome **bold** text");
-    const visited: string[] = [];
-
-    walkTree(doc, (node) => {
-      visited.push(node.type);
-    });
-
-    // walkTree iterates over document's children, not the document itself
-    expect(visited).toContain("heading");
-    expect(visited).toContain("paragraph");
-    expect(visited).toContain("text");
-    expect(visited).toContain("bold");
-  });
-
-  it("provides parent context", () => {
-    const doc = parseMarkdown("# Hello\n\nSome text");
-    let foundParent = false;
-
-    walkTree(doc, (node, parent) => {
-      if (node.type === "text" && parent?.type === "heading") {
-        foundParent = true;
-      }
-    });
-
-    expect(foundParent).toBe(true);
-  });
-
-  it("handles empty document", () => {
-    const doc = parseMarkdown("");
-    const visited: string[] = [];
-
-    walkTree(doc, (node) => {
-      visited.push(node.type);
-    });
-
-    expect(visited).toHaveLength(0);
-  });
-
-  it("visits nested blockquote children", () => {
-    const doc = parseMarkdown("> ## Quote heading\n> Quote text");
-    const visited: string[] = [];
-
-    walkTree(doc, (node) => {
-      visited.push(node.type);
-    });
-
-    expect(visited).toContain("blockquote");
-    expect(visited).toContain("heading");
-  });
-
-  it("visits table cells", () => {
-    const doc = parseMarkdown("| A | B |\n| --- | --- |\n| 1 | 2 |");
-    const visited: string[] = [];
-
-    walkTree(doc, (node) => {
-      visited.push(node.type);
-    });
-
-    expect(visited).toContain("table");
-    expect(visited).toContain("text");
-  });
-
-  it("visits list item children", () => {
-    const doc = parseMarkdown("- item one\n- item two");
-    const visited: string[] = [];
-
-    walkTree(doc, (node) => {
-      visited.push(node.type);
-    });
-
-    expect(visited).toContain("list");
-    expect(visited).toContain("text");
   });
 });
 

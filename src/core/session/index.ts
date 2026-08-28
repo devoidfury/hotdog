@@ -9,7 +9,6 @@ import type { CommandRegistryLike, ParsedCommand } from "../commands.ts";
 import type { LlmClient } from "../llm-client/client.ts";
 import type { CommandResult } from "../extensions/registries.ts";
 import type { ProfileManager, SwitchProfile } from "../config/index.ts";
-import type { MessageLog } from "../context/message-log.ts";
 import type { Message, ImageAttachment, MessageSource } from "../context/message.ts";
 import type { AgentRunResult, OutputSink } from "../agent.ts";
 import type { ModelConfig } from "../config/providers.ts";
@@ -28,7 +27,6 @@ export interface AgentLike {
   model: string;
   profileName: string | undefined;
   hooks: HookSystem;
-  log: MessageLog;
   sink: OutputSink | null;
   toolWhitelist: string[] | null;
   role: string | undefined;
@@ -47,6 +45,7 @@ export interface AgentLike {
   resetCancel(): void;
   executeCommand(cmd: ParsedCommand): Promise<CommandResult | null>;
   addMessage(msg: Message): void;
+  getMessages(): Message[];
   abortSignal?: AbortSignal | null;
   notifyCompletion?(result: string): void;
   followQueue?: string[];

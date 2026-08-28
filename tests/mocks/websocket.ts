@@ -3,7 +3,6 @@
 import { mock } from "bun:test";
 import type { AgentLike } from "../../src/core/session/index.ts";
 import type { HookSystem } from "../../src/core/hooks.ts";
-import type { MessageLog } from "../../src/core/context/message-log.ts";
 import type { HotdogServerSocket } from "../../src/extensions/websocket/server.ts";
 import { LlmClient } from "../../src/core/llm-client/client.ts";
 
@@ -14,26 +13,13 @@ const mockHooks = {
   unregisterHook: () => {},
 } as unknown as HookSystem;
 
-const mockLog: MessageLog = {
-  push: () => 0,
-  replace: () => {},
-  get: () => undefined,
-  getAll: () => [],
-  toJSON: () => [],
-  length: 0,
-  clear: () => {},
-  pop: () => undefined,
-  slice: () => [],
-  *[Symbol.iterator]() {},
-} as unknown as MessageLog;
-
 function makeMockAgent(overrides: Partial<AgentLike> = {}): AgentLike {
   return {
     sessionId: "test",
     model: "test-model",
     profileName: "default",
     hooks: mockHooks,
-    log: mockLog,
+    getMessages: () => [],
     sink: null,
     toolWhitelist: null,
     role: undefined,

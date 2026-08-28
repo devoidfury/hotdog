@@ -167,7 +167,7 @@ describe("SessionRegistry", () => {
       expect(agent.contextLimit).toBe(64000);
       expect(agent.toolWhitelist).toEqual(["alpha"]);
       // The UI confirmation exists for this wipe.
-      expect(agent.log.getAll()).toHaveLength(0);
+      expect(agent.context.log.getAll()).toHaveLength(0);
       // The whitelist restricts the tools advertised from the next turn on.
       const names = (await agent.getToolDefs()).map((d) => d.function.name);
       expect(names).toEqual(["alpha"]);
@@ -653,7 +653,7 @@ describe("createWsServer - cold log operations", () => {
     wsServer = createWsServer(createWsMockCore(), {
       buildAgent: async () =>
         makeWsMockAgent({
-          log: log as any,
+          getMessages: () => log.getAll(),
           addMessage: (msg: any) => { log.push(msg as any); },
         }),
     });
@@ -875,20 +875,7 @@ describe("replaySessionHistory", () => {
   }
 
   function agentWithLog(log: any[]): AgentLike {
-    return makeWsMockAgent({
-      log: {
-        getAll: () => log,
-        toJSON: () => log,
-        push: () => 0,
-        replace: () => {},
-        get: () => undefined,
-        length: log.length,
-        clear: () => {},
-        pop: () => undefined,
-        slice: () => [],
-        [Symbol.iterator]: () => log[Symbol.iterator](),
-      } as unknown as import("../../src/core/context/message-log.ts").MessageLog,
-    });
+    return makeWsMockAgent({ getMessages: () => log });
   }
 
   /** Switch the mock socket to the freshly created session, triggering replay. */

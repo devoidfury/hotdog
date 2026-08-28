@@ -34,7 +34,7 @@ Defaults are exported from `src/core/config/defaults.ts` for use by the config r
 layer (`getDefaultConfig()`). Components (`Agent`, `LlmClient`, `TaskManager`, etc.) receive
 resolved values from callers — do not import `DEFAULT_*` constants in components.
 Static path constants (`DEFAULT_PROFILES_SUBPATH`, `DEFAULT_CONFIG_FILENAME`,
-`DEFAULT_SYSTEM_PROMPT_FILENAME`, `DEFAULT_PROFILES_PATH`, `DEFAULT_PROMPTS_PATH`)
+`DEFAULT_SYSTEM_PROMPT_FILENAME`)
 and runtime fallbacks (`DEFAULT_SYSTEM_PROMPT_TEMPLATE`) are exempt from this rule.
 
 Extensions may also define configSchema in the same way via `src/extensions/*/extension.json` file.

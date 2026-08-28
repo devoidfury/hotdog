@@ -128,26 +128,4 @@ export function toolCtx(opts: Record<string, unknown> = {}) {
   });
 }
 
-/**
- * Set up the session log test directory and clean up any existing test file.
- */
-export function setupSessionTestDir(sessionId: string): void {
-  const { mkdirSync, rmSync } = fs;
-  const { join } = path;
-  const { homedir } = os;
-  const dir = join(homedir(), ".cache", "hotdog", "sessions");
-  mkdirSync(dir, { recursive: true });
-  const testFile = join(dir, `${sessionId}.jsonl`);
-  try { rmSync(testFile); } catch { /* doesn't exist yet */ }
-}
 
-/**
- * Clean up a session log test file.
- */
-export function cleanupSessionTest(sessionId: string): void {
-  const { rmSync } = fs;
-  const { join } = path;
-  const { homedir } = os;
-  const testFile = join(homedir(), ".cache", "hotdog", "sessions", `${sessionId}.jsonl`);
-  try { rmSync(testFile); } catch { /* ignore */ }
-}

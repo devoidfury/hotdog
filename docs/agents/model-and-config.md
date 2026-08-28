@@ -23,7 +23,7 @@ Each config key defines its own resolution layers. Common patterns:
 
 Components (`Agent`, `LlmClient`, `TaskManager`, etc.) receive resolved values from callers
 rather than importing constants directly. The `src/core/config/defaults.ts` module exports
-only static path constants (`DEFAULT_PROFILES_SUBPATH`, `DEFAULT_PROFILES_PATH`, `DEFAULT_PROMPTS_PATH`, etc.)
+only static path constants (`DEFAULT_PROFILES_SUBPATH`, `DEFAULT_CONFIG_FILENAME`, etc.)
 and runtime fallbacks (`DEFAULT_SYSTEM_PROMPT_TEMPLATE`) that are not schema-configurable.
 The skills path is computed dynamically via the config schema's `joinConfigDir:skills` compute function.
 

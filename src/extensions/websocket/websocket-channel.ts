@@ -1,4 +1,4 @@
-// Maps OutputEvent → S2CMessage protocol and sends JSON over WS.
+// Maps OutputEvent → S2C wire protocol and sends JSON over WS.
 
 import { Channel, ChannelSessionManager } from "../../core/channel.ts";
 import {

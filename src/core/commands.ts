@@ -22,8 +22,6 @@ export const Command = {
   Unknown: "unknown",
 } as const;
 
-export type CommandType = (typeof Command)[keyof typeof Command];
-
 /**
  * Action constants — returned by command handlers to tell the core
  * how to proceed after executing a command.
@@ -37,8 +35,6 @@ export const ACTIONS = {
   PROMPT: 1 << 1,
   ERROR: 1 << 2,
 } as const;
-
-export type ActionFlag = (typeof ACTIONS)[keyof typeof ACTIONS];
 
 // ── Command Registry Interface ───────────────────────────────────────────────
 

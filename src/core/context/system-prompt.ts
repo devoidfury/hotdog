@@ -37,14 +37,6 @@ export function collectSystemPromptChunks(
   return chunks;
 }
 
-export interface BuildSystemPromptOptions {
-  role: string;
-  body: string;
-  model: string;
-  profileName: string;
-  chunks: SystemPromptChunk[];
-  templatePath?: string;
-}
 
 /** Renders the template with role/body and extension-contributed chunks. */
 export async function buildSystemPrompt(

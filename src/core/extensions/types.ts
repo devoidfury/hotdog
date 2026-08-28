@@ -166,19 +166,6 @@ export interface HookPayloads {
   };
 }
 
-export type HookHandlerFor<K extends keyof HookPayloads> =
-  (payload: HookPayloads[K]) => void | Promise<void> | unknown;
-
-// Expected return types for pipeline hooks.
-export interface HookReturnTypes {
-  "tool:call": GateAction;
-  "input": InputHookResult;
-  "context": ContextHookResult;
-  "tool:result": ToolResultHookResult;
-  "provider:request": ProviderRequestHookResult;
-  "systemPrompt:build": SystemPromptChunk | SystemPromptChunk[];
-}
-
 // The `core` object passed to every extension's create(core).
 export interface CoreContext {
   hooks: HookSystem;

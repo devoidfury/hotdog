@@ -146,19 +146,6 @@ export class MockAgent {
   }
 }
 
-// ── Mock Sink ──────────────────────────────────────────────────────────────
-
-export class MockSink {
-  events: OutputEvent[];
-
-  constructor() {
-    this.events = [];
-  }
-  emit(event: OutputEvent): void {
-    this.events.push(event);
-  }
-}
-
 // ── Mock Readline ──────────────────────────────────────────────────────────
 
 export function createMockRl(responses: string[] = []): {

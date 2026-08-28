@@ -73,9 +73,3 @@ export interface C2SMessage {
   type: C2SType;
   [key: string]: unknown;
 }
-
-export interface S2CMessage {
-  type: S2CType;
-  sessionId?: string;
-  [key: string]: unknown;
-}

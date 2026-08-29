@@ -3,6 +3,7 @@ import { join, dirname } from "node:path";
 import { cwd } from "node:process";
 import { YAML } from "bun";
 import { logger } from "../core/logger.ts";
+import { ToolResult } from "../core/extensions/tool-utils.ts";
 
 /**
  * IO error class for file system operations.
@@ -116,6 +117,16 @@ export async function writeFileWithParents(filePath: string, content: string | U
     await fsPromises.mkdir(parentDir, { recursive: true });
   }
   await fsPromises.writeFile(filePath, content);
+}
+
+/** Create a directory (and parents), returning a ToolResult error instead of throwing. */
+export async function safeMkdir(dir: string): Promise<ToolResult | null> {
+  try {
+    await fsPromises.mkdir(dir, { recursive: true });
+    return null;
+  } catch (e: unknown) {
+    return ToolResult.err(`Error creating directory: ${(e as Error).message}`);
+  }
 }
 
 /** String transform on paths to fix common llm typos. */

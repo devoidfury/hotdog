@@ -9,6 +9,7 @@ import {
 import type { ToolMetadata } from "../../core/extensions/tool-registry.ts";
 import { PathEscapeError } from "../../utils/workspace.ts";
 import type { Workspace } from "../../utils/workspace.ts";
+import { safeMkdir } from "../../utils/file-utils.ts";
 import { ToolContext } from "../../core/extensions/types.ts";
 
 interface OverwriteArgs {
@@ -89,15 +90,6 @@ export class OverwriteTool {
         filesize_after: Buffer.byteLength(content, "utf-8"),
       }),
     );
-  }
-}
-
-async function safeMkdir(dir: string): Promise<ToolResult | null> {
-  try {
-    await fs.mkdir(dir, { recursive: true });
-    return null;
-  } catch (e: unknown) {
-    return ToolResult.err(`Error creating directory: ${(e as Error).message}`);
   }
 }
 

@@ -152,7 +152,6 @@ export async function createWebuiServer(
         return loginResp;
       }
 
-      // TODO: serve static files from the ui/ directory (currently only "/" is routed).
       return new Response("Not found", { status: 404 });
     },
 

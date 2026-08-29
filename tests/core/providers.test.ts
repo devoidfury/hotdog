@@ -277,6 +277,31 @@ describe("buildModelRegistry with fetchModels", () => {
     expect(registry["remote/remote-model-2"]!.capabilities?.vision).toBe(true);
   });
 
+  it("preserves path-prefixed base URLs when building the models URL", async () => {
+    // new URL("v1/models", baseUrl) would drop the /api and /llama-swap/
+    // base paths; the models URL must land where the chat path will.
+    const urls: string[] = [];
+    globalThis.fetch = Object.assign(async (url: string | URL | RequestInfo) => {
+      urls.push(String(url));
+      return {
+        ok: true,
+        json: async () => ({ data: [{ id: "path-base-model" }] }),
+      } as Response;
+    }, { preconnect: async () => {} }) as typeof fetch;
+
+    const config = {
+      providers: [
+        { name: "a", url: "http://test.com/api", fetchModels: true, models: [] },
+        { name: "b", url: "http://test.com/llama-swap/", fetchModels: true, models: [] },
+      ],
+    };
+    await buildModelRegistry(config, 32000);
+    expect(urls).toEqual([
+      "http://test.com/api/v1/models",
+      "http://test.com/llama-swap/v1/models",
+    ]);
+  });
+
   it("uses global baseUrl when provider has no URL", async () => {
     globalThis.fetch = Object.assign(async () =>
       ({

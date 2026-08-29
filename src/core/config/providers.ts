@@ -138,7 +138,10 @@ async function fetchRemoteModels(
   if (!baseUrl) return [];
 
   try {
-    const url = new URL("v1/models", baseUrl).toString();
+    // String concat, not new URL(): URL resolution drops path-prefixed bases
+    // (new URL("v1/models", "http://h:8080/api") -> "http://h:8080/v1/models"),
+    // and the chat request path is built the same concat way in llm-client.
+    const url = `${baseUrl.replace(/\/+$/, "")}/v1/models`;
 
     const headers: Record<string, string> = {};
     const apiKey = provider.apiKey || globalApiKey;

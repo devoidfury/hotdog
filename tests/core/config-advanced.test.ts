@@ -9,8 +9,7 @@ import {
   buildAgentConfig,
   buildConfig,
 } from "../../src/core/config/index.ts";
-import type { DefaultConfig } from "../../src/core/config/index.ts";
-import type { CoreConfig, CoreConfigWithExtensions } from "../../src/core/config/schema-loader.ts";
+import type { CoreConfigWithExtensions } from "../../src/core/config/schema-loader.ts";
 import { ConfigError } from "../../src/core/error.ts";
 
 describe("normalizeConfigKeys", () => {

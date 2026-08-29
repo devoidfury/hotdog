@@ -6,7 +6,7 @@ import {
   fetchWithSafeRedirects,
 } from "../../src/extensions/fetch-tool/index.ts";
 import { TransientError } from "../../src/core/error.ts";
-import { resultStr, getDisplay } from "../helpers.ts";
+import { getDisplay } from "../helpers.ts";
 
 // ── Local Test Server ──────────────────────────────────────────────────────
 

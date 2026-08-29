@@ -1,6 +1,4 @@
 import { HOOKS } from "../../core/hooks.ts";
-import { CliOutputSink } from "../../utils/cli/cli.ts";
-import { ColorPalette, type PaletteOptions } from "../../utils/cli/colors.ts";
 import { readSessionEntries, sessionsDir as getSessionsDir, type LogEntry } from "../../core/session/session-log.ts";
 import { contentToText } from "../../core/context/message.ts";
 import { readdir, access, stat, unlink, readFile } from "node:fs/promises";
@@ -69,15 +67,9 @@ async function runSessions(
 
 async function runShow(
   cli: CliArgs,
-  config: CoreConfigWithExtensions,
+  _config: CoreConfigWithExtensions,
 ): Promise<number> {
   const sessionsDir = getSessionsDir();
-
-  const palette = await CliOutputSink.resolve(
-    cli.colors ?? true,
-    cli.theme,
-    (config.colors as PaletteOptions) || null,
-  );
 
   const sessionId = cli.sessionId;
   if (sessionId) {
@@ -85,7 +77,6 @@ async function runShow(
       sessionId,
       cli.wantsJson ?? false,
       cli.toolIndex ?? false,
-      palette,
     );
   }
   if (cli.toolIndex) {
@@ -108,7 +99,7 @@ async function runShow(
     const entries = await readSessionEntries(mostRecent.name);
     return printToolIndex(entries, cli.wantsJson ?? false);
   }
-  return listSessions(cli.wantsJson ?? false, sessionsDir, palette);
+  return listSessions(cli.wantsJson ?? false, sessionsDir);
 }
 
 async function runDelete(
@@ -219,7 +210,6 @@ async function countEntries(filePath: string): Promise<number> {
 async function listSessions(
   json: boolean,
   dir: string,
-  palette: ColorPalette,
 ): Promise<number> {
   try {
     await access(dir);
@@ -278,7 +268,6 @@ async function reviewSession(
   sessionId: string,
   json: boolean,
   toolIndex: boolean,
-  palette: ColorPalette,
 ): Promise<number> {
   const entries = await readSessionEntries(sessionId);
   if (entries.length === 0) {
@@ -361,7 +350,7 @@ function printToolIndex(entries: LogEntry[], json: boolean): number {
   return 0;
 }
 
-export function create(core: CoreContext): ExtensionInstance {
+export function create(_core: CoreContext): ExtensionInstance {
   return {
     hooks: {
       [HOOKS.CLI_SUBCOMMANDS_REGISTER]: async (registry) => {

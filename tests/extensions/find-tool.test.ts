@@ -1,11 +1,9 @@
 import { describe, it, expect, beforeAll, afterAll } from "bun:test";
 import fsSync from "node:fs";
 import path from "node:path";
-import os from "node:os";
 import { FindTool } from "../../src/extensions/core-tools/find.ts";
-import { ToolContext } from "../../src/core/extensions/tool-context.ts";
 import { DEFAULT_FIND_MAX_RESULTS } from "../../src/extensions/core-tools/defaults.ts";
-import { resultStr, getDisplay, tmpDir, toolCtx, cleanupDir } from "../helpers.ts";
+import { getDisplay, tmpDir, toolCtx, cleanupDir } from "../helpers.ts";
 
 let dir: string;
 

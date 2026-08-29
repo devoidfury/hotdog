@@ -54,7 +54,8 @@ async function runOneShot(
   // (and their tools) were loaded before this session existed.
   registerTaskManagerService(core, sessionManager.getTaskManager());
 
-  const channel = new OneShotChannel({
+  // Constructed for its side effect: attach() subscribes the sink to session events.
+  new OneShotChannel({
     sessionManager,
     sessionId: sessionManager.sessionId()!,
     sink,

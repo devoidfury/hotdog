@@ -1,14 +1,6 @@
 // Contract between core and extensions.
 
-import type {
-  HookSystem,
-  GateAction,
-  ContextHookResult,
-  ProviderRequestHookResult,
-  ToolResultHookResult,
-  InputHookResult,
-  SystemPromptChunk,
-} from "../hooks.ts";
+import type { HookSystem } from "../hooks.ts";
 import type { CliSubcommandRegistryLike } from "./registries.ts";
 
 export type {

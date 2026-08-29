@@ -1,17 +1,12 @@
-import path from "node:path";
-import { fileURLToPath } from "node:url";
 import { HOOKS } from "../../core/hooks.ts";
 import { createWebuiServer, type WebuiConfig } from "./server.ts";
 import { CoreContext, ExtensionInstance, getExtensionConfig } from "../../core/extensions/types.ts";
 import { CliArgv } from "../../core/config/index.ts";
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const UI_DIR = path.join(__dirname, "ui");
-
 async function handleWebuiSubcommand(_cliArgs: CliArgv, core: CoreContext): Promise<number> {
   try {
     const config = getExtensionConfig<WebuiConfig>(core, "webui");
-    const { server, wsServer, authMiddleware } = await createWebuiServer(core, config, UI_DIR);
+    const { server, wsServer, authMiddleware } = await createWebuiServer(core, config);
 
     await new Promise<void>((resolve) => {
       const shutdown = () => {
@@ -33,7 +28,7 @@ async function handleWebuiSubcommand(_cliArgs: CliArgv, core: CoreContext): Prom
   }
 }
 
-export function create(core: CoreContext): ExtensionInstance {
+export function create(_core: CoreContext): ExtensionInstance {
   return {
     hooks: {
       [HOOKS.CLI_SUBCOMMANDS_REGISTER]: async (registry) => {

@@ -75,7 +75,7 @@ export async function create(core: CoreContext): Promise<ExtensionInstance> {
        * Mount the skills loader on the shared context container.
        * Tools access it via toolCtx.get('skillsLoader').
        */
-      [HOOKS.AGENT_TOOL_CONTEXT]: async ({ toolCtx, agent }) => {
+      [HOOKS.AGENT_TOOL_CONTEXT]: async ({ toolCtx }) => {
         toolCtx.set("skillsLoader", loader);
       },
 

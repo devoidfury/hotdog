@@ -1,6 +1,6 @@
 // Tests for the question tool — non-interactive mode only.
 
-import { describe, it, expect, beforeEach } from "bun:test";
+import { describe, it, expect, beforeEach, afterEach } from "bun:test";
 import { QuestionTool, create } from "../../src/extensions/question-tool/index.ts";
 import type { CoreContext } from "../../src/core/extensions/types.ts";
 
@@ -62,6 +62,10 @@ describe("QuestionTool", () => {
 
     beforeEach(() => {
       process.env.CI = "1";
+    });
+
+    afterEach(() => {
+      process.env.CI = originalCI;
     });
 
     it("returns defaults for all questions", async () => {

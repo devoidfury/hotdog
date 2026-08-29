@@ -300,7 +300,7 @@ describe("buildModelRegistry with fetchModels", () => {
 
   it("uses global apiKey when provider has no apiKey", async () => {
     let capturedAuth = "";
-    globalThis.fetch = Object.assign(async (url: string | URL | RequestInfo, init?: RequestInit) => {
+    globalThis.fetch = Object.assign(async (_url: string | URL | RequestInfo, init?: RequestInit) => {
       capturedAuth = (init?.headers as Record<string, string>)?.Authorization || "";
       return {
         ok: true,
@@ -320,7 +320,7 @@ describe("buildModelRegistry with fetchModels", () => {
 
   it("provider apiKey overrides global apiKey", async () => {
     let capturedAuth = "";
-    globalThis.fetch = Object.assign(async (url: string | URL | RequestInfo, init?: RequestInit) => {
+    globalThis.fetch = Object.assign(async (_url: string | URL | RequestInfo, init?: RequestInit) => {
       capturedAuth = (init?.headers as Record<string, string>)?.Authorization || "";
       return {
         ok: true,

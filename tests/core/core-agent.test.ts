@@ -17,7 +17,6 @@ import {
   simpleTool,
   validatedTool,
   failingTool,
-  metadataTool,
   createFixture,
 } from '../helpers.ts';
 import { expectCompletion, expectToolReturn } from '../test-helpers.ts';
@@ -806,7 +805,7 @@ describe('Agent — end-to-end loop', () => {
   describe('SYSTEM_PROMPT_BUILD hook', () => {
     it('should call SYSTEM_PROMPT_BUILD handlers and collect returned chunks', async () => {
       const { agent, hooks } = createFixture({});
-      hooks.on(HOOKS.SYSTEM_PROMPT_BUILD, async ({ agent: a }: { agent: unknown }) => {
+      hooks.on(HOOKS.SYSTEM_PROMPT_BUILD, async () => {
         return { name: 'test-chunk', priority: 500, content: '\n# Test Chunk' };
       });
 

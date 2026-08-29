@@ -37,7 +37,7 @@ describe("handleSlashCommand", () => {
 
     const mockSessionManager = {
       sessionId: () => "test-session",
-      executeCommand: async (sessionId: string, cmd: string) => 0,
+      executeCommand: async () => 0,
     } as any;
     const mockChannel = {} as any;
 
@@ -52,7 +52,7 @@ describe("handleSlashCommand", () => {
 
     const mockSessionManager = {
       sessionId: () => "test-session",
-      executeCommand: async (sessionId: string, cmd: string) => 0,
+      executeCommand: async () => 0,
     } as any;
     const mockChannel = {} as any;
 
@@ -72,7 +72,7 @@ describe("handleSlashCommand", () => {
     const executedCommands: string[] = [];
     const mockSessionManager = {
       sessionId: () => "test-session",
-      executeCommand: async (sessionId: string, cmd: string) => { executedCommands.push(cmd); return 0; },
+      executeCommand: async (_sessionId: string, cmd: string) => { executedCommands.push(cmd); return 0; },
     } as unknown as SessionManager;
     const mockChannel = {} as any;
 

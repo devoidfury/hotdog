@@ -1,7 +1,7 @@
 // Tests for ui-interactive-cli/index.ts — runInteractiveSession function.
 // Covers the main uncovered function (lines 279-519).
 
-import { describe, it, expect, mock, beforeEach, afterEach } from "bun:test";
+import { describe, it, expect, beforeEach, afterEach } from "bun:test";
 import { HOOKS } from "../../src/core/hooks.ts";
 import { HookSystem } from "../../src/core/hooks.ts";
 import { createCompletionService } from "../../src/core/completion.ts";

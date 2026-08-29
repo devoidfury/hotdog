@@ -1,6 +1,6 @@
-import { describe, it, expect, beforeEach, afterEach, beforeAll, afterAll } from 'bun:test';
+import { describe, it, expect, beforeAll, afterAll } from 'bun:test';
 import { ReviewTool } from '../../src/extensions/ui-session-review-cli/review.ts';
-import { resultStr, tmpDir, cleanupDir } from '../helpers.ts';
+import { resultStr } from '../helpers.ts';
 import { mkdirSync, writeFileSync, rmSync, symlinkSync, unlinkSync } from 'node:fs';
 import { join } from 'node:path';
 

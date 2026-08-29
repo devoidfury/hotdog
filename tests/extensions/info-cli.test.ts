@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach } from "bun:test";
+import { describe, it, expect } from "bun:test";
 import { HOOKS } from "../../src/core/hooks.ts";
 import { mkdirSync, rmSync, writeFileSync, mkdtempSync } from "node:fs";
 import { join } from "node:path";
@@ -391,7 +391,7 @@ describe("Info CLI - model tags in text output", () => {
 
 describe("Info CLI - profiles subcommand", () => {
   it("registers the profiles subcommand", async () => {
-    const run = await infoCliRunner();
+    await infoCliRunner();
     const core = createMockCore() as unknown as CoreContext;
     const { create } = await import("../../src/extensions/ui-info-cli/index.ts");
     const ext = create(core);

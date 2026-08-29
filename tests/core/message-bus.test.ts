@@ -1,6 +1,6 @@
 // Tests for MessageBus — event-driven dispatch loop, cancellation, interruption.
 
-import { describe, it, expect, beforeEach } from "bun:test";
+import { describe, it, expect } from "bun:test";
 import { MessageBus } from "../../src/core/session/message-bus.ts";
 import { OUTPUT_EVENT } from "../../src/core/context/output.ts";
 

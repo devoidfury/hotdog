@@ -313,7 +313,7 @@ export async function main(): Promise<number> {
     return 0;
   }
 
-  const { resolved, config, modelRegistry, providers } = await buildFullConfig(
+  const { resolved, config } = await buildFullConfig(
     cli as CliArgv,
     configRegistry,
   );

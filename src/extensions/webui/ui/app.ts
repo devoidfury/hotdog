@@ -106,9 +106,6 @@ async function init(): Promise<void> {
         chat!.workingAtom(false);
       }
     },
-    onListLogs: () => {
-      chat?.listLogs();
-    },
     onContinueLog: (logId: string) => {
       chat!.loadLog(logId);
     },

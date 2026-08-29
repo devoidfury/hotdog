@@ -492,7 +492,7 @@ describe("serializeConversation", () => {
 // ── compactMessages ─────────────────────────────────────────────────────────
 
 describe("compactMessages", () => {
-  const mockLlmChat = async (messages: Array<{ role: string; content: string }>, _model: string): Promise<string> => {
+  const mockLlmChat = async (_messages: Array<{ role: string; content: string }>, _model: string): Promise<string> => {
     return "Summary of the conversation";
   };
 

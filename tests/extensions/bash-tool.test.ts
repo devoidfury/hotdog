@@ -1,7 +1,6 @@
 import { describe, it, expect } from 'bun:test';
 import fs from 'node:fs';
 import { BashTool, create, resolveBashTimeout } from '../../src/extensions/bash-tool/index.ts';
-import { AssistantRetryableError } from '../../src/core/error.ts';
 import { resultStr, tmpDir, cleanupDir, processAlive, waitForExit } from '../helpers.ts';
 import { HOOKS } from '../../src/core/hooks.ts';
 
@@ -185,7 +184,7 @@ describe('BashTool', () => {
 
   it('create() passes maxTimeoutMs from config to the tool', async () => {
     let registeredTool: any = null;
-    const registry = { register: (name: string, tool: any) => { registeredTool = tool; }, getAll: () => [] };
+    const registry = { register: (_name: string, tool: any) => { registeredTool = tool; }, getAll: () => [] };
     const mockCore = { config: { bashTool: { bashTimeoutMs: 5000, maxToolOutputLines: 100, maxTimeoutMs: 120000 } } } as any;
     const ext = create(mockCore);
     await ext.hooks![HOOKS.TOOLS_REGISTER]!(registry as any);

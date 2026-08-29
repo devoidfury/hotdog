@@ -124,7 +124,7 @@ export class MockAgent {
   cancel(reset = true) {
     this._cancelled = reset;
   }
-  async run(text: string): Promise<string> {
+  async run(_text: string): Promise<string> {
     this._runCalled = true;
     if (this._runError) throw this._runError;
     return this._runResult;

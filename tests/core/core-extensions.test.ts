@@ -28,10 +28,10 @@ describe('ExtensionLoader', () => {
   describe('load()', () => {
     it('should load an extension with a create function', async () => {
       const extModule = {
-        create: (c: LoaderCore) => ({
+        create: (_c: LoaderCore) => ({
           name: 'test-ext',
           hooks: {
-            'test:hook': (data: unknown) => {},
+            'test:hook': () => {},
           },
         }),
       };
@@ -45,7 +45,7 @@ describe('ExtensionLoader', () => {
     it('should register hooks from the extension', async () => {
       const hookCalled: unknown[] = [];
       const extModule = {
-        create: (c: LoaderCore) => ({
+        create: (_c: LoaderCore) => ({
           hooks: {
             'test:hook': (data: unknown) => hookCalled.push(data),
           },
@@ -60,7 +60,7 @@ describe('ExtensionLoader', () => {
     it('should register tools via registerTools callback', async () => {
       let registryRef: any = null;
       const extModule = {
-        create: (c: LoaderCore) => ({
+        create: (_c: LoaderCore) => ({
           registerTools: (registry: any) => {
             registryRef = registry;
             registry.register('my-tool', {

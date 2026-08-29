@@ -150,7 +150,7 @@ describe('apply* formatting functions', () => {
     { name: 'applyProgress', fn: applyProgress, field: 'progress' },
   ];
 
-  for (const { name, fn, field } of functions) {
+  for (const { name, fn } of functions) {
     describe(name, () => {
       it('applies color from palette', () => {
         const p = ColorPalette.default();

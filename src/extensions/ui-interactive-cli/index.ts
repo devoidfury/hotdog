@@ -605,7 +605,7 @@ export async function runInteractiveSession(
 export function handleSlashCommand(
   cmdText: string,
   sessionManager: SessionManager,
-  channel: CliChannel,
+  _channel: CliChannel,
   rl: readline.Interface,
 ): void {
   const cmd = parseCommand(cmdText);
@@ -639,7 +639,7 @@ export function handleSlashCommand(
 }
 
 /** Create the interactive-cli extension. */
-export function create(core: CoreContext): ExtensionInstance {
+export function create(_core: CoreContext): ExtensionInstance {
   return {
     hooks: {
       [HOOKS.CLI_SUBCOMMANDS_REGISTER]: async (registry) => {

@@ -33,7 +33,6 @@ interface WebuiServerResult {
 export async function createWebuiServer(
   core: CoreContext,
   config: WebuiConfig,
-  uiDir: string,
 ): Promise<WebuiServerResult> {
   const { port, host, apiKey, sessionTokenTtlMin } = config;
 
@@ -150,7 +149,7 @@ export async function createWebuiServer(
         return loginResp;
       }
 
-      // TODO: serve static files from uiDir (currently only "/" is routed).
+      // TODO: serve static files from the ui/ directory (currently only "/" is routed).
       return new Response("Not found", { status: 404 });
     },
 

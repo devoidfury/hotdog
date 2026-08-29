@@ -342,9 +342,7 @@ describe("ExploreTool > execute", () => {
       },
     };
 
-    let capturedArgs: [string, string[], Record<string, unknown>] | null = null;
-    const spawnFn = ((cmd: string, args: readonly string[] | undefined, opts: unknown) => {
-      capturedArgs = [cmd, (args || []) as string[], (opts || {}) as Record<string, unknown>];
+    const spawnFn = ((_cmd: string, _args: readonly string[] | undefined, _opts: unknown) => {
       return mockProc;
     }) as SpawnFn;
 
@@ -435,7 +433,7 @@ describe("ExploreTool > execute — workspace boundary", () => {
         return mockProc;
       },
     };
-    const spawn = ((cmd: string, args: readonly string[] | undefined, opts: unknown) => {
+    const spawn = ((_cmd: string, _args: readonly string[] | undefined, opts: unknown) => {
       lastCwd = ((opts || {}) as Record<string, unknown>).cwd as string | null;
       return mockProc;
     }) as SpawnFn;

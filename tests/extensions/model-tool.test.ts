@@ -75,7 +75,7 @@ describe('ModelTool', () => {
     const registry = { 'model-1': mkModel('model-1') };
     let switched = false;
     const ctx = new ToolContext();
-    ctx.set('onSwitchModel', async (name: string) => { switched = true; });
+    ctx.set('onSwitchModel', async () => { switched = true; });
     const tool = new ModelTool(registry);
     const result = await tool.execute(JSON.stringify({ name: 'model-1' }), ctx);
     expect(switched).toBe(true);

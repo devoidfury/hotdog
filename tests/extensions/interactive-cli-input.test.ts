@@ -2,7 +2,6 @@
 // NoopInput is tested in core/input.test.ts.
 
 import { describe, it, expect, beforeEach, afterEach } from "bun:test";
-import readline from "readline";
 import { AsyncInteractiveCliInput } from "../../src/extensions/ui-interactive-cli/index.ts";
 import { createMockRl } from "../helpers.ts";
 

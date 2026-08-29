@@ -6,7 +6,7 @@
  * and automatically registered by the extension loader.
  */
 
-import { describe, it, expect, beforeEach, afterEach } from "bun:test";
+import { describe, it, expect, afterEach } from "bun:test";
 import { ConfigRegistry } from "../../src/core/extensions/config.ts";
 import { parseArgs } from "../../src/core/cli.ts";
 import { loadConfig } from "../../src/core/config/index.ts";

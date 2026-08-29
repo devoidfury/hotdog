@@ -1,14 +1,8 @@
 import { describe, it, expect, beforeEach, afterEach, spyOn } from "bun:test";
 import {
   CliOutputSink,
-  formatCompacting,
-  formatToolCall,
-  formatToolResult,
-  formatTokenUsage,
-  formatThinking,
-  formatTaskProgress,
 } from "../../../src/utils/cli/cli.ts";
-import { OUTPUT_EVENT, OutputEvent } from "../../../src/core/context/output.ts";
+import { OUTPUT_EVENT } from "../../../src/core/context/output.ts";
 import { ColorPalette } from "../../../src/utils/cli/colors.ts";
 
 describe("CliOutputSink", () => {

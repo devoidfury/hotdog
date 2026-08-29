@@ -95,14 +95,6 @@ describe("WebSocketChannel - construction", () => {
 });
 
 describe("WebSocketChannel - write()", () => {
-  let sm: ChannelSessionManager;
-  let ws: Bun.ServerWebSocket;
-
-  beforeEach(() => {
-    sm = createMockSessionManager();
-    ws = createMockWs();
-  });
-
   // Parameterized: each event type maps to the corresponding protocol message
   it.each([
     {

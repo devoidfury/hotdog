@@ -59,49 +59,49 @@ describe("createWebuiServer", () => {
     it("throws when no API key is configured", async () => {
       const core = createMockCore();
       await expect(
-        createWebuiServer(core, { port: 3000 }, "/tmp/ui"),
+        createWebuiServer(core, { port: 3000 }),
       ).rejects.toThrow("No API key configured");
     });
 
     it("throws when apiKey is empty string", async () => {
       const core = createMockCore();
       await expect(
-        createWebuiServer(core, { port: 3000, apiKey: "" }, "/tmp/ui"),
+        createWebuiServer(core, { port: 3000, apiKey: "" }),
       ).rejects.toThrow("No API key configured");
     });
 
     it("throws when apiKey is null", async () => {
       const core = createMockCore();
       await expect(
-        createWebuiServer(core, { port: 3000, apiKey: null }, "/tmp/ui"),
+        createWebuiServer(core, { port: 3000, apiKey: null }),
       ).rejects.toThrow("No API key configured");
     });
 
     it("throws when apiKey is undefined", async () => {
       const core = createMockCore();
       await expect(
-        createWebuiServer(core, { port: 3000, apiKey: undefined }, "/tmp/ui"),
+        createWebuiServer(core, { port: 3000, apiKey: undefined }),
       ).rejects.toThrow("No API key configured");
     });
 
     it("throws when maxAgeSecs is missing from webui config", async () => {
       const core = createMockCore({ webui: {} });
       await expect(
-        createWebuiServer(core, { port: 3000, apiKey: "test-key" }, "/tmp/ui"),
+        createWebuiServer(core, { port: 3000, apiKey: "test-key" }),
       ).rejects.toThrow("missing required webui.maxAgeSecs");
     });
 
     it("throws when maxAgeSecs is 0", async () => {
       const core = createMockCore({ webui: { maxAgeSecs: 0 } });
       await expect(
-        createWebuiServer(core, { port: 3000, apiKey: "test-key" }, "/tmp/ui"),
+        createWebuiServer(core, { port: 3000, apiKey: "test-key" }),
       ).rejects.toThrow("missing required webui.maxAgeSecs");
     });
 
     it("throws when maxAgeSecs is null", async () => {
       const core = createMockCore({ webui: { maxAgeSecs: null } });
       await expect(
-        createWebuiServer(core, { port: 3000, apiKey: "test-key" }, "/tmp/ui"),
+        createWebuiServer(core, { port: 3000, apiKey: "test-key" }),
       ).rejects.toThrow("missing required webui.maxAgeSecs");
     });
   });
@@ -115,7 +115,7 @@ describe("createWebuiServer", () => {
           host: "localhost",
           apiKey: "test-key",
           sessionTokenTtlMin: 60,
-        }, "/tmp/ui");
+        });
       } catch (e: unknown) {
         // Expected to fail at Bun.serve, not at config validation
         const message = (e as Error).message;
@@ -127,7 +127,7 @@ describe("createWebuiServer", () => {
     it("respects custom webui.maxAgeSecs", async () => {
       const core = createMockCore({ webui: { maxAgeSecs: 7200 } });
       try {
-        await createWebuiServer(core, { port: 3000, apiKey: "test-key" }, "/tmp/ui");
+        await createWebuiServer(core, { port: 3000, apiKey: "test-key" });
       } catch (e: unknown) {
         const message = (e as Error).message;
         expect(message).not.toContain("missing required webui.maxAgeSecs");
@@ -169,7 +169,7 @@ describe("createWebuiServer", () => {
       const result = await createWebuiServer(core, {
         port: 0,
         apiKey: "test-key",
-      }, "/tmp/ui");
+      });
       server = result.server;
       wsServer = result.wsServer;
       expect(result.server.hostname).toBe("127.0.0.1");
@@ -182,7 +182,7 @@ describe("createWebuiServer", () => {
           port: 0,
           host: "0.0.0.0",
           apiKey: "test-key",
-        }, "/tmp/ui");
+        });
         server = result.server;
         wsServer = result.wsServer;
         expect(result.server.hostname).toBe("0.0.0.0");
@@ -197,7 +197,7 @@ describe("createWebuiServer", () => {
           port: 0,
           host: "127.0.0.1",
           apiKey: "test-key",
-        }, "/tmp/ui");
+        });
         server = result.server;
         wsServer = result.wsServer;
       });
@@ -228,7 +228,7 @@ describe("createWebuiServer", () => {
         host: "0.0.0.0",
         apiKey: "test-secret",
         sessionTokenTtlMin: 60,
-      }, "/tmp/ui");
+      });
 
       server = result.server;
       wsServer = result.wsServer;
@@ -274,7 +274,7 @@ describe("createWebuiServer", () => {
     });
 
     it("GET /verify with valid token returns { valid: true }", async () => {
-      const result = await startServer();
+      await startServer();
 
       // First get a token
       const loginRes = await fetch(`${baseUrl}/login`, {
@@ -322,7 +322,7 @@ describe("createWebuiServer", () => {
     });
 
     it("WebSocket upgrade succeeds with valid token", async () => {
-      const result = await startServer();
+      await startServer();
 
       // Get a valid token
       const loginRes = await fetch(`${baseUrl}/login`, {
@@ -351,7 +351,7 @@ describe("createWebuiServer", () => {
     });
 
     it("WebSocket message handler forwards messages to wsServer", async () => {
-      const result = await startServer();
+      await startServer();
 
       // Get a valid token
       const loginRes = await fetch(`${baseUrl}/login`, {
@@ -394,7 +394,7 @@ describe("createWebuiServer", () => {
     });
 
     it("WebSocket close handler cleans up connection", async () => {
-      const result = await startServer();
+      await startServer();
 
       // Get a valid token
       const loginRes = await fetch(`${baseUrl}/login`, {

@@ -2,9 +2,6 @@
 // getExtensionConfigDefaults, registerExtensionMetadata, getExtensionsToLoad.
 
 import { describe, it, expect, beforeAll } from "bun:test";
-import {
-  getExtensionsToLoad,
-} from "../../src/core/extensions/extensions.ts";
 
 describe("discoverExtensionsInDir", async () => {
   let discoverExtensionsInDir: typeof import("../../src/core/extensions/extensions.ts").discoverExtensionsInDir;

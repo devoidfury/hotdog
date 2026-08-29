@@ -3,7 +3,7 @@
 import { describe, it, expect, beforeAll, afterAll, afterEach } from "bun:test";
 import { ToolRegistry, type Tool } from "../../src/core/extensions/tool-registry.ts";
 import { Agent } from "../../src/core/agent.ts";
-import { HookSystem, HOOKS } from "../../src/core/hooks.ts";
+import { HookSystem } from "../../src/core/hooks.ts";
 import { createToolRegistry } from "../../src/core/extensions/tool-registry.ts";
 import { initializeLogger, resetLoggerForTesting } from "../../src/core/logger.ts";
 

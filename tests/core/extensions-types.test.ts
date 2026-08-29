@@ -25,7 +25,7 @@ describe("getExtensionConfig", () => {
     const core = {
       config: { myExtension: { value: 42 } },
       configRegistry: {
-        validateConfigByKey: (key: string, value: unknown) => {
+        validateConfigByKey: (key: string, _value: unknown) => {
           calledWithKey = key;
           return { valid: true, errors: [] };
         },

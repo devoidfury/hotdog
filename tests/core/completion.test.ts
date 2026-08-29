@@ -4,7 +4,6 @@ import {
   CompletionService,
   createCompletionService,
   type CompletionContext,
-  type CompletionOption,
   type CompletionMatcher,
   type CompletionHandler,
 } from "../../src/core/completion.ts";

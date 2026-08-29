@@ -2,10 +2,9 @@
 
 import { describe, it, expect } from 'bun:test';
 import path from 'node:path';
-import { ToolExecutor, createToolExecutor, type ToolExecutorDeps } from '../../src/core/tool-executor.ts';
+import { createToolExecutor, type ToolExecutorDeps } from '../../src/core/tool-executor.ts';
 import type { Workspace } from '../../src/utils/workspace.ts';
 import { tmpDir, cleanupDir } from '../mocks/io.ts';
-import type { ToolCall } from '../../src/core/context/message.ts';
 import { createToolRegistry } from '../../src/core/extensions/tool-registry.ts';
 import { createHooks } from '../../src/core/hooks.ts';
 import { Message } from '../../src/core/context/message.ts';
@@ -347,10 +346,10 @@ describe('ToolExecutor', () => {
       const deps = createMockDeps();
       const hookCalls: string[] = [];
 
-      deps.hooks.on('tool:beforeExecute', (data: unknown) => {
+      deps.hooks.on('tool:beforeExecute', () => {
         hookCalls.push('before');
       });
-      deps.hooks.on('tool:afterExecute', (data: unknown) => {
+      deps.hooks.on('tool:afterExecute', () => {
         hookCalls.push('after');
       });
 

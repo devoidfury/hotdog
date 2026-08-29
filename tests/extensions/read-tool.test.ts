@@ -1,9 +1,7 @@
 import { describe, it, expect, beforeAll, afterAll } from 'bun:test';
 import fsSync from 'node:fs';
 import path from 'node:path';
-import os from 'node:os';
 import { ReadTool } from '../../src/extensions/core-tools/read.ts';
-import { ToolContext } from '../../src/core/extensions/tool-context.ts';
 import { resultStr, tmpDir, toolCtx, cleanupDir } from '../helpers.ts';
 
 let dir: string;

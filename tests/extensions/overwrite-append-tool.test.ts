@@ -4,7 +4,6 @@ import path from 'node:path';
 import fsPromises from 'node:fs/promises';
 import { OverwriteTool } from '../../src/extensions/core-tools/overwrite.ts';
 import { AppendTool } from '../../src/extensions/core-tools/append.ts';
-import { ToolContext } from '../../src/core/extensions/tool-context.ts';
 import { resultStr, tmpDir, toolCtx, cleanupDir } from '../helpers.ts';
 
 let dir: string;

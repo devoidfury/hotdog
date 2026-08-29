@@ -30,7 +30,7 @@ function makeMockAgent(overrides: Record<string, unknown> = {}): Record<string, 
   return {
     cancelled: false,
     clearContext: mock(async () => {}),
-    enqueue: mock((text: string) => {}),
+    enqueue: mock(() => {}),
     hideTools: false,
     hideThinking: false,
     context: {
@@ -44,7 +44,7 @@ function makeMockAgent(overrides: Record<string, unknown> = {}): Record<string, 
     },
     reasoningEffort: undefined,
     ensureSystemPrompt: mock(async () => {}),
-    emitOutput: mock((type: string, data: Record<string, unknown>) => {}),
+    emitOutput: mock(() => {}),
     ...overrides,
   };
 }

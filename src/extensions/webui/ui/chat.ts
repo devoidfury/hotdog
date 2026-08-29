@@ -348,7 +348,7 @@ export function createChat({
 
   // Clone the select on each profiles change so stale listeners are dropped.
   effect(() => {
-    const profiles = profilesAtom();
+    profilesAtom(); // read for the subscription: re-runs this effect when profiles change
     const select = document.getElementById("profile-select") as HTMLSelectElement | null;
     if (!select) return;
 

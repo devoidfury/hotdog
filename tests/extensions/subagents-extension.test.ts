@@ -9,7 +9,6 @@ import {
 import { HOOKS } from "../../src/core/hooks.ts";
 import { createMockCore } from "../mocks/fixtures.ts";
 import { createFixture, MockLLMClient, buildStreamResponse } from "../helpers.ts";
-import { DelegateTaskTool } from "../../src/extensions/subagents/subagents.ts";
 
 // ── Helpers ────────────────────────────────────────────────────────────────
 

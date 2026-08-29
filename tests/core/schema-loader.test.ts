@@ -19,7 +19,7 @@ describe("buildConfigSchema", () => {
     const schemaKeys = Object.keys(schema).sort();
     const configKeys = Object.keys(CONFIG_SCHEMA).sort();
     expect(schemaKeys).toEqual(configKeys);
-    for (const [key, value] of Object.entries(schema)) {
+    for (const [, value] of Object.entries(schema)) {
       expect(Array.isArray(value.layers)).toBe(true);
       expect(value.type).toBeDefined();
     }

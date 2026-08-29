@@ -110,7 +110,7 @@ describe('MessageBus interrupt integration', () => {
         }
       },
       resetCancel() { this._cancelled = false; },
-      async run(text: string) {
+      async run(_text: string) {
         await new Promise((r) => { resolveRun = r; });
         if (this._cancelled) throw LlmError.Cancelled('Agent cancelled');
         return 'done';
@@ -166,7 +166,7 @@ describe('MessageBus interrupt integration', () => {
       _cancelled: false,
       cancel() { this._cancelled = true; },
       resetCancel() { this._cancelled = false; },
-      async run(text: string) { throw new Error('Real error'); },
+      async run(_text: string) { throw new Error('Real error'); },
       get cancelled() { return this._cancelled; },
       get sessionName() { return 'test'; },
       get taskManager() { return null; },

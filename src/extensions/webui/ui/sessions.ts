@@ -29,7 +29,6 @@ interface SessionsConfig {
   /** Optional callback wired to the cancel button on working sessions */
   onCancel?: (sessionId: string) => void;
   /** Callback for listing cold session logs */
-  onListLogs?: () => void;
   /** Callback for continuing a cold session log in a new session */
   onContinueLog?: (logId: string) => void;
   /** Callback for viewing a cold session log (read-only, no active session) */
@@ -55,7 +54,6 @@ export function initSessions({
   onDelete,
   onRename,
   onCancel,
-  onListLogs,
   onContinueLog,
   onViewLog,
   onDeleteLog,

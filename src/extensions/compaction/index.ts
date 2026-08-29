@@ -96,7 +96,7 @@ export function create(core: CoreContext): ExtensionInstance | null {
     const model = agent.model;
     const modelConfig = getModelConfig(agent.modelRegistry, model);
 
-    const llmChat = async (chatMessages: Array<{ role: string; content: string }>, chatModel: string): Promise<string> => {
+    const llmChat = async (chatMessages: Array<{ role: string; content: string }>, _chatModel: string): Promise<string> => {
       const abortController = new AbortController();
 
       // Wire to task-agent abort signal if present. The listener is removed

@@ -40,7 +40,7 @@ const mdTableFormat: import("../../src/core/extensions/tool-format.ts").ToolForm
 const partsFormat: import("../../src/core/extensions/tool-format.ts").ToolFormat = {
   id: "parts",
   markers: [],
-  formatResult(result, toolName, meta) {
+  formatResult(result, toolName, _meta) {
     const payload = typeof result === "string" ? result : JSON.stringify(result);
     return [
       { type: "text", text: `[${toolName}]` },

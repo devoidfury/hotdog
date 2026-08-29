@@ -2,7 +2,6 @@ import { describe, it, expect } from "bun:test";
 import { create as createLoopExtension } from "../../src/extensions/loop/index.ts";
 import { HookSystem, HOOKS } from "../../src/core/hooks.ts";
 import { createCommandRegistry } from "../../src/core/extensions/registries.ts";
-import { OUTPUT_EVENT } from "../../src/core/context/output.ts";
 import { ACTIONS } from "../../src/core/commands.ts";
 import type { Agent } from "../../src/core/agent.ts";
 

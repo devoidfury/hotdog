@@ -82,7 +82,7 @@ export class BashTool {
     return defaultCallDisplay(input, (args: Record<string, unknown>) => `bash: ${args.command as string}`);
   }
 
-  async execute(input: string | Record<string, unknown> | null, ctx: ToolContext): Promise<ToolResult> {
+  async execute(input: string | Record<string, unknown> | null, _ctx: ToolContext): Promise<ToolResult> {
     const args = parseToolInput(input);
     if (!args) {
       return ToolResult.err("Error parsing arguments");

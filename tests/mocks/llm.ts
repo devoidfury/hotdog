@@ -1,7 +1,6 @@
 // Mock LLM client for testing.
 // Produces programmable streams of events.
 
-import type { LlmClient } from '../../src/core/llm-client/client.ts';
 import { createToolFormatRegistry, type ToolFormatRegistry } from '../../src/core/extensions/tool-format.ts';
 import { xmlToolFormat } from '../../src/core/extensions/tool-format-xml.ts';
 
@@ -106,7 +105,6 @@ export class MockLLMClient {
     modelConfig: Record<string, unknown>,
     toolDefs: Record<string, unknown>[],
     cancelSignal: AbortSignal | null | undefined,
-    sessionId?: string,
   ): AsyncGenerator<Record<string, unknown>, void, unknown> | (() => AsyncGenerator<Record<string, unknown>, void, unknown>) {
     this.callCount++;
     this.lastMessages = messages;

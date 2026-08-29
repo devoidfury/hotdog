@@ -3,7 +3,7 @@ import { HOOKS } from "../../src/core/hooks.ts";
 import { mkdirSync, rmSync, readdirSync, utimesSync } from "node:fs";
 import { join } from "node:path";
 import { createMockCore } from "../helpers.ts";
-import { captureConsole, withSilentConsole } from "../test-helpers.ts";
+import { captureConsole } from "../test-helpers.ts";
 import type { CoreContext } from "../../src/core/extensions/types.ts";
 
 import { TestSessionLog } from "../mocks/io.ts";

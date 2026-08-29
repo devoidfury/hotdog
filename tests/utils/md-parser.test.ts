@@ -9,7 +9,7 @@ import {
   type MdHeading,
   type MdList,
 } from "../../src/utils/md-parser.ts";
-import type { MdBlock, MdInline, MdDocument, MdBold, MdItalic, MdText } from "../../src/utils/md-parser.ts";
+import type { MdBlock, MdInline, MdBold, MdItalic } from "../../src/utils/md-parser.ts";
 
 describe("parseMarkdown", () => {
   // ── Edge cases ────────────────────────────────────────────────────
@@ -1027,7 +1027,6 @@ Third paragraph.`;
   it("handles codeblock fence characters arriving one at a time", () => {
     // Feed ``` one character at a time to ensure the parser handles
     // the triple-backtick detection correctly during streaming
-    const md = "```python\nprint('hi')\n```";
 
     const parser = createStreamingParser();
 
@@ -1198,8 +1197,6 @@ ___
   });
 
   it("handles empty chunks gracefully during streaming", () => {
-    const md = "# Hello\n\nWorld";
-
     const parser = createStreamingParser();
 
     parser.feed("# ");

@@ -62,9 +62,9 @@ describe("TaskManager", () => {
 
   describe("spawnTask", () => {
     it("creates a task handle", async () => {
-      const buildAgent = async (config: Record<string, unknown>) => ({
+      const buildAgent = async (_config: Record<string, unknown>) => ({
         context: [],
-        run: async (input: string) => "Task result",
+        run: async () => "Task result",
         notifyCompletion: () => {},
       } as any);
 

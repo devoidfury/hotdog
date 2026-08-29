@@ -10,7 +10,6 @@ import {
   resolveAll,
   resolveExtensionConfig,
   buildConfigSchema,
-  CONFIG_SCHEMA,
 } from "../../src/core/config/schema-loader.ts";
 
 describe("resolveCast", () => {

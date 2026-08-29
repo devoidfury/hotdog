@@ -375,7 +375,7 @@ test("readSessionEntries returns [] for traversal ids", async () => {
 });
 
 test("deleteSessionLog rejects traversal ids and does not touch files outside sessions dir", async () => {
-  const { deleteSessionLog, sessionsDir } = await import("../../src/core/session/session-log.ts");
+  const { deleteSessionLog } = await import("../../src/core/session/session-log.ts");
 
   // Create a sentinel file outside the sessions dir that a traversal id would hit
   const sentinelDir = join(import.meta.dir, "..", ".test-sessions-outside");

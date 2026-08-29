@@ -190,9 +190,6 @@ describe("SERVICES_REGISTER hook integration", () => {
     // synchronously during load, the service is available in core.services
     // by the time extension B's create() runs.
     let consumedService: { start: () => string } | null = null;
-    const extB = {
-      hooks: {},
-    };
 
     // Load A first
     await loader.load("ext-a", extA);

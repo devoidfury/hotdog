@@ -5,7 +5,6 @@ import { create } from "../../src/extensions/skills/index.ts";
 import { SkillsLoader, patternMatches } from "../../src/extensions/skills/loader.ts";
 import { HOOKS } from "../../src/core/hooks.ts";
 import { ACTIONS } from "../../src/core/commands.ts";
-import { ExtensionInstance } from "../../src/core/extensions/types.ts";
 import { createCompletionService } from "../../src/core/completion.ts";
 import fs from "node:fs/promises";
 import { join } from "node:path";
@@ -774,7 +773,7 @@ Content.
     const ext = (await create(core)) as any;
 
     const registry: any = {
-      register: mock((name: string, opts: any) => { registry.registeredCmd = opts; }),
+      register: mock((_name: string, opts: any) => { registry.registeredCmd = opts; }),
       registeredCmd: null,
     };
     await ext.hooks![HOOKS.COMMANDS_REGISTER]({ registry, agent: {} });
@@ -797,7 +796,7 @@ Content.
     const ext = (await create(core)) as any;
 
     const registry: any = {
-      register: mock((name: string, opts: any) => { registry.registeredCmd = opts; }),
+      register: mock((_name: string, opts: any) => { registry.registeredCmd = opts; }),
       registeredCmd: null,
     };
     await ext.hooks![HOOKS.COMMANDS_REGISTER]({ registry, agent: {} });

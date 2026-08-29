@@ -6,10 +6,13 @@ import {
   getExtensionConfig,
 } from "../../core/extensions/types.ts";
 
-import webuiFrontend from "./ui/index.html";
 import { ExtensionError } from "../../core/error.ts";
 import { ProfileManager, type ProfileDef } from "../../core/config/index.ts";
 import { BunRequest } from "bun";
+
+// special bun import that transpiles and serves all linked assets,
+// see https://bun.com/docs/bundler/loaders.md
+import webuiFrontend from "./ui/index.html";
 
 interface WebuiWsData {
   token: string;

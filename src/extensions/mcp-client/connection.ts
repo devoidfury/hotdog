@@ -1,5 +1,6 @@
 import { McpClient, McpError } from "./client.ts";
 import { contentBlocksToString } from "./types.ts";
+import { DEFAULT_HTTP_TIMEOUT_MS } from "./transports.ts";
 
 /** Shared client handle for use by McpTool instances. */
 export class McpConnectionHandle {
@@ -36,8 +37,13 @@ export class McpConnection {
     return conn;
   }
 
-  static async connectHttp(serverName: string, url: string, headers: Record<string, string> = {}): Promise<McpConnection> {
-    const client = await McpClient.forHttp(url, headers);
+  static async connectHttp(
+    serverName: string,
+    url: string,
+    headers: Record<string, string> = {},
+    timeoutMs = DEFAULT_HTTP_TIMEOUT_MS,
+  ): Promise<McpConnection> {
+    const client = await McpClient.forHttp(url, headers, timeoutMs);
     const conn = new McpConnection(client, serverName);
     await conn._initialize();
     return conn;

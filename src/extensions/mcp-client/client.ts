@@ -7,7 +7,7 @@ import {
   mcpToolCallRequest,
   mcpInitializeRequest,
 } from "./types.ts";
-import { McpTransport, StdioTransport, HttpTransport } from "./transports.ts";
+import { McpTransport, StdioTransport, HttpTransport, DEFAULT_HTTP_TIMEOUT_MS } from "./transports.ts";
 import { ExtensionError } from "@core/error.ts";
 
 export class McpError extends ExtensionError {
@@ -90,8 +90,12 @@ export class McpClient {
     return new McpClient(transport);
   }
 
-  static async forHttp(url: string, headers: Record<string, string> = {}): Promise<McpClient> {
-    const transport = new HttpTransport(url, headers);
+  static async forHttp(
+    url: string,
+    headers: Record<string, string> = {},
+    timeoutMs = DEFAULT_HTTP_TIMEOUT_MS,
+  ): Promise<McpClient> {
+    const transport = new HttpTransport(url, headers, timeoutMs);
     return new McpClient(transport);
   }
 

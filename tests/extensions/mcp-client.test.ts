@@ -5,7 +5,7 @@
 import { describe, it, expect } from "bun:test";
 import { McpClient, McpError } from "../../src/extensions/mcp-client/client.ts";
 import { McpConnection } from "../../src/extensions/mcp-client/connection.ts";
-import { HttpTransport } from "../../src/extensions/mcp-client/transports.ts";
+import { HttpTransport, MAX_TRANSPORT_BUFFER_CHARS } from "../../src/extensions/mcp-client/transports.ts";
 import { withMockFetch, jsonResponse, textResponse } from "../helpers.ts";
 
 // ── McpError ────────────────────────────────────────────────────────────────
@@ -124,6 +124,64 @@ describe("HttpTransport", () => {
     await transport.destroy();
     await expect(transport.destroy()).resolves.toBeUndefined();
   });
+});
+
+// ── HttpTransport: timeout and body cap ─────────────────────────────────────
+
+describe("HttpTransport — timeout and body cap", () => {
+  it("defaults to a 30s timeout when not given", () => {
+    const transport = new HttpTransport("http://localhost:3000/mcp");
+    expect(transport.timeoutMs).toBe(30_000);
+  });
+
+  it("keeps a custom timeout from construction", () => {
+    const transport = new HttpTransport("http://localhost:3000/mcp", {}, 5000);
+    expect(transport.timeoutMs).toBe(5000);
+  });
+
+  it("forHttp threads the timeout into the transport", async () => {
+    const client = await McpClient.forHttp("http://localhost:3000/mcp", {}, 4500);
+    try {
+      expect((client.transport as HttpTransport).timeoutMs).toBe(4500);
+    } finally {
+      await client.shutdown();
+    }
+  });
+
+  it("rejects with a timeout McpError when the request times out", async () =>
+    withMockFetch(async () => {
+      throw new DOMException("The operation was aborted due to timeout", "TimeoutError");
+    }, async () => {
+      const transport = new HttpTransport("http://localhost:3000/mcp", {}, 250);
+      const err = await transport.send("{}").catch((e: unknown) => e);
+      expect(err).toBeInstanceOf(McpError);
+      expect((err as Error).message).toBe("MCP HTTP request to http://localhost:3000/mcp timed out after 250ms");
+    }));
+
+  it("wraps network failures in McpError", async () =>
+    withMockFetch(async () => {
+      throw new Error("ECONNREFUSED");
+    }, async () => {
+      const transport = new HttpTransport("http://localhost:3000/mcp");
+      const err = await transport.send("{}").catch((e: unknown) => e);
+      expect(err).toBeInstanceOf(McpError);
+      expect((err as Error).message).toBe("MCP HTTP request to http://localhost:3000/mcp failed: ECONNREFUSED");
+    }));
+
+  it("refuses to parse a body truncated at the buffer cap", async () =>
+    withMockFetch(async () => textResponse("x".repeat(MAX_TRANSPORT_BUFFER_CHARS + 10), 200, "application/json"), async () => {
+      const transport = new HttpTransport("http://localhost:3000/mcp");
+      await expect(transport.send("{}")).rejects.toThrow("refusing to parse a truncated body");
+    }));
+
+  it("caps oversized error bodies and notes the truncation", async () =>
+    withMockFetch(async () => textResponse("x".repeat(MAX_TRANSPORT_BUFFER_CHARS + 10), 500), async () => {
+      const transport = new HttpTransport("http://localhost:3000/mcp");
+      const err = await transport.send("{}").catch((e: unknown) => e);
+      expect(err).toBeInstanceOf(McpError);
+      expect((err as Error).message).toContain("MCP HTTP error (500):");
+      expect((err as Error).message).toContain("[truncated]");
+    }));
 });
 
 // ── McpConnection HTTP mode ─────────────────────────────────────────────────

@@ -3,7 +3,7 @@ import { logger } from "@core/logger.ts";
 import { formatError } from "@core/error.ts";
 import { copyScrubbedEnv } from "@utils/env.ts";
 import { OWN_PROCESS_GROUP, killProcessGroup } from "@utils/process-group.ts";
-import { hotdogFetch } from "@utils/fetch.ts";
+import { hotdogFetch, readCappedBody } from "@utils/fetch.ts";
 import { McpError } from "./client.ts";
 
 export type TransportMessageHandler = (line: string) => void;
@@ -14,7 +14,7 @@ export type TransportMessageHandler = (line: string) => void;
  * MCP server (chatty stderr, or a single never-newlined stdio line) must
  * not be able to exhaust memory. Matches the fetch tool's response cap.
  */
-const MAX_TRANSPORT_BUFFER_CHARS = 2_000_000;
+export const MAX_TRANSPORT_BUFFER_CHARS = 2_000_000;
 
 export type TransportCloseHandler = () => void;
 
@@ -225,17 +225,26 @@ export class StdioTransport implements McpTransport {
   }
 }
 
+/**
+ * Default per-request timeout for HTTP transports (ms), used when a caller
+ * constructs one directly. Extension sessions pass the resolved
+ * `mcpClient.httpTimeoutSecs` config value instead.
+ */
+export const DEFAULT_HTTP_TIMEOUT_MS = 30_000;
+
 export class HttpTransport implements McpTransport {
   readonly isStreaming = false;
 
   readonly #url: string;
   readonly #headers: Record<string, string>;
+  readonly #timeoutMs: number;
   #closeHandlers: TransportCloseHandler[] = [];
   #destroyed: boolean = false;
 
-  constructor(url: string, headers: Record<string, string> = {}) {
+  constructor(url: string, headers: Record<string, string> = {}, timeoutMs = DEFAULT_HTTP_TIMEOUT_MS) {
     this.#url = url;
     this.#headers = headers;
+    this.#timeoutMs = timeoutMs;
   }
 
   /** @internal Exposed for testing. */
@@ -243,6 +252,9 @@ export class HttpTransport implements McpTransport {
 
   /** @internal Exposed for testing. */
   get headers(): Record<string, string> { return this.#headers; }
+
+  /** @internal Exposed for testing. */
+  get timeoutMs(): number { return this.#timeoutMs; }
 
   async send(serialized: string): Promise<unknown> {
     if (this.#destroyed) {
@@ -255,19 +267,55 @@ export class HttpTransport implements McpTransport {
       ...this.#headers,
     };
 
-    const response = await hotdogFetch(this.#url, {
-      method: "POST",
-      headers,
-      body: serialized,
-    });
-
-    if (!response.ok) {
-      const body = await response.text();
-      throw new McpError(`MCP HTTP error (${response.status}): ${body}`);
+    let response: Response;
+    try {
+      // Per-request timeout (config: mcpClient.httpTimeoutSecs). A wedged
+      // MCP server must not hang the tool call forever: the tool executor
+      // has no independent tool timeout, and agent.cancel() does not reach
+      // MCP tool execution.
+      response = await hotdogFetch(
+        this.#url,
+        { method: "POST", headers, body: serialized },
+        this.#timeoutMs,
+      );
+    } catch (e: unknown) {
+      if (HttpTransport.isTimeoutError(e)) {
+        throw new McpError(`MCP HTTP request to ${this.#url} timed out after ${this.#timeoutMs}ms`);
+      }
+      throw new McpError(`MCP HTTP request to ${this.#url} failed: ${e instanceof Error ? e.message : String(e)}`);
     }
 
-    const body = await response.text();
+    if (!response.ok) {
+      const { text: body, truncated } = await this.#readBody(response, "error response");
+      throw new McpError(`MCP HTTP error (${response.status}): ${body}${truncated ? " [truncated]" : ""}`);
+    }
+
+    const { text: body, truncated } = await this.#readBody(response, "response");
+    if (truncated) {
+      // A cut-off JSON/SSE body can parse as a different, valid value --
+      // fail instead (mirrors the stdio oversized-line handling).
+      throw new McpError(
+        `MCP HTTP response from ${this.#url} exceeds ${MAX_TRANSPORT_BUFFER_CHARS} chars; refusing to parse a truncated body`,
+      );
+    }
     return this.#parseResponse(body);
+  }
+
+  /** Read a response body with the shared hard cap (memory safety). */
+  async #readBody(response: Response, kind: string): Promise<{ text: string; truncated: boolean }> {
+    try {
+      return await readCappedBody(response, MAX_TRANSPORT_BUFFER_CHARS);
+    } catch (e: unknown) {
+      if (HttpTransport.isTimeoutError(e)) {
+        throw new McpError(`MCP HTTP ${kind} from ${this.#url} timed out after ${this.#timeoutMs}ms`);
+      }
+      throw new McpError(`MCP HTTP ${kind} read failed: ${e instanceof Error ? e.message : String(e)}`);
+    }
+  }
+
+  /** Bun rejects an aborted fetch with the aborting signal's reason. */
+  static isTimeoutError(e: unknown): boolean {
+    return e instanceof Error && (e.name === "TimeoutError" || e.name === "AbortError");
   }
 
   onMessage(_handler: TransportMessageHandler): () => void {

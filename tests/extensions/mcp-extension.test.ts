@@ -9,7 +9,7 @@ import type { McpConnection, McpConnectionHandle } from "../../src/extensions/mc
 
 /** Create a mock McpConnection class for testing. */
 function createMockConnectionClass(config: {
-  connectHttp?: (name: string, url: string, headers: Record<string, string>) => Promise<McpConnection> | never;
+  connectHttp?: (name: string, url: string, headers: Record<string, string>, timeoutMs?: number) => Promise<McpConnection> | never;
   connectStdio?: (name: string, command: string, args: string[], env: Record<string, string>) => Promise<McpConnection> | never;
 }): typeof McpConnection {
   class MockMcpConnection {
@@ -20,8 +20,9 @@ function createMockConnectionClass(config: {
       serverName: string,
       url: string,
       headers: Record<string, string> = {},
+      timeoutMs?: number,
     ): Promise<McpConnection> {
-      if (config.connectHttp) return config.connectHttp(serverName, url, headers);
+      if (config.connectHttp) return config.connectHttp(serverName, url, headers, timeoutMs);
       throw new Error("connectHttp not mocked");
     }
 
@@ -135,7 +136,7 @@ describe("MCP extension", () => {
     const ext = create(core, MockConnection);
     const registeredTools: Array<{ name: string }> = [];
     const mockRegistry = {
-      register: (name: string, tool: unknown) => {
+      register: (name: string, _tool: unknown) => {
         registeredTools.push({ name });
       },
     };
@@ -335,5 +336,43 @@ describe("MCP extension — branch coverage", () => {
     await ext.hooks![HOOKS.TOOLS_REGISTER]!({ register: () => {}, getAll: () => [] } as never);
     // A failing connection shutdown must not break ext.shutdown()
     await expect(ext.shutdown!()).resolves.toBeUndefined();
+  });
+});
+
+// ── HTTP timeout config (mcpClient.httpTimeoutSecs) ─────────────────────────
+
+describe("MCP extension — HTTP timeout config", () => {
+  /** Connect one HTTP server with the given config; return the timeoutMs the transport saw. */
+  async function connectTimeoutMs(config: Record<string, unknown>): Promise<number | undefined> {
+    const mockConnection = createMockConnection({ tools: [] });
+    let seenTimeout: number | undefined;
+    const MockConnection = createMockConnectionClass({
+      connectHttp: async (_n: string, _u: string, _h: Record<string, string>, timeoutMs?: number) => {
+        seenTimeout = timeoutMs;
+        return mockConnection;
+      },
+    });
+    const core = { config, hooks: { on: () => {}, notifyHooks: () => {} } } as any;
+    const ext = create(core, MockConnection);
+    await (ext!.hooks![HOOKS.TOOLS_REGISTER]! as Function)({ register: () => {} });
+    await ext!.shutdown!();
+    return seenTimeout;
+  }
+
+  const baseConfig = { mcpServers: [{ name: "test", url: "http://localhost/mcp" }] };
+
+  it("passes mcpClient.httpTimeoutSecs to connectHttp in ms", async () => {
+    expect(await connectTimeoutMs({ ...baseConfig, mcpClient: { httpTimeoutSecs: 45 } })).toBe(45_000);
+  });
+
+  it("falls back to the 30s default when mcpClient config is absent", async () => {
+    expect(await connectTimeoutMs(baseConfig)).toBe(30_000);
+  });
+
+  it("falls back to the default for invalid values (never 'no timeout')", async () => {
+    for (const bad of [0, -5, NaN, "fast"]) {
+      const seen = await connectTimeoutMs({ ...baseConfig, mcpClient: { httpTimeoutSecs: bad } });
+      expect(seen, `httpTimeoutSecs=${String(bad)}`).toBe(30_000);
+    }
   });
 });

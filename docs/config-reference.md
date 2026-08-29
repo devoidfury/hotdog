@@ -913,6 +913,22 @@ Extensions register their own configuration namespaces. Each extension's config 
 }
 ```
 
+### `mcpClient`
+
+[MCP Client](../src/extensions/mcp-client) — MCP client settings.
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `httpTimeoutSecs` | `number` | `30` | Timeout in seconds for MCP HTTP requests (connect, headers, and body). Prevents a wedged HTTP server from hanging a tool call indefinitely. Invalid or missing values fall back to the default (never "no timeout"). |
+
+```json
+{
+  "mcpClient": {
+    "httpTimeoutSecs": 60
+  }
+}
+```
+
 ### `mcpServers`
 
 [MCP Client](../src/extensions/mcp-client) — Model Context Protocol servers.

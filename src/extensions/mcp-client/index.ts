@@ -3,7 +3,7 @@ import { logger } from "@core/logger.ts";
 import { formatError } from "@core/error.ts";
 import { McpConnection } from "./connection.ts";
 import { McpTool } from "./tools.ts";
-import { type CoreContext, type ExtensionInstance } from "@core/extensions/types.ts";
+import { type CoreContext, type ExtensionInstance, getExtensionConfig } from "@core/extensions/types.ts";
 
 interface McpServerConfig {
   name: string;
@@ -16,6 +16,20 @@ interface McpServerConfig {
   blacklistTools?: string[];
 }
 
+/** Fallback when config is absent or malformed (the schema default is 30). */
+const DEFAULT_HTTP_TIMEOUT_SECS = 30;
+
+/**
+ * Sanitize the config-supplied timeout: a missing or non-positive value
+ * must mean "use the default", never "no timeout" (an unbounded timeout is
+ * exactly the hang this setting exists to prevent).
+ */
+function resolveHttpTimeoutSecs(value: unknown): number {
+  return typeof value === "number" && Number.isFinite(value) && value > 0
+    ? value
+    : DEFAULT_HTTP_TIMEOUT_SECS;
+}
+
 /** @param Connection - Optional McpConnection class override for testing. */
 export function create(core: CoreContext, Connection = McpConnection): ExtensionInstance | null {
   // mcpServers is an array, not an object — read it directly from core.config
@@ -26,6 +40,9 @@ export function create(core: CoreContext, Connection = McpConnection): Extension
     return null;
   }
 
+  const clientConfig = getExtensionConfig<{ httpTimeoutSecs?: number }>(core, "mcpClient");
+  const httpTimeoutMs = Math.round(resolveHttpTimeoutSecs(clientConfig.httpTimeoutSecs) * 1000);
+
   const connections: McpConnection[] = [];
 
   return {
@@ -33,7 +50,7 @@ export function create(core: CoreContext, Connection = McpConnection): Extension
       [HOOKS.TOOLS_REGISTER]: async (registry) => {
         for (const server of enabledServers) {
           try {
-            const conn = await _connectServer(server, Connection);
+            const conn = await _connectServer(server, Connection, httpTimeoutMs);
             if (!conn) continue;
             connections.push(conn);
 
@@ -71,10 +88,11 @@ export function create(core: CoreContext, Connection = McpConnection): Extension
 async function _connectServer(
   server: McpServerConfig,
   Connection: typeof McpConnection,
+  httpTimeoutMs: number,
 ): Promise<McpConnection | null> {
   try {
     if (server.url) {
-      return await Connection.connectHttp(server.name, server.url, server.headers || {});
+      return await Connection.connectHttp(server.name, server.url, server.headers || {}, httpTimeoutMs);
     } else if (server.command) {
       return await Connection.connectStdio(server.name, server.command, server.args || [], server.env || {});
     }

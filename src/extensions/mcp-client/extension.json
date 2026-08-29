@@ -4,6 +4,21 @@
   "loadOrder": 10,
   "description": "Model Context Protocol client — connects to MCP servers and exposes their tools",
   "configSchema": {
+    "mcpClient": {
+      "type": "object",
+      "properties": {
+        "httpTimeoutSecs": {
+          "type": "number",
+          "default": 30,
+          "description": "Timeout in seconds for MCP HTTP requests (connect, headers, and body). Prevents a wedged HTTP server from hanging a tool call indefinitely."
+        }
+      },
+      "additionalProperties": false,
+      "layers": [
+        { "source": "config", "key": "mcpClient" },
+        { "default": {} }
+      ]
+    },
     "mcpServers": {
       "type": "array",
       "default": [],

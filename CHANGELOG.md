@@ -2,16 +2,49 @@
 
 ## Unreleased
 
+**Full Changelog**: https://github.com/devoidfury/hotdog/compare/v0.7.0...main
+
+## [v0.7.0] - 2026-08-29
+
+- requirements
+  - minimum bun version bumped to 1.2
+
 - [BRK] the placeholder `qwen3.5-0.8b` default model is gone -- when nothing in the model resolution chain (CLI `--model`, profile, env, config `default_model`, provider models) supplies a model, agent creation now fails with a `No model configured` configuration error instead of silently using a bogus model; model-free subcommands (`profiles`, `sessions`, `info`, `show-prompt`) keep working with an incomplete config
   - fix - the `HOTDOG_MODEL`/`AI_MODEL` env layers of the `defaultModel` schema were dead for the final resolved model (only the raw config value reached `resolveModel`); they are honored now
 
 - llm-client
   - `chatStreamCancellable` now cancels the response body when the consumer abandons the stream (cancellation or early return), so the connection is released instead of lingering
+  - fix - streaming no longer sees stale provider state: SSE parsing now receives the provider-resolved `baseUrl`/`apiKey`/session id instead of the raw client-level fallbacks, so protocols that read those values while streaming work with per-provider settings
+  - `maxRetries: 0` now means exactly one attempt with no retries, instead of falling back to the configured default
 
 - config
   - the previously hardcoded fallback context window is now the `contextLimit` core config key (default `128000`) -- it feeds the model registry fallback, the agent, and compaction, so small-context local models can lower the base limit from `defaults.json`; compaction can override it per-extension via `compaction.contextLimit`
+  - **behavior change** -- `extensionAutoload` now defaults to `true` (was `false`); extensions on disk are loaded without being listed explicitly. Set `extensionAutoload: false` to restore the previous opt-in behavior
+  - removed dead config keys that were never read: `defaultAiUrl`, `systemPromptDefaultTemplate`, `embeddingsTimeout` / `embeddingsTimeoutSecs`
 
-**Full Changelog**: https://github.com/devoidfury/hotdog/compare/v0.6.0...main
+- workspace
+  - `.git` is now in the default deny list; workspace files inside `.git` are no longer reachable by file tools
+  - fix - deny-list entries could be bypassed through symlinks that resolve outside the listed path; the resolved target is now checked as well
+
+- mcp-client
+  - new `mcpClient.httpTimeoutSecs` config (default `30`) -- bounds HTTP transport requests (connect, headers, body) so a wedged MCP HTTP server can't hang a tool call indefinitely; invalid values fall back to the default, never to "no timeout"
+  - per-stream in-memory accumulation is now capped (2M chars) for stdio and HTTP transports; a chatty or hostile server can no longer exhaust memory, and truncated oversized lines are drained (not dispatched) to keep framing aligned
+
+- fetch tool
+  - default `maxBodyLength` raised from `8000` to `20000`
+
+- file-attachment
+  - fails closed (attachment rejected) when a workspace boundary check throws, instead of propagating the error
+
+- internals
+  - the tool-call hook pipeline now fails the call with an error when a hook errors, instead of swallowing the error and continuing
+  - tool defs are resolved once per batch of parallel tool calls, not once per call (faster multi-tool turns)
+
+- performance
+  - read tool - fewer redundant disk reads for the same functionality
+  - grep tool - the native fallback binary detection no longer reads whole file into memory
+
+**Full Changelog**: https://github.com/devoidfury/hotdog/compare/v0.6.0...v0.7.0
 
 ## [v0.6.0] - 2026-08-27
 

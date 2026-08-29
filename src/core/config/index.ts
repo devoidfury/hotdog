@@ -415,10 +415,13 @@ export async function buildAgentConfig(options: {
   };
   const resolved = resolveAll(CONFIG_SCHEMA, resolvedContext);
 
+  // resolved.defaultModel is the full schema chain (CLI > profile > env >
+  // config > default), so the HOTDOG_MODEL/AI_MODEL env layers reach the
+  // final model; the raw config.defaultModel would bypass the env vars.
   const model = resolveModel(
     cli.model ?? undefined,
     configProfile?.model,
-    config.defaultModel,
+    resolved.defaultModel ?? null,
     provider,
     defaultModel,
   );

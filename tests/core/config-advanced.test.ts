@@ -82,6 +82,25 @@ describe("buildAgentConfig", () => {
     expect(result.model).toBe("cli-model");
   });
 
+  it("resolves model from the HOTDOG_MODEL env var", async () => {
+    // Regression: the env layers of the defaultModel schema must reach the
+    // final resolved model, not just resolved.defaultModel.
+    const original = process.env.HOTDOG_MODEL;
+    process.env.HOTDOG_MODEL = "env-provider/env-model";
+    try {
+      const result = await buildAgentConfig({
+        ...baseOpts,
+        config: { ...baseOpts.config, defaultModel: "test-model" } as CoreConfigWithExtensions,
+        defaultModel: null,
+      });
+      // The env layer sits above the config layer per the schema.
+      expect(result.model).toBe("env-provider/env-model");
+    } finally {
+      if (original === undefined) delete process.env.HOTDOG_MODEL;
+      else process.env.HOTDOG_MODEL = original;
+    }
+  });
+
   it("resolves model from provider default", async () => {
     const provider = { name: "test-provider", models: [{ name: "provider-model" }] };
     const result = await buildAgentConfig({

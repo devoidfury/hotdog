@@ -198,11 +198,10 @@ export class FindTool {
     }
 
     const fdArgs = buildFdArgs(args);
-    const fdArgsStrs = fdArgs.map((s: string) => s);
 
     let output: string;
     try {
-      const { stdout } = await execFileAsync("fd", fdArgsStrs, {
+      const { stdout } = await execFileAsync("fd", fdArgs, {
         cwd,
         maxBuffer: 10 * 1024 * 1024,
       });

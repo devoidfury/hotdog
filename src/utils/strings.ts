@@ -5,7 +5,7 @@ const _camelTransform = (_: string, c: string): string => c.toUpperCase();
 
 /**
  * Convert snake_case or kebab-case string to camelCase.
- * Replaces underscores and hyphens with spaces, then capitalizes the first letter.
+ * Removes underscores and hyphens, then capitalizes the next letter.
  */
 export function camelCase(str: string): string {
   return str.replace(CAMEL_CASE_REGEX, _camelTransform);

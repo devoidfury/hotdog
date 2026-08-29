@@ -139,6 +139,7 @@ export function expandWorkspacePaths(entries: readonly string[]): string[] {
 export const DEFAULT_DENY_PATTERNS: readonly string[] = [
   ".ssh",
   ".config",
+  ".git",
   ".*profile",
   ".*rc",
   "*.local*",

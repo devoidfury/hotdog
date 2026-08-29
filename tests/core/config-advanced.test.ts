@@ -263,6 +263,7 @@ describe("buildAgentConfig — workspaceDeny", () => {
     expect(result.workspaceDeny).toEqual([
       ".ssh",
       ".config",
+      ".git",
       ".*profile",
       ".*rc",
       "*.local*",

@@ -155,6 +155,14 @@ describe("resolveSafe — denylist", () => {
     expect(() => ws.resolveSafe(".config/tool/settings.json")).toThrow(PathEscapeError);
   });
 
+  it("rejects .git and its children (hooks, config), at any depth", () => {
+    expect(() => ws.resolveSafe(".git")).toThrow(PathEscapeError);
+    expect(() => ws.resolveSafe(".git")).toThrow("Denylisted path rejected (.git)");
+    expect(() => ws.resolveSafe(".git/config")).toThrow(PathEscapeError);
+    expect(() => ws.resolveSafe(".git/hooks/pre-commit")).toThrow(PathEscapeError);
+    expect(() => ws.resolveSafe("sub/deep/.git/HEAD")).toThrow(PathEscapeError);
+  });
+
   it("rejects dotfile profile/rc rules, at any depth", () => {
     expect(() => ws.resolveSafe(".profile")).toThrow(PathEscapeError);
     expect(() => ws.resolveSafe(".bash_profile")).toThrow(PathEscapeError);
@@ -179,6 +187,7 @@ describe("resolveSafe — denylist", () => {
     expect(ws.resolveSafe("ssh")).toBe(path.join(workDir, "ssh"));
     expect(ws.resolveSafe("sshd_config")).toBe(path.join(workDir, "sshd_config"));
     expect(ws.resolveSafe("config")).toBe(path.join(workDir, "config"));
+    expect(ws.resolveSafe("git")).toBe(path.join(workDir, "git"));
     expect(ws.resolveSafe("env.txt")).toBe(path.join(workDir, "env.txt"));
     expect(ws.resolveSafe(".profile.txt")).toBe(path.join(workDir, ".profile.txt"));
     expect(ws.resolveSafe("myrc")).toBe(path.join(workDir, "myrc"));

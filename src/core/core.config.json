@@ -402,6 +402,7 @@
             "default": [
               ".ssh",
               ".config",
+              ".git",
               ".*profile",
               ".*rc",
               "*.local*",

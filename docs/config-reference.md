@@ -473,7 +473,7 @@ When `workspace.paths` is absent, the legacy raw keys `cwdBoundary` / `workspace
 #### `workspace.deny`
 
 - **Type:** `string[]`
-- **Default:** `[".ssh", ".config", ".*profile", ".*rc", "*.local*", ".env*", "!.env.example"]`
+- **Default:** `[".ssh", ".config", ".git", ".*profile", ".*rc", "*.local*", ".env*", "!.env.example"]`
 
 Denylist of sensitive paths rejected by `resolveSafe` (and therefore by all file tools), evaluated inside every configured root.
 

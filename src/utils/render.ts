@@ -7,29 +7,12 @@ interface Token {
   stripRight?: boolean;
 }
 
-/**
- * Compile a template string into a render function.
- */
-export function compile(template: string): (context: Record<string, unknown> | null) => string {
-  const tokens = tokenize(template);
-  return function render(context: Record<string, unknown> | null): string {
-    return walkTokens(tokens, context);
-  };
-}
-
-const templateCache = new Map<string, (context: Record<string, unknown> | null) => string>();
-
-/** Render a template string directly with a context object. */
+/** Render a template string with a context object. */
 export function render(
   template: string,
   context: Record<string, unknown> | null,
-  cache: boolean = false,
 ): string {
-  const cached = templateCache.get(template);
-  if (cached) return cached(context);
-  const artifact = compile(template);
-  if (cache) templateCache.set(template, artifact);
-  return artifact(context);
+  return walkTokens(tokenize(template), context);
 }
 
 // ── Tokenizer ──────────────────────────────────────────────────────

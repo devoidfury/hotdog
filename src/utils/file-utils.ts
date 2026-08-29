@@ -1,34 +1,9 @@
 import fsPromises from "node:fs/promises";
-import { join, dirname } from "node:path";
+import { join } from "node:path";
 import { cwd } from "node:process";
 import { YAML } from "bun";
 import { logger } from "../core/logger.ts";
 import { ToolResult } from "../core/extensions/tool-utils.ts";
-
-/**
- * IO error class for file system operations.
- * Standalone -- does not depend on core error classes.
- */
-export class IOError extends Error {
-  static PathNotFound(requested: string): IOError {
-    return new IOError(`Path not found: ${requested}`);
-  }
-
-  static PathOutside(requested: string, boundary: string): IOError {
-    return new IOError(
-      `Path '${requested}' is outside the allowed directory '${boundary}'. ` +
-        "File operations are restricted to the boundary directory.",
-    );
-  }
-
-  static NotWritable(dir: string, msg: string): IOError {
-    return new IOError(`Directory '${dir}' is not writable: ${msg}`);
-  }
-
-  static NotReadable(filePath: string): IOError {
-    return new IOError(`Path '${filePath}' does not exist or is not readable`);
-  }
-}
 
 export interface ParsedFrontMatter {
   frontMatter?: Record<string, unknown>;
@@ -110,15 +85,6 @@ export function validateNameable(name: string | null | undefined, label: string,
   return warnings;
 }
 
-/** Write a file, creating parent directories as needed. */
-export async function writeFileWithParents(filePath: string, content: string | Uint8Array): Promise<void> {
-  const parentDir = dirname(filePath);
-  if (parentDir && parentDir !== ".") {
-    await fsPromises.mkdir(parentDir, { recursive: true });
-  }
-  await fsPromises.writeFile(filePath, content);
-}
-
 /** Create a directory (and parents), returning a ToolResult error instead of throwing. */
 export async function safeMkdir(dir: string): Promise<ToolResult | null> {
   try {
@@ -143,43 +109,4 @@ export function correctCommonPathMistakes(strPath: string, dirPath?: string): [s
   }
 
   return [strPath, dirPath];
-}
-
-/** Get file size in bytes. */
-export async function fileSize(filePath: string): Promise<number> {
-  const stats = await fsPromises.stat(filePath);
-  return stats.size;
-}
-
-/** Check if a path is writable. */
-export async function checkWritable(filePath: string): Promise<boolean> {
-  const parentDir = dirname(filePath);
-
-  if (parentDir && parentDir !== ".") {
-    const tempPath = join(parentDir, ".hotdog-permission-test");
-    try {
-      await fsPromises.writeFile(tempPath, "");
-      await fsPromises.unlink(tempPath);
-    } catch (e) {
-      throw IOError.NotWritable(parentDir, (e as Error).message);
-    }
-  }
-
-  try {
-    await fsPromises.access(filePath, fsPromises.constants.W_OK);
-  } catch {
-    // File doesn't exist — that's OK, we can create it
-  }
-
-  return true;
-}
-
-/** Check if a path is readable. */
-export async function checkReadable(filePath: string): Promise<boolean> {
-  try {
-    await fsPromises.access(filePath, fsPromises.constants.R_OK);
-  } catch {
-    throw IOError.NotReadable(filePath);
-  }
-  return true;
 }

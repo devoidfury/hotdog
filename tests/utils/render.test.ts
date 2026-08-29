@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'bun:test';
-import { render, compile } from '../../src/utils/render.ts';
+import { render } from '../../src/utils/render.ts';
 
 describe('render', () => {
   it('renders variable interpolation', () => {
@@ -53,28 +53,6 @@ describe('render', () => {
   it('handles empty template and null context', () => {
     expect(render('', {})).toBe('');
     expect(render('static text', null)).toBe('static text');
-  });
-});
-
-describe('compile', () => {
-  it('returns a reusable render function', () => {
-    const fn = compile('Hello {{ name }}');
-    expect(typeof fn).toBe('function');
-    expect(fn({ name: 'World' })).toBe('Hello World');
-  });
-
-  it('renders plain text without tokens', () => {
-    expect(compile('Hello World!')({})).toBe('Hello World!');
-  });
-});
-
-describe('render caching', () => {
-  it('caches compiled templates when cache option is true', () => {
-    const template = '{{ name }}';
-    const result1 = render(template, { name: 'Alice' }, true);
-    const result2 = render(template, { name: 'Bob' }, true);
-    expect(result1).toBe('Alice');
-    expect(result2).toBe('Bob');
   });
 });
 

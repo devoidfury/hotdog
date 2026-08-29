@@ -7,7 +7,7 @@ import { DropStrategy } from "./strategies/drop.ts";
 import { SummarizeShortStrategy } from "./strategies/summarize-short.ts";
 import { TokenAwareStrategy } from "./strategies/token-aware.ts";
 import { TrimStrategy } from "./strategies/trim.ts";
-import { estimateContextTokens } from "./utils.ts";
+import { shouldCompact } from "./utils.ts";
 import { HOOKS } from "../../core/hooks.ts";
 import { ACTIONS } from "../../core/commands.ts";
 import { logger } from "../../core/logger.ts";
@@ -256,12 +256,8 @@ export function create(core: CoreContext): ExtensionInstance | null {
 
         if (nonSystemMessages.length <= settings.keepRecentMessages * 2) return;
 
-        const estimatedTokens = estimateContextTokens(nonSystemMessages);
-        const reserveTokens = settings.reserveTokens;
         const modelConfig = getModelConfig(agent.modelRegistry, agent.model);
-        const contextLimit = modelConfig.contextLimit;
-
-        if (estimatedTokens <= contextLimit - reserveTokens) return;
+        if (!shouldCompact(nonSystemMessages, modelConfig.contextLimit, settings.reserveTokens)) return;
 
         const strategy = strategyRegistry.get(settings.strategy) || strategyRegistry.getDefault();
         if (!strategy) return;

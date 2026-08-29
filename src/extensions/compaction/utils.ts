@@ -1,5 +1,3 @@
-import { SUMMARIZATION_SYSTEM_PROMPT, SUMMARIZATION_USER_PROMPT_TEMPLATE } from "./prompts.ts";
-import { AgentError } from "@core/error.ts";
 // Token estimation is general-purpose (core's ContextManager uses it too), so
 // it lives in src/utils and is re-exported here to keep the extension API stable.
 import {
@@ -119,45 +117,4 @@ export function serializeConversation(messages: MessageLike[]): string {
   }
 
   return parts.join("\n\n");
-}
-
-interface CompactionSettings {
-  enabled: boolean;
-  reserveTokens: number;
-  keepRecentMessages: number;
-}
-
-interface CompactResult {
-  summary: string;
-  messagesCompacted: number;
-}
-
-export async function compactMessages(
-  messages: MessageLike[],
-  llmChat: (messages: Array<{ role: string; content: string }>, model: string) => Promise<string>,
-  model: string,
-  settings: CompactionSettings,
-): Promise<CompactResult | null> {
-  if (!settings.enabled) return null;
-
-  const firstKept = findFirstKeptIndex(messages, settings.keepRecentMessages);
-  if (firstKept === 0) return null;
-
-  const messagesToCompact = messages.slice(0, firstKept);
-  const conversation = serializeConversation(messagesToCompact);
-  const userPrompt = SUMMARIZATION_USER_PROMPT_TEMPLATE.replace("{conversation}", () => conversation);
-
-  const summaryMessages = [
-    { role: "system", content: SUMMARIZATION_SYSTEM_PROMPT },
-    { role: "user", content: userPrompt },
-  ];
-
-  let summary: string;
-  try {
-    summary = await llmChat(summaryMessages, model);
-  } catch (e: unknown) {
-    throw AgentError.SummarizationFailed((e as Error).message);
-  }
-
-  return { summary, messagesCompacted: firstKept };
 }

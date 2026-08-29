@@ -153,6 +153,10 @@ describe("LlmClient.chatStreamCancellable", () => {
               releaseLock: () => {},
             } as any;
           },
+          // Real Response bodies are ReadableStreams with cancel(); the
+          // client releases the connection in a finally when the consumer
+          // abandons the stream.
+          cancel: async () => {},
         },
       } as unknown as Response;
     };
@@ -293,7 +297,7 @@ describe("LlmClient.chatStreamCancellable — network errors, timeouts, cancella
     return new Message({ role, content });
   }
 
-  function sseResponse(content: string): Response {
+  function sseResponse(content: string, onCancel?: () => void): Response {
     return {
       ok: true,
       headers: new Map([["content-type", "text/event-stream"]]),
@@ -313,6 +317,12 @@ describe("LlmClient.chatStreamCancellable — network errors, timeouts, cancella
             },
             releaseLock: () => {},
           } as any;
+        },
+        // Real Response bodies are ReadableStreams with cancel(); the
+        // client releases the connection in a finally when the consumer
+        // abandons the stream.
+        cancel: async () => {
+          onCancel?.();
         },
       },
     } as unknown as Response;
@@ -359,6 +369,42 @@ describe("LlmClient.chatStreamCancellable — network errors, timeouts, cancella
     expect(error).toBeUndefined();
     expect(calls).toBe(2);
     expect(events.some((e) => e.type === "content" && e.content === "recovered")).toBe(true);
+  });
+
+  it("cancels the response body when the consumer abandons the stream mid-way", async () => {
+    const client = new LlmClient({ chatTimeoutSecs: 30, maxRetries: 0, baseUrl: "http://test.com", markerMangler: null });
+    let bodyCancelled = false;
+
+    globalThis.fetch = (async () => sseResponse("partial", () => {
+      bodyCancelled = true;
+    })) as unknown as typeof fetch;
+
+    const gen = client.chatStreamCancellable([makeMsg("user", "Hi")], mc());
+    // Consume one event, then abandon the stream (the cancellation path).
+    const first = await gen.next();
+    expect(first.done).toBe(false);
+    await gen.return(undefined);
+    // The finally block runs asynchronously after return() settles.
+    await new Promise((r) => setTimeout(r, 0));
+
+    expect(bodyCancelled).toBe(true);
+  });
+
+  it("cancels the response body after a fully drained stream", async () => {
+    const client = new LlmClient({ chatTimeoutSecs: 30, maxRetries: 0, baseUrl: "http://test.com", markerMangler: null });
+    let bodyCancelled = false;
+
+    globalThis.fetch = (async () => sseResponse("full", () => {
+      bodyCancelled = true;
+    })) as unknown as typeof fetch;
+
+    const { events, error } = await collect(
+      client.chatStreamCancellable([makeMsg("user", "Hi")], mc()),
+    );
+
+    expect(error).toBeUndefined();
+    expect(events).toHaveLength(1);
+    expect(bodyCancelled).toBe(true);
   });
 
   it("exhausts retries on persistent network error and surfaces LlmError.Http", async () => {

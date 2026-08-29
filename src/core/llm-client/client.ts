@@ -281,7 +281,14 @@ export class LlmClient {
         baseDelayMs: this.retryBaseDelayMs,
       });
 
-      yield* this._processSSE(response, modelConfig, url, apiKey, effectiveSessionId);
+      try {
+        yield* this._processSSE(response, modelConfig, url, apiKey, effectiveSessionId);
+      } finally {
+        // Release the connection if the consumer abandons the stream mid-way
+        // (cancellation, early return); an already-drained body makes
+        // cancel() a no-op on the normal path.
+        response.body?.cancel().catch(() => {});
+      }
     } finally {
       removeCancelListener?.();
     }

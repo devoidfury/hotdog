@@ -26,8 +26,7 @@ jobs:
           bun-version: ${{ env.BUN_VERSION }}
 
       - name: "Run tests"
-        run: bun test
+        run: bun run loud-test
 
       - name: "Run tests with coverage"
-        run: bun test --coverage
-        continue-on-error: true
+        run: bun run coverage

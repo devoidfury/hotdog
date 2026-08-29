@@ -310,4 +310,43 @@ data: {"explicit":true}
       expect(results).toEqual([{ trimmed: true }]);
     });
   });
+
+  describe("data field without the optional space (SSE spec)", () => {
+    it("handles data lines with no space after the colon", async () => {
+      const sse = `data:{"a":1}
+
+data:{"b":2}
+
+`;
+      const results = await collect(parseSse(streamFromText(sse)));
+      expect(results).toEqual([{ a: 1 }, { b: 2 }]);
+    });
+
+    it("handles [DONE] without a space after the colon", async () => {
+      const results = await collect(
+        parseSse(streamFromText('data:{"x":1}\ndata:[DONE]\n')),
+      );
+      expect(results).toEqual([{ x: 1 }]);
+    });
+
+    it("reassembles JSON from a no-space data line split across chunks", async () => {
+      const results = await collect(
+        parseSse(streamFromChunks(
+          'data:{"choices":[{"delta":{"content":"',
+          'no space"}}]}\n\n',
+        )),
+      );
+      expect(results).toEqual([{ choices: [{ delta: { content: "no space" } }] }]);
+    });
+
+    it("still treats the space as optional when it is present", async () => {
+      const sse = `data: {"spaced":true}
+
+data:{"unspaced":false}
+
+`;
+      const results = await collect(parseSse(streamFromText(sse)));
+      expect(results).toEqual([{ spaced: true }, { unspaced: false }]);
+    });
+  });
 });

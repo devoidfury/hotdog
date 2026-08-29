@@ -77,9 +77,13 @@ export class SseParser {
             currentEvent = trimmed.slice(7);
             continue;
           }
-          if (!trimmed.startsWith("data: ")) continue;
+          if (!trimmed.startsWith("data:")) continue;
           if (currentEvent !== "message" && currentEvent !== "") continue;
-          if (trimmed === "data: [DONE]") {
+          // SSE spec: the field value is everything after "data:" with one
+          // leading space removed if present, so "data:x" is as valid as
+          // "data: x" (a second space is part of the value).
+          const payload = trimmed.slice(trimmed[5] === " " ? 6 : 5);
+          if (payload === "[DONE]") {
             if (jsonBuffer) {
               try {
                 const data = JSON.parse(jsonBuffer);
@@ -93,7 +97,6 @@ export class SseParser {
             }
             continue;
           }
-          const payload = trimmed.slice(6);
           try {
             const data = JSON.parse(payload);
             yield data;

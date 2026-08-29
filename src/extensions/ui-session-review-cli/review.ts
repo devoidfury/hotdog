@@ -2,11 +2,9 @@
 
 import {
   LOG_SOURCE,
+  listSessionLogs,
   readSessionEntries,
-  sessionsDir,
 } from "../../core/session/session-log.ts";
-import { join } from "node:path";
-import { readdir, access, stat, readFile } from "node:fs/promises";
 import {
   ToolResult,
   defaultCallDisplay,
@@ -14,10 +12,12 @@ import {
 } from "../../core/extensions/tool-utils.ts";
 import type { ToolMetadata } from "../../core/extensions/tool-registry.ts";
 
-interface SessionSummary {
+export interface RecentSession {
   id: string;
   last_modified: string;
   entry_count: number;
+  /** Last activity, ms since epoch. */
+  mtime: number;
 }
 
 interface ToolIndexEntry {
@@ -39,70 +39,19 @@ function truncateContent(content: string, maxLength: number): string {
   return content.slice(0, maxLength) + "\u2026";
 }
 
-async function countEntries(filePath: string): Promise<number> {
-  const content = await readFile(filePath, "utf-8");
-  let count = 0;
-  for (const line of content.split("\n")) {
-    if (line.trim()) count++;
-  }
-  return count;
-}
-
-async function listSessions(limit: number): Promise<SessionSummary[]> {
-  const dir = sessionsDir();
-
-  try {
-    await access(dir);
-  } catch {
-    return [];
-  }
-
-  const files = (await readdir(dir)).filter((f: string) =>
-    f.endsWith(".jsonl"),
-  );
-  if (files.length === 0) return [];
-
-  const sessions: Array<{
-    id: string;
-    last_modified: string;
-    entry_count: number;
-    mtime: number;
-  }> = [];
-  for (const file of files) {
-    const sessionId = file.replace(/\.jsonl$/, "");
-    const filePath = join(dir, file);
-    let metadata;
-    let entryCount;
-    try {
-      metadata = await stat(filePath);
-      entryCount = await countEntries(filePath);
-    } catch {
-      // File vanished between readdir() and here (e.g. concurrent
-      // `sessions cleanup`); skip it rather than failing the whole list.
-      continue;
-    }
-
-    // Filter out sessions with only 1 entry
-    if (entryCount <= 1) continue;
-
-    const lastTs = new Date(metadata.mtime).toISOString();
-    sessions.push({
-      id: sessionId,
-      last_modified: lastTs,
-      entry_count: entryCount,
-      mtime: metadata.mtime.getTime(),
-    });
-  }
-
-  // Sort by modification time (ascending), take most recent
-  sessions.sort((a, b) => a.mtime - b.mtime);
-  const len = sessions.length;
-  const start = Math.max(0, len - limit);
-  return sessions.slice(start).map((s) => ({
-    id: s.id,
-    last_modified: s.last_modified,
-    entry_count: s.entry_count,
-  }));
+/**
+ * Sessions from the core session logs, most recently active first.
+ * Excludes sessions with fewer than 2 real entries (incomplete runs).
+ */
+export async function listRecentSessions(): Promise<RecentSession[]> {
+  return (await listSessionLogs())
+    .filter((s) => s.messageCount > 1)
+    .map((s) => ({
+      id: s.id,
+      last_modified: new Date(s.lastActivityAt).toISOString(),
+      entry_count: s.messageCount,
+      mtime: s.lastActivityAt,
+    }));
 }
 
 // "get" is a summary view: user input messages plus the model's final stop
@@ -253,7 +202,11 @@ export class ReviewTool {
     switch (args.operation) {
       case "list": {
         const limit = Math.min(100, Math.max(1, args.limit));
-        const sessions = await listSessions(limit);
+        // Most recent `limit` sessions, ascending (oldest first).
+        const sessions = (await listRecentSessions())
+          .slice(-limit)
+          .reverse()
+          .map(({ id, last_modified, entry_count }) => ({ id, last_modified, entry_count }));
         return ToolResult.ok(JSON.stringify(sessions)).withEntries({
           operation: "list",
           session_count: String(sessions.length),

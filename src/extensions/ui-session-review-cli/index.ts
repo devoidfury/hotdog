@@ -1,9 +1,9 @@
 import { HOOKS } from "../../core/hooks.ts";
 import { readSessionEntries, sessionsDir as getSessionsDir, type LogEntry } from "../../core/session/session-log.ts";
 import { contentToText } from "../../core/context/message.ts";
-import { readdir, access, stat, unlink, readFile } from "node:fs/promises";
+import { readdir, access, stat, unlink } from "node:fs/promises";
 import { join } from "node:path";
-import { ReviewTool } from "./review.ts";
+import { ReviewTool, listRecentSessions } from "./review.ts";
 import { CoreContext, ExtensionInstance, ToolsRegisterPayload } from "../../core/extensions/types.ts";
 import readline from "node:readline";
 import { CoreConfigWithExtensions } from "../../core/config/index.ts";
@@ -18,13 +18,6 @@ interface CliArgs {
   yes?: boolean;
   args?: string[];
   [key: string]: unknown;
-}
-
-interface SessionInfo {
-  id: string;
-  last_modified: string;
-  entry_count: number;
-  mtime: number;
 }
 
 function confirm(prompt: string): Promise<boolean> {
@@ -69,8 +62,6 @@ async function runShow(
   cli: CliArgs,
   _config: CoreConfigWithExtensions,
 ): Promise<number> {
-  const sessionsDir = getSessionsDir();
-
   const sessionId = cli.sessionId;
   if (sessionId) {
     return await reviewSession(
@@ -80,26 +71,15 @@ async function runShow(
     );
   }
   if (cli.toolIndex) {
-    const files = (await readdir(sessionsDir)).filter((f: string) =>
-      f.endsWith(".jsonl"),
-    );
-    if (files.length === 0) {
+    const mostRecent = (await listRecentSessions())[0];
+    if (!mostRecent) {
       console.log("No sessions found.");
       return 1;
     }
-    const fileInfos = await Promise.all(
-      files.map(async (f: string) => ({
-        name: f.replace(/\.jsonl$/, ""),
-        path: join(sessionsDir, f),
-        mtime: (await stat(join(sessionsDir, f))).mtime.getTime(),
-      })),
-    );
-    fileInfos.sort((a: { mtime: number }, b: { mtime: number }) => b.mtime - a.mtime);
-    const mostRecent = fileInfos[0] as { name: string };
-    const entries = await readSessionEntries(mostRecent.name);
+    const entries = await readSessionEntries(mostRecent.id);
     return printToolIndex(entries, cli.wantsJson ?? false);
   }
-  return listSessions(cli.wantsJson ?? false, sessionsDir);
+  return listSessions(cli.wantsJson ?? false);
 }
 
 async function runDelete(
@@ -198,59 +178,14 @@ async function runCleanup(
   return 0;
 }
 
-async function countEntries(filePath: string): Promise<number> {
-  const content = await readFile(filePath, "utf-8");
-  let count = 0;
-  for (const line of content.split("\n")) {
-    if (line.trim()) count++;
-  }
-  return count;
-}
-
-async function listSessions(
-  json: boolean,
-  dir: string,
-): Promise<number> {
-  try {
-    await access(dir);
-  } catch {
-    if (json) console.log("[]");
-    else console.log("No log entries found.");
-    return 1;
-  }
-
-  const files = (await readdir(dir)).filter((f: string) => f.endsWith(".jsonl"));
-  if (files.length === 0) {
-    if (json) console.log("[]");
-    else console.log("No log entries found.");
-    return 1;
-  }
-
-  const sessions: SessionInfo[] = [];
-  for (const file of files) {
-    const sessionId = file.replace(/\.jsonl$/, "");
-    const filePath = join(dir, file);
-    const metadata = await stat(filePath);
-    const entryCount = await countEntries(filePath);
-
-    if (entryCount <= 1) continue;
-
-    const lastTs = new Date(metadata.mtime).toISOString();
-    sessions.push({
-      id: sessionId,
-      last_modified: lastTs,
-      entry_count: entryCount,
-      mtime: metadata.mtime.getTime(),
-    });
-  }
+async function listSessions(json: boolean): Promise<number> {
+  const sessions = await listRecentSessions();
 
   if (sessions.length === 0) {
     if (json) console.log("[]");
     else console.log("No log entries found.");
     return 1;
   }
-
-  sessions.sort((a, b) => b.mtime - a.mtime);
 
   if (json) {
     console.log(JSON.stringify(sessions, null, 2));

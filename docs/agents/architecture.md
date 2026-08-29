@@ -95,7 +95,7 @@ Minimal Agent class that runs the LLM loop and delegates behavior to hooks. Key 
 - `_executeTools(toolCalls)` — executes tool calls via the ToolExecutor
 - `executeCommand(cmd)` — executes commands
 - `cancel()` — cancels the running agent loop
-- Properties: `model` (setter emits `MODEL_CHANGE`, clears tool defs and system prompt cache), `context` (`ContextManager`), `log` (deprecated, prefer `context.getMessages()`), `isRestoring`, `iterationCount`, `sessionId`, `cancelled`, `hideTools`, `hideThinking`, `llmClient`, `reasoningEffort`, `followQueue`, `commandRegistry`, `enqueueCallback`
+- Properties: `model` (setter emits `MODEL_CHANGE`, clears tool defs and system prompt cache), `context` (`ContextManager`), `isRestoring`, `iterationCount`, `sessionId`, `cancelled`, `hideTools`, `hideThinking`, `llmClient`, `reasoningEffort`, `followQueue`, `commandRegistry`, `enqueueCallback`
 - Task agent support: `abortSignal`, `toolWhitelist`, `followQueue`
 - `enqueue(text)` — enqueue a message on the owning MessageBus
 
@@ -217,10 +217,9 @@ Message types and message log. Key exports:
 - Accepts both camelCase (API/JS) and snake_case (JSON/log files) field names
 
 ### Input (`src/core/context/input.ts`)
-Input parsing. Key exports:
-- `INPUT_EVENT` — enum with `TEXT` and `COMMAND` types
-- `parseInput(input)` — parses raw text into typed input event
-- `NoopInput` — no-op input implementation
+Question/answer collection, decoupled from the question tool so each UI (CLI, web, etc.) provides its own implementation. Key exports:
+- `QuestionDef` — shape of a question passed to `collectAnswers()`
+- `NoopInput` — no-op input implementation (non-interactive modes: CI, pipes, one-shot)
 
 ### Channel (`src/core/channel.ts`)
 Abstract UI connection. A `Channel` attaches to one or more sessions via a `SessionManager`, routes text input and `/`-prefixed commands, and handles channel-level commands locally (`quit`, `help`, `sessions`, `attach`, `detach`, `switch`) before forwarding the rest to the current session's agent. UI extensions implement the abstract `write()`, `read()`, and subscription methods.

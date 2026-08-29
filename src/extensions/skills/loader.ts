@@ -83,13 +83,11 @@ function parseSkillFromMd(
   const fm = parsed.frontMatter ?? {};
   const body = parsed.body ?? "";
 
-  // Validate description
   const description = fm?.description as string | null;
   if (!description || !description.trim()) {
     throw ParseError.MissingDescription("Skill");
   }
 
-  // Warn on description length
   const descLen =
     typeof fm.description === "string" ? fm.description.length : 0;
   if (descLen > 1024) {
@@ -100,13 +98,10 @@ function parseSkillFromMd(
 
   const name = (fm.name as string) || dirName;
 
-  // Lenient name validation
-  const warnings = validateNameable(name, "Skill", dirName);
-  for (const w of warnings) {
+  for (const w of validateNameable(name, "Skill", dirName)) {
     logger.warn(`Skill '${name}': ${w}`);
   }
 
-  // Parse tool-related fields
   const allowedTools = parseToolList(
     (fm["allowed-tools"] as string | string[]) ||
       (fm.allowed_tools as string | string[]) ||
@@ -153,7 +148,6 @@ function parseToolList(val: string | string[] | undefined): string[] {
   if (!val) return [];
   if (Array.isArray(val)) return val.map(String);
   if (typeof val === "string") {
-    // Could be space-separated or comma-separated
     return val
       .split(/[\s,]+/)
       .map((s: string) => s.trim())
@@ -190,7 +184,7 @@ async function collectAdditionalFiles(
       }
     }
   } catch {
-    // Skip on error
+    // Unreadable subtree: skip rather than fail the whole skill load.
   }
   files.sort();
   return files;
@@ -214,10 +208,7 @@ export class SkillsLoader {
     this.skills = new Map();
   }
 
-  /**
-   * Load all skills from configured directories.
-   * Returns number of skills loaded.
-   */
+  /** Load all skills from configured directories. Returns the number loaded. */
   async loadSkills(): Promise<number> {
     let count = 0;
     for (const dir of this.paths) {
@@ -248,20 +239,18 @@ export class SkillsLoader {
       try {
         content = await fs.readFile(skillFile, "utf-8");
       } catch {
-        continue; // No SKILL.md in this directory
+        continue; // Not a skill directory (no SKILL.md)
       }
 
       try {
         const location = await fs.realpath(skillFile);
         const skill = parseSkillFromMd(content, entry.name, location);
 
-        // Discover additional files (relative paths from skill root)
         skill.additionalFiles = await collectAdditionalFiles(
           join(dir, entry.name),
           entry.name,
         );
 
-        // Collision detection
         if (this.skills.has(skill.name)) {
           const existing = this.skills.get(skill.name)!;
           logger.warn(
@@ -283,25 +272,16 @@ export class SkillsLoader {
     return count;
   }
 
-  /**
-   * Get a skill by name.
-   */
   getSkill(name: string): Skill | null {
     return this.skills.get(name) || null;
   }
 
-  /**
-   * Get all skills.
-   */
   allSkills(): Skill[] {
     return Array.from(this.skills.values()).sort((a, b) =>
       a.name.localeCompare(b.name),
     );
   }
 
-  /**
-   * Get active/loaded skills.
-   */
   activeSkills(): Skill[] {
     return this.allSkills().filter((skill) => skill.loaded);
   }
@@ -310,22 +290,14 @@ export class SkillsLoader {
     return this.allSkills().filter((s) => !s.disableModelInvocation);
   }
 
-  /**
-   * Activate a skill (mark as loaded).
-   */
   activateSkill(name: string): void {
     const skill = this.skills.get(name);
     if (skill) skill.loaded = true;
   }
 
-  /**
-   * Preload skills
-   */
-  preloadSkills(preloadSkills: string[]): void {
-    if (preloadSkills.length > 0) {
-      for (const name of preloadSkills) {
-        this.activateSkill(name);
-      }
+  preloadSkills(names: string[]): void {
+    for (const name of names) {
+      this.activateSkill(name);
     }
   }
 
@@ -352,16 +324,10 @@ export class SkillsLoader {
     }
   }
 
-  /**
-   * Get configured directories.
-   */
   directories(): string[] {
     return [...this.paths];
   }
 
-  /**
-   * Load the skill content template (for individual skill rendering).
-   */
   private async loadSkillContentTemplate(): Promise<string> {
     if (this.skillContentTemplate) return this.skillContentTemplate;
 
@@ -403,7 +369,6 @@ export class SkillsLoader {
       return "";
     }
 
-    // Render loaded skills content using the shared template
     const loadedSkillsContent: string[] = [];
     for (const skill of visibleSkills) {
       if (skill.loaded) {
@@ -411,7 +376,7 @@ export class SkillsLoader {
       }
     }
 
-    // Transform skills to match template expectations
+    // The template reads snake_case `additional_files`.
     const renderedSkills = visibleSkills.map((s) => ({
       ...s,
       additional_files: s.additionalFiles || [],

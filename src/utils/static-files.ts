@@ -1,8 +1,3 @@
-// static-files.ts — Static file serving for Bun.serve() fetch handlers.
-//
-// Provides serveStaticFile() with MIME type detection, caching headers,
-// SPA fallback to index.html, and directory traversal protection.
-
 import fs from "node:fs";
 
 const MIME_TYPES: Record<string, string> = {
@@ -40,64 +35,44 @@ const MIME_TYPES: Record<string, string> = {
   ".wav": "audio/wav",
 };
 
-/**
- * Get the MIME type for a file path based on its extension.
- */
 export function getMimeType(filePath: string): string {
   const ext = filePath.match(/\.([a-z0-9]+)$/i);
   return ext ? MIME_TYPES[ext[0].toLowerCase()] || "application/octet-stream" : "application/octet-stream";
 }
 
-/**
- * Serve a static file from a directory.
- * Handles MIME types, caching headers, SPA fallback to index.html,
- * and directory traversal protection.
- *
- * @param rootDir - Absolute path to the static files root directory.
- * @param maxAgeSecs - Cache-Control max-age in seconds.
- * @param pathname - The URL pathname to serve (from `new URL(req.url).pathname`).
- * @returns A Response if the file was found, or null for 404.
- */
+/** Serve a static file under rootDir; returns null for 404. Unmatched paths fall back to index.html (SPA). */
 export function serveStaticFile(
   rootDir: string,
   maxAgeSecs: number,
   pathname: string,
 ): Response | null {
-  // Strip query string and fragment
   let filePath = pathname.split("?")[0]!.split("#")[0]!;
 
-  // Default to index.html for directory requests
   if (filePath === "/" || filePath.endsWith("/")) {
     filePath = filePath + "index.html";
   }
 
-  // Decode URI components
   try {
     filePath = decodeURIComponent(filePath);
   } catch {
     return new Response("Bad Request", { status: 400 });
   }
 
-  // Security: check for directory traversal BEFORE normalizing
-  const segments = filePath.split("/");
-  if (segments.some((seg) => seg === "..")) {
+  // Reject traversal before normalizing, since normalization would collapse it away.
+  if (filePath.split("/").some((seg) => seg === "..")) {
     return new Response("Forbidden", { status: 403 });
   }
 
-  // Normalize path
   const normalized = filePath.replace(/^\/+/, "").replace(/\/\.\//g, "/");
 
-  // Security: ensure the resolved path is within the root directory.
-  // Boundary check, not string prefix: startsWith(rootDir) alone would let
-  // a sibling dir with a shared prefix (root "/srv/app" vs "/srv/app2")
-  // pass the containment check.
+  // Containment is a boundary check, not a bare startsWith(): a sibling dir
+  // sharing a prefix ("/srv/app" vs "/srv/app2") would otherwise pass.
   const root = rootDir.endsWith("/") ? rootDir.slice(0, -1) : rootDir;
   const resolvedPath = new URL(normalized, `file://${root}/`).pathname;
   if (resolvedPath !== root && !resolvedPath.startsWith(root + "/")) {
     return new Response("Forbidden", { status: 403 });
   }
 
-  // Try to serve the file
   if (fs.existsSync(resolvedPath)) {
     const file = Bun.file(resolvedPath);
     const mimeType = getMimeType(resolvedPath);
@@ -109,7 +84,6 @@ export function serveStaticFile(
     });
   }
 
-  // SPA fallback: serve index.html for unmatched paths
   const indexPath = new URL("index.html", `file://${root}/`).pathname;
   if (fs.existsSync(indexPath)) {
     const indexFile = Bun.file(indexPath);
@@ -121,5 +95,5 @@ export function serveStaticFile(
     });
   }
 
-  return null; // 404
+  return null;
 }

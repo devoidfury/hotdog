@@ -1,8 +1,3 @@
-// SSE Parser — pure streaming parser for Server-Sent Events.
-//
-// Reads from a ReadableStream<Uint8Array>, handles SSE framing (event:, data:, [DONE]),
-// reassembles multi-chunk JSON payloads, and yields raw JSON objects.
-
 import { logger } from "../core/logger.ts";
 
 export interface SseParserOptions {
@@ -14,18 +9,7 @@ export interface SseParserOptions {
 
 const DEFAULT_MAX_JSON_BUFFER = 500_000;
 
-/**
- * Parse an SSE stream and yield JSON objects.
- *
- * Handles:
- * - SSE framing (event:, data:, [DONE], blank lines, comments)
- * - Multi-chunk JSON payloads (accumulates until valid JSON)
- * - Buffer overflow protection with warnings
- *
- * @param stream - The ReadableStream to parse (e.g., response.body.getReader().read() chunks)
- * @param options - Parser options
- * @yields Parsed JSON objects from the stream
- */
+/** Parse an SSE stream into JSON objects; reassembles payloads split across chunks. */
 export async function* parseSse(
   stream: ReadableStream<Uint8Array>,
   options: SseParserOptions = {},
@@ -42,12 +26,6 @@ export class SseParser {
     this.#onWarning = options.onWarning ?? ((msg: string) => logger.warn(msg));
   }
 
-  /**
-   * Parse an SSE stream and yield JSON objects.
-   *
-   * @param stream - The ReadableStream to parse
-   * @yields Parsed JSON objects from the stream
-   */
   async *parse(stream: ReadableStream<Uint8Array>): AsyncGenerator<Record<string, unknown>> {
     const reader = stream.getReader();
     const decoder = new TextDecoder();
@@ -118,7 +96,6 @@ export class SseParser {
         }
       }
 
-      // Handle any remaining JSON buffer at EOF
       if (jsonBuffer) {
         try {
           const data = JSON.parse(jsonBuffer);

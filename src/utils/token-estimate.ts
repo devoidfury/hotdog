@@ -15,7 +15,6 @@ export interface MessageLike {
   tool_calls?: Array<{ function?: { name?: string; arguments?: string } }>;
 }
 
-// chars/4 heuristic; deliberately overestimates.
 export function estimateMessageTokens(msg: MessageLike): number {
   const chars = _messageCharCount(msg);
   return Math.ceil(chars / 4);

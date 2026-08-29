@@ -1,11 +1,9 @@
-/** Inject markdown markers for a heading. */
 function heading(el: HTMLRewriterTypes.Element, level: number): void {
   const prefix = "\n" + "#".repeat(level) + " ";
   el.before(prefix, { html: true });
   el.after("\n");
 }
 
-/** Inject markdown markers for an inline element. */
 function inline(
   el: HTMLRewriterTypes.Element,
   open?: string,
@@ -45,9 +43,6 @@ function decodeEntities(text: string): string {
     .replace(/&#(\d+);/g, (_, n) => String.fromCharCode(parseInt(n, 10)));
 }
 
-/**
- * Convert an HTML string to simplified GitHub Flavored Markdown.
- */
 export function htmlToMarkdown(html: string | null | undefined): string {
   if (!html || typeof html !== "string") return "";
 
@@ -56,13 +51,11 @@ export function htmlToMarkdown(html: string | null | undefined): string {
   // TODO: switch to rewriter.on("*", { comments(c) { c.remove() } }) when available.
   html = html.replace(/<!--[\s\S]*?-->/g, "");
 
-  // Shared mutable state for tracking context across handlers.
   const ctx: { inPre: boolean; olCount: number[] } = {
-    inPre: false, // inside a <pre> block
-    olCount: [], // per-<ol> item counter stack
+    inPre: false,
+    olCount: [],
   };
 
-  // insert markdown syntax around html nodes
   const addMarkdownRewrite = new HTMLRewriter()
     .on("h1", { element: (el) => heading(el, 1) })
     .on("h2", { element: (el) => heading(el, 2) })

@@ -1,7 +1,5 @@
 import fsPromises from "node:fs/promises";
 
-// CLI color palettes and ANSI color helpers.
-
 export interface PaletteOptions {
   thinking?: string;
   tool_call?: string;
@@ -12,10 +10,6 @@ export interface PaletteOptions {
   use_colors?: boolean;
 }
 
-/**
- * Color mapping for each OutputEvent variant.
- * Each variant gets a named color that can be configured or loaded from a theme file.
- */
 export class ColorPalette {
   thinking: string;
   tool_call: string;
@@ -39,8 +33,6 @@ export class ColorPalette {
     return new ColorPalette(dark_palette());
   }
 }
-
-// ── Named Themes ──────────────────────────────────────────────────────────────
 
 export const NAMED_THEMES: Record<string, () => PaletteOptions> = {
   dark: dark_palette,
@@ -84,8 +76,6 @@ export function monochrome_palette(): PaletteOptions {
   };
 }
 
-// ── ANSI Color Codes ──────────────────────────────────────────────────────────
-
 const COLOR_MAP: Record<string, string> = {
   black: "30",
   red: "31",
@@ -110,10 +100,6 @@ const COLOR_MAP: Record<string, string> = {
 
 const RESET = "\x1b[0m";
 
-/**
- * Apply a color name to a string.
- * If `use_colors` is false, returns the text unchanged.
- */
 export function applyColor(text: string, colorName: string, useColors: boolean): string {
   if (!useColors || !colorName) return text;
   const code = COLOR_MAP[colorName];
@@ -121,11 +107,6 @@ export function applyColor(text: string, colorName: string, useColors: boolean):
   return `\x1b[${code}m${text}${RESET}`;
 }
 
-// ── Palette Resolution ────────────────────────────────────────────────────────
-
-/**
- * Merge a custom palette into a base palette, overriding only non-default fields.
- */
 export function mergePalette(base: ColorPalette, custom: PaletteOptions): ColorPalette {
   return new ColorPalette({
     thinking: custom.thinking || base.thinking,
@@ -139,9 +120,6 @@ export function mergePalette(base: ColorPalette, custom: PaletteOptions): ColorP
   });
 }
 
-/**
- * Resolve the effective color palette from CLI args, config, and theme file.
- */
 export async function resolvePalette(
   themeFile: string | null | undefined,
   configPalette: PaletteOptions | null | undefined,
@@ -154,19 +132,18 @@ export async function resolvePalette(
 
   let palette: ColorPalette;
   if (themeFile) {
-    // Check if it's a named theme or a file path
+    // A named theme takes precedence over treating the value as a file path.
     const themeFn = NAMED_THEMES[themeFile.toLowerCase()];
     if (themeFn) {
       palette = new ColorPalette(themeFn());
     } else {
-      // Try to load from file
       try {
         const content = await fsPromises.readFile(themeFile, "utf-8");
         const custom = JSON.parse(content) as PaletteOptions;
         const base = new ColorPalette(dark_palette());
         palette = mergePalette(base, custom);
       } catch {
-        // Fall back to named theme
+        // Unreadable/invalid theme file: fall back to the dark theme.
         palette = new ColorPalette(dark_palette());
       }
     }
@@ -184,46 +161,26 @@ export async function resolvePalette(
   return palette;
 }
 
-// ── Event Formatters with Color ───────────────────────────────────────────────
-
-/**
- * Apply thinking color to text.
- */
 export function applyThinking(text: string, palette: ColorPalette): string {
   return applyColor(text, palette.thinking, palette.use_colors);
 }
 
-/**
- * Apply tool call color to text.
- */
 export function applyToolCall(text: string, palette: ColorPalette): string {
   return applyColor(text, palette.tool_call, palette.use_colors);
 }
 
-/**
- * Apply tool result color to text.
- */
 export function applyToolResult(text: string, palette: ColorPalette): string {
   return applyColor(text, palette.tool_result, palette.use_colors);
 }
 
-/**
- * Apply final response color to text.
- */
 export function applyFinalResponse(text: string, palette: ColorPalette): string {
   return applyColor(text, palette.final_response, palette.use_colors);
 }
 
-/**
- * Apply compacting color to text.
- */
 export function applyCompacting(text: string, palette: ColorPalette): string {
   return applyColor(text, palette.compacting, palette.use_colors);
 }
 
-/**
- * Apply progress color to text.
- */
 export function applyProgress(text: string, palette: ColorPalette): string {
   return applyColor(text, palette.progress, palette.use_colors);
 }

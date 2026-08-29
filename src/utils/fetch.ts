@@ -5,13 +5,6 @@ const USER_AGENT = `hotdog/v${pkg.version} NOT Mozilla/5.0 (probably running lin
 export const VALID_METHODS = ["GET", "POST", "PUT", "DELETE", "PATCH", "HEAD"];
 export const METHODS_WITH_BODY = ["POST", "PUT", "PATCH"];
 
-/**
- * Combine multiple abort signals into one. Whichever input signal aborts
- * first wins.
- *
- * @param signals - Signals to combine.
- * @returns A single signal, or undefined if none were provided.
- */
 function combineSignals(signals: AbortSignal[]): AbortSignal | undefined {
   if (signals.length === 0) return undefined;
   if (signals.length === 1) return signals[0];
@@ -19,13 +12,9 @@ function combineSignals(signals: AbortSignal[]): AbortSignal | undefined {
 }
 
 /**
- * fetch() wrapper with a user-agent, method validation, and an optional timeout.
- *
- * @param url - The URL to request.
- * @param args - Standard RequestInit. A caller-provided `signal` is honored
- *   and combined with the timeout, so both can abort the request.
- * @param timeoutMs - Optional timeout in milliseconds. Aborts the request
- *   (headers and/or body still pending) with a TimeoutError when it fires.
+ * fetch() wrapper: sets the user agent, validates the method, and optionally
+ * times out. A caller-provided signal is combined with the timeout so either
+ * can abort the request.
  */
 export async function hotdogFetch(
   url: string,
@@ -56,15 +45,7 @@ export async function hotdogFetch(
   });
 }
 
-/**
- * Read a response body up to a character cap. Stops reading (and releases
- * the connection) once the cap is exceeded, so huge responses are bounded
- * in memory. Abort/timeout errors from the fetch signal propagate.
- *
- * @param resp - The Response to read.
- * @param maxChars - Maximum characters to accumulate.
- * @returns The (possibly capped) text and whether the body was cut off.
- */
+/** Read a response body up to maxChars; stops reading (releasing the connection) once over. */
 export async function readCappedBody(
   resp: Response,
   maxChars: number,
@@ -88,7 +69,6 @@ export async function readCappedBody(
     }
   }
   if (truncated) {
-    // Stop pulling from the connection once the cap is hit.
     await reader.cancel().catch(() => {});
   } else {
     text += decoder.decode();

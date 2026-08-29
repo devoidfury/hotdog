@@ -9,9 +9,6 @@
 
 type TypeCheckFn = (v: unknown) => boolean;
 
-/**
- * Map JSON Schema type names to JavaScript type checks.
- */
 const TYPE_CHECKS: Record<string, TypeCheckFn> = {
   string: (v) => typeof v === "string",
   number: (v) => typeof v === "number" && !Number.isNaN(v),
@@ -23,19 +20,13 @@ const TYPE_CHECKS: Record<string, TypeCheckFn> = {
   null: (v) => v === null,
 };
 
-/**
- * Get a human-readable type name for a JavaScript value.
- */
 function typeName(value: unknown): string {
   if (value === null) return "null";
   if (Array.isArray(value)) return "array";
   return typeof value;
 }
 
-/**
- * Check if a value matches a schema's default (deep equality).
- * Used to skip validation when value equals default.
- */
+/** Deep-ish equality via canonical JSON; used for default/const comparison. */
 function matchesDefault(value: unknown, defaultValue: unknown): boolean {
   try {
     return JSON.stringify(value) === JSON.stringify(defaultValue);
@@ -44,10 +35,7 @@ function matchesDefault(value: unknown, defaultValue: unknown): boolean {
   }
 }
 
-/**
- * Validate a single value against a schema node.
- * Returns an array of error strings (empty if valid).
- */
+/** Validate a value against a schema node; returns error strings (empty = valid). */
 export function validate(
   value: unknown,
   schema: unknown,
@@ -59,7 +47,6 @@ export function validate(
 
   const schemaObj = schema as Record<string, unknown>;
 
-  // ── Default: skip validation if value matches ──
   if (
     schemaObj.default !== undefined &&
     matchesDefault(value, schemaObj.default)
@@ -67,7 +54,6 @@ export function validate(
     return errors;
   }
 
-  // ── Const check ──
   if (schemaObj.const !== undefined) {
     if (!matchesDefault(value, schemaObj.const)) {
       errors.push(
@@ -77,7 +63,6 @@ export function validate(
     return errors;
   }
 
-  // ── Enum check ──
   if (schemaObj.enum !== undefined && Array.isArray(schemaObj.enum)) {
     const matches = schemaObj.enum.some(
       (e: unknown) => JSON.stringify(e) === JSON.stringify(value),
@@ -89,7 +74,6 @@ export function validate(
     }
   }
 
-  // ── Type check ──
   if (schemaObj.type !== undefined) {
     const typeStr = schemaObj.type as string;
     const checkFn = TYPE_CHECKS[typeStr];
@@ -101,7 +85,6 @@ export function validate(
     }
   }
 
-  // ── String constraints ──
   if (typeof value === "string") {
     if (
       schemaObj.minLength !== undefined &&
@@ -129,7 +112,6 @@ export function validate(
     }
   }
 
-  // ── Number constraints ──
   if (typeof value === "number") {
     if (
       schemaObj.minimum !== undefined &&
@@ -165,11 +147,9 @@ export function validate(
     }
   }
 
-  // ── Object: properties + required ──
   if (typeof value === "object" && value !== null && !Array.isArray(value)) {
     const valueObj = value as Record<string, unknown>;
 
-    // Required fields
     if (schemaObj.required && Array.isArray(schemaObj.required)) {
       for (const field of schemaObj.required as string[]) {
         if (!(field in valueObj)) {
@@ -180,7 +160,6 @@ export function validate(
       }
     }
 
-    // Validate known properties
     if (schemaObj.properties && typeof schemaObj.properties === "object") {
       for (const [key, propSchema] of Object.entries(
         schemaObj.properties as Record<string, unknown>,
@@ -196,7 +175,6 @@ export function validate(
       }
     }
 
-    // Additional properties check
     if (schemaObj.additionalProperties === false) {
       const allowedKeys = new Set([
         ...Object.keys((schemaObj.properties as Record<string, unknown>) || {}),
@@ -212,7 +190,6 @@ export function validate(
     }
   }
 
-  // ── Array: items ──
   if (Array.isArray(value)) {
     if (schemaObj.items) {
       for (let i = 0; i < value.length; i++) {
@@ -250,9 +227,7 @@ export interface ValidationResult {
   errors: string[];
 }
 
-/**
- * Validate arguments against a JSON Schema.
- */
+/** Validate an object against a JSON Schema. */
 export function validateParams(
   args: unknown,
   schema: unknown,
@@ -268,9 +243,6 @@ export function validateParams(
   return { valid: errors.length === 0, errors };
 }
 
-/**
- * Format validation errors as a human-readable message.
- */
 export function formatValidationErrors(errors: string[]): string {
   if (errors.length === 0) return "";
   const header = "Parameter validation failed:";
@@ -305,10 +277,7 @@ export function castAs<T>(value: unknown, schema?: unknown): T {
   return value as T;
 }
 
-/**
- * Validate and return a typed value. Throws on validation failure.
- * Use this when you want a hard guarantee that the value matches the schema.
- */
+/** Like castAs but throws instead of warning on validation failure. */
 export function parseOrThrow<T>(value: unknown, schema: unknown): T {
   const errors = validate(value, schema, "");
   if (errors.length > 0) {

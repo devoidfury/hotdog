@@ -378,7 +378,6 @@ export class CliOutputSink extends OutputSink {
   }
 
   override emitSessionState(event: SessionStateEvent): void {
-    // React to agent state changes emitted by the agent
     switch (event.key) {
       case "hideTools":
         this.hideTools = event.value as boolean;

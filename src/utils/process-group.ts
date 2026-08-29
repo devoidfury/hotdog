@@ -17,11 +17,6 @@ import type { ChildProcess, SpawnOptions } from "node:child_process";
 
 export const IS_POSIX = process.platform !== "win32";
 
-/**
- * Spawn options that put the child in its own process group (POSIX only).
- * Spread into spawn() options so killProcessGroup() can reach the child's
- * entire tree.
- */
 export const OWN_PROCESS_GROUP: Pick<SpawnOptions, "detached"> = {
   detached: IS_POSIX,
 };
@@ -40,6 +35,6 @@ export function killProcessGroup(child: ChildProcess, signal: NodeJS.Signals): v
       child.kill(signal);
     }
   } catch {
-    // group already exited; kill raced it
+    // ESRCH: the group exited between the check and the signal.
   }
 }

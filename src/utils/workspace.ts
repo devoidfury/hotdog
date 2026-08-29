@@ -10,9 +10,6 @@ import fs from "node:fs";
 import { ToolError, ConfigError } from "../core/error.ts";
 import { logger } from "../core/logger.ts";
 
-/**
- * A path tried to escape the workspace.
- */
 export class PathEscapeError extends ToolError {
   constructor(message: string) {
     super(message);
@@ -215,17 +212,10 @@ export class Workspace {
     this.deniedPatterns = deniedPatterns;
   }
 
-  /**
-   * The primary root (where relative paths resolve).
-   */
   get root(): string {
     return this.roots[0]!;
   }
 
-  /**
-   * Find the first configured root (config order) that contains the given
-   * absolute path, or null if none does.
-   */
   #ownerRoot(absolutePath: string): string | null {
     const resolved = resolveAbs(absolutePath);
     for (const r of this.roots) {
@@ -389,17 +379,11 @@ export class Workspace {
     return false;
   }
 
-  /**
-   * Check if a path is inside any workspace root without resolving.
-   */
   contains(absolutePath: string): boolean {
     return this.#ownerRoot(absolutePath) !== null;
   }
 
-  /**
-   * Convert an absolute path back to workspace-relative against the FIRST
-   * containing root (config order), or null if outside all roots.
-   */
+  /** Workspace-relative path against the first containing root, or null if outside. */
   relative(absolutePath: string): string | null {
     const resolved = resolveAbs(absolutePath);
     const owner = this.#ownerRoot(resolved);

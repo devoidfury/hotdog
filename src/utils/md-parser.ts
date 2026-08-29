@@ -178,9 +178,9 @@ export function parseMarkdown(markdown: string): MdDocument {
   return { type: "document", children: blocks };
 }
 
-// stableFrom: index of the first block that changed since the previous feed; earlier blocks' DOM can be left alone.
 export interface FeedResult {
   tree: MdDocument;
+  /** First block changed since the previous feed; earlier blocks' DOM can be left alone. */
   stableFrom: number;
 }
 
@@ -292,7 +292,6 @@ function areBlocksEqual(a: MdBlock, b: MdBlock): boolean {
   }
 }
 
-/** Index of the first block that differs between two parse trees. */
 export function getStablePrefix(prev: MdDocument, next: MdDocument): number {
   const len = Math.min(prev.children.length, next.children.length);
   for (let i = 0; i < len; i++) {
@@ -525,7 +524,7 @@ function parseList(
     } else if (trimmed === "") {
       break;
     } else if (items.length > 0) {
-      // continuation of previous list item
+      // Non-list line inside a list: treat it as a continuation of the last item.
       const continuation = parseInline(trimmed);
       items[items.length - 1]!.children.push(...continuation);
       i++;

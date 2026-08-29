@@ -15,8 +15,6 @@ export function render(
   return walkTokens(tokenize(template), context);
 }
 
-// ── Tokenizer ──────────────────────────────────────────────────────
-
 function tokenize(template: string): Token[] {
   const tokens: Token[] = [];
   let i = 0;
@@ -81,11 +79,9 @@ function findClose(str: string, from: number, delim: string): number {
 }
 
 /**
- * Parse the inside of a `{{ ... }}` or `{% ... %}` token, handling the
- * Tera-style whitespace-control dashes:
- *   - leading `-` (stripLeft):  strip trailing whitespace of the text before the token
- *   - trailing `-` (stripRight): strip leading whitespace of the text after the token
- * `expr` is the dash-free, trimmed expression (print) or tag (block).
+ * Parse a token body, handling Tera-style whitespace-control dashes:
+ * a leading `-` strips trailing whitespace before the token, a trailing `-`
+ * strips leading whitespace after it. `expr` is the dash-free expression.
  */
 function parseDelimited(inner: string): {
   stripLeft: boolean;
@@ -106,8 +102,6 @@ function stripPrevTrailingWhitespace(tokens: Token[]): void {
     last.value = last.value.replace(/\s+$/, "");
   }
 }
-
-// ── Main render loop ───────────────────────────────────────────────
 
 function walkTokens(
   tokens: Token[],
@@ -186,8 +180,6 @@ function walkIf(
       ? elseIdx + 1
       : bodyEnd;
   const end = condValue ? (elseIdx > 0 ? elseIdx : bodyEnd) : bodyEnd;
-  // Whitespace control is applied at tokenize time (adjacent text tokens are
-  // pre-stripped), so no runtime stripping is needed here.
   return walkTokens(tokens.slice(start, end), context);
 }
 
@@ -209,8 +201,6 @@ function walkFor(
       });
     }
   }
-  // Whitespace control is applied at tokenize time (adjacent text tokens are
-  // pre-stripped), so no runtime stripping is needed here.
   return output;
 }
 
@@ -219,8 +209,6 @@ function parseFor(tag: string): { varName: string; expr: string } {
   if (!m) throw new ParseError(`Invalid for tag: ${tag}`);
   return { varName: m[1]!, expr: m[2]! };
 }
-
-// ── Block finding ──────────────────────────────────────────────────
 
 function findBlock(
   tokens: Token[],
@@ -247,8 +235,6 @@ function findBlock(
   }
   return { bodyStart, elseIdx, bodyEnd };
 }
-
-// ── Expressions & filters ──────────────────────────────────────────
 
 function evalPrint(
   expr: string,

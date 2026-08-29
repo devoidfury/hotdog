@@ -518,13 +518,16 @@ export function resolveModelWithProvider(
 }
 
 // Priority: profile → CLI → provider default → config → default.
+// Returns null when nothing in the chain supplies a model; agent
+// construction is where that becomes a hard error (model-free subcommands
+// like `profiles` and `sessions` must keep working without one).
 export function resolveModel(
   cliModel: string | undefined,
   profileModel: string | null | undefined,
   configModel: string | null | undefined,
   provider: ProviderDef | undefined | null,
-  defaultModel: string,
-): string {
+  defaultModel: string | null,
+): string | null {
   if (profileModel) return resolveModelWithProvider(profileModel, provider);
   if (cliModel) return resolveModelWithProvider(cliModel, provider);
   if (provider?.models?.length)

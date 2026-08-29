@@ -137,7 +137,9 @@ describe("buildConfig", () => {
     const result = await buildConfig({ configDir: '/nonexistent/path' });
     expect(result.resolved).not.toBeNull();
     expect(result.modelRegistry).not.toBeNull();
-    expect(typeof result.resolved.model).toBe("string");
+    // No model anywhere in the resolution chain: resolution stays null and
+    // the hard error surfaces at agent construction, not here.
+    expect(result.resolved.model).toBeNull();
   });
 
   it("merges profile from file", async () => {

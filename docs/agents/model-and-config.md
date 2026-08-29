@@ -17,7 +17,7 @@
 ### Core Defaults
 All configurable defaults are defined in `src/core/core.config.json` as schema default layers.
 Each config key defines its own resolution layers. Common patterns:
-- **`defaultModel`**: CLI → profile → env → config → default
+- **`defaultModel`**: CLI → profile → env → config → provider's first model (no built-in default; agent construction errors when nothing resolves)
 - **`role`**: CLI → config → profile → default
 - **`aiUrl`/`apiKey`**: provider → CLI → config → env → default (provider is the natural source)
 

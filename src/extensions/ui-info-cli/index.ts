@@ -87,7 +87,7 @@ async function runInfo(cli: CliArgv, core: CoreContext): Promise<number> {
 
   let connectivity: ConnectivityResult;
   try {
-    await client.ping(resolved.model);
+    await client.ping(resolved.model || undefined);
     connectivity = { reachable: true, error: null };
   } catch (e: unknown) {
     connectivity = { reachable: false, error: (e as Error).message };
@@ -119,7 +119,7 @@ function printInfoText(
   const configDirAbs = resolved.configDir || resolveConfigDir(undefined);
   console.log(`  Config Dir:      ${configDirAbs}`);
   console.log(`  AI URL:          ${resolved.baseUrl}`);
-  console.log(`  Default Model:   ${resolved.model}`);
+  console.log(`  Default Model:   ${resolved.model || "(none)"}`);
   console.log(`  Skills Path:     ${(config?.skillsPath as string) || skillsPathFromConfig(config)}`);
   console.log(`  Chat Timeout:    ${resolved.chatTimeout}s`);
   console.log(`  Profile:         ${resolved.profileName}`);
@@ -363,7 +363,7 @@ async function printConfigDebug(
 
   console.log("=== Non-Declarative Values ===");
   console.log();
-  console.log(`  ${"model".padEnd(25)} → ${resolved.model}`);
+  console.log(`  ${"model".padEnd(25)} → ${resolved.model || "(none)"}`);
   console.log(`  ${"profileName".padEnd(25)} → ${resolved.profileName}`);
   console.log(`  ${"activeProvider".padEnd(25)} → ${resolved.activeProvider || "(none)"}`);
   console.log(

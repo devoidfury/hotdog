@@ -959,6 +959,41 @@ describe('Agent — end-to-end loop', () => {
     });
   });
 
+  describe('model resolution (no built-in default)', () => {
+    function buildAgentWithModel(model: unknown): Agent {
+      return new Agent({
+        hooks: createHooks(),
+        toolRegistry: createToolRegistry(),
+        llmClient: new MockLLMClient() as unknown as LlmClient,
+        model: model as string,
+        maxIterations: 10,
+        contextLimit: 128000,
+        config: { maxToolCallsPerIteration: 10, maxRetries: 5, toolRetryDelay: 1 },
+      });
+    }
+
+    it('throws a ConfigError when the model is an empty string', () => {
+      expect(() => buildAgentWithModel('')).toThrow(ConfigError);
+      expect(() => buildAgentWithModel('')).toThrow(/No model configured/);
+    });
+
+    it('throws a ConfigError when the model is null (nothing in the resolution chain)', () => {
+      // The resolution layer can pass null through when no layer (CLI,
+      // profile, env, config, provider) supplies a model.
+      expect(() => buildAgentWithModel(null)).toThrow(ConfigError);
+      expect(() => buildAgentWithModel(null)).toThrow(/No model configured/);
+    });
+
+    it('throws a ConfigError when the model is whitespace-only', () => {
+      expect(() => buildAgentWithModel('   ')).toThrow(/No model configured/);
+    });
+
+    it('accepts a valid model', () => {
+      const agent = buildAgentWithModel('test-model');
+      expect(agent.model).toBe('test-model');
+    });
+  });
+
   describe('maxToolCallsPerIteration', () => {
     it('skips tool calls exceeding maxToolCallsPerIteration limit', async () => {
       const tool1 = simpleTool('tool1', 'result1');

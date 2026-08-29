@@ -78,10 +78,12 @@ These are the top-level configuration keys available in `defaults.json`. Keys no
 
 - **Type:** `string`
 - **CLI flag:** `--model`
-- **Default:** `"qwen3.5-0.8b"`
-- **Resolution:** CLI `--model` > profile > env `HOTDOG_MODEL`/`AI_MODEL` > config > default
+- **Default:** none (required)
+- **Resolution:** CLI `--model` > profile > env `HOTDOG_MODEL`/`AI_MODEL` > config > provider's first model
 
 The default AI model used when no other model is specified. Format: `providerName/modelName`.
+
+There is no built-in fallback model: when nothing in the resolution chain supplies one, the resolved model is null and agent creation (interactive mode, one-shot prompts, WebUI sessions) fails with a `No model configured` configuration error. Model-free subcommands (`profiles`, `sessions`) still work with an incomplete config.
 
 ```json
 { "defaultModel": "ai365/dsv4" }

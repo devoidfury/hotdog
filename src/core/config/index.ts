@@ -127,7 +127,7 @@ export interface DefaultConfig extends Record<string, unknown> {
   systemPromptTemplate: string | null;
   aiUrl: string | null;
   apiKey: string | null;
-  defaultModel: string;
+  defaultModel: string | null;
   defaultProvider: string | null;
   defaultSubcommand: string | null;
   temperature: number | null;
@@ -167,7 +167,7 @@ export function getDefaultConfig(
     systemPromptTemplate: null,
     aiUrl: getLayerDefault(CONFIG_SCHEMA.baseUrl) as string | null,
     apiKey: null,
-    defaultModel: getLayerDefault(CONFIG_SCHEMA.defaultModel) as string,
+    defaultModel: getLayerDefault(CONFIG_SCHEMA.defaultModel) as string | null,
     defaultProvider: null,
     defaultSubcommand: getLayerDefault(CONFIG_SCHEMA.defaultSubcommand) as
       string | null,
@@ -299,7 +299,8 @@ export interface CliArgv {
 
 // Added by buildAgentConfig on top of the schema-resolved keys.
 export interface BuildAgentConfigExtra {
-  model: string;
+  /** Resolved model, or null when no layer supplies one (agent creation fails with a ConfigError). */
+  model: string | null;
   configDir: string;
   profile: Record<string, unknown>;
   profileBody: string;
@@ -338,7 +339,7 @@ export async function buildConfig(cliArgv: CliArgv): Promise<{
     config: config as CoreConfigWithExtensions,
     configDir,
     providers: config.providers || [],
-    defaultModel: getLayerDefault(CONFIG_SCHEMA.defaultModel) as string,
+    defaultModel: getLayerDefault(CONFIG_SCHEMA.defaultModel) as string | null,
   });
 
   const modelRegistry = await buildModelRegistry(
@@ -363,14 +364,14 @@ export async function buildAgentConfig(options: {
   config: CoreConfigWithExtensions;
   configDir: string;
   providers?: ProviderDef[];
-  defaultModel?: string;
+  defaultModel?: string | null;
 }): Promise<BuildAgentConfig> {
   const {
     cli,
     config,
     configDir,
     providers = [],
-    defaultModel = getLayerDefault(CONFIG_SCHEMA.defaultModel) as string,
+    defaultModel = getLayerDefault(CONFIG_SCHEMA.defaultModel) as string | null,
   } = options;
 
   const context: ResolutionContext = {

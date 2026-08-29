@@ -208,7 +208,7 @@ async function buildFullConfig(
     config: config as CoreConfigWithExtensions,
     configDir,
     providers: config.providers || [],
-    defaultModel: getLayerDefault(CONFIG_SCHEMA.defaultModel) as string,
+    defaultModel: getLayerDefault(CONFIG_SCHEMA.defaultModel) as string | null,
   });
 
   const modelRegistry = await buildModelRegistry(

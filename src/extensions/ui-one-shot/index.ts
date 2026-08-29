@@ -116,7 +116,7 @@ async function handlePromptSubcommand(
       hooks: core.hooks,
       toolRegistry: core.toolRegistry,
       llmClient: (agentConfig.llmClient as LlmClient) || llmClient,
-      model: (agentConfig.model as string) || resolved.model,
+      model: (agentConfig.model as string) || resolved.model || "",
       maxIterations:
         (agentConfig.maxIterations as number) || resolved.maxIterations || 100,
       contextLimit: resolved.contextLimit,

@@ -124,6 +124,15 @@ export class Agent implements AgentLike {
     if (options.contextLimit == null) {
       throw ConfigError.MissingConfig("contextLimit");
     }
+    if (typeof options.model !== "string" || options.model.trim() === "") {
+      // No model anywhere in the resolution chain (CLI --model, profile,
+      // env, config default_model, provider models). Failing here -- at
+      // agent construction -- keeps model-free subcommands (profiles,
+      // sessions) usable with an incomplete config.
+      throw new ConfigError(
+        "No model configured. Set default_model in your config file, pass --model, or set the HOTDOG_MODEL env var.",
+      );
+    }
     this.hooks = options.hooks;
     this.#toolRegistry = options.toolRegistry;
     this.llmClient = options.llmClient;

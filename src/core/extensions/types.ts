@@ -198,7 +198,8 @@ export interface ResolvedConfig {
   maxIterations: number;
   contextLimit: number;
 
-  model: string;
+  /** Resolved model, or null when no layer supplies one (agent creation fails with a ConfigError). */
+  model: string | null;
   modelRegistry: Record<string, ModelConfig>;
   profileName: string;
   profileDef?: ProfileDef;

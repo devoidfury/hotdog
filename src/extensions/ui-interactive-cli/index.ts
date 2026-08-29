@@ -341,7 +341,7 @@ export async function buildInteractiveAgent(
     hooks: core.hooks,
     toolRegistry: core.toolRegistry,
     llmClient: (agentConfig.llmClient as LlmClient | undefined) || llmClient,
-    model: (agentConfig.model as string) || (resolved.model as string),
+    model: (agentConfig.model as string) || (resolved.model as string | null) || "",
     maxIterations: (agentConfig.maxIterations as number) || (resolved.maxIterations as number) || 100,
     contextLimit: (agentConfig.contextLimit as number) || (resolved.contextLimit as number),
     hideTools:

@@ -281,7 +281,7 @@ export class LlmClient {
         baseDelayMs: this.retryBaseDelayMs,
       });
 
-      yield* this._processSSE(response, modelConfig);
+      yield* this._processSSE(response, modelConfig, url, apiKey, effectiveSessionId);
     } finally {
       removeCancelListener?.();
     }
@@ -361,13 +361,22 @@ export class LlmClient {
     return resp;
   }
 
-  async *_processSSE(response: Response, modelConfig: ModelConfig): AsyncGenerator<StreamEvent> {
+  async *_processSSE(
+    response: Response,
+    modelConfig: ModelConfig,
+    url: string,
+    apiKey: string | null,
+    sessionId: string,
+  ): AsyncGenerator<StreamEvent> {
     const protocol = this.protocolFor(modelConfig);
+    // Same resolved provider context as _doRequest: a protocol that reads
+    // ctx.baseUrl or ctx.apiKey while streaming must see the provider-
+    // resolved values, not the raw client-level fallbacks.
     const ctx: ProtocolContext = {
       mangler: this.#mangler,
-      baseUrl: this.baseUrl || "",
-      apiKey: this.apiKey,
-      sessionId: this.sessionId,
+      baseUrl: url,
+      apiKey,
+      sessionId,
     };
     yield* protocol.parseStream(response, ctx);
   }

@@ -3,6 +3,7 @@
 import { describe, it, expect, beforeEach, afterEach } from "bun:test";
 import { LlmClient } from "../../src/core/llm-client/client.ts";
 import type { ModelConfig } from "../../src/core/config/providers.ts";
+import { createLlmProtocolRegistry, type LlmProtocol, type ProtocolContext } from "../../src/core/llm-client/protocol.ts";
 import { LlmError } from "../../src/core/error.ts";
 import { Message } from "../../src/core/context/message.ts";
 
@@ -134,7 +135,7 @@ describe("LlmClient.chatStreamCancellable", () => {
       }
       return {
         headers: new Map([["content-type", "text/event-stream"]]),
-        get: (name: string) => "text/event-stream",
+        get: () => "text/event-stream",
         body: {
           getReader: () => {
             let done = false;
@@ -227,6 +228,53 @@ describe("LlmClient.chatStreamCancellable", () => {
 
     expect(events).toHaveLength(1);
     expect((events[0]! as any).content).toBe("Hello");
+  });
+
+  it("passes provider-resolved url/apiKey/sessionId to parseStream ctx", async () => {
+    let captured: ProtocolContext | null = null;
+    const registry = createLlmProtocolRegistry();
+    registry.register({
+      id: "capture",
+      buildRequest: () => ({ path: "/v1/chat/completions", body: {} }),
+      buildHeaders: () => ({}),
+      parseStream: async function* (_response: Response, ctx: ProtocolContext) {
+        captured = ctx;
+        yield { type: "content", content: "Hello" };
+      },
+    } as LlmProtocol);
+
+    const client = new LlmClient({
+      chatTimeoutSecs: 30,
+      maxRetries: 3,
+      // Raw client-level fallbacks: must NOT be what the protocol sees.
+      baseUrl: "http://fallback.com",
+      apiKey: "fallback-key",
+      sessionId: "client-session",
+      markerMangler: null,
+      providers: [{ name: "myprov", url: "http://prov.example", apiKey: "prov-key", models: [] }],
+      llmProtocolRegistry: registry,
+    });
+    // The capture protocol ignores the response body.
+    client._doRequest = async (): Promise<Response> =>
+      ({ headers: new Map(), get: () => "", body: null }) as unknown as Response;
+
+    const gen = client.chatStreamCancellable(
+      [makeMsg("user", "Hi")],
+      mc({ name: "myprov/model-x", protocol: "capture" }),
+      [],
+      null,
+    );
+
+    const events = [];
+    for await (const event of gen) {
+      events.push(event);
+    }
+
+    expect(events).toHaveLength(1);
+    expect(captured).not.toBeNull();
+    expect(captured!.baseUrl).toBe("http://prov.example");
+    expect(captured!.apiKey).toBe("prov-key");
+    expect(captured!.sessionId).toBe("client-session");
   });
 });
 

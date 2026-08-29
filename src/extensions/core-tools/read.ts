@@ -1,4 +1,5 @@
 import fs from "node:fs/promises";
+import type { Stats } from "node:fs";
 import path from "node:path";
 import {
   toolDef,
@@ -111,19 +112,21 @@ export class ReadTool {
       return ToolResult.err(`Error resolving path: ${(e as Error).message}`);
     }
 
+    let stat: Stats | null = null;
     try {
-      const stat = await fs.stat(resolved);
-      if (stat.isDirectory()) {
-        const listing = await listDirectoryDepth1(resolved);
-        return ToolResult.ok(
-          `'${filePath}' is a directory. Here's a depth-1 listing:\n${listing}`,
-        ).withEntries({
-          path: resolved,
-          type: "directory",
-        });
-      }
+      stat = await fs.stat(resolved);
     } catch {
       // stat failed — fall through to file-not-found handling below
+    }
+
+    if (stat?.isDirectory()) {
+      const listing = await listDirectoryDepth1(resolved);
+      return ToolResult.ok(
+        `'${filePath}' is a directory. Here's a depth-1 listing:\n${listing}`,
+      ).withEntries({
+        path: resolved,
+        type: "directory",
+      });
     }
 
     try {
@@ -137,7 +140,9 @@ export class ReadTool {
 
     const mimeType = getImageMimeType(resolved);
     if (mimeType) {
-      return await readImage(resolved, mimeType, filePath, this.maxImageSize);
+      // Size comes from the stat above; if that stat raced and missed, 0
+      // just skips the size check and the read below decides.
+      return await readImage(resolved, mimeType, filePath, this.maxImageSize, stat?.size ?? 0);
     }
 
     return await readLines(resolved, offset, limit);
@@ -228,28 +233,22 @@ function getImageMimeType(filePath: string): string | null {
   return IMAGE_EXTENSIONS[ext] ?? null;
 }
 
-async function readImage(filePath: string, mimeType: string, originalPath: string, maxImageSize: number): Promise<ToolResult> {
+async function readImage(filePath: string, mimeType: string, originalPath: string, maxImageSize: number, size: number): Promise<ToolResult> {
   try {
-    const stats = await fs.stat(filePath);
-    if (stats.size > maxImageSize) {
+    if (size > maxImageSize) {
       return ToolResult.err(
-        `Image file too large: ${(stats.size / 1024 / 1024).toFixed(1)}MB (max ${maxImageSize / 1024 / 1024}MB)`,
+        `Image file too large: ${(size / 1024 / 1024).toFixed(1)}MB (max ${maxImageSize / 1024 / 1024}MB)`,
       );
     }
 
+    // Single read: binary images are base64-encoded; .base64 files are
+    // already base64 text.
     const buffer = await fs.readFile(filePath);
-    const base64 = buffer.toString("base64");
+    const data =
+      mimeType === "application/octet-stream"
+        ? buffer.toString("utf-8").trim()
+        : buffer.toString("base64");
 
-    // .base64 files are already base64 text, so read them as text
-    let data: string;
-    if (mimeType === "application/octet-stream") {
-      const text = (await fs.readFile(filePath, "utf-8")).trim();
-      data = text;
-    } else {
-      data = base64;
-    }
-
-    const size = stats.size;
     const image = { type: "image_url", mimeType, data };
 
     return ToolResult.ok(

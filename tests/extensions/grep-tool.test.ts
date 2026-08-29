@@ -179,3 +179,57 @@ describe("GrepTool.execute", () => {
     expect(resultStr(result)).toContain("nested.js");
   });
 });
+
+describe("GrepTool.execute — native fallback (no rg on PATH)", () => {
+  // rg/fd are present in most dev environments, so execute() never reaches
+  // the native walker. Hide rg via PATH to exercise isBinary() + grepNative.
+  async function runNative(tool: GrepTool, args: Record<string, unknown>): Promise<string> {
+    const oldPath = process.env.PATH;
+    const emptyBin = tmpDir("hotdog-empty-bin-");
+    process.env.PATH = emptyBin;
+    try {
+      const result = getDisplay(await tool.execute(args, toolCtx()));
+      return resultStr(result);
+    } finally {
+      process.env.PATH = oldPath;
+      cleanupDir(emptyBin);
+    }
+  }
+
+  it("skips binary files and searches text files", async () => {
+    const dir2 = tmpDir();
+    try {
+      // NUL byte within the first 512 bytes -> binary
+      fsSync.writeFileSync(
+        path.join(dir2, "data.bin"),
+        Buffer.concat([Buffer.from("hello"), Buffer.from([0]), Buffer.from("hello")]),
+      );
+      fsSync.writeFileSync(path.join(dir2, "notes.txt"), "hello plain text");
+
+      const tool = new GrepTool({ maxResults: 100, maxOutputLines: 600 });
+      const output = await runNative(tool, { pattern: "hello", path: dir2 });
+
+      expect(output).toContain("notes.txt");
+      expect(output).not.toContain("data.bin");
+    } finally {
+      cleanupDir(dir2);
+    }
+  });
+
+  it("treats a NUL past byte 512 as text (only the first 512 bytes are probed)", async () => {
+    const dir2 = tmpDir();
+    try {
+      const buf = Buffer.alloc(600);
+      buf.fill(0x61, 0, 599); // 'a' x 599, then a NUL at byte 599
+      buf[599] = 0;
+      fsSync.writeFileSync(path.join(dir2, "sparse.bin"), buf);
+
+      const tool = new GrepTool({ maxResults: 100, maxOutputLines: 600 });
+      const output = await runNative(tool, { pattern: "a", path: dir2 });
+
+      expect(output).toContain("sparse.bin");
+    } finally {
+      cleanupDir(dir2);
+    }
+  });
+});

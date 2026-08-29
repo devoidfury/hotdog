@@ -89,12 +89,17 @@ function matchesType(fileExt: string, typeFilter: string | null): boolean {
 }
 
 async function isBinary(filePath: string): Promise<boolean> {
+  let handle: Awaited<ReturnType<typeof fs.open>> | undefined;
   try {
-    const data = await fs.readFile(filePath);
-    const slice = data.length > 512 ? data.subarray(0, 512) : data;
-    return slice.indexOf(0) !== -1;
+    handle = await fs.open(filePath, "r");
+    // Only the first 512 bytes matter for NUL detection; don't read the
+    // whole file into memory.
+    const { buffer, bytesRead } = await handle.read(Buffer.alloc(512), 0, 512, 0);
+    return buffer.subarray(0, bytesRead).indexOf(0) !== -1;
   } catch {
     return true;
+  } finally {
+    await handle?.close();
   }
 }
 

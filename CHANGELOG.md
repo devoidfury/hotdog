@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- [BRK] the placeholder `qwen3.5-0.8b` default model is gone -- when nothing in the model resolution chain (CLI `--model`, profile, env, config `default_model`, provider models) supplies a model, agent creation now fails with a `No model configured` configuration error instead of silently using a bogus model; model-free subcommands (`profiles`, `sessions`, `info`, `show-prompt`) keep working with an incomplete config
+  - fix - the `HOTDOG_MODEL`/`AI_MODEL` env layers of the `defaultModel` schema were dead for the final resolved model (only the raw config value reached `resolveModel`); they are honored now
+
+- llm-client
+  - `chatStreamCancellable` now cancels the response body when the consumer abandons the stream (cancellation or early return), so the connection is released instead of lingering
+
 - config
   - the previously hardcoded fallback context window is now the `contextLimit` core config key (default `128000`) -- it feeds the model registry fallback, the agent, and compaction, so small-context local models can lower the base limit from `defaults.json`; compaction can override it per-extension via `compaction.contextLimit`
 

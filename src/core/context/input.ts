@@ -1,18 +1,6 @@
 // The Input interface decouples question/answer collection from the tool itself;
 // the UI (CLI, TUI, etc.) provides its own implementation.
 
-const INPUT_EVENT = {
-  TEXT: "text",
-  COMMAND: "command",
-} as const;
-
-type InputEventType = (typeof INPUT_EVENT)[keyof typeof INPUT_EVENT];
-
-export interface InputEvent {
-  type: InputEventType;
-  value: string;
-}
-
 export interface QuestionDef {
   key: string;
   prompt?: string;
@@ -21,18 +9,6 @@ export interface QuestionDef {
   required?: boolean;
   allowOther?: boolean;
   allow_other?: boolean;
-}
-
-export function parseInput(input: string): InputEvent {
-  const trimmed = input.trim();
-  if (trimmed.startsWith("/")) {
-    const cmd = trimmed.slice(1).trim();
-    if (cmd.length === 0) {
-      return { type: INPUT_EVENT.TEXT, value: trimmed };
-    }
-    return { type: INPUT_EVENT.COMMAND, value: cmd };
-  }
-  return { type: INPUT_EVENT.TEXT, value: trimmed };
 }
 
 /**

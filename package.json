@@ -11,7 +11,7 @@
   },
   "description": "AI agent harness with tool calling support. Zero dependencies, just bun.",
   "engines": {
-    "bun": ">=1.0"
+    "bun": ">=1.2"
   },
   "author": "Thomas Hunkapiller <tom@furycodes.com> (http://furycodes.com/)",
   "repository": "github:devoidfury/hotdog",

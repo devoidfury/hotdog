@@ -28,28 +28,21 @@ function _messageCharCount(msg: MessageLike): number {
     return 0;
   };
 
-  switch (msg.role) {
-    case "user":
-    case "system":
-      return getContentLength(msg.content);
-    case "assistant": {
-      let chars = getContentLength(msg.content);
-      const reasoning = msg.reasoningContent ?? msg.reasoning_content;
-      if (reasoning) chars += reasoning.length;
-      const toolCalls = msg.toolCalls ?? msg.tool_calls;
-      if (Array.isArray(toolCalls)) {
-        for (const tc of toolCalls) {
-          const fn = (tc as { function?: { name?: string; arguments?: string } }).function;
-          chars += (fn?.name || "").length + (fn?.arguments || "").length;
-        }
-      }
-      return chars;
-    }
-    case "tool":
-      return getContentLength(msg.content);
-    default:
-      return getContentLength(msg.content);
+  if (msg.role !== "assistant") {
+    return getContentLength(msg.content);
   }
+
+  let chars = getContentLength(msg.content);
+  const reasoning = msg.reasoningContent ?? msg.reasoning_content;
+  if (reasoning) chars += reasoning.length;
+  const toolCalls = msg.toolCalls ?? msg.tool_calls;
+  if (Array.isArray(toolCalls)) {
+    for (const tc of toolCalls) {
+      const fn = (tc as { function?: { name?: string; arguments?: string } }).function;
+      chars += (fn?.name || "").length + (fn?.arguments || "").length;
+    }
+  }
+  return chars;
 }
 
 export function estimateContextTokens(messages: MessageLike[]): number {

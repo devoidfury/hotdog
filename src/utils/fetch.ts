@@ -7,8 +7,7 @@ export const METHODS_WITH_BODY = ["POST", "PUT", "PATCH"];
 
 /**
  * Combine multiple abort signals into one. Whichever input signal aborts
- * first wins. Uses AbortSignal.any when available (Bun >= 1.1) with a
- * manual fallback for older runtimes.
+ * first wins.
  *
  * @param signals - Signals to combine.
  * @returns A single signal, or undefined if none were provided.
@@ -16,24 +15,7 @@ export const METHODS_WITH_BODY = ["POST", "PUT", "PATCH"];
 function combineSignals(signals: AbortSignal[]): AbortSignal | undefined {
   if (signals.length === 0) return undefined;
   if (signals.length === 1) return signals[0];
-  const anySignal = (
-    AbortSignal as { any?: (signals: AbortSignal[]) => AbortSignal }
-  ).any;
-  if (typeof anySignal === "function") {
-    return anySignal(signals);
-  }
-  const controller = new AbortController();
-  const abort = () => {
-    if (!controller.signal.aborted) controller.abort();
-  };
-  for (const signal of signals) {
-    if (signal.aborted) {
-      controller.abort();
-      return controller.signal;
-    }
-    signal.addEventListener("abort", abort, { once: true });
-  }
-  return controller.signal;
+  return AbortSignal.any(signals);
 }
 
 /**

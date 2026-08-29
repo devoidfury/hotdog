@@ -1,5 +1,5 @@
 // Tests for context/output.ts — OutputSink, NoopSink.
-// parseInput and NoopInput are tested in input.test.ts.
+// NoopInput is tested in input.test.ts.
 
 import { describe, it, expect, beforeEach } from "bun:test";
 import {

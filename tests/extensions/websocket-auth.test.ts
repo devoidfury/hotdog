@@ -198,11 +198,23 @@ describe("createAuthMiddleware", () => {
   });
 
   describe("startCleanup / stopCleanup", () => {
-    it("startCleanup is idempotent and stopCleanup cleans up", () => {
-      middleware.startCleanup();
-      middleware.startCleanup(); // idempotent, should not throw
-      middleware.stopCleanup();
-      middleware.stopCleanup(); // idempotent, should not throw
+    it("startCleanup is idempotent and stopCleanup clears the timer", () => {
+      const setIntervalSpy = spyOn(globalThis, "setInterval");
+      const clearIntervalSpy = spyOn(globalThis, "clearInterval");
+      try {
+        middleware.startCleanup();
+        middleware.startCleanup(); // idempotent: must not start a second timer
+        expect(setIntervalSpy).toHaveBeenCalledTimes(1);
+
+        middleware.stopCleanup();
+        expect(clearIntervalSpy).toHaveBeenCalledTimes(1);
+
+        middleware.stopCleanup(); // idempotent
+        expect(clearIntervalSpy).toHaveBeenCalledTimes(1);
+      } finally {
+        setIntervalSpy.mockRestore();
+        clearIntervalSpy.mockRestore();
+      }
     });
   });
 });

@@ -1,7 +1,7 @@
 // Tests for session restoration and replay — replayEntriesIntoContext, readSessionEntries, sessionExists.
 // Merged from session-replay.test.ts + session-restoration.test.ts to reduce duplication.
 
-import { test, expect } from "bun:test";
+import { test, expect, beforeAll, afterAll } from "bun:test";
 import {
   replayEntriesIntoContext,
   readSessionEntries,
@@ -12,9 +12,22 @@ import type { LogEntry } from "../../src/core/session/session-log.ts";
 import { TestSessionLog } from "../mocks/io.ts";
 import { Message } from "../../src/core/context/message.ts";
 import { MessageLog } from "../../src/core/context/message-log.ts";
-import { mkdirSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
+import os from "node:os";
 import { join } from "node:path";
-import { homedir } from "node:os";
+
+// Use an isolated temp directory (via HOTDOG_SESSIONS_DIR) so tests never
+// write into the user's real ~/.cache/hotdog/sessions.
+const TEST_SESSIONS_DIR = mkdtempSync(join(os.tmpdir(), "hotdog-sessions-replay-"));
+
+beforeAll(() => {
+  process.env.HOTDOG_SESSIONS_DIR = TEST_SESSIONS_DIR;
+});
+
+afterAll(() => {
+  delete process.env.HOTDOG_SESSIONS_DIR;
+  try { rmSync(TEST_SESSIONS_DIR, { recursive: true, force: true }); } catch {}
+});
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -23,12 +36,11 @@ function uniqueSessionId(prefix: string) {
 }
 
 function setupSessionDir() {
-  const dir = join(homedir(), ".cache", "hotdog", "sessions");
-  mkdirSync(dir, { recursive: true });
+  mkdirSync(TEST_SESSIONS_DIR, { recursive: true });
 }
 
 function cleanupSession(sessionId: string) {
-  const testFile = join(homedir(), ".cache", "hotdog", "sessions", `${sessionId}.jsonl`);
+  const testFile = join(TEST_SESSIONS_DIR, `${sessionId}.jsonl`);
   try { rmSync(testFile); } catch { /* ignore */ }
 }
 
@@ -258,6 +270,67 @@ test("replayEntriesIntoContext handles PROMPT source as user messages", () => {
   expect(replayed).toBe(1);
   expect(agent.log.at(0)!.role).toBe("user");
   expect(agent.log.at(0)!.content).toBe("Prompt template rendered content");
+});
+
+// ── Images ──────────────────────────────────────────────────────────────────
+
+test("replayEntriesIntoContext preserves images in user messages", () => {
+  const agent = createMockAgent();
+  const entries: LogEntry[] = [
+    { ts: "2024-01-01T00:00:00Z", session_id: "test", source: LOG_SOURCE.INPUT, content: "What is this?", images: [{ type: "image_url", mimeType: "image/png", data: "abc" }] },
+  ];
+
+  const replayed = replayEntriesIntoContext(agent, entries);
+  expect(replayed).toBe(1);
+  expect(agent.log.at(0)!.images).toEqual([
+    { type: "image_url", mimeType: "image/png", data: "abc" },
+  ]);
+});
+
+test("replayEntriesIntoContext handles multiple images", () => {
+  const agent = createMockAgent();
+  const entries: LogEntry[] = [
+    {
+      ts: "2024-01-01T00:00:00Z",
+      session_id: "test",
+      source: LOG_SOURCE.INPUT,
+      content: "Compare these",
+      images: [
+        { type: "image_url", mimeType: "image/png", data: "img1" },
+        { type: "image_url", mimeType: "image/jpeg", data: "img2" },
+      ],
+    },
+  ];
+
+  const replayed = replayEntriesIntoContext(agent, entries);
+  expect(replayed).toBe(1);
+  expect(agent.log.at(0)!.images!.length).toBe(2);
+  expect(agent.log.at(0)!.images![0]!.mimeType).toBe("image/png");
+  expect(agent.log.at(0)!.images![1]!.mimeType).toBe("image/jpeg");
+});
+
+test("replayEntriesIntoContext handles PROMPT source with images", () => {
+  const agent = createMockAgent();
+  const entries: LogEntry[] = [
+    { ts: "2024-01-01T00:00:00Z", session_id: "test", source: LOG_SOURCE.PROMPT, content: "Template with image", images: [{ type: "image_url", mimeType: "image/webp", data: "webpimg" }] },
+  ];
+
+  const replayed = replayEntriesIntoContext(agent, entries);
+  expect(replayed).toBe(1);
+  expect(agent.log.at(0)!.role).toBe("user");
+  expect(agent.log.at(0)!.images).toEqual([
+    { type: "image_url", mimeType: "image/webp", data: "webpimg" },
+  ]);
+});
+
+test("replayed message getTextContent returns text without images", () => {
+  const agent = createMockAgent();
+  const entries: LogEntry[] = [
+    { ts: "2024-01-01T00:00:00Z", session_id: "test", source: LOG_SOURCE.INPUT, content: "What is this?", images: [{ type: "image_url", mimeType: "image/png", data: "abc" }] },
+  ];
+
+  replayEntriesIntoContext(agent, entries);
+  expect(agent.log.at(0)!.getTextContent()).toBe("What is this?");
 });
 
 test("replayEntriesIntoContext handles mixed entry types", () => {

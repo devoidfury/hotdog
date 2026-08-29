@@ -1,15 +1,15 @@
 import { describe, it, expect, beforeAll, afterAll } from 'bun:test';
 import { ReviewTool } from '../../src/extensions/ui-session-review-cli/review.ts';
 import { resultStr } from '../helpers.ts';
-import { mkdirSync, writeFileSync, rmSync, symlinkSync, unlinkSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, writeFileSync, rmSync, symlinkSync, unlinkSync } from 'node:fs';
+import os from 'node:os';
 import { join } from 'node:path';
 
 // Isolated temp dir so tests never touch the user's real session files.
-const TEST_SESSIONS_DIR = join(import.meta.dir, "..", ".test-review-sessions");
+const TEST_SESSIONS_DIR = mkdtempSync(join(os.tmpdir(), 'hotdog-sessions-review-tool-'));
 
 beforeAll(() => {
   process.env.HOTDOG_SESSIONS_DIR = TEST_SESSIONS_DIR;
-  mkdirSync(TEST_SESSIONS_DIR, { recursive: true });
 });
 
 afterAll(() => {

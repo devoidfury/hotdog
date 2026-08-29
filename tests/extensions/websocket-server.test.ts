@@ -11,18 +11,18 @@ import type { AgentLike } from "../../src/core/session/index.ts";
 import { createWsMockCore, createWsMockAgentFactory, createWsMockWs, makeWsMockAgent } from "../mocks/websocket.ts";
 import { createFixture, simpleTool } from "../helpers.ts";
 import { Message } from "../../src/core/context/message.ts";
-import { mkdirSync, rmSync, writeFileSync, existsSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync, existsSync } from "node:fs";
+import os from "node:os";
 import { join } from "node:path";
 
 type MockWs = ReturnType<typeof createWsMockWs>;
 
 // Isolated sessions dir for cold-log tests (listLogs/viewLog/loadLog/deleteLog).
-const SESSIONS_DIR = join(import.meta.dir, "..", ".test-sessions-ws");
+const SESSIONS_DIR = mkdtempSync(join(os.tmpdir(), "hotdog-sessions-ws-"));
 const FIXTURE_LOG_ID = "ws-fixture-log";
 
 beforeAll(() => {
   process.env.HOTDOG_SESSIONS_DIR = SESSIONS_DIR;
-  mkdirSync(SESSIONS_DIR, { recursive: true });
 });
 
 afterAll(() => {

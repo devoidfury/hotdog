@@ -10,8 +10,10 @@ import { getDisplay } from "../helpers.ts";
 
 // ── Local Test Server ──────────────────────────────────────────────────────
 
-const TEST_PORT = 18932;
-const BASE_URL = `http://localhost:${TEST_PORT}`;
+// Ephemeral port (0): fixed ports collide when two `bun test` runs are
+// concurrent. Assigned in startTestServer, read by the tests at run time.
+let TEST_PORT = 0;
+let BASE_URL = "";
 
 let server: ReturnType<typeof Bun.serve> | null = null;
 
@@ -25,7 +27,7 @@ const sampleJson = { id: 1, title: "Test Post", body: "Lorem ipsum", userId: 1 }
 
 function startTestServer(): void {
   server = Bun.serve({
-    port: TEST_PORT,
+    port: 0,
     fetch(req) {
       const url = new URL(req.url);
       const method = req.method;
@@ -155,6 +157,8 @@ function startTestServer(): void {
       });
     },
   });
+  TEST_PORT = server.port!;
+  BASE_URL = `http://localhost:${TEST_PORT}`;
 }
 
 async function stopTestServer(): Promise<void> {
@@ -163,6 +167,17 @@ async function stopTestServer(): Promise<void> {
     server = null;
   }
 }
+
+// Started once for the whole file: the input-validation and URL-restriction
+// tests reference BASE_URL without issuing requests, so the port must be
+// assigned before any test runs.
+beforeAll(() => {
+  startTestServer();
+});
+
+afterAll(async () => {
+  await stopTestServer();
+});
 
 // ── Tool Definition ─────────────────────────────────────────────────────────
 
@@ -500,14 +515,6 @@ describe("FetchTool URL restrictions", () => {
 // ── Integration tests (local server) ────────────────────────────────────────
 
 describe("FetchTool integration", () => {
-  beforeAll(() => {
-    startTestServer();
-  });
-
-  afterAll(async () => {
-    await stopTestServer();
-  });
-
   describe("HTML handling", () => {
     it("converts HTML to GFM when showOriginal is not true", async () => {
       const tool = new FetchTool({ timeoutMs: 30000, maxBodyLength: 8000, allowPrivateHosts: true });

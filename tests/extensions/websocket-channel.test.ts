@@ -327,7 +327,7 @@ describe("WebSocketChannel - write()", () => {
 });
 
 describe("WebSocketChannel - write error handling", () => {
-  it("marks as not ready when send throws", () => {
+  it("marks as not ready when an event send throws", () => {
     let savedHandler: ((event: OutputEvent) => void) | null = null;
     const sm = createMockSessionManager({
       onSessionEvents: mock((_sessionId, handler) => {
@@ -335,16 +335,7 @@ describe("WebSocketChannel - write error handling", () => {
         return () => {};
       }),
     });
-
-    const ws = {
-      readyState: WebSocket.OPEN,
-      send: () => { throw new Error("Connection closed"); },
-      close: () => {},
-      onopen: null,
-      onclose: null,
-      onerror: null,
-      onmessage: null,
-    } as unknown as Bun.ServerWebSocket;
+    const ws = createMockWs({ send: mock(() => { throw new Error("Connection closed"); }) });
 
     const channel = new WebSocketChannel({
       sessionManager: sm,

@@ -509,7 +509,9 @@ describe("Workspace — multi-root", () => {
   });
 
   it("rejects a symlink inside the secondary root that points outside", () => {
-    const target = path.join(os.tmpdir(), "hotdog-multi-outside.txt");
+    // Target lives in this run's base dir (unique per run) but outside both
+    // configured roots.
+    const target = path.join(path.dirname(rootA), "outside.txt");
     fs.writeFileSync(target, "secret");
     const link = path.join(rootB, "out-link");
     fs.symlinkSync(target, link);
@@ -536,7 +538,9 @@ describe("Workspace — multi-root", () => {
 
   it("rejects a dangling symlink final component under the secondary root", () => {
     const link = path.join(rootB, "dangle");
-    fs.symlinkSync(path.join(os.tmpdir(), "hotdog-multi-never-created.txt"), link);
+    // Unique per run, so the "never created" premise holds even with
+    // concurrent test runs.
+    fs.symlinkSync(path.join(path.dirname(rootA), `never-created-${process.pid}.txt`), link);
     expect(() => multi.resolveSafe(path.join(rootB, "dangle"))).toThrow(PathEscapeError);
     expect(() => multi.resolveSafe(path.join(rootB, "dangle"))).toThrow("Symlink escape rejected");
     fs.unlinkSync(link);

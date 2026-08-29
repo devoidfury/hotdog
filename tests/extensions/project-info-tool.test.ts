@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'bun:test';
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
+import { execSync } from 'node:child_process';
 import { ProjectInfoTool } from '../../src/extensions/core-tools/project-info.ts';
 import { resultStr, toolCtx } from '../helpers.ts';
 
@@ -178,10 +179,22 @@ describe('ProjectInfoTool > directory walking', () => {
 // Test directory sizes through public API
 describe('ProjectInfoTool > directory sizes', () => {
   it('shows directory sizes in git repo output', async () => {
-    const tool = new ProjectInfoTool();
-    const result = await tool.execute(JSON.stringify({ path: process.cwd() }), toolCtx({ workspaceRoots: [process.cwd()] }));
-    const output = resultStr(result);
-    expect(output).toContain('Directories');
+    // A small self-contained git repo, not the live checkout: `du` on the
+    // real repo can fail under heavy parallel test load, the section is
+    // then (correctly) omitted, and this assertion flakes.
+    const repoDir = fs.mkdtempSync(path.join(os.tmpdir(), 'hotdog-test-pinfo-dirsizes-'));
+    try {
+      fs.mkdirSync(path.join(repoDir, 'sub'));
+      fs.writeFileSync(path.join(repoDir, 'top.txt'), 'x');
+      fs.writeFileSync(path.join(repoDir, 'sub', 'file.txt'), 'x');
+      execSync('git init -q && git add -A && git -c user.email=t@t -c user.name=t commit -qm init', { cwd: repoDir });
+
+      const tool = new ProjectInfoTool();
+      const result = await tool.execute(JSON.stringify({ path: repoDir }), toolCtx({ workspaceRoots: [repoDir] }));
+      expect(resultStr(result)).toContain('Directories');
+    } finally {
+      fs.rmSync(repoDir, { recursive: true, force: true });
+    }
   });
 });
 

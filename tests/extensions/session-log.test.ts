@@ -1,27 +1,26 @@
-// Tests for the core session log — read, listing, deletion, and replay.
-// Merged from session-log.test.ts + session-log-extended.test.ts + session-log-images.test.ts
-// to reduce duplication and consolidate related tests.
+// Tests for the core session log — read, listing, and deletion.
+// (Replay behavior of replayEntriesIntoContext lives in session-replay.test.ts.)
 
 import { test, expect, beforeAll, afterAll } from "bun:test";
 import {
-  LOG_SOURCE,
   readSessionEntries,
   readAllSessions,
   sessionExists,
-  replayEntriesIntoContext,
+  listSessionLogs,
+  deleteSessionLog,
+  sessionPath,
+  sessionsDir,
 } from "../../src/core/session/session-log.ts";
-import type { LogEntry } from "../../src/core/session/session-log.ts";
-import { MessageLog } from "../../src/core/context/message-log.ts";
 import { TestSessionLog } from "../mocks/io.ts";
-import { mkdirSync, rmSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, readFileSync, writeFileSync } from "node:fs";
+import os from "node:os";
 import { join } from "node:path";
 
 // Use isolated temp directory to avoid scanning 100+ real session files
-const TEST_SESSIONS_DIR = join(import.meta.dir, "..", ".test-sessions");
+const TEST_SESSIONS_DIR = mkdtempSync(join(os.tmpdir(), "hotdog-sessions-log-"));
 
 beforeAll(() => {
   process.env.HOTDOG_SESSIONS_DIR = TEST_SESSIONS_DIR;
-  mkdirSync(TEST_SESSIONS_DIR, { recursive: true });
 });
 
 afterAll(() => {
@@ -38,15 +37,6 @@ function setupTestDir() {
 
 function teardown() {
   try { rmSync(join(TEST_SESSIONS_DIR, `${TEST_SESSION_ID}.jsonl`)); } catch {}
-}
-
-function createMockAgent() {
-  const log = new MessageLog();
-  return {
-    get log() { return log; },
-    ensureSystemPrompt: () => {},
-    addMessage(msg: unknown) { log.push(msg as any); },
-  };
 }
 
 // ── readSessionEntries ─────────────────────────────────────────────────────
@@ -163,76 +153,9 @@ test("readAllSessions reads from multiple session files", async () => {
   }
 });
 
-// ── replayEntriesIntoContext ──────────────────────────────────────────────
-
-// Note: Basic replayEntriesIntoContext behavior tests are in session-replay.test.ts
-// which covers all entry types (user, assistant, tool, system, compaction, PROMPT),
-// edge cases (empty, null, unknown sources), and full restoration round-trips.
-// The tests below focus on image-specific replay behavior.
-
-test("replayEntriesIntoContext preserves images in user messages", () => {
-  const agent = createMockAgent();
-  const entries: LogEntry[] = [
-    { ts: "2024-01-01T00:00:00Z", session_id: "test", source: LOG_SOURCE.INPUT, content: "What is this?", images: [{ type: "image_url", mimeType: "image/png", data: "abc" }] },
-  ];
-
-  const replayed = replayEntriesIntoContext(agent, entries);
-  expect(replayed).toBe(1);
-  expect(agent.log.at(0)!.images).toEqual([
-    { type: "image_url", mimeType: "image/png", data: "abc" },
-  ]);
-});
-
-test("replayEntriesIntoContext handles multiple images", () => {
-  const agent = createMockAgent();
-  const entries: LogEntry[] = [
-    {
-      ts: "2024-01-01T00:00:00Z",
-      session_id: "test",
-      source: LOG_SOURCE.INPUT,
-      content: "Compare these",
-      images: [
-        { type: "image_url", mimeType: "image/png", data: "img1" },
-        { type: "image_url", mimeType: "image/jpeg", data: "img2" },
-      ],
-    },
-  ];
-
-  const replayed = replayEntriesIntoContext(agent, entries);
-  expect(replayed).toBe(1);
-  expect(agent.log.at(0)!.images!.length).toBe(2);
-  expect(agent.log.at(0)!.images![0]!.mimeType).toBe("image/png");
-  expect(agent.log.at(0)!.images![1]!.mimeType).toBe("image/jpeg");
-});
-
-test("replayEntriesIntoContext handles PROMPT source with images", () => {
-  const agent = createMockAgent();
-  const entries: LogEntry[] = [
-    { ts: "2024-01-01T00:00:00Z", session_id: "test", source: LOG_SOURCE.PROMPT, content: "Template with image", images: [{ type: "image_url", mimeType: "image/webp", data: "webpimg" }] },
-  ];
-
-  const replayed = replayEntriesIntoContext(agent, entries);
-  expect(replayed).toBe(1);
-  expect(agent.log.at(0)!.role).toBe("user");
-  expect(agent.log.at(0)!.images).toEqual([
-    { type: "image_url", mimeType: "image/webp", data: "webpimg" },
-  ]);
-});
-
-test("replayed message getTextContent returns text without images", () => {
-  const agent = createMockAgent();
-  const entries: LogEntry[] = [
-    { ts: "2024-01-01T00:00:00Z", session_id: "test", source: LOG_SOURCE.INPUT, content: "What is this?", images: [{ type: "image_url", mimeType: "image/png", data: "abc" }] },
-  ];
-
-  replayEntriesIntoContext(agent, entries);
-  expect(agent.log.at(0)!.getTextContent()).toBe("What is this?");
-});
-
 // ── listSessionLogs ─────────────────────────────────────────────────────────
 
 test("listSessionLogs returns sessions sorted by last activity", async () => {
-  const { listSessionLogs } = await import("../../src/core/session/session-log.ts");
   const dir = TEST_SESSIONS_DIR;
   mkdirSync(dir, { recursive: true });
 
@@ -273,7 +196,6 @@ test("listSessionLogs returns sessions sorted by last activity", async () => {
 });
 
 test("listSessionLogs excludes sessions with only system/reset entries", async () => {
-  const { listSessionLogs } = await import("../../src/core/session/session-log.ts");
   const dir = TEST_SESSIONS_DIR;
   mkdirSync(dir, { recursive: true });
 
@@ -299,7 +221,6 @@ test("listSessionLogs excludes sessions with only system/reset entries", async (
 });
 
 test("listSessionLogs includes message count", async () => {
-  const { listSessionLogs } = await import("../../src/core/session/session-log.ts");
   const dir = TEST_SESSIONS_DIR;
   mkdirSync(dir, { recursive: true });
 
@@ -330,7 +251,6 @@ test("listSessionLogs includes message count", async () => {
 // ── deleteSessionLog ───────────────────────────────────────────────────────
 
 test("deleteSessionLog deletes existing session", async () => {
-  const { deleteSessionLog, sessionExists } = await import("../../src/core/session/session-log.ts");
   setupTestDir();
 
   try {
@@ -347,7 +267,6 @@ test("deleteSessionLog deletes existing session", async () => {
 });
 
 test("deleteSessionLog returns false for non-existent session", async () => {
-  const { deleteSessionLog } = await import("../../src/core/session/session-log.ts");
   const deleted = await deleteSessionLog("non-existent-session-xyz");
   expect(deleted).toBe(false);
 });
@@ -355,7 +274,6 @@ test("deleteSessionLog returns false for non-existent session", async () => {
 // ── session id validation (path traversal) ─────────────────────────────────
 
 test("sessionPath rejects traversal and malformed session ids", async () => {
-  const { sessionPath, sessionsDir } = await import("../../src/core/session/session-log.ts");
 
   // Valid UUID stays inside the sessions dir
   const uuid = crypto.randomUUID();
@@ -375,7 +293,6 @@ test("readSessionEntries returns [] for traversal ids", async () => {
 });
 
 test("deleteSessionLog rejects traversal ids and does not touch files outside sessions dir", async () => {
-  const { deleteSessionLog } = await import("../../src/core/session/session-log.ts");
 
   // Create a sentinel file outside the sessions dir that a traversal id would hit
   const sentinelDir = join(import.meta.dir, "..", ".test-sessions-outside");

@@ -11,10 +11,12 @@ import type { ModelConfig } from "../../../src/core/config/providers.ts";
 import { createLlmProtocolRegistry, type LlmProtocol } from "../../../src/core/llm-client/protocol.ts";
 import { openaiProtocol } from "../../../src/core/llm-client/openai-protocol.ts";
 
-const TEST_PORT = 18941;
-const PROVIDER_PORT = 18942;
-const BASE_URL = `http://127.0.0.1:${TEST_PORT}`;
-const PROVIDER_URL = `http://127.0.0.1:${PROVIDER_PORT}`;
+// Ephemeral ports (0): fixed ports collide when two `bun test` runs are
+// concurrent. Assigned in beforeAll, read by the tests at run time.
+let TEST_PORT = 0;
+let PROVIDER_PORT = 0;
+let BASE_URL = "";
+let PROVIDER_URL = "";
 
 function mc(overrides: Partial<ModelConfig> = {}): ModelConfig {
   return { name: "prov/m1", temperature: null, contextLimit: 128000, tags: [], ...overrides };
@@ -25,27 +27,29 @@ describe("LlmClient uses the protocol's request path", () => {
   let capturedUrls: string[] = [];
   let capturedHeaders: Record<string, string>[] = [];
 
-  function startServer(port: number): void {
-    servers.push(
-      Bun.serve({
-        port,
-        fetch(req) {
-          const h: Record<string, string> = {};
-          req.headers.forEach((v, k) => (h[k] = v));
-          capturedUrls.push(req.url);
-          capturedHeaders.push(h);
-          return new Response(JSON.stringify({ choices: [] }), {
-            status: 200,
-            headers: { "content-type": "application/json" },
-          });
-        },
-      }),
-    );
+  function startServer(): number {
+    const server = Bun.serve({
+      port: 0,
+      fetch(req) {
+        const h: Record<string, string> = {};
+        req.headers.forEach((v, k) => (h[k] = v));
+        capturedUrls.push(req.url);
+        capturedHeaders.push(h);
+        return new Response(JSON.stringify({ choices: [] }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
+      },
+    });
+    servers.push(server);
+    return server.port!;
   }
 
   beforeAll(() => {
-    startServer(TEST_PORT);
-    startServer(PROVIDER_PORT);
+    TEST_PORT = startServer();
+    PROVIDER_PORT = startServer();
+    BASE_URL = `http://127.0.0.1:${TEST_PORT}`;
+    PROVIDER_URL = `http://127.0.0.1:${PROVIDER_PORT}`;
   });
 
   afterAll(() => {

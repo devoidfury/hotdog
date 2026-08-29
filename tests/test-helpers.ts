@@ -42,21 +42,29 @@ export function createMockRegistry(): {
 
 /**
  * Create a mock core context for extension tests.
+ * `resolved` overrides are merged over the defaults; any other core member
+ * (e.g. `createLlmClient`) can be passed through as-is.
  * Usage:
  *   const core = createMockCore({ hooks, config: { webui: { port: 3000 } } });
  */
-export function createMockCore(overrides: Partial<{
-  hooks: { notifyHooks?: () => void; notifyHooksAsync?: () => Promise<void> } | null;
-  config: Record<string, unknown>;
-  resolved: Record<string, unknown>;
-}> = {}): Record<string, unknown> {
+export function createMockCore(
+  overrides: Partial<{
+    hooks: { notifyHooks?: () => void; notifyHooksAsync?: () => Promise<void> } | null;
+    config: Record<string, unknown>;
+    resolved: Record<string, unknown>;
+  }> & Record<string, unknown> = {},
+): Record<string, unknown> {
+  // Strip `resolved` from the final spread: it is merged over the defaults
+  // above, and a late spread would replace the merged object with the
+  // caller's partial.
+  const { resolved: resolvedOverride, ...rest } = overrides;
   return {
     hooks: overrides.hooks ?? {
       notifyHooks: () => {},
       notifyHooksAsync: async () => {},
     },
     config: overrides.config ?? {},
-    resolved: overrides.resolved ?? {
+    resolved: {
       baseUrl: "http://localhost:8000",
       apiKey: "test-key",
       model: "test-model",
@@ -70,6 +78,7 @@ export function createMockCore(overrides: Partial<{
       showTokenUse: true,
       profileName: "default",
       modelRegistry: {},
+      ...resolvedOverride,
     },
     toolRegistry: {
       getAll: () => [],
@@ -79,7 +88,7 @@ export function createMockCore(overrides: Partial<{
     extensions: {
       cleanup: async () => {},
     },
-    ...overrides,
+    ...rest,
   };
 }
 

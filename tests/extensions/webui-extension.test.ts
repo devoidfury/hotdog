@@ -4,9 +4,8 @@
 import { describe, it, expect } from "bun:test";
 import { create } from "../../src/extensions/webui/index.ts";
 import { HOOKS } from "../../src/core/hooks.ts";
+import { logger } from "../../src/core/logger.ts";
 import { createMockCore, createMockRegistry } from "../test-helpers.ts";
-
-const WEBUI_TEST_PORT = 18951;
 
 describe("WebUI Extension", () => {
   it("registers the 'webui' subcommand with correct metadata", async () => {
@@ -78,25 +77,51 @@ describe("WebUI Extension", () => {
     }
 
     it("starts the real server and shuts it down on SIGTERM, returning 0", async () => {
-      const { core, handler } = await getHandler({
-        port: WEBUI_TEST_PORT,
-        host: "127.0.0.1",
-        apiKey: "test-key",
-        maxAgeSecs: 3600,
-      });
+      // port: 0 lets Bun pick a free port, so concurrent test runs never
+      // fight over a fixed one. The bound port is read back from the
+      // "listening on" log line.
+      const logLines: string[] = [];
+      const origInfo = (logger as unknown as { info: (msg: string) => void }).info;
+      (logger as unknown as { info: (msg: string) => void }).info = (msg: string) => {
+        logLines.push(msg);
+        origInfo(msg);
+      };
 
-      const done = handler({}, core);
-      await waitForPort(WEBUI_TEST_PORT);
-      // The SIGTERM listener is registered right after the server starts.
-      process.emit("SIGTERM");
-      expect(await done).toBe(0);
-      await waitForPortClosed(WEBUI_TEST_PORT);
+      try {
+        const { core, handler } = await getHandler({
+          port: 0,
+          host: "127.0.0.1",
+          apiKey: "test-key",
+          maxAgeSecs: 3600,
+        });
+
+        const done = handler({}, core);
+
+        // Wait for the listening log line, then derive the real port.
+        const deadline = Date.now() + 5000;
+        let listeningLine = "";
+        while (!listeningLine && Date.now() < deadline) {
+          listeningLine = logLines.find((l) => l.includes("listening on")) || "";
+          if (!listeningLine) await new Promise((r) => setTimeout(r, 25));
+        }
+        expect(listeningLine).not.toBe("");
+        const port = Number(listeningLine.split(":").pop());
+        expect(Number.isInteger(port)).toBe(true);
+
+        await waitForPort(port);
+        // The SIGTERM listener is registered right after the server starts.
+        process.emit("SIGTERM");
+        expect(await done).toBe(0);
+        await waitForPortClosed(port);
+      } finally {
+        (logger as unknown as { info: (msg: string) => void }).info = origInfo;
+      }
     });
 
     it("returns 1 when the server fails to start", async () => {
       // Missing apiKey makes createWebuiServer throw before anything binds.
       const { core, handler } = await getHandler({
-        port: WEBUI_TEST_PORT,
+        port: 0,
         maxAgeSecs: 3600,
       });
       expect(await handler({}, core)).toBe(1);

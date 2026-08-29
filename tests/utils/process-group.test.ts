@@ -36,12 +36,16 @@ describe("process-group utils", () => {
         stdio: ["ignore", "ignore", "ignore"],
       });
 
+      // Poll until the file holds a full pid: under load the file can exist
+      // momentarily empty before `echo $!` finishes writing it.
       const start = Date.now();
-      while (!fs.existsSync(pidFile)) {
+      let grandchildPid = NaN;
+      while (Number.isNaN(grandchildPid)) {
         if (Date.now() - start > 5000) throw new Error("grandchild pid never written");
-        await new Promise((r) => setTimeout(r, 20));
+        const raw = fs.existsSync(pidFile) ? fs.readFileSync(pidFile, "utf-8").trim() : "";
+        if (/^\d+$/.test(raw)) grandchildPid = parseInt(raw, 10);
+        else await new Promise((r) => setTimeout(r, 20));
       }
-      const grandchildPid = parseInt(fs.readFileSync(pidFile, "utf-8").trim(), 10);
       expect(processAlive(grandchildPid)).toBe(true);
 
       killProcessGroup(child, "SIGTERM");

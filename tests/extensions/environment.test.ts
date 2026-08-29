@@ -53,12 +53,15 @@ describe("environment extension", () => {
   it("hook renders session date in content", async () => {
     const extension = create();
     const hook = extension.hooks![HOOKS.SYSTEM_PROMPT_BUILD]!;
+    // The hook reads the date at call time; guard against the rare case of
+    // a UTC midnight rollover between the two reads.
+    const before = new Date().toISOString().slice(0, 10);
     const result = await hook({
       agent: { model: "test" } as any,
     });
-    // Should contain today's date in YYYY-MM-DD format
-    const today = new Date().toISOString().slice(0, 10);
-    expect((result as any).content).toContain(today);
+    const after = new Date().toISOString().slice(0, 10);
+    const content = (result as any).content as string;
+    expect(content.includes(before) || content.includes(after)).toBe(true);
   });
 
   it("hook handles agent with no model", async () => {

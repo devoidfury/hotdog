@@ -312,8 +312,7 @@ describe("Info CLI - configDebug", () => {
   });
 
   it("configDebug shows config file content when exists", async () => {
-    const tmpDir = join(homedir(), ".config", "hotdog-test-debug");
-    mkdirSync(tmpDir, { recursive: true });
+    const tmpDir = mkdtempSync(join(tmpdir(), "hotdog-test-debug-"));
     const configPath = join(tmpDir, "defaults.json");
     writeFileSync(configPath, JSON.stringify({ defaultModel: "test-model" }));
 
@@ -330,7 +329,7 @@ describe("Info CLI - configDebug", () => {
   });
 
   it("configDebug shows config file not found when absent", async () => {
-    const tmpDir = join(homedir(), ".config", "hotdog-test-debug-absent");
+    const tmpDir = join(tmpdir(), `hotdog-test-debug-absent-${Date.now()}`);
 
     try {
       const run = await infoCliRunner({

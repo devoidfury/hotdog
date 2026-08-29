@@ -93,7 +93,7 @@ describe("MessageBus.cancel()", () => {
 
   it("does not crash when no agent", () => {
     const bus = new MessageBus({ sessionManager: createMockSessionManager(), sink: createMockSink() });
-    bus.cancel();
+    expect(() => bus.cancel()).not.toThrow();
   });
 });
 
@@ -122,7 +122,7 @@ describe("MessageBus.interrupt()", () => {
 
   it("does not crash when no agent", () => {
     const bus = new MessageBus({ sessionManager: createMockSessionManager(), sink: createMockSink() });
-    bus.interrupt();
+    expect(() => bus.interrupt()).not.toThrow();
   });
 });
 

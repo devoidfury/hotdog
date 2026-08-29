@@ -172,7 +172,7 @@ export async function createWebuiServer(
     },
   });
 
-  logger.info(`WebUI server listening on http://${effectiveHost}:${port}`);
+  logger.info(`WebUI server listening on http://${effectiveHost}:${server.port}`);
 
   return { server, wsServer, authMiddleware };
 }

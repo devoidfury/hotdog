@@ -9,14 +9,14 @@ import { create } from "../../src/extensions/session-log/index.ts";
 import { readSessionEntries, LOG_SOURCE } from "../../src/core/session/session-log.ts";
 import { HOOKS } from "../../src/core/hooks.ts";
 import { createMockCore } from "../helpers.ts";
-import { mkdirSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync } from "node:fs";
+import os from "node:os";
 import { join } from "node:path";
 
-const SESSIONS_DIR = join(import.meta.dir, "..", ".test-sessions-ext");
+const SESSIONS_DIR = mkdtempSync(join(os.tmpdir(), "hotdog-sessions-ext-"));
 
 beforeAll(() => {
   process.env.HOTDOG_SESSIONS_DIR = SESSIONS_DIR;
-  mkdirSync(SESSIONS_DIR, { recursive: true });
 });
 
 afterAll(() => {

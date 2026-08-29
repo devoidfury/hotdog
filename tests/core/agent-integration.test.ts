@@ -463,12 +463,14 @@ describe('Agent — lifecycle and state', () => {
     const { agent } = createAgentFixture({ mockLLM, stream: true });
     const runPromise = agent.run('Test streaming');
 
-    // Let the first chunk flush before checking accumulated content.
-    await new Promise(r => setTimeout(r, 0));
+    // Wait for the first chunk to flush (poll instead of a fixed sleep).
+    const deadline = Date.now() + 2000;
+    while (agent.currentStreamingContent.length === 0 && Date.now() < deadline) {
+      await new Promise(r => setTimeout(r, 1));
+    }
 
     // During streaming, content should be accumulating
-    const midContent = agent.currentStreamingContent;
-    expect(midContent.length).toBeGreaterThan(0);
+    expect(agent.currentStreamingContent.length).toBeGreaterThan(0);
 
     await runPromise;
 
@@ -545,11 +547,17 @@ describe('Agent — lifecycle and state', () => {
   it('should abort when external abortSignal fires during run', async () => {
     const controller = new AbortController();
 
-    // Very slow stream that gives us time to abort
+    // The stream signals when the consumer has taken the first chunk, then
+    // suspends until the test fires the abort and releases it. No timers:
+    // the wrapper's aborted-check is guaranteed to run after the abort.
+    let requestSecond: () => void;
+    const secondRequested = new Promise<void>((r) => { requestSecond = r; });
+    let release: () => void;
+    const released = new Promise<void>((r) => { release = r; });
     const slowStream = async function* () {
       yield { type: 'content', content: 'Start ' };
-      // Wait long enough for abort
-      await new Promise(r => setTimeout(r, 500));
+      requestSecond!();
+      await released;
       yield { type: 'content', content: 'End' };
     };
 
@@ -559,8 +567,10 @@ describe('Agent — lifecycle and state', () => {
 
     const runPromise = agent.run('Test abort mid-stream');
 
-    // Abort after a short delay
-    setTimeout(() => controller.abort(), 30);
+    // Abort once the run is provably mid-stream (first chunk consumed)
+    await secondRequested;
+    controller.abort();
+    release!();
 
     await expect(runPromise).rejects.toThrow(/cancelled|abort/i);
   });

@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach, beforeAll, afterAll } from "bun:test";
 import { HOOKS } from "../../src/core/hooks.ts";
-import { mkdirSync, rmSync, readdirSync, utimesSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, readdirSync, utimesSync } from "node:fs";
+import os from "node:os";
 import { join } from "node:path";
 import { createMockCore } from "../helpers.ts";
 import { captureConsole } from "../test-helpers.ts";
@@ -10,11 +11,10 @@ import { TestSessionLog } from "../mocks/io.ts";
 const { create: createSessionReview } = await import("../../src/extensions/ui-session-review-cli/index.ts");
 
 // Use isolated temp directory to avoid scanning 100+ real session files
-const TEST_SESSIONS_DIR = join(import.meta.dir, "..", ".test-sessions-review");
+const TEST_SESSIONS_DIR = mkdtempSync(join(os.tmpdir(), "hotdog-sessions-review-cli-"));
 
 beforeAll(() => {
   process.env.HOTDOG_SESSIONS_DIR = TEST_SESSIONS_DIR;
-  mkdirSync(TEST_SESSIONS_DIR, { recursive: true });
 });
 
 afterAll(() => {

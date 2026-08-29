@@ -20,9 +20,17 @@ describe('ModelTool', () => {
     const tool = new ModelTool(registry);
     const def = tool.toToolDef();
     expect(def.function.name).toBe('model');
+    expect(def.function.description).toContain('model-1');
+    expect(def.function.description).toContain('model-2');
     const props = def.function.parameters.properties as Record<string, unknown>;
     expect(props).toHaveProperty('name');
     expect((props.name as Record<string, unknown>).enum).toEqual(['model-1', 'model-2']);
+  });
+
+  it('generates tool definition with undefined registry', () => {
+    const tool = new ModelTool(undefined as never);
+    const def = tool.toToolDef();
+    expect(def.function.name).toBe('model');
   });
 
   it('generates tool definition with empty registry', () => {
@@ -41,6 +49,7 @@ describe('ModelTool', () => {
     const result = await tool.execute(JSON.stringify({ name: 'list' }));
     expect(resultStr(result)).toContain('qwen3.5-0.8b');
     expect(resultStr(result)).toContain('qwen3.5-4b');
+    expect(result.metadata?.get('model_count')).toBe('2');
   });
 
   it('returns error for unknown model', async () => {
@@ -57,6 +66,23 @@ describe('ModelTool', () => {
     const tool = new ModelTool({});
     const result = await tool.execute('');
     expect(resultStr(result)).toBe('Error parsing arguments');
+  });
+
+  it('returns error for empty model name', async () => {
+    const registry = { 'model-1': mkModel('model-1') };
+    const tool = new ModelTool(registry);
+    const result = await tool.execute(JSON.stringify({ name: '' }));
+    expect(resultStr(result)).toBe('Error parsing arguments');
+  });
+
+  it('accepts object input directly', async () => {
+    const registry = {
+      'model-1': mkModel('model-1'),
+      'model-2': mkModel('model-2'),
+    };
+    const tool = new ModelTool(registry);
+    const result = await tool.execute({ name: 'list' });
+    expect(resultStr(result)).toContain('model-1');
   });
 
   it('returns error for null input', async () => {
@@ -102,12 +128,18 @@ describe('ModelTool', () => {
     const tool = new ModelTool({});
     const result = await tool.execute(JSON.stringify({ name: 'list' }));
     expect(resultStr(result)).toBe('No models registered.');
+    expect(result.metadata?.get('model_count')).toBe('0');
   });
 
   it('generates call display', () => {
     const tool = new ModelTool({});
     const display = tool.callDisplay(JSON.stringify({ name: 'model-1' }));
     expect(display).toBe('-> model-1');
+  });
+
+  it('generates empty call display for null input', () => {
+    const tool = new ModelTool({});
+    expect(tool.callDisplay(null)).toBe('');
   });
 
   it('sorts models alphabetically in definition', () => {

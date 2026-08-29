@@ -90,8 +90,9 @@ describe("SkillsLoader", () => {
   }
 
   beforeEach(async () => {
-    tempDir = join(os.tmpdir(), `hotdog-skills-test-${Date.now()}`);
-    await fs.mkdir(tempDir, { recursive: true });
+    // mkdtemp: unique per call. A Date.now()-named dir collides across
+    // concurrent test runs, and one run's cleanup wipes the other's files.
+    tempDir = await fs.mkdtemp(join(os.tmpdir(), "hotdog-skills-test-"));
   });
 
   afterEach(async () => {
@@ -570,8 +571,7 @@ describe("Skills Extension", () => {
   }
 
   beforeEach(async () => {
-    tempDir = join(os.tmpdir(), `hotdog-skill-ext-test-${Date.now()}`);
-    await fs.mkdir(tempDir, { recursive: true });
+    tempDir = await fs.mkdtemp(join(os.tmpdir(), "hotdog-skill-ext-test-"));
   });
 
   afterEach(async () => {

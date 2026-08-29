@@ -318,12 +318,16 @@ describe("StdioTransport", () => {
         ["-c", `sleep 300 & echo $! > ${pidFile}; cat`],
       );
 
+      // Poll until the file holds a full pid: under load the file can exist
+      // momentarily empty before `echo $!` finishes writing it.
       const start = Date.now();
-      while (!fs.existsSync(pidFile)) {
+      let workerPid = NaN;
+      while (Number.isNaN(workerPid)) {
         if (Date.now() - start > 5000) throw new Error("worker pid never written");
-        await new Promise((r) => setTimeout(r, 20));
+        const raw = fs.existsSync(pidFile) ? fs.readFileSync(pidFile, "utf-8").trim() : "";
+        if (/^\d+$/.test(raw)) workerPid = parseInt(raw, 10);
+        else await new Promise((r) => setTimeout(r, 20));
       }
-      const workerPid = parseInt(fs.readFileSync(pidFile, "utf-8").trim(), 10);
       expect(processAlive(workerPid)).toBe(true);
 
       await transport.destroy();
@@ -397,8 +401,7 @@ describe("StdioTransport", () => {
   it("sendNotification is no-op after destroy", async () => {
     const transport = new StdioTransport("bun", ["./tests/fixtures/mcp-test-server.ts"]);
     await transport.destroy();
-    // Should not throw
-    transport.sendNotification("test");
+    expect(() => transport.sendNotification("test")).not.toThrow();
   });
 
   it("onClose registers close handler", async () => {
@@ -413,7 +416,7 @@ describe("StdioTransport", () => {
   it("destroy can be called multiple times", async () => {
     const transport = new StdioTransport("bun", ["./tests/fixtures/mcp-test-server.ts"]);
     await transport.destroy();
-    await transport.destroy();
+    await expect(transport.destroy()).resolves.toBeUndefined();
   });
 
   it("exposes command and args", async () => {
@@ -528,8 +531,7 @@ describe("HttpTransport onClose", () => {
 
   it("sendNotification is no-op for HTTP transport", () => {
     const transport = new HttpTransport("http://localhost:3000/mcp");
-    // Should not throw
-    transport.sendNotification("test");
+    expect(() => transport.sendNotification("test")).not.toThrow();
   });
 
   it("throws when sending to destroyed HTTP transport", async () => {

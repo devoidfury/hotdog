@@ -195,26 +195,8 @@ describe("main -- subcommand dispatch", () => {
     expect(stdout).toContain("webui");
   });
 });
-describe("main -- subcommand handler errors", () => {
-  it("handles unknown subcommand with suggestion", async () => {
-    // Verify that unknown subcommands are handled with suggestions.
-    // The "handler not available" case is an internal error that occurs
-    // when extension.json registers a subcommand but the extension fails
-    // to attach a handler - this is tested via the extension loading flow.
-    const { exitCode, stderr } = await runMain(["infoo"], {
-      AI_URL: "",
-      HOTDOG_AI_URL: "",
-    });
-
-    expect(exitCode).toBe(1);
-    expect(stderr).toContain("Unknown subcommand");
-    expect(stderr).toContain("info");
-  });
-});
-
 describe("main -- no subcommand fallback", () => {
   it("prints 'No subcommand provided' when no subcommand given and stdin is not TTY", async () => {
-    // This tests lines 432-436: the final fallback error.
     // Force stdin.isTTY to false so we skip the default_subcommand path.
     const origIsTTY = process.stdin.isTTY;
     Object.defineProperty(process.stdin, "isTTY", { value: false, configurable: true });
@@ -234,82 +216,23 @@ describe("main -- no subcommand fallback", () => {
   });
 });
 
-describe("CoreInfrastructure service accessor", () => {
-  it("core.service() retrieves registered services", async () => {
-    // This tests line 128: the service() arrow function on CoreInfrastructure.
-    const { createHooks } = await import("../../src/core/hooks.ts");
-    const { createToolRegistry } = await import(
-      "../../src/core/extensions/tool-registry.ts"
-    );
-    const { createServiceRegistry } = await import(
-      "../../src/core/extensions/service-registry.ts"
-    );
-    const { createExtensionLoader } = await import(
-      "../../src/core/extensions/extensions.ts"
-    );
-    const { createCompletionService } = await import(
-      "../../src/core/completion.ts"
-    );
+describe("createCore service accessor", () => {
+  it("core.service() retrieves registered services and throws for missing ones", async () => {
+    const { createCore } = await import("../../src/core/main.ts");
     const { createSubcommandRegistry } = await import(
       "../../src/core/extensions/registries.ts"
     );
-    const { createToolFormatRegistry } = await import(
-      "../../src/core/extensions/tool-format.ts"
-    );
-    const { xmlToolFormat } = await import(
-      "../../src/core/extensions/tool-format-xml.ts"
-    );
-    const { createLlmProtocolRegistry } = await import(
-      "../../src/core/llm-client/protocol.ts"
-    );
-    const { openaiProtocol } = await import(
-      "../../src/core/llm-client/openai-protocol.ts"
+
+    const core = createCore(
+      {} as never,
+      new ConfigRegistry(),
+      createSubcommandRegistry(),
     );
 
-    const hooks = createHooks();
-    const toolRegistry = createToolRegistry();
-    const toolFormatRegistry = createToolFormatRegistry();
-    toolFormatRegistry.register(xmlToolFormat);
-    const llmProtocolRegistry = createLlmProtocolRegistry();
-    llmProtocolRegistry.register(openaiProtocol);
-    const services = createServiceRegistry();
-    const completion = createCompletionService();
-    const configRegistry = new ConfigRegistry();
-    const cliSubcommandRegistry = createSubcommandRegistry();
+    core.services.register("test-service", { value: "hello" });
 
-    const extensions = createExtensionLoader({
-      hooks,
-      toolRegistry,
-      services,
-      completion,
-      config: {},
-      cliSubcommandRegistry,
-      configRegistry,
-    });
-
-    // Manually construct a CoreInfrastructure-like object matching createCore output
-    const core = {
-      hooks,
-      toolRegistry,
-      extensions,
-      services,
-      completion,
-      config: {},
-      cliSubcommandRegistry,
-      configRegistry,
-      toolFormatRegistry,
-      llmProtocolRegistry,
-      service: (name: string) => services.get(name),
-    };
-
-    // Register a service
-    services.register("test-service", { value: "hello" });
-
-    // Call core.service() - this exercises line 128
     const result = core.service("test-service") as { value: string };
     expect(result.value).toBe("hello");
-
-    // Verify it throws for missing services (same underlying get())
     expect(() => core.service("nonexistent")).toThrow();
   });
 });

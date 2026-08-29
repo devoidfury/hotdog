@@ -7,12 +7,12 @@ import { HookSystem } from "../../src/core/hooks.ts";
 import { createToolRegistry } from "../../src/core/extensions/tool-registry.ts";
 import { initializeLogger, resetLoggerForTesting } from "../../src/core/logger.ts";
 
-/** Create a minimal test tool */
-function mkTool(execute: () => unknown | Promise<unknown>): Tool {
+/** Create a minimal test tool (def name defaults to the registered name) */
+function mkTool(execute: () => unknown | Promise<unknown>, name = "test"): Tool {
   return {
     metadata: { sideEffects: false, difficulty: 1 },
-    toToolDef: () => ({ type: "function", function: { name: "test", description: "test", parameters: { type: "object", properties: {} } } }),
-    callDisplay: () => "test()",
+    toToolDef: () => ({ type: "function", function: { name, description: name, parameters: { type: "object", properties: {} } } }),
+    callDisplay: () => `${name}()`,
     execute: async () => execute(),
   };
 }
@@ -312,7 +312,7 @@ describe("ToolRegistry — getToolDefs error handling", () => {
 
   it("skips a tool whose toToolDef throws and logs the tool's actual name", async () => {
     const registry = new ToolRegistry();
-    registry.register("good", mkTool(async () => "ok"));
+    registry.register("good", mkTool(async () => "ok", "good"));
     registry.register("broken", {
       metadata: { sideEffects: false, difficulty: 1 },
       toToolDef: () => {
@@ -323,7 +323,8 @@ describe("ToolRegistry — getToolDefs error handling", () => {
     });
 
     const defs = await registry.getToolDefs();
-    expect(defs.map((d) => d.function.name)).toEqual(["test"]);
+    // Only the healthy tool survives, under its own registered name.
+    expect(defs.map((d) => d.function.name)).toEqual(["good"]);
 
     // The failed tool must be named in the warning, not "unknown".
     expect(warnings.length).toBe(1);
@@ -332,12 +333,12 @@ describe("ToolRegistry — getToolDefs error handling", () => {
 
     // The cache is not poisoned by a failure: the next call retries.
     const defs2 = await registry.getToolDefs();
-    expect(defs2.map((d) => d.function.name)).toEqual(["test"]);
+    expect(defs2.map((d) => d.function.name)).toEqual(["good"]);
     expect(warnings.length).toBe(2);
   });
 });
 
-// NOTE: Full ToolResult tests are in tests/extensions/tool-utils-and-file-utils.test.ts
+// NOTE: Full ToolResult tests are in tests/extensions/tool-utils.test.ts
 
 describe("Agent model setter clears tool def cache", () => {
   it("clears the tool registry cache when model changes", async () => {

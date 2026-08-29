@@ -106,6 +106,16 @@ describe("TaskManager", () => {
       expect((agentConfig as any)?.model).toBe("custom-model");
     });
 
+    // Poll until a condition holds (fails loudly on timeout) instead of a
+    // fixed sleep, which is racy under parallel test load.
+    async function settle(fn: () => boolean, what: string, timeoutMs = 2000): Promise<void> {
+      const deadline = Date.now() + timeoutMs;
+      while (!fn()) {
+        if (Date.now() > deadline) throw new Error(`timed out waiting for ${what}`);
+        await new Promise(r => setTimeout(r, 1));
+      }
+    }
+
     it("tracks active tasks and provides task counts", async () => {
       let resolveRun1: () => void;
       let resolveRun2: () => void;
@@ -145,9 +155,9 @@ describe("TaskManager", () => {
       // Verify config is accessible
       expect(manager.config).toHaveProperty("customKey", "customValue");
 
-      // Complete one task
+      // Complete one task; wait for the manager to observe it
       resolveRun1!();
-      await new Promise(r => setTimeout(r, 10));
+      await settle(() => manager.activeTasks().length === 1, "task-1 completion");
 
       expect(manager.activeTasks()).toEqual(["task-2"]);
       expect(manager.taskCounts()).toEqual([1, 2]);
@@ -155,7 +165,7 @@ describe("TaskManager", () => {
 
       // Complete second task
       resolveRun2!();
-      await new Promise(r => setTimeout(r, 10));
+      await settle(() => manager.activeTasks().length === 0, "task-2 completion");
 
       expect(manager.activeTasks()).toEqual([]);
       expect(manager.taskCounts()).toBeNull();

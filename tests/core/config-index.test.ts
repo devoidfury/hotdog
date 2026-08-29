@@ -2,6 +2,8 @@
 
 import { describe, it, expect } from "bun:test";
 import path from "node:path";
+import os from "node:os";
+import fs from "node:fs";
 import {
   resolveConfigDir,
   mergeExtensionConfigDefaults,
@@ -21,14 +23,20 @@ describe("resolveConfigDir", () => {
     expect(result).toBe(path.resolve("./config"));
   });
 
-  it("falls back to /etc/hotdog or XDG when no CWD config exists", () => {
-    // Personal config was moved to examples/devoidfury/config
+  it("resolves to one of the documented fallback candidates", () => {
     const saved = process.env.HOTDOG_CONFIG_DIR;
     delete process.env.HOTDOG_CONFIG_DIR;
     try {
       const result = resolveConfigDir();
-      // Should fall back to /etc/hotdog or ~/.config/hotdog
-      expect(result).toBeTruthy();
+      // The fallback chain is: CWD config/ -> /etc/hotdog -> ~/.config/hotdog.
+      // Which one wins depends on the host, so assert the contract, not the
+      // winner.
+      const candidates = [
+        path.resolve(process.cwd(), "config"),
+        "/etc/hotdog",
+        path.join(os.homedir(), ".config", "hotdog"),
+      ];
+      expect(candidates).toContain(result);
     } finally {
       process.env.HOTDOG_CONFIG_DIR = saved;
     }
@@ -190,9 +198,8 @@ describe("failOnInvalidConfig", () => {
 
 describe("loadConfig", () => {
   it("loads config from explicit path", async () => {
-    const { join } = await import("node:path");
     const { fileURLToPath } = await import("node:url");
-    const configPath = join(fileURLToPath(import.meta.url), "../../../examples/devoidfury/config/defaults.json");
+    const configPath = path.join(fileURLToPath(import.meta.url), "../../../examples/devoidfury/config/defaults.json");
     const config = await loadConfig(configPath);
     expect(config.defaultModel).toBeDefined();
     expect(config.defaultModel).not.toBe("");
@@ -200,13 +207,12 @@ describe("loadConfig", () => {
   });
 
   it("throws on invalid JSON", async () => {
-    const { writeFileSync, unlinkSync } = await import("node:fs");
-    const tmpFile = "/tmp/test-bad-config.json";
+    const tmpFile = path.join(fs.mkdtempSync(path.join(os.tmpdir(), "hotdog-config-test-")), "defaults.json");
     try {
-      writeFileSync(tmpFile, "{ invalid json }");
+      fs.writeFileSync(tmpFile, "{ invalid json }");
       await expect(loadConfig(tmpFile)).rejects.toThrow();
     } finally {
-      try { unlinkSync(tmpFile); } catch {}
+      try { fs.rmSync(path.dirname(tmpFile), { recursive: true, force: true }); } catch {}
     }
   });
 });

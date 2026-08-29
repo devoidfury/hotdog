@@ -4,14 +4,16 @@
 import { describe, it, expect, beforeAll, afterAll } from "bun:test";
 import { hotdogFetch, readCappedBody, VALID_METHODS, METHODS_WITH_BODY } from "../../src/utils/fetch.ts";
 
-const TEST_PORT = 18933;
-const BASE_URL = `http://localhost:${TEST_PORT}`;
+// Ephemeral port (0): fixed ports collide when two `bun test` runs are
+// concurrent. Assigned in beforeAll, read by the tests at run time.
+let TEST_PORT = 0;
+let BASE_URL = "";
 
 let server: ReturnType<typeof Bun.serve> | null = null;
 
 beforeAll(() => {
   server = Bun.serve({
-    port: TEST_PORT,
+    port: 0,
     fetch(req) {
       const url = new URL(req.url);
       // /slow — responds after a 3s delay (timeout tests)
@@ -31,6 +33,8 @@ beforeAll(() => {
       return new Response("ok", { headers: { "Content-Type": "text/plain" } });
     },
   });
+  TEST_PORT = server.port!;
+  BASE_URL = `http://localhost:${TEST_PORT}`;
 });
 
 afterAll(() => {

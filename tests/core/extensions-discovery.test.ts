@@ -218,15 +218,14 @@ describe("registerExtensionMetadata", async () => {
     expect(Array.isArray(result)).toBe(true);
   });
 
-  it("handles missing config gracefully", async () => {
+  it("handles missing config with built-in defaults", async () => {
     const configRegistry = createMockConfigRegistry();
     const subcommandRegistry = createMockSubcommandRegistry();
 
-    // Should not throw with undefined config
-    try {
-      await registerExtensionMetadata(null as any, configRegistry, subcommandRegistry);
-    } catch {
-      // May throw depending on implementation — either way it's handled
-    }
+    // A null config must fall back to defaults: @extensions path, autoload on.
+    const result = await registerExtensionMetadata(null as any, configRegistry, subcommandRegistry);
+    expect(Array.isArray(result)).toBe(true);
+    // Built-in extensions still register their subcommands.
+    expect(Object.keys(subcommandRegistry._subcommands).length).toBeGreaterThan(0);
   });
 });

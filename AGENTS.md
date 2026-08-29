@@ -12,10 +12,9 @@ JS project `hotdog` — an AI agent harness.
   - `bun bin/hotdog show-prompt` — render system prompt to stdout
   - `bun bin/hotdog profiles` — list all available profiles
   - `bun bin/hotdog prompt "text"` — one-shot mode
-- Run Tests: `bun run test`
+- Run Tests: `bun run test` (expected runtime < 10 seconds)
   - with Coverage report: `bun run coverage`
   - NOTE: uses `--only-failures`, which runs all tests, prints failures, and supresses green test output.
-  - NOTE: `test` runs files in parallel (`--parallel`); `coverage` stays sequential because isolated workers report skewed branch coverage.
 
 ## Rules & Guidelines
 

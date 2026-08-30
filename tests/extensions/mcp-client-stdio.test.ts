@@ -354,7 +354,7 @@ describe("StdioTransport", () => {
       receivedLines.push(line);
     });
 
-    await new Promise((r) => setTimeout(r, 30));
+    await until(() => receivedLines.length > 0);
     removeHandler();
     await transport.destroy();
 
@@ -369,7 +369,7 @@ describe("StdioTransport", () => {
     const remove1 = transport.onMessage((line) => handler1Lines.push(line));
     const remove2 = transport.onMessage((line) => handler2Lines.push(line));
 
-    await new Promise((r) => setTimeout(r, 30));
+    await until(() => handler1Lines.length > 0 && handler2Lines.length > 0);
     remove1();
     remove2();
     await transport.destroy();
@@ -437,7 +437,7 @@ describe("StdioTransport", () => {
 
   it("captures stderr output", async () => {
     const transport = new StdioTransport("bun", ["-e", "console.error('error-msg')"]);
-    await new Promise((r) => setTimeout(r, 30));
+    await until(() => transport.stderrOutput.includes("error-msg"));
     expect(transport.stderrOutput).toContain("error-msg");
     await transport.destroy();
   });

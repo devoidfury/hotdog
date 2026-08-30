@@ -53,7 +53,7 @@
   },
   "mcp-servers": [
     {
-      "enabled": false,
+      "enabled": true,
       "name": "bun-docs-mcp",
       "url": "https://bun.com/docs/mcp"
     }

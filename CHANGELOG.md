@@ -2,7 +2,14 @@
 
 ## Unreleased
 
-**Full Changelog**: https://github.com/devoidfury/hotdog/compare/v0.7.0...main
+**Full Changelog**: https://github.com/devoidfury/hotdog/compare/v0.7.1...main
+
+## [v0.7.1] - 2026-08-30
+
+- mcp-client fix regression in http, incorrect DI
+- internals code cleanup
+
+**Full Changelog**: https://github.com/devoidfury/hotdog/compare/v0.7.0...v0.7.1
 
 ## [v0.7.0] - 2026-08-29
 

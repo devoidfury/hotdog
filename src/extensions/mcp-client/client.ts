@@ -6,19 +6,9 @@ import {
   jsonRpcNotification,
   mcpToolCallRequest,
   mcpInitializeRequest,
+  McpError,
 } from "./types.ts";
 import { McpTransport, StdioTransport, HttpTransport, DEFAULT_HTTP_TIMEOUT_MS } from "./transports.ts";
-import { ExtensionError } from "@core/error.ts";
-
-export class McpError extends ExtensionError {
-  readonly code: number | null;
-
-  constructor(message: string, code: number | null = null) {
-    super(message);
-    this.name = "McpError";
-    this.code = code;
-  }
-}
 
 class PendingRequest {
   readonly id: number;

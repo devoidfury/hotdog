@@ -3,7 +3,8 @@
 // the extension wiring (create/hooks) in mcp-extension.test.ts.
 
 import { describe, it, expect } from "bun:test";
-import { McpClient, McpError } from "../../src/extensions/mcp-client/client.ts";
+import { McpClient } from "../../src/extensions/mcp-client/client.ts";
+import { McpError } from "../../src/extensions/mcp-client/types.ts";
 import { McpConnection } from "../../src/extensions/mcp-client/connection.ts";
 import { HttpTransport, MAX_TRANSPORT_BUFFER_CHARS } from "../../src/extensions/mcp-client/transports.ts";
 import { withMockFetch, jsonResponse, textResponse } from "../helpers.ts";

@@ -133,7 +133,7 @@ describe("MCP extension", () => {
       hooks: { on: () => {}, notifyHooks: () => {} },
     } as any;
 
-    const ext = create(core, MockConnection);
+    const ext = create(core, { Connection: MockConnection });
     const registeredTools: Array<{ name: string }> = [];
     const mockRegistry = {
       register: (name: string, _tool: unknown) => {
@@ -173,7 +173,7 @@ describe("MCP extension", () => {
       hooks: { on: () => {}, notifyHooks: () => {} },
     } as any;
 
-    const ext = create(core, MockConnection);
+    const ext = create(core, { Connection: MockConnection });
     const registeredTools: string[] = [];
     const mockRegistry = {
       register: (name: string) => {
@@ -201,7 +201,7 @@ describe("MCP extension", () => {
       hooks: { on: () => {}, notifyHooks: () => {} },
     } as any;
 
-    const ext = create(core, MockConnection)!;
+    const ext = create(core, { Connection: MockConnection })!;
     await ext.hooks![HOOKS.TOOLS_REGISTER]!({ register: () => {}, getAll: () => [] });
     expect(ext.connections).toHaveLength(1);
 
@@ -223,7 +223,7 @@ describe("MCP extension", () => {
       hooks: { on: () => {}, notifyHooks: () => {} },
     } as any;
 
-    const ext = create(core, MockConnection)!;
+    const ext = create(core, { Connection: MockConnection })!;
     await ext.hooks![HOOKS.TOOLS_REGISTER]!({ register: () => {}, getAll: () => [] });
     await ext.hooks![HOOKS.SHUTDOWN_CLEANUP]!({});
 
@@ -248,7 +248,7 @@ describe("MCP extension — branch coverage", () => {
       hooks: { on: () => {}, notifyHooks: () => {} },
     } as any;
 
-    const ext = create(core, MockConnection);
+    const ext = create(core, { Connection: MockConnection });
     const registeredTools: string[] = [];
 
     // Incomplete servers are skipped: no connection, no tools.
@@ -277,7 +277,7 @@ describe("MCP extension — branch coverage", () => {
       hooks: { on: () => {}, notifyHooks: () => {} },
     } as any;
 
-    const ext = create(core, MockConnection);
+    const ext = create(core, { Connection: MockConnection });
     const registeredTools: string[] = [];
     const mockRegistry = {
       register: (name: string) => {
@@ -302,7 +302,7 @@ describe("MCP extension — branch coverage", () => {
       hooks: { on: () => {}, notifyHooks: () => {} },
     } as any;
 
-    const ext = create(core, MockConnection);
+    const ext = create(core, { Connection: MockConnection });
     const registeredTools: string[] = [];
 
     // A failed connection is swallowed: no crash, no tools, no connection.
@@ -332,7 +332,7 @@ describe("MCP extension — branch coverage", () => {
       hooks: { on: () => {}, notifyHooks: () => {} },
     } as any;
 
-    const ext = create(core, MockConnection)!;
+    const ext = create(core, { Connection: MockConnection })!;
     await ext.hooks![HOOKS.TOOLS_REGISTER]!({ register: () => {}, getAll: () => [] } as never);
     // A failing connection shutdown must not break ext.shutdown()
     await expect(ext.shutdown!()).resolves.toBeUndefined();
@@ -353,7 +353,7 @@ describe("MCP extension — HTTP timeout config", () => {
       },
     });
     const core = { config, hooks: { on: () => {}, notifyHooks: () => {} } } as any;
-    const ext = create(core, MockConnection);
+    const ext = create(core, { Connection: MockConnection });
     await (ext!.hooks![HOOKS.TOOLS_REGISTER]! as Function)({ register: () => {} });
     await ext!.shutdown!();
     return seenTimeout;

@@ -1,5 +1,5 @@
-import { McpClient, McpError } from "./client.ts";
-import { contentBlocksToString } from "./types.ts";
+import { McpClient } from "./client.ts";
+import { McpContentBlock, McpError } from "./types.ts";
 import { DEFAULT_HTTP_TIMEOUT_MS } from "./transports.ts";
 
 /** Shared client handle for use by McpTool instances. */
@@ -91,4 +91,26 @@ export class McpConnection {
   async shutdown(): Promise<void> {
     await this.#client.shutdown();
   }
+}
+
+export function contentBlocksToString(blocks: McpContentBlock[]): string {
+  const parts: string[] = [];
+  for (const block of blocks) {
+    switch (block.type) {
+      case "text":
+        if (block.text) parts.push(block.text);
+        break;
+      case "image":
+        parts.push(`[Image: ${block.mimeType || "image"} (${(block.data || "").length} bytes)]`);
+        break;
+      case "resource":
+        if (block.text) {
+          parts.push(`[Resource: ${block.uri || ""}]\n${block.text}`);
+        }
+        break;
+      default:
+        parts.push("[Unknown content block]");
+    }
+  }
+  return parts.join("\n");
 }

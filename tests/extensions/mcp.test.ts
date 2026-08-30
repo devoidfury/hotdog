@@ -11,7 +11,6 @@ import { describe, it, expect } from "bun:test";
 import {
   parseMcpToolDefinition,
   parseMcpContentBlock,
-  contentBlocksToString,
   mcpToolCallRequest,
   jsonRpcRequest,
   jsonRpcNotification,
@@ -20,6 +19,7 @@ import {
   parseMcpToolsListResponse,
   parseMcpToolCallResponse,
 } from "../../src/extensions/mcp-client/types.ts";
+import { contentBlocksToString } from "../../src/extensions/mcp-client/connection.ts";
 
 // ── Request builders ────────────────────────────────────────────────────────
 

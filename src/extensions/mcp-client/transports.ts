@@ -4,7 +4,7 @@ import { formatError } from "@core/error.ts";
 import { copyScrubbedEnv } from "@utils/env.ts";
 import { OWN_PROCESS_GROUP, killProcessGroup } from "@utils/process-group.ts";
 import { hotdogFetch, readCappedBody } from "@utils/fetch.ts";
-import { McpError } from "./client.ts";
+import { McpError } from "./types";
 
 export type TransportMessageHandler = (line: string) => void;
 

@@ -2,6 +2,7 @@
 // needed for connecting to MCP servers, listing tools, and calling tools.
 
 import pkg from "@package.json" with { type: "json" };
+import { ExtensionError } from "@core/error.ts";
 
 export function jsonRpcRequest(id: number, method: string, params?: unknown): Record<string, unknown> {
   return { jsonrpc: "2.0", id, method, ...(params != null ? { params } : {}) };
@@ -23,6 +24,16 @@ export function mcpInitializeRequest(): Record<string, unknown> {
       version: pkg.version,
     },
   };
+}
+
+export class McpError extends ExtensionError {
+  readonly code: number | null;
+
+  constructor(message: string, code: number | null = null) {
+    super(message);
+    this.name = "McpError";
+    this.code = code;
+  }
 }
 
 interface McpServerCapabilities {
@@ -104,7 +115,7 @@ export function mcpToolCallRequest(
   return { name, ...(args != null ? { arguments: args } : {}) };
 }
 
-interface McpContentBlock {
+export interface McpContentBlock {
   type: string;
   text?: string;
   data?: string;
@@ -146,26 +157,4 @@ export function parseMcpContentBlock(block: Record<string, unknown> | null): Mcp
     default:
       return { type: "unknown" };
   }
-}
-
-export function contentBlocksToString(blocks: McpContentBlock[]): string {
-  const parts: string[] = [];
-  for (const block of blocks) {
-    switch (block.type) {
-      case "text":
-        if (block.text) parts.push(block.text);
-        break;
-      case "image":
-        parts.push(`[Image: ${block.mimeType || "image"} (${(block.data || "").length} bytes)]`);
-        break;
-      case "resource":
-        if (block.text) {
-          parts.push(`[Resource: ${block.uri || ""}]\n${block.text}`);
-        }
-        break;
-      default:
-        parts.push("[Unknown content block]");
-    }
-  }
-  return parts.join("\n");
 }

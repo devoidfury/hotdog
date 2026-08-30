@@ -30,8 +30,9 @@ function resolveHttpTimeoutSecs(value: unknown): number {
     : DEFAULT_HTTP_TIMEOUT_SECS;
 }
 
-/** @param Connection - Optional McpConnection class override for testing. */
-export function create(core: CoreContext, Connection = McpConnection): ExtensionInstance | null {
+/** @param options - Loader options; `Connection` overrides the McpConnection class (test seam). */
+export function create(core: CoreContext, options: { Connection?: typeof McpConnection } = {}): ExtensionInstance | null {
+  const Connection = options.Connection ?? McpConnection;
   // mcpServers is an array, not an object — read it directly from core.config
   const mcpServers = (core.config?.mcpServers as McpServerConfig[]) || [];
   const enabledServers = mcpServers.filter((s) => s.enabled !== false);

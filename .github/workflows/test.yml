@@ -15,15 +15,23 @@ env:
 jobs:
   test:
     name: "bun test"
-    runs-on: ubuntu-latest
-
+    runs-on: ubuntu-slim
     steps:
-      - uses: actions/checkout@v7
+      - name: "Checkout"
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          git init
+          git remote add origin "https://github.com/${GITHUB_REPOSITORY}.git"
+          echo "::add-mask::${GITHUB_TOKEN}"
+          CRED=$(printf 'x-access-token:%s' "$GITHUB_TOKEN" | base64 -w0)
+          echo "::add-mask::${CRED}"
+          git -c "http.https://github.com/.extraheader=AUTHORIZATION: basic ${CRED}" \
+            fetch --depth 1 --no-tags origin "${GITHUB_SHA}"
+          git checkout --detach FETCH_HEAD
 
-      - name: "Setup bun"
-        uses: oven-sh/setup-bun@v2
-        with:
-          bun-version: ${{ env.BUN_VERSION }}
+      - name: "Install bun"
+        run: examples/docker/bun-install.sh "$BUN_VERSION"
 
       - name: "Run tests"
         run: bun run loud-test

@@ -21,6 +21,7 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
+          git config set advice.defaultBranchName false
           git init
           git remote add origin "https://github.com/${GITHUB_REPOSITORY}.git"
           echo "::add-mask::${GITHUB_TOKEN}"

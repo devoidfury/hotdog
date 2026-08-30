@@ -182,6 +182,7 @@ export interface CoreContext {
   // For subcommand handlers that need to rebuild config at runtime.
   buildConfig?: (cli: Record<string, unknown>) => Promise<{
     resolved: BuildAgentConfig;
+    config: CoreConfigWithExtensions;
     modelRegistry: Record<string, ModelConfig>;
     providers: ProviderDef[];
   }>;

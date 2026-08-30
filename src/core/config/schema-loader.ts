@@ -213,6 +213,25 @@ export function getLayerDefault(
   return undefined;
 }
 
+// Literal defaults per schema key: the first "default" layer, only when the
+// value is a literal. Function/compute defaults (e.g. profilesPath) are
+// skipped so those keys stay absent from the result.
+export function schemaDefaults(schema: ConfigSchema): Record<string, unknown> {
+  const defaults: Record<string, unknown> = {};
+
+  for (const [keyName, prop] of Object.entries(schema)) {
+    for (const layer of prop.layers ?? []) {
+      if (!("default" in layer)) continue;
+      if (typeof layer.default !== "function") {
+        defaults[keyName] = layer.default;
+      }
+      break;
+    }
+  }
+
+  return defaults;
+}
+
 export function loadExtensionSchemas(
   extensions: Array<{ configSchema?: unknown }>,
 ): ConfigSchema {

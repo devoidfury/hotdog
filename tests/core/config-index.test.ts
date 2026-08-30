@@ -112,7 +112,12 @@ describe("getDefaultConfig", () => {
     const config = getDefaultConfig();
     expect(config.providers).toEqual([]);
     expect(config.defaultProvider).toBeNull();
-    expect(config.aiUrl).toBeNull();
+    // Key names come from the schema, not the config-file aliases
+    // (aiUrl/thinker/chatTimeoutSecs/healthCheckTimeoutSecs).
+    expect(config.baseUrl).toBeNull();
+    expect(config.thinkerFormat).toBe("[Thinking: {}]");
+    expect(config.chatTimeout).toBe(600);
+    expect(config.healthCheckTimeout).toBe(5);
     expect(config.defaultModel).toBeNull();
     expect(config.extensionPaths).toEqual(["@extensions"]);
     expect(config.extensionAutoload).toBe(true);

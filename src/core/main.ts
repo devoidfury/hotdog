@@ -15,26 +15,14 @@ import { createCompletionService } from "./completion.ts";
 import type { CoreContext, ExtensionInstance, ToolMetadataPayload } from "./extensions/types.ts";
 import type { ToolMetadata } from "./extensions/tool-registry.ts";
 import { parseArgs, generateHelpText } from "./cli.ts";
-import {
-  loadConfig,
-  buildConfig,
-  buildAgentConfig,
-  validateConfig,
-  failOnInvalidConfig,
-  resolveConfigDir,
-  type CliArgv,
-} from "./config/index.ts";
+import { loadConfig, buildConfig, type CliArgv } from "./config/index.ts";
 import type { ProfileDef } from "./config/profiles.ts";
 import type { ResolvedConfig } from "./extensions/types.ts";
-import type { ModelConfig, ProviderDef } from "./config/providers.ts";
-import { buildModelRegistry } from "./config/providers.ts";
-import { castAs } from "../utils/json-schema.ts";
+import type { ProviderDef } from "./config/providers.ts";
 import { getLayerDefault } from "./config/schema-loader.ts";
 import {
   cliFlagsFromSchema,
   CONFIG_SCHEMA,
-  resolveExtensionConfig,
-  type ResolutionContext,
   type CoreConfigWithExtensions,
 } from "./config/schema-loader.ts";
 import { ConfigRegistry } from "./extensions/config.ts";
@@ -189,61 +177,6 @@ export function createCore(
   return core;
 }
 
-async function buildFullConfig(
-  cli: CliArgv,
-  configRegistry: ConfigRegistry,
-): Promise<{
-  resolved: ResolvedConfig;
-  config: CoreConfigWithExtensions;
-  modelRegistry: Record<string, ModelConfig>;
-  providers: ProviderDef[];
-}> {
-  const extParams = configRegistry.getConfigParams();
-
-  const configDir = resolveConfigDir(cli.configDir ?? undefined);
-  const config = await loadConfig(cli.config ?? undefined, cli.configDir ?? undefined, extParams);
-
-  const resolved = await buildAgentConfig({
-    cli,
-    config: config as CoreConfigWithExtensions,
-    configDir,
-    providers: config.providers || [],
-    defaultModel: getLayerDefault(CONFIG_SCHEMA.defaultModel) as string | null,
-  });
-
-  const modelRegistry = await buildModelRegistry(
-    {
-      providers: castAs<ProviderDef[]>(config.providers || []),
-      baseUrl: resolved.baseUrl,
-      apiKey: resolved.apiKey,
-    },
-    castAs<number>(resolved.contextLimit),
-  );
-  resolved.modelRegistry = modelRegistry;
-
-  const extContext: ResolutionContext = {
-    cli,
-    config: config as Record<string, unknown>,
-    configDir: resolved.configDir,
-    provider: null,
-    profile: resolved.profileDef,
-    profileName: resolved.profileName,
-  };
-  const resolvedExtConfig = resolveExtensionConfig(extParams, extContext);
-  Object.assign(config as Record<string, unknown>, resolvedExtConfig);
-
-  const extensionSchemas = extParams.filter((p) => p.schema).map((p) => ({ key: p.key, schema: p.schema }));
-  const validationResult = validateConfig(config as CoreConfigWithExtensions, extensionSchemas);
-  failOnInvalidConfig(validationResult);
-
-  return {
-    resolved: resolved as ResolvedConfig,
-    config: config as CoreConfigWithExtensions,
-    modelRegistry,
-    providers: (config.providers || []) as ProviderDef[],
-  };
-}
-
 export async function main(): Promise<number> {
   // Hooks + logger must exist before any error output can happen.
   const hooks = createHooks();
@@ -313,10 +246,7 @@ export async function main(): Promise<number> {
     return 0;
   }
 
-  const { resolved, config } = await buildFullConfig(
-    cli as CliArgv,
-    configRegistry,
-  );
+  const { resolved, config } = await buildConfig(cli as CliArgv, configRegistry);
 
   if (!resolved.baseUrl) {
     logger.warn(
@@ -331,7 +261,9 @@ export async function main(): Promise<number> {
     hooks,
     profileName: resolved.profileName,
     profile: resolved.profileDef,
-    buildConfig,
+    // Bound so the extension-facing core.buildConfig runs the same full
+    // pipeline (incl. extension config resolution + validation) as main().
+    buildConfig: (cli) => buildConfig(cli as CliArgv, configRegistry),
   });
 
   core.resolved = resolved as ResolvedConfig;

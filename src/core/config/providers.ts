@@ -1,7 +1,10 @@
 import fsPromises from "node:fs/promises";
 import path from "node:path";
-import { cwd } from "node:process";
-import { DEFAULT_SYSTEM_PROMPT_FILENAME, DEFAULT_SYSTEM_PROMPT_TEMPLATE } from "./defaults.ts";
+import {
+  resolveConfigDir,
+  DEFAULT_SYSTEM_PROMPT_FILENAME,
+  DEFAULT_SYSTEM_PROMPT_TEMPLATE,
+} from "./defaults.ts";
 import { logger } from "../logger.ts";
 import { hotdogFetch } from "@utils/fetch.ts";
 
@@ -323,32 +326,13 @@ export function resetSystemPromptCache(): void {
 
 export async function initSystemPromptTemplate(
   templatePath?: string,
-  cliConfigDir?: string,
-  resolveConfigDirFn?: (cliConfigDir?: string) => string,
+  configDir?: string,
 ): Promise<string> {
   if (cachedSystemPromptTemplate) return cachedSystemPromptTemplate;
 
-  let templateFile = templatePath;
-  if (!templateFile) {
-    let configDir: string;
-    if (resolveConfigDirFn) {
-      configDir = resolveConfigDirFn(cliConfigDir);
-    } else {
-      if (cliConfigDir) {
-        configDir = path.resolve(cliConfigDir);
-      } else {
-        const cwdConfig = path.resolve(cwd(), "config");
-        try {
-          await fsPromises.access(cwdConfig);
-          configDir = cwdConfig;
-        } catch {
-          const envConfigDir = process.env.HOTDOG_CONFIG_DIR;
-          configDir = envConfigDir ? path.resolve(envConfigDir) : "./config";
-        }
-      }
-    }
-    templateFile = path.join(configDir, DEFAULT_SYSTEM_PROMPT_FILENAME);
-  }
+  const templateFile =
+    templatePath ??
+    path.join(configDir ?? resolveConfigDir(), DEFAULT_SYSTEM_PROMPT_FILENAME);
 
   try {
     cachedSystemPromptTemplate = await fsPromises.readFile(templateFile, "utf-8");

@@ -198,7 +198,7 @@ describe("initSystemPromptTemplate", () => {
     const tmpFile = path.join(tmpDir, "template.md");
     writeFileSync(tmpFile, "This is a test template {{ role }}");
 
-    const template = await initSystemPromptTemplate(tmpFile, undefined, undefined);
+    const template = await initSystemPromptTemplate(tmpFile);
     expect(template).toContain("This is a test template");
     expect(template).toContain("{{ role }}");
   });
@@ -207,22 +207,22 @@ describe("initSystemPromptTemplate", () => {
     const tmpFile = path.join(tmpDir, "template.md");
     writeFileSync(tmpFile, "Template v1");
 
-    const template1 = await initSystemPromptTemplate(tmpFile, undefined, undefined);
+    const template1 = await initSystemPromptTemplate(tmpFile);
     expect(template1).toBe("Template v1");
 
     writeFileSync(tmpFile, "Template v2");
-    const template2 = await initSystemPromptTemplate(tmpFile, undefined, undefined);
+    const template2 = await initSystemPromptTemplate(tmpFile);
     expect(template2).toBe("Template v1"); // cached
   });
 
   it("falls back to default template when file not found", async () => {
-    const template = await initSystemPromptTemplate("/nonexistent/path.md", undefined, undefined);
+    const template = await initSystemPromptTemplate("/nonexistent/path.md");
     expect(template).toContain("{{ role }}");
     expect(template).toContain("{{ body }}");
   });
 
   it("falls back to config directory when no explicit path", async () => {
-    const template = await initSystemPromptTemplate(undefined, undefined, () => "./config");
+    const template = await initSystemPromptTemplate(undefined, "./config");
     expect(template.length).toBeGreaterThan(0);
   });
 
@@ -230,13 +230,13 @@ describe("initSystemPromptTemplate", () => {
     const tmpFile = path.join(tmpDir, "template.md");
     writeFileSync(tmpFile, "Template before reset");
 
-    const template1 = await initSystemPromptTemplate(tmpFile, undefined, undefined);
+    const template1 = await initSystemPromptTemplate(tmpFile);
     expect(template1).toBe("Template before reset");
 
     resetSystemPromptCache();
     writeFileSync(tmpFile, "Template after reset");
 
-    const template2 = await initSystemPromptTemplate(tmpFile, undefined, undefined);
+    const template2 = await initSystemPromptTemplate(tmpFile);
     expect(template2).toBe("Template after reset");
   });
 });

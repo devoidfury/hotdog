@@ -1,8 +1,5 @@
-import fs from "node:fs";
 import fsPromises from "node:fs/promises";
 import path from "node:path";
-import os from "node:os";
-import { cwd } from "node:process";
 import { ConfigError } from "../error.ts";
 import { deepMerge } from "../../utils/objects.ts";
 import { render } from "../../utils/render.ts";
@@ -21,14 +18,21 @@ export {
   formatValidationErrors,
 } from "../../utils/json-schema.ts";
 
-import { DEFAULT_CONFIG_FILENAME } from "./defaults.ts";
+import { DEFAULT_CONFIG_FILENAME, resolveConfigDir } from "./defaults.ts";
 import {
   CONFIG_SCHEMA,
   getLayerDefault,
   ResolutionContext,
   type CoreConfigWithExtensions,
 } from "./schema-loader.ts";
-import { resolveAll, resolveKey, resolveModel } from "./schema-loader.ts";
+import {
+  resolveAll,
+  resolveKey,
+  resolveModel,
+  schemaDefaults,
+  resolveExtensionConfig,
+} from "./schema-loader.ts";
+import type { ConfigRegistry } from "../extensions/config.ts";
 import {
   ProfileManager,
   type ProfileDef,
@@ -40,36 +44,6 @@ import {
   ProviderDef,
   type ModelConfig,
 } from "./providers.ts";
-
-export function resolveConfigDir(cliConfigDir?: string | null): string {
-  if (cliConfigDir) {
-    return path.resolve(cliConfigDir);
-  }
-
-  const envConfigDir = process.env.HOTDOG_CONFIG_DIR;
-  if (envConfigDir) {
-    return path.resolve(envConfigDir);
-  }
-
-  const cwdConfig = path.resolve(cwd(), "config");
-  try {
-    fs.accessSync(cwdConfig);
-    return cwdConfig;
-  } catch {
-    // Not a directory or doesn't exist
-  }
-
-  const etcConfig = "/etc/hotdog";
-  try {
-    fs.accessSync(etcConfig);
-    return etcConfig;
-  } catch {
-    // Not found
-  }
-
-  // XDG-style directory fallback
-  return path.join(os.homedir(), ".config", "hotdog");
-}
 
 export function mergeExtensionConfigDefaults(
   defaultConfig: Record<string, unknown>,
@@ -111,94 +85,25 @@ export function normalizeConfigKeys(obj: unknown): unknown {
   return normalized;
 }
 
-export interface DefaultConfig extends Record<string, unknown> {
+// Loaded (non-resolved) config: schema keys with literal defaults
+// (schemaDefaults), plus raw config-file passthrough keys that are not
+// schema keys (providers, colors palette). profileDef is set at runtime.
+export type DefaultConfig = CoreConfigWithExtensions & {
   providers: ProviderDef[] | null;
-  profiles: Record<string, ProfileDef>;
-  extensionPaths: string[];
-  extensionAutoload: boolean;
-  extensions: string[];
-  /** Profile name from config file (--profile flag, config.profile). */
-  profile?: string | null;
-  /** Resolved profile object (includes manager flag, whitelistTools, etc.). */
-  profileDef?: ProfileDef | null;
-  profileName?: string;
-  theme: string | null;
   colors: unknown;
-  systemPromptTemplate: string | null;
-  aiUrl: string | null;
-  apiKey: string | null;
-  defaultModel: string | null;
-  defaultProvider: string | null;
-  defaultSubcommand: string | null;
-  temperature: number | null;
-  thinker: string | null;
-  toolCallDisplayFormat: string | null;
-  toolOutputFmt: string | null;
-  role: string | null;
-  hideTools: boolean;
-  hideThinking: boolean;
-  showTokenUse: boolean;
-  profilesPath: string;
-  chatTimeoutSecs: number;
-  healthCheckTimeoutSecs: number;
-  maxIterations: number;
-  maxRetries: number;
-  taskProfile: string | null;
-  exitCommands: string[];
-  noLog: boolean;
-  compactDebug: boolean;
-  hookTrace: boolean;
-}
+};
 
 export function getDefaultConfig(
   extParams?: Array<{ key: string; defaults: unknown }>,
 ): DefaultConfig {
-  const baseConfig: DefaultConfig = {
+  const baseConfig: Record<string, unknown> = {
+    ...schemaDefaults(CONFIG_SCHEMA),
     providers: [],
-    profiles: {},
-    extensionPaths: ["@extensions"],
-    extensionAutoload: getLayerDefault(CONFIG_SCHEMA.extensionAutoload) as boolean,
-    extensions: [],
-    profile: null,
-    profileDef: null,
-    profileName: undefined,
-    theme: null,
     colors: null,
-    systemPromptTemplate: null,
-    aiUrl: getLayerDefault(CONFIG_SCHEMA.baseUrl) as string | null,
-    apiKey: null,
-    defaultModel: getLayerDefault(CONFIG_SCHEMA.defaultModel) as string | null,
-    defaultProvider: null,
-    defaultSubcommand: getLayerDefault(CONFIG_SCHEMA.defaultSubcommand) as
-      string | null,
-    temperature: null,
-    thinker: getLayerDefault(CONFIG_SCHEMA.thinkerFormat) as string | null,
-    toolCallDisplayFormat: getLayerDefault(
-      CONFIG_SCHEMA.toolCallDisplayFormat,
-    ) as string | null,
-    toolOutputFmt: getLayerDefault(CONFIG_SCHEMA.toolOutputFmt) as
-      string | null,
-    role: null,
-    hideTools: getLayerDefault(CONFIG_SCHEMA.hideTools) as boolean,
-    hideThinking: getLayerDefault(CONFIG_SCHEMA.hideThinking) as boolean,
-    showTokenUse: getLayerDefault(CONFIG_SCHEMA.showTokenUse) as boolean,
-    profilesPath: "",
-    chatTimeoutSecs: getLayerDefault(CONFIG_SCHEMA.chatTimeout) as number,
-    healthCheckTimeoutSecs: getLayerDefault(
-      CONFIG_SCHEMA.healthCheckTimeout,
-    ) as number,
-    maxIterations: getLayerDefault(CONFIG_SCHEMA.maxIterations) as number,
-    maxRetries: getLayerDefault(CONFIG_SCHEMA.maxRetries) as number,
-    taskProfile: getLayerDefault(CONFIG_SCHEMA.taskProfile) as string | null,
-    exitCommands: getLayerDefault(CONFIG_SCHEMA.exitCommands) as string[],
-    noLog: getLayerDefault(CONFIG_SCHEMA.noLog) as boolean,
-    compactDebug: getLayerDefault(CONFIG_SCHEMA.compactDebug) as boolean,
-    hookTrace: getLayerDefault(CONFIG_SCHEMA.hookTrace) as boolean,
+    profileDef: null,
   };
 
-  return castAs<DefaultConfig>(
-    mergeExtensionConfigDefaults(baseConfig, extParams),
-  );
+  return castAs<DefaultConfig>(mergeExtensionConfigDefaults(baseConfig, extParams));
 }
 
 export async function loadConfig(
@@ -322,16 +227,26 @@ export interface BuildAgentConfigExtra {
 // Not to be confused with Agent.AgentConfig, the runtime config the Agent class reads.
 export type BuildAgentConfig = CoreConfigWithExtensions & BuildAgentConfigExtra;
 
-export async function buildConfig(cliArgv: CliArgv): Promise<{
+// Single config build pipeline: load config (with extension defaults) ->
+// buildAgentConfig -> model registry -> resolve + validate extension config.
+// Pass a ConfigRegistry to include extension config resolution/validation;
+// without one this is the core-only pipeline.
+export async function buildConfig(
+  cliArgv: CliArgv,
+  configRegistry?: ConfigRegistry,
+): Promise<{
   resolved: BuildAgentConfig;
+  config: CoreConfigWithExtensions;
   modelRegistry: Record<string, ModelConfig>;
   providers: ProviderDef[];
 }> {
+  const extParams = configRegistry?.getConfigParams();
   const configDir = resolveConfigDir(cliArgv.configDir ?? undefined);
 
   const config = await loadConfig(
     cliArgv.config ?? undefined,
     cliArgv.configDir ?? undefined,
+    extParams,
   );
 
   const resolved = await buildAgentConfig({
@@ -352,8 +267,29 @@ export async function buildConfig(cliArgv: CliArgv): Promise<{
   );
   resolved.modelRegistry = modelRegistry;
 
+  if (extParams) {
+    const extContext: ResolutionContext = {
+      cli: cliArgv,
+      config: config as Record<string, unknown>,
+      configDir: resolved.configDir,
+      provider: null,
+      profile: resolved.profileDef,
+      profileName: resolved.profileName,
+    };
+    const resolvedExtConfig = resolveExtensionConfig(extParams, extContext);
+    Object.assign(config as Record<string, unknown>, resolvedExtConfig);
+
+    const extensionSchemas = extParams
+      .filter((p) => p.schema)
+      .map((p) => ({ key: p.key, schema: p.schema }));
+    failOnInvalidConfig(
+      validateConfig(config as CoreConfigWithExtensions, extensionSchemas),
+    );
+  }
+
   return {
     resolved,
+    config: config as CoreConfigWithExtensions,
     modelRegistry,
     providers: (config.providers || []) as ProviderDef[],
   };
@@ -440,8 +376,7 @@ export async function buildAgentConfig(options: {
 
   const systemPromptTemplate = await initSystemPromptTemplate(
     cli.systemPromptTemplate || config.systemPromptTemplate,
-    cli.configDir ?? undefined,
-    resolveConfigDir,
+    configDir,
   );
 
   const profiles = profileManager.getProfilesForSwitch();

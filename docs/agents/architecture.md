@@ -20,18 +20,18 @@ Everything else is an extension. This keeps the core minimal, testable, and full
 ## Core Modules (`src/core/`)
 
 ### Entry Point (`src/core/main.ts`)
-Thin orchestrator: create config registry -> discover extension metadata -> parse CLI args -> build config -> create core infrastructure -> load extensions -> dispatch subcommand. All initialization logic is in config modules and core modules.
+Thin orchestrator: create config registry -> discover extension metadata -> parse CLI args -> build config -> create core infrastructure -> load extensions -> dispatch subcommand. All initialization logic is in config modules and core modules. Config building uses `buildConfig(cli, configRegistry)` from `src/core/config/index.ts` (the single pipeline, incl. extension config resolution + validation) and is exposed to extensions as `core.buildConfig`.
 
 ### CLI (`src/core/cli.ts`)
 Argument parsing with support for dynamic CLI flags registered by extensions via `ConfigRegistry`. Exports `parseArgs()` and `HELP_TEXT`. Supports core flags plus extension-provided flags.
 
 ### Config (`src/core/config/`)
 Split into sub-modules. The single source of truth is `src/core/core.config.json`. Key exports:
-- `src/core/config/index.ts` — re-exports all from sub-modules; plus `resolveConfigDir()`, `mergeExtensionConfigDefaults()`, `normalizeConfigKeys()`, `getDefaultConfig()`, `loadConfig()`, `validateConfig()`, `failOnInvalidConfig()`, `buildConfig()`, `buildAgentConfig()`
-- `src/core/config/defaults.ts` — exports only static path constants and runtime fallbacks (e.g., `DEFAULT_PROFILES_SUBPATH`, `DEFAULT_SYSTEM_PROMPT_TEMPLATE`); all configurable defaults are resolved from the schema; components receive resolved values from callers instead of importing these directly
-- `src/core/config/schema-loader.ts` — reads `core.config.json`, builds `CONFIG_SCHEMA`, cast functions, CLI flags, and resolvers (`resolveKey()`, `resolveAll()`, `resolveModel()`, `resolveModelWithProvider()`, `resolveExtensionConfig()`, `cliFlagsFromSchema()`)
+- `src/core/config/index.ts` — re-exports all from sub-modules; plus `mergeExtensionConfigDefaults()`, `normalizeConfigKeys()`, `getDefaultConfig()` (derived from the schema via `schemaDefaults()`, not hand-written), `loadConfig()`, `validateConfig()`, `failOnInvalidConfig()`, `buildConfig(cliArgv, configRegistry?)` (the single config build pipeline: load → `buildAgentConfig()` → model registry → resolve + validate extension config when a registry is passed), `buildAgentConfig()`
+- `src/core/config/defaults.ts` — static path constants, runtime fallbacks (e.g., `DEFAULT_PROFILES_SUBPATH`, `DEFAULT_SYSTEM_PROMPT_TEMPLATE`), and `resolveConfigDir()` — the single config-dir resolution chain (CLI arg > `HOTDOG_CONFIG_DIR` > CWD `config/` > `/etc/hotdog` > `~/.config/hotdog`); all configurable defaults are resolved from the schema; components receive resolved values from callers instead of importing these directly
+- `src/core/config/schema-loader.ts` — reads `core.config.json`, builds `CONFIG_SCHEMA`, cast functions, CLI flags, and resolvers (`resolveKey()`, `resolveAll()`, `resolveModel()`, `resolveModelWithProvider()`, `resolveExtensionConfig()`, `cliFlagsFromSchema()`); also `getLayerDefault()` and `schemaDefaults()` (literal schema defaults, skipping compute defaults)
 - `src/core/config/profiles.ts` — `loadProfileFile()`, `loadProfileFiles()`, `resolveProfile()`, `mergeProfile()`
-- `src/core/config/providers.ts` — `buildModelRegistry()`, `resolveProvider()`, `initSystemPromptTemplate()`, `resetSystemPromptCache()`
+- `src/core/config/providers.ts` — `buildModelRegistry()`, `resolveProvider()`, `initSystemPromptTemplate(templatePath?, configDir?)` (template file = `templatePath ?? <configDir ?? resolveConfigDir()>/system_prompt.md`), `resetSystemPromptCache()`
 
 ### Config Registry (`src/core/extensions/config.ts`)
 Manages extension-registered CLI flags and config parameters. Config params and CLI flags are defined in `extension.json` (configSchema and cli:flags), with defaults automatically extracted and registered by the extension loader.

@@ -1,14 +1,12 @@
+import pkg from "@package.json" with { type: "json" };
 import readline from "node:readline";
 import { spawn } from "node:child_process";
+import { CliOutputSink } from "@utils/cli/cli.ts";
 import { parseCommand, Command, ACTIONS } from "@core/commands.ts";
 import { HOOKS } from "@core/hooks.ts";
-import { CliOutputSink } from "@utils/cli/cli.ts";
 import type { LlmClient } from "@core/llm-client/client.ts";
 import { SessionManager, type AgentLike } from "@core/session/index.ts";
 import { Agent } from "@core/agent.ts";
-import { registerTaskManagerService } from "../subagents/index.ts";
-import { CliChannel } from "./cli-channel.ts";
-import pkg from "@package.json" with { type: "json" };
 import {
   readSessionEntries,
   sessionExists,
@@ -16,6 +14,10 @@ import {
 } from "@core/session/session-log.ts";
 import { CoreContext, ExtensionInstance } from "@core/extensions/types.ts";
 import { ExtensionError } from "@core/error.ts";
+import type { CliArgv } from "@core/config/index.ts";
+import type { ModelConfig } from "@core/config/providers.ts";
+import { registerTaskManagerService } from "../subagents/index.ts";
+import { CliChannel } from "./cli-channel.ts";
 import {
   parseCompletionContext,
   registerSlashCommandNameCompletion,
@@ -23,8 +25,6 @@ import {
   registerShellCompletion,
   buildReadlineCompleter,
 } from "./completions.ts";
-import type { CliArgv } from "@core/config/index.ts";
-import type { ModelConfig } from "@core/config/providers.ts";
 
 export {
   parseCompletionContext,

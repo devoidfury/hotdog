@@ -226,6 +226,14 @@ describe("McpClient.forStdio", () => {
 // ── StdioTransport Tests ─────────────────────────────────────────────────────
 
 describe("StdioTransport", () => {
+  // Subprocess spawn time varies wildly on cold runners; never rely on a fixed sleep.
+  async function until(cond: () => boolean, timeoutMs = 5000) {
+    const start = Date.now();
+    while (!cond() && Date.now() - start < timeoutMs) {
+      await new Promise((r) => setTimeout(r, 20));
+    }
+  }
+
   it("sends messages to subprocess stdin and receives the response", async () => {
     const transport = new StdioTransport("bun", ["./tests/fixtures/mcp-test-server.ts"]);
     const lines: string[] = [];
@@ -259,7 +267,7 @@ describe("StdioTransport", () => {
       receivedLines.push(line);
     });
 
-    await new Promise((r) => setTimeout(r, 30));
+    await until(() => receivedLines.includes("hello world"));
     removeHandler();
     await transport.destroy();
 
@@ -273,7 +281,7 @@ describe("StdioTransport", () => {
       receivedLines.push(line);
     });
 
-    await new Promise((r) => setTimeout(r, 30));
+    await until(() => receivedLines.length === 3);
     removeHandler();
     await transport.destroy();
 
@@ -291,7 +299,7 @@ describe("StdioTransport", () => {
       );
       const lines: string[] = [];
       const removeHandler = transport.onMessage((line) => lines.push(line));
-      await new Promise((r) => setTimeout(r, 100));
+      await until(() => lines.length > 0);
       removeHandler();
       await transport.destroy();
 

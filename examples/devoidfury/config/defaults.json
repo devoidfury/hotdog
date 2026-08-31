@@ -31,7 +31,8 @@
     }
   },
   "ui-interactive-cli": {
-    "shell-mode": true
+    "shell-mode": true,
+    "paste-marker-min-chars": 800
   },
   "skills": {
     "path": "/skills"

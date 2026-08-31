@@ -16,6 +16,11 @@
           "type": "boolean",
           "default": false,
           "description": "When enabled, lines starting with a recognized system command are executed directly instead of sent to the agent."
+        },
+        "pasteMarkerMinChars": {
+          "type": "number",
+          "default": 400,
+          "description": "Minimum length (characters) for a single-line paste to be shown as a [Paste #N] marker; shorter single-line pastes are inserted into the line as-is. Set to 0 to always use the marker."
         }
       },
       "additionalProperties": false,

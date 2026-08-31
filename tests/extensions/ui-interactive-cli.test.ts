@@ -599,6 +599,8 @@ function createMockCore(overrides: Record<string, unknown> = {}): never {
     },
     config: {
       providers: [],
+      // mirrors the extension schema defaults the real config layer always merges in
+      uiInteractiveCli: { shellMode: false, pasteMarkerMinChars: 80 },
       ...(config as Record<string, unknown> ?? {}),
     },
     hooks: {
@@ -779,12 +781,16 @@ describe("runInteractiveSession integration", () => {
     await withMockSessionManager(
       async () => createMockSessionManager(mockAgent, true),
       async () => {
-        await runInteractiveSession({}, createMockCore({ config: { uiInteractiveCli: { shellMode: true } } }), {
-          createReadline: () => rl,
-          onClose: () => {},
-          onSIGINT: () => {},
-          setupInput: () => {},
-        });
+        await runInteractiveSession(
+          {},
+          createMockCore({ config: { uiInteractiveCli: { shellMode: true, pasteMarkerMinChars: 80 } } }),
+          {
+            createReadline: () => rl,
+            onClose: () => {},
+            onSIGINT: () => {},
+            setupInput: () => {},
+          },
+        );
       },
     );
 

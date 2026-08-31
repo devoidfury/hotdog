@@ -477,7 +477,8 @@ export async function runInteractiveSession(
   console.log(`Session: ${agent?.sessionId || "unknown"}`);
   console.log("Type /quit or /exit to exit.\n");
 
-  const shellMode = (config.uiInteractiveCli as Record<string, unknown>)?.shellMode;
+  const uiCli = (config.uiInteractiveCli as Record<string, unknown>) || {};
+  const shellMode = uiCli.shellMode;
 
   const createReadline = options.createReadline || readline.createInterface;
 
@@ -489,8 +490,13 @@ export async function runInteractiveSession(
   });
 
   // Intercept bracketed paste before readline: pasted payloads become inline
-  // `[Paste #N - M lines]` markers (real content restored in `lineHandler`).
-  const paste = new ClipboardPasteInterceptor(rl);
+  // `[Paste #N - M lines]` markers (real content restored in `lineHandler`),
+  // except short single-line pastes which are inserted as-is.
+  // config record is untyped; the constructor validates and fails loud on a
+  // missing or invalid value
+  const paste = new ClipboardPasteInterceptor(rl, {
+    pasteMarkerMinChars: uiCli.pasteMarkerMinChars as number,
+  });
 
   const channel = new CliChannel({
     sessionManager,

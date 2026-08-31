@@ -7,12 +7,18 @@
 import { describe, it, expect, mock, afterEach } from "bun:test";
 import { EventEmitter } from "node:events";
 import readline from "node:readline";
-import { ClipboardPasteInterceptor } from "../../src/extensions/ui-interactive-cli/clipboard-paste.ts";
+import {
+  ClipboardPasteInterceptor,
+  type ClipboardPasteInterceptorOptions,
+} from "../../src/extensions/ui-interactive-cli/clipboard-paste.ts";
 
 // xterm bracketed paste (DECSET 2004) wire protocol, encoded independently of
 // the implementation so a constant drift in clipboard-paste.ts fails these tests.
 const PASTE_START = "\x1b[200~";
 const PASTE_END = "\x1b[201~";
+// single-line payloads at or above the 80-char threshold take the marker path
+const L80 = "x".repeat(80);
+const L79 = "x".repeat(79);
 
 type MockFn = ReturnType<typeof mock>;
 
@@ -32,7 +38,9 @@ interface Rig {
   interceptor: ClipboardPasteInterceptor;
 }
 
-function makeRig(options: { tty?: boolean; withDataListener?: boolean } = {}): Rig {
+function makeRig(
+  options: { tty?: boolean; withDataListener?: boolean; paste?: ClipboardPasteInterceptorOptions } = {},
+): Rig {
   const tty = options.tty !== false;
   const withDataListener = options.withDataListener !== false;
   const forwarded: unknown[] = [];
@@ -82,7 +90,9 @@ function makeRig(options: { tty?: boolean; withDataListener?: boolean } = {}): R
   rl.input = stdin;
   rl.output = stdout;
 
-  const interceptor = new ClipboardPasteInterceptor(rl as unknown as readline.Interface);
+  const interceptor = new ClipboardPasteInterceptor(rl as unknown as readline.Interface, options.paste ?? {
+    pasteMarkerMinChars: 80,
+  });
   return { stdin, stdout, rl: rl as unknown as Rig["rl"], forwarded, interceptor };
 }
 
@@ -133,13 +143,62 @@ describe("ClipboardPasteInterceptor", () => {
     expect(rig.interceptor.normalize("[Paste #1 - 3 lines]")).toBe("[Paste #1 - 3 lines]");
   });
 
-  it("marks single-line pastes as '1 line'", () => {
+  it("marks long single-line pastes as '1 line'", () => {
     const rig = makeRig();
     lastRig = rig;
-    feed(rig, `${PASTE_START}single${PASTE_END}`);
+    feed(rig, `${PASTE_START}${L80}${PASTE_END}`);
     expect(forwardedText(rig)).toBe("[Paste #1 - 1 line]");
     rig.rl.line = "[Paste #1 - 1 line]";
-    expect(rig.interceptor.normalize(rig.rl.line)).toBe("single");
+    expect(rig.interceptor.normalize(rig.rl.line)).toBe(L80);
+  });
+
+  it("forwards short single-line pastes as raw text instead of a marker", () => {
+    const rig = makeRig();
+    lastRig = rig;
+    feed(rig, `${PASTE_START}short pasted text${PASTE_END}`);
+    expect(forwardedText(rig)).toBe("short pasted text");
+    expect(rig.rl.line).toBe("short pasted text");
+    // nothing was recorded, so normalize is a no-op
+    expect(rig.interceptor.normalize(rig.rl.line)).toBe(rig.rl.line);
+  });
+
+  it("uses the raw path below 80 characters and the marker at exactly 80", () => {
+    const rig = makeRig();
+    lastRig = rig;
+    feed(rig, `${PASTE_START}${L79}${PASTE_END}`);
+    expect(forwardedText(rig)).toBe(L79);
+    feed(rig, `${PASTE_START}${L80}${PASTE_END}`);
+    // the raw paste did not consume a marker number, so this is #1
+    expect(rig.rl.line).toBe(L79 + "[Paste #1 - 1 line]");
+    expect(rig.interceptor.normalize(rig.rl.line)).toBe(L79 + L80);
+  });
+
+  it("honors a custom pasteMarkerMinChars threshold", () => {
+    const rig = makeRig({ paste: { pasteMarkerMinChars: 5 } });
+    lastRig = rig;
+    feed(rig, `${PASTE_START}four${PASTE_END}`); // 4 < 5: raw
+    expect(forwardedText(rig)).toBe("four");
+    feed(rig, `${PASTE_START}fives${PASTE_END}`); // 5: marker
+    expect(rig.rl.line).toBe("four[Paste #1 - 1 line]");
+    expect(rig.interceptor.normalize(rig.rl.line)).toBe("fourfives");
+  });
+
+  it("treats a threshold of 0 as always-marker", () => {
+    const rig = makeRig({ paste: { pasteMarkerMinChars: 0 } });
+    lastRig = rig;
+    feed(rig, `${PASTE_START}a${PASTE_END}`);
+    expect(forwardedText(rig)).toBe("[Paste #1 - 1 line]");
+    rig.rl.line = "[Paste #1 - 1 line]";
+    expect(rig.interceptor.normalize(rig.rl.line)).toBe("a");
+  });
+
+  it("fails when pasteMarkerMinChars is missing or invalid", () => {
+    expect(() => makeRig({ paste: {} as ClipboardPasteInterceptorOptions })).toThrow(
+      "pasteMarkerMinChars must be a non-negative number",
+    );
+    expect(() => makeRig({ paste: { pasteMarkerMinChars: -1 } })).toThrow(
+      "pasteMarkerMinChars must be a non-negative number",
+    );
   });
 
   it("ignores empty pastes", () => {
@@ -162,7 +221,7 @@ describe("ClipboardPasteInterceptor", () => {
   it("forwards surrounding text in the same chunk around a paste", () => {
     const rig = makeRig();
     lastRig = rig;
-    feed(rig, `a${PASTE_START}x${PASTE_END}b`);
+    feed(rig, `a${PASTE_START}${L80}${PASTE_END}b`);
     expect(rig.forwarded.join("")).toBe(`a[Paste #1 - 1 line]b`);
   });
 
@@ -171,22 +230,23 @@ describe("ClipboardPasteInterceptor", () => {
     lastRig = rig;
     // content itself ends with a prefix of the END delimiter; the terminal
     // still appends a complete END delimiter after it
-    feed(rig, `${PASTE_START}data \x1b[2`);
+    const content = `data \x1b[2${"x".repeat(75)}`;
+    feed(rig, `${PASTE_START}${content}`);
     feed(rig, PASTE_END);
     expect(forwardedText(rig)).toBe("[Paste #1 - 1 line]");
     rig.rl.line = "[Paste #1 - 1 line]";
-    expect(rig.interceptor.normalize(rig.rl.line)).toBe("data \x1b[2");
+    expect(rig.interceptor.normalize(rig.rl.line)).toBe(content);
   });
 
   it("handles a paste END delimiter split across chunks", () => {
     const rig = makeRig();
     lastRig = rig;
-    feed(rig, `${PASTE_START}abc\x1b[20`);
+    feed(rig, `${PASTE_START}${L80}\x1b[20`);
     expect(rig.forwarded).toHaveLength(0);
     feed(rig, `1~`);
     expect(forwardedText(rig)).toBe("[Paste #1 - 1 line]");
     rig.rl.line = "[Paste #1 - 1 line]";
-    expect(rig.interceptor.normalize(rig.rl.line)).toBe("abc");
+    expect(rig.interceptor.normalize(rig.rl.line)).toBe(L80);
   });
 
   it("handles a paste START delimiter split across chunks", () => {
@@ -214,21 +274,21 @@ describe("ClipboardPasteInterceptor", () => {
   it("numbers pastes sequentially and renders each marker's own content", () => {
     const rig = makeRig();
     lastRig = rig;
-    feed(rig, `${PASTE_START}first${PASTE_END}`);
-    feed(rig, `${PASTE_START}second${PASTE_END}`);
+    feed(rig, `${PASTE_START}${"f".repeat(80)}${PASTE_END}`);
+    feed(rig, `${PASTE_START}${"s".repeat(80)}${PASTE_END}`);
     expect(forwardedText(rig)).toBe("[Paste #1 - 1 line][Paste #2 - 1 line]");
 
     rig.rl.line = "[Paste #1 - 1 line][Paste #2 - 1 line]";
-    expect(rig.interceptor.normalize(rig.rl.line)).toBe("firstsecond");
+    expect(rig.interceptor.normalize(rig.rl.line)).toBe("f".repeat(80) + "s".repeat(80));
   });
 
   it("inserts a marker's content at most once even if it repeats in one line", () => {
     const rig = makeRig();
     lastRig = rig;
-    feed(rig, `${PASTE_START}abc${PASTE_END}`);
+    feed(rig, `${PASTE_START}${"a".repeat(80)}${PASTE_END}`);
     const line = `[Paste #1 - 1 line] and again [Paste #1 - 1 line]`;
     // first occurrence renders the content, the second stays as text
-    expect(rig.interceptor.normalize(line)).toBe("abc and again [Paste #1 - 1 line]");
+    expect(rig.interceptor.normalize(line)).toBe(`${"a".repeat(80)} and again [Paste #1 - 1 line]`);
     // second call: the marker was already rendered (e.g., recalled from
     // history), so nothing is substituted
     expect(rig.interceptor.normalize(line)).toBe(line);
@@ -237,7 +297,7 @@ describe("ClipboardPasteInterceptor", () => {
   it("drops an orphaned marker when a submitted line no longer contains it", () => {
     const rig = makeRig();
     lastRig = rig;
-    feed(rig, `${PASTE_START}abc${PASTE_END}`);
+    feed(rig, `${PASTE_START}${L80}${PASTE_END}`);
     // simulate ctrl-U: the line event fires without the marker
     expect(rig.interceptor.normalize("typed after ctrl-u")).toBe("typed after ctrl-u");
     expect(rig.interceptor.normalize("[Paste #1 - 1 line]")).toBe("[Paste #1 - 1 line]");
@@ -246,7 +306,7 @@ describe("ClipboardPasteInterceptor", () => {
   it("deletes the whole marker with one backspace at the marker end", () => {
     const rig = makeRig();
     lastRig = rig;
-    feed(rig, `${PASTE_START}abc${PASTE_END}`);
+    feed(rig, `${PASTE_START}${L80}${PASTE_END}`);
     rig.rl.line = "pre[Paste #1 - 1 line]";
     rig.rl.cursor = 22; // "pre" (3) + 19-char marker, at the end of it
 
@@ -263,7 +323,7 @@ describe("ClipboardPasteInterceptor", () => {
   it("deletes a marker with backspace when the cursor is inside the marker", () => {
     const rig = makeRig();
     lastRig = rig;
-    feed(rig, `${PASTE_START}abc${PASTE_END}`);
+    feed(rig, `${PASTE_START}${L80}${PASTE_END}`);
     rig.rl.line = "ab[Paste #1 - 1 line]cd";
     rig.rl.cursor = 8; // mid-marker (marker spans indexes 2..20)
 
@@ -276,22 +336,22 @@ describe("ClipboardPasteInterceptor", () => {
   it("deletes only the marker under the cursor when several markers are present", () => {
     const rig = makeRig();
     lastRig = rig;
-    feed(rig, `${PASTE_START}first${PASTE_END}`);
-    feed(rig, `${PASTE_START}second${PASTE_END}`);
+    feed(rig, `${PASTE_START}${"f".repeat(80)}${PASTE_END}`);
+    feed(rig, `${PASTE_START}${"s".repeat(80)}${PASTE_END}`);
     rig.rl.line = "[Paste #1 - 1 line][Paste #2 - 1 line]";
     rig.rl.cursor = 38; // end of the second marker
 
     feed(rig, "\x7f");
     expect(rig.rl.line).toBe("[Paste #1 - 1 line]");
     expect(rig.rl.cursor).toBe(19);
-    expect(rig.interceptor.normalize(rig.rl.line)).toBe("first");
+    expect(rig.interceptor.normalize(rig.rl.line)).toBe("f".repeat(80));
   });
 
   it("is not atomic on a marker whose content was already rendered", () => {
     const rig = makeRig();
     lastRig = rig;
-    feed(rig, `${PASTE_START}abc${PASTE_END}`);
-    expect(rig.interceptor.normalize(rig.rl.line)).toBe("abc");
+    feed(rig, `${PASTE_START}${L80}${PASTE_END}`);
+    expect(rig.interceptor.normalize(rig.rl.line)).toBe(L80);
     // marker already rendered; a recalled-from-history copy is plain text now
     rig.rl.line = "x[Paste #1 - 1 line]";
     rig.rl.cursor = 1;
@@ -306,7 +366,7 @@ describe("ClipboardPasteInterceptor", () => {
   it("forwards backspace when no marker is touched", () => {
     const rig = makeRig();
     lastRig = rig;
-    feed(rig, `${PASTE_START}abc${PASTE_END}`);
+    feed(rig, `${PASTE_START}${L80}${PASTE_END}`);
     rig.rl.line = "[Paste #1 - 1 line]xy";
     rig.rl.cursor = 21; // at the end, on 'y'
 
@@ -320,7 +380,7 @@ describe("ClipboardPasteInterceptor", () => {
   it("deletes the whole marker with the Delete key at the marker start", () => {
     const rig = makeRig();
     lastRig = rig;
-    feed(rig, `${PASTE_START}abc${PASTE_END}`);
+    feed(rig, `${PASTE_START}${L80}${PASTE_END}`);
     rig.rl.line = "[Paste #1 - 1 line]post";
     rig.rl.cursor = 0; // at the marker start
 
@@ -337,7 +397,7 @@ describe("ClipboardPasteInterceptor", () => {
   it("deletes the whole marker with the Delete key when the cursor is inside the marker", () => {
     const rig = makeRig();
     lastRig = rig;
-    feed(rig, `${PASTE_START}abc${PASTE_END}`);
+    feed(rig, `${PASTE_START}${L80}${PASTE_END}`);
     rig.rl.line = "ab[Paste #1 - 1 line]cd";
     rig.rl.cursor = 5; // mid-marker (marker spans indexes 2..20)
 
@@ -349,7 +409,7 @@ describe("ClipboardPasteInterceptor", () => {
   it("forwards the Delete key when the cursor is just past the marker", () => {
     const rig = makeRig();
     lastRig = rig;
-    feed(rig, `${PASTE_START}abc${PASTE_END}`);
+    feed(rig, `${PASTE_START}${L80}${PASTE_END}`);
     rig.rl.line = "[Paste #1 - 1 line]xy";
     rig.rl.cursor = 19; // on 'x', not part of the marker
 
@@ -360,7 +420,7 @@ describe("ClipboardPasteInterceptor", () => {
   it("handles a Delete key sequence split across chunks", () => {
     const rig = makeRig();
     lastRig = rig;
-    feed(rig, `${PASTE_START}abc${PASTE_END}`);
+    feed(rig, `${PASTE_START}${L80}${PASTE_END}`);
     rig.rl.line = "[Paste #1 - 1 line]";
     rig.rl.cursor = 0;
 
@@ -391,10 +451,12 @@ describe("ClipboardPasteInterceptor", () => {
   it("keeps backspace bytes inside a paste as content, not editor keys", () => {
     const rig = makeRig();
     lastRig = rig;
+    // 80-char single-line paste so it takes the marker path
+    const content = `x\x7f${"y".repeat(78)}`;
     feed(rig, "ab");
-    feed(rig, `${PASTE_START}x\x7fy${PASTE_END}`);
+    feed(rig, `${PASTE_START}${content}${PASTE_END}`);
     expect(forwardedText(rig)).toBe("ab[Paste #1 - 1 line]");
-    expect(rig.interceptor.normalize(rig.rl.line)).toBe("abx\x7fy");
+    expect(rig.interceptor.normalize(rig.rl.line)).toBe(`ab${content}`);
   });
 
   it("forwards ctrl-C mid-paste to readline and drops the in-flight payload", () => {
@@ -408,14 +470,14 @@ describe("ClipboardPasteInterceptor", () => {
     // rest of the payload plus END arrives; it must be dropped
     feed(rig, `more${PASTE_END}`);
     expect(forwardedText(rig)).not.toContain("Paste");
-    feed(rig, `${PASTE_START}again${PASTE_END}`);
+    feed(rig, `${PASTE_START}${L80}${PASTE_END}`);
     expect(forwardedText(rig)).toContain("[Paste #1 - 1 line]");
   });
 
   it("drops recorded markers on interrupt", () => {
     const rig = makeRig();
     lastRig = rig;
-    feed(rig, `${PASTE_START}abc${PASTE_END}`);
+    feed(rig, `${PASTE_START}${L80}${PASTE_END}`);
     rig.interceptor.onInterrupt();
     // app clears the line; a later typed line must not inherit old content
     expect(rig.interceptor.normalize("[Paste #1 - 1 line]")).toBe("[Paste #1 - 1 line]");
@@ -484,7 +546,7 @@ describe("ClipboardPasteInterceptor", () => {
       output: output as unknown as NodeJS.WritableStream,
       terminal: true,
     });
-    const interceptor = new ClipboardPasteInterceptor(rl);
+    const interceptor = new ClipboardPasteInterceptor(rl, { pasteMarkerMinChars: 80 });
     try {
       expect(interceptor.enabled).toBe(true);
       const lines: string[] = [];

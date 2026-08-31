@@ -4,7 +4,8 @@
 // the input stream itself) and swaps that listener for a dispatcher that:
 //   - swallows bracketed paste payloads and inserts a `[Paste #N - M lines]`
 //     marker into the line buffer instead (the real content is kept in an
-//     index keyed by N and restored in `normalize()` at submit time),
+//     index keyed by N and restored in `normalize()` at submit time), except
+//     for single-line pastes under 80 characters, which are inserted as-is,
 //   - deletes an entire marker with one backspace or the Delete key when the
 //     cursor is on it,
 //   - forwards every other byte to readline untouched, so completion,
@@ -13,7 +14,7 @@
 // The interceptor is a no-op unless the readline input stream is a TTY.
 
 import type readline from "node:readline";
-import { formatError } from "../../core/error.ts";
+import { ExtensionError, formatError } from "../../core/error.ts";
 import { logger } from "../../core/logger.ts";
 
 // xterm bracketed paste https://www.xfree86.org/current/ctlseqs.html#Bracketed%20Paste%20Mode
@@ -67,11 +68,21 @@ function ensureExitHook(): void {
   });
 }
 
+export interface ClipboardPasteInterceptorOptions {
+  /**
+   * Required. Minimum length (characters) for a single-line paste to get a
+   * marker; shorter single-line pastes are inserted as-is. 0 = always marker.
+   * Source of truth for the value is the `pasteMarkerMinChars` config key.
+   */
+  pasteMarkerMinChars: number;
+}
+
 export class ClipboardPasteInterceptor {
   readonly #rl: readline.Interface;
   readonly #origData: DataListener | null;
   readonly #stdin: InputLike | null;
   readonly #stdout: OutputLike | null;
+  readonly #markerMinChars: number;
   #input: DataListener | null = null;
   /** sequential marker number; incremented per paste, never reset */
   #seq = 0;
@@ -83,8 +94,18 @@ export class ClipboardPasteInterceptor {
   /** set by onInterrupt() mid-paste; the in-flight payload is dropped at END */
   #discard = false;
 
-  constructor(rl: readline.Interface) {
+  constructor(rl: readline.Interface, options: ClipboardPasteInterceptorOptions) {
     this.#rl = rl;
+    // config values arrive untyped from the config layer; fail loud rather
+    // than guess a threshold
+    if (typeof options.pasteMarkerMinChars !== "number" || options.pasteMarkerMinChars < 0) {
+      throw new ExtensionError(
+        `clipboard-paste: pasteMarkerMinChars must be a non-negative number, got ${String(
+          options.pasteMarkerMinChars,
+        )}`,
+      );
+    }
+    this.#markerMinChars = options.pasteMarkerMinChars;
     const input = (rl as { input?: unknown }).input as InputLike | undefined;
     const output = (rl as { output?: unknown }).output as OutputLike | undefined;
     const dataListeners = (input?.listeners?.("data") ?? []) as DataListener[];
@@ -272,6 +293,13 @@ export class ClipboardPasteInterceptor {
     // which breaks the line count below and corrupts the stored content;
     // restore \n so we keep what was actually on the clipboard.
     const content = raw.replace(/\r\n|\r/g, "\n");
+
+    // Short single-line pastes are indistinguishable from typing and are
+    // cheaper to show as-is; only multi-line or long pastes get a marker.
+    if (!content.includes("\n") && content.length < this.#markerMinChars) {
+      this.#forwardText(content);
+      return;
+    }
 
     const trimmed = content.endsWith("\n") ? content.slice(0, -1) : content;
     const lines = trimmed.length === 0 && content.length > 0 ? 1 : trimmed.split("\n").length;

@@ -60,6 +60,8 @@ describe("runInteractiveSession", () => {
         theme: "dark",
         colors: null,
         providers: [],
+        // mirrors the extension schema defaults the real config layer always merges in
+        uiInteractiveCli: { shellMode: false, pasteMarkerMinChars: 80 },
       },
       buildConfig: async () => ({ resolved, modelRegistry: resolved.modelRegistry, providers: [] }),
       resolved,
@@ -377,7 +379,7 @@ describe("runInteractiveSession", () => {
     const { runInteractiveSession } = await import("../../src/extensions/ui-interactive-cli/index.ts");
     const { SessionManager } = await import("../../src/core/session/index.ts");
     const core = createMockCore();
-    core.config.uiInteractiveCli = { shellMode: true };
+    core.config.uiInteractiveCli = { ...core.config.uiInteractiveCli, shellMode: true };
 
     const mockBus = {
       run: async () => new Promise<void>((resolve) => { (mockBus as any)._resolve = resolve; }),

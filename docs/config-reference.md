@@ -1049,6 +1049,7 @@ CLI flag: `--prompts-path`.
 |-------|------|---------|-------------|
 | `enabled` | `boolean` | `true` | Enable/disable the extension. |
 | `shellMode` | `boolean` | `false` | When enabled, lines starting with a recognized system command are executed directly instead of sent to the agent. |
+| `pasteMarkerMinChars` | `number` | `400` | Minimum length (characters) for a single-line pasted text to be shown as a `[Paste #N]` marker; shorter single-line pastes are inserted into the line as-is. Set to `0` to always use the marker. |
 
 CLI flag: `--shell-mode`.
 

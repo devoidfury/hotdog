@@ -23,6 +23,8 @@ type ProfileInfo = {
 };
 const profilesAtom = reactiveState<Record<string, ProfileInfo>>({});
 let currentProfile = "default";
+// Explicit session name for the active session; null = show the short id.
+const sessionTitleAtom = reactiveState<string | null>(null);
 // >0 means switching profiles will clear context, so confirm first.
 let userMessageCount = 0;
 
@@ -30,6 +32,8 @@ interface SessionCreatedMessage {
   type: "sessionCreated";
   sessionId: string;
   profile?: string;
+  /** Explicit session name; null = display name follows the profile. */
+  title?: string | null;
   currentModel?: string;
   models?: string[];
 }
@@ -41,7 +45,12 @@ interface SessionDeletedMessage {
 
 interface SessionsMessage {
   type: "sessions";
-  sessions: Array<{ id: string; profile?: string; userMessageCount?: number }>;
+  sessions: Array<{
+    id: string;
+    profile?: string;
+    title?: string | null;
+    userMessageCount?: number;
+  }>;
 }
 
 interface LogsListedMessage {
@@ -324,12 +333,14 @@ export function createChat({
     el.classList.toggle("hidden", !working);
   }, [workingAtom]);
 
+  // The session label shows the explicit title when set, else the short id.
   effect(() => {
     const el = document.getElementById("current-session-id") as HTMLElement | null;
     if (!el) return;
+    const title = sessionTitleAtom();
     const sid = sessionIdAtom();
-    el.textContent = sid ? sid.slice(0, 8) : "";
-  }, [sessionIdAtom]);
+    el.textContent = title || (sid ? sid.slice(0, 8) : "");
+  }, [sessionTitleAtom, sessionIdAtom]);
 
   effect(() => {
     const select = document.getElementById("profile-select") as HTMLSelectElement | null;
@@ -373,6 +384,7 @@ export function createChat({
     switch (data.type) {
       case "sessionCreated":
         sessionIdAtom(data.sessionId);
+        sessionTitleAtom(data.title ?? null);
         currentModelAtom(data.currentModel || "");
         if (data.profile) {
           currentProfile = data.profile;
@@ -392,16 +404,22 @@ export function createChat({
         if (data.sessionId === sessionIdAtom()) {
           if (messageList) messageList.clear();
           sessionIdAtom(null);
+          sessionTitleAtom(null);
           currentModelAtom("");
         }
         return;
       case "sessions": {
         const sessions = data.sessions;
         const activeSession = sessions.find(s => s.id === sessionIdAtom());
-        if (activeSession && activeSession.profile) {
-          currentProfile = activeSession.profile;
-          const select = document.getElementById("profile-select") as HTMLSelectElement | null;
-          if (select) select.value = currentProfile;
+        if (activeSession) {
+          if (activeSession.profile) {
+            currentProfile = activeSession.profile;
+            const select = document.getElementById("profile-select") as HTMLSelectElement | null;
+            if (select) select.value = currentProfile;
+          }
+          // The list is authoritative for the active session's title
+          // (e.g. after a rename from this or another tab).
+          sessionTitleAtom(activeSession.title ?? null);
         }
         userMessageCount = activeSession?.userMessageCount || 0;
         onSessionsUpdate?.(data.sessions as SessionInfo[], sessionIdAtom());
@@ -519,6 +537,9 @@ export function createChat({
           currentProfile = data.value as string;
           const select = document.getElementById("profile-select") as HTMLSelectElement | null;
           if (select) select.value = currentProfile;
+        }
+        if (data.key === "title") {
+          sessionTitleAtom(typeof data.value === "string" ? data.value : null);
         }
         messageList.handleSessionState(data);
         break;

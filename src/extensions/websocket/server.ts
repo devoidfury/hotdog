@@ -23,6 +23,12 @@ import { logger } from "../../core/logger.ts";
 
 interface SessionMetadata {
   profile: string;
+  /**
+   * Explicit session name, independent of the active profile. null means the
+   * display name follows `profile`; an explicit title survives profile
+   * switches.
+   */
+  title: string | null;
   model: string;
   createdAt: number;
   lastActivityAt: number;
@@ -178,6 +184,7 @@ export class SessionRegistry {
 
     this.#metadata.set(actualSessionId, {
       profile: profile || "default",
+      title: null,
       model: agent.model || "",
       createdAt: Date.now(),
       lastActivityAt: Date.now(),
@@ -208,6 +215,7 @@ export class SessionRegistry {
   list(): Array<{
     id: string;
     profile: string;
+    title: string | null;
     model: string;
     createdAt: number;
     lastActivityAt: number;
@@ -217,6 +225,7 @@ export class SessionRegistry {
     const result: Array<{
       id: string;
       profile: string;
+      title: string | null;
       model: string;
       createdAt: number;
       lastActivityAt: number;
@@ -228,6 +237,7 @@ export class SessionRegistry {
       result.push({
         id,
         profile: meta.profile,
+        title: meta.title,
         model: agent?.model || meta.model,
         createdAt: meta.createdAt,
         lastActivityAt: meta.lastActivityAt,
@@ -261,10 +271,15 @@ export class SessionRegistry {
     return (this.#channels.get(sessionId)?.size ?? 0) > 0;
   }
 
+  /**
+   * Set the session's display title. Independent of the active profile: the
+   * profile keeps driving behavior (role, tools, model), while the title is
+   * purely the label shown in the UI.
+   */
   rename(sessionId: string, newName: string): boolean {
     const meta = this.#metadata.get(sessionId);
     if (!meta) return false;
-    meta.profile = newName;
+    meta.title = newName;
     return true;
   }
 
@@ -620,6 +635,8 @@ async function routeMessage(
             type: S2C.SESSION_CREATED,
             sessionId,
             profile: agent.profileName || "default",
+            // Fresh session: no explicit title yet, display follows profile.
+            title: null,
             currentModel: agent.model,
             models: Object.keys(agent.modelRegistry || {}),
           };
@@ -740,6 +757,15 @@ async function routeMessage(
                 agent?.profileName || session.metadata.profile || "default",
             }),
           );
+          ws.send(
+            JSON.stringify({
+              type: S2C.SESSION_STATE,
+              sessionId: msg.sessionId,
+              key: "title",
+              // null = display name follows the profile.
+              value: session.metadata.title ?? null,
+            }),
+          );
           replaySessionHistory(msg.sessionId as string, session.agent, ws);
           const isRunning = registry
             .getSessionManager()
@@ -847,6 +873,8 @@ async function routeMessage(
               type: S2C.SESSION_CREATED,
               sessionId,
               profile: agent.profileName || "default",
+              // Fresh session (rebuilt from a cold log): no explicit title yet.
+              title: null,
               currentModel: agent.model,
               models: Object.keys(agent.modelRegistry || {}),
             };
@@ -964,6 +992,7 @@ function attachToMostRecentSession(
     type: S2C.SESSION_CREATED,
     sessionId,
     profile: agent?.profileName || mostRecent.profile || "default",
+    title: session.metadata.title,
     currentModel: agent?.model || mostRecent.model || "?",
     models: Object.keys(agent?.modelRegistry || {}),
   });
@@ -994,6 +1023,8 @@ function createAndAttachSession(
         type: S2C.SESSION_CREATED,
         sessionId,
         profile: agent.profileName || "default",
+        // Fresh session: no explicit title yet, display follows profile.
+        title: null,
         currentModel: agent.model,
         models: Object.keys(agent.modelRegistry || {}),
       });

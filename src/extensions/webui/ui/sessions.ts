@@ -8,6 +8,8 @@ import { sanitize, formatTime, shortId } from "./utils.ts";
 export interface SessionInfo {
   id: string;
   profile?: string;
+  /** Explicit session name; absent/null means the display name is the profile. */
+  title?: string | null;
   model?: string;
   createdAt: number;
   lastActivityAt: number;
@@ -71,7 +73,7 @@ export function initSessions({
 
   let contextMenu: HTMLDivElement | null = null;
   let contextSessionId: string | null = null;
-  let contextSessionProfile: string | null = null;
+  let contextSessionDisplayName: string | null = null;
 
   function hideContextMenu(): void {
     if (contextMenu) {
@@ -79,17 +81,18 @@ export function initSessions({
       contextMenu = null;
     }
     contextSessionId = null;
-    contextSessionProfile = null;
+    contextSessionDisplayName = null;
   }
 
+  /** The current display name (title if set, else the profile) pre-fills the rename prompt. */
   function showContextMenu(
     e: MouseEvent,
     sessionId: string,
-    profile: string,
+    displayName: string,
   ): void {
     hideContextMenu();
     contextSessionId = sessionId;
-    contextSessionProfile = profile;
+    contextSessionDisplayName = displayName;
 
     const menu = document.createElement("div");
     menu.className = "context-menu";
@@ -99,7 +102,7 @@ export function initSessions({
     renameItem.textContent = "Rename";
     renameItem.addEventListener("click", () => {
       if (!contextSessionId) return;
-      const newName = prompt("Rename session:", contextSessionProfile || "");
+      const newName = prompt("Rename session:", contextSessionDisplayName || "");
       if (newName !== null && newName.trim() !== "") {
         onRename(contextSessionId, newName.trim());
       }
@@ -196,7 +199,8 @@ export function initSessions({
         item.classList.add("active");
       }
 
-      const profileDisplay = getProfileDisplay(s.profile);
+      // An explicit title wins; otherwise the display name is the profile.
+      const nameDisplay = getProfileDisplay(s.title || s.profile);
       const modelDisplay = s.model ? sanitize(s.model) : "?";
       const timeDisplay = formatTime(s.createdAt);
       const clientInfo =
@@ -217,7 +221,7 @@ export function initSessions({
 
       item.innerHTML = `
         <div class="session-name">
-          <span class="session-profile-badge">${profileDisplay}</span>
+          <span class="session-profile-badge">${nameDisplay}</span>
           ${modelDisplay}
         </div>
         <div class="session-meta">
@@ -234,7 +238,7 @@ export function initSessions({
 
       item.addEventListener("contextmenu", (e: MouseEvent) => {
         e.preventDefault();
-        showContextMenu(e, s.id, s.profile || "default");
+        showContextMenu(e, s.id, s.title || s.profile || "default");
       });
 
       listEl.appendChild(item);

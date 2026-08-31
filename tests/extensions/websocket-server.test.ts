@@ -198,6 +198,24 @@ describe("SessionRegistry", () => {
       const unknownSession = await registry.switchProfile({ sessionId: "nope", profileName: "default" });
       expect(unknownSession.error).toBe("Session not found");
     });
+
+    it("keeps an explicit title when switching profile", async () => {
+      registry = new SessionRegistry({
+        buildAgent: createWsMockAgentFactory(),
+        profiles: {
+          coder: { role: "R", body: "", model: null, whitelistTools: null, blacklistTools: [] },
+        },
+      });
+      const { sessionId } = await registry.create({});
+      registry.rename(sessionId, "keep me");
+
+      const result = await registry.switchProfile({ sessionId, profileName: "coder" });
+      expect(result.success).toBe(true);
+
+      const meta = registry.get(sessionId)!.metadata;
+      expect(meta.profile).toBe("coder");
+      expect(meta.title).toBe("keep me");
+    });
   });
 
   it("returns false when deleting non-existent session", () => {
@@ -218,14 +236,28 @@ describe("SessionRegistry", () => {
     expect(registry.size).toBe(0);
   });
 
-  it("renames session profile", async () => {
+  it("rename sets the session title and leaves the profile untouched", async () => {
     const result = await registry.create({ profile: "old-name" });
     expect(registry.rename(result.sessionId, "new-name")).toBe(true);
-    expect(registry.get(result.sessionId)!.metadata.profile).toBe("new-name");
+    const meta = registry.get(result.sessionId)!.metadata;
+    expect(meta.title).toBe("new-name");
+    expect(meta.profile).toBe("old-name");
   });
 
   it("returns false when renaming non-existent session", () => {
     expect(registry.rename("non-existent", "new-profile")).toBe(false);
+  });
+
+  it("new sessions have no title and list() exposes it", async () => {
+    const { sessionId } = await registry.create({ profile: "coder" });
+    expect(registry.get(sessionId)!.metadata.title).toBeNull();
+    expect(registry.list()[0]!.title).toBeNull();
+    expect(registry.list()[0]!.profile).toBe("coder");
+
+    registry.rename(sessionId, "my session");
+    const listed = registry.list()[0]!;
+    expect(listed.title).toBe("my session");
+    expect(listed.profile).toBe("coder");
   });
 
   it("touches session to update lastActivityAt", async () => {
@@ -508,20 +540,23 @@ describe("createWsServer", () => {
     expect(metaAfter!.connectedClients).toBe(0);
   });
 
-  it("handles RENAME_SESSION message", async () => {
+  it("handles RENAME_SESSION message by setting the title", async () => {
     const ws = await connectWithSession();
     const sessionId = (ws as unknown as HotdogServerSocket).activeSessionId!;
 
     wsServer.onMessage(ws, JSON.stringify({ type: C2S.RENAME_SESSION, sessionId, newName: "renamed" }));
 
     const meta = wsServer.sessionRegistry._test_metadata.get(sessionId!);
-    expect(meta!.profile).toBe("renamed");
+    expect(meta!.title).toBe("renamed");
+    // The rename must not clobber the profile.
+    expect(meta!.profile).toBe("default");
   });
 
-  it("handles SWITCH_SESSION message", async () => {
+  it("handles SWITCH_SESSION message and reports the title", async () => {
     const ws = await connectWithSession();
 
     const second = await wsServer.sessionRegistry.create({});
+    wsServer.sessionRegistry.rename(second.sessionId, "second one");
 
     await wsServer.onMessage(ws, JSON.stringify({ type: C2S.SWITCH_SESSION, sessionId: second.sessionId }));
 
@@ -529,6 +564,26 @@ describe("createWsServer", () => {
     expect(msg.type).toBe(S2C.SESSION_STATE);
     expect(msg.sessionId).toBe(second.sessionId);
     expect((ws as unknown as HotdogServerSocket).activeSessionId).toBe(second.sessionId);
+
+    const titleState = ws.messages
+      .map((m) => { try { return JSON.parse(m); } catch { return null; } })
+      .find((m) => m && m.type === S2C.SESSION_STATE && m.key === "title");
+    expect(titleState).toBeDefined();
+    expect(titleState!.value).toBe("second one");
+  });
+
+  it("sends a null title in SWITCH_SESSION state when the session is untitled", async () => {
+    const ws = await connectWithSession();
+
+    const second = await wsServer.sessionRegistry.create({});
+
+    await wsServer.onMessage(ws, JSON.stringify({ type: C2S.SWITCH_SESSION, sessionId: second.sessionId }));
+
+    const titleState = ws.messages
+      .map((m) => { try { return JSON.parse(m); } catch { return null; } })
+      .find((m) => m && m.type === S2C.SESSION_STATE && m.key === "title");
+    expect(titleState).toBeDefined();
+    expect(titleState!.value).toBeNull();
   });
 
   it("does nothing for SWITCH_SESSION to a non-existent session", async () => {
@@ -549,6 +604,7 @@ describe("createWsServer", () => {
     const second = await wsServer.sessionRegistry.create({});
     wsServer.sessionRegistry._test_metadata.get(second.sessionId)!.lastActivityAt =
       wsServer.sessionRegistry._test_metadata.get(firstSessionId)!.lastActivityAt + 1000;
+    wsServer.sessionRegistry.rename(second.sessionId, "the second one");
     expect(wsServer.sessionRegistry.list()).toHaveLength(2);
     wsServer.onClose(ws1);
 
@@ -559,6 +615,8 @@ describe("createWsServer", () => {
     const attached = await waitForMessage(ws2, S2C.SESSION_CREATED);
     expect(attached.sessionId).toBe(second.sessionId);
     expect((ws2 as unknown as HotdogServerSocket).activeSessionId).toBe(second.sessionId);
+    // The existing session's title survives a reconnect.
+    expect(attached.title).toBe("the second one");
   });
 
   it("createAndAttachSession reports buildAgent errors", async () => {

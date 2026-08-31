@@ -1,5 +1,6 @@
 import { toolDef } from "@core/extensions/tool-utils.ts";
 import type { ToolMetadata } from "@core/extensions/tool-registry.ts";
+import { validateParams, formatValidationErrors } from "@utils/json-schema.ts";
 import { McpConnectionHandle } from "./connection.ts";
 
 /**
@@ -55,6 +56,20 @@ export class McpTool {
         output: ``,
         error: `Error parsing tool arguments: ${(e as Error).message}`,
       };
+    }
+
+    // Pre-flight gate: MCP servers are third-party code that aggregate
+    // credentials, so out-of-contract calls are refused here instead of
+    // being forwarded to the server.
+    if (args !== null) {
+      const { valid, errors } = validateParams(args, this.#toolDef.inputSchema);
+      if (!valid) {
+        return {
+          success: false,
+          output: ``,
+          error: `MCP call rejected: ${formatValidationErrors(errors)}`,
+        };
+      }
     }
 
     try {

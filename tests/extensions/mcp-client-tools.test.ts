@@ -389,3 +389,99 @@ describe("McpTool > Schema Edge Cases", () => {
     expect((properties.field as Record<string, unknown>)!.type).toBe("string");
   });
 });
+
+// ── Argument Validation (via shared JSON Schema validator) ─────────────────
+
+describe("McpTool > execute with schema validation", () => {
+  // createToolDef's schema: query (string, required), limit (number, min 1, max 100).
+
+  it("rejects a missing required arg before calling the server", async () => {
+    const connection = createMockConnection();
+    const tool = new McpTool("server", createToolDef(), connection);
+
+    const result = await tool.execute({ limit: 5 });
+
+    expect(result.success).toBe(false);
+    expect((result as any).error).toContain("MCP call rejected");
+    expect((result as any).error).toContain("query");
+    expect(connection.callTool).not.toHaveBeenCalled();
+  });
+
+  it("rejects a wrong-typed arg before calling the server", async () => {
+    const connection = createMockConnection();
+    const tool = new McpTool("server", createToolDef(), connection);
+
+    const result = await tool.execute({ query: "x", limit: "ten" });
+
+    expect(result.success).toBe(false);
+    expect((result as any).error).toContain("MCP call rejected");
+    expect((result as any).error).toContain("expected number");
+    expect(connection.callTool).not.toHaveBeenCalled();
+  });
+
+  it("rejects a value outside declared min/max before calling the server", async () => {
+    const connection = createMockConnection();
+    const tool = new McpTool("server", createToolDef(), connection);
+
+    const result = await tool.execute({ query: "x", limit: 500 });
+
+    expect(result.success).toBe(false);
+    expect((result as any).error).toContain("exceeds maximum");
+    expect(connection.callTool).not.toHaveBeenCalled();
+  });
+
+  it("rejects unknown args when the schema declares additionalProperties: false", async () => {
+    const connection = createMockConnection();
+    const tool = new McpTool(
+      "server",
+      createToolDef({ inputSchema: { type: "object", properties: {}, required: [], additionalProperties: false } }),
+      connection,
+    );
+
+    const result = await tool.execute({ surprise: 1 });
+
+    expect(result.success).toBe(false);
+    expect((result as any).error).toContain("additional property not allowed");
+    expect(connection.callTool).not.toHaveBeenCalled();
+  });
+
+  it("allows undeclared args when additionalProperties is not false", async () => {
+    const connection = createMockConnection({ content: [] });
+    const tool = new McpTool("server", createToolDef(), connection);
+
+    const result = await tool.execute({ query: "x", extra: "fine" });
+
+    expect(result.success).toBe(true);
+    expect(connection.callTool).toHaveBeenCalledWith("test-tool", { query: "x", extra: "fine" });
+  });
+
+  it("degrades to permissive when the server advertised no schema", async () => {
+    const connection = createMockConnection({ content: [] });
+    const tool = new McpTool("server", { name: "no-schema", description: "No schema" }, connection);
+
+    const result = await tool.execute({ anything: 42 });
+
+    expect(result.success).toBe(true);
+    expect(connection.callTool).toHaveBeenCalledWith("no-schema", { anything: 42 });
+  });
+
+  it("forwards an in-contract call unchanged", async () => {
+    const connection = createMockConnection({ content: [] });
+    const tool = new McpTool("server", createToolDef(), connection);
+
+    const result = await tool.execute({ query: "x", limit: 5 });
+
+    expect(result.success).toBe(true);
+    expect(connection.callTool).toHaveBeenCalledWith("test-tool", { query: "x", limit: 5 });
+  });
+
+  it("forwards null input as-is (existing contract for no-argument calls)", async () => {
+    const connection = createMockConnection({ content: [] });
+    const tool = new McpTool("server", createToolDef(), connection);
+
+    const result = await tool.execute(null);
+
+    expect(result.success).toBe(true);
+    expect(connection.callTool).toHaveBeenCalledWith("test-tool", null);
+  });
+});

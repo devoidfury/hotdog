@@ -2,12 +2,22 @@
 
 ## Unreleased
 
+**Full Changelog**: https://github.com/devoidfury/hotdog/compare/v0.7.2...main
+
+## [v0.7.2] - 2026-08-30
+
+I've been wanting this feature for a while and took a few tries at it - this is the first implementation I'm happy with so it's worth cutting a release.
+
 - ui-interactive-cli: clipboard paste detection and support in the interactive session (bracketed paste mode)
   - does not auto-submit on paste; pasted content appears inline as a numbered `[Paste #N - M lines]` marker in the input line.
   - one backspace, or the Delete key with the cursor on the marker, deletes the whole paste.
   - paste answers in question prompts are normalized the same way and should work the same.
 
-**Full Changelog**: https://github.com/devoidfury/hotdog/compare/v0.7.1...main
+- internal code cleanup, config resolution system consolidated
+
+- removed action dependencies from CI test/coverage runner
+
+**Full Changelog**: https://github.com/devoidfury/hotdog/compare/v0.7.1...v0.7.2
 
 ## [v0.7.1] - 2026-08-30
 

@@ -18,6 +18,7 @@ import type { CliArgv } from "@core/config/index.ts";
 import type { ModelConfig } from "@core/config/providers.ts";
 import { registerTaskManagerService } from "../subagents/index.ts";
 import { CliChannel } from "./cli-channel.ts";
+import { ClipboardPasteInterceptor } from "./clipboard-paste.ts";
 import {
   parseCompletionContext,
   registerSlashCommandNameCompletion,
@@ -216,15 +217,18 @@ export class AsyncInteractiveCliInput implements InputInterface {
   readonly #rl: readline.Interface;
   readonly #onLine: (line: string) => void;
   readonly #addLineHandler: (handler: (line: string) => void) => void;
+  readonly #normalize: (line: string) => string;
 
   constructor(
     rl: readline.Interface,
     onLine: (line: string) => void,
     addLineHandler: (handler: (line: string) => void) => void,
+    normalize: (line: string) => string = (line) => line,
   ) {
     this.#rl = rl;
     this.#onLine = onLine;
     this.#addLineHandler = addLineHandler;
+    this.#normalize = normalize;
   }
 
   isInteractive(): boolean {
@@ -270,7 +274,7 @@ export class AsyncInteractiveCliInput implements InputInterface {
             });
           });
 
-          const trimmed = line.trim();
+          const trimmed = this.#normalize(line).trim();
 
           if (trimmed === "") {
             answer = defaultValue;
@@ -484,6 +488,10 @@ export async function runInteractiveSession(
     completer: buildReadlineCompleter(sessionManager, core, !!shellMode),
   });
 
+  // Intercept bracketed paste before readline: pasted payloads become inline
+  // `[Paste #N - M lines]` markers (real content restored in `lineHandler`).
+  const paste = new ClipboardPasteInterceptor(rl);
+
   const channel = new CliChannel({
     sessionManager,
     sessionId: sessionManager.sessionId()!,
@@ -517,7 +525,7 @@ export async function runInteractiveSession(
   registerShellCompletion(core.completion, !!shellMode);
 
   lineHandler = async (line: string) => {
-    const trimmed = line.trim();
+    const trimmed = paste.normalize(line).trim();
 
     if (!trimmed) {
       rl.prompt();
@@ -577,7 +585,7 @@ export async function runInteractiveSession(
   const setupInput =
     options.setupInput ||
     (() => {
-      currentInput = new AsyncInteractiveCliInput(rl, lineHandler, addLineHandler);
+      currentInput = new AsyncInteractiveCliInput(rl, lineHandler, addLineHandler, (l) => paste.normalize(l));
     });
   setupInput();
 
@@ -587,6 +595,7 @@ export async function runInteractiveSession(
       channel.interrupt();
       (rl as { line: string; cursor: number }).line = "";
       (rl as { line: string; cursor: number }).cursor = 0;
+      paste.onInterrupt();
       console.log("\nInterrupted (/quit, /exit, or ctrl-d to exit)");
       rl.prompt();
     });

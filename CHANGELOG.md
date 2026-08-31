@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- ui-interactive-cli: clipboard paste detection and support in the interactive session (bracketed paste mode)
+  - does not auto-submit on paste; pasted content appears inline as a numbered `[Paste #N - M lines]` marker in the input line.
+  - one backspace, or the Delete key with the cursor on the marker, deletes the whole paste.
+  - paste answers in question prompts are normalized the same way and should work the same.
+
 **Full Changelog**: https://github.com/devoidfury/hotdog/compare/v0.7.1...main
 
 ## [v0.7.1] - 2026-08-30

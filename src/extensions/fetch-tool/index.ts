@@ -406,14 +406,15 @@ export function isPrivateAddress(ip: string): boolean {
       a === 0 || // 0.0.0.0/8 "this network"
       a === 10 || // RFC1918
       a === 127 || // loopback
-      a === 255 || // 255.255.255.255/8 broadcast
       (a === 100 && b >= 64 && b <= 127) || // CGNAT
       (a === 172 && b >= 16 && b <= 31) || // RFC1918
       (a === 169 && b === 254) || // link-local (cloud metadata lives here)
       (a === 192 && b === 0 && c === 2) || // TEST-NET-1 (documentation)
       (a === 192 && b === 168) || // RFC1918
+      (a === 198 && (b === 18 || b === 19)) || // benchmarking (RFC2544)
       (a === 198 && b === 51 && c === 100) || // TEST-NET-2 (documentation)
-      (a === 203 && b === 0 && c === 113) // TEST-NET-3 (documentation)
+      (a === 203 && b === 0 && c === 113) || // TEST-NET-3 (documentation)
+      a >= 240 // 240.0.0.0/4 reserved + 255.255.255.255 broadcast
     );
   }
 

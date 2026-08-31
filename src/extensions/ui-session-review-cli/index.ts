@@ -1,5 +1,5 @@
 import { HOOKS } from "../../core/hooks.ts";
-import { readSessionEntries, sessionsDir as getSessionsDir, type LogEntry } from "../../core/session/session-log.ts";
+import { deleteSessionLog, readSessionEntries, sessionExists, sessionsDir as getSessionsDir, type LogEntry } from "../../core/session/session-log.ts";
 import { contentToText } from "../../core/context/message.ts";
 import { readdir, access, stat, unlink } from "node:fs/promises";
 import { join } from "node:path";
@@ -93,11 +93,7 @@ async function runDelete(
     return 1;
   }
 
-  const filePath = join(getSessionsDir(), `${sessionId}.jsonl`);
-
-  try {
-    await access(filePath);
-  } catch {
+  if (!(await sessionExists(sessionId))) {
     console.error(`Session '${sessionId}' not found.`);
     return 1;
   }
@@ -110,7 +106,11 @@ async function runDelete(
     }
   }
 
-  await unlink(filePath);
+  const deleted = await deleteSessionLog(sessionId);
+  if (!deleted) {
+    console.error(`Session '${sessionId}' not found.`);
+    return 1;
+  }
   console.log(`Deleted session '${sessionId}'.`);
   return 0;
 }

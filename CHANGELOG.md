@@ -3,6 +3,7 @@
 ## Unreleased
 
 - websocket/webui: renaming a session now sets a display title instead of changing the session's profile; the profile keeps driving behavior (role, tools, model) and is still switched via the profile switcher. Titles are in-memory only and are dropped when a session is rebuilt from a cold log or the server restarts
+- ui-session-review-cli - sessions delete subcommand now validates sessionId before confirmation gate
 
 **Full Changelog**: https://github.com/devoidfury/hotdog/compare/v0.7.2...main
 

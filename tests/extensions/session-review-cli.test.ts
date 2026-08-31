@@ -1,8 +1,8 @@
 import { describe, it, expect, beforeEach, afterEach, beforeAll, afterAll } from "bun:test";
 import { HOOKS } from "../../src/core/hooks.ts";
-import { mkdirSync, mkdtempSync, rmSync, readdirSync, utimesSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, rmSync, readdirSync, utimesSync, writeFileSync } from "node:fs";
 import os from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { createMockCore } from "../helpers.ts";
 import { captureConsole } from "../test-helpers.ts";
 import type { CoreContext } from "../../src/core/extensions/types.ts";
@@ -271,6 +271,35 @@ describe("Session Review CLI - sessions delete", () => {
       expect(captured).toContain("not found");
     } finally {
       console.error = origErr;
+    }
+  });
+
+  it("refuses to delete via a path-traversal session id", async () => {
+    // A traversal id must be rejected by validation, never resolved against
+    // the sessions dir. Plant a decoy one level above the sessions dir so a
+    // naive join(dir, `${id}.jsonl`) would reach it; confirm the id is
+    // rejected before any unlink happens.
+    const parentDir = dirname(sessionsDirPath);
+    const decoyName = `decoy-${Date.now()}.jsonl`;
+    const decoyPath = join(parentDir, decoyName);
+    writeFileSync(decoyPath, "do not delete\n");
+    try {
+      const cli = { args: ["delete", `../${decoyName}`], yes: true, colors: false, theme: "dark" };
+      let captured = "";
+      const origErr = console.error;
+      console.error = (msg: unknown) => { captured += String(msg) + "\n"; };
+      try {
+        const exitCode = await runHandler(cli);
+        expect(exitCode).toBe(1);
+        expect(captured).toContain("not found");
+      } finally {
+        console.error = origErr;
+      }
+
+      // The decoy must still exist: the id was rejected before any fs.unlink.
+      expect(existsSync(decoyPath)).toBe(true);
+    } finally {
+      try { rmSync(decoyPath); } catch {}
     }
   });
 

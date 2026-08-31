@@ -14,8 +14,8 @@
 // The interceptor is a no-op unless the readline input stream is a TTY.
 
 import type readline from "node:readline";
-import { ExtensionError, formatError } from "../../core/error.ts";
-import { logger } from "../../core/logger.ts";
+import { ExtensionError, formatError } from "@core/error.ts";
+import { logger } from "@core/logger.ts";
 
 // xterm bracketed paste https://www.xfree86.org/current/ctlseqs.html#Bracketed%20Paste%20Mode
 const PASTE_START = "\x1b[200~";

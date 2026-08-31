@@ -1,7 +1,7 @@
 import readline from "node:readline";
-import { Channel, ChannelSessionManager } from "../../core/channel.ts";
-import type { OutputEvent } from "../../core/context/output.ts";
-import type { CliOutputSink } from "../../utils/cli/cli.ts";
+import { Channel, ChannelSessionManager } from "@core/channel.ts";
+import type { OutputEvent } from "@core/context/output.ts";
+import type { CliOutputSink } from "@utils/cli/cli.ts";
 
 export interface CliChannelOptions {
   sessionManager: ChannelSessionManager;

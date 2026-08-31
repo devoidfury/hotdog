@@ -7,11 +7,7 @@ import { HOOKS } from "@core/hooks.ts";
 import type { LlmClient } from "@core/llm-client/client.ts";
 import { SessionManager, type AgentLike } from "@core/session/index.ts";
 import { Agent } from "@core/agent.ts";
-import {
-  readSessionEntries,
-  sessionExists,
-  replayEntriesIntoContext,
-} from "@core/session/session-log.ts";
+import { readSessionEntries, sessionExists, replayEntriesIntoContext } from "@core/session/session-log.ts";
 import { CoreContext, ExtensionInstance } from "@core/extensions/types.ts";
 import { ExtensionError } from "@core/error.ts";
 import type { CliArgv } from "@core/config/index.ts";

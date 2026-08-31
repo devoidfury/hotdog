@@ -16,6 +16,12 @@
           "type": "boolean",
           "default": true,
           "description": "Whether to include handoff tool instructions in the system prompt."
+        },
+        "autoIncludeFilesUnderBytes": {
+          "type": "integer",
+          "minimum": 0,
+          "default": 24576,
+          "description": "Files in the handoff files list that exist and are this size or smaller (in bytes) are inlined into the handoff message automatically; larger and missing files are listed with their size. Default 24KB. Set to 0 to list files without inlining any."
         }
       },
       "additionalProperties": false,

@@ -839,9 +839,10 @@ Extensions register their own configuration namespaces. Each extension's config 
 |-------|------|---------|-------------|
 | `enabled` | `boolean` | `true` | Enable/disable the extension. |
 | `systemPrompt` | `boolean` | `true` | Include handoff tool instructions in the system prompt. |
+| `autoIncludeFilesUnderBytes` | `number` | `24576` | Files in the handoff `files` list that exist and are this size or smaller (bytes) are inlined into the handoff message; larger and missing files are listed with their size. Default 24KB. Set to `0` to list files without inlining any. |
 
 ```json
-{ "handoffTool": { "systemPrompt": true } }
+{ "handoffTool": { "autoIncludeFilesUnderBytes": 51200 } }
 ```
 
 ### `bashTool`

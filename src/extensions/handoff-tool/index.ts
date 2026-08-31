@@ -1,3 +1,5 @@
+import fs from "node:fs/promises";
+import { cwd } from "node:process";
 import { HOOKS } from "@core/hooks.ts";
 import {
   toolDef,
@@ -8,6 +10,14 @@ import {
 } from "@core/extensions/tool-utils.ts";
 import type { ToolMetadata } from "@core/extensions/tool-registry.ts";
 import { CoreContext, ExtensionInstance, ToolContext, getExtensionConfig } from "@core/extensions/types.ts";
+import { ConfigError } from "@core/error.ts";
+import { Workspace } from "@utils/workspace.ts";
+
+function formatBytes(bytes: number): string {
+  if (bytes < 1024) return `${bytes}B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)}KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)}MB`;
+}
 
 interface HandoffPayload {
   content: string;
@@ -42,7 +52,7 @@ export class HandoffTool {
           ),
           files: param(
             "array",
-            "Optional list of file paths relevant to the next phase. This instructs which files are important context and will be read.",
+            "Optional list of file paths relevant to the next phase. Files that exist and are under the auto-include size limit are inlined into the handoff automatically; the rest are listed with their size, or 'not found' if they don't exist yet (e.g. files to be created).",
             {
               items: { type: "string" },
             },
@@ -102,11 +112,29 @@ export function create(core: CoreContext): ExtensionInstance {
   const config = getExtensionConfig<{
     enabled?: boolean;
     systemPrompt?: boolean;
+    autoIncludeFilesUnderBytes?: number;
   }>(core, "handoffTool");
 
   if (config.enabled === false) {
     return {};
   }
+
+  // The resolved config always carries the schema default from
+  // extension.json; fail loudly if it is missing or invalid rather than
+  // silently falling back to a second copy of the default here.
+  const rawAutoIncludeBytes = config.autoIncludeFilesUnderBytes;
+  if (
+    typeof rawAutoIncludeBytes !== "number" ||
+    !Number.isFinite(rawAutoIncludeBytes) ||
+    rawAutoIncludeBytes < 0
+  ) {
+    throw new ConfigError(
+      `handoffTool.autoIncludeFilesUnderBytes must be a non-negative number, got: ${String(rawAutoIncludeBytes)}`,
+    );
+  }
+  // Fresh const so the narrowed type (number) is visible inside the
+  // closures below, where the guard's narrowing does not carry over.
+  const autoIncludeBytes = rawAutoIncludeBytes;
 
   // Keyed by session id: the tool instance is shared across all sessions
   // (e.g. multiple webui clients), so pending handoffs must be namespaced.
@@ -114,8 +142,74 @@ export function create(core: CoreContext): ExtensionInstance {
 
   const handoffTool = new HandoffTool(pending);
 
+  // Inlines files that exist and are small enough; everything else (too
+  // large, missing, binary, a directory, or rejected by the workspace
+  // boundary) is listed with a note. Per-file failures are swallowed so a
+  // bad path can never break the handoff.
+  async function buildFilesSection(files: string[], workspace: Workspace): Promise<string[]> {
+    const parts: string[] = ["", "## Relevant Files"];
+    const remaining: Array<{ path: string; note: string }> = [];
+    // Dedup by resolved path: the model can list the same file twice, or
+    // via different notations ("a/b" and "./a/b"); inlining it twice only
+    // burns context.
+    const seen = new Set<string>();
+
+    for (const file of files) {
+      let resolved: string;
+      try {
+        resolved = workspace.resolveSafe(file);
+      } catch {
+        remaining.push({ path: file, note: "path rejected" });
+        continue;
+      }
+      if (seen.has(resolved)) continue;
+      seen.add(resolved);
+
+      let stats;
+      try {
+        stats = await fs.stat(resolved);
+      } catch {
+        remaining.push({ path: file, note: "not found" });
+        continue;
+      }
+
+      if (stats.isDirectory()) {
+        remaining.push({ path: file, note: "directory" });
+        continue;
+      }
+      // autoIncludeBytes of 0 means "never inline", including 0-byte files.
+      if (autoIncludeBytes <= 0 || stats.size > autoIncludeBytes) {
+        remaining.push({ path: file, note: formatBytes(stats.size) });
+        continue;
+      }
+
+      let content: string;
+      try {
+        content = await fs.readFile(resolved, "utf-8");
+      } catch {
+        remaining.push({ path: file, note: "unreadable" });
+        continue;
+      }
+      if (content.includes("\u0000")) {
+        remaining.push({ path: file, note: `${formatBytes(stats.size)}, binary` });
+        continue;
+      }
+
+      // The fence must be strictly longer than the longest backtick run in
+      // the content, or a run in the body closes the block early.
+      const maxRun = [...content.matchAll(/`+/g)].reduce((max, m) => Math.max(max, m[0]!.length), 0);
+      const fence = "`".repeat(Math.max(3, maxRun) + 1);
+      parts.push(`### ${file}`, fence, content, fence);
+    }
+
+    for (const { path, note } of remaining) {
+      parts.push(`- ${path} (${note})`);
+    }
+    return parts;
+  }
+
   // Formats the handoff payload as the first user message of the fresh conversation.
-  function buildHandoffMessage(payload: HandoffPayload): string {
+  async function buildHandoffMessage(payload: HandoffPayload, workspace: Workspace): Promise<string> {
     const parts: string[] = [];
 
     if (payload.title) {
@@ -133,11 +227,7 @@ export function create(core: CoreContext): ExtensionInstance {
     parts.push(payload.content);
 
     if (payload.files && payload.files.length > 0) {
-      parts.push("");
-      parts.push(`## Relevant Files`);
-      for (const file of payload.files) {
-        parts.push(`- ${file}`);
-      }
+      parts.push(...(await buildFilesSection(payload.files, workspace)));
     }
 
     parts.push("");
@@ -182,11 +272,21 @@ export function create(core: CoreContext): ExtensionInstance {
         pending.delete(sessionId); // Clear immediately to avoid re-processing
 
         try {
+          // Build everything BEFORE touching the session: if workspace
+          // construction or message building throws, we must not have
+          // cleared context with no replacement message enqueued.
+          // Same boundary as the file tools: configured roots (denylist
+          // from config, or the built-in default) or the process CWD.
+          const roots = agent.config?.workspaceRoots ?? [];
+          const base = roots.length > 0 ? roots : [cwd()];
+          const deny = agent.config?.workspaceDeny;
+          const workspace = deny != null ? new Workspace(base, deny) : new Workspace(base);
+
+          const message = await buildHandoffMessage(handoff, workspace);
+
           await agent.clearContext();
           await agent.ensureSystemPrompt();
-
           // The model composed the handoff content, so tag it as model-sourced.
-          const message = buildHandoffMessage(handoff);
           agent.enqueue(message, { source: "model" });
         } catch (e: unknown) {
           // Emit instead of rethrowing so a failure mid-transition doesn't

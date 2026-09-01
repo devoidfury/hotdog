@@ -88,6 +88,17 @@ describe("retryDelay", () => {
     expect(Date.now() - start).toBeLessThan(5000);
   });
 
+  it("resolves immediately when the signal is already aborted", async () => {
+    // A past "abort" never re-fires the listener, so without the up-front
+    // check this would hang for the full backoff (60s) instead of
+    // resolving now.
+    const controller = new AbortController();
+    controller.abort();
+    const start = Date.now();
+    await retryDelay(60_000, controller.signal);
+    expect(Date.now() - start).toBeLessThan(500);
+  });
+
   // Spy on the signal's add/removeEventListener to verify the listener is
   // detached whichever way the wait ends (leak check: the shared abort
   // controller outlives many retries).

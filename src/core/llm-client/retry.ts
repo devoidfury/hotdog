@@ -57,10 +57,15 @@ export function shouldRetryLlmError(e: unknown, attempt: number, maxRetries: num
  * aborts so a user cancellation during the wait is noticed immediately
  * (the caller re-checks the signal). The listener is removed whichever way
  * the wait ends, so repeated retries don't accumulate listeners on the
- * long-lived shared signal.
+ * long-lived shared signal. A signal already aborted at call time resolves
+ * immediately -- a past "abort" never re-fires the listener.
  */
 export function retryDelay(delayMs: number, signal?: AbortSignal | null): Promise<void> {
   return new Promise<void>((resolve) => {
+    if (signal?.aborted) {
+      resolve();
+      return;
+    }
     const done = () => {
       clearTimeout(timer);
       signal?.removeEventListener("abort", done);

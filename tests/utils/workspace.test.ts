@@ -163,6 +163,15 @@ describe("resolveSafe — denylist", () => {
     expect(() => ws.resolveSafe("sub/deep/.git/HEAD")).toThrow(PathEscapeError);
   });
 
+  it("rejects cloud/credential dot-directories (.aws, .azure, .docker, .gnupg, .kube), at any depth", () => {
+    for (const dir of [".aws", ".azure", ".docker", ".gnupg", ".kube"]) {
+      expect(() => ws.resolveSafe(dir)).toThrow(PathEscapeError);
+      expect(() => ws.resolveSafe(`${dir}/credentials`)).toThrow(PathEscapeError);
+      expect(() => ws.resolveSafe(`sub/deep/${dir}/config`)).toThrow(PathEscapeError);
+    }
+    expect(() => ws.resolveSafe(".aws/credentials")).toThrow("Denylisted path rejected (.aws)");
+  });
+
   it("rejects dotfile profile/rc rules, at any depth", () => {
     expect(() => ws.resolveSafe(".profile")).toThrow(PathEscapeError);
     expect(() => ws.resolveSafe(".bash_profile")).toThrow(PathEscapeError);
@@ -191,6 +200,10 @@ describe("resolveSafe — denylist", () => {
     expect(ws.resolveSafe("env.txt")).toBe(path.join(workDir, "env.txt"));
     expect(ws.resolveSafe(".profile.txt")).toBe(path.join(workDir, ".profile.txt"));
     expect(ws.resolveSafe("myrc")).toBe(path.join(workDir, "myrc"));
+    expect(ws.resolveSafe("aws")).toBe(path.join(workDir, "aws"));
+    expect(ws.resolveSafe(".awsignore")).toBe(path.join(workDir, ".awsignore"));
+    expect(ws.resolveSafe("Dockerfile")).toBe(path.join(workDir, "Dockerfile"));
+    expect(ws.resolveSafe("kube.tf")).toBe(path.join(workDir, "kube.tf"));
   });
 
   it("applies to absolute paths too", () => {

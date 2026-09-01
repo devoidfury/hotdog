@@ -73,6 +73,12 @@ function buildFdArgs(args: FindArgs): string[] {
       }
     }
     fdArgs.push("--glob");
+  } else {
+    // "--" ends option parsing: the model-supplied pattern must never be
+    // parsed as an fd flag (e.g. "--exec=rm" makes fd run rm on every file
+    // found -- argument-injection RCE). Dash-leading patterns never reach
+    // here (see execute()); this guards the positional slot regardless.
+    fdArgs.push("--");
   }
   fdArgs.push(pattern);
 
@@ -200,14 +206,23 @@ export class FindTool {
     const fdArgs = buildFdArgs(args);
 
     let output: string;
-    try {
-      const { stdout } = await execFileAsync("fd", fdArgs, {
-        cwd,
-        maxBuffer: 10 * 1024 * 1024,
-      });
-      output = stdout;
-    } catch {
+    if (pattern.startsWith("-")) {
+      // A dash-leading pattern cannot be passed to fd safely: fd's --glob
+      // takes an optional value that clap refuses to bind to "--" args, so
+      // the pattern would be parsed as flags ("--exec=rm" runs rm on every
+      // file found). The find fallback is safe: -name/-path consume the
+      // pattern unconditionally, so it stays a literal.
       output = await runFindFallback(pattern, file_type, cwd);
+    } else {
+      try {
+        const { stdout } = await execFileAsync("fd", fdArgs, {
+          cwd,
+          maxBuffer: 10 * 1024 * 1024,
+        });
+        output = stdout;
+      } catch {
+        output = await runFindFallback(pattern, file_type, cwd);
+      }
     }
 
     let files = output.trim().split("\n").filter(Boolean);

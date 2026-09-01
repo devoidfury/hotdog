@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- find tool - fix argument injection in the fd path: a model-supplied pattern starting with `-` was parsed as an fd flag (e.g. `--exec=rm` made fd run rm on every file found, recursively). Dash-leading patterns now route to the find fallback, whose `-name`/`-path` consume the pattern as a literal, and the positional slot is additionally guarded with a `--` separator. Mirrors the earlier grep/rg fix
 - workspace denylist defaults expanded with cloud/credential directories: `.aws`, `.azure`, `.docker`, `.gnupg`, `.kube` (alongside `.ssh`, `.config`, `.git`). Projects that legitimately keep a directory of one of these names inside a workspace root can carve it out via `workspace.deny` (rules are last-match-wins, so `!.aws` after the positive rule disables it, or configure the exact rule set you want)
 - fetch tool SSRF blocklist now refuses Teredo (`2001:0000::/32`) alongside the existing 6to4/NAT64 refusal -- a Teredo packet carries an unchecked (XOR-obfuscated) IPv4 destination; adjacent `2001::` allocations such as provider space (`2001:4860::/32`) and documentation (`2001:db8::/32`) are unaffected
 - websocket/webui: renaming a session now sets a display title instead of changing the session's profile; the profile keeps driving behavior (role, tools, model) and is still switched via the profile switcher. Titles are in-memory only and are dropped when a session is rebuilt from a cold log or the server restarts

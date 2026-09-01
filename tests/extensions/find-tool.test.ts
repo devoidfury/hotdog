@@ -180,6 +180,52 @@ describe("FindTool.execute — max_results", () => {
   });
 });
 
+// ── execute: fd argument-injection guard ────────────────────────────────────
+
+describe("FindTool.execute — fd argument-injection guard", () => {
+  // A model-supplied pattern must never reach fd as a flag. Without the
+  // guard, a pattern like "--exec=rm" makes fd run rm on every file found
+  // (argument-injection RCE, deletes the search tree). The payload below
+  // proves execution: if the flag fires, the planted files vanish.
+  it("treats a flag-shaped pattern as a literal (positional path)", async () => {
+    const dir2 = tmpDir();
+    try {
+      fsSync.writeFileSync(path.join(dir2, "a.txt"), "a");
+      fsSync.writeFileSync(path.join(dir2, "b.txt"), "b");
+
+      const tool = new FindTool({ maxResults: 200, maxOutputLines: 600 });
+      await tool.execute(
+        { pattern: "--exec=rm", path: dir2 },
+        toolCtx(),
+      );
+
+      expect(fsSync.existsSync(path.join(dir2, "a.txt"))).toBe(true);
+      expect(fsSync.existsSync(path.join(dir2, "b.txt"))).toBe(true);
+    } finally {
+      cleanupDir(dir2);
+    }
+  });
+
+  it("treats a flag-shaped glob pattern as a literal (glob path)", async () => {
+    const dir2 = tmpDir();
+    try {
+      fsSync.writeFileSync(path.join(dir2, "a.txt"), "a");
+      fsSync.writeFileSync(path.join(dir2, "b.txt"), "b");
+
+      const tool = new FindTool({ maxResults: 200, maxOutputLines: 600 });
+      await tool.execute(
+        { pattern: "--exec=*rm", path: dir2 },
+        toolCtx(),
+      );
+
+      expect(fsSync.existsSync(path.join(dir2, "a.txt"))).toBe(true);
+      expect(fsSync.existsSync(path.join(dir2, "b.txt"))).toBe(true);
+    } finally {
+      cleanupDir(dir2);
+    }
+  });
+});
+
 // ── execute: error cases ────────────────────────────────────────────────────
 
 describe("FindTool.execute — error cases", () => {

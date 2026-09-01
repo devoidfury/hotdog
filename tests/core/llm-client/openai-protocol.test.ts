@@ -58,17 +58,38 @@ describe("openaiProtocol.parseStream", () => {
     );
   });
 
-  it("emits reasoning events unescaped through the mangler", async () => {
+  it("emits raw wire content: no per-chunk unescaping", async () => {
     const mangler = new MarkerMangler();
-    // A protected marker inside model output is mangled on the wire and must
-    // come back un-mangled.
+    // A protected marker inside model output is mangled on the wire. The
+    // protocol must emit the escaped alias verbatim (raw): unescaping
+    // per delta would fossilize aliases that straddle a delta boundary.
+    // Consumers unescape once on the assembled string (StreamProcessor).
     const tag = 'thinking'
-    const wire = mangler.escape(`start </${tag}> end`);
+    const wire = mangler.escape(`start </${tag}> end`) ?? "";
     expect(wire).not.toContain(`</${tag}>`);
     const body = `data: {"choices":[{"delta":{"reasoning_content":"${wire}"}}]}\n\n`;
-    expect(await collect(openaiProtocol.parseStream(sseResponse(body), ctx(mangler)))).toEqual([
-      { type: "reasoning", content: `start </${tag}> end` },
-    ]);
+    const events = await collect(openaiProtocol.parseStream(sseResponse(body), ctx(mangler)));
+    expect(events).toEqual([{ type: "reasoning", content: wire }]);
+    // Sanity: the raw wire content round-trips through the mangler.
+    expect(mangler.unescape(wire)).toBe(`start </${tag}> end`);
+  });
+
+  it("passes an alias split across two deltas through unmodified", async () => {
+    const mangler = new MarkerMangler();
+    const tag = "tool-call";
+    const escaped = mangler.escape(`<${tag}>body</${tag}>`) ?? "";
+    const alias = escaped.slice(1, escaped.indexOf(">"));
+    expect(alias).toMatch(/^m_[a-z2-9]{16}$/);
+    // Split the tag form right through the middle of the alias body, the way
+    // a tokenizer would.
+    const mid = 2 + Math.floor(alias.length / 2);
+    const [head, tail] = [escaped.slice(0, mid), escaped.slice(mid)];
+    const body =
+      `data: {"choices":[{"delta":{"content":"${head}"}}]}\n\n` +
+      `data: {"choices":[{"delta":{"content":"${tail}"}}]}\n\n`;
+    const events = await collect(openaiProtocol.parseStream(sseResponse(body), ctx(mangler)));
+    // Raw halves, untouched: neither half is unescapeable on its own.
+    expect(events.map((e) => (e as { content: string }).content)).toEqual([head, tail]);
   });
 
   it("emits tool call, finish, and usage events", async () => {

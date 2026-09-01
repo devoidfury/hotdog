@@ -3,6 +3,7 @@
 import crypto from "node:crypto";
 import { LlmError } from "../error.ts";
 import { logger } from "../logger.ts";
+import type { MarkerMangler } from "../marker-mangler.ts";
 import type { StreamEvent } from "./client.ts";
 import { ToolCall } from "../context/message.ts";
 import type { RawUsage } from "../token-tracker.ts";
@@ -63,11 +64,31 @@ export class StreamProcessor {
    * Normalizes tool calls to OpenAI format:
    * { id, type: "function", function: { name, arguments } }.
    *
+   * Mangler unescaping: stream events carry RAW wire content (the protocol
+   * deliberately does not unescape per delta, because a mangler alias is 16
+   * random chars that a tokenizer can split across two deltas -- unescaping
+   * the halves separately would fossilize the alias). Unescaping therefore
+   * happens here, in two places with different guarantees:
+   *
+   * - Display (onChunk/onReasoning callbacks and the streamingContent /
+   *   streamingReasoning replay buffers): each chunk is unescaped
+   *   individually, keeping the live UI showing real markers as it does today.
+   *   If a split boundary lands mid-alias, the fragments pass through
+   *   unescaped and the UI briefly shows a broken alias at the boundary.
+   *   Transient and accepted.
+   * - Storage (the returned StreamResult): unescaped ONCE on the fully
+   *   assembled strings, which always recovers aliases that straddle delta
+   *   boundaries. This is the authoritative text that lands in context and
+   *   tool arguments.
+   *
+   * @param mangler - The session's marker mangler (null/undefined disables
+   *   unescaping entirely).
    * @throws LlmError.Cancelled if shouldCancel() returns true.
    */
   async process(
     stream: AsyncIterable<StreamEvent>,
     callbacks: StreamCallbacks = {},
+    mangler: MarkerMangler | null | undefined = null,
   ): Promise<StreamResult> {
     const textParts: string[] = [];
     const reasoningParts: string[] = [];
@@ -77,6 +98,9 @@ export class StreamProcessor {
     >();
     let usage: Record<string, unknown> | null = null;
     let finishReason: string | null = null;
+
+    const unescape = (s: string): string =>
+      mangler ? (mangler.unescape(s) ?? s) : s;
 
     this.#currentStreamingContent = "";
     this.#currentStreamingReasoning = "";
@@ -88,19 +112,23 @@ export class StreamProcessor {
 
       switch (event.type) {
         case "content": {
+          // Raw chunk for storage; per-chunk unescape is display-only (see
+          // process() docs on why the stored string is unescaped once, later).
           textParts.push(event.content);
-          this.#currentStreamingContent += event.content;
+          const display = unescape(event.content);
+          this.#currentStreamingContent += display;
           if (callbacks.onChunk) {
-            callbacks.onChunk(event.content);
+            callbacks.onChunk(display);
           }
           break;
         }
 
         case "reasoning": {
           reasoningParts.push(event.content);
-          this.#currentStreamingReasoning += event.content;
+          const display = unescape(event.content);
+          this.#currentStreamingReasoning += display;
           if (callbacks.onReasoning) {
-            callbacks.onReasoning(event.content);
+            callbacks.onReasoning(display);
           }
           break;
         }
@@ -147,15 +175,36 @@ export class StreamProcessor {
           }
           break;
         }
+
+        case "reset": {
+          // A mid-stream failure is being retried: the request is re-issued
+          // from scratch, so the failed attempt's partial output must not
+          // leak into the assembled result or the replay buffers (a
+          // reconnecting client would replay it as if it were real).
+          textParts.length = 0;
+          reasoningParts.length = 0;
+          toolCallsBuffer.clear();
+          usage = null;
+          finishReason = null;
+          this.#currentStreamingContent = "";
+          this.#currentStreamingReasoning = "";
+          break;
+        }
       }
     }
 
+    // Authoritative unescape: runs ONCE on the fully-assembled strings, so a
+    // mangler alias that straddled a delta boundary is recovered. See the
+    // process() docs for the display-vs-storage split.
     let finalToolCalls: ToolCall[] | null = null;
     if (toolCallsBuffer.size > 0) {
       finalToolCalls = Array.from(toolCallsBuffer.values()).map((tc) => ({
         id: tc.id || crypto.randomUUID(),
         type: "function",
-        function: { name: tc.name, arguments: tc.args.join("") },
+        function: {
+          name: unescape(tc.name),
+          arguments: unescape(tc.args.join("")),
+        },
       }));
     }
 
@@ -168,9 +217,9 @@ export class StreamProcessor {
     this.#currentStreamingReasoning = "";
 
     return {
-      fullText: textParts.join(""),
+      fullText: unescape(textParts.join("")),
       fullReasoning:
-        reasoningParts.length > 0 ? reasoningParts.join("") : null,
+        reasoningParts.length > 0 ? unescape(reasoningParts.join("")) : null,
       finalToolCalls,
       usage,
       finishReason,

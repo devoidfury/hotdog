@@ -10,8 +10,19 @@ import { createServiceRegistry } from '../../src/core/extensions/service-registr
 import { ConfigRegistry } from '../../src/core/extensions/config.ts';
 import { createSubcommandRegistry } from '../../src/core/extensions/registries.ts';
 import { createCompletionService } from '../../src/core/completion.ts';
+import { TASK_STATUS } from '../../src/core/session/task-manager.ts';
 import { describe, it, expect, beforeEach } from 'bun:test';
 import { MockLLMClient } from '../helpers.ts';
+
+// Poll until a condition holds (fails loudly on timeout) instead of a
+// fixed sleep, which is racy under parallel test load.
+async function settle(fn: () => boolean, what: string, timeoutMs = 2000): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (!fn()) {
+    if (Date.now() > deadline) throw new Error(`timed out waiting for ${what}`);
+    await new Promise(r => setTimeout(r, 1));
+  }
+}
 
 // Helper to create a minimal agent
 function createMockAgent(options: Record<string, unknown> = {}): AgentLike {
@@ -319,6 +330,71 @@ describe('SessionManager', () => {
     it('should return null when no task manager is configured', () => {
       expect(sessionManager.getTaskManager()).toBeNull();
     });
+  });
+});
+
+describe('deleteSession cascades to subagent tasks', () => {
+  it('aborts the deleted session\'s tasks; other sessions\' tasks survive', async () => {
+    const hooks = createHooks();
+    const toolRegistry = createToolRegistry();
+    const extensions = new ExtensionLoader({ hooks, toolRegistry, services: createServiceRegistry(), configRegistry: new ConfigRegistry(), cliSubcommandRegistry: createSubcommandRegistry(), completion: createCompletionService() });
+
+    // A TaskManager only exists when taskConfig + llmClient + modelRegistry
+    // are all present, so build a dedicated manager (the beforeEach one has
+    // no taskConfig).
+    const llmClient = new MockLLMClient();
+
+    // run() stays pending until the TaskManager's abortSignal fires (it is
+    // assigned before run() is called), so tasks stay RUNNING until aborted.
+    const buildAgent = async () =>
+      ({
+        sessionId: crypto.randomUUID(),
+        model: 'test-model',
+        abortSignal: null as AbortSignal | null,
+        sink: null,
+        enqueueCallback: null,
+        run: function (this: { abortSignal: AbortSignal }) {
+          return new Promise((_resolve: (v?: unknown) => void, reject: (e: Error) => void) => {
+            if (this.abortSignal.aborted) {
+              reject(new Error('aborted'));
+              return;
+            }
+            this.abortSignal.addEventListener('abort', () => reject(new Error('aborted')));
+          });
+        },
+        cancel: () => {},
+        resetCancel: () => {},
+        notifyCompletion: () => {},
+      }) as any;
+
+    const sm = new SessionManager({
+      hooks: hooks as any,
+      extensions,
+      buildAgent,
+      llmClient: llmClient as any,
+      modelRegistry: { 'test-model': {} } as any,
+      taskConfig: { maxIterations: 100, taskProfile: 'task-default', taskRole: '' },
+    });
+
+    const sessionA = await sm.create({ model: 'test-model' });
+    const sessionB = await sm.create({ model: 'test-model' });
+
+    const tm = sm.getTaskManager()!;
+    expect(tm).not.toBeNull();
+    await tm.spawnTask('task-a', 'work', { managerAgent: { sessionId: sessionA } });
+    await tm.spawnTask('task-b', 'work', { managerAgent: { sessionId: sessionB } });
+    await settle(() => tm.activeTasks().length === 2, 'both tasks running');
+
+    expect(sm.deleteSession(sessionA)).toBe(true);
+
+    await settle(() => tm.taskStatus('task-a') === TASK_STATUS.CANCELLED, 'task-a -> CANCELLED');
+    // task-b belongs to the surviving session; the cascade must not touch it.
+    expect(tm.taskStatus('task-b')).toBe(TASK_STATUS.RUNNING);
+
+    // Clean up so no run promises stay pending. (task-a's cancelled result
+    // has no bus to land on -- the session is gone -- and is dropped quietly.)
+    tm.interruptTask('task-b');
+    await settle(() => tm.activeTasks().length === 0, 'task-b cleanup');
   });
 });
 

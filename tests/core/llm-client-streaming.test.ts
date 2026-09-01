@@ -6,6 +6,8 @@ import type { ModelConfig } from "../../src/core/config/providers.ts";
 import { createLlmProtocolRegistry, type LlmProtocol, type ProtocolContext } from "../../src/core/llm-client/protocol.ts";
 import { LlmError } from "../../src/core/error.ts";
 import { Message } from "../../src/core/context/message.ts";
+import { MarkerMangler } from "../../src/core/marker-mangler.ts";
+import { createStreamProcessor } from "../../src/core/llm-client/stream-processor.ts";
 
 function mc(overrides: Partial<ModelConfig> = {}): ModelConfig {
   return { name: "test-model", temperature: null, contextLimit: 128000, tags: [], ...overrides };
@@ -501,3 +503,270 @@ describe("LlmClient.chatStreamCancellable — network errors, timeouts, cancella
     expect(LlmError.isCancelled(error)).toBe(true);
   });
 });
+
+describe("LlmClient.chatStreamCancellable — mid-stream failures", () => {
+  let originalFetch: typeof globalThis.fetch;
+
+  beforeEach(() => {
+    originalFetch = globalThis.fetch;
+  });
+
+  afterEach(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  function makeMsg(role: string, content: string) {
+    return new Message({ role, content });
+  }
+
+  /**
+   * An SSE response that yields each frame once, then rejects the next
+   * read() with `error` -- simulates a connection reset mid-body.
+   */
+  function sseMidStreamFailure(frames: string[], error: unknown): Response {
+    const encoder = new TextEncoder();
+    let i = 0;
+    return {
+      ok: true,
+      headers: new Map([["content-type", "text/event-stream"]]),
+      body: {
+        getReader: () => ({
+          read: async () => {
+            if (i >= frames.length) throw error;
+            const value = encoder.encode(frames[i]!);
+            i++;
+            return { done: false, value };
+          },
+          releaseLock: () => {},
+        }),
+        cancel: async () => {},
+      },
+    } as unknown as Response;
+  }
+
+  async function collect(gen: AsyncGenerator<any>) {
+    const events: any[] = [];
+    let error: unknown;
+    try {
+      for await (const event of gen) events.push(event);
+    } catch (e) {
+      error = e;
+    }
+    return { events, error };
+  }
+
+  it("retries a mid-stream network failure with a fresh full request", async () => {
+    const client = new LlmClient({ chatTimeoutSecs: 30, maxRetries: 2, baseUrl: "http://test.com", markerMangler: null, retryBaseDelayMs: 1 });
+    let calls = 0;
+
+    globalThis.fetch = (async () => {
+      calls++;
+      if (calls === 1) {
+        // A few chunks, then the connection dies mid-body.
+        return sseMidStreamFailure(
+          [contentFrame("partial-one"), contentFrame("partial-two")],
+          new Error("socket hang up"),
+        );
+      }
+      return sseMultiResponse([contentFrame("good-one"), contentFrame("good-two")]);
+    }) as unknown as typeof fetch;
+
+    const { events, error } = await collect(
+      client.chatStreamCancellable([makeMsg("user", "Hi")], mc()),
+    );
+
+    expect(error).toBeUndefined();
+    // A half-read body cannot be resumed: the retry re-issues the request.
+    expect(calls).toBe(2);
+    // The failed attempt's chunks are followed by a reset, then ONLY the
+    // successful stream's events.
+    expect(events.map((e) => (e.type === "content" ? `content:${e.content}` : e.type))).toEqual([
+      "content:partial-one",
+      "content:partial-two",
+      "reset",
+      "content:good-one",
+      "content:good-two",
+    ]);
+  });
+
+  it("leaves no partial residue in the assembled result after a mid-stream retry", async () => {
+    const client = new LlmClient({ chatTimeoutSecs: 30, maxRetries: 2, baseUrl: "http://test.com", markerMangler: null, retryBaseDelayMs: 1 });
+    let calls = 0;
+
+    globalThis.fetch = (async () => {
+      calls++;
+      if (calls === 1) {
+        return sseMidStreamFailure(
+          [contentFrame("partial"), contentFrame("more-partial")],
+          new Error("network socket disconnected"),
+        );
+      }
+      return sseMultiResponse([contentFrame("full "), contentFrame("stream"), contentFrame(" done")]);
+    }) as unknown as typeof fetch;
+
+    // Consume through the StreamProcessor, as the agent does: the assembled
+    // result must be the fully successful stream, nothing from attempt 1.
+    const processor = createStreamProcessor();
+    const gen = client.chatStreamCancellable([makeMsg("user", "Hi")], mc());
+    const result = await processor.process(gen, {}, null);
+
+    expect(calls).toBe(2);
+    expect(result.fullText).toBe("full stream done");
+    expect(result.fullText).not.toContain("partial");
+  });
+
+  it("does not retry a non-transient error thrown mid-stream", async () => {
+    const client = new LlmClient({ chatTimeoutSecs: 30, maxRetries: 3, baseUrl: "http://test.com", markerMangler: null });
+    let calls = 0;
+
+    globalThis.fetch = (async () => {
+      calls++;
+      return sseMidStreamFailure(
+        [contentFrame("x")],
+        LlmError.Api("HTTP 401 (body: unauthorized)", 401),
+      );
+    }) as unknown as typeof fetch;
+
+    const { events, error } = await collect(
+      client.chatStreamCancellable([makeMsg("user", "Hi")], mc()),
+    );
+
+    expect(error).toBeInstanceOf(LlmError);
+    expect((error as LlmError).type).toBe("api");
+    expect(calls).toBe(1);
+    expect(events.some((e) => e.type === "reset")).toBe(false);
+  });
+
+  it("propagates cancellation during a retry wait immediately, without re-requesting", async () => {
+    const client = new LlmClient({ chatTimeoutSecs: 30, maxRetries: 5, baseUrl: "http://test.com", markerMangler: null, retryBaseDelayMs: 60_000 });
+    let calls = 0;
+
+    globalThis.fetch = (async () => {
+      calls++;
+      return sseMidStreamFailure([contentFrame("x")], new Error("socket hang up"));
+    }) as unknown as typeof fetch;
+
+    const cancelController = new AbortController();
+    setTimeout(() => cancelController.abort(), 50);
+
+    const start = Date.now();
+    const { events, error } = await collect(
+      client.chatStreamCancellable(
+        [makeMsg("user", "Hi")],
+        mc(),
+        [],
+        cancelController.signal,
+      ),
+    );
+    const elapsed = Date.now() - start;
+
+    expect(error).toBeInstanceOf(LlmError);
+    expect(LlmError.isCancelled(error)).toBe(true);
+    // The 60s backoff wait must have been cut short by the cancellation.
+    expect(elapsed).toBeLessThan(5000);
+    // The mid-stream failure happened exactly once; no retry was issued.
+    expect(calls).toBe(1);
+    expect(events.some((e) => e.type === "reset")).toBe(true);
+  });
+});
+
+describe("LlmClient streaming — mangler unescape on assembly (e2e)", () => {
+  // Regression: a protected marker whose mangler alias is split across two
+  // SSE deltas must come back real in the assembled StreamResult. This is the
+  // full path (wire SSE -> openaiProtocol.parseStream -> LlmClient
+  // .chatStreamCancellable -> StreamProcessor), the runtime analog of the
+  // source-hygiene fossil scan.
+  it("recovers a content alias split across two SSE deltas", async () => {
+    const mangler = new MarkerMangler();
+    const marker = "<" + "tool-call" + ">";
+    const wire = mangler.escape(`see ${marker} here`) ?? "";
+    const original = `see ${marker} here`;
+    // Split the mangled text right through the middle of the alias.
+    const aliasStart = wire.indexOf("m_");
+    const aliasEnd = wire.indexOf(">", aliasStart);
+    const mid = aliasStart + Math.floor((aliasEnd - aliasStart) / 2);
+    const frames = [contentFrame(wire.slice(0, mid)), contentFrame(wire.slice(mid))];
+
+    const client = makeSseClient(mangler, frames);
+    const processor = createStreamProcessor();
+    const gen = client.chatStreamCancellable([new Message({ role: "user", content: "hi" })], mc());
+    const result = await processor.process(gen, {}, mangler);
+
+    expect(result.fullText).toBe(original);
+    expect(result.fullText).not.toContain("m_");
+  });
+
+  it("recovers a tool-argument alias split across two SSE deltas", async () => {
+    const mangler = new MarkerMangler();
+    const marker = "<" + "tool-call" + ">";
+    const realArgs = JSON.stringify({ content: `<${marker}>` });
+    const escapedArgs = mangler.escape(realArgs) ?? "";
+    const aliasStart = escapedArgs.indexOf("m_");
+    const aliasEnd = escapedArgs.indexOf(">", aliasStart);
+    const mid = aliasStart + Math.floor((aliasEnd - aliasStart) / 2);
+
+    // Two toolArgument deltas, the alias split between them.
+    const frames = [
+      toolFrame({ index: 0, id: "c1", function: { name: "write_file", arguments: escapedArgs.slice(0, mid) } }),
+      toolFrame({ index: 0, function: { arguments: escapedArgs.slice(mid) } }),
+    ];
+
+    const client = makeSseClient(mangler, frames);
+    const processor = createStreamProcessor();
+    const gen = client.chatStreamCancellable([new Message({ role: "user", content: "hi" })], mc());
+    const result = await processor.process(gen, {}, mangler);
+
+    expect(result.finalToolCalls).toHaveLength(1);
+    expect(result.finalToolCalls![0]!.function.name).toBe("write_file");
+    expect(result.finalToolCalls![0]!.function.arguments).toBe(realArgs);
+    expect(result.finalToolCalls![0]!.function.arguments).not.toContain("m_");
+  });
+});
+
+function contentFrame(content: string): string {
+  return `data: ${JSON.stringify({ choices: [{ delta: { content } }] })}\n\n`;
+}
+function toolFrame(toolCall: Record<string, unknown>): string {
+  return `data: ${JSON.stringify({ choices: [{ delta: { tool_calls: [toolCall] } }] })}\n\n`;
+}
+
+function makeSseClient(mangler: MarkerMangler, frames: string[]): LlmClient {
+  const client = new LlmClient({
+    chatTimeoutSecs: 30,
+    maxRetries: 0,
+    baseUrl: "http://test.com",
+    markerMangler: mangler,
+  });
+  client._doRequest = async (): Promise<Response> =>
+    sseMultiResponse(frames) as unknown as Response;
+  return client;
+}
+
+/**
+ * Build a fake SSE Response whose body reader yields one frame per read(),
+ * in order. Mirrors the shape the client consumes (getReader/cancel).
+ */
+function sseMultiResponse(frames: string[]): {
+  ok: boolean;
+  headers: Map<string, string>;
+  body: { getReader: () => unknown; cancel: () => Promise<void> };
+} {
+  const encoder = new TextEncoder();
+  let i = 0;
+  return {
+    ok: true,
+    headers: new Map([["content-type", "text/event-stream"]]),
+    body: {
+      getReader: () => ({
+        read: async () => {
+          if (i >= frames.length) return { done: true, value: undefined };
+          const value = encoder.encode(frames[i]!);
+          i++;
+          return { done: false, value };
+        },
+        releaseLock: () => {},
+      }),
+      cancel: async () => {},
+    },
+  };
+}

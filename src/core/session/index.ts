@@ -237,6 +237,12 @@ export class SessionManager {
       this.#sessions.delete(sessionId);
     }
 
+    // Cascade: abort any subagent tasks this session delegated so they stop
+    // burning tokens with no session left to receive their results. Only this
+    // session's tasks are interrupted; tasks owned by other sessions survive.
+    // (No-op when this SessionManager owns no TaskManager.)
+    this.#taskManager?.interruptTasksForSession(sessionId);
+
     this.#eventHandlers.delete(sessionId);
     this.#questionBuffers.delete(sessionId);
 

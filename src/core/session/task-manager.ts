@@ -89,6 +89,9 @@ export class TaskManager {
     abortController: AbortController;
     statusRef: { value: TaskStatus };
     runPromise: Promise<string>;
+    /** The delegating session that spawned this task (null if none). Used to
+     *  abort the task when that session is deleted. */
+    sessionId: string | null;
   }>;
   #bus: TaskResultBus | null;
   #profileManager: ProfileManager | undefined;
@@ -235,6 +238,9 @@ export class TaskManager {
       abortController,
       statusRef,
       runPromise,
+      // Ownership by delegating session: lets session deletion abort this
+      // task (and only this session's tasks).
+      sessionId: delivery ? delivery.sessionId : null,
     });
 
     return new TaskHandle(taskId, statusRef, abortController);
@@ -309,6 +315,26 @@ export class TaskManager {
     if (!task) return false;
     task.abortController.abort();
     return true;
+  }
+
+  /**
+   * Abort every RUNNING task delegated from the given session. Called when
+   * that session is deleted, so its subagent tasks don't keep running (and
+   * burning tokens) with no session left to receive their results. Tasks
+   * owned by other sessions are untouched. Returns how many were aborted.
+   */
+  interruptTasksForSession(sessionId: string): number {
+    let interrupted = 0;
+    for (const task of this.#tasks.values()) {
+      if (
+        task.sessionId === sessionId &&
+        task.statusRef.value === TASK_STATUS.RUNNING
+      ) {
+        task.abortController.abort();
+        interrupted++;
+      }
+    }
+    return interrupted;
   }
 
   activeTasks(): string[] {

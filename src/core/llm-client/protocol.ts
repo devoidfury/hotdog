@@ -41,7 +41,17 @@ export interface LlmProtocol {
 
   buildHeaders(ctx: ProtocolContext): Record<string, string>;
 
-  /** Normalizes into the existing StreamEvent shape so everything downstream stays untouched. */
+  /**
+   * Normalizes into the existing StreamEvent shape so everything downstream
+   * stays untouched.
+   *
+   * Events carry RAW wire content: if the model echoed mangler aliases, the
+   * deltas may still contain them. Do not unescape per delta here -- a
+   * tokenizer splits aliases across deltas, and per-chunk unescaping would
+   * fossilize any alias that straddles a boundary. Consumers unescape once on
+   * the assembled string using `ctx.mangler` (StreamProcessor.process for the
+   * agent loop; the compaction extension does the same for its summary).
+   */
   parseStream(response: Response, ctx: ProtocolContext): AsyncIterable<StreamEvent>;
 
   health?(ctx: ProtocolContext): Promise<boolean>;

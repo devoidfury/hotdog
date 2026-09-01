@@ -1,4 +1,4 @@
-import { retryWithBackoff } from "./retry.ts";
+import { retryDelay, shouldRetryLlmError } from "./retry.ts";
 import { MarkerMangler } from "../marker-mangler.ts";
 import type { Message } from "../context/message.ts";
 import { LlmError } from "../error.ts";
@@ -51,13 +51,30 @@ export interface LlmClientRequiredOptions {
   maxRetries: number;
 }
 
+/**
+ * Stream events carry RAW wire content: text fields are not mangler-
+ * unescaped (an alias can straddle two deltas, so per-chunk unescaping would
+ * fossilize it). Consumers unescape once on the assembled string with the
+ * session mangler -- see StreamProcessor.process.
+ */
 export type StreamEvent =
   | { type: "content"; content: string }
   | { type: "reasoning"; content: string }
   | { type: "toolName"; index: number; name: string; toolCallId: string }
   | { type: "toolArgument"; index: number; arguments: string }
   | { type: "usage"; data: Record<string, unknown> }
-  | { type: "finish"; reason: string };
+  | { type: "finish"; reason: string }
+  | {
+      /**
+       * A mid-stream failure just occurred and the request is being
+       * re-issued from the start (a half-read SSE body cannot be resumed).
+       * Consumers must discard everything accumulated from the failed
+       * attempt -- text, reasoning, tool calls, usage, and replay buffers
+       * -- so the final result is the fully successful stream with no
+       * partial residue.
+       */
+      type: "reset";
+    };
 
 
 function createDefaultProtocolRegistry(): LlmProtocolRegistry {
@@ -257,52 +274,114 @@ export class LlmClient {
       }
     }
 
+    // The retry unit is the request PLUS full stream consumption: a
+    // half-read SSE body cannot be resumed, so a mid-stream failure
+    // (connection reset, chunked abort, stall) re-issues the whole request.
+    // (Retry stays idempotent for the agent: the assistant message is only
+    // added to context after the FULL stream is assembled.)
+    //
+    // The chat timeout is enforced per-attempt via hotdogFetch's built-in
+    // timeoutMs (an independent AbortSignal.timeout), NOT by aborting the
+    // shared abortController. Aborting the shared controller would poison
+    // every subsequent retry attempt with an already-aborted signal.
+    // The shared abortController is exclusively for user cancellation.
+    let response: Response | null = null;
+    let delayMs = this.retryBaseDelayMs ?? 1000;
+
     try {
       const effectiveSessionId = sessionId || this.sessionId;
-      // The chat timeout is enforced per-attempt via hotdogFetch's built-in
-      // timeoutMs (an independent AbortSignal.timeout), NOT by aborting the
-      // shared abortController. Aborting the shared controller would poison
-      // every subsequent retry attempt with an already-aborted signal.
-      // The shared abortController is exclusively for user cancellation.
-      const doRequestWithTimeout = () =>
-        this._doRequest(
-          url,
-          apiKey,
-          request,
-          abortController.signal,
-          modelConfig,
-          path,
-          effectiveSessionId,
-          this.chatTimeoutSecs * 1000,
-        );
 
-      const response = await retryWithBackoff<Response>(doRequestWithTimeout, this.maxRetries, {
-        signal: abortController.signal,
-        baseDelayMs: this.retryBaseDelayMs,
-      });
+      // Unbounded loop: every exit path is an explicit return/throw.
+      for (let attempt = 1; ; attempt++) {
+        if (abortController.signal.aborted) {
+          throw LlmError.Cancelled("request was cancelled");
+        }
 
-      try {
-        yield* this._processSSE(response, modelConfig, url, apiKey, effectiveSessionId);
-      } finally {
-        // Release the connection if the consumer abandons the stream mid-way
-        // (cancellation, early return); an already-drained body makes
-        // cancel() a no-op on the normal path.
-        response.body?.cancel().catch(() => {});
+        try {
+          response = await this._doRequest(
+            url,
+            apiKey,
+            request,
+            abortController.signal,
+            modelConfig,
+            path,
+            effectiveSessionId,
+            this.chatTimeoutSecs * 1000,
+          );
+        } catch (e: unknown) {
+          if (!shouldRetryLlmError(e, attempt, this.maxRetries)) throw e;
+          await retryDelay(delayMs, abortController.signal);
+          delayMs *= 2;
+          continue;
+        }
+
+        try {
+          yield* this._processSSE(response, modelConfig, url, apiKey, effectiveSessionId);
+          return; // stream consumed to completion: success
+        } catch (e: unknown) {
+          // Release the half-read body before the next attempt reuses the
+          // connection pool, then classify the raw failure the same way the
+          // request phase does (see classifyStreamError).
+          const failed = response;
+          response = null;
+          failed.body?.cancel().catch(() => {});
+          const err = LlmClient.classifyStreamError(e, abortController.signal, this.chatTimeoutSecs * 1000);
+          if (!shouldRetryLlmError(err, attempt, this.maxRetries)) throw err;
+
+          // A retry re-issues the request from scratch, so consumers must
+          // discard the failed attempt's partial output (and their replay
+          // buffers) before the new stream's events start arriving.
+          yield { type: "reset" };
+
+          await retryDelay(delayMs, abortController.signal);
+          delayMs *= 2;
+        }
       }
     } finally {
+      // Release the connection if the consumer abandons the stream mid-way
+      // (cancellation, early return); an already-drained body makes
+      // cancel() a no-op on the normal path.
+      response?.body?.cancel().catch(() => {});
       removeCancelListener?.();
     }
   }
 
   /**
-   * Classify a raw fetch rejection.
-   *
-   * Bun rejects an aborted fetch with the aborting signal's reason:
-   * `TimeoutError` (DOMException) for `AbortSignal.timeout()` and
-   * `AbortError` (DOMException) for a manual `controller.abort()`.
+   * Bun rejects an aborted fetch (or a mid-stream body read) with the
+   * aborting signal's reason: `TimeoutError` (DOMException) for
+   * `AbortSignal.timeout()` and `AbortError` (DOMException) for a manual
+   * `controller.abort()`.
    */
   static isAbortError(e: unknown): boolean {
     return e instanceof Error && (e.name === "AbortError" || e.name === "TimeoutError");
+  }
+
+  /**
+   * Classify a raw failure from fetch or from reading the response body
+   * (connection reset mid-stream, stream terminated, stall).
+   *
+   * The shared signal aborting means USER cancellation (not retried).
+   * Otherwise an aborted read is the per-attempt timeout (retryable), and
+   * any other failure is a transient network error (retryable). LlmErrors
+   * pass through untouched so their own type/status decide retryability.
+   */
+  static classifyStreamError(
+    e: unknown,
+    signal: AbortSignal | null,
+    timeoutMs: number | null | undefined,
+  ): LlmError {
+    if (e instanceof LlmError) return e;
+    if (LlmClient.isAbortError(e)) {
+      if (signal?.aborted) {
+        return LlmError.Cancelled("request was cancelled");
+      }
+      if (timeoutMs != null) {
+        return LlmError.Timeout(`Chat request timed out after ${Math.round(timeoutMs / 1000)}s`);
+      }
+      return LlmError.Cancelled("request was aborted");
+    }
+    // Network failures (ECONNREFUSED, DNS, TLS, reset mid-body) are transient.
+    return LlmError.Http(e instanceof Error ? e.message : String(e));
   }
 
   async _doRequest(
@@ -341,23 +420,10 @@ export class LlmClient {
         timeoutMs ?? undefined,
       );
     } catch (e: unknown) {
-      // Translate raw fetch failures into LlmError so retryWithBackoff
+      // Translate raw fetch failures into LlmError so the retry logic
       // classifies them: http/timeout are transient and retried, cancelled
       // is rethrown immediately.
-      if (e instanceof LlmError) throw e;
-      if (LlmClient.isAbortError(e)) {
-        // User cancellation aborts the shared signal; the per-attempt
-        // timeout uses an independent signal inside hotdogFetch.
-        if (signal?.aborted) {
-          throw LlmError.Cancelled("request was cancelled");
-        }
-        if (timeoutMs != null) {
-          throw LlmError.Timeout(`Chat request timed out after ${Math.round(timeoutMs / 1000)}s`);
-        }
-        throw LlmError.Cancelled("request was aborted");
-      }
-      // Network failures (ECONNREFUSED, DNS, TLS, etc.) are transient.
-      throw LlmError.Http(e instanceof Error ? e.message : String(e));
+      throw LlmClient.classifyStreamError(e, signal, timeoutMs);
     }
 
     if (!resp.ok) {

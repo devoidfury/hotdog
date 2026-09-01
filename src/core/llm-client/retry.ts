@@ -22,6 +22,57 @@ export function isRetryableHttpStatus(status: number): boolean {
   return false;
 }
 
+/**
+ * Decide whether a failed attempt should be retried. `attempt` is the
+ * 1-based index of the attempt that just failed; maxRetries counts retries
+ * AFTER the initial attempt, so the final attempt (1 + maxRetries) is never
+ * retried. Cancellation is never retried. Non-LlmError failures are never
+ * retried here -- callers are expected to classify raw errors into LlmError
+ * first (LlmClient does this for fetch and stream-body failures).
+ */
+export function shouldRetryLlmError(e: unknown, attempt: number, maxRetries: number): boolean {
+  if (LlmError.isCancelled(e)) return false;
+  if (attempt >= 1 + Math.max(0, maxRetries)) return false;
+
+  if (e instanceof LlmError) {
+    if (e.type === "http" || e.type === "timeout") {
+      // Network errors and timeouts are always transient
+      return true;
+    }
+    if (e.type === "api") {
+      // Prefer the structured status; fall back to the message for
+      // errors constructed without it.
+      const status = e.status ?? extractHttpStatus(e.message);
+      if (status !== null && isRetryableHttpStatus(status)) {
+        return true;
+      }
+    }
+  }
+  // Other API errors (e.g., "Bad input") are non-transient — don't retry
+  return false;
+}
+
+/**
+ * Wait `delayMs` before the next retry, resolving early if the signal
+ * aborts so a user cancellation during the wait is noticed immediately
+ * (the caller re-checks the signal).
+ */
+export function retryDelay(delayMs: number, signal?: AbortSignal | null): Promise<void> {
+  return new Promise<void>((resolve) => {
+    const timeout = setTimeout(resolve, delayMs);
+    if (signal) {
+      signal.addEventListener(
+        "abort",
+        () => {
+          clearTimeout(timeout);
+          resolve();
+        },
+        { once: true },
+      );
+    }
+  });
+}
+
 export interface RetryOptions {
   signal?: AbortSignal | null;
   /** Base delay in ms before first retry (default: 1000). Useful for fast tests. */
@@ -41,8 +92,6 @@ export async function retryWithBackoff<T>(
 
   // maxRetries counts retries AFTER the initial attempt: total attempts =
   // 1 + maxRetries. 0 (or negative) clamps to a single attempt, no retries.
-  const totalAttempts = 1 + Math.max(0, maxRetries);
-
   if (signal?.aborted) {
     throw LlmError.Cancelled("request was cancelled");
   }
@@ -60,30 +109,8 @@ export async function retryWithBackoff<T>(
       const result = await fn();
       return result;
     } catch (e: unknown) {
-      // If cancelled, don't retry - propagate immediately
-      if (LlmError.isCancelled(e)) {
-        throw e;
-      }
-
-      let shouldRetry = false;
-
-      if (e instanceof LlmError) {
-        if (e.type === "http" || e.type === "timeout") {
-          // Network errors and timeouts are always transient
-          shouldRetry = true;
-        } else if (e.type === "api") {
-          // Prefer the structured status; fall back to the message for
-          // errors constructed without it.
-          const status = e.status ?? extractHttpStatus(e.message);
-          if (status !== null && isRetryableHttpStatus(status)) {
-            shouldRetry = true;
-          }
-        }
-        // Other API errors (e.g., "Bad input") are non-transient — don't retry
-      }
-
-      // Non-transient, or the final attempt was just used: propagate.
-      if (!shouldRetry || attempt === totalAttempts) {
+      // If cancelled or non-transient, don't retry - propagate immediately
+      if (!shouldRetryLlmError(e, attempt, maxRetries)) {
         throw e;
       }
 
@@ -91,19 +118,7 @@ export async function retryWithBackoff<T>(
         throw LlmError.Cancelled("request was cancelled");
       }
 
-      await new Promise<void>((resolve) => {
-        const timeout = setTimeout(resolve, delayMs);
-        if (signal) {
-          signal.addEventListener(
-            "abort",
-            () => {
-              clearTimeout(timeout);
-              resolve();
-            },
-            { once: true },
-          );
-        }
-      });
+      await retryDelay(delayMs, signal);
 
       delayMs *= 2;
     }

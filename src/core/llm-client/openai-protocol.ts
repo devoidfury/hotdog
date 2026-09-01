@@ -9,7 +9,7 @@
 // streaming. Message serialization uses the WireFormat layer (serialize.ts)
 // with the session mangler so mangling happens at the wire boundary.
 
-import type { LlmProtocol, ProtocolContext } from "./protocol.ts";
+import type { LlmProtocol } from "./protocol.ts";
 import type { StreamEvent } from "./client.ts";
 import { parseSse } from "../../utils/sse-parser.ts";
 import { wireFormatFor } from "./serialize.ts";
@@ -61,7 +61,10 @@ export const openaiProtocol: LlmProtocol = {
     return headers;
   },
 
-  async *parseStream(response, ctx) {
+  // NOTE: the LlmProtocol interface still passes ctx (mangler, base URL, key,
+  // session) to parseStream for other protocols; the openai parser needs none
+  // of it (events are raw wire content, see parseStreamData below).
+  async *parseStream(response) {
     const contentType =
       typeof response.headers?.get === "function" ? response.headers.get("content-type") || "" : "";
     const isSse =
@@ -70,7 +73,7 @@ export const openaiProtocol: LlmProtocol = {
     if (!isSse) {
       try {
         const data = (await response.json()) as Record<string, unknown>;
-        yield* parseStreamData(data, ctx.mangler);
+        yield* parseStreamData(data);
         return;
       } catch {
         throw LlmError.InvalidResponse(`Unexpected Content-Type: ${contentType}`);
@@ -81,14 +84,20 @@ export const openaiProtocol: LlmProtocol = {
       throw LlmError.InvalidResponse("Response body is null");
     }
     for await (const data of parseSse(response.body)) {
-      yield* parseStreamData(data as Record<string, unknown>, ctx.mangler);
+      yield* parseStreamData(data as Record<string, unknown>);
     }
   },
 };
 
+/**
+ * Emits RAW wire content: no mangler unescaping here. A mangler alias
+ * (`<m_...>`) can be split across two SSE deltas, so unescaping per chunk
+ * would fossilize the alias in whatever gets assembled from these events.
+ * Consumers unescape once on the ASSEMBLED string (StreamProcessor.process
+ * for the agent, the compaction extension for summaries).
+ */
 function* parseStreamData(
   data: Record<string, unknown>,
-  mangler: ProtocolContext["mangler"],
 ): Generator<StreamEvent> {
   const events: StreamEvent[] = [];
   const choices = (data.choices as Array<Record<string, unknown>>) || [];
@@ -99,28 +108,20 @@ function* parseStreamData(
 
     const reasoningContent = delta.reasoning_content as string | null | undefined;
     if (reasoningContent) {
-      let content = reasoningContent;
-      if (mangler) content = mangler.unescape(content) ?? "";
-      if (content) events.push({ type: "reasoning", content });
+      events.push({ type: "reasoning", content: reasoningContent });
     }
 
     const contentVal = delta.content as string | null | undefined;
     if (contentVal) {
-      let content = contentVal;
-      if (mangler) content = mangler.unescape(content) ?? "";
-      if (content) events.push({ type: "content", content });
+      events.push({ type: "content", content: contentVal });
     }
 
     const toolCalls = (delta.tool_calls as Array<Record<string, unknown>>) || [];
     for (const tc of toolCalls) {
       if (tc.function) {
         const fn = tc.function as Record<string, unknown>;
-        let name = fn.name as string | null | undefined;
-        let args = fn.arguments as string | null | undefined;
-        if (mangler) {
-          if (name) name = mangler.unescape(name);
-          if (args) args = mangler.unescape(args);
-        }
+        const name = fn.name as string | null | undefined;
+        const args = fn.arguments as string | null | undefined;
         if (name) {
           events.push({ type: "toolName", index: Number(tc.index) || 0, name, toolCallId: (tc.id as string) || "" });
         }

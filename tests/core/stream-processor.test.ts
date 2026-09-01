@@ -8,6 +8,7 @@ import {
   type StreamResult,
 } from "../../src/core/llm-client/stream-processor.ts";
 import type { StreamEvent } from "../../src/core/llm-client/client.ts";
+import { MarkerMangler } from "../../src/core/marker-mangler.ts";
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -23,8 +24,40 @@ async function processEvents(
   processor: StreamProcessor,
   events: StreamEvent[],
   callbacks: StreamCallbacks = {},
+  mangler?: MarkerMangler | null,
 ): Promise<StreamResult> {
-  return processor.process(makeEvents(events) as unknown as AsyncIterable<StreamEvent>, callbacks);
+  return processor.process(
+    makeEvents(events) as unknown as AsyncIterable<StreamEvent>,
+    callbacks,
+    mangler,
+  );
+}
+
+/**
+ * Escape a protected marker, split the mangled form right through the middle
+ * of the alias (the way a tokenizer can split it across two deltas), and
+ * return the halves plus the real marker. The marker is built from bare
+ * words so only the tag form is mangled and the parts stay literal-safe.
+ */
+function makeSplitAlias(): {
+  mangler: MarkerMangler;
+  head: string;
+  tail: string;
+  original: string;
+} {
+  const mangler = new MarkerMangler();
+  const marker = "<" + "tool-call" + ">";
+  const wire = mangler.escape(`pre ${marker} post`) ?? "";
+  // wire === `pre <m_XXXXXXXXXXXXXXXX> post`
+  const aliasStart = wire.indexOf("m_");
+  const aliasEnd = wire.indexOf(">", aliasStart);
+  const mid = aliasStart + Math.floor((aliasEnd - aliasStart) / 2);
+  return {
+    mangler,
+    head: wire.slice(0, mid),
+    tail: wire.slice(mid),
+    original: `pre ${marker} post`,
+  };
 }
 
 // ── Tests ───────────────────────────────────────────────────────────────────
@@ -311,6 +344,186 @@ describe("StreamProcessor", () => {
       expect(processor.streamingContent).toBe("");
       expect(processor.streamingReasoning).toBe("");
       expect(result.fullText).toBe("Hello");
+    });
+  });
+
+  // Regression: a mangler alias split across two deltas must be recovered in
+  // the assembled result (per-chunk unescaping would fossilize it). Runtime
+  // analog of the source-hygiene scan in mangler-alias-fossil.test.ts.
+  describe("mangler unescaping on assembled strings", () => {
+    it("recovers a content alias split across two chunks", async () => {
+      const { mangler, head, tail, original } = makeSplitAlias();
+      const processor = createStreamProcessor();
+      const result = await processEvents(
+        processor,
+        [
+          { type: "content", content: head },
+          { type: "content", content: tail },
+        ],
+        {},
+        mangler,
+      );
+
+      expect(result.fullText).toBe(original);
+      expect(result.fullText).not.toContain("m_");
+    });
+
+    it("recovers a reasoning alias split across two chunks", async () => {
+      const { mangler, head, tail, original } = makeSplitAlias();
+      const processor = createStreamProcessor();
+      const result = await processEvents(
+        processor,
+        [
+          { type: "reasoning", content: head },
+          { type: "reasoning", content: tail },
+        ],
+        {},
+        mangler,
+      );
+
+      expect(result.fullReasoning).toBe(original);
+      expect(result.fullText).toBe("");
+    });
+
+    it("recovers an alias split across tool argument chunks", async () => {
+      const mangler = new MarkerMangler();
+      const marker = "<" + "tool-call" + ">";
+      // JSON argument payload carrying the protected marker in tag form.
+      const wireArgs = JSON.stringify({ note: `<${marker}>` });
+      const escapedArgs = mangler.escape(wireArgs) ?? "";
+      const aliasStart = escapedArgs.indexOf("m_");
+      const aliasEnd = escapedArgs.indexOf(">", aliasStart);
+      const mid = aliasStart + Math.floor((aliasEnd - aliasStart) / 2);
+
+      const processor = createStreamProcessor();
+      const result = await processEvents(
+        processor,
+        [
+          { type: "toolName", index: 0, name: "write_file", toolCallId: "call-1" },
+          { type: "toolArgument", index: 0, arguments: escapedArgs.slice(0, mid) },
+          { type: "toolArgument", index: 0, arguments: escapedArgs.slice(mid) },
+        ],
+        {},
+        mangler,
+      );
+
+      expect(result.finalToolCalls).toHaveLength(1);
+      expect(result.finalToolCalls![0]!.function.name).toBe("write_file");
+      expect(result.finalToolCalls![0]!.function.arguments).toBe(wireArgs);
+      expect(result.finalToolCalls![0]!.function.arguments).not.toContain("m_");
+    });
+
+    it("passes a normal (non-marker) tool name through unchanged", async () => {
+      const { mangler } = makeSplitAlias();
+      const processor = createStreamProcessor();
+      const result = await processEvents(
+        processor,
+        [
+          { type: "toolName", index: 0, name: "bash", toolCallId: "call-1" },
+          { type: "toolArgument", index: 0, arguments: "{}" },
+        ],
+        {},
+        mangler,
+      );
+
+      // Tool names are bare identifiers, never tag-form markers, so the
+      // mangler leaves them untouched (unescape is a defensive no-op here).
+      expect(result.finalToolCalls![0]!.function.name).toBe("bash");
+    });
+
+    it("display callbacks get per-chunk unescaping (complete alias in one chunk)", async () => {
+      const mangler = new MarkerMangler();
+      const marker = "<" + "tool-call" + ">";
+      const wire = mangler.escape(`pre ${marker} post`) ?? "";
+      const real = `pre ${marker} post`;
+
+      const chunks: string[] = [];
+      const processor = createStreamProcessor();
+      const result = await processEvents(
+        processor,
+        [{ type: "content", content: wire }],
+        { onChunk: (c) => chunks.push(c) },
+        mangler,
+      );
+
+      // A complete alias in a single chunk is unescaped for display...
+      expect(chunks).toEqual([real]);
+      // ...and the assembled result matches.
+      expect(result.fullText).toBe(real);
+    });
+
+    it("display of a split alias shows raw fragments (accepted transient)", async () => {
+      const { mangler, head, tail } = makeSplitAlias();
+      const chunks: string[] = [];
+      const processor = createStreamProcessor();
+      await processEvents(
+        processor,
+        [
+          { type: "content", content: head },
+          { type: "content", content: tail },
+        ],
+        { onChunk: (c) => chunks.push(c) },
+        mangler,
+      );
+
+      // Neither half holds a complete alias, so per-chunk display unescaping
+      // cannot recover it -- the fragments pass through raw. The stored
+      // result is still correct (see the split-chunk test above).
+      expect(chunks).toEqual([head, tail]);
+    });
+
+    it("is a no-op without a mangler", async () => {
+      const { head, tail } = makeSplitAlias();
+      const processor = createStreamProcessor();
+      const result = await processEvents(
+        processor,
+        [
+          { type: "content", content: head },
+          { type: "content", content: tail },
+        ],
+      );
+
+      expect(result.fullText).toBe(head + tail);
+    });
+  });
+
+  describe("reset (mid-stream retry)", () => {
+    it("discards the failed attempt's partial output and replay state", async () => {
+      const processor = createStreamProcessor();
+      const chunks: string[] = [];
+
+      async function* stream(): AsyncGenerator<StreamEvent> {
+        yield { type: "content", content: "old " };
+        yield { type: "reasoning", content: "old-reasoning" };
+        yield { type: "toolName", index: 0, name: "old-tool", toolCallId: "c1" };
+        yield { type: "reset" };
+        // By the time the producer resumes after the reset, the processor
+        // must have discarded everything from the failed attempt, including
+        // the replay buffers a reconnecting client would read.
+        expect(processor.streamingContent).toBe("");
+        expect(processor.streamingReasoning).toBe("");
+        yield { type: "content", content: "fresh" };
+      }
+
+      const result = await processor.process(stream(), {
+        onChunk: (c) => chunks.push(c),
+      });
+
+      // Only the successful attempt's text is assembled (display keeps the
+      // already-shown chunks; a terminal cannot be rewound).
+      expect(result.fullText).toBe("fresh");
+      expect(result.fullReasoning).toBeNull();
+      expect(result.finalToolCalls).toBeNull();
+      expect(chunks).toEqual(["old ", "fresh"]);
+    });
+
+    it("assembles normally when no reset arrives", async () => {
+      const processor = createStreamProcessor();
+      const result = await processEvents(processor, [
+        { type: "content", content: "a" },
+        { type: "content", content: "b" },
+      ]);
+      expect(result.fullText).toBe("ab");
     });
   });
 });

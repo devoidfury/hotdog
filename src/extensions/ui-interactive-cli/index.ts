@@ -526,6 +526,42 @@ export async function runInteractiveSession(
 
   registerShellCompletion(core.completion, !!shellMode);
 
+  async function handleShellMode(trimmed: string) {
+    const match = trimmed.match(SEND_TO_ASSISTANT_SUFFIX_RE);
+    const sendToAssistant = !!match;
+    const note = sendToAssistant ? (match[1] || "").trim() : "";
+    const cmd = sendToAssistant ? trimmed.replace(SEND_TO_ASSISTANT_SUFFIX_RE, "").trim() : trimmed;
+
+    const firstWord = cmd.split(/\s+/)[0];
+
+    if (!firstWord || firstWord.length < MIN_CMD_LEN || IGNORED_CMDS.has(firstWord) || !(await isSystemCommand(firstWord))) {
+      return false;
+    }
+    
+    rl.pause();
+    const result = await executeShellCommand(cmd, {
+      captureOutput: sendToAssistant,
+    });
+    rl.resume();
+
+    if (sendToAssistant) {
+      const notePart = note ? `Note: ${note}\n\n` : "";
+      const msg = `I ran: ${cmd}\n\n${notePart}Output:\n${result.content || "(no output)"}`;
+      await channel.send(msg);
+    } else {
+      if (result.content) {
+        console.log(result.content);
+      } else if (result.error) {
+        console.log(`${result.error}`);
+      }
+      if (result.exitCode != 0) {
+        console.log(`[exec: exit code ${result.exitCode}]`);
+      }
+    }
+    rl.prompt();
+    return true;
+  };
+
   lineHandler = async (line: string) => {
     const trimmed = paste.normalize(line).trim();
 
@@ -541,41 +577,8 @@ export async function runInteractiveSession(
     }
 
     if (shellMode) {
-      const match = trimmed.match(SEND_TO_ASSISTANT_SUFFIX_RE);
-      const sendToAssistant = !!match;
-      const note = sendToAssistant ? (match[1] || "").trim() : "";
-      const cmd = sendToAssistant ? trimmed.replace(SEND_TO_ASSISTANT_SUFFIX_RE, "").trim() : trimmed;
-
-      const firstWord = cmd.split(/\s+/)[0];
-      if (
-        firstWord &&
-        firstWord.length >= MIN_CMD_LEN &&
-        !IGNORED_CMDS.has(firstWord) &&
-        (await isSystemCommand(firstWord))
-      ) {
-        rl.pause();
-        const result = await executeShellCommand(cmd, {
-          captureOutput: sendToAssistant,
-        });
-        rl.resume();
-
-        if (sendToAssistant) {
-          const notePart = note ? `Note: ${note}\n\n` : "";
-          const msg = `I ran: ${cmd}\n\n${notePart}Output:\n${result.content || "(no output)"}`;
-          await channel.send(msg);
-        } else {
-          if (result.content) {
-            console.log(result.content);
-          } else if (result.error) {
-            console.log(`${result.error}`);
-          }
-          if (result.exitCode != 0) {
-            console.log(`[exec: exit code ${result.exitCode}]`);
-          }
-        }
-        rl.prompt();
-        return;
-      }
+      const handled = await handleShellMode(trimmed);
+      if (handled) return;
     }
 
     await channel.send(trimmed);

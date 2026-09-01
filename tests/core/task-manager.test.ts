@@ -12,6 +12,16 @@ function resultParts(taskId: string, result: string) {
   ];
 }
 
+// Poll until a condition holds (fails loudly on timeout) instead of a
+// fixed sleep, which is racy under parallel test load.
+async function settle(fn: () => boolean, what: string, timeoutMs = 2000): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (!fn()) {
+    if (Date.now() > deadline) throw new Error(`timed out waiting for ${what}`);
+    await new Promise(r => setTimeout(r, 1));
+  }
+}
+
 describe("TaskHandle", () => {
   it("creates with taskId and status", () => {
     const statusRef = { value: TASK_STATUS.RUNNING };
@@ -106,16 +116,6 @@ describe("TaskManager", () => {
       expect((agentConfig as any)?.model).toBe("custom-model");
     });
 
-    // Poll until a condition holds (fails loudly on timeout) instead of a
-    // fixed sleep, which is racy under parallel test load.
-    async function settle(fn: () => boolean, what: string, timeoutMs = 2000): Promise<void> {
-      const deadline = Date.now() + timeoutMs;
-      while (!fn()) {
-        if (Date.now() > deadline) throw new Error(`timed out waiting for ${what}`);
-        await new Promise(r => setTimeout(r, 1));
-      }
-    }
-
     it("tracks active tasks and provides task counts", async () => {
       let resolveRun1: () => void;
       let resolveRun2: () => void;
@@ -170,6 +170,62 @@ describe("TaskManager", () => {
       expect(manager.activeTasks()).toEqual([]);
       expect(manager.taskCounts()).toBeNull();
       expect(manager.progressMessage()).toBeNull();
+    });
+  });
+
+  describe("interruptTasksForSession", () => {
+    // Agent whose run() stays pending until its abortSignal fires --
+    // _runTask assigns agent.abortSignal before calling run(), so the mock
+    // reads it off `this` at call time.
+    const hangingBuildAgent = async () =>
+      ({
+        abortSignal: null as AbortSignal | null,
+        run: function (this: { abortSignal: AbortSignal }) {
+          return new Promise((_resolve: (v?: unknown) => void, reject: (e: Error) => void) => {
+            if (this.abortSignal.aborted) {
+              reject(new Error("aborted"));
+              return;
+            }
+            this.abortSignal.addEventListener("abort", () => reject(new Error("aborted")));
+          });
+        },
+        notifyCompletion: () => {},
+      }) as any;
+
+    it("aborts only RUNNING tasks owned by the session and returns the count", async () => {
+      const manager = createManager({ buildAgent: hangingBuildAgent });
+
+      await manager.spawnTask("t-a1", "work", { managerAgent: { sessionId: "sess-a" } });
+      await manager.spawnTask("t-a2", "work", { managerAgent: { sessionId: "sess-a" } });
+      await manager.spawnTask("t-b1", "work", { managerAgent: { sessionId: "sess-b" } });
+      await manager.spawnTask("t-0", "work"); // no delegating session
+
+      expect(manager.activeTasks()).toEqual(["t-a1", "t-a2", "t-b1", "t-0"]);
+      expect(manager.interruptTasksForSession("sess-a")).toBe(2);
+
+      await settle(() => manager.taskStatus("t-a1") === TASK_STATUS.CANCELLED, "t-a1 -> CANCELLED");
+      await settle(() => manager.taskStatus("t-a2") === TASK_STATUS.CANCELLED, "t-a2 -> CANCELLED");
+      // Other sessions' tasks and null-sessionId tasks are untouched.
+      expect(manager.taskStatus("t-b1")).toBe(TASK_STATUS.RUNNING);
+      expect(manager.taskStatus("t-0")).toBe(TASK_STATUS.RUNNING);
+
+      // Clean up the survivors so no run promises stay pending.
+      manager.interruptTask("t-b1");
+      manager.interruptTask("t-0");
+      await settle(() => manager.activeTasks().length === 0, "survivor cleanup");
+    });
+
+    it("returns 0 for unknown sessions and leaves non-running tasks alone", async () => {
+      const manager = createManager({
+        buildAgent: async () =>
+          ({ run: async () => ({ type: "completion", content: "done" }), notifyCompletion: () => {} } as any),
+      });
+      await manager.spawnTask("t-a", "work", { managerAgent: { sessionId: "sess-a" } });
+      await settle(() => manager.taskStatus("t-a") === TASK_STATUS.COMPLETED, "t-a -> COMPLETED");
+
+      expect(manager.interruptTasksForSession("no-such-session")).toBe(0);
+      // The task is completed, so nothing for the cascade to abort.
+      expect(manager.interruptTasksForSession("sess-a")).toBe(0);
     });
   });
 

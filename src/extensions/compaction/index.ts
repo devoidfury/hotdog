@@ -138,6 +138,13 @@ export function create(core: CoreContext): ExtensionInstance | null {
             abortController.abort();
             throw LlmError.Cancelled("Compaction cancelled");
           }
+          if (event.type === "reset") {
+            // A mid-stream failure is being retried: the request is
+            // re-issued from scratch, so the failed attempt's partial
+            // output must not leak into the assembled summary.
+            fullText = "";
+            continue;
+          }
           if (event.type === "content") {
             fullText += event.content;
           }
@@ -145,7 +152,12 @@ export function create(core: CoreContext): ExtensionInstance | null {
       } finally {
         removeAbortForwarder?.();
       }
-      return fullText;
+      // Stream events carry raw wire content: unescape the ASSEMBLED summary
+      // once. The summary is stored in context, so an alias straddling a
+      // delta boundary must be recovered (per-chunk unescaping would
+      // fossilize it into the summary).
+      const mangler = agent.llmClient.markerMangler;
+      return mangler ? (mangler.unescape(fullText) ?? fullText) : fullText;
     };
 
     try {

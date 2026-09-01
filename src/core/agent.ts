@@ -507,6 +507,10 @@ export class Agent implements AgentLike {
   }
 
   private _processStream(stream: AsyncIterable<StreamEvent>): Promise<StreamResult> {
+    // The session mangler unescapes the assembled result once (stream events
+    // carry raw wire content; per-chunk unescaping would fossilize aliases
+    // split across deltas). onChunk/onReasoning below get per-chunk
+    // unescaping for display only.
     return this.#streamProcessor.process(stream, {
       onChunk: (content) => {
         if (this.stream) {
@@ -519,7 +523,7 @@ export class Agent implements AgentLike {
         }
       },
       shouldCancel: () => this.cancelled,
-    });
+    }, this.llmClient.markerMangler);
   }
 
   private _executeTools(toolCalls: ToolCall[], toolFormatName?: string, availableToolNames?: string[]) {

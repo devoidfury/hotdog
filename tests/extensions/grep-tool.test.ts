@@ -343,3 +343,31 @@ describe("GrepTool.execute — context and truncation", () => {
     });
   }
 });
+
+describe("GrepTool.execute — rg argument-injection guard", () => {
+  // A model-supplied pattern must never reach rg as a flag. Without the
+  // "--" separator, a pattern like "--pre=/bin/sh" makes rg pipe every
+  // scanned file through sh (RCE). The payload below proves execution:
+  // if the flag fires, rg runs it and MARKER appears on disk.
+  it("treats a flag-shaped pattern as a literal pattern (rg path)", async () => {
+    const dir2 = tmpDir();
+    const marker = path.join(dir2, "MARKER");
+    try {
+      fsSync.writeFileSync(
+        path.join(dir2, "payload.txt"),
+        `touch ${marker}\n`,
+      );
+
+      const tool = new GrepTool({ maxResults: 100, maxOutputLines: 600 });
+      const result = await tool.execute(
+        { pattern: "--pre=/bin/sh", path: dir2 },
+        toolCtx(),
+      );
+
+      expect(resultStr(result)).toContain("No matches found");
+      expect(fsSync.existsSync(marker)).toBe(false);
+    } finally {
+      cleanupDir(dir2);
+    }
+  });
+});

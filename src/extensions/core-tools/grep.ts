@@ -269,7 +269,11 @@ async function grepWithRg(
     }
   }
 
-  args.push(pattern, absSearchDir);
+  // "--" ends option parsing: the model-supplied pattern must never be
+  // parsed as an rg flag (e.g. "--pre=/bin/sh" makes rg pipe every scanned
+  // file through sh -- argument-injection RCE). With the separator the
+  // pattern is always positional.
+  args.push("--", pattern, absSearchDir);
 
   let stdout: string;
   try {

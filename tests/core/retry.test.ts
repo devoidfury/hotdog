@@ -1,169 +1,158 @@
 import { describe, it, expect } from "bun:test";
 import {
-  retryWithBackoff,
+  shouldRetryLlmError,
+  retryDelay,
   extractHttpStatus,
   isRetryableHttpStatus,
 } from "../../src/core/llm-client/retry.ts";
 import { LlmError } from "../../src/core/error.ts";
 
-describe("retryWithBackoff", () => {
-  const fastOpts = { baseDelayMs: 1 };
-
-  it("succeeds on first try", async () => {
-    let calls = 0;
-    const result = await retryWithBackoff(
-      () => {
-        calls++;
-        return Promise.resolve("ok");
-      },
-      12,
-      fastOpts,
-    );
-    expect(result).toBe("ok");
-    expect(calls).toBe(1);
+describe("shouldRetryLlmError", () => {
+  it("retries transient http errors", () => {
+    expect(shouldRetryLlmError(LlmError.Http("Service unavailable"), 1, 3)).toBe(true);
+    expect(shouldRetryLlmError(LlmError.Http("Service unavailable"), 3, 3)).toBe(true);
   });
 
-  it("maxRetries: 0 makes exactly one attempt instead of zero", async () => {
-    let calls = 0;
-    const result = await retryWithBackoff(
-      () => {
-        calls++;
-        return Promise.resolve("ok");
-      },
-      0,
-      fastOpts,
-    );
-    expect(result).toBe("ok");
-    expect(calls).toBe(1);
+  it("retries timeout errors", () => {
+    expect(shouldRetryLlmError(LlmError.Timeout("timed out"), 1, 3)).toBe(true);
   });
 
-  it("maxRetries: 0 propagates a transient failure after the single attempt", async () => {
-    let calls = 0;
-    await expect(
-      retryWithBackoff(
-        () => {
-          calls++;
-          throw LlmError.Http("Service unavailable");
-        },
-        0,
-        fastOpts,
-      ),
-    ).rejects.toMatchObject({ type: "http" });
-    expect(calls).toBe(1);
+  it("does not retry cancelled errors", () => {
+    expect(shouldRetryLlmError(LlmError.Cancelled("cancelled"), 1, 3)).toBe(false);
   });
 
-  it("retries on transient http errors", async () => {
-    let calls = 0;
-    const result = await retryWithBackoff(
-      () => {
-        calls++;
-        if (calls < 3) throw LlmError.Http("Service unavailable");
-        return Promise.resolve("ok");
-      },
-      5,
-      { ...fastOpts, signal: new AbortController().signal },
-    );
-    expect(result).toBe("ok");
-    expect(calls).toBe(3);
+  it("does not retry non-transient api errors", () => {
+    expect(shouldRetryLlmError(LlmError.Api("Bad input"), 1, 3)).toBe(false);
   });
 
-  it("does not retry on non-transient errors", async () => {
-    let calls = 0;
-    await expect(
-      retryWithBackoff(
-        () => {
-          calls++;
-          throw LlmError.Api("Bad input");
-        },
-        3,
-        { ...fastOpts, signal: new AbortController().signal },
-      ),
-    ).rejects.toThrow("Bad input");
-    expect(calls).toBe(1);
+  it("does not retry on the final attempt, even for transient errors", () => {
+    // maxRetries: 3 -> attempts 1..4; attempt 4 is final.
+    expect(shouldRetryLlmError(LlmError.Http("fail"), 4, 3)).toBe(false);
   });
 
-  it("does not retry on cancelled errors", async () => {
-    let calls = 0;
-    await expect(
-      retryWithBackoff(
-        () => {
-          calls++;
-          throw LlmError.Cancelled("cancelled");
-        },
-        3,
-        { ...fastOpts, signal: new AbortController().signal },
-      ),
-    ).rejects.toThrow();
-    expect(calls).toBe(1);
+  it("negative maxRetries clamps to a single attempt", () => {
+    expect(shouldRetryLlmError(LlmError.Http("fail"), 1, -1)).toBe(false);
+    // And a hypothetical second attempt would also be rejected.
+    expect(shouldRetryLlmError(LlmError.Http("fail"), 2, -1)).toBe(false);
   });
 
-  it("throws original error after exhausting retries", async () => {
-    await expect(
-      retryWithBackoff(() => Promise.reject(LlmError.Http("fail")), 3, {
-        ...fastOpts,
-        signal: new AbortController().signal,
-      }),
-    ).rejects.toThrow("fail");
+  it("never retries non-LlmError failures (callers classify first)", () => {
+    expect(shouldRetryLlmError(new Error("socket hang up"), 1, 3)).toBe(false);
+    expect(shouldRetryLlmError("boom", 1, 3)).toBe(false);
+  });
+});
+
+describe("shouldRetryLlmError — api status retry", () => {
+  it("retries on retryable HTTP status codes in the message", () => {
+    expect(shouldRetryLlmError(LlmError.Api("HTTP 500 (body: Internal Server Error)"), 1, 3)).toBe(true);
+    expect(shouldRetryLlmError(LlmError.Api("HTTP 429 (body: Too Many Requests)"), 1, 3)).toBe(true);
   });
 
-  it("throws immediately when signal already aborted", async () => {
+  it("does not retry on non-retryable HTTP status codes", () => {
+    expect(shouldRetryLlmError(LlmError.Api("HTTP 301 (body: Moved Permanently)"), 1, 3)).toBe(false);
+    expect(shouldRetryLlmError(LlmError.Api("HTTP 400 (body: Bad Request)"), 1, 3)).toBe(false);
+  });
+
+  it("retries on retryable status from the field, independent of the message", () => {
+    expect(shouldRetryLlmError(LlmError.Api("upstream error", 503), 1, 3)).toBe(true);
+    expect(shouldRetryLlmError(LlmError.Api("rate limited", 429), 1, 3)).toBe(true);
+  });
+
+  it("does not retry on non-retryable status from the field", () => {
+    expect(shouldRetryLlmError(LlmError.Api("bad input", 400), 1, 3)).toBe(false);
+  });
+
+  it("field takes precedence over a contradictory message", () => {
+    // Message parses as retryable (500), field says 400: field wins.
+    expect(shouldRetryLlmError(LlmError.Api("HTTP 500 (body: Internal Server Error)", 400), 1, 3)).toBe(false);
+  });
+
+  it("falls back to the message when the field is absent", () => {
+    expect(shouldRetryLlmError(LlmError.Api("HTTP 500 (body: Internal Server Error)"), 1, 3)).toBe(true);
+  });
+});
+
+describe("retryDelay", () => {
+  it("resolves after the delay", async () => {
+    const start = Date.now();
+    await retryDelay(30);
+    expect(Date.now() - start).toBeGreaterThanOrEqual(25);
+  });
+
+  it("resolves early when the signal aborts", async () => {
     const controller = new AbortController();
-    controller.abort();
-    await expect(
-      retryWithBackoff(() => Promise.resolve("ok"), 3, {
-        ...fastOpts,
-        signal: controller.signal,
-      }),
-    ).rejects.toThrow();
+    const start = Date.now();
+    const p = retryDelay(60_000, controller.signal);
+    setTimeout(() => controller.abort(), 10);
+    await p;
+    expect(Date.now() - start).toBeLessThan(5000);
   });
 
-  it("honours cancellation during delay", async () => {
-    const controller = new AbortController();
-    let calls = 0;
-    const promise = retryWithBackoff(
-      () => {
-        calls++;
-        if (calls === 1) {
-          queueMicrotask(() => controller.abort());
-          throw LlmError.Http("fail");
-        }
-        return Promise.resolve("ok");
+  // Spy on the signal's add/removeEventListener to verify the listener is
+  // detached whichever way the wait ends (leak check: the shared abort
+  // controller outlives many retries).
+  function trackSignal(signal: AbortSignal): {
+    added: Array<() => void>;
+    removed: Array<() => void>;
+    restore: () => void;
+  } {
+    const proto = AbortSignal.prototype;
+    const origAdd = proto.addEventListener;
+    const origRemove = proto.removeEventListener;
+    const added: Array<() => void> = [];
+    const removed: Array<() => void> = [];
+    proto.addEventListener = function (
+      this: AbortSignal,
+      type: string,
+      listener: any,
+      options?: boolean | AddEventListenerOptions,
+    ) {
+      if (this === signal && type === "abort") added.push(listener as () => void);
+      return origAdd.call(this, type, listener, options);
+    };
+    proto.removeEventListener = function (
+      this: AbortSignal,
+      type: string,
+      listener: any,
+      options?: boolean | EventListenerOptions,
+    ) {
+      if (this === signal && type === "abort") removed.push(listener as () => void);
+      return origRemove.call(this, type, listener, options);
+    };
+    return {
+      added,
+      removed,
+      restore: () => {
+        proto.addEventListener = origAdd;
+        proto.removeEventListener = origRemove;
       },
-      3,
-      { ...fastOpts, signal: controller.signal },
-    );
-    await expect(promise).rejects.toThrow();
-    expect(calls).toBeLessThanOrEqual(2);
+    };
+  }
+
+  it("removes its abort listener when the delay elapses", async () => {
+    const controller = new AbortController();
+    const spy = trackSignal(controller.signal);
+    try {
+      await retryDelay(20, controller.signal);
+    } finally {
+      spy.restore();
+    }
+    expect(spy.added).toHaveLength(1);
+    expect(spy.removed).toEqual(spy.added);
   });
 
-  it("maxRetries: 2 makes one initial attempt plus two retries (3 total)", async () => {
-    let calls = 0;
-    await expect(
-      retryWithBackoff(
-        () => {
-          calls++;
-          throw LlmError.Http("fail");
-        },
-        2,
-        { ...fastOpts, signal: new AbortController().signal },
-      ),
-    ).rejects.toThrow("fail");
-    expect(calls).toBe(3);
-  });
-
-  it("negative maxRetries clamps to a single attempt", async () => {
-    let calls = 0;
-    await expect(
-      retryWithBackoff(
-        () => {
-          calls++;
-          throw LlmError.Http("fail");
-        },
-        -1,
-        { ...fastOpts, signal: new AbortController().signal },
-      ),
-    ).rejects.toThrow("fail");
-    expect(calls).toBe(1);
+  it("removes its abort listener when the signal aborts", async () => {
+    const controller = new AbortController();
+    const spy = trackSignal(controller.signal);
+    try {
+      const p = retryDelay(60_000, controller.signal);
+      setTimeout(() => controller.abort(), 10);
+      await p;
+    } finally {
+      spy.restore();
+    }
+    expect(spy.added).toHaveLength(1);
+    expect(spy.removed).toEqual(spy.added);
   });
 });
 
@@ -211,135 +200,5 @@ describe("isRetryableHttpStatus", () => {
   it("does not retry on 2xx or 1xx", () => {
     expect(isRetryableHttpStatus(200)).toBe(false);
     expect(isRetryableHttpStatus(201)).toBe(false);
-  });
-});
-
-describe("retryWithBackoff — HTTP status retry", () => {
-  const fastOpts = { baseDelayMs: 1 };
-
-  it("retries on retryable HTTP status codes via LlmError.Api", async () => {
-    let calls = 0;
-    const result = await retryWithBackoff(
-      () => {
-        calls++;
-        if (calls < 3)
-          throw LlmError.Api("HTTP 500 (body: Internal Server Error)");
-        return Promise.resolve("ok");
-      },
-      5,
-      { ...fastOpts, signal: new AbortController().signal },
-    );
-    expect(result).toBe("ok");
-    expect(calls).toBe(3);
-  });
-
-  it("does not retry on 3xx redirects", async () => {
-    let calls = 0;
-    await expect(
-      retryWithBackoff(
-        () => {
-          calls++;
-          throw LlmError.Api("HTTP 301 (body: Moved Permanently)");
-        },
-        3,
-        { ...fastOpts, signal: new AbortController().signal },
-      ),
-    ).rejects.toThrow("HTTP 301");
-    expect(calls).toBe(1);
-  });
-
-  it("does not retry on non-retryable HTTP status codes", async () => {
-    let calls = 0;
-    await expect(
-      retryWithBackoff(
-        () => {
-          calls++;
-          throw LlmError.Api("HTTP 400 (body: Bad Request)");
-        },
-        3,
-        { ...fastOpts, signal: new AbortController().signal },
-      ),
-    ).rejects.toThrow("HTTP 400");
-    expect(calls).toBe(1);
-  });
-});
-
-describe("retryWithBackoff — LlmError.status field", () => {
-  const fastOpts = { baseDelayMs: 1 };
-
-  it("retries on retryable status from the field, independent of the message", async () => {
-    let calls = 0;
-    const result = await retryWithBackoff(
-      () => {
-        calls++;
-        if (calls < 3) throw LlmError.Api("upstream error", 503);
-        return Promise.resolve("ok");
-      },
-      5,
-      { ...fastOpts, signal: new AbortController().signal },
-    );
-    expect(result).toBe("ok");
-    expect(calls).toBe(3);
-  });
-
-  it("retries on 429 from the field", async () => {
-    let calls = 0;
-    const result = await retryWithBackoff(
-      () => {
-        calls++;
-        if (calls < 3) throw LlmError.Api("rate limited", 429);
-        return Promise.resolve("ok");
-      },
-      5,
-      { ...fastOpts, signal: new AbortController().signal },
-    );
-    expect(result).toBe("ok");
-    expect(calls).toBe(3);
-  });
-
-  it("does not retry on non-retryable status from the field", async () => {
-    let calls = 0;
-    await expect(
-      retryWithBackoff(
-        () => {
-          calls++;
-          throw LlmError.Api("bad input", 400);
-        },
-        3,
-        { ...fastOpts, signal: new AbortController().signal },
-      ),
-    ).rejects.toThrow("bad input");
-    expect(calls).toBe(1);
-  });
-
-  it("field takes precedence over a contradictory message", async () => {
-    let calls = 0;
-    await expect(
-      retryWithBackoff(
-        () => {
-          calls++;
-          // Message parses as retryable (500), field says 400: field wins.
-          throw LlmError.Api("HTTP 500 (body: Internal Server Error)", 400);
-        },
-        3,
-        { ...fastOpts, signal: new AbortController().signal },
-      ),
-    ).rejects.toThrow("HTTP 500");
-    expect(calls).toBe(1);
-  });
-
-  it("falls back to the message when the field is absent", async () => {
-    let calls = 0;
-    const result = await retryWithBackoff(
-      () => {
-        calls++;
-        if (calls < 3) throw LlmError.Api("HTTP 500 (body: Internal Server Error)");
-        return Promise.resolve("ok");
-      },
-      5,
-      { ...fastOpts, signal: new AbortController().signal },
-    );
-    expect(result).toBe("ok");
-    expect(calls).toBe(3);
   });
 });

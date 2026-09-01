@@ -1,4 +1,4 @@
-import { ConfigError, LlmError } from "../error.ts";
+import { LlmError } from "../error.ts";
 
 /**
  * Fallback: parses the status out of LlmError messages formatted
@@ -55,72 +55,18 @@ export function shouldRetryLlmError(e: unknown, attempt: number, maxRetries: num
 /**
  * Wait `delayMs` before the next retry, resolving early if the signal
  * aborts so a user cancellation during the wait is noticed immediately
- * (the caller re-checks the signal).
+ * (the caller re-checks the signal). The listener is removed whichever way
+ * the wait ends, so repeated retries don't accumulate listeners on the
+ * long-lived shared signal.
  */
 export function retryDelay(delayMs: number, signal?: AbortSignal | null): Promise<void> {
   return new Promise<void>((resolve) => {
-    const timeout = setTimeout(resolve, delayMs);
-    if (signal) {
-      signal.addEventListener(
-        "abort",
-        () => {
-          clearTimeout(timeout);
-          resolve();
-        },
-        { once: true },
-      );
-    }
+    const done = () => {
+      clearTimeout(timer);
+      signal?.removeEventListener("abort", done);
+      resolve();
+    };
+    const timer = setTimeout(done, delayMs);
+    signal?.addEventListener("abort", done);
   });
-}
-
-export interface RetryOptions {
-  signal?: AbortSignal | null;
-  /** Base delay in ms before first retry (default: 1000). Useful for fast tests. */
-  baseDelayMs?: number;
-}
-
-export async function retryWithBackoff<T>(
-  fn: () => Promise<T>,
-  maxRetries: number,
-  options: RetryOptions = {},
-): Promise<T> {
-  const { signal, baseDelayMs } = options;
-
-  if (maxRetries == null) {
-    throw ConfigError.MissingConfig("maxRetries");
-  }
-
-  // maxRetries counts retries AFTER the initial attempt: total attempts =
-  // 1 + maxRetries. 0 (or negative) clamps to a single attempt, no retries.
-  if (signal?.aborted) {
-    throw LlmError.Cancelled("request was cancelled");
-  }
-
-  let delayMs = baseDelayMs ?? 1000;
-
-  // Unbounded loop: every exit path is an explicit return/throw (a retry
-  // falls through to the next iteration), so there is no code after it.
-  for (let attempt = 1; ; attempt++) {
-    if (signal?.aborted) {
-      throw LlmError.Cancelled("request was cancelled");
-    }
-
-    try {
-      const result = await fn();
-      return result;
-    } catch (e: unknown) {
-      // If cancelled or non-transient, don't retry - propagate immediately
-      if (!shouldRetryLlmError(e, attempt, maxRetries)) {
-        throw e;
-      }
-
-      if (signal?.aborted) {
-        throw LlmError.Cancelled("request was cancelled");
-      }
-
-      await retryDelay(delayMs, signal);
-
-      delayMs *= 2;
-    }
-  }
 }

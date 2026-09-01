@@ -174,7 +174,7 @@ export class ToolExecutor {
     let success = false;
     let stopLoop = false;
 
-    // maxRetries counts retries AFTER the initial attempt (same convention as retryWithBackoff).
+    // maxRetries counts retries AFTER the initial attempt (total attempts = 1 + maxRetries).
     const maxAttempts = 1 + Math.max(0, this.#deps.maxRetries);
     let attempts = 0;
 

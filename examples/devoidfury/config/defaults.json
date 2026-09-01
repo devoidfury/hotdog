@@ -7,9 +7,8 @@
   "hide_tools": true,
   "show_token_use": true,
   "extension_paths": ["@extensions"],
-  "extension_autoload": true,
   "default_subcommand": "cli",
-  "chat_timeout_secs": 900,
+  "chat_timeout_secs": 1200,
   "workspace": {
     "paths": [".", "/skills", "/data", "/tmp", "/etc/hotdog"]
   },

@@ -450,6 +450,13 @@ export function isPrivateAddress(ip: string): boolean {
     if (groups[0] === 0x2002) return true;
     if (groups[0] === 0x0064 && groups[1] === 0xff9b) return true;
 
+    // 2001:0000::/32 Teredo carries IPv4 packets (the embedded endpoints are
+    // XOR-obfuscated, so the v4 destination was never checked) -- refuse it
+    // for the same reason as 6to4/NAT64. Note this is only the /32: the
+    // adjacent documentation prefix (2001:db8::/32) and other 2001::
+    // allocations are unaffected.
+    if (groups[0] === 0x2001 && groups[1] === 0x0000) return true;
+
     // ff00::/8 multicast (LAN amplification, mDNS/SSDP targets)
     if ((groups[0] & 0xff00) === 0xff00) return true;
 

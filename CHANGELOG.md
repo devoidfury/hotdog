@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+**Full Changelog**: https://github.com/devoidfury/hotdog/compare/v0.7.3...main
+
+[v0.7.3] - 2026-09-01
+
+This release includes some security fixes for grep/find, expands the default workspace path denylist to include cloud creds, and other improvements.
+
 - find tool - fix argument injection in the fd path: a model-supplied pattern starting with `-` was parsed as an fd flag (e.g. `--exec=rm` made fd run rm on every file found, recursively). Dash-leading patterns now route to the find fallback, whose `-name`/`-path` consume the pattern as a literal, and the positional slot is additionally guarded with a `--` separator. Mirrors the earlier grep/rg fix
 - workspace denylist defaults expanded with cloud/credential directories: `.aws`, `.azure`, `.docker`, `.gnupg`, `.kube` (alongside `.ssh`, `.config`, `.git`). Projects that legitimately keep a directory of one of these names inside a workspace root can carve it out via `workspace.deny` (rules are last-match-wins, so `!.aws` after the positive rule disables it, or configure the exact rule set you want)
 - fetch tool SSRF blocklist now refuses Teredo (`2001:0000::/32`) alongside the existing 6to4/NAT64 refusal -- a Teredo packet carries an unchecked (XOR-obfuscated) IPv4 destination; adjacent `2001::` allocations such as provider space (`2001:4860::/32`) and documentation (`2001:db8::/32`) are unaffected
@@ -9,7 +15,7 @@
 - ui-session-review-cli - sessions delete subcommand now validates sessionId before confirmation gate
 - handoff-tool: listed handoff files that exist and are under the new `handoffTool.autoIncludeFilesUnderBytes` config (default 24KB) are now auto-inlined into the handoff message instead of just listed; oversized, binary, missing, and directory entries are listed with a note (size, `binary`, `not found`, `directory`, or `path rejected`)
 
-**Full Changelog**: https://github.com/devoidfury/hotdog/compare/v0.7.2...main
+**Full Changelog**: https://github.com/devoidfury/hotdog/compare/v0.7.2...v0.7.3
 
 ## [v0.7.2] - 2026-08-30
 

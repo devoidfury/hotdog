@@ -233,3 +233,113 @@ describe("GrepTool.execute — native fallback (no rg on PATH)", () => {
     }
   });
 });
+
+describe("GrepTool.execute — context and truncation", () => {
+  // rg is present in most dev environments; hide it via PATH to also cover
+  // the native walker (same behavior is now expected from both paths).
+  async function runWith(tool: GrepTool, args: Record<string, unknown>, hideRg: boolean) {
+    const oldPath = process.env.PATH;
+    const emptyBin = hideRg ? tmpDir("hotdog-empty-bin-") : null;
+    if (emptyBin) process.env.PATH = emptyBin;
+    try {
+      return await tool.execute(args, toolCtx());
+    } finally {
+      process.env.PATH = oldPath;
+      if (emptyBin) cleanupDir(emptyBin);
+    }
+  }
+
+  function contextFixture(): string {
+    const dir2 = tmpDir();
+    fsSync.writeFileSync(
+      path.join(dir2, "ctx.txt"),
+      "before one\nmatch alpha\nafter one\nfiller\nmatch beta\nlast line",
+    );
+    return dir2;
+  }
+
+  for (const [label, hideRg] of [
+    ["rg path", false],
+    ["native path", true],
+  ] as const) {
+    it(`includes context lines around matches (${label})`, async () => {
+      const dir2 = contextFixture();
+      try {
+        const tool = new GrepTool({ maxResults: 100, maxOutputLines: 600 });
+        const result = await runWith(
+          tool,
+          { pattern: "match", path: dir2, context: 1 },
+          hideRg,
+        );
+        const text = resultStr(result);
+        expect(text).toContain("before one");
+        expect(text).toContain("match alpha");
+        expect(text).toContain("after one");
+        expect(text).toContain("filler");
+        expect(text).toContain("match beta");
+        expect(text).toContain("last line");
+      } finally {
+        cleanupDir(dir2);
+      }
+    });
+
+    it(`no context lines when context is 0 (${label})`, async () => {
+      const dir2 = contextFixture();
+      try {
+        const tool = new GrepTool({ maxResults: 100, maxOutputLines: 600 });
+        const result = await runWith(
+          tool,
+          { pattern: "match", path: dir2 },
+          hideRg,
+        );
+        const text = resultStr(result);
+        expect(text).toContain("match alpha");
+        expect(text).not.toContain("before one");
+        expect(text).not.toContain("after one");
+      } finally {
+        cleanupDir(dir2);
+      }
+    });
+
+    it(`reports truncated and the true total when matches exceed max_results (${label})`, async () => {
+      const dir2 = tmpDir();
+      for (let i = 0; i < 5; i++) {
+        fsSync.writeFileSync(path.join(dir2, `t${i}.txt`), `hello ${i}`);
+      }
+      try {
+        const tool = new GrepTool({ maxResults: 100, maxOutputLines: 600 });
+        const result = await runWith(
+          tool,
+          { pattern: "hello", path: dir2, max_results: 2 },
+          hideRg,
+        );
+        const lines = resultStr(result).split("\n").filter(Boolean);
+        expect(lines.length).toBeLessThanOrEqual(2);
+        expect(result.metadata?.get("results")).toBe("5");
+        expect(result.metadata?.get("truncated")).toBe("true");
+      } finally {
+        cleanupDir(dir2);
+      }
+    });
+
+    it(`reports the total without truncated when matches fit max_results (${label})`, async () => {
+      const dir2 = tmpDir();
+      for (let i = 0; i < 3; i++) {
+        fsSync.writeFileSync(path.join(dir2, `t${i}.txt`), `hello ${i}`);
+      }
+      try {
+        const tool = new GrepTool({ maxResults: 100, maxOutputLines: 600 });
+        const result = await runWith(
+          tool,
+          { pattern: "hello", path: dir2, max_results: 10 },
+          hideRg,
+        );
+        expect(resultStr(result).split("\n").filter(Boolean).length).toBe(3);
+        expect(result.metadata?.get("results")).toBe("3");
+        expect(result.metadata?.get("truncated")).toBeUndefined();
+      } finally {
+        cleanupDir(dir2);
+      }
+    });
+  }
+});

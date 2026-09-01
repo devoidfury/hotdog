@@ -112,8 +112,6 @@ async function searchFile(
   outputLines: string[],
   totalMatches: { count: number },
 ): Promise<void> {
-  if (outputLines.length >= maxResults) return;
-
   const ext = extname(filePath).slice(1);
   if (!matchesType(ext, typeFilter)) return;
 
@@ -129,16 +127,17 @@ async function searchFile(
   const lines = content.split("\n");
   const pathStr = filePath;
 
-  for (
-    let i = 0;
-    i < lines.length && outputLines.length < maxResults;
-    i++
-  ) {
+  // The output cap limits what is displayed; the match count keeps going so
+  // the caller's truncated flag reflects the actual total
+  for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
     if (!line || !re.test(line)) continue;
 
     re.lastIndex = 0;
     totalMatches.count++;
+
+    if (outputLines.length >= maxResults) continue;
+
     const lineNum = i + 1;
 
     const start = context > 0 ? Math.max(1, lineNum - context) : lineNum;
@@ -194,9 +193,8 @@ async function walkAndSearch(
 
   const entries = await fs.readdir(path, { withFileTypes: true });
 
+  // no early cap exit - the walk continues past maxResults so the match count reflects the actual total.
   for (const entry of entries) {
-    if (outputLines.length >= maxResults) return;
-
     const fullPath = join(path, entry.name);
 
     if (entry.isDirectory()) {
@@ -273,39 +271,60 @@ async function grepWithRg(
 
   args.push(pattern, absSearchDir);
 
+  let stdout: string;
   try {
-    const { stdout } = await execFileAsync("rg", args, {
+    ({ stdout } = await execFileAsync("rg", args, {
       maxBuffer: 10 * 1024 * 1024,
       cwd: absSearchDir,
-    });
-
-    const lines = stdout.trim().split("\n").filter(Boolean);
-    const outputLines: string[] = [];
-    let totalMatches = 0;
-
-    for (const line of lines) {
-      try {
-        const match = JSON.parse(line) as Record<string, unknown>;
-        if (match.type === "match" && match.data && typeof match.data === "object") {
-          const data = match.data as Record<string, unknown>;
-          const pathObj = data.path as Record<string, unknown> | undefined;
-          const path = (pathObj?.text as string) || (data.absolute_path as string) || "";
-          const linesObj = data.lines as Record<string, unknown> | undefined;
-          const text = (linesObj?.text as string) || "";
-          const lineNum = (data.line_number as number) || 0;
-
-          if (outputLines.length < maxResults) {
-            totalMatches++;
-            outputLines.push(`${path}:${lineNum}:${text}`);
-          }
-        }
-      } catch {}
-    }
-
-    return { display: outputLines.join("\n"), totalMatches };
+    }));
   } catch (e: unknown) {
+    // rg exits 1 when nothing matches - normal, not an error. execFile rejects on it,
+    // so without this check every no-match search would fall through to the native walker.
+    // Only real failures (spawn errors, rg error exit 2) trigger the fallback.
+    if ((e as { code?: unknown })?.code === 1) {
+      return { display: "", totalMatches: 0 };
+    }
     throw ToolError.NotAvailable("ripgrep");
   }
+
+  const lines = stdout.trim().split("\n").filter(Boolean);
+  const outputLines: string[] = [];
+  // The true total comes from rg's final "summary" event. Counting only
+  // what we collect (capped at maxResults) would make the caller's
+  // truncated check (totalMatches > maxResults) a no-op.
+  let totalMatches = 0;
+
+  for (const line of lines) {
+    let event: Record<string, unknown>;
+    try {
+      event = JSON.parse(line) as Record<string, unknown>;
+    } catch {
+      continue;
+    }
+    const data = event.data as Record<string, unknown> | undefined;
+    if (!data || typeof data !== "object") continue;
+
+    if (event.type === "summary") {
+      const stats = data.stats as Record<string, unknown> | undefined;
+      const matched = stats?.matched_lines;
+      if (typeof matched === "number") totalMatches = matched;
+      continue;
+    }
+
+    // Context lines (from -C) share the result cap, mirroring the native
+    // walker where the cap counts every output line.
+    if (event.type !== "match" && event.type !== "context") continue;
+    if (outputLines.length >= maxResults) continue;
+
+    const pathObj = data.path as Record<string, unknown> | undefined;
+    const path = (pathObj?.text as string) || (data.absolute_path as string) || "";
+    const linesObj = data.lines as Record<string, unknown> | undefined;
+    const text = (linesObj?.text as string) || "";
+    const lineNum = (data.line_number as number) || 0;
+    outputLines.push(`${path}:${lineNum}:${text}`);
+  }
+
+  return { display: outputLines.join("\n"), totalMatches };
 }
 
 function parseArgs(

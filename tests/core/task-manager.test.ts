@@ -3,6 +3,9 @@
 import { describe, it, expect } from "bun:test";
 import { TaskManager, TaskHandle, TASK_STATUS } from "../../src/core/session/task-manager.ts";
 import { contentToText } from "../../src/core/context/message.ts";
+import { createHooks } from "../../src/core/hooks.ts";
+import { initializeLogger, resetLoggerForTesting, type LogEvent } from "../../src/core/logger.ts";
+import { LlmError } from "../../src/core/error.ts";
 
 /** The harness structure a task result is delivered as. */
 function resultParts(taskId: string, result: string) {
@@ -226,6 +229,90 @@ describe("TaskManager", () => {
       expect(manager.interruptTasksForSession("no-such-session")).toBe(0);
       // The task is completed, so nothing for the cascade to abort.
       expect(manager.interruptTasksForSession("sess-a")).toBe(0);
+    });
+  });
+
+  describe("task failure reporting", () => {
+    // Capture logger.error output via the "log" hook (no mock.module).
+    function captureLoggedErrors(): string[] {
+      resetLoggerForTesting();
+      const hooks = createHooks();
+      const lines: string[] = [];
+      hooks.on("log", (data) => {
+        const ev = data as LogEvent;
+        if (ev.level === "error") lines.push(ev.message);
+      });
+      initializeLogger({ hooks, minLevel: "error", target: "none" });
+      return lines;
+    }
+
+    function managerWithRun(run: () => Promise<unknown>, onResult: (r: string) => void) {
+      return createManager({
+        buildAgent: async () =>
+          ({ run, notifyCompletion: (r: string) => onResult(r) }) as any,
+      });
+    }
+
+    it("logs unexpected failures with a stack; model gets the message only", async () => {
+      const logged = captureLoggedErrors();
+      try {
+        let delivered = "";
+        const manager = managerWithRun(
+          async () => { throw new Error("null deref bug"); },
+          (r) => { delivered = r; },
+        );
+        await manager.spawnTask("t-boom", "work");
+        await settle(() => manager.taskStatus("t-boom") === TASK_STATUS.FAILED, "t-boom -> FAILED");
+
+        // The delegating model's result is message-only -- no stack.
+        expect(delivered).toBe("Task failed: null deref bug");
+        const line = logged.find((m) => m.includes("t-boom"));
+        expect(line).toBeDefined();
+        expect(line).toContain("null deref bug");
+        // formatError() appends the full stack for unexpected errors.
+        expect(/\n\s+at\s/.test(line!)).toBe(true);
+      } finally {
+        resetLoggerForTesting();
+      }
+    });
+
+    it("logs expected failures message-only (no stack)", async () => {
+      const logged = captureLoggedErrors();
+      try {
+        let delivered = "";
+        const manager = managerWithRun(
+          async () => { throw LlmError.Api("HTTP 400 bad input", 400); },
+          (r) => { delivered = r; },
+        );
+        await manager.spawnTask("t-api", "work");
+        await settle(() => manager.taskStatus("t-api") === TASK_STATUS.FAILED, "t-api -> FAILED");
+
+        expect(delivered).toBe("Task failed: HTTP 400 bad input");
+        const line = logged.find((m) => m.includes("t-api"));
+        expect(line).toBeDefined();
+        expect(line).toContain("HTTP 400 bad input");
+        expect(/\n\s+at\s/.test(line!)).toBe(false);
+      } finally {
+        resetLoggerForTesting();
+      }
+    });
+
+    it("logs nothing for cancellations", async () => {
+      const logged = captureLoggedErrors();
+      try {
+        let delivered = "";
+        const manager = managerWithRun(
+          async () => { throw LlmError.Cancelled("user cancelled"); },
+          (r) => { delivered = r; },
+        );
+        await manager.spawnTask("t-cancel", "work");
+        await settle(() => manager.taskStatus("t-cancel") === TASK_STATUS.CANCELLED, "t-cancel -> CANCELLED");
+
+        expect(delivered).toBe("Task aborted");
+        expect(logged.length).toBe(0);
+      } finally {
+        resetLoggerForTesting();
+      }
     });
   });
 

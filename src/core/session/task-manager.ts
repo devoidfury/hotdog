@@ -1,6 +1,6 @@
 import { logger } from "../logger.ts";
 import { Message, type MessageSource } from "../context/message.ts";
-import { LlmError } from "../error.ts";
+import { LlmError, formatError } from "../error.ts";
 import { loadProfileFile, ProfileManager } from "../config/profiles.ts";
 import { type CoreConfigWithExtensions } from "../config/schema-loader.ts";
 import type { ModelConfig } from "../config/providers.ts";
@@ -227,6 +227,7 @@ export class TaskManager {
     const statusRef: { value: TaskStatus } = { value: TASK_STATUS.RUNNING };
 
     const runPromise = this._runTask(
+      taskId,
       agent,
       taskDescription,
       abortController,
@@ -247,6 +248,7 @@ export class TaskManager {
   }
 
   private async _runTask(
+    taskId: string,
     agent: AgentLike,
     description: string,
     abortController: AbortController,
@@ -279,7 +281,12 @@ export class TaskManager {
         result = `Task aborted`;
       } else {
         statusRef.value = TASK_STATUS.FAILED;
-        result = `Task failed: ${(err as Error).message}`;
+        // Error Handling rule: report through formatError() -- unexpected
+        // errors (bugs) log message + full stack, expected ones message
+        // only. The delegating model gets the message alone; a stack in its
+        // context would waste tokens and leak internals.
+        logger.error(`[task ${taskId}] ${formatError(err)}`);
+        result = `Task failed: ${err instanceof Error ? err.message : String(err)}`;
       }
 
       agent.notifyCompletion?.(result);

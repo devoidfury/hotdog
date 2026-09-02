@@ -58,24 +58,44 @@ export function buildAliasPattern(): RegExp {
   );
 }
 
-function buildMappings(prefixes: readonly string[]): Map<string, string> {
-  const seen = new Set<string>();
-  const mappings = new Map<string, string>();
-  for (const prefix of prefixes) {
-    if (seen.has(prefix)) continue;
-    seen.add(prefix);
-    mappings.set(prefix, `m_${generateAlias()}`);
-  }
-  return mappings;
+interface ManglerRule {
+  re: RegExp;
+  repl: string;
 }
 
 function escapeRegex(str: string): string {
   return str.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
+// Rules for one from→to name pair. The exact-boundary rules run before the
+// dashed-prefix rule, mirroring the original application order: `<name>` uses
+// the exact rule, `<name-something>` falls through to the prefix rule.
+//
+// Rules are compiled ONCE per name pair (escape() runs per wire message per
+// request; rebuilding ~6 regexes per prefix per call was a hot path). All
+// patterns are /g; String.replace resets lastIndex after each global pass,
+// so a shared compiled regex is safe to reuse.
+function buildRules(from: string, to: string): ManglerRule[] {
+  const escaped = escapeRegex(from);
+  return [
+    // Opening tag: <name>, <name attr=, <name /
+    { re: new RegExp(`(<)(${escaped})([>\\s/])`, "g"), repl: `$1${to}$3` },
+    // Closing tag: </name>, </name attr=, </name /
+    { re: new RegExp(`(</)(${escaped})([>\\s/])`, "g"), repl: `$1${to}$3` },
+    // Partial/unclosed at end: <name or </name
+    { re: new RegExp(`(<)(${escaped})$`, "gm"), repl: `$1${to}` },
+    { re: new RegExp(`(</)(${escaped})$`, "gm"), repl: `$1${to}` },
+    // Prefix match: <name-something> (e.g. <m_abc123-extra>)
+    { re: new RegExp(`(<)(${escaped})(-[^>\\s]*)([>\\s/])`, "g"), repl: `$1${to}$3$4` },
+    { re: new RegExp(`(</)(${escaped})(-[^>\\s]*)([>\\s/])`, "g"), repl: `$1${to}$3$4` },
+  ];
+}
+
 export class MarkerMangler {
   #mappings: Map<string, string>;
   #reverse: Map<string, string>;
+  #escapeRules: ManglerRule[];
+  #unescapeRules: ManglerRule[];
 
   /**
    * @param prefixes - Protected marker prefixes to alias. Defaults to the
@@ -84,23 +104,35 @@ export class MarkerMangler {
    *   markers + model/provider controlTokens).
    */
   constructor(prefixes: readonly string[] = CORE_PROTECTED_PREFIXES) {
-    this.#mappings = buildMappings(prefixes);
-    this.#reverse = new Map<string, string>();
-    for (const [k, v] of this.#mappings) {
-      this.#reverse.set(v, k);
+    this.#mappings = new Map();
+    this.#reverse = new Map();
+    this.#escapeRules = [];
+    this.#unescapeRules = [];
+
+    const seen = new Set<string>();
+    for (const prefix of prefixes) {
+      if (seen.has(prefix)) continue;
+      seen.add(prefix);
+      this.#addEntry(prefix, `m_${generateAlias()}`);
     }
+  }
+
+  #addEntry(prefix: string, alias: string): void {
+    this.#mappings.set(prefix, alias);
+    this.#reverse.set(alias, prefix);
+    for (const rule of buildRules(prefix, alias)) this.#escapeRules.push(rule);
+    for (const rule of buildRules(alias, prefix)) this.#unescapeRules.push(rule);
   }
 
   /**
    * Add prefixes mid-session (e.g. on model switch when the token set grows).
-   * Existing aliases are untouched; only new prefixes get fresh aliases.
+   * Existing aliases (and their compiled rules) are untouched; only new
+   * prefixes get fresh aliases and appended rules.
    */
   addPrefixes(newOnes: readonly string[]): void {
     for (const prefix of newOnes) {
       if (!prefix || this.#mappings.has(prefix)) continue;
-      const alias = `m_${generateAlias()}`;
-      this.#mappings.set(prefix, alias);
-      this.#reverse.set(alias, prefix);
+      this.#addEntry(prefix, `m_${generateAlias()}`);
     }
   }
 
@@ -111,54 +143,20 @@ export class MarkerMangler {
   /** Escape protected marker names in text before sending to the model. */
   escape(text: string | null | undefined) {
     if (!text) return text;
-    return this.#transform(text, this.#mappings);
+    return this.#transform(text, this.#escapeRules);
   }
 
   /** Unescape escaped marker names in text received from the model. */
   unescape(text: string | null | undefined) {
     if (!text) return text;
-    return this.#transform(text, this.#reverse);
+    return this.#transform(text, this.#unescapeRules);
   }
 
-  #transform(text: string, nameMap: Map<string, string>): string {
+  #transform(text: string, rules: readonly ManglerRule[]): string {
     let result = text;
-
-    for (const [origName, newName] of nameMap) {
-      const escaped = escapeRegex(origName);
-
-      // Opening tag: <name>, <name attr=, <name /
-      result = result.replace(
-        new RegExp(`(<)(${escaped})([>\\s/])`, "g"),
-        `\$1${newName}\$3`,
-      );
-
-      // Closing tag: </name>, </name attr=, </name /
-      result = result.replace(
-        new RegExp(`(</)(${escaped})([>\\s/])`, "g"),
-        `\$1${newName}\$3`,
-      );
-
-      // Partial/unclosed at end: <name or </name
-      result = result.replace(
-        new RegExp(`(<)(${escaped})$`, "gm"),
-        `\$1${newName}`,
-      );
-      result = result.replace(
-        new RegExp(`(</)(${escaped})$`, "gm"),
-        `\$1${newName}`,
-      );
-
-      // Prefix match: <name-something> (e.g. <m_abc123-extra>)
-      result = result.replace(
-        new RegExp(`(<)(${escaped})(-[^>\\s]*)([>\\s/])`, "g"),
-        `\$1${newName}\$3\$4`,
-      );
-      result = result.replace(
-        new RegExp(`(</)(${escaped})(-[^>\\s]*)([>\\s/])`, "g"),
-        `\$1${newName}\$3\$4`,
-      );
+    for (const { re, repl } of rules) {
+      result = result.replace(re, repl);
     }
-
     return result;
   }
 }

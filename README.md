@@ -204,7 +204,6 @@ hotdog webui                     # Start the web UI server
 /tools             Toggle tool call display
 /compact [n]       Compact context
 /compact <strategy>  Switch compaction strategy (also: /compact:<strategy>)
-/cancel            Cancel current run
 /prompt:name       Execute saved prompt from prompts directory
 /skill             List available skills
 /skill:<name>      Activate a skill

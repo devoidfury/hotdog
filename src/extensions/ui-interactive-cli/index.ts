@@ -44,7 +44,6 @@ Commands:
   /compact [n] [--compact-debug]  - Compact context
   /compact <strategy>             - Switch compaction strategy
   /compact:<strategy>             - Switch compaction strategy
-  /cancel       - Cancel current run
   /prompt:name [args] - Execute saved prompt
   /skill        - List skills
   /skill:<name> - Activate skill

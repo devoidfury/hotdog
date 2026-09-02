@@ -104,7 +104,7 @@ hotdog -m "my-provider/hopus-popus" -p "See if you can improve the test coverage
 
 ## Configuration
 
-Config is resolved in priority order: **CLI flags** > **config file** > **environment variables** > **built-in defaults**.
+Config values are resolved through a priority chain defined **per key**: most keys resolve **CLI flag > config file > built-in default**, while some insert provider, profile, or environment layers at deliberate positions (e.g. `default_model` resolves env `HOTDOG_MODEL` *above* the config file, `apiKey` resolves it below). There is no single global order; the exact chain for every key is listed in the [config reference](docs/config-reference.md).
 
 See the [config reference](docs/config-reference.md) which covers all the configuration options and how it works in detail.
 

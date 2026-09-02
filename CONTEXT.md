@@ -105,7 +105,7 @@ Domain concepts for the hotdog AI agent harness. Implementation details are docu
 - `config/system_prompt.md` — System prompt template.
 - `config/prompts/*.prompt.md` — Named prompt templates.
 - `config/aspects/*.aspect.md` — Aspect snippets loaded by profiles.
-- Resolution priority — CLI argument → config file → extension defaults → built-in defaults.
+- Resolution priority — per-key layer chains defined in `core.config.json` / extension `configSchema` (commonly CLI → config → default; some keys deliberately place provider, profile, or env layers at specific positions). Per-key chains: `docs/config-reference.md`.
 
 ## Architecture
 

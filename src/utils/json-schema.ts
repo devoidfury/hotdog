@@ -7,13 +7,14 @@
  * minItems/maxItems, pattern (regex), and default (skip validation).
  */
 
+import { logger } from "../core/logger.ts";
+
 type TypeCheckFn = (v: unknown) => boolean;
 
 const TYPE_CHECKS: Record<string, TypeCheckFn> = {
   string: (v) => typeof v === "string",
   number: (v) => typeof v === "number" && !Number.isNaN(v),
-  integer: (v) =>
-    typeof v === "number" && Number.isInteger(v) && !Number.isNaN(v),
+  integer: (v) => typeof v === "number" && Number.isInteger(v) && !Number.isNaN(v),
   boolean: (v) => typeof v === "boolean",
   array: (v) => Array.isArray(v),
   object: (v) => typeof v === "object" && v !== null && !Array.isArray(v),
@@ -36,37 +37,26 @@ function matchesDefault(value: unknown, defaultValue: unknown): boolean {
 }
 
 /** Validate a value against a schema node; returns error strings (empty = valid). */
-export function validate(
-  value: unknown,
-  schema: unknown,
-  path: string = "",
-): string[] {
+export function validate(value: unknown, schema: unknown, path: string = ""): string[] {
   const errors: string[] = [];
 
   if (!schema || typeof schema !== "object") return errors;
 
   const schemaObj = schema as Record<string, unknown>;
 
-  if (
-    schemaObj.default !== undefined &&
-    matchesDefault(value, schemaObj.default)
-  ) {
+  if (schemaObj.default !== undefined && matchesDefault(value, schemaObj.default)) {
     return errors;
   }
 
   if (schemaObj.const !== undefined) {
     if (!matchesDefault(value, schemaObj.const)) {
-      errors.push(
-        `${path || "root"}: must be ${JSON.stringify(schemaObj.const)}`,
-      );
+      errors.push(`${path || "root"}: must be ${JSON.stringify(schemaObj.const)}`);
     }
     return errors;
   }
 
   if (schemaObj.enum !== undefined && Array.isArray(schemaObj.enum)) {
-    const matches = schemaObj.enum.some(
-      (e: unknown) => JSON.stringify(e) === JSON.stringify(value),
-    );
+    const matches = schemaObj.enum.some((e: unknown) => JSON.stringify(e) === JSON.stringify(value));
     if (!matches) {
       errors.push(
         `${path || "root"}: value ${JSON.stringify(value)} not in enum [${schemaObj.enum.map((e: unknown) => JSON.stringify(e)).join(", ")}]`,
@@ -78,72 +68,40 @@ export function validate(
     const typeStr = schemaObj.type as string;
     const checkFn = TYPE_CHECKS[typeStr];
     if (checkFn && !checkFn(value)) {
-      errors.push(
-        `${path || "root"}: expected ${typeStr}, got ${typeName(value)}`,
-      );
+      errors.push(`${path || "root"}: expected ${typeStr}, got ${typeName(value)}`);
       return errors; // No point checking further constraints on wrong type
     }
   }
 
   if (typeof value === "string") {
-    if (
-      schemaObj.minLength !== undefined &&
-      value.length < (schemaObj.minLength as number)
-    ) {
+    if (schemaObj.minLength !== undefined && value.length < (schemaObj.minLength as number)) {
       errors.push(
         `${path || "root"}: string length ${value.length} is less than minimum ${schemaObj.minLength}`,
       );
     }
-    if (
-      schemaObj.maxLength !== undefined &&
-      value.length > (schemaObj.maxLength as number)
-    ) {
-      errors.push(
-        `${path || "root"}: string length ${value.length} exceeds maximum ${schemaObj.maxLength}`,
-      );
+    if (schemaObj.maxLength !== undefined && value.length > (schemaObj.maxLength as number)) {
+      errors.push(`${path || "root"}: string length ${value.length} exceeds maximum ${schemaObj.maxLength}`);
     }
     if (schemaObj.pattern !== undefined) {
       const regex = new RegExp(schemaObj.pattern as string);
       if (!regex.test(value)) {
-        errors.push(
-          `${path || "root"}: must match pattern "${schemaObj.pattern}"`,
-        );
+        errors.push(`${path || "root"}: must match pattern "${schemaObj.pattern}"`);
       }
     }
   }
 
   if (typeof value === "number") {
-    if (
-      schemaObj.minimum !== undefined &&
-      value < (schemaObj.minimum as number)
-    ) {
-      errors.push(
-        `${path || "root"}: value ${value} is less than minimum ${schemaObj.minimum}`,
-      );
+    if (schemaObj.minimum !== undefined && value < (schemaObj.minimum as number)) {
+      errors.push(`${path || "root"}: value ${value} is less than minimum ${schemaObj.minimum}`);
     }
-    if (
-      schemaObj.maximum !== undefined &&
-      value > (schemaObj.maximum as number)
-    ) {
-      errors.push(
-        `${path || "root"}: value ${value} exceeds maximum ${schemaObj.maximum}`,
-      );
+    if (schemaObj.maximum !== undefined && value > (schemaObj.maximum as number)) {
+      errors.push(`${path || "root"}: value ${value} exceeds maximum ${schemaObj.maximum}`);
     }
-    if (
-      schemaObj.exclusiveMinimum !== undefined &&
-      value <= (schemaObj.exclusiveMinimum as number)
-    ) {
-      errors.push(
-        `${path || "root"}: value ${value} must be greater than ${schemaObj.exclusiveMinimum}`,
-      );
+    if (schemaObj.exclusiveMinimum !== undefined && value <= (schemaObj.exclusiveMinimum as number)) {
+      errors.push(`${path || "root"}: value ${value} must be greater than ${schemaObj.exclusiveMinimum}`);
     }
-    if (
-      schemaObj.exclusiveMaximum !== undefined &&
-      value >= (schemaObj.exclusiveMaximum as number)
-    ) {
-      errors.push(
-        `${path || "root"}: value ${value} must be less than ${schemaObj.exclusiveMaximum}`,
-      );
+    if (schemaObj.exclusiveMaximum !== undefined && value >= (schemaObj.exclusiveMaximum as number)) {
+      errors.push(`${path || "root"}: value ${value} must be less than ${schemaObj.exclusiveMaximum}`);
     }
   }
 
@@ -153,23 +111,15 @@ export function validate(
     if (schemaObj.required && Array.isArray(schemaObj.required)) {
       for (const field of schemaObj.required as string[]) {
         if (!(field in valueObj)) {
-          errors.push(
-            `${path ? `${path}.` : ""}${field}: missing required field`,
-          );
+          errors.push(`${path ? `${path}.` : ""}${field}: missing required field`);
         }
       }
     }
 
     if (schemaObj.properties && typeof schemaObj.properties === "object") {
-      for (const [key, propSchema] of Object.entries(
-        schemaObj.properties as Record<string, unknown>,
-      )) {
+      for (const [key, propSchema] of Object.entries(schemaObj.properties as Record<string, unknown>)) {
         if (key in valueObj) {
-          const childErrors = validate(
-            valueObj[key],
-            propSchema,
-            path ? `${path}.${key}` : key,
-          );
+          const childErrors = validate(valueObj[key], propSchema, path ? `${path}.${key}` : key);
           errors.push(...childErrors);
         }
       }
@@ -182,9 +132,7 @@ export function validate(
       ]);
       for (const key of Object.keys(valueObj)) {
         if (!allowedKeys.has(key)) {
-          errors.push(
-            `${path ? `${path}.` : ""}${key}: additional property not allowed`,
-          );
+          errors.push(`${path ? `${path}.` : ""}${key}: additional property not allowed`);
         }
       }
     }
@@ -193,29 +141,17 @@ export function validate(
   if (Array.isArray(value)) {
     if (schemaObj.items) {
       for (let i = 0; i < value.length; i++) {
-        const itemErrors = validate(
-          value[i]!,
-          schemaObj.items,
-          `${path ? `${path}[` : "["}${i}]`,
-        );
+        const itemErrors = validate(value[i]!, schemaObj.items, `${path ? `${path}[` : "["}${i}]`);
         errors.push(...itemErrors);
       }
     }
-    if (
-      schemaObj.minItems !== undefined &&
-      value.length < (schemaObj.minItems as number)
-    ) {
+    if (schemaObj.minItems !== undefined && value.length < (schemaObj.minItems as number)) {
       errors.push(
         `${path || "root"}: array length ${value.length} is less than minimum ${schemaObj.minItems}`,
       );
     }
-    if (
-      schemaObj.maxItems !== undefined &&
-      value.length > (schemaObj.maxItems as number)
-    ) {
-      errors.push(
-        `${path || "root"}: array length ${value.length} exceeds maximum ${schemaObj.maxItems}`,
-      );
+    if (schemaObj.maxItems !== undefined && value.length > (schemaObj.maxItems as number)) {
+      errors.push(`${path || "root"}: array length ${value.length} exceeds maximum ${schemaObj.maxItems}`);
     }
   }
 
@@ -228,10 +164,7 @@ export interface ValidationResult {
 }
 
 /** Validate an object against a JSON Schema. */
-export function validateParams(
-  args: unknown,
-  schema: unknown,
-): ValidationResult {
+export function validateParams(args: unknown, schema: unknown): ValidationResult {
   if (!args || typeof args !== "object" || Array.isArray(args)) {
     return { valid: false, errors: ["Arguments must be an object"] };
   }
@@ -267,11 +200,8 @@ export function castAs<T>(value: unknown, schema?: unknown): T {
   if (schema !== undefined) {
     const errors = validate(value, schema, "");
     if (errors.length > 0) {
-      // Log validation warnings but don't block — same semantics as
-      // the existing failOnInvalidConfig pattern.
-      console.warn(
-        `[config] Schema validation failed: ${errors.join("; ")}`,
-      );
+      // Log validation warnings but don't block
+      logger.warn(`[config] Schema validation failed: ${errors.join("; ")}`);
     }
   }
   return value as T;

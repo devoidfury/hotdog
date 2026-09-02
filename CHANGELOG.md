@@ -5,6 +5,15 @@
 - tool-executor - "Tool 'x' is not available for this agent" now suggests near-matching tools from the set the model was offered (case/separator differences first, then prefix/substring near-matches), so a misspelled or case-flipped tool name self-corrects in one retry
 
 
+- internals
+  - marker mangler - compiled escape/unescape regexes are now built once per name pair instead of rebuilt per protected prefix on every escape() call
+  - cleanup session - remove unused SessionManager.deserialize and related unused serialize/deserialize hooks
+  - task-manager - drop unsafe last-set bus fallback
+
+- CLI colors now honor the NO_COLOR environment convention and TERM=dumb: color output is disabled regardless of config when either is present
+
+
+
 **Full Changelog**: https://github.com/devoidfury/hotdog/compare/v0.7.3...main
 
 [v0.7.3] - 2026-09-01

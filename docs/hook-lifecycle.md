@@ -97,8 +97,6 @@ Session Create ────────────► "session:create"
 Agent Run Loop ────────────► See Phase 3
     │
     ▼
-Session Serialize ──────────► "session:serialize"
-Session Deserialize ────────► "session:deserialize"
 Session Swap ──────────────► "session:swap"
 Session Restore ────────────► "session:restoreActive"
 ```
@@ -107,8 +105,6 @@ Session Restore ────────────► "session:restoreActive"
 |------|------|-----------|---------|
 | `session:create` | New agent created | async notify | `{ session, config }` |
 | `session:swap` | Agent swapped | async notify | `{ oldAgent, newAgent }` |
-| `session:serialize` | Agent state serialized | sync notify | depends on serializer |
-| `session:deserialize` | Agent state deserialized | async notify | `{ data }` |
 | `session:restoreActive` | Restore flag changes | sync notify | `{ agent, isRestoring }` |
 
 ### 3. Agent Run Loop — Per-Iteration Lifecycle
@@ -222,8 +218,6 @@ Each tool call goes through a dedicated sub-pipeline:
 |---------------|------|---------|------|
 | `SESSION_CREATE` | `session:create` | async notify | New agent created via SessionManager |
 | `SESSION_SWAP` | `session:swap` | async notify | Agent swapped in SessionManager |
-| `SESSION_SERIALIZE` | `session:serialize` | sync notify | Agent state being serialized |
-| `SESSION_DESERIALIZE` | `session:deserialize` | async notify | Agent state being deserialized |
 | `SESSION_RESTORE_ACTIVE` | `session:restoreActive` | sync notify | Restore flag changes on agent |
 
 ### Message Flow

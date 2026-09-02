@@ -65,8 +65,6 @@ export interface ExtensionMetadata {
 export interface HookPayloads {
   "session:create": { session: SessionManager; sessionId: string; config: Record<string, unknown> };
   "session:swap": { oldAgent?: AgentLike; newAgent: AgentLike };
-  "session:serialize": { agent: Agent };
-  "session:deserialize": { data: Record<string, unknown> };
   "session:restoreActive": { agent: Agent; isRestoring: boolean };
 
   "agent:toolContext": { toolCtx: ToolContext; toolName: string; agent: Agent };

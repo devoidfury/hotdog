@@ -33,7 +33,6 @@ export interface AgentLike {
   profileBody: string | undefined;
   enqueueCallback: ((content: string | Array<Record<string, unknown>>, opts?: { source?: MessageSource }) => void) | null;
   serialize(): Record<string, unknown>;
-  deserialize(data: Record<string, unknown>): void;
   applyProfile(name: string, profile: SwitchProfile): void;
   run(
     content: string | Array<Record<string, unknown>>,
@@ -368,16 +367,6 @@ export class SessionManager {
       return this.#serializer.serialize(agent);
     }
     return agent.serialize();
-  }
-
-  async deserialize(data: Record<string, unknown>): Promise<AgentLike> {
-    this.#hooks.notifyHooks(HOOKS.SESSION_DESERIALIZE, { data });
-
-    const agent = await this.#buildAgent({ model: data.model });
-    agent.deserialize(data);
-    this.#store.addAgent(agent);
-    this.#currentSessionId = data.sessionId as string;
-    return agent;
   }
 
   getStore(): SessionStore {

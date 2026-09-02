@@ -41,7 +41,7 @@ The foundation for the extension architecture. `HookSystem` class with `on()`, `
 
 **Hook trace:** Set `_trace = true` on the HookSystem instance (via `--hook-trace` CLI flag, `HOTDOG_HOOK_TRACE=1` env, or `hook_trace: true` config) to log each handler invocation with execution order, source extension, timing, and return value. Output uses `logger.debug()` so it requires `HOTDOG_LOG_LEVEL=debug`. See `docs/agents/debugging-hotdog-tools-visibility-flags.md` for details.
 
-**Session:** `SESSION_CREATE`, `SESSION_SWAP`, `SESSION_SERIALIZE`, `SESSION_DESERIALIZE`, `SESSION_RESTORE_ACTIVE`
+**Session:** `SESSION_CREATE`, `SESSION_SWAP`, `SESSION_RESTORE_ACTIVE`
 
 **Tools:** `TOOLS_REGISTER`, `TOOL_METADATA`, `TOOL_BEFORE_EXECUTE`, `TOOL_AFTER_EXECUTE`, `AGENT_TOOL_CONTEXT`, `TOOL_CALL`, `TOOL_RESULT`
 
@@ -106,7 +106,7 @@ Command parsing — commands are the abstract concept, slash commands (/cmd) are
 
 ### Session Management (`src/core/session/index.ts`)
 - `SessionStore` — holds agents keyed by session ID (addAgent, getAgent, removeAgent, agents, size)
-- `SessionManager` — manages session lifecycle (create, swap, getAgent, switchSession, serialize, deserialize)
+- `SessionManager` — manages session lifecycle (create, swap, getAgent, switchSession, serialize)
 - `SessionManager.create(options)` — static factory that builds initial agent
 
 ### Registries (`src/core/extensions/registries.ts`)
@@ -333,8 +333,9 @@ Parent agent calls delegate_task()
     the delegating agent (captured at spawn time as managerAgent, so results
     never land in a different session that was created later). The bus run
     loop appends it to the manager's context via agent.run(), so it is
-    injected exactly once. Falls back to the last-set bus, then a direct
-    context add, when no delegating session was captured. If the delegating
+    injected exactly once. When no delegating session was captured (or the
+    session manager exposes no getBus — sessionless harnesses), the result
+    falls back to a direct context add. If the delegating
     session no longer has a bus at completion time (deleted, or the delegator
     owns no session entry), the result is dropped with a warning rather than
     misdelivered to an unrelated session.

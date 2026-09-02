@@ -200,23 +200,13 @@ describe('SessionManager', () => {
     });
   });
 
-  describe('serialize / deserialize', () => {
-    it('should serialize and deserialize sessions', async () => {
+  describe('serialize', () => {
+    it('should serialize the active session', async () => {
       await sessionManager.create({ model: 'test-model' });
-      const sessionId = sessionManager.sessionId()!;
 
       const serialized = sessionManager.serialize();
       expect(typeof serialized).toBe('object');
-
-      const newSm = new SessionManager({
-        hooks: hooks as any,
-        extensions,
-        buildAgent,
-      });
-
-      const agent = await newSm.deserialize(serialized as Record<string, unknown>);
-      expect((agent as any).model).toBe('test-model');
-      expect(newSm.sessionIds()).toContain(sessionId);
+      expect((serialized as Record<string, unknown>).model).toBe('test-model');
     });
 
     it('should return null when no active agent', () => {

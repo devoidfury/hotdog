@@ -332,8 +332,6 @@ export class HookSystem {
 export const HOOKS = {
   SESSION_CREATE: "session:create",
   SESSION_SWAP: "session:swap",
-  SESSION_SERIALIZE: "session:serialize",
-  SESSION_DESERIALIZE: "session:deserialize",
   SESSION_RESTORE_ACTIVE: "session:restoreActive",
 
   AGENT_TOOL_CONTEXT: "agent:toolContext",

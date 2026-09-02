@@ -4,6 +4,7 @@
 
 - tool-executor - "Tool 'x' is not available for this agent" now suggests near-matching tools from the set the model was offered (case/separator differences first, then prefix/substring near-matches), so a misspelled or case-flipped tool name self-corrects in one retry
 - cli - unknown flags are now fatal (exit 1) with a "Did you mean" suggestion when a registered flag is a near-match, instead of a warning that let the run proceed with the flag silently dropped
+- session - a throwing channel event handler is now logged at debug level instead of being swallowed silently; other handlers still run
 
 
 - internals

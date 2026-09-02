@@ -324,7 +324,13 @@ export class SessionManager {
       for (const handler of handlers) {
         try {
           handler(event);
-        } catch {}
+        } catch (e) {
+          // A throwing channel handler must not abort the others, but it must
+          // not vanish either (AGENTS.md: every catch goes through formatError).
+          logger.debug(
+            `[session ${sessionId}] channel event handler error: ${formatError(e)}`,
+          );
+        }
       }
     } else if (event.type === OUTPUT_EVENT.QUESTION && event.questions) {
       if (!this.#questionBuffers.has(sessionId)) {

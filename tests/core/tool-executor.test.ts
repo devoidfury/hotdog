@@ -275,6 +275,67 @@ describe('ToolExecutor', () => {
 
       expect(result.toolResults[0]!.result).toContain('not available');
     });
+
+    it('suggests a case/separator near-match from the offered tools', async () => {
+      const deps = createMockDeps();
+      deps.toolRegistry.register('read', makeTestTool('read', async () => 'should not reach'));
+      const executor = createToolExecutor(deps);
+
+      const result = await executor.execute(
+        [{
+          id: 'call-1',
+          type: 'function',
+          function: { name: 'Read', arguments: '{}' },
+        }],
+        undefined,
+        null,
+        ['read', 'edit'],
+      );
+
+      const msg = result.toolResults[0]!.result;
+      expect(msg).toContain('not available');
+      expect(msg).toContain('Did you mean: read?');
+    });
+
+    it('suggests a close name match for a misspelled tool', async () => {
+      const deps = createMockDeps();
+      const executor = createToolExecutor(deps);
+
+      const result = await executor.execute(
+        [{
+          id: 'call-1',
+          type: 'function',
+          function: { name: 'search_files', arguments: '{}' },
+        }],
+        undefined,
+        null,
+        ['search_files_content', 'read'],
+      );
+
+      const msg = result.toolResults[0]!.result;
+      expect(msg).toContain('not available');
+      expect(msg).toContain('search_files_content');
+    });
+
+    it('gives no suggestion for an unrelated name', async () => {
+      const deps = createMockDeps();
+      const executor = createToolExecutor(deps);
+
+      const result = await executor.execute(
+        [{
+          id: 'call-1',
+          type: 'function',
+          function: { name: 'quantum_flux', arguments: '{}' },
+        }],
+        undefined,
+        null,
+        ['read', 'edit'],
+      );
+
+      const msg = result.toolResults[0]!.result;
+      expect(msg).toContain('not available');
+      expect(msg).not.toContain('Did you mean');
+    });
   });
 
   describe('invalid tool names', () => {

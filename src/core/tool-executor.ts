@@ -118,8 +118,12 @@ export class ToolExecutor {
     }
 
     if (!available.has(toolName)) {
-      const msg = `Tool '${toolName}' is not available for this agent`;
-      return this.#writeToolResult(toolName, input, msg, toolCallId);
+      return this.#writeToolResult(
+        toolName,
+        input,
+        unavailableToolMessage(toolName, available),
+        toolCallId,
+      );
     }
 
     this.#deps.emitOutput("tool_call", { toolName, input, toolCallId });
@@ -306,4 +310,39 @@ export class ToolExecutor {
 
 export function createToolExecutor(deps: ToolExecutorDeps): ToolExecutor {
   return new ToolExecutor(deps);
+}
+
+/** Case- and separator-insensitive key for fuzzy tool-name matching. */
+function toolNameKey(name: string): string {
+  return name.toLowerCase().replace(/[-_]/g, "");
+}
+
+/**
+ * "Tool not available" result text, with actionable candidates so the model
+ * can self-correct: models frequently misspell names, flip case ("Read" for
+ * "read"), or reach for a tool filtered out by profile/difficulty. A bare
+ * rejection strands them; suggesting near-matches from the offered set
+ * recovers the turn in one retry.
+ */
+export function unavailableToolMessage(toolName: string, available: Set<string>): string {
+  const base = `Tool '${toolName}' is not available for this agent.`;
+  const target = toolNameKey(toolName);
+  if (!target) return base;
+
+  const names = Array.from(available).sort();
+  const exact = names.filter((n) => toolNameKey(n) === target);
+  if (exact.length > 0) {
+    return `${base} Did you mean: ${exact.slice(0, 5).join(", ")}? (names differ only in case/separators)`;
+  }
+
+  const close = names
+    .filter((n) => {
+      const k = toolNameKey(n);
+      return k.length > 2 && (k.includes(target) || target.includes(k));
+    })
+    .slice(0, 5);
+  if (close.length > 0) {
+    return `${base} Did you mean: ${close.join(", ")}?`;
+  }
+  return base;
 }

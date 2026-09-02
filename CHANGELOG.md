@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- tool-executor - "Tool 'x' is not available for this agent" now suggests near-matching tools from the set the model was offered (case/separator differences first, then prefix/substring near-matches), so a misspelled or case-flipped tool name self-corrects in one retry
+
+
 **Full Changelog**: https://github.com/devoidfury/hotdog/compare/v0.7.3...main
 
 [v0.7.3] - 2026-09-01

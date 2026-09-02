@@ -416,10 +416,6 @@ export class SessionManager {
 
     agent.enqueueCallback = (text, opts) => bus.enqueue(text, opts);
 
-    if (this.#taskManager) {
-      this.#taskManager.setBus(bus);
-    }
-
     const runLoop = bus.run().catch((err: Error) => {
       logger.error(`[session ${sessionId}] bus error: ${formatError(err)}`);
     });

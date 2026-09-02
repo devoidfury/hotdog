@@ -56,8 +56,8 @@ export interface SpawnTaskOptions {
   profile?: string;
   /**
    * The agent that delegated this task. Its session's bus is the delivery
-   * target for the completion result. Without this, results would go to
-   * whatever session happened to be created last (multi-session bug).
+   * target for the completion result. Without this, the result falls back to
+   * a direct append to the session manager's current agent's context.
    */
   managerAgent?: { sessionId: string } | null;
 }
@@ -93,7 +93,6 @@ export class TaskManager {
      *  abort the task when that session is deleted. */
     sessionId: string | null;
   }>;
-  #bus: TaskResultBus | null;
   #profileManager: ProfileManager | undefined;
 
   constructor(options: TaskManagerOptions & TaskManagerRequiredOptions) {
@@ -105,16 +104,11 @@ export class TaskManager {
     this.#taskProfile = options.taskProfile;
     this.#taskRole = options.taskRole;
     this.#tasks = new Map();
-    this.#bus = null;
     this.#profileManager = options.profileManager;
   }
 
   setSessionManager(sessionManager: TaskManagerSessionManager): void {
     this.#sessionManager = sessionManager;
-  }
-
-  setBus(bus: TaskResultBus): void {
-    this.#bus = bus;
   }
 
   /** Exposed for extensions. */
@@ -141,8 +135,8 @@ export class TaskManager {
     ];
 
     // Route to the bus of the session that owns the agent which spawned the
-    // task. The last-setBus() session is NOT a safe target: in multi-session
-    // setups it can be a different (even unrelated) session.
+    // task. A "last-known bus" fallback is NOT safe: in multi-session setups
+    // it can be a different (even unrelated) session.
     if (delivery && this.#sessionManager?.getBus) {
       const bus = this.#sessionManager.getBus(delivery.sessionId);
       if (bus) {
@@ -150,31 +144,28 @@ export class TaskManager {
         return;
       }
       // The delegating session is gone (deleted, or the delegator owns no
-      // session entry, e.g. a nested task agent). Falling through to the
-      // last-set bus could inject the result into an unrelated session, so
-      // drop it instead.
+      // session entry, e.g. a nested task agent). Misdelivery to an
+      // unrelated session is worse than dropping the result, so drop it.
       logger.warn(
         `[task ${taskId}] delegating session ${delivery.sessionId} has no bus; dropping task result`,
       );
       return;
     }
 
-    // Enqueue only: the bus run loop appends it via agent.run(). Also addMessage()-ing would inject it twice.
-    // The result is harness-generated: the framing stays trusted, the
-    // untrusted part is mangled at the wire.
-    if (this.#bus) {
-      this.#bus.enqueue(content, { source: "harness" });
-    } else if (this.#sessionManager) {
-      const agent = this.#sessionManager.getAgent();
-      if (agent) {
-        agent.addMessage(
-          new Message({
-            role: "harness",
-            content,
-            source: "harness",
-          }),
-        );
-      }
+    // No routable delivery target (no delegating session captured, or the
+    // session manager exposes no getBus — e.g. a harness without session
+    // entries): append directly to the current agent's context.
+    // Enqueue-only when a bus exists: the bus run loop appends via
+    // agent.run(), so also addMessage()-ing would inject the result twice.
+    const agent = this.#sessionManager?.getAgent();
+    if (agent) {
+      agent.addMessage(
+        new Message({
+          role: "harness",
+          content,
+          source: "harness",
+        }),
+      );
     }
   }
 

@@ -317,7 +317,7 @@ describe("TaskManager", () => {
   });
 
   describe("_onTaskComplete", () => {
-    it("enqueues result via bus without also adding to context", () => {
+    it("enqueues result via the delegating session's bus without also adding to context", () => {
       const enqueued: any[] = [];
       const added: any[] = [];
       const manager = createManager();
@@ -325,10 +325,10 @@ describe("TaskManager", () => {
         getAgent: () => ({
           addMessage(msg: any) { added.push(msg); },
         }) as any,
-      });
-      manager.setBus({ enqueue: (msg: any) => enqueued.push(msg) } as any);
+        getBus: () => ({ enqueue: (msg: any) => enqueued.push(msg) }) as any,
+      } as any);
 
-      manager._onTaskComplete("task-1", "Result text");
+      manager._onTaskComplete("task-1", "Result text", { sessionId: "sess-a" });
 
       // Exactly one injection: the bus path only. The bus run loop appends
       // the enqueued content to the manager's context via agent.run(), so a
@@ -361,12 +361,15 @@ describe("TaskManager", () => {
     it("enqueues results with harness provenance (bus path)", () => {
       const enqueued: Array<{ content: any; source?: string }> = [];
       const manager = createManager();
-      manager.setBus({
-        enqueue: (content: any, opts?: { source?: string }) =>
-          enqueued.push({ content, source: opts?.source }),
-      });
+      manager.setSessionManager({
+        getAgent: () => null,
+        getBus: () => ({
+          enqueue: (content: any, opts?: { source?: string }) =>
+            enqueued.push({ content, source: opts?.source }),
+        }),
+      } as any);
 
-      manager._onTaskComplete("task-1", "Result text");
+      manager._onTaskComplete("task-1", "Result text", { sessionId: "sess-a" });
 
       expect(enqueued).toHaveLength(1);
       // Harness structure: trusted framing + raw result in an untrusted
@@ -395,10 +398,10 @@ describe("TaskManager", () => {
       expect(() => manager._onTaskComplete("task-1", "result")).not.toThrow();
     });
 
-    it("routes result to the spawning agent's session bus, not the last-set bus", () => {
+    it("routes result to the spawning agent's session bus", () => {
       const enqueued: Record<string, Array<Array<Record<string, unknown>>>> = {
         "sess-a": [],
-        "sess-b": [], // created after sess-a; its bus would have been setBus() last
+        "sess-b": [],
       };
       const manager = createManager();
       manager.setSessionManager({
@@ -408,8 +411,6 @@ describe("TaskManager", () => {
             ? { enqueue: (m: any) => enqueued[sessionId]!.push(m) }
             : undefined,
       } as any);
-      // Simulates a later session entry overwriting the single-bus wiring.
-      manager.setBus({ enqueue: (m: any) => enqueued["sess-b"]!.push(m) } as any);
 
       manager._onTaskComplete("task-1", "Result text", { sessionId: "sess-a" });
 
@@ -421,31 +422,29 @@ describe("TaskManager", () => {
     });
 
     it("drops the result when the delivery session has no bus (deleted session / non-session delegator)", () => {
-      const viaBus: unknown[] = [];
+      const added: unknown[] = [];
       const manager = createManager();
       manager.setSessionManager({
-        getAgent: () => null,
+        getAgent: () => ({ addMessage(msg: any) { added.push(msg); } }) as any,
         getBus: () => undefined, // e.g. a deleted session or a task agent with no session entry
       } as any);
-      manager.setBus({ enqueue: (m: any) => viaBus.push(m) } as any);
 
       manager._onTaskComplete("task-1", "Result text", { sessionId: "no-such-session" });
 
       // Misdelivery to an unrelated session is worse than dropping the result.
-      expect(viaBus).toHaveLength(0);
+      expect(added).toHaveLength(0);
     });
 
-    it("falls back to the last-set bus when session manager has no getBus", () => {
-      const viaBus: unknown[] = [];
+    it("appends directly when the session manager exposes no getBus", () => {
+      const added: unknown[] = [];
       const manager = createManager();
       manager.setSessionManager({
-        getAgent: () => null,
+        getAgent: () => ({ addMessage(msg: any) { added.push(msg); } }) as any,
       } as any);
-      manager.setBus({ enqueue: (m: any) => viaBus.push(m) } as any);
 
       manager._onTaskComplete("task-1", "Result text", { sessionId: "sess-a" });
 
-      expect(viaBus).toHaveLength(1);
+      expect(added).toHaveLength(1);
     });
 
     it("spawnTask delivers completion to the managerAgent's session bus", async () => {
@@ -478,7 +477,6 @@ describe("TaskManager", () => {
             ? { enqueue: (m: any) => enqueued[sessionId]!.push(m) }
             : undefined,
       } as any);
-      manager.setBus({ enqueue: (m: any) => enqueued["sess-b"]!.push(m) } as any);
 
       await manager.spawnTask("task-1", "Do it", { managerAgent: { sessionId: "sess-a" } });
       // runTask is fire-and-forget; give it a tick to settle.

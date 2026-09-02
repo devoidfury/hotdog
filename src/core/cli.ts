@@ -44,14 +44,6 @@ const STRUCTURAL_FLAGS: CliFlagDef[] = [
   { short: "-m", long: "--model", type: "string", description: "Model name" },
   { short: undefined, long: "--ai-url", type: "string", description: "AI URL" },
   { short: "-k", long: "--api-key", type: "string", description: "API key" },
-  { short: undefined, long: "--profile", type: "string", description: "Profile name" },
-  { short: undefined, long: "--provider", type: "string", description: "AI provider" },
-  {
-    short: undefined,
-    long: "--system-prompt-template",
-    type: "string",
-    description: "Custom system prompt template",
-  },
   { short: "-l", long: "--loud", type: "boolean", description: "Print full JSON API responses" },
   { short: undefined, long: "--json", type: "boolean", description: "Output as JSON" },
   { short: "-v", long: "--version", type: "boolean", description: "Show version" },
@@ -248,9 +240,6 @@ Options:
   -m, --model <name>        Model name
       --ai-url <url>        AI URL
   -k, --api-key <key>       API key
-      --profile <name>      Profile name
-      --provider <name>     AI provider to use
-      --system-prompt-template <path> Custom system prompt template
   -l, --loud                Print full JSON API responses
   --json                    Output as JSON
   -v, --version             Show version

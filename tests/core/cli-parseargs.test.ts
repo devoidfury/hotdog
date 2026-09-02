@@ -14,16 +14,29 @@ function withArgs(args: string[], fn: () => void) {
 }
 
 describe("parseArgs", () => {
-  const flagTests = [
+  // Hardcoded in cli.ts STRUCTURAL_FLAGS; parse without a registry.
+  const structuralFlagTests = [
     { long: "--config", short: "-f", resultKey: "config", value: "/path/to/config.json" },
     { long: "--model", short: "-m", resultKey: "model", value: "gpt-4" },
     { long: "--ai-url", short: null, resultKey: "aiUrl", value: "http://localhost:8080" },
     { long: "--api-key", short: null, resultKey: "apiKey", value: "secret-key" },
-    { long: "--profile", short: null, resultKey: "profile", value: "explorer" },
-    { long: "--provider", short: null, resultKey: "provider", value: "openai" },
   ];
 
-  for (const { long, short, resultKey, value } of flagTests) {
+  // Config-value flags: declared in core.config.json cliFlag entries, so they
+  // are only known through a ConfigRegistry (without one they are fatal
+  // unknown flags, like --session-id).
+  const schemaFlagTests = [
+    { long: "--profile", short: null, resultKey: "profile", value: "explorer" },
+    { long: "--provider", short: null, resultKey: "provider", value: "openai" },
+    { long: "--system-prompt-template", short: null, resultKey: "systemPromptTemplate", value: "/path/to/template.md" },
+  ];
+
+  const schemaFlagRegistry = {
+    buildDefaults: () => ({}),
+    getCliFlags: () => schemaFlagTests.map((t) => ({ long: t.long, type: "string", description: "" })),
+  } as any;
+
+  for (const { long, short, resultKey, value } of structuralFlagTests) {
     it(`parses ${long} flag`, () => {
       withArgs([long, value], () => {
         expect(parseArgs()[resultKey]).toBe(value);
@@ -38,6 +51,20 @@ describe("parseArgs", () => {
       });
     }
   }
+
+  for (const { long, resultKey, value } of schemaFlagTests) {
+    it(`parses ${long} flag (schema-registered)`, () => {
+      withArgs([long, value], () => {
+        expect(parseArgs(schemaFlagRegistry)[resultKey]).toBe(value);
+      });
+    });
+  }
+
+  it("treats schema-registered flags as unknown without a registry", () => {
+    withArgs(["--profile", "explorer"], () => {
+      expect(() => parseArgs()).toThrow(/Unknown flag: --profile/);
+    });
+  });
 
   it("parses boolean flags", () => {
     withArgs(["--loud", "--json", "--version"], () => {
@@ -115,7 +142,7 @@ describe("parseArgs", () => {
 
   it("parses multiple flags together", () => {
     withArgs(["-m", "gpt-4", "--profile", "default", "--loud"], () => {
-      const result = parseArgs();
+      const result = parseArgs(schemaFlagRegistry);
       expect(result.model).toBe("gpt-4");
       expect(result.profile).toBe("default");
       expect(result.loud).toBe(true);

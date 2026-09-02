@@ -214,9 +214,9 @@ export async function main(): Promise<number> {
   try {
     cli = parseArgs(configRegistry, cliSubcommandRegistry.names());
   } catch (e: unknown) {
-    if (e instanceof CliError && e.message.startsWith("Unknown subcommand:")) {
+    if (e instanceof CliError && e.subcommand !== undefined) {
       const knownSubcommands = cliSubcommandRegistry.names();
-      const posLower = e.message.replace("Unknown subcommand: ", "").toLowerCase();
+      const posLower = e.subcommand.toLowerCase();
       const similar = knownSubcommands.filter(
         (sc) => sc.toLowerCase() !== posLower && sc.startsWith(posLower.slice(0, 2)),
       );

@@ -33,6 +33,10 @@ export class AppError extends Error {
 // ── Domain-specific error classes ───────────────────────────────────────
 
 export class CliError extends AppError {
+  /** Set by UnknownSubcommand/UnknownFlag: the offending positional/flag text. */
+  subcommand?: string;
+  flag?: string;
+
   constructor(message: string) {
     super(message, "cli");
   }
@@ -46,7 +50,24 @@ export class CliError extends AppError {
   }
 
   static UnknownSubcommand(arg: string): CliError {
-    return new CliError(`Unknown subcommand: ${arg}`);
+    const err = new CliError(`Unknown subcommand: ${arg}`);
+    err.subcommand = arg;
+    return err;
+  }
+
+  /**
+   * Unknown flags are fatal (a silently-dropped flag means the run proceeds
+   * with wrong config). `suggestions` holds close registered-flag names so a
+   * typo self-corrects without a --help round trip.
+   */
+  static UnknownFlag(arg: string, suggestions?: string[]): CliError {
+    const err = new CliError(
+      suggestions && suggestions.length > 0
+        ? `Unknown flag: ${arg}\nDid you mean: ${suggestions.join(", ")}?`
+        : `Unknown flag: ${arg}\nRun hotdog --help to see available flags.`,
+    );
+    err.flag = arg;
+    return err;
   }
 }
 

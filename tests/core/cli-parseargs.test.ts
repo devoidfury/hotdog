@@ -61,14 +61,49 @@ describe("parseArgs", () => {
   });
 
   it("parses positional args after subcommand", () => {
+    // --session-id is a registry-registered flag (core schema); without a
+    // registry here it would now be fatal as an unknown flag.
+    const registryStub = {
+      buildDefaults: () => ({}),
+      getCliFlags: () => [{ long: "--session-id", type: "string", description: "" }],
+    } as any;
     withArgs(["sessions", "show", "--session-id", "abc123"], () => {
-      expect(parseArgs().subcommand).toBe("sessions");
+      expect(parseArgs(registryStub).subcommand).toBe("sessions");
     });
   });
 
   it("throws on unknown subcommand", () => {
     withArgs(["unknown-subcommand"], () => {
       expect(() => parseArgs()).toThrow(/Unknown subcommand/);
+    });
+  });
+
+  it("unknown subcommand error carries the subcommand field", () => {
+    withArgs(["unknown-subcommand"], () => {
+      try {
+        parseArgs();
+        expect.unreachable();
+      } catch (e) {
+        expect((e as Error & { subcommand?: string }).subcommand).toBe("unknown-subcommand");
+      }
+    });
+  });
+
+  it("throws on unknown flag instead of warning and continuing", () => {
+    withArgs(["--bogus-flag"], () => {
+      expect(() => parseArgs()).toThrow(/Unknown flag: --bogus-flag/);
+    });
+  });
+
+  it("unknown flag suggests a one-edit near-match", () => {
+    withArgs(["--modl", "gpt-4"], () => {
+      expect(() => parseArgs()).toThrow(/Did you mean: --model\?/);
+    });
+  });
+
+  it("unknown flag points to --help when nothing is close", () => {
+    withArgs(["--zzzzz"], () => {
+      expect(() => parseArgs()).toThrow(/--help/);
     });
   });
 

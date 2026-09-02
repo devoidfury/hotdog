@@ -82,6 +82,22 @@ describe("Error types", () => {
     it("UnknownSubcommand", () => {
       const err = CliError.UnknownSubcommand("foobar");
       expect(err.message).toBe("Unknown subcommand: foobar");
+      expect(err.subcommand).toBe("foobar");
+    });
+
+    it("UnknownFlag with suggestions", () => {
+      const err = CliError.UnknownFlag("--modl", ["--model"]);
+      expect(err.message).toContain("Unknown flag: --modl");
+      expect(err.message).toContain("Did you mean: --model?");
+      expect(err.flag).toBe("--modl");
+      expect(err.type).toBe("cli");
+    });
+
+    it("UnknownFlag without suggestions points to --help", () => {
+      const err = CliError.UnknownFlag("--zzzzz");
+      expect(err.message).toContain("Unknown flag: --zzzzz");
+      expect(err.message).toContain("--help");
+      expect(err.flag).toBe("--zzzzz");
     });
   });
 

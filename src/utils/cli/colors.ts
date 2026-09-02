@@ -120,6 +120,22 @@ export function mergePalette(base: ColorPalette, custom: PaletteOptions): ColorP
   });
 }
 
+/**
+ * Environment-level color opt-out, checked before any palette resolution:
+ * - NO_COLOR (https://no-color.org): present and non-empty disables color.
+ * - TERM=dumb: terminfo convention for a terminal without color capability.
+ *
+ * Respects the conventions so scripts, pipes, and assistant harnesses
+ * consuming CLI output get plain text without passing --no-colors.
+ */
+export function colorDisabledByEnv(
+  env: Record<string, string | undefined> = process.env,
+): boolean {
+  const noColor = env.NO_COLOR;
+  if (noColor !== undefined && noColor !== "") return true;
+  return env.TERM === "dumb";
+}
+
 export async function resolvePalette(
   themeFile: string | null | undefined,
   configPalette: PaletteOptions | null | undefined,

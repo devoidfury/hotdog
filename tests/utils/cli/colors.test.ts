@@ -13,6 +13,7 @@ import {
   applyToolResult,
   applyFinalResponse,
   applyCompacting,
+  colorDisabledByEnv,
   applyProgress,
 } from '../../../src/utils/cli/colors.ts';
 import fs from 'node:fs';
@@ -177,5 +178,25 @@ describe('NAMED_THEMES', () => {
     expect(NAMED_THEMES.dark!()).toEqual(dark_palette());
     expect(NAMED_THEMES.light!()).toEqual(light_palette());
     expect(NAMED_THEMES.monochrome!()).toEqual(monochrome_palette());
+  });
+});
+
+describe('colorDisabledByEnv', () => {
+  it('disables on NO_COLOR present and non-empty', () => {
+    expect(colorDisabledByEnv({ NO_COLOR: '1' })).toBe(true);
+    expect(colorDisabledByEnv({ NO_COLOR: '0' })).toBe(true); // spec: any non-empty value
+  });
+
+  it('empty NO_COLOR does not disable', () => {
+    expect(colorDisabledByEnv({ NO_COLOR: '' })).toBe(false);
+  });
+
+  it('disables on TERM=dumb', () => {
+    expect(colorDisabledByEnv({ TERM: 'dumb' })).toBe(true);
+  });
+
+  it('normal environments pass', () => {
+    expect(colorDisabledByEnv({})).toBe(false);
+    expect(colorDisabledByEnv({ TERM: 'xterm-256color' })).toBe(false);
   });
 });

@@ -349,7 +349,9 @@ UI theme. Built-in options: `dark`, `light`, `monochrome`. Also accepts a file p
 - **Default:** `true`
 - **Resolution:** CLI > config > default
 
-Enable or disable colored output.
+Enable or disable colored output. Independently of this setting, color is always
+disabled when the `NO_COLOR` environment variable is set to a non-empty value or
+`TERM=dumb` (see [colors.ts](../src/utils/cli/colors.ts)).
 
 ```json
 { "colors": true }

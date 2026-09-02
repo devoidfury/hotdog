@@ -26,6 +26,7 @@ import {
   applyCompacting,
   applyProgress,
   resolvePalette,
+  colorDisabledByEnv,
   type PaletteOptions,
 } from "./colors.ts";
 
@@ -259,12 +260,16 @@ export class CliOutputSink extends OutputSink {
 
   /**
    * Resolve a palette from CLI args, config, and theme.
+   * NO_COLOR / TERM=dumb force a disabled palette regardless of config.
    */
   static async resolve(
     useColors: boolean,
     theme: string | null | undefined,
     configPalette: PaletteOptions | null | undefined,
   ): Promise<ColorPalette> {
+    if (colorDisabledByEnv()) {
+      return new ColorPalette({ use_colors: false });
+    }
     return resolvePalette(theme, configPalette, null, useColors);
   }
 

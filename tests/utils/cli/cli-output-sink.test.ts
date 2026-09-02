@@ -216,4 +216,26 @@ describe("CliOutputSink", () => {
     const palette = await CliOutputSink.resolve(false, null, null);
     expect(palette.use_colors).toBe(false);
   });
+
+  it("static resolve honors NO_COLOR and TERM=dumb", async () => {
+    const savedNoColor = process.env.NO_COLOR;
+    const savedTerm = process.env.TERM;
+    try {
+      delete process.env.NO_COLOR;
+      process.env.TERM = "xterm-256color";
+      expect((await CliOutputSink.resolve(true, null, null)).use_colors).toBe(true);
+
+      process.env.NO_COLOR = "1";
+      expect((await CliOutputSink.resolve(true, null, null)).use_colors).toBe(false);
+
+      delete process.env.NO_COLOR;
+      process.env.TERM = "dumb";
+      expect((await CliOutputSink.resolve(true, null, null)).use_colors).toBe(false);
+    } finally {
+      if (savedNoColor === undefined) delete process.env.NO_COLOR;
+      else process.env.NO_COLOR = savedNoColor;
+      if (savedTerm === undefined) delete process.env.TERM;
+      else process.env.TERM = savedTerm;
+    }
+  });
 });

@@ -185,7 +185,7 @@ hotdog webui                     # Start the web UI server
 --json                       Output as JSON
 --show-tools                 Show tool calls in output
 --show-thinking              Show reasoning/thinking output
---no-colors                  Disable colors
+--no-colors                  Disable colors (also honors NO_COLOR / TERM=dumb env)
 --hook-trace                 Trace hook execution (requires HOTDOG_LOG_LEVEL=debug)
 -v, --version                Show version
 -h, --help                   Show help

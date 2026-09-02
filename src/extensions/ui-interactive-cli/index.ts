@@ -7,11 +7,11 @@ import { HOOKS } from "@core/hooks.ts";
 import type { LlmClient } from "@core/llm-client/client.ts";
 import { SessionManager, type AgentLike } from "@core/session/index.ts";
 import { Agent } from "@core/agent.ts";
+import { createAgentFactory } from "@core/agent-factory.ts";
 import { readSessionEntries, sessionExists, replayEntriesIntoContext } from "@core/session/session-log.ts";
 import { CoreContext, ExtensionInstance } from "@core/extensions/types.ts";
 import { ExtensionError } from "@core/error.ts";
 import type { CliArgv } from "@core/config/index.ts";
-import type { ModelConfig } from "@core/config/providers.ts";
 import { registerTaskManagerService } from "../subagents/index.ts";
 import { CliChannel } from "./cli-channel.ts";
 import { ClipboardPasteInterceptor } from "./clipboard-paste.ts";
@@ -336,52 +336,9 @@ export async function buildInteractiveAgent(
   llmClient: LlmClient,
   cli: Record<string, unknown>,
 ): Promise<Agent> {
-  const sessionId = (agentConfig.sessionId as string) || crypto.randomUUID();
-  const agent = new Agent({
-    hooks: core.hooks,
-    toolRegistry: core.toolRegistry,
-    llmClient: (agentConfig.llmClient as LlmClient | undefined) || llmClient,
-    model: (agentConfig.model as string) || (resolved.model as string | null) || "",
-    maxIterations: (agentConfig.maxIterations as number) || (resolved.maxIterations as number) || 100,
-    contextLimit: (agentConfig.contextLimit as number) || (resolved.contextLimit as number),
-    hideTools:
-      typeof agentConfig.hideTools === "boolean"
-        ? agentConfig.hideTools
-        : (resolved.hideTools as boolean | undefined),
-    hideThinking:
-      typeof agentConfig.hideThinking === "boolean"
-        ? agentConfig.hideThinking
-        : (resolved.hideThinking as boolean | undefined),
-    showTokenUse:
-      typeof agentConfig.showTokenUse === "boolean"
-        ? agentConfig.showTokenUse
-        : (resolved.showTokenUse as boolean | undefined),
-    sink: null,
-    modelRegistry:
-      (agentConfig.modelRegistry as Record<string, ModelConfig>) ||
-      (resolved.modelRegistry as Record<string, ModelConfig>) ||
-      {},
-    profileName: (agentConfig.profileName as string) || (resolved.profileName as string),
-    role: (agentConfig.role as string) || (resolved.role as string | undefined),
-    profileBody: (agentConfig.profileBody as string) || (resolved.profileBody as string | undefined),
-    stream:
-      typeof agentConfig.stream === "boolean" ? agentConfig.stream : (resolved.stream as boolean | undefined),
-    config: {
-      ...config,
-      maxToolCallsPerIteration: resolved.maxToolCallsPerIteration as number,
-      maxRetries: resolved.maxRetries as number,
-      toolRetryDelay: resolved.toolRetryDelay as number,
-      workspaceRoots: (resolved.workspaceRoots as string[]) || [process.cwd()],
-    },
-    sessionId,
-    abortSignal: (agentConfig.abortSignal as AbortSignal) || null,
-    toolWhitelist: (agentConfig.toolWhitelist as string[]) || null,
-  });
-
-  core.hooks.notifyHooks(HOOKS.COMMANDS_REGISTER, {
-    registry: agent.commandRegistry,
-    agent,
-  });
+  const factory = createAgentFactory(core, { resolved, config, llmClient });
+  const agent = await factory(agentConfig);
+  const sessionId = agent.sessionId;
 
   const explicitSessionId = cli.sessionId as string | undefined;
   if (explicitSessionId && sessionId === explicitSessionId) {

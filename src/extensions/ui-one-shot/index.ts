@@ -5,7 +5,7 @@ import { logger } from "../../core/logger.ts";
 import { CliOutputSink } from "../../utils/cli/cli.ts";
 import type { LlmClient } from "../../core/llm-client/client.ts";
 import { SessionManager, type AgentLike } from "../../core/session/index.ts";
-import { Agent } from "../../core/agent.ts";
+import { createAgentFactory } from "../../core/agent-factory.ts";
 import { registerTaskManagerService } from "../subagents/index.ts";
 import { OneShotChannel } from "./oneshot-channel.ts";
 import type { CoreContext, ExtensionInstance, ResolvedConfig } from "../../core/extensions/types.ts";
@@ -110,45 +110,7 @@ async function handlePromptSubcommand(
 
   const llmClient = core.createLlmClient();
 
-  const buildAgent: (agentConfig: Record<string, unknown>) => Promise<AgentLike> = async (agentConfig) => {
-    const sessionId = (agentConfig.sessionId as string) || crypto.randomUUID();
-    const agent = new Agent({
-      hooks: core.hooks,
-      toolRegistry: core.toolRegistry,
-      llmClient: (agentConfig.llmClient as LlmClient) || llmClient,
-      model: (agentConfig.model as string) || resolved.model || "",
-      maxIterations:
-        (agentConfig.maxIterations as number) || resolved.maxIterations || 100,
-      contextLimit: resolved.contextLimit,
-      hideTools: typeof agentConfig.hideTools === "boolean" ? agentConfig.hideTools : resolved.hideTools,
-      hideThinking: typeof agentConfig.hideThinking === "boolean" ? agentConfig.hideThinking : resolved.hideThinking,
-      showTokenUse: typeof agentConfig.showTokenUse === "boolean" ? agentConfig.showTokenUse : resolved.showTokenUse,
-      sink: null, // Sink is managed by OneShotChannel via SessionManager
-      modelRegistry: (agentConfig.modelRegistry as Record<string, ModelConfig>) ||
-        (modelRegistry as Record<string, ModelConfig>),
-      profileName: (agentConfig.profileName as string) || resolved.profileName,
-      role: (agentConfig.role as string) || resolved.role,
-      profileBody: (agentConfig.profileBody as string) || resolved.profileBody,
-      stream: typeof agentConfig.stream === "boolean" ? agentConfig.stream : resolved.stream,
-      config: {
-        ...config,
-        maxToolCallsPerIteration: resolved.maxToolCallsPerIteration as number,
-        maxRetries: resolved.maxRetries as number,
-        toolRetryDelay: resolved.toolRetryDelay as number,
-        workspaceRoots: (resolved.workspaceRoots as string[]) || [process.cwd()],
-      },
-      sessionId,
-      abortSignal: (agentConfig.abortSignal as AbortSignal) || null,
-      toolWhitelist: (agentConfig.toolWhitelist as string[]) || null,
-    });
-
-    core.hooks.notifyHooks(HOOKS.COMMANDS_REGISTER, {
-      registry: agent.commandRegistry,
-      agent,
-    });
-
-    return agent;
-  };
+  const buildAgent = createAgentFactory(core, { resolved, config, llmClient });
 
   return await runOneShot(
     cli,

@@ -12,6 +12,7 @@ import type { LlmClient } from "../../core/llm-client/client.ts";
 import type { CoreContext } from "../../core/extensions/types.ts";
 import type { AuthMiddleware } from "./auth.ts";
 import { Agent } from "../../core/agent.ts";
+import { createAgentFactory } from "../../core/agent-factory.ts";
 import {
   readSessionEntries,
   replayEntriesIntoContext,
@@ -1060,65 +1061,7 @@ export function createWsServer(
     sessionId?: string;
     profileName?: string;
   }) => Promise<AgentLike> =
-    customBuildAgent ??
-    (async (agentConfig) => {
-      const sessionId = agentConfig.sessionId || crypto.randomUUID();
-      const profileName =
-        agentConfig.profileName ||
-        (core.resolved?.profileName as string) ||
-        "default";
-      const profile = profiles?.[profileName] || null;
-      const agent = new Agent({
-        hooks: core.hooks,
-        toolRegistry: core.toolRegistry,
-        llmClient:
-          ((agentConfig as Record<string, unknown>).llmClient as LlmClient) ||
-          sharedLlmClient,
-        model:
-          (agentConfig as { model?: string }).model ||
-          (core.resolved?.model as string) ||
-          "",
-        maxIterations: (core.resolved?.maxIterations as number) || 100,
-        contextLimit: core.resolved?.contextLimit as number,
-        hideTools:
-          (agentConfig as { hideTools?: boolean }).hideTools ??
-          (core.resolved?.hideTools as boolean) ??
-          false,
-        hideThinking:
-          (agentConfig as { hideThinking?: boolean }).hideThinking ??
-          (core.resolved?.hideThinking as boolean) ??
-          true,
-        showTokenUse:
-          (agentConfig as { showTokenUse?: boolean }).showTokenUse ??
-          (core.resolved?.showTokenUse as boolean) ??
-          true,
-        sink: null,
-        modelRegistry: core.resolved?.modelRegistry,
-        profileName,
-        profileBody: profile?.body || undefined,
-        role: profile?.role || undefined,
-        config: {
-          ...core.config,
-          maxToolCallsPerIteration: core.resolved?.maxToolCallsPerIteration as number,
-          maxRetries: core.resolved?.maxRetries as number,
-          toolRetryDelay: core.resolved?.toolRetryDelay as number,
-          workspaceRoots:
-            (core.resolved?.workspaceRoots as string[] | undefined) || [process.cwd()],
-        },
-        sessionId,
-        abortSignal: null,
-        toolWhitelist: profile?.whitelistTools || null,
-      });
-
-      if (core.hooks) {
-        core.hooks.notifyHooks(HOOKS.COMMANDS_REGISTER, {
-          registry: agent?.commandRegistry,
-          agent,
-        });
-      }
-
-      return agent;
-    });
+    customBuildAgent ?? createAgentFactory(core, { profiles, llmClient: sharedLlmClient });
 
   // Question tool integration: the bridge resolves pending question-tool
   // calls when a client answers. Declared before the registry so the

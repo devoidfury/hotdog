@@ -85,7 +85,9 @@ export class BashTool {
   async execute(input: string | Record<string, unknown> | null, _ctx: ToolContext): Promise<ToolResult> {
     const args = parseToolInput(input);
     if (!args) {
-      return ToolResult.err("Error parsing arguments");
+      return ToolResult.err(
+        "Error parsing arguments: expected a JSON object with a required 'command' string (optional: timeoutMs)",
+      );
     }
     const command = args.command as string;
     const timeout = resolveBashTimeout(

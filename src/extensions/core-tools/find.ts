@@ -142,7 +142,7 @@ export class FindTool {
   toToolDef() {
     return toolDef(
       FindTool.TOOL_NAME,
-      "Find files and directories matching a glob pattern. Use this tool when you need to find files by name patterns.",
+      "Find files and directories matching a glob pattern. Respects .gitignore and hidden files, so ignored trees never appear regardless of pattern.",
       {
         properties: {
           pattern: param(
@@ -185,7 +185,9 @@ export class FindTool {
   async execute(input: string | Record<string, unknown> | null, ctx: ToolContext): Promise<ToolResult> {
     const args = parseArgs(input, this.maxResults);
     if (!args) {
-      return ToolResult.err("Error parsing arguments");
+      return ToolResult.err(
+        "Error parsing arguments: expected a JSON object with a required 'pattern' string (optional: path, file_type, max_results)",
+      );
     }
 
     const { pattern, file_type, max_results, path: searchPath } = args;
@@ -241,7 +243,9 @@ export class FindTool {
       ? `1-${display_count} (of ${total_count} total)`
       : `1-${display_count}`;
 
-    const content = files.length === 0 ? "No files found" : files.join("\n");
+    const content = files.length === 0
+      ? `No files found matching '${pattern}' in ${cwd}. The pattern is a glob, not a regex (no '\\.' escaping needed; bare '*.ext' matches at any depth). Try a broader pattern, verify 'path' exists, or drop 'file_type'.`
+      : files.join("\n");
 
     return ToolResult.ok(truncateOutput(content, this.maxOutputLines)).withEntries({
       pattern,

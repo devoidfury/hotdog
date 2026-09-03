@@ -47,7 +47,7 @@ Tools without metadata are excluded when filtering is active (conservative defau
 | `append` | `core-tools` | Appends content to a file | `path`, `content` |
 | `read` | `core-tools` | Reads file contents with pagination | `path`, `limit`, `offset` |
 | `edit` | `core-tools` | Edits a file by finding and replacing exact text | `path`, `oldString`, `newString`, `replace_all` |
-| `grep` | `core-tools` | Searches file contents for regex patterns | `pattern`, `path`, `type`, `context` |
+| `grep` | `core-tools` | Searches file contents for regex patterns, with optional case-insensitive matching | `pattern`, `path`, `type`, `context`, `ignore_case` |
 | `find` | `core-tools` | Glob-based file search | `pattern`, `path`, `file_type`, `max_results` |
 | `project_info` | `core-tools` | Gathers project information | `path` |
 | `explore` *(disabled)* | `core-tools` | Runs the agent in explorer mode against a project directory | `path`, `outline` |

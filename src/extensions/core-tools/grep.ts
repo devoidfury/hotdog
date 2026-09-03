@@ -75,6 +75,7 @@ interface GrepArgs {
   maxResults: number;
   context: number;
   type: string | null;
+  ignoreCase: boolean;
 }
 
 function typeToExtensions(typeName: string): string[] {
@@ -222,14 +223,15 @@ async function walkAndSearch(
   }
 }
 
-async function grepNative(
+export async function grepNative(
   pattern: string,
   searchDir: string,
   maxResults: number,
   context: number,
   typeFilter: string | null,
+  ignoreCase: boolean,
 ): Promise<{ display: string; totalMatches: number }> {
-  const re = new RegExp(pattern);
+  const re = new RegExp(pattern, ignoreCase ? "i" : "");
 
   const outputLines: string[] = [];
   const totalMatches = { count: 0 };
@@ -254,12 +256,17 @@ async function grepWithRg(
   maxResults: number,
   context: number,
   typeFilter: string | null,
+  ignoreCase: boolean,
 ): Promise<{ display: string; totalMatches: number }> {
   const absSearchDir = resolve(searchDir);
   const args = ["--json", "--no-heading", "--color", "never"];
 
   if (context > 0) {
     args.push(`-C${context}`);
+  }
+
+  if (ignoreCase) {
+    args.push("-i");
   }
 
   if (typeFilter && typeFilter !== "all") {
@@ -351,10 +358,11 @@ function parseArgs(
   const context =
     typeof json.context === "number" && json.context >= 0 ? json.context : 0;
   const type = typeof json.type === "string" ? json.type : null;
+  const ignoreCase = json.ignore_case === true;
 
   [pattern, path] = correctCommonPathMistakes(pattern, path);
 
-  return { pattern, path, maxResults, context, type };
+  return { pattern, path, maxResults, context, type, ignoreCase };
 }
 
 export class GrepTool {
@@ -373,7 +381,7 @@ export class GrepTool {
   toToolDef() {
     return toolDef(
       GrepTool.TOOL_NAME,
-      "Search file contents for a pattern. Supports regex, file type filtering, and context lines. Returns matching lines with file paths.",
+      "Search file contents for a pattern. Supports regex, file type filtering, case-insensitive matching, and context lines. Binary files are skipped. Returns matching lines with file paths.",
       {
         properties: {
           pattern: param("string", "Search pattern regex."),
@@ -394,6 +402,13 @@ export class GrepTool {
             "Number of context lines before and after match.",
             {
               default: 0,
+            },
+          ),
+          ignore_case: param(
+            "boolean",
+            "Case-insensitive matching. Defaults false.",
+            {
+              default: false,
             },
           ),
         },
@@ -420,10 +435,12 @@ export class GrepTool {
   ): Promise<ToolResult> {
     const args = parseArgs(input, this.maxResults);
     if (!args) {
-      return ToolResult.err("Error parsing arguments");
+      return ToolResult.err(
+        "Error parsing arguments: expected a JSON object with a required 'pattern' string (optional: path, type, max_results, context, ignore_case)",
+      );
     }
 
-    const { pattern, path: searchPath, maxResults, context, type } = args;
+    const { pattern, path: searchPath, maxResults, context, type, ignoreCase } = args;
 
     // Models sometimes emit "/subpath" when they meant "./subpath"; detect and fix that here.
     const modelForgotPathPrefix =
@@ -457,16 +474,20 @@ export class GrepTool {
 
     let result: { display: string; totalMatches: number };
     try {
-      result = await grepWithRg(pattern, searchDir, maxResults, context, type);
+      result = await grepWithRg(pattern, searchDir, maxResults, context, type, ignoreCase);
     } catch {
-      result = await grepNative(pattern, searchDir, maxResults, context, type);
+      result = await grepNative(pattern, searchDir, maxResults, context, type, ignoreCase);
     }
 
     const { display, totalMatches } = result;
     const truncated = totalMatches > maxResults;
 
     if (totalMatches === 0) {
-      return ToolResult.ok("No matches found.");
+      return ToolResult.ok(
+        ignoreCase
+          ? "No matches found. The case-insensitive search found nothing; try a simpler or shorter pattern, drop the type filter, or widen the search path."
+          : "No matches found. If the pattern is a literal string, escape regex metacharacters (e.g. '(' as '\\('); you can also try ignore_case: true, dropping the type filter, or widening the search path.",
+      );
     }
 
     const content = truncateOutput(display, this.maxOutputLines);
@@ -487,6 +508,10 @@ export class GrepTool {
 
     if (type) {
       metadata.set("type", type);
+    }
+
+    if (ignoreCase) {
+      metadata.set("ignore_case", "true");
     }
 
     return ToolResult.ok(content).withEntries(Object.fromEntries(metadata));

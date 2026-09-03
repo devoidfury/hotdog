@@ -52,7 +52,7 @@ export class ReadTool {
   toToolDef() {
     return toolDef(
       ReadTool.TOOL_NAME,
-      `Read a file's contents with optional pagination. Supports text files (line-based extraction with offset/limit) and image files (jpeg, png, webp, base64). Returns an error for directories with a depth-1 listing instead.`,
+      `Read a file's contents with optional pagination. Supports text files (line-based extraction with offset/limit) and image files (jpeg, png, webp, base64). For directories, returns an error with a depth-1 listing.`,
       {
         properties: {
           path: param(
@@ -89,7 +89,9 @@ export class ReadTool {
   async execute(input: string | Record<string, unknown> | null, ctx: ToolContext): Promise<ToolResult> {
     const args = parseArgs(input, this.readLimit);
     if (!args) {
-      return ToolResult.err("Error parsing arguments");
+      return ToolResult.err(
+        "Error parsing arguments: expected a JSON object with a required 'path' string (optional: limit, offset)",
+      );
     }
 
     const filePath = args.path;

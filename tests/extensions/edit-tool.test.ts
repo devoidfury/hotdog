@@ -190,6 +190,52 @@ describe('EditTool.execute — line-trimmed fallback', () => {
     ).rejects.toThrow(/text not found in file/);
   });
 
+  it('falls back to the file preview when nothing is similar', async () => {
+    const filePath = path.join(dir, 'preview.txt');
+    fsSync.writeFileSync(filePath, 'alpha\nbeta\ngamma');
+
+    const tool = new EditTool({ maxEditInputSize: 16000 });
+    const err = await tool
+      .execute(
+        { path: 'preview.txt', oldString: 'zzzqqqxyz', newString: 'x' },
+        toolCtx({ workspaceRoots: [dir] })
+      )
+      .then(() => null, (e: unknown) => e as Error);
+
+    expect(err).not.toBeNull();
+    expect(err!.message).toContain('File content:');
+    expect(err!.message).not.toContain('Closest matches');
+  });
+
+  it('reports the closest matching line when oldString has a typo', async () => {
+    const filePath = path.join(dir, 'nearest.txt');
+    fsSync.writeFileSync(
+      filePath,
+      [
+        ...Array.from({ length: 40 }, (_, i) => `padding line ${i}`),
+        'const computedValue = aggregate(items);',
+        ...Array.from({ length: 40 }, (_, i) => `more padding ${i}`),
+      ].join('\n')
+    );
+
+    const tool = new EditTool({ maxEditInputSize: 16000 });
+    const err = await tool
+      .execute(
+        {
+          path: 'nearest.txt',
+          oldString: 'const computedValue = agregate(items);',
+          newString: 'x',
+        },
+        toolCtx({ workspaceRoots: [dir] })
+      )
+      .then(() => null, (e: unknown) => e as Error);
+
+    expect(err).not.toBeNull();
+    expect(err!.message).toContain('Closest matches');
+    expect(err!.message).toContain('line 41');
+    expect(err!.message).toContain('aggregate(items)');
+  });
+
   it('multi-line match with different indentation does not duplicate or drop lines', async () => {
     const filePath = path.join(dir, 'file.txt');
     fsSync.writeFileSync(

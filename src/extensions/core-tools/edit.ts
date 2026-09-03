@@ -48,7 +48,7 @@ export class EditTool {
   toToolDef() {
     return toolDef(
       EditTool.TOOL_NAME,
-      "Single mode tool that replaces text in a file. Finds oldString, replaces with newString. Use this instead of the write tool for precise code edits.",
+      "Replaces exact occurrences of oldString with newString in existing file. Fails with an error if oldString matches nothing. Read the file before editing -- whitespace and indentation must match.",
       {
         properties: {
           path: param("string", "File path. Path relative to the workspace root, or an absolute path inside a configured workspace root."),
@@ -77,7 +77,9 @@ export class EditTool {
   async execute(input: string | Record<string, unknown> | null, ctx: ToolContext): Promise<ToolResult> {
     const op = parseArgs(input);
     if (!op) {
-      return ToolResult.err("Error parsing arguments");
+      return ToolResult.err(
+        "Error parsing arguments: expected a JSON object with required 'path', 'oldString', and 'newString' strings (optional: replace_all)",
+      );
     }
 
     const { path: filePath, oldString, newString, replace_all: replaceAll = false } = op;
@@ -221,13 +223,26 @@ function findAndReplace(content: string, old: string, newStr: string, all: boole
   }
 
   if (startLineIdx === -1) {
-    const contextLines =
-      contentLines.length <= 10
-        ? contentLines
-        : [...contentLines.slice(0, 3), "...", ...contentLines.slice(Math.max(0, contentLines.length - 4))];
-    const context = contextLines.join("\n");
+    const near = closestMatches(content, old);
+    let detail: string;
+    if (near.length > 0) {
+      detail =
+        "Closest matches (1-based line numbers; copy the exact text):\n" +
+        near
+          .map(
+            (m) =>
+              `  line ${m.line} (differs by ${m.distance} char${m.distance !== 1 ? "s" : ""}):\n    ${m.text}`,
+          )
+          .join("\n");
+    } else {
+      const contextLines =
+        contentLines.length <= 10
+          ? contentLines
+          : [...contentLines.slice(0, 3), "...", ...contentLines.slice(Math.max(0, contentLines.length - 4))];
+      detail = `File content:\n${contextLines.join("\n")}`;
+    }
     throw AssistantRetryableError.WithHint(
-      `text not found in file.\n\nSearched for: ${JSON.stringify(old)}\n\nFile content:\n${context}`,
+      `text not found in file.\n\nSearched for: ${JSON.stringify(old)}\n\n${detail}`,
       "Use the exact text from the file, including correct indentation. You can use the read tool to get the current file contents if needed.",
     );
   }
@@ -254,4 +269,95 @@ function findAndReplace(content: string, old: string, newStr: string, all: boole
     newContent,
     matchInfo: { startLine, endLine, matchCount: 1 },
   };
+}
+
+// ── Nearest-match suggestions ──────────────────────────────────────────────
+//
+// When oldString misses (even after the trimmed-line fallback), the model is
+// stranded: a head/tail preview of a large file rarely contains the target.
+// Report the closest actual lines so the corrected edit needs no read
+// round-trip. Anchors on the first non-blank line of oldString — intra-line
+// drift (typos, renames, reformatting) is what the trimmed fallback can't
+// recover; reordered multi-line blocks won't suggest well, but they don't
+// match either, so behavior is no worse.
+
+interface ClosestMatch {
+  line: number; // 1-based
+  text: string;
+  distance: number;
+}
+
+const CLOSEST_MATCH_MAX_FILE_CHARS = 2 * 1024 * 1024;
+const CLOSEST_MATCH_CANDIDATE_CAP = 200;
+const CLOSEST_MATCH_LIMIT = 3;
+
+function closestMatches(content: string, old: string): ClosestMatch[] {
+  if (content.length > CLOSEST_MATCH_MAX_FILE_CHARS) return [];
+
+  const anchor = old
+    .split("\n")
+    .map((l) => l.trim())
+    .find((l) => l.length > 0);
+  if (!anchor) return [];
+
+  // Prefilter on the anchor's longest tokens keeps the scan O(lines)
+  // substring checks per attempt; the longest token is the most distinctive
+  // but may itself be the typo, so try up to 3 (longest first) until one
+  // yields candidates.
+  const tokens = Array.from(
+    new Set(anchor.split(/[^A-Za-z0-9_$]+/).filter((t) => t.length >= 4)),
+  )
+    .sort((a, b) => b.length - a.length)
+    .slice(0, 3);
+  if (tokens.length === 0) return [];
+
+  const threshold = Math.max(2, Math.floor(anchor.length * 0.4));
+  const lines = content.split("\n");
+  const scored: ClosestMatch[] = [];
+
+  for (const needle of tokens) {
+    let candidates = 0;
+    for (let i = 0; i < lines.length && candidates < CLOSEST_MATCH_CANDIDATE_CAP; i++) {
+      const line = lines[i]!;
+      if (!line.includes(needle)) continue;
+      candidates++;
+      const trimmed = line.trim();
+      // Length-difference lower bound: skips pathological long lines
+      // (minified bundles) before the quadratic distance computation.
+      if (Math.abs(trimmed.length - anchor.length) > threshold) continue;
+      const distance = editDistance(trimmed, anchor);
+      if (distance <= threshold) {
+        scored.push({ line: i + 1, text: line, distance });
+      }
+    }
+    if (scored.length > 0) break;
+  }
+
+  scored.sort((a, b) => a.distance - b.distance || a.line - b.line);
+  return scored.slice(0, CLOSEST_MATCH_LIMIT);
+}
+
+/** Levenshtein distance, two-row DP. */
+function editDistance(a: string, b: string): number {
+  if (a === b) return 0;
+  const m = a.length;
+  const n = b.length;
+  if (m === 0) return n;
+  if (n === 0) return m;
+
+  let prev = new Array<number>(n + 1);
+  let curr = new Array<number>(n + 1);
+  for (let j = 0; j <= n; j++) prev[j] = j;
+
+  for (let i = 1; i <= m; i++) {
+    curr[0] = i;
+    for (let j = 1; j <= n; j++) {
+      const cost = a[i - 1] === b[j - 1] ? 0 : 1;
+      curr[j] = Math.min(prev[j]! + 1, curr[j - 1]! + 1, prev[j - 1]! + cost);
+    }
+    const tmp = prev;
+    prev = curr;
+    curr = tmp;
+  }
+  return prev[n]!;
 }

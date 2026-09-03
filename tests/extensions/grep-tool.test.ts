@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeAll, afterAll } from "bun:test";
 import fsSync from "node:fs";
 import path from "node:path";
-import { GrepTool } from "../../src/extensions/core-tools/grep.ts";
+import { GrepTool, grepNative } from "../../src/extensions/core-tools/grep.ts";
 import { resultStr, getDisplay, tmpDir, toolCtx, cleanupDir } from "../helpers.ts";
 
 let dir: string;
@@ -79,6 +79,28 @@ describe("GrepTool.execute", () => {
     expect(resultStr(result)).toContain("test.py");
     expect(resultStr(result)).toContain("item1");
     expect(resultStr(result)).toContain("item2");
+  });
+
+  it("is case-sensitive by default", async () => {
+    fsSync.writeFileSync(path.join(dir, "case.js"), "HelloCase sensitive");
+
+    const tool = new GrepTool({ maxResults: 100, maxOutputLines: 600 });
+    const result = getDisplay(
+      await tool.execute({ pattern: "hellocase", path: dir }, toolCtx()),
+    );
+
+    expect(resultStr(result)).toContain("No matches found");
+  });
+
+  it("matches case-insensitively with ignore_case", async () => {
+    fsSync.writeFileSync(path.join(dir, "case.js"), "HelloCase sensitive");
+
+    const tool = new GrepTool({ maxResults: 100, maxOutputLines: 600 });
+    const result = getDisplay(
+      await tool.execute({ pattern: "hellocase", path: dir, ignore_case: true }, toolCtx()),
+    );
+
+    expect(resultStr(result)).toContain("HelloCase");
   });
 
   it("filters by file type", async () => {
@@ -366,6 +388,23 @@ describe("GrepTool.execute — rg argument-injection guard", () => {
 
       expect(resultStr(result)).toContain("No matches found");
       expect(fsSync.existsSync(marker)).toBe(false);
+    } finally {
+      cleanupDir(dir2);
+    }
+  });
+});
+
+describe("grepNative ignoreCase", () => {
+  it("honors the ignoreCase flag in the native walker", async () => {
+    const dir2 = tmpDir();
+    try {
+      fsSync.writeFileSync(path.join(dir2, "a.txt"), "FooBar line\n");
+
+      const ci = await grepNative("foobar", dir2, 10, 0, null, true);
+      expect(ci.totalMatches).toBe(1);
+
+      const cs = await grepNative("foobar", dir2, 10, 0, null, false);
+      expect(cs.totalMatches).toBe(0);
     } finally {
       cleanupDir(dir2);
     }

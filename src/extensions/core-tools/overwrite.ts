@@ -52,7 +52,9 @@ export class OverwriteTool {
   ): Promise<ToolResult> {
     const rawArgs = parseToolInput(input);
     if (!rawArgs || !rawArgs.path || rawArgs.content === undefined) {
-      return ToolResult.err("Error parsing arguments");
+      return ToolResult.err(
+        "Error parsing arguments: expected a JSON object with required 'path' and 'content' strings",
+      );
     }
 
     const args: OverwriteArgs = {

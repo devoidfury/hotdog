@@ -42,6 +42,14 @@ export class ToolResult {
   success: boolean;
   outputTag: string | null;
   images: unknown[] | null;
+  /**
+   * Recovery guidance for the model (e.g. "use the find tool to locate the
+   * file"). Rendered as a structured hint element by the ToolFormat seam,
+   * right after the error on failures. The model-facing counterpart of
+   * AssistantRetryableError.hint for tools that RETURN errors instead of
+   * throwing them.
+   */
+  hint: string | null;
   [TOOL_STOP_LOOP]?: boolean;
 
   constructor({
@@ -51,6 +59,7 @@ export class ToolResult {
     success = true,
     outputTag = null,
     images = null,
+    hint = null,
   }: {
     output?: string;
     error?: string | null;
@@ -58,6 +67,7 @@ export class ToolResult {
     success?: boolean;
     outputTag?: string | null;
     images?: unknown[] | null;
+    hint?: string | null;
   } = {}) {
     this.output = output;
     this.error = error;
@@ -65,6 +75,7 @@ export class ToolResult {
     this.success = success;
     this.outputTag = outputTag;
     this.images = images;
+    this.hint = hint;
   }
 
   static ok(output: string): ToolResult {
@@ -92,6 +103,7 @@ export class ToolResult {
     success = true,
     outputTag = null,
     images = null,
+    hint = null,
   }: {
     output?: string;
     error?: string | null;
@@ -99,6 +111,7 @@ export class ToolResult {
     success?: boolean;
     outputTag?: string | null;
     images?: unknown[] | null;
+    hint?: string | null;
   } = {}): ToolResult {
     if (error !== null && success !== false) {
       success = false;
@@ -110,6 +123,7 @@ export class ToolResult {
       success,
       outputTag,
       images,
+      hint,
     });
   }
 
@@ -129,6 +143,11 @@ export class ToolResult {
 
   withOutputTag(tag: string | null): this {
     this.outputTag = tag;
+    return this;
+  }
+
+  withHint(hint: string): this {
+    this.hint = hint;
     return this;
   }
 
@@ -155,6 +174,9 @@ export class ToolResult {
     if (this.error) {
       parts.push(`Error: ${this.error}`);
     }
+    if (this.hint) {
+      parts.push(`HINT: ${this.hint}`);
+    }
     return parts.join("\n");
   }
 
@@ -175,11 +197,12 @@ export class ToolResult {
     // The resolved ToolFormat owns model-facing rendering (the agent loop
     // resolves it per model and passes the name + registry explicitly). The
     // wire serializer is still the only mangle point (tool results are
-    // source:"tool").
+    // source:"tool"). The hint rides in the meta parameter so every format
+    // sees it identically on both render paths.
     const content = seamToolFormat(toolFormatName, registry).formatResult(
       { output: this.output, outputTag: tag, ...meta },
       toolName,
-      { status },
+      { status, ...(this.hint ? { hint: this.hint } : {}) },
     );
     return typeof content === "string" ? content : JSON.stringify(content);
   }
@@ -370,12 +393,18 @@ export function getRequiredStr(
   return v;
 }
 
+/**
+ * @param hint - Recovery guidance rendered by the format as a hint element
+ *   (the thrown-error path in ToolExecutor). Only applies to plain payload
+ *   results; a ToolResult instance carries its own hint and wins.
+ */
 export function formatToolResult(
   result: unknown,
   toolName: string,
   success: boolean,
   toolFormatName?: string,
   registry?: ToolFormatRegistry | null,
+  hint?: string,
 ): string {
   if (result && typeof (result as { toApiContent?: (name: string, fmt?: string, reg?: unknown) => string }).toApiContent === "function") {
     return (result as { toApiContent: (name: string, fmt?: string, reg?: unknown) => string }).toApiContent(toolName, toolFormatName, registry);
@@ -383,6 +412,9 @@ export function formatToolResult(
 
   const status = success ? "success" : "error";
   const payload = typeof result === "object" && result !== null ? JSON.stringify(result) : String(result);
-  const content = seamToolFormat(toolFormatName, registry).formatResult(payload, toolName, { status });
+  const content = seamToolFormat(toolFormatName, registry).formatResult(payload, toolName, {
+    status,
+    ...(hint ? { hint } : {}),
+  });
   return typeof content === "string" ? content : JSON.stringify(content);
 }

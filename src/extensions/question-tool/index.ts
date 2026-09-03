@@ -176,7 +176,6 @@ export class QuestionTool {
     const mode = inputInterface.isInteractive() ? "interactive" : "non-interactive";
 
     return ToolResult.ok(JSON.stringify(answers, null, 2)).withEntries({
-      status: "success",
       mode,
       questions_asked: String(questions.length),
       questions_answered: String(Object.keys(answers).length),

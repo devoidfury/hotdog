@@ -2,7 +2,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { execFile } from "node:child_process";
 import util from "node:util";
-import { toolDef, param, ToolResult, defaultCallDisplay } from "../../core/extensions/tool-utils.ts";
+import { toolDef, param, ToolResult, defaultCallDisplay, parseToolInput } from "../../core/extensions/tool-utils.ts";
 import type { ToolMetadata } from "../../core/extensions/tool-registry.ts";
 import { DEFAULT_GREP_MAX_RESULTS } from "./defaults.ts";
 import { correctCommonPathMistakes } from "../../utils/file-utils.ts";
@@ -54,10 +54,24 @@ export class ProjectInfoTool {
   }
 
   async execute(input: string | Record<string, unknown> | null, ctx: ToolContext): Promise<ToolResult> {
-    const args: Record<string, unknown> = typeof input === "string" ? JSON.parse(input) : (input as Record<string, unknown>);
-    let cwd = args.path as string || ".";
-    const maxDepth = args.max_depth as number || DEFAULT_DU_DEPTH;
-    const maxFiles = args.max_files as number || DEFAULT_GREP_MAX_RESULTS;
+    const args = parseToolInput(input);
+    if (!args) {
+      return ToolResult.err(
+        "Error parsing arguments: expected a JSON object (optional: path, max_depth, max_files)",
+      );
+    }
+
+    const rawPath = args.path;
+    let cwd = typeof rawPath === "string" && rawPath ? rawPath : ".";
+    // Validate because values reach du as CLI args / an invalid max_depth causes du to fail.
+    const maxDepth =
+      typeof args.max_depth === "number" && Number.isInteger(args.max_depth) && args.max_depth >= 0
+        ? args.max_depth
+        : DEFAULT_DU_DEPTH;
+    const maxFiles =
+      typeof args.max_files === "number" && Number.isInteger(args.max_files) && args.max_files >= 1
+        ? args.max_files
+        : DEFAULT_GREP_MAX_RESULTS;
 
     [cwd] = correctCommonPathMistakes(cwd);
 

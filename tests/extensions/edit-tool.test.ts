@@ -2,6 +2,7 @@ import { describe, it, expect, beforeAll, afterAll } from 'bun:test';
 import fsSync from 'node:fs';
 import path from 'node:path';
 import { EditTool } from '../../src/extensions/core-tools/edit.ts';
+import type { ToolResult } from '../../src/core/extensions/tool-utils.ts';
 import { resultStr, tmpDir, toolCtx, cleanupDir } from '../helpers.ts';
 
 let dir: string;
@@ -83,6 +84,22 @@ describe('EditTool.execute — exact match', () => {
     expect(fsSync.readFileSync(filePath, 'utf-8')).toBe('hello universe hello');
     expect(resultStr(result)).toContain('Successfully edited');
     expect(resultStr(result)).toContain('found 1 match');
+  });
+
+  it('returns a failed result with a hint when the file does not exist', async () => {
+    const tool = new EditTool({ maxEditInputSize: 16000 });
+    const result = await tool.execute(
+      { path: 'missing.txt', oldString: 'a', newString: 'b' },
+      toolCtx({ workspaceRoots: [dir] })
+    );
+
+    expect(result.success).toBe(false);
+    expect(resultStr(result)).toContain('File not found');
+    expect(result.hint).toMatch(/find tool/);
+    // Model-facing rendering carries the hint as a structured element.
+    const content = (result as ToolResult).toApiContent('edit');
+    expect(content).toContain('<hint>');
+    expect(content).toContain('find tool');
   });
 
   it('replaces all occurrences with replace_all', async () => {

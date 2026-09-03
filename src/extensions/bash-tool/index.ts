@@ -67,7 +67,7 @@ export class BashTool {
 
   toToolDef() {
     const capNote = this.maxTimeoutMs ? ` Capped at ${this.maxTimeoutMs}ms.` : "";
-    return toolDef(BashTool.TOOL_NAME, `Execute a bash command from the current working directory.`, {
+    return toolDef(BashTool.TOOL_NAME, `Execute a bash command from primary workspace root. Returns combined stdout/stderr.`, {
       properties: {
         command: param("string", "The shell command to execute."),
         timeoutMs: param("integer", `Optional timeout in milliseconds.${capNote}`, {

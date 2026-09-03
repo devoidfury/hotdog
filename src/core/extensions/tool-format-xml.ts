@@ -33,7 +33,7 @@ const SHORT_META_KEYS = new Set([
 function xmlResult(
   result: string | Record<string, unknown>,
   toolName: string,
-  meta?: { status: string; [key: string]: string },
+  meta?: { status: string; hint?: string; [key: string]: string | undefined },
 ): string {
   const status = meta?.status || "success";
 
@@ -55,6 +55,9 @@ function xmlResult(
   // position); otherwise an "error" key is just metadata like any other.
   const metaEntries: [string, unknown][] = [];
   let errorValue: unknown = null;
+  // Hint: recovery guidance arriving via the meta parameter on both render
+  // paths (ToolResult.toApiContent and formatToolResult).
+  const hintValue = typeof meta?.hint === "string" && meta.hint ? meta.hint : null;
   if (isObject) {
     for (const key of Object.keys(obj)) {
       if (key === "output" || key === "outputTag") continue;
@@ -63,7 +66,7 @@ function xmlResult(
     }
   } else if (meta) {
     for (const [key, value] of Object.entries(meta)) {
-      if (key === "status" || key === "outputTag") continue;
+      if (key === "status" || key === "outputTag" || key === "hint") continue;
       if (key === "error" && status !== "success") { errorValue = value; continue; }
       metaEntries.push([key, value]);
     }
@@ -81,16 +84,25 @@ function xmlResult(
   // Error text: always the first child (pre-seam position), raw/unescaped,
   // emitted only on failure -- matching pre-seam XML on both the plain and
   // the toApiContent() object paths.
+  const children: string[] = [];
   if (errorValue != null && status !== "success") {
-    longMeta.unshift(`  <error>${String(errorValue)}</error>`);
+    children.push(`  <error>${String(errorValue)}</error>`);
   }
+  children.push(...longMeta);
 
   // Output: toApiContent() passes the object (output is raw, matching the
   // pre-seam behavior); plain payloads are XML-escaped as before.
   const outputContent = isObject ? String(obj.output ?? "") : xmlEscape(result as string);
   const parts: string[] = [`<tool ${attrs.join(" ")}>`];
-  parts.push(...longMeta);
+  parts.push(...children);
   parts.push(`  <${tag}>${outputContent}</${tag}>`);
+  // Hint: recovery guidance, always the last child so it directly follows
+  // the error text on both render paths (object: after the error element;
+  // plain: after the payload carrying the error message). Tool-authored,
+  // emitted raw like the error text.
+  if (hintValue != null) {
+    parts.push(`  <hint>${String(hintValue)}</hint>`);
+  }
   parts.push("</tool>");
 
   return parts.join("\n");
@@ -98,7 +110,7 @@ function xmlResult(
 
 export const xmlToolFormat: ToolFormat = {
   id: "xml",
-  markers: ["tool", "output", "error"],
+  markers: ["tool", "output", "error", "hint"],
   formatResult(result, toolName, meta) {
     return xmlResult(result, toolName, meta);
   },

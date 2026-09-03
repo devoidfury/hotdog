@@ -52,7 +52,7 @@ export class ReadTool {
   toToolDef() {
     return toolDef(
       ReadTool.TOOL_NAME,
-      `Read a file's contents with optional pagination. Supports text files (line-based extraction with offset/limit) and image files (jpeg, png, webp, base64). For directories, returns an error with a depth-1 listing.`,
+      `Read a file's contents with optional pagination. Supports text files (line-based extraction with offset/limit) and image files (jpeg, png, webp, base64). For directories, returns a depth-1 listing of the contents.`,
       {
         properties: {
           path: param(

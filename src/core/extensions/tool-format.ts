@@ -21,12 +21,14 @@ export interface ToolFormat {
 
   /**
    * Model-facing content for a tool result message (string or content parts).
-   * `meta` carries at least `{ status }` plus any short metadata entries.
+   * `meta` carries at least `{ status }`, an optional `hint` (recovery
+   * guidance for the model, present on failed results), plus any short
+   * metadata entries.
    */
   formatResult(
     result: string | Record<string, unknown>,
     toolName: string,
-    meta?: { status: string; [key: string]: string },
+    meta?: { status: string; hint?: string; [key: string]: string | undefined },
   ): string | Array<Record<string, unknown>>;
 
   /**

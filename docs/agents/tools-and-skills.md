@@ -28,7 +28,13 @@ Tools without metadata are excluded when filtering is active (conservative defau
 **Tool definition helpers** (from `src/core/extensions/tool-utils.ts`):
 - `toolDef(name, description, parameters)` — creates OpenAI function-calling schema
 - `param(typeName, description, extra)` — creates parameter definition with JSON Schema fields (enum, min/max, etc.)
-- `ToolResult` — structured result with `output`, `error`, `metadata`, `success`, `outputTag`, `toDisplay()`, `toApiContent()`
+- `ToolResult` — structured result with `output`, `error`, `hint`, `metadata`, `success`, `outputTag`, `toDisplay()`, `toApiContent()`
+
+**Recovery hints** — tools that detect a model mistake (wrong path, bad regex, missing arg) attach recovery guidance so the model can self-correct in the next call:
+- Returned errors: `ToolResult.err("File not found: x").withHint("Use the find tool...")`
+- Thrown errors: `AssistantRetryableError.WithHint(message, hint)` (kept for flows where the tool genuinely cannot produce a result, e.g. mid-stream validation)
+
+Both render identically for the model: the ToolFormat seam emits the hint as a structured `hint` element after the error (the element name is in `xmlToolFormat.markers`, so the wire mangler protects it). Human-facing `toDisplay()` shows it as a `HINT:` line.
 - `parseToolInput(input)` — safe argument parsing returning null on failure
 - `defaultCallDisplay(input, templateFn, options)` — default display formatter for tools
 

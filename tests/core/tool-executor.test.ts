@@ -8,7 +8,7 @@ import { tmpDir, cleanupDir } from '../mocks/io.ts';
 import { createToolRegistry } from '../../src/core/extensions/tool-registry.ts';
 import { createHooks } from '../../src/core/hooks.ts';
 import { Message } from '../../src/core/context/message.ts';
-import { TransientError } from '../../src/core/error.ts';
+import { TransientError, AssistantRetryableError } from '../../src/core/error.ts';
 import type { Tool, ToolDef } from '../../src/core/extensions/tool-registry.ts';
 import { createToolFormatRegistry } from '../../src/core/extensions/tool-format.ts';
 import { xmlToolFormat } from '../../src/core/extensions/tool-format-xml.ts';
@@ -594,6 +594,29 @@ describe('ToolExecutor', () => {
 
       expect(result.toolResults[0]!.result).toContain('Error executing tool');
       expect(result.toolResults[0]!.result).toContain('boom');
+    });
+
+    it('routes AssistantRetryableError hints through the ToolFormat seam', async () => {
+      const deps = createMockDeps();
+      deps.toolRegistry.register('hint_tool', makeTestTool('hint_tool', async () => {
+        throw AssistantRetryableError.WithHint(
+          'File not found: x.txt',
+          'Use the find tool to locate the file.',
+        );
+      }));
+
+      const executor = createToolExecutor(deps);
+      const result = await executor.execute([{
+        id: 'call-1',
+        type: 'function',
+        function: { name: 'hint_tool', arguments: '{}' },
+      }]);
+
+      const rendered = result.toolResults[0]!.result;
+      expect(rendered).toContain('Error executing tool hint_tool: File not found: x.txt');
+      // The hint is a structured element now, not inlined "HINT:" text.
+      expect(rendered).not.toContain('HINT:');
+      expect(rendered).toContain('<hint>Use the find tool to locate the file.</hint>');
     });
   });
 

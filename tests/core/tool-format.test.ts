@@ -199,6 +199,23 @@ describe("tool-utils seam delegates to the session's registry", () => {
     expect(formatToolResult(ToolResult.ok("x"), "bash", true, "md-table", reg)).toContain("| bash | success |");
   });
 
+  it("xml format renders the hint as a child element (plain payload path)", () => {
+    const content = xmlToolFormat.formatResult(
+      "Error executing tool edit: File not found: x",
+      "edit",
+      { status: "error", hint: "Use the find tool to locate the file." },
+    ) as string;
+    expect(content).toContain('status="error"');
+    expect(content).toContain("<hint>Use the find tool to locate the file.</hint>");
+    // the payload (carrying the error text) renders ahead of the hint
+    expect(content.indexOf("File not found: x")).toBeLessThan(content.indexOf("<hint>"));
+  });
+
+  it("xml format renders no hint element when meta has none", () => {
+    expect(xmlToolFormat.formatResult("boom", "bash", { status: "error" })).not.toContain("<hint>");
+    expect(xmlToolFormat.formatResult("ok", "bash", { status: "success" })).not.toContain("<hint>");
+  });
+
   it("two sessions with different registries do not interfere", () => {
     const sessionA = createToolFormatRegistry();
     sessionA.register(mdTableFormat);

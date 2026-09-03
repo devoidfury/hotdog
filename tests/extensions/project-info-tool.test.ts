@@ -77,6 +77,38 @@ describe('ProjectInfoTool', () => {
     // Should return partial info since tmpDir is not a git repo
     expect(resultStr(result)).toContain('=== Project Info ===');
   });
+
+  it('returns a clean parse error for unparseable input', async () => {
+    const tool = new ProjectInfoTool();
+    const result = await tool.execute('not json at all', toolCtx({ workspaceRoots: [tmpDir] }));
+    expect(result.success).toBe(false);
+    expect(resultStr(result)).toContain('Error parsing arguments');
+  });
+
+  it('returns a clean parse error for null input instead of throwing', async () => {
+    const tool = new ProjectInfoTool();
+    const result = await tool.execute(null, toolCtx({ workspaceRoots: [tmpDir] }));
+    expect(result.success).toBe(false);
+    expect(resultStr(result)).toContain('Error parsing arguments');
+  });
+
+  it('falls back to defaults for non-numeric tuning args', async () => {
+    const sub = path.join(tmpDir, 'sub');
+    fs.mkdirSync(sub, { recursive: true });
+    fs.writeFileSync(path.join(sub, 'a.txt'), 'x');
+
+    const tool = new ProjectInfoTool();
+    const result = await tool.execute(
+      JSON.stringify({ path: tmpDir, max_depth: 'abc', max_files: -5 }),
+      toolCtx({ workspaceRoots: [tmpDir] })
+    );
+
+    // A string max_depth used to reach du verbatim, failing it and
+    // silently dropping the Directories section; it must fall back now.
+    expect(resultStr(result)).toContain('=== Project Info ===');
+    expect(resultStr(result)).toContain('Directories');
+    expect(resultStr(result)).toContain('sub');
+  });
 });
 
 // Test the extensionToLanguage mapping through the tool's output

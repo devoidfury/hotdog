@@ -177,6 +177,7 @@ export class ToolExecutor {
     let result: unknown;
     let success = false;
     let stopLoop = false;
+    let hint: string | undefined;
 
     // maxRetries counts retries AFTER the initial attempt (total attempts = 1 + maxRetries).
     const maxAttempts = 1 + Math.max(0, this.#deps.maxRetries);
@@ -207,8 +208,11 @@ export class ToolExecutor {
         }
 
         if (e instanceof AssistantRetryableError) {
-          const hint = e.hint ? `\n\nHINT: ${e.hint}` : "";
-          result = `Error executing tool ${toolName}: ${e.message}${hint}`;
+          result = `Error executing tool ${toolName}: ${e.message}`;
+          // Route the hint through the ToolFormat seam instead of inlining
+          // it in the error text: thrown errors and returned
+          // ToolResult.err().withHint() then render identically for the model.
+          hint = e.hint;
         } else {
           result = `Error executing tool ${toolName}: ${(e as Error).message}`;
         }
@@ -239,7 +243,7 @@ export class ToolExecutor {
     }
     const images = (result as { images?: unknown })?.images ?? null;
 
-    const resultStr = formatToolResult(result, toolName, success, toolFormatName, toolFormatRegistry);
+    const resultStr = formatToolResult(result, toolName, success, toolFormatName, toolFormatRegistry, hint);
     const durationMs = Date.now() - t0;
     const resultSize = typeof resultStr === "string" ? resultStr.length : 0;
     hooks.notifyHooks(HOOKS.TOOL_METRICS, {

@@ -183,6 +183,16 @@ describe("ToolResult", () => {
     expect(r.images).toBe(images);
   });
 
+  it("chains withHint", () => {
+    const r = ToolResult.err("boom").withHint("try a different path");
+    expect(r.hint).toBe("try a different path");
+  });
+
+  it("hint defaults to null", () => {
+    expect(ToolResult.ok("ok").hint).toBe(null);
+    expect(ToolResult.err("nope").hint).toBe(null);
+  });
+
   it("toDisplay returns output", () => {
     expect(ToolResult.ok("hello world").toDisplay()).toBe("hello world");
   });
@@ -199,6 +209,11 @@ describe("ToolResult", () => {
     expect(r.toDisplay()).toBe("partial output\nError: partial failure");
   });
 
+  it("toDisplay appends HINT after the error", () => {
+    const r = ToolResult.err("File not found: x").withHint("check the path");
+    expect(r.toDisplay()).toBe("Error: File not found: x\nHINT: check the path");
+  });
+
   it("toApiContent success no metadata", () => {
     const r = ToolResult.ok("hello world");
     const content = r.toApiContent("bash");
@@ -213,6 +228,28 @@ describe("ToolResult", () => {
     expect(content).toContain('<tool name="bash" status="failure">');
     expect(content).toContain("<error>command not found</error>");
     expect(content).toContain("<output></output>");
+  });
+
+  it("toApiContent failure with hint renders the hint element after the error", () => {
+    const r = ToolResult.err("File not found: x").withHint("check the path");
+    const content = r.toApiContent("edit");
+    expect(content).toContain('<tool name="edit" status="failure">');
+    expect(content).toContain("<hint>check the path</hint>");
+    // error text stays ahead of the hint text
+    expect(content.indexOf("File not found: x")).toBeLessThan(content.indexOf("<hint>"));
+    // the hint is not a metadata attribute
+    expect(content).not.toContain("hint=");
+  });
+
+  it("toApiContent success with hint renders the hint element", () => {
+    const content = ToolResult.ok("done").withHint("truncated; use offset for more").toApiContent("read");
+    expect(content).toContain('<tool name="read" status="success">');
+    expect(content).toContain("<hint>truncated; use offset for more</hint>");
+  });
+
+  it("toApiContent renders no hint element when unset", () => {
+    expect(ToolResult.err("boom").toApiContent("bash")).not.toContain("<hint>");
+    expect(ToolResult.ok("fine").toApiContent("bash")).not.toContain("<hint>");
   });
 
   it("toApiContent with metadata", () => {

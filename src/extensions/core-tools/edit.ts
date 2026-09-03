@@ -107,7 +107,15 @@ export class EditTool {
     try {
       sourceContent = await fs.readFile(resolvedPath, "utf-8");
     } catch (e: unknown) {
-      return ToolResult.err(`File not found or unreadable '${filePath}': ${(e as Error).message}`);
+      // A missing file is a model mistake: return (don't throw) with a
+      // structured hint so the model can self-correct, mirroring the
+      // thrown AssistantRetryableError path.
+      if ((e as NodeJS.ErrnoException).code === "ENOENT") {
+        return ToolResult.err(`File not found: ${filePath}`).withHint(
+          "Check the path is correct. Use the find tool to locate the file, or read the containing directory to list its contents.",
+        );
+      }
+      return ToolResult.err(`Failed to read file '${filePath}': ${(e as Error).message}`);
     }
 
     const result = findAndReplace(sourceContent, oldString, newString, replaceAll || false);

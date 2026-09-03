@@ -1,7 +1,5 @@
-// Measures a string in four units in a single call. The units matter: they
-// diverge for emoji (surrogate pairs), CJK, and combining sequences.
-// Models are unreliable at counting characters themselves, so this offloads the
-// measurement to deterministic code and removes the unit ambiguity.
+// Measures a string in four units. The units matter: they diverge for emoji (surrogate pairs), CJK, and combining sequences.
+// Models are unreliable at counting characters, give them the option for deterministic measurements removing unit ambiguity.
 
 import {
   toolDef,
@@ -12,11 +10,7 @@ import {
 } from "@core/extensions/tool-utils.ts";
 import type { ToolMetadata } from "@core/extensions/tool-registry.ts";
 import { HOOKS } from "@core/hooks.ts";
-import type {
-  CoreContext,
-  ExtensionInstance,
-  ToolContext,
-} from "@core/extensions/types.ts";
+import type { CoreContext, ExtensionInstance, ToolContext } from "@core/extensions/types.ts";
 
 export interface StringLengthResult {
   /** JS `.length` — UTF-16 code units (emoji count as 2). */
@@ -65,9 +59,7 @@ export class StringLengthTool {
       StringLengthTool.TOOL_NAME,
       "Use to measure length of a string, returns four units: utf16, codepoints, bytes (UTF-8), and graphemes -- these differ for emoji, CJK, and combining marks. Prefer this over counting in your head.",
       {
-        properties: {
-          string: param("string", "The string to measure."),
-        },
+        properties: { string: param("string", "The string to measure.") },
         required: ["string"],
       },
     );
@@ -93,7 +85,6 @@ export class StringLengthTool {
 
     const result = measureString(s);
     return ToolResult.ok(JSON.stringify(result)).withEntries({
-      status: "success",
       utf16: String(result.utf16),
       codepoints: String(result.codepoints),
       bytes: String(result.bytes),
@@ -105,11 +96,10 @@ export class StringLengthTool {
 // ── Extension Entry Point ───────────────────────────────────────────────────
 
 export function create(_core: CoreContext): ExtensionInstance {
-  const tool = new StringLengthTool();
-
   return {
     hooks: {
       [HOOKS.TOOLS_REGISTER]: async (registry) => {
+        const tool = new StringLengthTool();
         registry.register(StringLengthTool.TOOL_NAME, tool);
       },
     },

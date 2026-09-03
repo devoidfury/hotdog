@@ -40,6 +40,7 @@ const resolved = {
   maxRetries: 5,
   toolRetryDelay: 1,
   workspaceRoots: ["/tmp"],
+  workspaceDeny: ["secrets*"],
 };
 
 describe("createAgentFactory", () => {
@@ -59,8 +60,43 @@ describe("createAgentFactory", () => {
     // config bag: raw config spread + resolved numeric overrides
     expect((agent.config as Record<string, unknown>).coreOnly).toBe(true);
     expect((agent.config as Record<string, unknown>).maxToolCallsPerIteration).toBe(10);
+    expect((agent.config as Record<string, unknown>).workspaceDeny).toEqual(["secrets*"]);
     // COMMANDS_REGISTER fires on every construction
     expect(calls.some((c) => c[0] === HOOKS.COMMANDS_REGISTER)).toBe(true);
+  });
+
+  it("carries a user-configured workspace.deny into agent config (regression)", async () => {
+    // workspace.deny is resolved into resolved.workspaceDeny, but the factory
+    // previously only forwarded workspaceRoots, so ToolExecutor fell back to
+    // the built-in DEFAULT_DENY_PATTERNS and the user's deny list was
+    // silently ignored in every factory-based UI.
+    const { core } = makeCore();
+    const factory = createAgentFactory(core, { resolved: resolved as never, llmClient: {} as never });
+    const agent = await factory();
+    expect((agent.config as Record<string, unknown>).workspaceDeny).toEqual(["secrets*"]);
+  });
+
+  it("survives an explicit empty workspaceDeny (denylist disabled)", async () => {
+    // docs/config-reference.md: an explicit [] disables the denylist. [] must
+    // reach the agent as [], not be coerced to null (built-in defaults).
+    const { core } = makeCore();
+    const factory = createAgentFactory(core, {
+      resolved: { ...resolved, workspaceDeny: [] } as never,
+      llmClient: {} as never,
+    });
+    const agent = await factory();
+    expect((agent.config as Record<string, unknown>).workspaceDeny).toEqual([]);
+  });
+
+  it("yields null workspaceDeny when unresolved (built-in defaults apply)", async () => {
+    // Custom hosts may pass a partial resolved bag; null signals "unconfigured"
+    // so ToolExecutor applies the built-in DEFAULT_DENY_PATTERNS.
+    const { core } = makeCore();
+    const rest = { ...resolved } as Record<string, unknown>;
+    delete rest.workspaceDeny;
+    const factory = createAgentFactory(core, { resolved: rest as never, llmClient: {} as never });
+    const agent = await factory();
+    expect((agent.config as Record<string, unknown>).workspaceDeny).toBeNull();
   });
 
   it("agentConfig overrides win over resolved", async () => {

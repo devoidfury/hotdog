@@ -68,6 +68,10 @@ export function createAgentFactory(
         maxRetries: resolved.maxRetries as number,
         toolRetryDelay: resolved.toolRetryDelay as number,
         workspaceRoots: (resolved.workspaceRoots as string[]) || [process.cwd()],
+        // Carry the resolved deny list through verbatim, including an
+        // explicit [] (denylist disabled by config). null means unresolved
+        // so ToolExecutor applies the built-in DEFAULT_DENY_PATTERNS.
+        workspaceDeny: (resolved.workspaceDeny as readonly string[] | undefined) ?? null,
       },
       sessionId: (agentConfig.sessionId as string) || crypto.randomUUID(),
       abortSignal: (agentConfig.abortSignal as AbortSignal | null | undefined) ?? null,

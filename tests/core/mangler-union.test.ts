@@ -28,8 +28,8 @@ describe("characterization: default-config mangler union", () => {
     expect(mangler.protectedPrefixes().sort()).toEqual([...DEFAULT_UNION].sort());
   });
 
-  it("core list excludes format-owned names; xml markers are exactly tool/output/error", () => {
-    expect(xmlToolFormat.markers).toEqual(["tool", "output", "error"]);
+  it("core list excludes format-owned names; xml markers are exactly tool/output/error/hint", () => {
+    expect(xmlToolFormat.markers).toEqual(["tool", "output", "error", "hint"]);
     for (const m of xmlToolFormat.markers) {
       expect(CORE_PROTECTED_PREFIXES).not.toContain(m);
     }

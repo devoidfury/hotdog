@@ -439,6 +439,7 @@ async function runShowPrompt(cli: CliArgv, core: CoreContext): Promise<number> {
     profileName: resolved.profileName || "default",
     role: resolved.role,
     profileBody: resolved.profileBody,
+    systemPromptTemplate: resolved.systemPromptTemplate,
     config: resolved,
   });
   await agent.ensureSystemPrompt();

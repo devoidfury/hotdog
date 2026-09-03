@@ -31,7 +31,7 @@ Split into sub-modules. The single source of truth is `src/core/core.config.json
 - `src/core/config/defaults.ts` — static path constants, runtime fallbacks (e.g., `DEFAULT_PROFILES_SUBPATH`, `DEFAULT_SYSTEM_PROMPT_TEMPLATE`), and `resolveConfigDir()` — the single config-dir resolution chain (CLI arg > `HOTDOG_CONFIG_DIR` > CWD `config/` > `/etc/hotdog` > `~/.config/hotdog`); all configurable defaults are resolved from the schema; components receive resolved values from callers instead of importing these directly
 - `src/core/config/schema-loader.ts` — reads `core.config.json`, builds `CONFIG_SCHEMA`, cast functions, CLI flags, and resolvers (`resolveKey()`, `resolveAll()`, `resolveModel()`, `resolveModelWithProvider()`, `resolveExtensionConfig()`, `cliFlagsFromSchema()`); also `getLayerDefault()` and `schemaDefaults()` (literal schema defaults, skipping compute defaults)
 - `src/core/config/profiles.ts` — `loadProfileFile()`, `loadProfileFiles()`, `resolveProfile()`, `mergeProfile()`
-- `src/core/config/providers.ts` — `buildModelRegistry()`, `resolveProvider()`, `initSystemPromptTemplate(templatePath?, configDir?)` (template file = `templatePath ?? <configDir ?? resolveConfigDir()>/system_prompt.md`), `resetSystemPromptCache()`
+- `src/core/config/providers.ts` — `buildModelRegistry()`, `resolveProvider()`, `initSystemPromptTemplate(templatePath?, configDir?)` (pure loader, no cache; template file = `templatePath ?? <configDir ?? resolveConfigDir()>/system_prompt.md`). `buildConfig()` calls it once and hands the loaded text to agents via `resolved.systemPromptTemplate` / `AgentOptions.systemPromptTemplate`
 
 ### Config Registry (`src/core/extensions/config.ts`)
 Manages extension-registered CLI flags and config parameters. Config params and CLI flags are defined in `extension.json` (configSchema and cli:flags), with defaults automatically extracted and registered by the extension loader.
@@ -88,7 +88,7 @@ Discovers, loads, and manages extensions. Key exports:
 
 ### Agent (`src/core/agent.ts`)
 Minimal Agent class that runs the LLM loop and delegates behavior to hooks. Key features:
-- Constructor takes `options` object: `hooks`, `toolRegistry`, `llmClient`, `model`, `maxIterations`, `contextLimit`, `hideTools`, `hideThinking`, `showTokenUse`, `sink`, `modelRegistry`, `profileName`, `role`, `profileBody`, `stream`, `config`, `sessionId`, `abortSignal`, `toolWhitelist`, `commandRegistry`, `enqueueCallback`
+- Constructor takes `options` object: `hooks`, `toolRegistry`, `llmClient`, `model`, `maxIterations`, `contextLimit`, `hideTools`, `hideThinking`, `showTokenUse`, `sink`, `modelRegistry`, `profileName`, `role`, `profileBody`, `systemPromptTemplate` (loaded template text from the resolved config), `stream`, `config`, `sessionId`, `abortSignal`, `toolWhitelist`, `commandRegistry`, `enqueueCallback`
 - `run(userInput)` — main iteration loop: add user message → build messages → LLM call → process stream → execute tools → repeat
 - `ensureSystemPrompt()` — builds system prompt via hooks (extensions contribute)
 - `_processStream(stream)` — processes streaming LLM response (content, reasoning, tool calls, usage)
@@ -169,16 +169,17 @@ Tera-like template engine supporting `{{ vars }}`, `{% if %}`, `{% for %}`, filt
 
 ### System Prompt (`src/core/context/system-prompt.ts`)
 System prompt building. Key exports:
-- `buildSystemPrompt(role, body, model, profileName, chunks, templatePath?)` — builds full system prompt from chunks contributed by extensions via `SYSTEM_PROMPT_BUILD` hook
-- `loadSystemPromptTemplate(templatePath)` — loads the system prompt template from disk
+- `buildSystemPrompt(role, body, model, profileName, chunks, template?)` — builds full system prompt from chunks contributed by extensions via `SYSTEM_PROMPT_BUILD` hook. `template` is the loaded template **text**; when omitted it is loaded from the config dir via `initSystemPromptTemplate()` (standalone callers only — the agent pipeline always passes the resolved template)
 - `collectSystemPromptChunks(results)` — collects and sorts system prompt chunks from hook results
-- `SystemPromptBuilder` class — manages system prompt lifecycle with caching (`build()`, `ensureBuilt()`, `getPrompt()`, `clear()`)
-- `createSystemPromptBuilder(templatePath?)` — factory for SystemPromptBuilder
+- `SystemPromptBuilder` class — manages system prompt lifecycle with caching (`build()`, `ensureBuilt()`, `getPrompt()`, `clear()`). Constructor takes the loaded template **text** (not a path); it is passed in from the resolved config
+- `createSystemPromptBuilder(template?)` — factory for SystemPromptBuilder
+
+There is no process-wide template cache: the resolved template travels explicitly (buildConfig → `AgentOptions.systemPromptTemplate` → `ContextManager` → `SystemPromptBuilder`).
 
 **Note**: `loadAspects()` lives in `src/utils/file-utils.ts` and `loadAgentsMd()` lives in `src/extensions/agents-md/index.ts` — neither is in this file.
 
 ### Context Manager (`src/core/context/context-manager.ts`)
-Composes `MessageLog`, `TokenTracker`, and `SystemPromptBuilder` behind a single interface held by the agent as `agent.context`. Key methods: `addMessage()`, `getMessages()`, `replaceMessages()`, `clear()`, `getSystem()`/`getNonSystem()`, `getSystemPrompt()`, `clearSystemPrompt()`, `ensureSystemPrompt()`, `recordUsage()`, `getTokenUsage()`, `estimateTokens()`, `buildForLlmCall()`. `createContextManager(templatePath?)` — factory.
+Composes `MessageLog`, `TokenTracker`, and `SystemPromptBuilder` behind a single interface held by the agent as `agent.context`. Key methods: `addMessage()`, `getMessages()`, `replaceMessages()`, `clear()`, `getSystem()`/`getNonSystem()`, `getSystemPrompt()`, `clearSystemPrompt()`, `ensureSystemPrompt()`, `recordUsage()`, `getTokenUsage()`, `estimateTokens()`, `buildForLlmCall()`. `createContextManager(template?)` — factory (template is the loaded template text).
 
 ### Command Handlers (`src/core/command-handlers.ts`)
 Built-in command handler implementations for core commands. Extracted from `agent.ts` so the agent only does generic dispatch. Key exports:

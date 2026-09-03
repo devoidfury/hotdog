@@ -1,17 +1,6 @@
-import { initSystemPromptTemplate as _initTemplate } from "../config/providers.ts";
+import { initSystemPromptTemplate } from "../config/providers.ts";
 import { render } from "../../utils/render.ts";
 import { HOOKS, type SystemPromptChunk } from "../hooks.ts";
-
-let cachedTemplate: string | null = null;
-
-export async function loadSystemPromptTemplate(
-  templatePath?: string,
-): Promise<string> {
-  if (cachedTemplate) return cachedTemplate;
-
-  cachedTemplate = await _initTemplate(templatePath);
-  return cachedTemplate;
-}
 
 /** Chunks from hook results, prefixed with the handler's registration source, sorted by priority. */
 export function collectSystemPromptChunks(
@@ -38,16 +27,21 @@ export function collectSystemPromptChunks(
 }
 
 
-/** Renders the template with role/body and extension-contributed chunks. */
+/**
+ * Renders the template with role/body and extension-contributed chunks.
+ * `template` is the loaded template TEXT; when omitted it is loaded from
+ * the config dir (standalone callers only -- the agent pipeline always
+ * passes the resolved template explicitly).
+ */
 export async function buildSystemPrompt(
   role: string,
   body: string,
   model: string,
   profileName: string,
   chunks: SystemPromptChunk[],
-  templatePath?: string,
+  template?: string,
 ): Promise<string> {
-  const template = await loadSystemPromptTemplate(templatePath);
+  const tpl = template || (await initSystemPromptTemplate());
 
   const context = {
     role: role || "",
@@ -57,7 +51,7 @@ export async function buildSystemPrompt(
     chunks: chunks || [],
   };
 
-  return render(template, context);
+  return render(tpl, context);
 }
 
 export interface AgentConfigForPrompt {
@@ -69,10 +63,15 @@ export interface AgentConfigForPrompt {
 
 export class SystemPromptBuilder {
   #cachedPrompt: string | null = null;
-  #templatePath: string | undefined;
+  #template: string | null = null;
 
-  constructor(templatePath?: string) {
-    this.#templatePath = templatePath;
+  /**
+   * @param template - Loaded template text (from buildConfig's resolved
+   *   config). Omitted only by standalone callers; build() then falls back
+   *   to config-dir resolution.
+   */
+  constructor(template?: string) {
+    this.#template = template || null;
   }
 
   getPrompt(): string | null {
@@ -109,7 +108,7 @@ export class SystemPromptBuilder {
       config.model,
       config.profileName || "default",
       chunks,
-      this.#templatePath,
+      this.#template ?? undefined,
     );
 
     return this.#cachedPrompt;
@@ -134,6 +133,6 @@ export class SystemPromptBuilder {
   }
 }
 
-export function createSystemPromptBuilder(templatePath?: string): SystemPromptBuilder {
-  return new SystemPromptBuilder(templatePath);
+export function createSystemPromptBuilder(template?: string): SystemPromptBuilder {
+  return new SystemPromptBuilder(template);
 }

@@ -77,6 +77,12 @@ export interface AgentOptions {
   sessionId?: string;
   role?: string;
   profileBody?: string;
+  /**
+   * Resolved system prompt template TEXT (buildConfig's
+   * resolved.systemPromptTemplate). Omitted only by standalone callers;
+   * the prompt builder then falls back to config-dir resolution.
+   */
+  systemPromptTemplate?: string;
   stream?: boolean;
   abortSignal?: AbortSignal | null;
   toolWhitelist?: string[] | null;
@@ -137,7 +143,7 @@ export class Agent implements AgentLike {
     this.hooks = options.hooks;
     this.#toolRegistry = options.toolRegistry;
     this.llmClient = options.llmClient;
-    this.context = createContextManager();
+    this.context = createContextManager(options.systemPromptTemplate);
     this.#model = options.model;
     this.maxIterations = options.maxIterations;
     this.contextLimit = options.contextLimit;

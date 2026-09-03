@@ -223,6 +223,9 @@ export interface ResolvedConfig {
 
   profileManager?: ProfileManager;
 
+  /** Loaded system prompt template text (resolved from templatePath/configDir). */
+  systemPromptTemplate?: string;
+
   /** Concrete absolute workspace roots (expanded from workspace.paths). */
   workspaceRoots?: string[];
   /** Resolved workspace.deny rules; an explicit [] disables the denylist. */

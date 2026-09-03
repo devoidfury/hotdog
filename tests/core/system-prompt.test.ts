@@ -1,7 +1,6 @@
 import { describe, it, expect } from "bun:test";
 import {
   buildSystemPrompt,
-  loadSystemPromptTemplate,
   SystemPromptBuilder,
   createSystemPromptBuilder,
   collectSystemPromptChunks,
@@ -67,13 +66,17 @@ describe("buildSystemPrompt", () => {
   });
 });
 
-describe("loadSystemPromptTemplate", () => {
-  it("returns and caches the template string", async () => {
-    const template1 = await loadSystemPromptTemplate();
-    const template2 = await loadSystemPromptTemplate();
-    expect(typeof template1).toBe("string");
-    expect(template1.length).toBeGreaterThan(0);
-    expect(template1).toBe(template2);
+describe("buildSystemPrompt with explicit template", () => {
+  it("renders the supplied template text without touching disk", async () => {
+    const result = await buildSystemPrompt(
+      "Explicit role",
+      "Explicit body",
+      "model-x",
+      "default",
+      [],
+      "TEMPLATE: {{ role }} / {{ body }} / {{ model }}",
+    );
+    expect(result).toBe("TEMPLATE: Explicit role / Explicit body / model-x");
   });
 });
 
@@ -177,6 +180,12 @@ describe("SystemPromptBuilder", () => {
       profileName: undefined,
     });
     expect(typeof prompt).toBe("string");
+  });
+
+  it("uses the explicitly supplied template instead of config-dir resolution", async () => {
+    const builder = new SystemPromptBuilder("X: {{ role }}");
+    const prompt = await builder.build(mockHooks, {}, mockConfig);
+    expect(prompt).toContain("X: Test role");
   });
 });
 

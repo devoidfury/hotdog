@@ -5,7 +5,6 @@ import {
   buildModelRegistry,
   resolveProvider,
   initSystemPromptTemplate,
-  resetSystemPromptCache,
   type ProviderDef,
 } from "../../src/core/config/providers.ts";
 import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
@@ -185,12 +184,10 @@ describe("initSystemPromptTemplate", () => {
   let tmpDir: string;
 
   beforeEach(() => {
-    resetSystemPromptCache();
     tmpDir = mkdtempSync(path.join(os.tmpdir(), "hotdog-prompt-test-"));
   });
 
   afterEach(() => {
-    resetSystemPromptCache();
     rmSync(tmpDir, { recursive: true, force: true });
   });
 
@@ -203,7 +200,7 @@ describe("initSystemPromptTemplate", () => {
     expect(template).toContain("{{ role }}");
   });
 
-  it("returns cached template on second call", async () => {
+  it("is a pure loader: re-reads the file on every call (no cache)", async () => {
     const tmpFile = path.join(tmpDir, "template.md");
     writeFileSync(tmpFile, "Template v1");
 
@@ -212,7 +209,7 @@ describe("initSystemPromptTemplate", () => {
 
     writeFileSync(tmpFile, "Template v2");
     const template2 = await initSystemPromptTemplate(tmpFile);
-    expect(template2).toBe("Template v1"); // cached
+    expect(template2).toBe("Template v2"); // reloaded, not cached
   });
 
   it("falls back to default template when file not found", async () => {
@@ -224,20 +221,6 @@ describe("initSystemPromptTemplate", () => {
   it("falls back to config directory when no explicit path", async () => {
     const template = await initSystemPromptTemplate(undefined, "./config");
     expect(template.length).toBeGreaterThan(0);
-  });
-
-  it("resetSystemPromptCache clears the cache", async () => {
-    const tmpFile = path.join(tmpDir, "template.md");
-    writeFileSync(tmpFile, "Template before reset");
-
-    const template1 = await initSystemPromptTemplate(tmpFile);
-    expect(template1).toBe("Template before reset");
-
-    resetSystemPromptCache();
-    writeFileSync(tmpFile, "Template after reset");
-
-    const template2 = await initSystemPromptTemplate(tmpFile);
-    expect(template2).toBe("Template after reset");
   });
 });
 

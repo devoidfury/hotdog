@@ -61,6 +61,10 @@ export function createAgentFactory(
       profileName,
       role: (agentConfig.role as string) || profile?.role || resolved.role,
       profileBody: (agentConfig.profileBody as string) || profile?.body || resolved.profileBody,
+      // Loaded template text from buildConfig; the agent must never depend on
+      // process-global template state (multi-session hosts resolve config
+      // per entry point).
+      systemPromptTemplate: resolved.systemPromptTemplate,
       stream: pickBoolean(agentConfig.stream, resolved.stream),
       config: {
         ...(options.config ?? core.config),

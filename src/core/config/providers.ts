@@ -318,27 +318,20 @@ export function resolveModelConfig(
 
 // ── System Prompt Template ─────────────────────────────────────────────
 
-let cachedSystemPromptTemplate: string | null = null;
-
-export function resetSystemPromptCache(): void {
-  cachedSystemPromptTemplate = null;
-}
-
+// Pure loader — no process-wide cache. buildConfig() calls it once and hands
+// the result to agents explicitly (AgentOptions.systemPromptTemplate), so
+// template state never lingers across sessions or config changes.
 export async function initSystemPromptTemplate(
   templatePath?: string,
   configDir?: string,
 ): Promise<string> {
-  if (cachedSystemPromptTemplate) return cachedSystemPromptTemplate;
-
   const templateFile =
     templatePath ??
     path.join(configDir ?? resolveConfigDir(), DEFAULT_SYSTEM_PROMPT_FILENAME);
 
   try {
-    cachedSystemPromptTemplate = await fsPromises.readFile(templateFile, "utf-8");
+    return await fsPromises.readFile(templateFile, "utf-8");
   } catch {
-    cachedSystemPromptTemplate = DEFAULT_SYSTEM_PROMPT_TEMPLATE;
+    return DEFAULT_SYSTEM_PROMPT_TEMPLATE;
   }
-
-  return cachedSystemPromptTemplate;
 }

@@ -18,10 +18,14 @@ export class ContextManager {
   #tokenTracker: TokenTracker;
   #systemPromptBuilder: SystemPromptBuilder;
 
-  constructor(templatePath?: string) {
+  /**
+   * @param template - Loaded system prompt template text (from buildConfig's
+   *   resolved config). Omitted only by standalone callers.
+   */
+  constructor(template?: string) {
     this.#log = new MessageLog();
     this.#tokenTracker = new TokenTracker();
-    this.#systemPromptBuilder = new SystemPromptBuilder(templatePath);
+    this.#systemPromptBuilder = new SystemPromptBuilder(template);
   }
 
   addMessage(msg: Message): void {
@@ -96,6 +100,6 @@ export class ContextManager {
   }
 }
 
-export function createContextManager(templatePath?: string): ContextManager {
-  return new ContextManager(templatePath);
+export function createContextManager(template?: string): ContextManager {
+  return new ContextManager(template);
 }

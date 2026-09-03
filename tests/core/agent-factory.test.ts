@@ -88,6 +88,20 @@ describe("createAgentFactory", () => {
     expect((agent.config as Record<string, unknown>).workspaceDeny).toEqual([]);
   });
 
+  it("passes the resolved system prompt template into the agent (regression)", async () => {
+    // buildConfig loads the template once and resolves it to text; the
+    // factory must forward it so the prompt never depends on process-global
+    // template caching (multi-session hosts resolve config per entry point).
+    const { core } = makeCore();
+    const factory = createAgentFactory(core, {
+      resolved: { ...resolved, systemPromptTemplate: "FACTORY: {{ role }}" } as never,
+      llmClient: {} as never,
+    });
+    const agent = await factory();
+    await agent.ensureSystemPrompt();
+    expect(agent.context.getSystemPrompt()).toContain("FACTORY: resolved-role");
+  });
+
   it("yields null workspaceDeny when unresolved (built-in defaults apply)", async () => {
     // Custom hosts may pass a partial resolved bag; null signals "unconfigured"
     // so ToolExecutor applies the built-in DEFAULT_DENY_PATTERNS.

@@ -3,6 +3,8 @@
 ## Unreleased
 
 - llm-client - retries now honor a server `Retry-After` header (delta-seconds and HTTP-date forms, capped at 60s) instead of the fixed exponential backoff; absent or malformed headers fall back to the existing ladder
+- llm-client - error responses are now read up to the 200K cap but quoted in the LlmError message up to 2K (with a `[truncated]` marker), so a broken endpoint returning a full HTML page no longer dumps hundreds of KB into the sink, logs, and retry lines
+- agent - `run()` is now guarded against re-entrancy: a second overlapping `run()` throws `AgentError.AlreadyRunning` instead of silently interleaving loop state (iteration count, abort controller, stream replay buffers)
 - tool-executor - "Tool 'x' is not available for this agent" now suggests near-matching tools from the set the model was offered (case/separator differences first, then prefix/substring near-matches), so a misspelled or case-flipped tool name self-corrects in one retry
 - cli - unknown flags are now fatal (exit 1) with a "Did you mean" suggestion when a registered flag is a near-match, instead of a warning that let the run proceed with the flag silently dropped
 - session - a throwing channel event handler is now logged at debug level instead of being swallowed silently; other handlers still run

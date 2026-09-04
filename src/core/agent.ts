@@ -108,6 +108,7 @@ export class Agent implements AgentLike {
   maxToolCallsPerIteration: number;
   reasoningEffort: string | undefined;
   #isRestoring: boolean;
+  #running: boolean;
   abortSignal: AbortSignal | null;
   toolWhitelist: string[] | null;
   followQueue: string[];
@@ -158,6 +159,7 @@ export class Agent implements AgentLike {
     this.maxToolCallsPerIteration = options.config.maxToolCallsPerIteration;
     this.reasoningEffort = undefined;
     this.#isRestoring = false;
+    this.#running = false;
     this.abortSignal = options.abortSignal || null;
     this.toolWhitelist = options.toolWhitelist || null;
     this.followQueue = [];
@@ -262,6 +264,17 @@ export class Agent implements AgentLike {
       return;
     }
 
+    // Re-entrancy guard: the loop keeps per-run state on the instance
+    // (iterationCount, runAbortController, stream replay buffers). Two
+    // overlapping runs -- e.g. an extension calling run() while the bus
+    // loop is mid-turn -- would corrupt each other's assembly silently.
+    // An "agent" error type means formatError() prints the stack: an
+    // overlapping run is a bug, not a runtime condition to recover from.
+    if (this.#running) {
+      throw AgentError.AlreadyRunning(this.sessionId);
+    }
+    this.#running = true;
+
     let turnEnded = false;
     try {
       await this.ensureSystemPrompt();
@@ -309,6 +322,7 @@ export class Agent implements AgentLike {
       turnEnded = true;
       throw AgentError.MaxIterations(this.maxIterations);
     } finally {
+      this.#running = false;
       if (!turnEnded) {
         const reason: TurnEndReason = this.cancelled ? "cancelled" : "error";
         this._emitTurnEnd(this.iterationCount, "", [], true, this.cancelled, reason);

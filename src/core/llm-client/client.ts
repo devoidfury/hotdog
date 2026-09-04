@@ -16,12 +16,21 @@ import { openaiProtocol } from "./openai-protocol.ts";
 import { hotdogFetch, readCappedBody } from "@utils/fetch.ts";
 
 /**
- * Cap on how much of an error response body is read into the LlmError
- * message. Normal provider errors are a few KB (pass through untouched);
- * this only stops hostile or broken endpoints from materializing
- * multi-gigabyte error pages into the message (and logs/retries).
+ * Cap on how much of an error response body is READ. This only stops
+ * hostile or broken endpoints from materializing multi-gigabyte error
+ * pages into memory.
  */
 const MAX_ERROR_BODY_CHARS = 200_000;
+
+/**
+ * Cap on how much of the (already read-capped) body is QUOTED in the
+ * LlmError message. The message fans out to the sink, the logs, and every
+ * retry line, so it must stay small even when the body is legitimately
+ * large: a broken endpoint returning a full HTML page should not yell
+ * 200KB into the UI. Bodies past this cap are quoted up to here and marked
+ * "[truncated]".
+ */
+const MAX_ERROR_BODY_QUOTE_CHARS = 2_000;
 
 import { ModelConfig, ProviderDef } from "../config/providers.ts";
 
@@ -430,8 +439,15 @@ export class LlmClient {
 
     if (!resp.ok) {
       const { text: body, truncated } = await readCappedBody(resp, MAX_ERROR_BODY_CHARS);
-      const truncNote = truncated ? " [truncated]" : "";
-      const err = LlmError.Api(`HTTP ${resp.status} (body: ${body}${truncNote})`, resp.status);
+      // Quote only a head slice; the full body (up to the read cap) never
+      // belongs in a message that fans out to UI/logs/retries.
+      const quote =
+        body.length > MAX_ERROR_BODY_QUOTE_CHARS
+          ? body.slice(0, MAX_ERROR_BODY_QUOTE_CHARS)
+          : body;
+      const truncNote =
+        truncated || body.length > MAX_ERROR_BODY_QUOTE_CHARS ? " [truncated]" : "";
+      const err = LlmError.Api(`HTTP ${resp.status} (body: ${quote}${truncNote})`, resp.status);
       // Carry a server Retry-After hint (429/503) to the retry scheduler.
       // The `?.` guards cover test doubles that stub the Response without
       // headers.

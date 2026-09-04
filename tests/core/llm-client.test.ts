@@ -419,10 +419,57 @@ describe("LlmClient._doRequest", () => {
     const err = caught as LlmError;
     expect(err.status).toBe(500);
     expect(err.message).toContain("[truncated]");
-    // 200K cap plus "HTTP 500 (body: " and " [truncated])" framing.
-    expect(err.message.length).toBeLessThan(200_100);
+    // The message quotes at most the 2K quote cap, not the 200K read cap.
+    expect(err.message.length).toBeLessThan(2_100);
     // The prefix must stay parseable by the retry fallback.
     expect(err.message.startsWith("HTTP 500 ")).toBe(true);
+  });
+
+  it("truncates a mid-size body in the message even below the read cap", async () => {
+    const client = new LlmClient({ chatTimeoutSecs: 30, maxRetries: 3, baseUrl: "http://test.com", markerMangler: null });
+
+    // 5KB body: under the 200K read cap (passes through reading untouched)
+    // but over the 2K quote cap.
+    globalThis.fetch = (async () => ({
+      ok: false,
+      status: 503,
+      headers: new Map(),
+      body: null,
+      text: async () => "y".repeat(5_000),
+    }) as unknown as Response) as unknown as typeof fetch;
+
+    let caught: unknown;
+    try {
+      await client._doRequest("http://test.com", "key", { model: "gpt-4" }, null, mc(), "/v1/chat/completions");
+    } catch (e) {
+      caught = e;
+    }
+    const err = caught as LlmError;
+    expect(err).toBeInstanceOf(LlmError);
+    expect(err.message).toContain("[truncated]");
+    expect(err.message.length).toBeLessThan(2_100);
+    expect(err.message.startsWith("HTTP 503 (body: y")).toBe(true);
+  });
+
+  it("quotes a small error body in full with no truncation marker", async () => {
+    const client = new LlmClient({ chatTimeoutSecs: 30, maxRetries: 3, baseUrl: "http://test.com", markerMangler: null });
+
+    globalThis.fetch = (async () => ({
+      ok: false,
+      status: 400,
+      headers: new Map(),
+      body: null,
+      text: async () => "invalid request",
+    }) as unknown as Response) as unknown as typeof fetch;
+
+    let caught: unknown;
+    try {
+      await client._doRequest("http://test.com", "key", { model: "gpt-4" }, null, mc(), "/v1/chat/completions");
+    } catch (e) {
+      caught = e;
+    }
+    const err = caught as LlmError;
+    expect(err.message).toBe("HTTP 400 (body: invalid request)");
   });
 
   it("passes abort signal to fetch", async () => {

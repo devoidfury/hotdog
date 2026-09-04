@@ -171,6 +171,13 @@ export class AgentError extends AppError {
     return new AgentError(`Max iterations (${max}) reached`);
   }
 
+  static AlreadyRunning(sessionId: string): AgentError {
+    return new AgentError(
+      `Agent ${sessionId} is already running; concurrent run() calls would interleave ` +
+        "loop state (iteration count, abort controller, stream buffers). Serialize through the bus.",
+    );
+  }
+
   static SummarizationFailed(msg: string): AgentError {
     return new AgentError(`Summarization failed: ${msg}`);
   }

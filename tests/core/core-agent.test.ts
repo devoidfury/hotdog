@@ -5,7 +5,7 @@ import { HOOKS, createHooks } from '../../src/core/hooks.ts';
 import { ACTIONS } from '../../src/core/commands.ts';
 import { createToolRegistry } from '../../src/core/extensions/tool-registry.ts';
 import { Message } from '../../src/core/context/message.ts';
-import { ConfigError } from '../../src/core/error.ts';
+import { AgentError, ConfigError } from '../../src/core/error.ts';
 import type { LlmClient } from '../../src/core/llm-client/client.ts';
 import type { OutputEvent } from '../../src/core/context/output.ts';
 import { OUTPUT_EVENT } from '../../src/core/context/output.ts';
@@ -1342,5 +1342,103 @@ describe('Agent — end-to-end loop', () => {
       agent.applyProfile('fresh', makeProfile());
       expect(agent.context.log.getAll()).toHaveLength(1);
     });
+  });
+});
+
+describe('Agent — run() re-entrancy guard', () => {
+  // A client whose stream gates on an externally-resolved promise, so the
+  // first run is provably mid-flight when the second run() is attempted.
+  function gatedFixture() {
+    let release!: () => void;
+    const gate = new Promise<void>((r) => { release = r; });
+
+    class GatedLLM extends MockLLMClient {
+      override chatStreamCancellable(
+        messages: unknown[],
+        modelConfig: Record<string, unknown>,
+        toolDefs: Record<string, unknown>[],
+        cancelSignal: AbortSignal | null | undefined,
+      ) {
+        const inner = super.chatStreamCancellable(
+          messages, modelConfig, toolDefs, cancelSignal,
+        ) as AsyncGenerator<Record<string, unknown>>;
+        return (async function* (): AsyncGenerator<Record<string, unknown>> {
+          await gate;
+          yield* inner;
+        })();
+      }
+    }
+
+    const mockLLM = new GatedLLM({
+      responseSequences: [
+        [{ type: 'content', content: 'first run done' }],
+        [{ type: 'content', content: 'third run done' }],
+      ],
+    });
+    const { agent } = createFixture({ mockLLM });
+    return { agent, mockLLM, release };
+  }
+
+  it('rejects a concurrent run() while the first is mid-flight', async () => {
+    const { agent, release } = gatedFixture();
+
+    const first = agent.run('first');
+    // Let the first run reach the gated stream.
+    await new Promise((r) => setTimeout(r, 10));
+
+    let caught: unknown;
+    try {
+      await agent.run('second');
+    } catch (e) {
+      caught = e;
+    }
+    expect(caught).toBeInstanceOf(AgentError);
+    expect((caught as Error).message).toContain('already running');
+
+    // The rejected run must not have touched the context.
+    const userMsgs = agent.context.log.getAll().filter((m) => m.role === 'user');
+    expect(userMsgs).toHaveLength(1);
+
+    release();
+    const result = await first;
+    expect(expectCompletion(result).content).toBe('first run done');
+  });
+
+  it('clears the guard after the first run completes', async () => {
+    const { agent, release } = gatedFixture();
+
+    const first = agent.run('first');
+    await new Promise((r) => setTimeout(r, 10));
+    release();
+    await first;
+
+    // A fresh (ungated) sequence would be consumed here; the mock has one
+    // left and would return an empty stream otherwise.
+    const third = await agent.run('third');
+    expect(expectCompletion(third).content).toBe('third run done');
+  });
+
+  it('clears the guard when the run throws', async () => {
+    const mockLLM = new MockLLMClient({ responseSequences: [] });
+    mockLLM.chatStreamCancellable = () => {
+      throw new Error('boom');
+    };
+    const { agent } = createFixture({ mockLLM });
+
+    let threw = false;
+    try {
+      await agent.run('x');
+    } catch {
+      threw = true;
+    }
+    expect(threw).toBe(true);
+
+    // The flag must be released even on the error path.
+    mockLLM.chatStreamCancellable = () =>
+      (async function* (): AsyncGenerator<Record<string, unknown>> {
+        yield { type: 'content', content: 'recovered' };
+      })();
+    const result = await agent.run('y');
+    expect(expectCompletion(result).content).toBe('recovered');
   });
 });

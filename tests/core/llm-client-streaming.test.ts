@@ -284,6 +284,61 @@ describe("LlmClient.chatStreamCancellable", () => {
   });
 });
 
+describe("LlmClient.chatStreamCancellable — Retry-After", () => {
+  function makeMsg(role: string, content: string) {
+    return new Message({ role, content });
+  }
+
+  it("waits the server hint instead of the backoff, then succeeds", async () => {
+    const registry = createLlmProtocolRegistry();
+    registry.register({
+      id: "noop",
+      buildRequest: () => ({ path: "/v1/chat/completions", body: {} }),
+      buildHeaders: () => ({}),
+      parseStream: async function* () {
+        yield { type: "content", content: "Hello" };
+      },
+    } as LlmProtocol);
+
+    const client = new LlmClient({
+      chatTimeoutSecs: 30,
+      maxRetries: 3,
+      baseUrl: "http://test.com",
+      markerMangler: null,
+      llmProtocolRegistry: registry,
+      // Absurd fallback: if the Retry-After hint were ignored, this test
+      // would sit in retryDelay for a minute.
+      retryBaseDelayMs: 60_000,
+    });
+
+    let attempts = 0;
+    client._doRequest = async (): Promise<Response> => {
+      attempts++;
+      if (attempts === 1) {
+        throw LlmError.Api("HTTP 429 (body: slow down)", 429, 150);
+      }
+      return { headers: new Map(), get: () => "", body: null } as unknown as Response;
+    };
+
+    const start = Date.now();
+    const events = [];
+    for await (const event of client.chatStreamCancellable(
+      [makeMsg("user", "Hi")],
+      mc({ name: "test-model", protocol: "noop" }),
+    )) {
+      events.push(event);
+    }
+    const elapsed = Date.now() - start;
+
+    expect(attempts).toBe(2);
+    expect(events).toHaveLength(1);
+    expect((events[0] as { content?: string }).content).toBe("Hello");
+    // Waited the hinted 150ms, not the 60s fallback.
+    expect(elapsed).toBeGreaterThanOrEqual(140);
+    expect(elapsed).toBeLessThan(5000);
+  });
+});
+
 describe("LlmClient.chatStreamCancellable — network errors, timeouts, cancellation", () => {
   let originalFetch: typeof globalThis.fetch;
 

@@ -219,6 +219,12 @@ export class ParseError extends AppError {
 export class LlmError extends AppError {
   /** HTTP status when the error originated from an HTTP response (type "api"). */
   status?: number;
+  /**
+   * Server-provided Retry-After hint in ms (type "api"), already parsed and
+   * capped (see parseRetryAfterMs). Retry scheduling prefers this over the
+   * exponential backoff when present.
+   */
+  retryAfterMs?: number;
 
   constructor(message: string, type: ErrorType = "unknown") {
     super(message, type);
@@ -228,10 +234,13 @@ export class LlmError extends AppError {
     return new LlmError(msg, "http");
   }
 
-  static Api(msg: string, status?: number): LlmError {
+  static Api(msg: string, status?: number, retryAfterMs?: number): LlmError {
     const e = new LlmError(msg, "api");
     if (status !== undefined) {
       e.status = status;
+    }
+    if (retryAfterMs !== undefined) {
+      e.retryAfterMs = retryAfterMs;
     }
     return e;
   }

@@ -364,6 +364,42 @@ describe("LlmClient._doRequest", () => {
     });
   });
 
+  it("attaches a parsed Retry-After hint to the api error", async () => {
+    const client = new LlmClient({ chatTimeoutSecs: 30, maxRetries: 3, baseUrl: "http://test.com", markerMangler: null });
+
+    globalThis.fetch = (async () =>
+      new Response("slow down", { status: 429, headers: { "retry-after": "3" } })) as unknown as typeof fetch;
+
+    let caught: unknown;
+    try {
+      await client._doRequest("http://test.com", "key", { model: "gpt-4" }, null, mc(), "/v1/chat/completions");
+    } catch (e) {
+      caught = e;
+    }
+    expect(caught).toBeInstanceOf(LlmError);
+    const err = caught as LlmError;
+    expect(err.status).toBe(429);
+    expect(err.retryAfterMs).toBe(3000);
+  });
+
+  it("leaves retryAfterMs unset when the header is absent or malformed", async () => {
+    const client = new LlmClient({ chatTimeoutSecs: 30, maxRetries: 3, baseUrl: "http://test.com", markerMangler: null });
+
+    for (const headers of [undefined, { "retry-after": "later" }]) {
+      globalThis.fetch = (async () =>
+        new Response("nope", { status: 503, headers })) as unknown as typeof fetch;
+
+      let caught: unknown;
+      try {
+        await client._doRequest("http://test.com", "key", { model: "gpt-4" }, null, mc(), "/v1/chat/completions");
+      } catch (e) {
+        caught = e;
+      }
+      expect(caught).toBeInstanceOf(LlmError);
+      expect((caught as LlmError).retryAfterMs).toBeUndefined();
+    }
+  });
+
   it("caps oversized error bodies and keeps the status prefix", async () => {
     const client = new LlmClient({ chatTimeoutSecs: 30, maxRetries: 3, baseUrl: "http://test.com", markerMangler: null });
 

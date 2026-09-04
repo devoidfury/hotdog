@@ -1,4 +1,4 @@
-import { retryDelay, shouldRetryLlmError } from "./retry.ts";
+import { retryDelay, resolveRetryDelayMs, parseRetryAfterMs, shouldRetryLlmError } from "./retry.ts";
 import { MarkerMangler } from "../marker-mangler.ts";
 import type { Message } from "../context/message.ts";
 import { LlmError } from "../error.ts";
@@ -310,7 +310,9 @@ export class LlmClient {
           );
         } catch (e: unknown) {
           if (!shouldRetryLlmError(e, attempt, this.maxRetries)) throw e;
-          await retryDelay(delayMs, abortController.signal);
+          // Server Retry-After wins over the backoff when present; the
+          // exponential ladder keeps advancing regardless.
+          await retryDelay(resolveRetryDelayMs(e, delayMs), abortController.signal);
           delayMs *= 2;
           continue;
         }
@@ -333,7 +335,7 @@ export class LlmClient {
           // buffers) before the new stream's events start arriving.
           yield { type: "reset" };
 
-          await retryDelay(delayMs, abortController.signal);
+          await retryDelay(resolveRetryDelayMs(err, delayMs), abortController.signal);
           delayMs *= 2;
         }
       }
@@ -429,7 +431,15 @@ export class LlmClient {
     if (!resp.ok) {
       const { text: body, truncated } = await readCappedBody(resp, MAX_ERROR_BODY_CHARS);
       const truncNote = truncated ? " [truncated]" : "";
-      throw LlmError.Api(`HTTP ${resp.status} (body: ${body}${truncNote})`, resp.status);
+      const err = LlmError.Api(`HTTP ${resp.status} (body: ${body}${truncNote})`, resp.status);
+      // Carry a server Retry-After hint (429/503) to the retry scheduler.
+      // The `?.` guards cover test doubles that stub the Response without
+      // headers.
+      const retryAfterMs = parseRetryAfterMs(
+        resp.headers?.get?.("retry-after") ?? null,
+      );
+      if (retryAfterMs !== null) err.retryAfterMs = retryAfterMs;
+      throw err;
     }
     return resp;
   }

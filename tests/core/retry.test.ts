@@ -4,6 +4,9 @@ import {
   retryDelay,
   extractHttpStatus,
   isRetryableHttpStatus,
+  parseRetryAfterMs,
+  resolveRetryDelayMs,
+  MAX_RETRY_AFTER_MS,
 } from "../../src/core/llm-client/retry.ts";
 import { LlmError } from "../../src/core/error.ts";
 
@@ -69,6 +72,60 @@ describe("shouldRetryLlmError — api status retry", () => {
 
   it("falls back to the message when the field is absent", () => {
     expect(shouldRetryLlmError(LlmError.Api("HTTP 500 (body: Internal Server Error)"), 1, 3)).toBe(true);
+  });
+});
+
+describe("parseRetryAfterMs", () => {
+  it("parses the delta-seconds form", () => {
+    expect(parseRetryAfterMs("2")).toBe(2000);
+    expect(parseRetryAfterMs("0")).toBe(0);
+    expect(parseRetryAfterMs(" 45 ")).toBe(45_000);
+  });
+
+  it("clamps to MAX_RETRY_AFTER_MS", () => {
+    expect(parseRetryAfterMs("3600")).toBe(MAX_RETRY_AFTER_MS);
+    // HTTP-date far in the future clamps too.
+    expect(parseRetryAfterMs(new Date(Date.now() + 3_600_000).toUTCString())).toBe(MAX_RETRY_AFTER_MS);
+  });
+
+  it("parses the HTTP-date form relative to now", () => {
+    const future = new Date(Date.now() + 5000);
+    const ms = parseRetryAfterMs(future.toUTCString());
+    expect(ms).not.toBeNull();
+    expect(ms!).toBeGreaterThanOrEqual(4000);
+    expect(ms!).toBeLessThanOrEqual(5000);
+  });
+
+  it("clamps a past HTTP-date to 0", () => {
+    expect(parseRetryAfterMs(new Date(Date.now() - 60_000).toUTCString())).toBe(0);
+  });
+
+  it("returns null for absent or malformed values", () => {
+    expect(parseRetryAfterMs(null)).toBeNull();
+    expect(parseRetryAfterMs(undefined)).toBeNull();
+    expect(parseRetryAfterMs("")).toBeNull();
+    expect(parseRetryAfterMs("   ")).toBeNull();
+    expect(parseRetryAfterMs("-5")).toBeNull();
+    expect(parseRetryAfterMs("12.5")).toBeNull();
+    expect(parseRetryAfterMs("soon")).toBeNull();
+  });
+});
+
+describe("resolveRetryDelayMs", () => {
+  it("uses the server hint when present", () => {
+    const err = LlmError.Api("HTTP 429 (body: slow down)", 429, 750);
+    expect(resolveRetryDelayMs(err, 1000)).toBe(750);
+  });
+
+  it("falls back to backoff when the hint is absent", () => {
+    expect(resolveRetryDelayMs(LlmError.Api("HTTP 500 (body: boom)", 500), 2000)).toBe(2000);
+    expect(resolveRetryDelayMs(LlmError.Http("reset"), 4000)).toBe(4000);
+    expect(resolveRetryDelayMs(new Error("raw"), 8000)).toBe(8000);
+  });
+
+  it("a zero hint is honored, not treated as absent", () => {
+    const err = LlmError.Api("HTTP 429 (body: go)", 429, 0);
+    expect(resolveRetryDelayMs(err, 1000)).toBe(0);
   });
 });
 

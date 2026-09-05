@@ -103,10 +103,10 @@ export class BashTool {
     return new Promise((resolve, reject) => {
       const proc: ChildProcess = spawn(command, [], {
         shell: true,
-        // Own process group on POSIX so timeouts can kill the entire tree
-        // (see utils/process-group.ts for the trade-off).
+        // Own process group on POSIX so timeouts can kill the entire tree (see utils/process-group.ts for the trade-off).
         ...OWN_PROCESS_GROUP,
-        stdio: ["pipe", "pipe", "pipe"],
+        // ignore keeps stdin-reading commands (`cat`, `read`, `python -c "input()"`) from hanging until the timeout.
+        stdio: ["ignore", "pipe", "pipe"],
         env: {
           ...copyScrubbedEnv(),
           // enable agent-friendly test output in bun test, maybe others

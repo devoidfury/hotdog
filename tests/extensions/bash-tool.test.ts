@@ -34,6 +34,17 @@ describe('BashTool', () => {
     expect(resultStr(result)).toContain('hello');
   });
 
+  it('gives stdin-reading commands EOF instead of hanging', async () => {
+    // Regression: a kept-open stdin pipe made `cat` (no args) block until
+    // the timeout killed it. stdin is /dev/null now, so it gets EOF and
+    // completes promptly with empty output.
+    const tool = new BashTool({ timeoutMs: 30000, maxOutputLines: 100 });
+    const t0 = Date.now();
+    const result = await tool.execute(JSON.stringify({ command: 'cat' }), {} as any);
+    expect(Date.now() - t0).toBeLessThan(5000);
+    expect(resultStr(result)).toBe('');
+  });
+
   it('throws AssistantRetryableError on timeout', async () => {
     const tool = new BashTool({ timeoutMs: 100, maxOutputLines: 100 });
     await expect(

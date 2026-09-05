@@ -150,13 +150,7 @@ export function createMessageList(
       currentAssistantEl = document.createElement("div");
       currentAssistantEl.className = "message assistant streaming";
 
-      const avatar = document.createElement("div");
-      avatar.className = "avatar";
-      avatar.textContent = "🤖";
-      currentAssistantEl.appendChild(avatar);
-
       const bubble = document.createElement("div");
-      bubble.className = "bubble";
       const contentEl = document.createElement("div");
       contentEl.className = "content md-content";
       bubble.appendChild(contentEl);
@@ -253,11 +247,6 @@ export function createMessageList(
     const el = document.createElement("div");
     el.className = "message user";
 
-    const avatar = document.createElement("div");
-    avatar.className = "avatar";
-    avatar.textContent = "👤";
-    el.appendChild(avatar);
-
     const bubble = document.createElement("div");
     bubble.className = "bubble";
     const contentEl = document.createElement("div");
@@ -276,13 +265,7 @@ export function createMessageList(
     const el = document.createElement("div");
     el.className = "message assistant";
 
-    const avatar = document.createElement("div");
-    avatar.className = "avatar";
-    avatar.textContent = "🤖";
-    el.appendChild(avatar);
-
     const bubble = document.createElement("div");
-    bubble.className = "bubble";
     const contentEl = document.createElement("div");
     contentEl.className = "content md-content";
     const tree = parseMarkdown(content);
@@ -428,11 +411,6 @@ export function createMessageList(
     finalizeAssistant();
     const el = document.createElement("div");
     el.className = "message question";
-
-    const avatar = document.createElement("div");
-    avatar.className = "avatar";
-    avatar.textContent = "🤖";
-    el.appendChild(avatar);
 
     const bubble = document.createElement("div");
     bubble.className = "bubble";
@@ -678,11 +656,6 @@ export function createMessageList(
     const el = document.createElement("div");
     el.className = "message error";
 
-    const avatar = document.createElement("div");
-    avatar.className = "avatar";
-    avatar.textContent = "⚠️";
-    el.appendChild(avatar);
-
     const bubble = document.createElement("div");
     bubble.className = "bubble";
     const contentEl = document.createElement("div");
@@ -720,19 +693,27 @@ export function createMessageList(
     thinkingBlockCount = 0;
   }
 
-  function scrollBottom(): void {
-    // Only auto-scroll if the user is within 150px of the bottom,
-    // so they can scroll up to view history without being yanked down.
-    const threshold = 150;
+  // Auto-scroll follow state: the view stays pinned to the bottom unless the
+  // user has scrolled up (within 150px of the bottom counts as "at bottom").
+  // Checking distance after append would block follow whenever a single
+  // message is taller than the threshold — e.g. a long history replay on
+  // load, which would otherwise leave the view stuck at the top.
+  let followBottom = true;
+  container.addEventListener("scroll", () => {
     const distFromBottom =
       container.scrollHeight - container.scrollTop - container.clientHeight;
-    if (distFromBottom <= threshold) {
+    followBottom = distFromBottom <= 150;
+  });
+
+  function scrollBottom(): void {
+    if (followBottom) {
       container.scrollTop = container.scrollHeight;
     }
   }
 
   function clear(): void {
     container.innerHTML = "";
+    followBottom = true;
     currentAssistantEl = null;
     currentThinkingEl = null;
     currentToolCalls = [];

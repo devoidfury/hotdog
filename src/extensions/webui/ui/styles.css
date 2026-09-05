@@ -25,7 +25,7 @@
     /* Text */
     --text-primary: #e8e8ed;
     --text-secondary: #9a9ab0;
-    --text-muted: #5e5e72;
+    --text-muted: #a9a9a9;
     --text-inverse: #ffffff;
 
     /* Accent — refined purple */
@@ -571,81 +571,60 @@ body {
     cursor: not-allowed;
 }
 
-/* ── Model Selector ────────────────────────────────────────────────────────── */
+#input-area.read-only #model-selector,
+#input-area.read-only #profile-selector {
+    opacity: 0.5;
+}
 
-#model-selector {
-    color: var(--text-secondary);
-    font-size: 0.85rem;
+/* ── Model & Profile Switchers (composer pills) ───────────────────────────── */
+
+/* The label is the pill; the select sits inside it borderless. */
+#model-selector,
+#profile-selector {
+    color: var(--text-muted);
+    font-size: 0.72rem;
     display: flex;
     align-items: center;
     gap: 6px;
+    background: var(--bg-primary);
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    padding: 4px 12px;
+    cursor: pointer;
+    transition:
+        border-color 0.2s,
+        color 0.2s;
 }
 
-#model-select {
-    background: var(--bg-tertiary);
-    color: var(--text-primary);
-    border: 1px solid var(--border);
-    border-radius: var(--radius-sm);
-    padding: 4px 10px;
-    font-size: 0.82rem;
+#model-select,
+#profile-select {
+    background: transparent;
+    color: var(--text-secondary);
+    border: none;
+    padding: 0;
+    font-size: 0.72rem;
     font-family: var(--font-mono);
     cursor: pointer;
     outline: none;
     max-width: 220px;
-    transition:
-        border-color 0.2s,
-        box-shadow 0.2s;
 }
 
-#model-select:hover {
+#model-selector:hover,
+#profile-selector:hover {
     border-color: var(--border-light);
 }
 
-#model-select:focus {
-    border-color: var(--accent);
-    box-shadow: 0 0 0 2px var(--accent-soft);
-}
-
-#model-select option {
-    background: var(--bg-tertiary);
+#model-selector:hover #model-select,
+#profile-selector:hover #profile-select {
     color: var(--text-primary);
 }
 
-/* ── Profile Selector ─────────────────────────────────────────────────────── */
-
-#profile-selector {
-    color: var(--text-secondary);
-    font-size: 0.85rem;
-    display: flex;
-    align-items: center;
-    gap: 6px;
-}
-
-#profile-select {
-    background: var(--bg-tertiary);
-    color: var(--text-primary);
-    border: 1px solid var(--border);
-    border-radius: var(--radius-sm);
-    padding: 4px 10px;
-    font-size: 0.82rem;
-    font-family: var(--font-mono);
-    cursor: pointer;
-    outline: none;
-    max-width: 180px;
-    transition:
-        border-color 0.2s,
-        box-shadow 0.2s;
-}
-
-#profile-select:hover {
-    border-color: var(--border-light);
-}
-
-#profile-select:focus {
+#model-selector:focus-within,
+#profile-selector:focus-within {
     border-color: var(--accent);
-    box-shadow: 0 0 0 2px var(--accent-soft);
 }
 
+#model-select option,
 #profile-select option {
     background: var(--bg-tertiary);
     color: var(--text-primary);
@@ -702,7 +681,6 @@ body {
     display: flex;
     flex-direction: column;
     gap: 6px;
-    scroll-behavior: smooth;
 }
 
 /* ── Message Bubbles ──────────────────────────────────────────────────────── */
@@ -710,7 +688,6 @@ body {
 .message {
     display: flex;
     gap: 10px;
-    max-width: 88%;
     animation: messageIn 0.3s var(--ease-out) both;
 }
 
@@ -734,34 +711,11 @@ body {
     align-self: flex-start;
 }
 
-/* Avatar circles */
-.message .avatar {
-    width: 32px;
-    height: 32px;
-    border-radius: var(--radius-full);
-    flex-shrink: 0;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    font-size: 0.85rem;
-    font-weight: 600;
-    margin-top: 2px;
-}
-
-.message.user .avatar {
-    background: linear-gradient(
-        135deg,
-        var(--accent) 0%,
-        var(--accent-hover) 100%
-    );
-    color: var(--text-inverse);
-    box-shadow: 0 2px 8px var(--accent-glow);
-}
-
-.message.assistant .avatar {
-    background: var(--bg-elevated);
-    color: var(--text-secondary);
-    border: 1px solid var(--border);
+/* Assistant messages (live and replay) render unadorned -- no .bubble --
+   so carry the word-break guard .bubble used to provide. */
+.message.assistant .content {
+    overflow-wrap: break-word;
+    word-break: break-word;
 }
 
 /* Bubble content */
@@ -784,13 +738,6 @@ body {
     color: var(--text-inverse);
     border-bottom-right-radius: 4px;
     box-shadow: 0 2px 8px var(--accent-glow);
-}
-
-.message.assistant .bubble {
-    background: var(--bg-tertiary);
-    color: var(--text-primary);
-    border: 1px solid var(--border);
-    border-bottom-left-radius: 4px;
 }
 
 .message .content {
@@ -1006,8 +953,7 @@ body {
 .tool-call-block {
     background: var(--bg-tertiary);
     border: 1px solid var(--border);
-    margin: 6px 0 6px 42px;
-    max-width: 85%;
+    margin: 6px 0 6px 8px;
     animation: messageIn 0.25s var(--ease-out) both;
 }
 
@@ -1074,17 +1020,15 @@ body {
 /* ── Thinking Blocks ──────────────────────────────────────────────────────── */
 
 .thinking-block {
-    background: var(--bg-secondary);
-    border-left: 3px solid var(--accent);
+    border-left: 2px solid var(--accent);
     border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
-    margin: 4px 0 4px 42px;
+    margin: 4px 0 4px 8px;
     padding: 8px 14px;
     font-size: 0.82rem;
     color: var(--text-muted);
     font-family: var(--font-mono);
     white-space: pre-wrap;
     word-break: break-word;
-    max-width: 80%;
     animation: messageIn 0.25s var(--ease-out) both;
     line-height: 1.5;
 }
@@ -1332,51 +1276,61 @@ body {
 #chat-form {
     flex: 1;
     display: flex;
-    gap: 10px;
-    align-items: flex-end;
-}
-
-#chat-input {
-    flex: 1;
-    padding: 12px 16px;
+    flex-direction: column;
+    gap: 8px;
+    background: var(--bg-tertiary);
     border: 1px solid var(--border);
     border-radius: var(--radius-lg);
-    background: var(--bg-tertiary);
-    color: var(--text-primary);
-    font-size: 0.92rem;
-    font-family: var(--font-sans);
-    outline: none;
-    resize: none;
-    min-height: 44px;
-    max-height: 160px;
-    line-height: 1.5;
+    padding: 12px 14px 10px;
     transition:
         border-color 0.2s,
         box-shadow 0.2s;
 }
 
-#chat-input:focus {
+#chat-form:focus-within {
     border-color: var(--accent);
     box-shadow: 0 0 0 3px var(--accent-soft);
+}
+
+#chat-input {
+    width: 100%;
+    padding: 2px 4px;
+    border: none;
+    background: transparent;
+    color: var(--text-primary);
+    font-size: 0.92rem;
+    font-family: var(--font-sans);
+    outline: none;
+    resize: none;
+    min-height: 22px;
+    max-height: 160px;
+    line-height: 1.5;
 }
 
 #chat-input::placeholder {
     color: var(--text-muted);
 }
 
+#composer-actions {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
 #send-btn {
-    padding: 12px 20px;
+    margin-left: auto;
+    padding: 6px 18px;
     border: none;
-    border-radius: var(--radius-lg);
+    border-radius: var(--radius-sm);
     background: var(--accent);
     color: var(--text-inverse);
-    font-size: 0.9rem;
+    font-size: 0.85rem;
     font-weight: 600;
     font-family: var(--font-sans);
     cursor: pointer;
     transition: all 0.2s;
     white-space: nowrap;
-    height: 44px;
+    height: 32px;
 }
 
 #send-btn:hover {
@@ -1480,11 +1434,34 @@ body {
     }
 
     .tool-call-block {
-        margin-left: 42px;
+        margin-left: 8px;
     }
 
     .thinking-block {
-        margin-left: 42px;
+        margin-left: 8px;
+    }
+
+    /* Composer: let the pills wrap and shrink on narrow screens */
+    #input-area {
+        padding: 12px;
+    }
+
+    #composer-actions {
+        flex-wrap: wrap;
+        row-gap: 6px;
+    }
+
+    #model-selector,
+    #profile-selector {
+        min-width: 0;
+    }
+
+    #model-select,
+    #profile-select {
+        max-width: 140px;
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
     }
 }
 

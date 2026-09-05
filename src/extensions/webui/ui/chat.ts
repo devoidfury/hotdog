@@ -739,13 +739,26 @@ export function createChat({
   }
 
   const chatForm = document.getElementById("chat-form") as HTMLFormElement | null;
-  if (chatForm) {
+  const chatInput = document.getElementById("chat-input") as HTMLTextAreaElement | null;
+  if (chatForm && chatInput) {
+    const autoResize = () => {
+      chatInput.style.height = "auto";
+      chatInput.style.height = Math.min(chatInput.scrollHeight, 160) + "px";
+    };
+    chatInput.addEventListener("input", autoResize);
+    chatInput.addEventListener("keydown", (e: KeyboardEvent) => {
+      // Enter submits, Shift+Enter inserts a newline.
+      if (e.key === "Enter" && !e.shiftKey) {
+        e.preventDefault();
+        chatForm.requestSubmit();
+      }
+    });
     chatForm.addEventListener("submit", (e: SubmitEvent) => {
       e.preventDefault();
-      const input = document.getElementById("chat-input") as HTMLInputElement;
-      const text = input.value.trim();
+      const text = chatInput.value.trim();
       if (!text) return;
-      input.value = "";
+      chatInput.value = "";
+      autoResize();
 
       if (text.startsWith("/")) {
         sendSlashCommand(text);

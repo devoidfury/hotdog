@@ -48,12 +48,6 @@
         <div id="session-info">
           <span id="session-label">Session: <span id="current-session-id"></span></span>
           <span id="log-view-label" class="hidden">Viewing log: <span id="current-log-id"></span> <button id="close-log-view-btn" title="Close log view">✕</button></span>
-          <label id="model-selector">
-            Model: <select id="model-select"></select>
-          </label>
-          <label id="profile-selector">
-            Profile: <select id="profile-select"></select>
-          </label>
           <span id="connection-status" class="status-disconnected">Disconnected</span>
         </div>
 
@@ -72,8 +66,16 @@
         <!-- Input area -->
         <div id="input-area">
           <form id="chat-form">
-            <input type="text" id="chat-input" placeholder="Type a message..." autocomplete="off" />
-            <button type="submit" id="send-btn">Send</button>
+            <textarea id="chat-input" placeholder="Type a message..." autocomplete="off" rows="1"></textarea>
+            <div id="composer-actions">
+              <label id="profile-selector">
+                Profile: <select id="profile-select"></select>
+              </label>
+              <label id="model-selector">
+                Model: <select id="model-select"></select>
+              </label>
+              <button type="submit" id="send-btn">Send</button>
+            </div>
           </form>
         </div>
       </main>

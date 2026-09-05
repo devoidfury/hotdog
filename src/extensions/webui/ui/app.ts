@@ -52,12 +52,10 @@ function clearLogView(): void {
   activeLogId = null;
   const logViewLabel = document.getElementById("log-view-label");
   const sessionLabel = document.getElementById("session-label");
-  const modelSelector = document.getElementById("model-selector");
   const inputArea = document.getElementById("input-area");
-  const chatInput = document.getElementById("chat-input") as HTMLInputElement | null;
+  const chatInput = document.getElementById("chat-input") as HTMLTextAreaElement | null;
   if (logViewLabel) logViewLabel.classList.add("hidden");
   if (sessionLabel) sessionLabel.style.opacity = "";
-  if (modelSelector) modelSelector.style.opacity = "";
   if (inputArea) inputArea.classList.remove("read-only");
   if (chatInput) chatInput.disabled = false;
   // Remove the active-log highlight.
@@ -171,15 +169,13 @@ function startChat(): void {
       const logViewLabel = document.getElementById("log-view-label");
       const currentLogId = document.getElementById("current-log-id");
       const sessionLabel = document.getElementById("session-label");
-      const modelSelector = document.getElementById("model-selector");
       const inputArea = document.getElementById("input-area");
-      const chatInput = document.getElementById("chat-input") as HTMLInputElement | null;
+      const chatInput = document.getElementById("chat-input") as HTMLTextAreaElement | null;
       if (logViewLabel && currentLogId) {
         logViewLabel.classList.remove("hidden");
         currentLogId.textContent = logId.slice(0, 8);
       }
       if (sessionLabel) sessionLabel.style.opacity = "0.5";
-      if (modelSelector) modelSelector.style.opacity = "0.5";
       if (inputArea) inputArea.classList.add("read-only");
       if (chatInput) chatInput.disabled = true;
       const messageList = chat?.messageListAtom();

@@ -8,6 +8,8 @@
     "types": ["bun"],
 
     "moduleResolution": "bundler",
+    "jsx": "react-jsx",
+    "jsxImportSource": "@utils/jsx",
     "allowImportingTsExtensions": true,
     "forceConsistentCasingInFileNames": true,
     "noEmit": true,
@@ -28,6 +30,13 @@
       "@package.json": ["./package.json"],
     },
   },
-  "include": ["src/**/*.ts", "src/**/*.js", "tests/**/*.ts", "bin/**/*"],
+  "include": [
+    "src/**/*.ts",
+    "src/**/*.tsx",
+    "src/**/*.js",
+    "tests/**/*.ts",
+    "tests/**/*.tsx",
+    "bin/**/*",
+  ],
   "exclude": ["node_modules", "coverage", "tmp", "examples"],
 }

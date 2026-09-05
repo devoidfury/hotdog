@@ -2,7 +2,6 @@ telemetry = false
 
 [test]
 coveragePathIgnorePatterns = [
-    "config/**",
     "**/*.test.ts",
     "tests/**",
 ]

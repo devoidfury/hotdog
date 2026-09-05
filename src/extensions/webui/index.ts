@@ -2,6 +2,7 @@ import { HOOKS } from "../../core/hooks.ts";
 import { createWebuiServer, type WebuiConfig } from "./server.ts";
 import { CoreContext, ExtensionInstance, getExtensionConfig } from "../../core/extensions/types.ts";
 import { CliArgv } from "../../core/config/index.ts";
+import { formatError } from "../../core/error.ts";
 
 async function handleWebuiSubcommand(_cliArgs: CliArgv, core: CoreContext): Promise<number> {
   try {
@@ -22,8 +23,7 @@ async function handleWebuiSubcommand(_cliArgs: CliArgv, core: CoreContext): Prom
 
     return 0;
   } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
-    console.error(`[webui] Failed to start server: ${message}`);
+    console.error(`[webui] Failed to start server: ${formatError(err)}`);
     return 1;
   }
 }

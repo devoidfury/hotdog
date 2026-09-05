@@ -215,19 +215,6 @@ export function param(
   return { type: typeName, description: description || "", ...extra };
 }
 
-export function parseToolArgs(
-  input: string | Record<string, unknown>,
-): Record<string, unknown> {
-  if (typeof input === "string") {
-    try {
-      return JSON.parse(input) as Record<string, unknown>;
-    } catch {
-      return { input };
-    }
-  }
-  return input;
-}
-
 export function toolResult(
   result: ToolResult | string | Record<string, unknown> | unknown,
   toolName?: string,

@@ -140,7 +140,6 @@ Tool definition helpers and utilities. Key exports:
 - `ToolResult` — structured result with `output`, `error`, `metadata`, `success`, `outputTag`, `images`. Static constructors: `ok(output)`, `err(message)`, `from({...})`
 - `toolDef(name, description, parameters)` — creates OpenAI function-calling schema
 - `param(typeName, description, extra)` — creates parameter definition with JSON Schema fields
-- `parseToolArgs(input)` — parses JSON tool arguments
 - `toolResult(result, toolName)` — resolves tool result to string
 - `truncateOutput(text, maxLines)` — truncates output
 - `generateDiff(oldText, newText, maxLines)` — simple unified diff

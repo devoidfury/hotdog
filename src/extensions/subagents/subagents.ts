@@ -3,7 +3,7 @@
 import {
   toolDef,
   param,
-  parseToolArgs,
+  parseToolInput,
   ToolResult,
   defaultCallDisplay,
 } from "../../core/extensions/tool-utils.ts";
@@ -99,7 +99,7 @@ export class DelegateTaskTool extends SubagentTool {
   override metadata: ToolMetadata = { sideEffects: true, difficulty: 3 };
 
   override async execute(input: string | Record<string, unknown> | null, ctx?: ToolContext): Promise<ToolResult> {
-    const args = parseToolArgs(input ?? {});
+    const args = parseToolInput(input) ?? {};
     if (!args.task_id || !args.description) {
       return ToolResult.err("Error: task_id and description are required");
     }
@@ -167,7 +167,7 @@ export class DelegateTaskTool extends SubagentTool {
   }
 
   override callDisplay(input: string | Record<string, unknown> | null): string {
-    const args = parseToolArgs(input ?? {});
+    const args = parseToolInput(input) ?? {};
     const display = ((args.description as string) || "...").slice(0, 40);
     return `delegate_task(${args.task_id || "?"} -> ${display})`;
   }
@@ -181,7 +181,7 @@ export class TaskStatusTool extends SubagentTool {
   override metadata: ToolMetadata = { sideEffects: false, difficulty: 4 };
 
   override async execute(input: string | Record<string, unknown> | null): Promise<ToolResult> {
-    const args = parseToolArgs(input ?? {});
+    const args = parseToolInput(input) ?? {};
     if (!args.task_id) {
       return ToolResult.err("Error: task_id is required");
     }
@@ -214,7 +214,7 @@ export class TaskStatusTool extends SubagentTool {
   }
 
   override callDisplay(input: string | Record<string, unknown> | null): string {
-    const args = parseToolArgs(input ?? {});
+    const args = parseToolInput(input) ?? {};
     return `task_status(${args.task_id || "?"})`;
   }
 }
@@ -227,7 +227,7 @@ export class TaskFollowupTool extends SubagentTool {
   override metadata: ToolMetadata = { sideEffects: true, difficulty: 3 };
 
   override async execute(input: string | Record<string, unknown> | null): Promise<ToolResult> {
-    const args = parseToolArgs(input ?? {});
+    const args = parseToolInput(input) ?? {};
     if (!args.task_id || !args.message) {
       return ToolResult.err("Error: task_id and message are required");
     }
@@ -264,7 +264,7 @@ export class TaskFollowupTool extends SubagentTool {
   }
 
   override callDisplay(input: string | Record<string, unknown> | null): string {
-    const args = parseToolArgs(input ?? {});
+    const args = parseToolInput(input) ?? {};
     const display = ((args.message as string) || "...").slice(0, 40);
     return `task_followup(${args.task_id || "?"} -> ${display})`;
   }
@@ -278,7 +278,7 @@ export class TaskInterruptTool extends SubagentTool {
   override metadata: ToolMetadata = { sideEffects: true, difficulty: 4 };
 
   override async execute(input: string | Record<string, unknown> | null): Promise<ToolResult> {
-    const args = parseToolArgs(input ?? {});
+    const args = parseToolInput(input) ?? {};
     if (!args.task_id) {
       return ToolResult.err("Error: task_id is required");
     }
@@ -311,7 +311,7 @@ export class TaskInterruptTool extends SubagentTool {
   }
 
   override callDisplay(input: string | Record<string, unknown> | null): string {
-    const args = parseToolArgs(input ?? {});
+    const args = parseToolInput(input) ?? {};
     return `task_interrupt(${args.task_id || "?"})`;
   }
 }
@@ -324,7 +324,7 @@ export class PlanStatusTool extends SubagentTool {
   override metadata: ToolMetadata = { sideEffects: false, difficulty: 4 };
 
   override async execute(input: string | Record<string, unknown> | null): Promise<ToolResult> {
-    const args = parseToolArgs(input ?? {});
+    const args = parseToolInput(input) ?? {};
 
     const backend = this._ensureBackend();
     if (typeof backend === "string") return ToolResult.err(backend);
@@ -377,7 +377,7 @@ export class PlanStatusTool extends SubagentTool {
   }
 
   override callDisplay(input: string | Record<string, unknown> | null): string {
-    const args = parseToolArgs(input ?? {});
+    const args = parseToolInput(input) ?? {};
     return `plan_status(task=${args.task_id || "all"})`;
   }
 }
@@ -390,7 +390,7 @@ export class WaitTool extends SubagentTool {
   override metadata: ToolMetadata = { sideEffects: false, difficulty: 1 };
 
   override async execute(input: string | Record<string, unknown> | null): Promise<ToolResult> {
-    const args = parseToolArgs(input ?? {});
+    const args = parseToolInput(input) ?? {};
     const message = args.message as string | null;
     const note = message ? ` Note: ${message}` : "";
     return ToolResult.stop(
@@ -417,7 +417,7 @@ export class WaitTool extends SubagentTool {
   }
 
   override callDisplay(input: string | Record<string, unknown> | null): string {
-    const args = parseToolArgs(input ?? {});
+    const args = parseToolInput(input) ?? {};
     const message = args.message as string;
     return `wait(${message || "no-op"})`;
   }

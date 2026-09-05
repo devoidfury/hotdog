@@ -5,7 +5,6 @@ import { describe, it, expect, beforeAll } from "bun:test";
 import {
   toolDef,
   param,
-  parseToolArgs,
   toolResult,
   truncateOutput,
   generateDiff,
@@ -55,21 +54,6 @@ describe("param", () => {
 
   it("creates a parameter without description", () => {
     expect(param("integer", "")).toEqual({ type: "integer", description: "" });
-  });
-});
-
-describe("parseToolArgs", () => {
-  it("parses valid JSON string", () => {
-    expect(parseToolArgs('{"x": 1}')).toEqual({ x: 1 });
-  });
-
-  it("returns raw string on parse failure", () => {
-    expect(parseToolArgs("not json")).toEqual({ input: "not json" });
-  });
-
-  it("returns object as-is", () => {
-    const obj = { x: 1 };
-    expect(parseToolArgs(obj)).toBe(obj);
   });
 });
 

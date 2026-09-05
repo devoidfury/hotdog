@@ -8,12 +8,13 @@
 - tool-executor - "Tool 'x' is not available for this agent" now suggests near-matching tools from the set the model was offered (case/separator differences first, then prefix/substring near-matches), so a misspelled or case-flipped tool name self-corrects in one retry
 - cli - unknown flags are now fatal (exit 1) with a "Did you mean" suggestion when a registered flag is a near-match, instead of a warning that let the run proceed with the flag silently dropped
 - session - a throwing channel event handler is now logged at debug level instead of being swallowed silently; other handlers still run
-
+- package - minimum bun bumped to 1.3.1 (the `--only-failures` flag used by the test scripts landed in 1.3.1)
 
 - internals
   - marker mangler - compiled escape/unescape regexes are now built once per name pair instead of rebuilt per protected prefix on every escape() call
   - cleanup session - remove unused SessionManager.deserialize and related unused serialize/deserialize hooks
   - task-manager - drop unsafe last-set bus fallback
+  - tool-utils - remove legacy parseToolArgs (its invalid-JSON `{input: ...}` fallback was a footgun); subagents now use parseToolInput like every other tool
 
 - CLI colors now honor the NO_COLOR environment convention and TERM=dumb: color output is disabled regardless of config when either is present
 

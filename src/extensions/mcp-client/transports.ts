@@ -157,10 +157,13 @@ export class StdioTransport implements McpTransport {
     // subsequent messages, and a truncated line is never dispatched (a
     // cut-off JSON prefix could still parse as a different, valid value).
     let discarding = false;
+    // Stateful decoder: a multibyte UTF-8 sequence split across two read
+    // boundaries would decode to U+FFFD with per-chunk toString().
+    const decoder = new TextDecoder();
 
     readStream.on("data", (chunk: Buffer) => {
       if (this.#destroyed) return;
-      let data = chunk.toString();
+      let data = decoder.decode(chunk, { stream: true });
 
       if (discarding) {
         const newlineIdx = data.indexOf("\n");
@@ -201,9 +204,12 @@ export class StdioTransport implements McpTransport {
     const stderr = this.#stderr;
     if (!stderr) return;
 
+    // Stateful decoder -- see #startReader for why.
+    const decoder = new TextDecoder();
+
     stderr.on("data", (chunk: Buffer) => {
       if (this.#stderrTruncated) return;
-      this.#stderrOutput += chunk.toString();
+      this.#stderrOutput += decoder.decode(chunk, { stream: true });
       if (this.#stderrOutput.length > MAX_TRANSPORT_BUFFER_CHARS) {
         this.#stderrOutput = this.#stderrOutput.slice(0, MAX_TRANSPORT_BUFFER_CHARS);
         this.#stderrTruncated = true;

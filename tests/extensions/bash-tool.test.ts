@@ -137,6 +137,21 @@ describe('BashTool', () => {
     expect(result.metadata?.get('exit_code')).toBe('0');
   });
 
+  it('decodes multibyte output split across stream read boundaries', async () => {
+    // Regression: per-chunk chunk.toString() decoded a UTF-8 sequence that
+    // straddled two read chunks as U+FFFD. The lone lead byte of é (0xC3)
+    // is flushed and read before the continuation byte (0xA9) arrives, so
+    // the split is deterministic (verified: naive decode yields two U+FFFD).
+    const tool = new BashTool({ timeoutMs: 30000, maxOutputLines: 100 });
+    const result = await tool.execute(
+      JSON.stringify({ command: `printf '\\303'; sleep 0.3; printf '\\251 done\\n'` }),
+      {} as any,
+    );
+    const str = resultStr(result);
+    expect(str).toContain('é done');
+    expect(str).not.toContain('\uFFFD');
+  });
+
   it('handles multiline output', async () => {
     const tool = new BashTool({ timeoutMs: 30000, maxOutputLines: 100 });
     const result = await tool.execute(JSON.stringify({ command: 'printf "line1\\nline2\\nline3"' }), {} as any);

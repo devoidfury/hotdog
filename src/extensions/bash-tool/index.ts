@@ -166,14 +166,20 @@ export class BashTool {
         return { value, truncated: false };
       };
 
+      // Stateful decoders per stream: a multibyte UTF-8 sequence split across
+      // two read boundaries would decode to U+FFFD with per-chunk toString().
+      // Matches the TextDecoder pattern in utils/fetch.ts readCappedBody.
+      const stdoutDecoder = new TextDecoder();
+      const stderrDecoder = new TextDecoder();
+
       proc.stdout?.on("data", (chunk: Buffer) => {
-        const r = appendCapped(stdout, chunk.toString(), stdoutTruncated);
+        const r = appendCapped(stdout, stdoutDecoder.decode(chunk, { stream: true }), stdoutTruncated);
         stdout = r.value;
         stdoutTruncated = r.truncated;
       });
 
       proc.stderr?.on("data", (chunk: Buffer) => {
-        const r = appendCapped(stderr, chunk.toString(), stderrTruncated);
+        const r = appendCapped(stderr, stderrDecoder.decode(chunk, { stream: true }), stderrTruncated);
         stderr = r.value;
         stderrTruncated = r.truncated;
       });
@@ -209,6 +215,9 @@ export class BashTool {
         clearTimeout(termTimer);
         if (!timedOut) clearTimeout(killTimer);
         if (done) return; // already settled by a timeout; output not needed
+        // Flush any trailing sequence held by the stream decoders before use.
+        stdout += stdoutDecoder.decode();
+        stderr += stderrDecoder.decode();
         let output = [stdout, stderr].filter(Boolean).join("\n");
         if (stdoutTruncated || stderrTruncated) {
           output += "\n[output truncated]";

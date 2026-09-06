@@ -17,9 +17,9 @@
   "repository": "github:devoidfury/hotdog",
   "scripts": {
     "start": "bun bin/hotdog",
-    "loud-test": "bun test --parallel --preload ./tests/setup.ts",
-    "test": "HOTDOG_LOG_LEVEL=error HOTDOG_LOG_TARGET=none bun test --only-failures --parallel --preload ./tests/setup.ts",
-    "coverage": "HOTDOG_LOG_LEVEL=error HOTDOG_LOG_TARGET=none bun test --only-failures --preload ./tests/setup.ts --coverage",
+    "loud-test": "bun test --parallel",
+    "test": "HOTDOG_LOG_LEVEL=error HOTDOG_LOG_TARGET=none bun test --only-failures --parallel",
+    "coverage": "HOTDOG_LOG_LEVEL=error HOTDOG_LOG_TARGET=none bun test --only-failures --coverage",
     "check": "bun x tsc --noEmit"
   },
   "type": "module",

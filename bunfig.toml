@@ -1,6 +1,7 @@
 telemetry = false
 
 [test]
+preload = ["./tests/setup.ts", "./tests/dom-helper/index.ts"]
 coveragePathIgnorePatterns = [
     "**/*.test.ts",
     "tests/**",

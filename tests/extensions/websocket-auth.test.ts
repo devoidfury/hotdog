@@ -195,6 +195,44 @@ describe("createAuthMiddleware", () => {
         shortLived.stopCleanup();
       }
     });
+
+    it("purges expired sessions that validateToken never inspected", async () => {
+      // validateToken deletes expired entries as a side effect of checking
+      // them, so the test above leaves cleanup() an empty map. Here the
+      // stale entry stays in the map until cleanup() itself removes it,
+      // and an unexpired entry must survive.
+      const shortLived = createAuthMiddleware({
+        validateApiKey: async (key) => key === "test",
+        tokenTtlMin: 0,
+      });
+      const live = createAuthMiddleware({
+        validateApiKey: async (key) => key === "test",
+        tokenTtlMin: 1,
+      });
+      try {
+        const login = () =>
+          new Request("http://localhost/login", {
+            method: "POST",
+            body: JSON.stringify({ apiKey: "test" }),
+            headers: { "Content-Type": "application/json" },
+          });
+        const stale = (await (await shortLived.loginHandler(login())).json()) as { token: string };
+        const fresh = (await (await live.loginHandler(login())).json()) as { token: string };
+
+        // Guarantee Date.now() has passed the zero-TTL token's expiry
+        // without any validateToken() call removing it first.
+        await new Promise((r) => setTimeout(r, 5));
+
+        shortLived.cleanup();
+        live.cleanup();
+
+        expect(shortLived.validateToken(stale.token)).toBe(false);
+        expect(live.validateToken(fresh.token)).toBe(true);
+      } finally {
+        shortLived.stopCleanup();
+        live.stopCleanup();
+      }
+    });
   });
 
   describe("startCleanup / stopCleanup", () => {
@@ -325,6 +363,28 @@ describe("login rate limiting", () => {
       res = await middleware.loginHandler(loginReq("wrong-key", ip));
       expect(res.status).toBe(429);
       expect(Number(res.headers.get("Retry-After"))).toBe(4);
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  it("cleanup() drops rate-limit entries older than the 24h entry TTL", async () => {
+    const realNow = Date.now.bind(Date);
+    let fake = realNow();
+    const spy = spyOn(Date, "now").mockImplementation(() => fake);
+    try {
+      const ip = "10.0.0.7";
+      await failTimes(middleware, ip, 5); // entry: 5 consecutive failures at `fake`
+
+      // Jump past both the 1s lockout and the 24h entry TTL, then clean.
+      fake += 24 * 60 * 60_000 + 1_000;
+      middleware.cleanup();
+
+      // Entry purged: the next failure counts as the 1st, not the 6th, so
+      // the following valid login succeeds. Without the purge the counter
+      // would reach 6 and the valid attempt would draw a 429 lockout.
+      expect((await middleware.loginHandler(loginReq("wrong-key", ip))).status).toBe(401);
+      expect((await middleware.loginHandler(loginReq("valid-api-key", ip))).status).toBe(200);
     } finally {
       spy.mockRestore();
     }

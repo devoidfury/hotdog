@@ -1,6 +1,8 @@
 import { describe, it, expect } from 'bun:test';
 import fs from 'node:fs';
 import { BashTool, create, resolveBashTimeout } from '../../src/extensions/bash-tool/index.ts';
+import { ToolContext } from '../../src/core/extensions/tool-context.ts';
+import { Workspace } from '../../src/utils/workspace.ts';
 import { resultStr, tmpDir, cleanupDir, processAlive, waitForExit } from '../helpers.ts';
 import { HOOKS } from '../../src/core/hooks.ts';
 
@@ -32,6 +34,36 @@ describe('BashTool', () => {
     const tool = new BashTool({ timeoutMs: 30000, maxOutputLines: 100 });
     const result = await tool.execute(JSON.stringify({ command: 'echo hello' }), {} as any);
     expect(resultStr(result)).toContain('hello');
+  });
+
+  it('runs from the primary workspace root, not the process CWD', async () => {
+    // Regression: spawn inherited the process CWD, so with workspace.paths
+    // pointing elsewhere commands executed outside every declared root
+    // while the tool description promised the primary root.
+    // bun -e prints the real getcwd(); pwd's logical path is unreliable
+    // when TMPDIR contains a symlink.
+    const dir = tmpDir('hotdog-bash-cwd-');
+    try {
+      const tool = new BashTool({ timeoutMs: 30000, maxOutputLines: 100 });
+      const ctx = new ToolContext();
+      ctx.set('workspace', new Workspace(dir));
+      const result = await tool.execute(
+        JSON.stringify({ command: 'bun -e "console.log(process.cwd())"' }),
+        ctx,
+      );
+      expect(resultStr(result).trim()).toBe(fs.realpathSync(dir));
+    } finally {
+      cleanupDir(dir);
+    }
+  });
+
+  it('falls back to the process CWD when the context has no workspace', async () => {
+    const tool = new BashTool({ timeoutMs: 30000, maxOutputLines: 100 });
+    const result = await tool.execute(
+      JSON.stringify({ command: 'bun -e "console.log(process.cwd())"' }),
+      {} as any,
+    );
+    expect(resultStr(result).trim()).toBe(fs.realpathSync(process.cwd()));
   });
 
   it('gives stdin-reading commands EOF instead of hanging', async () => {

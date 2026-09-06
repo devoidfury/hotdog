@@ -12,6 +12,7 @@ import { AssistantRetryableError } from "@core/error.ts";
 import { HOOKS } from "@core/hooks.ts";
 import { CoreContext, ExtensionInstance, ToolContext, getExtensionConfig } from "@core/extensions/types.ts";
 import { copyScrubbedEnv } from "@utils/env.ts";
+import type { Workspace } from "@utils/workspace.ts";
 import { OWN_PROCESS_GROUP, killProcessGroup } from "@utils/process-group.ts";
 
 /**
@@ -82,13 +83,20 @@ export class BashTool {
     return defaultCallDisplay(input, (args: Record<string, unknown>) => `bash: ${args.command as string}`);
   }
 
-  async execute(input: string | Record<string, unknown> | null, _ctx: ToolContext): Promise<ToolResult> {
+  async execute(input: string | Record<string, unknown> | null, ctx: ToolContext): Promise<ToolResult> {
     const args = parseToolInput(input);
     if (!args) {
       return ToolResult.err(
         "Error parsing arguments: expected a JSON object with a required 'command' string (optional: timeoutMs)",
       );
     }
+    // Run from the primary workspace root, not the process CWD: the tool
+    // description promises the root, and with workspace.paths pointing
+    // elsewhere a process-CWD spawn silently executes outside every
+    // declared root. Falls back to the process CWD only when no workspace
+    // is on the context (standalone/test callers). `?.` on get: bare-object
+    // ctx doubles in tests expose no methods.
+    const cwd = (ctx?.get?.("workspace") as Workspace | undefined)?.root;
     const command = args.command as string;
     const timeout = resolveBashTimeout(
       args.timeoutMs ?? args.timeout_ms ?? this.timeoutMs,
@@ -103,6 +111,9 @@ export class BashTool {
     return new Promise((resolve, reject) => {
       const proc: ChildProcess = spawn(command, [], {
         shell: true,
+        // Primary workspace root (see execute); undefined inherits the
+        // process CWD, preserving the standalone-caller behavior.
+        cwd,
         // Own process group on POSIX so timeouts can kill the entire tree (see utils/process-group.ts for the trade-off).
         ...OWN_PROCESS_GROUP,
         // ignore keeps stdin-reading commands (`cat`, `read`, `python -c "input()"`) from hanging until the timeout.

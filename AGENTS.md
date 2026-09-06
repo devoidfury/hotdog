@@ -53,6 +53,7 @@ All error catches must use `formatError()` from `src/core/error.ts`:
 | `docs/agents/architecture.md` | Project structure, component breakdown, key types |
 | `docs/agents/extensions.md` | Extension system, adding and configuring extensions |
 | `docs/agents/tools-and-skills.md` | Tool system and skill system details |
+| `docs/agents/jsx.md` | JSX runtime: renderToString, client mount, diffing, security guards |
 | `docs/agents/model-and-config.md` | Model registry, config system, profiles |
 | `docs/agents/debugging-hotdog-tools-visibility-flags.md` | Debugging patterns, one-shot mode |
 | `docs/agents/show-prompt-audit-profile.md` | show-prompt subcommand reference |

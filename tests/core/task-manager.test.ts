@@ -490,3 +490,75 @@ describe("TaskManager", () => {
     });
   });
 });
+
+describe("task registry release", () => {
+  function makeManager(buildAgent: (config: Record<string, unknown>) => Promise<any>) {
+    return new TaskManager({
+      buildAgent: buildAgent as any,
+      modelRegistry: { default: "test-model" } as any,
+      config: { profilesPath: "./config/profiles" } as any,
+      maxIterations: 100,
+      taskProfile: "default",
+      taskRole: "",
+    });
+  }
+
+  it("releases the agent reference when a task completes", async () => {
+    const manager = makeManager(async () => ({
+      run: async () => ({ type: "completion", content: "done" }),
+      notifyCompletion: () => {},
+    }));
+    await manager.spawnTask("task-1", "Do it");
+    await settle(() => manager.taskStatus("task-1") === TASK_STATUS.COMPLETED, "completion");
+    // The slim entry survives (status stays queryable) but the Agent -- and
+    // with it the task's full message context -- is no longer pinned.
+    expect(manager._test_tasks.get("task-1")!.agent).toBeNull();
+    expect(manager.taskStatus("task-1")).toBe(TASK_STATUS.COMPLETED);
+    expect(manager.sendFollowUp("task-1", "late message")).toBe(false);
+  });
+
+  it("releases the agent reference when a task fails", async () => {
+    const manager = makeManager(async () => ({
+      run: async () => {
+        throw new Error("boom");
+      },
+      notifyCompletion: () => {},
+    }));
+    await manager.spawnTask("task-1", "Do it");
+    await settle(() => manager.taskStatus("task-1") === TASK_STATUS.FAILED, "failure");
+    expect(manager._test_tasks.get("task-1")!.agent).toBeNull();
+  });
+
+  it("releases the agent reference when a task is interrupted", async () => {
+    const manager = makeManager(async () => {
+      const agent: any = { notifyCompletion: () => {} };
+      agent.run = () =>
+        new Promise((_resolve, reject) => {
+          // TaskManager assigns agent.abortSignal before invoking run().
+          agent.abortSignal.addEventListener("abort", () =>
+            reject(LlmError.Cancelled("aborted")),
+          );
+        });
+      return agent;
+    });
+    const handle = await manager.spawnTask("task-1", "Do it");
+    handle.interrupt();
+    await settle(() => manager.taskStatus("task-1") === TASK_STATUS.CANCELLED, "cancellation");
+    expect(manager._test_tasks.get("task-1")!.agent).toBeNull();
+  });
+
+  it("keeps a running task's agent until it settles", async () => {
+    let release!: () => void;
+    const manager = makeManager(async () => ({
+      run: () => new Promise<void>((resolve) => { release = resolve; }),
+      notifyCompletion: () => {},
+    }));
+    await manager.spawnTask("task-1", "Do it");
+    // Yield a tick so _runTask enters agent.run, then check liveness.
+    await new Promise((r) => setTimeout(r, 5));
+    expect(manager._test_tasks.get("task-1")!.agent).not.toBeNull();
+    release();
+    await settle(() => manager.taskStatus("task-1") === TASK_STATUS.COMPLETED, "completion");
+    expect(manager._test_tasks.get("task-1")!.agent).toBeNull();
+  });
+});

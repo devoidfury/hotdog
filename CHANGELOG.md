@@ -14,6 +14,7 @@
   - marker mangler - compiled escape/unescape regexes are now built once per name pair instead of rebuilt per protected prefix on every escape() call
   - cleanup session - remove unused SessionManager.deserialize and related unused serialize/deserialize hooks
   - task-manager - drop unsafe last-set bus fallback
+  - task-manager - release the finished task's Agent reference from the registry when a task reaches a terminal state (completed/failed/cancelled); previously dead tasks pinned their full agent context for the manager's lifetime, an unbounded leak on long-lived hosts like the webui
   - tool-utils - remove legacy parseToolArgs (its invalid-JSON `{input: ...}` fallback was a footgun); subagents now use parseToolInput like every other tool
 
 - CLI colors now honor the NO_COLOR environment convention and TERM=dumb: color output is disabled regardless of config when either is present

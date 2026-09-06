@@ -84,11 +84,13 @@ export class TaskManager {
   #maxIterations: number;
   #taskProfile: string;
   #taskRole: string;
+  // Terminal tasks keep a slim record (no agent) so a long-lived manager --
+  // the webui TaskManager outlives every session -- does not pin each dead
+  // task's full Agent/context forever. See _runTask for the release point.
   #tasks: Map<string, {
-    agent: AgentLike;
+    agent: AgentLike | null;
     abortController: AbortController;
     statusRef: { value: TaskStatus };
-    runPromise: Promise<string>;
     /** The delegating session that spawned this task (null if none). Used to
      *  abort the task when that session is deleted. */
     sessionId: string | null;
@@ -217,23 +219,21 @@ export class TaskManager {
     const abortController = new AbortController();
     const statusRef: { value: TaskStatus } = { value: TASK_STATUS.RUNNING };
 
-    const runPromise = this._runTask(
-      taskId,
-      agent,
-      taskDescription,
-      abortController,
-      statusRef,
-    );
-
+    // Registered BEFORE the run starts so _runTask can always find its
+    // entry (an await never completes synchronously, so the ordering here
+    // is safe even for immediately-resolved fake agents).
     this.#tasks.set(taskId, {
       agent,
       abortController,
       statusRef,
-      runPromise,
       // Ownership by delegating session: lets session deletion abort this
       // task (and only this session's tasks).
       sessionId: delivery ? delivery.sessionId : null,
     });
+
+    // _runTask catches and reports all failures internally; nothing here
+    // can reject.
+    this._runTask(taskId, agent, taskDescription, abortController, statusRef);
 
     return new TaskHandle(taskId, statusRef, abortController);
   }
@@ -283,7 +283,21 @@ export class TaskManager {
       agent.notifyCompletion?.(result);
     }
 
+    // Release the finished agent: its full message context would otherwise
+    // stay pinned in #tasks for the manager's lifetime. The entry keeps
+    // exactly what post-run lookups use (statusRef, abortController,
+    // sessionId); sendFollowUp's RUNNING guard means the RUNNING state
+    // always implies a live agent, since status turns terminal before this
+    // line runs.
+    const entry = this.#tasks.get(taskId);
+    if (entry) entry.agent = null;
+
     return result;
+  }
+
+  /** @internal Test-only view of the task registry. */
+  get _test_tasks(): ReadonlyMap<string, { agent: AgentLike | null }> {
+    return this.#tasks;
   }
 
   taskStatus(taskId: string): TaskStatus | null {
@@ -298,13 +312,17 @@ export class TaskManager {
       return false;
     }
 
+    // A RUNNING task always has its agent; _runTask releases it only after
+    // the status becomes terminal.
+    const agent = task.agent!;
+
     // followQueue is drained between LLM calls.
-    if (task.agent.followQueue) {
-      task.agent.followQueue.push(message);
+    if (agent.followQueue) {
+      agent.followQueue.push(message);
       return true;
     }
 
-    task.agent.addMessage(new Message({ role: "user", content: message, source: "user" }));
+    agent.addMessage(new Message({ role: "user", content: message, source: "user" }));
     return true;
   }
 
